@@ -563,7 +563,7 @@ static void checkCffExpandedOutline() {
     const auto normal = makeCffFont();
     if (!stbtt_InitFont(&info, normal.data(), 0)) { check("normal CFF initializes", false); return; }
     vector<unsigned char> bitmap(128 * 128);
-    internal::FontScratchScope scratch(normal.size(), bitmap.size());
+    internal::FontScratchScope scratch(normal.size());
     stbtt_MakeGlyphBitmap(&info, bitmap.data(), 128, 128, 128, 0.128f, 0.128f, 1);
     check("normal CFF still renders", !scratch.failed() && any_of(bitmap.begin(), bitmap.end(), [](auto pixel) { return pixel != 0; }));
 }

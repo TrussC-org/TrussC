@@ -91,7 +91,7 @@ CollisionManager::Record CollisionManager::snapshot(Phase phase, const std::shar
     }
     if (contact->GetFixtureA()->GetBody() != pair->a.body) c.normal = -c.normal;
     bool eligible = phase == Phase::Stay || journal_.managedStep || (journal_.mutationDepth && (!journal_.deferred || state->depth));
-    return {phase, ++journal_.sequence, state->epoch, journal_.managedStep, pair, c, sensor, journal_.updateCounter + (eligible ? 0 : 1), false};
+    return {phase, state->epoch, journal_.managedStep, pair, c, sensor, journal_.updateCounter + (eligible ? 0 : 1), false};
 }
 void CollisionManager::beginStep() { journal_.managedStep = ++journal_.stepCounter; }
 void CollisionManager::endStep() { journal_.managedStep = 0; dropEnded(); }
@@ -126,7 +126,6 @@ void CollisionManager::BeginContact(b2Contact* contact) {
     auto pair = std::make_shared<Pair>();
     pair->a = endpoint(contact->GetFixtureA());
     pair->b = endpoint(contact->GetFixtureB());
-    pair->incarnation = journal_.sequence + 1;
     pair->contacts.push_back(contact);
     journal_.pairs.push_back(pair);
     journal_.records.push_back(snapshot(Phase::Begin, pair, contact));

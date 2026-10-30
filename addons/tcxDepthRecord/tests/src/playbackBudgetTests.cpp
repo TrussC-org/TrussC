@@ -186,38 +186,6 @@ int runPlaybackBudgetTests() {
         }
         check("large valid Hilo frames decode exactly across three slots", complete);
     }
-    // Append a sparse fourth frame: 256 MiB input + 64 MiB output + 64 MiB
-    // Hilo planes fits alone, but exceeds 512 MiB with two live 64 MiB slots
-    // and playback metadata. Rejection must precede its payload allocation.
-    {
-        std::fstream file(path, std::ios::binary | std::ios::in | std::ios::out);
-        TcdcHeader h{}; tcd_detail::rd(file, h);
-        uint64_t offsets[4];
-        file.seekg(h.indexOffset);
-        for (unsigned i = 0; i < 3; ++i) { double ts; tcd_detail::rd(file, ts); tcd_detail::rd(file, offsets[i]); }
-        offsets[3] = h.indexOffset;
-        constexpr uint32_t comp = 256u * 1024 * 1024;
-        file.seekp(h.indexOffset); tcd_detail::wr(file, double(3));
-        tcd_detail::wr(file, uint8_t(BLOCK_DEPTH)); tcd_detail::wr(file, uint32_t(12 + comp));
-        tcd_detail::wr(file, uint32_t(8192u * 4096)); tcd_detail::wr(file, uint32_t(64u * 1024 * 1024));
-        tcd_detail::wr(file, comp);
-        h.frameCount = 4;
-        h.indexOffset += 8 + 5 + 12 + comp;
-        file.seekp(h.indexOffset);
-        for (unsigned i = 0; i < 4; ++i) { tcd_detail::wr(file, double(i)); tcd_detail::wr(file, offsets[i]); }
-        file.seekp(0); tcd_detail::wr(file, h);
-    }
-    {
-        Probe::Reader oversized;
-        tcx::depthcamera::DepthFrame slots[3];
-        bool primed = oversized.open(path.string());
-        for (unsigned i = 0; i < 3; ++i) primed &= oversized.captureInto(slots[i]).depth;
-        largestRequest = 0; failAbove = 65536; measuring = true;
-        const auto fresh = oversized.captureInto(slots[0]);
-        measuring = false; failAbove = SIZE_MAX;
-        check("over-budget Hilo with live slots rejected before allocation", primed && !fresh.depth && slots[0].depth.empty() &&
-              largestRequest <= 65536 && PlaybackBudgetTestAccess::skipped(oversized) == 1);
-    }
     planeHistory(path, 3);
     {
         PlaybackDepthCamera camera(path.string());
@@ -293,27 +261,15 @@ int runPlaybackBudgetTests() {
     TcdcHeader h{};
     h.colorCodec = uint8_t(ColorCodecId::Raw);
     std::ostringstream fields(std::ios::binary);
-    tcd_detail::wr(fields, int32_t(8193)); tcd_detail::wr(fields, int32_t(1)); tcd_detail::wr(fields, uint8_t(4));
-    tcd_detail::wr(fields, uint32_t(8193 * 4)); tcd_detail::wr(fields, uint32_t(8193 * 4));
+    constexpr uint32_t wideBytes = 10240 * 4;
+    tcd_detail::wr(fields, int32_t(10240)); tcd_detail::wr(fields, int32_t(1)); tcd_detail::wr(fields, uint8_t(4));
+    tcd_detail::wr(fields, wideBytes); tcd_detail::wr(fields, wideBytes);
+    fields << std::string(wideBytes, '\x5a');
     std::istringstream input(fields.str(), std::ios::binary);
     std::vector<uint8_t> scratch;
     uint64_t used = 0; const char* why = nullptr;
-    largestRequest = 0; failAbove = 65536; measuring = true;
-    const bool ok = tcd_detail::parseColorPayload(input, h, 17 + 8193 * 4, 17 + 8193 * 4, dst, scratch, used, why);
-    measuring = false; failAbove = SIZE_MAX;
-    check("color axis checked before compressed allocation", !ok && scratch.capacity() == 0 && !dst.color.isAllocated() && largestRequest < 8193 * 4);
-    std::ostringstream oversizedFields(std::ios::binary);
-    const uint32_t colorBytes = 8192u * 4097 * 4, compressedBytes = colorBytes / 255 + 1;
-    tcd_detail::wr(oversizedFields, int32_t(8192)); tcd_detail::wr(oversizedFields, int32_t(4097)); tcd_detail::wr(oversizedFields, uint8_t(4));
-    tcd_detail::wr(oversizedFields, colorBytes); tcd_detail::wr(oversizedFields, compressedBytes);
-    std::istringstream oversizedInput(oversizedFields.str(), std::ios::binary);
-    h.colorCodec = uint8_t(ColorCodecId::LZ4);
-    largestRequest = 0; failAbove = 65536; measuring = true; threw = false;
-    bool admitted = true;
-    try { admitted = tcd_detail::parseColorPayload(oversizedInput, h, 17 + compressedBytes, 17 + compressedBytes, dst, scratch, used, why); }
-    catch (...) { threw = true; }
-    measuring = false; failAbove = SIZE_MAX;
-    check("decoded byte bound precedes compressed allocation", !admitted && !threw && largestRequest <= 65536 && scratch.capacity() == 0 && !dst.color.isAllocated());
+    const bool ok = tcd_detail::parseColorPayload(input, h, 17 + wideBytes, 17 + wideBytes, dst, scratch, used, why);
+    check("wide color plane loads", ok && dst.color.getWidth() == 10240 && dst.color.getData()[wideBytes - 1] == 0x5a);
 
     std::ostringstream validFields(std::ios::binary);
     tcd_detail::wr(validFields, uint32_t(16)); tcd_detail::wr(validFields, uint32_t(32)); tcd_detail::wr(validFields, uint32_t(32));

@@ -95,7 +95,7 @@ WidgetRef findWidget(const std::string& label,
 
 void clickWidget(const WidgetInfo& w);
 
-bool inputText(const WidgetInfo& w, const std::string& text);
+void inputText(const WidgetInfo& w, const std::string& text);
 
 // ---------------------------------------------------------------------------
 // Widget type classification from status flags

@@ -9,6 +9,7 @@
 namespace {
 size_t largestAllocation = 0;
 bool failAllocation = false;
+size_t failAllocationBytes = 0;
 int failures = 0;
 void check(const char* label, bool ok) {
     std::printf("%-72s %s\n", label, ok ? "PASS" : "FAIL");
@@ -121,6 +122,10 @@ __attribute__((noinline))
 #endif
 void* operator new(size_t bytes) {
     if (failAllocation) throw std::bad_alloc();
+    if (failAllocationBytes && bytes == failAllocationBytes) {
+        failAllocationBytes = 0;
+        throw std::bad_alloc();
+    }
     largestAllocation = std::max(largestAllocation, bytes);
     if (void* pointer = std::malloc(bytes ? bytes : 1)) return pointer;
     throw std::bad_alloc();
@@ -174,13 +179,22 @@ int main() {
         check("incomplete or invalid LUT import preserves previous result", !ok && !error.empty() && cube.side == 2 && cube.rgb.size() == 24);
         check("LUT declarations never request a declaration-sized allocation", largestAllocation < 1024u * 1024u);
     }
-    if (!tcTest::skipPersistentAllocationFailure("LUT parser scratch container construction")) {
-        std::istringstream cubeFailureInput(data);
-        failAllocation = true;
-        const bool cubeFailure = tcx::lut::detail::parseCube(cubeFailureInput, cube, error);
-        failAllocation = false;
-        check("LUT allocation failure returns a clean failure", !cubeFailure && !error.empty() && cube.rgb.size() == 24);
-    }
+    std::istringstream cubeFailureInput(data);
+    const auto previousRgb = cube.rgb;
+    const auto previousTitle = cube.title;
+    const int previousSide = cube.side;
+    bool allocationThrew = false;
+    // Fail the first RGB row's vector payload, not stream numeric conversion
+    // (which may swallow bad_alloc as badbit) or MSVC's debug container proxies.
+    // parseCube propagates allocation exceptions to the public load() catch.
+    failAllocationBytes = 3 * sizeof(float);
+    try { tcx::lut::detail::parseCube(cubeFailureInput, cube, error); }
+    catch (const std::bad_alloc&) { allocationThrew = true; }
+    const bool allocationFailed = failAllocationBytes == 0;
+    failAllocationBytes = 0;
+    check("LUT payload allocation failure propagates without publishing a result",
+          allocationFailed && allocationThrew && cube.side == previousSide &&
+          cube.title == previousTitle && cube.rgb == previousRgb);
     std::istringstream fractionalSize("LUT_3D_SIZE 2.5\n" + data.substr(data.find("0 0 0")));
     check("LUT dimensions require complete integer tokens", !tcx::lut::detail::parseCube(fractionalSize, cube, error));
     size_t count = 0;

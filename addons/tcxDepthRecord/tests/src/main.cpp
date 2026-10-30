@@ -22,8 +22,8 @@
 //      message, and the other frames still play.
 //      Depth / color blocks with trailing extension bytes still allow the
 //      following blocks to play, even when the known payload is skipped.
-//   3. Header frame size: 0x0 and sizes within 8192 per axis and 128 MiB
-//      RGBA open; negative sizes and larger ones are refused.
+//   3. Header frame size: 0x0 and positive sizes without policy caps
+//      open; negative sizes are refused.
 //   4. The parsers refuse a byte size above INT_MAX before allocating.
 //   5. Reopening one object warns about a skipped block again, and a failed
 //      reopen leaves the manifest empty. A refused open (wrong magic, manifest
@@ -761,8 +761,8 @@ static void runHeaderSize(const filesystem::path& dir) {
         {"recorded", 64, 48, true},
         {"zero", 0, 0, true},
         {"atLimit", 8192, 4096, true},              // RGBA = 128 MiB
-        {"pastLimit", 8192, 4097, false},           // RGBA > 128 MiB
-        {"productWrapsTo0", 65536, 65536, false},    // x 4 = 2^34, 0 in 32 bits
+        {"pastLimit", 8192, 4097, true},           // above the former byte cap
+        {"wide", 10240, 1080, true},    // above the former axis cap
         {"widthNegative", -64, 48, false},
         {"bothNegative", -64, -48, false},           // positive product
     };

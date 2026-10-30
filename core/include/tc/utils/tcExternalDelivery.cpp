@@ -1,4 +1,4 @@
-// Internal admission and safe-thread reporting for external Main deliveries.
+// Optional count limit for external Main deliveries.
 #include "tc/events/tcExternalDelivery.h"
 #include "tc/utils/tcMainThread.h"
 #include "tc/utils/tcLog.h"
@@ -18,39 +18,30 @@ bool ExternalEventScope::isExternal(const void* payload) {
 
 ExternalDeliveryStore::Lease::~Lease() {
     std::lock_guard<std::mutex> lock(store->mutex);
-    store->pending -= count;
-    store->retainedBytes -= bytes;
+    --store->pending;
+    if (store->pending == 0) store->overflowing = false;
 }
 
-std::shared_ptr<ExternalDeliveryStore::Lease> ExternalDeliveryStore::reserve(size_t count, size_t bytesPerCopy) {
-    bool warn = false;
+std::shared_ptr<ExternalDeliveryStore::Lease> ExternalDeliveryStore::reserve() {
+    size_t warnLimit = 0;
     {
         std::lock_guard<std::mutex> lock(mutex);
-        if (count <= deliveryLimit - pending && bytesPerCopy <= byteLimit &&
-            (!count || bytesPerCopy <= (byteLimit - retainedBytes) / count)) {
+        if (!deliveryLimit || pending < deliveryLimit) {
             auto lease = std::make_shared<Lease>();
             lease->store = shared_from_this();
-            lease->count = count;
-            lease->bytes = count * bytesPerCopy;
-            pending += count;
-            retainedBytes += lease->bytes;
+            ++pending;
             return lease;
         }
-        if (rejectedCopies != (std::numeric_limits<size_t>::max)()) ++rejectedCopies;
-        if (!warningScheduled) { warningScheduled = true; warn = true; }
+        if (!overflowing) {
+            overflowing = true;
+            warnLimit = deliveryLimit;
+        }
     }
-    if (warn) {
-        // One job per store, never one per loss; app/teardown jobs stay growable.
-        runOnMainThread([store = shared_from_this(), count, bytesPerCopy] {
-            size_t losses;
-            {
-                std::lock_guard<std::mutex> lock(store->mutex);
-                losses = store->rejectedCopies;
-            }
-            logWarning("ExternalDelivery") << "Main delivery store rejected " << losses << " whole external Main copy/copies: "
-                << "capacity " << deliveryLimit << " deliveries / " << byteLimit
-                << " payload bytes; needed " << count << " deliveries of " << bytesPerCopy
-                << " bytes each on first loss";
+    // Outside the store mutex: on the main thread runOnMainThread runs inline.
+    if (warnLimit) {
+        runOnMainThread([warnLimit] {
+            logWarning("Event") << "Main delivery limit (" << warnLimit
+                << ") reached; new external copies are being dropped";
         });
     }
     return {};

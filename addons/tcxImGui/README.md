@@ -425,3 +425,28 @@ C++ OOM recovery requires Release builds, or iterator debugging off (`_ITERATOR_
 ## License
 
 Dear ImGui is licensed under the MIT License. See [imgui/LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt).
+
+## MCP edits
+
+MCP edits have no addon limits on pending values, input events or bytes.
+The 2-second write deadline and core MCP ingress bounds (64 MiB HTTP body,
+sockets and workers) still apply. Allocation failure inside Dear ImGui behaves
+as it does for any ImGui frame.
+Text edits settle in linear time. For very large text-edit bursts, remaining
+growth comes from Dear ImGui's own event queue, including the backward search
+in `AddMousePosEvent()`; Dear ImGui is unchanged.
+
+MCP 編集にはアドオン独自の待機値・入力イベント数・バイト数の上限はありません。
+2 秒の書き込み期限と core MCP の受付上限（HTTP 本文 64 MiB、ソケット数、
+ワーカー数）は引き続き適用されます。Dear ImGui 内のメモリ確保失敗時の動作は、
+通常の ImGui フレームと同じです。
+テキスト編集の後処理は線形時間です。非常に大量のテキスト編集で残る処理時間の増加は、
+`AddMousePosEvent()` の後方検索を含む Dear ImGui 自身のイベントキューによるものです。
+Dear ImGui は変更していません。
+
+MCP 편집에는 애드온 자체의 대기 값, 입력 이벤트 수, 바이트 수 상한이 없습니다.
+2초 쓰기 기한과 core MCP 수신 상한(HTTP 본문 64 MiB, 소켓 수, 작업자 수)은
+계속 적용됩니다. Dear ImGui 내부의 메모리 할당 실패 동작은 일반 ImGui 프레임과 같습니다.
+텍스트 편집의 정리는 선형 시간에 처리됩니다. 매우 큰 텍스트 편집 묶음에서 남는
+처리 시간 증가는 `AddMousePosEvent()`의 역방향 검색을 포함한 Dear ImGui 자체의
+이벤트 큐에서 발생합니다. Dear ImGui는 변경하지 않았습니다.

@@ -1,9 +1,46 @@
 #include "../../common/tcTcpClientTest.h"
 #include "../../common/tcCoreTest.h"
 #include <future>
+#include <limits>
 
 namespace trussc::internal {
 struct TcpClientTestAccess {
+    static void pendingOverflow() {
+        const auto maximum = (std::numeric_limits<size_t>::max)();
+        for (size_t mark : {maximum, size_t(0)}) {
+            TcpClient client;
+            auto s = sharedLoad(client.state_);
+            s->useThread_ = false;
+            s->connected_ = true;
+            s->sendAsyncBufferSize_ = mark;
+            s->startSendChannel(); // No writer or valid socket: logical accounting only.
+            const char bytes[8]{};
+            auto seed = [&] {
+                TcpSendItem item;
+                item.borrowed = bytes;
+                item.size = maximum - 3;
+                return s->enqueue(std::move(item));
+            };
+            check("client pending-byte fixture seeded", bool(seed()));
+            auto rejected = s->sendAsync(bytes, sizeof(bytes));
+            check("client rejects owned overflow even with unlimited mark",
+                rejected.error == SendError::QueueFull && rejected.id == 0 &&
+                s->getSendAsyncPendingBytes() == maximum - 3);
+            auto boundary = s->sendAsync(bytes, 3);
+            check("client accepts exact representable boundary",
+                bool(boundary) && s->getSendAsyncPendingBytes() == maximum);
+            s->stopSendChannel(); // Cancels without reading the synthetic payload.
+            s->connected_ = true;
+            s->startSendChannel();
+            check("client sync pending-byte fixture seeded", bool(seed()));
+            // A non-threaded sync send tries to make room. Its invalid socket
+            // fails that attempt, so the overflowing item must fail too.
+            check("client sync send fails instead of wrapping pending total",
+                !s->send(bytes, sizeof(bytes)));
+            s->stopSendChannel();
+            s->connected_ = false;
+        }
+    }
     static std::weak_ptr<void> state(const TcpClient& client) {
         return std::weak_ptr<void>(sharedLoad(client.state_));
     }
@@ -249,6 +286,7 @@ void scenario() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    internal::TcpClientTestAccess::pendingOverflow();
     TcpClient winsock; // Initialise process-wide Winsock before raw fixtures.
     Watchdog watchdog;
     destroyWithOlderDeliveryHeld();

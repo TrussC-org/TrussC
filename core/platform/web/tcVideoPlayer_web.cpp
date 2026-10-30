@@ -135,8 +135,8 @@ EM_JS(int, tcVideoBeginLoad, (const char* pathPtr, size_t pathLength), {
     video.onloadedmetadata = function() {
         if (window._trussc_player_video !== video) return;
         var w = video.videoWidth, h = video.videoHeight;
-        if (w <= 0 || h <= 0 || w > 8192 || h > 8192 || w * h * 4 > 134217728) {
-            window._trussc_player_error = {message: 'Video frame exceeds decode limits', code: -863};
+        if (w <= 0 || h <= 0) {
+            window._trussc_player_error = {message: 'Invalid video frame dimensions', code: -863};
             video.pause(); return;
         }
         window._trussc_player_width = video.videoWidth;
@@ -181,26 +181,21 @@ EM_JS(int, tcVideoBeginLoad, (const char* pathPtr, size_t pathLength), {
 EM_JS(double, tcVideoStagingBytes, (), { return window._trussc_player_staging_bytes || 0; });
 EM_JS(double, tcVideoStagingPeak, (), { return window._trussc_player_staging_peak || 0; });
 EM_JS(double, tcVideoErrorNeeded, (), { return window._trussc_player_error.needed || 0; });
-EM_JS(double, tcVideoErrorCapacity, (), { return window._trussc_player_error.capacity || 134217728; });
+EM_JS(double, tcVideoErrorCapacity, (), { return window._trussc_player_error.capacity || 0; });
 EM_JS(int, tcVideoErrorIsStaging, (), { return window._trussc_player_error.store === 'staging'; });
 
-static void reportWebVideoStorageError(internal::VideoDecodeBudget& budget) {
-    budget.reject(uint64_t(tcVideoErrorNeeded()), uint64_t(tcVideoErrorCapacity()),
+static void reportWebVideoStorageError(internal::VideoDecodeStatus& status) {
+    status.reject(uint64_t(tcVideoErrorNeeded()), uint64_t(tcVideoErrorCapacity()),
         tcVideoErrorIsStaging() ? "Video file staging" : "Video decode storage");
-    budget.warn();
+    status.warn();
 }
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
     webLoadResult_ = LoadResult::success();
-    decodeBudget_ = std::make_shared<internal::VideoDecodeBudget>();
+    decodeStatus_ = std::make_shared<internal::VideoDecodeStatus>();
     const double deadline = emscripten_get_now() + internal::webLoadTimeoutMSecs;
     std::string pathStr = internal::pathToUtf8(path);
     int result = tcVideoBeginLoad(pathStr.c_str(), pathStr.size());
-    // JS admits the read phase separately (chunks + Blob <= 128 MiB),
-    // before any decoded output. Keep its peak and retained Blob in credits.
-    const size_t stagingPeak = size_t(tcVideoStagingPeak());
-    if (!decodeBudget_->acquire(stagingPeak)) { closePlatform(); return false; }
-    decodeBudget_->release(stagingPeak);
     if (result <= 0) {
         logError("VideoPlayer") << "failed to load '" << pathStr << "' [Web]";
         return false;
@@ -219,7 +214,7 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     }
     if (emscripten_run_script_int("!!window._trussc_player_error")) {
         if (emscripten_run_script_int("window._trussc_player_error.code == -863")) {
-            reportWebVideoStorageError(*decodeBudget_);
+            reportWebVideoStorageError(*decodeStatus_);
         }
         const std::string message = emscripten_run_script_string("window._trussc_player_error.message");
         webLoadResult_ = LoadResult::fail(LoadError::DecodeFailed, message);
@@ -231,14 +226,12 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
     height_ = emscripten_run_script_int("window._trussc_player_height");
     size_t bytes = 0;
     if (!internal::VideoDecodeLimits::rgba(width_, height_, bytes)) {
-        decodeBudget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
-        decodeBudget_->warn();
+        decodeStatus_->reject(bytes, 0);
+        decodeStatus_->warn();
         closePlatform();
         return false;
     }
 
-    webDecodeBytes_ = bytes * 3 + size_t(tcVideoStagingBytes()); // WASM mirror, canvas, delivered RGBA and retained staging Blob
-    if (!decodeBudget_->acquire(webDecodeBytes_)) { webDecodeBytes_ = 0; closePlatform(); return false; }
     // Allocate pixel buffer
     pixels_ = new (std::nothrow) unsigned char[bytes];
     if (!pixels_) { closePlatform(); return false; }
@@ -250,7 +243,6 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
 }
 
 void VideoPlayer::closePlatform() {
-    if (webDecodeBytes_) { decodeBudget_->release(webDecodeBytes_); webDecodeBytes_ = 0; }
     emscripten_run_script(R"JS(
         window._trussc_player_ready = false;
         window._trussc_player_playing = false;
@@ -310,8 +302,8 @@ void VideoPlayer::updatePlatform() {
     if (emscripten_run_script_int("!!window._trussc_player_error")) {
         const std::string message = emscripten_run_script_string("window._trussc_player_error.message");
         int code = emscripten_run_script_int("window._trussc_player_error.code");
-        if (code == -863 && decodeBudget_) {
-            reportWebVideoStorageError(*decodeBudget_);
+        if (code == -863 && decodeStatus_) {
+            reportWebVideoStorageError(*decodeStatus_);
         }
         emscripten_run_script("window._trussc_player_error = null;");
         reportPlaybackError(message, code);
@@ -323,33 +315,35 @@ void VideoPlayer::updatePlatform() {
 
     size_t bytes = 0;
     if (newWidth > 0 && newHeight > 0 && !internal::VideoDecodeLimits::rgba(newWidth, newHeight, bytes)) {
-        decodeBudget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
-        decodeBudget_->warn();
-        reportPlaybackError("Video frame exceeds decode limits", -863);
+        decodeStatus_->reject(bytes, 0);
+        decodeStatus_->warn();
+        reportPlaybackError("Invalid video frame dimensions", -863);
         return;
     }
     if (newWidth > 0 && newHeight > 0 && (newWidth != width_ || newHeight != height_)) {
+        auto sizeResult = internal::checkImageSize(newWidth, newHeight);
+        if (!sizeResult) {
+            reportPlaybackError(sizeResult.message, -863);
+            return;
+        }
         // Release the old canvas and texture before allocating the new size.
         emscripten_run_script("if (window._trussc_player_canvas) { window._trussc_player_canvas.width = 0; window._trussc_player_canvas.height = 0; }");
         texture_.clear();
         width_ = newWidth;
         height_ = newHeight;
-
-        // Reallocate pixel buffer after admitting the entire replacement.
         delete[] pixels_;
         pixels_ = nullptr;
-        decodeBudget_->release(webDecodeBytes_);
-        webDecodeBytes_ = bytes * 3 + size_t(tcVideoStagingBytes());
-        if (!decodeBudget_->acquire(webDecodeBytes_)) {
-            webDecodeBytes_ = 0;
-            reportPlaybackError("Video working budget exceeded", -863); return;
+
+        texture_.allocate(width_, height_, 4, TextureUsage::Stream);
+        if (!texture_.isAllocated()) {
+            reportPlaybackError("Video texture allocation failed", -863);
+            return;
         }
+
+        // Size the CPU mirror only after the replacement texture is available.
         pixels_ = new (std::nothrow) unsigned char[bytes];
         if (!pixels_) { reportPlaybackError("Video frame allocation failed", -863); return; }
         std::memset(pixels_, 0, bytes);
-
-        // Reallocate texture
-        texture_.allocate(width_, height_, 4, TextureUsage::Stream);
 
         logVerbose("VideoPlayer") << "resized to " << width_ << "x" << height_ << " [Web]";
     }
@@ -374,8 +368,8 @@ void VideoPlayer::updatePlatform() {
 
             var w = video.videoWidth;
             var h = video.videoHeight;
-            if (w <= 0 || h <= 0 || w > 8192 || h > 8192 || w * h * 4 > 134217728) {
-                window._trussc_player_error = {message: 'Video frame exceeds decode limits', code: -863};
+            if (w <= 0 || h <= 0) {
+                window._trussc_player_error = {message: 'Invalid video frame dimensions', code: -863};
                 video.pause(); return 0;
             }
             if (w != %d || h != %d) return 0;
@@ -531,11 +525,11 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
 // element preloads its first frame and update() uploads it before play().
 // =============================================================================
 
-bool VideoPlayer::extractFramePlatform(const fs::path&, Pixels&, float, float*, std::shared_ptr<internal::VideoDecodeBudget>) {
+bool VideoPlayer::extractFramePlatform(const fs::path&, Pixels&, float, float*, std::shared_ptr<internal::VideoDecodeStatus>) {
     return false;
 }
 
-bool VideoPlayer::extractKeyFramePlatform(const fs::path&, Pixels&, float, float*, std::shared_ptr<internal::VideoDecodeBudget>) {
+bool VideoPlayer::extractKeyFramePlatform(const fs::path&, Pixels&, float, float*, std::shared_ptr<internal::VideoDecodeStatus>) {
     return false;
 }
 

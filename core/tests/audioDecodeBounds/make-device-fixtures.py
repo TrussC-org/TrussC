@@ -89,7 +89,7 @@ def main():
                                ("small.ogg", vorbis_args, {"encoder": vorbis})]:
         record(encode(name, codec), "load", **extra)
     # A complete local WAV above the old encoded-input cap. Sparse zero PCM
-    # keeps fixture creation cheap; the file route must decode every frame.
+    # keeps fixture creation cheap; file and memory routes decode every frame.
     oversized = args.output / "over-encoded.wav"
     large_bytes = 64 * MIB + 4
     with oversized.open("wb") as output:
@@ -97,7 +97,7 @@ def main():
                                  b"WAVE", b"fmt ", 16, 1, 2, 48000, 192000, 4, 16,
                                  b"data", large_bytes))
         output.truncate(44 + large_bytes)
-    record(oversized, "load-file", frames=large_bytes // 4)
+    record(oversized, "load", frames=large_bytes // 4)
     # A complete PCM WAV with a unusual declared rate.
     rate, channels, frames = 384001, 2, 32
     data = bytes(frames * channels * 2)

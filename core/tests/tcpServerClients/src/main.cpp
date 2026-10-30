@@ -829,7 +829,6 @@ static void stopFromOnErrorAfterSendTimeout() {
     TcpServer* srv = server.get();
     srv->setSendTimeout(0.3f);
     // This teardown scenario deliberately sends one larger finite payload.
-    srv->setSendItemLimit(32 * 1024 * 1024);
     atomic<bool> errorIn{false}, removedFirst{false}, stopped{false}, notCut{false};
     EventListener onErr = srv->onError.listen([&, srv](TcpServerErrorEventArgs& e) {
         if (e.message.find("mid-payload") == string::npos || errorIn.exchange(true)) return;

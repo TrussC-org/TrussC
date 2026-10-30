@@ -32,101 +32,23 @@ using Access = OscReceiverTestAccess;
 void require(bool condition, const char* label) {
     if (!condition) { std::fprintf(stderr, "FAIL: %s\n", label); std::abort(); }
 }
-OscMessage arguments(size_t count, char tag) {
-    OscMessage message("/bounds");
-    for (size_t i = 0; i < count; ++i) {
-        if (tag == 's') message.addString("");
-        else if (tag == 'b') { const uint8_t empty = 0; message.addBlob(&empty, 0); }
-        else if (tag == 'D' && i < (count / 6) * 6) {
-            switch (i % 6) {
-                case 0: message.addBool(true); break;
-                case 1: message.addBool(false); break;
-                case 2: message.addNil(); break;
-                case 3: message.addImpulse(); break;
-                case 4: message.addArrayBegin(); break;
-                case 5: message.addArrayEnd(); break;
-            }
-        } else message.addBool(true);
-    }
-    return message;
-}
 void preflight() {
     OscReceiver receiver;
-    int messages = 0, bundles = 0, errors = 0, warnings = 0;
-    const auto mainThread = std::this_thread::get_id();
-    auto messageListener = receiver.onMessageReceived.listen([&](OscMessage&) { ++messages; });
-    auto bundleListener = receiver.onBundleReceived.listen([&](OscBundle&) { ++bundles; });
-    auto errorListener = receiver.onParseError.listen([&](std::string&) { ++errors; });
-    auto log = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
-        if (event.level != tc::LogLevel::Warning || event.message.find("OSC datagram preflight") == std::string::npos) return;
-        ++warnings;
-        require(std::this_thread::get_id() == mainThread, "preflight warning on main thread");
-        require(event.message.find("limit 4096") != std::string::npos &&
-                event.message.find("needed 4097 work units") != std::string::npos, "preflight warning details");
+    int calls = 0;
+    auto listener = receiver.onMessageReceived.listen([&](OscMessage& message) {
+        require(message.getArgCount() == 5000, "all 5000 floats delivered");
+        for (int i = 0; i < 5000; ++i)
+            require(message.getArgAsFloat(i) == float(i), "float contents preserved");
+        ++calls;
     });
-    for (char tag : {'s', 'b', 'T', 'D'}) {
-        for (size_t count : {4096u, 4097u}) {
-            auto bytes = arguments(count, tag).toBytes();
-            bool ok = false;
-            auto parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
-            require(ok == (count == 4096), "public message parser enforces work bound");
-            require(!ok || parsed.getArgCount() == 4096, "all boundary arguments present");
-            if (count == 4097 && !tcTest::skipPersistentAllocationFailure("OSC message result at work limit")) {
-                bool allocated = false;
-                rejectAllocations = true;
-                try { OscMessage::fromBytes(bytes.data(), bytes.size(), ok); }
-                catch (const std::bad_alloc&) { allocated = true; }
-                rejectAllocations = false;
-                require(!allocated && !ok, "over-limit message rejects before allocation");
-            }
-            const int before = messages;
-            std::thread producer([&] { Access::parse(receiver, bytes); });
-            producer.join();
-            require(messages == before + (count == 4096), "message accepted/rejected whole via events");
-        }
-    }
-    // Aggregate work includes both an inner-bundle element and its message.
-    for (size_t count : {4094u, 4095u}) {
-        OscBundle child, outer;
-        child.addMessage(arguments(count, 'T'));
-        outer.addBundle(child);
-        auto bytes = outer.toBytes();
-        const int beforeMessages = messages, beforeBundles = bundles;
-        bool ok = false;
-        OscBundle::fromBytes(bytes.data(), bytes.size(), ok);
-        require(ok == (count == 4094), "public bundle parser shares aggregate work budget");
-        if (count == 4095 && !tcTest::skipPersistentAllocationFailure("OSC bundle result at work limit")) {
-            bool allocated = false;
-            rejectAllocations = true;
-            try { OscBundle::fromBytes(bytes.data(), bytes.size(), ok); }
-            catch (const std::bad_alloc&) { allocated = true; }
-            rejectAllocations = false;
-            require(!allocated && !ok, "nested over-limit packet rejects before allocation");
-        }
-        Access::parse(receiver, bytes);
-        require(messages == beforeMessages + (count == 4094) &&
-                bundles == beforeBundles + (count == 4094 ? 2 : 0), "nested outer packet rejects without prefix delivery");
-    }
-    // Element count alone uses the same aggregate budget.
-    for (size_t count : {4096u, 4097u}) {
-        OscBundle outer;
-        for (size_t i = 0; i < count; ++i) outer.addMessage(OscMessage("/"));
-        const auto bytes = outer.toBytes();
-        const int before = messages;
-        Access::parse(receiver, bytes);
-        require(messages == before + (count == 4096 ? 4096 : 0), "element boundary observed through events");
-    }
-    require(Access::rejected(receiver) == 6 && errors == 6 && receiver.getDroppedMessageCount() == 0,
-            "datagram losses have separate exact counter");
-    receiver.close();
-    Access::socket(receiver).setBindAddress("127.0.0.1");
-    require(receiver.setup(0), "reopen receiver after datagram rejection");
-    Access::parse(receiver, arguments(4097, 'T').toBytes());
-    const int beforeNext = messages;
-    Access::parse(receiver, OscMessage("/next").toBytes());
-    tc::internal::drainMainThreadQueue();
-    require(Access::rejected(receiver) == 7 && warnings == 1 && messages == beforeNext + 1,
-            "next datagram works; counter and gate survive reopen without polling");
+    OscMessage message("/samples");
+    for (int i = 0; i < 5000; ++i) message.addFloat(float(i));
+    auto bytes = message.toBytes();
+    bool ok = false;
+    auto parsed = OscMessage::fromBytes(bytes.data(), bytes.size(), ok);
+    require(ok && parsed.getArgCount() == 5000, "5000-float public parser succeeds");
+    Access::parse(receiver, bytes);
+    require(calls == 1 && Access::rejected(receiver) == 0, "5000-float receiver succeeds");
 }
 void packetSizeAndDepth() {
     OscReceiver receiver;
@@ -272,7 +194,8 @@ void polling() {
                     "storage warning includes byte limit and units");
         }
     });
-    auto heavy = arguments(4096, 's');
+    OscMessage heavy("/bounds");
+    for (int index = 0; index < 4096; ++index) heavy.addString("");
     queue.enqueue(heavy);
     const size_t charge = queue.retainedBytes();
     OscMessage sample;
@@ -354,11 +277,11 @@ void reportingLifetime() {
         receiver.hasNewMessage();
         receiver.setBufferSize(0);
         const auto valid = OscMessage("/ok").toBytes();
-        const auto overWork = arguments(4097, 'T').toBytes();
+        const std::vector<uint8_t> oversized(65537, 0);
         std::thread producer([&] {
             for (int i = 0; i < 20; ++i) {
                 Access::parse(receiver, valid);
-                Access::parse(receiver, overWork);
+                Access::parse(receiver, oversized);
             }
         });
         producer.join();

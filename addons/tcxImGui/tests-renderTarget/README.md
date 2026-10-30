@@ -56,31 +56,22 @@ the cursor. The probe calls `tcx_imgui_input` through real deferred tool
 envelopes and advances the existing hook clock, delivering main `afterFrame`
 events without redrawing the Fbo. Applied edits settle at their check deadline;
 unrendered edits expire at their write deadline; 200 superseding tool requests
-and 256 distinct queued records are reclaimed. Pending tool edits, including text input, per UI context
-are bounded: 256 per context and 1,024 total, well above interactive bursts.
-The bound remains local to the addon. Window and offscreen contexts both test
-N+1 and repeated overflow: a JSON-RPC error (-32000), counted rejection, no
-queue or deferred-response growth, and capacity recovery after settlement.
-The total limit is tested across multiple contexts and released on destruction. Owning-window idle frames and
-shutdown settlement are checked separately. This records platform calls; it
-does not replace mobile-device testing.
+and 300 distinct queued records are reclaimed. Window and offscreen contexts
+accept more than the former 256 pending edits; several contexts accept more
+than the former 1,024 total. Owning-window idle frames and shutdown settlement
+are checked separately. This records platform calls; it does not replace
+mobile-device testing.
 
 For both window and offscreen value edits, `queueValue()` creates the pending
-record and `tcx_imgui_input` defers to that record's token. `handleToolsCall()`
-returns an empty internal result, but `processHttpQueue()` retains the request
-promise in `deferredResponses()`. The HTTP worker remains in `future.get()`;
-`finishPendingValues()` calls `onDone`, which drains that token and resolves
-the promise. Core cancellation/timeout can also resolve the promise. There is
-no MCP admission-slot counter on this base. The permanent local queue bound
-therefore stands independently of HTTP worker lifetime or future admission
-machinery; no hold-the-slot follow-up is required.
+record and `tcx_imgui_input` defers to that record's token. The HTTP worker waits
+for its deferred response until settlement, cancellation or timeout resolves it.
+Core MCP ingress still bounds HTTP bodies, sockets and workers.
 
-The probe also sends 1,000 text requests to an idle offscreen InputText. Text
-shares the edit count and reserves input event and byte capacity before insertion
-(8,192 events / 128 KiB per context; 32,768 events / 512 KiB total). Rejections
-are counted. Deadline and idle-frame cleanup reclaim tool events while preserving
-native events; context destruction releases aggregate capacity. Oversized input
-and mixed value/text budgets are covered.
+The probe also accepts 1,000 text requests to an idle offscreen InputText and
+one text above 128 KiB. Deadline and idle-frame cleanup reclaim tool events
+while preserving native events. Fixed-size edits can follow queued text.
+The addon has no pending-edit, event or byte admission caps. Allocation failure
+inside Dear ImGui behaves as it does for any ImGui frame.
 
 Cancellation also covers partially consumed text: one `NewFrame` consumes the
 tool's Ctrl and left-button presses, then either a 3-second clock advance and

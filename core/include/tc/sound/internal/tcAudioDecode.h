@@ -5,8 +5,6 @@
 #include <iomanip>
 
 namespace trussc::internal {
-// Bound (security): encoded memory inputs are limited to 64 MiB to bound external input; larger inputs fail loading, while local files are uncapped.
-constexpr size_t audioEncodedLimit = 64u * 1024 * 1024;
 constexpr size_t audioLargeLoadNoticeBytes = 256u * 1024 * 1024;
 
 uint64_t audioDecodeRejections(bool streaming = false);
@@ -38,9 +36,6 @@ struct AudioDecodeStatus {
     bool reject(const char* store, uint64_t needed, uint64_t cap) {
         if (!rejected) { rejected = true; reportAudioDecodeRejection(streaming, store, needed, cap); }
         return false;
-    }
-    bool encoded(uint64_t bytes) {
-        return bytes <= audioEncodedLimit || reject("encoded memory audio bytes", bytes, audioEncodedLimit);
     }
 };
 

@@ -24,8 +24,7 @@ static std::string tcLogText(id obj) {
 @interface TCVideoPlayerImpl : NSObject {
 @public
     trussc::internal::VideoErrorQueue playbackErrors_;
-    std::shared_ptr<trussc::internal::VideoDecodeBudget> budget_;
-    size_t fixedBytes_;
+    std::shared_ptr<trussc::internal::VideoDecodeStatus> status_;
 }
 
 @property (nonatomic, strong) AVPlayer* player;
@@ -86,7 +85,7 @@ static std::string tcLogText(id obj) {
 - (instancetype)init {
     self = [super init];
     if (self) {
-        budget_ = std::make_shared<trussc::internal::VideoDecodeBudget>();
+        status_ = std::make_shared<trussc::internal::VideoDecodeStatus>();
         _player = nil;
         _playerItem = nil;
         _videoOutput = nil;
@@ -178,19 +177,13 @@ static std::string tcLogText(id obj) {
     size_t metadataBytes = 0;
     if (!std::isfinite(naturalSize.width) || !std::isfinite(naturalSize.height) ||
         naturalSize.width <= 0 || naturalSize.height <= 0 ||
-        naturalSize.width > trussc::internal::VideoDecodeLimits::axis ||
-        naturalSize.height > trussc::internal::VideoDecodeLimits::axis ||
+        naturalSize.width > INT_MAX / 4 || naturalSize.height > INT_MAX ||
         !trussc::internal::VideoDecodeLimits::rgba(int64_t(naturalSize.width), int64_t(naturalSize.height), metadataBytes)) {
-        budget_->reject(metadataBytes, trussc::internal::VideoDecodeLimits::frameBytes);
-        budget_->warn(); self.asset = nil; return NO;
+        status_->reject(metadataBytes, 0);
+        status_->warn(); self.asset = nil; return NO;
     }
 
     // Handle transform (rotation)
-    fixedBytes_ = metadataBytes * 2; // backend mirror and public mirror
-    if (!budget_->acquire(fixedBytes_)) {
-        budget_->reject(fixedBytes_, trussc::internal::VideoDecodeLimits::workingBytes);
-        fixedBytes_ = 0; budget_->warn(); self.asset = nil; return NO;
-    }
     CGAffineTransform transform = videoTrack.preferredTransform;
     if (transform.b == 1.0 && transform.c == -1.0) {
         // 90 degrees rotation
@@ -324,7 +317,6 @@ static std::string tcLogText(id obj) {
     self.playerItem = nil;
     self.videoOutput = nil;
     self.asset = nil;
-    if (fixedBytes_) { budget_->release(fixedBytes_); fixedBytes_ = 0; }
 
     if (_pixelBuffer) {
         delete[] _pixelBuffer;
@@ -383,8 +375,8 @@ static std::string tcLogText(id obj) {
 
             if (!baseAddress || CVPixelBufferGetPixelFormatType(pixelBuffer) != kCVPixelFormatType_32BGRA ||
                 !trussc::internal::VideoDecodeLimits::rows(width, height, bytesPerRow, CVPixelBufferGetDataSize(pixelBuffer))) {
-                budget_->reject(CVPixelBufferGetDataSize(pixelBuffer), trussc::internal::VideoDecodeLimits::frameBytes);
-                budget_->warn();
+                status_->reject(CVPixelBufferGetDataSize(pixelBuffer), 0);
+                status_->warn();
                 playbackErrors_.report("Video frame layout exceeds decode limits", -1);
                 CVPixelBufferUnlockBaseAddress(pixelBuffer, kCVPixelBufferLock_ReadOnly);
                 CVBufferRelease(pixelBuffer);
@@ -622,8 +614,8 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
 
     // Read all samples
     std::vector<uint8_t> audioData;
-    trussc::internal::VideoAudioStorage storage(audioData, *budget_);
-    struct Warning { trussc::internal::VideoDecodeBudget& budget; ~Warning() { budget.warn(); } } warning{*budget_};
+    trussc::internal::VideoAudioStorage storage(audioData, *status_);
+    struct Warning { trussc::internal::VideoDecodeStatus& status; ~Warning() { status.warn(); } } warning{*status_};
     CMSampleBufferRef sampleBuffer;
 
     // Get AAC profile from format description (for ADTS header)
@@ -636,9 +628,10 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
             const CMItemCount count = CMSampleBufferGetNumSamples(sampleBuffer);
             size_t headers = 0;
             if (count < 0 || !trussc::internal::VideoDecodeLimits::product(size_t(count > 0 ? count : 1), isAAC ? 7 : 0, headers) ||
-                blockBytes > trussc::internal::VideoDecodeLimits::inputBytes - audioData.size() ||
-                headers > trussc::internal::VideoDecodeLimits::inputBytes - audioData.size() - blockBytes) {
-                budget_->reject(blockBytes, trussc::internal::VideoDecodeLimits::inputBytes);
+                blockBytes > trussc::internal::VideoDecodeLimits::inputBytes ||
+                blockBytes > audioData.max_size() - audioData.size() ||
+                headers > audioData.max_size() - audioData.size() - blockBytes) {
+                status_->reject(blockBytes, trussc::internal::VideoDecodeLimits::inputBytes);
                 CFRelease(sampleBuffer); [reader cancelReading]; return {};
             }
 
@@ -648,7 +641,7 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
                 for (CMItemIndex i = 0; i < packets; ++i) {
                     const size_t packetSize = count > 1 ? CMSampleBufferGetSampleSize(sampleBuffer, i) : blockBytes;
                     if (packetSize > blockBytes - offset || packetSize > trussc::internal::VideoDecodeLimits::adtsPayloadBytes) {
-                        budget_->reject(packetSize, trussc::internal::VideoDecodeLimits::adtsPayloadBytes);
+                        status_->reject(packetSize, trussc::internal::VideoDecodeLimits::adtsPayloadBytes);
                         CFRelease(sampleBuffer); [reader cancelReading]; return {};
                     }
                     uint8_t packet[trussc::internal::VideoDecodeLimits::adtsPayloadBytes];
@@ -702,7 +695,7 @@ namespace trussc {
 bool VideoPlayer::loadPlatform(const fs::path& path) {
     // Create Objective-C implementation
     TCVideoPlayerImpl* impl = [[TCVideoPlayerImpl alloc] init];
-    decodeBudget_ = impl->budget_;
+    decodeStatus_ = impl->status_;
 
     NSString* nsPath = [NSString stringWithUTF8String:internal::pathToUtf8(path).c_str()];
 
@@ -771,7 +764,7 @@ void VideoPlayer::updatePlatform() {
     if (impl.hasNewFrame && impl.pixelBuffer && pixels_) {
         std::lock_guard<std::mutex> lock(mutex_);
         
-        size_t numPixels = width_ * height_;
+        size_t numPixels = size_t(width_) * height_;
         
         if (std::abs(gammaCorrection_ - 1.0f) > 0.001f) {
             // Apply gamma correction using LUT
@@ -950,9 +943,9 @@ static CGImageRef tcv_copy_cgimage_at_time_ios(AVAssetImageGenerator* gen,
 // keyframe at or before the requested time (fast, time-approximate).
 static bool tcv_extract_frame_ios(const std::string& path, Pixels& outPixels,
                                   float timeSec, float* outDuration, bool exact,
-                                  std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    if (!budget) budget = std::make_shared<internal::VideoDecodeBudget>();
-    struct Warning { internal::VideoDecodeBudget& budget; ~Warning() { budget.warn(); } } warning{*budget};
+                                  std::shared_ptr<internal::VideoDecodeStatus> status) {
+    if (!status) status = std::make_shared<internal::VideoDecodeStatus>();
+    struct Warning { internal::VideoDecodeStatus& status; ~Warning() { status.warn(); } } warning{*status};
     @autoreleasepool {
         NSURL* url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path.c_str()]];
         if (!url) return false;
@@ -976,9 +969,9 @@ static bool tcv_extract_frame_ios(const std::string& path, Pixels& outPixels,
         size_t trackBytes = 0;
         if (!std::isfinite(trackSize.width) || !std::isfinite(trackSize.height) ||
             trackSize.width <= 0 || trackSize.height <= 0 ||
-            trackSize.width > internal::VideoDecodeLimits::axis || trackSize.height > internal::VideoDecodeLimits::axis ||
+            trackSize.width > INT_MAX / 4 || trackSize.height > INT_MAX ||
             !internal::VideoDecodeLimits::rgba(int64_t(trackSize.width), int64_t(trackSize.height), trackBytes)) {
-            budget->reject(trackBytes, internal::VideoDecodeLimits::frameBytes); return false;
+            status->reject(trackBytes, 0); return false;
         }
 
         AVAssetImageGenerator* generator = [AVAssetImageGenerator assetImageGeneratorWithAsset:asset];
@@ -1003,11 +996,9 @@ static bool tcv_extract_frame_ios(const std::string& path, Pixels& outPixels,
 
         size_t imageWidth = CGImageGetWidth(cgImage), imageHeight = CGImageGetHeight(cgImage);
         size_t imageBytes = 0, imageSpan = 0;
-        if (imageWidth > internal::VideoDecodeLimits::axis || imageHeight > internal::VideoDecodeLimits::axis ||
-            !internal::VideoDecodeLimits::rgba(int64_t(imageWidth), int64_t(imageHeight), imageBytes) ||
-            !internal::VideoDecodeLimits::product(CGImageGetBytesPerRow(cgImage), imageHeight, imageSpan) ||
-            imageSpan > internal::VideoDecodeLimits::frameBytes) {
-            budget->reject((std::max)(imageBytes, imageSpan), internal::VideoDecodeLimits::frameBytes);
+        if (!internal::VideoDecodeLimits::rgba(int64_t(imageWidth), int64_t(imageHeight), imageBytes) ||
+            !internal::VideoDecodeLimits::product(CGImageGetBytesPerRow(cgImage), imageHeight, imageSpan)) {
+            status->reject((std::max)(imageBytes, imageSpan), 0);
             CGImageRelease(cgImage); return false;
         }
         int w = int(imageWidth), h = int(imageHeight);
@@ -1017,7 +1008,7 @@ static bool tcv_extract_frame_ios(const std::string& path, Pixels& outPixels,
         Pixels decoded;
         try { decoded.allocate(w, h, 4); }
         catch (const std::bad_alloc&) {
-            budget->reject(imageBytes, internal::VideoDecodeLimits::workingBytes);
+            status->reject(imageBytes, 0);
             CGImageRelease(cgImage); return false;
         }
         CGColorSpaceRef srcSpace = CGImageGetColorSpace(cgImage);
@@ -1042,20 +1033,20 @@ static bool tcv_extract_frame_ios(const std::string& path, Pixels& outPixels,
 }
 
 bool VideoPlayer::extractFramePlatform(const fs::path& path, Pixels& outPixels,
-                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    return tcv_extract_frame_ios(path.string(), outPixels, timeSec, outDuration, /*exact=*/true, budget);
+                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeStatus> status) {
+    return tcv_extract_frame_ios(path.string(), outPixels, timeSec, outDuration, /*exact=*/true, status);
 }
 
 bool VideoPlayer::extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
-                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    if (!budget) budget = std::make_shared<internal::VideoDecodeBudget>();
-    const uint64_t previousRejections = budget->rejected();
-    if (tcv_extract_frame_ios(path.string(), outPixels, timeSec, outDuration, /*exact=*/false, budget)) {
+                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeStatus> status) {
+    if (!status) status = std::make_shared<internal::VideoDecodeStatus>();
+    const uint64_t previousRejections = status->rejected();
+    if (tcv_extract_frame_ios(path.string(), outPixels, timeSec, outDuration, /*exact=*/false, status)) {
         return true;
     }
     // No keyframe reachable - fall back to an exact decode.
-    if (budget->rejected() != previousRejections) return false;
-    return tcv_extract_frame_ios(path.string(), outPixels, timeSec, outDuration, /*exact=*/true, budget);
+    if (status->rejected() != previousRejections) return false;
+    return tcv_extract_frame_ios(path.string(), outPixels, timeSec, outDuration, /*exact=*/true, status);
 }
 
 } // namespace trussc

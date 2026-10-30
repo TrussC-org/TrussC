@@ -257,11 +257,9 @@ vector<char> readDeviceFile(const fs::path& path, size_t limit) {
 
 void deviceFixtureChecks(const fs::path& inputPath, const string& expect) {
     const auto path = fs::absolute(inputPath);
-    const bool memoryRejected = expect == "load-file";
     const bool notice = expect == "notice";
-    check("known expectation", memoryRejected || notice || expect == "load");
+    check("known expectation", notice || expect == "load");
     size_t notices = 0, warnings = 0;
-    string rejectionMessage;
     auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
         if (event.level == LogLevel::Notice && event.message.find("decoded audio exceeds") != string::npos) {
             ++notices;
@@ -269,11 +267,10 @@ void deviceFixtureChecks(const fs::path& inputPath, const string& expect) {
         }
         if (event.level == LogLevel::Warning && event.message.find("rejecting whole sound") != string::npos) {
             ++warnings;
-            rejectionMessage = event.message;
         }
     });
-    // Bound (test): retain at most 64 MiB + 1 encoded bytes for rejection probes, and 1 MiB of manifest JSON.
-    const auto bytes = readDeviceFile(path, 64 * 1024 * 1024 + 1);
+    // Read complete encoded fixtures; only the manifest has a test input cap.
+    const auto bytes = readDeviceFile(path, numeric_limits<size_t>::max());
     check("fixture is nonempty", !bytes.empty());
     const auto manifestBytes = readDeviceFile(path.parent_path() / "manifest.json", 1024 * 1024);
     const auto manifest = nlohmann::json::parse(manifestBytes.begin(), manifestBytes.end());
@@ -345,10 +342,10 @@ void deviceFixtureChecks(const fs::path& inputPath, const string& expect) {
     };
     if (!failures) {
         run("SoundBuffer file load", false, [&](SoundBuffer& b) { return b.load(path); });
-        run("SoundBuffer memory load", memoryRejected, memoryLoad);
+        run("SoundBuffer memory load", false, memoryLoad);
         // Sound has no encoded-memory API. Attach the memory-decoded buffer
         // through its public loadFromBuffer entry instead.
-        run("Sound memory buffer attachment", memoryRejected, [&](SoundBuffer& b) {
+        run("Sound memory buffer attachment", false, [&](SoundBuffer& b) {
             auto result = memoryLoad(b);
             if (result) {
                 auto decoded = make_shared<SoundBuffer>(std::move(b));
@@ -374,11 +371,11 @@ void deviceFixtureChecks(const fs::path& inputPath, const string& expect) {
         // Explicit native MP3 coverage: automatic .mp3 dispatch is miniaudio.
         if (ext == ".mp3") {
             run("native MP3 file load", false, [&](SoundBuffer& b) { return b.loadAac(path); });
-            run("native MP3 memory load", memoryRejected, [&](SoundBuffer& b) { return b.loadAacFromMemory(bytes.data(), bytes.size()); });
+            run("native MP3 memory load", false, [&](SoundBuffer& b) { return b.loadAacFromMemory(bytes.data(), bytes.size()); });
         }
 #endif
         check("one Notice across repeated loads", notices == (notice ? 1u : 0u));
-        check("one first rejection Warning", warnings == (memoryRejected ? 1u : 0u));
+        check("no whole-load rejection Warning", warnings == 0);
     }
 }
 
@@ -462,6 +459,21 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check("local WAV above 64 MiB loads completely", bool(large.loadWav(largePath)) &&
               large.numSamples == dataBytes / 2 && large.channels == 1 && large.samples.size() == dataBytes / 2 &&
               large.samples.front() == 0.25f && large.samples.back() == 0);
+    }
+    {
+        // Reuse the complete WAV, keeping live storage near 64 MiB encoded +
+        // 128 MiB PCM. This is app-owned input, like HAP-extracted audio.
+        const auto bytes = readDeviceFile(largePath, numeric_limits<size_t>::max());
+        SoundBuffer large;
+        const auto before = internal::audioDecodeRejections();
+        check("memory WAV above 64 MiB loads completely", bytes.size() > 64u * 1024 * 1024 &&
+              bool(large.loadWavFromMemory(bytes.data(), bytes.size())) &&
+              large.numSamples == dataBytes / 2 && large.channels == 1 && large.samples.size() == dataBytes / 2 &&
+              large.samples.front() == 0.25f && large.samples.back() == 0 &&
+              internal::audioDecodeRejections() == before);
+        check("OGG memory byte length must fit signed int",
+              !large.loadOggFromMemory(bytes.data(), size_t(INT_MAX) + 1) &&
+              large.numSamples == dataBytes / 2 && large.samples.front() == 0.25f);
     }
     const auto replacementPath = dir / "replacement.wav";
     writeBytes(replacementPath, wavBytes(51200));
