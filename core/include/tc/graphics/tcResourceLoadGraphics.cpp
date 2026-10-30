@@ -313,7 +313,6 @@ void Font::loadAsync(const fs::path& nameOrPath, int size, int faceIndex) {
     if (state->input.isDataFile) {
         state->result = internal::checkLoadFile(internal::utf8ToPath(state->input.path), "Font");
         if (!state->result) {
-            state->preflightFailure = true;
             internal::probeResourceLoad("font.preflight-failure", internal::utf8ToPath(state->input.path));
             internal::completeResourceLoad(state);
             return;
@@ -419,17 +418,6 @@ void Font::applyAsync(AsyncState& ready) {
     const bool hadAtlas = atlasManager_ != nullptr;
     cacheKey_ = ready.key;
     if (ready.unsupportedUrl) return; // native URL load keeps the old atlas
-    if (ready.preflightFailure || ready.urlTimeout) {
-        atlasManager_.reset();
-        if (ready.urlTimeout) cacheKey_.fontPath.clear();
-        if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
-        return;
-    }
-    if (!ready.result) {
-        atlasManager_.reset();
-        if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
-        return;
-    }
     try {
         atlasManager_ = internal::SharedFontCache::getInstance().publishPrepared(ready.key, std::move(ready.candidate));
     } catch (...) {

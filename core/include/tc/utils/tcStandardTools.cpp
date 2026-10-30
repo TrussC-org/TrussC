@@ -419,34 +419,26 @@ void registerStandardTools(Server& server) {
 
     // Lists and source lookup use the same process-wide lifetime registry.
     auto listImages = []() -> json {
-        try {
-            json arr = json::array();
-            for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Image)) {
-                const auto& p = static_cast<Image*>(e.object)->getPixels();
-                arr.push_back({{"index",e.index},{"name",e.name},{"width",p.getWidth()},
-                               {"height",p.getHeight()},{"format",p.isFloat()?"float":"RGBA8"}});
-            }
-            json result = json::object();
-            result["images"] = std::move(arr);
-            return result;
-        } catch (const AdmissionError& e) {
-            return json{{"status", "error"}, {"message", e.what()}};
+        json arr = json::array();
+        for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Image)) {
+            const auto& p = static_cast<Image*>(e.object)->getPixels();
+            arr.push_back({{"index",e.index},{"name",e.name},{"width",p.getWidth()},
+                           {"height",p.getHeight()},{"format",p.isFloat()?"float":"RGBA8"}});
         }
+        json result = json::object();
+        result["images"] = std::move(arr);
+        return result;
     };
     auto listFbos = []() -> json {
-        try {
-            json arr = json::array();
-            for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo)) {
-                const auto& f = *static_cast<Fbo*>(e.object);
-                arr.push_back({{"index",e.index},{"name",e.name},{"width",f.getWidth()},
-                               {"height",f.getHeight()},{"format",isFloatFormat(f.getTextureFormat())?"float":"RGBA8"}});
-            }
-            json result = json::object();
-            result["fbos"] = std::move(arr);
-            return result;
-        } catch (const AdmissionError& e) {
-            return json{{"status", "error"}, {"message", e.what()}};
+        json arr = json::array();
+        for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo)) {
+            const auto& f = *static_cast<Fbo*>(e.object);
+            arr.push_back({{"index",e.index},{"name",e.name},{"width",f.getWidth()},
+                           {"height",f.getHeight()},{"format",isFloatFormat(f.getTextureFormat())?"float":"RGBA8"}});
         }
+        json result = json::object();
+        result["fbos"] = std::move(arr);
+        return result;
     };
     coreTool(server, "tc_list_images", "List live Images: index, name, width, height, format (RGBA8 or float).")
         .level(ToolLevel::ReadOnly)

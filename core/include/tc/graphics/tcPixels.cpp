@@ -99,9 +99,7 @@ bool imageDecodeAllocationAllowed(size_t bytes) {
 void imageDecodeAllocationFailed() {
     if (imageDecodeAllocation) imageDecodeAllocation->failed_ = true;
 }
-namespace {
-template<class Allocate>
-LoadResult readEncodedImageImpl(const fs::path& path, size_t& length, Allocate allocate) {
+LoadResult readEncodedImage(const fs::path& path, std::unique_ptr<unsigned char[]>& bytes, size_t& length) {
     LoadResult entry;
     auto closeFile = [](FILE* handle) { std::fclose(handle); };
     std::unique_ptr<FILE, decltype(closeFile)> file(openLoadFile(path, "Pixels", entry), closeFile);
@@ -117,22 +115,16 @@ LoadResult readEncodedImageImpl(const fs::path& path, size_t& length, Allocate a
     try {
         // One immutable snapshot also prevents a path change between
         // metadata inspection and decoding (including the ImageIO fallback).
-        auto* bytes = imageDecodeAllocationAllowed() ? allocate(length) : nullptr;
+        if (imageDecodeAllocationAllowed()) bytes.reset(new (std::nothrow) unsigned char[length]);
+        else return imageDecodeOutOfMemory();
         if (!bytes && length) return imageDecodeOutOfMemory();
-        if (std::fread(bytes, 1, length, file.get()) != length ||
+        if (std::fread(bytes.get(), 1, length, file.get()) != length ||
             std::ferror(file.get()))
             return LoadResult::fail(LoadError::DecodeFailed, "cannot read encoded image");
         if (std::fgetc(file.get()) != EOF)
             return LoadResult::fail(LoadError::DecodeFailed, "encoded image changed while reading");
         return LoadResult::success();
     } catch (const std::bad_alloc&) { return imageDecodeOutOfMemory(); }
-}
-} // namespace
-LoadResult readEncodedImage(const fs::path& path, std::unique_ptr<unsigned char[]>& bytes, size_t& length) {
-    return readEncodedImageImpl(path, length, [&](size_t count) {
-        bytes.reset(new (std::nothrow) unsigned char[count]);
-        return bytes.get();
-    });
 }
 void* ImageCallbackInput::decode(bool asFloat, int& width, int& height, int& channels) {
     const stbi_io_callbacks callbacks{
@@ -231,10 +223,7 @@ LoadResult Pixels::loadFile(const fs::path& filePath, bool asFloat) {
         size_t length = 0;
         // Bulk decoder I/O can also report allocation failure through a null
         // result; this host TU enables exception cleanup for validation too.
-        auto result = internal::readEncodedImageImpl(path, length, [&](size_t count) {
-            bytes.reset(new (std::nothrow) unsigned char[count]);
-            return bytes.get();
-        });
+        auto result = internal::readEncodedImage(path, bytes, length);
         if (!result) return result;
         result = loadEncoded(bytes.get(), length, asFloat, path);
 #ifdef __APPLE__

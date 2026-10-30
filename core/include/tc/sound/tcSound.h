@@ -530,13 +530,8 @@ public:
         const size_t endFrame = offsetSamples + otherFrames;
         if (samples.size() < needed) {
             // A failed reserve leaves the current samples intact.
-            bool grown = false;
-            try {
-                grown = internal::growSampleBuffer(samples, needed);
-                if (grown) samples.resize(needed, 0.0f);
-            } catch (const std::bad_alloc&) {
-                grown = false;
-            }
+            const bool grown = internal::growSampleBuffer(samples, needed);
+            if (grown) samples.resize(needed, 0.0f);
             if (!grown) {
                 logError("SoundBuffer") << "mixFrom: out of memory growing to " << endFrame
                                         << " frames, nothing mixed";
