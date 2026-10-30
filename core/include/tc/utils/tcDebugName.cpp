@@ -1,5 +1,4 @@
 #include "tcDebugName.h"
-#include "tcMcpLimits.h"
 #include <map>
 #include <mutex>
 #include <utility>
@@ -48,24 +47,9 @@ void DebugName::set(const std::string& name) {
 std::vector<DebugObjectEntry> debugObjects(DebugObjectKind kind) {
     auto& r = registry();
     std::unique_lock lock(r.mutex);
-    size_t count = 0, total = 0;
-    for (const auto& [index, e] : r.entries) {
-        if (e.kind != kind) continue;
-        // Bound (security): size the complete snapshot before copying. Saturating arithmetic rejects overflow; diagnostics run only after unlocking.
-        const auto bytes = e.debug->get().size();
-        constexpr size_t overhead = sizeof(DebugObjectEntry) + 1;
-        total = bytes > SIZE_MAX - overhead || total > SIZE_MAX - overhead - bytes
-            ? SIZE_MAX : total + overhead + bytes;
-        ++count;
-    }
-    if (auto budget = mcp::internal::currentWorkBudget()) {
-        size_t limit, needed;
-        if (!budget->tryReserve(total, limit, needed)) {
-            lock.unlock();
-            mcp::internal::admissionRejected(mcp::internal::AdmissionStore::Working, limit, needed);
-            throw mcp::internal::AdmissionError();
-        }
-    }
+    size_t count = 0;
+    for (const auto& [index, e] : r.entries)
+        if (e.kind == kind) ++count;
     std::vector<DebugObjectEntry> result;
     result.reserve(count);
     for (const auto& [index, e] : r.entries)

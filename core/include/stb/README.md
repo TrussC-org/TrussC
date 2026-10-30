@@ -21,20 +21,15 @@ The implementations are compiled in `core/include/impl/stb_impl.cpp`
 `STBI_WINDOWS_UTF8` / `STBIW_WINDOWS_UTF8`, and `STBTT_assert`,
 `STBTT_malloc` / `STBTT_free` for stb_truetype, see below) and in
 `core/include/tc/sound/tcSound_impl.cpp` (`stb_vorbis`, inside `extern "C"`).
-For MCP file decoding, `STBI_MALLOC` / `STBI_REALLOC` / `STBI_FREE` route
-through the synchronous `impl/tcMcpImageAdmission.h` allocation scope. Metadata
-and decoding allocations, including growth during decompression, must fit the
-workspace reserved by the MCP owner. All scoped buffers are freed before the
-scope ends; outside a scope these hooks use ordinary malloc/realloc/free with
-unchanged pointer layout. Keep these hooks when updating stb_image and run
-`httpAdmission`, `mcpAdmission` and `mcpAnalyzeImage` after changes.
+Pixels and MCP file decoding observe allocation failures through the ordinary
+image-load scope, without an MCP working-memory budget or custom allocation
+layout. MCP local files use Pixels loading. The existing 64 MiB encoded-size
+limit for URL/memory image input remains; local files follow normal file loading.
 
-Ordinary Pixels decoding also observes allocation failures through an internal
-thread-local scope; it imposes no separate working-memory budget. File and
-memory entry points inspect metadata against the recorded GPU axis limit
-(16384 before GPU setup or in headless use) and admit at most 64 MiB encoded.
-
-No other configuration macro is set: every stb_image format is enabled.
+PNG uses stb_image_write's own zlib compressor and default allocators. Under real
+memory exhaustion, the encoder can abort internally; a null return is handled by
+the MCP adapter. No encoder vendor edit is added.
+Every stb_image format remains enabled.
 
 "Commit" is the commit of the source repository whose copy of the file is
 byte-identical to TrussC's copy before TrussC patches. For the three

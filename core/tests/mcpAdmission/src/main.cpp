@@ -1,85 +1,35 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
-#include "../../../include/tc/utils/tcAnalyzeImage.h"
-#include "../../../include/tc/utils/tcAudioTools.h"
 #include "../../../include/impl/httplib.h"
-#include "../../../include/impl/tcMcpImageAdmission.h"
+#include "../../../include/tc/utils/tcAnalyzeImage.h"
 #include <cstdio>
-#include <fstream>
-#ifndef _WIN32
-#include <sys/socket.h>
-#endif
-
 using namespace tc;
 using namespace std;
 namespace {
 int failures = 0;
-struct ReplyNode : Node {
-    string value;
-    void reflectMembers(Reflector& reflector) override {
-        Node::reflectMembers(reflector);
-        reflector.visit("value", value);
-    }
-};
 void check(const char* name, bool ok) {
     printf("%s: %s\n", ok ? "PASS" : "FAIL", name);
     if (!ok) ++failures;
 }
-}
+} // namespace
 TC_CORE_TEST_MAIN() {
-    using mcp::internal::AdmissionStore;
-    // Operational stores warn once per process; Configuration warns per call
-    // and is covered separately by mcpAdmissionConstruction.
-    constexpr size_t storeCount = static_cast<size_t>(AdmissionStore::Configuration);
-    array<atomic<int>, storeCount> warnings{};
-    const char* stores[] = {"body", "connections", "histogram", "grid", "operations", "reply", "working memory"};
-    EventListener listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+    std::atomic<int> bodyWarnings{0}, headerWarnings{0};
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
         if (event.level != LogLevel::Warning) return;
-        for (size_t i = 0; i < storeCount; ++i)
-            if (event.message.find(string("[MCP] ") + stores[i] + " capacity ") == 0) ++warnings[i];
+        if (event.message.find("[MCP] body capacity ") == 0) ++bodyWarnings;
+        if (event.message.find("[MCP] headers capacity ") == 0) ++headerWarnings;
     });
     const auto defaults = mcp::getAdmissionLimits();
-    check("default admission settings", defaults.bodyBytes == 64u * 1024 * 1024 && defaults.jsonDepth == 64 && defaults.outstanding == 32 && defaults.workers == 4 &&
-        defaults.histogramBins == 4096 &&
-        defaults.gridCells == 65536 && defaults.operations == 256 && defaults.replyBytes == 64u * 1024 * 1024 && defaults.workingBytes == 256u * 1024 * 1024);
-    auto zero = defaults;
-    zero.bodyBytes = 0;
-    bool invalid = !mcp::setAdmissionLimits(zero);
-    check("zero limits leave settings unchanged", invalid && mcp::getAdmissionLimits().bodyBytes == defaults.bodyBytes);
-    {
-        // Exercise the first working-store warning: later refusals are counted
-        // without logging, so this must precede the other working-store tests.
-        auto deeper = defaults;
-        deeper.jsonDepth = 96;
-        check("MCP reentrant depth configuration", mcp::setAdmissionLimits(deeper));
-        const string local = string(70, '[') + "0" + string(70, ']');
-        const string boundary = string(64, '[') + "0" + string(64, ']');
-        check("local document accepts depth 70 before MCP", !parseJson(local).is_null());
-        bool reentered = false, localAccepted = false, boundaryAccepted = false;
-        string depthWarning;
-        auto reentrantLog = getLogger().onLog.listen([&](LogEventArgs& event) {
-            if (event.level != LogLevel::Warning || reentered ||
-                event.message.find("[MCP] working memory capacity ") != 0) return;
-            reentered = true;
-            depthWarning = event.message;
-            localAccepted = !parseJson(local).is_null();
-            boundaryAccepted = !parseJson(boundary).is_null();
-        });
-        bool requestRejected = false;
-        try {
-            mcp::internal::WorkScope scope;
-            auto value = mcp::internal::parseRequest("{\"extra\":" +
-                string(100, '[') + "0" + string(100, ']') + "}");
-            (void)value;
-        } catch (const mcp::internal::AdmissionError&) { requestRejected = true; }
-        check("over-deep MCP request rejected during reentrant log", requestRejected && reentered);
-        check("depth Warning retains the previous exact text", depthWarning ==
-              "[MCP] working memory capacity 96, needed 97 levels; request rejected");
-        check("reentrant local parse uses upstream behavior", localAccepted && boundaryAccepted);
-        check("local document accepts depth 70 after MCP", !parseJson(local).is_null());
-        check("reentrant depth regression releases request credits", mcp::internal::workingMemory() == 0);
-        check("MCP reentrant depth configuration restored", mcp::setAdmissionLimits(defaults));
-    }
+    check("ingress defaults", defaults.bodyBytes == 64u * 1024 * 1024 && defaults.outstanding == 32 && defaults.workers == 4);
+    auto invalid = defaults;
+    invalid.bodyBytes = 0;
+    check("zero configuration is rejected", !mcp::setAdmissionLimits(invalid) && mcp::getAdmissionLimits().bodyBytes == defaults.bodyBytes);
+    auto& server = mcp::internal::Server::instance();
+    check("control JSON above 1 MiB is accepted", json::parse(server.processMessage(
+        string(1024 * 1024, ' ') + R"({"jsonrpc":"2.0","id":1,"method":"initialize"})")).contains("result"));
+    check("oversize control JSON is rejected", json::parse(server.processMessage(string(defaults.bodyBytes + 1, ' '))).contains("error"));
+    string nested(66, '['); nested += "0"; nested += string(66, ']');
+    check("JSON nesting guard remains", json::parse(server.processMessage(nested)).contains("error"));
     Pixels pixels;
     pixels.allocate(257, 256, 4);
     auto analyze = [&](json ops) {
@@ -96,105 +46,6 @@ TC_CORE_TEST_MAIN() {
     check("large grid product is rejected before resize", analyze(json::array({{{"op", "grid"}, {"cols", INT_MAX}, {"rows", INT_MAX}}})).value("status", "") == "error");
     check("histogram boundary is accepted", analyze(json::array({{{"op", "histogram"}, {"bins", 4096}}})).contains("results"));
     check("grid boundary is accepted", analyze(json::array({{{"op", "grid"}, {"cols", 256}, {"rows", 256}}})).contains("results"));
-    bool rejected = false;
-    try { (void)mcp::internal::dumpReply(json(string(64u * 1024 * 1024 + 1, 'a'))); }
-    catch (const exception&) { rejected = true; }
-    check("reply bytes are bounded during serialization", rejected);
-    auto reduced = defaults;
-    reduced.replyBytes = 4096;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(reduced));
-    auto limited = analyze(json::array({{{"op", "grid"}, {"cols", 8}, {"rows", 8}}}));
-    check("reply allowance is checked before constructing cells", limited.value("status", "") == "error" && !limited.contains("results"));
-    check("analysis releases working credits", mcp::internal::workingMemory() == 0);
-    reduced.replyBytes = 32768;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(reduced));
-    {
-        ReplyNode node;
-        node.value.assign(32768, 'a');
-        mcp::internal::WorkScope scope;
-        bool full = false;
-        try { (void)nodeToJson(node); } catch (const mcp::internal::AdmissionError&) { full = true; }
-        check("reflected fields are checked before copying", full);
-    }
-    reduced = defaults;
-    reduced.workingBytes = 128;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(reduced));
-    {
-        mcp::internal::WorkScope scope;
-        mcp::internal::reserveWork(100);
-        bool full = false;
-        try { mcp::internal::reserveWork(29); } catch (const mcp::internal::AdmissionError&) { full = true; }
-        check("aggregate reservation rejects before allocation", full && mcp::internal::workingMemory() == 100);
-    }
-    check("working credits are released after rejection", mcp::internal::workingMemory() == 0);
-    {
-        trussc::internal::AudioOutputRing ring(100, 2);
-        mcp::internal::WorkScope scope;
-        bool full = false;
-        try { (void)ring.snapshot(200, &mcp::internal::reserveAudioSnapshot); }
-        catch (const mcp::internal::AdmissionError&) { full = true; }
-        check("audio snapshot admission precedes allocation", full && mcp::internal::workingMemory() == 0);
-    }
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
-    const string deepRequest = R"({"jsonrpc":"2.0","id":1,"method":"tools/list","extra":)" +
-        string(65, '[') + "0" + string(65, ']') + "}";
-    check("JSON nesting preserves the previous exact admission response",
-        mcp::internal::Server::instance().processMessage(deepRequest) ==
-        R"({"jsonrpc":"2.0","id":null,"error":{"code":-32000,"message":"MCP admission limit exceeded"}})" &&
-        mcp::internal::workingMemory() == 0);
-    {
-        const auto path = fs::temp_directory_path() / ("mcp-admission-image-" + to_string(getSystemTimeMicros()) + ".tga");
-        array<unsigned char, 18> header{};
-        header[2] = 2;
-        header[12] = 0x10; header[13] = 0x27;
-        header[14] = 0x10; header[15] = 0x27;
-        header[16] = 32;
-        ofstream file(path, ios::binary);
-        file.write(reinterpret_cast<const char*>(header.data()), header.size());
-        file.close();
-        Pixels loaded;
-        bool full = false;
-        try { (void)mcp::internal::loadMcpImage(loaded, path); }
-        catch (const mcp::internal::AdmissionError&) { full = true; }
-        check("image metadata is limited before decoding", full && !loaded.isAllocated() && mcp::internal::workingMemory() == 0);
-        {
-            mcp::internal::ImageAllocationScope allocation(128);
-            int width = 0, height = 0, channels = 0;
-            auto* decoded = stbi_load_from_memory(header.data(), int(header.size()), &width, &height, &channels, 4);
-            check("codec allocation stops before exceeding workspace", !decoded && allocation.exceeded() && allocation.peak() <= 128);
-            stbi_image_free(decoded);
-        }
-        fs::remove(path);
-    }
-#ifdef __APPLE__
-    {
-        // One uncompressed grayscale TIFF pixel; stb has no TIFF decoder.
-        vector<unsigned char> tiff(123, 0);
-        auto le16 = [&](size_t offset, unsigned value) {
-            tiff[offset] = value & 255; tiff[offset + 1] = (value >> 8) & 255;
-        };
-        auto le32 = [&](size_t offset, unsigned value) {
-            for (unsigned i = 0; i < 4; ++i) tiff[offset + i] = (value >> (i * 8)) & 255;
-        };
-        tiff[0] = 'I'; tiff[1] = 'I'; le16(2, 42); le32(4, 8); le16(8, 9);
-        size_t entry = 10;
-        auto tag = [&](unsigned key, unsigned type, unsigned value) {
-            le16(entry, key); le16(entry + 2, type); le32(entry + 4, 1); le32(entry + 8, value);
-            entry += 12;
-        };
-        tag(256, 4, 1); tag(257, 4, 1); tag(258, 3, 8); tag(259, 3, 1);
-        tag(262, 3, 1); tag(273, 4, 122); tag(277, 3, 1); tag(278, 4, 1); tag(279, 4, 1);
-        tiff[122] = 127;
-        const auto path = fs::temp_directory_path() / ("mcp-imageio-" + to_string(getSystemTimeMicros()) + ".tiff");
-        ofstream file(path, ios::binary);
-        file.write(reinterpret_cast<const char*>(tiff.data()), tiff.size()); file.close();
-        Pixels decoded;
-        check("ImageIO-only TIFF loads through bounded MCP snapshot", mcp::internal::loadMcpImage(decoded, path) &&
-            decoded.getWidth() == 1 && decoded.getHeight() == 1 && decoded.getChannels() == 4 && decoded.getData()[3] == 255);
-        check("ImageIO snapshot credits retire", mcp::internal::workingMemory() == 0);
-        fs::remove(path);
-    }
-#endif
 #ifndef _WIN32
     if (!std::getenv("MCP_ADMISSION_SOCKET_FREE")) mcp::startHttpServer();
     const bool socketsAvailable = bool(mcp::internal::getHttpServer());
@@ -223,23 +74,13 @@ TC_CORE_TEST_MAIN() {
     check("connection 33 is closed at admission", n == 0 || (n < 0 && errno == ECONNRESET));
     for (auto sock : sockets) { shutdown(sock, SHUT_RDWR); close(sock); }
     mcp::stopHttpServer();
-    check("socket shutdown returns all admission credits", mcp::internal::admittedConnections() == 0 && mcp::internal::workingMemory() == 0);
+    check("socket shutdown returns all admission credits", mcp::internal::admittedConnections() == 0);
 
-    auto constrained = defaults;
-    constrained.workingBytes = 8u * 1024 * 1024;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(constrained));
+    check("limits restored", mcp::setAdmissionLimits(defaults));
     mcp::startHttpServer();
-    {
-        httplib::Client client("127.0.0.1", mcp::getHttpPort());
-        client.set_read_timeout(3);
-        auto reply = client.Post("/mcp", string(65536, ' '), "application/json");
-        check("working admission rejects before a promise is queued", reply && reply->status == 503 &&
-            reply->body.find("working memory") != string::npos && mcp::internal::getHttpChannel().size() == 0);
-    }
-    mcp::stopHttpServer();
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
-    mcp::startHttpServer();
+    bool connectionClosed = false;
     auto raw = [&](const string& text) {
+        auto pending = std::async(std::launch::async, [&] {
         auto sock = socket(AF_INET, SOCK_STREAM, 0);
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
@@ -250,23 +91,87 @@ TC_CORE_TEST_MAIN() {
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         size_t sent = 0;
         while (sent < text.size()) {
-            auto n = send(sock, text.data() + sent, text.size() - sent, 0);
+            int flags = 0;
+#ifdef MSG_NOSIGNAL
+            flags = MSG_NOSIGNAL;
+#endif
+            auto n = send(sock, text.data() + sent, text.size() - sent, flags);
             if (n <= 0) break;
             sent += size_t(n);
         }
         string response;
         char buffer[1024];
+        connectionClosed = false;
         for (;;) {
             auto n = recv(sock, buffer, sizeof(buffer), 0);
-            if (n <= 0) break;
+            if (n <= 0) { connectionClosed = n == 0 || errno == ECONNRESET; break; }
             response.append(buffer, size_t(n));
         }
         close(sock);
         return response;
+        });
+        while (pending.wait_for(chrono::milliseconds(1)) != std::future_status::ready) mcp::processHttpQueue();
+        return pending.get();
     };
     for (int i = 0; i < 2; ++i) {
-        check("MCP length limit rejects before body read", raw("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 67108865\r\n\r\n").find("413") != string::npos);
+        check("MCP length limit rejects before body read", raw("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " + to_string(defaults.bodyBytes + 1) + "\r\n\r\n").find("413") != string::npos);
     }
+    check("long request line is rejected", raw("GET /" + string(8192, 'a') + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n").find("414") != string::npos);
+    int toolCalls = 0;
+    mcp::tool("metadata_probe", "verify refusal before dispatch").bind([&]() -> json {
+        ++toolCalls;
+        return {{"status", "ok"}};
+    });
+    const string toolBody = R"({"jsonrpc":"2.0","id":37,"method":"tools/call","params":{"name":"metadata_probe"}})";
+    char chunkSize[32];
+    std::snprintf(chunkSize, sizeof(chunkSize), "%zx", toolBody.size());
+    const string toolPrefix = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n";
+    const auto firstTrailer = raw(toolPrefix + chunkSize + "\r\n" + toolBody + "\r\n0\r\nX-Padded:" + string(65536, ' ') + "\r\n\r\n");
+    check("first trailer overflow refuses before tool dispatch", toolCalls == 0 && connectionClosed &&
+        firstTrailer.find("431") != string::npos && firstTrailer.find("HTTP/1.1", 1) == string::npos);
+    const auto chunkExtension = raw(toolPrefix + chunkSize + ";" + string(1024 * 1024, 'a') + "\r\n" + toolBody + "\r\n0\r\n\r\n");
+    check("1 MiB chunk extension refuses before tool dispatch", toolCalls == 0 && connectionClosed &&
+        chunkExtension.find("431") != string::npos && chunkExtension.find("HTTP/1.1", 1) == string::npos);
+    const auto acceptedTool = raw(toolPrefix + chunkSize + "\r\n" + toolBody + "\r\n0\r\n\r\n");
+    check("metadata probe tool is callable after refusals", toolCalls == 1 && acceptedTool.find("200") != string::npos);
+    string headers;
+    for (int i = 0; i < 129; ++i) headers += "X-Test: a\r\n";
+    check("header count is rejected", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("431") != string::npos);
+    headers.clear();
+    for (int i = 0; i < 9; ++i) headers += "X-Test: " + string(8000, 'a') + "\r\n";
+    check("aggregate headers are rejected", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("431") != string::npos);
+    headers.clear();
+    for (int i = 0; i < 129; ++i) headers += "\rX-Test: a\r\n";
+    check("noncanonical initial field names still count", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("431") != string::npos && connectionClosed);
+    headers.clear();
+    for (int i = 0; i < 10; ++i) headers += "X-Padded:" + string(7000, ' ') + "a\r\n";
+    check("wire whitespace counts toward header bytes", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n" + headers + "\r\n").find("431") != string::npos && connectionClosed);
+    const string chunkPrefix = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n";
+    headers.clear();
+    for (int i = 0; i < 129; ++i) headers += "X-Trailer: a\r\n";
+    check("trailer count is bounded before storage", raw(chunkPrefix + headers + "\r\n").find("431") != string::npos && connectionClosed);
+    headers.clear();
+    for (int i = 0; i < 10; ++i) headers += "X-Padded:" + string(7000, ' ') + "a\r\n";
+    check("wire whitespace counts toward trailer bytes", raw(chunkPrefix + headers + "\r\n").find("431") != string::npos && connectionClosed);
+    headers.clear();
+    for (int i = 0; i < 126; ++i) headers += "X-Test: a\r\n";
+    check("128 initial fields are accepted", raw("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n" + headers + "\r\n").find("200") != string::npos);
+    headers.clear();
+    for (int i = 0; i < 129; ++i) headers += "\rX-Trailer: a\r\n";
+    check("noncanonical trailer names still count", raw(chunkPrefix + headers + "\r\n").find("431") != string::npos && connectionClosed);
+    headers.clear();
+    for (int i = 0; i < 128; ++i) headers += "X-Trailer: a\r\n";
+    check("excess trailer is refused before its line completes", raw(chunkPrefix + headers + "X-Trailer: a").find("431") != string::npos && connectionClosed);
+    const string validBody = R"({"jsonrpc":"2.0","id":1,"method":"initialize"})";
+    // Multiple chunks, including one-byte data, exercise framing observation.
+    const string validChunks = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n1\r\n" +
+        validBody.substr(0, 1) + "\r\n2d\r\n" + validBody.substr(1) + "\r\n0\r\n";
+    check("128 trailers and valid chunk framing are accepted", raw(validChunks + headers + "\r\n").find("200") != string::npos);
+    const string following = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    const auto refused = raw("POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " + to_string(defaults.bodyBytes + 1) + "\r\n\r\n" + following);
+    check("refusal with unread body closes without processing its bytes", connectionClosed && refused.find("413") != string::npos && refused.find("HTTP/1.1", 1) == string::npos);
+    const auto forbidden = raw("POST /mcp HTTP/1.1\r\nHost: attacker.example\r\nContent-Type: application/json\r\nContent-Length: " + to_string(following.size()) + "\r\n\r\n" + following);
+    check("host refusal with unread body closes", connectionClosed && forbidden.find("403") != string::npos && forbidden.find("HTTP/1.1", 1) == string::npos);
     mcp::stopHttpServer();
     auto ingressLimits = defaults;
     ingressLimits.bodyBytes = 64;
@@ -291,440 +196,19 @@ TC_CORE_TEST_MAIN() {
     check("ingress limits restored", mcp::setAdmissionLimits(defaults));
     mcp::startHttpServer();
     while (mcp::internal::admittedConnections() != 0) this_thread::yield();
-    mcp::Tool deferred;
-    deferred.name = "admission_reply";
-    deferred.description = "Deferred admission reply";
-    deferred.handler = [](const json&) -> json {
-        mcp::deferToolResultUntilAfterFrame([] { return json{{"status", "ok"}}; });
-        return nullptr;
-    };
-    mcp::internal::Server::instance().registerTool(deferred);
-    bool activeSetting = !mcp::setAdmissionLimits(defaults);
-    check("running listener keeps its settings", activeSetting);
-    auto parsedReply = async(launch::async, [deepRequest] {
-        httplib::Client client("127.0.0.1", mcp::getHttpPort());
-        client.set_read_timeout(5);
-        auto response = client.Post("/mcp", deepRequest, "application/json");
-        return response && response->status == 503 && !response->get_header_value("X-MCP-Reason").empty();
-    });
-    auto parseDeadline = chrono::steady_clock::now() + chrono::seconds(3);
-    while (mcp::internal::getHttpChannel().size() == 0 && chrono::steady_clock::now() < parseDeadline)
-        this_thread::sleep_for(chrono::milliseconds(1));
-    mcp::processHttpQueue();
-    check("parse admission resolves the HTTP future with a reason", parsedReply.get());
-    while (mcp::internal::admittedConnections() != 0) this_thread::yield();
-    vector<future<bool>> replies;
-    for (int i = 0; i < 32; ++i) {
-        replies.push_back(async(launch::async, [] {
-            httplib::Client client("127.0.0.1", mcp::getHttpPort());
-            client.set_read_timeout(5);
-            auto response = client.Post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admission_reply","arguments":{}}})", "application/json");
-            return bool(response) && response->status == 200;
-        }));
-        // Admit each connection before opening the next: a simultaneous burst
-        // can fill the OS listen backlog and delay SYN retries past the wait.
-        auto acceptedDeadline = chrono::steady_clock::now() + chrono::seconds(3);
-        while (mcp::internal::admittedConnections() < size_t(i + 1) && chrono::steady_clock::now() < acceptedDeadline)
-            this_thread::sleep_for(chrono::milliseconds(1));
-    }
-    auto deadline = chrono::steady_clock::now() + chrono::seconds(3);
-    while ((mcp::internal::getHttpChannel().size() < 4 || mcp::internal::admittedConnections() < 32) && chrono::steady_clock::now() < deadline)
-        this_thread::sleep_for(chrono::milliseconds(1));
-    check("four workers retain four admitted promises", mcp::internal::getHttpChannel().size() == 4);
-    mcp::processHttpQueue();
-    {
-        lock_guard<mutex> lock(mcp::internal::deferredResponsesMutex());
-        check("deferred replies retain admission", mcp::internal::deferredResponses().size() == 4 && mcp::internal::admittedConnections() == 32);
-    }
     mcp::stopHttpServer();
-    int answered = 0;
-    for (auto& reply : replies) {
-        check("shutdown future is resolved", reply.wait_for(chrono::seconds(1)) == future_status::ready);
-        if (reply.get()) ++answered;
-    }
-    // Queued socket work can be closed when the listener stops; all client
-    // futures must still finish and all four admitted promises must reply.
-    check("shutdown answers admitted promises", answered >= 4);
-    check("request shutdown returns all admission credits", mcp::internal::admittedConnections() == 0 && mcp::internal::workingMemory() == 0);
-    atomic<bool> entered{false}, stopped{false}, produced{false};
-    mcp::tool("admission_pending", "Pending admission reply").bind([&]() -> json {
-        entered = true;
-        while (!stopped) this_thread::yield();
-        mcp::deferToolResultUntilAfterFrame([&] { produced = true; return json::object(); });
-        return nullptr;
-    });
-    mcp::startHttpServer();
-    auto pendingReply = async(launch::async, [] {
-        httplib::Client client("127.0.0.1", mcp::getHttpPort());
-        client.set_read_timeout(5);
-        auto reply = client.Post("/mcp", R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admission_pending","arguments":{}}})", "application/json");
-        return reply && reply->status == 200 && reply->body.find("error") != string::npos;
-    });
-    thread watchdog([&] {
-        for (int i = 0; i < 500 && !stopped; ++i) this_thread::sleep_for(chrono::milliseconds(10));
-        if (!stopped) { printf("FAIL: pending shutdown timed out\n"); fflush(stdout); std::_Exit(2); }
-    });
-    thread stopper([&] {
-        while (!entered) this_thread::yield();
-        mcp::stopHttpServer();
-        stopped = true;
-    });
-    deadline = chrono::steady_clock::now() + chrono::seconds(3);
-    while (mcp::internal::getHttpChannel().size() == 0 && chrono::steady_clock::now() < deadline)
-        this_thread::sleep_for(chrono::milliseconds(1));
-    mcp::processHttpQueue();
-    stopper.join();
-    watchdog.join();
-    check("shutdown answers an executing request", pendingReply.get());
-    mcp::internal::drainDeferredResponses();
-    check("late deferred response is discarded at shutdown", !produced && !mcp::internal::hasDeferredResponses() && mcp::internal::workingMemory() == 0);
-
-    auto replyLimited = defaults;
-    const auto toolList = mcp::internal::Server::instance().processMessage(
-        R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})");
-    replyLimited.replyBytes = max<size_t>(4096, toolList.size() + 1024);
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(replyLimited));
-    mcp::startHttpServer();
-    auto limitedReply = async(launch::async, [idBytes = replyLimited.replyBytes + 1] {
-        httplib::Client client("127.0.0.1", mcp::getHttpPort());
-        client.set_read_timeout(5);
-        const json request{{"jsonrpc", "2.0"}, {"id", string(idBytes, 'a')}, {"method", "tools/call"},
-            {"params", {{"name", "admission_reply"}, {"arguments", json::object()}}}};
-        auto reply = client.Post("/mcp", request.dump(), "application/json");
-        return reply && reply->status == 503 && reply->body.empty() &&
-            reply->get_header_value("X-MCP-Reason").find("limit") != string::npos;
-    });
-    deadline = chrono::steady_clock::now() + chrono::seconds(3);
-    while (mcp::internal::getHttpChannel().size() == 0 && chrono::steady_clock::now() < deadline)
-        this_thread::sleep_for(chrono::milliseconds(1));
-    check("limited reply request is admitted", mcp::internal::getHttpChannel().size() == 1);
-    mcp::processHttpQueue();
-    mcp::stopHttpServer();
-    check("shutdown resolves a promise when its error reply cannot fit", limitedReply.get());
-    check("limited shutdown returns credits", mcp::internal::workingMemory() == 0 && mcp::internal::admittedConnections() == 0);
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
-    mcp::tool("admission_closed", "Closed admission reply").bind([]() -> json {
-        mcp::internal::getHttpChannel().close();
-        mcp::deferToolResultUntilAfterFrame([] { return json::object(); });
-        return nullptr;
-    });
+    check("header refusals counted", mcp::internal::admissionRejections(mcp::internal::AdmissionStore::Headers) == 9);
+    check("one header warning across HTTP restarts", headerWarnings == 1);
+    } else check("HTTP sockets are available", false);
+#endif
+    check("body rejections counted", mcp::internal::admissionRejections(mcp::internal::AdmissionStore::Body) > 0);
+    check("one body warning across HTTP restarts", bodyWarnings == 1);
     mcp::internal::resetHttpChannel();
-    auto promise = make_shared<std::promise<mcp::internal::ReplyThunk>>();
-    auto closedReply = promise->get_future();
+    auto responsePromise = make_shared<std::promise<mcp::internal::ReplyThunk>>();
+    auto future = responsePromise->get_future();
     mcp::internal::getHttpChannel().send(mcp::McpRequest{
-        R"({"jsonrpc":"2.0","id":91,"method":"tools/call","params":{"name":"admission_closed","arguments":{}}})", promise});
-    mcp::processHttpQueue();
-    const bool completed = closedReply.wait_for(chrono::seconds(0)) == future_status::ready;
-    check("closed channel resolves a late response", completed);
-    if (completed) {
-        auto response = json::parse(closedReply.get()());
-        check("shutdown reply preserves request id", response["id"] == 91 && response["result"].value("isError", false));
-    } else mcp::stopHttpServer();
-    } else {
-        printf("SKIP: live MCP sockets unavailable or MCP_ADMISSION_SOCKET_FREE set; running socket-free regressions\n");
-    }
-#endif
-    const uint64_t expected[] = {
-#ifndef _WIN32
-#ifdef CPPHTTPLIB_ZLIB_SUPPORT
-        socketsAvailable ? 4u : 0u,
-#else
-        socketsAvailable ? 3u : 0u,
-#endif
-        socketsAvailable ? 1u : 0u,
-#else
-        0, 0,
-#endif
-        3, 3, 2,
-#ifndef _WIN32
-        socketsAvailable ? 4u : 3u,
-#else
-        3,
-#endif
-#ifndef _WIN32
-        socketsAvailable ? 7u : 5u
-#else
-        5
-#endif
-    };
-    for (size_t i = 0; i < storeCount; ++i) {
-        printf("store %s: %llu rejections, %d warnings\n", stores[i],
-            static_cast<unsigned long long>(mcp::internal::admissionRejections(static_cast<AdmissionStore>(i))), warnings[i].load());
-        check("exact cumulative rejection counter", mcp::internal::admissionRejections(static_cast<AdmissionStore>(i)) == expected[i]);
-        check("exactly one Warning per rejecting store", warnings[i] == (expected[i] ? 1 : 0));
-    }
-
-    {
-        const auto requestAtDepth = [](size_t arrays) {
-            return R"({"jsonrpc":"2.0","id":1,"method":"tools/list","extra":)" +
-                string(arrays, '[') + "0" + string(arrays, ']') + "}";
-        };
-        const auto accepts = [&](size_t arrays) {
-            try {
-                mcp::internal::WorkScope scope;
-                auto value = mcp::internal::parseRequest(requestAtDepth(arrays));
-                return value["method"] == "tools/list";
-            } catch (const mcp::internal::AdmissionError&) { return false; }
-        };
-        auto deeper = defaults;
-        deeper.jsonDepth = 96;
-        check("MCP depth override configured", mcp::setAdmissionLimits(deeper));
-        check("MCP configured depth accepts 80 nested arrays", accepts(80));
-        check("MCP configured depth still rejects excessive nesting", !accepts(97));
-        bool emptyRejected = false;
-        try {
-            mcp::internal::WorkScope scope;
-            (void)mcp::internal::parseRequest(string(97, '[') + string(97, ']'));
-        } catch (const mcp::internal::AdmissionError&) { emptyRejected = true; }
-        check("empty containers retain the structural depth boundary", emptyRejected);
-        check("MCP depth configuration does not affect ordinary parsing", json::parse(requestAtDepth(65)).is_object());
-        check("MCP default depth restored", mcp::setAdmissionLimits(defaults));
-        check("MCP default accepts 63 nested arrays in a request", accepts(63));
-        check("MCP default rejects 65 nested arrays in a request", !accepts(65));
-        check("MCP depth regression releases request credits", mcp::internal::workingMemory() == 0);
-    }
-
-    const string nestedIdRequest = R"({"jsonrpc":"2.0","id":)" +
-        string(100000, '[') + "0" + string(100000, ']') + R"(,"method":"initialize"})";
-    {
-        const auto reply = json::parse(mcp::internal::Server::instance().processMessage(nestedIdRequest));
-        check("nested id exceeds request depth limit", reply.is_object() &&
-            reply.value("jsonrpc", "") == "2.0" && reply["id"].is_null() &&
-            reply.contains("error") && reply["error"].value("code", 0) == -32000);
-        const auto nextReply = json::parse(mcp::internal::Server::instance().processMessage(
-            R"({"jsonrpc":"2.0","id":92,"method":"initialize"})"));
-        check("request processing continues after depth rejection", nextReply["id"] == 92 && nextReply.contains("result"));
-        check("nested id rejection releases request credits", mcp::internal::workingMemory() == 0);
-    }
-
-    // Model the connection/request scope boundary around upstream request processing.
-    // These checks also run when a sandbox prohibits bind().
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
-    {
-        auto connection = make_shared<mcp::internal::WorkBudget>(true);
-        mcp::internal::WorkScope connectionScope(connection);
-        connection->reserve(4u * 1024 * 1024); // Default socket body workspace; request bodies reserve incrementally.
-        const auto base = mcp::internal::workingMemory();
-        const string body = R"({"jsonrpc":"2.0","id":7,"method":"initialize","padding":")" +
-            string(300000, 'a') + R"("})";
-        for (int i = 0; i < 7; ++i) {
-            {
-                mcp::internal::WorkScope requestScope(make_shared<mcp::internal::WorkBudget>(true));
-                mcp::internal::reserveWork(body.size() * 64);
-                auto reply = json::parse(mcp::internal::Server::instance().processMessage(body));
-                check("keep-alive model accepts sequential 300059-byte request", reply.contains("result") && reply["id"] == 7);
-            }
-            check("keep-alive model retires request credits and retains ingress", mcp::internal::workingMemory() == base);
-        }
-    }
-    check("connection model returns all credits", mcp::internal::workingMemory() == 0);
-    auto perReply = defaults;
-    perReply.replyBytes = 2048;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(perReply));
-    {
-        mcp::internal::WorkScope connectionScope(make_shared<mcp::internal::WorkBudget>(true));
-        Pixels pixel;
-        pixel.allocate(1, 1, 4);
-        for (int i = 0; i < 7; ++i) {
-            {
-                mcp::internal::WorkScope requestScope(make_shared<mcp::internal::WorkBudget>(true));
-                const auto reply = mcp::internal::analyzeImage(pixel,
-                    {{"ops", json::array({{{"op", "pixel"}, {"x", 0}, {"y", 0}}})}}, "sRGB");
-                check("reply allowance resets per modeled request", reply.contains("results"));
-            }
-            check("modeled reply credits retire", mcp::internal::workingMemory() == 0);
-        }
-        bool full = false;
-        try {
-            mcp::internal::WorkScope requestScope(make_shared<mcp::internal::WorkBudget>(true));
-            mcp::internal::reserveReply(2049);
-        } catch (const mcp::internal::AdmissionError&) { full = true; }
-        check("each request still enforces its reply limit", full);
-    }
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
-    {
-        auto request = make_shared<mcp::internal::WorkBudget>(true);
-        mcp::internal::ReplyThunk worker;
-        {
-            mcp::internal::WorkScope scope(request);
-            mcp::internal::reserveWork(4096);
-            worker = [budget = request] {
-                mcp::internal::WorkScope scope(budget);
-                return string("{}");
-            };
-        }
-        request.reset();
-        check("worker stage retains request credits after main scope", mcp::internal::workingMemory() == 4096);
-        check("retained worker stage completes", worker() == "{}");
-        worker = {};
-        check("last worker owner retires request credits", mcp::internal::workingMemory() == 0);
-    }
-    auto terminal = [&](const char* name, int mode, bool tiny) {
-        auto limits = defaults;
-        if (tiny) limits.replyBytes = 32;
-        check("admission limits configuration succeeds", mcp::setAdmissionLimits(limits));
-        auto promise = make_shared<std::promise<mcp::internal::ReplyThunk>>();
-        auto future = promise->get_future();
-        int owner;
-        mcp::internal::DeferredResponse d;
-        d.budget = make_shared<mcp::internal::WorkBudget>(true);
-        d.id = 77;
-        d.response = promise;
-        d.owner = &owner;
-        d.makeEnvelope = [mode]() -> mcp::internal::ReplyThunk {
-            if (mode == 2) throw mcp::internal::AdmissionError();
-            throw runtime_error("producer failed");
-        };
-        if (mode == 0) {
-            d.target = &owner;
-            d.deadline = chrono::steady_clock::time_point::min();
-        }
-        mcp::internal::deferredResponses().push_back(std::move(d));
-        bool threw = false;
-        try {
-            if (mode == 1) mcp::internal::removeRegistrationsOwnedBy(&owner);
-            else mcp::internal::drainDeferredResponses();
-        } catch (...) { threw = true; }
-        const bool ready = future.wait_for(chrono::seconds(0)) == future_status::ready;
-        check(name, !threw && ready && !mcp::internal::hasDeferredResponses());
-        if (ready) {
-            bool quota = false;
-            string reply;
-            try { reply = future.get()(); } catch (const mcp::internal::AdmissionError&) { quota = true; }
-            if (tiny) check("unencodable terminal error publishes HTTP 503 thunk", quota && reply.empty());
-            else {
-                const auto envelope = json::parse(reply, nullptr, false);
-                check("terminal error is a valid id-preserving JSON-RPC envelope", !quota && envelope.is_object() &&
-                    envelope.value("jsonrpc", "") == "2.0" && envelope["id"] == 77 && envelope["result"].value("isError", false));
-            }
-        }
-        check("terminal completion retires stage credits", mcp::internal::workingMemory() == 0);
-    };
-    terminal("expired tiny reply future is ready", 0, true);
-    terminal("owner cleanup tiny reply future is ready", 1, true);
-    terminal("deferred admission tiny reply future is ready", 2, true);
-    terminal("deferred exception tiny reply future is ready", 3, true);
-    terminal("deferred admission produces correlated error", 2, false);
-    terminal("deferred exception produces correlated error", 3, false);
-#ifndef __EMSCRIPTEN__
-    for (int mode = 0; mode < 4; ++mode) {
-        auto limits = defaults;
-        if (mode == 1) limits.replyBytes = 32;
-        check("admission limits configuration succeeds", mcp::setAdmissionLimits(limits));
-        mcp::internal::resetHttpChannel();
-        auto promise = make_shared<std::promise<mcp::internal::ReplyThunk>>();
-        auto future = promise->get_future().share();
-        string body;
-        if (mode == 0 || mode == 3) body = nestedIdRequest;
-        else if (mode == 1) body = R"({"id":")" + string(4096, 'a') + R"("})";
-        else body = R"({"id":91})";
-        if (mode == 3) mcp::internal::getHttpChannel().close();
-        mcp::internal::enqueueHttpRequest(mcp::McpRequest{body, promise, make_shared<mcp::internal::WorkBudget>(true)}, future);
-        mcp::stopHttpServer();
-        const bool ready = future.wait_for(chrono::seconds(0)) == future_status::ready;
-        check(mode == 0 ? "queued nested id resolves when server stops" :
-            "queued/closed shutdown completes even with depth or reply rejection", ready);
-        if (ready) {
-            bool quota = false;
-            string reply;
-            try { reply = future.get()(); } catch (const mcp::internal::AdmissionError&) { quota = true; }
-            if (mode != 2) check(mode == 0 ? "queued nested id returns bounded shutdown error" :
-                "shutdown rejection has a bounded HTTP 503 thunk", quota && reply.empty());
-            else check("bounded shutdown envelope retains id", json::parse(reply)["id"] == 91 && reply.size() <= limits.replyBytes);
-        }
-        check("shutdown model releases credits", mcp::internal::workingMemory() == 0);
-    }
-#endif
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
-#ifndef _WIN32
-    if (socketsAvailable) {
-        // Real keep-alive requests use one httplib client socket. Capture all
-        // response statuses; main services requests while the client runs.
-        auto live = [&](bool smallReplies) {
-            auto limits = defaults;
-            if (smallReplies) limits.replyBytes = 2048;
-            check("admission limits configuration succeeds", mcp::setAdmissionLimits(limits));
-            mcp::tool("admission_pixel", "One pixel").bind([&]() -> json {
-                Pixels pixel;
-                pixel.allocate(1, 1, 4);
-                return mcp::internal::analyzeImage(pixel,
-                    {{"ops", json::array({{{"op", "pixel"}, {"x", 0}, {"y", 0}}})}}, "sRGB");
-            });
-            mcp::startHttpServer();
-            atomic<bool> done{false};
-            vector<bool> results;
-            vector<size_t> connections;
-            auto client = async(launch::async, [&] {
-                httplib::Client c("127.0.0.1", mcp::getHttpPort());
-                c.set_keep_alive(true);
-                c.set_read_timeout(5);
-                for (int i = 0; i < 7; ++i) {
-                    const string body = smallReplies
-                        ? R"({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"admission_pixel","arguments":{}}})"
-                        : R"({"jsonrpc":"2.0","id":7,"method":"initialize","padding":")" + string(300000, 'a') + R"("})";
-                    auto response = c.Post("/mcp", body, "application/json");
-                    const auto envelope = response ? json::parse(response->body, nullptr, false) : json();
-                    const bool pixelOk = !smallReplies || (envelope.contains("result") &&
-                        envelope["result"].contains("content") &&
-                        json::parse(envelope["result"]["content"][0].value("text", "null"), nullptr, false).contains("results"));
-                    results.push_back(response && response->status == 200 && envelope.contains("result") && pixelOk);
-                    connections.push_back(mcp::internal::admittedConnections());
-                }
-                done = true;
-            });
-            while (!done) { mcp::processHttpQueue(); this_thread::sleep_for(chrono::milliseconds(1)); }
-            client.get();
-            for (bool ok : results) check(smallReplies ? "live keep-alive reply budget resets" : "live keep-alive accepts sequential large requests", ok);
-            check("live keep-alive retains exactly one socket admission", all_of(connections.begin(), connections.end(), [](size_t n) { return n == 1; }));
-            mcp::stopHttpServer();
-            check("live keep-alive releases all credits", mcp::internal::workingMemory() == 0 && mcp::internal::admittedConnections() == 0);
-        };
-        live(false);
-        live(true);
-
-        mcp::tool("admission_mainstage", "Main-stage limit").bind([]() -> json {
-            mcp::deferToolResultTwoStage([]() -> std::function<json()> {
-                throw mcp::internal::AdmissionError();
-            });
-            return nullptr;
-        });
-        for (bool tiny : {false, true}) {
-            auto limits = defaults;
-            limits.replyBytes = tiny ? 32 : 2048;
-            check("admission limits configuration succeeds", mcp::setAdmissionLimits(limits));
-            mcp::startHttpServer();
-            atomic<bool> done{false};
-            auto client = async(launch::async, [&] {
-                httplib::Client c("127.0.0.1", mcp::getHttpPort());
-                c.set_read_timeout(5);
-                auto response = c.Post("/mcp", R"({"jsonrpc":"2.0","id":77,"method":"tools/call","params":{"name":"admission_mainstage","arguments":{}}})", "application/json");
-                done = true;
-                return response;
-            });
-            while (!done) {
-                mcp::processHttpQueue();
-                mcp::internal::drainDeferredResponses();
-                this_thread::sleep_for(chrono::milliseconds(1));
-            }
-            auto response = client.get();
-            if (tiny) check("live main-stage admission uses HTTP 503 if error cannot fit", response &&
-                response->status == 503 && response->body.empty() && !response->get_header_value("X-MCP-Reason").empty());
-            else {
-                const auto envelope = response ? json::parse(response->body, nullptr, false) : json();
-                check("live main-stage admission returns correlated JSON-RPC tool error", response &&
-                    response->status == 200 && envelope.value("jsonrpc", "") == "2.0" &&
-                    envelope["id"] == 77 && envelope["result"].value("isError", false));
-            }
-            mcp::stopHttpServer();
-            check("live deferred failure releases all credits", mcp::internal::workingMemory() == 0 && mcp::internal::admittedConnections() == 0);
-        }
-    }
-#endif
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
-    for (size_t i = 0; i < storeCount; ++i)
-        printf("final store %s: %llu rejections, %d warnings\n", stores[i],
-            static_cast<unsigned long long>(mcp::internal::admissionRejections(static_cast<AdmissionStore>(i))), warnings[i].load());
-    listener.disconnect();
-    printf("mcpAdmission: %d failures\n", failures);
+        R"({"jsonrpc":"2.0","id":77,"method":"initialize"})", responsePromise});
+    mcp::stopHttpServer();
+    check("shutdown answers queued request with its id", json::parse(future.get()())["id"] == 77);
     return failures ? 1 : 0;
 }

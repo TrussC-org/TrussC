@@ -226,8 +226,8 @@ void boundaryChecks(const fs::path& root) {
     check("CPU float load ignores recorded GPU limit", pixels.loadHDR(root / "float-image") && pixels.isFloat() && pixels.getWidth() == 65);
     Pixels mcpPixels;
     const auto beforeMcp = internal::imageDecodeRejectionsForTests();
-    check("MCP file-image route shares GPU admission", !mcp::internal::loadMcpImage(mcpPixels, root / "over.png") &&
-          empty(mcpPixels) && internal::imageDecodeRejectionsForTests() == beforeMcp + 1 && mcp::internal::workingMemory() == 0);
+    check("MCP local file follows CPU loading", mcp::internal::loadMcpImage(mcpPixels, root / "over.png") &&
+          mcpPixels.getWidth() == 65 && internal::imageDecodeRejectionsForTests() == beforeMcp);
 }
 void headerChecks() {
     rejected("corrupt bytes", Bytes{1,2,3}, LoadError::DecodeFailed);
@@ -274,7 +274,7 @@ void earlyPngChecks(const fs::path& root) {
         writeFile(path, png);
         check("local PNG CRC follows stb", pixels.load(path) && pixels.getWidth() == 8);
         Pixels mcpPixels;
-        check("MCP retains its header policy", !mcp::internal::loadMcpImage(mcpPixels, path) && empty(mcpPixels));
+        check("MCP local PNG follows stb CRC policy", mcp::internal::loadMcpImage(mcpPixels, path) && mcpPixels.getWidth() == 8);
     }
 }
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
@@ -442,7 +442,7 @@ void platformChecks(const fs::path& root) {
     check("direct ImageIO exceeds old axis cap", pixels.loadPlatform(root / "over.tiff") && pixels.getWidth() == 65);
     check("ImageIO file fallback exceeds old axis cap", pixels.load(root / "over.tiff") && pixels.getWidth() == 65);
     pixels.clear();
-    check("MCP ImageIO fallback shares axis admission", !mcp::internal::loadMcpImage(pixels, root / "over.tiff") && empty(pixels));
+    check("MCP ImageIO fallback follows local loading", mcp::internal::loadMcpImage(pixels, root / "over.tiff") && pixels.getWidth() == 65);
 }
 #endif
 void mipSamplingChecks() {
@@ -501,8 +501,8 @@ void allocationChecks(const fs::path& root) {
         mcpPixels.clear();
         internal::failImageDecodeAllocationAfterForTests(int64_t(step));
         const auto before = internal::imageDecodeRejectionsForTests();
-        check("MCP encoded/decoder/pixel OOM releases owner credits", !mcp::internal::loadMcpImage(mcpPixels, root / "mcp-allocation.png") &&
-              empty(mcpPixels) && mcp::internal::workingMemory() == 0 && internal::imageDecodeRejectionsForTests() == before);
+        check("MCP encoded/decoder/pixel OOM returns failure", !mcp::internal::loadMcpImage(mcpPixels, root / "mcp-allocation.png") &&
+              empty(mcpPixels) && internal::imageDecodeRejectionsForTests() == before);
     }
     const auto path = root / "allocation.hdr";
     writeFile(path, encoded("hdr", 8, 8));
@@ -603,7 +603,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         if (event.message.find("[Pixels]") == string::npos) return;
         if (event.level == LogLevel::Warning) {
             ++warnings;
-            check("MCP bound Warning names GPU capacity", event.message.find("GPU limit of 64 per axis") != string::npos);
+            check("bound Warning reports rejection", event.message.find("image rejected: ") != string::npos);
         }
         if (event.level == LogLevel::Error) ++errors;
     });
@@ -617,7 +617,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
           warnings == 0 && internal::imageDecodeRejectionsForTests() == before);
     earlyPngChecks(root);
     boundaryChecks(root);
-    check("real axis overflow still emits first bound Warning", warnings == 1);
+    check("local MCP loading emits no axis admission Warning", warnings == 0);
     headerChecks();
     inputSizeChecks(root);
     callbackInputChecks();
