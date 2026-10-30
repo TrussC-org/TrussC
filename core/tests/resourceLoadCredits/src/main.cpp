@@ -61,7 +61,7 @@ struct Gate {
     void open() { std::lock_guard lock(mutex); opened = true; changed.notify_all(); }
 };
 #include "../../common/resourceLoadLocalChecks.h"
-void concurrency() {
+void concurrencyChecks() {
     check("default preparation concurrency is four", getResourceLoadConcurrency() == 4);
     setResourceLoadConcurrency(8);
     check("public setter accepts eight", getResourceLoadConcurrency() == 8);
@@ -305,7 +305,7 @@ TC_CORE_TEST_MAIN() {
     auto log = getLogger().onLog.listen([&](LogEventArgs& message) {
         if (message.message.find("[ResourceLoad]") != std::string::npos && message.level == LogLevel::Warning) ++warnings;
     });
-    concurrency(); localFileAdmissionChecks(); credits(); workersAndFailures(); callers(); lifecycle();
+    concurrencyChecks(); localFileAdmissionChecks(); credits(); workersAndFailures(); callers(); lifecycle();
     settle();
     check("one first admission warning across all repeated failures", warnings == 1);
     internal::setResourceLoadLimitsForTests(4, 64, size_t(1024) * 1024 * 1024);
