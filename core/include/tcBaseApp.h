@@ -60,6 +60,7 @@ constexpr int appAudioPriority = audio::priority::Generator - 1;
 class App : public RectNode {
 public:
     App() {
+        internal::requireAppConstruction(this);
         // The audio hooks are not subscribed here: the audio thread could
         // then call audioOut() before setup() has prepared its state, even
         // before the derived constructor has finished. They are subscribed
@@ -73,6 +74,8 @@ public:
         // (runApp, hot reload and secondary windows), runHeadlessApp for
         // the headless root.
     }
+
+    ~App() override { internal::retireAppOwner(constructorTicket_.owner); }
 
     // -------------------------------------------------------------------------
     // Size (synchronized with window)
@@ -239,6 +242,9 @@ public:
 private:
     internal::AppConstructionTicket constructorTicket_;
     friend void internal::completeAppConstruction(App&) noexcept;
+    friend void internal::deliverAppExit(App&);
+    friend std::shared_ptr<internal::AppOwner> internal::appOwner(const App&) noexcept;
+    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool) noexcept;
     EventListener audioOutListener_;
     EventListener audioInListener_;
 
@@ -249,9 +255,8 @@ private:
         // The main App's setup() has now made its code grant (windowed or
         // headless: both runners register this root before setup). Secondary apps
         // and hot reload guests must not repeat process startup.
-        const auto& context = internal::currentWindowContext();
-        if (context.isMain && context.rootNode.lock().get() == this)
-            mcp::internal::initializeMcp();
+        internal::AppOwnerScope process({});
+        mcp::internal::initializeMcp();
     }
 
     // Node's pre-cleanup hook: an App added as a child ends with its
@@ -438,48 +443,3 @@ inline bool appRanCleanup(const App& app) {
 }
 
 } // namespace trussc
-
-namespace trussc::internal {
-// Install once per main-window run, before setup/guest loading. Lookup happens
-// inside each callback; swapping a hot-reload guest never reorders the host slot.
-template<class GetApp>
-void registerAppEventListeners(GetApp getApp) {
-    auto& listeners = mainWindowContext().appEventListeners;
-    listeners.clear();
-    auto warned = std::make_shared<std::atomic<bool>>(false);
-    auto bind = [&](auto& event, auto callback) {
-        listeners.push_back(FrameworkEventAccess::listen(event,
-            [getApp, callback, warned](auto&&... args) {
-                if (!isMainThread()) {
-                    if (!warned->exchange(true))
-                        logWarning("App") << "App events must be delivered on the main thread";
-                    return;
-                }
-                if (auto app = getApp()) {
-                    // Keep an outgoing guest alive through callback-induced changes.
-                    auto owner = app->shared_from_this();
-                    callback(*app, args...);
-                }
-            }, EventPriority::App));
-    };
-    auto& source = events();
-    bind(source.update, [](auto& app) {
-        auto& ctx = currentWindowContext();
-        app.handleUpdate(ctx.mouseX, ctx.mouseY);
-    });
-    bind(source.draw, [](auto& app) { app.handleDraw(); });
-    bind(source.exit, [](auto& app) { app.exit(); });
-    bind(source.keyPressed, [](auto& app, auto& e) { e.consumed = app.handleKeyPressed(e) || e.consumed; });
-    bind(source.keyReleased, [](auto& app, auto& e) { e.consumed = app.handleKeyReleased(e) || e.consumed; });
-    bind(source.mousePressed, [](auto& app, auto& e) { e.consumed = app.handleMousePressed(e) || e.consumed; });
-    bind(source.mouseReleased, [](auto& app, auto& e) { e.consumed = app.handleMouseReleased(e) || e.consumed; });
-    bind(source.mouseMoved, [](auto& app, auto& e) { e.consumed = app.handleMouseMoved(e) || e.consumed; });
-    bind(source.mouseDragged, [](auto& app, auto& e) { e.consumed = app.handleMouseDragged(e) || e.consumed; });
-    bind(source.mouseScrolled, [](auto& app, auto& e) { e.consumed = app.handleMouseScrolled(e) || e.consumed; });
-    bind(source.touchPressed, [](auto& app, auto& e) { app.touchPressed(e); });
-    bind(source.touchMoved, [](auto& app, auto& e) { app.touchMoved(e); });
-    bind(source.touchReleased, [](auto& app, auto& e) { app.touchReleased(e); });
-    bind(source.windowResized, [](auto& app, auto& e) { app.handleWindowResized(e.width, e.height); });
-    bind(source.filesDropped, [](auto& app, auto& e) { app.filesDropped(e.files); });
-}
-} // namespace trussc::internal

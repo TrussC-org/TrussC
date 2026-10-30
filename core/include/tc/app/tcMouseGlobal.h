@@ -24,22 +24,26 @@ namespace trussc {
 
 // Current mouse X coordinate (window coordinates)
 inline float getGlobalMouseX() {
-    return internal::currentWindowContext().mouseX;
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->mouseX : 0;
 }
 
 // Current mouse Y coordinate (window coordinates)
 inline float getGlobalMouseY() {
-    return internal::currentWindowContext().mouseY;
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->mouseY : 0;
 }
 
 // Previous frame mouse X coordinate (window coordinates)
 inline float getGlobalPMouseX() {
-    return internal::currentWindowContext().pmouseX;
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->pmouseX : 0;
 }
 
 // Previous frame mouse Y coordinate (window coordinates)
 inline float getGlobalPMouseY() {
-    return internal::currentWindowContext().pmouseY;
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->pmouseY : 0;
 }
 
 // Alias for getGlobalMouseX/Y (for tcDebugInput)

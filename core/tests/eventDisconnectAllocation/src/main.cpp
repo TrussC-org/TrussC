@@ -43,6 +43,8 @@ void check(const char* name, bool ok, int nth = -1) {
 struct AttachmentDevice {
 #ifdef TC_WINDOW_ATTACH_DUMMY
     static constexpr bool usesGpu = true;
+    Window renderWindow;
+    internal::WindowContext* previous = internal::currentWindowCtx();
     AttachmentDevice() {
         sg_desc sd{}; sd.pipeline_pool_size = 2048;
         sd.environment.defaults.color_format = SG_PIXELFORMAT_RGBA8;
@@ -52,13 +54,15 @@ struct AttachmentDevice {
         check("attachment dummy device initialized", sg_isvalid());
         sgl_desc_t gd{}; gd.context_pool_size = 8; gd.pipeline_pool_size = 256;
         sgl_setup(&gd);
-        auto& main = internal::mainWindowContext();
+        internal::WindowRequestAccess::bindForTests(renderWindow, 303);
+        auto& main = renderWindow.context();
         main.fbWidth = main.fbHeight = 32;
         main.swapchainTarget.width = main.swapchainTarget.height = 32;
         internal::restoreWindowContext(&main);
     }
     ~AttachmentDevice() {
-        internal::mainWindowContext().swapchainTarget.resources().release();
+        internal::WindowRequestAccess::teardown(renderWindow);
+        internal::restoreWindowContext(previous);
         internal::drainPendingGpuDestroys();
         sgl_shutdown();
         sg_shutdown();
@@ -145,14 +149,10 @@ struct TestWindow : Window {
     TestWindow() { native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
     void finish() noexcept {
         if (!native_) return;
-        internal::TeardownSteps steps;
-        std::optional<internal::EntryStackGuard> guard;
-        steps.run("exit entry guard", [&] { guard.emplace(internal::AppEntry::Exit); });
-        native_ = nullptr; internal::WindowRequestAccess::unbind(*this);
-        ctx_.targetsClosed = true;
-        ctx_.teardownTargets();
-        steps.run("stand-in GPU release", [&] { ctx_.swapchainTarget.resources().release(); });
-        internal::WindowRequestAccess::endApp(*this);
+        // The synthetic handle has no native backing; use the production ending
+        // and binding retirement rather than disposing the target before App.
+        native_ = nullptr;
+        internal::WindowRequestAccess::teardown(*this);
     }
     ~TestWindow() { finish(); }
 };
@@ -162,7 +162,9 @@ struct TestApp : App {
     void exit() override { ++exits; }
     void cleanup() override { ++cleanups; }
 };
-bool countsMatch(Window& win, std::size_t count) {
+bool countsMatch(Window& win, std::size_t) {
+    // Stable framework slots belong to the open Window, including when empty.
+    const std::size_t count = win.isOpen() ? 1 : 0;
     auto& e = win.events();
     return e.update.listenerCount() == count && e.draw.listenerCount() == count &&
         e.exit.listenerCount() == count && e.keyPressed.listenerCount() == count &&
@@ -195,7 +197,7 @@ void prepareReleasedTarget(Window& win) {
 // contain registration failure. Run the same allocation matrix through them.
 extern "C" void swapAtCallbackBoundary(Window* win, const std::shared_ptr<App>* next, int nth) noexcept {
     internal::WindowEntryScope scope(*win);
-    win->setApp(*next);
+    internal::WindowRequestAccess::attachCandidate(*win, *next);
     arm(nth);
 }
 void swaps(bool callbackBoundary = false) {
@@ -207,8 +209,8 @@ void swaps(bool callbackBoundary = false) {
     for (int nth = 0;; ++nth) {
         AttachmentDevice device;
         TestWindow win;
-        auto a = std::make_shared<TestApp>(), b = std::make_shared<TestApp>();
-        win.setApp(a); internal::applyPendingAppForTests(win);
+        auto a = internal::makeConstructedApp<TestApp>(), b = internal::makeConstructedApp<TestApp>();
+        internal::WindowRequestAccess::attachCandidate(win, a); internal::applyPendingAppForTests(win);
         prepareReleasedTarget(win);
         const int before = errors;
         bool threw = false;
@@ -216,7 +218,7 @@ void swaps(bool callbackBoundary = false) {
             std::shared_ptr<App> next = b;
             swapAtCallbackBoundary(&win, &next, nth);
         } else {
-            win.setApp(b);
+            internal::WindowRequestAccess::attachCandidate(win, b);
             arm(nth);
             try { internal::applyPendingAppForTests(win); }
             catch (const std::bad_alloc&) { threw = true; }
@@ -227,8 +229,8 @@ void swaps(bool callbackBoundary = false) {
         const bool bound = current != nullptr;
         check("swap: contained failure, complete binding set, at most one report",
               !threw && countsMatch(win, bound ? 1 : 0) &&
-              win.context().appEventListeners.size() == (bound ? 15u : 0u) &&
-              errors - before == (current == b ? 0 : 1), nth);
+              win.context().appEventListeners.size() == 15u &&
+              (errors - before <= 1 && (current == b || errors - before == 1)), nth);
         auto* prev = internal::currentWindowCtx();
         internal::currentWindowCtx() = &win.context();
         win.events().update.notify();
@@ -255,22 +257,22 @@ extern "C" void attachAtCallbackBoundary(Window* win) noexcept {
 bool attachment(int scenario, bool callback, int nth) {
     AttachmentDevice device;
     TestWindow win;
-    auto a = std::make_shared<TestApp>(), b = std::make_shared<TestApp>();
-    auto superseded = std::make_shared<TestApp>();
+    auto a = internal::makeConstructedApp<TestApp>(), b = internal::makeConstructedApp<TestApp>();
+    auto superseded = internal::makeConstructedApp<TestApp>();
     const bool hasOld = scenario != 1;
     auto& audio = AudioEngine::getInstance();
     const auto audioOutBefore = audio.audioOut.listenerCount();
     const auto audioInBefore = audio.audioIn.listenerCount();
     if (hasOld) {
-        win.setApp(a); internal::applyPendingAppForTests(win);
+        internal::WindowRequestAccess::attachCandidate(win, a); internal::applyPendingAppForTests(win);
         internal::attachAppAudio(*a);
     }
     prepareReleasedTarget(win);
-    if (scenario == 3) win.setApp(superseded);
-    win.setApp(scenario == 2 ? nullptr : b);
-    if (scenario == 4) win.setApp(a); // Cancel a pending swap with the current App.
+    if (scenario == 3) internal::WindowRequestAccess::attachCandidate(win, superseded);
+    internal::WindowRequestAccess::attachCandidate(win, scenario == 2 ? nullptr : b);
+    if (scenario == 4) internal::WindowRequestAccess::attachCandidate(win, superseded); // Last fresh candidate wins.
     auto old = win.getApp();
-    auto requested = scenario == 2 ? std::shared_ptr<TestApp>{} : (scenario == 4 ? a : b);
+    auto requested = scenario == 2 ? std::shared_ptr<TestApp>{} : (scenario == 4 ? superseded : b);
     auto* previous = internal::currentWindowCtx();
     const auto gpuContext = sg_isvalid() ? sgl_get_context() : sgl_context{};
     bool escaped = false;
@@ -287,11 +289,11 @@ bool attachment(int scenario, bool callback, int nth) {
           !escaped && (committed || current == old) &&
           win.context().rootNode.lock() == current &&
           countsMatch(win, current ? 1 : 0) &&
-          win.context().appEventListeners.size() == (current ? 15u : 0u) &&
+          win.context().appEventListeners.size() == 15u &&
           internal::attachedApps().size() == (current ? 1u : 0u) &&
           internal::attachedApps().count(a.get()) == (current == a ? 1u : 0u) &&
           internal::attachedApps().count(b.get()) == (current == b ? 1u : 0u) &&
-          internal::attachedApps().count(superseded.get()) == 0 &&
+          internal::attachedApps().count(superseded.get()) == (current == superseded ? 1u : 0u) &&
           !win.appRequested_ && !win.pendingApp_ &&
           a->exits == (hasOld && current != a ? 1 : 0) &&
           a->cleanups == (hasOld && current != a ? 1 : 0) &&
@@ -309,12 +311,12 @@ bool attachment(int scenario, bool callback, int nth) {
     internal::restoreWindowContext(previous);
     check("attachment: only attached App receives delivery",
           a->updates == (current == a ? 1 : 0) && b->updates == (current == b ? 1 : 0) &&
-          superseded->updates == 0, nth);
-    if (current != b) {
+          superseded->updates == (current == superseded ? 1 : 0), nth);
+    if (current != b && !internal::appOwner(*b)->token->load()) {
         TestWindow retry;
-        retry.setApp(b); internal::applyPendingAppForTests(retry);
-        check("attachment: unattached B is accepted by another window",
-              retry.getApp() == b && countsMatch(retry, 1) &&
+        internal::WindowRequestAccess::attachCandidate(retry, b); internal::applyPendingAppForTests(retry);
+        check("attachment: a cancelled candidate cannot attach elsewhere",
+              !retry.getApp() && !internal::appOwner(*b)->token->load() && countsMatch(retry, 0) &&
               retry.context().appEventListeners.size() == 15, nth);
         retry.finish();
     }
@@ -337,14 +339,14 @@ void attachments() {
         Window& win;
         std::shared_ptr<App> next;
         RequestOnExit(Window& w, std::shared_ptr<App> n) : win(w), next(std::move(n)) {}
-        void exit() override { TestApp::exit(); win.setApp(next); }
+        void exit() override { TestApp::exit(); internal::WindowRequestAccess::attachCandidate(win, next); }
     };
     AttachmentDevice device;
     TestWindow win;
-    auto b = std::make_shared<TestApp>(), c = std::make_shared<TestApp>();
-    auto a = std::make_shared<RequestOnExit>(win, c);
-    win.setApp(a); internal::applyPendingAppForTests(win);
-    win.setApp(b); internal::applyPendingAppForTests(win);
+    auto b = internal::makeConstructedApp<TestApp>(), c = internal::makeConstructedApp<TestApp>();
+    auto a = internal::makeConstructedApp<RequestOnExit>(win, c);
+    internal::WindowRequestAccess::attachCandidate(win, a); internal::applyPendingAppForTests(win);
+    internal::WindowRequestAccess::attachCandidate(win, b); internal::applyPendingAppForTests(win);
     check("attachment: outgoing exit can queue the following swap",
           win.getApp() == b && win.pendingApp_ == c && win.appRequested_);
     internal::applyPendingAppForTests(win);
@@ -453,197 +455,87 @@ void mcpOwnerReentry() {
     check("MCP owner: reentrant drain never invokes retired producers",
           ownedRuns == 0 && hostRuns == 1 && mi::deferredResponses().empty());
 }
+// Stable slots never rebuild on swap. Tombstones can survive a swap after an
+// OOM disconnect; cancellation still releases App captures at owner retirement.
 void mainBoundaryValidation() {
-    internal::createMainWindow(WindowSettings{});
-    auto* win = internal::mainWindow();
-    internal::WindowRequestAccess::bindForTests(*win, 101);
-    auto current = std::make_shared<TestApp>(), candidate = std::make_shared<TestApp>();
-    check("main boundary: initial shared attach", internal::attachMainApp(current));
+    TestWindow win;
+    win.setApp<TestApp>(); attachAtCallbackBoundary(&win);
+    auto old = std::static_pointer_cast<TestApp>(win.getApp());
+    auto slots = win.context().appEventListeners.size();
     int releases = 0;
-    retainUntilRebuild(win->events().update, [] {}, releases);
-    win->setApp(candidate);
-    TestWindow other;
-    other.setApp(candidate); attachAtCallbackBoundary(&other); other.finish();
-    internal::applyPendingAppForTests(*win);
-    check("main boundary: invalid candidate rejected before preparation", win->getApp() == current && releases == 0);
-    internal::destroyMainWindow();
+    retainUntilRebuild(win.events().update, [] {}, releases);
+    win.setApp<TestApp>(); attachAtCallbackBoundary(&win);
+    check("stable slots: swap does not reclaim or reorder unrelated listeners",
+          win.getApp() != old && releases == 0 && old->exits == 1 && old->cleanups == 1 &&
+          win.context().appEventListeners.size() == slots);
+    auto rebuild = win.events().update.listen([] {});
+    check("stable slots: explicit rebuild releases the tombstone once", releases == 1);
 }
-// The same preparation-recheck invariant with the runner-owned main Window.
 void mainReentrantAttachments() {
-    for (int action = 0; action < 2; ++action) {
-        internal::createMainWindow(WindowSettings{});
-        auto* win = internal::mainWindow();
-        internal::WindowRequestAccess::bindForTests(*win, 101);
-        auto current = std::make_shared<TestApp>(), candidate = std::make_shared<TestApp>();
-        check("main recheck: initial shared attach", internal::attachMainApp(current));
-        TestWindow other;
-        int releases = 0;
-        retainUntilRebuild(win->events().update, [&] {
-            other.setApp(candidate);
-            attachAtCallbackBoundary(&other);
-            check("main recheck: competitor attached during preparation", other.getApp() == candidate);
-            if (action == 1) other.finish();
-        }, releases);
-        win->setApp(candidate);
-        internal::applyPendingAppForTests(*win);
-        check("main recheck: candidate rejected after preparation", releases == 1 && win->getApp() == current &&
-              (action == 0 ? other.getApp() == candidate : internal::appRanCleanup(*candidate)));
-        other.finish();
-        internal::destroyMainWindow();
-        check("main recheck: exactly once teardown", current->exits == 1 && current->cleanups == 1 &&
-              candidate->exits == 1 && candidate->cleanups == 1 && internal::attachedApps().empty());
-    }
+    TestWindow win;
+    struct Nested : TestApp {
+        Window& target;
+        explicit Nested(Window& w) : target(w) {
+            target.setApp<TestApp>();
+            throw std::runtime_error("constructor rollback");
+        }
+    };
+    win.setApp<TestApp>(); attachAtCallbackBoundary(&win);
+    auto old = std::static_pointer_cast<TestApp>(win.getApp());
+    bool threw = false;
+    try { win.setApp<Nested>(win); } catch (const std::runtime_error&) { threw = true; }
+    check("constructor reentry: throwing outer leaves old published and nested request pending",
+          threw && win.getApp() == old && win.appRequested_);
+    attachAtCallbackBoundary(&win);
+    check("constructor reentry: nested candidate publishes once", win.getApp() != old && old->exits == 1);
 }
 void reentrantAttachments() {
-    if (tcTest::skipProxyAllocationSweep("reentrant window App attachment sweep")) return;
-    for (bool callback : {false, true}) for (int action = 0; action < 5; ++action) {
-        for (int nth = 0;; ++nth) {
-            AttachmentDevice device;
-            TestWindow win, other;
-            auto a = std::make_shared<TestApp>(), b = std::make_shared<TestApp>();
-            auto c = std::make_shared<TestApp>();
-            win.setApp(a); internal::applyPendingAppForTests(win);
-            int releases = 0;
-            retainUntilRebuild(win.events().update, [&] {
-                check("preparation reentry: existing committed App/root/registry",
-                      win.getApp() == a && win.context().rootNode.lock() == a &&
-                      internal::attachedApps().size() == 1 && internal::attachedApps().count(a.get()));
-                win.events().update.notify();
-                check("preparation reentry: A updates exactly once, B stays inert",
-                      a->updates == 1 && b->updates == 0);
-                if (action == 1 || action == 2) {
-                    other.setApp(b); attachAtCallbackBoundary(&other);
-                    check("preparation reentry: nested window owns B", other.getApp() == b);
-                    if (action == 2) other.finish(); // B is now unavailable by lifecycle.
-                } else if (action == 3) {
-                    win.setApp(c); attachAtCallbackBoundary(&win);
-                    check("preparation reentry: same-window request waits", win.getApp() == a && win.pendingApp_ == c);
-                } else if (action == 4) win.finish();
-                // Exhaust every remaining allocation after user reentry. The
-                // existing attachment matrices cover faults before reclamation.
-                arm(nth);
-            }, releases);
-            win.setApp(b);
-            if (callback) attachAtCallbackBoundary(&win);
-            else internal::applyPendingAppForTests(win);
-            const bool injected = fired;
-            disarm();
-            const auto current = win.getApp();
-            check("preparation reentry: one release, one A update", releases == 1 && a->updates == 1 && b->updates == 0, nth);
-            check("preparation reentry: authoritative candidate validation",
-                  (action == 1 || action == 2 ? current == a :
-                   action == 4 ? !current : current == a || current == b) &&
-                  win.context().rootNode.lock() == current && countsMatch(win, current ? 1 : 0) &&
-                  internal::attachedApps().size() == (current ? 1u : 0u) + (other.getApp() ? 1u : 0u) &&
-                  internal::attachedApps().count(a.get()) == (current == a ? 1u : 0u) &&
-                  internal::attachedApps().count(b.get()) == (current == b || other.getApp() == b ? 1u : 0u), nth);
-            if (action == 3) {
-                check("preparation reentry: later request survives", win.appRequested_ && win.pendingApp_ == c, nth);
-                attachAtCallbackBoundary(&win);
-                check("preparation reentry: later boundary commits C", win.getApp() == c && countsMatch(win, 1), nth);
-            }
-            win.finish();
-            check("preparation reentry: closing first preserves other registration",
-                  internal::attachedApps().size() == (other.getApp() ? 1u : 0u) &&
-                  (other.getApp() != b || (b->exits == 0 && b->cleanups == 0 && internal::attachedApps().count(b.get()))), nth);
-            other.finish();
-            const bool usedB = action == 1 || action == 2 || current == b;
-            check("preparation reentry: exactly-once teardown, empty registry",
-                  a->exits == 1 && a->cleanups == 1 && b->exits == (usedB ? 1 : 0) &&
-                  b->cleanups == (usedB ? 1 : 0) && internal::attachedApps().empty(), nth);
-            if (sg_isvalid()) internal::drainPendingGpuDestroys();
-            if (!injected) {
-                std::printf("reentrant attachment action=%d callback=%d gpu=%d: %d fired indices, terminal index passed\n",
-                            action, callback, AttachmentDevice::usesGpu, nth);
-                break;
-            }
-        }
-    }
-}
-
-void reentrantOtherPhases() {
-    for (bool callback : {false, true}) {
+    for (bool callback : {false, true}) for (bool closing : {false, true}) {
         AttachmentDevice device;
-        TestWindow win, other;
-        auto a = std::make_shared<TestApp>(), b = std::make_shared<TestApp>(), c = std::make_shared<TestApp>();
-        win.setApp(a); internal::applyPendingAppForTests(win);
-        int preparationReleases = 0, retirementReleases = 0;
-        // Last preparation step leaves a fresh tombstone in an already
-        // prepared event. Disconnecting the old bindings reclaims it at commit.
-        retainUntilRebuild(win.events().filesDropped, [&] {
-            retainUntilRebuild(win.events().update, [&] {
-                check("retirement reentry: new App/root/registry committed",
-                      win.getApp() == b && win.context().rootNode.lock() == b &&
-                      internal::attachedApps().size() == 1 && internal::attachedApps().count(b.get()));
-                win.events().update.notify();
-                check("retirement reentry: B updates once, retired A stays inert", b->updates == 1 && a->updates == 0);
-                other.setApp(a); attachAtCallbackBoundary(&other);
-                check("retirement reentry: outgoing A cannot attach elsewhere", !other.getApp() && !other.appRequested_);
-                win.setApp(c); attachAtCallbackBoundary(&win);
-                check("retirement reentry: later request stays pending", win.getApp() == b && win.pendingApp_ == c);
-            }, retirementReleases);
-        }, preparationReleases);
-        win.setApp(b);
-        if (callback) attachAtCallbackBoundary(&win);
-        else internal::applyPendingAppForTests(win);
-        check("retirement reentry: both captures released once", preparationReleases == 1 && retirementReleases == 1);
-        attachAtCallbackBoundary(&win);
-        check("retirement reentry: subsequent request commits", win.getApp() == c && a->exits == 1 && a->cleanups == 1 && b->exits == 1 && b->cleanups == 1);
-        win.finish(); other.finish();
-        check("retirement reentry: registry drained", internal::attachedApps().empty());
-    }
-    for (bool closing : {false, true}) {
-        struct ExitReentry : TestApp {
-            TestWindow& other;
-            explicit ExitReentry(TestWindow& w) : other(w) {}
+        TestWindow win, peer;
+        struct Reentrant : TestApp {
+            Window& win; Window& peer; bool closing;
+            Reentrant(Window& w, Window& p, bool c) : win(w), peer(p), closing(c) {}
             void exit() override {
                 TestApp::exit();
-                other.setApp(std::static_pointer_cast<App>(shared_from_this()));
-                attachAtCallbackBoundary(&other);
-                check("exit reentry: outgoing App cannot attach elsewhere", !other.getApp() && !other.appRequested_);
+                peer.setApp<TestApp>();
+                internal::applyPendingAppForTests(peer);
+                if (closing) win.closeRequested_ = true;
+                else win.setApp<TestApp>();
+                internal::applyPendingAppForTests(win);
+                check("exit reentry: outgoing App detached before nested work", !getWindow() && !win.getApp());
             }
         };
-        TestWindow win, other;
-        auto a = std::make_shared<ExitReentry>(other);
-        win.setApp(a); internal::applyPendingAppForTests(win);
-        if (closing) win.finish();
-        else { win.setApp(nullptr); attachAtCallbackBoundary(&win); }
-        check("exit reentry: one exit and cleanup", a->exits == 1 && a->cleanups == 1 && internal::attachedApps().empty());
+        win.setApp<Reentrant>(win, peer, closing); attachAtCallbackBoundary(&win);
+        auto old = std::static_pointer_cast<TestApp>(win.getApp());
+        win.setApp<TestApp>();
+        if (callback) attachAtCallbackBoundary(&win); else internal::applyPendingAppForTests(win);
+        check("exit reentry: peer survives and old ends once", peer.getApp() && old->exits == 1 && old->cleanups == 1);
+        check("exit reentry: close outranks replacement, otherwise later request survives",
+              closing ? !win.getApp() && !win.appRequested_ : win.getApp() && win.appRequested_);
+        if (!closing) { auto current = win.getApp(); attachAtCallbackBoundary(&win);
+            check("exit reentry: following boundary commits the later request", win.getApp() != current); }
+        win.finish();
+        check("exit reentry: closing one Window preserves peer attachment", peer.getApp() && internal::attachedApps().size() == 1);
+        peer.finish();
+        check("exit reentry: complete ledger retirement", internal::attachedApps().empty());
     }
-    {
-        TestWindow win;
-        auto a = std::make_shared<TestApp>(), b = std::make_shared<TestApp>(), c = std::make_shared<TestApp>();
-        struct PendingReentry : TestApp {
-            TestWindow& win;
-            std::shared_ptr<App> next;
-            PendingReentry(TestWindow& w, std::shared_ptr<App> n) : win(w), next(std::move(n)) {}
-            ~PendingReentry() noexcept override {
-                tcCoreTest::nativeBoundary([&] { win.setApp(next); attachAtCallbackBoundary(&win); });
-            }
-        };
-        win.setApp(a); internal::applyPendingAppForTests(win);
-        win.setApp(std::make_shared<PendingReentry>(win, c));
-        win.setApp(b); // Releases the previous request, which requests C.
-        attachAtCallbackBoundary(&win);
-        check("pending release reentry: later request wins", win.getApp() == c && b->exits == 0 && b->cleanups == 0);
-    }
-    {
-        TestWindow win;
-        auto a = std::make_shared<TestApp>(), b = std::make_shared<TestApp>(), c = std::make_shared<TestApp>();
-        win.setApp(a); internal::applyPendingAppForTests(win);
-        int reports = 0;
-        auto logger = getLogger().onLog.listen([&](LogEventArgs& e) {
-            if (e.level != LogLevel::Error || reports++) return;
-            check("logger reentry: failed preparation retains A", win.getApp() == a && win.context().rootNode.lock() == a);
-            win.events().update.notify();
-            win.setApp(c); attachAtCallbackBoundary(&win);
-            check("logger reentry: nested boundary retains A", win.getApp() == a && win.pendingApp_ == c);
-        });
-        win.setApp(b); arm(0); attachAtCallbackBoundary(&win); disarm();
-        check("logger reentry: new request survives failure report", reports == 1 && a->updates == 1 && win.pendingApp_ == c);
-        attachAtCallbackBoundary(&win);
-        check("logger reentry: subsequent boundary commits C", win.getApp() == c);
-    }
+}
+void reentrantOtherPhases() {
+    mainBoundaryValidation(); mainReentrantAttachments();
+    TestWindow win;
+    win.setApp<TestApp>(); attachAtCallbackBoundary(&win);
+    auto old = win.getApp();
+    int reports = 0;
+    auto logger = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level != LogLevel::Error || reports++) return;
+        check("logger reentry: failed ledger preparation retains old App", win.getApp() == old && win.context().rootNode.lock() == old);
+        win.setApp<TestApp>(); attachAtCallbackBoundary(&win);
+    });
+    win.setApp<TestApp>(); arm(0); attachAtCallbackBoundary(&win); disarm();
+    check("logger reentry: later request survives failed preparation", reports == 1 && win.getApp() == old && win.appRequested_);
+    attachAtCallbackBoundary(&win);
+    check("logger reentry: next boundary commits the fresh candidate", win.getApp() != old);
 }
 
 struct ClearExitApp : TestApp {
@@ -662,15 +554,15 @@ struct ClearExitApp : TestApp {
     }
     void cleanup() override {
         ++cleanups;
-        finished = win.context().appEventListeners.empty() && internal::appRanCleanup(*this);
+        finished = win.context().appEventListeners.size() == 15 && internal::appRanCleanup(*this);
     }
 };
 extern "C" void closeAtCallbackBoundary(TestWindow* win) noexcept { win->finish(); }
 
 int closeWithClear(int boundary, int nth, bool faultInsideExit = false) {
     auto win = std::make_shared<TestWindow>();
-    auto app = std::make_shared<ClearExitApp>(*win, faultInsideExit);
-    win->setApp(app); internal::applyPendingAppForTests(*win);
+    auto app = internal::makeConstructedApp<ClearExitApp>(*win, faultInsideExit);
+    internal::WindowRequestAccess::attachCandidate(*win, app); internal::applyPendingAppForTests(*win);
     int after = 0, ordinary = 0;
     auto mandatory = internal::FrameworkEventAccess::listen(win->events().exit, [&] {
         ++after;
@@ -722,7 +614,8 @@ void closes() {
 // paths reached only after an earlier failure. No STL allocation sizes/counts.
 struct CloseState {
     int exits = 0, cleanups = 0, after = 0, destroyed = 0;
-    bool detached = false, bindingsEmpty = false, screenshotsEmpty = false;
+    bool detached = false, slotsStable = false, screenshotsRetained = false;
+    size_t expectedScreenshots = 0;
     bool destructorContext = false;
 };
 void allocatingWork() {
@@ -746,8 +639,8 @@ struct SweepApp : App {
         ++state.cleanups;
         state.detached = internal::appRanCleanup(*this) && !win.getApp() &&
                          win.context().rootNode.expired() && internal::attachedApps().empty();
-        state.bindingsEmpty = win.context().appEventListeners.empty();
-        state.screenshotsEmpty = win.context().asyncScreenshots.pending.empty();
+        state.slotsStable = win.context().appEventListeners.size() == 15;
+        state.screenshotsRetained = win.context().asyncScreenshots.pending.size() == state.expectedScreenshots;
         allocatingWork();
         if (throwCleanup) throw 2;
     }
@@ -760,11 +653,11 @@ extern "C" void sweepCloseCallback(TestWindow* win) noexcept {
     tcCoreTest::nativeBoundary([&] { win->finish(); });
 }
 bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth) {
-    CloseState state;
+    CloseState state; state.expectedScreenshots = queued;
     auto win = std::make_unique<TestWindow>();
-    auto app = std::make_shared<SweepApp>(*win, state, clearExit, throwing);
+    auto app = internal::makeConstructedApp<SweepApp>(*win, state, clearExit, throwing);
     std::weak_ptr<App> lifetime = app;
-    win->setApp(app); internal::applyPendingAppForTests(*win);
+    internal::WindowRequestAccess::attachCandidate(*win, app); internal::applyPendingAppForTests(*win);
     app.reset(); // Teardown owns the last App reference; completions must not retain it.
     auto first = internal::FrameworkEventAccess::listen(win->events().exit, [&] {
         ++state.after;
@@ -777,7 +670,7 @@ bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth)
         internal::submitScreenshot(&win->context().asyncScreenshots, "pending-close-sweep.png");
     auto admitted = win->context().asyncScreenshots.admitted;
     // Exercise the allocating dropped-request diagnostic before exit as well.
-    win->setApp(std::make_shared<App>());
+    win->setApp<App>();
     int completions = 0;
     bool validCompletions = true;
     auto completed = onScreenshotSave().listen([&](ScreenshotSaveEventArgs& args) {
@@ -796,7 +689,7 @@ bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth)
     disarm();
     check("close sweep: exit, all protected hooks, detach, cleanup, lifetime and context",
           !escaped && state.exits == 1 && state.cleanups == 1 && state.after == 2 &&
-          state.destroyed == 1 && state.detached && state.bindingsEmpty && state.screenshotsEmpty &&
+          state.destroyed == 1 && state.detached && state.slotsStable && state.screenshotsRetained &&
           state.destructorContext && lifetime.expired() && internal::currentWindowCtx() == previous, nth);
     if (win) {
         win->finish();

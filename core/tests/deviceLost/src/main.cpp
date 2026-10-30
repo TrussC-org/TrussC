@@ -71,7 +71,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
 
     getMainThreadId();
-    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 239);
+    auto launch = internal::prepareLaunchWindow(WindowSettings{});
+    internal::WindowRequestAccess::bindForTests(*launch, 239);
 
     for (uint32_t hr : {0u, 0x087A0001u, 0x087A0007u, 0x887A000Au, hung, 0x80004005u}) {
         bool notified = false;
@@ -148,7 +149,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
           "explicit exit code reaches clean log");
     exitApp();
     check(internal::appExitCode() == 0, "no-argument exit remains success");
-    internal::destroyMainWindow();
+    internal::shutdownRuntime();
     std::printf("deviceLost headless: %d failures\n", failures);
     return failures ? 1 : 0;
 }

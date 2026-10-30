@@ -48,6 +48,7 @@ def body(text, marker, origin):
 native = read(include/'sokol_app_tc.h')
 shared = read(include/'util/sokol_window_native.h')
 common = read(Path(os.environ.get('TC_NATIVE_GATES_GLOBAL', root/'core/include/tc/app/tcGlobal.cpp')))
+runtime_source = read(root/'core/include/tc/app/tcWindowRuntime.cpp')
 trussc_header = read(Path(os.environ.get('TC_NATIVE_GATES_TRUSSC', root/'core/include/TrussC.h')))
 event_header = read(Path(os.environ.get('TC_NATIVE_GATES_EVENT', root/'core/include/tc/events/tcEvent.h')))
 window_header = read(Path(os.environ.get('TC_NATIVE_GATES_WINDOW', root/'core/include/tc/app/tcWindow.h')))
@@ -64,10 +65,8 @@ app_admission = prefix(window_header, 'inline void Window::applyPendingApp() {',
     '    applyingApp_ = true;', 'tcWindow.h', window_markers) + '    ++app_work;\n}\n'
 adapter_admission = prefix(mac_adapter,
     'std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {',
-    '    // While a busy session end is frozen,', 'tcWindowMac.mm', mac_markers)
+    '    auto win = std::make_shared<Window>();', 'tcWindowMac.mm', mac_markers)
 adapter_admission = adapter_admission.replace('internal::createSecondaryWindow', 'create_secondary') + '    ++adapter_creates; return nullptr;\n}\n'
-mac_markers.append('[](Window* w) {')
-window_deleter = body(mac_adapter, mac_markers[-1], 'tcWindowMac.mm')
 event_markers = []
 def event_extract(marker):
     event_markers.append(marker)
@@ -87,7 +86,8 @@ def common_extract(marker):
     return body(common, marker, 'tcGlobal.cpp') + '\n'
 
 session_flag = common_extract('bool& sessionEndExit() {')
-app_exit_notifications = common_extract('void notifyAppExitsAtSessionEnd() noexcept {')
+app_exit_notifications = body(runtime_source, 'void notifyAppExitsAtSessionEnd() noexcept {', 'tcWindowRuntime.cpp') + '\n'
+attachment_ledger = body(runtime_source, 'class AttachmentLedger {', 'tcWindowRuntime.cpp') + ';\n'
 # Compile the complete production cleanup body with the macOS branch enabled.
 # Record its service calls, leaving both its early return and std::exit intact.
 mac_cleanup = cleanup_extract('inline void _cleanup_cb_impl() {')
@@ -147,9 +147,9 @@ mac_tick_body = mac_extract('static void _sapp_tc_mac_tick_body(_sapp_tc_window_
     ('link.targetTimestamp', 'link->targetTimestamp'),))
 mac_tick_scope = mac_extract('struct _sapp_tc_mac_tick_scope {', (('= nil', '= 0'),)) + ';\n'
 mac_closed_now = mac_extract('static void _sapp_tc_mac_closed_now(', (
-    ('[NSApp terminate:nil]', 'terminate()'), ('[w->link invalidate]', 'invalidate_link(w->link)'),))
+    ('[w->link invalidate]', 'invalidate_link(w->link)'),))
 mac_deferred = mac_extract('static void _sapp_tc_mac_process_deferred(void) {', (
-    ('[nsw close]', 'close_window(nsw)'), ('[first->window performClose:nil]', 'perform_close(first->window)'),
+    ('[nsw close]', 'close_window(nsw)'),
     ('[NSApp terminate:nil]', 'terminate()'),))
 mac_schedule = mac_extract('static void _sapp_tc_mac_schedule_deferred(void) {', (
     ('^{', '[]{'),))
@@ -212,6 +212,8 @@ code = r'''
 #include <cstring>
 #include <initializer_list>
 #include <vector>
+#include <list>
+#include <utility>
 #include <functional>
 #include <new>
 #include <algorithm>
@@ -472,7 +474,9 @@ static bool _sapp_tc_mac_busy();
 void terminate() {
     ++quit;
     terminate_replayed_busy |= _sapp_tc_mac_busy();
-    application_should_terminate(nullptr);
+    if (application_should_terminate(nullptr)==NSTerminateNow) {
+        _sapp_tc.app.quit_requested = _sapp_tc.app.quit_ordered = false;
+    }
 }
 void invalidate_link(CADisplayLink*) {}
 ''' + extract('static void _sapp_tc_mac_forget_key(') + mac_stop + mac_closed_now + extract('static void _sapp_tc_mac_closed(') + mac_will_close + r'''
@@ -762,6 +766,8 @@ bool change_exit_registry=false;
 void mutate_exit_registry();
 void restoreWindowContext(void*);
 int& mainWindowContext() { static int context=0; return context; }
+struct Window;
+struct Owner { Window* window; bool ended=false; };
 struct Window {
     int id;
     ExitContext state;
@@ -779,6 +785,7 @@ struct Window {
             if (owner->id==1) { session_record('E'); appExitCode()=79;
                 if (change_exit_registry) mutate_exit_registry(); }
         }
+        Owner attribution{owner};
     } app{this};
     ExitContext& context() { return state; }
     Events& events() { return notifications; }
@@ -811,10 +818,21 @@ namespace headless { bool isActive() { return false; } }
 struct LogSink { template<class T> LogSink& operator<<(T&&) { return *this; } };
 LogSink logError(const char*) { return {}; }
 ''' + adapter_admission + r'''
-auto frozen_window_deleter = ''' + window_deleter + r''';
+
 Window main_owner{1,{200}}, first_peer{2,{160}}, last_peer{3,{120}}, late_peer{4,{100}};
 std::vector<Window*> exit_registry;
 int registry_reads=0;
+using App = Window::App;
+Owner* appOwner(App& app) { return &app.attribution; }
+''' + attachment_ledger + r'''
+class TestLedger : public AttachmentLedger {
+public:
+    void clear() { while (!empty()) { auto retired = extract(first()); } }
+};
+struct Runtime { TestLedger attachments, sessionAttachments; };
+Runtime& runtime() { static Runtime state; return state; }
+void shutdownRuntime() { session_record('C'); }
+
 ExitContext* initializedMainWindowContext=&main_owner.context();
 void mutate_exit_registry() { exit_registry={&main_owner,&late_peer}; }
 Window* mainWindow() { return &main_owner; }
@@ -823,6 +841,8 @@ void prepare_session_apps() {
     for (auto* w : {&main_owner,&first_peer,&last_peer,&late_peer}) w->prepare();
     // Creation order main, A, B: peers distinguish newest-first from creation order.
     exit_registry={&main_owner,&first_peer,&last_peer};
+    runtime().sessionAttachments.clear(); runtime().attachments.clear();
+    for (auto* w : exit_registry) runtime().attachments.push_back(std::shared_ptr<App>(&w->app, [](App*) {}));
     registry_reads=0; change_exit_registry=false;
     exit_apps.clear(); before_apps.clear(); app_listeners.clear(); after_apps.clear();
     exit_contexts_ok=true; gpu_restores=0;
@@ -870,7 +890,7 @@ void session_trussc_cleanup() {
         if (!exit_apps.empty() || registry_reads) session_record('!');
         return;
     }
-    if (exit_apps!=std::vector<int>{1,3,2} || before_apps!=exit_apps || app_listeners!=exit_apps ||
+    if (exit_apps!=std::vector<int>{3,2,1} || before_apps!=exit_apps || app_listeners!=exit_apps ||
         !after_apps.empty() || !exit_contexts_ok || gpu_restores) session_record('!');
 }
 void session_init_callback() { application_should_terminate(nullptr); session_record('R'); }
@@ -903,6 +923,8 @@ void session_child(Native& w,AEEventID reason,bool parameter,int context,int cle
         }
         if (context==5) {
             trussc::internal::initializedMainWindowContext=nullptr;
+            trussc::internal::runtime().attachments.clear();
+            trussc::internal::runtime().sessionAttachments.clear();
             _sapp_tc.app.main=nullptr; _sapp_tc.app.init_called=false;
             _sapp_tc.app.desc.init_cb=session_init_callback;
             _sapp_tc_mac_init_client();
@@ -1084,7 +1106,10 @@ void run() {
         reset(w,window,view,role); peer_setup(peer,peer_window,peer_view);
         callback_target=&w; probe_callbacks=true; probe_kind=0; throw_kind=throws?0:-1;
         peer.fallback_active=fallback; peer_window.occlusionState=fallback?0:1;
-        _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
+        bool escaped=false;
+        try { _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED); }
+        catch (...) { escaped=true; }
+        check("macOS peer modal callback exception stays contained", !escaped);
         check("macOS modal return balances global callback depth", _sapp_tc.callbacks_active==0 && w.callback_depth==0);
         probe_callbacks=false; throw_kind=-1;
         const auto frame=peer.frame_count;
@@ -1512,11 +1537,11 @@ void run() {
         prepare_session_apps();
         auto* previous=currentWindowCtx();
         notifyAppExitsAtSessionEnd();
-        check("macOS session every App exits once main first then newest-first", exit_apps==std::vector<int>{1,3,2});
+        check("macOS session every App exits once in reverse attachment order", exit_apps==std::vector<int>{3,2,1});
         check("macOS session selects each window context for all listeners", exit_contexts_ok);
         check("macOS session restores previous context without GPU restore", currentWindowCtx()==previous && gpu_restores==0);
-        check("macOS session delivers BeforeApp listeners main first then newest-first", before_apps==std::vector<int>{1,3,2});
-        check("macOS session delivers App listeners main first then newest-first", app_listeners==std::vector<int>{1,3,2});
+        check("macOS session delivers BeforeApp listeners in reverse attachment order", before_apps==std::vector<int>{3,2,1});
+        check("macOS session delivers App listeners in reverse attachment order", app_listeners==std::vector<int>{3,2,1});
         check("macOS session skips AfterApp framework hooks", after_apps.empty());
     }
     reset(w,window,view,true);
@@ -1544,28 +1569,13 @@ void run() {
         check("macOS frozen applyPendingApp returns before attachment", app_work==0 && pending_window.appRequested_ && !pending_window.applyingApp_);
         adapter_creates=0;
         check("macOS frozen createSecondaryWindow refuses", !create_secondary(WindowSettings{}) && adapter_creates==0);
-        int deleted=window_deletes;
-        auto* released=new Window{6,{60}};
-        { std::shared_ptr<Window> owner(released, frozen_window_deleter); }
-        check("macOS frozen Window deleter skips delete", window_deletes==deleted);
-        // Harness cleanup only, after thawing; the real path ends with _exit.
         sessionEndExit()=false;
-        if (window_deletes==deleted) delete released;
         pending_window.applyPendingApp();
         create_secondary(WindowSettings{});
         check("macOS thawed admission seams reach work", app_work==1 && adapter_creates==1);
-        deleted=window_deletes;
-        { std::shared_ptr<Window> owner(new Window{6,{60}}, frozen_window_deleter); }
-        check("macOS thawed Window deleter deletes", window_deletes==deleted+1);
-        // Shutdown owns the lifetime now: even a stale session flag must allow
-        // CPU destruction (the common Window destructor skips GPU/native work).
-        stopped=true; sessionEndExit()=true; deleted=window_deletes;
-        { std::shared_ptr<Window> owner(new Window{6,{60}}, frozen_window_deleter); }
-        check("macOS stopped Window deleter releases CPU object", window_deletes==deleted+1);
-        stopped=false; sessionEndExit()=false;
         prepare_session_apps(); change_exit_registry=true; sessionEndExit()=true;
         notifyAppExitsAtSessionEnd();
-        check("macOS session only notifies its single initial snapshot", registry_reads==1 && exit_apps==std::vector<int>{1,3,2} && before_apps==exit_apps && app_listeners==exit_apps);
+        check("macOS session only notifies its single initial snapshot", registry_reads==0 && exit_apps==std::vector<int>{3,2,1} && before_apps==exit_apps && app_listeners==exit_apps);
         change_exit_registry=false; sessionEndExit()=false;
     }
     summary("macOS round 4e freeze / single snapshot", before, count);
@@ -1971,7 +1981,7 @@ if '--mutations' in sys.argv[3:]:
         'mac-retain-skip': change('static void _sapp_tc_mac_swap(', 'w->skip_present = false;', ''),
         'mac-late-tick-guard': change(tick, 'if (w->desc.tick_cb)', 'w->in_tick = false;\n        if (w->desc.tick_cb)'),
         'mac-observe-outside-guard': change('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {',
-            '_sapp_tc_mac_observe(w, SAPP_EVENTTYPE_INVALID, true);', 'w->in_tick = false; _sapp_tc_mac_observe(w, SAPP_EVENTTYPE_INVALID, true); w->in_tick = true;'),
+            '_sapp_tc_mac_observe(w);', 'w->in_tick = false; _sapp_tc_mac_observe(w); w->in_tick = true;'),
         'mac-double-source': change('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {',
             'w->fallback_active == from_fallback', 'true'),
         'win-no-hidden-admission': change(win, admission, 'const bool admitted = true;'),
@@ -2157,33 +2167,11 @@ if '--mutations' in sys.argv[3:]:
     ):
         cleanup_mutants['mac-minimal-'+name] = (change(minimal, old, new, text=trussc_header), minimal_label)
     notifications = 'void notifyAppExitsAtSessionEnd() noexcept {'
-    every_app = 'macOS session every App exits once main first then newest-first'
+    every_app = 'macOS session every App exits once in reverse attachment order'
     own_context = 'macOS session selects each window context for all listeners'
     no_restore = 'macOS session restores previous context without GPU restore'
     no_after = 'macOS session skips AfterApp framework hooks'
     common_mutants = {}
-    for name, old, new, label in (
-        ('no-owner-guard-lost', 'if (!initializedMainWindowContext) return;', '', minimal_label),
-        ('main-exit-notification-lost', 'FrameworkEventAccess::notifySessionEnd(w->events().exit, steps);', '', minimal_label),
-        ('skips-main-first', 'if (main) order.push_back(main);', '', every_app),
-        ('skips-peers', 'if (*it != main) order.push_back(*it);', '', every_app),
-        ('duplicates-main', 'if (*it != main)', 'if (true)', every_app),
-        ('duplicates-peers', 'order.push_back(*it);', 'order.push_back(*it); order.push_back(*it);', every_app),
-        ('restores-creation-order', 'open.rbegin(); it != open.rend();', 'open.begin(); it != open.end();', every_app),
-        ('loses-own-context', 'currentWindowCtx() = &w->context();', '', own_context),
-        ('uses-main-context', 'currentWindowCtx() = &w->context();',
-            'currentWindowCtx() = &mainWindow()->context();', own_context),
-        ('loses-context-restore', 'currentWindowCtx() = previous;', '', no_restore),
-        ('restores-gpu', 'currentWindowCtx() = previous;', 'restoreWindowContext(previous); currentWindowCtx() = previous;', no_restore),
-        ('uses-full-shutdown', 'FrameworkEventAccess::notifySessionEnd(w->events().exit, steps);',
-            'FrameworkEventAccess::notifyShutdown(w->events().exit, steps);', no_after),
-        ('rereads-snapshot', 'for (Window* w : order) {', 'for (Window* w : order) { (void)openWindows();',
-            'macOS session only notifies its single initial snapshot'),
-        ('notifies-late-window', 'for (Window* w : order) {',
-            'for (Window* w : order) { if (w != mainWindow()) w = openWindows().back();',
-            'macOS session only notifies its single initial snapshot'),
-    ):
-        common_mutants['mac-session-'+name] = (change(notifications, old, new, text=common), label)
     freeze_mutants = {
         'event': ('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {',
             '_sapp_tc_mac_frozen() || ', '', 'macOS frozen event send is blocked'),
@@ -2214,18 +2202,13 @@ if '--mutations' in sys.argv[3:]:
     adapter_mutants = {
         'mac-frozen-secondary-creation': (change('std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {',
             'if (sessionEndExit()) {', 'if (false) {', text=mac_adapter), 'macOS frozen createSecondaryWindow refuses'),
-        'mac-frozen-window-deletion': (change('[](Window* w) {', 'if (!frameworkShutdown() && sessionEndExit()) return;', '', text=mac_adapter),
-            'macOS frozen Window deleter skips delete'),
     }
-    adapter_mutants['mac-stopped-window-deletion'] = (change('[](Window* w) {',
-        '!frameworkShutdown() && sessionEndExit()', 'sessionEndExit()', text=mac_adapter),
-        'macOS stopped Window deleter releases CPU object')
     event_mutants = {}
     for name, replacement, label in (
         ('skips-before-app', 'if (entry.priority != EventPriority::App) continue;',
-            'macOS session delivers BeforeApp listeners main first then newest-first'),
+            'macOS session delivers BeforeApp listeners in reverse attachment order'),
         ('skips-app', 'if (entry.priority >= EventPriority::App) continue;',
-            'macOS session delivers App listeners main first then newest-first'),
+            'macOS session delivers App listeners in reverse attachment order'),
         ('runs-after-app', '', no_after),
         ('runs-after-app-boundary', 'if (entry.priority > EventPriority::AfterApp) continue;', no_after),
         ('runs-above-after-app', 'if (entry.priority == EventPriority::AfterApp) continue;', no_after),
@@ -2235,8 +2218,6 @@ if '--mutations' in sys.argv[3:]:
     adapter_mutants['mac-thawed-secondary-creation'] = (change(
         'std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {',
         'if (sessionEndExit()) {', 'if (true) {', text=mac_adapter), 'macOS thawed admission seams reach work')
-    adapter_mutants['mac-thawed-window-deletion'] = (change('[](Window* w) {',
-        'if (!frameworkShutdown() && sessionEndExit()) return;', 'return;', text=mac_adapter), 'macOS thawed Window deleter deletes')
     targeted_mutants = dict(round3_mutants, **round4_mutants, **round4c_mutants,
                             **cleanup_mutants, **common_mutants, **event_mutants, **freeze_mutants, **window_mutants, **adapter_mutants)
     # Remove both redundant callback checks to expose close during an event

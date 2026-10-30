@@ -56,7 +56,7 @@ struct EnvGrantApp : App {
               mcp::getToolLevel() == (grantInSetup ? mcp::ToolLevel::Control : expectedEnvGrant));
         check("Control exposure follows the final app grant",
               bool(listed().count("tc_mouse_click")) == mcp::isDebuggerEnabled());
-        check("mainWindowTitle reflects build kind", mcp::internal::mainWindowTitle("MCP startup test") ==
+        check("mainWindowTitle reflects build kind", mcp::internal::markedWindowTitle("MCP startup test") ==
               (mcp::internal::isDevBuild() ? "MCP startup test [MCP]" : "MCP startup test"));
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
         if (sapp_x11_get_display()) {
@@ -70,10 +70,10 @@ struct EnvGrantApp : App {
                 return result;
             };
             check("initial native title reflects build kind", nativeTitle() ==
-                  mcp::internal::mainWindowTitle("MCP startup test"));
+                  mcp::internal::markedWindowTitle("MCP startup test"));
             setWindowTitle("Retitled");
             check("native main window retains dev marker after retitle", nativeTitle() ==
-                  mcp::internal::mainWindowTitle("Retitled"));
+                  mcp::internal::markedWindowTitle("Retitled"));
         }
 #endif
     }

@@ -8,8 +8,8 @@
 // — input, hover/scene, render-target routing, per-window frame count,
 // lighting/material/environment, and mutable shadow maps and slots —
 // lives in one WindowContext instead of scattered process globals.
-// currentWindowContext() == mainWindowContext() while only the main window is
-// running; each secondary native window owns its own context and the native
+// App-facing APIs resolve the App token or the sole open Window; each native
+// Window owns its own context and the native
 // layer switches internal::currentWindowCtx() while dispatching that window's
 // events and draw (see tcWindow.h / platform/*/tcWindow*).
 //
@@ -18,7 +18,7 @@
 // is included BEFORE the 3D headers (tcLight/tcMaterial/tcEnvironment), so the
 // lighting members below are held by forward-declared pointer / pointer-vector.
 //
-// Hot-reload note: mainWindowContext() is NON-inline (defined in tcGlobal.cpp)
+// Hot-reload note: windowApiContext() is NON-inline (defined in tcGlobal.cpp)
 // so Host and Guest share one instance — same pattern as events() and
 // getDefaultContext(). Each Window prewires the RenderContext / CoreEvents
 // pointers below to its owned state before exposing those references.
@@ -163,7 +163,7 @@ struct WindowContext {
     // them through lock() and keep the resulting shared_ptr for as long as
     // the node is used (e.g. across a handler that may remove it). A hot
     // reload host resets them before it unloads a guest
-    // (resetNodeRefsForUnload): releasing the last weak reference to a
+    // during its common ending: releasing the last weak reference to a
     // make_shared node runs code of the module that created it.
     std::weak_ptr<Node> rootNode;         // The running App (set by the framework)
     std::weak_ptr<Node> hoveredNode;      // Currently hovered node
@@ -198,7 +198,6 @@ struct WindowContext {
     }
     // Host metadata is initialized before callbacks for every bound Window.
     // Headless uses a separate non-window context. Drawable acquisition is lazy.
-    bool isMain = true;
     // Existing hidden-update behavior is constructor configuration until #997.
     bool pauseUpdatesWhenHidden = false;
     bool drawWhileHidden = true;
@@ -310,7 +309,7 @@ struct WindowContext {
     std::vector<EventListener> appEventListeners;
 };
 
-// Pipeline target for swapchain draws. The main window keeps sokol's defaults.
+// Pipeline format for an addressed Window swapchain.
 struct SwapchainTargetFormat {
     sg_pixel_format colorFormat;
     int sampleCount;
@@ -320,34 +319,35 @@ inline SwapchainTargetFormat swapchainTargetFormat(const WindowContext& ctx) {
     return {ctx.swapchainTarget.colorFormat, ctx.swapchainTarget.sampleCount};
 }
 
-// Main window context. Non-inline (tcGlobal.cpp) — Host/Guest share one.
-WindowContext& mainWindowContext();
+// Resolved API context. Non-inline (tcGlobal.cpp) so Host/Guest share it.
+WindowContext& windowApiContext();
+WindowContext* findWindowApiContext();
+class WindowContextScope {
+public:
+    explicit WindowContextScope(WindowContext*);
+    ~WindowContextScope() noexcept;
+    WindowContextScope(const WindowContextScope&) = delete;
+private:
+    WindowContext* previous_;
+    void* display_ = nullptr;
+    void* context_ = nullptr;
+    uintptr_t draw_ = 0, read_ = 0;
+    uint32_t drawWindow_ = 0, readWindow_ = 0, sgl_ = 0;
+};
 
 // Active context while dispatching a window's events / draw. Null = no Window. The
-// native window layer points it at a secondary window's context around that
-// window's tick. Non-inline (tcGlobal.cpp) like mainWindowContext(): a Windows
-// hot reload guest DLL would get its own copy of an inline variable, which
-// would stay null there and send the guest's drawing during a secondary
-// window's tick to the main window.
+// native layer selects the addressed Window around its tick. Non-inline
+// storage ensures hot-reload guests observe the same physical selection.
 WindowContext*& currentWindowCtx();
 
 // The context drawing and input calls act on. Also non-inline: it reads
 // currentWindowCtx(), and in a single-window app it costs the one out-of-line
-// call its inline version always made (to mainWindowContext()).
+// call its inline version always made (to windowApiContext()).
 WindowContext& currentWindowContext();
 
 // Restore both window dispatch and its current target's actual SGL context.
 // nullptr restores process context, without selecting any Window or surface.
 void restoreWindowContext(WindowContext* previous);
-
-// Drop the node references of every window context: hover, grab and
-// selection in the main window's context and each secondary window's, and
-// the main window's root. The hot reload host calls it before it unloads a
-// guest (tcHotReloadHost.h), so no weak reference to a node the guest created
-// outlives the guest. A secondary window's root stays: it names the App the
-// window itself holds (Window::setApp). Non-inline (tcGlobal.cpp): it walks
-// the window registry.
-void resetNodeRefsForUnload();
 
 // ---------------------------------------------------------------------------
 // Per-window frame timing. Non-inline (tcGlobal.cpp).

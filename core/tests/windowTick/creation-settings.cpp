@@ -203,8 +203,10 @@ namespace trussc {
 struct Window {
     void* native_=nullptr; std::string title_;
     struct { double width=0,height=0; bool pixel=false; } geometry;
+    void setQuitOnClose(bool) {}
     ~Window();
 };
+namespace mcp::internal { std::string markedWindowTitle(const std::string& title) { return title; } }
 namespace headless { bool isActive() { return false; } }
 struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
 Log logError(const char*) { return {}; } Log logWarning(const char*) { return {}; }
@@ -217,8 +219,10 @@ struct WindowRequestAccess {
     static Binding& binding(Window&) { static Binding b; return b; }
     static void unbind(Window&) {}
 };
-void windowTick(sapp_window,void*) {} void mainWindowEvent(const sapp_event*,sapp_window,void*) {}
+void windowTick(sapp_window,void*) {} void windowEvent(const sapp_event*,sapp_window,void*) {}
 void windowClosed(sapp_window,void*) {}
+bool allowWindowClose(sapp_window,void*) { return true; }
+void retainRuntimeWindow(const std::shared_ptr<Window>&) {}
 void refreshWindowMetadata(Window&) {}
 bool bindNativeWindow(uint32_t id,void*) {
     auto* w=_sapp_tc_lookup({id}); check("binding after dimensions before ready",w&&w->initialized&&!w->ready);

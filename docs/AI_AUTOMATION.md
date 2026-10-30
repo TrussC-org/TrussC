@@ -29,7 +29,7 @@ TRUSSC_MCP_PORT=8080 trusscli run --mcp
 
 `trusscli build --mcp` / `run --mcp` set the CMake option `TRUSSC_MCP_DEV=ON`.
 A build without `--mcp` explicitly sets it OFF. Dev builds grant `Control`,
-start the server automatically, show `[MCP]` in the window title, and log a
+start the server automatically, show `[MCP]` in every Window title, and log a
 startup warning. Code cannot lower the dev build's grant. Use ordinary builds
 for distributed apps and production installations.
 
@@ -103,8 +103,8 @@ runs on and logs a warning. sokol's own errors, warnings and panics go through t
 logger too, and lines logged from worker threads land whole. A window or GPU
 setup failure reaches the file where sokol reports it as text: on Linux (no X
 display; GLX setup, framebuffer config, GL context or window creation; EGL
-setup in GLES3 builds), Windows (D3D11 device, main window and swapchain),
-macOS (Metal device and main window), and iOS (Metal swapchain textures). On the web,
+setup in GLES3 builds), Windows (D3D11 device, window and swapchain),
+macOS (Metal device and window), and iOS (Metal swapchain textures). On the web,
 WebGPU instance, adapter and device request failures reach the logger (the
 browser console and `onLog`), not a file. On Android sokol's app messages
 (lifecycle, the app thread's startup) reach the logger too, but an EGL setup
@@ -146,20 +146,23 @@ your own tools:
   `tcx_<addon>_*`, but the prefix is free for app and third-party tools too.
 
 ### Inspection Tools (ReadOnly, except Public health)
+
+Window targets use positive IDs from `tc_list_windows`. Omit a target only when exactly one Window is open. Zero, invalid IDs and ambiguous omissions return an error with the available IDs. This rule also applies to input, node-tree and recording-start tools.
+
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` = index from `tc_list_windows` (default 0 = main). Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236). A secondary window is captured inside its own frame, so it must be visible: see [Hidden secondary windows](#hidden-secondary-windows) |
-| `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional `window` index from `tc_list_windows` (default 0 = main). A secondary window must be visible, as for `tc_get_screenshot` |
-| `tc_list_windows` | (none) | List open windows: `{windows: [{index, main, title, width, height, occluded}]}`. Index 0 = main (no `title`, no `occluded`), then the secondary windows. `occluded` is `true` while the OS reports that window hidden (`Window::isOccluded()`). Use the index as the `window` arg above |
+| `tc_get_screenshot` | `format`, `width`, `quality`, `window` (all optional) | Screenshot as an MCP image content block (rendered inline by MCP clients) plus a text metadata block. Defaults to full-resolution lossless PNG; pass `width` for a downscaled monitoring thumbnail (aspect preserved, never upscales, clamped 16-4096) and `format: "jpg"` (+ `quality`, default 75) for small payloads. `window` is a positive ID from `tc_list_windows`; omit it only when exactly one Window is open. Zero is invalid. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread (measured under continuous hammering at jpg/512: ~179 fps vs ~46 fps for the old synchronous encode; baseline ~236). Each Window is captured inside its own frame, so it must be visible: see [Hidden windows](#hidden-windows) |
+| `tc_save_screenshot` | `path`, `window`? | Save screenshot to file. Optional positive `window` ID from `tc_list_windows`; omission requires exactly one open Window. The target Window must be visible, as for `tc_get_screenshot` |
+| `tc_list_windows` | (none) | List open windows: `{windows: [{index, title, width, height, occluded}]}`. Every `index` is a positive native Window ID; there is no default Window or zero alias. `occluded` is `true` while the OS reports that window hidden (`Window::isOccluded()`). Use the index as the `window` arg above |
 | `tc_get_audio_state` | `devices` (optional, default `true`) | Audio engine diagnostics, read-only (never starts the engine): `running`; `output` `{device, default, backend, sampleRate, channels, requestedBufferSize, periodFrames, deviceSampleRate, deviceChannels, maxPolyphony}` (`requestedBufferSize` = `AudioSettings::bufferSize` as asked, 0 = backend default; `periodFrames` = the period the device granted); `input` `{running, device, sampleRate}` (the `getMicInput()` microphone); `playingSounds` `[{slot, path (resolved, the same string as `getPath()` and the logs, UTF-8), streaming, position, duration, volume, pan, speed, loop, paused, level}]` (`level` = the playback's output peak in the last callback); `master` `{peak, rms, clippedSamples}` (linear, measured before the clamp); `dropped` `{total, polyphonyLimit, streamLimit, decoderError, notRunning}` (plays refused since startup; `polyphonyLimit` = every playback slot busy); `thread` `{cpuUsage, cpuUsagePeak}` (fraction of audio-thread time: mix time / audio time over ~0.5 s of audio, 1.0 = a callback took as long as the audio it produced; `cpuUsagePeak` = the worst single callback, > 1 = a dropout); `devices` `{playback, capture}` lists. Meters and levels read 0 while the engine is not running. Pass `devices: false` to skip the enumeration when polling (it can be slow on some backends). Same numbers as `AudioEngine::getStats()` / `getPlayingSounds()` |
 | `tc_get_audio_spectrum` | `n`?, `window`?, `channels`?, `fmin`?, `fmax`?, `peaks`? | Full output FFT: `n` is a power of two from 64 up to the two-second ring length (default 1024); `window` is `hann` (default) or `blackmanharris`; `channels` is `mix` (default, all-channel average) or `each`; `peaks` defaults to 3. Returns `{sampleRate, n, binHz, framesWritten, channels: [{peak, rms, peaks: [{hz, dbfs}], spectrum}]}`. Peak/RMS are linear; spectrum is amplitude dBFS rounded to one decimal, with `null` for zero amplitude (−∞). All n/2+1 bins are returned unless inclusive `fmin`/`fmax` bounds select a range. Bin frequencies start at `ceil(fmin / binHz) * binHz`. Peaks use coherent-gain normalization and frequency interpolation. |
 | `tc_save_audio_capture` | `path`, `seconds`? | Save the last `seconds` (default 1.0), ending at the call, as float32 WAV. Returns `{path, sampleRate, channels, frames, framesWritten}`. Relative paths resolve through `getDataPath()`; missing directories are created; paths without a `.wav` extension get `.wav` appended with a log warning. Duration is capped by the two-second ring and available history. Use `AudioRecorder` for longer recordings. |
-| `tc_get_health` | (none) | Lightweight liveness snapshot: `{buildKind, toolLevel, fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, mainQueuePending, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `mainQueuePending` is how many `runOnMainThread` / `Deliver::Main` calls this frame's drain started with (each frame runs only those, so frames keep starting; a number that keeps growing means workers queue faster than the app runs them); `memoryBytes` is sokol-tracked allocations only |
+| `tc_get_health` | `window` (optional) | Positive Window IDs apply here too; omission requires a sole open Window. Health reads counters even while that Window is hidden. A headless App may omit the target for virtual counters; an explicit ID is rejected because it has no Window. Lightweight liveness snapshot: `{buildKind, toolLevel, fps, frameCount, uptimeSec, width, height, version, pid, rssBytes, mainQueuePending, memoryBytes}`. Reads counters only (no GPU state), so it is cheap enough for a supervisor to poll. `pid` lets a supervisor confirm the reply comes from *its* child (port collisions); `rssBytes` is whole-process resident memory (the leak-hunting number); `mainQueuePending` is how many `runOnMainThread` / `Deliver::Main` calls this frame's drain started with (each frame runs only those, so frames keep starting; a number that keeps growing means workers queue faster than the app runs them); `memoryBytes` is sokol-tracked allocations only |
 | `tc_get_status` | (none) | App-published ops status (see [Publishing custom ops status](#publishing-custom-ops-status)): `{values: [{name, value, mode}], images: [names]}`. `mode` is `"status"` (show as-is) or `"graph"` (plot over time). Empty when the app publishes nothing |
 | `tc_get_status_image` | `name`, `width`, `quality` (last two optional) | Fetch an app-published image registered via `mcp::statusImage()`, downscaled + JPEG-encoded exactly like `tc_get_screenshot` (pixel grab on the main loop, encode on the HTTP worker — no frame stutter) |
 | `tc_get_alerts` | - | Drain operator alerts raised via `mcp::alert()` — returns and clears the pending list, so exactly one consumer receives each alert |
-| `tc_get_node_tree` | `id`, `depth` (both optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as Euler radians, derived rotationDeg as degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
-| `tc_get_selected_node` | (none) | The currently selected node (same shape, no children), or `null` |
+| `tc_get_node_tree` | `window`, `id`, `depth` (all optional) | Dump the node tree (or a subtree) as JSON: per node `{type, name, id, members, mods, children}`. Members are the `TC_REFLECT`ed values — rotation as Euler radians, derived rotationDeg as degrees, colors as `[r,g,b,a]` floats 0-1, Vec3 as `[x,y,z]`, enums as their label string. `mods` lists each attached Mod as `{type, members}`. `depth` limits recursion (~270 bytes/node — on large scenes, explore with `depth` + drill into subtrees by `id`; cut-off nodes carry a `childCount`) |
+| `tc_get_selected_node` | `window` (optional) | The currently selected node (same shape, no children), or `null` |
 
 Both audio tools read the same per-channel, post-clamp output history and never
 start the engine. `framesWritten` identifies the end of the snapshot and counts
@@ -171,9 +174,9 @@ callbacks prevent a coherent snapshot, the tools return an error to retry. Captu
 not wait for new audio. The existing `getAudioAnalysisBuffer()` reads this same
 ring while keeping its 4096-sample limit and L/R mono average.
 
-#### Hidden secondary windows
+#### Hidden windows
 
-A secondary window renders only while it is visible, and the screenshot tools
+Every Window defaults to pausing updates and skipping draws while hidden, and the screenshot tools
 capture it inside its own frame. So:
 
 - While the OS reports the window hidden, `tc_list_windows` shows
@@ -193,16 +196,15 @@ capture it inside its own frame. So:
   signal for how it is hidden, or `Window::setFps()` throttles it very low),
   it fails with `the window rendered no frame within 5 s (minimized, hidden
   or closed?)`.
-- The main window (index 0) keeps running while hidden, so none of this
-  applies to it.
+- These rules apply to every Window. App code may opt into hidden updates or drawing through the Window context; this does not change the positive-ID targeting rule.
 
-### Recording Tools (Control)
+### Recording Tools (ReadOnly)
 
-The video counterpart of `tc_save_screenshot` — capture the window to a video file with the native encoder (no ffmpeg). Registered independently of exposure; these require Control because they start/stop a recording.
+The video counterpart of `tc_save_screenshot` — capture the window to a video file with the native encoder (no ffmpeg). Registered independently of exposure at ReadOnly level, like screenshot capture. Starting records an explicitly resolved Window; stopping operates the process recorder even after that Window closes.
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `tc_start_recording` | `path`, `duration`, `fps`, `codec` (all optional) | Start recording the window. Omit `path` for a timestamped `recording-<timestamp>.mp4` (`.mov` for ProRes) in the data dir; relative paths resolve under the data dir. `duration` (seconds) makes a fixed-length clip that **auto-stops and finalizes itself** at exactly that length (omit or `0` = unlimited). `fps` is the target frame rate (default 60; ProMotion frames are decimated to it). `codec` is `h264` (default) / `hevc` / `prores422` / `prores4444`. Returns `{status, path (resolved), fps, codec}` plus `duration` when a fixed length was set |
+| `tc_start_recording` | `window`, `path`, `duration`, `fps`, `codec` (all optional) | Start recording the addressed Window. `window` is a positive ID; omission requires exactly one open Window. Omit `path` for a timestamped `recording-<timestamp>.mp4` (`.mov` for ProRes) in the data dir; relative paths resolve under the data dir. `duration` (seconds) makes a fixed-length clip that **auto-stops and finalizes itself** at exactly that length (omit or `0` = unlimited). `fps` is the target frame rate (default 60; ProMotion frames are decimated to it). `codec` is `h264` (default) / `hevc` / `prores422` / `prores4444`. Returns `{status, path (resolved), fps, codec}` plus `duration` when a fixed length was set |
 | `tc_stop_recording` | (none) | Stop the current recording and finalize the file. A manual stop **always wins** over a pending fixed `duration` — it finalizes immediately at the current length. Returns `{status, recording:false, path, frames, length}` (`length` = measured output seconds). Finalization or an earlier append failure returns `status:"error"` and `message`. An idle recorder retains any automatic-stop failure; otherwise it returns `{status:"ok", recording:false, message:"not recording"}` |
 
 ### Control Tools (Control)
@@ -268,10 +270,12 @@ The grant can be set before or after `imguiSetup()`.
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
-| `tcx_imgui_get_widgets` | `window`, `windowId` (optional) | Widgets drawn in the last frame, in every window running imgui: label, `window` (ImGui panel), `windowId` (OS window, `tc_list_windows` numbering), type, rect, and for value widgets `widget` / `valueType` / `value` — floats at full precision, N-component widgets (`DragFloat3`) as one array under their own label, colors as the variable holds them (0-1, `colorSpace` `rgb`/`hsv`), `SliderAngle` in radians, a `RadioButton(int*)` with `buttonValue` (the value that button sets). `touched` = changed by hand |
+| `tcx_imgui_get_widgets` | `window`, `windowId` (optional) | Widgets drawn in the last frame, in every window running imgui: label, `window` (ImGui panel), `windowId` (OS Window, positive IDs from `tc_list_windows`), type, rect, and for value widgets `widget` / `valueType` / `value` — floats at full precision, N-component widgets (`DragFloat3`) as one array under their own label, colors as the variable holds them (0-1, `colorSpace` `rgb`/`hsv`), `SliderAngle` in radians, a `RadioButton(int*)` with `buttonValue` (the value that button sets). `touched` = changed by hand |
 | `tcx_imgui_get_touched` | (none) | What the user changed by hand since startup or the last reset, with current values. `widgets`: the ImGui value widgets changed — sliders, drags, inputs, colors, combos, text, `Checkbox`, `MenuItem` / `Selectable` with a `bool*`, `RadioButton` with an `int*`, `ListBox` (under its own label, with the index) — each with the value of its variable (not drawn right now = last known value, `visible: false`). Items that change no variable are not recorded: buttons, menu headers, action menu items, `MenuItem(label, shortcut, bool selected)` even as a toggle, plain `Selectable`s, `RadioButton(label, bool)`; `inspector`: tcxNodeInspector edits per node (node type / name / id, mod, member path, value in the `tc_get_node_tree` encoding). Code assignments, `tc_set_node_members` writes and values set by `tcx_imgui_input` on a value widget are not recorded |
 | `tcx_imgui_reset_touched` | (none) | Clear that record (both lists). No value changes |
 | `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox` | `label` + tool args, `window` / `windowId` (optional) | Drive a widget by label. `tcx_imgui_input` is for widgets that hold a value (and text fields); buttons and other items without a variable are pressed with `tcx_imgui_click`. `tcx_imgui_input` on a value widget takes the value as JSON in the units `tcx_imgui_get_widgets` reports (`[x, y, z]`, colors 0-1, radians, `true`, an index; for a `RadioButton(int*)` target the button whose value you want: another button's value is refused), writes it into the variable on the next frame (the widget returns true in that frame, so `if (DragFloat(...)) apply();` code runs, unless the variable already held the value) and reads it back, then checks it again in the frame after; text fields are typed into, items with no variable (buttons, `RadioButton(label, bool)`) are refused with a pointer to `tcx_imgui_click`. A composite widget (`DragFloat3`, `ColorEdit4`) cannot be clicked |
+
+`windowId` selects a positive native Window ID; zero is invalid. Widget actions may omit it only when exactly one Window is open. Read-only widget listing may list all Windows. Invalid or ambiguous targets include the available IDs in their error.
 
 `tcx_imgui_input` takes the form reported by `tcx_imgui_get_widgets` and
 `tcx_imgui_get_touched`: the variable's form. For `SliderAngle`, send radians

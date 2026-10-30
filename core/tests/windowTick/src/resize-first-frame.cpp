@@ -59,7 +59,7 @@ struct Main : tc::App {
         check("secondary created", bool(secondary));
         if (!secondary) { tc::exitApp(1); return; }
         secondary->setClearColor(tc::Color(1, 0, 0, 1));
-        secondary->setApp(std::make_shared<Secondary>());
+        secondary->setApp<Secondary>();
         const auto handle = tc::internal::WindowRequestAccess::binding(*secondary).handle;
         auto* display = (Display*)sapp_x11_get_display();
         const auto native = (::Window)(uintptr_t)sapp_window_x11_get_window(handle);

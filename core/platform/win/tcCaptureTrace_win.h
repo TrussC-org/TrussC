@@ -5,7 +5,8 @@
 // identities for the callback and must not be dereferenced or retained.
 namespace trussc::internal {
 struct D3D11CaptureTrace {
-    bool isMain = false, succeeded = false;
+    unsigned windowId = 0;
+    bool succeeded = false;
     int fbWidth = 0, fbHeight = 0;
     int lastWidth = 0, lastHeight = 0, lastFormat = 0, lastSamples = 0;
     const void* lastRenderView = nullptr;

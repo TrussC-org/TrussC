@@ -45,6 +45,7 @@
 #include "../events/tcCoreEvents.h"
 
 namespace trussc {
+namespace internal { void dispatchConsoleEvent(ConsoleEventArgs&); }
 namespace console {
 
 // ---------------------------------------------------------------------------
@@ -293,7 +294,7 @@ inline void processQueue() {
 
     ConsoleEventArgs args;
     while (internal::getChannel().tryReceive(args)) {
-        events().console.notify(args);
+        trussc::internal::dispatchConsoleEvent(args);
     }
 #endif
 }

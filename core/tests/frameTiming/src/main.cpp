@@ -133,7 +133,7 @@ static void testElapsedClock() {
     checkf("reset: counts on from the reset", later >= 0.03 && later < 0.5, later);
 
     // getFrameElapsedTime(): one sample per frame, constant within it.
-    auto& ctx = internal::mainWindowContext();
+    auto& ctx = internal::windowApiContext();
     internal::sampleFrameTime(ctx);
     double fa = getFrameElapsedTime();
     sleepMs(20);
@@ -251,7 +251,7 @@ static int runFrames(Clk::time_point& t, int frames, double step,
 
 static void testMainLoopUpdates() {
     schedulerUpdate = events().update.listen(countingUpdate);
-    auto& ctx = internal::mainWindowContext();
+    auto& ctx = internal::windowApiContext();
 
     // --- dt per step: setIndependentFps(120, VSYNC) on a 60 Hz display ---
     setIndependentFps(120, VSYNC);
@@ -573,8 +573,8 @@ struct TimerNode : Node {
 static Clk::time_point g_simNow;
 static void simUpdate(TimerNode& n, double dt, double advance = -1.0,
                       const function<void()>& during = nullptr) {
-    internal::mainWindowContext().updateCount++;
-    auto& ctx = internal::mainWindowContext();
+    internal::windowApiContext().updateCount++;
+    auto& ctx = internal::windowApiContext();
     ctx.updateDeltaTime = dt;
     g_simNow += secs(advance >= 0.0 ? advance : dt);
     ctx.updateTime = g_simNow;
@@ -733,7 +733,7 @@ static void testNodeTimers() {
         resetElapsedTimeCounter();
         check("timers: resetElapsedTimeCounter() does not delay a timer", fired == 1);
     }
-    internal::mainWindowContext().updateDeltaTime = 0.0;
+    internal::windowApiContext().updateDeltaTime = 0.0;
 }
 
 // Node timers through the real main-loop wiring (runIndependentUpdates sets
@@ -741,7 +741,7 @@ static void testNodeTimers() {
 static TimerNode* g_loopNode = nullptr;
 static function<void()> g_loopDuring;
 static void timerLoopUpdate() {
-    internal::mainWindowContext().updateCount++;           // as the app's update does
+    internal::windowApiContext().updateCount++;           // as the app's update does
     ++g_updates;
     if (g_loopDuring) g_loopDuring();
     g_loopNode->step();
@@ -851,7 +851,7 @@ static void testNodeTimersInLoop() {
     schedulerUpdate.disconnect();
     g_loopNode = nullptr;
     setFps(VSYNC);
-    internal::mainWindowContext().updateDeltaTime = 0.0;
+    internal::windowApiContext().updateDeltaTime = 0.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -866,7 +866,7 @@ static void testNodeTimersInLoop() {
 // runner can't fail it.
 static shared_ptr<App> g_treeRoot;
 static void treeUpdate() {
-    internal::mainWindowContext().updateCount++;           // as the app's update does
+    internal::windowApiContext().updateCount++;           // as the app's update does
     ++g_updates;
     g_treeRoot->handleUpdate(0, 0);
 }
@@ -933,7 +933,7 @@ static void testTimersCountFromCreation() {
     // A long setup(): Node::setup() (and App::setup()) runs inside the first
     // update, so the next update's dt covers it.
     {
-        g_treeRoot = make_shared<App>();
+        g_treeRoot = internal::makeConstructedApp<App>();
         auto n = make_shared<LongSetupNode>();
         g_treeRoot->addChild(n);
         schedulerUpdate = events().update.listen(treeUpdate);
@@ -1023,7 +1023,7 @@ static void testModeSwitchMeasuredDelta() {
     setIndependentFps(EVENT_DRIVEN, VSYNC);
     internal::runIndependentUpdates(Clk::now());   // no update runs
     // As if that last update had been an hour ago.
-    internal::mainWindowContext().mainUpdateCallTime -= secs(3600.0);
+    internal::windowApiContext().mainUpdateCallTime -= secs(3600.0);
     setFps(VSYNC);
     internal::runSyncedUpdate();
     const double dt = getDeltaTime();
@@ -1040,7 +1040,7 @@ static void testModeSwitchMeasuredDelta() {
     // next update's dt covers the load, and callAfter(0.2) made after the
     // switch fires on it.
     {
-        g_treeRoot = make_shared<App>();
+        g_treeRoot = internal::makeConstructedApp<App>();
         auto n = make_shared<SwitchingSetupNode>();
         g_treeRoot->addChild(n);
         schedulerUpdate = events().update.listen(treeUpdate);
@@ -1093,7 +1093,7 @@ static void testModeSwitchMeasuredDelta() {
     // timer, as before the switch existed.
     {
         setFps(VSYNC);
-        g_treeRoot = make_shared<App>();
+        g_treeRoot = internal::makeConstructedApp<App>();
         auto n = make_shared<LoadThenSwitchSetupNode>();
         g_treeRoot->addChild(n);
         schedulerUpdate = events().update.listen(treeUpdate);
@@ -1211,7 +1211,7 @@ static void testModeSwitchMeasuredDelta() {
     // setFps(60); }. The update right after it doesn't fire the timer.
     {
         setIndependentFps(60, VSYNC);
-        g_treeRoot = make_shared<App>();
+        g_treeRoot = internal::makeConstructedApp<App>();
         auto n = make_shared<StepSetupNode>();
         g_treeRoot->addChild(n);
         schedulerUpdate = events().update.listen(treeUpdate);
@@ -1231,7 +1231,7 @@ static void testModeSwitchMeasuredDelta() {
     // estimate.
     {
         setFps(VSYNC);
-        internal::mainWindowContext().mainUpdateCallTimeInitialized = false;   // no update ran yet
+        internal::windowApiContext().mainUpdateCallTimeInitialized = false;   // no update ran yet
         setFps(60);
         sleepMs(50);
         internal::runSyncedUpdate();
@@ -1263,8 +1263,8 @@ struct MovingNode : Node {
 };
 
 static void testReparentChargesOnce() {
-    auto& ctx = internal::mainWindowContext();
-    auto root = make_shared<App>();
+    auto& ctx = internal::windowApiContext();
+    auto root = internal::makeConstructedApp<App>();
     auto p1 = make_shared<Node>(), p2 = make_shared<Node>();
     auto n = make_shared<MovingNode>();
     root->addChild(p1);
@@ -1274,7 +1274,7 @@ static void testReparentChargesOnce() {
     const double dt = 1.0 / 60.0;
     // One simulated measured-dt update of the whole tree (as simUpdate does).
     auto update = [&] {
-        internal::mainWindowContext().updateCount++;
+        internal::windowApiContext().updateCount++;
         ctx.updateDeltaTime = dt;
         g_simNow += secs(dt);
         ctx.updateTime = g_simNow;
@@ -1644,9 +1644,10 @@ static void testHeadlessLoop() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    auto fixture = std::make_unique<tcCoreTest::WindowFixture>();
     // These scheduler probes explicitly exercise the main receiver, outside
     // native callbacks. Process context no longer implicitly selects it.
-    internal::currentWindowCtx() = &internal::mainWindowContext();
+    internal::currentWindowCtx() = &internal::windowApiContext();
     // Must run first: proves the clock origin predates the first read.
     testElapsedClock();
 
@@ -1668,6 +1669,7 @@ TC_CORE_TEST_MAIN() {
     testReparentChargesOnce();
     testRecorderPacing();
     testHealthUptime();
+    fixture.reset();
     testHeadlessLoop();
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");

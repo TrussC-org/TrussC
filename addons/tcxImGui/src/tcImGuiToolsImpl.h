@@ -26,34 +26,38 @@ void addTouchedSource(const std::string& key,
     touchedSources().push_back({key, std::move(get), std::move(reset)});
 }
 
-int windowIdFor(ImGuiContext* ctx) {
+int64_t windowIdFor(ImGuiContext* ctx) {
     auto& contexts = detail::contexts();
     auto it = contexts.find(ctx);
     if (it == contexts.end() || !it->second.owner) return -1;
     const void* owner = it->second.owner;
-    if (owner == &tc::internal::mainWindowContext()) return 0;
-    int i = 1;
-    for (tc::Window* w : tc::internal::openWindows()) {
-        if (w->context().isMain) continue;
-        if (owner == static_cast<const void*>(&w->context())) return i;
-        ++i;
-    }
+    for (tc::Window* w : tc::internal::openWindows())
+        if (owner == static_cast<const void*>(&w->context()))
+            return tc::internal::WindowRequestAccess::creationId(*w);
     return -1;
 }
 
-std::vector<std::pair<int, ImGuiContext*>> orderedContexts() {
-    std::vector<std::pair<int, ImGuiContext*>> out;
+std::vector<std::pair<int64_t, ImGuiContext*>> orderedContexts() {
+    std::vector<std::pair<int64_t, ImGuiContext*>> out;
     for (auto& [ctx, cs] : detail::contexts()) out.emplace_back(windowIdFor(ctx), ctx);
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
-        return a.first != b.first ? (unsigned)a.first < (unsigned)b.first : a.second < b.second;
+        return a.first != b.first ? uint64_t(a.first) < uint64_t(b.first) : a.second < b.second;
     });
     return out;
 }
 
 WidgetRef findWidget(const std::string& label,
                             const std::string& window,
-                            int windowId,
+                            int64_t windowId,
                             std::string& outError) {
+    if (windowId < 0) {
+        auto windows = tc::internal::openWindows();
+        if (windows.size() != 1) {
+            outError = "Specify a positive windowId from tc_list_windows; omission requires exactly one open Window";
+            return {};
+        }
+        windowId = tc::internal::WindowRequestAccess::creationId(*windows.front());
+    }
     std::vector<WidgetRef> found;
     for (auto& [wid, ctx] : orderedContexts()) {
         if (windowId >= 0 && wid != windowId) continue;
@@ -293,7 +297,7 @@ nlohmann::json touchedWidgetsJson() {
     nlohmann::json arr = nlohmann::json::array();
     for (auto& t : detail::touched()) {
         nlohmann::json e = {{"label", t.label}, {"window", t.windowName}};
-        int wid = t.ctx ? windowIdFor(t.ctx) : -1;
+        int64_t wid = t.ctx ? windowIdFor(t.ctx) : -1;
         e["windowId"] = wid >= 0 ? nlohmann::json(wid) : nlohmann::json(nullptr);
         addValueFields(e, t.value);
         e["visible"] = drawnLastFrame(t);
@@ -395,7 +399,7 @@ nlohmann::json injectionResult(ImGuiContext* ctx, const std::shared_ptr<PendingV
                                       const std::string& label, const std::string& window) {
     using State = PendingValue::State;
     nlohmann::json r = {{"label", label}, {"window", window}};
-    int wid = windowIdFor(ctx);
+    int64_t wid = windowIdFor(ctx);
     r["windowId"] = wid >= 0 ? nlohmann::json(wid) : nlohmann::json(nullptr);
     auto error = [&](const std::string& message) {
         r["status"] = "error";
@@ -467,11 +471,16 @@ void registerImGuiTools() {
     tc::mcp::tool("tcx_imgui_get_widgets", "List the ImGui widgets drawn in the last frame of every window running imgui: label, window (ImGui panel), windowId (OS window as tc_list_windows numbers it), type, rect, and for value widgets the current value (widget, valueType, value — floats at full precision; colors as the variable holds them, 0-1, with colorSpace; SliderAngle in radians; RadioButton(int*): value = the group's variable, buttonValue = the value this button sets). touched = changed by hand since startup / tcx_imgui_reset_touched")
         .level(tc::mcp::ToolLevel::ReadOnly)
         .arg<std::string>("window", "Filter by ImGui window (panel) name (optional, omit for all)", false)
-        .arg<int>("windowId", "Filter by OS window id from tc_list_windows (optional)", false)
+        .arg<int64_t>("windowId", "Filter by OS window id from tc_list_windows (optional)", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
             std::string window = args.value("window", "");
-            int windowId = (args.contains("windowId") && args.at("windowId").is_number())
-                         ? args.at("windowId").get<int>() : -1;
+            int64_t windowId = (args.contains("windowId") && args.at("windowId").is_number())
+                         ? args.at("windowId").get<int64_t>() : -1;
+            if (args.contains("windowId") && windowId <= 0) {
+                json ids = json::array();
+                for (auto* w : tc::internal::openWindows()) ids.push_back(tc::internal::WindowRequestAccess::creationId(*w));
+                return json{{"status", "error"}, {"message", "windowId must be a positive ID from tc_list_windows"}, {"windows", std::move(ids)}};
+            }
             json widgets = json::array();
 
             for (auto& [wid, ctx] : orderedContexts()) {
@@ -544,17 +553,24 @@ void registerImGuiTools() {
         .level(tc::mcp::ToolLevel::Control)
         .arg<std::string>("label", "Widget label text")
         .arg<std::string>("window", "ImGui window (panel) name (optional, required if label is ambiguous)", false)
-        .arg<int>("windowId", "OS window id from tc_list_windows (optional, when the same panel exists in several OS windows)", false)
+        .arg<int64_t>("windowId", "Positive native Window ID from tc_list_windows; omission requires exactly one open Window", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
             std::string label = args.at("label").get<std::string>();
             std::string window = args.value("window", "");
-            int windowId = (args.contains("windowId") && args.at("windowId").is_number())
-                         ? args.at("windowId").get<int>() : -1;
+            int64_t windowId = (args.contains("windowId") && args.at("windowId").is_number())
+                         ? args.at("windowId").get<int64_t>() : -1;
+            if (args.contains("windowId") && windowId <= 0) {
+                json ids = json::array();
+                for (auto* w : tc::internal::openWindows()) ids.push_back(tc::internal::WindowRequestAccess::creationId(*w));
+                return json{{"status", "error"}, {"message", "windowId must be a positive ID from tc_list_windows"}, {"windows", std::move(ids)}};
+            }
             std::string error;
 
             WidgetRef ref = findWidget(label, window, windowId, error);
             if (!ref.widget) {
-                return json{{"status", "error"}, {"message", error}};
+                json ids = json::array();
+                for (auto* w : tc::internal::openWindows()) ids.push_back(tc::internal::WindowRequestAccess::creationId(*w));
+                return json{{"status", "error"}, {"message", error}, {"windows", std::move(ids)}};
             }
             const WidgetValue& v = ref.widget->value;
             if (detail::isComposite(v)) {
@@ -581,17 +597,24 @@ void registerImGuiTools() {
         .arg<std::string>("label", "Widget label")
         .arg<std::string>("text", "Value widgets: the reported variable value as JSON (5, 0.25, [1, 2, 3], true, an index); SliderAngle takes radians, although it displays degrees. Text fields: the replacement text")
         .arg<std::string>("window", "ImGui window (panel) name (optional)", false)
-        .arg<int>("windowId", "OS window id from tc_list_windows (optional)", false)
+        .arg<int64_t>("windowId", "Positive native Window ID from tc_list_windows; omission requires exactly one open Window", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
             std::string label = args.at("label").get<std::string>();
             std::string window = args.value("window", "");
-            int windowId = (args.contains("windowId") && args.at("windowId").is_number())
-                         ? args.at("windowId").get<int>() : -1;
+            int64_t windowId = (args.contains("windowId") && args.at("windowId").is_number())
+                         ? args.at("windowId").get<int64_t>() : -1;
+            if (args.contains("windowId") && windowId <= 0) {
+                json ids = json::array();
+                for (auto* w : tc::internal::openWindows()) ids.push_back(tc::internal::WindowRequestAccess::creationId(*w));
+                return json{{"status", "error"}, {"message", "windowId must be a positive ID from tc_list_windows"}, {"windows", std::move(ids)}};
+            }
             std::string error;
 
             WidgetRef ref = findWidget(label, window, windowId, error);
             if (!ref.widget) {
-                return json{{"status", "error"}, {"message", error}};
+                json ids = json::array();
+                for (auto* w : tc::internal::openWindows()) ids.push_back(tc::internal::WindowRequestAccess::creationId(*w));
+                return json{{"status", "error"}, {"message", error}, {"windows", std::move(ids)}};
             }
             const WidgetInfo& w = *ref.widget;
 
@@ -687,17 +710,24 @@ void registerImGuiTools() {
         .arg<std::string>("label", "Checkbox label")
         .arg<bool>("value", "Desired state (true/false)", false)
         .arg<std::string>("window", "ImGui window (panel) name (optional)", false)
-        .arg<int>("windowId", "OS window id from tc_list_windows (optional)", false)
+        .arg<int64_t>("windowId", "Positive native Window ID from tc_list_windows; omission requires exactly one open Window", false)
         .bind(std::function<json(const json&)>([](const json& args) -> json {
             std::string label = args.at("label").get<std::string>();
             std::string window = args.value("window", "");
-            int windowId = (args.contains("windowId") && args.at("windowId").is_number())
-                         ? args.at("windowId").get<int>() : -1;
+            int64_t windowId = (args.contains("windowId") && args.at("windowId").is_number())
+                         ? args.at("windowId").get<int64_t>() : -1;
+            if (args.contains("windowId") && windowId <= 0) {
+                json ids = json::array();
+                for (auto* w : tc::internal::openWindows()) ids.push_back(tc::internal::WindowRequestAccess::creationId(*w));
+                return json{{"status", "error"}, {"message", "windowId must be a positive ID from tc_list_windows"}, {"windows", std::move(ids)}};
+            }
             std::string error;
 
             WidgetRef ref = findWidget(label, window, windowId, error);
             if (!ref.widget) {
-                return json{{"status", "error"}, {"message", error}};
+                json ids = json::array();
+                for (auto* w : tc::internal::openWindows()) ids.push_back(tc::internal::WindowRequestAccess::creationId(*w));
+                return json{{"status", "error"}, {"message", error}, {"windows", std::move(ids)}};
             }
             const WidgetInfo* w = ref.widget;
 

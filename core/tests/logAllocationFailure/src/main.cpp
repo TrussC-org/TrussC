@@ -43,7 +43,7 @@ TC_CORE_TEST_MAIN() {
     {
         OpenWindow first, second;
         Window closed;
-        auto& main = internal::mainWindowContext();
+        auto& main = internal::windowApiContext();
         auto material = std::make_unique<Material>();
         auto environment = std::make_unique<Environment>();
         auto light = std::make_unique<Light>();

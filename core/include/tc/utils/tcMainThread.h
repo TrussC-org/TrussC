@@ -16,20 +16,26 @@
 //
 // Each turn runs what was queued when its drain started, in order; work queued
 // while the drain runs waits for the next turn, so the host always makes progress.
-// Calls without a token are never dropped and there is no limit: a queued
-// closure may edit the tree or free something. The count taken at drain start
+// App-owned calls check owner liveness when delivered. Unowned calls without
+// a token are never dropped. Queued captures live until queue storage releases
+// them, with guest code pinned. There is no queue limit: a closure may edit the tree or free something. The count taken at drain start
 // is reported by the tc_get_health MCP tool (mainQueuePending). Code that may queue faster than the
 // app runs it, and can drop values, keeps its own bounded or latest-value buffer.
 //
-//   tcp.onReceive.listen([&](Msg& m){
-//       Msg copy = m;
-//       runOnMainThread([this, copy]{ scene->addChild(make_shared<Enemy>(copy.pos)); });
-//   });
+//   // In App::setup(), with receiveListener an EventListener App member:
+//   receiveListener = tcp.onReceive.listen([this](Msg& copy) {
+//       scene->addChild(make_shared<Enemy>(copy.pos));
+//   }, Deliver::Main);
+//
+// This owned subscription checks the App at delivery. A raw user-created
+// worker does not inherit App ownership; use an explicit liveness token for
+// runOnMainThread work that captures an object from such a worker.
 //
 // Event<T> builds a typed convenience on top of this — see Deliver::Main in
 // tcEvent.h, which captures the payload and marshals the listener for you.
 // ---------------------------------------------------------------------------
 
+#include "../app/internal/tcAppConstruction.h"
 #include "tcThread.h"        // isMainThread()
 #include <atomic>
 #include <memory>
@@ -49,7 +55,8 @@ namespace internal {
     // in the host Runtime, shared with hot reload guests; accessed on main
     // thread. During construction it selects the innermost ticket's token.
     std::shared_ptr<std::atomic<bool>>& appRunToken();
-    // During a complete derived constructor C1 can capture its ticket's token.
+    std::function<void()> attributeMainThreadWork(std::function<void()>);
+    // During a complete derived constructor this selects its ticket's token.
     // This accessor and appRunToken use the same host Runtime across DLLs.
     std::shared_ptr<std::atomic<bool>> constructorRunToken();
     inline bool appRunIsAlive(const std::weak_ptr<std::atomic<bool>>& token) {
@@ -173,7 +180,14 @@ namespace internal {
 
 // Web is single-threaded — everything already runs on the main thread, so
 // there is nothing to marshal and no queue to drain.
-inline void runOnMainThread(const std::function<void()>& fn) { if (fn) fn(); }
+inline void runOnMainThread(const std::function<void()>& fn) {
+    if (!fn) return;
+    if (auto owner = internal::currentAppOwner()) {
+        if (owner->ended || owner->retiring || !owner->token->load(std::memory_order_acquire)) return;
+        internal::AppCallbackScope scope(owner);
+        fn();
+    } else fn();
+}
 namespace internal {
     inline void drainMainThreadQueue() { drainMainThreadSlots(); }
     inline size_t getMainThreadQueuePending() { return 0; }
@@ -200,8 +214,16 @@ namespace internal {
 // to run at the next safe outer host turn. Safe to call from any thread.
 inline void runOnMainThread(std::function<void()> fn) {
     if (!fn) return;
-    if (isMainThread()) { fn(); return; }
-    internal::mainThreadQueue().send(std::move(fn));
+    if (auto owner = internal::currentAppOwner()) {
+        if (owner->ended || owner->retiring || !owner->token->load(std::memory_order_acquire)) return;
+        if (isMainThread()) {
+            internal::AppCallbackScope scope(owner);
+            fn();
+            return;
+        }
+    } else if (isMainThread()) { fn(); return; }
+    fn = internal::attributeMainThreadWork(std::move(fn));
+    if (fn) internal::mainThreadQueue().send(std::move(fn));
 }
 
 // Run the main-thread work queued so far. Called by the framework once per
@@ -238,11 +260,21 @@ inline void drainMainThreadQueue() {
 inline void runOnMainThread(std::function<void()> fn,
                             std::weak_ptr<std::atomic<bool>> token) {
     if (!fn) return;
-    runOnMainThread([fn = std::move(fn), token = std::move(token)]() {
+    auto owner = internal::currentAppOwner();
+    if (owner && (owner->retiring || owner->ended || !owner->token->load(std::memory_order_acquire))) return;
+    // Queued copies retain code, but create no per-message cancellation entry.
+    auto code = owner ? owner->code : internal::retainGuestCode();
+    auto delivery = [code = std::move(code), owner = std::weak_ptr(owner),
+                     owned = bool(owner), fn = std::move(fn), token = std::move(token)]() {
         auto alive = token.lock();
         if (!alive || !alive->load(std::memory_order_acquire)) return;
+        auto app = owner.lock();
+        if (owned && (!app || app->retiring || app->ended || !app->token->load(std::memory_order_acquire))) return;
+        internal::AppCallbackScope scope(app);
         fn();
-    });
+    };
+    internal::AppOwnerScope process({});
+    runOnMainThread(std::move(delivery));
 }
 
 } // namespace trussc

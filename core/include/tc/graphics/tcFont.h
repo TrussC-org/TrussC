@@ -1363,12 +1363,14 @@ private:
         internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
     }
 
+    static float loadDpiScale();
+
 public:
     LoadResult load(const fs::path& nameOrPath, int size, int faceIndex = 0) {
         cancelAsync();
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
-        dpiScale_ = getDpiScale();
+        dpiScale_ = loadDpiScale();
         int physicalSize = (int)(size * dpiScale_ + 0.5f);
         logicalSize_ = size;
 

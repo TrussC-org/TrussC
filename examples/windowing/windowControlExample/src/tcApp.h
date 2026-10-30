@@ -27,6 +27,7 @@ public:
     Window* self = nullptr;
 
     void setup() override {
+        self = getWindow();
         autotest_ = (getenv("TC_WINCTRL_AUTOTEST") != nullptr);
         logNotice("SubApp") << "second window setup: "
             << getWindowWidth() << "x" << getWindowHeight()
@@ -135,5 +136,4 @@ public:
 
 private:
     shared_ptr<Window> second_;
-    shared_ptr<SubApp> subApp_;
 };

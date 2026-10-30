@@ -8,8 +8,8 @@
 // API onto TrussC:
 //   tick_cb   -> WindowContext switch + per-window dt + update/draw the tree
 //   event_cb  -> CoreEvents + App hooks + Node-tree dispatch (same keycode
-//                semantics as the main window: key == SAPP_KEYCODE_*)
-//   close_cb  -> Window::teardownSecondary() (close button, or a close() request)
+//                semantics on every Window: key == SAPP_KEYCODE_*)
+//   close_cb  -> Window::disposeNativeBacking() (close button, or a close() request)
 // All rendering shares the one sokol_gfx context; each window gets its own
 // sokol_gl context (same pattern as Fbo). Mirror of platform/win/tcWindowWin.cpp.
 
@@ -43,38 +43,14 @@ namespace trussc {
 
 // A request (see tcWindow.h): the backend calls close_cb -> teardown() at its
 // next safe point, outside this window's tick and events.
-void Window::closeSecondary() {
-    if (internal::frameworkShutdown()) return;
-    auto* st = static_cast<AdapterState*>(native_);
-    if (!st || closeRequested_) return;
-    closeRequested_ = true;
-    sapp_window_request_close(st->win);
-}
-
-void Window::teardownSecondary() noexcept {
+void Window::disposeNativeBacking() noexcept {
     if (internal::frameworkShutdown()) return;
     auto* st = static_cast<AdapterState*>(native_);
     if (!st) return;
     internal::TeardownSteps steps;
-    internal::WindowRequestAccess::unbind(*this);
-    native_ = nullptr;             // guard before entry diagnostics can reenter
-    closeRequested_ = false;
-    ctx_.targetsClosed = true;
-    // Stack restoration must not prevent any native/App teardown step.
-    std::optional<internal::EntryStackGuard> guard;
-    steps.run("exit entry guard", [&] { guard.emplace(internal::AppEntry::Exit); });
-    steps.run("native target cleanup", [&] { ctx_.teardownTargets(); });
-    ctx_.acquireSwapchain = nullptr;
-    ctx_.acquireSwapchainUser = nullptr;
-    ctx_.activateNative = nullptr;
+    native_ = nullptr;
     steps.run("native window destruction", [&] { sapp_destroy_window(st->win); });
-    // Frees this window's sgl pipelines and its sgl context (#317).
-    steps.run("native GPU resource release", [&] { ctx_.swapchainTarget.resources().release(); });
     delete st;
-    // The window's own exit event: per-window resource holders (e.g. the
-    // tcxImGui per-window manager) tear down here, while this window's
-    // CoreEvents is still alive.
-    endApp();
 }
 
 namespace internal {
@@ -117,14 +93,17 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     }
     auto win = std::shared_ptr<Window>(new Window());
     internal::WindowRequestAccess::setHostOwner(*win, win);
-    win->title_ = settings.title;
+    win->title_ = mcp::internal::markedWindowTitle(settings.title);
+    win->setQuitOnClose(settings.quitOnClose);
     internal::WindowRequestAccess::binding(*win).geometry = {double(settings.width), double(settings.height), pixelPerfectMode()};
     auto* st = new AdapterState();
 
     sapp_window_desc d = internal::buildNativeWindowDescriptor(settings, pixelPerfectMode());
+    d.title = win->title_.c_str();
     d.tick_cb = &internal::windowTick;
-    d.event_cb = &internal::mainWindowEvent;
+    d.event_cb = &internal::windowEvent;
     d.close_cb = &internal::windowClosed;
+    d.close_request_cb = &internal::allowWindowClose;
     d.user_data = win.get();
     d.bind_cb = bindAdapter;
     win->native_ = st;
@@ -141,6 +120,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     }
 
     internal::refreshWindowMetadata(*win);
+    internal::retainRuntimeWindow(win);
     return win;
 }
 

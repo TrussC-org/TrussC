@@ -31,10 +31,4 @@ inline const char* windowGeometryIgnoredReason(WindowFullscreenPhase phase) noex
     return nullptr;
 }
 
-#if defined(__APPLE__)
-// Implemented beside the implementation-owned sokol main/secondary state.
-WindowFullscreenPhase macWindowFullscreenPhase(uint32_t id = 0) noexcept;
-void setMacWindowFullscreen(uint32_t id, bool full) noexcept;
-void toggleMacWindowFullscreen(uint32_t id) noexcept;
-#endif
 }

@@ -122,6 +122,13 @@ TC_CORE_TEST_MAIN() {
                   {"result", {{"content", {{{"type", "text"}, {"text", ownError.dump()}}}}}}});
 
 #ifndef __EMSCRIPTEN__
+        auto window = internal::prepareLaunchWindow(WindowSettings{});
+        internal::WindowRequestAccess::bindForTests(*window, 683);
+        auto productionDrain = [&] {
+            mcp::internal::drainDeferredResponses(&window->context(), true,
+                                                std::chrono::steady_clock::now(), false);
+            mcp::internal::drainDeferredResponses(nullptr, false);
+        };
         mcp::tool("throws_main", "").bind([]() -> json {
             mcp::deferToolResultUntilAfterFrame([]() -> json {
                 throw std::runtime_error("main failed");
@@ -130,7 +137,7 @@ TC_CORE_TEST_MAIN() {
         });
         {
             auto future = queue("throws_main", "main");
-            mcp::internal::drainDeferredResponses();
+            productionDrain();
             checkError("main exception", reply(future),
                        "main", "deferred response failed: main failed");
         }
@@ -143,7 +150,7 @@ TC_CORE_TEST_MAIN() {
                 return nullptr;
             });
             auto future = queue(mainThrows ? "two_main" : "two_worker", 685);
-            mcp::internal::drainDeferredResponses();
+            productionDrain();
             checkError(mainThrows ? "two-stage main exception" : "two-stage worker exception",
                        reply(future), 685, mainThrows ? "deferred response failed: two-stage main failed"
                                                     : "deferred worker stage failed: worker failed");
@@ -164,7 +171,7 @@ TC_CORE_TEST_MAIN() {
             auto& pending = mcp::internal::deferredResponses().back();
             // Exercise expiry without depending on how long the test waited.
             pending.deadline = std::chrono::steady_clock::time_point::min();
-            mcp::internal::drainDeferredResponses();
+            productionDrain();
             checkError("timeout", reply(timed), "timeout",
                        "the window rendered no frame within 5 s (minimized, hidden or closed?)");
 

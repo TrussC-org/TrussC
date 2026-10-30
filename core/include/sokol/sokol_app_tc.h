@@ -2233,6 +2233,8 @@ typedef struct sapp_desc {
     void* _tc_bind_user;
     void (*_tc_tick_cb)(sapp_window, void*);
     void (*_tc_event_cb)(const sapp_event*, sapp_window, void*);
+    void (*_tc_close_cb)(sapp_window, void*);
+    bool (*_tc_close_request_cb)(sapp_window, void*);
     void (*_tc_before_turn)(void);
     void (*_tc_after_turn)(void);
     bool (*_tc_callbacks_active)(void);
@@ -2462,6 +2464,7 @@ typedef struct sapp_window_desc {
     /* callbacks -- all invoked on the main thread */
     void (*tick_cb)(sapp_window win, void* user);   /* native tick; occluded callbacks are update-only */
     void (*event_cb)(const sapp_event* ev, sapp_window win, void* user);
+    bool (*close_request_cb)(sapp_window win, void* user);
     void (*close_cb)(sapp_window win, void* user);  /* user closed the window; call sapp_destroy_window() to accept */
     void* user_data;
     bool (*bind_cb)(uint32_t id, void* user);
@@ -2544,6 +2547,7 @@ typedef struct sapp_tc_gl_state {
     uintptr_t draw, read;
     uint32_t draw_window, read_window;
 } sapp_tc_gl_state;
+SOKOL_APP_API_DECL bool sapp_tc_gl_activate_idle(void);
 SOKOL_APP_API_DECL sapp_tc_gl_state sapp_tc_gl_save(void);
 SOKOL_APP_API_DECL void sapp_tc_gl_restore(sapp_tc_gl_state state);
 // [TrussC] Desktop adapter seam: suppress this secondary window's present.
@@ -3464,14 +3468,17 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 
 static BOOL _sapp_tc_request_exit(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    /* main window: sokol_app.h's cancellable quit dance. sapp_quit() pre-sets
+    /* Process quit: sokol_app.h's cancellable quit dance. sapp_quit() pre-sets
        quit_ordered (unvetoable); otherwise QUIT_REQUESTED is delivered and a
        handler may call sapp_cancel_quit() to keep the window open. */
     if (!_sapp_tc.app.quit_ordered) {
         _sapp_tc.app.quit_requested = true;
         sapp_event e; memset(&e, 0, sizeof(e));
         e.type = SAPP_EVENTTYPE_QUIT_REQUESTED;
-        _sapp_tc_send(w, &e);
+        if (_sapp_tc.app.desc._tc_event_cb) {
+            if (_sapp_tc_deliver_runtime_quit(_sapp_tc.app.desc, _sapp_tc.app.init_called).client_threw)
+                _sapp_tc.app.quit_requested = false;
+        } else _sapp_tc_send(w, &e);
         if (_sapp_tc.app.quit_requested) {
             _sapp_tc.app.quit_ordered = true;
         }
@@ -3481,23 +3488,19 @@ static BOOL _sapp_tc_request_exit(void) {
 
 /* The one native close path: a close button, performClose: and deferred
    sapp_window_request_close() all ask here whether AppKit may close now.
-   Only the first window is special: closing it is a cancellable process quit. */
+   The framework applies the addressed Window close policy. */
 static BOOL _sapp_tc_mac_close(_sapp_tc_window_t* w) {
-    if (w->is_main) {
-        trussc::internal::setExitReasonIfEmpty("window-close");
-        return _sapp_tc_request_exit();
+    try {
+        return !w->desc.close_request_cb || w->desc.close_request_cb({w->win_id}, w->desc.user_data);
+    } catch (...) {
+        _sapp_tc_mac_contained("sapp_window_desc.close_request_cb");
+        return NO;
     }
-    return YES;
 }
 
-/* The native window has closed: the first window terminates the AppKit
-   application (cleanup runs in applicationWillTerminate, never returns);
-   any other window reports to its close callback, which may destroy it. */
+/* Every native close reports its addressed callback. Runtime ends the
+   process after the last Window closes, or on a normal quit request. */
 static void _sapp_tc_mac_closed_now(_sapp_tc_window_t* w) {
-    if (w->is_main) {
-        [NSApp terminate:nil];
-        return;
-    }
     /* A closed window never ticks or receives events again, even when its
        close_cb keeps it registered: unpublish it and stop both sources (no
        source restarts while not ready). sapp_destroy_window unwinds it once. */
@@ -3806,9 +3809,8 @@ static void _sapp_tc_mac_process_deferred(void) {
         [NSApp terminate:nil];
         return;
     }
-    _sapp_tc_window_t* first = _sapp_tc.app.main;
-    if (first && first->window && (_sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered)) {
-        [first->window performClose:nil];
+    if (_sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) {
+        [NSApp terminate:nil];
     }
 }
 
@@ -3955,6 +3957,7 @@ static void _sapp_tc_main_tick_tramp(sapp_window win, void* user) {
    partially initialized handle is nil-safe. A published window has already
    been removed from the registry by its caller. */
 static void _sapp_tc_mac_unwind(_sapp_tc_window_t* w) {
+    if (_sapp_tc.app.main == w) { _sapp_tc.app.main = 0; _sapp_tc.app.desc.window_title = 0; }
     if (!w) return;
     _sapp_tc_mac_forget_key(w->win_id);
     w->ready = false;
@@ -4179,6 +4182,8 @@ static bool _sapp_tc_mac_create_main_window(void) {
     native.window = _sapp_tc_normalize_main_window(d);
     native.events_enabled = _sapp_tc_app_events_enabled;
     native.window.event_cb = d->_tc_event_cb ? d->_tc_event_cb : _sapp_tc_main_event_tramp;
+    native.window.close_cb = d->_tc_close_cb;
+    native.window.close_request_cb = d->_tc_close_request_cb;
     native.window.tick_cb = d->_tc_tick_cb ? d->_tc_tick_cb : _sapp_tc_main_tick_tramp;
     native.window.mtl_device = (__bridge const void*)_sapp_tc.app.device;
     native.swap_interval = d->swap_interval;
@@ -4441,11 +4446,6 @@ void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
     if (w->constructing) { w->close_requested = true; return; }
-    if (w->is_main) {
-        // The first window owns process quit/veto; disposal follows cleanup.
-        w->close_requested = true;
-        return;
-    }
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
     }
@@ -7007,9 +7007,6 @@ static struct {
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w);
 static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w);
 static void _sapp_tc_win32_close(_sapp_tc_window_t* w);
-static bool _sapp_tc_win32_update_dimensions(_sapp_tc_window_t* w);
-static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w);
-static void _sapp_tc_win32_apply_cursor(sapp_mouse_cursor cursor, bool shown, bool skip_area_test);
 
 /*-- timing -----------------------------------------------------------------*/
 static double _sapp_tc_now(void) {
@@ -8023,7 +8020,10 @@ static bool _sapp_tc_win32_request_exit(_sapp_tc_window_t* w) {
         _sapp_tc.app.quit_requested = true;
         // A throwing quit client vetoes once, just like sapp_cancel_quit().
         // Delivery contains the exception before it reaches the OS callback.
-        if (_sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED).client_threw) {
+        const auto result = _sapp_tc.app.desc._tc_event_cb
+            ? _sapp_tc_deliver_runtime_quit(_sapp_tc.app.desc, _sapp_tc.app.init_called)
+            : _sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED);
+        if (result.client_threw) {
             _sapp_tc.app.quit_requested = false;
         }
     }
@@ -8042,23 +8042,8 @@ static void _sapp_tc_win32_cleanup(void) {
 }
 
 static void _sapp_tc_win32_close(_sapp_tc_window_t* w) {
-    if (w->is_main) {
-        trussc::internal::setExitReasonIfEmpty("window-close");
-        if (_sapp_tc_win32_request_exit(w)) {
-            _sapp_tc.app.quit_ordered = true;
-            ShutdownBlockReasonDestroy(w->hwnd);
-        }
-        if (_sapp_tc.app.quit_ordered) {
-            PostQuitMessage(0);
-        }
-    } else {
-        /* user closed a secondary window: notify; the app accepts by
-           calling sapp_destroy_window() (w may be freed after this) */
-        if (w->desc.close_cb) {
-            sapp_window handle = { w->win_id };
-            w->desc.close_cb(handle, w->desc.user_data);
-        }
-    }
+    if (w->desc.close_request_cb && !w->desc.close_request_cb({w->win_id}, w->desc.user_data)) return;
+    if (w->desc.close_cb) w->desc.close_cb({w->win_id}, w->desc.user_data);
 }
 
 /*-- window procedure --------------------------------------------------------*/
@@ -8415,7 +8400,7 @@ static void _sapp_tc_win32_unwind(_sapp_tc_window_t* w) {
     w->ready = false;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i)
         if (_sapp_tc.windows[i] == w) _sapp_tc.windows[i] = 0;
-    if (_sapp_tc.app.main == w) _sapp_tc.app.main = 0;
+    if (_sapp_tc.app.main == w) { _sapp_tc.app.main = 0; _sapp_tc.app.desc.window_title = 0; }
     if (w->hwnd) {
         KillTimer(w->hwnd, _SAPP_TC_MODAL_TIMER);
         SetWindowLongPtrW(w->hwnd, GWLP_USERDATA, 0);
@@ -8508,6 +8493,8 @@ static bool _sapp_tc_win32_create_main_window(void) {
     native.window = _sapp_tc_normalize_main_window(d);
     native.events_enabled = _sapp_tc_app_events_enabled;
     native.window.event_cb = d->_tc_event_cb ? d->_tc_event_cb : _sapp_tc_main_event_tramp;
+    native.window.close_cb = d->_tc_close_cb;
+    native.window.close_request_cb = d->_tc_close_request_cb;
     native.window.tick_cb = d->_tc_tick_cb ? d->_tc_tick_cb : _sapp_tc_main_tick_tramp;
     native.swap_interval = d->swap_interval;
     native.fullscreen = d->fullscreen;
@@ -8627,8 +8614,9 @@ static void _sapp_tc_win32_run_loop(void) {
         }
         /* route programmatic quits through the same WM_CLOSE dance so the
            QUIT_REQUESTED semantics stay identical (upstream parity) */
-        if (_sapp_tc.app.quit_requested && _sapp_tc.app.main) {
-            PostMessageW(_sapp_tc.app.main->hwnd, WM_CLOSE, 0, 0);
+        if (_sapp_tc.app.quit_requested && _sapp_tc_win32_request_exit(_sapp_tc.app.main)) {
+            _sapp_tc.app.quit_ordered = true;
+            PostQuitMessage(0);
         }
     }
     if (pace_timer) CloseHandle(pace_timer);
@@ -8656,7 +8644,6 @@ void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
     if (w->constructing) { w->close_requested = true; return; }
-    if (w->is_main) { w->close_requested = true; return; }
     _sapp_tc_win32_unwind(w);
 }
 
@@ -9297,6 +9284,7 @@ static struct {
     int (*SwapIntervalMESA)(int);                           /* context-wide */
     GLXContext (*CreateContextAttribsARB)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
 #endif
+    _sapp_tc_window_t idle;
     uint32_t gl_framebuffer;    /* default FBO captured after make-current */
     double refresh_period;      /* estimate from the main window's vsync'd presents */
 
@@ -9351,6 +9339,7 @@ static void _sapp_tc_x11_free(void* memory) {
 }
 
 static void _sapp_tc_x11_free_window(_sapp_tc_window_t* w) {
+    if (_sapp_tc.app.main == w) { _sapp_tc.app.main = 0; _sapp_tc.app.desc.window_title = 0; }
 #if defined(SOKOL_GLES3)
     _sapp_tc_x11_free(w);
 #else
@@ -11273,6 +11262,16 @@ static void _sapp_tc_x11_app_event(_sapp_tc_window_t* w, sapp_event_type type) {
     _sapp_tc_send(w, &e);
 }
 
+static void _sapp_tc_x11_request_exit(void) {
+    if (_sapp_tc.app.desc._tc_event_cb) {
+        if (_sapp_tc_deliver_runtime_quit(_sapp_tc.app.desc, _sapp_tc.app.init_called).client_threw)
+            _sapp_tc.app.quit_requested = false;
+    } else if (_sapp_tc.app.main) {
+        _sapp_tc_x11_app_event(_sapp_tc.app.main, SAPP_EVENTTYPE_QUIT_REQUESTED);
+    }
+    if (_sapp_tc.app.quit_requested) _sapp_tc.app.quit_ordered = true;
+}
+
 /*-- XDND handlers -------------------------------------------------------------*/
 static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
     /* XDND drop data arrival (clipboard replies are consumed synchronously by
@@ -11316,12 +11315,8 @@ static void _sapp_tc_x11_close(_sapp_tc_window_t* w) {
     if (w->constructing || w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) {
         w->close_requested = true; return;
     }
-    if (w->is_main) {
-        trussc::internal::setExitReasonIfEmpty("window-close");
-        _sapp_tc.app.quit_requested = true;
-    } else if (w->desc.close_cb) {
-        w->desc.close_cb({w->win_id}, w->desc.user_data);
-    }
+    if (w->desc.close_request_cb && !w->desc.close_request_cb({w->win_id}, w->desc.user_data)) return;
+    if (w->desc.close_cb) w->desc.close_cb({w->win_id}, w->desc.user_data);
 }
 
 static void _sapp_tc_x11_on_clientmessage(XEvent* event) {
@@ -11976,6 +11971,20 @@ static void _sapp_tc_x11_destroy_window_resources(_sapp_tc_window_t* w) {
     XFlush(_sapp_tc.display);
 }
 
+extern "C" bool sapp_tc_gl_activate_idle(void) {
+    if (!_sapp_tc.display || !_sapp_tc.ctx) return false;
+    auto* idle = &_sapp_tc.idle;
+    if (!idle->drawable) {
+        idle->dpi_scale = 1.0f;
+        if (!_sapp_tc_x11_create_native_window(idle, "", 1, 1, true) ||
+            !_sapp_tc_x11_create_surface(idle)) {
+            _sapp_tc_x11_destroy_window_resources(idle);
+            return false;
+        }
+    }
+    return _sapp_tc_x11_make_current(idle);
+}
+
 #if defined(SOKOL_GLES3)
 static void _sapp_tc_x11_lock_mouse(bool lock) {
     if (!_sapp_tc.app.main) return;
@@ -12479,12 +12488,7 @@ static void _sapp_tc_x11_run_loop(void) {
         /* the cancellable quit dance (upstream parity): WM_DELETE_WINDOW or
            sapp_request_quit() land here; sapp_quit() pre-sets quit_ordered */
         if (_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered) {
-            if (_sapp_tc.app.main) {
-                _sapp_tc_x11_app_event(_sapp_tc.app.main, SAPP_EVENTTYPE_QUIT_REQUESTED);
-            }
-            if (_sapp_tc.app.quit_requested) {
-                _sapp_tc.app.quit_ordered = true;
-            }
+            _sapp_tc_x11_request_exit();
         }
     }
 }
@@ -12495,6 +12499,12 @@ static void _sapp_tc_x11_run_loop(void) {
 
 static void _sapp_tc_x11_unwind(_sapp_tc_window_t* w) {
     if (!w) return;
+#if defined(SOKOL_GLES3)
+    if (_sapp_tc.lock_owner == w) {
+        if (_sapp_tc.mouse_locked) _sapp_tc_x11_lock_mouse(false);
+        _sapp_tc.lock_owner = NULL;
+    }
+#endif
     _sapp_tc_x11_destroy_window_resources(w);
     _sapp_tc_x11_free(w->title);
     _sapp_tc_x11_free_window(w);
@@ -12584,6 +12594,8 @@ static bool _sapp_tc_x11_create_main_window(void) {
     native.window = _sapp_tc_normalize_main_window(d);
     native.events_enabled = _sapp_tc_app_events_enabled;
     native.window.event_cb = d->_tc_event_cb ? d->_tc_event_cb : _sapp_tc_main_event_tramp;
+    native.window.close_cb = d->_tc_close_cb;
+    native.window.close_request_cb = d->_tc_close_request_cb;
     native.window.tick_cb = d->_tc_tick_cb ? d->_tc_tick_cb : _sapp_tc_main_tick_tramp;
     native.swap_interval = d->swap_interval;
     native.fullscreen = d->fullscreen;
@@ -12646,11 +12658,6 @@ void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
     if (w->constructing) { w->close_requested = true; return; }
-    if (w->is_main) {
-        // The first window owns process quit/veto; disposal follows cleanup.
-        _sapp_tc_x11_close(w);
-        return;
-    }
     for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
         if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
     }
@@ -12874,6 +12881,7 @@ void sapp_run(const sapp_desc* desc) {
         _sapp_tc_x11_unwind(w);
     }
     _sapp_tc.app.main = NULL;
+    _sapp_tc_x11_destroy_window_resources(&_sapp_tc.idle);
     _sapp_tc.app.desc.window_title = NULL;
     if (_sapp_tc.ctx) {
 #if defined(SOKOL_GLES3)
@@ -18453,6 +18461,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 #endif /* platform select */
 
 #if !(defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+extern "C" bool sapp_tc_gl_activate_idle(void) { return true; }
 extern "C" sapp_tc_gl_state sapp_tc_gl_save(void) { return {}; }
 extern "C" void sapp_tc_gl_restore(sapp_tc_gl_state) {}
 #endif

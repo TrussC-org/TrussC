@@ -150,8 +150,9 @@ void tcApp::setup() {
 | `tcx_imgui_checkbox` | `label`, `value`, `window`, `windowId` (optional) | Toggle or set a checkbox |
 
 `window` is the ImGui window (panel) name. `windowId` is the OS window as
-`tc_list_windows` numbers it (0 = main); you only need it when the same panel
-exists in two OS windows.
+the positive native ID returned by `tc_list_windows`. Actions may omit it only
+when exactly one Window is open; zero is not an alias. Widget listing may omit
+the filter to list every context. Closed Window IDs never select a new Window.
 
 These tools use ImGui's Test Engine hooks plus a small patch to the bundled
 Dear ImGui that hands each value widget's variable to tcxImGui. See
@@ -163,7 +164,7 @@ Each value widget in `tcx_imgui_get_widgets` carries `widget`, `valueType` and
 `value`, plus `touched` (changed by hand, see below):
 
 ```json
-{"label": "speed", "window": "Params", "windowId": 0, "type": "input",
+{"label": "speed", "window": "Params", "windowId": 101, "type": "input",
  "widget": "slider", "valueType": "float", "value": 0.35, "touched": true, "rect": {...}}
 ```
 
@@ -210,7 +211,7 @@ when the widget returns, and checked again when the widget runs in the next
 frame.
 
 ```json
-{"label": "position", "window": "Params", "windowId": 0, "status": "ok",
+{"label": "position", "window": "Params", "windowId": 101, "status": "ok",
  "widget": "drag", "valueType": "float", "value": [0.5, -1, 2.25]}
 ```
 
@@ -283,9 +284,9 @@ the code, and calls `tcx_imgui_reset_touched`.
 ```json
 {"status": "ok", "count": 2,
  "widgets": [
-   {"label": "speed", "window": "Params", "windowId": 0, "widget": "slider",
+   {"label": "speed", "window": "Params", "windowId": 101, "widget": "slider",
     "valueType": "float", "value": 0.35, "visible": true},
-   {"label": "tint", "window": "Params", "windowId": 0, "widget": "color",
+   {"label": "tint", "window": "Params", "windowId": 101, "widget": "color",
     "valueType": "color", "value": [1, 0.4, 0.2, 1], "colorSpace": "rgb", "visible": false}
  ],
  "inspector": []}
@@ -334,7 +335,7 @@ tcxImGui connects to TrussC via these core events:
 
 - **`events().rawEvent`** (priority: BeforeApp) — Routes input events to ImGui
 - **`events().onRender`** (priority: 1000) — Renders ImGui after all sokol_gl content is flushed
-- **the main window's `events().afterFrame`** (priority: BeforeApp) — Answers a
+- **each owning Window's `events().afterFrame`** (priority: BeforeApp) — Answers a
   `tcx_imgui_input` whose check frame did not come in time (see
   [Setting values](#setting-values)), before the MCP server's own timeout
 
@@ -353,3 +354,8 @@ C++ OOM recovery requires Release builds, or iterator debugging off (`_ITERATOR_
 ## License
 
 Dear ImGui is licensed under the MIT License. See [imgui/LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt).
+
+App-owned registrations
+-----------------------
+
+Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown runs App cleanup and window exit hooks before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.

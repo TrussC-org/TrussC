@@ -354,6 +354,8 @@ public:
 #else
         WindowSettings settings; settings.setSize(128,96); settings.setHighDpi(false); settings.sampleCount = 1;
         b_ = createWindow(settings); unused_ = createWindow(settings);
+        if (b_) b_->setPosition(32, 32);
+        if (unused_) unused_->setPosition(64, 64);
         check("secondary and unused windows created", b_ && unused_);
         check("all windows start without shadow maps", !a_->shadow.storage &&
             b_ && !b_->context().shadow.storage && unused_ && !unused_->context().shadow.storage);

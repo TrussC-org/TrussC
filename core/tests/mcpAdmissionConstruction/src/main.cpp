@@ -168,7 +168,7 @@ class ResizeDisplayApp : public App {
     std::chrono::steady_clock::time_point lastRenderedFrame = started;
 
     internal::WindowContext& context() {
-        return windowIndex ? getWindow()->context() : internal::mainWindowContext();
+        return windowIndex ? getWindow()->context() : internal::windowApiContext();
     }
     void checkCleared() {
         auto& ctx = context();
@@ -287,9 +287,9 @@ class ResizeDisplayApp : public App {
                 // setup() waits for the first native tick, which an occluded
                 // window may never receive. Count it at creation instead.
                 ++resizeWindows;
-                secondaryApp = std::make_shared<ResizeDisplayApp>();
+                secondaryApp = internal::makeConstructedApp<ResizeDisplayApp>();
                 secondaryApp->windowIndex = 1;
-                secondary->setApp(secondaryApp);
+                internal::WindowRequestAccess::attachCandidate(*secondary, secondaryApp);
                 return;
             }
         } else {
@@ -413,7 +413,7 @@ public:
                 return;
             }
             using namespace mcp::internal;
-            auto& ctx = internal::mainWindowContext();
+            auto& ctx = internal::windowApiContext();
             const auto [width, height] = internal::captureWindowSize(ctx);
             const int logicalWidth = getWindowWidth(), logicalHeight = getWindowHeight();
             Pixels pixels;
@@ -423,7 +423,7 @@ public:
             check("real framebuffer has requested DPI ratio",
                 logicalWidth > 0 && logicalHeight > 0 &&
                 pixels.getWidth() == logicalWidth * expectedDpi && pixels.getHeight() == logicalHeight * expectedDpi);
-            check("main context dimensions agree before readback", ctx.isMain && ctx.fbWidth == pixels.getWidth() && ctx.fbHeight == pixels.getHeight());
+            check("main context dimensions agree before readback", ctx.hostWindow && ctx.fbWidth == pixels.getWidth() && ctx.fbHeight == pixels.getHeight());
             printf("real screenshot DPI=%d: logical=%dx%d framebuffer=%zux%zu readback=%dx%d scale=%.2f\n",
                 expectedDpi, logicalWidth, logicalHeight, width, height,
                 pixels.getWidth(), pixels.getHeight(), double(getDpiScale()));
@@ -697,19 +697,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     check("reply overflow emits one Warning", replyWarnings == 1);
 #ifdef TC_ADMISSION_CAPTURE_PROBE
+    Window primary;
+    internal::WindowRequestAccess::bindForTests(primary, 101);
     OpenWindow secondary;
-    auto& main = internal::mainWindowContext();
+    auto& main = primary.context();
     auto* processCaller = internal::currentWindowCtx();
     internal::currentWindowCtx() = &main;
     struct RestoreCaller {
         internal::WindowContext* previous;
         ~RestoreCaller() { internal::currentWindowCtx() = previous; }
     } restoreCaller{processCaller};
-    check("unbound main getters read native dimensions", main.isMain &&
-          getFramebufferWidth() == sapp_width() && getFramebufferHeight() == sapp_height() && getDpiScale() == sapp_dpi_scale());
-    // Model a bound Window before assigning its published dimensions.
-    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
-    const std::initializer_list<int> windows{0, 1};
+    const std::initializer_list<int> windows{101, 202};
     auto dimensions = [&](int width, int height) {
         secondary.context().fbWidth = width;
         secondary.context().fbHeight = height;
@@ -741,7 +739,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     // GPU is needed: the native dimension wrappers and real prelude dispatch
     // exercise enqueue independently of the previous frame's swapchain size.
     for (int window : windows) {
-        auto& ctx = window ? secondary.context() : main;
+        auto& ctx = window == 202 ? secondary.context() : main;
         dimensions(3840, 2160);
         ctx.lastSwapchain.width = 3840;
         ctx.lastSwapchain.height = 2160;
@@ -777,7 +775,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         auto first = queuedSave(window);
         int rejected = 0;
         for (int i = 1; i < 1000; ++i) {
-            auto result = queuedSave(1 - window); // slot is shared across windows
+            auto result = queuedSave(window == 101 ? 202 : 101); // slot is shared across windows
             if (result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
                 try { (void)result.get()(); } catch (const AdmissionError&) { ++rejected; }
             }
@@ -787,20 +785,20 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check("queued MCP save does not enter application path queue", main.pendingScreenshotPaths.empty() && secondary.context().pendingScreenshotPaths.empty());
         check("999 excess saves increment rejection counter", admissionRejections(AdmissionStore::Connections) == before + 999);
         const auto& pending = deferredResponses().front();
-        check("save defers to the requested window", pending.target == (window ? &secondary.context() : nullptr));
+        check("save defers to the requested window", pending.target == (window == 202 ? &secondary.context() : &main));
         // Grow after admission: drain must reject before native GPU readback.
-        auto& ctx = window ? secondary.context() : main;
+        auto& ctx = window == 202 ? secondary.context() : main;
         dimensions(3840, 2160);
         const auto beforeGrowth = admissionRejections(AdmissionStore::Working);
         largest = 0; tracking = true;
-        const void* ownerTarget = window ? &secondary.context() : nullptr;
-        if (window) {
+        const void* ownerTarget = window == 202 ? &secondary.context() : &main;
+        if (window == 202) {
             auto* previous = internal::currentWindowCtx();
             internal::currentWindowCtx() = &ctx;
             drainDeferredResponses(ownerTarget);
             internal::currentWindowCtx() = previous;
         }
-        else drainDeferredResponses();
+        else drainDeferredResponses(&main);
         tracking = false;
         check("dimension growth rejects at drain before oversized allocation", largest <= small.workingBytes && toolError(json::parse(first.get()())));
         check("save growth rejection increments working counter", admissionRejections(AdmissionStore::Working) == beforeGrowth + 1);
@@ -823,8 +821,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             const auto before = admissionRejections(AdmissionStore::Working);
             largest = 0; tracking = true;
             auto* previous = internal::currentWindowCtx();
-            if (window) internal::currentWindowCtx() = &secondary.context();
-            drainDeferredResponses(window ? &secondary.context() : nullptr);
+            if (window == 202) internal::currentWindowCtx() = &secondary.context();
+            drainDeferredResponses(window == 202 ? &secondary.context() : &main);
             internal::currentWindowCtx() = previous;
             tracking = false;
             check("grown window readback rejects before oversized allocation", largest <= small.workingBytes && toolError(json::parse(future.get()())));
@@ -851,14 +849,14 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             auto promise = std::make_shared<std::promise<ReplyThunk>>();
             auto future = promise->get_future();
             json args = std::string(name) == "tc_analyze_image" ?
-                json{{"source", {{"window", 0}}}, {"ops", json::array({{{"op", "stats"}}})}} : json{{"window", 0}};
+                json{{"source", {{"window", 101}}}, {"ops", json::array({{{"op", "stats"}}})}} : json{{"window", 101}};
             if (save) args["path"] = internal::pathToUtf8(extentPath);
             if (std::string(name) == "tc_get_screenshot") args["width"] = 16;
             const auto before = admissionRejections(AdmissionStore::Working);
             largest = 0; tracking = true;
             getHttpChannel().send(mcp::McpRequest{request(name, args), promise, std::make_shared<WorkBudget>(true)});
             mcp::processHttpQueue();
-            drainDeferredResponses();
+            drainDeferredResponses(&main);
             const bool ready = future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
             bool error = false;
             if (ready) error = toolError(json::parse(future.get()()));
@@ -895,11 +893,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     // Shutdown also releases the deferred producer and its credits.
     dimensions(32, 32);
     resetHttpChannel();
-    auto cancelled = queuedSave(0);
+    auto cancelled = queuedSave(101);
     mcp::stopHttpServer();
     check("shutdown answers admitted save and releases all credits", cancelled.wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
         toolError(json::parse(cancelled.get()())) && workingMemory() == 0 && !hasDeferredResponses());
-    internal::WindowRequestAccess::unbind(*internal::mainWindow());
+    internal::WindowRequestAccess::unbind(primary);
 
 #endif
     check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));

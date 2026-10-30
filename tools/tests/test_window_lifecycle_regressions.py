@@ -87,7 +87,9 @@ struct sapp_tc_window_metadata {
     double source_interval=0;
     bool trust_hidden_signals=false, iconified=false, occluded=false, drawable_available=false;
 };
+struct Window;
 struct WindowContext {
+    Window* hostWindow=nullptr;
     bool isMain=true, pauseUpdatesWhenHidden=false, suspended=false, lifecycleSuspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
 };
 struct Window {
@@ -100,7 +102,8 @@ struct Window {
 };
 ''' + body(window, 'inline bool Window::isOccluded() const') + r'''
 Window owner;
-Window* mainWindow() { return &owner; }
+Window* resolveWindow() { return &owner; }
+WindowContext* currentWindowCtx() { return &owner.ctx; }
 constexpr bool supportsSecondaryWindows() { return false; }
 Window* openWindows[1]={&owner};
 // Only used by the discarded desktop branch of visibility observation.
@@ -123,7 +126,7 @@ void publishWindowMetadata(Window& w, const sapp_tc_window_metadata& m) {
     ++queries; w.binding_.metadata=m;
     w.ctx.suspended=m.trust_hidden_signals && (m.iconified || m.occluded);
 }
-''' + body(runtime, 'void refreshMainWindowMetadata()') + r'''
+''' + body(runtime, 'void refreshSelectedWindowMetadata()') + r'''
 ''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool occlusionPausesUpdate(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()') + r'''
 enum class VisibilityDelivery { Drop, RawOnly, RawThenTyped };
 struct sapp_event {
@@ -142,7 +145,7 @@ void convertWindowEvent(const sapp_event* event, Window& window) {
 }
 ''' + body(runtime, 'void deliverPendingWindowVisibilityAtReadyEntry(') + r'''
 void _sapp_tc_android_app_event(sapp_event_type type) {
-    refreshMainWindowMetadata(); observeWindowVisibility(owner.ctx,type);
+    refreshSelectedWindowMetadata(); observeWindowVisibility(owner.ctx,type);
     sapp_event event{};event.type=type;convertWindowEvent(&event,owner);
     deliverPendingWindowVisibilityAtReadyEntry(owner);
 }

@@ -79,8 +79,10 @@ TC_CORE_TEST_MAIN() {
 #else
     setenv("TRUSSC_MCP", "0", 1);
 #endif
-    tcCoreTest::InjectedWindow native(*internal::mainWindow());
-    internal::currentWindowCtx() = &internal::mainWindow()->context();
+    getMainThreadId();
+    Window window;
+    tcCoreTest::InjectedWindow native(window);
+    internal::currentWindowCtx() = &window.context();
     mcp::setToolLevel(mcp::ToolLevel::Control);
     auto& ctx = internal::currentWindowContext();
     ctx.keysPressed.clear();
@@ -95,8 +97,8 @@ TC_CORE_TEST_MAIN() {
     listeners.push_back(events().mouseDragged.listen([](const MouseDragEventArgs&) { ++eventCalls; }));
     listeners.push_back(events().mouseScrolled.listen([](const ScrollEventArgs&) { ++eventCalls; }));
     getMainThreadId();
-    auto app = std::make_shared<InputApp>();
-    internal::registerAppEventListeners([app] { return app; });
+    auto app = internal::makeConstructedApp<InputApp>();
+    internal::attachCandidate(window, app);
 
     const auto domain = keyDomain();
     check("key domain contains 120 codes", domain.size() == 120);
@@ -209,6 +211,6 @@ TC_CORE_TEST_MAIN() {
     }
     check("invalid scroll input leaves callbacks and state unchanged", scrollInvalid);
     std::printf("checks=%d failures=%d\n", checks, failures);
-    internal::mainWindowContext().appEventListeners.clear();
+    internal::windowApiContext().appEventListeners.clear();
     return failures ? 1 : 0;
 }

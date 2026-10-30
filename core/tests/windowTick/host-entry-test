@@ -119,10 +119,10 @@ if os.environ.get('TC_HOST_ENTRY_EXTRA_MUTATIONS') and results[0]['valid']:
     cases=[
       ('launch_legacy_tick','header','desc._tc_tick_cb = internal::windowTick;','desc._tc_tick_cb = nullptr;'),
       ('launch_no_process_hooks','header','desc._tc_before_turn = internal::beforeHostTurn;','desc._tc_before_turn = nullptr;'),
-      ('main_scheduler_skipped','global','if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);','if (!ctx.isMain && !ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);'),
+      ('main_scheduler_skipped','global','if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);','if (!ctx.hostWindow && !ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);'),
       ('device_key_uses_launch_tick','global','return sg_isvalid() ? sg_query_stats().prev_frame.frame_index : 0;', 'return sapp_frame_count();'),
       ('headless_uses_window_key','global','if (&ctx == nonWindowContextIfInitialized()) return ctx.updateCount;', 'if (false) return ctx.updateCount;'),
-      ('main_resource_role_branch','global','return ctx.resourceTickCount;','return ctx.isMain ? ctx.updateCount : ctx.resourceTickCount;'),
+      ('main_resource_role_branch','global','return ctx.resourceTickCount;','return ctx.hostWindow ? ctx.updateCount : ctx.resourceTickCount;'),
     ]
     for name,kind,old,new in cases:
         original=header if kind=='header' else global_source

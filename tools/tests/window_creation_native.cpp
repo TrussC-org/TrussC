@@ -13,12 +13,12 @@ struct Platform { static constexpr bool isDesktop() { return true; } };
 float getDisplayScaleFactor() { return 2; }
 namespace internal {
 SHARED_DESCRIPTOR
-sapp_desc buildWindowDescriptor(const Settings& settings) {
+sapp_desc buildWindowDescriptor(const Settings& settings, [[maybe_unused]] void* target) {
     LAUNCHER
     return desc;
 }
 }
-sapp_desc normalDescriptor(const Settings& settings) { NORMAL_LAUNCHER }
+sapp_desc normalDescriptor(const Settings& settings) { struct Handle { void* get() { return nullptr; } } window; NORMAL_LAUNCHER }
 sapp_desc baseDescriptor(const Settings& settings) {
     // Launcher sizing from next/window 4b26a8b1, before pixel creation overrides.
     sapp_desc desc = {};

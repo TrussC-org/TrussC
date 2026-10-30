@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcTcpClientTest.h"
 #include "../../common/tcCoreTest.h"
 #include "tc/network/tcUdpSocket.h"
@@ -191,6 +192,7 @@ void closeWakesBlockedReceive() {
 }
 } // namespace
 TC_CORE_TEST_MAIN() {
+    tcCoreTest::WindowFixture fixture;
     Watchdog watchdog;
     for (bool threaded : {true, false}) { preservesSocket(threaded); lifecycle(threaded); moves(threaded); }
     restartWithCallbackInFlight();

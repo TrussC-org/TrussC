@@ -8,6 +8,14 @@
 #include <dlfcn.h>
 using namespace trussc;
 namespace {
+std::shared_ptr<Window> runnerWindow;
+Window* testWindow() { return runnerWindow.get(); }
+template<class T, class... Args> std::shared_ptr<T> candidateInCurrentFactory(Args&&... args) {
+    auto result = std::shared_ptr<T>(internal::constructAppStorage<T>(std::forward<Args>(args)...),
+        [](T* app) { internal::destroyAppStorage<T>(app); });
+    internal::completeAppConstruction(*result);
+    return result;
+}
 bool gpuValid = false;
 sg_stats gpuStats{};
 int checks = 0, failures = 0;
@@ -89,10 +97,10 @@ void constructorSize(Window& window, double width, double height, bool) {
 }
 const internal::WindowNativeOperations bootstrapOperations{read, acquire, nullptr, nullptr, constructorSize};
 struct BootstrapProbe : Probe {
-    BootstrapProbe() { setWindowSize(120, 60); }
+    explicit BootstrapProbe(Window& window) { window.setSize(120, 60); }
     void setup() override {
         ++setups;
-        auto& window = *internal::mainWindow();
+        auto& window = *testWindow();
         check("ctx/getter equal authoritative hidden snapshot at setup",
               window.context().suspended && window.isOccluded() &&
               internal::WindowRequestAccess::binding(window).metadata.occluded);
@@ -105,12 +113,15 @@ struct BootstrapProbe : Probe {
 void bootstrap() {
     using Run = void (*)(std::function<void()>);
     for (Run run : {admission_mac::run, admission_win32::run, admission_x11_glx::run, admission_x11_egl::run}) {
-        auto& window = *internal::mainWindow();
+        auto& window = *testWindow();
         Native native; bind(window, native, 717);
         internal::WindowRequestAccess::binding(window).operations = &bootstrapOperations;
         Window other; Native peerNative; bind(other, peerNative, 716);
         bootstrapCallbacks = dropGetterCalls = 0; bootstrapReady = false;
         window.context().drawCount = 0;
+        // Exercise hidden startup updates explicitly for every Window fixture.
+        window.context().pauseUpdatesWhenHidden = false;
+        window.context().drawWhileHidden = true;
         std::vector<sapp_event_type> delivered;
         std::vector<std::vector<std::string>> drops;
         std::vector<int> keys;
@@ -142,13 +153,12 @@ void bootstrap() {
                 [](const sapp_event*, sapp_window, Window*, internal::WindowContext&) { ++peerEvents; });
             check("secondary init-time event is admitted", peerEvents == 1);
             if (queryEndSession) {
-                expected.push_back(SAPP_EVENTTYPE_QUIT_REQUESTED);
                 check("WM_QUERYENDSESSION returns FALSE for exitRequested veto during init", queryEndSession() && exitRequests == 1);
             }
             expected.push_back(SAPP_EVENTTYPE_RESIZED);
-            bootstrapApp = std::make_shared<BootstrapProbe>();
+            bootstrapApp = internal::makeConstructedApp<BootstrapProbe>(window);
             check("constructor setWindowSize delivers raw RESIZED synchronously", delivered == expected && delivered.back() == SAPP_EVENTTYPE_RESIZED);
-            window.setApp(bootstrapApp);
+            internal::WindowRequestAccess::attachCandidate(window, bootstrapApp);
             expected.push_back(SAPP_EVENTTYPE_FOCUSED); // initial size callback at bootstrap exit
         });
         bootstrapReady = true;
@@ -172,11 +182,11 @@ void bootstrap() {
         check("ready entry delivers pending visibility once", internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
         listener.disconnect(); dropped.disconnect(); pressed.disconnect(); released.disconnect(); exit.disconnect();
         sapp_event visibility{}; visibility.type = SAPP_EVENTTYPE_SUSPENDED;
-        internal::mainWindowEvent(&visibility, {717}, &window);
+        internal::windowEvent(&visibility, {717}, &window);
         check("delivered aggregate records per-Window visibility", internal::WindowRequestAccess::binding(window).lastDeliveredHidden && !internal::WindowRequestAccess::binding(other).lastDeliveredHidden);
         native.metadata.occluded = false; internal::refreshWindowMetadata(window);
         check("snapshot refresh preserves last delivery", !window.isOccluded() && internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
-        visibility.type = SAPP_EVENTTYPE_RESUMED; internal::mainWindowEvent(&visibility, {717}, &window);
+        visibility.type = SAPP_EVENTTYPE_RESUMED; internal::windowEvent(&visibility, {717}, &window);
         check("delivered resume records visible state", !internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
         internal::WindowRequestAccess::endApp(window); internal::WindowRequestAccess::unbind(window);
         internal::WindowRequestAccess::resetForLaunch(window); bootstrapApp.reset(); nativeDropPaths.clear();
@@ -239,27 +249,27 @@ void constructorsAndEpochs() {
         check("nested startup rejects before changing active run state", rejected && internal::appExitCode() == 71 &&
             internal::runtimeEpoch() == before && internal::appRunToken() == a.runToken);
         internal::appExitCode() = previousExitCode;
-        auto app = internal::makeConstructedApp<Derived>(a);
+        auto app = candidateInCurrentFactory<Derived>(a);
         check("completed candidate receives scope attribution", a.app == app.get() &&
             internal::WindowRequestAccess::constructionTicket(*app).runToken == a.runToken &&
             internal::WindowRequestAccess::constructionTicket(*app).epoch == internal::runtimeEpoch());
         {
             internal::AppConstructionScope inner(b);
-            auto nested = internal::makeConstructedApp<Derived>(b);
+            auto nested = candidateInCurrentFactory<Derived>(b);
             check("completed nested candidate receives B attribution", b.app == nested.get() &&
-                internal::WindowRequestAccess::constructionTicket(*nested).registrationOwner == &bOwner);
+                internal::WindowRequestAccess::constructionTicket(*nested).registrationOwner == b.registrationOwner);
             check("nested constructor selects B", internal::currentAppConstruction() == &b);
         }
         check("nested constructor restores A", internal::currentAppConstruction() == &a &&
-            mcp::internal::registrationOwner() == &aOwner && internal::constructorRunToken() == a.runToken);
+            mcp::internal::registrationOwner() == a.registrationOwner && internal::constructorRunToken() == a.runToken);
         internal::AppConstructionTicket failed{b.runToken, &bOwner};
         struct Throwing : App { Throwing() { throw std::runtime_error("derived constructor"); } };
         try {
             internal::AppConstructionScope inner(failed);
-            (void)internal::makeConstructedApp<Throwing>();
+            (void)candidateInCurrentFactory<Throwing>();
         } catch (const std::runtime_error&) {}
         check("failed derived constructor unwinds claim and restores A", !failed.app &&
-            internal::currentAppConstruction() == &a && mcp::internal::registrationOwner() == &aOwner);
+            internal::currentAppConstruction() == &a && mcp::internal::registrationOwner() == a.registrationOwner);
         if (const char* path = std::getenv("TC_CONSTRUCTOR_GUEST")) {
             void* guest = dlopen(path, RTLD_NOW | RTLD_LOCAL);
             check("constructor guest links to host", guest != nullptr);
@@ -274,28 +284,32 @@ void constructorsAndEpochs() {
     }
     check("constructor stack and owner restore on exit", internal::currentAppConstruction() == previous &&
         mcp::internal::registrationOwner() == owner && !internal::hostCallbacksActive());
-    struct EarlierBase { App helper; };
+    // An incidental App must use its own factory even before the requested
+    // App base is reached (including virtual-base construction order).
+    struct EarlierBase { std::shared_ptr<App> helper = internal::makeConstructedApp<App>(); };
     struct Root : EarlierBase, App {};
     struct VirtualRoot : EarlierBase, virtual App {};
     auto attribution = [&]<class T>() {
         internal::AppConstructionTicket ticket{internal::appRunToken(), &aOwner};
         internal::AppConstructionScope scope(ticket);
-        auto candidate = internal::makeConstructedApp<T>();
+        auto candidate = candidateInCurrentFactory<T>();
         const auto& root = internal::WindowRequestAccess::constructionTicket(*candidate);
-        const auto& helper = internal::WindowRequestAccess::constructionTicket(candidate->helper);
-        check("requested App claims ticket after earlier incidental App", ticket.app == static_cast<App*>(candidate.get()) &&
-            root.app == ticket.app && root.epoch == internal::runtimeEpoch() && root.registrationOwner == &aOwner &&
-            root.runToken == ticket.runToken && !helper.app && !helper.runToken);
+        const auto& helper = internal::WindowRequestAccess::constructionTicket(*candidate->helper);
+        check("requested App claims ticket after independently constructed helper", ticket.app == static_cast<App*>(candidate.get()) &&
+            root.app == ticket.app && root.epoch == internal::runtimeEpoch() && root.registrationOwner == ticket.registrationOwner &&
+            root.runToken == ticket.runToken && helper.app == candidate->helper.get() &&
+            helper.runToken && helper.runToken != root.runToken);
     };
     attribution.template operator()<Root>();
     attribution.template operator()<VirtualRoot>();
     {
         internal::AppConstructionTicket ticket{internal::appRunToken(), &aOwner};
         internal::AppConstructionScope scope(ticket);
-        std::unique_ptr<Root> candidate(new Root());
+        auto candidate = candidateInCurrentFactory<Root>();
         internal::completeAppConstruction(*candidate);
-        check("guest allocation attributes requested App, not helper", ticket.app == static_cast<App*>(candidate.get()) &&
-            !internal::WindowRequestAccess::constructionTicket(candidate->helper).app);
+        check("guest allocation attributes requested App and independent helper", ticket.app == static_cast<App*>(candidate.get()) &&
+            internal::WindowRequestAccess::constructionTicket(*candidate->helper).app == candidate->helper.get() &&
+            internal::WindowRequestAccess::constructionTicket(*candidate->helper).runToken != ticket.runToken);
     }
     struct CustomRoot : EarlierBase, App {
         static void* operator new(size_t size) { ++customAppAllocations; return ::operator new(size); }
@@ -304,13 +318,14 @@ void constructorsAndEpochs() {
     {
         internal::AppConstructionTicket ticket{internal::appRunToken(), &aOwner};
         internal::AppConstructionScope scope(ticket);
-        std::unique_ptr<CustomRoot> candidate(new CustomRoot());
+        auto candidate = candidateInCurrentFactory<CustomRoot>();
         internal::completeAppConstruction(*candidate);
-        check("raw guest attribution preserves class allocation", customAppAllocations == 1 &&
-            ticket.app == static_cast<App*>(candidate.get()) && !internal::WindowRequestAccess::constructionTicket(candidate->helper).app);
+        check("factory storage bypasses class allocation", customAppAllocations == 0 &&
+            ticket.app == static_cast<App*>(candidate.get()) && internal::WindowRequestAccess::constructionTicket(*candidate->helper).app == candidate->helper.get() &&
+            internal::WindowRequestAccess::constructionTicket(*candidate->helper).runToken != ticket.runToken);
     }
-    check("raw guest attribution preserves class deallocation", customAppDeallocations == 1);
-    internal::restoreWindowContext(&internal::mainWindowContext());
+    check("factory storage uses matching deallocation", customAppDeallocations == 0);
+    internal::restoreWindowContext(&internal::windowApiContext());
     setColor(1, 0, 0);
     std::thread styleWorker([] { runOnMainThread([] {
         check("service style uses process selection", !internal::currentWindow());
@@ -321,13 +336,13 @@ void constructorsAndEpochs() {
     const auto color = internal::getDefaultContext().getColor();
     check("process drawing style leaves main red", color.r == 1 && color.g == 0 && color.b == 0);
     internal::restoreWindowContext(nullptr);
-    check("null restoration selects no Window", !internal::currentWindowCtx() && !internal::currentWindow() &&
+    check("null restoration selects no Window", !internal::currentWindowCtx() && !internal::currentWindowContext().hostWindow &&
         &internal::currentWindowContext() == &internal::nonWindowContext());
     check("process dimensions never fall back to a native main surface",
         !internal::usesNativeWindowDimensions(internal::currentWindowContext()));
 }
 void processToolSnapshots() {
-    auto& window = *internal::mainWindow();
+    auto& window = *testWindow();
     Native native; bind(window, native, 141);
     auto& ctx = window.context();
     const auto updates = ctx.updateCount;
@@ -346,11 +361,19 @@ void processToolSnapshots() {
     };
     const auto health = call("tc_get_health");
     const auto windows = call("tc_list_windows");
-    check("process health reads explicit main metrics", health.at("width") == 100 && health.at("height") == 50 &&
+    check("process health uses the sole open Window", health.at("width") == 100 && health.at("height") == 50 &&
         health.at("frameCount") == 42 && health.at("fps") == 6);
-    check("process window listing preserves main dimensions", windows.at("windows").at(0).at("width") == 100 &&
+    native.metadata.occluded = true;
+    internal::refreshWindowMetadata(window);
+    const auto hiddenHealth = call("tc_get_health");
+    check("health reads paused Window counters without requiring a drawable",
+          hiddenHealth.value("status", "") == "ok" && hiddenHealth.at("frameCount") == 42 &&
+          hiddenHealth.at("width") == 100 && hiddenHealth.at("fps") == 6);
+    native.metadata.occluded = false;
+    internal::refreshWindowMetadata(window);
+    check("process window listing preserves receiver dimensions", windows.at("windows").at(0).at("width") == 100 &&
         windows.at("windows").at(0).at("height") == 50);
-    check("tool snapshots leave process context unselected", !internal::currentWindowCtx() && !internal::currentWindow());
+    check("tool snapshots leave process context unselected", !internal::currentWindowCtx() && !internal::currentWindowContext().hostWindow);
     mcp::setToolLevel(level);
     internal::WindowRequestAccess::unbind(window);
     ctx.updateCount = updates; ctx.rateCount = rates;
@@ -360,14 +383,14 @@ int queues = 0, maintenance = 0, reloads = 0;
 bool throwQueue = false;
 void queueService() {
     ++queues;
-    check("queues select no Window", internal::currentWindowCtx() == nullptr && !internal::currentWindow());
+    check("queues select no Window", internal::currentWindowCtx() == nullptr && !internal::currentWindowContext().hostWindow);
     internal::beforeHostTurn(); internal::afterHostTurn();
     check("nested service turn coalesces", queues == maintenance + 1);
     if (throwQueue) throw std::runtime_error("queue service fault");
 }
 void maintain() {
     ++maintenance;
-    check("maintenance selects no Window", internal::currentWindowCtx() == nullptr && !internal::currentWindow());
+    check("maintenance selects no Window", internal::currentWindowCtx() == nullptr && !internal::currentWindowContext().hostWindow);
     internal::HostTurnScope nested;
     check("maintenance cannot reenter services", queues == maintenance);
 }
@@ -375,12 +398,12 @@ void reload() { ++reloads; }
 void roots() {
     for (bool runner : {true, false}) {
         Window secondary, peer;
-        auto& window = runner ? *internal::mainWindow() : secondary;
+        auto& window = runner ? *testWindow() : secondary;
         Native native, peerNative;
         bind(window, native, runner ? 718u : 719u); bind(peer, peerNative, 720);
-        auto app = std::make_shared<Probe>();
+        auto app = internal::makeConstructedApp<Probe>();
         window.setIndependentFps(VSYNC, EVENT_DRIVEN); window.context().loop.redrawCount = 0;
-        window.setApp(app);
+        internal::WindowRequestAccess::attachCandidate(window, app);
         auto* previous = internal::currentWindowCtx();
         internal::currentWindowCtx() = &peer.context();
         inputs = 0;
@@ -391,9 +414,9 @@ void roots() {
             int rawEvents = 0;
             auto raw = window.events().rawEvent.listen([&](const sapp_event&) { ++rawEvents; });
             sapp_event e{}; e.type = SAPP_EVENTTYPE_FOCUSED;
-            internal::mainWindowEvent(&e, {9999}, &window);
+            internal::windowEvent(&e, {9999}, &window);
             check("launch event client rejects the delivered stale identity", rawEvents == 0);
-            internal::mainWindowEvent(&e, {native.expected}, &window);
+            internal::windowEvent(&e, {native.expected}, &window);
             check("launch event client uses the common binding and converter", rawEvents == 1);
         }
         check("event restores the actual peer caller", internal::currentWindowCtx() == &peer.context());
@@ -443,9 +466,9 @@ void roots() {
             /* Common converter performs typed delivery. */
         });
         outerInput.disconnect(); peerInput.disconnect();
-        auto next = std::make_shared<Probe>();
+        auto next = internal::makeConstructedApp<Probe>();
         auto replace = window.events().keyPressed.listen([&](KeyEventArgs&) {
-            window.setApp(next);
+            internal::WindowRequestAccess::attachCandidate(window, next);
             check("attachment defers through callback", window.getApp() == app && app->exits == 0);
             tick(window);
             check("reentrant tick cannot apply pending attachment", window.getApp() == app && app->exits == 0);
@@ -455,9 +478,9 @@ void roots() {
         });
         check("attachment lands at outer entry exit", window.getApp() == next && app->exits == 1);
         replace.disconnect();
-        auto committed = std::make_shared<Probe>(), later = std::make_shared<Probe>();
-        next->onExit = [&] { window.setApp(later); };
-        auto atExit = window.events().keyPressed.listen([&](KeyEventArgs&) { window.setApp(committed); });
+        auto committed = internal::makeConstructedApp<Probe>(), later = internal::makeConstructedApp<Probe>();
+        next->onExit = [&] { internal::WindowRequestAccess::attachCandidate(window, later); };
+        auto atExit = window.events().keyPressed.listen([&](KeyEventArgs&) { internal::WindowRequestAccess::attachCandidate(window, committed); });
         event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
             /* Common converter performs typed delivery. */
         });
@@ -481,7 +504,7 @@ void roots() {
         check("hidden draw gate runs before fake presentation", !tick(window) && window.context().drawCount == noDrawCount);
         window.closeRequested_ = true;
         { internal::WindowEntryScope closedEntry(window, true); check("pending close rejects tick entry itself", !closedEntry); }
-        auto refused = std::make_shared<Probe>(); window.pendingApp_ = refused; window.appRequested_ = true;
+        auto refused = internal::makeConstructedApp<Probe>(); window.pendingApp_ = refused; window.appRequested_ = true;
         const auto sizes = next->sizes, closingUpdates = next->updates;
         check("close outranks tick and attachment", !tick(window) && window.getApp() == next && next->sizes == sizes && next->updates == closingUpdates);
         int vetoes = 0;
@@ -524,7 +547,7 @@ void retention() {
 
     // The common close bridge must retain through the existing ending endpoint too.
     destroyed = inside = destroyedInside = false;
-    raw = internal::WindowRequestAccess::makeMain().release();
+    raw = new Window();
     owner = std::shared_ptr<Window>(raw, [&](Window*) {
         destroyed = true; destroyedInside |= inside;
         // Keep storage so a missing close retainer reports assertions without UAF.
@@ -617,10 +640,11 @@ int main() {
     internal::pixelPerfectMode() = false;
     internal::windowClockForTests() = readClock;
     constructorsAndEpochs();
+    runnerWindow = internal::prepareLaunchWindow(WindowSettings{});
     processToolSnapshots();
     WindowSettings settings; settings.pixelPerfect = false;
-    const auto descriptor = internal::buildWindowDescriptor(settings);
-    check("launch descriptor installs the common desktop tick client", descriptor._tc_tick_cb == internal::windowTick && descriptor._tc_bind_user == internal::mainWindow() && descriptor._tc_event_cb == internal::mainWindowEvent);
+    const auto descriptor = internal::buildWindowDescriptor(settings, runnerWindow.get());
+    check("launch descriptor installs the common desktop tick client", descriptor._tc_tick_cb == internal::windowTick && descriptor._tc_bind_user == testWindow() && descriptor._tc_event_cb == internal::windowEvent);
     check("launch descriptor installs process turn hooks", descriptor._tc_before_turn == internal::beforeHostTurn && descriptor._tc_after_turn == internal::afterHostTurn && descriptor._tc_callbacks_active == internal::hostCallbacksActive);
     bootstrap(); roots(); retention(); turns();
     auto* previous = internal::currentWindowCtx();

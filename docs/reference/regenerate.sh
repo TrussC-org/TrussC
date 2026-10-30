@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate the API outputs on macOS (the committed reference platform).
+# Regenerate the API outputs using clang on a supported host.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUILD="$ROOT/docs/reference/build-regenerate"

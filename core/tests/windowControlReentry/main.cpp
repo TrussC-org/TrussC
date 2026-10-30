@@ -25,6 +25,18 @@
 using namespace tc;
 namespace {
 int failures = 0;
+Window* primaryFixture = nullptr;
+template<class F> decltype(auto) fixtureCall(F&& fn) {
+    auto* target = internal::currentWindowContext().hostWindow;
+    auto app = target ? target->getApp() : nullptr;
+    internal::AppOwnerScope owner(app ? internal::appOwner(*app) : nullptr);
+    return fn();
+}
+void fixtureSetWindowSize(int w, int h) { fixtureCall([&] { tc::setWindowSize(w, h); }); }
+void fixtureSetWindowSizeLogical(int w, int h) { fixtureCall([&] { tc::setWindowSizeLogical(w, h); }); }
+void fixtureSetWindowPosition(int x, int y) { fixtureCall([&] { tc::setWindowPosition(x, y); }); }
+void fixtureToggleFullscreen() { fixtureCall([] { tc::toggleFullscreen(); }); }
+bool fixtureIsFullscreen() { return fixtureCall([] { return tc::isFullscreen(); }); }
 double nativeWidth = 0, nativeHeight = 0;
 int nativeSizes = 0;
 float nativeDpi = 1;
@@ -47,7 +59,7 @@ void check(const char* label, bool ok) {
 }
 internal::WindowFullscreenState mainFullscreen, secondaryFullscreen;
 internal::WindowFullscreenPhase recordedPhase(const Window& window) {
-    return (window.ctx_.isMain ? mainFullscreen : secondaryFullscreen).phase;
+    return (&window == primaryFixture ? mainFullscreen : secondaryFullscreen).phase;
 }
 uint32_t recordNativePhase(const Window& window) { return static_cast<uint32_t>(recordedPhase(window)); }
 int appliedControls = 0;
@@ -58,8 +70,8 @@ bool recordControl(Window&, internal::WindowControl, int, int, const std::string
 int mainNativeToggles = 0, secondaryNativeToggles = 0;
 bool recordFullscreenControl(Window& window, internal::WindowControl op, int full, int,
                              const std::string*, IVec2&) {
-    auto& state = window.ctx_.isMain ? mainFullscreen : secondaryFullscreen;
-    auto& toggles = window.ctx_.isMain ? mainNativeToggles : secondaryNativeToggles;
+    auto& state = &window == primaryFixture ? mainFullscreen : secondaryFullscreen;
+    auto& toggles = &window == primaryFixture ? mainNativeToggles : secondaryNativeToggles;
     // Stand in only for the native endpoint. Invoke the real public wrapper,
     // context routing and control adapter, including explicit set requests.
     if (op == internal::WindowControl::ToggleFullscreen) toggles += state.request(!state.desired);
@@ -80,7 +92,7 @@ void testPublicFullscreenToggles(Window& main, Window& secondary) {
             auto toggle = [&] {
                 if (global) {
                     internal::currentWindowCtx() = &target->context();
-                    toggleFullscreen();
+                    fixtureToggleFullscreen();
                 } else {
                     // A handle must act on its target even in another context.
                     internal::currentWindowCtx() = &(target == &main ? secondary : main).context();
@@ -208,8 +220,8 @@ void testFullscreenCalls(Window& main, Window& secondary) {
         " ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false"};
     secondary.title_ = "Preview";
     for (Window* target : {&main, &secondary}) {
-        auto& state = target->ctx_.isMain ? mainFullscreen : secondaryFullscreen;
-        auto& other = target->ctx_.isMain ? secondaryFullscreen : mainFullscreen;
+        auto& state = target == primaryFixture ? mainFullscreen : secondaryFullscreen;
+        auto& other = target == primaryFixture ? secondaryFullscreen : mainFullscreen;
         for (Phase phase : {Phase::Windowed, Phase::Entering, Phase::Fullscreen, Phase::Exiting}) {
             state.phase = phase;
             other.phase = phase == Phase::Windowed ? Phase::Fullscreen : Phase::Windowed;
@@ -219,12 +231,12 @@ void testFullscreenCalls(Window& main, Window& secondary) {
                 for (int value : {320, -1}) {
                     for (int call = 0; call != 6; ++call) {
                         internal::currentWindowCtx() = &target->context();
-                        check("global isFullscreen follows target guard", isFullscreen() == (phase != Phase::Windowed));
+                        check("global isFullscreen follows target guard", fixtureIsFullscreen() == (phase != Phase::Windowed));
                         const int beforeMessages = messages, beforeApplied = appliedControls;
                         switch (call) {
-                            case 0: setWindowSize(value, 240); break;
-                            case 1: setWindowSizeLogical(value, 240); break;
-                            case 2: setWindowPosition(value < 0 ? (std::numeric_limits<int>::max)() : value, 20); break;
+                            case 0: fixtureSetWindowSize(value, 240); break;
+                            case 1: fixtureSetWindowSizeLogical(value, 240); break;
+                            case 2: fixtureSetWindowPosition(value < 0 ? (std::numeric_limits<int>::max)() : value, 20); break;
                             case 3: internal::currentWindowCtx() = &((target == &main) ? secondary : main).context();
                                 target->setSize(value, 240); break;
                             case 4: internal::currentWindowCtx() = &((target == &main) ? secondary : main).context();
@@ -234,7 +246,7 @@ void testFullscreenCalls(Window& main, Window& secondary) {
                         }
                         if (phase != Phase::Windowed) {
                             const std::string expected = std::string("[Window] ") + names[call] +
-                                (target == &main ? "" : " on \"Preview\"") + reasons[int(phase)];
+                                (" on \"" + target->getTitle() + "\"") + reasons[int(phase)];
                             check("ignored public call logs exactly one exact Notice before validation",
                                 messages == beforeMessages + 1 && level == LogLevel::Notice && message == expected);
                             check("ignored public call never reaches native control", appliedControls == beforeApplied);
@@ -292,7 +304,7 @@ struct DrawApp : App {
 };
 bool reenter(Window& target, internal::WindowControl op, int, int, const std::string*, IVec2&) {
     check("size reached native control hook", op == internal::WindowControl::Size);
-    if (!target.context().isMain) {
+    if (&target != primaryFixture) {
         // The production secondary callback boundary and resize delivery. Its
         // platform-specific event decoder only supplies the dimensions here.
         tcCoreTest::nativeBoundary([&] {
@@ -304,10 +316,10 @@ bool reenter(Window& target, internal::WindowControl op, int, int, const std::st
     // Always exercise the real main dispatcher too: native controls can pump
     // events for other windows. In the main-target case this is precisely the
     // windowDidResize -> RESIZED path from the reviewer's nested-dummy probe.
-    publishSize(*internal::mainWindow(), ++framebufferWidth, framebufferHeight, nativeDpi);
+    publishSize(*primaryFixture, ++framebufferWidth, framebufferHeight, nativeDpi);
     sapp_event ev{};
     ev.type = SAPP_EVENTTYPE_RESIZED;
-    tcCoreTest::dispatchMainEvent(&ev);
+    internal::dispatchWindowEventForTests(&ev, *primaryFixture);
     return true;
 }
 int vertices(Window& window) {
@@ -332,17 +344,18 @@ int main() {
     sg_desc gd{}; sg_setup(&gd);
     sgl_desc_t sd{}; sgl_setup(&sd);
     {
-        internal::createMainWindow(WindowSettings{});
-        Window* main = internal::mainWindow();
+        internal::beginRuntimeRun();
+        auto launch = internal::prepareLaunchWindow(WindowSettings{});
+        Window* main = primaryFixture = launch.get();
         internal::WindowRequestAccess::bindForTests(*main, 101);
         Window secondary;
         secondary.native_ = &secondary; internal::WindowRequestAccess::bindForTests(secondary, 202);
         internal::WindowRequestAccess::binding(*main).operations = &recordingOperations;
         internal::WindowRequestAccess::binding(secondary).operations = &recordingOperations;
-        auto mainApp = std::make_shared<DrawApp>();
-        auto secondaryApp = std::make_shared<DrawApp>();
-        check("main App attached", internal::attachMainApp(mainApp));
-        secondary.setApp(secondaryApp);
+        auto mainApp = internal::makeConstructedApp<DrawApp>();
+        auto secondaryApp = internal::makeConstructedApp<DrawApp>();
+        check("main App attached", internal::attachCandidate(*main, mainApp));
+        internal::WindowRequestAccess::attachCandidate(secondary, secondaryApp);
         internal::WindowRequestAccess::applyPendingApp(secondary);
         check("secondary App attached", secondary.getApp() == secondaryApp);
         testFullscreenCalls(*main, secondary);
@@ -396,8 +409,8 @@ int main() {
                     mainApp->getWidth() == expectedWidth && mainApp->getHeight() == expectedHeight &&
                     mainApp->resizedWidth == expectedWidth && mainApp->resizedHeight == expectedHeight);
                 check("main Window getters stay logical", main->getWidth() == int(1001 / dpi) && main->getHeight() == int(667 / dpi));
-                auto replacement = std::make_shared<DrawApp>();
-                secondary.setApp(replacement);
+                auto replacement = internal::makeConstructedApp<DrawApp>();
+                internal::WindowRequestAccess::attachCandidate(secondary, replacement);
                 internal::WindowRequestAccess::applyPendingApp(secondary);
                 internal::restoreWindowContext(&secondary.context());
                 internal::syncWindowAppSize(secondary);
@@ -405,8 +418,8 @@ int main() {
                     replacement->getWidth() == expectedWidth && replacement->getHeight() == expectedHeight &&
                     replacement->resizedWidth == expectedWidth && replacement->resizedHeight == expectedHeight);
                 secondaryApp = replacement;
-                auto mainReplacement = std::make_shared<DrawApp>();
-                main->setApp(mainReplacement);
+                auto mainReplacement = internal::makeConstructedApp<DrawApp>();
+                internal::WindowRequestAccess::attachCandidate(*main, mainReplacement);
                 internal::WindowRequestAccess::applyPendingApp(*main);
                 internal::syncWindowAppSize(*main, true);
                 check("main replacement seed matches secondary",
@@ -427,8 +440,7 @@ int main() {
                 internal::pixelPerfectMode() = enabled;
                 auto deliver = [&](Window& window, const sapp_event& event) {
                     internal::restoreWindowContext(&window.context());
-                    if (window.context().isMain) tcCoreTest::dispatchMainEvent(&event);
-                    else internal::dispatchWindowEventForTests(&event, window);
+                    internal::dispatchWindowEventForTests(&event, window);
                 };
                 sapp_event ev{};
                 ev.type = SAPP_EVENTTYPE_MOUSE_MOVE;
@@ -446,8 +458,8 @@ int main() {
                     mainApp->moves > 0 && secondaryApp->moves > 0 &&
                     same(mainApp->pointer, expected) && same(secondaryApp->pointer, expected) &&
                     same(mainApp->delta, Vec2(0, 0)) && same(secondaryApp->delta, Vec2(0, 0)));
-                check("secondary cursor getters use App pointer units", same(getMousePos(), expected) &&
-                    same(Vec2(secondaryApp->getMouseX(), secondaryApp->getMouseY()), expected));
+                check("secondary cursor getters use App pointer units", same(fixtureCall([] { return getMousePos(); }), expected) &&
+                    same(fixtureCall([&] { return Vec2(secondaryApp->getMouseX(), secondaryApp->getMouseY()); }), expected));
                 ev.type = SAPP_EVENTTYPE_MOUSE_DOWN; ev.mouse_button = SAPP_MOUSEBUTTON_LEFT;
                 deliver(*main, ev); deliver(secondary, ev);
                 ev.type = SAPP_EVENTTYPE_MOUSE_MOVE; ev.modifiers = SAPP_MODIFIER_LMB;
@@ -470,9 +482,9 @@ int main() {
                 deliver(*main, ev); deliver(secondary, ev);
                 ev.type = SAPP_EVENTTYPE_MOUSE_ENTER; ev.mouse_x = 200; ev.mouse_y = 100;
                 deliver(secondary, ev);
-                check("secondary entry updates hover coordinates in App units", same(getMousePos(), expected));
+                check("secondary entry updates hover coordinates in App units", same(fixtureCall([] { return getMousePos(); }), expected));
                 ev.type = SAPP_EVENTTYPE_MOUSE_LEAVE; deliver(secondary, ev);
-                check("secondary leave retains offscreen hover sentinel", same(getMousePos(), Vec2(-1, -1)));
+                check("secondary leave retains offscreen hover sentinel", same(fixtureCall([] { return getMousePos(); }), Vec2(-1, -1)));
                 for (auto* target : {main, &secondary}) {
                     target->context().dpiScale = dpi;
                     auto rawDpiChange = target->events().rawEvent.listen([&](const sapp_event&) {
@@ -499,7 +511,7 @@ int main() {
         internal::pixelPerfectMode() = true;
         secondary.context().dpiScale = 1.1f;
         int calls = nativeSizes;
-        setWindowSize(550, 330);
+        fixtureSetWindowSize(550, 330);
         check("public fractional DPI size reaches native fractional logical size",
               nativeSizes == ++calls && nativeWidth == double(550) / 1.1f && nativeHeight == double(330) / 1.1f);
         // An attached App targets its own secondary even from the main caller.
@@ -517,7 +529,7 @@ int main() {
                 const int expectedCalls = 1;
                 internal::restoreWindowContext(&secondary.context());
                 calls = nativeSizes;
-                setWindowSize(pixels, pixels);
+                fixtureSetWindowSize(pixels, pixels);
                 publicSweep &= nativeSizes == calls + expectedCalls &&
                     (!expectedCalls || (nativeWidth == expected && nativeHeight == expected));
                 internal::restoreWindowContext(&main->context());
@@ -534,15 +546,15 @@ int main() {
         internal::restoreWindowContext(&secondary.context());
         calls = nativeSizes;
         secondary.context().dpiScale = 0.5f;
-        setWindowSize((std::numeric_limits<int>::max)(), 330); // logical quotient exceeds int range
+        fixtureSetWindowSize((std::numeric_limits<int>::max)(), 330); // logical quotient exceeds int range
         secondary.context().dpiScale = std::numeric_limits<float>::min();
-        setWindowSize(550, 330); // logical quotient exceeds int range
+        fixtureSetWindowSize(550, 330); // logical quotient exceeds int range
         check("out-of-range logical quotients never reach native size", nativeSizes == calls);
         internal::pixelPerfectMode() = false;
         internal::restoreWindowContext(nullptr);
         secondary.native_ = nullptr; internal::WindowRequestAccess::unbind(secondary);
         internal::WindowRequestAccess::endApp(secondary);
-        internal::destroyMainWindow();
+        internal::shutdownRuntime();
     }
     sgl_shutdown(); sg_shutdown();
     return failures ? 1 : 0;

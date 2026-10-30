@@ -6,6 +6,8 @@
 using namespace tc;
 namespace {
 int checks = 0, failures = 0;
+const internal::WindowContext* earlierContext = nullptr;
+bool isEarlier(const internal::WindowContext& context) { return &context == earlierContext; }
 void check(const char* name, bool value) { ++checks; if (!value) { ++failures; std::printf("host-entry: FAIL: %s\n", name); } }
 using Native = tcCoreTest::InjectedWindow;
 sapp_event event(sapp_event_type type, float x=0, float y=0, unsigned mods=0) {
@@ -46,14 +48,14 @@ void nativeVisibilityHistory(Window& w,Native& n,Record& record,Cover cover,Mini
     cover(false);expect({});minimize(false);expect({SAPP_EVENTTYPE_RESTORED,SAPP_EVENTTYPE_RESUMED,101});
     minimize(true);expect({SAPP_EVENTTYPE_ICONIFIED,SAPP_EVENTTYPE_SUSPENDED,100});
     minimize(false);expect({SAPP_EVENTTYPE_RESTORED,SAPP_EVENTTYPE_RESUMED,101});
-    check("native producer retains role and draw policy independently",record.is_main==w.context().isMain);
+    check("native producer retains role and draw policy independently",record.is_main==isEarlier(w.context()));
     n.metadata.trust_hidden_signals=true;
 }
 void nativeVisibilitySources(Window& w,Native& n) {
     using namespace nativeFixture;
     for(bool trust:{false,true})for(bool allow:{false,true})for(bool startHidden:{false,true}) {
         mac::Record m(n);mac::NSWindow window;m.window=&window;mac::live=&m;
-        m.is_main=w.context().isMain;m.trust_hidden_signals=trust;m.draw_while_hidden=allow;
+        m.is_main=isEarlier(w.context());m.trust_hidden_signals=trust;m.draw_while_hidden=allow;
         // Sample launch visibility before callback admission, then enter ready.
         auto& binding=internal::WindowRequestAccess::binding(w);
         binding.visibilityReady=false;binding.lastDeliveredHidden=false;
@@ -69,9 +71,9 @@ void nativeVisibilitySources(Window& w,Native& n) {
         check("launch-hidden macOS main and peer both resume",launch==(trust&&startHidden?std::vector<int>{SAPP_EVENTTYPE_RESUMED,101}:std::vector<int>{}));
         launchRaw.disconnect();launchTyped.disconnect();
         nativeVisibilityHistory(w,n,m,[&](bool covered){mac::observe(m,window.miniaturized,covered);},[&](bool iconic){window.miniaturized=iconic;if(iconic)mac::minimize(&m,nullptr);else mac::restore(&m,nullptr);},startHidden,trust);
-        win::Record v(n);win::live=&v;v.is_main=w.context().isMain;v.trust_hidden_signals=trust;v.draw_while_hidden=allow;
+        win::Record v(n);win::live=&v;v.is_main=isEarlier(w.context());v.trust_hidden_signals=trust;v.draw_while_hidden=allow;
         nativeVisibilityHistory(w,n,v,[&](bool covered){win::_sapp_tc_win32_observe_occlusion(&v,covered);},[&](bool iconic){win::minimize(&v,iconic);},startHidden,trust);
-        x11::Record x(n);x11::live=&x;x.is_main=w.context().isMain;x.trust_hidden_signals=trust;x.draw_while_hidden=allow;
+        x11::Record x(n);x11::live=&x;x.is_main=isEarlier(w.context());x.trust_hidden_signals=trust;x.draw_while_hidden=allow;
         nativeVisibilityHistory(w,n,x,[&](bool covered){x11::cover(&x,covered);},[&](bool iconic){x11::minimize(&x,iconic);},startHidden,trust);
     }
     n.metadata.iconified=n.metadata.occluded=false;n.metadata.trust_hidden_signals=true;
@@ -94,7 +96,7 @@ void lockedDelivery(Window& w,Native& original) {
     for(bool pixels:{false,true})for(bool useXi2:{false,true}) {
         nativeFixture::xi2::Record n(w,original.win_id);
         n.metadata.dpi_scale=2;clearInput(w);internal::pixelPerfectMode()=pixels;
-        auto app=std::make_shared<LockedApp>();auto node=std::make_shared<LockedNode>();app->addChild(node);w.setApp(app);
+        auto app=internal::makeConstructedApp<LockedApp>();auto node=std::make_shared<LockedNode>();app->addChild(node);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         n.send(event(SAPP_EVENTTYPE_MOUSE_MOVE,20,30));
         auto motion=[&](float dx,float dy){
@@ -121,7 +123,7 @@ void lockedDelivery(Window& w,Native& original) {
         n.send(event(SAPP_EVENTTYPE_MOUSE_UP,20,30));
         check("physical UP after locked drag clears grab once",app->releases==2&&node->releases==2&&w.context().grabbedNode.expired()&&w.context().pressedMouseButtons==0);
         if(useXi2)check("real XI2 cookie parsing queries and frees native data",nativeFixture::xi2::queries>0&&nativeFixture::xi2::freed==nativeFixture::xi2::queries);
-        w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);
+        w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
     }
     internal::bindWindow(w,{original.win_id},original.operations,&original);internal::pixelPerfectMode()=false;
 }
@@ -365,7 +367,7 @@ void injections(Window& w,Native& n,Window& peer) {
     const int rawBefore=raw;
     int invalidCallbacks=0;
     struct InvalidApp : App { int& calls; explicit InvalidApp(int& calls):calls(calls){} void windowResized(int,int)override{++calls;} };
-    auto pendingInvalid=std::make_shared<InvalidApp>(invalidCallbacks);w.pendingApp_=pendingInvalid;w.appRequested_=true;
+    auto pendingInvalid=internal::makeConstructedApp<InvalidApp>(invalidCallbacks);w.pendingApp_=pendingInvalid;w.appRequested_=true;
     const auto beforeInvalidApp=w.getApp();
     n.metadata.dpi_scale=2;
     auto rejected=json::parse(mcp::internal::Server::instance().processMessage(json{{"jsonrpc","2.0"},{"id",239},{"method","tools/call"},{"params",{{"name","tc_mouse_move"},{"arguments",{{"x",std::numeric_limits<float>::max()},{"y",0}}}}}}.dump()));
@@ -377,16 +379,16 @@ void injections(Window& w,Native& n,Window& peer) {
     tool("tc_mouse_click",{{"x",10},{"y",10}});
     check("MCP release rebuilds coordinates after callback DPI change",freshRelease==Vec2(10,10));changeDpi.disconnect();releasePosition.disconnect();
     struct GestureApp : App { int presses=0,releases=0; void mousePressed(const MouseEventArgs&)override{++presses;}void mouseReleased(const MouseEventArgs&)override{++releases;} };
-    auto first=std::make_shared<GestureApp>(),next=std::make_shared<GestureApp>();w.setApp(first);
-    auto swap=w.events().mousePressed.listen([&](MouseEventArgs&){w.setApp(next);});
+    auto first=internal::makeConstructedApp<GestureApp>(),next=internal::makeConstructedApp<GestureApp>();internal::WindowRequestAccess::attachCandidate(w, first);
+    auto swap=w.events().mousePressed.listen([&](MouseEventArgs&){internal::WindowRequestAccess::attachCandidate(w, next);});
     tool("tc_mouse_click",{{"x",10},{"y",10}});
     check("MCP click holds attachment across both halves",first->presses==1&&first->releases==1&&next->presses==0&&next->releases==0&&w.getApp()==next);
-    swap.disconnect();w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);
-    auto pendingCloseApp=std::make_shared<GestureApp>();w.setApp(pendingCloseApp);
+    swap.disconnect();w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
+    auto pendingCloseApp=internal::makeConstructedApp<GestureApp>();internal::WindowRequestAccess::attachCandidate(w, pendingCloseApp);
     auto closeDuringPress=w.events().mousePressed.listen([&](MouseEventArgs&){n.closed=true;});
     tool("tc_mouse_click",{{"x",10},{"y",10}});
     check("pending native close cannot split an admitted click",pendingCloseApp->presses==1&&pendingCloseApp->releases==1);
-    n.closed=false;closeDuringPress.disconnect();w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);
+    n.closed=false;closeDuringPress.disconnect();w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
     auto nestedKey=w.events().mousePressed.listen([&](MouseEventArgs&){auto key=event(SAPP_EVENTTYPE_KEY_DOWN);key.key_code=SAPP_KEYCODE_B;key.modifiers=SAPP_MODIFIER_SHIFT;n.operations.injectEvent({n.win_id},&n,&key);});
     tool("tc_mouse_click",{{"x",10},{"y",10},{"shift",true}});
     check("temporary click modifiers preserve callback changes to other keys",w.context().keysPressed.contains(SAPP_KEYCODE_B)&&!w.context().keysPressed.contains(SAPP_KEYCODE_LEFT_SHIFT));
@@ -434,7 +436,7 @@ void clickRecovery(Window& w, Native& n) {
 void clickNewPress(Window& w, Native& n) {
     for (bool rawRelease : {false,true}) {
         clearInput(w);internal::pixelPerfectMode()=false;n.metadata.dpi_scale=1;
-        auto app=std::make_shared<LockedApp>();auto node=std::make_shared<LockedNode>();app->addChild(node);w.setApp(app);
+        auto app=internal::makeConstructedApp<LockedApp>();auto node=std::make_shared<LockedNode>();app->addChild(node);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         bool nested=false;
         auto down=[&]{if(!nested){nested=true;n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,20,30,SAPP_MODIFIER_LMB));}};
@@ -454,7 +456,7 @@ void disabledTouchInClick(Window& w, Native& n) {
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=1;
         {internal::WindowEntryScope entry(w);setTouchAsMouse(true);}
         struct SettingApp:LockedApp {std::function<void()> touch;void touchPressed(const TouchEventArgs&)override{if(touch)touch();}};
-        auto app=std::make_shared<SettingApp>();auto a=std::make_shared<LockedNode>();app->addChild(a);w.setApp(app);
+        auto app=internal::makeConstructedApp<SettingApp>();auto a=std::make_shared<LockedNode>();app->addChild(a);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         bool nested=false;int typed=0;
         auto disable=[&]{setTouchAsMouse(false);};
@@ -464,7 +466,7 @@ void disabledTouchInClick(Window& w, Native& n) {
         auto press=w.events().mousePressed.listen([&](MouseEventArgs&){++typed;if(!nested){nested=true;auto e=event(SAPP_EVENTTYPE_TOUCHES_BEGAN);e.num_touches=1;e.touches[0]={42,20,30,SAPP_ANDROIDTOOLTYPE_FINGER,true};n.send(e);}},EventPriority::BeforeApp);
         tool("tc_mouse_click",{{"x",20},{"y",30}});
         check("disabled nested touch preserves parent click UP without a held button",nested&&typed==1&&a->releases==1&&app->releases==1&&!w.context().mousePressed&&w.context().pressedMouseButtons==0&&!w.context().touchMapper.hasPrimary());
-        app->touch={};w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);
+        app->touch={};w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
         {internal::WindowEntryScope entry(w);setTouchAsMouse(true);}
     }
 }
@@ -474,7 +476,7 @@ void abortedClickOwnership(Window& w, Native& n) {
     for(bool pixels:{false,true}) {
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=1;
         struct AbortNode:LockedNode {bool consume=true;bool onMousePress(const MouseEventArgs&)override{return consume;}};
-        auto app=std::make_shared<LockedApp>();auto a=std::make_shared<AbortNode>();app->addChild(a);w.setApp(app);
+        auto app=internal::makeConstructedApp<LockedApp>();auto a=std::make_shared<AbortNode>();app->addChild(a);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         int phase=0,typed=0;bool nested=false;
         auto count=w.events().mousePressed.listen([&](MouseEventArgs&){++typed;},EventPriority::BeforeApp);
@@ -488,7 +490,7 @@ void abortedClickOwnership(Window& w, Native& n) {
         check("reused aborted click cannot recover another gesture's grab",intact()&&typed==2);
         raw.disconnect();after.disconnect();n.send(event(SAPP_EVENTTYPE_MOUSE_UP,120,30));
         check("UP after repeated raw failures releases the base grab once",a->releases==1&&app->releases==1&&w.context().pressedMouseButtons==0);
-        w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);
+        w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
     }
 }
 // Cross-button cells compare complete observable traces against 8196a698.
@@ -526,8 +528,8 @@ void crossButtonMatrix(Window& w, Native& n, bool printRecords=false) {
             bool onMouseMove(const MouseMoveEventArgs& e)override{pointer("move",internal::toRaw(e));return false;}
             bool onMouseDrag(const MouseDragEventArgs& e)override{pointer("drag",internal::toRaw(e));return false;}
         };
-        auto app=std::make_shared<CrossApp>();auto a=std::make_shared<CrossNode>(),b=std::make_shared<CrossNode>();b->setPos(100,0);
-        app->addChild(a);app->addChild(b);w.setApp(app);
+        auto app=internal::makeConstructedApp<CrossApp>();auto a=std::make_shared<CrossNode>(),b=std::make_shared<CrossNode>();b->setPos(100,0);
+        app->addChild(a);app->addChild(b);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         auto appHook=[&]{if(active&&!inNested&&site==2&&hook)hook();};
         app->pointer=[&](const char* kind,const MouseEventArgs& e){record("app",kind,e);appHook();};
@@ -570,7 +572,7 @@ void crossButtonMatrix(Window& w, Native& n, bool printRecords=false) {
         if(outer>=2&&outer<=4)touch(outer==2?SAPP_EVENTTYPE_TOUCHES_BEGAN:outer==3?SAPP_EVENTTYPE_TOUCHES_ENDED:SAPP_EVENTTYPE_TOUCHES_MOVED);
         if(outer>=5)mouse(SAPP_EVENTTYPE_MOUSE_MOVE,25,0,((outer==6)?SAPP_MODIFIER_LMB:0)|(!down?otherBit:0));
         auto& c=w.context();auto grab=c.grabbedNode.lock();
-        char label[180];std::snprintf(label,sizeof(label),"cross root=%d pixels=%d outer=%d button=%d down=%d throws=%d site=%d preHeld=%d",c.isMain,pixels,outer,button,down,throws,site,preHeldOther);
+        char label[180];std::snprintf(label,sizeof(label),"cross root=%d pixels=%d outer=%d button=%d down=%d throws=%d site=%d preHeld=%d",isEarlier(c),pixels,outer,button,down,throws,site,preHeldOther);
         check(label,nested);
         // Raw cross-button DOWN cannot replace the outer left coordinates.
         if(site==0&&(outer==0||outer==1||outer==2||outer==3))check(label,c.mouseX==20&&c.mouseY==30);
@@ -583,17 +585,17 @@ void crossButtonMatrix(Window& w, Native& n, bool printRecords=false) {
         if(site==0&&throws&&down&&outer>=5)check(label,c.mouseX==25&&app!=nullptr&&trace.size()>1);
         if(site==0&&!throws&&down&&outer>=5)check(label,c.mouseX==25&&c.pressedMouseButtons==unsigned(outer==6)&&c.grabbedNode.expired());
         if(printRecords)std::printf("CROSS %s\n",json{{"cell",label},{"nested",nested},{"trace",trace},{"pos",{c.mouseX,c.mouseY}},{"anchor",{c.lastPointerX,c.lastPointerY}},{"held",c.pressedMouseButtons},{"drag",c.mouseButton},{"pressed",c.mousePressed},{"grab",grab==a?1:grab==b?2:0},{"grabButton",c.grabbedButton},{"touch",c.touchMapper.hasPrimary()}}.dump().c_str());
-        hook={};app->touch={};app->pointer={};app->motion={};a->pointer={};b->pointer={};w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);clearInput(w);++cells;
+        hook={};app->touch={};app->pointer={};app->motion={};a->pointer={};b->pointer={};w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);clearInput(w);++cells;
     }
-    std::printf("cross-button matrix: root=%d %d cells\n",w.context().isMain,cells);
+    std::printf("cross-button matrix: root=%d %d cells\n",isEarlier(w.context()),cells);
 }
 // A consumed UP can leave a grab without a held ledger bit. That grab still
 // makes the next motion a continuation of its button's older gesture.
 void unheldGrabMotion(Window& w, Native& n) {
     for(bool pixels:{false,true}) {
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=2;
-        auto app=std::make_shared<LockedApp>();auto a=std::make_shared<LockedNode>(),b=std::make_shared<LockedNode>();
-        b->setPos(100,0);app->addChild(a);app->addChild(b);w.setApp(app);
+        auto app=internal::makeConstructedApp<LockedApp>();auto a=std::make_shared<LockedNode>(),b=std::make_shared<LockedNode>();
+        b->setPos(100,0);app->addChild(a);app->addChild(b);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         const float factor=pixels?1:2;
         n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,20*factor,30*factor,SAPP_MODIFIER_LMB));
@@ -605,7 +607,7 @@ void unheldGrabMotion(Window& w, Native& n) {
         check("recovery never refreshes an already concerned grab epoch",nested&&w.context().mouseX==120&&w.context().pressedMouseButtons==1&&w.context().grabbedNode.lock()==b&&app->moves==0&&app->drags==0&&a->releases==0&&b->releases==0);
         n.send(event(SAPP_EVENTTYPE_MOUSE_UP,120*factor,30*factor));
         check("unheld grab supersession only releases the newer press on its UP",a->releases==0&&b->releases==1&&app->releases==1&&w.context().pressedMouseButtons==0);
-        w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);
+        w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
     }
 }
 // Full Cartesian matrix: four open/atomic gestures, four newer sources,
@@ -615,7 +617,7 @@ void newestPressMatrix(Window& w, Native& n) {
     int cells=0;
     for(bool pixels:{false,true})for(int older=0;older<4;++older)for(int newer=0;newer<4;++newer)
     for(int site=0;site<(older==Click?10:5);++site)for(bool different:{false,true}) {
-        if(!w.context().isMain&&(older<2||newer==3))continue;
+        if(!isEarlier(w.context())&&(older<2||newer==3))continue;
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=2;
         const float factor=pixels?1:2;
         auto send=[&](sapp_event e){e.mouse_x*=factor;e.mouse_y*=factor;return n.send(e);};
@@ -630,9 +632,9 @@ void newestPressMatrix(Window& w, Native& n) {
             void mousePressed(const MouseEventArgs&)override {if(press)press();}
             void mouseReleased(const MouseEventArgs& e)override {LockedApp::mouseReleased(e);if(release)release();}
         };
-        auto app=std::make_shared<MatrixApp>();
+        auto app=internal::makeConstructedApp<MatrixApp>();
         auto a=std::make_shared<MatrixNode>(),b=std::make_shared<MatrixNode>();
-        b->setPos(100,0);app->addChild(a);app->addChild(b);w.setApp(app);
+        b->setPos(100,0);app->addChild(a);app->addChild(b);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         auto target=different?b:a;const float x=different?120:20;
         bool nested=false,insideHeld=false,insideGrab=false,insidePrimary=false;
@@ -671,7 +673,7 @@ void newestPressMatrix(Window& w, Native& n) {
         if(older==NativeDown)send(event(SAPP_EVENTTYPE_MOUSE_DOWN,20,30,SAPP_MODIFIER_LMB));
         if(older==Touch)touch(SAPP_EVENTTYPE_TOUCHES_BEGAN,41,20);
         char label[220];
-        auto cellCheck=[&](const char* name,bool value){std::snprintf(label,sizeof(label),"matrix root=%d pixels=%d older=%d newer=%d site=%d different=%d: %s",w.context().isMain,pixels,older,newer,site,different,name);check(label,value);};
+        auto cellCheck=[&](const char* name,bool value){std::snprintf(label,sizeof(label),"matrix root=%d pixels=%d older=%d newer=%d site=%d different=%d: %s",isEarlier(w.context()),pixels,older,newer,site,different,name);check(label,value);};
         auto& c=w.context();const bool held=newer!=3;
         cellCheck("reentry ran and newest epoch retained",nested&&c.mousePressGenerations[0]==newestEpoch);
         cellCheck("newest owns ledger pressed state provenance",insideHeld==held&&c.pressedMouseButtons==(held?1u:0u)&&c.snapshotMouseButtons==0&&c.mousePressed==held&&c.mouseButton==(held?0:-1)&&c.mousePressOwners[0]==nullptr);
@@ -693,10 +695,10 @@ void newestPressMatrix(Window& w, Native& n) {
         cellCheck("later release reaches newest Node exactly once",a->releases==ar+(held&&!different)&&b->releases==br+(held&&different)&&app->releases==apr+held);
         cellCheck("no gesture remains held",c.pressedMouseButtons==0&&c.snapshotMouseButtons==0&&!c.mousePressed&&c.mouseButton==-1&&c.grabbedNode.expired()&&c.grabbedButton==-1&&c.touchMapper.hasPrimary()==(primary&&newer!=2));
         c.touchMapper.reset();
-        w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);++cells;
+        w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);++cells;
     }
-    check("generated press matrix includes both coordinate modes",cells==(w.context().isMain?400:120));
-    std::printf("newest-press matrix: root=%d %d cells\n",w.context().isMain,cells);
+    check("generated press matrix includes both coordinate modes",cells==(isEarlier(w.context())?400:120));
+    std::printf("newest-press matrix: root=%d %d cells\n",isEarlier(w.context()),cells);
 }
 
 // Generated axes: both roots (caller), both coordinate modes, motion callback
@@ -718,8 +720,8 @@ void continuationMatrix(Window& w, Native& n, int regressionFilter=0) {
         if(regressionFilter&&(operation==0||(regressionFilter==1&&operation==3)))continue;
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=2;
         {internal::WindowEntryScope entry(w);setTouchAsMouse(!(operation==2&&site>=3));}
-        auto app=std::make_shared<TestApp>();auto a=std::make_shared<TestNode>(),b=std::make_shared<TestNode>();
-        b->setPos(100,0);app->addChild(a);app->addChild(b);w.setApp(app);
+        auto app=internal::makeConstructedApp<TestApp>();auto a=std::make_shared<TestNode>(),b=std::make_shared<TestNode>();
+        b->setPos(100,0);app->addChild(a);app->addChild(b);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         const float scale=pixels?1:2;
         auto mouse=[&](sapp_event_type type,float x){n.send(event(type,x*scale,30*scale,type==SAPP_EVENTTYPE_MOUSE_UP?0:SAPP_MODIFIER_LMB));};
@@ -751,16 +753,16 @@ void continuationMatrix(Window& w, Native& n, int regressionFilter=0) {
         if(operation==1)touch(site==3?SAPP_EVENTTYPE_TOUCHES_ENDED:SAPP_EVENTTYPE_TOUCHES_MOVED);
         if(operation==2)touch(SAPP_EVENTTYPE_TOUCHES_BEGAN);
         if(operation==3){nested=true;mouse(SAPP_EVENTTYPE_MOUSE_DOWN,(site==1||site==6)?320:120);}
-        char label[180];auto cell=[&](const char* name,bool ok){std::snprintf(label,sizeof(label),"continuation root=%d pixels=%d operation=%d site=%d: %s",w.context().isMain,pixels,operation,site,name);check(label,ok);};
+        char label[180];auto cell=[&](const char* name,bool ok){std::snprintf(label,sizeof(label),"continuation root=%d pixels=%d operation=%d site=%d: %s",isEarlier(w.context()),pixels,operation,site,name);check(label,ok);};
         auto& c=w.context();
         if(operation==0){cell("new grab and anchor survive old motion",nested&&c.grabbedNode.lock()==b&&c.mouseX==120&&b->drags==0&&a->moves==(site==4)&&app->drags==(site>=2));mouse(SAPP_EVENTTYPE_MOUSE_UP,120);cell("only newest release",a->releases==0&&b->releases==1&&app->releases==1);}
         if(operation==1){cell("ended finger never resurrected or dragged",nested&&!c.touchMapper.hasPrimary()&&c.pressedMouseButtons==0&&app->drags==0&&a->drags==0&&a->releases==1&&app->releases==1);touch(SAPP_EVENTTYPE_TOUCHES_ENDED);cell("duplicate END has no release",a->releases==1&&app->releases==1);}
         if(operation==2){const bool enabled=site>=3;cell("callback setting controls current mouse press",nested&&c.touchMapper.hasPrimary()==enabled&&c.pressedMouseButtons==unsigned(enabled)&&c.grabbedNode.expired()==!enabled);touch(SAPP_EVENTTYPE_TOUCHES_ENDED);cell("setting change never leaves held button",c.pressedMouseButtons==0&&!c.mousePressed&&app->releases==int(enabled));}
         if(operation==3){cell("admission preserves base grab and touch identity",c.grabbedNode.lock()==(site==3?b:a)&&c.touchMapper.hasPrimary()==(site>=3)&&a->releases==0&&b->releases==0);mouse(SAPP_EVENTTYPE_MOUSE_UP,120);cell("later UP follows base grab",a->releases==(site!=3)&&b->releases==(site==3)&&app->releases==1);}
-        app->drag=app->touch=app->move=a->drag=b->drag={};w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);clearInput(w);
+        app->drag=app->touch=app->move=a->drag=b->drag={};w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);clearInput(w);
         {internal::WindowEntryScope entry(w);setTouchAsMouse(true);}++cells;
     }
-    std::printf("continuation matrix: root=%d %d cells\n",w.context().isMain,cells);
+    std::printf("continuation matrix: root=%d %d cells\n",isEarlier(w.context()),cells);
 }
 void supersessionObservers(Window& w, Native& n) {
     for(bool pixels:{false,true})for(int site=0;site<5;++site) {
@@ -773,8 +775,8 @@ void supersessionObservers(Window& w, Native& n) {
             std::function<void()> release;
             void mouseReleased(const MouseEventArgs& e)override{LockedApp::mouseReleased(e);if(release)release();}
         };
-        auto app=std::make_shared<ObserverApp>();auto a=std::make_shared<ObserverNode>(),b=std::make_shared<ObserverNode>();
-        b->setPos(100,0);app->addChild(a);app->addChild(b);w.setApp(app);
+        auto app=internal::makeConstructedApp<ObserverApp>();auto a=std::make_shared<ObserverNode>(),b=std::make_shared<ObserverNode>();
+        b->setPos(100,0);app->addChild(a);app->addChild(b);internal::WindowRequestAccess::attachCandidate(w, app);
         {internal::WindowEntryScope entry(w);internal::setupNodeOnce(*app);}
         const float factor=pixels?1:2;bool nested=false;int rawTail=0,before=0,after=0;
         auto down=[&]{if(nested)return;nested=true;n.send(event(SAPP_EVENTTYPE_MOUSE_DOWN,120*factor,30*factor,SAPP_MODIFIER_LMB));};
@@ -790,9 +792,9 @@ void supersessionObservers(Window& w, Native& n) {
         app->release=a->release={};
         n.send(event(SAPP_EVENTTYPE_MOUSE_UP,120*factor,30*factor));
         check("later UP releases the surviving new grab once",b->releases==1&&app->releases==(site>=2)+1&&w.context().grabbedNode.expired());
-        w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);
+        w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
     }
-    std::printf("supersession observer matrix: root=%d 10 cells\n",w.context().isMain);
+    std::printf("supersession observer matrix: root=%d 10 cells\n",isEarlier(w.context()));
 }
 void touchExtremes(Window& w, Native& n) {
     clearInput(w);internal::pixelPerfectMode()=true;n.metadata.dpi_scale=.5f;
@@ -936,7 +938,7 @@ void closes(Window& w, Native& n) {
                 void update() override { if(closeInUpdate) native.closed=true; }
                 void draw() override { ++draws; }
             };
-            auto app=std::make_shared<CloseApp>(n,!fromRender);w.setApp(app);internal::WindowRequestAccess::applyPendingApp(w);
+            auto app=internal::makeConstructedApp<CloseApp>(n,!fromRender);internal::WindowRequestAccess::attachCandidate(w, app);internal::WindowRequestAccess::applyPendingApp(w);
             w.context().appEventListeners.at(1)=internal::FrameworkEventAccess::listen(w.events().draw,[app]{app->draw();},EventPriority::App);
             auto update=w.events().update.listen([&]{++updates;});
             auto draw=w.events().draw.listen([&]{++draws;});
@@ -951,7 +953,7 @@ void closes(Window& w, Native& n) {
             check("independent update close acquires no new drawable",synced||fromRender||begins==0);
             check("close from onRender never presents acquired drawable",!fromRender||(draws==1&&render==1&&acquired));
             check("App virtual draw agrees with close admission",app->draws==(fromRender?1:0));
-            n.closed=false;w.setApp(nullptr);internal::WindowRequestAccess::applyPendingApp(w);
+            n.closed=false;w.destroyApp();internal::WindowRequestAccess::applyPendingApp(w);
         }
     }
     n.closed=false;w.setIndependentFps(VSYNC,VSYNC);
@@ -971,7 +973,7 @@ extern "C" bool __wrap_sg_isvalid(){return false;}extern "C" sg_stats __wrap_sg_
 extern "C" void __wrap_sapp_cancel_quit(){}extern "C" int __wrap_sapp_get_num_dropped_files(){return 0;}extern "C" const char* __wrap_sapp_get_dropped_file_path(int){return "";}
 int main(int argc,char** argv){
     getMainThreadId();Window peer;Native peerNative(peer);
-    auto& main=*internal::mainWindow();Native mainNative(main);mainNative.win_id=702;internal::WindowRequestAccess::binding(main).handle={702};
+    Window earlier; auto& main=earlier; earlierContext=&main.context(); Native mainNative(main);mainNative.win_id=702;internal::WindowRequestAccess::binding(main).handle={702};
     if(argc>1&&std::string(argv[1])=="--cross-buttons"){
         crossButtonMatrix(main,mainNative,true);crossButtonMatrix(peer,peerNative,true);
         std::printf("host-entry: %d checks, %d failures\n",checks,failures);return failures?1:0;

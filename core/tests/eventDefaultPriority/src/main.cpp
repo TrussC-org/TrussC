@@ -186,9 +186,11 @@ private:
 };
 void appTouchOrder() {
     // Exercise the real App listeners and setup registration without a display.
-    (void)buildAppDescriptor<TouchApp>();
+    const auto descriptor = buildAppDescriptor<TouchApp>();
+    auto* launch = static_cast<Window*>(descriptor._tc_bind_user);
     // Model the runner opening its main Window without starting sokol.
-    internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
+    internal::WindowRequestAccess::bindForTests(*launch, 101);
+    internal::currentWindowCtx() = &launch->context();
     internal::appSetupFunc();
     events().update.notify();
     for (auto* event : {&events().touchPressed, &events().touchMoved, &events().touchReleased}) {
@@ -196,7 +198,7 @@ void appTouchOrder() {
         fire(*event);
         check("App touch listener vs explicit-0 setup listener keeps base order BA", touchOrder == "BA");
     }
-    internal::appCleanupFunc();
+    internal::shutdownRuntime();
 }
 
 } // namespace

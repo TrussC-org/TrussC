@@ -12,7 +12,7 @@
 #endif
 
 // sokol_app_tc.h is the self-contained sapp_* implementation on macOS
-// (main window, run loop, events, multi-window API).
+// (window bootstrap, run loop, events, multi-window API).
 
 #define SOKOL_IMPL
 #include "sokol_log.h"

@@ -89,16 +89,16 @@ Hook windowControlHookForTests() { return nullptr; }
 struct WindowRequestAccess {
     static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
 };
-void setMainFullscreen(bool) {}
-void setMainWindowSizeLogical(int, int) { assert(false); }
-void setMainWindowPosition(int, int) {}
-IVec2 mainWindowPosition() { return {}; }
+void setSingleWindowFullscreen(bool) {}
+void setSingleWindowSizeLogical(int, int) { assert(false); }
+void setSingleWindowPosition(int, int) {}
+IVec2 singleWindowPosition() { return {}; }
 void setWindowSizeWin32(const void* handle, double w, double h) {
     ++calls; seenHandle = handle; seenWidth = w; seenHeight = h;
 }
 CLIENT_CONVERSION
 }
-namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
+namespace mcp::internal { std::string markedWindowTitle(const std::string& title) { return title; } }
 struct Window {
     struct { bool isMain = false; float dpiScale = 1; } ctx_;
     void* native_ = nullptr;
@@ -159,7 +159,7 @@ def creation_source(backend, *, native_path=None):
     """
     header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
     native = (native_path or ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
-    launcher = between(body(header, 'inline sapp_desc buildWindowDescriptor('), '{', '    const auto& windowTitle')
+    launcher = between(body(header, 'inline sapp_desc buildWindowDescriptor('), '{', '    const auto windowTitle')
     normal = before(split_marker(body(header, 'sapp_desc buildAppDescriptor('), '    return ', last=True)[1], ';')
     normal = 'return ' + normal + ';'
     hot_header = (ROOT / 'core/include/tc/app/tcHotReloadHost.h').read_text(encoding='utf-8')
@@ -168,7 +168,7 @@ def creation_source(backend, *, native_path=None):
     adapter_path = {'win': 'win/tcWindowWin.cpp', 'x11': 'linux/tcWindowLinux.cpp',
                     'mac': 'mac/tcWindowMac.mm', 'egl': 'linux/tcWindowLinux.cpp'}[backend]
     adapter = (ROOT / 'core/platform' / adapter_path).read_text(encoding='utf-8')
-    secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.tick_cb =')
+    secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.title = win->title_.c_str();')
     secondary = '    sapp_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
     secondary = secondary.replace('settings, pixelPerfectMode()', 'settings, settings.pixelPerfect').replace('    d.mtl_device = sglue_environment().metal.device;\n', '')
     main_signature = {'win': 'static bool _sapp_tc_win32_create_main_window(',
@@ -353,7 +353,7 @@ class WindowPixelSizeTests(unittest.TestCase):
         # including shared normalization, adapters and desktop entry points.
         cases = (
             ('win', 'inline sapp_desc buildWindowDescriptor('),
-            ('win', '    const auto& windowTitle'),
+            ('win', '    const auto windowTitle'),
             ('win', '    sapp_desc desc = '),
             ('win', '    sapp_window_desc d = internal::buildNativeWindowDescriptor('),
             ('win', 'static bool _sapp_tc_win32_create_main_window('),
@@ -397,11 +397,11 @@ class WindowPixelSizeTests(unittest.TestCase):
         # Isolate expected assertion failures in child processes and compare real
         # native creation/default selection to the target branch, per dimension.
         header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
-        launcher = between(body(header, 'inline sapp_desc buildWindowDescriptor('), '{', '    const auto& windowTitle')
+        launcher = between(body(header, 'inline sapp_desc buildWindowDescriptor('), '{', '    const auto windowTitle')
         normal = 'return ' + before(split_marker(body(header, 'sapp_desc buildAppDescriptor('), '    return ', last=True)[1], ';') + ';'
         source = (ROOT / 'tools/tests/window_creation_native.cpp').read_text(encoding='utf-8')
         adapter = (ROOT / 'core/platform/linux/tcWindowLinux.cpp').read_text(encoding='utf-8')
-        secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.tick_cb =')
+        secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.title = win->title_.c_str();')
         secondary = '    sapp_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
         secondary = secondary.replace('settings, pixelPerfectMode()', 'settings, settings.pixelPerfect').replace('    d.mtl_device = sglue_environment().metal.device;\n', '')
         source = source.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
@@ -459,7 +459,7 @@ subprocess.run([glx,'tiny','640','400','1'], check=True)
         template = (ROOT / 'tools/tests/window_mac_size.cpp').read_text(encoding='utf-8')
         source = template.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
         for token, path, signature in (
-                ('MAC_MAIN_CALL', 'core/platform/mac/tcPlatform_mac.mm', 'void internal::setMainWindowSizeFractionalMac('),
+                ('MAC_MAIN_CALL', 'core/platform/mac/tcPlatform_mac.mm', 'void internal::setSingleWindowSizeFractionalMac('),
                 ('MAC_SECONDARY_CALL', 'core/platform/mac/tcWindowMac.mm', 'void nativeWindowSetSize(')):
             endpoint = body((ROOT / path).read_text(encoding='utf-8'), signature)
             arguments = between(endpoint, 'NSMakeSize(', ')];')

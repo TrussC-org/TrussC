@@ -1,20 +1,23 @@
 #include <TrussC.h>
+#include <list>
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#include <dlfcn.h>
+#endif
 
 namespace trussc {
 Window::OwnedState::OwnedState() {
     context.render = &render;
     context.coreEvents = &events;
 }
-Window::Window() : Window(false) {}
-Window::Window(bool mainWindow)
+Window::Window()
     : owned_(std::make_unique<OwnedState>()), ctx_(owned_->context),
       events_(owned_->events), render_(owned_->render), title_(owned_->title) {
     ctx_.hostWindow = this;
-    ctx_.isMain = mainWindow;
-    ctx_.pauseUpdatesWhenHidden = !mainWindow;
-    ctx_.drawWhileHidden = mainWindow;
-    ctx_.deferredResponseTarget = mainWindow ? nullptr : &ctx_;
-    clearColorSet_ = !mainWindow;
+    ctx_.pauseUpdatesWhenHidden = true;
+    ctx_.drawWhileHidden = false;
+    ctx_.deferredResponseTarget = &ctx_;
+    clearColorSet_ = true;
+    internal::WindowRequestAccess::prepareInitialBindings(*this);
 }
 
 namespace internal {
@@ -22,8 +25,73 @@ namespace {
 void processQueues();
 void processMaintenance();
 }
-// One host instance, shared by ordinary apps, guests and headless runs. This
-// substrate adds no Window registry or attachment/ending authority (C1).
+// One host instance owns Window backings, attachment order and App lifetimes
+// across ordinary apps, guests and headless runs.
+struct RetiringGeneration {
+    const void* generation;
+    RetiringGeneration* previous;
+};
+// Publication allocates each ledger record before attachment commit. Empty
+// snapshots, moves, partitioning and release never allocate a container sentinel
+// or debug proxy; teardown must keep working after every allocation fails.
+class AttachmentLedger {
+public:
+    struct Entry {
+        std::shared_ptr<App> app;
+        Entry* previous = nullptr;
+        std::unique_ptr<Entry> next;
+        explicit Entry(const std::shared_ptr<App>& value) : app(value) {}
+    };
+    AttachmentLedger() noexcept = default;
+    AttachmentLedger(AttachmentLedger&& other) noexcept
+        : first_(std::move(other.first_)), last_(std::exchange(other.last_, nullptr)) {}
+    AttachmentLedger(const AttachmentLedger&) = delete;
+    ~AttachmentLedger() noexcept {
+        while (first_) {
+            auto retired = extract(first_.get());
+            // Drop one record outside the chain, so deep ledgers do not recurse.
+        }
+    }
+    bool empty() const noexcept { return !first_; }
+    Entry* first() const noexcept { return first_.get(); }
+    Entry* last() const noexcept { return last_; }
+    void push_back(const std::shared_ptr<App>& app) {
+        append(std::make_unique<Entry>(app));
+    }
+    void append(std::unique_ptr<Entry> entry) noexcept {
+        auto* raw = entry.get();
+        raw->previous = last_;
+        if (last_) last_->next = std::move(entry);
+        else first_ = std::move(entry);
+        last_ = raw;
+    }
+    std::unique_ptr<Entry> extract(Entry* entry) noexcept {
+        auto& position = entry->previous ? entry->previous->next : first_;
+        auto result = std::move(position);
+        position = std::move(result->next);
+        if (position) position->previous = result->previous;
+        else last_ = result->previous;
+        result->previous = nullptr;
+        return result;
+    }
+    void appendAll(AttachmentLedger& other) noexcept {
+        if (other.empty()) return;
+        other.first_->previous = last_;
+        if (last_) last_->next = std::move(other.first_);
+        else first_ = std::move(other.first_);
+        last_ = std::exchange(other.last_, nullptr);
+    }
+    void erase(const App* app) noexcept {
+        for (auto* entry = first(); entry; entry = entry->next.get()) {
+            if (entry->app.get() != app) continue;
+            auto retired = extract(entry);
+            return; // Each App has one publication record; release after unlink.
+        }
+    }
+private:
+    std::unique_ptr<Entry> first_;
+    Entry* last_ = nullptr;
+};
 struct Runtime {
     unsigned entries = 0, turns = 0;
     bool servicing = false, bootstrapping = false, servicedTurn = false;
@@ -33,6 +101,13 @@ struct Runtime {
     std::shared_ptr<std::atomic<bool>> runToken;
     AppConstructionTicket* constructor = nullptr;
     WindowContext* selected = nullptr;
+    std::vector<std::shared_ptr<Window>> windows, endingWindows;
+    AttachmentLedger attachments, sessionAttachments;
+    RetiringGeneration* retiringGenerations = nullptr;
+    std::vector<std::weak_ptr<AppOwner>> owners;
+    bool stopping = false;
+    uintptr_t nextGeneration = 0;
+
 #ifndef __EMSCRIPTEN__
     ThreadChannel<std::function<void()>> mainQueue;
     std::atomic<size_t> mainQueuePending{0};
@@ -43,12 +118,123 @@ Runtime& runtime() {
     static auto* state = new Runtime;
     return *state;
 }
+namespace {
+struct GuestCode {
+    const void* generation;
+    void* handle;
+    void (*close)(void*);
+    const void* module;
+    bool released = false;
+};
+std::list<std::shared_ptr<GuestCode>>& guestCode() {
+    static auto* codes = new std::list<std::shared_ptr<GuestCode>>;
+    return *codes;
+}
+}
+std::mutex& guestCodeMutex() { static auto* mutex = new std::mutex; return *mutex; }
+std::shared_ptr<void> retainGuestCode() {
+    auto owner = currentAppOwner();
+    return owner ? owner->code : std::shared_ptr<void>{};
+}
+namespace {
+const void* codeModule(const void* address) {
+#ifdef _WIN32
+    HMODULE module = nullptr;
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                      reinterpret_cast<LPCSTR>(address), &module);
+    return module;
+#elif !defined(__EMSCRIPTEN__)
+    Dl_info info{};
+    return dladdr(address, &info) ? info.dli_fbase : nullptr;
+#else
+    return nullptr;
+#endif
+}
+}
+std::shared_ptr<void> retainGuestCodeFor(const void* address) {
+    const auto module = codeModule(address);
+    if (!module) return {};
+    std::lock_guard lock(guestCodeMutex());
+    for (const auto& code : guestCode()) if (code->module == module) return code;
+    return {};
+}
+std::shared_ptr<void> combineGuestCode(std::shared_ptr<void> caller, std::shared_ptr<void> defining) {
+    if (!caller) return defining;
+    if (!defining || caller == defining) return caller;
+    struct Pins { std::shared_ptr<void> caller, defining; };
+    return std::make_shared<Pins>(Pins{std::move(caller), std::move(defining)});
+}
+const void* guestCodeGeneration(const std::shared_ptr<void>& pin) {
+    if (!pin) return nullptr;
+    std::lock_guard lock(guestCodeMutex());
+    for (const auto& code : guestCode()) if (code.get() == pin.get()) {
+        if (code->released) throw std::logic_error("the guest generation is retiring");
+        return code->generation;
+    }
+    return nullptr;
+}
+std::shared_ptr<void> adoptGuestStorage(void* value, void (*destroy)(void*), std::shared_ptr<void> code) {
+    // This control block and its deleter are compiled in the host, including
+    // when allocation fails. The pin outlives the call to guest destruction.
+    return std::shared_ptr<void>(value, [destroy, code = std::move(code)](void* p) { destroy(p); });
+}
+std::shared_ptr<ResourceLoadState> adoptGuestResourceStorage(ResourceLoadState* base, void* value,
+        void (*destroy)(void*), std::shared_ptr<void> code) {
+    return {base, [code = std::move(code), value, destroy](ResourceLoadState*) { destroy(value); }};
+}
+std::shared_ptr<ExternalDeliveryStore> adoptGuestEventStorage(ExternalDeliveryStore* base, void* value,
+        void (*destroy)(void*), std::shared_ptr<void> code) {
+    return {base, [code = std::move(code), value, destroy](ExternalDeliveryStore*) { destroy(value); }};
+}
+std::function<void()> eventDisconnect(void* event, uint64_t id,
+        std::weak_ptr<std::atomic<bool>> alive, void (*remove)(void*, uint64_t)) {
+    return [event, id, alive = std::move(alive), remove, code = retainGuestCodeFor(reinterpret_cast<const void*>(remove))] {
+        auto live = alive.lock();
+        if (live && live->load(std::memory_order_acquire)) remove(event, id);
+    };
+}
+void registerGuestCode(const void* generation, void* handle, void (*close)(void*), const void* address) {
+    std::lock_guard lock(guestCodeMutex());
+    guestCode().push_back(std::make_shared<GuestCode>(GuestCode{generation, handle, close, codeModule(address)}));
+}
+void releaseGuestCode(const void* generation) noexcept {
+    std::lock_guard lock(guestCodeMutex());
+    for (auto& code : guestCode()) if (code->generation == generation) code->released = true;
+}
+void drainGuestCode() noexcept {
+    if (runtime().entries || runtime().constructor) return;
+    for (;;) {
+        std::shared_ptr<GuestCode> retired;
+        {
+            std::lock_guard lock(guestCodeMutex());
+            auto it = std::find_if(guestCode().begin(), guestCode().end(), [](const auto& code) {
+                return code->released && code.use_count() == 1;
+            });
+            if (it == guestCode().end()) return;
+            retired = std::move(*it);
+            guestCode().erase(it);
+        }
+        TeardownSteps steps;
+        steps.run("guest library release", [&] { retired->close(retired->handle); });
+    }
+}
 RuntimeActivityScope::RuntimeActivityScope() noexcept { ++runtime().entries; }
 RuntimeActivityScope::~RuntimeActivityScope() noexcept { --runtime().entries; }
 WindowContext*& currentWindowCtx() { return runtime().selected; }
+void dispatchConsoleEvent(ConsoleEventArgs& args) {
+    TeardownSteps steps;
+    if (headless::isActive()) {
+        steps.run("headless console event", [&] { nonWindowContext().coreEvents->console.notify(args); });
+        return;
+    }
+    const auto windows = runtime().windows;
+    for (const auto& window : windows) if (window->isOpen())
+        steps.run("Window console event", [&] { window->events().console.notify(args); });
+}
 std::shared_ptr<std::atomic<bool>>& appRunToken() {
     auto& state = runtime();
-    return state.constructor ? state.constructor->runToken : state.runToken;
+    if (auto owner = currentAppOwner()) return owner->token;
+    return state.runToken;
 }
 #ifndef __EMSCRIPTEN__
 ThreadChannel<std::function<void()>>& mainThreadQueue() { return runtime().mainQueue; }
@@ -57,7 +243,7 @@ std::atomic<size_t>& mainThreadQueuePendingCount() { return runtime().mainQueueP
 uint64_t runtimeEpoch() noexcept { return runtime().epoch; }
 void beginRuntimeRun() {
     auto& state = runtime();
-    if (state.entries || state.turns || state.servicing || state.constructor)
+    if (state.entries || state.turns || state.servicing || state.constructor || !state.windows.empty() || !state.attachments.empty())
         throw std::logic_error("a Runtime run cannot begin inside a host entry");
     if (state.epoch == UINT64_MAX) throw std::overflow_error("Runtime epochs exhausted");
     auto token = std::make_shared<std::atomic<bool>>(true);
@@ -69,31 +255,432 @@ void beginRuntimeRun() {
     state.runToken = std::move(token);
     ++state.epoch;
     state.servicedTurn = false;
+    state.stopping = false;
+    prepareRuntimeExit();
+}
+void requestNormalQuit(const char* reason) {
+    setExitReason(reason);
+    if (headless::isActive()) headless::quitRequested = true;
+    else sapp_request_quit();
+}
+bool runtimeEnding() noexcept { return runtime().stopping; }
+void retainRuntimeWindow(const std::shared_ptr<Window>& window) {
+    if (runtime().stopping) throw std::logic_error("the Runtime is ending");
+    runtime().windows.push_back(window);
+    WindowRequestAccess::setHostOwner(*window, window);
+}
+void releaseRuntimeWindow(Window& window) noexcept {
+    auto& state = runtime();
+    std::erase_if(state.windows, [&](const auto& owner) { return owner.get() == &window; });
+    if (!state.stopping && state.windows.empty() && !headless::isActive()) {
+        TeardownSteps steps;
+        steps.run("last Window quit", [] { requestNormalQuit("last-window-close"); });
+    }
+}
+void recordAppAttachment(const std::shared_ptr<App>& app, Window&) {
+    runtime().attachments.push_back(app);
+}
+void recordHeadlessAttachment(const std::shared_ptr<App>& app, WindowContext& context) {
+    auto owner = appOwner(*app);
+    {
+        std::lock_guard lock(owner->cancellationsMutex);
+        owner->context = &context;
+    }
+    runtime().attachments.push_back(app);
+}
+void shutdownRuntime() noexcept {
+    auto& state = runtime();
+    if (state.stopping) return;
+    state.stopping = true;
+    TeardownSteps steps;
+    // One retained snapshot of attachment order, including headless. Backings
+    // are separately retained so user handle cycles cannot postpone disposal.
+    state.endingWindows.swap(state.windows);
+    auto& windows = state.endingWindows;
+    auto attachments = std::move(state.attachments);
+    for (auto* entry = attachments.last(); entry; entry = entry->previous) {
+        if (auto app = entry->app) {
+            auto owner = appOwner(*app);
+            if (!owner || owner->ended) continue;
+            if (auto* window = owner->window) WindowRequestAccess::endForShutdown(*window);
+            else if (owner->context) {
+                owner->context->rootNode.reset();
+                endAppAttachment(app, *owner->context, true);
+            }
+        }
+    }
+    for (auto& window : windows) WindowRequestAccess::teardown(*window);
+    // Unpublished candidates also belong to this run. They receive no invented
+    // setup/exit, but their constructor-owned work must stop before services.
+    while (!state.owners.empty()) {
+        auto owner = state.owners.back().lock();
+        if (owner) retireAppOwner(owner);
+        else state.owners.pop_back();
+    }
+    if (state.runToken) state.runToken->store(false);
+    if (sg_isvalid()) sapp_tc_gl_activate_idle();
+    windows.clear();
+}
+void notifyAppExitsAtSessionEnd() noexcept {
+    TeardownSteps steps;
+    auto& snapshot = runtime().sessionAttachments;
+    snapshot.appendAll(runtime().attachments);
+    auto* previous = currentWindowCtx();
+    for (auto* entry = snapshot.last(); entry; entry = entry->previous) {
+        auto owner = appOwner(*entry->app);
+        if (!owner || !owner->window || owner->ended) continue;
+        currentWindowCtx() = &owner->window->context();
+        FrameworkEventAccess::notifySessionEnd(owner->window->events().exit, steps);
+        currentWindowCtx() = previous;
+    }
+}
+Window* resolveWindow(bool report) {
+    if (auto owner = currentAppOwner()) return !owner->ended && !owner->retiring ? owner->window : nullptr;
+    Window* result = nullptr;
+    for (auto* window : openWindows()) {
+        if (result) {
+            if (report) logError("Window") << "Specify a Window handle when more than one window is open";
+            return nullptr;
+        }
+        result = window;
+    }
+    if (!result && report) logError("Window") << "No open window";
+    return result;
+}
+WindowContext* findWindowApiContext() {
+    if (auto owner = currentAppOwner()) {
+        if (owner->context && !owner->retiring) return owner->context;
+        logError("Window") << "This App has no attached window context";
+        return nullptr;
+    }
+    if (auto* window = resolveWindow(true)) return &window->context();
+    return nullptr;
+}
+WindowContextScope::WindowContextScope(WindowContext* context) : previous_(currentWindowCtx()) {
+    const auto native = sapp_tc_gl_save();
+    display_ = native.display; context_ = native.context; draw_ = native.draw; read_ = native.read;
+    drawWindow_ = native.draw_window; readWindow_ = native.read_window;
+    sgl_ = sg_isvalid() ? sgl_get_context().id : 0;
+    try { restoreWindowContext(context); }
+    catch (...) {
+        TeardownSteps steps;
+        steps.run("explicit Window entry rollback", [&] { restoreWindowContext(previous_); });
+        currentWindowCtx() = previous_;
+        sapp_tc_gl_restore(native);
+        if (sg_isvalid() && sgl_) sgl_set_context({sgl_});
+        throw;
+    }
+}
+WindowContextScope::~WindowContextScope() noexcept {
+    TeardownSteps steps;
+    steps.run("explicit Window context restoration", [&] { restoreWindowContext(previous_); });
+    currentWindowCtx() = previous_;
+    if (sg_isvalid() && !currentWindowContext().targetsClosed && sgl_) sgl_set_context({sgl_});
+    sapp_tc_gl_restore({display_, context_, draw_, read_, drawWindow_, readWindow_});
+}
+WindowContext& windowApiContext() {
+    if (auto* context = findWindowApiContext()) return *context;
+    return nonWindowContext();
+}
+CoreEvents& unavailableWindowEvents() {
+    struct UnavailableEvents {
+        CoreEvents events;
+        UnavailableEvents() {
+            auto disable = [](auto&... event) { (FrameworkEventAccess::disableSubscriptions(event), ...); };
+            disable(events.setup, events.update, events.draw, events.onRender, events.afterFrame,
+                events.exit, events.hotReloadUnload, events.exitRequested, events.deviceLost,
+                events.keyPressed, events.keyReleased, events.mousePressed, events.mouseReleased,
+                events.mouseMoved, events.mouseDragged, events.mouseScrolled, events.windowResized,
+                events.occludedChanged, events.filesDropped, events.clipboardPasted, events.console,
+                events.touchPressed, events.touchMoved, events.touchReleased, events.rawEvent);
+        }
+    };
+    static UnavailableEvents unavailable;
+    return unavailable.events;
 }
 AppConstructionTicket* currentAppConstruction() noexcept { return runtime().constructor; }
 std::shared_ptr<std::atomic<bool>> constructorRunToken() {
     return appRunToken();
 }
+namespace {
+// Trivial TLS storage is still valid during late static App destruction.
+thread_local AppOwnerScope* selectedAppOwner = nullptr;
+}
+std::shared_ptr<AppOwner> currentAppOwner() noexcept {
+    return selectedAppOwner ? selectedAppOwner->owner_ : std::shared_ptr<AppOwner>{};
+}
+AppOwnerScope::AppOwnerScope(std::shared_ptr<AppOwner> owner) noexcept
+    : previous_(selectedAppOwner), owner_(std::move(owner)), previousRegistration_(mcp::internal::registrationOwner()) {
+    selectedAppOwner = this;
+    mcp::internal::setRegistrationOwner(owner_ ? owner_->token.get() : nullptr);
+}
+AppOwnerScope::~AppOwnerScope() noexcept {
+    mcp::internal::setRegistrationOwner(previousRegistration_);
+    selectedAppOwner = previous_;
+}
+AppCallbackScope::AppCallbackScope(std::shared_ptr<AppOwner> owner) : owner_(owner) {
+    if (!isMainThread() || !owner) return;
+    previous_ = currentWindowCtx();
+    if (owner->context == previous_) return;
+    const auto native = sapp_tc_gl_save();
+    display_ = native.display; context_ = native.context; draw_ = native.draw; read_ = native.read;
+    drawWindow_ = native.draw_window; readWindow_ = native.read_window;
+    sgl_ = sg_isvalid() ? sgl_get_context().id : 0;
+    ++runtime().entries;
+    entered_ = true;
+    try { restoreWindowContext(owner->context); }
+    catch (...) {
+        TeardownSteps steps;
+        steps.run("callback entry rollback", [&] { restoreWindowContext(previous_); });
+        currentWindowCtx() = previous_;
+        sapp_tc_gl_restore(native);
+        --runtime().entries;
+        entered_ = false;
+        throw;
+    }
+}
+AppCallbackScope::~AppCallbackScope() noexcept {
+    if (!entered_) return;
+    TeardownSteps steps;
+    steps.run("App callback caller restoration", [&] { restoreWindowContext(previous_); });
+    currentWindowCtx() = previous_;
+    if (sg_isvalid() && !currentWindowContext().targetsClosed && sgl_) sgl_set_context({sgl_});
+    sapp_tc_gl_restore({display_, context_, draw_, read_, drawWindow_, readWindow_});
+    --runtime().entries;
+}
+const void* nextAppGeneration() {
+    auto& next = runtime().nextGeneration;
+    if (next == UINTPTR_MAX) throw std::overflow_error("App generations exhausted");
+    return reinterpret_cast<const void*>(++next);
+}
+void retireAppGeneration(const void* generation) noexcept {
+    if (!generation) return;
+    auto& state = runtime();
+    if (state.stopping || sessionEndExit()) return;
+    for (auto* active = state.retiringGenerations; active; active = active->previous)
+        if (active->generation == generation) return;
+    RetiringGeneration retiring{generation, state.retiringGenerations};
+    state.retiringGenerations = &retiring;
+    struct RestoreGeneration {
+        Runtime& state;
+        RetiringGeneration* previous;
+        ~RestoreGeneration() { state.retiringGenerations = previous; }
+    } restore{state, retiring.previous};
+    RuntimeActivityScope activity;
+    // Splice one retained snapshot without allocating, including under OOM.
+    // Cohort retirement never consumes another App's ledger entry.
+    AttachmentLedger snapshot;
+    for (auto* entry = state.attachments.first(); entry;) {
+        auto* next = entry->next.get();
+        if (auto owner = appOwner(*entry->app); owner && owner->generation == generation)
+            snapshot.append(state.attachments.extract(entry));
+        entry = next;
+    }
+    for (auto* entry = snapshot.last(); entry; entry = entry->previous) {
+        auto owner = appOwner(*entry->app);
+        if (owner->window) WindowRequestAccess::endApp(*owner->window);
+        else if (owner->context) endAppAttachment(entry->app, *owner->context, true);
+    }
+    // Candidates were never published, so they retire without invented hooks.
+    for (;;) {
+        std::shared_ptr<AppOwner> candidate;
+        for (auto it = state.owners.rbegin(); it != state.owners.rend(); ++it) {
+            if (auto owner = it->lock(); owner && owner->generation == generation) {
+                candidate = std::move(owner);
+                break;
+            }
+        }
+        if (!candidate) break;
+        retireAppOwner(candidate);
+    }
+}
+
+std::unordered_set<const App*> attachedApps() {
+    std::unordered_set<const App*> result;
+    for (auto* entry = runtime().attachments.first(); entry; entry = entry->next.get()) if (auto& app = entry->app) {
+        auto owner = appOwner(*app);
+        if (owner && owner->window && !owner->ended && !owner->retiring) result.insert(app.get());
+    }
+    return result;
+}
+std::function<void()> attributeMainThreadWork(std::function<void()> callback) {
+    auto owner = currentAppOwner();
+    if (!owner || !callback) return callback;
+    if (owner->retiring || owner->ended || !owner->token->load()) return {};
+    // Like Deliver::Main copies, queue storage owns the capture and code pin.
+    // No per-submission cancellation record; discard releases captures too.
+    struct Work {
+        // Declared first so code outlives callback destruction, also on discard.
+        std::shared_ptr<void> code;
+        std::weak_ptr<AppOwner> weak;
+        std::function<void()> callback;
+        void operator()() const {
+            auto live = weak.lock();
+            if (!live || live->retiring || live->ended || !live->token->load()) return;
+            AppCallbackScope scope(live);
+            callback();
+        }
+    };
+    return Work{owner->code, owner, std::move(callback)};
+}
+void ownAppCancellation(std::function<void()> cancel) {
+    if (auto owner = currentAppOwner()) {
+        {
+            std::lock_guard lock(owner->cancellationsMutex);
+            if (!owner->retiring && !owner->ended && owner->token->load()) {
+                owner->cancellations.push_back(std::move(cancel));
+                return;
+            }
+        }
+        cancel(); // Never invoke application/disconnect code under the owner lock.
+    }
+}
+bool isAppExitEvent(const void* event) noexcept {
+    auto owner = currentAppOwner();
+    if (!owner) return false;
+    // Event registration may run on a worker while main retires its context.
+    std::lock_guard lock(owner->cancellationsMutex);
+    return owner->context && event == &owner->context->coreEvents->exit;
+}
+void retireAppOwner(const std::shared_ptr<AppOwner>& owner) noexcept {
+    if (!owner || owner->retiring.exchange(true)) return;
+    runtime().attachments.erase(owner->app);
+    std::erase_if(runtime().owners, [&](const auto& weak) { auto live = weak.lock(); return !live || live == owner; });
+    owner->token->store(false, std::memory_order_release);
+    {
+        std::lock_guard lock(owner->cancellationsMutex);
+        owner->window = nullptr;
+        owner->context = nullptr;
+    }
+    AppOwnerScope scope(owner);
+    TeardownSteps steps;
+    steps.run("App MCP retirement", [&] { mcp::internal::removeRegistrationsOwnedBy(owner->token.get()); });
+    // Admission and extraction share a lock; invocation and capture destruction
+    // stay outside it. Extract in place so OOM teardown needs no container move.
+    for (size_t index = 0;; ++index) {
+        std::function<void()> cancel;
+        {
+            std::lock_guard lock(owner->cancellationsMutex);
+            if (index == owner->cancellations.size()) {
+                owner->cancellations.clear();
+                break;
+            }
+            cancel = std::move(owner->cancellations[index]);
+        }
+        steps.run("App callback retirement", cancel);
+    }
+    owner->app = nullptr;
+}
 AppConstructionScope::AppConstructionScope(AppConstructionTicket& ticket)
-    : ticket_(ticket), previous_(currentAppConstruction()), previousOwner_(mcp::internal::registrationOwner()),
-      exceptions_(std::uncaught_exceptions()) {
-    if (!ticket.runToken) ticket.runToken = appRunToken();
-    if (!ticket.epoch) ticket.epoch = runtimeEpoch();
+    : ticket_(ticket), previous_(currentAppConstruction()) {
+    ticket.owner = std::make_shared<AppOwner>();
+    auto parent = currentAppOwner();
+    const auto definingGeneration = guestCodeGeneration(ticket.code);
+    ticket.owner->generation = ticket.registrationOwner ? ticket.registrationOwner :
+        (parent && parent->generation ? parent->generation : definingGeneration);
+    for (auto* retiring = runtime().retiringGenerations; retiring; retiring = retiring->previous)
+        if (ticket.owner->generation == retiring->generation)
+            throw std::logic_error("the guest generation is retiring");
+    ticket.owner->code = combineGuestCode(parent ? parent->code : std::shared_ptr<void>{}, ticket.code);
+    if (!ticket.owner->code) {
+        std::lock_guard lock(guestCodeMutex());
+        for (const auto& code : guestCode())
+            if (code->generation == ticket.owner->generation) ticket.owner->code = code;
+    }
+    ticket.owner->epoch = runtimeEpoch();
+    ticket.owner->context = ticket.context;
+    runtime().owners.push_back(ticket.owner);
+    ticket.runToken = ticket.owner->token;
+    ticket.registrationOwner = ticket.runToken.get();
+    ticket.epoch = ticket.owner->epoch;
+    ownerScope_ = std::make_unique<AppOwnerScope>(ticket.owner);
     runtime().constructor = &ticket;
     ++runtime().entries;
-    mcp::internal::setRegistrationOwner(ticket.registrationOwner);
 }
 AppConstructionScope::~AppConstructionScope() noexcept {
-    if (std::uncaught_exceptions() > exceptions_) ticket_.app = nullptr;
-    mcp::internal::setRegistrationOwner(previousOwner_);
+    if (!ticket_.app) retireAppOwner(ticket_.owner);
     runtime().constructor = previous_;
     --runtime().entries;
 }
+void requireAppConstruction(const App* app) {
+    auto* ticket = currentAppConstruction();
+    const auto address = reinterpret_cast<uintptr_t>(app);
+    if (!ticket || ticket->claimed || !ticket->allocation ||
+        address < reinterpret_cast<uintptr_t>(ticket->allocation) ||
+        address - reinterpret_cast<uintptr_t>(ticket->allocation) >= ticket->allocationSize)
+        throw std::logic_error("App construction requires Window::setApp<T>() or a launcher");
+    // Known gap: an App subobject inside T other than T's own App base can
+    // pass this range check and run its constructor body before the outer
+    // construction fails. Such member/base composition is unsupported.
+    ticket->claimed = true; // One base constructor per factory, including nested construction.
+}
 void completeAppConstruction(App& app) noexcept {
-    if (auto* ticket = currentAppConstruction(); ticket && (!ticket->app || ticket->app == &app)) {
+    if (auto* ticket = currentAppConstruction(); ticket && !ticket->app) {
         ticket->app = &app;
+        ticket->owner->app = &app;
         app.constructorTicket_ = *ticket;
     }
+}
+std::shared_ptr<AppOwner> appOwner(const App& app) noexcept { return app.constructorTicket_.owner; }
+std::shared_ptr<App> adoptConstructedApp(App* app, void (*destroy)(App*)) {
+    if (!app) return {};
+    auto owner = appOwner(*app);
+    // The host owns the control block and final release. Even a retained App
+    // handle destroyed after shutdown keeps its retired owner selected while
+    // the entire derived destructor runs.
+    return std::shared_ptr<App>(app, [owner, destroy](App* target) noexcept {
+        AppOwnerScope scope(owner);
+        retireAppOwner(owner);
+        TeardownSteps steps;
+        steps.run("App destruction", [&] {
+            if (destroy) destroy(target);
+            else delete target;
+        });
+    });
+}
+
+void deliverAppExit(App& app) {
+    auto owner = appOwner(app);
+    if (!owner || owner->exitDelivered) return;
+    owner->exitDelivered = true;
+    AppOwnerScope scope(owner);
+    EntryStackGuard entry(AppEntry::Exit);
+    app.exit();
+}
+void resetAppNodeReferences(const App&) noexcept;
+void endAppAttachment(const std::shared_ptr<App>& app, WindowContext& context, bool virtualOnly) noexcept {
+    if (!app) return;
+    auto owner = appOwner(*app);
+    if (!owner || owner->ended) return;
+    owner->ended = true;
+    owner->token->store(false, std::memory_order_release);
+    {
+        std::lock_guard lock(owner->cancellationsMutex);
+        owner->window = nullptr;
+        owner->context = &context; // exit/cleanup retain their state without a Window handle.
+    }
+    AppOwnerScope scope(owner);
+    TeardownSteps steps;
+    auto* previous = currentWindowCtx();
+    steps.run("ending context", [&] { restoreWindowContext(&context); });
+    currentWindowCtx() = &context;
+    if (owner->notifyWindowExit) FrameworkEventAccess::notifyShutdown(context.coreEvents->exit, steps);
+    app->cleanupCalled_ = true;
+    steps.run("App exit", [&] { deliverAppExit(*app); });
+    owner->callbacksClosing = true;
+    steps.run("App audio detach", [&] { detachAppAudio(*app); });
+    resetAppNodeReferences(*app);
+    if (virtualOnly) steps.run("App virtual cleanup", [&] { app->cleanup(); });
+    else steps.run("App tree cleanup", [&] { app->cleanupTree(); });
+    resetAppNodeReferences(*app);
+    context.hoveredNode.reset();
+    context.prevHoveredNode.reset();
+    context.grabbedNode.reset();
+    context.grabbedButton = -1;
+    context.selectedNode.reset();
+    retireAppOwner(owner);
+    steps.run("ending caller restoration", [&] { restoreWindowContext(previous); });
+    currentWindowCtx() = previous;
 }
 void WindowContext::admitMousePress(int button) noexcept {
     ++mousePressGenerations[button];
@@ -149,12 +736,14 @@ namespace {
 constinit WindowContext* initializedNonWindow = nullptr;
 struct NonWindowState {
     RenderContext processRender;
+    RenderContext canonicalRender;
+    CoreEvents events;
     WindowContext context;
     NonWindowState() {
         // Preserve prelaunch subscriptions and render references. Their storage
         // belongs to the canonical Window; this fallback is not a live Window.
-        context.render = &mainRenderContext();
-        context.coreEvents = &mainCoreEvents();
+        context.render = &canonicalRender;
+        context.coreEvents = &events;
         initializedNonWindow = &context;
     }
     ~NonWindowState() { initializedNonWindow = nullptr; }
@@ -285,7 +874,7 @@ bool refreshWindowMetadata(Window& window) {
     return true;
 }
 bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations& operations, void* user) {
-    if (!handle.id || !operations.readMetadata) return false;
+    if (!WindowRequestAccess::acceptsBinding(window) || !handle.id || !operations.readMetadata) return false;
     sapp_tc_window_metadata metadata{};
     if (!operations.readMetadata(handle, user, metadata) || metadata.fb_width <= 0 || metadata.fb_height <= 0 ||
         !std::isfinite(metadata.dpi_scale) || metadata.dpi_scale <= 0) return false;
@@ -328,6 +917,7 @@ void syncWindowAppSize(Window& window, bool initial) {
         const auto size = framebufferResizeArgs(ctx.fbWidth, ctx.fbHeight, appSizeDpi(ctx.dpiScale));
         if (window.appSizeSeeded_ && window.appSizeWidth_ == size.width && window.appSizeHeight_ == size.height) return;
         try {
+            AppCallbackScope owner(appOwner(*app));
             EntryStackGuard guard(AppEntry::Event, "windowResized()");
             WindowCallbackTimeScope callbackTime;
             // Initial attachment seeds only the App; subsequent changes use its events.
@@ -354,8 +944,9 @@ void syncWindowAppSize(Window& window, bool initial) {
         // delivery/claim. Re-read the context, never the listener-edited args.
     }
 }
-void refreshMainWindowMetadata() {
-    auto* window = mainWindow();
+void refreshSelectedWindowMetadata() {
+    auto* selected = currentWindowCtx();
+    auto* window = selected && selected->hostWindow ? selected->hostWindow : resolveWindow();
     if (!window) return;
     if constexpr (supportsSecondaryWindows()) refreshWindowMetadata(*window);
     else if (sapp_isvalid()) {
@@ -371,20 +962,13 @@ void refreshMainWindowMetadata() {
 }
 bool refreshWindowEntryMetadata(Window& window) {
     if constexpr (supportsSecondaryWindows()) return refreshWindowMetadata(window);
-    else { refreshMainWindowMetadata(); return true; }
-}
-void bindSingleWindowMain() {
-    if constexpr (!supportsSecondaryWindows()) {
-        if (!headless::isActive() && sapp_isvalid()) {
-            // Single-window ports have a native canvas/surface, without sapp_window IDs.
-            WindowRequestAccess::binding(*mainWindow()).bound = true;
-        }
-    }
+    else { refreshSelectedWindowMetadata(); return true; }
 }
 
 namespace {
 Runtime& coordinator() { return runtime(); }
 void processQueues() {
+    if (sg_isvalid()) sapp_tc_gl_activate_idle();
     auto loads = takeResourceLoadBatch();
     EntryStackGuard guard(AppEntry::Prelude);
     deliverResourceLoadBatch(std::move(loads));
@@ -396,6 +980,8 @@ void processQueues() {
 #endif
 }
 void processMaintenance() {
+    drainGuestCode();
+    if (sg_isvalid()) sapp_tc_gl_activate_idle();
 #ifndef __EMSCRIPTEN__
     mcp::internal::drainDeferredResponses(nullptr, false, windowClockNow());
 #endif
@@ -1018,7 +1604,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 window.events().exitRequested.notify(args);
                 if (args.cancel) {
                     sapp_cancel_quit();
-                    cancelMainWindowClose();
+                    WindowRequestAccess::cancelClose(window);
                     cancelWindowExitSignal();
                     clearExitReason();
                     setExitBlockReason(args.reason);
@@ -1058,12 +1644,35 @@ void dispatchWindowDisplayEventForTests(const sapp_event* event, Window& window)
 void singleWindowEvent(const sapp_event* event) noexcept {
     if (!event) return;
     TeardownSteps steps;
-    steps.run("main native event binding", [&] {
-        auto* window = mainWindow();
-        mainWindowEvent(event, WindowRequestAccess::binding(*window).handle, window);
+    steps.run("single-window native event binding", [&] {
+        auto* window = resolveWindow();
+        if (window) windowEvent(event, WindowRequestAccess::binding(*window).handle, window);
     });
 }
-void mainWindowEvent(const sapp_event* event, sapp_window handle, void* user) noexcept {
+void windowEvent(const sapp_event* event, sapp_window handle, void* user) noexcept {
+    if (event && event->type == SAPP_EVENTTYPE_QUIT_REQUESTED && handle.id == 0 && !user) {
+        // A process quit belongs to Runtime, independently of the initial Window.
+        try {
+            auto windows = runtime().windows; // Keep every receiver alive across reentrant closes.
+            setExitBlockReason("");
+            for (const auto& window : windows) {
+                if (!window || !window->isOpen()) continue;
+                WindowEntryScope entry(*window, false, false, false);
+                if (!entry) continue;
+                EntryStackGuard guard(AppEntry::Event, "exitRequested");
+                ExitRequestEventArgs args;
+                AppCallbackScope scope(window->getApp() ? appOwner(*window->getApp()) : nullptr);
+                window->events().exitRequested.notify(args);
+                if (args.cancel) {
+                    sapp_cancel_quit();
+                    WindowRequestAccess::cancelClose(*window);
+                    cancelWindowExitSignal(); clearExitReason(); setExitBlockReason(args.reason);
+                    break;
+                }
+            }
+        } catch (...) { sapp_cancel_quit(); }
+        return;
+    }
     enterWindowEvent(event, handle, user);
 }
 void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user) noexcept {
@@ -1121,18 +1730,29 @@ void windowTick(sapp_window handle, void* user) noexcept {
         else sapp_skip_present();
     }
 }
-void mainWindowBootstrap(void (*bootstrap)()) {
+void bootstrapWindow(Window& target, void (*bootstrap)()) {
     auto& state = coordinator();
     state.bootstrapping = true;
     try {
-        bindSingleWindowMain();
-        WindowEntryScope entry(*mainWindow(), false, true);
+        if constexpr (!supportsSecondaryWindows()) WindowRequestAccess::binding(target).bound = sapp_isvalid();
+        WindowEntryScope entry(target, false, true);
         if (entry) bootstrap();
     } catch (...) {
         state.bootstrapping = false;
         throw;
     }
     state.bootstrapping = false;
+}
+bool allowWindowClose(sapp_window handle, void* user) noexcept {
+    bool allow = false;
+    TeardownSteps steps;
+    steps.run("window close request", [&] {
+        auto* window = static_cast<Window*>(user);
+        if (!window || WindowRequestAccess::binding(*window).handle.id != handle.id) return;
+        if (WindowRequestAccess::quitOnClose(*window)) requestNormalQuit("window-close");
+        else allow = true;
+    });
+    return allow;
 }
 void windowClosed(sapp_window handle, void* user) noexcept {
     TeardownSteps steps;
@@ -1148,7 +1768,8 @@ void singleWindowFrame() noexcept {
     beforeHostTurn();
     TeardownSteps steps;
     steps.run("single-window native tick binding", [&] {
-        auto* window = mainWindow();
+        auto* window = resolveWindow();
+        if (!window) return;
         windowTick(WindowRequestAccess::binding(*window).handle, window);
     });
     afterHostTurn();

@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 // #455: screenshot fallback paths, warnings, MCP replies and native encoders.
 // Default: no GPU. --screen: also exercise deferred and synchronous captures.
 #include <TrussC.h>
@@ -111,6 +112,7 @@ public:
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    auto fixture = std::make_unique<tcCoreTest::WindowFixture>();
     sandbox = fs::temp_directory_path() / "tc_screenshotExtension";
     fs::remove_all(sandbox);
     fs::create_directories(sandbox);
@@ -134,6 +136,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     checkMcp("mcp.xyz", sandbox / "mcp.xyz.png");
     checkMcp(sandbox / "mcp", sandbox / "mcp.png");
     if (argc > 1 && strcmp(argv[1], "--screen") == 0) {
+        fixture.reset();
         WindowSettings settings;
         settings.setSize(64, 48);
         settings.setHighDpi(false);

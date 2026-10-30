@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDeferredWindowTest.h"
 #include "../../../include/tc/utils/tcAnalyzeImage.h"
 #include "../../../include/tc/utils/tcAudioTools.h"
 #include "../../../include/impl/httplib.h"
@@ -27,6 +28,7 @@ void check(const char* name, bool ok) {
 }
 }
 TC_CORE_TEST_MAIN() {
+    auto deferredWindow = tcCoreTest::deferredWindow();
     using mcp::internal::AdmissionStore;
     // Operational stores warn once per process; Configuration warns per call
     // and is covered separately by mcpAdmissionConstruction.
@@ -348,7 +350,7 @@ TC_CORE_TEST_MAIN() {
     stopper.join();
     watchdog.join();
     check("shutdown answers an executing request", pendingReply.get());
-    mcp::internal::drainDeferredResponses();
+    tcCoreTest::drainDeferredFrame();
     check("late deferred response is discarded at shutdown", !produced && !mcp::internal::hasDeferredResponses() && mcp::internal::workingMemory() == 0);
 
     auto replyLimited = defaults;
@@ -535,6 +537,7 @@ TC_CORE_TEST_MAIN() {
         d.id = 77;
         d.response = promise;
         d.owner = &owner;
+        d.target = &deferredWindow->context();
         d.makeEnvelope = [mode]() -> mcp::internal::ReplyThunk {
             if (mode == 2) throw mcp::internal::AdmissionError();
             throw runtime_error("producer failed");
@@ -547,7 +550,7 @@ TC_CORE_TEST_MAIN() {
         bool threw = false;
         try {
             if (mode == 1) mcp::internal::removeRegistrationsOwnedBy(&owner);
-            else mcp::internal::drainDeferredResponses();
+            else tcCoreTest::drainDeferredFrame();
         } catch (...) { threw = true; }
         const bool ready = future.wait_for(chrono::seconds(0)) == future_status::ready;
         check(name, !threw && ready && !mcp::internal::hasDeferredResponses());
@@ -667,7 +670,7 @@ TC_CORE_TEST_MAIN() {
             });
             while (!done) {
                 mcp::processHttpQueue();
-                mcp::internal::drainDeferredResponses();
+                tcCoreTest::drainDeferredFrame();
                 this_thread::sleep_for(chrono::milliseconds(1));
             }
             auto response = client.get();

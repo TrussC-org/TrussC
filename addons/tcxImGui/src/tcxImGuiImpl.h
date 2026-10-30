@@ -93,6 +93,9 @@ void ImGuiManager::setup() {
     exitListener_ = tc::internal::FrameworkEventAccess::listen(tc::events().exit,
         [this]() { shutdown(); }, tc::EventPriority::AfterApp);
 
+    tc::internal::ownAppCancellation([this, lifetime = std::weak_ptr<int>(retirementLifetime_)] {
+        if (!lifetime.expired()) shutdown();
+    });
     tc::logVerbose() << "ImGui initialized";
 }
 
@@ -209,22 +212,20 @@ ImGuiManager::~ImGuiManager() { if (!registryOwned_ && detail::hookRegistriesAli
 void ImGuiManager::installDeadlineListeners_() {
     // A value the MCP tools wrote into this context's widgets whose check
     // frame does not come in time (a cached Fbo or a stopped/slow window)
-    // is settled from the main window's afterFrame, before
-    // tc::mcp's timeout drain there (BeforeApp), whichever window this is.
+    // is settled from the owning Window's afterFrame, before host maintenance
+    // drains MCP timeouts.
     {
-        auto& wctx = tc::internal::currentWindowContext();
-        tc::CoreEvents* mainEvents = wctx.isMain ? &tc::events()
-                                                 : tc::internal::mainWindowContext().coreEvents;
-        if (mainEvents) {
-            overdueListener_ = mainEvents->afterFrame.listen([this]() {
+        tc::CoreEvents* ownerEvents = &tc::events();
+        if (ownerEvents) {
+            overdueListener_ = ownerEvents->afterFrame.listen([this]() {
                 detail::settleOverdueValues(imguiCtx_);
             }, tc::EventPriority::BeforeApp);
             // Hot reload: the manager registry is a static of the guest
             // image, which outlives a reload. Tear down this generation's
             // manager (the same cleanup as at exit) before the host
             // unloads it, so no stale listener stays on the host's events
-            // (#416). The host fires it on the main window's events.
-            hotReloadUnloadListener_ = mainEvents->hotReloadUnload.listen([this]() { shutdown(); }, tc::EventPriority::App);
+            // (#416). The host fires it on the owning Window's events.
+            hotReloadUnloadListener_ = ownerEvents->hotReloadUnload.listen([this]() { shutdown(); }, tc::EventPriority::App);
         }
     }
 }

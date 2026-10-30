@@ -47,6 +47,7 @@ struct ResourceLoadState : MainThreadSlot, std::enable_shared_from_this<Resource
     using Target = std::function<void(ResourceLoadState&)>;
     std::atomic<bool> cancelled{false};
     std::weak_ptr<std::atomic<bool>> run;
+    std::weak_ptr<AppOwner> appOwner;
     std::weak_ptr<Target> apply;
     EventSnapshotDelivery<LoadResult> event;
     LoadResult result;
@@ -126,14 +127,18 @@ public:
     }
     template<class Apply> std::shared_ptr<State> begin(Event<LoadResult>& event, Apply apply) {
         cancel();
-        auto state = std::make_shared<State>();
+        auto state = makeCodeShared<State>();
         state->run = appRunToken();
-        state->stop = registerResourceStop([weak = std::weak_ptr<State>(state)] {
+        state->appOwner = currentAppOwner();
+        auto cancel = [weak = std::weak_ptr<State>(state)] {
             if (auto live = weak.lock()) live->cancel();
-        });
+        };
+        state->stop = registerResourceStop(cancel);
+        // Completion checks the originating App run token; completed loads
+        // leave no cancellation registration on that App.
         event_ = EventSnapshotDelivery<LoadResult>::bind(event, gate_);
         state->event.target = event_;
-        apply_ = std::make_shared<ResourceLoadState::Target>(
+        apply_ = makeCodeShared<ResourceLoadState::Target>(
             [this, apply = std::move(apply)](ResourceLoadState& base) {
                 auto& ready = static_cast<State&>(base);
                 if (state_.get() != &ready) return;
@@ -158,7 +163,7 @@ private:
     std::shared_ptr<State> state_;
     std::shared_ptr<ResourceLoadState::Target> apply_;
     std::shared_ptr<typename EventSnapshotDelivery<LoadResult>::Target> event_;
-    std::shared_ptr<NetworkDelivery> gate_ = std::make_shared<NetworkDelivery>();
+    std::shared_ptr<NetworkDelivery> gate_ = makeCodeShared<NetworkDelivery>();
 };
 
 } // namespace trussc::internal

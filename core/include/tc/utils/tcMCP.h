@@ -74,8 +74,7 @@ bool& explicitlyOpened();
 bool environmentClosesMcp();
 void startConfiguredServer(const char* opener);
 void initializeMcp();
-std::string& mainWindowTitleStorage();
-const std::string& mainWindowTitle(const std::string& title);
+std::string markedWindowTitle(const std::string&);
 inline const char* toolLevelName(ToolLevel level) {
     switch (level) {
         case ToolLevel::Public: return "Public";
@@ -293,7 +292,7 @@ struct DeferredResponse {
     json id = nullptr;  // request id retained for deferred error replies
     std::shared_ptr<std::promise<ReplyThunk>> response;  // unblocks the HTTP worker
     std::function<ReplyThunk()> makeEnvelope;            // main stage → worker thunk
-    const void* target = nullptr;                        // window to run in (null = main)
+    const void* target = nullptr;                        // explicit WindowContext to run in
     std::chrono::steady_clock::time_point deadline;      // give up without a frame after this
     // Registration owner of the code the producer runs (DeferralState::owner):
     // a hot reload guest generation, or null for host code. When that owner
@@ -312,12 +311,14 @@ struct DeferredResponse {
 inline constexpr std::chrono::seconds kTargetedDeferralTimeout{5};
 
 struct DeferralState {
+    std::shared_ptr<::trussc::internal::AppOwner> appOwner;
+    std::shared_ptr<void> code;             // defining guest, released after callback storage
     json id = nullptr;  // copied into DeferredResponse when queued
     bool requested = false;                  // set by deferToolResultUntilAfterFrame()
     std::function<json()> produce;           // tool content producer (runs fully on main)
     bool twoStageRequested = false;          // set by deferToolResultTwoStage()
     std::function<std::function<json()>()> produceTwoStage;  // main stage → worker stage
-    const void* target = nullptr;            // window the deferral runs in (null = main)
+    const void* target = nullptr;            // explicit WindowContext after admission
     bool hasEnvelope = false;                // set by handleToolsCall(), read by processHttpQueue()
     std::function<ReplyThunk()> envelope;    // JSON-RPC reply builder (main part)
     // Registration owner of the code the deferred producer runs: the called
@@ -331,6 +332,11 @@ struct DeferralState {
 // each, and a tool handler it runs would defer into a DeferralState the host
 // never reads (#249; docs/ARCHITECTURE.md, "One instance per process").
 DeferralState& deferralState();
+void resetDeferralState() noexcept;
+std::function<ReplyThunk()> retainDeferredCode(std::function<ReplyThunk()>, std::shared_ptr<void>,
+                                            std::shared_ptr<::trussc::internal::AppOwner>, json id = nullptr);
+const void* resolveDeferredTarget(const void* targetWindow);
+void retireDeferredTarget(const void* targetWindow) noexcept;
 
 // Call after deferring, in a tool handler whose deferred producer runs code
 // registered under another owner (see DeferralState::owner).
@@ -353,10 +359,14 @@ inline bool isDebuggerEnabled() {
 // Call inside a tool handler to defer its result until just after the next
 // present(). `produce` returns the tool's content json (same shape a normal
 // handler would return) and runs at that safe readback point. `targetWindow`
-// (a WindowContext*, null = the main window) picks whose present() — the
-// producer then runs inside that window's tick, with its context current.
+// (an explicit WindowContext*) picks whose present() runs the producer.
+// Omission selects the owning App's Window, otherwise the sole open Window.
+// Zero or ambiguous unowned Windows fail here, before a reply is deferred.
 inline void deferToolResultUntilAfterFrame(std::function<json()> produce,
                                            const void* targetWindow = nullptr) {
+    internal::deferralState().appOwner = ::trussc::internal::currentAppOwner();
+    internal::deferralState().code = ::trussc::internal::retainGuestCode();
+    targetWindow = internal::resolveDeferredTarget(targetWindow);
     internal::deferralState().requested = true;
     internal::deferralState().produce = std::move(produce);
     internal::deferralState().target = targetWindow;
@@ -371,6 +381,9 @@ inline void deferToolResultUntilAfterFrame(std::function<json()> produce,
 // `targetWindow`: as for deferToolResultUntilAfterFrame().
 inline void deferToolResultTwoStage(std::function<std::function<json()>()> mainStage,
                                     const void* targetWindow = nullptr) {
+    internal::deferralState().appOwner = ::trussc::internal::currentAppOwner();
+    internal::deferralState().code = ::trussc::internal::retainGuestCode();
+    targetWindow = internal::resolveDeferredTarget(targetWindow);
     internal::deferralState().twoStageRequested = true;
     internal::deferralState().produceTwoStage = std::move(mainStage);
     internal::deferralState().target = targetWindow;
@@ -395,14 +408,12 @@ inline void completeRetiredResponse(DeferredResponse& entry) noexcept {
     }
 }
 
-// Run the deferred main stages aimed at `targetWindow` (null = the main
-// window) and unblock their HTTP workers. Call right after that window's
-// present(): the main window from an events().afterFrame listener, a secondary
-// window from its tick. Only the main part of each envelope runs here; the
-// returned thunk executes on the HTTP worker. The main window's call also
-// answers entries that ran past their deadline. Non-presenting ticks use
+// Run the deferred main stages aimed at an explicit WindowContext and unblock
+// their HTTP workers. Call right after that Window's present(). Only the main
+// part of each envelope runs here; the returned thunk executes on the HTTP
+// worker. A null target performs process deadline maintenance only. Non-presenting ticks use
 // frameAvailable=false: retry producers later, but still answer expired
-// requests (including main captures) without attempting a GPU readback.
+// requests without attempting a GPU readback.
 inline void drainDeferredResponses(const void* targetWindow = nullptr,
                                    bool frameAvailable = true,
                                    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now(),
@@ -475,15 +486,10 @@ inline bool hasDeferredResponsesForTarget(const void* target) {
 // ---------------------------------------------------------------------------
 // While an owner is set, every tool / resource / status entry registered is
 // tagged with it, and removeRegistrationsOwnedBy() takes them all out again.
-// The hot reload host sets one per guest generation, so a reload drops what
-// the old guest registered — handlers that capture the old App — before that
-// App is deleted. Plain apps never set one (tag null = permanent).
-// The owner is a generation, not an App: releasing one App of a generation
-// (a main setApp() swap to a replacement the guest built) retires nothing;
-// only the generation's unload does.
-// Internal AppConstructionScope temporarily selects a ticket's attribution
-// across a complete derived constructor and restores nested/throwing callers.
-// It never retires an owner or creates a second attachment authority.
+// Every App has an independent owner, including its complete constructor,
+// pending request, callbacks and lazy addon registrations. Ending or cancelling
+// it retires that owner without affecting sibling Apps. Runtime registrations
+// made without an App owner are permanent until their service removes them.
 // Both accessors are defined in tcMCP.cpp: the host sets the owner and a guest
 // registers under it, so they must see the same one on every platform.
 namespace internal {
@@ -521,7 +527,8 @@ RefusalReport& refusalReport();
 // allocation-failure safe (logAllocationFailure), so this holds on the
 // retirement path too.
 inline bool refuseRetiringRegistration(const char* kind, const std::string& name) {
-    if (!ownerRetiring(registrationOwner())) return false;
+    auto app = ::trussc::internal::currentAppOwner();
+    if (!ownerRetiring(registrationOwner()) && !(app && (app->ended || app->retiring))) return false;
     auto& report = refusalReport();
     if (report.reporting) {   // refused from a log listener: counted, summarized below
         ++report.suppressed;
@@ -628,14 +635,18 @@ public:
         if (tools_.count(tool.name)) {
             logWarning("MCP") << "tool '" << tool.name << "' re-registered; previous handler replaced";
         }
-        tools_[tool.name] = tool;
-        tools_[tool.name].owner = internal::registrationOwner();
+        Tool prepared = tool;
+        prepared.owner = internal::registrationOwner();
+        prepared.handler = ::trussc::internal::appOwnedCallback(tool.handler);
+        tools_.insert_or_assign(tool.name, std::move(prepared));
     }
 
     void registerResource(const Resource& res) {
         if (internal::refuseRetiringRegistration("resource", res.uri)) return;
-        resources_[res.uri] = res;
-        resources_[res.uri].owner = internal::registrationOwner();
+        Resource prepared = res;
+        prepared.owner = internal::registrationOwner();
+        prepared.handler = ::trussc::internal::appOwnedCallback(res.handler);
+        resources_.insert_or_assign(res.uri, std::move(prepared));
     }
 
     bool hasTool(const std::string& name) const { return tools_.count(name) != 0; }
@@ -1089,6 +1100,8 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline void processHttpQueue() {
     McpRequest req;
     while (internal::getHttpChannel().tryReceive(req)) {
         internal::WorkScope workScope(req.budget);
+        internal::resetDeferralState();
+        struct ResetDeferral { ~ResetDeferral() { internal::resetDeferralState(); } } resetDeferral;
         auto& ds = internal::deferralState();
         ds.hasEnvelope = false;
         ds.target = nullptr;
@@ -1108,7 +1121,7 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline void processHttpQueue() {
             d.budget = req.budget;
             d.id = std::move(ds.id);
             d.response = req.response;
-            d.makeEnvelope = std::move(ds.envelope);
+            d.makeEnvelope = internal::retainDeferredCode(std::move(ds.envelope), std::move(ds.code), std::move(ds.appOwner), d.id);
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + internal::kTargetedDeferralTimeout;
             d.owner = ds.owner;

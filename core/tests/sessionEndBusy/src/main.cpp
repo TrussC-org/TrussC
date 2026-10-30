@@ -191,11 +191,11 @@ struct ChildApp : App {
         WindowSettings wa;
         wa.setSize(160, 100).setTitle("sessionEndBusy A");
         a = createWindow(wa);
-        if (a) a->setApp(std::make_shared<SecondaryApp>("A", scenario == "busyA"));
+        if (a) a->setApp<SecondaryApp>("A", scenario == "busyA");
         WindowSettings wb;
         wb.setSize(180, 110).setTitle("sessionEndBusy B");
         b = createWindow(wb);
-        if (b) b->setApp(std::make_shared<SecondaryApp>("B", false));
+        if (b) b->setApp<SecondaryApp>("B", false);
         logListener = getLogger().onLog.listen([](LogEventArgs& e) {
             if (e.message.find("exit: clean") == std::string::npos) return;
             // getWindowWidth() reads the window context the session end restored.
@@ -230,7 +230,7 @@ struct ChildApp : App {
             say("main exit dropped A");
         }
         if (scenario != "hooks") return;
-        a->setApp(nullptr);   // a detach request, applied only at a frame boundary
+        a->destroyApp();   // a detach request, applied only at a frame boundary
         trussc::internal::applyPendingAppForTests(*a);   // a frame boundary reached while frozen
         const int before = sessionEndWindowCount();
         WindowSettings wc;

@@ -19,6 +19,7 @@ void MicState::audio(const float* input, size_t frames) {
 void completeMic(const std::shared_ptr<MicState>& state) {
     enqueueResourceLoad([state] {
         if (state->cancelled || !appRunIsAlive(state->run)) return;
+        AppOwnerScope appScope(state->appOwner.lock());
         if (auto target = state->apply.lock()) (*target)(*state);
     });
 }
@@ -79,9 +80,11 @@ bool MicInput::beginStart(int sampleRate, bool asynchronous) {
             // A listener can delete or restart this object.
         });
     state->apply = apply_;
-    state->registration = internal::registerResourceStop([weak = std::weak_ptr(state)] {
+    auto cancel = [weak = std::weak_ptr(state)] {
         if (auto live = weak.lock()) internal::cancelMic(live);
-    });
+    };
+    state->registration = internal::registerResourceStop(cancel);
+    internal::ownAppCancellation(cancel);
     try {
         internal::launchMic(state, asynchronous);
     } catch (const std::exception& e) {

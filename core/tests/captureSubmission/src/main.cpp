@@ -27,12 +27,12 @@ void printCaptureTrace(const internal::D3D11CaptureTrace& t) {
     const int rw = diagnosticRecorder ? diagnosticRecorder->writer().getWidth() : 0;
     const int rh = diagnosticRecorder ? diagnosticRecorder->writer().getHeight() : 0;
     const auto layout = internal::recorderPackedLayout(rw, rh, internal::RecorderPixelFormat::RGBA8);
-    std::printf("captureSubmission DIAG secondary isMain=%d fb=%dx%d "
+    std::printf("captureSubmission DIAG secondary windowId=%u fb=%dx%d "
         "lastSwapchain=%dx%d sgFormat=%d samples=%d renderView=%p resolveView=%p "
         "selectedRenderView=%p texture=%p desc=%ux%u dxgiFormat=%u samples=%u "
         "resolveFromSelected=%d reconciled=%ux%u Pixels=%dx%d success=%d "
         "recorder=%dx%d input=RGBA8 MF=BGRA8 rowBytes=%zu byteSize=%zu\n",
-        int(t.isMain), t.fbWidth, t.fbHeight, t.lastWidth, t.lastHeight, t.lastFormat, t.lastSamples,
+        t.windowId, t.fbWidth, t.fbHeight, t.lastWidth, t.lastHeight, t.lastFormat, t.lastSamples,
         t.lastRenderView, t.lastResolveView, t.selectedView, t.selectedTexture,
         t.width, t.height, t.format, t.samples, int(t.samples > 1),
         t.reconciledWidth, t.reconciledHeight, t.pixelWidth, t.pixelHeight, int(t.succeeded),
@@ -94,6 +94,9 @@ public:
             check("early DPI window created", bool(dpiWindow));
             if (dpiWindow) {
                 auto& ctx = dpiWindow->context();
+                dpiWindow->setApp<App>();
+                internal::applyPendingAppForTests(*dpiWindow);
+                internal::AppOwnerScope queryScope(internal::appOwner(*dpiWindow->getApp()));
                 const float nativeScale = ctx.fbWidth / 160.0f;
                 check("DPI initialized before first tick", ctx.updateCount == 0 &&
                     nativeScale > 0 && std::abs(ctx.dpiScale - nativeScale) < 0.01f);
@@ -191,6 +194,8 @@ public:
         if (secondary_) {
             internal::restoreWindowContext(&secondary_->context());
             {
+                auto query = internal::makeConstructedAppAt<App>(&secondary_->context());
+                internal::AppOwnerScope queryScope(internal::appOwner(*query));
                 internal::EntryStackGuard secondaryDraw(internal::AppEntry::Draw);
                 internal::prepareWindowTarget(); beginFrame(); clear(0,0,1);
                 const auto estimate = internal::captureWindowSize(internal::currentWindowContext());

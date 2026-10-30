@@ -27,12 +27,12 @@ void setOrientation(Orientation mask) { (void)mask; }
 void setKeepScreenOn(bool enabled) { (void)enabled; }
 bool getKeepScreenOn() { return false; }
 
-IVec2 internal::mainWindowPosition() {
+IVec2 internal::singleWindowPosition() {
     logWarning("Platform") << "getWindowPosition() is not supported on Web";
     return IVec2(-1, -1);
 }
 
-void internal::setMainWindowPosition(int x, int y) {
+void internal::setSingleWindowPosition(int x, int y) {
     logWarning("Platform") << "setWindowPosition() is not supported on Web";
     (void)x; (void)y;
 }
@@ -42,7 +42,7 @@ void setWindowDecorated(bool decorated) {
     (void)decorated;
 }
 
-void internal::setMainWindowSizeLogical(int width, int height) {
+void internal::setSingleWindowSizeLogical(int width, int height) {
     // CSS layout owns the canvas. Changing only its drawable bypasses sokol's
     // WGPU attachment rebuild and stretches WebGL output at devicePixelRatio.
     (void)width; (void)height;

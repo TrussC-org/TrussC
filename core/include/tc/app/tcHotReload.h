@@ -60,10 +60,10 @@ namespace trussc {
 
 #define TC_HOT_RELOAD(AppClass)                                             \
     _TC_EXPORT trussc::App* tcHotReloadCreateApp() {                        \
-        return new AppClass();                                               \
+        return trussc::internal::constructAppStorage<AppClass>();                                               \
     }                                                                        \
     _TC_EXPORT void tcHotReloadDestroyApp(trussc::App* app) {               \
-        delete app;                                                          \
+        trussc::internal::destroyAppStorage<AppClass>(app);                                                          \
     }
 
 #else // not TC_HOT_RELOAD_BUILD

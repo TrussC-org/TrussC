@@ -91,6 +91,7 @@ void* limitedAllocate(size_t bytes) {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    auto fixture = std::make_unique<tcCoreTest::WindowFixture>();
     constexpr size_t cap = 64 * 1024 * 1024;
     const size_t total = cap + 131071;
     vector<uint8_t> input(total);
@@ -226,7 +227,9 @@ TC_CORE_TEST_MAIN() {
     serial = std::move(pendingMove);
     waitingBacklog = &backlogWarnings;
     waitingLoss = &overflowWarnings;
+    fixture.reset();
     runHeadlessApp<WarningDeliveryApp>(HeadlessSettings().setFps(1000));
+    fixture = std::make_unique<tcCoreTest::WindowFixture>();
     check("first-drop warning arrives in headless loop without another Serial poll",
           overflowWarnings == 1 && backlogWarnings == 1);
     check("headless delivery leaves nothing queued", internal::countQueuedMainThreadSlots() == 0);

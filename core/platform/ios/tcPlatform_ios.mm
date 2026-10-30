@@ -97,12 +97,12 @@ float getDisplayScaleFactor() {
     return (float)[UIScreen mainScreen].scale;
 }
 
-IVec2 internal::mainWindowPosition() {
+IVec2 internal::singleWindowPosition() {
     logWarning("Platform") << "getWindowPosition() is not supported on iOS";
     return IVec2(-1, -1);
 }
 
-void internal::setMainWindowPosition(int x, int y) {
+void internal::setSingleWindowPosition(int x, int y) {
     logWarning("Platform") << "setWindowPosition() is not supported on iOS";
     (void)x; (void)y;
 }
@@ -112,7 +112,7 @@ void setWindowDecorated(bool decorated) {
     (void)decorated;
 }
 
-void internal::setMainWindowSizeLogical(int width, int height) {
+void internal::setSingleWindowSizeLogical(int width, int height) {
     // no-op on iOS (window size is fixed to screen size)
     (void)width;
     (void)height;

@@ -35,17 +35,17 @@ enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, Positio
 struct WindowRequestAccess {
     static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
 };
-void setMainFullscreen(bool) {}
+void setSingleWindowFullscreen(bool) {}
 constexpr bool windowSizeIsScreenControlled() { return false; }
 constexpr bool supportsSecondaryWindows() { return TEST_SECONDARY; }
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 Hook windowControlHookForTests() { return nullptr; }
-void setMainWindowSizeFractionalMac(double width, double height) { recordMac(MAC_MAIN_CALL); }
-void setMainWindowSizeLogical(int width, int height) { pointWidth=width; pointHeight=height; }
-void setMainWindowPosition(int,int) {}
-IVec2 mainWindowPosition() { return {}; }
+void setSingleWindowSizeFractionalMac(double width, double height) { recordMac(MAC_MAIN_CALL); }
+void setSingleWindowSizeLogical(int width, int height) { pointWidth=width; pointHeight=height; }
+void setSingleWindowPosition(int,int) {}
+IVec2 singleWindowPosition() { return {}; }
 }
-namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
+namespace mcp::internal { std::string markedWindowTitle(const std::string& title) { return title; } }
 struct Window {
     struct { bool isMain = false; float dpiScale = 2; } ctx_;
     std::string title_;

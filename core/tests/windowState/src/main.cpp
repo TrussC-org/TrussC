@@ -33,8 +33,8 @@ void activate(sapp_window h, void* user) {
 const internal::WindowNativeOperations operations{read, acquire, activate};
 struct HeadlessProbe : App {
     void setup() override {
-        check("headless has zero windows and a non-window fallback", internal::openWindows().empty() && !internal::currentWindow() && !getWindow() && &internal::currentWindowContext() != &internal::mainWindowContext() && internal::currentWindowContext().render && internal::currentWindowContext().coreEvents);
-        check("headless preserves prelaunch event/render references", &events() == &internal::mainCoreEvents() && &internal::getDefaultContext() == &internal::mainRenderContext());
+        check("headless has zero windows and a non-window fallback", internal::openWindows().empty() && !internal::currentWindow() && !getWindow() && &internal::currentWindowContext() == &internal::nonWindowContext() && internal::currentWindowContext().render && internal::currentWindowContext().coreEvents);
+        check("headless preserves prelaunch event/render references", &events() == internal::nonWindowContext().coreEvents && &internal::getDefaultContext() == &internal::processRenderContext());
         exitApp();
     }
 };
@@ -72,8 +72,8 @@ void exercise(Window& w, uint32_t id) {
     check("identity comes from binding", internal::WindowRequestAccess::creationId(w) == id);
     check("actual target format is published before callbacks", w.context().swapchainTarget.colorFormat == SG_PIXELFORMAT_RGB10A2 && w.context().swapchainTarget.sampleCount == 4);
     check("metadata query needs no native activation", n.activations == 0 && n.acquisitions == 0);
-    auto app = std::make_shared<Probe>();
-    w.setApp(app); internal::applyPendingAppForTests(w);
+    auto app = internal::makeConstructedApp<Probe>();
+    internal::WindowRequestAccess::attachCandidate(w, app); internal::applyPendingAppForTests(w);
     check("initial size delivered once at attachment", app->sizes == 1);
     internal::syncWindowAppSize(w, true); internal::syncWindowAppSize(w);
     check("next entry deduplicates initial size", app->sizes == 1);
@@ -153,17 +153,13 @@ void exercise(Window& w, uint32_t id) {
 }
 TC_CORE_TEST_MAIN() {
     getMainThreadId();
-    auto* canonical = internal::mainWindow();
-    auto* context = &internal::mainWindowContext();
-    auto* events = &tc::events();
-    auto* render = &internal::getDefaultContext();
-    auto* title = &mcp::internal::mainWindowTitleStorage();
-    check("main events and render accessors forward", &internal::mainCoreEvents() == &canonical->events() && &internal::mainRenderContext() == &canonical->render_);
-    check("prelaunch references belong to canonical Window", context == &canonical->context() && events == &canonical->events() && render == &canonical->render_ && title == &canonical->title_);
-    check("prelaunch exposes zero live windows", internal::openWindows().empty());
-    internal::createMainWindow(WindowSettings{});
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+    auto canonical = internal::prepareLaunchWindow(WindowSettings{});
+    auto* context = &canonical->context();
+    auto* events = &canonical->events();
+    auto* render = &canonical->render_;
     Window secondary;
-    check("every Window owns distinct state", &secondary.context() != context && &secondary.events() != events && &secondary.render_ != render && &secondary.title_ != title);
+    check("every Window owns distinct state", &secondary.context() != context && &secondary.events() != events && &secondary.render_ != render);
     internal::windowClockForTests() = clockNow;
     for (bool pixels : {false, true}) {
         internal::pixelPerfectMode() = pixels;
@@ -171,8 +167,9 @@ TC_CORE_TEST_MAIN() {
     }
     internal::pixelPerfectMode() = false;
     internal::windowClockForTests() = nullptr;
-    internal::destroyMainWindow();
-    check("cleanup preserves canonical references", internal::mainWindow() == canonical && &internal::mainWindowContext() == context && &tc::events() == events && &internal::getDefaultContext() == render);
+    internal::shutdownRuntime();
+    internal::endFrameworkLifetime();
+    check("retained closed Window keeps CPU state", &canonical->context() == context && &canonical->events() == events && &canonical->render_ == render);
     check("headless runner succeeds", runHeadlessApp<HeadlessProbe>() == 0);
     check("headless restores the null process caller", !internal::currentWindowCtx() &&
         &internal::currentWindowContext() == &internal::nonWindowContext());

@@ -321,27 +321,16 @@ namespace internal {
     bool routeSetWindowTitleToWindow(const std::string& title);
     bool routeSetWindowSizeToWindow(int width, int height, WindowGeometryCall call = WindowGeometryCall::GlobalLogicalSize);
     bool routeSetWindowPixelSizeToWindow(int width, int height, WindowGeometryCall call = WindowGeometryCall::GlobalSize);
-    WindowFullscreenPhase mainWindowFullscreenPhase();
-    void setMainFullscreen(bool full);
+    WindowFullscreenPhase singleWindowFullscreenPhase();
+    void setSingleWindowFullscreen(bool full);
     bool ignoreFullscreenGeometry(WindowFullscreenPhase phase, WindowGeometryCall call, const std::string* title = nullptr);
     bool routeSetFullscreenToWindow(bool full);
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
-    // Main Window is host-owned; these declarations precede the App/Window types.
-    void createMainWindow(const WindowSettings& settings);
-    void openMainWindow();
-    void prepareMainAppBindings();
-    bool mainWindowDispatchActive();
-    void destroyMainWindow() noexcept;
-    void cancelMainWindowClose() noexcept;
-    bool attachMainApp(std::shared_ptr<App> app);
-    void detachMainApp();
-    std::shared_ptr<App> mainApp();
-    // Closes the secondary windows whose close() request is still pending
-    // (defined in tc/app/tcWindow.h). The app shutdown calls it after the
-    // main App's exit(): the run loop has ended, so no backend safe point
-    // follows.
-    void closeRequestedWindowsAtShutdown();
+    const char* launchWindowTitle(Window&);
+    void configureLaunchWindow(Window&, const WindowSettings&);
+    bool attachCandidate(Window&, std::shared_ptr<App>);
+
 }
 
 // ---------------------------------------------------------------------------
@@ -363,37 +352,47 @@ void cleanup();
 // Get DPI scale (e.g., 2.0 for Retina displays)
 // Routed through the active window context (secondary windows keep their own).
 inline float getDpiScale() {
-    const auto& ctx = internal::currentWindowContext();
+    auto* context = internal::findWindowApiContext();
+    if (!context) return 0;
+    const auto& ctx = *context;
     return internal::usesNativeWindowDimensions(ctx) ? sapp_dpi_scale() : ctx.dpiScale;
 }
 
 // Get actual framebuffer size (in pixels)
 inline int getFramebufferWidth() {
-    const auto& ctx = internal::currentWindowContext();
+    auto* context = internal::findWindowApiContext();
+    if (!context) return 0;
+    const auto& ctx = *context;
     return internal::usesNativeWindowDimensions(ctx) ? sapp_width() : ctx.fbWidth;
 }
 
 inline int getFramebufferHeight() {
-    const auto& ctx = internal::currentWindowContext();
+    auto* context = internal::findWindowApiContext();
+    if (!context) return 0;
+    const auto& ctx = *context;
     return internal::usesNativeWindowDimensions(ctx) ? sapp_height() : ctx.fbHeight;
 }
 
 // Active drawing extent in coordinate units; explicitly window-named getters
 // continue to report the window even inside an Fbo.
 inline int getWidth() {
-    const auto& target = internal::currentTarget();
-    return int(target.width / (target.isFbo || internal::pixelPerfectMode() ? 1.0f : getDpiScale()));
+    auto* target = internal::drawingApiTarget();
+    if (!target) return 0;
+    const float scale = target->isFbo || internal::pixelPerfectMode() ? 1.0f : getDpiScale();
+    return scale > 0 ? int(target->width / scale) : 0;
 }
 inline int getHeight() {
-    const auto& target = internal::currentTarget();
-    return int(target.height / (target.isFbo || internal::pixelPerfectMode() ? 1.0f : getDpiScale()));
+    auto* target = internal::drawingApiTarget();
+    if (!target) return 0;
+    const float scale = target->isFbo || internal::pixelPerfectMode() ? 1.0f : getDpiScale();
+    return scale > 0 ? int(target->height / scale) : 0;
 }
 inline Vec2 getSize() { return Vec2(float(getWidth()), float(getHeight())); }
-inline Mat4 getViewMatrix() { return internal::currentTarget().camera.currentViewMatrix; }
-inline Mat4 getProjectionMatrix() { return internal::currentTarget().camera.currentProjectionMatrix; }
+inline Mat4 getViewMatrix() { auto* target = internal::drawingApiTarget(); return target ? target->camera.currentViewMatrix : Mat4{}; }
+inline Mat4 getProjectionMatrix() { auto* target = internal::drawingApiTarget(); return target ? target->camera.currentProjectionMatrix : Mat4{}; }
 namespace internal {
     inline float targetPixelScale() {
-        return currentTarget().isFbo || pixelPerfectMode() ? 1.0f : getDpiScale();
+        return currentTarget().isFbo || pixelPerfectMode() ? 1.0f : windowDimensions(currentWindowContext()).dpiScale;
     }
     // Camera coordinates retain fractional logical extents at fractional DPI.
     inline Vec2 targetLogicalSize() {
@@ -645,7 +644,8 @@ inline void setBlendMode(BlendMode mode) {
 
 // Get current blend mode
 inline BlendMode getBlendMode() {
-    return internal::currentWindowContext().currentTarget->currentBlendMode;
+    auto* target = internal::drawingApiTarget();
+    return target ? target->currentBlendMode : BlendMode::Alpha;
 }
 
 // Reset to default blend mode (Alpha)
@@ -694,7 +694,8 @@ inline void disableDepthTest() {
 
 // Whether the depth-tested blend pipeline variant is active (see enableDepthTest)
 inline bool isDepthTestEnabled() {
-    return internal::currentWindowContext().currentTarget->depthTestEnabled;
+    auto* target = internal::drawingApiTarget();
+    return target && target->depthTestEnabled;
 }
 
 // ---------------------------------------------------------------------------
@@ -782,15 +783,16 @@ namespace internal {
     // Wrapper that uses main screen size
     inline void setupScreenFov(float fovRadians, float nearDist, float farDist) {
         auto& target = internal::currentTarget();
+        const auto dimensions = windowDimensions(currentWindowContext());
         if (!target.isFbo) {
             target.automaticViewport = false;
-            target.width = getFramebufferWidth();
-            target.height = getFramebufferHeight();
+            target.width = dimensions.fbWidth;
+            target.height = dimensions.fbHeight;
             target.viewport = {0, 0, (float)target.width, (float)target.height, true};
         }
         // Per-window: framebuffer size and dpi come from the ACTIVE window
         // context (a secondary window on another display has its own scale).
-        float dpiScale = getDpiScale();
+        float dpiScale = dimensions.dpiScale;
         const bool pixelPerfect = pixelPerfectMode();
         float viewW = target.isFbo ? float(target.width) : (pixelPerfect ? float(target.width) : target.width / dpiScale);
         float viewH = target.isFbo ? float(target.height) : (pixelPerfect ? float(target.height) : target.height / dpiScale);
@@ -894,15 +896,18 @@ inline float getFarClip() {
 /// Convert world coordinate to screen coordinate
 /// Returns Vec3: x, y = screen position (pixels from top-left), z = normalized depth [0, 1]
 inline Vec3 worldToScreen(const Vec3& worldPos) {
-    // Get current viewport dimensions
-    float viewW = internal::currentWindowContext().currentTarget->camera.currentViewW;
-    float viewH = internal::currentWindowContext().currentTarget->camera.currentViewH;
-    // Per-window fallback (secondary windows have their own framebuffer/dpi).
-    if (viewW == 0) viewW = internal::targetLogicalSize().x;
-    if (viewH == 0) viewH = internal::targetLogicalSize().y;
+    auto* target = internal::drawingApiTarget();
+    if (!target) return {};
+    const float scale = target->isFbo || internal::pixelPerfectMode() ? 1.0f : getDpiScale();
+    if (scale <= 0) return {};
+    float viewW = target->camera.currentViewW;
+    float viewH = target->camera.currentViewH;
+    if (viewW == 0) viewW = target->width / scale;
+    if (viewH == 0) viewH = target->height / scale;
+    if (viewW <= 0 || viewH <= 0) return {};
 
     // Transform world -> clip space
-    Mat4 mvp = internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix * internal::currentWindowContext().currentTarget->camera.currentViewMatrix;
+    Mat4 mvp = target->camera.currentProjectionMatrix * target->camera.currentViewMatrix;
     Vec4 clip = mvp * Vec4(worldPos.x, worldPos.y, worldPos.z, 1.0f);
 
     // Perspective division
@@ -924,19 +929,22 @@ inline Vec3 worldToScreen(const Vec3& worldPos) {
 /// screenPos: screen position in pixels (from top-left)
 /// worldZ: target Z plane (default = 0)
 inline Vec3 screenToWorld(const Vec2& screenPos, float worldZ = 0.0f) {
-    // Get current viewport dimensions
-    float viewW = internal::currentWindowContext().currentTarget->camera.currentViewW;
-    float viewH = internal::currentWindowContext().currentTarget->camera.currentViewH;
-    // Per-window fallback (secondary windows have their own framebuffer/dpi).
-    if (viewW == 0) viewW = internal::targetLogicalSize().x;
-    if (viewH == 0) viewH = internal::targetLogicalSize().y;
+    auto* target = internal::drawingApiTarget();
+    if (!target) return {};
+    const float scale = target->isFbo || internal::pixelPerfectMode() ? 1.0f : getDpiScale();
+    if (scale <= 0) return {};
+    float viewW = target->camera.currentViewW;
+    float viewH = target->camera.currentViewH;
+    if (viewW == 0) viewW = target->width / scale;
+    if (viewH == 0) viewH = target->height / scale;
+    if (viewW <= 0 || viewH <= 0) return {};
 
     // Screen to NDC (flip Y: screen Y is down, NDC Y is up)
     float ndcX = (screenPos.x / viewW) * 2.0f - 1.0f;
     float ndcY = 1.0f - (screenPos.y / viewH) * 2.0f;  // Flip Y
 
     // Create inverse MVP matrix
-    Mat4 mvp = internal::currentWindowContext().currentTarget->camera.currentProjectionMatrix * internal::currentWindowContext().currentTarget->camera.currentViewMatrix;
+    Mat4 mvp = target->camera.currentProjectionMatrix * target->camera.currentViewMatrix;
     Mat4 invMvp = mvp.inverted();
 
     // Unproject two points: near plane and a middle point (mid instead of far
@@ -1488,31 +1496,10 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
 // Window control
 // ---------------------------------------------------------------------------
 
-namespace internal {
-// Returns true when called from a secondary window's context, emitting a
-// warning that `fn` is main-window only (`why` states the platform
-// limitation), once per `warned` (the caller's own `static OnceGate`). The
-// global window-control functions that have no per-window implementation
-// call this and bail, so a secondary tick can never silently
-// drive the MAIN window (the pre-Phase-2 trap). No-op / false on the main
-// context, where the caller proceeds normally.
-inline bool warnIfSecondaryWindowControl(OnceGate& warned, const char* fn, const char* why) {
-    if (currentWindowContext().isMain) return false;
-    if (warned.isFirstTime()) {
-        logWarning("Window") << fn << "() is main-window only (" << why
-            << "). Called from a secondary window's context — ignored to avoid "
-            "retargeting the main window.";
-    }
-    return true;
-}
-}
-
-// Set window title. Context-aware: from a secondary window's tick/event it
-// retitles THAT window (Window::setTitle); on the main context it retitles the
-// main window as before.
+// Set the title of the App token's Window or the sole open Window.
 inline void setWindowTitle(const std::string& title) {
     if (internal::routeSetWindowTitleToWindow(title)) return;
-    sapp_set_window_title(mcp::internal::mainWindowTitle(title).c_str());
+
 }
 
 // ---------------------------------------------------------------------------
@@ -1550,39 +1537,19 @@ enum class Cursor {
     Custom15    = SAPP_MOUSECURSOR_CUSTOM_15,
 };
 
-// Cursor visibility/shape asymmetry: sokol_app's cursor API targets the main
-// window, and on macOS cursor visibility is app-global (NSCursor hide/unhide is
-// process-wide, not per-NSWindow) — so there is no honest per-secondary-window
-// cursor control. From a secondary context these warn once and no-op rather
-// than silently changing the main window's cursor.
-
-// Show the mouse cursor (default)
+// Cursor shape and visibility are process-wide native state. Resolve the
+// caller's Window before changing them; every Window has the same capability.
 inline void showCursor() {
-    static OnceGate warned;
-    if (internal::warnIfSecondaryWindowControl(warned, "showCursor",
-        "cursor visibility is app-global on macOS and sokol_app targets the main window")) return;
-    sapp_show_mouse(true);
+    if (internal::findWindowApiContext()) sapp_show_mouse(true);
 }
-
-// Hide the mouse cursor
 inline void hideCursor() {
-    static OnceGate warned;
-    if (internal::warnIfSecondaryWindowControl(warned, "hideCursor",
-        "cursor visibility is app-global on macOS and sokol_app targets the main window")) return;
-    sapp_show_mouse(false);
+    if (internal::findWindowApiContext()) sapp_show_mouse(false);
 }
-
-// Set mouse cursor shape (uses OS system cursors or custom cursors)
 inline void setCursor(Cursor cursor) {
-    static OnceGate warned;
-    if (internal::warnIfSecondaryWindowControl(warned, "setCursor",
-        "sokol_app's cursor shape targets the main window")) return;
-    sapp_set_mouse_cursor((sapp_mouse_cursor)cursor);
+    if (internal::findWindowApiContext()) sapp_set_mouse_cursor((sapp_mouse_cursor)cursor);
 }
-
-// Get current mouse cursor shape
 inline Cursor getCursor() {
-    return (Cursor)sapp_get_mouse_cursor();
+    return internal::findWindowApiContext() ? (Cursor)sapp_get_mouse_cursor() : Cursor::Default;
 }
 
 // Bind a custom RGBA image to a cursor slot
@@ -1632,58 +1599,29 @@ inline std::string getClipboardString() {
 // Desktop geometry requests are ignored with one Notice until isFullscreen()
 // returns false, including macOS fullscreen transitions.
 inline void setWindowSize(int width, int height) {
-    if constexpr (internal::windowSizeIsScreenControlled()) {
-        internal::setMainWindowSizeLogical(width, height);
-        return;
-    }
-    if (internal::pixelPerfectMode()) {
-        if (internal::routeSetWindowPixelSizeToWindow(width, height)) return;
-        if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalSize)) return;
-        if (width <= 0 || height <= 0) return;
-        const float scale = sapp_dpi_scale();
-        const float factor = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
-#if defined(__linux__) && !defined(__ANDROID__)
-        internal::setMainWindowSizeFractionalX11(double(width) / factor, double(height) / factor);
-        return;
-#endif
-        // Same float division as the single-window PixelSize path.
-        const float logicalWidth = width / factor, logicalHeight = height / factor;
-        // Bound: float(INT_MAX) rounds up to 2^31, outside int range.
-        if (!std::isfinite(logicalWidth) || !std::isfinite(logicalHeight) ||
-            logicalWidth >= 0x1p31f || logicalHeight >= 0x1p31f) return;
-        if (logicalWidth < 1 || logicalHeight < 1) return;
-        internal::setMainWindowSizeLogical(int(logicalWidth), int(logicalHeight));
-    } else {
-        if (internal::routeSetWindowSizeToWindow(width, height, internal::WindowGeometryCall::GlobalSize)) return;
-        if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalSize)) return;
-        if (width > 0 && height > 0) internal::setMainWindowSizeLogical(width, height);
-    }
+    if (internal::pixelPerfectMode()) internal::routeSetWindowPixelSizeToWindow(width, height);
+    else internal::routeSetWindowSizeToWindow(width, height, internal::WindowGeometryCall::GlobalSize);
 }
 
-// Fullscreen. Context-aware: sapp_toggle_fullscreen()/sapp_is_fullscreen() only
-// act on the main window, so from a secondary window's tick/event these route to
-// THAT window's native per-window fullscreen (macOS NSWindow toggleFullScreen:,
-// Win32 borderless-fullscreen style swap, X11 EWMH _NET_WM_STATE_FULLSCREEN —
-// see Window::setFullscreen). isFullscreen() remains true while fullscreen
-// blocks geometry controls, including macOS entering/exiting animations.
+// Fullscreen follows the App token or sole open Window. Native binding
+// operations address that Window throughout entering/exiting animations.
+// isFullscreen() remains true while fullscreen blocks geometry controls.
 
 // Enter / leave fullscreen.
 inline void setFullscreen(bool full) {
     if (internal::routeSetFullscreenToWindow(full)) return;
-    internal::setMainFullscreen(full);
 }
 
 // Get fullscreen state (of the current window's context).
 inline bool isFullscreen() {
     bool out = false;
     if (internal::routeIsFullscreenFromWindow(out)) return out;
-    return internal::mainWindowFullscreenPhase() != internal::WindowFullscreenPhase::Windowed;
+    return false;
 }
 
 // Toggle fullscreen.
 inline void toggleFullscreen() {
     if (internal::routeToggleFullscreenToWindow()) return;
-    sapp_toggle_fullscreen();
 }
 
 // ---------------------------------------------------------------------------
@@ -1741,8 +1679,10 @@ inline Vec2 getWindowSize() {
 
 // Aspect ratio (of the CURRENT window's framebuffer, like getWindowWidth/Height)
 inline float getAspectRatio() {
-    return static_cast<float>(getFramebufferWidth()) /
-           static_cast<float>(getFramebufferHeight());
+    auto* context = internal::findWindowApiContext();
+    if (!context) return 0;
+    const auto dimensions = internal::windowDimensions(*context);
+    return dimensions.fbHeight > 0 ? float(dimensions.fbWidth) / dimensions.fbHeight : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1772,7 +1712,9 @@ inline int getSokolMemoryAllocs() { return smemtrack_info().num_allocs; }
 // Buffers are automatically re-allocated on the next draw call.
 // Call between frames when you know the next frame will use fewer vertices.
 inline void releaseSglBuffers() {
-    auto& window = internal::currentWindowContext();
+    auto* resolved = internal::findWindowApiContext();
+    if (!resolved) return;
+    auto& window = *resolved;
     const auto& target = window.swapchainTarget;
     if (window.targetStack.size() > 1 || target.inPass || target.passStartedThisFrame || target.openShaderScopes ||
         !target.deferredShaderDraws.empty() || !target.deferredPbrDraws.empty() || !target.deferredPointDraws.empty() ||
@@ -1790,17 +1732,20 @@ inline void releaseSglBuffers() {
 
 // Is mouse button pressed
 inline bool isMousePressed() {
-    return internal::currentWindowContext().mousePressed;
+    auto* ctx = internal::findWindowApiContext();
+    return ctx && ctx->mousePressed;
 }
 
 // Currently pressed mouse button (-1 = none)
 inline int getMouseButton() {
-    return internal::currentWindowContext().mouseButton;
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->mouseButton : 0;
 }
 
 // Is specific key currently pressed
 inline bool isKeyPressed(int key) {
-    return internal::currentWindowContext().keysPressed.count(key) > 0;
+    auto* ctx = internal::findWindowApiContext();
+    return ctx && ctx->keysPressed.count(key) > 0;
 }
 
 // "Either-side" modifier checks. Return true while either the left or
@@ -1934,11 +1879,10 @@ namespace internal {
 // creation. A changed update mode also ends the remaining old steps of a
 // fixed-Hz frame when the switch comes from inside update()
 // (runIndependentUpdates checks the timestamp flag).
-inline void restartLoopTiming(bool update, bool draw) {
-    auto& loop = mainLoop();
+inline void restartLoopTiming(WindowContext& wctx, bool update, bool draw) {
+    auto& loop = wctx.loop;
     if (update) {
         loop.lastUpdateTimeInitialized = false;
-        auto& wctx = currentWindowContext();
         const bool fixedStep = !loop.updateSyncedToDraw && loop.updateTargetFps > 0.0f;
         if ((!wctx.inUpdate || wctx.inCallbackClock) &&
             (wctx.mainUpdateCallTimeInitialized || wctx.frameUptimeSampled)) {
@@ -1960,35 +1904,45 @@ inline void restartLoopTiming(bool update, bool draw) {
 // VSYNC: sync to monitor refresh rate
 // EVENT_DRIVEN: only on redraw() call
 // > 0: fixed fps
-inline void setFps(float fps) {
+namespace internal {
+inline void setFpsForContext(internal::WindowContext& context, float fps) {
     // Only a real change restarts the timing: re-applying the current rate
     // (setFps(guiValue) every frame) must not skip frames.
-    auto& loop = internal::mainLoop();
+    auto& loop = context.loop;
     const bool updateChanged = !loop.updateSyncedToDraw || loop.updateTargetFps != fps;
     const bool drawChanged = loop.drawTargetFps != fps;
     if (!updateChanged && !drawChanged) return;
     loop.updateTargetFps = fps;
     loop.drawTargetFps = fps;
     loop.updateSyncedToDraw = true;
-    internal::restartLoopTiming(updateChanged, drawChanged);
+    internal::restartLoopTiming(context, updateChanged, drawChanged);
+}
+}
+inline void setFps(float fps) {
+    if (auto* context = internal::findWindowApiContext()) internal::setFpsForContext(*context, fps);
 }
 
 // Set independent FPS for update and draw (not synchronized)
 // Each loop runs at its own rate, may cause timing variations.
 // Acts on the current window (inside a window's callbacks, that window).
 // Use Window::setIndependentFps to target a particular window from anywhere.
-inline void setIndependentFps(float updateFps, float drawFps) {
+namespace internal {
+inline void setIndependentFpsForContext(internal::WindowContext& context, float updateFps, float drawFps) {
     // Only a real change restarts the timing (per loop): re-applying the
     // current rates every frame must not starve update or skip draws, and
     // changing only the draw rate leaves the update's phase alone.
-    auto& loop = internal::mainLoop();
+    auto& loop = context.loop;
     const bool updateChanged = loop.updateSyncedToDraw || loop.updateTargetFps != updateFps;
     const bool drawChanged = loop.drawTargetFps != drawFps;
     if (!updateChanged && !drawChanged) return;
     loop.updateTargetFps = updateFps;
     loop.drawTargetFps = drawFps;
     loop.updateSyncedToDraw = false;
-    internal::restartLoopTiming(updateChanged, drawChanged);
+    internal::restartLoopTiming(context, updateChanged, drawChanged);
+}
+}
+inline void setIndependentFps(float updateFps, float drawFps) {
+    if (auto* context = internal::findWindowApiContext()) internal::setIndependentFpsForContext(*context, updateFps, drawFps);
 }
 
 // Cap on the fixed-rate update steps run in one frame (setIndependentFps with
@@ -2006,7 +1960,9 @@ int getMaxUpdateSteps();
 
 // Get current FPS settings
 inline FpsSettings getFpsSettings() {
-    const auto& loop = internal::mainLoop();
+    auto* resolved = internal::findWindowApiContext();
+    if (!resolved) return {};
+    const auto& loop = resolved->loop;
     FpsSettings settings;
     settings.updateFps = loop.updateTargetFps;
     settings.drawFps = loop.drawTargetFps;
@@ -2015,8 +1971,8 @@ inline FpsSettings getFpsSettings() {
     // Get actual VSync frequency (approximate from frame duration when VSYNC)
     if (loop.updateTargetFps == internal::VSYNC ||
         loop.drawTargetFps == internal::VSYNC) {
-        double dt = internal::currentWindowContext().tickDuration;
-        if (!(dt > 0.0) && internal::currentWindowContext().isMain) dt = sapp_frame_duration();
+        double dt = resolved->tickDuration;
+
         settings.actualVsyncFps = (dt > 0.0) ? static_cast<float>(1.0 / dt) : 0.0f;
     } else {
         settings.actualVsyncFps = 0.0f;
@@ -2036,7 +1992,9 @@ inline float getFps() {
 // count: number of draws (max value is used when called multiple times)
 // Acts on the current window.
 inline void redraw(int count = 1) {
-    auto& loop = internal::mainLoop();
+    auto* resolved = internal::findWindowApiContext();
+    if (!resolved) return;
+    auto& loop = resolved->loop;
     if (count > loop.redrawCount) {
         loop.redrawCount = count;
     }
@@ -2045,14 +2003,14 @@ inline void redraw(int count = 1) {
 // Request application exit (can be cancelled via exitRequested event)
 // If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
 inline void requestExitApp() {
-    internal::setExitReason("request-exit-app");
-    if (headless::isActive()) headless::quitRequested = true;
-    else sapp_request_quit();
+    if (internal::runtimeEnding()) return;
+    internal::requestNormalQuit("request-exit-app");
 }
 
 // Immediately exit the application (cannot be cancelled)
 // Use this for forced exit, e.g., after user confirms exit in a dialog
 inline void exitApp(int code = 0) {
+    if (internal::runtimeEnding()) return;
     internal::appExitCode() = code;
     internal::setExitReason("exit-app");
     if (headless::isActive()) headless::running = false;
@@ -2172,6 +2130,8 @@ namespace internal {
 // App-authored captures use their existing queue. External requests use MCP's
 // admitted deferral path instead.
 inline bool queueScreenshot(const std::filesystem::path& path) {
+    auto* resolvedContext = findWindowApiContext();
+    if (!resolvedContext) return false;
     std::filesystem::path resolved;
 #ifdef __EMSCRIPTEN__
     auto name = internal::resolveScreenshotDownloadName(path);
@@ -2185,14 +2145,8 @@ inline bool queueScreenshot(const std::filesystem::path& path) {
     if (!internal::prepareOutputPath(destination, resolved, "Screenshot")) return false;
 #endif
 
-    internal::currentWindowContext().pendingScreenshotPaths.push_back(std::move(resolved));
-    // Guarantee a present() (and thus the afterFrame drain) even when paused.
-    // Main keeps its explicit redraw request. For every window, the pending
-    // capture itself forces draw admission on the next renderable tick,
-    // including a secondary using EVENT_DRIVEN drawing.
-    if (internal::currentWindowContext().isMain) {
-        redraw();
-    }
+    resolvedContext->pendingScreenshotPaths.push_back(std::move(resolved));
+    resolvedContext->loop.redrawCount = std::max(resolvedContext->loop.redrawCount, 1);
     return true;
 }
 } // namespace internal
@@ -2293,6 +2247,8 @@ struct WindowSettings {
     bool highDpi = true;  // High DPI support (sharp rendering on Retina)
     bool pixelPerfect = false;  // true: coords = framebuffer size, false: coords = logical size
     int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
+    bool quitOnClose = false;
+    WindowSettings& setQuitOnClose(bool enabled) { quitOnClose = enabled; return *this; }
     bool fullscreen = false;
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
     // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
@@ -2406,7 +2362,6 @@ namespace internal { void pumpAudioDiagnostics(); }
 class App;
 namespace internal {
 inline void detachAppAudio(App& app);
-template<class GetApp> void registerAppEventListeners(GetApp getApp);
 }
 
 namespace internal {
@@ -2440,7 +2395,7 @@ namespace internal {
 
         // TRUSSC_LOG_FILE was opened before sapp_run() (openEnvLogFile above).
 
-        openMainWindow();
+        refreshSelectedWindowMetadata();
         setup();
         appSetupCalled() = true;
 
@@ -2467,13 +2422,13 @@ namespace internal {
             appSetupFunc();
         }
 
-        if (auto* window = mainWindow()) syncWindowAppSize(*window, true);
+        if (auto* window = resolveWindow()) syncWindowAppSize(*window, true);
     }
 
-    inline void _setup_cb() noexcept {
+    inline void _setup_cb(void* target) noexcept {
         TeardownSteps steps;
         bool completed = false;
-        steps.run("main native callback", [&] { mainWindowBootstrap(_setup_cb_impl); completed = true; });
+        steps.run("main native callback", [&] { bootstrapWindow(*static_cast<Window*>(target), _setup_cb_impl); completed = true; });
         if (!completed) { appExitCode() = 1; sapp_quit(); }
     }
 
@@ -2502,42 +2457,25 @@ namespace internal {
         }
         #endif
         if (!beginExitCleanup()) return;
-        if (auto token = appRunToken()) token->store(false);
-        internal::cancelResourceBackends();
         CrashPhaseScope crashPhase("cleanup");
-        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
-        // Session end may arrive inside a secondary window's modal loop.
-        restoreWindowContext(&mainWindowContext());
-        // Stop MCP HTTP server
-        #ifndef __EMSCRIPTEN__
-        mcp::stopHttpServer();
-        #endif
-
-        // Stop console input thread
-        console::stop();
-
-        if (appCleanupFunc) {
-            EntryStackGuard guard(AppEntry::Exit);
-            appCleanupFunc();
-        }
-
-        waitForResourceLoadsAtAppExit();
-
-        // Stop the audio device explicitly: the AudioEngine singleton is
-        // intentionally leaked (see AudioEngine::getInstance()), so no
-        // exit-time destructor will do this. Runs after appCleanupFunc so
-        // the app's exit() can still use audio; shutdown() is a no-op when
-        // the engine was never initialized.
-        trussc::shutdownAudio();
-
-        cleanup();
-        writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
-        restoreWindowExitSignals();
-
-        #if defined(__APPLE__) && TARGET_OS_OSX
-        // AppKit's terminate: would exit(0) right after this.
+        TeardownSteps steps;
+        steps.run("exit begin log", [&] { writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false)); });
+        shutdownRuntime();
+        steps.run("shutdown process context", [] { restoreWindowContext(nullptr); });
+        steps.run("resource cancellation", [] { cancelResourceBackends(); });
+#ifndef __EMSCRIPTEN__
+        steps.run("MCP stop", [] { mcp::stopHttpServer(); });
+#endif
+        steps.run("console stop", [] { console::stop(); });
+        steps.run("launcher cleanup", [] { if (appCleanupFunc) appCleanupFunc(); });
+        steps.run("resource completion", [] { waitForResourceLoadsAtAppExit(); });
+        steps.run("audio stop", [] { trussc::shutdownAudio(); });
+        steps.run("device cleanup", [] { cleanup(); });
+        steps.run("exit end log", [] { writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true)); });
+        steps.run("restore signals", [] { restoreWindowExitSignals(); });
+#if defined(__APPLE__) && TARGET_OS_OSX
         if (appExitCode() != 0) std::exit(appExitCode());
-        #endif
+#endif
     }
 
     inline void _cleanup_cb() noexcept {
@@ -2575,7 +2513,7 @@ inline sapp_window_desc buildNativeWindowDescriptor(const WindowSettings& settin
     return d;
 }
 // Shared by normal startup and the hot-reload host; callbacks may be overridden.
-inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
+inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* target) {
     sapp_desc desc = {};
     const auto window = buildNativeWindowDescriptor(settings, settings.pixelPerfect);
     if constexpr (Platform::isDesktop()) {
@@ -2602,8 +2540,8 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
         desc.width = window.width;
         desc.height = window.height;
     }
-    const auto& windowTitle = mcp::internal::mainWindowTitle(settings.title);
-    desc.window_title = windowTitle.c_str();
+    const auto windowTitle = mcp::internal::markedWindowTitle(settings.title);
+    desc.window_title = launchWindowTitle(*target);
     desc.high_dpi = !window.no_high_dpi;
     desc.sample_count = window.sample_count;
     desc.fullscreen = window.fullscreen;
@@ -2611,11 +2549,14 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     // Admit setup and the first draw even when covered before the first tick.
     desc._tc_draw_while_hidden = 1;
     desc._tc_bind_cb = bindNativeWindow;
-    desc._tc_bind_user = mainWindow();
-    desc.init_cb = internal::_setup_cb;
+    desc._tc_bind_user = target;
+    desc.init_userdata_cb = internal::_setup_cb;
+    desc.user_data = target;
     desc.frame_cb = internal::singleWindowFrame;
     desc._tc_tick_cb = internal::windowTick;
-    desc._tc_event_cb = internal::mainWindowEvent;
+    desc._tc_event_cb = internal::windowEvent;
+    desc._tc_close_cb = internal::windowClosed;
+    desc._tc_close_request_cb = internal::allowWindowClose;
     desc._tc_before_turn = internal::beforeHostTurn;
     desc._tc_after_turn = internal::afterHostTurn;
     desc._tc_callbacks_active = internal::hostCallbacksActive;
@@ -2633,7 +2574,7 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings) {
     // Enable clipboard
     desc.enable_clipboard = true;
     desc.clipboard_size = settings.clipboardSize;
-    internal::mainWindowContext().clipboardSize = settings.clipboardSize;
+    configureLaunchWindow(*target, settings);
 
     // Windows: keep console input and output UTF-8 while the app runs.
     // Takes effect whenever the process has a console (Debug builds,
@@ -2667,23 +2608,17 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
     internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
 
-    internal::createMainWindow(settings);
-    internal::prepareMainAppBindings();
+    auto window = internal::prepareLaunchWindow(settings);
     internal::appSetupFunc = []() {
-        std::shared_ptr<AppClass> app;
-        internal::AppConstructionTicket ticket{internal::appRunToken(), mcp::internal::registrationOwner()};
-        {
-            internal::AppConstructionScope construction(ticket);
-            app = internal::makeConstructedApp<AppClass>();
-        }
-        if (!internal::attachMainApp(std::move(app))) {
+        auto app = internal::makeConstructedAppAt<AppClass>(&internal::currentWindowContext());
+        if (!internal::attachCandidate(*internal::currentWindowCtx()->hostWindow, std::move(app))) {
             internal::appExitCode() = 1;
             sapp_quit();
         }
     };
-    internal::appCleanupFunc = []() { internal::destroyMainWindow(); };
+    internal::appCleanupFunc = nullptr;
 
-    return internal::buildWindowDescriptor(settings);
+    return internal::buildWindowDescriptor(settings, window.get());
 }
 
 #ifdef _WIN32
@@ -2775,6 +2710,7 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
     // The browser owns the asynchronous loop; returning is not app shutdown.
     return 0;
 #else
+    internal::shutdownRuntime();
     internal::endFrameworkLifetime();
     return internal::appSetupCalled() ? internal::appExitCode() : 1;
 #endif
@@ -2971,9 +2907,6 @@ inline void drawCone(float x, float y, float z, float radius, float height, int 
 
 // Hot reload support (must be after tcBaseApp.h — needs App class definition)
 #include "tc/app/tcHotReload.h"
-#ifdef TC_HOT_RELOAD_BUILD
-#include "tc/app/tcHotReloadHost.h"
-#endif
 
 // =============================================================================
 // Standard library includes (convenience)
@@ -3032,6 +2965,9 @@ namespace tc = trussc;
 
 // Secondary windows (multi-window; needs Node/CoreEvents/WindowSettings above)
 #include "tc/app/tcWindow.h"
+#ifdef TC_HOT_RELOAD_BUILD
+#include "tc/app/tcHotReloadHost.h"
+#endif
 
 // TrussC standard MCP tools (included last to resolve dependencies)
 #include "tc/utils/tcStandardTools.h"

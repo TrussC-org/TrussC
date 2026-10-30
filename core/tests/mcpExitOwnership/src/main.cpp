@@ -22,7 +22,7 @@ struct ExitApp : App {
             mcp::tool("exit_worker", "test process exit from HTTP reply construction").bind([]() -> json {
                 mcp::deferToolResultTwoStage([] {
                     return []() -> json { std::exit(0); };
-                });
+                }, internal::currentAppOwner()->context); // explicit virtual presentation seam
                 return nullptr;
             });
             const int port = mcp::getHttpPort();
@@ -39,9 +39,11 @@ struct ExitApp : App {
     }
     void update() override {
         if (!workerExit) std::exit(0);
-        // Headless apps have no present; explicitly run the deferred main
-        // stage so the real HTTP request worker executes its reply thunk.
-        mcp::internal::drainDeferredResponses();
+        // Simulate an addressed frame on this virtual test context so the
+        // real HTTP worker executes its reply thunk; maintenance has no frame.
+        mcp::internal::drainDeferredResponses(internal::currentAppOwner()->context, true,
+                                            std::chrono::steady_clock::now(), false);
+        mcp::internal::drainDeferredResponses(nullptr, false);
     }
 };
 // The test re-launches its own executable per case (as mcpHttpGuard does), so

@@ -62,7 +62,7 @@ void initialize() {
     check("first native drain precedes init", drained==1);
     check("native init flag is true throughout desktop init",_sapp_tc.app.init_called);
     check("init retains the native busy guard",record.in_tick);
-    internal::mainWindowBootstrap([] { initializeHost(); });
+    internal::bootstrapWindow(*testWindow(), [] { initializeHost(); });
 }
 ''' + init + '\n'
         if port == 'x11':
@@ -83,6 +83,7 @@ void _sapp_tc_x11_process_event(XEvent*) { ++drained; emit(SAPP_EVENTTYPE_KEY_DO
 void _sapp_tc_x11_wait_until(double) {}
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,sapp_event_type type) { emit(type); }
+''' + body(native, 'static void _sapp_tc_x11_request_exit(') + r'''
 void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     const sapp_window handle{w->win_id}; w->in_tick=true;
 ''' + callback + r'''
@@ -106,7 +107,7 @@ constexpr int CREATE_WAITABLE_TIMER_HIGH_RESOLUTION=2,TIMER_MODIFY_STATE=1,SYNCH
 constexpr int QS_ALLINPUT=1,MWMO_INPUTAVAILABLE=2,WAIT_OBJECT_0=0,PM_REMOVE=1,WM_QUIT=2,WM_CLOSE=3;
 constexpr int _SAPP_TC_MAX_WINDOWS=1,TRUE=1,FALSE=0,CP_UTF8=65001,WM_QUERYENDSESSION=4;
 HANDLE CreateWaitableTimerExW(...) { return nullptr; } bool SetWaitableTimer(...) { return false; }
-void CloseHandle(...) {} void PostMessageW(...) {}
+void CloseHandle(...) {} void PostMessageW(...) {} void PostQuitMessage(int) {}
 DWORD MsgWaitForMultipleObjectsEx(...) { return 3; }
 struct MSG { int message=0; };
 bool PeekMessageW(MSG*,void*,int,int,int) { if (!queued) return false; queued=false;return true; }
@@ -152,8 +153,8 @@ void tick() {
         code += r'''
 void run(std::function<void()> host) {
     initializeHost=host; _sapp_tc.app.desc.init_cb=initialize;
-    _sapp_tc.app.desc._tc_event_cb=internal::mainWindowEvent;
-    record.desc.event_cb=internal::mainWindowEvent; record.desc.user_data=internal::mainWindow();
+    _sapp_tc.app.desc._tc_event_cb=internal::windowEvent;
+    record.desc.event_cb=internal::windowEvent; record.desc.user_data=testWindow();
     record.events_enabled=_sapp_tc_app_events_enabled;
     nativeSend=emit;
 ''' + (r'''
@@ -205,7 +206,9 @@ struct _sapp_tc_window_t {
     double last_tick_time=0,frame_duration=0; uint64_t frame_count=0;
     NSWindow* window=&nativeWindow; bool (*events_enabled)()=nullptr;
     struct { void (*event_cb)(const sapp_event*,sapp_window,void*)=nullptr;
-        void (*tick_cb)(sapp_window,void*)=nullptr; void* user_data=nullptr; } desc;
+        void (*tick_cb)(sapp_window,void*)=nullptr;
+        bool (*close_request_cb)(sapp_window,void*)=nullptr;
+        void* user_data=nullptr; } desc;
 } record;
 struct { _sapp_tc_window_t* windows[1]={&record};
     bool visibility_pending=false;
@@ -233,8 +236,8 @@ AEEventID _sapp_tc_mac_quit_reason() { return 0; }
 bool _sapp_tc_mac_is_session_end(AEEventID) { return false; }
 void _sapp_tc_mac_session_end(AEEventID) {}
 void terminate_app();
-int checks=0,failures=0,delivered=0,replayed=0,closed=0,terminated=0;
-bool setupReturned=false,callbacksActive=false,requestClose=false,veto=false;
+int checks=0,failures=0,delivered=0,replayed=0,closed=0,terminated=0,closeQueries=0;
+bool setupReturned=false,callbacksActive=false,requestClose=false,veto=false,processTerminated=false;
 void check(const char* message,bool ok) {
     ++checks; if (!ok) { ++failures; std::printf("macOS intended exception: FAIL: %s\n",message); }
 }
@@ -250,7 +253,15 @@ bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t*) { return false; }
 void _sapp_tc_send_type(_sapp_tc_window_t*,int) {}
 void _sapp_tc_mac_swap(_sapp_tc_window_t*) {}
 ''' + tick + delegates + r'''
-void terminate_app() { ++terminated; if (application_should_terminate(nullptr)==NSTerminateNow) nativeWindow.close(); }
+void terminate_app() {
+    // AppKit termination leaves the run loop; later test drains cannot replay it.
+    if (processTerminated) return;
+    ++terminated;
+    if (application_should_terminate(nullptr)==NSTerminateNow) {
+        processTerminated=true;
+        nativeWindow.close();
+    }
+}
 void NSWindow::close() { ++closed; _sapp_tc.app.main=nullptr; record.window=nullptr; }
 void NSWindow::performClose() {
     ++replayed;
@@ -279,21 +290,35 @@ void setup() {
 }
 int main() {
     for (bool closeRequest : {false,true}) for (bool cancel : {false,true}) {
+        // The native bootstrap carrier invokes init; close policy is explicit.
         record={}; _sapp_tc.app={};
-        delivered=replayed=closed=terminated=0; setupReturned=callbacksActive=false;
+        delivered=replayed=closed=terminated=closeQueries=0;
+        setupReturned=callbacksActive=processTerminated=false;
         requestClose=closeRequest; veto=cancel;
         record.events_enabled=_sapp_tc_app_events_enabled; record.desc.event_cb=listener;
+        record.desc.close_request_cb=[](sapp_window target,void*) {
+            ++closeQueries;
+            check("close callback addresses the requested Window",target.id==record.win_id);
+            check("addressed close waits until setup returns",setupReturned);
+            return !veto;
+        };
         _sapp_tc.app.desc._tc_event_cb=listener;
         _sapp_tc.app.desc.init_cb=setup;
         _sapp_tc.app.desc._tc_callbacks_active=[] { return callbacksActive; };
         // Production tick supplies the init guard, unwinds it and drains replay.
         _sapp_tc_mac_tick(&record,nullptr);
-        check("Quit/close delivered exactly once after setup",setupReturned && delivered==1);
+        check("Quit or addressed close delivered exactly once after setup",
+              setupReturned && delivered==int(!requestClose) && closeQueries==int(requestClose));
         check("application Quit replays once through process termination",requestClose || (terminated==1 && replayed==0));
         check("close intent is consumed after setup",!record.close_requested && !record.in_tick);
-        check("replayed request preserves the existing veto",_sapp_tc.app.quit_ordered==!veto && closed==int(!veto));
+        check("replayed request preserves the addressed or process veto",
+              _sapp_tc.app.quit_ordered==(!requestClose && !veto) && closed==int(!veto));
+        check("addressed Window close never requests process quit",
+              !requestClose || (!processTerminated && terminated==0 && !_sapp_tc.app.quit_requested));
         _sapp_tc_mac_process_deferred();
-        check("another drain cannot duplicate QUIT_REQUESTED",delivered==1 && closed==int(!veto) && (requestClose || (terminated==1 && replayed==0)));
+        check("another drain cannot duplicate quit or addressed close",
+              delivered==int(!requestClose) && closeQueries==int(requestClose) &&
+              closed==int(!veto) && (requestClose || (terminated==1 && replayed==0)));
     }
     std::printf("macOS init admission: %d checks, %d failures\n",checks,failures);
     return failures?1:0;

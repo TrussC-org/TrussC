@@ -133,7 +133,7 @@ public:
 
     Event() : Event(EventPriority::App) {}
     explicit Event(int defaultPriority)
-        : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
+        : alive_(internal::makeCodeShared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     // Copy/Move forbidden (events have fixed location)
@@ -235,6 +235,7 @@ private:
         // also covers queued calls whose snapshot is still held by an
         // in-flight notify() on another thread (weak expiry alone would not).
         std::shared_ptr<std::atomic<bool>> alive;
+        std::weak_ptr<internal::AppOwner> owner;
     };
 
     using EntryList = std::vector<Entry>;
@@ -247,7 +248,7 @@ private:
         const auto count = std::count_if(entries.begin(), entries.end(),
             [](const Entry& e) { return e.frameworkOwned; });
         if (!count) return {};
-        auto snapshot = std::make_shared<EntryList>();
+        auto snapshot = internal::makeCodeShared<EntryList>();
         snapshot->reserve(count);
         for (const auto& e : entries) if (e.frameworkOwned) snapshot->push_back(e);
         return snapshot;
@@ -255,24 +256,34 @@ private:
 
     void listenImpl(EventListener& listener, Callback callback,
                     Deliver deliver, int priority, bool frameworkOwned = false) {
+        if (!alive_->load(std::memory_order_acquire)) return;
         // Share registration storage across COW snapshots without copying an
         // executing callable. Queued invocations copy the callable separately.
         uint64_t id;
         ConstEntryListPtr cur;
         EventListener::DisconnectFunc disconnect;
+        auto owner = frameworkOwned ? std::shared_ptr<internal::AppOwner>{} : internal::currentAppOwner();
+        if (owner && (owner->retiring || owner->ended || !owner->token->load())) return;
+        if (owner && callback) callback = internal::appOwnedCallback(std::move(callback), internal::isAppExitEvent(this));
+        else if (!frameworkOwned && callback) {
+            callback = [callback = std::move(callback)](auto&&... args) {
+                internal::AppOwnerScope process({});
+                callback(std::forward<decltype(args)>(args)...);
+            };
+        }
         {
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
             cur = internal::sharedLoad(entries_);
-            auto next = cur ? std::make_shared<EntryList>(*cur)
-                            : std::make_shared<EntryList>();
+            auto next = cur ? internal::makeCodeShared<EntryList>(*cur)
+                            : internal::makeCodeShared<EntryList>();
             // Sweep tombstones left by a failed removal snapshot allocation.
             std::erase_if(*next, [](const Entry& e) {
                 return e.alive && !e.alive->load(std::memory_order_acquire);
             });
             next->push_back({id, priority, deliver, frameworkOwned,
-                             callback ? std::make_shared<Callback>(std::move(callback)) : nullptr,
-                             std::make_shared<std::atomic<bool>>(true)});
+                             callback ? internal::makeCodeShared<Callback>(std::move(callback)) : nullptr,
+                             internal::makeCodeShared<std::atomic<bool>>(true), owner});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -281,16 +292,18 @@ private:
             // Allocate the disconnect callable BEFORE publishing. A failure
             // must not leave a live entry without its owning handle.
             std::weak_ptr<std::atomic<bool>> weak = alive_;
-            disconnect = [this, id, weak]() {
-                if (auto alive = weak.lock()) {
-                    if (alive->load(std::memory_order_relaxed)) this->removeListener(id);
-                }
-            };
+            disconnect = internal::eventDisconnect(this, id, weak, [](void* event, uint64_t entry) {
+                static_cast<Event*>(event)->removeListener(entry);
+            });
             frameworkEntries_ = std::move(framework);
             internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
         // Moving the prepared callable cannot allocate. Disconnect an existing
         // handle outside the mutex; release the old snapshot outside it too.
+        // Retirement may synchronously disconnect. Publish first and never call
+        // cancellation registration while holding this Event's mutex.
+        try { if (owner) internal::ownAppCancellation(disconnect); }
+        catch (...) { disconnect(); throw; }
         listener = EventListener(std::move(disconnect));
     }
 
@@ -350,7 +363,8 @@ private:
                         lease = store->reserve(1, internal::ExternalPayload<T>::bytes(arg));
                         if (!lease) { accepted = false; continue; }
                     }
-                    auto copy = std::make_shared<OwnedCopy>(std::move(lease), arg, *entry.callback);
+                    internal::AppOwnerScope workerOwner(entry.owner.lock());
+                    auto copy = internal::makeCodeShared<OwnedCopy>(std::move(lease), arg, *entry.callback);
                     runOnMainThread([copy, run, sourceAlive]() mutable {
                         if (internal::eventSourceIsAlive(sourceAlive) && (!run || run->load(std::memory_order_acquire))) copy->callback(copy->payload);
                     }, std::weak_ptr<std::atomic<bool>>(entry.alive));
@@ -419,7 +433,7 @@ private:
             for (const auto& e : *cur) {
                 if (e.id == id && e.alive) e.alive->store(false);
             }
-            auto next = std::make_shared<EntryList>();
+            auto next = internal::makeCodeShared<EntryList>();
             next->reserve(cur->size());
             for (const auto& e : *cur) {
                 if (e.id != id && (!e.alive || e.alive->load(std::memory_order_acquire)))
@@ -453,7 +467,7 @@ public:
 
     Event() : Event(EventPriority::App) {}
     explicit Event(int defaultPriority)
-        : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
+        : alive_(internal::makeCodeShared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     Event(const Event&) = delete;
@@ -549,6 +563,7 @@ private:
         std::shared_ptr<Callback> callback;
         // Liveness token — see Event<T>::Entry::alive
         std::shared_ptr<std::atomic<bool>> alive;
+        std::weak_ptr<internal::AppOwner> owner;
     };
 
     using EntryList = std::vector<Entry>;
@@ -561,7 +576,7 @@ private:
         const auto count = std::count_if(entries.begin(), entries.end(),
             [](const Entry& e) { return e.frameworkOwned; });
         if (!count) return {};
-        auto snapshot = std::make_shared<EntryList>();
+        auto snapshot = internal::makeCodeShared<EntryList>();
         snapshot->reserve(count);
         for (const auto& e : entries) if (e.frameworkOwned) snapshot->push_back(e);
         return snapshot;
@@ -569,22 +584,32 @@ private:
 
     void listenImpl(EventListener& listener, Callback callback,
                     Deliver deliver, int priority, bool frameworkOwned = false) {
+        if (!alive_->load(std::memory_order_acquire)) return;
         uint64_t id;
         ConstEntryListPtr cur;
         EventListener::DisconnectFunc disconnect;
+        auto owner = frameworkOwned ? std::shared_ptr<internal::AppOwner>{} : internal::currentAppOwner();
+        if (owner && (owner->retiring || owner->ended || !owner->token->load())) return;
+        if (owner && callback) callback = internal::appOwnedCallback(std::move(callback), internal::isAppExitEvent(this));
+        else if (!frameworkOwned && callback) {
+            callback = [callback = std::move(callback)](auto&&... args) {
+                internal::AppOwnerScope process({});
+                callback(std::forward<decltype(args)>(args)...);
+            };
+        }
         {
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
             cur = internal::sharedLoad(entries_);
-            auto next = cur ? std::make_shared<EntryList>(*cur)
-                            : std::make_shared<EntryList>();
+            auto next = cur ? internal::makeCodeShared<EntryList>(*cur)
+                            : internal::makeCodeShared<EntryList>();
             // Sweep tombstones left by a failed removal snapshot allocation.
             std::erase_if(*next, [](const Entry& e) {
                 return e.alive && !e.alive->load(std::memory_order_acquire);
             });
             next->push_back({id, priority, deliver, frameworkOwned,
-                             callback ? std::make_shared<Callback>(std::move(callback)) : nullptr,
-                             std::make_shared<std::atomic<bool>>(true)});
+                             callback ? internal::makeCodeShared<Callback>(std::move(callback)) : nullptr,
+                             internal::makeCodeShared<std::atomic<bool>>(true), owner});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -593,16 +618,18 @@ private:
             // Allocate the disconnect callable BEFORE publishing. A failure
             // must not leave a live entry without its owning handle.
             std::weak_ptr<std::atomic<bool>> weak = alive_;
-            disconnect = [this, id, weak]() {
-                if (auto alive = weak.lock()) {
-                    if (alive->load(std::memory_order_relaxed)) this->removeListener(id);
-                }
-            };
+            disconnect = internal::eventDisconnect(this, id, weak, [](void* event, uint64_t entry) {
+                static_cast<Event*>(event)->removeListener(entry);
+            });
             frameworkEntries_ = std::move(framework);
             internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
         // Moving the prepared callable cannot allocate. Disconnect an existing
         // handle outside the mutex; release the old snapshot outside it too.
+        // Retirement may synchronously disconnect. Publish first and never call
+        // cancellation registration while holding this Event's mutex.
+        try { if (owner) internal::ownAppCancellation(disconnect); }
+        catch (...) { disconnect(); throw; }
         listener = EventListener(std::move(disconnect));
     }
 
@@ -637,7 +664,8 @@ private:
                     lease = store->reserve(1, 0);
                     if (!lease) { accepted = false; continue; }
                 }
-                auto call = std::make_shared<OwnedCall>(std::move(lease), *entry.callback);
+                internal::AppOwnerScope workerOwner(entry.owner.lock());
+                auto call = internal::makeCodeShared<OwnedCall>(std::move(lease), *entry.callback);
                 runOnMainThread([call, sourceAlive] {
                     if (internal::eventSourceIsAlive(sourceAlive)) call->callback();
                 }, std::weak_ptr<std::atomic<bool>>(entry.alive));
@@ -693,7 +721,7 @@ private:
             for (const auto& e : *cur) {
                 if (e.id == id && e.alive) e.alive->store(false);
             }
-            auto next = std::make_shared<EntryList>();
+            auto next = internal::makeCodeShared<EntryList>();
             next->reserve(cur->size());
             for (const auto& e : *cur) {
                 if (e.id != id && (!e.alive || e.alive->load(std::memory_order_acquire)))
@@ -721,6 +749,9 @@ private:
 // Internal registration only: the returned handle is the framework's teardown path.
 namespace trussc::internal {
 struct FrameworkEventAccess {
+    template<class T> static void disableSubscriptions(Event<T>& event) noexcept {
+        event.alive_->store(false, std::memory_order_release);
+    }
     // Terminal main-thread delivery. A failed listener must not skip App exit
     // or a later protected AfterApp hook. Keep the original snapshot and live
     // tokens, so clear/removal during shutdown retains its usual semantics.
@@ -793,7 +824,7 @@ template<class T> struct ExternalEventDelivery {
             if (entry.deliver == Deliver::Main && entry.callback && entry.alive->load()) { needed = true; break; }
         if (!needed) return {};
         TC_LOCK_GUARD(source.mutex_);
-        if (!source.externalStore_) source.externalStore_ = std::make_shared<ExternalDeliveryStore>();
+        if (!source.externalStore_) source.externalStore_ = internal::makeCodeShared<ExternalDeliveryStore>();
         return source.externalStore_;
     }
     template<class... Args>

@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDeferredWindowTest.h"
 #include <cstdio>
 using namespace tc;
 namespace {
@@ -19,7 +20,7 @@ void exercise(bool expired, bool throws, bool cancelled) {
     response.id = 821;
     response.response = std::make_shared<std::promise<ReplyThunk>>();
     auto future = response.response->get_future();
-    response.target = expired ? &issues : nullptr;
+    response.target = expired ? static_cast<const void*>(&issues) : &internal::resolveWindow()->context();
     response.deadline = std::chrono::steady_clock::now() - std::chrono::seconds(1);
     response.makeEnvelope = [&] {
         ++issues;
@@ -32,7 +33,7 @@ void exercise(bool expired, bool throws, bool cancelled) {
         response = {};
     } else {
         { std::lock_guard<std::mutex> lock(deferredResponsesMutex()); deferredResponses().push_back(std::move(response)); }
-        drainDeferredResponses();
+        tcCoreTest::drainDeferredFrame();
     }
     const bool workerOwnsBudget = !expired && !cancelled && !throws;
     check("only pending worker retains request budget", releases == (workerOwnsBudget ? 0 : 1));
@@ -183,6 +184,7 @@ void payloadReleaseOrder(bool throws) {
 #endif
 }
 TC_CORE_TEST_MAIN() {
+    auto deferredWindow = tcCoreTest::deferredWindow();
     size_t row = 0, bytes = 0;
     check("source extent layout", internal::captureLayout(160,96,4,row,bytes) && row == 640 && bytes == 61440);
     check("nonpositive source rejected", !internal::captureLayout(0,96,4,row,bytes) && !internal::captureLayout(160,-1,4,row,bytes));

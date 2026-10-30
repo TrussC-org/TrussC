@@ -98,20 +98,20 @@ X11GeometryState geometry{640,480};
 struct WindowRequestAccess {
     static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
 };
-void setMainFullscreen(bool) {}
-WindowFullscreenPhase mainWindowFullscreenPhase() { return WindowFullscreenPhase::Windowed; }
+void setSingleWindowFullscreen(bool) {}
+WindowFullscreenPhase singleWindowFullscreenPhase() { return WindowFullscreenPhase::Windowed; }
 bool ignoreFullscreenGeometry(WindowFullscreenPhase, WindowGeometryCall) { return false; }
 bool routeSetWindowSizeToWindow(int, int, WindowGeometryCall) { return false; }
 struct StartupDesc { int width, height, _tc_pixel_width, _tc_pixel_height; };
 void seedCreationGeometry(const StartupDesc& desc) { CREATION_GEOMETRY_SEED }
-void setMainWindowSizeLogical(int w, int h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi); }
-void setMainWindowSizeFractionalX11(double w, double h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi,false,true); }
-void setMainWindowPosition(int, int) {}
-IVec2 mainWindowPosition() { return {}; }
+void setSingleWindowSizeLogical(int w, int h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi); }
+void setSingleWindowSizeFractionalX11(double w, double h) { x11Geometry(dpy, 2, geometry, false, 0,0,w,h,dpi,false,true); }
+void setSingleWindowPosition(int, int) {}
+IVec2 singleWindowPosition() { return {}; }
 bool pixelPerfectMode() { return true; }
 bool routeSetWindowPixelSizeToWindow(int,int);
 }
-namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
+namespace mcp::internal { std::string markedWindowTitle(const std::string& title) { return title; } }
 struct Window {
     struct { bool isMain=true; float dpiScale=1; } ctx_;
     std::string title_;
@@ -134,7 +134,7 @@ bool routeSetWindowPixelSizeToWindow(int w,int h) {
     return true;
 }
 }
-void setWindowSizeLogical(int w,int h) { internal::setMainWindowSizeLogical(w,h); }
+void setWindowSizeLogical(int w,int h) { internal::setSingleWindowSizeLogical(w,h); }
 GLOBAL_BODY
 }
 int main() {
@@ -147,6 +147,7 @@ int main() {
             trussc::routeToMain=path == 1; requests.clear();
             if (path == 0) trussc::mainWindow.control(trussc::internal::WindowControl::PixelSize,1001,667);
             else trussc::setWindowSize(1001,667);
+            if (path == 2) { assert(requests.empty()); continue; }
             assert(!requests.empty());
             const auto& r=requests.back();
             assert(r.kind == "resize" && r.width == 1001 && r.height == 667);
@@ -174,7 +175,7 @@ int main() {
         requests.clear();
         const int before = trussc::warnings;
         trussc::setWindowSize(1001,667);
-        assert(requests.empty() && trussc::warnings == before + 1);
+        assert(requests.empty() && trussc::warnings == before + (routed ? 1 : 0));
     }
     std::free(dpy);
 }

@@ -134,8 +134,10 @@ inline bool isOverlayFocused() {
 // =============================================================================
 
 class Node : public std::enable_shared_from_this<Node> {
+    friend void internal::deliverAppExit(App&);
     friend class App;     // Allow App to call dispatch methods
-    friend class Window;  // Secondary windows drive their own tree (tcWindow.h)
+    friend class Window;
+    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool) noexcept;  // Secondary windows drive their own tree (tcWindow.h)
     friend class Mod;  // Allow Mod to access owner_
     friend void internal::setupNodeOnce(Node& node);
 
@@ -926,9 +928,14 @@ private:
         // because a child's cleanup() may reach back and mutate this node's
         // children_ (uncommon but legal — e.g. a child that unregisters
         // siblings from its parent on destruction).
-        auto snapshot = children_;
+        internal::TeardownSteps steps;
+        std::vector<Ptr> snapshot;
+        steps.run("cleanup child snapshot", [&] { snapshot = children_; });
+        // If a snapshot cannot be copied, retain children by moving the vector.
+        // Ending must still visit every child and the root's cleanup hook.
+        if (snapshot.empty() && !children_.empty()) snapshot.swap(children_);
         for (auto& child : snapshot) {
-            child->cleanupTree();
+            steps.run("child cleanup", [&] { child->cleanupTree(); });
         }
 
         // A destroyed node leaves hover, grab and selection at once, even
@@ -946,8 +953,8 @@ private:
         if (isThis(ctx.selectedNode)) ctx.selectedNode.reset();
 
         dead_ = true;
-        onCleanupStart();
-        cleanup();
+        steps.run("node cleanup hook", [&] { onCleanupStart(); });
+        steps.run("node cleanup", [&] { cleanup(); });
     }
 
     // Recursively draw self and child nodes
@@ -1778,9 +1785,12 @@ inline void Mod::removeSelf() {
 // returns is for the current call; to keep the node, keep
 // n->weak_from_this(), not the pointer. setSelectedNode() with a node that is
 // not owned by a shared_ptr (weak_from_this() empty) clears the selection.
-inline Node* getSelectedNode() { return internal::currentWindowContext().selectedNode.lock().get(); }
+inline Node* getSelectedNode() {
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->selectedNode.lock().get() : nullptr;
+}
 inline void setSelectedNode(Node* n) {
-    internal::currentWindowContext().selectedNode = n ? n->weak_from_this() : NodeWeakPtr();
+    if (auto* ctx = internal::findWindowApiContext()) ctx->selectedNode = n ? n->weak_from_this() : NodeWeakPtr();
 }
 
 // The running App as the root of the node tree (set by the framework while the
@@ -1789,6 +1799,9 @@ inline void setSelectedNode(Node* n) {
 // framework registers the App once it is made (runApp(), runHeadlessApp(),
 // the hot reload host): inside the App's own constructor this is not the App
 // yet. Use it from setup() on.
-inline Node* getRootNode() { return internal::currentWindowContext().rootNode.lock().get(); }
+inline Node* getRootNode() {
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->rootNode.lock().get() : nullptr;
+}
 
 } // namespace trussc

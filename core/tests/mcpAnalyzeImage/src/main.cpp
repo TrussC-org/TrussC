@@ -211,7 +211,7 @@ public:
         moved_=std::move(fbo_); // Deferred lookup must follow the new address.
         defer({{"fbo","float-round-trip"}});hdr_.begin(2.5f,0,0,1);hdr_.end();
         {Fbo dead;dead.setDebugName("pending-dead");defer({{"fbo","pending-dead"}});}
-        defer({{"window",0}});
+        defer({{"window",internal::WindowRequestAccess::creationId(*getWindow())}});
         defer({{"fbo","changing-format"}});
         changing_.allocate(8,8,1,TextureFormat::RGBA16);
         changing_.begin(0,0,1,1);changing_.end();

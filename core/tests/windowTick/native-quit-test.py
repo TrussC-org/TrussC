@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SDK-free Win32 exit extraction. Run via tcbuild.sh (also in native-gates-test).
+"""SDK-free desktop exit extraction. Run via tcbuild.sh (also in native-gates-test).
 Delivery, native send, quit decision, close/session branches and exception
 boundary are production bodies. Only Win32 APIs and unrelated messages are seams.
 """
@@ -31,6 +31,10 @@ parts += [body(win[:win.index('/*-- mouse cursor')], marker) for marker in (
 parts += [body(native, marker) for marker in (
     'static bool _sapp_tc_win32_request_exit(', 'static void _sapp_tc_win32_cleanup(',
     'static void _sapp_tc_win32_close(')]
+parts += ['using BOOL = int; constexpr int YES=1, NO=0;',
+          body(native, 'static BOOL _sapp_tc_request_exit('),
+          'static void _sapp_tc_x11_app_event(_sapp_tc_window_t* w, sapp_event_type type) { _sapp_tc_win32_app_event(w, type); }',
+          body(native, 'static void _sapp_tc_x11_request_exit(')]
 proc = body(native, 'static LRESULT _sapp_tc_wndproc_impl(')
 # Keep complete production cases, including else branches and all returns.
 branches = proc[proc.index('        case WM_QUERYENDSESSION:'):proc.index('        case WM_SYSCOMMAND:')]
@@ -133,7 +137,7 @@ int main() {
         throwing=false;
         check("main trampoline accepts subsequent request",_sapp_tc_win32_request_exit(&window) && calls==2);
     }
-    for(UINT msg:{WM_CLOSE,WM_QUERYENDSESSION}) {
+    for(UINT msg:{WM_QUERYENDSESSION}) {
         reset();throwing=true;
         const auto reply=_sapp_tc_wndproc(17,msg,0,0);
         check("throwing close/session query stays open",reply==0 && posted==0 && calls==1 && !_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered && !window.in_tick && defaults==0);
@@ -147,6 +151,16 @@ int main() {
     }
     reset();cancel=throwReason=true;
     check("session reason failure retains outer catch veto",_sapp_tc_wndproc(17,WM_QUERYENDSESSION,0,0)==FALSE && blocked==1 && !_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered && defaults==0);
+    for(bool initial:{false,true}) {
+        reset();window.is_main=initial;
+        int closes=0;
+        window.desc.user_data=&closes;
+        window.desc.close_cb=[](sapp_window,void* user) { ++*static_cast<int*>(user); };
+        check("any Window close reaches its addressed callback", _sapp_tc_wndproc(17,WM_CLOSE,0,0)==0 && closes==1 && posted==0 && calls==0);
+        window.desc.close_request_cb=[](sapp_window,void*) { return false; };
+        _sapp_tc_wndproc(17,WM_CLOSE,0,0);
+        check("any Window close request can defer without process quit", closes==1 && posted==0 && calls==0);
+    }
     reset();window.is_main=false;window.desc.close_cb=[](sapp_window,void*) { throw 239; };
     check("throwing secondary close is contained without default destruction",_sapp_tc_wndproc(17,WM_CLOSE,0,0)==0 && defaults==0 && posted==0);
     reset();window.is_main=false;
@@ -157,6 +171,27 @@ int main() {
     reset();_sapp_tc.app.quit_requested=_sapp_tc.app.quit_ordered=true;
     _sapp_tc_wndproc(17,WM_ENDSESSION,FALSE,0);
     check("cancelled session clears quit state without cleanup",!_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered && cleaned==0 && terminated==0);
+    // A and B opened; A's native storage has been disposed. The Runtime
+    // receiver must still ask B through its existing cancellable callback.
+    for (int platform : {0, 1, 2}) for (bool veto : {false, true}) {
+        reset(); _sapp_tc.app.main = nullptr; window.is_main = false;
+        cancel = veto;
+        _sapp_tc.app.desc._tc_event_cb = [](const sapp_event* e, sapp_window h, void* user) {
+            check("process quit addresses Runtime rather than disposed A", e->type == SAPP_EVENTTYPE_QUIT_REQUESTED && h.id == 0 && user == nullptr);
+            // Runtime's live-window veto is exercised by the linked ownership probe.
+            sapp_event addressed = *e; addressed.window_id = 17; event(&addressed, {17}, nullptr);
+        };
+        // The seam callback above represents B's veto without native stamping.
+        window.in_tick = true;
+        bool accepted;
+        if (platform == 0) accepted = _sapp_tc_win32_request_exit(_sapp_tc.app.main);
+        else if (platform == 1) {
+            _sapp_tc.app.quit_requested = true; _sapp_tc_x11_request_exit();
+            accepted = _sapp_tc.app.quit_ordered;
+        } else accepted = _sapp_tc_request_exit();
+        check("surviving B is asked exactly once after A closes", calls == 1);
+        check("surviving B can cancel process quit on every desktop seam", accepted == !veto);
+    }
     reset();window.ready=false;
     check("gated client does not manufacture a throw veto",_sapp_tc_win32_request_exit(&window) && calls==0);
     reset();throwing=true;sapp_event e{};e.type=SAPP_EVENTTYPE_QUIT_REQUESTED;
@@ -173,9 +208,9 @@ if os.environ.get('TC_NATIVE_QUIT_MUTATIONS'):
     old='result.client_threw = true;'
     assert old in code, 'shared throw-report mutation anchor missing'
     variants.append(('swallowed_unreported_throw',code.replace(old,'/* swallow without reporting */')))
-    old='if (_sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED).client_threw)'
+    old='if (result.client_threw)'
     assert old in code, 'quit-result mutation anchor missing'
-    variants.append(('ignored_quit_result',code.replace(old,'if ((_sapp_tc_win32_app_event(w, SAPP_EVENTTYPE_QUIT_REQUESTED), false))')))
+    variants.append(('ignored_quit_result',code.replace(old,'if (false)')))
 results=[]
 with tempfile.TemporaryDirectory(prefix='tc-an2b-cp3fu10-native-quit-') as folder:
     for backend in ('SOKOL_GLCORE','SOKOL_GLES3'):

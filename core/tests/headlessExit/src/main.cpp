@@ -16,6 +16,9 @@
 using namespace tc;
 
 namespace {
+// Whitebox subscriptions explicitly target the headless hub before launch.
+CoreEvents& fixtureEvents() { return *internal::nonWindowContext().coreEvents; }
+
 int failures = 0;
 void check(bool ok, const char* name) {
     std::printf("%s: %s\n", ok ? "PASS" : "FAIL", name);
@@ -65,7 +68,7 @@ struct ExitProbeApp : App {
         }
         // Request mode deliberately has no listener.
         if (probe->mode != Mode::Request) {
-            listener = events().exitRequested.listen([](ExitRequestEventArgs& args) {
+            listener = fixtureEvents().exitRequested.listen([](ExitRequestEventArgs& args) {
                 ++probe->requests;
                 probe->updatesAtRequest = probe->updates;
                 check(!probe->inUpdate && probe->setupReturned,
@@ -164,6 +167,7 @@ void testRunner(Mode mode, int code, const char* reason) {
 }
 
 void resetPassState() {
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
     headless::active = true;
     headless::running = true;
     headless::quitRequested = false;
@@ -180,8 +184,8 @@ void testCatchUp(Mode mode, int expectedSteps) {
     Probe result;
     result.mode = mode;
     probe = &result;
-    auto app = std::make_shared<ExitProbeApp>();
-    auto appListeners = internal::registerHeadlessAppEventListeners(app);
+    auto app = internal::makeConstructedApp<ExitProbeApp>();
+    auto appListeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
     app->setup();
     auto& ctx = internal::nonWindowContext();
     const int rateIndex = ctx.rateIndex;
@@ -211,8 +215,8 @@ void testSetupFirstPass() {
     Probe result;
     result.mode = Mode::SetupRequest;
     probe = &result;
-    auto app = std::make_shared<ExitProbeApp>();
-    auto appListeners = internal::registerHeadlessAppEventListeners(app);
+    auto app = internal::makeConstructedApp<ExitProbeApp>();
+    auto appListeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
     app->setup();
     double accumulator = 0.0;
     internal::runHeadlessUpdatePass(*app, internal::nonWindowContext(), accumulator, 0.0, 1.0);

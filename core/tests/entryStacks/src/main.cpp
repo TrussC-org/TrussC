@@ -218,7 +218,7 @@ static shared_ptr<LeakySetupApp> g_setupApp;
 static void setupAppUpdate() { if (g_setupApp) g_setupApp->handleUpdate(0, 0); }
 
 static void testSetup(Clk::time_point& t) {
-    g_setupApp = make_shared<LeakySetupApp>();
+    g_setupApp = internal::makeConstructedApp<LeakySetupApp>();
     schedulerUpdate = events().update.listen(setupAppUpdate);
     setFps(VSYNC);
     g_warnings.clear();
@@ -316,6 +316,7 @@ static void testHeadless() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    auto fixture = std::make_unique<tcCoreTest::WindowFixture>();
 #ifndef NDEBUG
     std::printf("SKIP: needs a release build (sokol_gl asserts it is set up on pushMatrix())\n");
     return 0;
@@ -333,6 +334,7 @@ TC_CORE_TEST_MAIN() {
     testSetup(t);
     testValuesCarry();
     testRateLimit(t);
+    fixture.reset();
     testHeadless();
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");

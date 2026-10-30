@@ -254,16 +254,10 @@ void logExposure() {
 #endif
 }
 
-std::string& mainWindowTitleStorage() {
-    return trussc::internal::mainWindow()->title_;
+std::string markedWindowTitle(const std::string& title) {
+    return isDevBuild() && title.find("[MCP]") == std::string::npos ? title + " [MCP]" : title;
 }
 
-const std::string& mainWindowTitle(const std::string& title) {
-    auto& windowTitle = mainWindowTitleStorage();
-    windowTitle = isDevBuild() && title.find("[MCP]") == std::string::npos
-        ? title + " [MCP]" : title;
-    return windowTitle;
-}
 
 void startConfiguredServer(const char* opener) {
 #ifndef __EMSCRIPTEN__
@@ -303,6 +297,77 @@ DeferralState& deferralState() {
     return s;
 }
 
+void resetDeferralState() noexcept {
+    auto& state = deferralState();
+    auto code = std::move(state.code);
+    state.produce = {}; state.produceTwoStage = {}; state.envelope = {};
+    state.requested = state.twoStageRequested = state.hasEnvelope = false;
+    state.owner = state.target = nullptr;
+    state.appOwner.reset();
+}
+std::function<ReplyThunk()> retainDeferredCode(std::function<ReplyThunk()> callback, std::shared_ptr<void> code,
+                                             std::shared_ptr<::trussc::internal::AppOwner> owner, json id) {
+    // Host managers retain code until both stages' guest storage is destroyed.
+    return [code = std::move(code), owner = std::move(owner), id = std::move(id), callback = std::move(callback)]() mutable -> ReplyThunk {
+        if (owner && (owner->retiring || owner->ended || !owner->token->load()))
+            throw std::runtime_error("the App behind this deferred reply retired");
+        ::trussc::internal::AppCallbackScope scope(owner);
+        auto reply = callback();
+        return [code, owner, id, reply = std::move(reply)]() mutable {
+            if (owner && (owner->retiring || owner->ended || !owner->token->load()))
+                return toolError(id, "the App behind this deferred reply retired");
+            // The worker restores attribution only; it never selects GPU state.
+            ::trussc::internal::AppOwnerScope scope(owner);
+            return reply();
+        };
+    };
+}
+const void* resolveDeferredTarget(const void* targetWindow) {
+    if (targetWindow) return targetWindow;
+    if (auto owner = ::trussc::internal::currentAppOwner()) {
+        if (!owner->retiring && !owner->ended && owner->context &&
+            owner->context->hostWindow && owner->context->hostWindow->isOpen()) return owner->context;
+        throw std::runtime_error("the App has no live Window for a deferred reply");
+    }
+    auto windows = ::trussc::internal::openWindows();
+    if (windows.size() == 1) return &windows.front()->context();
+    std::string ids = "[";
+    for (auto* window : windows) {
+        if (ids.size() > 1) ids += ", ";
+        auto id = std::to_string(::trussc::internal::WindowRequestAccess::creationId(*window));
+        reserveWork(id.size() + 2);
+        ids += id;
+    }
+    ids += "]";
+    throw std::runtime_error("Specify a Window for a deferred reply; available positive IDs: " + ids);
+}
+
+void retireDeferredTarget(const void* targetWindow) noexcept {
+    // Extract one entry at a time. Destruction and completion can reenter MCP,
+    // and retirement must also succeed when no snapshot allocation is possible.
+    for (;;) {
+        DeferredResponse entry;
+        {
+            std::lock_guard<std::mutex> lock(deferredResponsesMutex());
+            auto& pending = deferredResponses();
+            auto it = std::find_if(pending.begin(), pending.end(), [=](const auto& response) {
+                return response.target == targetWindow;
+            });
+            if (it == pending.end()) return;
+            entry = std::move(*it);
+            pending.erase(it);
+        }
+        try {
+            completeTerminalResponse(entry.response, entry.budget, [&] {
+                return toolError(entry.id, "the target window was closed before the reply was produced");
+            });
+        } catch (...) {
+            try { completeResponse(entry.response, +[]() -> std::string { throw AdmissionError(); }); }
+            catch (...) {}
+        }
+    }
+}
+
 std::vector<DeferredResponse>& deferredResponses() {
     static auto* v = new std::vector<DeferredResponse>;
     return *v;
@@ -320,7 +385,7 @@ std::atomic<ToolLevel>& grantedToolLevel() {
 }
 
 const void*& registrationOwner() {
-    static const void* owner = nullptr;
+    static thread_local const void* owner = nullptr;
     return owner;
 }
 
@@ -741,10 +806,8 @@ Server& Server::instance() {
     // Build the core registry once, even when the first registration is from
     // a guest. Core handlers outlive that guest and must have no guest owner.
     static const bool registered = [&] {
-        const auto owner = internal::registrationOwner();
-        internal::setRegistrationOwner(nullptr);
+        ::trussc::internal::AppOwnerScope process({});
         internal::registerStandardTools(server);
-        internal::setRegistrationOwner(owner);
         return true;
     }();
     (void)registered;

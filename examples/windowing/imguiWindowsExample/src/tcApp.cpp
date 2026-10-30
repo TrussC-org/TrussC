@@ -10,8 +10,7 @@ void tcApp::setup() {
     ws.setTitle("imguiWindowsExample - second");
     second_ = createWindow(ws);
     if (second_) {
-        subApp_ = make_shared<SubApp>();
-        second_->setApp(subApp_);
+        second_->setApp<SubApp>();
     }
 }
 
@@ -35,8 +34,7 @@ void tcApp::draw() {
             ws.setTitle("imguiWindowsExample - second");
             second_ = createWindow(ws);
             if (second_) {
-                subApp_ = make_shared<SubApp>();
-                second_->setApp(subApp_);
+                second_->setApp<SubApp>();
             }
         }
     }
@@ -60,8 +58,7 @@ void tcApp::keyPressed(int key) {
             ws.setTitle("imguiWindowsExample - second");
             second_ = createWindow(ws);
             if (second_) {
-                subApp_ = make_shared<SubApp>();
-                second_->setApp(subApp_);
+                second_->setApp<SubApp>();
             }
         }
     }

@@ -39,7 +39,7 @@ struct MainApp : App {
         WindowSettings settings; settings.setSize(64, 64);
         secondary = createWindow(settings);
         if (!secondary) { ++failures; exitApp(1); return; }
-        secondary->setApp(std::make_shared<TimerApp>());
+        secondary->setApp<TimerApp>();
     }
     void cleanup() override { secondary.reset(); }
 };

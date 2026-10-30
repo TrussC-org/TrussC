@@ -406,7 +406,7 @@ int main(int argc, char** argv) {
     sgl_desc_t ld = {}; ld.pipeline_pool_size = 256; ld.logger.func = internal::sokolLog; sgl_setup(ld);
     auto& w = internal::currentWindowContext();
     // Keep framebuffer metrics independent of sapp (no native window exists).
-    w.isMain = false; w.fbWidth = w.fbHeight = 256; w.dpiScale = 1; w.updateDeltaTime = 1.0/60.0;
+    w.fbWidth = w.fbHeight = 256; w.dpiScale = 1; w.updateDeltaTime = 1.0/60.0;
     w.swapchainTarget.resources().context = sgl_default_context();
     w.swapchainTarget.width = w.swapchainTarget.height = 256;
     w.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;

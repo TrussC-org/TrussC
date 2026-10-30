@@ -143,7 +143,8 @@ int child(const std::string& selected, const fs::path& directory) {
     if (mode == "overflow") return overflow(1000000);
     if (mode == "worker") { std::thread worker(fault); worker.join(); return 94; }
     if (mode == "event") {
-        internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 239);
+        auto launch = internal::prepareLaunchWindow(WindowSettings{});
+        internal::WindowRequestAccess::bindForTests(*launch, 239);
         auto listener = events().rawEvent.listen([](const sapp_event&) { fault(); });
         sapp_event event{};
         event.type = SAPP_EVENTTYPE_KEY_DOWN;

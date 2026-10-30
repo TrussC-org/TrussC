@@ -42,7 +42,7 @@ void runNativeClipChecks() {
         check("native RectNode Fbo matches real framebuffer and uses pixel coordinates",
               target.getWidth() == getFramebufferWidth() && target.getHeight() == getFramebufferHeight() &&
               tc::getWidth() == target.getWidth() && tc::getHeight() == target.getHeight() && internal::targetPixelScale() == 1);
-        auto node = std::make_shared<ClipFixture>();
+        auto node = internal::makeConstructedApp<ClipFixture>();
         node->setPos(10, 10); node->setSize(20, 20); node->setClipping(true); node->handleDraw();
         check("native RectNode pop restores inactive empty clip", !internal::currentTarget().currentScissor.active &&
               internal::currentTarget().scissorStack.empty());
@@ -235,7 +235,7 @@ void runMatrixChecks() {
         first.begin(0, 0, 0); setupScreenOrtho(); setBlendMode(BlendMode::Alpha); disableDepthTest();
         check("Fbo coordinate scale ignores host DPI and pixelPerfect", internal::targetPixelScale() == 1 && tc::getWidth() == 160 && tc::getHeight() == 96 &&
               getFramebufferWidth() == 192 && getWindowWidth() == int(192 / (pixelPerfect ? 1 : dpi)));
-        auto node = std::make_shared<ClipFixture>();
+        auto node = internal::makeConstructedApp<ClipFixture>();
         node->setPos(10, 10); node->setSize(20, 20); node->setClipping(true); node->handleDraw();
         check("clipped node geometry stays object-local", node->getWidth() == 20 && node->getHeight() == 20 && node->getSize().x == 20);
         setColor(1, 0, 0); drawRect(40, 10, 5, 5);

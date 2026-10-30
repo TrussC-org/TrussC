@@ -68,7 +68,7 @@ struct SizeEvidence : App {
         receivedDpi = tc::getDpiScale();
         receivedScale = internal::appSizeDpi(receivedDpi);
         std::printf("resize role=%s frame=%llu received=%dx%d dpi=%.6g App-scale=%.6g\n",
-            getWindow()->context().isMain ? "main" : "secondary", (unsigned long long)sapp_frame_count(),
+            "window", (unsigned long long)sapp_frame_count(),
             w, h, receivedDpi, receivedScale);
     }
     void printSizeEvidence(const char* role) {
@@ -102,13 +102,14 @@ struct CreationApp : SizeEvidence {
         WindowSettings settings;
         settings.setSize(requestWidth, requestHeight).setPixelPerfect(!pixels).setTitle("Creation secondary");
         secondary = createWindow(settings);
+        if (secondary) secondary->setPosition(32, 32);
         check("secondary created", bool(secondary));
         if (!secondary) { exitApp(1); return; }
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
         // Keep constructor dimensions before the secondary's first adapter tick.
         secondWidth = secondary->context().fbWidth; secondHeight = secondary->context().fbHeight;
 #endif
-        secondary->setApp(std::make_shared<Secondary>());
+        secondary->setApp<Secondary>();
         mainWidth = sapp_width(); mainHeight = sapp_height();
     }
     void update() override {
@@ -181,7 +182,7 @@ struct CreationApp : SizeEvidence {
                 bool exact = true;
                 auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
                     ++notices;
-                    const std::string suffix = target == main ? "" : " on \"Creation secondary\"";
+                    const std::string suffix = " on \"" + target->getTitle() + "\"";
                     const std::string prefix = "[Window] ";
                     const std::string reason = " ignored while fullscreen; call it once isFullscreen() returns false";
                     exact &= e.level == LogLevel::Notice &&

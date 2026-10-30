@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 // =============================================================================
 // core/tests/screenshotContract — screenshot contracts for #230 and #298.
 // Native: deferred filesystem capture. Web (under node): deferred canvas
@@ -66,6 +67,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #else
     (void)argc; (void)argv;
 #endif
+    tcCoreTest::WindowFixture fixture;
     // Count the "[Screenshot]" warnings/errors the calls below log.
     int screenshotWarnings = 0;
     int screenshotErrors = 0;

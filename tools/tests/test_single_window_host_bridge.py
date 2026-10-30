@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = Path(os.environ.get('TC_SINGLE_WINDOW_RUNTIME', ROOT/'core/include/tc/app/tcWindowRuntime.cpp')).read_text(encoding='utf-8')
 NATIVE = (ROOT/'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
 common = '\n'.join(body(RUNTIME, signature) for signature in (
-    'void refreshMainWindowMetadata(', 'bool enterWindowTick(', 'void windowTick(', 'void singleWindowFrame('))
+    'void refreshSelectedWindowMetadata(', 'bool enterWindowTick(', 'void windowTick(', 'void singleWindowFrame('))
 parts = []
 # Use each real platform's implementation of the legacy skip endpoint.
 skips = list(re.finditer(r'SOKOL_API_IMPL void sapp_skip_present\(void\) \{', NATIVE))
@@ -27,11 +27,14 @@ for platform, match in zip(('ios','android','web'), skips):
 struct sapp_window { unsigned id=0; };
 struct sapp_event {};
 struct sapp_tc_window_metadata { int fb_width=0,fb_height=0,sample_count=0,color_format=0,depth_format=0; float dpi_scale=0; bool trust_hidden_signals=false,occluded=false,drawable_available=false; double source_interval=0; };
-struct Context { double tickDuration=0; float mouseX=3,mouseY=4,pmouseX=0,pmouseY=0; struct { bool empty() { return true; } } pendingScreenshotPaths; struct { decltype(pendingScreenshotPaths) pending; } asyncScreenshots; void* deferredResponseTarget=nullptr; bool drawWhileHidden=true; int fbWidth=100,fbHeight=50; };
+struct Window;
+struct Context { Window* hostWindow=nullptr; double tickDuration=0; float mouseX=3,mouseY=4,pmouseX=0,pmouseY=0; struct { bool empty() { return true; } } pendingScreenshotPaths; struct { decltype(pendingScreenshotPaths) pending; } asyncScreenshots; void* deferredResponseTarget=nullptr; bool drawWhileHidden=true; int fbWidth=100,fbHeight=50; };
 struct Binding { sapp_window handle; sapp_tc_window_metadata metadata; };
 struct Window { Binding binding; Context ctx; Context& context() { return ctx; } bool isOccluded() { return false; } } window;
 struct WindowRequestAccess { static Binding& binding(Window& w) { return w.binding; } };
-Window* mainWindow() { return &window; }
+bool hasWindow=true;
+Window* resolveWindow() { return hasWindow ? &window : nullptr; }
+Context* currentWindowCtx() { window.ctx.hostWindow=&window; return hasWindow ? &window.ctx : nullptr; }
 constexpr bool supportsSecondaryWindows() { return false; }
 bool sapp_isvalid() { return true; }
 int sapp_width() { return 100; } int sapp_height() { return 50; }
@@ -46,7 +49,7 @@ void sapp_tc_window_skip_present(sapp_window) { ++desktopSkips; }
 void publishWindowMetadata(Window& w,const sapp_tc_window_metadata& m) { w.binding.metadata=m; }
 bool refreshWindowMetadata(Window&) { return true; }
 void syncWindowAppSize(Window&) {}
-struct WindowEntryScope { WindowEntryScope(Window&,bool) { refreshMainWindowMetadata(); } operator bool() { return true; } static void refreshMainWindowMetadata(); };
+struct WindowEntryScope { WindowEntryScope(Window&,bool) { refreshSelectedWindowMetadata(); } operator bool() { return true; } static void refreshSelectedWindowMetadata(); };
 struct TeardownSteps { template<class F> void run(const char*,F fn) { fn(); } };
 struct WindowTickPresentation {};
 struct CrashPhaseScope { CrashPhaseScope(const char*) {} };
@@ -59,7 +62,7 @@ namespace mcp::internal { bool hasDeferredResponsesForTarget(void*) { return fal
 bool runWindowTick(int,double duration,bool,const WindowTickPresentation*,bool) { ++ticks; window.ctx.tickDuration=duration; return admitDraw; }
 struct { bool skip_present=false; int timing=0; struct { int display=1,context=1,surface=1; struct { void* window=nullptr; } current; } android; } _sapp_tc;
 ''' + skip + '\n' + common.replace('std::chrono::steady_clock::time_point', 'int') + r'''
-void WindowEntryScope::refreshMainWindowMetadata() { NAMESPACE::refreshMainWindowMetadata(); }
+void WindowEntryScope::refreshSelectedWindowMetadata() { NAMESPACE::refreshSelectedWindowMetadata(); }
 int swaps=0;
 constexpr int EGL_NO_DISPLAY=0,EGL_NO_CONTEXT=0,EGL_NO_SURFACE=0;
 void _sapp_tc_timing_update(int*,double) {}
@@ -82,7 +85,11 @@ void run() {
     check("Android no-draw returns before eglSwapBuffers",swaps==0 && !_sapp_tc.skip_present);
     admitDraw=true; _sapp_tc_android_frame(1);
     check("Android one-shot skip leaves next admitted swap intact",swaps==1 && !_sapp_tc.skip_present);
-''' if platform=='android' else '') + '}\n}\n')
+''' if platform=='android' else '') + r'''
+    hasWindow=false; const int before=ticks; singleWindowFrame();
+    check("zero-window native frame does no work and balances the host turn", ticks==before && turns==0);
+    hasWindow=true;
+''' + '}\n}\n')
 prefix = r'''
 #include <cstdio>
 #include <cmath>
@@ -97,7 +104,7 @@ int main() { ios::run();android::run();web::run(); printf("single-window: %d che
 '''
 # Forward declarations are necessary because extraction retains production order.
 source = source.replace('const WindowTickPresentation* presentation)', 'const WindowTickPresentation* presentation = nullptr)')
-source = source.replace('struct WindowEntryScope {', 'void refreshMainWindowMetadata();\nstruct WindowEntryScope {')
+source = source.replace('struct WindowEntryScope {', 'void refreshSelectedWindowMetadata();\nstruct WindowEntryScope {')
 variants=[('baseline',source)]
 if os.environ.get('TC_SINGLE_WINDOW_MUTATIONS'):
     for name, old, new in (

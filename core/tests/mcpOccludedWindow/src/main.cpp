@@ -137,36 +137,35 @@ TC_CORE_TEST_MAIN() {
         // --- tc_list_windows: the flag per secondary window ---------------
         json list = call(*cli, "tc_list_windows", "{}");
         const json wins = list.is_object() ? list.value("windows", json::array()) : json::array();
-        check("tc_list_windows lists main + 2 secondary windows", wins.size() == 3, list.dump());
-        if (wins.size() == 3) {
-            check("main entry has no occluded field", !wins[0].contains("occluded"), wins[0].dump());
+        check("tc_list_windows lists both positive Window IDs", wins.size() == 2, list.dump());
+        if (wins.size() == 2) {
             check("visible window: occluded false",
-                  wins[1].value("title", "") == "visible" && wins[1].contains("occluded") &&
-                  wins[1]["occluded"] == false, wins[1].dump());
+                  wins[0].value("title", "") == "visible" && wins[0].contains("occluded") &&
+                  wins[0]["occluded"] == false, wins[0].dump());
             check("hidden window: occluded true",
-                  wins[2].value("title", "") == "hidden" && wins[2].contains("occluded") &&
-                  wins[2]["occluded"] == true, wins[2].dump());
+                  wins[1].value("title", "") == "hidden" && wins[1].contains("occluded") &&
+                  wins[1]["occluded"] == true, wins[1].dump());
         }
 
         // --- hidden window: both screenshot tools fail at once ------------
         double sec = 0;
-        json r = call(*cli, "tc_get_screenshot", R"({"window":2})", &sec);
+        json r = call(*cli, "tc_get_screenshot", R"({"window":303})", &sec);
         check("tc_get_screenshot hidden window -> error", statusOf(r) == "error", r.dump());
         check("  names the window and why",
-              contains(messageOf(r), "window 2 is not visible (the OS reports it hidden"), r.dump());
+              contains(messageOf(r), "window 303 is not visible (the OS reports it hidden"), r.dump());
         check("  answered at once (< 2 s, not the 5 s timeout)", sec < 2.0, to_string(sec) + " s");
 
-        r = call(*cli, "tc_save_screenshot", R"({"window":2,"path":)" + savePathJson + "}", &sec);
+        r = call(*cli, "tc_save_screenshot", R"({"window":303,"path":)" + savePathJson + "}", &sec);
         check("tc_save_screenshot hidden window -> error", statusOf(r) == "error", r.dump());
         check("  names the window and why",
-              contains(messageOf(r), "window 2 is not visible (the OS reports it hidden"), r.dump());
+              contains(messageOf(r), "window 303 is not visible (the OS reports it hidden"), r.dump());
         check("  answered at once (< 2 s, not the 5 s timeout)", sec < 2.0, to_string(sec) + " s");
         // No "no file written" check: headless, a secondary window's capture
         // has no framebuffer to read (0x0), so no file could appear either way.
 
         // Unchanged: an index past the open windows.
-        r = call(*cli, "tc_get_screenshot", R"({"window":3})");
-        check("out-of-range window -> index error", contains(messageOf(r), "out of range"), r.dump());
+        r = call(*cli, "tc_get_screenshot", R"({"window":999})");
+        check("out-of-range window -> index error", contains(messageOf(r), "positive window ID"), r.dump());
 
         // --- visible window: unchanged, deferred to its tick --------------
         // The stand-in never ticks, so the main window's drain answers both
@@ -176,9 +175,9 @@ TC_CORE_TEST_MAIN() {
         thread saver([&] {
             auto c2 = makeClient();
             saveReply = call(*c2, "tc_save_screenshot",
-                             R"({"window":1,"path":)" + savePathJson + "}", &saveSec);
+                             R"({"window":202,"path":)" + savePathJson + "}", &saveSec);
         });
-        getReply = call(*cli, "tc_get_screenshot", R"({"window":1})", &getSec);
+        getReply = call(*cli, "tc_get_screenshot", R"({"window":202})", &getSec);
         saver.join();
         const string timeoutMsg = "rendered no frame within 5 s";
         check("tc_get_screenshot visible window -> deferred, then timeout",
@@ -195,8 +194,8 @@ TC_CORE_TEST_MAIN() {
         list = call(*cli, "tc_list_windows", "{}");
         const json wins2 = list.is_object() ? list.value("windows", json::array()) : json::array();
         check("after visible observation: both windows occluded false",
-              wins2.size() == 3 && wins2[1].value("occluded", true) == false &&
-              wins2[2].value("occluded", true) == false, list.dump());
+              wins2.size() == 2 && wins2[0].value("occluded", true) == false &&
+              wins2[1].value("occluded", true) == false, list.dump());
 
         done = true;
     });
@@ -207,7 +206,7 @@ TC_CORE_TEST_MAIN() {
     auto deadline = chrono::steady_clock::now() + chrono::seconds(40);
     while (!done && chrono::steady_clock::now() < deadline) {
         mcp::processHttpQueue();
-        mcp::internal::drainDeferredResponses();
+        mcp::internal::drainDeferredResponses(nullptr, false);
         this_thread::sleep_for(chrono::milliseconds(1));
     }
     check("finished before the deadline", done.load());

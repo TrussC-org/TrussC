@@ -126,8 +126,9 @@ void checkLogicalHandoff() {
 
 }
 void checkCpuCoordinates() {
-    internal::WindowRequestAccess::HostState windowState; internal::WindowContext& window = windowState.context;
-    window.isMain = false; window.fbWidth = 512; window.fbHeight = 384;
+    tc::Window fixture; internal::WindowRequestAccess::bindForTests(fixture, 101);
+    auto& window = fixture.context();
+    window.fbWidth = 512; window.fbHeight = 384;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
     internal::RenderTarget fbo;
@@ -153,6 +154,9 @@ void checkCpuCoordinates() {
     }
     internal::pixelPerfectMode() = previousMode;
     internal::currentWindowCtx() = previous;
+    // Finish the synthetic Runtime before disposing its last addressed Window.
+    // Its close must not leave a native quit request for the later display run.
+    internal::shutdownRuntime();
 }
 auto& cameraFields() { return internal::currentWindowContext().currentTarget->camera; }
 auto& reviewDrawFields() { return *internal::currentWindowContext().currentTarget; }

@@ -139,11 +139,11 @@ void runPath(TeardownPath path, const char* name) {
         runHeadlessApp<HeadlessApp>();
         headlessProbe = nullptr;
     } else {
-        auto app = std::make_shared<BufferApp>(p);
+        auto app = internal::makeConstructedApp<BufferApp>(p);
         OpenWindow window;
         if (path == TeardownPath::Child) {
             auto parent = std::make_shared<Node>();
-            window.setApp(std::make_shared<App>());
+            window.setApp<App>();
             tick(window);
             // Keep only the child App subscribed, to use the same counts.
             internal::detachAppAudio(*window.getApp());
@@ -154,14 +154,14 @@ void runPath(TeardownPath path, const char* name) {
             app->destroy();
             tick(window);
         } else {
-            window.setApp(app);
+            internal::WindowRequestAccess::attachCandidate(window, app);
             tick(window);
             armCallback(p);
             if (path == TeardownPath::Close) {
                 window.close();
                 window.landClose();
             } else {
-                window.setApp(path == TeardownPath::Swap ? std::make_shared<App>() : nullptr);
+                internal::WindowRequestAccess::attachCandidate(window, path == TeardownPath::Swap ? internal::makeConstructedApp<App>() : nullptr);
                 internal::applyPendingAppForTests(window);
             }
         }

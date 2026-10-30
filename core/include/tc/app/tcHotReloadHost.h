@@ -75,12 +75,21 @@ struct GuestLibrary {
 #else
     void* handle = nullptr;
 #endif
+    std::shared_ptr<void> code;
+    const void* codeOwner = nullptr;
     CreateAppFn createApp = nullptr;
     DestroyAppFn destroyApp = nullptr;
     std::weak_ptr<App> app; // Window owns the App; the guest keeps only generation metadata.
     string loadedPath;  // actual path loaded (may be a temp copy on Windows)
     const void* mcpOwner = nullptr;  // this generation's MCP registrations (create/destroy)
 
+    static void closeLibrary(void* library) {
+#ifdef _WIN32
+        FreeLibrary(static_cast<HMODULE>(library));
+#else
+        dlclose(library);
+#endif
+    }
     bool load(const string& path) {
         // Always load from a unique temp path. Without this, the OS dynamic
         // loader deduplicates by pathname/inode and may return the already-
@@ -137,45 +146,48 @@ struct GuestLibrary {
 #endif
         internal::refreshCrashModules();
         loadedPath = tempPath;
+        try {
+            codeOwner = internal::nextAppGeneration();
+            internal::registerGuestCode(codeOwner, handle, closeLibrary, reinterpret_cast<const void*>(createApp));
+            code = internal::retainGuestCodeFor(reinterpret_cast<const void*>(createApp));
+        } catch (...) {
+            closeLibrary(handle); handle = nullptr; codeOwner = nullptr;
+            try { fs::remove(loadedPath); } catch (...) {}
+            throw;
+        }
         return true;
     }
 
+    std::weak_ptr<Window> targetWindow;
+    bool targetAssigned = false;
     App* create() {
         if (createApp) {
-            // Everything this guest generation registers with MCP (tools,
-            // resources, status getters) is tagged with it from here on, and
-            // destroy() removes it all before the App those handlers capture
-            // is deleted — no stale tool from an old build lingers in
-            // tools/list pointing at a freed App (#227). The tag is only an
-            // identity, never dereferenced.
-            static uintptr_t generation = 0;  // host-only: only the host creates guests
-            mcpOwner = reinterpret_cast<const void*>(++generation);
-            mcp::internal::setRegistrationOwner(mcpOwner);
-            if (auto token = internal::appRunToken()) token->store(false);
-            internal::cancelResourceBackends();
-            internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-            App* raw;
-            internal::AppConstructionTicket ticket{internal::appRunToken(), mcpOwner};
+            if (!targetAssigned) {
+                auto* context = internal::currentWindowCtx();
+                auto* selected = context && context->hostWindow ? context->hostWindow : internal::resolveWindow();
+                if (selected) targetWindow = internal::WindowRequestAccess::retainHostOwner(*selected);
+                targetAssigned = true;
+            }
+            auto target = targetWindow.lock();
+            if (!target || !target->isOpen()) return nullptr;
+            App* raw = nullptr;
+            mcpOwner = internal::nextAppGeneration();
+
+            internal::AppConstructionTicket ticket;
+            ticket.registrationOwner = mcpOwner;
+            ticket.code = code;
+            ticket.context = &target->context();
             {
                 internal::AppConstructionScope construction(ticket);
                 raw = createApp();
                 if (raw) internal::completeAppConstruction(*raw);
             }
-            auto deleter = destroyApp;
-            // Destroying an App is not retiring its generation: a guest can
-            // self-swap, and the replacement (built while this generation's
-            // owner was current) keeps its registrations, as do the
-            // generation's still-running secondary Apps. destroy() retires
-            // the whole generation, before the last App of it is released.
-            auto candidate = std::shared_ptr<App>(raw, [deleter](App* p) {
-                internal::TeardownSteps steps;
-                steps.run("guest App destruction", [&] { if (deleter) deleter(p); });
-            });
-            if (!internal::attachMainApp(candidate)) {
+            if (!raw) return nullptr;
+            auto candidate = internal::adoptConstructedApp(raw, destroyApp);
+            if (target && target->isOpen()) internal::attachCandidate(*target, candidate);
+            if (!target || target->getApp() != candidate) {
                 // Constructor registrations must not outlive a refused candidate.
-                mcp::internal::removeRegistrationsOwnedBy(mcpOwner);
-                mcp::internal::setRegistrationOwner(nullptr);
-                mcpOwner = nullptr;
+                internal::retireAppOwner(ticket.owner);
                 return nullptr;
             }
             app = candidate;
@@ -185,48 +197,30 @@ struct GuestLibrary {
     }
 
     void destroy() {
-        if (auto token = internal::appRunToken()) token->store(false);
-        internal::cancelResourceBackends();
-        if (mcpOwner) {
-            mcp::internal::removeRegistrationsOwnedBy(mcpOwner);
-            mcp::internal::setRegistrationOwner(nullptr);
-            mcpOwner = nullptr;
+        internal::retireAppGeneration(mcpOwner);
+        mcpOwner = nullptr;
+        if (auto live = app.lock()) {
+            if (auto* window = live->getWindow()) {
+                window->destroyApp();
+                internal::WindowRequestAccess::applyPendingApp(*window);
+            } else internal::retireAppOwner(internal::appOwner(*live));
         }
-        // Same transactional detach as setApp(nullptr), before unloading code.
-        internal::detachMainApp();
         app.reset();
-        // Cleanup/destructors can have submitted another old-run operation.
-        internal::cancelResourceBackends();
     }
 
     void unload() {
-        // Tell guest code first, while its App and node references are still
-        // valid: singletons and other statics in the guest image outlive the
-        // App and keep their listeners on the host's events until they drop
-        // them (#416). Dispatched on the main window's events, whichever
-        // window context is current.
+        // Notification failures cannot skip cohort ending or code retirement.
+        internal::TeardownSteps steps;
         if (handle || !app.expired()) {
-            auto* prev = internal::currentWindowCtx();
-            internal::restoreWindowContext(&internal::mainWindowContext());
-            events().hotReloadUnload.notify();
-            internal::restoreWindowContext(prev);
+            if (auto window = targetWindow.lock()) steps.run("guest unload notification", [&] {
+                internal::WindowContextScope selected(&window->context());
+                window->events().hotReloadUnload.notify();
+            });
         }
-        // Drop the window contexts' weak references first (hover, grab,
-        // selection, the main root; #255). Releasing the last weak reference
-        // to a make_shared node runs code of the module that created it, so
-        // none may outlive the guest. Hover, grab and selection start empty
-        // in the new generation.
-        internal::resetNodeRefsForUnload();
         destroy();
-        // Intentionally NOT dlclose()d / FreeLibrary()d: the old guest's code
-        // can still be referenced from host-owned state even after its App is
-        // destroyed -- shared_ptr control blocks it allocated (e.g. the COW
-        // listener list inside Event<T> after this App's listeners were
-        // removed), std::function invokers, vtables/typeinfo. Unmapping the
-        // image turns any such leftover into a jump into unmapped memory
-        // (observed: SEGV in Event::listenImpl releasing the previous list
-        // snapshot on the first reload). Leaking ~one guest image per reload
-        // is the standard hot-reload trade-off and is bounded by dev usage.
+        // Retirement cancels callbacks now. Retained snapshots and App handles
+        // pin the library until their guest destructors have returned; the host
+        // maintenance boundary then physically unloads it without allocating.
         if (handle) {
             handle = nullptr;
 #ifndef _WIN32
@@ -238,6 +232,10 @@ struct GuestLibrary {
         }
         createApp = nullptr;
         destroyApp = nullptr;
+        internal::releaseGuestCode(codeOwner);
+        codeOwner = nullptr;
+        code.reset();
+        internal::drainGuestCode();
     }
 };
 
@@ -532,7 +530,7 @@ struct Host {
 
     bool reloadRequested = false;
     bool reload() {
-        if (internal::mainWindowDispatchActive()) {
+        if (internal::hostCallbacksActive()) {
             reloadRequested = true;
             return true; // accepted; the next host boundary performs the reload
         }
@@ -642,17 +640,18 @@ inline int runHotReloadApp(const WindowSettings& settings) {
 
     internal::appCleanupFunc = []() {
         // Retain the generation through hotReloadUnload, as on the old runner.
-        auto app = internal::mainApp();
-        internal::destroyMainWindow();
+        auto app = g_host.guest.app.lock();
+        internal::shutdownRuntime();
         g_host.guest.unload();
     };
-    internal::createMainWindow(settings);
-    internal::prepareMainAppBindings();
+    auto window = internal::prepareLaunchWindow(settings);
+    g_host.guest.targetWindow = window;
+    g_host.guest.targetAssigned = true;
 
     // Build the sokol descriptor (without template — we handle App* manually)
     internal::pixelPerfectMode() = settings.pixelPerfect;
 
-    sapp_desc desc = buildWindowDescriptor(settings);
+    sapp_desc desc = buildWindowDescriptor(settings, window.get());
     setHostReloadPoll([] { g_host.poll(); });
     openEnvLogFile();   // TRUSSC_LOG_FILE before sapp_run(): init-time failures too
 #ifdef _WIN32
@@ -661,6 +660,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     appExitCode() = 0;
     appSetupCalled() = false;
     sapp_run(&desc);
+    shutdownRuntime();
     endFrameworkLifetime();
     setHostReloadPoll(nullptr);
     return appSetupCalled() ? appExitCode() : 1;

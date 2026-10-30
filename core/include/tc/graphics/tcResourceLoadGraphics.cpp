@@ -270,12 +270,26 @@ LoadResult Image::finishLoad(const fs::path& path, bool mipmaps) try {
     return internal::imageDecodeOutOfMemory();
 }
 
+float Font::loadDpiScale() {
+    // Construction/callback ownership wins over the caller's drawing context.
+    if (auto owner = internal::currentAppOwner()) {
+        if (owner->context && !owner->retiring)
+            return internal::windowDimensions(*owner->context).dpiScale;
+        return 1.0f;
+    }
+    // CPU resource preparation without a Window uses logical pixels. With
+    // Windows open, omission follows the same sole-Window rule as queries.
+    if (internal::openWindows().empty()) return 1.0f;
+    if (auto* window = internal::resolveWindow(true))
+        return internal::windowDimensions(window->context()).dpiScale;
+    return 1.0f;
+}
+
 void Font::loadAsync(const fs::path& nameOrPath, int size, int faceIndex) {
     cancelAsync();
     auto state = async_.begin(onLoad, [this](AsyncState& ready) { applyAsync(ready); });
-    // Match load() in the requesting context. Completion runs in the process
-    // context, and the native main-window DPI need not describe either one.
-    state->dpi = getDpiScale();
+    // Capture the same owner/sole-Window DPI as load(), before process delivery.
+    state->dpi = loadDpiScale();
     state->size = size;
     const auto resolvedPath = internal::resolveLoadPath(nameOrPath);
     state->input = resolveInput(nameOrPath, resolvedPath, faceIndex);

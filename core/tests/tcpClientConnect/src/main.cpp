@@ -16,7 +16,7 @@ void destroyWithOlderDeliveryHeld() {
         promise<void> firstEntered, firstRelease, secondEntered, allowDestroy, destroyed;
         atomic<int> unexpected{0};
     };
-    auto fixture = make_shared<Fixture>();
+    auto fixture = std::make_shared<Fixture>();
     auto firstEntered = fixture->firstEntered.get_future();
     auto firstRelease = fixture->firstRelease.get_future().share();
     auto secondEntered = fixture->secondEntered.get_future();

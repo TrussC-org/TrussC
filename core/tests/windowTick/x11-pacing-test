@@ -33,6 +33,8 @@ probe = r'''
 #include <cstdio>
 #include <cstddef>
 struct sapp_window { int id; };
+struct sapp_event { int type=0; };
+QUIT_RESULT
 struct _sapp_tc_window_t {
     bool is_main=false, ready=true, constructing=false, surface_resize_pending=false, in_tick=false, close_requested=false, input_delivered=false;
     int drawable=1, frame_count=0, swap_interval=0, win_id=1;
@@ -41,7 +43,7 @@ struct _sapp_tc_window_t {
     struct { double smooth_dt=1.0/62.0, last=0; } timing;
     struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; } desc;
 };
-struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; } desc; bool quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
+struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; } desc; bool init_called=true, quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
 struct { App app; int display=0; size_t window_slots=2; double refresh_period=1.0/62.0;
     _sapp_tc_window_t* windows[2]; } _sapp_tc;
 struct XEvent {};
@@ -77,6 +79,8 @@ void _sapp_tc_x11_wait_until(double deadline) { clockValue=deadline; }
 void _sapp_tc_x11_process_event(XEvent*) {}
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
+RUNTIME_QUIT_HELPER
+QUIT_DECISION
 PERIODIC
 DUE
 struct _sapp_tc_x11_surface_scope {};
@@ -231,10 +235,14 @@ int main() {
 '''
 probe = '#include <initializer_list>\n#include <algorithm>\n' + probe
 saved_source = source
+source = (root / 'core/include/sokol/util/sokol_window_event.h').read_text(encoding='utf-8')
+probe = probe.replace('QUIT_RESULT', body('struct _sapp_tc_event_result {') + ';')
+probe = probe.replace('RUNTIME_QUIT_HELPER', body('template<class Descriptor>\nstatic inline _sapp_tc_event_result _sapp_tc_deliver_runtime_quit('))
 source = (root / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
 probe = probe.replace('FRAME_SKIP', body('bool frameSkipShouldTick('))
 source = saved_source
 for placeholder, marker in (
+    ('QUIT_DECISION', 'static void _sapp_tc_x11_request_exit('),
     ('PERIODIC', 'static void _sapp_tc_x11_pace_periodic('),
     ('DUE', 'static bool _sapp_tc_x11_window_due('),
     ('PACE', 'static void _sapp_tc_x11_pace('),

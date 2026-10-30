@@ -14,7 +14,7 @@ using namespace tc;
 #endif
 namespace {
 std::shared_ptr<Window> makeRetainedWindow() {
-    auto* window = internal::WindowRequestAccess::makeMain().release();
+    auto* window = new Window();
 #if defined(TC_LATE_MAC_DELETER)
     return std::shared_ptr<Window>(window, internal::lateMacWindowDeleter);
 #else
@@ -76,7 +76,7 @@ struct RestartFirst : App {
         retainedLight = std::make_unique<Light>();
         retainedMaterial = std::make_unique<Material>();
         retainedEnvironment = std::make_unique<Environment>();
-        for (auto* ctx : {&internal::nonWindowContext(), &internal::mainWindow()->context(), &retained->context()}) {
+        for (auto* ctx : {&internal::nonWindowContext(), &internal::resolveWindow()->context(), &retained->context()}) {
             ctx->activeLights.push_back(retainedLight.get());
             ctx->currentMaterial = retainedMaterial.get();
             ctx->currentEnvironment = retainedEnvironment.get();
@@ -98,7 +98,7 @@ struct RestartFirst : App {
                 ctx.currentEnvironment = concurrentObjects.front().front().environment.get();
             };
             populate(internal::nonWindowContext());
-            populate(internal::mainWindow()->context());
+            populate(internal::resolveWindow()->context());
             populate(retained->context());
             for (auto& batch : concurrentObjects) for (auto& objects : batch) populate(objects.window->context());
         }
@@ -113,7 +113,7 @@ struct RestartSecond : App {
                      "Image registry empty after restart");
         restartCheck(internal::openWindows().size() == initialWindows, "window registry empty after restart");
         checkLighting(internal::nonWindowContext());
-        checkLighting(internal::mainWindow()->context());
+        checkLighting(internal::resolveWindow()->context());
         requestExitApp();
     }
 };
@@ -144,7 +144,7 @@ struct Main : App {
         WindowSettings settings; settings.width = settings.height = 64;
         retained = createWindow(settings);
         if (!retained) std::abort();
-        retained->setApp(std::make_shared<Secondary>());
+        retained->setApp<Secondary>();
     }
     void update() override { if (++turns == 12) requestExitApp(); }
     void exit() override { ++mainExits; }

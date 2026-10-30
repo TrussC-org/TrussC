@@ -130,14 +130,14 @@ constexpr bool windowSizeIsScreenControlled() {
 }
 IVec2 windowPositionNative(const void* handle);
 void setWindowPositionNative(const void* handle, int x, int y);
-IVec2 mainWindowPosition();
-void setMainWindowPosition(int x, int y);
-void setMainWindowSizeLogical(int width, int height);
+IVec2 singleWindowPosition();
+void setSingleWindowPosition(int x, int y);
+void setSingleWindowSizeLogical(int width, int height);
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
-void setMainWindowSizeFractionalMac(double width, double height);
+void setSingleWindowSizeFractionalMac(double width, double height);
 #endif
 #if defined(__linux__) && !defined(__ANDROID__)
-void setMainWindowSizeFractionalX11(double width, double height);
+void setSingleWindowSizeFractionalX11(double width, double height);
 #endif
 }
 

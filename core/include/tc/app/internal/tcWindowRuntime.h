@@ -4,9 +4,27 @@
 
 namespace trussc {
 class Window;
+struct WindowSettings;
 namespace internal {
 struct Runtime;
 Runtime& runtime();
+void retainRuntimeWindow(const std::shared_ptr<Window>&);
+void releaseRuntimeWindow(Window&) noexcept;
+void recordAppAttachment(const std::shared_ptr<App>&, Window&);
+void recordHeadlessAttachment(const std::shared_ptr<App>&, WindowContext&);
+void shutdownRuntime() noexcept;
+void prepareRuntimeExit();
+void requestNormalQuit(const char* reason);
+bool runtimeEnding() noexcept;
+Window* resolveWindow(bool report = false);
+WindowContext& windowApiContext();
+WindowContext* findWindowApiContext();
+struct RenderTarget;
+RenderTarget* drawingApiTarget();
+CoreEvents& unavailableWindowEvents();
+std::shared_ptr<Window> prepareLaunchWindow(const WindowSettings&);
+bool attachCandidate(Window&, std::shared_ptr<App>);
+
 class RuntimeActivityScope {
 public:
     RuntimeActivityScope() noexcept;
@@ -69,7 +87,7 @@ private:
     bool entered_ = false, admitted_ = false, dispatch_ = false, requestsReady_ = false;
     void leave() noexcept;
 };
-void mainWindowEvent(const sapp_event*, sapp_window, void*) noexcept;
+void windowEvent(const sapp_event*, sapp_window, void*) noexcept;
 void singleWindowEvent(const sapp_event*) noexcept;
 void enterWindowEvent(const sapp_event*, sapp_window, void*) noexcept;
 void convertWindowEvent(const sapp_event*, Window&);
@@ -79,9 +97,10 @@ void dispatchWindowDisplayEventForTests(const sapp_event*, Window&);
 bool enterWindowTick(Window&, sapp_window, std::chrono::steady_clock::time_point, double,
                      const WindowTickPresentation* = nullptr);
 void windowTick(sapp_window, void*) noexcept;
+bool allowWindowClose(sapp_window, void*) noexcept;
 void windowClosed(sapp_window, void*) noexcept;
 void singleWindowFrame() noexcept;
-void mainWindowBootstrap(void (*bootstrap)());
+void bootstrapWindow(Window&, void (*bootstrap)());
 // Reconcile launch visibility; single-window lifecycle observations also use this hook.
 void deliverPendingWindowVisibilityAtReadyEntry(Window&);
 bool currentWindowCloseRecorded();
@@ -101,7 +120,6 @@ struct HostServiceOperations {
     void (*maintenance)();
 };
 HostServiceOperations& hostServiceOperationsForTests();
-Window* mainWindow();
 // Capture readers need dimensions by value, without changing unbound contexts.
 struct WindowDimensions {
     float dpiScale;
@@ -125,8 +143,7 @@ bool refreshWindowMetadata(Window& window);
 bool refreshWindowEntryMetadata(Window& window);
 void publishWindowMetadata(Window& window, const sapp_tc_window_metadata& metadata);
 void syncWindowAppSize(Window& window, bool initial = false);
-void refreshMainWindowMetadata();
+void refreshSelectedWindowMetadata();
 // Single-window ports retain their native bootstrap and lifecycle boundary.
-void bindSingleWindowMain();
 }
 }

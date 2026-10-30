@@ -73,6 +73,7 @@ public:
     // exit/unload hooks; other process statics may already be gone at destruction.
     ~ImGuiManager();
 private:
+    std::shared_ptr<int> retirementLifetime_ = std::make_shared<int>(0);
     void installDeadlineListeners_();
 
     void initializeContext_();
@@ -91,9 +92,9 @@ private:
     bool offscreenFrameCompleted_ = false;
     std::vector<bool> attempts_;
     tc::EventListener exitListener_;
-    tc::EventListener hotReloadUnloadListener_;   // on the main window's hotReloadUnload
+    tc::EventListener hotReloadUnloadListener_;   // on the owning Window's hotReloadUnload
     tc::EventListener renderListener_;
-    tc::EventListener overdueListener_;   // on the main window's afterFrame
+    tc::EventListener overdueListener_;   // on the owning Window's afterFrame
     tc::EventListener eventListener_;
 
     // Input arbitration: consume listeners (-20) + pointer-gesture capture.

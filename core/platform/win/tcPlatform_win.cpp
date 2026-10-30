@@ -29,7 +29,9 @@
 namespace trussc {
 
 void bringWindowToFront() {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
+    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(internal::WindowRequestAccess::binding(*target).handle);
     if (hwnd) {
         SetForegroundWindow(hwnd);
     }
@@ -50,23 +52,7 @@ float getDisplayScaleFactor() {
         // SetProcessDpiAwarenessContext は sokol_app が行うはずなので
         // ここでは単にDPIを取得する
 
-        // まずウィンドウハンドルを試す
-        HWND hwnd = (HWND)sapp_win32_get_hwnd();
-        if (hwnd) {
-            // GetDpiForWindow は Windows 10 1607 以降で利用可能
-            typedef UINT (WINAPI *GetDpiForWindowFunc)(HWND);
-            HMODULE user32 = GetModuleHandleW(L"user32.dll");
-            if (user32) {
-                auto getDpiForWindow = (GetDpiForWindowFunc)GetProcAddress(user32, "GetDpiForWindow");
-                if (getDpiForWindow) {
-                    UINT dpi = getDpiForWindow(hwnd);
-                    scaleFactor = dpi / 96.0f;
-                    return scaleFactor;
-                }
-            }
-        }
-
-        // フォールバック: GetDpiForSystem
+        // Display scale is process-wide; no Window is selected here.
         typedef UINT (WINAPI *GetDpiForSystemFunc)();
         HMODULE user32 = GetModuleHandleW(L"user32.dll");
         if (user32) {
@@ -129,11 +115,13 @@ void internal::setWindowPositionNative(const void* handle, int x, int y) {
     SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
-IVec2 internal::mainWindowPosition() { return windowPositionNative(sapp_win32_get_hwnd()); }
-void internal::setMainWindowPosition(int x, int y) { setWindowPositionNative(sapp_win32_get_hwnd(), x, y); }
+IVec2 internal::singleWindowPosition() { return windowPositionNative(sapp_win32_get_hwnd()); }
+void internal::setSingleWindowPosition(int x, int y) { setWindowPositionNative(sapp_win32_get_hwnd(), x, y); }
 
 void setWindowDecorated(bool decorated) {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
+    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(internal::WindowRequestAccess::binding(*target).handle);
     if (!hwnd) return;
 
     // Toggle the caption/border/system-menu bits. Keyboard focus and the quit
@@ -201,7 +189,7 @@ void internal::setWindowSizeWin32(const void* handle, double logicalWidth, doubl
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void internal::setMainWindowSizeLogical(int width, int height) {
+void internal::setSingleWindowSizeLogical(int width, int height) {
     internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height);
 }
 
@@ -286,9 +274,8 @@ struct CaptureTraceScope {
     internal::D3D11CaptureTraceHook hook;
     CaptureTraceScope() : hook(captureTraceHook) {
         const auto& ctx = internal::currentWindowContext();
-        if (ctx.isMain) hook = nullptr;
         if (!hook) return;
-        trace.isMain = ctx.isMain;
+        trace.windowId = ctx.hostWindow ? internal::WindowRequestAccess::binding(*ctx.hostWindow).handle.id : 0;
         trace.fbWidth = ctx.fbWidth; trace.fbHeight = ctx.fbHeight;
         trace.lastWidth = ctx.lastSwapchain.width; trace.lastHeight = ctx.lastSwapchain.height;
         trace.lastFormat = int(ctx.lastSwapchain.color_format); trace.lastSamples = ctx.lastSwapchain.sample_count;

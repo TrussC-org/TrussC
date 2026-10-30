@@ -4661,6 +4661,7 @@ struct Cover_Window : af::Scope<Window> {
     static void run() {
         (void)Window();
         (void)af::val<Window>().close();
+        (void)af::val<Window>().destroyApp();
         (void)af::val<Window>().events();
         (void)af::val<const Window>().getApp();
         (void)af::val<const Window>().getFps();
@@ -4673,7 +4674,6 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<const Window>().isFullscreen();
         (void)af::val<const Window>().isOccluded();
         (void)af::val<const Window>().isOpen();
-        (void)af::val<Window>().setApp(af::val<std::shared_ptr<App>>());
         (void)af::val<Window>().setClearColor(af::val<const Color>());
         (void)af::val<Window>().setFps(af::val<float>());
         (void)af::val<Window>().setFullscreen(af::val<bool>());
@@ -4681,6 +4681,7 @@ struct Cover_Window : af::Scope<Window> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setPosition(af::val<int>(), af::val<int>());
 #endif
+        (void)af::val<Window>().setQuitOnClose(af::val<bool>());
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<Window>().setTitle(af::val<const std::string>());
         (void)af::val<Window>().toggleFullscreen();
@@ -4695,6 +4696,7 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().height;
         (void)af::val<WindowSettings>().highDpi;
         (void)af::val<WindowSettings>().pixelPerfect;
+        (void)af::val<WindowSettings>().quitOnClose;
         (void)af::val<WindowSettings>().reserveUniformBuffer(af::val<int>());
         (void)af::val<WindowSettings>().sampleCount;
         (void)af::val<WindowSettings>().setClipboardSize(af::val<int>());
@@ -4702,6 +4704,7 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().setFullscreen(af::val<bool>());
         (void)af::val<WindowSettings>().setHighDpi(af::val<bool>());
         (void)af::val<WindowSettings>().setPixelPerfect(af::val<bool>());
+        (void)af::val<WindowSettings>().setQuitOnClose(af::val<bool>());
         (void)af::val<WindowSettings>().setSampleCount(af::val<int>());
         (void)af::val<WindowSettings>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<WindowSettings>().setSwapInterval(af::val<int>());

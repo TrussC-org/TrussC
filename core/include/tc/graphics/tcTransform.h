@@ -190,7 +190,8 @@ inline void scale(float sx, float sy, float sz) {
 
 // Get the current transformation matrix
 inline Mat4 getMatrix() {
-    return getDefaultContext().getMatrix();
+    auto* target = internal::drawingApiTarget();
+    return target ? target->currentMatrix : Mat4{};
 }
 [[deprecated("Use getMatrix() instead. Will be removed in v1.0.0")]]
 inline Mat4 getCurrentMatrix() {
@@ -199,7 +200,12 @@ inline Mat4 getCurrentMatrix() {
 
 // Effective uniform scale of the current matrix (max of x/y basis lengths)
 inline float getScale() {
-    return getDefaultContext().getScale();
+    auto* target = internal::drawingApiTarget();
+    if (!target) return 0;
+    const auto& m = target->currentMatrix.m;
+    const float sx = std::sqrt(m[0]*m[0] + m[4]*m[4] + m[8]*m[8]);
+    const float sy = std::sqrt(m[1]*m[1] + m[5]*m[5] + m[9]*m[9]);
+    return std::max(sx, sy) > 0 ? std::max(sx, sy) : 1;
 }
 
 // Reset transformation matrix
@@ -222,7 +228,7 @@ inline void loadMatrix(const Mat4& mat) {
 }
 [[deprecated("Use getScale() instead. Will be removed in v1.0.0")]]
 inline float getCurrentScale() {
-    return getDefaultContext().getScale();
+    return getScale();
 }
 
 } // namespace trussc

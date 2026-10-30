@@ -152,7 +152,7 @@ void recordingIsolation() {
         }
     });
     std::thread worker([&] { runOnMainThread([&] {
-        check("process recording selects no Window or SGL context", !internal::currentWindow() && !sgl_get_context().id);
+        check("process recording selects no Window or SGL context", !internal::currentWindowContext().hostWindow && !sgl_get_context().id);
         setColor(0, 1, 0); drawRect(0, 0, 64, 64); drawRect(0, 0, 64, 64);
         pushMatrix(); translate(300, 400); scale(2, 3); popMatrix();
         setBlendMode(BlendMode::Add);
@@ -180,6 +180,7 @@ void recordingIsolation() {
 }
 struct Resources {
     WindowProbe window;
+    std::shared_ptr<App> queryOwner = internal::makeConstructedAppAt<App>(&window.context());
     Light light;
     Fbo fbo, sink;
     EventListener draw;
@@ -191,6 +192,7 @@ struct Resources {
     double sourceDuration = 1.0 / 60;
     int offscreenRecordings = 0;
     void renderOffscreen() {
+        internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
         auto& ctx = window.context();
         const auto tick = internal::resourceFrameKey();
         auto receiver = createPlane(8, 8);
@@ -218,15 +220,16 @@ struct Resources {
         ++offscreenRecordings;
     }
     void setup(bool sync) {
+        internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
         synchronized = sync;
         auto& ctx = window.context(); internal::currentWindowCtx() = &ctx;
         ctx.fbWidth = ctx.fbHeight = 64; ctx.dpiScale = 1;
         ctx.swapchainTarget.width = ctx.swapchainTarget.height = 64;
         ctx.swapchainTarget.sampleCount = 1; ctx.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
         ctx.acquireSwapchain = swapchain;
-        if (synchronized) setFps(VSYNC); else setIndependentFps(EVENT_DRIVEN, VSYNC);
+        if (synchronized) window.setFps(VSYNC); else window.setIndependentFps(EVENT_DRIVEN, VSYNC);
         light.enableShadow(32); addLight(light); fbo.allocate(16,16); sink.allocate(16,16);
-        draw = events().draw.listen([this] {
+        draw = window.events().draw.listen([this] {
             auto& ctx = window.context();
             check("public count contract", getFrameCount() == getUpdateCount());
             check("draws without updates", synchronized || getUpdateCount() == 0);
@@ -253,6 +256,7 @@ struct Resources {
         });
     }
     void tick(int n, bool force = false) {
+        internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
         internal::restoreWindowContext(&window.context());
         internal::runWindowTick(std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(17*n), sourceDuration, force);
     }
@@ -303,7 +307,7 @@ void pendingShadowConsumer(Resources& owner) {
     auto& ctx = owner.window.context();
     internal::restoreWindowContext(&ctx);
     owner.draw = {};
-    setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
+    owner.window.setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
     owner.tick(105); // a newly admitted secondary tick, before any shadow producer
     owner.light.setShadowArea(Vec3(0,0,0),16);
     auto mesh = createBox(8);
@@ -410,7 +414,7 @@ TC_CORE_TEST_MAIN() {
         internal::restoreWindowContext(&fast.window.context());
         fast.firstImage = 0; // establish a fresh storage reference for the control phase
         const auto synchronizedDraws = fast.draws;
-        fast.synchronized = true; setFps(VSYNC);
+        fast.synchronized = true; fast.window.setFps(VSYNC);
         for (int n = 40; n < 52; ++n) fast.tick(n);
         check("synchronized control updates and draws", fast.draws == synchronizedDraws + 12 && fast.window.context().updateCount == 12);
         auto& owner = slow; auto& other = fast;
@@ -437,11 +441,11 @@ TC_CORE_TEST_MAIN() {
         // Run the resource-bearing listener on twelve update-only commits.
         internal::restoreWindowContext(&other.window.context());
         other.draw = {}; other.firstImage = 0;
-        setIndependentFps(VSYNC, EVENT_DRIVEN);
+        other.window.setIndependentFps(VSYNC, EVENT_DRIVEN);
         other.window.context().loop.redrawCount = 0;
         int afterFrames = 0;
-        auto after = events().afterFrame.listen([&] { ++afterFrames; });
-        auto update = events().update.listen([&] { other.renderOffscreen(); });
+        auto after = other.window.events().afterFrame.listen([&] { ++afterFrames; });
+        auto update = other.window.events().update.listen([&] { other.renderOffscreen(); });
         const auto before = other.window.context().drawCount;
         for (int n = 54; n < 66; ++n) {
             const auto tick = other.window.context().resourceTickCount;
@@ -455,14 +459,14 @@ TC_CORE_TEST_MAIN() {
         other.shadowPass = true; other.expectedShadowSlots = -1;
         update = {};
         // Idle callbacks retain the base secondary admission key.
-        setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
+        other.window.setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
         const auto idleRecording = other.window.context().resourceTickCount;
         other.tick(68);
         check("idle secondary callback advances the base admission key", other.window.context().resourceTickCount == idleRecording + 1);
         // Keep the draw listener through every invalid-swapchain attempt and
         // recovery: these attempts commit offscreen resources, but no real draw.
-        setIndependentFps(EVENT_DRIVEN, VSYNC);
-        other.draw = events().draw.listen([&] { other.renderOffscreen(); });
+        other.window.setIndependentFps(EVENT_DRIVEN, VSYNC);
+        other.draw = other.window.events().draw.listen([&] { other.renderOffscreen(); });
         rejectSwapchain = true;
         const auto attemptsBefore = other.offscreenRecordings;
         for (int n = 69; n < 81; ++n) {

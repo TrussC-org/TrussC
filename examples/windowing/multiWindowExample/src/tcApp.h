@@ -10,7 +10,8 @@ using namespace tc;
 // usable directly — one shared sokol_gfx context.
 class SubApp : public App {
 public:
-    Fbo* sharedFbo = nullptr;   // rendered by the MAIN window's app
+    explicit SubApp(shared_ptr<Fbo> source) : sharedFbo(std::move(source)) {}
+    shared_ptr<Fbo> sharedFbo;   // rendered by the MAIN window's app
 
     void setup() override {
         logNotice("SubApp") << "setup in second window: "
@@ -69,10 +70,9 @@ public:
     void keyPressed(int key) override;
 
 private:
-    Fbo fbo;
+    shared_ptr<Fbo> fbo = make_shared<Fbo>();
     float t = 0.0f;
     shared_ptr<Window> second;
-    shared_ptr<SubApp> subApp;
     // The position WE asked for. Arrow keys add to this instead of reading the
     // window back: a read-back reports where the WM actually put the window,
     // and feeding that into the next move accumulates whatever the WM adjusted.

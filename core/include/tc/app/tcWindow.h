@@ -4,9 +4,9 @@
 // tcWindow.h - Application windows
 // =============================================================================
 //
-// Each Window owns its App attachment. The runner owns the main Window;
-// secondary windows are kept alive by the handles returned by createWindow().
-// Native tick sources follow the OS; every window uses the shared scheduler.
+// Runtime strongly owns every open Window. createWindow returns an operation
+// handle; dropping it does not close the window. close is explicit. Each Window
+// owns one App attachment with stable event slots and an independent clock.
 //
 // GPU resources (Texture / Fbo / Mesh / Font) live in the single shared
 // sokol_gfx context and can be used freely from any window.
@@ -24,6 +24,7 @@ class Window;
 
 namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
+inline constexpr bool supportsSecondaryWindows();
 // One control entry for explicit handles and context-aware globals.
 enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -34,14 +35,14 @@ WindowFullscreenHook& windowFullscreenHookForTests();
 // Native implementation, reached through createWindow's platform check.
 std::shared_ptr<Window> createSecondaryWindow(const WindowSettings& settings);
 
-// Open-window registry (creation order, including main). Non-inline storage
+// Open-window registry in creation order. Non-inline storage
 // in tcGlobal.cpp so the hot-reload
 // host and guest see ONE list. Used by the MCP window-targeting tools.
 void registerWindow(Window* w);
 void unregisterWindow(Window* w);
 std::vector<Window*> openWindows();   // only windows whose native side is alive
 
-// RAII registrar: every Window destruction unregisters, including main.
+// RAII registrar: every Window destruction unregisters.
 struct WindowRegistryEntry {
     Window* w;
     explicit WindowRegistryEntry(Window* win) : w(win) { registerWindow(win); }
@@ -55,69 +56,36 @@ class Window {
 public:
     ~Window();
 
-    // Attach an App to this window — the ONLY way to give a window content.
-    // The App gets its familiar lifecycle wired to THIS window: setup() once
-    // on the first tick, update()/draw() on the window's own tick,
-    // keyPressed/mousePressed/... from this window's event stream, and
-    // windowResized() on resize (whose base impl keeps the App's RectNode
-    // size in sync, exactly like the main window). App IS a Node — attach
-    // children as usual for scene content.
-    // One App per window; attaching an App that is already driving another
-    // window is an error.
-    // App::setSize() resizes this window from anywhere. The global
-    // window-control functions do not: they act on the window being processed
-    // (title, size, position and fullscreen). To control it from elsewhere, use this
-    // Window handle (from inside the App, App::getWindow() returns it).
-    // Note: the App's setup() runs once on the window's first tree update
-    // (standard Node lifecycle), i.e. on the window's first tick; its
-    // audioOut() / audioIn() are subscribed right after that setup() returns,
-    // not at setApp(). An App runs
-    // once: setup() when first attached, exit() / cleanup() when it leaves
-    // its window (close(), setApp(other), or setApp(nullptr)); leaving also
-    // detaches its audioOut() / audioIn() for good. To show it again, create
-    // a new App. setApp() refuses an App whose cleanup() already ran, and any
-    // App on a window that is not open or is closing (both log an error and
-    // leave the window as it is); setApp(nullptr) releases.
-    // setApp() is a request: it records the App and returns at once. The
-    // window applies it at its next frame boundary (before or after one of
-    // its ticks or events, never inside them), wherever setApp() was called
-    // from, including the App's own update() / draw() / keyPressed(). Until
-    // then getApp() returns the current App. The last setApp() before the
-    // boundary wins; a close() requested before the boundary wins over it.
-    // The checks above run again when the request is applied. Replacing or
-    // removing an App directly calls its exit(), without events().exit; only
-    // closing the window notifies that event.
-    void setApp(std::shared_ptr<App> app);
+    // Construct a fresh App and request attachment at the next safe boundary.
+    // Constructor failure leaves the current App intact. The last request wins;
+    // close cancels unpublished candidates without setup, exit or cleanup.
+    template<class T, class... Args> void setApp(Args&&... args) {
+        static_assert(std::is_base_of_v<App, T>, "T must derive from App");
+        if (!isOpen() || closeRequested_ || internal::frameworkShutdown() || internal::runtimeEnding()) {
+            logError("Window") << "setApp(): this window is closed or closing";
+            return;
+        }
+        requestApp(internal::makeConstructedAppAt<T>(&ctx_, std::forward<Args>(args)...));
+    }
+    // Remove the App at the next boundary, keeping the window and settings.
+    void destroyApp() { requestApp({}); }
+    void setQuitOnClose(bool enabled) { quitOnClose_ = enabled; }
     std::shared_ptr<App> getApp() const { return app_; }
 
     // This window's event stream (mousePressed / keyPressed / draw / ...).
     CoreEvents& events() { return events_; }
 
-    // Close this window. Closing the main window requests application quit;
-    // closing a secondary window leaves the other windows running.
-    // close() is a request, like requestExitApp() for the main window: it returns at
-    // once, and the window closes at its backend's next safe point (after the
-    // current run-loop pass on Linux / Windows, after the next main-window
-    // tick on macOS), through the same path as the window's close button.
-    // Until then isOpen() is true and getApp() / App::getWindow() still
-    // return the App and the window. Safe to call from the window's own
-    // App (update() / draw() / keyPressed() ...). Destroying the Window
-    // (the last shared_ptr) closes it immediately while the framework runs.
-    // After framework shutdown, destruction abandons native/GPU handles without
-    // calling the framework; those resources are reclaimed with the process.
-    // Secondary teardown destroys the native window; main teardown is owned
-    // by the runner. In either case isOpen() turns false,
-    // then events().exit delivers App::exit() at App priority, followed by
-    // AfterApp teardown hooks; cleanup() runs after the notification.
-    // App::getWindow() returns nullptr during those teardown callbacks.
-    // The borrowed main Window pointer expires when the runner shuts down.
+    // Request closure at the next safe boundary. Pending replacement is
+    // cancelled. App ending and owner retirement precede native/GPU disposal.
+    // Other windows continue; the last close ends a windowed Runtime.
+    // quitOnClose defaults to false. Closed handles stay closed across runs.
     void close();
     bool isOpen() const { return binding_.bound; }
 
     void setTitle(const std::string& title);
     // Last title set via WindowSettings/setTitle (for window listing/tooling).
     const std::string& getTitle() const { return title_; }
-    // Always logical points for main and secondary, regardless of pixelPerfect.
+    // Always logical points for every Window, regardless of pixelPerfect.
     // getWindowWidth()/getWindowHeight() and the attached App follow pixelPerfect.
     int getWidth() const;
     int getHeight() const;
@@ -180,7 +148,7 @@ public:
 
     // --- tree driving (called by the platform glue; friend access to Node) ---
     // The root is locked once per call, so it stays alive for the whole call
-    // even if a handler detaches the window's App (setApp(nullptr)).
+    // even if a handler detaches the window's App (destroyApp()).
     void dispatchMousePressToTree(const MouseEventArgs& e) {
         internal::MouseDispatchScope dispatch(ctx_, e.button, true);
         if (auto root = ctx_.rootNode.lock()) root->dispatchMousePress(e);
@@ -203,18 +171,19 @@ public:
     void tickTree() {
         auto root = ctx_.rootNode.lock();
         if (!root) return;
+        internal::AppCallbackScope owner(app_ ? internal::appOwner(*app_) : nullptr);
         internal::setupNodeOnce(*root);   // the setup() entry point (#349)
         root->updateTree();
         root->updateHoverState(ctx_.mouseX, ctx_.mouseY);
     }
     void drawTreeNow() {
         if (auto root = ctx_.rootNode.lock()) {
+            internal::AppCallbackScope owner(app_ ? internal::appOwner(*app_) : nullptr);
             internal::setupNodeOnce(*root);   // the setup() entry point (#349)
             root->drawTree();
         }
     }
-    // Size-sync convention (mirrors the main App, which is a RectNode kept in
-    // sync with the window): if the root IS a RectNode it is resized to the
+    // The App root is resized to the
     // App's coordinate size (pixels in pixelPerfect mode, otherwise logical)
     // before its first setup and on every resize/display change.
     // A plain Node root is left untouched.
@@ -222,7 +191,7 @@ public:
         if (!app_) return;
         // handleWindowResized() = RectNode::setSize (non-virtual; App::setSize
         // is overridden to resize the OS window) + the windowResized() hook —
-        // the same path the main window uses on SAPP_EVENTTYPE_RESIZED.
+        // the shared SAPP_EVENTTYPE_RESIZED path.
         // The attachment's observed dimensions own deduplication. A listener
         // may have edited the App to this size on an earlier native revision.
         ResizeEventArgs args; args.width = (int)wPts; args.height = (int)hPts;
@@ -250,14 +219,16 @@ public:
     internal::WindowContext& ctx_;
     CoreEvents& events_;
     internal::RenderContext& render_;
-    bool clearColorSet_ = false; // main keeps the existing clear() default until explicitly set
+    bool clearColorSet_ = false; // construction installs the Window clear colour
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
     std::string& title_;
     // Request state (setApp() / close()). The pending App is owned here until
     // the boundary, so a request never refers to a freed App, and it goes
     // away with the window.
     std::shared_ptr<App> pendingApp_;
-    bool appRequested_ = false;      // separate flag: setApp(nullptr) is a request too
+    bool appRequested_ = false;      // separate flag: destroyApp() is a request too
+    bool quitOnClose_ = false;
+    uint64_t epoch_ = internal::runtimeEpoch();
     bool closeRequested_ = false;
     int dispatchDepth_ = 0;          // ticks / events of this window running
     internal::WindowRegistryEntry registryEntry_{this};
@@ -266,10 +237,8 @@ private:
     IVec2 control(internal::WindowControl op, int x = 0, int y = 0,
                   const std::string* title = nullptr,
                   internal::WindowGeometryCall call = internal::WindowGeometryCall::WindowSize);
-    void closeSecondary();
-    void teardownSecondary() noexcept;
+    void disposeNativeBacking() noexcept;
     internal::WindowFullscreenPhase fullscreenPhase() const;
-    explicit Window(bool mainWindow);
     // Rebuilt only at a successful setApp boundary. Exit resolves the held
     // outgoing App after getApp() has been cleared for window teardown.
     struct AppEventState {
@@ -285,13 +254,16 @@ private:
     bool appSizeSeeded_ = false;
     int appSizeWidth_ = 0, appSizeHeight_ = 0;
     bool appStarted() const { return app_ && app_->setupCalled_; }
-    bool initialAppBindings_ = false; // runner reserves the initial App slot before its constructor
     bool applyingApp_ = false; // Nested boundaries leave later requests pending.
     std::weak_ptr<App> exitingApp_;
     bool exitDelivered_ = false;
+    bool windowExitNotified_ = false;
+    bool closingApp_ = false;
 
     // setApp()'s checks; logs the reason and returns false when refused.
     bool canAttach(const std::shared_ptr<App>& app) const;
+    void requestApp(std::shared_ptr<App>);
+    void cancelCandidate(std::shared_ptr<App>) noexcept;
 
     // --- requests (framework only, at the frame boundary; not user API) ---
     // Reached through internal::WindowRequestAccess, so they stay out of the
@@ -324,6 +296,8 @@ namespace internal {
 // VideoPlayer to its platform code.
 class WindowRequestAccess {
 public:
+    static void attachCandidate(Window& w, std::shared_ptr<App> app) { w.requestApp(std::move(app)); }
+    static bool acceptsBinding(const Window& w) { return !w.exitDelivered_ && w.epoch_ == runtimeEpoch() && !runtimeEnding(); }
     static const AppConstructionTicket& constructionTicket(const App& app) { return app.constructorTicket_; }
     using HostState = Window::OwnedState;
     static bool appStarted(const Window& w) { return w.appStarted(); }
@@ -333,9 +307,9 @@ public:
     static void setSize(Window& w, int width, int height, WindowGeometryCall call) { w.control(WindowControl::Size, width, height, nullptr, call); }
     static void setPosition(Window& w, int x, int y, WindowGeometryCall call) { w.control(WindowControl::Position, x, y, nullptr, call); }
     static bool ignoreGeometry(Window& w, WindowGeometryCall call) {
-        return ignoreFullscreenGeometry(w.fullscreenPhase(), call, w.ctx_.isMain ? nullptr : &w.title_);
+        return ignoreFullscreenGeometry(w.fullscreenPhase(), call, !internal::supportsSecondaryWindows() ? nullptr : &w.title_);
     }
-    // Creation identity stays internal; main and secondary IDs are never reused.
+    // Creation identity stays internal; IDs are never reused.
     static uint64_t creationId(const Window& w) { return w.binding_.handle.id; }
     static WindowBinding& binding(Window& w) { return w.binding_; }
     static const WindowBinding& binding(const Window& w) { return w.binding_; }
@@ -343,9 +317,9 @@ public:
     static void resetForLaunch(Window& w) {
         w.binding_.lastDeliveredHidden = false; w.binding_.visibilityReady = false;
         w.exitDelivered_ = false; w.closeRequested_ = false; w.ctx_.targetsClosed = false;
-        w.appEventState_.reset(); w.initialAppBindings_ = false; w.appSizeSeeded_ = false;
+        w.ctx_.appEventListeners.clear(); w.appEventState_.reset(); w.appSizeSeeded_ = false;
+        prepareInitialBindings(w); w.epoch_ = runtimeEpoch();
     }
-    static std::unique_ptr<Window> makeMain() { return std::unique_ptr<Window>(new Window(true)); }
     static bool dispatchActive(const Window& w) { return w.entryDepth_ > 0 || w.dispatchDepth_ > 0 || w.applyingApp_; }
     static void setHostOwner(Window& w, const std::shared_ptr<Window>& owner) { w.hostOwner_ = owner; }
     static std::shared_ptr<Window> retainHostOwner(Window& w) noexcept { return w.hostOwner_.lock(); }
@@ -355,18 +329,13 @@ public:
         w.prepareAppEvents(listeners, state);
         w.ctx_.appEventListeners.swap(listeners);
         w.appEventState_ = std::move(state);
-        w.initialAppBindings_ = true;
     }
-    static void cancelMainClose(Window& w) noexcept { w.closeRequested_ = false; }
-    static void endMain(Window& w) noexcept {
-        if (!w.isOpen()) { w.ctx_.appEventListeners.clear(); return; }
-        unbind(w);
-        w.closeRequested_ = false;
-        w.endApp();
-    }
+    static void cancelClose(Window& w) noexcept { w.closeRequested_ = false; }
     static void applyPendingApp(Window& w) { w.applyPendingApp(); }
     static void endApp(Window& w) noexcept { w.endApp(); }
+    static void endForShutdown(Window& w) noexcept { w.closingApp_ = true; w.closeRequested_ = true; w.endApp(); }
     static void teardown(Window& w) noexcept { w.teardown(); }
+    static bool quitOnClose(const Window& w) { return w.quitOnClose_; }
     static bool closeRequested(const Window& w) { return w.closeRequested(); }
 };
 
@@ -376,22 +345,10 @@ inline void applyPendingAppForTests(Window& w) { WindowRequestAccess::applyPendi
 }
 
 namespace internal {
-// The Window whose context is active, including main (nullptr without an
-// open window, e.g. headless). Linear scan
-// over the (tiny) open-window registry — used by the context-aware global
-// window-control functions to route to the right window. Defined here (after
-// Window is complete); the globals in TrussC.h call the forward-declared
-// route* helpers below.
-inline Window* currentWindow() {
-    auto& ctx = currentWindowContext();
-    for (Window* w : openWindows()) {
-        if (&w->context() == &ctx) return w;
-    }
-    return nullptr;
-}
+// App callbacks select their token's Window; unowned callers need a sole open
+// Window. Backends address that handle, including single-surface platforms.
+inline Window* currentWindow() { return resolveWindow(true); }
 
-// Route helpers consume main and secondary handles alike. Window operations
-// route a main handle to the existing sapp path, including single-window OSes.
 inline bool routeSetWindowTitleToWindow(const std::string& title) {
     Window* w = currentWindow();
     if (!w) return false;
@@ -410,8 +367,7 @@ inline bool routeSetWindowPixelSizeToWindow(int width, int height, WindowGeometr
     WindowRequestAccess::setPixelSize(*w, width, height, call);
     return true;
 }
-// Fullscreen routing follows the active Window; each backend keeps its
-// existing main/secondary native implementation.
+// Fullscreen routing addresses the resolved Window through its native binding.
 inline bool routeSetFullscreenToWindow(bool full) {
     Window* w = currentWindow();
     if (!w) return false;
@@ -424,22 +380,6 @@ inline bool routeToggleFullscreenToWindow() {
     w->toggleFullscreen();
     return true;
 }
-inline void closeRequestedWindowsAtShutdown() {
-    // exit() / cleanup() can destroy another Window or request another close.
-    // Re-read the registry after each teardown; never retain a snapshot of
-    // raw Window pointers across user code, and drain requests added by it.
-    for (;;) {
-        Window* requested = nullptr;
-        for (Window* w : openWindows()) {
-            if (!w->context().isMain && WindowRequestAccess::closeRequested(*w)) {
-                requested = w;
-                break;
-            }
-        }
-        if (!requested) return;
-        WindowRequestAccess::teardown(*requested);
-    }
-}
 inline bool routeIsFullscreenFromWindow(bool& out) {
     Window* w = currentWindow();
     if (!w) return false;
@@ -449,83 +389,37 @@ inline bool routeIsFullscreenFromWindow(bool& out) {
 }
 
 // Create a secondary window. macOS, Windows and Linux (nullptr elsewhere).
-// The returned shared_ptr keeps the window alive; closing the window (user or
-// close()) destroys the native side while the handle stays valid (isOpen()).
+// Runtime retains the Window when external handles are released. Explicit close
+// disposes its native backing; a retained handle then reports isOpen() == false.
 TC_PLATFORMS("macos,windows,linux") std::shared_ptr<Window> createWindow(const WindowSettings& settings = {});
 
-namespace internal {
-CoreEvents& mainCoreEvents();
-Window* mainWindow();
-inline void cancelMainWindowClose() noexcept {
-    if (auto* window = mainWindow()) WindowRequestAccess::cancelMainClose(*window);
-}
-void createMainWindow(const WindowSettings& settings);
-void destroyMainWindow() noexcept;
-// Runner and hot reload use the same transactional Window attachment.
-bool attachMainApp(std::shared_ptr<App> app);
-void detachMainApp();
-}
-
-// Construction is host compiled, including canonical main and fallback wiring.
+// Construction and native binding initialization are host compiled.
 
 namespace internal {
-// Apps currently driving a window (double-attach guard). One set per process,
-// defined in tcGlobal.cpp: applyPendingApp() below adds to it and the
-// platform teardown (TrussC.lib) removes from it; setApp() reads it from app
-// code, so under hot reload the guest reads what the host changed. With a
-// copy per module a Windows guest never saw
-// the removal: the released App stayed "attached" in the guest's view, so a
-// new App that got a released App's address was refused. (A closed App is
-// never attached again: setApp() refuses an App whose cleanup() ran; attach
-// a new App instead.)
-// Main thread only; all window attachments use this contract.
-std::unordered_set<const App*>& attachedApps();
+// Read-only attachment inspection. Runtime's ledger is the sole owner.
+std::unordered_set<const App*> attachedApps();
 }
 
 inline bool Window::canAttach(const std::shared_ptr<App>& app) const {
-    // A closed window never runs its teardown again (~Window() returns
-    // early), so nothing would end an App attached to it (#256).
-    if (!isOpen()) {
-        logError("Window") << "setApp(): this window is closed; create a new window";
-        return false;
-    }
-    auto owner = app->weak_from_this().lock();
-    if (!owner || owner.owner_before(app) || app.owner_before(owner)) {
-        logError("Window") << "setApp(): this App has a different shared owner";
-        return false;
-    }
-    // This window's own App may be requested again (it cancels a pending
-    // swap); any other attached App drives another window.
-    if (app != app_ && internal::attachedApps().count(app.get())) {
-        logError("Window") << "setApp(): this App already drives another window";
-        return false;
-    }
-    // An App runs once (#256): its window's teardown ran its cleanup() and
-    // detached its audio hooks for good.
-    if (internal::appRanCleanup(*app)) {
-        logError("Window") << "setApp(): this App already ran cleanup(); create a new App";
-        return false;
-    }
-    return true;
+    const auto owner = internal::appOwner(*app);
+    return !internal::runtimeEnding() && isOpen() && !closeRequested_ && owner && !owner->retiring && !owner->ended &&
+        owner->epoch == epoch_ && !owner->window;
 }
-
-// Request time: the checks log at the call site. A pending close() wins, so
-// a setApp() made while the window is closing is refused here.
-inline void Window::setApp(std::shared_ptr<App> app) {
+inline void Window::cancelCandidate(std::shared_ptr<App> app) noexcept {
     if (app) {
-        if (closeRequested_) {
-            logError("Window") << "setApp(): this window is closing; create a new window";
-            return;
-        }
-        if (!canAttach(app)) return;
-    } else if (!isOpen() || closeRequested_) {
-        return;   // nothing to release: the teardown ends the App
+        auto owner = internal::appOwner(*app);
+        if (owner && !owner->window && !owner->ended) internal::retireAppOwner(owner);
     }
-    // Publish the complete request before releasing superseded user ownership.
-    // Its destructor may setApp() again; that later request must survive.
+}
+inline void Window::requestApp(std::shared_ptr<App> app) {
+    if (!isOpen() || closeRequested_ || (app && !canAttach(app))) {
+        cancelCandidate(std::move(app));
+        return;
+    }
     auto superseded = std::move(pendingApp_);
     pendingApp_ = std::move(app);
     appRequested_ = true;
+    cancelCandidate(std::move(superseded));
 }
 
 namespace internal {
@@ -538,119 +432,49 @@ inline void reportWindowAppAttachmentFailure() noexcept {
 }
 
 // Apply time: the checks run again and are authoritative here (a pending App
-// is not in attachedApps() yet, so the same App requested on two windows
-// passes both request-time checks; the second window to apply refuses it).
+// is still unpublished until this boundary).
 inline void Window::applyPendingApp() {
-    if (!appRequested_ || dispatchDepth_ > 0 || applyingApp_ || exitDelivered_) return;
-    // A busy session end freezes App attachment until the process ends.
+    if (!appRequested_ || dispatchDepth_ || applyingApp_ || exitDelivered_) return;
     if (internal::sessionEndExit()) return;
     applyingApp_ = true;
-    struct ApplyingReset {
-        bool& flag;
-        ~ApplyingReset() { flag = false; }
-    } applyingReset{applyingApp_};
-    std::shared_ptr<App> next = std::move(pendingApp_);
-    pendingApp_.reset();
+    struct Reset { bool& flag; ~Reset() { flag = false; } } reset{applyingApp_};
+    auto next = std::move(pendingApp_);
     appRequested_ = false;
-    if (closeRequested_) {
-        if (next) logWarning("Window") << "setApp(): dropped, close() was requested on this window";
-        return;
-    }
-    if (next == app_) return;
-    if (next && !canAttach(next)) return;
-    // Consume this request even on preparation failure. A later request (for
-    // example from failure reporting or outgoing callbacks) remains pending.
-    // Keep the old attachment/root/audio/bindings until all preparation succeeds.
-    auto* prev = internal::currentWindowCtx();
-    // Even an empty vector may allocate a Debug iterator proxy on MSVC.
-    std::optional<std::vector<EventListener>> prepared;
-    std::shared_ptr<AppEventState> state;
-    auto& attached = internal::attachedApps();
-    internal::TeardownSteps steps;
-    auto rollback = [&] {
-        // Provisional callbacks are inert, including during capture reclamation.
-        // Token invalidation cannot throw even if rebuilding a snapshot fails.
-        if (prepared) prepared->clear();
-        steps.run("failed attachment context restoration", [&] { internal::restoreWindowContext(prev); });
-        internal::currentWindowCtx() = prev;
-    };
+    if (closeRequested_ || (next && !canAttach(next))) { cancelCandidate(std::move(next)); return; }
+    // Stable App-priority slots are installed before any constructor, for every
+    // window. Preparation failure never detaches the old attachment.
     try {
-        // Refresh before selecting the target or seeding a newly attached App.
+        if (!appEventState_) internal::WindowRequestAccess::prepareInitialBindings(*this);
         internal::refreshWindowMetadata(*this);
-        // Target restoration can allocate when rebuilding a resized target.
-        internal::restoreWindowContext(&ctx_);
-        if (initialAppBindings_) {
-            // Preserve the launcher's initial equal-priority ordering. These
-            // reserved callbacks have been inert since descriptor construction.
-            prepared.emplace(std::move(ctx_.appEventListeners));
-            state = std::move(appEventState_);
-            initialAppBindings_ = false;
-        } else {
-            // The count constructor lets a refused Debug iterator proxy reach
-            // this guard; vector's default constructor is noexcept on MSVC.
-            prepared.emplace(size_t(0));
-            if (next) {
-                state = std::make_shared<AppEventState>();
-                prepareAppEvents(*prepared, state);
-            }
-        }
-        // Preparation can release user captures or invoke diagnostic sinks.
-        // Recheck after all such work; a nested window may have accepted next.
-        if (!isOpen() || closeRequested_ || (next && !canAttach(next))) {
-            rollback();
-            return;
-        }
-        // Final throwing operation. A failed insertion belongs to another
-        // committed attachment: never publish next or erase that registration.
-        if (next && !attached.insert(next.get()).second) {
-            rollback();
-            return;
+        if (next) {
+            internal::recordAppAttachment(next, *this);
         }
     } catch (...) {
-        rollback();
+        cancelCandidate(std::move(next));
         internal::reportWindowAppAttachmentFailure();
         return;
     }
-    // No user code in publication: retain every replaced owner until all
-    // App/root/registry/binding state agrees. Retired callbacks become inert
-    // before disconnect can reclaim user captures from old Event snapshots.
-    // Main launcher slots keep their position across hot reload (and swaps).
-    // Preparation still exercises the same transactional validation; its
-    // provisional bindings stay inert and are retired instead of the slot.
-    const bool keepMainBindings = ctx_.isMain && bool(appEventState_);
-    auto oldState = keepMainBindings ? std::shared_ptr<AppEventState>{} : std::move(appEventState_);
-    if (oldState) oldState->active.store(false);
-    std::shared_ptr<App> outgoing = std::move(app_);
-    const bool endOutgoing = outgoing && !internal::appRanCleanup(*outgoing);
-    if (outgoing) outgoing->cleanupCalled_ = true;
+    auto outgoing = std::move(app_);
+    ctx_.rootNode.reset();
+    internal::endAppAttachment(outgoing, ctx_);
+    // Outgoing callbacks can close the window: close still beats replacement.
+    if (closeRequested_) {
+        cancelCandidate(std::move(next));
+        return;
+    }
     app_ = std::move(next);
-    appSizeSeeded_ = false;
     ctx_.rootNode = app_;
-    if (!keepMainBindings) {
-        ctx_.appEventListeners.swap(*prepared);
-        appEventState_ = std::move(state);
+    if (app_) {
+        auto owner = internal::appOwner(*app_);
+        std::lock_guard lock(owner->cancellationsMutex);
+        owner->window = this;
+        owner->context = &ctx_;
+
     }
-    if (outgoing) attached.erase(outgoing.get());
+    appSizeSeeded_ = false;
     if (appEventState_) appEventState_->active.store(true);
-    prepared->clear();
-    // setApp is a direct-call exception: no window exit event on a swap.
-    // Same shape as endApp() (close): the window drops the App first, then
-    // its exit() / cleanup() run, so getApp() there is already the next App.
-    // An App runs once (#318): end it at the boundary, outside its own
-    // callbacks, with this window's context still active. Keep it alive until
-    // its audio hooks are detached and any callback in flight has returned.
-    if (endOutgoing) {
-        steps.run("outgoing App exit", [&] {
-            internal::EntryStackGuard guard(internal::AppEntry::Exit);
-            outgoing->exit();
-        });
-        steps.run("outgoing App audio detach", [&] { internal::detachAppAudio(*outgoing); });
-        steps.run("outgoing App cleanup", [&] { outgoing->cleanup(); });
-    }
-    outgoing.reset();
-    steps.run("initial App size", [&] { internal::syncWindowAppSize(*this, true); });
-    steps.run("swap context restoration", [&] { internal::restoreWindowContext(prev); });
-    internal::currentWindowCtx() = prev;
+    internal::TeardownSteps steps;
+    steps.run("App initial sizing", [&] { internal::syncWindowAppSize(*this, true); });
 }
 
 inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
@@ -668,13 +492,17 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                 // Resolve at delivery time, retaining the target through user code.
                 auto app = exiting ? exitingApp_.lock() : app_;
                 if (!app && exiting) app = app_;
-                if (app) callback(*app, args...);
+                if (app) {
+                    internal::AppCallbackScope owner(internal::appOwner(*app));
+                    callback(*app, args...);
+                }
             }, EventPriority::App));
     };
     // Keep the float hover coordinates: App::handleUpdate takes integers.
     bind(events_.update, [this](App&) { tickTree(); });
     bind(events_.draw, [this](App&) { drawTreeNow(); });
-    bind(events_.exit, [](App& app) { app.exit(); }, true);
+    bind(events_.exit, [](App& app) { internal::deliverAppExit(app); }, true);
+
     bind(events_.keyPressed, [](App& app, auto& e) { e.consumed = app.handleKeyPressed(e) || e.consumed; });
     bind(events_.keyReleased, [](App& app, auto& e) { e.consumed = app.handleKeyReleased(e) || e.consumed; });
     bind(events_.mousePressed, [](App& app, auto& e) { e.consumed = app.handleMousePressed(e) || e.consumed; });
@@ -690,87 +518,36 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
 }
 
 inline void Window::endApp() noexcept {
-    if (exitDelivered_) return;
-    exitDelivered_ = true;
     internal::WindowLifecycleScope lifecycle(*this);
-    if (!ctx_.isMain) ctx_.targetsClosed = true;
-    internal::TeardownSteps steps;
-    std::shared_ptr<App> dropped = std::move(pendingApp_);
-    pendingApp_.reset();
-    if (appRequested_ && dropped) {
-        steps.run("pending App warning", [&] {
-            logWarning("Window") << "setApp(): dropped, this window closed before the App was attached";
-        });
-    }
+    cancelCandidate(std::move(pendingApp_));
     appRequested_ = false;
-    dropped.reset();
-    // Detach first, then deliver exit with the outgoing App held for the
-    // entire notification, including BeforeApp and mandatory AfterApp hooks.
-    auto* prev = internal::currentWindowCtx();
-    // The native target has been released. Select only the event/state owner;
-    // nested restoration also honors WindowContext's terminal target state.
-    internal::currentWindowCtx() = &ctx_;
-    std::shared_ptr<App> app = std::move(app_);
-    // Keep the main runner's legacy weak root through shutdown/unload hooks.
-    // Ownership/getWindow are already detached; secondary teardown clears root.
-    if (!ctx_.isMain) ctx_.rootNode.reset();
-    // End admission before any exit hook, logger or disconnect destructor can
-    // request this outgoing App on another window. Audio stays live until exit.
-    if (app) app->cleanupCalled_ = true;
-    if (app) steps.run("attachment registry removal", [&] { internal::attachedApps().erase(app.get()); });
-    exitingApp_ = app;
-    internal::FrameworkEventAccess::notifyShutdown(events_.exit, steps);
-    if (ctx_.isMain) steps.run("requested secondary closes", [] { internal::closeRequestedWindowsAtShutdown(); });
+    auto outgoing = std::move(app_);
+    ctx_.rootNode.reset();
+    if (outgoing) {
+        if (closingApp_ && !windowExitNotified_) {
+            internal::appOwner(*outgoing)->notifyWindowExit = true;
+            windowExitNotified_ = true;
+        }
+    }
+    exitingApp_ = outgoing;
+    internal::endAppAttachment(outgoing, ctx_);
     exitingApp_.reset();
-    if (appEventState_) appEventState_->active.store(false);
-    // Keep each backend's existing shutdown order. Main screenshots are
-    // cancelled by the runner's resource-stop step before App shutdown;
-    // secondary cancellation and binding retirement follow the exit hooks.
-    if (!ctx_.isMain) {
-        internal::closeScreenshots(ctx_.asyncScreenshots);
-        ctx_.appEventListeners.clear();
-    }
-    if (app) {
-        // Other windows keep their audio callbacks; only detach this App.
-        steps.run("App audio detach", [&] { internal::detachAppAudio(*app); });
-        steps.run("App cleanup", [&] { app->cleanup(); });
-    }
-    app.reset();
-    if (ctx_.isMain) ctx_.appEventListeners.clear();
-    if (prev != &ctx_) {
-        steps.run("App context restoration", [&] { internal::restoreWindowContext(prev); });
-    }
-    internal::currentWindowCtx() = prev; // also restore ownership if target preparation failed
 }
 
-namespace internal {
-
-}
-
-// Looked up in the open-window registry rather than cached on the App: every
-// platform's teardown drops app_, so a closed window stops matching here and
-// no back-pointer can dangle. The registry holds only a handful of windows.
 inline Window* App::getWindow() const {
-    for (Window* w : internal::openWindows()) {
-        if (w->getApp().get() == this) return w;
-    }
-    return nullptr;
+    auto owner = internal::appOwner(*this);
+    return owner && !owner->ended && !owner->retiring ? owner->window : nullptr;
 }
 
-// Picks the window from the App, not from the active context: the global
-// setWindowSize() follows the context, so from another window's callback it
-// resized THAT window instead. Width/height get the same framebuffer ->
-// logical conversion as setWindowSize(), with the target window's own scale.
+// Resize this App's attached Window using its own framebuffer-to-logical scale,
+// including when called from a different App's callback.
 inline void App::setSize(float w, float h) {
     if constexpr (internal::windowSizeIsScreenControlled()) {
         // Reach the Notice endpoint before validation or float-to-int conversion.
-        if (getWindow()) { internal::setMainWindowSizeLogical(0, 0); return; }
+        if (getWindow()) { internal::setSingleWindowSizeLogical(0, 0); return; }
     }
-    // Not owned by a shared_ptr (yet): inside the App's constructor, or an
-    // App made on the stack or in a unique_ptr. No window runs such an App
-    // (it becomes getRootNode() / a window's App only through a shared_ptr),
-    // so there is no window to resize: only the App's own size is set, and
-    // the first such call on this App logs a warning.
+    // During construction the candidate is not published or shared yet.
+    // Only its local size changes; native resizing belongs in setup().
     if (weak_from_this().expired()) {
         if (!unownedSetSizeWarned_) {
             unownedSetSizeWarned_ = true;
@@ -808,8 +585,7 @@ inline std::shared_ptr<Window> createSecondaryWindow(const WindowSettings&) { re
 // Stubs for platforms without window glue (web / iOS / Android). The real implementations live in platform/mac/tcWindowMac.mm,
 // platform/win/tcWindowWin.cpp and platform/linux/tcWindowLinux.cpp (desktop
 // Linux uses the same adapter for GLX and GLES3/EGL).
-inline void Window::closeSecondary() {}
-inline void Window::teardownSecondary() noexcept {}
+inline void Window::disposeNativeBacking() noexcept {}
 
 #else
 namespace internal {
@@ -819,25 +595,59 @@ inline constexpr bool supportsSecondaryWindows() { return true; }
 
 // Desktop controls use the addressed binding. Single-window platforms retain
 // their canvas/surface control endpoints.
-inline Window::~Window() { if (!internal::frameworkShutdown()) teardown(); }
+inline Window::~Window() {
+    if (!internal::frameworkShutdown() && epoch_ == internal::runtimeEpoch()) teardown();
+}
 inline void Window::close() {
-    if (internal::frameworkShutdown()) return;
-    if (!ctx_.isMain) { closeSecondary(); return; }
-    if (isOpen() && !closeRequested_) { closeRequested_ = true; requestExitApp(); }
+    if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || !isOpen() || closeRequested_) return;
+    if (quitOnClose_) { requestExitApp(); return; }
+    closeRequested_ = true;
+    if (binding_.handle.id) sapp_window_request_close(binding_.handle);
+    else requestExitApp(); // sole-surface platforms have one native lifetime
 }
 inline void Window::teardown() noexcept {
-    if (internal::frameworkShutdown()) return;
+    if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || exitDelivered_) return;
+    auto keepAlive = hostOwner_.lock();
+    exitDelivered_ = true;
+    closeRequested_ = true;
     internal::WindowLifecycleScope lifecycle(*this);
-    if (!ctx_.isMain) { teardownSecondary(); return; }
-    if (isOpen()) internal::WindowRequestAccess::endMain(*this);
+    internal::TeardownSteps steps;
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx_;
+    // The App loses its Window and root before any ending callback. The native
+    // and GPU resources remain usable until all App and owner teardown finishes.
+    binding_.bound = false;
+    closingApp_ = true;
+    endApp();
+    if (!windowExitNotified_) {
+        windowExitNotified_ = true;
+        internal::FrameworkEventAccess::notifyShutdown(events_.exit, steps);
+    }
+    internal::closeScreenshots(ctx_.asyncScreenshots);
+    mcp::internal::retireDeferredTarget(&ctx_);
+    if (appEventState_) appEventState_->active.store(false);
+    ctx_.appEventListeners.clear();
+    steps.run("window target cleanup", [&] { ctx_.teardownTargets(); });
+    steps.run("window GPU release", [&] { ctx_.swapchainTarget.resources().release(); });
+    ctx_.targetsClosed = true;
+    sapp_tc_gl_activate_idle();
+    if (native_) disposeNativeBacking();
+    else if (binding_.handle.id) steps.run("window native disposal", [&] { sapp_destroy_window(binding_.handle); });
+    internal::WindowRequestAccess::unbind(*this);
+    ctx_.acquireSwapchain = nullptr;
+    ctx_.acquireSwapchainUser = nullptr;
+    ctx_.activateNative = nullptr;
+    steps.run("window caller restoration", [&] { internal::restoreWindowContext(previous == &ctx_ ? nullptr : previous); });
+    internal::currentWindowCtx() = previous == &ctx_ ? nullptr : previous;
+    internal::releaseRuntimeWindow(*this);
 }
 inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std::string* title, internal::WindowGeometryCall call) {
-    // Native controls take an explicit target (the main endpoint or this
-    // Window's native handle). Keep the rendering owner current: a synchronous
+    // Native controls take this Window's explicit binding. Keep the rendering
+    // owner current: a synchronous
     // resize/fullscreen event must park, switch and restore the real caller.
     if constexpr (internal::windowSizeIsScreenControlled()) {
         if (op == internal::WindowControl::Size || op == internal::WindowControl::PixelSize) {
-            internal::setMainWindowSizeLogical(x, y);
+            internal::setSingleWindowSizeLogical(x, y);
             return {-1, -1};
         }
     }
@@ -850,8 +660,7 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         if (hook(*this, op, x, y, title, result)) return result;
     }
     if (op == internal::WindowControl::Title) {
-        if (ctx_.isMain) mcp::internal::mainWindowTitle(*title);
-        else title_ = *title;
+        title_ = mcp::internal::markedWindowTitle(*title);
     }
     if (!isOpen()) return result;
     if (binding_.operations) {
@@ -891,7 +700,7 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
     }
     switch (op) {
         case internal::WindowControl::Title:
-            if (ctx_.isMain) {
+            if (!internal::supportsSecondaryWindows()) {
                 if (sapp_isvalid()) sapp_set_window_title(title_.c_str());
             }
             break;
@@ -902,8 +711,8 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
 #if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
             bool useFractionalSize = internal::supportsSecondaryWindows();
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && !TARGET_OS_IPHONE)
-            // Main desktop sizing is independent of secondary-window support.
-            useFractionalSize = useFractionalSize || ctx_.isMain;
+            // Desktop sole-surface sizing is independent of secondary-window support.
+            useFractionalSize = useFractionalSize || !internal::supportsSecondaryWindows();
 #endif
             if (useFractionalSize) {
                 const double width = _sapp_tc_window_points(0, x, factor);
@@ -915,10 +724,10 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
 #if defined(_WIN32)
                 internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height); break;
 #elif defined(__linux__) && !defined(__ANDROID__)
-                if (sapp_isvalid()) internal::setMainWindowSizeFractionalX11(width, height);
+                if (sapp_isvalid()) internal::setSingleWindowSizeFractionalX11(width, height);
                 break;
 #elif defined(__APPLE__) && !TARGET_OS_IPHONE
-                if (sapp_isvalid()) internal::setMainWindowSizeFractionalMac(width, height);
+                if (sapp_isvalid()) internal::setSingleWindowSizeFractionalMac(width, height);
                 break;
 #endif
             }
@@ -933,19 +742,19 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         }
         case internal::WindowControl::Size:
             if (x <= 0 || y <= 0) return result;
-            if (ctx_.isMain) { if (sapp_isvalid()) internal::setMainWindowSizeLogical(x, y); }
+            if (!internal::supportsSecondaryWindows()) { if (sapp_isvalid()) internal::setSingleWindowSizeLogical(x, y); }
             break;
         case internal::WindowControl::Position:
-            if (ctx_.isMain) internal::setMainWindowPosition(x, y);
+            if (!internal::supportsSecondaryWindows()) internal::setSingleWindowPosition(x, y);
             break;
         case internal::WindowControl::PositionQuery:
-            result = internal::mainWindowPosition();
+            result = internal::singleWindowPosition();
             break;
         case internal::WindowControl::Fullscreen:
-            if (ctx_.isMain) internal::setMainFullscreen(bool(x));
+            if (!internal::supportsSecondaryWindows()) internal::setSingleWindowFullscreen(bool(x));
             break;
         case internal::WindowControl::ToggleFullscreen:
-            if (ctx_.isMain) sapp_toggle_fullscreen();
+            if (!internal::supportsSecondaryWindows()) sapp_toggle_fullscreen();
             break;
     }
     return result;
@@ -966,10 +775,11 @@ inline void Window::setFullscreen(bool full) {
     control(internal::WindowControl::Fullscreen, int(full));
 }
 inline internal::WindowFullscreenPhase Window::fullscreenPhase() const {
+    if (!isOpen() || epoch_ != internal::runtimeEpoch()) return internal::WindowFullscreenPhase::Windowed;
     if (auto hook = internal::windowFullscreenHookForTests()) return hook(*this);
     if (binding_.operations && binding_.operations->fullscreenPhase)
         return static_cast<internal::WindowFullscreenPhase>(binding_.operations->fullscreenPhase(*this));
-    if (ctx_.isMain) return isOpen() ? internal::mainWindowFullscreenPhase() : internal::WindowFullscreenPhase::Windowed;
+    if (!internal::supportsSecondaryWindows()) return isOpen() ? internal::singleWindowFullscreenPhase() : internal::WindowFullscreenPhase::Windowed;
     return internal::WindowFullscreenPhase::Windowed;
 }
 inline bool Window::isFullscreen() const {
@@ -977,7 +787,7 @@ inline bool Window::isFullscreen() const {
 }
 namespace internal {
 inline bool usesNativeWindowDimensions(const WindowContext& ctx) noexcept {
-    return ctx.isMain && ctx.hostWindow && !ctx.hostWindow->isOpen();
+    return headless::isActive() && !ctx.hostWindow;
 }
 inline WindowDimensions windowDimensions(const WindowContext& ctx) noexcept {
     if (usesNativeWindowDimensions(ctx))
@@ -992,19 +802,9 @@ inline int Window::getWidth() const {
 inline int Window::getHeight() const {
     return isOpen() ? internal::framebufferToLogical(ctx_.fbHeight, ctx_.dpiScale) : 0;
 }
-inline void Window::setFps(float fps) {
-    // Select only the API context; changing a target needs no GPU switch.
-    auto* previous = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &ctx_;
-    struct Restore { internal::WindowContext* previous; ~Restore() { internal::currentWindowCtx() = previous; } } restore{previous};
-    trussc::setFps(fps);
-}
+inline void Window::setFps(float fps) { internal::setFpsForContext(ctx_, fps); }
 inline void Window::setIndependentFps(float updateFps, float drawFps) {
-    // Select only the API context; changing a target needs no GPU switch.
-    auto* previous = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &ctx_;
-    struct Restore { internal::WindowContext* previous; ~Restore() { internal::currentWindowCtx() = previous; } } restore{previous};
-    trussc::setIndependentFps(updateFps, drawFps);
+    internal::setIndependentFpsForContext(ctx_, updateFps, drawFps);
 }
 inline bool Window::isOccluded() const {
     const auto& m = binding_.metadata;

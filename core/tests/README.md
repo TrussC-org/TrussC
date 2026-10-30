@@ -17,7 +17,7 @@ building `allCoreTests`, run `tcbuild.sh python3 core/tests/windowState/review-t
 from the repository root. It uses the build's compilation database and library;
 `TC_WINDOW_REVIEW_BUILD` can select a private EGL build directory. The Linux
 event bridge and all three desktop tick bodies are extracted without changing
-their control flow. The same probe calls the actual main event/frame entries
+their control flow. The same probe calls the actual addressed event/frame entries
 and Linux event/tick entries for nested newer sizes, interrupted typed delivery,
 one retry per tick under persistent failure, argument-edit collisions and
 deduplication in both coordinate modes. Shared assertions also run in the
@@ -506,7 +506,7 @@ Fitting requests run every check strictly, without SKIPs.
   after a second meanwhile) and goes on once it returns; an App runs once:
   `Window::setApp()` refuses an App whose window closed (one error, the
   window keeps its App, no hook comes back, no second `setup()`) and any App
-  on a window that is not open, and `setApp(nullptr)` removes the window
+  on a window that is not open, and `destroyApp()` removes the window
   App's hook;
   `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
   flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
@@ -535,7 +535,7 @@ Fitting requests run every check strictly, without SKIPs.
   secondary window's App (setup on the window's first tick), whose `setup()`
   allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
   has returned and no hook is subscribed while it runs; afterwards there is
-  exactly one hook each, also after more ticks, and `setApp(nullptr)` removes
+  exactly one hook each, also after more ticks, and `destroyApp()` removes
   them;
   an App that is constructed but never run gets no callbacks; the App's
   `audioOut()` still runs before the default-priority listeners its `setup()`
@@ -751,10 +751,10 @@ Fitting requests run every check strictly, without SKIPs.
   exits, cleanup and exit codes, main-thread dispatch, signal reasons, clean
   consecutive runs, and deterministic 100-step catch-up passes that stop only
   for uncancellable exits. No display or timing-dependent assertions.
-- `secondaryTimerCreation/`: native #307 pre-creation delta regression with deterministic timestamps; the same source runs on the pre-Q2 base. Use `--display`.
-- `windowTick`: #239 Q2 / #307 / #984 common-tick scheduling, listener timers, frame samples, read-only FPS, real draw counts, headless zero draws and fractional DPI conversion. `--display` checks native presentation and main clear color/visibility, hidden-main updates while a visible secondary draws, upload-only GPU boundaries, and non-throwing invalid-swapchain retry. Hidden main drawing is skipped in idle EVENT_DRIVEN mode or retains configured/native pacing.
-  `tcbuild.sh env python3 core/tests/windowTick/host-entry-test` links the production common entry/coordinator and exercises both ownership roots without a display. Add `TC_HOST_ENTRY_MUTATIONS=1 TC_HOST_ENTRY_EXTRA_MUTATIONS=1` after `env` to run compiled host, launch-client and scheduler mutations. `tcbuild.sh env TC_HOST_TURN_MUTATIONS=1 python3 tools/tests/test_host_turn_hooks.py` executes native event guards, no-draw X11 turns and nested AppKit turn arbitration with stubs; it does not claim Windows/macOS SDK compilation.
-  Bootstrap tests preserve base native admission: construction and queued-before-first-tick notifications are dropped; desktop init-time notifications reach host listeners synchronously, including constructor resize and the Windows QUERYENDSESSION exitRequested veto. The host probe extracts production sends, predicates, init helpers and complete Win32/X11 loops (GLX and EGL), plus the macOS observer/callback boundary. Mutations initialize before the first drain or drop during init. Post-init input arrives before the first draw in order exactly once with each drop’s own paths. Tests check the authoritative hidden snapshot at setup and preserve per-Window last-delivered visibility and the empty checkpoint-3 hook. `tcbuild.sh env TC_BOOTSTRAP_MUTATIONS=1 python3 tools/tests/test_host_bootstrap_readiness.py` checks construction and init-in-progress admission on all three desktop ports and the base flag-after-init ordering on Web/iOS/Android. `tcbuild.sh env TC_SINGLE_WINDOW_MUTATIONS=1 python3 tools/tests/test_single_window_host_bridge.py` checks real 120 Hz source timing, native single-window skip endpoints and Android's pre-swap suppression, and links production Web sokol with the common tick body using Emscripten (`EMXX` or the installed SDK). These checks use native stubs and make no mobile device claim.
+- `secondaryTimerCreation/`: native pre-creation delta regression with deterministic timestamps. Use `--display`.
+- `windowTick`: common-tick scheduling, listener timers, frame samples, read-only FPS, real draw counts, headless zero draws and fractional DPI conversion. `--display` checks native presentation and main clear color/visibility, hidden-main updates while a visible secondary draws, upload-only GPU boundaries, and non-throwing invalid-swapchain retry. Hidden drawing is skipped in idle EVENT_DRIVEN mode or retains configured/native pacing when hidden updates are enabled.
+  `tcbuild.sh env python3 core/tests/windowTick/host-entry-test` links the production common entry/coordinator and exercises addressed Window and process entries without a display. Add `TC_HOST_ENTRY_MUTATIONS=1 TC_HOST_ENTRY_EXTRA_MUTATIONS=1` after `env` to run compiled host, launch-client and scheduler mutations. `tcbuild.sh env TC_HOST_TURN_MUTATIONS=1 python3 tools/tests/test_host_turn_hooks.py` executes native event guards, no-draw X11 turns and nested AppKit turn arbitration with stubs; it does not claim Windows/macOS SDK compilation.
+  Bootstrap tests preserve base native admission: construction and queued-before-first-tick notifications are dropped; desktop init-time notifications reach host listeners synchronously, including constructor resize and the Windows QUERYENDSESSION exitRequested veto. The host probe extracts production sends, predicates, init helpers and complete Win32/X11 loops (GLX and EGL), plus the macOS observer/callback boundary. Mutations initialize before the first drain or drop during init. Post-init input arrives before the first draw in order exactly once with each drop’s own paths. Tests check the authoritative hidden snapshot at setup and preserve per-Window last-delivered visibility. `tcbuild.sh env TC_BOOTSTRAP_MUTATIONS=1 python3 tools/tests/test_host_bootstrap_readiness.py` checks construction and init-in-progress admission on all three desktop ports and the base flag-after-init ordering on Web/iOS/Android. `tcbuild.sh env TC_SINGLE_WINDOW_MUTATIONS=1 python3 tools/tests/test_single_window_host_bridge.py` checks real 120 Hz source timing, native single-window skip endpoints and Android's pre-swap suppression, and links production Web sokol with the common tick body using Emscripten (`EMXX` or the installed SDK). These checks use native stubs and make no mobile device claim.
   Its deterministic tests also cover capture retry/expiry during persistent admission failure without afterFrame. `sh core/tests/windowTick/egl-wait-test` extracts the production EGL frame function and checks readable-fd wake-up, Xlib-buffered input, work/deadline accounting, EINTR and no catch-up without sleep-duration assertions.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
@@ -808,21 +808,13 @@ Fitting requests run every check strictly, without SKIPs.
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
-- `windowAppSwap/` — a secondary window's `setApp()` and `close()` are
-  requests that land at the window's next frame boundary (#315). Called from
-  the window's own App (`update()`, `keyPressed()`) or from its child
-  (`update()`, `onKeyPress()`), the window is unchanged until the tick or
-  event ends (`getApp()`, `App::getWindow()`, `isOpen()`), the App and its
-  children stay alive for the rest of it, and then the swap lands; a request
-  from outside a tick lands when the next tick starts. Two `setApp()` in one
-  frame: the last wins and the other App is never attached. `close()` with a
-  `setApp()` in the same frame: `close()` wins (the pending App is dropped
-  with a warning; a `setApp()` after `close()` is an error at the call). The
-  checks run again when a request is applied (the same App requested on two
-  windows lands on the first only), and the teardown detaches the App before
-  its `exit()` / `cleanup()`, so `setApp()` / `close()` from there find a
-  closed window. The tick / event bracket is the glue's
-  `internal::WindowEntryScope`; build with `-fsanitize=address` for the
+- `windowAppSwap/` — typed App replacement and close requests land at a safe
+  Window frame boundary. Calls from App or child callbacks preserve the outgoing
+  App through the rest of that entry. The last pending constructor candidate wins;
+  close cancels pending candidates without inventing setup, exit or cleanup.
+  Stable framework event slots remain while an App is replaced or destroyed.
+  Attachment rollback, lifecycle reentry, event ordering and native teardown use
+  the common `internal::WindowEntryScope`; build with AddressSanitizer for the
   memory side. The same test also has real-window pipeline lifetime checks:
   `allCoreTests windowAppSwap --pipeline-cycles self 100` closes from the
   secondary App's third update; replace `self` with `main` to close from the
@@ -895,18 +887,12 @@ Fitting requests run every check strictly, without SKIPs.
   accept thread cannot start, `start()` returns false, reports it once and
   leaves nothing listening, and a later `start()` on that port works. Each
   server binds a port the OS just handed out, not a fixed one.
-- `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
-  reference, so the App can't register itself from its constructor, and the
-  code that creates it through a `shared_ptr` does. `runApp()`'s setup
-  callback (called here without `sapp_run()`) registers the App, and the
-  root is gone once the cleanup callback freed it. Inside the App's
-  constructor `getRootNode()` is not the App yet and `App::setSize()`
-  resizes no window and warns once however often it is called (an App on
-  the stack likewise); from `setup()` it goes to the main window without a
-  warning. `runHeadlessApp()` owns
-  the App with a `shared_ptr`, so it is the root in `setup()`, `update()` and
-  `cleanup()`, `setup()` can `addChild()`, and the root is cleared when the
-  run ends.
+- `appRoot/` — typed construction publishes the App as a weak scene root only
+  after its constructor finishes. Constructor-only registrations belong to its
+  token; constructor sizing changes its own RectNode until attachment. Setup
+  resolves the App's Window. Ending clears the root and `getWindow()` before
+  exit and cleanup. Headless execution keeps the virtual root and providers
+  without executing the scene tree or owning a native Window.
 - `pixelsIndex/` — `Pixels` indexes with `size_t`, so images past `INT_MAX`
   bytes work: the offset of the far corner of a 23171x23171 RGBA image, and
   an `allocate()` byte count that is checked before it can wrap (against a
@@ -1061,18 +1047,10 @@ Fitting requests run every check strictly, without SKIPs.
   `tools/src/main.cpp` (including the ones that call the build / clean
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
-- `windowSetApp/` — an App ends when it leaves its window (#318), on the real
-  `AudioEngine` over miniaudio's null backend: `Window::setApp(other)` and
-  `setApp(nullptr)` run the outgoing App's `exit()` and then `cleanup()`, once
-  each, and detach its `audioOut()` / `audioIn()` (not called again); the
-  incoming App's `setup()` runs on the window's next tick; attaching the
-  swapped-out App again is refused with one error and the window keeps its
-  App; an App whose `cleanup()` already ran is not ended twice. Also from the
-  App's own `update()`, from its `setup()` (the swapped-out App's audio
-  hooks are detached at the boundary), and for an App added with `addChild()`
-  and destroyed (its hooks go with `cleanupTree()`). Requests leave the App
-  live inside its callback and run teardown at the frame boundary (#315).
-  Audio-stop checks wait for actual callbacks. Not covered: a native window.
+- `windowSetApp/` — constructor-only App ownership, nested constructor attribution,
+  cancelled candidates, stable event slots, per-App MCP and async retirement,
+  retained handles across epochs and reverse shutdown despite callback throws.
+  `appAudioTeardown/` separately exercises the real null AudioEngine barrier.
 - `nodeReflectRoundTrip/` — derived values in reflection (#287), with Node's
   `globalPos` (`TC_DERIVED`, derived from `pos`): `reflectToJson()` writes
   `pos` and no `globalPos` (`reflectToJson(obj, true)` writes both), and a
@@ -1119,15 +1097,18 @@ Fitting requests run every check strictly, without SKIPs.
   remain manual in `repro/appSetSizeTest` on `test/app-setsize-own-window`
   (see its `repro/README.md`). Headless S6 does not prove that another window
   is not resized.
-- `windowState/` — deterministic main/secondary ownership, positive native
+- `windowState/` — deterministic equal Window ownership, positive native
   binding IDs, per-window native operations, framebuffer/DPI before initial
   App sizing, trusted effective-hidden snapshots, size deduplication and
   headless fallback/reference lifetime through the common production path.
-- `mainWindowAttach/` — main Window ownership, identity, shared admission,
-  deferred swap, replacement size and main-close quit. Display modes also
-  cover callback exit, process teardown with a pending swap, and constructor
-  failure contained at the C callback boundary.
-- `mainWindowRouting/` — standalone recording unit for the common main-window
+- `mainWindowAttach/` — equal Window ownership and explicit close. Its display
+  mode closes the earlier Window while a surviving Window uploads textures/Fbos
+  and continues drawing. Dropping all external handles leaves a Window live.
+- `windowTick/guest-storage-test.py` — real Linux dynamic-library retirement,
+  persistent OOM disconnects, queued callbacks, retained App handles and weak
+  control blocks. Physical unloading waits for the last defining-code holder;
+  released storage can be rebuilt and notified after unloading.
+- `mainWindowRouting/` — standalone recording unit for the addressed Window
   title/size/fullscreen dispatcher and own-window DPI conversion. Its plain
   `main()` uses recording sapp entry points; native support limits remain
   device checks.

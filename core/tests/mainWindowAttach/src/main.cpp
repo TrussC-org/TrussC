@@ -1,211 +1,109 @@
-// Main/secondary shared admission, deferred boundaries and runner ownership.
+// All Window handles have the same ownership; an earlier Window can close first.
 #include <TrussC.h>
-#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 using namespace tc;
-#if defined(__EMSCRIPTEN__) || defined(__ANDROID__) || (defined(__APPLE__) && !TARGET_OS_OSX) || (defined(__linux__) && !defined(SOKOL_GLCORE) && !defined(SOKOL_GLES3))
-static_assert(!internal::supportsSecondaryWindows(), "single-window platforms must reject secondary creation");
-#endif
 namespace {
 int failures = 0;
-void check(const char* label, bool ok) {
-    std::printf("mainWindowAttach: %s: %s\n", label, ok ? "PASS" : "FAIL");
-    if (!ok) ++failures;
+void check(const char* label, bool okay) {
+    std::printf("mainWindowAttach: %s: %s\n", label, okay ? "PASS" : "FAIL");
+    if (!okay) ++failures;
 }
-int processExits = 0, processCleanups = 0;
-void processVerdict() {
-    const bool ok = processExits == 1 && processCleanups == 1;
-    std::printf("mainWindowAttach: process teardown: %s\n", ok ? "PASS" : "FAIL");
-    std::fflush(stdout);
-    if (!ok) std::_Exit(1);
-}
-struct ProcessExitApp : App {
-    void update() override {
-        getWindow()->setApp(std::make_shared<App>());
-        std::exit(0); // owner must outlive framework state even with a pending swap
-    }
-    void exit() override { ++processExits; }
-    void cleanup() override { ++processCleanups; }
-};
-struct Probe : App {
-    int exits = 0, cleanups = 0;
-    void exit() override { ++exits; }
-    void cleanup() override { ++cleanups; }
-};
-uint64_t standIn = 0;
-struct OtherWindow : Window {
-    OtherWindow() { native_ = &standIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
-    ~OtherWindow() { finish(); }
-    void finish() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
-};
-struct ThrowConstructor : App { ThrowConstructor() { throw std::runtime_error("constructor test"); } };
-bool displayFinished = false;
-void displayVerdict() {
-    if (!displayFinished || failures) {
-        std::printf("mainWindowAttach: display verdict: FAIL\n");
-        std::fflush(stdout);
-        std::_Exit(1);
-    }
-}
-struct DisplayNext : App {
-    void setup() override {
-        check("replacement main handle", getWindow() && internal::currentWindow() == getWindow());
-        check("replacement main size seeded before setup", getWidth() == getWindowWidth() && getHeight() == getWindowHeight());
-        getWindow()->close();
+std::shared_ptr<Window> earlier, later;
+int earlierExits = 0, laterFrames = 0;
+struct Later : App {
+    Texture texture;
+    Fbo fbo;
+    bool uploaded = false;
+    void setup() override { check("later size seeded", getWidth() == getWindowWidth()); }
+    void draw() override {
+        if (earlier && !earlier->isOpen()) {
+            if (!uploaded) {
+                Pixels pixels;
+                pixels.allocate(16, 16, 4);
+                texture.allocate(pixels);
+                fbo.allocate(16, 16);
+                uploaded = texture.isAllocated() && fbo.isAllocated();
+                check("later uploads texture and Fbo after earlier close", uploaded);
+            }
+            fbo.begin(); clear(Color(0, 1, 0)); fbo.end();
+            clear(Color(0, 0, 1));
+            fbo.draw(0, 0);
+            if (++laterFrames == 3) getWindow()->close();
+        }
     }
     void cleanup() override {
-        auto* main = internal::mainWindow();
-        check("main close reaches runner shutdown", main && !main->isOpen() && !main->getApp());
-        displayFinished = true;
+        check("earlier close did not terminate later", earlierExits == 1 && laterFrames == 3 && uploaded);
         if (failures) internal::appExitCode() = 1;
     }
 };
-struct DisplayFirst : App {
-    DisplayFirst() {
-        auto* w = internal::mainWindow();
-        sapp_tc_window_metadata metadata{};
-        const auto id = uint32_t(internal::WindowRequestAccess::creationId(*w));
-        check("native ID bound before App construction", id && sapp_tc_window_read_metadata({id}, &metadata));
-        check("main framebuffer and DPI ready before App construction", w->context().fbWidth == metadata.fb_width && w->context().fbHeight == metadata.fb_height && w->context().dpiScale == metadata.dpi_scale && metadata.fb_width > 0);
-    }
-    int updates = 0;
-    EventListener cancelClose;
+struct Earlier : App {
     void setup() override {
-        cancelClose = events().exitRequested.listen([](ExitRequestEventArgs& args) {
-            args.cancel = true;
-        });
+        earlier = internal::WindowRequestAccess::retainHostOwner(*getWindow());
+        later = createWindow(WindowSettings{}.setSize(120, 90).setTitle("Later"));
+        check("later created", bool(later));
+        if (later) later->setApp<Later>();
+        else exitApp(1);
     }
-    void update() override {
-        auto* window = getWindow();
-        check("runner main handle", window && internal::currentWindow() == window);
-        if (!window) { exitApp(1); return; }
-        if (++updates == 1) { window->close(); return; }
-        check("cancelled display close keeps main open", window->isOpen());
-        cancelClose.disconnect();
-        window->setApp(std::make_shared<DisplayNext>());
-        check("self swap remains deferred", window->getApp().get() == this && getWindow() == window);
-    }
+    void update() override { if (later && later->getApp()) getWindow()->close(); }
+    void exit() override { ++earlierExits; check("earlier App detached before exit", !getWindow()); }
 };
-} // namespace
-
+struct Empty : App {};
+int processExits = 0, processCleanups = 0;
+void processVerdict() {
+    const bool okay = processExits == 1 && processCleanups == 1;
+    std::printf("mainWindowAttach: process ending exactly once: %s\n", okay ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    if (!okay) std::_Exit(1);
+}
+struct ProcessExitApp : App {
+    void update() override { getWindow()->setApp<Empty>(); std::exit(0); }
+    void exit() override { ++processExits; }
+    void cleanup() override { ++processCleanups; }
+};
+struct ThrowConstructor : App {
+    ThrowConstructor() { throw std::runtime_error("constructor test"); }
+};
+}
 TC_CORE_TEST_MAIN(int argc, char** argv) {
-    getMainThreadId();
-    if (argc > 1 && std::string(argv[1]) == "--constructor-failure") {
-        WindowSettings settings; settings.width = settings.height = 128;
-        // runapp-verdict: atexit-verdict -- failure propagates through appExitCode.
-        return runApp<ThrowConstructor>(settings);
-    }
-    if (argc > 1 && std::string(argv[1]) == "--exit-in-callback") {
+    if (argc > 1 && std::string(argv[1]) == "--display")
+        return runApp<Earlier>(WindowSettings{}.setSize(160, 120).setTitle("Earlier"));
+    if (argc > 1 && std::string(argv[1]) == "--constructor-failure")
+        return runApp<ThrowConstructor>(WindowSettings{}.setSize(128, 128));
+    if (argc > 1 && (std::string(argv[1]) == "--exit-in-callback" ||
+                     std::string(argv[1]) == "--process-exit")) {
+        // Register before Runtime so its destructor runs before this verdict.
         std::atexit(processVerdict);
-        WindowSettings settings; settings.width = settings.height = 128;
-        return runApp<ProcessExitApp>(settings);
-    }
-    if (argc > 1 && std::string(argv[1]) == "--process-exit") {
-        std::atexit(processVerdict);
-        internal::createMainWindow(WindowSettings{});
-        internal::WindowRequestAccess::bindForTests(*internal::mainWindow(), 101);
-        internal::attachMainApp(std::make_shared<ProcessExitApp>());
-        internal::mainWindow()->setApp(std::make_shared<App>());
+        if (std::string(argv[1]) == "--exit-in-callback")
+            return runApp<ProcessExitApp>(WindowSettings{}.setSize(128, 128));
+        getMainThreadId();
+        internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+        auto window = internal::prepareLaunchWindow(WindowSettings{});
+        internal::WindowRequestAccess::bindForTests(*window, 101);
+        window->setApp<ProcessExitApp>(); internal::applyPendingAppForTests(*window);
+        window->setApp<Empty>();
         std::exit(0);
     }
-    if (argc > 1 && std::string(argv[1]) == "--display") {
-        WindowSettings settings; settings.width = settings.height = 128;
-        // The initial App is deliberately swapped out; verdict belongs to
-        // the replacement's cleanup, with an atexit guard against early exit.
-        std::atexit(displayVerdict);
-        return runApp<DisplayFirst>(settings);
-    }
-    internal::createMainWindow(WindowSettings{});
-    auto* window = internal::mainWindow();
-    window->setApp(std::make_shared<Probe>());
-    check("unopened main rejects attachment", !window->appRequested_ && !window->getApp());
-    internal::WindowRequestAccess::bindForTests(*window, 101); // no sapp in headless contract mode
-    auto first = std::make_shared<Probe>();
-    check("runner uses shared attachment", internal::attachMainApp(first));
-    check("attachment retains main handle without selecting a caller Window", !internal::currentWindow() && first->getWindow() == window);
-    check("main context and events retained", &window->context() == &internal::mainWindowContext() && &window->events() == &events());
-    const auto id = internal::WindowRequestAccess::creationId(*window);
-    setWindowTitle("Main title");
-    check("main title stored by global routing", window->getTitle() == (mcp::internal::isDevBuild() ? "Main title [MCP]" : "Main title") && &window->getTitle() == &mcp::internal::mainWindowTitleStorage());
-    OtherWindow other;
-    check("explicit native identities are retained", id == 101 && internal::WindowRequestAccess::creationId(other) == 202);
-    auto next = std::make_shared<Probe>();
-    {
-        internal::WindowEntryScope dispatch(*internal::mainWindow());
-        check("main dispatch is active", internal::mainWindowDispatchActive());
-        window->setApp(next);
-        check("main setApp deferred", window->getApp() == first && first->getWindow() == window && !next->getWindow());
-    }
-    check("main dispatch ended", !internal::mainWindowDispatchActive());
-    check("main swap at boundary", window->getApp() == next && next->getWindow() == window && first->exits == 1 && first->cleanups == 1);
-    window->setApp(first);
-    check("cleaned-up admission rejected at request", !window->appRequested_);
-    other.setApp(next);
-    check("main attachment blocks secondary admission", !other.appRequested_);
-    auto foreignOwner = std::shared_ptr<App>(next.get(), [](App*) {});
-    window->setApp(foreignOwner);
-    check("foreign shared owner refused", !window->appRequested_);
-    auto competing = std::make_shared<Probe>();
-    window->setApp(competing); other.setApp(competing);
-    internal::applyPendingAppForTests(other);
-    internal::applyPendingAppForTests(*window);
-    check("boundary repeats double-attach check", window->getApp() == next && other.getApp() == competing);
-    other.finish();
-    // A candidate can be ended between request and boundary.
-    auto stale = std::make_shared<Probe>();
-    window->setApp(stale);
-    OtherWindow disposer; disposer.setApp(stale); internal::applyPendingAppForTests(disposer); disposer.finish();
-    internal::applyPendingAppForTests(*window);
-    check("boundary repeats lifecycle check", window->getApp() == next);
-    internal::currentWindowCtx() = &window->context();
-    headless::active = true; headless::running = true;
-    auto cancelClose = events().exitRequested.listen([](ExitRequestEventArgs& args) {
-        args.cancel = true;
-    });
-    // Drive the actual native quit handler without a display. Include a close
-    // made inside another event callback, plus OS and direct soft-quit requests.
-    for (int source = 0; source < 4; ++source) {
-        headless::quitRequested = false;
-        if (source == 0) window->close();
-        if (source == 1) internal::setExitReason("window-close");
-        if (source == 2) requestExitApp();
-        if (source == 3) {
-            auto callback = events().rawEvent.listen([&](const sapp_event&) { window->close(); });
-            sapp_event focus{}; focus.type = SAPP_EVENTTYPE_FOCUSED;
-            tcCoreTest::dispatchMainEvent(&focus);
-        }
-        if (source != 1)
-            check("main close uses cancellable quit", headless::running && headless::quitRequested);
-        sapp_event quit{}; quit.type = SAPP_EVENTTYPE_QUIT_REQUESTED;
-        tcCoreTest::dispatchMainEvent(&quit);
-        check("cancelled quit restores open main", window->isOpen() && !internal::WindowRequestAccess::closeRequested(*window));
-        check("cancelled quit clears exit reason", internal::exitReason().empty());
-        auto replacement = std::make_shared<Probe>();
-        {
-            internal::WindowEntryScope dispatch(*internal::mainWindow());
-            window->setApp(replacement);
-            check("swap accepted after cancelled quit", window->appRequested_ && window->getApp() == next);
-        }
-        check("swap applied after cancelled quit", window->getApp() == replacement);
-        if (window->getApp() == replacement) next = replacement;
-    }
-    cancelClose.disconnect();
-    headless::quitRequested = false;
-    window->setApp(std::make_shared<Probe>());
-    window->close();
-    check("main close requests quit again", headless::running && headless::quitRequested && window->isOpen());
-    // Forced exitApp remains uncancellable, including after a soft request.
-    exitApp();
-    check("direct exitApp still forces quit", !headless::running);
-    headless::quitRequested = false;
-    headless::active = false;
-    internal::applyPendingAppForTests(*window);
-    check("main close wins pending swap", window->getApp() == next);
-    internal::destroyMainWindow();
-    check("main shutdown releases App once", !next->getWindow() && next->exits == 1 && next->cleanups == 1 && internal::attachedApps().empty());
-    internal::createMainWindow(WindowSettings{});
-    check("unbound canonical main has no native ID", internal::mainWindow() == window && internal::WindowRequestAccess::creationId(*window) == 0);
-    internal::destroyMainWindow();
+    getMainThreadId();
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+    auto a = std::make_shared<Window>(), b = std::make_shared<Window>();
+    internal::WindowRequestAccess::bindForTests(*a, 401);
+    internal::WindowRequestAccess::bindForTests(*b, 402);
+    internal::retainRuntimeWindow(a); internal::retainRuntimeWindow(b);
+    check("ambiguous omission resolves no Window", !internal::resolveWindow());
+    a->setApp<Empty>(); b->setApp<Empty>();
+    internal::applyPendingAppForTests(*a); internal::applyPendingAppForTests(*b);
+    auto* rawA = a.get(); auto* rawB = b.get();
+    std::weak_ptr<Window> weakA = a;
+    a.reset();
+    check("Runtime owns Window after external release", !weakA.expired() && rawA->isOpen());
+    internal::WindowRequestAccess::teardown(*rawA);
+    check("earlier closes while later remains open", rawB->isOpen() && internal::resolveWindow() == rawB);
+    internal::shutdownRuntime(); internal::endFrameworkLifetime();
+    check("shutdown retires all backings", !rawB->isOpen());
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+    b->close();
+    check("old handle stays closed across Runtime epochs", !b->isOpen());
+    internal::shutdownRuntime(); internal::endFrameworkLifetime();
     return failures ? 1 : 0;
 }

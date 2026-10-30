@@ -28,9 +28,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     bool ok = internal::appRunIsAlive(oldToken);
     first->store(false); // native cleanup invalidates this same atomic
     ok = !internal::appRunIsAlive(oldToken) && ok;
+    internal::shutdownRuntime();
     buildAppDescriptor<TokenApp>();
     const std::weak_ptr<std::atomic<bool>> nextToken = internal::appRunToken();
     ok = internal::appRunIsAlive(nextToken) && !internal::appRunIsAlive(oldToken) && ok;
+    internal::shutdownRuntime();
     first.reset();
     ok = oldToken.expired() && !internal::appRunIsAlive(oldToken) && ok;
     internal::appRunToken()->store(false);

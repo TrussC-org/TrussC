@@ -20,7 +20,7 @@
 //   - A secondary window's App (Window::setApp(), setup() on the window's
 //     first tick): nothing is subscribed at setApp(), the hooks come right
 //     after that setup(), and further ticks add no second hook and run no
-//     second setup(); setApp(nullptr) removes them.
+//     second setup(); destroyApp() removes them.
 //   - An App that is constructed but never run (make_shared or on the stack)
 //     is never subscribed and gets no callbacks.
 //   - The App's hooks still run ahead of the default-priority audioOut
@@ -170,6 +170,8 @@ struct OpenWindow : Window {
 static void tickWindow(Window& w) {
     internal::WindowContext* prev = internal::currentWindowCtx();
     internal::currentWindowCtx() = &w.context();
+    internal::applyPendingAppForTests(w);
+    internal::applyPendingAppForTests(w);
     w.tickTree();
     internal::currentWindowCtx() = prev;
 }
@@ -230,13 +232,16 @@ TC_CORE_TEST_MAIN() {
               engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase);
     }
 
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+
     // --- an App that is never run ---------------------------------------------------
     {
         Probe p;
         g_nextProbe = &p;
         {
-            auto kept = make_shared<SetupAllocApp>();   // e.g. kept for a later setApp()
-            SetupAllocApp onStack;
+            auto kept = internal::makeConstructedApp<SetupAllocApp>();   // e.g. kept for a later setApp()
+            try { SetupAllocApp onStack; check("direct App construction rejected", false); }
+            catch (const std::logic_error&) { check("direct App construction rejected", true); }
             check("an App that is constructed is not subscribed",
                   engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase,
                   hooks(engine.audioOut.listenerCount()));
@@ -251,9 +256,9 @@ TC_CORE_TEST_MAIN() {
     {
         Probe p;
         g_nextProbe = &p;
-        auto sub = make_shared<SetupAllocApp>();
+        auto sub = internal::makeConstructedApp<SetupAllocApp>();
         OpenWindow win, other;
-        win.setApp(sub);
+        internal::WindowRequestAccess::attachCandidate(win, sub);
         internal::applyPendingAppForTests(win);   // the frame boundary
         this_thread::sleep_for(chrono::milliseconds(50));
         check("window App: setApp() alone subscribes nothing",
@@ -281,15 +286,15 @@ TC_CORE_TEST_MAIN() {
               engine.audioIn.listenerCount() == inBase + 1 && p.setups.load() == 1,
               hooks(engine.audioOut.listenerCount()));
 
-        // setApp(nullptr) ends the App as a close does (#318): both hooks go,
+        // destroyApp() ends the App as a close does (#318): both hooks go,
         // and another window refuses it (an App runs once).
-        win.setApp(nullptr);
+        win.destroyApp();
         internal::applyPendingAppForTests(win);   // the frame boundary
         win.native_ = nullptr; internal::WindowRequestAccess::unbind(win);
-        check("window App: setApp(nullptr) removes both hooks",
+        check("window App: destroyApp() removes both hooks",
               engine.audioOut.listenerCount() == outBase && engine.audioIn.listenerCount() == inBase,
               hooks(engine.audioOut.listenerCount()));
-        other.setApp(sub);
+        internal::WindowRequestAccess::attachCandidate(other, sub);
         internal::applyPendingAppForTests(other);   // the frame boundary
         tickWindow(other);
         check("window App: another window refuses it, no hook, no second setup()",
@@ -303,7 +308,7 @@ TC_CORE_TEST_MAIN() {
         Probe p;
         g_nextProbe = &p;
         p.tagBuffer = true;
-        auto app = make_shared<TapInSetupApp>();
+        auto app = internal::makeConstructedApp<TapInSetupApp>();
         // Subscribed before the App's hooks too, at the default priority.
         atomic<int> earlyFirst{0}, earlyLater{0};
         EventListener early = engine.audioOut.listen([&](AudioOutBuffer& b) {
@@ -338,7 +343,7 @@ TC_CORE_TEST_MAIN() {
     {
         Probe p;
         g_nextProbe = &p;
-        auto app = make_shared<SetupAllocApp>();
+        auto app = internal::makeConstructedApp<SetupAllocApp>();
         internal::setupNodeOnce(*app);
         internal::setupNodeOnce(*app);
         check("setup once: setup() ran once, one hook each",

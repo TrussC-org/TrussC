@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 // =============================================================================
 // core/tests/userDataPath — behavioral regression test for where the app
 // writes (#433).
@@ -217,6 +218,7 @@ static void checkPlatformFolders(const fs::path& sandbox) {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    tcCoreTest::WindowFixture fixture;
     const fs::path sandbox = fs::absolute(fs::temp_directory_path() / "tc_userDataPath_test");
     std::error_code ec;
     fs::remove_all(sandbox, ec);

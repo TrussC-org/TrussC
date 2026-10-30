@@ -74,6 +74,11 @@ class AfterFrameScreenshotApp : public App {
             }, priority));
         }
     }
+    struct SecondaryApp : App {
+        AfterFrameScreenshotApp& parent;
+        explicit SecondaryApp(AfterFrameScreenshotApp& value) : parent(value) {}
+        void setup() override { parent.bind(events(), parent.secondaryState, false); }
+    };
 public:
     void setup() override {
         directory = fs::absolute("after-frame-screenshots");
@@ -89,7 +94,7 @@ public:
             if (secondary) {
                 // Keep the windows apart so native occlusion cannot stop ticks.
                 secondary->setPosition(300, 300);
-                bind(secondary->events(), secondaryState, false);
+                secondary->setApp<SecondaryApp>(*this);
             }
         }
     }

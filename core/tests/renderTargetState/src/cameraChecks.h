@@ -17,7 +17,7 @@ class PickProbe : public App {
 
 CameraSnapshot cameraSnapshot() {
     const auto& camera = cameraFields();
-    auto node = std::make_shared<PickProbe>();
+    auto node = internal::makeConstructedApp<PickProbe>();
     node->handleDraw();
     const auto context = node->getCameraContext();
     return {camera.currentViewMatrix, camera.currentProjectionMatrix,
@@ -54,7 +54,7 @@ void expectCamera(const CameraSnapshot& expected, bool pickable, bool sameContex
           sameVec(actual.ray.origin, expected.ray.origin) &&
           sameVec(actual.ray.direction, expected.ray.direction) &&
           (!sameContext || actual.context == expected.context));
-    auto node = std::make_shared<PickProbe>();
+    auto node = internal::makeConstructedApp<PickProbe>();
     node->handleDraw();
     check("public picking follows restored/offscreen context",
           node->findHitNodeFromScreen(11, 13).hit() == pickable);

@@ -453,8 +453,8 @@ int environmentCase(const string& mode) {
     check("initialization logs full exposure once", exposureNotices.size() == (listening && !healthOnly ? 1u : 0u));
     check("health-only Notice occurs exactly once", healthNotices == (healthOnly ? 1 : 0));
     check("dev warning follows build even when disabled", devWarnings == (dev ? 1 : 0));
-    check("main title marks dev builds", (mcp::internal::mainWindowTitle("Test") == (dev ? "Test [MCP]" : "Test")));
-    check("main title does not duplicate marker", mcp::internal::mainWindowTitle("Test [MCP]") == "Test [MCP]");
+    check("main title marks dev builds", (mcp::internal::markedWindowTitle("Test") == (dev ? "Test [MCP]" : "Test")));
+    check("main title does not duplicate marker", mcp::internal::markedWindowTitle("Test [MCP]") == "Test [MCP]");
     if (!listening) return g_fail ? 1 : 0;
     check("PORT selects the requested listener", !configuredPort || mcp::getHttpPort() == configuredPort);
     const bool devEnvironment = dev && !explicitStart && mode != "none";

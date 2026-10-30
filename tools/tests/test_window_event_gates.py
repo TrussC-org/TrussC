@@ -69,17 +69,18 @@ void run(){
         check("sentinel event cannot wake",!_sapp_tc_event_wakes(type));
         check("sentinel event cannot be injected",!_sapp_tc_valid_injected_event(sentinel));
     }
+    record.desc.close_cb=[](sapp_window,void*){++closedCallbacks;};
     _sapp_tc_mac_closed(&record);
-    check("direct main close records frame cancellation without a queued close",record.close_recorded&&!record.close_requested&&record.ready&&terminated==1&&sapp_tc_window_close_recorded({91}));
+    check("direct main close records frame cancellation without a queued close",record.close_recorded&&!record.close_requested&&!record.ready&&terminated==0&&closedCallbacks==1&&sapp_tc_window_close_recorded({91}));
     sapp_event closedInput{};closedInput.type=SAPP_EVENTTYPE_MOUSE_MOVE;
     check("physically closed target rejects input in its closing frame",!sapp_window_inject_event({91},&closedInput));
     ++record.frame_count;check("native close persists beyond its recorded frame",sapp_tc_window_close_recorded({91}));--record.frame_count;
-    record.native_closed=false; // Isolate the shared frame marker contract too.
+    record.native_closed=false; record.ready=true; // Isolate the shared frame marker contract too.
     check("shared physical close marker rejects closing-frame input",!sapp_window_inject_event({91},&closedInput));
     ++record.frame_count;check("physical close marker is limited to its native frame",!sapp_tc_window_close_recorded({91}));--record.frame_count;
     record.close_recorded=false;record.is_main=false;record.desc.close_cb=[](sapp_window,void*){++closedCallbacks;};
     _sapp_tc_mac_closed(&record);
-    check("direct secondary close stops admission and reports once",record.close_recorded&&!record.ready&&!record.close_requested&&closedCallbacks==1);
+    check("direct secondary close stops admission and reports once",record.close_recorded&&!record.ready&&!record.close_requested&&closedCallbacks==2);
     record.close_recorded=false;record.native_closed=false;record.ready=true;record.is_main=false;
     sapp_event e{};e.type=SAPP_EVENTTYPE_MOUSE_MOVE;e.mouse_x=40;e.mouse_y=20;
     _sapp_tc_send(&record,&e);check("real source is zero",last.source==SAPP_EVENTSOURCE_REAL&&!record.in_tick);
@@ -118,7 +119,8 @@ struct Target {
     unsigned ownerId=3;struct {unsigned generation=4;}resource;
     auto& resources(){return resource;}void flushLayers(){}void endPass(){inPass=false;}
 };
-struct Window {Target swapchainTarget;unsigned renderEpoch=1;bool framePending=true;
+struct Events;
+struct Window {Events* coreEvents=nullptr;Target swapchainTarget;unsigned renderEpoch=1;bool framePending=true;
     struct Stack {size_t size(){return 1;}}targetStack;} window;
 struct Event {int listenerCount(){return 1;}void notify();};
 struct Events {Event onRender;} hub;
@@ -142,7 +144,7 @@ Context& getDefaultContext(){return context;}
 # Unreachable scope cleanup branches still need a compilable stack entry.
 code=code.replace('struct Stack {size_t size(){return 1;}}targetStack;', 'struct Stack {struct Entry {Target* target=nullptr;unsigned token=0;};size_t size(){return 1;}Entry back(){return {};}}targetStack;')
 code+=body(global_source,'void present()')+r'''
-void run(){present();check("production present cancels drawable after onRender close",closed&&cancels==1&&!authorized&&commits==1&&!window.framePending);}
+void run(){window.coreEvents=&hub;present();check("production present cancels drawable after onRender close",closed&&cancels==1&&!authorized&&commits==1&&!window.framePending);}
 }
 int main(){native::run();presentation::run();printf("event-gates: %d checks, %d failures\n",checks,failures);return failures?1:0;}
 '''

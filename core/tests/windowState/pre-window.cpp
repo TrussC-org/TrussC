@@ -129,7 +129,7 @@ int main() {
     check("static", "width", initial.width == sapp_width());
     check("static", "height", initial.height == sapp_height());
     getters("prelaunch", sapp_dpi_scale(), sapp_width(), sapp_height());
-    auto* main = internal::mainWindow();
+    auto* main = internal::resolveWindow();
     check("prelaunch", "unbound", !main->isOpen());
     check("prelaunch", "closed Window width", main->getWidth() == 0);
     check("prelaunch", "closed Window height", main->getHeight() == 0);
@@ -147,12 +147,12 @@ int main() {
     check("descriptor", "App factory is deferred until bootstrap", constructors == 0 && descriptor.init_cb != nullptr);
     check("descriptor", "unbound", !main->isOpen());
     getters("launch reset", sapp_dpi_scale(), sapp_width(), sapp_height());
-    { auto app = std::make_shared<ConstructorApp>(); }
+    { auto app = internal::makeConstructedApp<ConstructorApp>(); }
     // Repeat the reset with different native values.
     setenv("TC_PREWINDOW_NATIVE_DPI", "2", 1);
     setenv("TC_PREWINDOW_NATIVE_WIDTH", "2561", 1);
     setenv("TC_PREWINDOW_NATIVE_HEIGHT", "1441", 1);
-    internal::createMainWindow(settings);
+    internal::prepareLaunchWindow(settings);
     getters("second launch reset", sapp_dpi_scale(), sapp_width(), sapp_height());
     // Once bound, metadata remains authoritative despite different native values.
     sapp_tc_window_metadata metadata{};

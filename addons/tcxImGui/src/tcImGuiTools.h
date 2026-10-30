@@ -47,12 +47,11 @@ void addTouchedSource(const std::string& key,
 // Contexts and windows
 // ---------------------------------------------------------------------------
 
-// The OS window an ImGui context draws into, as tc_list_windows numbers it
-// (0 = main, 1..N = open secondary windows). -1 = unknown / closed.
-int windowIdFor(ImGuiContext* ctx);
+// Positive native Window ID from tc_list_windows; -1 means unknown or closed.
+int64_t windowIdFor(ImGuiContext* ctx);
 
 // Contexts ordered by windowId (stable output across calls)
-std::vector<std::pair<int, ImGuiContext*>> orderedContexts();
+std::vector<std::pair<int64_t, ImGuiContext*>> orderedContexts();
 
 namespace detail {
 // Context operations are implemented in the addon, including for templated callers.
@@ -86,7 +85,7 @@ struct WidgetRef {
 // OS window id. Returns an empty ref if not found or ambiguous (sets outError)
 WidgetRef findWidget(const std::string& label,
                             const std::string& window,
-                            int windowId,
+                            int64_t windowId,
                             std::string& outError);
 
 // ---------------------------------------------------------------------------
@@ -188,7 +187,7 @@ bool valueToBytes(const WidgetValue& w, const nlohmann::json& v,
 // is waited for until kValueCheckDeadline after the call; a value written but
 // not checked by then (its window rendered no frame since the write: slower
 // than one frame per 2 s, or it stopped rendering) is settled as applied on
-// its read-back at the widget's return, from the main window's afterFrame
+// its read-back at the widget's return, from the addressed Window's afterFrame
 // (settleOverdueValues()), as for a widget not drawn again. Both come before
 // tc::mcp's timeout for a deferred reply that is never produced
 // (kTargetedDeferralTimeout, 5 s), whose generic error would hide that the

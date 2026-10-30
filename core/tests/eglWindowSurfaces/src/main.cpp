@@ -78,7 +78,7 @@ public:
             tc::WindowSettings settings;
             settings.setSize(280, 220).setTitle(i == 0 ? "EGL Pi red" : "EGL Pi green");
             secondary_[i] = tc::createWindow(settings);
-            if (secondary_[i]) secondary_[i]->setApp(std::make_shared<InteractiveApp>(i + 1));
+            if (secondary_[i]) secondary_[i]->setApp<InteractiveApp>(i + 1);
             else tc::exitApp(1);
         }
     }

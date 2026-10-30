@@ -54,6 +54,7 @@ public:
 class Driver {
 public:
     Driver() {
+        tc::internal::WindowRequestAccess::bindForTests(win_, 101);
         prev_ = tc::internal::currentWindowCtx();
         tc::internal::currentWindowCtx() = &win_.context();
     }
@@ -79,14 +80,14 @@ private:
 static void testReparent() {
     Driver drv;
     // root(800x600) > A(0,0), B(300,200); A > p(10,10, 50x50)
-    auto root = make_shared<Probe>(false);
+    auto root = std::make_shared<Probe>(false);
     root->setSize(800, 600);
     auto a = make_shared<Node>();
     auto b = make_shared<Node>();
     b->setPos(300, 200);
     root->addChild(a);
     root->addChild(b);
-    auto p = make_shared<Probe>(true);
+    auto p = std::make_shared<Probe>(true);
     p->setPos(10, 10); p->setSize(50, 50);
     a->addChild(p);
     auto leaf = make_shared<Node>();
@@ -180,12 +181,12 @@ static void testReparent() {
 static void testScaleZero() {
     Driver drv;
     // root > container(400,300) > btn(100,100, 80x40)
-    auto root = make_shared<Probe>(false);
+    auto root = std::make_shared<Probe>(false);
     root->setSize(800, 600);
     auto container = make_shared<Node>();
     container->setPos(400, 300);
     root->addChild(container);
-    auto btn = make_shared<Probe>(true);
+    auto btn = std::make_shared<Probe>(true);
     btn->setPos(100, 100); btn->setSize(80, 40);
     container->addChild(btn);
     drv.setRoot(root);
@@ -208,7 +209,7 @@ static void testScaleZero() {
     drv.press(510, 405);
     check("scale 1e-6: btn not hit", btn->pressCount == 1);
 
-    auto tiny = make_shared<Probe>(true);
+    auto tiny = std::make_shared<Probe>(true);
     tiny->setPos(200, 100); tiny->setSize(80, 40); tiny->setScale(1e-6f);
     root->addChild(tiny);
     drv.press(200, 100);
@@ -221,7 +222,7 @@ static void testScaleZero() {
     check("scale restored: btn hit near (500,400)", btn->pressCount == 2);
 
     // Subtree of a scale-0 node is not picked either
-    auto child = make_shared<Probe>(true);
+    auto child = std::make_shared<Probe>(true);
     child->setPos(0, 0); child->setSize(80, 40);
     btn->addChild(child);
     btn->setScale(1, 0);
@@ -236,7 +237,7 @@ static void testScaleZero() {
     auto clip = make_shared<RectNode>();
     clip->setPos(0, 0); clip->setSize(200, 200);
     clip->setClipping(true);
-    auto inner = make_shared<Probe>(true);
+    auto inner = std::make_shared<Probe>(true);
     inner->setPos(10, 10); inner->setSize(50, 50);
     clip->addChild(inner);
     root->addChild(clip);

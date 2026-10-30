@@ -16,6 +16,9 @@ struct Size {
     Size(bool accepted) : x(0), y(0) { assert(!accepted); }
 };
 struct Descriptor {
+    int close_cb = 0, _tc_close_cb = 0;
+    bool (*close_request_cb)(int, void*) = nullptr;
+    bool (*_tc_close_request_cb)(int, void*) = nullptr;
     bool (*bind_cb)(uint32_t, void*) = nullptr;
     bool (*_tc_bind_cb)(uint32_t, void*) = nullptr;
     void* user_data = nullptr;
@@ -129,14 +132,14 @@ Descriptor macSecondaryTransfer(const Descriptor* desc) {
 Size roundMac(double width, double height) { return {int(std::ceil(width) * renderScale), int(std::ceil(height) * renderScale)}; }
 namespace internal {
 SHARED_DESCRIPTOR
-Descriptor buildWindowDescriptor(const Settings& settings) {
+Descriptor buildWindowDescriptor(const Settings& settings, [[maybe_unused]] void* target) {
     LAUNCHER
     return desc;
 }
 }
 using internal::buildWindowDescriptor;
-Descriptor mainDescriptor(const Settings& settings) { NORMAL_LAUNCHER }
-Descriptor hotDescriptor(const Settings& settings) { HOT_LAUNCHER return desc; }
+Descriptor mainDescriptor(const Settings& settings) { struct Handle { void* get() { return nullptr; } } window; NORMAL_LAUNCHER }
+Descriptor hotDescriptor(const Settings& settings) { struct Handle { void* get() { return nullptr; } } window; HOT_LAUNCHER return desc; }
 Descriptor secondaryDescriptor(const Settings& settings) {
     using internal::buildNativeWindowDescriptor;
     SECONDARY

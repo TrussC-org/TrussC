@@ -467,11 +467,14 @@ void fontWorkerRetirement() {
 // no Window and must not reinterpret prepared metrics using a native/main DPI.
 void dpiContextParity() {
     auto* previous = internal::currentWindowCtx();
-    internal::WindowContext requesting;
+    tcCoreTest::WindowFixture receiver;
+    auto& requesting = receiver.window->context();
+    internal::WindowContext foreign;
+    foreign.dpiScale = 3;
     for (float dpi : {1.0f, 2.0f}) {
         requesting.dpiScale = dpi;
         for (int branch = 0; branch < 4; ++branch) {
-            internal::currentWindowCtx() = &requesting;
+            internal::currentWindowCtx() = &foreign;
             const fs::path path = branch < 2 ? font : branch == 2 ? fs::path("https://invalid/font.ttf") : broken;
             Font sync, async;
             sync.load(font, 24); async.load(font, 24);
@@ -482,7 +485,8 @@ void dpiContextParity() {
             if (branch == 1) internal::SharedFontCache::getInstance().clear(); // worker, rather than cache hit
             int events = 0;
             auto listener = async.onLoad.listen([&](LoadResult& result) {
-                check("Font completion stays in process context at DPI 1", !internal::currentWindow() && getDpiScale() == 1);
+                check("Font completion stays in process context at DPI 1",
+                      !internal::currentWindowContext().hostWindow && internal::currentWindowContext().dpiScale == 1);
                 actual = result; ++events;
             });
             {
@@ -507,10 +511,34 @@ void dpiContextParity() {
             }
             if (branch == 2) {
                 std::printf("Font URL DPI repro: native=%.1f request=%.1f completion=%.1f ascent=%.1f/%.1f width=%.1f/%.1f (sync/async)\n",
-                    sapp_dpi_scale(), dpi, getDpiScale(), sync.getAscent(), async.getAscent(), sync.getWidth("AWa"), async.getWidth("AWa"));
+                    sapp_dpi_scale(), dpi, internal::currentWindowContext().dpiScale, sync.getAscent(), async.getAscent(), sync.getWidth("AWa"), async.getWidth("AWa"));
                 check("DPI-independent native URL rejection retains the atlas", async.getAtlas(0) == retained);
             }
         }
+    }
+    {
+        requesting.dpiScale = 2;
+        Font expected;
+        expected.load(font, 37);
+        tcCoreTest::WindowFixture peer(202);
+        peer.window->context().dpiScale = 3;
+        internal::currentWindowCtx() = &peer.window->context();
+        struct ConstructorFont : App {
+            Font sync, async;
+            explicit ConstructorFont(const fs::path& path) {
+                sync.load(path, 37);
+                async.loadAsync(path, 37);
+            }
+        };
+        auto candidate = internal::makeConstructedAppAt<ConstructorFont>(&requesting, font);
+        internal::restoreWindowContext(nullptr);
+        finish();
+        check("Font nested constructor captures destination DPI for sync and async",
+              candidate->sync.isLoaded() && candidate->async.isLoaded() &&
+              candidate->sync.getAtlas(0) == candidate->async.getAtlas(0) &&
+              candidate->sync.getAtlas(0) == expected.getAtlas(0) &&
+              candidate->sync.getSize() == 37 && candidate->async.getSize() == 37);
+        internal::retireAppOwner(internal::appOwner(*candidate));
     }
     internal::currentWindowCtx() = &requesting;
     Image syncImage, asyncImage;

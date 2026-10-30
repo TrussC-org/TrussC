@@ -7,6 +7,7 @@
 #include "impl/httplib.h"
 #endif
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDeferredWindowTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <csignal>
 #include <cstdio>
@@ -103,6 +104,7 @@ struct ExitApp : App {
 
 #ifndef __EMSCRIPTEN__
 void testHttpShutdown() {
+    auto deferredWindow = tcCoreTest::deferredWindow();
     internal::setExitReason("sigterm");
     mcp::startHttpServer(0);
     auto waitFor = [](auto ready) {
@@ -143,6 +145,7 @@ void testHttpShutdown() {
 #endif
 
 void testShared() {
+    auto deferredWindow = tcCoreTest::deferredWindow();
     check(internal::exitReason().empty(), "unknown reason omitted");
     check(internal::exitLogMessage(false).find("exit: begin pid=") == 0, "unknown begin format");
     internal::setExitReason("os-session-end");

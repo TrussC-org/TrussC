@@ -25,7 +25,9 @@
 namespace trussc {
 
 void bringWindowToFront() {
-    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
+    NSWindow* window = (__bridge NSWindow*)sapp_window_macos_get_window(internal::WindowRequestAccess::binding(*target).handle);
     if (window) {
         [NSApp activateIgnoringOtherApps:YES];
         [window makeKeyAndOrderFront:nil];
@@ -83,8 +85,7 @@ void setKeepScreenOn(bool enabled) {
 
 bool getKeepScreenOn() { return keepScreenOn_; }
 
-// #219: screen points relative to the primary screen's top-left. Keep the
-// same frame-top-left primitive for main and secondary windows.
+// Screen points relative to the primary screen's top-left for every Window.
 IVec2 internal::windowPositionNative(const void* handle) {
     NSWindow* window = (__bridge NSWindow*)handle;
     if (!window) return IVec2(-1, -1);
@@ -99,11 +100,13 @@ void internal::setWindowPositionNative(const void* handle, int x, int y) {
     [window setFrameTopLeftPoint:NSMakePoint((CGFloat)x, primary.frame.size.height - (CGFloat)y)];
 }
 
-IVec2 internal::mainWindowPosition() { return windowPositionNative(sapp_macos_get_window()); }
-void internal::setMainWindowPosition(int x, int y) { setWindowPositionNative(sapp_macos_get_window(), x, y); }
+IVec2 internal::singleWindowPosition() { return windowPositionNative(sapp_macos_get_window()); }
+void internal::setSingleWindowPosition(int x, int y) { setWindowPositionNative(sapp_macos_get_window(), x, y); }
 
 void setWindowDecorated(bool decorated) {
-    NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
+    NSWindow* window = (__bridge NSWindow*)sapp_window_macos_get_window(internal::WindowRequestAccess::binding(*target).handle);
     if (!window) return;
 
     const NSWindowStyleMask base = NSWindowStyleMaskTitled |
@@ -121,10 +124,8 @@ void setWindowDecorated(bool decorated) {
         [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
         [[window standardWindowButton:NSWindowZoomButton]        setHidden:NO];
     } else {
-        // Keep the window *titled* (so it can become key AND stays closable —
-        // sokol's quit path calls performClose:, which no-ops on a borderless
-        // window) but hide all chrome with a transparent, full-size-content
-        // title bar. The result looks borderless yet keyboard + exitApp() work.
+        // Keep the titled style for key input and native close handling while
+        // hiding the chrome with a transparent full-size content title bar.
         window.styleMask = base | NSWindowStyleMaskFullSizeContentView;
         window.titlebarAppearsTransparent = YES;
         window.titleVisibility = NSWindowTitleHidden;
@@ -146,15 +147,13 @@ void setWindowDecorated(bool decorated) {
     [window makeFirstResponder:window.contentView];
 }
 
-void internal::setMainWindowSizeFractionalMac(double width, double height) {
+void internal::setSingleWindowSizeFractionalMac(double width, double height) {
     NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
     if (window) [window setContentSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
 }
 
-void internal::setMainWindowSizeLogical(int width, int height) {
-    // The TrussC main window, like the other functions in this file. NOT
-    // [NSApp mainWindow]: that is AppKit's focused window, which is a
-    // secondary window whenever one has focus.
+void internal::setSingleWindowSizeLogical(int width, int height) {
+    // Sole-surface fallback; desktop Window controls use their binding operations.
     NSWindow* window = (__bridge NSWindow*)sapp_macos_get_window();
 
     if (window) {

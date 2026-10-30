@@ -236,7 +236,7 @@ How the hooks behave (in `tcImGuiHooksImpl.h`):
   no imgui for that context, from tcxImGui's render listener
   (`settleWithoutImGuiFrame()`). A value whose next-frame check has not come
   by its check deadline (the window renders no frame) is settled on its
-  read-back at return from the main window's afterFrame
+  read-back at return from the owning Window's afterFrame
   (`settleOverdueValues()`). The write sets no Edited flag, so it is not
   recorded as touched. Text (buffer size unknown) and the openers (`BeginCombo`,
   `BeginListBox`: no variable) are never written. `ColorPicker3` and

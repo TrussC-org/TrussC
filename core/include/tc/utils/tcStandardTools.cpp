@@ -309,6 +309,7 @@ json imageContentResult(json img) {
 void addStatusEntry(StatusEntry entry) {
     if (mcp::internal::refuseRetiringRegistration("status", entry.name)) return;
     entry.owner = mcp::internal::registrationOwner();
+    entry.getter = ::trussc::internal::appOwnedCallback(entry.getter);
     auto& reg = statusRegistry();
     for (auto& e : reg) {
         if (e.name == entry.name) { e = std::move(entry); return; }
@@ -372,6 +373,7 @@ void statusGraph(const std::string& name, std::function<double()> getter) {
 
 void statusImage(const std::string& name, std::function<trussc::Pixels()> getter) {
     if (internal::refuseRetiringRegistration("status image", name)) return;
+    getter = ::trussc::internal::appOwnedCallback(std::move(getter));
     auto& reg = internal::statusImageRegistry();
     const void* owner = mcp::internal::registrationOwner();
     for (auto& e : reg) {
@@ -395,27 +397,46 @@ void registerInspectionTools() { setToolLevel(ToolLevel::ReadOnly); }
 
 namespace trussc::mcp::internal {
 
-// A whole tool call retains the main attachment, including both halves of a click.
+// A whole input call targets one explicit Window, including both halves of a click.
 struct InputTarget {
-    trussc::Window& window = *trussc::internal::mainWindow();
+    static trussc::Window& targetWindow(const json& args) {
+        const auto windows = trussc::internal::openWindows();
+        json ids = json::array();
+        trussc::Window* target = nullptr;
+        uint64_t id = 0;
+        if (args.contains("window")) {
+            const auto& value = args.at("window");
+            if (!value.is_number_integer() || value < 1 || value > UINT32_MAX)
+                throw InputArgumentError("window must be a positive Window ID");
+            id = value.get<uint64_t>();
+        }
+        for (auto* window : windows) {
+            auto candidate = trussc::internal::WindowRequestAccess::creationId(*window);
+            ids.push_back(candidate);
+            if (candidate == id || (!args.contains("window") && windows.size() == 1)) target = window;
+        }
+        if (!target) throw InputArgumentError("Specify a Window ID; available IDs: " + ids.dump());
+        return *target;
+    }
+    trussc::Window& window;
     std::optional<trussc::internal::WindowEntryScope> entry;
     sapp_tc_window_metadata snapshot{};
     trussc::internal::WindowContext& ctx = window.context();
-    InputTarget() {
-        if (!window.isOpen()) throw InputArgumentError("main window is not available for input");
+    explicit InputTarget(const json& args) : window(targetWindow(args)) {
+        if (!window.isOpen()) throw InputArgumentError("target window is not available for input");
         const auto& b = trussc::internal::WindowRequestAccess::binding(window);
         snapshot = b.metadata;
         if (b.operations && b.operations->readMetadata && !b.operations->readMetadata(b.handle, b.user, snapshot))
-            throw InputArgumentError("main window is not available for input");
+            throw InputArgumentError("target window is not available for input");
     }
     void begin() {
         if (!entry) {
             entry.emplace(window, false, false, false);
-            if (!*entry) throw InputArgumentError("main window is not available for input");
+            if (!*entry) throw InputArgumentError("target window is not available for input");
         }
         const auto& b = trussc::internal::WindowRequestAccess::binding(window);
         if (b.operations && b.operations->readMetadata && !b.operations->readMetadata(b.handle, b.user, snapshot))
-            throw InputArgumentError("main window is not available for input");
+            throw InputArgumentError("target window is not available for input");
     }
     uint32_t modifiers(int key = -1, bool down = false) const {
         const auto held = [&](int code) { return code == key ? down : ctx.keysPressed.contains(code); };
@@ -472,7 +493,7 @@ struct InputTarget {
             delivered = binding.operations && binding.operations->injectEvent &&
                 binding.operations->injectEvent(binding.handle, binding.user, &event);
         } else delivered = sapp_window_inject_event(binding.handle, &event);
-        if (!delivered) throw InputArgumentError("main window rejected input");
+        if (!delivered) throw InputArgumentError("target window rejected input");
     }
     void key(int key, bool down) {
         sapp_event event{};
@@ -507,28 +528,30 @@ namespace internal {
 void registerStandardTools(Server& server) {
     registerAudioTools(server);
 
-    // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
-    // secondary windows in the order tc_list_windows reports). Returns the
-    // WindowContext to capture from, or null on a bad index or a hidden
+    // Resolve the optional positive Window ID. Omission requires one open
+    // Window. Returns its WindowContext, or null on an invalid ID or a hidden
     // window (error filled in).
     // Resolved when the request is handled; the capture itself then runs in
     // that window's own tick (deferral target), see drainPendingScreenshots().
-    auto resolveWindowCtx = [](int windowIdx, json& err) -> trussc::internal::WindowContext* {
-        if (windowIdx == 0) return &trussc::internal::mainWindowContext();
+    auto resolveWindowCtx = [](int64_t windowIdx, json& err, bool omitted = false, bool requireVisible = true) -> trussc::internal::WindowContext* {
         auto wins = trussc::internal::openWindows();
-        wins.erase(std::remove_if(wins.begin(), wins.end(), [](auto* w) { return w->context().isMain; }), wins.end());
-        if (windowIdx < 0 || (size_t)windowIdx > wins.size()) {
-            err = json{{"status", "error"},
-                       {"message", "window index out of range (0=main, 1.." +
-                                   std::to_string(wins.size()) + " secondary)"}};
+        json ids = json::array();
+        trussc::Window* win = nullptr;
+        for (auto* candidate : wins) {
+            const auto id = trussc::internal::WindowRequestAccess::creationId(*candidate);
+            ids.push_back(id);
+            if (windowIdx > 0 && id == static_cast<uint64_t>(windowIdx)) win = candidate;
+        }
+        if (omitted && wins.size() == 1) win = wins.front();
+        if (!win) {
+            err = json{{"status", "error"}, {"message", "Specify a positive window ID from tc_list_windows; omission requires exactly one open window"}, {"windows", ids}};
             return nullptr;
         }
-        trussc::Window* win = wins[(size_t)windowIdx - 1];
-        // The OS reports the window hidden, and a hidden secondary window
+        // The OS reports the window hidden, and a hidden Window
         // runs no tick, so a capture deferred to it could only time out after
         // kTargetedDeferralTimeout (#347). Only this direct signal fails fast;
         // a window that turns hidden later still gets the timeout.
-        if (win->isOccluded()) {
+        if (requireVisible && win->isOccluded()) {
             err = json{{"status", "error"},
                        {"message", "window " + std::to_string(windowIdx) +
                                    " is not visible (the OS reports it hidden: minimized, "
@@ -540,22 +563,12 @@ void registerStandardTools(Server& server) {
         return &win->context();
     };
 
-    coreTool(server, "tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot). Each secondary window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
+    coreTool(server, "tc_list_windows", "List open windows with positive IDs (use index as the window argument). Each window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
         .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
-            // Read the tool's explicit main/headless target without selecting a Window.
-            const auto& ctx = headless::isActive() ? trussc::internal::nonWindowContext() : trussc::internal::mainWindowContext();
-            const auto dimensions = trussc::internal::windowDimensions(ctx);
-            const auto size = trussc::internal::framebufferResizeArgs(dimensions.fbWidth, dimensions.fbHeight,
-                trussc::internal::appSizeDpi(dimensions.dpiScale));
             json arr = json::array();
-            // The main window keeps rendering while hidden: no occluded field.
-            arr.push_back(json{{"index", 0}, {"main", true},
-                               {"width", size.width}, {"height", size.height}});
-            int i = 1;
             for (auto* w : trussc::internal::openWindows()) {
-                if (w->context().isMain) continue;
-                arr.push_back(json{{"index", i++}, {"main", false},
+                arr.push_back(json{{"index", trussc::internal::WindowRequestAccess::creationId(*w)},
                                    {"title", w->getTitle()},
                                    {"width", w->getWidth()}, {"height", w->getHeight()},
                                    {"occluded", w->isOccluded()}});
@@ -610,7 +623,7 @@ void registerStandardTools(Server& server) {
     Tool analyze;
     analyze.level = ToolLevel::ReadOnly;
     analyze.name = "tc_analyze_image";
-    analyze.description = "Analyze pixels without returning an image. Source: exactly one of {window:index}, {fbo:name or index}, {image:name or index}, {path:file}. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), results in ops order. Colors are RGBA, 0-1 for bytes; float values are unchanged. Ops: pixel(x,y)->color; histogram(bins)->histogram[RGBA][bin] (0-1, outliers in end bins); count(color,tolerance OR min,max)->count,bbox,centroid; stats()->mean,min,max; grid(cols,rows)->colors[row][col]; diff(path,threshold,save optional)->count,bbox,maxDifference; line(x0,y0,x1,y1)->colors. Every op accepts rect:[x,y,w,h], default whole image. Coordinates are top-left, line includes endpoints and clips to rect. Bbox is [x,y,w,h]; empty matches give null bbox/centroid. Diff uses max absolute RGBA difference, compares raw values and counts strictly above threshold. Save paths follow tc_save_screenshot; float file output is clamped to 0-1, analysis is unchanged. Fbo/window capture runs after frame completion. Web Fbo readback and iOS float Fbo readback return errors; non-float Fbo formats are converted to RGBA8 for byte readback.";
+    analyze.description = "Analyze pixels without returning an image. Source: exactly one of {window:positiveID}, {fbo:name or index}, {image:name or index}, {path:file}. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), results in ops order. Colors are RGBA, 0-1 for bytes; float values are unchanged. Ops: pixel(x,y)->color; histogram(bins)->histogram[RGBA][bin] (0-1, outliers in end bins); count(color,tolerance OR min,max)->count,bbox,centroid; stats()->mean,min,max; grid(cols,rows)->colors[row][col]; diff(path,threshold,save optional)->count,bbox,maxDifference; line(x0,y0,x1,y1)->colors. Every op accepts rect:[x,y,w,h], default whole image. Coordinates are top-left, line includes endpoints and clips to rect. Bbox is [x,y,w,h]; empty matches give null bbox/centroid. Diff uses max absolute RGBA difference, compares raw values and counts strictly above threshold. Save paths follow tc_save_screenshot; float file output is clamped to 0-1, analysis is unchanged. Fbo/window capture runs after frame completion. Web Fbo readback and iOS float Fbo readback return errors; non-float Fbo formats are converted to RGBA8 for byte readback.";
     analyze.args = {{"source","object","Image source (exactly one selector)",true},
                     {"save","string|null","Optional capture file path; omitted/null writes nothing",false},
                     {"ops","array","Ordered image operations and their arguments",true}};
@@ -718,7 +731,7 @@ void registerStandardTools(Server& server) {
             if(source.contains("window")) {
                 if (!source.at("window").is_number_integer()) return error("window must be an integer");
                 json err;
-                auto* ctx=resolveWindowCtx(source.at("window").get<int>(),err);
+                auto* ctx=resolveWindowCtx(source.at("window").get<int64_t>(),err);
                 if(!ctx) return err;
                 mcp::deferToolResultTwoStage([args,error]() -> std::function<json()> {
                     auto p=std::make_shared<Pixels>();
@@ -728,7 +741,7 @@ void registerStandardTools(Server& server) {
                         if(!ok) return error("failed to grab screen");
                         return internal::analyzeImage(*p,args,"sRGB");
                     };
-                },ctx->isMain?nullptr:ctx);
+                },ctx);
                 return nullptr;
             }
             return error("unknown image source");
@@ -736,12 +749,12 @@ void registerStandardTools(Server& server) {
     };
     server.registerTool(analyze);
 
-    coreTool(server, "tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
+    coreTool(server, "tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app. A Window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
         .level(ToolLevel::ReadOnly)
         .arg<std::string>("format", "'png' (default, lossless) or 'jpg'", false)
         .arg<int>("width", "Target width in pixels, aspect preserved (clamped 16-4096; never upscales; omit = full resolution)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75; ignored for png)", false)
-        .arg<int>("window", "Window index from tc_list_windows (default 0 = main; a secondary window must be visible)", false)
+        .arg<int>("window", "Positive window ID from tc_list_windows; omit only with exactly one open window; target must be visible", false)
         .bind([resolveWindowCtx](const json& args) -> json {
             std::string format = "png";
             if (args.contains("format") && args.at("format").is_string()) {
@@ -758,10 +771,10 @@ void registerStandardTools(Server& server) {
                 reqWidth = std::clamp(args.at("width").get<int>(), 16, 4096);
             if (args.contains("quality") && args.at("quality").is_number())
                 quality = std::clamp(args.at("quality").get<int>(), 1, 100);
-            const int windowIdx = args.value("window", 0);
+            const int64_t windowIdx = args.value("window", int64_t(0));
 
             json err;
-            auto* ctx = resolveWindowCtx(windowIdx, err);
+            auto* ctx = resolveWindowCtx(windowIdx, err, !args.contains("window"));
             if (!ctx) return err;
 
             // Two-stage deferral: the main stage runs right after the TARGET
@@ -781,21 +794,21 @@ void registerStandardTools(Server& server) {
                     }
                     return internal::imageContentResult(internal::pixelsToImageJson(*px, format, reqWidth, quality));
                 };
-            }, ctx->isMain ? nullptr : ctx);
+            }, ctx);
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    coreTool(server, "tc_save_screenshot", "Save screenshot to file. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
+    coreTool(server, "tc_save_screenshot", "Save screenshot to file. A Window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
         .level(ToolLevel::ReadOnly)
         .arg<std::string>("path", "File path")
-        .arg<int>("window", "Window index from tc_list_windows (default 0 = main; a secondary window must be visible)", false)
+        .arg<int>("window", "Positive window ID from tc_list_windows; omit only with exactly one open window; target must be visible", false)
         .bind([resolveWindowCtx](const json& args) -> json {
             // JSON strings are UTF-8 — convert explicitly (fs::path(string)
             // would interpret them in the ACP on Windows)
             const std::string path = args.at("path").get<std::string>();
-            const int windowIdx = args.value("window", 0);
+            const int64_t windowIdx = args.value("window", int64_t(0));
             json err;
-            auto* ctx = resolveWindowCtx(windowIdx, err);
+            auto* ctx = resolveWindowCtx(windowIdx, err, !args.contains("window"));
             if (!ctx) return err;
             auto credit = acquireScreenshotCredit();
             auto budget = currentWorkBudget();
@@ -815,7 +828,7 @@ void registerStandardTools(Server& server) {
                 bool ok = trussc::internal::captureWindowToFile(destination);
                 if (ok) return json{{"status", "ok"}, {"path", trussc::internal::pathToUtf8(destination)}, {"window", windowIdx}};
                 return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};
-            }, ctx->isMain ? nullptr : ctx);
+            }, ctx);
             return json(nullptr);  // deferred result is sent instead
         });
 
@@ -900,8 +913,19 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, main-thread queue backlog, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting; mainQueuePending is how many runOnMainThread / Deliver::Main calls this frame's drain started with (a number that keeps growing means workers queue faster than the app runs them).")
         .level(ToolLevel::Public)
-        .bind(std::function<json()>([]() -> json {
-            const auto& ctx = headless::isActive() ? trussc::internal::nonWindowContext() : trussc::internal::mainWindowContext();
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
+        .bind([resolveWindowCtx](const json& args) -> json {
+            json error;
+            const bool specified = args.is_object() && args.contains("window");
+            auto* target = resolveWindowCtx(specified ? args.at("window").get<int64_t>() : 0, error, !specified, false);
+            if (!target && (!trussc::headless::isActive() || specified)) {
+                error["buildKind"] = internal::isDevBuild() ? "dev" : "default";
+                error["toolLevel"] = internal::toolLevelName(getToolLevel());
+                error["pid"] = internal::currentPid();
+                error["uptimeSec"] = trussc::internal::getUptimeSeconds();
+                return error;
+            }
+            const auto& ctx = target ? *target : trussc::internal::nonWindowContext();
             const auto dimensions = trussc::internal::windowDimensions(ctx);
             const auto size = trussc::internal::framebufferResizeArgs(dimensions.fbWidth, dimensions.fbHeight,
                 trussc::internal::appSizeDpi(dimensions.dpiScale));
@@ -920,7 +944,7 @@ void registerStandardTools(Server& server) {
                         {"rssBytes", internal::processRssBytes()},
                         {"mainQueuePending", trussc::internal::getMainThreadQueuePending()},
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
-        }));
+        });
 
     coreTool(server, "tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; initFailure (last failed init reason, miniaudio result, backend and requested device; omitted after success); stalled (no callback finished for 250 ms or 4 periods; meters and voice levels read zero); underrunFrames (silent output frames per stream voice, excluding startup); voicesStoppedByReinit (decoder could not reopen at the new rate); playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
         .level(ToolLevel::ReadOnly)
@@ -995,11 +1019,16 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
         .level(ToolLevel::ReadOnly)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<std::string>("path", "Output file path (relative paths resolve to the data dir). Omit for recording-<timestamp>.mp4/.mov in the data dir.", false)
         .arg<float>("duration", "Fixed length in seconds; the file auto-stops & finalizes at that length. Omit or 0 = unlimited (tc_stop_recording to end).", false)
         .arg<float>("fps", "Target frame rate (default 60; ProMotion frames are decimated to it)", false)
         .arg<std::string>("codec", "h264 (default) | hevc | prores422 | prores4444 (.mov, macOS)", false)
-        .bind([](const json& args) -> json {
+        .bind([resolveWindowCtx](const json& args) -> json {
+            json error;
+            auto* context = resolveWindowCtx(args.value("window", int64_t(0)), error, !args.contains("window"));
+            if (!context) return error;
+            trussc::internal::WindowContextScope selected(context);
             trussc::VideoRecordSettings settings;
             if (args.contains("fps") && args.at("fps").is_number()) {
                 settings.fps = args.at("fps").get<float>();
@@ -1024,7 +1053,7 @@ void registerStandardTools(Server& server) {
                 path = "recording-" + trussc::getTimestampString("%Y-%m-%d-%H-%M-%S")
                      + (isProRes ? ".mov" : ".mp4");
             }
-            auto ok = trussc::startRecording(trussc::internal::utf8ToPath(path), settings);
+            auto ok = trussc::internal::ScreenRecorderWindowAccess::start(*context, trussc::internal::utf8ToPath(path), settings);
             json r{{"status", ok ? "ok" : "error"},
                    {"path", trussc::internal::pathToUtf8(trussc::recordingPath())},
                    {"fps", settings.fps},
@@ -1057,10 +1086,13 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in radians, derived rotationDeg in degrees, colors 0-1), derived, mods, children}. \"derived\" names members computed from another member (e.g. globalPos from pos, rotationDeg from rotation): editable, but not saved, and when a write carries both, the canonical one (pos or rotation) wins. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
         .level(ToolLevel::ReadOnly)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("id", "Subtree root instance id (omit for the whole tree)", false)
         .arg<int>("depth", "Max child depth (omit for unlimited, 0 = the node only)", false)
         .bind([](const json& args) -> json {
-            Node* root = getRootNode();
+            auto& window = internal::InputTarget::targetWindow(args);
+            auto rootOwner = window.context().rootNode.lock();
+            Node* root = rootOwner.get();
             if (!root) {
                 return json{{"status", "error"}, {"message", "App is not running"}};
             }
@@ -1080,26 +1112,29 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_get_selected_node", "Get the currently selected node (type, name, id, reflected members), or null if nothing is selected")
         .level(ToolLevel::ReadOnly)
-        .bind(std::function<json()>([]() -> json {
-            Node* n = getSelectedNode();
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
+        .bind([](const json& args) -> json {
+            auto& window = internal::InputTarget::targetWindow(args);
+            auto selected = window.context().selectedNode.lock();
+            Node* n = selected.get();
             if (!n) {
                 return json{{"status", "ok"}, {"selected", nullptr}};
             }
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
-        }));
+        });
 
     coreTool(server, "tc_quit", "Quit the application gracefully")
         .level(ToolLevel::Control)
-        .bind(std::function<json()>([]() -> json {
-            trussc::internal::setExitReason("tc-quit");
-            sapp_request_quit();
+        .bind([]() -> json {
+            trussc::internal::requestNormalQuit("tc-quit");
             return json{{"status", "ok"}};
-        }));
+        });
 
     // --- Mouse Tools ---
 
     coreTool(server, "tc_mouse_move", "Move mouse cursor (with a button held, emits a drag)")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button held during the move (0:left, 1:right, 2:middle; omit or -1 for a plain move)", false)
@@ -1109,7 +1144,7 @@ void registerStandardTools(Server& server) {
             float x = internal::inputFloat(a, "x");
             float y = internal::inputFloat(a, "y");
             int button = internal::inputMouseButton(a, true);
-            internal::InputTarget target;
+            internal::InputTarget target(a);
             auto event = target.pointer(SAPP_EVENTTYPE_MOUSE_MOVE, x, y);
             event.button_snapshot = true;
             event.modifiers &= ~(SAPP_MODIFIER_LMB | SAPP_MODIFIER_RMB | SAPP_MODIFIER_MMB);
@@ -1125,13 +1160,14 @@ void registerStandardTools(Server& server) {
     // mouse position at press keeps the first drag delta sane.
     coreTool(server, "tc_mouse_press", "Press and hold a mouse button (start of a drag; pair with tc_mouse_move + tc_mouse_release)")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
             const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
             const int button = internal::inputMouseButton(a);
-            internal::InputTarget target;
+            internal::InputTarget target(a);
             target.send(target.pointer(SAPP_EVENTTYPE_MOUSE_DOWN, x, y, button));
 
             return json{{"status", "ok"}};
@@ -1139,13 +1175,14 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_mouse_release", "Release a mouse button (end of a drag)")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
             const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
             const int button = internal::inputMouseButton(a);
-            internal::InputTarget target;
+            internal::InputTarget target(a);
             target.send(target.pointer(SAPP_EVENTTYPE_MOUSE_UP, x, y, button));
 
             return json{{"status", "ok"}};
@@ -1153,6 +1190,7 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_mouse_click", "Click mouse button (optionally with modifier keys held)")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
@@ -1164,7 +1202,7 @@ void registerStandardTools(Server& server) {
             internal::validateInputModifiers(a);
             const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
             const int button = internal::inputMouseButton(a);
-            internal::InputTarget target;
+            internal::InputTarget target(a);
             auto press = target.pointer(SAPP_EVENTTYPE_MOUSE_DOWN, x, y, button);
             target.begin();
             // Prepare modifier nodes before changing held input. Restoration uses
@@ -1239,12 +1277,13 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_mouse_scroll", "Scroll mouse wheel")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("dx", "Horizontal scroll delta")
         .arg<float>("dy", "Vertical scroll delta")
         .bind([](const json& a) -> json {
             const float dx = internal::inputFloat(a, "dx");
             const float dy = internal::inputFloat(a, "dy");
-            internal::InputTarget target;
+            internal::InputTarget target(a);
             sapp_event event{}; event.type = SAPP_EVENTTYPE_MOUSE_SCROLL;
             event.scroll_x = dx; event.scroll_y = dy; event.modifiers = target.modifiers();
             target.send(event);
@@ -1266,6 +1305,7 @@ void registerStandardTools(Server& server) {
          "pair it with the same flag on tc_key_release, or hold a modifier across several "
          "keys by pressing/releasing its keycode explicitly")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("key", "Defined nonzero sokol_app key code; letters are uppercase ASCII: 'A'=65..'Z'=90")
         .arg<bool>("shift", "Hold Shift for this press", false)
         .arg<bool>("ctrl", "Hold Ctrl for this press", false)
@@ -1274,7 +1314,7 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             const int key = internal::inputKey(a);
             internal::validateInputModifiers(a);
-            internal::InputTarget target; target.begin();
+            internal::InputTarget target(a); target.begin();
 
             // Press the requested modifiers first (skip any already held —
             // whichever side, so an explicit RIGHT_SHIFT hold is respected).
@@ -1303,6 +1343,7 @@ void registerStandardTools(Server& server) {
          "(shift -> keycode 340, ctrl -> 341, alt -> 342, super -> 343), "
          "mirroring tc_key_press")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("key", "Defined nonzero sokol_app key code; letters are uppercase ASCII: 'A'=65..'Z'=90")
         .arg<bool>("shift", "Also release Shift after this key", false)
         .arg<bool>("ctrl", "Also release Ctrl after this key", false)
@@ -1311,7 +1352,7 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             const int key = internal::inputKey(a);
             internal::validateInputModifiers(a);
-            internal::InputTarget target; target.begin();
+            internal::InputTarget target(a); target.begin();
 
             // The key goes up first — while the modifiers are still held, so
             // this event still carries them (as it does on a real keyboard).
@@ -1338,28 +1379,35 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_select_node", "Select a node by instance id (0 clears the selection); drives the same selection an inspector shows")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("id", "Instance id from tc_get_node_tree (0 to clear)")
-        .bind<int>([](int id) {
+        .bind([](const json& args) -> json {
+            const auto id = args.at("id").get<uint64_t>();
+            auto& window = internal::InputTarget::targetWindow(args);
             if (id == 0) {
-                setSelectedNode(nullptr);
+                window.context().selectedNode.reset();
                 return json{{"status", "ok"}, {"selected", nullptr}};
             }
-            Node* root = getRootNode();
+            auto rootOwner = window.context().rootNode.lock();
+            Node* root = rootOwner.get();
             Node* n = root ? root->findByInstanceId(static_cast<uint64_t>(id)) : nullptr;
             if (!n) {
                 return json{{"status", "error"}, {"message", "No node with id " + std::to_string(id)}};
             }
-            setSelectedNode(n);
+            window.context().selectedNode = n->weak_from_this();
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
         });
 
     coreTool(server, "tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in radians, derived rotationDeg in degrees, enums by label string). A derived member (e.g. globalPos or rotationDeg) is applied before its canonical member (pos or rotation), so when both are given the canonical one wins")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("id", "Instance id from tc_get_node_tree")
         .arg<json>("members", "Member values to apply, e.g. {\"pos\":[10,20,0],\"visible\":true}")
         .arg<std::string>("mod", "Mod short type name (e.g. \"LayoutMod\") to target a mod attached to the node instead of the node itself", false)
         .bind([](const json& args) -> json {
-            Node* root = getRootNode();
+            auto& window = internal::InputTarget::targetWindow(args);
+            auto rootOwner = window.context().rootNode.lock();
+            Node* root = rootOwner.get();
             uint64_t id = args.at("id").get<uint64_t>();
             Node* n = root ? root->findByInstanceId(id) : nullptr;
             if (!n) {

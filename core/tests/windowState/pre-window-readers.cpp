@@ -10,7 +10,7 @@ int failures = 0;
 bool same(float a, float b) { return a == b || (std::isnan(a) && std::isnan(b)); }
 void readers(const char* phase) {
     auto& ctx = internal::currentWindowContext();
-    auto* window = internal::mainWindow();
+    auto* window = internal::resolveWindow();
     const float dpi = sapp_dpi_scale();
     const int width = sapp_width(), height = sapp_height();
     for (bool pixels : {false, true}) for (bool fbo : {false, true}) {

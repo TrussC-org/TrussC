@@ -82,7 +82,6 @@ void screenshotTemporaryTests() {
 void screenshotWindowOrderTests() {
     newRun();
     internal::WindowRequestAccess::HostState contextAState; internal::WindowContext& contextA = contextAState.context; internal::WindowRequestAccess::HostState contextBState; internal::WindowContext& contextB = contextBState.context;
-    contextA.isMain = true; contextB.isMain = false;
     const auto path = sandbox / "two-windows.png";
     vector<ScreenshotSaveEventArgs> events;
     auto listener = onScreenshotSave().listen([&](ScreenshotSaveEventArgs& args) { events.push_back(args); });
@@ -92,9 +91,9 @@ void screenshotWindowOrderTests() {
     internal::setResourceLoadProbeForTests([&](const char* stage, const fs::path&) {
         if (string(stage) == "screenshot-writer-launch") ++launches;
     });
-    internal::setScreenshotBackendForTests([](Pixels& pixels) {
+    internal::setScreenshotBackendForTests([&](Pixels& pixels) {
         pixels.allocate(1, 1, 4); pixels.getData()[3] = 255;
-        pixels.getData()[0] = internal::currentWindowContext().isMain ? 31 : 63;
+        pixels.getData()[0] = &internal::currentWindowContext() == &contextA ? 31 : 63;
         return true;
     }, [&](const Pixels& pixels, const fs::path& output) {
         const int value = pixels.getData()[0];
@@ -200,7 +199,7 @@ void screenshotTests() {
     const auto before = events.size();
     saveScreenshotAsync("headless.png");
     check("no-window failure never fires inline", events.size() == before);
-    drain(); check("no-window failure is deferred", events.size() == before + 1 && !events.back().result);
+    drain(); check("unowned zero-Window capture queues no completion", events.size() == before);
     bool submitted = false;
     auto reentrant = onScreenshotSave().listen([&](ScreenshotSaveEventArgs&) {
         if (!submitted) { submitted = true; internal::submitScreenshot(nullptr, "during-drain.png"); }
@@ -222,11 +221,10 @@ void screenshotTests() {
     }
     // Drain two real WindowContexts independently, after changing current.
     internal::WindowRequestAccess::HostState contextAState; internal::WindowContext& contextA = contextAState.context; internal::WindowRequestAccess::HostState contextBState; internal::WindowContext& contextB = contextBState.context;
-    contextA.isMain = true; contextB.isMain = false;
     map<fs::path, int> contextPixels;
     mutex contextRecords;
-    internal::setScreenshotBackendForTests([](Pixels& pixels) {
-        pixels.allocate(1, 1, 4); pixels.getData()[3] = 255; pixels.getData()[0] = internal::currentWindowContext().isMain ? 31 : 63;
+    internal::setScreenshotBackendForTests([&](Pixels& pixels) {
+        pixels.allocate(1, 1, 4); pixels.getData()[3] = 255; pixels.getData()[0] = &internal::currentWindowContext() == &contextA ? 31 : 63;
         return true;
     }, [&](const Pixels& pixels, const fs::path& path) {
         lock_guard<mutex> lock(contextRecords); contextPixels[path.filename()] = pixels.getData()[0];
@@ -867,7 +865,9 @@ public:
             }
             if (secondary) {
                 auto* previous = internal::currentWindowCtx(); internal::currentWindowCtx() = &secondary->context();
-                for (int i = 0; i < 4; ++i) saveScreenshotAsync(sandbox / "hidden-real.png");
+                // This Window intentionally has no App; address its queue explicitly.
+                for (int i = 0; i < 4; ++i) internal::submitScreenshot(
+                    &secondary->context().asyncScreenshots, sandbox / "hidden-real.png");
                 internal::currentWindowCtx() = previous;
                 hiddenRequested = true;
             }
@@ -878,7 +878,7 @@ public:
                 secondary->close(); closingSecondary = true;
             }
             if (!secondary || hiddenFailed == 4) exitApp();
-        } else if (*internal::mainWindowContext().asyncScreenshots.admitted == 0) {
+        } else if (*internal::windowApiContext().asyncScreenshots.admitted == 0) {
             saveScreenshotAsync(sandbox / ("real" + to_string(mainSaved) + ".png"));
         }
     }

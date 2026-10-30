@@ -54,6 +54,5 @@ public:
 
 private:
     shared_ptr<Window> second_;
-    shared_ptr<SubApp> subApp_;
     float mainHue_ = 0.1f;
 };

@@ -76,6 +76,18 @@ struct _sapp_tc_event_result {
     bool client_threw = false;
 };
 
+// Process quit uses the Runtime callback, never an initial native Window.
+template<class Descriptor>
+static inline _sapp_tc_event_result _sapp_tc_deliver_runtime_quit(const Descriptor& desc, bool initialized) noexcept {
+    if (!initialized || !desc._tc_event_cb) return {};
+    sapp_event event{};
+    event.type = SAPP_EVENTTYPE_QUIT_REQUESTED;
+    _sapp_tc_event_result result{true, false};
+    try { desc._tc_event_cb(&event, {0}, nullptr); }
+    catch (...) { result.client_threw = true; }
+    return result;
+}
+
 template<class Record, class Lookup>
 static _sapp_tc_event_result _sapp_tc_deliver_event(Record* w, sapp_event* event, uint64_t frame, Lookup lookup) noexcept {
     if (!w || !event || !w->ready || !w->desc.event_cb || (w->events_enabled && !w->events_enabled())) return {};

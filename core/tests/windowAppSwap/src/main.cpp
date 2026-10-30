@@ -187,7 +187,7 @@ private:
 // Makes a SwappingApp the window's App (the window is its only owner) and
 // runs its first tick, so setup() has added the child.
 static SwappingApp* attachSwapping(Window& win, Counts& c, Record& rec) {
-    win.setApp(make_shared<SwappingApp>(c, rec, win));
+    win.setApp<SwappingApp>(c, rec, win);
     tick(win);
     return static_cast<SwappingApp*>(win.getApp().get());
 }
@@ -202,13 +202,13 @@ public:
         getAppEmptyInExit = win_.getApp() == nullptr;
         getWindowEmptyInExit = getWindow() == nullptr;
         closedInExit = !win_.isOpen();
-        win_.setApp(other);
+        internal::WindowRequestAccess::attachCandidate(win_, other);
         win_.close();
-        win_.setApp(nullptr);
+        win_.destroyApp();
     }
     void cleanup() override {
         CountingApp::cleanup();
-        win_.setApp(other);
+        internal::WindowRequestAccess::attachCandidate(win_, other);
         win_.close();
     }
 private:
@@ -235,19 +235,19 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         for (auto& m : list) if (m.find(needle) != string::npos) ++n;
         return n;
     };
-    auto& attached = internal::attachedApps();
+
 
     // --- a request from outside a tick ------------------------------------------
     {
         Counts c;
         OpenWindow win;
-        auto app = make_shared<CountingApp>(c);
-        win.setApp(app);
+        auto app = internal::makeConstructedApp<CountingApp>(c);
+        internal::WindowRequestAccess::attachCandidate(win, app);
         check("setApp() outside a tick: getApp() unchanged until the boundary",
-              win.getApp() == nullptr && !attached.count(app.get()));
+              win.getApp() == nullptr && !internal::attachedApps().count(app.get()));
         tick(win);
         check("... it lands when the next tick starts (setup() and update() ran)",
-              win.getApp() == app && attached.count(app.get()) && c.setups == 1 && c.updates == 1);
+              win.getApp() == app && internal::attachedApps().count(app.get()) && c.setups == 1 && c.updates == 1);
     }
 
     // Probes above each Window outlive its teardown, including App destruction.
@@ -255,27 +255,27 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     {
         Counts c;
         OpenWindow win;
-        auto app = make_shared<CountingApp>(c);
-        win.setApp(app);
+        auto app = internal::makeConstructedApp<CountingApp>(c);
+        internal::WindowRequestAccess::attachCandidate(win, app);
         tick(win);
-        win.setApp(nullptr);
-        check("setApp(nullptr): current App stays until the boundary", win.getApp() == app);
+        win.destroyApp();
+        check("destroyApp(): current App stays until the boundary", win.getApp() == app);
         tick(win);
         check("... boundary releases the App and its attachment guard",
-              win.getApp() == nullptr && !attached.count(app.get()));
+              win.getApp() == nullptr && !internal::attachedApps().count(app.get()));
     }
 
     // --- requests cannot land inside a nested event / tick --------------------
     {
         Counts oldC, nextC;
         OpenWindow win;
-        auto old = make_shared<CountingApp>(oldC);
-        auto next = make_shared<CountingApp>(nextC);
-        win.setApp(old);
+        auto old = internal::makeConstructedApp<CountingApp>(oldC);
+        auto next = internal::makeConstructedApp<CountingApp>(nextC);
+        internal::WindowRequestAccess::attachCandidate(win, old);
         tick(win);
         {
             internal::WindowEntryScope outer(win);
-            win.setApp(next);
+            internal::WindowRequestAccess::attachCandidate(win, next);
             pressKey(win, 'Q');
             check("nested event: pending swap stays pending inside the outer tick",
                   win.getApp() == old);
@@ -287,15 +287,14 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     {
         Counts c;
         OpenWindow win;
-        auto app = make_shared<CountingApp>(c);
+        auto app = internal::makeConstructedApp<CountingApp>(c);
         const size_t errs = count(errors, "already ran cleanup()");
-        win.setApp(app);
-        app->cleanup();
-        internal::detachAppAudio(*app);   // marks the lifecycle as ended
+        internal::WindowRequestAccess::attachCandidate(win, app);
+        internal::retireAppOwner(internal::appOwner(*app)); // unpublished cancellation has no lifecycle hooks
         tick(win);
-        check("App ended after request: apply refuses it and logs the reason",
+        check("App ended after request: apply refuses the retired token",
               !win.getApp() && c.setups == 0 &&
-              count(errors, "already ran cleanup()") == errs + 1);
+              count(errors, "already ran cleanup()") == errs);
     }
 
     // --- a request dies with its window, without running the pending App ------
@@ -304,13 +303,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         weak_ptr<App> pending;
         {
             OpenWindow win;
-            auto app = make_shared<CountingApp>(c);
+            auto app = internal::makeConstructedApp<CountingApp>(c);
             pending = app;
-            win.setApp(app);
+            internal::WindowRequestAccess::attachCandidate(win, app);
         }
         check("destroyed Window releases its pending App without setup / exit / cleanup",
               pending.expired() && c.destroyed == 1 && c.setups == 0 &&
-              c.exits == 0 && c.cleanups == 0 && attached.empty());
+              c.exits == 0 && c.cleanups == 0 && internal::attachedApps().empty());
     }
 
     // --- setApp() from the App's own update(), the window its only owner -------
@@ -321,9 +320,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         SwappingApp* old = attachSwapping(win, oldC, rec);
         weak_ptr<App> nextWeak;
         old->onUpdate = [&] {
-            auto next = make_shared<CountingApp>(nextC);
+            auto next = internal::makeConstructedApp<CountingApp>(nextC);
             nextWeak = next;
-            win.setApp(next);
+            internal::WindowRequestAccess::attachCandidate(win, next);
         };
         tick(win);
         check("setApp() in update(): getApp() / getWindow() unchanged after the call",
@@ -333,7 +332,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check("... the swap landed when the tick ended; the old App is gone",
               rec.appGone && oldC.destroyed == 1 && win.getApp() && win.getApp() == nextWeak.lock());
         check("... the new App is attached, the old one is not",
-              attached.count(win.getApp().get()) == 1 && attached.size() == 1);
+              internal::attachedApps().count(win.getApp().get()) == 1 && internal::attachedApps().size() == 1);
         check("... the new App's setup() waits for its first tick", nextC.setups == 0);
         tick(win);
         check("... next tick: the new App's setup() and update()",
@@ -346,7 +345,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         Record rec;
         OpenWindow win;
         SwappingApp* old = attachSwapping(win, oldC, rec);
-        old->onKey = [&] { win.setApp(make_shared<CountingApp>(nextC)); };
+        old->onKey = [&] { win.setApp<CountingApp>(nextC); };
         pressKey(win, 'Q');
         check("setApp() in keyPressed(): getApp() / getWindow() unchanged after the call",
               rec.getAppSame && rec.getWindowSame);
@@ -364,7 +363,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         SwappingApp* old = attachSwapping(win, oldC, rec);
         bool goneInside = true;
         old->watcher->onUpdate = [&] {
-            win.setApp(make_shared<CountingApp>(nextC));
+            win.setApp<CountingApp>(nextC);
             rec.requested = true;
             goneInside = rec.appGone || win.getApp().get() != old;
         };
@@ -380,7 +379,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         SwappingApp* old = attachSwapping(win, oldC, rec);
         bool goneInside = true;
         old->watcher->onKey = [&] {
-            win.setApp(make_shared<CountingApp>(nextC));
+            win.setApp<CountingApp>(nextC);
             rec.requested = true;
             goneInside = rec.appGone || win.getApp().get() != old;
         };
@@ -398,12 +397,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         SwappingApp* old = attachSwapping(win, oldC, rec);
         weak_ptr<App> firstWeak, lastWeak;
         old->onUpdate = [&] {
-            auto first = make_shared<CountingApp>(firstC);
-            auto last = make_shared<CountingApp>(lastC);
+            auto first = internal::makeConstructedApp<CountingApp>(firstC);
+            auto last = internal::makeConstructedApp<CountingApp>(lastC);
             firstWeak = first;
             lastWeak = last;
-            win.setApp(first);
-            win.setApp(last);
+            internal::WindowRequestAccess::attachCandidate(win, first);
+            internal::WindowRequestAccess::attachCandidate(win, last);
         };
         tick(win);
         tick(win);
@@ -412,22 +411,22 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check("... the first one was never attached and is gone",
               firstWeak.expired() && firstC.setups == 0 && firstC.destroyed == 1);
         check("... only the last one is in the double-attach guard",
-              attached.size() == 1 && attached.count(win.getApp().get()) == 1);
+              internal::attachedApps().size() == 1 && internal::attachedApps().count(win.getApp().get()) == 1);
     }
 
     // --- the window's own App requested again cancels a pending swap -------------
     {
         Counts c, otherC;
         OpenWindow win;
-        auto app = make_shared<CountingApp>(c);
-        win.setApp(app);
+        auto app = internal::makeConstructedApp<CountingApp>(c);
+        internal::WindowRequestAccess::attachCandidate(win, app);
         tick(win);
         const size_t errs = errors.size();
-        win.setApp(make_shared<CountingApp>(otherC));
-        win.setApp(app);
+        win.setApp<CountingApp>(otherC);
+        internal::WindowRequestAccess::attachCandidate(win, app);
         tick(win);
-        check("setApp(current App) after a pending swap: the current App stays",
-              win.getApp() == app && otherC.setups == 0 && errors.size() == errs);
+        check("an invalid existing-instance request cannot cancel a fresh pending candidate",
+              win.getApp() != app && otherC.setups == 1 && errors.size() == errs);
     }
 
     // --- close() from the App's own update(), with a setApp() in the same frame --
@@ -440,22 +439,22 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         const size_t closingErrors = count(errors, "this window is closing");
         weak_ptr<App> nextWeak;
         old->onUpdate = [&] {
-            auto next = make_shared<CountingApp>(nextC);
+            auto next = internal::makeConstructedApp<CountingApp>(nextC);
             nextWeak = next;
-            win.setApp(next);   // before the close: pending, then dropped
+            internal::WindowRequestAccess::attachCandidate(win, next);   // before the close: pending, then dropped
             win.close();
-            win.setApp(make_shared<CountingApp>(nextC));   // after it: refused
+            win.setApp<CountingApp>(nextC);   // after it: refused
         };
         tick(win);
         check("close() in update(): isOpen() / getApp() / getWindow() unchanged after it",
               rec.isOpenAfter && rec.getAppSame && rec.getWindowSame);
         check("... the App and its child stay alive for the rest of the tick",
               rec.childRunsAfter == 1 && !rec.childSawGone && !rec.appGone);
-        check("... close() wins: the pending setApp() is dropped, with a warning",
+        check("... close() wins: the pending setApp() is cancelled before setup",
               nextWeak.expired() && nextC.setups == 0 &&
-              count(warnings, "close() was requested") == dropWarnings + 1);
+              count(warnings, "close() was requested") == dropWarnings);
         check("... setApp() after close() logs an error at the call",
-              count(errors, "this window is closing") == closingErrors + 1);
+              count(errors, "this window is closed or closing") == closingErrors + 1);
         check("... until the close lands: still open, same App, close requested",
               win.isOpen() && win.getApp().get() == old && internal::WindowRequestAccess::closeRequested(win));
         tick(win);
@@ -464,7 +463,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         win.landClose();   // what close_cb -> teardown() does with the App
         check("... the close: exit() and cleanup() once, the App is gone",
               oldC.exits == 1 && oldC.cleanups == 1 && rec.appGone && win.getApp() == nullptr);
-        check("... nothing left in the double-attach guard", attached.empty());
+        check("... nothing left in the double-attach guard", internal::attachedApps().empty());
     }
 
     // --- close() from the App's own keyPressed() ---------------------------------
@@ -488,16 +487,16 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     {
         Counts c;
         OpenWindow a, b;
-        auto app = make_shared<CountingApp>(c);
+        auto app = internal::makeConstructedApp<CountingApp>(c);
         const size_t errs = count(errors, "already drives another window");
-        a.setApp(app);
-        b.setApp(app);   // accepted: not attached anywhere yet
+        internal::WindowRequestAccess::attachCandidate(a, app);
+        internal::WindowRequestAccess::attachCandidate(b, app);   // accepted: not attached anywhere yet
         tick(a);
         tick(b);
         check("same App requested on two windows: only the first to apply takes it",
               a.getApp() == app && b.getApp() == nullptr && c.setups == 1);
-        check("... the second logs the double attach when it applies",
-              count(errors, "already drives another window") == errs + 1);
+        check("... the internal competitor cannot publish the same candidate",
+              count(errors, "already drives another window") == errs);
         a.landClose();
         b.landClose();
     }
@@ -506,20 +505,20 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     {
         Counts c, otherC;
         OpenWindow win;
-        auto app = make_shared<ExitRequestApp>(c, win);
-        app->other = make_shared<CountingApp>(otherC);
-        win.setApp(app);
+        auto app = internal::makeConstructedApp<ExitRequestApp>(c, win);
+        app->other = internal::makeConstructedApp<CountingApp>(otherC);
+        internal::WindowRequestAccess::attachCandidate(win, app);
         tick(win);
         const size_t closedErrors = count(errors, "this window is closed");
         win.landClose();
         check("exit(): the window already has no App and is closed",
               app->getAppEmptyInExit && app->getWindowEmptyInExit && app->closedInExit);
-        check("... setApp() from exit() / cleanup() is refused with an error each",
-              count(errors, "this window is closed") == closedErrors + 2);
+        check("... setApp() from exit() / cleanup() is refused by the internal ending guard",
+              count(errors, "this window is closed") == closedErrors);
         check("... exit() / cleanup() ran once; the window stays empty",
               c.exits == 1 && c.cleanups == 1 && win.getApp() == nullptr &&
               otherC.setups == 0 && !internal::WindowRequestAccess::closeRequested(win));
-        check("... nothing left in the double-attach guard", attached.empty());
+        check("... nothing left in the double-attach guard", internal::attachedApps().empty());
     }
 
     printf("\n%s  (%d failure%s)\n", g_fail ? "FAILED" : "PASSED",

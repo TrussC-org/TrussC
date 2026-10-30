@@ -11,6 +11,9 @@
 using namespace tc;
 
 namespace {
+// Whitebox subscriptions explicitly target the headless hub before launch.
+CoreEvents& fixtureEvents() { return *internal::nonWindowContext().coreEvents; }
+
 int failures = 0;
 void check(const char* name, bool ok) {
     std::printf("%-72s %s\n", name, ok ? "PASS" : "FAIL");
@@ -31,13 +34,13 @@ struct EventsApp : App {
         addChild(std::make_shared<Child>());
         addMod<ProbeMod>();
         callAfter(0, [] { ++timerCalls; });
-        listeners.push_back(events().update.listen([] { order += 'c'; }, EventPriority::App));
-        listeners.push_back(events().update.listen([] { order += 'z'; }, EventPriority::AfterApp));
-        listeners.push_back(events().exit.listen([] { order += 'C'; }, EventPriority::App));
-        listeners.push_back(events().exit.listen([] { order += 'Z'; }, EventPriority::AfterApp));
+        listeners.push_back(fixtureEvents().update.listen([] { order += 'c'; }, EventPriority::App));
+        listeners.push_back(fixtureEvents().update.listen([] { order += 'z'; }, EventPriority::AfterApp));
+        listeners.push_back(fixtureEvents().exit.listen([] { order += 'C'; }, EventPriority::App));
+        listeners.push_back(fixtureEvents().exit.listen([] { order += 'Z'; }, EventPriority::AfterApp));
         // Exercise the same protected, self-disconnecting ownership as mandatory
         // recorder/ImGui/inspector teardown. A live inspector is tested in its addon.
-        listeners.push_back(internal::FrameworkEventAccess::listen(events().exit, [this] {
+        listeners.push_back(internal::FrameworkEventAccess::listen(fixtureEvents().exit, [this] {
             check("mandatory teardown runs after App exit and before cleanup", exits == 1 && cleanups == 0);
             order += 'T';
             ++teardowns;
@@ -53,7 +56,7 @@ struct EventsApp : App {
         check("headless App exit stays on main thread", std::this_thread::get_id() == mainThread);
         order += 'A';
         ++exits;
-        if (mode == Mode::ClearInApp) events().exit.clear();
+        if (mode == Mode::ClearInApp) fixtureEvents().exit.clear();
     }
     void cleanup() override { order += 'K'; ++cleanups; }
 };
@@ -62,18 +65,18 @@ void testDelivery(Mode requested) {
     mode = requested;
     order.clear();
     updates = exits = cleanups = teardowns = childUpdates = modUpdates = timerCalls = 0;
-    const auto updateCount = events().update.listenerCount();
-    const auto exitCount = events().exit.listenerCount();
-    auto defaultUpdate = events().update.listen([] {
+    const auto updateCount = fixtureEvents().update.listenerCount();
+    const auto exitCount = fixtureEvents().exit.listenerCount();
+    auto defaultUpdate = fixtureEvents().update.listen([] {
         order += 'd';
-        if (mode == Mode::ClearBeforeApp) events().update.clear();
+        if (mode == Mode::ClearBeforeApp) fixtureEvents().update.clear();
     });
-    auto beforeUpdate = events().update.listen([] { order += 'b'; }, EventPriority::App);
-    auto defaultExit = events().exit.listen([] {
+    auto beforeUpdate = fixtureEvents().update.listen([] { order += 'b'; }, EventPriority::App);
+    auto defaultExit = fixtureEvents().exit.listen([] {
         order += 'D';
-        if (mode == Mode::ClearBeforeApp) events().exit.clear();
+        if (mode == Mode::ClearBeforeApp) fixtureEvents().exit.clear();
     });
-    auto beforeExit = events().exit.listen([] { order += 'B'; }, EventPriority::App);
+    auto beforeExit = fixtureEvents().exit.listen([] { order += 'B'; }, EventPriority::App);
     check("runHeadlessApp returns exit code", runHeadlessApp<EventsApp>(HeadlessSettings().setFps(1024)) == 7);
     check("App update, exit and cleanup survive clear and run exactly once per delivery",
           updates == 3 && exits == 1 && cleanups == 1 && teardowns == 1);
@@ -86,7 +89,7 @@ void testDelivery(Mode requested) {
     defaultUpdate.disconnect(); beforeUpdate.disconnect();
     defaultExit.disconnect(); beforeExit.disconnect();
     check("runner disconnects App bindings after returning",
-          events().update.listenerCount() == updateCount && events().exit.listenerCount() == exitCount);
+          fixtureEvents().update.listenerCount() == updateCount && fixtureEvents().exit.listenerCount() == exitCount);
 }
 
 // A worker paused before the App slot holds the notification snapshot while
@@ -107,7 +110,7 @@ struct SnapshotApp : App {
         snapshotProbe->destroyedOnMain = isMainThread();
     }
     void setup() override {
-        snapshotProbe->worker = std::thread([] { events().update.notify(); });
+        snapshotProbe->worker = std::thread([] { fixtureEvents().update.notify(); });
         std::unique_lock<std::mutex> lock(snapshotProbe->mutex);
         check("worker acquired a headless update snapshot", snapshotProbe->cv.wait_for(
             lock, std::chrono::seconds(10), [] { return snapshotProbe->entered; }));
@@ -117,7 +120,7 @@ struct SnapshotApp : App {
 void testWorkerSnapshot() {
     SnapshotProbe state;
     snapshotProbe = &state;
-    auto blocker = events().update.listen([&] {
+    auto blocker = fixtureEvents().update.listen([&] {
         if (isMainThread()) {
             ++state.mainNotifications;
             return;

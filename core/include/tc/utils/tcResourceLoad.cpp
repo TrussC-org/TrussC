@@ -151,6 +151,7 @@ void deliver(ResourceLoadState& state) {
         }
     } retirement{state};
     if (alive) {
+        AppOwnerScope appScope(state.appOwner.lock());
         if (auto target = state.apply.lock()) (*target)(state);
     }
 }

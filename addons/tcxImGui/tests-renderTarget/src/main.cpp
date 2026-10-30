@@ -77,7 +77,7 @@ void transparent(int samples, TextureFormat format, bool unfilterable) {
         simgui_imtextureid(white.getView());
     fbo.begin(0,0,0,0);
     const bool savedMode=internal::pixelPerfectMode(); auto& window=internal::currentWindowContext();
-    const auto savedDpi=window.dpiScale; const bool savedMain=window.isMain;
+    const auto savedDpi=window.dpiScale;
     window.dpiScale=2; internal::pixelPerfectMode()=true;
     {
         auto scope=ui.scoped(); fixedContext(); check("offscreen scope accepted",bool(scope));
@@ -105,7 +105,7 @@ void transparent(int samples, TextureFormat format, bool unfilterable) {
             color.blend.src_factor_alpha==SG_BLENDFACTOR_ONE && color.blend.dst_factor_alpha==SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA);
     }
     check("both ImGui sampling recipes selected",recipesChecked==2);
-    window.isMain=savedMain; window.dpiScale=savedDpi; internal::pixelPerfectMode()=savedMode;
+    window.dpiScale=savedDpi; internal::pixelPerfectMode()=savedMode;
     setupScreenOrtho(); setColor(0,0,1); drawRect(120,40,8,8);
     fbo.end();
     auto attachment=read(fbo);
@@ -245,7 +245,7 @@ void targetAssociation() {
 void screenUi(bool pixelMode) {
     auto& window=internal::currentWindowContext();
     if(!nativeDpi2) {
-        check("main framebuffer metadata initialized", !window.isMain || (window.fbWidth==sapp_width() && window.fbHeight==sapp_height()));
+        check("main framebuffer metadata initialized", window.hostWindow && window.fbWidth==window.hostWindow->getPixelWidth() && window.fbHeight==window.hostWindow->getPixelHeight());
         window.dpiScale=2;
     }
     internal::pixelPerfectMode()=pixelMode;
@@ -447,7 +447,7 @@ public:
         if (exitWindow) {
             secondaryExitUpdate = exitWindow->events().update.listen([] { secondaryExitTicked = true; }, -1000);
             secondaryExitDraw = exitWindow->events().draw.listen([] { secondaryExitTicked = true; }, -1000);
-            exitWindow->setApp(std::make_shared<SecondaryExitApp>());
+            exitWindow->setApp<SecondaryExitApp>();
         }
         else exitApp();
     }
@@ -542,8 +542,8 @@ public:
         inputPriorityChecks();
 #endif
         sg_enable_stats();
-        log_=getLogger().onLog.listen([this](LogEventArgs& args){
-            if(args.message=="ImGui shutdown" && exitCalls_ && internal::currentWindowContext().isMain) {
+        log_=getLogger().onLog.listen([this, owner=&internal::currentWindowContext()](LogEventArgs& args){
+            if(args.message=="ImGui shutdown" && exitCalls_ && &internal::currentWindowContext()==owner) {
                 ++imguiShutdowns_;
                 check("ImGui teardown follows App::exit", appExitFinished_);
             }
@@ -563,10 +563,6 @@ public:
         manifest["version"]=getVersion();
         manifest["dpiSource"]=nativeDpi2?"native window DPI from Xft.dpi":"simulated window metrics";
         manifest["backend"]=getBackendName(); manifest["baseCapability"]=screenOnly?"screen-only; target-bound UI unavailable on base":"target-bound UI";
-        // Restore the simulated main-window identity before present() returns.
-        render_=events().onRender.listen([] {
-            internal::currentWindowContext().isMain=true;
-        },2000);
         after_=events().afterFrame.listen([this] {
 #ifndef TC_IMGUI_BASE_FIXTURE
             if(pendingReadback_) {
@@ -652,7 +648,7 @@ public:
             WindowSettings secondarySettings; secondarySettings.setSize(nativeDpi2?256:512,nativeDpi2?192:384); secondarySettings.setHighDpi(nativeDpi2); secondarySettings.sampleCount=screenSamples;
             lastSecondaryFrame=Clock::now();
             secondary_=createWindow(secondarySettings); check("real secondary window created",bool(secondary_));
-            if(secondary_) secondary_->setApp(std::make_shared<SecondaryFixture>());
+            if(secondary_) secondary_->setApp<SecondaryFixture>();
             else secondaryComplete=true; // Creation already failed; do not wait for a tick.
         }
 #ifndef TC_IMGUI_BASE_FIXTURE
@@ -694,7 +690,6 @@ public:
             manifest["expectedTcErrors"]=screenOnly?0:7;
             manifest["tcErrors"]=errors; manifest["sokolValidationErrors"]=validationErrors;
             if(!output.empty()) { std::ofstream file(output/"samples.json"); file<<manifest.dump(2)<<'\n'; }
-            internal::currentWindowContext().isMain=true;
             completed=true; exitApp();
         }
         ++frame_;

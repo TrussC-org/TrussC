@@ -78,7 +78,6 @@ core/include/tc/app/tcHeadlessApp.h trussc::headless::deliveredSignal # no-hot-r
 core/include/tc/app/tcHeadlessApp.h trussc::internal::headlessRestoreConsoleCP # no-hot-reload: headless Windows console restoration only
 core/include/tc/app/tcHeadlessState.h trussc::headless::active    # no-hot-reload: false in every copy of a hot reload (windowed) process
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::load::loadCounter   # host-only: the hot reload host itself
-core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::GuestLibrary::create::generation  # host-only: the hot reload host itself
 core/include/tc/app/tcHotReloadHost.h trussc::hot_reload::g_host  # host-only: the hot reload host itself (a guest's copy is constructed, never used)
 
 # --- tc/comm
