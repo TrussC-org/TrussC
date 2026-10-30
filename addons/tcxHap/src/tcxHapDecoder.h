@@ -124,7 +124,7 @@ public:
         result = {};
         lastChunkCount_ = -1;
         lastErrorCode_ = HapResult_Bad_Frame;
-        if (frameSize > detail::movFrameBytes || !detail::movDimensions(width, height) ||
+        if (!detail::movDimensions(width, height) ||
             !detail::validateHapFrame(frameData, frameSize, width, height, result.format)) {
             result = {};
             return invalidFrame(width, height, frameSize);
@@ -175,7 +175,7 @@ public:
         lastErrorCode_ = HapResult_Bad_Arguments;
         outFormat = HapFormat::Unknown;
         if (!outputBuffer) return false;
-        if (frameSize > detail::movFrameBytes || !detail::movDimensions(width, height) ||
+        if (!detail::movDimensions(width, height) ||
             !detail::validateHapFrame(frameData, frameSize, width, height, outFormat)) {
             outFormat = HapFormat::Unknown;
             return invalidFrame(width, height, frameSize);
@@ -224,7 +224,7 @@ private:
         ++invalidFrameCount_;
         if (!std::exchange(invalidFrameWarned_, true)) {
             trussc::logWarning("HapDecoder") << "Skipping invalid HAP frame (needed " << width << "x" << height << ", " << frameSize
-                << " encoded bytes; capacity 8192 per axis and 128 MiB per frame); invalid frames will be skipped";
+                << " encoded bytes); invalid frames will be skipped";
         }
         return false;
     }

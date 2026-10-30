@@ -4910,9 +4910,7 @@ struct Cover_mcp__AdmissionLimits : af::Scope<mcp::AdmissionLimits> {
         (void)af::val<mcp::AdmissionLimits>().jsonDepth;
         (void)af::val<mcp::AdmissionLimits>().operations;
         (void)af::val<mcp::AdmissionLimits>().outstanding;
-        (void)af::val<mcp::AdmissionLimits>().replyBytes;
         (void)af::val<mcp::AdmissionLimits>().workers;
-        (void)af::val<mcp::AdmissionLimits>().workingBytes;
     }
 };
 

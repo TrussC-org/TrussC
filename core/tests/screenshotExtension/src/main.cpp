@@ -54,13 +54,11 @@ void checkMcp(const fs::path& requested, const fs::path& expected) {
     check("MCP fallback warns once", warnings.size() == count + 1);
     check("MCP warning names actual destination", warnings.size() > count &&
           warnings.back().find(internal::pathToUtf8(expected)) != string::npos);
-    check("MCP capture retains admission credits", mcp::internal::workingMemory() > 0);
     check("MCP capture leaves application queue independent", internal::currentWindowContext().pendingScreenshotPaths.empty());
     // No GPU in this tier: cancel the queued producer after checking its
-    // admitted lifetime. Native file encoders are exercised by --screen.
+    // deferred destination. Native file encoders are exercised by --screen.
     deferred.envelope = {};
     deferred.hasEnvelope = false;
-    check("cancelled MCP capture releases credits", mcp::internal::workingMemory() == 0);
 }
 
 void checkFile(const fs::path& path, const string& magic) {

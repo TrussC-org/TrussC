@@ -9,6 +9,7 @@
 
 #include "../utils/tcAnnotations.h"
 #include <memory>
+#include <algorithm>
 #include <array>
 #include <type_traits>
 
@@ -328,6 +329,10 @@ public:
         internal::deferGpuDestroy(sampler_);
         internal::deferGpuDestroy(view_);
         internal::deferGpuDestroy(image_);
+        image_ = {};
+        view_ = {};
+        sampler_ = {};
+        allocated_ = false;
 
         // Recreate with new data
         createCompressedResources(data, dataSize);
@@ -706,9 +711,28 @@ private:
         }
     }
 
+    // Creation has not published these handles, so failure can release them immediately.
+    void finishResources_() {
+        const auto validView = [](sg_view view) { return sg_query_view_state(view) == SG_RESOURCESTATE_VALID; };
+        allocated_ = sg_query_image_state(image_) == SG_RESOURCESTATE_VALID && validView(view_)
+            && sg_query_sampler_state(sampler_) == SG_RESOURCESTATE_VALID
+            && (usage_ != TextureUsage::RenderTarget || validView(attachmentView_))
+            && std::all_of(mipAttachmentViews_.begin(), mipAttachmentViews_.end(), validView)
+            && std::all_of(mipSamplingViews_.begin(), mipSamplingViews_.end(), validView);
+        if (!allocated_) {
+            logError("Texture") << "GPU texture view or sampler allocation failed";
+            clearResources_(false);
+        }
+    }
+
     void createCompressedResources(const void* data, size_t dataSize) {
         if (!sg_isvalid()) return;
         if (!prepareRetirement_()) return;
+        auto sizeResult = internal::checkImageSize(width_, height_);
+        if (!sizeResult) {
+            logError("Texture") << sizeResult.message;
+            return;
+        }
         sg_image_desc img_desc = {};
         img_desc.width = width_;
         img_desc.height = height_;
@@ -717,6 +741,11 @@ private:
         img_desc.data.mip_levels[0].size = dataSize;
 
         image_ = sg_make_image(&img_desc);
+        if (sg_query_image_state(image_) != SG_RESOURCESTATE_VALID) {
+            logError("Texture") << "GPU compressed texture allocation failed";
+            clearResources_(false);
+            return;
+        }
 
         // Create texture view
         sg_view_desc view_desc = {};
@@ -726,7 +755,7 @@ private:
         // Create sampler
         createSampler();
 
-        allocated_ = true;
+        finishResources_();
     }
 
     void createResources(const void* initialData, const sg_image_data* imageLoadMips = nullptr);

@@ -149,7 +149,7 @@ LoadResult drainVorbis(stb_vorbis* vorbis, internal::AudioDecodeStatus& status, 
 bool decodeMemoryWithMiniaudio(const void* data, size_t bytes, ma_encoding_format hint,
                                const char* label, SoundBuffer& out) {
     internal::AudioDecodeStatus status;
-    if (!data || !bytes || !status.encoded(bytes)) return false;
+    if (!data || !bytes) return false;
     ma_decoder decoder;
     auto cfg = ma_decoder_config_init(ma_format_f32, 0, 0);
     cfg.encodingFormat = hint;
@@ -374,7 +374,11 @@ LoadResult SoundBuffer::loadOggFromMemory(const void* data, size_t dataSize) {
         return LoadResult::fail(LoadError::DecodeFailed, "empty memory range");
     }
     internal::AudioDecodeStatus status;
-    if (!status.encoded(dataSize)) return LoadResult::fail(LoadError::DecodeFailed, "OGG input rejected");
+    // Bound (abi): stb_vorbis takes a signed int byte length; larger inputs fail before narrowing.
+    if (dataSize > size_t(INT_MAX)) {
+        logError("SoundBuffer") << "OGG memory input size does not fit the decoder's int byte length";
+        return LoadResult::fail(LoadError::DecodeFailed, "OGG input size cannot be represented");
+    }
     int error = 0;
     auto* vorbis = stb_vorbis_open_memory(static_cast<const unsigned char*>(data), int(dataSize), &error, nullptr);
     if (!vorbis) {
