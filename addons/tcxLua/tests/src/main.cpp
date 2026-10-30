@@ -112,52 +112,6 @@ static bool preCompileAllocationFailure(const fs::path& dir, bool solPanic) {
         lua_type(raw, base + 4) == LUA_TTABLE && lua_topointer(raw, base + 4) == table;
 }
 
-// The large-load Notice is delivered after compilation and before execution.
-// Use that existing boundary to refuse native Lua growth, not C++ allocations.
-static bool postCompileAllocationFailure(const fs::path& dir) {
-    struct Memory {
-        bool deny = false;
-        size_t refused = 0;
-        static void* allocate(void* context, void* ptr, size_t oldSize, size_t size) noexcept {
-            auto& memory = *static_cast<Memory*>(context);
-            if (!size) { std::free(ptr); return nullptr; }
-            if (memory.deny && (!ptr || size > oldSize)) { ++memory.refused; return nullptr; }
-            return std::realloc(ptr, size);
-        }
-    } memory;
-    sol::state lua(sol::default_at_panic, Memory::allocate, &memory);
-    lua_State* raw = lua.lua_state();
-    int ref;
-    do { lua_pushboolean(raw, 1); ref = luaL_ref(raw, LUA_REGISTRYINDEX); } while (ref < 1024);
-    luaL_unref(raw, LUA_REGISTRYINDEX, 1024);
-    const auto path = dir / "post-compile.lua";
-    {
-        ofstream file(path, ios::binary);
-        const string comment = "--" + string(8190, 'x') + "\n";
-        for (int i = 0; i < 32768; ++i) file << comment;
-        file << "return {}\n";
-        if (!file) return false;
-    }
-    const int top = lua_gettop(raw);
-    int compiled = 0, errors = 0;
-    auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
-        if (event.level == tc::LogLevel::Notice &&
-            event.message.find("Loading a large local script") != string::npos &&
-            // The protected setup frame contains its context, handler and chunk.
-            lua_gettop(raw) == 3 && lua_isfunction(raw, -2) && lua_isfunction(raw, -1)) {
-            ++compiled;
-            memory.deny = true;
-        }
-        if (memory.deny && event.level == tc::LogLevel::Error) ++errors;
-    });
-    bool result = true, threw = false;
-    try { result = tcxLua::runFile(lua, path); } catch (...) { threw = true; }
-    memory.deny = false;
-    fs::remove(path);
-    return compiled == 1 && memory.refused > 0 && errors == 1 &&
-        !result && !threw && lua_gettop(raw) == top;
-}
-
 int main(int argc, char** argv) {
     fs::path dir = fs::temp_directory_path() /
         ("tcxLua-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
@@ -165,11 +119,6 @@ int main(int argc, char** argv) {
     check("pre-compile allocation failure: custom panic", preCompileAllocationFailure(dir, false));
     check("pre-compile allocation failure: sol panic", preCompileAllocationFailure(dir, true));
     if (argc > 1 && string(argv[1]) == "--pre-compile-allocation") {
-        fs::remove_all(dir);
-        return g_fail ? 1 : 0;
-    }
-    check("post-compile Lua allocation failure contained", postCompileAllocationFailure(dir));
-    if (argc > 1 && string(argv[1]) == "--post-compile-allocation") {
         fs::remove_all(dir);
         return g_fail ? 1 : 0;
     }

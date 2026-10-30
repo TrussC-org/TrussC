@@ -134,25 +134,15 @@ public:
     // -------------------------------------------------------------------------
 
     void begin() {
-        if (!loaded || internal::currentTarget().recordingFailed) return;
-        if (internal::currentTarget().openShaderScopes == UINT_MAX) {
-            internal::currentTarget().failRecording("shader scope count cannot be represented");
-            return;
-        }
+        if (!loaded) return;
 
         // Push to stack (per-window)
         auto& wctx = internal::currentWindowContext();
         // Bind the scope to an activation, including while its target is parked.
         auto& target = internal::currentTarget();
-        try {
-            wctx.shaderScopeTargets.push_back({&target, target.activation});
-            try { wctx.shaderStack.push_back(this); }
-            catch (...) { wctx.shaderScopeTargets.pop_back(); throw; }
-        } catch (const std::bad_alloc&) {
-            target.failRecording("shader scope allocation failed"); return;
-        } catch (const std::length_error&) {
-            target.failRecording("shader scope count cannot be represented"); return;
-        }
+        wctx.shaderScopeTargets.push_back({&target, target.activation});
+        try { wctx.shaderStack.push_back(this); }
+        catch (...) { wctx.shaderScopeTargets.pop_back(); throw; }
         ++target.openShaderScopes;
 
         // Increment layer for post-shader sokol_gl draws
@@ -161,7 +151,7 @@ public:
         // (target layer bump in submitVertices, like the deferred PBR path),
         // so only the swapchain layer counter is advanced here.
         if (!wctx.currentTarget->isFbo) {
-            if (!wctx.currentTarget->advanceLayer()) return;
+            wctx.currentTarget->advanceLayer();
         }
 
         // Call virtual hook
@@ -317,9 +307,9 @@ public:
     // -------------------------------------------------------------------------
 
     void submitVertices(const ShaderVertex* data, int count, PrimitiveType type) {
-        if (count == 0 || !loaded || internal::currentTarget().recordingFailed) return;
+        if (count == 0 || !loaded) return;
         if (count < 0 || !data || (size_t)count > SIZE_MAX / sizeof(ShaderVertex)) {
-            internal::currentTarget().failRecording("shader vertex count cannot be represented");
+            internal::reportImportError("Shader", "shader vertex count cannot be represented");
             return;
         }
         try {
@@ -371,16 +361,16 @@ public:
             // the deferred PBR/point pattern (tcMeshPbrPipeline.h).
             draw.layerId = wctx.currentTarget->sglLayerNext;
             if (!internal::appendTargetRecording(*wctx.currentTarget, wctx.currentTarget->deferredShaderDraws, std::move(draw))) return;
-            if (!wctx.currentTarget->advanceLayer()) return;
+            wctx.currentTarget->advanceLayer();
         } else {
             // Swapchain: executed in present() between sokol_gl layers.
             draw.layerId = wctx.currentTarget->sglLayerNext - 1;  // Layer before this shader
             if (!internal::appendTargetRecording(*wctx.currentTarget, wctx.currentTarget->deferredShaderDraws, std::move(draw))) return;
         }
         } catch (const std::bad_alloc&) {
-            internal::currentTarget().failRecording("shader snapshot allocation failed");
+            internal::reportImportError("Shader", "shader snapshot allocation failed");
         } catch (const std::length_error&) {
-            internal::currentTarget().failRecording("shader snapshot size cannot be represented");
+            internal::reportImportError("Shader", "shader snapshot size cannot be represented");
         }
     }
 
@@ -520,7 +510,7 @@ inline void internal::ShaderWriter::end() {
             v.y = transformed.y;
             v.z = transformed.z;
         }
-        if (vertices.size() > (size_t)INT_MAX) internal::currentTarget().failRecording("shader vertex count cannot be represented");
+        if (vertices.size() > (size_t)INT_MAX) internal::reportImportError("Shader", "shader vertex count cannot be represented");
         else shader->submitVertices(vertices.data(), (int)vertices.size(), currentType);
     }
     vertices.clear();

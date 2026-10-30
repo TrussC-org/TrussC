@@ -23,9 +23,7 @@ int main() {
             }
         });
     });
-    trussc::internal::HotReloadScanLoss loss;
-    const auto command = trussc::internal::hotReloadCMakeCommand("/cache", loss);
-    std::printf("injected EIO: rejected=%llu accepted='%s'\n",
-        static_cast<unsigned long long>(loss.rejectedCaches), command.c_str());
-    return command.empty() && loss.rejectedCaches == 1 ? 0 : 1;
+    const auto command = trussc::internal::hotReloadCMakeCommand("/cache");
+    std::printf("injected EIO: accepted='%s'\n", command.c_str());
+    return command.empty() ? 0 : 1;
 }

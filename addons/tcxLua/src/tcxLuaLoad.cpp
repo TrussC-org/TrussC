@@ -29,7 +29,6 @@ struct LuaFileLoad {
     std::FILE* file;
     const char* name;
     char bytes[8 * 1024];
-    size_t total = 0;
     bool readError = false;
 };
 
@@ -41,7 +40,6 @@ int luaLoadFileProtected(lua_State* state) {
     auto read = [](lua_State*, void* data, size_t* size) noexcept -> const char* {
         auto& r = *static_cast<LuaFileLoad*>(data);
         *size = std::fread(r.bytes, 1, sizeof(r.bytes), r.file);
-        if (r.total < 256u * 1024u * 1024u) r.total += *size;
         return *size ? r.bytes : nullptr;
     };
 #ifdef TCXLUA_USE_LUAJIT
@@ -50,8 +48,6 @@ int luaLoadFileProtected(lua_State* state) {
 #else
     int status = lua_load(state, read, &load, load.name, "t");
 #endif
-    if (load.total >= 256u * 1024u * 1024u)
-        luaLoadLog(trussc::LogLevel::Notice, "Loading a large local script (at least 256 MiB)");
     load.readError = std::ferror(load.file) != 0;
     if (status != 0) return lua_error(state);
     if (load.readError) return 0;

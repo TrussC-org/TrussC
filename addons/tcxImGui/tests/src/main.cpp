@@ -1313,6 +1313,147 @@ static void testToolLevels() {
     }
 }
 
+static void testPendingTextCompaction() {
+    namespace d = tcx::imgui::detail;
+    for (bool wrap : {false, true}) {
+        ImGuiHarness h;
+        auto* ctx = h.context();
+        if (wrap) ctx->InputEventsNextEventId = UINT32_MAX - 8;
+        auto& cs = d::contexts()[ctx];
+        tcx::imgui::WidgetInfo widget;
+        widget.rect = ImRect({0, 0}, {20, 20});
+        auto& io = ImGui::GetIO();
+        io.AddKeyEvent(ImGuiKey_F1, true);
+        tcx::imgui::inputText(widget, "first");
+        io.AddFocusEvent(false);
+        tcx::imgui::inputText(widget, "second");
+        io.AddFocusEvent(true);
+        tcx::imgui::inputText(widget, "third");
+        io.AddKeyEvent(ImGuiKey_F1, false);
+        const auto requests = cs.pendingText;
+        std::vector<ImU32> expected, native;
+        for (const auto& event : ctx->InputEventsQueue) {
+            if (!requests[0].contains(event.EventId) && !requests[2].contains(event.EventId))
+                expected.push_back(event.EventId);
+            if (std::none_of(requests.begin(), requests.end(), [&](const auto& p) {
+                return p.contains(event.EventId);
+            })) native.push_back(event.EventId);
+        }
+        cs.pendingText[0].deadline = cs.pendingText[2].deadline = d::now();
+        d::settlePendingText(ctx, cs);
+        std::vector<ImU32> actual;
+        for (const auto& event : ctx->InputEventsQueue) actual.push_back(event.EventId);
+        check("text compaction: mixed deadlines preserve survivor and native event order",
+            actual == expected && cs.pendingText.size() == 1 &&
+            cs.pendingText[0].firstEvent == requests[1].firstEvent);
+        d::settlePendingText(ctx, cs, true);
+        actual.clear();
+        for (const auto& event : ctx->InputEventsQueue) actual.push_back(event.EventId);
+        check("text compaction: later cancellation removes only remaining tool events",
+            actual == native && cs.pendingText.empty());
+        ctx->InputEventsQueue.clear();
+        tcx::imgui::inputText(widget, "consumed");
+        const int consumed = ctx->InputEventsQueue.Size;
+        tcx::imgui::inputText(widget, "queued");
+        const auto survivor = cs.pendingText.back();
+        ctx->InputEventsQueue.erase(ctx->InputEventsQueue.begin(), ctx->InputEventsQueue.begin() + consumed);
+        d::settlePendingText(ctx, cs);
+        check("text compaction: consumed prefix leaves later request queued",
+            cs.pendingText.size() == 1 && cs.pendingText[0].firstEvent == survivor.firstEvent);
+        d::settlePendingText(ctx, cs, true);
+    }
+}
+
+static void testPendingValueIndex() {
+    namespace d = tcx::imgui::detail;
+    using State = d::PendingValue::State;
+    ImGuiHarness h;
+    bool value = false;
+    h.setUi([&] {
+        ImGui::Begin("Indexed edits");
+        ImGui::Checkbox("value", &value);
+        ImGui::End();
+    });
+    h.frames(3);
+    const auto widget = *h.find("value");
+    auto& cs = d::contexts().at(h.context());
+    std::vector<int> callbacks;
+    bool removedBeforeCallback = true;
+    auto queue = [&](ImGuiID id, bool wanted, int token) {
+        std::vector<unsigned char> bytes;
+        std::string error;
+        d::valueToBytes(widget.value, wanted, bytes, error);
+        return d::queueValue(h.context(), id, widget.value.kind, widget.value.dataType,
+            widget.value.components, std::move(bytes), d::kPendingValueLifetime,
+            d::kValueCheckDeadline, [&, token] {
+                callbacks.push_back(token);
+                removedBeforeCallback &= cs.pendingValues.empty() && cs.pendingValueIndex.empty();
+            });
+    };
+    auto first = queue(widget.id, true, 1);
+    auto second = queue(widget.id, true, 2);
+    check("indexed edits: supersession defers callbacks and retains ordered records",
+        first->state == State::Superseded && second->state == State::Queued &&
+        callbacks.empty() && cs.pendingValues.size() == 2 && cs.pendingValueIndex.size() == 1);
+    // Keep another ID queued while compacting the superseded prefix.
+    auto other = queue(widget.id + 1, false, 3);
+    d::finishPendingValues(cs, h.context()->FrameCount);
+    check("indexed edits: partial compaction preserves survivors and callback order",
+        callbacks == std::vector<int>{1} && cs.pendingValues ==
+        std::vector<std::shared_ptr<d::PendingValue>>{second, other} && cs.pendingValueIndex.size() == 2);
+    callbacks.clear();
+    h.frame();
+    check("indexed edits: write keeps verification indexed and settles missing widget",
+        value && second->state == State::Verify && other->state == State::NotDrawn &&
+        callbacks == std::vector<int>{3} && cs.pendingValueIndex.size() == 1);
+    callbacks.clear();
+    auto newer = queue(widget.id, false, 4);
+    auto newest = queue(widget.id, false, 5);
+    check("indexed edits: new queue supersedes only Queued, preserving older verification",
+        second->state == State::Verify && newer->state == State::Superseded &&
+        newest->state == State::Queued && cs.pendingValueIndex.size() == 2);
+    h.frame();
+    check("indexed edits: older verification precedes newer write with ordered replies",
+        !value && second->state == State::Applied && newest->state == State::Verify &&
+        callbacks == std::vector<int>({2, 4}) && cs.pendingValueIndex.size() == 1);
+    callbacks.clear();
+    removedBeforeCallback = true;
+    h.frame();
+    check("indexed edits: finished records and index removed before callback",
+        newest->state == State::Applied && callbacks == std::vector<int>{5} && removedBeforeCallback);
+    callbacks.clear();
+    auto expired = queue(widget.id, true, 6);
+    d::clockSkew += d::kPendingValueLifetime;
+    d::settleOverdueValues(h.context());
+    auto replacement = queue(widget.id, true, 7);
+    check("indexed edits: deadline removes index before admitting the same ID again",
+        expired->state == State::Expired && replacement->state == State::Queued &&
+        callbacks == std::vector<int>{6} && cs.pendingValueIndex.size() == 1);
+    d::clockSkew = {};
+    callbacks.clear();
+    d::finishPendingValues(cs, h.context()->FrameCount, true);
+    auto reentrant = queue(widget.id, true, 8);
+    std::shared_ptr<d::PendingValue> fromCallback;
+    reentrant->onDone = [&] { fromCallback = queue(widget.id, false, 9); };
+    d::finishPendingValues(cs, h.context()->FrameCount, true);
+    check("indexed edits: callbacks can queue the same ID after compaction",
+        fromCallback && fromCallback->state == State::Queued &&
+        cs.pendingValues.size() == 1 && cs.pendingValueIndex.size() == 1);
+    d::finishPendingValues(cs, h.context()->FrameCount, true);
+    auto* extra = ImGui::CreateContext();
+    int tornDown = 0;
+    auto doomed = d::queueValue(extra, widget.id, widget.value.kind, widget.value.dataType,
+        widget.value.components, second->bytes, d::kPendingValueLifetime,
+        d::kValueCheckDeadline, [&] { ++tornDown; });
+    auto surviving = queue(widget.id, true, 10);
+    tcx::imgui::forgetContext(extra);
+    ImGui::DestroyContext(extra);
+    check("indexed edits: teardown settles its index without affecting another context",
+        tornDown == 1 && doomed->state == State::NotDrawn && !d::contexts().count(extra) &&
+        surviving->state == State::Queued && cs.pendingValueIndex.size() == 1);
+    d::finishPendingValues(cs, h.context()->FrameCount, true);
+}
+
 int main() {
     testToolLevels();
     tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
@@ -1334,5 +1475,7 @@ int main() {
     testRadioButtons();
     testCurrentValue();
     testInspectorRecord();
+    testPendingValueIndex();
+    testPendingTextCompaction();
     return harness::summary();
 }

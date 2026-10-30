@@ -90,19 +90,8 @@ void clickWidget(const WidgetInfo& w) {
     io.AddMouseButtonEvent(0, false);
 }
 
-bool inputText(const WidgetInfo& w, const std::string& text) {
+void inputText(const WidgetInfo& w, const std::string& text) {
     auto* ctx = ImGui::GetCurrentContext();
-    // Each UTF-8 byte produces at most one character event, plus 11 controls.
-    // Check both budgets before any Add*Event call or per-request allocation.
-    if (text.size() > detail::kMaxPendingBytesPerContext ||
-        !detail::admitPendingEdit(ctx, text.size() + 11,
-                                 (text.size() + 11) * sizeof(ImGuiInputEvent))) {
-        if (text.size() > detail::kMaxPendingBytesPerContext) {
-            ++detail::contexts()[ctx].rejectedPendingValues;
-            ++detail::rejectedPendingValues;
-        }
-        return false;
-    }
     const auto firstEvent = ctx->InputEventsNextEventId;
     auto& io = ImGui::GetIO();
     auto center = w.rect.GetCenter();
@@ -132,10 +121,12 @@ bool inputText(const WidgetInfo& w, const std::string& text) {
     io.AddKeyEvent(ImGuiKey_Enter, false);
     const ImU32 count = ctx->InputEventsNextEventId - firstEvent;
     if (count) {
-        detail::PendingText pending{firstEvent, count, text.size() + 11,
+        detail::PendingText pending{firstEvent, count,
                                     detail::now() + detail::kPendingValueLifetime};
         // Record only actual down/up pairs. If native input already held a
         // key/button, Add*Event emits no down and cancellation must not release it.
+        // At most five downs are injected, so this scans only this request's
+        // events a constant number of times, independent of earlier requests.
         const int begin = ctx->InputEventsQueue.Size - int(count);
         for (int i = begin; i < ctx->InputEventsQueue.Size; ++i) {
             const auto& down = ctx->InputEventsQueue[i];
@@ -155,7 +146,6 @@ bool inputText(const WidgetInfo& w, const std::string& text) {
         }
         detail::contexts()[ctx].pendingText.push_back(pending);
     }
-    return true;
 }
 
 std::string classifyWidget(ImGuiItemStatusFlags flags) {
@@ -629,12 +619,6 @@ void registerImGuiTools() {
                 auto pending = detail::queueValue(ctx, w.id, w.value.kind, w.value.dataType, w.value.components,
                                                   std::move(bytes), detail::kPendingValueLifetime,
                                                   detail::kValueCheckDeadline, nullptr);
-                if (!pending) {
-                    throw tc::mcp::internal::RequestRejected(
-                        "Pending tool edit queue full (limit " + std::to_string(detail::kMaxPendingValuesPerContext) +
-                        " per UI context, " + std::to_string(detail::kMaxPendingValuesTotal) +
-                        " total; input event and byte budgets also apply). Retry after pending edits settle. Nothing was written");
-                }
                 const void* token = pending.get();
                 pending->onDone = [token]() { tc::mcp::internal::drainDeferredResponses(token); };
                 std::string panel = w.windowName;
@@ -667,10 +651,7 @@ void registerImGuiTools() {
 
             std::string text = args.at("text").is_string() ? args.at("text").get<std::string>()
                                                             : args.at("text").dump();
-            bool accepted = false;
-            withContext(ref.ctx, [&] { accepted = inputText(*ref.widget, text); });
-            if (!accepted) throw tc::mcp::internal::RequestRejected(
-                "Pending tool edit queue full (edit, input event or byte limit). Retry after pending edits settle. Nothing was written");
+            withContext(ref.ctx, [&] { inputText(*ref.widget, text); });
             return json{
                 {"status", "ok"},
                 {"label", ref.widget->label},

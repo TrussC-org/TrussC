@@ -81,20 +81,12 @@ namespace {
 thread_local FontScratchScope* fontScratchScope = nullptr;
 thread_local int64_t fontScratchFailAfter = -1;
 thread_local size_t fontScratchLargest = 0;
-struct alignas(std::max_align_t) FontScratchBlock { size_t bytes; FontScratchScope* owner; };
 }
-FontScratchScope::FontScratchScope(size_t sourceBytes, size_t pixelBytes)
+FontScratchScope::FontScratchScope(size_t sourceBytes)
     : previous_(fontScratchScope), sourceBytes_(sourceBytes) {
-    // Bound (security): live outline/raster allocations and the metric-sized bitmap must fit the per-glyph working memory. Overflow rejects the whole glyph and is counted.
-    constexpr size_t workspace = 256u * 1024u * 1024u;
-    if (pixelBytes > workspace) { failed_ = true; limit_ = 0; }
-    else limit_ = workspace - pixelBytes;
     fontScratchScope = this;
 }
 FontScratchScope::~FontScratchScope() { fontScratchScope = previous_; }
-size_t fontScratchRemaining() {
-    return fontScratchScope ? fontScratchScope->limit_ - fontScratchScope->used_ : SIZE_MAX;
-}
 size_t fontScratchSourceBytes() { return fontScratchScope ? fontScratchScope->sourceBytes_ : SIZE_MAX; }
 bool fontScratchFailed() { return fontScratchScope && fontScratchScope->failed(); }
 void fontScratchFailure() { if (fontScratchScope) fontScratchScope->failed_ = true; }
@@ -104,27 +96,21 @@ void failFontScratchAllocationAfterForTests(int64_t successes) {
 }
 size_t fontScratchLargestAllocationForTests() { return fontScratchLargest; }
 void* fontScratchMalloc(size_t bytes) {
-    constexpr size_t overhead = sizeof(FontScratchBlock) + TC_STBTT_ALLOC_PADDING;
-    if (fontScratchFailed() || bytes > SIZE_MAX - overhead || bytes + overhead > fontScratchRemaining() ||
+    constexpr size_t overhead = TC_STBTT_ALLOC_PADDING;
+    // Bound (representation): allocation bytes plus padding must fit size_t; overflow rejects the glyph.
+    if (fontScratchFailed() || bytes > SIZE_MAX - overhead ||
         bytes > tcStbttMallocMax.load(std::memory_order_relaxed) || fontScratchFailAfter == 0) {
         fontScratchFailure(); return nullptr;
     }
     fontScratchLargest = std::max(fontScratchLargest, bytes);
-    auto* block = static_cast<FontScratchBlock*>(std::malloc(bytes + overhead));
-    if (!block) { fontScratchFailure(); return nullptr; }
+    auto* result = std::malloc(bytes + overhead);
+    if (!result) { fontScratchFailure(); return nullptr; }
     if (fontScratchFailAfter > 0) --fontScratchFailAfter;
-    block->bytes = bytes + overhead;
-    block->owner = fontScratchScope;
-    if (block->owner) block->owner->used_ += block->bytes;
-    auto* result = block + 1;
     std::memset(static_cast<char*>(static_cast<void*>(result)) + bytes, 0, TC_STBTT_ALLOC_PADDING);
     return result;
 }
 void fontScratchFree(void* pointer) {
-    if (!pointer) return;
-    auto* block = static_cast<FontScratchBlock*>(pointer) - 1;
-    if (block->owner) block->owner->used_ -= block->bytes;
-    std::free(block);
+    std::free(pointer);
 }
 }
 #define STBTT_malloc(x,u)  ((void)(u), trussc::internal::fontScratchMalloc(x))
@@ -147,10 +133,10 @@ static_assert(TC_STBTT_ALLOC_PADDING >= 2 * sizeof(stbtt_vertex),
 static std::atomic<int> tcStbttMaxVerticesValue{STBTT_DEFAULT_MAX_VERTICES};
 static std::atomic<int> tcStbttMaxPointsValue{STBTT_DEFAULT_MAX_POINTS};
 static int tcStbttMaxVertices() {
-    return (int)std::min(size_t(tcStbttMaxVerticesValue.load(std::memory_order_relaxed)), trussc::internal::fontScratchRemaining() / sizeof(stbtt_vertex));
+    return tcStbttMaxVerticesValue.load(std::memory_order_relaxed);
 }
 static int tcStbttMaxPoints() {
-    return (int)std::min(size_t(tcStbttMaxPointsValue.load(std::memory_order_relaxed)), trussc::internal::fontScratchRemaining() / (sizeof(stbtt__point) + sizeof(stbtt__edge)));
+    return tcStbttMaxPointsValue.load(std::memory_order_relaxed);
 }
 
 // Test hooks, declared in tc/graphics/tcFont.h.

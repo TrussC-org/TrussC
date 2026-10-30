@@ -23,8 +23,6 @@
 // Dummy resources have no native Metal objects to validate. Supply the Apple
 // checks here too, so tcGlobal does not pull in the native sokol implementation.
 namespace trussc::internal {
-bool shadowNativeValid(sg_image) { return true; }
-bool shadowNativeValid(sg_view) { return true; }
-bool shadowNativeValid(sg_sampler) { return true; }
+bool shadowTextureViewCreated(sg_view) { return true; }
 } // namespace trussc::internal
 #endif
