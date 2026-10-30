@@ -57,11 +57,11 @@ struct HttpResponse {
 
     bool ok() const { return statusCode >= 200 && statusCode < 300; }
 
-    // Parse within 16 MiB input, depth 64 and 1,000,000 nodes (including keys),
-    // plus an internal 128 MiB working budget that can reject earlier.
-    // Budget rejection returns an empty object and logs one first-loss Warning
-    // shared by JSON parsing across clients. Empty/invalid JSON also returns an
-    // empty object, without a budget Warning unless a budget was exceeded.
+    // Parse with nlohmann JSON; empty/invalid JSON returns an empty object.
+    // No separate JSON input-size, depth, node-count or working-memory caps.
+    // The parsed document can use many times the response body's memory.
+    // Apps receiving large untrusted JSON should lower setResponseLimit().
+    // Parsing leaves the response status, body and error unchanged.
     nlohmann::json json() const {
         return detail::parseResponseJson(body);
     }

@@ -30,11 +30,7 @@ extern "C" {
 namespace {
 using View = std::string_view;
 
-// Bound (security): edit-distance comparisons use at most 64*1024*1024 band cells per file; candidate visits remain O(reads * candidates). Overflow omits further suggestions and retains all undefined-read diagnostics.
-constexpr size_t suggestionCells = 64u * 1024u * 1024u;
 struct LintWork {
-    size_t suggestionWork = 0;
-    bool suggestionsExhausted = false;
     void ensureStack(lua_State* lua) {
         if (!lua_checkstack(lua, 4)) throw std::runtime_error("lint stack allocation failed");
     }
@@ -103,14 +99,8 @@ void scanProto(const Proto* p, View chunk, Reads& reads, Names& writes,
 
 // Optimal string alignment for distance <= 2, with a five-cell diagonal
 // band and three rows. Storage is constant; work is linear in name length.
-int editDistance(View a, View b, LintWork& budget) {
+int editDistance(View a, View b) {
     if (a.size() > b.size() + 2 || b.size() > a.size() + 2) return 3;
-    const size_t work = a.size() + 1;
-    if (budget.suggestionsExhausted || work > (suggestionCells - budget.suggestionWork) / 5) {
-        budget.suggestionsExhausted = true;
-        return 3;
-    }
-    budget.suggestionWork += work * 5;
     std::array<std::array<int, 5>, 3> rows;
     for (auto& row : rows) row.fill(3);
     std::array<size_t, 3> starts{};
@@ -148,15 +138,13 @@ bool iequals(View a, View b) {
             std::tolower(static_cast<unsigned char>(b[i]))) return false;
     return true;
 }
-View bestSuggestion(View name, const Candidates& candidates, LintWork& budget) {
-    if (budget.suggestionsExhausted) return {};
+View bestSuggestion(View name, const Candidates& candidates) {
     const int limit = name.size() < 4 ? 1 : 2;
     View best;
     int bestDist = 3, bestRank = 2, bestCi = 0;
     for (const auto& candidate : candidates) {
         if (candidate.first == name) continue;
-        int distance = editDistance(name, candidate.first, budget);
-        if (budget.suggestionsExhausted) return {};
+        int distance = editDistance(name, candidate.first);
         if (distance > limit) continue;
         int ci = iequals(name, candidate.first) ? 1 : 0;
         if (distance < bestDist || (distance == bestDist && candidate.second < bestRank) ||
@@ -237,14 +225,12 @@ std::vector<LuaLintIssue> tcxLuaLintUndefinedGlobals(
         std::set<std::tuple<View, int, View>> reported;
         for (const auto& scan : scans) {
             try {
-                budget.suggestionWork = 0;
-                budget.suggestionsExhausted = false;
                 std::vector<LuaLintIssue> fileIssues;
                 for (const auto& read : scan.reads) {
                     if (writes.count(read.name)) continue;
                     if (globalDefined(lua, read.name.data()) ||
                         !reported.emplace(read.chunk, read.line, View(read.name)).second) continue;
-                    View suggestion = bestSuggestion(read.name, candidates, budget);
+                    View suggestion = bestSuggestion(read.name, candidates);
                     fileIssues.push_back({std::string(read.chunk), read.line, std::string(read.name), std::string(suggestion)});
                 }
                 issues.insert(issues.end(), std::make_move_iterator(fileIssues.begin()), std::make_move_iterator(fileIssues.end()));
