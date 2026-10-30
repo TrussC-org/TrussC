@@ -104,8 +104,59 @@ template<class T> void overflowWarnings() {
         check("Warning waits for Main drain", warnings == episode - 1);
         internal::drainMainThreadQueue();
         check("one Warning per episode including repeated overflow", warnings == episode);
-        check("drain rearms overflow Warning", !External<T>::diagnostics(source)->overflowing);
+        auto store = External<T>::diagnostics(source);
+        check("full drain rearms overflow Warning", store->pending == 0 && !store->overflowing);
     }
+}
+
+template<class T> void sustainedOverflowWarnings() {
+    internal::drainMainThreadQueue();
+    int warnings = 0, calls = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning && event.message.find(
+                "[Event] Main delivery limit (2) reached;") == 0) {
+            check("sustained overflow Warning runs on Main", isMainThread());
+            ++warnings;
+        }
+    });
+    Event<T> source;
+    source.setMainThreadDeliveryLimit(2);
+    auto listener = source.listen([&](auto&...) { ++calls; }, Deliver::Main);
+    auto emit = [&] {
+        if constexpr (std::is_void_v<T>) return External<T>::notify(source);
+        else { T value{}; return External<T>::notify(source, value); }
+    };
+    std::thread initial([&] {
+        check("sustained episode accepts first copy", emit());
+        check("sustained episode fills backlog", emit());
+        check("sustained episode starts overflow", !emit());
+    });
+    initial.join();
+    auto store = External<T>::diagnostics(source);
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        // Drain exactly one delivery, including any Warning ahead of it.
+        // Release its closure before refilling so its lease returns one slot.
+        int before = calls;
+        while (calls == before) {
+            std::function<void()> next;
+            if (!internal::mainThreadQueue().tryReceive(next)) {
+                check("sustained episode has a queued copy", false);
+                break;
+            }
+            next();
+        }
+        check("partial drain keeps overflow active", store->pending == 1 && store->overflowing);
+        std::thread refill([&] {
+            check("sustained episode refills one slot", emit());
+            check("sustained episode drops at limit", !emit());
+        });
+        refill.join();
+        check("sustained backlog stays at limit", store->pending == 2 && store->overflowing);
+    }
+    internal::drainMainThreadQueue();
+    check("sustained overload logs exactly one Warning", warnings == 1);
+    check("sustained accepted copies all run", calls == 102);
+    check("sustained episode rearms only after full drain", store->pending == 0 && !store->overflowing);
 }
 
 void allocationFailure() {
@@ -543,6 +594,8 @@ TC_CORE_TEST_MAIN() {
     getMainThreadId();
     overflowWarnings<int>();
     overflowWarnings<void>();
+    sustainedOverflowWarnings<int>();
+    sustainedOverflowWarnings<void>();
     lockOrder();
     optionalTransportLimit<UdpReceiveEventArgs>();
     optionalTransportLimit<tcx::websocket::WebSocketEventArgs>();

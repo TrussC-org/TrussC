@@ -19,7 +19,7 @@ bool ExternalEventScope::isExternal(const void* payload) {
 ExternalDeliveryStore::Lease::~Lease() {
     std::lock_guard<std::mutex> lock(store->mutex);
     --store->pending;
-    if (!store->deliveryLimit || store->pending < store->deliveryLimit) store->overflowing = false;
+    if (store->pending == 0) store->overflowing = false;
 }
 
 std::shared_ptr<ExternalDeliveryStore::Lease> ExternalDeliveryStore::reserve() {

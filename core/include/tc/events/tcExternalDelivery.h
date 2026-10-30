@@ -32,7 +32,7 @@ struct ExternalDeliveryStore : std::enable_shared_from_this<ExternalDeliveryStor
     };
     std::shared_ptr<Lease> reserve();
     mutable std::mutex mutex;
-    // Bound (network input): opt-in backlog of queued/executing Main copies; 0 = unlimited, over the limit a whole new copy is rejected with one Warning per overflow episode.
+    // Bound (network input): opt-in backlog of queued/executing Main copies; 0 = unlimited, copies beyond the limit are dropped; a Warning is logged when the backlog reaches the limit, and again only after the backlog has fully drained and fills up again.
     size_t deliveryLimit = 0;
     size_t pending = 0;
     bool overflowing = false;
