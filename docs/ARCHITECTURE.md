@@ -450,13 +450,12 @@ staging cleanup; diagnostics are delivered after unlocking within the recorder's
 Delivery barrier.
 Busy opportunities are counted and skipped with wall/audio PTS gaps preserved.
 A replacement start is refused while the previous operation remains pending.
-MCP captures use #878's existing admission policy, screenshot credits and request
-queue. Each backend reconciles its selected source extent through #891's existing
-WorkBudget high-water reservation before allocation, charging growth once.
-Two-stage workers destroy captured image payloads before releasing working-memory
-credit, including on exceptions. Native jobs retain the same budget and optional
-save credit until cleanup, even after a synchronous timeout; an abandoned late
-consumer skips output allocation.
+MCP captures use the request queue and outstanding screenshot slots, without
+estimating or reserving bytes for pixels, encoders, decoders or replies.
+Two-stage workers destroy captured image payloads after completion, including
+on exceptions. Native jobs retain the optional screenshot slot until cleanup,
+even after a synchronous timeout; an abandoned late consumer skips output
+allocation.
 
 **Node Style Isolation:**
 

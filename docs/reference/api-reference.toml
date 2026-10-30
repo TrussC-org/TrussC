@@ -23051,6 +23051,7 @@ description.en = "Saves CPU pixels to an image file."
 description.ja = "CPU ピクセルを画像ファイルに保存する。"
 description.ko = "CPU 픽셀을 이미지 파일로 저장한다."
 details.en = '''
+- PNG encoding under real memory exhaustion is a known limitation of stb_image_write (the process may abort inside the encoder).
 - OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even an empty `std::string` or container, including a move on return, can allocate a proxy; persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging are best effort under OOM.
 - Selects JPEG for `.jpg` or `.jpeg`, BMP for `.bmp`, and PNG for every other extension, ignoring extension case and preserving the requested filename. JPEG quality is 90.
 - Returns `SaveResult`; unallocated data, a null data pointer, or F32 format returns `SaveError::WriteFailed`.
@@ -23059,6 +23060,7 @@ details.en = '''
 - Atomic replacement does not guarantee durability after power loss.
 '''
 details.ja = '''
+- 実際のメモリ枯渇時の PNG エンコードには stb_image_write の既知の制約があり、エンコーダー内でプロセスが異常終了する場合があります。
 - OOM からの回復は Release ビルド、またはイテレータデバッグ無効時（MSVC では `_ITERATOR_DEBUG_LEVEL=0`）に対応します。イテレータデバッグが有効だと、空の `std::string` やコンテナ、返却時のムーブでもプロキシを確保するため、持続的なメモリ確保失敗は `noexcept` 操作内で終了を招く場合があります。OOM 時の診断文とログは可能な範囲で出力します。
 - 拡張子の大文字小文字を区別せず、`.jpg`・`.jpeg` は JPEG、`.bmp` は BMP、それ以外は PNG で保存し、指定したファイル名を保持します。JPEG の品質は 90 です。
 - `SaveResult` を返します。データが未確保、データポインタが null、または F32 形式の場合は `SaveError::WriteFailed` を返します。
@@ -23067,6 +23069,7 @@ details.ja = '''
 - アトミックな置き換えは、電源断時のデータの永続性を保証しません。
 '''
 details.ko = '''
+- 실제 메모리 고갈 시 PNG 인코딩에는 stb_image_write의 알려진 제약이 있으며, 인코더 내부에서 프로세스가 중단될 수 있습니다.
 - OOM 복구는 Release 빌드 또는 반복자 디버깅을 끈 경우(MSVC의 `_ITERATOR_DEBUG_LEVEL=0`)에 지원합니다. 반복자 디버깅이 켜져 있으면 빈 `std::string`이나 컨테이너 및 반환 시 이동도 프록시를 할당할 수 있어 지속적인 할당 실패가 `noexcept` 연산에서 종료를 일으킬 수 있습니다. OOM 시 진단 메시지와 로그는 가능한 범위에서 출력합니다.
 - 확장자의 대소문자를 구분하지 않고 `.jpg`와 `.jpeg`는 JPEG, `.bmp`는 BMP, 그 외는 PNG로 저장하며 요청한 파일명을 유지합니다. JPEG 품질은 90입니다.
 - `SaveResult`를 반환합니다. 데이터가 할당되지 않았거나 데이터 포인터가 null이거나 F32 형식이면 `SaveError::WriteFailed`를 반환합니다.
@@ -50825,6 +50828,7 @@ description.en = "Queues a screenshot of the rendered window."
 description.ja = "描画済みウィンドウのスクリーンショット保存を予約する。"
 description.ko = "렌더링된 윈도우의 스크린샷 저장을 예약한다."
 details.en = '''
+- PNG encoding under real memory exhaustion is a known limitation of stb_image_write (the process may abort inside the encoder).
 - Call from main-thread setup, update, draw, or event callbacks. Captures the current window's completed frame after `present()`, even when called while drawing into an Fbo.
 - Returns `true` when the destination is prepared and capture is queued, not when the file is written. Native platforms check the path and create missing parent folders before returning; an empty path or preparation failure returns `false`.
 - Native relative paths resolve against the data folder. Paths inside an application bundle on macOS/iOS are refused with an Error directing you to `getUserDataPath()`.
@@ -50832,6 +50836,7 @@ details.en = '''
 - A request ensures a frame in the main window even when event-driven rendering is idle. Secondary-window requests wait for that window's next rendered frame.
 '''
 details.ja = '''
+- 実際のメモリ枯渇時の PNG エンコードには stb_image_write の既知の制約があり、エンコーダー内でプロセスが異常終了する場合があります。
 - メインスレッドの setup、update、draw、イベントコールバックから呼び出してください。Fbo に描画している間に呼んでも、`present()` 後に現在のウィンドウの完成したフレームを取得します。
 - 保存先の準備ができ、キャプチャを予約すると `true` を返します。ファイルの書き込み完了を意味するものではありません。ネイティブ環境では、戻る前にパスを確認して不足する親フォルダーを作成します。空のパスや準備の失敗では `false` を返します。
 - ネイティブ環境の相対パスはデータフォルダーを基準に解決します。macOS/iOS のアプリバンドル内への保存は拒否し、`getUserDataPath()` を案内する Error を記録します。
@@ -50839,6 +50844,7 @@ details.ja = '''
 - メインウィンドウでは、イベント駆動描画が待機中でもフレームを描画します。サブウィンドウへの要求は、そのウィンドウが次に描画するフレームを待ちます。
 '''
 details.ko = '''
+- 실제 메모리 고갈 시 PNG 인코딩에는 stb_image_write의 알려진 제약이 있으며, 인코더 내부에서 프로세스가 중단될 수 있습니다.
 - 메인 스레드의 setup, update, draw, 이벤트 콜백에서 호출하세요. Fbo에 그리는 동안 호출해도 `present()` 후 현재 윈도우의 완성된 프레임을 캡처합니다.
 - 저장 경로 준비와 캡처 예약이 완료되면 `true`를 반환합니다. 파일 쓰기가 끝났다는 뜻은 아닙니다. 네이티브 환경에서는 반환 전에 경로를 확인하고 없는 상위 폴더를 만듭니다. 빈 경로나 준비 실패는 `false`를 반환합니다.
 - 네이티브 환경의 상대 경로는 데이터 폴더를 기준으로 해석합니다. macOS/iOS의 앱 번들 내부 경로는 거부하고 `getUserDataPath()`를 안내하는 Error를 기록합니다.
@@ -62683,46 +62689,31 @@ description.en = "Defines the limits for accepting and processing MCP requests."
 description.ja = "MCP 要求の受付と処理の上限を定義する。"
 description.ko = "MCP 요청의 수락 및 처리 한도를 정의한다."
 details.en = '''
-- All fields are positive `size_t` values. Settings are shared across the process; change them through `mcp::setAdmissionLimits` while HTTP is stopped and no work remains outstanding.
-- HTTP defaults are `bodyBytes = 67108864` (64 MiB), `outstanding = 32` and `workers = 4`.
-- Processing defaults are `jsonDepth = 64`, `histogramBins = 4096`, `gridCells = 65536`, `operations = 256`, `replyBytes = 67108864` (64 MiB) and `workingBytes = 268435456` (256 MiB).
-- Excess HTTP body data returns 413 and closes the connection; excess connection admission closes the new socket. Header/trailer count and aggregate size have no MCP limit; only upstream's default per-line header limit, payload limit and read timeout remain. Upstream metadata allocations are outside MCP working-memory accounting.
-- Histogram bins, grid cell products and operation counts are checked before analysis runs; exceeding a limit rejects the operation or request instead of truncating its input.
-- Reply construction, including JSON escaping, must fit the reply limit. Concurrent requests share the working-memory limit for retained request copies, parsing, image copies, encoders, audio scratch space and results; exceeding a limit rejects admission or returns an error, including HTTP 503 when an HTTP reply cannot be produced.
-- Encoded image input must fit `INT_MAX` bytes and its working-memory allowance before reading. Decoded pixels, retained copies and decoder workspace are checked before decoding.
-- Image codec allocations must fit their reserved workspace, including allocation headers that must fit `size_t`; exceeding either bound makes the allocator return null and is counted as a rejection.
-- JSON nesting is checked during parsing against `jsonDepth` before recursive copies or serialization; exceeding the limit rejects the request.
-- Audio snapshot copies and scratch/result size products are checked before allocation. FFT lengths must fit `int` and the fixed audio-history ring; excessive lengths return an error. The audio callback does not allocate for these reads.
-- Limit rejections increment counters and log a Warning on the first rejection for each limit store. Counters and first-Warning state persist for the process lifetime across queries and HTTP restarts; configuration rejection logging follows `mcp::setAdmissionLimits`.
-- Invalid chunk sizes follow upstream parsing and return 400; they do not increment admission counters.
+- PNG encoding under real memory exhaustion is a known limitation of stb_image_write (the process may abort inside the encoder).
+- HTTP defaults are a 64 MiB body, 8192-byte request lines, 64 KiB / 128 wire headers, 32 sockets and 4 workers. Body overflow returns 413; header overflow returns 431; excess sockets are closed. The same bounds apply independently to chunked trailers before storage.
+- Change positive settings with `setAdmissionLimits` while HTTP is stopped and no connections or screenshot slots remain outstanding. Counters and each store's first Warning persist across HTTP restarts.
+- `replyBytes` and `workingBytes` were removed. MCP no longer estimates or reserves memory for tool work, screenshots, image analysis, audio scratch or replies. Replies are serialized once. Allocation failure returns an MCP error.
+- A 3840×2160 screenshot can be saved without changing limits. Local image analysis uses normal Pixels loading; URL/memory image loading retains its encoded-size limit.
+- Existing JSON depth (64), histogram bins (4096), grid cells (65536) and operation count (256) checks remain. FFT lengths must fit `int` and the fixed audio-history ring; the audio callback does not allocate for these reads.
+- A socket-level exception boundary retires failed connections. Refusals close the connection.
 '''
 details.ja = '''
-- すべてのフィールドは正の `size_t` 値です。設定はプロセス全体で共有します。HTTP が停止し、未完了の作業がない状態で `mcp::setAdmissionLimits` を使って変更してください。
-- HTTP の既定値は `bodyBytes = 67108864`（64 MiB）、`outstanding = 32`、`workers = 4` です。
-- 処理の既定値は `jsonDepth = 64`、`histogramBins = 4096`、`gridCells = 65536`、`operations = 256`、`replyBytes = 67108864`（64 MiB）、`workingBytes = 268435456`（256 MiB）です。
-- HTTP 本文の超過は 413 を返し、接続を閉じます。接続の受付上限を超えると、新しいソケットを閉じます。ヘッダーとトレーラーの個数・合計サイズに MCP の上限はなく、上流の既定のヘッダー行上限、ペイロード上限、読み取りタイムアウトだけが残ります。上流のメタデータ確保は MCP の作業メモリ計上の対象外です。
-- 解析の実行前にヒストグラムのビン数、グリッドのセル数の積、操作数を検査します。上限を超えた場合は入力を切り詰めず、操作または要求を拒否します。
-- JSON のエスケープを含む応答の生成は応答上限内に収める必要があります。同時要求は、保持する要求のコピー、解析、画像のコピー、エンコーダー、音声の作業領域と結果に対して作業メモリ上限を共有します。超過すると受付を拒否するかエラーを返し、HTTP 応答を生成できない場合などは HTTP 503 になります。
-- エンコード済み画像の入力は、読み取り前に `INT_MAX` バイト以下かつ作業メモリの許容範囲内である必要があります。デコード後のピクセル、保持するコピー、デコーダーの作業領域はデコード前に検査します。
-- 画像コーデックのメモリ確保は予約済みの作業領域内に収める必要があり、管理情報を含むサイズは `size_t` に収まる必要があります。どちらかを超えるとアロケーターは null を返し、拒否として計数します。
-- JSON のネストは解析中に `jsonDepth` と比較し、再帰的なコピーやシリアライズより前に検査します。上限を超えると要求を拒否します。
-- 音声スナップショットのコピーと、作業領域や結果のサイズの積は、メモリ確保前に検査します。FFT 長は `int` と固定長の音声履歴リングに収まる必要があり、超過するとエラーを返します。これらの読み取りのために音声コールバックがメモリを確保することはありません。
-- 上限による拒否はカウンターを増やし、上限を管理する領域ごとの最初の拒否で Warning を記録します。カウンターと初回 Warning の状態は、照会や HTTP の再起動後もプロセスの生存期間中保持します。設定の拒否時のログは `mcp::setAdmissionLimits` に従います。
-- 不正なチャンクサイズは上流の解析に従って 400 を返し、受付拒否カウンターには含みません。
+- 実際のメモリ枯渇時の PNG エンコードには stb_image_write の既知の制約があり、エンコーダー内でプロセスが異常終了する場合があります。
+- HTTP の既定値は本文 64 MiB、要求行 8192 バイト、wire 上のヘッダー 64 KiB／128 件、ソケット 32 件、ワーカー 4 件です。本文超過は 413、ヘッダー超過は 431 を返し、超過した接続は閉じます。チャンク形式のトレーラーにも同じ上限を別々に適用し、保存前に検査します。
+- HTTP が停止し、接続とスクリーンショット枠が残っていない状態で `setAdmissionLimits` に正の値を渡します。カウンターと領域ごとの初回 Warning は HTTP の再起動後も保持します。
+- `replyBytes` と `workingBytes` は削除しました。ツール、スクリーンショット、画像解析、音声の作業領域、応答のためのメモリ見積もりや予約は行いません。応答のシリアライズは一度です。メモリ確保に失敗すると MCP エラーを返します。
+- 上限を変更せずに 3840×2160 のスクリーンショットを保存できます。ローカル画像の解析は通常の Pixels 読み込みを使います。URL／メモリからの画像読み込みのエンコード済みサイズ上限は維持します。
+- 既存の JSON 深度 64、ヒストグラム 4096 ビン、グリッド 65536 セル、操作数 256 の検査は維持します。FFT 長は `int` と固定の音声履歴リングに収めます。音声コールバックはこれらの読み取りのためにメモリを確保しません。
+- ソケット入口で例外を捕捉し、失敗した接続を終了します。拒否後は接続を閉じます。
 '''
 details.ko = '''
-- 모든 필드는 양수인 `size_t` 값입니다. 설정은 프로세스 전체에서 공유합니다. HTTP가 중지되고 미완료 작업이 없는 상태에서 `mcp::setAdmissionLimits`로 변경하세요.
-- HTTP 기본값은 `bodyBytes = 67108864`(64 MiB), `outstanding = 32`, `workers = 4`입니다.
-- 처리 기본값은 `jsonDepth = 64`, `histogramBins = 4096`, `gridCells = 65536`, `operations = 256`, `replyBytes = 67108864`(64 MiB), `workingBytes = 268435456`(256 MiB)입니다.
-- HTTP 본문이 초과하면 413을 반환하고 연결을 닫습니다. 연결 수락 한도를 초과하면 새 소켓을 닫습니다. 헤더와 트레일러 개수 및 총크기에 MCP 한도는 없으며 업스트림 기본 헤더 줄 한도, 페이로드 한도 및 읽기 타임아웃만 유지됩니다. 업스트림 메타데이터 할당은 MCP 작업 메모리 계산 대상이 아닙니다.
-- 분석 실행 전에 히스토그램 빈 수, 그리드 셀 수의 곱, 연산 수를 검사합니다. 한도를 초과하면 입력을 잘라내지 않고 연산 또는 요청을 거부합니다.
-- JSON 이스케이프를 포함한 응답 생성은 응답 한도 내에 있어야 합니다. 동시 요청은 유지되는 요청 복사본, 파싱, 이미지 복사본, 인코더, 오디오 작업 공간 및 결과에 대한 작업 메모리 한도를 공유합니다. 초과하면 수락을 거부하거나 오류를 반환하며, HTTP 응답을 생성할 수 없는 경우 등에는 HTTP 503을 반환합니다.
-- 인코딩된 이미지 입력은 읽기 전에 `INT_MAX` 바이트 이하이며 작업 메모리 허용 범위 내에 있어야 합니다. 디코딩된 픽셀, 유지되는 복사본 및 디코더 작업 공간은 디코딩 전에 검사합니다.
-- 이미지 코덱의 메모리 할당은 예약된 작업 공간 내에 있어야 하며, 관리 헤더를 포함한 크기가 `size_t`에 들어가야 합니다. 어느 한도를 초과해도 할당자는 null을 반환하며 거부 횟수에 포함합니다.
-- JSON 중첩은 파싱 중에 `jsonDepth`와 비교하여 재귀적 복사나 직렬화 전에 검사합니다. 한도를 초과하면 요청을 거부합니다.
-- 오디오 스냅샷 복사본과 작업 공간 및 결과 크기의 곱은 할당 전에 검사합니다. FFT 길이는 `int` 및 고정 크기 오디오 이력 링에 들어가야 하며 초과하면 오류를 반환합니다. 오디오 콜백은 이러한 읽기를 위해 메모리를 할당하지 않습니다.
-- 한도로 인한 거부는 카운터를 증가시키며 한도를 관리하는 영역별 첫 거부에 Warning을 기록합니다. 카운터와 첫 Warning 상태는 조회나 HTTP 재시작 후에도 프로세스 수명 동안 유지합니다. 설정 거부 시 로그는 `mcp::setAdmissionLimits`를 따릅니다.
-- 잘못된 청크 크기는 업스트림 파싱에 따라 400을 반환하며 수락 거부 카운터에 포함하지 않습니다.
+- 실제 메모리 고갈 시 PNG 인코딩에는 stb_image_write의 알려진 제약이 있으며, 인코더 내부에서 프로세스가 중단될 수 있습니다.
+- HTTP 기본값은 본문 64 MiB, 요청 줄 8192바이트, wire 헤더 64 KiB / 128개, 소켓 32개, 워커 4개입니다. 본문 초과는 413, 헤더 초과는 431을 반환하며 초과 소켓은 닫습니다. 청크 트레일러에도 같은 한도를 별도로 적용하며 저장 전에 검사합니다.
+- HTTP가 중지되고 연결과 스크린샷 슬롯이 남아 있지 않을 때 `setAdmissionLimits`로 양수 값을 설정합니다. 카운터와 영역별 첫 Warning 상태는 HTTP 재시작 후에도 유지됩니다.
+- `replyBytes`와 `workingBytes`를 제거했습니다. 도구 작업, 스크린샷, 이미지 분석, 오디오 작업 공간과 응답의 메모리를 추정하거나 예약하지 않습니다. 응답은 한 번 직렬화하며 실제 할당 실패는 MCP 오류를 반환합니다.
+- 한도를 바꾸지 않고 3840×2160 스크린샷을 저장할 수 있습니다. 로컬 이미지 분석은 일반 Pixels 로드를 사용합니다. URL/메모리 이미지 로드의 인코딩 크기 한도는 유지합니다.
+- 기존 JSON 깊이 64, 히스토그램 4096개 구간, 그리드 65536셀, 연산 수 256 검사는 유지합니다. FFT 길이는 `int`와 고정 오디오 이력 링에 들어가야 하며 오디오 콜백은 이러한 읽기를 위해 할당하지 않습니다.
+- 소켓 진입점에서 예외를 잡고 실패한 연결을 종료합니다. 거부 후에는 연결을 닫습니다.
 '''
 
 ["mcp::setAdmissionLimits"]
@@ -62731,19 +62722,16 @@ description.en = "Replaces the MCP admission limits."
 description.ja = "MCP の受付上限を置き換える。"
 description.ko = "MCP 수락 한도를 교체한다."
 details.en = '''
-- Accepts `const mcp::AdmissionLimits&` and returns `true` after replacing all settings; call while HTTP is stopped and no admitted connections or reserved working memory remain.
-- Returns `false` if any field is zero, HTTP is active, or work remains outstanding. All previous settings remain unchanged; each rejected call logs one Warning and increments the Configuration rejection counter.
-- Defaults, memory accounting and rejection-counter lifetime are described in `mcp::AdmissionLimits`.
+- Replaces positive settings while HTTP is stopped and no admitted connections or screenshot slots remain. Returns false and preserves settings otherwise, logging one Warning per rejected call and incrementing the Configuration counter.
+- The `replyBytes` and `workingBytes` fields have been removed. Existing ingress and tool-argument settings remain; see `mcp::AdmissionLimits`.
 '''
 details.ja = '''
-- `const mcp::AdmissionLimits&` を受け取り、すべての設定を置き換えると `true` を返します。HTTP が停止し、受付済みの接続と予約済みの作業メモリが残っていない状態で呼び出してください。
-- いずれかのフィールドが 0、HTTP が動作中、または未完了の作業がある場合は `false` を返します。以前の設定をすべて保持し、拒否した呼び出しごとに Warning を 1 回記録して Configuration 拒否カウンターを増やします。
-- 既定値、メモリの計上、拒否カウンターの有効期間は `mcp::AdmissionLimits` を参照してください。
+- HTTP が停止し、接続とスクリーンショット枠が残っていない状態で正の設定値を置き換えます。それ以外は false を返して設定を保持し、呼び出しごとに Warning と Configuration カウンターで記録します。
+- `replyBytes` と `workingBytes` は削除しました。既存の受付とツール引数の設定は維持します。`mcp::AdmissionLimits` を参照してください。
 '''
 details.ko = '''
-- `const mcp::AdmissionLimits&`를 받아 모든 설정을 교체하면 `true`를 반환합니다. HTTP가 중지되고 수락된 연결과 예약된 작업 메모리가 남아 있지 않을 때 호출하세요.
-- 필드 중 하나라도 0이거나 HTTP가 실행 중이거나 미완료 작업이 있으면 `false`를 반환합니다. 이전 설정을 모두 유지하며 거부된 호출마다 Warning을 한 번 기록하고 Configuration 거부 카운터를 증가시킵니다.
-- 기본값, 메모리 계산 및 거부 카운터 수명은 `mcp::AdmissionLimits`를 참조하세요.
+- HTTP가 중지되고 연결과 스크린샷 슬롯이 남아 있지 않을 때 양수 설정을 교체합니다. 그 외에는 false를 반환하고 설정을 유지하며 호출마다 Warning과 Configuration 카운터로 기록합니다.
+- `replyBytes`와 `workingBytes` 필드를 제거했습니다. 기존 수신 및 도구 인수 설정은 유지합니다. `mcp::AdmissionLimits`를 참조하세요.
 '''
 
 ["mcp::getAdmissionLimits"]
@@ -62877,66 +62865,18 @@ description.ko = "이미지 분석 요청당 연산 수를 제한한다."
 details.en = '''
 - The default maximum is 256 elements in the request's `ops` array.
 - The operation count, histogram bin counts and grid cell counts are checked before image loading or capture and before any analysis operation runs. Exceeding a limit returns an error without executing any operation.
-- Reply and working-memory limits also apply to the combined operations. For configuration requirements, see `mcp::setAdmissionLimits`.
+- For configuration requirements, see `mcp::setAdmissionLimits`.
 '''
 details.ja = '''
 - 既定の上限は要求の `ops` 配列の要素数で 256 です。
 - 操作数・ヒストグラムのビン数・グリッドのセル数は、画像の読み込みやキャプチャ、およびすべての解析操作の実行より前に確認します。上限を超えると、どの操作も実行せずにエラーを返します。
-- 操作全体には応答と作業メモリの上限も適用されます。設定条件は `mcp::setAdmissionLimits` を参照してください。
+- 設定条件は `mcp::setAdmissionLimits` を参照してください。
 '''
 details.ko = '''
 - 기본 한도는 요청의 `ops` 배열 요소 수로 256개입니다.
 - 연산 수, 히스토그램 구간 수, 그리드 셀 수는 이미지 로드나 캡처 및 모든 분석 연산의 실행 전에 확인합니다. 한도를 초과하면 어떤 연산도 실행하지 않고 오류를 반환합니다.
-- 전체 연산에는 응답과 작업 메모리 한도도 적용됩니다. 설정 조건은 `mcp::setAdmissionLimits`를 참조하세요.
-'''
-
-["mcp::AdmissionLimits::replyBytes"]
-category = "mcp"
-description.en = "Limits MCP reply size."
-description.ja = "MCP 応答のサイズを制限する。"
-description.ko = "MCP 응답 크기를 제한한다."
-details.en = '''
-- The default is 67108864 bytes (64 MiB). Serialized JSON replies, including their JSON-RPC envelope and escaped text, are checked against this limit.
-- Reply construction also uses cumulative size estimates, so a request can fail before its serialized reply reaches the limit. Exceeding the allowance can return an analysis or tool error, or HTTP 503 directly.
-- For configuration requirements, see `mcp::setAdmissionLimits`.
-'''
-details.ja = '''
-- 既定値は 67108864 バイト（64 MiB）です。JSON-RPC の外枠とエスケープ後のテキストを含む、シリアライズした JSON 応答をこの上限で確認します。
-- 応答の構築時にはサイズの見積もりも累積するため、シリアライズした応答が上限に達する前に要求が失敗する場合があります。許容量を超えると、解析やツールのエラー、または直接 HTTP 503 を返す場合があります。
-- 設定条件は `mcp::setAdmissionLimits` を参照してください。
-'''
-details.ko = '''
-- 기본값은 67108864바이트(64 MiB)입니다. JSON-RPC의 바깥 구조와 이스케이프 처리된 텍스트를 포함한 직렬화된 JSON 응답을 이 한도로 확인합니다.
-- 응답 구성 시 크기 추정치도 누적하므로 직렬화된 응답이 한도에 도달하기 전에 요청이 실패할 수 있습니다. 허용량을 초과하면 분석 또는 도구 오류를 반환하거나 HTTP 503을 직접 반환할 수 있습니다.
 - 설정 조건은 `mcp::setAdmissionLimits`를 참조하세요.
 '''
-
-["mcp::AdmissionLimits::workingBytes"]
-category = "mcp"
-description.en = "Limits aggregate MCP working-memory reservations."
-description.ja = "MCP 作業メモリの予約量の合計を制限する。"
-description.ko = "MCP 작업 메모리 예약량의 합계를 제한한다."
-details.en = '''
-- The default is 268435456 bytes (256 MiB), shared across concurrent MCP connections and requests, including deferred work.
-- Memory allowances are reserved before allocation and retained until the corresponding work budget is released. Reservations include estimates for input copies, JSON parsing, analysis and reply construction.
-- Insufficient allowance during connection admission closes the new socket before reading the request. Later failures can return an error response or HTTP 503, depending on where the reservation fails.
-- For configuration requirements, see `mcp::setAdmissionLimits`.
-'''
-details.ja = '''
-- 既定値は 268435456 バイト（256 MiB）で、遅延処理を含む、同時進行中の MCP 接続と要求で共有します。
-- メモリの許容量は確保前に予約し、対応する作業の予算が解放されるまで保持します。予約量には、入力のコピー・JSON の解析・解析処理・応答の構築に必要な量の見積もりが含まれます。
-- 接続の受付時に許容量が不足すると、要求を読む前に新しいソケットを閉じます。その後は、予約に失敗した処理箇所に応じて、エラー応答または HTTP 503 を返す場合があります。
-- 設定条件は `mcp::setAdmissionLimits` を参照してください。
-'''
-details.ko = '''
-- 기본값은 268435456바이트(256 MiB)이며 지연 처리를 포함하여 동시에 진행 중인 MCP 연결과 요청이 공유합니다.
-- 메모리 허용량은 할당 전에 예약하며 해당 작업의 예산이 해제될 때까지 유지합니다. 예약량에는 입력 복사, JSON 파싱, 분석 및 응답 구성에 필요한 크기의 추정치가 포함됩니다.
-- 연결 수락 시 허용량이 부족하면 요청을 읽기 전에 새 소켓을 닫습니다. 이후에는 예약이 실패한 처리 단계에 따라 오류 응답 또는 HTTP 503을 반환할 수 있습니다.
-- 설정 조건은 `mcp::setAdmissionLimits`를 참조하세요.
-'''
-
-["mcp::McpRequest::budget"]
-hide = true
 
 ["mcp::AdmissionLimits::jsonDepth"]
 category = "mcp"
