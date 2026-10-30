@@ -680,10 +680,15 @@ int main() {
         check("unicast: message received", ok);
         check("unicast: address == /uni", ok && got.getAddress() == "/uni");
         check("unicast: arg == 42", ok && got.getArgCount() == 1 && got.getArgAsInt(0) == 42);
+        // T/F tags carry no payload: 5000 elements exceed the former 4096 cap
+        // while the whole datagram fits macOS's default 9216-byte UDP limit.
+        constexpr size_t sampleCount = 5000;
         OscMessage samples("/samples");
-        for (int i = 0; i < 5000; ++i) samples.addFloat(float(i));
+        for (size_t i = 0; i < sampleCount; ++i) samples.addBool(i % 2 == 0);
+        check("unicast: >4096 elements fit the platform datagram limit",
+              samples.getArgCount() > 4096 && samples.toBytes().size() <= 9216);
         rx.hasNewMessage();
-        check("unicast: send 5000 floats", tx.sendTo("127.0.0.1", portUni, samples));
+        check("unicast: send 5000 bools", tx.sendTo("127.0.0.1", portUni, samples));
         bool receivedSamples = false;
         const auto sampleDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (!receivedSamples && std::chrono::steady_clock::now() < sampleDeadline) {
@@ -692,11 +697,14 @@ int main() {
             }
             if (!receivedSamples) sleepMs(2);
         }
-        bool intact = receivedSamples && got.getArgCount() == 5000;
+        bool intact = receivedSamples && got.getArgCount() == sampleCount;
         if (intact) {
-            for (int i = 0; i < 5000; ++i) intact &= got.getArgAsFloat(i) == float(i);
+            for (size_t i = 0; i < sampleCount; ++i) {
+                const bool expected = i % 2 == 0;
+                intact &= got.getArgType(i) == (expected ? 'T' : 'F') && got.getArgAsBool(i) == expected;
+            }
         }
-        check("unicast: 5000 floats received intact", intact);
+        check("unicast: 5000 bools received intact", intact);
         rx.close();
     }
 
