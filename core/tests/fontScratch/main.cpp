@@ -25,7 +25,7 @@ int main() {
         trussc::internal::FontScratchScope scratch(font.size(), bitmap.size());
         const size_t remaining = trussc::internal::fontScratchRemaining();
         trussc::internal::failFontScratchAllocationAfterForTests(successes);
-        fill(bitmap.begin(), bitmap.end(), 0);
+        fill(bitmap.begin(), bitmap.end(), static_cast<unsigned char>(0));
         stbtt_MakeGlyphBitmap(&info, bitmap.data(), 128, 128, 128,
                              0.128f, 0.128f, stbtt_FindGlyphIndex(&info, 'A'));
         sawFailure |= scratch.failed();
@@ -154,7 +154,7 @@ int main() {
     bool compoundRendered = false;
     {
         trussc::internal::FontScratchScope scratch(normal.size(), bitmap.size());
-        fill(bitmap.begin(), bitmap.end(), 0);
+        fill(bitmap.begin(), bitmap.end(), static_cast<unsigned char>(0));
         stbtt_MakeGlyphBitmap(&malformedInfo, bitmap.data(), 128, 128, 128, 0.128f, 0.128f, 3);
         compoundRendered = !scratch.failed() && any_of(bitmap.begin(), bitmap.end(), [](unsigned char p) { return p != 0; });
     }

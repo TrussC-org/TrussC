@@ -143,5 +143,11 @@ echo ==========================================
 echo   Build completed successfully!
 echo ==========================================
 echo.
-echo Launching TrussC Project Generator...
-start "" "%SCRIPT_DIR%\trusscli.exe"
+REM Set TC_NO_LAUNCH=1 for non-interactive builds (for example CI).
+if not defined TC_NO_LAUNCH (
+    echo Launching TrussC Project Generator...
+    start "" "%SCRIPT_DIR%\trusscli.exe"
+) else (
+    REM The unattended PATH prompt may have reached EOF after a successful build.
+    exit /b 0
+)

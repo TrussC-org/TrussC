@@ -1502,7 +1502,7 @@ bool resizeSelectedStateProbe(int scenario) {
         if (scenario == 12) {
             pushMatrix();
             setMatrix(Mat4::translate(7, 8, 9));
-            loadMatrix(Mat4::translate(3, 4, 5));
+            setMatrix(Mat4::translate(3, 4, 5));
             popMatrix();
             translate(2, 3, 0);
         }

@@ -47,7 +47,9 @@
 #include "tc/gpu/shaders/sglCoverage.glsl.h"
 
 #ifdef __APPLE__
+#include <pthread.h>
 #include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
+#include <unistd.h>
 #endif
 #include <cstdlib>
 
@@ -1643,6 +1645,27 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
 // Logger platform sink (declared in tcLog.h)
 // ---------------------------------------------------------------------------
 #if TC_LOG_SYSTEM_SINK
+#if defined(__APPLE__)
+namespace {
+// libtrace/libdispatch state inherited across fork is not usable until exec.
+// Constant initialization also permits logging from user global constructors.
+constinit std::atomic<bool> systemLogForked{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+constinit std::atomic<pid_t> systemLogProcess{0};
+static_assert(std::atomic<pid_t>::is_always_lock_free);
+void systemLogForkChild() {
+    systemLogForked.store(true, std::memory_order_relaxed);
+}
+struct SystemLogForkGuard {
+    SystemLogForkGuard() {
+        systemLogProcess.store(getpid(), std::memory_order_relaxed);
+        // Register at image load, before an app can fork without logging.
+        // The PID check also protects forks if registration ever fails.
+        pthread_atfork(nullptr, nullptr, systemLogForkChild);
+    }
+} systemLogForkGuard;
+}
+#endif
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 namespace {
 // True when os_log lines are mirrored into the console that already shows
@@ -1665,6 +1688,12 @@ namespace internal {
 
 void writeSystemLog(const LogEventArgs& e) {
 #if defined(__APPLE__)
+    if (systemLogForked.load(std::memory_order_relaxed)) return;
+    // Zero means our load-time constructor has not run yet: early parent
+    // global constructors must still be able to log.
+    // Only the PID itself is published; no other state needs synchronization.
+    const pid_t parentProcess = systemLogProcess.load(std::memory_order_relaxed);
+    if (parentProcess != 0 && getpid() != parentProcess) return;
 #if !TARGET_OS_IPHONE
     if (osLogMirroredToConsole()) return;
 #endif

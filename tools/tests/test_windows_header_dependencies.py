@@ -12,6 +12,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
 CLI = Path(os.environ.get("TRUSSCLI", ROOT / "tools/bin/trusscli.exe")).resolve()
 
 
@@ -36,7 +38,8 @@ class WindowsHeaderDependencies(unittest.TestCase):
                 env.pop(f"CMAKE_{lang}_COMPILER_LAUNCHER", None)
 
             def run(*args, check=True):
-                result = subprocess.run(list(map(str, args)), cwd=project, env=env,
+                runner = run_build if str(args[0]) == "cmake" or (args[0] == CLI and args[1] in ("update", "build")) else subprocess.run
+                result = runner(list(map(str, args)), cwd=project, env=env,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         encoding="utf-8", errors="replace")
                 if check:
