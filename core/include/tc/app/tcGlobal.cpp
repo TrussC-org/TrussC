@@ -1553,13 +1553,18 @@ namespace {
 // Constant initialization also permits logging from user global constructors.
 constinit std::atomic<bool> systemLogForked{false};
 static_assert(std::atomic<bool>::is_always_lock_free);
-constinit pthread_once_t systemLogForkRegistration = PTHREAD_ONCE_INIT;
+constinit pid_t systemLogProcess = 0;
 void systemLogForkChild() {
     systemLogForked.store(true, std::memory_order_relaxed);
 }
-void registerSystemLogForkGuard() {
-    pthread_atfork(nullptr, nullptr, systemLogForkChild);
-}
+struct SystemLogForkGuard {
+    SystemLogForkGuard() {
+        systemLogProcess = getpid();
+        // Register at image load, before an app can fork without logging.
+        // The PID check also protects forks if registration ever fails.
+        pthread_atfork(nullptr, nullptr, systemLogForkChild);
+    }
+} systemLogForkGuard;
 }
 #endif
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
@@ -1584,8 +1589,10 @@ namespace internal {
 
 void writeSystemLog(const LogEventArgs& e) {
 #if defined(__APPLE__)
-    pthread_once(&systemLogForkRegistration, registerSystemLogForkGuard);
     if (systemLogForked.load(std::memory_order_relaxed)) return;
+    // Zero means our load-time constructor has not run yet: early parent
+    // global constructors must still be able to log.
+    if (systemLogProcess != 0 && getpid() != systemLogProcess) return;
 #if !TARGET_OS_IPHONE
     if (osLogMirroredToConsole()) return;
 #endif

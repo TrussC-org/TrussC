@@ -298,10 +298,18 @@ endif()
         endif()
 
         # Guest: shared library with user code
-        # A separate directory keeps guest-only configuration flags out of the
-        # host and shared core, including on multi-config generators.
-        add_subdirectory("${TRUSSC_DIR}/cmake/hot_reload_guest"
-            "${CMAKE_CURRENT_BINARY_DIR}/tc_hot_reload_guest")
+        # Keep source properties in the app's directory, including properties
+        # applied later by local.cmake. Move configuration optimization flags
+        # to the other app targets once all local customization has run.
+        add_library(guest SHARED ${_TC_GUEST_SOURCES})
+        include("${TRUSSC_DIR}/cmake/tc_hot_reload_flags.cmake")
+        cmake_language(DEFER CALL tc_hot_reload_flags)
+        if(MSVC)
+            target_compile_options(guest PRIVATE /Od /Z7)
+            set_target_properties(guest PROPERTIES LINK_FLAGS "/DEBUG /PDBALTPATH:none")
+        else()
+            target_compile_options(guest PRIVATE -O0)
+        endif()
         target_include_directories(guest PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
         )

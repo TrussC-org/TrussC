@@ -4,16 +4,29 @@ include_guard(GLOBAL)
 
 function(_tc_restore_fetch_warning_cache)
     if(DEFINED CACHE{_TC_FETCH_WARN_SAVED})
-        if(_TC_FETCH_WARN_SAVED)
-            set(CMAKE_WARN_DEPRECATED "$CACHE{_TC_FETCH_WARN_VALUE}"
-                CACHE "$CACHE{_TC_FETCH_WARN_TYPE}" "$CACHE{_TC_FETCH_WARN_HELP}" FORCE)
-        else()
-            unset(CMAKE_WARN_DEPRECATED CACHE)
+        # A failed configure can leave our temporary entry on disk. Restore
+        # only that exact entry: -D, -U or a cache editor may have changed it
+        # since then. The unique help string distinguishes even an OFF/BOOL
+        # user replacement from our own OFF/BOOL entry.
+        if(DEFINED CACHE{CMAKE_WARN_DEPRECATED} AND DEFINED CACHE{_TC_FETCH_WARN_TEMP_HELP})
+            get_property(_tc_value CACHE CMAKE_WARN_DEPRECATED PROPERTY VALUE)
+            get_property(_tc_type CACHE CMAKE_WARN_DEPRECATED PROPERTY TYPE)
+            get_property(_tc_help CACHE CMAKE_WARN_DEPRECATED PROPERTY HELPSTRING)
+            if(_tc_value STREQUAL "OFF" AND _tc_type STREQUAL "BOOL" AND
+               _tc_help STREQUAL "$CACHE{_TC_FETCH_WARN_TEMP_HELP}")
+                if(_TC_FETCH_WARN_SAVED)
+                    set(CMAKE_WARN_DEPRECATED "$CACHE{_TC_FETCH_WARN_VALUE}"
+                        CACHE "$CACHE{_TC_FETCH_WARN_TYPE}" "$CACHE{_TC_FETCH_WARN_HELP}" FORCE)
+                else()
+                    unset(CMAKE_WARN_DEPRECATED CACHE)
+                endif()
+            endif()
         endif()
         unset(_TC_FETCH_WARN_SAVED CACHE)
         unset(_TC_FETCH_WARN_VALUE CACHE)
         unset(_TC_FETCH_WARN_TYPE CACHE)
         unset(_TC_FETCH_WARN_HELP CACHE)
+        unset(_TC_FETCH_WARN_TEMP_HELP CACHE)
     endif()
 endfunction()
 
@@ -45,7 +58,9 @@ function(tc_fetch_quiet name)
             set(_TC_FETCH_WARN_SAVED FALSE CACHE INTERNAL "Restore dependency warning cache" FORCE)
         endif()
         # CMake 3.x compatibility diagnostics read the cache diagnostic setting.
-        set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
+        string(RANDOM LENGTH 32 ALPHABET 0123456789abcdef _tc_token)
+        set(_TC_FETCH_WARN_TEMP_HELP "tc_fetch_quiet temporary ${_tc_token}" CACHE INTERNAL "" FORCE)
+        set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "${_TC_FETCH_WARN_TEMP_HELP}" FORCE)
         set(CMAKE_WARN_DEPRECATED OFF)
         FetchContent_MakeAvailable(${name})
         _tc_restore_fetch_warning_cache()

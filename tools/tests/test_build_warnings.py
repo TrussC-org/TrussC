@@ -610,6 +610,7 @@ int main() {
             directory = Path(temporary)
             cpp = directory / 'sink.cpp'
             cpp.write_text(r'''#include <string>
+#include <cstdlib>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <atomic>
@@ -631,7 +632,10 @@ pid_t parentProcess() { static const pid_t parent = getpid(); return parent; }
 void writeSystemLog(const LogEventArgs&);
 // Deliberately before the production guard declarations/initializers.
 struct EarlyLog {
-    EarlyLog() { writeSystemLog({LogLevel::Warning, "before owner initialization"}); }
+    EarlyLog() {
+        if (std::getenv("TC_TEST_EARLY_LOG"))
+            writeSystemLog({LogLevel::Warning, "before owner initialization"});
+    }
 } earlyLog;
 os_log_t os_log_create(const char*, const char*) {
     if (getpid() != parentProcess()) _exit(90);
@@ -644,39 +648,56 @@ void os_log_with_type(os_log_t, os_log_type_t, const char*, const char*, const c
 ''' + owner + '\n' + function + r'''
 int main() {
     LogEventArgs warning{LogLevel::Warning, "forwarding failed"};
-    writeSystemLog(warning);
+    parentProcess(); // Other libraries can initialize libtrace before any TrussC log.
+    const bool early = std::getenv("TC_TEST_EARLY_LOG") != nullptr;
+    if (early) writeSystemLog(warning);
     const pid_t child = fork();
     if (!child) { writeSystemLog(warning); writeSystemLog(warning); _exit(0); }
     int status = 0;
     if (child < 0 || waitpid(child, &status, 0) != child ||
         !WIFEXITED(status) || WEXITSTATUS(status)) return 1;
     writeSystemLog(warning);
-    return calls == 3 ? 0 : 2;
+    return calls == (early ? 3 : 1) ? 0 : 2;
 }
 ''', encoding='utf-8')
-            gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                            str(cpp), '-o', str(directory / 'sink')], echo=False, check=True)
-            result = subprocess.run([str(directory / 'sink')], capture_output=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            # The former dynamically initialized PID guard drops the early
-            # parent call while still protecting the post-initialization fork.
             fixed = cpp.read_text(encoding='utf-8')
+            guard = function[function.index('    if (systemLogForked'):function.index('#if !TARGET_OS_IPHONE')]
+
+            def probe(name, code, expected):
+                cpp.write_text(code, encoding='utf-8')
+                gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
+                                str(cpp), '-o', str(directory / name)], echo=False, check=True)
+                for early, status in expected:
+                    env = dict(os.environ)
+                    env.pop('TC_TEST_EARLY_LOG', None)
+                    if early:
+                        env['TC_TEST_EARLY_LOG'] = '1'
+                    result = subprocess.run([str(directory / name)], env=env, capture_output=True)
+                    self.assertEqual(result.returncode, status, (name, early, result.stderr))
+
+            # First log in a fork child, and a parent log even before our
+            # load-time initializer: both must work in the same production code.
+            probe('fixed', fixed, [(False, 0), (True, 0)])
+            # A failed atfork registration still has the PID fallback.
+            probe('pid_fallback', fixed.replace(
+                'pthread_atfork(nullptr, nullptr, systemLogForkChild);',
+                '(void)systemLogForkChild;'), [(False, 0), (True, 0)])
+            # Old dynamic PID initialization incorrectly drops the early log.
             legacy = fixed.replace(owner, 'const pid_t systemLogProcess = getpid();').replace(
+                guard, '    if (getpid() != systemLogProcess) return;\n')
+            probe('legacy', legacy, [(True, 2)])
+            # The reviewed lazy registration misses a fork before any log.
+            lazy_owner = '''constinit std::atomic<bool> systemLogForked{false};
+constinit pthread_once_t systemLogForkRegistration = PTHREAD_ONCE_INIT;
+void systemLogForkChild() { systemLogForked.store(true, std::memory_order_relaxed); }
+void registerSystemLogForkGuard() { pthread_atfork(nullptr, nullptr, systemLogForkChild); }
+'''
+            lazy = fixed.replace(owner, lazy_owner).replace(guard,
                 '    pthread_once(&systemLogForkRegistration, registerSystemLogForkGuard);\n'
-                '    if (systemLogForked.load(std::memory_order_relaxed)) return;\n',
-                '    if (getpid() != systemLogProcess) return;\n')
-            cpp.write_text(legacy, encoding='utf-8')
-            gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                            str(cpp), '-o', str(directory / 'legacy')], echo=False, check=True)
-            result = subprocess.run([str(directory / 'legacy')], capture_output=True)
-            self.assertEqual(result.returncode, 2, result.stderr)
-            # The same OS fault kills the child with the former unguarded sink.
-            cpp.write_text(fixed.replace(
-                '    if (systemLogForked.load(std::memory_order_relaxed)) return;\n', ''), encoding='utf-8')
-            gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                            str(cpp), '-o', str(directory / 'unguarded')], echo=False, check=True)
-            result = subprocess.run([str(directory / 'unguarded')], capture_output=True)
-            self.assertEqual(result.returncode, 1, result.stderr)
+                '    if (systemLogForked.load(std::memory_order_relaxed)) return;\n')
+            probe('lazy', lazy, [(False, 1), (True, 0)])
+            # Fault injection is live at both os_log entry points.
+            probe('unguarded', fixed.replace(guard, ''), [(False, 1), (True, 1)])
 
     def test_wrapped_workflow_steps_use_the_running_shell(self):
         # Python's Windows PATH search can choose the System32 WSL launcher

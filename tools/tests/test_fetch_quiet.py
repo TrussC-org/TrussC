@@ -90,8 +90,9 @@ tc_fetch_quiet(old_dependency)
         cmake = os.environ.get('TC_TEST_CMAKE', 'cmake')
         if subprocess.check_output([cmake, '--version']).startswith(b'cmake version 4.'):
             self.skipTest('CMake 4 uses a scoped policy floor without changing the warning cache')
-        for cached in (False, True):
-            with self.subTest(cached=cached), tempfile.TemporaryDirectory() as tmp:
+        for cached, edit in ((cached, edit) for cached in (False, True)
+                             for edit in ('unedited', 'string_off', 'bool_off', 'value', 'removed')):
+            with self.subTest(cached=cached, edit=edit), tempfile.TemporaryDirectory() as tmp:
                 src = Path(tmp)
                 dep = src / 'dep'
                 dep.mkdir()
@@ -109,6 +110,35 @@ endif()
 ''' if cached else '''
 if(DEFINED CACHE{CMAKE_WARN_DEPRECATED})
     message(FATAL_ERROR "originally absent cache entry leaked")
+endif()
+'''
+                edits = {
+                    'unedited': [],
+                    'string_off': ['-DCMAKE_WARN_DEPRECATED:STRING=OFF'],
+                    'bool_off': ['-DCMAKE_WARN_DEPRECATED:BOOL=OFF'],
+                    'value': ['-DCMAKE_WARN_DEPRECATED:BOOL=ON'],
+                    'removed': ['-U', 'CMAKE_WARN_DEPRECATED'],
+                }
+                if edit != 'unedited':
+                    if edit == 'removed':
+                        check = '''
+if(DEFINED CACHE{CMAKE_WARN_DEPRECATED})
+    message(FATAL_ERROR "user removal overwritten")
+endif()
+'''
+                    else:
+                        kind = 'STRING' if edit == 'string_off' else 'BOOL'
+                        value = 'ON' if edit == 'value' else 'OFF'
+                        check = f'''
+get_property(value CACHE CMAKE_WARN_DEPRECATED PROPERTY VALUE)
+get_property(kind CACHE CMAKE_WARN_DEPRECATED PROPERTY TYPE)
+get_property(help CACHE CMAKE_WARN_DEPRECATED PROPERTY HELPSTRING)
+if(NOT value STREQUAL "{value}" OR NOT kind STREQUAL "{kind}" OR
+   NOT help STREQUAL "No help, variable specified on the command line.")
+    message(FATAL_ERROR "user cache change overwritten: ${{value}}|${{kind}}|${{help}}")
+endif()
+if(NOT CMAKE_WARN_DEPRECATED STREQUAL "{value}")
+    message(FATAL_ERROR "user visible value changed")
 endif()
 '''
                 (src / 'CMakeLists.txt').write_text(f'''
@@ -150,12 +180,14 @@ endif()
                 self.assertNotEqual(failed.returncode, 0)
                 self.assertIn('dependency failed', failed.stderr)
                 # Recover on inclusion alone, before any helper invocation.
-                retry = run_build(command + ['-DRETRY=ON', '-DSKIP_DEPENDENCY=ON'],
+                retry = run_build(command + ['-DRETRY=ON', '-DSKIP_DEPENDENCY=ON'] + edits[edit],
                                   text=True, encoding='utf-8')
                 self.assertEqual(retry.returncode, 0, retry.stdout)
                 dependency.write_text('project(recovered_dependency NONE)', encoding='utf-8')
                 retry = run_build(command + ['-DSKIP_DEPENDENCY=OFF'], text=True, encoding='utf-8')
                 self.assertEqual(retry.returncode, 0, retry.stdout)
+                if edit != 'unedited':
+                    continue
                 diagnostic = subprocess.run(command + ['-DVERIFY_DIAGNOSTIC=ON'],
                                             capture_output=True, text=True, encoding='utf-8')
                 self.assertEqual(diagnostic.returncode, 0, diagnostic.stdout + diagnostic.stderr)
