@@ -615,6 +615,7 @@ int main() {
 #include <sys/wait.h>
 #include <atomic>
 #include <pthread.h>
+#include <thread>
 #define __APPLE__ 1
 #define TARGET_OS_IPHONE 0
 #define OS_LOG_TYPE_DEBUG 0
@@ -627,7 +628,7 @@ enum class LogLevel { Verbose, Notice, Warning, Error, Fatal };
 struct LogEventArgs { LogLevel level; std::string message; };
 const char* logLevelToString(LogLevel) { return "WARNING"; }
 bool osLogMirroredToConsole() { return false; }
-int calls = 0;
+constinit std::atomic<int> calls{0};
 pid_t parentProcess() { static const pid_t parent = getpid(); return parent; }
 void writeSystemLog(const LogEventArgs&);
 // Deliberately before the production guard declarations/initializers.
@@ -666,7 +667,7 @@ int main() {
             def probe(name, code, expected):
                 cpp.write_text(code, encoding='utf-8')
                 gate.run_build(['c++', '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                                str(cpp), '-o', str(directory / name)], echo=False, check=True)
+                                '-pthread', str(cpp), '-o', str(directory / name)], echo=False, check=True)
                 for early, status in expected:
                     env = dict(os.environ)
                     env.pop('TC_TEST_EARLY_LOG', None)
@@ -678,6 +679,27 @@ int main() {
             # First log in a fork child, and a parent log even before our
             # load-time initializer: both must work in the same production code.
             probe('fixed', fixed, [(False, 0), (True, 0)])
+            # Start logging on a worker before the production load-time guard,
+            # and keep reading the PID while its constructor publishes it.
+            concurrent = fixed.replace('struct EarlyLog {',
+                'constinit std::atomic<bool> stopWorker{false};\n'
+                'std::thread worker;\nstruct EarlyLog {').replace(
+                '        if (std::getenv("TC_TEST_EARLY_LOG"))\n'
+                '            writeSystemLog({LogLevel::Warning, "before owner initialization"});',
+                '        parentProcess();\n'
+                '        worker = std::thread([] {\n'
+                '            while (!stopWorker.load(std::memory_order_relaxed))\n'
+                '                writeSystemLog({LogLevel::Warning, "concurrent initialization"});\n'
+                '        });\n'
+                '        while (calls.load(std::memory_order_relaxed) == 0) std::this_thread::yield();')
+            concurrent = concurrent[:concurrent.index('int main() {')] + '''
+int main() {
+    stopWorker.store(true, std::memory_order_relaxed);
+    worker.join();
+    return calls.load(std::memory_order_relaxed) > 0 ? 0 : 2;
+}
+'''
+            probe('concurrent', concurrent, [(False, 0)])
             # A failed atfork registration still has the PID fallback.
             probe('pid_fallback', fixed.replace(
                 'pthread_atfork(nullptr, nullptr, systemLogForkChild);',

@@ -298,18 +298,7 @@ endif()
         endif()
 
         # Guest: shared library with user code
-        # Keep source properties in the app's directory, including properties
-        # applied later by local.cmake. Move configuration optimization flags
-        # to the other app targets once all local customization has run.
         add_library(guest SHARED ${_TC_GUEST_SOURCES})
-        include("${TRUSSC_DIR}/cmake/tc_hot_reload_flags.cmake")
-        cmake_language(DEFER CALL tc_hot_reload_flags)
-        if(MSVC)
-            target_compile_options(guest PRIVATE /Od /Z7)
-            set_target_properties(guest PROPERTIES LINK_FLAGS "/DEBUG /PDBALTPATH:none")
-        else()
-            target_compile_options(guest PRIVATE -O0)
-        endif()
         target_include_directories(guest PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
         )
@@ -338,6 +327,24 @@ endif()
         if(_TC_PUB_LINK_DIRS)
             target_link_directories(guest PRIVATE ${_TC_PUB_LINK_DIRS})
         endif()
+        # Windows: embed debug info into the .obj (/Z7), don't generate a PDB.
+        # If the debugger locks guest.pdb, the rebuild on hot reload fails.
+        # Replace CMake's default /Zi with /Z7 to avoid a D9025 warning.
+        if(MSVC)
+            foreach(_cfg DEBUG RELWITHDEBINFO)
+                string(REGEX REPLACE "/Z[iI]" "/Z7" CMAKE_CXX_FLAGS_${_cfg} "${CMAKE_CXX_FLAGS_${_cfg}}")
+            endforeach()
+            target_compile_options(guest PRIVATE /Z7)
+            set_target_properties(guest PROPERTIES LINK_FLAGS "/DEBUG /PDBALTPATH:none")
+        endif()
+        # GCC/Clang Guest: disable optimization to speed up reload iterations.
+        # Host and TrussC keep the project's configured optimization level.
+        # GCC/Clang use the last -O flag. MSVC keeps configured optimization:
+        # appending /Od would emit D9025 when overriding /O2.
+        if(NOT MSVC)
+            target_compile_options(guest PRIVATE -O0)
+        endif()
+
         # Guest: precompile TrussC.h. The header is the dominant cost when
         # parsing each guest .cpp (~2s for ~2700 lines), so caching it once
         # per build dramatically shortens reload turnaround.

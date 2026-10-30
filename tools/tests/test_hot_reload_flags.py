@@ -1,4 +1,4 @@
-"""Generate real guest/PCH commands and check configuration flag isolation."""
+"""Generate real guest/PCH commands and check configured optimization and app source properties."""
 import json
 from pathlib import Path
 import re
@@ -36,6 +36,8 @@ int customized() { return 1; }
                         'add_library(core OBJECT ../probe.c)\n', encoding='utf-8')
                     base = '/O1 /Ox /O2' if msvc else '-O1 -Ofast -O3'
                     configured = '/O2 /Zi' if msvc else '-Os -O2 -g'
+                    production = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding='utf-8')
+                    setup = production[production.index('        # Windows: embed debug info'):production.index('        # Guest: precompile TrussC.h.')]
                     (src / 'CMakeLists.txt').write_text(f'''
 cmake_minimum_required(VERSION 3.20)
 project(flag_probe C CXX)
@@ -47,9 +49,10 @@ endforeach()
 add_library(host OBJECT probe.cpp)
 add_subdirectory(core)
 add_library(guest SHARED probe.cpp probe.c custom.cpp)
-include("{ROOT / 'core/cmake/tc_hot_reload_flags.cmake'}")
-cmake_language(DEFER CALL tc_hot_reload_flags)
-target_compile_options(guest PRIVATE {'/Od /Z7' if msvc else '-O0'})
+# Extract the production setup so this fixture exercises its actual choices.
+{setup}
+set_target_properties(host PROPERTIES COMPILE_FLAGS "{'/Os' if msvc else '-Os'}")
+cmake_language(DEFER CALL add_library late OBJECT probe.cpp)
 target_precompile_headers(guest PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${{CMAKE_CURRENT_SOURCE_DIR}}/pch.h>")
 # Same timing and directory scope as an app's local.cmake.
 set_source_files_properties(custom.cpp PROPERTIES
@@ -66,23 +69,25 @@ set_source_files_properties(custom.cpp PROPERTIES
                     guest = [c for c in commands if 'guest.dir' in c['command']]
                     others = [c for c in commands if c not in guest]
                     self.assertEqual(len(guest), 4)  # C, two C++, and C++ PCH
-                    self.assertEqual(len(others), 2)
-                    optimization = r'(?<!\S)(?:[-/]O[12xd]|-O(?:[0-9]+|g|s|z|fast)?)(?!\S)'
+                    self.assertEqual(len(others), 3)
+                    optimization = r'(?<!\S)(?:[-/]O[12xds]|-O(?:[0-9]+|g|s|z|fast)?)(?!\S)'
                     for entry in guest:
                         flags = re.findall(optimization, entry['command'])
-                        self.assertEqual(flags, ['/Od'] if msvc else ['-O0'], entry)
+                        self.assertEqual(flags, re.findall(optimization, base + ' ' + configured)
+                                         + ([] if msvc else ['-O0']), entry)
                         self.assertIn('-DKEEP_O2=1', entry['command'])
                         self.assertIn('-DNDEBUG', entry['command'])
                         if msvc:
-                            self.assertNotIn('/Zi', entry['command'])
+                            self.assertNotIn('/Od', entry['command'])
                             self.assertIn('/Z7', entry['command'])
                     for entry in others:
                         self.assertEqual(re.findall(optimization, entry['command']),
-                                         re.findall(optimization, base + ' ' + configured), entry)
+                                         re.findall(optimization, base + ' ' + configured)
+                                         + (['/Os' if msvc else '-Os'] if 'host.dir' in entry['command'] else []), entry)
                         self.assertIn('-DKEEP_O2=1', entry['command'])
                         self.assertIn('-DNDEBUG', entry['command'])
                         if msvc:
-                            self.assertIn('/Zi', entry['command'])
+                            self.assertEqual('/Zi' in entry['command'], config not in ('Debug', 'RelWithDebInfo') or 'core.dir' in entry['command'])
                     custom = next(c for c in guest if c['file'].endswith('custom.cpp'))
                     self.assertIn('-DLOCAL_DEFINITION=1', custom['command'])
                     self.assertIn('-DLOCAL_OPTION=1', custom['command'])

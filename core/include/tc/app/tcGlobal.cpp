@@ -1553,13 +1553,14 @@ namespace {
 // Constant initialization also permits logging from user global constructors.
 constinit std::atomic<bool> systemLogForked{false};
 static_assert(std::atomic<bool>::is_always_lock_free);
-constinit pid_t systemLogProcess = 0;
+constinit std::atomic<pid_t> systemLogProcess{0};
+static_assert(std::atomic<pid_t>::is_always_lock_free);
 void systemLogForkChild() {
     systemLogForked.store(true, std::memory_order_relaxed);
 }
 struct SystemLogForkGuard {
     SystemLogForkGuard() {
-        systemLogProcess = getpid();
+        systemLogProcess.store(getpid(), std::memory_order_relaxed);
         // Register at image load, before an app can fork without logging.
         // The PID check also protects forks if registration ever fails.
         pthread_atfork(nullptr, nullptr, systemLogForkChild);
@@ -1592,7 +1593,9 @@ void writeSystemLog(const LogEventArgs& e) {
     if (systemLogForked.load(std::memory_order_relaxed)) return;
     // Zero means our load-time constructor has not run yet: early parent
     // global constructors must still be able to log.
-    if (systemLogProcess != 0 && getpid() != systemLogProcess) return;
+    // Only the PID itself is published; no other state needs synchronization.
+    const pid_t parentProcess = systemLogProcess.load(std::memory_order_relaxed);
+    if (parentProcess != 0 && getpid() != parentProcess) return;
 #if !TARGET_OS_IPHONE
     if (osLogMirroredToConsole()) return;
 #endif
