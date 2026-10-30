@@ -27,7 +27,9 @@ Record first;
 using _sapp_tc_window_t=Record;
 Record* live=&record;
 constexpr int _SAPP_TC_MAX_WINDOWS=1;
+'''+body(source,'struct _sapp_tc_mac_pending_key {')+r''';
 struct { bool mouse_locked=false;Record* lock_owner=nullptr; Record* windows[1]={&record};
+    _sapp_tc_mac_pending_key pending_keys[_SAPP_TC_MAX_WINDOWS]{}; int pending_key_count=0;
     int callbacks_active=0,constructing=0; bool deferred_blocked=false;
     struct {Record* main=&first;}app;} _sapp_tc;
 bool _sapp_tc_mac_frozen() { return false; }
@@ -42,6 +44,7 @@ code+=body(source[send.start():],send.group())+'\n'
 code+='#define __APPLE__ 1\n#define TARGET_OS_OSX 1\n'
 for marker in ['extern "C" bool sapp_window_inject_event(', 'extern "C" bool sapp_tc_window_close_recorded(']:
     code+=body(source,marker).replace('extern "C" ','')+'\n'
+code+=body(source,'static void _sapp_tc_mac_forget_key(')+'\n'
 closed=(body(source,'static void _sapp_tc_mac_closed_now(')+body(source,'static void _sapp_tc_mac_closed(')).replace('[NSApp terminate:nil]','terminate()').replace('[w->link invalidate]','invalidate(w->link)').replace('= nil','= 0')
 code+='void terminate(); void invalidate(int); void _sapp_tc_mac_stop_fallback(Record*);\n'+closed+'\n'
 code+=r'''

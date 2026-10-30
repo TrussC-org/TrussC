@@ -299,16 +299,19 @@ void nestClose(sapp_window win, void*) {
 
 // Throwing clients: the native boundary contains the exception and recovers.
 int throwTicks, throwEventTicks;
-int resizeThrowTicks;
+int resizeThrowSampleTicks;
 double resizeThrowTime;
 bool throwClosed, eventThrown, mainThrowOnce, mainThrew;
 sapp_window throwWindow;
 void throwTick(sapp_window, void*) { if (++throwTicks == 3) throw std::runtime_error("tick_cb test throw"); }
-void countTick(sapp_window, void*) { ++throwEventTicks; }
+void countTick(sapp_window, void*) {
+    ++throwEventTicks;
+    if (eventThrown && now() - resizeThrowTime < 1.0) ++resizeThrowSampleTicks;
+}
 bool keyThrown;
 void throwEvent(const sapp_event* event, sapp_window, void*) {
     if (event->type == SAPP_EVENTTYPE_RESIZED && !eventThrown) {
-        eventThrown = true; resizeThrowTime = now(); resizeThrowTicks = throwEventTicks;
+        eventThrown = true; resizeThrowTime = now();
         throw 7;
     }
     if (event->type == SAPP_EVENTTYPE_KEY_DOWN && !keyThrown) { keyThrown = true; throw std::runtime_error("key event test throw"); }
@@ -805,15 +808,17 @@ void step() {
     }
     case ThrowEventStart:
         throwEventTicks = 0; throwClosed = eventThrown = false;
-        resizeThrowTicks = 0; resizeThrowTime = 0;
+        resizeThrowTime = 0;
+        resizeThrowSampleTicks = 0; sampleStart = 0; keyThrown = false;
         throwWindow = makeProbe(countTick, throwEvent, throwClose, "throwing event");
         enter(ThrowEventWait);
         break;
     case ThrowEventWait: {
         _sapp_tc_window_t* w = _sapp_tc_lookup(throwWindow);
         if (w && !waited(0.3)) break;
-        if (w && !eventThrown && sampleStart == 0) {
-            w->fb_width = 1; sampleStart = now();                    // RESIZED next tick (in-tick throw)
+        if (w && sampleStart == 0) {
+            if (!eventThrown) w->fb_width = 1;                      // RESIZED next tick if no natural throw yet
+            sampleStart = now();
             _sapp_tc_view* view = w->view;                           // and an out-of-tick throw from AppKit input
             NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
                 timestamp:0 windowNumber:w->window.windowNumber context:nil characters:@"a"
@@ -822,14 +827,16 @@ void step() {
             check("an out-of-tick event_cb throw is contained at the input boundary", keyThrown);
             break;
         }
-        if (w && now() - sampleStart < 1.0) break;
+        // Natural startup RESIZED can throw before this phase's 0.3s delay.
+        // The callback timestamps that throw; count only its fixed 1s window.
+        if (w && (eventThrown ? now() - resizeThrowTime < 1.0 : !waited(2.0))) break;
         if (w && !w->close_requested && !throwClosed) {
             std::printf("nativeWindow: throwing event_cb: threw=%d, %d ticks\n", eventThrown, throwEventTicks);
             const CAFrameRateRange range = w->link.preferredFrameRateRange;
-            std::printf("nativeWindow: after RESIZED throw: %d ticks in %.3fs, source=%s, range=%.1f/%.1f/%.1f, callback_depth=%d\n",
-                throwEventTicks - resizeThrowTicks, resizeThrowTime ? now() - resizeThrowTime : 0,
+            std::printf("nativeWindow: after RESIZED throw: %d ticks in fixed 1.000s, checked at %.3fs, source=%s, range=%.1f/%.1f/%.1f, callback_depth=%d\n",
+                resizeThrowSampleTicks, resizeThrowTime ? now() - resizeThrowTime : 0,
                 w->fallback_active ? "fallback" : "display link", range.minimum, range.maximum, range.preferred, w->callback_depth);
-            check("ticks continue after event_cb throws", eventThrown && throwEventTicks >= 10 && !w->in_tick);
+            check("ticks continue after event_cb throws", eventThrown && resizeThrowSampleTicks >= 10 && !w->in_tick);
             sapp_window_request_close(throwWindow);
             break;
         }

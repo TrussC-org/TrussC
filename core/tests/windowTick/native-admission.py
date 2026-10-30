@@ -189,6 +189,7 @@ def mac_init_exit_probe(native):
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 #include "sokol_app_tc.h"
 #include "util/sokol_window_event.h"
 using BOOL=bool;
@@ -207,6 +208,8 @@ struct _sapp_tc_window_t {
         void (*tick_cb)(sapp_window,void*)=nullptr; void* user_data=nullptr; } desc;
 } record;
 struct { _sapp_tc_window_t* windows[1]={&record};
+    bool visibility_pending=false;
+    int pending_key_count=0; // No key/activation notifications in this init probe.
     int callbacks_active=0,constructing=0; bool deferred_blocked=false,terminate_pending=false;
     struct { bool init_called=false,quit_requested=false,quit_ordered=false;
         _sapp_tc_window_t* main=&record;
@@ -225,6 +228,7 @@ bool _sapp_tc_mac_frozen() { return false; }
 void _sapp_tc_mac_contained(const char*) {}
 void _sapp_tc_mac_schedule_deferred() {}
 void _sapp_tc_mac_closed_now(_sapp_tc_window_t*) {}
+void _sapp_tc_mac_process_visibility() {}
 AEEventID _sapp_tc_mac_quit_reason() { return 0; }
 bool _sapp_tc_mac_is_session_end(AEEventID) { return false; }
 void _sapp_tc_mac_session_end(AEEventID) {}

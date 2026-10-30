@@ -2649,6 +2649,7 @@ uint64_t sapp_html5_get_dropped_file_size64(int index) {
 #endif
 #include "util/sokol_window_native.h"
 #include <new>
+#include <vector>
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
@@ -2682,6 +2683,11 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool native_closed;                 /* the NSWindow closed; its close was handled (or is pending) */
 };
 
+struct _sapp_tc_mac_pending_key {
+    uint32_t win_id;
+    sapp_event_type type;
+};
+
 #define _SAPP_TC_MAX_WINDOWS (32)
 
 static struct {
@@ -2695,6 +2701,10 @@ static struct {
     bool terminate_pending;             /* an AppKit terminate arrived while busy; replayed later */
     bool deferred_blocked;              /* deferred work waited for a callback, tick or constructor */
     bool deferred_scheduled;            /* a deferred pass is queued on the main run loop */
+    bool visibility_pending;            /* activation/key observation waited for a callback */
+    // Bound (registry): at most one final focus state per registered window, in 32 fixed entries.
+    _sapp_tc_mac_pending_key pending_keys[_SAPP_TC_MAX_WINDOWS];
+    int pending_key_count;
 
     /* ---- process state (this header owns sapp_run on macOS) ---- */
     struct {
@@ -3052,6 +3062,92 @@ static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail) {
         if (!w) return;
     }
     _sapp_tc_mac_update_suspension(w);
+}
+
+/* Activation/key transitions can change peer visibility too. Re-read every
+   live window through the same event/source path. A hidden window also
+   rechecks on its existing fallback timer, so recovery after a modal does
+   not depend on restoring a key window or an occlusion notification. */
+static void _sapp_tc_mac_recheck_visibility(void) noexcept {
+    if (_sapp_tc_mac_frozen()) return;
+    const bool defer = _sapp_tc.callbacks_active > 0;
+    if (defer) {
+        _sapp_tc.visibility_pending = true;
+        _sapp_tc.deferred_blocked = true;
+    }
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        _sapp_tc_window_t* w = _sapp_tc.windows[i];
+        if (!w || !w->ready || w->native_closed || w->closed_pending) continue;
+        try {
+            if (defer) {
+                // Keep native source selection current, without changing the
+                // effective visibility or its last delivered aggregate event.
+                w->link_suspended = (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0 || w->window.miniaturized;
+                _sapp_tc_mac_select_source(w);
+            } else {
+                _sapp_tc_mac_observe(w);
+            }
+        }
+        catch (...) { _sapp_tc_mac_contained("visibility recheck"); }
+        // observe may invoke a client that removes this or another window.
+    }
+}
+
+/* Remove a window's pending state on close/disposal and before replacing it.
+   Moving a replacement to the end orders final states by last notification. */
+static void _sapp_tc_mac_forget_key(uint32_t win_id) noexcept {
+    for (int i = 0; i < _sapp_tc.pending_key_count; i++) {
+        if (_sapp_tc.pending_keys[i].win_id != win_id) continue;
+        for (int j = i + 1; j < _sapp_tc.pending_key_count; j++) {
+            _sapp_tc.pending_keys[j - 1] = _sapp_tc.pending_keys[j];
+        }
+        _sapp_tc.pending_keys[--_sapp_tc.pending_key_count] = {};
+        return;
+    }
+}
+
+/* Key notifications follow visibility. Intermediate modal flips are coalesced:
+   even a previously focused window that resigns and becomes key ends focused. */
+static void _sapp_tc_mac_key_event(_sapp_tc_window_t* w, sapp_event_type type) noexcept {
+    if (_sapp_tc_mac_frozen() || !w) return;
+    try {
+        if (_sapp_tc.callbacks_active > 0) {
+            if (w->native_closed || w->closed_pending) return;
+            bool registered = false;
+            for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+                if (_sapp_tc.windows[i] == w) { registered = true; break; }
+            }
+            if (!registered) return;
+            _sapp_tc_mac_forget_key(w->win_id);
+            if (_sapp_tc.pending_key_count < _SAPP_TC_MAX_WINDOWS) {
+                _sapp_tc.pending_keys[_sapp_tc.pending_key_count++] = {w->win_id, type};
+            }
+            _sapp_tc.deferred_blocked = true;
+        } else {
+            _sapp_tc_send_type(w, type);
+        }
+    } catch (...) { _sapp_tc_mac_contained("key transition"); }
+}
+
+static void _sapp_tc_mac_process_visibility(void) {
+    if (_sapp_tc_mac_frozen() || _sapp_tc.callbacks_active > 0) return;
+    // Detach first: notifications from a client's nested loop belong to the
+    // next pass, and cannot invalidate the fixed snapshot being delivered here.
+    _sapp_tc_mac_pending_key keys[_SAPP_TC_MAX_WINDOWS] = {};
+    const int count = _sapp_tc.pending_key_count;
+    for (int i = 0; i < count; i++) {
+        keys[i] = _sapp_tc.pending_keys[i];
+        _sapp_tc.pending_keys[i] = {};
+    }
+    _sapp_tc.pending_key_count = 0;
+    if (_sapp_tc.visibility_pending) {
+        _sapp_tc.visibility_pending = false;
+        _sapp_tc_mac_recheck_visibility();
+    }
+    for (int i = 0; i < count; i++) {
+        _sapp_tc_window_t* w = _sapp_tc_mac_live(keys[i].win_id);
+        if (w && !w->native_closed && !w->closed_pending) _sapp_tc_mac_key_event(w, keys[i].type);
+    }
 }
 
 /*-- main window: event routing to the sapp_desc callbacks ------------------*/
@@ -3419,6 +3515,7 @@ static void _sapp_tc_mac_closed_now(_sapp_tc_window_t* w) {
    after the outermost callback runs the close handling above, unchanged and
    not vetoable (the native window is already closed). */
 static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
+    _sapp_tc_mac_forget_key(w->win_id);
     // Closed natively: any close request still pending is satisfied by it.
     w->close_recorded = true;
     w->close_recorded_frame = w->frame_count;
@@ -3525,11 +3622,15 @@ static void _sapp_tc_mac_update_frame_rate(_sapp_tc_window_t* w) {
 }
 - (void)windowDidBecomeKey:(NSNotification*)n {
     (void)n;
-    if (self.w) _sapp_tc_send_type(self.w, SAPP_EVENTTYPE_FOCUSED);
+    _sapp_tc_mac_process_visibility();
+    _sapp_tc_mac_recheck_visibility();
+    if (self.w) _sapp_tc_mac_key_event(self.w, SAPP_EVENTTYPE_FOCUSED);
 }
 - (void)windowDidResignKey:(NSNotification*)n {
     (void)n;
-    if (self.w) _sapp_tc_send_type(self.w, SAPP_EVENTTYPE_UNFOCUSED);
+    _sapp_tc_mac_process_visibility();
+    _sapp_tc_mac_recheck_visibility();
+    if (self.w) _sapp_tc_mac_key_event(self.w, SAPP_EVENTTYPE_UNFOCUSED);
 }
 @end
 
@@ -3662,7 +3763,7 @@ static bool _sapp_tc_mac_busy(void) {
 }
 
 static bool _sapp_tc_mac_deferred_pending(void) {
-    if (_sapp_tc.terminate_pending || _sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) return true;
+    if (_sapp_tc.visibility_pending || _sapp_tc.pending_key_count > 0 || _sapp_tc.terminate_pending || _sapp_tc.app.quit_requested || _sapp_tc.app.quit_ordered) return true;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
         if (cw && (cw->close_requested || cw->closed_pending)) return true;
@@ -3678,6 +3779,7 @@ static void _sapp_tc_mac_process_deferred(void) {
         return;
     }
     _sapp_tc.deferred_blocked = false;
+    _sapp_tc_mac_process_visibility();
     // Native closes that happened while busy: run their close handling now.
     // Re-fetch each slot: a close callback destroys windows.
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
@@ -3815,10 +3917,15 @@ static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
     _sapp_tc_mac_process_deferred();
 }
 
-/* A tick from one of the window's sources. Visibility sampling may notify, so
-   it runs under the tick guard; the inactive source's ticks are dropped. */
+/* A tick from one of the window's sources. Flush transition work first and
+   re-resolve identity: a delivered event may dispose the firing window. The
+   source's own observation runs under its tick guard; inactive ticks drop. */
 static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {
     if (_sapp_tc_mac_tick_blocked(w)) return;
+    const uint32_t source_id = w->win_id;
+    _sapp_tc_mac_process_visibility();
+    w = _sapp_tc_mac_live(source_id);
+    if (!w || _sapp_tc_mac_tick_blocked(w)) return;
     {
         const uint32_t win_id = w->win_id;
         _sapp_tc_mac_tick_scope guard(w);
@@ -3845,6 +3952,7 @@ static void _sapp_tc_main_tick_tramp(sapp_window win, void* user) {
    been removed from the registry by its caller. */
 static void _sapp_tc_mac_unwind(_sapp_tc_window_t* w) {
     if (!w) return;
+    _sapp_tc_mac_forget_key(w->win_id);
     w->ready = false;
     _sapp_tc_mac_stop_fallback(w);
     if (w->link) { [w->link invalidate]; w->link = nil; }
@@ -4213,6 +4321,11 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
         _sapp_tc_mac_update_frame_rate(_sapp_tc.windows[i]);
     }
 }
+- (void)applicationDidBecomeActive:(NSNotification*)n {
+    (void)n;
+    _sapp_tc_mac_process_visibility();
+    _sapp_tc_mac_recheck_visibility();
+}
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
     (void)sender;
     return YES;
@@ -4257,6 +4370,9 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 }
 - (void)applicationWillTerminate:(NSNotification*)n {
     (void)n;
+    _sapp_tc.pending_key_count = 0;
+    for (auto& key : _sapp_tc.pending_keys) key = {};
+    _sapp_tc.visibility_pending = false;
     if (_sapp_tc.app.host_turn_observer) {
         CFRunLoopObserverInvalidate(_sapp_tc.app.host_turn_observer);
         CFRelease(_sapp_tc.app.host_turn_observer);
