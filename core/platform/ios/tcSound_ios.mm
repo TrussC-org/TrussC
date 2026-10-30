@@ -63,10 +63,15 @@ static SInt64 MemoryAudioFile_GetSizeProc(void* inClientData) {
 }
 
 namespace {
-LoadResult decodeAacMemory(const void* data, size_t dataSize, SoundBuffer& out, internal::AudioDecodeStatus& status, bool memoryInput = true,
+LoadResult decodeAacMemory(const void* data, size_t dataSize, SoundBuffer& out, internal::AudioDecodeStatus& status,
                            const std::string& input = "memory input") {
-    if (!data || !dataSize || (memoryInput && !status.encoded(dataSize)))
-        return LoadResult::fail(LoadError::DecodeFailed, "AAC input rejected; use SoundStream::loadStream()");
+    if (!data || !dataSize)
+        return LoadResult::fail(LoadError::DecodeFailed, "empty AAC memory input");
+    // Bound (abi): AudioFile callbacks expose their size as SInt64; larger inputs fail before narrowing.
+    if (dataSize > uint64_t(INT64_MAX)) {
+        logError("SoundBuffer") << "AAC memory input size does not fit AudioFile's SInt64 byte length";
+        return LoadResult::fail(LoadError::DecodeFailed, "AAC input size cannot be represented");
+    }
     MemoryAudioFileData memory{static_cast<const uint8_t*>(data), dataSize, 0};
     AudioFileID file = nullptr;
     const AudioFileTypeID types[] = {kAudioFileAAC_ADTSType, kAudioFileM4AType, 0};
@@ -93,7 +98,7 @@ LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     std::vector<unsigned char> bytes;
     if (!internal::readAudioFile(path, bytes, status))
         return LoadResult::fail(LoadError::DecodeFailed, "AAC input rejected; use SoundStream::loadStream()");
-    return decodeAacMemory(bytes.data(), bytes.size(), *this, status, false, internal::pathToDisplayUtf8(path));
+    return decodeAacMemory(bytes.data(), bytes.size(), *this, status, internal::pathToDisplayUtf8(path));
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {

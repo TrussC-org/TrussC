@@ -636,7 +636,7 @@ void Texture::createResources(const void* initialData, const sg_image_data* imag
     // Create sampler
     createSampler();
 
-    allocated_ = true;
+    finishResources_();
 }
 
 #ifdef __EMSCRIPTEN__

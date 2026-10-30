@@ -1347,18 +1347,24 @@ private:
 
 // A single 4x4 uncompressed HAP-Q block, with a red/opaque raw texture.
 // The movie is constructed locally so this regression needs no encoder or audio.
-static vector<char> buildShaderFailureMovie() {
-    vector<char> frame(20, 0);
+static vector<char> buildShaderFailureMovie(int width = 4, int height = 4, bool bc1 = false) {
+    vector<char> frame(bc1 ? size_t(width / 4) * (height / 4) * 8 + 4 : 20, 0);
     frame[0] = 16;
     frame[3] = char(0xAF); // no secondary compression, YCoCg DXT5
     frame[4] = char(255); // BC3 alpha endpoint, all indices select it
     frame[13] = char(0xF8); // BC3 RGB565 endpoint: red
+    if (bc1) {
+        const size_t bytes = frame.size() - 4;
+        for (unsigned i = 0; i < 3; ++i) frame[i] = char(bytes >> (i * 8));
+        frame[3] = char(0xAB); // raw BC1
+    }
     const auto mdat = makeAtom("mdat", frame);
     vector<char> entry(78, 0);
     entry[7] = 1; // data reference index
-    entry[25] = 4; entry[27] = 4; // width, height (entry excludes atom header)
+    entry[24] = char(width >> 8); entry[25] = char(width);
+    entry[26] = char(height >> 8); entry[27] = char(height); // entry excludes atom header
     vector<char> stsd; appendU32(stsd, 0); appendU32(stsd, 1);
-    const auto description = makeAtom("HapY", entry);
+    const auto description = makeAtom(bc1 ? "Hap1" : "HapY", entry);
     stsd.insert(stsd.end(), description.begin(), description.end());
     vector<char> stts; appendU32(stts, 0); appendU32(stts, 1);
     appendU32(stts, 1); appendU32(stts, 1);
@@ -1380,6 +1386,26 @@ static vector<char> buildShaderFailureMovie() {
 class ShaderFailureApp : public App {
 public:
     void draw() override {
+        const int limit = sg_query_limits().max_image_size_2d;
+        const int width = ((limit / 4) + 1) * 4;
+        const auto wide = fs::temp_directory_path() / "tcxHap_device_size.mov";
+        check("wide BC1 fixture fits MOV dimensions", width <= 65535);
+        check("wide BC1 fixture written", writeBytes(wide, buildShaderFailureMovie(width, 4, true)));
+        {
+            HapPlayer oversized;
+            int events = 0;
+            auto listener = oversized.onError.listen([&](VideoErrorEventArgs&) { ++events; });
+            check("wide BC1 fixture loads for CPU decoding", bool(oversized.load(wide)));
+            oversized.setFrame(0);
+            oversized.update();
+            check("wide BC1 upload reports playback error", oversized.hasError() && events == 1 &&
+                !oversized.isPlaying() && !oversized.getTexture().isAllocated());
+            oversized.update();
+            check("wide BC1 error delivered once", events == 1);
+            printf("BC1 fixture: %dx4, device limit %d, %llu bytes\n", width, limit,
+                static_cast<unsigned long long>(fs::file_size(wide)));
+        }
+        fs::remove(wide);
         const auto path = fs::temp_directory_path() / "tcxHap_shader_failure.mov";
         check("HAP-Q shader failure fixture written", writeBytes(path, buildShaderFailureMovie()));
         HapPlayer player, other;

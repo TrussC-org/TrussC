@@ -22,7 +22,7 @@
 #include "impl/bcdec.h"
 #include "impl/tcxHapRgba.h"
 #include "impl/tcxHapDrawData.h"
-#include <tc/sound/internal/tcAudioDecodeBudget.h>
+#include <tc/sound/internal/tcAudioDecode.h>
 
 namespace tcx::hap {
 
@@ -271,7 +271,7 @@ public:
                 MovParser::fourccToString(videoTrack->codecFourCC) + ")");
         }
 
-        // Bound (security): dimension checks precede first-sample allocation; one encoded frame, BC output, RGBA output and exact replacements fit the 512 MiB decoder set. Overflow fails loading with LoadError.
+        // Check dimensions supported by the decoder and texture APIs before reading the first sample.
         // Bound (abi): VideoPlayerBase indexes frames with int. Overflow rejects the file with LoadError.
         if (!detail::movDimensions(videoTrack->width, videoTrack->height) || videoTrack->samples.size() > INT_MAX) {
             movParser_.close();
@@ -967,7 +967,7 @@ private:
                                 int dstX = bx * 4 + px;
                                 int dstY = by * 4 + py;
                                 if (dstX < width_ && dstY < height_) {
-                                    uint8_t* pixel = dst + (dstY * dstPitch) + (dstX * 4);
+                                    uint8_t* pixel = dst + (size_t(dstY) * dstPitch) + (dstX * 4);
                                     uint8_t r = rBlock[py * 4 + px];
                                     pixel[0] = r;
                                     pixel[1] = r;
@@ -1060,6 +1060,9 @@ private:
             texture_.allocateCompressed(width_, height_, compressedFormat_,
                                         frameBuffer_.data(), frameBuffer_.size());
         }
+        if (sg_isvalid() && !texture_.isAllocated()) {
+            reportPlaybackError("HAP texture allocation failed");
+        }
     }
 
     sg_pixel_format compressedFormat_ = SG_PIXELFORMAT_NONE;
@@ -1120,11 +1123,10 @@ private:
     }
     std::vector<uint8_t> extractAudio(bool adts) const {
         if (!audioTrack_) return {};
-        const uint64_t cap = audioTrack_->isPcm() ? uint64_t(SIZE_MAX) : 64u * 1024 * 1024;
+        const uint64_t cap = uint64_t(SIZE_MAX);
         uint64_t total = 0;
         for (size_t i = 0; i < audioTrack_->samples.size(); ++i) {
             const auto sample = audioTrack_->samples[i];
-            // Bound (security): encoded audio extraction, including ADTS headers, fits 64 MiB before any read/copy; full PCM grows to available memory. Overflow rejects the whole track and is counted.
             // Bound (abi): ADTS has a 13-bit packet length including its seven-byte header. Overflow rejects the whole extraction and is counted.
             if (!movParser_.isSampleInFile(*audioTrack_, i) ||
                 sample.size > cap - total ||

@@ -1,5 +1,5 @@
 #include "tcxHapPlayer.h"
-#include <tc/sound/internal/tcAudioDecodeBudget.h>
+#include <tc/sound/internal/tcAudioDecode.h>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
@@ -315,19 +315,25 @@ int runRecordedFormatsTests() {
     HapDecoder decoder;
     HapDecodedFrame decoded;
     {
-        // A complete raw BC1 frame at the 128 MiB RGBA boundary.
-        Bytes exactFrame(16u * 1024 * 1024 + 8, 0);
-        exactFrame[3] = 0xab; exactFrame[7] = 1;
+        // A complete BC1 frame whose RGBA image exceeds the former 128 MiB cap.
+        constexpr size_t textureBytes = 2048u * 1025u * 8;
+        Bytes exactFrame(textureBytes + 8, 0);
+        exactFrame[3] = 0xab;
+        for (unsigned i = 0; i < 4; ++i) exactFrame[4 + i] = uint8_t(textureBytes >> (i * 8));
         HapDecodedFrame exact;
-        check("complete frame at the RGBA byte limit decodes", decoder.decode(exactFrame.data(), exactFrame.size(), 8192, 4096, exact) &&
-              exact.data.size() == 16u * 1024 * 1024 && exact.data.front() == 0 && exact.data.back() == 0);
+        check("HAP frame above former byte cap decodes", decoder.decode(exactFrame.data(), exactFrame.size(), 8192, 4100, exact) &&
+              exact.data.size() == textureBytes && exact.data.front() == 0 && exact.data.back() == 0);
     }
     Bytes axisFrame(16392 + 4, 0);
     axisFrame[0] = 16392 & 255; axisFrame[1] = 16392 >> 8; axisFrame[3] = 0xab;
-    largestRequest = 0; failAbove = 65536; measuring = true;
     bool ok = decoder.decode(axisFrame.data(), axisFrame.size(), 8193, 4, decoded);
-    measuring = false;
-    check("axis bound checked before decoded allocation", !ok && decoded.data.empty() && largestRequest < 65536);
+    check("wide HAP frame decodes", ok && decoded.width == 8193 && decoded.data.size() == 16392);
+    failAbove = 8; measuring = true;
+    bool decoderThrew = false;
+    try { ok = decoder.decode(axisFrame.data(), axisFrame.size(), 8193, 4, decoded); }
+    catch (...) { decoderThrew = true; }
+    measuring = false; failAbove = SIZE_MAX;
+    check("HAP decode allocation failure returns cleanly", !ok && !decoderThrew && decoded.data.empty());
     write(path, movie(1, 1, 1));
     parser.open(path); track = parser.getInfo().getVideoTrack();
     (void)track->samples[0]; // Separate sample-buffer failure from lazy page creation.
@@ -343,20 +349,9 @@ int runRecordedFormatsTests() {
     check("audio range fixture opens", parser.open(path));
     HapPlayer player;
     HapBudgetTestAccess::audio(player, std::move(parser));
-    unsigned warnings = 0;
-    auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
-        if (event.level == tc::LogLevel::Warning) ++warnings;
-    });
-    std::vector<uint8_t> extracted, again;
-    largestRequest = 0; failAbove = 65536; measuring = true;
-    bool audioThrew = false;
-    try {
-        extracted = HapBudgetTestAccess::extract(player);
-        again = HapBudgetTestAccess::extract(player);
-    } catch (...) { audioThrew = true; }
-    measuring = false; failAbove = SIZE_MAX;
-    check("audio cap precedes extraction allocation", !audioThrew && extracted.empty() && again.empty() && largestRequest <= 65536);
-    check("audio loss counted with one Warning", warnings == 1 && HapBudgetTestAccess::rejections(player) == 2);
+    auto extracted = HapBudgetTestAccess::extract(player);
+    check("encoded audio extraction grows past 64 MiB", extracted.size() == 64u * 1024 * 1024 + 2 && extracted.back() == 0);
+    std::vector<uint8_t>().swap(extracted);
     HapBudgetTestAccess::pcm(player);
     auto pcmBytes = HapBudgetTestAccess::extract(player);
     check("full PCM extraction remains complete past encoded cap", pcmBytes.size() == 64u * 1024 * 1024 + 2 && pcmBytes.back() == 0);

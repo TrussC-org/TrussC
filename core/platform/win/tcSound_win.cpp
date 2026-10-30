@@ -171,8 +171,13 @@ namespace {
 namespace {
 LoadResult decodeAacMemory(const void* data, size_t dataSize, SoundBuffer& out) {
     internal::AudioDecodeStatus status;
-    if (!data || !dataSize || !status.encoded(dataSize))
-        return LoadResult::fail(LoadError::DecodeFailed, "AAC input rejected; use SoundStream::loadStream()");
+    if (!data || !dataSize)
+        return LoadResult::fail(LoadError::DecodeFailed, "empty AAC memory input");
+    // Bound (abi): SHCreateMemStream takes a UINT byte length; larger inputs fail before narrowing.
+    if (dataSize > size_t(UINT_MAX)) {
+        logError("SoundBuffer") << "AAC memory input size does not fit the Windows stream's UINT byte length";
+        return LoadResult::fail(LoadError::DecodeFailed, "AAC input size cannot be represented");
+    }
     EnsureMFStartup();
     IStream* stream = SHCreateMemStream(static_cast<const BYTE*>(data), UINT(dataSize));
     if (!stream) {
