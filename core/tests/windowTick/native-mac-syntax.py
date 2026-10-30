@@ -40,9 +40,10 @@ for name, declaration, expected in [
 ]:
     body = definition
     if name == 'old_forward_declaration':
-        body = body.replace('sapp_event_type detail)', 'sapp_event_type detail = SAPP_EVENTTYPE_INVALID)')
+        body = body.replace('sapp_event_type detail, bool recovery_only)',
+                            'sapp_event_type detail = SAPP_EVENTTYPE_INVALID, bool recovery_only = false)')
     if name == 'duplicate_default_argument':
-        body = body.replace('sapp_event_type detail)', 'sapp_event_type detail = SAPP_EVENTTYPE_INVALID)')
+        body = body.replace('bool recovery_only)', 'bool recovery_only = false)')
     path = out / (name + '.cpp')
     path.write_text(stubs + declaration + body + callsite, encoding='utf-8')
     command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-fsyntax-only', str(path)]

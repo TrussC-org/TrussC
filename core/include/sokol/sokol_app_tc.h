@@ -2746,7 +2746,7 @@ static void _sapp_tc_mac_schedule_deferred(void);
 static bool _sapp_tc_mac_busy(void);
 static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback);
 static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w);
-static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail = SAPP_EVENTTYPE_INVALID);
+static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail = SAPP_EVENTTYPE_INVALID, bool recovery_only = false);
 static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown);
 
 static void _sapp_tc_timing_reset(_sapp_tc_timing_t* t) {
@@ -3041,14 +3041,17 @@ static void _sapp_tc_mac_update_suspension(_sapp_tc_window_t* w) {
     _sapp_tc_send_type(w, suspended ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
 }
 
-/* Sample AppKit's visibility for one window: from the occlusion/miniaturize
-   notifications (a hidden view's link is suspended, so a tick alone often
-   never sees it) and at each tick (the transition race). Raw observations
-   only enter the shared record while hidden signals are trusted. */
-static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail) {
+/* Occlusion/miniaturize notifications and source ticks sample AppKit visibility
+   and can enter hidden. Activation/key rechecks only recover after AppKit
+   reports visible and non-miniaturized. Raw observations only enter the shared
+   record while hidden signals are trusted. */
+static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail, bool recovery_only) {
     if (!w || !w->window) return;
     const bool occluded = (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0;
     const bool iconified = w->window.miniaturized;
+    // Activation/key rechecks must not latch the not-visible property while
+    // makeKeyAndOrderFront is still publishing a new window.
+    if (recovery_only && (occluded || iconified)) return;
     w->link_suspended = occluded || iconified;
     if (w->trust_hidden_signals) {
         w->occluded = occluded;
@@ -3064,10 +3067,9 @@ static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail) {
     _sapp_tc_mac_update_suspension(w);
 }
 
-/* Activation/key transitions can change peer visibility too. Re-read every
-   live window through the same event/source path. A hidden window also
-   rechecks on its existing fallback timer, so recovery after a modal does
-   not depend on restoring a key window or an occlusion notification. */
+/* Activation/key transitions only recover visible windows. Hidden entry is
+   driven by native occlusion/miniaturize notifications and source ticks. A key-time
+   transient hidden property during creation must not synthesize SUSPENDED. */
 static void _sapp_tc_mac_recheck_visibility(void) noexcept {
     if (_sapp_tc_mac_frozen()) return;
     const bool defer = _sapp_tc.callbacks_active > 0;
@@ -3080,12 +3082,14 @@ static void _sapp_tc_mac_recheck_visibility(void) noexcept {
         if (!w || !w->ready || w->native_closed || w->closed_pending) continue;
         try {
             if (defer) {
-                // Keep native source selection current, without changing the
-                // effective visibility or its last delivered aggregate event.
-                w->link_suspended = (w->window.occlusionState & NSWindowOcclusionStateVisible) == 0 || w->window.miniaturized;
-                _sapp_tc_mac_select_source(w);
+                // Recover native source selection without changing effective
+                // visibility or its last delivered aggregate event.
+                if ((w->window.occlusionState & NSWindowOcclusionStateVisible) != 0 && !w->window.miniaturized) {
+                    w->link_suspended = false;
+                    _sapp_tc_mac_select_source(w);
+                }
             } else {
-                _sapp_tc_mac_observe(w);
+                _sapp_tc_mac_observe(w, SAPP_EVENTTYPE_INVALID, true);
             }
         }
         catch (...) { _sapp_tc_mac_contained("visibility recheck"); }

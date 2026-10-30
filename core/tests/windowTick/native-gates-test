@@ -117,7 +117,7 @@ mac_source = mac_extract('static void _sapp_tc_mac_select_source(', (
 mac_recheck = mac_extract('static void _sapp_tc_mac_recheck_visibility(void) noexcept', (
     ('w->window.occlusionState', 'w->window->occlusionState'),
     ('w->window.miniaturized', 'w->window->miniaturized'),))
-mac_observe = mac_extract('static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail) {', (
+mac_observe = mac_extract('static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail, bool recovery_only) {', (
     ('w->window.occlusionState', 'w->window->occlusionState'),
     ('w->window.miniaturized', 'w->window->miniaturized'),))
 # The shared event gate also sets in_tick. Check observation entry itself,
@@ -190,6 +190,9 @@ mac_fallback = mac_method('- (void)fallbackTick:(NSTimer*)timer',
     'void fallback_tick(View* self, NSTimer* timer)', '_sapp_tc_view')
 mac_minimize = mac_method('- (void)windowDidMiniaturize:(NSNotification*)n',
     'void minimize(View* self, void* n)', '_sapp_tc_win_delegate')
+mac_occlusion = mac_extract('- (void)windowDidChangeOcclusionState:(NSNotification*)n', (
+    ('- (void)windowDidChangeOcclusionState:(NSNotification*)n', 'void occlusion_changed(View* self, void* n)'),
+    ('self.w', 'self->w'),))
 mac_restore = mac_method('- (void)windowDidDeminiaturize:(NSNotification*)n',
     'void restore(View* self, void* n)', '_sapp_tc_win_delegate')
 mac_visibility_transitions = ''.join(mac_extract('- (void)' + name + ':(NSNotification*)n', (
@@ -418,6 +421,7 @@ bool skip_in_callback, reenter, dispose_in_callback;
 bool probe_callbacks=false, probing=false, nest_event=false, request_deferred=false;
 int throw_kind=-1, destroy_at=0, creation_stage=0, probe_kind=-1;
 bool constructor_probe=false, notify_reconcile=false, expect_tick_guard=false;
+bool creation_key_probe=false;
 Native* callback_target=nullptr;
 Native* other=nullptr;
 Native* creation_record=nullptr;
@@ -492,7 +496,7 @@ BOOL native_perform_close(View* delegate) {
 // Legacy process-quit seam used by the round-2 tests; round-3 native requests
 // enter the real translated window/application delegates above.
 void perform_close(NSWindow*) { ++quit; _sapp_tc.app.quit_requested=_sapp_tc.app.quit_ordered=false; }
-''' + extract('static void _sapp_tc_mac_init_client(void) {') + extract('static bool _sapp_tc_mac_deferred_pending(void) {') + mac_deferred + mac_schedule + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_main_drawable + mac_swap + mac_tick_scope + mac_tick_body + extract('static bool _sapp_tc_mac_tick_blocked(') + extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {') + extract('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {') + mac_link + mac_fallback + mac_minimize + mac_restore + mac_recheck + extract('static void _sapp_tc_mac_key_event(') + extract('static void _sapp_tc_mac_process_visibility(') + mac_visibility_transitions + r'''
+''' + extract('static void _sapp_tc_mac_init_client(void) {') + extract('static bool _sapp_tc_mac_deferred_pending(void) {') + mac_deferred + mac_schedule + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_main_drawable + mac_swap + mac_tick_scope + mac_tick_body + extract('static bool _sapp_tc_mac_tick_blocked(') + extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {') + extract('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {') + mac_link + mac_fallback + mac_minimize + mac_occlusion + mac_restore + mac_recheck + extract('static void _sapp_tc_mac_key_event(') + extract('static void _sapp_tc_mac_process_visibility(') + mac_visibility_transitions + r'''
 void probe_closed_window(Native* w) {
     const int ticks=consulted, samples=timing, sizes=dimensions, draws=acquired, reconciles=reconciled;
     const int event_count=events.size(), timer_count=timers, installed=installs;
@@ -661,6 +665,7 @@ void reset(Native& w,NSWindow& window,View& view,bool role) {
     skip_in_callback=reenter=dispose_in_callback=false; events.clear(); event_windows.clear();
     probe_callbacks=probing=nest_event=request_deferred=false;
     throw_kind=probe_kind=-1; destroy_at=creation_stage=0;
+    creation_key_probe=false;
     constructor_probe=notify_reconcile=expect_tick_guard=false; callback_target=other=creation_record=nullptr;
 }
 void peer_setup(Native& peer,NSWindow& window,View& view) {
@@ -694,7 +699,17 @@ void creation_notification(Native* w,int stage) {
     check("macOS constructor defers close after notification returns", closed==0 && quit==0 && other->close_requested);
 }
 void _sapp_tc_request_fullscreen(Native* w,bool) { creation_notification(w,1); }
-void show_window(NSWindow*) { ++shown; creation_notification(creation_record,2); }
+void show_window(NSWindow*) {
+    ++shown;
+    if (creation_key_probe) {
+        creation_record->window->occlusionState=0;
+        windowDidBecomeKey(creation_record->view,nil);
+    } else creation_notification(creation_record,2);
+}
+sapp_event_type destroyOn;
+bool destroyedInCallback=false;
+void _sapp_tc_mac_unwind(Native* w) { _sapp_tc_mac_forget_key(w->win_id); dispose(w); }
+''' + extract('void sapp_destroy_window(sapp_window win) {') + extract('bool sapp_window_valid(sapp_window win) {') + body(read(root/'core/tests/nativeWindow/main_mac.mm'), 'void victimEvent(', 'main_mac.mm') + r'''
 int native_allocations=0;
 ''' + mac_creation_admission + r'''
     ++native_allocations;
@@ -972,12 +987,72 @@ void run() {
         check("macOS fallback preserves last display-link sample", w.frame_duration==duration && w.last_tick_time==last);
         link=CADisplayLink{};
     }
+    // Replay the production public constructor's show-time key notification:
+    // AppKit has not yet changed the not-visible property to visible.
+    reset(w,window,view,false); creation_key_probe=true;
+    auto created=sapp_create_window(&w.desc);
+    check("macOS creation with transient hidden key property emits only FOCUSED",
+          created.id==w.win_id && events==std::vector<int>{SAPP_EVENTTYPE_FOCUSED} &&
+          !w.occluded && !w.iconified && !w.link_suspended && !w.fallback_active && !w.suspended_sent);
+    window.occlusionState=1; applicationDidBecomeActive(nullptr,nil);
+    check("macOS creation visible recovery emits no spurious RESUMED", events==std::vector<int>{SAPP_EVENTTYPE_FOCUSED});
+    // Activation/key rechecks cannot enter hidden, including while callbacks
+    // defer effective state and key delivery. Source rereads retain full observation.
+    for (bool role : {false,true}) for (bool modal : {false,true})
+    for (bool iconic : {false,true}) for (int transition=0; transition<5; ++transition) {
+        reset(w,window,view,role);
+        window.occlusionState=iconic?1:0; window.miniaturized=iconic;
+        const auto fire=[&] {
+            if (transition==0) applicationDidBecomeActive(nullptr,nil);
+            if (transition==1) windowDidBecomeKey(&view,nil);
+            if (transition==2) windowDidResignKey(&view,nil);
+            if (transition==3) link_tick(&view,&link);
+            if (transition==4) fallback_tick(&view,&timer);
+        };
+        if (modal) { _sapp_tc_mac_callback_scope scope(&w); fire(); }
+        else fire();
+        drain_run_loop();
+        if (transition<3 || modal) {
+            check("macOS activation/key recovery-only or blocked source cannot enter hidden",
+                  !w.occluded && !w.iconified && !w.link_suspended && !w.fallback_active &&
+                  !w.suspended_sent && std::count(events.begin(),events.end(),SAPP_EVENTTYPE_SUSPENDED)==0);
+        } else {
+            check("macOS unblocked source reread retains full hidden observation",
+                  w.occluded==!iconic && w.iconified==iconic && w.link_suspended && w.fallback_active &&
+                  w.suspended_sent && events==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED});
+        }
+    }
+    // Extract the device victimEvent and public destroy/valid functions. The
+    // native allocation/free seam keeps stack fixtures addressable after close.
+    // Both source shims retain the original SUSPENDED destruction contract;
+    // notification/resize and additional source RESUMED destruction stay covered.
+    for (int path=0; path<7; ++path) {
+        reset(w,window,view,false); creation_key_probe=true;
+        auto victim=sapp_create_window(&w.desc);
+        w.desc.event_cb=victimEvent;
+        destroyOn=path==4?SAPP_EVENTTYPE_RESIZED:path>=5?SAPP_EVENTTYPE_RESUMED:SAPP_EVENTTYPE_SUSPENDED;
+        destroyedInCallback=false; events.clear();
+        window.occlusionState=0;
+        if (path==0) link_tick(&view,&link);
+        if (path==1) fallback_tick(&view,&timer);
+        if (path==2) minimize(&view,nil);
+        if (path==3) occlusion_changed(&view,nil);
+        if (path==4) { w.fb_width=1; _sapp_tc_mac_tick(&w,nil); }
+        if (path>=5) {
+            _sapp_tc_mac_observe(&w);
+            window.occlusionState=1;
+            if (path==5) link_tick(&view,&link); else fallback_tick(&view,&timer);
+        }
+        check("macOS device victim destroys safely from source SUSPENDED/RESUMED notification or RESIZED",
+              destroyedInCallback && !sapp_window_valid(victim) && _sapp_tc.callbacks_active==0);
+        check("macOS destroyed victim performs no later client tick or drawable", consulted==0 && acquired==0);
+    }
     // Exercise the same visibility and source shims for both roles. AppKit's
     // physical link suspension still needs a fallback when trust is disabled.
     for (bool role : {false,true}) for (bool trust : {false,true})
     for (bool allow : {false,true}) {
         reset(w,window,view,role); w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
-        window.occlusionState=0; link_tick(&view,&link);
+        window.occlusionState=0; _sapp_tc_mac_observe(&w);
         check("macOS suspended link selects fallback without double tick", consulted==0 && w.fallback_active && timers==1 && installs==1);
         check("macOS observations respect trust", w.occluded==trust && !w.iconified && w.link_suspended);
         fallback_tick(&view,&timer);
@@ -1021,7 +1096,7 @@ void run() {
     // existing hidden fallback to recover after that callback unwinds.
     for (bool role : {false,true}) for (int transition=0; transition<5; ++transition) {
         reset(w,window,view,role); peer_setup(peer,peer_window,peer_view);
-        window.occlusionState=0; link_tick(&view,&link);
+        window.occlusionState=0; _sapp_tc_mac_observe(&w);
         check("macOS missed-notification setup selects hidden fallback",
               w.occluded && w.suspended_sent && w.fallback_active);
         const auto frame=w.frame_count;
@@ -1055,7 +1130,7 @@ void run() {
     for (bool role : {false,true}) for (int transition=0; transition<3; ++transition)
     for (int boundary=0; boundary<3; ++boundary) {
         reset(w,window,view,role); peer_setup(peer,peer_window,peer_view);
-        window.occlusionState=0; link_tick(&view,&link);
+        window.occlusionState=0; _sapp_tc_mac_observe(&w);
         events.clear();
         const auto frame=w.frame_count;
         {
@@ -1091,7 +1166,7 @@ void run() {
     // A later native transition can arrive before the queued block. Older
     // final key states must still precede it, coalescing intermediate flips.
     reset(w,window,view,false); peer_setup(peer,peer_window,peer_view);
-    window.occlusionState=0; link_tick(&view,&link); events.clear();
+    window.occlusionState=0; _sapp_tc_mac_observe(&w); events.clear();
     {
         _sapp_tc_mac_callback_scope modal(&peer);
         window.occlusionState=1;
@@ -1110,7 +1185,7 @@ void run() {
     static_assert(sizeof(_sapp_tc.pending_keys) == 32*sizeof(_sapp_tc_mac_pending_key), "fixed registry storage");
     for (bool role : {false,true}) for (int boundary=0; boundary<3; ++boundary) {
         reset(w,window,view,role); peer_setup(peer,peer_window,peer_view);
-        window.occlusionState=0; link_tick(&view,&link); events.clear(); event_windows.clear();
+        window.occlusionState=0; _sapp_tc_mac_observe(&w); events.clear(); event_windows.clear();
         {
             _sapp_tc_mac_callback_scope modal(&w);
             window.occlusionState=1;
@@ -1169,14 +1244,15 @@ void run() {
     }
     reset(w,window,view,false);
     window.occlusionState=0; applicationDidBecomeActive(nullptr,nil);
-    check("macOS activation also repairs a missed hidden notification", w.occluded && w.fallback_active);
+    check("macOS activation cannot introduce hidden from a missed notification", !w.occluded && !w.fallback_active && events.empty());
+    _sapp_tc_mac_observe(&w);
     window.occlusionState=1; throw_kind=0;
     applicationDidBecomeActive(nullptr,nil);
     check("macOS visibility recovery contains throwing resumed callback",
           errors==1 && !w.occluded && !w.fallback_active && _sapp_tc.callbacks_active==0);
     throw_kind=-1;
     reset(w,window,view,false);
-    window.occlusionState=0; link_tick(&view,&link); window.occlusionState=1;
+    window.occlusionState=0; _sapp_tc_mac_observe(&w); window.occlusionState=1;
     w.closed_pending=true; applicationDidBecomeActive(nullptr,nil);
     check("macOS visibility recheck skips pending closed windows", w.occluded && w.fallback_active);
     w.closed_pending=false; w.native_closed=true; applicationDidBecomeActive(nullptr,nil);
@@ -1207,7 +1283,7 @@ void run() {
         probe_kind=context<4?0:context==4?1:2; notify_reconcile=context==2;
         expect_tick_guard=context>=1 && context<=3;
         if (context==0) _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
-        if (context==1) { window.occlusionState=0; link_tick(&view,&link); }
+        if (context==1) { w.occluded=w.suspended_sent=w.link_suspended=true; link_tick(&view,&link); }
         if (context==2) _sapp_tc_mac_tick(&w,nil); // reconciliation event
         if (context==3) { ++view.bounds.size.width; _sapp_tc_mac_tick(&w,nil); }
         if (context==4) _sapp_tc_mac_tick(&w,nil);
@@ -1891,11 +1967,11 @@ if '--mutations' in sys.argv[3:]:
         'mac-retain-callback-state': change('struct _sapp_tc_mac_callback_scope {', '--w->callback_depth;', '(void)w;'),
         'mac-retain-process-callback-state': change('struct _sapp_tc_mac_callback_scope {', '--_sapp_tc.callbacks_active;', ''),
         'mac-no-hidden-admission': change(tick, admission, 'const bool admitted = true;'),
-        'mac-ignore-trust': change('static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail) {', 'if (w->trust_hidden_signals)', 'if (true)'),
+        'mac-ignore-trust': change('static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail, bool recovery_only) {', 'if (w->trust_hidden_signals)', 'if (true)'),
         'mac-retain-skip': change('static void _sapp_tc_mac_swap(', 'w->skip_present = false;', ''),
         'mac-late-tick-guard': change(tick, 'if (w->desc.tick_cb)', 'w->in_tick = false;\n        if (w->desc.tick_cb)'),
         'mac-observe-outside-guard': change('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {',
-            '_sapp_tc_mac_observe(w);', 'w->in_tick = false; _sapp_tc_mac_observe(w); w->in_tick = true;'),
+            '_sapp_tc_mac_observe(w, SAPP_EVENTTYPE_INVALID, true);', 'w->in_tick = false; _sapp_tc_mac_observe(w, SAPP_EVENTTYPE_INVALID, true); w->in_tick = true;'),
         'mac-double-source': change('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {',
             'w->fallback_active == from_fallback', 'true'),
         'win-no-hidden-admission': change(win, admission, 'const bool admitted = true;'),

@@ -214,11 +214,14 @@ sapp_window makeVictim() {
     return sapp_create_window(&d);
 }
 void destroyInCallbackChecks() {
-    enum Path { LinkTick, FallbackTick, Miniaturize, Deminiaturize, TickResize, KeyDown };
+    enum Path { LinkTick, FallbackTick, Occlusion, Miniaturize, Deminiaturize, TickResize, KeyDown };
     struct Case { const char* name; Path path; sapp_event_type type; };
     const Case cases[] = {
         {"SUSPENDED from the display-link shim", LinkTick, SAPP_EVENTTYPE_SUSPENDED},
         {"SUSPENDED from the fallback-timer shim", FallbackTick, SAPP_EVENTTYPE_SUSPENDED},
+        {"RESUMED from the display-link shim", LinkTick, SAPP_EVENTTYPE_RESUMED},
+        {"RESUMED from the fallback-timer shim", FallbackTick, SAPP_EVENTTYPE_RESUMED},
+        {"SUSPENDED from windowDidChangeOcclusionState", Occlusion, SAPP_EVENTTYPE_SUSPENDED},
         {"SUSPENDED from windowDidMiniaturize", Miniaturize, SAPP_EVENTTYPE_SUSPENDED},
         {"ICONIFIED from windowDidMiniaturize", Miniaturize, SAPP_EVENTTYPE_ICONIFIED},
         {"RESUMED from windowDidDeminiaturize", Deminiaturize, SAPP_EVENTTYPE_RESUMED},
@@ -236,8 +239,15 @@ void destroyInCallbackChecks() {
             NSWindow* window = w->window;
             destroyOn = c.type; destroyedInCallback = false;
             switch (c.path) {
-            case LinkTick: forceHidden = window; [view tick:nil]; break;
-            case FallbackTick: forceHidden = window; [view fallbackTick:nil]; break;
+            case LinkTick:
+            case FallbackTick:
+                if (c.type == SAPP_EVENTTYPE_RESUMED) {
+                    forceHidden = window; _sapp_tc_mac_observe(w);
+                    forceHidden = nil; forceVisible = window;
+                } else forceHidden = window;
+                if (c.path == LinkTick) [view tick:nil]; else [view fallbackTick:nil];
+                break;
+            case Occlusion: forceHidden = window; [delegate windowDidChangeOcclusionState:nil]; break;
             case Miniaturize: forceHidden = window; [delegate windowDidMiniaturize:nil]; break;
             case Deminiaturize:
                 forceHidden = window; _sapp_tc_mac_observe(w);   // suspended: RESUMED follows
