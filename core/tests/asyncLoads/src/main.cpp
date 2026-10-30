@@ -463,6 +463,72 @@ void fontWorkerRetirement() {
     check("cancelled Font candidate takes CPU-only cleanup on worker", retiredOffMain == 1 && !typeface.isLoaded() && events == 0);
 }
 
+// Preparation belongs to the requesting context; process-service delivery has
+// no Window and must not reinterpret prepared metrics using a native/main DPI.
+void dpiContextParity() {
+    auto* previous = internal::currentWindowCtx();
+    internal::WindowContext requesting;
+    for (float dpi : {1.0f, 2.0f}) {
+        requesting.dpiScale = dpi;
+        for (int branch = 0; branch < 4; ++branch) {
+            internal::currentWindowCtx() = &requesting;
+            const fs::path path = branch < 2 ? font : branch == 2 ? fs::path("https://invalid/font.ttf") : broken;
+            Font sync, async;
+            sync.load(font, 24); async.load(font, 24);
+            const auto* retained = async.getAtlas(0);
+            LoadResult expected, actual;
+            vector<string> syncLogs, asyncLogs;
+            { Logs logs; expected = sync.load(path, 31); syncLogs = logs.lines; }
+            if (branch == 1) internal::SharedFontCache::getInstance().clear(); // worker, rather than cache hit
+            int events = 0;
+            auto listener = async.onLoad.listen([&](LoadResult& result) {
+                check("Font completion stays in process context at DPI 1", !internal::currentWindow() && getDpiScale() == 1);
+                actual = result; ++events;
+            });
+            {
+                Logs logs;
+                async.loadAsync(path, 31);
+                internal::restoreWindowContext(nullptr);
+                finish();
+                asyncLogs = logs.lines;
+            }
+            check("Font captured DPI survives cache/worker/rejection process delivery",
+                  sameResult(expected, actual) && syncLogs == asyncLogs && events == 1 &&
+                  sync.isLoaded() == async.isLoaded() && sync.getSize() == async.getSize() &&
+                  sync.getAscent() == async.getAscent() && sync.getDescent() == async.getDescent() &&
+                  sync.getWidth("AWa") == async.getWidth("AWa") && sync.getAtlasCount() == async.getAtlasCount());
+            if (branch < 2) {
+                // Metric division can hide a wrong rasterization scale. Check
+                // the cache identity and actual glyph pixels as well.
+                sync.getWidth("AWa"); async.getWidth("AWa");
+                check("Font physical atlas matches requesting DPI", sync.getAtlas(0) && async.getAtlas(0) &&
+                      sync.getAtlas(0)->getPixels() == async.getAtlas(0)->getPixels() &&
+                      (branch != 0 || sync.getAtlas(0) == async.getAtlas(0)));
+            }
+            if (branch == 2) {
+                std::printf("Font URL DPI repro: native=%.1f request=%.1f completion=%.1f ascent=%.1f/%.1f width=%.1f/%.1f (sync/async)\n",
+                    sapp_dpi_scale(), dpi, getDpiScale(), sync.getAscent(), async.getAscent(), sync.getWidth("AWa"), async.getWidth("AWa"));
+                check("DPI-independent native URL rejection retains the atlas", async.getAtlas(0) == retained);
+            }
+        }
+    }
+    internal::currentWindowCtx() = &requesting;
+    Image syncImage, asyncImage;
+    SoundBuffer syncSound, asyncSound;
+    syncImage.load(png); syncSound.load(wav);
+    int events = 0;
+    auto imageListener = asyncImage.onLoad.listen([&](LoadResult& result) { if (result) ++events; });
+    auto soundListener = asyncSound.onLoad.listen([&](LoadResult& result) { if (result) ++events; });
+    asyncImage.loadAsync(png); asyncSound.loadAsync(wav);
+    internal::restoreWindowContext(nullptr);
+    finish();
+    check("Image pixels and SoundBuffer metadata survive DPI 2 to process delivery", events == 2 &&
+          syncImage.getWidth() == asyncImage.getWidth() && syncImage.getHeight() == asyncImage.getHeight() &&
+          syncSound.samples == asyncSound.samples && syncSound.channels == asyncSound.channels &&
+          syncSound.sampleRate == asyncSound.sampleRate && syncSound.numSamples == asyncSound.numSamples);
+    internal::restoreWindowContext(previous);
+}
+
 void pathsAudioAndFontThreading() {
     const fs::path japanese = fixtureDir / utf8ToPath("日本語");
     fs::create_directories(japanese);
@@ -642,6 +708,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     getMainThreadId();
     if (argc == 3 && string(argv[1]) == "--exit-child") return exitChild(argv[2]);
     newRun(); fixtures();
+    if (argc == 2 && string(argv[1]) == "--dpi-repro") {
+        dpiContextParity();
+        finish(); fs::remove_all(fixtureDir);
+        return failures ? 1 : 0;
+    }
     if (argc == 2 && string(argv[1]) == "--replace-every-frame") {
         WindowSettings settings; settings.setSize(64, 64); settings.setHighDpi(false);
         return tcCoreTest::runDisplayTest<ReplaceEveryFrameApp>(settings, failures, [] {
@@ -652,7 +723,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     } else {
         replacementAndCancel(); lifetimeAndReentrancy(); runtime(); exitTests(argv[0]);
         if (!(argc == 2 && string(argv[1]) == "--lifecycle-only")) {
-            successAndDelivery(); overrides(); parity(); pathsAudioAndFontThreading(); fontWorkerRetirement();
+            successAndDelivery(); overrides(); parity(); pathsAudioAndFontThreading(); fontWorkerRetirement(); dpiContextParity();
             runHeadlessApp<HeadlessExitApp>();
             auto discarded = internal::takeResourceLoadBatch();
             check("headless teardown drops queued work before resource teardown", discarded.empty());

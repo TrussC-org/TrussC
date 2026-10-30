@@ -7,6 +7,8 @@
 #include <type_traits>
 #include <initializer_list>
 #include <vector>
+#include <chrono>
+#include <thread>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
 namespace {
 int failures, callbacks, liveWindows, presents, resizeTicks;
@@ -24,6 +26,18 @@ void check(const char* name, bool passed) {
     if (!passed) ++failures;
 }
 void onEvent(const sapp_event* event, sapp_window, void*) { received = *event; ++callbacks; }
+bool waitForClientSize(Window window, int width, int height) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    XWindowAttributes actual{};
+    do {
+        if (XGetWindowAttributes(_sapp_tc.display, window, &actual) &&
+            actual.width == width && actual.height == height) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    } while (std::chrono::steady_clock::now() < deadline);
+    std::fprintf(stderr, "nativeWindow: timed out after 2 s waiting for WM client resize to %dx%d (last observed %dx%d)\n",
+        width, height, actual.width, actual.height);
+    return false;
+}
 void initialized() {
     didInitialize = true;
     auto* first = _sapp_tc.app.main;
@@ -154,10 +168,11 @@ void initialized() {
     const auto caller = sapp_tc_gl_save();
     XResizeWindow(_sapp_tc.display, other->xwin, 100, 60);
     XSync(_sapp_tc.display, False);
-    XEvent configure{}; configure.xconfigure.type = ConfigureNotify;
-    configure.xconfigure.window = other->xwin;
-    configure.xconfigure.width = 100; configure.xconfigure.height = 60;
-    _sapp_tc_x11_process_event(&configure);
+    // XSync only completes the ConfigureRequest; a real WM may grant it later.
+    // Wait for the server's actual size before injecting surface failure.
+    const bool resized = waitForClientSize(other->xwin, 100, 60);
+    check("WM applied requested client size before resize failure", resized);
+    if (!resized) { sapp_quit(); return; }
     callbacks = presents = 0;
     failSurface = true;
     _sapp_tc_x11_tick(other);

@@ -132,6 +132,9 @@ mac_dimensions = mac_extract('static bool _sapp_tc_mac_update_dimensions(_sapp_t
 mac_resize = mac_extract('- (void)windowDidResize:(NSNotification*)n', (
     ('- (void)windowDidResize:(NSNotification*)n', 'void window_did_resize(View* self, void* n)'),
     ('self.w', 'self->w'),))
+mac_frame_rate = mac_extract('static void _sapp_tc_mac_update_frame_rate(', (
+    ('w->window.screen.maximumFramesPerSecond', 'w->window->screenRate'),
+    ('w->link.preferredFrameRateRange', 'w->link->preferredFrameRateRange'),))
 mac_screen_change = mac_extract('- (void)windowDidChangeScreen:(NSNotification*)n', (
     ('- (void)windowDidChangeScreen:(NSNotification*)n', 'void window_did_change_screen(View* self, void* n)'),
     ('self.w', 'self->w'),))
@@ -304,8 +307,10 @@ int& appExitCode() { return app_code; }
 ''' + session_flag + r'''
 }
 constexpr unsigned NSWindowOcclusionStateVisible=1;
-struct NSWindow { unsigned occlusionState=1; bool miniaturized=false; double backingScaleFactor=1; };
-struct CADisplayLink { double timestamp=10, targetTimestamp=10.017; };
+struct NSWindow { unsigned occlusionState=1; bool miniaturized=false, inLiveResize=false; double backingScaleFactor=1; float screenRate=60; };
+struct CAFrameRateRange { float minimum,maximum,preferred; };
+CAFrameRateRange CAFrameRateRangeMake(float a,float b,float c) { return {a,b,c}; }
+struct CADisplayLink { double timestamp=10, targetTimestamp=10.017; CAFrameRateRange preferredFrameRateRange{}; };
 struct NSTimer {};
 struct Native;
 using CGFloat = double;
@@ -441,7 +446,7 @@ void _sapp_tc_reconcile_fullscreen(Native* w) {
 CGFloat _sapp_tc_mac_scale(Native* w) { ++dimensions; return w->window->backingScaleFactor; }
 // The Metal allocator is a seam; retain its production caller and count work.
 void _sapp_tc_ensure_swapchain_textures(Native*) { ++ensure_textures; ++texture_allocations; }
-''' + mac_dimensions + mac_resize + mac_screen_change + r'''
+''' + mac_frame_rate + mac_dimensions + mac_resize + mac_screen_change + r'''
 static void _sapp_tc_mac_tick(Native*,CADisplayLink*);
 static void _sapp_tc_mac_source_tick(Native*,CADisplayLink*,bool);
 void link_tick(View*,CADisplayLink*);
@@ -552,11 +557,20 @@ void exercise_callback(Native* w,int kind) {
             check("macOS deferred close waits for outermost callback", closed==0 && quit==0 && other->close_requested);
         }
         const auto peer_frame=other->frame_count;
+        const int peer_ticks=consulted, peer_samples=timing, peer_sizes=dimensions, peer_draws=acquired;
+        // Simulate a modal run loop firing B's display link and then its timer
+        // while A's callback remains on the stack, for either selected source.
+        const bool fallback=other->fallback_active;
         _sapp_tc_mac_tick(other,nil);
-        check("macOS other window ticks during own callback", other->frame_count==peer_frame+1);
+        other->fallback_active=false; link_tick(other->view,nil);
+        other->fallback_active=true; fallback_tick(other->view,&timer);
+        other->fallback_active=fallback;
+        check("macOS nested modal blocks peer direct display-link and timer ticks",
+              other->frame_count==peer_frame && consulted==peer_ticks && timing==peer_samples &&
+              dimensions==peer_sizes && acquired==peer_draws);
         _sapp_tc_mac_process_deferred();
         if (request_deferred)
-            check("macOS deferred close and quit wait through peer tick", closed==0 && quit==0 && other->close_requested && _sapp_tc.app.quit_requested);
+            check("macOS deferred close and quit wait through nested modal sources", closed==0 && quit==0 && other->close_requested && _sapp_tc.app.quit_requested);
         probing=false;
     }
     if (request_deferred && probing && w==callback_target) _sapp_tc_mac_process_deferred();
@@ -637,7 +651,7 @@ void reset(Native& w,NSWindow& window,View& view,bool role) {
     constructor_probe=notify_reconcile=expect_tick_guard=false; callback_target=other=creation_record=nullptr;
 }
 void peer_setup(Native& peer,NSWindow& window,View& view) {
-    peer=Native{}; view=View{}; view.w=&peer; peer.win_id=3; peer.window=&window; peer.view=&view; peer.layer=&view.layer;
+    peer=Native{}; window=NSWindow{}; view=View{}; view.w=&peer; peer.win_id=3; peer.window=&window; peer.view=&view; peer.layer=&view.layer;
     peer.desc={callback,&peer}; peer.desc.event_cb=event_callback; peer.desc.close_cb=close_callback;
     _sapp_tc.windows[1]=&peer; other=&peer;
 }
@@ -975,6 +989,30 @@ void run() {
     summary("macOS common tick / admission / visibility / sources", before, count);
     before=failures; count=checks;
     Native peer; NSWindow peer_window; View peer_view;
+    // No deferred close: B must resume on the very first native source firing
+    // after A returns, including an exception-contained callback. Both roles
+    // and both source selections use the production callback/source shims.
+    for (bool role : {false,true}) for (bool fallback : {false,true}) for (bool throws : {false,true}) {
+        reset(w,window,view,role); peer_setup(peer,peer_window,peer_view);
+        callback_target=&w; probe_callbacks=true; probe_kind=0; throw_kind=throws?0:-1;
+        peer.fallback_active=fallback; peer_window.occlusionState=fallback?0:1;
+        _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
+        check("macOS modal return balances global callback depth", _sapp_tc.callbacks_active==0 && w.callback_depth==0);
+        probe_callbacks=false; throw_kind=-1;
+        const auto frame=peer.frame_count;
+        if (fallback) fallback_tick(&peer_view,&timer); else link_tick(&peer_view,&link);
+        check("macOS peer resumes on first source tick after callback returns", peer.frame_count==frame+1);
+    }
+    // AppKit's live resize loop has no client callback on the stack. Deliver
+    // a real source tick to the resizing window and its peer in that state.
+    for (bool role : {false,true}) {
+        reset(w,window,view,role); peer_setup(peer,peer_window,peer_view);
+        window.inLiveResize=true; ++view.bounds.size.width;
+        link_tick(&view,&link); link_tick(&peer_view,&link);
+        check("macOS live resize without callback still ticks both windows",
+              window.inLiveResize && _sapp_tc.callbacks_active==0 && w.frame_count==1 && peer.frame_count==1 &&
+              consulted==2 && events==std::vector<int>{SAPP_EVENTTYPE_RESIZED});
+    }
     // Event callbacks outside a tick, from observe, from reconciliation and
     // from RESIZED, plus tick and close callbacks. The other window is live.
     for (int context=0; context<6; ++context) for (bool role : {false,true}) {
@@ -1654,8 +1692,7 @@ if '--mutations' in sys.argv[3:]:
     mutants = {
         'win-modal-foreign-pass': change('static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {',
             'if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active()) return;', ''),
-        'mac-ignore-own-callback': change(blocked, 'w->in_tick || w->callback_depth > 0', 'w->in_tick'),
-        'mac-pause-all-windows': change(blocked, 'return _sapp_tc_mac_frozen() || w->in_tick', 'return _sapp_tc_mac_frozen() || _sapp_tc.callbacks_active > 0 || w->in_tick'),
+        'mac-ignore-global-callback': change(blocked, '_sapp_tc.callbacks_active > 0 || ', ''),
         'mac-event-without-scope': change('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', scope, ''),
         'mac-tick-without-scope': change(tick, scope, ''),
         'mac-close-without-scope': change('static void _sapp_tc_mac_closed_now(', scope, ''),

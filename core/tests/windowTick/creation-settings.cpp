@@ -260,7 +260,7 @@ int main() {
 #if defined(TEST_MAC)
         int effective=interval>0?interval:1;
         check("mac per-window interval",w->swap_interval==effective);
-        check("mac display link rate applied",w->link->preferredFrameRateRange.preferred==(interval>1?120.0f/interval:0));
+        check("mac display link rate applied",w->link->preferredFrameRateRange.preferred==120.0f/effective);
         check("mac deferred desired matches creation", w->fullscreen_state.desired==full);
         check("mac creation defers until normal tick", !w->nativeFullscreen && !w->fullscreen &&
               w->fullscreen_state.phase==_sapp_tc_fullscreen_phase::Windowed &&

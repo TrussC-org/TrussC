@@ -490,10 +490,16 @@ void policies(_sapp_tc_window_t* w) {
     check("device loss consumes completed tick's skip one-shot", !w->skip_present && spy.presents == 0);
     _sapp_tc.app.device_lost_notified = false;
     // Every admitted frame, including WM_TIMER in the modal loop, must see
-    // the new client extent in both native metadata and its D3D attachments.
+    // the new framebuffer extent in both native metadata and its D3D attachments.
+    // With no_high_dpi, DXGI scales a logical-sized buffer to the client pixels.
+    // Match _sapp_tc_win32_update_dimensions' float rounding and minimum size.
+    const auto framebufferExtent = [w](int clientPixels) {
+        const int extent = w->desc.no_high_dpi ? int(float(clientPixels) / w->window_scale + 0.5f) : clientPixels;
+        return extent > 0 ? extent : 1;
+    };
     sizeClient(w, 313, 219);
     spy.resizes = 0;
-    resizeFrameWidth = 313; resizeFrameHeight = 219; resizeFrameModal = true;
+    resizeFrameWidth = framebufferExtent(313); resizeFrameHeight = framebufferExtent(219); resizeFrameModal = true;
     resizeFrameChecks = 0;
     w->desc.tick_cb = [](sapp_window handle, void*) {
         ++resizeFrameChecks;
@@ -527,13 +533,14 @@ void policies(_sapp_tc_window_t* w) {
     SendMessageW(w->hwnd,WM_TIMER,_SAPP_TC_MODAL_TIMER,0);
     SendMessageW(w->hwnd,WM_EXITSIZEMOVE,0,0);
     check("modal timer source reconciles ResizeBuffers", spy.resizes == 1 && resizeFrameChecks == 1 && !w->from_modal);
-    resizeFrameWidth = 319; resizeFrameHeight = 223; resizeFrameModal = false;
-    sizeClient(w, resizeFrameWidth, resizeFrameHeight);
+    sizeClient(w, 319, 223);
+    resizeFrameWidth = framebufferExtent(319); resizeFrameHeight = framebufferExtent(223); resizeFrameModal = false;
     _sapp_tc_win32_tick(w);
     check("ordinary resize reconciles before its first callback", spy.resizes == 2 && resizeFrameChecks == 2);
     w->desc.tick_cb = tick;
     _sapp_tc_win32_tick(w);
-    check("ordinary tick preserves reconciled resize", spy.resizes == 2 && w->fb_width == 319 && w->fb_height == 223);
+    check("ordinary tick preserves reconciled resize", spy.resizes == 2 &&
+        w->fb_width == resizeFrameWidth && w->fb_height == resizeFrameHeight);
     // Advance an injected clock inside the client: no wall-time/speed assertion.
     const double realPeriod=_sapp_tc.qpc_period;
     const auto realTiming=w->timing;

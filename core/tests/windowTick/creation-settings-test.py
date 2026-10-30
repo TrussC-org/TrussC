@@ -46,7 +46,6 @@ def mac_api(source):
         ('[w->window makeFirstResponder:view]', 'make_first_responder(w->window,view)'),
         ('[w->window center]', 'center(w->window)'),
         ('[view displayLinkWithTarget:view selector:@selector(tick:)]', 'new Link'),
-        ('[NSScreen mainScreen].maximumFramesPerSecond', '120.0f'),
         ('_sapp_tc_win_delegate* del = [_sapp_tc_win_delegate new]', 'Delegate* del = new Delegate'),
         ('[w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes]', 'add_link(w)'),
         ('[window makeKeyAndOrderFront:nil]', 'mac_show(w)'),
@@ -72,6 +71,7 @@ def generate(backend, variant):
     entry = body(entry_region, 'sapp_window sapp_create_window(')
     constructor_name = '_sapp_tc_' + port + ('_create_window_ex' if backend == 'mac' else '_create_window')
     constructor = body(NATIVE, 'static _sapp_tc_window_t* ' + constructor_name + '(')
+    rate_helper = body(NATIVE, 'static void _sapp_tc_mac_update_frame_rate(') if backend == 'mac' else ''
     if variant == 'adapter_fullscreen':
         descriptor = replace_once(descriptor, 'd.fullscreen = settings.fullscreen;', 'd.fullscreen = false;')
     elif variant == 'adapter_interval':
@@ -102,7 +102,9 @@ def generate(backend, variant):
         constructor = replace_once(constructor, '    if (!_sapp_tc_mac_initialize_dimensions(w))',
                                    '    [w->window makeKeyAndOrderFront:nil];\n    if (!_sapp_tc_mac_initialize_dimensions(w))')
     elif variant == 'mac_rate':
-        constructor = replace_once(constructor, 'if (w->swap_interval > 1)', 'if (false && w->swap_interval > 1)')
+        rate_helper = replace_once(rate_helper,
+            'w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);',
+            'w->link.preferredFrameRateRange = CAFrameRateRangeMake(0, 0, 0);')
     elif variant not in ('baseline', 'win_present', 'mac_pre_show_toggle', 'mac_desired'):
         raise AssertionError(variant)
     if port == 'x11' and variant == 'fullscreen_order':
@@ -133,7 +135,8 @@ def generate(backend, variant):
         runtime = body(NATIVE, 'extern "C" void sapp_tc_window_set_fullscreen(')
         prefix = body(NATIVE, 'struct _sapp_tc_mac_window_attrs') + ';\n'
         wrapper = body(NATIVE, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window(')
-        production = prefix + request + reconcile + terminal + runtime + constructor + wrapper + entry
+        rate_helper = rate_helper.replace('w->window.screen.maximumFramesPerSecond', '120.0f').replace('w->link.', 'w->link->')
+        production = prefix + rate_helper + request + reconcile + terminal + runtime + constructor + wrapper + entry
     else:
         extra = (body(NATIVE, 'static void _sapp_tc_win32_set_fullscreen(') if backend == 'win' else
                  body(NATIVE, 'static void _sapp_tc_x11_pace_periodic(') +

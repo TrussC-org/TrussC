@@ -3437,6 +3437,16 @@ static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed
     w->fullscreen = observed;
 }
 
+/* An explicit range must follow the current display, including recovery from
+   the no-screen/rate fallback. Creation and display/backing notifications share
+   this path; it neither admits ticks nor invokes client callbacks. */
+static void _sapp_tc_mac_update_frame_rate(_sapp_tc_window_t* w) {
+    if (_sapp_tc_mac_frozen() || !w || !w->link) return;
+    const float maxfps = (float)w->window.screen.maximumFramesPerSecond;
+    const float p = (maxfps > 0.0f ? maxfps : 60.0f) / (float)w->swap_interval;
+    w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);
+}
+
 @implementation _sapp_tc_win_delegate
 - (BOOL)windowShouldClose:(id)sender {
     (void)sender;
@@ -3464,6 +3474,13 @@ static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed
 - (void)windowDidChangeScreen:(NSNotification*)n {
     (void)n;
     _sapp_tc_window_t* w = self.w;
+    _sapp_tc_mac_update_frame_rate(w);
+    if (w && w->ready && _sapp_tc_mac_update_dimensions(w)) _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESIZED);
+}
+- (void)windowDidChangeBackingProperties:(NSNotification*)n {
+    (void)n;
+    _sapp_tc_window_t* w = self.w;
+    _sapp_tc_mac_update_frame_rate(w);
     if (w && w->ready && _sapp_tc_mac_update_dimensions(w)) _sapp_tc_send_type(w, SAPP_EVENTTYPE_RESIZED);
 }
 - (void)windowDidChangeOcclusionState:(NSNotification*)n {
@@ -3627,8 +3644,7 @@ static void _sapp_tc_mac_swap(_sapp_tc_window_t* w) {
 }
 
 /* sapp_window_request_close() and the process quit request land here,
-   after a tick and outside every window's tick (a modal loop inside one
-   window's callback may run another window's tick). -close (not
+   after a tick and outside every window's tick and callback. -close (not
    performClose:, which only plays the alert sound on a borderless window)
    sends windowWillClose: once the common close path agrees. Re-fetch each
    slot: a close destroys windows. */
@@ -3781,14 +3797,13 @@ static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
     }
 }
 
-/* A window does not tick while one of its own client callbacks is on the
-   stack, inside or outside a tick (D5, as on Win32): a run loop spun by that
-   callback, e.g. a synchronous modal dialog, pauses only this window. Other
-   windows keep ticking. Notifications keep its source selection current, and
-   its next tick after the callback returns runs normally and processes
-   deferred close/quit. */
+/* Any client callback on the stack pauses ticks for every window, as on
+   Win32/X11, including a nested modal run loop. Native live resize/fullscreen
+   loops without a client callback keep ticking. Notifications keep source
+   selection current; the first source tick after the callback returns runs
+   normally and processes deferred close/quit. */
 static bool _sapp_tc_mac_tick_blocked(const _sapp_tc_window_t* w) {
-    return _sapp_tc_mac_frozen() || w->constructing || w->in_tick || w->callback_depth > 0 || w->closed_pending;
+    return _sapp_tc_mac_frozen() || _sapp_tc.callbacks_active > 0 || w->constructing || w->in_tick || w->callback_depth > 0 || w->closed_pending;
 }
 
 static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
@@ -3979,11 +3994,9 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
        swap_interval > 1 divides the display rate */
     w->link = [view displayLinkWithTarget:view selector:@selector(tick:)];
     if (w->link == nil) return _sapp_tc_mac_fail(w, "Window display link creation returned nil (no NSError available)");
-    if (w->swap_interval > 1) {
-        const float maxfps = (float)[NSScreen mainScreen].maximumFramesPerSecond;
-        const float p = maxfps / (float)w->swap_interval;
-        w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);
-    }
+    /* Interval 1 also needs ticks when a client presents nothing, including
+       after a throw: do not opt into the adaptive default for an idle view. */
+    _sapp_tc_mac_update_frame_rate(w);
     _sapp_tc_win_delegate* del = [_sapp_tc_win_delegate new];
     if (del == nil) return _sapp_tc_mac_fail(w, "Window delegate allocation returned nil (no NSError available)");
 
@@ -4192,6 +4205,13 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
         data1:0
         data2:0];
     [NSApp postEvent:focusevent atStart:YES];
+}
+- (void)applicationDidChangeScreenParameters:(NSNotification*)n {
+    (void)n;
+    // A display mode/rate can change without the window moving to a new screen.
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
+        _sapp_tc_mac_update_frame_rate(_sapp_tc.windows[i]);
+    }
 }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
     (void)sender;

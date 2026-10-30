@@ -318,3 +318,4 @@ sys.exit(int(failed))
 PY
 
 python3 "$root/core/tests/nativeWindow/glx-renewal-test.py"
+python3 "$root/core/tests/nativeWindow/mac-frame-rate-test.py"

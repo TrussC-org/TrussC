@@ -299,13 +299,18 @@ void nestClose(sapp_window win, void*) {
 
 // Throwing clients: the native boundary contains the exception and recovers.
 int throwTicks, throwEventTicks;
+int resizeThrowTicks;
+double resizeThrowTime;
 bool throwClosed, eventThrown, mainThrowOnce, mainThrew;
 sapp_window throwWindow;
 void throwTick(sapp_window, void*) { if (++throwTicks == 3) throw std::runtime_error("tick_cb test throw"); }
 void countTick(sapp_window, void*) { ++throwEventTicks; }
 bool keyThrown;
 void throwEvent(const sapp_event* event, sapp_window, void*) {
-    if (event->type == SAPP_EVENTTYPE_RESIZED && !eventThrown) { eventThrown = true; throw 7; }
+    if (event->type == SAPP_EVENTTYPE_RESIZED && !eventThrown) {
+        eventThrown = true; resizeThrowTime = now(); resizeThrowTicks = throwEventTicks;
+        throw 7;
+    }
     if (event->type == SAPP_EVENTTYPE_KEY_DOWN && !keyThrown) { keyThrown = true; throw std::runtime_error("key event test throw"); }
 }
 void throwClose(sapp_window win, void*) {
@@ -502,7 +507,7 @@ void modalEvent(const sapp_event* event, sapp_window win, void*) {
     std::printf("nativeWindow: modal round %d: %.2fs, owner ticked %d, other window ticked %.1f/s\n", modalRound,
         seconds, modalOwnerTicks - modalOwnerAt, (callbacks - modalOtherAt) / seconds);
     check("owner window gets no tick while its key handler is in a modal", modalOwnerTicks == modalOwnerAt);
-    check("other windows keep ticking during the modal", (callbacks - modalOtherAt) / seconds > 20);
+    check("all other windows pause during the modal callback", callbacks == modalOtherAt);
     modalOwnerAfterAt = modalOwnerTicks;
     modalActive = false;
     modalHandlerDone = true;
@@ -800,6 +805,7 @@ void step() {
     }
     case ThrowEventStart:
         throwEventTicks = 0; throwClosed = eventThrown = false;
+        resizeThrowTicks = 0; resizeThrowTime = 0;
         throwWindow = makeProbe(countTick, throwEvent, throwClose, "throwing event");
         enter(ThrowEventWait);
         break;
@@ -819,6 +825,10 @@ void step() {
         if (w && now() - sampleStart < 1.0) break;
         if (w && !w->close_requested && !throwClosed) {
             std::printf("nativeWindow: throwing event_cb: threw=%d, %d ticks\n", eventThrown, throwEventTicks);
+            const CAFrameRateRange range = w->link.preferredFrameRateRange;
+            std::printf("nativeWindow: after RESIZED throw: %d ticks in %.3fs, source=%s, range=%.1f/%.1f/%.1f, callback_depth=%d\n",
+                throwEventTicks - resizeThrowTicks, resizeThrowTime ? now() - resizeThrowTime : 0,
+                w->fallback_active ? "fallback" : "display link", range.minimum, range.maximum, range.preferred, w->callback_depth);
             check("ticks continue after event_cb throws", eventThrown && throwEventTicks >= 10 && !w->in_tick);
             sapp_window_request_close(throwWindow);
             break;
@@ -866,6 +876,7 @@ void step() {
     }
     case ModalAfter:
         if (!waited(1.0)) break;
+        check("other window resumes after the modal callback", modalHandlerDone && callbacks - modalOtherAt >= 20);
         if (modalRound == 0) {
             const double resume = modalResumedAt > 0 ? modalResumedAt - modalEnd : -1;
             std::printf("nativeWindow: owner resumed %.3fs after the modal, %d ticks in the following second\n",
