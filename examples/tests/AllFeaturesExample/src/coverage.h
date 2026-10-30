@@ -56,7 +56,11 @@ std::remove_reference_t<T>& val() {
 // the owner declares (Node's Ptr, HitResult, ...) resolve inside the generated
 // code without qualification. Never instantiated.
 template <class Owner>
-struct Scope : Owner {};
+struct Scope : Owner {
+    // Declared only: coverage scopes are never constructed or destroyed.
+    // An implicit destructor would be deleted for singleton owners (MSVC C4624).
+    ~Scope();
+};
 
 void coverGenerated();   // coverage_generated.cpp
 void coverManual();      // coverage_manual.cpp

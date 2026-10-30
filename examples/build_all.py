@@ -9,6 +9,9 @@ import re
 from pathlib import Path
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+from check_build_warnings import run_build
+
 # =============================================================================
 # Configuration & Constants
 # =============================================================================
@@ -319,15 +322,13 @@ def run_test_binary(binary, cwd, launcher=None, args=(), timings=None, timing_na
 
 def run_command(cmd, cwd, verbose=False):
     try:
-        if verbose:
-            subprocess.run(cmd, cwd=cwd, check=True)
-        else:
-            subprocess.run(cmd, cwd=cwd, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        run_build(cmd, cwd=cwd, check=True, echo=verbose)
         return True
-    except subprocess.CalledProcessError as e:
-        if not verbose:
-            if e.stdout:
-                print(e.stdout.decode('utf-8', errors='replace'))
+    except (subprocess.CalledProcessError, RuntimeError) as e:
+        if isinstance(e, subprocess.CalledProcessError) and e.stdout and not verbose:
+            print(e.stdout.decode('utf-8', errors='replace'))
+        else:
+            print(e, flush=True)
         return False
 
 def run_timed_test_binary(binary, cwd, options, launcher=None, args=()):

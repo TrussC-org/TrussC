@@ -6,7 +6,11 @@ import subprocess
 import tempfile
 import unittest
 
+import sys
+
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
 spec = importlib.util.spec_from_file_location('build_all', ROOT / 'examples/build_all.py')
 build_all = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build_all)
@@ -54,7 +58,8 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
         (self.source / 'CMakeLists.txt').write_text(self.project, encoding="utf-8")
 
     def command(self, command, cwd=None):
-        result = subprocess.run(command, cwd=cwd, env=self.env,
+        runner = run_build if command[0] == "cmake" else subprocess.run
+        result = runner(command, cwd=cwd, env=self.env,
                                 capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result.stdout + result.stderr

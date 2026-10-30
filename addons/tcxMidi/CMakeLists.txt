@@ -14,6 +14,11 @@ message(STATUS "[tcxMidi] Loading addon...")
 # -----------------------------------------------------------------------------
 # Fetch libremidi
 # -----------------------------------------------------------------------------
+# Use extraction-time timestamps on CMake 3.24+, without requiring the newer
+# DOWNLOAD_EXTRACT_TIMESTAMP argument on our supported CMake 3.20 minimum.
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+endif()
 include(FetchContent)
 
 # Keep the dependency footprint small and predictable: use std types instead of

@@ -9,7 +9,7 @@
 
 #ifdef __ANDROID__
 
-#pragma message("STUB: tcSound_android.cpp — needs MediaCodec or FFmpeg AAC decoding")
+// Not implemented on Android yet (#1113): needs MediaCodec or FFmpeg AAC decoding.
 
 namespace trussc {
 

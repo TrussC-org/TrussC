@@ -1,0 +1,199 @@
+"""Configure the shared FetchContent helper with caller diagnostic states."""
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
+
+
+class FetchQuietTests(unittest.TestCase):
+    def test_caller_state_and_dependency_warning(self):
+        for state in ('absent', 'cache', 'normal', 'shadow', 'uninitialized'):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as tmp:
+                src = Path(tmp)
+                dep = src / 'dep'
+                dep.mkdir()
+                (dep / 'CMakeLists.txt').write_text('''
+cmake_minimum_required(VERSION 3.5)
+project(old_dependency NONE)
+''', encoding='utf-8')
+                setup = {
+                    'absent': '',
+                    'cache': 'set(CMAKE_WARN_DEPRECATED ON CACHE STRING "user help")',
+                    'normal': 'set(CMAKE_WARN_DEPRECATED ON)',
+                    'shadow': 'set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "user help")\nset(CMAKE_WARN_DEPRECATED ON)',
+                    'uninitialized': 'set(CMAKE_WARN_DEPRECATED ON CACHE UNINITIALIZED "user help")',
+                }[state]
+                cached = state in ('cache', 'shadow', 'uninitialized')
+                check = '''
+if(NOT CMAKE_WARN_DEPRECATED STREQUAL "ON")
+    message(FATAL_ERROR "normal or visible cache value changed")
+endif()
+''' if state != 'absent' else '''
+if(DEFINED CMAKE_WARN_DEPRECATED)
+    message(FATAL_ERROR "normal binding leaked")
+endif()
+'''
+                if cached:
+                    value = 'OFF' if state == 'shadow' else 'ON'
+                    kind = {'cache': 'STRING', 'shadow': 'BOOL', 'uninitialized': 'UNINITIALIZED'}[state]
+                    check += f'''
+get_property(value CACHE CMAKE_WARN_DEPRECATED PROPERTY VALUE)
+get_property(kind CACHE CMAKE_WARN_DEPRECATED PROPERTY TYPE)
+get_property(help CACHE CMAKE_WARN_DEPRECATED PROPERTY HELPSTRING)
+if(NOT value STREQUAL "{value}" OR NOT kind STREQUAL "{kind}" OR NOT help STREQUAL "user help")
+    message(FATAL_ERROR "cache state changed")
+endif()
+'''
+                else:
+                    check += '''
+if(DEFINED CACHE{CMAKE_WARN_DEPRECATED})
+    message(FATAL_ERROR "cache entry leaked")
+endif()
+'''
+                # Unsetting a caller normal binding must reveal its original cache.
+                check += 'unset(CMAKE_WARN_DEPRECATED)\n'
+                if not cached:
+                    check += '''
+if(DEFINED CMAKE_WARN_DEPRECATED)
+    message(FATAL_ERROR "hidden cache entry leaked")
+endif()
+'''
+                (src / 'CMakeLists.txt').write_text(f'''
+cmake_minimum_required(VERSION 3.20)
+project(fetch_quiet_probe NONE)
+if(POLICY CMP0218)
+    cmake_policy(SET CMP0218 NEW)
+endif()
+# CMake 4.4 initializes an INTERNAL entry; explicitly exercise absence too.
+unset(CMAKE_WARN_DEPRECATED CACHE)
+{setup}
+include("{ROOT}/core/cmake/tc_fetch_quiet.cmake")
+include(FetchContent)
+FetchContent_Declare(old_dependency SOURCE_DIR "{dep}")
+tc_fetch_quiet(old_dependency)
+{check}
+''', encoding='utf-8')
+                result = run_build([os.environ.get('TC_TEST_CMAKE', 'cmake'), '-S', str(src),
+                                    '-B', str(src / 'build')], stdout=subprocess.PIPE,
+                                   stderr=subprocess.STDOUT, text=True, encoding='utf-8')
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertNotIn('Warning', result.stdout)
+                self.assertNotIn('compatibility', result.stdout.lower())
+
+    def test_failed_configure_recovers_cache_before_next_dependency(self):
+        cmake = os.environ.get('TC_TEST_CMAKE', 'cmake')
+        if subprocess.check_output([cmake, '--version']).startswith(b'cmake version 4.'):
+            self.skipTest('CMake 4 uses a scoped policy floor without changing the warning cache')
+        for cached, edit in ((cached, edit) for cached in (False, True)
+                             for edit in ('unedited', 'string_off', 'bool_off', 'value', 'removed')):
+            with self.subTest(cached=cached, edit=edit), tempfile.TemporaryDirectory() as tmp:
+                src = Path(tmp)
+                dep = src / 'dep'
+                dep.mkdir()
+                dependency = dep / 'CMakeLists.txt'
+                dependency.write_text('message(FATAL_ERROR "dependency failed")', encoding='utf-8')
+                setup = ('set(CMAKE_WARN_DEPRECATED ON CACHE STRING "original help" FORCE)'
+                         if cached else '')
+                check = '''
+get_property(value CACHE CMAKE_WARN_DEPRECATED PROPERTY VALUE)
+get_property(kind CACHE CMAKE_WARN_DEPRECATED PROPERTY TYPE)
+get_property(help CACHE CMAKE_WARN_DEPRECATED PROPERTY HELPSTRING)
+if(NOT value STREQUAL "ON" OR NOT kind STREQUAL "STRING" OR NOT help STREQUAL "original help")
+    message(FATAL_ERROR "original cache state not recovered")
+endif()
+''' if cached else '''
+if(DEFINED CACHE{CMAKE_WARN_DEPRECATED})
+    message(FATAL_ERROR "originally absent cache entry leaked")
+endif()
+'''
+                edits = {
+                    'unedited': [],
+                    'string_off': ['-DCMAKE_WARN_DEPRECATED:STRING=OFF'],
+                    'bool_off': ['-DCMAKE_WARN_DEPRECATED:BOOL=OFF'],
+                    'value': ['-DCMAKE_WARN_DEPRECATED:BOOL=ON'],
+                    'removed': ['-U', 'CMAKE_WARN_DEPRECATED'],
+                }
+                if edit != 'unedited':
+                    if edit == 'removed':
+                        check = '''
+if(DEFINED CACHE{CMAKE_WARN_DEPRECATED})
+    message(FATAL_ERROR "user removal overwritten")
+endif()
+'''
+                    else:
+                        kind = 'STRING' if edit == 'string_off' else 'BOOL'
+                        value = 'ON' if edit == 'value' else 'OFF'
+                        check = f'''
+get_property(value CACHE CMAKE_WARN_DEPRECATED PROPERTY VALUE)
+get_property(kind CACHE CMAKE_WARN_DEPRECATED PROPERTY TYPE)
+get_property(help CACHE CMAKE_WARN_DEPRECATED PROPERTY HELPSTRING)
+if(NOT value STREQUAL "{value}" OR NOT kind STREQUAL "{kind}" OR
+   NOT help STREQUAL "No help, variable specified on the command line.")
+    message(FATAL_ERROR "user cache change overwritten: ${{value}}|${{kind}}|${{help}}")
+endif()
+if(NOT CMAKE_WARN_DEPRECATED STREQUAL "{value}")
+    message(FATAL_ERROR "user visible value changed")
+endif()
+'''
+                (src / 'CMakeLists.txt').write_text(f'''
+cmake_minimum_required(VERSION 3.20)
+project(fetch_quiet_recovery NONE)
+if(POLICY CMP0218)
+    cmake_policy(SET CMP0218 NEW)
+endif()
+if(NOT RETRY)
+    unset(CMAKE_WARN_DEPRECATED CACHE)
+    {setup}
+endif()
+# The app entry point must recover even if this configure skips the addon.
+include("{ROOT}/core/cmake/trussc_app.cmake")
+if(RETRY)
+    {check}
+    get_cmake_property(entries CACHE_VARIABLES)
+    foreach(entry IN LISTS entries)
+        if(entry MATCHES "^_TC_FETCH_WARN_")
+            message(FATAL_ERROR "recovery marker leaked: ${{entry}}")
+        endif()
+    endforeach()
+endif()
+if(NOT SKIP_DEPENDENCY)
+    include(FetchContent)
+    FetchContent_Declare(old_dependency SOURCE_DIR "{dep}")
+    tc_fetch_quiet(old_dependency)
+endif()
+if(RETRY)
+    {check}
+endif()
+if(VERIFY_DIAGNOSTIC)
+    message(DEPRECATION "caller diagnostic restored")
+endif()
+''', encoding='utf-8')
+                command = [os.environ.get('TC_TEST_CMAKE', 'cmake'), '-S', str(src),
+                           '-B', str(src / 'build')]
+                failed = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn('dependency failed', failed.stderr)
+                # Recover on inclusion alone, before any helper invocation.
+                retry = run_build(command + ['-DRETRY=ON', '-DSKIP_DEPENDENCY=ON'] + edits[edit],
+                                  text=True, encoding='utf-8')
+                self.assertEqual(retry.returncode, 0, retry.stdout)
+                dependency.write_text('project(recovered_dependency NONE)', encoding='utf-8')
+                retry = run_build(command + ['-DSKIP_DEPENDENCY=OFF'], text=True, encoding='utf-8')
+                self.assertEqual(retry.returncode, 0, retry.stdout)
+                if edit != 'unedited':
+                    continue
+                diagnostic = subprocess.run(command + ['-DVERIFY_DIAGNOSTIC=ON'],
+                                            capture_output=True, text=True, encoding='utf-8')
+                self.assertEqual(diagnostic.returncode, 0, diagnostic.stdout + diagnostic.stderr)
+                self.assertIn('CMake Deprecation Warning', diagnostic.stderr)
+                self.assertIn('caller diagnostic restored', diagnostic.stderr)
+
+
+if __name__ == '__main__':
+    unittest.main()

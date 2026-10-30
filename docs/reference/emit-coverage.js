@@ -167,9 +167,11 @@ for (const cat of freeCats) {
 // An owner that can't be derived from (a final class) would not compile here.
 // None is documented today; if one appears, list both 'Foo' and 'Foo::*' in
 // SKIP (with the reason) — that drops all of Foo's coverage.
+// Declare these unused destructors instead of letting MSVC implicitly delete
+// them for singleton owners with private destruction (C4624; see af::Scope).
 const ownerNames = Object.keys(owners).sort();
 for (const o of ownerNames) {
-    cpp += `struct Cover_${sanitize(o)} : af::Scope<${o}> {\n    static void run() {\n${emitBlock(owners[o], '        ')}    }\n};\n\n`;
+    cpp += `struct Cover_${sanitize(o)} : af::Scope<${o}> {\n    ~Cover_${sanitize(o)}(); // Never instantiated.\n    static void run() {\n${emitBlock(owners[o], '        ')}    }\n};\n\n`;
 }
 cpp += `} // namespace af_generated
 

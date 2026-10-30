@@ -125,7 +125,8 @@ class AddonWorkflowTests(unittest.TestCase):
         self.assertTrue(any(s.get('run') == 'python3 tools/tests/test_addon_ci.py -v'
                             and s.get('if') == 'always()' for s in checks))
         job = self.workflow['jobs']['addon-tests']
-        run = job['steps'][-1]['run']
+        run = next(step['run'] for step in job['steps']
+                   if step.get('name') == 'Build and run affected addon tests')
         for argument in ('examples/build_all.py', '--addon-tests-only', '--include-daily', '--addons'):
             self.assertIn(argument, run)
         self.assertIn("json.loads(os.environ['SELECTED_ADDONS'])", run)

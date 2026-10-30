@@ -12,6 +12,11 @@ else()
     file(GLOB LUA_SOURCES "${ADDON_DIR}/lua/src/*.c")
     add_library(testLua STATIC ${LUA_SOURCES})
     target_include_directories(testLua PUBLIC "${ADDON_DIR}/lua/src" "${ADDON_DIR}/lua/include")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        # Same as the addon: loslib.c only (mkstemp instead of tmpnam).
+        set_source_files_properties("${ADDON_DIR}/lua/src/loslib.c"
+            PROPERTIES COMPILE_DEFINITIONS LUA_USE_POSIX)
+    endif()
     if(UNIX)
         target_link_libraries(testLua PUBLIC m ${CMAKE_DL_LIBS})
     endif()

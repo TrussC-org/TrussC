@@ -316,6 +316,8 @@ inline string findCMake(const string& buildDir = "") {
 inline int runBuildCommand(const vector<string>& argv, string& output) {
     output.clear();
     if (argv.empty()) return -1;
+    const auto lostBuilds = internal::buildOutputLoss().truncatedBuilds +
+                            internal::buildOutputLoss().unavailableBuilds;
 
 #ifdef _WIN32
     // Build a quoted command line for CreateProcess.
@@ -332,10 +334,36 @@ inline int runBuildCommand(const vector<string>& argv, string& output) {
     if (rc == -1) {
         logError("HotReload") << "Failed to launch: " << argv[0];
     }
-    return rc;
 #else
-    return internal::runPosixBuildWithOutput(argv, output);
+    const int rc = internal::runPosixBuildWithOutput(argv, output);
 #endif
+    // CI collects builds separately from arbitrary application/test output.
+    // Include runtime-triggered guest rebuilds in that same build-only log.
+    if (const char* path = std::getenv("TC_BUILD_WARNING_LOG"); path && *path) {
+        try {
+            std::ofstream buildLog(path, std::ios::app | std::ios::binary);
+            buildLog << "Hot reload build: " << argv[0] << '\n' << output << '\n';
+            buildLog.flush();
+            if (!buildLog) {
+                logError("HotReload") << "Cannot write build log: " << path;
+                return -1;
+            }
+            // The runtime retains bounded diagnostics. CI cannot certify a build
+            // if that capture omitted bytes that might contain a warning.
+            if (lostBuilds != internal::buildOutputLoss().truncatedBuilds +
+                              internal::buildOutputLoss().unavailableBuilds) {
+                logError("HotReload") << "Incomplete build output for warning check";
+                return -1;
+            }
+        } catch (...) {
+            // Reporting must not let another allocation failure escape either.
+            try {
+                logError("HotReload") << "Cannot write build log: " << path;
+            } catch (...) {}
+            return -1;
+        }
+    }
+    return rc;
 }
 
 // ---------------------------------------------------------------------------
