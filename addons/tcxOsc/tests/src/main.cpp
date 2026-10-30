@@ -680,6 +680,23 @@ int main() {
         check("unicast: message received", ok);
         check("unicast: address == /uni", ok && got.getAddress() == "/uni");
         check("unicast: arg == 42", ok && got.getArgCount() == 1 && got.getArgAsInt(0) == 42);
+        OscMessage samples("/samples");
+        for (int i = 0; i < 5000; ++i) samples.addFloat(float(i));
+        rx.hasNewMessage();
+        check("unicast: send 5000 floats", tx.sendTo("127.0.0.1", portUni, samples));
+        bool receivedSamples = false;
+        const auto sampleDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!receivedSamples && std::chrono::steady_clock::now() < sampleDeadline) {
+            while (rx.getNextMessage(got)) {
+                if (got.getAddress() == "/samples") { receivedSamples = true; break; }
+            }
+            if (!receivedSamples) sleepMs(2);
+        }
+        bool intact = receivedSamples && got.getArgCount() == 5000;
+        if (intact) {
+            for (int i = 0; i < 5000; ++i) intact &= got.getArgAsFloat(i) == float(i);
+        }
+        check("unicast: 5000 floats received intact", intact);
         rx.close();
     }
 

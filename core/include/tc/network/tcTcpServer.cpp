@@ -16,7 +16,7 @@
 #include <algorithm>
 #include <cstring>
 #include <system_error>
-#include <sstream>
+#include <stdexcept>
 #include <limits>
 #include <climits>
 
@@ -203,10 +203,6 @@ thread_local const void* tlAcceptThreadOf = nullptr;
 // other thread. start() there must not wait for another stop() to finish:
 // that one may be waiting for this very thread.
 thread_local const void* tlClientThreadOf = nullptr;
-
-// Stays set through callbacks and nested calls, including into other servers.
-// Only writers can hold queued credits whose release needs their own return.
-thread_local bool tlServerWriterThread = false;
 
 // Whether the caller is one of this server's own threads (accept, receive or
 // writer). Such a thread never joins another of the server's threads: that
@@ -902,16 +898,7 @@ void TcpServer::State::clientThreadFunc(int clientId) {
             TcpServerReceiveEventArgs args;
             args.clientId = clientId;
             args.data.assign(buffer.begin(), buffer.begin() + received);
-            if (!onReceive.notifyExternal(args, channel->receiveDeliveryRun)) {
-                channel->receiveDeliveryRun->store(false, std::memory_order_release);
-                removeClient(clientId);
-                TcpClientDisconnectEventArgs disconnected;
-                disconnected.clientId = clientId;
-                disconnected.reason = "External main-thread delivery overflow";
-                disconnected.wasClean = false;
-                onClientDisconnect.notify(disconnected);
-                break;
-            }
+            onReceive.notifyExternal(args, channel->receiveDeliveryRun);
         } else if (received == 0) {
             // Client closed connection
             TcpClientDisconnectEventArgs args;
@@ -1116,8 +1103,6 @@ bool TcpServer::State::shutChannel(const std::shared_ptr<internal::TcpSendChanne
 #endif
         }
     }
-    { std::lock_guard<std::mutex> lock(sendMutex_); }
-    sendRoom_.notify_all();
     ch->queued.notify_all();
     ch->room.notify_all();
     return true;
@@ -1143,7 +1128,7 @@ struct WriteOutcome {
 } // namespace
 
 static WriteOutcome writePayload(internal::TcpSendChannel& ch, const void* data, size_t size,
-                                 float timeout, size_t window) {
+                                 float timeout) {
     WriteOutcome out;
     const char* ptr = static_cast<const char*>(data);
     size_t remaining = size;
@@ -1164,7 +1149,7 @@ static WriteOutcome writePayload(internal::TcpSendChannel& ch, const void* data,
         }
 
         int sent = static_cast<int>(::send(ch.socket, ptr,
-            static_cast<int>(std::min(remaining, std::min(window, size_t(INT_MAX)))), TC_SEND_FLAGS));
+            static_cast<int>(std::min(remaining, size_t(INT_MAX))), TC_SEND_FLAGS));
         if (sent > 0) {
             ptr += sent;
             remaining -= static_cast<size_t>(sent);
@@ -1231,138 +1216,42 @@ static bool isOwnWriterThread(const std::shared_ptr<internal::TcpSendChannel>& c
     return ch->writerId == std::this_thread::get_id();
 }
 
-TcpServer::State::SendCredit::~SendCredit() {
-    if (!owner) return;
-    {
-        std::lock_guard<std::mutex> lock(owner->sendMutex_);
-        owner->totalSendBytes_ -= bytes;
-    }
-    owner->sendRoom_.notify_all();
-}
-
-// Called under sendMutex_: count at rejection and claim each lifetime Warning
-// exactly once, even if another producer reports before this one finishes.
-void TcpServer::State::recordSendRejection(SendRejections& reports, size_t reason, size_t limit, size_t needed) {
-    if (rejectedSends_[reason] != (std::numeric_limits<uint64_t>::max)())
-        ++rejectedSends_[reason];
-    if (sendRejectionWarned_[reason]) return;
-    sendRejectionWarned_[reason] = true;
-    reports[reason] = {true, limit, needed};
-}
-
-void TcpServer::State::reportSendRejections(SendRejections& reports) noexcept {
-    // Listeners may stop or synchronously send. Producers must release their
-    // payload/credit aliases as well as locks before delivering any report.
-    const char* stores[] = {"owned item", "per-client high-water", "per-client entries", "aggregate credits"};
-    for (size_t reason = 0; reason < reports.size(); ++reason) {
-        auto& report = reports[reason];
-        if (!report.warn) continue;
-        // Consume before dispatch: reentrant calls and destructor cleanup must
-        // never repeat an attempted Warning, even if a listener throws.
-        report.warn = false;
-        try {
-            std::ostringstream message;
-            message << "[TcpServer] Send " << stores[reason] << " capacity " << report.limit
-                << (reason == 2 ? " entries" : " bytes") << ", needed " << report.needed
-                << "; whole send rejected; further rejections counted";
-            // LogStream's destructor is noexcept, so invoke Logger directly
-            // here to catch listener exceptions during producer unwinding.
-            // Avoid str()'s noexcept allocator-only string construction on
-            // MSVC: a refused iterator proxy must reach this catch.
-            const auto text = message.view();
-            getLogger().log(LogLevel::Warning,
-                           std::string(text.empty() ? "" : text.data(), text.size()));
-        } catch (...) {
-            // Reporting must preserve the producer's exception and continue
-            // delivering any other first Warnings in this batch.
-        }
-    }
-}
-
 SendResult TcpServer::State::enqueue(const std::shared_ptr<internal::TcpSendChannel>& ch, int clientId,
-        internal::TcpSendItem&& item, SendRejections& reports, size_t ownedBytes,
-        const std::function<void(internal::TcpSendItem&, const std::shared_ptr<void>&)>& prepare) {
+        internal::TcpSendItem&& item,
+        const std::function<void(internal::TcpSendItem&)>& prepare) {
     (void)clientId;
-    if (beforeSendEnqueueForTest_) beforeSendEnqueueForTest_(reports);
-    // Defined before the locks: allocation/queue exceptions release the lease
-    // only after both locks have unwound. No counter or payload survives failure.
-    std::shared_ptr<SendCredit> credit;
-    std::unique_lock<std::mutex> admission(sendMutex_);
-    for (;;) {
-        std::unique_lock<std::mutex> channel(ch->mutex);
+    try {
+        std::unique_lock<std::mutex> lock(ch->mutex);
+        auto hasRoom = [&] {
+            return ch->pendingBytes < sendAsyncBufferSize_.load() &&
+                item.size <= (std::numeric_limits<size_t>::max)() - ch->pendingBytes;
+        };
+        if (item.waiter) ch->room.wait(lock, [&] { return !ch->open || ch->dropped || hasRoom(); });
         if (!ch->open || ch->dropped) return {SendError::Disconnected, 0};
-        const size_t itemLimit = sendItemLimit_.load();
-        if (prepare && ownedBytes > itemLimit) {
-            recordSendRejection(reports, 0, itemLimit, ownedBytes);
-            return {SendError::QueueFull, 0};
-        }
-        // Borrowed data stays with the blocked caller; only its finite write
-        // window consumes byte credits. Owned capacity is charged in full.
-        const size_t bytes = prepare ? ownedBytes : std::min(item.size, std::min(itemLimit, totalSendBufferSize_));
-        const size_t mark = sendAsyncBufferSize_.load();
-        size_t reason = 4, limit = 0, needed = 0;
-        if (ch->pendingBytes >= mark || item.size > (std::numeric_limits<size_t>::max)() - ch->pendingBytes) {
-            reason = 1; limit = mark;
-            needed = item.size > (std::numeric_limits<size_t>::max)() - ch->pendingBytes
-                ? (std::numeric_limits<size_t>::max)() : ch->pendingBytes + item.size;
-        } else if (ch->pendingEntries >= kSendEntryLimit) {
-            reason = 2; limit = kSendEntryLimit; needed = ch->pendingEntries + 1;
-        } else if (totalSendBytes_ > totalSendBufferSize_ || bytes > totalSendBufferSize_ - totalSendBytes_) {
-            reason = 3; limit = totalSendBufferSize_;
-            needed = bytes > (std::numeric_limits<size_t>::max)() - totalSendBytes_
-                ? (std::numeric_limits<size_t>::max)() : totalSendBytes_ + bytes;
-        }
-        if (reason != 4) {
-            // Only the new server-wide credit wait is refused on writers.
-            // Per-destination bounds retain their existing synchronous waits.
-            // The destination's own-writer guard is checked by send/broadcast.
-            if (!item.waiter || (reason == 3 && tlServerWriterThread)) {
-                recordSendRejection(reports, reason, limit, needed);
-                return {SendError::QueueFull, 0};
-            }
-            channel.unlock();
-            ++waitingSenders_;
-            sendRoom_.wait(admission);
-            --waitingSenders_;
-            continue;
-        }
-        credit = std::make_shared<SendCredit>();
-        credit->owner = shared_from_this();
-        credit->bytes = bytes;
-        totalSendBytes_ += bytes;
-        item.credits = credit;
-        // The shared enqueue seam admits before any owned copy, move metadata,
-        // or broadcast fanout. All producers use these same locks and credits.
-        if (prepare) prepare(item, credit);
-        const uint64_t id = ++nextSendId_;
-        item.id = id;
+        if (!item.waiter && !hasRoom()) return {SendError::QueueFull, 0};
+        if (prepare) prepare(item);
+        item.id = ++nextSendId_;
         ch->queue.push_back(std::move(item));
+        const auto id = ch->queue.back().id;
         ch->pendingBytes += ch->queue.back().size;
-        ++ch->pendingEntries;
-        // Drop enqueue's temporary reservation alias before a writer can
-        // complete the queued item and invoke listeners.
-        credit.reset();
-        channel.unlock();
-        admission.unlock();
+        lock.unlock();
         ch->queued.notify_one();
         return {SendError::None, id};
+    } catch (const std::bad_alloc&) {
+        return {SendError::AllocationFailed, 0};
+    } catch (const std::length_error&) {
+        return {SendError::AllocationFailed, 0};
     }
 }
 
 void TcpServer::State::completeSend(int clientId, const std::shared_ptr<internal::TcpSendChannel>& ch,
                              internal::TcpSendItem& item, SendError error, size_t bytesSent,
                              const char* failure, int code) {
-    // Release storage before returning its credits. Broadcast aliases retain
-    // the original payload's credit until the last recipient/local alias dies.
     item.owned.reset();
-    item.credits.reset();
     {
-        std::lock_guard<std::mutex> admission(sendMutex_);
         std::lock_guard<std::mutex> lock(ch->mutex);
         ch->pendingBytes -= item.size;
-        --ch->pendingEntries;
     }
-    sendRoom_.notify_all();
     ch->room.notify_all();
 
     // Wake a synchronous sender before running listeners: it has nothing to
@@ -1377,8 +1266,8 @@ void TcpServer::State::completeSend(int clientId, const std::shared_ptr<internal
         item.waiter->cv.notify_all();
     }
 
-    // Error callbacks must see the failed item's storage and entry returned,
-    // just like successful completions. Keep onError before onSendComplete.
+    // Error callbacks must see the failed item's storage and pending bytes
+    // released, just like successful completions. Keep onError before onSendComplete.
     if (failure) notifyError(failure, code, clientId, error != SendError::Timeout);
 
     TcpSendCompleteEventArgs args;
@@ -1398,7 +1287,6 @@ void TcpServer::State::completeSend(int clientId, const std::shared_ptr<internal
 // =============================================================================
 void TcpServer::State::writerThreadFunc(int clientId, std::shared_ptr<internal::TcpSendChannel> ch) {
     tlClientThreadOf = this;
-    tlServerWriterThread = true;
 
     // Like the receive thread: however this thread ends, it hands its id to
     // the accept loop, which joins it (reapClientThreads). Declared first so
@@ -1435,8 +1323,7 @@ void TcpServer::State::writerThreadFunc(int clientId, std::shared_ptr<internal::
             continue;
         }
 
-        const WriteOutcome out = writePayload(*ch, item.data(), item.size, sendTimeout_.load(),
-            static_cast<SendCredit*>(item.credits.get())->bytes);
+        const WriteOutcome out = writePayload(*ch, item.data(), item.size, sendTimeout_.load());
         if (!out.failure) {
             completeSend(clientId, ch, item, SendError::None, out.written);
             continue;
@@ -1494,20 +1381,20 @@ bool TcpServer::State::send(int clientId, const void* data, size_t size) {
         return false;
     }
 
-    SendRejectionReporter reports{*this};
     std::shared_ptr<internal::TcpSendWaiter> waiter;
     SendResult queuedResult;
     {
         internal::TcpSendItem item;
         item.borrowed = data;
         item.size = size;
-        item.waiter = std::make_shared<internal::TcpSendWaiter>();
+        try { item.waiter = std::make_shared<internal::TcpSendWaiter>(); }
+        catch (const std::bad_alloc&) { return false; }
         waiter = item.waiter;
 
-        queuedResult = enqueue(ch, clientId, std::move(item), reports.pending);
+        queuedResult = enqueue(ch, clientId, std::move(item));
     }
-    reports.report();
     if (!queuedResult) {
+        if (queuedResult.error == SendError::AllocationFailed) return false;
         // Write failures are reported by the writer thread; this is the one
         // case the caller has to report itself.
         notifyError(queuedResult.error == SendError::QueueFull ? "Send queue full" : "Client disconnected", 0, clientId);
@@ -1528,17 +1415,10 @@ bool TcpServer::State::send(int clientId, const std::string& message) {
 }
 
 namespace {
-struct ServerSendPayload {
-    std::shared_ptr<void> credits;
-    std::vector<char> bytes;
-};
-std::shared_ptr<const std::vector<char>> copyServerPayload(const void* data, size_t size,
-                                                        const std::shared_ptr<void>& credits) {
-    auto payload = std::make_shared<ServerSendPayload>();
-    payload->credits = credits;
-    payload->bytes.resize(size);
-    if (size) std::memcpy(payload->bytes.data(), data, size);
-    return {payload, &payload->bytes};
+std::shared_ptr<const std::vector<char>> copyServerPayload(const void* data, size_t size) {
+    auto payload = std::make_shared<std::vector<char>>(size);
+    if (size) std::memcpy(payload->data(), data, size);
+    return payload;
 }
 } // namespace
 
@@ -1551,18 +1431,18 @@ SendResult TcpServer::State::sendAsync(int clientId, const void* data, size_t si
         return SendResult{SendError::ClientNotFound, 0};
     }
 
-    SendRejectionReporter reports{*this};
     SendResult result;
-    {
+    try {
         internal::TcpSendItem item;
         item.size = size;
-        result = enqueue(ch, clientId, std::move(item), reports.pending, size,
-            [&](internal::TcpSendItem& admitted, const std::shared_ptr<void>& credits) {
-                admitted.owned = copyServerPayload(data, size, credits);
+        result = enqueue(ch, clientId, std::move(item),
+            [&](internal::TcpSendItem& admitted) {
+                admitted.owned = copyServerPayload(data, size);
             });
+    } catch (const std::bad_alloc&) {
+        return {SendError::AllocationFailed, 0};
     }
-    reports.report();
-    if (!result) notifyError(result.error == SendError::QueueFull ? "Send queue full"
+    if (!result && result.error != SendError::AllocationFailed) notifyError(result.error == SendError::QueueFull ? "Send queue full"
                                                                  : "Client disconnected",
                              0, clientId);
     return result;
@@ -1577,21 +1457,18 @@ SendResult TcpServer::State::sendAsync(int clientId, std::vector<char>&& data) {
         return SendResult{SendError::ClientNotFound, 0};
     }
 
-    SendRejectionReporter reports{*this};
     SendResult result;
-    {
+    try {
         internal::TcpSendItem item;
         item.size = data.size();
-        result = enqueue(ch, clientId, std::move(item), reports.pending, data.capacity(),
-            [&](internal::TcpSendItem& admitted, const std::shared_ptr<void>& credits) {
-                auto payload = std::make_shared<ServerSendPayload>();
-                payload->credits = credits;
-                payload->bytes = std::move(data);
-                admitted.owned = {payload, &payload->bytes};
+        result = enqueue(ch, clientId, std::move(item),
+            [&](internal::TcpSendItem& admitted) {
+                admitted.owned = std::make_shared<std::vector<char>>(std::move(data));
             });
+    } catch (const std::bad_alloc&) {
+        return {SendError::AllocationFailed, 0};
     }
-    reports.report();
-    if (!result) notifyError(result.error == SendError::QueueFull ? "Send queue full"
+    if (!result && result.error != SendError::AllocationFailed) notifyError(result.error == SendError::QueueFull ? "Send queue full"
                                                                  : "Client disconnected",
                              0, clientId);
     return result;
@@ -1602,45 +1479,42 @@ SendResult TcpServer::State::sendAsync(int clientId, const std::string& message)
 }
 
 void TcpServer::State::broadcast(const void* data, size_t size) {
-    // Queue to every client first, then wait for all of them. Sending to each
-    // in turn would put a slow peer in front of the fast ones behind it; the
-    // call still returns only once everyone has the payload (or has failed).
-    struct Pending {
-        int clientId;
-        std::shared_ptr<internal::TcpSendWaiter> waiter;
-    };
-    std::vector<Pending> pending;
+    // Reserve bookkeeping before lending the caller's buffer to any writer.
+    std::vector<std::pair<int, std::shared_ptr<internal::TcpSendChannel>>> channels;
+    std::vector<std::shared_ptr<internal::TcpSendWaiter>> pending;
     std::vector<std::pair<int, SendError>> rejected;
-    SendRejectionReporter reports{*this};
-
-    // One pass over the registry, not one lookup per client: a broadcast from
-    // a draw loop used to take the client lock once for the id list and again
-    // for every id in it. A client that goes away mid-broadcast is reported by
-    // its own channel (closed) rather than by a failed lookup.
-    for (auto& [id, ch] : snapshotChannels()) {
-        if (isOwnWriterThread(ch)) continue;   // see send()
-
+    try {
+        channels = snapshotChannels();
+        pending.reserve(channels.size());
+        rejected.reserve(channels.size());
+    } catch (const std::bad_alloc&) {
+        try { notifyError("Send allocation failed"); } catch (const std::bad_alloc&) {}
+        return;
+    }
+    for (auto& [id, ch] : channels) {
+        if (isOwnWriterThread(ch)) continue;
         internal::TcpSendItem item;
-        item.borrowed = data;   // every waiter is joined below, so `data` outlives them
+        item.borrowed = data;
         item.size = size;
-        item.waiter = std::make_shared<internal::TcpSendWaiter>();
-        std::shared_ptr<internal::TcpSendWaiter> waiter = item.waiter;
-
-        const auto result = enqueue(ch, id, std::move(item), reports.pending);
-        if (!result) {
-            rejected.emplace_back(id, result.error);
+        try { item.waiter = std::make_shared<internal::TcpSendWaiter>(); }
+        catch (const std::bad_alloc&) {
+            rejected.emplace_back(id, SendError::AllocationFailed);
             continue;
         }
-        pending.push_back({id, std::move(waiter)});
+        auto waiter = item.waiter;
+        const auto result = enqueue(ch, id, std::move(item));
+        if (!result) rejected.emplace_back(id, result.error);
+        else pending.push_back(std::move(waiter));
     }
-
-    reports.report();
-    for (auto& [id, error] : rejected)
-        notifyError(error == SendError::QueueFull ? "Send queue full" : "Client disconnected", 0, id);
-
-    for (auto& p : pending) {
-        std::unique_lock<std::mutex> lock(p.waiter->mutex);
-        p.waiter->cv.wait(lock, [&] { return p.waiter->done; });
+    for (auto& [id, error] : rejected) {
+        try {
+            notifyError(error == SendError::AllocationFailed ? "Send allocation failed" : "Client disconnected", 0, id);
+        } catch (const std::bad_alloc&) {}
+    }
+    // Every accepted borrowed send must finish before the caller returns.
+    for (auto& waiter : pending) {
+        std::unique_lock<std::mutex> lock(waiter->mutex);
+        waiter->cv.wait(lock, [&] { return waiter->done; });
     }
 }
 
@@ -1657,23 +1531,24 @@ int TcpServer::State::broadcastAsync(const void* data, size_t size) {
 
     // Buffered once and shared, not copied per client: a broadcast of a frame
     // to twenty peers should not mean twenty copies of the frame.
-    // Declare the reporter before every producer payload/credit alias so
-    // unwinding destroys those aliases before invoking any log listener.
-    SendRejectionReporter reports{*this};
     std::shared_ptr<const std::vector<char>> payload;
 
     int queued = 0;
-    for (auto& [id, ch] : snapshotChannels()) {
+    std::vector<std::pair<int, std::shared_ptr<internal::TcpSendChannel>>> channels;
+    try { channels = snapshotChannels(); }
+    catch (const std::bad_alloc&) { return 0; }
+    for (auto& [id, ch] : channels) {
         internal::TcpSendItem item;
         item.size = size;
-        if (enqueue(ch, id, std::move(item), reports.pending, size,
-            [&](internal::TcpSendItem& admitted, const std::shared_ptr<void>& credits) {
-                if (!payload) payload = copyServerPayload(data, size, credits);
-                admitted.owned = payload;
-            })) ++queued;
+        try {
+            if (enqueue(ch, id, std::move(item),
+                [&](internal::TcpSendItem& admitted) {
+                    if (!payload) payload = copyServerPayload(data, size);
+                    admitted.owned = payload;
+                })) ++queued;
+        } catch (const std::bad_alloc&) { break; }
     }
     payload.reset();
-    reports.report();
     return queued;
 }
 
@@ -1708,27 +1583,14 @@ void TcpServer::State::setSendAsyncBufferSize(size_t bytes) {
         logError("TcpServer") << "setSendAsyncBufferSize(): bytes must be positive";
         return;
     }
-    { std::lock_guard<std::mutex> lock(sendMutex_); sendAsyncBufferSize_ = bytes; }
-    sendRoom_.notify_all();
+    sendAsyncBufferSize_ = bytes;
+    for (auto& [id, ch] : snapshotChannels()) {
+        std::lock_guard<std::mutex> lock(ch->mutex);
+        ch->room.notify_all();
+    }
 }
 
-void TcpServer::State::setSendItemLimit(size_t bytes) {
-    if (!bytes) {
-        logError("TcpServer") << "setSendItemLimit(): bytes must be positive";
-        return;
-    }
-    { std::lock_guard<std::mutex> lock(sendMutex_); sendItemLimit_ = bytes; }
-    sendRoom_.notify_all();
-}
 
-void TcpServer::State::setTotalSendBufferSize(size_t bytes) {
-    if (!bytes) {
-        logError("TcpServer") << "setTotalSendBufferSize(): bytes must be positive";
-        return;
-    }
-    { std::lock_guard<std::mutex> lock(sendMutex_); totalSendBufferSize_ = bytes; }
-    sendRoom_.notify_all();
-}
 
 size_t TcpServer::State::getSendAsyncBufferSize() const {
     return sendAsyncBufferSize_.load();
@@ -1889,14 +1751,6 @@ void TcpServer::setReceiveBufferSize(size_t size) {
 void TcpServer::setSendAsyncBufferSize(size_t bytes) {
     auto state = state_;
     state->setSendAsyncBufferSize(bytes);
-}
-void TcpServer::setSendItemLimit(size_t bytes) {
-    auto state = state_;
-    state->setSendItemLimit(bytes);
-}
-void TcpServer::setTotalSendBufferSize(size_t bytes) {
-    auto state = state_;
-    state->setTotalSendBufferSize(bytes);
 }
 size_t TcpServer::getSendAsyncBufferSize() const {
     auto state = state_;

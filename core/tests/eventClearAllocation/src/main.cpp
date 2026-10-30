@@ -5,6 +5,8 @@
 #include <limits>
 #include <new>
 #include <vector>
+#include <thread>
+#include "tc/network/tcNetworkState.h"
 
 namespace {
 thread_local bool observe = false;
@@ -51,8 +53,59 @@ template<class T> void clearAllocation(bool keepFramework) {
                 ok ? "PASS" : "FAIL", allocationCount, largestAllocation);
     if (!ok) ++failures;
 }
+template<class T> void mainStoreAllocation(bool snapshotPath, bool mainFirst) {
+    using External = internal::ExternalEventDelivery<T>;
+    using Delivery = internal::EventSnapshotDelivery<T>;
+    Event<T> source;
+    int inlineCalls = 0, mainCalls = 0;
+    auto mainListener = source.listen([&](auto&...) { ++mainCalls; }, Deliver::Main, mainFirst ? -1 : 1);
+    auto inlineListener = source.listen([&](auto&...) { ++inlineCalls; }, 0);
+    auto gate = std::make_shared<internal::NetworkDelivery>();
+    auto target = Delivery::bind(source, gate);
+    Delivery delivery{target};
+    bool accepted = true, threw = false;
+    size_t failedAllocations = 0;
+    auto emit = [&] {
+        if constexpr (std::is_void_v<T>) {
+            if (snapshotPath) delivery.notifyExternal();
+            else accepted = External::notify(source);
+        } else {
+            T value{};
+            accepted = snapshotPath ? delivery.notifyExternal(value) : External::notify(source, value);
+        }
+    };
+    std::thread worker([&] {
+        allocationCount = 0;
+        allocationLimit = 0;
+        observe = true;
+        try { emit(); } catch (const std::bad_alloc&) { threw = true; }
+        observe = false;
+        failedAllocations = allocationCount;
+    });
+    worker.join();
+    internal::drainMainThreadQueue();
+    bool ok = !threw && failedAllocations == 1 && inlineCalls == 1 && mainCalls == 0 &&
+        !External::diagnostics(source);
+    if constexpr (!std::is_void_v<T>) ok = ok && !accepted;
+    else if (!snapshotPath) ok = ok && !accepted;
+    // A later successful store acquisition recovers without retained OOM state.
+    std::thread recovery([&] { emit(); });
+    recovery.join();
+    auto store = External::diagnostics(source);
+    ok = ok && store && !store->overflowing && store->pending == 1;
+    internal::drainMainThreadQueue();
+    ok = ok && inlineCalls == 2 && mainCalls == 1 && store->pending == 0;
+    std::printf("Event<%s>: failed lazy store, snapshot=%d, mainFirst=%d: %s\n",
+        std::is_void_v<T> ? "void" : "int", int(snapshotPath), int(mainFirst), ok ? "PASS" : "FAIL");
+    if (!ok) ++failures;
+}
 } // namespace
 TC_CORE_TEST_MAIN() {
+    getMainThreadId();
+    for (bool snapshot : {false, true}) for (bool mainFirst : {false, true}) {
+        mainStoreAllocation<int>(snapshot, mainFirst);
+        mainStoreAllocation<void>(snapshot, mainFirst);
+    }
     clearAllocation<int>(false); clearAllocation<void>(false);
     clearAllocation<int>(true); clearAllocation<void>(true);
     return failures ? 1 : 0;

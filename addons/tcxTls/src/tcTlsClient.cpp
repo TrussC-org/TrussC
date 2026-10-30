@@ -513,7 +513,7 @@ bool TlsClient::TlsTransport::processNetworkStep(State& st, const AliveToken& al
         }
 
         if (ret > 0) {
-            if (!st.deliverReceive(args)) return false;
+            st.deliverReceive(args);
             // An onReceive listener may have destroyed the client (an owner
             // that replaces it from a close it handles inline, say)
             if (!*alive) return false;

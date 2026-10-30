@@ -7632,6 +7632,33 @@ details.ko = '''
 - 현재 리스너 목록의 개수를 `size_t`로 반환합니다. 등록된 리스너가 없으면 `0`입니다. 실행을 기다리는 콜백은 별도로 세지 않습니다.
 '''
 
+["Event::setMainThreadDeliveryLimit"]
+description.en = "Sets an optional limit for external main-thread copies."
+description.ja = "外部入力のメインスレッド配送に任意の件数上限を設定する。"
+description.ko = "외부 입력의 메인 스레드 복사본 수에 선택적 한도를 설정한다."
+details.en = '''
+- Applies only to listeners using `Deliver::Main` when an external source queues a copy from another thread. Inline listeners are unaffected.
+- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged when the backlog reaches the limit, and again only after the backlog has fully drained and fills up again. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
+- Lowering the limit keeps already accepted copies. Each Main listener uses one slot until its callback finishes; a cancelled copy frees its slot when discarded at the next main-thread drain. Allocation failure drops the copy silently. The setting also works for `Event<void>`.
+'''
+details.ja = '''
+- 外部入力を別スレッドからコピーして配送する `Deliver::Main` のリスナーだけが対象です。Inline リスナーには適用しません。
+- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達したときに Warning をログに記録し、その後はバックログが完全に空になって再び上限に達した場合にのみ記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
+- 上限を下げても受付済みのコピーは保持します。Main リスナーごとに、コールバックの終了まで 1 件と数えます。取り消したコピーの枠は、次のメインスレッドのキュー処理でコピーを破棄した時点で戻ります。コピーのメモリ確保に失敗した場合は、ログを記録せず破棄します。`Event<void>` でも使えます。
+'''
+details.ko = '''
+- 외부 입력을 다른 스레드에서 복사해 전달하는 `Deliver::Main` 리스너에만 적용합니다. Inline 리스너에는 적용하지 않습니다.
+- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달하면 Warning을 기록하고, 이후에는 백로그가 완전히 비워진 뒤 다시 한도에 도달할 때만 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
+- 한도를 줄여도 이미 수락한 복사본은 유지합니다. Main 리스너마다 콜백이 끝날 때까지 한 자리를 사용합니다. 취소된 복사본은 다음 메인 스레드 큐 처리에서 폐기될 때 자리를 반환합니다. 복사본 메모리 할당에 실패하면 로그 없이 버립니다. `Event<void>`에도 사용할 수 있습니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    TcpClient client;
+    client.onReceive.setMainThreadDeliveryLimit(2048);
+    client.onReceive.setMainThreadDeliveryLimit(0); // unlimited (the default)
+}
+'''
+
 ["Event::notify"]
 description.en = "Notifies the event's listeners."
 description.ja = "イベントのリスナーに通知する。"
@@ -7668,6 +7695,7 @@ description.en = "Connects listeners to notifications with a shared argument typ
 description.ja = "共通の引数型を持つ通知にリスナーを登録する。"
 description.ko = "공통 인자 타입을 사용하는 알림에 리스너를 등록한다."
 details.en = '''
+- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged when the backlog reaches the limit, and again only after the backlog has fully drained and fills up again. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
 - `Event()` defaults to `100`; `Event(defaultPriority)` sets an immutable per-instance integer default for all omitted-priority overloads. Every explicitly supplied integer stays explicit, including `0`, negative values and integer extremes.
 - On events the App receives, listen() defaults to BeforeApp; other events keep 100.
 - Register a callback with `listen(callback)` or a member function with `listen(object, &Class::method)`; callbacks receive `T&`. `notify(arg)` passes the same argument by reference to listeners, so they can modify it. `Event<void>` uses callbacks and `notify()` without arguments.
@@ -7684,6 +7712,7 @@ details.en = '''
 - For the order of input listeners, App callbacks, and node handlers, see `App::mousePressed`.
 '''
 details.ja = '''
+- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達したときに Warning をログに記録し、その後はバックログが完全に空になって再び上限に達した場合にのみ記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
 - `Event()` の既定優先度は `100` です。`Event(defaultPriority)` は優先度を省略する全形式に使う、インスタンスごとの不変の整数値を設定します。明示した整数は `0`、負数、整数の両端値を含め、そのまま使います。
 - App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。
 - `listen(callback)` でコールバックを、`listen(object, &Class::method)` でメンバー関数を登録します。コールバックは `T&` を受け取ります。`notify(arg)` は同じ引数を参照で各リスナーに渡すため、リスナーは値を変更できます。`Event<void>` ではコールバックも `notify()` も引数を取りません。
@@ -7700,6 +7729,7 @@ details.ja = '''
 - 入力リスナー、App のコールバック、ノードのハンドラーの順番については `App::mousePressed` を参照してください。
 '''
 details.ko = '''
+- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달하면 Warning을 기록하고, 이후에는 백로그가 완전히 비워진 뒤 다시 한도에 도달할 때만 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
 - `Event()`의 기본 우선순위는 `100`입니다. `Event(defaultPriority)`는 우선순위를 생략하는 모든 형식에 사용할 인스턴스별 불변 정수 기본값을 설정합니다. `0`, 음수, 정수 극값을 포함한 명시적 정수는 그대로 사용합니다.
 - App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다.
 - `listen(callback)`으로 콜백을, `listen(object, &Class::method)`로 멤버 함수를 등록합니다. 콜백은 `T&`를 받습니다. `notify(arg)`는 같은 인자를 참조로 각 리스너에 전달하므로 리스너가 값을 변경할 수 있습니다. `Event<void>`에서는 콜백과 `notify()` 모두 인자를 받지 않습니다.
@@ -30066,6 +30096,7 @@ platform_note.ko = '''
 - 브라우저의 TCP 통신에는 Emscripten WebSocket 소켓 에뮬레이션과 프록시 서버가 필요합니다. wasm에서는 스레드를 강제로 끕니다. `connectAsync()`는 백그라운드 스레드 없이 연결 작업을 수행하며, 보류 중인 TCP 연결 완료는 `processNetwork()`로 진행합니다.
 '''
 details.en = '''
+- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged when the backlog reaches the limit, and again only after the backlog has fully drained and fills up again. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
 - Connect with a host name and port using `connect()` or `connectAsync()`. Threading is enabled by default on native platforms; `connect()` waits for TCP connection completion in that mode, while `connectAsync()` reports completion through `onConnect`.
 - Received bytes arrive in the `data` member of the `onReceive` callback argument (`e.data` for `TcpReceiveEventArgs& e`); one event represents a read chunk, not an application message. Accumulate and separate messages in application code.
 - `send()` waits for writing to finish or fail; use `sendAsync()` from frame callbacks to avoid waiting. Asynchronous sends own their payload and return a `SendResult`; completion is reported through `onSendComplete`.
@@ -30078,6 +30109,7 @@ details.en = '''
 - See `EventListener` for subscription lifetime; do not hold a listener's lock while joining its worker from another thread.
 '''
 details.ja = '''
+- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達したときに Warning をログに記録し、その後はバックログが完全に空になって再び上限に達した場合にのみ記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
 - ホスト名とポートを指定し、`connect()` または `connectAsync()` で接続します。ネイティブ環境では既定でスレッドを使います。このモードの `connect()` は TCP 接続の完了を待ち、`connectAsync()` は `onConnect` で結果を通知します。
 - 受信したバイト列は `onReceive` コールバック引数の `data` メンバ（`TcpReceiveEventArgs& e` の場合は `e.data`）に届きます。1 回のイベントは読み取り単位であり、アプリケーションのメッセージ単位ではありません。アプリケーション側で蓄積してメッセージを区切ってください。
 - `send()` は書き込みの完了または失敗まで待ちます。フレームのコールバックでは、待機を避けるために `sendAsync()` を使ってください。非同期送信はデータを所有し、`SendResult` を返します。完了は `onSendComplete` で通知します。
@@ -30090,6 +30122,7 @@ details.ja = '''
 - 購読の寿命は `EventListener` を参照してください。別スレッドからワーカーを join するときは、そのリスナーが必要とするロックを保持しないでください。
 '''
 details.ko = '''
+- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달하면 Warning을 기록하고, 이후에는 백로그가 완전히 비워진 뒤 다시 한도에 도달할 때만 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
 - 호스트 이름과 포트를 지정하여 `connect()` 또는 `connectAsync()`로 연결합니다. 네이티브 플랫폼에서는 기본적으로 스레드를 사용합니다. 이 모드에서 `connect()`는 TCP 연결 완료를 기다리고 `connectAsync()`는 `onConnect`로 결과를 알립니다.
 - 수신한 바이트는 `onReceive` 콜백 인수의 `data` 멤버(`TcpReceiveEventArgs& e`인 경우 `e.data`)에 전달됩니다. 이벤트 하나는 읽기 청크이며 애플리케이션 메시지 단위가 아닙니다. 애플리케이션 코드에서 데이터를 누적하고 메시지를 구분하세요.
 - `send()`는 쓰기가 완료되거나 실패할 때까지 기다립니다. 프레임 콜백에서는 대기를 피하도록 `sendAsync()`를 사용하세요. 비동기 송신은 데이터를 소유하며 `SendResult`를 반환합니다. 완료는 `onSendComplete`로 알립니다.
@@ -30868,6 +30901,7 @@ description.en = "Describes a send queue rejection or a completed send's outcome
 description.ja = "送信キューへの追加失敗や送信完了時の結果を表す。"
 description.ko = "전송 큐 등록 실패나 전송 완료 결과를 나타낸다."
 details.en = '''
+- `AllocationFailed` means that the sender could not allocate payload or queue storage; no send was accepted.
 - `None` means that a `SendResult` accepted the payload into the queue, or that a completion handed the entire payload to the kernel; it does not confirm receipt by the remote application.
 - `ClientNotFound` means that the server has no client registered under the requested ID; `NotRunning` means that the server is stopped or the client is not connected.
 - `QueueFull` means that pending bytes have already reached the configured queue high-water mark; this is not a per-message size limit.
@@ -30875,6 +30909,7 @@ details.en = '''
 - `Timeout` is reported by `TcpServer` when the send timeout expires without writing any payload bytes, leaving the connection open; a server timeout after a partial write drops the client and reports `Disconnected`, and `TcpClient` send timeouts close the connection and report `Disconnected`.
 '''
 details.ja = '''
+- `AllocationFailed` は、送信側のデータまたはキューのメモリ確保に失敗し、送信を受け付けなかったことを表します。
 - `None` は、`SendResult` ではペイロードをキューに追加できたこと、完了通知ではペイロード全体をカーネルに渡したことを表します。相手のアプリケーションによる受信を確認するものではありません。
 - `ClientNotFound` は、指定した ID のクライアントがサーバーに登録されていないことを表します。`NotRunning` は、サーバーが停止しているか、クライアントが接続していないことを表します。
 - `QueueFull` は、送信待ちのバイト数が設定したキューのしきい値にすでに達していることを表します。メッセージ単位のサイズ制限ではありません。
@@ -30882,6 +30917,7 @@ details.ja = '''
 - `Timeout` は、`TcpServer` でペイロードを 1 バイトも書き込まずに送信がタイムアウトした場合に返され、接続は維持されます。サーバーで一部を書き込んだあとにタイムアウトすると、クライアントを切断して `Disconnected` を返します。`TcpClient` の送信タイムアウトも、接続を閉じて `Disconnected` を返します。
 '''
 details.ko = '''
+- `AllocationFailed`는 송신자가 페이로드 또는 큐 메모리 할당에 실패하여 전송을 수락하지 않았음을 나타냅니다.
 - `None`은 `SendResult`에서는 페이로드를 큐에 등록했음을, 완료 알림에서는 전체 페이로드를 커널에 전달했음을 나타냅니다. 상대 애플리케이션의 수신을 확인하는 값은 아닙니다.
 - `ClientNotFound`는 지정한 ID의 클라이언트가 서버에 등록되어 있지 않음을 나타냅니다. `NotRunning`은 서버가 중지되었거나 클라이언트가 연결되어 있지 않음을 나타냅니다.
 - `QueueFull`은 대기 중인 바이트 수가 설정된 큐 임계값에 이미 도달했음을 나타냅니다. 메시지별 크기 제한은 아닙니다.
@@ -30895,6 +30931,7 @@ value_desc.Disconnected.en = "The write was cancelled or failed before the paylo
 value_desc.Timeout.en = "The server send timed out before writing any payload bytes; the connection remains open"
 value_desc.QueueFull.en = "Pending bytes have already reached the queue high-water mark"
 value_desc.NotRunning.en = "The server is not running, or the client is not connected"
+value_desc.AllocationFailed.en = "Payload or queue storage could not be allocated"
 
 ["SendResult"]
 category = "network"
@@ -30980,15 +31017,15 @@ description.en = "Returns a short name for a send error."
 description.ja = "送信エラーの短い名前を返す。"
 description.ko = "송신 오류의 짧은 이름을 반환한다."
 details.en = '''
-- Returns a string literal as `const char*`: `"None"`, `"ClientNotFound"`, `"Disconnected"`, `"Timeout"`, `"QueueFull"`, or `"NotRunning"`, matching the `SendError` enumerator.
+- Returns a string literal as `const char*`: `"None"`, `"ClientNotFound"`, `"Disconnected"`, `"Timeout"`, `"QueueFull"`, `"AllocationFailed"`, or `"NotRunning"`, matching the `SendError` enumerator.
 - Returns `"Unknown"` for an unrecognized value. The labels are suitable for log messages.
 '''
 details.ja = '''
-- `SendError` の列挙子に対応する `"None"`、`"ClientNotFound"`、`"Disconnected"`、`"Timeout"`、`"QueueFull"`、`"NotRunning"` の文字列リテラルを `const char*` で返します。
+- `SendError` の列挙子に対応する `"None"`、`"ClientNotFound"`、`"Disconnected"`、`"Timeout"`、`"QueueFull"`、`"AllocationFailed"`、`"NotRunning"` の文字列リテラルを `const char*` で返します。
 - 未知の値には `"Unknown"` を返します。ログメッセージのラベルとして使えます。
 '''
 details.ko = '''
-- `SendError` 열거자에 대응하는 `"None"`, `"ClientNotFound"`, `"Disconnected"`, `"Timeout"`, `"QueueFull"`, `"NotRunning"` 문자열 리터럴을 `const char*`로 반환합니다.
+- `SendError` 열거자에 대응하는 `"None"`, `"ClientNotFound"`, `"Disconnected"`, `"Timeout"`, `"QueueFull"`, `"AllocationFailed"`, `"NotRunning"` 문자열 리터럴을 `const char*`로 반환합니다.
 - 알 수 없는 값에는 `"Unknown"`을 반환합니다. 로그 메시지의 레이블로 사용할 수 있습니다.
 '''
 related = ["SendError", "SendResult"]
@@ -31102,7 +31139,7 @@ description.ko = "TCP 클라이언트의 연결을 받아 데이터를 보낸다
 details.en = '''
 - `start(port, maxClients)` listens on all IPv4 interfaces by default and returns whether startup succeeded. Port `0` lets the OS choose a port, available through `getPort()`; the default client limit is 64; explicit nonpositive limits are configuration errors.
 - A connection accepted while the client limit is reached is closed immediately. Connected clients have IDs for `send()`, `sendAsync()`, and disconnection; `broadcast()` and `broadcastAsync()` target the connected clients.
-- `send()` and `broadcast()` wait for writes; use their asynchronous counterparts from frame callbacks. Queued sends report completion through `onSendComplete`. The TCP byte-stream and `Deliver::Main` rules are explained under `TcpClient`. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
+- `send()` and `broadcast()` wait for writes; use their asynchronous counterparts from frame callbacks. Queued sends report completion through `onSendComplete`. The TCP byte-stream and `Deliver::Main` rules are explained under `TcpClient`.
 - The server always uses workers: `onClientConnect` normally runs on the accept thread, `onReceive` on a client's receive thread, and `onSendComplete` on its writer thread. Error and disconnect callbacks can also run on the thread performing the operation.
 - `stop()` clears the running state, disconnects clients, and joins workers when called from another thread. Destruction also stops the server; workers retain their state until they return.
 - Inline worker listeners may call `stop()`, `disconnectClient()`, or `disconnectAllClients()` without waiting for server threads. On the accept thread, `stop()` closes the listening socket immediately and disconnects clients after the listener returns; other worker calls disconnect the relevant clients before returning.
@@ -31112,7 +31149,7 @@ details.en = '''
 details.ja = '''
 - `start(port, maxClients)` は既定ですべての IPv4 インターフェースで待ち受け、開始できたかどうかを返します。ポート `0` では OS がポートを選び、`getPort()` で取得できます。接続数の上限の既定値は 64 で、0 以下の明示指定は設定エラーです。
 - 接続数の上限に達しているときに受け入れた接続は、直ちに閉じます。接続済みクライアントの ID を使って `send()`、`sendAsync()`、切断を行います。`broadcast()` と `broadcastAsync()` は接続済みクライアントに送信します。
-- `send()` と `broadcast()` は書き込みを待ちます。フレームのコールバックでは非同期版を使ってください。キューに入れた送信の完了は `onSendComplete` で通知します。TCP のバイトストリームと `Deliver::Main` の規則は `TcpClient` を参照してください。 サーバーの送信スレッドで動くコールバック（例：`onSendComplete`、`onError`）内では、同期 send や broadcast はサーバー全体の送信バッファ（`setTotalSendBufferSize`）の空きを待たず、満杯なら直ちに失敗します。宛先クライアント自身のキューの空きは引き続き待ちます。
+- `send()` と `broadcast()` は書き込みを待ちます。フレームのコールバックでは非同期版を使ってください。キューに入れた送信の完了は `onSendComplete` で通知します。TCP のバイトストリームと `Deliver::Main` の規則は `TcpClient` を参照してください。
 - サーバーは常にワーカーを使います。通常、`onClientConnect` は接続受付スレッド、`onReceive` はクライアントの受信スレッド、`onSendComplete` は送信スレッドで呼ばれます。エラーと切断のコールバックは、操作を行ったスレッドで呼ばれる場合もあります。
 - 別スレッドからの `stop()` は動作中の状態を解除し、クライアントを切断してワーカーを join します。デストラクタもサーバーを停止します。ワーカーは終了するまで自分の状態を保持します。
 - ワーカーの inline リスナーは、サーバーのスレッドを待たずに `stop()`、`disconnectClient()`、`disconnectAllClients()` を呼べます。接続受付スレッドの `stop()` は待ち受けソケットを直ちに閉じ、リスナーが戻った後にクライアントを切断します。他のワーカーでの呼び出しは、対象のクライアントを切断してから戻ります。
@@ -31122,7 +31159,7 @@ details.ja = '''
 details.ko = '''
 - `start(port, maxClients)`는 기본적으로 모든 IPv4 인터페이스에서 연결을 기다리며 시작 성공 여부를 반환합니다. 포트 `0`은 OS가 포트를 선택하도록 하며 `getPort()`로 확인할 수 있습니다. 기본 클라이언트 제한은 64이며 0 이하를 명시하면 설정 오류입니다.
 - 클라이언트 제한에 도달한 상태에서 수락한 연결은 즉시 닫습니다. 연결된 클라이언트의 ID로 `send()`, `sendAsync()`, 연결 해제를 수행합니다. `broadcast()`와 `broadcastAsync()`는 연결된 클라이언트에 송신합니다.
-- `send()`와 `broadcast()`는 쓰기를 기다립니다. 프레임 콜백에서는 비동기 버전을 사용하세요. 큐에 넣은 송신의 완료는 `onSendComplete`로 알립니다. TCP 바이트 스트림과 `Deliver::Main` 규칙은 `TcpClient`를 참조하세요. 서버 송신 스레드에서 실행되는 콜백(예: `onSendComplete`, `onError`) 안에서 동기 send나 broadcast는 서버 전체 송신 버퍼(`setTotalSendBufferSize`)의 공간을 기다리지 않고 가득 차면 즉시 실패합니다. 대상 클라이언트 자체 큐의 공간은 계속 기다립니다.
+- `send()`와 `broadcast()`는 쓰기를 기다립니다. 프레임 콜백에서는 비동기 버전을 사용하세요. 큐에 넣은 송신의 완료는 `onSendComplete`로 알립니다. TCP 바이트 스트림과 `Deliver::Main` 규칙은 `TcpClient`를 참조하세요.
 - 서버는 항상 워커를 사용합니다. 일반적으로 `onClientConnect`는 연결 수락 스레드, `onReceive`는 클라이언트 수신 스레드, `onSendComplete`는 송신 스레드에서 실행됩니다. 오류와 연결 해제 콜백은 작업을 수행한 스레드에서도 실행될 수 있습니다.
 - 다른 스레드에서 호출한 `stop()`은 실행 상태를 해제하고 클라이언트 연결을 끊은 뒤 워커를 join합니다. 소멸자도 서버를 중지합니다. 워커는 반환할 때까지 자신의 상태를 보관합니다.
 - 워커의 inline 리스너는 서버 스레드를 기다리지 않고 `stop()`, `disconnectClient()`, `disconnectAllClients()`를 호출할 수 있습니다. 연결 수락 스레드의 `stop()`은 수신 대기 소켓을 즉시 닫고 리스너가 반환한 뒤 클라이언트 연결을 끊습니다. 다른 워커의 호출은 대상 클라이언트 연결을 끊은 뒤 반환합니다.
@@ -31150,19 +31187,19 @@ description.ja = "接続中の全クライアントへデータを送信する�
 description.ko = "연결된 모든 클라이언트에 데이터를 전송한다."
 details.en = '''
 - Accepts a pointer and byte count, `vector<char>`, or `string`. The payload is borrowed until this call returns; see `TcpServer::send` for the byte format.
-- Takes a snapshot of the clients, queues the payload for each client, and then waits for all accepted sends to finish or fail. A full client queue can block the queuing pass before later clients are reached. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
+- Takes a snapshot of the clients, queues the payload for each client, and then waits for all accepted sends to finish or fail. A full client queue can block the queuing pass before later clients are reached.
 - Returns no result. Calling it from a client's own writer thread silently skips that client.
 - See `TcpServer::setSendTimeout` for timeout behavior. Use `TcpServer::broadcastAsync` in frame callbacks to avoid waiting for network writes.
 '''
 details.ja = '''
 - ポインタとバイト数、`vector<char>`、または `string` を受け取ります。この呼び出しが戻るまで元のデータを借用します。バイト列の形式は `TcpServer::send` を参照してください。
-- クライアントの一覧を取得し、それぞれにデータをキュー投入してから、受け付けられた全送信が完了または失敗するまで待ちます。クライアントのキューが満杯の場合、後続のクライアントへ投入する前に待機することがあります。 サーバーの送信スレッドで動くコールバック（例：`onSendComplete`、`onError`）内では、同期 send や broadcast はサーバー全体の送信バッファ（`setTotalSendBufferSize`）の空きを待たず、満杯なら直ちに失敗します。宛先クライアント自身のキューの空きは引き続き待ちます。
+- クライアントの一覧を取得し、それぞれにデータをキュー投入してから、受け付けられた全送信が完了または失敗するまで待ちます。クライアントのキューが満杯の場合、後続のクライアントへ投入する前に待機することがあります。
 - 戻り値はありません。クライアント自身の送信スレッドから呼ぶと、そのクライアントは通知なしで対象から外れます。
 - タイムアウトの動作は `TcpServer::setSendTimeout` を参照してください。フレームのコールバックでネットワーク書き込みを待たずに済ませるには、`TcpServer::broadcastAsync` を使ってください。
 '''
 details.ko = '''
 - 포인터와 바이트 수, `vector<char>` 또는 `string`을 받습니다. 이 호출이 반환할 때까지 원본 데이터를 빌려 사용합니다. 바이트 형식은 `TcpServer::send`에 설명되어 있습니다.
-- 클라이언트 목록의 스냅샷을 가져와 각 클라이언트의 큐에 데이터를 넣은 다음, 수락된 모든 전송이 완료되거나 실패할 때까지 기다립니다. 클라이언트 큐가 가득 차면 이후 클라이언트의 큐에 넣기 전에 대기할 수 있습니다. 서버 송신 스레드에서 실행되는 콜백(예: `onSendComplete`, `onError`) 안에서 동기 send나 broadcast는 서버 전체 송신 버퍼(`setTotalSendBufferSize`)의 공간을 기다리지 않고 가득 차면 즉시 실패합니다. 대상 클라이언트 자체 큐의 공간은 계속 기다립니다.
+- 클라이언트 목록의 스냅샷을 가져와 각 클라이언트의 큐에 데이터를 넣은 다음, 수락된 모든 전송이 완료되거나 실패할 때까지 기다립니다. 클라이언트 큐가 가득 차면 이후 클라이언트의 큐에 넣기 전에 대기할 수 있습니다.
 - 반환값은 없습니다. 클라이언트 자신의 송신 스레드에서 호출하면 해당 클라이언트를 알림 없이 건너뜁니다.
 - 타임아웃 동작은 `TcpServer::setSendTimeout`에 설명되어 있습니다. 프레임 콜백에서 네트워크 쓰기를 기다리지 않으려면 `TcpServer::broadcastAsync`를 사용합니다.
 '''
@@ -31411,20 +31448,23 @@ description.en = "Reports server and client send errors."
 description.ja = "サーバとクライアント送信のエラーを通知する。"
 description.ko = "서버 및 클라이언트 전송 오류를 알린다."
 details.en = '''
+- If synchronous `send()` cannot allocate its queue storage, it returns `false` without requiring an error callback.
 - Delivers `TcpServerErrorEventArgs` containing `message`, `errorCode`, and `clientId`. A `clientId` of -1 identifies a server-level error; `errorCode` can be 0 when no operating-system error code is supplied.
-- Startup failures and rejected `send()` or `sendAsync()` calls notify on the calling thread. Queued write failures notify on that client's writer thread. `sendAsync()` returning `NotRunning` and clients skipped by `broadcastAsync()` do not notify this event.
+- Startup failures and rejected `send()` or `sendAsync()` calls notify on the calling thread. Queued write failures notify on that client's writer thread. `sendAsync()` returning `NotRunning` or `AllocationFailed` and clients skipped by `broadcastAsync()` do not notify this event.
 - Connection-wait, accept, and new-client thread-start failures notify on the accept thread, at most once every 5 seconds for each failure kind while it persists. Logs count suppressed occurrences, and retries use a short back-off.
 - An inline accept-thread listener may call `stop()` but cannot call `start()`. See those entries for shutdown timing, and `TcpServer::onReceive` for shared delivery and listener lifetime rules.
 '''
 details.ja = '''
+- 同期 `send()` のキュー用メモリを確保できない場合は、エラー通知を前提とせず `false` を返します。
 - `message`、`errorCode`、`clientId` を含む `TcpServerErrorEventArgs` を渡します。`clientId` が -1 の場合はサーバ単位のエラーです。OS のエラーコードが指定されない場合、`errorCode` は 0 になることがあります。
-- 起動失敗と、拒否された `send()` または `sendAsync()` は、呼び出したスレッドで通知します。キュー投入後の書き込み失敗は、そのクライアントの送信スレッドで通知します。`sendAsync()` が `NotRunning` を返す場合と、`broadcastAsync()` がクライアントを対象から外す場合は、このイベントを通知しません。
+- 起動失敗と、拒否された `send()` または `sendAsync()` は、呼び出したスレッドで通知します。キュー投入後の書き込み失敗は、そのクライアントの送信スレッドで通知します。`sendAsync()` が `NotRunning` または `AllocationFailed` を返す場合と、`broadcastAsync()` がクライアントを対象から外す場合は、このイベントを通知しません。
 - 接続待機、接続受付、新規クライアント用スレッドの起動の失敗は、接続受付スレッドで通知します。失敗が続く間の通知は、種類ごとに 5 秒に 1 回までです。省略した回数はログに記録し、再試行には短い待機を挟みます。
 - 接続受付スレッドのインラインリスナーでは `stop()` を呼べますが、`start()` は呼べません。停止のタイミングはそれぞれの項目、共通の配信とリスナーの寿命の規則は `TcpServer::onReceive` を参照してください。
 '''
 details.ko = '''
+- 동기 `send()`가 큐 메모리를 할당하지 못하면 오류 콜백 없이 `false`를 반환할 수 있습니다.
 - `message`, `errorCode`, `clientId`를 포함한 `TcpServerErrorEventArgs`를 전달합니다. `clientId`가 -1이면 서버 수준 오류입니다. 운영체제 오류 코드가 제공되지 않으면 `errorCode`가 0일 수 있습니다.
-- 시작 실패와 거부된 `send()` 또는 `sendAsync()` 호출은 호출한 스레드에서 알립니다. 큐에 들어간 뒤 발생한 쓰기 실패는 해당 클라이언트의 송신 스레드에서 알립니다. `sendAsync()`가 `NotRunning`을 반환하거나 `broadcastAsync()`가 클라이언트를 건너뛰는 경우에는 이 이벤트를 알리지 않습니다.
+- 시작 실패와 거부된 `send()` 또는 `sendAsync()` 호출은 호출한 스레드에서 알립니다. 큐에 들어간 뒤 발생한 쓰기 실패는 해당 클라이언트의 송신 스레드에서 알립니다. `sendAsync()`가 `NotRunning` 또는 `AllocationFailed`를 반환하거나 `broadcastAsync()`가 클라이언트를 건너뛰는 경우에는 이 이벤트를 알리지 않습니다.
 - 연결 대기, 연결 수락 및 새 클라이언트용 스레드 시작 실패는 연결 수락 스레드에서 알립니다. 실패가 지속되는 동안 종류별로 최대 5초에 한 번 알립니다. 생략된 발생 횟수는 로그에 기록하며, 재시도 사이에 짧은 대기 시간을 둡니다.
 - 연결 수락 스레드의 인라인 리스너는 `stop()`을 호출할 수 있지만 `start()`는 호출할 수 없습니다. 종료 시점은 해당 항목에, 공통 전달 및 리스너 수명 규칙은 `TcpServer::onReceive`에 설명되어 있습니다.
 '''
@@ -31496,21 +31536,21 @@ description.ja = "指定したクライアントへデータを送信する。"
 description.ko = "지정한 클라이언트에 데이터를 전송한다."
 details.en = '''
 - Accepts `clientId` followed by a pointer and byte count, `vector<char>`, or `string`. Sends the supplied bytes without adding a terminator or message framing; a string sends `message.size()` bytes.
-- Borrows the payload without copying it and waits until the write completes or fails. Keep the data unchanged until return. Returns `true` when the whole payload reaches the kernel, or `false` on failure; success does not confirm processing by the peer application. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
+- Borrows the payload without copying it and waits until the write completes or fails. Keep the data unchanged until return. Returns `true` when the whole payload reaches the kernel, or `false` on failure; success does not confirm processing by the peer application.
 - Shares the client's queue and send ordering with `sendAsync()`. A slow peer blocks this call without blocking other clients' writers or the accept loop; use `sendAsync()` in frame callbacks.
 - An unknown client, a closed connection, or a call from that client's own writer-thread listener returns `false` and reports `onError`. Use `sendAsync()` from that writer thread.
 - See `TcpServer::setSendAsyncBufferSize` for waiting on a full queue and `TcpServer::setSendTimeout` for write timeouts.
 '''
 details.ja = '''
 - `clientId` に続けて、ポインタとバイト数、`vector<char>`、または `string` を指定します。終端文字やメッセージ境界を追加せず、指定したバイト列を送信します。文字列では `message.size()` バイトを送信します。
-- データをコピーせずに借用し、書き込みが完了または失敗するまで待ちます。戻るまではデータを変更しないでください。データ全体がカーネルに渡されると `true`、失敗すると `false` を返します。成功しても、相手のアプリによる処理の完了は確認していません。 サーバーの送信スレッドで動くコールバック（例：`onSendComplete`、`onError`）内では、同期 send や broadcast はサーバー全体の送信バッファ（`setTotalSendBufferSize`）の空きを待たず、満杯なら直ちに失敗します。宛先クライアント自身のキューの空きは引き続き待ちます。
+- データをコピーせずに借用し、書き込みが完了または失敗するまで待ちます。戻るまではデータを変更しないでください。データ全体がカーネルに渡されると `true`、失敗すると `false` を返します。成功しても、相手のアプリによる処理の完了は確認していません。
 - クライアントのキューと送信順序を `sendAsync()` と共有します。通信相手が遅い場合、この呼び出しは待機しますが、別のクライアントの送信スレッドや接続受付ループは停止しません。フレームのコールバックでは `sendAsync()` を使ってください。
 - クライアントが存在しない場合、接続が閉じている場合、そのクライアント自身の送信スレッド上のリスナーから呼んだ場合は、`false` を返して `onError` で通知します。その送信スレッドでは `sendAsync()` を使ってください。
 - キューが満杯のときの待機は `TcpServer::setSendAsyncBufferSize`、書き込みのタイムアウトは `TcpServer::setSendTimeout` を参照してください。
 '''
 details.ko = '''
 - `clientId` 다음에 포인터와 바이트 수, `vector<char>` 또는 `string`을 지정합니다. 종료 문자나 메시지 경계를 추가하지 않고 지정한 바이트를 전송하며, 문자열은 `message.size()`바이트를 전송합니다.
-- 데이터를 복사하지 않고 빌려 사용하며 쓰기가 완료되거나 실패할 때까지 기다립니다. 반환할 때까지 데이터를 변경하지 않아야 합니다. 전체 데이터가 커널에 전달되면 `true`, 실패하면 `false`를 반환합니다. 성공해도 상대 앱이 처리를 완료했는지는 확인하지 않습니다. 서버 송신 스레드에서 실행되는 콜백(예: `onSendComplete`, `onError`) 안에서 동기 send나 broadcast는 서버 전체 송신 버퍼(`setTotalSendBufferSize`)의 공간을 기다리지 않고 가득 차면 즉시 실패합니다. 대상 클라이언트 자체 큐의 공간은 계속 기다립니다.
+- 데이터를 복사하지 않고 빌려 사용하며 쓰기가 완료되거나 실패할 때까지 기다립니다. 반환할 때까지 데이터를 변경하지 않아야 합니다. 전체 데이터가 커널에 전달되면 `true`, 실패하면 `false`를 반환합니다. 성공해도 상대 앱이 처리를 완료했는지는 확인하지 않습니다.
 - 클라이언트의 큐와 전송 순서를 `sendAsync()`와 공유합니다. 상대가 느리면 이 호출은 대기하지만 다른 클라이언트의 송신 스레드나 연결 수락 루프는 멈추지 않습니다. 프레임 콜백에서는 `sendAsync()`를 사용합니다.
 - 클라이언트가 없거나, 연결이 닫혔거나, 해당 클라이언트 자신의 송신 스레드 리스너에서 호출하면 `false`를 반환하고 `onError`로 알립니다. 해당 송신 스레드에서는 `sendAsync()`를 사용합니다.
 - 큐가 가득 찼을 때의 대기는 `TcpServer::setSendAsyncBufferSize`에, 쓰기 타임아웃은 `TcpServer::setSendTimeout`에 설명되어 있습니다.
@@ -31530,7 +31570,7 @@ description.ja = "指定したクライアントへデータをキュー投入�
 description.ko = "지정한 클라이언트의 큐에 데이터를 넣는다."
 details.en = '''
 - Returns without waiting for network writes. The pointer-and-byte-count and `string` overloads copy the payload; the `vector<char>&&` overload takes ownership by moving it. Byte format follows `TcpServer::send`.
-- A successful `SendResult` has a nonzero `id` matched by `onSendComplete`. A false result means nothing was queued, with `error` set to `NotRunning`, `ClientNotFound`, `Disconnected`, or `QueueFull`.
+- A successful `SendResult` has a nonzero `id` matched by `onSendComplete`. A false result means nothing was queued, with `error` set to `NotRunning`, `ClientNotFound`, `Disconnected`, `QueueFull`, or `AllocationFailed`.
 - On a running server, an unknown `clientId` returns `SendResult{SendError::ClientNotFound, 0}`, which evaluates to false, and emits `onError` with the message `"Client not found"`.
 - A full queue returns `QueueFull` without disconnecting the client. See `TcpServer::setSendAsyncBufferSize` for the threshold rules and `TcpServer::onError` for error notifications.
 - Each client has a writer thread that processes accepted sends in queue order, including synchronous sends. Calls from different threads are ordered when they enter the queue.
@@ -31538,7 +31578,7 @@ details.en = '''
 '''
 details.ja = '''
 - ネットワーク書き込みを待たずに戻ります。ポインタとバイト数を受け取る版と `string` 版はデータをコピーし、`vector<char>&&` 版はムーブして所有権を受け取ります。バイト列の形式は `TcpServer::send` と同じです。
-- 成功した `SendResult` の `id` は 0 以外で、`onSendComplete` の ID と対応します。偽の結果は何もキュー投入されなかったことを示し、`error` は `NotRunning`、`ClientNotFound`、`Disconnected`、`QueueFull` のいずれかです。
+- 成功した `SendResult` の `id` は 0 以外で、`onSendComplete` の ID と対応します。偽の結果は何もキュー投入されなかったことを示し、`error` は `NotRunning`、`ClientNotFound`、`Disconnected`、`QueueFull`、`AllocationFailed` のいずれかです。
 - 動作中のサーバでは、存在しない `clientId` に対して偽と評価される `SendResult{SendError::ClientNotFound, 0}` を返し、メッセージ `"Client not found"` で `onError` を通知します。
 - キューが満杯の場合は、クライアントを切断せずに `QueueFull` を返します。しきい値の規則は `TcpServer::setSendAsyncBufferSize`、エラー通知は `TcpServer::onError` を参照してください。
 - 各クライアントには送信スレッドがあり、同期送信も含め、受け付けた送信をキューの順序で処理します。異なるスレッドからの呼び出しは、キューに入った時点で順序が決まります。
@@ -31546,7 +31586,7 @@ details.ja = '''
 '''
 details.ko = '''
 - 네트워크 쓰기를 기다리지 않고 반환합니다. 포인터와 바이트 수를 받는 오버로드와 `string` 오버로드는 데이터를 복사하며, `vector<char>&&` 오버로드는 이동하여 소유권을 받습니다. 바이트 형식은 `TcpServer::send`와 같습니다.
-- 성공한 `SendResult`의 `id`는 0이 아니며 `onSendComplete`의 ID와 대응합니다. 거짓 결과는 큐에 아무것도 들어가지 않았음을 의미하며, `error`는 `NotRunning`, `ClientNotFound`, `Disconnected`, `QueueFull` 중 하나입니다.
+- 성공한 `SendResult`의 `id`는 0이 아니며 `onSendComplete`의 ID와 대응합니다. 거짓 결과는 큐에 아무것도 들어가지 않았음을 의미하며, `error`는 `NotRunning`, `ClientNotFound`, `Disconnected`, `QueueFull`, `AllocationFailed` 중 하나입니다.
 - 실행 중인 서버에서 존재하지 않는 `clientId`를 전달하면 거짓으로 평가되는 `SendResult{SendError::ClientNotFound, 0}`을 반환하고 메시지 `"Client not found"`로 `onError`를 알립니다.
 - 큐가 가득 차면 클라이언트 연결을 해제하지 않고 `QueueFull`을 반환합니다. 기준값 규칙은 `TcpServer::setSendAsyncBufferSize`에, 오류 알림은 `TcpServer::onError`에 설명되어 있습니다.
 - 각 클라이언트에는 송신 스레드가 있으며, 동기 전송을 포함하여 수락된 전송을 큐 순서대로 처리합니다. 서로 다른 스레드에서 호출하면 큐에 들어갈 때 순서가 정해집니다.
@@ -31593,75 +31633,21 @@ description.en = "Sets the per-client send high-water mark."
 description.ja = "クライアントごとの送信高水位を設定する。"
 description.ko = "클라이언트별 송신 상한 기준을 설정한다."
 details.en = '''
-- Default: 16 MiB. Zero logs a configuration Error and leaves the setting unchanged (v0.8 change).
-- Bound (security): slow peers retain sends; a finite item bounds one-item overshoot. Overflow rejects whole async sends (sync sends wait) and is counted. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
-- Pending bytes include queued and executing sync/async sends. An item may cross the mark; later async sends return `QueueFull` and broadcast skips that client. Owned items also obey `setSendItemLimit()` and `setTotalSendBufferSize()`.
-- Each channel admits at most 4096 pending entries, including empty sends. Each bound warns once and counts rejections for the server object's lifetime. A rejection does not disconnect the client.
-- Changes preserve existing sends and wake waiting sync senders. Borrowed sync sends do not copy payloads; large transfers use finite write windows. See `setSendTimeout()` for idle timeouts.
+- Defaults to 16 MiB. Zero logs an Error and keeps the current setting. Pending bytes include queued and executing sends; one item may cross the mark.
+- At the mark, asynchronous sends return `QueueFull` and synchronous sends wait for room. Changing the setting keeps pending sends and wakes waiting senders. `getSendAsyncPendingBytes()` reports the outstanding bytes.
+- There is no per-item, queue-entry or server-wide send limit. `setSendItemLimit()` and `setTotalSendBufferSize()` have been removed. Allocation failure returns `AllocationFailed` without queuing the send.
 '''
 details.ja = '''
-- 既定値は 16 MiB。0 は設定 Error を記録し、元の値を保持します（v0.8 の変更）。
-- Bound (security): 遅い接続先が送信を保持するため、有限の項目サイズで 1 項目分の高水位超過を制限します。超過時は非同期送信全体を拒否し、同期送信は待機します。拒否数を累積します。 サーバーの送信スレッドで動くコールバック（例：`onSendComplete`、`onError`）内では、同期 send や broadcast はサーバー全体の送信バッファ（`setTotalSendBufferSize`）の空きを待たず、満杯なら直ちに失敗します。宛先クライアント自身のキューの空きは引き続き待ちます。
-- 未完了バイト数には待機中・実行中の同期／非同期送信を含みます。1 項目で高水位を超えると、後続の非同期送信は `QueueFull`、broadcast はその宛先を除外します。所有するデータには `setSendItemLimit()` と `setTotalSendBufferSize()` も適用します。
-- 空の送信を含め、各チャネルは最大 4096 項目を受け付けます。各上限はサーバーオブジェクトの寿命中に 1 回警告し、拒否数を累積します。拒否だけでは切断しません。
-- 設定変更は既存の送信を保持し、待機中の同期送信を起こします。同期送信はデータをコピーせず、有限の書き込み単位を使います。無進捗タイムアウトは `setSendTimeout()` を参照してください。
+- 既定値は 16 MiB。0 は Error を記録し、元の設定を保持します。待機中と書き込み中のバイト数を数え、1 件は高水位を越えられます。
+- 高水位では非同期送信は `QueueFull`、同期送信は空きを待ちます。設定を変更しても既存の送信を保持し、待機中の送信を起こします。未完了のバイト数は `getSendAsyncPendingBytes()` で確認できます。
+- 1 件の容量、キュー件数、サーバー全体の送信量の上限はありません。`setSendItemLimit()` と `setTotalSendBufferSize()` は削除しました。メモリ確保に失敗すると送信を登録せず `AllocationFailed` を返します。
 '''
 details.ko = '''
-- 기본값은 16 MiB입니다. 0은 설정 Error를 기록하고 기존 값을 유지합니다(v0.8 변경).
-- Bound (security): 느린 상대가 전송을 보유하므로 유한한 항목 크기로 한 항목의 기준 초과를 제한합니다. 초과 시 비동기 전송 전체를 거부하고 동기 전송은 대기합니다. 거부 횟수는 누적됩니다. 서버 송신 스레드에서 실행되는 콜백(예: `onSendComplete`, `onError`) 안에서 동기 send나 broadcast는 서버 전체 송신 버퍼(`setTotalSendBufferSize`)의 공간을 기다리지 않고 가득 차면 즉시 실패합니다. 대상 클라이언트 자체 큐의 공간은 계속 기다립니다.
-- 미완료 바이트에는 대기 및 실행 중인 동기/비동기 전송을 포함합니다. 한 항목이 기준을 넘으면 이후 비동기 전송은 `QueueFull`을 반환하고 broadcast는 해당 상대를 건너뜁니다. 소유 데이터에는 `setSendItemLimit()` 및 `setTotalSendBufferSize()`도 적용됩니다.
-- 빈 전송을 포함하여 채널마다 최대 4096개 항목을 허용합니다. 각 한도는 서버 객체 수명 동안 한 번 경고하며 거부 횟수를 누적합니다. 거부만으로 연결을 끊지 않습니다.
-- 설정 변경은 기존 전송을 유지하고 대기 중인 동기 송신자를 깨웁니다. 동기 전송은 데이터를 복사하지 않고 유한한 쓰기 단위를 사용합니다. 무진행 제한 시간은 `setSendTimeout()`을 참조하세요.
+- 기본값은 16 MiB입니다. 0은 Error를 기록하고 현재 설정을 유지합니다. 대기 및 쓰기 중인 바이트를 계산하며 한 항목은 기준을 넘을 수 있습니다.
+- 기준에 도달하면 비동기 전송은 `QueueFull`을 반환하고 동기 전송은 공간을 기다립니다. 설정 변경은 기존 전송을 유지하고 대기 중인 송신자를 깨웁니다. `getSendAsyncPendingBytes()`로 미완료 바이트를 확인합니다.
+- 항목 크기, 큐 항목 수, 서버 전체 송신량 한도는 없습니다. `setSendItemLimit()`와 `setTotalSendBufferSize()`는 제거되었습니다. 메모리 할당 실패 시 전송을 등록하지 않고 `AllocationFailed`를 반환합니다.
 '''
-related = ["TcpServer::sendAsync", "TcpServer::setSendItemLimit", "TcpServer::setTotalSendBufferSize"]
-
-["TcpServer::setSendItemLimit"]
-description.en = "Sets the maximum owned send payload capacity."
-description.ja = "所有する送信データの最大容量を設定する。"
-description.ko = "소유 송신 데이터의 최대 용량을 설정한다."
-details.en = '''
-- Default: 16 MiB. Zero logs a configuration Error and keeps the previous value. Changes apply to subsequent admissions without discarding pending sends.
-- Bound (security): bulk owned sends need a finite pre-copy budget. Overflow rejects the whole send with `QueueFull` and is counted.
-- Checked before copying or moving data, including a moved vector's capacity. Broadcast checks each recipient before fanout and copies its payload only after the first admission. The high-water mark and aggregate credits also apply.
-- One Warning per bound and cumulative internal rejection totals last for the server object's lifetime, across stop/start. No public statistics API is added. Borrowed synchronous sends use finite credit windows instead of owning the whole payload.
-'''
-details.ja = '''
-- 既定値は 16 MiB。0 は設定 Error を記録して元の値を保持します。変更は以後の受付に適用し、未完了送信を破棄しません。
-- Bound (security): 所有する大きな送信にはコピー前の有限の予算が必要です。超過時は送信全体を `QueueFull` で拒否し、拒否数を累積します。
-- コピーや移動の前に検証し、移動する vector の容量も含めます。Broadcast は各宛先の受付を検証し、最初の受付後にのみデータをコピーします。高水位と総クレジットも適用します。
-- 上限ごとの 1 回の警告と内部の累積拒否数は、停止・再開をまたいでサーバーオブジェクトの寿命中保持します。公開統計 API は追加しません。同期送信はデータ全体を所有せず、有限のクレジット単位を使います。
-'''
-details.ko = '''
-- 기본값은 16 MiB입니다. 0은 설정 Error를 기록하고 이전 값을 유지합니다. 변경은 이후 수락에 적용하며 미완료 전송을 버리지 않습니다.
-- Bound (security): 소유하는 대용량 전송에는 복사 전의 유한한 예산이 필요합니다. 초과 시 전송 전체를 `QueueFull`로 거부하고 횟수를 누적합니다.
-- 복사나 이동 전에 확인하며 이동하는 vector의 용량도 포함합니다. Broadcast는 각 수신자의 수락을 확인하고 첫 수락 후에만 데이터를 복사합니다. 상한 기준과 총 크레딧도 적용됩니다.
-- 한도별 한 번의 경고와 내부 누적 거부 횟수는 중지/재시작을 포함하여 서버 객체 수명 동안 유지됩니다. 공개 통계 API는 추가하지 않습니다. 동기 전송은 전체 데이터를 소유하지 않고 유한한 크레딧 단위를 사용합니다.
-'''
-related = ["TcpServer::setSendAsyncBufferSize", "TcpServer::setTotalSendBufferSize"]
-
-["TcpServer::setTotalSendBufferSize"]
-description.en = "Sets aggregate TCP server send credits."
-description.ja = "TCP サーバー全体の送信クレジットを設定する。"
-description.ko = "TCP 서버 전체의 송신 크레딧을 설정한다."
-details.en = '''
-- Default: 64 MiB. Zero logs a configuration Error and preserves the setting. Lowering the limit preserves existing sends; admissions wait or fail until credits fit again.
-- Bound (security): slow peers must not multiply retained sends across clients. Overflow rejects whole async sends (sync sends wait except in send-thread callbacks) and is counted. Inside a callback running on a server send thread (for example `onSendComplete` or `onError`), a synchronous send or broadcast does not wait for the server-wide send buffer (`setTotalSendBufferSize`) and fails at once when it is full; it still waits for room in the destination client's own queue.
-- Reserve before copying/moving data or broadcast fanout. Every recipient consumes credits, even when sharing one payload. Shared storage retains its original credit until its last reference is released. Borrowed sync sends charge a finite window bounded by the item and aggregate limits.
-- Completion, failure, cancellation and disconnect release credits. Each bound warns once with cumulative internal rejection totals for the server object's lifetime. Changes wake waiting synchronous senders.
-'''
-details.ja = '''
-- 既定値は 64 MiB。0 は設定 Error を記録し、元の値を保持します。下げても既存の送信は保持し、予算内に戻るまで受付を待機または拒否します。
-- Bound (security): 遅い接続先によって保持送信量がクライアント数に応じて増大するのを防ぎます。超過時は非同期送信全体を拒否し、同期送信は送信スレッドのコールバック内を除いて待機します。拒否数を累積します。 サーバーの送信スレッドで動くコールバック（例：`onSendComplete`、`onError`）内では、同期 send や broadcast はサーバー全体の送信バッファ（`setTotalSendBufferSize`）の空きを待たず、満杯なら直ちに失敗します。宛先クライアント自身のキューの空きは引き続き待ちます。
-- コピー・移動・broadcast 配信前に確保します。データを共有していても各宛先でクレジットを消費します。共有データは最後の参照が解放されるまで元のクレジットを保持します。同期送信は項目上限と総量上限内の有限単位を計上します。
-- 完了、失敗、キャンセル、切断でクレジットを解放します。各上限はサーバーオブジェクトの寿命中に 1 回警告し、内部の拒否数を累積します。変更時は待機中の同期送信を起こします。
-'''
-details.ko = '''
-- 기본값은 64 MiB입니다. 0은 설정 Error를 기록하고 기존 값을 유지합니다. 줄여도 기존 전송은 유지하며 예산에 다시 맞을 때까지 수락을 대기하거나 거부합니다.
-- Bound (security): 느린 상대 때문에 보유 전송량이 클라이언트 수에 따라 증가하는 것을 막습니다. 초과 시 비동기 전송 전체를 거부하고 동기 전송은 송신 스레드의 콜백 안을 제외하고 대기합니다. 거부 횟수는 누적됩니다. 서버 송신 스레드에서 실행되는 콜백(예: `onSendComplete`, `onError`) 안에서 동기 send나 broadcast는 서버 전체 송신 버퍼(`setTotalSendBufferSize`)의 공간을 기다리지 않고 가득 차면 즉시 실패합니다. 대상 클라이언트 자체 큐의 공간은 계속 기다립니다.
-- 복사, 이동, broadcast 배포 전에 확보합니다. 데이터를 공유해도 수신자마다 크레딧을 소비합니다. 공유 데이터는 마지막 참조가 해제될 때까지 원래 크레딧을 유지합니다. 동기 전송은 항목 및 총량 한도 이내의 유한한 단위를 계산합니다.
-- 완료, 실패, 취소, 연결 해제 시 크레딧을 반환합니다. 각 한도는 서버 객체 수명 동안 한 번 경고하고 내부 거부 횟수를 누적합니다. 설정 변경은 대기 중인 동기 송신자를 깨웁니다.
-'''
-related = ["TcpServer::setSendAsyncBufferSize", "TcpServer::setSendItemLimit"]
+related = ["TcpServer::sendAsync", "TcpServer::getSendAsyncPendingBytes"]
 
 ["TcpServer::setReceiveBufferSize"]
 description.en = "Sets the client receive buffer size."
@@ -35182,6 +35168,7 @@ description.en = "Sends and receives IPv4 UDP datagrams."
 description.ja = "IPv4 UDP データグラムを送受信する。"
 description.ko = "IPv4 UDP 데이터그램을 송수신한다."
 details.en = '''
+- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged when the backlog reaches the limit, and again only after the backlog has fully drained and fills up again. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
 - Use `bind(port)` to receive datagrams; it creates the socket if needed and starts event-based receiving by default. Pass `false` as the second argument for manual `receive()` calls.
 - Use `sendTo(host, port, data)` for a specified destination, or call `connect(host, port)` before `send()`. These operations return `bool` for success or failure; UDP `connect()` selects a peer without establishing a connection.
 - Manual `receive()` returns a byte count or `-1` on error and follows the socket's blocking and timeout settings. Event receiving reports positive-length datagrams through `onReceive`, with data, source IPv4 address, and source port; zero-length datagrams do not produce this event.
@@ -35194,6 +35181,7 @@ details.en = '''
 - Copying is disabled. Moving a receiving socket first stops it and logs one Error, `moved while running; stopped`, before transferring its stopped state. Event listeners remain attached to their original objects, and the moved-from socket can be used for a new run.
 '''
 details.ja = '''
+- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達したときに Warning をログに記録し、その後はバックログが完全に空になって再び上限に達した場合にのみ記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
 - データグラムを受信するには `bind(port)` を使います。必要ならソケットを作成し、既定ではイベントによる受信を開始します。手動で `receive()` を呼ぶ場合は、第 2 引数に `false` を渡してください。
 - 宛先を指定して送るには `sendTo(host, port, data)` を使い、`send()` を使う場合は先に `connect(host, port)` を呼びます。これらの操作は成功か失敗かを `bool` で返します。UDP の `connect()` は接続を確立せず、通信相手を選択します。
 - 手動の `receive()` は受信バイト数、エラー時は `-1` を返し、ソケットのブロッキング設定とタイムアウト設定に従います。イベントによる受信では、長さが正のデータグラムについて、データ、送信元 IPv4 アドレス、送信元ポートを `onReceive` で通知します。長さ 0 のデータグラムではこのイベントを通知しません。
@@ -35206,6 +35194,7 @@ details.ja = '''
 - コピーはできません。受信中のソケットをムーブすると、先に停止して Error の `moved while running; stopped` を 1 回記録し、停止した状態を移します。イベントリスナーはそれぞれ元のオブジェクトに残り、ムーブ元のソケットは新しい実行に使えます。
 '''
 details.ko = '''
+- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달하면 Warning을 기록하고, 이후에는 백로그가 완전히 비워진 뒤 다시 한도에 도달할 때만 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
 - 데이터그램을 수신하려면 `bind(port)`를 사용합니다. 필요하면 소켓을 생성하고 기본적으로 이벤트 수신을 시작합니다. 수동으로 `receive()`를 호출하려면 두 번째 인수에 `false`를 전달하세요.
 - 목적지를 지정하려면 `sendTo(host, port, data)`를 사용하고, `send()`를 사용하려면 먼저 `connect(host, port)`를 호출합니다. 이 작업들은 성공 여부를 `bool`로 반환합니다. UDP의 `connect()`는 연결을 수립하지 않고 통신 상대를 선택합니다.
 - 수동 `receive()`는 수신 바이트 수를 반환하며 오류 시 `-1`을 반환하고, 소켓의 블로킹 및 시간 제한 설정을 따릅니다. 이벤트 수신은 길이가 양수인 데이터그램의 데이터, 송신자 IPv4 주소, 송신자 포트를 `onReceive`로 알립니다. 길이가 0인 데이터그램은 이 이벤트를 발생시키지 않습니다.
@@ -60034,25 +60023,28 @@ description.en = "Queues owned bytes for asynchronous sending."
 description.ja = "データを所有するキューに追加して非同期に送信する。"
 description.ko = "데이터를 소유하는 큐에 추가하여 비동기로 전송한다."
 details.en = '''
+- Allocation failure returns `AllocationFailed` with id `0`, without queuing data, notifying `onError`, or producing a send completion.
 - Pointer-and-size and `string` overloads copy the bytes, while `vector<char>&&` transfers ownership; shares FIFO order and idle timeout behavior with `send()`.
 - Returns a `SendResult`; success means the data was queued and supplies a non-zero `id`, which is later reported as `onSendComplete`'s `sendId`.
-- Immediate rejection returns `NotRunning`, `QueueFull`, or `Disconnected` with id `0` and emits `onError` on the calling thread; it does not produce a send completion. Retrying directly from that error listener can recurse.
+- Other immediate rejections return `NotRunning`, `QueueFull`, or `Disconnected` with id `0` and emit `onError` on the calling thread; they do not produce send completions. Retrying directly from that error listener can recurse.
 - Queue admission rules are described in `TcpClient::setSendAsyncBufferSize`; `QueueFull` does not disconnect the client.
 - With threads, the writer advances the queue; without threads, `processNetwork()` advances it without waiting for socket readiness and reports completions inline. Completion delivery is described in `TcpClient::onSendComplete`.
 - Timeout behavior, including completion as `SendError::Disconnected` after the connection closes, is described in `TcpClient::setSendTimeout`; use this API instead of `send()` from inline send completion or send-error listeners.
 '''
 details.ja = '''
+- メモリ確保に失敗すると id `0` の `AllocationFailed` を返します。データを登録せず、`onError` や送信完了も通知しません。
 - ポインターとサイズの版および `string` 版はバイト列をコピーし、`vector<char>&&` 版は所有権を移します。`send()` と先入れ先出しの順序および無進捗時間の期限を共有します。
 - `SendResult` を返します。成功はキューに追加できたことを示し、0 以外の `id` が後で `onSendComplete` の `sendId` として通知されます。
-- 即座に拒否した場合は、id が `0` の `NotRunning`、`QueueFull`、`Disconnected` を返し、呼び出し元のスレッドで `onError` を通知します。送信完了は通知しません。そのエラーのリスナーからすぐに再試行すると、再帰呼び出しになる場合があります。
+- その他の即時拒否では、id が `0` の `NotRunning`、`QueueFull`、`Disconnected` を返し、呼び出し元のスレッドで `onError` を通知します。送信完了は通知しません。そのエラーのリスナーからすぐに再試行すると、再帰呼び出しになる場合があります。
 - キューへの追加条件は `TcpClient::setSendAsyncBufferSize` を参照してください。`QueueFull` では切断しません。
 - スレッドありでは送信ワーカーがキューを進めます。スレッドなしでは `processNetwork()` がソケットの準備を待たずに進め、その場で完了を通知します。完了通知の実行先は `TcpClient::onSendComplete` を参照してください。
 - 接続を閉じた後に `SendError::Disconnected` で完了する動作を含むタイムアウトの規則は、`TcpClient::setSendTimeout` を参照してください。インラインの送信完了・送信エラーリスナーでは、`send()` の代わりにこの API を使ってください。
 '''
 details.ko = '''
+- 메모리 할당 실패 시 id가 `0`인 `AllocationFailed`를 반환하며 데이터를 등록하거나 `onError` 및 전송 완료를 알리지 않습니다.
 - 포인터와 크기 버전 및 `string` 버전은 바이트를 복사하고 `vector<char>&&` 버전은 소유권을 이전합니다. `send()`와 선입선출 순서 및 전송이 진행되지 않는 시간 제한을 공유합니다.
 - `SendResult`를 반환합니다. 성공은 큐에 추가되었다는 뜻이며, 0이 아닌 `id`가 이후 `onSendComplete`의 `sendId`로 전달됩니다.
-- 즉시 거부하면 id가 `0`인 `NotRunning`, `QueueFull` 또는 `Disconnected`를 반환하고 호출한 스레드에서 `onError`를 알립니다. 전송 완료는 알리지 않습니다. 해당 오류 리스너에서 바로 재시도하면 재귀 호출이 발생할 수 있습니다.
+- 그 밖의 즉시 거부에서는 id가 `0`인 `NotRunning`, `QueueFull` 또는 `Disconnected`를 반환하고 호출한 스레드에서 `onError`를 알립니다. 전송 완료는 알리지 않습니다. 해당 오류 리스너에서 바로 재시도하면 재귀 호출이 발생할 수 있습니다.
 - 큐에 추가하는 조건은 `TcpClient::setSendAsyncBufferSize`를 참조하세요. `QueueFull`은 연결을 해제하지 않습니다.
 - 스레드가 있으면 전송 작업자가 큐를 진행합니다. 스레드가 없으면 `processNetwork()`이 소켓 준비를 기다리지 않고 진행하며 즉시 완료를 알립니다. 완료 알림의 실행 위치는 `TcpClient::onSendComplete`를 참조하세요.
 - 연결을 닫은 뒤 `SendError::Disconnected`로 완료하는 동작을 포함한 시간 제한 규칙은 `TcpClient::setSendTimeout`을 참조하세요. 인라인 전송 완료 또는 전송 오류 리스너에서는 `send()` 대신 이 API를 사용해야 합니다.

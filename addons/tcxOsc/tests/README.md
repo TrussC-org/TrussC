@@ -55,8 +55,7 @@ And the polling queue:
   and counted in `getDroppedMessageCount()`;
 - first loss logs once on the main thread automatically, even without another poll;
 - shrinking keeps the newest whole messages and preserves the lifetime counter;
-- allocation-free preflight accepts the work boundary and rejects the next unit
-  whole across nested bundles and arguments with or without data;
+- 5000-float messages parse and arrive whole; datagram size and nesting bounds remain;
 - retained-storage eviction accounts for empty arguments, blobs and queue nodes;
 - parsed addresses, string arguments and type tags at lengths 15, 16, 17, 29,
   30 and 31 poll intact with zero drops from an empty queue; charges match the
