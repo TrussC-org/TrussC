@@ -140,10 +140,9 @@ struct PendingValue {
 };
 
 // Input injected by a tool, identified separately from native input. Keep its
-// reservation until all its events are consumed, or its write deadline expires.
+// events until they are consumed, or their write deadline expires.
 struct PendingText {
     ImU32 firstEvent = 0, eventCount = 0;
-    size_t reservedEvents = 0;
     std::chrono::steady_clock::time_point deadline;
     // Only pairs actually inserted by Add*Event (which deduplicates against
     // native state). Text injection presses Ctrl, mouse, A, Delete and Enter.
@@ -191,8 +190,10 @@ struct ContextState {
 
     // Values queued by the MCP tools, waiting for their widget (or running in it)
     std::vector<std::shared_ptr<PendingValue>> pendingValues;
+    // Only Queued/Written/Verify records; the vector owns them and orders replies.
+    // A newer Queued edit may coexist with an earlier write awaiting verification.
+    std::unordered_multimap<ImGuiID, PendingValue*> pendingValueIndex;
     std::vector<PendingText> pendingText;
-    uint64_t rejectedPendingValues = 0;
 
     // Opaque owner tag (tcxImGui: the tc::internal::WindowContext*), so tools
     // can say which OS window a widget is in
@@ -251,20 +252,8 @@ bool isWritableKind(int kind);
 // top while ItemInfo runs inside a plain Combo / ListBox.
 bool hasValueOwner(const ContextState& cs, int kind, ImGuiID id, int comboDepth = 0);
 
-// Bound (security): pending tool edits, including text input, per UI context
-// are bounded to 256 (1024 total). Injected input also reserves at most 8192
-// events and 128 KiB per context (32768 events / 512 KiB total), BEFORE insertion.
-// These budgets permit interactive bursts without retaining unlimited idle work.
 // Bound (reply latency): unconsumed text uses the same 2 s write deadline as values.
 inline constexpr std::chrono::seconds kPendingValueLifetime{2};
-inline constexpr size_t kMaxPendingValuesPerContext = 256;
-inline constexpr size_t kMaxPendingValuesTotal = 1024;
-inline constexpr size_t kMaxPendingEventsPerContext = 8192;
-inline constexpr size_t kMaxPendingEventsTotal = 32768;
-inline constexpr size_t kMaxPendingBytesPerContext = 128 * 1024;
-inline constexpr size_t kMaxPendingBytesTotal = 512 * 1024;
-inline uint64_t rejectedPendingValues = 0;
-
 // Reclaim only tool events, preserving native events and other requests. Keep
 // releases whose tool presses have already been consumed: trickling can split
 // a request across frames. Retaining these in place preserves native ordering
@@ -272,18 +261,12 @@ inline uint64_t rejectedPendingValues = 0;
 // context switch. Rebuild to release allocation even when this UI stays cached.
 void settlePendingText(ImGuiContext* ctx, ContextState& cs, bool settleAll = false);
 
-size_t pendingValueCount();
-size_t pendingEventCount(const ContextState& cs);
-size_t pendingByteCount(const ContextState& cs);
-bool admitPendingEdit(ImGuiContext* ctx, size_t events, size_t bytes);
-
 // Queue `bytes` for the widget `id` of `ctx`, which reported `kind`,
 // `dataType` and `components`. The value hook writes it the next time the
 // widget runs, within `lifetime`; its check in the widget's next frame is
 // waited for until `checkWithin` after now (see settleOverdueValues()). A value
 // still queued for the same widget is superseded. `onDone` runs once the
-// outcome is known (see finishPendingValues()). Returns null on overflow;
-// rejection is counted and leaves existing edits (including supersession) untouched.
+// outcome is known (see finishPendingValues()).
 std::shared_ptr<PendingValue> queueValue(ImGuiContext* ctx, ImGuiID id, int kind,
                                                 ImGuiDataType dataType, int components,
                                                 std::vector<unsigned char> bytes,

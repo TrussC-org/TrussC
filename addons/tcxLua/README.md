@@ -74,11 +74,9 @@ tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
 - Lint traversal uses the engine's `LUAI_MAXCCALLS` nesting limit (200 by
   default), covering the prototypes its source parser produces.
   Name and diagnostic storage grows with input; compilation has no allocation
-  quota. Suggestions use constant scratch storage per comparison, with at most
-  64*1024*1024 edit-distance band cells per file. Candidate visits still cost
-  O(undefined reads × candidates), including names outside the length window.
-  Exhaustion omits further suggestions while retaining every diagnostic; it
-  has no separate exhaustion signal. A structure, allocation, depth or lookup
+  quota. Suggestions use constant scratch storage per comparison. Candidate
+  visits cost O(undefined reads × candidates), including names outside the length
+  window. A structure, allocation, depth or lookup
   failure returns one diagnostic for that file, preserving other files' results.
   Shared global-name snapshot failures return a `[lint]` diagnostic. If the
   diagnostic cannot be allocated, an Error goes to stderr and the result is
@@ -177,3 +175,15 @@ $ cp trussc_generated.cpp ../../src/generated
 [LICENSE](./LICENSE) is combined result. Please also check [docs/LICENSE_NOTE.md](docs/LICENSE_NOTE.md/) in detail.
 
 C++ OOM recovery requires Release builds, or iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, even empty string/container construction and moves can allocate a proxy on an error path.
+
+Local script loading keeps Lua's protected call so memory errors return `false`.
+It has no size notice or extra OOM retry/reserve machinery. Lint suggestions
+have no per-file work budget.
+
+ローカルスクリプトは Lua の保護された呼び出しで読み込み、メモリ不足時は
+`false` を返します。サイズの Notice や OOM 専用の再試行・予備メモリはありません。
+lint の候補探しにもファイルごとの作業量の上限はありません。
+
+로컬 스크립트는 Lua의 보호된 호출로 읽으며 메모리가 부족하면 `false`를 반환합니다.
+크기 Notice나 OOM 전용 재시도 및 예비 메모리는 없습니다.
+lint 제안 검색에도 파일별 작업량 상한이 없습니다.

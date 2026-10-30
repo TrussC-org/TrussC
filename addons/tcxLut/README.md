@@ -22,3 +22,14 @@ video (legal) range and are rejected. Full range is expressed by omitting
 those flags; arguments to the flags are malformed. Range lines with missing,
 extra, or non-finite values are rejected. Trailing `#` comments are allowed.
 1D LUTs (`LUT_1D_SIZE`) remain unsupported.
+
+A failed load keeps the previous LUT, including when the file is malformed or
+GPU creation fails. Allocation exceptions from parsing are handled by `load()`;
+the parser has no separate allocation-error handler.
+
+ファイルが不正な場合や GPU リソースの作成に失敗した場合も、読み込み失敗時は
+以前の LUT を保持します。解析中のメモリ確保例外は `load()` が処理し、
+パーサー内で重ねて捕捉しません。
+
+파일이 잘못되었거나 GPU 리소스를 만들지 못해 읽기가 실패하면 이전 LUT를 유지합니다.
+파싱 중의 메모리 할당 예외는 `load()`가 처리하며 파서에서 중복으로 처리하지 않습니다.

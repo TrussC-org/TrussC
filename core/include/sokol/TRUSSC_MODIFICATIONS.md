@@ -405,7 +405,7 @@ TrussC-specific public functions use the `sgl_tc_` prefix to distinguish from up
 - `_sgl_next_vertex()`: auto-realloc to 2x on overflow
 - `_sgl_next_uniform()`: same
 - `_sgl_next_command()`: same
-- `_sgl_grow_gpu_buffer()`: destroy and recreate GPU buffer with larger capacity
+- `_sgl_grow_gpu_buffer()`: recreate the GPU buffer with larger capacity in-frame and retain the old buffer until retirement
 - Default initial capacities kept small (128 verts, 64 cmds) for low-memory targets
 
 ### 12. TrussC-specific Public API (`sgl_tc_` prefix)

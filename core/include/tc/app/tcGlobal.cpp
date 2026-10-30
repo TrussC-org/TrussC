@@ -26,11 +26,13 @@
 #include "impl/tcImageDecode.h"
 #include "internal/tcBuildOutputCapture.h"
 #include "internal/tcHotReloadScan.h"
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-#include "../../../platform/gl/tcShadowAllocation.h"
-#endif
 #ifdef _WIN32
 #include <windows.h>
+#endif
+#if defined(SOKOL_GLCORE)
+#include <GL/gl.h>
+#elif defined(SOKOL_GLES3)
+#include <GLES3/gl3.h>
 #endif
 #include <cstring>
 #include <fstream>
@@ -122,12 +124,10 @@ void BuildOutputLoss::recordForwardingFailure() {
 #endif
     }
 }
-HotReloadScanLoss& hotReloadCacheLoss() { static HotReloadScanLoss loss; return loss; }
 namespace { void discardRetiredShadows() noexcept; }
-// Metal's host backend inspects native objects in its implementation TU.
-bool shadowNativeValid(sg_image);
-bool shadowNativeValid(sg_view);
-bool shadowNativeValid(sg_sampler);
+#if defined(SOKOL_METAL)
+bool shadowTextureViewCreated(sg_view);
+#endif
 }
 
 namespace {
@@ -676,32 +676,15 @@ void RenderTarget::endPass() {
     }
 }
 
-void RenderTarget::failRecording(const char* reason) {
-    auto& window = currentWindowContext();
-    deferredShaderDraws.clear(); deferredPbrDraws.clear(); deferredPointDraws.clear();
-    for (size_t i = window.shaderScopeTargets.size(); i-- > 0;) {
-        if (window.shaderScopeTargets[i].target == this) {
-            window.shaderScopeTargets.erase(window.shaderScopeTargets.begin() + i);
-            window.shaderStack.erase(window.shaderStack.begin() + i);
-        }
-    }
-    openShaderScopes = 0; sglLayerNext = 0; recordingFailed = true;
-    if (resources().context.id) sgl_tc_context_complete(resources().context);
-    logError("RenderTarget") << reason << "; discarded this target's recording";
-}
-bool RenderTarget::advanceLayer() {
-    // Bound (abi): SGL layer identifiers must fit signed int. Overflow discards the target's recording and is reported by failRecording logging an error and advanceLayer returning false.
-    if (recordingFailed) return false;
-    if (sglLayerNext == INT_MAX) { failRecording("layer identifier cannot be represented"); return false; }
+void RenderTarget::advanceLayer() {
     sgl_layer(++sglLayerNext);
-    return true;
 }
 
 void RenderTarget::flushLayers() {
     assert(currentWindowContext().currentTarget == this);
     if (!inPass || !resources().context.id) return;
     const auto err = sgl_context_error(resources().context);
-    const bool overflow = recordingFailed || err.vertices_full || err.commands_full || err.uniforms_full;
+    const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
         for (auto& draw : deferredShaderDraws)
@@ -742,7 +725,6 @@ uint64_t pushTarget(RenderTarget& target, bool prepareOnly) {
     target.activation = token;
     target.activeWindow = &window;
     target.passStartedThisFrame = false;
-    target.recordingFailed = false;
     target.frameEpoch = window.renderEpoch;
     // A scope constructor has no destructor if target setup throws. Roll back
     // a published activation here, without finalizing an unprepared owner.
@@ -951,7 +933,6 @@ void internal::endGpuFrame() {
     // their pass-consumption lifetime, including on upload-only boundaries.
     auto& target = internal::currentWindowContext().swapchainTarget;
     if (target.resources().context.id) sgl_tc_context_complete(target.resources().context);
-    target.recordingFailed = false;
 
     // Retire submitted resources while preserving typed dependencies of every
     // still-unconsumed recording, including suspended foreign targets.
@@ -2106,61 +2087,11 @@ ShadowStorage::~ShadowStorage() noexcept {
     if (sampler.id) sg_destroy_sampler(sampler);
 }
 
-#if defined(SOKOL_D3D11)
-bool shadowNativeValid(sg_image image) {
-    return sg_d3d11_query_image_info(image).res != nullptr;
-}
-bool shadowNativeValid(sg_view view) {
-    const auto desc = sg_query_view_desc(view);
-    const auto info = sg_d3d11_query_view_info(view);
-    if (desc.texture.image.id) return info.srv != nullptr;
-    if (desc.color_attachment.image.id) return info.rtv != nullptr;
-    return desc.depth_stencil_attachment.image.id && info.dsv != nullptr;
-}
-bool shadowNativeValid(sg_sampler sampler) {
-    return sg_d3d11_query_sampler_info(sampler).smp != nullptr;
-}
-#elif !defined(SOKOL_METAL) && !defined(SOKOL_GLCORE) && !defined(SOKOL_GLES3)
-bool shadowNativeValid(sg_image) { return true; }
-bool shadowNativeValid(sg_view) { return true; }
-bool shadowNativeValid(sg_sampler) { return true; }
-#endif
-
-namespace {
-// Prepared before main: reporting CPU exhaustion must not build a LogStream or
-// copy its message. Inline listeners and the normal console sink need no new
-// allocation. If an application listener/sink throws, retain the stderr Error.
-LogEventArgs shadowAllocationError{LogLevel::Error,
-    "[Shadow] could not allocate this window's shadow maps; shadow use discarded"};
-
-void reportShadowAllocationFailure() noexcept {
-    try { getLogger().onLog.notify(shadowAllocationError); }
-    catch (...) { std::fputs("[ERROR] [Shadow] shadow use discarded (allocation failure)\n", stderr); } // log-check: allow (allocation-free fallback)
-}
-
-template<class Handle, class Desc, class Make, class State>
-bool makeShadowResource(Handle& handle, const Desc& desc, Make make, State state) {
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    const bool gl = sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3;
-    GLPendingErrors pending;
-    if (gl) pending = beginGLShadowCreation();
-#endif
-    handle = make(&desc);
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    const bool nativeOK = !gl || endGLShadowCreation();
-    reportGLPendingErrors(pending);
-    return state(handle) == SG_RESOURCESTATE_VALID && nativeOK && shadowNativeValid(handle);
-#else
-    return state(handle) == SG_RESOURCESTATE_VALID && shadowNativeValid(handle);
-#endif
-}
-} // namespace
-
 bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, size_t& totalBytes) {
     colorBytes = depthBytes = totalBytes = 0;
     if (resolution <= 0) return false;
     const size_t side = static_cast<size_t>(resolution);
-    // Bound (representation): image byte products and their sum must fit size_t. Overflow rejects a generation and is counted in its owner's allocationFailures by ensureShadowStorage.
+    // Bound (representation): image byte products and their sum must fit size_t; overflow rejects the generation with an Error.
     if (side > SIZE_MAX / side) return false;
     const size_t texels = side * side;
     constexpr size_t colorTexelBytes = maxShadowLights * 4; // four R32F layers
@@ -2174,25 +2105,24 @@ bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, s
 
 bool ensureShadowStorage(WindowContext& window, int resolution) {
     auto& sh = window.shadow;
-    auto fail = [&] {
-        sh.count = 0;
-        sh.current = -1;
-        sh.storage.reset();
-        ++sh.allocationFailures;
-        reportShadowAllocationFailure();
-        return false;
-    };
     size_t colorBytes, depthBytes, totalBytes;
     const auto limits = sg_query_limits();
-    // Bound (device): attachment extents and array layers must fit Sokol's device limits. Overflow discards this owner's shadow use, emits an Error and is counted in allocationFailures.
+    // Bound (device): attachment extents and layers must fit device limits; failure rejects the generation with an Error.
     if (!shadowImageLayout(resolution, colorBytes, depthBytes, totalBytes) ||
         resolution > limits.max_image_size_2d || resolution > limits.max_image_size_array ||
-        maxShadowLights > limits.max_image_array_layers) return fail();
+        maxShadowLights > limits.max_image_array_layers) {
+        reportImportError("Shadow", "shadow resolution or layers exceed the device limits");
+        return false;
+    }
     if (sh.storage && resolution <= sh.storage->resolution) return true;
     try {
         auto next = std::shared_ptr<ShadowStorage>(new ShadowStorage, retireShadowStorage);
         next->resolution = resolution;
         next->imageBytes = totalBytes;
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        const bool gl = sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3;
+        if (gl) while (glGetError() != GL_NO_ERROR) {}
+#endif
         sg_image_desc cd = {};
         cd.type = SG_IMAGETYPE_ARRAY;
         cd.num_slices = maxShadowLights;
@@ -2201,39 +2131,78 @@ bool ensureShadowStorage(WindowContext& window, int resolution) {
         cd.pixel_format = SG_PIXELFORMAT_R32F;
         cd.sample_count = 1;
         cd.label = "tc_shadow_color_array";
-        if (!makeShadowResource(next->colorImage, cd, static_cast<sg_image (*)(const sg_image_desc*)>(sg_make_image), sg_query_image_state)) return fail();
+        next->colorImage = sg_make_image(&cd);
+        if (sg_query_image_state(next->colorImage) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         for (int slot = 0; slot < maxShadowLights; ++slot) {
             sg_view_desc vd = {};
             vd.color_attachment.image = next->colorImage;
             vd.color_attachment.slice = slot;
-            if (!makeShadowResource(next->colorAttachments[slot], vd, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+            next->colorAttachments[slot] = sg_make_view(&vd);
+            if (sg_query_view_state(next->colorAttachments[slot]) != SG_RESOURCESTATE_VALID) {
+                reportImportError("Shadow", "could not create shadow resource");
+                return false;
+            }
         }
         sg_view_desc tv = {};
         tv.texture.image = next->colorImage;
-        if (!makeShadowResource(next->colorTexture, tv, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        next->colorTexture = sg_make_view(&tv);
+        if (sg_query_view_state(next->colorTexture) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_image_desc dd = {};
         dd.usage.depth_stencil_attachment = true;
         dd.width = dd.height = resolution;
         dd.pixel_format = SG_PIXELFORMAT_DEPTH;
         dd.sample_count = 1;
         dd.label = "tc_shadow_depth";
-        if (!makeShadowResource(next->depthImage, dd, static_cast<sg_image (*)(const sg_image_desc*)>(sg_make_image), sg_query_image_state)) return fail();
+        next->depthImage = sg_make_image(&dd);
+        if (sg_query_image_state(next->depthImage) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_view_desc dv = {};
         dv.depth_stencil_attachment.image = next->depthImage;
-        if (!makeShadowResource(next->depthAttachment, dv, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        next->depthAttachment = sg_make_view(&dv);
+        if (sg_query_view_state(next->depthAttachment) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_sampler_desc sd = {};
         sd.min_filter = sd.mag_filter = SG_FILTER_NEAREST;
         sd.wrap_u = sd.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         sd.label = "tc_shadow_smp";
-        if (!makeShadowResource(next->sampler, sd, static_cast<sg_sampler (*)(const sg_sampler_desc*)>(sg_make_sampler), sg_query_sampler_state)) return fail();
+        next->sampler = sg_make_sampler(&sd);
+        if (sg_query_sampler_state(next->sampler) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        // Bound (device): Sokol's GL create path can report VALID after a failed native allocation; reject this shadow replacement.
+        if (gl && glGetError() != GL_NO_ERROR) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#elif defined(SOKOL_METAL)
+        // Bound (device): Sokol's Metal create path can report VALID for a nil native texture view; reject this shadow replacement.
+        if (!shadowTextureViewCreated(next->colorTexture)) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#endif
         // Publish only a complete generation. New storage contains no old slots;
         // previously queued draws retain both the old maps and copied matrices.
         sh.storage = std::move(next);
         sh.count = 0;
         sh.current = -1;
         return true;
-    } catch (const std::bad_alloc&) { return fail(); }
-      catch (const std::length_error&) { return fail(); }
+    } catch (const std::bad_alloc&) {
+        reportImportError("Shadow", "could not allocate shadow storage");
+        return false;
+    }
 }
 
 void consumeShadowSlot(int slot) {
@@ -2265,14 +2234,6 @@ void consumeShadowSlot(int slot) {
             target.flushLayers();
             target.endPass();
         }
-    } catch (const std::bad_alloc&) {
-        failure = std::current_exception();
-        currentTarget().failRecording("shadow consumer replay allocation failed");
-        currentTarget().endPass();
-    } catch (const std::length_error&) {
-        failure = std::current_exception();
-        currentTarget().failRecording("shadow consumer replay size cannot be represented");
-        currentTarget().endPass();
     } catch (...) {
         failure = std::current_exception();
         currentTarget().endPass();
@@ -3023,12 +2984,11 @@ void parkWindowPass() {
     if (outgoing.currentTarget->inPass) {
         try { outgoing.currentTarget->flushLayers(); }
         catch (const std::bad_alloc&) {
-            outgoing.currentTarget->failRecording("parked replay allocation failed");
+            reportImportError("RenderTarget", "parked replay allocation failed");
         } catch (const std::length_error&) {
-            outgoing.currentTarget->failRecording("parked replay size cannot be represented");
+            reportImportError("RenderTarget", "parked replay size cannot be represented");
         }
-        // Even a failed recording must release the native encoder before a
-        // foreign window can render or enter its noexcept teardown.
+        // Release the encoder before a foreign window renders or tears down.
         outgoing.currentTarget->endPass();
     }
 }
