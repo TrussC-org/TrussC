@@ -31,12 +31,11 @@ struct ExternalDeliveryStore : std::enable_shared_from_this<ExternalDeliveryStor
         ~Lease();
     };
     std::shared_ptr<Lease> reserve();
-    void reject();
     mutable std::mutex mutex;
-    // Bound (network input): opt-in backlog of queued/executing Main copies; 0 = unlimited, over the limit a whole new copy is rejected and counted.
+    // Bound (network input): opt-in backlog of queued/executing Main copies; 0 = unlimited, over the limit a whole new copy is rejected with one Warning per overflow episode.
     size_t deliveryLimit = 0;
     size_t pending = 0;
-    size_t rejectedCopies = 0;
+    bool overflowing = false;
 };
 
 // The source token is separate from listener tokens: an in-flight snapshot

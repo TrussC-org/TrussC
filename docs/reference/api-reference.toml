@@ -7638,18 +7638,18 @@ description.ja = "外部入力のメインスレッド配送に任意の件数�
 description.ko = "외부 입력의 메인 스레드 복사본 수에 선택적 한도를 설정한다."
 details.en = '''
 - Applies only to listeners using `Deliver::Main` when an external source queues a copy from another thread. Inline listeners are unaffected.
-- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped and counted internally. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
-- Lowering the limit keeps already accepted copies. Each Main listener uses one slot until its callback finishes; a cancelled copy frees its slot when discarded at the next main-thread drain. Allocation failure drops and counts the copy. The setting also works for `Event<void>`.
+- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged each time the backlog reaches the limit. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
+- Lowering the limit keeps already accepted copies. Each Main listener uses one slot until its callback finishes; a cancelled copy frees its slot when discarded at the next main-thread drain. Allocation failure drops the copy silently. The setting also works for `Event<void>`.
 '''
 details.ja = '''
 - 外部入力を別スレッドからコピーして配送する `Deliver::Main` のリスナーだけが対象です。Inline リスナーには適用しません。
-- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、内部で数えます。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
-- 上限を下げても受付済みのコピーは保持します。Main リスナーごとに、コールバックの終了まで 1 件と数えます。取り消したコピーの枠は、次のメインスレッドのキュー処理でコピーを破棄した時点で戻ります。コピーのメモリ確保に失敗した場合も破棄して数えます。`Event<void>` でも使えます。
+- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達するたびに Warning をログに記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
+- 上限を下げても受付済みのコピーは保持します。Main リスナーごとに、コールバックの終了まで 1 件と数えます。取り消したコピーの枠は、次のメインスレッドのキュー処理でコピーを破棄した時点で戻ります。コピーのメモリ確保に失敗した場合は、ログを記録せず破棄します。`Event<void>` でも使えます。
 '''
 details.ko = '''
 - 외부 입력을 다른 스레드에서 복사해 전달하는 `Deliver::Main` 리스너에만 적용합니다. Inline 리스너에는 적용하지 않습니다.
-- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리고 내부에서 집계합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
-- 한도를 줄여도 이미 수락한 복사본은 유지합니다. Main 리스너마다 콜백이 끝날 때까지 한 자리를 사용합니다. 취소된 복사본은 다음 메인 스레드 큐 처리에서 폐기될 때 자리를 반환합니다. 복사본 메모리 할당에 실패해도 버리고 집계합니다. `Event<void>`에도 사용할 수 있습니다.
+- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달할 때마다 Warning을 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
+- 한도를 줄여도 이미 수락한 복사본은 유지합니다. Main 리스너마다 콜백이 끝날 때까지 한 자리를 사용합니다. 취소된 복사본은 다음 메인 스레드 큐 처리에서 폐기될 때 자리를 반환합니다. 복사본 메모리 할당에 실패하면 로그 없이 버립니다. `Event<void>`에도 사용할 수 있습니다.
 '''
 snippet = '''
 void tcApp::setup() {
@@ -7695,7 +7695,7 @@ description.en = "Connects listeners to notifications with a shared argument typ
 description.ja = "共通の引数型を持つ通知にリスナーを登録する。"
 description.ko = "공통 인자 타입을 사용하는 알림에 리스너를 등록한다."
 details.en = '''
-- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped and counted internally. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
+- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged each time the backlog reaches the limit. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
 - `Event()` defaults to `100`; `Event(defaultPriority)` sets an immutable per-instance integer default for all omitted-priority overloads. Every explicitly supplied integer stays explicit, including `0`, negative values and integer extremes.
 - On events the App receives, listen() defaults to BeforeApp; other events keep 100.
 - Register a callback with `listen(callback)` or a member function with `listen(object, &Class::method)`; callbacks receive `T&`. `notify(arg)` passes the same argument by reference to listeners, so they can modify it. `Event<void>` uses callbacks and `notify()` without arguments.
@@ -7712,7 +7712,7 @@ details.en = '''
 - For the order of input listeners, App callbacks, and node handlers, see `App::mousePressed`.
 '''
 details.ja = '''
-- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、内部で数えます。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
+- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達するたびに Warning をログに記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
 - `Event()` の既定優先度は `100` です。`Event(defaultPriority)` は優先度を省略する全形式に使う、インスタンスごとの不変の整数値を設定します。明示した整数は `0`、負数、整数の両端値を含め、そのまま使います。
 - App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。
 - `listen(callback)` でコールバックを、`listen(object, &Class::method)` でメンバー関数を登録します。コールバックは `T&` を受け取ります。`notify(arg)` は同じ引数を参照で各リスナーに渡すため、リスナーは値を変更できます。`Event<void>` ではコールバックも `notify()` も引数を取りません。
@@ -7729,7 +7729,7 @@ details.ja = '''
 - 入力リスナー、App のコールバック、ノードのハンドラーの順番については `App::mousePressed` を参照してください。
 '''
 details.ko = '''
-- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리고 내부에서 집계합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
+- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달할 때마다 Warning을 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
 - `Event()`의 기본 우선순위는 `100`입니다. `Event(defaultPriority)`는 우선순위를 생략하는 모든 형식에 사용할 인스턴스별 불변 정수 기본값을 설정합니다. `0`, 음수, 정수 극값을 포함한 명시적 정수는 그대로 사용합니다.
 - App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다.
 - `listen(callback)`으로 콜백을, `listen(object, &Class::method)`로 멤버 함수를 등록합니다. 콜백은 `T&`를 받습니다. `notify(arg)`는 같은 인자를 참조로 각 리스너에 전달하므로 리스너가 값을 변경할 수 있습니다. `Event<void>`에서는 콜백과 `notify()` 모두 인자를 받지 않습니다.
@@ -30087,7 +30087,7 @@ platform_note.ko = '''
 - 브라우저의 TCP 통신에는 Emscripten WebSocket 소켓 에뮬레이션과 프록시 서버가 필요합니다. wasm에서는 스레드를 강제로 끕니다. `connectAsync()`는 백그라운드 스레드 없이 연결 작업을 수행하며, 보류 중인 TCP 연결 완료는 `processNetwork()`로 진행합니다.
 '''
 details.en = '''
-- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped and counted internally. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
+- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged each time the backlog reaches the limit. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
 - Connect with a host name and port using `connect()` or `connectAsync()`. Threading is enabled by default on native platforms; `connect()` waits for TCP connection completion in that mode, while `connectAsync()` reports completion through `onConnect`.
 - Received bytes arrive in the `data` member of the `onReceive` callback argument (`e.data` for `TcpReceiveEventArgs& e`); one event represents a read chunk, not an application message. Accumulate and separate messages in application code.
 - `send()` waits for writing to finish or fail; use `sendAsync()` from frame callbacks to avoid waiting. Asynchronous sends own their payload and return a `SendResult`; completion is reported through `onSendComplete`.
@@ -30100,7 +30100,7 @@ details.en = '''
 - See `EventListener` for subscription lifetime; do not hold a listener's lock while joining its worker from another thread.
 '''
 details.ja = '''
-- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、内部で数えます。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
+- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達するたびに Warning をログに記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
 - ホスト名とポートを指定し、`connect()` または `connectAsync()` で接続します。ネイティブ環境では既定でスレッドを使います。このモードの `connect()` は TCP 接続の完了を待ち、`connectAsync()` は `onConnect` で結果を通知します。
 - 受信したバイト列は `onReceive` コールバック引数の `data` メンバ（`TcpReceiveEventArgs& e` の場合は `e.data`）に届きます。1 回のイベントは読み取り単位であり、アプリケーションのメッセージ単位ではありません。アプリケーション側で蓄積してメッセージを区切ってください。
 - `send()` は書き込みの完了または失敗まで待ちます。フレームのコールバックでは、待機を避けるために `sendAsync()` を使ってください。非同期送信はデータを所有し、`SendResult` を返します。完了は `onSendComplete` で通知します。
@@ -30113,7 +30113,7 @@ details.ja = '''
 - 購読の寿命は `EventListener` を参照してください。別スレッドからワーカーを join するときは、そのリスナーが必要とするロックを保持しないでください。
 '''
 details.ko = '''
-- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리고 내부에서 집계합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
+- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달할 때마다 Warning을 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
 - 호스트 이름과 포트를 지정하여 `connect()` 또는 `connectAsync()`로 연결합니다. 네이티브 플랫폼에서는 기본적으로 스레드를 사용합니다. 이 모드에서 `connect()`는 TCP 연결 완료를 기다리고 `connectAsync()`는 `onConnect`로 결과를 알립니다.
 - 수신한 바이트는 `onReceive` 콜백 인수의 `data` 멤버(`TcpReceiveEventArgs& e`인 경우 `e.data`)에 전달됩니다. 이벤트 하나는 읽기 청크이며 애플리케이션 메시지 단위가 아닙니다. 애플리케이션 코드에서 데이터를 누적하고 메시지를 구분하세요.
 - `send()`는 쓰기가 완료되거나 실패할 때까지 기다립니다. 프레임 콜백에서는 대기를 피하도록 `sendAsync()`를 사용하세요. 비동기 송신은 데이터를 소유하며 `SendResult`를 반환합니다. 완료는 `onSendComplete`로 알립니다.
@@ -35159,7 +35159,7 @@ description.en = "Sends and receives IPv4 UDP datagrams."
 description.ja = "IPv4 UDP データグラムを送受信する。"
 description.ko = "IPv4 UDP 데이터그램을 송수신한다."
 details.en = '''
-- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped and counted internally. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
+- External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged each time the backlog reaches the limit. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
 - Use `bind(port)` to receive datagrams; it creates the socket if needed and starts event-based receiving by default. Pass `false` as the second argument for manual `receive()` calls.
 - Use `sendTo(host, port, data)` for a specified destination, or call `connect(host, port)` before `send()`. These operations return `bool` for success or failure; UDP `connect()` selects a peer without establishing a connection.
 - Manual `receive()` returns a byte count or `-1` on error and follows the socket's blocking and timeout settings. Event receiving reports positive-length datagrams through `onReceive`, with data, source IPv4 address, and source port; zero-length datagrams do not produce this event.
@@ -35172,7 +35172,7 @@ details.en = '''
 - Copying is disabled. Moving a receiving socket first stops it and logs one Error, `moved while running; stopped`, before transferring its stopped state. Event listeners remain attached to their original objects, and the moved-from socket can be used for a new run.
 '''
 details.ja = '''
-- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、内部で数えます。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
+- 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達するたびに Warning をログに記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
 - データグラムを受信するには `bind(port)` を使います。必要ならソケットを作成し、既定ではイベントによる受信を開始します。手動で `receive()` を呼ぶ場合は、第 2 引数に `false` を渡してください。
 - 宛先を指定して送るには `sendTo(host, port, data)` を使い、`send()` を使う場合は先に `connect(host, port)` を呼びます。これらの操作は成功か失敗かを `bool` で返します。UDP の `connect()` は接続を確立せず、通信相手を選択します。
 - 手動の `receive()` は受信バイト数、エラー時は `-1` を返し、ソケットのブロッキング設定とタイムアウト設定に従います。イベントによる受信では、長さが正のデータグラムについて、データ、送信元 IPv4 アドレス、送信元ポートを `onReceive` で通知します。長さ 0 のデータグラムではこのイベントを通知しません。
@@ -35185,7 +35185,7 @@ details.ja = '''
 - コピーはできません。受信中のソケットをムーブすると、先に停止して Error の `moved while running; stopped` を 1 回記録し、停止した状態を移します。イベントリスナーはそれぞれ元のオブジェクトに残り、ムーブ元のソケットは新しい実行に使えます。
 '''
 details.ko = '''
-- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리고 내부에서 집계합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
+- 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달할 때마다 Warning을 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
 - 데이터그램을 수신하려면 `bind(port)`를 사용합니다. 필요하면 소켓을 생성하고 기본적으로 이벤트 수신을 시작합니다. 수동으로 `receive()`를 호출하려면 두 번째 인수에 `false`를 전달하세요.
 - 목적지를 지정하려면 `sendTo(host, port, data)`를 사용하고, `send()`를 사용하려면 먼저 `connect(host, port)`를 호출합니다. 이 작업들은 성공 여부를 `bool`로 반환합니다. UDP의 `connect()`는 연결을 수립하지 않고 통신 상대를 선택합니다.
 - 수동 `receive()`는 수신 바이트 수를 반환하며 오류 시 `-1`을 반환하고, 소켓의 블로킹 및 시간 제한 설정을 따릅니다. 이벤트 수신은 길이가 양수인 데이터그램의 데이터, 송신자 IPv4 주소, 송신자 포트를 `onReceive`로 알립니다. 길이가 0인 데이터그램은 이 이벤트를 발생시키지 않습니다.

@@ -88,11 +88,11 @@ template<class T> void mainStoreAllocation(bool snapshotPath, bool mainFirst) {
         !External::diagnostics(source);
     if constexpr (!std::is_void_v<T>) ok = ok && !accepted;
     else if (!snapshotPath) ok = ok && !accepted;
-    // A later successful store acquisition preserves the earlier loss count.
+    // A later successful store acquisition recovers without retained OOM state.
     std::thread recovery([&] { emit(); });
     recovery.join();
     auto store = External::diagnostics(source);
-    ok = ok && store && store->rejectedCopies == 1 && store->pending == 1;
+    ok = ok && store && !store->overflowing && store->pending == 1;
     internal::drainMainThreadQueue();
     ok = ok && inlineCalls == 2 && mainCalls == 1 && store->pending == 0;
     std::printf("Event<%s>: failed lazy store, snapshot=%d, mainFirst=%d: %s\n",

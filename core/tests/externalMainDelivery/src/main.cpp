@@ -69,13 +69,43 @@ template<class T> void cancelledSlot(bool clear) {
     auto replacement = source.listen([&](auto&...) { ++calls; }, Deliver::Main);
     std::thread beforeDrain([&] { check("replacement drops while cancelled copy awaits drain", !emit()); });
     beforeDrain.join();
-    check("replacement rejection counted before drain", store->pending == 1 && store->rejectedCopies == 1);
+    check("replacement starts overflow episode before drain", store->pending == 1 && store->overflowing);
     internal::drainMainThreadQueue();
     check("drain discards cancelled copy and returns slot", calls == 0 && store->pending == 0);
     std::thread afterDrain([&] { check("replacement accepted after drain", emit()); });
     afterDrain.join();
     internal::drainMainThreadQueue();
     check("replacement runs after slot returned", calls == 1 && store->pending == 0);
+}
+
+template<class T> void overflowWarnings() {
+    internal::drainMainThreadQueue();
+    int warnings = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning && event.message.find(
+                "[Event] Main delivery limit (1) reached;") == 0) {
+            check("overflow Warning runs on Main", isMainThread());
+            ++warnings;
+        }
+    });
+    Event<T> source;
+    source.setMainThreadDeliveryLimit(1);
+    auto listener = source.listen([](auto&...) {}, Deliver::Main);
+    for (int episode = 1; episode <= 2; ++episode) {
+        std::thread worker([&] {
+            auto emit = [&] {
+                if constexpr (std::is_void_v<T>) return External<T>::notify(source);
+                else { T value{}; return External<T>::notify(source, value); }
+            };
+            check("episode accepts first copy", emit());
+            for (int i = 0; i < 100; ++i) check("episode drops burst", !emit());
+        });
+        worker.join();
+        check("Warning waits for Main drain", warnings == episode - 1);
+        internal::drainMainThreadQueue();
+        check("one Warning per episode including repeated overflow", warnings == episode);
+        check("drain rearms overflow Warning", !External<T>::diagnostics(source)->overflowing);
+    }
 }
 
 void allocationFailure() {
@@ -92,7 +122,7 @@ void allocationFailure() {
     });
     producer.join();
     auto store = External<CopyProbe>::diagnostics(source);
-    check("failed copy counted and pending slot released", store->pending == 1 && store->rejectedCopies == 1);
+    check("failed copy releases pending slot without overflow", store->pending == 1 && !store->overflowing);
     source.setMainThreadDeliveryLimit(1);
     internal::drainMainThreadQueue();
     check("lowering optional limit retains accepted copy", calls == 1 && store->pending == 0);
@@ -114,7 +144,7 @@ template<class T> void optionalTransportLimit() {
     });
     worker.join();
     auto store = External<T>::diagnostics(source);
-    check("transport drops count while Inline delivery continues", store->pending == 1 && store->rejectedCopies == 1 && inlineCalls == 2);
+    check("transport overflows while Inline delivery continues", store->pending == 1 && store->overflowing && inlineCalls == 2);
     internal::drainMainThreadQueue();
     check("transport accepted copy runs", mainCalls == 1 && store->pending == 0);
 }
@@ -142,7 +172,7 @@ void optionalVoidLimit() {
     std::thread producer([&] { check("void event shares limit across listeners", !External<void>::notify(source)); });
     producer.join();
     auto store = External<void>::diagnostics(source);
-    check("void event whole-copy drop counted", store->pending == 1 && store->rejectedCopies == 1);
+    check("void event whole-copy overflow", store->pending == 1 && store->overflowing);
     source.setMainThreadDeliveryLimit(0);
     std::thread unlimited([&] { check("zero restores unlimited void delivery", External<void>::notify(source)); });
     unlimited.join();
@@ -184,12 +214,12 @@ void countAndFanout() {
     check("1024 copies pending before any drain", store && store->pending == 1024 && called == 0);
     check("rejection occurs before payload copying", CopyProbe::copies == 1024);
     check("only admitted notifications copy callable captures", ClosureProbe::copies == 512);
-    check("every rejected Main copy counted", store->rejectedCopies == 202);
+    check("burst keeps one overflow episode active", store->overflowing);
     internal::drainMainThreadQueue();
     check("all admitted listeners run", called == 1024);
-    check("only accepted copies queued", internal::getMainThreadQueuePending() == 1024);
+    check("accepted copies and one episode warning queued", internal::getMainThreadQueuePending() == 1025);
     check("pending slots returned", store->pending == 0);
-    check("rejections remain cumulative after drain", store->rejectedCopies == 204);
+    check("drain ends overflow episode", !store->overflowing);
 }
 
 void oscAndMidi() {
@@ -221,8 +251,8 @@ void oscAndMidi() {
     worker.join();
     auto oscStore = External<tcx::osc::OscMessage>::diagnostics(osc.onMessageReceived);
     auto midiStore = External<tcx::midi::MidiMessage>::diagnostics(midi.onMessage);
-    check("OSC stalled Main with polling never enabled", oscCalls == 0 && oscStore->pending == 1024 && oscStore->rejectedCopies == 1);
-    check("MIDI stalled Main with polling never enabled", midiCalls == 0 && midiStore->pending == 1024 && midiStore->rejectedCopies == 1);
+    check("OSC stalled Main with polling never enabled", oscCalls == 0 && oscStore->pending == 1024 && oscStore->overflowing);
+    check("MIDI stalled Main with polling never enabled", midiCalls == 0 && midiStore->pending == 1024 && midiStore->overflowing);
     internal::drainMainThreadQueue();
     check("OSC/MIDI whole-unit drop", oscCalls == 1024 && midiCalls == 1024);
     midi.closePort();
@@ -299,20 +329,20 @@ void oscForwardedErrors() {
     });
     worker.join();
     auto store = External<std::string>::diagnostics(receiver.onParseError);
-    check("forwarded receive errors bound pending copies and count every rejection",
-          store && store->pending == 1024 && store->rejectedCopies == 8976);
+    check("forwarded receive errors bound pending copies and enter overflow",
+          store && store->pending == 1024 && store->overflowing);
 #if !defined(__EMSCRIPTEN__)
     check("forwarded receive errors queue only accepted copies",
-          internal::mainThreadQueue().size() == 1024);
+          internal::mainThreadQueue().size() == 1025);
 #endif
     std::thread app([&] {
         for (int i = 0; i < 10000; ++i) tcx::osc::OscDeliveryTestAccess::error(receiver, false);
     });
     app.join();
     check("forwarded app errors bypass saturated external store",
-          store && store->pending == 1024 && store->rejectedCopies == 8976);
+          store && store->pending == 1024 && store->overflowing);
 #if !defined(__EMSCRIPTEN__)
-    check("forwarded app error copies stay growable", internal::mainThreadQueue().size() == 11024);
+    check("forwarded app error copies stay growable", internal::mainThreadQueue().size() == 11025);
 #endif
     internal::drainMainThreadQueue();
     check("forwarded receive/app error callbacks remain whole", calls == 11024 && appCalls == 10000);
@@ -443,7 +473,7 @@ void tcpBacklog(bool serverSide, bool limited) {
     check("backlog keeps TCP connection open", calls == 0 && disconnected == 0 && client.isConnected() && server.getClientCount() == 1);
     auto store = serverSide ? External<TcpServerReceiveEventArgs>::diagnostics(server.onReceive)
                             : External<TcpReceiveEventArgs>::diagnostics(client.onReceive);
-    check("only explicit limit drops copies", store->pending == (limited ? 7u : 1500u) && store->rejectedCopies == (limited ? 1493u : 0u));
+    check("only explicit limit drops copies", store->pending == (limited ? 7u : 1500u) && store->overflowing == limited);
     internal::drainMainThreadQueue();
     check("all accepted chunks arrive", calls == (limited ? 7 : 1500) && store->pending == 0);
     client.disconnect();
@@ -511,6 +541,8 @@ void lifetimeAndAppWork() {
 TC_CORE_TEST_MAIN() {
     Watchdog watchdog;
     getMainThreadId();
+    overflowWarnings<int>();
+    overflowWarnings<void>();
     lockOrder();
     optionalTransportLimit<UdpReceiveEventArgs>();
     optionalTransportLimit<tcx::websocket::WebSocketEventArgs>();

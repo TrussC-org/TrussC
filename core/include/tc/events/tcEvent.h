@@ -107,7 +107,7 @@ namespace priority {
 //   - External network/device Main copies are unlimited by default.
 //     setMainThreadDeliveryLimit(count) optionally limits queued and executing
 //     copies across this event's listeners (0 restores unlimited delivery).
-//     Overflow drops and counts each whole copy without disconnecting TCP.
+//     Overflow drops each whole copy and logs one Warning per episode; TCP stays connected.
 //     App-authored notify() and runOnMainThread() remain growable.
 //   - Requires T to be copy-constructible (otherwise delivered inline).
 //   - Listener lifetime is honored across the marshal boundary: a call queued
@@ -139,16 +139,16 @@ public:
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     // Optional count limit for external Main copies across this event's listeners.
-    // Default/0: unlimited. Existing copies survive a lower limit. Overflow or
-    // allocation failure drops the new copy and is counted internally.
+    // Default/0: unlimited. Existing copies survive a lower limit. Overflow
+    // drops new copies and logs one Warning per episode; allocation failure drops silently.
     void setMainThreadDeliveryLimit(size_t count) {
         TC_LOCK_GUARD(mutex_);
         if (!externalStore_) {
             externalStore_ = std::make_shared<internal::ExternalDeliveryStore>();
-            externalStore_->rejectedCopies = std::exchange(externalStoreRejectedCopies_, 0);
         }
         std::lock_guard<std::mutex> storeLock(externalStore_->mutex);
         externalStore_->deliveryLimit = count;
+        if (!count || externalStore_->pending < count) externalStore_->overflowing = false;
     }
 
     // Copy/Move forbidden (events have fixed location)
@@ -366,7 +366,7 @@ private:
                             // Reserve before either copy, using the value after
                             // earlier Inline listeners have finished editing it.
                             lease = store->reserve();
-                            if (!lease) { store->reject(); accepted = false; continue; }
+                            if (!lease) { accepted = false; continue; }
                         }
                         auto copy = std::make_shared<OwnedCopy>(std::move(lease), arg, *entry.callback);
                         runOnMainThread([copy, run, sourceAlive]() mutable {
@@ -374,7 +374,6 @@ private:
                         }, std::weak_ptr<std::atomic<bool>>(entry.alive));
                     } catch (const std::bad_alloc&) {
                         if (!store) throw;
-                        store->reject();
                         accepted = false;
                     }
                     continue;
@@ -463,8 +462,6 @@ private:
     uint64_t nextId_ = 0;
     // Created only when an external source first marshals to Main.
     std::shared_ptr<internal::ExternalDeliveryStore> externalStore_;
-    // Losses before lazy store allocation succeeds, guarded by mutex_.
-    size_t externalStoreRejectedCopies_ = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -482,16 +479,16 @@ public:
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     // Optional count limit for external Main copies across this event's listeners.
-    // Default/0: unlimited. Existing copies survive a lower limit. Overflow or
-    // allocation failure drops the new copy and is counted internally.
+    // Default/0: unlimited. Existing copies survive a lower limit. Overflow
+    // drops new copies and logs one Warning per episode; allocation failure drops silently.
     void setMainThreadDeliveryLimit(size_t count) {
         TC_LOCK_GUARD(mutex_);
         if (!externalStore_) {
             externalStore_ = std::make_shared<internal::ExternalDeliveryStore>();
-            externalStore_->rejectedCopies = std::exchange(externalStoreRejectedCopies_, 0);
         }
         std::lock_guard<std::mutex> storeLock(externalStore_->mutex);
         externalStore_->deliveryLimit = count;
+        if (!count || externalStore_->pending < count) externalStore_->overflowing = false;
     }
 
     Event(const Event&) = delete;
@@ -676,7 +673,7 @@ private:
                     std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
                     if (store) {
                         lease = store->reserve();
-                        if (!lease) { store->reject(); accepted = false; continue; }
+                        if (!lease) { accepted = false; continue; }
                     }
                     auto call = std::make_shared<OwnedCall>(std::move(lease), *entry.callback);
                     runOnMainThread([call, sourceAlive] {
@@ -684,7 +681,6 @@ private:
                     }, std::weak_ptr<std::atomic<bool>>(entry.alive));
                 } catch (const std::bad_alloc&) {
                     if (!store) throw;
-                    store->reject();
                     accepted = false;
                 }
                 continue;
@@ -760,8 +756,6 @@ private:
     uint64_t nextId_ = 0;
     // Created only when an external source first marshals to Main.
     std::shared_ptr<internal::ExternalDeliveryStore> externalStore_;
-    // Losses before lazy store allocation succeeds, guarded by mutex_.
-    size_t externalStoreRejectedCopies_ = 0;
 };
 
 } // namespace trussc
@@ -833,16 +827,8 @@ template<class T> struct ExternalEventDelivery {
         if (!source.externalStore_) {
             try {
                 source.externalStore_ = std::make_shared<ExternalDeliveryStore>();
-                source.externalStore_->rejectedCopies = std::exchange(source.externalStoreRejectedCopies_, 0);
             } catch (const std::bad_alloc&) {
                 failed = true;
-                // Count the lost Main copies while the source is still alive.
-                // Dispatch owns only the snapshot and may destroy the source.
-                for (const auto& entry : *snapshot) {
-                    if (entry.deliver == Deliver::Main && entry.callback && entry.alive->load() &&
-                        source.externalStoreRejectedCopies_ != (std::numeric_limits<size_t>::max)())
-                        ++source.externalStoreRejectedCopies_;
-                }
                 return {};
             }
         }
