@@ -8,7 +8,8 @@
 
 namespace trussc::internal {
 
-// A bounded, lazy buffer with a fallible allocator seam for internal tests.
+// A bounded, lazy buffer. The allocator seam tests retained stdin limits
+// and whole-line rejection on allocation failure.
 class InputStorage {
 public:
     using Reallocate = void* (*)(void*, size_t);

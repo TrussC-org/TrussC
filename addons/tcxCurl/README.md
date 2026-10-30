@@ -175,12 +175,22 @@ Content-Type argument sent with a request body. The Web client remains a stub.
 
 ### JSON responses
 
-`response.json()` parses within **16 MiB input, depth 64 and 1,000,000 nodes
-(including keys)**, plus an internal **128 MiB working budget** that can reject
-input below those individual limits. Budget rejection returns an empty object
-and logs a Warning only on the first JSON-budget loss, shared across clients.
-Empty or invalid JSON also returns an empty object; it does not log a budget
-Warning unless a budget was exceeded. Parsing does not change the response's
-status, body or error.
+`response.json()` parses the response with nlohmann JSON. Empty or invalid JSON
+returns an empty object. Parsing does not change the
+response's status, body or error. The response body limit still applies when
+receiving data. There are no separate JSON input-size, depth, node-count or
+working-memory caps.
+The parsed document can use many times the response body's memory. Apps
+receiving large untrusted JSON should lower `setResponseLimit()`.
 
-JSON解析の上限超過時は空のオブジェクトを返し、最初の超過時のみWarningを記録します。
+JSON の入力サイズ・深さ・ノード数・作業メモリに独自の上限はありません。
+空または不正な JSON は空のオブジェクトを返します。
+受信時のレスポンス本文の上限は引き続き適用されます。
+解析後のドキュメントはレスポンス本文の何倍ものメモリを使用することがあります。
+信頼できない大きな JSON を受信するアプリは `setResponseLimit()` を小さくしてください。
+
+JSON 입력 크기, 깊이, 노드 수, 작업 메모리에 별도 상한을 두지 않습니다.
+비어 있거나 잘못된 JSON은 빈 객체를 반환합니다.
+응답 본문을 수신할 때의 크기 상한은 계속 적용됩니다.
+파싱된 문서는 응답 본문보다 몇 배나 많은 메모리를 사용할 수 있습니다.
+신뢰할 수 없는 큰 JSON을 수신하는 앱은 `setResponseLimit()`을 낮춰야 합니다.

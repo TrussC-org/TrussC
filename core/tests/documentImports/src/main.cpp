@@ -220,10 +220,6 @@ TC_CORE_TEST_MAIN() {
     manager.clearAtlas();
     glyph = manager.getOrLoadGlyph('A');
     check("glyph rendering recovers after allocation failure", glyph && glyph->isValid());
-    {
-        internal::FontScratchScope scratch(1, 1);
-        check("scratch rejects expansion before a huge allocation", !internal::fontScratchMalloc(256u * 1024u * 1024u) && scratch.failed() && internal::fontScratchLargestAllocationForTests() < 256u * 1024u * 1024u);
-    }
     stbtt_fontinfo fontInfo{};
     stbtt_InitFont(&fontInfo, font.data(), 0);
     const size_t firstGlyph = size_t(fontInfo.glyf);

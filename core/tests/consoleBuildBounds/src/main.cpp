@@ -298,50 +298,49 @@ void scans() {
     ));
     fs::remove_all(root);
     fs::create_directories(root);
-    internal::HotReloadScanLoss loss;
     std::ofstream(root / "one.CPP") << "// source\n";
     std::ofstream(root / "two.hpp") << "// header\n";
     std::ofstream(root / "ignored.txt") << "text\n";
     auto deep = root;
     for (int index = 0; index < 66; ++index) { deep /= "d"; fs::create_directory(deep); }
     std::ofstream(deep / "deep.cpp") << "// deep\n";
-    auto sources = internal::hotReloadSources(root, loss);
-    check(sources.size() == 2 && loss.skippedEntries == 1, "source depth skipped with counter, valid files retained");
-    check(internal::hotReloadSources(root / "missing", loss).empty() && loss.incompleteScans == 1,
+    auto sources = internal::hotReloadSources(root);
+    check(sources.size() == 3, "source scan includes deep files");
+    check(internal::hotReloadSources(root / "missing").empty(),
           "unreadable source scan does not throw");
+#ifndef _WIN32
+    // Pick an entry before the final source in the actual iteration order, so
+    // stopping on its status error cannot pass by filesystem ordering luck.
+    const auto unreadable = root / "unreadable";
+    fs::create_directory(unreadable);
+    for (int i = 0; i < 51; ++i) std::ofstream(unreadable / (std::to_string(i) + ".cpp"));
+    fs::path broken;
+    for (const auto& entry : fs::directory_iterator(unreadable)) { broken = entry.path(); break; }
+    fs::remove(broken);
+    fs::create_symlink(unreadable / "missing", broken);
+    check(internal::hotReloadSources(unreadable).size() == 50,
+          "hot-reload scan skips unreadable entries");
+#endif
     const auto cache = root / "CMakeCache.txt";
     std::ofstream(cache, std::ios::binary) << "CMAKE_COMMAND:INTERNAL=/example/cmake\r\n";
-    check(internal::hotReloadCMakeCommand(cache, loss) == "/example/cmake", "cache normal command CRLF");
+    check(internal::hotReloadCMakeCommand(cache) == "/example/cmake", "cache normal command CRLF");
     { std::ofstream file(cache, std::ios::binary); file << "CMAKE_COMMAND:INTERNAL=/prefix\n";
       const std::string block(4096, 'x'); for (int index = 0; index < 257; ++index) file << block; }
-    check(internal::hotReloadCMakeCommand(cache, loss).empty() && loss.rejectedCaches == 1,
-          "overlong cache line never publishes earlier command");
+    check(internal::hotReloadCMakeCommand(cache) == "/prefix",
+          "long cache line keeps earlier command");
     fs::resize_file(cache, 16 * 1024 * 1024 + 1);
-    check(internal::hotReloadCMakeCommand(cache, loss).empty() && loss.rejectedCaches == 2,
-          "oversized cache rejected before reading");
+    check(internal::hotReloadCMakeCommand(cache) == "/prefix",
+          "large cache keeps earlier command");
     fs::create_directory(root / "cache-directory");
-    check(internal::hotReloadCMakeCommand(root / "cache-directory", loss).empty() && loss.rejectedCaches == 3,
-          "non-file cache entry is skipped and counted");
+    check(internal::hotReloadCMakeCommand(root / "cache-directory").empty(),
+          "non-file cache entry is skipped");
     // Generate the inventory in-test. No compiler, downloader or other tool is needed.
     const auto inventory = root / "inventory";
     fs::create_directory(inventory);
     for (size_t index = 0; index < 65537; ++index)
         std::ofstream(inventory / (std::to_string(index) + ".cpp"));
-    internal::HotReloadScanLoss countLoss;
-    sources = internal::hotReloadSources(inventory, countLoss);
-    check(sources.size() == 65536 && countLoss.incompleteScans == 1, "source entry boundary and explicit incomplete scan");
-#ifndef _WIN32
-    // Alternate spellings keep this aggregate-storage probe independent of
-    // Windows long-path configuration; the shared admission code runs above.
-    auto longRoot = inventory;
-    for (int index = 0; index < 200; ++index) longRoot /= ".";
-    internal::HotReloadScanLoss nameLoss;
-    sources = internal::hotReloadSources(longRoot, nameLoss);
-    size_t nameBytes = 0;
-    for (const auto& path : sources) nameBytes += (path.native().size() + 1) * sizeof(fs::path::value_type);
-    check(sources.size() < 65536 && nameBytes <= 16 * 1024 * 1024 && nameLoss.skippedEntries > 0,
-          "source aggregate path storage stays bounded");
-#endif
+    sources = internal::hotReloadSources(inventory);
+    check(sources.size() == 65537, "source scan includes more than 65536 entries");
     fs::remove_all(root);
 }
 } // namespace

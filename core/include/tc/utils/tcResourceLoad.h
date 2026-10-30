@@ -112,6 +112,7 @@ void startExternalResourceLoad(const std::shared_ptr<State>& state, Prepare) {
 }
 struct ResourceLoadUsage { size_t active, pending, retainedBytes; uint64_t rejected; size_t outstanding; };
 ResourceLoadUsage resourceLoadUsageForTests();
+// Test the retained URL admission limits and clean worker-launch failure.
 void setResourceLoadLimitsForTests(size_t active, size_t pending, size_t bytes);
 void failResourceLoadLaunchForTests(bool fail);
 

@@ -14,16 +14,7 @@ namespace tcx::curl::detail {
 constexpr size_t responseByteLimit = 64 * 1024 * 1024;
 // Bound (security): peers control headers, redirects and error text. Overflow rejects the whole response and is counted.
 constexpr size_t metadataByteLimit = 64 * 1024;
-// Bound (security): small JSON can amplify into a large DOM. Overflow rejects the whole parse and is counted.
-constexpr size_t jsonByteLimit = 16 * 1024 * 1024;
-// Bound (security): nested peer JSON can exhaust parser/traversal stacks. Overflow rejects the whole parse and is counted.
-constexpr size_t jsonDepthLimit = 64;
-// Bound (security): tiny peer JSON nodes can amplify DOM storage. Overflow rejects the whole parse and is counted.
-constexpr size_t jsonNodeLimit = 1000000;
-// Bound (security): DOM, lexer and result copies share finite working storage. Overflow rejects the whole parse and is counted.
-constexpr size_t jsonWorkingLimit = 128 * 1024 * 1024;
-
-enum class ResponseLoss { Body, Metadata, Json, BackendHeader, HeaderSyntax, Redirects, RedirectPolicy, Count };
+enum class ResponseLoss { Body, Metadata, BackendHeader, HeaderSyntax, Redirects, RedirectPolicy, Count };
 void reportResponseLoss(ResponseLoss kind, size_t needed, size_t capacity, const char* units = "bytes");
 size_t responseLossCountForTests(ResponseLoss kind);
 void reportInvalidResponseLimit();
