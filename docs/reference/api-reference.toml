@@ -9816,7 +9816,7 @@ description.en = "Loads a font from a file, a system font name, or a Web URL."
 description.ja = "ファイル、システムフォント名、または Web の URL からフォントを読み込む。"
 description.ko = "파일, 시스템 폰트 이름 또는 Web URL에서 폰트를 로드한다."
 details.en = '''
-- Local font files have no additional encoded-size cap beyond the backend addressing guard (below 1 GiB). The sfnt directory and glyph sections are validated against actual bytes. Per-glyph outline/raster allocations are checked against glyph counts and raster metrics, with a 256 MiB live-workspace ceiling; a failure reports an Error and publishes no partial glyph. This workspace limit does not cap app-produced atlas pages. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug iterator-proxy allocation is outside this guarantee.
+- Local font files have no additional encoded-size cap beyond the backend addressing guard (below 1 GiB). The sfnt directory and glyph sections are validated against actual bytes. Per-glyph outline/raster allocations are checked against glyph counts and raster metrics, without a per-glyph workspace cap; a failure reports an Error and publishes no partial glyph. Allocation recovery requires standard-library configurations without iterator debugging; MSVC Debug iterator-proxy allocation is outside this guarantee.
 - Call `load(nameOrPath, size, faceIndex = 0)` with an integer font size in logical pixels. Rasterization uses the display DPI scale captured at loading, while drawing and metrics use logical coordinates.
 - Relative file paths resolve against the data folder through `getDataPath()`; absolute paths are used as given. A regular file at the resolved path takes precedence over a system font with the same name.
 - `faceIndex` selects a face in a file or URL containing a font collection (`.ttc` or `.otc`); a single font has only face 0. A negative index or an index at or beyond the face count logs an error and fails.
@@ -9827,7 +9827,7 @@ details.en = '''
 - Cancels any pending `loadAsync()` operation. Matching resolved paths, faces, physical sizes, oversampling settings, and mipmap settings share an atlas; changing any of these selects a separate cache entry. Glyphs are rasterized lazily.
 '''
 details.ja = '''
-- ローカルフォントファイルには、バックエンドのアドレス範囲（1 GiB 未満）以外の符号化サイズ上限を設けません。sfnt ディレクトリとグリフの区画を実際のバイト数に対して検証します。グリフごとの輪郭・ラスタライズでは件数とラスタ寸法を検証し、同時に使う作業メモリを 256 MiB 以内に制限します。失敗時は Error を出力し、部分的なグリフを公開しません。この作業メモリ上限はアプリが生成するアトラスページ数を制限しません。メモリ確保失敗からの復旧は、イテレーターデバッグを無効にした標準ライブラリ構成が対象です。MSVC Debug のイテレータープロキシ確保は保証対象外です。
+- ローカルフォントファイルには、バックエンドのアドレス範囲（1 GiB 未満）以外の符号化サイズ上限を設けません。sfnt ディレクトリとグリフの区画を実際のバイト数に対して検証します。グリフごとの輪郭・ラスタライズでは件数とラスタ寸法を検証し、グリフごとの作業メモリに上限は設けません。失敗時は Error を出力し、部分的なグリフを公開しません。メモリ確保失敗からの復旧は、イテレーターデバッグを無効にした標準ライブラリ構成が対象です。MSVC Debug のイテレータープロキシ確保は保証対象外です。
 - `load(nameOrPath, size, faceIndex = 0)` に、論理ピクセル単位の整数のフォントサイズを渡します。ラスタライズには読み込み時の画面の DPI スケールを使い、描画と寸法の取得には論理座標を使います。
 - 相対ファイルパスは `getDataPath()` を通じてデータフォルダ基準で解決し、絶対パスはそのまま使います。解決先に通常のファイルがあれば、同名のシステムフォントより優先します。
 - `faceIndex` は、ファイルまたは URL で指定したフォントコレクション（`.ttc`、`.otc`）内の書体を選びます。単一フォントは書体 0 のみです。負の値や書体数以上の値は、エラーを記録して失敗します。
@@ -9838,7 +9838,7 @@ details.ja = '''
 - 処理中の `loadAsync()` をキャンセルします。解決済みパス、書体、物理サイズ、オーバーサンプリング設定、ミップマップ設定が一致する場合はアトラスを共有し、いずれかが異なる場合は別のキャッシュ項目を使います。グリフは必要になった時点でラスタライズします。
 '''
 details.ko = '''
-- 로컬 폰트 파일에는 백엔드의 주소 범위(1 GiB 미만) 외의 인코딩 크기 제한을 두지 않습니다. sfnt 디렉터리와 글리프 구역은 실제 바이트 범위와 대조하여 검증합니다. 글리프별 윤곽선·래스터 할당은 글리프 수와 래스터 치수로 검증하며 동시에 사용하는 작업 메모리를 최대 256 MiB로 제한합니다. 실패하면 Error를 기록하고 일부 글리프를 공개하지 않습니다. 이 작업 메모리 제한은 앱이 만드는 아틀라스 페이지 수를 제한하지 않습니다. 할당 실패 복구는 반복자 디버깅이 없는 표준 라이브러리 구성을 대상으로 하며 MSVC Debug의 반복자 프록시 할당은 보장 대상이 아닙니다.
+- 로컬 폰트 파일에는 백엔드의 주소 범위(1 GiB 미만) 외의 인코딩 크기 제한을 두지 않습니다. sfnt 디렉터리와 글리프 구역은 실제 바이트 범위와 대조하여 검증합니다. 글리프별 윤곽선·래스터 할당은 글리프 수와 래스터 치수로 검증하며 글리프별 작업 메모리에 별도 상한을 두지 않습니다. 실패하면 Error를 기록하고 일부 글리프를 공개하지 않습니다. 할당 실패 복구는 반복자 디버깅이 없는 표준 라이브러리 구성을 대상으로 하며 MSVC Debug의 반복자 프록시 할당은 보장 대상이 아닙니다.
 - `load(nameOrPath, size, faceIndex = 0)`에 논리 픽셀 단위의 정수 폰트 크기를 전달합니다. 래스터화에는 로드 시점의 화면 DPI 배율을 사용하고, 그리기와 치수 측정에는 논리 좌표를 사용합니다.
 - 상대 파일 경로는 `getDataPath()`를 통해 데이터 폴더 기준으로 해석하며, 절대 경로는 그대로 사용합니다. 해석된 경로에 일반 파일이 있으면 같은 이름의 시스템 폰트보다 우선합니다.
 - `faceIndex`는 파일이나 URL로 지정한 폰트 컬렉션(`.ttc`, `.otc`) 안의 서체를 선택합니다. 단일 폰트에는 서체 0만 있습니다. 음수이거나 서체 수 이상이면 오류를 기록하고 실패합니다.
@@ -27556,23 +27556,20 @@ description.ja = "このシェーダーで描画するスコープを開始す�
 description.ko = "이 셰이더로 그리는 범위를 시작한다."
 details.en = '''
 - Pushes this shader onto the current window's shader stack so drawing functions that use the shader vertex writer submit through it; this does not immediately bind a GPU pipeline.
-- Pair each successful `begin()` with `end()` in reverse nesting order, within the same window and render-target activation. Switching to another target temporarily suspends the scope until the original activation is restored.
-- Calls the protected `onBegin()` hook after pushing the shader; an unloaded shader or a target whose recording has failed is ignored.
-- Scope allocation failure or scope/layer count overflow logs an error and discards the target's recording.
+- Pair every `begin()` with `end()` in reverse nesting order, within the same window and render-target activation. Switching to another target temporarily suspends the scope until the original activation is restored.
+- Calls the protected `onBegin()` hook after pushing the shader; an unloaded shader is ignored.
 - End the scope before clearing, moving, or destroying the shader, because the active stack stores its address. Resource lifetime after submission is described in `Shader::clear`.
 '''
 details.ja = '''
 - 現在のウィンドウのシェーダースタックにこのシェーダーを追加し、シェーダー用の頂点出力を使う描画関数の送信先にします。この時点では GPU パイプラインをバインドしません。
-- 成功した `begin()` ごとに、入れ子の逆順で `end()` を呼んでください。同じウィンドウと同じ描画ターゲットの有効化区間内で対応させます。別のターゲットに切り替えると、元の有効化区間に戻るまでスコープは一時的に使われなくなります。
-- スタックへの追加後に protected の `onBegin()` フックを呼びます。未ロードの場合や、ターゲットの描画記録が失敗状態の場合は何もしません。
-- スコープ用メモリの確保失敗や、スコープ数・レイヤー数の上限超過では、エラーをログに出してターゲットの描画記録を破棄します。
+- `begin()` ごとに、入れ子の逆順で `end()` を呼んでください。同じウィンドウと同じ描画ターゲットの有効化区間内で対応させます。別のターゲットに切り替えると、元の有効化区間に戻るまでスコープは一時的に使われなくなります。
+- スタックへの追加後に protected の `onBegin()` フックを呼びます。未ロードの場合は何もしません。
 - 有効なスタックにはシェーダーのアドレスが保存されるため、クリア・ムーブ・破棄の前にスコープを終了してください。送信後のリソースの寿命は `Shader::clear` を参照してください。
 '''
 details.ko = '''
 - 이 셰이더를 현재 창의 셰이더 스택에 추가하여 셰이더용 정점 출력을 사용하는 그리기 함수가 이 셰이더로 제출되도록 합니다. 이 시점에는 GPU 파이프라인을 바인딩하지 않습니다.
-- 성공한 `begin()`마다 중첩의 역순으로 `end()`를 호출하세요. 같은 창과 같은 렌더 타깃 활성화 구간 안에서 짝을 맞춰야 합니다. 다른 타깃으로 전환하면 원래 활성화 구간으로 돌아올 때까지 범위가 일시적으로 사용되지 않습니다.
-- 스택에 추가한 뒤 protected 훅인 `onBegin()`을 호출합니다. 로드되지 않았거나 타깃의 그리기 기록이 실패 상태이면 아무 작업도 하지 않습니다.
-- 범위용 메모리 할당 실패나 범위 수 또는 레이어 수의 한도 초과 시 오류를 기록하고 타깃의 그리기 기록을 폐기합니다.
+- 모든 `begin()`마다 중첩의 역순으로 `end()`를 호출하세요. 같은 창과 같은 렌더 타깃 활성화 구간 안에서 짝을 맞춰야 합니다. 다른 타깃으로 전환하면 원래 활성화 구간으로 돌아올 때까지 범위가 일시적으로 사용되지 않습니다.
+- 스택에 추가한 뒤 protected 훅인 `onBegin()`을 호출합니다. 로드되지 않았으면 아무 작업도 하지 않습니다.
 - 활성 스택에는 셰이더의 주소가 저장되므로 초기화, 이동 또는 소멸 전에 범위를 종료하세요. 제출 후 리소스의 수명은 `Shader::clear`를 참조하세요.
 '''
 snippet = '''
@@ -27592,17 +27589,17 @@ description.ko = "이 셰이더의 활성 그리기 범위를 종료한다."
 details.en = '''
 - Calls `onEnd()` before removing this shader from the current window's stack, restoring the previous shader; removing the last shader resets the sokol GPU state cache.
 - Does nothing when unloaded or when the stack is empty. If another shader is on top, or the current target activation differs from the one recorded by `begin()`, logs a warning and leaves the scope open.
-- Scope pairing and object lifetime rules are described in `Shader::begin`; this call does not flush deferred draws.
+- Pair every `begin()` with `end()`; see `Shader::begin` for scope and object lifetime rules. This call does not flush deferred draws.
 '''
 details.ja = '''
 - 現在のウィンドウのスタックからこのシェーダーを取り除く前に `onEnd()` を呼び、前のシェーダーに戻します。最後のシェーダーを取り除くと、sokol の GPU 状態キャッシュをリセットします。
 - 未ロードの場合やスタックが空の場合は何もしません。別のシェーダーが先頭にある場合や、現在のターゲットの有効化区間が `begin()` 時と異なる場合は、警告をログに出してスコープを開いたままにします。
-- スコープの対応とオブジェクトの寿命は `Shader::begin` を参照してください。この呼び出しでは遅延描画を実行しません。
+- `begin()` ごとに `end()` を呼んでください。スコープの対応とオブジェクトの寿命は `Shader::begin` を参照してください。この呼び出しでは遅延描画を実行しません。
 '''
 details.ko = '''
 - 현재 창의 스택에서 이 셰이더를 제거하기 전에 `onEnd()`를 호출하고 이전 셰이더로 돌아갑니다. 마지막 셰이더를 제거하면 sokol의 GPU 상태 캐시를 초기화합니다.
 - 로드되지 않았거나 스택이 비어 있으면 아무 작업도 하지 않습니다. 다른 셰이더가 맨 위에 있거나 현재 타깃의 활성화 구간이 `begin()` 시점과 다르면 경고를 기록하고 범위를 열린 상태로 유지합니다.
-- 범위의 짝과 객체 수명 규칙은 `Shader::begin`을 참조하세요. 이 호출은 지연된 그리기를 실행하지 않습니다.
+- 모든 `begin()`마다 `end()`를 호출하세요. 범위의 짝과 객체 수명 규칙은 `Shader::begin`을 참조하세요. 이 호출은 지연된 그리기를 실행하지 않습니다.
 '''
 snippet = '''
 void tcApp::draw() {
@@ -42002,7 +41999,6 @@ endShape();
 - `appendCurve(points)` needs at least 4 points. With fewer, it does nothing. The curve passes through the inner points only. The first and last points only set the direction at the ends and are not added as vertices.
 - `appendCurve(points, true)` makes a closed curve. It needs at least 3 points and passes through all of them.
 - How smooth the curve is depends on `setCurveResolution` or `setCurveTolerance`.
-- To protect CPU and memory from very large input, arrays of more than 100,000 points are refused with a warning. The program does not crash.
 '''
 details.ja = '''
 - なめらかな Catmull-Rom 曲線の点を、開いているバッファ（`beginShape`、`beginStroke`、`beginLines` のいずれか）に追加します。`vertex()` をループで呼ぶのと同じ結果になります。曲線の種類は `drawCurve` と同じです。
@@ -42018,7 +42014,6 @@ endShape();
 - `appendCurve(points)` には最低 4 点が必要で、それより少ないと何もしません。曲線は内側の点だけを通ります。最初と最後の点は両端の向きを決めるためだけに使われ、頂点としては追加されません。
 - `appendCurve(points, true)` は閉じた曲線を作ります。最低 3 点が必要で、すべての点を通ります。
 - 曲線のなめらかさは `setCurveResolution` または `setCurveTolerance` で決まります。
-- 非常に大きな入力から CPU とメモリを守るため、10 万点を超える配列は警告を出して受け付けません。クラッシュはしません。
 '''
 details.ko = '''
 - 매끄러운 Catmull-Rom 곡선의 점을 열려 있는 버퍼(`beginShape`, `beginStroke`, `beginLines` 중 하나)에 추가합니다. `vertex()`를 반복 호출하는 것과 같은 결과가 됩니다. 곡선의 종류는 `drawCurve`와 같습니다.
@@ -42034,7 +42029,6 @@ endShape();
 - `appendCurve(points)`에는 최소 4개의 점이 필요하며, 그보다 적으면 아무것도 하지 않습니다. 곡선은 안쪽 점만 지납니다. 첫 점과 마지막 점은 양 끝의 방향을 정하는 데만 쓰이고 정점으로 추가되지 않습니다.
 - `appendCurve(points, true)`는 닫힌 곡선을 만듭니다. 최소 3개의 점이 필요하며 모든 점을 지납니다.
 - 곡선의 매끄러움은 `setCurveResolution` 또는 `setCurveTolerance`로 정해집니다.
-- 매우 큰 입력으로부터 CPU와 메모리를 보호하기 위해 10만 개를 넘는 점 배열은 경고를 내고 받지 않습니다. 프로그램이 멈추지는 않습니다.
 '''
 
 ["appendSuperellipse"]
@@ -43426,21 +43420,21 @@ details.en = '''
 - Pass the compressed buffer `src`, its byte count `nbytes`, and the codec used by `compress()`; `Codec::None` copies the input unchanged.
 - The vector overload `decompress(src, nbytes, out, decompressedSize, codec)` requires the known original byte count, resizes `out` to that size, and returns `true` only when exactly that many bytes are produced. Failure or a size mismatch clears `out` and returns `false`.
 - The raw overload `decompress(src, nbytes, dst, dstCapacity, codec)` writes into caller-owned storage and returns the number of bytes written as `int`, or `-1` on failure. A result smaller than `dstCapacity` is allowed; this overload does not check the expected original size. Inputs whose byte count cannot be represented as `int` return `-1`.
-- The vector overload checks encoded lengths and proves the exact LZ4 output size before allocation. Output has no policy cap; LZ4 output over 256 MiB emits one Notice. It logs an Error on failure. The raw overload has no output policy cap; it checks that `nbytes` fits `int` and clamps LZ4 `dstCapacity` to `INT_MAX` before decoding.
+- The vector overload checks LZ4 lengths before allocation and verifies the decoded size. Output has no policy cap; LZ4 output over 256 MiB emits one Notice. It logs an Error on failure. The raw overload has no output policy cap; it checks that `nbytes` fits `int` and clamps LZ4 `dstCapacity` to `INT_MAX` before decoding.
 - For source and destination storage rules, see `compress`.
 '''
 details.ja = '''
 - 圧縮済みのバッファ `src`、そのバイト数 `nbytes`、`compress()` で使ったコーデックを渡します。`Codec::None` は入力をそのままコピーします。
 - vector 版の `decompress(src, nbytes, out, decompressedSize, codec)` には既知の元のバイト数を渡します。`out` をそのサイズに変更し、出力が指定バイト数と一致した場合だけ `true` を返します。失敗やサイズの不一致では `out` を空にして `false` を返します。
 - raw 版の `decompress(src, nbytes, dst, dstCapacity, codec)` は呼び出し側が用意した領域に書き込み、書き込んだバイト数を `int` で返します。失敗時は `-1` を返します。出力が `dstCapacity` より小さくても成功し、期待する元のサイズとの一致は検査しません。バイト数を `int` で表せない入力は `-1` を返します。
-- vector 版は確保前に符号化データの長さと LZ4 の正確な出力サイズを検査します。出力にポリシー上限はなく、256 MiB を超える LZ4 出力には Notice を一度出します。失敗時は Error を記録します。raw 版に出力のポリシー上限はなく、復号前に `nbytes` が `int` に収まるか検査し、LZ4 の `dstCapacity` は `INT_MAX` にクランプします。
+- vector 版は確保前に LZ4 の長さを検査し、展開後に出力サイズを確認します。出力にポリシー上限はなく、256 MiB を超える LZ4 出力には Notice を一度出します。失敗時は Error を記録します。raw 版に出力のポリシー上限はなく、復号前に `nbytes` が `int` に収まるか検査し、LZ4 の `dstCapacity` は `INT_MAX` にクランプします。
 - 入力と出力の領域の扱いは `compress` を参照してください。
 '''
 details.ko = '''
 - 압축 버퍼 `src`, 해당 바이트 수 `nbytes`, `compress()`에서 사용한 코덱을 전달합니다. `Codec::None`은 입력을 그대로 복사합니다.
 - vector 오버로드 `decompress(src, nbytes, out, decompressedSize, codec)`에는 알고 있는 원본 바이트 수를 전달합니다. `out`을 해당 크기로 조정하고 정확히 그 바이트 수가 출력된 경우에만 `true`를 반환합니다. 실패하거나 크기가 일치하지 않으면 `out`을 비우고 `false`를 반환합니다.
 - raw 오버로드 `decompress(src, nbytes, dst, dstCapacity, codec)`은 호출자가 마련한 저장 공간에 기록하고, 기록한 바이트 수를 `int`로 반환합니다. 실패하면 `-1`을 반환합니다. 출력이 `dstCapacity`보다 작아도 성공하며, 예상 원본 크기와의 일치는 검사하지 않습니다. 바이트 수를 `int`로 표현할 수 없는 입력은 `-1`을 반환합니다.
-- vector 오버로드는 할당 전에 인코딩 길이와 정확한 LZ4 출력 크기를 검사합니다. 출력 정책 상한은 없으며 256 MiB를 넘는 LZ4 출력에는 Notice를 한 번 기록합니다. 실패하면 Error를 기록합니다. raw 오버로드에는 출력 정책 상한이 없으며 디코딩 전에 `nbytes`가 `int` 범위인지 검사하고 LZ4의 `dstCapacity`를 `INT_MAX`로 제한합니다.
+- vector 오버로드는 할당 전에 LZ4 길이를 검사하고 디코딩 후 출력 크기를 확인합니다. 출력 정책 상한은 없으며 256 MiB를 넘는 LZ4 출력에는 Notice를 한 번 기록합니다. 실패하면 Error를 기록합니다. raw 오버로드에는 출력 정책 상한이 없으며 디코딩 전에 `nbytes`가 `int` 범위인지 검사하고 LZ4의 `dstCapacity`를 `INT_MAX`로 제한합니다.
 - 입력과 출력 저장 공간의 사용 규칙은 `compress`를 참조하세요.
 '''
 related = ["Codec", "compress", "compressBound"]
@@ -55816,7 +55810,7 @@ details.en = '''
 - Copies vertices, stored uniform bytes, and binding handles at submission time, and selects a pipeline for the current target. Later setter calls do not alter that submission; no vertex transformation is applied by this function.
 - Calls `setupBindings()` while capturing bindings. The captured draw can execute without accessing the Shader object; resource lifetime is described in `Shader::clear`, and texture ownership in `Shader::setTexture`.
 - Records into the current target for execution during its drawing flush, including FBO flushes and window presentation. Stream capacity behavior is described in `Shader::createVertexBuffer`.
-- Does nothing for zero vertices, an unloaded shader, or a target whose recording has failed. A negative count, null data with a positive count, unrepresentable size, or recording allocation failure logs an error and discards the target's recording.
+- Does nothing for zero vertices or an unloaded shader. Invalid vertex data, unrepresentable sizes, or allocation failure logs an error and skips that draw. Earlier recorded draws remain available.
 - If no compatible pipeline is available, skips the submission.
 '''
 details.ja = '''
@@ -55824,7 +55818,7 @@ details.ja = '''
 - 送信時に頂点、保存済みユニフォームのバイト列、バインディングのハンドルをコピーし、現在のターゲットに合うパイプラインを選びます。後の設定変更はその送信内容に影響しません。この関数自体は頂点変換を行いません。
 - バインディングの記録時に `setupBindings()` を呼びます。記録後の描画は Shader オブジェクトにアクセスせず実行できます。リソースの寿命は `Shader::clear`、テクスチャの所有権は `Shader::setTexture` を参照してください。
 - 現在のターゲットに記録し、FBO のフラッシュやウィンドウの表示など、ターゲットの描画実行時に処理します。ストリーム容量の扱いは `Shader::createVertexBuffer` を参照してください。
-- 頂点数がゼロの場合、未ロードの場合、ターゲットの描画記録が失敗状態の場合は何もしません。負の頂点数、正の頂点数に対する null データ、表現できないサイズ、描画記録用メモリの確保失敗では、エラーをログに出してターゲットの描画記録を破棄します。
+- 頂点数がゼロの場合や未ロードの場合は何もしません。不正な頂点データ、表現できないサイズ、メモリ確保の失敗では、エラーを記録してその描画を省略します。それまでの描画記録は保持します。
 - 適合するパイプラインが得られない場合は、その送信を省略します。
 '''
 details.ko = '''
@@ -55832,7 +55826,7 @@ details.ko = '''
 - 제출 시점에 정점, 저장된 유니폼 바이트 및 바인딩 핸들을 복사하고 현재 타깃에 맞는 파이프라인을 선택합니다. 이후의 설정 변경은 해당 제출 내용에 영향을 주지 않습니다. 이 함수 자체는 정점을 변환하지 않습니다.
 - 바인딩을 기록할 때 `setupBindings()`를 호출합니다. 기록한 그리기는 Shader 객체에 접근하지 않고 실행할 수 있습니다. 리소스 수명은 `Shader::clear`, 텍스처 소유권은 `Shader::setTexture`를 참조하세요.
 - 현재 타깃에 기록하고 FBO 플러시나 창 표시를 포함한 타깃의 그리기 실행 시 처리합니다. 스트림 용량 동작은 `Shader::createVertexBuffer`를 참조하세요.
-- 정점 수가 0이거나 로드되지 않았거나 타깃의 그리기 기록이 실패 상태이면 아무 작업도 하지 않습니다. 음수 정점 수, 양수 정점 수에 대한 null 데이터, 표현할 수 없는 크기 또는 그리기 기록용 메모리 할당 실패 시 오류를 기록하고 타깃의 그리기 기록을 폐기합니다.
+- 정점 수가 0이거나 로드되지 않았으면 아무 작업도 하지 않습니다. 잘못된 정점 데이터, 표현할 수 없는 크기 또는 메모리 할당 실패 시 오류를 기록하고 해당 그리기를 생략합니다. 앞서 기록한 그리기는 유지합니다.
 - 호환되는 파이프라인을 얻지 못하면 해당 제출을 생략합니다.
 '''
 
@@ -56392,9 +56386,6 @@ hide = true
 hide = true
 
 ["kBezierMaxOrder"]
-hide = true
-
-["kAppendCurveMaxPoints"]
 hide = true
 
 ["EnumLabelSpan"]

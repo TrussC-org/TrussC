@@ -474,11 +474,6 @@ public:
 
         const auto freeShape = [&](stbtt_vertex* shape) { stbtt_FreeShape(&fontInfo_, shape); };
         std::unique_ptr<stbtt_vertex, decltype(freeShape)> shape(vertices, freeShape);
-        // Bound (security): each outline vertex emits at most 17 path points, with vector growth and subpath bookkeeping. Overflow rejects the whole outline and is counted.
-        if (size_t(numVerts) > fontScratchRemaining() / (51 * sizeof(Vec3) + 4 * sizeof(size_t))) {
-            internal::reportImportError("Font", "glyph path exceeds outline workspace");
-            return Path();
-        }
         try {
         // stbtt returns vertex coords in font design units, Y-up.
         // Multiply by emScale to get em units (1.0 = em); negate Y for screen Y-down.
@@ -880,8 +875,7 @@ private:
             return false;
         }
         const size_t bitmapBytes = size_t(glyphWidth) * size_t(glyphHeight);
-        FontScratchScope scratch(fontData_.size(), bitmapBytes);
-        if (scratch.failed()) { internal::reportImportError("Font", "glyph bitmap exceeds raster workspace"); return false; }
+        FontScratchScope scratch(fontData_.size());
         std::vector<uint8_t> glyphBitmap;
         try { glyphBitmap.resize(bitmapBytes, 0); }
         catch (const std::bad_alloc&) { internal::reportImportError("Font", "cannot allocate glyph bitmap"); return false; }

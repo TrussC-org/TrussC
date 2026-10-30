@@ -213,6 +213,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     auto listener = getLogger().onLog.listen([](LogEventArgs& e) {
         if (e.level == LogLevel::Warning && e.message.find("FOV out of range") != std::string::npos) ++fovWarnings;
     });
+    // A long, straight path exercises both overloads beyond the former limit.
+    std::vector<Vec3> points(100001, Vec3{0, 0, 0});
+    auto& shape = internal::currentWindowContext();
+    beginShape();
+    appendCurve(points);
+    check("long open curve appends vertices", !shape.shapeVertices.empty());
+    beginShape();
+    appendCurve(points, true);
+    check("long closed curve appends vertices", !shape.shapeVertices.empty());
+    shape.shapeVertices.clear();
+    shape.shapeStarted = false;
     testArcs();
     testDefaults();
     if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) {

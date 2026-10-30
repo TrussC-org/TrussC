@@ -249,6 +249,18 @@ inline void appendSuperellipse(const Vec2& pos, const Vec2& size,
 // Helper — tessellate one Catmull-Rom segment (with p0/p3 as tangent
 // influences, p1->p2 as the visible piece) into the active vertex buffer.
 namespace internal {
+struct CurveAppendCheckpoint {
+    WindowContext& window = currentWindowContext();
+    size_t size = window.linesStarted ? window.linesVertices.size() :
+                  window.shapeStarted ? window.shapeVertices.size() : window.strokeVertices.size();
+    StrokeCap startCap = window.strokeStartCap;
+    void restore() const {
+        if (window.linesStarted) window.linesVertices.resize(size);
+        else if (window.shapeStarted) window.shapeVertices.resize(size);
+        else if (window.strokeStarted) window.strokeVertices.resize(size);
+        window.strokeStartCap = startCap;
+    }
+};
 inline void appendCatmullRomSegment_(const Vec3& p0, const Vec3& p1,
                                      const Vec3& p2, const Vec3& p3) {
     const auto& ctx = getDefaultContext();
@@ -278,32 +290,20 @@ inline void appendCatmullRomSegment_(const Vec3& p0, const Vec3& p1,
 }
 } // namespace internal
 
-// Hard cap on the number of points accepted by appendCurve. Catmull-Rom
-// chains expand each segment into a cubic Bezier and tessellate it
-// adaptively (up to ~131k recursive nodes at the depth cap, ~1-100ms per
-// segment depending on geometry). N segments → linear DoS surface; at
-// N=1e6 a single appendCurve call could spend hours of CPU.
-//
-// 100k is generous — a hand-drawn pen-tool path tops out in the low
-// thousands. If you really need more, your art tool is doing something
-// the framework wasn't designed for; split into multiple appendCurve
-// calls, or batch-tessellate yourself.
-// Bound (security): user Catmull-Rom point arrays can demand huge meshes; a cap bounds generated vertex memory and work. Overflow refuses the curve with a warning.
-inline constexpr int kAppendCurveMaxPoints = 100000;
-
 // Append a chained Catmull-Rom curve through `points`. Emits (N-3)
 // segments; needs N >= 4. Tangent points (first and last) are NOT
 // pushed as vertices — only the visible interior is appended.
 inline void appendCurve(const std::vector<Vec3>& points) {
     if (points.size() < 4) return;
-    if ((int)points.size() > kAppendCurveMaxPoints) {
-        logWarning() << "appendCurve: refusing N=" << points.size()
-                     << " points (cap " << kAppendCurveMaxPoints << ").";
-        return;
-    }
-    for (size_t i = 0; i + 3 < points.size(); i++) {
-        internal::appendCatmullRomSegment_(points[i], points[i+1],
-                                           points[i+2], points[i+3]);
+    const internal::CurveAppendCheckpoint checkpoint;
+    try {
+        for (size_t i = 0; i + 3 < points.size(); i++) {
+            internal::appendCatmullRomSegment_(points[i], points[i+1],
+                                               points[i+2], points[i+3]);
+        }
+    } catch (const std::bad_alloc&) {
+        checkpoint.restore();
+        internal::reportImportError("Shape", "could not allocate curve vertices");
     }
 }
 
@@ -311,18 +311,19 @@ inline void appendCurve(const std::vector<Vec3>& points) {
 // through.
 inline void appendCurve(const std::vector<Vec3>& points, bool closed) {
     if (!closed) { appendCurve(points); return; }
-    const int n = (int)points.size();
+    const size_t n = points.size();
     if (n < 3) return;
-    if (n > kAppendCurveMaxPoints) {
-        logWarning() << "appendCurve (closed): refusing N=" << n
-                     << " points (cap " << kAppendCurveMaxPoints << ").";
-        return;
-    }
-    for (int i = 0; i < n; i++) {
-        internal::appendCatmullRomSegment_(points[(i - 1 + n) % n],
-                                           points[i],
-                                           points[(i + 1) % n],
-                                           points[(i + 2) % n]);
+    const internal::CurveAppendCheckpoint checkpoint;
+    try {
+        for (size_t i = 0; i < n; i++) {
+            internal::appendCatmullRomSegment_(points[i == 0 ? n - 1 : i - 1],
+                                               points[i],
+                                               points[i == n - 1 ? 0 : i + 1],
+                                               points[i >= n - 2 ? i - (n - 2) : i + 2]);
+        }
+    } catch (const std::bad_alloc&) {
+        checkpoint.restore();
+        internal::reportImportError("Shape", "could not allocate curve vertices");
     }
 }
 
