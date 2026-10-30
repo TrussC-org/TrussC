@@ -1211,7 +1211,7 @@ class Font {
         std::shared_ptr<internal::FontAtlasManager> candidate;
         float dpi = 1;
         int size = 0, limit = 4096;
-        bool preflightFailure = false, unsupportedUrl = false, urlTimeout = false;
+        bool unsupportedUrl = false, urlTimeout = false;
         bool cached = false;
         size_t retainedBytes() const noexcept override {
             return candidate && !cached ? candidate->preparedResourceBytes() : 0;

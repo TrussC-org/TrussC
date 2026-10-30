@@ -33,8 +33,6 @@ TouchedWidget& markTouched(ImGuiContext* ctx, ImGuiID id) {
     return t;
 }
 
-// Inside a ColorEdit/ColorPicker, its parts (##X, ##Text, ##picker, ...) run as
-// widgets of their own on temporaries. The whole widget reports instead.
 bool insideColorWidget(ImGuiContext* ctx) {
     return ctx->ColorEditCurrentID != 0;
 }
@@ -115,8 +113,6 @@ bool isWritableKind(int kind) {
     }
 }
 
-// Search all active scopes: a component or another value widget may be on
-// top while ItemInfo runs inside a plain Combo / ListBox.
 bool hasValueOwner(const ContextState& cs, int kind, ImGuiID id, int comboDepth) {
     for (size_t i = cs.valueSnapshotDepth; i > 0; --i) {
         const auto& snapshot = cs.valueSnapshots[i - 1];
@@ -126,11 +122,6 @@ bool hasValueOwner(const ContextState& cs, int kind, ImGuiID id, int comboDepth)
     return false;
 }
 
-// Reclaim only tool events, preserving native events and other requests. Keep
-// releases whose tool presses have already been consumed: trickling can split
-// a request across frames. Retaining these in place preserves native ordering
-// and needs neither a focus-loss event (which clears native state) nor a current
-// context switch. Rebuild to release allocation even when this UI stays cached.
 void settlePendingText(ImGuiContext* ctx, ContextState& cs, bool settleAll) {
     const auto t = now();
     bool expired = false;
@@ -249,9 +240,6 @@ PendingValue::State refusalFor(const ImGuiTcItemValue& item) {
     return readOnly ? PendingValue::State::ReadOnly : PendingValue::State::Queued;
 }
 
-// At a value widget's entry: first check a value written in an earlier frame
-// (does the variable still hold it?), then write the value queued for it, if
-// any, through Data, before the widget reads its variable.
 void writePendingValue(ContextState& cs, ImGuiTcItemValue& item) {
     ImGuiWindow* window = static_cast<ImGuiWindow*>(item.Window);
     if (!window || window->SkipItems || !item.Data || !item.Label || !item.Label[0]) return;
@@ -336,8 +324,6 @@ void writePendingValue(ContextState& cs, ImGuiTcItemValue& item) {
     }
 }
 
-// At a value widget's return: read back the variable a value was written into
-// at its entry.
 void readBackPendingValue(ContextState& cs, const ImGuiTcItemValue& item) {
     auto* window = static_cast<ImGuiWindow*>(item.Window);
     if (!window || !item.Label) return;
@@ -355,12 +341,6 @@ void readBackPendingValue(ContextState& cs, const ImGuiTcItemValue& item) {
     }
 }
 
-// At the end of a context's frame: settle what this frame decided and hand
-// each finished value to its onDone. A value still queued after a whole frame
-// was not drawn; a value still waiting for its check a frame after the write
-// was not drawn again, and its read-back at return stands. `settleAll`: no
-// imgui frame will decide them (the context is going, or its window rendered
-// a frame without imgui), so every value is settled now.
 void finishPendingValues(ContextState& cs, int frame, bool settleAll) {
     std::vector<std::shared_ptr<PendingValue>> finished;
     // Allocate before moving survivors: the compaction pass must reach erase.
@@ -484,8 +464,6 @@ void setContextOwner(ImGuiContext* ctx, const void* owner) {
     if (ctx) detail::contexts()[ctx].owner = owner;
 }
 
-// Call before destroying an ImGui context: drops its frame registry. Its
-// touched widgets stay listed (last known value) but no longer update.
 void forgetContext(ImGuiContext* ctx) {
     if (!ctx) return;
     auto it = detail::contexts().find(ctx);
@@ -639,8 +617,6 @@ unsigned int ImGuiTcHook_ItemEntry(ImGuiTcItemValue* item) {
     return cs.editCount;
 }
 
-// Runs when a value widget returns. The widget's own item (or, for a
-// composite widget, its group) is g.LastItemData at this point.
 void ImGuiTcHook_ItemValue(const ImGuiTcItemValue* item) {
     namespace d = tcx::imgui::detail;
     if (!item || !item->Ctx) return;

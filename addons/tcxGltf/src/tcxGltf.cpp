@@ -504,8 +504,7 @@ void setTextureLoadHookForTests(void (*hook)()) {
 
 static Texture* loadGltfTexture(const cgltf_texture* tex,
                                  vector<unique_ptr<Texture>>& store,
-                                 const fs::path& baseDir,
-                                 const cgltf_data* data) {
+                                 const fs::path& baseDir) {
     if (!tex || !tex->image) return nullptr;
     if (auto hook = g_textureLoadHook.load(memory_order_relaxed)) hook();
 
@@ -600,8 +599,7 @@ static Texture* loadGltfTexture(const cgltf_texture* tex,
 
 static Material loadGltfMaterial(const cgltf_material* mat,
                                  vector<unique_ptr<Texture>>& texStore,
-                                 const fs::path& baseDir,
-                                 const cgltf_data* data) {
+                                 const fs::path& baseDir) {
     Material m;
     if (!mat) return m;
 
@@ -616,25 +614,25 @@ static Material loadGltfMaterial(const cgltf_material* mat,
 
         if (pbr.base_color_texture.texture) {
             Texture* tex = loadGltfTexture(pbr.base_color_texture.texture,
-                                           texStore, baseDir, data);
+                                           texStore, baseDir);
             if (tex) m.setBaseColorTexture(tex);
         }
         if (pbr.metallic_roughness_texture.texture) {
             Texture* tex = loadGltfTexture(pbr.metallic_roughness_texture.texture,
-                                           texStore, baseDir, data);
+                                           texStore, baseDir);
             if (tex) m.setMetallicRoughnessTexture(tex);
         }
     }
 
     if (mat->normal_texture.texture) {
         Texture* tex = loadGltfTexture(mat->normal_texture.texture,
-                                       texStore, baseDir, data);
+                                       texStore, baseDir);
         if (tex) m.setNormalMap(tex);
     }
 
     if (mat->emissive_texture.texture) {
         Texture* tex = loadGltfTexture(mat->emissive_texture.texture,
-                                       texStore, baseDir, data);
+                                       texStore, baseDir);
         if (tex) m.setEmissiveTexture(tex);
     }
     m.setEmissive(mat->emissive_factor[0],
@@ -647,7 +645,7 @@ static Material loadGltfMaterial(const cgltf_material* mat,
 
     if (mat->occlusion_texture.texture) {
         Texture* tex = loadGltfTexture(mat->occlusion_texture.texture,
-                                       texStore, baseDir, data);
+                                       texStore, baseDir);
         if (tex) m.setOcclusionTexture(tex);
     }
 
@@ -898,7 +896,7 @@ LoadResult GltfModel::load(const fs::path& path) {
                         break;
                     }
                     entry.material = loadGltfMaterial(prim->material, textures_,
-                                                      baseDir, data);
+                                                      baseDir);
                     entry.transform = worldXform;
                     entry.name = node->name ? node->name : "";
 
