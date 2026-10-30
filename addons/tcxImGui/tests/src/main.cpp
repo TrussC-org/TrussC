@@ -1099,8 +1099,8 @@ static void testFramesWithoutImGui() {
           isError(r) && late == 0 && r.value("message", "").find("too late") != std::string::npos);
 
     // The window renders no frame after the write frame (very slow, or it
-    // stopped): the value is settled on its read-back at return from the main
-    // window's afterFrame, 4 s after the call (the clock is advanced before
+    // stopped): the value is settled on its read-back at return from the Runtime
+    // maintenance, 4 s after the call (the clock is advanced before
     // frame 3), not left to the core's 5 s timeout and its generic error.
     namespace d = tcx::imgui::detail;
     r = callTool(h, "tcx_imgui_input", {{"label", "slow"}, {"text", "4"}}, nullptr, &frames, 10, [&](int i) {

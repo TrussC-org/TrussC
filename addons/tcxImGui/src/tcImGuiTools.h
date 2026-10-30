@@ -187,7 +187,7 @@ bool valueToBytes(const WidgetValue& w, const nlohmann::json& v,
 // is waited for until kValueCheckDeadline after the call; a value written but
 // not checked by then (its window rendered no frame since the write: slower
 // than one frame per 2 s, or it stopped rendering) is settled as applied on
-// its read-back at the widget's return, from the addressed Window's afterFrame
+// its read-back at the widget's return, from Runtime maintenance
 // (settleOverdueValues()), as for a widget not drawn again. Both come before
 // tc::mcp's timeout for a deferred reply that is never produced
 // (kTargetedDeferralTimeout, 5 s), whose generic error would hide that the

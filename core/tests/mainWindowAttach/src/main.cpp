@@ -65,6 +65,7 @@ struct ThrowConstructor : App {
     ThrowConstructor() { throw std::runtime_error("constructor test"); }
 };
 }
+#include "c2ProcessChecks.h"
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--display")
         return runApp<Earlier>(WindowSettings{}.setSize(160, 120).setTitle("Earlier"));
@@ -105,5 +106,6 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     b->close();
     check("old handle stays closed across Runtime epochs", !b->isOpen());
     internal::shutdownRuntime(); internal::endFrameworkLifetime();
+    c2::run();
     return failures ? 1 : 0;
 }

@@ -21,18 +21,22 @@ and is immediately reusable; a second `setup()` replaces the physics world.
 
 ## Stdin commands need `console::start()`
 
-Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. If your app subscribes to `events().console`, add `console::start()` in `setup()`:
+Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. `CoreEvents::console` / `events().console` has been removed. Subscribe once to
+`runtime().events().console` and add `console::start()` in `setup()`:
 
 ```cpp
 void MyApp::setup() {
-    consoleListener_ = events().console.listen([this](ConsoleEventArgs& e) {
+    consoleListener_ = runtime().events().console.listen([this](ConsoleEventArgs& e) {
         handleCommand(e);
     });
     console::start();
 }
 ```
 
-Keep `consoleListener_` as an `EventListener` member. Both runners pump commands on the main thread and stop delivery before `exit()` / `cleanup()`; no manual pump is needed.
+Keep `consoleListener_` as an `EventListener` member. Runtime pumps commands once on the main thread, before the first draw, after
+the first Window closes, with zero Windows and headless. Console has no App
+fan-out; subscriptions still carry their App owner token and retire on App
+ending. The service stops after App ending; no manual pump is needed.
 
 `console::stop()` disables delivery and drains pending commands. `console::start()` drains pending commands before enabling delivery again. The first start creates the process's only detached stdin reader, which continues consuming and discarding lines while stopped and ends at EOF. Restarting delivery does not create a new reader or replay discarded lines. Apps that never opt in leave stdin untouched. Web support remains unavailable.
 
@@ -227,3 +231,29 @@ Logical blend/depth flags retain continuity, separately from scoped pipeline sel
 The existing screen blend-after-Fbo behavior, offscreen premult handling and GPU point
 transform/size corrections remain for PR 4. Repeating `setBlendMode` explicitly selects
 that blend pipeline, even when the logical value already matches.
+
+## Process events and closing a Window
+
+App code uses `events()`; non-App code (addons, app-wide handling) uses
+`runtime().events()`. `exitRequested`, `deviceLost`, and `hotReloadUnload` retain
+the same names on both hubs. Runtime receives them first, then attached Apps in
+reverse attachment order (hot reload targets only replacing Apps). Quit and OS
+close give every listener fresh `cancel=false`, OR all vetoes, retain the first
+nonempty veto reason, and count a throwing listener as a veto. Device loss keeps
+its mutable cancellation behavior.
+
+OS close first queries that Window's `events().closeRequested`. Accepted close
+ends its App and closes the Window. `Window::close()` skips the query. Every
+Window defaults to `setQuitOnClose(false)`; true, or closing the last Window,
+requests process quit after closure. A process veto leaves the Window closed
+and Runtime services running with zero Windows. `exitApp(code)` now requests
+cancellable process quit too; an async confirmation listener should remember
+acceptance before calling it again (see exitExample). Process shutdown sends no
+closeRequested. Calls to exitApp from an ending App are inert.
+
+App::exit also runs on setApp, destroyApp and reload, so it is unsuitable for a
+Window-close policy. Prefer setQuitOnClose; a manual alternative in setup is:
+
+```cpp
+quitListener_ = getWindow()->events().exit.listen([] { tc::exitApp(); });
+```

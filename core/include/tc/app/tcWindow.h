@@ -69,7 +69,7 @@ public:
     }
     // Remove the App at the next boundary, keeping the window and settings.
     void destroyApp() { requestApp({}); }
-    void setQuitOnClose(bool enabled) { quitOnClose_ = enabled; }
+    void setQuitOnClose(bool enabled) { if (!exitDelivered_) quitOnClose_ = enabled; }
     std::shared_ptr<App> getApp() const { return app_; }
 
     // This window's event stream (mousePressed / keyPressed / draw / ...).
@@ -600,10 +600,9 @@ inline Window::~Window() {
 }
 inline void Window::close() {
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || !isOpen() || closeRequested_) return;
-    if (quitOnClose_) { requestExitApp(); return; }
     closeRequested_ = true;
     if (binding_.handle.id) sapp_window_request_close(binding_.handle);
-    else requestExitApp(); // sole-surface platforms have one native lifetime
+    // Surface-only hosts drain this request at the outer host boundary.
 }
 inline void Window::teardown() noexcept {
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || exitDelivered_) return;

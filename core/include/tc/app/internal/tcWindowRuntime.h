@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include "tcWindowGeometryState.h"
 #include "tcAppConstruction.h"
 
@@ -14,8 +15,12 @@ void recordAppAttachment(const std::shared_ptr<App>&, Window&);
 void recordHeadlessAttachment(const std::shared_ptr<App>&, WindowContext&);
 void shutdownRuntime() noexcept;
 void prepareRuntimeExit();
-void requestNormalQuit(const char* reason);
+void requestNormalQuit(const char* reason, std::optional<int> code = std::nullopt);
 bool runtimeEnding() noexcept;
+bool appEnding() noexcept;
+bool dispatchExitRequested() noexcept;
+void dispatchDeviceLost(uint32_t reason) noexcept;
+void dispatchHotReloadUnload(const void* generation) noexcept;
 Window* resolveWindow(bool report = false);
 WindowContext& windowApiContext();
 WindowContext* findWindowApiContext();
@@ -115,6 +120,7 @@ bool hostCallbacksActive() noexcept;
 void beforeHostTurn() noexcept;
 void afterHostTurn() noexcept;
 void setHostReloadPoll(void (*poll)()) noexcept;
+Event<void>& runtimeMaintenanceEvent();
 struct HostServiceOperations {
     void (*queues)();
     void (*maintenance)();

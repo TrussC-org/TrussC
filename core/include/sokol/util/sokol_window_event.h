@@ -76,6 +76,17 @@ struct _sapp_tc_event_result {
     bool client_threw = false;
 };
 
+// A process event has no native Window receiver, including after Window0.
+template<class Descriptor>
+static inline _sapp_tc_event_result _sapp_tc_deliver_runtime_event(const Descriptor& desc, bool initialized,
+                                                                 const sapp_event& event) noexcept {
+    if (!initialized || !desc._tc_event_cb) return {};
+    _sapp_tc_event_result result{true, false};
+    try { desc._tc_event_cb(&event, {0}, nullptr); }
+    catch (...) { result.client_threw = true; }
+    return result;
+}
+
 // Process quit uses the Runtime callback, never an initial native Window.
 template<class Descriptor>
 static inline _sapp_tc_event_result _sapp_tc_deliver_runtime_quit(const Descriptor& desc, bool initialized) noexcept {

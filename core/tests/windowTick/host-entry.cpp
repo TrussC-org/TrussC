@@ -132,7 +132,7 @@ void bootstrap() {
             if (bootstrapReady)
                 check("post-init input sees attached seeded App", window.getApp() == bootstrapApp && bootstrapApp->sizes == 1 && bootstrapApp->setups == 0);
         });
-        auto exit = window.events().exitRequested.listen([&](ExitRequestEventArgs& args) {
+        auto exit = tc::runtime().events().exitRequested.listen([&](ExitRequestEventArgs& args) {
             ++exitRequests; args.cancel = true; args.reason = "startup veto";
         });
         auto dropped = window.events().filesDropped.listen([&](DragDropEventArgs& args) { drops.push_back(args.files); });

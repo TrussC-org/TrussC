@@ -92,9 +92,9 @@ private:
     bool offscreenFrameCompleted_ = false;
     std::vector<bool> attempts_;
     tc::EventListener exitListener_;
-    tc::EventListener hotReloadUnloadListener_;   // on the owning Window's hotReloadUnload
+    tc::EventListener hotReloadUnloadListener_;   // on Runtime hotReloadUnload
     tc::EventListener renderListener_;
-    tc::EventListener overdueListener_;   // on the owning Window's afterFrame
+    tc::EventListener overdueListener_;   // on Runtime maintenance before MCP expiry
     tc::EventListener eventListener_;
 
     // Input arbitration: consume listeners (-20) + pointer-gesture capture.

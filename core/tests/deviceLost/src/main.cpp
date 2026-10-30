@@ -102,7 +102,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         if (_sapp_tc_d3d11_first_device_loss(first, &notified)) pending = true;
         dispatchPending();
         check(notified && pending, "pre-init loss remains latched and pending");
-        auto deferred = events().deviceLost.listen([&](DeviceLostEventArgs& args) {
+        auto deferred = runtime().events().deviceLost.listen([&](DeviceLostEventArgs& args) {
             ++deferredCalls;
             check(initialized && args.reason == hung, "deferred loss delivered after init with reason");
             check(!pending, "pending cleared before app callback");
@@ -124,7 +124,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         if (args.level == LogLevel::Error && args.message.find("887a0006") != string::npos)
             ++errorLogs;
     });
-    auto cancel = events().deviceLost.listen([&](DeviceLostEventArgs& args) {
+    auto cancel = runtime().events().deviceLost.listen([&](DeviceLostEventArgs& args) {
         ++lossCalls;
         check(args.reason == hung && !args.cancel, "reason and cancel defaults");
         args.cancel = true;

@@ -211,6 +211,17 @@ public:
         }
         player.update();
         if (!player.hasError() && !player.isDone()) return;
+        // The decoder publishes its terminal error asynchronously. A transient
+        // done flag can precede that publication; classify after notification,
+        // with a hang guard that still reaches the existing failure assertions.
+        if (expectVideoError && !player.hasError() && events == 0) {
+            const auto now = chrono::steady_clock::now();
+            if (!terminalWaitStarted) {
+                terminalWaitStarted = true;
+                terminalWaitDeadline = now + chrono::seconds(10);
+            }
+            if (now < terminalWaitDeadline) return;
+        }
         if (player.hasError() && hadFrameBeforeError) {
             check("real failure keeps last pixels and texture", !before.empty() &&
                   player.getPixels() &&
@@ -290,6 +301,8 @@ private:
     int events = 0;
     bool hadFrameBeforeError = false;
     bool checkingRecoverySeek = false;
+    bool terminalWaitStarted = false;
+    chrono::steady_clock::time_point terminalWaitDeadline;
     string errorBeforeSeek;
     uint32_t seekUploadFrame = 0;
 };

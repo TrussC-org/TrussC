@@ -173,3 +173,10 @@ App-owned registrations
 -----------------------
 
 Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown runs App cleanup and window exit hooks before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.
+
+Process lifecycle names are the same on App/Window events and
+`runtime():events()`: `exitRequested`, `deviceLost`, `hotReloadUnload`.
+Console moved from CoreEvents to `runtime():events().console`; subscribe once
+and opt into stdin from the C++ host with `tc::console::start()` as described in the v0.8 migration.
+Generated bindings include CloseRequestEventArgs and Window closeRequested;
+code close skips that query. App ending retires owner-scoped subscriptions.

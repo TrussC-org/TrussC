@@ -10,6 +10,20 @@ const internal::WindowContext* earlierContext = nullptr;
 bool isEarlier(const internal::WindowContext& context) { return &context == earlierContext; }
 void check(const char* name, bool value) { ++checks; if (!value) { ++failures; std::printf("host-entry: FAIL: %s\n", name); } }
 using Native = tcCoreTest::InjectedWindow;
+Window* mcpTarget = nullptr;
+// Explicit subscriber ownership replaces the former ambient first-Window
+// assumption. Test observers survive App swaps and retire at fixture scope end.
+struct FixtureWindowScope {
+    std::shared_ptr<App> observer;
+    internal::AppOwnerScope owner;
+    internal::WindowContextScope selected;
+    Window* previous;
+    explicit FixtureWindowScope(Window& w)
+        : observer(internal::makeConstructedAppAt<App>(&w.context())),
+          owner(internal::appOwner(*observer)), selected(&w.context()),
+          previous(std::exchange(mcpTarget, &w)) {}
+    ~FixtureWindowScope() { mcpTarget = previous; }
+};
 sapp_event event(sapp_event_type type, float x=0, float y=0, unsigned mods=0) {
     sapp_event e{}; e.type=type; e.mouse_x=x; e.mouse_y=y; e.modifiers=mods;
     e.key_code=SAPP_KEYCODE_A; e.mouse_button=SAPP_MOUSEBUTTON_LEFT; e.char_code=0x3042;
@@ -25,6 +39,7 @@ void clearInput(Window& w) {
 
 template<class Record, class Cover, class Minimize>
 void nativeVisibilityHistory(Window& w,Native& n,Record& record,Cover cover,Minimize minimize,bool startHidden,bool trust) {
+    FixtureWindowScope fixture(w);
     auto& b=internal::WindowRequestAccess::binding(w);
     b.lastDeliveredHidden=false;b.visibilityReady=true;
     n.metadata.iconified=n.metadata.occluded=false;n.metadata.trust_hidden_signals=trust;
@@ -52,6 +67,7 @@ void nativeVisibilityHistory(Window& w,Native& n,Record& record,Cover cover,Mini
     n.metadata.trust_hidden_signals=true;
 }
 void nativeVisibilitySources(Window& w,Native& n) {
+    FixtureWindowScope fixture(w);
     using namespace nativeFixture;
     for(bool trust:{false,true})for(bool allow:{false,true})for(bool startHidden:{false,true}) {
         mac::Record m(n);mac::NSWindow window;m.window=&window;mac::live=&m;
@@ -93,6 +109,7 @@ struct LockedApp:App {
     void mouseReleased(const MouseEventArgs&)override{++releases;}
 };
 void lockedDelivery(Window& w,Native& original) {
+    FixtureWindowScope fixture(w);
     for(bool pixels:{false,true})for(bool useXi2:{false,true}) {
         nativeFixture::xi2::Record n(w,original.win_id);
         n.metadata.dpi_scale=2;clearInput(w);internal::pixelPerfectMode()=pixels;
@@ -128,6 +145,7 @@ void lockedDelivery(Window& w,Native& original) {
     internal::bindWindow(w,{original.win_id},original.operations,&original);internal::pixelPerfectMode()=false;
 }
 void pointers(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     for (bool pixels : {false,true}) {
         internal::pixelPerfectMode()=pixels; clearInput(w); n.metadata.dpi_scale=1;
         Vec2 pos, delta, scroll, release, pressPosition; int releases=0, presses=0, drags=0;
@@ -202,6 +220,7 @@ void pointers(Window& w, Native& n) {
 }
 // Contrary observations may arrive while either half of a transition runs.
 void reentrantVisibility(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     for (bool hidden : {false,true}) for (bool fromTyped : {false,true}) {
         auto& binding=internal::WindowRequestAccess::binding(w);
         n.metadata.iconified=false;n.metadata.occluded=!hidden;n.metadata.trust_hidden_signals=true;
@@ -227,6 +246,7 @@ void reentrantVisibility(Window& w, Native& n) {
     }
 }
 void visibility(Window& w, Native& n, Window& peer) {
+    FixtureWindowScope fixture(w);
     auto& b=internal::WindowRequestAccess::binding(w);
     n.metadata.iconified=n.metadata.occluded=false;b.lastDeliveredHidden=false;
     std::vector<int> order;int typed=0,peerCount=0;
@@ -292,6 +312,7 @@ void visibility(Window& w, Native& n, Window& peer) {
 
 }
 void parity(Window& w, Native& n, std::vector<int>& counts) {
+    FixtureWindowScope fixture(w);
     std::vector<int> types;
     for(int type=0;type<_SAPP_EVENTTYPE_NUM;++type) types.push_back(type);
     types.push_back(_SAPP_EVENTTYPE_NUM);types.push_back(_SAPP_EVENTTYPE_FORCE_U32);
@@ -301,7 +322,8 @@ void parity(Window& w, Native& n, std::vector<int>& counts) {
         int rawCount=0,typed=0;bool rawFirst=true;
         std::vector<EventListener> listeners;
         listeners.push_back(w.events().rawEvent.listen([&](const sapp_event& e){++rawCount;check("native target source and dimensions",e.window_id==n.win_id&&e.source==SAPP_EVENTSOURCE_REAL&&e.frame_count==123&&e.dpi_scale==n.metadata.dpi_scale&&e.framebuffer_width==n.metadata.fb_width);check("input wake precedes callback",!_sapp_tc_event_wakes(e.type)||n.input_delivered);}));
-        auto notify=[&](auto&){rawFirst&=rawCount==1;++typed;};
+        const bool processEvent = type == SAPP_EVENTTYPE_QUIT_REQUESTED || type == SAPP_EVENTTYPE_TC_DEVICE_LOST;
+        auto notify=[&](auto&){rawFirst &= rawCount == (processEvent ? 0 : 1); ++typed;};
         listeners.push_back(w.events().keyPressed.listen(notify));listeners.push_back(w.events().keyReleased.listen(notify));
         listeners.push_back(w.events().mousePressed.listen(notify));listeners.push_back(w.events().mouseReleased.listen(notify));
         listeners.push_back(w.events().mouseMoved.listen(notify));listeners.push_back(w.events().mouseDragged.listen(notify));
@@ -309,8 +331,8 @@ void parity(Window& w, Native& n, std::vector<int>& counts) {
         listeners.push_back(w.events().touchMoved.listen(notify));listeners.push_back(w.events().touchReleased.listen(notify));
         listeners.push_back(w.events().clipboardPasted.listen(notify));listeners.push_back(w.events().filesDropped.listen(notify));
         listeners.push_back(w.events().occludedChanged.listen(notify));
-        listeners.push_back(w.events().deviceLost.listen([&](DeviceLostEventArgs& e){notify(e);e.cancel=true;}));
-        listeners.push_back(w.events().exitRequested.listen([&](ExitRequestEventArgs& e){notify(e);e.cancel=true;}));
+        listeners.push_back(runtime().events().deviceLost.listen([&](DeviceLostEventArgs& e){notify(e);e.cancel=true;}));
+        listeners.push_back(runtime().events().exitRequested.listen([&](ExitRequestEventArgs& e){notify(e);e.cancel=true;}));
         auto e=event(static_cast<sapp_event_type>(type));n.input_delivered=false;
         if(type==SAPP_EVENTTYPE_MOUSE_UP)w.context().pressedMouseButtons=1;
         if(type==SAPP_EVENTTYPE_SUSPENDED)n.metadata.occluded=true;
@@ -321,7 +343,7 @@ void parity(Window& w, Native& n, std::vector<int>& counts) {
         static_assert(std::size(expected)==_SAPP_EVENTTYPE_NUM);
         constexpr bool wakes[]={false,true,true,true,true,true,true,true,true,true,true,true,true,true,false,true,true,true,true,false,false,false,true,true,false};
         static_assert(std::size(wakes)==_SAPP_EVENTTYPE_NUM);
-        check("exhaustive typed parity table",typed==(type<_SAPP_EVENTTYPE_NUM?expected[type]:0)&&rawCount==1&&rawFirst);
+        check("exhaustive typed parity table",typed==(type<_SAPP_EVENTTYPE_NUM?expected[type]:0)&&rawCount==(processEvent ? 0 : 1)&&rawFirst);
         check("exhaustive wake classifier",_sapp_tc_event_wakes(e.type)==(type<_SAPP_EVENTTYPE_NUM?wakes[type]:false));
         constexpr const char* names[]={"a rawEvent listener","keyPressed()","keyReleased()","a rawEvent listener","mousePressed()","mouseReleased()","mouseScrolled()","mouseMoved()","mouseMoved()","a rawEvent listener","touchPressed()","touchMoved()","touchReleased()","touchReleased()","windowResized()","a rawEvent listener","a rawEvent listener","a rawEvent listener","a rawEvent listener","a rawEvent listener","a rawEvent listener","the exitRequested event","the clipboardPasted event","filesDropped()","the deviceLost event"};
         static_assert(std::size(names)==_SAPP_EVENTTYPE_NUM);
@@ -330,10 +352,12 @@ void parity(Window& w, Native& n, std::vector<int>& counts) {
     }
 }
 json tool(const char* name,json args) {
+    args["window"] = internal::WindowRequestAccess::creationId(*mcpTarget);
     auto reply=json::parse(mcp::internal::Server::instance().processMessage(json{{"jsonrpc","2.0"},{"id",239},{"method","tools/call"},{"params",{{"name",name},{"arguments",args}}}}.dump()));
     check("MCP tool succeeds",reply.contains("result")&&!reply["result"].value("isError",false));return reply;
 }
 void injections(Window& w,Native& n,Window& peer) {
+    FixtureWindowScope fixture(w);
     clearInput(w);internal::pixelPerfectMode()=false;n.metadata.dpi_scale=2;
     internal::currentWindowCtx()=&peer.context();mcp::setToolLevel(mcp::ToolLevel::Control);
     Vec2 pos,delta;int raw=0,press=0,release=0,chars=0;bool injected=true;std::shared_ptr<App> oldApp;
@@ -370,7 +394,7 @@ void injections(Window& w,Native& n,Window& peer) {
     auto pendingInvalid=internal::makeConstructedApp<InvalidApp>(invalidCallbacks);w.pendingApp_=pendingInvalid;w.appRequested_=true;
     const auto beforeInvalidApp=w.getApp();
     n.metadata.dpi_scale=2;
-    auto rejected=json::parse(mcp::internal::Server::instance().processMessage(json{{"jsonrpc","2.0"},{"id",239},{"method","tools/call"},{"params",{{"name","tc_mouse_move"},{"arguments",{{"x",std::numeric_limits<float>::max()},{"y",0}}}}}}.dump()));
+    auto rejected=json::parse(mcp::internal::Server::instance().processMessage(json{{"jsonrpc","2.0"},{"id",239},{"method","tools/call"},{"params",{{"name","tc_mouse_move"},{"arguments",{{"window",n.win_id},{"x",std::numeric_limits<float>::max()},{"y",0}}}}}}.dump()));
     check("MCP transformed overflow rejected before callbacks",rejected.contains("error")&&rejected["error"]["code"]==-32602&&raw==rawBefore&&invalidCallbacks==0&&w.getApp()==beforeInvalidApp&&w.pendingApp_==pendingInvalid);
     w.pendingApp_.reset();w.appRequested_=false;
     Vec2 freshRelease;
@@ -399,6 +423,7 @@ void injections(Window& w,Native& n,Window& peer) {
     internal::currentWindowCtx()=nullptr;
 }
 void clickRecovery(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     clearInput(w);internal::pixelPerfectMode()=false;n.metadata.dpi_scale=1;
     bool shift=false,ctrl=false,alt=false,super=false;int presses=0,releases=0,raw=0;
     auto p=w.events().mousePressed.listen([&](MouseEventArgs& e){
@@ -434,6 +459,7 @@ void clickRecovery(Window& w, Native& n) {
     check("throwing release raw listener cannot leave click held",w.context().pressedMouseButtons==0&&w.context().snapshotMouseButtons==0&&!w.context().mousePressed&&w.context().grabbedNode.expired());
 }
 void clickNewPress(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     for (bool rawRelease : {false,true}) {
         clearInput(w);internal::pixelPerfectMode()=false;n.metadata.dpi_scale=1;
         auto app=internal::makeConstructedApp<LockedApp>();auto node=std::make_shared<LockedNode>();app->addChild(node);internal::WindowRequestAccess::attachCandidate(w, app);
@@ -452,6 +478,7 @@ void clickNewPress(Window& w, Native& n) {
 
 // Disabling a nested touch conversion must leave the parent click's UP live.
 void disabledTouchInClick(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     for(bool pixels:{false,true})for(int site=0;site<3;++site) {
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=1;
         {internal::WindowEntryScope entry(w);setTouchAsMouse(true);}
@@ -473,6 +500,7 @@ void disabledTouchInClick(Window& w, Native& n) {
 // A raw failure preserves the old public grab/ledger while retiring a scoped
 // click owner. Repeated aborted calls may reuse the same recovery stack address.
 void abortedClickOwnership(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     for(bool pixels:{false,true}) {
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=1;
         struct AbortNode:LockedNode {bool consume=true;bool onMousePress(const MouseEventArgs&)override{return consume;}};
@@ -496,6 +524,7 @@ void abortedClickOwnership(Window& w, Native& n) {
 // Cross-button cells compare complete observable traces against 8196a698.
 // Sites: raw, BeforeApp, App, Node, AfterApp; touch also covers typed/App touch.
 void crossButtonMatrix(Window& w, Native& n, bool printRecords=false) {
+    FixtureWindowScope fixture(w);
     int cells=0;
     for(bool pixels:{false,true}) for(int outer=0;outer<7;++outer)
     for(int button:{int(SAPP_MOUSEBUTTON_RIGHT),int(SAPP_MOUSEBUTTON_MIDDLE)})
@@ -592,6 +621,7 @@ void crossButtonMatrix(Window& w, Native& n, bool printRecords=false) {
 // A consumed UP can leave a grab without a held ledger bit. That grab still
 // makes the next motion a continuation of its button's older gesture.
 void unheldGrabMotion(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     for(bool pixels:{false,true}) {
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=2;
         auto app=internal::makeConstructedApp<LockedApp>();auto a=std::make_shared<LockedNode>(),b=std::make_shared<LockedNode>();
@@ -613,6 +643,7 @@ void unheldGrabMotion(Window& w, Native& n) {
 // Full Cartesian matrix: four open/atomic gestures, four newer sources,
 // five press sites and both targets; atomic clicks add five release sites.
 void newestPressMatrix(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     enum Source { Click, Drag, NativeDown, Touch };
     int cells=0;
     for(bool pixels:{false,true})for(int older=0;older<4;++older)for(int newer=0;newer<4;++newer)
@@ -704,6 +735,7 @@ void newestPressMatrix(Window& w, Native& n) {
 // Generated axes: both roots (caller), both coordinate modes, motion callback
 // sites, touch MOVE/END reentry, callback-visible settings and base grab rules.
 void continuationMatrix(Window& w, Native& n, int regressionFilter=0) {
+    FixtureWindowScope fixture(w);
     int cells=0;
     struct TestNode:LockedNode {
         std::function<void()> drag;bool consume=true;
@@ -765,6 +797,7 @@ void continuationMatrix(Window& w, Native& n, int regressionFilter=0) {
     std::printf("continuation matrix: root=%d %d cells\n",isEarlier(w.context()),cells);
 }
 void supersessionObservers(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     for(bool pixels:{false,true})for(int site=0;site<5;++site) {
         clearInput(w);internal::pixelPerfectMode()=pixels;n.metadata.dpi_scale=2;
         struct ObserverNode:LockedNode {
@@ -797,6 +830,7 @@ void supersessionObservers(Window& w, Native& n) {
     std::printf("supersession observer matrix: root=%d 10 cells\n",isEarlier(w.context()));
 }
 void touchExtremes(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     clearInput(w);internal::pixelPerfectMode()=true;n.metadata.dpi_scale=.5f;
     int raw=0,touch=0,mouse=0;Vec2 pos;
     auto r=w.events().rawEvent.listen([&](const sapp_event&){++raw;});
@@ -847,6 +881,7 @@ void touchExtremes(Window& w, Native& n) {
 }
 
 void finiteExtremes(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     clearInput(w);internal::pixelPerfectMode()=true;n.metadata.dpi_scale=1;
     auto e=event(SAPP_EVENTTYPE_MOUSE_MOVE,std::numeric_limits<float>::max(),-std::numeric_limits<float>::max());n.send(e);
     check("finite extreme pointer positions retain float event range",w.context().mouseX==e.mouse_x&&w.context().mouseY==e.mouse_y);
@@ -874,6 +909,7 @@ void finiteExtremes(Window& w, Native& n) {
     internal::pixelPerfectMode()=false;
 }
 void nestedPointerBasis(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     clearInput(w);internal::pixelPerfectMode()=true;n.metadata.dpi_scale=1;
     std::vector<float> deltas;
     auto move=w.events().mouseMoved.listen([&](MouseMoveEventArgs& e){deltas.push_back(e.delta.x);});
@@ -897,6 +933,7 @@ void nestedPointerBasis(Window& w, Native& n) {
     internal::pixelPerfectMode()=false;
 }
 void sourceParity(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     std::vector<std::string> reference;
     for (auto source : {SAPP_EVENTSOURCE_REAL,SAPP_EVENTSOURCE_INJECTED,SAPP_EVENTSOURCE_REPLAYED}) {
         clearInput(w); n.metadata.dpi_scale=1;
@@ -926,6 +963,7 @@ void touchIsolation(Window& a, Native& an, Window& b, Native& bn) {
     e.type=SAPP_EVENTTYPE_TOUCHES_ENDED;bn.send(e);
 }
 void closes(Window& w, Native& n) {
+    FixtureWindowScope fixture(w);
     for(bool synced:{false,true}) {
         for(bool fromRender:{false,true}) {
             n.closed=false;n.metadata.iconified=n.metadata.occluded=false;

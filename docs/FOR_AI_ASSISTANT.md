@@ -48,7 +48,11 @@ Close, replacement, removal, headless shutdown and guest destruction use the sam
 
 Argument-free Window APIs in App callbacks, owned listeners and async completions resolve the App token. Unowned code must have exactly one open Window to omit its target; zero or multiple Windows produce an error. MCP uses positive Window IDs and returns the available IDs for an ambiguous or invalid target. Every development Window title carries [MCP].
 
-`quitOnClose` defaults to false for every Window. `setQuitOnClose(true)` requests normal application quit, allowing veto. Closing the last Window ends a windowed Runtime. App::exit also runs on replacement, destroyApp and hot reload, so it is unsuitable for expressing a window-close policy. A manual alternative is an EventListener member assigned with `getWindow()->events().exit.listen([] { tc::exitApp(); });`. Calling exitApp during Runtime shutdown does nothing.
+`quitOnClose` defaults to false for every Window. `setQuitOnClose(true)` requests normal application quit, allowing veto. Closing the last Window requests cancellable process quit after actual closure. A veto leaves it closed and Runtime services advancing with zero Windows. App::exit also runs on replacement, destroyApp and hot reload, so it is unsuitable for expressing a window-close policy. A manual alternative is an EventListener member assigned with `getWindow()->events().exit.listen([] { tc::exitApp(); });`. Calling exitApp during Runtime shutdown does nothing.
+
+App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. Runtime owns exitRequested, deviceLost, hotReloadUnload and console. Lifecycle events notify Runtime first, then one reverse-attachment App snapshot (reload targets replacing Apps only). Quit gives every listener fresh cancel=false, ORs all vetoes, keeps the first nonempty veto reason and treats a throw as a veto while continuing. Device loss keeps its mutable cancellation behavior. Console is Runtime-only, once per subscribed slot, with subscriber ownership restored. See MIGRATION_0_8.md for console::start and the removal of CoreEvents::console.
+
+OS close asks only the addressed Window's closeRequested with the same per-listener OR/throw-veto policy. Acceptance closes that Window before quitOnClose/last-window process quit. Window::close and process shutdown bypass closeRequested. App swap/destroy/reload call App::exit without a Window exit. exitApp inside App::exit or Runtime shutdown is inert; an owned Window exit listener can request normal quit while the process is still running. ImGui deadlines run in Runtime maintenance before MCP expiry, including no-draw turns.
 
 Runtime queue and maintenance work selects process context and progresses at safe outer host turns, including turns with no Window draws. Swapchain drawing requires a Window callback; explicit offscreen Fbo drawing remains available. Nested entries restore the caller's drawing and native state. Native creation establishes identity, resources, dimensions and binding readiness before App construction. Each resized frame reconciles its Window framebuffer, swapchain and automatic viewport before beginning a pass.
 
@@ -2014,7 +2018,6 @@ void bindCursorImage(Cursor cursor, int width, int height, const unsigned char *
 bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Shows a confirmation dialog.
 void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Shows a confirmation dialog with a result callback.
 CoreEvents & events()  // Returns the current window context's CoreEvents hub.
-void exitApp(int code = 0)  // Orders the application to exit with normal cleanup.
 Cursor getCursor()  // Returns the selected mouse cursor shape.
 Vec2 getGlobalMousePos()  // Returns the mouse position in the current window.
 float getGlobalMouseX()  // Returns the current mouse X coordinate in the active window.
@@ -2040,7 +2043,6 @@ bool isShiftPressed()  // Returns whether either Shift key is recorded as presse
 bool isSuperPressed()  // Returns whether either Super, Command, or Windows key is recorded as pressed.
 FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [macos,windows,linux,android]  // Shows a file or folder selection dialog.
 void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Shows a file or folder picker with a result callback.
-void requestExitApp()  // Requests a cancellable application exit.
 FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [macos,windows,linux,android]  // Shows a file save dialog.
 void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback)  // Shows a save destination picker with a result callback.
 void setCursor(Cursor cursor)  // Sets the mouse cursor shape.
@@ -2563,6 +2565,7 @@ const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // R
 EnumLabelSpan enumReflectedSpan()  // Returns an enum label table built from reflection.
 const std::array<E, internal::enumValidCount<E> enumValues()  // Returns the automatically discovered values of an enum's enumerators.
 EVENT_DRIVEN  // Selects rendering on demand.
+void exitApp(int code = 0)  // Requests cancellable process quit at the host boundary.
 float exp2(float x) [std]  // Returns two raised to the given power.
 HALF_TAU  // Represents half a turn in radians.
 KEY_BACKSPACE  // Identifies the Backspace key.
@@ -2606,7 +2609,9 @@ Vec2 operator*(float s, const Vec2 & v) [+4]  // Multiplies values according to 
 PI ⚠️deprecated  // Represents the ratio of a circle's circumference to its diameter.
 QUARTER_TAU  // Defines a quarter turn in radians.
 float remainder(float x, float y) [std]  // Returns the IEEE floating-point remainder.
+void requestExitApp()  // Requests cancellable process quit at the host boundary.
 Right  // Provides shorthand for `Direction::Right`.
+Runtime & runtime()  // Accesses the process event hub without selecting a Window.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
@@ -2750,6 +2755,11 @@ float ChipSoundNote::getTotalDuration() const  // Returns the note duration.
 ```
 
 ### ClipboardPastedEventArgs — Carries text received by a clipboard paste event.
+
+```cpp
+```
+
+### CloseRequestEventArgs — Queries whether one OS Window close may proceed.
 
 ```cpp
 ```
@@ -2932,7 +2942,7 @@ void EventListener::disconnect()  // Explicitly disconnects the listener.
 bool EventListener::isConnected() const  // Returns the token's recorded connection state.
 ```
 
-### ExitRequestEventArgs — Carries a cancellable application exit request.
+### ExitRequestEventArgs — Per-listener process quit decision and optional UTF-8 veto reason.
 
 ```cpp
 ```
@@ -3889,6 +3899,17 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Processes one refle
 ```cpp
 ```
 
+### Runtime — Host-owned process services and process events.
+
+```cpp
+RuntimeEvents & Runtime::events()  // Accesses the process event hub without selecting a Window.
+```
+
+### RuntimeEvents — Accesses the process event hub without selecting a Window.
+
+```cpp
+```
+
 ### SaveResult — Represents the result of a save or recording operation.
 
 ```cpp
@@ -4686,7 +4707,7 @@ SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double
 ### Window — A Runtime-owned window and its App attachment.
 
 ```cpp
-void Window::close()  // Requests explicit closure of this window.
+void Window::close()  // Closes this Window without asking closeRequested.
 void Window::destroyApp()  // Requests removal of the current App while keeping this window open.
 CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
@@ -4704,7 +4725,7 @@ void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
 void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
 void Window::setPosition(int x, int y) [macos,windows,linux]  // Move this window on the desktop, in screen coordinates with the primary display's top-left at (0, 0); a display left of or above the primary one has negative coordinates. To fill a second display, move the window there first and then call setFullscreen — fullscreen covers the display the window is currently on
-void Window::setQuitOnClose(bool enabled)  // Changes whether this window’s close requests application quit.
+void Window::setQuitOnClose(bool enabled)  // Requests cancellable process quit after this Window closes.
 void Window::setSize(int width, int height)  // Resizes this window's content area.
 void Window::setTitle(const std::string & title)  // Sets this window's title.
 void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
@@ -4719,7 +4740,7 @@ WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.
-WindowSettings & WindowSettings::setQuitOnClose(bool enabled)  // Sets this window’s creation-time quit-on-close option.
+WindowSettings & WindowSettings::setQuitOnClose(bool enabled)  // Requests cancellable process quit after this Window closes.
 WindowSettings & WindowSettings::setSampleCount(int count)  // Sets the window's MSAA sample count.
 WindowSettings & WindowSettings::setSize(int w, int h)  // Sets the initial window dimensions.
 WindowSettings & WindowSettings::setSwapInterval(int interval)  // Sets the requested VSync presentation interval.

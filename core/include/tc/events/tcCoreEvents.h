@@ -23,13 +23,7 @@ public:
     Event<void> onRender;          // After sokol_gl flush, render pass still active
     Event<void> afterFrame;        // After present() (swapchain committed, outside any pass)
     Event<void> exit{EventPriority::BeforeApp};             // On app exit
-    // Hot reload only: the host is about to unload the current guest
-    // generation (its App is still alive). Fired on each reload, and when the
-    // host unloads the last generation at exit (after `exit`). Code in the
-    // guest with state that outlives the App (function-local statics,
-    // singletons) drops its listeners on the host's events here: a guest
-    // image stays loaded, so nothing else removes them. Never fired in a
-    // normal (non hot reload) build.
+    // Runtime lifecycle fan-out to the attached App, before its replacement.
     Event<void> hotReloadUnload;
 
     // Exit request (can be cancelled)
@@ -49,6 +43,9 @@ public:
     Event<MouseDragEventArgs> mouseDragged{EventPriority::BeforeApp};
     Event<ScrollEventArgs> mouseScrolled{EventPriority::BeforeApp};
 
+    // OS close only; code close and process shutdown bypass this query.
+    Event<CloseRequestEventArgs> closeRequested;
+
     // Window
     Event<ResizeEventArgs> windowResized{EventPriority::BeforeApp};
     Event<OccludedEventArgs> occludedChanged; // Explicit listeners for effective-hidden changes
@@ -59,9 +56,6 @@ public:
     // Clipboard paste (Cmd+V / Ctrl+V / browser paste); args.text holds the content
     Event<ClipboardPastedEventArgs> clipboardPasted;
 
-    // Console input (commands from stdin)
-    Event<ConsoleEventArgs> console;
-
     // Touch (multi-touch, used on Android/iOS)
     Event<TouchEventArgs> touchPressed{EventPriority::BeforeApp};
     Event<TouchEventArgs> touchMoved{EventPriority::BeforeApp};
@@ -70,6 +64,25 @@ public:
     // Raw sokol event (for addons that need the full sapp_event)
     Event<const sapp_event> rawEvent;
 };
+
+// Process events are independent of drawing and Window count. Lifecycle events
+// notify Runtime first, then the one reverse-attachment App snapshot.
+class RuntimeEvents {
+public:
+    Event<ExitRequestEventArgs> exitRequested;
+    Event<DeviceLostEventArgs> deviceLost;
+    Event<void> hotReloadUnload;
+    Event<ConsoleEventArgs> console;
+};
+
+class Runtime {
+public:
+    RuntimeEvents& events();
+private:
+    Runtime() = default;
+    friend Runtime& runtime();
+};
+Runtime& runtime();
 
 // ---------------------------------------------------------------------------
 // Global accessor (non-inline: Host/Guest share the same instance on Windows)

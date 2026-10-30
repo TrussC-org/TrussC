@@ -212,10 +212,7 @@ struct GuestLibrary {
         // Notification failures cannot skip cohort ending or code retirement.
         internal::TeardownSteps steps;
         if (handle || !app.expired()) {
-            if (auto window = targetWindow.lock()) steps.run("guest unload notification", [&] {
-                internal::WindowContextScope selected(&window->context());
-                window->events().hotReloadUnload.notify();
-            });
+            internal::dispatchHotReloadUnload(mcpOwner);
         }
         destroy();
         // Retirement cancels callbacks now. Retained snapshots and App handles

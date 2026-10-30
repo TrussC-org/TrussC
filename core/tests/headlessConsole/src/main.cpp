@@ -46,7 +46,7 @@ struct ConsoleApp : App {
         appThread = std::this_thread::get_id();
         check(!console::isEnabled() && !console::internal::spawned(),
               "runner does not start a reader before setup");
-        listener = events().console.listen([](ConsoleEventArgs& args) {
+        listener = runtime().events().console.listen([](ConsoleEventArgs& args) {
             check(std::this_thread::get_id() == appThread && isMainThread(),
                   "console callback runs on the main thread");
             ++received;
@@ -132,7 +132,7 @@ struct ConsoleApp : App {
 struct ProcessExitApp : App {
     EventListener listener;
     void setup() override {
-        listener = events().console.listen([](ConsoleEventArgs& args) {
+        listener = runtime().events().console.listen([](ConsoleEventArgs& args) {
             check(args.raw == "before setup", "exit case receives the parent's line");
             ++received;
         });
@@ -178,7 +178,7 @@ void stoppedLines() {
           queued[0].args == std::vector<std::string>{"再開", "café"},
           "only the restarted line arrives; UTF-8 and CRLF preserved/normalized");
     int callbacks = 0;
-    EventListener listener = internal::nonWindowContext().coreEvents->console.listen([&](ConsoleEventArgs&) { ++callbacks; });
+    EventListener listener = runtime().events().console.listen([&](ConsoleEventArgs&) { ++callbacks; });
     const bool previousHeadless = headless::active.exchange(true);
     struct RestoreHeadless { bool previous; ~RestoreHeadless() { headless::active = previous; } } restore{previousHeadless};
     std::istringstream ignored("\n   \t\r\n# comment\n  # comment\r\n");
@@ -321,7 +321,9 @@ void runChild(const char* executable, const char* scenario) {
 }
 } // namespace
 
+#include "windowConsoleChecks.h"
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--windowed") return c2WindowConsole::run();
     if (argc == 3 && std::string(argv[1]) == "--child") {
         mode = argv[2];
         if (mode == "std-exit" || mode == "stop-exit") {

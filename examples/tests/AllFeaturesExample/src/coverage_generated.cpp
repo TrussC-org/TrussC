@@ -477,12 +477,15 @@ static void cover_other() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)createWindow(af::val<const WindowSettings>());
 #endif
+    (void)exitApp(af::val<int>());
     (void)onScreenshotSave();
     (void)operator*(af::val<float>(), af::val<const Vec2>());
     (void)operator*(af::val<float>(), af::val<const Vec3>());
     (void)operator*(af::val<int>(), af::val<const IVec2>());
     (void)operator*(af::val<int>(), af::val<const IVec3>());
     (void)operator*(af::val<float>(), af::val<const Vec4>());
+    (void)requestExitApp();
+    (void)runtime();
     (void)saveScreenshotAsync(af::val<const fs::path>());
 }
 
@@ -696,7 +699,6 @@ static void cover_window_input() {
 #endif
     (void)confirmDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<std::function<void (bool)>>());
     (void)events();
-    (void)exitApp(af::val<int>());
     (void)getCursor();
     (void)getGlobalMousePos();
     (void)getGlobalMouseX();
@@ -724,7 +726,6 @@ static void cover_window_input() {
     (void)loadDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>());
 #endif
     (void)loadDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>(), af::val<std::function<void (const FileDialogResult &)>>());
-    (void)requestExitApp();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
     (void)saveDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>());
 #endif
@@ -1119,6 +1120,13 @@ struct Cover_ClipboardPastedEventArgs : af::Scope<ClipboardPastedEventArgs> {
     }
 };
 
+struct Cover_CloseRequestEventArgs : af::Scope<CloseRequestEventArgs> {
+    static void run() {
+        (void)af::val<CloseRequestEventArgs>().cancel;
+        (void)af::val<CloseRequestEventArgs>().reason;
+    }
+};
+
 struct Cover_Color : af::Scope<Color> {
     static void run() {
         (void)Color();
@@ -1243,7 +1251,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
     static void run() {
         (void)af::val<CoreEvents>().afterFrame;
         (void)af::val<CoreEvents>().clipboardPasted;
-        (void)af::val<CoreEvents>().console;
+        (void)af::val<CoreEvents>().closeRequested;
         (void)af::val<CoreEvents>().deviceLost;
         (void)af::val<CoreEvents>().draw;
         (void)af::val<CoreEvents>().exit;
@@ -2868,6 +2876,21 @@ struct Cover_ResizeEventArgs : af::Scope<ResizeEventArgs> {
     static void run() {
         (void)af::val<ResizeEventArgs>().height;
         (void)af::val<ResizeEventArgs>().width;
+    }
+};
+
+struct Cover_Runtime : af::Scope<Runtime> {
+    static void run() {
+        (void)af::val<Runtime>().events();
+    }
+};
+
+struct Cover_RuntimeEvents : af::Scope<RuntimeEvents> {
+    static void run() {
+        (void)af::val<RuntimeEvents>().console;
+        (void)af::val<RuntimeEvents>().deviceLost;
+        (void)af::val<RuntimeEvents>().exitRequested;
+        (void)af::val<RuntimeEvents>().hotReloadUnload;
     }
 };
 
@@ -4857,6 +4880,7 @@ void af::coverGenerated() {
     af_generated::Cover_ChipSoundBundle__Entry::run();
     af_generated::Cover_ChipSoundNote::run();
     af_generated::Cover_ClipboardPastedEventArgs::run();
+    af_generated::Cover_CloseRequestEventArgs::run();
     af_generated::Cover_Color::run();
     af_generated::Cover_ColorHSB::run();
     af_generated::Cover_ColorLinear::run();
@@ -4926,6 +4950,8 @@ void af::coverGenerated() {
     af_generated::Cover_RectNodeButton::run();
     af_generated::Cover_Reflector::run();
     af_generated::Cover_ResizeEventArgs::run();
+    af_generated::Cover_Runtime::run();
+    af_generated::Cover_RuntimeEvents::run();
     af_generated::Cover_SaveResult::run();
     af_generated::Cover_ScreenRecorder::run();
     af_generated::Cover_ScreenshotSaveEventArgs::run();

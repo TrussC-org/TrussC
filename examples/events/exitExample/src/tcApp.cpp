@@ -2,7 +2,7 @@
 // exitExample - Demonstrates exit confirmation dialog
 // =============================================================================
 // Press Q or Escape to request exit
-// Click X button to request exit
+// Click X to query closeRequested; process quit queries exitRequested
 // A confirmation dialog will appear before closing
 // =============================================================================
 
@@ -11,17 +11,27 @@
 void tcApp::setup() {
     setWindowTitle("Exit Example");
 
-    // Listen to exitRequested event (new API: returns EventListener)
+    getWindow()->setQuitOnClose(true);
+    // App code uses events(); non-App code (addons, app-wide handling)
+    // uses runtime().events(). See main.cpp for that subscription.
     exitListener_ = events().exitRequested.listen(this, &tcApp::onExitRequested);
+    closeListener_ = events().closeRequested.listen([this](CloseRequestEventArgs& e) {
+        e.cancel = !quitConfirmed_;
+        if (e.cancel) confirmExit();
+    });
 }
 
 void tcApp::onExitRequested(ExitRequestEventArgs& args) {
-    // Cancel the exit first (we'll handle it via async dialog)
-    args.cancel = true;
+    args.cancel = !quitConfirmed_;
+    if (args.cancel) confirmExit();
+}
 
-    // Show async confirmation dialog (title, message, callback)
-    confirmDialogAsync("Confirm Exit", "Are you sure you want to quit?", [](bool confirmed) {
-        if (confirmed) exitApp();
+void tcApp::confirmExit() {
+    if (confirmationPending_) return;
+    confirmationPending_ = true;
+    confirmDialogAsync("Confirm Exit", "Are you sure you want to quit?", [this](bool confirmed) {
+        confirmationPending_ = false;
+        if (confirmed) { quitConfirmed_ = true; exitApp(); }
     });
 }
 

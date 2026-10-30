@@ -49,8 +49,8 @@ void tcApp::draw() {
 ImGui renders on top of all TrussC content automatically via the `onRender` event.
 Teardown is automatic too — the addon listens to the framework's exit event and
 shuts itself down when the app closes, so there is nothing to call in `cleanup()`.
-With hot reload, the same teardown runs on `events().hotReloadUnload` before
-each reload, and the new build sets ImGui up again in its `setup()`.
+With hot reload, the same teardown runs on its App’s `events().hotReloadUnload` before
+that generation reloads, and the new build sets ImGui up again in its `setup()`.
 
 ## Offscreen UI
 
@@ -335,7 +335,7 @@ tcxImGui connects to TrussC via these core events:
 
 - **`events().rawEvent`** (priority: BeforeApp) — Routes input events to ImGui
 - **`events().onRender`** (priority: 1000) — Renders ImGui after all sokol_gl content is flushed
-- **each owning Window's `events().afterFrame`** (priority: BeforeApp) — Answers a
+- **Runtime maintenance** (before MCP expiry, independent of drawing) — Answers a
   `tcx_imgui_input` whose check frame did not come in time (see
   [Setting values](#setting-values)), before the MCP server's own timeout
 
@@ -359,3 +359,11 @@ App-owned registrations
 -----------------------
 
 Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown runs App cleanup and window exit hooks before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.
+
+App-tied code, including addon state owned by an App, uses `events()`;
+process-wide observers use `runtime().events()`. The manager keeps input/render hooks on its addressed Window, settles widget
+deadlines from Runtime maintenance before MCP reply expiry even without a
+frame, and subscribes to its App’s `events().hotReloadUnload` for generation
+teardown. Only Apps in the retiring generation receive that notification;
+other Apps keep their ImGui state. The App owner token retires registrations
+on swap or close.

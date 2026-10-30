@@ -2003,18 +2003,12 @@ inline void redraw(int count = 1) {
 // Request application exit (can be cancelled via exitRequested event)
 // If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
 inline void requestExitApp() {
-    if (internal::runtimeEnding()) return;
     internal::requestNormalQuit("request-exit-app");
 }
 
-// Immediately exit the application (cannot be cancelled)
-// Use this for forced exit, e.g., after user confirms exit in a dialog
+// Request process exit with an exit code. Every Runtime/App listener may veto.
 inline void exitApp(int code = 0) {
-    if (internal::runtimeEnding()) return;
-    internal::appExitCode() = code;
-    internal::setExitReason("exit-app");
-    if (headless::isActive()) headless::running = false;
-    else sapp_quit();
+    internal::requestNormalQuit("exit-app", code);
 }
 
 // ---------------------------------------------------------------------------

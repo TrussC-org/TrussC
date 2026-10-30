@@ -749,6 +749,19 @@ private:
 // Internal registration only: the returned handle is the framework's teardown path.
 namespace trussc::internal {
 struct FrameworkEventAccess {
+    template<class T> static auto snapshot(Event<T>& event) {
+        return sharedLoad(event.entries_);
+    }
+    // Framework-only synchronous delivery. Keep generic mutable notify intact.
+    // The caller owns exception containment and the per-listener payload policy.
+    template<class Snapshot, class Invoke>
+    static void forEachOwned(const Snapshot& snapshot, Invoke invoke) {
+        if (!snapshot) return;
+        for (const auto& entry : *snapshot) {
+            if (!entry.callback || (entry.alive && !entry.alive->load(std::memory_order_acquire))) continue;
+            invoke(*entry.callback, entry.owner.lock());
+        }
+    }
     template<class T> static void disableSubscriptions(Event<T>& event) noexcept {
         event.alive_->store(false, std::memory_order_release);
     }

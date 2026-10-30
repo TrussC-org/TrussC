@@ -202,21 +202,21 @@ details.en = '''
 - Runs once in the shared normal ending for window close, setApp<T>() replacement, destroyApp(), normal Runtime shutdown, headless shutdown and guest destruction, after this App was attached, including before its first tick. Unpublished or cancelled candidates receive no setup/exit/cleanup.
 - Before exit, App::getWindow() and the root association are detached and Window::getApp() is empty. Audio remains live through exit; afterwards the framework disconnects this App's hooks and waits for in-flight callbacks, cleans up the tree (only the App virtual in headless), and retires its tools, listeners, async completions and weak references. Other Apps' work remains live. Native/GPU disposal happens afterwards.
 - Normal Runtime shutdown retains one reverse-attachment snapshot. An exception in exit or cleanup does not skip required steps or siblings. Run this callback on the main thread; do not wait for a worker that needs that thread.
-- App::exit also runs during replacement, destroyApp and hot reload, so writing exitApp() here is unsuitable for a window-close policy. Use setQuitOnClose(true) for normal quit with veto. A manual alternative is an EventListener member assigned with `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });` in setup. During Runtime shutdown, exitApp() does nothing.
+- App::exit also runs during replacement, destroyApp and hot reload, so writing exitApp() here is unsuitable for a window-close policy. Use setQuitOnClose(true) for normal quit with veto. A manual alternative is an EventListener member assigned with `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });` in setup. Inside App::exit/cleanup and during Runtime shutdown, exitApp() does nothing; a Window exit listener may still request quit while Runtime is running.
 - OS forced termination cannot guarantee normal callbacks. For audio threading and teardown waits, see App::audioOut. There are no parameters or units.
 '''
 details.ja = '''
 - 接続済みの App は最初のtick前も、窓 close、setApp<T>() の差替え、destroyApp()、通常 Runtime 終了、headless 終了、guest 破棄の共通終了で一度呼ばれます。未公開・取消し候補に setup/exit/cleanup は呼びません。
 - exit 前に App::getWindow() と root の関連を外し、Window::getApp() は空になります。audio は exit 中も動き、その後この App の hook を切り離して実行中 callback を待ち、ツリーを cleanup（headless は App virtual だけ）し、tool、購読、非同期完了、弱参照を退役します。他 App の処理は生きたままで、native/GPU はその後に破棄します。
 - 通常 Runtime 終了は、一回の逆接続順 snapshot を保持します。exit/cleanup の例外でも必要な段階や兄弟の終了を続けます。メインスレッドで呼ばれるため、このスレッドを必要とする worker を待たないでください。
-- App::exit は差替え、destroyApp、hot reload でも呼ばれるので、ここに exitApp() を書くのは窓 close の用途には向きません。veto 可能な通常終了には setQuitOnClose(true) を使います。手動の代案は setup で EventListener メンバへ `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });` を保存する書き方です。Runtime 終了中の exitApp() は何もしません。
+- App::exit は差替え、destroyApp、hot reload でも呼ばれるので、ここに exitApp() を書くのは窓 close の用途には向きません。veto 可能な通常終了には setQuitOnClose(true) を使います。手動の代案は setup で EventListener メンバへ `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });` を保存する書き方です。App::exit/cleanup 内と Runtime 終了中の exitApp() は何もしません。Runtime の通常運転中は Window exit listener から終了を要求できます。
 - OS の強制終了では通常 callback を保証しません。audio のスレッドと待機は App::audioOut を参照してください。引数や単位はありません。
 '''
 details.ko = '''
 - 시작된 App은 창 close, setApp<T>() 교체, destroyApp(), 일반 Runtime 종료, headless 종료, guest 파괴의 공통 종료에서 한 번 호출됩니다. 미공개·취소 후보의 setup/exit/cleanup은 호출하지 않습니다.
 - exit 전에 App::getWindow()와 root 연결을 분리하고 Window::getApp()은 비워집니다. audio는 exit 중 유지하며 이후 이 App의 hook을 끊고 실행 중 콜백을 기다리고 트리를 cleanup(headless는 App virtual만)한 다음 도구, 구독, 비동기 완료, 약한 참조를 회수합니다. 다른 App의 작업은 유지하며 native/GPU는 이후 폐기합니다.
 - 일반 Runtime 종료는 한 번의 역연결 순서 snapshot을 유지합니다. exit/cleanup 예외에도 필수 단계와 다른 App 종료를 계속합니다. 메인 스레드에서 호출하므로 이 스레드를 필요로 하는 worker를 기다리지 마세요.
-- App::exit은 교체, destroyApp, hot reload에서도 호출하므로 여기에 exitApp()을 쓰는 것은 창 close 정책에 적합하지 않습니다. 거부 가능한 일반 종료에는 setQuitOnClose(true)를 사용합니다. 수동 대안은 setup에서 EventListener 멤버에 `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });`를 저장하는 것입니다. Runtime 종료 중 exitApp()은 아무 작업도 하지 않습니다.
+- App::exit은 교체, destroyApp, hot reload에서도 호출하므로 여기에 exitApp()을 쓰는 것은 창 close 정책에 적합하지 않습니다. 거부 가능한 일반 종료에는 setQuitOnClose(true)를 사용합니다. 수동 대안은 setup에서 EventListener 멤버에 `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });`를 저장하는 것입니다. App::exit/cleanup 안과 Runtime 종료 중 exitApp()은 아무 작업도 하지 않습니다. Runtime 실행 중에는 Window exit listener가 종료를 요청할 수 있습니다.
 - OS 강제 종료는 일반 콜백을 보장하지 않습니다. audio 스레드와 대기는 App::audioOut을 참고하세요. 인수와 단위가 없습니다。
 '''
 related = ["Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "requestExitApp", "exitApp", "App::requestExit", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App", "App::audioIn", "App::isExitRequested", "App::setSize", "AudioRecorder::stop", "ExitRequestEventArgs::cancel", "TcpClient::disconnect", "Texture::clear", "shutdownAudio", "stopRecording", "console::start"]
@@ -5117,17 +5117,17 @@ description.en = "Carries a command line received from standard input."
 description.ja = "標準入力から受け取ったコマンド行を保持する。"
 description.ko = "표준 입력에서 받은 명령줄을 담는다."
 details.en = '''
-- Call `console::start()` to enable delivery to `events().console`. Windowed and headless runners deliver queued commands on the main thread; console input is unavailable on Web.
+- Call `console::start()` to enable delivery to `runtime().events().console`. Windowed and headless runners deliver queued commands on the main thread; console input is unavailable on Web.
 - `raw` contains the input line without its line ending. `args` contains whitespace-separated tokens after removing `#` and everything following it; quotation marks do not group tokens.
 - Empty lines and lines containing only whitespace or comments produce no event.
 '''
 details.ja = '''
-- `console::start()` を呼ぶと、`events().console` への通知が有効になります。ウィンドウありとヘッドレスのどちらの実行でも、キューに入ったコマンドはメインスレッドで渡されます。Web ではコンソール入力を利用できません。
+- `console::start()` を呼ぶと、`runtime().events().console` への通知が有効になります。ウィンドウありとヘッドレスのどちらの実行でも、キューに入ったコマンドはメインスレッドで渡されます。Web ではコンソール入力を利用できません。
 - `raw` は改行を除いた入力行です。`args` は、`#` 以降を取り除いてから空白で区切ったトークンです。引用符で囲んでも 1 つのトークンにはまとまりません。
 - 空行、空白だけの行、コメントだけの行ではイベントは発生しません。
 '''
 details.ko = '''
-- `console::start()`를 호출하면 `events().console`로 전달하는 기능이 활성화됩니다. 윈도우 실행과 헤드리스 실행 모두 큐에 들어온 명령을 메인 스레드에서 전달합니다. Web에서는 콘솔 입력을 사용할 수 없습니다.
+- `console::start()`를 호출하면 `runtime().events().console`로 전달하는 기능이 활성화됩니다. 윈도우 실행과 헤드리스 실행 모두 큐에 들어온 명령을 메인 스레드에서 전달합니다. Web에서는 콘솔 입력을 사용할 수 없습니다.
 - `raw`는 줄 끝 문자를 제외한 입력 줄입니다. `args`는 `#`와 그 뒤의 내용을 제거한 다음 공백으로 나눈 토큰입니다. 따옴표로 감싸도 하나의 토큰으로 묶이지 않습니다.
 - 빈 줄, 공백만 있는 줄, 주석만 있는 줄은 이벤트를 발생시키지 않습니다.
 '''
@@ -5178,6 +5178,8 @@ description.en = "Collection of framework lifecycle, rendering, and input events
 description.ja = "フレームワークのライフサイクル、描画、入力のイベントをまとめる。"
 description.ko = "프레임워크의 수명 주기, 렌더링 및 입력 이벤트를 모은다."
 details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Lifecycle fan-out retains exitRequested/deviceLost/hotReloadUnload; console belongs only to RuntimeEvents. Window exit means actual closure, not App replacement.
 - Every Window has stable framework App slots at priority 100, installed before App construction. Default input/update/draw/exit listeners use priority 0; explicit priority 100 listeners follow the App slot in registration order. Replacement changes the App in the slot without moving it.
 - **v0.8: consumed input no longer reaches App virtuals.** On every Window and MCP, an earlier listener setting `consumed` skips the App, its tree and later listeners. Inside the App slot the virtual receives const arguments and runs first, then the tree. Explicit node consumption (including an App root override) skips later listeners. An enabled App root no longer consumes background presses/releases/drags by default; return true from its node handler or consume its node event explicitly. A default root creates no background grab.
 - On events the App receives, listen() defaults to BeforeApp; other events keep 100. This covers update, draw, exit, key, mouse, touch, windowResized, and filesDropped; setup is unchanged.
@@ -5185,6 +5187,8 @@ details.en = '''
 - Framework notifications run on the main thread. Headless runs do not generate native window/input events or rendering events.
 '''
 details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- exitRequested/deviceLost/hotReloadUnload は App にも残り、console は RuntimeEvents だけです。Window exit は実際の閉鎖であり App 交換ではありません。
 - 各Windowでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
 - **v0.8: 消費済み入力は App の仮想関数にも届かなくなります。** 各WindowとMCPでは、先行リスナーが `consumed` を設定すると、App、ツリー、後続リスナーは呼ばれません。App の枠では 引数が const の仮想関数、ツリーの順に呼びます。App ルートのオーバーライドを含むノードの明示的な消費は後続リスナーを止めます。イベントを有効にした App ルートも、背景の押下・解放・ドラッグを既定では消費しません。ノードハンドラーで true を返すか、ノードイベントで明示的に消費してください。既定のルートは背景で grab しません。
 - すべての Window は App の構築前に優先度 100 の安定した framework slot を持ちます。入力・update・draw・exit の既定購読は優先度 0 です。明示的な優先度 100 の購読は App slot の後に登録順で走ります。差し替えでも slot は移動しません。
@@ -5193,6 +5197,8 @@ details.ja = '''
 - フレームワークからの通知はメインスレッドで行います。ヘッドレス実行では、ネイティブのウィンドウ・入力イベントと描画イベントは発生しません。
 '''
 details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- exitRequested/deviceLost/hotReloadUnload는 App에도 유지하고 console은 RuntimeEvents 전용입니다. Window exit은 실제 닫기이며 App 교체가 아닙니다.
 - 모든 Window는 App 생성 전에 우선순위 100의 고정 framework slot을 갖습니다. 입력·update·draw·exit의 기본 구독 우선순위는 0입니다. 명시적 우선순위 100 구독은 App slot 뒤에서 등록 순서로 실행합니다. 교체해도 slot은 이동하지 않습니다.
 - App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다. update, draw, exit, 키, 마우스, 터치, windowResized, filesDropped가 해당하며 setup은 변경하지 않습니다.
 - 각 멤버는 `Event<T>` 또는 `Event<void>`입니다. `listen()`, 리스너 수명, 우선순위 및 호출 스레드는 `Event<T>`를 참조하세요.
@@ -5201,29 +5207,38 @@ details.ko = '''
 related = ["events", "Event<T>", "EventListener", "Window::events", "CoreEvents::occludedChanged"]
 
 ["CoreEvents::deviceLost"]
-description.en = "Fired when the shared Windows D3D11 device is lost."
-description.ja = "Windows の共有 D3D11 デバイスが失われたときに発生する。"
-description.ko = "Windows의 공유 D3D11 장치가 손실되면 발생한다."
+description.en = "Receives the deviceLost lifecycle notification. "
+description.ja = "deviceLost のライフサイクル通知を受け取る。"
+description.ko = "deviceLost 수명 주기 알림을 받는다."
 details.en = '''
-- Every Window has stable framework App slots at priority 100, installed before App construction. Default input/update/draw/exit listeners use priority 0; explicit priority 100 listeners follow the App slot in registration order. Replacement changes the App in the slot without moving it.
-- `args.reason` contains the `GetDeviceRemovedReason` HRESULT bits.
-- Set `args.cancel = true` to suppress the default failure exit and continue non-GPU work. Otherwise, TrussC logs an error and exits with code 1; GPU resources are not recreated.
-- The arguments have no `consumed` field; setting `cancel` does not stop subsequent listeners.
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- D3D11 only; reason is GetDeviceRemovedReason HRESULT bits (uint32_t). One mutable payload is shared in delivery order, with cancel initially false; later listeners may change it back to false. This is not quit OR aggregation. Final false logs failure and exits with code 1; true continues non-GPU services without recovery. A throwing callback is contained and later listeners continue.
 '''
 details.ja = '''
-- すべての Window は App の構築前に優先度 100 の安定した framework slot を持ちます。入力・update・draw・exit の既定購読は優先度 0 です。明示的な優先度 100 の購読は App slot の後に登録順で走ります。差し替えでも slot は移動しません。
-- `args.reason` には `GetDeviceRemovedReason` の HRESULT のビット値が入ります。
-- `args.cancel = true` にすると、既定の異常終了を抑止して GPU を使わない処理を続けられます。それ以外の場合はエラーを記録して終了コード 1 で終了します。GPU リソースは再作成しません。
-- 引数に `consumed` フィールドはありません。`cancel` を設定しても、後続のリスナーは呼ばれます。
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- D3D11 のみで reason は GetDeviceRemovedReason の HRESULT bits (uint32_t) です。一つの可変引数を順に共有し、cancel は最初 false、後続は false に戻せます。quit の OR 集約ではありません。最終 false はエラーを記録して code 1 で終了し、true は GPU 回復なしで非 GPU サービスを続けます。callback 例外を捕捉し後続を呼びます。
 '''
 details.ko = '''
-- 모든 Window는 App 생성 전에 우선순위 100의 고정 framework slot을 갖습니다. 입력·update·draw·exit의 기본 구독 우선순위는 0입니다. 명시적 우선순위 100 구독은 App slot 뒤에서 등록 순서로 실행합니다. 교체해도 slot은 이동하지 않습니다.
-- `args.reason`에는 `GetDeviceRemovedReason`의 HRESULT 비트 값이 들어갑니다.
-- `args.cancel = true`로 설정하면 기본 오류 종료를 막고 GPU를 사용하지 않는 작업을 계속합니다. 그렇지 않으면 오류를 기록하고 종료 코드 1로 종료합니다. GPU 리소스는 다시 생성하지 않습니다.
-- 인수에 `consumed` 필드는 없습니다. `cancel`을 설정해도 이후 리스너는 호출됩니다.
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- D3D11 전용이며 reason은 GetDeviceRemovedReason HRESULT bits(uint32_t)입니다. 하나의 가변 인수를 순서대로 공유하고 cancel은 처음 false이며 이후 false로 되돌릴 수 있습니다. quit OR 집계가 아닙니다. 마지막 false는 오류 기록 후 code 1로 종료하고 true는 GPU 복구 없이 비 GPU 서비스를 계속합니다. callback 예외를 처리하고 이후 리스너를 호출합니다.
 '''
-related = ["DeviceLostEventArgs", "exitApp"]
-
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener life;
+    void setup() override {
+        life = tc::events().deviceLost.listen([](tc::DeviceLostEventArgs& e) { e.cancel = true; });
+    }
+};
+int main() {
+    auto addon = tc::runtime().events().deviceLost.listen([](tc::DeviceLostEventArgs& e) { tc::logNotice() << e.reason; });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["Runtime::events", "EventListener"]
 ["DeviceLostEventArgs"]
 description.en = "Carries information about a lost graphics device."
 description.ja = "グラフィックスデバイス喪失の情報を保持する。"
@@ -5263,15 +5278,15 @@ description.en = "Controls whether the application exits after device loss."
 description.ja = "デバイス喪失後にアプリを終了するかを制御する。"
 description.ko = "장치 손실 후 앱을 종료할지 제어한다."
 details.en = '''
-- Defaults to `false`; after listeners return, TrussC logs the device-loss error and calls `exitApp(1)` unless this field is `true`.
+- Defaults to `false`; after listeners return, TrussC logs the device-loss error and orders failure exit with code 1 unless this field is `true`.
 - Set `e.cancel = true` in a listener to continue running without GPU recovery; this does not restore the graphics device.
 '''
 details.ja = '''
-- 既定値は `false` です。リスナーの呼び出し後、この値が `true` でなければ、TrussC はデバイス喪失のエラーを記録して `exitApp(1)` を呼び出します。
+- 既定値は `false` です。リスナーの呼び出し後、この値が `true` でなければ、TrussC はデバイス喪失のエラーを記録して 終了コード 1 で終了します。
 - リスナーで `e.cancel = true` にすると、GPU を復旧せずに実行を続けます。グラフィックスデバイスが復旧するわけではありません。
 '''
 details.ko = '''
-- 기본값은 `false`입니다. 리스너 호출이 끝난 후 이 값이 `true`가 아니면 TrussC는 장치 손실 오류를 기록하고 `exitApp(1)`을 호출합니다.
+- 기본값은 `false`입니다. 리스너 호출이 끝난 후 이 값이 `true`가 아니면 TrussC는 장치 손실 오류를 기록하고 종료 코드 1로 종료합니다.
 - 리스너에서 `e.cancel = true`로 설정하면 GPU 복구 없이 실행을 계속합니다. 그래픽 장치를 복구하지는 않습니다.
 '''
 
@@ -5317,33 +5332,33 @@ details.ko = '''
 '''
 related = ["ClipboardPastedEventArgs", "getClipboardString", "CoreEvents::rawEvent"]
 
-["CoreEvents::console"]
-description.en = "Fired when a command line is received from standard input."
-description.ja = "標準入力からコマンド行を受け取ったときに発生する。"
-description.ko = "표준 입력에서 명령줄을 받으면 발생한다."
+["RuntimeEvents::console"]
+description.en = "Receives process stdin commands without App fan-out."
+description.ja = "App への fan-out なしでプロセスの stdin command を受け取る。"
+description.ko = "App fan-out 없이 프로세스 stdin 명령을 받는다."
 details.en = '''
-- Console commands are delivered on the main thread to every open Window, or to the headless App; the background reader never invokes listeners.
-- Call `console::start()` to enable delivery. `console::stop()` disables delivery and discards queued commands; the reader continues consuming standard input and drops lines while delivery is disabled.
-- Delivers `ConsoleEventArgs&`: `raw` contains the original line without its line ending, and `args` contains whitespace-separated tokens after removing `#` and the rest of the line. Lines without tokens are ignored.
-- Every Window has stable framework App slots at priority 100, installed before App construction. Default input/update/draw/exit listeners use priority 0; explicit priority 100 listeners follow the App slot in registration order. Replacement changes the App in the slot without moving it.
-- The arguments have neither `cancel` nor `consumed`. Console input is unavailable on the Web; see `Event<T>` for listening.
+- Runtime-only, once per subscribed slot; there is no App fan-out or CoreEvents console member. Main-thread delivery runs before the first draw, after a Window closes, with zero Windows, and headless. A subscriber registered under an App token runs in that owner scope and is disconnected when the App ends; an unowned addon subscription has process scope. Retain EventListener. console::start opts into stdin; console::stop disables delivery and discards queued commands. Web has no stdin console. args.raw is UTF-8 text, args.args splits whitespace, with borrowed callback lifetime; no numeric units.
 '''
 details.ja = '''
-- console コマンドはメインスレッドですべての開いた Window、または headless App に通知します。背景の入力 reader は購読を呼びません。
-- `console::start()` で通知を有効にします。`console::stop()` は通知を無効にし、待機中のコマンドを破棄します。読み取り処理は標準入力を読み続け、通知が無効な間の行を破棄します。
-- `ConsoleEventArgs&` を渡します。`raw` は行末を除いた元の行で、`args` は `#` 以降を除いて空白で分割した単語列です。単語がない行は無視します。
-- すべての Window は App の構築前に優先度 100 の安定した framework slot を持ちます。入力・update・draw・exit の既定購読は優先度 0 です。明示的な優先度 100 の購読は App slot の後に登録順で走ります。差し替えでも slot は移動しません。
-- 引数に `cancel` と `consumed` はありません。Web では標準入力を利用できません。リスナーの登録方法は `Event<T>` を参照してください。
+- Runtime だけに各購読 slot へ一回通知し、App への fan-out や CoreEvents の console はありません。メインスレッドで初回 draw 前、窓 close 後、窓 0 個、headless でも配ります。App token で登録した購読はその owner scope で走り、App ending で解除します。所有なしの addon 購読は process scope です。EventListener を保持してください。console::start で stdin を有効にし、console::stop で配送停止・キュー破棄します。Web では使えません。args.raw は UTF-8、args.args は空白区切り、callback 内の借用寿命で数値単位はありません。
 '''
 details.ko = '''
-- console 명령은 메인 스레드에서 모든 열린 Window 또는 headless App에 전달합니다. 백그라운드 입력 reader는 구독을 호출하지 않습니다.
-- `console::start()`로 알림을 활성화합니다. `console::stop()`은 알림을 비활성화하고 대기 중인 명령을 버립니다. 읽기 작업은 표준 입력을 계속 읽으며 알림이 비활성화된 동안의 줄은 버립니다.
-- `ConsoleEventArgs&`를 전달합니다. `raw`에는 줄 끝 문자를 제외한 원래 줄이 들어가고, `args`에는 `#` 이후를 제거한 뒤 공백으로 나눈 토큰이 들어갑니다. 토큰이 없는 줄은 무시합니다.
-- 모든 Window는 App 생성 전에 우선순위 100의 고정 framework slot을 갖습니다. 입력·update·draw·exit의 기본 구독 우선순위는 0입니다. 명시적 우선순위 100 구독은 App slot 뒤에서 등록 순서로 실행합니다. 교체해도 slot은 이동하지 않습니다.
-- 인수에 `cancel`과 `consumed`는 없습니다. Web에서는 표준 입력을 사용할 수 없습니다. 리스너 등록 방법은 `Event<T>`를 참조하세요.
+- Runtime 전용으로 구독 slot마다 한 번 알리며 App fan-out과 CoreEvents console은 없습니다. 메인 스레드에서 첫 draw 전, 창 close 후, 창 0개, headless에서도 전달합니다. App token 구독은 해당 owner scope에서 실행하고 App ending에서 해제합니다. 소유 없는 addon 구독은 process scope입니다. EventListener를 보관하세요. console::start로 stdin을 활성화하고 console::stop으로 전달 중지·큐 폐기합니다. Web에는 없습니다. args.raw는 UTF-8, args.args는 공백 분리이며 callback 동안의 빌린 수명이고 수치 단위는 없습니다.
 '''
-related = ["ConsoleEventArgs", "console::start", "console::stop", "Event<T>"]
-
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener input;
+    void setup() override {
+        input = tc::runtime().events().console.listen([](tc::ConsoleEventArgs& e) {
+            tc::logNotice() << e.raw;
+        });
+        tc::console::start();
+    }
+};
+int main() { return tc::runHeadlessApp<Demo>(); }
+'''
+related = ["console::start", "ConsoleEventArgs"]
 ["CoreEvents::draw"]
 keywords = ["before App draw", "drawn frames only", "per window", "behind", "listen"]
 description.en = "Delivers a rendered frame; main/host drawing at 100 separates BeforeApp and AfterApp listeners."
@@ -5362,65 +5377,77 @@ details.ko = '''
 related = ["Node::draw", "CoreEvents::update", "events", "EventListener"]
 
 ["CoreEvents::exit"]
-keywords = ["shutdown", "teardown", "before App exit", "per window", "release", "listen"]
-description.en = "Delivers shutdown; main/host App::exit runs at priority 100."
-description.ja = "終了を通知します。メインとホストでは優先度 100 で App::exit を呼びます。"
-description.ko = "종료를 알립니다. 메인/호스트 App::exit는 우선순위 100에서 실행됩니다."
+description.en = "Notifies actual Window closure before native disposal."
+description.ja = "native 破棄前に実際の Window 閉鎖を通知する。"
+description.ko = "native 해제 전에 실제 Window 닫기를 알린다."
 details.en = '''
-- Every Window has stable framework App slots at priority 100, installed before App construction. Default input/update/draw/exit listeners use priority 0; explicit priority 100 listeners follow the App slot in registration order. Replacement changes the App in the slot without moving it.
-- Normal main/host shutdown: exit notify calls App::exit at 100, then AfterApp shutdown hooks (ImGui including offscreen manager, NodeInspector, ScreenRecorder), then audio detach and cleanup. Guest swaps still call exit directly after hotReloadUnload; they do not emit events().exit. Startup and reload resize seeds remain App-only.
-- On macOS, when the operating system logs out, restarts or shuts down while one of the app's handlers is running, `exit()` may run while that handler is paused. `cleanup()` and framework shutdown hooks do not run, and Apps remain attached to their windows until the process ends. See `App::exit`.
+- Main thread, once on actual Window closure, including Runtime shutdown. App replacement, destroyApp and hot reload call App::exit without Window exit. Defaults to BeforeApp priority 0; the framework App slot at 100 calls App::exit once, followed by protected AfterApp teardown, audio detach and cleanup. Exceptions do not skip mandatory ending steps.
+- Keep the EventListener alive. An App-owned exit subscription remains callable during that App's ending and retires immediately afterward. A manual quit-on-close listener is shown below; prefer Window::setQuitOnClose for this policy. exitApp during ending is inert.
+- No payload, units or cancellation. OS confirmation belongs on closeRequested, process confirmation on exitRequested. Headless exit keeps its virtual-only ending notification; native forced-session limits still apply.
 '''
 details.ja = '''
-- 通常は、各Windowでは、`BeforeApp` (0) → App（仮想関数、対象イベントではツリーも）→ `AfterApp` (200) の順です。App は `App` (100) のフレームワーク所有リスナーで、`clear()` 後も残ります。同順位は登録順です。App のコンストラクタや setup で明示的に 100 を指定すると App の後、起動前に登録すると App の前です。ホストはゲスト読み込み前に登録し、リロードでも位置を維持します。
-- すべての Window は App の構築前に優先度 100 の安定した framework slot を持ちます。入力・update・draw・exit の既定購読は優先度 0 です。明示的な優先度 100 の購読は App slot の後に登録順で走ります。差し替えでも slot は移動しません。
-- 通常は、メインとホストの終了では exit notify が 100 で App::exit を呼び、その後 AfterApp で ImGui（オフスクリーン管理を含む）、NodeInspector、ScreenRecorder を終了し、音声を切り離して cleanup します。ゲスト交換では hotReloadUnload 後に exit を直接呼び、events().exit は発火しません。起動・リロード時のサイズ初期化は App のみです。
-- macOS でアプリの処理が実行中に OS がログアウト、再起動、シャットダウンすると、その処理が一時停止している間に `exit()` が呼ばれることがあります。`cleanup()` とフレームワークの終了フックは実行されず、プロセスが終了するまで App はウィンドウに接続されたままです。`App::exit` を参照してください。
+- メインスレッドで Runtime shutdown を含む実際の Window 閉鎖に一回通知します。App 交換、destroyApp、hot reload は Window exit を出さず App::exit を呼びます。既定優先度 BeforeApp (0)、framework App slot (100) で App::exit を一回呼び、保護された AfterApp teardown、audio detach、cleanup と続きます。例外でも必須 ending 手順を飛ばしません。
+- EventListener を保持します。App 所有の exit 購読はその App の ending 中に呼べ、その直後に退役します。以下は手動の quit-on-close ですが、通常は Window::setQuitOnClose を使います。ending 中の exitApp は何もしません。
+- 引数・単位・取り消しはありません。OS close 確認は closeRequested、process 確認は exitRequested を使います。headless は仮想 ending 通知を保ち、native の強制 session 終了には制限があります。
 '''
 details.ko = '''
-- 모든 Window는 App 생성 전에 우선순위 100의 고정 framework slot을 갖습니다. 입력·update·draw·exit의 기본 구독 우선순위는 0입니다. 명시적 우선순위 100 구독은 App slot 뒤에서 등록 순서로 실행합니다. 교체해도 slot은 이동하지 않습니다.
-- 일반적으로 메인/호스트 종료 시 exit notify가 100에서 App::exit를 호출하고 AfterApp에서 ImGui(오프스크린 관리자 포함), NodeInspector, ScreenRecorder를 종료한 뒤 오디오를 분리하고 cleanup합니다. 게스트 교체는 hotReloadUnload 후 exit를 직접 호출하며 events().exit를 발생시키지 않습니다. 시작/리로드 크기 초기화는 App 전용입니다.
-- macOS에서 앱의 처리 함수가 실행 중일 때 운영 체제가 로그아웃, 다시 시작 또는 종료하면 해당 함수가 일시 정지된 동안 `exit()`가 호출될 수 있습니다. `cleanup()`과 프레임워크 종료 훅은 실행되지 않으며 프로세스가 끝날 때까지 App은 윈도우에 연결된 상태를 유지합니다. `App::exit`을 참고하십시오.
+- 메인 스레드에서 Runtime shutdown을 포함한 실제 Window 닫기에 한 번 알립니다. App 교체, destroyApp, hot reload는 Window exit 없이 App::exit을 호출합니다. 기본 우선순위 BeforeApp(0), framework App slot(100)에서 App::exit을 한 번 호출하고 보호된 AfterApp teardown, audio detach, cleanup 순입니다. 예외로 필수 ending 절차를 건너뛰지 않습니다.
+- EventListener를 보관하세요. App 소유 exit 구독은 해당 App ending 중 호출 가능하고 직후 회수합니다. 아래는 수동 quit-on-close 대안이며 보통 Window::setQuitOnClose를 사용합니다. ending 중 exitApp은 아무 작업도 하지 않습니다.
+- 인수·단위·취소는 없습니다. OS 닫기 확인은 closeRequested, process 확인은 exitRequested를 사용합니다. headless는 가상 ending 알림을 유지하며 native 강제 session 종료에는 제한이 있습니다.
 '''
-related = ["App::exit", "Node::cleanup", "CoreEvents::update", "events", "EventListener"]
 snippet = '''
-// tcApp.h (inside class tcApp : public App)
-EventListener exitListener;
-AudioRecorder recorder;
-
-// tcApp.cpp
-void tcApp::setup() {
-    exitListener = events().exit.listen([this]() { recorder.stop(); }, EventPriority::AfterApp);
-}
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    void setup() override {
+        quit = getWindow()->events().exit.listen([] { tc::exitApp(); });
+    }
+};
+int main() { return tc::runApp<Demo>(); }
 '''
+related = ["App::exit", "Window::setQuitOnClose", "CoreEvents::closeRequested"]
 
 ["CoreEvents::exitRequested"]
-description.en = "Fired when application exit is requested."
-description.ja = "アプリケーションの終了が要求されたときに発生する。"
-description.ko = "애플리케이션 종료가 요청되면 발생한다."
+description.en = "Receives a cancellable process quit request."
+description.ja = "取り消し可能なプロセス終了要求を受け取る。"
+description.ko = "취소 가능한 프로세스 종료 요청을 받는다."
 details.en = '''
-- Every Window has stable framework App slots at priority 100, installed before App construction. Default input/update/draw/exit listeners use priority 0; explicit priority 100 listeners follow the App slot in registration order. Replacement changes the App in the slot without moving it.
-- Set `args.cancel = true` to keep the application running. `args.reason` can supply an explanation when blocking Windows shutdown.
-- The arguments have no `consumed` field, so cancellation does not stop subsequent listeners. The final `cancel` value determines whether the request is accepted.
-- Headless runs also notify this event for `requestExitApp()`, after update processing. `exitApp()` bypasses this event and cannot be cancelled.
-- On macOS, a logout, restart or shutdown during a running handler skips this event and ends the app without asking; see `App::exit`.
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Runtime/App listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept; if storing it fails, the veto stands with an empty reason. Generic Event::notify semantics are unchanged.
+- exitApp(code), requestExitApp, native termination, quitOnClose and last-Window close use this path. OS close queries closeRequested before actual closure; process veto does not restore that closed Window. Headless signals retain their immediate stop behavior; forced OS termination cannot be vetoed.
 '''
 details.ja = '''
-- すべての Window は App の構築前に優先度 100 の安定した framework slot を持ちます。入力・update・draw・exit の既定購読は優先度 0 です。明示的な優先度 100 の購読は App slot の後に登録順で走ります。差し替えでも slot は移動しません。
-- `args.cancel = true` にすると、アプリケーションを実行し続けられます。`args.reason` には Windows のシャットダウンを妨げる理由を指定できます。
-- 引数に `consumed` はないため、キャンセルしても後続のリスナーは呼ばれます。最後の `cancel` の値で要求を受け入れるかどうかを決めます。
-- ヘッドレス実行でも、`requestExitApp()` による要求を update の処理後に通知します。`exitApp()` はこのイベントを経由せず、キャンセルできません。
-- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、このイベントは通知されず、アプリは確認なしで終了します。`App::exit` を参照してください。
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Runtime/App の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。保存に失敗しても reason を空にして拒否を維持します。一般の Event::notify の意味は変えません。
+- exitApp(code)、requestExitApp、native 終了、quitOnClose、最後の窓の close がこの経路を使います。OS close は実際の閉鎖より前に closeRequested を聞きます。process veto で閉じた窓は復活しません。headless signal は即停止の意味を保ち、OS の強制終了は拒否できません。
 '''
 details.ko = '''
-- 모든 Window는 App 생성 전에 우선순위 100의 고정 framework slot을 갖습니다. 입력·update·draw·exit의 기본 구독 우선순위는 0입니다. 명시적 우선순위 100 구독은 App slot 뒤에서 등록 순서로 실행합니다. 교체해도 slot은 이동하지 않습니다.
-- `args.cancel = true`로 설정하면 애플리케이션을 계속 실행합니다. `args.reason`에는 Windows 종료를 막는 이유를 지정할 수 있습니다.
-- 인수에 `consumed`가 없으므로 취소해도 이후 리스너는 호출됩니다. 마지막 `cancel` 값으로 요청을 받아들일지 결정합니다.
-- 헤드리스 실행에서도 `requestExitApp()`의 요청을 update 처리 후에 알립니다. `exitApp()`은 이 이벤트를 거치지 않으며 취소할 수 없습니다.
-- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 이 이벤트는 발생하지 않으며 앱은 확인 없이 종료됩니다. `App::exit`을 참고하십시오.
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Runtime/App 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 저장에 실패하면 빈 reason으로 거부를 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- exitApp(code), requestExitApp, native 종료, quitOnClose, 마지막 창 close가 이 경로를 사용합니다. OS close는 실제 닫기 전에 closeRequested를 묻습니다. process 거부로 닫힌 창을 복원하지 않습니다. headless signal은 즉시 정지 의미를 유지하며 OS 강제 종료는 거부할 수 없습니다.
 '''
-related = ["ExitRequestEventArgs", "requestExitApp", "exitApp", "App::exit"]
-
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["ExitRequestEventArgs", "CoreEvents::closeRequested", "exitApp"]
 ["CoreEvents::filesDropped"]
 description.en = "Fired when files are dropped onto the window."
 description.ja = "ウィンドウにファイルがドロップされたときに発生する。"
@@ -5447,36 +5474,38 @@ details.ko = '''
 related = ["DragDropEventArgs", "App::filesDropped", "CoreEvents::rawEvent"]
 
 ["CoreEvents::hotReloadUnload"]
-keywords = ["hot reload", "unload", "reload", "singleton", "listener", "cleanup"]
-description.en = "Fired before the current hot-reload guest generation is unloaded."
-description.ja = "ホットリロードで現在のゲスト世代をアンロードする前に発生する。"
-description.ko = "핫 리로드의 현재 게스트 세대를 언로드하기 전에 발생한다."
+description.en = "Receives the hotReloadUnload lifecycle notification. "
+description.ja = "hotReloadUnload のライフサイクル通知を受け取る。"
+description.ko = "hotReloadUnload 수명 주기 알림을 받는다."
 details.en = '''
-- Hot reload notifies the guest target Window before ending its App. This event has no arguments or cancellation and does not fire in normal builds.
-- Every Window has stable framework App slots at priority 100, installed before App construction. Default input/update/draw/exit listeners use priority 0; explicit priority 100 listeners follow the App slot in registration order. Replacement changes the App in the slot without moving it.
-- Normally, on reload, it fires after a successful rebuild and before the old App's `exit()` and `cleanup()`. At application exit, it fires after the exit event and the App's `exit()` and `cleanup()`, but before the App is destroyed.
-- Guest state that outlives the App, such as singletons and function-local statics, must release its listeners on host events here.
-- `tcxImGui` and `tcxNodeInspector` release their listeners automatically; see `Event<T>` for listener lifetime.
-- On macOS, a logout, restart or shutdown during a running handler skips this event; see `App::exit`.
+- App-tied code, including per-App addons, uses `events()`; process-wide observers use `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- No payload, units or cancellation. Only hot reload emits this, before ending the replacing generation’s still-attached Apps. Runtime receives one notification, then only that generation’s Apps in reverse attachment order. Unrelated Apps are excluded. At final unload after shutdown only the Runtime notification remains; already-ended Apps are not revived. Owned subscriptions retire at App ending; per-App addon hooks belong on that App’s events(), so other generations keep their state.
 '''
 details.ja = '''
-- hot reload は App を終了する前に guest の対象 Window に通知します。引数・取り消しはなく、通常ビルドでは発火しません。
-- すべての Window は App の構築前に優先度 100 の安定した framework slot を持ちます。入力・update・draw・exit の既定購読は優先度 0 です。明示的な優先度 100 の購読は App slot の後に登録順で走ります。差し替えでも slot は移動しません。
-- 通常は、リロード時は再ビルドの成功後、古い App の `exit()` と `cleanup()` より前に発生します。アプリケーション終了時は exit イベントと App の `exit()`、`cleanup()` のあと、App を破棄する前に発生します。
-- シングルトンや関数内 static など、App より長く生存するゲストの状態は、ここでホストのイベントに登録したリスナーを解除する必要があります。
-- `tcxImGui` と `tcxNodeInspector` はリスナーを自動で解除します。リスナーの寿命については `Event<T>` を参照してください。
-- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、このイベントは発生しません。`App::exit` を参照してください。
+- App ごとの addon を含む App に結び付くコードは `events()`、プロセス全体の監視は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- 引数・単位・取り消しはありません。hot reload のみが、差し替える世代の接続中 App を終了する前に通知します。Runtime に一回、その世代の App だけに付いた順の逆で配り、別世代は除外します。shutdown 後の最終 unload は Runtime 通知のみで、終了済み App を復活させません。所有購読は App ending で退役し、App ごとの addon hook はその App の events() に置き、他世代の状態を保ちます。
 '''
 details.ko = '''
-- hot reload는 App 종료 전에 guest 대상 Window에 알립니다. 인수와 취소가 없으며 일반 빌드에서는 발생하지 않습니다.
-- 모든 Window는 App 생성 전에 우선순위 100의 고정 framework slot을 갖습니다. 입력·update·draw·exit의 기본 구독 우선순위는 0입니다. 명시적 우선순위 100 구독은 App slot 뒤에서 등록 순서로 실행합니다. 교체해도 slot은 이동하지 않습니다.
-- 일반적으로 리로드할 때는 재빌드가 성공한 후, 이전 App의 `exit()`와 `cleanup()` 전에 발생합니다. 애플리케이션 종료 시에는 exit 이벤트와 App의 `exit()`, `cleanup()` 이후, App을 파괴하기 전에 발생합니다.
-- 싱글턴이나 함수 내부 static처럼 App보다 오래 유지되는 게스트 상태는 여기서 호스트 이벤트에 등록한 리스너를 해제해야 합니다.
-- `tcxImGui`와 `tcxNodeInspector`는 리스너를 자동으로 해제합니다. 리스너 수명은 `Event<T>`를 참조하세요.
-- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 이 이벤트는 발생하지 않습니다. `App::exit`을 참고하십시오.
+- App별 애드온을 포함한 App에 속한 코드는 `events()`, 프로세스 전체 관찰자는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- 인수·단위·취소는 없습니다. hot reload에서 교체할 세대의 연결된 App을 종료하기 전에 알립니다. Runtime에 한 번 알린 뒤 해당 세대 App만 연결 역순으로 호출하며 다른 세대는 제외합니다. shutdown 뒤 최종 unload에는 Runtime만 알리고 종료한 App은 복원하지 않습니다. 소유 구독은 App ending에서 회수하며 App별 애드온 hook은 해당 App의 events()에 두어 다른 세대의 상태를 유지합니다.
 '''
-related = ["CoreEvents::exit", "Event<T>", "EventListener", "App::exit"]
-
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener life;
+    void setup() override {
+        life = tc::events().hotReloadUnload.listen([] { tc::logNotice() << "App will be replaced"; });
+    }
+};
+int main() {
+    auto addon = tc::runtime().events().hotReloadUnload.listen([] { tc::logNotice() << "Guest generation retiring"; });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["Runtime::events", "EventListener"]
 ["CoreEvents::keyPressed"]
 description.en = "Fired when a key is pressed."
 description.ja = "キーが押されたときに発生する。"
@@ -7802,71 +7831,110 @@ details.ko = '''
 '''
 
 ["ExitRequestEventArgs"]
-keywords = ["quit", "close", "shutdown"]
-description.en = "Carries a cancellable application exit request."
-description.ja = "キャンセル可能なアプリの終了要求を保持する。"
-description.ko = "취소 가능한 앱 종료 요청을 담는다."
+description.en = "Per-listener process quit decision and optional UTF-8 veto reason."
+description.ja = "リスナーごとの終了判定と任意の UTF-8 拒否理由。"
+description.ko = "리스너별 프로세스 종료 결정과 선택적 UTF-8 거부 이유."
 details.en = '''
-- Passed to `events().exitRequested`; listeners can set `cancel` to veto the request and `reason` to explain a Windows shutdown veto.
-- For listener registration, lifetime, and delivery threads, see `Event<T>`.
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Runtime/App listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept; if storing it fails, the veto stands with an empty reason. Generic Event::notify semantics are unchanged.
+- Main-thread borrowed arguments; use only during the callback. cancel defaults false, reason empty, no units. reason alone does not veto. Windows uses the preserved reason for a shutdown-block explanation; an empty reason uses its generic message.
 '''
 details.ja = '''
-- `events().exitRequested` に渡されます。リスナーは `cancel` で終了要求を拒否し、`reason` で Windows のシャットダウンを拒否する理由を指定できます。
-- リスナーの登録、寿命、呼び出されるスレッドについては `Event<T>` を参照してください。
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Runtime/App の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。保存に失敗しても reason を空にして拒否を維持します。一般の Event::notify の意味は変えません。
+- メインスレッドの借用引数であり callback 中だけ使います。cancel の既定は false、reason は空、単位はありません。reason だけでは拒否しません。Windows は保持した理由を shutdown-block 説明に使い、空なら汎用メッセージです。
 '''
 details.ko = '''
-- `events().exitRequested`에 전달됩니다. 리스너는 `cancel`로 종료 요청을 거부하고 `reason`으로 Windows 종료를 거부하는 이유를 지정할 수 있습니다.
-- 리스너 등록, 수명, 호출 스레드는 `Event<T>`를 참조하세요.
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Runtime/App 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 저장에 실패하면 빈 reason으로 거부를 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- 메인 스레드의 빌린 인수이며 callback 동안만 사용합니다. cancel 기본값은 false, reason은 빈 문자열이며 단위는 없습니다. reason만으로 거부하지 않습니다. Windows는 유지한 이유를 종료 차단 설명으로 쓰며 빈 값은 일반 메시지입니다.
 '''
-related = ["requestExitApp", "events"]
-
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["RuntimeEvents::exitRequested"]
 ["ExitRequestEventArgs::reason"]
-description.en = "Stores an explanation for blocking Windows shutdown."
-description.ja = "Windows のシャットダウンを止める理由を保持する。"
-description.ko = "Windows 종료를 막는 이유를 저장한다."
+description.en = "Per-listener process quit decision and optional UTF-8 veto reason."
+description.ja = "リスナーごとの終了判定と任意の UTF-8 拒否理由。"
+description.ko = "리스너별 프로세스 종료 결정과 선택적 UTF-8 거부 이유."
 details.en = '''
-- An optional UTF-8 `string`, empty by default, used when `cancel` blocks Windows session shutdown or logoff.
-- An empty string uses the generic message "The app is still busy."; setting `reason` alone does not cancel the request.
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Runtime/App listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept; if storing it fails, the veto stands with an empty reason. Generic Event::notify semantics are unchanged.
+- Main-thread borrowed arguments; use only during the callback. cancel defaults false, reason empty, no units. reason alone does not veto. Windows uses the preserved reason for a shutdown-block explanation; an empty reason uses its generic message.
 '''
 details.ja = '''
-- `cancel` で Windows のセッション終了やログオフを止めるときに使う、省略可能な UTF-8 の `string` です。既定では空です。
-- 空の場合は汎用メッセージ "The app is still busy." を使います。`reason` を設定するだけでは終了要求をキャンセルしません。
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Runtime/App の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。保存に失敗しても reason を空にして拒否を維持します。一般の Event::notify の意味は変えません。
+- メインスレッドの借用引数であり callback 中だけ使います。cancel の既定は false、reason は空、単位はありません。reason だけでは拒否しません。Windows は保持した理由を shutdown-block 説明に使い、空なら汎用メッセージです。
 '''
 details.ko = '''
-- `cancel`로 Windows 세션 종료나 로그오프를 막을 때 사용하는 선택적 UTF-8 `string`입니다. 기본값은 비어 있습니다.
-- 비어 있으면 일반 메시지 "The app is still busy."를 사용합니다. `reason`만 설정해도 종료 요청이 취소되지는 않습니다.
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Runtime/App 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 저장에 실패하면 빈 reason으로 거부를 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- 메인 스레드의 빌린 인수이며 callback 동안만 사용합니다. cancel 기본값은 false, reason은 빈 문자열이며 단위는 없습니다. reason만으로 거부하지 않습니다. Windows는 유지한 이유를 종료 차단 설명으로 쓰며 빈 값은 일반 메시지입니다.
 '''
-
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["RuntimeEvents::exitRequested"]
 ["ExitRequestEventArgs::cancel"]
-description.en = "Controls whether an application exit request is cancelled."
-description.ja = "アプリの終了要求をキャンセルするかを制御する。"
-description.ko = "앱 종료 요청을 취소할지 제어한다."
+description.en = "Per-listener process quit decision and optional UTF-8 veto reason."
+description.ja = "リスナーごとの終了判定と任意の UTF-8 拒否理由。"
+description.ko = "리스너별 프로세스 종료 결정과 선택적 UTF-8 거부 이유."
 details.en = '''
-- Defaults to `false`. Set `e.cancel = true` in an `events().exitRequested` listener to cancel the requested exit.
-- Windowed applications also use this event for Windows session end, including Restart Manager, macOS termination, and Linux/macOS `SIGTERM` or `SIGINT`.
-- After a veto, the user must start shutdown again; TrussC does not automatically resume the cancelled request.
-- In windowed Linux/macOS applications, a second signal while the first request is pending forces termination. Cancelling the request resets this escalation state.
-- Forced OS shutdown cannot be blocked. On Windows, `App::exit()` and `App::cleanup()` must finish during `WM_ENDSESSION(TRUE)` handling before control returns to Windows, which may terminate the process immediately afterward.
-- `exitApp()` bypasses this event. Headless applications support cancellation of `requestExitApp()`, but their signal handlers stop the application without sending `exitRequested`.
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Runtime/App listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept; if storing it fails, the veto stands with an empty reason. Generic Event::notify semantics are unchanged.
+- Main-thread borrowed arguments; use only during the callback. cancel defaults false, reason empty, no units. reason alone does not veto. Windows uses the preserved reason for a shutdown-block explanation; an empty reason uses its generic message.
 '''
 details.ja = '''
-- 既定値は `false` です。`events().exitRequested` のリスナーで `e.cancel = true` にすると、終了要求をキャンセルします。
-- ウィンドウ付きアプリでは、Windows のセッション終了（Restart Manager を含みます）、macOS の終了、Linux/macOS の `SIGTERM` と `SIGINT` もこのイベントを使います。
-- 拒否した後は、ユーザーが終了操作をやり直す必要があります。TrussC がキャンセル済みの要求を自動的に再開することはありません。
-- ウィンドウ付きの Linux/macOS アプリでは、最初の要求が保留中に 2 回目のシグナルを受け取ると強制終了します。要求をキャンセルすると、この強制終了に使う状態はリセットされます。
-- OS の強制終了は阻止できません。Windows では、`WM_ENDSESSION(TRUE)` の処理中に `App::exit()` と `App::cleanup()` を終える必要があります。Windows に制御を返した直後にプロセスが終了される場合があります。
-- `exitApp()` はこのイベントを通りません。ヘッドレスアプリでは `requestExitApp()` をキャンセルできますが、シグナルハンドラーは `exitRequested` を送らずにアプリを停止します。
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Runtime/App の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。保存に失敗しても reason を空にして拒否を維持します。一般の Event::notify の意味は変えません。
+- メインスレッドの借用引数であり callback 中だけ使います。cancel の既定は false、reason は空、単位はありません。reason だけでは拒否しません。Windows は保持した理由を shutdown-block 説明に使い、空なら汎用メッセージです。
 '''
 details.ko = '''
-- 기본값은 `false`입니다. `events().exitRequested` 리스너에서 `e.cancel = true`로 설정하면 종료 요청을 취소합니다.
-- 창이 있는 앱에서는 Windows 세션 종료(Restart Manager 포함), macOS 종료, Linux/macOS의 `SIGTERM`과 `SIGINT`도 이 이벤트를 사용합니다.
-- 거부한 후에는 사용자가 종료 작업을 다시 시작해야 합니다. TrussC가 취소된 요청을 자동으로 재개하지는 않습니다.
-- 창이 있는 Linux/macOS 앱에서는 첫 요청이 보류 중일 때 두 번째 시그널을 받으면 강제로 종료합니다. 요청을 취소하면 이 강제 종료에 사용하는 상태를 초기화합니다.
-- OS의 강제 종료는 막을 수 없습니다. Windows에서는 `WM_ENDSESSION(TRUE)` 처리 중에 `App::exit()`과 `App::cleanup()`을 마쳐야 합니다. Windows에 제어를 반환한 직후 프로세스가 종료될 수 있습니다.
-- `exitApp()`은 이 이벤트를 거치지 않습니다. 헤드리스 앱에서는 `requestExitApp()`을 취소할 수 있지만, 시그널 핸들러는 `exitRequested`를 보내지 않고 앱을 중지합니다.
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Runtime/App 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 저장에 실패하면 빈 reason으로 거부를 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- 메인 스레드의 빌린 인수이며 callback 동안만 사용합니다. cancel 기본값은 false, reason은 빈 문자열이며 단위는 없습니다. reason만으로 거부하지 않습니다. Windows는 유지한 이유를 종료 차단 설명으로 쓰며 빈 값은 일반 메시지입니다.
 '''
-related = ["App::exit"]
-
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["RuntimeEvents::exitRequested"]
 ["Fbo"]
 category = "graphics_fbo"
 keywords = ["framebuffer", "render target", "offscreen", "render texture", "of fbo"]
@@ -40323,26 +40391,26 @@ void tcApp::setup() {
 '''
 
 ["Window::close"]
-description.en = "Requests explicit closure of this window."
-description.ja = "この窓を明示的に閉じるよう要求する。"
-description.ko = "이 창을 명시적으로 닫도록 요청한다."
+description.en = "Closes this Window without asking closeRequested."
+description.ja = "closeRequested を聞かず対象窓を閉じる。"
+description.ko = "closeRequested를 묻지 않고 해당 창을 닫는다."
 details.en = '''
-- On the main thread, omitted Window arguments resolve through the App token, including owned listeners and completions. A headless App uses its virtual state. Outside an App, exactly one open Window is required; zero or multiple Windows log Error and return zero/null or do no work. Use an explicit Window handle to choose a target.
+- Main thread; records closure for the next safe native boundary. Repeated/closed-handle calls do nothing. Cancels pending App replacement, ends the attached App once and emits Window exit before native disposal. Other Windows continue. After closure, quitOnClose or last-Window close requests cancellable process quit; veto does not restore this Window. No units/arguments. Sole-surface ports retire the Window while the host services remain alive if quit is vetoed. Confirm in App code before calling close if needed.
 '''
 details.ja = '''
-- メインスレッドで呼び、すぐ戻ります。安全な境界で閉じるまでは isOpen が true です。繰返し要求しても害はありません。待機中の差替えは取り消します。終了コールバック前に App::getWindow と getApp が空になり、exit、audio 切離しと待機、ツリー cleanup、owner 退役を終えてから native/GPU を破棄します。先に作った窓を閉じても他窓は動き続けます。Runtime 終了は一回の逆接続順 snapshot を保持し、全 backing を device 停止前に破棄します。quitOnClose の既定値は false です。副窓非対応の環境にも起動用の単一 surface はあります。
+- メインスレッドで次の安全な native 境界への close を記録します。重複・閉じた handle は無視します。pending App 交換を取り消し、App を一回終了し、native 破棄前に Window exit を通知します。他窓は継続します。閉鎖後、quitOnClose または最後の窓で取り消し可能な process 終了を要求し、veto でも窓は復活しません。単位・引数はありません。単一 surface の port も Window を退役し、終了 veto なら host サービスは継続します。確認が必要なら App 側で済ませてから呼びます。
 '''
 details.ko = '''
-- 메인 스레드에서 사용합니다. 창 인수를 생략하면 App token으로 해석하며 소유한 구독과 완료에도 적용합니다. headless App은 가상 상태를 사용합니다. App 밖에서는 열린 창이 정확히 하나여야 합니다. 0개 또는 여러 개이면 Error를 기록하고 0/null을 반환하거나 아무 작업도 하지 않습니다. 대상을 선택하려면 Window handle을 사용합니다.
+- 메인 스레드에서 다음 안전한 native 경계에 닫기를 기록합니다. 반복·닫힌 handle 호출은 무시합니다. pending App 교체를 취소하고 App을 한 번 종료하며 native 해제 전에 Window exit을 알립니다. 다른 창은 계속됩니다. 닫은 뒤 quitOnClose 또는 마지막 창이면 취소 가능한 process 종료를 요청하며 거부해도 창을 복원하지 않습니다. 단위·인수는 없습니다. 단일 surface port도 Window를 회수하고 종료 거부 시 host 서비스는 계속합니다. 필요하면 App에서 확인을 마친 뒤 호출하세요.
 '''
 snippet = '''
+#include <TrussC.h>
 class Demo : public tc::App {
-    void keyPressed(int key) override { if (key == 'C') getWindow()->close(); }
+    void keyPressed(int key) override { if (key == 'W') getWindow()->close(); }
 };
 int main() { return tc::runApp<Demo>(); }
 '''
-related = ["Window::setQuitOnClose", "Window::destroyApp"]
-
+related = ["CoreEvents::closeRequested", "Window::setQuitOnClose"]
 ["Window::isOpen"]
 description.en = "Returns whether this window is open."
 description.ja = "このウィンドウが開いているかを返す。"
@@ -44343,31 +44411,29 @@ class tcApp : public App {
 '''
 
 ["exitApp"]
-category = "window_input"
-keywords = ["quit", "close", "terminate", "shutdown", "kill"]
-description.en = "Orders the application to exit with normal cleanup."
-description.ja = "通常のクリーンアップを伴うアプリケーション終了を指示する。"
-description.ko = "정상 정리를 거쳐 애플리케이션을 종료하도록 지시한다."
+description.en = "Requests cancellable process quit at the host boundary."
+description.ja = "host 境界で取り消し可能なプロセス終了を要求する。"
+description.ko = "host 경계에서 취소 가능한 프로세스 종료를 요청한다."
 details.en = '''
-- `exitApp(code)` records the exit code, which defaults to `0`, and orders an exit that cannot be cancelled through the exit-request event; use a nonzero code to report failure.
-- The call marks the loop for termination and returns to the current callback; normal exit and cleanup processing follows.
-- On Windows and Linux, `runApp` returns the code to its caller; on macOS, cleanup is followed by process termination with that code, without returning from `runApp`.
-- In `runHeadlessApp`, stops the headless loop and returns the code after its normal exit and cleanup callbacks.
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Runtime/App listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept; if storing it fails, the veto stands with an empty reason. Generic Event::notify semantics are unchanged.
+- Returns to the caller; Runtime then Apps decide at a host boundary (headless after owed updates). exitApp(code) records an integer exit code, default 0, while requestExitApp keeps the code. Accepted quit performs normal App ending and native cleanup. On main, calls from App::exit/cleanup during ending, Runtime shutdown or quit notification are inert, including their exit code. Worker calls only post a Runtime-owned request; main checks these conditions and updates exit state when it delivers the request. No Window is selected and no closeRequested is synthesized. A veto keeps services active even with zero Windows. Signal/forced OS termination retains platform limits.
 '''
 details.ja = '''
-- `exitApp(code)` は終了コードを記録し、終了要求イベントではキャンセルできない終了を指示します。`code` の既定値は `0` です。失敗を示す場合はゼロ以外を指定してください。
-- ループの終了を指定して現在のコールバックに戻り、その後に通常の終了処理とクリーンアップが行われます。
-- Windows と Linux では `runApp` が呼び出し元に終了コードを返します。macOS では `runApp` から戻らず、クリーンアップ後にそのコードでプロセスが終了します。
-- `runHeadlessApp` ではヘッドレスのループを停止し、通常の終了・クリーンアップのコールバックのあとに終了コードを返します。
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Runtime/App の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。保存に失敗しても reason を空にして拒否を維持します。一般の Event::notify の意味は変えません。
+- 呼び出し元へ戻り、host 境界で Runtime、各 App が判定します（headless は必要な update 後）。exitApp(code) は整数の終了コードを記録し既定 0、requestExitApp はコードを維持します。許可時は通常の App ending と native cleanup を行います。main 上で ending 中の App::exit/cleanup、Runtime shutdown、終了通知中から呼ぶと終了コードも含め何もしません。worker は Runtime 所有の要求を投稿するだけで、main が配送時にこれらを判定し終了状態を更新します。窓を選ばず closeRequested も合成しません。veto 後も窓 0 個でサービスは動きます。signal・OS 強制終了には platform の制約があります。
 '''
 details.ko = '''
-- `exitApp(code)`는 종료 코드를 기록하고 종료 요청 이벤트로 취소할 수 없는 종료를 지시합니다. `code`의 기본값은 `0`이며, 실패를 나타내려면 0이 아닌 값을 지정합니다.
-- 루프가 종료되도록 표시한 뒤 현재 콜백으로 돌아오며, 이후 정상 종료 처리와 정리가 이루어집니다.
-- Windows와 Linux에서는 `runApp`이 호출자에게 종료 코드를 반환합니다. macOS에서는 `runApp`이 반환하지 않고 정리 후 해당 코드로 프로세스가 종료됩니다.
-- `runHeadlessApp`에서는 헤드리스 루프를 멈추고 정상 종료 및 정리 콜백 이후에 종료 코드를 반환합니다.
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Runtime/App 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 저장에 실패하면 빈 reason으로 거부를 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- 호출자에게 돌아간 뒤 host 경계에서 Runtime, 각 App이 결정합니다(headless는 필요한 update 후). exitApp(code)는 정수 종료 코드(기본 0)를 기록하고 requestExitApp은 코드를 유지합니다. 허용 시 일반 App ending과 native cleanup을 수행합니다. main에서 ending 중 App::exit/cleanup, Runtime shutdown 또는 종료 알림 중 호출하면 종료 코드도 변경하지 않습니다. worker 호출은 Runtime 소유 요청만 게시하며 main이 전달할 때 조건을 확인하고 종료 상태를 갱신합니다. 창 선택과 closeRequested 합성은 없습니다. 거부 후 창 0개에서도 서비스는 진행합니다. signal·OS 강제 종료에는 플랫폼 제한이 있습니다.
 '''
-related = ["requestExitApp"]
-
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    void keyPressed(int key) override { if (key == 'Q') tc::exitApp(0); }
+};
+int main() { return tc::runApp<Demo>(); }
+'''
+related = ["RuntimeEvents::exitRequested", "CoreEvents::exitRequested"]
 ["exp"]
 category = "math_general"
 keywords = ["exponential", "euler", "e power"]
@@ -50049,37 +50115,29 @@ details.ko = '''
 related = ["Light", "addLight", "clearLights", "getNumLights"]
 
 ["requestExitApp"]
-category = "window_input"
-keywords = ["quit", "close", "terminate", "shutdown", "cancelable"]
-of = ["ofExit"]
-description.en = "Requests a cancellable application exit."
-description.ja = "取り消し可能なアプリケーション終了を要求する。"
-description.ko = "취소 가능한 앱 종료를 요청한다."
+description.en = "Requests cancellable process quit at the host boundary."
+description.ja = "host 境界で取り消し可能なプロセス終了を要求する。"
+description.ko = "host 경계에서 취소 가능한 프로세스 종료를 요청한다."
 details.en = '''
-- Requests exit through the event loop; it does not terminate the application immediately.
-- Before exiting, `events().exitRequested` notifies listeners with `ExitRequestEventArgs`. A listener can set `e.cancel = true` to keep the application running; retain the returned `EventListener` to keep that listener registered.
-- Use `exitApp()` for an exit that bypasses this cancellation event. The request also works in `runHeadlessApp`.
-- On iOS and Android, this request does not drive shutdown or deliver the cancellation event because the operating system owns the application lifecycle.
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Runtime/App listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept; if storing it fails, the veto stands with an empty reason. Generic Event::notify semantics are unchanged.
+- Returns to the caller; Runtime then Apps decide at a host boundary (headless after owed updates). exitApp(code) records an integer exit code, default 0, while requestExitApp keeps the code. Accepted quit performs normal App ending and native cleanup. On main, calls from App::exit/cleanup during ending, Runtime shutdown or quit notification are inert, including their exit code. Worker calls only post a Runtime-owned request; main checks these conditions and updates exit state when it delivers the request. No Window is selected and no closeRequested is synthesized. A veto keeps services active even with zero Windows. Signal/forced OS termination retains platform limits.
 '''
 details.ja = '''
-- イベントループを通じて終了を要求します。呼び出した時点でアプリを直ちに終了するわけではありません。
-- 終了前に `events().exitRequested` が `ExitRequestEventArgs` を使ってリスナーを呼びます。リスナーで `e.cancel = true` にすると実行を続けます。登録を維持するには、返された `EventListener` を保持してください。
-- この取り消しイベントを経由せずに終了するには `exitApp()` を使います。この要求は `runHeadlessApp` でも機能します。
-- iOS と Android では OS がアプリのライフサイクルを管理するため、この要求では終了処理も取り消しイベントの通知も行いません。
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Runtime/App の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。保存に失敗しても reason を空にして拒否を維持します。一般の Event::notify の意味は変えません。
+- 呼び出し元へ戻り、host 境界で Runtime、各 App が判定します（headless は必要な update 後）。exitApp(code) は整数の終了コードを記録し既定 0、requestExitApp はコードを維持します。許可時は通常の App ending と native cleanup を行います。main 上で ending 中の App::exit/cleanup、Runtime shutdown、終了通知中から呼ぶと終了コードも含め何もしません。worker は Runtime 所有の要求を投稿するだけで、main が配送時にこれらを判定し終了状態を更新します。窓を選ばず closeRequested も合成しません。veto 後も窓 0 個でサービスは動きます。signal・OS 強制終了には platform の制約があります。
 '''
 details.ko = '''
-- 이벤트 루프를 통해 종료를 요청합니다. 호출한 즉시 앱을 종료하지는 않습니다.
-- 종료 전에 `events().exitRequested`가 `ExitRequestEventArgs`로 리스너를 호출합니다. 리스너에서 `e.cancel = true`를 설정하면 실행을 계속합니다. 등록을 유지하려면 반환된 `EventListener`를 보관하세요.
-- 이 취소 이벤트를 거치지 않고 종료하려면 `exitApp()`을 사용합니다. 이 요청은 `runHeadlessApp`에서도 작동합니다.
-- iOS와 Android에서는 운영체제가 앱 수명 주기를 관리하므로 이 요청으로 종료를 진행하거나 취소 이벤트를 전달하지 않습니다.
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Runtime/App 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 저장에 실패하면 빈 reason으로 거부를 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- 호출자에게 돌아간 뒤 host 경계에서 Runtime, 각 App이 결정합니다(headless는 필요한 update 후). exitApp(code)는 정수 종료 코드(기본 0)를 기록하고 requestExitApp은 코드를 유지합니다. 허용 시 일반 App ending과 native cleanup을 수행합니다. main에서 ending 중 App::exit/cleanup, Runtime shutdown 또는 종료 알림 중 호출하면 종료 코드도 변경하지 않습니다. worker 호출은 Runtime 소유 요청만 게시하며 main이 전달할 때 조건을 확인하고 종료 상태를 갱신합니다. 창 선택과 closeRequested 합성은 없습니다. 거부 후 창 0개에서도 서비스는 진행합니다. signal·OS 강제 종료에는 플랫폼 제한이 있습니다.
 '''
-related = ["exitApp", "events", "ExitRequestEventArgs", "runHeadlessApp"]
 snippet = '''
-void tcApp::update() {
-    if (isKeyPressed(KEY_ESCAPE)) requestExitApp();
-}
+#include <TrussC.h>
+class Demo : public tc::App {
+    void keyPressed(int key) override { if (key == 'Q') tc::exitApp(0); }
+};
+int main() { return tc::runApp<Demo>(); }
 '''
-
+related = ["RuntimeEvents::exitRequested", "CoreEvents::exitRequested"]
 ["resetBlendMode"]
 category = "graphics_style"
 keywords = ["default", "alpha"]
@@ -60378,42 +60436,53 @@ description.en = "Enables command delivery from standard input."
 description.ja = "標準入力からのコマンド配信を有効にする。"
 description.ko = "표준 입력의 명령 전달을 활성화한다."
 details.en = '''
+- v0.8.0 migration: CoreEvents::console / events().console is removed; replace it with runtime().events().console, with no compatibility alias or App fan-out.
 - Call `console::start()` explicitly in `setup()` for either a windowed or headless app. Neither runner starts input automatically; this is a breaking change in v0.8.0.
-- Commands are delivered through `events().console` on the main thread before updates. Input is split on whitespace, text from `#` onward is ignored, and lines with no arguments are discarded.
+- Commands are delivered through `runtime().events().console` on the main thread before updates. Input is split on whitespace, text from `#` onward is ignored, and lines with no arguments are discarded.
 - Discards queued commands before enabling delivery. Calling it while delivery is already enabled does nothing.
 - The first call creates the process's only detached reader, which consumes standard input until EOF or process exit. Later calls reuse it; a reader that has reached EOF is not restarted.
-- `console::stop()` disables delivery while the reader continues consuming input and discards lines read while stopped. Normally, both runners stop delivery before the app's `exit()` and `cleanup()`.
+- `console::stop()` disables delivery while the reader continues consuming input and discards lines read while stopped. Runtime stops the service after App ending; owner-scoped listeners retire at ending.
 - Supports LF and CRLF line endings, including a final line without a newline at EOF.
 - External control text is bounded to 1 MiB per line (excluding LF, including CR), 1024 pending commands and 16 MiB of pending raw text. An oversized line is drained and rejected whole; a full queue drops the new whole command. Reading continues without waiting for app delivery. Each store emits one Warning on its first rejection and retains cumulative internal loss counts for the process lifetime; stopping/restarting delivery does not reset them.
 - On Web, logs a notice and leaves delivery disabled.
 - On macOS, a logout, restart or shutdown during a running handler skips `console::stop()` before `exit()`; see `App::exit`.
 '''
 details.ja = '''
+- v0.8.0 移行: CoreEvents::console / events().console を削除しました。runtime().events().console に置き換えます。互換 alias や App への fan-out はありません。
 - ウィンドウ付きアプリでもヘッドレスアプリでも、`setup()` で `console::start()` を明示的に呼んでください。どちらのランナーも入力を自動では開始しません。これは v0.8.0 の破壊的変更です。
-- コマンドは更新処理より前に、メインスレッドで `events().console` を通じて届きます。入力を空白文字で分割し、`#` 以降を無視し、引数がない行は破棄します。
+- コマンドは更新処理より前に、メインスレッドで `runtime().events().console` を通じて届きます。入力を空白文字で分割し、`#` 以降を無視し、引数がない行は破棄します。
 - 配信を有効にする前に、キューに残っているコマンドを破棄します。すでに有効な場合は何もしません。
 - 初回の呼び出しで、プロセス内で唯一の切り離された読み取りスレッドを作成し、EOF またはプロセス終了まで標準入力を読み取ります。以後の呼び出しは同じスレッドを使い、EOF に達した読み取りは再開しません。
-- `console::stop()` は配信を無効にしますが、読み取りスレッドは入力を読み続け、停止中に読んだ行を破棄します。通常は、どちらのランナーもアプリの `exit()` と `cleanup()` より前に配信を停止します。
+- `console::stop()` は配信を無効にしますが、読み取りスレッドは入力を読み続け、停止中に読んだ行を破棄します。Runtime は App ending 後でサービスを停止し、所有購読は ending で退役します。
 - LF と CRLF の改行に対応し、EOF 直前の改行がない最終行も扱います。
 - 外部からの制御テキストには、1 行 1 MiB（LF を除き CR を含む）、待機コマンド 1024 件、待機中の生テキスト合計 16 MiB の上限があります。長すぎる行は最後まで読み捨てて全体を拒否し、キューが満杯なら新しいコマンド全体を破棄します。アプリの配信を待たずに読み取りを続けます。各保存先は初回の拒否時に Warning を 1 回出し、プロセスの有効期間中は内部の累積損失数を保持します。配信の停止・再開ではリセットしません。
 - Web では通知ログを出力し、配信は無効のままです。
 - macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、`exit()` の前に `console::stop()` は呼ばれません。`App::exit` を参照してください。
 '''
 details.ko = '''
+- v0.8.0 이전: CoreEvents::console / events().console은 제거되었습니다. runtime().events().console로 바꾸세요. 호환 alias와 App fan-out은 없습니다.
 - 창 앱과 헤드리스 앱 모두 `setup()`에서 `console::start()`를 명시적으로 호출하세요. 어느 러너도 입력을 자동으로 시작하지 않습니다. 이는 v0.8.0의 호환성을 깨는 변경입니다.
-- 명령은 업데이트 전에 메인 스레드에서 `events().console`을 통해 전달됩니다. 입력을 공백 문자로 나누고, `#` 이후의 텍스트를 무시하며, 인수가 없는 줄은 버립니다.
+- 명령은 업데이트 전에 메인 스레드에서 `runtime().events().console`을 통해 전달됩니다. 입력을 공백 문자로 나누고, `#` 이후의 텍스트를 무시하며, 인수가 없는 줄은 버립니다.
 - 전달을 활성화하기 전에 큐에 남은 명령을 버립니다. 이미 활성화되어 있으면 아무 작업도 하지 않습니다.
 - 최초 호출에서 프로세스의 유일한 분리된 읽기 스레드를 생성하며, EOF 또는 프로세스 종료까지 표준 입력을 읽습니다. 이후 호출은 같은 스레드를 사용하며, EOF에 도달한 읽기는 다시 시작하지 않습니다.
-- `console::stop()`은 전달을 비활성화하지만 읽기 스레드는 입력을 계속 읽으며 중지 중에 읽은 줄을 버립니다. 일반적으로 두 러너 모두 앱의 `exit()`와 `cleanup()` 전에 전달을 중지합니다.
+- `console::stop()`은 전달을 비활성화하지만 읽기 스레드는 입력을 계속 읽으며 중지 중에 읽은 줄을 버립니다. Runtime은 App ending 후 서비스를 중지하며 소유 구독은 ending에서 회수합니다.
 - LF와 CRLF 줄바꿈을 지원하며, EOF 직전의 줄바꿈 없는 마지막 줄도 처리합니다.
 - 외부 제어 텍스트는 줄당 1 MiB(LF 제외, CR 포함), 대기 명령 1024개, 대기 원문 합계 16 MiB로 제한됩니다. 너무 긴 줄은 끝까지 읽고 전체를 거부하며, 큐가 가득 차면 새 명령 전체를 버립니다. 앱의 전달을 기다리지 않고 계속 읽습니다. 각 저장소는 첫 거부 시 Warning을 한 번 출력하고 프로세스 수명 동안 내부 누적 손실 수를 유지합니다. 전달을 중지하거나 재개해도 초기화하지 않습니다.
 - Web에서는 알림 로그를 출력하고 전달을 비활성화 상태로 유지합니다.
 - macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 `exit()` 전에 `console::stop()`은 호출되지 않습니다. `App::exit`을 참고하십시오.
 '''
 snippet = '''
-void tcApp::setup() {
-    console::start();
-}
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener input;
+    void setup() override {
+        input = tc::runtime().events().console.listen([](tc::ConsoleEventArgs& e) {
+            tc::logNotice() << e.raw;
+        });
+        tc::console::start();
+    }
+};
+int main() { return tc::runHeadlessApp<Demo>(); }
 '''
 related = ["App::exit"]
 
@@ -62885,60 +62954,515 @@ int main() { return tc::runApp<Demo>(); }
 related = ["Window::setApp", "Window::close"]
 
 ["WindowSettings::quitOnClose"]
-description.en = "Whether closing this window requests application quit."
-description.ja = "この窓の close でアプリ終了を要求するか。"
-description.ko = "이 창을 닫을 때 앱 종료를 요청할지 여부。"
+description.en = "Requests cancellable process quit after this Window closes."
+description.ja = "この窓を閉じた後で取り消し可能なプロセス終了を要求する。"
+description.ko = "이 창을 닫은 뒤 취소 가능한 프로세스 종료를 요청한다."
 details.en = '''
-- Default false for every window, including the launcher window. True requests normal application quit when this window closes; normal quit can be vetoed. False closes only this window. A windowed Runtime ends when its last window closes. This bool has no units; use Window::setQuitOnClose for a live change. Native close veto details follow platform event delivery.
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Default false for every Window. This unitless bool applies only to this Window. True requests normal process quit after actual close; false still requests it on last-Window close. All Runtime/App quit listeners can veto; a veto leaves the Window closed and Runtime services advancing with zero Windows. OS close first asks closeRequested. Set on the main thread; WindowSettings supplies the creation value, Window::setQuitOnClose changes a live value and does nothing to a closed handle. App::exit also runs on setApp/destroyApp/reload and is unsuitable for this policy. A manual alternative is a retained Window events().exit listener calling exitApp(); exitApp during ending does nothing.
 '''
 details.ja = '''
-- 起動窓を含む全窓で既定値は false です。true の窓を閉じると通常のアプリ終了を要求し、通常終了は veto できます。false ではこの窓だけ閉じます。窓のある Runtime は最後の窓で終了します。単位のない bool です。起動後は Window::setQuitOnClose で変更します。native close の veto の時期は各 OS のイベント配送に従います。
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- 全窓で既定は false です。単位のない bool で対象窓だけに作用します。true は実際に閉じた後で通常の process 終了を要求し、false でも最後の窓なら要求します。全 Runtime/App リスナーが veto でき、拒否しても窓は閉じたままで窓 0 個の Runtime サービスは進みます。OS close は先に closeRequested を聞きます。メインスレッドで設定し、WindowSettings は作成値、Window::setQuitOnClose は live 値を変え、閉じた handle には作用しません。App::exit は setApp/destroyApp/reload でも走るのでこの用途に向きません。手動なら保持した Window events().exit リスナーから exitApp() を呼びます。ending 中の exitApp は何もしません。
 '''
 details.ko = '''
-- 시작 창을 포함한 모든 창의 기본값은 false입니다. true인 창을 닫으면 일반 앱 종료를 요청하며 거부할 수 있습니다. false이면 해당 창만 닫습니다. 창이 있는 Runtime은 마지막 창이 닫히면 종료합니다. 단위 없는 bool이며 실행 중에는 Window::setQuitOnClose로 변경합니다. native close 거부 시점은 플랫폼 이벤트 전달을 따릅니다。
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- 모든 창의 기본값은 false입니다. 단위 없는 bool이며 해당 창에만 적용합니다. true이면 실제 닫은 뒤 일반 process 종료를 요청하고 false여도 마지막 창이면 요청합니다. 모든 Runtime/App 리스너가 거부할 수 있으며 거부해도 창은 닫혀 있고 창 0개의 Runtime 서비스는 진행합니다. OS close는 먼저 closeRequested를 묻습니다. 메인 스레드에서 설정하며 WindowSettings는 생성 값, Window::setQuitOnClose는 live 값을 변경하고 닫힌 handle에는 작용하지 않습니다. App::exit은 setApp/destroyApp/reload에도 실행하므로 이 용도에 적합하지 않습니다. 수동 대안은 보관한 Window events().exit 리스너에서 exitApp() 호출입니다. ending 중 exitApp은 아무 작업도 하지 않습니다.
 '''
 snippet = '''
-class Demo : public tc::App {};
-int main() { return tc::runApp<Demo>(tc::WindowSettings{}.setQuitOnClose(true)); }
-'''
-related = ["WindowSettings::setQuitOnClose", "Window::setQuitOnClose"]
-
-["WindowSettings::setQuitOnClose"]
-description.en = "Sets this window’s creation-time quit-on-close option."
-description.ja = "この窓の作成時の quitOnClose 設定を変更する。"
-description.ko = "이 창의 생성 시 quitOnClose 설정을 변경한다."
-details.en = '''
-- Default false for every window, including the launcher window. True requests normal application quit when this window closes; normal quit can be vetoed. False closes only this window. A windowed Runtime ends when its last window closes. This bool has no units; use Window::setQuitOnClose for a live change. Native close veto details follow platform event delivery.
-'''
-details.ja = '''
-- 起動窓を含む全窓で既定値は false です。true の窓を閉じると通常のアプリ終了を要求し、通常終了は veto できます。false ではこの窓だけ閉じます。窓のある Runtime は最後の窓で終了します。単位のない bool です。起動後は Window::setQuitOnClose で変更します。native close の veto の時期は各 OS のイベント配送に従います。
-'''
-details.ko = '''
-- 시작 창을 포함한 모든 창의 기본값은 false입니다. true인 창을 닫으면 일반 앱 종료를 요청하며 거부할 수 있습니다. false이면 해당 창만 닫습니다. 창이 있는 Runtime은 마지막 창이 닫히면 종료합니다. 단위 없는 bool이며 실행 중에는 Window::setQuitOnClose로 변경합니다. native close 거부 시점은 플랫폼 이벤트 전달을 따릅니다。
-'''
-snippet = '''
-class Demo : public tc::App {};
-int main() { return tc::runApp<Demo>(tc::WindowSettings{}.setQuitOnClose(true)); }
-'''
-related = ["WindowSettings::quitOnClose"]
-
-["Window::setQuitOnClose"]
-description.en = "Changes whether this window’s close requests application quit."
-description.ja = "この窓の close でアプリ終了を要求する設定を変更する。"
-description.ko = "이 창의 close가 앱 종료를 요청할지 변경한다."
-details.en = '''
-- Default false for every window, including the launcher window. True requests normal application quit when this window closes; normal quit can be vetoed. False closes only this window. A windowed Runtime ends when its last window closes. This bool has no units; use Window::setQuitOnClose for a live change. Native close veto details follow platform event delivery. Main thread; applies to subsequent close requests. No-op on a retired native lifetime.
-'''
-details.ja = '''
-- 起動窓を含む全窓で既定値は false です。true の窓を閉じると通常のアプリ終了を要求し、通常終了は veto できます。false ではこの窓だけ閉じます。窓のある Runtime は最後の窓で終了します。単位のない bool です。起動後は Window::setQuitOnClose で変更します。native close の veto の時期は各 OS のイベント配送に従います。 メインスレッドで設定し、次の close 要求から有効です。退役済み native lifetime に作用しません。
-'''
-details.ko = '''
-- 시작 창을 포함한 모든 창의 기본값은 false입니다. true인 창을 닫으면 일반 앱 종료를 요청하며 거부할 수 있습니다. false이면 해당 창만 닫습니다. 창이 있는 Runtime은 마지막 창이 닫히면 종료합니다. 단위 없는 bool이며 실행 중에는 Window::setQuitOnClose로 변경합니다. native close 거부 시점은 플랫폼 이벤트 전달을 따릅니다。 메인 스레드에서 설정하며 이후 close 요청부터 적용합니다. 회수된 native lifetime에는 영향을 주지 않습니다。
-'''
-snippet = '''
+#include <TrussC.h>
+// App code uses events(); non-App code uses runtime().events().
 class Demo : public tc::App {
-    void setup() override { getWindow()->setQuitOnClose(true); }
+    tc::EventListener quit, manual;
+    void setup() override {
+        getWindow()->setQuitOnClose(true); // live setter; default false
+        quit = tc::events().exitRequested.listen([](tc::ExitRequestEventArgs& e) {
+            e.cancel = false; // an earlier veto still wins
+        });
+        // Manual alternative to the option, if needed:
+        // manual = getWindow()->events().exit.listen([] { tc::exitApp(); });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>(tc::WindowSettings{}.setQuitOnClose(true));
+}
+'''
+related = ["CoreEvents::closeRequested", "CoreEvents::exit", "App::exit"]
+["WindowSettings::setQuitOnClose"]
+description.en = "Requests cancellable process quit after this Window closes."
+description.ja = "この窓を閉じた後で取り消し可能なプロセス終了を要求する。"
+description.ko = "이 창을 닫은 뒤 취소 가능한 프로세스 종료를 요청한다."
+details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Default false for every Window. This unitless bool applies only to this Window. True requests normal process quit after actual close; false still requests it on last-Window close. All Runtime/App quit listeners can veto; a veto leaves the Window closed and Runtime services advancing with zero Windows. OS close first asks closeRequested. Set on the main thread; WindowSettings supplies the creation value, Window::setQuitOnClose changes a live value and does nothing to a closed handle. App::exit also runs on setApp/destroyApp/reload and is unsuitable for this policy. A manual alternative is a retained Window events().exit listener calling exitApp(); exitApp during ending does nothing.
+'''
+details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- 全窓で既定は false です。単位のない bool で対象窓だけに作用します。true は実際に閉じた後で通常の process 終了を要求し、false でも最後の窓なら要求します。全 Runtime/App リスナーが veto でき、拒否しても窓は閉じたままで窓 0 個の Runtime サービスは進みます。OS close は先に closeRequested を聞きます。メインスレッドで設定し、WindowSettings は作成値、Window::setQuitOnClose は live 値を変え、閉じた handle には作用しません。App::exit は setApp/destroyApp/reload でも走るのでこの用途に向きません。手動なら保持した Window events().exit リスナーから exitApp() を呼びます。ending 中の exitApp は何もしません。
+'''
+details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- 모든 창의 기본값은 false입니다. 단위 없는 bool이며 해당 창에만 적용합니다. true이면 실제 닫은 뒤 일반 process 종료를 요청하고 false여도 마지막 창이면 요청합니다. 모든 Runtime/App 리스너가 거부할 수 있으며 거부해도 창은 닫혀 있고 창 0개의 Runtime 서비스는 진행합니다. OS close는 먼저 closeRequested를 묻습니다. 메인 스레드에서 설정하며 WindowSettings는 생성 값, Window::setQuitOnClose는 live 값을 변경하고 닫힌 handle에는 작용하지 않습니다. App::exit은 setApp/destroyApp/reload에도 실행하므로 이 용도에 적합하지 않습니다. 수동 대안은 보관한 Window events().exit 리스너에서 exitApp() 호출입니다. ending 중 exitApp은 아무 작업도 하지 않습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+// App code uses events(); non-App code uses runtime().events().
+class Demo : public tc::App {
+    tc::EventListener quit, manual;
+    void setup() override {
+        getWindow()->setQuitOnClose(true); // live setter; default false
+        quit = tc::events().exitRequested.listen([](tc::ExitRequestEventArgs& e) {
+            e.cancel = false; // an earlier veto still wins
+        });
+        // Manual alternative to the option, if needed:
+        // manual = getWindow()->events().exit.listen([] { tc::exitApp(); });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>(tc::WindowSettings{}.setQuitOnClose(true));
+}
+'''
+related = ["CoreEvents::closeRequested", "CoreEvents::exit", "App::exit"]
+["Window::setQuitOnClose"]
+description.en = "Requests cancellable process quit after this Window closes."
+description.ja = "この窓を閉じた後で取り消し可能なプロセス終了を要求する。"
+description.ko = "이 창을 닫은 뒤 취소 가능한 프로세스 종료를 요청한다."
+details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Default false for every Window. This unitless bool applies only to this Window. True requests normal process quit after actual close; false still requests it on last-Window close. All Runtime/App quit listeners can veto; a veto leaves the Window closed and Runtime services advancing with zero Windows. OS close first asks closeRequested. Set on the main thread; WindowSettings supplies the creation value, Window::setQuitOnClose changes a live value and does nothing to a closed handle. App::exit also runs on setApp/destroyApp/reload and is unsuitable for this policy. A manual alternative is a retained Window events().exit listener calling exitApp(); exitApp during ending does nothing.
+'''
+details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- 全窓で既定は false です。単位のない bool で対象窓だけに作用します。true は実際に閉じた後で通常の process 終了を要求し、false でも最後の窓なら要求します。全 Runtime/App リスナーが veto でき、拒否しても窓は閉じたままで窓 0 個の Runtime サービスは進みます。OS close は先に closeRequested を聞きます。メインスレッドで設定し、WindowSettings は作成値、Window::setQuitOnClose は live 値を変え、閉じた handle には作用しません。App::exit は setApp/destroyApp/reload でも走るのでこの用途に向きません。手動なら保持した Window events().exit リスナーから exitApp() を呼びます。ending 中の exitApp は何もしません。
+'''
+details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- 모든 창의 기본값은 false입니다. 단위 없는 bool이며 해당 창에만 적용합니다. true이면 실제 닫은 뒤 일반 process 종료를 요청하고 false여도 마지막 창이면 요청합니다. 모든 Runtime/App 리스너가 거부할 수 있으며 거부해도 창은 닫혀 있고 창 0개의 Runtime 서비스는 진행합니다. OS close는 먼저 closeRequested를 묻습니다. 메인 스레드에서 설정하며 WindowSettings는 생성 값, Window::setQuitOnClose는 live 값을 변경하고 닫힌 handle에는 작용하지 않습니다. App::exit은 setApp/destroyApp/reload에도 실행하므로 이 용도에 적합하지 않습니다. 수동 대안은 보관한 Window events().exit 리스너에서 exitApp() 호출입니다. ending 중 exitApp은 아무 작업도 하지 않습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+// App code uses events(); non-App code uses runtime().events().
+class Demo : public tc::App {
+    tc::EventListener quit, manual;
+    void setup() override {
+        getWindow()->setQuitOnClose(true); // live setter; default false
+        quit = tc::events().exitRequested.listen([](tc::ExitRequestEventArgs& e) {
+            e.cancel = false; // an earlier veto still wins
+        });
+        // Manual alternative to the option, if needed:
+        // manual = getWindow()->events().exit.listen([] { tc::exitApp(); });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>(tc::WindowSettings{}.setQuitOnClose(true));
+}
+'''
+related = ["CoreEvents::closeRequested", "CoreEvents::exit", "App::exit"]
+["Runtime"]
+description.en = "Host-owned process services and process events."
+description.ja = "ホストが所有するプロセスサービスとイベント。"
+description.ko = "호스트가 소유하는 프로세스 서비스와 이벤트."
+details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- Obtain the process facade with runtime(); do not construct it. Its event hub has process lifetime and no implicit Window. No units or creation settings. The native host must keep turning for queue delivery.
+'''
+details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- runtime() で取得し、直接構築しません。イベント hub はプロセス寿命を持ち、暗黙の窓を選びません。単位・作成設定はありません。キュー配送には native host の turn が必要です。
+'''
+details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- runtime()으로 얻으며 직접 생성하지 않습니다. 이벤트 hub는 프로세스 수명이며 암묵적 창을 선택하지 않습니다. 단위·생성 설정은 없습니다. 큐 전달에는 native host turn이 필요합니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["runtime", "Runtime::events"]
+
+
+["runtime"]
+description.en = "Accesses the process event hub without selecting a Window."
+description.ja = "窓を選ばずプロセスのイベント hub にアクセスする。"
+description.ko = "창 선택 없이 프로세스 이벤트 hub에 접근한다."
+details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- The same host hub is shared by guests. exitRequested/deviceLost/hotReloadUnload also fan out to Apps; console is Runtime-only. Access and subscribe on the main thread; keep returned references only for process lifetime. Web has no stdin console, and mobile/Web do not supply desktop close buttons.
+'''
+details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- ゲストも同じ host hub を共有します。exitRequested/deviceLost/hotReloadUnload は App にも配り、console は Runtime だけです。アクセス・購読はメインスレッドで行い、参照はプロセス寿命内で使います。Web に stdin console はなく、mobile/Web に desktop の閉じるボタンはありません。
+'''
+details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- guest도 같은 host hub를 공유합니다. exitRequested/deviceLost/hotReloadUnload는 App에도 전달하며 console은 Runtime 전용입니다. 메인 스레드에서 접근·구독하며 참조는 프로세스 수명 안에서 사용합니다. Web에는 stdin console이 없고 mobile/Web에는 desktop 닫기 버튼이 없습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["RuntimeEvents::exitRequested", "RuntimeEvents::console"]
+
+
+["Runtime::events"]
+description.en = "Accesses the process event hub without selecting a Window."
+description.ja = "窓を選ばずプロセスのイベント hub にアクセスする。"
+description.ko = "창 선택 없이 프로세스 이벤트 hub에 접근한다."
+details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- The same host hub is shared by guests. exitRequested/deviceLost/hotReloadUnload also fan out to Apps; console is Runtime-only. Access and subscribe on the main thread; keep returned references only for process lifetime. Web has no stdin console, and mobile/Web do not supply desktop close buttons.
+'''
+details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- ゲストも同じ host hub を共有します。exitRequested/deviceLost/hotReloadUnload は App にも配り、console は Runtime だけです。アクセス・購読はメインスレッドで行い、参照はプロセス寿命内で使います。Web に stdin console はなく、mobile/Web に desktop の閉じるボタンはありません。
+'''
+details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- guest도 같은 host hub를 공유합니다. exitRequested/deviceLost/hotReloadUnload는 App에도 전달하며 console은 Runtime 전용입니다. 메인 스레드에서 접근·구독하며 참조는 프로세스 수명 안에서 사용합니다. Web에는 stdin console이 없고 mobile/Web에는 desktop 닫기 버튼이 없습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["RuntimeEvents::exitRequested", "RuntimeEvents::console"]
+
+
+["RuntimeEvents"]
+description.en = "Accesses the process event hub without selecting a Window."
+description.ja = "窓を選ばずプロセスのイベント hub にアクセスする。"
+description.ko = "창 선택 없이 프로세스 이벤트 hub에 접근한다."
+details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- The same host hub is shared by guests. exitRequested/deviceLost/hotReloadUnload also fan out to Apps; console is Runtime-only. Access and subscribe on the main thread; keep returned references only for process lifetime. Web has no stdin console, and mobile/Web do not supply desktop close buttons.
+'''
+details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- ゲストも同じ host hub を共有します。exitRequested/deviceLost/hotReloadUnload は App にも配り、console は Runtime だけです。アクセス・購読はメインスレッドで行い、参照はプロセス寿命内で使います。Web に stdin console はなく、mobile/Web に desktop の閉じるボタンはありません。
+'''
+details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- guest도 같은 host hub를 공유합니다. exitRequested/deviceLost/hotReloadUnload는 App에도 전달하며 console은 Runtime 전용입니다. 메인 스레드에서 접근·구독하며 참조는 프로세스 수명 안에서 사용합니다. Web에는 stdin console이 없고 mobile/Web에는 desktop 닫기 버튼이 없습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["RuntimeEvents::exitRequested", "RuntimeEvents::console"]
+
+
+["RuntimeEvents::exitRequested"]
+description.en = "Receives a cancellable process quit request."
+description.ja = "取り消し可能なプロセス終了要求を受け取る。"
+description.ko = "취소 가능한 프로세스 종료 요청을 받는다."
+details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Runtime/App listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept; if storing it fails, the veto stands with an empty reason. Generic Event::notify semantics are unchanged.
+- exitApp(code), requestExitApp, native termination, quitOnClose and last-Window close use this path. OS close queries closeRequested before actual closure; process veto does not restore that closed Window. Headless signals retain their immediate stop behavior; forced OS termination cannot be vetoed.
+'''
+details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Runtime/App の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。保存に失敗しても reason を空にして拒否を維持します。一般の Event::notify の意味は変えません。
+- exitApp(code)、requestExitApp、native 終了、quitOnClose、最後の窓の close がこの経路を使います。OS close は実際の閉鎖より前に closeRequested を聞きます。process veto で閉じた窓は復活しません。headless signal は即停止の意味を保ち、OS の強制終了は拒否できません。
+'''
+details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Runtime/App 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 저장에 실패하면 빈 reason으로 거부를 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- exitApp(code), requestExitApp, native 종료, quitOnClose, 마지막 창 close가 이 경로를 사용합니다. OS close는 실제 닫기 전에 closeRequested를 묻습니다. process 거부로 닫힌 창을 복원하지 않습니다. headless signal은 즉시 정지 의미를 유지하며 OS 강제 종료는 거부할 수 없습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = tc::events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Unsaved document";
+        });
+    }
+};
+int main() {
+    auto process = tc::runtime().events().exitRequested.listen([](tc::ExitRequestEventArgs&) {
+        tc::logNotice() << "Process quit requested";
+    });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["ExitRequestEventArgs", "CoreEvents::closeRequested", "exitApp"]
+
+
+["CoreEvents::closeRequested"]
+description.en = "Queries whether one OS Window close may proceed."
+description.ja = "OS からの一つの窓の close を許可するか問い合わせる。"
+description.ko = "하나의 OS 창 닫기를 허용할지 묻는다."
+details.en = '''
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Window listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept. Generic Event::notify semantics are unchanged.
+- Only this Window receives OS ×, Cmd+W or Alt+F4 requests. Rejection leaves it open. Acceptance closes it, then requests cancellable process quit if quitOnClose is true or it was the last Window. Process veto leaves it closed and services active with zero Windows. Window::close bypasses this query; process termination/session logout never synthesizes it. Main-thread borrowed payload, false/empty defaults, no units. Mobile/Web have no desktop close buttons.
+'''
+details.ja = '''
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Window の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。一般の Event::notify の意味は変えません。
+- OS の ×、Cmd+W、Alt+F4 で対象の窓だけに通知します。拒否なら開いたままです。許可で閉じ、その後 quitOnClose が true または最後の窓なら取り消し可能な process 終了を要求します。process veto でも閉じたままで、窓 0 個でもサービスは進みます。Window::close は聞かず、process 終了・logout も合成しません。メインスレッドの借用引数、既定 false/空、単位なしです。mobile/Web に desktop ボタンはありません。
+'''
+details.ko = '''
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Window 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- OS ×, Cmd+W, Alt+F4 요청은 해당 창만 받습니다. 거부하면 열어 둡니다. 허용하면 닫은 뒤 quitOnClose가 true이거나 마지막 창이면 취소 가능한 process 종료를 요청합니다. process 거부 후에도 닫힌 상태이며 창 0개에서 서비스가 진행합니다. Window::close는 묻지 않으며 process 종료·logout도 합성하지 않습니다. 메인 스레드 빌린 인수, 기본 false/빈 값, 단위 없음입니다. mobile/Web에는 desktop 버튼이 없습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener close;
+    bool unsaved = true;
+    void setup() override {
+        close = tc::events().closeRequested.listen([this](tc::CloseRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Save before closing";
+        });
+    }
 };
 int main() { return tc::runApp<Demo>(); }
 '''
-related = ["Window::close", "App::exit"]
+related = ["Window::close", "Window::setQuitOnClose", "CoreEvents::exitRequested"]
+
+
+["CloseRequestEventArgs"]
+description.en = "Queries whether one OS Window close may proceed."
+description.ja = "OS からの一つの窓の close を許可するか問い合わせる。"
+description.ko = "하나의 OS 창 닫기를 허용할지 묻는다."
+details.en = '''
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Window listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept. Generic Event::notify semantics are unchanged.
+- Only this Window receives OS ×, Cmd+W or Alt+F4 requests. Rejection leaves it open. Acceptance closes it, then requests cancellable process quit if quitOnClose is true or it was the last Window. Process veto leaves it closed and services active with zero Windows. Window::close bypasses this query; process termination/session logout never synthesizes it. Main-thread borrowed payload, false/empty defaults, no units. Mobile/Web have no desktop close buttons.
+'''
+details.ja = '''
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Window の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。一般の Event::notify の意味は変えません。
+- OS の ×、Cmd+W、Alt+F4 で対象の窓だけに通知します。拒否なら開いたままです。許可で閉じ、その後 quitOnClose が true または最後の窓なら取り消し可能な process 終了を要求します。process veto でも閉じたままで、窓 0 個でもサービスは進みます。Window::close は聞かず、process 終了・logout も合成しません。メインスレッドの借用引数、既定 false/空、単位なしです。mobile/Web に desktop ボタンはありません。
+'''
+details.ko = '''
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Window 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- OS ×, Cmd+W, Alt+F4 요청은 해당 창만 받습니다. 거부하면 열어 둡니다. 허용하면 닫은 뒤 quitOnClose가 true이거나 마지막 창이면 취소 가능한 process 종료를 요청합니다. process 거부 후에도 닫힌 상태이며 창 0개에서 서비스가 진행합니다. Window::close는 묻지 않으며 process 종료·logout도 합성하지 않습니다. 메인 스레드 빌린 인수, 기본 false/빈 값, 단위 없음입니다. mobile/Web에는 desktop 버튼이 없습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener close;
+    bool unsaved = true;
+    void setup() override {
+        close = tc::events().closeRequested.listen([this](tc::CloseRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Save before closing";
+        });
+    }
+};
+int main() { return tc::runApp<Demo>(); }
+'''
+related = ["Window::close", "Window::setQuitOnClose", "CoreEvents::exitRequested"]
+
+
+["CloseRequestEventArgs::cancel"]
+description.en = "Queries whether one OS Window close may proceed."
+description.ja = "OS からの一つの窓の close を許可するか問い合わせる。"
+description.ko = "하나의 OS 창 닫기를 허용할지 묻는다."
+details.en = '''
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Window listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept. Generic Event::notify semantics are unchanged.
+- Only this Window receives OS ×, Cmd+W or Alt+F4 requests. Rejection leaves it open. Acceptance closes it, then requests cancellable process quit if quitOnClose is true or it was the last Window. Process veto leaves it closed and services active with zero Windows. Window::close bypasses this query; process termination/session logout never synthesizes it. Main-thread borrowed payload, false/empty defaults, no units. Mobile/Web have no desktop close buttons.
+'''
+details.ja = '''
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Window の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。一般の Event::notify の意味は変えません。
+- OS の ×、Cmd+W、Alt+F4 で対象の窓だけに通知します。拒否なら開いたままです。許可で閉じ、その後 quitOnClose が true または最後の窓なら取り消し可能な process 終了を要求します。process veto でも閉じたままで、窓 0 個でもサービスは進みます。Window::close は聞かず、process 終了・logout も合成しません。メインスレッドの借用引数、既定 false/空、単位なしです。mobile/Web に desktop ボタンはありません。
+'''
+details.ko = '''
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Window 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- OS ×, Cmd+W, Alt+F4 요청은 해당 창만 받습니다. 거부하면 열어 둡니다. 허용하면 닫은 뒤 quitOnClose가 true이거나 마지막 창이면 취소 가능한 process 종료를 요청합니다. process 거부 후에도 닫힌 상태이며 창 0개에서 서비스가 진행합니다. Window::close는 묻지 않으며 process 종료·logout도 합성하지 않습니다. 메인 스레드 빌린 인수, 기본 false/빈 값, 단위 없음입니다. mobile/Web에는 desktop 버튼이 없습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener close;
+    bool unsaved = true;
+    void setup() override {
+        close = tc::events().closeRequested.listen([this](tc::CloseRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Save before closing";
+        });
+    }
+};
+int main() { return tc::runApp<Demo>(); }
+'''
+related = ["Window::close", "Window::setQuitOnClose", "CoreEvents::exitRequested"]
+
+
+["CloseRequestEventArgs::reason"]
+description.en = "Queries whether one OS Window close may proceed."
+description.ja = "OS からの一つの窓の close を許可するか問い合わせる。"
+description.ko = "하나의 OS 창 닫기를 허용할지 묻는다."
+details.en = '''
+- Each listener receives fresh `cancel=false` and an empty reason. All vetoes are ORed across every Window listener; later false cannot undo a veto. A throwing listener vetoes and later listeners still run. The first nonempty reason from a veto is kept. Generic Event::notify semantics are unchanged.
+- Only this Window receives OS ×, Cmd+W or Alt+F4 requests. Rejection leaves it open. Acceptance closes it, then requests cancellable process quit if quitOnClose is true or it was the last Window. Process veto leaves it closed and services active with zero Windows. Window::close bypasses this query; process termination/session logout never synthesizes it. Main-thread borrowed payload, false/empty defaults, no units. Mobile/Web have no desktop close buttons.
+'''
+details.ja = '''
+- 各リスナーに新しい `cancel=false` と空の reason を渡します。全 Window の拒否を OR 集約し、後続の false で解除できません。例外を投げたリスナーも拒否とし、後続も呼びます。拒否から最初の空でない reason を保持します。一般の Event::notify の意味は変えません。
+- OS の ×、Cmd+W、Alt+F4 で対象の窓だけに通知します。拒否なら開いたままです。許可で閉じ、その後 quitOnClose が true または最後の窓なら取り消し可能な process 終了を要求します。process veto でも閉じたままで、窓 0 個でもサービスは進みます。Window::close は聞かず、process 終了・logout も合成しません。メインスレッドの借用引数、既定 false/空、単位なしです。mobile/Web に desktop ボタンはありません。
+'''
+details.ko = '''
+- 각 리스너는 새 `cancel=false`와 빈 reason을 받습니다. 모든 Window 거부를 OR로 모으며 이후 false로 취소할 수 없습니다. 예외도 거부로 처리하며 이후 리스너를 계속 호출합니다. 거부 중 첫 비어 있지 않은 reason을 유지합니다. 일반 Event::notify 의미는 그대로입니다.
+- OS ×, Cmd+W, Alt+F4 요청은 해당 창만 받습니다. 거부하면 열어 둡니다. 허용하면 닫은 뒤 quitOnClose가 true이거나 마지막 창이면 취소 가능한 process 종료를 요청합니다. process 거부 후에도 닫힌 상태이며 창 0개에서 서비스가 진행합니다. Window::close는 묻지 않으며 process 종료·logout도 합성하지 않습니다. 메인 스레드 빌린 인수, 기본 false/빈 값, 단위 없음입니다. mobile/Web에는 desktop 버튼이 없습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener close;
+    bool unsaved = true;
+    void setup() override {
+        close = tc::events().closeRequested.listen([this](tc::CloseRequestEventArgs& e) {
+            e.cancel = unsaved; e.reason = "Save before closing";
+        });
+    }
+};
+int main() { return tc::runApp<Demo>(); }
+'''
+related = ["Window::close", "Window::setQuitOnClose", "CoreEvents::exitRequested"]
+
+
+["RuntimeEvents::deviceLost"]
+description.en = "Receives the deviceLost lifecycle notification. "
+description.ja = "deviceLost のライフサイクル通知を受け取る。"
+description.ko = "deviceLost 수명 주기 알림을 받는다."
+details.en = '''
+- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- D3D11 only; reason is GetDeviceRemovedReason HRESULT bits (uint32_t). One mutable payload is shared in delivery order, with cancel initially false; later listeners may change it back to false. This is not quit OR aggregation. Final false logs failure and exits with code 1; true continues non-GPU services without recovery. A throwing callback is contained and later listeners continue.
+'''
+details.ja = '''
+- App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- D3D11 のみで reason は GetDeviceRemovedReason の HRESULT bits (uint32_t) です。一つの可変引数を順に共有し、cancel は最初 false、後続は false に戻せます。quit の OR 集約ではありません。最終 false はエラーを記録して code 1 で終了し、true は GPU 回復なしで非 GPU サービスを続けます。callback 例外を捕捉し後続を呼びます。
+'''
+details.ko = '''
+- App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- D3D11 전용이며 reason은 GetDeviceRemovedReason HRESULT bits(uint32_t)입니다. 하나의 가변 인수를 순서대로 공유하고 cancel은 처음 false이며 이후 false로 되돌릴 수 있습니다. quit OR 집계가 아닙니다. 마지막 false는 오류 기록 후 code 1로 종료하고 true는 GPU 복구 없이 비 GPU 서비스를 계속합니다. callback 예외를 처리하고 이후 리스너를 호출합니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener life;
+    void setup() override {
+        life = tc::events().deviceLost.listen([](tc::DeviceLostEventArgs& e) { e.cancel = true; });
+    }
+};
+int main() {
+    auto addon = tc::runtime().events().deviceLost.listen([](tc::DeviceLostEventArgs& e) { tc::logNotice() << e.reason; });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["Runtime::events", "EventListener"]
+
+
+["RuntimeEvents::hotReloadUnload"]
+description.en = "Receives the hotReloadUnload lifecycle notification. "
+description.ja = "hotReloadUnload のライフサイクル通知を受け取る。"
+description.ko = "hotReloadUnload 수명 주기 알림을 받는다."
+details.en = '''
+- App-tied code, including per-App addons, uses `events()`; process-wide observers use `runtime().events()`.
+- Runtime listeners run first; one snapshot of attached Apps follows in reverse attachment order, including headless Apps. Slots disconnected or retired before their turn are skipped; new Apps/listeners wait for another request. Each callback runs under its subscriber App token, on the main thread, independent of drawing or Window count. Retain the EventListener; App ending retires owned subscriptions.
+- No payload, units or cancellation. Only hot reload emits this, before ending the replacing generation’s still-attached Apps. Runtime receives one notification, then only that generation’s Apps in reverse attachment order. Unrelated Apps are excluded. At final unload after shutdown only the Runtime notification remains; already-ended Apps are not revived. Owned subscriptions retire at App ending; per-App addon hooks belong on that App’s events(), so other generations keep their state.
+'''
+details.ja = '''
+- App ごとの addon を含む App に結び付くコードは `events()`、プロセス全体の監視は `runtime().events()` を使います。
+- Runtime のリスナーを先に呼び、その後、一回の snapshot に含まれる各 App を付いた順の逆に呼びます。headless App も含みます。順番までに解除・退役した slot は飛ばし、新しい App・購読は次の要求から対象です。各 callback は購読者の App token 下でメインスレッド上を走り、描画や窓数に依存しません。EventListener を保持してください。App 終了で所有購読を退役します。
+- 引数・単位・取り消しはありません。hot reload のみが、差し替える世代の接続中 App を終了する前に通知します。Runtime に一回、その世代の App だけに付いた順の逆で配り、別世代は除外します。shutdown 後の最終 unload は Runtime 通知のみで、終了済み App を復活させません。所有購読は App ending で退役し、App ごとの addon hook はその App の events() に置き、他世代の状態を保ちます。
+'''
+details.ko = '''
+- App별 애드온을 포함한 App에 속한 코드는 `events()`, 프로세스 전체 관찰자는 `runtime().events()`를 사용합니다.
+- Runtime 리스너를 먼저 호출하고, 한 snapshot의 App을 연결 역순으로 호출합니다. headless App도 포함합니다. 차례 전에 해제·회수된 slot은 건너뛰며 새 App·리스너는 다음 요청부터 대상입니다. 각 callback은 구독자의 App token으로 메인 스레드에서 실행하며 그리기와 창 수에 의존하지 않습니다. EventListener를 보관하세요. App 종료 시 소유 구독을 회수합니다.
+- 인수·단위·취소는 없습니다. hot reload에서 교체할 세대의 연결된 App을 종료하기 전에 알립니다. Runtime에 한 번 알린 뒤 해당 세대 App만 연결 역순으로 호출하며 다른 세대는 제외합니다. shutdown 뒤 최종 unload에는 Runtime만 알리고 종료한 App은 복원하지 않습니다. 소유 구독은 App ending에서 회수하며 App별 애드온 hook은 해당 App의 events()에 두어 다른 세대의 상태를 유지합니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::EventListener life;
+    void setup() override {
+        life = tc::events().hotReloadUnload.listen([] { tc::logNotice() << "App will be replaced"; });
+    }
+};
+int main() {
+    auto addon = tc::runtime().events().hotReloadUnload.listen([] { tc::logNotice() << "Guest generation retiring"; });
+    return tc::runApp<Demo>();
+}
+'''
+related = ["Runtime::events", "EventListener"]

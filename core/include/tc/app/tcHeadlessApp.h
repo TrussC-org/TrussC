@@ -209,20 +209,8 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
     headless::pollExitSignal();
     if (headless::running && !app.isExitRequested()
             && headless::quitRequested.exchange(false)) {
-        EntryStackGuard guard(AppEntry::Event);
-        setExitBlockReason("");
-        ExitRequestEventArgs args;
-        ctx.coreEvents->exitRequested.notify(args);
+        if (dispatchExitRequested()) headless::running = false;
         headless::pollExitSignal();
-        if (args.cancel) {
-            // A listener may also issue an uncancellable exit.
-            if (headless::running) {
-                setExitBlockReason(args.reason);
-                clearExitReason();
-            }
-        } else {
-            headless::running = false;
-        }
     }
 }
 } // namespace internal

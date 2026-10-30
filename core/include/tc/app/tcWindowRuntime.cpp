@@ -93,7 +93,7 @@ private:
     Entry* last_ = nullptr;
 };
 struct Runtime {
-    unsigned entries = 0, turns = 0;
+    unsigned entries = 0, turns = 0, appExitCallbacks = 0;
     bool servicing = false, bootstrapping = false, servicedTurn = false;
     uint64_t epoch = 0;
     void (*reload)() = nullptr;
@@ -105,7 +105,9 @@ struct Runtime {
     AttachmentLedger attachments, sessionAttachments;
     RetiringGeneration* retiringGenerations = nullptr;
     std::vector<std::weak_ptr<AppOwner>> owners;
-    bool stopping = false;
+    bool stopping = false, notifyingQuit = false;
+    RuntimeEvents events;
+    Event<void> maintenance;
     uintptr_t nextGeneration = 0;
 
 #ifndef __EMSCRIPTEN__
@@ -221,15 +223,141 @@ void drainGuestCode() noexcept {
 RuntimeActivityScope::RuntimeActivityScope() noexcept { ++runtime().entries; }
 RuntimeActivityScope::~RuntimeActivityScope() noexcept { --runtime().entries; }
 WindowContext*& currentWindowCtx() { return runtime().selected; }
+namespace {
+// Establish the subscriber's physical context before taking its stack guard.
+// A Runtime subscription owned by App B must restore B's stacks, not those of
+// the process or another Window which happened to receive the native callback.
+template<class T, class Snapshot>
+void notifyRequestListeners(const Snapshot& saved, T& aggregate, const char* name) {
+    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+        T fresh;
+        try {
+            AppCallbackScope subscriber(std::move(owner));
+            EntryStackGuard guard(AppEntry::Event, name);
+            callback(fresh);
+        } catch (...) {
+            fresh.cancel = true;
+            reportTeardownFailure("request listener");
+        }
+        if (fresh.cancel) {
+            aggregate.cancel = true;
+            if (aggregate.reason.empty() && !fresh.reason.empty()) aggregate.reason = std::move(fresh.reason);
+        }
+    });
+}
+}
 void dispatchConsoleEvent(ConsoleEventArgs& args) {
+    RuntimeActivityScope activity;
+    AppOwnerScope process({});
+    WindowContextScope context(nullptr);
+    EntryStackGuard guard(AppEntry::Event, "console");
     TeardownSteps steps;
-    if (headless::isActive()) {
-        steps.run("headless console event", [&] { nonWindowContext().coreEvents->console.notify(args); });
-        return;
+    auto saved = FrameworkEventAccess::snapshot(runtime().events.console);
+    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+        steps.run("Runtime console listener", [&] {
+            AppCallbackScope subscriber(std::move(owner));
+            EntryStackGuard listener(AppEntry::Event, "console");
+            callback(args);
+        });
+    });
+}
+namespace {
+// Capture all App event slots before any user code. A listener that replaces or
+// closes a sibling cannot enroll a replacement in the current notification.
+template<class T, class Invoke>
+void notifyProcessEvent(Event<T>& processEvent, Event<T> CoreEvents::* member,
+                        const char* name, Invoke invoke, const void* generation = nullptr, bool generationOnly = false) {
+    using Snapshot = decltype(FrameworkEventAccess::snapshot(processEvent));
+    struct Target {
+        std::shared_ptr<App> app;
+        std::shared_ptr<Window> window;
+        WindowContext* context;
+        Snapshot listeners;
+    };
+    RuntimeActivityScope activity;
+    AppOwnerScope process({});
+    std::vector<Target> targets;
+    auto processListeners = FrameworkEventAccess::snapshot(processEvent);
+    for (auto* entry = runtime().attachments.last(); entry; entry = entry->previous) {
+        auto owner = appOwner(*entry->app);
+        if (!owner || owner->ended || owner->retiring || !owner->context ||
+                (generationOnly && (!generation || owner->generation != generation))) continue;
+        auto window = owner->window ? WindowRequestAccess::retainHostOwner(*owner->window) : nullptr;
+        targets.push_back({entry->app, std::move(window), owner->context,
+            FrameworkEventAccess::snapshot(owner->context->coreEvents->*member)});
     }
-    const auto windows = runtime().windows;
-    for (const auto& window : windows) if (window->isOpen())
-        steps.run("Window console event", [&] { window->events().console.notify(args); });
+    WindowContextScope processContext(nullptr);
+    { EntryStackGuard guard(AppEntry::Event, name); invoke(processListeners); }
+    for (auto& target : targets) {
+        auto owner = appOwner(*target.app);
+        if (!owner || owner->ended || owner->retiring || !owner->token->load()) continue;
+        if (target.window) {
+            WindowEntryScope entry(*target.window, false, false, false);
+            if (!entry) continue;
+            EntryStackGuard guard(AppEntry::Event, name);
+            invoke(target.listeners);
+        } else {
+            WindowContextScope entry(target.context);
+            EntryStackGuard guard(AppEntry::Event, name);
+            invoke(target.listeners);
+        }
+    }
+}
+}
+bool dispatchExitRequested() noexcept {
+    auto& state = runtime();
+    if (state.stopping || state.notifyingQuit) return false;
+    state.notifyingQuit = true;
+    struct Restore { bool& flag; ~Restore() { flag = false; } } restore{state.notifyingQuit};
+    ExitRequestEventArgs aggregate;
+    setExitBlockReason("");
+    try {
+        notifyProcessEvent(state.events.exitRequested, &CoreEvents::exitRequested, "exitRequested",
+            [&](const auto& saved) { notifyRequestListeners<ExitRequestEventArgs>(saved, aggregate, "exitRequested"); });
+    } catch (...) { aggregate.cancel = true; reportTeardownFailure("process quit notification"); }
+    if (aggregate.cancel) {
+        cancelWindowExitSignal(); clearExitReason();
+        // The explanation is optional; allocation failure must retain the veto.
+        try { setExitBlockReason(aggregate.reason); }
+        catch (...) { setExitBlockReason(""); }
+    }
+    return !aggregate.cancel;
+}
+void dispatchDeviceLost(uint32_t reason) noexcept {
+    DeviceLostEventArgs args;
+    args.reason = reason;
+    TeardownSteps steps;
+    steps.run("device loss notification", [&] {
+        notifyProcessEvent(runtime().events.deviceLost, &CoreEvents::deviceLost, "deviceLost",
+            [&](const auto& saved) { FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+                steps.run("device loss listener", [&] {
+                    AppCallbackScope subscriber(std::move(owner));
+                    EntryStackGuard listener(AppEntry::Event, "deviceLost");
+                    callback(args);
+                });
+            }); });
+    });
+    // Device loss retains its existing mutable cancel meaning, without OR.
+    if (!args.cancel) {
+        logError("D3D11") << "Device lost, GetDeviceRemovedReason=0x" << std::hex << reason << "; exiting";
+        appExitCode() = 1;
+        setExitReason("device-lost");
+        if (headless::isActive()) headless::running = false;
+        else sapp_quit();
+    }
+}
+void dispatchHotReloadUnload(const void* generation) noexcept {
+    TeardownSteps steps;
+    steps.run("hot reload notification", [&] {
+        notifyProcessEvent(runtime().events.hotReloadUnload, &CoreEvents::hotReloadUnload, "hotReloadUnload",
+            [&](const auto& saved) { FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+                steps.run("hot reload listener", [&] {
+                    AppCallbackScope subscriber(std::move(owner));
+                    EntryStackGuard listener(AppEntry::Event, "hotReloadUnload");
+                    callback();
+                });
+            }); }, generation, true);
+    });
 }
 std::shared_ptr<std::atomic<bool>>& appRunToken() {
     auto& state = runtime();
@@ -252,18 +380,38 @@ void beginRuntimeRun() {
         RuntimeActivityScope starting;
         cancelResourceBackends();
     }
-    state.runToken = std::move(token);
+    std::atomic_store(&state.runToken, std::move(token));
     ++state.epoch;
     state.servicedTurn = false;
     state.stopping = false;
     prepareRuntimeExit();
 }
-void requestNormalQuit(const char* reason) {
+void requestNormalQuit(const char* reason, std::optional<int> code) {
+#ifndef __EMSCRIPTEN__
+    if (!isMainThread()) {
+        // A process request outlives its App, but never its Runtime run. Read
+        // only the published run token here; main owns all exit-state checks.
+        auto run = std::atomic_load(&runtime().runToken);
+        if (!run || !run->load()) return;
+        mainThreadQueue().send([run = std::move(run), reason = std::string(reason), code] {
+            if (!run->load() || run != runtime().runToken || runtimeEnding()) return;
+            AppOwnerScope process({});
+            requestNormalQuit(reason.c_str(), code);
+        });
+        return;
+    }
+#endif
+    if (runtimeEnding() || appEnding() || runtime().notifyingQuit) return;
+    if (code) appExitCode() = *code;
     setExitReason(reason);
     if (headless::isActive()) headless::quitRequested = true;
     else sapp_request_quit();
 }
 bool runtimeEnding() noexcept { return runtime().stopping; }
+bool appEnding() noexcept {
+    auto owner = currentAppOwner();
+    return runtime().appExitCallbacks || (owner && (owner->retiring || owner->callbacksClosing));
+}
 void retainRuntimeWindow(const std::shared_ptr<Window>& window) {
     if (runtime().stopping) throw std::logic_error("the Runtime is ending");
     runtime().windows.push_back(window);
@@ -272,7 +420,7 @@ void retainRuntimeWindow(const std::shared_ptr<Window>& window) {
 void releaseRuntimeWindow(Window& window) noexcept {
     auto& state = runtime();
     std::erase_if(state.windows, [&](const auto& owner) { return owner.get() == &window; });
-    if (!state.stopping && state.windows.empty() && !headless::isActive()) {
+    if (!state.stopping && (WindowRequestAccess::quitOnClose(window) || state.windows.empty()) && !headless::isActive()) {
         TeardownSteps steps;
         steps.run("last Window quit", [] { requestNormalQuit("last-window-close"); });
     }
@@ -391,7 +539,7 @@ CoreEvents& unavailableWindowEvents() {
                 events.exit, events.hotReloadUnload, events.exitRequested, events.deviceLost,
                 events.keyPressed, events.keyReleased, events.mousePressed, events.mouseReleased,
                 events.mouseMoved, events.mouseDragged, events.mouseScrolled, events.windowResized,
-                events.occludedChanged, events.filesDropped, events.clipboardPasted, events.console,
+                events.occludedChanged, events.filesDropped, events.clipboardPasted, events.closeRequested,
                 events.touchPressed, events.touchMoved, events.touchReleased, events.rawEvent);
         }
     };
@@ -645,6 +793,8 @@ void deliverAppExit(App& app) {
     owner->exitDelivered = true;
     AppOwnerScope scope(owner);
     EntryStackGuard entry(AppEntry::Exit);
+    ++runtime().appExitCallbacks;
+    struct ExitScope { ~ExitScope() { --runtime().appExitCallbacks; } } exitScope;
     app.exit();
 }
 void resetAppNodeReferences(const App&) noexcept;
@@ -980,6 +1130,15 @@ void processQueues() {
 #endif
 }
 void processMaintenance() {
+    TeardownSteps steps;
+    auto listeners = FrameworkEventAccess::snapshot(runtime().maintenance);
+    FrameworkEventAccess::forEachOwned(listeners, [&](auto& callback, auto owner) {
+        steps.run("Runtime maintenance listener", [&] {
+            AppCallbackScope subscriber(std::move(owner));
+            EntryStackGuard guard(AppEntry::Event, "maintenance");
+            callback();
+        });
+    });
     drainGuestCode();
     if (sg_isvalid()) sapp_tc_gl_activate_idle();
 #ifndef __EMSCRIPTEN__
@@ -999,6 +1158,7 @@ WindowLifecycleScope::~WindowLifecycleScope() noexcept {
     --coordinator().entries;
     --window_.entryDepth_;
 }
+Event<void>& runtimeMaintenanceEvent() { return runtime().maintenance; }
 HostServiceOperations& hostServiceOperationsForTests() {
     return runtime().services;
 }
@@ -1041,6 +1201,17 @@ void afterHostTurn() noexcept {
     steps.run("host turn maintenance", [&] {
         restoreWindowContext(nullptr);
         ProcessDrawingScope drawing;
+        // Single-surface hosts have no native Window close callback. Retire the
+        // addressed virtual Window only after all callbacks have returned.
+        for (;;) {
+            std::shared_ptr<Window> closing;
+            for (const auto& window : state.windows) {
+                if (window->isOpen() && !WindowRequestAccess::binding(*window).handle.id &&
+                        WindowRequestAccess::closeRequested(*window)) { closing = window; break; }
+            }
+            if (!closing) break;
+            WindowRequestAccess::teardown(*closing);
+        }
         if (auto maintenance = hostServiceOperationsForTests().maintenance) maintenance();
     });
     steps.run("maintenance caller restoration", [&] { restoreWindowContext(previous); });
@@ -1585,32 +1756,12 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 window.events().clipboardPasted.notify(args);
                 break;
             }
-            case SAPP_EVENTTYPE_TC_DEVICE_LOST: {
-                DeviceLostEventArgs args;
-                args.reason = ev->device_lost_reason;
-                window.events().deviceLost.notify(args);
-                if (!args.cancel) {
-                    logError("D3D11") << "Device lost, GetDeviceRemovedReason=0x"
-                        << std::hex << ev->device_lost_reason << "; exiting";
-                    exitApp(1);
-                    setExitReason("device-lost");
-                }
+            case SAPP_EVENTTYPE_TC_DEVICE_LOST:
+                dispatchDeviceLost(ev->device_lost_reason);
                 break;
-            }
-            case SAPP_EVENTTYPE_QUIT_REQUESTED: {
-                // Notify exitRequested event - listeners can cancel by setting args.cancel = true
-                setExitBlockReason("");
-                ExitRequestEventArgs args;
-                window.events().exitRequested.notify(args);
-                if (args.cancel) {
-                    sapp_cancel_quit();
-                    WindowRequestAccess::cancelClose(window);
-                    cancelWindowExitSignal();
-                    clearExitReason();
-                    setExitBlockReason(args.reason);
-                }
+            case SAPP_EVENTTYPE_QUIT_REQUESTED:
+                if (!dispatchExitRequested()) sapp_cancel_quit();
                 break;
-            }
             // These events have no typed TrussC input counterpart.
             case SAPP_EVENTTYPE_INVALID:
             case SAPP_EVENTTYPE_CHAR:
@@ -1643,6 +1794,10 @@ void dispatchWindowDisplayEventForTests(const sapp_event* event, Window& window)
 }
 void singleWindowEvent(const sapp_event* event) noexcept {
     if (!event) return;
+    if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED || event->type == SAPP_EVENTTYPE_TC_DEVICE_LOST) {
+        windowEvent(event, {0}, nullptr);
+        return;
+    }
     TeardownSteps steps;
     steps.run("single-window native event binding", [&] {
         auto* window = resolveWindow();
@@ -1650,27 +1805,10 @@ void singleWindowEvent(const sapp_event* event) noexcept {
     });
 }
 void windowEvent(const sapp_event* event, sapp_window handle, void* user) noexcept {
-    if (event && event->type == SAPP_EVENTTYPE_QUIT_REQUESTED && handle.id == 0 && !user) {
-        // A process quit belongs to Runtime, independently of the initial Window.
-        try {
-            auto windows = runtime().windows; // Keep every receiver alive across reentrant closes.
-            setExitBlockReason("");
-            for (const auto& window : windows) {
-                if (!window || !window->isOpen()) continue;
-                WindowEntryScope entry(*window, false, false, false);
-                if (!entry) continue;
-                EntryStackGuard guard(AppEntry::Event, "exitRequested");
-                ExitRequestEventArgs args;
-                AppCallbackScope scope(window->getApp() ? appOwner(*window->getApp()) : nullptr);
-                window->events().exitRequested.notify(args);
-                if (args.cancel) {
-                    sapp_cancel_quit();
-                    WindowRequestAccess::cancelClose(*window);
-                    cancelWindowExitSignal(); clearExitReason(); setExitBlockReason(args.reason);
-                    break;
-                }
-            }
-        } catch (...) { sapp_cancel_quit(); }
+    if (event && (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED || event->type == SAPP_EVENTTYPE_TC_DEVICE_LOST)) {
+        if (event->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
+            if (!dispatchExitRequested()) sapp_cancel_quit();
+        } else dispatchDeviceLost(event->device_lost_reason);
         return;
     }
     enterWindowEvent(event, handle, user);
@@ -1749,8 +1887,16 @@ bool allowWindowClose(sapp_window handle, void* user) noexcept {
     steps.run("window close request", [&] {
         auto* window = static_cast<Window*>(user);
         if (!window || WindowRequestAccess::binding(*window).handle.id != handle.id) return;
-        if (WindowRequestAccess::quitOnClose(*window)) requestNormalQuit("window-close");
-        else allow = true;
+        if (!window->isOpen() || runtimeEnding()) return;
+        // A code close already made its decision; native replay must not query.
+        if (WindowRequestAccess::closeRequested(*window)) { allow = true; return; }
+        WindowEntryScope entry(*window, false, false, false);
+        if (!entry) return;
+        EntryStackGuard guard(AppEntry::Event, "closeRequested");
+        CloseRequestEventArgs aggregate;
+        auto saved = FrameworkEventAccess::snapshot(window->events().closeRequested);
+        notifyRequestListeners<CloseRequestEventArgs>(saved, aggregate, "closeRequested");
+        allow = !aggregate.cancel;
     });
     return allow;
 }
@@ -1775,4 +1921,9 @@ void singleWindowFrame() noexcept {
     afterHostTurn();
 }
 }
+}
+
+namespace trussc {
+Runtime& runtime() { static Runtime facade; return facade; }
+RuntimeEvents& Runtime::events() { return internal::runtime().events; }
 }

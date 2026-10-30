@@ -7440,8 +7440,7 @@ static void _sapp_tc_win32_restore_console(void) {
     }
 }
 
-/* The device belongs to the app, even when a secondary window detects loss.
-   Route the notification to the main callback, never a secondary Node tree. */
+/* Device loss belongs to Runtime, including after every Window has closed. */
 static void _sapp_tc_d3d11_dispatch_pending_device_loss(void) {
     if (!_sapp_tc_d3d11_take_pending_device_loss(_sapp_tc.app.init_called,
             &_sapp_tc.app.device_lost_event_pending)) return;
@@ -7449,7 +7448,9 @@ static void _sapp_tc_d3d11_dispatch_pending_device_loss(void) {
     memset(&ev, 0, sizeof(ev));
     ev.type = SAPP_EVENTTYPE_TC_DEVICE_LOST;
     ev.device_lost_reason = _sapp_tc.app.device_lost_reason;
-    _sapp_tc_send(_sapp_tc.app.main, &ev);
+    if (_sapp_tc.app.desc._tc_event_cb) {
+        _sapp_tc_deliver_runtime_event(_sapp_tc.app.desc, _sapp_tc.app.init_called, ev);
+    } else _sapp_tc_send(_sapp_tc.app.main, &ev);
 }
 
 static bool _sapp_tc_d3d11_check_device_loss(HRESULT hr) {

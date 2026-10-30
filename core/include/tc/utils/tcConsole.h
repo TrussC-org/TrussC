@@ -10,7 +10,7 @@
 // Usage:
 //   // Receiver side (e.g., in tcApp::setup())
 //   console::start();  // Opt in to stdin commands
-//   events().console.listen([](const ConsoleEventArgs& e) {
+//   runtime().events().console.listen([](const ConsoleEventArgs& e) {
 //       if (e.args[0] == "spawn") {
 //           spawnEnemy(stoi(e.args[1]), stoi(e.args[2]));
 //       }
@@ -279,7 +279,7 @@ namespace internal {
 
 /// Process commands in queue
 /// Called each loop by the windowed and headless runners
-/// Fires events to events().console if commands exist
+/// Fires events to runtime().events().console if commands exist
 inline void processQueue() {
 #ifdef __EMSCRIPTEN__
     // No-op on web

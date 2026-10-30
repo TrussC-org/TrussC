@@ -666,6 +666,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](std::function<void ()> fn) { return trussc::runOnMainThread(fn); },
         [](std::function<void ()> fn, std::weak_ptr<std::atomic<bool>> token) { return trussc::runOnMainThread(fn, token); }
     ));
+    lua->set_function("runtime", []() -> decltype(auto) { return trussc::runtime(); });
     lua->set_function("sameSubnet", [](const std::string & a, const std::string & b, const std::string & netmask) { return trussc::sameSubnet(a, b, netmask); });
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     lua->set_function("saveDialog", sol::overload(

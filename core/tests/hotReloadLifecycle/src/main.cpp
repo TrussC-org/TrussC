@@ -321,7 +321,8 @@ static int runCycles(const std::string& guestPath, int port) {
     // The host's events the guest's inspector singleton listens on (#416)
     auto hostListenerCounts = [] {
         return std::vector<size_t>{events().keyPressed.listenerCount(), events().exit.listenerCount(),
-                                   events().hotReloadUnload.listenerCount()};
+                                   events().hotReloadUnload.listenerCount(), runtime().events().hotReloadUnload.listenerCount(),
+                                   internal::runtimeMaintenanceEvent().listenerCount()};
     };
 
     internal::beginRuntimeRun();
@@ -399,10 +400,18 @@ static int runCycles(const std::string& guestPath, int port) {
             return fail(4, "guest MCP registrations not visible to the host");
         }
 
-        // A guest singleton listening on the host's events (#416)
-        static_cast<tcApp*>(app)->useInspectorToggleKey();
+        // App-owned addon hooks stay on this App's hub; Runtime observers
+        // are not enrolled in per-App cleanup (#416, C2 follow-up 1).
+        const auto unloadBeforeInspector = events().hotReloadUnload.listenerCount();
+        const auto runtimeUnloadBeforeInspector = runtime().events().hotReloadUnload.listenerCount();
+        {
+            internal::AppCallbackScope owner(internal::appOwner(*app));
+            internal::EntryStackGuard entry(internal::AppEntry::Event, "inspector fixture");
+            static_cast<tcApp*>(app)->useInspectorToggleKey();
+        }
         if (events().keyPressed.listenerCount() != boundListenerCounts[0] + 1 ||
-            events().hotReloadUnload.listenerCount() <= countsBeforeLoad[2]) {
+            events().hotReloadUnload.listenerCount() != unloadBeforeInspector + 1 ||
+            runtime().events().hotReloadUnload.listenerCount() != runtimeUnloadBeforeInspector) {
             return fail(42, "the guest's NodeInspector::setToggleKey() did not listen on the host's events");
         }
 
@@ -1019,7 +1028,9 @@ static int runReloadCheck() {
                                    ev.mouseMoved.listenerCount(),    ev.mouseDragged.listenerCount(),
                                    ev.mouseScrolled.listenerCount(), ev.keyPressed.listenerCount(),
                                    ev.keyReleased.listenerCount(),   ev.afterFrame.listenerCount(),
-                                   ev.exit.listenerCount(),          ev.hotReloadUnload.listenerCount()};
+                                   ev.exit.listenerCount(),          ev.hotReloadUnload.listenerCount(),
+                                   runtime().events().hotReloadUnload.listenerCount(),
+                                   internal::runtimeMaintenanceEvent().listenerCount()};
     };
     auto countsText = [](const std::vector<size_t>& c) {
         std::string t;

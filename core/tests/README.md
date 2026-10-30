@@ -747,10 +747,10 @@ Fitting requests run every check strictly, without SKIPs.
   end event was lost (not among the touches at the next BEGAN) is dropped so
   the next finger down presses.
 - `headlessExit/` — headless exit protocol (#378, #383): pending-signal
-  retention and second-signal escalation (POSIX child processes), forced and cancellable
+  retention and second-signal escalation (POSIX child processes), immediate signal/App-flag stops and cancellable process
   exits, cleanup and exit codes, main-thread dispatch, signal reasons, clean
   consecutive runs, and deterministic 100-step catch-up passes that stop only
-  for uncancellable exits. No display or timing-dependent assertions.
+  for immediate signal/App-flag stops. Runtime-first headless quit and fresh per-listener false preserve a veto against later false. No display or timing-dependent assertions.
 - `secondaryTimerCreation/`: native pre-creation delta regression with deterministic timestamps. Use `--display`.
 - `windowTick`: common-tick scheduling, listener timers, frame samples, read-only FPS, real draw counts, headless zero draws and fractional DPI conversion. `--display` checks native presentation and main clear color/visibility, hidden-main updates while a visible secondary draws, upload-only GPU boundaries, and non-throwing invalid-swapchain retry. Hidden drawing is skipped in idle EVENT_DRIVEN mode or retains configured/native pacing when hidden updates are enabled.
   `tcbuild.sh env python3 core/tests/windowTick/host-entry-test` links the production common entry/coordinator and exercises addressed Window and process entries without a display. Add `TC_HOST_ENTRY_MUTATIONS=1 TC_HOST_ENTRY_EXTRA_MUTATIONS=1` after `env` to run compiled host, launch-client and scheduler mutations. `tcbuild.sh env TC_HOST_TURN_MUTATIONS=1 python3 tools/tests/test_host_turn_hooks.py` executes native event guards, no-draw X11 turns and nested AppKit turn arbitration with stubs; it does not claim Windows/macOS SDK compilation.
@@ -1125,3 +1125,22 @@ resource-bearing listeners, the atlas same-key upload deferral, shadow consumer
 replay before a referenced slot is overwritten, and native secondary policy
 routing. Resource lifetimes keep base's rules (see #995); these tests do not
 check FBO consumers carried across idle commits.
+
+C2 process and close coverage:
+
+- `mainWindowAttach/src/c2ProcessChecks.h` checks Runtime-first/reverse-attachment
+  lifecycle delivery, unsaved A/clean B in both orders, later false, first veto
+  reason, throwing listeners, subscriber stack restoration, sibling close/swap,
+  generation-filtered unload, unchanged device-loss mutation, both-window OS
+  close veto/allow, code-close bypass, quitOnClose, last close, Window0 services,
+  the manual Window-exit quit listener, and inert exitApp in App::exit. The
+  surface-only close fixture verifies deferred retirement at the host boundary.
+- `secondaryEventDelivery --display` also checks Runtime/local quit ordering and
+  OS-close veto with later false on a live secondary native Window.
+- `headlessConsole --windowed` uses the real native host and deterministic queued
+  commands: before first draw, after the initial Window closes, then Window0
+  after vetoing last-window process quit. It checks subscriber owner scope,
+  registration retirement and exactly-once Runtime console delivery. The normal
+  headless stdin subprocess cases remain part of the own-binary suite.
+- `windowTick/event-converter-test` classifies quit/device loss as process events;
+  they have no Window raw-event fan-out. Native input keeps raw-before-typed order.

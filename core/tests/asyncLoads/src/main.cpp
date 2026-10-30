@@ -605,7 +605,7 @@ void pathsAudioAndFontThreading() {
     voice.stop(); shutdownAudio();
 }
 
-void runtime() {
+void runtimeChecks() {
     Image image; int events = 0;
     auto listener = image.onLoad.listen([&](LoadResult&) { ++events; });
     image.loadAsync(png); internal::waitForResourceLoadsForTests();
@@ -749,7 +749,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             fs::remove_all(fixtureDir);
         });
     } else {
-        replacementAndCancel(); lifetimeAndReentrancy(); runtime(); exitTests(argv[0]);
+        replacementAndCancel(); lifetimeAndReentrancy(); runtimeChecks(); exitTests(argv[0]);
         if (!(argc == 2 && string(argv[1]) == "--lifecycle-only")) {
             successAndDelivery(); overrides(); parity(); pathsAudioAndFontThreading(); fontWorkerRetirement(); dpiContextParity();
             runHeadlessApp<HeadlessExitApp>();
