@@ -65,7 +65,7 @@ public:
                 tween.loop(-1).yoyo();
             }
 
-            tweens.push_back(move(tween));
+            tweens.push_back(std::move(tween));
         }
 
         // Set up complete event listeners

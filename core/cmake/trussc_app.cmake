@@ -21,6 +21,8 @@
 #
 # =============================================================================
 
+include("${CMAKE_CURRENT_LIST_DIR}/tc_fetch_quiet.cmake")
+
 # CI can share dependency sources across otherwise independent app builds.
 # Explicit CMake settings (including -D overrides) always take precedence.
 if(DEFINED ENV{TRUSSC_FETCHCONTENT_DIR} AND NOT DEFINED FETCHCONTENT_BASE_DIR)
@@ -335,14 +337,11 @@ endif()
             target_compile_options(guest PRIVATE /Z7)
             set_target_properties(guest PROPERTIES LINK_FLAGS "/DEBUG /PDBALTPATH:none")
         endif()
-        # Guest: disable codegen optimization to speed up reload iterations.
-        # Host and TrussC keep the project's configured optimization level;
-        # only the hot-reload Guest trades runtime speed for compile speed.
-        # Trailing position ensures these flags override the earlier -O2/-O3
-        # inherited from CMAKE_CXX_FLAGS_<CONFIG>.
-        if(MSVC)
-            target_compile_options(guest PRIVATE /Od)
-        else()
+        # GCC/Clang Guest: disable optimization to speed up reload iterations.
+        # Host and TrussC keep the project's configured optimization level.
+        # GCC/Clang use the last -O flag. MSVC keeps configured optimization:
+        # appending /Od would emit D9025 when overriding /O2.
+        if(NOT MSVC)
             target_compile_options(guest PRIVATE -O0)
         endif()
 

@@ -13,6 +13,7 @@ import plistlib
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -21,6 +22,8 @@ import zipfile
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
 WORKFLOW = yaml.load((ROOT / '.github/workflows/release.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 ARCHIVE_REFS = [('v1.2.3', 'v1.2.3'), ('fix/a', 'fix-a'),
                 ('fix-a', 'fix-a'), ('fix/release/check', 'fix-release-check')]
@@ -204,17 +207,17 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 }
                 generator.write_text('cmake_minimum_required(VERSION 3.20)\n' + ''.join(
                     f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer, encoding="utf-8")
-                self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
+                self.ok(run_build(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
                 source.write_text('TC_HOT_RELOAD(App)\n', encoding="utf-8")
                 state.write_text('ON', encoding="utf-8")
-                self.ok(subprocess.run(check_command, text=True, capture_output=True, encoding="utf-8", errors="replace"))
+                self.ok(run_build(check_command, text=True, capture_output=True, encoding="utf-8", errors="replace"))
                 source.write_text('int x;\n', encoding="utf-8")
-                result = subprocess.run(check_command, text=True, stderr=subprocess.STDOUT,
+                result = run_build(check_command, text=True, stderr=subprocess.STDOUT,
                                         stdout=subprocess.PIPE, encoding="utf-8", errors="replace")
                 self.assertNotEqual(result.returncode, 0, result.stdout)
                 self.assertIn('hot reload state changed', result.stdout)
                 state.write_text('OFF', encoding="utf-8")
-                self.ok(subprocess.run(check_command, text=True, capture_output=True, encoding="utf-8", errors="replace"))
+                self.ok(run_build(check_command, text=True, capture_output=True, encoding="utf-8", errors="replace"))
 
         # Drive paths from the failing runner must also survive the CMake parser.
         scanner = self.root / 'D:/a/TrussC/TrussC/TrussC/core/cmake/tc_hot_reload_scan.cmake'
@@ -227,14 +230,14 @@ class ReleaseWorkflowTest(unittest.TestCase):
                       _TC_HR_EXPLICIT_SOURCES=r'D:\a\app with spaces\one.cpp;D:\a\app\two.cpp')
         generator.write_text('cmake_minimum_required(VERSION 3.20)\n' + ''.join(
             f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer, encoding="utf-8")
-        self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
+        self.ok(run_build(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
         with generated.open('a', encoding="utf-8") as out:
             for key, value in [('SRC_DIR', values['_TC_HR_SRC_DIR']),
                                ('CMAKELISTS', values['_TC_HR_CMAKELISTS']),
                                ('EXPLICIT_SOURCES', values['_TC_HR_EXPLICIT_SOURCES'])]:
                 out.write(f'\nif(NOT "${{{key}}}" STREQUAL [==[{value}]==])\n'
                           f'    message(FATAL_ERROR "{key} changed during parsing")\nendif()\n')
-        self.ok(subprocess.run(check_command, cwd=self.root, text=True, capture_output=True, encoding="utf-8", errors="replace"))
+        self.ok(run_build(check_command, cwd=self.root, text=True, capture_output=True, encoding="utf-8", errors="replace"))
 
     def test_generated_windows_exports_uses_runtime_paths(self):
         # The other generated CMake script takes paths through -D at execution,
@@ -243,13 +246,13 @@ class ReleaseWorkflowTest(unittest.TestCase):
         generator = self.root / 'generate-exports.cmake'
         generator.write_text(f'set(_TC_DEF_SCRIPT [==[{generated}]==])\n' +
                              cmake_script_writer('_TC_DEF_SCRIPT'), encoding="utf-8")
-        self.ok(subprocess.run(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
+        self.ok(run_build(['cmake', '-P', str(generator)], text=True, capture_output=True, encoding="utf-8", errors="replace"))
         library = r'D:\a\app with spaces\TrussC.lib'
         self.mock('dumpbin', "import os, sys\n"
                             "assert sys.argv[1:] == ['/LINKERMEMBER:1', os.environ['LIBRARY_PATH']]\n"
                             "print('  000001 ?fixture@@YAXXZ')\n")
         exports = self.project / 'exports.def'
-        result = subprocess.run(['cmake', f'-DLIB_FILE={library}', f'-DDEF_FILE={exports}',
+        result = run_build(['cmake', f'-DLIB_FILE={library}', f'-DDEF_FILE={exports}',
                                  f'-DDUMPBIN={self.commands / "dumpbin"}', '-P', str(generated)],
                                 env=dict(self.env, LIBRARY_PATH=library), text=True, capture_output=True, encoding="utf-8", errors="replace")
         self.ok(result)

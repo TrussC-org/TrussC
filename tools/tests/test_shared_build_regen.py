@@ -8,6 +8,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
 
 
 @unittest.skipUnless(shutil.which('cmake') and shutil.which('make'),
@@ -69,12 +71,12 @@ file(APPEND "${{CMAKE_BINARY_DIR}}/configure-calls" "configure\\n")
 ''', encoding="utf-8")
 
     def command(self, *args):
-        result = subprocess.run(list(map(str, args)), capture_output=True, text=True, timeout=30, encoding="utf-8")
+        runner = run_build if str(args[0]) == "cmake" else subprocess.run
+        result = runner(list(map(str, args)), capture_output=True, text=True, timeout=30, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def configure(self, app, generator):
-        self.command('cmake', '-S', app, '-B', app / 'build', '-G', generator,
-                     '-DTC_HOT_RELOAD=OFF')
+        self.command('cmake', '-S', app, '-B', app / 'build', '-G', generator)
 
     def build(self, app):
         self.command('cmake', '--build', app / 'build')
@@ -87,7 +89,7 @@ file(APPEND "${{CMAKE_BINARY_DIR}}/configure-calls" "configure\\n")
         args = ['cmake', '--build', str(app / 'build')]
         if target:
             args += ['--target', target]
-        result = subprocess.run(args, capture_output=True, text=True, timeout=30, encoding="utf-8")
+        result = run_build(args, capture_output=True, text=True, timeout=30, encoding="utf-8")
         output = result.stdout + result.stderr
         self.assertNotIn('No rule to make target', output)
         self.assertNotIn('No such file or directory', output)
@@ -213,7 +215,7 @@ file(APPEND "${{CMAKE_BINARY_DIR}}/configure-calls" "configure\\n")
         stamp.write_text(str(self.apps[1] / 'build'), encoding="utf-8")
         os.utime(stamp, ns=(1600000000000000000, 1600000000000000000))
         count = self.configure_count(app)
-        result = subprocess.run(['cmake', '--build', str(app / 'build')],
+        result = run_build(['cmake', '--build', str(app / 'build')],
                                 capture_output=True, text=True, timeout=30, encoding="utf-8")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn('No rule to make target', result.stdout + result.stderr)

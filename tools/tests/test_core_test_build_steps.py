@@ -10,6 +10,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
 # Whole-target options need review even though the runner starts a fresh process
 # per entry: linking/compiling an interceptor affects every entry in that binary.
 # Keep exact operations here, not a blanket exemption for a test directory.
@@ -82,15 +84,15 @@ include("{recipe.as_posix()}")
                    '-S', str(fixture), '-B', str(fixture / 'build')]
         if selected is not None:
             command.append('-DTC_CORE_TEST_SELECT=' + ';'.join(selected))
-        result = subprocess.run(command, capture_output=True, text=True,
-                                encoding='utf-8', errors='replace', timeout=60)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         records = []
-        for line in result.stderr.splitlines():
+        def observe(line):
             if line.startswith('{'):
                 entry = json.loads(line)
                 if 'cmd' in entry:
                     records.append(entry)
+        result = run_build(command, capture_output=True, text=True, on_line=observe,
+                           encoding='utf-8', errors='replace', timeout=60)
+        self.assertEqual(result.returncode, 0, result.stdout)
         shader_log = fixture / 'build/shaders.txt'
         shaders = []
         if shader_log.exists():
@@ -224,7 +226,7 @@ int main() {
 }
 ''', encoding='utf-8')
         binary = self.scratch_root / 'probe'
-        result = subprocess.run([
+        result = run_build([
             os.environ.get('CXX', 'c++'), str(source),
             str(self.tests / 'audioDecodeBounds/src/mallocProbe.cpp'), '-o', str(binary)],
             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)

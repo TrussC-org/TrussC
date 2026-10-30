@@ -237,6 +237,11 @@ void closedForwarding(std::vector<std::string> arguments) {
         int status = 0;
         pid_t waited;
         do { waited = host > 0 ? waitpid(host, &status, 0) : -1; } while (waited < 0 && errno == EINTR);
+        if (waited != host || host <= 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+            std::fprintf(stderr, "closed forwarding scenario %d: wait=%ld, exit=%d, signal=%d\n",
+                         scenario, static_cast<long>(waited),
+                         WIFEXITED(status) ? WEXITSTATUS(status) : -1,
+                         WIFSIGNALED(status) ? WTERMSIG(status) : 0);
         check(waited == host && host > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0,
               "closed forwarding preserves host, child status, diagnostics, signal state and one warning");
     }

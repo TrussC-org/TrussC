@@ -17,10 +17,14 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 HARNESS = 'core/tests/renderRegression'
 
+sys.path.insert(0, str(ROOT / 'tools'))
+from check_build_warnings import run_build
 
-def run(command, cwd=ROOT, capture=False, env=None):
+
+def run(command, cwd=ROOT, capture=False, env=None, build=False):
     print('+ ' + shlex.join(map(str, command)), flush=True)
-    result = subprocess.run(list(map(str, command)), cwd=cwd, check=True, env=env,
+    runner = run_build if build else subprocess.run
+    result = runner(list(map(str, command)), cwd=cwd, check=True, env=env,
                             text=True, stdout=subprocess.PIPE if capture else None, encoding="utf-8")
     return result.stdout.strip() if capture else None
 
@@ -42,10 +46,10 @@ def build(tree, trusscli):
     # CMAKE_{C,CXX}_COMPILER_LAUNCHER env vars on both fresh configurations.
     build_env = dict(os.environ, CCACHE_BASEDIR=str(tree))
     run(wrapper + [trusscli, 'update', '-p', project, '--tc-root', tree, '--ide', 'cmake',
-                   '--no-web', '--no-android', '--no-ios'], env=build_env)
+                   '--no-web', '--no-android', '--no-ios'], env=build_env, build=True)
     run(wrapper + ['cmake', '-S', project, '-B', project / 'build-regression',
-                   '-DCMAKE_BUILD_TYPE=Release', '-DTC_HOT_RELOAD=OFF'], env=build_env)
-    run(wrapper + ['cmake', '--build', project / 'build-regression', '--config', 'Release', '--parallel', '4'], env=build_env)
+                   '-DCMAKE_BUILD_TYPE=Release'], env=build_env, build=True)
+    run(wrapper + ['cmake', '--build', project / 'build-regression', '--config', 'Release', '--parallel', '4'], env=build_env, build=True)
     suffix = '.exe' if sys.platform == 'win32' else ''
     binary = project / 'bin' / ('renderRegression' + suffix)
     if sys.platform == 'darwin':

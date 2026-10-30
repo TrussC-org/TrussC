@@ -788,6 +788,7 @@ static void cover_window_system() {
 }
 
 struct Cover_App : af::Scope<App> {
+    ~Cover_App(); // Never instantiated.
     static void run() {
         (void)App();
         (void)af::val<App>().addChild(af::val<Ptr>(), af::val<bool>());
@@ -936,6 +937,7 @@ struct Cover_App : af::Scope<App> {
 };
 
 struct Cover_AudioDeviceChangedArgs : af::Scope<AudioDeviceChangedArgs> {
+    ~Cover_AudioDeviceChangedArgs(); // Never instantiated.
     static void run() {
         (void)af::val<AudioDeviceChangedArgs>().bufferSize;
         (void)af::val<AudioDeviceChangedArgs>().channels;
@@ -947,6 +949,7 @@ struct Cover_AudioDeviceChangedArgs : af::Scope<AudioDeviceChangedArgs> {
 };
 
 struct Cover_AudioDeviceInfo : af::Scope<AudioDeviceInfo> {
+    ~Cover_AudioDeviceInfo(); // Never instantiated.
     static void run() {
         (void)af::val<AudioDeviceInfo>().isDefault;
         (void)af::val<AudioDeviceInfo>().name;
@@ -954,6 +957,7 @@ struct Cover_AudioDeviceInfo : af::Scope<AudioDeviceInfo> {
 };
 
 struct Cover_AudioEngine : af::Scope<AudioEngine> {
+    ~Cover_AudioEngine(); // Never instantiated.
     static void run() {
         (void)af::val<AudioEngine>().audioDeviceChanged;
         (void)af::val<AudioEngine>().audioIn;
@@ -979,6 +983,7 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
 };
 
 struct Cover_AudioInBuffer : af::Scope<AudioInBuffer> {
+    ~Cover_AudioInBuffer(); // Never instantiated.
     static void run() {
         (void)af::val<AudioInBuffer>().channels;
         (void)af::val<AudioInBuffer>().data;
@@ -989,6 +994,7 @@ struct Cover_AudioInBuffer : af::Scope<AudioInBuffer> {
 };
 
 struct Cover_AudioOutBuffer : af::Scope<AudioOutBuffer> {
+    ~Cover_AudioOutBuffer(); // Never instantiated.
     static void run() {
         (void)af::val<AudioOutBuffer>().channels;
         (void)af::val<AudioOutBuffer>().data;
@@ -999,6 +1005,7 @@ struct Cover_AudioOutBuffer : af::Scope<AudioOutBuffer> {
 };
 
 struct Cover_AudioRecordSettings : af::Scope<AudioRecordSettings> {
+    ~Cover_AudioRecordSettings(); // Never instantiated.
     static void run() {
         (void)af::val<AudioRecordSettings>().channelMap;
         (void)af::val<AudioRecordSettings>().format;
@@ -1006,6 +1013,7 @@ struct Cover_AudioRecordSettings : af::Scope<AudioRecordSettings> {
 };
 
 struct Cover_AudioRecorder : af::Scope<AudioRecorder> {
+    ~Cover_AudioRecorder(); // Never instantiated.
     static void run() {
         (void)AudioRecorder();
         (void)af::val<const AudioRecorder>().getDroppedFrames();
@@ -1018,6 +1026,7 @@ struct Cover_AudioRecorder : af::Scope<AudioRecorder> {
 };
 
 struct Cover_AudioSettings : af::Scope<AudioSettings> {
+    ~Cover_AudioSettings(); // Never instantiated.
     static void run() {
         (void)af::val<AudioSettings>().backend;
         (void)af::val<AudioSettings>().bufferSize;
@@ -1029,6 +1038,7 @@ struct Cover_AudioSettings : af::Scope<AudioSettings> {
 };
 
 struct Cover_AudioStats : af::Scope<AudioStats> {
+    ~Cover_AudioStats(); // Never instantiated.
     static void run() {
         (void)af::val<AudioStats>().clippedSamples;
         (void)af::val<AudioStats>().cpuUsage;
@@ -1050,6 +1060,7 @@ struct Cover_AudioStats : af::Scope<AudioStats> {
 };
 
 struct Cover_BuildInfo : af::Scope<BuildInfo> {
+    ~Cover_BuildInfo(); // Never instantiated.
     static void run() {
         (void)af::val<BuildInfo>().date();
         (void)af::val<BuildInfo>().dateTime();
@@ -1065,6 +1076,7 @@ struct Cover_BuildInfo : af::Scope<BuildInfo> {
 };
 
 struct Cover_CameraContext : af::Scope<CameraContext> {
+    ~Cover_CameraContext(); // Never instantiated.
     static void run() {
         (void)af::val<CameraContext>().pickable;
         (void)af::val<CameraContext>().projection;
@@ -1077,6 +1089,7 @@ struct Cover_CameraContext : af::Scope<CameraContext> {
 };
 
 struct Cover_ChipSoundBundle : af::Scope<ChipSoundBundle> {
+    ~Cover_ChipSoundBundle(); // Never instantiated.
     static void run() {
         (void)af::val<ChipSoundBundle>().add(af::val<const ChipSoundNote>(), af::val<float>());
         (void)af::val<ChipSoundBundle>().add(af::val<ChipSoundNote::Wave>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1089,6 +1102,7 @@ struct Cover_ChipSoundBundle : af::Scope<ChipSoundBundle> {
 };
 
 struct Cover_ChipSoundBundle__Entry : af::Scope<ChipSoundBundle::Entry> {
+    ~Cover_ChipSoundBundle__Entry(); // Never instantiated.
     static void run() {
         (void)af::val<ChipSoundBundle::Entry>().note;
         (void)af::val<ChipSoundBundle::Entry>().time;
@@ -1096,6 +1110,7 @@ struct Cover_ChipSoundBundle__Entry : af::Scope<ChipSoundBundle::Entry> {
 };
 
 struct Cover_ChipSoundNote : af::Scope<ChipSoundNote> {
+    ~Cover_ChipSoundNote(); // Never instantiated.
     static void run() {
         (void)ChipSoundNote();
         (void)ChipSoundNote(af::val<Wave>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1114,12 +1129,14 @@ struct Cover_ChipSoundNote : af::Scope<ChipSoundNote> {
 };
 
 struct Cover_ClipboardPastedEventArgs : af::Scope<ClipboardPastedEventArgs> {
+    ~Cover_ClipboardPastedEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<ClipboardPastedEventArgs>().text;
     }
 };
 
 struct Cover_Color : af::Scope<Color> {
+    ~Cover_Color(); // Never instantiated.
     static void run() {
         (void)Color();
         (void)Color(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1159,6 +1176,7 @@ struct Cover_Color : af::Scope<Color> {
 };
 
 struct Cover_ColorHSB : af::Scope<ColorHSB> {
+    ~Cover_ColorHSB(); // Never instantiated.
     static void run() {
         (void)ColorHSB();
         (void)ColorHSB(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1175,6 +1193,7 @@ struct Cover_ColorHSB : af::Scope<ColorHSB> {
 };
 
 struct Cover_ColorLinear : af::Scope<ColorLinear> {
+    ~Cover_ColorLinear(); // Never instantiated.
     static void run() {
         (void)ColorLinear();
         (void)ColorLinear(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1201,6 +1220,7 @@ struct Cover_ColorLinear : af::Scope<ColorLinear> {
 };
 
 struct Cover_ColorOKLCH : af::Scope<ColorOKLCH> {
+    ~Cover_ColorOKLCH(); // Never instantiated.
     static void run() {
         (void)ColorOKLCH();
         (void)ColorOKLCH(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1217,6 +1237,7 @@ struct Cover_ColorOKLCH : af::Scope<ColorOKLCH> {
 };
 
 struct Cover_ColorOKLab : af::Scope<ColorOKLab> {
+    ~Cover_ColorOKLab(); // Never instantiated.
     static void run() {
         (void)ColorOKLab();
         (void)ColorOKLab(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1233,6 +1254,7 @@ struct Cover_ColorOKLab : af::Scope<ColorOKLab> {
 };
 
 struct Cover_ConsoleEventArgs : af::Scope<ConsoleEventArgs> {
+    ~Cover_ConsoleEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<ConsoleEventArgs>().args;
         (void)af::val<ConsoleEventArgs>().raw;
@@ -1240,6 +1262,7 @@ struct Cover_ConsoleEventArgs : af::Scope<ConsoleEventArgs> {
 };
 
 struct Cover_CoreEvents : af::Scope<CoreEvents> {
+    ~Cover_CoreEvents(); // Never instantiated.
     static void run() {
         (void)af::val<CoreEvents>().afterFrame;
         (void)af::val<CoreEvents>().clipboardPasted;
@@ -1269,6 +1292,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
 };
 
 struct Cover_CurveStyle : af::Scope<CurveStyle> {
+    ~Cover_CurveStyle(); // Never instantiated.
     static void run() {
         (void)af::val<CurveStyle>().mode;
         (void)af::val<CurveStyle>().resolution;
@@ -1277,6 +1301,7 @@ struct Cover_CurveStyle : af::Scope<CurveStyle> {
 };
 
 struct Cover_DeviceLostEventArgs : af::Scope<DeviceLostEventArgs> {
+    ~Cover_DeviceLostEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<DeviceLostEventArgs>().cancel;
         (void)af::val<DeviceLostEventArgs>().reason;
@@ -1284,6 +1309,7 @@ struct Cover_DeviceLostEventArgs : af::Scope<DeviceLostEventArgs> {
 };
 
 struct Cover_DragDropEventArgs : af::Scope<DragDropEventArgs> {
+    ~Cover_DragDropEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<DragDropEventArgs>().files;
         (void)af::val<DragDropEventArgs>().x;
@@ -1292,6 +1318,7 @@ struct Cover_DragDropEventArgs : af::Scope<DragDropEventArgs> {
 };
 
 struct Cover_EasyCam : af::Scope<EasyCam> {
+    ~Cover_EasyCam(); // Never instantiated.
     static void run() {
         (void)EasyCam();
         (void)af::val<EasyCam>().begin();
@@ -1343,6 +1370,7 @@ struct Cover_EasyCam : af::Scope<EasyCam> {
 };
 
 struct Cover_EnumLabelSpan : af::Scope<EnumLabelSpan> {
+    ~Cover_EnumLabelSpan(); // Never instantiated.
     static void run() {
         (void)af::val<EnumLabelSpan>().count;
         (void)af::val<EnumLabelSpan>().labels;
@@ -1350,6 +1378,7 @@ struct Cover_EnumLabelSpan : af::Scope<EnumLabelSpan> {
 };
 
 struct Cover_Environment : af::Scope<Environment> {
+    ~Cover_Environment(); // Never instantiated.
     static void run() {
         (void)Environment();
         (void)af::val<const Environment>().getBrdfLut();
@@ -1365,6 +1394,7 @@ struct Cover_Environment : af::Scope<Environment> {
 };
 
 struct Cover_EventListener : af::Scope<EventListener> {
+    ~Cover_EventListener(); // Never instantiated.
     static void run() {
         (void)EventListener();
         (void)af::val<EventListener>().disconnect();
@@ -1373,6 +1403,7 @@ struct Cover_EventListener : af::Scope<EventListener> {
 };
 
 struct Cover_ExitRequestEventArgs : af::Scope<ExitRequestEventArgs> {
+    ~Cover_ExitRequestEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<ExitRequestEventArgs>().cancel;
         (void)af::val<ExitRequestEventArgs>().reason;
@@ -1380,6 +1411,7 @@ struct Cover_ExitRequestEventArgs : af::Scope<ExitRequestEventArgs> {
 };
 
 struct Cover_Fbo : af::Scope<Fbo> {
+    ~Cover_Fbo(); // Never instantiated.
     static void run() {
         (void)Fbo();
         (void)af::val<Fbo>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<TextureFormat>(), af::val<bool>());
@@ -1427,6 +1459,7 @@ struct Cover_Fbo : af::Scope<Fbo> {
 };
 
 struct Cover_FileDialogResult : af::Scope<FileDialogResult> {
+    ~Cover_FileDialogResult(); // Never instantiated.
     static void run() {
         (void)af::val<FileDialogResult>().fileName;
         (void)af::val<FileDialogResult>().filePath;
@@ -1435,6 +1468,7 @@ struct Cover_FileDialogResult : af::Scope<FileDialogResult> {
 };
 
 struct Cover_FileReader : af::Scope<FileReader> {
+    ~Cover_FileReader(); // Never instantiated.
     static void run() {
         (void)FileReader();
         (void)af::val<FileReader>().close();
@@ -1452,6 +1486,7 @@ struct Cover_FileReader : af::Scope<FileReader> {
 };
 
 struct Cover_FileWriter : af::Scope<FileWriter> {
+    ~Cover_FileWriter(); // Never instantiated.
     static void run() {
         (void)FileWriter();
         (void)af::val<FileWriter>().close();
@@ -1466,6 +1501,7 @@ struct Cover_FileWriter : af::Scope<FileWriter> {
 };
 
 struct Cover_Font : af::Scope<Font> {
+    ~Cover_Font(); // Never instantiated.
     static void run() {
         (void)Font();
         (void)af::val<Font>().clearAtlas();
@@ -1532,6 +1568,7 @@ struct Cover_Font : af::Scope<Font> {
 };
 
 struct Cover_Font__PlacedGlyph : af::Scope<Font::PlacedGlyph> {
+    ~Cover_Font__PlacedGlyph(); // Never instantiated.
     static void run() {
         (void)af::val<Font::PlacedGlyph>().baselineY;
         (void)af::val<Font::PlacedGlyph>().codepoint;
@@ -1544,6 +1581,7 @@ struct Cover_Font__PlacedGlyph : af::Scope<Font::PlacedGlyph> {
 };
 
 struct Cover_FpsSettings : af::Scope<FpsSettings> {
+    ~Cover_FpsSettings(); // Never instantiated.
     static void run() {
         (void)af::val<FpsSettings>().actualVsyncFps;
         (void)af::val<FpsSettings>().drawFps;
@@ -1553,6 +1591,7 @@ struct Cover_FpsSettings : af::Scope<FpsSettings> {
 };
 
 struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
+    ~Cover_FullscreenShader(); // Never instantiated.
     static void run() {
         (void)FullscreenShader();
         (void)af::val<FullscreenShader>().begin();
@@ -1578,6 +1617,7 @@ struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
 };
 
 struct Cover_GrabberFrame : af::Scope<GrabberFrame> {
+    ~Cover_GrabberFrame(); // Never instantiated.
     static void run() {
         (void)af::val<GrabberFrame>().pixels;
         (void)af::val<GrabberFrame>().timestampUs;
@@ -1585,6 +1625,7 @@ struct Cover_GrabberFrame : af::Scope<GrabberFrame> {
 };
 
 struct Cover_GraphicsBackend : af::Scope<GraphicsBackend> {
+    ~Cover_GraphicsBackend(); // Never instantiated.
     static void run() {
         (void)af::val<GraphicsBackend>().isD3D11();
         (void)af::val<GraphicsBackend>().isMetal();
@@ -1597,6 +1638,7 @@ struct Cover_GraphicsBackend : af::Scope<GraphicsBackend> {
 };
 
 struct Cover_HasTexture : af::Scope<HasTexture> {
+    ~Cover_HasTexture(); // Never instantiated.
     static void run() {
         (void)af::val<const HasTexture>().draw(af::val<float>(), af::val<float>());
         (void)af::val<const HasTexture>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1618,6 +1660,7 @@ struct Cover_HasTexture : af::Scope<HasTexture> {
 };
 
 struct Cover_HeadlessSettings : af::Scope<HeadlessSettings> {
+    ~Cover_HeadlessSettings(); // Never instantiated.
     static void run() {
         (void)af::val<HeadlessSettings>().setFps(af::val<float>());
         (void)af::val<HeadlessSettings>().targetFps;
@@ -1625,6 +1668,7 @@ struct Cover_HeadlessSettings : af::Scope<HeadlessSettings> {
 };
 
 struct Cover_IVec2 : af::Scope<IVec2> {
+    ~Cover_IVec2(); // Never instantiated.
     static void run() {
         (void)IVec2();
         (void)IVec2(af::val<int>(), af::val<int>());
@@ -1645,6 +1689,7 @@ struct Cover_IVec2 : af::Scope<IVec2> {
 };
 
 struct Cover_IVec3 : af::Scope<IVec3> {
+    ~Cover_IVec3(); // Never instantiated.
     static void run() {
         (void)IVec3();
         (void)IVec3(af::val<int>(), af::val<int>(), af::val<int>());
@@ -1668,6 +1713,7 @@ struct Cover_IVec3 : af::Scope<IVec3> {
 };
 
 struct Cover_IesProfile : af::Scope<IesProfile> {
+    ~Cover_IesProfile(); // Never instantiated.
     static void run() {
         (void)IesProfile();
         (void)af::val<const IesProfile>().getMaxCandela();
@@ -1682,6 +1728,7 @@ struct Cover_IesProfile : af::Scope<IesProfile> {
 };
 
 struct Cover_Image : af::Scope<Image> {
+    ~Cover_Image(); // Never instantiated.
     static void run() {
         (void)Image();
         (void)af::val<Image>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<bool>());
@@ -1731,6 +1778,7 @@ struct Cover_Image : af::Scope<Image> {
 };
 
 struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
+    ~Cover_JsonReadReflector(); // Never instantiated.
     static void run() {
         (void)JsonReadReflector(af::val<Json>());
         (void)af::val<JsonReadReflector>().applied;
@@ -1757,6 +1805,7 @@ struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
 };
 
 struct Cover_JsonWriteReflector : af::Scope<JsonWriteReflector> {
+    ~Cover_JsonWriteReflector(); // Never instantiated.
     static void run() {
         (void)af::val<JsonWriteReflector>().beginGroup(af::val<const char *>());
         (void)af::val<JsonWriteReflector>().derived;
@@ -1781,6 +1830,7 @@ struct Cover_JsonWriteReflector : af::Scope<JsonWriteReflector> {
 };
 
 struct Cover_KeyEventArgs : af::Scope<KeyEventArgs> {
+    ~Cover_KeyEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<KeyEventArgs>().alt;
         (void)af::val<KeyEventArgs>().consumed;
@@ -1793,6 +1843,7 @@ struct Cover_KeyEventArgs : af::Scope<KeyEventArgs> {
 };
 
 struct Cover_LayoutMod : af::Scope<LayoutMod> {
+    ~Cover_LayoutMod(); // Never instantiated.
     static void run() {
         (void)LayoutMod(af::val<LayoutDirection>(), af::val<float>());
         (void)af::val<const LayoutMod>().getCrossAxis();
@@ -1821,6 +1872,7 @@ struct Cover_LayoutMod : af::Scope<LayoutMod> {
 };
 
 struct Cover_Light : af::Scope<Light> {
+    ~Cover_Light(); // Never instantiated.
     static void run() {
         (void)Light();
         (void)af::val<const Light>().calculate(af::val<const Vec3>(), af::val<const Vec3>(), af::val<const Material>(), af::val<const Vec3>());
@@ -1883,6 +1935,7 @@ struct Cover_Light : af::Scope<Light> {
 };
 
 struct Cover_LoadResult : af::Scope<LoadResult> {
+    ~Cover_LoadResult(); // Never instantiated.
     static void run() {
         (void)af::val<LoadResult>().error;
         (void)af::val<LoadResult>().fail(af::val<LoadError>(), af::val<std::string>());
@@ -1893,6 +1946,7 @@ struct Cover_LoadResult : af::Scope<LoadResult> {
 };
 
 struct Cover_Location : af::Scope<Location> {
+    ~Cover_Location(); // Never instantiated.
     static void run() {
         (void)af::val<Location>().accuracy;
         (void)af::val<Location>().altitude;
@@ -1902,6 +1956,7 @@ struct Cover_Location : af::Scope<Location> {
 };
 
 struct Cover_LogEventArgs : af::Scope<LogEventArgs> {
+    ~Cover_LogEventArgs(); // Never instantiated.
     static void run() {
         (void)LogEventArgs(af::val<LogLevel>(), af::val<const std::string>());
         (void)af::val<LogEventArgs>().level;
@@ -1911,12 +1966,14 @@ struct Cover_LogEventArgs : af::Scope<LogEventArgs> {
 };
 
 struct Cover_LogStream : af::Scope<LogStream> {
+    ~Cover_LogStream(); // Never instantiated.
     static void run() {
         (void)LogStream(af::val<LogLevel>(), af::val<const std::string>());
     }
 };
 
 struct Cover_Logger : af::Scope<Logger> {
+    ~Cover_Logger(); // Never instantiated.
     static void run() {
         (void)Logger();
         (void)af::val<Logger>().closeFile();
@@ -1936,6 +1993,7 @@ struct Cover_Logger : af::Scope<Logger> {
 };
 
 struct Cover_Mat3 : af::Scope<Mat3> {
+    ~Cover_Mat3(); // Never instantiated.
     static void run() {
         (void)Mat3();
         (void)Mat3(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1960,6 +2018,7 @@ struct Cover_Mat3 : af::Scope<Mat3> {
 };
 
 struct Cover_Mat4 : af::Scope<Mat4> {
+    ~Cover_Mat4(); // Never instantiated.
     static void run() {
         (void)Mat4();
         (void)Mat4(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -1991,6 +2050,7 @@ struct Cover_Mat4 : af::Scope<Mat4> {
 };
 
 struct Cover_Material : af::Scope<Material> {
+    ~Cover_Material(); // Never instantiated.
     static void run() {
         (void)Material();
         (void)af::val<Material>().bronze();
@@ -2036,6 +2096,7 @@ struct Cover_Material : af::Scope<Material> {
 };
 
 struct Cover_Mesh : af::Scope<Mesh> {
+    ~Cover_Mesh(); // Never instantiated.
     static void run() {
         (void)Mesh();
         (void)af::val<Mesh>().addColor(af::val<const Color>());
@@ -2124,6 +2185,7 @@ struct Cover_Mesh : af::Scope<Mesh> {
 };
 
 struct Cover_MicInput : af::Scope<MicInput> {
+    ~Cover_MicInput(); // Never instantiated.
     static void run() {
         (void)MicInput();
         (void)af::val<MicInput>().getBuffer(af::val<float *>(), af::val<size_t>());
@@ -2140,6 +2202,7 @@ struct Cover_MicInput : af::Scope<MicInput> {
 };
 
 struct Cover_MicStartResult : af::Scope<MicStartResult> {
+    ~Cover_MicStartResult(); // Never instantiated.
     static void run() {
         (void)af::val<MicStartResult>().message;
         (void)af::val<MicStartResult>().success;
@@ -2147,6 +2210,7 @@ struct Cover_MicStartResult : af::Scope<MicStartResult> {
 };
 
 struct Cover_Mod : af::Scope<Mod> {
+    ~Cover_Mod(); // Never instantiated.
     static void run() {
         (void)af::val<Mod>().getOwner();
         (void)af::val<const Mod>().getOwner();
@@ -2154,6 +2218,7 @@ struct Cover_Mod : af::Scope<Mod> {
 };
 
 struct Cover_MouseDragEventArgs : af::Scope<MouseDragEventArgs> {
+    ~Cover_MouseDragEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<MouseDragEventArgs>().alt;
         (void)af::val<MouseDragEventArgs>().button;
@@ -2174,6 +2239,7 @@ struct Cover_MouseDragEventArgs : af::Scope<MouseDragEventArgs> {
 };
 
 struct Cover_MouseEventArgs : af::Scope<MouseEventArgs> {
+    ~Cover_MouseEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<MouseEventArgs>().alt;
         (void)af::val<MouseEventArgs>().button;
@@ -2190,6 +2256,7 @@ struct Cover_MouseEventArgs : af::Scope<MouseEventArgs> {
 };
 
 struct Cover_MouseMoveEventArgs : af::Scope<MouseMoveEventArgs> {
+    ~Cover_MouseMoveEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<MouseMoveEventArgs>().alt;
         (void)af::val<MouseMoveEventArgs>().consumed;
@@ -2209,6 +2276,7 @@ struct Cover_MouseMoveEventArgs : af::Scope<MouseMoveEventArgs> {
 };
 
 struct Cover_NetworkInterface : af::Scope<NetworkInterface> {
+    ~Cover_NetworkInterface(); // Never instantiated.
     static void run() {
         (void)af::val<NetworkInterface>().address;
         (void)af::val<const NetworkInterface>().getAddress();
@@ -2228,6 +2296,7 @@ struct Cover_NetworkInterface : af::Scope<NetworkInterface> {
 };
 
 struct Cover_Node : af::Scope<Node> {
+    ~Cover_Node(); // Never instantiated.
     static void run() {
         (void)Node();
         (void)af::val<Node>().addChild(af::val<Ptr>(), af::val<bool>());
@@ -2335,6 +2404,7 @@ struct Cover_Node : af::Scope<Node> {
 };
 
 struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
+    ~Cover_Node__HitResult(); // Never instantiated.
     static void run() {
         (void)af::val<Node::HitResult>().distance;
         (void)af::val<const Node::HitResult>().hit();
@@ -2344,6 +2414,7 @@ struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
 };
 
 struct Cover_OnceGate : af::Scope<OnceGate> {
+    ~Cover_OnceGate(); // Never instantiated.
     static void run() {
         (void)OnceGate();
         (void)OnceGate(af::val<double>());
@@ -2353,6 +2424,7 @@ struct Cover_OnceGate : af::Scope<OnceGate> {
 };
 
 struct Cover_Path : af::Scope<Path> {
+    ~Cover_Path(); // Never instantiated.
     static void run() {
         (void)Path();
         (void)Path(af::val<const std::vector<Vec2>>());
@@ -2413,6 +2485,7 @@ struct Cover_Path : af::Scope<Path> {
 };
 
 struct Cover_Pixels : af::Scope<Pixels> {
+    ~Cover_Pixels(); // Never instantiated.
     static void run() {
         (void)Pixels();
         (void)af::val<Pixels>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<PixelFormat>());
@@ -2451,6 +2524,7 @@ struct Cover_Pixels : af::Scope<Pixels> {
 };
 
 struct Cover_Platform : af::Scope<Platform> {
+    ~Cover_Platform(); // Never instantiated.
     static void run() {
         (void)af::val<Platform>().isAndroid();
         (void)af::val<Platform>().isApple();
@@ -2466,6 +2540,7 @@ struct Cover_Platform : af::Scope<Platform> {
 };
 
 struct Cover_PlayingSound : af::Scope<PlayingSound> {
+    ~Cover_PlayingSound(); // Never instantiated.
     static void run() {
         (void)af::val<PlayingSound>().buffer;
         (void)af::val<PlayingSound>().channelGains;
@@ -2485,6 +2560,7 @@ struct Cover_PlayingSound : af::Scope<PlayingSound> {
 };
 
 struct Cover_PlayingSoundInfo : af::Scope<PlayingSoundInfo> {
+    ~Cover_PlayingSoundInfo(); // Never instantiated.
     static void run() {
         (void)af::val<PlayingSoundInfo>().duration;
         (void)af::val<PlayingSoundInfo>().level;
@@ -2501,6 +2577,7 @@ struct Cover_PlayingSoundInfo : af::Scope<PlayingSoundInfo> {
 };
 
 struct Cover_Quaternion : af::Scope<Quaternion> {
+    ~Cover_Quaternion(); // Never instantiated.
     static void run() {
         (void)Quaternion();
         (void)Quaternion(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -2528,6 +2605,7 @@ struct Cover_Quaternion : af::Scope<Quaternion> {
 };
 
 struct Cover_Ray : af::Scope<Ray> {
+    ~Cover_Ray(); // Never instantiated.
     static void run() {
         (void)Ray();
         (void)Ray(af::val<const Vec3>(), af::val<const Vec3>());
@@ -2544,6 +2622,7 @@ struct Cover_Ray : af::Scope<Ray> {
 };
 
 struct Cover_Ray__Hit : af::Scope<Ray::Hit> {
+    ~Cover_Ray__Hit(); // Never instantiated.
     static void run() {
         (void)af::val<Ray::Hit>().hit;
         (void)af::val<Ray::Hit>().point;
@@ -2552,6 +2631,7 @@ struct Cover_Ray__Hit : af::Scope<Ray::Hit> {
 };
 
 struct Cover_Rect : af::Scope<Rect> {
+    ~Cover_Rect(); // Never instantiated.
     static void run() {
         (void)Rect();
         (void)Rect(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -2575,6 +2655,7 @@ struct Cover_Rect : af::Scope<Rect> {
 };
 
 struct Cover_RectNode : af::Scope<RectNode> {
+    ~Cover_RectNode(); // Never instantiated.
     static void run() {
         (void)af::val<RectNode>().addChild(af::val<Ptr>(), af::val<bool>());
         (void)af::val<RectNode>().callAfter(af::val<double>(), af::val<std::function<void ()>>());
@@ -2703,6 +2784,7 @@ struct Cover_RectNode : af::Scope<RectNode> {
 };
 
 struct Cover_RectNodeButton : af::Scope<RectNodeButton> {
+    ~Cover_RectNodeButton(); // Never instantiated.
     static void run() {
         (void)RectNodeButton();
         (void)af::val<RectNodeButton>().addChild(af::val<Ptr>(), af::val<bool>());
@@ -2837,6 +2919,7 @@ struct Cover_RectNodeButton : af::Scope<RectNodeButton> {
 };
 
 struct Cover_Reflector : af::Scope<Reflector> {
+    ~Cover_Reflector(); // Never instantiated.
     static void run() {
         (void)af::val<Reflector>().beginGroup(af::val<const char *>());
         (void)af::val<Reflector>().endGroup();
@@ -2858,6 +2941,7 @@ struct Cover_Reflector : af::Scope<Reflector> {
 };
 
 struct Cover_ResizeEventArgs : af::Scope<ResizeEventArgs> {
+    ~Cover_ResizeEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<ResizeEventArgs>().height;
         (void)af::val<ResizeEventArgs>().width;
@@ -2865,6 +2949,7 @@ struct Cover_ResizeEventArgs : af::Scope<ResizeEventArgs> {
 };
 
 struct Cover_SaveResult : af::Scope<SaveResult> {
+    ~Cover_SaveResult(); // Never instantiated.
     static void run() {
         (void)af::val<SaveResult>().error;
         (void)af::val<SaveResult>().fail(af::val<SaveError>(), af::val<std::string>());
@@ -2875,6 +2960,7 @@ struct Cover_SaveResult : af::Scope<SaveResult> {
 };
 
 struct Cover_ScreenRecorder : af::Scope<ScreenRecorder> {
+    ~Cover_ScreenRecorder(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)ScreenRecorder();
@@ -2907,6 +2993,7 @@ struct Cover_ScreenRecorder : af::Scope<ScreenRecorder> {
 };
 
 struct Cover_ScreenshotSaveEventArgs : af::Scope<ScreenshotSaveEventArgs> {
+    ~Cover_ScreenshotSaveEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<ScreenshotSaveEventArgs>().path;
         (void)af::val<ScreenshotSaveEventArgs>().result;
@@ -2914,6 +3001,7 @@ struct Cover_ScreenshotSaveEventArgs : af::Scope<ScreenshotSaveEventArgs> {
 };
 
 struct Cover_ScrollBar : af::Scope<ScrollBar> {
+    ~Cover_ScrollBar(); // Never instantiated.
     static void run() {
         (void)ScrollBar(af::val<ScrollContainer *>(), af::val<Direction>());
         (void)af::val<ScrollBar>().addChild(af::val<Ptr>(), af::val<bool>());
@@ -3050,6 +3138,7 @@ struct Cover_ScrollBar : af::Scope<ScrollBar> {
 };
 
 struct Cover_ScrollContainer : af::Scope<ScrollContainer> {
+    ~Cover_ScrollContainer(); // Never instantiated.
     static void run() {
         (void)ScrollContainer();
         (void)af::val<ScrollContainer>().addChild(af::val<Ptr>(), af::val<bool>());
@@ -3197,6 +3286,7 @@ struct Cover_ScrollContainer : af::Scope<ScrollContainer> {
 };
 
 struct Cover_ScrollEventArgs : af::Scope<ScrollEventArgs> {
+    ~Cover_ScrollEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<ScrollEventArgs>().alt;
         (void)af::val<ScrollEventArgs>().consumed;
@@ -3213,6 +3303,7 @@ struct Cover_ScrollEventArgs : af::Scope<ScrollEventArgs> {
 };
 
 struct Cover_SendResult : af::Scope<SendResult> {
+    ~Cover_SendResult(); // Never instantiated.
     static void run() {
         (void)af::val<SendResult>().error;
         (void)af::val<SendResult>().id;
@@ -3221,6 +3312,7 @@ struct Cover_SendResult : af::Scope<SendResult> {
 };
 
 struct Cover_Serial : af::Scope<Serial> {
+    ~Cover_Serial(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)Serial();
@@ -3286,6 +3378,7 @@ struct Cover_Serial : af::Scope<Serial> {
 };
 
 struct Cover_SerialDeviceInfo : af::Scope<SerialDeviceInfo> {
+    ~Cover_SerialDeviceInfo(); // Never instantiated.
     static void run() {
         (void)af::val<SerialDeviceInfo>().deviceId;
         (void)af::val<SerialDeviceInfo>().deviceName;
@@ -3297,6 +3390,7 @@ struct Cover_SerialDeviceInfo : af::Scope<SerialDeviceInfo> {
 };
 
 struct Cover_SerialDisconnectEventArgs : af::Scope<SerialDisconnectEventArgs> {
+    ~Cover_SerialDisconnectEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<SerialDisconnectEventArgs>().baudRate;
         (void)af::val<SerialDisconnectEventArgs>().portName;
@@ -3306,6 +3400,7 @@ struct Cover_SerialDisconnectEventArgs : af::Scope<SerialDisconnectEventArgs> {
 };
 
 struct Cover_Shader : af::Scope<Shader> {
+    ~Cover_Shader(); // Never instantiated.
     static void run() {
         (void)Shader();
         (void)af::val<Shader>().begin();
@@ -3330,6 +3425,7 @@ struct Cover_Shader : af::Scope<Shader> {
 };
 
 struct Cover_ShaderVertex : af::Scope<ShaderVertex> {
+    ~Cover_ShaderVertex(); // Never instantiated.
     static void run() {
         (void)af::val<ShaderVertex>().a;
         (void)af::val<ShaderVertex>().b;
@@ -3344,6 +3440,7 @@ struct Cover_ShaderVertex : af::Scope<ShaderVertex> {
 };
 
 struct Cover_Sound : af::Scope<Sound> {
+    ~Cover_Sound(); // Never instantiated.
     static void run() {
         (void)Sound();
         (void)af::val<Sound>().clearChannelGains();
@@ -3385,6 +3482,7 @@ struct Cover_Sound : af::Scope<Sound> {
 };
 
 struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
+    ~Cover_SoundBuffer(); // Never instantiated.
     static void run() {
         (void)SoundBuffer();
         (void)af::val<SoundBuffer>().applyADSR(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -3429,6 +3527,7 @@ struct Cover_SoundBuffer : af::Scope<SoundBuffer> {
 };
 
 struct Cover_SoundSource : af::Scope<SoundSource> {
+    ~Cover_SoundSource(); // Never instantiated.
     static void run() {
         (void)af::val<SoundSource>().channels;
         (void)af::val<const SoundSource>().getDuration();
@@ -3438,6 +3537,7 @@ struct Cover_SoundSource : af::Scope<SoundSource> {
 };
 
 struct Cover_SoundStream : af::Scope<SoundStream> {
+    ~Cover_SoundStream(); // Never instantiated.
     static void run() {
         (void)SoundStream();
         (void)af::val<SoundStream>().channels;
@@ -3451,6 +3551,7 @@ struct Cover_SoundStream : af::Scope<SoundStream> {
 };
 
 struct Cover_StrokeMesh : af::Scope<StrokeMesh> {
+    ~Cover_StrokeMesh(); // Never instantiated.
     static void run() {
         (void)StrokeMesh();
         (void)StrokeMesh(af::val<const Path>());
@@ -3476,6 +3577,7 @@ struct Cover_StrokeMesh : af::Scope<StrokeMesh> {
 };
 
 struct Cover_TcpClient : af::Scope<TcpClient> {
+    ~Cover_TcpClient(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)TcpClient();
@@ -3560,6 +3662,7 @@ struct Cover_TcpClient : af::Scope<TcpClient> {
 };
 
 struct Cover_TcpClientConnectEventArgs : af::Scope<TcpClientConnectEventArgs> {
+    ~Cover_TcpClientConnectEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpClientConnectEventArgs>().clientId;
         (void)af::val<TcpClientConnectEventArgs>().host;
@@ -3568,6 +3671,7 @@ struct Cover_TcpClientConnectEventArgs : af::Scope<TcpClientConnectEventArgs> {
 };
 
 struct Cover_TcpClientDisconnectEventArgs : af::Scope<TcpClientDisconnectEventArgs> {
+    ~Cover_TcpClientDisconnectEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpClientDisconnectEventArgs>().clientId;
         (void)af::val<TcpClientDisconnectEventArgs>().reason;
@@ -3576,6 +3680,7 @@ struct Cover_TcpClientDisconnectEventArgs : af::Scope<TcpClientDisconnectEventAr
 };
 
 struct Cover_TcpConnectEventArgs : af::Scope<TcpConnectEventArgs> {
+    ~Cover_TcpConnectEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpConnectEventArgs>().message;
         (void)af::val<TcpConnectEventArgs>().success;
@@ -3583,6 +3688,7 @@ struct Cover_TcpConnectEventArgs : af::Scope<TcpConnectEventArgs> {
 };
 
 struct Cover_TcpDisconnectEventArgs : af::Scope<TcpDisconnectEventArgs> {
+    ~Cover_TcpDisconnectEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpDisconnectEventArgs>().reason;
         (void)af::val<TcpDisconnectEventArgs>().wasClean;
@@ -3590,6 +3696,7 @@ struct Cover_TcpDisconnectEventArgs : af::Scope<TcpDisconnectEventArgs> {
 };
 
 struct Cover_TcpErrorEventArgs : af::Scope<TcpErrorEventArgs> {
+    ~Cover_TcpErrorEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpErrorEventArgs>().errorCode;
         (void)af::val<TcpErrorEventArgs>().message;
@@ -3597,12 +3704,14 @@ struct Cover_TcpErrorEventArgs : af::Scope<TcpErrorEventArgs> {
 };
 
 struct Cover_TcpReceiveEventArgs : af::Scope<TcpReceiveEventArgs> {
+    ~Cover_TcpReceiveEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpReceiveEventArgs>().data;
     }
 };
 
 struct Cover_TcpSendCompleteEventArgs : af::Scope<TcpSendCompleteEventArgs> {
+    ~Cover_TcpSendCompleteEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpSendCompleteEventArgs>().bytesSent;
         (void)af::val<TcpSendCompleteEventArgs>().clientId;
@@ -3612,6 +3721,7 @@ struct Cover_TcpSendCompleteEventArgs : af::Scope<TcpSendCompleteEventArgs> {
 };
 
 struct Cover_TcpServer : af::Scope<TcpServer> {
+    ~Cover_TcpServer(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)TcpServer();
@@ -3706,6 +3816,7 @@ struct Cover_TcpServer : af::Scope<TcpServer> {
 };
 
 struct Cover_TcpServerClient : af::Scope<TcpServerClient> {
+    ~Cover_TcpServerClient(); // Never instantiated.
     static void run() {
         (void)af::val<const TcpServerClient>().getHost();
         (void)af::val<const TcpServerClient>().getId();
@@ -3714,6 +3825,7 @@ struct Cover_TcpServerClient : af::Scope<TcpServerClient> {
 };
 
 struct Cover_TcpServerErrorEventArgs : af::Scope<TcpServerErrorEventArgs> {
+    ~Cover_TcpServerErrorEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpServerErrorEventArgs>().clientId;
         (void)af::val<TcpServerErrorEventArgs>().errorCode;
@@ -3722,6 +3834,7 @@ struct Cover_TcpServerErrorEventArgs : af::Scope<TcpServerErrorEventArgs> {
 };
 
 struct Cover_TcpServerReceiveEventArgs : af::Scope<TcpServerReceiveEventArgs> {
+    ~Cover_TcpServerReceiveEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TcpServerReceiveEventArgs>().clientId;
         (void)af::val<TcpServerReceiveEventArgs>().data;
@@ -3729,6 +3842,7 @@ struct Cover_TcpServerReceiveEventArgs : af::Scope<TcpServerReceiveEventArgs> {
 };
 
 struct Cover_Texture : af::Scope<Texture> {
+    ~Cover_Texture(); // Never instantiated.
     static void run() {
         (void)Texture();
         (void)af::val<Texture>().allocate(af::val<int>(), af::val<int>(), af::val<int>(), af::val<TextureUsage>(), af::val<int>());
@@ -3781,6 +3895,7 @@ struct Cover_Texture : af::Scope<Texture> {
 };
 
 struct Cover_Thread : af::Scope<Thread> {
+    ~Cover_Thread(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)af::val<Thread>().getMainThreadId();
@@ -3813,6 +3928,7 @@ struct Cover_Thread : af::Scope<Thread> {
 };
 
 struct Cover_TouchEventArgs : af::Scope<TouchEventArgs> {
+    ~Cover_TouchEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<TouchEventArgs>().cancelled;
         (void)af::val<const TouchEventArgs>().id();
@@ -3824,6 +3940,7 @@ struct Cover_TouchEventArgs : af::Scope<TouchEventArgs> {
 };
 
 struct Cover_TouchPoint : af::Scope<TouchPoint> {
+    ~Cover_TouchPoint(); // Never instantiated.
     static void run() {
         (void)af::val<TouchPoint>().changed;
         (void)af::val<TouchPoint>().id;
@@ -3834,6 +3951,7 @@ struct Cover_TouchPoint : af::Scope<TouchPoint> {
 };
 
 struct Cover_TweenMod : af::Scope<TweenMod> {
+    ~Cover_TweenMod(); // Never instantiated.
     static void run() {
         (void)TweenMod();
         (void)af::val<TweenMod>().complete;
@@ -3886,6 +4004,7 @@ struct Cover_TweenMod : af::Scope<TweenMod> {
 };
 
 struct Cover_UdpErrorEventArgs : af::Scope<UdpErrorEventArgs> {
+    ~Cover_UdpErrorEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<UdpErrorEventArgs>().errorCode;
         (void)af::val<UdpErrorEventArgs>().message;
@@ -3893,6 +4012,7 @@ struct Cover_UdpErrorEventArgs : af::Scope<UdpErrorEventArgs> {
 };
 
 struct Cover_UdpReceiveEventArgs : af::Scope<UdpReceiveEventArgs> {
+    ~Cover_UdpReceiveEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<UdpReceiveEventArgs>().data;
         (void)af::val<UdpReceiveEventArgs>().remoteHost;
@@ -3901,6 +4021,7 @@ struct Cover_UdpReceiveEventArgs : af::Scope<UdpReceiveEventArgs> {
 };
 
 struct Cover_UdpSocket : af::Scope<UdpSocket> {
+    ~Cover_UdpSocket(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)UdpSocket();
@@ -4005,6 +4126,7 @@ struct Cover_UdpSocket : af::Scope<UdpSocket> {
 };
 
 struct Cover_Vec2 : af::Scope<Vec2> {
+    ~Cover_Vec2(); // Never instantiated.
     static void run() {
         (void)Vec2();
         (void)Vec2(af::val<float>(), af::val<float>());
@@ -4051,6 +4173,7 @@ struct Cover_Vec2 : af::Scope<Vec2> {
 };
 
 struct Cover_Vec3 : af::Scope<Vec3> {
+    ~Cover_Vec3(); // Never instantiated.
     static void run() {
         (void)Vec3();
         (void)Vec3(af::val<float>(), af::val<float>(), af::val<float>());
@@ -4094,6 +4217,7 @@ struct Cover_Vec3 : af::Scope<Vec3> {
 };
 
 struct Cover_Vec4 : af::Scope<Vec4> {
+    ~Cover_Vec4(); // Never instantiated.
     static void run() {
         (void)Vec4();
         (void)Vec4(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
@@ -4135,6 +4259,7 @@ struct Cover_Vec4 : af::Scope<Vec4> {
 };
 
 struct Cover_VideoDeviceInfo : af::Scope<VideoDeviceInfo> {
+    ~Cover_VideoDeviceInfo(); // Never instantiated.
     static void run() {
         (void)af::val<VideoDeviceInfo>().deviceId;
         (void)af::val<VideoDeviceInfo>().deviceName;
@@ -4146,6 +4271,7 @@ struct Cover_VideoDeviceInfo : af::Scope<VideoDeviceInfo> {
 };
 
 struct Cover_VideoErrorEventArgs : af::Scope<VideoErrorEventArgs> {
+    ~Cover_VideoErrorEventArgs(); // Never instantiated.
     static void run() {
         (void)af::val<VideoErrorEventArgs>().errorCode;
         (void)af::val<VideoErrorEventArgs>().message;
@@ -4153,6 +4279,7 @@ struct Cover_VideoErrorEventArgs : af::Scope<VideoErrorEventArgs> {
 };
 
 struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
+    ~Cover_VideoGrabber(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)VideoGrabber();
@@ -4275,6 +4402,7 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 };
 
 struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
+    ~Cover_VideoPlayer(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)VideoPlayer();
@@ -4517,6 +4645,7 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
 };
 
 struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
+    ~Cover_VideoPlayerBase(); // Never instantiated.
     static void run() {
         (void)af::val<VideoPlayerBase>().close();
         (void)af::val<const VideoPlayerBase>().draw(af::val<float>(), af::val<float>());
@@ -4587,6 +4716,7 @@ struct Cover_VideoPlayerBase : af::Scope<VideoPlayerBase> {
 };
 
 struct Cover_VideoRecordSettings : af::Scope<VideoRecordSettings> {
+    ~Cover_VideoRecordSettings(); // Never instantiated.
     static void run() {
         (void)af::val<VideoRecordSettings>().audio;
         (void)af::val<VideoRecordSettings>().audioBitrate;
@@ -4601,6 +4731,7 @@ struct Cover_VideoRecordSettings : af::Scope<VideoRecordSettings> {
 };
 
 struct Cover_VideoWriter : af::Scope<VideoWriter> {
+    ~Cover_VideoWriter(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_IOS)
         (void)VideoWriter();
@@ -4657,6 +4788,7 @@ struct Cover_VideoWriter : af::Scope<VideoWriter> {
 };
 
 struct Cover_Window : af::Scope<Window> {
+    ~Cover_Window(); // Never instantiated.
     static void run() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)Window();
@@ -4722,6 +4854,7 @@ struct Cover_Window : af::Scope<Window> {
 };
 
 struct Cover_WindowSettings : af::Scope<WindowSettings> {
+    ~Cover_WindowSettings(); // Never instantiated.
     static void run() {
         (void)af::val<WindowSettings>().clipboardSize;
         (void)af::val<WindowSettings>().decorated;
@@ -4748,6 +4881,7 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
 };
 
 struct Cover_Xml : af::Scope<Xml> {
+    ~Cover_Xml(); // Never instantiated.
     static void run() {
         (void)Xml();
         (void)af::val<Xml>().addDeclaration(af::val<const std::string>(), af::val<const std::string>());
@@ -4766,6 +4900,7 @@ struct Cover_Xml : af::Scope<Xml> {
 };
 
 struct Cover_mcp__AdmissionLimits : af::Scope<mcp::AdmissionLimits> {
+    ~Cover_mcp__AdmissionLimits(); // Never instantiated.
     static void run() {
         (void)af::val<mcp::AdmissionLimits>().bodyBytes;
         (void)af::val<mcp::AdmissionLimits>().gridCells;
@@ -4783,6 +4918,7 @@ struct Cover_mcp__AdmissionLimits : af::Scope<mcp::AdmissionLimits> {
 };
 
 struct Cover_mcp__Resource : af::Scope<mcp::Resource> {
+    ~Cover_mcp__Resource(); // Never instantiated.
     static void run() {
         (void)af::val<mcp::Resource>().description;
         (void)af::val<mcp::Resource>().handler;
@@ -4794,6 +4930,7 @@ struct Cover_mcp__Resource : af::Scope<mcp::Resource> {
 };
 
 struct Cover_mcp__ResourceBuilder : af::Scope<mcp::ResourceBuilder> {
+    ~Cover_mcp__ResourceBuilder(); // Never instantiated.
     static void run() {
         (void)mcp::ResourceBuilder(af::val<const std::string>(), af::val<const std::string>());
         (void)af::val<mcp::ResourceBuilder>().bind(af::val<std::function<std::string ()>>());
@@ -4803,6 +4940,7 @@ struct Cover_mcp__ResourceBuilder : af::Scope<mcp::ResourceBuilder> {
 };
 
 struct Cover_mcp__Tool : af::Scope<mcp::Tool> {
+    ~Cover_mcp__Tool(); // Never instantiated.
     static void run() {
         (void)af::val<mcp::Tool>().args;
         (void)af::val<mcp::Tool>().description;
@@ -4815,6 +4953,7 @@ struct Cover_mcp__Tool : af::Scope<mcp::Tool> {
 };
 
 struct Cover_mcp__ToolArg : af::Scope<mcp::ToolArg> {
+    ~Cover_mcp__ToolArg(); // Never instantiated.
     static void run() {
         (void)af::val<mcp::ToolArg>().description;
         (void)af::val<mcp::ToolArg>().name;
@@ -4824,6 +4963,7 @@ struct Cover_mcp__ToolArg : af::Scope<mcp::ToolArg> {
 };
 
 struct Cover_mcp__ToolBuilder : af::Scope<mcp::ToolBuilder> {
+    ~Cover_mcp__ToolBuilder(); // Never instantiated.
     static void run() {
         (void)mcp::ToolBuilder(af::val<const std::string>(), af::val<const std::string>());
         (void)af::val<mcp::ToolBuilder>().bind(af::val<std::function<json (const json &)>>());
