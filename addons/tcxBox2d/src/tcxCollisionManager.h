@@ -54,17 +54,15 @@ private:
     struct Pair {
         Endpoint a, b;
         std::vector<b2Contact*> contacts; // only live Box2D contacts, never deferred geometry
-        uint64_t incarnation = 0;
         uint64_t endedStep = 0;
         bool beganDelivered = false;
     };
     enum class Phase { Begin, Stay, End };
     struct Record {
         Phase phase;
-        uint64_t sequence;
         uint64_t epoch;
         uint64_t step;
-        std::shared_ptr<Pair> pair;
+        std::shared_ptr<Pair> pair; // Each Pair object provides identity, even if body addresses are reused.
         WorldContact geometry;
         bool sensor = false;
         uint64_t readyUpdate = 0;
@@ -75,7 +73,6 @@ private:
     struct Journal {
         std::vector<std::shared_ptr<Pair>> pairs;
         std::deque<Record> records;
-        uint64_t sequence = 0;
         uint64_t stepCounter = 0;
         uint64_t updateCounter = 0;
         uint64_t managedStep = 0;
