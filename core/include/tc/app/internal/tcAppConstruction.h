@@ -10,6 +10,7 @@
 #include <vector>
 #include <type_traits>
 #include "../../utils/tcAtomicSharedPtr.h"
+#include "../tcExit.h"
 
 namespace trussc {
 class App;
@@ -64,6 +65,7 @@ struct AppOwner {
     WindowContext* context = nullptr;
     std::atomic<bool> retiring{false}, ended{false}, callbacksClosing{false};
     bool exitDelivered = false, notifyWindowExit = false;
+    std::atomic<bool> abandoned{false};
     // Serializes registration/extraction; invoke cancellations outside this lock.
     std::mutex cancellationsMutex;
     std::vector<std::function<void()>> cancellations;
@@ -111,7 +113,7 @@ private:
     void* context_ = nullptr;
     uintptr_t draw_ = 0, read_ = 0;
     uint32_t drawWindow_ = 0, readWindow_ = 0, sgl_ = 0;
-    bool entered_ = false;
+    bool entered_ = false, workerEntry_ = false, mainEntry_ = false;
 };
 class AppConstructionScope {
 public:
@@ -128,8 +130,9 @@ void requireAppConstruction(const App*);
 void completeAppConstruction(App&) noexcept;
 std::shared_ptr<App> adoptConstructedApp(App*, void (*destroy)(App*) = nullptr);
 std::shared_ptr<AppOwner> appOwner(const App&) noexcept;
+bool admitAppEndingEvent(const AppOwner*) noexcept;
 void deliverAppExit(App&);
-void endAppAttachment(const std::shared_ptr<App>&, WindowContext&, bool virtualOnly = false) noexcept;
+void endAppAttachment(const std::shared_ptr<App>&, WindowContext&, bool virtualOnly = false, EndingPolicy policy = EndingPolicy::Normal) noexcept;
 
 // Retain attribution for callbacks held outside Event (tools, dialogs, providers).
 template<class R, class... Args>
@@ -143,6 +146,10 @@ std::function<R(Args...)> appOwnedCallback(std::function<R(Args...)> callback, b
         if (auto live = weak.lock()) sharedStore(*live, std::shared_ptr<Callback>{});
     });
     return [weak = std::weak_ptr(owner), target, exitEvent](Args... args) -> R {
+        if (sessionEndExit() && !(exitEvent && admitAppEndingEvent(weak.lock().get()))) {
+            if constexpr (!std::is_void_v<R>) return R{};
+            else return;
+        }
         auto live = weak.lock();
         auto call = sharedLoad(*target);
         if (!live || (!live->token->load() && !(exitEvent && live->ended)) || live->callbacksClosing || !call) {
@@ -150,6 +157,12 @@ std::function<R(Args...)> appOwnedCallback(std::function<R(Args...)> callback, b
             else return;
         }
         AppCallbackScope scope(live);
+        // Pair callback activity admission with Runtime's freeze-before-count
+        // snapshot. A worker that lost the race never enters App code.
+        if (sessionEndExit() && !(exitEvent && admitAppEndingEvent(weak.lock().get()))) {
+            if constexpr (!std::is_void_v<R>) return R{};
+            else return;
+        }
         return (*call)(std::forward<Args>(args)...);
     };
 }

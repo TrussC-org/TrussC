@@ -137,7 +137,7 @@ class Node : public std::enable_shared_from_this<Node> {
     friend void internal::deliverAppExit(App&);
     friend class App;     // Allow App to call dispatch methods
     friend class Window;
-    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool) noexcept;  // Secondary windows drive their own tree (tcWindow.h)
+    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool, internal::EndingPolicy) noexcept;  // Secondary windows drive their own tree (tcWindow.h)
     friend class Mod;  // Allow Mod to access owner_
     friend void internal::setupNodeOnce(Node& node);
 

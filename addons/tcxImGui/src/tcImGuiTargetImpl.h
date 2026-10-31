@@ -96,6 +96,7 @@ struct TargetFrame {
 std::unordered_map<void*, std::unique_ptr<TargetFrame>> frames;
 }
 bool beginTargetFrame(simgui_tc_context context, const simgui_frame_desc_t& desc) {
+    if (tc::internal::sessionEndExit()) return false;
     auto& slot = frames[context.ptr];
     if (!slot) {
         slot = std::make_unique<TargetFrame>();

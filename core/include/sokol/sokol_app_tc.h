@@ -3761,6 +3761,7 @@ static void _sapp_tc_mac_swap(_sapp_tc_window_t* w) {
    sapp_window_request_close(): a client callback must never see its own window
    (or the App) torn down underneath it. */
 static bool _sapp_tc_mac_busy(void) {
+    if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active()) return true;
     if (_sapp_tc.callbacks_active > 0 || _sapp_tc.constructing > 0) return true;
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; i++) {
         const _sapp_tc_window_t* cw = _sapp_tc.windows[i];
@@ -4255,41 +4256,31 @@ static bool _sapp_tc_mac_is_session_end(AEEventID reason) {
     }
 }
 
-/* Session end while a tick, callback or constructor is active, as Win32
-   WM_ENDSESSION: the App is not asked (no QUIT_REQUESTED) and the session is
-   not cancelled. From here until _exit the backend is frozen (see
-   _sapp_tc_mac_frozen): run the cleanup callback once, in place, then end the
-   process at once so control never returns to the interrupted callback.
-   Native windows and GPU resources are left to the OS. */
+// Observe existing native startup/callback/constructor state. Runtime alone
+// decides the ending policy; this probe performs no native or GPU operation.
+static bool _sapp_tc_mac_session_busy(void) {
+    return !_sapp_tc.app.init_called || _sapp_tc_mac_busy();
+}
+
+/* App delegate forwards committed session termination to Runtime. All App
+   ending, freeze and watchdog state belongs there, independent of Windows. */
 static void _sapp_tc_mac_session_end(AEEventID reason) {
-    switch (reason) {
-        case 0x72727374: case 0x72657374: trussc::internal::setExitReason("os-restart"); break;
-        case 0x7273646e: case 0x73687574: trussc::internal::setExitReason("os-shutdown"); break;
-        default: trussc::internal::setExitReason("os-logoff"); break;
-    }
-    _sapp_tc.app.quit_ordered = true;
-    // Only the _exit below ends the process: cleanup must not std::exit.
-    trussc::internal::sessionEndExit() = true;
-    if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
-        _sapp_tc.app.cleanup_called = true;
-        try {
-            if (_sapp_tc.app.desc.cleanup_cb) {
-                _sapp_tc.app.desc.cleanup_cb();
-            } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
-                _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
-            }
-        } catch (...) { _sapp_tc_mac_contained("sapp_desc.cleanup_cb"); }
-    }
-    fflush(NULL);
-    _exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
+    (void)reason;
+    trussc::internal::commitSessionEnd();
 }
 
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
 @end
 
 @implementation _sapp_tc_app_delegate
+- (void)sessionWillPowerOff:(NSNotification*)notification {
+    (void)notification;
+    trussc::internal::commitSessionEnd();
+}
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
     (void)n;
+    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
+        selector:@selector(sessionWillPowerOff:) name:NSWorkspaceWillPowerOffNotification object:nil];
     /* activation policy must be set before window creation (sokol #1500) */
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     _sapp_tc_init_cursors();
@@ -4344,29 +4335,16 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
     // A quit (or a second session end) while frozen: the process is already ending.
     if (_sapp_tc_mac_frozen()) return NSTerminateCancel;
     const AEEventID quit_reason = _sapp_tc_mac_quit_reason();
-    if (!_sapp_tc.app.quit_ordered) {
-        // Cocoa forwards the quit Apple event's reason for OS session exits.
-        // keyAEQuitReason ('why?'). [TrussC] Any other quit (Cmd+Q, the Dock's
-        // Quit, an AppleScript quit) carries no session reason: app-quit, so
-        // the main window's windowShouldClose: does not fill in window-close.
-        // IfEmpty keeps a reason an earlier exit request already recorded.
-        // A real logout sends the reason as an event attribute, not a
-        // parameter (seen on macOS); read the attribute first.
-        switch (quit_reason) {
-            case 0x6c6f676f: // kAELogOut ('logo')
-            case 0x726c676f: // kAEReallyLogOut ('rlgo')
-                trussc::internal::setExitReason("os-logoff"); break;
-            case 0x72657374: // kAERestart ('rest')
-                trussc::internal::setExitReason("os-restart"); break;
-            case 0x73687574: // kAEShutDown ('shut')
-                trussc::internal::setExitReason("os-shutdown"); break;
-            default:
-                trussc::internal::setExitReasonIfEmpty("app-quit"); break;
+    if (_sapp_tc_mac_is_session_end(quit_reason)) {
+        if (!trussc::internal::querySessionEnd()) {
+            trussc::internal::cancelSessionEnd();
+            return NSTerminateCancel;
         }
+        _sapp_tc_mac_session_end(quit_reason);
     }
+    trussc::internal::setExitReasonIfEmpty("app-quit");
     if (_sapp_tc_mac_busy()) {
         // A session end is not asked and not cancelled (as Win32 WM_ENDSESSION).
-        if (_sapp_tc_mac_is_session_end(quit_reason)) _sapp_tc_mac_session_end(quit_reason);
         /* Any other quit inside a callback, tick or constructor (e.g. a run loop
            spun by a client callback): cancel this request and replay it after they return.
            NSTerminateLater would wait in a nested modal loop above that
@@ -4375,10 +4353,16 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
         _sapp_tc.deferred_blocked = true;
         return NSTerminateCancel;
     }
-    return _sapp_tc_request_exit() ? NSTerminateNow : NSTerminateCancel;
+    if (!_sapp_tc_request_exit()) return NSTerminateCancel;
+    // AppKit may close remaining secondaries inside terminate:, before
+    // applicationWillTerminate. Retire their Apps/GPU/backings together now,
+    // while sg/sgl are live; later AppKit closes see disposed native records.
+    trussc::internal::shutdownRuntime();
+    return NSTerminateNow;
 }
 - (void)applicationWillTerminate:(NSNotification*)n {
     (void)n;
+    [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
     _sapp_tc.pending_key_count = 0;
     for (auto& key : _sapp_tc.pending_keys) key = {};
     _sapp_tc.visibility_pending = false;
@@ -4561,6 +4545,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 void sapp_run(const sapp_desc* desc) {
     if (!desc) return;
     _sapp_tc.app.desc = *desc;
+    trussc::internal::setSessionActivityProbe(_sapp_tc_mac_session_busy);
     sapp_desc* d = &_sapp_tc.app.desc;
     // Legacy descriptor default, before normalization into common constructor data.
     if (d->_tc_draw_while_hidden == 0) d->_tc_draw_while_hidden = 1;
@@ -8016,6 +8001,15 @@ static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {
     if (_sapp_tc.app.desc._tc_after_turn) _sapp_tc.app.desc._tc_after_turn();
 }
 
+static bool _sapp_tc_win32_session_busy(void) {
+    if (!_sapp_tc.app.init_called) return true;
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
+        const auto* window = _sapp_tc.windows[i];
+        if (window && (window->constructing || window->in_tick)) return true;
+    }
+    return false;
+}
+
 static bool _sapp_tc_win32_request_exit(_sapp_tc_window_t* w) {
     if (!_sapp_tc.app.quit_ordered) {
         _sapp_tc.app.quit_requested = true;
@@ -8035,7 +8029,6 @@ static void _sapp_tc_win32_cleanup(void) {
     // Both sapp_run and an early/reentrant WM_ENDSESSION must obey this guard.
     if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
-        if (_sapp_tc.app.main) ShutdownBlockReasonDestroy(_sapp_tc.app.main->hwnd);
         if (_sapp_tc.app.desc.cleanup_cb) _sapp_tc.app.desc.cleanup_cb();
         else if (_sapp_tc.app.desc.cleanup_userdata_cb)
             _sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);
@@ -8061,46 +8054,10 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
     switch (msg) {
-        case WM_QUERYENDSESSION:
-            if (!w->is_main) return TRUE;
-            trussc::internal::setExitReason("os-session-end");
-            if (_sapp_tc_win32_request_exit(w)) {
-                // Do not end the run loop until WM_ENDSESSION(TRUE): another
-                // app may still veto the session. No QUIT_REQUESTED twice.
-                _sapp_tc.app.quit_requested = false;
-                ShutdownBlockReasonDestroy(hwnd);
-                return TRUE;
-            } else {
-                std::string reason = trussc::internal::exitBlockReason();
-                if (reason.empty()) reason = "The app is still busy.";
-                const int count = MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, NULL, 0);
-                if (count > 0) {
-                    std::wstring wide((size_t)count, L'\0');
-                    MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, &wide[0], count);
-                    ShutdownBlockReasonCreate(hwnd, wide.c_str());
-                }
-                return FALSE;
-            }
-        case WM_ENDSESSION:
-            if (!w->is_main) return 0;
-            ShutdownBlockReasonDestroy(hwnd);
-            if (wParam) {
-                // Forced shutdown can arrive after a veto. Cleanup must finish
-                // inside this message; Windows may kill us as soon as it returns.
-                trussc::internal::setExitReason("os-session-end");
-                _sapp_tc.app.quit_ordered = true;
-                _sapp_tc_win32_cleanup();
-                // This is what Windows does after we return; cleanup and logs
-                // are complete. Do not run DLL detach or guest static destructors.
-                TerminateProcess(GetCurrentProcess(),
-                    trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
-            } else {
-                _sapp_tc.app.quit_requested = false;
-                _sapp_tc.app.quit_ordered = false;
-                trussc::internal::clearExitReason();
-                trussc::internal::setExitBlockReason("");
-            }
-            return 0;
+        // A Runtime-owned hidden top-level HWND receives session broadcasts.
+        // User windows never own query/commit or retain shutdown authority.
+        case WM_QUERYENDSESSION: return TRUE;
+        case WM_ENDSESSION: return 0;
         case WM_CLOSE:
             if (w->constructing || w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) w->close_requested = true;
             else _sapp_tc_win32_close(w);
@@ -8293,18 +8250,6 @@ static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPA
     try {
         return _sapp_tc_wndproc_impl(hwnd, msg, wParam, lParam);
     } catch (...) {
-        if (msg == WM_ENDSESSION && wParam) {
-            _sapp_tc.app.quit_ordered = true;
-            try { _sapp_tc_win32_cleanup(); } catch (...) { }
-            TerminateProcess(GetCurrentProcess(),
-                trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);
-            return 0;
-        }
-        if (msg == WM_QUERYENDSESSION) {
-            _sapp_tc.app.quit_requested = false;
-            ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
-            return FALSE;
-        }
         if (msg == WM_CLOSE) return 0; // a throwing close client must not let DefWindowProc destroy the HWND
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
@@ -8772,6 +8717,7 @@ void sapp_run(const sapp_desc* desc) {
     // Keep creation identities across repeated runs; reset only process services.
     memset(&_sapp_tc.app, 0, sizeof(_sapp_tc.app));
     _sapp_tc.app.desc = *desc;
+    trussc::internal::setSessionActivityProbe(_sapp_tc_win32_session_busy);
     sapp_desc* d = &_sapp_tc.app.desc;
     if (d->sample_count <= 0) d->sample_count = 1;
     if (d->swap_interval <= 0) d->swap_interval = 1;

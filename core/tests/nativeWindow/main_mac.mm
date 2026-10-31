@@ -12,11 +12,12 @@
 #include <string>
 #include <stdexcept>
 namespace trussc::internal {
+void setSessionActivityProbe(bool (*)()) noexcept {}
 void setExitReasonIfEmpty(const char*) {}
 void setExitReason(const char*) {}
 int& appExitCode() { static int code = 0; return code; }
 bool& appSetupCalled() { static bool called = true; return called; }
-bool& sessionEndExit() { static bool active = false; return active; }
+std::atomic<bool>& sessionEndExit() { static std::atomic<bool> active{false}; return active; }
 }
 namespace {
 int failures, callbacks, acquired, mainFrames, mainDrawables, showsChecked;
@@ -1077,8 +1078,8 @@ void step() {
             ![text containsString:@"marker ran"]);
         text = runChild(@"--session-end-not-busy", &status);
         std::printf("nativeWindow: not-busy session-end child exited with %d\n", status);
-        check("not-busy session end keeps the normal std::exit path with the app code (markers ran)",
-            status == 7 && [text containsString:@"atexit marker ran"] && [text containsString:@"static destructor marker ran"] &&
+        check("idle session end forwards commit and ends without static destruction",
+            status == 7 && ![text containsString:@"atexit marker ran"] && ![text containsString:@"static destructor marker ran"] &&
             [text containsString:@"session-end cleanup ran (inside callback=0"] && ![text containsString:@": FAIL"]);
         text = runChild(@"--plain-quit-in-callback", &status);
         check("plain quit Apple event inside a callback (child) still defers until it returns",
@@ -1257,6 +1258,21 @@ void finish() {
         _exit(failures ? 1 : trussc::internal::appExitCode());   // keep the app code
     }
     _exit(failures ? 1 : 0);
+}
+}
+
+// The standalone native fixture supplies the Runtime adapter boundary; the
+// actual retained-ledger policy is linked by sessionEndBusy/test.py.
+namespace trussc::internal {
+bool querySessionEnd() noexcept { return _sapp_tc_mac_busy() || _sapp_tc_request_exit(); }
+void cancelSessionEnd() noexcept {}
+void shutdownRuntime(EndingPolicy) noexcept {}
+void commitSessionEnd() noexcept {
+    if (sessionEndExit()) return;
+    sessionEndExit() = true;
+    _sapp_tc.app.quit_ordered = true;
+    if (!_sapp_tc.app.cleanup_called) { _sapp_tc.app.cleanup_called = true; mainCleanup(); }
+    _exit(appExitCode());
 }
 }
 

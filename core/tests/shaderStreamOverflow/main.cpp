@@ -251,6 +251,8 @@ void tests(sg_pipeline pip, Trace& trace) {
 } // namespace
 
 namespace trussc::internal {
+// This dummy-backend unit has no Runtime; supply its process predicate.
+std::atomic<bool>& sessionEndExit() { static std::atomic<bool> frozen{false}; return frozen; }
 void deferGpuDestroy(sg_buffer buffer) noexcept {
     pendingDestroys.push_back(buffer);
 }

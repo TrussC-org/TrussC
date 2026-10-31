@@ -1,4 +1,5 @@
 #pragma once
+#include "../app/tcExit.h"
 
 // ---------------------------------------------------------------------------
 // runOnMainThread - marshal work onto the main (scene) thread
@@ -110,7 +111,7 @@ namespace internal {
     }
     inline bool MainThreadSlot::post(std::shared_ptr<void> keepAlive,
                                      std::atomic<MainThreadSlot*>& head) noexcept {
-        if (!keepAlive || queued_.exchange(true, std::memory_order_acq_rel)) return false;
+        if (sessionEndExit() || !keepAlive || queued_.exchange(true, std::memory_order_acq_rel)) return false;
         // Only the winner of `queued_` writes these until the drain takes them.
         keepAlive_ = std::move(keepAlive);
         MainThreadSlot* top = head.load(std::memory_order_relaxed);
@@ -162,6 +163,7 @@ namespace internal {
     // the next drain. keepAlive is released only after run returns, so run
     // may destroy the owner (for example from a Logger listener).
     inline void drainMainThreadSlots() {
+        if (sessionEndExit()) return;
         MainThreadSlotBatch(mainThreadSlots()).deliver();
     }
 
@@ -181,7 +183,7 @@ namespace internal {
 // Web is single-threaded — everything already runs on the main thread, so
 // there is nothing to marshal and no queue to drain.
 inline void runOnMainThread(const std::function<void()>& fn) {
-    if (!fn) return;
+    if (internal::sessionEndExit() || !fn) return;
     if (auto owner = internal::currentAppOwner()) {
         if (owner->ended || owner->retiring || !owner->token->load(std::memory_order_acquire)) return;
         internal::AppCallbackScope scope(owner);
@@ -189,7 +191,8 @@ inline void runOnMainThread(const std::function<void()>& fn) {
     } else fn();
 }
 namespace internal {
-    inline void drainMainThreadQueue() { drainMainThreadSlots(); }
+    inline void drainMainThreadQueue() {
+    if (sessionEndExit()) return; drainMainThreadSlots(); }
     inline size_t getMainThreadQueuePending() { return 0; }
 }
 
@@ -213,7 +216,7 @@ namespace internal {
 // Run `fn` on the main thread. Immediately if already on it; otherwise queued
 // to run at the next safe outer host turn. Safe to call from any thread.
 inline void runOnMainThread(std::function<void()> fn) {
-    if (!fn) return;
+    if (internal::sessionEndExit() || !fn) return;
     if (auto owner = internal::currentAppOwner()) {
         if (owner->ended || owner->retiring || !owner->token->load(std::memory_order_acquire)) return;
         if (isMainThread()) {
@@ -236,6 +239,7 @@ inline void runOnMainThread(std::function<void()> fn) {
 // Posted MainThreadSlots run after the closures.
 namespace internal {
 inline void drainMainThreadQueue() {
+    if (sessionEndExit()) return;
     std::vector<std::function<void()>> batch = mainThreadQueue().receiveAll();
     mainThreadQueuePendingCount().store(batch.size(), std::memory_order_relaxed);
     for (auto& slot : batch) {
@@ -259,7 +263,7 @@ inline void drainMainThreadQueue() {
 // want the queue to hold {fn, token} directly.
 inline void runOnMainThread(std::function<void()> fn,
                             std::weak_ptr<std::atomic<bool>> token) {
-    if (!fn) return;
+    if (internal::sessionEndExit() || !fn) return;
     auto owner = internal::currentAppOwner();
     if (owner && (owner->retiring || owner->ended || !owner->token->load(std::memory_order_acquire))) return;
     // Queued copies retain code, but create no per-message cancellation entry.

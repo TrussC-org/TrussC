@@ -159,7 +159,7 @@ void run(std::function<void()> host) {
     nativeSend=emit;
 ''' + (r'''
     cancelNativeQuit=[] { _sapp_tc.app.quit_requested=false; };
-    queryEndSession=[] { return querySession()==FALSE; };
+    queryEndSession=[] { return querySession()==TRUE; };
 ''' if port == 'win32' else '    queryEndSession={};\n') + r'''
     emit(SAPP_EVENTTYPE_FOCUSED); // synchronous construction notification
 ''' + run + r'''
@@ -224,7 +224,8 @@ struct { _sapp_tc_window_t* windows[1]={&record};
     } app;
 } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==record.win_id?&record:nullptr; }
-namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} void setExitReason(const char*) {} }
+namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} void setExitReason(const char*) {}
+bool querySessionEnd() { return true; } void cancelSessionEnd() {} void shutdownRuntime() {} }
 constexpr int NSTerminateCancel=0,NSTerminateNow=1;
 using AEEventID=unsigned;
 bool _sapp_tc_mac_frozen() { return false; }

@@ -32,7 +32,9 @@ struct Context { Window* hostWindow=nullptr; double tickDuration=0; float mouseX
 struct Binding { sapp_window handle; sapp_tc_window_metadata metadata; };
 struct Window { Binding binding; Context ctx; Context& context() { return ctx; } bool isOccluded() { return false; } } window;
 struct WindowRequestAccess { static Binding& binding(Window& w) { return w.binding; } };
-bool hasWindow=true;
+bool hasWindow=true, stopping=false, frozen=false;
+bool runtimeEnding() { return stopping; }
+bool sessionEndExit() { return frozen; }
 Window* resolveWindow() { return hasWindow ? &window : nullptr; }
 Context* currentWindowCtx() { window.ctx.hostWindow=&window; return hasWindow ? &window.ctx : nullptr; }
 constexpr bool supportsSecondaryWindows() { return false; }
@@ -89,10 +91,17 @@ void run() {
     hasWindow=false; const int before=ticks; singleWindowFrame();
     check("zero-window native frame does no work and balances the host turn", ticks==before && turns==0);
     hasWindow=true;
+    for (bool stop : {false,true}) {
+        stopping=stop; frozen=!stop; const int prior=ticks;
+        windowTick({0},&window); singleWindowFrame();
+        check("ending and session freeze admit no single-window tick", ticks==prior && turns==0);
+    }
+    stopping=frozen=false;
 ''' + '}\n}\n')
 prefix = r'''
 #include <cstdio>
 #include <cmath>
+#include <initializer_list>
 #define SOKOL_API_IMPL
 #define _SOKOL_PRIVATE
 #define SOKOL_ASSERT(x) check("native EGL handles valid",x)
@@ -108,6 +117,7 @@ source = source.replace('struct WindowEntryScope {', 'void refreshSelectedWindow
 variants=[('baseline',source)]
 if os.environ.get('TC_SINGLE_WINDOW_MUTATIONS'):
     for name, old, new in (
+        ('ignore_ending_admission','    if (runtimeEnding() || sessionEndExit()) return;',''),
         ('source_metadata_zero','metadata.source_interval = sapp_frame_duration();','metadata.source_interval = 0;'),
         ('source_uses_secondary_stub','supportsSecondaryWindows() ? sapp_window_frame_duration(handle) : sapp_frame_duration()','sapp_window_frame_duration(handle)'),
         ('skip_uses_desktop_endpoint','else sapp_skip_present();','else sapp_tc_window_skip_present(handle);'),
@@ -142,6 +152,8 @@ struct TeardownSteps { template<class F> void run(const char*,F f) { f(); } };
 constexpr bool supportsSecondaryWindows() { return false; }
 int windowClockNow() { return 0; }
 bool enterWindowTick(Window&,sapp_window,int,double) { return false; }
+bool runtimeEnding() { return false; }
+bool sessionEndExit() { return false; }
 ''' + body(RUNTIME,'void windowTick(') + r'''
 int main() { Window window; windowTick({0},&window); return 0; }
 '''

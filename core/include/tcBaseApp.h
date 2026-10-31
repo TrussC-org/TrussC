@@ -244,7 +244,7 @@ private:
     friend void internal::completeAppConstruction(App&) noexcept;
     friend void internal::deliverAppExit(App&);
     friend std::shared_ptr<internal::AppOwner> internal::appOwner(const App&) noexcept;
-    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool) noexcept;
+    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool, internal::EndingPolicy) noexcept;
     EventListener audioOutListener_;
     EventListener audioInListener_;
 

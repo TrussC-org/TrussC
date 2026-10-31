@@ -324,6 +324,7 @@ bool internal::captureWindowAsync(
     const std::function<void(const internal::CaptureReadback&)>& completion,
     const std::shared_ptr<internal::CaptureStagingPool>& pool,
     const std::function<void()>& finished) {
+    if (internal::sessionEndExit()) return false;
     // Select only this native tick's rendered drawable. The host clears the
     // borrowed pointer at frame end; this job owns its texture until cleanup.
     if (!sg_isvalid() || internal::hasPublicFboActivation()) return false;
@@ -427,6 +428,7 @@ bool internal::captureWindowAsync(
 }
 
 bool captureWindow(Pixels& outPixels) {
+    if (internal::sessionEndExit()) return false;
     if (!sg_isvalid() || internal::hasPublicFboActivation()) {
         logError("Screenshot") << "Metal window capture requires an available window target";
         return false;

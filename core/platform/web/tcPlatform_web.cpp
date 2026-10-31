@@ -129,6 +129,7 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 }
 
 bool captureWindow(Pixels& outPixels) {
+    if (internal::sessionEndExit()) return false;
     (void)outPixels;
     if (!captureWindowWarned_) {
         captureWindowWarned_ = true;
@@ -160,6 +161,7 @@ std::filesystem::path internal::resolveScreenshotDownloadName(const std::filesys
 }
 
 bool internal::captureWindowToFile(const std::filesystem::path& path) {
+    if (internal::sessionEndExit()) return false;
     const auto resolved = internal::resolveScreenshotDownloadName(path);
     const auto name = internal::pathToUtf8(resolved);
     const auto ext = toLower(getFileExtension(resolved));
@@ -233,6 +235,10 @@ EM_JS(void, asyncScreenshot, (unsigned key, const char* filename, ScreenshotDone
 });
 }
 void captureScreenshotDownload(const fs::path& path, std::function<void(SaveResult)> done) {
+    if (sessionEndExit()) {
+        done(SaveResult::fail(SaveError::WriteFailed, "Screenshot capture failed"));
+        return;
+    }
     unsigned key;
     do { key = ++nextScreenshotKey; } while (!key || screenshotCallbacks().contains(key));
     screenshotCallbacks().emplace(key, std::move(done));

@@ -636,7 +636,12 @@ private:
 public:
     // Fire event. Hot path: a single atomic load, no allocation, no mutex.
     // Changes to the listener list during a pass: see Event<T>::notify().
-    void notify() { notifySnapshot(internal::sharedLoad(entries_), {}, alive_); }
+    void notify() {
+        // Frozen public notification cannot borrow an ending runner's permit.
+        // FrameworkEventAccess::notifyShutdown owns terminal event delivery.
+        if (internal::sessionEndExit()) return;
+        notifySnapshot(internal::sharedLoad(entries_), {}, alive_);
+    }
 
 private:
     friend struct internal::FrameworkEventAccess;
@@ -772,18 +777,6 @@ struct FrameworkEventAccess {
         auto snapshot = sharedLoad(event.entries_);
         if (!snapshot) return;
         for (const auto& entry : *snapshot) {
-            if (!entry.callback || (entry.alive && !entry.alive->load(std::memory_order_acquire))) continue;
-            steps.run("exit listener", [&] { (*entry.callback)(); });
-        }
-    }
-    // Session-end delivery (the native backend ends the process right after):
-    // the BeforeApp and App bands only. Protected AfterApp hooks, which may
-    // wait on or tear down resources, do not run.
-    static void notifySessionEnd(Event<void>& event, TeardownSteps& steps) noexcept {
-        auto snapshot = sharedLoad(event.entries_);
-        if (!snapshot) return;
-        for (const auto& entry : *snapshot) {
-            if (entry.priority >= EventPriority::AfterApp) continue;
             if (!entry.callback || (entry.alive && !entry.alive->load(std::memory_order_acquire))) continue;
             steps.run("exit listener", [&] { (*entry.callback)(); });
         }

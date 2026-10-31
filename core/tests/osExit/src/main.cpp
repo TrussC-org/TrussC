@@ -33,36 +33,22 @@ void verifyWindowExit() {
     check(requests == ((mode == "cancel" || mode == "cancel-empty") ? 2 : 1), "quit request count");
     if (failures) std::_Exit(1);
 }
-struct ExitApp : App {
-    int updates = 0;
-    void setup() override {
-        if (mode == "log-warning" || mode == "log-silent") setLogLevel(LogLevel::Warning);
-        if (mode == "log-silent") setFileLogLevel(LogLevel::Silent);
-        if (mode == "event-driven") { setIndependentFps(VSYNC, EVENT_DRIVEN); }
-        quitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) {
-            ++requests;
-            if ((mode == "cancel" || mode == "cancel-empty" || mode == "forced" || mode == "escalate" || mode == "escalate-term") && requests == 1) {
-                args.cancel = true;
-                if (mode != "cancel-empty") args.reason = "Unsaved test document";
-            }
-#if (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
-            if ((mode == "escalate" || mode == "escalate-term") && requests == 2) {
-                check(exits == 0 && begins == 0 && cleans == 0,
-                      "first signal after veto delivers another cancellable request");
-                std::fflush(stdout);
-                // This request is still pending inside its listener. Only
-                // now does a further signal have permission to force exit.
-                std::raise(mode == "escalate-term" ? SIGTERM : SIGINT);
-                std::_Exit(1);
-            }
-#endif
-        });
-    }
-    void update() override {
-        ++updates;
 #ifdef _WIN32
-        HWND hwnd = (HWND)sapp_win32_get_hwnd();
-        if (updates == 1) {
+BOOL CALLBACK findSessionAuthority(HWND candidate, LPARAM target) {
+    wchar_t name[64]{};
+    if (GetClassNameW(candidate, name, 64) && std::wstring(name) == L"TrussC.Runtime.Session") {
+        *reinterpret_cast<HWND*>(target) = candidate;
+        return FALSE;
+    }
+    return TRUE;
+}
+void CALLBACK testSession(HWND, UINT, UINT_PTR timer, DWORD) {
+    KillTimer(nullptr, timer);
+        HWND hwnd = nullptr;
+        EnumThreadWindows(GetCurrentThreadId(), findSessionAuthority, reinterpret_cast<LPARAM>(&hwnd));
+        check(hwnd != nullptr, "Runtime owns a session authority independent of user Windows");
+        if (!hwnd) std::_Exit(1);
+        {
             const bool veto = mode == "cancel" || mode == "cancel-empty" || mode == "forced";
             check(SendMessageW(hwnd, WM_QUERYENDSESSION, 0, ENDSESSION_CLOSEAPP) == !veto,
                   "session query respects veto (Restart Manager)");
@@ -88,6 +74,40 @@ struct ExitApp : App {
                 std::_Exit(1);
             }
         }
+}
+#endif
+struct ExitApp : App {
+    int updates = 0;
+    void setup() override {
+#ifdef _WIN32
+        SetTimer(nullptr, 0, 1, testSession);
+#endif
+        if (mode == "log-warning" || mode == "log-silent") setLogLevel(LogLevel::Warning);
+        if (mode == "log-silent") setFileLogLevel(LogLevel::Silent);
+        if (mode == "event-driven") { setIndependentFps(VSYNC, EVENT_DRIVEN); }
+        quitListener = events().exitRequested.listen([](ExitRequestEventArgs& args) {
+            ++requests;
+            if ((mode == "cancel" || mode == "cancel-empty" || mode == "forced" || mode == "escalate" || mode == "escalate-term") && requests == 1) {
+                args.cancel = true;
+                if (mode != "cancel-empty") args.reason = "Unsaved test document";
+            }
+#if (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
+            if ((mode == "escalate" || mode == "escalate-term") && requests == 2) {
+                check(exits == 0 && begins == 0 && cleans == 0,
+                      "first signal after veto delivers another cancellable request");
+                std::fflush(stdout);
+                // This request is still pending inside its listener. Only
+                // now does a further signal have permission to force exit.
+                std::raise(mode == "escalate-term" ? SIGTERM : SIGINT);
+                std::_Exit(1);
+            }
+#endif
+        });
+    }
+    void update() override {
+        ++updates;
+#ifdef _WIN32
+        // The native timer below drives an idle query outside update().
 #elif (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
         if (updates == 1) std::raise(mode == "sigint" ? SIGINT : SIGTERM);
         if (requests == 1 && (mode == "cancel" || mode == "cancel-empty")) requestExitApp();

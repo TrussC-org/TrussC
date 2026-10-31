@@ -1144,3 +1144,12 @@ C2 process and close coverage:
   headless stdin subprocess cases remain part of the own-binary suite.
 - `windowTick/event-converter-test` classifies quit/device loss as process events;
   they have no Window raw-event fan-out. Native input keeps raw-before-typed order.
+
+### Session authority and OS-only exit deadline (C3)
+
+`sessionEndBusy` now runs deterministic deadline/race checks without a display.
+Its `test.py` supervises production-linked busy/idle, constructor, swap, reload,
+audio-in-flight and timeout children; `native-test.py` compiles actual macOS and
+Win32 authority adapters and tests late GPU disposal. Both run through tcbuild.sh.
+The retained real macOS Apple-event probes require explicit `--mac-device`;
+real logout remains an externally supervised combined-pass-1 route. See its README.

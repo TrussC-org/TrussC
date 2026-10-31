@@ -13,7 +13,11 @@ void retainRuntimeWindow(const std::shared_ptr<Window>&);
 void releaseRuntimeWindow(Window&) noexcept;
 void recordAppAttachment(const std::shared_ptr<App>&, Window&);
 void recordHeadlessAttachment(const std::shared_ptr<App>&, WindowContext&);
-void shutdownRuntime() noexcept;
+#ifdef _WIN32
+void* createSessionAuthority();
+void destroySessionAuthority(void*) noexcept;
+void pollSessionAuthority(void*) noexcept;
+#endif
 void prepareRuntimeExit();
 void requestNormalQuit(const char* reason, std::optional<int> code = std::nullopt);
 bool runtimeEnding() noexcept;

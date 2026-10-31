@@ -227,6 +227,7 @@ private:
     using BakeResources = internal::IblBakeResources;
 
     static void ensureBakeResources() {
+        if (internal::sessionEndExit()) return;
         BakeResources& r = internal::iblBakeResources();
         if (r.initialized) return;
 

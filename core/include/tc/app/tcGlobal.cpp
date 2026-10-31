@@ -110,6 +110,7 @@ bool shadowNativeValid(sg_sampler);
 // Initialization (setup)
 // ---------------------------------------------------------------------------
 void setup() {
+    if (internal::sessionEndExit()) return;
     internal::beginFrameworkLifetime();
     // Initialize sokol_gfx (with memory tracking allocator)
     sg_desc sgdesc = {};
@@ -267,6 +268,7 @@ namespace internal {
 // it survives sgl_shutdown()/resizeSgl() like the font texture. Returns {0} if
 // sokol isn't ready yet (caller then falls back to sgl's straight shader).
 sg_shader sglPremultShader() {
+    if (internal::sessionEndExit()) return {};
     static sg_shader shd = {};
     if (shd.id == SG_INVALID_ID && sg_isvalid()) {
         shd = sg_make_shader(tc_sgl_premult_shader_desc(sg_query_backend()));
@@ -279,6 +281,7 @@ sg_shader sglPremultShader() {
 // R8 (coverage in R), and this shader uses R as alpha. Same ABI and lifetime as
 // sglPremultShader() above. Returns {0} if sokol isn't ready yet.
 sg_shader sglCoverageShader() {
+    if (internal::sessionEndExit()) return {};
     static sg_shader shd = {};
     if (shd.id == SG_INVALID_ID && sg_isvalid()) {
         shd = sg_make_shader(tc_sglcov_coverage_shader_desc(sg_query_backend()));
@@ -398,6 +401,7 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
 // ---------------------------------------------------------------------------
 namespace internal {
 bool RenderContext::admitScreenCapture() {
+    if (internal::sessionEndExit()) return false;
     // A selected/parked native pass is not an app phase: synced update runs
     // after beginFrame(), and Fbo rendering is also possible during setup().
     if (activeEntry_ == AppEntry::Draw || activeEntry_ == AppEntry::AfterFrame)
@@ -417,6 +421,7 @@ uint64_t nextTargetOwnerId() {
     return previous + 1;
 }
 WindowCaptureSource windowCaptureSource() {
+    if (internal::sessionEndExit()) return {};
     auto& window = currentWindowContext();
     WindowCaptureSource source;
     // Borrow the current window frame's source (Metal: current native tick;
@@ -547,6 +552,7 @@ void selectTarget(RenderTarget& target) {
 }
 
 void RenderTarget::beginPass(TargetPassStart reason) {
+    if (sessionEndExit()) return;
     auto& window = currentWindowContext();
     assert(window.currentTarget == this && !inPass);
     if (passKind == TargetPassKind::Swapchain && !admitRootSwapchainPass()) return;
@@ -626,6 +632,7 @@ void RenderTarget::beginPass(TargetPassStart reason) {
 }
 
 void RenderTarget::endPass() {
+    if (sessionEndExit()) return;
     if (passKind == TargetPassKind::Transfer) {
         if (endTransfer) endTransfer(owner);
     } else if (inPass) {
@@ -660,6 +667,7 @@ bool RenderTarget::advanceLayer() {
 }
 
 void RenderTarget::flushLayers() {
+    if (sessionEndExit()) return;
     assert(currentWindowContext().currentTarget == this);
     if (!inPass || !resources().context.id) return;
     const auto err = sgl_context_error(resources().context);
@@ -803,6 +811,7 @@ bool popTarget(RenderTarget& target, uint64_t token) {
 }
 
 bool admitRootSwapchainPass() {
+    if (sessionEndExit()) return false;
     auto& context = currentWindowContext();
     if (context.hostWindow) return true;
     if (!context.processSwapchainWarned) {
@@ -813,6 +822,7 @@ bool admitRootSwapchainPass() {
 }
 
 bool ensureCurrentPass() {
+    if (sessionEndExit()) return false;
     auto& window = currentWindowContext();
     ensureTargetStack(window);
     auto& target = *window.currentTarget;
@@ -905,6 +915,7 @@ void reportSglStackErrors(sgl_error_t err, bool inFbo) {
 } // namespace internal
 
 void internal::endGpuFrame() {
+    if (internal::sessionEndExit()) return;
     sgl_error_t err = sgl_error();
     internal::reportSglStackErrors(err, false);
     if (err.vertices_full || err.commands_full) {
@@ -1047,6 +1058,7 @@ void unregisterWindow(Window* w) {
     list.erase(std::remove(list.begin(), list.end(), w), list.end());
 }
 RenderTarget* drawingApiTarget() {
+    if (sessionEndExit()) return nullptr;
     // An App constructor or late destructor can select an owner without changing
     // the physical caller. Never borrow that caller's Fbo across owner scopes.
     if (currentAppOwner()) {
@@ -2486,6 +2498,7 @@ void reportShadowAllocationFailure() noexcept {
 
 template<class Handle, class Desc, class Make, class State>
 bool makeShadowResource(Handle& handle, const Desc& desc, Make make, State state) {
+    if (internal::sessionEndExit()) return false;
 #if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
     const bool gl = sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3;
     GLPendingErrors pending;
@@ -2519,6 +2532,7 @@ bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, s
 }
 
 bool ensureShadowStorage(WindowContext& window, int resolution) {
+    if (internal::sessionEndExit()) return false;
     auto& sh = window.shadow;
     auto fail = [&] {
         sh.count = 0;
@@ -2737,6 +2751,7 @@ PipelineGeneration::~PipelineGeneration() {
     for (const auto& entry : cache) deferGpuDestroy(entry.second);
 }
 bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const char* what) {
+    if (sessionEndExit()) return false;
     if (context.id) return true;
     if (contextFailed) return false;
     context = sgl_make_context(&desc);
@@ -2747,7 +2762,7 @@ bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const ch
     return !contextFailed;
 }
 void RenderTargetResources::release() {
-    if (frameworkShutdown()) return;
+    if (frameworkShutdown() || !sg_isvalid()) return;
     for (const auto& entry : cache) {
         if (entry.second.id) sgl_destroy_pipeline(entry.second);
 #ifndef NDEBUG
@@ -2761,6 +2776,7 @@ void RenderTargetResources::release() {
     context = {}; contextFailed = false;
 }
 PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
+    if (sessionEndExit()) return {};
     PipelineSelection result;
     if (!sg_isvalid()) return result;
     auto& bundle = resources();
@@ -2959,6 +2975,7 @@ void prepareWindowTarget() {
     }
 }
 bool rebuildTargetResources() {
+    if (sessionEndExit()) return false;
     std::vector<WindowContext*> windows{&nonWindowContext()};
     for (auto* window : openWindows()) windows.push_back(&window->context());
     std::erase_if(windows, [](const WindowContext* window) { return window->targetsClosed; });
@@ -3135,8 +3152,8 @@ bool& appSetupCalled() {
 // Set by a native backend that ends the process itself (_exit) right after
 // cleanup, e.g. a macOS session end while a callback is paused: cleanup must
 // then not leave through std::exit (atexit handlers, static destructors).
-bool& sessionEndExit() {
-    static bool active = false;
+std::atomic<bool>& sessionEndExit() {
+    static std::atomic<bool> active{false};
     return active;
 }
 
@@ -3413,6 +3430,7 @@ CapturePrefixScope::~CapturePrefixScope() noexcept {
 }
 
 void restoreWindowContext(WindowContext* previous) {
+    if (sessionEndExit()) return;
     auto* incoming = previous ? previous : &nonWindowContext();
     if (&currentWindowContext() != incoming && sg_isvalid()) parkWindowPass();
     currentWindowCtx() = previous;
@@ -3594,6 +3612,7 @@ SaveResult ScreenRecorder::State::startSource(Source src, const Fbo* fbo, int w,
 }
 
 void ScreenRecorder::State::onAfterFrame() {
+    if (internal::sessionEndExit()) return;
     Delivery delivery(*this);
     if (source_ == Source::None || !writer_.isOpen()) return;
     // Recorded Fbo was destroyed: finalize instead of reading a dangling

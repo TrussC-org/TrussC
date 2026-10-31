@@ -43,6 +43,18 @@ def main():
     command = [*flags, '-I', str(include), str(source)]
     print('Checking full Windows sokol_impl.cpp:', ' '.join(command), flush=True)
     subprocess.run(command, check=True)
+    # Runtime owns the new control HWND and prestarted watchdog outside sokol.
+    # Compile those real TUs too, including the host coordinator and public API.
+    for relative in ('core/platform/win/tcPlatform_win.cpp',
+                     'core/include/tc/app/tcExit.cpp',
+                     'core/include/tc/app/tcWindowRuntime.cpp',
+                     'core/tests/osExit/src/main.cpp',
+                     'core/tests/nativeWindow/win32.cpp'):
+        path = root / relative
+        print('Checking Windows Runtime TU:', relative, flush=True)
+        subprocess.run([*flags, '-DNOMINMAX', '-I', str(root / 'core/include'),
+                        '-I', str(include), '-I', str(root / 'core/include/tc/gpu/shaders'),
+                        str(path)], check=True)
     print('Windows implementation syntax: PASS', flush=True)
     if args.mutations:
         # Compile the same production TU with only its QPC helper removed.

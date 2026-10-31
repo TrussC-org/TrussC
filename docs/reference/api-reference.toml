@@ -83,7 +83,7 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 - The argument is a read-only `const AudioInBuffer&`. `data` is a `const float*` with `frameCount * channels` interleaved samples, and the buffer also provides `sampleRate` and `framePosition`.
 - Normally, everything else works as in `App::audioOut`: the audio-thread rules, when it starts being called (after the first `setup()` returns; an App that never runs receives no calls), the priority, and the exit order (it is stopped, and a running call is waited for with no time limit, before `cleanup()`).
 - Known issue: [#907](https://github.com/TrussC-org/TrussC/issues/907) (never called).
-- On macOS, a logout, restart or shutdown during a running handler skips the normal exit order; see `App::exit`.
+- OS logout/restart/shutdown still calls App::exit in reverse attachment order. If a callback is interrupted, audio is not stopped or waited for and cleanup is skipped; see App::exit and Runtime::setLogoutTimeout.
 '''
 details.ja = '''
 - 現在、この関数は呼ばれません。TrussC の core にも addon にも、`AudioEngine::audioIn` を送るコードがないためです。マイクの音が必要な場合は、代わりに `MicInput`（`getMicInput()`, `getMicAnalysisBuffer()`）を使ってください。
@@ -96,7 +96,7 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 - 引数は読み取り専用の `const AudioInBuffer&` です。`data` は `const float*` で、サンプルが `frameCount * channels` 個、チャンネル交互に並んでいます。ほかに `sampleRate` と `framePosition` も持っています。
 - それ以外の動作は、通常 `App::audioOut` と同じです。オーディオスレッドでのルール、呼ばれ始めるタイミング（最初の `setup()` が終わったあと。一度も実行されない App には呼ばれません）、優先度、終了時の順番（`cleanup()` の前に呼び出しが止められ、実行中の呼び出しを時間制限なしで待ちます）も共通です。
 - 既知の問題: [#907](https://github.com/TrussC-org/TrussC/issues/907)（呼ばれない）。
-- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、通常の終了順序は省略されます。`App::exit` を参照してください。
+- OS のログアウト・再起動・シャットダウンでも逆 attachment 順で App::exit を呼びます。処理が中断された場合、audio の停止・待機や cleanup は行いません。App::exit と Runtime::setLogoutTimeout を参照してください。
 '''
 details.ko = '''
 - 현재 이 함수는 호출되지 않습니다. TrussC core 에도 addon 에도 `AudioEngine::audioIn` 을 보내는 코드가 없기 때문입니다. 마이크 소리가 필요하면 대신 `MicInput` (`getMicInput()`, `getMicAnalysisBuffer()`) 을 사용하세요.
@@ -109,7 +109,7 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 - 인자는 읽기 전용 `const AudioInBuffer&` 입니다. `data` 는 `const float*` 로, 샘플이 `frameCount * channels` 개 채널이 번갈아 들어 있습니다. 그 밖에 `sampleRate` 와 `framePosition` 도 가집니다.
 - 그 밖의 동작은 일반적으로 `App::audioOut` 과 같습니다. 오디오 스레드 규칙, 호출이 시작되는 시점 (첫 `setup()` 이 끝난 뒤. 한 번도 실행되지 않는 App 에는 호출되지 않음), 우선순위, 종료 순서 (`cleanup()` 전에 호출이 멈추고, 실행 중인 호출을 시간 제한 없이 기다림) 도 공통입니다.
 - 알려진 문제: [#907](https://github.com/TrussC-org/TrussC/issues/907)(호출되지 않음).
-- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 일반적인 종료 순서를 건너뜁니다. `App::exit`을 참고하십시오.
+- OS 로그아웃·재시작·종료에도 연결 역순으로 App::exit을 호출합니다. 콜백이 중단되면 audio 정지·대기와 cleanup은 생략합니다. App::exit 및 Runtime::setLogoutTimeout을 참고하세요.
 '''
 related = ["App::audioOut", "AudioInBuffer", "AudioEngine::audioIn", "MicInput", "getMicInput", "getMicAnalysisBuffer", "MicInput::getBuffer", "App::exit"]
 snippet = '''
@@ -142,7 +142,7 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 - Its priority is `audio::priority::Generator - 1`. It therefore runs before listeners at the default priority (including ones registered before the App existed), and `Effect` / `Monitor` listeners receive what you wrote.
 - Normally, the exit order is: first `exit()`, then audioOut is stopped and TrussC waits, with no time limit, for a call that is still running, and finally `cleanup()`. You can therefore free audio state in `cleanup()`. **Never wait on the main thread or its locks in this function**, or the exit hangs (an error is logged after 1 second).
 - After that it is never registered again, because an App runs only once (see `App`).
-- On macOS, a logout, restart or shutdown during a running handler skips the normal exit order; see `App::exit`.
+- OS logout/restart/shutdown still calls App::exit in reverse attachment order. If a callback is interrupted, audio is not stopped or waited for and cleanup is skipped; see App::exit and Runtime::setLogoutTimeout.
 '''
 details.ja = '''
 - 自分の音は `buf.data` に `+=` で**足して**ください。ここにはミックス済みの `Sound` の音がすでに入っているため、0 にしたり上書きしたりするとその音が消えてしまいます。すべての書き込みが終わったあと、最終的な音は [-1, 1] の範囲に収められます（クランプ）。
@@ -158,7 +158,7 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 - 優先度は `audio::priority::Generator - 1` です。そのため、デフォルト優先度のリスナー（App より前に登録したものを含む）より先に呼ばれ、`Effect` や `Monitor` のリスナーはここで書いた音を受け取ります。
 - 通常は、まず `exit()` が呼ばれ、次に audioOut の呼び出しが止められて実行中の呼び出しの終了を時間制限なしで待ち、最後に `cleanup()` が呼ばれます。したがって、`cleanup()` でオーディオ用のデータを解放できます。**この関数の中でメインスレッドやそのロックを待たないでください**。終了処理が止まってしまいます（1 秒たつとエラーログが出ます）。
 - 一度終了すると、二度と登録されません。App は 1 回しか動かないためです（`App` を参照してください）。
-- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、通常の終了順序は省略されます。`App::exit` を参照してください。
+- OS のログアウト・再起動・シャットダウンでも逆 attachment 順で App::exit を呼びます。処理が中断された場合、audio の停止・待機や cleanup は行いません。App::exit と Runtime::setLogoutTimeout を参照してください。
 '''
 details.ko = '''
 - 직접 만든 샘플은 `buf.data` 에 `+=` 로 **더하세요**. 여기에는 믹스된 `Sound` 보이스가 이미 들어 있으므로, 0 으로 만들거나 덮어쓰면 그 소리가 사라집니다. 모든 쓰기가 끝난 뒤 최종 믹스는 [-1, 1] 범위로 잘립니다 (클램프).
@@ -174,7 +174,7 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 - 우선순위는 `audio::priority::Generator - 1` 입니다. 따라서 기본 우선순위 리스너 (App 보다 먼저 등록한 것 포함) 보다 먼저 호출되고, `Effect` / `Monitor` 리스너는 여기서 쓴 소리를 받습니다.
 - 일반적으로 먼저 `exit()` 가 호출되고, 다음으로 audioOut 호출이 멈추며 실행 중인 호출이 끝나기를 시간 제한 없이 기다린 뒤, 마지막으로 `cleanup()` 이 호출됩니다. 따라서 `cleanup()` 에서 오디오용 데이터를 해제할 수 있습니다. **이 함수 안에서 메인 스레드나 그 락을 기다리지 마세요**. 종료 처리가 멈춥니다 (1 초가 지나면 에러 로그가 출력됩니다).
 - 한 번 종료되면 다시 등록되지 않습니다. App 은 한 번만 동작하기 때문입니다 (`App` 참조).
-- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 일반적인 종료 순서를 건너뜁니다. `App::exit`을 참고하십시오.
+- OS 로그아웃·재시작·종료에도 연결 역순으로 App::exit을 호출합니다. 콜백이 중단되면 audio 정지·대기와 cleanup은 생략합니다. App::exit 및 Runtime::setLogoutTimeout을 참고하세요.
 '''
 related = ["AudioOutBuffer", "AudioEngine::audioOut", "AudioEngine::init", "AudioSettings", "AudioEngine::waitForAudioCallbacks", "audio::priority::Generator", "audio::priority::Effect", "audio::priority::Monitor", "App::audioIn", "App::exit", "App"]
 snippet = '''
@@ -200,26 +200,26 @@ description.ja = "App が終わるときに 1 回呼ばれます。"
 description.ko = "App이 끝날 때 한 번 호출됩니다."
 details.en = '''
 - Runs once in the shared normal ending for window close, setApp<T>() replacement, destroyApp(), normal Runtime shutdown, headless shutdown and guest destruction, after this App was attached, including before its first tick. Unpublished or cancelled candidates receive no setup/exit/cleanup.
-- Before exit, App::getWindow() and the root association are detached and Window::getApp() is empty. Audio remains live through exit; afterwards the framework disconnects this App's hooks and waits for in-flight callbacks, cleans up the tree (only the App virtual in headless), and retires its tools, listeners, async completions and weak references. Other Apps' work remains live. Native/GPU disposal happens afterwards.
+- During normal ending, App::getWindow() and the root association are detached and Window::getApp() is empty. Audio remains live through exit; afterwards the framework disconnects this App's hooks and waits for in-flight callbacks, cleans up the tree (only the App virtual in headless), and retires its tools, listeners, async completions and weak references. Other Apps' work remains live. Native/GPU disposal happens afterwards.
 - Normal Runtime shutdown retains one reverse-attachment snapshot. An exception in exit or cleanup does not skip required steps or siblings. Run this callback on the main thread; do not wait for a worker that needs that thread.
 - App::exit also runs during replacement, destroyApp and hot reload, so writing exitApp() here is unsuitable for a window-close policy. Use setQuitOnClose(true) for normal quit with veto. A manual alternative is an EventListener member assigned with `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });` in setup. Inside App::exit/cleanup and during Runtime shutdown, exitApp() does nothing; a Window exit listener may still request quit while Runtime is running.
-- OS forced termination cannot guarantee normal callbacks. For audio threading and teardown waits, see App::audioOut. There are no parameters or units.
+- OS logout/restart/shutdown also calls each attached App’s exit once, in the same reverse attachment order, even when it interrupts a callback. Save briefly; do not use the GPU or wait for audio/other threads. Busy ending abandons the interrupted stack and skips tree cleanup, AfterApp hooks and module unload. One OS-only watchdog budget covers all exits (default 3 seconds); see Runtime::setLogoutTimeout. An OS that kills the process without a session callback cannot deliver exit. There are no parameters or units.
 '''
 details.ja = '''
 - 接続済みの App は最初のtick前も、窓 close、setApp<T>() の差替え、destroyApp()、通常 Runtime 終了、headless 終了、guest 破棄の共通終了で一度呼ばれます。未公開・取消し候補に setup/exit/cleanup は呼びません。
-- exit 前に App::getWindow() と root の関連を外し、Window::getApp() は空になります。audio は exit 中も動き、その後この App の hook を切り離して実行中 callback を待ち、ツリーを cleanup（headless は App virtual だけ）し、tool、購読、非同期完了、弱参照を退役します。他 App の処理は生きたままで、native/GPU はその後に破棄します。
+- 通常終了では exit 前に App::getWindow() と root の関連を外し、Window::getApp() は空になります。audio は exit 中も動き、その後この App の hook を切り離して実行中 callback を待ち、ツリーを cleanup（headless は App virtual だけ）し、tool、購読、非同期完了、弱参照を退役します。他 App の処理は生きたままで、native/GPU はその後に破棄します。
 - 通常 Runtime 終了は、一回の逆接続順 snapshot を保持します。exit/cleanup の例外でも必要な段階や兄弟の終了を続けます。メインスレッドで呼ばれるため、このスレッドを必要とする worker を待たないでください。
 - App::exit は差替え、destroyApp、hot reload でも呼ばれるので、ここに exitApp() を書くのは窓 close の用途には向きません。veto 可能な通常終了には setQuitOnClose(true) を使います。手動の代案は setup で EventListener メンバへ `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });` を保存する書き方です。App::exit/cleanup 内と Runtime 終了中の exitApp() は何もしません。Runtime の通常運転中は Window exit listener から終了を要求できます。
-- OS の強制終了では通常 callback を保証しません。audio のスレッドと待機は App::audioOut を参照してください。引数や単位はありません。
+- OS のログアウト・再起動・シャットダウンが処理を中断するときも、各 App の exit を同じ逆 attachment 順で一度呼びます。保存は手短にし、GPU や audio・別スレッドを待たないでください。busy 終了は中断スタックを保持し、tree cleanup・AfterApp hook・module unload を省略します。OS 終了だけに一つの見張り予算（既定 3 秒）が付きます。Runtime::setLogoutTimeout を参照してください。session callback なしの OS 強制 kill では呼べません。引数や単位はありません。
 '''
 details.ko = '''
 - 시작된 App은 창 close, setApp<T>() 교체, destroyApp(), 일반 Runtime 종료, headless 종료, guest 파괴의 공통 종료에서 한 번 호출됩니다. 미공개·취소 후보의 setup/exit/cleanup은 호출하지 않습니다.
-- exit 전에 App::getWindow()와 root 연결을 분리하고 Window::getApp()은 비워집니다. audio는 exit 중 유지하며 이후 이 App의 hook을 끊고 실행 중 콜백을 기다리고 트리를 cleanup(headless는 App virtual만)한 다음 도구, 구독, 비동기 완료, 약한 참조를 회수합니다. 다른 App의 작업은 유지하며 native/GPU는 이후 폐기합니다.
+- 일반 종료에서는 exit 전에 App::getWindow()와 root 연결을 분리하고 Window::getApp()은 비워집니다. audio는 exit 중 유지하며 이후 이 App의 hook을 끊고 실행 중 콜백을 기다리고 트리를 cleanup(headless는 App virtual만)한 다음 도구, 구독, 비동기 완료, 약한 참조를 회수합니다. 다른 App의 작업은 유지하며 native/GPU는 이후 폐기합니다.
 - 일반 Runtime 종료는 한 번의 역연결 순서 snapshot을 유지합니다. exit/cleanup 예외에도 필수 단계와 다른 App 종료를 계속합니다. 메인 스레드에서 호출하므로 이 스레드를 필요로 하는 worker를 기다리지 마세요.
 - App::exit은 교체, destroyApp, hot reload에서도 호출하므로 여기에 exitApp()을 쓰는 것은 창 close 정책에 적합하지 않습니다. 거부 가능한 일반 종료에는 setQuitOnClose(true)를 사용합니다. 수동 대안은 setup에서 EventListener 멤버에 `quitListener = getWindow()->events().exit.listen([] { tc::exitApp(); });`를 저장하는 것입니다. App::exit/cleanup 안과 Runtime 종료 중 exitApp()은 아무 작업도 하지 않습니다. Runtime 실행 중에는 Window exit listener가 종료를 요청할 수 있습니다.
-- OS 강제 종료는 일반 콜백을 보장하지 않습니다. audio 스레드와 대기는 App::audioOut을 참고하세요. 인수와 단위가 없습니다。
+- OS 로그아웃·재시작·종료가 콜백을 중단할 때도 같은 연결 역순으로 각 App의 exit을 한 번 호출합니다. 저장은 짧게 하고 GPU를 사용하거나 audio·다른 스레드를 기다리지 마세요. busy 종료는 중단된 스택을 보관하고 tree cleanup·AfterApp hook·module unload를 생략합니다. OS 종료에만 전체 exit을 합한 하나의 감시 예산(기본 3초)을 적용합니다. Runtime::setLogoutTimeout을 참고하세요. session 콜백 없는 OS 강제 kill은 exit을 전달할 수 없습니다. 인수나 단위는 없습니다.
 '''
-related = ["Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "requestExitApp", "exitApp", "App::requestExit", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App", "App::audioIn", "App::isExitRequested", "App::setSize", "AudioRecorder::stop", "ExitRequestEventArgs::cancel", "TcpClient::disconnect", "Texture::clear", "shutdownAudio", "stopRecording", "console::start"]
+related = ["Runtime::setLogoutTimeout", "Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "requestExitApp", "exitApp", "App::requestExit", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App", "App::audioIn", "App::isExitRequested", "App::setSize", "AudioRecorder::stop", "ExitRequestEventArgs::cancel", "TcpClient::disconnect", "Texture::clear", "shutdownAudio", "stopRecording", "console::start"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 void exit() override;
@@ -227,7 +227,7 @@ void cleanup() override;
 
 // tcApp.cpp
 void tcApp::exit() {
-    saveJson(settings, "settings.json");   // settings: a Json member; audio and GPU still work here
+    saveJson(settings, "settings.json");   // settings: a Json member; keep this save brief
 }
 void tcApp::cleanup() {
     // free audio state here: audio callbacks are already detached
@@ -803,7 +803,7 @@ details.en = '''
 - The resized window is always the App's own `getWindow()`, regardless of the current callback. Without an attached Window, only the App's own Node size changes.
 - Normally, inside a sub-window App's own `exit()`/`cleanup()`, `getWindow()` is already nullptr, so the call only changes the App's size.
 - It returns nothing and does not report failure. `setWidth()`/`setHeight()` never resize the window.
-- On macOS, a logout, restart or shutdown during a running handler keeps the App attached to its window during the exit notification; see `App::exit`.
+- OS logout/restart/shutdown freezes window operations before `App::exit`, including an interrupted callback. In its own exit, `getWindow()` is unavailable; setSize changes only local Node size; see `App::exit`.
 '''
 details.ja = '''
 - ウィンドウに接続済みの App は macOS・Windows・Linux X11 では fullscreen 中のサイズ・位置要求は無効な引数も含め無視し、呼び出しごとに Notice を 1 回出します。予約・再実行はせず、終了時には開始前の位置とサイズに戻ります。サイズ・位置は `isFullscreen()` が false を返してから指定してください。macOS は移行開始・終了のアニメーション中も無視し、Windows/X11 は `setFullscreen(false)` の直後から受け付けます。
@@ -815,7 +815,7 @@ details.ja = '''
 - 現在のコールバックに関係なく、この App 自身の `getWindow()` が返す窓をリサイズします。所属する Window がなければ、この App の Node サイズだけを変更します。
 - メインスレッドで使います。窓引数の省略は App token で解決し、所有する購読・完了通知にも適用します。headless App では仮想状態です。App 外では開いた窓がちょうど 1 つ必要です。0 個・複数なら Error を出し、0/null を返すか何もしません。対象を選ぶには Window handle を使います。
 - 戻り値はなく、失敗しても通知されません。`setWidth()`/`setHeight()` ではウィンドウはリサイズされません。
-- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、終了通知の間も App はウィンドウに接続されたままです。`App::exit` を参照してください。
+- OS のログアウト・再起動・シャットダウンでは、処理を中断する場合も App::exit 前に窓操作を凍結します。自身の exit 内では getWindow() は利用できず、setSize はローカル Node サイズだけを変更します。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 윈도우에 연결된 App은 macOS, Windows, Linux X11에서 fullscreen 중 크기·위치 요청을 잘못된 인수도 포함해 무시하고 호출마다 Notice를 한 번 출력합니다. 예약하거나 재실행하지 않으며 종료 시 진입 전 위치와 크기를 복원합니다. `isFullscreen()`이 false를 반환한 뒤 크기·위치를 지정하세요. macOS는 진입·종료 애니메이션 중에도 무시하고 Windows/X11은 `setFullscreen(false)` 직후부터 허용합니다.
@@ -827,7 +827,7 @@ details.ko = '''
 - 현재 콜백과 관계없이 이 App 자신의 `getWindow()`가 반환하는 윈도우를 리사이즈합니다. 연결된 Window가 없으면 이 App의 Node 크기만 변경합니다.
 - 일반적으로 서브 윈도우 App 자신의 `exit()`/`cleanup()` 안에서는 `getWindow()`가 이미 nullptr이므로 App 크기만 바뀝니다.
 - 반환값이 없으며 실패해도 알려 주지 않습니다. `setWidth()`/`setHeight()`로는 윈도우가 리사이즈되지 않습니다.
-- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 종료 알림 중에도 App은 윈도우에 연결된 상태를 유지합니다. `App::exit`을 참고하십시오.
+- OS 로그아웃·재시작·종료는 콜백을 중단할 때도 App::exit 전에 창 작업을 동결합니다. 자신의 exit에서 getWindow()는 사용할 수 없으며 setSize는 로컬 Node 크기만 바꿉니다. `App::exit`을 참고하세요.
 '''
 related = ["getWindowSize", "setWindowSize", "App::getWindow", "App::windowResized", "App", "Window::setSize", "Window::setApp", "WindowSettings", "App::exit"]
 platform_note.en = '''
@@ -5383,17 +5383,17 @@ description.ko = "native 해제 전에 실제 Window 닫기를 알린다."
 details.en = '''
 - Main thread, once on actual Window closure, including Runtime shutdown. App replacement, destroyApp and hot reload call App::exit without Window exit. Defaults to BeforeApp priority 0; the framework App slot at 100 calls App::exit once, followed by protected AfterApp teardown, audio detach and cleanup. Exceptions do not skip mandatory ending steps.
 - Keep the EventListener alive. An App-owned exit subscription remains callable during that App's ending and retires immediately afterward. A manual quit-on-close listener is shown below; prefer Window::setQuitOnClose for this policy. exitApp during ending is inert.
-- No payload, units or cancellation. OS confirmation belongs on closeRequested, process confirmation on exitRequested. Headless exit keeps its virtual-only ending notification; native forced-session limits still apply.
+- No payload, units or cancellation. OS confirmation belongs on closeRequested, process confirmation on exitRequested. Headless exit keeps its virtual-only ending notification; a busy OS session end calls App::exit directly and does not notify this event or run AfterApp hooks.
 '''
 details.ja = '''
 - メインスレッドで Runtime shutdown を含む実際の Window 閉鎖に一回通知します。App 交換、destroyApp、hot reload は Window exit を出さず App::exit を呼びます。既定優先度 BeforeApp (0)、framework App slot (100) で App::exit を一回呼び、保護された AfterApp teardown、audio detach、cleanup と続きます。例外でも必須 ending 手順を飛ばしません。
 - EventListener を保持します。App 所有の exit 購読はその App の ending 中に呼べ、その直後に退役します。以下は手動の quit-on-close ですが、通常は Window::setQuitOnClose を使います。ending 中の exitApp は何もしません。
-- 引数・単位・取り消しはありません。OS close 確認は closeRequested、process 確認は exitRequested を使います。headless は仮想 ending 通知を保ち、native の強制 session 終了には制限があります。
+- 引数・単位・取り消しはありません。OS close 確認は closeRequested、process 確認は exitRequested を使います。headless は仮想 ending 通知を保ち、busy な OS session 終了では App::exit を直接呼び、この event や AfterApp hook は通知しません。
 '''
 details.ko = '''
 - 메인 스레드에서 Runtime shutdown을 포함한 실제 Window 닫기에 한 번 알립니다. App 교체, destroyApp, hot reload는 Window exit 없이 App::exit을 호출합니다. 기본 우선순위 BeforeApp(0), framework App slot(100)에서 App::exit을 한 번 호출하고 보호된 AfterApp teardown, audio detach, cleanup 순입니다. 예외로 필수 ending 절차를 건너뛰지 않습니다.
 - EventListener를 보관하세요. App 소유 exit 구독은 해당 App ending 중 호출 가능하고 직후 회수합니다. 아래는 수동 quit-on-close 대안이며 보통 Window::setQuitOnClose를 사용합니다. ending 중 exitApp은 아무 작업도 하지 않습니다.
-- 인수·단위·취소는 없습니다. OS 닫기 확인은 closeRequested, process 확인은 exitRequested를 사용합니다. headless는 가상 ending 알림을 유지하며 native 강제 session 종료에는 제한이 있습니다.
+- 인수·단위·취소는 없습니다. OS 닫기 확인은 closeRequested, process 확인은 exitRequested를 사용합니다. headless는 가상 ending 알림을 유지하며 busy OS session 종료는 App::exit을 직접 호출하며 이 event와 AfterApp hook은 알리지 않습니다.
 '''
 snippet = '''
 #include <TrussC.h>
@@ -19629,7 +19629,7 @@ details.en = '''
 - Before `cleanup()` runs, the node is marked dead, its async timers are cancelled, and it is no longer treated as the hovered, grabbed or selected node.
 - Normally, for the App, `exit()` and then `cleanup()` are called directly, not through the tree, so child nodes receive no `cleanup()` at app exit. Audio is disconnected before this, so you can release audio state here. For the whole shutdown order, see `App::exit`.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (child nodes get no cleanup() at app exit).
-- On macOS, a logout, restart or shutdown during a running handler skips `cleanup()`; see `App::exit`.
+- OS logout/restart/shutdown during a running main or audio callback calls `App::exit` but skips `cleanup()` and thread waits; see `App::exit`.
 - Normal App ending detaches the App/root association before cleanup. Tree cleanup visits children before the root and contains each child/hook exception so siblings and the root still finish. If the child snapshot cannot be copied, ending moves the children into its retained snapshot so allocation failure cannot skip cleanup. Headless ending calls only the App virtual, without traversing children.
 '''
 details.ja = '''
@@ -19640,7 +19640,7 @@ details.ja = '''
 - `cleanup()` の前に、ノードは dead として扱われ、非同期タイマーはキャンセルされ、hover・grab・選択中のノードとしても扱われなくなります。
 - 通常は、App では `exit()` の次に `cleanup()` が直接呼ばれます（ツリー経由ではありません）。そのため、アプリ終了時に子ノードの `cleanup()` は呼ばれません。それより前にオーディオは切り離されているので、オーディオ関連の状態はここで解放できます。終了処理の流れについては `App::exit` を参照してください。
 - 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（アプリ終了時に子ノードの cleanup() が呼ばれない）。
-- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、`cleanup()` は呼ばれません。`App::exit` を参照してください。
+- main や audio の処理中に OS がログアウト・再起動・シャットダウンすると、App::exit を呼び、cleanup() と別スレッドの待機は省略します。`App::exit` を参照してください。
 - 通常のApp終了ではcleanup前にAppとrootの関連を切ります。ツリーでは子からrootの順に呼び、各子・hookの例外を受け止めて兄弟とrootの処理を続けます。子snapshotをコピーできない場合は子のvectorを保持snapshotへ移し、確保失敗でもcleanupを省きません。headless終了は子をたどらずAppのvirtualだけです。
 '''
 details.ko = '''
@@ -19651,7 +19651,7 @@ details.ko = '''
 - `cleanup()` 전에 노드는 dead로 표시되고, 비동기 타이머가 취소되며, hover·grab·선택 중인 노드로도 더 이상 다뤄지지 않습니다.
 - 일반적으로 App에서는 `exit()` 다음에 `cleanup()`이 직접 호출됩니다(트리 경유가 아님). 따라서 앱 종료 시 자식 노드의 `cleanup()`은 호출되지 않습니다. 그 전에 오디오가 분리되어 있으므로 오디오 관련 상태는 여기서 해제할 수 있습니다. 종료 처리 흐름은 `App::exit`을 참고하세요.
 - 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(앱 종료 시 자식 노드의 cleanup()이 호출되지 않음).
-- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 `cleanup()`은 호출되지 않습니다. `App::exit`을 참고하십시오.
+- main 또는 audio 콜백 실행 중 OS 로그아웃·재시작·종료는 App::exit을 호출하고 cleanup() 및 스레드 대기를 생략합니다. `App::exit`을 참고하세요.
 - 정상 App 종료는 cleanup 전에 App과 root 연결을 분리합니다. 트리는 자식부터 root 순서로 처리하고 각 자식·hook의 예외를 처리하여 형제와 root 종료를 계속합니다. 자식 snapshot을 복사할 수 없으면 자식 vector를 보유 snapshot으로 옮겨 할당 실패로 cleanup이 생략되지 않게 합니다. headless 종료는 자식을 순회하지 않고 App virtual만 호출합니다.
 '''
 related = ["Node::destroy", "Node::removeChild", "App::exit", "Node::setup", "Node::cancelAllAsyncTimers"]
@@ -32975,6 +32975,7 @@ description.en = "Provides a base class for background workers."
 description.ja = "バックグラウンド処理用スレッドの基底クラスを提供する。"
 description.ko = "백그라운드 작업 스레드의 기반 클래스를 제공한다."
 details.en = '''
+- GPU objects (create, upload, draw, capture) are main-thread only. Workers hand their results to `runOnMainThread`.
 - Subclass this ofThread-compatible class, override the protected pure virtual `threadedFunction()`, and launch it with `startThread()`. A repeating worker should check `isThreadRunning()` in its loop.
 - `stopThread()` only clears the running flag; it does not wait for the worker to finish. `waitForThread()` requests stop and joins by default; `waitForThread(false)` waits without requesting stop.
 - A subclass must call `waitForThread()` in its own destructor before its members are destroyed. The base destructor also stops and joins, but runs too late to protect subclass members and warns if the worker has not finished.
@@ -32990,6 +32991,7 @@ protected: void threadedFunction() override { while (isThreadRunning()) sleep(10
 - `sleep(milliseconds)` pauses the calling thread, and `yield()` yields the calling thread to other runnable threads.
 '''
 details.ja = '''
+- GPU オブジェクトの作成・アップロード・描画・キャプチャはメインスレッドだけで行います。worker の結果は `runOnMainThread` で渡してください。
 - ofThread 互換のこのクラスを継承し、protected の純粋仮想関数 `threadedFunction()` をオーバーライドして、`startThread()` で開始します。繰り返し処理では、ループ内で `isThreadRunning()` を確認してください。
 - `stopThread()` は動作中のフラグを解除するだけで、ワーカーの終了を待ちません。`waitForThread()` は既定で停止を要求して join します。`waitForThread(false)` は停止を要求せずに待ちます。
 - 派生クラスは、メンバを破棄する前に自分のデストラクタで `waitForThread()` を呼ぶ必要があります。基底クラスのデストラクタも停止して join しますが、派生クラスのメンバを保護するには遅すぎます。ワーカーが終了していなければ警告します。
@@ -33005,6 +33007,7 @@ protected: void threadedFunction() override { while (isThreadRunning()) sleep(10
 - `sleep(milliseconds)` は呼び出したスレッドを指定ミリ秒間休止し、`yield()` は他の実行可能なスレッドに実行機会を譲ります。
 '''
 details.ko = '''
+- GPU 객체의 생성·업로드·그리기·캡처는 메인 스레드에서만 합니다. worker의 결과는 `runOnMainThread`로 전달하세요.
 - ofThread 호환 클래스인 이 클래스를 상속하고 protected 순수 가상 함수 `threadedFunction()`을 재정의한 뒤 `startThread()`로 시작합니다. 반복 작업에서는 루프 안에서 `isThreadRunning()`을 확인하세요.
 - `stopThread()`는 실행 플래그만 해제하며 워커 종료를 기다리지 않습니다. `waitForThread()`는 기본적으로 중지를 요청하고 join합니다. `waitForThread(false)`는 중지를 요청하지 않고 기다립니다.
 - 파생 클래스는 멤버가 파괴되기 전에 자신의 소멸자에서 `waitForThread()`를 호출해야 합니다. 기반 소멸자도 중지하고 join하지만 파생 클래스 멤버를 보호하기에는 늦습니다. 워커가 끝나지 않았으면 경고합니다.
@@ -52754,19 +52757,19 @@ details.en = '''
 - Closes the audio device, releases its device context, clears the audio meters, and marks the global `AudioEngine` as uninitialized.
 - Normally, the windowed app loop calls it automatically during shutdown after application cleanup, so an explicit call is unnecessary; repeated calls are safe when the device is already closed.
 - `runHeadlessApp()` leaves the audio device running when it returns; call this function explicitly when audio is no longer needed. See `AudioEngine` for threading rules.
-- On macOS, a logout, restart or shutdown during a running handler still stops audio after `exit()`; see `App::exit`.
+- OS logout/restart/shutdown during a running main or audio callback calls `App::exit` without stopping audio or waiting for callbacks; process termination ends the device. Do not wait for audio in exit; see `App::exit`.
 '''
 details.ja = '''
 - オーディオデバイスを閉じ、そのデバイスコンテキストを解放し、オーディオメーターをクリアして、グローバルな `AudioEngine` を未初期化状態にします。
 - 通常は、ウィンドウ付きアプリのループがアプリケーションのクリーンアップ後に自動的に呼ぶため、明示的に呼ぶ必要はありません。デバイスがすでに閉じていても繰り返し呼べます。
 - `runHeadlessApp()` は戻るときにオーディオデバイスを停止しません。オーディオが不要になったら、この関数を明示的に呼んでください。スレッドの扱いは `AudioEngine` を参照してください。
-- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、`exit()` の後に音声は停止します。`App::exit` を参照してください。
+- main や audio の処理中に OS がログアウト・再起動・シャットダウンすると、audio の停止や callback 待機をせず App::exit を呼び、プロセス終了で device が終わります。exit 内で audio を待たないでください。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 오디오 장치를 닫고 해당 장치 컨텍스트를 해제하며 오디오 미터를 지운 뒤 전역 `AudioEngine`을 미초기화 상태로 설정합니다.
 - 일반적으로 윈도우 앱 루프가 애플리케이션 정리 후 종료 과정에서 자동 호출하므로 명시적으로 호출할 필요가 없습니다. 장치가 이미 닫혀 있어도 반복 호출할 수 있습니다.
 - `runHeadlessApp()`은 반환할 때 오디오 장치를 중지하지 않습니다. 오디오가 더 이상 필요하지 않으면 이 함수를 명시적으로 호출하세요. 스레드 규칙은 `AudioEngine`을 참조하세요.
-- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 `exit()` 뒤에 오디오는 중지됩니다. `App::exit`을 참고하십시오.
+- main 또는 audio 콜백 실행 중 OS 로그아웃·재시작·종료는 audio 정지나 콜백 대기 없이 App::exit을 호출하고 프로세스 종료로 device가 끝납니다. exit에서 audio를 기다리지 마세요. `App::exit`을 참고하세요.
 '''
 related = ["initAudio", "AudioEngine", "runHeadlessApp", "App::exit"]
 
@@ -60445,7 +60448,7 @@ details.en = '''
 - Supports LF and CRLF line endings, including a final line without a newline at EOF.
 - External control text is bounded to 1 MiB per line (excluding LF, including CR), 1024 pending commands and 16 MiB of pending raw text. An oversized line is drained and rejected whole; a full queue drops the new whole command. Reading continues without waiting for app delivery. Each store emits one Warning on its first rejection and retains cumulative internal loss counts for the process lifetime; stopping/restarting delivery does not reset them.
 - On Web, logs a notice and leaves delivery disabled.
-- On macOS, a logout, restart or shutdown during a running handler skips `console::stop()` before `exit()`; see `App::exit`.
+- OS logout/restart/shutdown during a running main or audio callback skips `console::stop()` and other thread waits; see `App::exit`.
 '''
 details.ja = '''
 - v0.8.0 移行: CoreEvents::console / events().console を削除しました。runtime().events().console に置き換えます。互換 alias や App への fan-out はありません。
@@ -60457,7 +60460,7 @@ details.ja = '''
 - LF と CRLF の改行に対応し、EOF 直前の改行がない最終行も扱います。
 - 外部からの制御テキストには、1 行 1 MiB（LF を除き CR を含む）、待機コマンド 1024 件、待機中の生テキスト合計 16 MiB の上限があります。長すぎる行は最後まで読み捨てて全体を拒否し、キューが満杯なら新しいコマンド全体を破棄します。アプリの配信を待たずに読み取りを続けます。各保存先は初回の拒否時に Warning を 1 回出し、プロセスの有効期間中は内部の累積損失数を保持します。配信の停止・再開ではリセットしません。
 - Web では通知ログを出力し、配信は無効のままです。
-- macOS でアプリの処理が実行中にログアウト、再起動、シャットダウンすると、`exit()` の前に `console::stop()` は呼ばれません。`App::exit` を参照してください。
+- main や audio の処理中に OS がログアウト・再起動・シャットダウンすると、console::stop() や別スレッドの待機は省略します。`App::exit` を参照してください。
 '''
 details.ko = '''
 - v0.8.0 이전: CoreEvents::console / events().console은 제거되었습니다. runtime().events().console로 바꾸세요. 호환 alias와 App fan-out은 없습니다.
@@ -60469,7 +60472,7 @@ details.ko = '''
 - LF와 CRLF 줄바꿈을 지원하며, EOF 직전의 줄바꿈 없는 마지막 줄도 처리합니다.
 - 외부 제어 텍스트는 줄당 1 MiB(LF 제외, CR 포함), 대기 명령 1024개, 대기 원문 합계 16 MiB로 제한됩니다. 너무 긴 줄은 끝까지 읽고 전체를 거부하며, 큐가 가득 차면 새 명령 전체를 버립니다. 앱의 전달을 기다리지 않고 계속 읽습니다. 각 저장소는 첫 거부 시 Warning을 한 번 출력하고 프로세스 수명 동안 내부 누적 손실 수를 유지합니다. 전달을 중지하거나 재개해도 초기화하지 않습니다.
 - Web에서는 알림 로그를 출력하고 전달을 비활성화 상태로 유지합니다.
-- macOS에서 앱의 처리 함수가 실행 중일 때 로그아웃, 다시 시작 또는 종료하면 `exit()` 전에 `console::stop()`은 호출되지 않습니다. `App::exit`을 참고하십시오.
+- main 또는 audio 콜백 실행 중 OS 로그아웃·재시작·종료는 console::stop() 및 다른 스레드 대기를 생략합니다. `App::exit`을 참고하세요.
 '''
 snippet = '''
 #include <TrussC.h>
@@ -63146,6 +63149,44 @@ int main() {
 '''
 related = ["RuntimeEvents::exitRequested", "RuntimeEvents::console"]
 
+
+["Runtime::setLogoutTimeout"]
+category = "events"
+keywords = ["logout", "shutdown", "restart", "session", "watchdog", "timeout", "seconds"]
+description.en = "Sets the process-wide time budget for OS logout, restart or shutdown."
+description.ja = "OS のログアウト・再起動・シャットダウン時のプロセス全体の待ち時間を設定する。"
+description.ko = "OS 로그아웃·재시작·종료 시 프로세스 전체의 대기 시간을 설정한다."
+details.en = '''
+- Call on the main thread during the current Runtime run, for example in setup(). The default is 3 seconds on each new run. This is an escape hatch for unusual applications that need a different OS logout budget, not an ordinary quit setting.
+- seconds is a float in seconds. Negative values and NaN log Error and keep the previous value. 0 ends the process immediately, before exit callbacks; positive infinity means no watchdog. These are plain numeric meanings, with no special sentinel values.
+- The watchdog starts before App exits for an OS logout/restart/shutdown, whether idle or busy. One process-wide deadline covers all App exits together and is never restarted per App. OS session end is received on the main thread. If main is blocked when it arrives, App::exit cannot run and the OS ends the process by its own policy. This timeout only bounds exits that do run. Windows may enforce an earlier OS deadline. macOS has no published fixed logout allowance.
+- Cmd+Q, exitApp(), requestExitApp() and closing the last Window have no watchdog and retain complete normal cleanup. For OS termination that interrupts a callback, save briefly in App::exit; do not use the GPU or wait for other threads. Work abandoned at that point is not reported as completed.
+- The setting belongs to this Runtime run and is shared with reload guests. It has no effect after session commit. Desktop adapters must receive an OS session callback; Linux hosts without one cannot promise logout delivery. iOS/Android/Web host-stop or surface-loss events are not desktop logout notifications. Infinity can let user exit code block OS logout indefinitely.
+'''
+details.ja = '''
+- 現在の Runtime run のメインスレッドで、たとえば setup() から呼びます。新しい run ごとの既定は 3 秒です。通常の quit 設定ではなく、既定の OS 終了予算では困る珍しいアプリのための逃げ道です。
+- seconds は float の秒です。負数・NaN は Error を出し、前の値を維持します。0 は exit callback の前に即座にプロセスを終了し、正の無限大は見張りなしです。特別な sentinel を設けず、数値そのままの意味です。
+- OS のログアウト・再起動・シャットダウンでは、idle/busy とも App の exit 前に見張りを開始します。全 App の exit を合計して一つの期限とし、App ごとに開始し直しません。OS の session end はメインスレッドで受け取ります。到着時にメインがブロックしていると App::exit は実行できず、OS が自身の方針でプロセスを終了します。このタイムアウトが制限するのは、実行された exit だけです。Windows では OS の期限が先に来る場合があります。macOS の固定の猶予秒数は公開されていません。
+- Cmd+Q・exitApp()・requestExitApp()・最後の窓の close には見張りを付けず、通常の cleanup を行います。OS 終了が処理を中断するときも App::exit は呼びます。保存は手短に、GPU や別スレッドを待たないでください。中断した仕事を完了扱いにはしません。
+- 値は現在の run に属し、reload guest と共有します。session commit 後の変更は効きません。OS session callback が届く desktop で有効です。callback を供給しない Linux host にログアウト配送は約束できません。iOS/Android/Web の host-stop・surface-loss は desktop logout ではありません。無限大では exit がログアウトを無期限に止め得ます。
+'''
+details.ko = '''
+- 현재 Runtime run의 메인 스레드에서, 예를 들어 setup()에서 호출합니다. 새 run의 기본값은 3초입니다. 일반 quit 설정이 아니라 기본 OS 종료 예산을 바꿔야 하는 드문 앱을 위한 탈출구입니다.
+- seconds는 float 초 단위입니다. 음수·NaN은 Error를 기록하고 이전 값을 유지합니다. 0은 exit 콜백 전에 프로세스를 즉시 끝내며 양의 무한대는 감시 스레드 제한이 없습니다. 특별한 sentinel 없이 수치 그대로의 의미입니다.
+- OS 로그아웃·재시작·종료는 idle/busy 모두 App exit 전에 감시를 시작합니다. 모든 App exit의 합계에 하나의 프로세스 기한을 적용하며 App마다 다시 시작하지 않습니다. OS session end는 메인 스레드에서 받습니다. 도착 시 메인이 블록되어 있으면 App::exit를 실행할 수 없으며 OS가 자체 정책으로 프로세스를 종료합니다. 이 타임아웃은 실제 실행되는 exit에만 적용됩니다. Windows의 OS 기한이 먼저 올 수도 있습니다. macOS의 고정 로그아웃 허용 시간은 공개되지 않았습니다.
+- Cmd+Q·exitApp()·requestExitApp()·마지막 창 close에는 감시를 적용하지 않고 일반 cleanup을 완료합니다. OS 종료가 콜백을 중단할 때도 App::exit을 호출합니다. 저장은 짧게 하고 GPU를 쓰거나 다른 스레드를 기다리지 마세요. 중단한 작업을 완료로 보고하지 않습니다.
+- 값은 현재 run에 속하며 reload guest와 공유합니다. session commit 이후 변경은 무효입니다. OS session 콜백을 받는 desktop에 적용되며 콜백 없는 Linux host는 로그아웃 전달을 보장할 수 없습니다. iOS/Android/Web의 host-stop·surface-loss는 desktop 로그아웃이 아닙니다. 무한대에서는 exit이 OS 로그아웃을 무기한 막을 수 있습니다.
+'''
+snippet = '''
+#include <TrussC.h>
+class Demo : public tc::App {
+    tc::Json settings;
+    void setup() override { tc::runtime().setLogoutTimeout(3.0f); }
+    void exit() override { tc::saveJson(settings, "settings.json"); }
+};
+int main() { return tc::runApp<Demo>(); }
+'''
+related = ["App::exit", "Runtime", "Runtime::events", "exitApp", "requestExitApp"]
 
 ["Runtime::events"]
 description.en = "Accesses the process event hub without selecting a Window."

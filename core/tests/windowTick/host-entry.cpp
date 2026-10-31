@@ -153,7 +153,8 @@ void bootstrap() {
                 [](const sapp_event*, sapp_window, Window*, internal::WindowContext&) { ++peerEvents; });
             check("secondary init-time event is admitted", peerEvents == 1);
             if (queryEndSession) {
-                check("WM_QUERYENDSESSION returns FALSE for exitRequested veto during init", queryEndSession() && exitRequests == 1);
+                check("user HWND yields WM_QUERYENDSESSION to Runtime authority during init", queryEndSession());
+                check("user HWND never dispatches a duplicate session veto", exitRequests == 0);
             }
             expected.push_back(SAPP_EVENTTYPE_RESIZED);
             bootstrapApp = internal::makeConstructedApp<BootstrapProbe>(window);

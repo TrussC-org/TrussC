@@ -72,7 +72,7 @@ def event_extract(marker):
     event_markers.append(marker)
     return body(event_header, marker, 'tcEvent.h') + '\n'
 
-session_delivery = event_extract('static void notifySessionEnd(Event<void>& event, TeardownSteps& steps) noexcept {')
+session_delivery = ''
 shutdown_delivery = event_extract('static void notifyShutdown(Event<void>& event, TeardownSteps& steps) noexcept {')
 extraction_markers = []
 cleanup_markers = []
@@ -85,12 +85,12 @@ def common_extract(marker):
     common_markers.append(marker)
     return body(common, marker, 'tcGlobal.cpp') + '\n'
 
-session_flag = common_extract('bool& sessionEndExit() {')
-app_exit_notifications = body(runtime_source, 'void notifyAppExitsAtSessionEnd() noexcept {', 'tcWindowRuntime.cpp') + '\n'
+session_flag = common_extract('std::atomic<bool>& sessionEndExit() {')
+app_exit_notifications = ''
 attachment_ledger = body(runtime_source, 'class AttachmentLedger {', 'tcWindowRuntime.cpp') + ';\n'
 # Compile the complete production cleanup body with the macOS branch enabled.
 # Record its service calls, leaving both its early return and std::exit intact.
-mac_cleanup = cleanup_extract('inline void _cleanup_cb_impl() {')
+mac_cleanup = ''
 def extract(marker):
     extraction_markers.append(marker)
     return body(native, marker, 'sokol_app_tc.h') + '\n'
@@ -317,6 +317,11 @@ void setExitReasonIfEmpty(const char* reason) { if (!*exit_reason) exit_reason=r
 bool appSetupCalled() { return setup_called; }
 int& appExitCode() { return app_code; }
 ''' + session_flag + r'''
+int session_queries=0, session_commits=0;
+bool querySessionEnd() { ++session_queries; return true; }
+void cancelSessionEnd() {}
+void commitSessionEnd() { ++session_commits; }
+void shutdownRuntime() {}
 }
 constexpr unsigned NSWindowOcclusionStateVisible=1;
 struct NSWindow { unsigned occlusionState=1; bool miniaturized=false, inLiveResize=false; double backingScaleFactor=1; float screenRate=60; };
@@ -369,6 +374,7 @@ struct {
         bool init_called=false, cleanup_called=false;
         struct {
             int logger=0;
+            bool (*_tc_callbacks_active)()=nullptr;
             void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr;
             void (*cleanup_cb)()=nullptr;
             void (*cleanup_userdata_cb)(void*)=nullptr;
@@ -723,93 +729,13 @@ int native_allocations=0;
     Native* w=target; // Fixture has completed allocation, initialization and publication.
     creation_record=w;
 ''' + mac_constructing_scope + '    _sapp_tc_creation_transaction creation(w, [](Native*) {});\n' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_create_window(const sapp_window_desc* desc) {') + r'''
-void session_record(char step) { if (session_pipe>=0) (void)write(session_pipe,&step,1); }
-namespace trussc {
-void shutdownAudio() { session_record('A'); }
-namespace internal {
-bool cleanup_started=false;
-bool beginExitCleanup() {
-    if (cleanup_started) return false;
-    cleanup_started=true; session_record('B'); return true;
-}
-struct RunToken { void store(bool value) { session_record(value?'!':'T'); } };
-RunToken* appRunToken() { static RunToken token; return &token; }
-struct CrashPhaseScope { explicit CrashPhaseScope(const char* phase) { session_record(strcmp(phase,"cleanup")==0?'P':'!'); } };
-enum class LogLevel { Notice };
-std::string exitLogMessage(bool complete) { return complete?"end":"begin"; }
-void writeProtocolLine(LogLevel, const std::string& line) {
-    session_record(line=="[System] begin"?'<':line=="[System] end"?'>':'!');
-}
-// Native services are seams; both production delivery bodies are compiled.
-namespace EventPriority { constexpr int BeforeApp=0, App=100, AfterApp=200; }
-struct ExitEntry {
-    int priority;
-    std::shared_ptr<std::function<void()>> callback;
-    std::shared_ptr<std::atomic<bool>> alive;
-};
-template<class T> struct Event { std::shared_ptr<std::vector<ExitEntry>> entries_; };
-template<class T> auto sharedLoad(const std::shared_ptr<T>& entries) { return entries; }
-struct TeardownSteps {
-    template<class F> void run(const char*, F&& fn) noexcept { try { fn(); } catch (...) {} }
-};
-struct FrameworkEventAccess {
-''' + session_delivery + shutdown_delivery + r'''
-};
-struct ExitContext { int width; };
-ExitContext*& currentWindowCtx() { static ExitContext prior{999}; static auto* selected=&prior; return selected; }
-std::vector<int> exit_apps, before_apps, app_listeners, after_apps;
-bool exit_contexts_ok=true;
-int gpu_restores=0, app_work=0, adapter_creates=0, window_deletes=0;
-bool stopped=false;
-bool frameworkShutdown() { return stopped; }
-bool change_exit_registry=false;
-void mutate_exit_registry();
-void restoreWindowContext(void*);
-int& mainWindowContext() { static int context=0; return context; }
-struct Window;
-struct Owner { Window* window; bool ended=false; };
+namespace trussc::internal {
+int app_work=0,adapter_creates=0;
 struct Window {
-    int id;
-    ExitContext state;
-    bool appRequested_=true, applyingApp_=false, exitDelivered_=false;
+    int id; struct State { int width; } state;
+    bool appRequested_=true,applyingApp_=false,exitDelivered_=false;
     int dispatchDepth_=0;
     void applyPendingApp();
-    ~Window() { ++window_deletes; }
-    struct Events { Event<void> exit; } notifications;
-    struct App {
-        Window* owner;
-        void exit() {
-            exit_apps.push_back(owner->id);
-            exit_contexts_ok &= currentWindowCtx()==&owner->context();
-            // The exit handler may set the final app status.
-            if (owner->id==1) { session_record('E'); appExitCode()=79;
-                if (change_exit_registry) mutate_exit_registry(); }
-        }
-        Owner attribution{owner};
-    } app{this};
-    ExitContext& context() { return state; }
-    Events& events() { return notifications; }
-    void prepare() {
-        auto entries=std::make_shared<std::vector<ExitEntry>>();
-        auto add=[&](int priority, std::function<void()> fn, bool alive=true) {
-            entries->push_back({priority,std::make_shared<std::function<void()>>(std::move(fn)),
-                                std::make_shared<std::atomic<bool>>(alive)});
-        };
-        add(EventPriority::BeforeApp, [this] {
-            before_apps.push_back(id); exit_contexts_ok &= currentWindowCtx()==&context();
-        });
-        add(EventPriority::App, [this] { app.exit(); });
-        add(EventPriority::App, [this] {
-            app_listeners.push_back(id); exit_contexts_ok &= currentWindowCtx()==&context();
-        });
-        // Model protected ImGui/recording/GPU shutdown hooks, including a
-        // priority above the AfterApp boundary to catch equality-only guards.
-        for (int priority : {EventPriority::AfterApp, EventPriority::AfterApp+1})
-            add(priority, [this] { after_apps.push_back(id); session_record('!'); });
-        add(EventPriority::BeforeApp, [] { session_record('!'); }, false);
-        entries->push_back({EventPriority::App, nullptr, nullptr});
-        notifications.exit.entries_=entries;
-    }
 };
 namespace internal = ::mac::trussc::internal;
 ''' + app_admission + r'''
@@ -818,150 +744,6 @@ namespace headless { bool isActive() { return false; } }
 struct LogSink { template<class T> LogSink& operator<<(T&&) { return *this; } };
 LogSink logError(const char*) { return {}; }
 ''' + adapter_admission + r'''
-
-Window main_owner{1,{200}}, first_peer{2,{160}}, last_peer{3,{120}}, late_peer{4,{100}};
-std::vector<Window*> exit_registry;
-int registry_reads=0;
-using App = Window::App;
-Owner* appOwner(App& app) { return &app.attribution; }
-''' + attachment_ledger + r'''
-class TestLedger : public AttachmentLedger {
-public:
-    void clear() { while (!empty()) { auto retired = extract(first()); } }
-};
-struct Runtime { TestLedger attachments, sessionAttachments; };
-Runtime& runtime() { static Runtime state; return state; }
-void shutdownRuntime() { session_record('C'); }
-
-ExitContext* initializedMainWindowContext=&main_owner.context();
-void mutate_exit_registry() { exit_registry={&main_owner,&late_peer}; }
-Window* mainWindow() { return &main_owner; }
-std::vector<Window*> openWindows() { ++registry_reads; return exit_registry; }
-void prepare_session_apps() {
-    for (auto* w : {&main_owner,&first_peer,&last_peer,&late_peer}) w->prepare();
-    // Creation order main, A, B: peers distinguish newest-first from creation order.
-    exit_registry={&main_owner,&first_peer,&last_peer};
-    runtime().sessionAttachments.clear(); runtime().attachments.clear();
-    for (auto* w : exit_registry) runtime().attachments.push_back(std::shared_ptr<App>(&w->app, [](App*) {}));
-    registry_reads=0; change_exit_registry=false;
-    exit_apps.clear(); before_apps.clear(); app_listeners.clear(); after_apps.clear();
-    exit_contexts_ok=true; gpu_restores=0;
-}
-''' + app_exit_notifications + r'''
-void cancelResourceBackends() { session_record('R'); }
-void restoreWindowContext(void*) { ++gpu_restores; session_record('W'); }
-namespace mcp { void stopHttpServer() { session_record('H'); } }
-namespace console { void stop() { session_record('O'); } }
-enum class AppEntry { Exit };
-struct EntryStackGuard { explicit EntryStackGuard(AppEntry) { session_record('K'); } };
-void normal_app_cleanup() { session_record('C'); }
-void (*appCleanupFunc)()=normal_app_cleanup;
-void waitForResourceLoadsAtAppExit() { session_record('L'); }
-void cleanup() { session_record('G'); } // GPU/window teardown entry point
-void restoreWindowExitSignals() { session_record('S'); }
-#define __APPLE__ 1
-#define TARGET_OS_OSX 1
-''' + mac_cleanup + r'''
-#undef TARGET_OS_OSX
-#undef __APPLE__
-}
-}
-void session_cleanup() {
-    const bool correct=_sapp_tc.app.cleanup_called && _sapp_tc.app.quit_ordered &&
-        _sapp_tc_mac_busy() && exit_requests==0 && !_sapp_tc.terminate_pending;
-    (void)write(session_pipe,correct?"C":"B",1);
-}
-bool cleanup_throws=false, cleanup_reenters=false;
-void session_cleanup_cb() {
-    session_cleanup();
-    if (cleanup_reenters) { cleanup_reenters=false; application_should_terminate(nullptr); }
-    if (cleanup_throws) throw 42;
-}
-void session_cleanup_userdata(void* user) {
-    if (user!=&_sapp_tc) (void)write(session_pipe,"B",1);
-    session_cleanup_cb();
-}
-void session_trussc_cleanup() {
-    session_cleanup();
-    trussc::internal::_cleanup_cb_impl();
-    trussc::internal::_cleanup_cb_impl(); // The minimal path is idempotent too.
-    using namespace trussc::internal;
-    if (!initializedMainWindowContext) {
-        if (!exit_apps.empty() || registry_reads) session_record('!');
-        return;
-    }
-    if (exit_apps!=std::vector<int>{3,2,1} || before_apps!=exit_apps || app_listeners!=exit_apps ||
-        !after_apps.empty() || !exit_contexts_ok || gpu_restores) session_record('!');
-}
-void session_init_callback() { application_should_terminate(nullptr); session_record('R'); }
-void session_atexit() { session_record('X'); }
-void session_child(Native& w,AEEventID reason,bool parameter,int context,int cleanup_mode,bool setup,bool allowed=false) {
-    int channel[2];
-    if (pipe(channel)!=0) { check("macOS session pipe available",false); return; }
-    fflush(nullptr);
-    pid_t child=fork();
-    if (child==0) {
-        close(channel[0]); session_pipe=channel[1]; alarm(3);
-        attribute_reason=parameter?0:reason; parameter_reason=parameter?reason:0;
-        setup_called=setup; app_code=73; terminate_allowed=allowed;
-        std::atexit(session_atexit); // Production std::exit must be observable.
-        trussc::internal::cleanup_started=false;
-        trussc::internal::prepare_session_apps();
-        _sapp_tc.app.init_called=cleanup_mode!=4;
-        _sapp_tc.app.cleanup_called=cleanup_mode==5;
-        _sapp_tc.app.desc.cleanup_cb=cleanup_mode==6?session_trussc_cleanup:cleanup_mode==1?nullptr:session_cleanup_cb;
-        _sapp_tc.app.desc.cleanup_userdata_cb=session_cleanup_userdata;
-        _sapp_tc.app.desc.user_data=&_sapp_tc;
-        cleanup_throws=cleanup_mode==2; cleanup_reenters=cleanup_mode==3;
-        session_probe=true; callback_target=&w; native_kind=context;
-        if (context==0) _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
-        if (context==1) _sapp_tc_mac_tick(&w,nil);
-        if (context==2 || context==3) {
-            if (context==2) _sapp_tc.constructing=1;
-            else w.in_tick=true;
-            application_should_terminate(nullptr);
-        }
-        if (context==5) {
-            trussc::internal::initializedMainWindowContext=nullptr;
-            trussc::internal::runtime().attachments.clear();
-            trussc::internal::runtime().sessionAttachments.clear();
-            _sapp_tc.app.main=nullptr; _sapp_tc.app.init_called=false;
-            _sapp_tc.app.desc.init_cb=session_init_callback;
-            _sapp_tc_mac_init_client();
-        }
-        if (context==4) {
-            const auto reply=application_should_terminate(nullptr);
-            (void)write(session_pipe,reply==NSTerminateNow?"N":"V",1);
-            _exit(91);
-        }
-        (void)write(session_pipe,"R",1);
-        _exit(99);
-    }
-    close(channel[1]);
-    check("macOS session child starts", child>0);
-    int status=0;
-    if (child>0) {
-        check("macOS session child finishes", waitpid(child,&status,0)==child);
-        char report[32]{};
-        ssize_t size=read(channel[0],report,sizeof(report));
-        if (context==4) {
-            check("macOS idle session end takes normal App veto path",
-                size==2 && report[0]=='A' && report[1]==(allowed?'N':'V') &&
-                WIFEXITED(status) && WEXITSTATUS(status)==91);
-        } else {
-            if (cleanup_mode==6) {
-                check("macOS busy session uses only minimal TrussC cleanup without std::exit",
-                    (context==5 ? size==7 && std::string(report,size)=="CBTP<A>" : size==8 && std::string(report,size)=="CBTP<EA>"));
-                check("macOS minimal session exits with handler app code",
-                    WIFEXITED(status) && WEXITSTATUS(status)==(setup && context!=5?79:1));
-            } else {
-                check("macOS busy session cleanup runs once without asking or resuming App",
-                    cleanup_mode<4?(size==1 && report[0]=='C'):size==0);
-                check("macOS busy session exits with app code", WIFEXITED(status) && WEXITSTATUS(status)==(setup?73:1));
-            }
-        }
-    }
-    close(channel[0]);
 }
 void run() {
     int before=failures, count=checks;
@@ -1454,27 +1236,8 @@ void run() {
         check("macOS direct close is consumed after deferred handling",
             close_callbacks==1 && native_closes==1 && close_queries==0 && !_sapp_tc.deferred_blocked);
     }
-    // All OS session reasons, attribute first and parameter fallback. Real
-    // child processes keep production _exit intact and expose wrong status,
-    // App veto calls, duplicate cleanup and any return to the interrupted App.
-    for (AEEventID reason : {0x6c6f676fu,0x726c676fu,0x72727374u,0x72657374u,0x7273646eu,0x73687574u}) {
-        for (bool parameter : {false,true}) for (int context : {0,1}) {
-            reset(w,window,view,false);
-            session_child(w,reason,parameter,context,0,true);
-        }
-        // Outside a callback/tick/constructor, a session end stays vetoable.
-        for (bool allowed : {false,true}) {
-            reset(w,window,view,false);
-            session_child(w,reason,false,4,0,true,allowed);
-        }
-    }
-    for (int mode : {1,2,3,4,5}) {
-        reset(w,window,view,false); session_child(w,0x73687574,false,0,mode,true);
-    }
-    for (int context : {2,3}) {
-        reset(w,window,view,false); session_child(w,0x72657374,false,context,0,true);
-    }
-    reset(w,window,view,false); session_child(w,0x6c6f676f,false,1,0,false);
+    // Session query/commit, watchdog and actual retained-ledger ending are
+    // exercised by sessionEndBusy/test.py against the production Runtime.
     // A plain quit and an unknown reason retain cancel-and-replay behavior,
     // even when the App vetoes the eventual replay.
     for (AEEventID reason : {0u,0x12345678u}) for (bool allowed : {false,true}) {
@@ -1524,33 +1287,10 @@ void run() {
             native_closes==1 && close_callbacks==1 && close_queries==0 &&
             w.native_closed && !w.close_requested && !w.closed_pending);
     }
-    for (AEEventID reason : {0x6c6f676fu,0x726c676fu,0x72727374u,0x72657374u,0x7273646eu,0x73687574u})
-    for (bool parameter : {false,true}) for (int context : {0,1,2,3}) {
-        reset(w,window,view,false);
-        session_child(w,reason,parameter,context,6,true);
-    }
-    reset(w,window,view,false); session_child(w,0x73687574,false,1,6,false);
-    summary("macOS round 4c tick boundaries / close coalescing / minimal cleanup", before, count);
-    before=failures; count=checks;
-    {
-        using namespace trussc::internal;
-        prepare_session_apps();
-        auto* previous=currentWindowCtx();
-        notifyAppExitsAtSessionEnd();
-        check("macOS session every App exits once in reverse attachment order", exit_apps==std::vector<int>{3,2,1});
-        check("macOS session selects each window context for all listeners", exit_contexts_ok);
-        check("macOS session restores previous context without GPU restore", currentWindowCtx()==previous && gpu_restores==0);
-        check("macOS session delivers BeforeApp listeners in reverse attachment order", before_apps==std::vector<int>{3,2,1});
-        check("macOS session delivers App listeners in reverse attachment order", app_listeners==std::vector<int>{3,2,1});
-        check("macOS session skips AfterApp framework hooks", after_apps.empty());
-    }
-    reset(w,window,view,true);
-    session_child(w,0x6c6f676f,false,5,6,false);
-    summary("macOS round 4d every App / window context / listener bands", before, count);
-    before=failures; count=checks;
     reset(w,window,view,false);
     {
         using namespace trussc::internal;
+        session_queries=session_commits=0;
         sessionEndExit()=true;
         _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
         check("macOS frozen event send is blocked", events.empty() && _sapp_tc.callbacks_active==0);
@@ -1561,7 +1301,7 @@ void run() {
         check("macOS frozen deferred pass preserves pending work", close_queries==0 && closed==0 && quit==0 && w.close_requested && _sapp_tc.terminate_pending && _sapp_tc.deferred_blocked);
         _sapp_tc.terminate_pending=false; _sapp_tc.app.quit_ordered=false;
         attribute_reason=0x73687574;
-        check("macOS frozen applicationShouldTerminate is blocked", application_should_terminate(nullptr)==NSTerminateCancel && exit_requests==0 && !*exit_reason && !_sapp_tc.terminate_pending);
+        check("macOS frozen applicationShouldTerminate is blocked", application_should_terminate(nullptr)==NSTerminateCancel && session_queries==0 && session_commits==0 && exit_requests==0 && !*exit_reason && !_sapp_tc.terminate_pending);
         native_allocations=0; sapp_window_desc frozen_desc{};
         check("macOS frozen native creation refuses before allocation", sapp_create_window(&frozen_desc).id==0 && native_allocations==0 && _sapp_tc.create_error);
         Window pending_window{5,{80}};
@@ -1573,10 +1313,6 @@ void run() {
         pending_window.applyPendingApp();
         create_secondary(WindowSettings{});
         check("macOS thawed admission seams reach work", app_work==1 && adapter_creates==1);
-        prepare_session_apps(); change_exit_registry=true; sessionEndExit()=true;
-        notifyAppExitsAtSessionEnd();
-        check("macOS session only notifies its single initial snapshot", registry_reads==0 && exit_apps==std::vector<int>{3,2,1} && before_apps==exit_apps && app_listeners==exit_apps);
-        change_exit_registry=false; sessionEndExit()=false;
     }
     summary("macOS round 4e freeze / single snapshot", before, count);
     before=failures; count=checks;
@@ -2066,34 +1802,7 @@ if '--mutations' in sys.argv[3:]:
         'mac-direct-close-asks-veto': (change(pending, '_sapp_tc_mac_closed_now(cw);',
             'if (_sapp_tc_mac_close(cw)) _sapp_tc_mac_closed_now(cw);'),
             'macOS direct close handled exactly once without second close or veto'),
-        'mac-session-end-cancels-busy': (change(should_terminate,
-            'if (_sapp_tc_mac_is_session_end(quit_reason)) _sapp_tc_mac_session_end(quit_reason);', ''),
-            'macOS busy session cleanup runs once without asking or resuming App'),
-        'mac-session-end-asks-App': (change(session, '_sapp_tc.app.quit_ordered = true;',
-            '_sapp_tc_request_exit(); _sapp_tc.app.quit_ordered = true;'),
-            'macOS busy session cleanup runs once without asking or resuming App'),
-        'mac-session-end-skips-cleanup': (change(session, '_sapp_tc.app.desc.cleanup_cb();', '(void)0;'),
-            'macOS busy session cleanup runs once without asking or resuming App'),
-        'mac-session-end-skips-userdata-cleanup': (change(session,
-            '_sapp_tc.app.desc.cleanup_userdata_cb(_sapp_tc.app.desc.user_data);', '(void)0;'),
-            'macOS busy session cleanup runs once without asking or resuming App'),
-        'mac-session-end-repeats-cleanup': (change(session, '&& !_sapp_tc.app.cleanup_called', ''),
-            'macOS busy session cleanup runs once without asking or resuming App'),
-        'mac-session-end-wrong-code': (change(session,
-            'trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1', '1'),
-            'macOS busy session exits with app code'),
-        'mac-session-end-resumes-handler': (change(session,
-            '_exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);', 'return;'),
-            'macOS busy session exits with app code'),
-        'mac-session-end-skips-idle-veto': (change(should_terminate,
-            'if (_sapp_tc_mac_busy())', 'if (_sapp_tc_mac_busy() || _sapp_tc_mac_is_session_end(quit_reason))'),
-            'macOS idle session end takes normal App veto path'),
     }
-    # Mutate each session reason independently; each must reach the busy path.
-    for reason in ('6c6f676f','726c676f','72727374','72657374','7273646e','73687574'):
-        round4_mutants['mac-session-end-misses-'+reason] = (change(
-            'static bool _sapp_tc_mac_is_session_end(', 'case 0x'+reason+':', 'case 0xdeadbeef:'),
-            'macOS busy session cleanup runs once without asking or resuming App')
     # Reuse the plain-quit mutations with explicit round-4 assertions too.
     round4_mutants['mac-plain-quit-loses-replay'] = (change(should_terminate,
         '_sapp_tc.terminate_pending = true;', ''), 'macOS busy plain quit replays once with normal veto')
@@ -2123,15 +1832,6 @@ if '--mutations' in sys.argv[3:]:
             'macOS direct close marks native closed and consumes requested close'),
         'mac-deferred-close-ignores-native-closed': (change(pending, 'if (cw->native_closed) continue;', ''),
             'macOS requested plus direct close delivers one native close and callback'),
-        'mac-session-end-misses-minimal-flag': (change(session, 'trussc::internal::sessionEndExit() = true;', ''),
-            'macOS busy session uses only minimal TrussC cleanup without std::exit'),
-        'mac-session-end-uses-std-exit': (change(session,
-            '_exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);',
-            'std::exit(trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1);'),
-            'macOS busy session uses only minimal TrussC cleanup without std::exit'),
-        'mac-minimal-session-wrong-handler-code': (change(session,
-            'trussc::internal::appSetupCalled() ? trussc::internal::appExitCode() : 1', '73'),
-            'macOS minimal session exits with handler app code'),
     }
     # Observation and the first tick-body boundary both reject this close.
     round4c_mutants['mac-close-after-resize-keeps-tick'] = (change(tick,
@@ -2146,31 +1846,7 @@ if '--mutations' in sys.argv[3:]:
         ' || w->native_closed', '', text=round4c_mutants['mac-resumed-close-reaches-callback'][0]),
         'macOS RESUMED direct close suppresses running tick and drawable')
     mutants.update({name: contents for name, (contents, label) in round4c_mutants.items()})
-    minimal_label = 'macOS busy session uses only minimal TrussC cleanup without std::exit'
-    minimal = 'if (sessionEndExit()) {'
-    cleanup_mutants = {
-        'mac-cleanup-skips-minimal-path': (change('inline void _cleanup_cb_impl() {',
-            'if (sessionEndExit())', 'if (false)', text=trussc_header), minimal_label),
-    }
-    for name, old, new in (
-        ('no-exit-event', 'notifyAppExitsAtSessionEnd();', ''),
-        ('no-audio-stop', 'trussc::shutdownAudio();', ''),
-        ('no-start-log', 'writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));', ''),
-        ('no-end-log', 'writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));', ''),
-        ('repeats-cleanup', 'if (!beginExitCleanup()) return;', ''),
-        ('uses-std-exit', 'notifyAppExitsAtSessionEnd();', 'notifyAppExitsAtSessionEnd(); std::exit(appExitCode());'),
-        ('tears-down-gpu', 'notifyAppExitsAtSessionEnd();', 'cleanup(); notifyAppExitsAtSessionEnd();'),
-        ('tears-down-window', 'notifyAppExitsAtSessionEnd();', 'restoreWindowContext(nullptr); notifyAppExitsAtSessionEnd();'),
-        ('cancels-resource-workers', 'notifyAppExitsAtSessionEnd();', 'internal::cancelResourceBackends(); notifyAppExitsAtSessionEnd();'),
-        ('waits-resource-workers', 'notifyAppExitsAtSessionEnd();', 'waitForResourceLoadsAtAppExit(); notifyAppExitsAtSessionEnd();'),
-        ('runs-app-cleanup', 'notifyAppExitsAtSessionEnd();', 'appCleanupFunc(); notifyAppExitsAtSessionEnd();'),
-    ):
-        cleanup_mutants['mac-minimal-'+name] = (change(minimal, old, new, text=trussc_header), minimal_label)
-    notifications = 'void notifyAppExitsAtSessionEnd() noexcept {'
-    every_app = 'macOS session every App exits once in reverse attachment order'
-    own_context = 'macOS session selects each window context for all listeners'
-    no_restore = 'macOS session restores previous context without GPU restore'
-    no_after = 'macOS session skips AfterApp framework hooks'
+    cleanup_mutants = {}
     common_mutants = {}
     freeze_mutants = {
         'event': ('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {',
@@ -2204,17 +1880,6 @@ if '--mutations' in sys.argv[3:]:
             'if (sessionEndExit()) {', 'if (false) {', text=mac_adapter), 'macOS frozen createSecondaryWindow refuses'),
     }
     event_mutants = {}
-    for name, replacement, label in (
-        ('skips-before-app', 'if (entry.priority != EventPriority::App) continue;',
-            'macOS session delivers BeforeApp listeners in reverse attachment order'),
-        ('skips-app', 'if (entry.priority >= EventPriority::App) continue;',
-            'macOS session delivers App listeners in reverse attachment order'),
-        ('runs-after-app', '', no_after),
-        ('runs-after-app-boundary', 'if (entry.priority > EventPriority::AfterApp) continue;', no_after),
-        ('runs-above-after-app', 'if (entry.priority == EventPriority::AfterApp) continue;', no_after),
-    ):
-        event_mutants['mac-session-'+name] = (change(event_markers[0],
-            'if (entry.priority >= EventPriority::AfterApp) continue;', replacement, text=event_header), label)
     adapter_mutants['mac-thawed-secondary-creation'] = (change(
         'std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {',
         'if (sessionEndExit()) {', 'if (true) {', text=mac_adapter), 'macOS thawed admission seams reach work')

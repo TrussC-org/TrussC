@@ -137,20 +137,6 @@ int main() {
         throwing=false;
         check("main trampoline accepts subsequent request",_sapp_tc_win32_request_exit(&window) && calls==2);
     }
-    for(UINT msg:{WM_QUERYENDSESSION}) {
-        reset();throwing=true;
-        const auto reply=_sapp_tc_wndproc(17,msg,0,0);
-        check("throwing close/session query stays open",reply==0 && posted==0 && calls==1 && !_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered && !window.in_tick && defaults==0);
-        if(msg==WM_QUERYENDSESSION)check("throwing session query records block reason",blocked==1);
-        // Idle processing has no pending quit to turn into another WM_CLOSE.
-        if(_sapp_tc.app.quit_requested)_sapp_tc_wndproc(17,WM_CLOSE,0,0);
-        check("idle after throw never retries",calls==1);
-        throwing=false;
-        const auto accepted=_sapp_tc_wndproc(17,msg,0,0);
-        check("later close/session query accepts once",calls==2 && (msg==WM_CLOSE ? posted==1 && _sapp_tc.app.quit_ordered : accepted==TRUE && !_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered));
-    }
-    reset();cancel=throwReason=true;
-    check("session reason failure retains outer catch veto",_sapp_tc_wndproc(17,WM_QUERYENDSESSION,0,0)==FALSE && blocked==1 && !_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered && defaults==0);
     for(bool initial:{false,true}) {
         reset();window.is_main=initial;
         int closes=0;
@@ -165,12 +151,9 @@ int main() {
     check("throwing secondary close is contained without default destruction",_sapp_tc_wndproc(17,WM_CLOSE,0,0)==0 && defaults==0 && posted==0);
     reset();window.is_main=false;
     check("secondary session query does not consult quit client",_sapp_tc_wndproc(17,WM_QUERYENDSESSION,0,0)==TRUE && calls==0);
-    reset();throwCleanup=true;
+    reset();
     _sapp_tc_wndproc(17,WM_ENDSESSION,TRUE,0);
-    check("forced session end contains cleanup failure and terminates once",cleaned==1 && terminated==1 && _sapp_tc.app.cleanup_called && _sapp_tc.app.quit_ordered && calls==0);
-    reset();_sapp_tc.app.quit_requested=_sapp_tc.app.quit_ordered=true;
-    _sapp_tc_wndproc(17,WM_ENDSESSION,FALSE,0);
-    check("cancelled session clears quit state without cleanup",!_sapp_tc.app.quit_requested && !_sapp_tc.app.quit_ordered && cleaned==0 && terminated==0);
+    check("user HWND does not own session commit",cleaned==0 && terminated==0 && calls==0);
     // A and B opened; A's native storage has been disposed. The Runtime
     // receiver must still ask B through its existing cancellable callback.
     for (int platform : {0, 1, 2}) for (bool veto : {false, true}) {

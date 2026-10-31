@@ -1203,6 +1203,7 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 // is allowed.
 uint64_t getFrameCount(); // forward declaration; public update counter
 inline void ensureFontAtlas(int rows) {
+    if (internal::sessionEndExit()) return;
     if (rows <= 0) return;
     auto& atlas = internal::bitmapFontAtlas();
     if (!atlas.initialized) return;  // pipeline/sampler not ready yet
@@ -2100,6 +2101,7 @@ namespace internal {
     // The capture callback also permits GPU-free drain regression tests.
     inline void drainPendingScreenshots(
         bool (*capture)(const std::filesystem::path&) = captureWindowToFile) {
+        if (sessionEndExit()) return;
         auto& ctx = currentWindowContext();
         auto& queue = ctx.pendingScreenshotPaths;
         // Snapshot before any stage that can log: saves queued from a callback
@@ -2124,6 +2126,7 @@ namespace internal {
 // App-authored captures use their existing queue. External requests use MCP's
 // admitted deferral path instead.
 inline bool queueScreenshot(const std::filesystem::path& path) {
+    if (sessionEndExit()) return false;
     auto* resolvedContext = findWindowApiContext();
     if (!resolvedContext) return false;
     std::filesystem::path resolved;
@@ -2435,21 +2438,6 @@ namespace internal {
     void runSyncedUpdate();
 
     inline void _cleanup_cb_impl() {
-        #if defined(__APPLE__) && TARGET_OS_OSX
-        // A macOS session end under a paused callback; the backend _exits right
-        // after. Only the App exit notification, audio stop and the exit log
-        // lines: no GPU, window or resource-worker teardown on top of it.
-        if (sessionEndExit()) {
-            if (!beginExitCleanup()) return;
-            if (auto token = appRunToken()) token->store(false);
-            CrashPhaseScope crashPhase("cleanup");
-            writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
-            notifyAppExitsAtSessionEnd();
-            trussc::shutdownAudio();
-            writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true));
-            return;
-        }
-        #endif
         if (!beginExitCleanup()) return;
         CrashPhaseScope crashPhase("cleanup");
         TeardownSteps steps;
@@ -2464,11 +2452,11 @@ namespace internal {
         steps.run("launcher cleanup", [] { if (appCleanupFunc) appCleanupFunc(); });
         steps.run("resource completion", [] { waitForResourceLoadsAtAppExit(); });
         steps.run("audio stop", [] { trussc::shutdownAudio(); });
-        steps.run("device cleanup", [] { cleanup(); });
+        steps.run("device cleanup", [] { if (!headless::isActive()) cleanup(); });
         steps.run("exit end log", [] { writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true)); });
         steps.run("restore signals", [] { restoreWindowExitSignals(); });
 #if defined(__APPLE__) && TARGET_OS_OSX
-        if (appExitCode() != 0) std::exit(appExitCode());
+        if (!sessionEndExit() && appExitCode() != 0) std::exit(appExitCode());
 #endif
     }
 

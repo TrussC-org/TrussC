@@ -61,6 +61,7 @@ public:
 
     // Load from sokol-shdc generated descriptor function
     bool load(const sg_shader_desc* (*descFn)(sg_backend)) {
+        if (internal::sessionEndExit()) return false;
         clear();
 
         sg_backend backend = sg_query_backend();
@@ -291,6 +292,7 @@ public:
     // queue since a recorded draw may still reference it). Prefer the sg_view
     // overload when a view is already available (e.g. Texture::getView()).
     void setTexture(int slot, sg_image image, sg_sampler sampler) {
+        if (internal::sessionEndExit()) return;
         if (!validateTextureSlot(slot, sampler)) return;
         auto& cached = imageViews_[slot];
         if (cached.image.id != image.id) {

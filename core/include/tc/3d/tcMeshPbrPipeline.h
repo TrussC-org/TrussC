@@ -94,6 +94,7 @@ class PbrPipeline {
 public:
     // Lazily create shader on first use. Safe to call every frame.
     void ensureInit() {
+        if (internal::sessionEndExit()) return;
         if (initialized_) return;
         shader_ = sg_make_shader(tc_pbr_pbr_mesh_shader_desc(sg_query_backend()));
         shaderReady_ = internal::internalShaderReady(shader_, "PBR");
@@ -433,6 +434,7 @@ private:
     // supply black for samples and 0 for iblParams.x so the shader branches
     // away from IBL evaluation.
     void ensureFallbacks() {
+        if (internal::sessionEndExit()) return;
         if (fallbackInitialized_) return;
 
         // 1x1x6 RGBA8 cubemap, all zeros
@@ -763,6 +765,7 @@ public:
 
 private:
     void ensureShadowInit() {
+        if (internal::sessionEndExit()) return;
         if (shadowInitialized_) return;
 
         shadowShader_ = sg_make_shader(tc_shadow_shadow_depth_shader_desc(sg_query_backend()));

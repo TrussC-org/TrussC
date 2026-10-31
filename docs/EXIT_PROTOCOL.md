@@ -1,11 +1,37 @@
 # Windowed app exit protocol
 
-Window close, Windows session end (including `ENDSESSION_CLOSEAPP`), macOS
-application termination and Linux/macOS SIGTERM/SIGINT issue the ordinary
-`events().exitRequested` event. Setting `cancel` vetoes that request. Windows
-uses `reason` as the shutdown-block explanation, or “The app is still busy.”
-when it is empty. After cancellation, the user starts shutdown again. The
-block is removed when the request is resolved or Windows cancels session end.
+OS close asks the addressed Window's closeRequested. After closure, quitOnClose
+or the last Window requests normal process quit. Runtime dispatches
+exitRequested first to its own listeners and then to attached Apps in reverse
+attachment order, ORing vetoes and retaining the first nonempty explanation.
+Code close and process shutdown bypass closeRequested.
+
+OS session query and commit belong to Runtime. Windows receives
+WM_QUERYENDSESSION/WM_ENDSESSION on its own hidden top-level control HWND;
+closing the first user Window cannot remove that authority. Idle queries reuse
+the process veto dispatcher and register its explanation with Windows. A nested
+busy query accepts without reentering user callbacks. WM_ENDSESSION(FALSE)
+resolves the query without ending the Runtime. A committed session end, including
+ENDSESSION_CLOSEAPP, bypasses veto. macOS applicationShouldTerminate forwards
+logout/restart/shutdown Apple-event reasons through the same query/commit;
+NSWorkspaceWillPowerOff commits directly. Ordinary Cmd+Q remains deferred and
+vetoable at the existing safe boundary.
+
+Before OS-session exits, Runtime freezes new admission and arms one process-wide
+watchdog (default 3 seconds, runtime().setLogoutTimeout(float seconds)). Negative
+or NaN values log Error and retain the previous setting; zero ends immediately,
+and positive infinity leaves the watchdog unarmed. The budget covers all App
+exits together. Windows may impose an earlier deadline. No fixed macOS logout
+allowance is asserted. Ordinary quit never arms this watchdog.
+
+Busy commit calls each completed App::exit once from the common reverse
+attachment snapshot. It retains interrupted objects and skips Window exit-event
+bands, audio/thread waits, tree cleanup, module unload and native/GPU disposal.
+There is no begin/clean log pair or claim that abandoned work completed. Idle
+commit performs common complete cleanup under the same deadline. Both end the
+process without atexit/static destructors. An OS that supplies no session
+callback cannot guarantee this delivery. Save briefly in exit; do not use the
+GPU or wait for other threads.
 
 The first SIGTERM/SIGINT only records a flag in the signal handler. The next
 frame requests exit on the main thread, even in event-driven rendering. A
@@ -13,20 +39,15 @@ second signal while that request is still pending, including during cleanup,
 terminates immediately without another event or cleanup. A veto clears the
 pending signal and its delivery state: the next signal starts a fresh,
 cancellable request, and only another signal while that request is pending
-forces immediate exit (status `128 + signal`, normally 130 or 143). Forced OS shutdown
-and SIGKILL cannot be vetoed. Windows runs cleanup inside `WM_ENDSESSION(TRUE)`
-even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)` inside
-that message, including for `ENDSESSION_CLOSEAPP`. This prevents returning to
-interrupted user code or running DLL detach/guest static destructors after
-teardown. Cleanup and its log writes finish first. Windows grants only a few
-seconds: keep exit handlers short.
+forces immediate exit (status `128 + signal`, normally 130 or 143). SIGKILL
+cannot deliver a callback or cleanup.
 
 The Logger emits these stable **message payloads**, with its usual timestamp,
 level and `[System]` prefix:
 
 ```text
-exit: begin reason=os-session-end pid=1234
-exit: clean reason=os-session-end code=0 pid=1234
+exit: begin reason=exit-app pid=1234
+exit: clean reason=exit-app code=0 pid=1234
 ```
 
 `begin` is emitted at the start of `_cleanup_cb`, before MCP, app `exit()` and
@@ -42,8 +63,7 @@ level filtering. `onLog` listeners receive both records normally. Ordinary
 log records still obey the file level; the bypass is internal to the runtime.
 
 Known reason tokens are `window-close`, `request-exit-app`, `exit-app`,
-`tc-quit`, `os-session-end` (Windows), `os-logoff`, `os-restart`, `os-shutdown`
-(macOS when supplied by the quit Apple event), `app-quit` (macOS: a quit Apple
+`tc-quit`, `os-session-end` (idle desktop session commit), `app-quit` (macOS: a quit Apple
 event without one of those reasons, i.e. Cmd+Q, the Dock's Quit or an
 AppleScript `quit`), `sigterm`, `sigint`, and `device-lost` where the backend
 detects loss. A cancelled request clears its origin. Cleanup freezes it so
@@ -67,16 +87,17 @@ Headless log-file/MCP startup and anchorbolt classification are separate work.
 
 ## Platform verification
 
-Run `osExit --window accept` and `osExit --window cancel` (or
-`allCoreTests osExit --window ...`). On Windows also run `--window cancel-empty` for the generic explanation and
-`--window forced`
-to send an accepted `ENDSESSION_CLOSEAPP` notification after a veto. Accepted
-session-end tests verify cleanup before process termination, which skips
-`atexit`; check status 0 and one begin/clean pair in `TRUSSC_LOG_FILE` as well.
-These use synthetic messages; verify real logoff/restart/shutdown separately, including Restart
-Manager, a custom/empty block reason, cancellation by another application,
-and forced shutdown while a modal dialog or window drag is active. Check the
-app's saved state and the single log pair after signing back in.
+Run the Linux-compiled session policy and native seam tests described in
+core/tests/sessionEndBusy/README.md. Windows osExit --window accept/cancel/
+cancel-empty/forced addresses the hidden Runtime HWND; it schedules the query
+outside update so veto is meaningful. Native user HWND tests assert that neither
+first nor subsequent user windows own session termination.
+
+Actual Windows logout/restart/shutdown and macOS Air logout with 2/5/10-second
+exit delays require separate auditor supervision. Include modal/audio-in-flight
+cases and synchronous performClose with two secondaries during update. Check
+saved state and OS deadlines separately; busy termination has no clean log claim.
+No worker initiates real logout on an unattended host.
 
 On macOS verify Cmd+Q and real logout/restart/shutdown with and without a veto,
 including the Apple event reason and a modal dialog. On Linux/macOS also run

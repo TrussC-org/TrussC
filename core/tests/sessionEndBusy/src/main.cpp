@@ -1,531 +1,251 @@
-// A macOS session end (logout) handled while a client callback is paused must
-// end the app at once with a minimal ending. From the moment the session-end
-// path starts until _exit the framework is frozen: only every window's App::exit
-// (main first, then the others newest first, each in its own window context,
-// BeforeApp/App exit listeners only) and audio stop run. No AfterApp hooks, no
-// tick, event, App attachment, window creation, GPU, window or App teardown,
-// and no atexit/static destructors (process exit via _exit with the app code).
-// Outside callbacks the normal full cleanup runs, AfterApp hooks included.
-//
-// Run without arguments (as build_all does) it launches itself once per
-// scenario and checks each child's output and exit status. A child scenario is
-// a real TrussC launch that dispatches a logout quit Apple event in-process.
-#if defined(__APPLE__)
-#include <TargetConditionals.h>
-#endif
-
-#if defined(__APPLE__) && TARGET_OS_OSX
-
+// Runtime session policy and deadline arbitration. Terminal cases are supervised
+// by test.py; no real desktop logout is initiated by this test.
 #include <TrussC.h>
-#include <mach-o/dyld.h>
-#include <poll.h>
-#include <signal.h>
-#include <spawn.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <chrono>
+#include "../../common/tcCoreTest.h"
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <vector>
-
-extern char** environ;
+#include <cmath>
+#include <limits>
+#include <thread>
 using namespace tc;
-
-extern "C" void sessionEndDispatchLogout();
-extern "C" void sessionEndAfter(double seconds, void (*fn)());
-extern "C" void sessionEndSpin(double seconds);
-extern "C" bool sessionEndSendKey(const char* title);
-extern "C" int sessionEndWindowCount();
-extern "C" void sessionEndDrawableSize(const char* title, int* width, int* height);
-extern "C" void sessionEndNativeResize(const char* title, double width, double height);
-extern "C" void sessionEndViewResizeAndScreenChange(const char* title, double width, double height);
-// sokol_app's Metal accessors (declared there only for Objective-C/Metal builds).
-extern "C" const void* sapp_metal_get_current_drawable(void);
-extern "C" const void* sapp_metal_get_depth_stencil_texture(void);
-extern "C" const void* sapp_metal_get_msaa_color_texture(void);
-
 namespace {
-
-// ---- child: one scenario -------------------------------------------------
-std::string scenario;
-int childExitCode = 7;
-bool frozen = false;   // set when main's App::exit starts (the session end is running)
-
-void say(const char* line) {
-    std::printf("sessionEndBusy child: %s\n", line);
-    std::fflush(stdout);
+int failures=0, exits=0, cleanups=0, destructors=0, queryCalls=0, constructors=0;
+int order[8]{};
+std::shared_ptr<Window> windows[3];
+std::atomic<bool> audioEntered{false};
+std::atomic<int> frozenAudioCalls{0}, liveAudioCalls{0};
+Event<void> appSignal;
+std::atomic<int> frozenEventCalls{0};
+std::atomic<bool> trigger{false};
+bool probeFrozen=false;
+float delay=0;
+int logCalls=0, logsBeforeCommit=0;
+std::atomic<bool> ownerLocked{false};
+const char* mode="";
+void check(const char* label,bool good) {
+    std::printf("sessionEndBusy: %s: %s\n",label,good?"PASS":"FAIL");
+    if (!good) ++failures;
 }
-
-void atexitMarker() {
-    std::printf("sessionEndBusy child: atexit marker (gpu valid=%d)\n", sg_isvalid());
-    std::fflush(stdout);
-}
-
-struct StaticDestructorMarker {
-    ~StaticDestructorMarker() { say("static destructor marker"); }
-};
-
-// One line per App::exit: which window context is selected (its logical
-// width, whether events() is the App's own window's) and whether the App is
-// still attached (normal teardown detaches it before exit).
-void reportExit(const char* who, CoreEvents* ownEvents, bool attached) {
-    std::printf("sessionEndBusy child: %s App::exit width=%d own-events=%d attached=%d\n", who,
-                getWindowWidth(), &events() == ownEvents, attached);
-    std::fflush(stdout);
-}
-
-// A protected framework hook (like an addon's shutdown): runs on the normal
-// exit, skipped by the session end under a paused callback.
-EventListener afterAppHook(const std::string& who) {
-    return trussc::internal::FrameworkEventAccess::listen(events().exit,
-        [who] { std::printf("sessionEndBusy child: %s AfterApp exit hook\n", who.c_str()); std::fflush(stdout); },
-        EventPriority::AfterApp);
-}
-
-// Main's GPU-facing native state: the layer's drawable size and the
-// swapchain depth/MSAA texture identities.
-struct GpuState {
-    int width = -1, height = -1;
-    const void* depth = nullptr;
-    const void* msaa = nullptr;
-    bool operator==(const GpuState& o) const {
-        return width == o.width && height == o.height && depth == o.depth && msaa == o.msaa;
-    }
-};
-
-GpuState sampleMainGpu() {
-    GpuState g;
-    sessionEndDrawableSize("sessionEndBusy", &g.width, &g.height);
-    g.depth = sapp_metal_get_depth_stencil_texture();
-    g.msaa = sapp_metal_get_msaa_color_texture();
-    return g;
-}
-
-// "gpu": a frozen exit hook asks for main's drawable and swapchain, resizes the
-// window (TrussC and native) and changes the view size behind a screen change.
-void gpuHook() {
-    const GpuState before = sampleMainGpu();
-    const void* drawable = sapp_metal_get_current_drawable();
-    const sapp_swapchain sc = sapp_get_swapchain();
-    std::printf("sessionEndBusy child: gpu main drawable=%d swapchain drawable=%d\n",
-                drawable != nullptr, sc.metal.current_drawable != nullptr);
-    setWindowSize(320, 200);
-    sessionEndSpin(0.2);
-    sessionEndNativeResize("sessionEndBusy", 340, 210);
-    sessionEndSpin(0.2);
-    const GpuState resized = sampleMainGpu();
-    sessionEndViewResizeAndScreenChange("sessionEndBusy", 360, 220);
-    sessionEndSpin(0.1);
-    const GpuState screen = sampleMainGpu();
-    std::printf("sessionEndBusy child: gpu layer %dx%d -> %dx%d -> %dx%d\n",
-                before.width, before.height, resized.width, resized.height, screen.width, screen.height);
-    std::printf("sessionEndBusy child: gpu valid=%d resize unchanged=%d screen change unchanged=%d\n",
-                before.width > 0 && before.depth != nullptr, resized == before, screen == before);
-    std::fflush(stdout);
-}
-
-struct ChildApp;
-ChildApp* owner = nullptr;
-void dropWindowA();
-
-struct SecondaryApp : App {
-    std::string who;
-    bool busyHere = false;   // this window's update() is the paused callback
-    int frames = 0;
-    CoreEvents* ownEvents = nullptr;
-    EventListener afterApp;
-    explicit SecondaryApp(std::string name, bool busy) : who(std::move(name)), busyHere(busy) {}
+struct Rejected : App { Rejected() { ++constructors; } void exit() override { std::puts("unpublished App exit: FAIL");std::_Exit(91); } };
+void commit() { internal::commitSessionEnd(); std::_Exit(96); }
+struct Probe : App {
+    int id;
+    EventListener render, signal, exitSignal;
+    explicit Probe(int value):id(value) { ++constructors; }
+    ~Probe() { ++destructors; }
     void setup() override {
-        ownEvents = &events();
-        afterApp = afterAppHook(who);
+        signal=appSignal.listen([] { ++frozenEventCalls; });
+        exitSignal=events().exit.listen([] { if (internal::sessionEndExit()) ++frozenEventCalls; });
+        render=events().onRender.listen([] { if (trigger && std::string(mode)=="onRender") commit(); });
     }
-    void update() override {
-        if (frozen) {
-            std::printf("sessionEndBusy child: %s update while frozen\n", who.c_str());
-            std::fflush(stdout);
+    void update() override { if (trigger && std::string(mode)=="update") commit(); }
+    void draw() override { if (trigger && std::string(mode)=="draw") commit(); }
+    void keyPressed(const KeyEventArgs&) override { if (trigger) commit(); }
+    void audioOut(AudioOutBuffer&) override {
+        if (std::string(mode)=="audio-freeze") {
+            if (internal::sessionEndExit()) ++frozenAudioCalls;
+            else ++liveAudioCalls;
+            return;
         }
-        if (!busyHere || ++frames != 20) return;
-        sessionEndAfter(0.02, [] { sessionEndDispatchLogout(); });
-        sessionEndSpin(0.15);
-        say("returned into update");
-    }
-    void keyPressed(int) override {
-        if (!frozen) return;
-        std::printf("sessionEndBusy child: %s key while frozen\n", who.c_str());
-        std::fflush(stdout);
+        if (!trigger) return;
+        audioEntered=true;
+        // Deliberately remains in flight until terminal process exit.
+        for (;;) std::this_thread::yield();
     }
     void exit() override {
-        reportExit(who.c_str(), ownEvents, getWindow() != nullptr);
-        // "hooks": A's own exit drops A's last owner.
-        if (scenario == "hooks" && who == "A") dropWindowA();
+        if (trigger && (std::string(mode)=="cohort" || std::string(mode)=="during-exit" || std::string(mode)=="swap") && !internal::sessionEndExit()) {
+            order[exits++]=id;std::printf("EXIT %d\n",id);commit();
+        }
+        order[exits++]=id;
+        std::printf("EXIT %d\n",id);
+        if (probeFrozen) {
+            appSignal.notify();
+            windows[id-1]->events().exit.notify();
+            if (id==3) {
+                const int beforeCrossNotify=exits;
+                windows[0]->events().exit.notify();
+                std::thread worker([] { windows[0]->events().exit.notify(); });
+                worker.join();
+                check("cross-notify cannot advance App 1",exits==beforeCrossNotify);
+            }
+            check("App-owned ordinary and own exit events frozen",frozenEventCalls==0);
+            if (id==3 && std::string(mode)=="audio-freeze") {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                check("new audio callbacks frozen before older Apps end",frozenAudioCalls==0);
+            }
+            check("no logger reentry",logCalls==logsBeforeCommit);
+            check("reverse attachment order",id==(std::string(mode)=="swap"?5-exits:4-exits));
+            check("no veto/cleanup/destructor",queryCalls==0 && cleanups==0 && destructors==0);
+            check("own Window unavailable",getWindow()==nullptr);
+            const int before=constructors;
+            windows[0]->setApp<Rejected>();
+            windows[1]->close(); windows[2]->destroyApp();
+            check("create refused",!createWindow());
+            check("constructor admission frozen",constructors==before);
+            int calls=0;
+            runOnMainThread([&] { ++calls; });
+            internal::drainMainThreadQueue();
+            check("queue frozen",calls==0);
+            check("capture frozen",!internal::queueScreenshot("session.png"));
+            internal::WindowEntryScope nested(*windows[0]);
+            check("event/frame entry frozen",!nested);
+            Texture texture; texture.allocate(2,2);
+            Fbo fbo; fbo.allocate(2,2); fbo.begin(); fbo.end();
+            check("GPU allocation frozen",!texture.isAllocated() && !fbo.isAllocated());
+            auto& c=windows[0]->context();
+            check("swapchain acquisition frozen",!c.acquireSwapchain || c.acquireSwapchain(c.acquireSwapchainUser).width==0);
+            internal::endRuntimeForSession();
+            internal::commitSessionEnd(); // actual native entry must be inert on repetition
+            check("repeated commit returns without ending the snapshot",true);
+            const auto epoch=internal::runtimeEpoch();bool refused=false;
+            try { internal::beginRuntimeRun(); } catch (const std::logic_error&) { refused=true; }
+            check("terminal session cannot start another Runtime",refused && epoch==internal::runtimeEpoch() && internal::sessionEndExit());
+        }
+        if (delay>0) std::this_thread::sleep_for(std::chrono::duration<float>(delay));
+        std::printf("RETURN %d\n",id);
+        if (failures) std::_Exit(91);
+        if (std::string(mode)=="throw") throw std::runtime_error("exit fixture");
     }
-    void cleanup() override {
-        std::printf("sessionEndBusy child: %s App::cleanup\n", who.c_str());
-        std::fflush(stdout);
-    }
+    void cleanup() override { ++cleanups; }
 };
-
-struct ChildApp : App {
-    int frames = 0;
-    // Window ownership as in an app: main's App holds A, then B.
-    std::shared_ptr<Window> a;
-    std::shared_ptr<Window> b;
-    std::shared_ptr<Window> c;   // "hooks": a window requested inside an exit hook
-    EventListener cExit;
-    EventListener logListener;
-    EventListener afterApp;
-    CoreEvents* ownEvents = nullptr;
-    void setup() override {
-        owner = this;
-        ownEvents = &events();
-        afterApp = afterAppHook("main");
-        trussc::internal::appExitCode() = childExitCode;
-        std::atexit(atexitMarker);
-        static StaticDestructorMarker marker;   // destructor registered after main's statics
-        (void)marker;
-        AudioEngine::getInstance().init();
-        std::printf("sessionEndBusy child: audio initialized=%d\n", AudioEngine::getInstance().isInitialized());
-        std::fflush(stdout);
-        WindowSettings wa;
-        wa.setSize(160, 100).setTitle("sessionEndBusy A");
-        a = createWindow(wa);
-        if (a) a->setApp<SecondaryApp>("A", scenario == "busyA");
-        WindowSettings wb;
-        wb.setSize(180, 110).setTitle("sessionEndBusy B");
-        b = createWindow(wb);
-        if (b) b->setApp<SecondaryApp>("B", false);
-        logListener = getLogger().onLog.listen([](LogEventArgs& e) {
-            if (e.message.find("exit: clean") == std::string::npos) return;
-            // getWindowWidth() reads the window context the session end restored.
-            std::printf("sessionEndBusy child: final exit line gpu valid=%d audio initialized=%d context width=%d\n",
-                        sg_isvalid(), AudioEngine::getInstance().isInitialized(), getWindowWidth());
-            std::fflush(stdout);
-        });
-        if (scenario == "notbusy") sessionEndAfter(0.8, [] { sessionEndDispatchLogout(); });
-    }
-    void update() override {
-        const bool busyHere = scenario == "busy" || scenario == "busy0" || scenario == "hooks" || scenario == "gpu";
-        if (!busyHere || ++frames != 20) return;
-        // Paused callback: the logout arrives while update() spins the run loop.
-        sessionEndAfter(0.02, [] { sessionEndDispatchLogout(); });
-        sessionEndSpin(0.15);
-        say("returned into update");
-    }
-    void exit() override {
-        frozen = true;
-        reportExit("main", ownEvents, getWindow() != nullptr);
-        if (scenario == "gpu") gpuHook();
-        if (scenario == "busyA") {
-            // The paused callback is A's tick: no drawable for A (TrussC's own
-            // swapchain acquisition) nor for main (outside its tick).
-            auto& actx = a->context();
-            const sg_swapchain asc = actx.acquireSwapchain ? actx.acquireSwapchain(actx.acquireSwapchainUser) : sg_swapchain{};
-            const void* mainDrawable = sapp_metal_get_current_drawable();
-            std::printf("sessionEndBusy child: busyA drawable A=%d\n", asc.metal.current_drawable != nullptr);
-            std::printf("sessionEndBusy child: busyA drawable main=%d\n", mainDrawable != nullptr);
-            // Dropping A here must not free the context the session end later restores.
-            a.reset();
-            say("main exit dropped A");
-        }
-        if (scenario != "hooks") return;
-        a->destroyApp();   // a detach request, applied only at a frame boundary
-        trussc::internal::applyPendingAppForTests(*a);   // a frame boundary reached while frozen
-        const int before = sessionEndWindowCount();
-        WindowSettings wc;
-        wc.setSize(120, 80).setTitle("sessionEndBusy C");
-        c = createWindow(wc);
-        const bool firstNull = c == nullptr;
-        if (c) cExit = c->events().exit.listen([] { say("C exit listener"); });
-        const bool secondNull = createWindow(wc) == nullptr;
-        std::printf("sessionEndBusy child: hook createWindow null=%d,%d native windows %d->%d\n",
-                    firstNull, secondNull, before, sessionEndWindowCount());
-        sessionEndDispatchLogout();   // a second session end while the first is running
-        std::printf("sessionEndBusy child: hook key sent=%d\n", sessionEndSendKey("sessionEndBusy B"));
-        sessionEndSpin(0.3);          // other windows' tick sources keep firing meanwhile
-        say("main hook done");
-        std::fflush(stdout);
-    }
-    void cleanup() override { say("main App::cleanup"); }
-};
-
-void dropWindowA() {
-    if (owner) owner->a.reset();
-    say("A exit dropped A");
-}
-
-// Supervision probes (no TrussC launch): a child that keeps printing slowly,
-// one that floods output, one that closes its output and keeps running.
-int runProbe(const std::string& kind) {
-    const auto start = std::chrono::steady_clock::now();
-    auto elapsed = [&] { return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); };
-    if (kind == "trickle") {
-        while (elapsed() < 20.0) { std::printf("trickle\n"); std::fflush(stdout); usleep(50000); }
-    } else if (kind == "flood") {
-        std::string chunk(64 * 1024, 'x');
-        chunk.back() = '\n';
-        while (elapsed() < 10.0) { std::fwrite(chunk.data(), 1, chunk.size(), stdout); std::fflush(stdout); usleep(10000); }
-    } else if (kind == "linger") {
-        std::fclose(stdout);
-        std::fclose(stderr);
-        while (elapsed() < 20.0) usleep(100000);
-    }
-    return 0;
-}
-
-int runChild() {
-    if (scenario == "trickle" || scenario == "flood" || scenario == "linger") return runProbe(scenario);
-    childExitCode = scenario == "busy0" ? 0 : 7;
-    WindowSettings s;
-    s.setSize(200, 120).setTitle("sessionEndBusy");
-    return runApp<ChildApp>(s);
-}
-
-// ---- parent: launch and check each scenario --------------------------------
-int failures = 0;
-
-void check(const std::string& label, bool ok) {
-    std::printf("sessionEndBusy %s: %s\n", label.c_str(), ok ? "PASS" : "FAIL");
-    std::fflush(stdout);
-    if (!ok) ++failures;
-}
-
-int countOf(const std::string& text, const std::string& needle) {
-    int n = 0;
-    for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + needle.size())) ++n;
-    return n;
-}
-
-bool has(const std::string& text, const std::string& needle) { return text.find(needle) != std::string::npos; }
-
-enum class Outcome { Exited, Failed, TimedOut, OutputCapped };
-struct Launch {
-    Outcome outcome = Outcome::Failed;
-    int status = -1;        // exit status when Exited
-    double seconds = 0.0;   // wall time until the child was reaped
-};
-
-constexpr size_t outputCap = 1024 * 1024;
-
-double secondsSince(std::chrono::steady_clock::time_point t) {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t).count();
-}
-
-// Runs this binary with one scenario argument and collects stdout+stderr.
-Launch launch(const char* which, std::string& output, double deadlineSeconds) {
-    Launch result;
-    const auto start = std::chrono::steady_clock::now();
-    char path[4096];
-    uint32_t size = sizeof(path);
-    if (_NSGetExecutablePath(path, &size) != 0) return result;
-    int fds[2];
-    if (pipe(fds) != 0) return result;
-    posix_spawn_file_actions_t actions;
-    posix_spawn_file_actions_init(&actions);
-    posix_spawn_file_actions_adddup2(&actions, fds[1], 1);
-    posix_spawn_file_actions_adddup2(&actions, fds[1], 2);
-    posix_spawn_file_actions_addclose(&actions, fds[0]);
-    posix_spawn_file_actions_addclose(&actions, fds[1]);   // the child writes only through 1 and 2
-    char* argv[] = { path, const_cast<char*>(which), nullptr };
-    pid_t pid = 0;
-    const int spawned = posix_spawn(&pid, path, &actions, nullptr, argv, environ);
-    posix_spawn_file_actions_destroy(&actions);
-    close(fds[1]);
-    if (spawned != 0) { close(fds[0]); return result; }
-    bool timedOut = false;
-    bool capped = false;
-    char buffer[65536];
-    for (;;) {
-        // Bound (deadline): one monotonic deadline for the whole child, whether or not it prints.
-        const double remaining = deadlineSeconds - secondsSince(start);
-        if (remaining <= 0.0) { timedOut = true; break; }
-        pollfd p = { fds[0], POLLIN, 0 };
-        const int ready = poll(&p, 1, remaining < 0.1 ? (int)(remaining * 1000) + 1 : 100);
-        if (ready <= 0) continue;
-        const ssize_t n = read(fds[0], buffer, sizeof(buffer));
-        if (n <= 0) break;
-        // Bound (output): at most outputCap bytes are kept; a child past it is stopped.
-        if (output.size() + (size_t)n > outputCap) {
-            output.append(buffer, outputCap - output.size());
-            capped = true;
-            break;
-        }
-        output.append(buffer, (size_t)n);
-    }
-    close(fds[0]);
-    int status = 0;
-    bool reaped = false;
-    if (!timedOut && !capped) {
-        // Bound (deadline): the reap after end of output waits only for the deadline's remainder.
-        while (secondsSince(start) < deadlineSeconds) {
-            const pid_t r = waitpid(pid, &status, WNOHANG);
-            if (r == pid || r < 0) { reaped = r == pid; break; }
-            poll(nullptr, 0, 10);
-        }
-        if (!reaped && secondsSince(start) >= deadlineSeconds) timedOut = true;
-    }
-    if (!reaped) {
-        kill(pid, SIGKILL);
-        // Bound (SIGKILL): the child cannot catch or ignore it; this reap follows its termination.
-        waitpid(pid, &status, 0);
-    }
-    result.seconds = secondsSince(start);
-    if (capped) result.outcome = Outcome::OutputCapped;
-    else if (timedOut) result.outcome = Outcome::TimedOut;
-    else if (WIFEXITED(status)) { result.outcome = Outcome::Exited; result.status = WEXITSTATUS(status); }
-    return result;
-}
-
-std::string run(const char* which) {
-    std::string out;
-    const Launch l = launch(which, out, 60.0);
-    std::printf("%s", out.c_str());
-    if (l.outcome != Outcome::Exited) out += "\n[parent] child did not exit normally\n";
-    out += "\n[parent] status=" + std::to_string(l.status) + "\n";
-    return out;
-}
-
-// Order of the "<who> App::exit" lines.
-std::string exitOrder(const std::string& out) {
-    std::string order;
-    size_t at = 0;
-    const std::string tag = "child: ";
-    while ((at = out.find(" App::exit width=", at)) != std::string::npos) {
-        const size_t lineStart = out.rfind(tag, at);
-        if (lineStart != std::string::npos) {
-            if (!order.empty()) order += ",";
-            order += out.substr(lineStart + tag.size(), at - lineStart - tag.size());
-        }
-        at += 1;
-    }
-    return order;
-}
-
-void checkFrozenExits(const std::string& label, const std::string& out) {
-    check(label + ": every App::exit exactly once, main then newest first (main,B,A)", exitOrder(out) == "main,B,A");
-    check(label + ": each App::exit runs in its own context with the App attached",
-          has(out, "main App::exit width=200 own-events=1 attached=1") &&
-          has(out, "B App::exit width=180 own-events=1 attached=1") &&
-          has(out, "A App::exit width=160 own-events=1 attached=1"));
-    check(label + ": protected AfterApp exit hooks skipped", !has(out, "AfterApp exit hook"));
-    check(label + ": no window or App teardown (no App::cleanup)", !has(out, "App::cleanup"));
-    check(label + ": GPU not torn down, audio stopped at the final exit line",
-          has(out, "final exit line gpu valid=1 audio initialized=0"));
-    check(label + ": no atexit handler or static destructor ran",
-          !has(out, "atexit marker") && !has(out, "static destructor marker"));
-    check(label + ": control never returned into the paused callback", !has(out, "returned into update"));
-}
-
-void checkBusy(const char* which, int expectedStatus) {
-    const std::string out = run(which);
-    const std::string label = std::string("busy session end, code ") + std::to_string(expectedStatus);
-    check(label + ": exit status is the app code", has(out, "[parent] status=" + std::to_string(expectedStatus) + "\n"));
-    checkFrozenExits(label, out);
-}
-
-void checkHooks() {
-    const std::string out = run("hooks");
-    const std::string label = "busy session end, exit hooks that act";
-    check(label + ": exit status is the app code", has(out, "[parent] status=7\n"));
-    checkFrozenExits(label, out);
-    check(label + ": every hook ran to its end (a second logout inside a hook ends nothing)",
-          has(out, "main hook done") && has(out, "A exit dropped A"));
-    check(label + ": no tick while frozen", !has(out, "update while frozen"));
-    check(label + ": no event delivered while frozen", has(out, "hook key sent=1") && !has(out, "key while frozen"));
-    check(label + ": createWindow refused, no native window, logged once",
-          has(out, "hook createWindow null=1,1") && countOf(out, "createWindow(): refused, the session is ending") == 1);
-    check(label + ": only windows open before the first notification are notified", !has(out, "C exit listener"));
-    {
-        const size_t at = out.find("native windows ");
-        bool same = false;
-        if (at != std::string::npos) {
-            int before = -1, after = -2;
-            same = std::sscanf(out.c_str() + at, "native windows %d->%d", &before, &after) == 2 && before == after;
-        }
-        check(label + ": native window count unchanged by createWindow", same);
+struct Interrupted : App { Interrupted() { commit(); } };
+void deterministic() {
+    using D=internal::LogoutDeadline;using C=D::Clock;
+    const auto t=C::time_point{};
+    D budget;budget.arm(3,t);
+    check("deadline not per App (first)",!budget.expire(t+std::chrono::seconds(1)));
+    check("deadline not per App (second)",!budget.expire(t+std::chrono::seconds(2)));
+    budget.arm(100,t+std::chrono::seconds(2)); // repeat cannot restart the budget
+    check("deadline exact",budget.expire(t+std::chrono::seconds(3)));
+    check("deadline once",!budget.expire(t+std::chrono::seconds(4)));
+    D zero;zero.arm(0,t);check("zero immediate",zero.expire(t));
+    D infinity;infinity.arm(INFINITY,t);check("infinite budget",!infinity.expire(C::time_point::max()));
+    for(int n=0;n<100;++n) {
+        D race;race.arm(0,t);std::thread a([&] { race.expire(t); });race.cancel();a.join();
+        check("cancelled worker cannot expire a later run",!race.expire(C::time_point::max()));
     }
 }
-
-void checkBusyA() {
-    const std::string out = run("busyA");
-    const std::string label = "busy session end in A's callback, main's exit drops A";
-    check(label + ": exit status is the app code", has(out, "[parent] status=7\n"));
-    check(label + ": main's exit dropped A", has(out, "main exit dropped A"));
-    check(label + ": the interrupted context (A's) is still valid at the final exit line",
-          has(out, "audio initialized=0 context width=160"));
-    check(label + ": no drawable acquired for the interrupted secondary", has(out, "busyA drawable A=0\n"));
-    check(label + ": no drawable acquired for main outside its tick", has(out, "busyA drawable main=0\n"));
-    checkFrozenExits(label, out);
 }
-
-void checkGpu() {
-    const std::string out = run("gpu");
-    const std::string label = "busy session end, exit hook touches the GPU";
-    check(label + ": exit status is the app code", has(out, "[parent] status=7\n"));
-    checkFrozenExits(label, out);
-    check(label + ": main's state was readable", has(out, "gpu valid=1"));
-    check(label + ": no drawable acquired for main inside the interrupted tick",
-          has(out, "gpu main drawable=0 swapchain drawable=0"));
-    check(label + ": resize leaves the layer drawable size and swapchain textures unchanged",
-          has(out, "resize unchanged=1"));
-    check(label + ": a screen change leaves them unchanged", has(out, "screen change unchanged=1"));
-}
-
-void checkNotBusy() {
-    const std::string out = run("notbusy");
-    const std::string label = "not-busy session end, code 7";
-    check(label + ": exit status is the app code", has(out, "[parent] status=7\n"));
-    // Normal shutdown follows App ownership: main's App holds A then B.
-    std::printf("sessionEndBusy not-busy exit order: %s\n", exitOrder(out).c_str());
-    check(label + ": normal order follows ownership (main,B,A)", exitOrder(out) == "main,B,A");
-    check(label + ": full cleanup detaches and cleans up every App",
-          has(out, "main App::exit width=200 own-events=1 attached=0") && has(out, "main App::cleanup") &&
-          has(out, "A App::cleanup") && has(out, "B App::cleanup") && !has(out, "attached=1"));
-    check(label + ": protected AfterApp exit hooks run once each",
-          countOf(out, "main AfterApp exit hook") == 1 && countOf(out, "A AfterApp exit hook") == 1 &&
-          countOf(out, "B AfterApp exit hook") == 1);
-    check(label + ": full cleanup tears down the GPU (atexit sees it gone)", has(out, "atexit marker (gpu valid=0)"));
-    check(label + ": process exit handlers run (std::exit)", has(out, "static destructor marker"));
-}
-
-void checkSupervision() {
-    std::string out;
-    Launch l = launch("trickle", out, 3.0);
-    check("supervision: a child that keeps printing is stopped at the deadline",
-          l.outcome == Outcome::TimedOut && l.seconds < 5.0);
-    out.clear();
-    l = launch("flood", out, 30.0);
-    check("supervision: a child past the output cap is stopped",
-          l.outcome == Outcome::OutputCapped && out.size() == outputCap && l.seconds < 5.0);
-    out.clear();
-    l = launch("linger", out, 3.0);
-    check("supervision: a child that closes its output and keeps running is reaped by the deadline",
-          l.outcome == Outcome::TimedOut && l.seconds < 5.0);
-}
-
-} // namespace
-
-int main(int argc, char** argv) {
-    if (argc > 1) { scenario = argv[1]; return runChild(); }
-    checkSupervision();
-    checkBusy("busy", 7);
-    checkBusy("busy0", 0);
-    checkHooks();
-    checkBusyA();
-    checkGpu();
-    checkNotBusy();
-    std::printf("sessionEndBusy: %s\n", failures ? "FAILED" : "all checks passed");
-    return failures ? 1 : 0;
-}
-
-#else
-
-#include <cstdio>
-
-int main() {
-    std::puts("SKIP: sessionEndBusy covers the macOS session-end path");
-    return 0;
-}
-
+#if defined(__APPLE__) && TARGET_OS_OSX
+int runSessionEndDeviceProbe(int,char**);
 #endif
+TC_CORE_TEST_MAIN(int argc,char** argv) {
+#if defined(__APPLE__) && TARGET_OS_OSX
+    if (argc>1 && std::string(argv[1])=="--mac-device") return runSessionEndDeviceProbe(argc-1,argv+1);
+#endif
+    std::setvbuf(stdout,nullptr,_IONBF,0);
+    std::fputs("ENTERED MAIN sessionEndBusy\n",stderr);
+    if (argc==1) { deterministic();return failures?1:0; }
+    mode=argv[1];delay=argc>2?std::strtof(argv[2],nullptr):0;
+    getMainThreadId();
+    if (std::string(mode)=="watchdog-runs") {
+        for (int i=0;i<100;++i) {
+            internal::beginRuntimeRun();internal::beginFrameworkLifetime();
+            internal::armLogoutWatchdog(3600);
+            internal::cancelLogoutWatchdog();
+            internal::shutdownRuntime();
+        }
+        internal::beginRuntimeRun();internal::beginFrameworkLifetime();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        internal::shutdownRuntime();
+        check("arm/disarm cannot kill a subsequent Runtime",true);return 0;
+    }
+    internal::beginRuntimeRun();internal::beginFrameworkLifetime();
+    headless::active=true;
+    if (argc>3) runtime().setLogoutTimeout(std::strtof(argv[3],nullptr));
+    if (std::string(mode)=="negative") runtime().setLogoutTimeout(-1);
+    if (std::string(mode)=="nan") runtime().setLogoutTimeout(NAN);
+    if ((std::string(mode)=="audio" || std::string(mode)=="audio-idle" || std::string(mode)=="audio-freeze")) {
+        AudioSettings settings;settings.backend=AudioBackend::Null;
+        if (!AudioEngine::getInstance().init(settings)) return 92;
+    }
+    for(int i=0;i<3;++i) {
+        auto& w=windows[i];w=std::make_shared<Window>();
+        internal::WindowRequestAccess::bindForTests(*w,900+i);
+        internal::retainRuntimeWindow(w);w->setApp<Probe>(i+1);
+        internal::applyPendingAppForTests(*w);
+        internal::currentWindowCtx()=&w->context();
+        w->tickTree();
+    }
+    internal::currentWindowCtx()=nullptr;
+    auto veto=runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) { ++queryCalls;e.cancel=true; });
+    if (std::string(mode)=="late-disposal") {
+        internal::shutdownRuntime();internal::endFrameworkLifetime();
+        // AppKit may deliver the remaining native closes in any order after
+        // terminate has shut sg/sgl down. Every Window is already a closed shell.
+        for (int i : {1,2,0,2,1}) {
+            internal::windowClosed({uint32_t(900+i)},windows[i].get());
+            internal::WindowRequestAccess::teardown(*windows[i]);
+        }
+        check("late closes after device shutdown are inert",exits==3 && cleanups==3);
+        return failures?1:0;
+    }
+    if (std::string(mode)=="query") {
+        check("query veto",!internal::querySessionEnd());
+        check("query deduplicated",!internal::querySessionEnd() && queryCalls==1);
+        internal::cancelSessionEnd();check("cancel permits a new query",!internal::querySessionEnd() && queryCalls==2);
+        internal::shutdownRuntime();check("normal complete cleanup",exits==3 && cleanups==3);
+        return failures?1:0;
+    }
+    auto logs=getLogger().onLog.listen([](LogEventArgs&) { ++logCalls; });
+    logsBeforeCommit=logCalls;
+    probeFrozen=true;trigger=true;
+    if (std::string(mode)=="normal") {
+        probeFrozen=false;
+        internal::shutdownRuntime();
+        check("ordinary quit has full cleanup",exits==3 && cleanups==3);
+        return failures?1:0;
+    }
+    if (std::string(mode)=="idle") { probeFrozen=false;commit(); }
+    EventListener beforeExit;
+    if (std::string(mode)=="before-exit")
+        beforeExit=windows[2]->events().exit.listen([] { commit(); },EventPriority::BeforeApp);
+    if (std::string(mode)=="audio-idle") {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+        while (!audioEntered) { if(std::chrono::steady_clock::now()>deadline)return 94;std::this_thread::yield(); }
+        check("worker-only query bypasses veto",internal::querySessionEnd() && internal::querySessionEnd() && queryCalls==0);
+        check("worker-only query bypasses veto",internal::querySessionEnd() && internal::querySessionEnd() && queryCalls==0);
+        commit();
+    }
+    if (std::string(mode)=="audio-freeze") {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+        while (!liveAudioCalls) { if(std::chrono::steady_clock::now()>deadline)return 94;std::this_thread::yield(); }
+    }
+    if (std::string(mode)=="native-busy") {
+        internal::setSessionActivityProbe([] { return true; });
+        check("native constructor query bypasses veto",internal::querySessionEnd() && queryCalls==0);
+        commit();
+    }
+    internal::RuntimeActivityScope interrupted;
+    check("busy queries bypass veto",internal::querySessionEnd() && internal::querySessionEnd() && queryCalls==0);
+    internal::cancelSessionEnd();
+    if (std::string(mode)=="swap") {
+        windows[0]->setApp<Rejected>();internal::applyPendingAppForTests(*windows[0]);return 98;
+    }
+    if (std::string(mode)=="cohort") {
+        const auto generation=reinterpret_cast<void*>(7);
+        internal::appOwner(*windows[0]->getApp())->generation=generation;
+        internal::appOwner(*windows[2]->getApp())->generation=generation;
+        internal::retireAppGeneration(generation);return 96;
+    }
+    if (std::string(mode)=="before-exit" || std::string(mode)=="during-exit") { internal::shutdownRuntime();return 97; }
+    if (std::string(mode)=="constructor") { windows[0]->setApp<Interrupted>();return 93; }
+    if (std::string(mode)=="audio") {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
+        while (!audioEntered) { if(std::chrono::steady_clock::now()>deadline)return 94;std::this_thread::yield(); }
+    }
+    std::thread ownerLock;
+    if (std::string(mode)=="owner-lock") {
+        auto owner=internal::appOwner(*windows[2]->getApp());
+        ownerLock=std::thread([owner] { std::lock_guard lock(owner->cancellationsMutex);ownerLocked=true;for (;;) std::this_thread::yield(); });
+        while (!ownerLocked) std::this_thread::yield();
+    }
+    auto& w=*windows[0];internal::WindowEntryScope entry(w);
+    if (std::string(mode)=="update") w.events().update.notify();
+    else if (std::string(mode)=="draw") w.getApp()->draw();
+    else if (std::string(mode)=="onRender") w.events().onRender.notify();
+    else if (std::string(mode)=="event") {
+        sapp_event e{};e.type=SAPP_EVENTTYPE_KEY_DOWN;e.key_code=SAPP_KEYCODE_A;
+        internal::dispatchWindowEventForTests(&e,w);
+    } else commit();
+    return 95; // a committed OS callback never resumes its interrupted caller
+}

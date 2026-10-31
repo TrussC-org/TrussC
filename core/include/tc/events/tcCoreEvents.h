@@ -78,6 +78,7 @@ public:
 class Runtime {
 public:
     RuntimeEvents& events();
+    void setLogoutTimeout(float seconds);
 private:
     Runtime() = default;
     friend Runtime& runtime();

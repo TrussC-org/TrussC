@@ -734,6 +734,7 @@ void registerStandardTools(Server& server) {
                 auto* ctx=resolveWindowCtx(source.at("window").get<int64_t>(),err);
                 if(!ctx) return err;
                 mcp::deferToolResultTwoStage([args,error]() -> std::function<json()> {
+                if (trussc::internal::sessionEndExit()) return [error]() -> json { return error("failed to grab screen"); };
                     auto p=std::make_shared<Pixels>();
                     reserveWindowReadback();
                     bool ok=captureWindow(*p);
@@ -785,6 +786,7 @@ void registerStandardTools(Server& server) {
             // the pixels; the returned closure — downscale + encode + Base64 —
             // runs on the HTTP worker blocked on this reply.
             mcp::deferToolResultTwoStage([format, reqWidth, quality]() -> std::function<json()> {
+                if (trussc::internal::sessionEndExit()) return []() -> json { return json{{"status", "error"}, {"message", "Failed to grab screen"}}; };
                 auto px = std::make_shared<trussc::Pixels>();
                 reserveWindowReadback();
                 bool grabbed = trussc::captureWindow(*px);
@@ -822,6 +824,7 @@ void registerStandardTools(Server& server) {
             // capture, expiration, owner cleanup or shutdown releases the job.
             // App-authored saveScreenshot() keeps its independent path queue.
             mcp::deferToolResultUntilAfterFrame([windowIdx, destination, credit, budget]() -> json {
+                if (trussc::internal::sessionEndExit()) return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};
                 WorkScope scope(budget);
                 reserveWindowSave(trussc::internal::currentWindowContext());
                 WindowCaptureAdmission admission(credit);

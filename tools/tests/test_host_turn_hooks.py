@@ -118,9 +118,9 @@ void run() {
 }
 }
 '''
-# macOS uses the incoming RAII scopes; the other backends retain host admission.
+# Native RAII scopes and Runtime activity both exclude nested client entry.
 assert '_tc_callbacks_active' in extract(NATIVE, 'static void _sapp_tc_x11_close(')
-assert '_tc_callbacks_active' not in extract(NATIVE, 'static bool _sapp_tc_mac_busy(')
+assert '._tc_callbacks_active()' in extract(NATIVE, 'static bool _sapp_tc_mac_busy(')
 quit_gate=r'''
 namespace quit_gate {
 using NSApplication=void; using NSApplicationTerminateReply=int; using AEEventID=unsigned;
@@ -128,28 +128,39 @@ constexpr int NSTerminateCancel=0,NSTerminateNow=1,_SAPP_TC_MAX_WINDOWS=1;
 struct _sapp_tc_window_t { unsigned win_id=3; bool in_tick=false; int callback_depth=0; } window;
 struct { int callbacks_active=0,constructing=0; bool deferred_blocked=false,terminate_pending=false;
     _sapp_tc_window_t* windows[1]={&window};
-    struct { bool quit_requested=false,quit_ordered=false; } app; } _sapp_tc;
+    struct { bool quit_requested=false,quit_ordered=false; struct { bool (*_tc_callbacks_active)()=nullptr; } desc; } app; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return _sapp_tc.windows[0] && h.id==window.win_id?&window:nullptr; }
 void _sapp_tc_mac_schedule_deferred() {}
 bool _sapp_tc_mac_frozen() { return false; }
 AEEventID _sapp_tc_mac_quit_reason() { return 0; }
 bool _sapp_tc_mac_is_session_end(AEEventID) { return false; }
 void _sapp_tc_mac_session_end(AEEventID) {}
-namespace trussc::internal { void setExitReason(const char*) {} void setExitReasonIfEmpty(const char*) {} }
+int endings=0;
+bool runtimeBusy=false;
+namespace trussc::internal {
+void setExitReason(const char*) {} void setExitReasonIfEmpty(const char*) {}
+bool querySessionEnd() { return true; }
+void cancelSessionEnd() {}
+void shutdownRuntime() { ++endings; }
+}
 int requests=0;
 bool _sapp_tc_request_exit() { ++requests; return true; }
 '''+extract(NATIVE,'struct _sapp_tc_mac_callback_scope {')+';\n'+extract(NATIVE,'static bool _sapp_tc_mac_busy(')+extract(NATIVE,'- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender').replace(
     '- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender','int should_terminate(void* sender)')+r'''
 void run() {
+    _sapp_tc.app.desc._tc_callbacks_active=[] { return runtimeBusy; };
     {
         _sapp_tc_mac_callback_scope host(nullptr); // process callback after native unbind
         _sapp_tc.windows[0]=nullptr;
         check("AppKit quit defers for host ending callbacks after native unbind",should_terminate(nullptr)==NSTerminateCancel && requests==0 && _sapp_tc.terminate_pending);
     }
+    runtimeBusy=true; _sapp_tc.terminate_pending=false;
+    check("AppKit quit defers for Runtime callback activity without native windows",should_terminate(nullptr)==NSTerminateCancel && requests==0 && _sapp_tc.terminate_pending && endings==0);
+    runtimeBusy=false;
     _sapp_tc.windows[0]=&window; window.in_tick=true;
     check("AppKit quit defers for native tick activity",should_terminate(nullptr)==NSTerminateCancel && requests==0);
     window.in_tick=false;
-    check("AppKit quit reaches the existing endpoint at the next safe boundary",should_terminate(nullptr)==NSTerminateNow && requests==1);
+    check("AppKit quit reaches the existing endpoint at the next safe boundary",should_terminate(nullptr)==NSTerminateNow && requests==1 && endings==1);
 }
 }
 '''

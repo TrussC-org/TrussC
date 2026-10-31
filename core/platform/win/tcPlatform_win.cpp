@@ -28,6 +28,64 @@
 
 namespace trussc {
 
+namespace internal {
+namespace {
+LRESULT CALLBACK sessionAuthorityProc(HWND hwnd, UINT message, WPARAM value, LPARAM flags) {
+    if (message == WM_QUERYENDSESSION) {
+        if (querySessionEnd()) { ShutdownBlockReasonDestroy(hwnd); return TRUE; }
+        // Preserve C2's first nonempty veto explanation. Optional text failure
+        // cannot remove the veto and never escapes the native callback.
+        try {
+            const auto reason = exitBlockReason();
+            if (reason.empty()) ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
+            else {
+                const int count = MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, nullptr, 0);
+                if (count > 0) {
+                    std::wstring wide(static_cast<size_t>(count), L'\0');
+                    MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, wide.data(), count);
+                    ShutdownBlockReasonCreate(hwnd, wide.c_str());
+                } else ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
+            }
+        } catch (...) { ShutdownBlockReasonCreate(hwnd, L"The app is still busy."); }
+        return FALSE;
+    }
+    if (message == WM_ENDSESSION) {
+        ShutdownBlockReasonDestroy(hwnd);
+        if (value) commitSessionEnd();
+        cancelSessionEnd();
+        return 0;
+    }
+    return DefWindowProcW(hwnd, message, value, flags);
+}
+}
+void* createSessionAuthority() {
+    WNDCLASSW type{};
+    type.lpfnWndProc = sessionAuthorityProc;
+    type.hInstance = GetModuleHandleW(nullptr);
+    type.lpszClassName = L"TrussC.Runtime.Session";
+    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        throw std::runtime_error("Unable to register Runtime session authority");
+    // HWND_MESSAGE does not receive WM_QUERYENDSESSION broadcasts. This is an
+    // unshown top-level control window, owned for the whole Runtime run.
+    HWND hwnd = CreateWindowExW(0, type.lpszClassName, L"TrussC", WS_OVERLAPPED,
+        0, 0, 0, 0, nullptr, nullptr, type.hInstance, nullptr);
+    if (!hwnd) throw std::runtime_error("Unable to create Runtime session authority");
+    return hwnd;
+}
+void pollSessionAuthority(void* authority) noexcept {
+    // Headless has no user-window pump. Sent session messages are dispatched
+    // by PeekMessage on the Runtime main thread as well.
+    MSG message;
+    while (authority && PeekMessageW(&message, static_cast<HWND>(authority), 0, 0, PM_REMOVE)) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+}
+void destroySessionAuthority(void* authority) noexcept {
+    if (authority) DestroyWindow(static_cast<HWND>(authority));
+}
+}
+
 void bringWindowToFront() {
     auto* target = internal::resolveWindow(true);
     if (!target) return;
@@ -295,6 +353,7 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 }
 
 bool captureWindow(Pixels& outPixels) {
+    if (internal::sessionEndExit()) return false;
     if (!sg_isvalid()) return false;
     if (internal::hasPublicFboActivation()) return false;
     internal::CapturePrefixScope capturePhase;

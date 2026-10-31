@@ -2882,6 +2882,7 @@ struct Cover_ResizeEventArgs : af::Scope<ResizeEventArgs> {
 struct Cover_Runtime : af::Scope<Runtime> {
     static void run() {
         (void)af::val<Runtime>().events();
+        (void)af::val<Runtime>().setLogoutTimeout(af::val<float>());
     }
 };
 

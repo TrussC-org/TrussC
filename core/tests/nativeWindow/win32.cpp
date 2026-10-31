@@ -67,6 +67,7 @@ void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 #undef QueryPerformanceCounter
 
 namespace trussc::internal {
+void setSessionActivityProbe(bool (*)()) noexcept {}
 int& appExitCode() { static int value; return value; }
 bool& appSetupCalled() { static bool value = true; return value; }
 void setExitReason(const char*) {}
@@ -577,7 +578,8 @@ void initialized() {
     if (sessionEnd) {
         trussc::internal::appExitCode() = 37;
         SendMessageW(first->hwnd, WM_ENDSESSION, TRUE, 0);
-        check("forced session termination returned unexpectedly", false);
+        check("user HWND does not own forced session termination", !_sapp_tc.app.quit_ordered);
+        sapp_quit();
         return;
     }
     if (launchCovered) {
@@ -666,11 +668,7 @@ void nativeChecks() {
     SendMessageW(other->hwnd,WM_ENDSESSION,TRUE,0);
     check("secondary session end cannot terminate the process", !_sapp_tc.app.quit_ordered);
     vetoQuit = true; quitRequests = 0;
-    SendMessageW(first->hwnd,WM_QUERYENDSESSION,0,0);
-    check("session query preserves close veto", quitRequests == 1 && !_sapp_tc.app.quit_ordered);
-    trussc::internal::throwReason = true;
-    check("session allocation failure cannot escape wndproc", SendMessageW(first->hwnd,WM_QUERYENDSESSION,0,0) == FALSE);
-    trussc::internal::throwReason = false;
+    check("first user HWND also has no session authority", SendMessageW(first->hwnd,WM_QUERYENDSESSION,0,0)==TRUE && quitRequests==0);
     SendMessageW(first->hwnd,WM_ENDSESSION,FALSE,0);
     vetoQuit = false;
     const auto savedClose=other->desc.close_cb;

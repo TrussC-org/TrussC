@@ -58,6 +58,7 @@ class PointPipeline {
 public:
     // Lazily create the shader and the shared unit-quad buffer. Safe every frame.
     void ensureInit() {
+        if (internal::sessionEndExit()) return;
         if (initialized_) return;
         shader_     = sg_make_shader(tc_pointcloud_point_shader_desc(sg_query_backend()));
         shaderPrim_ = sg_make_shader(tc_pointcloud_point_prim_shader_desc(sg_query_backend()));
