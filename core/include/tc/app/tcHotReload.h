@@ -64,6 +64,10 @@ namespace trussc {
     }                                                                        \
     _TC_EXPORT void tcHotReloadDestroyApp(trussc::App* app) {               \
         trussc::internal::destroyAppStorage<AppClass>(app);                                                          \
+    }                                                                        \
+    _TC_EXPORT void tcHotReloadSource(const char** type, const char** file) { \
+        *type = #AppClass;                                                    \
+        *file = __FILE__;                                                     \
     }
 
 #else // not TC_HOT_RELOAD_BUILD

@@ -314,7 +314,9 @@ std::function<ReplyThunk()> retainDeferredCode(std::function<ReplyThunk()> callb
         ::trussc::internal::AppCallbackScope scope(owner);
         auto reply = callback();
         return [code, owner, id, reply = std::move(reply)]() mutable {
-            if (owner && (owner->retiring || owner->ended || !owner->token->load()))
+            // MCP deferred worker uses the common worker admission.
+            ::trussc::internal::WorkerAppAdmission admission(owner);
+            if (!admission || (owner && (owner->retiring || owner->ended || !owner->token->load() || owner->callbacksClosing)))
                 return toolError(id, "the App behind this deferred reply retired");
             // The worker restores attribution only; it never selects GPU state.
             ::trussc::internal::AppOwnerScope scope(owner);

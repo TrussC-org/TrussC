@@ -78,7 +78,7 @@ public:
 
     // Request closure at the next safe boundary. Pending replacement is
     // cancelled. App ending and owner retirement precede native/GPU disposal.
-    // Other windows continue; the last close ends a windowed Runtime.
+    // Last-window/quitOnClose asks exitRequested first; any veto keeps all windows.
     // quitOnClose defaults to false. Closed handles stay closed across runs.
     void close();
     bool isOpen() const { return binding_.bound; }
@@ -332,6 +332,7 @@ public:
         w.appEventState_ = std::move(state);
     }
     static void cancelClose(Window& w) noexcept { w.closeRequested_ = false; }
+    static void acceptCodeQuit(Window& w) noexcept { w.closeRequested_ = true; }
     static void applyPendingApp(Window& w) { w.applyPendingApp(); }
     static void endApp(Window& w) noexcept { w.endApp(); }
     static void endForShutdown(Window& w) noexcept { w.closingApp_ = true; w.closeRequested_ = true; w.endApp(); }
@@ -604,6 +605,7 @@ inline Window::~Window() {
 inline void Window::close() {
     if (internal::sessionEndExit()) return;
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || !isOpen() || closeRequested_) return;
+    if (internal::codeCloseExitsRuntime(*this)) return;
     closeRequested_ = true;
     if (binding_.handle.id) sapp_window_request_close(binding_.handle);
     // Surface-only hosts drain this request at the outer host boundary.

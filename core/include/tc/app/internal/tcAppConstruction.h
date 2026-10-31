@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 #include <type_traits>
+#include <string>
 #include "../../utils/tcAtomicSharedPtr.h"
 #include "../tcExit.h"
 
@@ -19,7 +20,7 @@ namespace internal {
 class WindowRequestAccess;
 struct WindowContext;
 // Host control blocks retain the defining library until erased storage has
-// finished its guest destructor. Physical unloading runs only at a host boundary.
+// finished its guest destructor. Retired modules remain pinned for process lifetime.
 std::shared_ptr<void> retainGuestCode();
 std::shared_ptr<void> retainGuestCodeFor(const void*);
 std::shared_ptr<void> combineGuestCode(std::shared_ptr<void>, std::shared_ptr<void>);
@@ -100,20 +101,32 @@ private:
     std::shared_ptr<AppOwner> owner_;
     const void* previousRegistration_;
 };
+// Worker activity and revalidation for ordinary session ending. Cleanup remains allowed.
+class WorkerAppAdmission {
+public:
+    explicit WorkerAppAdmission(const std::shared_ptr<AppOwner>&, bool cleanup = false) noexcept;
+    ~WorkerAppAdmission() noexcept;
+    explicit operator bool() const noexcept { return admitted_; }
+    WorkerAppAdmission(const WorkerAppAdmission&) = delete;
+private:
+    bool counted_ = false, admitted_ = false;
+};
 // Main-thread callbacks restore the caller's physical rendering context too.
 class AppCallbackScope {
 public:
     explicit AppCallbackScope(std::shared_ptr<AppOwner>);
     ~AppCallbackScope() noexcept;
     AppCallbackScope(const AppCallbackScope&) = delete;
+    bool admitted() const noexcept { return bool(worker_); }
 private:
+    WorkerAppAdmission worker_;
     AppOwnerScope owner_;
     WindowContext* previous_ = nullptr;
     void* display_ = nullptr;
     void* context_ = nullptr;
     uintptr_t draw_ = 0, read_ = 0;
     uint32_t drawWindow_ = 0, readWindow_ = 0, sgl_ = 0;
-    bool entered_ = false, workerEntry_ = false, mainEntry_ = false;
+    bool entered_ = false, mainEntry_ = false;
 };
 class AppConstructionScope {
 public:
@@ -159,7 +172,9 @@ std::function<R(Args...)> appOwnedCallback(std::function<R(Args...)> callback, b
         AppCallbackScope scope(live);
         // Pair callback activity admission with Runtime's freeze-before-count
         // snapshot. A worker that lost the race never enters App code.
-        if (sessionEndExit() && !(exitEvent && admitAppEndingEvent(weak.lock().get()))) {
+        if (!scope.admitted() ||
+            (!live->token->load() && !(exitEvent && live->ended)) || live->callbacksClosing ||
+            (sessionEndExit() && !(exitEvent && admitAppEndingEvent(live.get())))) {
             if constexpr (!std::is_void_v<R>) return R{};
             else return;
         }

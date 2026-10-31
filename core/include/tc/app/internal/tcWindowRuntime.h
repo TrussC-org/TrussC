@@ -9,6 +9,8 @@ struct WindowSettings;
 namespace internal {
 struct Runtime;
 Runtime& runtime();
+// Host/guest internal ABI: null type disables the creation-time Warning.
+void setHotReloadSource(const char* type, const char* file);
 void retainRuntimeWindow(const std::shared_ptr<Window>&);
 void releaseRuntimeWindow(Window&) noexcept;
 void recordAppAttachment(const std::shared_ptr<App>&, Window&);
@@ -121,6 +123,8 @@ public:
     HostTurnScope(const HostTurnScope&) = delete;
 };
 bool hostCallbacksActive() noexcept;
+bool reloadSafePoint() noexcept;
+bool codeCloseExitsRuntime(Window&);
 void beforeHostTurn() noexcept;
 void afterHostTurn() noexcept;
 void setHostReloadPoll(void (*poll)()) noexcept;

@@ -367,3 +367,5 @@ frame, and subscribes to its App’s `events().hotReloadUnload` for generation
 teardown. Only Apps in the retiring generation receive that notification;
 other Apps keep their ImGui state. The App owner token retires registrations
 on swap or close.
+
+Runtime owns the process `hotReloadUnload` subscription and maintenance tick. Per-App hooks belong on that App’s `events().hotReloadUnload`; they retire with its token. Runtime notifies before reverse attachment ending at the outer main-thread reload safe point. Ending App A does not retire same-generation App B; generation retirement removes generation registrations after its Apps. Old DLL/dylib/.so modules remain pinned for process lifetime, including retained callback/control-block storage. Maintenance runs without relying on a drawing Window.

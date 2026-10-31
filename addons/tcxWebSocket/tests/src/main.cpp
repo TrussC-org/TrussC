@@ -51,6 +51,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../../../core/tests/common/tcWindowTest.h"
 #include <tcWebSocketClient.h>
 
 #include <atomic>
@@ -837,6 +838,7 @@ int main(int argc, char** argv) {
 #ifndef __EMSCRIPTEN__
     checkHeadlessTimeout();
 #endif
+    tcCoreTest::WindowFixture loopWindow;
     runIngressTests();
     {
         auto bytes = emscriptenText("hello");

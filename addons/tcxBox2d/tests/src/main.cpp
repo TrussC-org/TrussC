@@ -1,5 +1,5 @@
 // =============================================================================
-// tcxBox2d tests - headless behavioral test (no window).
+// tcxBox2d tests - CPU behavioral test (addressed Window, no native window).
 //
 // Built and run by CI on every push/PR via examples/build_all.py
 // --addon-tests-only (exit 0 = pass, non-zero = fail). Console only: the world
@@ -59,6 +59,7 @@
 // =============================================================================
 
 #include <tcxBox2d.h>
+#include "../../../../core/tests/common/tcWindowTest.h"
 
 #include <algorithm>
 #include <chrono>
@@ -2571,7 +2572,7 @@ static void testDeprecatedEventAliases(box2d::World& world) {
 }
 
 // Drive the public stepping path with deterministic frame IDs and delta time.
-// Restore the headless window context so these tests do not affect other tests.
+// Restore the addressed fixture's context so these tests do not affect other tests.
 struct WorldTestFrames {
     decltype(internal::currentWindowContext()) ctx = internal::currentWindowContext();
     double savedDelta = ctx.updateDeltaTime;
@@ -4131,7 +4132,6 @@ struct HeadlessPhysicsApp : App {
     }
 };
 static void testHeadlessPhysics() {
-    WorldTestFrames frames;
     check("headless Box2d runner exits", runHeadlessApp<HeadlessPhysicsApp>(HeadlessSettings().setFps(1024)) == 0);
 }
 } // namespace
@@ -4141,6 +4141,8 @@ int main(int argc, char** argv) {
         testHeadlessPhysics();
         return finishSelectedRun(argv[1]);
     }
+    if (argc == 1) testHeadlessPhysics();
+    tcCoreTest::WindowFixture receiver;
     if (argc == 2 && string(argv[1]) == "--contact-lifetimes") {
         testCompoundEvents();
         testCompoundHandover();
@@ -4192,7 +4194,6 @@ int main(int argc, char** argv) {
         return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
 
-    testHeadlessPhysics();
     testDeliveryPR2();
     testPolyShapeRefuses(world);
     testHullDropWarning(world);

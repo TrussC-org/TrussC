@@ -72,6 +72,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -1206,6 +1207,7 @@ TC_CORE_TEST_MAIN() {
     // Before the scenario: the threads the process starts with
     const int threadsAtStart = countThreads();
 
+    tcCoreTest::WindowFixture loopWindow;
     g_phase = "the scenario";
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);

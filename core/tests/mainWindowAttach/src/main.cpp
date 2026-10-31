@@ -29,7 +29,7 @@ struct Later : App {
             fbo.begin(); clear(Color(0, 1, 0)); fbo.end();
             clear(Color(0, 0, 1));
             fbo.draw(0, 0);
-            if (++laterFrames == 3) getWindow()->close();
+            if (++laterFrames == 3) { getWindow()->close(); exitApp(); }
         }
     }
     void cleanup() override {

@@ -109,9 +109,10 @@ struct Runtime {
     unsigned entries = 0, turns = 0, appExitCallbacks = 0;
     const AppOwner* endingEventOwner = nullptr;
     std::atomic<unsigned> workerCallbacks{0};
-    bool servicing = false, bootstrapping = false, servicedTurn = false;
+    bool servicing = false, pollingReload = false, bootstrapping = false, servicedTurn = false;
     uint64_t epoch = 0;
     void (*reload)() = nullptr;
+    std::string hotReloadType, hotReloadFile;
     HostServiceOperations services{processQueues, processMaintenance};
     std::shared_ptr<std::atomic<bool>> runToken;
     AppConstructionTicket* constructor = nullptr;
@@ -226,21 +227,7 @@ void releaseGuestCode(const void* generation) noexcept {
     for (auto& code : guestCode()) if (code->generation == generation) code->released = true;
 }
 void drainGuestCode() noexcept {
-    if (runtime().entries || runtime().constructor) return;
-    for (;;) {
-        std::shared_ptr<GuestCode> retired;
-        {
-            std::lock_guard lock(guestCodeMutex());
-            auto it = std::find_if(guestCode().begin(), guestCode().end(), [](const auto& code) {
-                return code->released && code.use_count() == 1;
-            });
-            if (it == guestCode().end()) return;
-            retired = std::move(*it);
-            guestCode().erase(it);
-        }
-        TeardownSteps steps;
-        steps.run("guest library release", [&] { retired->close(retired->handle); });
-    }
+    // dev-only: each successful reload keeps one mapped image (and on Windows one DLL copy on disk) for the process lifetime; unbounded by design
 }
 RuntimeActivityScope::RuntimeActivityScope() noexcept { ++runtime().entries; }
 RuntimeActivityScope::~RuntimeActivityScope() noexcept { --runtime().entries; }
@@ -263,7 +250,8 @@ void notifyRequestListeners(const Snapshot& saved, T& aggregate, const char* nam
         }
         if (fresh.cancel) {
             aggregate.cancel = true;
-            if (aggregate.reason.empty() && !fresh.reason.empty()) aggregate.reason = std::move(fresh.reason);
+            if constexpr (std::is_same_v<T, ExitRequestEventArgs>)
+                if (aggregate.reason.empty() && !fresh.reason.empty()) aggregate.reason = std::move(fresh.reason);
         }
     });
 }
@@ -446,18 +434,22 @@ bool appEnding() noexcept {
     auto owner = currentAppOwner();
     return runtime().appExitCallbacks || (owner && (owner->retiring || owner->callbacksClosing));
 }
+void setHotReloadSource(const char* type, const char* file) {
+    runtime().hotReloadType = type ? type : "";
+    runtime().hotReloadFile = file ? file : "";
+}
 void retainRuntimeWindow(const std::shared_ptr<Window>& window) {
     if (runtime().stopping) throw std::logic_error("the Runtime is ending");
     runtime().windows.push_back(window);
     WindowRequestAccess::setHostOwner(*window, window);
+    if (!runtime().hotReloadType.empty() && openWindows().size() >= 2) {
+        logWarning() << "!! Remove \"TC_HOT_RELOAD(" << runtime().hotReloadType
+            << ")\" from " << runtime().hotReloadFile << " !! Hot reload does not support multiple windows.";
+    }
 }
 void releaseRuntimeWindow(Window& window) noexcept {
     auto& state = runtime();
     std::erase_if(state.windows, [&](const auto& owner) { return owner.get() == &window; });
-    if (!state.stopping && (WindowRequestAccess::quitOnClose(window) || state.windows.empty()) && !headless::isActive()) {
-        TeardownSteps steps;
-        steps.run("last Window quit", [] { requestNormalQuit("last-window-close"); });
-    }
 }
 void recordAppAttachment(const std::shared_ptr<App>& app, Window&) {
     runtime().attachments.push_back(app, ++runtime().nextAttachment);
@@ -655,11 +647,22 @@ AppOwnerScope::~AppOwnerScope() noexcept {
     mcp::internal::setRegistrationOwner(previousRegistration_);
     selectedAppOwner = previous_;
 }
-AppCallbackScope::AppCallbackScope(std::shared_ptr<AppOwner> owner) : owner_(owner) {
+WorkerAppAdmission::WorkerAppAdmission(const std::shared_ptr<AppOwner>& owner, bool cleanup) noexcept {
+    if (isMainThread()) { admitted_ = true; return; }
+    auto& state = runtime();
+    state.workerCallbacks.fetch_add(1, std::memory_order_seq_cst);
+    // Count before revalidating the freeze, matching the session snapshot.
+    const bool live = !owner || (owner->token->load() && !owner->callbacksClosing);
+    admitted_ = cleanup || (live && !sessionEndExit());
+    if (admitted_) counted_ = true;
+    else state.workerCallbacks.fetch_sub(1, std::memory_order_seq_cst);
+}
+WorkerAppAdmission::~WorkerAppAdmission() noexcept {
+    if (counted_) runtime().workerCallbacks.fetch_sub(1, std::memory_order_seq_cst);
+}
+AppCallbackScope::AppCallbackScope(std::shared_ptr<AppOwner> owner) : worker_(owner), owner_(owner) {
     if (!owner) return;
     if (!isMainThread()) {
-        runtime().workerCallbacks.fetch_add(1, std::memory_order_seq_cst);
-        workerEntry_ = true;
         return;
     }
     ++runtime().entries;
@@ -684,7 +687,7 @@ AppCallbackScope::AppCallbackScope(std::shared_ptr<AppOwner> owner) : owner_(own
     }
 }
 AppCallbackScope::~AppCallbackScope() noexcept {
-    if (workerEntry_) { runtime().workerCallbacks.fetch_sub(1, std::memory_order_seq_cst); return; }
+    if (!isMainThread()) return;
     if (!entered_) { if (mainEntry_) --runtime().entries; return; }
     TeardownSteps steps;
     steps.run("App callback caller restoration", [&] { restoreWindowContext(previous_); });
@@ -739,6 +742,7 @@ void retireAppGeneration(const void* generation) noexcept {
         if (!candidate) break;
         retireAppOwner(candidate);
     }
+    mcp::internal::removeRegistrationsOwnedBy(generation);
 }
 
 std::unordered_set<const App*> attachedApps() {
@@ -761,9 +765,11 @@ std::function<void()> attributeMainThreadWork(std::function<void()> callback) {
         std::weak_ptr<AppOwner> weak;
         std::function<void()> callback;
         void operator()() const {
+            if (sessionEndExit()) return;
             auto live = weak.lock();
             if (!live || live->retiring || live->ended || !live->token->load()) return;
             AppCallbackScope scope(live);
+            if (sessionEndExit()) return;
             callback();
         }
     };
@@ -876,6 +882,7 @@ std::shared_ptr<App> adoptConstructedApp(App* app, void (*destroy)(App*)) {
     // handle destroyed after shutdown keeps its retired owner selected while
     // the entire derived destructor runs.
     return std::shared_ptr<App>(app, [owner, destroy](App* target) noexcept {
+        WorkerAppAdmission worker(owner, true);
         AppOwnerScope scope(owner);
         retireAppOwner(owner);
         TeardownSteps steps;
@@ -1293,6 +1300,9 @@ void setHostReloadPoll(void (*poll)()) noexcept { coordinator().reload = poll; }
 HostTurnScope::HostTurnScope() noexcept { beforeHostTurn(); }
 HostTurnScope::~HostTurnScope() noexcept { afterHostTurn(); }
 bool hostCallbacksActive() noexcept { return coordinator().entries || coordinator().servicing; }
+bool reloadSafePoint() noexcept {
+    return isMainThread() && !sessionEndExit() && !runtime().stopping && runtime().pollingReload;
+}
 void beforeHostTurn() noexcept {
     auto& state = coordinator();
     if (state.turns++ || state.entries || state.servicing || state.stopping || sessionEndExit()) return;
@@ -1308,7 +1318,11 @@ void beforeHostTurn() noexcept {
     steps.run("host turn services", [&] {
         restoreWindowContext(nullptr);
         ProcessDrawingScope drawing;
-        if (state.reload) state.reload();
+        if (state.reload) {
+            state.pollingReload = true;
+            struct RestorePoll { bool& flag; ~RestorePoll() { flag = false; } } restore{state.pollingReload};
+            state.reload();
+        }
         if (auto queues = hostServiceOperationsForTests().queues) queues();
         // Queue callbacks may upload/Fbo-render during a no-draw turn.
         if (sg_isvalid() && tc_internal_gpu_frame_has_work()) endGpuFrame();
@@ -2017,6 +2031,20 @@ void bootstrapWindow(Window& target, void (*bootstrap)()) {
     }
     state.bootstrapping = false;
 }
+bool codeCloseExitsRuntime(Window& window) {
+    auto& state = runtime();
+    if (state.stopping) return false;
+    if (!WindowRequestAccess::quitOnClose(window) &&
+        std::count_if(state.windows.begin(), state.windows.end(), [](const auto& w) { return w->isOpen() && !WindowRequestAccess::closeRequested(*w); }) != 1) return false;
+    if (dispatchExitRequested()) {
+        WindowRequestAccess::acceptCodeQuit(window);
+        setExitReason("last-window-close");
+        prepareRuntimeExit();
+        if (headless::isActive()) headless::running = false;
+        else sapp_quit();
+    }
+    return true;
+}
 bool allowWindowClose(sapp_window handle, void* user) noexcept {
     bool allow = false;
     TeardownSteps steps;
@@ -2032,7 +2060,18 @@ bool allowWindowClose(sapp_window handle, void* user) noexcept {
         CloseRequestEventArgs aggregate;
         auto saved = FrameworkEventAccess::snapshot(window->events().closeRequested);
         notifyRequestListeners<CloseRequestEventArgs>(saved, aggregate, "closeRequested");
-        allow = !aggregate.cancel;
+        if (aggregate.cancel || !window->isOpen() || WindowRequestAccess::closeRequested(*window)) return;
+        if (WindowRequestAccess::quitOnClose(*window) ||
+                std::count_if(runtime().windows.begin(), runtime().windows.end(),
+                    [](const auto& w) { return w->isOpen() && !WindowRequestAccess::closeRequested(*w); }) == 1) {
+            if (!dispatchExitRequested()) return;
+            setExitReason("last-window-close");
+            prepareRuntimeExit();
+            if (headless::isActive()) headless::running = false;
+            else sapp_quit();
+            return; // Common ending owns every Window; native must not close W first.
+        }
+        allow = true;
     });
     return allow;
 }

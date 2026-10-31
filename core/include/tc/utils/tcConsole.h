@@ -91,11 +91,11 @@ public:
     static constexpr size_t commandCount = 1024, queuedBytes = 16 * 1024 * 1024;
     std::atomic<uint64_t> rejectedLines{0}, droppedCommands{0};
 
-    void rejectLine() { rejectedLines.fetch_add(1); }
+    void rejectLine() { rejectedLines.fetch_add(1); lineLossPending_.store(true); }
     // Called by the runners even when delivery is disabled. The reader never
     // logs or waits for app delivery, including on an unterminated flood.
     void reportLoss() {
-        if (rejectedLines.load() && !lineWarned_.exchange(true)) {
+        if (lineLossPending_.exchange(false) && !lineWarned_.exchange(true)) {
 #if defined(__cpp_exceptions)
             try {
 #endif
@@ -105,7 +105,7 @@ public:
             } catch (...) {}
 #endif
         }
-        if (droppedCommands.load() && !queueWarned_.exchange(true)) {
+        if (queueLossPending_.exchange(false) && !queueWarned_.exchange(true)) {
 #if defined(__cpp_exceptions)
             try {
 #endif
@@ -136,7 +136,7 @@ public:
     bool tryReceive(ConsoleEventArgs& args) {
         for (;;) {
             std::unique_lock<std::mutex> lock(mutex_);
-            if (!head_) return false;
+            if (!head_) { rearmWarnings(); return false; }
             Node* node = head_;
             head_ = node->next;
             if (!head_) tail_ = nullptr;
@@ -170,6 +170,7 @@ public:
         while (head_) { Node* node = head_; head_ = head_->next; std::free(node); }
         tail_ = nullptr;
         bytes_ = count_ = 0;
+        rearmWarnings();
     }
     ~CommandChannel() { clear(); }
     size_t size() const { std::lock_guard<std::mutex> lock(mutex_); return count_; }
@@ -180,9 +181,12 @@ private:
     struct Node { Node* next; size_t length; };
     bool drop() {
         droppedCommands.fetch_add(1);
+        queueLossPending_.store(true);
         return false;
     }
+    void rearmWarnings() { lineWarned_.store(false); queueWarned_.store(false); }
     std::atomic<bool> lineWarned_{false}, queueWarned_{false};
+    std::atomic<bool> lineLossPending_{false}, queueLossPending_{false};
     mutable std::mutex mutex_;
     Node* head_ = nullptr;
     Node* tail_ = nullptr;

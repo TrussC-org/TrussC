@@ -286,7 +286,6 @@ struct ExitRequestEventArgs {
 // OS close request for one Window. Each listener gets a fresh payload.
 struct CloseRequestEventArgs {
     bool cancel = false;
-    std::string reason;
 };
 
 // D3D11 device loss. The reason contains GetDeviceRemovedReason HRESULT bits.

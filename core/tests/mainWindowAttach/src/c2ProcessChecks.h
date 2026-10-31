@@ -21,7 +21,7 @@ struct AppProbe : App {
         listeners.push_back(events().closeRequested.listen([this](CloseRequestEventArgs& e) {
             ++state.closes[id];
             check("close subscriber token", internal::currentAppOwner() == internal::appOwner(*this));
-            check("close starts fresh false", !e.cancel && e.reason.empty());
+            check("close starts fresh false", !e.cancel);
             e.cancel = state.unsaved[id];
         }));
         listeners.push_back(runtime().events().console.listen([this](ConsoleEventArgs&) {
@@ -135,14 +135,20 @@ void run() {
     enqueue(); internal::beforeHostTurn(); internal::afterHostTurn();
     check("console one surviving subscription with no draw", state.console[2] == 1 && state.console[0] == 0 && state.console[1] == 0 && unownedConsole == 1);
     auto veto = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) { e.cancel = true; });
-    check("last Window closes before process veto", osClose(a) && !a->isOpen());
-    check("process veto leaves zero Windows", !internal::dispatchExitRequested() && internal::resolveWindow() == nullptr);
+    state.order.clear();
+    check("last Window exit veto keeps Window open", !osClose(a) && a->isOpen() && state.order == "C");
+    a->close();
+    check("code last close veto keeps native Window open", a->isOpen() && !internal::WindowRequestAccess::closeRequested(*a));
+    // Test-only disposal exercises an empty Runtime; the public close was vetoed.
+    internal::WindowRequestAccess::teardown(*a);
+    check("empty fixture Runtime keeps servicing", internal::resolveWindow() == nullptr);
     runOnMainThread([&] { ++queueCalls; });
     enqueue(); internal::beforeHostTurn(); internal::afterHostTurn();
     check("Window0 queues and maintenance continue", queueCalls == 1 && maintenanceCalls == 2);
     check("Window0 console services and retired subscribers", unownedConsole == 2 && state.console[2] == 1);
     check("App exit once through sibling close and shutdown", state.exits[0] == 1 && state.exits[1] == 1 && state.exits[2] == 1);
     console::stop();
+    veto.disconnect();
     internal::shutdownRuntime(); internal::endFrameworkLifetime();
 
     // Both windows, both close-listener orders, later false, throw veto,
@@ -153,7 +159,7 @@ void run() {
         auto x = make(closeState, 0), y = make(closeState, 1);
         auto w = target ? y : x;
         closeState.unsaved[target] = true;
-        auto falseListener = w->events().closeRequested.listen([](CloseRequestEventArgs& e) { check("close false receives fresh payload", !e.cancel && e.reason.empty()); e.cancel = false; }, early ? -100 : 200);
+        auto falseListener = w->events().closeRequested.listen([](CloseRequestEventArgs& e) { check("close false receives fresh payload", !e.cancel); e.cancel = false; }, early ? -100 : 200);
         check("OS close veto on either Window in both orders", !osClose(w) && w->isOpen());
         closeState.unsaved[target] = false;
         auto throwListener = w->events().closeRequested.listen([](CloseRequestEventArgs&) { throw std::runtime_error("C2 close veto"); }, early ? -200 : 300);
@@ -166,13 +172,28 @@ void run() {
         const int before = closeState.closes[1-target];
         remaining->close();
         check("direct close bypasses closeRequested", osClose(remaining) && closeState.closes[1-target] == before);
-        check("last code close requests quit after actual closure", !remaining->isOpen() && internal::exitReason() == "last-window-close");
+        check("last code close requests normal process ending", !remaining->isOpen() && internal::exitReason() == "last-window-close");
         internal::shutdownRuntime(); internal::endFrameworkLifetime();
     }
     internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
     State optState; auto x = make(optState, 0), y = make(optState, 1);
     x->setQuitOnClose(true); internal::clearExitReason();
-    check("quitOnClose accepted close precedes request with sibling live", osClose(x) && !x->isOpen() && y->isOpen() && !internal::exitReason().empty());
+    optState.unsaved[1] = true;
+    check("quitOnClose exit veto keeps both Windows open", !osClose(x) && x->isOpen() && y->isOpen());
+    optState.unsaved[1] = false;
+    check("quitOnClose accepted requests common process ending", !osClose(x) && x->isOpen() && y->isOpen() && internal::exitReason() == "last-window-close");
+    internal::shutdownRuntime();
+    check("accepted process close ends both Apps once", !x->isOpen() && !y->isOpen() && optState.exits[0] == 1 && optState.exits[1] == 1);
+    internal::endFrameworkLifetime();
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+    // Classic unsaved single-window listener, without a closeRequested listener.
+    auto single = std::make_shared<Window>();
+    internal::WindowRequestAccess::bindForTests(*single, 901); internal::retainRuntimeWindow(single);
+    single->setApp<App>(); internal::applyPendingAppForTests(*single);
+    auto unsaved = single->events().exitRequested.listen([](ExitRequestEventArgs& e) { e.cancel = true; });
+    check("single-window exitRequested alone cancels OS close", !osClose(single) && single->isOpen());
+    unsaved.disconnect();
+    check("single-window accepted requests process ending", !osClose(single) && single->isOpen() && internal::exitReason() == "last-window-close");
     internal::shutdownRuntime(); internal::endFrameworkLifetime();
     internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
     State manualState; auto manualWindow = make(manualState, 0), sibling = make(manualState, 1);

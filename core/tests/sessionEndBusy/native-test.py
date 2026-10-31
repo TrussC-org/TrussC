@@ -16,6 +16,8 @@ code=r'''
 #include <unordered_map>
 #include <memory>
 #include <stdexcept>
+#include <thread>
+#include <functional>
 using HWND=void*;using UINT=unsigned;using WPARAM=unsigned;using LPARAM=long;using LRESULT=long;
 #define CALLBACK
 constexpr int WM_QUERYENDSESSION=1,WM_ENDSESSION=2,TRUE=1,FALSE=0,ERROR_CLASS_ALREADY_EXISTS=1410,WS_OVERLAPPED=0,CP_UTF8=65001;
@@ -65,9 +67,10 @@ code+='namespace trussc { class Runtime { public: void setLogoutTimeout(float); 
 code+=body(runtime,'void Runtime::setLogoutTimeout(float seconds) {')+'\n}\n'
 method=body(mac,'- (NSApplicationTerminateReply)applicationShouldTerminate:')
 method=method.replace('- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender','NSApplicationTerminateReply shouldTerminate(NSApplication* sender)')
-power=body(mac,'- (void)sessionWillPowerOff:').replace('- (void)sessionWillPowerOff:(NSNotification*)notification','void willPowerOff(NSNotification* notification)')
 launch=body(mac,'- (void)applicationDidFinishLaunching:')
-assert 'NSWorkspaceWillPowerOffNotification' in launch and '@selector(sessionWillPowerOff:)' in launch
+assert 'NSWorkspaceWillPowerOffNotification' in launch and 'queue:[NSOperationQueue mainQueue]' in launch
+begin=launch.index('usingBlock:^(NSNotification* notification) {')
+power=body(launch[begin:].replace('usingBlock:^(NSNotification* notification)', 'void willPowerOff(NSNotification* notification)',1),'void willPowerOff(')
 code+='struct NSNotification {};\n'+power+method+r'''
 int main() {
  trussc::Runtime config;
@@ -89,7 +92,12 @@ int main() {
  }
  reason=0x73687574;busy=false;allow=false;
  check("mac query veto cancels before commit",shouldTerminate(nullptr)==NSTerminateCancel);
- int beforePower=commits;try{willPowerOff(nullptr);}catch(int){}check("power-off notification commits without veto",commits==beforePower+1);
+ int beforePower=commits;
+ std::function<void()> onMain;
+ std::thread worker([&] { onMain=[] { willPowerOff(nullptr); }; });worker.join();
+ check("worker workspace post waits for main operation queue", commits==beforePower);
+ try { onMain(); } catch(int) {}
+ check("power-off notification commits on main without veto",commits==beforePower+1);
  reason=0;busy=true;allow=true;
  check("ordinary nested terminate deferred",shouldTerminate(nullptr)==NSTerminateCancel && _sapp_tc.terminate_pending && retired==0);
  busy=false;

@@ -353,10 +353,10 @@ static int runCycles(const std::string& guestPath, int port) {
         // App construction and its first update (setup(), then the audio
         // hooks) walk the hazardous surface: first-touch of the AudioEngine
         // singleton, listener registration on host-owned Events.
-        App* app = lib.create();
+        App* app = lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow()));
         if (!app || app->getWindow() != mainHandle || internal::currentWindow() != mainHandle ||
             internal::WindowRequestAccess::creationId(*mainHandle) != mainId || !internal::attachedApps().count(app))
-            return fail(69, "reload must use shared main Window attachment and retain identity");
+            return fail(69, "reload must use the explicit Window attachment and retain identity");
         if (!app) return fail(3, "create failed");
         // Node ids are unique per process: a new generation's nodes (its App
         // first) must not count from 0 again, as a Windows guest DLL's own
@@ -752,7 +752,7 @@ static int runCycles(const std::string& guestPath, int port) {
     {
         GuestLibrary lib;
         if (!lib.load(guestPath)) return 71;
-        auto* raw = static_cast<tcApp*>(lib.create());
+        auto* raw = static_cast<tcApp*>(lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow())));
         if (!raw) return 71;
         raw->cycleOnly = true;
         raw->handleUpdate(0, 0);
@@ -860,6 +860,7 @@ static int checkLoadFailuresLogged() {
 // per attempt, and leave the current guest intact. A child mode of this test
 // stands in for cmake and records whether the build command was reached.
 static int checkRebuildPreflight() {
+    internal::beginRuntimeRun();
     using trussc::hot_reload::Host;
     // The host normalizes candidates, so compare paths, not spellings.
     auto samePath = [](const std::string& a, const fs::path& b) {
@@ -906,14 +907,23 @@ static int checkRebuildPreflight() {
     errors.clear();
     Host initial;
     initial.coreLibPath = coreLib.string();
-    expect(!initial.init(), "initialized a stale host");
+    expect(!initial.init({}), "initialized a stale host");
     expect(errors.size() == 1 && errors[0] == staleMessage, "initial stale host logged duplicate Errors");
 
     auto retainedPreflightApp = internal::makeConstructedApp<App>();
     host.guest.app = retainedPreflightApp;
     App* runningApp = host.getApp();
     errors.clear();
-    expect(!host.reload() && host.getApp() == runningApp && host.reloadCount == 0,
+    host.initialized = true;
+    static Host* preflightPoll = nullptr; preflightPoll = &host;
+    auto requestAndPoll = [&] {
+        const bool accepted = host.reload();
+        internal::setHostReloadPoll(+[] { preflightPoll->poll(); });
+        internal::beforeHostTurn(); internal::afterHostTurn();
+        internal::setHostReloadPoll(nullptr);
+        return accepted;
+    };
+    expect(requestAndPoll() && host.getApp() == runningApp && host.reloadCount == 0,
            "failed reload replaced the running guest");
     expect(errors.size() == 1 && errors[0] == staleMessage, "reload logged duplicate Errors");
     expect(!fs::exists(configured / "build-command-reached"), "stale host launched the build command");
@@ -960,7 +970,7 @@ static int checkRebuildPreflight() {
     host.buildDir = configured.string();
     fs::remove(configured / "CMakeCache.txt");
     errors.clear();
-    expect(!host.reload() && host.getApp() == runningApp, "missing cache replaced running guest");
+    expect(requestAndPoll() && host.getApp() == runningApp, "missing cache replaced running guest");
     expect(errors.size() == 1 && errors[0].find(configured.string()) != std::string::npos &&
            errors[0].find(fallback.lexically_normal().string()) != std::string::npos,
            "missing cache reload did not re-scan and log one Error");
@@ -968,6 +978,7 @@ static int checkRebuildPreflight() {
     listener.disconnect();
     host.guest.app.reset();
     fs::remove_all(dir);
+    internal::shutdownRuntime();
     if (rc == 0) std::printf("hotReloadLifecycle: rebuild preflight ok\n");
     return rc;
 }
@@ -1296,7 +1307,7 @@ void recursiveRetirement() {
     trussc::hot_reload::GuestLibrary lib;
     lib.createApp = createGuestApp;
     lib.destroyApp = destroyGuestApp;
-    lib.create();
+    lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow()));
     // Model registration performed in the guest App's callback. The host
     // no longer leaves constructor attribution selected after create returns.
     auto callbackScope = std::make_unique<internal::AppOwnerScope>(
@@ -1330,7 +1341,7 @@ void recursiveStatusRetirement() {
     trussc::hot_reload::GuestLibrary lib;
     lib.createApp = createGuestApp;
     lib.destroyApp = destroyGuestApp;
-    lib.create();
+    lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow()));
     // Model registration performed in the guest App's callback. The host
     // no longer leaves constructor attribution selected after create returns.
     auto callbackScope = std::make_unique<internal::AppOwnerScope>(
@@ -1374,7 +1385,7 @@ void lateRegistration() {
     trussc::hot_reload::GuestLibrary lib;
     lib.createApp = createGuestWithValue;
     lib.destroyApp = destroyGuestWithValue;
-    auto* app = static_cast<GuestWithValue*>(lib.create());
+    auto* app = static_cast<GuestWithValue*>(lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow())));
     // Model registration performed in the guest App's callback. The host
     // no longer leaves constructor attribution selected after create returns.
     auto callbackScope = std::make_unique<internal::AppOwnerScope>(
@@ -1450,7 +1461,7 @@ void lateFeedback() {
     trussc::hot_reload::GuestLibrary lib;
     lib.createApp = createGuestWithValue;
     lib.destroyApp = destroyGuestWithValue;
-    auto* app = static_cast<GuestWithValue*>(lib.create());
+    auto* app = static_cast<GuestWithValue*>(lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow())));
     // Model registration performed in the guest App's callback. The host
     // no longer leaves constructor attribution selected after create returns.
     auto callbackScope = std::make_unique<internal::AppOwnerScope>(
@@ -1479,7 +1490,7 @@ void retainedAppRetirement() {
     trussc::hot_reload::GuestLibrary lib;
     lib.createApp = createGuestApp;
     lib.destroyApp = destroyGuestApp;
-    lib.create();
+    lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow()));
     // Model registration performed in the guest App's callback. The host
     // no longer leaves constructor attribution selected after create returns.
     auto callbackScope = std::make_unique<internal::AppOwnerScope>(
@@ -1514,7 +1525,7 @@ void replacementKeepsRegistrations() {
     trussc::hot_reload::GuestLibrary lib;
     lib.createApp = createGuestApp;
     lib.destroyApp = destroyGuestApp;
-    lib.create();
+    lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow()));
     // Model registration performed in the guest App's callback. The host
     // no longer leaves constructor attribution selected after create returns.
     auto callbackScope = std::make_unique<internal::AppOwnerScope>(
@@ -1535,7 +1546,7 @@ void replacementKeepsRegistrations() {
     }
     lib.destroy();
     callbackScope.reset();
-    check("unload removes the whole generation", !mcp::hasTool("life_new_tool") &&
+    check("replacement registrations retire at unload", !mcp::hasTool("life_new_tool") &&
           !mcp::hasTool("life_old_tool") && !hasStatusNamed("life_new_status"));
     internal::shutdownRuntime();
 }
@@ -1589,7 +1600,7 @@ void reloadResize() {
     internal::windowApiContext().fbWidth = 128; internal::windowApiContext().fbHeight = 96;
     lib.createApp = createResizeApp;
     lib.destroyApp = destroyResizeApp;
-    lib.create();  // the reload attaches the new guest App, then seeds its size
+    lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow()));  // the reload attaches the new guest App, then seeds its size
     { internal::WindowEntryScope boundary(*internal::resolveWindow()); }
     check("reload seed: callback ran once with the receiver intact", callbackSwaps == 1 && marker == 123);
     check("reload seed: dispatch active, reload defers", dispatchActiveInResize);
@@ -1621,8 +1632,18 @@ int run(const std::string& only = "") {
 
 } // namespace lifetime
 
+#include "c4Checks.h"
+
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    // Deliberately invalid guest images must fail without a system dialog in tests.
+    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+#endif
+    if (argc > 1 && std::string(argv[1]) == "--c4-checks") return c4::run();
+    if (argc > 1 && std::string(argv[1]) == "--c4-forced") return c4::forced();
     if (argc > 2 && std::string(argv[1]) == "--build") {
+        std::ofstream args(fs::path(argv[2]) / "build-command-argv");
+        for (int i = 1; i < argc; ++i) args << argv[i] << '\n';
         std::ofstream(fs::path(argv[2]) / "build-command-reached") << "mock cmake build\n";
         return 0;
     }
@@ -1647,7 +1668,7 @@ int main(int argc, char** argv) {
         internal::WindowRequestAccess::bindForTests(*launchWindow, 101);
         trussc::hot_reload::GuestLibrary lib;
         if (!lib.load(findGuestLibrary())) return 72;
-        auto* app = static_cast<tcApp*>(lib.create());
+        auto* app = static_cast<tcApp*>(lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow())));
         if (!app) return 72;
         app->cycleOnly = true;
         app->unloadProbe = &probe;

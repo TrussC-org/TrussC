@@ -64,6 +64,7 @@ using Clock = std::chrono::steady_clock;
 // Function pointer types for Guest exports
 using CreateAppFn  = App* (*)();
 using DestroyAppFn = void (*)(App*);
+using SourceFn = void (*)(const char**, const char**);
 
 // ---------------------------------------------------------------------------
 // Guest library manager
@@ -91,6 +92,7 @@ struct GuestLibrary {
 #endif
     }
     bool load(const string& path) {
+        if (internal::sessionEndExit() || !isMainThread()) return false;
         // Always load from a unique temp path. Without this, the OS dynamic
         // loader deduplicates by pathname/inode and may return the already-
         // loaded handle on subsequent dlopen() calls:
@@ -144,10 +146,19 @@ struct GuestLibrary {
             return false;
         }
 #endif
+#ifdef _WIN32
+        auto source = (SourceFn)GetProcAddress(handle, "tcHotReloadSource");
+#else
+        auto source = (SourceFn)dlsym(handle, "tcHotReloadSource");
+#endif
+        const char* type = "<type>";
+        const char* file = "<file>";
+        if (source) source(&type, &file);
         internal::refreshCrashModules();
         loadedPath = tempPath;
         try {
             codeOwner = internal::nextAppGeneration();
+            mcpOwner = codeOwner;
             internal::registerGuestCode(codeOwner, handle, closeLibrary, reinterpret_cast<const void*>(createApp));
             code = internal::retainGuestCodeFor(reinterpret_cast<const void*>(createApp));
         } catch (...) {
@@ -155,23 +166,16 @@ struct GuestLibrary {
             try { fs::remove(loadedPath); } catch (...) {}
             throw;
         }
+        internal::setHotReloadSource(type, file);
         return true;
     }
 
-    std::weak_ptr<Window> targetWindow;
-    bool targetAssigned = false;
-    App* create() {
+    App* create(const std::shared_ptr<Window>& target) {
+        if (internal::sessionEndExit() || !isMainThread()) return nullptr;
         if (createApp) {
-            if (!targetAssigned) {
-                auto* context = internal::currentWindowCtx();
-                auto* selected = context && context->hostWindow ? context->hostWindow : internal::resolveWindow();
-                if (selected) targetWindow = internal::WindowRequestAccess::retainHostOwner(*selected);
-                targetAssigned = true;
-            }
-            auto target = targetWindow.lock();
-            if (!target || !target->isOpen()) return nullptr;
+            if (!target || !target->isOpen() || internal::WindowRequestAccess::closeRequested(*target)) return nullptr;
             App* raw = nullptr;
-            mcpOwner = internal::nextAppGeneration();
+            if (!mcpOwner) mcpOwner = codeOwner ? codeOwner : internal::nextAppGeneration();
 
             internal::AppConstructionTicket ticket;
             ticket.registrationOwner = mcpOwner;
@@ -184,7 +188,7 @@ struct GuestLibrary {
             }
             if (!raw) return nullptr;
             auto candidate = internal::adoptConstructedApp(raw, destroyApp);
-            if (target && target->isOpen()) internal::attachCandidate(*target, candidate);
+            if (target->isOpen() && !internal::WindowRequestAccess::closeRequested(*target)) internal::attachCandidate(*target, candidate);
             if (!target || target->getApp() != candidate) {
                 // Constructor registrations must not outlive a refused candidate.
                 internal::retireAppOwner(ticket.owner);
@@ -197,7 +201,7 @@ struct GuestLibrary {
     }
 
     void destroy() {
-        internal::retireAppGeneration(mcpOwner);
+        internal::retireAppGeneration(codeOwner ? codeOwner : mcpOwner);
         mcpOwner = nullptr;
         if (auto live = app.lock()) {
             if (auto* window = live->getWindow()) {
@@ -209,21 +213,22 @@ struct GuestLibrary {
     }
 
     void unload() {
-        // Notification failures cannot skip cohort ending or code retirement.
+        // Notification failures cannot skip App ending or code retirement.
         internal::TeardownSteps steps;
         if (handle || !app.expired()) {
+            // App-owned threads, timers and async work must be stopped in hotReloadUnload; reload does not guard them.
             internal::dispatchHotReloadUnload(mcpOwner);
         }
         destroy();
-        // Retirement cancels callbacks now. Retained snapshots and App handles
-        // pin the library until their guest destructors have returned; the host
-        // maintenance boundary then physically unloads it without allocating.
+        // Retire callbacks and registrations now; modules remain pinned for the
+        // process lifetime, including after the last retained control block.
         if (handle) {
+            internal::setHotReloadSource(nullptr, nullptr);
             handle = nullptr;
 #ifndef _WIN32
             // POSIX: unlinking the mapped temp copy is safe (drops the
             // directory entry only). Windows can't delete a loaded DLL, so
-            // temp copies remain until the next run cleans them up.
+            // temp copies remain for the process lifetime.
             try { fs::remove(loadedPath); } catch (...) {}
 #endif
         }
@@ -431,7 +436,10 @@ struct Host {
         return reportMissingBuildDirectory();
     }
 
-    bool init() {
+    std::weak_ptr<Window> targetWindow;
+    bool init(const std::shared_ptr<Window>& target) {
+        if (internal::sessionEndExit() || !isMainThread()) return false;
+        targetWindow = target;
         // Detect project directory from the executable's location
         // The Host EXE is at bin/<AppName>.app/Contents/MacOS/<AppName> (macOS)
         // or bin/<AppName> (Linux)
@@ -470,7 +478,7 @@ struct Host {
             logError("HotReload") << "Failed to load Guest library";
             return false;
         }
-        if (!guest.create()) {
+        if (!guest.create(target)) {
             logError("HotReload") << "Failed to create initial App instance";
             return false;
         }
@@ -486,6 +494,7 @@ struct Host {
     }
 
     bool rebuildGuest() {
+        if (internal::sessionEndExit() || !isMainThread()) return false;
         rebuildBlocked = false;
         // Missing/unreadable paths cannot establish staleness; keep rebuilding.
         std::error_code ec;
@@ -527,13 +536,12 @@ struct Host {
 
     bool reloadRequested = false;
     bool reload() {
-        if (internal::hostCallbacksActive()) {
-            reloadRequested = true;
-            return true; // accepted; the next host boundary performs the reload
-        }
-        return reloadNow();
+        if (!isMainThread() || internal::sessionEndExit() || internal::runtimeEnding()) return false;
+        reloadRequested = true;
+        return true;
     }
 
+private:
     bool reloadNow() {
         // IMPORTANT: rebuild BEFORE unloading the old Guest. On macOS/Linux,
         // overwriting a loaded dylib is safe (the old inode stays in memory).
@@ -547,17 +555,17 @@ struct Host {
         }
         auto tBuildDone = Clock::now();
 
-        // Build succeeded — now swap: destroy old App, unload old library,
-        // load the new one.
+        if (internal::sessionEndExit()) return false;
+        auto window = targetWindow.lock();
         guest.unload();
+        if (internal::sessionEndExit()) return false;
 
         if (!guest.load(guestLibPath)) {
             logError() << "[HotReload] Failed to load rebuilt library";
             return false;
         }
 
-        App* newApp = guest.create();
-        if (!newApp) {
+        if (window && window->isOpen() && !internal::WindowRequestAccess::closeRequested(*window) && !guest.create(window)) {
             logError() << "[HotReload] Failed to create App instance";
             return false;
         }
@@ -580,9 +588,12 @@ struct Host {
         return true;
     }
 
-    // Called from the update loop — checks for file changes periodically
+public:
+    // Called from the outer main-loop turn — checks for file changes periodically
     void poll() {
-        if (!initialized) return;
+        if (!isMainThread()) return;
+        if (internal::sessionEndExit() || internal::runtimeEnding()) return;
+        if (!initialized || !internal::reloadSafePoint()) return;
         if (reloadRequested) {
             reloadRequested = false;
             reloadNow();
@@ -625,8 +636,10 @@ inline int runHotReloadApp(const WindowSettings& settings) {
     // before sapp_run. So we defer Guest loading to the setup callback.
 
     // Set up callbacks that go through the Host's dynamically loaded App
+    auto window = internal::prepareLaunchWindow(settings);
+    g_host.targetWindow = window;
     internal::appSetupFunc = []() {
-        if (!g_host.init()) {
+        if (!g_host.init(g_host.targetWindow.lock())) {
             if (!g_host.rebuildBlocked) logError() << "[HotReload] Host initialization failed. Exiting.";
             sapp_quit();
             return;
@@ -641,9 +654,6 @@ inline int runHotReloadApp(const WindowSettings& settings) {
         internal::shutdownRuntime();
         g_host.guest.unload();
     };
-    auto window = internal::prepareLaunchWindow(settings);
-    g_host.guest.targetWindow = window;
-    g_host.guest.targetAssigned = true;
 
     // Build the sokol descriptor (without template — we handle App* manually)
     internal::pixelPerfectMode() = settings.pixelPerfect;

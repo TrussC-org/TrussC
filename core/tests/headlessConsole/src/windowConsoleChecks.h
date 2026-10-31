@@ -1,4 +1,4 @@
-// Real native host: console before draw, after first close, and at Window0.
+// Real native host: console before draw, after first close, and after a last-close veto.
 namespace c2WindowConsole {
 #ifndef __EMSCRIPTEN__
 std::shared_ptr<Window> first, second;
@@ -9,7 +9,7 @@ void send(const char* text) {
     console::internal::getChannel().send(console::internal::parseLine(text));
 }
 void sendAfterClose(std::shared_ptr<Window> window, const char* line, bool waitForVeto = false) {
-    if (window->isOpen() || (waitForVeto && vetoes == 0)) {
+    if (waitForVeto ? vetoes == 0 : window->isOpen()) {
         internal::mainThreadQueue().send([window = std::move(window), line, waitForVeto] { sendAfterClose(window, line, waitForVeto); });
         return;
     }
@@ -23,8 +23,12 @@ struct Later : App {
         input = runtime().events().console.listen([this](ConsoleEventArgs& e) {
             check(internal::currentAppOwner() == internal::appOwner(*this), "native sibling console uses subscriber owner");
             ++secondConsole;
+            if (e.raw == "after-close-veto") {
+                check(second->isOpen(), "native cancelled code close keeps last Window");
+                return;
+            }
             check(e.raw == "after-first-close" && !first->isOpen(), "native console after first closure");
-            getWindow()->close();
+            getWindow()->close(); // Last-window process veto leaves this Window open.
         });
         closeQuery = events().closeRequested.listen([](CloseRequestEventArgs&) { check(false, "native code close bypasses query on sibling"); });
     }
@@ -58,10 +62,10 @@ int run() {
     if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: windowed console needs desktop secondary windows"); return 0; }
     auto quit = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) {
         if (!readyToQuit) { e.cancel = true; ++vetoes; return; }
-        check(phase == 3 && firstConsole == 1 && secondConsole == 1 && globalConsole == 3,
+        check(phase == 3 && firstConsole == 1 && secondConsole == 2 && globalConsole == 3,
               "native Runtime console has no duplicated App fanout");
-        check(exits == 2 && vetoes == 1 && firstDraws == 0,
-              "native Window0 services after one process veto and exact-once ending");
+        check(exits == 1 && vetoes == 1 && firstDraws == 0,
+              "native console after one code-close veto and first App ending");
         if (failures) internal::appExitCode() = 1;
     });
     auto input = runtime().events().console.listen([](ConsoleEventArgs& e) {
@@ -72,12 +76,11 @@ int run() {
             internal::mainThreadQueue().send([] { sendAfterClose(first, "after-first-close"); });
         } else if (e.raw == "after-first-close") {
             ++phase;
-            internal::mainThreadQueue().send([] { sendAfterClose(second, "zero-windows", true); });
+            internal::mainThreadQueue().send([] { sendAfterClose(second, "after-close-veto", true); });
         } else {
             ++phase;
-            check(e.raw == "zero-windows" && !internal::resolveWindow(), "native console and queues progress with zero Windows");
-            // The close request is vetoed at the end of the previous host turn.
-            check(vetoes == 1, "native last-window process quit was vetoed");
+            check(e.raw == "after-close-veto" && second->isOpen(), "native console and queues progress after last-close veto");
+            check(vetoes == 1, "native code-close process quit was vetoed once");
             readyToQuit = true;
             exitApp();
         }

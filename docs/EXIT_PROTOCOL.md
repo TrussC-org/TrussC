@@ -1,10 +1,16 @@
 # Windowed app exit protocol
 
-OS close asks the addressed Window's closeRequested. After closure, quitOnClose
-or the last Window requests normal process quit. Runtime dispatches
+OS close asks the addressed Window's closeRequested. If accepted, quitOnClose
+or the last open Window asks process exitRequested before any Window closes.
+Either veto keeps every Window open; acceptance uses common process ending. Runtime dispatches
 exitRequested first to its own listeners and then to attached Apps in reverse
 attachment order, ORing vetoes and retaining the first nonempty explanation.
-Code close and process shutdown bypass closeRequested.
+Code Window::close() skips closeRequested. For the last open Window or
+setQuitOnClose(true), Runtime asks exitRequested once before anything closes.
+Any veto keeps all Windows open; acceptance uses normal process ending.
+A non-last plain code close closes only that Window without events.
+Each close() is decided when it is called; a later exitRequested veto does not undo an earlier close() from the same frame.
+Process shutdown bypasses closeRequested.
 
 OS session query and commit belong to Runtime. Windows receives
 WM_QUERYENDSESSION/WM_ENDSESSION on its own hidden top-level control HWND;
@@ -14,7 +20,7 @@ busy query accepts without reentering user callbacks. WM_ENDSESSION(FALSE)
 resolves the query without ending the Runtime. A committed session end, including
 ENDSESSION_CLOSEAPP, bypasses veto. macOS applicationShouldTerminate forwards
 logout/restart/shutdown Apple-event reasons through the same query/commit;
-NSWorkspaceWillPowerOff commits directly. Ordinary Cmd+Q remains deferred and
+NSWorkspaceWillPowerOff commits on the main operation queue. Ordinary Cmd+Q remains deferred and
 vetoable at the existing safe boundary.
 
 Before OS-session exits, Runtime freezes new admission and arms one process-wide

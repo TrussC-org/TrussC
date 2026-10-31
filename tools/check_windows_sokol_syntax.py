@@ -6,6 +6,7 @@ On Linux, set TC_WINDOWS_SYNTAX_SDK to a MinGW prefix containing usr/, or pass
   apt-get download mingw-w64-common mingw-w64-x86-64-dev g++-mingw-w64-x86-64-posix
   for package in *.deb; do dpkg-deb -x "$package" sdk; done
   export TC_WINDOWS_SYNTAX_SDK="$PWD/sdk"
+Missing SDK configuration/headers: explicit SKIP, exit status 0.
 Optional local check only; CI must not depend on this SDK.
 Requires clang++ with the x86_64 Windows target; never links or executes Windows code.
 """

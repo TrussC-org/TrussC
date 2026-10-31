@@ -46,7 +46,11 @@ int main(int argc, char** argv) {
         storageVoid = &zero; storageTyped = &typed;
         storageCalls = storageDrops = storageExits = storageCleanups = 0;
         for (auto& id : storageEndingOrder) id = 0;
-        void* handle = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+        const auto copy = std::filesystem::path(std::string(argv[1]) + "." +
+            std::to_string(runtimeStop) + "." + std::to_string(oom));
+        std::filesystem::copy_file(argv[1], copy, std::filesystem::copy_options::overwrite_existing);
+        void* handle = dlopen(copy.c_str(), RTLD_NOW | RTLD_LOCAL);
+        std::filesystem::remove(copy);
         check("real guest loads", handle != nullptr);
         if (!handle) { std::puts(dlerror()); return 2; }
         auto create = reinterpret_cast<App* (*)()>(dlsym(handle, "storageCreate"));
@@ -134,8 +138,8 @@ int main(int argc, char** argv) {
         internal::drainMainThreadQueue();
         check("retired queued guest never runs and capture destruction finishes while pinned", storageCalls == 0 && storageDrops == 4 && unloads == before);
         internal::drainGuestCode();
-        check("final queue storage release physically unloads once", unloads == before + 1);
-        // Rebuild and notify after dlclose, catching lingering guest managers.
+        check("retired module stays pinned after final storage release", unloads == before);
+        // Rebuild and notify after logical retirement, while the image stays pinned.
         auto a = zero.listen([] {}); auto b = typed.listen([](int&) {});
         zero.notify(); typed.notify(value);
         internal::shutdownRuntime();

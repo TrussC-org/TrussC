@@ -44,6 +44,7 @@ public:
         prev_ = ImGui::GetCurrentContext();
         ctx_ = ImGui::CreateContext();
         ImGui::SetCurrentContext(ctx_);
+        tcx::imgui::setContextOwner(ctx_, &tc::internal::currentWindowContext());
         ImGuiIO& io = ImGui::GetIO();
         io.DisplaySize = ImVec2(1024, 768);
         io.DeltaTime = 1.0f / 60.0f;

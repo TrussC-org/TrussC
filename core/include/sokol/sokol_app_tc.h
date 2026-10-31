@@ -4270,17 +4270,18 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 }
 
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
+@property(nonatomic, strong) id sessionPowerOffObserver;
 @end
 
 @implementation _sapp_tc_app_delegate
-- (void)sessionWillPowerOff:(NSNotification*)notification {
-    (void)notification;
-    trussc::internal::commitSessionEnd();
-}
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
     (void)n;
-    [[[NSWorkspace sharedWorkspace] notificationCenter] addObserver:self
-        selector:@selector(sessionWillPowerOff:) name:NSWorkspaceWillPowerOffNotification object:nil];
+    self.sessionPowerOffObserver = [[[NSWorkspace sharedWorkspace] notificationCenter]
+        addObserverForName:NSWorkspaceWillPowerOffNotification object:nil queue:[NSOperationQueue mainQueue]
+        usingBlock:^(NSNotification* notification) {
+            (void)notification;
+            trussc::internal::commitSessionEnd();
+        }];
     /* activation policy must be set before window creation (sokol #1500) */
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     _sapp_tc_init_cursors();
@@ -4342,6 +4343,8 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
         }
         _sapp_tc_mac_session_end(quit_reason);
     }
+    // [TrussC] Any other quit (Cmd+Q, the Dock's Quit, an AppleScript quit)
+    // carries no session reason: app-quit, unless an earlier request set one.
     trussc::internal::setExitReasonIfEmpty("app-quit");
     if (_sapp_tc_mac_busy()) {
         // A session end is not asked and not cancelled (as Win32 WM_ENDSESSION).
@@ -4362,7 +4365,8 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 }
 - (void)applicationWillTerminate:(NSNotification*)n {
     (void)n;
-    [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self];
+    [[[NSWorkspace sharedWorkspace] notificationCenter] removeObserver:self.sessionPowerOffObserver];
+    self.sessionPowerOffObserver = nil;
     _sapp_tc.pending_key_count = 0;
     for (auto& key : _sapp_tc.pending_keys) key = {};
     _sapp_tc.visibility_pending = false;

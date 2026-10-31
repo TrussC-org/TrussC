@@ -1123,7 +1123,6 @@ struct Cover_ClipboardPastedEventArgs : af::Scope<ClipboardPastedEventArgs> {
 struct Cover_CloseRequestEventArgs : af::Scope<CloseRequestEventArgs> {
     static void run() {
         (void)af::val<CloseRequestEventArgs>().cancel;
-        (void)af::val<CloseRequestEventArgs>().reason;
     }
 };
 

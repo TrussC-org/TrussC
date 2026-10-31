@@ -38,6 +38,7 @@ void tcApp::draw() {
 }
 
 void tcApp::exit() {
+    if (c4ExitRequest) c4ExitRequest();
     if (unloadProbe) ++unloadProbe->exits;
     imguiShutdown();
 }
@@ -149,4 +150,9 @@ std::shared_ptr<Node> tcApp::addGuestChild() {
     auto node = std::make_shared<RectNode>();
     addChild(node);
     return node;
+}
+
+// C4: the running guest can request the next poll from its ending callback.
+_TC_EXPORT void tcC4ExitRequest(tc::App* app, void (*request)()) {
+    static_cast<tcApp*>(app)->c4ExitRequest = request;
 }

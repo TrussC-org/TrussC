@@ -96,6 +96,9 @@ struct UnloadProbe {
 class tcApp : public App {
 public:
     tcApp() {
+        // Own-binary fixture: invoke a host callback from each newly loaded constructor.
+        if (const char* address = std::getenv("TC_C4_CONSTRUCTOR_REQUEST"))
+            reinterpret_cast<void (*)()>(static_cast<uintptr_t>(std::strtoull(address, nullptr, 10)))();
         for (auto* event : {&events().update, &events().draw}) {
             frameTieListeners_.push_back(event->listen([this] {
                 if (frameOrder) *frameOrder += 'l';
@@ -146,6 +149,7 @@ public:
     void touchReleased(const TouchEventArgs&) override { ++touchReleases; }
     void setup() override;
     void draw() override;
+    void (*c4ExitRequest)() = nullptr; // own-binary successful-reload ending seam
     void exit() override;
     void cleanup() override;
 

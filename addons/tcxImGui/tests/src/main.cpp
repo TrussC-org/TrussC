@@ -1,6 +1,7 @@
 #include "../../../../core/tests/common/tcTestFailure.h"
+#include "../../../../core/tests/common/tcWindowTest.h"
 // =============================================================================
-// tcxImGui tests - headless behavioral test (no window, no GPU).
+// tcxImGui tests - CPU behavioral test (addressed Window, no native window/GPU).
 //
 // Built and run by CI on every push/PR across macOS / Windows / Linux via
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
@@ -1426,6 +1427,7 @@ static void testLocalImports() {
 }
 
 int main() {
+    tcCoreTest::WindowFixture receiver;
     testLocalImports();
     testToolLevels();
     tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
