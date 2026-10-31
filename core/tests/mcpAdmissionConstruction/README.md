@@ -9,7 +9,12 @@ Temporary PNG files are removed after the test.
 
 Follow-up regressions fail each deferred partition reserve before any entries
 move, retain pending producers/promises, retry, and assert numeric/string IDs on
-allocation errors. Linux malloc wrappers fail filtered-pixel, line-storage and final-PNG allocations;
+allocation errors. Linux malloc wrappers select filtered-pixel and line-storage
+allocations by size, and the final PNG buffer by its calibrated encoded size for
+the same fixed input. A successful probe must match each size exactly once before
+failure injection is armed, and each injected failure must be consumed. This
+avoids compiler-dependent malloc indices (including optimized realloc(NULL) calls).
+The pixel/JSON/deferred C++ allocation probes are unchanged;
 operator new fails the C++ output copy after encoding. Compressor-internal growth
 failures are excluded because stb_image_write can abort there under real memory
 exhaustion. Its final-buffer failure also leaks the compressed temporary upstream.
