@@ -234,6 +234,33 @@ The existing screen blend-after-Fbo behavior, offscreen premult handling and GPU
 transform/size corrections remain for PR 4. Repeating `setBlendMode` explicitly selects
 that blend pipeline, even when the logical value already matches.
 
+## Default listener priority on App events is now 0
+
+On the events an App also receives (update, draw, exit, key, mouse, touch,
+windowResized and so on), `listen()` without a priority now registers at
+`EventPriority::BeforeApp` (`0`) instead of `100`. Other events still default
+to `100`.
+
+- A default listener ties with an explicit `0` and runs in registration order.
+  A default `a` registered before an explicit-0 `b` now runs `a`, then `b`
+  (before: `b`, then `a`).
+- Default listeners now run before explicit `1`–`99` (before: after them) and
+  before explicit `100` (before: same priority, mixed by registration order).
+- So a default listener that sets `e.consumed = true` now stops even an
+  explicit-100 listener that was registered earlier.
+
+Check listeners whose order matters, and give them an explicit priority:
+
+```cpp
+overlayListener = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 50);
+pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ });
+// Before (v0.7): pickListener had priority 100, so it ran after overlayListener.
+// After (v0.8):  pickListener has priority 0, so it now runs first.
+
+// To keep it after overlayListener, give it a priority above 50:
+pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 60);
+```
+
 ## Process events and closing a Window
 
 App code uses `events()`; non-App code (addons, app-wide handling) uses

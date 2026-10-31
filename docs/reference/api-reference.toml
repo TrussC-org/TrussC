@@ -5188,7 +5188,7 @@ description.ko = "프레임워크의 수명 주기, 렌더링 및 입력 이벤�
 details.en = '''
 - App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
 - Lifecycle fan-out retains exitRequested/deviceLost/hotReloadUnload; console belongs only to RuntimeEvents. Window exit means actual closure, not App replacement.
-- On events the App receives, listen() defaults to BeforeApp; other events keep 100. This covers update, draw, exit, key, mouse, touch, windowResized, and filesDropped; setup is unchanged.
+- On events the App receives, listen() defaults to BeforeApp; other events default to 100. This covers update, draw, exit, key, mouse, touch, windowResized, and filesDropped; setup is unchanged.
 - Each member is an `Event<T>` or `Event<void>`; see `Event<T>` for `listen()`, listener lifetime, priorities, and delivery threads.
 - Framework notifications run on the main thread. Headless runs do not generate native window/input events or rendering events.
 '''
@@ -5202,7 +5202,7 @@ details.ja = '''
 details.ko = '''
 - App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
 - exitRequested/deviceLost/hotReloadUnload는 App에도 유지하고 console은 RuntimeEvents 전용입니다. Window exit은 실제 닫기이며 App 교체가 아닙니다.
-- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다. update, draw, exit, 키, 마우스, 터치, windowResized, filesDropped가 해당하며 setup은 변경하지 않습니다.
+- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트에서는 100입니다. update, draw, exit, 키, 마우스, 터치, windowResized, filesDropped가 해당하며 setup은 변경하지 않습니다.
 - 각 멤버는 `Event<T>` 또는 `Event<void>`입니다. `listen()`, 리스너 수명, 우선순위 및 호출 스레드는 `Event<T>`를 참조하세요.
 - 프레임워크의 알림은 메인 스레드에서 전달합니다. 헤드리스 실행에서는 네이티브 윈도우 및 입력 이벤트와 렌더링 이벤트가 발생하지 않습니다.
 '''
@@ -7557,15 +7557,13 @@ description.en = "Registers an event listener and returns its connection token."
 description.ja = "イベントリスナーを登録し、接続トークンを返す。"
 description.ko = "이벤트 리스너를 등록하고 연결 토큰을 반환한다."
 details.en = '''
-- On App-facing events, the default changes from `100` to `0`. An omitted priority now ties with explicit `0` in registration order: default `a` registered before explicit-0 `b` runs `ab` (previously `ba`). Defaults now precede explicit `1–99` (previously followed them) and explicit `100` (previously tied and interleaved by registration). A consuming default listener therefore pre-empts even an explicit-100 listener registered earlier.
-- On events the App receives, listen() defaults to BeforeApp; other events keep 100.
+- On events the App receives, listen() defaults to BeforeApp; other events default to 100.
 - Use `listen(callback)` or `listen(object, &Class::method)`; callbacks receive `T&`, or no arguments for `Event<void>`.
 - Omitted priority uses the event instance’s default (generic and audio events: `100`); smaller values run first, and equal priorities preserve registration order.
 - Use `listen(callback, Deliver::Main, priority)` to request main-thread delivery. For delivery rules, the non-copyable argument fallback, and storing the returned `EventListener`, see `Event<T>`.
 - Overloads that take an `EventListener&` as the first argument are deprecated.
 '''
 details.ja = '''
-- App 向けイベントの既定値は `100` から `0` に変わります。省略時は明示的な `0` と同順位になり、登録順に呼ばれます。既定の `a` を明示的な 0 の `b` より先に登録すると `ab` です（従来は `ba`）。既定のリスナーは明示的な `1–99`（従来はその後）と `100`（従来は同順位で登録順に混在）より先に呼ばれます。このため、既定のリスナーがイベントを消費すると、先に登録された明示的な 100 のリスナーにも届きません。
 - App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。
 - `listen(callback)` または `listen(object, &Class::method)` で登録します。コールバックは `T&` を受け取り、`Event<void>` では引数を取りません。
 - 優先度を省略すると、そのイベントの既定値（汎用イベントと音声イベントでは `100`）を使います。小さい値から呼ばれ、同じ値では登録順になります。
@@ -7573,8 +7571,7 @@ details.ja = '''
 - 第1引数に `EventListener&` を取るオーバーロードは非推奨です。
 '''
 details.ko = '''
-- App 대상 이벤트의 기본값은 `100`에서 `0`으로 바뀝니다. 우선순위를 생략하면 명시적 `0`과 같은 우선순위로 등록 순서에 따라 실행됩니다. 기본값 `a`를 명시적 0인 `b`보다 먼저 등록하면 `ab`입니다(이전에는 `ba`). 기본 리스너는 명시적 `1–99`(이전에는 그 뒤) 및 `100`(이전에는 같은 우선순위로 등록 순서에 따라 섞임)보다 먼저 실행됩니다. 따라서 기본 리스너가 이벤트를 소비하면 먼저 등록된 명시적 100 리스너도 실행되지 않습니다.
-- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다.
+- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트에서는 100입니다.
 - `listen(callback)` 또는 `listen(object, &Class::method)`로 등록합니다. 콜백은 `T&`를 받으며, `Event<void>`에서는 인자를 받지 않습니다.
 - 우선순위를 생략하면 해당 이벤트의 기본값(일반 이벤트와 오디오 이벤트는 `100`)을 사용합니다. 작은 값부터 호출하며, 같은 값에서는 등록 순서를 유지합니다.
 - 메인 스레드 호출을 지정하려면 `listen(callback, Deliver::Main, priority)`를 사용합니다. 호출 스레드 규칙, 복사할 수 없는 인자의 처리, 반환된 `EventListener`의 보관은 `Event<T>`를 참조하세요.
@@ -7642,7 +7639,7 @@ description.ja = "共通の引数型を持つ通知にリスナーを登録す�
 description.ko = "공통 인자 타입을 사용하는 알림에 리스너를 등록한다."
 details.en = '''
 - `Event()` defaults to `100`; `Event(defaultPriority)` sets an immutable per-instance integer default for all omitted-priority overloads. Every explicitly supplied integer stays explicit, including `0`, negative values and integer extremes.
-- On events the App receives, listen() defaults to BeforeApp; other events keep 100.
+- On events the App receives, listen() defaults to BeforeApp; other events default to 100.
 - Register a callback with `listen(callback)` or a member function with `listen(object, &Class::method)`; callbacks receive `T&`. `notify(arg)` passes the same argument by reference to listeners, so they can modify it. `Event<void>` uses callbacks and `notify()` without arguments.
 - Keep the returned `EventListener` as a member, such as `EventListener listener;`, and assign the result to it. Destroying or reassigning the token disconnects its previous listener automatically; discarding the returned token disconnects immediately.
 - Omitted priority uses the event instance’s default (generic and audio events: `100`). Use `listen(callback, priority)` or `listen(callback, Deliver::Main, priority)`; see `EventPriority::BeforeApp` for priority values, listener order, and `consumed`.
@@ -7676,7 +7673,7 @@ details.ja = '''
 '''
 details.ko = '''
 - `Event()`의 기본 우선순위는 `100`입니다. `Event(defaultPriority)`는 우선순위를 생략하는 모든 형식에 사용할 인스턴스별 불변 정수 기본값을 설정합니다. `0`, 음수, 정수 극값을 포함한 명시적 정수는 그대로 사용합니다.
-- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다.
+- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트에서는 100입니다.
 - `listen(callback)`으로 콜백을, `listen(object, &Class::method)`로 멤버 함수를 등록합니다. 콜백은 `T&`를 받습니다. `notify(arg)`는 같은 인자를 참조로 각 리스너에 전달하므로 리스너가 값을 변경할 수 있습니다. `Event<void>`에서는 콜백과 `notify()` 모두 인자를 받지 않습니다.
 - `EventListener listener;`와 같은 멤버 변수에 반환된 `EventListener`를 대입하여 보관하세요. 토큰을 소멸시키거나 다시 대입하면 이전 리스너의 연결이 자동으로 해제됩니다. 반환값을 보관하지 않으면 즉시 연결이 해제됩니다.
 - 우선순위를 생략하면 해당 이벤트의 기본값(일반 이벤트와 오디오 이벤트는 `100`)을 사용합니다. `listen(callback, priority)` 또는 `listen(callback, Deliver::Main, priority)`로 작성합니다. 우선순위 값, 호출 순서, `consumed`는 `EventPriority::BeforeApp`을 참조하세요.
@@ -7780,22 +7777,19 @@ description.en = "Names the early listener priority."
 description.ja = "先に呼ばれるリスナーの優先度を表す。"
 description.ko = "먼저 호출할 리스너의 우선순위를 나타낸다."
 details.en = '''
-- On App-facing events, the default changes from `100` to `0`. An omitted priority now ties with explicit `0` in registration order: default `a` registered before explicit-0 `b` runs `ab` (previously `ba`). Defaults now precede explicit `1–99` (previously followed them) and explicit `100` (previously tied and interleaved by registration). A consuming default listener therefore pre-empts even an explicit-100 listener registered earlier.
-- The predefined integer priorities are `BeforeApp = 0`, `App = 100`, and `AfterApp = 200`. On events the App receives, listen() defaults to BeforeApp; other events keep 100. Explicit priorities accept every integer.
+- The predefined integer priorities are `BeforeApp = 0`, `App = 100`, and `AfterApp = 200`. On events the App receives, listen() defaults to BeforeApp; other events default to 100. Explicit priorities accept every integer.
 - Listeners run from smaller priority values to larger ones. Listeners with the same value run in registration order.
 - For argument types with a `consumed` field, delivery stops after an inline listener returns with `e.consumed == true`, skipping subsequent listeners, including those with the same priority. Argument types without this field do not stop delivery this way.
 - For listener registration and queued delivery, see `Event<T>`; for the order relative to App callbacks and nodes, see `App::mousePressed`.
 '''
 details.ja = '''
-- App 向けイベントの既定値は `100` から `0` に変わります。省略時は明示的な `0` と同順位になり、登録順に呼ばれます。既定の `a` を明示的な 0 の `b` より先に登録すると `ab` です（従来は `ba`）。既定のリスナーは明示的な `1–99`（従来はその後）と `100`（従来は同順位で登録順に混在）より先に呼ばれます。このため、既定のリスナーがイベントを消費すると、先に登録された明示的な 100 のリスナーにも届きません。
-- 定義済みの整数の優先度は `BeforeApp = 0`、`App = 100`、`AfterApp = 200` です。App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。 明示する優先度には任意の整数値を指定できます。
+- 定義済みの整数の優先度は `BeforeApp = 0`、`App = 100`、`AfterApp = 200` です。App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。明示する優先度には任意の整数値を指定できます。
 - 数値が小さいリスナーから順に呼ばれます。同じ値のリスナーは登録した順に呼ばれます。
 - 引数型に `consumed` フィールドがある場合、同期的に呼ばれたリスナーが `e.consumed == true` の状態で戻ると、同じ優先度も含めて後続のリスナーは呼ばれません。このフィールドがない引数型では、この方法で呼び出しを止めることはできません。
 - リスナーの登録とキューを使う呼び出しについては `Event<T>` を、App のコールバックやノードとの順番については `App::mousePressed` を参照してください。
 '''
 details.ko = '''
-- App 대상 이벤트의 기본값은 `100`에서 `0`으로 바뀝니다. 우선순위를 생략하면 명시적 `0`과 같은 우선순위로 등록 순서에 따라 실행됩니다. 기본값 `a`를 명시적 0인 `b`보다 먼저 등록하면 `ab`입니다(이전에는 `ba`). 기본 리스너는 명시적 `1–99`(이전에는 그 뒤) 및 `100`(이전에는 같은 우선순위로 등록 순서에 따라 섞임)보다 먼저 실행됩니다. 따라서 기본 리스너가 이벤트를 소비하면 먼저 등록된 명시적 100 리스너도 실행되지 않습니다.
-- 미리 정의된 정수 우선순위는 `BeforeApp = 0`, `App = 100`, `AfterApp = 200`입니다. App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트는 100을 유지합니다. 명시적 우선순위에는 모든 정수를 사용할 수 있습니다.
+- 미리 정의된 정수 우선순위는 `BeforeApp = 0`, `App = 100`, `AfterApp = 200`입니다. App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트에서는 100입니다. 명시적 우선순위에는 모든 정수를 사용할 수 있습니다.
 - 값이 작은 리스너부터 순서대로 호출합니다. 값이 같으면 등록한 순서대로 호출합니다.
 - 인자 타입에 `consumed` 필드가 있으면 동기적으로 호출된 리스너가 `e.consumed == true`인 상태로 반환한 뒤 전달을 중단하며, 같은 우선순위를 포함한 후속 리스너를 건너뜁니다. 이 필드가 없는 인자 타입은 이 방법으로 전달을 중단할 수 없습니다.
 - 리스너 등록과 큐를 사용하는 호출은 `Event<T>`를, App 콜백 및 노드와의 순서는 `App::mousePressed`를 참조하세요.
