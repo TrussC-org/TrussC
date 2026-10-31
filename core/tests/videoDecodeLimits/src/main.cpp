@@ -178,8 +178,11 @@ void hardwareTransferChecks() {
     av_frame_free(&packed);
 
     AVBufferRef* device = nullptr;
-    if (av_hwdevice_ctx_create(&device, AV_HWDEVICE_TYPE_VULKAN, nullptr, nullptr, 0) < 0) {
-        std::puts("Vulkan transfer: SKIP (device unavailable); synthetic surface admission exercised");
+    const int deviceResult = av_hwdevice_ctx_create(&device, AV_HWDEVICE_TYPE_VULKAN, nullptr, nullptr, 0);
+    if (deviceResult < 0) {
+        char error[AV_ERROR_MAX_STRING_SIZE] = {};
+        av_strerror(deviceResult, error, sizeof(error));
+        std::printf("Vulkan transfer: SKIP (device unavailable: %s); synthetic surface admission exercised\n", error);
         return;
     }
     AVBufferRef* frames = av_hwframe_ctx_alloc(device);
@@ -190,16 +193,15 @@ void hardwareTransferChecks() {
     context->sw_format = AV_PIX_FMT_YUV420P;
     context->width = 1920; context->height = 1088;
     int result = av_hwframe_ctx_init(frames);
+    check("Vulkan frames context initialized", result >= 0);
     if (result < 0) {
         char error[AV_ERROR_MAX_STRING_SIZE] = {};
         av_strerror(result, error, sizeof(error));
-        std::printf("Vulkan transfer: SKIP (frames context unavailable: %s); synthetic surface admission exercised\n", error);
-        std::puts("Vulkan surface allocated: SKIP (frames context unavailable)");
+        std::printf("Vulkan frames context initialization failed: %s\n", error);
         av_buffer_unref(&frames);
         av_buffer_unref(&device);
         return;
     }
-    check("Vulkan frames context initialized", true);
     AVFrame* hardware = av_frame_alloc();
     result = av_hwframe_get_buffer(frames, hardware, 0);
     check("Vulkan surface allocated", result >= 0);
