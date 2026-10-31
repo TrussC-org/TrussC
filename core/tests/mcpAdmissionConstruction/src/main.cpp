@@ -320,6 +320,38 @@ TC_CORE_TEST_MAIN() {
             response.find("HTTP/1.1", 1) == std::string::npos && serverBytesRead > 0 && serverBytesRead <= 16384);
         printf("request-line server bytes read: %zu\n", serverBytesRead.load());
     }
+    {
+        serverBytesRead = 0;
+        countServerReads = true;
+        const auto sock = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(mcp::getHttpPort());
+        inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+        check("header probe connects", connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+        timeval timeout{3, 0};
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        std::string wire = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n";
+        for (int i = 0; i < 1024; ++i) wire += "X-Probe: " + std::string(1024, 'a') + "\r\n";
+        wire += "\r\n";
+        size_t sent = 0;
+        while (sent < wire.size()) {
+            const auto n = send(sock, wire.data() + sent, wire.size() - sent, MSG_NOSIGNAL);
+            if (n <= 0) break;
+            sent += size_t(n);
+        }
+        std::string response;
+        char buffer[1024];
+        ssize_t received;
+        while ((received = recv(sock, buffer, sizeof(buffer), 0)) > 0) response.append(buffer, size_t(received));
+        const bool closed = received == 0 || errno == ECONNRESET;
+        close(sock);
+        countServerReads = false;
+        // Bound (network input): this short request line and 64 KiB header cap fit within one extra read-ahead block.
+        check("oversized headers are refused without reading beyond the header bound", closed && response.find("431") != std::string::npos &&
+            response.find("HTTP/1.1", 1) == std::string::npos && serverBytesRead > 0 && serverBytesRead <= 64 * 1024 + 4096);
+        printf("header server bytes read: %zu\n", serverBytesRead.load());
+    }
 #endif
     for (const char* name : {"allocation_pixels", "allocation_json", "allocation_main", "allocation_worker", "allocation_envelope"}) {
         auto pending = std::async(std::launch::async, [body = request(name)] {
