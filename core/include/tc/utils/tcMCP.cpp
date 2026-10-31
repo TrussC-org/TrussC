@@ -24,6 +24,8 @@
 #ifndef __EMSCRIPTEN__
 #include "../../impl/httplib.h"
 #ifndef _WIN32
+#include <fcntl.h>
+#include <poll.h>
 #include <sys/socket.h>
 #endif
 #endif
@@ -291,13 +293,27 @@ public:
     void get_local_ip_and_port(std::string& ip, int& port) const override { stream_.get_local_ip_and_port(ip, port); }
     socket_t socket() const override { return stream_.socket(); }
     void body(const httplib::Request& req) {
+        bodyConfigured_ = true;
         phase_ = httplib::detail::is_chunked_transfer_encoding(req.headers) ? Phase::ChunkSize : Phase::Body;
+        bodyLengthKnown_ = !req.has_header("Transfer-Encoding");
+        bodyRemaining_ = req.get_header_value_u64("Content-Length");
     }
     bool refused() const { return refused_ || overflow_; }
     bool overflowed() const { return overflow_; }
+    void response(const httplib::Request& req) {
+        // httplib can refuse a Range header before the body setup callback runs.
+        if (!bodyConfigured_ && phase_ == Phase::Body && !req.method.empty()) body(req);
+    }
+    uint64_t refusalRemainder() const {
+        if (!bodyLengthKnown_) return (std::numeric_limits<uint64_t>::max)();
+        // Read-ahead has already left the socket, even if the body reader never ran.
+        return bodyRemaining_ - (std::min)(bodyRemaining_, static_cast<uint64_t>(bufferSize_ - bufferOffset_));
+    }
     ssize_t read(char* data, size_t size) override {
         if (overflow_) return -1;
-        const auto n = stream_.read(data, size);
+        const auto n = readBuffered(data, size);
+        if (n > 0 && bodyLengthKnown_)
+            bodyRemaining_ -= (std::min)(bodyRemaining_, static_cast<uint64_t>(n));
         if (n <= 0 || phase_ == Phase::Body) return n;
         if (phase_ == Phase::ChunkData && static_cast<size_t>(n) <= remaining_) {
             remaining_ -= static_cast<unsigned long>(n);
@@ -360,6 +376,21 @@ public:
         return stream_.write(data, size);
     }
 private:
+    ssize_t readBuffered(char* data, size_t size) {
+        if (!size) return 0;
+        if (bufferOffset_ == bufferSize_) {
+            // Read at least httplib's read-ahead size so it leaves no hidden buffered bytes.
+            if (size >= sizeof(buffer_)) return stream_.read(data, size);
+            const auto n = stream_.read(buffer_, sizeof(buffer_));
+            if (n <= 0) return n;
+            bufferOffset_ = 0;
+            bufferSize_ = static_cast<size_t>(n);
+        }
+        const auto count = (std::min)(size, bufferSize_ - bufferOffset_);
+        std::memcpy(data, buffer_ + bufferOffset_, count);
+        bufferOffset_ += count;
+        return static_cast<ssize_t>(count);
+    }
     // Mirror only strtoul's hexadecimal prefix/value so body bytes never count as trailer fields.
     // Upstream remains responsible for rejecting malformed/overflowing chunk-size lines.
     void observeChunkSize(unsigned char c) {
@@ -385,6 +416,11 @@ private:
     }
     enum class Phase { RequestLine, Headers, Body, ChunkSize, ChunkData, ChunkEnd, Trailers };
     httplib::Stream& stream_;
+    // Bound (read-ahead accounting): match httplib's 4096-byte buffer with fixed storage visible to refusal teardown.
+    char buffer_[4096];
+    size_t bufferOffset_ = 0, bufferSize_ = 0;
+    uint64_t bodyRemaining_ = 0;
+    bool bodyConfigured_ = false, bodyLengthKnown_ = false;
     Phase phase_ = Phase::RequestLine;
     size_t bytes_ = 0, fields_ = 0, lineBytes_ = 0;
     unsigned long remaining_ = 0, chunkSize_ = 0;
@@ -394,11 +430,53 @@ private:
     bool overflow_ = false, overflowWritten_ = false, refused_ = false, requestLineOverflow_ = false;
 };
 
-static thread_local const McpIngressStream* activeIngressStream = nullptr;
+static thread_local McpIngressStream* activeIngressStream = nullptr;
 // Socket exception boundary with observation of header-section and chunk metadata lines.
 class McpSocketServer final : public httplib::Server {
+    static void drainRefusedSocket(socket_t sock, uint64_t owedBytes) {
+        // Send the complete refusal before discarding unread input; closing with unread data can reset TCP on Windows.
+#ifdef _WIN32
+        if (shutdown(sock, SD_SEND) != 0) return;
+        if (!owedBytes) return;
+        u_long nonblocking = 1;
+        if (ioctlsocket(sock, FIONBIO, &nonblocking) != 0) return;
+#else
+        if (shutdown(sock, SHUT_WR) != 0) return;
+        if (!owedBytes) return;
+        const int flags = fcntl(sock, F_GETFL, 0);
+        if (flags < 0 || fcntl(sock, F_SETFL, flags | O_NONBLOCK) != 0) return;
+#endif
+        // Bound (connection teardown): discard at most 1 MiB for 250 ms so a refused client cannot retain a worker indefinitely.
+        constexpr size_t drainByteLimit = 1024 * 1024;
+        size_t remainingBytes = static_cast<size_t>((std::min)(owedBytes, static_cast<uint64_t>(drainByteLimit)));
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(250);
+        char buffer[4096];
+        while (remainingBytes) {
+            const auto remainingTime = std::chrono::duration_cast<std::chrono::microseconds>(
+                deadline - std::chrono::steady_clock::now()).count();
+            if (remainingTime <= 0) break;
+#ifdef _WIN32
+            fd_set readable;
+            FD_ZERO(&readable);
+            FD_SET(sock, &readable);
+            timeval timeout{};
+            timeout.tv_usec = static_cast<decltype(timeout.tv_usec)>(remainingTime);
+            const int ready = select(0, &readable, nullptr, nullptr, &timeout);
+#else
+            pollfd readable{sock, POLLIN, 0};
+            const int ready = poll(&readable, 1, static_cast<int>(remainingTime / 1000));
+#endif
+            if (ready <= 0) break;
+            const int count = static_cast<int>((std::min)(sizeof(buffer), remainingBytes));
+            const auto received = recv(sock, buffer, count, 0);
+            if (received <= 0) break;
+            remainingBytes -= static_cast<size_t>(received);
+        }
+    }
     bool process_and_close_socket(socket_t sock) override {
         bool result = false;
+        bool refusalClose = false;
+        uint64_t refusalRemainder = 0;
         // Upstream catches routing exceptions only; parsing and response writing can also throw on a worker.
         try {
             std::string remote, local;
@@ -411,12 +489,14 @@ class McpSocketServer final : public httplib::Server {
                 [&](httplib::Stream& stream, bool close, bool& closed) {
                     McpIngressStream ingress(stream);
                     struct IngressScope {
-                        const McpIngressStream* previous = activeIngressStream;
+                        McpIngressStream* previous = activeIngressStream;
                         ~IngressScope() { activeIngressStream = previous; }
                     } ingressScope;
                     activeIngressStream = &ingress;
                     const bool ok = process_request(ingress, remote, remotePort, local, localPort,
                         close, closed, [&](httplib::Request& req) { ingress.body(req); });
+                    refusalClose = ingress.refused();
+                    refusalRemainder = ingress.refusalRemainder();
                     if (ingress.overflowed()) ingress.write("", 0);
                     closed = closed || ingress.refused();
                     return ok;
@@ -424,7 +504,8 @@ class McpSocketServer final : public httplib::Server {
         } catch (...) {
             // No allocation/logging here: even a failed error response must retire the socket safely.
         }
-        httplib::detail::shutdown_socket(sock);
+        if (refusalClose) drainRefusedSocket(sock, refusalRemainder);
+        else httplib::detail::shutdown_socket(sock);
         httplib::detail::close_socket(sock);
         return result;
     }
@@ -656,7 +737,8 @@ void startHttpServerImpl(int port, const std::string& host,
         }
         return httplib::Server::HandlerResponse::Unhandled;
     });
-    svr->set_logger([limits](const httplib::Request&, const httplib::Response& res) {
+    svr->set_logger([limits](const httplib::Request& req, const httplib::Response& res) {
+        if (activeIngressStream) activeIngressStream->response(req);
         if (res.status == 413) admissionRejected(AdmissionStore::Body, limits.bodyBytes, limits.bodyBytes + 1);
         if (res.status == 414) admissionRejected(AdmissionStore::RequestLine, 8192, 8193);
     });
