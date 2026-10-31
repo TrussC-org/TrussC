@@ -16,7 +16,7 @@ ephemeral localhost port, prints the URL, launches headless Chrome with
 SwiftShader WebGPU, and captures the console and completion verdict:
 
 ```text
-WEBGPU_UNIFORM_GROWTH: PASS (6 frames, 3 raster/compute passes, tiny/large pixels, allocation rollback, async GPU failure)
+WEBGPU_UNIFORM_GROWTH: PASS (6 frames, 3 raster/compute passes, tiny/large pixels, growth/prefix, allocation failures)
 ```
 
 The six frames compare every pixel against both analytic per-tile RGBA values
@@ -28,15 +28,10 @@ frame test pass transitions and storage-buffer compute readback. Later frames
 reuse the grown buffer. Fault injection covers CPU allocation, GPU buffer and
 uniform/resource bind-group creation, null cache allocation, failed slot
 cleanup and next-frame recovery. A failed upload also attempts raster and
-compute encoding to verify both are skipped. In one frame a growth requests an
-invalid buffer usage, so Chrome returns a non-null error object and reports the
-validation error later through the backend's error scope. That frame keeps
-uploading, binding and drawing with the error object and is submitted. The
-next frame must return to the previous buffer with one Error, render every tile
-correctly, and the run must show no uncaptured WebGPU error. The validation
-error from using the error object is captured and logged through sokol with its
-message (`WebGPU error captured while new uniform resources were unconfirmed`);
-that line is expected in this step.
+compute encoding to verify both are skipped. Asynchronous GPU OOM/validation
+recovery cases were removed with the recovery path (#1097). A failed GPU
+creation uses WebGPU's own error report and may drop or corrupt a frame;
+the backend does not restore a previous buffer.
 
 The timeouts in `run.py` are hang guards; no pass criterion depends on elapsed
 time. Chrome background networking is disabled and DNS is restricted to
@@ -62,28 +57,9 @@ native build, including `build_all.py --core-tests-only`, runs the mock. Pass
 `WEBGPU_INCLUDE_DIR` to point at another emdawn `webgpu/include` directory.
 The mock executes the actual backend helpers,
 records 8192 draws/dispatches, models WebGPU reference retention, checks each
-recorded block after submission, tests allocation/arithmetic rollback and
-exercises 4999 cache keys with quiet eviction. It also models WebGPU error
-objects: buffer and bind-group creation can return a non-null object whose
-error scope reports OutOfMemory or Validation one frame later, and writing or
-binding an error object raises a validation error (at the write, or at finish
-and submit) that counts as uncaptured unless a scope is open. Frames run
-through the backend's begin pass, end pass and commit. The next frame must
-return to the last good buffer and size with one Error, must not retry growth
-while demand fits, must not reuse a uniform group built from the error object,
-and a late callback after teardown must not affect a new backend. It also
-covers a valid growth replacing an errored one before the results arrive (one
-Error, valid buffer kept), a shader without uniform blocks whose empty group
-fails while no frame uploads uniforms, and an unrelated error inside a
-contained frame (logged once, not hidden, nothing rolled back). It also covers
-an initial buffer that fails with no predecessor (shaders without uniform
-blocks keep drawing; the next group or upload that needs a buffer recreates it
-at the initial reservation), an app error in a frame where an unused group
-fails (still logged), and containment results arriving before creation results
-(the same errors are logged in either order). Every error a containment scope
-captures is logged, so the failed frame's validation message appears next to
-the one recovery Error.
-Build with ASan/UBSan to check CPU memory and temporary-resource cleanup.
+recorded block after submission, tests allocation/arithmetic rollback, keeps
+empty uniform groups across growth and exercises 4999 cache keys with quiet
+eviction. Build with ASan/UBSan to check CPU memory and temporary-resource cleanup.
 Without the headers (macOS, Windows, or no emsdk) the native executable only
 prints `SKIP ...` and exits 0, which the batch runner still counts as passed;
 treat that as "not run".
