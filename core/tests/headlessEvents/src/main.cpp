@@ -172,6 +172,7 @@ struct UdpBurstApp : App {
     int received = 0, frames = 0;
     bool ordered = true, onMain = true;
     void setup() override {
+        receiver.setBindAddress("127.0.0.1");
         receiver.setUseThread(false);
         check("UDP burst receiver creates", receiver.create());
         check("UDP burst receive queue configured", receiver.setReceiveBufferSize(4 * 1024 * 1024));
@@ -238,7 +239,9 @@ struct NetworkApp : App {
             udpOnMain = std::this_thread::get_id() == mainThread;
         });
         client.setUseThread(false);
+        receiver.setBindAddress("127.0.0.1");
         receiver.setUseThread(false);
+        server.setBindAddress("127.0.0.1");
         const bool listening = server.start(0);
         check("loopback TCP server starts", listening);
         check("update-mode TCP client connects", listening && client.connect("127.0.0.1", server.getPort()));

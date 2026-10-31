@@ -19,6 +19,8 @@ struct UdpSocketLifecycleTestAccess {
 namespace {
 void preservesSocket(bool threaded) {
     UdpSocket socket, sink;
+    socket.setBindAddress("127.0.0.1");
+    sink.setBindAddress("127.0.0.1");
     socket.setUseThread(threaded);
     check("bind option preservation fixture", socket.bind(0, false) && sink.bind(0, false));
     const int port = socket.getLocalPort();
@@ -64,6 +66,7 @@ void preservesSocket(bool threaded) {
 void lifecycle(bool threaded) {
     UdpSocket sender;
     auto socket = make_unique<UdpSocket>();
+    socket->setBindAddress("127.0.0.1");
     socket->setUseThread(threaded);
     check("bind UDP loopback", socket->bind(0));
     const int port = socket->getLocalPort();
@@ -95,6 +98,7 @@ void lifecycle(bool threaded) {
 }
 void moves(bool threaded) {
     UdpSocket sender, original;
+    original.setBindAddress("127.0.0.1");
     original.setUseThread(threaded);
     check("bind stopped UDP socket", original.bind(0, false));
     const int port = original.getLocalPort();
@@ -127,6 +131,7 @@ void moves(bool threaded) {
 }
 void restartWithCallbackInFlight() {
     UdpSocket receiver, sender;
+    receiver.setBindAddress("127.0.0.1");
     promise<void> ready, release, oldReturned, delivered;
     auto gate = release.get_future().share();
     auto newReady = ready.get_future();
@@ -158,6 +163,7 @@ void restartWithCallbackInFlight() {
 }
 void moveInsideListener() {
     UdpSocket source, sender;
+    source.setBindAddress("127.0.0.1");
     unique_ptr<UdpSocket> destination;
     atomic<bool> done{false};
     check("bind self-move fixture", source.bind(0));
@@ -173,6 +179,7 @@ void moveInsideListener() {
 // socket, alive; only shutdown() makes recvfrom return).
 void closeWakesBlockedReceive() {
     UdpSocket socket;
+    socket.setBindAddress("127.0.0.1");
     check("bind blocking receive fixture", socket.bind(0, false));
     promise<int> received;
     auto result = received.get_future();

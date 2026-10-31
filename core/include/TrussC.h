@@ -274,16 +274,16 @@ namespace internal {
         int pendingCommands = 0; // explicit deferred request; 0 derives from vertices
     };
     SglBudget& sglBudget();
+    sgl_desc_t sglSetupDescriptor();
 
     // Separate report gates for screen and FBO contexts, shared across modules.
     OnceGate& sglStackErrorReportGate(bool inFbo);
     void reportSglStackErrors(sgl_error_t err, bool inFbo);
 
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
-    // ring buffer; GL/D3D11 ignore it). 0 = default: 1MB on Metal (auto-grows on
-    // overflow — TrussC patch in sokol_gfx.h), 4MB sokol default on WebGPU/Vulkan
-    // (no auto-grow there, so set this via WindowSettings::reserveUniformBuffer
-    // for scenes with very high draw-call counts).
+    // ring buffer; GL/D3D11 ignore it). 0 = default: 1 MiB on Metal/WebGPU
+    // (grows on overflow), 4 MiB on Vulkan (fixed capacity). Set this via
+    // WindowSettings::reserveUniformBuffer to reserve capacity at startup.
     // Host-only, so a per-module copy is fine (tools/header_state_allowlist.txt):
     // the launcher sets it and setup() (tcGlobal.cpp) reads it.
     inline int gpuUniformBufferReserve = 0;
@@ -1949,7 +1949,7 @@ inline void setIndependentFps(float updateFps, float drawFps) {
 // an update rate) or in one runHeadlessApp loop pass. More are pending after
 // a stall, when update() is slower than its own rate, or when the update rate
 // is more than this many times the display rate; the time beyond the cap is
-// dropped with a one-time warning instead of replayed. Default 10. 0 or less
+// dropped with one warning per stall instead of replayed. Default 10. 0 or less
 // removes the cap: every step runs (e.g. a deterministic simulation), at the
 // cost of a freeze while a long stall is replayed, and of frames (or
 // headless passes) that grow longer and longer while update() is slower than
@@ -2097,9 +2097,7 @@ namespace internal {
     // Each window also answers the MCP requests aimed at it here
     // (tc_get_screenshot / tc_save_screenshot with a window index): only
     // inside its own tick is its drawable the one a readback sees (#243).
-    // The capture callback also permits GPU-free drain regression tests.
-    inline void drainPendingScreenshots(
-        bool (*capture)(const std::filesystem::path&) = captureWindowToFile) {
+    inline void drainPendingScreenshots() {
         auto& ctx = currentWindowContext();
         auto& queue = ctx.pendingScreenshotPaths;
         // Snapshot before any stage that can log: saves queued from a callback
@@ -2113,8 +2111,7 @@ namespace internal {
         for (size_t i = 0; i < count && i < queue.size(); ++i) {
             // Logging callbacks may append without invalidating the local path.
             auto path = std::move(queue[i]);
-            try { capture(path); }
-            catch (const std::exception& error) { logError("Screenshot") << error.what(); }
+            captureWindowToFile(path);
         }
         queue.erase(queue.begin(), queue.begin() + std::min(count, queue.size()));
     }
@@ -2234,6 +2231,11 @@ constexpr int MOUSE_BUTTON_MIDDLE = (int)MouseButton::Middle;
 // Window settings
 // ---------------------------------------------------------------------------
 
+struct WindowSettings;
+namespace internal {
+    void configureGraphicsPools(const WindowSettings& settings);
+}
+
 struct WindowSettings {
     int width = 1280;
     int height = 720;
@@ -2311,12 +2313,27 @@ struct WindowSettings {
         return *this;
     }
 
+    // Fixed startup capacities; 0 selects defaults, negatives log a Notice.
+    // Headless apps do not initialize graphics, so these settings do not apply.
+    WindowSettings& setResourcePoolSize(int count) {
+        resourcePoolSize = count;
+        return *this;
+    }
+    WindowSettings& setShaderPoolSize(int count) {
+        shaderPoolSize = count;
+        return *this;
+    }
+    WindowSettings& setPipelinePoolSize(int count) {
+        pipelinePoolSize = count;
+        return *this;
+    }
+
     // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1MB on
-    // Metal, 4MB on WebGPU/Vulkan). Like std::vector::reserve: on Metal the
-    // ring auto-grows (doubling, with a warning log) when a frame overflows it,
+    // Metal/WebGPU, 4MB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
+    // the ring grows (with a warning log) when a frame overflows it,
     // so a sufficient reservation only skips the one-time grow hitch. Every
     // draw call takes a 256-byte-aligned slice of this ring buffer (~4MB per
-    // 8k draw calls per frame). WebGPU/Vulkan do NOT auto-grow yet: there an
+    // 8k draw calls per frame). Vulkan does NOT auto-grow: there an
     // overflowing frame is still an error, so size this generously for very
     // high draw-call scenes. GL/D3D11 ignore it — they have no such cap.
     // Metal/WebGPU/Vulkan allocate it x2 (in-flight frames).
@@ -2324,6 +2341,11 @@ struct WindowSettings {
         uniformBufferReserve = bytes;
         return *this;
     }
+
+    // Keep settings aggregate-initializable, like the existing public fields.
+    int resourcePoolSize = 0;
+    int shaderPoolSize = 0;
+    int pipelinePoolSize = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -2444,6 +2466,9 @@ namespace internal {
 #endif
         steps.run("console stop", [] { console::stop(); });
         steps.run("launcher cleanup", [] { if (appCleanupFunc) appCleanupFunc(); });
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__EMSCRIPTEN__)
+        steps.run("keep screen on shutdown", [] { shutdownKeepScreenOn(); });
+#endif
         steps.run("resource completion", [] { waitForResourceLoadsAtAppExit(); });
         steps.run("audio stop", [] { trussc::shutdownAudio(); });
         steps.run("device cleanup", [] { if (!headless::isActive()) cleanup(); });
@@ -2582,6 +2607,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
 
     // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
     internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
+    internal::configureGraphicsPools(settings);
 
     auto window = internal::prepareLaunchWindow(settings);
     internal::appSetupFunc = []() {

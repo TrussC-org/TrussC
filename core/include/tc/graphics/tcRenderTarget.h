@@ -6,6 +6,7 @@
 // Targets own matrices and pass state; all pipeline creation is host-owned.
 // Included from TrussC.h after BlendMode, CameraContext and the sokol headers.
 // =============================================================================
+#include "impl/tcImportError.h"
 #include <unordered_map>
 #include <cstdint>
 #include <climits>
@@ -286,9 +287,7 @@ struct RenderTarget {
     void beginPass(TargetPassStart reason);
     void endPass();
     void flushLayers();
-    bool advanceLayer();
-    void failRecording(const char* reason);
-    bool recordingFailed = false;
+    void advanceLayer();
     void restartClear(float r, float g, float b, float a);
 
     TargetCameraState camera;
@@ -331,22 +330,16 @@ struct RenderTarget {
         depthTestEnabled = previous.depthTestEnabled;
     }
 };
-// Container max_size and allocator failure are representation/allocation
-// failures, never a separate application quota or MCP admission decision.
+// A failed append skips this draw without discarding earlier recordings.
 template<class Queue, class Draw>
-bool appendTargetRecording(RenderTarget& target, Queue& queue, Draw&& draw) {
-    if (target.recordingFailed) return false;
+bool appendTargetRecording(RenderTarget&, Queue& queue, Draw&& draw) {
     try {
-        if (queue.size() == queue.max_size()) {
-            target.failRecording("raw recording count cannot be represented");
-            return false;
-        }
         queue.push_back(std::forward<Draw>(draw));
         return true;
     } catch (const std::bad_alloc&) {
-        target.failRecording("raw recording allocation failed");
+        reportImportError("RenderTarget", "could not allocate draw recording");
     } catch (const std::length_error&) {
-        target.failRecording("raw recording size cannot be represented");
+        reportImportError("RenderTarget", "draw recording size cannot be represented");
     }
     return false;
 }

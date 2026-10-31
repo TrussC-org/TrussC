@@ -8,6 +8,10 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "tools"))
+from check_build_warnings import run_build
 
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('--build-wrapper', required=True)
@@ -28,7 +32,7 @@ for name, flags in [('staticExit', ['-fsanitize=address,undefined']),
     if a.before_include:
         command += ['-I' + str(a.before_include.resolve())]
     command += ['-I' + str(root / 'core/include'), str(Path(__file__).with_name(name + '.cpp')), '-o', str(exe)] + libs
-    subprocess.run(command, check=True, cwd=root)
+    run_build(command, check=True, cwd=root)
     result = subprocess.run([str(exe)], env={**os.environ, 'ASAN_OPTIONS': 'detect_leaks=0'}, timeout=90)
     print(f'{name}: exit {result.returncode}', flush=True)
     if result.returncode:

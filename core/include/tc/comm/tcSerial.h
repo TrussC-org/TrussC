@@ -84,6 +84,7 @@
 #include <cstring>
 #include <sstream>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <memory>
 #include "tcSerialRx.h"
@@ -261,6 +262,11 @@ namespace internal {
     private:
         std::vector<std::pair<LogLevel, std::string>> lines_;
     };
+    // Internal integration-test seam, stored in tcSerial.cpp. Zero restores
+    // the production default; only subsequently created connections use it.
+    size_t serialRxCapacityForTesting();
+    void setSerialRxCapacityForTesting(size_t bytes);
+
     // Receive state of one connection, shared by its worker, its Serial and a
     // queued warning delivery. The worker appends with buffer.mutex held;
     // when that captures a warning it posts the preallocated main-thread
@@ -271,7 +277,8 @@ namespace internal {
     struct SerialRxState : MainThreadSlot, std::enable_shared_from_this<SerialRxState> {
         SerialRxBuffer buffer;
 
-        SerialRxState() : MainThreadSlot(&deliver) {}
+        SerialRxState() : MainThreadSlot(&deliver),
+                          buffer(std::malloc, serialRxCapacityForTesting()) {}
 
         // Worker, with buffer.mutex held.
         void append(const uint8_t* data, size_t length) noexcept {
@@ -291,11 +298,11 @@ namespace internal {
             }
             if (warning.backlog) {
                 logWarning() << "Serial: RX buffer exceeds 1 MiB; app is falling behind; buffered bytes: "
-                             << warning.buffered << "; capacity bytes: " << SerialRxBuffer::capacity;
+                             << warning.buffered << "; capacity bytes: " << self.buffer.capacityBytes();
             }
             if (warning.loss) {
                 logWarning() << "Serial: RX buffer overflow or allocation failure, dropping data; capacity bytes: "
-                             << SerialRxBuffer::capacity << "; needed bytes: " << warning.needed
+                             << self.buffer.capacityBytes() << "; needed bytes: " << warning.needed
                              << "; total dropped bytes: " << warning.dropped
                              << (warning.allocationFailed ? "; receive allocation failed" : "; dropping oldest bytes");
             }
@@ -1104,11 +1111,8 @@ public:
     // Status
     // ---------------------------------------------------------------------------
 
-    // Whether the port is open and working. Turns false after close(), and
-    // also when available() / readBytes() / readByte() / writeBytes() find
-    // that the device went away (USB unplug, driver reset): the port is then
-    // closed, onDisconnect fires, and setup() connects again. This call does
-    // not probe the device itself; detection happens inside those I/O calls.
+    // Whether the port is open and working. Does not probe the device itself;
+    // detection happens inside the I/O calls.
     // Android: may flip to true AFTER setup() returned false, once the user
     // grants USB permission, and stays true after the USB worker finds the
     // device gone until one of those calls reports it (see androidserial
@@ -1142,8 +1146,7 @@ public:
     }
 
     // Get number of bytes buffered by TrussC for reading.
-    // Returns 0 when not connected; a device loss found here closes the port
-    // (isConnected() turns false) and fires onDisconnect.
+    // Returns 0 when not connected.
     int available() const {
         internal::SerialHeldLog held;
         LossFound loss;
@@ -1180,9 +1183,7 @@ public:
     // ---------------------------------------------------------------------------
 
     // Read specified number of bytes
-    // Returns: actual bytes read (>=0), -1 on error. A device loss found here
-    // closes the port (isConnected() turns false), fires onDisconnect and
-    // returns -1. Never blocks: it returns what has arrived so far.
+    // Returns: actual bytes read (>=0), -1 on error. Never blocks.
     int readBytes(void* buffer, int length) {
         internal::SerialHeldLog held;
         LossFound loss;
@@ -1213,9 +1214,7 @@ public:
     }
 
     // Read single byte
-    // Returns: byte read (0-255), -1 if no data, -2 on error. A device loss
-    // found here closes the port (isConnected() turns false), fires
-    // onDisconnect and returns -2.
+    // Returns: byte read (0-255), -1 if no data, -2 on error.
     int readByte() {
         unsigned char byte = 0;
         const int n = readBytes(&byte, 1);
@@ -1227,9 +1226,8 @@ public:
     // ---------------------------------------------------------------------------
 
     // Write specified number of bytes
-    // Returns: actual bytes written, -1 on error. A device loss found here
-    // closes the port (isConnected() turns false), fires onDisconnect and
-    // returns -1. How long it may take depends on the platform:
+    // Returns: actual bytes written, -1 on error.
+    // How long it may take depends on the platform:
     // - macOS / Linux: never blocks (the port is O_NONBLOCK). It may write
     //   fewer bytes than asked, or return -1 while the output buffer is full.
     // - Windows: waits until the driver has taken every byte, at most
@@ -1651,17 +1649,9 @@ private:
     mutable std::mutex infoMutex_;
 
     // For the I/O calls
-    struct Shared {
-        PortLock& l;
-        explicit Shared(PortLock& lock) : l(lock) { l.lock_shared(); }
-        ~Shared() { l.unlock_shared(); }
-    };
+    using Shared = std::shared_lock<PortLock>;
     // For opening and closing
-    struct Exclusive {
-        PortLock& l;
-        explicit Exclusive(PortLock& lock) : l(lock) { l.lock(); }
-        ~Exclusive() { l.unlock(); }
-    };
+    using Exclusive = std::lock_guard<PortLock>;
     // Two Serials in one order (by address), for a move assignment, so that
     // two threads moving them into each other cannot deadlock
     struct ExclusiveBoth {

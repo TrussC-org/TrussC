@@ -1,16 +1,28 @@
 #include "../../common/tcWindowTest.h"
 #include <TrussC.h>
+#include "../../../include/impl/httplib.h"
 #include "../../common/tcCoreTest.h"
-#include "../../common/tcDisplayTest.h"
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
 
+#ifdef TC_ADMISSION_CAPTURE_PROBE
+extern "C" void* __real_malloc(size_t);
+extern "C" unsigned char* stbi_write_png_to_mem(const unsigned char*, int, int, int, int, int*);
+#endif
 // This test owns its binary: interposition must not affect other harnesses.
 namespace {
-bool tracking = false;
-size_t largest = 0;
+thread_local bool failNextAllocation = false;
+thread_local int failAllocationAfter = -1;
+#ifdef TC_ADMISSION_CAPTURE_PROBE
+thread_local size_t encoderMallocSize = 0;
+thread_local int encoderMallocMatches = 0;
+thread_local bool failEncoderMalloc = false;
+std::atomic<bool> failParsingOnce{false};
+std::atomic<size_t> serverBytesRead{0};
+std::atomic<bool> countServerReads{false};
+#endif
 int checks = 0, failures = 0;
 void check(const char* name, bool ok) {
     ++checks;
@@ -19,8 +31,13 @@ void check(const char* name, bool ok) {
 }
 }
 void* operator new(std::size_t n) {
-    if (tracking) largest = std::max(largest, n);
+    if (failAllocationAfter >= 0 && failAllocationAfter-- == 0) { failAllocationAfter = -1; throw std::bad_alloc(); }
+    if (failNextAllocation) { failNextAllocation = false; throw std::bad_alloc(); }
+#ifdef TC_ADMISSION_CAPTURE_PROBE
+    if (auto* p = __real_malloc(n ? n : 1)) return p;
+#else
     if (auto* p = std::malloc(n ? n : 1)) return p;
+#endif
     throw std::bad_alloc();
 }
 void* operator new[](std::size_t n) { return ::operator new(n); }
@@ -37,900 +54,343 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 #ifdef TC_ADMISSION_CAPTURE_PROBE
 #include <GL/gl.h>
-namespace {
-bool realCapture = false, modeledCapture = false;
-int capturePrefixes = 0;
-int sourceWidth = 0, sourceHeight = 0, pixelReads = 0;
-size_t readbackWorking = 0;
+extern "C" void* __wrap_malloc(size_t size) {
+    if (encoderMallocSize != 0 && size == encoderMallocSize) {
+        ++encoderMallocMatches;
+        if (failEncoderMalloc) {
+            failEncoderMalloc = false;
+            return nullptr;
+        }
+    }
+    return __real_malloc(size);
 }
-// Headless capture models a valid renderer and its submit boundary. Display
-// modes forward both seams to the real renderer, as they do native dimensions.
-extern "C" bool __real_sg_isvalid();
-extern "C" bool __wrap_sg_isvalid() {
-    return modeledCapture || __real_sg_isvalid();
+extern "C" ssize_t __real_recv(int, void*, size_t, int);
+extern "C" ssize_t __wrap_recv(int sock, void* data, size_t size, int flags) {
+    const auto n = __real_recv(sock, data, size, flags);
+    if (n > 0 && countServerReads && !(flags & MSG_PEEK)) {
+        sockaddr_in local{};
+        socklen_t length = sizeof(local);
+        if (getsockname(sock, reinterpret_cast<sockaddr*>(&local), &length) == 0 &&
+            ntohs(local.sin_port) == trussc::mcp::getHttpPort()) serverBytesRead += size_t(n);
+    }
+    if (n > 0 && failParsingOnce.exchange(false)) failNextAllocation = true;
+    return n;
 }
-extern "C" void __real_sg_tc_submit_prefix();
-extern "C" void __wrap_sg_tc_submit_prefix() {
-    if (realCapture) __real_sg_tc_submit_prefix();
-    else ++capturePrefixes;
-}
-// The admission estimate uses context metadata; the actual source can change
-// before readback. Interpose the common source boundary, not native size wrappers.
-extern "C" trussc::internal::WindowCaptureSource __real__ZN6trussc8internal19windowCaptureSourceEv();
-extern "C" trussc::internal::WindowCaptureSource __wrap__ZN6trussc8internal19windowCaptureSourceEv() {
-    auto source = __real__ZN6trussc8internal19windowCaptureSourceEv();
-    if (modeledCapture) { source.width = sourceWidth; source.height = sourceHeight; }
-    return source;
-}
-extern "C" void __real_glReadPixels(GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, void*);
-extern "C" void __wrap_glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, void* data) {
-    if (realCapture) { __real_glReadPixels(x, y, w, h, format, type, data); return; }
-    ++pixelReads;
-    readbackWorking = trussc::mcp::internal::workingMemory();
-    std::memset(data, 0, size_t(w) * h * 4);
+extern "C" bool __wrap_sg_isvalid() { return true; }
+extern "C" void __wrap_sg_tc_submit_prefix() {}
+extern "C" int __wrap_sapp_width() { return 3840; }
+extern "C" int __wrap_sapp_height() { return 2160; }
+extern "C" void __wrap_glReadPixels(GLint, GLint, GLsizei w, GLsizei h, GLenum, GLenum, void* data) {
+    std::memset(data, 127, size_t(w) * h * 4);
 }
 #endif
-
-using namespace trussc;
+namespace trussc::mcp::internal {
+json pixelsToImageJson(const Pixels&, const std::string&, int, int);
+}
+using namespace tc;
 namespace {
-alignas(16) unsigned char nativeStandIn[256]{};
-struct OpenWindow : Window {
-    OpenWindow() { native_ = nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
-    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
-};
 std::string request(const char* name, json args = json::object()) {
     return json{{"jsonrpc", "2.0"}, {"id", 19}, {"method", "tools/call"},
         {"params", {{"name", name}, {"arguments", std::move(args)}}}}.dump();
 }
-bool toolError(const json& reply) {
-    if (!reply.contains("result")) return false;
-    const auto& result = reply.at("result");
-    if (result.value("isError", false)) return true;
-    if (result.at("content").at(0).value("type", "") == "image") return false;
-    const auto text = json::parse(result.at("content").at(0).at("text").get<std::string>());
-    return text.value("status", "") == "error";
-}
-
-int expectedDpi = 1;
-bool gpuCompleted = false;
-// Windows obtains high-DPI scale from the monitor; highDpi cannot force 2x.
-bool skipMonitorDpi() {
-#ifdef _WIN32
-    if (expectedDpi == 2 && std::abs(getDpiScale() - 1.0f) < 0.01f) {
-        printf("SKIP: DPI 2 needs a display scaled to 200%% (measured %.2f)\n", double(getDpiScale()));
-        return true;
-    }
-#endif
-    return false;
-}
-bool dpiSkipped = false;
-void checkReadbackAdmission(size_t pixelCount, const void* target = nullptr) {
+json dispatch(const std::string& body, bool deferred = false) {
     using namespace mcp::internal;
-    const auto defaults = mcp::getAdmissionLimits();
-    const int window = target ? 1 : 0;
-    const auto probePath = fs::temp_directory_path() / "tc-admission-rejection.png";
-    for (const char* name : {"tc_save_screenshot", "tc_get_screenshot", "tc_analyze_image"}) {
-        auto limits = defaults;
-        // Readback pixels are independent of captureWindowSize. At DPI 2 a
-        // logical-size admission fits this budget and must fail the checks.
-        limits.workingBytes = std::string(name) == "tc_save_screenshot" ?
-            pixelCount * 64 + 1024 * 1024 - 1 : pixelCount * 8 - 1;
-        check("admission limits configuration succeeds", mcp::setAdmissionLimits(limits));
-        const auto before = admissionRejections(AdmissionStore::Working);
-        resetHttpChannel();
-        auto promise = std::make_shared<std::promise<ReplyThunk>>();
-        auto future = promise->get_future();
-        json args = std::string(name) == "tc_analyze_image" ?
-            json{{"source", {{"window", window}}}, {"ops", json::array({{{"op", "stats"}}})}} : json{{"window", window}};
-        if (std::string(name) == "tc_save_screenshot") args["path"] = internal::pathToUtf8(probePath);
-        // A thumbnail keeps later encoding within the budget even under the
-        // logical-size mutation, so late encoder rejection cannot mask it.
-        if (std::string(name) == "tc_get_screenshot") args["width"] = 16;
-        getHttpChannel().send(mcp::McpRequest{request(name, args), promise, std::make_shared<WorkBudget>(true)});
-        mcp::processHttpQueue();
-        drainDeferredResponses(target);
-        const bool ready = future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-        bool rejected = false;
-        if (ready) {
-            try { rejected = toolError(json::parse(future.get()())); }
-            catch (const AdmissionError&) { rejected = true; }
-        }
-        check("real framebuffer admission rejects screenshot tool", ready && rejected);
-        check("real framebuffer rejection increments working counter once", admissionRejections(AdmissionStore::Working) == before + 1);
-        check("real framebuffer rejection releases capture and credits", !hasDeferredResponses() && workingMemory() == 0);
-        printf("real admission tool=%s working limit=%zu rejections=%llu\n", name, limits.workingBytes,
-            static_cast<unsigned long long>(admissionRejections(AdmissionStore::Working) - before));
-    }
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
-    std::error_code ec;
-    fs::remove(probePath, ec);
+    auto promise = std::make_shared<std::promise<ReplyThunk>>();
+    auto future = promise->get_future();
+    getHttpChannel().send(mcp::McpRequest{body, promise});
+    mcp::processHttpQueue();
+    if (deferred) drainDeferredResponses(&internal::currentWindowContext());
+    return json::parse(future.get()());
 }
-// This mode deliberately uses native resizing and the normal frame prelude.
-// No synthetic dimensions, drawable cleanup, or manual frame pumping here.
-int resizeSaves = 0, resizeAccepted = 0, resizeCycles = 0;
-int resizePointerChecks = 0, resizeWindows = 0, resizeSkipped = 0, resizeSkippedCycles = 0;
-bool resizeCompleted = false;
-class ResizeDisplayApp : public App {
-    EventListener after;
-    std::shared_ptr<Window> secondary;
-    std::shared_ptr<ResizeDisplayApp> secondaryApp;
-    std::future<mcp::internal::ReplyThunk> reply;
-    fs::path output;
-    static constexpr int resizeFrameLimit = 60;
-    static constexpr auto noFrameLimit = std::chrono::seconds(3);
-    int windowIndex = 0, largeFrames = 0, resizeFrames = 0, cycles = 0;
-    bool resizing = false;
-    bool largeFrameSeen = false;
-    bool waiting = false, finished = false, verifyAdmission = false;
-    size_t savedPixelCount = 0;
-    uint64_t rejections = 0;
-    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
-    std::chrono::steady_clock::time_point lastRenderedFrame = started;
-
-    internal::WindowContext& context() {
-        return windowIndex ? getWindow()->context() : internal::windowApiContext();
-    }
-    void checkCleared() {
-        auto& ctx = context();
-        ++resizePointerChecks;
-        check("previous frame cleared both borrowed drawable pointers",
-            !ctx.lastSwapchainDrawable && !ctx.lastSwapchain.metal.current_drawable);
-    }
-    void grow() {
-        // Request 4K physical. Window managers may constrain this; record the
-        // actual surface after three rendered frames, rather than assuming 4K.
-        setWindowSize(3840 / expectedDpi, 2160 / expectedDpi);
-        largeFrames = 0;
-    }
-    void skipResize(int requestedWidth, int requestedHeight) {
-#if defined(__linux__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
-        check("X11 main and secondary resizing must work (#889)", !sapp_x11_get_display());
-#endif
-        const auto [w, h] = internal::captureWindowSize(context());
-        printf("SKIP: window resize not supported here (requested %dx%d, measured %zux%zu)\n",
-            requestedWidth, requestedHeight, w, h);
-        skipRemainingCycles();
-    }
-    void skipRemainingCycles() {
-        printf("resize skipped window=%d remaining_cycles=%d\n", windowIndex, 3 - cycles);
-        ++resizeSkipped;
-        resizeSkippedCycles += 3 - cycles;
-        resizing = false;
-        finishWindow();
-    }
-    void checkNoFrames(std::chrono::steady_clock::time_point now) {
-        if (finished || now - lastRenderedFrame < noFrameLimit) return;
-        printf("SKIP: window %d renders no frames (occluded or hidden)\n", windowIndex);
-        skipRemainingCycles();
-    }
-    void enqueueInPrelude() {
-        using namespace mcp::internal;
-        check("large frame exceeds small framebuffer", largeFrameSeen);
-        checkCleared();
-        auto& ctx = context();
-        const auto [w, h] = internal::captureWindowSize(ctx);
-        printf("resize prelude window=%d cycle=%d current=%zux%zu previous=%dx%d budget=%zu\n",
-            windowIndex, cycles + 1, w, h, ctx.lastSwapchain.width, ctx.lastSwapchain.height,
-            mcp::getAdmissionLimits().workingBytes);
-        check("next-frame prelude sees resized physical framebuffer",
-            w == size_t(320 * expectedDpi) && h == size_t(240 * expectedDpi));
-        rejections = admissionRejections(AdmissionStore::Working);
-        auto promise = std::make_shared<std::promise<ReplyThunk>>();
-        reply = promise->get_future();
-        getHttpChannel().send(mcp::McpRequest{request("tc_save_screenshot",
-            {{"path", internal::pathToUtf8(output)}, {"window", windowIndex}}),
-            promise, std::make_shared<WorkBudget>(true)});
-        // Same queue dispatcher as beginScheduledFrame, while still in its
-        // main-thread prelude, before beginFrame/update/draw on the main window.
-        mcp::processHttpQueue();
-        ++resizeSaves;
-        const bool accepted = reply.wait_for(std::chrono::seconds(0)) != std::future_status::ready &&
-            deferredResponses().size() == 1;
-        if (accepted) ++resizeAccepted;
-        check("real resized save accepted and deferred before drawing", accepted);
-        check("enqueue has no stale-size working rejection",
-            admissionRejections(AdmissionStore::Working) == rejections);
-        check("deferred save retains bounded working credits",
-            accepted && workingMemory() > 0 && workingMemory() <= mcp::getAdmissionLimits().workingBytes);
-    }
-    void afterFrame() {
-        lastRenderedFrame = std::chrono::steady_clock::now();
-        if (dpiSkipped) return;
-        if (verifyAdmission) {
-            verifyAdmission = false;
-            checkReadbackAdmission(savedPixelCount, windowIndex ? &context() : nullptr);
-            if (cycles == 3) finishWindow();
-            else grow();
-            return;
-        }
-        if (finished) return;
-        if (resizing) {
-            // afterFrame runs after this window's native tick has refreshed its
-            // framebuffer cache. Only then enqueue for the next main prelude.
-            const auto [w, h] = internal::captureWindowSize(context());
-            if (w == size_t(320 * expectedDpi) && h == size_t(240 * expectedDpi)) {
-                resizing = false;
-                waiting = true;
-                internal::mainThreadQueue().send([this] { enqueueInPrelude(); });
-            } else if (++resizeFrames >= resizeFrameLimit) {
-                skipResize(320 * expectedDpi, 240 * expectedDpi);
-            }
-            return;
-        }
-        if (waiting) return;
-        if (++largeFrames < 3) return;
-        const auto [w, h] = internal::captureWindowSize(context());
-        largeFrameSeen = w > size_t(320 * expectedDpi) && h > size_t(240 * expectedDpi);
-        if (!largeFrameSeen) {
-            if (largeFrames >= resizeFrameLimit) skipResize(3840, 2160);
-            return;
-        }
-        auto& ctx = context();
-        printf("resize large window=%d cycle=%d actual=%dx%d logical=%dx%d dpi=%.2f\n",
-            windowIndex, cycles + 1, ctx.lastSwapchain.width, ctx.lastSwapchain.height,
-            getWindowWidth(), getWindowHeight(), double(getDpiScale()));
-        setWindowSize(320, 240);
-        resizing = true;
-        resizeFrames = 0;
-    }
-    void finishWindow() {
-        finished = true;
-        if (windowIndex) return;
-        if constexpr (internal::supportsSecondaryWindows()) {
-            WindowSettings settings;
-            settings.setSize(3840 / expectedDpi, 2160 / expectedDpi);
-            settings.setHighDpi(expectedDpi == 2);
-            settings.sampleCount = 1;
-            secondary = createWindow(settings);
-            check("supported platform creates real secondary window", bool(secondary));
-            if (secondary) {
-                // setup() waits for the first native tick, which an occluded
-                // window may never receive. Count it at creation instead.
-                ++resizeWindows;
-                secondaryApp = internal::makeConstructedApp<ResizeDisplayApp>();
-                secondaryApp->windowIndex = 1;
-                internal::WindowRequestAccess::attachCandidate(*secondary, secondaryApp);
-                return;
-            }
-        } else {
-            ++resizeSkipped;
-            printf("SKIP: secondary windows unsupported on this platform\n");
-        }
-        resizeCompleted = true;
-        exitApp();
-    }
-public:
-    void setup() override {
-        if (!windowIndex && skipMonitorDpi()) {
-            dpiSkipped = true;
-            exitApp();
-            return;
-        }
-        if (!windowIndex) {
-            ++resizeWindows;
-            mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
-            mcp::stopHttpServer();
-            auto limits = mcp::getAdmissionLimits();
-            // Independent requested logical dimensions times measured DPI. Leave
-            // 3 MiB above the current physical save bound for request overhead;
-            // the previous large framebuffer must still exceed this allowance.
-            const auto scale = double(getDpiScale());
-            limits.workingBytes = size_t(320 * scale) * size_t(240 * scale) * 64 + 4 * 1024 * 1024;
-            limits.outstanding = 1; // Every completed save must return its slot.
-            check("resize working budget configured", mcp::setAdmissionLimits(limits));
-            mcp::internal::resetHttpChannel();
-        }
-        output = fs::temp_directory_path() / ("tc-admission-resize-" + std::to_string(windowIndex) + ".png");
-        std::error_code ec;
-        fs::remove(output, ec);
-        after = events().afterFrame.listen([this] { afterFrame(); });
-    }
-    void update() override {
-        const auto now = std::chrono::steady_clock::now();
-        // Only the main window is guaranteed to tick while a secondary is
-        // occluded. Poll here, including before the secondary's first setup.
-        if (!windowIndex) {
-            checkNoFrames(now);
-            if (secondaryApp) secondaryApp->checkNoFrames(now);
-            if (finished && secondaryApp && secondaryApp->finished) {
-                resizeCompleted = true;
-                secondary->close();
-                exitApp();
-                return;
-            }
-        }
-        if (now - started > std::chrono::seconds(45)) {
-            check("resize mode completes within 45 seconds", false);
-            exitApp(1);
-            return;
-        }
-    }
-    void draw() override {
-        clear(0.2f, 0.4f, 0.6f);
-        if (!waiting || !reply.valid()) return;
-        // This closure runs after the current native callback has returned,
-        // so both drawable pointers must already have been cleared by core.
-        internal::mainThreadQueue().send([this] {
-            using namespace mcp::internal;
-            checkCleared();
-            if (!reply.valid()) return;
-            const bool ready = reply.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-            check("real resized save completes after its frame", ready);
-            if (!ready) return;
-            bool ok = false;
-            try { ok = !toolError(json::parse(reply.get()())); }
-            catch (const std::exception& e) { printf("resize reply exception: %s\n", e.what()); }
-            check("real resized save succeeds", ok);
-            Pixels pixels;
-            const bool loaded = bool(pixels.load(output));
-            const auto [w, h] = internal::captureWindowSize(context());
-            check("saved output equals current physical framebuffer",
-                loaded && pixels.getWidth() == 320 * expectedDpi && pixels.getHeight() == 240 * expectedDpi &&
-                size_t(pixels.getWidth()) == w && size_t(pixels.getHeight()) == h);
-            check("completion has no stale-size working rejection",
-                admissionRejections(AdmissionStore::Working) == rejections);
-            check("completion releases deferred capture and all working credits",
-                !hasDeferredResponses() && workingMemory() == 0);
-            bool slotReleased = false;
-            try {
-                WorkScope scope(std::make_shared<WorkBudget>(true));
-                auto credit = acquireScreenshotCredit();
-                slotReleased = bool(credit);
-            } catch (const AdmissionError&) {}
-            check("completion returns the sole screenshot slot", slotReleased && workingMemory() == 0);
-            printf("resize saved window=%d cycle=%d output=%dx%d credits=%zu\n",
-                windowIndex, cycles + 1, pixels.getWidth(), pixels.getHeight(), workingMemory());
-            std::error_code ec;
-            fs::remove(output, ec);
-            waiting = false;
-            ++cycles;
-            ++resizeCycles;
-            // Independently predict the requested physical size even if saving failed.
-            const auto scale = double(getDpiScale());
-            savedPixelCount = size_t(320 * scale) * size_t(240 * scale);
-            // Rejection probes need a live drawable; run in the next afterFrame.
-            verifyAdmission = true;
-        });
-    }
-    void cleanup() override {
-        mcp::stopHttpServer();
-        std::error_code ec;
-        fs::remove(output, ec);
-    }
-};
-class AdmissionDisplayApp : public App {
-    EventListener after;
-public:
-    void setup() override {
-        mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
-        mcp::stopHttpServer();
-        after = events().afterFrame.listen([] {
-            if (gpuCompleted) return;
-            gpuCompleted = true;
-            if (skipMonitorDpi()) {
-                dpiSkipped = true;
-                exitApp();
-                return;
-            }
-            using namespace mcp::internal;
-            auto& ctx = internal::windowApiContext();
-            const auto [width, height] = internal::captureWindowSize(ctx);
-            const int logicalWidth = getWindowWidth(), logicalHeight = getWindowHeight();
-            Pixels pixels;
-            check("real main swapchain readback succeeds", captureWindow(pixels));
-            check("admission dimensions match real readback pixels",
-                width == size_t(pixels.getWidth()) && height == size_t(pixels.getHeight()));
-            check("real framebuffer has requested DPI ratio",
-                logicalWidth > 0 && logicalHeight > 0 &&
-                pixels.getWidth() == logicalWidth * expectedDpi && pixels.getHeight() == logicalHeight * expectedDpi);
-            check("main context dimensions agree before readback", ctx.hostWindow && ctx.fbWidth == pixels.getWidth() && ctx.fbHeight == pixels.getHeight());
-            printf("real screenshot DPI=%d: logical=%dx%d framebuffer=%zux%zu readback=%dx%d scale=%.2f\n",
-                expectedDpi, logicalWidth, logicalHeight, width, height,
-                pixels.getWidth(), pixels.getHeight(), double(getDpiScale()));
-            checkReadbackAdmission(size_t(pixels.getWidth()) * size_t(pixels.getHeight()));
-            exitApp();
-        });
-    }
-    void draw() override { clear(0.2f, 0.4f, 0.6f); }
-};
+json content(const json& reply) {
+    return json::parse(reply.at("result").at("content").at(0).at("text").get<std::string>());
 }
-TC_CORE_TEST_MAIN(int argc, char** argv) {
-#ifdef _WIN32
-    _putenv_s("TRUSSC_MCP", "0");
-#else
-    setenv("TRUSSC_MCP", "0", 1);
-#endif
-    if (argc > 1) {
-        if (argc != 3 || (std::strcmp(argv[1], "--gpu-check") != 0 && std::strcmp(argv[1], "--gpu-check-resize") != 0) ||
-            (std::strcmp(argv[2], "--dpi=1") != 0 && std::strcmp(argv[2], "--dpi=2") != 0)) {
-            printf("Usage: mcpAdmissionConstruction [--gpu-check|--gpu-check-resize --dpi=1|--dpi=2]\n");
-            return 2;
-        }
-        expectedDpi = argv[2][6] - '0';
-#ifdef TC_ADMISSION_CAPTURE_PROBE
-        realCapture = true;
-#endif
-        WindowSettings settings;
-        const bool resize = std::strcmp(argv[1], "--gpu-check-resize") == 0;
-        settings.setSize(resize ? 3840 / expectedDpi : 320, resize ? 2160 / expectedDpi : 240);
-        settings.setHighDpi(expectedDpi == 2);
-        settings.sampleCount = 1;
-        if (resize) return tcCoreTest::runDisplayTest<ResizeDisplayApp>(settings, failures, [] {
-            if (dpiSkipped) {
-                printf("mcpAdmissionConstruction RESIZE DPI=2: 0/0 checks, DPI-only run skipped\n");
-                return;
-            }
-            check("real resize run completed", resizeCompleted);
-            check("three resize cycles completed or skipped per window",
-                resizeCycles + resizeSkippedCycles == resizeWindows * 3);
-            printf("mcpAdmissionConstruction RESIZE DPI=%d: windows=%d skipped=%d cycles=%d saves=%d accepted=%d pointer_checks=%d checks=%d/%d failures=%d\n",
-                expectedDpi, resizeWindows, resizeSkipped, resizeCycles, resizeSaves, resizeAccepted,
-                resizePointerChecks, checks - failures, checks, failures);
-        });
-        return tcCoreTest::runDisplayTest<AdmissionDisplayApp>(settings, failures, [] {
-            if (dpiSkipped) {
-                printf("mcpAdmissionConstruction GPU DPI=2: 0/0 checks, DPI-only run skipped\n");
-                return;
-            }
-            check("real framebuffer admission run completed", gpuCompleted);
-            printf("mcpAdmissionConstruction GPU DPI=%d: %d/%d checks passed, %d failures\n",
-                expectedDpi, checks - failures, checks, failures);
-        });
-    }
+} // namespace
+TC_CORE_TEST_MAIN() {
+    getMainThreadId();
+    tcCoreTest::WindowFixture receiver;
+    receiver.window->context().fbWidth = 3840;
+    receiver.window->context().fbHeight = 2160;
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::stopHttpServer();
-    using namespace mcp::internal;
-    const auto defaults = mcp::getAdmissionLimits();
-    int workingWarnings = 0, connectionWarnings = 0, replyWarnings = 0;
-    auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
-        if (event.level != LogLevel::Warning) return;
-        if (event.message.find("[MCP] working memory capacity ") == 0) ++workingWarnings;
-        if (event.message.find("[MCP] connections capacity ") == 0) ++connectionWarnings;
-        if (event.message.find("[MCP] reply capacity ") == 0) ++replyWarnings;
-    });
-    size_t mcp::AdmissionLimits::* const fields[] = {
-        &mcp::AdmissionLimits::bodyBytes, &mcp::AdmissionLimits::jsonDepth,
-        &mcp::AdmissionLimits::outstanding, &mcp::AdmissionLimits::workers,
-        &mcp::AdmissionLimits::lineBytes, &mcp::AdmissionLimits::headerBytes,
-        &mcp::AdmissionLimits::headerCount, &mcp::AdmissionLimits::histogramBins,
-        &mcp::AdmissionLimits::gridCells, &mcp::AdmissionLimits::operations,
-        &mcp::AdmissionLimits::replyBytes, &mcp::AdmissionLimits::workingBytes};
-    auto sameLimits = [&](const mcp::AdmissionLimits& a, const mcp::AdmissionLimits& b) {
-        for (auto field : fields) if (a.*field != b.*field) return false;
-        return true;
-    };
-    int configurationWarnings = 0;
-    auto configurationListener = getLogger().onLog.listen([&](LogEventArgs& event) {
-        if (event.level == LogLevel::Warning && event.message.find("[MCP] Admission limits rejected: ") == 0) {
-            ++configurationWarnings;
-            // Reentrant query verifies logging happens after unlocking.
-            (void)mcp::getAdmissionLimits();
-        }
-    });
-    auto expectConfigurationRejection = [&](const mcp::AdmissionLimits& limits) {
-        const auto previous = mcp::getAdmissionLimits();
-        const auto before = admissionRejections(AdmissionStore::Configuration);
-        const int warningsBefore = configurationWarnings;
-        check("configuration rejection returns false", !mcp::setAdmissionLimits(limits));
-        check("configuration rejection logs exactly one Warning", configurationWarnings == warningsBefore + 1);
-        check("configuration rejection increments counter once", admissionRejections(AdmissionStore::Configuration) == before + 1);
-        check("configuration rejection preserves every limit", sameLimits(previous, mcp::getAdmissionLimits()));
-    };
-    auto configured = defaults;
-    configured.bodyBytes /= 2;
-    const auto beforeConfiguration = admissionRejections(AdmissionStore::Configuration);
-    check("valid configuration returns true", mcp::setAdmissionLimits(configured));
-    check("valid configuration applies every limit", sameLimits(configured, mcp::getAdmissionLimits()));
-    check("valid configuration does not warn or count rejection", configurationWarnings == 0 &&
-        admissionRejections(AdmissionStore::Configuration) == beforeConfiguration);
-    for (auto field : fields) {
-        auto invalid = defaults;
-        invalid.*field = 0;
-        expectConfigurationRejection(invalid);
-    }
-    {
-        WorkScope scope;
-        reserveWork(1);
-        expectConfigurationRejection(defaults);
-        expectConfigurationRejection(defaults);
-    }
-#ifndef __EMSCRIPTEN__
-#ifdef _WIN32
-    _putenv_s("TRUSSC_MCP", "1");
-#else
-    setenv("TRUSSC_MCP", "1", 1);
-#endif
-    mcp::startHttpServer();
-    check("configuration test starts HTTP listener", mcp::getHttpPort() != 0);
-    if (mcp::getHttpPort()) {
-        expectConfigurationRejection(defaults);
-        expectConfigurationRejection(defaults);
-    }
-    mcp::stopHttpServer();
-#ifdef _WIN32
-    _putenv_s("TRUSSC_MCP", "0");
-#else
-    setenv("TRUSSC_MCP", "0", 1);
-#endif
-#endif
-    check("configuration rejection counter persists after HTTP stop",
-        admissionRejections(AdmissionStore::Configuration) == beforeConfiguration + configurationWarnings);
-    printf("configuration: %llu rejections, %d Warnings, previous limits retained\n",
-        static_cast<unsigned long long>(admissionRejections(AdmissionStore::Configuration) - beforeConfiguration), configurationWarnings);
-    configurationListener.disconnect();
-    auto small = defaults;
-    small.workingBytes = 1024 * 1024;
-    small.bodyBytes = small.headerBytes = 1024;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(small));
-    {
-        Image image;
-        Fbo fbo;
-        image.setDebugName(std::string(4 * 1024 * 1024, 'x'));
-        fbo.setDebugName(std::string(4 * 1024 * 1024, 'y'));
-        // The first rejection Warning synchronously reenters both registries.
-        bool reentered = false;
-        auto reentrant = getLogger().onLog.listen([&](LogEventArgs& event) {
-            if (event.level != LogLevel::Warning || event.message.find("[MCP] working memory capacity ") != 0) return;
-            image.setDebugName("warning observed");
-            fbo.setDebugName("warning observed");
-            Image created;
-            Fbo createdFbo;
-            created.setDebugName("created by listener");
-            createdFbo.setDebugName("created by listener");
-            reentered = !internal::debugObjects(internal::DebugObjectKind::Image).empty() &&
-                !internal::debugObjects(internal::DebugObjectKind::Fbo).empty();
-            (void)workingMemory();
-        });
-        const auto beforeWarning = admissionRejections(AdmissionStore::Working);
-        check("reentrant registry Warning returns tool error", toolError(json::parse(Server::instance().processMessage(request("tc_list_images")))));
-        check("Warning listener can rename, create, query and destroy Image/Fbo", reentered);
-        check("reentrant Warning counts exactly one rejection", admissionRejections(AdmissionStore::Working) == beforeWarning + 1);
-        check("reentrant Warning retires working credits", workingMemory() == 0);
-        reentrant.disconnect();
-        image.setDebugName(std::string(4 * 1024 * 1024, 'x'));
-        fbo.setDebugName(std::string(4 * 1024 * 1024, 'y'));
-        for (const auto& raw : {request("tc_list_images"), request("tc_list_fbos"),
-                request("tc_analyze_image", {{"source", {{"image", 1}}}, {"ops", json::array({{{"op", "stats"}}})}}),
-                request("tc_analyze_image", {{"source", {{"fbo", 1}}}, {"ops", json::array({{{"op", "stats"}}})}})}) {
-            const auto before = admissionRejections(AdmissionStore::Working);
-            largest = 0;
-            std::string response;
-            {
-                WorkScope scope(std::make_shared<WorkBudget>(true));
-                tracking = true;
-                response = Server::instance().processMessage(raw);
-                tracking = false;
-            }
-            const auto envelope = json::parse(response);
-            check("oversized registry name returns a correlated tool error in HTTP scope", toolError(envelope) && envelope.at("id") == 19);
-            check("snapshot rejects before any oversized allocation", largest <= small.workingBytes);
-            check("snapshot rejection increments working counter", admissionRejections(AdmissionStore::Working) == before + 1);
-            check("snapshot rejection retires credits", workingMemory() == 0);
-            printf("registry probe: largest allocation=%zu, working limit=%zu\n", largest, small.workingBytes);
-        }
-    }
-    check("registry overflow emits one working Warning", workingWarnings == 1);
-    // Snapshot fits; incremental JSON storage does not fit the working budget.
-    {
-        Image image;
-        image.setDebugName(std::string(200000, 'x'));
-        const auto before = admissionRejections(AdmissionStore::Working);
-        largest = 0; tracking = true;
-        const auto response = Server::instance().processMessage(request("tc_list_images"));
-        tracking = false;
-        check("incremental JSON working admission returns tool error", toolError(json::parse(response)));
-        check("incremental JSON rejects before oversized allocation", largest <= small.workingBytes);
-        check("incremental JSON working rejection counted", admissionRejections(AdmissionStore::Working) == before + 1);
-        check("incremental JSON working credits retire", workingMemory() == 0);
-    }
-    // Metadata is app-owned at registration; all request-time copies must be admitted.
-    for (int field = 0; field < 9; ++field) {
-        int owner;
-        setRegistrationOwner(&owner);
-        mcp::Tool tool;
-        tool.name = "000_metadata_probe";
-        tool.description = "small description";
-        tool.handler = [](const json&) { return json(nullptr); };
-        mcp::Resource resource;
-        resource.uri = "000_probe://metadata";
-        resource.name = "probe";
-        resource.description = "small description";
-        resource.mimeType = "text/plain";
-        const std::string huge(4 * 1024 * 1024, 'x');
-        if (field == 0) tool.description = huge;
-        if (field == 1) tool.name = "000_" + huge;
-        if (field >= 2 && field <= 4) {
-            mcp::ToolArg arg{"probe", "string", "description", true};
-            if (field == 2) arg.description = huge;
-            if (field == 3) arg.name = huge;
-            if (field == 4) arg.type = huge;
-            tool.args.push_back(std::move(arg));
-        }
-        if (field == 5) resource.description = huge;
-        if (field == 6) resource.uri = huge;
-        if (field == 7) resource.name = huge;
-        if (field == 8) resource.mimeType = huge;
-        if (field < 5) Server::instance().registerTool(tool);
-        else Server::instance().registerResource(resource);
-        setRegistrationOwner(nullptr);
-        const std::string raw = json{{"jsonrpc", "2.0"}, {"id", 19},
-            {"method", field < 5 ? "tools/list" : "resources/list"}}.dump();
-        const auto before = admissionRejections(AdmissionStore::Working);
-        bool rejected = false;
-        largest = 0;
-        {
-            WorkScope scope(std::make_shared<WorkBudget>(true));
-            tracking = true;
-            try { (void)Server::instance().processMessage(raw); }
-            catch (const AdmissionError&) { rejected = true; }
-            tracking = false;
-        }
-        check("oversized metadata/schema rejects in HTTP scope", rejected);
-        check("metadata/schema rejects before oversized allocation", largest <= small.workingBytes);
-        check("metadata/schema increments working counter", admissionRejections(AdmissionStore::Working) == before + 1);
-        check("metadata/schema rejection retires credits", workingMemory() == 0);
-        printf("metadata probe field=%d: largest allocation=%zu, working limit=%zu\n", field, largest, small.workingBytes);
-        Server::instance().removeOwnedBy(&owner);
-    }
-    // Also exercise successful lists, including required/nullable schemas.
-    {
-        WorkScope scope;
-        const auto tools = json::parse(Server::instance().processMessage(R"({"jsonrpc":"2.0","id":19,"method":"tools/list"})"));
-        check("incrementally admitted tools list succeeds", tools.at("result").at("tools").is_array() && !tools.at("result").at("tools").empty());
-        const auto resources = json::parse(Server::instance().processMessage(R"({"jsonrpc":"2.0","id":19,"method":"resources/list"})"));
-        check("incrementally admitted resources list succeeds", resources.at("result").at("resources").is_array());
-    }
-    small = defaults;
-    small.replyBytes = 4096;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(small));
-    {
-        Image image;
-        Fbo fbo;
-        image.setDebugName(std::string(4096, 'x'));
-        fbo.setDebugName(std::string(4096, 'y'));
-        for (const char* tool : {"tc_list_images", "tc_list_fbos"}) {
-            const auto before = admissionRejections(AdmissionStore::Reply);
-            check("incremental JSON reply admission returns tool error", toolError(json::parse(Server::instance().processMessage(request(tool)))));
-            check("incremental JSON reply rejection counted", admissionRejections(AdmissionStore::Reply) == before + 1);
-            check("incremental JSON reply credits retire", workingMemory() == 0);
-        }
-    }
-    check("reply overflow emits one Warning", replyWarnings == 1);
+    mcp::internal::resetHttpChannel();
+    const auto dir = fs::temp_directory_path() / ("mcp-now-works-" + std::to_string(getSystemTimeMicros()));
+    fs::create_directories(dir);
+    setDataPathRoot(dir);
 #ifdef TC_ADMISSION_CAPTURE_PROBE
-    Window primary;
-    internal::WindowRequestAccess::bindForTests(primary, 101);
-    OpenWindow secondary;
-    auto& main = primary.context();
-    auto* processCaller = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &main;
-    struct RestoreCaller {
-        internal::WindowContext* previous;
-        ~RestoreCaller() { internal::currentWindowCtx() = previous; }
-    } restoreCaller{processCaller};
-    const std::initializer_list<int> windows{101, 202};
-    auto dimensions = [&](int width, int height) {
-        secondary.context().fbWidth = width;
-        secondary.context().fbHeight = height;
-        main.fbWidth = width; main.fbHeight = height;
-    };
-    small = defaults;
-    small.outstanding = 1;
-    small.workingBytes = 8 * 1024 * 1024;
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(small));
-    dimensions(3840, 2160);
-    for (int window : windows) {
-        const auto before = admissionRejections(AdmissionStore::Working);
-        largest = 0; tracking = true;
-        const auto response = Server::instance().processMessage(request("tc_save_screenshot", {{"path", "admission.png"}, {"window", window}}));
-        tracking = false;
-        check("4K save rejects before capture in either window", toolError(json::parse(response)));
-        check("4K save allocates no oversized readback or encoder buffer", largest <= small.workingBytes);
-        check("4K save rejection counted and releases credits", admissionRejections(AdmissionStore::Working) == before + 1 && workingMemory() == 0);
-    }
-    auto queuedSave = [&](int window) {
-        auto promise = std::make_shared<std::promise<ReplyThunk>>();
-        auto future = promise->get_future();
-        getHttpChannel().send(mcp::McpRequest{request("tc_save_screenshot", {{"path", "admission.png"}, {"window", window}}),
-            promise, std::make_shared<WorkBudget>(true)});
-        mcp::processHttpQueue();
-        return future;
-    };
-    // Model a completed 4K frame, then resize before the next prelude. No
-    // GPU is needed: the native dimension wrappers and real prelude dispatch
-    // exercise enqueue independently of the previous frame's swapchain size.
-    for (int window : windows) {
-        auto& ctx = window == 202 ? secondary.context() : main;
-        dimensions(3840, 2160);
-        ctx.lastSwapchain.width = 3840;
-        ctx.lastSwapchain.height = 2160;
-        ctx.lastSwapchainDrawable = nativeStandIn;
-        ctx.lastSwapchain.metal.current_drawable = nativeStandIn;
-        ctx.clearFrameDrawable(); // same frame-end cleanup as Apple callbacks
-        check("frame end clears both borrowed drawable pointers",
-            !ctx.lastSwapchainDrawable && !ctx.lastSwapchain.metal.current_drawable);
-        dimensions(320, 240);
-        resetHttpChannel();
-        auto promise = std::make_shared<std::promise<ReplyThunk>>();
-        auto future = promise->get_future();
-        getHttpChannel().send(mcp::McpRequest{request("tc_save_screenshot",
-            {{"path", "admission.png"}, {"window", window}}), promise, std::make_shared<WorkBudget>(true)});
-        const auto before = admissionRejections(AdmissionStore::Working);
-        tcCoreTest::beginScheduledFrame(std::chrono::steady_clock::now());
-        check("next-frame prelude admits resized 320x240 save after 4K frame",
-            deferredResponses().size() == 1 && future.wait_for(std::chrono::seconds(0)) != std::future_status::ready);
-        check("next-frame enqueue charges current size without stale-size rejection",
-            admissionRejections(AdmissionStore::Working) == before &&
-            workingMemory() >= 5963776 && workingMemory() < small.workingBytes);
-        mcp::stopHttpServer();
-        check("cross-frame resize cleanup releases capture and credits",
-            future.wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
-            toolError(json::parse(future.get()())) && !hasDeferredResponses() && workingMemory() == 0);
-        printf("cross-frame resize window=%d: 3840x2160 -> 320x240, capture charge=5963776, limit=%zu\n",
-            window, small.workingBytes);
-    }
-    for (int window : windows) {
-        dimensions(32, 32);
-        resetHttpChannel();
-        const auto before = admissionRejections(AdmissionStore::Connections);
-        auto first = queuedSave(window);
-        int rejected = 0;
-        for (int i = 1; i < 1000; ++i) {
-            auto result = queuedSave(window == 101 ? 202 : 101); // slot is shared across windows
-            if (result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-                try { (void)result.get()(); } catch (const AdmissionError&) { ++rejected; }
-            }
-        }
-        check("1000 saves retain only one deferred capture", deferredResponses().size() == 1 && rejected == 999);
-        check("queued save retains working credits after dispatch", workingMemory() >= 1024 * 1024);
-        check("queued MCP save does not enter application path queue", main.pendingScreenshotPaths.empty() && secondary.context().pendingScreenshotPaths.empty());
-        check("999 excess saves increment rejection counter", admissionRejections(AdmissionStore::Connections) == before + 999);
-        const auto& pending = deferredResponses().front();
-        check("save defers to the requested window", pending.target == (window == 202 ? &secondary.context() : &main));
-        // Grow after admission: drain must reject before native GPU readback.
-        auto& ctx = window == 202 ? secondary.context() : main;
-        dimensions(3840, 2160);
-        const auto beforeGrowth = admissionRejections(AdmissionStore::Working);
-        largest = 0; tracking = true;
-        const void* ownerTarget = window == 202 ? &secondary.context() : &main;
-        if (window == 202) {
-            auto* previous = internal::currentWindowCtx();
-            internal::currentWindowCtx() = &ctx;
-            drainDeferredResponses(ownerTarget);
-            internal::currentWindowCtx() = previous;
-        }
-        else drainDeferredResponses(&main);
-        tracking = false;
-        check("dimension growth rejects at drain before oversized allocation", largest <= small.workingBytes && toolError(json::parse(first.get()())));
-        check("save growth rejection increments working counter", admissionRejections(AdmissionStore::Working) == beforeGrowth + 1);
-        check("capture failure retires slot and working credits", !hasDeferredResponses() && workingMemory() == 0);
-        printf("screenshot probe window=%d: 1000 requests, 1 queued, %d rejected\n", window, rejected);
-    }
-    // Readback-only tools defer admission until the actual capture point.
-    for (int window : windows) {
-        for (const char* name : {"tc_get_screenshot", "tc_analyze_image"}) {
-            dimensions(32, 32);
-            resetHttpChannel();
-            auto promise = std::make_shared<std::promise<ReplyThunk>>();
-            auto future = promise->get_future();
-            json args = std::string(name) == "tc_get_screenshot" ? json{{"window", window}} :
-                json{{"source", {{"window", window}}}, {"ops", json::array({{{"op", "stats"}}})}};
-            getHttpChannel().send(mcp::McpRequest{request(name, args), promise, std::make_shared<WorkBudget>(true)});
-            mcp::processHttpQueue();
-            check("window readback waits for target frame", hasDeferredResponses() && future.wait_for(std::chrono::seconds(0)) != std::future_status::ready);
-            dimensions(3840, 2160);
-            const auto before = admissionRejections(AdmissionStore::Working);
-            largest = 0; tracking = true;
-            auto* previous = internal::currentWindowCtx();
-            if (window == 202) internal::currentWindowCtx() = &secondary.context();
-            drainDeferredResponses(window == 202 ? &secondary.context() : &main);
-            internal::currentWindowCtx() = previous;
-            tracking = false;
-            check("grown window readback rejects before oversized allocation", largest <= small.workingBytes && toolError(json::parse(future.get()())));
-            check("readback rejection counted and releases credits", admissionRejections(AdmissionStore::Working) == before + 1 && workingMemory() == 0);
-        }
-    }
-    check("capture overflow emits one connections Warning", connectionWarnings == 1);
-    // Keep reservation queries small while the capture observes its own extent.
-    // The common capture-source boundary isolates this transition without GL.
-    const auto extentPath = fs::temp_directory_path() / "tc-admission-source-extent.png";
-    {
-        std::error_code ec;
-        fs::remove(extentPath, ec);
-    }
-    modeledCapture = true;
-    for (const char* name : {"tc_get_screenshot", "tc_analyze_image", "tc_save_screenshot"}) {
-        const bool save = std::string(name) == "tc_save_screenshot";
-        for (int extent : {2048, 32, 64}) {
-            dimensions(32, 32);
-            pixelReads = capturePrefixes = 0;
-            readbackWorking = 0;
-            sourceWidth = sourceHeight = extent;
-            resetHttpChannel();
-            auto promise = std::make_shared<std::promise<ReplyThunk>>();
-            auto future = promise->get_future();
-            json args = std::string(name) == "tc_analyze_image" ?
-                json{{"source", {{"window", 101}}}, {"ops", json::array({{{"op", "stats"}}})}} : json{{"window", 101}};
-            if (save) args["path"] = internal::pathToUtf8(extentPath);
-            if (std::string(name) == "tc_get_screenshot") args["width"] = 16;
-            const auto before = admissionRejections(AdmissionStore::Working);
-            largest = 0; tracking = true;
-            getHttpChannel().send(mcp::McpRequest{request(name, args), promise, std::make_shared<WorkBudget>(true)});
-            mcp::processHttpQueue();
-            drainDeferredResponses(&main);
-            const bool ready = future.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
-            bool error = false;
-            if (ready) error = toolError(json::parse(future.get()()));
-            tracking = false;
-            check("modeled capture submits its renderer prefix", capturePrefixes == 1);
-            if (extent == 2048) {
-                check("source extent above allowance returns error reply", ready && error);
-                check("source extent rejection increments Working once", admissionRejections(AdmissionStore::Working) == before + 1);
-                check("source extent rejection precedes full output allocation and read", largest < size_t(extent) * extent * 4 && pixelReads == 0);
-            } else {
-                check("source extent within allowance succeeds", ready && !error && pixelReads == 1);
-                check("source extent within allowance has no Working rejection", admissionRejections(AdmissionStore::Working) == before);
-                const size_t expected = size_t(extent) * extent * (save ? 64 : 8) + (save ? 1024 * 1024 : 0);
-                check("source extent workspace is reserved before read", readbackWorking >= expected && readbackWorking < small.workingBytes);
-            }
-            check("source extent completion releases deferred work and credits", !hasDeferredResponses() && workingMemory() == 0);
-            if (save) {
-                check("source extent save writes only admitted output", fs::exists(extentPath) == (extent != 2048));
-                std::error_code ec;
-                fs::remove(extentPath, ec);
-            }
-        }
-    }
-    // Application capture has no WorkBudget and keeps its normal behavior.
-    dimensions(32, 32);
-    sourceWidth = sourceHeight = 32;
-    {
-        Pixels pixels;
-        const auto before = admissionRejections(AdmissionStore::Working);
-        check("application capture without a budget succeeds", captureWindow(pixels) && pixels.getWidth() == 32);
-        check("application capture leaves Working admission unchanged", workingMemory() == 0 && admissionRejections(AdmissionStore::Working) == before);
-    }
-    modeledCapture = false;
-    // Shutdown also releases the deferred producer and its credits.
-    dimensions(32, 32);
-    resetHttpChannel();
-    auto cancelled = queuedSave(101);
-    mcp::stopHttpServer();
-    check("shutdown answers admitted save and releases all credits", cancelled.wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
-        toolError(json::parse(cancelled.get()())) && workingMemory() == 0 && !hasDeferredResponses());
-    internal::WindowRequestAccess::unbind(primary);
-
+    // Existing headless framebuffer seam exercises the production MCP save path.
+    const auto saved = content(dispatch(request("tc_save_screenshot", {{"path", "4k.png"}}), true));
+    check("3840x2160 MCP screenshot save succeeds", saved.value("status", "") == "ok");
+    Pixels screenshot;
+    check("saved screenshot has 4K dimensions", screenshot.load(dir / "4k.png") &&
+        screenshot.getWidth() == 3840 && screenshot.getHeight() == 2160);
 #endif
-    check("admission limits configuration succeeds", mcp::setAdmissionLimits(defaults));
     {
-        WorkScope scope;
-        reserveWindowCapture(32, 32);
-        const size_t initial = workingMemory();
-        reconcileWindowCapture(32, 32);
-        check("matching source extent retains its existing reservation", workingMemory() == initial);
-        reconcileWindowCapture(16, 16);
-        check("smaller source extent retains its existing reservation", workingMemory() == initial);
-        reconcileWindowCapture(64, 64);
-        check("larger source extent reserves only the difference", workingMemory() == size_t(64) * 64 * 8);
-        const auto before = admissionRejections(AdmissionStore::Working);
-        bool rejected = false;
-        try { reconcileWindowCapture(SIZE_MAX, SIZE_MAX); }
-        catch (const AdmissionError&) { rejected = true; }
-        check("source extent product is checked and counted", rejected && admissionRejections(AdmissionStore::Working) == before + 1);
+        Pixels source;
+        source.allocate(2304, 2304, 4);
+        std::memset(source.getData(), 127, source.getTotalBytes());
+        check("large local image saved", bool(source.save(dir / "large.png")));
     }
-    check("source extent arithmetic checks release credits", workingMemory() == 0);
+    auto analyzed = content(dispatch(request("tc_analyze_image", {{"source", {{"path", "large.png"}}},
+        {"ops", json::array({{{"op", "pixel"}, {"x", 2303}, {"y", 2303}}})}})));
+    check("local image above 2048x2048 is analyzed", analyzed["width"] == 2304 && analyzed["height"] == 2304 && analyzed.contains("results"));
+    // Fail an actual allocation once, so error reporting itself can allocate.
+    mcp::tool("allocation_pixels", "pixel allocation failure").bind([]() -> json {
+        failNextAllocation = true;
+        Pixels pixels; pixels.allocate(128, 128, 4);
+        return {{"unexpected", true}};
+    });
+    mcp::tool("allocation_json", "JSON allocation failure").bind([]() -> json {
+        failNextAllocation = true;
+        return json::array({1, 2, 3});
+    });
+    mcp::tool("allocation_main", "deferred main allocation failure").bind([]() -> json {
+        mcp::deferToolResultUntilAfterFrame([]() -> json {
+            failNextAllocation = true;
+            return json::array({1, 2, 3});
+        });
+        return nullptr;
+    });
+    mcp::tool("allocation_worker", "deferred worker allocation failure").bind([]() -> json {
+        mcp::deferToolResultTwoStage([]() -> std::function<json()> {
+            return []() -> json {
+                failNextAllocation = true;
+                return json::array({1, 2, 3});
+            };
+        });
+        return nullptr;
+    });
+    mcp::tool("allocation_envelope", "deferred envelope allocation failure").bind([]() -> json {
+        mcp::deferToolResultUntilAfterFrame([]() -> json { return nullptr; });
+        failNextAllocation = true;
+        return nullptr;
+    });
+    for (const char* name : {"allocation_pixels", "allocation_json", "allocation_main", "allocation_worker", "allocation_envelope"}) {
+        const auto reply = dispatch(request(name), true);
+        check(name, (reply.contains("error") || reply.at("result").value("isError", false)) && reply.at("id") == 19);
+        auto stringRequest = json::parse(request(name));
+        stringRequest["id"] = "request-\"19";
+        const auto stringReply = dispatch(stringRequest.dump(), true);
+        check("allocation error preserves string id through deferred stages", stringReply.at("id") == stringRequest.at("id") && stringReply.contains("error"));
+        const auto next = json::parse(mcp::internal::Server::instance().processMessage(
+            R"({"jsonrpc":"2.0","id":42,"method":"initialize"})"));
+        check("server continues after allocation failure", next["id"] == 42 && next.contains("result"));
+    }
+    for (const json& id : {json(19), json("request-\"19"), json(-42)}) {
+        auto message = json::parse(request("allocation_json"));
+        message["id"] = id;
+        const auto reply = json::parse(mcp::internal::Server::instance().processMessage(message.dump()));
+        check("synchronous allocation error preserves numeric/string id", reply.at("id") == id && reply.contains("error"));
+    }
     {
-        WorkScope scope;
-        reserveWork(defaults.workingBytes - 32 * 32 * 8);
-        reserveWindowCapture(32, 32);
-        const auto before = admissionRejections(AdmissionStore::Working);
-        bool rejected = false;
-        try { reconcileWindowCapture(64, 64); }
-        catch (const AdmissionError&) { rejected = true; }
-        check("source extent increase shares the existing Working allowance", rejected && admissionRejections(AdmissionStore::Working) == before + 1);
-        check("source extent rejection retains only prior credits", workingMemory() == defaults.workingBytes);
+        const auto message = request("allocation_json");
+        failNextAllocation = true;
+        const auto reply = json::parse(mcp::internal::Server::instance().processMessage(message));
+        check("allocation before parsing establishes id uses null", reply.at("id").is_null() && reply.contains("error"));
     }
-    check("shared source extent check releases credits", workingMemory() == 0);
-    listener.disconnect();
-    printf("mcpAdmissionConstruction: %d/%d checks passed, %d failures\n", checks - failures, checks, failures);
+    // Exercise compressed and incompressible input through normal PNG save/load.
+    for (bool random : {false, true}) {
+        Pixels original; original.allocate(257, 129, 4);
+        unsigned seed = 1234567;
+        for (size_t i = 0; i < original.getTotalBytes(); ++i) {
+            seed = seed * 1664525u + 1013904223u;
+            original.getData()[i] = random ? static_cast<unsigned char>(seed >> 24) : 127;
+        }
+        const auto path = dir / (random ? "random.png" : "uniform.png");
+        Pixels decoded;
+        check("PNG compressor roundtrip preserves pixel bytes", bool(original.save(path)) && bool(decoded.load(path)) &&
+            decoded.getTotalBytes() == original.getTotalBytes() &&
+            std::memcmp(decoded.getData(), original.getData(), original.getTotalBytes()) == 0);
+    }
+    // Each destination reserve can fail, including after earlier collections allocated.
+    // Retain every promise and producer, then retry the same pending entries.
+    for (int allocation = 0; allocation < 3; ++allocation) {
+        using namespace mcp::internal;
+        std::vector<std::future<ReplyThunk>> futures;
+        auto producer = std::make_shared<int>(1);
+        std::weak_ptr<int> lifetime = producer;
+        for (int i = 0; i < 3; ++i) {
+            DeferredResponse d;
+            d.id = 19 + i;
+            d.response = std::make_shared<std::promise<ReplyThunk>>();
+            futures.push_back(d.response->get_future());
+            d.makeEnvelope = [producer] { return [] { return std::string("ok"); }; };
+            d.target = i == 0 ? nullptr : reinterpret_cast<void*>(1);
+            d.deadline = i == 1 ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point::max();
+            deferredResponses().push_back(std::move(d));
+        }
+        producer.reset();
+        (void)deferredResponsesMutex();
+        failAllocationAfter = allocation;
+        drainDeferredResponses();
+        bool intact = deferredResponses().size() == 3 && !lifetime.expired();
+        for (const auto& d : deferredResponses()) intact = intact && bool(d.response) && bool(d.makeEnvelope);
+        for (auto& f : futures) intact = intact && f.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
+        check("partition allocation failure retains all pending producers/promises", intact && failAllocationAfter == -1);
+        drainDeferredResponses();
+        drainDeferredResponses(reinterpret_cast<void*>(1));
+        bool resolved = true;
+        for (auto& f : futures) {
+            resolved = resolved && f.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+            if (resolved) (void)f.get()();
+        }
+        check("partition retry resolves all requests and releases producers", resolved && lifetime.expired());
+    }
+#ifdef TC_ADMISSION_CAPTURE_PROBE
+    // Calibrate the final buffer size with the same input/settings. A malloc
+    // index is unstable: optimization can turn compressor realloc(NULL) into malloc.
+    Pixels encoderPixels; encoderPixels.allocate(64, 64, 4);
+    std::memset(encoderPixels.getData(), 127, encoderPixels.getTotalBytes());
+    int pngSize = 0;
+    auto* encoded = stbi_write_png_to_mem(encoderPixels.getData(), 0, 64, 64, 4, &pngSize);
+    check("PNG allocation probe obtains final buffer size", encoded && pngSize > 0);
+    std::free(encoded);
+    if (!encoded || pngSize <= 0) return 1;
+    // Filtered pixels, line storage, final PNG; zero selects the C++ output copy.
+    for (size_t allocationSize : {size_t((64 * 4 + 1) * 64), size_t(64 * 4), size_t(pngSize), size_t(0)}) {
+        if (allocationSize != 0) {
+            encoderMallocSize = allocationSize;
+            encoderMallocMatches = 0;
+            (void)mcp::internal::pixelsToImageJson(encoderPixels, "png", 0, 90);
+            encoderMallocSize = 0;
+            // Refuse an ambiguous predicate rather than failing compressor growth.
+            check("PNG size predicate uniquely identifies its allocation", encoderMallocMatches == 1);
+            if (encoderMallocMatches != 1) return 1;
+        }
+        // Select inside the handler: dispatch must retain a parsed request id.
+        mcp::tool("allocation_png", "encoder malloc failure").bind([allocationSize, &encoderPixels]() -> json {
+            encoderMallocMatches = 0;
+            if (allocationSize == 0) failNextAllocation = true;
+            else {
+                encoderMallocSize = allocationSize;
+                failEncoderMalloc = true;
+            }
+            return mcp::internal::pixelsToImageJson(encoderPixels, "png", 0, 90);
+        });
+        const auto reply = dispatch(request("allocation_png"));
+        encoderMallocSize = 0;
+        check("PNG allocation failure injection was consumed", allocationSize == 0 ? !failNextAllocation :
+            !failEncoderMalloc && encoderMallocMatches == 1);
+        check("PNG encoder allocation failure returns an MCP error with id", reply.at("id") == 19 &&
+            reply.contains("error"));
+    }
+#endif
+    // Repeat through actual HTTP workers, including deferred worker construction.
+    mcp::startHttpServer();
+    {
+        std::vector<std::shared_ptr<void>> credits;
+        for (int i = 0; i < 8; ++i) credits.push_back(mcp::internal::acquireScreenshotCredit());
+        auto body = json::parse(request("tc_save_screenshot", {{"path", "refused.png"}}));
+        body["id"] = 37;
+        const auto direct = dispatch(body.dump());
+        check("screenshot slot refusal preserves id in JSON-RPC error", direct.at("id") == 37 && direct.contains("error"));
+        auto pending = std::async(std::launch::async, [body = body.dump()] {
+            httplib::Client client("127.0.0.1", mcp::getHttpPort());
+            client.set_read_timeout(10);
+            return client.Post("/mcp", body, "application/json");
+        });
+        while (pending.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) mcp::processHttpQueue();
+        const auto response = pending.get();
+        check("HTTP screenshot slot refusal returns JSON-RPC error with id 37", response && response->status == 200 &&
+            json::parse(response->body).at("id") == 37 && json::parse(response->body).contains("error"));
+        check("refused screenshot creates no file or deferred capture", !fs::exists(dir / "refused.png") && !mcp::internal::hasDeferredResponses());
+    }
+#ifdef TC_ADMISSION_CAPTURE_PROBE
+    {
+        serverBytesRead = 0;
+        countServerReads = true;
+        const auto sock = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(mcp::getHttpPort());
+        inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+        check("request-line probe connects", connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+        timeval timeout{3, 0};
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        const std::string wire = "GET /" + std::string(1024 * 1024, 'a') + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        size_t sent = 0;
+        while (sent < wire.size()) {
+            const auto n = send(sock, wire.data() + sent, wire.size() - sent, MSG_NOSIGNAL);
+            if (n <= 0) break;
+            sent += size_t(n);
+        }
+        std::string response;
+        char buffer[1024];
+        ssize_t received;
+        while ((received = recv(sock, buffer, sizeof(buffer), 0)) > 0) response.append(buffer, size_t(received));
+        const bool closed = received == 0 || errno == ECONNRESET;
+        close(sock);
+        countServerReads = false;
+        check("1 MiB request line is refused without reading it all", closed && response.find("414") != std::string::npos &&
+            response.find("HTTP/1.1", 1) == std::string::npos && serverBytesRead > 0 && serverBytesRead <= 16384);
+        printf("request-line server bytes read: %zu\n", serverBytesRead.load());
+    }
+    {
+        serverBytesRead = 0;
+        countServerReads = true;
+        const auto sock = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(mcp::getHttpPort());
+        inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+        check("header probe connects", connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+        timeval timeout{3, 0};
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        std::string wire = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n";
+        for (int i = 0; i < 1024; ++i) wire += "X-Probe: " + std::string(1024, 'a') + "\r\n";
+        wire += "\r\n";
+        size_t sent = 0;
+        while (sent < wire.size()) {
+            const auto n = send(sock, wire.data() + sent, wire.size() - sent, MSG_NOSIGNAL);
+            if (n <= 0) break;
+            sent += size_t(n);
+        }
+        std::string response;
+        char buffer[1024];
+        ssize_t received;
+        while ((received = recv(sock, buffer, sizeof(buffer), 0)) > 0) response.append(buffer, size_t(received));
+        const bool closed = received == 0 || errno == ECONNRESET;
+        close(sock);
+        countServerReads = false;
+        // Bound (network input): this short request line and 64 KiB header cap fit within one extra read-ahead block.
+        check("oversized headers are refused without reading beyond the header bound", closed && response.find("431") != std::string::npos &&
+            response.find("HTTP/1.1", 1) == std::string::npos && serverBytesRead > 0 && serverBytesRead <= 64 * 1024 + 4096);
+        printf("header server bytes read: %zu\n", serverBytesRead.load());
+    }
+#endif
+    for (const char* name : {"allocation_pixels", "allocation_json", "allocation_main", "allocation_worker", "allocation_envelope"}) {
+        auto pending = std::async(std::launch::async, [body = request(name)] {
+            httplib::Client client("127.0.0.1", mcp::getHttpPort());
+            client.set_read_timeout(10);
+            auto result = client.Post("/mcp", body, "application/json");
+            return result && result->status == 200 && json::parse(result->body).contains("error") &&
+                json::parse(result->body).at("id") == 19;
+        });
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (mcp::internal::getHttpChannel().size() == 0 && std::chrono::steady_clock::now() < deadline)
+            std::this_thread::yield();
+        mcp::processHttpQueue();
+        mcp::internal::drainDeferredResponses(&internal::currentWindowContext());
+        check("HTTP allocation failure returns an MCP error", pending.get());
+        httplib::Client health("127.0.0.1", mcp::getHttpPort());
+        auto response = health.Get("/");
+        check("HTTP worker remains usable", response && response->status == 200);
+    }
+#ifdef TC_ADMISSION_CAPTURE_PROBE
+    // Fail outside upstream's routing catch, using the production task queue/socket entry.
+    for (bool parsing : {false, true}) {
+        if (parsing) failParsingOnce = true;
+        else mcp::internal::getHttpServer()->set_post_routing_handler([](const auto&, auto&) { failNextAllocation = true; });
+        httplib::Client failed("127.0.0.1", mcp::getHttpPort());
+        failed.set_read_timeout(3);
+        check("socket boundary closes after actual parsing/response bad_alloc", !failed.Get("/"));
+        mcp::internal::getHttpServer()->set_post_routing_handler(nullptr);
+        httplib::Client health("127.0.0.1", mcp::getHttpPort());
+        const auto response = health.Get("/");
+        check("production worker survives socket-boundary bad_alloc", response && response->status == 200);
+    }
+#endif
+    mcp::stopHttpServer();
+    fs::remove_all(dir);
     return failures ? 1 : 0;
 }

@@ -87,13 +87,16 @@ print('diff --git a/generated.cpp b/generated.cpp')
                 else:
                     self.assertFalse((self.directory / 'regenerated.patch').exists())
         tracked = subprocess.check_output(['git', 'ls-files', '--', *OUTPUTS], cwd=ROOT, text=True, encoding="utf-8")
-        self.assertEqual(len(tracked.splitlines()), 21)
+        self.assertEqual(len(set(tracked.splitlines())), 21)
         self.assertNotIn('reference-data.json', tracked)
 
     def test_regenerate_order_and_fail_fast(self):
         reference = self.directory / 'docs/reference'
         reference.mkdir(parents=True)
         (self.directory / 'addons/tcxLua/src/generated').mkdir(parents=True)
+        (self.directory / 'tools').mkdir()
+        for name in ('check_build_warnings.py', 'build_warning_allowlist.json'):
+            (self.directory / 'tools' / name).write_bytes((ROOT / 'tools' / name).read_bytes())
         script = reference / 'regenerate.sh'
         script.write_text((ROOT / 'docs/reference/regenerate.sh').read_text(encoding="utf-8"), encoding="utf-8")
         stub = '''import json, os, sys
@@ -126,13 +129,18 @@ if any(os.path.basename(a) == os.environ.get('FAIL_AT') for a in sys.argv[1:]):
         runner = r"""
 const assert = require('assert/strict'), fs = require('fs'), vm = require('vm');
 const file = process.argv[1], realRequire = require('module').createRequire(file);
-for (const args of [['--ids'], ['--json', 'output'], ['--save-ast', 'output']]) {
+for (const failure of [
+    { status: 1, stderr: 'fatal error: missing.glsl.h' },
+    { status: 2, stderr: 'ordinary compiler error' },
+    { status: 3, stderr: '' },
+    { code: 'ENOBUFS', message: 'spawnSync /bin/sh ENOBUFS', stderr: '' },
+]) for (const args of [['--ids'], ['--json', 'output'], ['--save-ast', 'output']]) {
     let status, stderr = '', writes = [];
     const stopped = new Error('exit');
     try {
         vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
             require: name => name === 'child_process' ? {
-                execSync: () => { throw { stdout: 'x'.repeat(200000), stderr: 'fatal error: missing.glsl.h' }; },
+                execSync: () => { throw { stdout: 'x'.repeat(200000), ...failure }; },
             } : name === 'fs' ? { writeFileSync: name => writes.push(name) } : realRequire(name),
             __dirname: require('path').dirname(file),
             process: { argv: ['node', file, ...args], env: { CXX: 'clang++' },
@@ -141,7 +149,17 @@ for (const args of [['--ids'], ['--json', 'output'], ['--save-ast', 'output']]) 
         }, { filename: file });
     } catch (error) { if (error !== stopped) throw error; }
     assert.equal(status, 1);
-    assert.match(stderr, /hint:.*core\/include\/tc\/gpu\/shaders\/\*\.glsl\.h.*generate the shaders first/);
+    if (failure.stderr.startsWith('fatal error:')) {
+        assert.match(stderr, /hint:.*core\/include\/tc\/gpu\/shaders\/\*\.glsl\.h.*generate the shaders first/);
+    }
+    if (failure.code) {
+        assert.match(stderr, /AST dump could not be read\/parsed: clang output exceeded the 1073741824-byte capture limit/);
+        assert.doesNotMatch(stderr, /clang AST dump FAILED/);
+    } else {
+        assert.match(stderr, /clang AST dump FAILED/);
+    }
+    if (failure.stderr) assert.ok(stderr.includes('compiler stderr:\n' + failure.stderr));
+    else assert.doesNotMatch(stderr, /compiler stderr/);
     assert.doesNotMatch(stderr, /using.*PARTIAL AST/);
     assert.equal(writes.length, 1); // probe input only, no exported AST/structure
 }
@@ -184,6 +202,70 @@ vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
         self.assertEqual(result.returncode, 1)
         self.assertIn('REFUSING', result.stderr)
         self.assertFalse(output.exists())
+
+
+class StructureAstTests(unittest.TestCase):
+    """Synthetic cached dumps; no clang or npm dependencies."""
+    def setUp(self):
+        self.scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(self.scratch.cleanup)
+        self.directory = Path(self.scratch.name)
+        self.ast = self.directory / 'ast.json'
+        self.output = self.directory / 'structure.json'
+
+    def run_structure(self, *args):
+        return subprocess.run(['node', str(ROOT / 'docs/reference/structure.js'), '--ast', str(self.ast), *args],
+                              capture_output=True, text=True, encoding='utf-8')
+
+    def test_many_objects_and_cached_export(self):
+        # Braces, quotes, backslashes and UTF-8 inside strings must not affect
+        # byte-level framing. Assert every symbol so skipped objects cannot pass.
+        nodes = []
+        for index in range(1000):
+            nodes.append(json.dumps({
+                'kind': 'NamespaceDecl', 'name': 'trussc',
+                'loc': {'file': '/fixture/core/include/TrussC.h'},
+                'note': '日本語 { } " \\ }',
+                'inner': [{'kind': 'FunctionDecl', 'name': f'fixture{index}',
+                           'type': {'qualType': 'void ()'}}],
+            }, ensure_ascii=False))
+        self.ast.write_text(' \t\r\n' + '\n'.join(nodes) + '\n', encoding='utf-8')
+        result = self.run_structure('--json', str(self.output))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        structure = json.loads(self.output.read_text(encoding='utf-8'))
+        self.assertEqual({key for key in structure if key.startswith('fixture')},
+                         {f'fixture{i}' for i in range(1000)})
+        result = self.run_structure('--ids')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), sorted(structure))
+        exported = self.directory / 'exported.json'
+        result = self.run_structure('--save-ast', str(exported))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(exported.read_bytes(), self.ast.read_bytes())
+
+    def test_bad_dumps_fail_loudly(self):
+        for data, cause in [('', 'no top-level JSON objects'),
+                            ('{}\ntrailing', "expected '{' at byte 3"),
+                            ('{}\n{"kind":', 'unterminated object starting at byte 3'),
+                            ('{}\n{"kind": invalid}', 'object starting at byte 3:')]:
+            for args in [('--ids',), ('--json', str(self.output))]:
+                with self.subTest(data=data, args=args):
+                    self.ast.write_text(data, encoding='utf-8')
+                    result = self.run_structure(*args)
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn('AST dump could not be read/parsed:', result.stderr)
+                    self.assertIn(cause, result.stderr)
+                    self.assertNotIn('compiler stderr', result.stderr)
+                    self.assertNotIn('clang AST dump FAILED', result.stderr)
+                    self.assertFalse(self.output.exists())
+
+    def test_missing_cache_reports_read_error(self):
+        result = self.run_structure('--ids')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('AST dump could not be read/parsed:', result.stderr)
+        self.assertIn('ENOENT', result.stderr)
+        self.assertIn(str(self.ast), result.stderr)
+        self.assertNotIn('compiler stderr', result.stderr)
 
 
 if __name__ == '__main__':

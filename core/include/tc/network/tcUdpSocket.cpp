@@ -77,14 +77,34 @@ bool UdpSocket::State::ensureSocket() {
 // ---------------------------------------------------------------------------
 // Bind
 // ---------------------------------------------------------------------------
+void UdpSocket::State::setBindAddress(const std::string& address) {
+    {
+        std::lock_guard<std::mutex> lock(bindConfiguration_->mutex);
+        internal::saveBindAddress(address, bindConfiguration_->address, bindConfiguration_->error);
+    }
+    if (bound_) logWarning() << "UdpSocket: bind address change ignored while bound; applies after close() and next bind().";
+}
+
 bool UdpSocket::State::bind(int port, bool startReceiving) {
+    in_addr bindAddress{};
+    std::string addressError;
+    {
+        std::lock_guard<std::mutex> lock(bindConfiguration_->mutex);
+        addressError = bindConfiguration_->error;
+        if (addressError.empty())
+            addressError = internal::parseBindAddress(bindConfiguration_->address, bindAddress);
+    }
+    if (!addressError.empty()) {
+        notifyError(addressError);
+        return false;
+    }
     if (!ensureSocket()) {
         return false;
     }
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr = bindAddress;
     addr.sin_port = htons(static_cast<uint16_t>(port));
 
 #ifdef _WIN32
@@ -103,7 +123,10 @@ bool UdpSocket::State::bind(int port, bool startReceiving) {
 #endif
 
     if (::bind(socket_->handle, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        notifyError("Failed to bind to port " + std::to_string(port), SOCKET_ERROR_CODE);
+        const int error = SOCKET_ERROR_CODE;
+        notifyError(internal::isBindAddressUnavailable(error)
+            ? "Bind address is not available on this machine"
+            : "Failed to bind to port " + std::to_string(port), error);
         return false;
     }
 
@@ -740,7 +763,7 @@ void UdpSocket::State::notifyError(const std::string& message, int code) {
 void UdpSocket::freshState() {
     auto previous = internal::sharedLoad(state_);
     socketOwner_ = std::make_shared<Socket>();
-    auto next = std::make_shared<State>(socketOwner_);
+    auto next = std::make_shared<State>(socketOwner_, previous->bindConfiguration_);
     next->useThread_ = previous->useThread_;
     next->onReceive.target = onReceiveTarget_;
     next->onError.target = onErrorTarget_;
@@ -801,6 +824,10 @@ bool UdpSocket::create() {
     auto state = internal::sharedLoad(state_);
     return state->create();
 }
+void UdpSocket::setBindAddress(const std::string& address) {
+    auto state = internal::sharedLoad(state_);
+    state->setBindAddress(address);
+}
 bool UdpSocket::bind(int port, bool startReceiving) {
     auto state = internal::sharedLoad(state_);
     return state->bind(port, startReceiving);
@@ -853,7 +880,7 @@ void UdpSocket::stopReceiving() {
     const bool reuseAddress = state->reuseAddress_;
     const bool reusePort = state->reusePort_;
     state->stopReceiving();
-    auto next = std::make_shared<State>(state->socket_);
+    auto next = std::make_shared<State>(state->socket_, state->bindConfiguration_);
     next->useThread_ = state->useThread_;
     next->onReceive.target = onReceiveTarget_;
     next->onError.target = onErrorTarget_;

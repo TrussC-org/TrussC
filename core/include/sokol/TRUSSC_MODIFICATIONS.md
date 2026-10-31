@@ -85,8 +85,8 @@ this behavior and the descriptor comments when importing upstream changes.
 
 Outside sokol, `TrussC.h`'s host-only `ConsoleCPCtrlGuard` saves both values
 for Ctrl+C / Ctrl+Break / console close and one `atexit` hook. The guard's
-destructor restores both values before disarming the exit fallback: on normal shutdown
-this repeats sokol's restore; if an exception escapes `sapp_run()` and the caller
+destructor restores both values before disarming the exit fallback: on normal
+shutdown this repeats sokol's restore; if an exception escapes `sapp_run()` and the caller
 catches it, this is the only restore. `abort()`, `TerminateProcess` and external
 kills cannot restore the console. Console input still uses `std::getline(std::cin)`.
 
@@ -416,7 +416,7 @@ TrussC-specific public functions use the `sgl_tc_` prefix to distinguish from up
 - `_sgl_next_vertex()`: auto-realloc to 2x on overflow
 - `_sgl_next_uniform()`: same
 - `_sgl_next_command()`: same
-- `_sgl_grow_gpu_buffer()`: destroy and recreate GPU buffer with larger capacity
+- `_sgl_grow_gpu_buffer()`: recreate the GPU buffer with larger capacity in-frame and retain the old buffer until retirement
 - Default initial capacities kept small (128 verts, 64 cmds) for low-memory targets
 
 ### 12. TrussC-specific Public API (`sgl_tc_` prefix)
@@ -608,15 +608,11 @@ header-inline mutable state, or Mesa version check is added.
 
 All changes carry `[TrussC]` markers; no upstream Sokol API is replaced.
 
-The twelve declarations `sgl_tc_context_target_owned`, `sgl_tc_context_complete`,
+The ten declarations `sgl_tc_context_target_owned`, `sgl_tc_context_complete`,
 `sgl_tc_context_dependencies`, `sg_tc_submit_prefix`, `sg_tc_gl_resolve_swapchain`,
 `sg_tc_mtl_command_buffer`, `sg_tc_mtl_register_drawable`,
-`sg_tc_mtl_authorize_drawable`, `sg_tc_mtl_cancel_drawables`,
-`sg_tc_mtl_drawable_trace`, `sg_tc_mtl_set_drawable_trace`, and
+`sg_tc_mtl_authorize_drawable`, `sg_tc_mtl_cancel_drawables`, and
 `sapp_tc_gl_make_current` are each a TrussC-internal framework seam, not app API.
-The trace typedef, setter, storage and callback emission exist only with
-`SOKOL_TC_TEST_HOOKS`; tests enable it in both the consumer and Sokol implementation.
-Production builds omit the declarations and storage and use a no-op emission helper.
 
 - `sgl_tc_context_target_owned()` opts framework-created contexts into explicit
   CPU completion. Every device commit invalidates their upload epoch/cache;
@@ -670,3 +666,40 @@ copy will be inserted before that authorization. Existing backend capture
 sources remain in use, including their existing presentation-time limitations.
 Native Metal presentation/API validation, Windows debug-layer execution and
 Pi V3D swapchain pixels remain required device checks.
+
+### Checked WebGPU uniform growth (K9; #863, lane 4B; slimmed in #1097)
+
+- `_sg_wgpu_uniform_reserve()` checks wide size arithmetic, the device buffer
+  limit and uint32 dynamic offsets before allocating CPU/GPU replacements.
+  Uploads retain the 64 KiB binding extent and device alignment (256 bytes on
+  WebGPU). TrussC starts WebGPU at 1 MiB; explicit reservations still apply.
+- Growth copies staging without changing any block offset, uploads the old
+  buffer's recorded prefix, then releases the backend's reference. WebGPU
+  encoders/commands and bind groups retain referenced resources through queue
+  submission/completion; the backend never destroys a retired buffer.
+  Old shader uniform groups (including idle shaders) are retired on growth;
+  replacements are built lazily by generation, so uploads split
+  between stages of one draw keep valid offsets into the copied data.
+- Synchronous allocation failures leave the previous storage unchanged. One Error suppresses later
+  uploads/draws/dispatches until commit; the next frame can retry. One
+  `WGPU_UNIFORM_BUFFER_GROWN` warning is emitted per backend initialization.
+- Asynchronous GPU out-of-memory or validation failures use WebGPU's own
+  error reporting. There are no uniform error scopes, per-generation failure
+  callbacks or last-good-buffer fallback (#1097, owner Decision 2026-10-29).
+  A non-null error buffer/group can leave a frame dropped or corrupt; the
+  backend keeps the current buffer and does not recover it next frame.
+- The direct-mapped resource bind-group cache retains its default 1024 slots
+  (`Bound (cache)`). Null creation is never cached; failed native
+  groups release their pool slot. Disabled-cache failures also skip the draw.
+  Normal collisions still evict without a Warning or loss counter.
+- `core/tests/webgpuUniformGrowth` owns the Release browser pixel harness.
+  It compares tiny/large reservations across raster and compute passes and
+  frames; `run.py --build` captures the Chrome console verdict, including any
+  uncaptured WebGPU error. Its native mock (run when emdawn's headers are
+  found) checks growth, prefix preservation, lazy bind-group replacement,
+  resource retention and synchronous allocation/arithmetic failures.
+
+This patch does not change Metal or Vulkan, or TrussC's API. In this sokol fork
+it adds two `sg_log_item` entries (`WGPU_UNIFORM_BUFFER_GROWN`,
+`WGPU_UNIFORM_UPLOAD_FAILED`). The earlier note that WebGPU is untouched
+applies only to the historical Metal-only patch.

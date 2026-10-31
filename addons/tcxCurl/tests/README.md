@@ -11,7 +11,7 @@ Windows this builds curl from source with Schannel; macOS/Linux use the
 system libcurl.
 
 Response admission checks also cover lazy storage, complete boundary values,
-whole-response rejection, JSON structure/working memory, cumulative rejection
+whole-response rejection, JSON parsing, cumulative rejection
 counts and a single first-loss Warning. Linux additionally traces C++ allocation
 peaks and release. SDK/libcurl C-heap allocations are outside that trace.
 

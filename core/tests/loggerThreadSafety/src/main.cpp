@@ -421,7 +421,8 @@ static void testSokolBridge() {
         EventListener l = lg.onLog.listen([&](LogEventArgs& e) { seen.push_back({e.level, e.message}); });
         internal::sokolLog("sg", 1, 12, nullptr, 345, nullptr, nullptr);
         internal::sokolLog("sapp", 2, 7, "warned", 10, "sokol_app.h", nullptr);
-        internal::sokolLog("sgl", 3, 3, "info message", 11, nullptr, nullptr);
+        // Use an informational item: ID 3 is pipeline-pool exhaustion.
+        internal::sokolLog("sgl", 3, SGL_LOGITEM_CONTEXT_POOL_GROWN, "info message", 11, nullptr, nullptr);
         internal::sokolLog("simgui", 1, 5, "imgui error", 12, nullptr, nullptr);
         internal::sokolLog("sapp", 3, SAPP_LOGITEM_LINUX_X11_DROP_TYPES_TRUNCATED, "1024 4", 13, nullptr, nullptr);
         internal::sokolLog("sapp", 3, SAPP_LOGITEM_OK, "ordinary info", 14, nullptr, nullptr);
@@ -715,9 +716,17 @@ static void testXOpenDisplayFailureReachesLogFile() {
     });
     const string text = readText(log);
     check("no display: runApp() aborts", abortedWithSigabrt(status));
-    check("no display: XOpenDisplay failure in TRUSSC_LOG_FILE",
-          text.find("] [FATAL] [sapp] XOpenDisplay() failed (no X server / DISPLAY not set)") != string::npos);
-    if (text.find("XOpenDisplay") == string::npos) {
+    bool fatalDisplayFailure = false;
+    istringstream lines(text);
+    for (string line; getline(lines, line);) {
+        if (line.find("[FATAL] [sapp]") != string::npos &&
+            (line.find("XOpenDisplay() failed") != string::npos ||
+             line.find("LINUX_X11_OPEN_DISPLAY_FAILED") != string::npos)) {
+            fatalDisplayFailure = true;
+        }
+    }
+    check("no display: fatal X11 display failure in TRUSSC_LOG_FILE", fatalDisplayFailure);
+    if (!fatalDisplayFailure) {
         printf("  log file: [%s]\n  stderr: [%s]\n", text.c_str(), readText(err).c_str());
     }
     error_code ec;

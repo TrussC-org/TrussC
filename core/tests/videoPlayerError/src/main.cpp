@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <thread>
 
 using namespace std;
@@ -160,7 +161,12 @@ public:
             if (log.message.find("[VideoPlayer]") != 0) return;
             if (log.level == LogLevel::Error) ++errorLogs;
             if (log.level == LogLevel::Warning && log.message.find("skipping invalid") != string::npos) {
-                if (log.message.find("skipped 2 invalid packets and 0 invalid frames since the last report") != string::npos)
+                // Frame-threaded codecs can report corrupt packets at receive time.
+                const auto summary = log.message.find("skipped ");
+                unsigned long long skippedPackets = 0, skippedFrames = 0;
+                if (summary != string::npos && std::sscanf(log.message.c_str() + summary,
+                        "skipped %llu invalid packets and %llu invalid frames", &skippedPackets, &skippedFrames) == 2 &&
+                    skippedPackets + skippedFrames == 2)
                     sawSkippedCount = true;
                 ++badPackets;
             }
@@ -283,6 +289,11 @@ private:
             auto message = player.getErrorMessage();
             check("failed reload stays a load failure", !player.load(videoPath / "missing-file"));
             check("failed reload retains runtime message", player.getErrorMessage() == message);
+            const auto invalid = fs::temp_directory_path() / "tc-video-error-invalid.mkv";
+            { std::ofstream file(invalid); file << "invalid video bytes"; }
+            check("existing invalid reload fails", !player.load(invalid));
+            check("decoder-open failure retains runtime message", player.hasError() && player.getErrorMessage() == message);
+            fs::remove(invalid);
         }
         player.close();
         check("real close clears error", !player.hasError());

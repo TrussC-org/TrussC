@@ -81,7 +81,7 @@ public:
     // Parse error: a packet that is not a valid OSC message or bundle (for
     // example an unknown type tag, data cut short, or a damaged message in a
     // bundle). The packet is not delivered, not even in part.
-    // Also reports preflight size/work/depth rejection and forwards socket
+    // Also reports preflight size/depth rejection and forwards socket
     // errors; setup failures notify on the calling thread.
     tc::Event<std::string> onParseError;
 

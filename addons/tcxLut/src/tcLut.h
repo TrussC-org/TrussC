@@ -9,6 +9,8 @@
 // Addon for TrussC. Add "tcxLut" to addons.make to use.
 //
 // Supports .cube file format (industry standard for color LUTs)
+// Only the 0..1 input domain and full-range LUTs are supported;
+// other declared ranges fail to load with a keyword-specific error.
 // Uses 3D texture for GPU-accelerated color transformation
 //
 // Usage example:
@@ -69,12 +71,18 @@ public:
 
     // Load from .cube file. Relative paths resolve via getDataPath, like
     // Image::load.
+    // Range metadata must declare the default 0..1 input domain. Resolve's
+    // LUT_IN_VIDEO_RANGE / LUT_OUT_VIDEO_RANGE flags are unsupported.
     // OOM recovery holds in Release, or with iterator debugging off
     // (_ITERATOR_DEBUG_LEVEL=0); see docs/ADDONS.md.
     bool load(const fs::path& filePath) {
         fs::path path;
         try {
             path = getDataPath(filePath); // absolute paths pass through
+            if (!internal::isLoadFile(path)) {
+                internal::reportImportError("Lut3D", "failed to open LUT document: ", path);
+                return false;
+            }
             std::ifstream file(path, std::ios::binary);
             if (!file) {
                 internal::reportImportError("Lut3D", "failed to open LUT document: ", path);
@@ -86,8 +94,9 @@ public:
             detail::CubeData parsed;
             std::string error;
             std::string bytes;
-            if (!internal::readDocumentBytes(file, bytes)) {
-                internal::reportImportError("Lut3D", "failed to read the complete LUT document: ", path);
+            const char* readError = nullptr;
+            if (!internal::readDocumentBytes(file, bytes, &readError)) {
+                internal::reportImportError("Lut3D", "failed to read the complete LUT document: ", path, readError);
                 return false;
             }
             std::istringstream input(std::move(bytes));

@@ -35,6 +35,11 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(snappy PRIVATE -Wno-pass-failed -Wno-error)
 endif()
+if(MSVC)
+    # Snappy sets /W4 in its directory CMAKE_CXX_FLAGS; /w would cause D9025.
+    # Suppress only the conversion diagnostics observed in its own sources.
+    target_compile_options(snappy PRIVATE /wd4244 /wd4267 /wd4245)
+endif()
 
 # -----------------------------------------------------------------------------
 # HAP reference decoder (BSD 2-Clause)
@@ -45,10 +50,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/Vidvox/hap.git
     GIT_TAG d847f6bbd3be88575dd4ef33a877243780e3be76 # 2024-07-25
 )
-FetchContent_GetProperties(hap_source)
-if(NOT hap_source_POPULATED)
-    FetchContent_Populate(hap_source)
-endif()
+FetchContent_MakeAvailable(hap_source)
 
 # HAP source files
 set(HAP_SOURCES

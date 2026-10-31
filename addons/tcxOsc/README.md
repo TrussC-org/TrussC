@@ -140,16 +140,22 @@ Overflow evicts oldest whole messages and increments the counter.
 초과하거나 한도를 줄이면 오래된 메시지 전체를 버리고 카운터에 더합니다.
 
 Incoming packets (including the public `fromBytes()` parsers) are preflighted
-without allocation before decoding: at most **65,536 bytes**, **16 bundle levels**,
-and **4096 work units** across the entire outer packet. Each bundle element and
-each argument type tag counts once, including nested elements and tags without
-data. Over-limit packets are rejected whole; the next valid packet can proceed.
-The receiver reports the first limit loss for its datagram preflight store with
-a separate lifetime Warning. Rejected datagrams are not queue-message losses.
-The parsing workspace is separate from the queue budget: admitted wire bytes,
-bounded argument/element objects and their vector growth slack, plus the decoded
-tree and the currently dispatched message copy. Main-thread event delivery is a
-separate store from the polling queue.
+without allocation before decoding: at most **65,536 bytes** and **16 bundle
+levels**. There is no argument or work-unit limit; a 5000-float message fits.
+Over-limit packets are rejected whole; the next valid packet can proceed.
+The receiver reports the first limit loss with a separate lifetime Warning.
+Rejected datagrams are not queue-message losses. Main-thread event delivery
+uses a separate store from the polling queue and is unlimited by default.
+
+日本語: 受信パケットの 65536 バイトと入れ子 16 段の上限は維持します。
+引数数の上限はなく、5000 個の float を持つメッセージも受信できます。
+Main 配送は既定で無制限で、イベントの `setMainThreadDeliveryLimit(count)`
+で任意の件数上限を設定できます。0 は無制限です。超過コピーは破棄して内部で数えます。
+
+한국어: 수신 패킷의 65536바이트 및 중첩 16단계 한도는 유지합니다.
+인자 수 한도는 없으며 float 5000개를 담은 메시지도 수신합니다.
+Main 전달은 기본 무제한이며 이벤트의 `setMainThreadDeliveryLimit(count)`로
+선택적 개수 한도를 설정합니다. 0은 무제한입니다. 초과 복사본은 버리고 내부에서 집계합니다.
 
 ```cpp
 // Polling style — all on the main thread, no locks:

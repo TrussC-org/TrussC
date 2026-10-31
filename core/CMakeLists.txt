@@ -2,6 +2,7 @@
 # A cross-platform creative coding framework
 
 cmake_minimum_required(VERSION 3.20)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tc_fetch_quiet.cmake")
 
 # Start with C/CXX only — OBJC/OBJCXX enabled after project() if on macOS
 project(TrussC LANGUAGES C CXX)
@@ -88,6 +89,15 @@ elseif(TC_PLATFORM_LINUX OR TC_PLATFORM_RASPBIAN)
     file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
 else()
     file(GLOB TC_PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/*.cpp)
+endif()
+
+# Omit implementation TUs whose platform guards leave no symbols. Apple's
+# libtool warns about empty objects (including the iOS archive).
+if(TC_PLATFORM_MACOS OR TC_PLATFORM_IOS OR TC_PLATFORM_ANDROID)
+    list(REMOVE_ITEM TC_IMPL_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/impl/tcKeepScreenOn.cpp)
+endif()
+if(NOT TC_PLATFORM_EMSCRIPTEN)
+    list(REMOVE_ITEM TC_GRAPHICS_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/include/tc/graphics/tcBoundedFontFetch.cpp)
 endif()
 
 # Combine all sources

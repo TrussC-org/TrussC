@@ -126,7 +126,7 @@ protected:
         int writeSendStep(const void* data, size_t size, bool& forWrite, int& error);
         std::mutex socketMutex_;
         void notifyError(const std::string& msg, int code = 0, bool external = false);
-        bool deliverReceive(TcpReceiveEventArgs& args);
+        void deliverReceive(TcpReceiveEventArgs& args);
         internal::AtomicSharedPtr<std::atomic<bool>> receiveDeliveryRun_{std::make_shared<std::atomic<bool>>(true)};
         AliveToken alive_ = std::make_shared<std::atomic<bool>>(true);
         bool processNetworkStep(const AliveToken& alive);

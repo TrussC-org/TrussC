@@ -47,37 +47,17 @@ bool ready(std::future<md::ReplyThunk>& reply) {
 bool replyHas(std::future<md::ReplyThunk>& reply, const char* text) {
     return ready(reply) && reply.get()().find(text) != std::string::npos;
 }
-void checkContextBound(ImGuiContext* ctx, const char* label) {
+void checkContextQueue(ImGuiContext* ctx, const char* label) {
     auto& cs = d::contexts().at(ctx);
-    const auto rejected = d::rejectedPendingValues;
-    const auto localRejected = cs.rejectedPendingValues;
     std::vector<std::future<md::ReplyThunk>> replies;
-    for (size_t i = 0; i < d::kMaxPendingValuesPerContext; ++i) replies.push_back(request(label));
-    if (cs.pendingValues.empty()) { check("tool edits enter the context queue", false); return; }
-    auto last = cs.pendingValues.back();
-    check("N pending tool edits retain their reply promises", cs.pendingValues.size() == d::kMaxPendingValuesPerContext && !ready(replies.back()));
-    bool errors = true;
-    for (int i = 0; i < 32; ++i) {
-        auto extra = request(label);
-        if (!ready(extra)) { errors = false; continue; }
-        auto reply = nlohmann::json::parse(extra.get()());
-        errors &= reply.value("jsonrpc", "") == "2.0" && reply.at("id") == 1 &&
-            reply.contains("error") && reply["error"].value("code", 0) == -32000 &&
-            reply["error"].value("message", "").find("queue full") != std::string::npos;
-    }
-    check("N+1 and repeated overflow are JSON-RPC errors, counted without queue growth",
-        errors && cs.pendingValues.size() == d::kMaxPendingValuesPerContext &&
-        md::deferredResponses().size() == d::kMaxPendingValuesPerContext &&
-        cs.rejectedPendingValues == localRejected + 32 && d::rejectedPendingValues == rejected + 32 &&
-        last->state == d::PendingValue::State::Queued);
+    for (int i = 0; i < 300; ++i) replies.push_back(request(label));
+    check("more than 256 tool edits retain their reply promises",
+        cs.pendingValues.size() == 300 && !ready(replies.back()));
     d::finishPendingValues(cs, ctx->FrameCount, true);
     bool settled = true;
     for (auto& reply : replies) settled &= ready(reply);
-    check("bounded edits settle and release all deferred responses", settled && cs.pendingValues.empty() && md::deferredResponses().empty());
-    auto next = request(label);
-    check("settlement releases queue capacity", !ready(next) && cs.pendingValues.size() == 1);
-    d::finishPendingValues(cs, ctx->FrameCount, true);
-    check("newly admitted edit settles", ready(next));
+    check("queued edits settle and release all deferred responses",
+        settled && cs.pendingValues.empty() && md::deferredResponses().empty());
 }
 
 // This process deliberately skips the framework exit event and all automatic
@@ -165,7 +145,7 @@ void regressions() {
         bool windowValue = false;
         ImGui::Begin("window probe"); ImGui::Checkbox("window value", &windowValue); ImGui::End();
         window.end();
-        checkContextBound(windowCtx, "window value");
+        checkContextQueue(windowCtx, "window value");
         window.shutdown(); internal::endGpuFrame();
     }
     auto& pending = d::contexts().at(ctx).pendingValues;
@@ -186,7 +166,7 @@ void regressions() {
     events().afterFrame.notify();
     check("idle unrendered edit expires at its write deadline", queued->state == d::PendingValue::State::Expired && replyHas(expired, "too late") && pending.empty());
 
-    checkContextBound(ctx, "idle value");
+    checkContextQueue(ctx, "idle value");
 
     std::vector<std::future<md::ReplyThunk>> replies;
     for (int i=0; i<200; ++i) replies.push_back(request());
@@ -198,42 +178,30 @@ void regressions() {
     d::clockSkew += last->deadline - d::now(); events().afterFrame.notify();
     check("200 queued tool requests leave no records past their deadlines", replyHas(replies.back(), "too late") && pending.empty() && md::deferredResponses().empty());
 
-    // Distinct widget IDs also expire; cleanup does not rely on supersession.
+    // Distinct IDs still expire without relying on supersession.
     int done = 0;
-    for (size_t i=0; i<d::kMaxPendingValuesPerContext; ++i)
+    for (int i = 0; i < 300; ++i)
         d::queueValue(ctx, ImGuiID(i+1), queued->kind, queued->dataType, queued->components,
             queued->bytes, d::kPendingValueLifetime, d::kValueCheckDeadline, [&] { ++done; });
-    const auto distinctRejected = d::rejectedPendingValues;
-    auto extraDistinct = d::queueValue(ctx, ImGuiID(d::kMaxPendingValuesPerContext+1), queued->kind,
-        queued->dataType, queued->components, queued->bytes,
-        d::kPendingValueLifetime, d::kValueCheckDeadline, [&] { ++done; });
-    check("N+1 distinct pending edits are bounded and rejection is counted",
-        !extraDistinct && pending.size() == d::kMaxPendingValuesPerContext &&
-        d::rejectedPendingValues == distinctRejected + 1);
+    check("more than 256 distinct edits are queued", pending.size() == 300);
     d::clockSkew += pending.back()->deadline - d::now(); events().afterFrame.notify();
-    check("N distinct idle requests expire and each callback runs once",
-        pending.empty() && done == int(d::kMaxPendingValuesPerContext));
-    events().afterFrame.notify(); check("deadline callbacks run only once", done == int(d::kMaxPendingValuesPerContext));
+    check("distinct idle requests expire and each callback runs once", pending.empty() && done == 300);
+    events().afterFrame.notify(); check("deadline callbacks run only once", done == 300);
 
-    // Fill several independent contexts to test the aggregate bound separately.
     std::vector<ImGuiContext*> extraContexts;
-    bool accepted = true;
-    for (size_t c = 0; c < d::kMaxPendingValuesTotal / d::kMaxPendingValuesPerContext; ++c) {
+    for (int c = 0; c < 4; ++c) {
         auto* extra = ImGui::CreateContext();
         extraContexts.push_back(extra);
-        for (size_t i = 0; i < d::kMaxPendingValuesPerContext; ++i)
-            accepted &= bool(d::queueValue(extra, ImGuiID(i+1), queued->kind,
-                queued->dataType, queued->components, queued->bytes,
-                d::kPendingValueLifetime, d::kValueCheckDeadline, nullptr));
+        for (int i = 0; i < 300; ++i)
+            d::queueValue(extra, ImGuiID(i+1), queued->kind, queued->dataType,
+                queued->components, queued->bytes, d::kPendingValueLifetime,
+                d::kValueCheckDeadline, nullptr);
     }
-    check("aggregate capacity accepts N edits across contexts", accepted);
-    const auto rejected = d::rejectedPendingValues;
-    auto overflow = request();
-    check("total N+1 is rejected and counted even with room in its own context",
-        replyHas(overflow, "queue full") && pending.empty() &&
-        d::pendingValueCount() == d::kMaxPendingValuesTotal && d::rejectedPendingValues == rejected + 1);
+    auto additional = request();
+    check("more than 1024 edits across contexts allow another edit", !ready(additional) && pending.size() == 1);
     for (auto* extra : extraContexts) { forgetContext(extra); ImGui::DestroyContext(extra); }
-    check("destroying contexts releases aggregate capacity", d::pendingValueCount() == 0);
+    d::finishPendingValues(d::contexts().at(ctx), ctx->FrameCount, true);
+    check("context cleanup settles remaining edits", ready(additional) && pending.empty());
 
     // Clear the previous completed-frame marker, then skip one owning frame.
     events().onRender.notify();
@@ -242,31 +210,15 @@ void regressions() {
     // The text branch goes through the real Server handler, without any UI redraw.
     ctx->InputEventsQueue.clear();
     auto& cs = d::contexts().at(ctx);
-    const auto rejectedText = d::rejectedPendingValues;
-    const auto localRejectedText = cs.rejectedPendingValues;
-    size_t acceptedText = 0, refusedText = 0;
+    const size_t acceptedText = 1000;
     bool envelopes = true;
-    for (int i = 0; i < 1000; ++i) {
+    for (size_t i = 0; i < acceptedText; ++i) {
         auto reply = request("idle text");
-        if (!ready(reply)) { envelopes = false; continue; }
-        auto result = nlohmann::json::parse(reply.get()());
-        if (result.contains("error")) {
-            ++refusedText;
-            envelopes &= result["error"].value("code", 0) == -32000 &&
-                result["error"].value("message", "").find("queue full") != std::string::npos;
-        } else ++acceptedText;
+        envelopes &= replyHas(reply, "ok");
     }
-    check("1000 idle text requests admit only the context edit budget",
-        envelopes && acceptedText == d::kMaxPendingValuesPerContext && refusedText == 1000 - acceptedText &&
-        cs.pendingText.size() == acceptedText && d::pendingValueCount() == acceptedText);
-    check("idle text overflow is counted locally and globally and bounds events and bytes",
-        d::rejectedPendingValues == rejectedText + refusedText &&
-        cs.rejectedPendingValues == localRejectedText + refusedText &&
-        size_t(ctx->InputEventsQueue.Size) <= d::pendingEventCount(cs) &&
-        d::pendingEventCount(cs) <= d::kMaxPendingEventsPerContext &&
-        d::pendingByteCount(cs) <= d::kMaxPendingBytesPerContext);
+    check("1000 idle text requests are accepted", envelopes && cs.pendingText.size() == acceptedText);
     auto mixed = request();
-    check("text and fixed-size edits share the context budget", replyHas(mixed, "queue full"));
+    check("fixed-size edits can follow queued text", !ready(mixed) && pending.size() == 1);
     const auto deadline = cs.pendingText.back().deadline;
     d::clockSkew += deadline - d::now() - std::chrono::seconds(1);
     events().afterFrame.notify();
@@ -275,10 +227,9 @@ void regressions() {
     ImGui::SetCurrentContext(ctx); ImGui::GetIO().AddFocusEvent(false);
     const auto nativeId = ctx->InputEventsNextEventId - 1;
     d::clockSkew += deadline - d::now(); events().afterFrame.notify();
-    check("idle text events and reservations are reclaimed at the deadline, preserving native input",
-        cs.pendingText.empty() && d::pendingValueCount() == 0 &&
-        ctx->InputEventsQueue.Size == 1 && ctx->InputEventsQueue[0].EventId == nativeId &&
-        d::pendingByteCount(cs) == 0);
+    check("idle text is reclaimed at the deadline, preserving native input",
+        cs.pendingText.empty() && pending.empty() && ready(mixed) &&
+        ctx->InputEventsQueue.Size == 1 && ctx->InputEventsQueue[0].EventId == nativeId);
     ctx->InputEventsQueue.clear();
     auto renewed = request("idle text");
     check("deadline cleanup releases text capacity", replyHas(renewed, "ok") && cs.pendingText.size() == 1);
@@ -336,35 +287,11 @@ void regressions() {
     }
     ctx->IO.ConfigMacOSXBehaviors = false;
 
-    const auto beforeLarge = d::rejectedPendingValues;
-    auto large = request("idle text", std::string(d::kMaxPendingBytesPerContext, 'x'));
-    check("one oversized text is rejected before inserting any events",
-        replyHas(large, "queue full") && ctx->InputEventsQueue.empty() && cs.pendingText.empty() &&
-        d::rejectedPendingValues == beforeLarge + 1);
-    auto huge = request("idle text", std::string(d::kMaxPendingBytesPerContext + 1, 'x'));
-    check("text above the byte budget is also counted without insertion",
-        replyHas(huge, "queue full") && ctx->InputEventsQueue.empty() && d::rejectedPendingValues == beforeLarge + 2);
-
-    // Exhaust total byte/event reservations with room in each context's edit count.
-    std::vector<ImGuiContext*> textContexts;
-    WidgetInfo textWidget; textWidget.rect = ImRect({0,0}, {20,20});
-    bool textAccepted = true;
-    const size_t chars = d::kMaxPendingBytesPerContext / sizeof(ImGuiInputEvent) - 11;
-    for (int i = 0; i < 4; ++i) {
-        auto* extra = ImGui::CreateContext(); textContexts.push_back(extra);
-        ImGui::SetCurrentContext(extra);
-        textAccepted &= inputText(textWidget, std::string(chars, 'a'));
-    }
-    ImGui::SetCurrentContext(ctx);
-    auto totalText = request("idle text");
-    check("total input byte budget rejects text in a context with spare capacity",
-        textAccepted && replyHas(totalText, "queue full") && cs.pendingText.empty() && ctx->InputEventsQueue.empty());
-    auto totalValue = d::queueValue(ctx, 1, ImGuiTcValueKind_Input, ImGuiDataType_Double, 1,
-        std::vector<unsigned char>(sizeof(double)), d::kPendingValueLifetime, d::kValueCheckDeadline, nullptr);
-    check("fixed-size edits share the total byte budget", !totalValue && cs.pendingValues.empty());
-    for (auto* extra : textContexts) { forgetContext(extra); ImGui::DestroyContext(extra); }
-    ImGui::SetCurrentContext(ctx);
-    check("context destruction releases input reservations", d::pendingValueCount() == 0);
+    auto large = request("idle text", std::string(128 * 1024 + 1, 'x'));
+    check("text above 128 KiB is accepted and queues all character events",
+        replyHas(large, "ok") && ctx->InputEventsQueue.Size > 128 * 1024 && cs.pendingText.size() == 1);
+    d::clockSkew += std::chrono::seconds(3); events().afterFrame.notify();
+    check("large text expires without leaving events", cs.pendingText.empty() && ctx->InputEventsQueue.empty());
 
     auto shutdownText = request("idle text");
     check("text is admitted after aggregate cleanup", replyHas(shutdownText, "ok"));
@@ -391,6 +318,8 @@ extern "C" void __wrap_sapp_set_mouse_cursor(sapp_mouse_cursor next) { ++cursorC
 extern "C" sapp_mouse_cursor __wrap_sapp_get_mouse_cursor() { ++cursorCalls; return cursor; }
 extern "C" bool __wrap_sapp_keyboard_shown() { ++keyboardQueries; return keyboard; }
 extern "C" void __wrap_sapp_show_keyboard(bool shown) { ++keyboardCalls; keyboard = shown; }
+#include "bufferGrow.h"
+
 int main(int argc, char** argv) {
     EGLDisplay display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
     if (!eglInitialize(display,nullptr,nullptr) || !eglBindAPI(EGL_OPENGL_API)) return 2;
@@ -411,7 +340,8 @@ int main(int argc, char** argv) {
     w.swapchainTarget.width = w.swapchainTarget.height = 256;
     w.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
     if (argc == 2 && std::string(argv[1]) == "--static-exit") staticExitRegression();
-    regressions();
+    bufferGrowRegression();
+    if (argc != 2 || std::string(argv[1]) != "--buffer-grow") regressions();
     internal::drainPendingGpuDestroys(); sgl_shutdown(); sg_shutdown();
     eglMakeCurrent(display,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
     eglDestroyContext(display,context); eglTerminate(display);

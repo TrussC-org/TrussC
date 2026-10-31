@@ -13,6 +13,8 @@ import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools"))
+from check_build_warnings import run_build
 
 
 def reload_artifacts(project, platform=sys.platform, config='Release'):
@@ -183,8 +185,7 @@ int main(int argc, char** argv) {
                 command = ['c++', '-std=c++17', str(fixture), '-o', str(binary)]
                 if platform == 'macos':
                     command.insert(1, '-D__APPLE__')
-                compiled = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
-                self.assertEqual(compiled.returncode, 0, compiled.stdout + compiled.stderr)
+                run_build(command, check=True, capture_output=True)
                 for stop in ('return', 'exit'):
                     for reason in ('unfinished', 'stale host', 'missing guest', 'build failed'):
                         with self.subTest(platform=platform, stop=stop, reason=reason):

@@ -9,8 +9,8 @@ if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --shaders-only ) ]]; then
 fi
 
 # Use the core's pinned compiler and shader recipe, without compiling the core.
-cmake -S "$ROOT/core" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release
-cmake --build "$BUILD" --target TrussC_shaders_gen --config Release
+python3 "$ROOT/tools/check_build_warnings.py" --run-build -- cmake -S "$ROOT/core" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release
+python3 "$ROOT/tools/check_build_warnings.py" --run-build -- cmake --build "$BUILD" --target TrussC_shaders_gen --config Release
 [[ "${1:-}" != --shaders-only ]] || exit 0
 
 cd "$ROOT/docs/reference"

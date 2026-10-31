@@ -188,6 +188,15 @@ TC_CORE_TEST_MAIN() {
 #else
     // Delivery uses the main-thread queue, not the update event.
     const size_t initialUpdateListeners = events().update.listenerCount();
+    // Keep the real 1 MiB warning threshold. Later lifetime checks need only
+    // a loss warning, so their connections can use a much smaller capacity.
+    constexpr size_t ptyCap = 1024 * 1024 + 1;
+    constexpr size_t ptyTotal = ptyCap + 16383;
+    struct ResetCapacity {
+        ~ResetCapacity() { internal::setSerialRxCapacityForTesting(0); }
+    } resetCapacity;
+    internal::setSerialRxCapacityForTesting(ptyCap);
+    vector<uint8_t> ptyInput(input.begin(), input.begin() + ptyTotal);
     Pty pty;
     Serial serial;
     check("new Serial counter is zero", serial.getDroppedByteCount() == 0);
@@ -210,16 +219,16 @@ TC_CORE_TEST_MAIN() {
             ++overflowWarnings;
             warningsOnAppThread &= this_thread::get_id() == appThread;
             warningHasTotal = event.message.find("total dropped bytes:") != string::npos &&
-                              event.message.find("capacity bytes: 67108864") != string::npos;
+                              event.message.find("capacity bytes: " + to_string(ptyCap)) != string::npos;
             // Inline log callbacks must run with the Serial's locks released.
             serial.available();
             serial.getDroppedByteCount();
         }
     });
-    // No Serial reads or available() calls while the worker drains > 64 MiB.
-    check("device writes the complete stream while app does not read", pty.send(input));
+    // No Serial reads or available() calls while the worker drains the flood.
+    check("device writes the complete stream while app does not read", pty.send(ptyInput));
     check("flood queues exactly one delivery for the connection", until([&] {
-        return serial.getDroppedByteCount() == total - cap;
+        return serial.getDroppedByteCount() == ptyTotal - ptyCap;
     }) && internal::countQueuedMainThreadSlots() == 1);
     // Move the live connection before delivery; run the real framework loop.
     // The headless runner drains the main-thread queue; it fires no update event.
@@ -233,39 +242,41 @@ TC_CORE_TEST_MAIN() {
     check("first-drop warning arrives in headless loop without another Serial poll",
           overflowWarnings == 1 && backlogWarnings == 1);
     check("headless delivery leaves nothing queued", internal::countQueuedMainThreadSlots() == 0);
-    const bool received = until([&] { return serial.getDroppedByteCount() == total - cap; });
+    const bool received = until([&] { return serial.getDroppedByteCount() == ptyTotal - ptyCap; });
     check("exact overflow count", received);
-    check("available counts the capped TrussC buffer", serial.available() == static_cast<int>(cap));
+    check("available counts the capped TrussC buffer", serial.available() == static_cast<int>(ptyCap));
     check("overflow warning includes total and permits inline callbacks", overflowWarnings == 1 && warningHasTotal && warningsOnAppThread);
     Serial moved(std::move(serial));
-    check("move carries buffer and counter", !serial.isConnected() && moved.getDroppedByteCount() == total - cap);
+    check("move carries buffer and counter", !serial.isConnected() && moved.getDroppedByteCount() == ptyTotal - ptyCap);
     serial = std::move(moved);
-    vector<uint8_t> output(cap);
+    vector<uint8_t> output(ptyCap);
     check("newest bytes survive a stall and both moves",
-          serial.readBytes(output.data(), output.size()) == static_cast<int>(cap) &&
-          equal(output.begin(), output.end(), input.end() - cap));
-    check("reading does not count intentional consumption", serial.available() == 0 && serial.getDroppedByteCount() == total - cap);
+          serial.readBytes(output.data(), output.size()) == static_cast<int>(ptyCap) &&
+          equal(output.begin(), output.end(), ptyInput.end() - ptyCap));
+    check("reading does not count intentional consumption", serial.available() == 0 && serial.getDroppedByteCount() == ptyTotal - ptyCap);
     vector<uint8_t> small(input.begin(), input.begin() + 4096);
     check("device sends data below cap", pty.send(small));
     check("worker receives below-cap data without an app read", until([&] { return serial.available() == 4096; }));
     serial.flushInput();
-    check("flushInput clears buffer and preserves counter", serial.available() == 0 && serial.getDroppedByteCount() == total - cap);
+    check("flushInput clears buffer and preserves counter", serial.available() == 0 && serial.getDroppedByteCount() == ptyTotal - ptyCap);
     check("data arrives after flushInput", pty.send(small) && until([&] { return serial.available() == 4096; }));
     serial.flush();
-    check("flush clears buffer and preserves counter", serial.available() == 0 && serial.getDroppedByteCount() == total - cap);
+    check("flush clears buffer and preserves counter", serial.available() == 0 && serial.getDroppedByteCount() == ptyTotal - ptyCap);
     serial.close();
-    check("close preserves counter", !serial.isConnected() && serial.getDroppedByteCount() == total - cap);
+    check("close preserves counter", !serial.isConnected() && serial.getDroppedByteCount() == ptyTotal - ptyCap);
     internal::drainMainThreadQueue();
     check("gated warnings do not repeat after close", backlogWarnings == 1 && overflowWarnings == 1);
+    internal::setSerialRxCapacityForTesting(16 * 1024);
     Pty next;
     check("new connection resets counter", next.open() && serial.setup(next.path, 9600) && serial.getDroppedByteCount() == 0);
     check("below-cap stall loses no bytes", next.send(small) && until([&] { return serial.available() == 4096; }));
     vector<uint8_t> fresh(4096);
     check("below-cap contents survive", serial.readBytes(fresh.data(), fresh.size()) == 4096 && fresh == small && serial.getDroppedByteCount() == 0);
-    vector<uint8_t> backlog(input.begin(), input.begin() + 1024 * 1024 + 1);
+    // Each following warning uses the same queue/lifetime path via overflow.
+    vector<uint8_t> lossFlood(input.begin(), input.begin() + 16 * 1024 + 1);
     // EVENT_DRIVEN with no redraw: the frame drains the queue, update never runs.
     {
-        check("reopened connection queues a fresh backlog delivery", next.send(backlog) &&
+        check("reopened connection queues a fresh loss delivery", next.send(lossFlood) &&
               until([&] { return internal::countQueuedMainThreadSlots() == 1; }));
         int updateEvents = 0;
         EventListener updateCounter = events().update.listen([&] { ++updateEvents; });
@@ -276,7 +287,7 @@ TC_CORE_TEST_MAIN() {
         const bool drew = tcCoreTest::beginScheduledFrame(chrono::steady_clock::now());
         if (drew) internal::runSyncedUpdate();
         check("idle EVENT_DRIVEN frame delivers the warning without update",
-              !drew && backlogWarnings == 2 && appUpdates == 0 && updateEvents == 0);
+              !drew && overflowWarnings == 2 && appUpdates == 0 && updateEvents == 0);
         schedulerUpdate = std::move(previousUpdate);
         setFps(VSYNC);
     }
@@ -286,17 +297,17 @@ TC_CORE_TEST_MAIN() {
         Pty first, second;
         Serial reopened;
         check("reopen-before-drain setup", first.open() && reopened.setup(first.path, 115200));
-        check("old connection queues its warning", first.send(backlog) &&
+        check("old connection queues its warning", first.send(lossFlood) &&
               until([&] { return internal::countQueuedMainThreadSlots() == 1; }));
         reopened.close();
         check("reopen before drain", second.open() && reopened.setup(second.path, 115200) &&
               reopened.getDroppedByteCount() == 0);
         internal::drainMainThreadQueue();
-        check("queued warning of the closed connection is delivered once", backlogWarnings == 3 &&
+        check("queued warning of the closed connection is delivered once", overflowWarnings == 3 &&
               internal::countQueuedMainThreadSlots() == 0);
-        check("reopened connection still gets its own backlog warning", second.send(backlog) && until([&] {
+        check("reopened connection still gets its own loss warning", second.send(lossFlood) && until([&] {
             internal::drainMainThreadQueue();
-            return backlogWarnings == 4;
+            return overflowWarnings == 4;
         }));
     }
     serial.close();
@@ -305,11 +316,11 @@ TC_CORE_TEST_MAIN() {
         Pty gonePty;
         auto gone = make_unique<Serial>();
         check("destroy-before-drain setup", gonePty.open() && gone->setup(gonePty.path, 115200));
-        check("destroyed connection had a queued delivery", gonePty.send(backlog) &&
+        check("destroyed connection had a queued delivery", gonePty.send(lossFlood) &&
               until([&] { return internal::countQueuedMainThreadSlots() == 1; }));
         gone.reset();
         internal::drainMainThreadQueue();
-        check("delivery after destruction is safe and reports once", backlogWarnings == 5 &&
+        check("delivery after destruction is safe and reports once", overflowWarnings == 5 &&
               internal::countQueuedMainThreadSlots() == 0);
     }
     // A log listener can destroy the whole connection during delivery.
@@ -318,14 +329,20 @@ TC_CORE_TEST_MAIN() {
     auto dying = make_unique<Serial>();
     check("reentrant-destruction setup", destroyPty.open() && dying->setup(destroyPty.path, 115200));
     auto destroyListener = getLogger().onLog.listen([&](LogEventArgs& e) {
-        if (e.message.find("Serial: RX buffer exceeds 1 MiB") != string::npos) dying.reset();
+        if (e.message.find("Serial: RX buffer overflow") != string::npos) dying.reset();
     });
-    check("warning callback can destroy connection", destroyPty.send(backlog) && until([&] {
+    check("warning callback can destroy connection", destroyPty.send(lossFlood) && until([&] {
         internal::drainMainThreadQueue();
         return !dying;
     }));
     check("reentrant destruction leaves nothing queued", internal::countQueuedMainThreadSlots() == 0);
     destroyListener.disconnect();
+    internal::setSerialRxCapacityForTesting(0);
+    bool defaultCapacityText = false;
+    auto defaultWarning = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.message.find("Serial: RX buffer overflow") != string::npos)
+            defaultCapacityText |= e.message.find("capacity bytes: 67108864") != string::npos;
+    });
     // Shared connection state, driven directly as a worker would.
     {
         auto state = make_shared<internal::SerialRxState>();
@@ -363,6 +380,7 @@ TC_CORE_TEST_MAIN() {
         check("repeated floods after delivery queue nothing", !state->isQueued() &&
               internal::countQueuedMainThreadSlots() == 0);
     }
+    check("default capacity warning reports 64 MiB without PTY traffic", defaultCapacityText);
     check("Serial leaves the update listeners unchanged", events().update.listenerCount() == initialUpdateListeners);
     return failures ? 1 : 0;
 #endif

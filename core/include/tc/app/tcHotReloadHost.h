@@ -47,7 +47,6 @@ extern char** environ;
 #include <string>
 #include <vector>
 #include <cstdlib>
-#include "internal/tcHotReloadDiagnostics.h"
 #include "internal/tcWindowsBuildOutput.h"
 #include "internal/tcHotReloadScan.h"
 #include "internal/tcPosixBuildOutput.h"
@@ -240,12 +239,11 @@ struct GuestLibrary {
 struct FileWatcher {
     vector<fs::path> watchPaths;
     fs::file_time_type lastBuildTime;
-    internal::HotReloadScanLoss scanLoss;
 
     void init(const string& srcDir) {
-        // Release old path storage before constructing the bounded replacement.
+        // Release old paths before scanning again.
         vector<fs::path>().swap(watchPaths);
-        watchPaths = internal::hotReloadSources(srcDir, scanLoss);
+        watchPaths = internal::hotReloadSources(srcDir);
         lastBuildTime = fs::file_time_type::clock::now();
     }
 
@@ -280,18 +278,9 @@ inline string findCMake(const string& buildDir = "") {
     // know the generator used by the current build (e.g. "Visual Studio 18 2026").
     if (!buildDir.empty()) {
         fs::path cachePath = fs::path(buildDir) / "CMakeCache.txt";
-        auto& loss = internal::hotReloadCacheLoss();
-        const auto path = internal::hotReloadCMakeCommand(cachePath, loss);
-        try {
-            std::error_code error;
-            if (!path.empty() && fs::is_regular_file(path, error)) return path;
-        } catch (const fs::filesystem_error&) {
-            ++loss.rejectedCaches;
-            loss.warn();
-        } catch (const std::bad_alloc&) {
-            ++loss.rejectedCaches;
-            loss.warn();
-        }
+        const auto path = internal::hotReloadCMakeCommand(cachePath);
+        std::error_code error;
+        if (!path.empty() && fs::is_regular_file(path, error)) return path;
     }
 #ifdef __APPLE__
     const char* paths[] = {
@@ -321,6 +310,8 @@ inline string findCMake(const string& buildDir = "") {
 inline int runBuildCommand(const vector<string>& argv, string& output) {
     output.clear();
     if (argv.empty()) return -1;
+    const auto lostBuilds = internal::buildOutputLoss().truncatedBuilds +
+                            internal::buildOutputLoss().unavailableBuilds;
 
 #ifdef _WIN32
     // Build a quoted command line for CreateProcess.
@@ -337,10 +328,36 @@ inline int runBuildCommand(const vector<string>& argv, string& output) {
     if (rc == -1) {
         logError("HotReload") << "Failed to launch: " << argv[0];
     }
-    return rc;
 #else
-    return internal::runPosixBuildWithOutput(argv, output);
+    const int rc = internal::runPosixBuildWithOutput(argv, output);
 #endif
+    // CI collects builds separately from arbitrary application/test output.
+    // Include runtime-triggered guest rebuilds in that same build-only log.
+    if (const char* path = std::getenv("TC_BUILD_WARNING_LOG"); path && *path) {
+        try {
+            std::ofstream buildLog(path, std::ios::app | std::ios::binary);
+            buildLog << "Hot reload build: " << argv[0] << '\n' << output << '\n';
+            buildLog.flush();
+            if (!buildLog) {
+                logError("HotReload") << "Cannot write build log: " << path;
+                return -1;
+            }
+            // The runtime retains bounded diagnostics. CI cannot certify a build
+            // if that capture omitted bytes that might contain a warning.
+            if (lostBuilds != internal::buildOutputLoss().truncatedBuilds +
+                              internal::buildOutputLoss().unavailableBuilds) {
+                logError("HotReload") << "Incomplete build output for warning check";
+                return -1;
+            }
+        } catch (...) {
+            // Reporting must not let another allocation failure escape either.
+            try {
+                logError("HotReload") << "Cannot write build log: " << path;
+            } catch (...) {}
+            return -1;
+        }
+    }
+    return rc;
 }
 
 // ---------------------------------------------------------------------------
@@ -517,9 +534,8 @@ struct Host {
         if (rc != 0) {
             logError() << "[HotReload] Build failed (exit code " << rc << ")";
 #ifdef _WIN32
-            if (internal::hasWindowsGuestLinkError(output)) {
-                logWarning() << internal::windowsGuestLinkHint();
-            }
+            logWarning("HotReload") << "The guest can use only TrussC and code linked into the guest; "
+                << "main.cpp functions and host-only libraries are not visible.";
 #endif
             return false;
         }
@@ -646,6 +662,7 @@ inline int runHotReloadApp(const WindowSettings& settings) {
 
     // Build the sokol descriptor (without template — we handle App* manually)
     internal::pixelPerfectMode() = settings.pixelPerfect;
+    internal::configureGraphicsPools(settings);
 
     sapp_desc desc = buildWindowDescriptor(settings, window.get());
     setHostReloadPoll([] { g_host.poll(); });

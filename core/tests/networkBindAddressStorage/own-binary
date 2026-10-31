@@ -1,0 +1,1 @@
+Allocation instrumentation must stay out of the combined core executable.

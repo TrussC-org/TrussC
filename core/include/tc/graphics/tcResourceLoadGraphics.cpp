@@ -1,6 +1,4 @@
-// Resource preparation and publication own storage while allocations can fail.
-// Keep these definitions in the exception-enabled host, including all owning
-// helper frames; CMake also propagates exception support for header loaders.
+// Resource preparation and publication are implemented in the host.
 #include <TrussC.h>
 
 namespace trussc {
@@ -52,6 +50,10 @@ bool FontAtlasManager::prepareFile(const std::string& fontPath, int fontSize, in
         fontName_ = fontPath;
         if (!initFromFontData(fontSize, faceIndex, &path)) { cleanup(); return false; }
         return true;
+    } catch (const std::bad_alloc&) {
+        cleanup();
+        internal::reportImportError("Font", "Out of memory while initializing font: ", fontPath.c_str());
+        return false;
     } catch (const std::exception&) {
         return initializationFailed(fontPath.c_str());
     }
@@ -78,6 +80,10 @@ bool FontAtlasManager::setupFromMemory(const uint8_t* data, size_t size, int fon
         fontName_ = "font data in memory";
         if (!initFromFontData(fontSize, faceIndex)) { cleanup(); return false; }
         return true;
+    } catch (const std::bad_alloc&) {
+        cleanup();
+        internal::reportImportError("Font", "Out of memory while initializing font");
+        return false;
     } catch (const std::exception&) {
         return initializationFailed();
     }
@@ -226,8 +232,7 @@ void Image::loadAsync(const fs::path& path, bool mipmaps) {
         clearCommitted();
         if (ready.result) {
             pixels_ = std::move(ready.pixels);
-            try { ready.result = finishLoad(ready.path, ready.mipmaps); }
-            catch (...) { clearCommitted(); throw; }
+            ready.result = finishLoad(ready.path, ready.mipmaps);
         }
     });
     state->path = internal::resolveLoadPath(path);
@@ -329,7 +334,6 @@ void Font::loadAsync(const fs::path& nameOrPath, int size, int faceIndex) {
     if (state->input.isDataFile) {
         state->result = internal::checkLoadFile(internal::utf8ToPath(state->input.path), "Font");
         if (!state->result) {
-            state->preflightFailure = true;
             internal::probeResourceLoad("font.preflight-failure", internal::utf8ToPath(state->input.path));
             internal::completeResourceLoad(state);
             return;
@@ -435,23 +439,7 @@ void Font::applyAsync(AsyncState& ready) {
     const bool hadAtlas = atlasManager_ != nullptr;
     cacheKey_ = ready.key;
     if (ready.unsupportedUrl) return; // native URL load keeps the old atlas
-    if (ready.preflightFailure || ready.urlTimeout) {
-        atlasManager_.reset();
-        if (ready.urlTimeout) cacheKey_.fontPath.clear();
-        if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
-        return;
-    }
-    if (!ready.result) {
-        atlasManager_.reset();
-        if (hadAtlas) internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
-        return;
-    }
-    try {
-        atlasManager_ = internal::SharedFontCache::getInstance().publishPrepared(ready.key, std::move(ready.candidate));
-    } catch (...) {
-        cacheKey_ = std::move(previousKey);
-        throw;
-    }
+    atlasManager_ = internal::SharedFontCache::getInstance().publishPrepared(ready.key, std::move(ready.candidate));
     if (hadAtlas && !(previousKey == cacheKey_)) {
         internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
     }
@@ -652,7 +640,7 @@ void Texture::createResources(const void* initialData, const sg_image_data* imag
     // Create sampler
     createSampler();
 
-    allocated_ = true;
+    finishResources_();
 }
 
 #ifdef __EMSCRIPTEN__

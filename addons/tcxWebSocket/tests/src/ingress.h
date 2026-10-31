@@ -193,7 +193,7 @@ struct WebSocketIngressTest {
             });
             worker.join();
             auto store = tc::internal::ExternalEventDelivery<void>::diagnostics(ws.onClose);
-            check("local WebSocket closes bypass saturated external delivery", store && store->pending == 1024 && store->rejectedCopies == 0);
+            check("local WebSocket closes bypass saturated external delivery", store && store->pending == 1024 && !store->overflowing);
             tc::internal::drainMainThreadQueue();
             check("all local WebSocket closes reach Main", closes == 2049 && store->pending == 0);
         }

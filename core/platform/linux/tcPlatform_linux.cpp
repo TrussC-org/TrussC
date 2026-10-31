@@ -77,10 +77,6 @@ bool getImmersiveMode() { return false; }
 // Orientation (no-op on desktop)
 void setOrientation(Orientation mask) { (void)mask; }
 
-// Keep screen on (TODO: xdg-screensaver or systemd-inhibit — no-op for now)
-void setKeepScreenOn(bool enabled) { (void)enabled; }
-bool getKeepScreenOn() { return false; }
-
 IVec2 internal::windowPositionNative(const void* handle) {
     auto* dpy = (Display*)sapp_x11_get_display();
     if (!dpy || !handle) {

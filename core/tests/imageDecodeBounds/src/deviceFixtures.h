@@ -65,9 +65,11 @@ void deviceFixture(const fs::path& path, const string& expectation) {
                                   (memory ? cpu.loadFromMemory(bytes.data(), int(bytes.size())) : cpu.load(path));
         string expected = expectation;
         if (memory && row.contains("memory")) expected = row.at("memory").get<string>();
+        if (expectation == "too-large" && expected != "decode-failed") expected = gpu ? "too-large" : "load";
+        if (expectation == "reject-encoded") expected = memory ? "reject-encoded" : "decode-failed";
         const bool load = expected == "load";
         const auto error = load ? LoadError::None : expected == "decode-failed" ? LoadError::DecodeFailed : LoadError::TooLarge;
-        const auto losses = load || expected == "decode-failed" ? 0 : 1;
+        const auto losses = expected == "reject-encoded" ? 1 : 0;
         bool ok = bool(result) == load && result.error == error &&
             internal::imageDecodeRejectionsForTests() == before + losses;
         // Synchronous rejection clears the target; the saved previous Pixels stay intact.

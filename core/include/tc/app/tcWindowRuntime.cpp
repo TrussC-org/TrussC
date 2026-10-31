@@ -1085,6 +1085,10 @@ bool refreshWindowEntryMetadata(Window& window) {
 namespace {
 Runtime& coordinator() { return runtime(); }
 void processQueues() {
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)) || defined(__EMSCRIPTEN_PTHREADS__)
+    updateKeepScreenOn(headless::isActive());
+#endif
+
     if (sg_isvalid()) sapp_tc_gl_activate_idle();
     auto loads = takeResourceLoadBatch();
     EntryStackGuard guard(AppEntry::Prelude);

@@ -208,6 +208,114 @@ static void testPortLogOutputs() {
 static const string kListTools = R"({"jsonrpc":"2.0","id":1,"method":"tools/list"})";
 static const string kToken = "test-token-0123456789abcdef";
 
+static void testConcurrentCompleteRefusals(int port, const string& name,
+                                           const string& request, int expectedStatus) {
+    struct SocketGroup {
+        vector<socket_t> sockets;
+        ~SocketGroup() { for (const auto sock : sockets) httplib::detail::close_socket(sock); }
+    } group;
+    // Bound (test admission): 28 refusals plus the valid request fit the default 32 outstanding slots.
+    constexpr int refusalCount = 28;
+    for (int i = 0; i < refusalCount; ++i) {
+        const auto sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock == INVALID_SOCKET) break;
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(static_cast<uint16_t>(port));
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+            httplib::detail::close_socket(sock);
+            break;
+        }
+        group.sockets.push_back(sock);
+    }
+    check(name + " opens refusal sockets", group.sockets.size() == refusalCount);
+    if (group.sockets.size() != refusalCount) return;
+    const auto start = chrono::steady_clock::now();
+    bool sent = true;
+    for (const auto sock : group.sockets) {
+        httplib::detail::SocketStream stream(sock, 5, 0, 5, 0);
+        sent = httplib::detail::write_data(stream, request.data(), request.size()) && sent;
+    }
+    check(name + " sends complete refusals", sent);
+    httplib::Client valid("127.0.0.1", port);
+    valid.set_connection_timeout(5);
+    valid.set_read_timeout(5);
+    const auto response = valid.Get("/");
+    const auto elapsed = chrono::duration_cast<chrono::milliseconds>(chrono::steady_clock::now() - start).count();
+    const int status = response ? response->status : -1;
+    check(name + " concurrent GET -> 200", status == 200, to_string(status));
+    // Bound (test latency): allow 1 s on slow CI, 750 ms below seven serialized 250 ms drains (1.75 s).
+    check(name + " GET avoids serialized drains", elapsed < 1000, to_string(elapsed) + " ms");
+    printf("concurrent refusals (%s): %lld ms including sends\n", name.c_str(), static_cast<long long>(elapsed));
+    bool complete = true;
+    for (const auto sock : group.sockets) {
+        // No client FIN: retirement must use the completed request rather than the peer's send-side close.
+        httplib::detail::SocketStream stream(sock, 5, 0, 5, 0);
+        string reply;
+        char buffer[4096];
+        ssize_t n;
+        while ((n = stream.read(buffer, sizeof(buffer))) > 0) reply.append(buffer, static_cast<size_t>(n));
+        int refusalStatus = -1;
+        std::sscanf(reply.c_str(), "HTTP/1.1 %d", &refusalStatus);
+        complete = complete && refusalStatus == expectedStatus && n == 0;
+    }
+    check(name + " refusals reach EOF while peers stay open", complete);
+}
+
+static void testCompleteRefusals(int port) {
+    const string headers = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n";
+    testConcurrentCompleteRefusals(port, "zero body", headers +
+        "Content-Type: text/plain\r\nContent-Length: 0\r\n\r\n", 415);
+    testConcurrentCompleteRefusals(port, "no body", "GET / HTTP/1.1\r\nHost: other.example\r\n\r\n", 403);
+    testConcurrentCompleteRefusals(port, "header refusal", "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: invalid\r\n\r\n", 416);
+    testConcurrentCompleteRefusals(port, "read-ahead body", headers +
+        "Content-Type: text/plain\r\nContent-Length: " + to_string(kListTools.size()) + "\r\n\r\n" + kListTools, 415);
+    testConcurrentCompleteRefusals(port, "body read", headers +
+        "Content-Type: application/json\r\nContent-Length: " + to_string(kListTools.size()) + "\r\n\r\n" + kListTools, 401);
+    testConcurrentCompleteRefusals(port, "drained body", headers +
+        "Content-Type: text/plain\r\nContent-Length: 65536\r\n\r\n" + string(65536, 'x'), 415);
+}
+
+static void testIncompleteRefusal(int port) {
+    const auto sock = socket(AF_INET, SOCK_STREAM, 0);
+    check("incomplete refusal socket opens", sock != INVALID_SOCKET);
+    if (sock == INVALID_SOCKET) return;
+    struct SocketScope {
+        socket_t sock;
+        ~SocketScope() { httplib::detail::close_socket(sock); }
+    } socketScope{sock};
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(static_cast<uint16_t>(port));
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    const bool connected = connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
+    check("incomplete refusal connects", connected);
+    if (!connected) return;
+    httplib::detail::SocketStream stream(sock, 5, 0, 5, 0);
+    // Keep the sending side open with most of the declared body still missing.
+    const string request = "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: text/plain\r\n"
+        "Content-Length: 524288\r\n\r\n" + string(65536, 'x');
+    check("incomplete refusal sends partial body", httplib::detail::write_data(stream, request.data(), request.size()));
+    string response;
+    char buffer[4096];
+    ssize_t received = 0;
+    while ((received = stream.read(buffer, sizeof(buffer))) > 0)
+        response.append(buffer, static_cast<size_t>(received));
+    int status = -1;
+    std::sscanf(response.c_str(), "HTTP/1.1 %d", &status);
+    check("incomplete body -> 415 with graceful EOF", status == 415 && received == 0, to_string(status));
+    const string body = json{{"error", "unsupported Content-Type 'text/plain': send application/json"}}.dump();
+    const auto separator = response.find("\r\n\r\n");
+    check("incomplete body gets the complete refusal", separator != string::npos &&
+          response.substr(separator + 4) == body, response);
+    // Bound (test completion): a stalled sender must release its worker without waiting for the rest of the body.
+    const auto deadline = chrono::steady_clock::now() + chrono::seconds(5);
+    while (mcp::internal::admittedConnections() != 0 && chrono::steady_clock::now() < deadline)
+        this_thread::yield();
+    check("incomplete sender releases admission while still open", mcp::internal::admittedConnections() == 0);
+}
+
 
 void setEnv(const char* key, const char* value) {
 #ifdef _WIN32
@@ -695,23 +803,44 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check("native client gets a JSON-RPC reply", r && r->body.find("\"result\"") != string::npos, r ? r->body : "");
         check("Content-Type with charset -> 200", status(post({}, "application/json; charset=utf-8")) == 200);
 
+        auto expectStatus = [&](const string& name, const httplib::Result& response, int expected) {
+            check(name, status(response) == expected, to_string(status(response)));
+        };
+
         // Content-Type
-        check("Content-Type text/plain -> 415", status(post({}, "text/plain")) == 415);
-        check("Content-Type form-urlencoded -> 415", status(post({}, "application/x-www-form-urlencoded")) == 415);
+        expectStatus("Content-Type text/plain -> 415", post({}, "text/plain"), 415);
+        expectStatus("Content-Type form-urlencoded -> 415", post({}, "application/x-www-form-urlencoded"), 415);
+
+        // Refusal occurs before the body reader. This exceeds httplib's read-ahead
+        // buffer, leaving input on the socket when the response is sent.
+        const string unreadBody(512 * 1024, 'x');
+        auto expectFullRefusal = [&](const string& name, const httplib::Headers& headers,
+                                     const string& contentType, int expected) {
+            const auto reference = post(headers, contentType);
+            const auto response = cli.Post("/mcp", headers, unreadBody, contentType);
+            expectStatus(name, response, expected);
+            check(name + " has the complete JSON response", reference && response &&
+                  reference->status == expected && response->body == reference->body &&
+                  !response->body.empty() && response->get_header_value("Content-Type") == "application/json",
+                  "status " + to_string(status(response)));
+        };
+        expectFullRefusal("unread body Content-Type -> 415", {}, "text/plain", 415);
+        expectFullRefusal("unread body Origin -> 403", {{"Origin", "http://other.example"}}, "application/json", 403);
+        expectFullRefusal("unread body Host -> 403", {{"Host", "other.example"}}, "application/json", 403);
 
         // Origin
-        check("foreign Origin -> 403", status(post({{"Origin", "http://evil.example"}}, "application/json")) == 403);
-        check("Origin null -> 403", status(post({{"Origin", "null"}}, "application/json")) == 403);
+        expectStatus("foreign Origin -> 403", post({{"Origin", "http://evil.example"}}, "application/json"), 403);
+        expectStatus("Origin null -> 403", post({{"Origin", "null"}}, "application/json"), 403);
         check("own origin localhost -> 200", status(post({{"Origin", "http://localhost:" + p}}, "application/json")) == 200);
         check("own origin 127.0.0.1 -> 200", status(post({{"Origin", "http://127.0.0.1:" + p}}, "application/json")) == 200);
-        check("localhost on another port -> 403", status(post({{"Origin", "http://localhost:5173"}}, "application/json")) == 403);
+        expectStatus("localhost on another port -> 403", post({{"Origin", "http://localhost:5173"}}, "application/json"), 403);
 
         // Host (DNS rebinding: the page's own name, resolving to 127.0.0.1)
-        check("rebinding Host -> 403", status(post({{"Host", "evil.example:" + p}}, "application/json")) == 403);
+        expectStatus("rebinding Host -> 403", post({{"Host", "evil.example:" + p}}, "application/json"), 403);
         check("Host localhost:port -> 200", status(post({{"Host", "localhost:" + p}}, "application/json")) == 200);
         check("Host 127.0.0.1 -> 200", status(post({{"Host", "127.0.0.1"}}, "application/json")) == 200);
         check("Host [::1]:port -> 200", status(post({{"Host", "[::1]:" + p}}, "application/json")) == 200);
-        check("Host localhost.evil.example -> 403", status(post({{"Host", "localhost.evil.example"}}, "application/json")) == 403);
+        expectStatus("Host localhost.evil.example -> 403", post({{"Host", "localhost.evil.example"}}, "application/json"), 403);
 
         // Bearer token on /mcp. `raw` sends only the headers given here.
         {
@@ -719,26 +848,38 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             raw.set_connection_timeout(5);
             raw.set_read_timeout(10);
             auto postAuth = [&](const string& value) {
-                return status(raw.Post("/mcp", {{"Authorization", value}}, kListTools, "application/json"));
+                return raw.Post("/mcp", {{"Authorization", value}}, kListTools, "application/json");
             };
             string sameLength = kToken;
             sameLength.back() = (sameLength.back() == 'x') ? 'y' : 'x';
-            check("correct token -> 200", postAuth("Bearer " + kToken) == 200);
-            check("no Authorization header -> 401",
-                  status(raw.Post("/mcp", kListTools, "application/json")) == 401);
-            check("same-length wrong token -> 401", postAuth("Bearer " + sameLength) == 401);
-            check("token prefix -> 401", postAuth("Bearer " + kToken.substr(0, kToken.size() - 1)) == 401);
-            check("token plus a byte -> 401", postAuth("Bearer " + kToken + "x") == 401);
-            check("scheme only -> 401", postAuth("Bearer ") == 401);
-            check("token without scheme -> 401", postAuth(kToken) == 401);
+            check("correct token -> 200", status(postAuth("Bearer " + kToken)) == 200);
+            expectStatus("no Authorization header -> 401",
+                         raw.Post("/mcp", kListTools, "application/json"), 401);
+            expectStatus("same-length wrong token -> 401", postAuth("Bearer " + sameLength), 401);
+            expectStatus("token prefix -> 401", postAuth("Bearer " + kToken.substr(0, kToken.size() - 1)), 401);
+            expectStatus("token plus a byte -> 401", postAuth("Bearer " + kToken + "x"), 401);
+            expectStatus("scheme only -> 401", postAuth("Bearer "), 401);
+            expectStatus("token without scheme -> 401", postAuth(kToken), 401);
             check("GET / needs no token -> 200", status(raw.Get("/")) == 200);
         }
 
         // GET / (server info) takes the Host / Origin checks too
         check("GET / -> 200", status(cli.Get("/")) == 200);
-        check("GET / rebinding Host -> 403", status(cli.Get("/", {{"Host", "evil.example"}})) == 403);
-        check("GET / foreign Origin -> 403", status(cli.Get("/", {{"Origin", "http://evil.example"}})) == 403);
+        expectStatus("GET / rebinding Host -> 403", cli.Get("/", {{"Host", "evil.example"}}), 403);
+        expectStatus("GET / foreign Origin -> 403", cli.Get("/", {{"Origin", "http://evil.example"}}), 403);
 
+        {
+            httplib::Client persistent("127.0.0.1", port);
+            persistent.set_read_timeout(5);
+            persistent.set_keep_alive(true);
+            const auto first = persistent.Get("/");
+            const auto originalSocket = persistent.socket();
+            const auto second = persistent.Get("/");
+            check("200 responses preserve keep-alive", status(first) == 200 && status(second) == 200 &&
+                  originalSocket != INVALID_SOCKET && persistent.socket() == originalSocket);
+        }
+        testCompleteRefusals(port);
+        testIncompleteRefusal(port);
         done = true;
     });
 

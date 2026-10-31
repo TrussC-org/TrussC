@@ -114,6 +114,29 @@
 using namespace std;
 using namespace tc;
 
+namespace trussc::internal {
+// As in tcpServerCredits: a removed client still occupies admission until
+// both workers have finished, including any callbacks they are delivering.
+struct TcpServerTestAccess {
+    static size_t workers(TcpServer& server) { return server.state_->workerClients_.load(); }
+
+    struct WorkerBookkeeping {
+        size_t workers, readers, writers, finishedReaders, finishedWriters;
+        bool empty() const {
+            return workers == 0 && readers == 0 && writers == 0 &&
+                   finishedReaders == 0 && finishedWriters == 0;
+        }
+    };
+    static WorkerBookkeeping bookkeeping(TcpServer& server) {
+        auto& state = *server.state_;
+        std::shared_lock<std::shared_mutex> lock(state.clientsMutex_);
+        return {state.workerClients_.load(), state.clientThreads_.size(),
+                state.clientWriters_.size(), state.finishedClientThreads_.size(),
+                state.finishedWriters_.size()};
+    }
+};
+}
+
 #ifdef __linux__
 // How many thread creations to let through before the next one fails with
 // EAGAIN, as if the process were out of resources; -1 = never. Disarms itself
@@ -198,7 +221,7 @@ static int freePort() {
     if (s == kBadSocket) return 0;
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     addr.sin_port = 0;
     int port = 0;
     if (::bind(s, (sockaddr*)&addr, sizeof(addr)) == 0) {
@@ -298,37 +321,6 @@ static bool closedAfterData(rawsocket_t s, int ms) {
 }
 
 #ifdef __linux__
-// Live threads in this process
-static int taskCount() {
-    int n = 0;
-    if (DIR* d = opendir("/proc/self/task")) {
-        while (dirent* e = readdir(d)) {
-            if (e->d_name[0] != '.') ++n;
-        }
-        closedir(d);
-    }
-    return n;
-}
-
-// Mapped address space, in KiB. A thread that has returned but was never
-// joined no longer shows up in /proc/self/task — the kernel reaps the task
-// itself — yet its stack stays mapped until the join, so this is what reveals
-// threads that were never reclaimed.
-static long vmSizeKb() {
-    long kb = -1;
-    if (FILE* f = fopen("/proc/self/status", "r")) {
-        char line[256];
-        while (fgets(line, sizeof(line), f)) {
-            if (strncmp(line, "VmSize:", 7) == 0) {
-                kb = strtol(line + 7, nullptr, 10);
-                break;
-            }
-        }
-        fclose(f);
-    }
-    return kb;
-}
-
 // Inode of the socket listening on this port (IPv4), 0 if there is none
 static unsigned long listeningInode(int port) {
     unsigned long inode = 0;
@@ -437,6 +429,7 @@ struct WarningCounter {
 // -----------------------------------------------------------------------------
 static void testReclaim() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     const int port = startOnFreePort(server, -1);
     check("reclaim: server started", port != 0);
     if (!port) return;
@@ -461,72 +454,36 @@ static void testReclaim() {
         return true;
     };
 
-    // Warm up first, so allocator and thread-stack caches are already at their
-    // steady size when the baseline is taken
+    // Observe the server's own worker/handle bookkeeping. VmSize cannot prove
+    // joins: allocator arenas may stay mapped after every thread has joined.
+    // Allow slow scheduling; elapsed time is diagnostic, not a speed assertion.
+    auto reclaimed = [&](const char* name) {
+        const auto started = chrono::steady_clock::now();
+        const bool empty = waitUntil(15000, [&] {
+            return internal::TcpServerTestAccess::bookkeeping(server).empty();
+        });
+        const auto observed = internal::TcpServerTestAccess::bookkeeping(server);
+        const auto elapsed = chrono::duration_cast<chrono::milliseconds>(
+            chrono::steady_clock::now() - started).count();
+        printf("  (reclaim: workers=%zu, reader handles=%zu, writer handles=%zu, "
+               "finished readers=%zu, finished writers=%zu, elapsed=%lld ms)\n",
+               observed.workers, observed.readers, observed.writers,
+               observed.finishedReaders, observed.finishedWriters,
+               static_cast<long long>(elapsed));
+        check(name, empty);
+    };
+
     check("reclaim: warm-up clients come and go", churn(2, 10));
-
-#ifdef __linux__
-    this_thread::sleep_for(chrono::milliseconds(300));   // let the reaper catch up
-    const int tasksBefore = taskCount();
-    const long vmBefore = vmSizeKb();
-#endif
-
     const int kBatches = 20, kPerBatch = 10;   // 200 clients in all
     check("reclaim: 200 clients connect and leave", churn(kBatches, kPerBatch));
     check("reclaim: client list is empty afterwards", server.getClientCount() == 0 &&
                                                         server.getClientIds().empty());
+    reclaimed("reclaim: finished worker bookkeeping is empty");
 
-#ifdef __linux__
-    // The accept loop reaps on its next slice (100 ms)
-    const bool tasksBack = waitUntil(3000, [&] { return taskCount() <= tasksBefore; });
-    const int tasksAfter = taskCount();
-    this_thread::sleep_for(chrono::milliseconds(300));
-    const long vmAfter = vmSizeKb();
-    const long growthMb = (vmAfter - vmBefore) / 1024;
-    printf("  (threads %d -> %d, address space %+ld MB)\n", tasksBefore, tasksAfter, growthMb);
-
-    check("reclaim: thread count returns to baseline", tasksBack);
-    // 200 unjoined threads keep 200 stacks mapped: 8 MB each by default, so
-    // well over a gigabyte. Joined ones go back to a small shared cache.
-    check("reclaim: finished threads are joined (no stacks left mapped)",
-          vmBefore > 0 && vmAfter > 0 && growthMb < 256);
-
-    // The same without a later connection. A server that reaped only when the
-    // next client arrived would pass the check above (it holds just the last
-    // batch) and would start every measurement here with a batch held, so
-    // first one probe client, whose accept is where such a server would reap.
-    const int kIdleBatch = 40;
-    size_t stackBytes = 0;
-    pthread_attr_t attr;
-    if (pthread_getattr_default_np(&attr) == 0) {
-        pthread_attr_getstacksize(&attr, &stackBytes);
-        pthread_attr_destroy(&attr);
-    }
-    const long stackMb = static_cast<long>(stackBytes / (1024 * 1024));
-    if (stackMb >= 4) {
-        // Warm up at this batch size too: more threads at once than before
-        // can make the allocator map further arenas, which stay mapped
-        const bool warm = churn(2, kIdleBatch);
-        const bool probed = warm && churn(1, 1);
-        this_thread::sleep_for(chrono::milliseconds(300));
-        const long vmIdle = vmSizeKb();
-        const bool left = churn(1, kIdleBatch);
-        // No further connection: only the accept loop's own slices can reap
-        this_thread::sleep_for(chrono::milliseconds(500));
-        const long heldMb = (vmSizeKb() - vmIdle) / 1024;
-        printf("  (%d clients left an idle server: address space %+ld MB, %ld MB per stack)\n",
-               kIdleBatch, heldMb, stackMb);
-        // Held, their receive stacks alone would be kIdleBatch * stackMb
-        check("reclaim: an idle server joins them without a new connection",
-              probed && left && vmIdle > 0 && heldMb < kIdleBatch * stackMb / 2);
-    } else {
-        skip("reclaim: an idle server joins them without a new connection",
-             "default thread stack under 4 MB");
-    }
-#else
-    skip("reclaim: thread count returns to baseline", "Linux only");
-    skip("reclaim: an idle server joins them without a new connection", "Linux only");
-#endif
+    // No further connection after this batch: the accept loop must reap on
+    // its own idle slices, even when no new client ever arrives.
+    check("reclaim: idle batch connects and leaves", churn(1, 40));
+    reclaimed("reclaim: an idle server joins them without a new connection");
 
     server.stop();
 }
@@ -537,6 +494,7 @@ static void testReclaim() {
 static void testLimit() {
     WarningCounter warnings;
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     const int kLimit = 4;
     const int port = startOnFreePort(server, kLimit);
     check("limit: server started with maxClients = 4", port != 0);
@@ -573,11 +531,24 @@ static void testLimit() {
     TC_CLOSE(members.back());
     members.pop_back();
     check("limit: a leaving client frees its slot",
-          waitUntil(3000, [&] { return server.getClientCount() == kLimit - 1; }));
+          waitUntil(3000, [&] {
+              return server.getClientCount() == kLimit - 1 &&
+                     internal::TcpServerTestAccess::workers(server) == kLimit - 1;
+          }));
+    const auto lateStarted = chrono::steady_clock::now();
     rawsocket_t late = connectTo(port);
-    check("limit: a new client takes the freed slot",
-          waitUntil(3000, [&] { return server.getClientCount() == kLimit; }) &&
-          late != kBadSocket && !closedByServer(late, 300));
+    const bool lateConnected = late != kBadSocket;
+    const bool countReached = waitUntil(3000, [&] { return server.getClientCount() == kLimit; });
+    const int observedCount = server.getClientCount();
+    const bool lateClosed = lateConnected && closedByServer(late, 300);
+    const auto lateElapsed = chrono::duration_cast<chrono::milliseconds>(
+        chrono::steady_clock::now() - lateStarted).count();
+    printf("  (freed slot: count=%d/%d, elapsed=%lld ms, count reached=%s, connected=%s, closed=%s)\n",
+           observedCount, kLimit, static_cast<long long>(lateElapsed),
+           countReached ? "yes" : "no", lateConnected ? "yes" : "no", lateClosed ? "yes" : "no");
+    check("limit: freed slot reaches the client count", countReached);
+    check("limit: late connection succeeds", lateConnected);
+    check("limit: late connection stays open", lateConnected && !lateClosed);
     if (late != kBadSocket) TC_CLOSE(late);
 
     for (rawsocket_t s : members) if (s != kBadSocket) TC_CLOSE(s);
@@ -590,6 +561,7 @@ static void testLimit() {
 static void testDefaultLimit() {
     WarningCounter warnings;
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     const int port = startOnFreePort(server, -1);
     check("default: server started with the default limit", port != 0);
     if (!port) return;
@@ -616,11 +588,13 @@ static void testDefaultLimit() {
 // -----------------------------------------------------------------------------
 static void testPortInUse() {
     TcpServer first;
+    first.setBindAddress("127.0.0.1");
     const int port = startOnFreePort(first, -1);
     check("port in use: first server started", port != 0);
     if (!port) return;
 
     TcpServer second;
+    second.setBindAddress("127.0.0.1");
     check("port in use: a second server on that port fails to start", !second.start(port));
     check("port in use: the second server is not running", !second.isRunning());
     check("port in use: the first server is still running", first.isRunning());
@@ -672,6 +646,7 @@ static void testRestartSamePort(bool serverClosesFirst) {
     auto name = [&](const char* what) { return prefix + what; };
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     EventListener echo = server.onReceive.listen([&](TcpServerReceiveEventArgs& e) {
         server.sendAsync(e.clientId, string(e.data.begin(), e.data.end()));
     });
@@ -721,6 +696,7 @@ static void testListenerTeardown() {
     // touches the server on its way out, so the destruction has to wait for it.
     {
         auto server = make_unique<TcpServer>();
+        server->setBindAddress("127.0.0.1");
         TcpServer* srv = server.get();
         atomic<bool> listenerDone{false};
         EventListener sub = server->onReceive.listen([&, srv](TcpServerReceiveEventArgs& e) {
@@ -747,6 +723,7 @@ static void testListenerTeardown() {
     // though it joins none of the server's threads
     {
         TcpServer server;
+        server.setBindAddress("127.0.0.1");
         atomic<bool> stopped{false};
         EventListener sub = server.onReceive.listen([&](TcpServerReceiveEventArgs&) {
             server.stop();
@@ -774,6 +751,7 @@ static void testListenerTeardown() {
     // there is refused rather than attempted.
     {
         TcpServer server;
+        server.setBindAddress("127.0.0.1");
         atomic<int> connects{0};
         atomic<int> oldPort{0};
         atomic<bool> restartRefused{false};
@@ -847,10 +825,10 @@ static void stopFromOnErrorAfterSendTimeout() {
     Watchdog dog(prefix, 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     srv->setSendTimeout(0.3f);
     // This teardown scenario deliberately sends one larger finite payload.
-    srv->setSendItemLimit(32 * 1024 * 1024);
     atomic<bool> errorIn{false}, removedFirst{false}, stopped{false}, notCut{false};
     EventListener onErr = srv->onError.listen([&, srv](TcpServerErrorEventArgs& e) {
         if (e.message.find("mid-payload") == string::npos || errorIn.exchange(true)) return;
@@ -924,6 +902,7 @@ static void destroyWhileWriterListenerRuns(bool viaStop) {
     Watchdog dog(prefix.c_str(), 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<bool> listenerIn{false}, callReturned{false}, listenerDone{false};
     EventListener onSent = srv->onSendComplete.listen([&, srv](TcpSendCompleteEventArgs& e) {
@@ -967,6 +946,7 @@ static void crossDisconnectFromTwoListeners() {
     Watchdog dog(prefix, 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> inside{0}, returned{0};
     mutex seenMutex;
@@ -1026,6 +1006,7 @@ static void disconnectAllFromTwoListeners(bool fromWriter) {
     Watchdog dog(prefix.c_str(), 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> inside{0}, returned{0};
     mutex seenMutex;
@@ -1092,6 +1073,7 @@ static void disconnectAllWhileAClientConnects() {
     Watchdog dog(prefix, 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<int> firstId{-1}, secondId{-1};
     atomic<bool> listenerIn{false}, secondJoined{false};
     atomic<rawsocket_t> second{kBadSocket};
@@ -1166,6 +1148,7 @@ static void concurrentStopWithAcceptThread(bool fromWriter, bool acceptLast) {
     Watchdog dog(prefix.c_str(), 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> firstId{-1};
     atomic<bool> connectIn{false}, otherIn{false};
@@ -1257,6 +1240,7 @@ static void stopOnAcceptThreadAfterAnotherTookIt() {
     Watchdog dog(prefix, 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> connects{0}, oldPort{0};
     atomic<bool> plainIn{false}, listenerStopped{false}, refusedAfterStop{false};
@@ -1349,6 +1333,7 @@ static void concurrentStopOnTwoClientThreads(bool fromWriter) {
     Watchdog dog(prefix.c_str(), 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> inside{0}, stopped{0};
     mutex seenMutex;
@@ -1422,6 +1407,7 @@ static void concurrentStopOnPlainAndWriterThread() {
     Watchdog dog(prefix, 20000);
 
     auto server = make_unique<TcpServer>();
+    server->setBindAddress("127.0.0.1");
     TcpServer* srv = server.get();
     atomic<int> firstId{-1};
     atomic<bool> hookArmed{false}, plainTook{false}, tookFirst{false};
@@ -1495,6 +1481,7 @@ static void concurrentStopFromTwoThreads() {
     Watchdog dog("concurrent stop: two threads", 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<bool> inListener{false}, release{false};
     EventListener onCon = server.onClientConnect.listen([&](TcpClientConnectEventArgs&) {
         inListener = true;
@@ -1538,6 +1525,7 @@ static void startWhileAnotherThreadStops() {
     Watchdog dog(prefix, 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<bool> holdNext{true}, held{false}, release{false};
     EventListener onCon = server.onClientConnect.listen([&](TcpClientConnectEventArgs&) {
         if (!holdNext.exchange(false)) return;
@@ -1591,6 +1579,7 @@ static void startWhileAnotherStopCleansUp() {
     Watchdog dog(prefix, 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<bool> holdNext{false}, held{false}, release{false};
     internal::setTcpServerStopHookForTests([&] {
         if (!holdNext.exchange(false)) return;
@@ -1660,6 +1649,7 @@ static void startFromClientThreadRefused() {
     Watchdog dog(prefix, 20000);
 
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<bool> listenerDone{false}, refused{false};
     EventListener onRecv = server.onReceive.listen([&](TcpServerReceiveEventArgs&) {
         refused = !server.start(freePort());
@@ -1706,6 +1696,7 @@ static void acceptBackoffChild() {
     WarningCounter warnings;
     atomic<int> errors{0};
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     EventListener onErr = server.onError.listen([&](TcpServerErrorEventArgs&) { ++errors; });
     const int port = startOnFreePort(server, -1);
     check("accept errors: server started", port != 0);
@@ -1766,6 +1757,7 @@ static void threadStartFailureChild() {
     WarningCounter warnings;
     atomic<int> errors{0};
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     EventListener onErr = server.onError.listen([&](TcpServerErrorEventArgs&) { ++errors; });
     const int port = startOnFreePort(server, -1);
     check("thread start: server started", port != 0);
@@ -1806,6 +1798,7 @@ static void threadStartFailureChild() {
 static void receiveThreadFailureChild() {
     WarningCounter warnings;
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<int> connects{0}, disconnects{0}, connectId{-1}, disconnectId{-1};
     atomic<int> errors{0}, lastErrorClientId{-2};
     // The client whose receive thread fails gets an empty payload queued as
@@ -1879,6 +1872,7 @@ static void receiveThreadFailureChild() {
 // -----------------------------------------------------------------------------
 static void acceptThreadFailureChild() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     atomic<int> errors{0};
     EventListener onErr = server.onError.listen([&](TcpServerErrorEventArgs&) { ++errors; });
     const int port = freePort();

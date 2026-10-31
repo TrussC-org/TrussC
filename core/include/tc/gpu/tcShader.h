@@ -89,7 +89,9 @@ public:
         if (sg_query_buffer_state(vertexBuffer) != SG_RESOURCESTATE_VALID ||
             (recipe_.index_type != SG_INDEXTYPE_NONE && recipe_.index_type != _SG_INDEXTYPE_DEFAULT &&
              sg_query_buffer_state(indexBuffer) != SG_RESOURCESTATE_VALID)) {
-            internal::deferGpuDestroy(vertexBuffer); internal::deferGpuDestroy(indexBuffer);
+            if (!stream_) {
+                internal::deferGpuDestroy(vertexBuffer); internal::deferGpuDestroy(indexBuffer);
+            }
             internal::deferGpuDestroy(shader);
             shader = {}; vertexBuffer = {}; indexBuffer = {}; stream_.reset();
             logError("Shader") << "Failed to create draw buffers";
@@ -106,8 +108,10 @@ public:
         // This is what makes scope-local Shaders safe — the captured pipeline
         // and buffers outlive the object until the flush.
         if (loaded) {
-            internal::deferGpuDestroy(indexBuffer);
-            internal::deferGpuDestroy(vertexBuffer);
+            if (!stream_) {
+                internal::deferGpuDestroy(indexBuffer);
+                internal::deferGpuDestroy(vertexBuffer);
+            }
             internal::retirePipelineProgram(shader);
             internal::deferGpuDestroy(shader);
         }
@@ -130,25 +134,15 @@ public:
     // -------------------------------------------------------------------------
 
     void begin() {
-        if (!loaded || internal::currentTarget().recordingFailed) return;
-        if (internal::currentTarget().openShaderScopes == UINT_MAX) {
-            internal::currentTarget().failRecording("shader scope count cannot be represented");
-            return;
-        }
+        if (!loaded) return;
 
         // Push to stack (per-window)
         auto& wctx = internal::currentWindowContext();
         // Bind the scope to an activation, including while its target is parked.
         auto& target = internal::currentTarget();
-        try {
-            wctx.shaderScopeTargets.push_back({&target, target.activation});
-            try { wctx.shaderStack.push_back(this); }
-            catch (...) { wctx.shaderScopeTargets.pop_back(); throw; }
-        } catch (const std::bad_alloc&) {
-            target.failRecording("shader scope allocation failed"); return;
-        } catch (const std::length_error&) {
-            target.failRecording("shader scope count cannot be represented"); return;
-        }
+        wctx.shaderScopeTargets.push_back({&target, target.activation});
+        try { wctx.shaderStack.push_back(this); }
+        catch (...) { wctx.shaderScopeTargets.pop_back(); throw; }
         ++target.openShaderScopes;
 
         // Increment layer for post-shader sokol_gl draws
@@ -157,7 +151,7 @@ public:
         // (target layer bump in submitVertices, like the deferred PBR path),
         // so only the swapchain layer counter is advanced here.
         if (!wctx.currentTarget->isFbo) {
-            if (!wctx.currentTarget->advanceLayer()) return;
+            wctx.currentTarget->advanceLayer();
         }
 
         // Call virtual hook
@@ -263,7 +257,12 @@ protected:
             }
             return;
         }
-        pendingUniforms[slot].assign((const uint8_t*)data, (const uint8_t*)data + size);
+        auto& bytes = pendingUniforms[slot];
+        if (size == 0) {
+            bytes.clear();
+            return;
+        }
+        bytes.assign((const uint8_t*)data, (const uint8_t*)data + size);
     }
 
     // Apply all stored uniforms
@@ -313,9 +312,9 @@ public:
     // -------------------------------------------------------------------------
 
     void submitVertices(const ShaderVertex* data, int count, PrimitiveType type) {
-        if (count == 0 || !loaded || internal::currentTarget().recordingFailed) return;
+        if (count == 0 || !loaded) return;
         if (count < 0 || !data || (size_t)count > SIZE_MAX / sizeof(ShaderVertex)) {
-            internal::currentTarget().failRecording("shader vertex count cannot be represented");
+            internal::reportImportError("Shader", "shader vertex count cannot be represented");
             return;
         }
         try {
@@ -330,18 +329,10 @@ public:
         // destroyed before present()) and later setUniform()/setTexture()
         // calls cannot retroactively change this draw. Same pattern as
         // PbrDrawCommand; executed by internal::executeDeferredShaderDraw().
-        // Grow before capturing any handles in this sokol frame. Later FBO
-        // flushes can request growth, but must not replace this frame's buffers.
+        // Protected handles are aliases; replay owns and can replace the stream.
         if (stream_) {
-            const auto growth = stream_->beginFrame(vertexBuffer, indexBuffer);
-            if (growth == internal::ShaderStreamGrowth::Grown) {
-                logWarning("Shader") << "Stream buffers grew to "
-                    << sg_query_buffer_size(vertexBuffer) / sizeof(ShaderVertex)
-                    << " vertices and " << sg_query_buffer_size(indexBuffer) / sizeof(uint32_t)
-                    << " indices";
-            } else if (growth == internal::ShaderStreamGrowth::Failed) {
-                logError("Shader") << "Failed to grow stream buffers";
-            }
+            vertexBuffer = stream_->vertices;
+            indexBuffer = stream_->indices;
         }
         internal::DeferredShaderDraw draw;
         draw.stream = stream_;
@@ -375,16 +366,16 @@ public:
             // the deferred PBR/point pattern (tcMeshPbrPipeline.h).
             draw.layerId = wctx.currentTarget->sglLayerNext;
             if (!internal::appendTargetRecording(*wctx.currentTarget, wctx.currentTarget->deferredShaderDraws, std::move(draw))) return;
-            if (!wctx.currentTarget->advanceLayer()) return;
+            wctx.currentTarget->advanceLayer();
         } else {
             // Swapchain: executed in present() between sokol_gl layers.
             draw.layerId = wctx.currentTarget->sglLayerNext - 1;  // Layer before this shader
             if (!internal::appendTargetRecording(*wctx.currentTarget, wctx.currentTarget->deferredShaderDraws, std::move(draw))) return;
         }
         } catch (const std::bad_alloc&) {
-            internal::currentTarget().failRecording("shader snapshot allocation failed");
+            internal::reportImportError("Shader", "shader snapshot allocation failed");
         } catch (const std::length_error&) {
-            internal::currentTarget().failRecording("shader snapshot size cannot be represented");
+            internal::reportImportError("Shader", "shader snapshot size cannot be represented");
         }
     }
 
@@ -455,9 +446,9 @@ protected:
     }
 
     virtual void createVertexBuffer() {
-        vertexBuffer = internal::makeShaderStreamBuffer(65536 * sizeof(ShaderVertex), false);
-        indexBuffer = internal::makeShaderStreamBuffer(65536 * sizeof(uint32_t), true);
         stream_ = std::make_shared<internal::ShaderStreamState>();
+        vertexBuffer = stream_->vertices = internal::makeShaderStreamBuffer(65536 * sizeof(ShaderVertex), false);
+        indexBuffer = stream_->indices = internal::makeShaderStreamBuffer(65536 * sizeof(uint32_t), true);
     }
 
     virtual void onBegin() {}
@@ -524,7 +515,7 @@ inline void internal::ShaderWriter::end() {
             v.y = transformed.y;
             v.z = transformed.z;
         }
-        if (vertices.size() > (size_t)INT_MAX) internal::currentTarget().failRecording("shader vertex count cannot be represented");
+        if (vertices.size() > (size_t)INT_MAX) internal::reportImportError("Shader", "shader vertex count cannot be represented");
         else shader->submitVertices(vertices.data(), (int)vertices.size(), currentType);
     }
     vertices.clear();

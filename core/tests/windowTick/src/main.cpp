@@ -425,7 +425,7 @@ void captureExpiryWithoutPresentation(Window& main) {
     auto capture = promise->get_future();
     const Json request = {{"jsonrpc", "2.0"}, {"id", 307}, {"method", "tools/call"},
         {"params", {{"name", "tc_get_screenshot"}, {"arguments", {{"window", 101}}}}}};
-    getHttpChannel().send(mcp::McpRequest{request.dump(), promise, std::make_shared<WorkBudget>(true)});
+    getHttpChannel().send(mcp::McpRequest{request.dump(), promise});
     mcp::processHttpQueue();
     Clock::time_point deadline{};
     {
@@ -445,7 +445,6 @@ void captureExpiryWithoutPresentation(Window& main) {
     attempt(deadline, .25, true, &rejected);
     check("main capture times out at its deadline without a successful frame", timedOut(capture, 307) && !hasDeferredResponses() && produced == 0);
     check("capture timeout preserves failed-admission draw and afterFrame contract", afterFrames == 0 && getDrawCount() == draws);
-    check("capture timeout releases request working credits", workingMemory() == 0);
     mcp::setToolLevel(grant);
     mcp::stopHttpServer();
 

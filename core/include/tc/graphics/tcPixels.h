@@ -336,7 +336,7 @@ public:
 private:
     friend struct internal::ImageLoadAccess;
     void halveInto(Pixels& destination) const;
-    LoadResult loadEncoded(const unsigned char* buffer, int len, bool asFloat);
+    LoadResult loadEncoded(const unsigned char* buffer, size_t len, bool asFloat, const fs::path& path = {});
     LoadResult loadFile(const fs::path& path, bool asFloat);
 
     void* data_ = nullptr;

@@ -148,8 +148,8 @@ LSAN_OPTIONS="suppressions=$PWD/core/tests/lsan.supp" \
 Keep symbolization enabled and a symbolizer available so the named LSan
 suppression can match. `lsan.supp` covers fontconfig's retained cache and
 the deliberately retained reconnect clients; other leaks remain errors.
-Use fresh build directories or explicitly reset the cached
-compiler and linker flags when switching back to a normal build.
+Use fresh build directories or explicitly reset the cached compiler and
+linker flags when switching back to a normal build.
 
 ### Also on web (`web-test` marker)
 
@@ -226,11 +226,10 @@ Fitting requests run every check strictly, without SKIPs.
   final draw, at samples 1/4 with and without mips. Checks every RGBA pixel,
   copyTo under a parent scissor, an empty clipped CLEAR pass, and clipping in
   the following pass. Run with `--gpu-check` on GLCORE and GLES3.
-- `mcpAdmissionConstruction/` — admission construction/model checks, real
-  framebuffer rejection (`--gpu-check --dpi=1|2`), and native cross-frame
-  resize/save cycles (`--gpu-check-resize --dpi=1|2`). See its
-  [README](mcpAdmissionConstruction/README.md) for exact Linux, Air and Windows
-  commands and the current DPI 2 / 8 MiB budget limitation.
+- `mcpAdmissionConstruction/` — large screenshot save/image analysis and allocation-error reply checks, including numeric/string request IDs, PNG roundtrips, deferred payload lifetime and bounded HTTP framing reads. The GPU-free framebuffer seam uses an addressed Window.
+- `asyncLoads/` — small resource-load smoke test and worker-to-main exit request.
+- `captureSubmission/` — five asynchronous screenshots of a presented frame, writer queue and shutdown disposition.
+- `asyncScreenshotMic/` — microphone startup, permission and owning-worker teardown checks; Web screenshot smoke coverage lives in `asyncScreenshotMicWeb/`.
 
 - `webDropSize/` — Web dropped-file size and reader limits. The Web build
   exercises the complete application header with mock FileReaders under Node;
@@ -244,12 +243,7 @@ Fitting requests run every check strictly, without SKIPs.
   inert and cannot change the new run's count. Run the Web build
   with `emcmake cmake -S core/tests/webDropSize -B /tmp/webDropSize`,
   `cmake --build /tmp/webDropSize`, then `node /tmp/webDropSize/webDropSize.js`.
-- `hotReloadDiagnostics/` — the shared Windows guest linker-error matcher:
-  MSVC LNK2019/LNK2001 and lld-link undefined symbols trigger the import-contract
-  hint; compile errors, host link failures and successful guest builds stay quiet.
-  Output/project ownership excludes input-library and status-line false positives.
-  On Windows it also checks separate stdout/stderr destinations, capture beyond
-  pipe-buffer capacity, and the failing exit code.
+- `hotReloadDiagnostics/` — Windows-only stdout/stderr build capture and failed exit code. Failed Windows guest builds emit one fixed visibility reminder; there is no diagnostic classifier.
 - `shaderBindingSlots/` — headless Shader/FullscreenShader slot limits (#362):
   rejected view/image slots leave pending bindings and the image cache unchanged;
   every valid view slot binds, but only supported sampler slots are written.
@@ -257,7 +251,7 @@ Fitting requests run every check strictly, without SKIPs.
   canary, with zero and nonzero sentinels. Uniform slots retain their bytes or
   are rejected before copying; repeated invalid calls warn only once.
 - `shaderStreamOverflow/` — dummy-backend custom Shader stream accounting and
-  replay (#271): pre-append overflow detection, growth on the next sokol frame,
+  replay (#271): in-frame vertex/index buffer growth,
   32-bit relative indices, multiple passes, and captured-resource lifetime.
   Standalone CMake unit test with a plain `int main()`; run in Debug and Release.
 - `shaderStreamDraws/` — custom Shader and FullscreenShader index formats.
@@ -607,12 +601,7 @@ Fitting requests run every check strictly, without SKIPs.
   requested spelling. `--screen` (needs a display, e.g. Xvfb) also checks the
   deferred PNG/JPEG/BMP files, direct file capture and absence of duplicate
   suffixes. The default run needs no GPU.
-- `screenshotContract/` — *(also on web)* screenshot contracts (#230, #298).
-  Web: `grabScreen()` returns false and warns once; `saveScreenshot()` queues
-  a canvas download without creating folders. A mock DOM under node checks
-  filenames, PNG/JPEG selection, deferred callbacks, resource cleanup and
-  errors (including a tainted canvas). Native: the destination folder is
-  created and capture is queued. The web half runs in the daily sweep.
+- `screenshotContract/` — a pending screenshot receives one main-thread failure completion when the addressed Window ends.
 - `mcpHttpGuard/` — a web page in the user's browser cannot drive the
   loopback MCP server (#238): a foreign Host (DNS rebinding) or Origin gets
   403, a non-JSON POST 415, and a missing or wrong bearer token 401, while
@@ -1124,7 +1113,7 @@ replay before a referenced slot is overwritten, and native secondary policy
 routing. Resource lifetimes keep base's rules (see #995); these tests do not
 check FBO consumers carried across idle commits.
 
-C2 process and close coverage:
+Process and close coverage:
 
 - `mainWindowAttach/src/c2ProcessChecks.h` checks Runtime-first/reverse-attachment
   lifecycle delivery, unsaved A/clean B in both orders, later false, first veto
@@ -1143,7 +1132,7 @@ C2 process and close coverage:
 - `windowTick/event-converter-test` classifies quit/device loss as process events;
   they have no Window raw-event fan-out. Native input keeps raw-before-typed order.
 
-### Session authority and OS-only exit deadline (C3)
+### Session authority and OS-only exit deadline
 
 `sessionEndBusy` covers idle veto/cancel/dedupe, reverse exact-once ending and
 one shared deadline. Busy main-stack commits call no App exit and arm no watchdog;

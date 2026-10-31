@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <climits>
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
@@ -15,12 +16,10 @@
 namespace tcx::hap { class MovParser; struct HapBudgetTestAccess; }
 
 namespace tcx::hap::detail {
-// Bound (security): file-driven frame storage must remain finite before decode or copy. Overflow rejects the whole frame and is counted by its reader/decoder.
-constexpr size_t movFrameBytes = 128u * 1024 * 1024;
-
 inline bool movDimensions(uint32_t width, uint32_t height) {
-    // Bound (security): recorded images obey the video 8192-axis and 128 MiB RGBA bounds. Overflow rejects the frame and is counted by its reader/decoder.
-    return width && height && width <= 8192 && height <= 8192 && uint64_t(width) * height * 4 <= movFrameBytes;
+    // RGBA row strides use signed int; size_t holds the frame byte count.
+    return width && height && width <= uint32_t(INT_MAX / 4) && height <= uint32_t(INT_MAX)
+        && uint64_t(width) * height <= SIZE_MAX / 4;
 }
 
 template<class T> bool resizeMovBuffer(std::vector<T>& dst, size_t count) {
@@ -197,7 +196,7 @@ template<class Sample> class MovSamples {
     bool next(Cursor& c) const {
         ++tableSteps_;
         if (!ready(c)) return false;
-        const uint64_t frames = pcmBytes_ ? std::min<uint64_t>(c.left, movFrameBytes / pcmBytes_) : 1;
+        const uint64_t frames = pcmBytes_ ? std::min<uint64_t>(c.left, UINT32_MAX / pcmBytes_) : 1;
         if (!frames) return false;
         Sample sample;
         sample.offset = c.offset;

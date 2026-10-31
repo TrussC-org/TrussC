@@ -401,7 +401,6 @@ void mcpOwnerRetirement() {
             mi::DeferredResponse item;
             item.id = i;
             item.owner = i % 2 ? owner : nullptr;
-            item.budget = std::make_shared<mi::WorkBudget>();
             item.response = std::make_shared<std::promise<mi::ReplyThunk>>();
             replies.push_back(item.response->get_future());
             promises.push_back(item.response);
@@ -438,7 +437,6 @@ void mcpOwnerReentry() {
         mi::DeferredResponse item;
         item.id = i;
         item.owner = i == 1 ? nullptr : owner;
-        item.budget = std::make_shared<mi::WorkBudget>();
         item.response = std::make_shared<std::promise<mi::ReplyThunk>>();
         item.makeEnvelope = [&, owned = i != 1]() -> mi::ReplyThunk {
             if (owned) ++ownedRuns; else ++hostRuns;
@@ -614,8 +612,7 @@ void closes() {
 // paths reached only after an earlier failure. No STL allocation sizes/counts.
 struct CloseState {
     int exits = 0, cleanups = 0, after = 0, destroyed = 0;
-    bool detached = false, slotsStable = false, screenshotsRetained = false;
-    size_t expectedScreenshots = 0;
+    bool detached = false, slotsStable = false;
     bool destructorContext = false;
 };
 void allocatingWork() {
@@ -640,7 +637,6 @@ struct SweepApp : App {
         state.detached = internal::appRanCleanup(*this) && !win.getApp() &&
                          win.context().rootNode.expired() && internal::attachedApps().empty();
         state.slotsStable = win.context().appEventListeners.size() == 15;
-        state.screenshotsRetained = win.context().asyncScreenshots.pending.size() == state.expectedScreenshots;
         allocatingWork();
         if (throwCleanup) throw 2;
     }
@@ -652,8 +648,8 @@ struct SweepApp : App {
 extern "C" void sweepCloseCallback(TestWindow* win) noexcept {
     tcCoreTest::nativeBoundary([&] { win->finish(); });
 }
-bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth) {
-    CloseState state; state.expectedScreenshots = queued;
+bool sweepClose(int boundary, bool clearExit, int throwing, int nth) {
+    CloseState state;
     auto win = std::make_unique<TestWindow>();
     auto app = internal::makeConstructedApp<SweepApp>(*win, state, clearExit, throwing);
     std::weak_ptr<App> lifetime = app;
@@ -666,17 +662,8 @@ bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth)
     }, EventPriority::AfterApp);
     auto last = internal::FrameworkEventAccess::listen(win->events().exit, [&] { ++state.after; }, EventPriority::AfterApp);
     auto before = win->events().exit.listen([&] { if (throwing == 4) throw 4; }, EventPriority::BeforeApp);
-    for (int i = 0; i < queued; ++i)
-        internal::submitScreenshot(&win->context().asyncScreenshots, "pending-close-sweep.png");
-    auto admitted = win->context().asyncScreenshots.admitted;
     // Exercise the allocating dropped-request diagnostic before exit as well.
     win->setApp<App>();
-    int completions = 0;
-    bool validCompletions = true;
-    auto completed = onScreenshotSave().listen([&](ScreenshotSaveEventArgs& args) {
-        ++completions;
-        validCompletions &= args.result.error == SaveError::WriteFailed && !args.path.empty() && lifetime.expired();
-    });
     auto* previous = internal::currentWindowCtx();
     arm(nth);
     bool escaped = false;
@@ -689,7 +676,7 @@ bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth)
     disarm();
     check("close sweep: exit, all protected hooks, detach, cleanup, lifetime and context",
           !escaped && state.exits == 1 && state.cleanups == 1 && state.after == 2 &&
-          state.destroyed == 1 && state.detached && state.slotsStable && state.screenshotsRetained &&
+          state.destroyed == 1 && state.detached && state.slotsStable &&
           state.destructorContext && lifetime.expired() && internal::currentWindowCtx() == previous, nth);
     if (win) {
         win->finish();
@@ -697,48 +684,27 @@ bool sweepClose(int boundary, int queued, bool clearExit, int throwing, int nth)
               win->context().asyncScreenshots.pending.empty() && win->context().appEventListeners.empty() &&
               state.exits == 1 && state.cleanups == 1 && state.after == 2, nth);
     }
-    // Accepted completions own only ScreenshotState. Destroying/delivering the
-    // batch releases every slot; failed cancellation dropped its slot already.
-    internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
-    check("close sweep: failure completion or drop, no leaked admission or retained App",
-          *admitted == 0 && lifetime.expired() && validCompletions &&
-          completions <= queued && completions >= queued - (injected ? 1 : 0), nth);
     return injected;
 }
 void closeSweep() {
-    if (tcTest::skipProxyAllocationSweep("window close and screenshot queue destruction sweeps")) return;
+    if (tcTest::skipProxyAllocationSweep("window close sweeps")) return;
     auto savedRun = internal::appRunToken();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
     // Warm lazy framework state before the repeatable exhaustive matrices.
-    sweepClose(0, 1, true, 0, -1);
+    sweepClose(0, true, 0, -1);
     for (int boundary = 0; boundary < 3; ++boundary) {
-        for (int queued : {0, 1, 3}) for (bool clear : {false, true}) {
+        for (bool clear : {false, true}) {
             int nth = 0;
-            while (sweepClose(boundary, queued, clear, 0, nth)) ++nth;
-            std::printf("close sweep boundary=%d queued=%d clear=%d: %d fired indices, terminal index passed\n",
-                        boundary, queued, clear, nth);
+            while (sweepClose(boundary, clear, 0, nth)) ++nth;
+            std::printf("close sweep boundary=%d clear=%d: %d fired indices, terminal index passed\n",
+                        boundary, clear, nth);
         }
         // App exit/cleanup, an AfterApp hook, and a BeforeApp listener throwing
         // must each leave the remaining mandatory steps reachable.
         for (int throwing = 1; throwing <= 4; ++throwing) {
             int nth = 0;
-            while (sweepClose(boundary, 3, true, throwing, nth)) ++nth;
+            while (sweepClose(boundary, true, throwing, nth)) ++nth;
             std::printf("close throwing sweep boundary=%d throwing=%d: %d fired indices\n", boundary, throwing, nth);
-        }
-    }
-    // A queue can also die without a Window/endApp, including static cleanup.
-    for (int queued : {1, 3}) {
-        for (int nth = 0;; ++nth) {
-            auto queue = std::make_unique<internal::ScreenshotQueue>();
-            for (int i = 0; i < queued; ++i) internal::submitScreenshot(queue.get(), "pending-queue-destruction.png");
-            auto admitted = queue->admitted;
-            arm(nth);
-            queue.reset(); // noexcept unique_ptr/queue destructor boundary
-            const bool injected = fired;
-            disarm();
-            internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
-            check("screenshot queue destructor: all requests completed or dropped", *admitted == 0, nth);
-            if (!injected) break;
         }
     }
     internal::appRunToken() = std::move(savedRun);

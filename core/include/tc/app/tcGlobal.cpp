@@ -26,13 +26,15 @@
 #include "impl/tcImageDecode.h"
 #include "internal/tcBuildOutputCapture.h"
 #include "internal/tcHotReloadScan.h"
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-#include "../../../platform/gl/tcShadowAllocation.h"
-#endif
 #ifdef _WIN32
 #include <windows.h>
 #endif
 #include <algorithm>
+#if defined(SOKOL_GLCORE)
+#include <GL/gl.h>
+#elif defined(SOKOL_GLES3)
+#include <GLES3/gl3.h>
+#endif
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -48,13 +50,38 @@
 #include "tc/gpu/shaders/sglCoverage.glsl.h"
 
 #ifdef __APPLE__
+#include <pthread.h>
 #include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
+#include <unistd.h>
 #endif
 #include <cstdlib>
 
 namespace trussc {
 
 namespace internal {
+namespace {
+thread_local bool shaderStreamBufferAllocation = false;
+}
+
+sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
+    struct AllocationScope {
+        bool previous = std::exchange(shaderStreamBufferAllocation, true);
+        ~AllocationScope() { shaderStreamBufferAllocation = previous; }
+    } scope;
+    return makeShaderStreamBuffer(bytes, index);
+}
+
+void reportShaderStreamFailure(size_t vertices) noexcept {
+    static OnceGate reported;
+    if (!reported.isFirstTime()) return;
+    // Logging allocates too. Never let allocation failure escape a draw callback.
+    try {
+        logError("Shader") << "Shader stream could not allocate vertex/index storage for " << vertices
+            << " vertices; this draw was skipped. Reduce geometry submitted with "
+               "Shader::submitVertices() to lower stream storage demand";
+    } catch (...) {}
+}
+
 BuildOutputLoss& buildOutputLoss() { static BuildOutputLoss loss; return loss; }
 void BuildOutputLoss::record(uint64_t omitted) {
     if (!omitted) return;
@@ -98,12 +125,62 @@ void BuildOutputLoss::recordForwardingFailure() {
 #endif
     }
 }
-HotReloadScanLoss& hotReloadCacheLoss() { static HotReloadScanLoss loss; return loss; }
 namespace { void discardRetiredShadows() noexcept; }
-// Metal's host backend inspects native objects in its implementation TU.
-bool shadowNativeValid(sg_image);
-bool shadowNativeValid(sg_view);
-bool shadowNativeValid(sg_sampler);
+#if defined(SOKOL_METAL)
+bool shadowTextureViewCreated(sg_view);
+#endif
+}
+
+namespace {
+struct GraphicsPoolSizes {
+    int resources = 10000;
+    int shaders = 1024;
+    int pipelines = 1024;
+};
+GraphicsPoolSizes requestedGraphicsPools;
+GraphicsPoolSizes activeGraphicsPools;
+// Process lifetime: graphics restarts and hot reload must not repeat errors.
+std::atomic<bool> poolExhaustionReported[7]{};
+
+// Bound (representation): 16-bit sokol pool indices would alias handles above 65535; log Error and use 65535.
+constexpr int maxGraphicsPoolSize = 65535;
+
+int graphicsPoolSize(int count, int defaultCount, const char* setter) {
+    if (count > maxGraphicsPoolSize) {
+        logError("WindowSettings") << setter << "(" << count << "): sokol handles index pools with 16 bits; using " << maxGraphicsPoolSize;
+        return maxGraphicsPoolSize;
+    }
+    if (count < 0) {
+        logNotice("WindowSettings") << setter << "() received a negative count; using default " << defaultCount;
+    }
+    return count > 0 ? count : defaultCount;
+}
+}
+
+namespace internal {
+void configureGraphicsPools(const WindowSettings& settings) {
+    requestedGraphicsPools = {settings.resourcePoolSize, settings.shaderPoolSize, settings.pipelinePoolSize};
+}
+sgl_desc_t sglSetupDescriptor() {
+    sgl_desc_t desc = {};
+    desc.logger.func = sokolLog;
+    // Use the same count for sgl: its small CPU slots (32 B) should not impose
+    // a separate hidden limit. Each sgl pipeline still needs up to 5 sg slots.
+    // The sgl context pool keeps its existing automatic growth behavior.
+    desc.pipeline_pool_size = activeGraphicsPools.pipelines;
+    // sokol_gl's default of 4 contexts runs out fast: the swapchain takes one,
+    // every secondary window takes one more, and Fbo::ensureShared() takes one
+    // per (sample count, color format) combination. An app with a second window
+    // and a couple of float FBO formats is already past four, and the overflow
+    // is a per-frame SGL_LOGITEM_CONTEXT_POOL_EXHAUSTED with nothing drawn.
+    desc.context_pool_size = 64;
+    desc.max_vertices = sglBudget().maxVertices;
+    desc.max_commands = sglBudget().maxCommands;
+    desc.allocator.alloc_fn = smemtrack_alloc;
+    desc.allocator.free_fn = smemtrack_free;
+    return desc;
+}
+
 }
 
 // ---------------------------------------------------------------------------
@@ -115,32 +192,26 @@ void setup() {
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = internal::sokolLog;
-    // Shader and pipeline pools are fixed at sg_setup(): sg resources point
-    // into the pool arrays, so these pools cannot grow (#317). 10000 like the
-    // pools below would cost ~34 MB (shader slot ~3.4 KB) and ~12 MB
-    // (pipeline slot ~1.2 KB). 1024 shaders (~3.5 MB) leaves room for many
-    // loaded Shader objects next to TrussC's own dozen or so. 1024 pipelines
-    // (~1.2 MB) is ~200 sgl pipelines (5 sg pipelines each) plus the PBR /
-    // point / Shader pipelines per target format.
-    sgdesc.shader_pool_size = 1024;   // sokol default 32
-    sgdesc.pipeline_pool_size = 1024; // sokol default 64
-    sgdesc.buffer_pool_size = 10000;  // default 128 too small with many meshes (only CPU slot table, not GPU memory)
-    sgdesc.image_pool_size = 10000;
-    sgdesc.view_pool_size = 10000;
-    sgdesc.sampler_pool_size = 10000;
+    // Fixed at sg_setup: slots hold CPU tables (~3.4 KB/shader, ~1.2 KB/pipeline).
+    // Resolve the requested counts once; later sgl rebuilds retain these values.
+    activeGraphicsPools = {
+        graphicsPoolSize(requestedGraphicsPools.resources, 10000, "setResourcePoolSize"),
+        graphicsPoolSize(requestedGraphicsPools.shaders, 1024, "setShaderPoolSize"),
+        graphicsPoolSize(requestedGraphicsPools.pipelines, 1024, "setPipelinePoolSize")
+    };
+    sgdesc.shader_pool_size = activeGraphicsPools.shaders;
+    sgdesc.pipeline_pool_size = activeGraphicsPools.pipelines;
+    sgdesc.buffer_pool_size = activeGraphicsPools.resources;
+    sgdesc.image_pool_size = activeGraphicsPools.resources;
+    sgdesc.view_pool_size = activeGraphicsPools.resources;
+    sgdesc.sampler_pool_size = activeGraphicsPools.resources;
     // Per-frame uniform ring buffer (Metal/WebGPU/Vulkan; GL/D3D11 ignore it).
-    // On Metal the ring auto-grows on overflow (x2 per step, with a warning log
-    // — TrussC patch in sokol_gfx.h), so start small (1MB ≈ 2k draw calls per
-    // frame, each apply 256-byte aligned) and let heavy scenes grow to size;
-    // WindowSettings::reserveUniformBuffer just skips the one-time grow hitch.
-    // WebGPU/Vulkan do NOT auto-grow: keep the 4MB sokol default there — past
-    // the cap, RELEASE builds silently write out of bounds (garbage uniforms
-    // render as flipped or fully black frames), so high-draw-count apps must
-    // reserve enough up front. The backend allocates it x2 in-flight frames.
+    // Metal and WebGPU grow on demand; the reserve skips initial growth.
+    // Start with 1 MiB of app-produced uniforms. Vulkan keeps its fixed reserve.
     if (internal::gpuUniformBufferReserve > 0) {
         sgdesc.uniform_buffer_size = internal::gpuUniformBufferReserve;
     }
-    #if defined(SOKOL_METAL)
+    #if defined(SOKOL_METAL) || defined(SOKOL_WGPU)
     else {
         sgdesc.uniform_buffer_size = 1024 * 1024;
     }
@@ -150,20 +221,8 @@ void setup() {
     sg_setup(&sgdesc);
     internal::recordImageDecodeLimit(sg_isvalid() ? sg_query_limits().max_image_size_2d : 0);
 
-    // Initialize sokol_gl (with memory tracking allocator)
-    sgl_desc_t sgldesc = {};
-    sgldesc.logger.func = internal::sokolLog;
-    // sgl pipeline slots are small (32 B); the sg pipeline pool above is the
-    // real limit, since each sgl pipeline uses 5 sg pipelines.
-    sgldesc.pipeline_pool_size = 256;
-    // Start with 64 contexts: the swapchain takes one, every secondary window
-    // takes one more, and Fbo::ensureShared() takes one per (sample count, color
-    // format) combination. sokol_gl_tc.h still grows the pool when full.
-    sgldesc.context_pool_size = 64;
-    sgldesc.max_vertices = internal::sglBudget().maxVertices;
-    sgldesc.max_commands = internal::sglBudget().maxCommands;
-    sgldesc.allocator.alloc_fn = smemtrack_alloc;
-    sgldesc.allocator.free_fn = smemtrack_free;
+    // Initialize sokol_gl with the same descriptor used for later rebuilds.
+    auto sgldesc = internal::sglSetupDescriptor();
     sgl_setup(&sgldesc);
 
     // RenderTarget: the swapchain target uses the default sgl context (carries the
@@ -638,32 +697,15 @@ void RenderTarget::endPass() {
     }
 }
 
-void RenderTarget::failRecording(const char* reason) {
-    auto& window = currentWindowContext();
-    deferredShaderDraws.clear(); deferredPbrDraws.clear(); deferredPointDraws.clear();
-    for (size_t i = window.shaderScopeTargets.size(); i-- > 0;) {
-        if (window.shaderScopeTargets[i].target == this) {
-            window.shaderScopeTargets.erase(window.shaderScopeTargets.begin() + i);
-            window.shaderStack.erase(window.shaderStack.begin() + i);
-        }
-    }
-    openShaderScopes = 0; sglLayerNext = 0; recordingFailed = true;
-    if (resources().context.id) sgl_tc_context_complete(resources().context);
-    logError("RenderTarget") << reason << "; discarded this target's recording";
-}
-bool RenderTarget::advanceLayer() {
-    // Bound (abi): SGL layer identifiers must fit signed int. Overflow discards the target's recording and is reported by failRecording logging an error and advanceLayer returning false.
-    if (recordingFailed) return false;
-    if (sglLayerNext == INT_MAX) { failRecording("layer identifier cannot be represented"); return false; }
+void RenderTarget::advanceLayer() {
     sgl_layer(++sglLayerNext);
-    return true;
 }
 
 void RenderTarget::flushLayers() {
     assert(currentWindowContext().currentTarget == this);
     if (!inPass || !resources().context.id) return;
     const auto err = sgl_context_error(resources().context);
-    const bool overflow = recordingFailed || err.vertices_full || err.commands_full || err.uniforms_full;
+    const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
         for (auto& draw : deferredShaderDraws)
@@ -704,7 +746,6 @@ uint64_t pushTarget(RenderTarget& target, bool prepareOnly) {
     target.activation = token;
     target.activeWindow = &window;
     target.passStartedThisFrame = false;
-    target.recordingFailed = false;
     target.frameEpoch = window.renderEpoch;
     // A scope constructor has no destructor if target setup throws. Roll back
     // a published activation here, without finalizing an unprepared owner.
@@ -925,7 +966,6 @@ void internal::endGpuFrame() {
     // their pass-consumption lifetime, including on upload-only boundaries.
     auto& target = internal::currentWindowContext().swapchainTarget;
     if (target.resources().context.id) sgl_tc_context_complete(target.resources().context);
-    target.recordingFailed = false;
 
     // Retire submitted resources while preserving typed dependencies of every
     // still-unconsumed recording, including suspended foreign targets.
@@ -1350,9 +1390,7 @@ void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
 
         FixedStepAdvance adv = advanceFixedStep(loop.updateAccumulator, elapsed, updateInterval,
                                                 getMaxUpdateSteps());
-        if (adv.droppedTime > 0.0) {
-            warnUpdateStepsDropped(FixedStepLoop::Main, adv.droppedTime, updateInterval, adv.steps);
-        }
+        warnUpdateStepsDropped(FixedStepLoop::Main, adv.droppedTime, updateInterval, adv.steps);
         // The frame's steps are the latest adv.steps intervals on the
         // loop's timeline, ending one leftover accumulator before `now`.
         const double leftover = loop.updateAccumulator;
@@ -1740,10 +1778,12 @@ bool frameSkipShouldTick(double& accumulator, double elapsed, double interval) {
 
 void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double interval,
                             int stepsRun) {
-    // One flag per loop: each loop reports its own first drop.
+    // One flag per loop: a pass without dropped time ends its episode.
     static std::atomic<bool> warned[2] = {false, false};
     const bool headless = (loop == FixedStepLoop::Headless);
-    if (warned[headless ? 1 : 0].exchange(true)) return;
+    const bool dropped = droppedTime > 0.0;
+    const bool alreadyWarned = warned[headless ? 1 : 0].exchange(dropped);
+    if (!dropped || alreadyWarned) return;
     const char* where = headless ? "Headless loop" : "Update loop";
     const char* frame = headless ? "loop pass" : "frame";
     // stepsRun is the cap (getMaxUpdateSteps()): time is only dropped once
@@ -1765,7 +1805,7 @@ void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double inter
         warning << ", or the update rate is more than " << stepsRun
             << "x the display's frame rate";
     }
-    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once.";
+    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once per stall.";
 }
 } // namespace internal
 
@@ -1978,9 +2018,44 @@ std::string sokolLogMessage(const char* tag, uint32_t logItem,
     return text;
 }
 
+namespace {
+bool logPoolExhaustion(const char* tag, uint32_t logItem) {
+    int pool = -1;
+    if (tag && std::strcmp(tag, "sg") == 0) {
+        switch (logItem) {
+            case SG_LOGITEM_BUFFER_POOL_EXHAUSTED: pool = 0; break;
+            case SG_LOGITEM_IMAGE_POOL_EXHAUSTED: pool = 1; break;
+            case SG_LOGITEM_VIEW_POOL_EXHAUSTED: pool = 2; break;
+            case SG_LOGITEM_SAMPLER_POOL_EXHAUSTED: pool = 3; break;
+            case SG_LOGITEM_SHADER_POOL_EXHAUSTED: pool = 4; break;
+            case SG_LOGITEM_PIPELINE_POOL_EXHAUSTED: pool = 5; break;
+            default: break;
+        }
+    } else if (tag && std::strcmp(tag, "sgl") == 0 && logItem == SGL_LOGITEM_PIPELINE_POOL_EXHAUSTED) {
+        pool = 6;
+    }
+    if (pool < 0) return false;
+    if (!poolExhaustionReported[pool].exchange(true)) {
+        const char* names[] = {"buffer", "image", "view", "sampler", "shader", "pipeline", "pipeline"};
+        const int count = pool < 4 ? activeGraphicsPools.resources :
+                          pool == 4 ? activeGraphicsPools.shaders : activeGraphicsPools.pipelines;
+        const char* setter = pool < 4 ? "setResourcePoolSize" :
+                             pool == 4 ? "setShaderPoolSize" : "setPipelinePoolSize";
+        getLogger().log(LogLevel::Error, std::string(names[pool]) + " pool exhausted (" +
+            std::to_string(count) + " " + names[pool] + "s in use); raise it with WindowSettings::" +
+            setter + "() before runApp()");
+    }
+    return true;
+}
+}
+
 void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
               const char* message, uint32_t lineNr, const char* filename,
               void* userData) {
+    // A failed stream replacement gets one actionable Shader Error after the
+    // allocation returns. Avoid duplicating its immediate backend errors. Fatal
+    // errors, warnings and asynchronous errors on other threads keep their path.
+    if (shaderStreamBufferAllocation && logLevel == 1 && tag && std::strcmp(tag, "sg") == 0) return;
     // Called from sokol's C code: nothing may throw out of here, and a panic
     // must reach slog_func (the abort) whatever happens before it.
     const bool noLogger = loggerDestroyed.load();
@@ -1993,6 +2068,9 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                 if (!v3dResolveFlushNoticed.exchange(true)) {
                     logNotice("RenderTarget") << "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)";
                 }
+            } else if (logPoolExhaustion(tag, logItem)) {
+                // Keep sokol's own line at debug verbosity, including repeats.
+                getLogger().log(LogLevel::Verbose, sokolLogMessage(tag, logItem, message, lineNr));
             } else if (logLevel == 0) {
                 // A panic: the process ends right after, so the sinks do not
                 // wait for the lock (a thread holding it may never let go).
@@ -2024,6 +2102,27 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
 // Logger platform sink (declared in tcLog.h)
 // ---------------------------------------------------------------------------
 #if TC_LOG_SYSTEM_SINK
+#if defined(__APPLE__)
+namespace {
+// libtrace/libdispatch state inherited across fork is not usable until exec.
+// Constant initialization also permits logging from user global constructors.
+constinit std::atomic<bool> systemLogForked{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+constinit std::atomic<pid_t> systemLogProcess{0};
+static_assert(std::atomic<pid_t>::is_always_lock_free);
+void systemLogForkChild() {
+    systemLogForked.store(true, std::memory_order_relaxed);
+}
+struct SystemLogForkGuard {
+    SystemLogForkGuard() {
+        systemLogProcess.store(getpid(), std::memory_order_relaxed);
+        // Register at image load, before an app can fork without logging.
+        // The PID check also protects forks if registration ever fails.
+        pthread_atfork(nullptr, nullptr, systemLogForkChild);
+    }
+} systemLogForkGuard;
+}
+#endif
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 namespace {
 // True when os_log lines are mirrored into the console that already shows
@@ -2046,6 +2145,12 @@ namespace internal {
 
 void writeSystemLog(const LogEventArgs& e) {
 #if defined(__APPLE__)
+    if (systemLogForked.load(std::memory_order_relaxed)) return;
+    // Zero means our load-time constructor has not run yet: early parent
+    // global constructors must still be able to log.
+    // Only the PID itself is published; no other state needs synchronization.
+    const pid_t parentProcess = systemLogProcess.load(std::memory_order_relaxed);
+    if (parentProcess != 0 && getpid() != parentProcess) return;
 #if !TARGET_OS_IPHONE
     if (osLogMirroredToConsole()) return;
 #endif
@@ -2373,56 +2478,46 @@ void drainPendingGpuDestroys() {
         discardRetiredTextures();
         return;
     }
-    try {
-        RecordingReferences refs;
-        std::unordered_set<WindowContext*> windows{&nonWindowContext(), &currentWindowContext()};
-        for (auto* window : openWindows()) windows.insert(&window->context());
-        for (auto* window : windows) {
-            refs.target(window->swapchainTarget);
-            for (const auto& entry : window->targetStack)
-                if (entry.target != &window->swapchainTarget) refs.target(*entry.target);
-        }
-        auto retire = [](auto& handles, const auto& pinned, auto destroy) {
-            handles.erase(std::remove_if(handles.begin(), handles.end(), [&](auto handle) {
-                if (pinned.count(handle.id)) return false;
-                destroy(handle);
-                return true;
-            }), handles.end());
-        };
-        retire(q.buffers, refs.buffers, sg_destroy_buffer);
-        retire(q.views, refs.views, sg_destroy_view);
-        retire(q.images, refs.images, sg_destroy_image);
-        retire(q.samplers, refs.samplers, sg_destroy_sampler);
-        retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
-        retire(q.shaders, refs.shaders, sg_destroy_shader);
-        auto** textureLink = &retiredTextures;
-        while (auto* storage = *textureLink) {
-            bool pinned = refs.images.count(storage->image.id) || refs.views.count(storage->view.id) ||
-                refs.views.count(storage->attachment.id) || refs.samplers.count(storage->sampler.id);
-            for (const auto* views : {&storage->cubeViews, &storage->mipAttachments, &storage->mipViews})
-                for (auto view : *views) pinned |= refs.views.count(view.id) != 0;
-            if (pinned) { textureLink = &storage->next; continue; }
-            *textureLink = storage->next;
-            delete storage;
-        }
-        auto** link = &retiredShadows;
-        while (auto* storage = *link) {
-            bool pinned = refs.images.count(storage->colorImage.id) ||
-                refs.images.count(storage->depthImage.id) || refs.samplers.count(storage->sampler.id) ||
-                refs.views.count(storage->colorTexture.id) || refs.views.count(storage->depthAttachment.id);
-            for (auto view : storage->colorAttachments) pinned |= refs.views.count(view.id) != 0;
-            if (pinned) { link = &storage->retiredNext; continue; }
-            *link = storage->retiredNext;
-            delete storage;
-        }
-    } catch (const std::bad_alloc&) {
-        // No handle retires before the complete reference closure is known.
-        // Keep this batch intact and retry at the next device boundary.
-        try { getLogger().log(LogLevel::Warning, "[RenderTarget] resource retirement allocation failed; deferred collection"); }
-        catch (...) {} // Collection must also survive sustained allocation failure.
-    } catch (const std::length_error&) {
-        try { getLogger().log(LogLevel::Warning, "[RenderTarget] resource retirement size cannot be represented; deferred collection"); }
-        catch (...) {}
+    RecordingReferences refs;
+    std::unordered_set<WindowContext*> windows{&nonWindowContext(), &currentWindowContext()};
+    for (auto* window : openWindows()) windows.insert(&window->context());
+    for (auto* window : windows) {
+        refs.target(window->swapchainTarget);
+        for (const auto& entry : window->targetStack)
+            if (entry.target != &window->swapchainTarget) refs.target(*entry.target);
+    }
+    auto retire = [](auto& handles, const auto& pinned, auto destroy) {
+        handles.erase(std::remove_if(handles.begin(), handles.end(), [&](auto handle) {
+            if (pinned.count(handle.id)) return false;
+            destroy(handle);
+            return true;
+        }), handles.end());
+    };
+    retire(q.buffers, refs.buffers, sg_destroy_buffer);
+    retire(q.views, refs.views, sg_destroy_view);
+    retire(q.images, refs.images, sg_destroy_image);
+    retire(q.samplers, refs.samplers, sg_destroy_sampler);
+    retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
+    retire(q.shaders, refs.shaders, sg_destroy_shader);
+    auto** textureLink = &retiredTextures;
+    while (auto* storage = *textureLink) {
+        bool pinned = refs.images.count(storage->image.id) || refs.views.count(storage->view.id) ||
+            refs.views.count(storage->attachment.id) || refs.samplers.count(storage->sampler.id);
+        for (const auto* views : {&storage->cubeViews, &storage->mipAttachments, &storage->mipViews})
+            for (auto view : *views) pinned |= refs.views.count(view.id) != 0;
+        if (pinned) { textureLink = &storage->next; continue; }
+        *textureLink = storage->next;
+        delete storage;
+    }
+    auto** link = &retiredShadows;
+    while (auto* storage = *link) {
+        bool pinned = refs.images.count(storage->colorImage.id) ||
+            refs.images.count(storage->depthImage.id) || refs.samplers.count(storage->sampler.id) ||
+            refs.views.count(storage->colorTexture.id) || refs.views.count(storage->depthAttachment.id);
+        for (auto view : storage->colorAttachments) pinned |= refs.views.count(view.id) != 0;
+        if (pinned) { link = &storage->retiredNext; continue; }
+        *link = storage->retiredNext;
+        delete storage;
     }
 }
 
@@ -2447,61 +2542,11 @@ ShadowStorage::~ShadowStorage() noexcept {
     if (sampler.id) sg_destroy_sampler(sampler);
 }
 
-#if defined(SOKOL_D3D11)
-bool shadowNativeValid(sg_image image) {
-    return sg_d3d11_query_image_info(image).res != nullptr;
-}
-bool shadowNativeValid(sg_view view) {
-    const auto desc = sg_query_view_desc(view);
-    const auto info = sg_d3d11_query_view_info(view);
-    if (desc.texture.image.id) return info.srv != nullptr;
-    if (desc.color_attachment.image.id) return info.rtv != nullptr;
-    return desc.depth_stencil_attachment.image.id && info.dsv != nullptr;
-}
-bool shadowNativeValid(sg_sampler sampler) {
-    return sg_d3d11_query_sampler_info(sampler).smp != nullptr;
-}
-#elif !defined(SOKOL_METAL) && !defined(SOKOL_GLCORE) && !defined(SOKOL_GLES3)
-bool shadowNativeValid(sg_image) { return true; }
-bool shadowNativeValid(sg_view) { return true; }
-bool shadowNativeValid(sg_sampler) { return true; }
-#endif
-
-namespace {
-// Prepared before main: reporting CPU exhaustion must not build a LogStream or
-// copy its message. Inline listeners and the normal console sink need no new
-// allocation. If an application listener/sink throws, retain the stderr Error.
-LogEventArgs shadowAllocationError{LogLevel::Error,
-    "[Shadow] could not allocate this window's shadow maps; shadow use discarded"};
-
-void reportShadowAllocationFailure() noexcept {
-    try { getLogger().onLog.notify(shadowAllocationError); }
-    catch (...) { std::fputs("[ERROR] [Shadow] shadow use discarded (allocation failure)\n", stderr); } // log-check: allow (allocation-free fallback)
-}
-
-template<class Handle, class Desc, class Make, class State>
-bool makeShadowResource(Handle& handle, const Desc& desc, Make make, State state) {
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    const bool gl = sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3;
-    GLPendingErrors pending;
-    if (gl) pending = beginGLShadowCreation();
-#endif
-    handle = make(&desc);
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    const bool nativeOK = !gl || endGLShadowCreation();
-    reportGLPendingErrors(pending);
-    return state(handle) == SG_RESOURCESTATE_VALID && nativeOK && shadowNativeValid(handle);
-#else
-    return state(handle) == SG_RESOURCESTATE_VALID && shadowNativeValid(handle);
-#endif
-}
-} // namespace
-
 bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, size_t& totalBytes) {
     colorBytes = depthBytes = totalBytes = 0;
     if (resolution <= 0) return false;
     const size_t side = static_cast<size_t>(resolution);
-    // Bound (representation): image byte products and their sum must fit size_t. Overflow rejects a generation and is counted in its owner's allocationFailures by ensureShadowStorage.
+    // Bound (representation): image byte products and their sum must fit size_t; overflow rejects the generation with an Error.
     if (side > SIZE_MAX / side) return false;
     const size_t texels = side * side;
     constexpr size_t colorTexelBytes = maxShadowLights * 4; // four R32F layers
@@ -2515,25 +2560,24 @@ bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, s
 
 bool ensureShadowStorage(WindowContext& window, int resolution) {
     auto& sh = window.shadow;
-    auto fail = [&] {
-        sh.count = 0;
-        sh.current = -1;
-        sh.storage.reset();
-        ++sh.allocationFailures;
-        reportShadowAllocationFailure();
-        return false;
-    };
     size_t colorBytes, depthBytes, totalBytes;
     const auto limits = sg_query_limits();
-    // Bound (device): attachment extents and array layers must fit Sokol's device limits. Overflow discards this owner's shadow use, emits an Error and is counted in allocationFailures.
+    // Bound (device): attachment extents and layers must fit device limits; failure rejects the generation with an Error.
     if (!shadowImageLayout(resolution, colorBytes, depthBytes, totalBytes) ||
         resolution > limits.max_image_size_2d || resolution > limits.max_image_size_array ||
-        maxShadowLights > limits.max_image_array_layers) return fail();
+        maxShadowLights > limits.max_image_array_layers) {
+        reportImportError("Shadow", "shadow resolution or layers exceed the device limits");
+        return false;
+    }
     if (sh.storage && resolution <= sh.storage->resolution) return true;
     try {
         auto next = std::shared_ptr<ShadowStorage>(new ShadowStorage, retireShadowStorage);
         next->resolution = resolution;
         next->imageBytes = totalBytes;
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        const bool gl = sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3;
+        if (gl) while (glGetError() != GL_NO_ERROR) {}
+#endif
         sg_image_desc cd = {};
         cd.type = SG_IMAGETYPE_ARRAY;
         cd.num_slices = maxShadowLights;
@@ -2542,39 +2586,78 @@ bool ensureShadowStorage(WindowContext& window, int resolution) {
         cd.pixel_format = SG_PIXELFORMAT_R32F;
         cd.sample_count = 1;
         cd.label = "tc_shadow_color_array";
-        if (!makeShadowResource(next->colorImage, cd, static_cast<sg_image (*)(const sg_image_desc*)>(sg_make_image), sg_query_image_state)) return fail();
+        next->colorImage = sg_make_image(&cd);
+        if (sg_query_image_state(next->colorImage) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         for (int slot = 0; slot < maxShadowLights; ++slot) {
             sg_view_desc vd = {};
             vd.color_attachment.image = next->colorImage;
             vd.color_attachment.slice = slot;
-            if (!makeShadowResource(next->colorAttachments[slot], vd, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+            next->colorAttachments[slot] = sg_make_view(&vd);
+            if (sg_query_view_state(next->colorAttachments[slot]) != SG_RESOURCESTATE_VALID) {
+                reportImportError("Shadow", "could not create shadow resource");
+                return false;
+            }
         }
         sg_view_desc tv = {};
         tv.texture.image = next->colorImage;
-        if (!makeShadowResource(next->colorTexture, tv, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        next->colorTexture = sg_make_view(&tv);
+        if (sg_query_view_state(next->colorTexture) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_image_desc dd = {};
         dd.usage.depth_stencil_attachment = true;
         dd.width = dd.height = resolution;
         dd.pixel_format = SG_PIXELFORMAT_DEPTH;
         dd.sample_count = 1;
         dd.label = "tc_shadow_depth";
-        if (!makeShadowResource(next->depthImage, dd, static_cast<sg_image (*)(const sg_image_desc*)>(sg_make_image), sg_query_image_state)) return fail();
+        next->depthImage = sg_make_image(&dd);
+        if (sg_query_image_state(next->depthImage) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_view_desc dv = {};
         dv.depth_stencil_attachment.image = next->depthImage;
-        if (!makeShadowResource(next->depthAttachment, dv, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        next->depthAttachment = sg_make_view(&dv);
+        if (sg_query_view_state(next->depthAttachment) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_sampler_desc sd = {};
         sd.min_filter = sd.mag_filter = SG_FILTER_NEAREST;
         sd.wrap_u = sd.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         sd.label = "tc_shadow_smp";
-        if (!makeShadowResource(next->sampler, sd, static_cast<sg_sampler (*)(const sg_sampler_desc*)>(sg_make_sampler), sg_query_sampler_state)) return fail();
+        next->sampler = sg_make_sampler(&sd);
+        if (sg_query_sampler_state(next->sampler) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        // Bound (device): Sokol's GL create path can report VALID after a failed native allocation; reject this shadow replacement.
+        if (gl && glGetError() != GL_NO_ERROR) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#elif defined(SOKOL_METAL)
+        // Bound (device): Sokol's Metal create path can report VALID for a nil native texture view; reject this shadow replacement.
+        if (!shadowTextureViewCreated(next->colorTexture)) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#endif
         // Publish only a complete generation. New storage contains no old slots;
         // previously queued draws retain both the old maps and copied matrices.
         sh.storage = std::move(next);
         sh.count = 0;
         sh.current = -1;
         return true;
-    } catch (const std::bad_alloc&) { return fail(); }
-      catch (const std::length_error&) { return fail(); }
+    } catch (const std::bad_alloc&) {
+        reportImportError("Shadow", "could not allocate shadow storage");
+        return false;
+    }
 }
 
 void consumeShadowSlot(int slot) {
@@ -2606,14 +2689,6 @@ void consumeShadowSlot(int slot) {
             target.flushLayers();
             target.endPass();
         }
-    } catch (const std::bad_alloc&) {
-        failure = std::current_exception();
-        currentTarget().failRecording("shadow consumer replay allocation failed");
-        currentTarget().endPass();
-    } catch (const std::length_error&) {
-        failure = std::current_exception();
-        currentTarget().failRecording("shadow consumer replay size cannot be represented");
-        currentTarget().endPass();
     } catch (...) {
         failure = std::current_exception();
         currentTarget().endPass();
@@ -2976,13 +3051,7 @@ bool rebuildTargetResources() {
         entry.second.generation.reset(); entry.second.allocationFailed = false;
         for (auto& lease : entry.second.leases) { assert(!lease->leased); discard(*lease); }
     }
-    sgl_desc_t desc = {};
-    desc.logger.func = sokolLog;
-    // Bound (retain existing pool budget; growth belongs to #863's sgl lane): 256 slots; pipeline creation fails on overflow and affected draws are skipped with a log.
-    desc.pipeline_pool_size = 256;
-    desc.context_pool_size = 64;   // same reason as in the setup path above
-    desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
-    desc.allocator.alloc_fn = smemtrack_alloc; desc.allocator.free_fn = smemtrack_free;
+    auto desc = sglSetupDescriptor();
     sgl_setup(&desc);
     sgl_tc_context_target_owned(sgl_default_context());
     for (auto* window : windows) {
@@ -3358,12 +3427,11 @@ void parkWindowPass() {
     if (outgoing.currentTarget->inPass) {
         try { outgoing.currentTarget->flushLayers(); }
         catch (const std::bad_alloc&) {
-            outgoing.currentTarget->failRecording("parked replay allocation failed");
+            reportImportError("RenderTarget", "parked replay allocation failed");
         } catch (const std::length_error&) {
-            outgoing.currentTarget->failRecording("parked replay size cannot be represented");
+            reportImportError("RenderTarget", "parked replay size cannot be represented");
         }
-        // Even a failed recording must release the native encoder before a
-        // foreign window can render or enter its noexcept teardown.
+        // Release the encoder before a foreign window renders or tears down.
         outgoing.currentTarget->endPass();
     }
 }

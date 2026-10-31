@@ -10,6 +10,8 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <limits>
+#include <utility>
 #include <type_traits>
 #include "tcEventListener.h"
 #include "tcExternalDelivery.h"
@@ -102,10 +104,10 @@ namespace priority {
 //     participate in `consumed` propagation. Fine for reactive events
 //     (onReceive); input events that use `consumed` already fire on the main
 //     thread, where Main is a no-op anyway.
-//   - External network/device sources opt into internal admission: 1024
-//     pending Main deliveries / 64 MiB retained payload per event store.
-//     Each Main copy is admitted at its listener turn, after earlier Inline
-//     edits. A rejected copy is counted and warns once automatically on main.
+//   - External network/device Main copies are unlimited by default.
+//     setMainThreadDeliveryLimit(count) optionally limits queued and executing
+//     copies across this event's listeners (0 restores unlimited delivery).
+//     Overflow drops each whole copy and logs one Warning per episode; TCP stays connected.
 //     App-authored notify() and runOnMainThread() remain growable.
 //   - Requires T to be copy-constructible (otherwise delivered inline).
 //   - Listener lifetime is honored across the marshal boundary: a call queued
@@ -135,6 +137,19 @@ public:
     explicit Event(int defaultPriority)
         : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
+
+    // Optional count limit for external Main copies across this event's listeners.
+    // Default/0: unlimited. Existing copies survive a lower limit. Overflow
+    // drops new copies and logs one Warning per episode; allocation failure drops silently.
+    void setMainThreadDeliveryLimit(size_t count) {
+        TC_LOCK_GUARD(mutex_);
+        if (!externalStore_) {
+            externalStore_ = std::make_shared<internal::ExternalDeliveryStore>();
+        }
+        std::lock_guard<std::mutex> storeLock(externalStore_->mutex);
+        externalStore_->deliveryLimit = count;
+        if (!count || externalStore_->pending < count) externalStore_->overflowing = false;
+    }
 
     // Copy/Move forbidden (events have fixed location)
     Event(const Event&) = delete;
@@ -338,7 +353,8 @@ private:
     static bool notifySnapshot(ConstEntryListPtr snapshot, T& arg,
                                std::shared_ptr<internal::ExternalDeliveryStore> store = {},
                                std::weak_ptr<std::atomic<bool>> sourceAlive = {},
-                               std::shared_ptr<std::atomic<bool>> run = {}) {
+                               std::shared_ptr<std::atomic<bool>> run = {},
+                               bool mainStoreFailed = false) {
         if (!snapshot) return true;
         struct OwnedCopy {
             std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
@@ -357,18 +373,24 @@ private:
             // takes the hot path below unchanged.
             if (entry.deliver == Deliver::Main && !isMainThread()) {
                 if constexpr (std::is_copy_constructible_v<T>) {
-                    std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
-                    if (store) {
-                        // Reserve before either copy, using the value after
-                        // earlier Inline listeners have finished editing it.
-                        lease = store->reserve(1, internal::ExternalPayload<T>::bytes(arg));
-                        if (!lease) { accepted = false; continue; }
+                    if (mainStoreFailed) { accepted = false; continue; }
+                    try {
+                        std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
+                        if (store) {
+                            // Reserve before either copy, using the value after
+                            // earlier Inline listeners have finished editing it.
+                            lease = store->reserve();
+                            if (!lease) { accepted = false; continue; }
+                        }
+                        internal::AppOwnerScope workerOwner(entry.owner.lock());
+                        auto copy = std::make_shared<OwnedCopy>(std::move(lease), arg, *entry.callback);
+                        runOnMainThread([copy, run, sourceAlive]() mutable {
+                            if (internal::eventSourceIsAlive(sourceAlive) && (!run || run->load(std::memory_order_acquire))) copy->callback(copy->payload);
+                        }, std::weak_ptr<std::atomic<bool>>(entry.alive));
+                    } catch (const std::bad_alloc&) {
+                        if (!store) throw;
+                        accepted = false;
                     }
-                    internal::AppOwnerScope workerOwner(entry.owner.lock());
-                    auto copy = std::make_shared<OwnedCopy>(std::move(lease), arg, *entry.callback);
-                    runOnMainThread([copy, run, sourceAlive]() mutable {
-                        if (internal::eventSourceIsAlive(sourceAlive) && (!run || run->load(std::memory_order_acquire))) copy->callback(copy->payload);
-                    }, std::weak_ptr<std::atomic<bool>>(entry.alive));
                     continue;
                 }
                 // Non-copyable payload can't be marshalled — fall through and
@@ -470,6 +492,19 @@ public:
     explicit Event(int defaultPriority)
         : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
+
+    // Optional count limit for external Main copies across this event's listeners.
+    // Default/0: unlimited. Existing copies survive a lower limit. Overflow
+    // drops new copies and logs one Warning per episode; allocation failure drops silently.
+    void setMainThreadDeliveryLimit(size_t count) {
+        TC_LOCK_GUARD(mutex_);
+        if (!externalStore_) {
+            externalStore_ = std::make_shared<internal::ExternalDeliveryStore>();
+        }
+        std::lock_guard<std::mutex> storeLock(externalStore_->mutex);
+        externalStore_->deliveryLimit = count;
+        if (!count || externalStore_->pending < count) externalStore_->overflowing = false;
+    }
 
     Event(const Event&) = delete;
     Event& operator=(const Event&) = delete;
@@ -649,11 +684,12 @@ private:
     template<class> friend struct internal::GuardedEventDelivery;
     static bool notifySnapshot(ConstEntryListPtr snapshot,
                                std::shared_ptr<internal::ExternalDeliveryStore> store = {},
-                               std::weak_ptr<std::atomic<bool>> sourceAlive = {}) {
+                               std::weak_ptr<std::atomic<bool>> sourceAlive = {},
+                               bool mainStoreFailed = false) {
         if (!snapshot) return true;
         struct OwnedCall {
             std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
-            Callback callback; // Destroy the callable before returning its credit.
+            Callback callback; // Destroy the callable before releasing the pending slot.
         };
         bool accepted = true;
         for (const auto& entry : *snapshot) {
@@ -663,16 +699,22 @@ private:
             // Deliver::Main from a worker thread: run on the main thread next
             // frame (no payload to copy for Event<void>).
             if (entry.deliver == Deliver::Main && !isMainThread()) {
-                std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
-                if (store) {
-                    lease = store->reserve(1, 0);
-                    if (!lease) { accepted = false; continue; }
+                if (mainStoreFailed) { accepted = false; continue; }
+                try {
+                    std::shared_ptr<internal::ExternalDeliveryStore::Lease> lease;
+                    if (store) {
+                        lease = store->reserve();
+                        if (!lease) { accepted = false; continue; }
+                    }
+                    internal::AppOwnerScope workerOwner(entry.owner.lock());
+                    auto call = std::make_shared<OwnedCall>(std::move(lease), *entry.callback);
+                    runOnMainThread([call, sourceAlive] {
+                        if (internal::eventSourceIsAlive(sourceAlive)) call->callback();
+                    }, std::weak_ptr<std::atomic<bool>>(entry.alive));
+                } catch (const std::bad_alloc&) {
+                    if (!store) throw;
+                    accepted = false;
                 }
-                internal::AppOwnerScope workerOwner(entry.owner.lock());
-                auto call = std::make_shared<OwnedCall>(std::move(lease), *entry.callback);
-                runOnMainThread([call, sourceAlive] {
-                    if (internal::eventSourceIsAlive(sourceAlive)) call->callback();
-                }, std::weak_ptr<std::atomic<bool>>(entry.alive));
                 continue;
             }
             {
@@ -822,21 +864,33 @@ template<class T> struct ExternalEventDelivery {
         return source.externalStore_;
     }
     static std::shared_ptr<ExternalDeliveryStore> store(Event<T>& source,
-                                                       const typename Event<T>::ConstEntryListPtr& snapshot) {
+                                                       const typename Event<T>::ConstEntryListPtr& snapshot,
+                                                       bool& failed) {
         if (isMainThread() || !snapshot) return {};
         bool needed = false;
         for (const auto& entry : *snapshot)
             if (entry.deliver == Deliver::Main && entry.callback && entry.alive->load()) { needed = true; break; }
         if (!needed) return {};
         TC_LOCK_GUARD(source.mutex_);
-        if (!source.externalStore_) source.externalStore_ = std::make_shared<ExternalDeliveryStore>();
+        if (!source.externalStore_) {
+            try {
+                source.externalStore_ = std::make_shared<ExternalDeliveryStore>();
+            } catch (const std::bad_alloc&) {
+                failed = true;
+                return {};
+            }
+        }
         return source.externalStore_;
     }
     template<class... Args>
     static bool notify(Event<T>& source, Args&... args) {
         auto snapshot = sharedLoad(source.entries_);
-        auto ownedStore = store(source, snapshot);
-        return Event<T>::notifySnapshot(std::move(snapshot), args..., std::move(ownedStore), source.alive_);
+        bool failed = false;
+        auto ownedStore = store(source, snapshot, failed);
+        if constexpr (std::is_void_v<T>)
+            return Event<T>::notifySnapshot(std::move(snapshot), std::move(ownedStore), source.alive_, failed);
+        else
+            return Event<T>::notifySnapshot(std::move(snapshot), args..., std::move(ownedStore), source.alive_, {}, failed);
     }
 };
 } // namespace trussc::internal

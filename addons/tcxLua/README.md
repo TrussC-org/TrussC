@@ -61,31 +61,38 @@ tcxLua::call(*lua, "keyPressed", key);             // arguments are passed on
   and Lua diagnostics include the UTF-8 file name. Local files have no size cap.
 - Both also work on the Web. The owned loading and lint translation units
   enable exception recovery for C++ allocation failures.
-- Source and bytecode modules have no load size cap. Allocation failures use
+- Text source modules have no load size cap. Allocation failures use
   Lua's own "not enough memory" error; loaders do not replace the allocator.
-  Both bundled engines check bytecode ranges and count products before reading
-  or allocating. Binary input is buffered to establish the remaining range;
-  a binary reader must supply one finite complete chunk and is read to EOF.
-  LuaJIT's native embedded `luaJIT_BC_<name>` modules retain their in-process
-  end-marker convention. Buffer allocations use the engine's own GC accounting
-  and allocation path, including PUC's emergency collection and retry.
-  LuaJIT retains its engine representation limits on individual prototypes,
-  strings and lexer scratch buffers (`MSize`/`LJ_MAX_MEM`/`LJ_MAX_BUF`); these
-  are engine limits, not local-file policy caps or a total bytecode-file limit.
-  These structure checks are not an instruction verifier; bytecode retains
-  the authority of executable Lua code.
-- PUC bytecode and lint traversal use the engine's `LUAI_MAXCCALLS` nesting
-  limit (200 by default), covering the prototypes its source parser produces.
+  `runFile` and lint compile in text-only mode (`"t"`). Binary chunks are
+  rejected with the engine's error naming binary input and text mode.
+  Initial sketch/file loads and hot reload use `runFile`; the live editor
+  compiles text only. Scripts calling the standard `load`, `loadstring`
+  (LuaJIT), `loadfile`, `dofile`, or `require` get standard Lua behavior,
+  including binary loading where the engine supports it. These functions are
+  left upstream. Direct C++ sol2/native engine APIs also retain their standard
+  behavior. Script authors are responsible for inputs they load themselves.
+- Lint traversal uses the engine's `LUAI_MAXCCALLS` nesting limit (200 by
+  default), covering the prototypes its source parser produces.
   Name and diagnostic storage grows with input; compilation has no allocation
-  quota. Suggestions use constant scratch storage per comparison, with at most
-  64*1024*1024 edit-distance band cells per file. Candidate visits still cost
-  O(undefined reads × candidates), including names outside the length window.
-  Exhaustion omits further suggestions while retaining every diagnostic; it
-  has no separate exhaustion signal. A structure, allocation, depth or lookup
+  quota. Suggestions use constant scratch storage per comparison. Candidate
+  visits cost O(undefined reads × candidates), including names outside the length
+  window. A structure, allocation, depth or lookup
   failure returns one diagnostic for that file, preserving other files' results.
   Shared global-name snapshot failures return a `[lint]` diagnostic. If the
   diagnostic cannot be allocated, an Error goes to stderr and the result is
   empty. LuaJIT has no undefined-global scan; its lint path compiles each file.
+
+日本語: TrussC はスクリプトファイルとソースをテキストとして読み込みます。
+`runFile`、初回のスケッチ読み込み、リロード、lint ではモード `"t"` を使い、
+バイナリチャンクを明確なエラーで拒否します。スクリプト自身が標準の
+`load`、`loadstring`（LuaJIT）、`loadfile`、`dofile`、`require` を呼ぶ場合は、
+バイナリ読み込みを含め、各 Lua エンジンの標準動作になります。
+
+한국어: TrussC는 스크립트 파일과 소스를 텍스트로 읽습니다.
+`runFile`, 최초 스케치 로드, 다시 로드, lint는 `"t"` 모드를 사용하며
+바이너리 청크를 명확한 오류와 함께 거부합니다. 스크립트가 직접 표준
+`load`, `loadstring`(LuaJIT), `loadfile`, `dofile`, `require`를 호출하면
+바이너리 로드를 포함한 각 Lua 엔진의 표준 동작이 적용됩니다.
 
 sol2's own defaults are unchanged: on an error, `lua->safe_script(...)` and
 `safe_script_file(...)` without `sol::script_pass_on_error` throw `sol::error`,
@@ -180,3 +187,15 @@ Console moved from CoreEvents to `runtime().events().console`; subscribe once
 and opt into stdin from the C++ host with `tc::console::start()` as described in the v0.8 migration.
 Generated bindings include CloseRequestEventArgs and Window closeRequested;
 code close skips that query. App ending retires owner-scoped subscriptions.
+
+Local script loading keeps Lua's protected call so memory errors return `false`.
+It has no size notice or extra OOM retry/reserve machinery. Lint suggestions
+have no per-file work budget.
+
+ローカルスクリプトは Lua の保護された呼び出しで読み込み、メモリ不足時は
+`false` を返します。サイズの Notice や OOM 専用の再試行・予備メモリはありません。
+lint の候補探しにもファイルごとの作業量の上限はありません。
+
+로컬 스크립트는 Lua의 보호된 호출로 읽으며 메모리가 부족하면 `false`를 반환합니다.
+크기 Notice나 OOM 전용 재시도 및 예비 메모리는 없습니다.
+lint 제안 검색에도 파일별 작업량 상한이 없습니다.

@@ -8,6 +8,9 @@
 #include <emscripten.h>
 #include <map>
 #include <emscripten/html5.h>
+#ifdef __EMSCRIPTEN_PTHREADS__
+#include <emscripten/threading.h>
+#endif
 
 namespace trussc {
 
@@ -23,9 +26,100 @@ bool getImmersiveMode() { return false; }
 // Orientation (no-op on web)
 void setOrientation(Orientation mask) { (void)mask; }
 
-// Keep screen on (TODO: Screen Wake Lock API via JS — no-op for now)
-void setKeepScreenOn(bool enabled) { (void)enabled; }
-bool getKeepScreenOn() { return false; }
+namespace {
+void wakeLockUnavailable() noexcept {
+    // Log only after the browser-thread proxy returns; contain listener exceptions.
+    try { logNotice("Platform") << "Screen Wake Lock unavailable; use a supported browser in a secure context (HTTPS or localhost)."; }
+    catch (...) {}
+}
+EM_JS(int, applyWebWakeLock, (bool enabled), {
+    let state = Module['trusscWakeLock'];
+    if (!state) {
+        if (!enabled) return 0;
+        state = Module['trusscWakeLock'] = {
+            requested: false, unsupported: false, notified: false, busy: false, sentinel: null, generation: 0
+        };
+        const visible = () => document.visibilityState === 'visible';
+        state.pump = async () => {
+            if (state.busy || state.unsupported) return;
+            const generation = state.generation;
+            state.busy = true;
+            try {
+                if (state.sentinel && state.sentinel.released) state.sentinel = null;
+                if (state.sentinel && (!state.requested || !visible())) {
+                    const sentinel = state.sentinel;
+                    state.sentinel = null;
+                    await sentinel.release();
+                } else if (!state.sentinel && state.requested && visible()) {
+                    const sentinel = await navigator.wakeLock.request('screen');
+                    if (!state.requested || !visible() || generation !== state.generation) {
+                        await sentinel.release();
+                    } else {
+                        state.sentinel = sentinel;
+                        sentinel.addEventListener('release', () => {
+                            if (state.sentinel === sentinel) state.sentinel = null;
+                        }, { once: true });
+                        if (sentinel.released) state.sentinel = null;
+                    }
+                }
+            } catch (error) {
+                // Hidden-page rejection is normal. Keep recovery armed, including for
+                // visible-page rejections; retry on visibility change or disable/re-enable.
+            } finally {
+                state.busy = false;
+                // Reconcile changes made while awaiting acquisition or release.
+                if (generation !== state.generation) state.pump();
+            }
+        };
+        state.changed = () => { ++state.generation; state.pump(); };
+    }
+    if (state.requested === !!enabled) return 0;
+    state.requested = !!enabled;
+    ++state.generation;
+    if (enabled) {
+        if (!globalThis.isSecureContext || !navigator.wakeLock) {
+            state.unsupported = true;
+            if (state.notified) return 0;
+            state.notified = true;
+            return 1;
+        }
+        state.unsupported = false;
+        document.addEventListener('visibilitychange', state.changed);
+    } else {
+        document.removeEventListener('visibilitychange', state.changed);
+    }
+    state.pump();
+    return 0;
+});
+int webWakeLockOnMain(int enabled) {
+    return applyWebWakeLock(enabled != 0);
+}
+} // namespace
+namespace internal {
+void applyKeepScreenOn(bool enabled, bool headless) {
+    (void)headless;
+#ifdef __EMSCRIPTEN_PTHREADS__
+    // The app main loop may itself be proxied to a pthread; DOM work stays in the browser.
+    const int notice = emscripten_sync_run_in_main_runtime_thread(EM_FUNC_SIG_II, webWakeLockOnMain, int(enabled));
+#else
+    const int notice = webWakeLockOnMain(int(enabled));
+#endif
+    if (notice) wakeLockUnavailable();
+}
+} // namespace internal
+#ifndef __EMSCRIPTEN_PTHREADS__
+namespace { bool webKeepScreenRequested = false; }
+void setKeepScreenOn(bool enabled) {
+    webKeepScreenRequested = enabled;
+    internal::applyKeepScreenOn(enabled, false);
+}
+bool getKeepScreenOn() { return webKeepScreenRequested; }
+namespace internal {
+void shutdownKeepScreenOn() noexcept {
+    try { setKeepScreenOn(false); } catch (...) {}
+}
+} // namespace internal
+#endif
 
 IVec2 internal::singleWindowPosition() {
     logWarning("Platform") << "getWindowPosition() is not supported on Web";

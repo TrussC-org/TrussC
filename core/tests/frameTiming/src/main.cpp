@@ -11,7 +11,7 @@
 //   2. getFrameElapsedTime() is constant within a frame (also through the
 //      main loop's frame start, beginScheduledFrame).
 //   3. Fixed-Hz update: every step reports the nominal 1/updateFps as dt, at
-//      most 10 steps run per frame by default (excess dropped, warned once;
+//      most 10 steps run per frame by default (excess dropped, one warning per stall;
 //      setMaxUpdateSteps() sets the cap, <= 0 runs every step), and
 //      getFrameRate() reports the measured rate, steady at non-integer ratios.
 //      The independent VSYNC update and the default draw-synced update
@@ -299,7 +299,7 @@ static void testMainLoopUpdates() {
     check("fixed Hz: dropped time warned once", g_dropWarnings == warningsBefore + 1);
     t += secs(3.0);
     internal::runIndependentUpdates(t);
-    check("fixed Hz: the warning is one-time", g_dropWarnings == warningsBefore + 1);
+    check("fixed Hz: sustained drops do not repeat the warning", g_dropWarnings == warningsBefore + 1);
 
     // --- setMaxUpdateSteps(): a custom cap, and <= 0 for no cap ---
     setMaxUpdateSteps(25);

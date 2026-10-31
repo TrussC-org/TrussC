@@ -5,6 +5,21 @@
 #include "tcLutParse.h"
 #include <sstream>
 #include <cstdio>
+#include <cstdlib>
+#include <new>
+
+namespace {
+bool trackBufferAllocations = false;
+size_t peakBufferAllocation = 0;
+}
+// Observe the fallback's actual string allocations without a production hook.
+void* operator new(std::size_t size) {
+    if (trackBufferAllocations) peakBufferAllocation = std::max(peakBufferAllocation, size);
+    if (void* memory = std::malloc(size ? size : 1)) return memory;
+    throw std::bad_alloc();
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <fstream>
@@ -65,6 +80,67 @@ private:
     }
 };
 
+// Regular pseudo-file model: readable bytes with zero/unavailable metadata.
+class PseudoFile : public std::stringbuf {
+public:
+    enum class Seek { ZeroSize, NoEnd, NoTell, None };
+    PseudoFile(const std::string& text, Seek behavior)
+        : std::stringbuf(text, std::ios::in), behavior_(behavior) {}
+private:
+    Seek behavior_;
+    pos_type seekoff(off_type offset, std::ios::seekdir direction,
+                     std::ios::openmode mode) override {
+        if (behavior_ == Seek::None ||
+            (behavior_ == Seek::NoEnd && direction == std::ios::end) ||
+            (behavior_ == Seek::NoTell && direction == std::ios::cur))
+            return pos_type(off_type(-1));
+        // A zero-sized file's end position is its beginning, even with content.
+        if (direction == std::ios::end && behavior_ != Seek::NoEnd)
+            direction = std::ios::beg;
+        return std::stringbuf::seekoff(offset, direction, mode);
+    }
+};
+
+class GrowingFile : public std::stringbuf {
+public:
+    explicit GrowingFile(const std::string& text) : std::stringbuf(text, std::ios::in) {}
+private:
+    pos_type seekoff(off_type offset, std::ios::seekdir direction,
+                     std::ios::openmode mode) override {
+        return std::stringbuf::seekoff(direction == std::ios::end ? offset - 1 : offset,
+                                      direction, mode);
+    }
+};
+
+// Generate bytes without storing the input. Endless mode throws at a test-only
+// cutoff instead of returning EOF, so removing the reader cap cannot run away.
+class GeneratedFile : public std::streambuf {
+public:
+    GeneratedFile(size_t length, bool endless = false, bool sized = false)
+        : length_(length), endless_(endless), sized_(sized) {}
+    size_t delivered = 0;
+private:
+    size_t length_;
+    bool endless_, sized_;
+    std::streamsize xsgetn(char* destination, std::streamsize count) override {
+        if (endless_ && size_t(count) > length_ - delivered) throw Cutoff{};
+        const size_t size = std::min(size_t(count), length_ - delivered);
+        std::fill_n(destination, size, ' ');
+        delivered += size;
+        return std::streamsize(size);
+    }
+    int_type underflow() override {
+        return endless_ || delivered < length_ ? traits_type::to_int_type(' ') : traits_type::eof();
+    }
+    pos_type seekoff(off_type offset, std::ios::seekdir direction, std::ios::openmode) override {
+        if (offset != 0) return pos_type(off_type(-1));
+        if (direction == std::ios::beg) delivered = 0;
+        if (direction == std::ios::end) delivered = sized_ ? length_ : 0;
+        return pos_type(delivered);
+    }
+    struct Cutoff {};
+};
+
 bool readJson(std::istream& input) {
     std::string bytes;
     if (!trussc::internal::readDocumentBytes(input, bytes)) return false;
@@ -107,6 +183,19 @@ int main() {
         const bool rejected = !readers[i](shortRead);
         printf("%s: complete=%d short read rejected=%d\n", names[i], good, rejected);
         failures += !good || !rejected;
+        GrowingFile growing(inputs[i] + " \n");
+        std::istream growingStream(&growing);
+        const bool growthRejected = !readers[i](growingStream);
+        printf("%s: sized file growth rejected=%d\n", names[i], growthRejected);
+        failures += !growthRejected;
+        for (auto behavior : {PseudoFile::Seek::ZeroSize, PseudoFile::Seek::NoEnd,
+                              PseudoFile::Seek::NoTell, PseudoFile::Seek::None}) {
+            PseudoFile pseudo(inputs[i], behavior);
+            std::istream stream(&pseudo);
+            const bool loaded = readers[i](stream);
+            printf("%s: pseudo-file mode=%d loaded=%d\n", names[i], int(behavior), loaded);
+            failures += !loaded;
+        }
 #ifdef __EMSCRIPTEN__
         std::ifstream file(paths[i], std::ios::binary);
         const bool eioRejected = !readers[i](file);
@@ -114,5 +203,75 @@ int main() {
         failures += !eioRejected;
 #endif
     }
+    auto check = [&](const char* label, bool ok) {
+        printf("%s: %s\n", label, ok ? "PASS" : "FAIL");
+        failures += !ok;
+    };
+    std::string bytes = "unchanged";
+    PseudoFile empty("", PseudoFile::Seek::ZeroSize);
+    std::istream emptyStream(&empty);
+    check("empty zero-size document reads as empty",
+          trussc::internal::readDocumentBytes(emptyStream, bytes) && bytes.empty());
+    PseudoFile emptyJson("", PseudoFile::Seek::ZeroSize);
+    std::istream emptyJsonStream(&emptyJson);
+    check("empty zero-size JSON remains invalid", !readJson(emptyJsonStream));
+    const std::string large(3 * 8192 + 7, ' ');
+    PseudoFile largeFile(large, PseudoFile::Seek::ZeroSize);
+    std::istream largeStream(&largeFile);
+    check("zero-size stream retains all chunks exactly",
+          trussc::internal::readDocumentBytes(largeStream, bytes) && bytes == large);
+    constexpr size_t cap = 64u * 1024u * 1024u;
+    GeneratedFile endless(cap + 2 * 8192, true);
+    std::istream endlessStream(&endless);
+    bytes = "unchanged";
+    const char* readError = nullptr;
+    peakBufferAllocation = 0;
+    trackBufferAllocations = true;
+    const bool endlessRejected = !trussc::internal::readDocumentBytes(endlessStream, bytes, &readError);
+    trackBufferAllocations = false;
+    check("endless unknown-size stream rejects at 64 MiB plus one byte",
+          endlessRejected && endless.delivered == cap + 1 && bytes == "unchanged");
+    check("unknown-size overflow returns the fixed read error",
+          readError && std::string(readError) == "document size unknown and over 64 MiB");
+    // Allow library-dependent capacity rounding, but not a doubled buffer.
+    printf("endless stream peak buffer allocation: %zu bytes\n", peakBufferAllocation);
+    check("endless stream peak buffer allocation stays bounded",
+          peakBufferAllocation >= cap && peakBufferAllocation <= cap + cap / 4);
+
+    GeneratedFile exact(cap);
+    std::istream exactStream(&exact);
+    check("unknown-size stream of exactly 64 MiB succeeds",
+          trussc::internal::readDocumentBytes(exactStream, bytes, &readError) &&
+          bytes.size() == cap && bytes.find_first_not_of(' ') == std::string::npos && !readError);
+    bytes.clear();
+    GeneratedFile sizedAboveCap(cap + 1, false, true);
+    std::istream sizedStream(&sizedAboveCap);
+    check("sized documents above 64 MiB remain uncapped",
+          trussc::internal::readDocumentBytes(sizedStream, bytes) && bytes.size() == cap + 1);
+    bytes.clear();
+    // Exercise the production fallback with a reduced string storage ceiling.
+    // No multi-exabyte allocation is needed to verify the ABI bound.
+    for (size_t ceiling : {size_t(0), size_t(5), size_t(8192), large.size()}) {
+        PseudoFile full(large.substr(0, ceiling), PseudoFile::Seek::ZeroSize);
+        std::istream fullStream(&full);
+        check("fallback accepts exactly the storage ceiling",
+              trussc::internal::readDocumentBytesToEnd(fullStream, bytes, ceiling) &&
+              bytes == large.substr(0, ceiling));
+        PseudoFile excess(large + " ", PseudoFile::Seek::ZeroSize);
+        std::istream excessStream(&excess);
+        bytes = "unchanged";
+        const bool rejected = !trussc::internal::readDocumentBytesToEnd(excessStream, bytes, ceiling);
+        check("fallback rejects overflow without publishing a prefix",
+              rejected && bytes == "unchanged");
+        check("fallback stops after the first excess byte",
+              excessStream.rdbuf()->pubseekoff(0, std::ios::cur, std::ios::in) ==
+              std::streampos(ceiling + 1));
+    }
+    std::istringstream bad("42");
+    bad.setstate(std::ios::badbit);
+    bytes = "unchanged";
+    check("fallback rejects stream errors without publishing bytes",
+          !trussc::internal::readDocumentBytesToEnd(bad, bytes, bytes.max_size()) &&
+          bytes == "unchanged");
     return failures ? 1 : 0;
 }

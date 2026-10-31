@@ -170,7 +170,9 @@ void headlessChecks() {
 }
 #ifndef __EMSCRIPTEN__
 class CaptureApp : public App {
-    Fbo fbo_,hdr_,moved_,changing_;
+    Fbo fbo_,hdr_,moved_,changing_,integer_;
+    bool rgba16Renderable_ = false;
+    TextureFormat alternate_ = TextureFormat::RGBA16;
     EventListener after_;
     vector<function<mcp::internal::ReplyThunk()>> pending_;
 public:
@@ -178,6 +180,19 @@ public:
         fbo_.allocate(8,8);fbo_.setDebugName("round-trip");
         hdr_.allocate(8,8,1,TextureFormat::RGBA32F);hdr_.setDebugName("float-round-trip");
         changing_.allocate(8,8);changing_.setDebugName("changing-format");
+        rgba16Renderable_ = sg_query_pixelformat(SG_PIXELFORMAT_RGBA16).render;
+        // RG8 is a GLES3 renderable byte format. Float formats would select
+        // MCP's float readback path instead of exercising conversion to RGBA8.
+        if (!rgba16Renderable_) alternate_ = TextureFormat::RG8;
+        check("alternate conversion format is renderable and non-RGBA8",
+            alternate_ != TextureFormat::RGBA8 && sg_query_pixelformat(toSokolFormat(alternate_)).render);
+        integer_.setDebugName("integer-round-trip");
+        integer_.allocate(8,8,1,TextureFormat::RGBA16);
+        if (!rgba16Renderable_) {
+            printf("SKIP: RGBA16 Fbo analysis returns converted RGBA8 colors (RGBA16 render unsupported)\n");
+            check("unsupported RGBA16 allocation is rejected", !integer_.isAllocated());
+        }
+
         after_=events().afterFrame.listen([this]() {
             if(pending_.empty()) return;
             auto first=decode(pending_[0]()());
@@ -192,10 +207,12 @@ public:
                 win["results"][0]["color"]==json::array({1,0,0,1}));
             auto changed=decode(pending_[4]()());
             check("deferred capture converts changed format to RGBA8",changed["format"]=="RGBA8"&&
-                changed["results"][0]["color"]==json::array({0,0,1,1}));
-            auto integer=decode(pending_[5]()());
-            check("RGBA16 Fbo analysis returns converted RGBA8 colors",integer["format"]=="RGBA8"&&
-                integer["results"][0]["color"]==json::array({0,0,1,1}));
+                changed["results"][0]["color"]==json::array({0,1,0,1}));
+            if (rgba16Renderable_) {
+                auto integer=decode(pending_[5]()());
+                check("RGBA16 Fbo analysis returns converted RGBA8 colors",integer["format"]=="RGBA8"&&
+                    integer["results"][0]["color"]==json::array({0,0,1,1}));
+            }
             pending_.clear(); completed=true;exitApp();
         });
     }
@@ -213,9 +230,12 @@ public:
         {Fbo dead;dead.setDebugName("pending-dead");defer({{"fbo","pending-dead"}});}
         defer({{"window",internal::WindowRequestAccess::creationId(*getWindow())}});
         defer({{"fbo","changing-format"}});
-        changing_.allocate(8,8,1,TextureFormat::RGBA16);
-        changing_.begin(0,0,1,1);changing_.end();
-        defer({{"fbo","changing-format"}});
+        changing_.allocate(8,8,1,alternate_);
+        changing_.begin(0,1,0,1);changing_.end();
+        if (rgba16Renderable_) {
+            integer_.begin(0,0,1,1);integer_.end();
+            defer({{"fbo","integer-round-trip"}});
+        }
     }
 };
 #endif

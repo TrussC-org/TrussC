@@ -11,9 +11,22 @@
   and topic guides, so you don't need to load this whole file into context:
       git clone https://github.com/TrussC-org/trussc-dev-skill.git ~/.claude/skills/trussc-dev
   (Codex: clone into ~/.codex/skills/trussc-dev)
+  Any AI tool that speaks MCP can also connect the TrussC docs search server
+  (beta, Streamable HTTP) at https://api.trussc.org/mcp — Claude Code:
+      claude mcp add --transport http --scope user trussc-docs https://api.trussc.org/mcp
 -->
 
 You are a coding assistant for the TrussC framework.
+When a `trussc_api_details.txt` reference file is available, look up an entry's `## <id>` section there for its details and code examples.
+
+## Docs search (MCP, beta)
+If the `trussc_search` tool is available (the TrussC docs MCP server at `https://api.trussc.org/mcp`), use it whenever you need TrussC knowledge: which API to use, how something behaves, examples, addons.
+- Ask freely, in English or Japanese. A plain question works, and so does describing what the user wants to make; you don't need the exact API name.
+- Every result, and every line under "Other possibly related", carries an id tag like `[#symbol:Sound::play]`. Pass the id without the `#` (`symbol:Sound::play`) to `trussc_get` to read a cut-short example in full or to open a related card.
+- The search covers the TrussC `main` API, guides, examples, release notes, known open bugs and the registered addons. It can lag behind the newest commits.
+- It is a beta service. If it is busy, rate-limited (HTTP 429) or down, don't keep retrying: look things up yourself in the normal docs instead — the API index in this file, https://trussc.org/reference/, and the headers in the TrussC repo.
+- Queries are logged to improve search, kept for about six months and then deleted. Query text is sent to Jev (typesafe.ai) to select documentation; IP addresses are not sent.
+- Never put personal information, passwords or other secrets, or private code in a query.
 
 ## About TrussC
 - Lightweight creative coding framework based on sokol
@@ -1639,7 +1652,7 @@ Rules for callbacks that are not on the main thread:
        // runs on the main thread (next frame); dropped if listener_ is gone
    }, Deliver::Main);
    ```
-   `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. Each external network/device Main copy reserves credit at its listener turn, after earlier Inline edits, with a lazy store per event capped at 1024 pending deliveries and 64 MiB retained payload. Overflow rejects the whole copy before copying its payload or callable, counts it, and warns once on main without receive polling. Each queued invocation owns an independent callable copy, including mutable value captures. TCP overflow closes the connection and cancels that run’s queued chunks. App-authored notifications (including clean disconnects and send rejections), overflow teardown, `runOnMainThread` work, and send completions remain growable. Plain `runOnMainThread(fn)` also moves work to the main thread, but has no such check, so don't capture a raw `this` there.
+   `Deliver::Main` copies the payload and checks that the listener is still alive before calling it. External network/device copies are unlimited by default. `event.setMainThreadDeliveryLimit(count)` optionally limits queued and executing copies across the event's listeners (0 restores unlimited delivery). Overflow or allocation failure drops and counts the whole copy; TCP stays connected and accepted copies remain queued. Each invocation owns an independent callable copy, including mutable value captures. App-authored notifications, `runOnMainThread` work and send completions remain growable. Plain `runOnMainThread(fn)` also moves work to the main thread but has no liveness check, so avoid capturing a raw `this` there.
 2. **Audio callbacks stay on the audio thread.** They need low latency, so don't marshal them. Keep them short: no allocation, no file IO, no locks that the main thread may hold for a long time. Share values through atomics.
 3. **When the receiving object goes away, stop the source first, and wait for it.** `Event` does not wait for a callback that is already running on another thread, so dropping or disconnecting the listener is not enough there. It is enough only for listeners on the main thread and for `Deliver::Main` listeners, whose queued call is dropped. For an inline listener on another thread, call the source's own stop-and-wait before the members the callback uses are destroyed:
    - `TcpClient::disconnect()` and `UdpSocket::close()` join their threads.
@@ -1843,7 +1856,7 @@ The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`
 
 Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
 
-OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, constructing or moving even an empty `LoadResult` / `SaveResult` string or STL container can allocate a container proxy, so persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging remain best effort.
+Allocation failure in resource-load or screenshot bookkeeping follows the normal exception policy; completion under OOM is not guaranteed. See [Asynchronous resource loading](ASYNC_LOADING.md) for handle lifetime and copy rules.
 
 
 Addons must use `pathToUtf8()` / `utf8ToPath()` for IO or display instead of `path.string()`, and `log << path` for logging; third-party narrow file IO still needs the Windows UTF-8 manifest described above.
@@ -2233,7 +2246,7 @@ float getDisplayScaleFactor()  // Returns the platform display scale factor.
 float getDpiScale()  // Returns the current window's DPI scale factor.
 int getFramebufferHeight()  // Returns the current window framebuffer's height.
 int getFramebufferWidth()  // Returns the current window framebuffer's width.
-bool getKeepScreenOn() [macos,windows,android,ios]  // Returns the keep-screen-on setting.
+bool getKeepScreenOn() [macos,windows,linux,android,ios,web]  // Returns the keep-screen-on setting.
 int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
 IVec2 getWindowPosition() [macos,windows,linux]  // Returns the window position on the screen.
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
@@ -2247,7 +2260,7 @@ bool saveScreenshot(const std::filesystem::path & path)  // Queues a screenshot 
 void setClipboardString(const std::string & text)  // Copies text to the clipboard.
 void setFullscreen(bool full)  // Sets the window fullscreen state.
 void setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates.
-void setKeepScreenOn(bool enabled) [macos,windows,android,ios]  // Controls whether display sleep and automatic locking are inhibited.
+void setKeepScreenOn(bool enabled) [macos,windows,linux,android,ios,web]  // Requests that the display stay on.
 void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
 void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
 void setWindowDecorated(bool decorated)  // Controls the resolved Window's standard decorations.
@@ -2575,6 +2588,7 @@ const std::array<E, internal::enumValidCount<E> enumValues()  // Returns the aut
 EVENT_DRIVEN  // Selects rendering on demand.
 void exitApp(int code = 0)  // Asks the process to quit, with an exit code.
 float exp2(float x) [std]  // Returns two raised to the given power.
+int getResourceLoadConcurrency()  // Returns how many resource loads can prepare at once.
 HALF_TAU  // Represents half a turn in radians.
 KEY_BACKSPACE  // Identifies the Backspace key.
 KEY_DELETE  // Identifies the Delete key.
@@ -2621,6 +2635,7 @@ void requestExitApp()  // Asks the process to quit, keeping the current exit cod
 Right  // Provides shorthand for `Direction::Right`.
 Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
+void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
 Top  // Provides the shorthand constant for Direction::Top.
@@ -2941,6 +2956,7 @@ void Event::clear()  // Removes user listeners, preserving framework-owned liste
 EventListener Event::listen(Callback callback) [+11]  // Registers an event listener and returns its connection token.
 size_t Event::listenerCount() const  // Returns the number of registered listeners.
 void Event::notify(T & arg)  // Notifies the event's listeners.
+void Event::setMainThreadDeliveryLimit(size_t count)  // Sets an optional limit for external main-thread copies.
 ```
 
 ### EventListener — Owns an event-listener connection.
@@ -3934,7 +3950,7 @@ int ScreenRecorder::getFrameCount() const [macos,windows,linux,android,ios]  // 
 fs::path ScreenRecorder::getPath() const [macos,windows,linux,android,ios]  // Returns the recording's output path.
 uint64_t ScreenRecorder::getRejectedFrameCount() const [macos,windows,linux,android,ios]  // Returns the number of frames rejected during capture or layout validation.
 bool ScreenRecorder::isRecording() const [macos,windows,linux,android,ios]  // Returns whether the recorder is capturing frames.
-SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Start live capture of the originating window or an Fbo at its actual pixel size at start. The take keeps fixed encoder dimensions and stays open across source resizes: mismatched frames are skipped before copying and counted by getRejectedFrameCount(), and recording resumes when the original size returns. stop() finalizes the take. One capture/encode operation may be pending: busy opportunities are counted and skipped while wall/audio PTS gaps are preserved. Calling start finalizes the previous take first and refuses replacement while an old operation remains pending. Destroying the source Fbo stops/finalizes automatically. Returns SaveResult for path preparation and encoder opening; check stop() for finalization.
+SaveResult ScreenRecorder::start(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Starts recording the window or an Fbo to a video file.
 SaveResult ScreenRecorder::stop() [macos,windows,linux,android,ios]  // Stops capturing and finalizes the recording file.
 VideoWriter & ScreenRecorder::writer() [macos,windows,linux,android,ios]  // Returns access to the recorder's underlying video writer.
 ```
@@ -4250,11 +4266,10 @@ size_t TcpServer::getSendAsyncPendingBytes(int clientId) const [macos,windows,li
 bool TcpServer::isRunning() const [macos,windows,linux,android]  // Returns whether the server is running.
 bool TcpServer::send(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Sends data to a specified client.
 SendResult TcpServer::sendAsync(int clientId, const void * data, size_t size) [+2] [macos,windows,linux,android]  // Queues data for a specified client.
+void TcpServer::setBindAddress(const std::string & address) [macos,windows,linux,android]  // Chooses the local IPv4 address for TCP connections.
 void TcpServer::setReceiveBufferSize(size_t size) [macos,windows,linux,android]  // Sets the client receive buffer size.
 void TcpServer::setSendAsyncBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets the per-client send high-water mark.
-void TcpServer::setSendItemLimit(size_t bytes) [macos,windows,linux,android]  // Sets the maximum owned send payload capacity.
 void TcpServer::setSendTimeout(float seconds) [macos,windows,linux,android]  // Sets the send inactivity timeout.
-void TcpServer::setTotalSendBufferSize(size_t bytes) [macos,windows,linux,android]  // Sets aggregate TCP server send credits.
 bool TcpServer::start(int port, int maxClients = 64) [macos,windows,linux,android]  // Starts listening for TCP connections.
 void TcpServer::stop() [macos,windows,linux,android]  // Stops the TCP server.
 ```
@@ -4456,6 +4471,7 @@ void UdpSocket::processNetwork() [macos,windows,linux,android,ios]  // Processes
 int UdpSocket::receive(void * buffer, size_t bufferSize) [+1] [macos,windows,linux,android,ios]  // Receives one UDP datagram into a buffer.
 bool UdpSocket::send(const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to the configured destination.
 bool UdpSocket::sendTo(const std::string & host, int port, const void * data, size_t size) [+1] [macos,windows,linux,android,ios]  // Sends a UDP datagram to a specified host and port.
+void UdpSocket::setBindAddress(const std::string & address) [macos,windows,linux,android,ios]  // Chooses the local IPv4 address for receiving UDP datagrams.
 bool UdpSocket::setBroadcast(bool enable) [macos,windows,linux,android,ios]  // Enables or disables UDP broadcast sending.
 bool UdpSocket::setMulticastInterface(const std::string & interfaceAddr) [macos,windows,linux,android,ios]  // Selects the outgoing IPv4 multicast interface.
 bool UdpSocket::setMulticastLoopback(bool enable) [macos,windows,linux,android,ios]  // Controls local loopback of outgoing multicast datagrams.
@@ -4748,9 +4764,12 @@ WindowSettings & WindowSettings::setClipboardSize(int size)  // Sets the clipboa
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
+WindowSettings & WindowSettings::setPipelinePoolSize(int count)  // Sets the startup pipeline pool slot count.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.
 WindowSettings & WindowSettings::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
+WindowSettings & WindowSettings::setResourcePoolSize(int count)  // Sets the startup slot count for each resource pool.
 WindowSettings & WindowSettings::setSampleCount(int count)  // Sets the window's MSAA sample count.
+WindowSettings & WindowSettings::setShaderPoolSize(int count)  // Sets the startup shader pool slot count.
 WindowSettings & WindowSettings::setSize(int w, int h)  // Sets the initial window dimensions.
 WindowSettings & WindowSettings::setSwapInterval(int interval)  // Sets the requested VSync presentation interval.
 WindowSettings & WindowSettings::setTitle(const std::string & t)  // Sets the initial window title.
@@ -4841,7 +4860,7 @@ enum PointStyle { Square, Round, Pixel }  // Defines the shape used to draw poin
 enum PrimitiveMode { Triangles, TriangleStrip, TriangleFan, Lines, LineStrip, LineLoop, Points }  // Selects how a mesh connects its vertices into drawing primitives.
 enum PrimitiveType { Points, Lines, LineStrip, Triangles, TriangleStrip, Quads }  // Selects the primitive topology used by vertex writers.
 enum SaveError { None, AccessDenied, NoSpace, WriteFailed, Unknown }  // Identifies a save error.
-enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning }  // Describes a send queue rejection or a completed send's outcome.
+enum SendError { None, ClientNotFound, Disconnected, Timeout, QueueFull, NotRunning, AllocationFailed }  // Describes a send queue rejection or a completed send's outcome.
 enum SoundSource::Kind { Eager, Stream }  // Identifies how a sound source supplies audio data.
 enum StrokeCap { Butt, Round, Square }  // Selects the shape of stroke endpoints.
 enum StrokeJoin { Miter, Round, Bevel }  // Selects the shape of stroke corners.
@@ -5259,6 +5278,7 @@ Sound sfx = bundle.build();
 20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth (LESS_EQUAL + depth write, same as the 3D pipeline) for all subsequent draws; it persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
 21. **IBL no-ops on iOS Safari (wasm).** `Environment::loadProcedural()`/`loadFromHDR()` return false on iOS web (the cube-face bake breaks the canvas swapchain there); PBR falls back to flat hemisphere ambient + direct lights. Don't rely on IBL reflections for cross-platform looks if you target iOS web. Native, desktop web, and Android web are unaffected.
 22. **Don't hand-parse JSON/XML.** `tc::Json` (nlohmann) and `tc::Xml` (pugixml) are bundled and included via `<TrussC.h>` — use `loadJson`/`parseJson`/`loadXml`/`parseXml`.
+23. **Move things with `getDeltaTime()` / `getElapsedTime()`, not a fixed step per frame.** The frame rate follows the monitor (60/120/144 Hz, or 30 on some external displays), so `x += 2` runs at different speeds on different screens; `x += speed * getDeltaTime()` does not.
 
 ## Code Examples
 

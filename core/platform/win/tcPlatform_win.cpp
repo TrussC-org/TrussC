@@ -16,7 +16,6 @@
 #include <windows.h>
 #include <shellscalingapi.h>
 #include <d3d11.h>
-#include "tcCaptureTrace_win.h"
 
 // sokol_app のウィンドウ取得
 #include "sokol_app_tc.h"
@@ -141,17 +140,15 @@ bool getImmersiveMode() { return false; }
 // Orientation (no-op on desktop)
 void setOrientation(Orientation mask) { (void)mask; }
 
-// Keep screen on (SetThreadExecutionState)
-static bool keepScreenOn_ = false;
-void setKeepScreenOn(bool enabled) {
-    keepScreenOn_ = enabled;
-    if (enabled) {
-        SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
-    } else {
-        SetThreadExecutionState(ES_CONTINUOUS);
-    }
+// SetThreadExecutionState belongs to the host main thread, including release.
+namespace internal {
+void applyKeepScreenOn(bool enabled, bool headless) {
+    (void)headless;
+    SetThreadExecutionState(enabled
+        ? ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS
+        : ES_CONTINUOUS);
 }
-bool getKeepScreenOn() { return keepScreenOn_; }
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // setWindowSize - ウィンドウサイズを変更
@@ -325,28 +322,6 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
-namespace {
-internal::D3D11CaptureTraceHook captureTraceHook = nullptr;
-struct CaptureTraceScope {
-    internal::D3D11CaptureTrace trace;
-    internal::D3D11CaptureTraceHook hook;
-    CaptureTraceScope() : hook(captureTraceHook) {
-        const auto& ctx = internal::currentWindowContext();
-        if (!hook) return;
-        trace.windowId = ctx.hostWindow ? internal::WindowRequestAccess::binding(*ctx.hostWindow).handle.id : 0;
-        trace.fbWidth = ctx.fbWidth; trace.fbHeight = ctx.fbHeight;
-        trace.lastWidth = ctx.lastSwapchain.width; trace.lastHeight = ctx.lastSwapchain.height;
-        trace.lastFormat = int(ctx.lastSwapchain.color_format); trace.lastSamples = ctx.lastSwapchain.sample_count;
-        trace.lastRenderView = ctx.lastSwapchain.d3d11.render_view;
-        trace.lastResolveView = ctx.lastSwapchain.d3d11.resolve_view;
-    }
-    ~CaptureTraceScope() { if (hook) hook(trace); }
-};
-}
-void internal::setD3D11CaptureTraceForTests(D3D11CaptureTraceHook hook) {
-    captureTraceHook = hook;
-}
-
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
     const auto dimensions = windowDimensions(ctx);
     return {size_t(std::max(0, dimensions.fbWidth)), size_t(std::max(0, dimensions.fbHeight))};
@@ -356,10 +331,8 @@ bool captureWindow(Pixels& outPixels) {
     if (!sg_isvalid()) return false;
     if (internal::hasPublicFboActivation()) return false;
     internal::CapturePrefixScope capturePhase;
-    CaptureTraceScope diagnostic;
     const auto source = internal::windowCaptureSource();
     const void* renderView = source.swapchain.d3d11.render_view;
-    diagnostic.trace.selectedView = renderView;
     if (!renderView) {
         logError() << "[Screenshot] D3D11 render target view is null";
         return false;
@@ -387,12 +360,8 @@ bool captureWindow(Pixels& outPixels) {
     // テクスチャの情報を取得
     D3D11_TEXTURE2D_DESC desc;
     backBuffer->GetDesc(&desc);
-    diagnostic.trace.selectedTexture = backBuffer;
-    diagnostic.trace.width = desc.Width; diagnostic.trace.height = desc.Height;
-    diagnostic.trace.format = unsigned(desc.Format); diagnostic.trace.samples = desc.SampleDesc.Count;
     try {
         mcp::internal::reconcileWindowCapture(desc.Width, desc.Height);
-        diagnostic.trace.reconciledWidth = desc.Width; diagnostic.trace.reconciledHeight = desc.Height;
     } catch (...) {
         backBuffer->Release();
         throw;
@@ -543,8 +512,6 @@ bool captureWindow(Pixels& outPixels) {
     context->Unmap(stagingTexture, 0);
     stagingTexture->Release();
 
-    diagnostic.trace.succeeded = true;
-    diagnostic.trace.pixelWidth = outPixels.getWidth(); diagnostic.trace.pixelHeight = outPixels.getHeight();
     return true;
 }
 

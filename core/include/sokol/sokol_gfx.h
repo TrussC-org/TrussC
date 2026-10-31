@@ -4448,6 +4448,8 @@ typedef struct sg_stats {
     _SG_LOGITEM_XMACRO(WGPU_BINDGROUPS_POOL_EXHAUSTED, "bindgroups pool exhausted (increase sg_desc.bindgroups_cache_size) (wgpu)") \
     _SG_LOGITEM_XMACRO(WGPU_BINDGROUPSCACHE_SIZE_GREATER_ONE, "sg_desc.wgpu.bindgroups_cache_size must be > 1 (wgpu)") \
     _SG_LOGITEM_XMACRO(WGPU_BINDGROUPSCACHE_SIZE_POW2, "sg_desc.wgpu.bindgroups_cache_size must be a power of 2 (wgpu)") \
+    _SG_LOGITEM_XMACRO(WGPU_UNIFORM_BUFFER_GROWN, "per-frame uniform buffer auto-grown (webgpu); use sg_desc.uniform_buffer_size to pre-allocate") \
+    _SG_LOGITEM_XMACRO(WGPU_UNIFORM_UPLOAD_FAILED, "WebGPU uniform upload failed (allocation, binding or device limit); skipping uploads and draws until next commit") \
     _SG_LOGITEM_XMACRO(WGPU_CREATEBINDGROUP_FAILED, "wgpuDeviceCreateBindGroup failed") \
     _SG_LOGITEM_XMACRO(WGPU_CREATE_BUFFER_FAILED, "wgpuDeviceCreateBuffer() failed") \
     _SG_LOGITEM_XMACRO(WGPU_CREATE_TEXTURE_FAILED, "wgpuDeviceCreateTexture() failed") \
@@ -5406,13 +5408,6 @@ SOKOL_GFX_API_DECL const void* sg_tc_mtl_command_buffer(void);
 SOKOL_GFX_API_DECL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, uint64_t owner, uint64_t generation, uint64_t frame);
 SOKOL_GFX_API_DECL bool sg_tc_mtl_authorize_drawable(uint64_t owner, uint64_t generation, uint64_t frame);
 SOKOL_GFX_API_DECL void sg_tc_mtl_cancel_drawables(uint64_t owner);
-#if defined(SOKOL_TC_TEST_HOOKS)
-// [TrussC] Framework seam, not app API. Test-only native-device verification
-// trace (typedef and setter). No history is retained.
-// action: 0 registered, 1 authorized, 2 presented, 3 cancelled, 4 prefix submit.
-typedef void (*sg_tc_mtl_drawable_trace)(int action, uint64_t owner, uint64_t generation, uint64_t frame, void* user);
-SOKOL_GFX_API_DECL void sg_tc_mtl_set_drawable_trace(sg_tc_mtl_drawable_trace trace, void* user);
-#endif
 // Metal: get internal __bridge-casted buffer resource objects
 SOKOL_GFX_API_DECL sg_mtl_buffer_info sg_mtl_query_buffer_info(sg_buffer buf);
 // Metal: get internal __bridge-casted image resource objects
@@ -5514,7 +5509,7 @@ inline int sg_append_buffer(sg_buffer buf_id, const sg_range& data) { return sg_
 
 #include <stdlib.h> // malloc, free, qsort
 #include <string.h> // memset
-#include <stdio.h> // snprintf ([TrussC modification] metal uniform-buffer auto-grow log)
+#include <stdio.h> // snprintf ([TrussC modification] uniform-buffer growth logs)
 #include <limits.h> // INT_MAX ([TrussC] checked Metal uniform cursor growth)
 #include <float.h> // FLT_MAX
 
@@ -6244,6 +6239,7 @@ enum {
     _SG_DEFAULT_VIEW_POOL_SIZE = 256,
     _SG_DEFAULT_UB_SIZE = 4 * 1024 * 1024,
     _SG_DEFAULT_MAX_COMMIT_LISTENERS = 1024,
+    // Bound (cache): direct-mapped resource groups reuse a finite cache. Overflow evicts or replaces.
     _SG_DEFAULT_WGPU_BINDGROUP_CACHE_SIZE = 1024,
     _SG_DEFAULT_VK_COPY_STAGING_SIZE = (4 * 1024 * 1024),
     _SG_DEFAULT_VK_STREAM_STAGING_SIZE = (16 * 1024 * 1024),
@@ -6876,10 +6872,6 @@ typedef struct {
     id<CAMetalDrawable> cur_drawable;
     NSMutableArray* pending_drawables; // [TrussC] unmanaged Sokol drawables
     NSMutableArray* managed_drawables; // [TrussC] strong drawable + owner/generation/frame/ready
-    #if defined(SOKOL_TC_TEST_HOOKS)
-    sg_tc_mtl_drawable_trace drawable_trace;
-    void* drawable_trace_user;
-    #endif
     id<MTLBuffer> uniform_buffers[SG_NUM_INFLIGHT_FRAMES];
 } _sg_mtl_backend_t;
 
@@ -6936,6 +6928,7 @@ typedef struct _sg_shader_s {
         _sg_wgpu_shader_func_t compute_func;
         WGPUBindGroupLayout bgl_ub;
         WGPUBindGroup bg_ub;
+        uint64_t ub_generation; // [TrussC] lazily replace groups after uniform growth
         WGPUBindGroupLayout bgl_view_smp;
         // a mapping of sokol-gfx bind slots to setBindGroup dynamic-offset-array indices
         uint8_t ub_num_dynoffsets;
@@ -6975,6 +6968,11 @@ typedef struct {
     uint8_t* staging;   // intermediate buffer for uniform data updates
     WGPUBuffer buf;     // the GPU-side uniform buffer
     bool dirty;
+    // [TrussC] Failed uploads suppress draws until commit; diagnostics are once per backend.
+    bool failed;
+    bool error_logged;
+    bool growth_logged;
+    uint64_t generation;
     uint32_t bind_offsets[SG_MAX_UNIFORMBLOCK_BINDSLOTS];   // NOTE: index is sokol-gfx ub slot index!
 } _sg_wgpu_uniform_system_t;
 
@@ -7045,6 +7043,7 @@ typedef struct {
     _sg_wgpu_bindings_cache_t bindings_cache;
     _sg_wgpu_bindgroups_cache_t bindgroups_cache;
     _sg_wgpu_bindgroups_pool_t bindgroups_pool;
+    bool bindgroup_error_logged; // [TrussC] unexpected failure, not ordinary cache eviction
 } _sg_wgpu_backend_t;
 
 #elif defined(SOKOL_VULKAN)
@@ -16419,17 +16418,6 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
     // legitimately use blocks from several buffer generations after growth.
 }
 
-// [TrussC] Trace native scheduling without a second registry or retained log.
-_SOKOL_PRIVATE void _sg_mtl_trace_drawable(int action, NSDictionary* record) {
-    #if defined(SOKOL_TC_TEST_HOOKS)
-    if (_sg.mtl.drawable_trace) _sg.mtl.drawable_trace(action,
-        [record[@"owner"] unsignedLongLongValue], [record[@"generation"] unsignedLongLongValue],
-        [record[@"frame"] unsignedLongLongValue], _sg.mtl.drawable_trace_user);
-    #else
-    _SOKOL_UNUSED(action); _SOKOL_UNUSED(record);
-    #endif
-}
-
 _SOKOL_PRIVATE void _sg_mtl_end_pass(const _sg_attachments_ptrs_t* atts) {
     _SOKOL_UNUSED(atts);
     if (nil != _sg.mtl.render_cmd_encoder) {
@@ -16489,7 +16477,6 @@ _SOKOL_PRIVATE void _sg_mtl_commit(void) {
         NSDictionary* record = _sg.mtl.managed_drawables[(NSUInteger)i];
         if ([record[@"ready"] boolValue]) {
             [_sg.mtl.cmd_buffer presentDrawable:record[@"drawable"]];
-            _sg_mtl_trace_drawable(2, record);
             [_sg.mtl.managed_drawables removeObjectAtIndex:(NSUInteger)i];
         }
     }
@@ -17568,24 +17555,124 @@ _SOKOL_PRIVATE void _sg_wgpu_init_caps(void) {
     }
 }
 
+// [TrussC] Allocation is transactional and fallible (the generic _sg_malloc panics).
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_fail(void) {
+    _sg.wgpu.uniform.failed = true;
+    if (!_sg.wgpu.uniform.error_logged) {
+        _sg.wgpu.uniform.error_logged = true;
+        _SG_ERROR(WGPU_UNIFORM_UPLOAD_FAILED);
+    }
+    return false;
+}
+
+_SOKOL_PRIVATE bool _sg_wgpu_shader_has_uniform_blocks(const _sg_shader_t* shd) {
+    for (size_t i = 0; i < SG_MAX_UNIFORMBLOCK_BINDSLOTS; i++) {
+        if (shd->cmn.uniform_blocks[i].stage != SG_SHADERSTAGE_NONE) { return true; }
+    }
+    return false;
+}
+
+// [TrussC] Encoded commands retain their groups; idle shaders must not pin an
+// old peak buffer. Empty groups reference no buffer and stay valid across growth.
+_SOKOL_PRIVATE void _sg_wgpu_uniform_retire_groups(void) {
+    _sg.wgpu.uniform.generation++;
+    for (int i = 0; i < _sg.pools.shader_pool.size; i++) {
+        _sg_shader_t* shader = &_sg.pools.shaders[i];
+        if (shader->wgpu.bg_ub && _sg_wgpu_shader_has_uniform_blocks(shader)) {
+            wgpuBindGroupRelease(shader->wgpu.bg_ub);
+            shader->wgpu.bg_ub = 0;
+        }
+    }
+}
+
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_reserve(uint64_t required) {
+    _sg_wgpu_uniform_system_t* u = &_sg.wgpu.uniform;
+    if (u->buf && required <= u->num_bytes) {
+        return true;
+    }
+    // Bound (gpu): dynamic offsets are uint32 and the device limits buffer size.
+    // Unrepresentable demand skips uploads/draws until commit with one Error.
+    uint64_t limit = _sg.wgpu.limits.maxBufferSize;
+    if (limit > UINT32_MAX) { limit = UINT32_MAX; }
+    limit &= ~((uint64_t)255);
+    if (required > limit) { return _sg_wgpu_uniform_fail(); }
+    uint64_t capacity = u->num_bytes ? (uint64_t)u->num_bytes * 2 : required;
+    if (capacity < required) { capacity = required; }
+    if (capacity > limit) { capacity = limit; }
+    uint8_t* staging = (uint8_t*)(_sg.desc.allocator.alloc_fn
+        ? _sg.desc.allocator.alloc_fn((size_t)capacity, _sg.desc.allocator.user_data)
+        : malloc((size_t)capacity));
+    if (!staging) { return _sg_wgpu_uniform_fail(); }
+    _SG_STRUCT(WGPUBufferDescriptor, desc);
+    desc.size = capacity;
+    desc.usage = WGPUBufferUsage_Uniform | WGPUBufferUsage_CopyDst;
+    // WebGPU reports asynchronous GPU failures itself; no rollback is attempted.
+    WGPUBuffer buffer = wgpuDeviceCreateBuffer(_sg.wgpu.dev, &desc);
+    if (!buffer) {
+        _sg_free(staging);
+        return _sg_wgpu_uniform_fail();
+    }
+    if (u->offset) {
+        memcpy(staging, u->staging, u->offset);
+        // Already encoded draws use the old buffer. Upload its immutable prefix
+        // before releasing our reference. WebGPU commands/bind groups retain it
+        // through submission/completion: never call wgpuBufferDestroy here.
+        wgpuQueueWriteBuffer(_sg.wgpu.queue, u->buf, 0, u->staging, u->offset);
+        _sg_stats_add(wgpu.uniforms.size_write_buffer, u->offset);
+    }
+    const uint32_t previous_size = u->num_bytes;
+    if (u->buf) { wgpuBufferRelease(u->buf); }
+    if (u->staging) { _sg_free(u->staging); }
+    u->staging = staging;
+    u->buf = buffer;
+    u->num_bytes = (uint32_t)capacity;
+    _sg_wgpu_uniform_retire_groups();
+    u->dirty = true;
+    if (previous_size && !u->growth_logged) {
+        u->growth_logged = true;
+        char message[256];
+        snprintf(message, sizeof(message),
+            "per-frame uniform buffer auto-grown %u -> %u bytes (webgpu); use sg_desc.uniform_buffer_size to pre-allocate",
+            (unsigned)previous_size, (unsigned)u->num_bytes);
+        _sg_log(SG_LOGITEM_WGPU_UNIFORM_BUFFER_GROWN, 2, message, __LINE__);
+    }
+    return true;
+}
+
 _SOKOL_PRIVATE void _sg_wgpu_uniform_system_init(const sg_desc* desc) {
-    SOKOL_ASSERT(0 == _sg.wgpu.uniform.staging);
-    SOKOL_ASSERT(0 == _sg.wgpu.uniform.buf);
+    // Bound (gpu): each dynamic binding spans 64 KiB even for a smaller block.
+    // Keep that slack beyond every aligned upload; total frame storage grows.
+    const uint64_t required = (((uint64_t)desc->uniform_buffer_size + 255) & ~((uint64_t)255))
+        + _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE;
+    _sg_wgpu_uniform_reserve(required);
+}
 
-    // Add the max-uniform-update size (64 KB) to the requested buffer size,
-    // this is to prevent validation errors in the WebGPU implementation
-    // if the entire buffer size is used per frame. 64 KB is the allowed
-    // max uniform update size on NVIDIA
-    //
-    // FIXME: is this still needed?
-    _sg.wgpu.uniform.num_bytes = (uint32_t)(desc->uniform_buffer_size + _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE);
-    _sg.wgpu.uniform.staging = (uint8_t*)_sg_malloc(_sg.wgpu.uniform.num_bytes);
-
-    _SG_STRUCT(WGPUBufferDescriptor, ub_desc);
-    ub_desc.size = _sg.wgpu.uniform.num_bytes;
-    ub_desc.usage = WGPUBufferUsage_Uniform|WGPUBufferUsage_CopyDst;
-    _sg.wgpu.uniform.buf = wgpuDeviceCreateBuffer(_sg.wgpu.dev, &ub_desc);
-    SOKOL_ASSERT(_sg.wgpu.uniform.buf);
+// [TrussC] Rebuild lazily for the current buffer generation. Recorded commands
+// retain their old groups; offsets into the copied staging stay valid.
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_bindgroup(_sg_shader_t* shd) {
+    const bool uses_buffer = _sg_wgpu_shader_has_uniform_blocks(shd);
+    if (shd->wgpu.bg_ub && (!uses_buffer || (shd->wgpu.ub_generation == _sg.wgpu.uniform.generation))) {
+        return true;
+    }
+    _SG_STRUCT(WGPUBindGroupEntry, entries[SG_MAX_UNIFORMBLOCK_BINDSLOTS]);
+    size_t count = 0;
+    for (size_t i = 0; i < SG_MAX_UNIFORMBLOCK_BINDSLOTS; i++) {
+        if (shd->cmn.uniform_blocks[i].stage == SG_SHADERSTAGE_NONE) { continue; }
+        entries[count].binding = shd->wgpu.ub_grp0_bnd_n[i];
+        entries[count].buffer = _sg.wgpu.uniform.buf;
+        entries[count].size = _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE;
+        count++;
+    }
+    _SG_STRUCT(WGPUBindGroupDescriptor, desc);
+    desc.layout = shd->wgpu.bgl_ub;
+    desc.entryCount = count;
+    desc.entries = entries;
+    WGPUBindGroup group = wgpuDeviceCreateBindGroup(_sg.wgpu.dev, &desc);
+    if (!group) { return _sg_wgpu_uniform_fail(); }
+    if (shd->wgpu.bg_ub) { wgpuBindGroupRelease(shd->wgpu.bg_ub); }
+    shd->wgpu.bg_ub = group;
+    shd->wgpu.ub_generation = _sg.wgpu.uniform.generation;
+    return true;
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_uniform_system_discard(void) {
@@ -17599,11 +17686,12 @@ _SOKOL_PRIVATE void _sg_wgpu_uniform_system_discard(void) {
     }
 }
 
-_SOKOL_PRIVATE void _sg_wgpu_uniform_system_set_bindgroup(void) {
+_SOKOL_PRIVATE bool _sg_wgpu_uniform_system_set_bindgroup(void) {
     SOKOL_ASSERT(_sg.wgpu.uniform.dirty);
     _sg.wgpu.uniform.dirty = false;
     const _sg_pipeline_t* pip = _sg_pipeline_ref_ptr(&_sg.cur_pip);
-    const _sg_shader_t* shd = _sg_shader_ref_ptr(&pip->cmn.shader);
+    _sg_shader_t* shd = _sg_shader_ref_ptr(&pip->cmn.shader);
+    if (!_sg_wgpu_uniform_bindgroup(shd)) { return false; }
     // NOTE: dynamic offsets must be in binding order, not in BindGroupEntry order
     SOKOL_ASSERT(shd->wgpu.ub_num_dynoffsets < SG_MAX_UNIFORMBLOCK_BINDSLOTS);
     _SG_STRUCT(uint32_t, dyn_offsets[SG_MAX_UNIFORMBLOCK_BINDSLOTS]);
@@ -17630,6 +17718,7 @@ _SOKOL_PRIVATE void _sg_wgpu_uniform_system_set_bindgroup(void) {
             shd->wgpu.ub_num_dynoffsets,
             dyn_offsets);
     }
+    return true;
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_uniform_system_on_apply_pipeline(void) {
@@ -17637,9 +17726,12 @@ _SOKOL_PRIVATE void _sg_wgpu_uniform_system_on_apply_pipeline(void) {
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_uniform_system_on_commit(void) {
-    wgpuQueueWriteBuffer(_sg.wgpu.queue, _sg.wgpu.uniform.buf, 0, _sg.wgpu.uniform.staging, _sg.wgpu.uniform.offset);
+    if (_sg.wgpu.uniform.offset) {
+        wgpuQueueWriteBuffer(_sg.wgpu.queue, _sg.wgpu.uniform.buf, 0, _sg.wgpu.uniform.staging, _sg.wgpu.uniform.offset);
+    }
     _sg_stats_add(wgpu.uniforms.size_write_buffer, _sg.wgpu.uniform.offset);
     _sg.wgpu.uniform.offset = 0;
+    _sg.wgpu.uniform.failed = false;
     _sg_clear(_sg.wgpu.uniform.bind_offsets, sizeof(_sg.wgpu.uniform.bind_offsets));
 }
 
@@ -17686,7 +17778,10 @@ _SOKOL_PRIVATE _sg_wgpu_bindgroup_handle_t _sg_wgpu_alloc_bindgroup(void) {
         res.id = _sg_slot_alloc(&p->pool, &p->bindgroups[slot_index].slot, slot_index);
     } else {
         res.id = SG_INVALID_ID;
-        _SG_ERROR(WGPU_BINDGROUPS_POOL_EXHAUSTED);
+        if (!_sg.wgpu.bindgroup_error_logged) {
+            _sg.wgpu.bindgroup_error_logged = true;
+            _SG_ERROR(WGPU_BINDGROUPS_POOL_EXHAUSTED);
+        }
     }
     return res;
 }
@@ -17867,7 +17962,10 @@ _SOKOL_PRIVATE _sg_wgpu_bindgroup_t* _sg_wgpu_create_bindgroup(_sg_bindings_ptrs
     bg_desc.entries = bg_entries;
     bg->bindgroup = wgpuDeviceCreateBindGroup(_sg.wgpu.dev, &bg_desc);
     if (bg->bindgroup == 0) {
-        _SG_ERROR(WGPU_CREATEBINDGROUP_FAILED);
+        if (!_sg.wgpu.bindgroup_error_logged) {
+            _sg.wgpu.bindgroup_error_logged = true;
+            _SG_ERROR(WGPU_CREATEBINDGROUP_FAILED);
+        }
         bg->slot.state = SG_RESOURCESTATE_FAILED;
         return bg;
     }
@@ -17879,7 +17977,7 @@ _SOKOL_PRIVATE _sg_wgpu_bindgroup_t* _sg_wgpu_create_bindgroup(_sg_bindings_ptrs
 _SOKOL_PRIVATE void _sg_wgpu_discard_bindgroup(_sg_wgpu_bindgroup_t* bg) {
     SOKOL_ASSERT(bg);
     _sg_stats_inc(wgpu.bindings.num_discard_bindgroup);
-    if (bg->slot.state == SG_RESOURCESTATE_VALID) {
+    if ((bg->slot.state == SG_RESOURCESTATE_VALID) || (bg->slot.state == SG_RESOURCESTATE_FAILED)) {
         if (bg->bindgroup) {
             wgpuBindGroupRelease(bg->bindgroup);
             bg->bindgroup = 0;
@@ -18085,6 +18183,10 @@ _SOKOL_PRIVATE bool _sg_wgpu_apply_bindings_bindgroup(_sg_bindings_ptrs_t* bnd) 
         if (bg == 0) {
             // either no cache entry yet, or cache collision, create new bindgroup and store in cache
             bg = _sg_wgpu_create_bindgroup(bnd);
+            if (!bg || bg->slot.state != SG_RESOURCESTATE_VALID) {
+                if (bg) { _sg_wgpu_discard_bindgroup(bg); }
+                return false;
+            }
             _sg_wgpu_bindgroups_cache_set(key.hash, bg->slot.id);
         }
         if (bg && bg->slot.state == SG_RESOURCESTATE_VALID) {
@@ -18099,7 +18201,9 @@ _SOKOL_PRIVATE bool _sg_wgpu_apply_bindings_bindgroup(_sg_bindings_ptrs_t* bnd) 
             if (bg->slot.state == SG_RESOURCESTATE_VALID) {
                 _sg_wgpu_set_bindgroup(_SG_WGPU_VIEW_SMP_BINDGROUP_INDEX, bg);
             }
+            const bool valid = bg->slot.state == SG_RESOURCESTATE_VALID;
             _sg_wgpu_discard_bindgroup(bg);
+            if (!valid) { return false; }
         } else {
             return false;
         }
@@ -18494,8 +18598,6 @@ _SOKOL_PRIVATE sg_resource_state _sg_wgpu_create_shader(_sg_shader_t* shd, const
     SOKOL_ASSERT(_SG_WGPU_MAX_UB_BINDGROUP_ENTRIES <= _SG_WGPU_MAX_VIEW_SMP_BINDGROUP_ENTRIES);
     _SG_STRUCT(WGPUBindGroupLayoutEntry, bgl_entries[_SG_WGPU_MAX_VIEW_SMP_BINDGROUP_ENTRIES]);
     _SG_STRUCT(WGPUBindGroupLayoutDescriptor, bgl_desc);
-    _SG_STRUCT(WGPUBindGroupEntry, bg_entries[_SG_WGPU_MAX_VIEW_SMP_BINDGROUP_ENTRIES]);
-    _SG_STRUCT(WGPUBindGroupDescriptor, bg_desc);
     _SG_STRUCT(_sg_wgpu_dynoffset_mapping_t, dynoffset_map[SG_MAX_UNIFORMBLOCK_BINDSLOTS]);
     size_t bgl_index = 0;
     for (size_t i = 0; i < SG_MAX_UNIFORMBLOCK_BINDSLOTS; i++) {
@@ -18503,15 +18605,11 @@ _SOKOL_PRIVATE sg_resource_state _sg_wgpu_create_shader(_sg_shader_t* shd, const
             continue;
         }
         shd->wgpu.ub_grp0_bnd_n[i] = desc->uniform_blocks[i].wgsl_group0_binding_n;
-        WGPUBindGroupEntry* bg_entry = &bg_entries[bgl_index];
         WGPUBindGroupLayoutEntry* bgl_entry = &bgl_entries[bgl_index];
         bgl_entry->binding = shd->wgpu.ub_grp0_bnd_n[i];
         bgl_entry->visibility = _sg_wgpu_shader_stage(shd->cmn.uniform_blocks[i].stage);
         bgl_entry->buffer.type = WGPUBufferBindingType_Uniform;
         bgl_entry->buffer.hasDynamicOffset = true;
-        bg_entry->binding = bgl_entry->binding;
-        bg_entry->buffer = _sg.wgpu.uniform.buf;
-        bg_entry->size = _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE;
         dynoffset_map[i].sokol_slot = (uint8_t)i;
         dynoffset_map[i].wgpu_slot = (uint8_t)bgl_entry->binding;
         bgl_index += 1;
@@ -18519,12 +18617,11 @@ _SOKOL_PRIVATE sg_resource_state _sg_wgpu_create_shader(_sg_shader_t* shd, const
     bgl_desc.entryCount = bgl_index;
     bgl_desc.entries = bgl_entries;
     shd->wgpu.bgl_ub = wgpuDeviceCreateBindGroupLayout(_sg.wgpu.dev, &bgl_desc);
-    SOKOL_ASSERT(shd->wgpu.bgl_ub);
-    bg_desc.layout = shd->wgpu.bgl_ub;
-    bg_desc.entryCount = bgl_index;
-    bg_desc.entries = bg_entries;
-    shd->wgpu.bg_ub = wgpuDeviceCreateBindGroup(_sg.wgpu.dev, &bg_desc);
-    SOKOL_ASSERT(shd->wgpu.bg_ub);
+    if (!shd->wgpu.bgl_ub) {
+        _SG_ERROR(WGPU_SHADER_CREATE_BINDGROUP_LAYOUT_FAILED);
+        return SG_RESOURCESTATE_FAILED;
+    }
+    if (!_sg_wgpu_uniform_bindgroup(shd)) { return SG_RESOURCESTATE_FAILED; }
 
     // sort the dynoffset_map by wgpu bindings, this is because the
     // dynamic offsets of the WebGPU setBindGroup call must be in
@@ -18995,24 +19092,31 @@ _SOKOL_PRIVATE bool _sg_wgpu_apply_bindings(_sg_bindings_ptrs_t* bnd) {
 
 _SOKOL_PRIVATE void _sg_wgpu_apply_uniforms(int ub_slot, const sg_range* data) {
     const uint32_t alignment = _sg.wgpu.limits.minUniformBufferOffsetAlignment;
-    SOKOL_ASSERT(_sg.wgpu.uniform.staging);
-    SOKOL_ASSERT((ub_slot >= 0) && (ub_slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS));
-    SOKOL_ASSERT((_sg.wgpu.uniform.offset + data->size) <= _sg.wgpu.uniform.num_bytes);
-    SOKOL_ASSERT((_sg.wgpu.uniform.offset & (alignment - 1)) == 0);
-    SOKOL_ASSERT(data->size <= _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE);
+    if (_sg.wgpu.uniform.failed) { return; }
+    // Bound (gpu): a bind group entry covers at most 64 KiB. Invalid blocks
+    // skip uploads/draws until commit with one Error; no memcpy is attempted.
+    if ((ub_slot < 0) || (ub_slot >= SG_MAX_UNIFORMBLOCK_BINDSLOTS)
+        || !data->ptr || !data->size || (data->size > _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE)) {
+        _sg_wgpu_uniform_fail();
+        return;
+    }
+    const uint64_t end = (uint64_t)_sg.wgpu.uniform.offset + data->size;
+    const uint64_t aligned_end = (end + alignment - 1) & ~((uint64_t)alignment - 1);
+    // Include binding slack, not only the memcpy length (dynamic offsets plus
+    // 64 KiB must fit). All arithmetic is wide before narrowing the offset.
+    if (!_sg_wgpu_uniform_reserve(aligned_end + _SG_WGPU_MAX_UNIFORM_UPDATE_SIZE)) { return; }
 
     _sg_stats_inc(wgpu.uniforms.num_set_bindgroup);
     memcpy(_sg.wgpu.uniform.staging + _sg.wgpu.uniform.offset, data->ptr, data->size);
     _sg.wgpu.uniform.bind_offsets[ub_slot] = _sg.wgpu.uniform.offset;
-    _sg.wgpu.uniform.offset = _sg_roundup_u32(_sg.wgpu.uniform.offset + (uint32_t)data->size, alignment);
+    _sg.wgpu.uniform.offset = (uint32_t)aligned_end;
     _sg.wgpu.uniform.dirty = true;
 }
 
 _SOKOL_PRIVATE void _sg_wgpu_draw(int base_element, int num_elements, int num_instances, int base_vertex, int base_instance) {
     SOKOL_ASSERT(_sg.wgpu.rpass_enc);
-    if (_sg.wgpu.uniform.dirty) {
-        _sg_wgpu_uniform_system_set_bindgroup();
-    }
+    if (_sg.wgpu.uniform.failed) { return; }
+    if (_sg.wgpu.uniform.dirty && !_sg_wgpu_uniform_system_set_bindgroup()) { return; }
     if (_sg.use_indexed_draw) {
         wgpuRenderPassEncoderDrawIndexed(_sg.wgpu.rpass_enc,
             (uint32_t)num_elements,
@@ -19031,9 +19135,8 @@ _SOKOL_PRIVATE void _sg_wgpu_draw(int base_element, int num_elements, int num_in
 
 _SOKOL_PRIVATE void _sg_wgpu_dispatch(int num_groups_x, int num_groups_y, int num_groups_z) {
     SOKOL_ASSERT(_sg.wgpu.cpass_enc);
-    if (_sg.wgpu.uniform.dirty) {
-        _sg_wgpu_uniform_system_set_bindgroup();
-    }
+    if (_sg.wgpu.uniform.failed) { return; }
+    if (_sg.wgpu.uniform.dirty && !_sg_wgpu_uniform_system_set_bindgroup()) { return; }
     wgpuComputePassEncoderDispatchWorkgroups(_sg.wgpu.cpass_enc,
         (uint32_t)num_groups_x,
         (uint32_t)num_groups_y,
@@ -26776,7 +26879,6 @@ SOKOL_API_IMPL void sg_tc_submit_prefix(void) {
         if (_sg.mtl.cmd_buffer) {
             [_sg.mtl.cmd_buffer commit];
             _sg.mtl.cmd_buffer = nil;
-            _sg_mtl_trace_drawable(4, nil);
         }
     #elif defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
         glFlush();
@@ -26801,18 +26903,6 @@ SOKOL_API_IMPL const void* sg_tc_mtl_command_buffer(void) {
     #endif
 }
 
-#if defined(SOKOL_TC_TEST_HOOKS)
-SOKOL_API_IMPL void sg_tc_mtl_set_drawable_trace(sg_tc_mtl_drawable_trace trace, void* user) {
-    #if defined(SOKOL_METAL)
-        _sg.mtl.drawable_trace = trace;
-        _sg.mtl.drawable_trace_user = user;
-    #else
-        _SOKOL_UNUSED(trace); _SOKOL_UNUSED(user);
-    #endif
-}
-
-#endif // SOKOL_TC_TEST_HOOKS
-
 SOKOL_API_IMPL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, uint64_t owner, uint64_t generation, uint64_t frame) {
     #if defined(SOKOL_METAL)
         if (!swapchain || !swapchain->metal.current_drawable) return false;
@@ -26834,7 +26924,6 @@ SOKOL_API_IMPL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, u
         if (swapchain->metal.msaa_color_texture) [attachments addObject:(__bridge id)swapchain->metal.msaa_color_texture];
         record[@"attachments"] = [NSArray arrayWithArray:attachments];
         [_sg.mtl.managed_drawables addObject:record];
-        _sg_mtl_trace_drawable(0, record);
         _SG_OBJC_RELEASE(record);
     #else
         _SOKOL_UNUSED(swapchain); _SOKOL_UNUSED(owner); _SOKOL_UNUSED(generation); _SOKOL_UNUSED(frame);
@@ -26849,7 +26938,6 @@ SOKOL_API_IMPL bool sg_tc_mtl_authorize_drawable(uint64_t owner, uint64_t genera
                 [record[@"generation"] unsignedLongLongValue] == generation &&
                 [record[@"frame"] unsignedLongLongValue] == frame && ![record[@"ready"] boolValue]) {
                 record[@"ready"] = @YES;
-                _sg_mtl_trace_drawable(1, record);
                 return true;
             }
         }
@@ -26865,7 +26953,6 @@ SOKOL_API_IMPL void sg_tc_mtl_cancel_drawables(uint64_t owner) {
         for (NSInteger i = (NSInteger)_sg.mtl.managed_drawables.count - 1; i >= 0; --i) {
             NSDictionary* record = _sg.mtl.managed_drawables[(NSUInteger)i];
             if ([record[@"owner"] unsignedLongLongValue] == owner) {
-                _sg_mtl_trace_drawable(3, record);
                 [_sg.mtl.managed_drawables removeObjectAtIndex:(NSUInteger)i];
             }
         }

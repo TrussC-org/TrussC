@@ -1,5 +1,4 @@
 #include <TrussC.h>
-#include "tcKeptThreads.h"
 #ifdef _WIN32
 #include <objbase.h>
 #endif
@@ -19,21 +18,20 @@ struct LoadHost {
     ResourceLoadBatch mailbox;
     ResourceLoadProbe probe;
     std::vector<std::weak_ptr<std::function<void()>>> stops;
-    size_t stopDrains = 0;
     std::atomic<MainThreadSlot*> completions{nullptr};
     struct Job { std::shared_ptr<ResourceLoadState> state; std::function<void()> work; };
     std::shared_ptr<ResourceLoadState> pendingHead, pendingTail;
     size_t pendingCount = 0;
-    // Bound (security): file/network preparations must not multiply decoder workers indefinitely. Local overflow waits; URL/network-buffer overflow waits in the bounded pending queue, then rejects whole requests and is counted.
+    // Shared preparation slots, configurable on main. Queued work waits for a slot.
     size_t activeLimit = 4, active = 0;
     // Bound (security): URL/network-buffer loads retain paths and preparation state. Overflow rejects whole new requests and is counted. Local files wait in a growable queue; app CPU jobs are unaffected.
     size_t pendingLimit = 64;
     // Bound (security): tiny URL/network-buffer results must not accumulate unlimited completion bookkeeping. Active + pending request credits stay held through application/cancellation; overflow rejects whole new URL/network-buffer loads and is counted. Local files wait without a request cap.
     size_t outstanding = 0;
+    size_t requestLimit = 68; // Admission budget is independent of public concurrency changes.
     // Bound (security): decoded URL/network-buffer results waiting for main must not retain unlimited memory. Overflow rejects the whole result and is counted, without dropping its failure notification. Local files keep their results and log one Notice per run on overflow.
     size_t byteLimit = size_t(1024) * 1024 * 1024, retained = 0;
     uint64_t rejected = 0;
-    bool failLaunch = false;
     const char* rejectedStore = "";
     size_t rejectedLimit = 0, rejectedNeeded = 0;
     MainThreadSlot warning{[](MainThreadSlot&) {
@@ -45,43 +43,15 @@ struct LoadHost {
     std::shared_ptr<void> warningOwner;
     std::weak_ptr<std::atomic<bool>> localNoticeRun;
     bool localNoticeIssued = false;
-    bool localNoticePending = false;
-    // Posting is allocation-free. Only the current run may consume this flag;
-    // shutdown omits an undelivered Notice rather than carrying it into a run.
-    MainThreadSlot localNotice{[](MainThreadSlot&) {
-        auto& owner = host();
-        bool pending;
-        {
-            std::lock_guard<std::mutex> lock(owner.mutex);
-            const auto& run = appRunToken();
-            pending = std::exchange(owner.localNoticePending, false) &&
-                !owner.localNoticeRun.owner_before(run) && !run.owner_before(owner.localNoticeRun) &&
-                appRunIsAlive(owner.localNoticeRun);
-        }
-        if (pending)
-            logNotice("ResourceLoad") << "Local-file retained results exceeded the resource-load byte budget; "
-                << "results are kept and further local overages are silent for this run";
-    }, [](MainThreadSlot& slot) {
-        auto& owner = host();
-        std::lock_guard<std::mutex> lock(owner.mutex);
-        const auto& run = appRunToken();
-        // An old snapshot can hold this slot across shutdown and prevent the
-        // current run's post. Discard releases it before this callback runs.
-        if (owner.localNoticePending &&
-            !owner.localNoticeRun.owner_before(run) && !run.owner_before(owner.localNoticeRun) &&
-            appRunIsAlive(owner.localNoticeRun))
-            slot.post(owner.warningOwner, owner.completions);
-    }};
 #ifndef __EMSCRIPTEN__
     struct Worker { std::thread thread; bool done = false; };
     std::list<std::shared_ptr<Worker>> workers;
     std::condition_variable changed;
-    KeptThreads kept;
     std::thread reaper;
     bool exiting = false;
 
     LoadHost() {
-        kept.start(reaper, [this] {
+        reaper = std::thread([this] {
             std::unique_lock<std::mutex> lock(mutex);
             for (;;) {
                 changed.wait(lock, [&] {
@@ -96,7 +66,7 @@ struct LoadHost {
                     // Keep it in the list until the join has completed, so
                     // explicit test drains also wait for State destruction.
                     lock.unlock();
-                    kept.release(worker->thread);
+                    worker->thread.join();
                     lock.lock();
                     it = workers.erase(it);
                     changed.notify_all();
@@ -141,12 +111,10 @@ void deliver(ResourceLoadState& state) {
     {
         std::lock_guard<std::mutex> lock(host().mutex);
         alive = !state.cancelled.load() && appRunIsAlive(state.run);
-        state.delivering = alive;
     }
     struct Retirement {
         ResourceLoadState& state;
         ~Retirement() {
-            { std::lock_guard<std::mutex> lock(host().mutex); state.delivering = false; }
             state.cancel();
         }
     } retirement{state};
@@ -181,9 +149,6 @@ void pumpExternalLoads() {
     auto& owner = host();
     for (;;) {
         LoadHost::Job job;
-#ifdef __EMSCRIPTEN__
-        bool failLaunch;
-#endif
         {
             std::lock_guard<std::mutex> lock(owner.mutex);
             if (!owner.pendingHead || owner.active >= owner.activeLimit) return;
@@ -191,52 +156,36 @@ void pumpExternalLoads() {
             ++owner.active;
 #ifdef __EMSCRIPTEN__
             job.state->externalActive = true;
-            failLaunch = owner.failLaunch;
 #endif
         }
-        auto failedState = job.state;
-        auto fail = [&] {
-            {
-                std::lock_guard<std::mutex> lock(owner.mutex);
-                --owner.active;
-                failedState->externalActive = false;
-                if (!failedState->localFile)
-                    reject(owner, "preparation workers", owner.activeLimit, owner.active + 1);
-            }
-            failedState->result.error = LoadError::Unknown;
-            completeResourceLoad(failedState);
-        };
 #ifdef __EMSCRIPTEN__
-        if (failLaunch) { fail(); continue; }
-        // VFS and browser preparations use the existing preallocated slot,
-        // independently snapshotted with resource results. No queue allocation
-        // or exception support is needed to schedule or report failure.
-        job.state->preparing = true;
-        job.state->preparation = std::move(job.work);
-        job.state->post(job.state, owner.completions);
+        // VFS preparation waits for a later main-thread resource pass.
+        {
+            std::lock_guard<std::mutex> lock(owner.mutex);
+            job.state->preparing = true;
+            job.state->preparation = std::move(job.work);
+            owner.mailbox.results.push_back(job.state);
+        }
 #else
-        try {
-            startResourceLoad([job = std::move(job), &owner]() mutable {
-                for (;;) {
-                    runExternalJob(job);
-                    job = {};
-                    std::lock_guard<std::mutex> lock(owner.mutex);
-                    if (!owner.pendingHead) {
-                        --owner.active;
-                        owner.changed.notify_all();
-                        return;
-                    }
-                    job = takePending(owner);
+        startResourceLoad([job = std::move(job), &owner]() mutable {
+            for (;;) {
+                runExternalJob(job);
+                job = {};
+                std::lock_guard<std::mutex> lock(owner.mutex);
+                if (!owner.pendingHead || owner.active > owner.activeLimit) {
+                    --owner.active;
+                    owner.changed.notify_all();
+                    return;
                 }
-            });
-        } catch (...) { fail(); }
+                job = takePending(owner);
+            }
+        });
 #endif
     }
 }
 }
 
 bool prepareResourceLoad(ResourceLoadState& state, const std::function<void()>& preparation) {
-    std::function<void()> backend;
     try {
 #ifdef __APPLE__
         resourceLoadAutoreleasePool(preparation);
@@ -244,33 +193,35 @@ bool prepareResourceLoad(ResourceLoadState& state, const std::function<void()>& 
         preparation();
 #endif
         return true;
-    } catch (...) {
+    } catch (const std::bad_alloc&) {
+        logError("ResourceLoad") << "Out of memory while preparing a resource";
+        state.result = LoadResult::fail(LoadError::Unknown, "Out of memory while preparing a resource");
+    } catch (const std::exception& error) {
+        logError("ResourceLoad") << error.what();
+        state.result = LoadResult::fail(LoadError::Unknown, error.what());
+    }
+    std::function<void()> backend;
+    {
         std::lock_guard<std::mutex> lock(host().mutex);
-        if (!state.completed || (state.delivering && isMainThread())) {
-            state.backendPending = false;
-            state.result.error = LoadError::Unknown;
-            state.result.message.clear();
-            backend = std::move(state.cancelBackend);
-            state.discardPayload();
-        }
+        state.backendPending = false;
+        backend = std::move(state.cancelBackend);
+        state.discardPayload();
     }
     if (backend) backend();
     return false;
 }
-
-ResourceLoadState::ResourceLoadState() : MainThreadSlot([](MainThreadSlot& slot) {
-    auto& state = static_cast<ResourceLoadState&>(slot);
-#ifdef __EMSCRIPTEN__
-    if (state.preparing) {
-        state.preparing = false;
-        LoadHost::Job job{std::static_pointer_cast<ResourceLoadState>(state.shared_from_this()),
-                          std::move(state.preparation)};
-        runExternalJob(job);
-        return;
+ResourceLoadBatch::~ResourceLoadBatch() {
+    for (auto& state : results) if (state) state->cancel();
+}
+ResourceLoadBatch& ResourceLoadBatch::operator=(ResourceLoadBatch&& other) {
+    if (this != &other) {
+        for (auto& state : results) if (state) state->cancel();
+        callbacks = std::move(other.callbacks);
+        results = std::move(other.results);
+        warnings = std::move(other.warnings);
     }
-#endif
-    deliver(state);
-}, [](MainThreadSlot& slot) { static_cast<ResourceLoadState&>(slot).cancel(); }) {}
+    return *this;
+}
 ResourceLoadState::~ResourceLoadState() {
     if (frameworkShutdown()) return;
     if (!credits && !requestCredit) return; // setup may have failed before the host existed
@@ -287,12 +238,8 @@ void ResourceLoadState::cancel() {
     {
         std::lock_guard<std::mutex> lock(owner.mutex);
         backend = std::move(cancelBackend);
-        // std::exit can cancel from a worker while main is applying a result.
-        // Main owns that payload until its delivery guard retires it.
-        if (!delivering || isMainThread()) {
-            if (completed) discardPayload();
-            releaseCredits(owner, *this);
-        }
+        if (completed) discardPayload();
+        releaseCredits(owner, *this);
 #ifdef __EMSCRIPTEN__
         if (preparing) {
             preparing = false;
@@ -346,16 +293,18 @@ void completeResourceLoad(const std::shared_ptr<ResourceLoadState>& state) {
                 if (owner.localNoticeRun.owner_before(state->run) || state->run.owner_before(owner.localNoticeRun)) {
                     owner.localNoticeRun = state->run;
                     owner.localNoticeIssued = false;
-                    owner.localNoticePending = false;
                 }
                 if (!owner.localNoticeIssued) {
                     owner.localNoticeIssued = true;
-                    owner.localNoticePending = true;
-                    owner.localNotice.post(owner.warningOwner, owner.completions);
+                    owner.mailbox.callbacks.push_back([run = state->run] {
+                        if (appRunIsAlive(run))
+                            logNotice("ResourceLoad") << "Local-file retained results exceeded the resource-load byte budget; "
+                                << "results are kept and further local overages are silent for this run";
+                    });
                 }
             }
         }
-        if (!state->cancelled.load()) state->post(state, owner.completions);
+        if (!state->cancelled.load()) owner.mailbox.results.push_back(state);
 #ifdef __EMSCRIPTEN__
         if (state->externalActive) {
             state->backendPending = false;
@@ -392,8 +341,7 @@ void startExternalResourceLoad(std::shared_ptr<ResourceLoadState> state, std::fu
     bool accepted = false;
     {
         std::lock_guard<std::mutex> lock(owner.mutex);
-        const size_t requestLimit = owner.pendingLimit > SIZE_MAX - owner.activeLimit
-            ? SIZE_MAX : owner.pendingLimit + owner.activeLimit;
+        const size_t requestLimit = owner.requestLimit;
         if (state->localFile || (owner.outstanding < requestLimit && owner.pendingCount < owner.pendingLimit && owner.retained < owner.byteLimit)) {
             state->preparation = std::move(preparation);
             if (owner.pendingTail) owner.pendingTail->nextPending = state;
@@ -428,32 +376,41 @@ void setResourceLoadLimitsForTests(size_t active, size_t pending, size_t bytes) 
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
     owner.activeLimit = active; owner.pendingLimit = pending; owner.byteLimit = bytes;
+    owner.requestLimit = pending > SIZE_MAX - active ? SIZE_MAX : pending + active;
 }
-void failResourceLoadLaunchForTests(bool fail) { host().failLaunch = fail; }
 
 void enqueueResourceLoad(std::function<void()> completion) {
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
-    if (!owner.mailbox.callbacks)
-        owner.mailbox.callbacks = std::make_unique<std::vector<std::function<void()>>>();
-    owner.mailbox.callbacks->push_back(std::move(completion));
+    owner.mailbox.callbacks.push_back(std::move(completion));
 }
 ResourceLoadBatch takeResourceLoadBatch() {
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
     ResourceLoadBatch batch;
     batch.callbacks.swap(owner.mailbox.callbacks);
-    batch.results = MainThreadSlotBatch(owner.completions);
+    batch.results.swap(owner.mailbox.results);
+    batch.warnings = MainThreadSlotBatch(owner.completions);
     return batch;
 }
 void deliverResourceLoadBatch(ResourceLoadBatch batch) {
-    if (batch.callbacks) {
-        for (auto& slot : *batch.callbacks) {
-            auto fn = std::move(slot);
-            if (fn) fn();
-        }
+    for (auto& slot : batch.callbacks) {
+        auto fn = std::move(slot);
+        if (fn) fn();
     }
-    batch.results.deliver();
+    for (auto& slot : batch.results) {
+        auto state = std::move(slot);
+#ifdef __EMSCRIPTEN__
+        if (state->preparing) {
+            state->preparing = false;
+            LoadHost::Job job{state, std::move(state->preparation)};
+            if (!state->cancelled.load()) runExternalJob(job);
+            continue;
+        }
+#endif
+        deliver(*state);
+    }
+    batch.warnings.deliver();
 }
 void startResourceLoad(std::function<void()> preparation) {
 #ifdef __EMSCRIPTEN__
@@ -466,8 +423,7 @@ void startResourceLoad(std::function<void()> preparation) {
     std::lock_guard<std::mutex> lock(owner.mutex);
     owner.workers.push_back(worker);
     try {
-        if (owner.failLaunch) throw std::bad_alloc();
-        owner.kept.start(worker->thread, [worker, preparation = std::move(preparation), &owner]() mutable {
+        worker->thread = std::thread([worker, preparation = std::move(preparation), &owner]() mutable {
 #ifdef _WIN32
             const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 #endif
@@ -497,31 +453,19 @@ std::shared_ptr<std::function<void()>> registerResourceStop(std::function<void()
     auto registration = std::make_shared<std::function<void()>>(std::move(stop));
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
-    // A shutdown pass indexes this registry without copying it. New entries
-    // may append, but existing indices stay stable until every pass returns.
-    if (!owner.stopDrains)
-        std::erase_if(owner.stops, [](const auto& entry) { return entry.expired(); });
+    std::erase_if(owner.stops, [](const auto& entry) { return entry.expired(); });
     owner.stops.push_back(registration);
     return registration;
 }
 void cancelResourceBackends() {
     auto& owner = host();
-    size_t count;
+    std::vector<std::weak_ptr<std::function<void()>>> stops;
     {
         std::lock_guard<std::mutex> lock(owner.mutex);
-        ++owner.stopDrains;
-        count = owner.stops.size();
+        stops = owner.stops;
     }
-    struct Drain {
-        LoadHost& owner;
-        ~Drain() { std::lock_guard<std::mutex> lock(owner.mutex); --owner.stopDrains; }
-    } drain{owner};
-    // Keep persistent registrations (for example a window reused after a
-    // run change). Acquiring one weak target at a time never allocates.
-    for (size_t i = 0; i < count; ++i) {
-        std::shared_ptr<std::function<void()>> stop;
-        { std::lock_guard<std::mutex> lock(owner.mutex); stop = owner.stops[i].lock(); }
-        if (stop) (*stop)();
+    for (auto& entry : stops) {
+        if (auto stop = entry.lock()) (*stop)();
     }
 }
 void finishResourceLoadsAtExit() {
@@ -531,24 +475,11 @@ void finishResourceLoadsAtExit() {
 #ifndef __EMSCRIPTEN__
     {
         std::lock_guard<std::mutex> lock(owner.mutex);
-        // std::exit may itself be called on a worker. Keep its handle without
-        // joining it; the reaper joins every other worker before returning.
-        for (auto it = owner.workers.begin(); it != owner.workers.end(); ++it) {
-            if ((*it)->thread.get_id() == std::this_thread::get_id()) {
-                owner.kept.release((*it)->thread);
-                owner.workers.erase(it);
-                break;
-            }
-        }
         owner.exiting = true;
         owner.changed.notify_all();
     }
-    owner.kept.release(owner.reaper);
+    if (owner.reaper.joinable()) owner.reaper.join();
 #endif
-    {
-        std::lock_guard<std::mutex> lock(owner.mutex);
-        owner.localNoticePending = false;
-    }
     // Destroy queued CPU payloads before app/GPU/logger teardown, without
     // executing application callbacks from exit.
     if (isMainThread()) {
@@ -569,11 +500,6 @@ void waitForResourceLoadsForTests() {
 void waitForResourceLoadsAtAppExit() {
     cancelResourceBackends();
     waitForResourceLoadsForTests();
-    {
-        auto& owner = host();
-        std::lock_guard<std::mutex> lock(owner.mutex);
-        owner.localNoticePending = false;
-    }
     // Cache hits can retain a committed GPU atlas. Release invalidated queue
     // entries here, on main and before the old GPU context is torn down.
     auto discarded = takeResourceLoadBatch();
@@ -588,3 +514,23 @@ size_t resourceLoadWorkersForTests() {
 #endif
 }
 } // namespace trussc::internal
+
+namespace trussc {
+void setResourceLoadConcurrency(int count) {
+    if (count < 1) {
+        logNotice("ResourceLoad") << "Resource load concurrency below 1; using 1";
+        count = 1;
+    }
+    auto& owner = internal::host();
+    {
+        std::lock_guard<std::mutex> lock(owner.mutex);
+        owner.activeLimit = static_cast<size_t>(count);
+    }
+    internal::pumpExternalLoads();
+}
+int getResourceLoadConcurrency() {
+    auto& owner = internal::host();
+    std::lock_guard<std::mutex> lock(owner.mutex);
+    return static_cast<int>(owner.activeLimit);
+}
+} // namespace trussc

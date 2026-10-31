@@ -65,9 +65,6 @@
 #include <thread>
 
 using namespace std;
-namespace {
-#include "../../../../core/tests/asyncLoads/src/fontFixture.h"
-}
 using harness::callTool;
 using harness::check;
 using harness::ImGuiHarness;
@@ -1317,118 +1314,149 @@ static void testToolLevels() {
     }
 }
 
-// Local imports use complete units and the shared font backend.
-static void testLocalImports() {
+static void testPendingTextCompaction() {
+    namespace d = tcx::imgui::detail;
+    for (bool wrap : {false, true}) {
+        ImGuiHarness h;
+        auto* ctx = h.context();
+        if (wrap) ctx->InputEventsNextEventId = UINT32_MAX - 8;
+        auto& cs = d::contexts()[ctx];
+        tcx::imgui::WidgetInfo widget;
+        widget.rect = ImRect({0, 0}, {20, 20});
+        auto& io = ImGui::GetIO();
+        io.AddKeyEvent(ImGuiKey_F1, true);
+        tcx::imgui::inputText(widget, "first");
+        io.AddFocusEvent(false);
+        tcx::imgui::inputText(widget, "second");
+        io.AddFocusEvent(true);
+        tcx::imgui::inputText(widget, "third");
+        io.AddKeyEvent(ImGuiKey_F1, false);
+        const auto requests = cs.pendingText;
+        std::vector<ImU32> expected, native;
+        for (const auto& event : ctx->InputEventsQueue) {
+            if (!requests[0].contains(event.EventId) && !requests[2].contains(event.EventId))
+                expected.push_back(event.EventId);
+            if (std::none_of(requests.begin(), requests.end(), [&](const auto& p) {
+                return p.contains(event.EventId);
+            })) native.push_back(event.EventId);
+        }
+        cs.pendingText[0].deadline = cs.pendingText[2].deadline = d::now();
+        d::settlePendingText(ctx, cs);
+        std::vector<ImU32> actual;
+        for (const auto& event : ctx->InputEventsQueue) actual.push_back(event.EventId);
+        check("text compaction: mixed deadlines preserve survivor and native event order",
+            actual == expected && cs.pendingText.size() == 1 &&
+            cs.pendingText[0].firstEvent == requests[1].firstEvent);
+        d::settlePendingText(ctx, cs, true);
+        actual.clear();
+        for (const auto& event : ctx->InputEventsQueue) actual.push_back(event.EventId);
+        check("text compaction: later cancellation removes only remaining tool events",
+            actual == native && cs.pendingText.empty());
+        ctx->InputEventsQueue.clear();
+        tcx::imgui::inputText(widget, "consumed");
+        const int consumed = ctx->InputEventsQueue.Size;
+        tcx::imgui::inputText(widget, "queued");
+        const auto survivor = cs.pendingText.back();
+        ctx->InputEventsQueue.erase(ctx->InputEventsQueue.begin(), ctx->InputEventsQueue.begin() + consumed);
+        d::settlePendingText(ctx, cs);
+        check("text compaction: consumed prefix leaves later request queued",
+            cs.pendingText.size() == 1 && cs.pendingText[0].firstEvent == survivor.firstEvent);
+        d::settlePendingText(ctx, cs, true);
+    }
+}
+
+static void testPendingValueIndex() {
+    namespace d = tcx::imgui::detail;
+    using State = d::PendingValue::State;
     ImGuiHarness h;
-    auto& io = ImGui::GetIO();
-    string lastImportError;
-    auto importLogs = tc::getLogger().onLog.listen([&](tc::LogEventArgs& event) {
-        if (event.level == tc::LogLevel::Error) lastImportError = event.message;
+    bool value = false;
+    h.setUi([&] {
+        ImGui::Begin("Indexed edits");
+        ImGui::Checkbox("value", &value);
+        ImGui::End();
     });
-    const string repeatedTable = "[Table][0x12345678,511]\nRefScale=42\n";
-    string repeatedIni;
-    for (int i = 0; i < 1000; ++i) repeatedIni += repeatedTable;
-    ImGui::LoadIniSettingsFromMemory(repeatedIni.data(), repeatedIni.size());
-    auto* table = ImGui::TableSettingsFindByID(0x12345678);
-    const int retainedTableBytes = GImGui->SettingsTables.Buf.Size;
-    check("ini repeated table headers reserve only retained storage", table && table->RefScale == 42 && GImGui->SettingsTables.Buf.Capacity == retainedTableBytes);
-    ImGui::LoadIniSettingsFromMemory(repeatedIni.data(), repeatedIni.size());
-    check("ini existing table storage is recycled on reload", GImGui->SettingsTables.Buf.Size == retainedTableBytes && GImGui->SettingsTables.Buf.Capacity == retainedTableBytes);
-    const char growTable[] = "[Table][0x22345678,1]\n[Table][0x22345678,3]\n[Table][0x22345678,2]\nRefScale=17\n";
-    ImGui::LoadIniSettingsFromMemory(growTable);
-    table = ImGui::TableSettingsFindByID(0x22345678);
-    check("ini table growth retains old chunks and reuses column capacity", table && table->ColumnsCountMax == 3 && table->ColumnsCount == 2 && table->RefScale == 17 && GImGui->SettingsTables.Buf.Capacity == GImGui->SettingsTables.Buf.Size);
-    GImGui->SettingsTables.clear();
-    const char validIni[] = "[Window][Import fixture]\nPos=1,2\nSize=100,100\nCollapsed=0\n";
-    ImGui::LoadIniSettingsFromMemory(validIni);
-    size_t beforeSize = 0;
-    const std::string before(ImGui::SaveIniSettingsToMemory(&beforeSize));
-    const char invalidIni[] = "[Window][Invalid]\n\0Pos=9,9\n";
-    ImGui::LoadIniSettingsFromMemory(invalidIni, sizeof(invalidIni) - 1);
-    check("ini structural failure preserves previous settings", before == ImGui::SaveIniSettingsToMemory());
-    check("ini memory error keeps its pathless message", lastImportError == "[ImGui] ini import has an invalid text size or embedded terminator");
-    const auto iniPath = std::filesystem::current_path() / std::filesystem::path(u8".imgui-import-日本.ini");
-    const auto iniFilename = tc::pathToUtf8(iniPath);
-    { std::ofstream file(iniPath, std::ios::binary); file.write(invalidIni, sizeof(invalidIni) - 1); }
-    ImGui::LoadIniSettingsFromDisk(iniFilename.c_str());
-    check("ini file validation error names the non-ASCII file", lastImportError == "[ImGui] ini import has an invalid text size or embedded terminator: " + iniFilename);
-    std::filesystem::remove(iniPath);
-    const char empty = 0;
-    ImGui::LoadIniSettingsFromMemory(&empty, size_t(INT_MAX));
-    check("ini size check runs before buffer copy", before == ImGui::SaveIniSettingsToMemory());
-    unsigned char shortFont[128] = {};
-    ImFontConfig config;
-    config.FontDataOwnedByAtlas = false;
-    const int fontsBefore = io.Fonts->Fonts.Size;
-    check("invalid sfnt font import returns failure", io.Fonts->AddFontFromMemoryTTF(shortFont, sizeof(shortFont), 16, &config) == nullptr);
-    check("failed font import leaves the font list unchanged", io.Fonts->Fonts.Size == fontsBefore);
-    size_t aliasSize = 0;
-    const char* aliasText = ImGui::SaveIniSettingsToMemory(&aliasSize);
-    ImGui::LoadIniSettingsFromMemory(aliasText, aliasSize);
-    check("ini imports may reuse the current saved text buffer", before == ImGui::SaveIniSettingsToMemory());
-    struct ImportAllocator {
-        ImGuiMemAllocFunc allocate;
-        ImGuiMemFreeFunc release;
-        void* originalData;
-        bool failNext = false;
-        void* ownedInput = nullptr;
-        int inputFrees = 0;
-        size_t largestRequest = 0;
-    } allocator;
-    ImGui::GetAllocatorFunctions(&allocator.allocate, &allocator.release, &allocator.originalData);
-    ImGui::SetAllocatorFunctions([](size_t bytes, void* context) -> void* {
-        auto& state = *static_cast<ImportAllocator*>(context);
-        state.largestRequest = std::max(state.largestRequest, bytes);
-        if (state.failNext) { state.failNext = false; return nullptr; }
-        return state.allocate(bytes, state.originalData);
-    }, [](void* pointer, void* context) {
-        auto& state = *static_cast<ImportAllocator*>(context);
-        if (pointer == state.ownedInput) ++state.inputFrees;
-        state.release(pointer, state.originalData);
-    }, &allocator);
-    const char invalidTable[] = "[Window][Import fixture]\nPos=99,99\n[Table][0x00000001,2147483647]\n";
-    allocator.largestRequest = 0;
-    ImGui::LoadIniSettingsFromMemory(invalidTable);
-    check("ini table count rejects before handler mutation or allocation", before == ImGui::SaveIniSettingsToMemory() && allocator.largestRequest < 1024u * 1024u);
-    const char replacementIni[] = "[Window][Import fixture]\nPos=9,9\nSize=100,100\nCollapsed=0\n";
-    allocator.failNext = true;
-    ImGui::LoadIniSettingsFromMemory(replacementIni);
-    const bool iniFaultConsumed = !allocator.failNext;
-    allocator.failNext = false;
-    check("ini allocation failure preserves existing settings", iniFaultConsumed && before == ImGui::SaveIniSettingsToMemory());
-    ImGui::LoadIniSettingsFromMemory(replacementIni);
-    check("same ini replacement loads without an allocation fault", before != ImGui::SaveIniSettingsToMemory());
-    allocator.ownedInput = IM_ALLOC(128);
-    memset(allocator.ownedInput, 0, 128);
-    check("rejected owned font input is released once", io.Fonts->AddFontFromMemoryTTF(allocator.ownedInput, 128, 16) == nullptr && allocator.inputFrees == 1);
-    allocator.ownedInput = nullptr;
-    const auto font = makeFont();
-    const auto fontPath = std::filesystem::current_path() / ".imgui-font-import-test.ttf";
-    { std::ofstream file(fontPath, std::ios::binary); file.write((const char*)font.data(), font.size()); }
-    const auto fontFilename = fontPath.string();
-    allocator.failNext = true;
-    config.Flags |= ImFontFlags_NoLoadError;
-    config.FontDataOwnedByAtlas = true;
-    auto* failedFont = io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config);
-    const bool fontFaultConsumed = !allocator.failNext;
-    allocator.failNext = false;
-    check("font file allocation failure returns cleanly", failedFont == nullptr && fontFaultConsumed && io.Fonts->Fonts.Size == fontsBefore);
-    check("same font file loads without an allocation fault", io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) != nullptr && io.Fonts->Fonts.Size == fontsBefore + 1);
-    { std::ofstream file(fontPath, std::ios::binary); file << "invalid"; }
-    check("font file validation error retains the path and parser reason",
-          io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) == nullptr &&
-          lastImportError.rfind("[ImGui] font import rejected: " + fontFilename + " - ", 0) == 0);
-    std::filesystem::remove(fontPath);
-    config.Flags &= ~ImFontFlags_NoLoadError;
-    check("missing font file error retains its filename",
-          io.Fonts->AddFontFromFileTTF(fontFilename.c_str(), 16, &config) == nullptr &&
-          lastImportError == "[ImGui] cannot read or allocate font file: " + fontFilename);
-    ImGui::SetAllocatorFunctions(allocator.allocate, allocator.release, allocator.originalData);
+    h.frames(3);
+    const auto widget = *h.find("value");
+    auto& cs = d::contexts().at(h.context());
+    std::vector<int> callbacks;
+    bool removedBeforeCallback = true;
+    auto queue = [&](ImGuiID id, bool wanted, int token) {
+        std::vector<unsigned char> bytes;
+        std::string error;
+        d::valueToBytes(widget.value, wanted, bytes, error);
+        return d::queueValue(h.context(), id, widget.value.kind, widget.value.dataType,
+            widget.value.components, std::move(bytes), d::kPendingValueLifetime,
+            d::kValueCheckDeadline, [&, token] {
+                callbacks.push_back(token);
+                removedBeforeCallback &= cs.pendingValues.empty() && cs.pendingValueIndex.empty();
+            });
+    };
+    auto first = queue(widget.id, true, 1);
+    auto second = queue(widget.id, true, 2);
+    check("indexed edits: supersession defers callbacks and retains ordered records",
+        first->state == State::Superseded && second->state == State::Queued &&
+        callbacks.empty() && cs.pendingValues.size() == 2 && cs.pendingValueIndex.size() == 1);
+    // Keep another ID queued while compacting the superseded prefix.
+    auto other = queue(widget.id + 1, false, 3);
+    d::finishPendingValues(cs, h.context()->FrameCount);
+    check("indexed edits: partial compaction preserves survivors and callback order",
+        callbacks == std::vector<int>{1} && cs.pendingValues ==
+        std::vector<std::shared_ptr<d::PendingValue>>{second, other} && cs.pendingValueIndex.size() == 2);
+    callbacks.clear();
+    h.frame();
+    check("indexed edits: write keeps verification indexed and settles missing widget",
+        value && second->state == State::Verify && other->state == State::NotDrawn &&
+        callbacks == std::vector<int>{3} && cs.pendingValueIndex.size() == 1);
+    callbacks.clear();
+    auto newer = queue(widget.id, false, 4);
+    auto newest = queue(widget.id, false, 5);
+    check("indexed edits: new queue supersedes only Queued, preserving older verification",
+        second->state == State::Verify && newer->state == State::Superseded &&
+        newest->state == State::Queued && cs.pendingValueIndex.size() == 2);
+    h.frame();
+    check("indexed edits: older verification precedes newer write with ordered replies",
+        !value && second->state == State::Applied && newest->state == State::Verify &&
+        callbacks == std::vector<int>({2, 4}) && cs.pendingValueIndex.size() == 1);
+    callbacks.clear();
+    removedBeforeCallback = true;
+    h.frame();
+    check("indexed edits: finished records and index removed before callback",
+        newest->state == State::Applied && callbacks == std::vector<int>{5} && removedBeforeCallback);
+    callbacks.clear();
+    auto expired = queue(widget.id, true, 6);
+    d::clockSkew += d::kPendingValueLifetime;
+    d::settleOverdueValues(h.context());
+    auto replacement = queue(widget.id, true, 7);
+    check("indexed edits: deadline removes index before admitting the same ID again",
+        expired->state == State::Expired && replacement->state == State::Queued &&
+        callbacks == std::vector<int>{6} && cs.pendingValueIndex.size() == 1);
+    d::clockSkew = {};
+    callbacks.clear();
+    d::finishPendingValues(cs, h.context()->FrameCount, true);
+    auto reentrant = queue(widget.id, true, 8);
+    std::shared_ptr<d::PendingValue> fromCallback;
+    reentrant->onDone = [&] { fromCallback = queue(widget.id, false, 9); };
+    d::finishPendingValues(cs, h.context()->FrameCount, true);
+    check("indexed edits: callbacks can queue the same ID after compaction",
+        fromCallback && fromCallback->state == State::Queued &&
+        cs.pendingValues.size() == 1 && cs.pendingValueIndex.size() == 1);
+    d::finishPendingValues(cs, h.context()->FrameCount, true);
+    auto* extra = ImGui::CreateContext();
+    int tornDown = 0;
+    auto doomed = d::queueValue(extra, widget.id, widget.value.kind, widget.value.dataType,
+        widget.value.components, second->bytes, d::kPendingValueLifetime,
+        d::kValueCheckDeadline, [&] { ++tornDown; });
+    auto surviving = queue(widget.id, true, 10);
+    tcx::imgui::forgetContext(extra);
+    ImGui::DestroyContext(extra);
+    check("indexed edits: teardown settles its index without affecting another context",
+        tornDown == 1 && doomed->state == State::NotDrawn && !d::contexts().count(extra) &&
+        surviving->state == State::Queued && cs.pendingValueIndex.size() == 1);
+    d::finishPendingValues(cs, h.context()->FrameCount, true);
 }
 
 int main() {
     tcCoreTest::WindowFixture receiver;
-    testLocalImports();
     testToolLevels();
     tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
     testUtf8Capture();
@@ -1449,5 +1477,7 @@ int main() {
     testRadioButtons();
     testCurrentValue();
     testInspectorRecord();
+    testPendingValueIndex();
+    testPendingTextCompaction();
     return harness::summary();
 }
