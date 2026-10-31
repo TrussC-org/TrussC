@@ -2023,7 +2023,7 @@ void alertDialogAsync(const std::string & title, const std::string & message, st
 void bindCursorImage(Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX = 0, int hotspotY = 0) [+1]  // Assigns an image to a mouse cursor slot.
 bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Shows a confirmation dialog.
 void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Shows a confirmation dialog with a result callback.
-CoreEvents & events()  // Returns the current window context's CoreEvents hub.
+CoreEvents & events()  // Returns the events of the window the current App is in.
 Cursor getCursor()  // Returns the selected mouse cursor shape.
 Vec2 getGlobalMousePos()  // Returns the mouse position in the current window.
 float getGlobalMouseX()  // Returns the current mouse X coordinate in the active window.
@@ -2565,13 +2565,13 @@ float atanh(float x) [std]  // Returns the inverse hyperbolic tangent.
 Baseline  // Provides shorthand for text baseline alignment.
 Bottom  // Provides shorthand for bottom alignment.
 Center  // Provides shorthand for center alignment.
-std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Creates a secondary application window.
+std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Opens a new, empty window.
 const char * enumLabel(E value)  // Returns the display string for an enum value.
 const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Returns the automatically discovered names of an enum's enumerators.
 EnumLabelSpan enumReflectedSpan()  // Returns an enum label table built from reflection.
 const std::array<E, internal::enumValidCount<E> enumValues()  // Returns the automatically discovered values of an enum's enumerators.
 EVENT_DRIVEN  // Selects rendering on demand.
-void exitApp(int code = 0)  // Requests cancellable process quit at the host boundary.
+void exitApp(int code = 0)  // Asks the process to quit, with an exit code.
 float exp2(float x) [std]  // Returns two raised to the given power.
 HALF_TAU  // Represents half a turn in radians.
 KEY_BACKSPACE  // Identifies the Backspace key.
@@ -2615,9 +2615,9 @@ Vec2 operator*(float s, const Vec2 & v) [+4]  // Multiplies values according to 
 PI ⚠️deprecated  // Represents the ratio of a circle's circumference to its diameter.
 QUARTER_TAU  // Defines a quarter turn in radians.
 float remainder(float x, float y) [std]  // Returns the IEEE floating-point remainder.
-void requestExitApp()  // Requests cancellable process quit at the host boundary.
+void requestExitApp()  // Asks the process to quit, keeping the current exit code.
 Right  // Provides shorthand for `Direction::Right`.
-Runtime & runtime()  // Accesses the process event hub without selecting a Window.
+Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
@@ -2633,9 +2633,9 @@ VSYNC  // Selects frame scheduling at the display refresh rate.
 ```cpp
 void App::audioIn(const AudioInBuffer & buf)  // Meant for reading incoming audio on the audio thread, but currently never called.
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
-void App::exit()  // Called once when the App ends.
+void App::exit()  // Called once when the App ends, right before cleanup().
 void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto this Window, with their paths.
-Window * App::getWindow() const  // Returns this App’s attached Window, or nullptr before attachment and during ending.
+Window * App::getWindow() const  // Returns the window this App is attached to, or nullptr.
 bool App::isExitRequested() const  // Returns whether requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
 void App::keyReleased(const KeyEventArgs & e) [+1]  // Called when a key is released.
@@ -3586,7 +3586,7 @@ void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancels 
 void Node::cancelAllTimers()  // Cancels all frame timers on this node.
 void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancels a background scheduler timer by ID.
 void Node::cancelTimer(uint64_t id)  // Cancels a frame timer by ID.
-void Node::cleanup()  // Called when a node you destroy() is removed from the tree (children first), and for the App at shutdown.
+void Node::cleanup()  // Called when a node you destroy() is removed from the tree, and on every node of an App when the App ends (children first).
 void Node::destroy()  // Marks this node for deferred removal.
 void Node::disableEvents()  // Disables this node's event flag.
 void Node::draw()  // Called on each drawn frame to draw the node, in its own local coordinates and starting from the default style.
@@ -3905,14 +3905,14 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Processes one refle
 ```cpp
 ```
 
-### Runtime — Host-owned process services and process events.
+### Runtime — The object that represents the whole running process.
 
 ```cpp
-RuntimeEvents & Runtime::events()  // Accesses the process event hub without selecting a Window.
-void Runtime::setLogoutTimeout(float seconds)  // Sets the process-wide time budget for OS logout, restart or shutdown.
+RuntimeEvents & Runtime::events()  // Returns the events that belong to the whole process.
+void Runtime::setLogoutTimeout(float seconds)  // Sets how long TrussC waits for exit() when the OS logs out, restarts or shuts down.
 ```
 
-### RuntimeEvents — Accesses the process event hub without selecting a Window.
+### RuntimeEvents — Holds the events that belong to the whole process rather than to one window.
 
 ```cpp
 ```
@@ -4711,11 +4711,11 @@ SaveResult VideoWriter::submitFrame(double timeSec) [macos]  // Submits the prev
 SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec) [macos,windows,linux,android,ios]  // Appends audio samples at a specified presentation time.
 ```
 
-### Window — A Runtime-owned window and its App attachment.
+### Window — A window on the screen, with its own App, events and drawing state.
 
 ```cpp
 void Window::close()  // Closes this Window without asking closeRequested.
-void Window::destroyApp()  // Requests removal of the current App while keeping this window open.
+void Window::destroyApp()  // Removes the App from this window and leaves the window open and empty.
 CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
 float Window::getFps() const  // Returns this window's target frame rate.
@@ -4726,7 +4726,7 @@ int Window::getWidth() const  // Returns this window's content width.
 bool Window::isFullscreen() const  // Returns whether fullscreen currently blocks this window's size and position requests.
 bool Window::isOccluded() const  // Returns whether this window is minimized or fully hidden according to trusted operating system observations.
 bool Window::isOpen() const  // Returns whether this window is open.
-void Window::setApp(Args &&... args)  // Constructs a fresh App and requests attachment to this window.
+void Window::setApp(Args &&... args)  // Creates a new App of the given class and puts it in this window.
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
 void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
