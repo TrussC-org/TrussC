@@ -2765,7 +2765,7 @@ float ChipSoundNote::getTotalDuration() const  // Returns the note duration.
 ```cpp
 ```
 
-### CloseRequestEventArgs — Queries whether one OS Window close may proceed.
+### CloseRequestEventArgs — The argument of closeRequested: whether to keep the window open.
 
 ```cpp
 ```
@@ -2948,7 +2948,7 @@ void EventListener::disconnect()  // Explicitly disconnects the listener.
 bool EventListener::isConnected() const  // Returns the token's recorded connection state.
 ```
 
-### ExitRequestEventArgs — Per-listener process quit decision and optional UTF-8 veto reason.
+### ExitRequestEventArgs — The argument of exitRequested: whether to cancel the quit, and an optional reason.
 
 ```cpp
 ```
@@ -4714,7 +4714,7 @@ SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double
 ### Window — A window on the screen, with its own App, events and drawing state.
 
 ```cpp
-void Window::close()  // Closes this Window without asking closeRequested.
+void Window::close()  // Requests closure of this window.
 void Window::destroyApp()  // Removes the App from this window and leaves the window open and empty.
 CoreEvents & Window::events()  // Returns this window's event collection.
 std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
@@ -4732,7 +4732,7 @@ void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
 void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
 void Window::setPosition(int x, int y) [macos,windows,linux]  // Move this window on the desktop, in screen coordinates with the primary display's top-left at (0, 0); a display left of or above the primary one has negative coordinates. To fill a second display, move the window there first and then call setFullscreen — fullscreen covers the display the window is currently on
-void Window::setQuitOnClose(bool enabled)  // Chooses process quit policy for an accepted OS close of this Window.
+void Window::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
 void Window::setSize(int width, int height)  // Resizes this window's content area.
 void Window::setTitle(const std::string & title)  // Sets this window's title.
 void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
@@ -4747,7 +4747,7 @@ WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.
-WindowSettings & WindowSettings::setQuitOnClose(bool enabled)  // Chooses process quit policy for an accepted OS close of this Window.
+WindowSettings & WindowSettings::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
 WindowSettings & WindowSettings::setSampleCount(int count)  // Sets the window's MSAA sample count.
 WindowSettings & WindowSettings::setSize(int w, int h)  // Sets the initial window dimensions.
 WindowSettings & WindowSettings::setSwapInterval(int interval)  // Sets the requested VSync presentation interval.
