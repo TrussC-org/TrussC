@@ -113,7 +113,6 @@ void closeScreenshots(ScreenshotQueue& window) noexcept {
     }
 }
 void submitScreenshot(ScreenshotQueue* window, const fs::path& requested) {
-    if (sessionEndExit()) return;
     auto state = std::make_shared<ScreenshotState>();
 #ifdef __EMSCRIPTEN__
     state->path = resolveScreenshotDownloadName(requested);
@@ -147,7 +146,6 @@ void submitScreenshot(ScreenshotQueue* window, const fs::path& requested) {
     window->pending.push_back(state);
 }
 void captureScreenshots(ScreenshotQueue& window) {
-    if (sessionEndExit()) return;
     auto jobs = std::move(window.pending);
     window.pending.clear();
     for (auto& state : jobs) {

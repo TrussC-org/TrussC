@@ -26,10 +26,6 @@ static void _sapp_tc_x11_grab_error_handler() {}
 static void _sapp_tc_x11_release_error_handler() {}
 static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*, int) {}
 static EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, EGLNativeWindowType, const EGLint*) { return EGL_NO_SURFACE; }
-static bool failRecovery;
-static EGLSurface eglCreatePbufferSurface(EGLDisplay d, EGLConfig c, const EGLint* a) {
-    return failRecovery ? EGL_NO_SURFACE : ::eglCreatePbufferSurface(d, c, a);
-}
 #if !defined(SOKOL_GLES3)
 #define SOKOL_GLES3
 #include "renewal.inc"
@@ -49,37 +45,18 @@ void failedCurrentRenewal(EGLDisplay display, EGLConfig config, EGLSurface& surf
     window.drawable = surface;
     renewal::_sapp_tc.egl_display = display; renewal::_sapp_tc.fbconfig = config;
     renewal::_sapp_tc.windows[0] = &window;
-    renewal::failRecovery = true;
-    check("failed device drawable reservation preserves current old surface",
-        !renewal::_sapp_tc_x11_resize_surface(&window) && window.drawable == surface &&
-        eglGetCurrentSurface(EGL_DRAW) == surface && eglGetCurrentContext() != EGL_NO_CONTEXT);
-    renewal::failRecovery = false;
-    {
-        renewal::_sapp_tc_x11_surface_scope outerTick;
-        check("forced renewal failure on CURRENT window is rejected", !renewal::_sapp_tc_x11_resize_surface(&window));
-    }
-    check("both renewal scopes retain a usable current device context",
-        eglGetCurrentContext() != EGL_NO_CONTEXT && eglGetCurrentSurface(EGL_DRAW) == window.drawable);
-    bool uploaded = false;
-    std::thread worker([&] { runOnMainThread([&] {
-        uint32_t pixel = 0xffffffff;
-        sg_image_desc desc{}; desc.width = desc.height = 1; desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        desc.data.mip_levels[0] = {&pixel, sizeof pixel};
-        const auto image = sg_make_image(&desc);
-        const auto native = sg_gl_query_image_info(image);
-        check("next process turn image is VALID with a real native texture",
-            sg_query_image_state(image) == SG_RESOURCESTATE_VALID && native.tex[native.active_slot] != 0);
-        uploaded = true; sg_destroy_image(image);
-    }); });
-    worker.join();
-    { internal::HostTurnScope turn; }
-    check("CPU queue progresses after current surface renewal failure", uploaded);
-    // Return to the normal fixture extent after the failure probe's 1x1 device drawable.
+    const auto context = eglGetCurrentContext();
+    check("failed renewal leaves a terminal window without a drawable",
+        !renewal::_sapp_tc_x11_resize_surface(&window) && !window.drawable);
+    check("failed current drawable is unbound before the native failure exit",
+        eglGetCurrentContext() == EGL_NO_CONTEXT &&
+        eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE);
+    // The native caller fails this window. Recreate only the test fixture so
+    // the independent rendering checks below still have a real EGL context.
     const EGLint size[] = {EGL_WIDTH,64,EGL_HEIGHT,64,EGL_NONE};
     surface = ::eglCreatePbufferSurface(display, config, size);
     check("fixture restores its drawable", surface != EGL_NO_SURFACE &&
-        eglMakeCurrent(display, surface, surface, eglGetCurrentContext()));
-    eglDestroySurface(display, window.drawable);
+        eglMakeCurrent(display, surface, surface, context));
     renewal::_sapp_tc.windows[0] = nullptr;
 }
 void processPasses() {

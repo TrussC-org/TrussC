@@ -163,7 +163,7 @@ void initialized() {
     check("zero skip suppresses only first presentation", presents == 1 && presentedDrawable == (uintptr_t)other->drawable);
     // An external configure must replace the old-sized native back buffer
     // before its first frame, without changing the Window identity. Exercise
-    // a failed replacement too: no stale draw/present, then retry next tick.
+    // successful renewal without a recovery drawable.
     _sapp_tc_x11_make_current(first);
     const auto caller = sapp_tc_gl_save();
     XResizeWindow(_sapp_tc.display, other->xwin, 100, 60);
@@ -174,11 +174,6 @@ void initialized() {
     check("WM applied requested client size before resize failure", resized);
     if (!resized) { sapp_quit(); return; }
     callbacks = presents = 0;
-    failSurface = true;
-    _sapp_tc_x11_tick(other);
-    failSurface = false;
-    check("failed resize surface blocks stale drawing and presentation", !callbacks && !presents &&
-        other->drawable && other->surface_resize_pending && sapp_window_valid(second));
     other->desc.tick_cb = [](sapp_window handle, void*) {
         ++resizeTicks;
         sapp_tc_window_metadata metadata{};
@@ -195,9 +190,9 @@ void initialized() {
     };
     _sapp_tc_x11_tick(other);
     const auto restored = sapp_tc_gl_save();
-    check("resize retry draws exactly once with the same identity", resizeTicks == 1 && presents == 1 &&
+    check("successful resize draws exactly once with the same identity", resizeTicks == 1 && presents == 1 &&
         other->drawable && !other->surface_resize_pending && sapp_window_valid(second));
-    check("resize failure and retry restore actual native caller", restored.display == caller.display &&
+    check("successful resize restores actual native caller", restored.display == caller.display &&
         restored.context == caller.context && restored.draw == caller.draw && restored.read == caller.read);
     other->desc.tick_cb = [](sapp_window, void*) { ++callbacks; };
     first->in_tick = true;
@@ -220,7 +215,15 @@ void initialized() {
     check("last identity is valid", last.id == UINT32_MAX);
     if (last.id) sapp_destroy_window(last);
     check("identity exhaustion rejects cleanly", sapp_create_window(&desc).id == 0 && _sapp_tc.next_id == UINT32_MAX && liveWindows == before);
-    sapp_destroy_window(second);
+    XResizeWindow(_sapp_tc.display, other->xwin, 120, 80);
+    XSync(_sapp_tc.display, False);
+    check("WM applied terminal resize", waitForClientSize(other->xwin, 120, 80));
+    first->in_tick = false;
+    callbacks = presents = 0; failSurface = true;
+    _sapp_tc_x11_tick(other);
+    failSurface = false;
+    check("failed renewal closes the Window and ends the backend without another frame",
+        !callbacks && !presents && !sapp_window_valid(second) && _sapp_tc.app.quit_ordered);
     sapp_quit();
 }
 }

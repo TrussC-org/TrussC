@@ -120,7 +120,6 @@ public:
 
 private:
     void allocateDocument(int size, const float* rgbData, const fs::path* sourcePath) {
-        if (internal::sessionEndExit()) return;
         clear();
 
         size_t rgbaBytes = 0;
@@ -246,7 +245,6 @@ private:
     TextureFilter filter_ = TextureFilter::Linear;
 
     void createSampler() {
-        if (internal::sessionEndExit()) return;
         sg_sampler_desc smp_desc = {};
         smp_desc.min_filter = (filter_ == TextureFilter::Nearest) ? SG_FILTER_NEAREST : SG_FILTER_LINEAR;
         smp_desc.mag_filter = (filter_ == TextureFilter::Nearest) ? SG_FILTER_NEAREST : SG_FILTER_LINEAR;

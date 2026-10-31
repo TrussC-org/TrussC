@@ -1640,7 +1640,6 @@ int main(int argc, char** argv) {
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
 #endif
     if (argc > 1 && std::string(argv[1]) == "--c4-checks") return c4::run();
-    if (argc > 1 && std::string(argv[1]) == "--c4-forced") return c4::forced();
     if (argc > 2 && std::string(argv[1]) == "--build") {
         std::ofstream args(fs::path(argv[2]) / "build-command-argv");
         for (int i = 1; i < argc; ++i) args << argv[i] << '\n';

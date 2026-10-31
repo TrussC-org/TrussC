@@ -54,7 +54,6 @@ inline bool shaderStreamAppendFits(sg_buffer buffer, size_t bytes) {
 }
 
 inline sg_buffer makeShaderStreamBuffer(size_t bytes, bool index) {
-    if (internal::sessionEndExit()) return {};
     sg_buffer_desc desc = {};
     desc.size = bytes;
     desc.usage.stream_update = true;
@@ -150,7 +149,6 @@ struct DeferredShaderDraw {
 // resources and accounting, never a live Shader. RenderTarget::flushLayers()
 // consumes these snapshots in the same order on every drawing target.
 inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
-    if (internal::sessionEndExit()) return;
     if (d.vertices.empty()) return;
 
     const size_t count = d.vertices.size();

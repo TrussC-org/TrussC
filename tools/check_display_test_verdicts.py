@@ -23,6 +23,7 @@ EXCEPTIONS = {
     ("core/tests/loggerThreadSafety/src/main.cpp", "expected-abort"),
     ("core/tests/hotReloadLifecycle/src/main.cpp", "atexit-verdict"),
     ("core/tests/windowTick/late-window.cpp", "linux-returning-lifetime"),
+    ("core/tests/headlessConsole/src/windowConsoleChecks.h", "returning-setup-quit"),
 }
 NON_CODE = re.compile(
     r'//[^\n]*|/\*.*?\*/|(?:u8|u|U|L)?R"([^ ()\\\t\r\n]{0,16})\(.*?\)\1"'

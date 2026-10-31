@@ -7,15 +7,14 @@
 namespace trussc::internal {
 int& appExitCode();  // defined in tcGlobal.cpp; shared by host, guests and backends
 bool& appSetupCalled();  // defined in tcGlobal.cpp; whether setup ran in this launch
-std::atomic<bool>& sessionEndExit();
-enum class EndingPolicy { Normal, ForcedBusy };
-void shutdownRuntime(EndingPolicy policy = EndingPolicy::Normal) noexcept;
+void shutdownRuntime() noexcept;
+bool sessionEndCommitted() noexcept;
 bool querySessionEnd() noexcept;
 void cancelSessionEnd() noexcept;
 void commitSessionEnd() noexcept;
 void setSessionActivityProbe(bool (*probe)()) noexcept;
 // The terminal phase is separate from process termination for compiled probes.
-void endRuntimeForSession() noexcept;
+bool endRuntimeForSession() noexcept;
 void prepareLogoutWatchdog();
 void cancelLogoutWatchdog() noexcept;
 void armLogoutWatchdog(float seconds) noexcept;

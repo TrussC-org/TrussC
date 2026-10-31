@@ -127,7 +127,7 @@ public:
     }
     template<class Apply> std::shared_ptr<State> begin(Event<LoadResult>& event, Apply apply) {
         cancel();
-        auto state = makeCodeShared<State>();
+        auto state = std::make_shared<State>();
         state->run = appRunToken();
         state->appOwner = currentAppOwner();
         auto cancel = [weak = std::weak_ptr<State>(state)] {
@@ -138,7 +138,7 @@ public:
         // leave no cancellation registration on that App.
         event_ = EventSnapshotDelivery<LoadResult>::bind(event, gate_);
         state->event.target = event_;
-        apply_ = makeCodeShared<ResourceLoadState::Target>(
+        apply_ = std::make_shared<ResourceLoadState::Target>(
             [this, apply = std::move(apply)](ResourceLoadState& base) {
                 auto& ready = static_cast<State&>(base);
                 if (state_.get() != &ready) return;
@@ -163,7 +163,7 @@ private:
     std::shared_ptr<State> state_;
     std::shared_ptr<ResourceLoadState::Target> apply_;
     std::shared_ptr<typename EventSnapshotDelivery<LoadResult>::Target> event_;
-    std::shared_ptr<NetworkDelivery> gate_ = makeCodeShared<NetworkDelivery>();
+    std::shared_ptr<NetworkDelivery> gate_ = std::make_shared<NetworkDelivery>();
 };
 
 } // namespace trussc::internal

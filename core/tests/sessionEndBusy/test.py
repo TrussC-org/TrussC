@@ -23,6 +23,11 @@ if sanitized:
  flags.append('-no-pie')
 binary=scratch/('probe-tsan' if sanitized else 'probe')
 subprocess.run([compiler,*flags,'-O0','-g0',str(root/'core/tests/sessionEndBusy/src/main.cpp'),*objects,*libs,'-o',str(binary)],cwd=build,check=True)
+# A link-time check complements timings even on small/fast Linux binaries.
+symbols=subprocess.check_output(['nm','-C',str(root/'core/tests/allCoreTests/bin/allCoreTests')],text=True,encoding='utf-8')
+for symbol in ['retainGuestCodeFor','makeCodeShared','dladdr']:
+ if symbol in symbols:raise SystemExit('FAIL: combined binary still contains '+symbol)
+print('PASS: combined binary has no per-object guest retention or dladdr symbol',flush=True)
 records=[]
 def run(name,args,expected=None,deadline=8):
  start=time.monotonic()
@@ -41,36 +46,31 @@ def run(name,args,expected=None,deadline=8):
  if not good:raise SystemExit(log)
 run('deterministic',[])
 run('watchdog-runs',['watchdog-runs'])
-run('frozen-exit-event',['update','0','inf'],['cross-notify cannot advance App 1: PASS','App-owned ordinary and own exit events frozen: PASS'])
-if sanitized:raise SystemExit(0)
-# Actual GPU/device behavior, including the inherited Draw phase regression.
-gpu=scratch/'gpu-freeze'
-subprocess.run([compiler,*flags,'-O0','-g0',str(root/'core/tests/sessionEndBusy/gpu-freeze.cpp'),*libs,'-lEGL','-o',str(gpu)],cwd=build,check=True)
-saved=binary;binary=gpu
-run('gpu-freeze',[],['grabScreen inside Draw-interrupted exit: PASS','worker captureWindow admission: PASS','IES loadFromString frozen: PASS','uploaded Mesh lazy point draw creates no resources: PASS'])
-binary=saved
 run('query',['query'])
-run('late-disposal',['late-disposal'])
-for mode in ['update','event','draw','onRender','constructor','audio','idle','cohort','before-exit','during-exit','swap','owner-lock','throw','audio-idle','audio-freeze','native-busy']:
- run(mode,[mode,'0','inf'],['EXIT 3', 'RETURN 2' if mode=='swap' else 'RETURN 1'])
-# Numeric validation retains an earlier positive value. A veto-free watchdog
-# must interrupt the first long exit before it can return.
+run('worker-query',['worker-query'])
+if not sanitized:
+ for mode in ['busy','native-busy','constructor']:
+  run(mode,[mode],['busy commit returns with no App exit or watchdog: PASS'])
+if sanitized:raise SystemExit(0)
+logfile = scratch/'idle-final.log'
+logfile.unlink(missing_ok=True)
+run('idle-log',['idle-log','0','inf',str(logfile)],['App final stdout exit line','exit: clean','App final exit line 1'])
+text = logfile.read_text(encoding='utf-8')
+assert 'exit: clean' in text and 'App final exit line 1' in text, 'idle commit lost final file log lines'
+print('PASS: idle commit preserves final exit lines in file and captured stdout',flush=True)
+run('idle-check',['idle-check','0','inf'],['idle common ending includes every cleanup: PASS'])
+run('idle',['idle','0','inf'],['EXIT 3','RETURN 1'])
 for mode in ['negative','nan']:
  run(mode,[mode,'5','0.05'],['setLogoutTimeout()','EXIT 3'])
  text=(out/('session-'+mode+'.log')).read_text(encoding='utf-8');assert 'RETURN 3' not in text
-run('zero',['zero','5','0']);assert 'EXIT' not in (out/'session-zero.log').read_text(encoding='utf-8')
-# Real sleep probes are externally supervised; exact deadline semantics above
-# use an injected clock and do not depend on scheduler timing.
+run('zero',['idle','5','0']);assert 'EXIT' not in (out/'session-zero.log').read_text(encoding='utf-8')
 for delay in ['2','5','10']:
- run('default-'+delay,['busy',delay],['EXIT 3'])
- run('configured-'+delay,['busy',delay,'0.05'],['EXIT 3'])
-run('shared-budget',['busy','0.07','0.1'],['RETURN 3','EXIT 2'])
+ run('default-'+delay,['idle',delay],['EXIT 3'])
+ run('configured-'+delay,['idle',delay,'0.05'],['EXIT 3'])
+run('shared-budget',['idle','0.07','0.1'],['RETURN 3','EXIT 2'])
 assert 'RETURN 2' not in (out/'session-shared-budget.log').read_text(encoding='utf-8')
-run('infinity',['busy','0.02','inf'],['RETURN 1'])
-run('ordinary-no-watchdog',['normal','0.05','0.001'],['ordinary quit has full cleanup: PASS'])
-
-# Infinity is supervised externally, including an exit that remains blocked.
-p=subprocess.Popen([str(binary),'busy','5','inf'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8')
+run('infinity',['idle','0.02','inf'],['RETURN 1'])
+p=subprocess.Popen([str(binary),'idle','5','inf'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,encoding='utf-8')
 try:
  text=p.communicate(timeout=0.5)[0]
  raise AssertionError('infinite watchdog unexpectedly terminated: '+text)

@@ -211,10 +211,6 @@ int main(int argc, char** argv) {
         if (runHeadlessApp<RestartFirst>()) return 2;
         forbidLateCalls.store(true, std::memory_order_release);
         restartCheck(internal::frameworkShutdown(), "run 1 stopped before destruction");
-#if defined(TC_LATE_MAC_DELETER)
-        // Even a stale session flag must allow stopped CPU registry removal.
-        internal::sessionEndExit() = true;
-#endif
         if (concurrentRestart) {
             std::barrier start(static_cast<ptrdiff_t>(workerCount));
             std::array<std::thread, workerCount> workers;
@@ -242,9 +238,6 @@ int main(int argc, char** argv) {
         retainedLight.reset(); retainedMaterial.reset(); retainedEnvironment.reset();
         checkLighting(retained->context());
         retainedFbo.reset(); retainedImage.reset(); retained.reset();
-#if defined(TC_LATE_MAC_DELETER)
-        internal::sessionEndExit() = false;
-#endif
         forbidLateCalls.store(false, std::memory_order_release);
         if (runHeadlessApp<RestartSecond>()) return 2;
         std::printf("late-window: restart completed, %d failures\n", restartFailures);

@@ -80,7 +80,6 @@ _sapp_tc_window_t* _sapp_tc_mac_fail(_sapp_tc_window_t*,const char*) { return nu
 bool _sapp_tc_win32_trust_hidden_signals() { return true; }
 void DragAcceptFiles(void*,int) {}
 void add_link() {} void register_drop() {} void order_out() {}
-bool _sapp_tc_mac_frozen() { return false; }
 void _sapp_tc_mac_contained(const char*) {}
 void _sapp_tc_mac_schedule_deferred() {}
 _sapp_tc_window_t* _sapp_tc_mac_live(unsigned id) { return _sapp_tc_lookup({id}); }

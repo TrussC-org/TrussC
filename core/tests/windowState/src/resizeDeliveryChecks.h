@@ -68,52 +68,6 @@ void checkResizeDelivery(tc::Window& window, sapp_tc_window_metadata& metadata,
     check("feedback catchup deduplicates on following ticks", matches(pendingPixels) && app->sizes == beforeCatchup + 1);
     observe(200);
 
-    int attempts = 0;
-    auto once = window.events().windowResized.listen([&](tc::ResizeEventArgs&) {
-        if (++attempts == 1) throw std::runtime_error("one-shot typed resize interruption");
-    }, tc::EventPriority::BeforeApp);
-    const auto beforeFailure = app->sizes;
-    observe(250);
-    check("one-shot listener failure is caught before App delivery",
-          attempts == 1 && matches(200) && app->sizes == beforeFailure && window.context().fbWidth == 250);
-    tick();
-    check("next tick retries interrupted typed delivery", attempts == 2 && matches(250) && app->sizes == beforeFailure + 1);
-    tick();
-    check("successful retry deduplicates", attempts == 2 && matches(250) && app->sizes == beforeFailure + 1);
-    once.disconnect();
-
-    attempts = 0;
-    auto always = window.events().windowResized.listen([&](tc::ResizeEventArgs&) {
-        ++attempts;
-        // Pump an identical native resize before throwing. It cannot recurse
-        // into another size attempt or consume this interrupted delivery.
-        if (attempts == 1) event();
-        throw std::runtime_error("persistent typed resize interruption");
-    }, tc::EventPriority::BeforeApp);
-    observe(300);
-    check("persistent throw stays inside native event boundary", attempts == 1 && matches(250));
-    for (int i = 0; i != 3; ++i) {
-        const int before = attempts;
-        tick();
-        check("persistent throw makes exactly one attempt per native tick", attempts == before + 1 && matches(250));
-    }
-    always.disconnect();
-    tick();
-    check("delivery recovers after persistent listener disconnects", matches(300));
-
-    // Even if a late listener throws after the App received an intermediate
-    // size, returning to an older delivered extent must still be retried.
-    auto late = window.events().windowResized.listen([&](tc::ResizeEventArgs&) {
-        metadata.fb_width = metadata.fb_height = 300;
-        event();
-        throw std::runtime_error("late typed resize interruption");
-    }, tc::EventPriority::AfterApp);
-    observe(350);
-    check("late failure preserves latest native observation", matches(350) && window.context().fbWidth == 300);
-    late.disconnect();
-    tick();
-    check("late failure retries even an earlier delivered extent", matches(300));
-
     // Preserve the first review's argument-edit collision fix.
     notifications = 0;
     auto collision = window.events().windowResized.listen([&](tc::ResizeEventArgs& e) {
@@ -125,4 +79,14 @@ void checkResizeDelivery(tc::Window& window, sapp_tc_window_metadata& metadata,
     check("real change still delivers when edited App already matches", notifications == 2 && matches(400));
     event(); tick();
     check("identical native events and ticks still deduplicate", notifications == 2 && matches(400));
+
+    int attempts = 0;
+    auto failure = window.events().windowResized.listen([&](tc::ResizeEventArgs&) {
+        ++attempts;
+        throw std::runtime_error("terminal resize callback failure");
+    }, tc::EventPriority::BeforeApp);
+    observe(450);
+    check("throwing resize is contained and fails the Window", attempts == 1 && !window.isOpen());
+    tick(); tick();
+    check("failed Window never replays resize on later ticks", attempts == 1);
 }

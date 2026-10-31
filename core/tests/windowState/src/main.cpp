@@ -127,7 +127,6 @@ void exercise(Window& w, uint32_t id) {
             internal::syncWindowAppSize(w);
         });
     };
-    checkResizeDelivery(w, n.metadata, app, sizeEntry, sizeEntry, check);
     check("metadata never acquires a drawable", n.acquisitions == 0);
     n.metadata.trust_hidden_signals = false;
     internal::refreshWindowMetadata(w);
@@ -145,6 +144,7 @@ void exercise(Window& w, uint32_t id) {
     w.context().activateNative(w.context().acquireSwapchainUser);
     (void)w.context().acquireSwapchain(w.context().acquireSwapchainUser);
     check("native operations use this window's table and user", n.acquisitions == acquisitions + 1 && n.activations == activations + 1);
+    checkResizeDelivery(w, n.metadata, app, sizeEntry, sizeEntry, check);
     internal::WindowRequestAccess::unbind(w);
     check("closed getter and identity clear", !w.isOpen() && !w.isOccluded() && internal::WindowRequestAccess::creationId(w) == 0);
     internal::WindowRequestAccess::endApp(w);

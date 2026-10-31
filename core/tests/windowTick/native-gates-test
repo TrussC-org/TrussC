@@ -22,7 +22,7 @@ def fail(message):
 
 def read(path):
     try:
-        return path.read_text()
+        return path.read_text(encoding='utf-8')
     except OSError as error:
         fail(str(error))
 
@@ -60,13 +60,6 @@ def prefix(text, marker, boundary, origin, markers):
     part = body(text, marker, origin)
     return part[:position(part, boundary, origin)]
 
-# Keep the complete admission path; replace work beyond it with a counted seam.
-app_admission = prefix(window_header, 'inline void Window::applyPendingApp() {',
-    '    applyingApp_ = true;', 'tcWindow.h', window_markers) + '    ++app_work;\n}\n'
-adapter_admission = prefix(mac_adapter,
-    'std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {',
-    '    auto win = std::make_shared<Window>();', 'tcWindowMac.mm', mac_markers)
-adapter_admission = adapter_admission.replace('internal::createSecondaryWindow', 'create_secondary') + '    ++adapter_creates; return nullptr;\n}\n'
 event_markers = []
 def event_extract(marker):
     event_markers.append(marker)
@@ -85,9 +78,8 @@ def common_extract(marker):
     common_markers.append(marker)
     return body(common, marker, 'tcGlobal.cpp') + '\n'
 
-session_flag = common_extract('std::atomic<bool>& sessionEndExit() {')
+session_flag = ""
 app_exit_notifications = ''
-attachment_ledger = body(runtime_source, 'class AttachmentLedger {', 'tcWindowRuntime.cpp') + ';\n'
 # Compile the complete production cleanup body with the macOS branch enabled.
 # Record its service calls, leaving both its early return and std::exit intact.
 mac_cleanup = ''
@@ -451,7 +443,7 @@ void dispose(Native* w) {
     for (auto& slot : _sapp_tc.windows) if (slot==w) slot=nullptr;
     if (target==w) target=nullptr;
 }
-''' + re.search(r'^static [^;{}\n]*\b_sapp_tc_mac_observe\([^;{}]*\);', native, re.M).group(0) + '\n' + extract('static bool _sapp_tc_mac_frozen(void) {') + extract('static _sapp_tc_window_t* _sapp_tc_mac_live(') + extract('static void _sapp_tc_mac_contained(') + extract('struct _sapp_tc_mac_callback_scope {') + ';\n' + extract('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {') + extract('static void _sapp_tc_send_type(') + r'''
+''' + re.search(r'^static [^;{}\n]*\b_sapp_tc_mac_observe\([^;{}]*\);', native, re.M).group(0) + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_live(') + extract('static void _sapp_tc_mac_contained(') + extract('struct _sapp_tc_mac_callback_scope {') + ';\n' + extract('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {') + extract('static void _sapp_tc_send_type(') + r'''
 void _sapp_tc_timing_update(_sapp_tc_timing_t* t) { ++timing; t->smooth_dt+=.001; }
 static void _sapp_tc_mac_process_visibility();
 static void _sapp_tc_mac_process_deferred();
@@ -671,7 +663,6 @@ void reset(Native& w,NSWindow& window,View& view,bool role) {
     close_queries=0; close_allowed=true; direct_probe=direct_probing=session_probe=false;
     direct_target=nullptr; session_pipe=-1;
     close_on_event=-1; request_before_direct=request_after_direct=false;
-    trussc::internal::sessionEndExit()=false;
     skip_in_callback=reenter=dispose_in_callback=false; events.clear(); event_windows.clear();
     probe_callbacks=probing=nest_event=request_deferred=false;
     throw_kind=probe_kind=-1; destroy_at=creation_stage=0;
@@ -725,26 +716,9 @@ int native_allocations=0;
     ++native_allocations;
     // Count crossing the admission boundary before standing in for native
     // allocation. A guard-removal mutant must not enter AppKit setup seams.
-    if (trussc::internal::sessionEndExit()) return target;
     Native* w=target; // Fixture has completed allocation, initialization and publication.
     creation_record=w;
 ''' + mac_constructing_scope + '    _sapp_tc_creation_transaction creation(w, [](Native*) {});\n' + mac_constructor + '\n' + extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window(const _sapp_tc_native_desc* d) {') + extract('sapp_window sapp_create_window(const sapp_window_desc* desc) {') + r'''
-namespace trussc::internal {
-int app_work=0,adapter_creates=0;
-struct Window {
-    int id; struct State { int width; } state;
-    bool appRequested_=true,applyingApp_=false,exitDelivered_=false;
-    int dispatchDepth_=0;
-    void applyPendingApp();
-};
-namespace internal = ::mac::trussc::internal;
-''' + app_admission + r'''
-struct WindowSettings {};
-namespace headless { bool isActive() { return false; } }
-struct LogSink { template<class T> LogSink& operator<<(T&&) { return *this; } };
-LogSink logError(const char*) { return {}; }
-''' + adapter_admission + r'''
-}
 void run() {
     int before=failures, count=checks;
     Native w; NSWindow window; View view; CADisplayLink link;
@@ -1065,10 +1039,6 @@ void run() {
     w.closed_pending=false; w.native_closed=true; applicationDidBecomeActive(nullptr,nil);
     check("macOS visibility recheck skips natively closed windows", w.occluded);
     w.native_closed=false;
-    trussc::internal::sessionEndExit()=true;
-    applicationDidBecomeActive(nullptr,nil);
-    check("macOS frozen visibility recheck leaves state unchanged", w.occluded && w.fallback_active);
-    trussc::internal::sessionEndExit()=false;
     // AppKit's live resize loop has no client callback on the stack. Deliver
     // a real source tick to the resizing window and its peer in that state.
     for (bool role : {false,true}) {
@@ -1287,34 +1257,6 @@ void run() {
             native_closes==1 && close_callbacks==1 && close_queries==0 &&
             w.native_closed && !w.close_requested && !w.closed_pending);
     }
-    reset(w,window,view,false);
-    {
-        using namespace trussc::internal;
-        session_queries=session_commits=0;
-        sessionEndExit()=true;
-        _sapp_tc_send_type(&w,SAPP_EVENTTYPE_RESIZED);
-        check("macOS frozen event send is blocked", events.empty() && _sapp_tc.callbacks_active==0);
-        _sapp_tc_mac_tick(&w,nil); link_tick(&view,nil); fallback_tick(&view,&timer);
-        check("macOS frozen ticks do no callback or GPU work", consulted==0 && timing==0 && dimensions==0 && acquired==0 && reconciled==0 && w.frame_count==0);
-        w.close_requested=true; _sapp_tc.terminate_pending=true; _sapp_tc.deferred_blocked=true;
-        _sapp_tc_mac_process_deferred();
-        check("macOS frozen deferred pass preserves pending work", close_queries==0 && closed==0 && quit==0 && w.close_requested && _sapp_tc.terminate_pending && _sapp_tc.deferred_blocked);
-        _sapp_tc.terminate_pending=false; _sapp_tc.app.quit_ordered=false;
-        attribute_reason=0x73687574;
-        check("macOS frozen applicationShouldTerminate is blocked", application_should_terminate(nullptr)==NSTerminateCancel && session_queries==0 && session_commits==0 && exit_requests==0 && !*exit_reason && !_sapp_tc.terminate_pending);
-        native_allocations=0; sapp_window_desc frozen_desc{};
-        check("macOS frozen native creation refuses before allocation", sapp_create_window(&frozen_desc).id==0 && native_allocations==0 && _sapp_tc.create_error);
-        Window pending_window{5,{80}};
-        app_work=0; pending_window.applyPendingApp();
-        check("macOS frozen applyPendingApp returns before attachment", app_work==0 && pending_window.appRequested_ && !pending_window.applyingApp_);
-        adapter_creates=0;
-        check("macOS frozen createSecondaryWindow refuses", !create_secondary(WindowSettings{}) && adapter_creates==0);
-        sessionEndExit()=false;
-        pending_window.applyPendingApp();
-        create_secondary(WindowSettings{});
-        check("macOS thawed admission seams reach work", app_work==1 && adapter_creates==1);
-    }
-    summary("macOS round 4e freeze / single snapshot", before, count);
     before=failures; count=checks;
     // Exercise the sole layer/texture writer directly and through both real
     // delegates. Nonzero, changed sizes make a removed guard perform GPU work.
@@ -1327,21 +1269,10 @@ void run() {
             else window_did_change_screen(&view,nullptr);
             return false; // Delegates return void; only the direct call reports change.
         };
-        trussc::internal::sessionEndExit()=true;
-        const bool frozen_result=update();
-        check(path==0?"macOS frozen dimensions return false without layer or texture work":
-              path==1?"macOS frozen resize delegate does no layer or texture work":
-                      "macOS frozen screen delegate does no layer or texture work",
-            !frozen_result && dimensions==0 && ensure_textures==0 && texture_allocations==0 &&
-            w.layer->contentsScale.writes==0 && w.layer->drawableSize.writes==0 &&
-            w.layer->contentsScale.value==1 && w.layer->drawableSize.width==640 &&
-            w.layer->drawableSize.height==480 && w.dpi_scale==1 &&
-            w.fb_width==640 && w.fb_height==480 && w.win_width==640 && w.win_height==480 && events.empty());
-        trussc::internal::sessionEndExit()=false;
         const bool thawed_result=update();
-        check(path==0?"macOS thawed dimensions publish and allocate":
-              path==1?"macOS thawed resize delegate publishes and allocates":
-                      "macOS thawed screen delegate publishes and allocates",
+        check(path==0?"macOS dimensions publish and allocate":
+              path==1?"macOS resize delegate publishes and allocates":
+                      "macOS screen delegate publishes and allocates",
             thawed_result==(path==0) && dimensions==1 && ensure_textures==1 && texture_allocations==1 &&
             w.layer->contentsScale.writes==1 && w.layer->drawableSize.writes==1 &&
             w.layer->contentsScale.value==2 && w.layer->drawableSize.width==1600 &&
@@ -1349,35 +1280,26 @@ void run() {
             w.fb_width==1600 && w.fb_height==1200 && w.win_width==800 && w.win_height==600 &&
             events==(path==0?std::vector<int>{}:std::vector<int>{SAPP_EVENTTYPE_RESIZED}));
     }
-    // A session end interrupts an already admitted main or secondary tick.
-    // Test both an empty drawable cache and a drawable acquired before freeze.
+    // Test both an empty and an acquired drawable cache.
     for (bool role : {false,true}) for (int cached : {0,7}) {
         reset(w,window,view,role); w.in_tick=w.draw_admitted=true; w.frame_drawable=cached;
         if (role) _sapp_tc.app.main=&w;
-        trussc::internal::sessionEndExit()=true;
-        check("macOS frozen admitted tick rejects drawable for either role",
-            _sapp_tc_mac_drawable(&w)==0 && acquired==0 && w.frame_drawable==cached);
-        trussc::internal::sessionEndExit()=false;
         const int expected=cached?cached:1;
-        check("macOS thawed admitted tick acquires or reuses drawable for either role",
+        check("macOS admitted tick acquires or reuses drawable for either role",
             _sapp_tc_mac_drawable(&w)==expected && acquired==int(!cached) &&
             _sapp_tc_mac_drawable(&w)==expected && acquired==int(!cached));
     }
     // Outside a tick the legacy main API bypasses the per-window accessor;
-    // its own frozen gate must prevent nextDrawable independently.
+    // the nextDrawable cache follows the tick lifetime.
     for (bool in_tick : {false,true}) {
         reset(w,window,view,true); _sapp_tc.app.main=&w;
         w.in_tick=in_tick; w.draw_admitted=true;
-        trussc::internal::sessionEndExit()=true;
-        check("macOS frozen main drawable does not acquire",
-            _sapp_tc_main_next_drawable()==0 && acquired==0 && w.frame_drawable==0);
-        trussc::internal::sessionEndExit()=false;
-        check("macOS thawed main drawable acquires",
+        check("macOS main drawable acquires",
             _sapp_tc_main_next_drawable()==1 && acquired==1);
-        check("macOS thawed main drawable follows tick cache policy",
+        check("macOS main drawable follows tick cache policy",
             _sapp_tc_main_next_drawable()==1 && acquired==(in_tick?1:2));
     }
-    summary("macOS round 4f frozen GPU / delegates / admitted drawable", before, count);
+    summary("macOS round 4f GPU / delegates / admitted drawable", before, count);
 }
 }
 namespace win {
@@ -1561,9 +1483,9 @@ HRESULT SwapChain::Present(UINT,UINT flags) {
 namespace x11 {
 Native* live = nullptr;
 Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? live : nullptr; }
-struct { double refresh_period=.017; int WM_STATE=1; } _sapp_tc;
+struct { double refresh_period=.017; int WM_STATE=1; struct { bool quit_ordered=false; } app; } _sapp_tc;
 int consulted, updates, acquired, presents, state, polls;
-bool changed=false, closeOnResize=false, closeOnTick=false, reenter=false;
+bool changed=false, closeOnResize=false, closeOnTick=false, reenter=false, renewalOk=true;
 void _sapp_tc_x11_init_client() {} // admission covered by host-entry-test
 static void _sapp_tc_x11_tick(Native*);
 std::vector<int> events;
@@ -1572,7 +1494,8 @@ void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
 struct _sapp_tc_x11_surface_scope {};
 void _sapp_tc_x11_pace(Native* w,double seconds) { w->earliest_next=10+seconds; }
 void _sapp_tc_x11_pace_periodic(Native* w,double seconds) { w->earliest_next=10+seconds; }
-bool _sapp_tc_x11_resize_surface(Native*) { return true; }
+bool _sapp_tc_x11_resize_surface(Native*) { return renewalOk; }
+void sapp_destroy_window(sapp_window) { live=nullptr; }
 bool _sapp_tc_x11_update_dimensions(Native*) { ++polls; return changed; }
 bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
 void _sapp_tc_x11_swap(Native*) { ++presents; }
@@ -1599,6 +1522,15 @@ void visibility(Native* w,int observed) {
 }
 void run() {
     int before=failures, count=checks;
+    {
+        Native w; live=&w; w.desc={callback,&w}; changed=true; renewalOk=false;
+        consulted=acquired=presents=0;
+        _sapp_tc_x11_tick(&w);
+        check("X11 failed renewal closes Window and ends backend without drawing",
+              !live && _sapp_tc.app.quit_ordered && consulted==0 && acquired==0 && presents==0);
+        changed=false; renewalOk=true; _sapp_tc.app.quit_ordered=false;
+    }
+
     for (bool role : {false,true}) for (bool trust : {false,true})
     for (bool allow : {false,true}) for (bool iconic : {false,true}) for (bool obscured : {false,true}) {
         Native w; live=&w; w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
@@ -1848,43 +1780,9 @@ if '--mutations' in sys.argv[3:]:
     mutants.update({name: contents for name, (contents, label) in round4c_mutants.items()})
     cleanup_mutants = {}
     common_mutants = {}
-    freeze_mutants = {
-        'event': ('static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {',
-            '_sapp_tc_mac_frozen() || ', '', 'macOS frozen event send is blocked'),
-        'tick': (blocked, '_sapp_tc_mac_frozen() || ', '', 'macOS frozen ticks do no callback or GPU work'),
-        'deferred': (pending, 'if (_sapp_tc_mac_frozen()) return;', '', 'macOS frozen deferred pass preserves pending work'),
-        'terminate': (should_terminate, 'if (_sapp_tc_mac_frozen()) return NSTerminateCancel;', '',
-            'macOS frozen applicationShouldTerminate is blocked'),
-        'creation': (ctor, 'if (_sapp_tc_mac_frozen())', 'if (false)', 'macOS frozen native creation refuses before allocation'),
-        'dimensions': ('static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w) {',
-            'if (_sapp_tc_mac_frozen()) return false;', '',
-            'macOS frozen dimensions return false without layer or texture work'),
-        'drawable': ('static id<CAMetalDrawable> _sapp_tc_mac_drawable(',
-            'if (_sapp_tc_mac_frozen()) return nil;', '',
-            'macOS frozen admitted tick rejects drawable for either role'),
-        'main-drawable': ('static id<CAMetalDrawable> _sapp_tc_main_next_drawable(void) {',
-            'if (_sapp_tc_mac_frozen()) return nil;', '',
-            'macOS frozen main drawable does not acquire'),
-    }
-    freeze_mutants = {'mac-frozen-'+name: (change(marker, old, new), label)
-                      for name, (marker, old, new, label) in freeze_mutants.items()}
-    mutants.update({name: contents for name, (contents, label) in freeze_mutants.items()})
-    window_mutants = {'mac-frozen-app-attach': (change('inline void Window::applyPendingApp() {',
-        'if (internal::sessionEndExit()) return;', '', text=window_header),
-        'macOS frozen applyPendingApp returns before attachment'),
-        'mac-thawed-app-attach': (change('inline void Window::applyPendingApp() {',
-            'if (internal::sessionEndExit()) return;', 'return;', text=window_header),
-            'macOS thawed admission seams reach work')}
-    adapter_mutants = {
-        'mac-frozen-secondary-creation': (change('std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {',
-            'if (sessionEndExit()) {', 'if (false) {', text=mac_adapter), 'macOS frozen createSecondaryWindow refuses'),
-    }
     event_mutants = {}
-    adapter_mutants['mac-thawed-secondary-creation'] = (change(
-        'std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {',
-        'if (sessionEndExit()) {', 'if (true) {', text=mac_adapter), 'macOS thawed admission seams reach work')
     targeted_mutants = dict(round3_mutants, **round4_mutants, **round4c_mutants,
-                            **cleanup_mutants, **common_mutants, **event_mutants, **freeze_mutants, **window_mutants, **adapter_mutants)
+                            **cleanup_mutants, **common_mutants, **event_mutants, **{})
     # Remove both redundant callback checks to expose close during an event
     # outside a tick. The tick and constructor checks remain in this mutant.
     mutants['mac-close-inside-callback'] = change(busy, ' || cw->callback_depth > 0', '',
@@ -1938,8 +1836,6 @@ if '--mutations' in sys.argv[3:]:
     fixtures = [(*fixture, event_header) for fixture in fixtures]
     fixtures += [(name, native, shared, trussc_header, common, value) for name, (value, label) in event_mutants.items()]
     fixtures = [(*fixture, window_header, mac_adapter) for fixture in fixtures]
-    fixtures += [(name, native, shared, trussc_header, common, event_header, value, mac_adapter) for name, (value, label) in window_mutants.items()]
-    fixtures += [(name, native, shared, trussc_header, common, event_header, window_header, value) for name, (value, label) in adapter_mutants.items()]
     for name, contents, utility, cleanup_source, global_source, event_source, window_source, adapter_source in fixtures:
         rc, output = run_fixture(contents, utility, cleanup_source, global_source, event_source, window_source, adapter_source)
         totals = [line for line in output.splitlines() if 'native-gates: total ' in line]

@@ -133,7 +133,7 @@ public:
 
     Event() : Event(EventPriority::App) {}
     explicit Event(int defaultPriority)
-        : alive_(internal::makeCodeShared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
+        : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     // Copy/Move forbidden (events have fixed location)
@@ -248,7 +248,7 @@ private:
         const auto count = std::count_if(entries.begin(), entries.end(),
             [](const Entry& e) { return e.frameworkOwned; });
         if (!count) return {};
-        auto snapshot = internal::makeCodeShared<EntryList>();
+        auto snapshot = std::make_shared<EntryList>();
         snapshot->reserve(count);
         for (const auto& e : entries) if (e.frameworkOwned) snapshot->push_back(e);
         return snapshot;
@@ -275,15 +275,15 @@ private:
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
             cur = internal::sharedLoad(entries_);
-            auto next = cur ? internal::makeCodeShared<EntryList>(*cur)
-                            : internal::makeCodeShared<EntryList>();
+            auto next = cur ? std::make_shared<EntryList>(*cur)
+                            : std::make_shared<EntryList>();
             // Sweep tombstones left by a failed removal snapshot allocation.
             std::erase_if(*next, [](const Entry& e) {
                 return e.alive && !e.alive->load(std::memory_order_acquire);
             });
             next->push_back({id, priority, deliver, frameworkOwned,
-                             callback ? internal::makeCodeShared<Callback>(std::move(callback)) : nullptr,
-                             internal::makeCodeShared<std::atomic<bool>>(true), owner});
+                             callback ? std::make_shared<Callback>(std::move(callback)) : nullptr,
+                             std::make_shared<std::atomic<bool>>(true), owner});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -292,9 +292,10 @@ private:
             // Allocate the disconnect callable BEFORE publishing. A failure
             // must not leave a live entry without its owning handle.
             std::weak_ptr<std::atomic<bool>> weak = alive_;
-            disconnect = internal::eventDisconnect(this, id, weak, [](void* event, uint64_t entry) {
-                static_cast<Event*>(event)->removeListener(entry);
-            });
+            disconnect = [this, id, weak] {
+                auto live = weak.lock();
+                if (live && live->load(std::memory_order_acquire)) removeListener(id);
+            };
             frameworkEntries_ = std::move(framework);
             internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
@@ -364,7 +365,7 @@ private:
                         if (!lease) { accepted = false; continue; }
                     }
                     internal::AppOwnerScope workerOwner(entry.owner.lock());
-                    auto copy = internal::makeCodeShared<OwnedCopy>(std::move(lease), arg, *entry.callback);
+                    auto copy = std::make_shared<OwnedCopy>(std::move(lease), arg, *entry.callback);
                     runOnMainThread([copy, run, sourceAlive]() mutable {
                         if (internal::eventSourceIsAlive(sourceAlive) && (!run || run->load(std::memory_order_acquire))) copy->callback(copy->payload);
                     }, std::weak_ptr<std::atomic<bool>>(entry.alive));
@@ -433,7 +434,7 @@ private:
             for (const auto& e : *cur) {
                 if (e.id == id && e.alive) e.alive->store(false);
             }
-            auto next = internal::makeCodeShared<EntryList>();
+            auto next = std::make_shared<EntryList>();
             next->reserve(cur->size());
             for (const auto& e : *cur) {
                 if (e.id != id && (!e.alive || e.alive->load(std::memory_order_acquire)))
@@ -467,7 +468,7 @@ public:
 
     Event() : Event(EventPriority::App) {}
     explicit Event(int defaultPriority)
-        : alive_(internal::makeCodeShared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
+        : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     Event(const Event&) = delete;
@@ -576,7 +577,7 @@ private:
         const auto count = std::count_if(entries.begin(), entries.end(),
             [](const Entry& e) { return e.frameworkOwned; });
         if (!count) return {};
-        auto snapshot = internal::makeCodeShared<EntryList>();
+        auto snapshot = std::make_shared<EntryList>();
         snapshot->reserve(count);
         for (const auto& e : entries) if (e.frameworkOwned) snapshot->push_back(e);
         return snapshot;
@@ -601,15 +602,15 @@ private:
             TC_LOCK_GUARD(mutex_);
             id = nextId_++;
             cur = internal::sharedLoad(entries_);
-            auto next = cur ? internal::makeCodeShared<EntryList>(*cur)
-                            : internal::makeCodeShared<EntryList>();
+            auto next = cur ? std::make_shared<EntryList>(*cur)
+                            : std::make_shared<EntryList>();
             // Sweep tombstones left by a failed removal snapshot allocation.
             std::erase_if(*next, [](const Entry& e) {
                 return e.alive && !e.alive->load(std::memory_order_acquire);
             });
             next->push_back({id, priority, deliver, frameworkOwned,
-                             callback ? internal::makeCodeShared<Callback>(std::move(callback)) : nullptr,
-                             internal::makeCodeShared<std::atomic<bool>>(true), owner});
+                             callback ? std::make_shared<Callback>(std::move(callback)) : nullptr,
+                             std::make_shared<std::atomic<bool>>(true), owner});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -618,9 +619,10 @@ private:
             // Allocate the disconnect callable BEFORE publishing. A failure
             // must not leave a live entry without its owning handle.
             std::weak_ptr<std::atomic<bool>> weak = alive_;
-            disconnect = internal::eventDisconnect(this, id, weak, [](void* event, uint64_t entry) {
-                static_cast<Event*>(event)->removeListener(entry);
-            });
+            disconnect = [this, id, weak] {
+                auto live = weak.lock();
+                if (live && live->load(std::memory_order_acquire)) removeListener(id);
+            };
             frameworkEntries_ = std::move(framework);
             internal::sharedStore(entries_, ConstEntryListPtr(next));
         }
@@ -637,9 +639,6 @@ public:
     // Fire event. Hot path: a single atomic load, no allocation, no mutex.
     // Changes to the listener list during a pass: see Event<T>::notify().
     void notify() {
-        // Frozen public notification cannot borrow an ending runner's permit.
-        // FrameworkEventAccess::notifyShutdown owns terminal event delivery.
-        if (internal::sessionEndExit()) return;
         notifySnapshot(internal::sharedLoad(entries_), {}, alive_);
     }
 
@@ -670,7 +669,7 @@ private:
                     if (!lease) { accepted = false; continue; }
                 }
                 internal::AppOwnerScope workerOwner(entry.owner.lock());
-                auto call = internal::makeCodeShared<OwnedCall>(std::move(lease), *entry.callback);
+                auto call = std::make_shared<OwnedCall>(std::move(lease), *entry.callback);
                 runOnMainThread([call, sourceAlive] {
                     if (internal::eventSourceIsAlive(sourceAlive)) call->callback();
                 }, std::weak_ptr<std::atomic<bool>>(entry.alive));
@@ -726,7 +725,7 @@ private:
             for (const auto& e : *cur) {
                 if (e.id == id && e.alive) e.alive->store(false);
             }
-            auto next = internal::makeCodeShared<EntryList>();
+            auto next = std::make_shared<EntryList>();
             next->reserve(cur->size());
             for (const auto& e : *cur) {
                 if (e.id != id && (!e.alive || e.alive->load(std::memory_order_acquire)))
@@ -830,7 +829,7 @@ template<class T> struct ExternalEventDelivery {
             if (entry.deliver == Deliver::Main && entry.callback && entry.alive->load()) { needed = true; break; }
         if (!needed) return {};
         TC_LOCK_GUARD(source.mutex_);
-        if (!source.externalStore_) source.externalStore_ = internal::makeCodeShared<ExternalDeliveryStore>();
+        if (!source.externalStore_) source.externalStore_ = std::make_shared<ExternalDeliveryStore>();
         return source.externalStore_;
     }
     template<class... Args>

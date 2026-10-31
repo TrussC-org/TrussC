@@ -68,6 +68,7 @@ _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
     for (auto* w : _sapp_tc.windows) if (w && w->win_id==h.id) return w;
     return nullptr;
 }
+void sapp_destroy_window(sapp_window h) { for (auto*& w : _sapp_tc.windows) if (w && w->win_id==h.id) w=nullptr; }
 void _sapp_tc_x11_init_client() {}
 double _sapp_tc_now() { return clockValue; }
 int XPending(int) { return 0; }

@@ -1203,7 +1203,6 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 // is allowed.
 uint64_t getFrameCount(); // forward declaration; public update counter
 inline void ensureFontAtlas(int rows) {
-    if (internal::sessionEndExit()) return;
     if (rows <= 0) return;
     auto& atlas = internal::bitmapFontAtlas();
     if (!atlas.initialized) return;  // pipeline/sampler not ready yet
@@ -2101,7 +2100,6 @@ namespace internal {
     // The capture callback also permits GPU-free drain regression tests.
     inline void drainPendingScreenshots(
         bool (*capture)(const std::filesystem::path&) = captureWindowToFile) {
-        if (sessionEndExit()) return;
         auto& ctx = currentWindowContext();
         auto& queue = ctx.pendingScreenshotPaths;
         // Snapshot before any stage that can log: saves queued from a callback
@@ -2126,7 +2124,6 @@ namespace internal {
 // App-authored captures use their existing queue. External requests use MCP's
 // admitted deferral path instead.
 inline bool queueScreenshot(const std::filesystem::path& path) {
-    if (sessionEndExit()) return false;
     auto* resolvedContext = findWindowApiContext();
     if (!resolvedContext) return false;
     std::filesystem::path resolved;
@@ -2369,7 +2366,6 @@ namespace internal {
     // init-time failures sokol reports (e.g. no X display on Linux) and
     // setup-time log lines land in the file too.
     inline void openEnvLogFile() {
-        installCrashHandler();
         #ifndef __EMSCRIPTEN__
         if (const char* envLog = std::getenv("TRUSSC_LOG_FILE")) {
             if (envLog[0] != '\0' && !setLogFile(envLog)) {
@@ -2383,7 +2379,6 @@ namespace internal {
     bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
 
     inline void _setup_cb_impl() {
-        CrashPhaseScope crashPhase("setup");
         installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
@@ -2439,7 +2434,6 @@ namespace internal {
 
     inline void _cleanup_cb_impl() {
         if (!beginExitCleanup()) return;
-        CrashPhaseScope crashPhase("cleanup");
         TeardownSteps steps;
         steps.run("exit begin log", [&] { writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false)); });
         shutdownRuntime();
@@ -2456,7 +2450,7 @@ namespace internal {
         steps.run("exit end log", [] { writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true)); });
         steps.run("restore signals", [] { restoreWindowExitSignals(); });
 #if defined(__APPLE__) && TARGET_OS_OSX
-        if (!sessionEndExit() && appExitCode() != 0) std::exit(appExitCode());
+        if (!sessionEndCommitted() && appExitCode() != 0) std::exit(appExitCode());
 #endif
     }
 
@@ -2563,8 +2557,7 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
     // TRUSSC_SHOW_CONSOLE); a GUI-subsystem Release build has none.
     // sokol restores both code pages when sapp_run() returns. The host's
     // ConsoleCPCtrlGuard covers Ctrl+C, Ctrl+Break, console close and
-    // std::exit(), and restores during exception unwinding; the Windows
-    // crash handler restores after its report.
+    // std::exit(), and restores during exception unwinding.
     // abort(), TerminateProcess and external kills cannot restore them.
     // Ignored on other platforms.
     desc.win32.console_utf8 = true;
@@ -2639,7 +2632,6 @@ struct ConsoleCPCtrlGuard {
         const UINT input = GetConsoleCP();
         consoleCPBeforeRun.output = output;
         consoleCPBeforeRun.input = input;
-        setCrashConsoleCodePages(output, input);
         static const int exitHook = std::atexit(restoreConsoleCP);
         (void)exitHook;
         installed = (output != 0 || input != 0) &&
@@ -2652,7 +2644,6 @@ struct ConsoleCPCtrlGuard {
         // Disarm only after restoring; do not overwrite later changes at exit.
         consoleCPBeforeRun.output = 0;
         consoleCPBeforeRun.input = 0;
-        setCrashConsoleCodePages(0, 0);
     }
     ConsoleCPCtrlGuard(const ConsoleCPCtrlGuard&) = delete;
     ConsoleCPCtrlGuard& operator=(const ConsoleCPCtrlGuard&) = delete;

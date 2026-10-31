@@ -23,21 +23,34 @@ logout/restart/shutdown Apple-event reasons through the same query/commit;
 NSWorkspaceWillPowerOff commits on the main operation queue. Ordinary Cmd+Q remains deferred and
 vetoable at the existing safe boundary.
 
-Before OS-session exits, Runtime freezes new admission and arms one process-wide
-watchdog (default 3 seconds, runtime().setLogoutTimeout(float seconds)). Negative
-or NaN values log Error and retain the previous setting; zero ends immediately,
-and positive infinity leaves the watchdog unarmed. The budget covers all App
-exits together. Windows may impose an earlier deadline. No fixed macOS logout
-allowance is asserted. Ordinary quit never arms this watchdog.
+Busy means App code on the main stack: a host callback, constructor, native
+callback or tick. Workers do not make an idle main busy. A busy query accepts
+without entering App callbacks. On busy commit, no App::exit, exit events,
+cleanup or watchdog runs. Windows returns from WM_ENDSESSION and the OS ends
+the process. macOS calls _exit(0) before returning NSTerminateNow; it never
+uses an unanswered NSTerminateLater that could block logout. A blocked main
+that cannot receive the callback is subject to the OS termination policy.
 
-Busy commit calls each completed App::exit once from the common reverse
-attachment snapshot. It retains interrupted objects and skips Window exit-event
-bands, audio/thread waits, tree cleanup, module unload and native/GPU disposal.
-There is no begin/clean log pair or claim that abandoned work completed. Idle
-commit performs common complete cleanup under the same deadline. Both end the
-process without atexit/static destructors. An OS that supplies no session
-callback cannot guarantee this delivery. Save briefly in exit; do not use the
-GPU or wait for other threads.
+An idle commit runs normal reverse attachment ending synchronously: exit events,
+exactly one App::exit, audio detach and cleanup, then complete service/device
+cleanup. One process-wide watchdog (default 3 seconds,
+runtime().setLogoutTimeout(float seconds)) bounds the whole idle ending.
+Negative or NaN values log Error and retain the old setting; zero ends
+immediately, positive infinity disables the deadline. Ordinary quit arms none.
+Windows may impose an earlier deadline. After idle cleanup, Runtime closes the
+Logger file sink and flushes stdout/stderr, preserving the final exit lines
+before terminal process exit. Busy termination does not flush sinks.
+After idle cleanup, Windows uses
+TerminateProcess; macOS uses _exit. Neither returns to frames. A host without
+a session receiver cannot promise logout delivery.
+
+A quit requested during setup (exitApp/requestExitApp) is handled before the
+first service prelude, and exitRequested still gets its veto. For a Window's root
+App (including headless), the rule is:
+**exit requested in setup → no further App callbacks (no console, no update)**.
+If vetoed, the loop continues normally.
+A child App leaves quit pending until the current tree traversal unwinds; the
+outer turn handles it before the next services, with no callbacks after cleanup.
 
 The first SIGTERM/SIGINT only records a flag in the signal handler. The next
 frame requests exit on the main thread, even in event-driven rendering. A
@@ -80,7 +93,6 @@ callbacks cannot change the reason halfway through the pair.
 | `begin` and `clean` | Normal exit completed |
 | `begin` only | Interrupted during cleanup |
 | Neither | No observed cleanup; unknown, not necessarily a crash |
-| Crash marker from the crash-reporting protocol (#252) | Crash |
 
 At MCP HTTP shutdown, all queued requests and deferred replies receive a
 JSON-RPC response containing `the app is exiting normally (reason=TOKEN)`.
@@ -100,8 +112,9 @@ outside update so veto is meaningful. Native user HWND tests assert that neither
 first nor subsequent user windows own session termination.
 
 Actual Windows logout/restart/shutdown and macOS Air logout with 2/5/10-second
-exit delays require separate auditor supervision. Include modal/audio-in-flight
-cases and synchronous performClose with two secondaries during update. Check
+exit delays require separate auditor supervision. Check busy main drag/modal
+logout gets no App exit and does not block shutdown; separately check synchronous
+performClose with two secondaries during update. Check
 saved state and OS deadlines separately; busy termination has no clean log claim.
 No worker initiates real logout on an unattended host.
 

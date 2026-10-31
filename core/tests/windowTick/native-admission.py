@@ -52,7 +52,7 @@ void _sapp_tc_d3d11_dispatch_pending_device_loss() {}
 void _sapp_tc_mac_schedule_deferred() {}
 bool _sapp_tc_native_hidden(_sapp_tc_window_t*) { return false; }
 bool _sapp_tc_native_iconified(_sapp_tc_window_t*) { return false; }
-''' + (body(native, 'struct _sapp_tc_mac_callback_scope {') + ';\nvoid _sapp_tc_mac_contained(const char*) {}\nbool _sapp_tc_mac_frozen() { return false; }\n' if port == 'mac' else '') + predicate + '\n' + send + r'''
+''' + (body(native, 'struct _sapp_tc_mac_callback_scope {') + ';\nvoid _sapp_tc_mac_contained(const char*) {}\n' if port == 'mac' else '') + predicate + '\n' + send + r'''
 void emit(sapp_event_type type) {
     sapp_event event{}; event.type=type; event.key_code=SAPP_KEYCODE_B; event.char_code='b';
     _sapp_tc_send(&record,&event);
@@ -228,7 +228,6 @@ namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} void setE
 bool querySessionEnd() { return true; } void cancelSessionEnd() {} void shutdownRuntime() {} }
 constexpr int NSTerminateCancel=0,NSTerminateNow=1;
 using AEEventID=unsigned;
-bool _sapp_tc_mac_frozen() { return false; }
 void _sapp_tc_mac_contained(const char*) {}
 void _sapp_tc_mac_schedule_deferred() {}
 void _sapp_tc_mac_closed_now(_sapp_tc_window_t*) {}

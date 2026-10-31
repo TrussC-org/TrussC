@@ -1121,7 +1121,6 @@ public:
     // Upload interleaved (pos, normal, uv) data to a sg_buffer. Lazy; no-op if
     // already clean and sizes match. Called automatically from drawGpuPbr().
     void uploadToGpu() const {
-    if (internal::sessionEndExit()) return;
         if (vbuf_.id != 0 && gpuRevision_ == dataRevision_) return;
         if (vertices_.empty()) return;
 
@@ -1212,7 +1211,6 @@ public:
     // white so the shader's tint (the current draw color) shows through. Called
     // from drawGpuPoints().
     void uploadPointsToGpu() const {
-    if (internal::sessionEndExit()) return;
         if (pbuf_.id != 0 && pointGpuRevision_ == dataRevision_) return;
         if (vertices_.empty()) return;
 

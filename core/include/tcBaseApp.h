@@ -244,13 +244,16 @@ private:
     friend void internal::completeAppConstruction(App&) noexcept;
     friend void internal::deliverAppExit(App&);
     friend std::shared_ptr<internal::AppOwner> internal::appOwner(const App&) noexcept;
-    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool, internal::EndingPolicy) noexcept;
+    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool) noexcept;
     EventListener audioOutListener_;
     EventListener audioInListener_;
 
     // Node's post-setup hook: subscribe audioOut() / audioIn() now that the
     // first setup() has returned (#426). final: apps override setup().
     void onSetupDone() final {
+        // Only a Window's root can end synchronously here. A descendant's
+        // setup must return through the live tree before the outer turn ends it.
+        if (getRootNode() == this && internal::processPendingQuit()) return;
         internal::attachAppAudio(*this);
         // The main App's setup() has now made its code grant (windowed or
         // headless: both runners register this root before setup). Secondary apps

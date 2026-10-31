@@ -48,11 +48,10 @@ struct Delegate { Record* w; };
 constexpr auto nil=nullptr;
 constexpr int _SAPP_TC_MAX_WINDOWS=32, SAPP_EVENTTYPE_RESIZED=1;
 struct { Record* windows[_SAPP_TC_MAX_WINDOWS]={}; } _sapp_tc;
-bool failLink=false, frozen=false, dimensionsChanged=false;
+bool failLink=false, dimensionsChanged=false;
 int dimensions=0, resizes=0;
 Link link;
 Link* create_link(int) { link={}; return failLink ? nullptr : &link; }
-bool _sapp_tc_mac_frozen() { return frozen; }
 bool _sapp_tc_mac_update_dimensions(Record*) { ++dimensions; return dimensionsChanged; }
 void _sapp_tc_send_type(Record*,int) { ++resizes; }
 int failures=0, checks=0;
@@ -111,12 +110,6 @@ int main() {
         applicationDidChangeScreenParameters(nullptr,nullptr);
         check("display configuration change refreshes each current screen independently",
               range_is(w,60.f/interval) && range_is(peer,15));
-        frozen=true; w.screenRate=120; peer.screenRate=60;
-        windowDidChangeScreen(&delegate,nullptr);
-        windowDidChangeBackingProperties(&delegate,nullptr);
-        applicationDidChangeScreenParameters(nullptr,nullptr);
-        check("frozen session leaves frame rate unchanged",range_is(w,60.f/interval) && range_is(peer,15));
-        frozen=false;
         _sapp_tc.windows[0]=_sapp_tc.windows[1]=nullptr;
     }
     Delegate empty{nullptr};

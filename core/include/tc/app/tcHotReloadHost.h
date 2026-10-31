@@ -76,7 +76,6 @@ struct GuestLibrary {
 #else
     void* handle = nullptr;
 #endif
-    std::shared_ptr<void> code;
     const void* codeOwner = nullptr;
     CreateAppFn createApp = nullptr;
     DestroyAppFn destroyApp = nullptr;
@@ -92,7 +91,7 @@ struct GuestLibrary {
 #endif
     }
     bool load(const string& path) {
-        if (internal::sessionEndExit() || !isMainThread()) return false;
+        if (!isMainThread()) return false;
         // Always load from a unique temp path. Without this, the OS dynamic
         // loader deduplicates by pathname/inode and may return the already-
         // loaded handle on subsequent dlopen() calls:
@@ -154,13 +153,10 @@ struct GuestLibrary {
         const char* type = "<type>";
         const char* file = "<file>";
         if (source) source(&type, &file);
-        internal::refreshCrashModules();
         loadedPath = tempPath;
         try {
             codeOwner = internal::nextAppGeneration();
             mcpOwner = codeOwner;
-            internal::registerGuestCode(codeOwner, handle, closeLibrary, reinterpret_cast<const void*>(createApp));
-            code = internal::retainGuestCodeFor(reinterpret_cast<const void*>(createApp));
         } catch (...) {
             closeLibrary(handle); handle = nullptr; codeOwner = nullptr;
             try { fs::remove(loadedPath); } catch (...) {}
@@ -171,7 +167,7 @@ struct GuestLibrary {
     }
 
     App* create(const std::shared_ptr<Window>& target) {
-        if (internal::sessionEndExit() || !isMainThread()) return nullptr;
+        if (!isMainThread()) return nullptr;
         if (createApp) {
             if (!target || !target->isOpen() || internal::WindowRequestAccess::closeRequested(*target)) return nullptr;
             App* raw = nullptr;
@@ -179,7 +175,6 @@ struct GuestLibrary {
 
             internal::AppConstructionTicket ticket;
             ticket.registrationOwner = mcpOwner;
-            ticket.code = code;
             ticket.context = &target->context();
             {
                 internal::AppConstructionScope construction(ticket);
@@ -220,8 +215,8 @@ struct GuestLibrary {
             internal::dispatchHotReloadUnload(mcpOwner);
         }
         destroy();
-        // Retire callbacks and registrations now; modules remain pinned for the
-        // process lifetime, including after the last retained control block.
+        // Successful modules stay mapped for process lifetime; object storage
+        // needs no separate code reference (dev-only, unbounded per reload).
         if (handle) {
             internal::setHotReloadSource(nullptr, nullptr);
             handle = nullptr;
@@ -234,10 +229,7 @@ struct GuestLibrary {
         }
         createApp = nullptr;
         destroyApp = nullptr;
-        internal::releaseGuestCode(codeOwner);
         codeOwner = nullptr;
-        code.reset();
-        internal::drainGuestCode();
     }
 };
 
@@ -438,7 +430,7 @@ struct Host {
 
     std::weak_ptr<Window> targetWindow;
     bool init(const std::shared_ptr<Window>& target) {
-        if (internal::sessionEndExit() || !isMainThread()) return false;
+        if (!isMainThread()) return false;
         targetWindow = target;
         // Detect project directory from the executable's location
         // The Host EXE is at bin/<AppName>.app/Contents/MacOS/<AppName> (macOS)
@@ -494,7 +486,7 @@ struct Host {
     }
 
     bool rebuildGuest() {
-        if (internal::sessionEndExit() || !isMainThread()) return false;
+        if (!isMainThread()) return false;
         rebuildBlocked = false;
         // Missing/unreadable paths cannot establish staleness; keep rebuilding.
         std::error_code ec;
@@ -536,7 +528,7 @@ struct Host {
 
     bool reloadRequested = false;
     bool reload() {
-        if (!isMainThread() || internal::sessionEndExit() || internal::runtimeEnding()) return false;
+        if (!isMainThread() || internal::runtimeEnding()) return false;
         reloadRequested = true;
         return true;
     }
@@ -555,11 +547,8 @@ private:
         }
         auto tBuildDone = Clock::now();
 
-        if (internal::sessionEndExit()) return false;
         auto window = targetWindow.lock();
         guest.unload();
-        if (internal::sessionEndExit()) return false;
-
         if (!guest.load(guestLibPath)) {
             logError() << "[HotReload] Failed to load rebuilt library";
             return false;
@@ -592,7 +581,7 @@ public:
     // Called from the outer main-loop turn — checks for file changes periodically
     void poll() {
         if (!isMainThread()) return;
-        if (internal::sessionEndExit() || internal::runtimeEnding()) return;
+        if (internal::runtimeEnding()) return;
         if (!initialized || !internal::reloadSafePoint()) return;
         if (reloadRequested) {
             reloadRequested = false;

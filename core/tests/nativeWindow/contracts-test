@@ -9,7 +9,7 @@ from pathlib import Path
 import os, re, subprocess, sys
 root, scratch = map(Path, sys.argv[1:])
 include = Path(os.environ.get('TC_X11_TEST_INCLUDE', root/'core/include/sokol'))
-header = (include/'sokol_app_tc.h').read_text()
+header = (include/'sokol_app_tc.h').read_text(encoding='utf-8')
 # The event field contract applies to every window, including EGL first scroll.
 comments_ok = all('always valid' not in re.search(r'float mouse_' + axis + r';[^\n]*', header)[0]
                   for axis in ('dx', 'dy'))
@@ -56,7 +56,7 @@ static struct {
     unsigned next_id;
     size_t window_slots = 4;
     _sapp_tc_window_t* windows[4];
-    struct { _sapp_tc_window_t* main; sapp_desc desc; bool valid = true; bool init_called = false; } app;
+    struct { _sapp_tc_window_t* main; sapp_desc desc; bool valid = true; bool init_called = false; bool quit_ordered = false; } app;
     Atom NET_WM_NAME = 1, NET_WM_ICON_NAME = 2, UTF8_STRING = 3;
     struct { _sapp_tc_window_t* over=nullptr; } xdnd;
 #ifdef SOKOL_GLES3

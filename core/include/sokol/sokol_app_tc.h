@@ -2934,14 +2934,6 @@ static _sapp_tc_window_t* _sapp_tc_resolve(sapp_window win) {
     return win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
 }
 
-/* Busy session end: from the moment _sapp_tc_mac_session_end starts until its
-   _exit, the backend is frozen. Only the exit notifications run: no tick, event,
-   deferred close/quit, terminate, window creation, dimension/texture update or
-   drawable acquisition is admitted. */
-static bool _sapp_tc_mac_frozen(void) {
-    return trussc::internal::sessionEndExit();
-}
-
 static uint32_t _sapp_tc_mods(NSEvent* ev) {
     const NSEventModifierFlags f = ev.modifierFlags;
     uint32_t m = 0;
@@ -2982,7 +2974,7 @@ static void _sapp_tc_mac_contained(const char* where) noexcept {
 }
 
 static void _sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {
-    if (_sapp_tc_mac_frozen() || !w || w->native_closed) return;
+    if (!w || w->native_closed) return;
     ev->pointer_locked = false;
     ev->reliable_button_bits = false; // AppKit reports keyboard modifiers only.
     _sapp_tc_mac_callback_scope scope(w);
@@ -3075,7 +3067,6 @@ static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail, b
    driven by native occlusion/miniaturize notifications and source ticks. A key-time
    transient hidden property during creation must not synthesize SUSPENDED. */
 static void _sapp_tc_mac_recheck_visibility(void) noexcept {
-    if (_sapp_tc_mac_frozen()) return;
     const bool defer = _sapp_tc.callbacks_active > 0;
     if (defer) {
         _sapp_tc.visibility_pending = true;
@@ -3117,7 +3108,7 @@ static void _sapp_tc_mac_forget_key(uint32_t win_id) noexcept {
 /* Key notifications follow visibility. Intermediate modal flips are coalesced:
    even a previously focused window that resigns and becomes key ends focused. */
 static void _sapp_tc_mac_key_event(_sapp_tc_window_t* w, sapp_event_type type) noexcept {
-    if (_sapp_tc_mac_frozen() || !w) return;
+    if (!w) return;
     try {
         if (_sapp_tc.callbacks_active > 0) {
             if (w->native_closed || w->closed_pending) return;
@@ -3138,7 +3129,7 @@ static void _sapp_tc_mac_key_event(_sapp_tc_window_t* w, sapp_event_type type) n
 }
 
 static void _sapp_tc_mac_process_visibility(void) {
-    if (_sapp_tc_mac_frozen() || _sapp_tc.callbacks_active > 0) return;
+    if (_sapp_tc.callbacks_active > 0) return;
     // Detach first: notifications from a client's nested loop belong to the
     // next pass, and cannot invalidate the fixed snapshot being delivered here.
     _sapp_tc_mac_pending_key keys[_SAPP_TC_MAX_WINDOWS] = {};
@@ -3545,7 +3536,7 @@ static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed
    the no-screen/rate fallback. Creation and display/backing notifications share
    this path; it neither admits ticks nor invokes client callbacks. */
 static void _sapp_tc_mac_update_frame_rate(_sapp_tc_window_t* w) {
-    if (_sapp_tc_mac_frozen() || !w || !w->link) return;
+    if (!w || !w->link) return;
     const float maxfps = (float)w->window.screen.maximumFramesPerSecond;
     const float p = (maxfps > 0.0f ? maxfps : 60.0f) / (float)w->swap_interval;
     w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);
@@ -3687,10 +3678,8 @@ static CGFloat _sapp_tc_mac_scale(_sapp_tc_window_t* w) {
    textures in sync. Called by the common initializer, every admitted tick
    and windowDidResize / windowDidChangeScreen. Returns whether published
    dimensions changed; a zero-area view keeps the last published sizes.
-   The one path to drawableSize, contentsScale and the swapchain textures:
-   while frozen (busy session end) nothing here changes. */
+   The one path to drawableSize, contentsScale and the swapchain textures. */
 static bool _sapp_tc_mac_update_dimensions(_sapp_tc_window_t* w) {
-    if (_sapp_tc_mac_frozen()) return false;
     if (!w->view || !w->layer) return false;
     const CGFloat scale = _sapp_tc_mac_scale(w);
     w->dpi_scale = (float)scale;
@@ -3736,7 +3725,6 @@ static bool _sapp_tc_mac_initialize_dimensions(_sapp_tc_window_t* w) {
    that tick admitted a draw (a hidden, non-admitted window must never reach
    nextDrawable, which can stall). Repeated queries reuse the drawable. */
 static id<CAMetalDrawable> _sapp_tc_mac_drawable(_sapp_tc_window_t* w) {
-    if (_sapp_tc_mac_frozen()) return nil;   // no drawable while frozen, even inside the interrupted tick
     if (!w || !w->in_tick || !w->draw_admitted || w->closed_pending || !w->layer) return nil;
     if (w->frame_drawable == nil) w->frame_drawable = [w->layer nextDrawable];
     return w->frame_drawable;
@@ -3780,7 +3768,6 @@ static bool _sapp_tc_mac_deferred_pending(void) {
 }
 
 static void _sapp_tc_mac_process_deferred(void) {
-    if (_sapp_tc_mac_frozen()) return;   // the process ends; nothing deferred runs
     // Only when no tick, client callback or constructor is on the stack.
     if (_sapp_tc_mac_busy()) {
         if (_sapp_tc_mac_deferred_pending()) _sapp_tc.deferred_blocked = true;
@@ -3912,7 +3899,7 @@ static void _sapp_tc_mac_tick_body(_sapp_tc_window_t* w, CADisplayLink* link) {
    selection current; the first source tick after the callback returns runs
    normally and processes deferred close/quit. */
 static bool _sapp_tc_mac_tick_blocked(const _sapp_tc_window_t* w) {
-    return _sapp_tc_mac_frozen() || _sapp_tc.callbacks_active > 0 || w->constructing || w->in_tick || w->callback_depth > 0 || w->closed_pending;
+    return _sapp_tc.callbacks_active > 0 || w->constructing || w->in_tick || w->callback_depth > 0 || w->closed_pending;
 }
 
 static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
@@ -4003,7 +3990,6 @@ struct _sapp_tc_mac_window_attrs {
 static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_desc* d,
                                                         const _sapp_tc_mac_window_attrs* attrs) {
     _sapp_tc.create_error = 0;
-    if (_sapp_tc_mac_frozen()) { _sapp_tc.create_error = "Window creation refused: the session is ending"; return 0; }
     struct constructing_scope {
         constructing_scope() { ++_sapp_tc.constructing; }
         ~constructing_scope() {
@@ -4263,7 +4249,7 @@ static bool _sapp_tc_mac_session_busy(void) {
 }
 
 /* App delegate forwards committed session termination to Runtime. All App
-   ending, freeze and watchdog state belongs there, independent of Windows. */
+   ending and watchdog state belongs there, independent of Windows. */
 static void _sapp_tc_mac_session_end(AEEventID reason) {
     (void)reason;
     trussc::internal::commitSessionEnd();
@@ -4333,8 +4319,6 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
     (void)sender;
-    // A quit (or a second session end) while frozen: the process is already ending.
-    if (_sapp_tc_mac_frozen()) return NSTerminateCancel;
     const AEEventID quit_reason = _sapp_tc_mac_quit_reason();
     if (_sapp_tc_mac_is_session_end(quit_reason)) {
         if (!trussc::internal::querySessionEnd()) {
@@ -4342,6 +4326,7 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
             return NSTerminateCancel;
         }
         _sapp_tc_mac_session_end(quit_reason);
+        return NSTerminateNow;
     }
     // [TrussC] Any other quit (Cmd+Q, the Dock's Quit, an AppleScript quit)
     // carries no session reason: app-quit, unless an earlier request set one.
@@ -4825,7 +4810,6 @@ const void* sapp_metal_get_device(void) {
    via sglue_swapchain()); outside a tick each call acquires a fresh
    drawable, exactly like sokol_app.h. */
 static id<CAMetalDrawable> _sapp_tc_main_next_drawable(void) {
-    if (_sapp_tc_mac_frozen()) return nil;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w || !w->layer) return nil;
     if (w->in_tick) return _sapp_tc_mac_drawable(w);
@@ -9159,15 +9143,13 @@ sapp_swapchain sapp_get_swapchain(void) {
 #include "util/sokol_window_native.h"
 
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
-    bool surface_resize_pending;
     Window xwin;
+    bool surface_resize_pending; // normal size observations pending the next tick
     Colormap colormap;
 #if defined(SOKOL_GLES3)
     EGLSurface drawable;
 #else
     GLXDrawable drawable;
-    bool drawable_is_pbuffer;
-    Window recovery_xwin; // unmapped recovery window, using this Window's colormap
 #endif
     bool mouse_pos_valid;
     float mouse_x, mouse_y, mouse_dx, mouse_dy;
@@ -11461,7 +11443,6 @@ static bool _sapp_tc_glx_choose_fbconfig(void) {
     const int want_samples = (_sapp_tc.app.desc.sample_count > 1) ? _sapp_tc.app.desc.sample_count : 0;
     int best = -1;
     int best_score = INT_MAX;
-    bool best_has_pbuffer = false;
     for (int i = 0; i < count; i++) {
         if (!(_sapp_tc_glx_attrib(configs[i], GLX_RENDER_TYPE) & GLX_RGBA_BIT)) continue;
         const int drawable_types = _sapp_tc_glx_attrib(configs[i], GLX_DRAWABLE_TYPE);
@@ -11478,9 +11459,7 @@ static bool _sapp_tc_glx_choose_fbconfig(void) {
         int sample_diff = samples - want_samples;
         if (sample_diff < 0) sample_diff = -sample_diff;
         const int score = sample_diff * 100 + (depth - 24) + (stencil - 8);
-        const bool has_pbuffer = (drawable_types & GLX_PBUFFER_BIT) != 0;
-        if (score < best_score || (score == best_score && has_pbuffer && !best_has_pbuffer)) {
-            best_has_pbuffer = has_pbuffer;
+        if (score < best_score) {
             best_score = score;
             best = i;
         }
@@ -11545,7 +11524,7 @@ static bool _sapp_tc_egl_init(void) {
         !eglInitialize(_sapp_tc.egl_display, NULL, NULL) || !eglBindAPI(EGL_OPENGL_ES_API)) return false;
     const sapp_desc* d = &_sapp_tc.app.desc;
     const EGLint attrs[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
         EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8,
         EGL_ALPHA_SIZE, d->alpha ? 8 : 0, EGL_DEPTH_SIZE, 24, EGL_STENCIL_SIZE, 8,
         EGL_SAMPLE_BUFFERS, d->sample_count > 1 ? 1 : 0,
@@ -11702,13 +11681,7 @@ static void _sapp_tc_x11_destroy_surface(_sapp_tc_window_t* w) {
     if (glXGetCurrentDisplay() == _sapp_tc.display &&
         (glXGetCurrentDrawable() == w->drawable || glXGetCurrentReadDrawable() == w->drawable))
         glXMakeContextCurrent(_sapp_tc.display, None, None, NULL);
-    if (w->drawable_is_pbuffer) glXDestroyPbuffer(_sapp_tc.display, w->drawable);
-    else glXDestroyWindow(_sapp_tc.display, w->drawable);
-    w->drawable_is_pbuffer = false;
-    if (w->recovery_xwin) {
-        XDestroyWindow(_sapp_tc.display, w->recovery_xwin);
-        w->recovery_xwin = 0;
-    }
+    glXDestroyWindow(_sapp_tc.display, w->drawable);
 #endif
     w->drawable = 0;
 }
@@ -11727,90 +11700,10 @@ static bool _sapp_tc_x11_create_surface(_sapp_tc_window_t* w) {
 }
 static bool _sapp_tc_x11_resize_surface(_sapp_tc_window_t* w) {
     _sapp_tc_x11_surface_scope caller;
-#if defined(SOKOL_GLES3)
-    // EGL forbids two window surfaces for one native window. Reserve a device
-    // drawable before releasing the old one; if that fails, retain the old
-    // surface. A failed window renewal keeps this pbuffer, so the next host
-    // turn can still upload resources with the shared context current.
-    const EGLint attributes[] = {EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE};
-    const EGLSurface recovery = eglCreatePbufferSurface(_sapp_tc.egl_display, _sapp_tc.fbconfig, attributes);
-    if (recovery == EGL_NO_SURFACE) return false;
+    // GLX/EGL forbid two surfaces for one native window. A failed renewal is
+    // terminal: never render with drawable 0 or carry a recovery surface.
     _sapp_tc_x11_destroy_surface(w);
-    if (!_sapp_tc_x11_create_surface(w)) {
-        w->drawable = recovery;
-        return false;
-    }
-    eglDestroySurface(_sapp_tc.egl_display, recovery);
-#else
-    // GLX 1.4 forbids a second GLXWindow associated with the same X window.
-    // Validate recovery before retiring the usable drawable. Window-only
-    // configs remain supported: their recovery uses a distinct, unmapped X
-    // window with the config's visual and the owning Window's colormap.
-    // Failed replacements retain this recovery and retries reuse it.
-    if (!w->drawable_is_pbuffer && !w->recovery_xwin) {
-        const bool pbuffer = (_sapp_tc_glx_attrib(_sapp_tc.fbconfig, GLX_DRAWABLE_TYPE) & GLX_PBUFFER_BIT) != 0;
-        GLXDrawable recovery = 0;
-        Window recovery_xwin = 0;
-        if (pbuffer) {
-            const int attributes[] = {GLX_PBUFFER_WIDTH, 1, GLX_PBUFFER_HEIGHT, 1, None};
-            _sapp_tc_x11_grab_error_handler();
-            recovery = glXCreatePbuffer(_sapp_tc.display, _sapp_tc.fbconfig, attributes);
-            _sapp_tc_x11_release_error_handler();
-            if (!recovery || _sapp_tc.error_code) return false;
-        } else {
-            XVisualInfo* vi = glXGetVisualFromFBConfig(_sapp_tc.display, _sapp_tc.fbconfig);
-            if (!vi) return false;
-            XSetWindowAttributes attributes = {};
-            attributes.colormap = w->colormap;
-            attributes.border_pixel = 0;
-            _sapp_tc_x11_grab_error_handler();
-            recovery_xwin = XCreateWindow(_sapp_tc.display, _sapp_tc.root,
-                0, 0, 1, 1, 0, vi->depth, InputOutput, vi->visual,
-                CWColormap | CWBorderPixel, &attributes);
-            _sapp_tc_x11_release_error_handler();
-            XFree(vi);
-            if (!recovery_xwin || _sapp_tc.error_code) return false;
-            _sapp_tc_x11_grab_error_handler();
-            recovery = glXCreateWindow(_sapp_tc.display, _sapp_tc.fbconfig, recovery_xwin, NULL);
-            _sapp_tc_x11_release_error_handler();
-            if (!recovery || _sapp_tc.error_code) {
-                XDestroyWindow(_sapp_tc.display, recovery_xwin);
-                return false;
-            }
-        }
-        bool current;
-        {
-            _sapp_tc_x11_surface_scope restore;
-            _sapp_tc_x11_grab_error_handler();
-            current = glXMakeContextCurrent(_sapp_tc.display, recovery, recovery, _sapp_tc.ctx);
-            _sapp_tc_x11_release_error_handler();
-            current = current && !_sapp_tc.error_code;
-            if (current) {
-                _sapp_tc_x11_destroy_surface(w);
-                w->drawable = recovery;
-                w->drawable_is_pbuffer = pbuffer;
-                w->recovery_xwin = recovery_xwin;
-            }
-        }
-        if (!current) {
-            if (pbuffer) glXDestroyPbuffer(_sapp_tc.display, recovery);
-            else {
-                glXDestroyWindow(_sapp_tc.display, recovery);
-                XDestroyWindow(_sapp_tc.display, recovery_xwin);
-            }
-            return false;
-        }
-    }
-    const auto recovery = w->drawable;
-    if (!_sapp_tc_x11_create_surface(w)) {
-        w->drawable = recovery;
-        return false;
-    }
-    const auto replacement = w->drawable;
-    w->drawable = recovery;
-    _sapp_tc_x11_destroy_surface(w);
-    w->drawable = replacement;
-#endif
+    if (!_sapp_tc_x11_create_surface(w)) return false;
     _sapp_tc_x11_set_swapinterval(w, w->swap_interval);
     return true;
 }
@@ -12198,7 +12091,7 @@ static void _sapp_tc_x11_pace_periodic(_sapp_tc_window_t* w, double period) {
 }
 
 static bool _sapp_tc_x11_window_due(_sapp_tc_window_t* w, double now) {
-    if (!w || !w->ready || w->constructing || (!w->drawable && !w->surface_resize_pending) || w->in_tick) return false;
+    if (!w || !w->ready || w->constructing || !w->drawable || w->in_tick) return false;
     return w->earliest_next <= now;
 }
 
@@ -12229,7 +12122,7 @@ static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
 }
 
 static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
-    if (w->constructing || w->in_tick || (!w->drawable && !w->surface_resize_pending)) return;
+    if (w->constructing || w->in_tick || !w->drawable) return;
     const sapp_window handle = {w->win_id};
     w->in_tick = true;
     struct TickGuard {
@@ -12242,12 +12135,12 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     w->frame_duration = w->timing.smooth_dt;
     const bool resized = _sapp_tc_x11_update_dimensions(w);
     if (resized || w->surface_resize_pending) {
-        w->surface_resize_pending = true;
+        w->surface_resize_pending = false;
         if (!_sapp_tc_x11_resize_surface(w)) {
-            _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
+            sapp_destroy_window(handle);
+            _sapp_tc.app.quit_ordered = true;
             return;
         }
-        w->surface_resize_pending = false;
         _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESIZED);
     }
     if (_sapp_tc_lookup(handle) != w) return;
@@ -18434,7 +18327,7 @@ extern "C" bool sapp_window_inject_event(sapp_window win, const sapp_event* inpu
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
     auto* w = _sapp_tc_lookup(win);
 #if defined(__APPLE__) && TARGET_OS_OSX
-    if (_sapp_tc_mac_frozen() || (w && w->native_closed)) return false;
+    if ((w && w->native_closed)) return false;
 #endif
     if (!w || !input || !_sapp_tc_valid_injected_event(*input) || !w->ready ||
         (w->close_recorded && w->close_recorded_frame == w->frame_count) ||

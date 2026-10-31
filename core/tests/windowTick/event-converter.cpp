@@ -885,10 +885,6 @@ void finiteExtremes(Window& w, Native& n) {
     clearInput(w);internal::pixelPerfectMode()=true;n.metadata.dpi_scale=1;
     auto e=event(SAPP_EVENTTYPE_MOUSE_MOVE,std::numeric_limits<float>::max(),-std::numeric_limits<float>::max());n.send(e);
     check("finite extreme pointer positions retain float event range",w.context().mouseX==e.mouse_x&&w.context().mouseY==e.mouse_y);
-#if TC_HAS_CRASH_HANDLER
-    auto& crash=internal::crashContext();const auto index=(crash.inputCount.load()-1)%8;
-    check("diagnostic coordinates saturate without integer conversion overflow",crash.inputs[index].x.load()==std::numeric_limits<int>::max()&&crash.inputs[index].y.load()==std::numeric_limits<int>::min());
-#endif
     int raw=0,typed=0;bool finite=true;
     auto r=w.events().rawEvent.listen([&](const sapp_event&){++raw;});
     auto m=w.events().mouseMoved.listen([&](MouseMoveEventArgs& e){++typed;finite=finite&&std::isfinite(e.delta.x)&&std::isfinite(e.delta.y);});

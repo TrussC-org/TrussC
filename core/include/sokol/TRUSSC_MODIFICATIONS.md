@@ -84,10 +84,8 @@ pages that were successfully set, each to its own original value. Preserve
 this behavior and the descriptor comments when importing upstream changes.
 
 Outside sokol, `TrussC.h`'s host-only `ConsoleCPCtrlGuard` saves both values
-for Ctrl+C / Ctrl+Break / console close and one `atexit` hook. It also passes
-the pair to the Windows crash handler, which restores after reporting and
-before chaining to a previous exception filter. The guard's destructor restores
-both values before disarming the exit and crash fallbacks: on normal shutdown
+for Ctrl+C / Ctrl+Break / console close and one `atexit` hook. The guard's
+destructor restores both values before disarming the exit fallback: on normal shutdown
 this repeats sokol's restore; if an exception escapes `sapp_run()` and the caller
 catches it, this is the only restore. `abort()`, `TerminateProcess` and external
 kills cannot restore the console. Console input still uses `std::getline(std::cin)`.
@@ -549,10 +547,13 @@ All modifications by tettou771
   NSWorkspaceWillPowerOff commits directly. Busy ordinary termination is deferred.
   Accepted ordinary termination runs Runtime shutdown before NSTerminateNow so
   AppKit's remaining closes cannot release targets after sg/sgl shutdown.
-- ForcedBusy freezes admission and calls completed App exits exactly once through
-  common ending, without AfterApp/audio waits/tree/module/native/GPU cleanup.
-  Runtime's OS-only deadline defaults to 3 seconds across all exits. Backends
+- Busy main-stack commits call no App exit and arm no watchdog: Windows
+  returns to WM_ENDSESSION; macOS calls _exit(0) before NSTerminateNow.
+  Idle commits run synchronous normal ending and process termination under one
+  OS-only deadline (default 3 seconds). No session freeze is needed. Backends
   contain no second session state machine or App-notification runner.
+  After idle cleanup, Runtime closes the Logger file sink and flushes stdout /
+  stderr before terminal process exit. Busy termination does not flush sinks.
 - Shared runtime signal handling, Logger markers and MCP drain semantics are
   documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).
 

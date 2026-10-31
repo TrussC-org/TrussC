@@ -12,6 +12,7 @@ namespace {
 int failures = 0;
 void check(const char* label, bool ok) {
     std::printf("appEventDelivery: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
     if (!ok) ++failures;
 }
 std::map<std::string, std::string> order;

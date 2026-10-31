@@ -31,7 +31,7 @@ extern "C" void storageDestroy(App* app) { internal::destroyAppStorage<Guest>(ap
 
 extern "C" std::weak_ptr<void> storageWeak() {
     struct State : tc::internal::ResourceLoadState {};
-    auto value = tc::internal::makeCodeShared<State>();
+    auto value = std::make_shared<State>();
     if (value->shared_from_this() != value) std::abort();
     return value;
 }
@@ -40,7 +40,7 @@ extern "C" tc::mcp::internal::ReplyThunk storageWorker() {
     using namespace tc::mcp::internal;
     return retainDeferredCode([]() -> ReplyThunk {
         return [] { return std::string("retained guest worker"); };
-    }, tc::internal::retainGuestCode(), tc::internal::currentAppOwner(), 239)();
+    }, tc::internal::currentAppOwner(), 239)();
 }
 
 extern "C" std::shared_ptr<Node> storageNode(App* app) {
@@ -53,7 +53,7 @@ extern "C" void storageAttach(Window* target) { target->setApp<Guest>(); }
 
 extern "C" void storageQueue() {
     struct QueuedCapture : Capture {
-        ~QueuedCapture() { internal::drainGuestCode(); }
+        ~QueuedCapture() {  }
     };
     auto capture = std::make_shared<QueuedCapture>();
     runOnMainThread([capture] { ++storageCalls; });

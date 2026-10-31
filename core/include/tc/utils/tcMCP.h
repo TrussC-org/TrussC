@@ -312,7 +312,6 @@ inline constexpr std::chrono::seconds kTargetedDeferralTimeout{5};
 
 struct DeferralState {
     std::shared_ptr<::trussc::internal::AppOwner> appOwner;
-    std::shared_ptr<void> code;             // defining guest, released after callback storage
     json id = nullptr;  // copied into DeferredResponse when queued
     bool requested = false;                  // set by deferToolResultUntilAfterFrame()
     std::function<json()> produce;           // tool content producer (runs fully on main)
@@ -333,7 +332,7 @@ struct DeferralState {
 // never reads (#249; docs/ARCHITECTURE.md, "One instance per process").
 DeferralState& deferralState();
 void resetDeferralState() noexcept;
-std::function<ReplyThunk()> retainDeferredCode(std::function<ReplyThunk()>, std::shared_ptr<void>,
+std::function<ReplyThunk()> retainDeferredCode(std::function<ReplyThunk()>,
                                             std::shared_ptr<::trussc::internal::AppOwner>, json id = nullptr);
 const void* resolveDeferredTarget(const void* targetWindow);
 void retireDeferredTarget(const void* targetWindow) noexcept;
@@ -365,7 +364,6 @@ inline bool isDebuggerEnabled() {
 inline void deferToolResultUntilAfterFrame(std::function<json()> produce,
                                            const void* targetWindow = nullptr) {
     internal::deferralState().appOwner = ::trussc::internal::currentAppOwner();
-    internal::deferralState().code = ::trussc::internal::retainGuestCode();
     targetWindow = internal::resolveDeferredTarget(targetWindow);
     internal::deferralState().requested = true;
     internal::deferralState().produce = std::move(produce);
@@ -382,7 +380,6 @@ inline void deferToolResultUntilAfterFrame(std::function<json()> produce,
 inline void deferToolResultTwoStage(std::function<std::function<json()>()> mainStage,
                                     const void* targetWindow = nullptr) {
     internal::deferralState().appOwner = ::trussc::internal::currentAppOwner();
-    internal::deferralState().code = ::trussc::internal::retainGuestCode();
     targetWindow = internal::resolveDeferredTarget(targetWindow);
     internal::deferralState().twoStageRequested = true;
     internal::deferralState().produceTwoStage = std::move(mainStage);
@@ -1121,7 +1118,7 @@ TC_PLATFORMS("macos,windows,linux,ios,android") inline void processHttpQueue() {
             d.budget = req.budget;
             d.id = std::move(ds.id);
             d.response = req.response;
-            d.makeEnvelope = internal::retainDeferredCode(std::move(ds.envelope), std::move(ds.code), std::move(ds.appOwner), d.id);
+            d.makeEnvelope = internal::retainDeferredCode(std::move(ds.envelope), std::move(ds.appOwner), d.id);
             d.target = ds.target;
             d.deadline = std::chrono::steady_clock::now() + internal::kTargetedDeferralTimeout;
             d.owner = ds.owner;

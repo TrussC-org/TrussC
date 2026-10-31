@@ -12,11 +12,12 @@ struct InjectedWindow {
     bool (*events_enabled)() = nullptr;
     int win_width = 640, win_height = 480, fb_width = 640, fb_height = 480;
     float dpi_scale = 1;
+    std::shared_ptr<trussc::Window> keepAlive;
     trussc::Window& window;
     trussc::internal::WindowNativeOperations operations{};
     sapp_tc_window_metadata metadata{};
     bool closed = false, pointerLocked = false;
-    explicit InjectedWindow(trussc::Window& target, uint32_t id = 701) : win_id(id), window(target) {
+    explicit InjectedWindow(trussc::Window& target, uint32_t id = 701) : win_id(id), keepAlive(trussc::internal::WindowRequestAccess::retainHostOwner(target)), window(target) {
         desc.event_cb = trussc::internal::windowEvent; desc.user_data = &window;
         metadata.fb_width = fb_width; metadata.fb_height = fb_height;
         metadata.width = win_width; metadata.height = win_height; metadata.dpi_scale = dpi_scale;

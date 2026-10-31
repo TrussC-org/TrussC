@@ -8,10 +8,8 @@ namespace c4 {
 using namespace tc;
 using hot_reload::Host;
 using hot_reload::GuestLibrary;
-int failures = 0, attempts = 0, forcedExits = 0;
+int failures = 0, attempts = 0;
 Host* requesting = nullptr;
-std::function<void()> frozenWork;
-int queuedCalls = 0;
 void check(const char* label, bool ok) {
     std::printf("hotReloadLifecycle: C4: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
@@ -42,31 +40,6 @@ void* symbol(GuestLibrary& lib, const char* name) {
 #else
     return dlsym(lib.handle, name);
 #endif
-}
-int forced() {
-    getMainThreadId(); internal::beginRuntimeRun();
-    Host host; requesting = &host; host.reloadRequested = true;
-    struct Ending : App {
-        void exit() override {
-            ++forcedExits;
-            check("ForcedBusy reload is refused", !requesting->reload());
-            check("frozen reload preserves pending", requesting->reloadRequested);
-            check("ForcedBusy rebuild is refused", !requesting->rebuildGuest());
-            requesting->poll();
-            frozenWork();
-            check("freeze refuses App-owned queued work", queuedCalls == 0);
-            check("freeze preserves pending without build", requesting->reloadRequested && requesting->reloadCount == 0);
-        }
-    };
-    auto w = window(901); w->setApp<Ending>(); internal::applyPendingAppForTests(*w);
-    { internal::AppOwnerScope owner(internal::appOwner(*w->getApp()));
-      frozenWork = internal::attributeMainThreadWork([] { ++queuedCalls; }); }
-    { internal::AppCallbackScope active(internal::appOwner(*w->getApp())); internal::endRuntimeForSession(); }
-    internal::commitSessionEnd();
-    check("forced ending called App exit once", forcedExits == 1);
-    check("forced session end committed", internal::sessionEndExit());
-    std::fflush(stdout);
-    std::_Exit(failures ? 1 : 0);
 }
 // Observe the loop exit request before fixture cleanup can cause App exits.
 struct CloseExitObservation {
@@ -140,7 +113,7 @@ int run() {
     auto owner = std::make_shared<internal::AppOwner>(); int replies = 0;
     auto reply = mcp::internal::retainDeferredCode([&]() -> mcp::internal::ReplyThunk {
         return [&] { ++replies; return std::string("reply"); };
-    }, {}, owner, 239)();
+    }, owner, 239)();
     owner->callbacksClosing = true;
     std::thread closing([&] { reply(); }); closing.join();
     check("MCP deferred worker respects callbacksClosing", replies == 0);
@@ -223,6 +196,7 @@ int run() {
     check("build targets guest only", args.find("--target\nguest\n") != std::string::npos && args.find("host") == std::string::npos);
     // A retained export remains callable after logical retirement.
     auto pinned = actual.guest.createApp;
+    GuestLibrary pinnedModule; pinnedModule.handle = actual.guest.handle;
     int warnings = 0;
     const auto expected = std::string("!! Remove \"TC_HOT_RELOAD(tcApp)\" from ") +
         (fs::path(__FILE__).parent_path() / "tcApp.cpp").string() +
@@ -247,7 +221,7 @@ int run() {
     a->close(); internal::WindowRequestAccess::teardown(*a);
     turn(actual);
     check("closed launch Window skips attach at next poll", deferredUntilClose && actual.reloadCount == before + 1 && !a->isOpen() && !a->getApp() && actual.guest.app.expired() && !mcp::hasTool("guest_probe"));
-    check("retired module remains mapped", pinned != nullptr && internal::retainGuestCodeFor(reinterpret_cast<const void*>(pinned)) != nullptr);
+    check("retired module remains mapped", pinned != nullptr && symbol(pinnedModule, "tcHotReloadCreateApp") == reinterpret_cast<void*>(pinned));
     check("closed target refuses direct candidate", !actual.guest.create(a) && !a->getApp());
     constructorCloseTarget = b.get();
     GuestLibrary candidate;

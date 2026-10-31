@@ -95,9 +95,13 @@ struct ConsoleApp : App {
             console::start();
             check(console::isEnabled(), "double start stays enabled");
         }
-        if (mode == "setup-exit") exitApp();
+        if (mode == "setup-exit") {
+            console::internal::getChannel().send(console::internal::parseLine("before setup"));
+            exitApp();
+        }
     }
     void update() override {
+        check(mode != "setup-exit", "setup quit runs no update callback");
         if (mode == "disabled") {
             check(!console::isEnabled() && !console::internal::spawned(),
                   "app without opt-in starts no reader");
@@ -324,6 +328,12 @@ void runChild(const char* executable, const char* scenario) {
 #include "windowConsoleChecks.h"
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--windowed") return c2WindowConsole::run();
+#ifndef __EMSCRIPTEN__
+    if (argc == 2 && std::string(argv[1]) == "--windowed-child-setup-exit") return c2WindowConsole::childSetupQuit(false);
+    if (argc == 2 && std::string(argv[1]) == "--windowed-child-setup-veto") return c2WindowConsole::childSetupQuit(true);
+    if (argc == 2 && std::string(argv[1]) == "--windowed-setup-exit") return c2WindowConsole::setupQuit(false);
+    if (argc == 2 && std::string(argv[1]) == "--windowed-setup-veto") return c2WindowConsole::setupQuit(true);
+#endif
     if (argc == 3 && std::string(argv[1]) == "--child") {
         mode = argv[2];
         if (mode == "std-exit" || mode == "stop-exit") {

@@ -90,7 +90,6 @@ public:
 
 private:
     bool loadDocument(const std::string& data, const fs::path* sourcePath) {
-        if (internal::sessionEndExit()) return false;
         try {
             internal::IesParseResult parsed;
             std::string error;

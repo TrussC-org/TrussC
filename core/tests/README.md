@@ -148,9 +148,7 @@ LSAN_OPTIONS="suppressions=$PWD/core/tests/lsan.supp" \
 Keep symbolization enabled and a symbolizer available so the named LSan
 suppression can match. `lsan.supp` covers fontconfig's retained cache and
 the deliberately retained reconnect clients; other leaks remain errors.
-`crashHandler` logs each skipped signal case under ASan, while its exception
-and terminate cases still run. Run a normal sweep as well to cover those
-signal cases. Use fresh build directories or explicitly reset the cached
+Use fresh build directories or explicitly reset the cached
 compiler and linker flags when switching back to a normal build.
 
 ### Also on web (`web-test` marker)
@@ -1113,7 +1111,7 @@ Fitting requests run every check strictly, without SKIPs.
   `main()` uses recording sapp entry points; native support limits remain
   device checks.
 
-OOM recovery tests support Release builds, or iterator debugging off. Under MSVC iterator debugging, persistent cases that construct or move string/container storage while failure is armed SKIP with a reason; allocation-free recovery and targeted one-shot payload failure cases still run. Exhaustive one-shot STL sweeps also skip if they target allocating noexcept proxy construction/moves. `common/tcTestFailure.h` redirects MSVC Debug CRT reports and GUI assertions to stderr and suppresses CRT abort and OS fault dialogs at static initialization. This setup is Debug-only; default invalid-parameter termination and installed crash handlers remain in place. Core test entries include it through `tcCoreTest.h`; standalone unit tests keep their plain `main()`.
+OOM recovery tests support Release builds, or iterator debugging off. Under MSVC iterator debugging, persistent cases that construct or move string/container storage while failure is armed SKIP with a reason; allocation-free recovery and targeted one-shot payload failure cases still run. Exhaustive one-shot STL sweeps also skip if they target allocating noexcept proxy construction/moves. `common/tcTestFailure.h` redirects MSVC Debug CRT reports and GUI assertions to stderr and suppresses CRT abort and OS fault dialogs at static initialization. This setup is Debug-only; default invalid-parameter termination remains in place. Core test entries include it through `tcCoreTest.h`; standalone unit tests keep their plain `main()`.
 
 For #239 render-boundary regressions, after building the core archive and combined
 runner, run `tcbuild.sh sh core/tests/windowTick/render-boundary-test` (surfaceless
@@ -1147,9 +1145,8 @@ C2 process and close coverage:
 
 ### Session authority and OS-only exit deadline (C3)
 
-`sessionEndBusy` now runs deterministic deadline/race checks without a display.
-Its `test.py` supervises production-linked busy/idle, constructor, swap, reload,
-audio-in-flight and timeout children; `native-test.py` compiles actual macOS and
-Win32 authority adapters and tests late GPU disposal. Both run through tcbuild.sh.
-The retained real macOS Apple-event probes require explicit `--mac-device`;
-real logout remains an externally supervised combined-pass-1 route. See its README.
+`sessionEndBusy` covers idle veto/cancel/dedupe, reverse exact-once ending and
+one shared deadline. Busy main-stack commits call no App exit and arm no watchdog;
+workers alone retain idle veto behavior. `native-test.py` compiles the mac busy
+probe through `_exit` on Linux. The explicit `--mac-device` probe covers idle and
+busy-no-exit Apple events; real logout remains a supervised device pass.

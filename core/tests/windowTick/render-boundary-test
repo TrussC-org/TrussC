@@ -25,8 +25,8 @@ pool_settings = re.findall(r'sgdesc\.(\w+_pool_size) = (\d+);', (root/'core/incl
 assert pool_settings, 'production GPU pool settings not found'
 (scratch/'gpu-pools.inc').write_text(''.join(f'gd.{field} = {value};\n' for field, value in pool_settings))
 # Compile the actual renewal and caller restoration bodies against real EGL.
-# Only window-surface allocation is forced to fail; the original and recovery
-# pbuffers, context, Sokol image upload and next Runtime host turn are real.
+# Only window-surface allocation is forced to fail. Verify terminal failure,
+# then restore the separate EGL fixture for the remaining real GPU checks.
 native = (Path(inc)/'sokol/sokol_app_tc.h').read_text()
 def body(marker):
     start = native.index(marker)

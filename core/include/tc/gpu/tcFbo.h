@@ -137,7 +137,7 @@ public:
         }
         clear();
 
-        if (internal::sessionEndExit() || !sg_isvalid()) return;
+        if (!sg_isvalid()) return;
         const int limit = sg_query_limits().max_image_size_2d;
         auto failed = [&] {
             clear();
@@ -342,7 +342,6 @@ public:
     // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
     // For MSAA, reads from resolved texture
     TC_PLATFORMS("macos,windows,linux,ios,android,web") bool readPixels(unsigned char* pixels) const {
-        if (internal::sessionEndExit()) return false;
         if (!allocated_ || !pixels) return false;
         if (internal::hasPublicFboActivation()) {
             logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
@@ -359,7 +358,6 @@ public:
     // Buffer must be large enough: width * height * channelCount(format) floats
     // Note: Call after rendering is complete (after end()); inside an Fbo pass it returns false
     TC_PLATFORMS("macos,ios,windows,linux,android,web") bool readPixelsFloat(float* pixels) const {
-        if (internal::sessionEndExit()) return false;
         if (!allocated_ || !pixels) return false;
         if (internal::hasPublicFboActivation()) {
             logError("Fbo") << "readPixels() inside fbo.begin()/end() is not supported; call it after end()";
@@ -370,7 +368,6 @@ public:
 
     // Copy to Image
     bool copyTo(Image& image) const {
-        if (internal::sessionEndExit()) return false;
         if (!allocated_) return false;
 
         image.allocate(target_.width, target_.height, 4);
@@ -593,7 +590,6 @@ private:
     // Returns false (cursor unchanged) when versioning is degraded by an
     // earlier allocation failure or when the new allocation fails now.
     bool advanceVersion_() {
-        if (internal::sessionEndExit()) return false;
         if (poolAllocFailed_) return false;
         int next = currentVersion_ + 1;
         if ((int)versionPool_.size() < next) {
@@ -692,7 +688,6 @@ private:
     }
 
     static void ensureSharedMip(TextureFormat format) {
-        if (internal::sessionEndExit()) return;
         auto& s = getSharedMip(format);
         if (s.initialized) return;
 
@@ -815,7 +810,6 @@ private:
     }
 
     void beginInternal(float r, float g, float b, float a, bool doClear) {
-        if (internal::sessionEndExit()) return;
         if (!allocated_) return;
         if (sg_query_view_state(depthAttView_) != SG_RESOURCESTATE_VALID ||
             sg_query_view_state(target_.sampleCount > 1 ? msaaColorAttView_ : curColorTex_().getAttachmentView()) != SG_RESOURCESTATE_VALID ||

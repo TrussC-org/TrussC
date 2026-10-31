@@ -194,8 +194,6 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
         if (!headless::running || app.isExitRequested()) break;
         ctx.updateDeltaTime = targetDelta;
         EntryStackGuard guard(AppEntry::Update);
-        crashFrame(headless::frameCount);
-        CrashPhaseScope updatePhase("update");
         // Services such as Box2d guard against stepping twice in one update.
         // Match the windowed loop's counter before delivering this step.
         ++ctx.updateCount;
@@ -241,8 +239,6 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
             internal::endFrameworkLifetime();
         }
     } endFrameworkLifetime;
-    internal::installCrashHandler();
-    internal::CrashPhaseScope crashPhase("headless");
 
     // Set target FPS
     headless::targetFps = settings.targetFps;

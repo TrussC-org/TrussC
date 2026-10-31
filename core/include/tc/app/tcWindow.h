@@ -61,7 +61,6 @@ public:
     // close cancels unpublished candidates without setup, exit or cleanup.
     template<class T, class... Args> void setApp(Args&&... args) {
         static_assert(std::is_base_of_v<App, T>, "T must derive from App");
-        if (internal::sessionEndExit()) return;
         if (!isOpen() || closeRequested_ || internal::frameworkShutdown() || internal::runtimeEnding()) {
             logError("Window") << "setApp(): this window is closed or closing";
             return;
@@ -174,6 +173,7 @@ public:
         if (!root) return;
         internal::AppCallbackScope owner(app_ ? internal::appOwner(*app_) : nullptr);
         internal::setupNodeOnce(*root);   // the setup() entry point (#349)
+        if (ctx_.rootNode.lock() != root) return;
         root->updateTree();
         root->updateHoverState(ctx_.mouseX, ctx_.mouseY);
     }
@@ -181,6 +181,7 @@ public:
         if (auto root = ctx_.rootNode.lock()) {
             internal::AppCallbackScope owner(app_ ? internal::appOwner(*app_) : nullptr);
             internal::setupNodeOnce(*root);   // the setup() entry point (#349)
+            if (ctx_.rootNode.lock() != root) return;
             root->drawTree();
         }
     }
@@ -414,7 +415,6 @@ inline void Window::cancelCandidate(std::shared_ptr<App> app) noexcept {
     }
 }
 inline void Window::requestApp(std::shared_ptr<App> app) {
-    if (internal::sessionEndExit()) return;
     if (!isOpen() || closeRequested_ || (app && !canAttach(app))) {
         cancelCandidate(std::move(app));
         return;
@@ -438,7 +438,6 @@ inline void reportWindowAppAttachmentFailure() noexcept {
 // is still unpublished until this boundary).
 inline void Window::applyPendingApp() {
     if (!appRequested_ || dispatchDepth_ || applyingApp_ || exitDelivered_) return;
-    if (internal::sessionEndExit()) return;
     applyingApp_ = true;
     struct Reset { bool& flag; ~Reset() { flag = false; } } reset{applyingApp_};
     auto next = std::move(pendingApp_);
@@ -486,7 +485,7 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
     auto bind = [&](auto& event, auto callback, bool exiting = false) {
         listeners.push_back(internal::FrameworkEventAccess::listen(event,
             [this, callback, state, exiting](auto&&... args) {
-                if ((internal::sessionEndExit() && (!exiting || !isMainThread())) || !state->active.load()) return;
+                if (!state->active.load()) return;
                 if (!isMainThread()) {
                     if (!state->warned.exchange(true))
                         logWarning("App") << "App events must be delivered on the main thread";
@@ -496,7 +495,6 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                 auto app = exiting ? exitingApp_.lock() : app_;
                 if (!app && exiting) app = app_;
                 if (app) {
-                    if (exiting && !internal::admitAppEndingEvent(internal::appOwner(*app).get())) return;
                     internal::AppCallbackScope owner(internal::appOwner(*app));
                     callback(*app, args...);
                 }
@@ -603,7 +601,6 @@ inline Window::~Window() {
     if (!internal::frameworkShutdown() && epoch_ == internal::runtimeEpoch()) teardown();
 }
 inline void Window::close() {
-    if (internal::sessionEndExit()) return;
     if (internal::frameworkShutdown() || epoch_ != internal::runtimeEpoch() || !isOpen() || closeRequested_) return;
     if (internal::codeCloseExitsRuntime(*this)) return;
     closeRequested_ = true;
@@ -817,7 +814,7 @@ inline bool Window::isOccluded() const {
 }
 
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
-    if (internal::runtimeEnding() || internal::sessionEndExit()) return nullptr;
+    if (internal::runtimeEnding()) return nullptr;
     if constexpr (!internal::supportsSecondaryWindows()) {
         logError("Window") << "createWindow(): secondary windows are supported on "
             "macOS, Windows and Linux X11 (GLX or GLES3/EGL); this platform is "

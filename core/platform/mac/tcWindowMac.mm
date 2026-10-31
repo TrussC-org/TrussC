@@ -73,15 +73,6 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
         logError("Window") << "createWindow(): not available in headless mode";
         return nullptr;
     }
-    if (sessionEndExit()) {
-        // Busy session end (frozen until _exit): no native window is created.
-        static bool reported = false;
-        if (!reported) {
-            reported = true;
-            logError("Window") << "createWindow(): refused, the session is ending";
-        }
-        return nullptr;
-    }
     auto win = std::make_shared<Window>();
     internal::WindowRequestAccess::setHostOwner(*win, win);
     win->title_ = mcp::internal::markedWindowTitle(settings.title);

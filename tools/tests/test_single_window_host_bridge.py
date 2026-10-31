@@ -32,9 +32,8 @@ struct Context { Window* hostWindow=nullptr; double tickDuration=0; float mouseX
 struct Binding { sapp_window handle; sapp_tc_window_metadata metadata; };
 struct Window { Binding binding; Context ctx; Context& context() { return ctx; } bool isOccluded() { return false; } } window;
 struct WindowRequestAccess { static Binding& binding(Window& w) { return w.binding; } };
-bool hasWindow=true, stopping=false, frozen=false;
+bool hasWindow=true, stopping=false;
 bool runtimeEnding() { return stopping; }
-bool sessionEndExit() { return frozen; }
 Window* resolveWindow() { return hasWindow ? &window : nullptr; }
 Context* currentWindowCtx() { window.ctx.hostWindow=&window; return hasWindow ? &window.ctx : nullptr; }
 constexpr bool supportsSecondaryWindows() { return false; }
@@ -54,8 +53,7 @@ void syncWindowAppSize(Window&) {}
 struct WindowEntryScope { WindowEntryScope(Window&,bool) { refreshSelectedWindowMetadata(); } operator bool() { return true; } static void refreshSelectedWindowMetadata(); };
 struct TeardownSteps { template<class F> void run(const char*,F fn) { fn(); } };
 struct WindowTickPresentation {};
-struct CrashPhaseScope { CrashPhaseScope(const char*) {} };
-void crashFrame(int) {} int sapp_frame_count() { return 0; }
+int sapp_frame_count() { return 0; }
 int windowClockNow() { return 0; }
 bool admitDraw=false;
 int ticks=0, turns=0;
@@ -91,12 +89,12 @@ void run() {
     hasWindow=false; const int before=ticks; singleWindowFrame();
     check("zero-window native frame does no work and balances the host turn", ticks==before && turns==0);
     hasWindow=true;
-    for (bool stop : {false,true}) {
-        stopping=stop; frozen=!stop; const int prior=ticks;
+    {
+        stopping=true; const int prior=ticks;
         windowTick({0},&window); singleWindowFrame();
-        check("ending and session freeze admit no single-window tick", ticks==prior && turns==0);
+        check("ending admits no single-window tick", ticks==prior && turns==0);
     }
-    stopping=frozen=false;
+    stopping=false;
 ''' + '}\n}\n')
 prefix = r'''
 #include <cstdio>
@@ -117,7 +115,7 @@ source = source.replace('struct WindowEntryScope {', 'void refreshSelectedWindow
 variants=[('baseline',source)]
 if os.environ.get('TC_SINGLE_WINDOW_MUTATIONS'):
     for name, old, new in (
-        ('ignore_ending_admission','    if (runtimeEnding() || sessionEndExit()) return;',''),
+        ('ignore_ending_admission','    if (runtimeEnding()) return;',''),
         ('source_metadata_zero','metadata.source_interval = sapp_frame_duration();','metadata.source_interval = 0;'),
         ('source_uses_secondary_stub','supportsSecondaryWindows() ? sapp_window_frame_duration(handle) : sapp_frame_duration()','sapp_window_frame_duration(handle)'),
         ('skip_uses_desktop_endpoint','else sapp_skip_present();','else sapp_tc_window_skip_present(handle);'),
@@ -153,7 +151,6 @@ constexpr bool supportsSecondaryWindows() { return false; }
 int windowClockNow() { return 0; }
 bool enterWindowTick(Window&,sapp_window,int,double) { return false; }
 bool runtimeEnding() { return false; }
-bool sessionEndExit() { return false; }
 ''' + body(RUNTIME,'void windowTick(') + r'''
 int main() { Window window; windowTick({0},&window); return 0; }
 '''

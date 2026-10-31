@@ -1004,7 +1004,6 @@ private:
     }
 
     void updateAtlasTexture(AtlasState& atlas) {
-        if (internal::sessionEndExit()) return;
         // Re-upload whenever the atlas is dirty (only reached via
         // ensureTexturesUpdated, which already gates on textureDirty_). No
         // once-per-frame throttle: glyphs may be added across several draw calls
@@ -2832,7 +2831,6 @@ private:
     }
 
     void initResources() {
-        if (internal::sessionEndExit()) return;
         if (!sg_isvalid()) return;
         internal::FontSamplers& samplers = internal::fontSamplers();
         if (samplers.initialized) return;

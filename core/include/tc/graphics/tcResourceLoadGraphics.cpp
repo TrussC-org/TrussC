@@ -512,7 +512,6 @@ void Texture::allocatePixels(const Pixels& pixels, TextureUsage usage, bool mipm
 }
 
 void Texture::createResources(const void* initialData, const sg_image_data* imageLoadMips) {
-    if (internal::sessionEndExit()) return;
     // CPU-only Images are valid in headless apps and before graphics setup.
     // Leave the texture unallocated so their updates and draws are no-ops.
     if (!sg_isvalid()) return;

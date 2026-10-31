@@ -58,6 +58,96 @@ struct Initial : App {
     void draw() override { ++firstDraws; }
     void exit() override { ++exits; exitApp(99); }
 };
+bool setupVeto = false;
+int setupQueries = 0, setupInputs = 0, setupUpdates = 0;
+struct SetupQuit : App {
+    EventListener input;
+    void setup() override {
+        input = runtime().events().console.listen([](ConsoleEventArgs&) {
+            ++setupInputs;
+            exitApp();
+        });
+        console::internal::isRunning().store(true);
+        send("queued-before-setup-returns");
+        requestExitApp();
+    }
+    void update() override { ++setupUpdates; }
+    void exit() override {
+        check(setupQueries == (setupVeto ? 2 : 1), "windowed setup quit retains exitRequested veto");
+        check(setupInputs == int(setupVeto), "accepted setup quit precedes queued console input");
+        if (!setupVeto) check(setupUpdates == 0, "accepted setup quit precedes first update");
+        if (failures) internal::appExitCode() = 1;
+    }
+};
+int setupQuit(bool veto) {
+    setupVeto = veto;
+    auto query = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) {
+        ++setupQueries;
+        e.cancel = setupVeto && setupQueries == 1;
+    });
+    // runapp-verdict: returning-setup-quit -- #239 requires post-run counters on returning hosts; in-App exit checks remain for macOS.
+    const int result = runApp<SetupQuit>(WindowSettings{}.setSize(160, 120));
+    check(setupQueries == (veto ? 2 : 1), "post-run windowed setup quit retains veto");
+    check(setupInputs == int(veto), "post-run setup quit has no late console delivery");
+    if (!veto) check(setupUpdates == 0, "post-run setup quit has no late update");
+    return failures ? 1 : result;
+}
+
+// A descendant's setup runs inside the parent's tree traversal. Ending there
+// must wait until that traversal unwinds, before the next service callbacks.
+// No verdict on macOS: these checks run after runApp, which never returns
+// there. Exiting without a failure on macOS is not a pass; coverage is Linux.
+bool childVeto = false, treeCleaned = false;
+int childQueries = 0, treeExits = 0, parentCleanups = 0, childCleanups = 0;
+int lateCallbacks = 0, childUpdates = 0, childMods = 0, childTimers = 0;
+void treeCallback() { if (treeCleaned) ++lateCallbacks; }
+struct ChildMod : Mod {
+    void earlyUpdate() override { treeCallback(); ++childMods; }
+    void update() override { treeCallback(); }
+};
+struct ChildQuit : App {
+    void setup() override {
+        treeCallback();
+        addMod<ChildMod>();
+        callAfter(0, [] { treeCallback(); ++childTimers; });
+        requestExitApp();
+    }
+    void update() override {
+        treeCallback(); ++childUpdates;
+        if (childVeto && childQueries == 1) requestExitApp();
+    }
+    void cleanup() override { ++childCleanups; treeCleaned = true; }
+};
+struct ParentOfQuit : App {
+    EventListener input;
+    void setup() override {
+        addChild(internal::makeConstructedApp<ChildQuit>());
+        input = runtime().events().console.listen([](ConsoleEventArgs&) { treeCallback(); });
+        console::internal::isRunning().store(true);
+    }
+    void update() override { treeCallback(); }
+    void draw() override { treeCallback(); }
+    void exit() override { ++treeExits; }
+    void cleanup() override {
+        ++parentCleanups; treeCleaned = true;
+        send("queued-at-child-cleanup");
+    }
+};
+int childSetupQuit(bool veto) {
+    childVeto = veto;
+    auto query = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) {
+        ++childQueries;
+        e.cancel = childVeto && childQueries == 1;
+    });
+    // runapp-verdict: returning-setup-quit -- #239 requires the child traversal's final counters after a returning runner has unwound.
+    const int result = runApp<ParentOfQuit>(WindowSettings{}.setSize(160, 120));
+    console::internal::processQueue();
+    check(lateCallbacks == 0, "child setup quit has no parent/child/Mod/timer/console callback after cleanup");
+    check(treeExits == 1 && parentCleanups == 1 && childCleanups == 1, "child setup quit ends the tree once");
+    check(childQueries == (veto ? 2 : 1), "child setup quit retains exitRequested veto");
+    check(childUpdates > 0 && childMods > 0 && childTimers == 1, "descendant setup unwinds before deferred ending");
+    return failures ? 1 : result;
+}
 int run() {
     if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: windowed console needs desktop secondary windows"); return 0; }
     auto quit = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) {

@@ -65,7 +65,7 @@ void prepareLogoutWatchdog() {
 #ifndef __EMSCRIPTEN__
     cancelLogoutWatchdog();
     // Prepare storage and the worker at run admission, before constructors or
-    // native callbacks can interrupt us. The forced path only arms atomics.
+    // native callbacks can arrive. An idle commit only arms atomics.
     auto& worker = logoutWorker();
     worker.deadline.reset();
     worker.stop.store(false, std::memory_order_release);

@@ -32,7 +32,6 @@ struct { bool mouse_locked=false;Record* lock_owner=nullptr; Record* windows[1]=
     _sapp_tc_mac_pending_key pending_keys[_SAPP_TC_MAX_WINDOWS]{}; int pending_key_count=0;
     int callbacks_active=0,constructing=0; bool deferred_blocked=false;
     struct {Record* main=&first; struct { bool (*_tc_callbacks_active)()=nullptr; } desc;}app;} _sapp_tc;
-bool _sapp_tc_mac_frozen() { return false; }
 void _sapp_tc_mac_contained(const char*) {}
 void _sapp_tc_mac_schedule_deferred() {}
 Record* _sapp_tc_lookup(sapp_window h){return live&&h.id==live->win_id?live:nullptr;}

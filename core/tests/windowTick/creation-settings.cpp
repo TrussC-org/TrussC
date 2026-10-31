@@ -75,8 +75,7 @@ _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
     return nullptr;
 }
 _sapp_tc_window_t* _sapp_tc_resolve(sapp_window h) { return _sapp_tc_lookup(h); }
-namespace trussc::internal { bool sessionEndExit() { return false; } bool frameworkShutdown() { return false; } }
-static bool _sapp_tc_mac_frozen() { return trussc::internal::sessionEndExit(); }
+namespace trussc::internal { bool frameworkShutdown() { return false; } }
 static void _sapp_tc_mac_schedule_deferred() {}
 static _sapp_tc_window_t* _sapp_tc_mac_live(unsigned id) { return _sapp_tc_lookup({id}); }
 void order_out(NativeWindow*) {}

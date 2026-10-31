@@ -17,7 +17,6 @@ void setExitReasonIfEmpty(const char*) {}
 void setExitReason(const char*) {}
 int& appExitCode() { static int code = 0; return code; }
 bool& appSetupCalled() { static bool called = true; return called; }
-std::atomic<bool>& sessionEndExit() { static std::atomic<bool> active{false}; return active; }
 }
 namespace {
 int failures, callbacks, acquired, mainFrames, mainDrawables, showsChecked;
@@ -486,11 +485,9 @@ void mainCleanup() {
         std::printf("nativeWindow: session-end cleanup ran (inside callback=%d, quit requests=%d)\n", cleanupInsideCallback, quitRequests);
         std::fflush(stdout);
     }
-    // Mirrors TrussC's _cleanup_cb_impl on macOS (TrussC.h): during the busy
-    // session end it runs only the minimal ending and returns; otherwise a
-    // non-zero app code leaves through std::exit at the end of cleanup.
-    if (trussc::internal::sessionEndExit()) return;
-    if (trussc::internal::appExitCode() != 0) std::exit(trussc::internal::appExitCode());
+    // Busy session commit never reaches cleanup. Idle commit ends itself
+    // after cleanup; ordinary nonzero exits retain std::exit behavior.
+    if (!sessionEndNotBusyMode && trussc::internal::appExitCode() != 0) std::exit(trussc::internal::appExitCode());
 }
 // A real synchronous modal (NSAlert runModal) opened from a key handler.
 int modalRound, modalOwnerTicks, modalOtherAt, modalOwnerAt, modalOwnerAfterAt;
@@ -1070,8 +1067,8 @@ void step() {
             status == 0 && [text containsString:@"terminate scenario complete"] && ![text containsString:@": FAIL"]);
         text = runChild(@"--session-end-in-callback", &status);
         std::printf("nativeWindow: session-end child exited with %d\n", status);
-        check("session end inside a callback (child): not asked, cleanup once, _exit(app code), never back in the callback",
-            status == 7 && [text componentsSeparatedByString:@"session-end cleanup ran"].count == 2 &&
+        check("session end inside a callback (child): no App exit or cleanup, _exit(0), never resumes",
+            status == 0 && ![text containsString:@"session-end cleanup ran"] &&
             ![text containsString:@"QUIT_REQUESTED delivered"] && ![text containsString:@"returned into the callback"] &&
             ![text containsString:@": FAIL"]);
         check("busy session end leaves through _exit only: no atexit or static destructor ran",
@@ -1266,10 +1263,12 @@ void finish() {
 namespace trussc::internal {
 bool querySessionEnd() noexcept { return _sapp_tc_mac_busy() || _sapp_tc_request_exit(); }
 void cancelSessionEnd() noexcept {}
-void shutdownRuntime(EndingPolicy) noexcept {}
+void shutdownRuntime() noexcept {}
 void commitSessionEnd() noexcept {
-    if (sessionEndExit()) return;
-    sessionEndExit() = true;
+    static bool committed = false;
+    if (committed) return;
+    committed = true;
+    if (_sapp_tc_mac_session_busy()) _exit(0);
     _sapp_tc.app.quit_ordered = true;
     if (!_sapp_tc.app.cleanup_called) { _sapp_tc.app.cleanup_called = true; mainCleanup(); }
     _exit(appExitCode());

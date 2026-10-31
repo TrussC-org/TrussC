@@ -299,21 +299,20 @@ DeferralState& deferralState() {
 
 void resetDeferralState() noexcept {
     auto& state = deferralState();
-    auto code = std::move(state.code);
     state.produce = {}; state.produceTwoStage = {}; state.envelope = {};
     state.requested = state.twoStageRequested = state.hasEnvelope = false;
     state.owner = state.target = nullptr;
     state.appOwner.reset();
 }
-std::function<ReplyThunk()> retainDeferredCode(std::function<ReplyThunk()> callback, std::shared_ptr<void> code,
+std::function<ReplyThunk()> retainDeferredCode(std::function<ReplyThunk()> callback,
                                              std::shared_ptr<::trussc::internal::AppOwner> owner, json id) {
-    // Host managers retain code until both stages' guest storage is destroyed.
-    return [code = std::move(code), owner = std::move(owner), id = std::move(id), callback = std::move(callback)]() mutable -> ReplyThunk {
+    // Owner lifetime is checked at both stages; modules remain mapped.
+    return [owner = std::move(owner), id = std::move(id), callback = std::move(callback)]() mutable -> ReplyThunk {
         if (owner && (owner->retiring || owner->ended || !owner->token->load()))
             throw std::runtime_error("the App behind this deferred reply retired");
         ::trussc::internal::AppCallbackScope scope(owner);
         auto reply = callback();
-        return [code, owner, id, reply = std::move(reply)]() mutable {
+        return [owner, id, reply = std::move(reply)]() mutable {
             // MCP deferred worker uses the common worker admission.
             ::trussc::internal::WorkerAppAdmission admission(owner);
             if (!admission || (owner && (owner->retiring || owner->ended || !owner->token->load() || owner->callbacksClosing)))

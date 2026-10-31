@@ -27,7 +27,6 @@ struct { int callbacks_active=0; bool deferred_blocked=false; bool mouse_locked=
 _sapp_tc_window_t* live=nullptr;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return live && live->win_id==h.id ? live : nullptr; }
 ''' + ('''
-bool _sapp_tc_mac_frozen() { return false; }
 void _sapp_tc_mac_contained(const char*) {}
 void _sapp_tc_mac_schedule_deferred() {}
 ''' + extract(NATIVE,'struct _sapp_tc_mac_callback_scope {')+';\n' if index==0 else '')+implementation+r'''
@@ -131,7 +130,6 @@ struct { int callbacks_active=0,constructing=0; bool deferred_blocked=false,term
     struct { bool quit_requested=false,quit_ordered=false; struct { bool (*_tc_callbacks_active)()=nullptr; } desc; } app; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return _sapp_tc.windows[0] && h.id==window.win_id?&window:nullptr; }
 void _sapp_tc_mac_schedule_deferred() {}
-bool _sapp_tc_mac_frozen() { return false; }
 AEEventID _sapp_tc_mac_quit_reason() { return 0; }
 bool _sapp_tc_mac_is_session_end(AEEventID) { return false; }
 void _sapp_tc_mac_session_end(AEEventID) {}

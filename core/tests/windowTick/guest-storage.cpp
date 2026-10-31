@@ -13,12 +13,11 @@ unsigned storageEndingOrder[3]{};
 }
 namespace {
 bool failAllocation = false;
-int failures = 0, unloads = 0;
+int failures = 0;
 void check(const char* label, bool ok) {
     std::printf("guest-storage: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
 }
-void closeGuest(void* handle) { ++unloads; dlclose(handle); }
 }
 void* operator new(std::size_t size) {
     if (failAllocation) throw std::bad_alloc();
@@ -56,7 +55,6 @@ int main(int argc, char** argv) {
         auto create = reinterpret_cast<App* (*)()>(dlsym(handle, "storageCreate"));
         auto destroy = reinterpret_cast<void (*)(App*)>(dlsym(handle, "storageDestroy"));
         const auto generation = internal::nextAppGeneration();
-        internal::registerGuestCode(generation, handle, closeGuest, reinterpret_cast<const void*>(create));
         auto createAt = [&](Window& target, internal::AppConstructionTicket& ticket) {
             ticket.registrationOwner = generation;
             ticket.context = &target.context();
@@ -78,10 +76,10 @@ int main(int argc, char** argv) {
         auto youngestWindow = internal::prepareLaunchWindow(WindowSettings{});
         internal::WindowRequestAccess::bindForTests(*youngestWindow, 303);
         auto attach = reinterpret_cast<void (*)(Window*)>(dlsym(handle, "storageAttach"));
-        attach(youngestWindow.get()); // guest typed construction outside any App owner
+        { internal::AppOwnerScope scope(ticket.owner); attach(youngestWindow.get()); }
         internal::applyPendingAppForTests(*youngestWindow);
         auto youngest = youngestWindow->getApp();
-        check("unowned guest typed construction publishes its own cohort App", bool(youngest));
+        check("guest typed construction inherits its caller cohort", bool(youngest));
         if (!youngest) return 2;
         auto addNode = reinterpret_cast<std::shared_ptr<Node> (*)(App*)>(dlsym(handle, "storageNode"));
         { auto node = addNode(app.get()); peer.context().hoveredNode = node; peer.context().grabbedNode = node; peer.context().grabbedButton = 0; }
@@ -99,12 +97,11 @@ int main(int argc, char** argv) {
         auto queueGuest = reinterpret_cast<void (*)()>(dlsym(handle, "storageQueue"));
         std::thread ownedWorker([&] { internal::AppOwnerScope scope(ticket.owner); queueGuest(); });
         ownedWorker.join();
-        const int before = unloads;
+        auto mapped = [&] { return dlsym(handle, "storageCreate") == reinterpret_cast<void*>(create); };
         std::printf("guest-storage: mode=%s oom=%d\n", runtimeStop ? "Runtime shutdown" : "cohort retirement", int(oom));
         failAllocation = oom;
         if (runtimeStop) internal::shutdownRuntime();
         else internal::retireAppGeneration(generation);
-        internal::releaseGuestCode(generation);
         failAllocation = false;
         check("OOM ending clears foreign guest node refs while preserving unrelated live nodes",
               peer.context().hoveredNode.expired() && peer.context().grabbedNode.expired() &&
@@ -116,29 +113,25 @@ int main(int argc, char** argv) {
         check("only Runtime shutdown retires the Window backings", window->isOpen() == !runtimeStop &&
               siblingWindow->isOpen() == !runtimeStop && youngestWindow->isOpen() == !runtimeStop);
         check("retirement releases captures before any queue drain", storageDrops == 3 && storageCalls == 0);
-        internal::drainGuestCode();
-        check("retained App pins its guest destroy function", unloads == before);
+        check("module remains mapped through retained App destruction", mapped());
         app.reset(); sibling.reset(); youngest.reset();
         ticket.owner.reset(); ticket.runToken.reset();
         siblingTicket.owner.reset(); siblingTicket.runToken.reset();
-        internal::drainGuestCode();
-        if (oom) check("OOM tombstones retain their defining code", unloads == before);
+        if (oom) check("module remains mapped through OOM tombstones", mapped());
         int value = 0; zero.notify(); typed.notify(value);
         check("retired callbacks never run", storageCalls == 0);
         zero.clear(); typed.clear();
-        internal::drainGuestCode();
-        check("retained weak control block still pins guest destruction code", unloads == before);
-        weak.reset(); internal::drainGuestCode();
-        check("completed MCP worker storage pins guest code", unloads == before);
+        weak.reset();
+        check("module remains mapped through weak control block release", mapped());
+        check("module remains mapped through completed MCP worker storage", mapped());
         auto retiredReply = json::parse(reply());
-        check("retired worker refuses execution inside JSON-RPC while its storage pins code",
+        check("retired worker refuses execution inside JSON-RPC while the module remains mapped",
             retiredReply.value("jsonrpc", "") == "2.0" && retiredReply["id"] == 239 && retiredReply["result"].value("isError", false));
-        reply = {}; internal::drainGuestCode();
-        check("single-argument queued guest capture remains pinned after every other storage release", unloads == before && storageDrops == 3);
+        reply = {};
+        check("single-argument queued guest capture remains pinned after every other storage release", mapped() && storageDrops == 3);
         internal::drainMainThreadQueue();
-        check("retired queued guest never runs and capture destruction finishes while pinned", storageCalls == 0 && storageDrops == 4 && unloads == before);
-        internal::drainGuestCode();
-        check("retired module stays pinned after final storage release", unloads == before);
+        check("retired queued guest never runs and capture destruction finishes while pinned", storageCalls == 0 && storageDrops == 4 && mapped());
+        check("retired module stays pinned after final storage release", mapped());
         // Rebuild and notify after logical retirement, while the image stays pinned.
         auto a = zero.listen([] {}); auto b = typed.listen([](int&) {});
         zero.notify(); typed.notify(value);

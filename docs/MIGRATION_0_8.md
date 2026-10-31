@@ -291,5 +291,3 @@ class Document : public tc::App {
     }
 };
 ```
-
-Reload uses the common App ending and Runtime-first `hotReloadUnload`. It supports a single window; while a hot-reload guest is loaded, creating a second or later open window emits a Warning each time and behaviour is not guaranteed. Reload happens at the main-thread safe point. Requests set a flag, cleared by the next poll before one attempt; requests made during that attempt wait for the next poll. Session freeze refuses requests. Successful modules stay loaded for the process lifetime. Desktop macOS/Windows/Linux support runtime reload; iOS/Android/Web use the static fallback.

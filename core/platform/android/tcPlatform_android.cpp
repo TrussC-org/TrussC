@@ -259,7 +259,6 @@ std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowCont
 }
 
 bool captureWindow(Pixels& outPixels) {
-    if (internal::sessionEndExit()) return false;
     if (!sg_isvalid()) return false;
     if (internal::hasPublicFboActivation()) return false;
     internal::CapturePrefixScope capturePhase;

@@ -29,7 +29,7 @@ template<class T> struct EventSnapshotDelivery {
     };
     std::weak_ptr<Target> target;
     static std::shared_ptr<Target> bind(Event<T>& event, std::shared_ptr<NetworkDelivery> gate) {
-        return makeCodeShared<Target>([source = &event, gate = std::move(gate)](T& args, RunToken run, bool external) {
+        return std::make_shared<Target>([source = &event, gate = std::move(gate)](T& args, RunToken run, bool external) {
             typename Event<T>::ConstEntryListPtr snapshot;
             std::shared_ptr<ExternalDeliveryStore> store;
             std::weak_ptr<std::atomic<bool>> sourceAlive;
@@ -63,7 +63,7 @@ template<> struct EventSnapshotDelivery<void> {
     };
     std::weak_ptr<Target> target;
     static std::shared_ptr<Target> bind(Event<void>& event, std::shared_ptr<NetworkDelivery> gate) {
-        return makeCodeShared<Target>([source = &event, gate = std::move(gate)](bool external) {
+        return std::make_shared<Target>([source = &event, gate = std::move(gate)](bool external) {
             Event<void>::ConstEntryListPtr snapshot;
             std::shared_ptr<ExternalDeliveryStore> store;
             std::weak_ptr<std::atomic<bool>> sourceAlive;

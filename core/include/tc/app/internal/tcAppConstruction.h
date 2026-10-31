@@ -19,46 +19,9 @@ class Window;
 namespace internal {
 class WindowRequestAccess;
 struct WindowContext;
-// Host control blocks retain the defining library until erased storage has
-// finished its guest destructor. Retired modules remain pinned for process lifetime.
-std::shared_ptr<void> retainGuestCode();
-std::shared_ptr<void> retainGuestCodeFor(const void*);
-std::shared_ptr<void> combineGuestCode(std::shared_ptr<void>, std::shared_ptr<void>);
-const void* guestCodeGeneration(const std::shared_ptr<void>&);
-std::shared_ptr<void> adoptGuestStorage(void*, void (*)(void*), std::shared_ptr<void>);
-void registerGuestCode(const void*, void*, void (*)(void*), const void*);
-void releaseGuestCode(const void*) noexcept;
-void drainGuestCode() noexcept;
-struct ResourceLoadState;
-struct ExternalDeliveryStore;
-std::shared_ptr<ResourceLoadState> adoptGuestResourceStorage(ResourceLoadState*, void*, void (*)(void*), std::shared_ptr<void>);
-std::shared_ptr<ExternalDeliveryStore> adoptGuestEventStorage(ExternalDeliveryStore*, void*, void (*)(void*), std::shared_ptr<void>);
-template<class T, class... Args> std::shared_ptr<T> makeCodeShared(Args&&... args) {
-    auto destroy = +[](void* p) { delete static_cast<T*>(p); };
-    auto code = retainGuestCodeFor(reinterpret_cast<const void*>(destroy));
-    auto* value = new T(std::forward<Args>(args)...);
-    // All control blocks and deleter managers live in the host. In particular,
-    // dropping the last weak reference on a worker never returns through an
-    // unloaded guest control-block destructor. Known framework bases initialize
-    // enable_shared_from_this in the host's typed adoption constructor.
-    if constexpr (std::is_base_of_v<ResourceLoadState, T>) {
-        auto storage = adoptGuestResourceStorage(value, value, destroy, std::move(code));
-        return std::shared_ptr<T>(std::move(storage), value);
-    } else if constexpr (std::is_base_of_v<ExternalDeliveryStore, T>) {
-        auto storage = adoptGuestEventStorage(value, value, destroy, std::move(code));
-        return std::shared_ptr<T>(std::move(storage), value);
-    } else {
-        static_assert(!requires(T& v) { v.shared_from_this(); }, "shared ownership requires a host adoption overload");
-        auto storage = adoptGuestStorage(value, destroy, std::move(code));
-        return std::shared_ptr<T>(std::move(storage), value);
-    }
-}
-std::function<void()> eventDisconnect(void*, uint64_t, std::weak_ptr<std::atomic<bool>>,
-                                    void (*)(void*, uint64_t));
 // One host-owned lifetime for construction, pending publication and attachment.
 struct AppOwner {
     std::shared_ptr<std::atomic<bool>> token = std::make_shared<std::atomic<bool>>(true);
-    std::shared_ptr<void> code;
     uint64_t epoch = 0;
     const void* generation = nullptr;
     App* app = nullptr;
@@ -66,7 +29,6 @@ struct AppOwner {
     WindowContext* context = nullptr;
     std::atomic<bool> retiring{false}, ended{false}, callbacksClosing{false};
     bool exitDelivered = false, notifyWindowExit = false;
-    std::atomic<bool> abandoned{false};
     // Serializes registration/extraction; invoke cancellations outside this lock.
     std::mutex cancellationsMutex;
     std::vector<std::function<void()>> cancellations;
@@ -78,7 +40,6 @@ struct AppConstructionTicket {
     App* app = nullptr;
     WindowContext* context = nullptr;
     std::shared_ptr<AppOwner> owner;
-    std::shared_ptr<void> code;
     bool claimed = false;
     const void* allocation = nullptr;
     size_t allocationSize = 0;
@@ -101,7 +62,7 @@ private:
     std::shared_ptr<AppOwner> owner_;
     const void* previousRegistration_;
 };
-// Worker activity and revalidation for ordinary session ending. Cleanup remains allowed.
+// Worker callbacks revalidate the ordinary owner lifetime. Cleanup remains allowed.
 class WorkerAppAdmission {
 public:
     explicit WorkerAppAdmission(const std::shared_ptr<AppOwner>&, bool cleanup = false) noexcept;
@@ -109,7 +70,7 @@ public:
     explicit operator bool() const noexcept { return admitted_; }
     WorkerAppAdmission(const WorkerAppAdmission&) = delete;
 private:
-    bool counted_ = false, admitted_ = false;
+    bool admitted_ = false;
 };
 // Main-thread callbacks restore the caller's physical rendering context too.
 class AppCallbackScope {
@@ -143,9 +104,8 @@ void requireAppConstruction(const App*);
 void completeAppConstruction(App&) noexcept;
 std::shared_ptr<App> adoptConstructedApp(App*, void (*destroy)(App*) = nullptr);
 std::shared_ptr<AppOwner> appOwner(const App&) noexcept;
-bool admitAppEndingEvent(const AppOwner*) noexcept;
 void deliverAppExit(App&);
-void endAppAttachment(const std::shared_ptr<App>&, WindowContext&, bool virtualOnly = false, EndingPolicy policy = EndingPolicy::Normal) noexcept;
+void endAppAttachment(const std::shared_ptr<App>&, WindowContext&, bool virtualOnly = false) noexcept;
 
 // Retain attribution for callbacks held outside Event (tools, dialogs, providers).
 template<class R, class... Args>
@@ -154,15 +114,11 @@ std::function<R(Args...)> appOwnedCallback(std::function<R(Args...)> callback, b
     if (!owner || !callback) return callback;
     if (owner->ended || owner->retiring) return {};
     using Callback = std::function<R(Args...)>;
-    auto target = makeCodeShared<AtomicSharedPtr<Callback>>(makeCodeShared<Callback>(std::move(callback)));
+    auto target = std::make_shared<AtomicSharedPtr<Callback>>(std::make_shared<Callback>(std::move(callback)));
     ownAppCancellation([weak = std::weak_ptr(target)] {
         if (auto live = weak.lock()) sharedStore(*live, std::shared_ptr<Callback>{});
     });
     return [weak = std::weak_ptr(owner), target, exitEvent](Args... args) -> R {
-        if (sessionEndExit() && !(exitEvent && admitAppEndingEvent(weak.lock().get()))) {
-            if constexpr (!std::is_void_v<R>) return R{};
-            else return;
-        }
         auto live = weak.lock();
         auto call = sharedLoad(*target);
         if (!live || (!live->token->load() && !(exitEvent && live->ended)) || live->callbacksClosing || !call) {
@@ -170,11 +126,8 @@ std::function<R(Args...)> appOwnedCallback(std::function<R(Args...)> callback, b
             else return;
         }
         AppCallbackScope scope(live);
-        // Pair callback activity admission with Runtime's freeze-before-count
-        // snapshot. A worker that lost the race never enters App code.
         if (!scope.admitted() ||
-            (!live->token->load() && !(exitEvent && live->ended)) || live->callbacksClosing ||
-            (sessionEndExit() && !(exitEvent && admitAppEndingEvent(live.get())))) {
+            (!live->token->load() && !(exitEvent && live->ended)) || live->callbacksClosing) {
             if constexpr (!std::is_void_v<R>) return R{};
             else return;
         }
@@ -203,7 +156,6 @@ template<class T, class... Args> std::shared_ptr<T> makeConstructedAppAt(WindowC
     AppConstructionTicket ticket;
     ticket.context = context;
     auto definingCode = &destroyAppStorage<T>;
-    ticket.code = retainGuestCodeFor(reinterpret_cast<const void*>(definingCode));
     AppConstructionScope construction(ticket);
     static_assert(std::is_base_of_v<App, T>, "T must derive from App");
     auto* candidate = constructAppStorage<T>(std::forward<Args>(args)...);
@@ -217,5 +169,6 @@ template<class T, class... Args> std::shared_ptr<T> makeConstructedApp(Args&&...
 std::shared_ptr<std::atomic<bool>> constructorRunToken();
 uint64_t runtimeEpoch() noexcept;
 void beginRuntimeRun();
+bool processPendingQuit() noexcept;
 }
 }
