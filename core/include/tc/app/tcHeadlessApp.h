@@ -176,15 +176,20 @@ inline std::vector<EventListener> registerHeadlessAppEventListeners(
     return listeners;
 }
 
+struct HeadlessUpdateState {
+    double accumulator = 0.0;
+    bool updateStepsDropWarned = false; // Main-thread-only warning episode
+};
+
 // One pass, with elapsed time supplied by the runner (or a deterministic
 // test). A cancellable request is dispatched only after all owed steps.
 inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
-                                  double& accumulator, double elapsed,
+                                  HeadlessUpdateState& state, double elapsed,
                                   double targetDelta) {
     RuntimeActivityScope activity;
     FixedStepAdvance adv = advanceFixedStep(
-        accumulator, elapsed, targetDelta, getMaxUpdateSteps());
-    warnUpdateStepsDropped(FixedStepLoop::Headless,
+        state.accumulator, elapsed, targetDelta, getMaxUpdateSteps());
+    warnUpdateStepsDropped(FixedStepLoop::Headless, state.updateStepsDropWarned,
                            adv.droppedTime, targetDelta, adv.steps);
     int ran = 0;
     for (; ran < adv.steps; ++ran) {
@@ -328,7 +333,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // precise timer (HeadlessSleeper), so a fast rate stays well under the
     // cap per pass.
     const double targetDelta = 1.0 / headless::targetFps;
-    double accumulator = 0.0;
+    internal::HeadlessUpdateState updateState;
     auto lastTime = std::chrono::steady_clock::now();
     internal::HeadlessSleeper sleeper;
 
@@ -342,7 +347,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         internal::sampleFrameTime(ctx);
         {
             internal::HostTurnScope turn;
-            internal::runHeadlessUpdatePass(*app, ctx, accumulator, elapsed, targetDelta);
+            internal::runHeadlessUpdatePass(*app, ctx, updateState, elapsed, targetDelta);
         }
         if (!headless::running || app->isExitRequested()) break;
 
@@ -350,7 +355,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         // pass start: the steps above already took part of that time.
         const double spent = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - now).count();
-        sleeper.sleep(internal::headlessSleepTime(accumulator, targetDelta, spent));
+        sleeper.sleep(internal::headlessSleepTime(updateState.accumulator, targetDelta, spent));
     }
 
     internal::shutdownRuntime();

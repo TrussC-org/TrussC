@@ -34,10 +34,10 @@ TC_CORE_TEST_MAIN() {
         internal::runIndependentUpdates(now);
     };
     auto app = internal::makeConstructedApp<App>();
-    double accumulator = 0.0;
+    internal::HeadlessUpdateState updateState;
     auto headlessPass = [&](double elapsed) {
         internal::runHeadlessUpdatePass(*app, receiver.window->context(),
-                                        accumulator, elapsed, 0.01);
+                                        updateState, elapsed, 0.01);
     };
 
     mainPass(1000);
@@ -61,5 +61,31 @@ TC_CORE_TEST_MAIN() {
     mainPass(1000);
     headlessPass(1.0);
     check("both: second sustained episode stays silent", mainWarnings == 2 && headlessWarnings == 2);
+    // Window B's clean passes must not end Window A's continuous stall.
+    {
+        tcCoreTest::WindowFixture fast(102), normal(103);
+        auto windowPass = [&](tcCoreTest::WindowFixture& receiver, float hz) {
+            internal::currentWindowCtx() = &receiver.window->context();
+            receiver.window->context().loop.updateTargetFps = hz;
+            internal::runIndependentUpdates(now);
+        };
+        windowPass(fast, 1000);
+        windowPass(normal, 60);
+        const int before = mainWarnings;
+        for (int frame = 0; frame < 5; ++frame) {
+            now += std::chrono::milliseconds(16);
+            windowPass(fast, 1000);
+            windowPass(normal, 60);
+        }
+        check("two Windows: B clean passes do not re-arm A", mainWarnings == before + 1);
+        windowPass(fast, 1000); // A's own zero-elapsed clean pass re-arms A.
+        now += std::chrono::milliseconds(16);
+        windowPass(fast, 1000);
+        check("two Windows: A clean pass re-arms A", mainWarnings == before + 2);
+        windowPass(normal, 60);
+        now += std::chrono::milliseconds(16);
+        windowPass(fast, 1000);
+        check("two Windows: A second sustained episode stays silent", mainWarnings == before + 2);
+    }
     return failures ? 1 : 0;
 }

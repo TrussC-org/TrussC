@@ -211,10 +211,10 @@ void testCatchUp(Mode mode, int expectedSteps) {
     app->setup();
     auto& ctx = internal::nonWindowContext();
     const int rateIndex = ctx.rateIndex;
-    double accumulator = 0.0;
+    internal::HeadlessUpdateState updateState;
     // Binary-exact interval and elapsed time: exactly 100 owed steps,
     // independent of CPU load, wall time or sleep resolution.
-    internal::runHeadlessUpdatePass(*app, ctx, accumulator, 100.0 / 128.0, 1.0 / 128.0);
+    internal::runHeadlessUpdatePass(*app, ctx, updateState, 100.0 / 128.0, 1.0 / 128.0);
     check(result.updates == expectedSteps && headless::frameCount == unsigned(expectedSteps),
           "100 due steps: actual update count matches stop kind");
     check(ctx.rateSteps[rateIndex] == expectedSteps, "measured rate counts only completed steps");
@@ -244,8 +244,8 @@ void testSetupFirstPass() {
     auto appListeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
     internal::recordHeadlessAttachment(app, internal::nonWindowContext());
     app->setup();
-    double accumulator = 0.0;
-    internal::runHeadlessUpdatePass(*app, internal::nonWindowContext(), accumulator, 0.0, 1.0);
+    internal::HeadlessUpdateState updateState;
+    internal::runHeadlessUpdatePass(*app, internal::nonWindowContext(), updateState, 0.0, 1.0);
     check(result.requests == 1 && result.updates == 0 && !headless::running,
           "setup request is handled on first pass even with no due steps");
     internal::shutdownRuntime();

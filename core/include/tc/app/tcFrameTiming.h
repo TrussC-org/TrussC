@@ -9,8 +9,8 @@
 // timing behaviour is testable headless (core/tests/frameTiming). The one
 // exception is HeadlessSleeper, the headless loop's OS sleep.
 //
-// Defined in tcGlobal.cpp (non-inline): the per-episode warning keeps its flags
-// there, and the hot-reload Host and Guest share them.
+// Helpers are defined in tcGlobal.cpp (non-inline); warning episode state
+// belongs to each Window loop and the headless runner.
 // =============================================================================
 
 namespace trussc {
@@ -31,6 +31,7 @@ struct MainLoopState {
     std::chrono::steady_clock::time_point lastUpdateTime;
     bool lastUpdateTimeInitialized = false;
     double updateAccumulator = 0.0;  // Accumulated time for independent Update
+    bool updateStepsDropWarned = false; // Main-thread-only warning episode
 
     // Draw timing (frame skip)
     std::chrono::steady_clock::time_point lastDrawTime;
@@ -111,10 +112,11 @@ bool frameSkipShouldTick(double& accumulator, double elapsed, double interval);
 enum class FixedStepLoop { Main, Headless };
 
 // Call on every fixed-step frame or pass, including those that drop no time.
-// Log the first drop in each episode, separately per loop, after running
-// `stepsRun` steps (its cap, getMaxUpdateSteps()). A pass with no dropped time
-// re-arms the warning for the next stall (#1151).
-void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double interval,
+// Log the first drop in each episode, per Window loop and the headless loop,
+// after running `stepsRun` steps (its cap, getMaxUpdateSteps()). A pass with
+// no dropped time re-arms the warning for the next stall (#1151).
+void warnUpdateStepsDropped(FixedStepLoop loop, bool& warned,
+                            double droppedTime, double interval,
                             int stepsRun);
 
 } // namespace internal

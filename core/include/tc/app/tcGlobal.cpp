@@ -1390,7 +1390,8 @@ void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
 
         FixedStepAdvance adv = advanceFixedStep(loop.updateAccumulator, elapsed, updateInterval,
                                                 getMaxUpdateSteps());
-        warnUpdateStepsDropped(FixedStepLoop::Main, adv.droppedTime, updateInterval, adv.steps);
+        warnUpdateStepsDropped(FixedStepLoop::Main, loop.updateStepsDropWarned,
+                               adv.droppedTime, updateInterval, adv.steps);
         // The frame's steps are the latest adv.steps intervals on the
         // loop's timeline, ending one leftover accumulator before `now`.
         const double leftover = loop.updateAccumulator;
@@ -1776,13 +1777,15 @@ bool frameSkipShouldTick(double& accumulator, double elapsed, double interval) {
     return true;
 }
 
-void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double interval,
+void warnUpdateStepsDropped(FixedStepLoop loop, bool& warned,
+                            double droppedTime, double interval,
                             int stepsRun) {
-    // One flag per loop: a pass without dropped time ends its episode.
-    static std::atomic<bool> warned[2] = {false, false};
+    // The owning loop supplies its main-thread-only episode flag.
+    // A pass without dropped time ends only that loop's episode.
     const bool headless = (loop == FixedStepLoop::Headless);
     const bool dropped = droppedTime > 0.0;
-    const bool alreadyWarned = warned[headless ? 1 : 0].exchange(dropped);
+    const bool alreadyWarned = warned;
+    warned = dropped;
     if (!dropped || alreadyWarned) return;
     const char* where = headless ? "Headless loop" : "Update loop";
     const char* frame = headless ? "loop pass" : "frame";
