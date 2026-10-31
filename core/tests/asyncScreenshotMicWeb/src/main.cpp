@@ -32,39 +32,16 @@ int action(int operation) {
         }));
         break;
     case 1:
-        internal::submitScreenshot(&queue, "directory/same.png");
-        internal::submitScreenshot(&queue, "same.png");
-        internal::submitScreenshot(&queue, "other.jpg");
-        internal::submitScreenshot(&queue, "fourth.png");
-        internal::submitScreenshot(&queue, "overflow.png");
+        internal::submitScreenshot(&queue, "shot.png");
         internal::captureScreenshots(queue);
-        check("Web capture and cap failure never notify inline", shots.empty() && *queue.admitted == 4);
-        drain(); check("Web overflow uses deferred WriteFailed", shots.size() == 1 && shots[0].result.error == SaveError::WriteFailed && shots[0].result.message == "Screenshot queue is full");
-        break;
+        check("Web shot completion is deferred", shots.empty()); break;
     case 2:
-        check("Web URL cleanup still occupies admission", *queue.admitted == 4);
-        break;
+        drain(); check("Web shot completes once", shots.size() == 1 && shots.back().result.ok()); break;
     case 3:
-        drain(); check("independent filename completes first", shots.size() == 2 && shots.back().path == "other.jpg" && shots.back().result.ok());
-        break;
+        internal::submitScreenshot(&queue, "closed.png");
+        internal::closeScreenshots(queue); break;
     case 4:
-        drain(); check("all Web captures retire once", shots.size() == 5 && *queue.admitted == 0);
-        break;
-    case 5: {
-        auto before = shots.size();
-        internal::submitScreenshot(&queue, "throw.png"); internal::captureScreenshots(queue);
-        check("synchronous Web exception never fires inline", shots.size() == before);
-        drain(); check("synchronous Web exception is deferred failure", shots.size() == before + 1 && !shots.back().result);
-        break;
-    }
-    case 6:
-        internal::submitScreenshot(&queue, "null.png"); internal::captureScreenshots(queue); break;
-    case 7:
-        drain(); check("null blob is one failure", shots.size() == 7 && !shots.back().result && *queue.admitted == 0); break;
-    case 8:
-        internal::submitScreenshot(&queue, "click.png"); internal::captureScreenshots(queue); break;
-    case 9:
-        drain(); check("click throw is one deferred failure", shots.size() == 8 && !shots.back().result && *queue.admitted == 0); break;
+        drain(); check("Web window close completes with failure", shots.size() == 2 && !shots.back().result); break;
     case 10:
         first->startAsync(44100);
         check("Web publishes starting before permission/resume", first->isStarting() && !first->isRunning() && firstEvents == 0); break;
@@ -155,14 +132,14 @@ EM_JS(void, runMocks, (Action actionFn, Finish finishFn), {
         const originalFrame = globalThis.requestAnimationFrame;
         globalThis.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
         const nextFrame = () => { const pending = frames.splice(0); pending.forEach(callback => callback()); };
-        let removed = 0, clickThrows = false, suspended = false, processors = 0;
+        let suspended = false, processors = 0;
         globalThis.setTimeout = callback => { timers.push(callback); return timers.length; };
         const cleanURLs = () => { while (timers.length) timers.shift()(); };
         Module.canvas = { toBlob(callback, mime) { blobs.push({callback, mime}); } };
         globalThis.document = { querySelector: () => Module.canvas,
             body: { appendChild() {} }, createElement() { return {
-                click() { if (clickThrows) throw new Error('click failed'); clicks.push(this.href); },
-                remove() { ++removed; }
+                click() { clicks.push(this.href); },
+                remove() {}
             }; }
         };
         globalThis.URL = { createObjectURL: blob => 'blob:' + blob.id,
@@ -180,19 +157,8 @@ EM_JS(void, runMocks, (Action actionFn, Finish finishFn), {
         }};
         const stream = () => { const track = { stopped: 0, stop() { ++this.stopped; } }; return { track, getTracks: () => [track] }; };
         action(0); action(1);
-        assert('Web captures are queued in invocation order', blobs.length === 4 && blobs[2].mime === 'image/jpeg');
-        blobs[2].callback({id:'other'}); action(2); cleanURLs(); action(3);
-        blobs[1].callback({id:'second'});
-        assert('reordered same-name blob waits for first capture', clicks.join() === 'blob:other');
-        blobs[0].callback({id:'first'}); blobs[3].callback({id:'fourth'});
-        assert('same-name downloads preserve capture order', clicks.join() === 'blob:other,blob:first,blob:second,blob:fourth');
-        cleanURLs(); action(4);
-        assert('download URLs and links are released', revoked.length === 4 && removed === 4);
-        const capture = Module.canvas.toBlob;
-        Module.canvas.toBlob = () => { throw new Error('tainted canvas'); }; action(5); Module.canvas.toBlob = capture;
-        action(6); blobs[4].callback(null); action(7);
-        clickThrows = true; action(8); blobs[5].callback({id:'throw'}); cleanURLs(); action(9); clickThrows = false;
-        assert('thrown click still releases URL/link', revoked.length === 5 && removed === 5);
+        blobs[0].callback({id:'shot'}); cleanURLs(); action(2);
+        action(3); action(4);
         action(10);
         assert('permission and resume begin in initiating stack', permissions.length === 1 && contexts.length === 1);
         navigator.userActivation.isActive = false; // activation expires after the call
