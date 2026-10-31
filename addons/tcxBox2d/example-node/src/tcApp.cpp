@@ -10,15 +10,9 @@
 #include <tcxBox2d.h>
 #include <vector>
 #include <memory>
-#include <cstdlib>
 
 using namespace tc;
 using namespace tcx;
-
-// Generate random float (min to max)
-float randomFloat(float min, float max) {
-    return min + (float)rand() / RAND_MAX * (max - min);
-}
 
 class tcApp : public tc::App {
 public:
@@ -131,16 +125,16 @@ public:
                 world.startDrag(body, e.pos.x, e.pos.y);
             } else {
                 // Otherwise add a circle
-                addCircle(e.pos.x, e.pos.y, randomFloat(15, 40));
+                addCircle(e.pos.x, e.pos.y, random(15, 40));
             }
         }
         else if (e.button == MOUSE_BUTTON_RIGHT) {
-            addRect(e.pos.x, e.pos.y, randomFloat(30, 60), randomFloat(20, 40));
+            addRect(e.pos.x, e.pos.y, random(30, 60), random(20, 40));
         }
         else if (e.button == MOUSE_BUTTON_MIDDLE) {
             // Middle click: add random polygon (3-8 sides)
-            int sides = 3 + rand() % 6;
-            addPolygon(e.pos.x, e.pos.y, randomFloat(20, 40), sides);
+            int sides = randomInt(3, 8);
+            addPolygon(e.pos.x, e.pos.y, random(20, 40), sides);
         }
     }
 
