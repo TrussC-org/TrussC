@@ -36,8 +36,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(snappy PRIVATE -Wno-pass-failed -Wno-error)
 endif()
 if(MSVC)
-    # Suppress fetched-source diagnostics without silencing addon/app sources.
-    target_compile_options(snappy PRIVATE /w)
+    # Snappy sets /W4 in its directory CMAKE_CXX_FLAGS; /w would cause D9025.
+    # Suppress only the conversion diagnostics observed in its own sources.
+    target_compile_options(snappy PRIVATE /wd4244 /wd4267 /wd4245)
 endif()
 
 # -----------------------------------------------------------------------------
