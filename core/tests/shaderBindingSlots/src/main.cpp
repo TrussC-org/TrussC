@@ -118,6 +118,20 @@ TC_CORE_TEST_MAIN() {
         check("valid uniform slot retains its padded bytes", bytes.size() == sizeof(expected) &&
             std::memcmp(bytes.data(), expected, sizeof(expected)) == 0);
     }
+    auto checkEmptyUniform = [&](const auto& values) {
+        shader.setUniform(0, 1.0f);
+        shader.setUniform(0, values);
+        check("empty uniform vector clears existing bytes", shader.pendingUniforms.at(0).empty());
+    };
+    checkEmptyUniform(std::vector<float>{});
+    checkEmptyUniform(std::vector<Vec2>{});
+    checkEmptyUniform(std::vector<Vec3>{});
+    checkEmptyUniform(std::vector<Vec4>{});
+    shader.setUniform(0, 1.0f);
+    shader.setUniform(0, nullptr, 0);
+    check("null source with zero size clears existing bytes", shader.pendingUniforms.at(0).empty());
+    shader.setUniform(0, 1.0f);
+    check("nonempty uniform replaces empty bytes", shader.pendingUniforms.at(0).size() == 4 * sizeof(float));
     auto viewsBefore = shader.pendingViews;
     auto uniformsBefore = shader.pendingUniforms;
     for (int repeat = 0; repeat < 100; ++repeat) {

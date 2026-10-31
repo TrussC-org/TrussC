@@ -257,7 +257,12 @@ protected:
             }
             return;
         }
-        pendingUniforms[slot].assign((const uint8_t*)data, (const uint8_t*)data + size);
+        auto& bytes = pendingUniforms[slot];
+        if (size == 0) {
+            bytes.clear();
+            return;
+        }
+        bytes.assign((const uint8_t*)data, (const uint8_t*)data + size);
     }
 
     // Apply all stored uniforms
