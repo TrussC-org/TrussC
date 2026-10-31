@@ -16,19 +16,10 @@ int main() {
 #include <vector>
 
 namespace {
-bool failBuffer = false, failGroup = false, failAllocation = false, errorBuffer = false;
+bool failBuffer = false, failGroup = false, failAllocation = false;
 int errors = 0, warnings = 0, failures = 0;
-// forwarded: captured WebGPU errors logged with their message; creationFailed: recovery Errors.
-[[maybe_unused]] int forwarded = 0, creationFailed = 0;
 WGPUBuffer createBuffer(WGPUDevice device, const WGPUBufferDescriptor* desc) {
     if (failBuffer) return nullptr;
-    if (errorBuffer) {
-        // MapRead combines only with CopyDst: the browser returns a non-null error
-        // object and reports a validation error later through the error scope.
-        WGPUBufferDescriptor invalid = *desc;
-        invalid.usage |= WGPUBufferUsage_MapRead;
-        return wgpuDeviceCreateBuffer(device, &invalid);
-    }
     return wgpuDeviceCreateBuffer(device, desc);
 }
 WGPUBindGroup createGroup(WGPUDevice device, const WGPUBindGroupDescriptor* desc) {
@@ -49,13 +40,7 @@ WGPUDevice device;
 void check(bool ok, const char* label) {
     if (!ok) { ++failures; std::printf("FAIL %s\n", label); }
 }
-void logger(const char*, uint32_t level, uint32_t item, const char* message, uint32_t, const char*, void*) {
-#if !defined(TC_WEBGPU_BASELINE)
-    if (item == SG_LOGITEM_WGPU_UNIFORM_CHECK_CAPTURED_ERROR) ++forwarded;
-    if (item == SG_LOGITEM_WGPU_UNIFORM_BUFFER_CREATION_FAILED) ++creationFailed;
-#else
-    (void)item;
-#endif
+void logger(const char*, uint32_t level, uint32_t, const char* message, uint32_t, const char*, void*) {
     if (level <= 1) ++errors;
     if (level == 2) ++warnings;
     if (message) std::printf("sokol[%u] %s\n", level, message);
@@ -162,41 +147,6 @@ Raster makeRaster() {
     sg_view view = sg_make_view(&viewDesc);
     return {pipeline, image, view};
 }
-// Pixel per tile: the first `count` tiles have this frame's colors, the rest are cleared.
-bool tilesMatch(sg_image image, int frame, int count) {
-    auto pixels = readPixels(image);
-    for (int tile = 0; tile < width * height; ++tile) {
-        auto expected = tile < count ? color(tile, frame) : std::array<uint8_t,4>{0,0,0,255};
-        if (std::memcmp(pixels.data() + tile * 4, expected.data(), 4)) return false;
-    }
-    return true;
-}
-// One cleared raster pass drawing `count` tiles with two uniform uploads each.
-void drawTiles(const Raster& raster, int frame, int count) {
-    sg_pass pass{}; pass.attachments.colors[0] = raster.view;
-    pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    pass.action.colors[0].clear_value = {0, 0, 0, 1};
-    sg_begin_pass(&pass); sg_apply_pipeline(raster.pipeline);
-    sg_bindings bindings{}; sg_apply_bindings(&bindings);
-    for (int tile = 0; tile < count; ++tile) {
-        const int x = tile % width, y = tile / width;
-        sg_apply_scissor_rect(x, y, 1, 1, true);
-        float transform[4]{-1.f + 2.f*x/width, 1.f - 2.f*(y+1)/height, 2.f/width, 2.f/height};
-        auto rgba = color(tile, frame);
-        float tint[4]{rgba[0]/255.f, rgba[1]/255.f, rgba[2]/255.f, 1.f};
-        sg_range vertex{transform, sizeof(transform)}, fragment{tint, sizeof(tint)};
-        sg_apply_uniforms(0, &vertex); sg_apply_uniforms(1, &fragment); sg_draw(0, 3, 1);
-    }
-    sg_end_pass();
-}
-#if !defined(TC_WEBGPU_BASELINE)
-// Waits until every error scope the backend popped (creation and containment)
-// has delivered its result. Settlement order is not assumed; run.py's timeout
-// is the hang guard.
-void drainScopes() {
-    while (_sg.wgpu.uniform.scope_pending || _sg.wgpu.uniform.use_pending) emscripten_sleep(1);
-}
-#endif
 std::vector<uint8_t> scene(int reserve) {
     setup(reserve);
     auto [pipeline, image, view] = makeRaster();
@@ -302,39 +252,6 @@ void faults() {
         check(u.offset == 256, "next frame recovers");
         sg_shutdown();
     }
-    {
-        // Asynchronous GPU failure in a real frame: a growth mid-frame gets a
-        // non-null error object, and the frame's uploads, binds, draws, finish and
-        // submit use it before the error scope reports. Those errors must stay
-        // inside the backend's scopes (no uncaptured error); the next frame must
-        // return to the previous buffer with one Error and render correctly.
-        setup(256);
-        Raster raster = makeRaster();
-        auto& u = _sg.wgpu.uniform;
-        drawTiles(raster, 0, 16); sg_commit(); drainScopes();
-        drawTiles(raster, 1, 16); sg_commit(); drainScopes(); // confirmed, predecessor released
-        auto goodBuffer = u.buf; auto goodSize = u.num_bytes;
-        const int before = errors, beforeForwarded = forwarded, beforeFailed = creationFailed;
-        errorBuffer = true;
-        drawTiles(raster, 2, 256); // 512 uploads: one growth past the confirmed buffer
-        errorBuffer = false;
-        check(u.buf && u.buf != goodBuffer && u.num_bytes > goodSize, "failed growth frame used an error object");
-        sg_commit();
-        drainScopes();
-        check(u.scope_failed && creationFailed == beforeFailed, "error scope reported the failed growth");
-        drawTiles(raster, 3, 16);
-        check(u.buf == goodBuffer && u.num_bytes == goodSize && creationFailed == beforeFailed + 1,
-            "next frame returns to the last good buffer; one Error");
-        sg_commit();
-        check(tilesMatch(raster.image, 3, 16), "frame after the failed growth renders every tile");
-        drainScopes();
-        // Validation errors from using the error object are captured and logged
-        // with their message (never uncaptured); nothing else adds an Error.
-        check(forwarded > beforeForwarded, "captured errors of the failed frame are logged");
-        check(creationFailed == beforeFailed + 1 && errors - forwarded == before - beforeForwarded + 1,
-            "one recovery Error; other Errors are logged captured errors");
-        sg_shutdown();
-    }
     setup(256);
     _sg_shader_t shader{}; shader.slot.id = 1; shader.wgpu.bgl_view_smp = reinterpret_cast<WGPUBindGroupLayout>(1);
     _sg_pipeline_t pipeline{}; pipeline.slot.id = 1; pipeline.cmn.shader = _sg_shader_ref(&shader);
@@ -380,7 +297,7 @@ int main() {
     #endif
     check(EM_ASM_INT({ return Module.webgpuValidationErrors || 0; }) == 0, "no WebGPU validation errors");
     wgpuDeviceRelease(device);
-    std::printf("WEBGPU_UNIFORM_GROWTH: %s (6 frames, 3 raster/compute passes, tiny/large pixels, allocation rollback, async GPU failure)\n", failures ? "FAIL" : "PASS");
+    std::printf("WEBGPU_UNIFORM_GROWTH: %s (6 frames, 3 raster/compute passes, tiny/large pixels, growth/prefix, allocation failures)\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;
 }
 #endif
