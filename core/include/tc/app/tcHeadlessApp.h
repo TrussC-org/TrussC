@@ -179,10 +179,8 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
                                   double targetDelta) {
     FixedStepAdvance adv = advanceFixedStep(
         accumulator, elapsed, targetDelta, getMaxUpdateSteps());
-    if (adv.droppedTime > 0.0) {
-        warnUpdateStepsDropped(FixedStepLoop::Headless,
-                               adv.droppedTime, targetDelta, adv.steps);
-    }
+    warnUpdateStepsDropped(FixedStepLoop::Headless,
+                           adv.droppedTime, targetDelta, adv.steps);
     int ran = 0;
     for (; ran < adv.steps; ++ran) {
         headless::pollExitSignal();
@@ -294,7 +292,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // exactly that), at most getMaxUpdateSteps() steps per pass (the main
     // loop's cap per frame, setMaxUpdateSteps; default 10). After a stall
     // (sleep/resume) or when update() is slower than its rate, the excess
-    // time is dropped with a one-time warning instead of replayed, and
+    // time is dropped with one warning per stall instead of replayed, and
     // runOnMainThread work is drained between bounded passes (#228). Between
     // passes the loop sleeps until the next step is due, at most 1 ms, on a
     // precise timer (HeadlessSleeper), so a fast rate stays well under the

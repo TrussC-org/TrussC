@@ -2026,7 +2026,7 @@ inline void setIndependentFps(float updateFps, float drawFps) {
 // an update rate) or in one runHeadlessApp loop pass. More are pending after
 // a stall, when update() is slower than its own rate, or when the update rate
 // is more than this many times the display rate; the time beyond the cap is
-// dropped with a one-time warning instead of replayed. Default 10. 0 or less
+// dropped with one warning per stall instead of replayed. Default 10. 0 or less
 // removes the cap: every step runs (e.g. a deterministic simulation), at the
 // cost of a freeze while a long stall is replayed, and of frames (or
 // headless passes) that grow longer and longer while update() is slower than
@@ -2612,7 +2612,7 @@ namespace internal {
     //   VSYNC:        one update per frame, measured dt.
     //   fixed Hz:     accumulator steps at the nominal 1/updateFps, at most
     //                 getMaxUpdateSteps() per frame; time beyond the cap is
-    //                 dropped with a one-time warning (#228).
+    //                 dropped with one warning per stall (#228).
     //   EVENT_DRIVEN: no update.
     inline void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
         auto& wctx = mainWindowContext();
@@ -2631,9 +2631,7 @@ namespace internal {
 
             FixedStepAdvance adv = advanceFixedStep(loop.updateAccumulator, elapsed, updateInterval,
                                                     getMaxUpdateSteps());
-            if (adv.droppedTime > 0.0) {
-                warnUpdateStepsDropped(FixedStepLoop::Main, adv.droppedTime, updateInterval, adv.steps);
-            }
+            warnUpdateStepsDropped(FixedStepLoop::Main, adv.droppedTime, updateInterval, adv.steps);
             // The frame's steps are the latest adv.steps intervals on the
             // loop's timeline, ending one leftover accumulator before `now`.
             const double leftover = loop.updateAccumulator;
