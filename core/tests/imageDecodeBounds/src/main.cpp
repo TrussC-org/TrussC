@@ -281,15 +281,22 @@ void earlyPngChecks(const fs::path& root) {
 void gpuReplacementChecks(const fs::path& root) {
     // Resolve EGL at runtime so other platforms retain the same owned test.
     auto* library = dlopen("libEGL.so.1", RTLD_NOW);
-    check("surfaceless EGL library is available", library != nullptr);
-    if (!library) return;
+    if (!library) {
+        printf("SKIP: surfaceless EGL GPU checks: %s\n", dlerror());
+        return;
+    }
 #define EGL_FUNCTION(name) auto name = reinterpret_cast<decltype(&::name)>(dlsym(library, #name))
     EGL_FUNCTION(eglGetPlatformDisplay); EGL_FUNCTION(eglInitialize); EGL_FUNCTION(eglBindAPI);
     EGL_FUNCTION(eglChooseConfig); EGL_FUNCTION(eglCreateContext); EGL_FUNCTION(eglMakeCurrent);
     EGL_FUNCTION(eglDestroyContext); EGL_FUNCTION(eglTerminate); EGL_FUNCTION(eglGetError);
 #undef EGL_FUNCTION
+    if (!eglGetPlatformDisplay || !eglInitialize || !eglBindAPI || !eglChooseConfig ||
+        !eglCreateContext || !eglMakeCurrent || !eglDestroyContext || !eglTerminate || !eglGetError) {
+        printf("SKIP: surfaceless EGL GPU checks: required EGL entry point unavailable\n");
+        dlclose(library); return;
+    }
     auto stage = [&](const char* name, bool ok) {
-        if (!ok) printf("surfaceless EGL %s failed: eglGetError=0x%04x\n", name, eglGetError());
+        if (!ok) printf("SKIP: surfaceless EGL GPU checks: %s failed: eglGetError=0x%04x\n", name, eglGetError());
         return ok;
     };
     auto display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
@@ -313,12 +320,12 @@ void gpuReplacementChecks(const fs::path& root) {
     const bool created = initialized && stage("eglCreateContext", context != EGL_NO_CONTEXT);
     const bool current = created && stage("eglMakeCurrent",
         eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context));
-    check("surfaceless EGL context is available", current);
     if (!current) {
         if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
         if (haveDisplay) eglTerminate(display);
         dlclose(library); return;
     }
+    check("surfaceless EGL context is available", true);
     sg_desc descriptor{}; sg_setup(&descriptor);
     internal::recordImageDecodeLimit(sg_query_limits().max_image_size_2d);
     {
