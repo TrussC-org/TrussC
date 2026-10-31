@@ -5,7 +5,6 @@
 #include "ProjectState.h"
 #include "BuildSetup.h"
 #include "VsDetector.h"
-#include "tc/app/internal/tcHotReloadDiagnostics.h"
 #include "tc/app/internal/tcWindowsBuildOutput.h"
 #include <iostream>
 #include <string>
@@ -3642,8 +3641,9 @@ static int cmdBuild(const vector<string>& args) {
     if (rc != 0) {
         cerr << "Build failed (exit code " << rc << ").\n";
 #ifdef _WIN32
-        if (hotReloadState == "ON" && trussc::internal::hasWindowsGuestLinkError(buildOutput)) {
-            cerr << trussc::internal::windowsGuestLinkHint() << '\n';
+        if (hotReloadState == "ON") {
+            cerr << "Warning: the guest can use only TrussC and code linked into the guest; "
+                 << "main.cpp functions and host-only libraries are not visible.\n";
         }
 #endif
     }

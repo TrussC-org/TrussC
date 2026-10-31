@@ -2085,14 +2085,16 @@ inline void redraw(int count = 1) {
 // Request application exit (can be cancelled via exitRequested event)
 // If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
 inline void requestExitApp() {
+    if (!isMainThread()) { runOnMainThread([] { requestExitApp(); }); return; }
     internal::setExitReason("request-exit-app");
     if (headless::isActive()) headless::quitRequested = true;
     else sapp_request_quit();
 }
 
-// Immediately exit the application (cannot be cancelled)
+// Order application exit (cannot be cancelled); background calls post to main
 // Use this for forced exit, e.g., after user confirms exit in a dialog
 inline void exitApp(int code = 0) {
+    if (!isMainThread()) { runOnMainThread([code] { exitApp(code); }); return; }
     internal::appExitCode() = code;
     internal::setExitReason("exit-app");
     if (headless::isActive()) headless::running = false;
@@ -2187,9 +2189,7 @@ namespace internal {
     // (tc_get_screenshot / tc_save_screenshot with a window index): only
     // inside its own tick is its drawable the one a readback sees (#243).
     // The main window's are drained by the same afterFrame listener.
-    // The capture callback also permits headless drain regression tests.
-    inline void drainPendingScreenshots(
-        bool (*capture)(const std::filesystem::path&) = captureWindowToFile) {
+    inline void drainPendingScreenshots() {
         auto& ctx = currentWindowContext();
         auto& queue = ctx.pendingScreenshotPaths;
         // Snapshot before any stage that can log: saves queued from a callback
@@ -2203,8 +2203,7 @@ namespace internal {
         for (size_t i = 0; i < count && i < queue.size(); ++i) {
             // Logging callbacks may append without invalidating the local path.
             auto path = std::move(queue[i]);
-            try { capture(path); }
-            catch (const std::exception& error) { logError("Screenshot") << error.what(); }
+            captureWindowToFile(path);
         }
         queue.erase(queue.begin(), queue.begin() + std::min(count, queue.size()));
     }

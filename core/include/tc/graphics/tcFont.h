@@ -1236,19 +1236,19 @@ public:
     virtual ~Font() { cancelAsync(); }
 
     // Copies share the committed atlas, start idle and have empty listeners.
-    // Assignments keep the destination listeners. Moving cancels both runs.
+    // Copying, assigning or moving a loading resource is unsupported; the destination is not loading.
     Font(const Font& other) { copyCommitted(other); }
     Font& operator=(const Font& other) {
-        if (this != &other) { cancelAsync(); copyCommitted(other); }
+        cancelAsync();
+        if (this != &other) copyCommitted(other);
         return *this;
     }
     Font(Font&& other) noexcept {
-        other.cancelAsync(); moveCommitted(other);
+        moveCommitted(other);
     }
     Font& operator=(Font&& other) noexcept {
-        if (this != &other) {
-            cancelAsync(); other.cancelAsync(); moveCommitted(other);
-        }
+        cancelAsync();
+        if (this != &other) moveCommitted(other);
         return *this;
     }
 
@@ -1437,11 +1437,6 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
-    // Web CMake propagates exception support. With custom app flags disabling
-    // it, recovery from allocation failure is guaranteed only for TrussC's
-    // out-of-line host code. Inline helpers from headers may be compiled into the
-    // application without exception support; allocation failure inside them is a
-    // known limitation.
     void loadAsync(const fs::path& nameOrPath, int size, int faceIndex = 0);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }

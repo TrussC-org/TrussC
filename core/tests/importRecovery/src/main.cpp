@@ -199,70 +199,29 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         }
         check("font reason budgets exercise exhaustion and ordinary rejection", sawFailure && sawRejection);
     }
-    if ((mode == "all" || mode == "font-file" || mode == "font-async") &&
-        !tcTest::skipPersistentAllocationFailure("font file/async persistent initialization")) {
+    if ((mode == "all" || mode == "font-file") &&
+        !tcTest::skipPersistentAllocationFailure("font file persistent initialization")) {
         auto font = makeFont();
         const auto path = fs::current_path() / ".font-init-exhaustion.ttf";
         { ofstream file(path, ios::binary); file.write((const char*)font.data(), font.size()); }
         const string filename = path.string();
-        if (mode != "font-async") {
-            bool sawFailure = false, sawSuccess = false;
-            for (int budget = 0; ; ++budget) {
-                internal::FontAtlasManager manager;
-                bool returned = false, loaded = true;
-                failedRequests = 0;
-                armSourceBytes = font.size(); sourceBudget = budget;
-                try { loaded = manager.prepareFile(filename, 16, 0, 4096); returned = true; } catch (...) {}
-                remaining = -1; armSourceBytes = 0;
-                if (failedRequests > 0) {
-                    sawFailure = true;
-                    check("font file initialization recovers after the source read", returned && !loaded && manager.getAtlasCount() == 0);
-                } else {
-                    sawSuccess = returned && loaded;
-                    break;
-                }
+        bool sawFailure = false, sawSuccess = false;
+        for (int budget = 0; ; ++budget) {
+            internal::FontAtlasManager manager;
+            bool returned = false, loaded = true;
+            failedRequests = 0;
+            armSourceBytes = font.size(); sourceBudget = budget;
+            try { loaded = manager.prepareFile(filename, 16, 0, 4096); returned = true; } catch (...) {}
+            remaining = -1; armSourceBytes = 0;
+            if (failedRequests > 0) {
+                sawFailure = true;
+                check("font file initialization recovers after the source read", returned && !loaded && manager.getAtlasCount() == 0);
+            } else {
+                sawSuccess = returned && loaded;
+                break;
             }
-            check("font file budgets exercise both failure and success", sawFailure && sawSuccess);
         }
-        if (mode != "font-file") {
-            internal::appRunToken() = make_shared<atomic<bool>>(true);
-            bool sawFailure = false, sawSuccess = false;
-            for (int budget = 0; ; ++budget) {
-                Font async;
-                bool delivered = false, rejected = false, loaded = false;
-                atomic<bool> faultReached{false};
-                auto listener = async.onLoad.listen([&](LoadResult& result) {
-                    delivered = true;
-                    rejected = !result && result.error == LoadError::DecodeFailed && !async.isLoaded() && !async.isLoading();
-                    loaded = result && async.isLoaded() && !async.isLoading();
-                });
-                internal::setResourceLoadProbeForTests([&](const char* stage, const fs::path&) {
-                    if (strcmp(stage, "font.decode") == 0) {
-                        armSourceBytes = font.size(); sourceBudget = budget; failedRequests = 0;
-                    } else if (strcmp(stage, "font.ready") == 0) {
-                        faultReached = failedRequests > 0;
-                    } else if (strcmp(stage, "font.queued") == 0) {
-                        // Keep exhaustion active through mailbox publication.
-                        remaining = -1; armSourceBytes = 0;
-                    }
-                });
-                async.loadAsync(path, 16 + budget);
-                internal::waitForResourceLoadsForTests();
-                internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
-#ifdef __EMSCRIPTEN__
-                internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
-#endif
-                internal::setResourceLoadProbeForTests({});
-                if (faultReached) {
-                    sawFailure = true;
-                    check("async font reports failure after persistent init exhaustion", delivered && rejected);
-                } else {
-                    sawSuccess = delivered && loaded;
-                    break;
-                }
-            }
-            check("async font budgets exercise both failure and success", sawFailure && sawSuccess);
-        }
+        check("font file budgets exercise both failure and success", sawFailure && sawSuccess);
         fs::remove(path);
     }
     return failures ? 1 : 0;

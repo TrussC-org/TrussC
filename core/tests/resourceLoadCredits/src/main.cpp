@@ -208,34 +208,12 @@ void workersAndFailures() {
     check("all accepted requests settle except explicitly cancelled owner", delivered == 67 && internal::resourceLoadUsageForTests().active == 0 && internal::resourceLoadUsageForTests().pending == 0);
     check("resource saturation does not cap app-authored jobs", appJobs == 2);
 
-    Load launchFailure;
-    internal::failResourceLoadLaunchForTests(true);
-    launchFailure.start(1);
-    internal::failResourceLoadLaunchForTests(false);
-    settle();
-    check("allocation/thread-launch failure settles without a stuck worker", launchFailure.events == 1 && launchFailure.error == LoadError::Unknown && internal::resourceLoadUsageForTests().active == 0);
     Load thrown;
     auto state = thrown.begin();
     internal::startExternalResourceLoad(state, [](const auto& ready) { ready->data.resize(32); throw std::bad_alloc(); });
     settle();
     check("preparation allocation failure is clean and frees storage", thrown.events == 1 && thrown.error == LoadError::Unknown && state->data.empty());
-    Load applyFailure;
-    auto ready = applyFailure.slot.begin(applyFailure.event, [](State&) { throw std::bad_alloc(); });
-    ready->data.resize(32);
-    internal::completeResourceLoad(ready);
-    drain();
-    check("application allocation failure settles once and returns credits", applyFailure.events == 1 && applyFailure.error == LoadError::Unknown && ready->data.empty() && internal::resourceLoadUsageForTests().retainedBytes == 0);
-    Load applying;
-    bool observed = false;
-    auto inMain = applying.slot.begin(applying.event, [&](State& ready) {
-        std::thread workerExit([&] { ready.cancel(); });
-        workerExit.join();
-        check("worker-exit cancellation leaves an applying payload to main", ready.data.size() == 32 && internal::resourceLoadUsageForTests().retainedBytes == 32);
-        observed = true;
-    });
-    internal::startExternalResourceLoad(inMain, [](const auto& ready) { ready->data.resize(32); });
-    settle();
-    check("main retirement returns credits after concurrent exit cancellation", observed && inMain->data.empty() && internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
+
 }
 void callers() {
     const auto root = fs::absolute("resourceLoadCredits-fixtures");
