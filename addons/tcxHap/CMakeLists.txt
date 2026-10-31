@@ -35,6 +35,10 @@ endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     target_compile_options(snappy PRIVATE -Wno-pass-failed -Wno-error)
 endif()
+if(MSVC)
+    # Suppress fetched-source diagnostics without silencing addon/app sources.
+    target_compile_options(snappy PRIVATE /w)
+endif()
 
 # -----------------------------------------------------------------------------
 # HAP reference decoder (BSD 2-Clause)
