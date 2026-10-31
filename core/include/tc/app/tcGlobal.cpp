@@ -1265,10 +1265,12 @@ bool frameSkipShouldTick(double& accumulator, double elapsed, double interval) {
 
 void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double interval,
                             int stepsRun) {
-    // One flag per loop: each loop reports its own first drop.
+    // One flag per loop: a pass without dropped time ends its episode.
     static std::atomic<bool> warned[2] = {false, false};
     const bool headless = (loop == FixedStepLoop::Headless);
-    if (warned[headless ? 1 : 0].exchange(true)) return;
+    const bool dropped = droppedTime > 0.0;
+    const bool alreadyWarned = warned[headless ? 1 : 0].exchange(dropped);
+    if (!dropped || alreadyWarned) return;
     const char* where = headless ? "Headless loop" : "Update loop";
     const char* frame = headless ? "loop pass" : "frame";
     // stepsRun is the cap (getMaxUpdateSteps()): time is only dropped once
@@ -1290,7 +1292,7 @@ void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double inter
         warning << ", or the update rate is more than " << stepsRun
             << "x the display's frame rate";
     }
-    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once.";
+    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once per stall.";
 }
 } // namespace internal
 
