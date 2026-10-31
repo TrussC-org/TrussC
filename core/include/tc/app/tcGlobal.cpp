@@ -1483,10 +1483,6 @@ SaveResult Logger::setLogFile(const fs::path& path) {
         closeFileLocked();
         fileStream_ = std::move(stream);
         filePath_ = resolved;
-        if (this == &getLogger()) {
-            internal::setCrashLogFile(resolved);
-            crashLogOwner_ = true;
-        }
     }
     return SaveResult::success();
 }

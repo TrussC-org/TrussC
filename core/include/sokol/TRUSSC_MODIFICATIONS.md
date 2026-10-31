@@ -71,11 +71,9 @@ pages that were successfully set, each to its own original value. Preserve
 this behavior and the descriptor comments when importing upstream changes.
 
 Outside sokol, `TrussC.h`'s host-only `ConsoleCPCtrlGuard` saves both values
-for Ctrl+C / Ctrl+Break / console close and one `atexit` hook. It also passes
-the pair to the Windows crash handler, which restores after reporting and
-before chaining to a previous exception filter. The guard's destructor restores
-both values before disarming the exit and crash fallbacks: on normal shutdown
-this repeats sokol's restore; if an exception escapes `sapp_run()` and the caller
+for Ctrl+C / Ctrl+Break / console close and one `atexit` hook. The guard's
+destructor restores both values before disarming the exit fallback: on normal
+shutdown this repeats sokol's restore; if an exception escapes `sapp_run()` and the caller
 catches it, this is the only restore. `abort()`, `TerminateProcess` and external
 kills cannot restore the console. Console input still uses `std::getline(std::cin)`.
 

@@ -2488,7 +2488,6 @@ namespace internal {
     // init-time failures sokol reports (e.g. no X display on Linux) and
     // setup-time log lines land in the file too.
     inline void openEnvLogFile() {
-        installCrashHandler();
         #ifndef __EMSCRIPTEN__
         if (const char* envLog = std::getenv("TRUSSC_LOG_FILE")) {
             if (envLog[0] != '\0' && !setLogFile(envLog)) {
@@ -2502,7 +2501,6 @@ namespace internal {
     bool& appSetupCalled();   // defined in tcGlobal.cpp (one copy for host and hot-reload guest)
 
     inline void _setup_cb() {
-        CrashPhaseScope crashPhase("setup");
         installWindowExitSignals();
         // Record the main thread id while we are guaranteed to be on it.
         // isMainThread() / runOnMainThread() / the Node main-thread asserts all
@@ -2602,7 +2600,6 @@ namespace internal {
         auto& wctx = mainWindowContext();
         wctx.inUpdate = true;
         if (appUpdateFunc) {
-            CrashPhaseScope crashPhase("update");
             EntryStackGuard guard(AppEntry::Update);
             appUpdateFunc();
         }
@@ -2752,8 +2749,6 @@ namespace internal {
 #endif
         auto* previousWindow = currentWindowCtx();
         restoreWindowContext(nullptr);
-        crashFrame(sapp_frame_count());
-        CrashPhaseScope crashPhase("frame");
 
         // Frame time, queued work, independent updates and the draw decision.
         bool shouldDraw = beginMainLoopFrame(std::chrono::steady_clock::now());
@@ -2780,10 +2775,7 @@ namespace internal {
 
             {
                 EntryStackGuard drawEntry(AppEntry::Draw);
-                {
-                    CrashPhaseScope drawPhase("draw");
-                    if (appDrawFunc) appDrawFunc();
-                }
+                if (appDrawFunc) appDrawFunc();
 
                 // Reset shader stack if any shaders are still pushed
                 internal::resetShaderStack();
@@ -2830,7 +2822,6 @@ namespace internal {
         if (!beginExitCleanup()) return;
         if (auto token = appRunToken()) token->store(false);
         internal::cancelResourceBackends();
-        CrashPhaseScope crashPhase("cleanup");
         writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false));
         // Session end may arrive inside a secondary window's modal loop.
         restoreWindowContext(nullptr);
@@ -2944,13 +2935,6 @@ namespace internal {
             WindowContext* previous;
             ~RestoreEventWindow() { restoreWindowContext(previous); }
         } restoreEventWindow{previousWindow};
-        CrashPhaseScope crashPhase("event dispatch");
-        if (ev->type >= SAPP_EVENTTYPE_KEY_DOWN && ev->type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
-            crashInput(static_cast<int>(ev->type), static_cast<int>(ev->mouse_x),
-                       static_cast<int>(ev->mouse_y),
-                       ev->type == SAPP_EVENTTYPE_KEY_DOWN || ev->type == SAPP_EVENTTYPE_KEY_UP
-                           ? static_cast<int>(ev->key_code) : static_cast<int>(ev->mouse_button));
-        }
         // Each event is an entry point (#349): the listeners, the App's
         // handler and the Node handlers it reaches leave the stacks as they
         // found them.
@@ -3360,8 +3344,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     // TRUSSC_SHOW_CONSOLE); a GUI-subsystem Release build has none.
     // sokol restores both code pages when sapp_run() returns. The host's
     // ConsoleCPCtrlGuard covers Ctrl+C, Ctrl+Break, console close and
-    // std::exit(), and restores during exception unwinding; the Windows
-    // crash handler restores after its report.
+    // std::exit(), and restores during exception unwinding.
     // abort(), TerminateProcess and external kills cannot restore them.
     // Ignored on other platforms.
     desc.win32.console_utf8 = true;
@@ -3405,7 +3388,6 @@ struct ConsoleCPCtrlGuard {
         const UINT input = GetConsoleCP();
         consoleCPBeforeRun.output = output;
         consoleCPBeforeRun.input = input;
-        setCrashConsoleCodePages(output, input);
         static const int exitHook = std::atexit(restoreConsoleCP);
         (void)exitHook;
         installed = (output != 0 || input != 0) &&
@@ -3418,7 +3400,6 @@ struct ConsoleCPCtrlGuard {
         // Disarm only after restoring; do not overwrite later changes at exit.
         consoleCPBeforeRun.output = 0;
         consoleCPBeforeRun.input = 0;
-        setCrashConsoleCodePages(0, 0);
     }
     ConsoleCPCtrlGuard(const ConsoleCPCtrlGuard&) = delete;
     ConsoleCPCtrlGuard& operator=(const ConsoleCPCtrlGuard&) = delete;
