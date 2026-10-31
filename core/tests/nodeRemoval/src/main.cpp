@@ -268,15 +268,15 @@ public:
     WindowDriver() {
         prev_ = internal::currentWindowCtx();
         internal::currentWindowCtx() = &win_.context();
-        win_.native_ = &nativeStandIn_;
-        app_ = make_shared<App>();
-        win_.setApp(app_);
+        win_.native_ = &nativeStandIn_; internal::WindowRequestAccess::bindForTests(win_, 202);
+        app_ = internal::makeConstructedApp<App>();
+        internal::WindowRequestAccess::attachCandidate(win_, app_);
         internal::applyPendingAppForTests(win_);   // the frame boundary
     }
     ~WindowDriver() override {
-        win_.setApp(nullptr);
+        win_.destroyApp();
         internal::applyPendingAppForTests(win_);   // the frame boundary
-        win_.native_ = nullptr;
+        win_.native_ = nullptr; internal::WindowRequestAccess::unbind(win_);
         app_.reset();
         internal::currentWindowCtx() = prev_;
     }
@@ -300,32 +300,7 @@ private:
 
 // The main window's context: the App's event handlers, as the main loop
 // calls them.
-class MainDriver : public Driver {
-public:
-    MainDriver() {
-        prev_ = internal::currentWindowCtx();
-        internal::currentWindowCtx() = nullptr;   // the main window's context
-        app_ = make_shared<App>();
-    }
-    ~MainDriver() override {
-        app_.reset();
-        internal::currentWindowCtx() = prev_;
-    }
-
-protected:
-    void doPress(const MouseEventArgs& e) override { app_->handleMousePressed(e); }
-    void doRelease(const MouseEventArgs& e) override { app_->handleMouseReleased(e); }
-    void doMove(const internal::MouseEventRaw& e) override { app_->handleMouseMoved(e); }
-    void doScroll(const ScrollEventArgs& e) override { app_->handleMouseScrolled(e); }
-    void doTick(Vec2 p) override {
-        internal::mainWindowContext().mouseX = p.x;
-        internal::mainWindowContext().mouseY = p.y;
-        app_->handleUpdate((int)p.x, (int)p.y);
-    }
-
-private:
-    internal::WindowContext* prev_ = nullptr;
-};
+using MainDriver = WindowDriver;
 
 // The cursor positions: over the probes placed at (100,100)-(200,200), and
 // over nothing.

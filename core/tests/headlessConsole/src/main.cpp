@@ -46,7 +46,7 @@ struct ConsoleApp : App {
         appThread = std::this_thread::get_id();
         check(!console::isEnabled() && !console::internal::spawned(),
               "runner does not start a reader before setup");
-        listener = events().console.listen([](ConsoleEventArgs& args) {
+        listener = runtime().events().console.listen([](ConsoleEventArgs& args) {
             check(std::this_thread::get_id() == appThread && isMainThread(),
                   "console callback runs on the main thread");
             ++received;
@@ -95,9 +95,13 @@ struct ConsoleApp : App {
             console::start();
             check(console::isEnabled(), "double start stays enabled");
         }
-        if (mode == "setup-exit") exitApp();
+        if (mode == "setup-exit") {
+            console::internal::getChannel().send(console::internal::parseLine("before setup"));
+            exitApp();
+        }
     }
     void update() override {
+        check(mode != "setup-exit", "setup quit runs no update callback");
         if (mode == "disabled") {
             check(!console::isEnabled() && !console::internal::spawned(),
                   "app without opt-in starts no reader");
@@ -111,7 +115,7 @@ struct ConsoleApp : App {
     }
     void exit() override {
         ++exits;
-        check(!console::isEnabled(), "runner stops console before app exit");
+        check(console::isEnabled() == (mode != "disabled"), "console service stays live through App exit");
         if (mode == "manual") {
             console::stop();
             console::stop();
@@ -120,10 +124,28 @@ struct ConsoleApp : App {
     void cleanup() override {
         ++cleanups;
         check(exits == 1, "exit precedes cleanup");
-        check(!console::isEnabled(), "console disabled in cleanup");
+        check(console::isEnabled() == (mode != "disabled" && mode != "manual"), "console service stops after App ending");
         const int before = received;
         console::internal::processQueue();
         check(received == before, "no console event after stop");
+    }
+};
+
+// The process-exit path still has an actual virtual attachment: subscriptions
+// belong to its constructor/setup owner, and stdin remains open at std::exit.
+struct ProcessExitApp : App {
+    EventListener listener;
+    void setup() override {
+        listener = runtime().events().console.listen([](ConsoleEventArgs& args) {
+            check(args.raw == "before setup", "exit case receives the parent's line");
+            ++received;
+        });
+        console::start();
+    }
+    void update() override {
+        if (!received) return;
+        if (mode == "stop-exit") console::stop();
+        std::exit(failures ? 1 : 0);
     }
 };
 
@@ -160,11 +182,16 @@ void stoppedLines() {
           queued[0].args == std::vector<std::string>{"再開", "café"},
           "only the restarted line arrives; UTF-8 and CRLF preserved/normalized");
     int callbacks = 0;
-    EventListener listener = events().console.listen([&](ConsoleEventArgs&) { ++callbacks; });
+    EventListener listener = runtime().events().console.listen([&](ConsoleEventArgs&) { ++callbacks; });
+    const bool previousHeadless = headless::active.exchange(true);
+    struct RestoreHeadless { bool previous; ~RestoreHeadless() { headless::active = previous; } } restore{previousHeadless};
     std::istringstream ignored("\n   \t\r\n# comment\n  # comment\r\n");
     console::internal::readLines(ignored);
     console::internal::processQueue();
-    check(callbacks == 0, "whitespace and comment-only lines deliver no console event");
+    check(callbacks == 0 && console::internal::getChannel().empty(), "whitespace and comment-only lines deliver no console event");
+    console::internal::getChannel().send(console::internal::parseLine("delivery control"));
+    console::internal::processQueue();
+    check(callbacks == 1, "virtual console listener and pump remain live after ignored input");
     console::stop();
 }
 
@@ -298,23 +325,19 @@ void runChild(const char* executable, const char* scenario) {
 }
 } // namespace
 
+#include "windowConsoleChecks.h"
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--windowed") return c2WindowConsole::run();
+#ifndef __EMSCRIPTEN__
+    if (argc == 2 && std::string(argv[1]) == "--windowed-child-setup-exit") return c2WindowConsole::childSetupQuit(false);
+    if (argc == 2 && std::string(argv[1]) == "--windowed-child-setup-veto") return c2WindowConsole::childSetupQuit(true);
+    if (argc == 2 && std::string(argv[1]) == "--windowed-setup-exit") return c2WindowConsole::setupQuit(false);
+    if (argc == 2 && std::string(argv[1]) == "--windowed-setup-veto") return c2WindowConsole::setupQuit(true);
+#endif
     if (argc == 3 && std::string(argv[1]) == "--child") {
         mode = argv[2];
         if (mode == "std-exit" || mode == "stop-exit") {
-            // Wait for the parent's line so the reader has consumed it and
-            // looped back into its raw read before exiting (#689).
-            EventListener listener = events().console.listen([](ConsoleEventArgs& args) {
-                check(args.raw == "before setup", "exit case receives the parent's line");
-                ++received;
-            });
-            console::start();
-            while (received == 0) {
-                console::internal::processQueue();
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-            if (mode == "stop-exit") console::stop();
-            std::exit(failures ? 1 : 0);
+            return runHeadlessApp<ProcessExitApp>();
         }
         if (mode == "stopped-lines") {
             stoppedLines();

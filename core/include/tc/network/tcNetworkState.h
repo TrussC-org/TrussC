@@ -33,15 +33,18 @@ template<class T> struct EventSnapshotDelivery {
             typename Event<T>::ConstEntryListPtr snapshot;
             std::shared_ptr<ExternalDeliveryStore> store;
             std::weak_ptr<std::atomic<bool>> sourceAlive;
+            bool mainStoreFailed = false;
             {
                 std::lock_guard<std::mutex> lock(gate->mutex);
                 if (!gate->open) return true;
                 snapshot = sharedLoad(source->entries_);
                 sourceAlive = source->alive_;
-                if (external) store = ExternalEventDelivery<T>::store(*source, snapshot);
+                if (external) {
+                    store = ExternalEventDelivery<T>::store(*source, snapshot, mainStoreFailed);
+                }
             }
             ExternalEventScope origin(&args, external);
-            return Event<T>::notifySnapshot(std::move(snapshot), args, std::move(store), std::move(sourceAlive), std::move(run));
+            return Event<T>::notifySnapshot(std::move(snapshot), args, std::move(store), std::move(sourceAlive), std::move(run), mainStoreFailed);
         });
     }
     bool notify(T& args, RunToken run = {}) const {
@@ -67,14 +70,17 @@ template<> struct EventSnapshotDelivery<void> {
             Event<void>::ConstEntryListPtr snapshot;
             std::shared_ptr<ExternalDeliveryStore> store;
             std::weak_ptr<std::atomic<bool>> sourceAlive;
+            bool mainStoreFailed = false;
             {
                 std::lock_guard<std::mutex> lock(gate->mutex);
                 if (!gate->open) return;
                 snapshot = sharedLoad(source->entries_);
                 sourceAlive = source->alive_;
-                if (external) store = ExternalEventDelivery<void>::store(*source, snapshot);
+                if (external) {
+                    store = ExternalEventDelivery<void>::store(*source, snapshot, mainStoreFailed);
+                }
             }
-            Event<void>::notifySnapshot(std::move(snapshot), std::move(store), std::move(sourceAlive));
+            Event<void>::notifySnapshot(std::move(snapshot), std::move(store), std::move(sourceAlive), mainStoreFailed);
         });
     }
     void notify() const { if (auto delivery = target.lock()) (*delivery)(); }

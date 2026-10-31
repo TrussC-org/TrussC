@@ -16,6 +16,9 @@
 using namespace tc;
 
 namespace {
+// Whitebox subscriptions explicitly target the headless hub before launch.
+CoreEvents& fixtureEvents() { return *internal::nonWindowContext().coreEvents; }
+
 int failures = 0;
 void check(bool ok, const char* name) {
     std::printf("%s: %s\n", ok ? "PASS" : "FAIL", name);
@@ -23,7 +26,7 @@ void check(bool ok, const char* name) {
 }
 
 enum class Mode { Forced, Request, CancelOnce, SetupRequest, WorkerRequest,
-                  Direct, SignalInt, SignalTerm, SetupSignal, ListenerForced,
+                  Direct, SignalInt, SignalTerm, SetupSignal, ListenerForced, ListenerVetoRequest, ListenerVetoCode,
                   ListenerSignal };
 struct Probe {
     Mode mode = Mode::Forced;
@@ -54,7 +57,7 @@ struct RequestWorker : Thread {
 };
 
 struct ExitProbeApp : App {
-    EventListener listener;
+    EventListener listener, runtimeFirst, laterFalse;
     void setup() override {
         if (probe->checkEntry) {
             check(headless::running && !headless::quitRequested
@@ -63,9 +66,14 @@ struct ExitProbeApp : App {
                   && internal::appExitCode() == 0 && internal::exitReason().empty()
                   && internal::exitBlockReason().empty(), "entry resets all exit state");
         }
-        // Request mode deliberately has no listener.
+        runtimeFirst = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) {
+            check(!e.cancel && e.reason.empty(), "headless Runtime listener fresh payload");
+            check(probe->requests == ((probe->mode == Mode::CancelOnce || probe->mode == Mode::ListenerVetoRequest || probe->mode == Mode::ListenerVetoCode) && probe->reRequested ? 1 : 0),
+                  "Runtime receives headless quit before App slot");
+        });
+        // Request mode deliberately has no App listener.
         if (probe->mode != Mode::Request) {
-            listener = events().exitRequested.listen([](ExitRequestEventArgs& args) {
+            listener = fixtureEvents().exitRequested.listen([](ExitRequestEventArgs& args) {
                 ++probe->requests;
                 probe->updatesAtRequest = probe->updates;
                 check(!probe->inUpdate && probe->setupReturned,
@@ -77,8 +85,16 @@ struct ExitProbeApp : App {
                     args.reason = "keep running";
                 }
                 if (probe->mode == Mode::ListenerForced) {
+                    // Reentrant process requests do not override the in-flight
+                    // listener's veto or enqueue duplicate notifications.
+                    exitApp(7);
+                    args.cancel = false;
+                }
+                if ((probe->mode == Mode::ListenerVetoRequest || probe->mode == Mode::ListenerVetoCode) && probe->requests == 1) {
                     exitApp(7);
                     args.cancel = true;
+                    args.reason = "veto reentrant code";
+                    check(internal::appExitCode() == 0, "inert reentrant exitApp preserves code");
                 }
                 if (probe->mode == Mode::ListenerSignal) {
                     sendSignal(SIGTERM);
@@ -86,6 +102,10 @@ struct ExitProbeApp : App {
                 }
             });
         }
+        laterFalse = fixtureEvents().exitRequested.listen([](ExitRequestEventArgs& e) {
+            check(!e.cancel && e.reason.empty(), "headless later listener receives fresh false");
+            e.cancel = false;
+        }, 200);
         if (probe->mode == Mode::SetupRequest) requestExitApp();
         if (probe->mode == Mode::SetupSignal) sendSignal(SIGTERM);
         probe->setupReturned = true;
@@ -102,6 +122,8 @@ struct ExitProbeApp : App {
                 case Mode::Request:
                 case Mode::CancelOnce:
                 case Mode::ListenerForced:
+                case Mode::ListenerVetoRequest:
+                case Mode::ListenerVetoCode:
                 case Mode::ListenerSignal: requestExitApp(); break;
                 case Mode::WorkerRequest: {
                     RequestWorker worker;
@@ -115,13 +137,14 @@ struct ExitProbeApp : App {
                 case Mode::SetupRequest:
                 case Mode::SetupSignal: break;
             }
-        } else if (probe->mode == Mode::CancelOnce && probe->requests == 1 && !probe->reRequested) {
+        } else if ((probe->mode == Mode::CancelOnce || probe->mode == Mode::ListenerVetoRequest || probe->mode == Mode::ListenerVetoCode) && probe->requests == 1 && !probe->reRequested) {
             // Only once: a loaded runner can run several catch-up steps in one
             // pass, and the request below stays pending until the pass ends.
             check(internal::exitReason().empty() && !headless::quitRequested,
                   "veto clears request and reason");
             probe->reRequested = true;
-            requestExitApp();
+            if (probe->mode == Mode::ListenerVetoCode) exitApp(probe->code);
+            else requestExitApp();
         }
         probe->inUpdate = false;
     }
@@ -146,24 +169,26 @@ void testRunner(Mode mode, int code, const char* reason) {
     result.code = code;
     probe = &result;
     const int returned = runHeadlessApp<ExitProbeApp>(HeadlessSettings().setFps(1000));
-    check(returned == (mode == Mode::ListenerForced ? 7 : code), "runner returns app exit code");
+    check(returned == code, "runner returns app exit code");
     check(result.exits == 1 && result.cleanups == 1, "exit and cleanup run once");
     check(result.reason == reason, "runner records expected exit reason");
     check(!headless::isActive(), "runner leaves headless mode");
-    if (mode == Mode::Forced || mode == Mode::Direct
+    if (mode == Mode::Direct
             || mode == Mode::SignalInt || mode == Mode::SignalTerm) {
         check(result.updates == 1 && result.requests == 0,
               "uncancellable exit stops after one update without an event");
     }
+    if (mode == Mode::Forced) check(result.requests == 1, "exitApp requests cancellable quit once");
     if (mode == Mode::SetupSignal)
         check(result.updates == 0 && result.requests == 0, "setup signal survives until loop poll");
-    if (mode == Mode::CancelOnce)
+    if (mode == Mode::CancelOnce || mode == Mode::ListenerVetoRequest || mode == Mode::ListenerVetoCode)
         check(result.requests == 2, "cancel first request, accept second");
     if (mode == Mode::SetupRequest || mode == Mode::WorkerRequest)
         check(result.requests == 1, "setup/worker request delivered once");
 }
 
 void resetPassState() {
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
     headless::active = true;
     headless::running = true;
     headless::quitRequested = false;
@@ -180,19 +205,22 @@ void testCatchUp(Mode mode, int expectedSteps) {
     Probe result;
     result.mode = mode;
     probe = &result;
-    auto app = std::make_shared<ExitProbeApp>();
-    auto appListeners = internal::registerHeadlessAppEventListeners(app);
+    auto app = internal::makeConstructedApp<ExitProbeApp>();
+    auto appListeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
+    internal::recordHeadlessAttachment(app, internal::nonWindowContext());
     app->setup();
-    auto& ctx = internal::mainWindowContext();
+    auto& ctx = internal::nonWindowContext();
     const int rateIndex = ctx.rateIndex;
-    double accumulator = 0.0;
+    internal::HeadlessUpdateState updateState;
     // Binary-exact interval and elapsed time: exactly 100 owed steps,
     // independent of CPU load, wall time or sleep resolution.
-    internal::runHeadlessUpdatePass(*app, ctx, accumulator, 100.0 / 128.0, 1.0 / 128.0);
+    internal::runHeadlessUpdatePass(*app, ctx, updateState, 100.0 / 128.0, 1.0 / 128.0);
     check(result.updates == expectedSteps && headless::frameCount == unsigned(expectedSteps),
           "100 due steps: actual update count matches stop kind");
     check(ctx.rateSteps[rateIndex] == expectedSteps, "measured rate counts only completed steps");
-    if (mode == Mode::CancelOnce) {
+    if (mode == Mode::Forced) {
+        check(result.requests == 1, "exitApp catch-up dispatches after owed updates");
+    } else if (mode == Mode::CancelOnce) {
         check(result.requests == 1 && result.updatesAtRequest == 100,
               "cancellable request waits until all 100 steps finish");
         check(headless::running && !headless::quitRequested && internal::exitReason().empty(),
@@ -203,6 +231,7 @@ void testCatchUp(Mode mode, int expectedSteps) {
             check(!headless::running && internal::exitReason() == "request-exit-app",
                   "request without listener stops after all 100 steps");
     }
+    internal::shutdownRuntime();
     headless::active = false;
 }
 
@@ -211,13 +240,15 @@ void testSetupFirstPass() {
     Probe result;
     result.mode = Mode::SetupRequest;
     probe = &result;
-    auto app = std::make_shared<ExitProbeApp>();
-    auto appListeners = internal::registerHeadlessAppEventListeners(app);
+    auto app = internal::makeConstructedApp<ExitProbeApp>();
+    auto appListeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
+    internal::recordHeadlessAttachment(app, internal::nonWindowContext());
     app->setup();
-    double accumulator = 0.0;
-    internal::runHeadlessUpdatePass(*app, internal::mainWindowContext(), accumulator, 0.0, 1.0);
+    internal::HeadlessUpdateState updateState;
+    internal::runHeadlessUpdatePass(*app, internal::nonWindowContext(), updateState, 0.0, 1.0);
     check(result.requests == 1 && result.updates == 0 && !headless::running,
           "setup request is handled on first pass even with no due steps");
+    internal::shutdownRuntime();
     headless::active = false;
 }
 
@@ -239,6 +270,7 @@ void testSignalHandler() {
     headless::pollExitSignal();
     check(headless::pendingSignal == SIGTERM && internal::exitReason() == "after-delivery",
           "poll delivers each pending signal only once");
+    internal::shutdownRuntime();
     headless::active = false;
 }
 
@@ -299,6 +331,7 @@ void testSignalEscalation() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    std::fputs("headlessExit: main entered\n", stderr);
     getMainThreadId();
     testSignalEscalation();
     testRunner(Mode::Forced, 0, "exit-app");
@@ -312,7 +345,9 @@ TC_CORE_TEST_MAIN() {
     testRunner(Mode::CancelOnce, 0, "request-exit-app");
     testRunner(Mode::SetupRequest, 0, "request-exit-app");
     testRunner(Mode::WorkerRequest, 0, "request-exit-app");
-    testRunner(Mode::ListenerForced, 0, "exit-app");
+    testRunner(Mode::ListenerForced, 0, "request-exit-app");
+    testRunner(Mode::ListenerVetoRequest, 0, "request-exit-app");
+    testRunner(Mode::ListenerVetoCode, 4, "exit-app");
     testRunner(Mode::ListenerSignal, 0, "sigterm");
     testRunner(Mode::Direct, 0, "");
     testRunner(Mode::SignalInt, 0, "sigint");
@@ -322,7 +357,7 @@ TC_CORE_TEST_MAIN() {
     const int previousCap = getMaxUpdateSteps();
     setMaxUpdateSteps(100);
     testCatchUp(Mode::Direct, 1);
-    testCatchUp(Mode::Forced, 1);
+    testCatchUp(Mode::Forced, 100);
     testCatchUp(Mode::SignalInt, 1);
     testCatchUp(Mode::SignalTerm, 1);
     testCatchUp(Mode::Request, 100);

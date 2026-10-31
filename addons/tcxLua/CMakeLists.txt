@@ -72,6 +72,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # (loslib.c: l_system returns -1). Without this the SDK marks the
     # symbol unavailable and the build fails.
     target_compile_definitions(${ADDON_NAME} PRIVATE LUA_USE_IOS)
+elseif((CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND NOT USE_LUAJIT)
+    # loslib.c only: mkstemp instead of tmpnam (and gmtime_r/localtime_r).
+    # Not global: that would enable io.popen in liolib.c. Not LUA_USE_LINUX/
+    # MACOSX: those add LUA_USE_DLOPEN (native modules via require).
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/lua/src/loslib.c
+        PROPERTIES COMPILE_DEFINITIONS LUA_USE_POSIX)
 endif()
 
 if(USE_LUAJIT)

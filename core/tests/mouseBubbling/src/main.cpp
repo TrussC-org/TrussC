@@ -103,11 +103,11 @@ TC_CORE_TEST_MAIN() {
 
     // Tree: root(0,0,800,600) > panel(100,100,400,300) > label(50,50,100,40)
     // (positions are parent-relative; Probe enables events in its ctor)
-    auto root = make_shared<Probe>(false);
+    auto root = std::make_shared<Probe>(false);
     root->setPos(0, 0); root->setSize(800, 600);
-    auto panel = make_shared<Probe>(true);    // consumes (a widget)
+    auto panel = std::make_shared<Probe>(true);    // consumes (a widget)
     panel->setPos(100, 100); panel->setSize(400, 300);
-    auto label = make_shared<Probe>(false);   // does NOT consume (decorative)
+    auto label = std::make_shared<Probe>(false);   // does NOT consume (decorative)
     label->setPos(50, 50); label->setSize(100, 40);
     root->addChild(panel);
     panel->addChild(label);

@@ -131,9 +131,9 @@ public:
 };
 void pointsAndPremult(int samples, TextureFormat format) {
     auto& window=internal::currentWindowContext(); const float savedDpi=window.dpiScale;
-    const bool savedMode=internal::pixelPerfectMode(), savedMain=window.isMain;
+    const bool savedMode=internal::pixelPerfectMode();
     const int savedWidth=window.fbWidth, savedHeight=window.fbHeight;
-    window.isMain=false; window.fbWidth=512; window.fbHeight=384;
+    window.fbWidth=512; window.fbHeight=384;
     Fbo fbo; fbo.allocate(160,96,samples,format);
     Mesh points; points.setMode(PrimitiveMode::Points); points.addVertex(40,40,0);
     Texture source; unsigned char bytes[]={128,0,0,128};
@@ -173,7 +173,7 @@ void pointsAndPremult(int samples, TextureFormat format) {
     internal::applyTargetDrawingState();
     EasyCam camera; camera.setDistance(173); camera.begin();
     setPointStyle(PointStyle::Square); setPointSize(12); setColor(0,1,0);
-    auto node=std::make_shared<PointFixtureNode>(); node->points=&points; node->setPos(3,4);
+    auto node=internal::makeConstructedApp<PointFixtureNode>(); node->points=&points; node->setPos(3,4);
     pushMatrix(); rotate(0.2f); scale(1.4f,0.7f);
     const auto nodeModel=getMatrix()*node->getLocalMatrix();
     const auto expectedNode=(getProjectionMatrix()*getViewMatrix()*nodeModel).transposed();
@@ -184,7 +184,7 @@ void pointsAndPremult(int samples, TextureFormat format) {
     const int px=8+int((center.x/center.w+1)*64),py=4+int((1-center.y/center.w)*40);
     camera.end(); fbo.end();
     expect(read(fbo),px,py,Color(0,1,0),"Node/changed camera/nonuniform rotation point center");
-    window.isMain=savedMain; window.fbWidth=savedWidth; window.fbHeight=savedHeight;
+    window.fbWidth=savedWidth; window.fbHeight=savedHeight;
     window.dpiScale=savedDpi; internal::pixelPerfectMode()=savedMode;
     fbo.begin(0,0,1); setupScreenOrtho(); setBlendMode(BlendMode::Alpha); setColor(1,1,1); source.draw(8,8,32,32); fbo.end();
     expect(read(fbo),16,16,Color(128.f/255,0,127.f/255),"premult source in target does not multiply alpha twice");
@@ -260,16 +260,16 @@ void transformedConsumers(int samples, TextureFormat format) {
     fractionalY.allocate(2,2,TextureFormat::R8,TextureUsage::Dynamic); fractionalY.loadData(yBytes,2,2,1);
     fractionalUV.allocate(1,1,TextureFormat::RG8,TextureUsage::Dynamic); fractionalUV.loadData(uvBytes,1,1,2);
     auto& window=internal::currentWindowContext();
-    const bool originalMain=window.isMain, originalPixel=internal::pixelPerfectMode();
+    const bool originalPixel=internal::pixelPerfectMode();
     const int originalWidth=window.fbWidth, originalHeight=window.fbHeight; const float originalDpi=window.dpiScale;
-    window.isMain=false; window.fbWidth=1001; window.fbHeight=751; window.dpiScale=1.5f;
+    window.fbWidth=1001; window.fbHeight=751; window.dpiScale=1.5f;
     for(bool pixelMode:{false,true}) {
         internal::pixelPerfectMode()=pixelMode;
         fbo.begin(0,0,0); setupScreenOrtho(); translate(20,10); scale(2,1); pushScissor(40,16,12,16);
         nv12.draw(5,5,20,24,fractionalY,fractionalUV); popScissor(); fbo.end();
         expect(read(fbo),44,20,Color(131.f/255,130.f/255,131.f/255),"NV12 fractional 1001x751 / DPI 1.5 target control",1);
     }
-    window.isMain=originalMain; window.fbWidth=originalWidth; window.fbHeight=originalHeight; window.dpiScale=originalDpi;
+    window.fbWidth=originalWidth; window.fbHeight=originalHeight; window.dpiScale=originalDpi;
     internal::pixelPerfectMode()=originalPixel;
 #endif
 
@@ -322,8 +322,10 @@ void lazyResizeChecks() {
     {
         // A secondary-window coordinator using this native drawable. Alter its
         // reported dimensions exactly as the reviewer's windowless probe did.
-        internal::WindowContext secondary;
-        secondary.isMain=false; secondary.fbWidth=256; secondary.fbHeight=192;
+        Window secondaryOwner;
+        auto& secondary = secondaryOwner.context();
+        internal::WindowRequestAccess::binding(secondaryOwner).metadata.dpi_scale = secondary.dpiScale;
+        secondary.fbWidth=256; secondary.fbHeight=192;
         secondary.swapchainTarget.colorFormat=main.swapchainTarget.colorFormat;
         secondary.swapchainTarget.depthFormat=main.swapchainTarget.depthFormat;
         secondary.swapchainTarget.sampleCount=main.swapchainTarget.sampleCount;

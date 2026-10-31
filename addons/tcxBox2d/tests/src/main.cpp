@@ -1,5 +1,5 @@
 // =============================================================================
-// tcxBox2d tests - headless behavioral test (no window).
+// tcxBox2d tests - CPU behavioral test (addressed Window, no native window).
 //
 // Built and run by CI on every push/PR via examples/build_all.py
 // --addon-tests-only (exit 0 = pass, non-zero = fail). Console only: the world
@@ -59,6 +59,7 @@
 // =============================================================================
 
 #include <tcxBox2d.h>
+#include "../../../../core/tests/common/tcWindowTest.h"
 
 #include <algorithm>
 #include <chrono>
@@ -2571,19 +2572,19 @@ static void testDeprecatedEventAliases(box2d::World& world) {
 }
 
 // Drive the public stepping path with deterministic frame IDs and delta time.
-// Restore the headless window context so these tests do not affect other tests.
+// Restore the addressed fixture's context so these tests do not affect other tests.
 struct WorldTestFrames {
     decltype(internal::currentWindowContext()) ctx = internal::currentWindowContext();
     double savedDelta = ctx.updateDeltaTime;
-    uint64_t savedMainFrame = internal::mainWindowContext().updateCount;
+    uint64_t savedMainFrame = internal::windowApiContext().updateCount;
     uint64_t savedWindowFrame = ctx.updateCount;
     ~WorldTestFrames() {
         ctx.updateDeltaTime = savedDelta;
-        internal::mainWindowContext().updateCount = savedMainFrame;
+        internal::windowApiContext().updateCount = savedMainFrame;
         ctx.updateCount = savedWindowFrame;
     }
     void update(box2d::World& world, double dt = 1.0 / 60.0) {
-        ++internal::mainWindowContext().updateCount;
+        ++internal::windowApiContext().updateCount;
         ++ctx.updateCount;
         ctx.updateDeltaTime = dt;
         world.update();
@@ -2976,7 +2977,7 @@ static void testClearReuse() {
               mod->getBody()->GetType() == b2_dynamicBody && !mod->getBody()->GetFixtureList()->IsSensor());
         for (int i = 0; i < 4; ++i) {
             if (automatic) {
-                ++internal::mainWindowContext().updateCount;
+                ++internal::windowApiContext().updateCount;
                 ++frames.ctx.updateCount;
                 frames.ctx.updateDeltaTime = 1.0 / 60.0;
                 tc::events().update.notify();
@@ -4131,7 +4132,6 @@ struct HeadlessPhysicsApp : App {
     }
 };
 static void testHeadlessPhysics() {
-    WorldTestFrames frames;
     check("headless Box2d runner exits", runHeadlessApp<HeadlessPhysicsApp>(HeadlessSettings().setFps(1024)) == 0);
 }
 } // namespace
@@ -4141,6 +4141,8 @@ int main(int argc, char** argv) {
         testHeadlessPhysics();
         return finishSelectedRun(argv[1]);
     }
+    if (argc == 1) testHeadlessPhysics();
+    tcCoreTest::WindowFixture receiver;
     if (argc == 2 && string(argv[1]) == "--contact-lifetimes") {
         testCompoundEvents();
         testCompoundHandover();
@@ -4192,7 +4194,6 @@ int main(int argc, char** argv) {
         return finishSelectedRun(argc >= 3 ? argv[2] : argv[1]);
     }
 
-    testHeadlessPhysics();
     testDeliveryPR2();
     testPolyShapeRefuses(world);
     testHullDropWarning(world);

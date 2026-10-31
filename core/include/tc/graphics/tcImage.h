@@ -54,16 +54,14 @@ public:
         , mipmaps_(other.mipmaps_)
         , usage_(other.usage_)
     {
-        other.async_.cancel();
         other.dirty_ = false;
         other.mipmaps_ = false;
         other.usage_ = TextureUsage::Immutable;
     }
 
     Image& operator=(Image&& other) noexcept {
+        async_.cancel();
         if (this != &other) {
-            async_.cancel();
-            other.async_.cancel();
             debugName_.moveFrom(other.debugName_);
             pixels_ = std::move(other.pixels_);
             texture_ = std::move(other.texture_);
@@ -106,11 +104,6 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
-    // Web CMake propagates exception support. With custom app flags disabling
-    // it, recovery from allocation failure is guaranteed only for TrussC's
-    // out-of-line host code. Inline helpers from headers may be compiled into the
-    // application without exception support; allocation failure inside them is a
-    // known limitation.
     void loadAsync(const fs::path& path, bool mipmaps = false);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }

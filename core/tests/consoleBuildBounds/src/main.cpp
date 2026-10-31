@@ -115,6 +115,13 @@ void linesAndQueue() {
     // Accumulated counters are not reset by warning delivery or querying.
     check(channel.rejectedLines.load() == beforeLines + 1 && channel.droppedCommands.load() == beforeDrops + 4,
           "warning delivery preserves cumulative stdin totals");
+    channel.clear();
+    channel.rejectLine(); channel.sendRaw(std::string(Channel::lineBytes + 1, 'x'));
+    channel.sendRaw("dropped", +[](void*, size_t) -> void* { return nullptr; });
+    channel.reportLoss(); channel.reportLoss();
+    check(warnings == 4, "drained stdin stores re-arm once per new overflow episode");
+    channel.clear(); channel.reportLoss();
+    check(warnings == 4, "historical losses do not warn after drain");
 }
 
 void capture() {
@@ -186,11 +193,22 @@ void capture() {
 #ifndef _WIN32
 void closedForwarding(std::vector<std::string> arguments) {
     arguments.back() = "--closed-output-child";
+    const char* names[] = {"stdout/default SIGPIPE", "stderr/default SIGPIPE", "both/default SIGPIPE",
+                           "stdout/blocked SIGPIPE", "stdout/pending SIGPIPE", "stdout/ignored SIGPIPE"};
+    const char* predicates[] = {
+        "sigaction setup", "signal mask setup", "raise pending SIGPIPE", "read initial signal mask",
+        "pipe setup", "redirect output", "child exit status == 7", "signal disposition preserved",
+        "signal mask preserved", "pending SIGPIPE preserved", "forwarding failures == 2",
+        "captured output matches", "read final signal mask", "read pending signals", "warnings == 1"
+    }; // Child exit codes 10 through 24 identify the failed predicate.
     for (int scenario = 0; scenario < 6; ++scenario) {
         // Isolate descriptor/signal changes from the test runner. The first
         // case is the review shape: closed stdout, 8192 bytes, default SIGPIPE.
         const pid_t host = fork();
         if (!host) {
+            // macOS os_log is not fork-safe. Keep the warning listener and
+            // console sink active, as in loggerThreadSafety's forked probes.
+            setSystemLogLevel(LogLevel::Silent);
             const bool stderrOnly = scenario == 1;
             const bool both = scenario == 2;
             const bool blocked = scenario == 3 || scenario == 4;
@@ -223,22 +241,34 @@ void closedForwarding(std::vector<std::string> arguments) {
                                               : std::string(8192, 'x') + (stderrOnly ? "" : "\n");
             for (int build = 0; build < 2; ++build) {
                 std::string output;
-                if (internal::runPosixBuildWithOutput(arguments, output) != 7 || output != expected) _exit(16);
+                if (internal::runPosixBuildWithOutput(arguments, output) != 7) _exit(16);
+                if (output != expected) _exit(21);
                 struct sigaction after = {};
                 sigset_t maskAfter, pending;
-                if (sigaction(SIGPIPE, nullptr, &after) || after.sa_handler != disposition.sa_handler ||
-                    pthread_sigmask(SIG_BLOCK, nullptr, &maskAfter) || sigpending(&pending)) _exit(17);
+                if (sigaction(SIGPIPE, nullptr, &after) || after.sa_handler != disposition.sa_handler) _exit(17);
+                if (pthread_sigmask(SIG_BLOCK, nullptr, &maskAfter)) _exit(22);
+                if (sigpending(&pending)) _exit(23);
                 for (int signal = 1; signal < NSIG; ++signal)
                     if (sigismember(&maskBefore, signal) != sigismember(&maskAfter, signal)) _exit(18);
                 if ((sigismember(&pending, SIGPIPE) == 1) != alreadyPending) _exit(19);
             }
-            _exit(loss.forwardingFailures == 2 && warnings == 1 ? 0 : 20);
+            if (loss.forwardingFailures != 2) _exit(20);
+            if (warnings != 1) _exit(24);
+            _exit(0);
         }
         int status = 0;
         pid_t waited;
         do { waited = host > 0 ? waitpid(host, &status, 0) : -1; } while (waited < 0 && errno == EINTR);
-        check(waited == host && host > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0,
-              "closed forwarding preserves host, child status, diagnostics, signal state and one warning");
+        const bool reaped = host > 0 && waited == host;
+        const int exitCode = reaped && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        const int signalCode = reaped && WIFSIGNALED(status) ? WTERMSIG(status) : 0;
+        const char* predicate = !reaped ? "fork/waitpid" : signalCode ? "host survives" :
+            exitCode == 0 ? "all passed" : exitCode >= 10 && exitCode <= 24 ? predicates[exitCode - 10] :
+            "unexpected child status";
+        std::printf("closed forwarding %s: exit=%d, signal=%d, predicate=%s\n",
+                    names[scenario], exitCode, signalCode, predicate);
+        std::fflush(stdout); // Do not inherit buffered result lines in the next fork.
+        check(reaped && exitCode == 0, names[scenario]);
     }
 }
 #else
@@ -293,50 +323,49 @@ void scans() {
     ));
     fs::remove_all(root);
     fs::create_directories(root);
-    internal::HotReloadScanLoss loss;
     std::ofstream(root / "one.CPP") << "// source\n";
     std::ofstream(root / "two.hpp") << "// header\n";
     std::ofstream(root / "ignored.txt") << "text\n";
     auto deep = root;
     for (int index = 0; index < 66; ++index) { deep /= "d"; fs::create_directory(deep); }
     std::ofstream(deep / "deep.cpp") << "// deep\n";
-    auto sources = internal::hotReloadSources(root, loss);
-    check(sources.size() == 2 && loss.skippedEntries == 1, "source depth skipped with counter, valid files retained");
-    check(internal::hotReloadSources(root / "missing", loss).empty() && loss.incompleteScans == 1,
+    auto sources = internal::hotReloadSources(root);
+    check(sources.size() == 3, "source scan includes deep files");
+    check(internal::hotReloadSources(root / "missing").empty(),
           "unreadable source scan does not throw");
+#ifndef _WIN32
+    // Pick an entry before the final source in the actual iteration order, so
+    // stopping on its status error cannot pass by filesystem ordering luck.
+    const auto unreadable = root / "unreadable";
+    fs::create_directory(unreadable);
+    for (int i = 0; i < 51; ++i) std::ofstream(unreadable / (std::to_string(i) + ".cpp"));
+    fs::path broken;
+    for (const auto& entry : fs::directory_iterator(unreadable)) { broken = entry.path(); break; }
+    fs::remove(broken);
+    fs::create_symlink(unreadable / "missing", broken);
+    check(internal::hotReloadSources(unreadable).size() == 50,
+          "hot-reload scan skips unreadable entries");
+#endif
     const auto cache = root / "CMakeCache.txt";
     std::ofstream(cache, std::ios::binary) << "CMAKE_COMMAND:INTERNAL=/example/cmake\r\n";
-    check(internal::hotReloadCMakeCommand(cache, loss) == "/example/cmake", "cache normal command CRLF");
+    check(internal::hotReloadCMakeCommand(cache) == "/example/cmake", "cache normal command CRLF");
     { std::ofstream file(cache, std::ios::binary); file << "CMAKE_COMMAND:INTERNAL=/prefix\n";
       const std::string block(4096, 'x'); for (int index = 0; index < 257; ++index) file << block; }
-    check(internal::hotReloadCMakeCommand(cache, loss).empty() && loss.rejectedCaches == 1,
-          "overlong cache line never publishes earlier command");
+    check(internal::hotReloadCMakeCommand(cache) == "/prefix",
+          "long cache line keeps earlier command");
     fs::resize_file(cache, 16 * 1024 * 1024 + 1);
-    check(internal::hotReloadCMakeCommand(cache, loss).empty() && loss.rejectedCaches == 2,
-          "oversized cache rejected before reading");
+    check(internal::hotReloadCMakeCommand(cache) == "/prefix",
+          "large cache keeps earlier command");
     fs::create_directory(root / "cache-directory");
-    check(internal::hotReloadCMakeCommand(root / "cache-directory", loss).empty() && loss.rejectedCaches == 3,
-          "non-file cache entry is skipped and counted");
+    check(internal::hotReloadCMakeCommand(root / "cache-directory").empty(),
+          "non-file cache entry is skipped");
     // Generate the inventory in-test. No compiler, downloader or other tool is needed.
     const auto inventory = root / "inventory";
     fs::create_directory(inventory);
     for (size_t index = 0; index < 65537; ++index)
         std::ofstream(inventory / (std::to_string(index) + ".cpp"));
-    internal::HotReloadScanLoss countLoss;
-    sources = internal::hotReloadSources(inventory, countLoss);
-    check(sources.size() == 65536 && countLoss.incompleteScans == 1, "source entry boundary and explicit incomplete scan");
-#ifndef _WIN32
-    // Alternate spellings keep this aggregate-storage probe independent of
-    // Windows long-path configuration; the shared admission code runs above.
-    auto longRoot = inventory;
-    for (int index = 0; index < 200; ++index) longRoot /= ".";
-    internal::HotReloadScanLoss nameLoss;
-    sources = internal::hotReloadSources(longRoot, nameLoss);
-    size_t nameBytes = 0;
-    for (const auto& path : sources) nameBytes += (path.native().size() + 1) * sizeof(fs::path::value_type);
-    check(sources.size() < 65536 && nameBytes <= 16 * 1024 * 1024 && nameLoss.skippedEntries > 0,
-          "source aggregate path storage stays bounded");
-#endif
+    sources = internal::hotReloadSources(inventory);
+    check(sources.size() == 65537, "source scan includes more than 65536 entries");
     fs::remove_all(root);
 }
 } // namespace

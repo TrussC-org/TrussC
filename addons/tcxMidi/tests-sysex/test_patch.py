@@ -15,17 +15,15 @@ import tarfile
 
 
 PATCHED_HASHES = {
-    "include/libremidi/detail/midi_stream_decoder.hpp":
-        "b919e33aba675e7286bde4e437831628fce9f062c7d8eec362214b2efff041c5",
-    "include/libremidi/input_configuration.hpp":
-        "91891013773211537e9397e4cd4ac994fe3cb400b0eea80f19dc8f5575d426ba",
-    "include/libremidi/backends/alsa_seq/midi_in.hpp":
-        "316f03a84f76c59a2629b863d656789b0af9821500fe4ce852e038417d6e895d",
-    "include/libremidi/backends/winmm/midi_in.hpp":
-        "ce432de402f161b917ca43b65c9720fde12bc5eb13bc4ccf3369b540da63106c",
     "include/libremidi/backends/alsa_seq/midi_out.hpp":
         "0590ffc031e6fbc2076af581542095c057bedbc6766d137bd14114eb4ec9525b",
 }
+INPUT_FILES = (
+    "include/libremidi/detail/midi_stream_decoder.hpp",
+    "include/libremidi/input_configuration.hpp",
+    "include/libremidi/backends/alsa_seq/midi_in.hpp",
+    "include/libremidi/backends/winmm/midi_in.hpp",
+)
 
 
 def snapshot(root):
@@ -68,18 +66,19 @@ def main():
         'cmake_minimum_required(VERSION 3.20)\nproject(patch_checks LANGUAGES C CXX)\n'
         'add_library(TrussC INTERFACE)\nadd_subdirectory(addon)\n', encoding="utf-8")
 
-    def run(label, command, succeeds=True):
+    def run(label, command, succeeds=True, error="checked libremidi 5.4.3 ALSA SysEx output patch"):
         result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
         (work / (label + ".log")).write_text(result.stdout + result.stderr, encoding="utf-8")
         if (result.returncode == 0) != succeeds:
             raise RuntimeError(f"{label}: unexpected result {result.returncode}; see log")
-        if not succeeds and "checked libremidi 5.4.3 SysEx patch" not in result.stdout + result.stderr:
+        if not succeeds and error not in result.stdout + result.stderr:
             raise RuntimeError(f"{label}: failed for an unrelated reason")
         print(f"PASS: {label}", flush=True)
+        return result.stdout + result.stderr
 
-    def configure(label, *options, succeeds=True):
-        run(label, ["cmake", "-S", str(work), "-B", str(work / label),
-                    "-DFETCHCONTENT_UPDATES_DISCONNECTED=ON", *options], succeeds)
+    def configure(label, *options, succeeds=True, **kwargs):
+        return run(label, ["cmake", "-S", str(work), "-B", str(work / label),
+                          "-DFETCHCONTENT_UPDATES_DISCONNECTED=ON", *options], succeeds, **kwargs)
 
     if not args.script_only:
         configure("archive_patch_command")
@@ -101,6 +100,10 @@ def main():
 
     run("explicit_private_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
     expected = patched_bytes(override)
+    for path in pristine.rglob("*"):
+        if path.is_file() and path.relative_to(pristine).as_posix() not in PATCHED_HASHES:
+            assert (override / path.relative_to(pristine)).read_bytes() == path.read_bytes(), path
+    print("PASS: all files except ALSA output remain byte-exact upstream", flush=True)
     before = snapshot(override)
     run("idempotent_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
     assert patched_bytes(override) == expected
@@ -114,6 +117,25 @@ def main():
     assert snapshot(crlf_output) == before, "VERIFY_ONLY wrote patched sources"
     patch("crlf_script_idempotent", crlf_output, script_crlf)
     assert snapshot(crlf_output) == before, "idempotent patch wrote sources"
+
+    # R4 alone must never conceal stale R1-R3 or other input edits.
+    for index, path in enumerate(INPUT_FILES):
+        header = override / path
+        upstream = header.read_bytes()
+        header.write_bytes(upstream + b"\n// Stale input edit.\n")
+        before = snapshot(override)
+        for verify in (False, True):
+            run(f"stale_input_{index}_verify_{verify}",
+                ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}",
+                 f"-DVERIFY_ONLY={'ON' if verify else 'OFF'}", "-P", str(script)],
+                succeeds=False, error=path)
+        if not args.script_only:
+            message = configure(f"stale_input_{index}_override",
+                                f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}",
+                                succeeds=False, error=path)
+            assert "Use clean v5.4.3 sources" in message
+        assert snapshot(override) == before, "stale input was modified"
+        header.write_bytes(upstream)
 
     # Reject CRLF as unknown bytes, even if only the last checked file differs.
     # Test both entry points and both script encodings, including pristine input.
@@ -162,7 +184,7 @@ def main():
     if args.script_only:
         return
     configure("patched_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}")
-    # Every replacement is required for overrides, including the fifth (ALSA output).
+    # The ALSA output replacement is required for source overrides.
     for index, path in enumerate(PATCHED_HASHES):
         header = override / path
         patched = header.read_bytes()
@@ -175,7 +197,7 @@ def main():
         configure(f"unknown_{index}_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
         assert snapshot(override) == before, "verification modified unknown override"
         header.write_bytes(patched)
-        # Unknown input must fail before any of the other four files are written.
+        # Unknown input must fail before any source is written.
         unknown = work / f"unknown_input_{index}"
         shutil.copytree(pristine, unknown)
         with (unknown / path).open("ab") as output:
@@ -186,17 +208,22 @@ def main():
                 patch(f"unknown_{index}_{encoding}_verify_{verify}", unknown, candidate,
                       verify=verify, succeeds=False)
                 assert snapshot(unknown) == before, "unknown input was modified"
-    decoder = override / "include/libremidi/detail/midi_stream_decoder.hpp"
-    with decoder.open("a", encoding="utf-8") as output:
+    output_header = override / "include/libremidi/backends/alsa_seq/midi_out.hpp"
+    with output_header.open("a", encoding="utf-8") as output:
         output.write("\n// Unknown local edit.\n")
     configure("modified_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
     cache = work / "reused_cache"
-    shutil.copytree(pristine, cache / "libremidi-src")
+    cached_source = cache / "libremidi-v5.4.3-r4-src"
+    shutil.copytree(pristine, cached_source)
     configure("unpatched_reused_cache", f"-DFETCHCONTENT_BASE_DIR={cache}",
               "-DFETCHCONTENT_FULLY_DISCONNECTED=ON", succeeds=False)
-    run("private_cache_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={cache / 'libremidi-src'}", "-P", str(script)])
+    run("private_cache_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={cached_source}", "-P", str(script)])
     configure("patched_reused_cache", f"-DFETCHCONTENT_BASE_DIR={cache}",
               "-DFETCHCONTENT_FULLY_DISCONNECTED=ON")
+    with (cached_source / INPUT_FILES[0]).open("ab") as output:
+        output.write(b"\n// Stale cached input.\n")
+    configure("stale_input_reused_cache", f"-DFETCHCONTENT_BASE_DIR={cache}",
+              "-DFETCHCONTENT_FULLY_DISCONNECTED=ON", succeeds=False, error=INPUT_FILES[0])
 
 
 if __name__ == "__main__":

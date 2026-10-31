@@ -6,6 +6,7 @@
 namespace {
 void startStopHandoff() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     promise<void> entered, release;
     auto proceed = release.get_future().share();
     auto ready = entered.get_future();
@@ -32,6 +33,7 @@ void startStopHandoff() {
 void clientStopsAndDestroys() {
     for (bool destroy : {false, true}) {
         auto server = make_unique<TcpServer>();
+        server->setBindAddress("127.0.0.1");
         atomic<bool> done{false};
         auto receive = server->onReceive.listen([&](TcpServerReceiveEventArgs& e) {
             if (destroy) server.reset();

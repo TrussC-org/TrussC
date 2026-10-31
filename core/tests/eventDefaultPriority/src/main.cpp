@@ -115,8 +115,8 @@ void coreFamilies() {
 #undef APP_EVENT
 #define OTHER_EVENT(name) family(hub.name, 100, "CoreEvents::" #name " defaults to 100")
     OTHER_EVENT(setup); OTHER_EVENT(onRender); OTHER_EVENT(afterFrame);
-    OTHER_EVENT(hotReloadUnload); OTHER_EVENT(exitRequested); OTHER_EVENT(deviceLost);
-    OTHER_EVENT(clipboardPasted); OTHER_EVENT(console); OTHER_EVENT(rawEvent);
+    OTHER_EVENT(closeRequested); OTHER_EVENT(hotReloadUnload); OTHER_EVENT(exitRequested); OTHER_EVENT(deviceLost);
+    OTHER_EVENT(clipboardPasted);  OTHER_EVENT(rawEvent);
 #undef OTHER_EVENT
     family(AudioEngine::getInstance().audioOut, audio::priority::Generator, "audioOut defaults to Generator (100)");
     family(AudioEngine::getInstance().audioIn, 100, "audioIn defaults to 100");
@@ -186,17 +186,19 @@ private:
 };
 void appTouchOrder() {
     // Exercise the real App listeners and setup registration without a display.
-    (void)buildAppDescriptor<TouchApp>();
+    const auto descriptor = buildAppDescriptor<TouchApp>();
+    auto* launch = static_cast<Window*>(descriptor._tc_bind_user);
     // Model the runner opening its main Window without starting sokol.
-    internal::WindowRequestAccess::openMain(*internal::mainWindow());
+    internal::WindowRequestAccess::bindForTests(*launch, 101);
+    internal::currentWindowCtx() = &launch->context();
     internal::appSetupFunc();
-    internal::appUpdateFunc();
+    events().update.notify();
     for (auto* event : {&events().touchPressed, &events().touchMoved, &events().touchReleased}) {
         touchOrder.clear();
         fire(*event);
         check("App touch listener vs explicit-0 setup listener keeps base order BA", touchOrder == "BA");
     }
-    internal::appCleanupFunc();
+    internal::shutdownRuntime();
 }
 
 } // namespace

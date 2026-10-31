@@ -66,7 +66,7 @@ jobs:
   sweep:
     needs: check
     if: needs.check.outputs.run == 'true'
-    timeout-minutes: 180
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
@@ -136,7 +136,9 @@ jobs:
         with:
           variant: ${{ matrix.launcher }}
           key: ${{ matrix.os }}-build
-          max-size: 800M
+          # Same key and size as build.yml: a smaller size here trimmed the shared
+          # cache on every daily save and cost the next builds their hits.
+          max-size: 2G
 
       - name: Enable compiler launcher
         shell: bash
@@ -185,8 +187,10 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build trusscli
+        id: daily_tools_native
         shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
             sed -i '' 's/open /#open /g' tools/build_mac.command
@@ -197,25 +201,58 @@ jobs:
             sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
             ./tools/build_linux.sh
           elif [ "$RUNNER_OS" == "Windows" ]; then
-            ./tools/build_win.bat
+            TC_NO_LAUNCH=1 ./tools/build_win.bat
           fi
+          TC_BUILD
+
+      - name: Check build warnings (daily_tools_native)
+        if: always() && steps.daily_tools_native.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/daily_tools_native.log"
 
       - name: Build every example
+        id: daily_examples_native
         shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_examples_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --verbose
+          TC_BUILD
+
+      - name: Check build warnings (daily_examples_native)
+        if: always() && steps.daily_examples_native.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/daily_examples_native.log"
 
       # The behavioral tests again, on top of the full build (cheap next to it).
       - name: Build & run addon tests
+        id: daily_addon_tests
         shell: bash
-        run: ./examples/build_all.py --addon-tests-only --include-daily --verbose
+        run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_addon_tests.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
+          ./examples/build_all.py --addon-tests-only --include-daily --verbose
+          TC_BUILD
+
+      - name: Check build warnings (daily_addon_tests)
+        if: always() && steps.daily_addon_tests.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/daily_addon_tests.log"
 
       - name: Build & run core tests
+        id: daily_core_tests
         shell: bash
-        run: ./examples/build_all.py --core-tests-only --include-daily --verbose
+        run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_core_tests.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
+          ./examples/build_all.py --core-tests-only --include-daily --verbose
+          TC_BUILD
+
+      - name: Check build warnings (daily_core_tests)
+        if: always() && steps.daily_core_tests.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/daily_core_tests.log"
 
       - name: Run core display modes (Xvfb + Mesa)
+        id: display_tests
         if: runner.os == 'Linux'
         env:
           LIBGL_ALWAYS_SOFTWARE: '1'
@@ -223,7 +260,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_display_builds.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           xvfb-run -a -s '-screen 0 1280x1024x24' python3 tools/run_core_display_tests.py
+          TC_BUILD
+
+      - name: Check display rebuild warnings
+        if: always() && steps.display_tests.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/daily_display_builds.log"
+
+      - name: Run example self-checks (Xvfb + Mesa)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+        run: xvfb-run -a -s '-screen 0 1280x1024x24' python3 tools/run_example_self_checks.py
 
       - name: Compiler cache stats
         if: always()
@@ -319,17 +370,34 @@ jobs:
         uses: ./.github/actions/apt-deps
 
       - name: Build trusscli
+        id: daily_tools_web
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_web.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x tools/build_linux.sh
           sed -i 's/read -r -p/#read -r -p/g' tools/build_linux.sh
           sed -i 's|\"$SCRIPT_DIR/trusscli\"|#&|g' tools/build_linux.sh
           ./tools/build_linux.sh
+          TC_BUILD
+
+      - name: Check build warnings (daily_tools_web)
+        if: always() && steps.daily_tools_web.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/daily_tools_web.log"
 
       - name: Build every example (Web)
         id: web_examples
+        shell: bash
         run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/web_examples.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --web-only --verbose
+          TC_BUILD
+
+      - name: Check build warnings (web_examples)
+        if: always() && steps.web_examples.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/web_examples.log"
 
       # The web builds above only compile. Core tests carrying a `web-test`
       # marker (core/tests/*/web-test) are built for wasm and RUN under node, so
@@ -338,8 +406,18 @@ jobs:
       # An example failure must not hide web regressions; a skipped sweep means
       # its prerequisites did not complete, so the tests cannot run either.
       - name: Build and run core tests (Web, under node)
+        id: daily_core_tests_web
         if: ${{ !cancelled() && steps.web_examples.outcome != 'skipped' }}
-        run: ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
+        shell: bash
+        run: |
+          python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_core_tests_web.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
+          ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
+          TC_BUILD
+
+      - name: Check build warnings (daily_core_tests_web)
+        if: always() && steps.daily_core_tests_web.outcome != 'skipped'
+        shell: bash
+        run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/daily_core_tests_web.log"
 
       - name: Compiler cache stats
         if: always()

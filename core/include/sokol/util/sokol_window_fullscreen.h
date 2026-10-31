@@ -12,10 +12,14 @@ struct _sapp_tc_fullscreen_state_t {
         return phase == _sapp_tc_fullscreen_phase::Entering || phase == _sapp_tc_fullscreen_phase::Exiting;
     }
     bool blocksGeometry() const noexcept { return phase != _sapp_tc_fullscreen_phase::Windowed; }
-    bool request(bool full) noexcept {
+    bool request(bool full, bool defer = false) noexcept {
         desired = full;
         reconcilePending = false;
         if (transitioning() || full == (phase == _sapp_tc_fullscreen_phase::Fullscreen)) return false;
+        if (defer) {
+            reconcilePending = true;
+            return false;
+        }
         phase = full ? _sapp_tc_fullscreen_phase::Entering : _sapp_tc_fullscreen_phase::Exiting;
         return true;
     }

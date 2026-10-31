@@ -107,16 +107,14 @@ public:
 
 private:
     bool loadAudioForPlayback();
-    std::shared_ptr<internal::VideoDecodeBudget> budget_ = std::make_shared<internal::VideoDecodeBudget>();
-    size_t queueLimit_ = 4;
-    size_t fixedBytes_ = 0;
+    std::shared_ptr<internal::VideoDecodeStatus> status_ = std::make_shared<internal::VideoDecodeStatus>();
 public:
-    std::shared_ptr<internal::VideoDecodeBudget> budget() const { return budget_; }
+    std::shared_ptr<internal::VideoDecodeStatus> status() const { return status_; }
 private:
     void decodeThread();
     bool decodeNextFrame();
     internal::VideoErrorQueue playbackErrors_;
-    // Both decode paths share a per-player budget. Only the decoder accesses
+    // Both decode paths share a per-player status. Only the decoder accesses
     // these counters; include the current skip in each report, then reset.
     OnceGate invalidDataWarningGate_{5.0};
     uint64_t skippedInvalidPackets_ = 0;
@@ -136,7 +134,8 @@ private:
         char message[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(code, message, sizeof(message));
         isPlaying_ = false;
-        playbackErrors_.report(std::string(operation) + ": " + message, code);
+        if (code == AVERROR(ENOMEM)) playbackErrors_.report("out of memory", code);
+        else playbackErrors_.report(std::string(operation) + ": " + message, code);
     }
     void seekToTime(double seconds);
     void probeHwOutputFormat();
@@ -199,14 +198,13 @@ private:
 
     // Frame queue
     struct FrameData {
-        std::shared_ptr<void> credit;
         std::vector<uint8_t> pixels;    // RGBA, or NV12 Y-plane when isNV12
         std::vector<uint8_t> pixelsUV;  // NV12 UV-plane (empty when !isNV12)
         bool isNV12 = false;
         double pts;
     };
     std::queue<FrameData> frameQueue_;
-    // Bound (security): decoded file frames can outpace presentation; a cap keeps queued frame memory finite. Overflow waits for the consumer; byte-admission failure rejects the whole frame and is counted.
+    // Bound (memory): at most four decoded frames are queued; decoding waits for the consumer when the count limit is reached.
     static constexpr size_t MAX_QUEUE_SIZE = 4;
 
     // Timing
@@ -234,7 +232,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     filePath_ = path;
 
     // Open file
-    if (!internal::openVideoInput(&formatCtx_, path.c_str(), *budget_)) {
+    if (!internal::openVideoInput(&formatCtx_, path.c_str(), *status_)) {
         logError("VideoPlayer") << "Failed to open file: " << path;
         return false;
     }
@@ -283,19 +281,10 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
 
     size_t frameBytes = 0;
     if (!internal::VideoDecodeLimits::rgba(codecPar->width, codecPar->height, frameBytes)) {
-        budget_->reject(frameBytes, internal::VideoDecodeLimits::frameBytes);
-        budget_->warn();
+        status_->reject(frameBytes, 0);
+        status_->warn();
         return false;
     }
-    // Reserve the CPU mirror, demux (64 MiB) and scaler
-    // scratch (8 MiB). Actual codec buffers and queue allocations share the rest.
-    const size_t fixedBytes = frameBytes + internal::VideoDecodeLimits::inputBytes + 8 * 1024 * 1024;
-    if (!budget_->acquire(fixedBytes)) { budget_->reject(fixedBytes, internal::VideoDecodeLimits::workingBytes); return false; }
-    fixedBytes_ = fixedBytes;
-    queueLimit_ = (std::min)(MAX_QUEUE_SIZE, (internal::VideoDecodeLimits::workingBytes - fixedBytes_) /
-                            (frameBytes * 2));
-    queueLimit_ = (std::max)(size_t(1), queueLimit_);
-
     // Find decoder
     const AVCodec* codec = avcodec_find_decoder(codecPar->codec_id);
     if (!codec) {
@@ -333,7 +322,8 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
         logNotice("VideoPlayer") << "HW accel disabled by user, using software decoding";
     }
 
-    internal::configureVideoCodec(codecCtx_, budget_);
+
+    internal::configureVideoCodec(codecCtx_);
 
     // Open codec (fallback to SW on HW open failure)
     if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
@@ -344,7 +334,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
             avcodec_free_context(&codecCtx_);
             codecCtx_ = avcodec_alloc_context3(codec);
             if (!codecCtx_ || avcodec_parameters_to_context(codecCtx_, codecPar) < 0) return false;
-            internal::configureVideoCodec(codecCtx_, budget_);
+            internal::configureVideoCodec(codecCtx_);
         }
         if (avcodec_open2(codecCtx_, codec, nullptr) < 0) {
             logError("VideoPlayer") << "Failed to open codec";
@@ -359,20 +349,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     height_ = codecCtx_->height;
     size_t openedBytes = 0;
     if (!internal::VideoDecodeLimits::rgba(width_, height_, openedBytes)) {
-        budget_->reject(openedBytes, internal::VideoDecodeLimits::frameBytes); return false;
-    }
-    if (openedBytes != frameBytes) {
-        // Codec headers can refine container metadata. Admit the actual size
-        // before output allocation, including the revised effective queue.
-        budget_->release(fixedBytes_);
-        fixedBytes_ = 0;
-        const size_t revisedBytes = openedBytes + internal::VideoDecodeLimits::inputBytes + 8 * 1024 * 1024;
-        if (!budget_->acquire(revisedBytes)) {
-            budget_->reject(revisedBytes, internal::VideoDecodeLimits::workingBytes); return false;
-        }
-        fixedBytes_ = revisedBytes;
-        queueLimit_ = (std::max)(size_t(1), (std::min)(MAX_QUEUE_SIZE,
-            (internal::VideoDecodeLimits::workingBytes - fixedBytes_) / (openedBytes * 2)));
+        status_->reject(openedBytes, 0); return false;
     }
     timeBase_ = videoStream->time_base;
 
@@ -428,8 +405,11 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
 }
 
 void TCVideoPlayerImpl::close() {
-    // Stop decode thread
-    shouldStop_ = true;
+    // Change the wait predicate under its mutex so shutdown cannot lose a wakeup.
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        shouldStop_ = true;
+    }
     cv_.notify_all();
 
     if (decodeThread_.joinable()) {
@@ -477,7 +457,6 @@ void TCVideoPlayerImpl::close() {
         formatCtx_ = nullptr;
     }
 
-    if (fixedBytes_) { budget_->release(fixedBytes_); fixedBytes_ = 0; }
     isLoaded_ = false;
     isPlaying_ = false;
     isPaused_ = false;
@@ -620,8 +599,8 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
                 if (front.isNV12) {
                     unsigned char* yBuf  = player->getPixelsY();
                     unsigned char* uvBuf = player->getPixelsUV();
-                    if (yBuf  && front.pixels.size()   == (size_t)(width_ * height_) &&
-                        uvBuf && front.pixelsUV.size() == (size_t)(width_ * height_ / 2)) {
+                    if (yBuf  && front.pixels.size()   == size_t(width_) * height_ &&
+                        uvBuf && front.pixelsUV.size() == size_t(width_) * height_ / 2) {
                         memcpy(yBuf,  front.pixels.data(),   front.pixels.size());
                         memcpy(uvBuf, front.pixelsUV.data(), front.pixelsUV.size());
                         hasNewFrame_ = true;
@@ -629,7 +608,7 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
                     }
                 } else {
                     unsigned char* playerPixels = player->getPixels();
-                    if (playerPixels && front.pixels.size() == (size_t)(width_ * height_ * 4)) {
+                    if (playerPixels && front.pixels.size() == size_t(width_) * height_ * 4) {
                         memcpy(playerPixels, front.pixels.data(), front.pixels.size());
                         hasNewFrame_ = true;
                         currentPts_  = front.pts;
@@ -676,7 +655,7 @@ void TCVideoPlayerImpl::decodeThread() {
             std::unique_lock<std::mutex> lock(mutex_);
             cv_.wait(lock, [this] {
                 return shouldStop_ ||
-                       (isPlaying_ && !isPaused_ && !isFinished_ && frameQueue_.size() < queueLimit_) ||
+                       (isPlaying_ && !isPaused_ && !isFinished_ && frameQueue_.size() < MAX_QUEUE_SIZE) ||
                        seekRequested_;
             });
         }
@@ -715,7 +694,7 @@ void TCVideoPlayerImpl::decodeThread() {
         // Decode next frame
         bool decoded = false;
         try { decoded = decodeNextFrame(); }
-        catch (const std::bad_alloc&) { decodeError("video frame allocation", AVERROR(ENOMEM)); }
+        catch (const std::exception&) { decodeError("video frame allocation", AVERROR(ENOMEM)); }
         if (!decoded) {
             isFinished_ = true;
         }
@@ -739,7 +718,7 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
         int ret = av_read_frame(formatCtx_, packet_);
         if (ret < 0) break;
         if (packet_->size < 0 || size_t(packet_->size) > internal::VideoDecodeLimits::inputBytes) {
-            budget_->reject(packet_->size < 0 ? 0 : size_t(packet_->size), internal::VideoDecodeLimits::inputBytes);
+            status_->reject(packet_->size < 0 ? 0 : size_t(packet_->size), internal::VideoDecodeLimits::inputBytes);
             av_packet_unref(packet_); break;
         }
         if (packet_->stream_index != videoStreamIndex_) {
@@ -758,11 +737,11 @@ void TCVideoPlayerImpl::probeHwOutputFormat() {
 
             size_t bytes = 0;
             if (!internal::VideoDecodeLimits::rgba(frame_->width, frame_->height, bytes)) {
-                budget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
+                status_->reject(bytes, 0);
                 av_frame_unref(frame_); break;
             }
             if (frame_->hw_frames_ctx) {
-                internal::VideoCPUTransfer transfer(budget_);
+                internal::VideoCPUTransfer transfer(status_);
                 if (transfer.transfer(frame_) >= 0) {
                     probedFormat_ = AVPixelFormat(transfer.frame()->format);
                     captured = true;
@@ -831,7 +810,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
                     return false;
                 }
                 if (packet_->size < 0 || size_t(packet_->size) > internal::VideoDecodeLimits::inputBytes) {
-                    budget_->reject(packet_->size < 0 ? 0 : size_t(packet_->size), internal::VideoDecodeLimits::inputBytes);
+                    status_->reject(packet_->size < 0 ? 0 : size_t(packet_->size), internal::VideoDecodeLimits::inputBytes);
                     av_packet_unref(packet_);
                     decodeError("video packet limit", AVERROR(EINVAL));
                     return false;
@@ -894,13 +873,13 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
 
         size_t sourceBytes = 0;
         if (!internal::VideoDecodeLimits::rgba(frame_->width, frame_->height, sourceBytes)) {
-            budget_->reject(sourceBytes, internal::VideoDecodeLimits::frameBytes);
+            status_->reject(sourceBytes, 0);
             av_frame_unref(frame_);
             decodeError("video frame dimensions", AVERROR(EINVAL));
             return false;
         }
         AVFrame* srcFrame = frame_;
-        internal::VideoCPUTransfer transfer(budget_);
+        internal::VideoCPUTransfer transfer(status_);
         if (frame_->hw_frames_ctx) {
             int result = transfer.transfer(frame_);
             if (result < 0) {
@@ -910,7 +889,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
             }
             srcFrame = transfer.frame();
         }
-        if (!internal::validVideoFrame(srcFrame, *budget_)) {
+        if (!internal::validVideoFrame(srcFrame, *status_)) {
             av_frame_unref(frame_);
             decodeError("video frame layout", AVERROR(EINVAL));
             return false;
@@ -920,16 +899,7 @@ bool TCVideoPlayerImpl::decodeNextFrame() {
         // the actual admitted input dimensions, rather than reading old rows.
         const size_t outputBytes = nv12Mode_ ? size_t(width_) * height_ * 3 / 2
                                              : size_t(width_) * height_ * 4;
-        if (!budget_->acquire(outputBytes)) {
-            budget_->reject(outputBytes, internal::VideoDecodeLimits::workingBytes);
-            av_frame_unref(frame_);
-            decodeError("video working budget", AVERROR(ENOMEM));
-            return false;
-        }
         FrameData data;
-        data.credit = std::shared_ptr<void>(budget_.get(), [budget = budget_, outputBytes](void*) {
-            budget->release(outputBytes);
-        });
         data.pts = pts;
         data.isNV12 = nv12Mode_;
         data.pixels.resize(nv12Mode_ ? size_t(width_) * height_ : outputBytes);
@@ -1141,18 +1111,11 @@ static void createADTSHeader(uint8_t* hdr, int frameSize, int sampleRate, int ch
 }
 
 std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
-    const auto budget = budget_;
+    const auto status = status_;
     if (!hasAudio_ || filePath_.empty()) return {};
 
-    const size_t inputBytes = internal::VideoDecodeLimits::inputBytes;
-    if (!budget->acquire(inputBytes)) {
-        budget->reject(inputBytes, internal::VideoDecodeLimits::workingBytes);
-        budget->warn(); return {};
-    }
-    struct InputCredit { internal::VideoDecodeBudget& budget; size_t bytes;
-        ~InputCredit() { budget.release(bytes); budget.warn(); } } inputCredit{*budget, inputBytes};
     AVFormatContext* fmtCtx = nullptr;
-    if (!internal::openVideoInput(&fmtCtx, filePath_.c_str(), *budget)) return {};
+    if (!internal::openVideoInput(&fmtCtx, filePath_.c_str(), *status)) return {};
 
     int audioIdx = -1;
     for (unsigned int i = 0; i < fmtCtx->nb_streams; i++) {
@@ -1170,7 +1133,7 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
     bool isAAC = (fmtCtx->streams[audioIdx]->codecpar->codec_id == AV_CODEC_ID_AAC);
 
     std::vector<uint8_t> audioData;
-    internal::VideoAudioStorage storage(audioData, *budget);
+    internal::VideoAudioStorage storage(audioData, *status);
     AVPacket* pkt = av_packet_alloc();
     if (!pkt) { avformat_close_input(&fmtCtx); return {}; }
 
@@ -1178,7 +1141,7 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
     int readResult = 0;
     while ((readResult = av_read_frame(fmtCtx, pkt)) >= 0) {
         if (pkt->size < 0 || size_t(pkt->size) > internal::VideoDecodeLimits::inputBytes) {
-            budget->reject(pkt->size < 0 ? 0 : size_t(pkt->size), internal::VideoDecodeLimits::inputBytes);
+            status->reject(pkt->size < 0 ? 0 : size_t(pkt->size), internal::VideoDecodeLimits::inputBytes);
             accepted = false; break;
         }
         if (pkt->stream_index == audioIdx) {
@@ -1186,7 +1149,7 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
                 uint8_t adtsHdr[7];
                 createADTSHeader(adtsHdr, pkt->size, audioSampleRate_, audioChannels_);
                 if (size_t(pkt->size) > internal::VideoDecodeLimits::adtsPayloadBytes) {
-                    budget->reject(size_t(pkt->size), internal::VideoDecodeLimits::adtsPayloadBytes);
+                    status->reject(size_t(pkt->size), internal::VideoDecodeLimits::adtsPayloadBytes);
                     accepted = false; break;
                 }
                 if (!storage.append(adtsHdr, 7)) { accepted = false; break; }
@@ -1201,7 +1164,7 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
     av_packet_free(&pkt);
     avformat_close_input(&fmtCtx);
 
-    budget->warn();
+    status->warn();
     if (!accepted || (readResult < 0 && readResult != AVERROR_EOF)) return {};
     logNotice("VideoPlayer") << "Extracted audio: " << audioData.size() << " bytes";
     return audioData;
@@ -1296,18 +1259,18 @@ void internal::VideoPlayerPlatformAccess::stopAudioForTests(VideoPlayer& player)
 }
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
-    auto impl = new TCVideoPlayerImpl();
+    auto owned = std::make_unique<TCVideoPlayerImpl>();
+    auto* impl = owned.get();
 
-    decodeBudget_ = impl->budget();
+    decodeStatus_ = impl->status();
 
     // FFmpeg takes narrow UTF-8 (Linux native)
     if (!impl->load(internal::pathToUtf8(path), this)) {
-        delete impl;
         return false;
     }
 
-    platformHandle_ = impl;
-    decodeBudget_ = impl->budget();
+    platformHandle_ = owned.release();
+    decodeStatus_ = impl->status();
     width_  = impl->getWidth();
     height_ = impl->getHeight();
 
@@ -1315,22 +1278,22 @@ bool VideoPlayer::loadPlatform(const fs::path& path) {
         if (impl->isNV12Capable() && width_ % 2 == 0 && height_ % 2 == 0) {
             impl->nv12Mode_ = true;
             nv12Mode_  = true;
-            pixelsY_   = new (std::nothrow) unsigned char[width_ * height_];
-            pixelsUV_  = new (std::nothrow) unsigned char[width_ * height_ / 2];
+            pixelsY_   = new (std::nothrow) unsigned char[size_t(width_) * height_];
+            pixelsUV_  = new (std::nothrow) unsigned char[size_t(width_) * height_ / 2];
             if (!pixelsY_ || !pixelsUV_) {
                 delete[] pixelsY_; delete[] pixelsUV_; pixelsY_ = pixelsUV_ = nullptr;
                 closePlatform(); return false;
             }
-            std::memset(pixelsY_,  0, width_ * height_);
-            std::memset(pixelsUV_, 128, width_ * height_ / 2);  // 128 = neutral chroma in NV12
+            std::memset(pixelsY_,  0, size_t(width_) * height_);
+            std::memset(pixelsUV_, 128, size_t(width_) * height_ / 2);  // 128 = neutral chroma in NV12
 
             auto* shader = new internal::NV12VideoShader();
             shader->loadShader();
             nv12ShaderHandle_ = shader;
         } else {
-            pixels_ = new (std::nothrow) unsigned char[width_ * height_ * 4];
+            pixels_ = new (std::nothrow) unsigned char[size_t(width_) * height_ * 4];
             if (!pixels_) { closePlatform(); return false; }
-            std::memset(pixels_, 0, width_ * height_ * 4);
+            std::memset(pixels_, 0, size_t(width_) * height_ * 4);
         }
     }
 
@@ -1518,13 +1481,12 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
 // before timeSec — which skips the forward decode and is faster.
 static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
                                     float timeSec, float* outDuration, bool exact,
-                                    std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    const bool ownBudget = !budget || budget->used() == 0;
-    if (!budget) budget = std::make_shared<internal::VideoDecodeBudget>();
-    const uint64_t previousRejections = budget->rejected();
-    struct Warning { internal::VideoDecodeBudget& budget; ~Warning() { budget.warn(); } } warning{*budget};
+                                    std::shared_ptr<internal::VideoDecodeStatus> status) {
+    if (!status) status = std::make_shared<internal::VideoDecodeStatus>();
+    const uint64_t previousRejections = status->rejected();
+    struct Warning { internal::VideoDecodeStatus& status; ~Warning() { status.warn(); } } warning{*status};
     AVFormatContext* fmtCtx = nullptr;
-    if (!internal::openVideoInput(&fmtCtx, path.c_str(), *budget)) return false;
+    if (!internal::openVideoInput(&fmtCtx, path.c_str(), *status)) return false;
 
     // Find the first video stream.
     int videoIdx = -1;
@@ -1551,18 +1513,11 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
     if (duration > 0.0 && timeSec > duration) timeSec = (float)(duration * 0.1);
     if (timeSec < 0) timeSec = 0;
 
-    // Standalone extraction owns its output and demux/scaler scratch. A
-    // player's poster already reserved these in the shared playback budget.
-    size_t extractionBytes = ownBudget ? internal::VideoDecodeLimits::frameBytes +
-        internal::VideoDecodeLimits::inputBytes + 8 * 1024 * 1024 : 0;
-    if (!budget->acquire(extractionBytes)) { avformat_close_input(&fmtCtx); return false; }
-    struct Credit { internal::VideoDecodeBudget& budget; size_t bytes; ~Credit() { budget.release(bytes); } } credit{*budget, extractionBytes};
-
     // Open the video decoder (software).
     AVCodecParameters* par = videoStream->codecpar;
     size_t frameBytes = 0;
     if (!internal::VideoDecodeLimits::rgba(par->width, par->height, frameBytes)) {
-        budget->reject(frameBytes, internal::VideoDecodeLimits::frameBytes);
+        status->reject(frameBytes, 0);
         avformat_close_input(&fmtCtx); return false;
     }
     const AVCodec* codec = avcodec_find_decoder(par->codec_id);
@@ -1574,8 +1529,8 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
     if (!codecCtx || avcodec_parameters_to_context(codecCtx, par) < 0) {
         avcodec_free_context(&codecCtx); avformat_close_input(&fmtCtx); return false;
     }
-    internal::configureVideoCodec(codecCtx, budget);
-    if (avcodec_open2(codecCtx, codec, nullptr) < 0 || budget->rejected() != previousRejections) {
+    internal::configureVideoCodec(codecCtx);
+    if (avcodec_open2(codecCtx, codec, nullptr) < 0 || status->rejected() != previousRejections) {
         avcodec_free_context(&codecCtx);
         avformat_close_input(&fmtCtx);
         return false;
@@ -1620,22 +1575,24 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
         if (readResult == AVERROR_EOF) { eof = true; break; }
         if (readResult < 0) { cleanup(); return false; }
         if (pkt->size < 0 || size_t(pkt->size) > internal::VideoDecodeLimits::inputBytes) {
-            budget->reject(pkt->size < 0 ? 0 : size_t(pkt->size), internal::VideoDecodeLimits::inputBytes);
+            status->reject(pkt->size < 0 ? 0 : size_t(pkt->size), internal::VideoDecodeLimits::inputBytes);
             cleanup(); return false;
         }
         if (pkt->stream_index == videoIdx) {
             const int sendResult = avcodec_send_packet(codecCtx, pkt);
-            if (budget->rejected() != previousRejections) { cleanup(); return false; }
+            if (status->rejected() != previousRejections) { cleanup(); return false; }
             // Keep the existing recovery for ordinary invalid packets. An
-            // admission rejection is terminal even if the codec recovers.
-            while (sendResult == 0 && avcodec_receive_frame(codecCtx, frame) == 0) {
-                if (budget->rejected() != previousRejections || !internal::validVideoFrame(frame, *budget)) {
+            // packet rejection is terminal even if the codec recovers.
+            int receiveResult = 0;
+            while (sendResult == 0 && (receiveResult = avcodec_receive_frame(codecCtx, frame)) == 0) {
+                if (status->rejected() != previousRejections || !internal::validVideoFrame(frame, *status)) {
                     cleanup(); return false;
                 }
                 got = true;
                 if (isTargetFrame(frame)) { reached = true; break; }
             }
-            if (budget->rejected() != previousRejections) { cleanup(); return false; }
+            if (sendResult == AVERROR(ENOMEM) || receiveResult == AVERROR(ENOMEM) ||
+                status->rejected() != previousRejections) { cleanup(); return false; }
         }
         av_packet_unref(pkt);
     }
@@ -1643,23 +1600,23 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
     // and read failures return through cleanup without publishing one.
     if (eof) {
         const int sendResult = avcodec_send_packet(codecCtx, nullptr);
-        if (sendResult < 0 || budget->rejected() != previousRejections) { cleanup(); return false; }
+        if (sendResult < 0 || status->rejected() != previousRejections) { cleanup(); return false; }
         int receiveResult;
         while ((receiveResult = avcodec_receive_frame(codecCtx, frame)) == 0) {
-            if (budget->rejected() != previousRejections || !internal::validVideoFrame(frame, *budget)) {
+            if (status->rejected() != previousRejections || !internal::validVideoFrame(frame, *status)) {
                 cleanup(); return false;
             }
             got = true;
             if (isTargetFrame(frame)) { reached = true; break; }
         }
-        if (budget->rejected() != previousRejections ||
+        if (status->rejected() != previousRejections ||
             (!reached && receiveResult != AVERROR_EOF && receiveResult != AVERROR(EAGAIN))) {
             cleanup(); return false;
         }
     }
 
     bool ok = false;
-    if (got && internal::validVideoFrame(frame, *budget)) {
+    if (got && internal::validVideoFrame(frame, *status)) {
         int w = frame->width, h = frame->height;
         // Publish only after the complete conversion succeeds.
         Pixels decoded;
@@ -1671,7 +1628,7 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
         if (sws) {
             try { decoded.allocate(w, h, 4); }
             catch (const std::bad_alloc&) {
-                budget->reject(size_t(w) * h * 4, internal::VideoDecodeLimits::workingBytes);
+                status->reject(size_t(w) * h * 4, 0);
                 cleanup(); sws_freeContext(sws); return false;
             }
             uint8_t* dstData[4]   = { decoded.getData(), nullptr, nullptr, nullptr };
@@ -1688,21 +1645,21 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
 }
 
 bool VideoPlayer::extractFramePlatform(const fs::path& path, Pixels& outPixels,
-                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    return tcv_extract_frame_linux(internal::pathToUtf8(path), outPixels, timeSec, outDuration, /*exact=*/true, budget);
+                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeStatus> status) {
+    return tcv_extract_frame_linux(internal::pathToUtf8(path), outPixels, timeSec, outDuration, /*exact=*/true, status);
 }
 
 bool VideoPlayer::extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
-                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    if (!budget) budget = std::make_shared<internal::VideoDecodeBudget>();
-    const uint64_t previousRejections = budget->rejected();
+                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeStatus> status) {
+    if (!status) status = std::make_shared<internal::VideoDecodeStatus>();
+    const uint64_t previousRejections = status->rejected();
     std::string p = internal::pathToUtf8(path);
-    if (tcv_extract_frame_linux(p, outPixels, timeSec, outDuration, /*exact=*/false, budget)) {
+    if (tcv_extract_frame_linux(p, outPixels, timeSec, outDuration, /*exact=*/false, status)) {
         return true;
     }
     // No keyframe reachable — fall back to an exact decode.
-    if (budget->rejected() != previousRejections) return false;
-    return tcv_extract_frame_linux(p, outPixels, timeSec, outDuration, /*exact=*/true, budget);
+    if (status->rejected() != previousRejections) return false;
+    return tcv_extract_frame_linux(p, outPixels, timeSec, outDuration, /*exact=*/true, status);
 }
 
 } // namespace trussc

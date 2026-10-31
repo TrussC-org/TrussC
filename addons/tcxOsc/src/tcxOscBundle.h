@@ -1,5 +1,4 @@
 #pragma once
-#include "tc/events/tcExternalDelivery.h"
 
 #include "tcxOscMessage.h"
 #include <variant>
@@ -118,7 +117,6 @@ public:
     }
 
 private:
-    friend struct trussc::internal::ExternalPayload<OscBundle>;
     // fromBytes() for a bundle at nesting level `depth` (1 = outermost)
     static OscBundle fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok,
                                       bool& paddingMissing, int depth);
@@ -134,18 +132,3 @@ private:
 // -----------------------------------------------------------------------------
 namespace tcx    { using osc::OscBundle; } // deprecated: remove at v1.0.0
 namespace trussc { using tcx::osc::OscBundle; } // deprecated: remove at v1.0.0
-
-namespace trussc::internal {
-template<> struct ExternalPayload<tcx::osc::OscBundle> {
-    static size_t bytes(const tcx::osc::OscBundle& bundle) {
-        size_t result = externalSizeAdd(sizeof(bundle), externalSizeMultiply(bundle.elements_.capacity(), sizeof(tcx::osc::OscBundle::Element)));
-        for (const auto& element : bundle.elements_) {
-            std::visit([&](const auto& child) {
-                // Element storage already includes the child object itself.
-                result = externalSizeAdd(result, ExternalPayload<std::decay_t<decltype(child)>>::bytes(child) - sizeof(child));
-            }, element);
-        }
-        return result;
-    }
-};
-} // namespace trussc::internal

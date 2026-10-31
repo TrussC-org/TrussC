@@ -27,8 +27,8 @@
 //   it, a memory decode, PCM fill or generator clears it (a voice must not
 //   report the previous file).
 // - A file named .ogg that is not Ogg Vorbis fails to load (DecodeFailed,
-//   logged), and the bounded file reader closes its file once before decoder
-//   initialization (counted by fcloseProbe.cpp on
+//   logged), and stb_vorbis closes its file once if decoder
+//   initialization fails (counted by fcloseProbe.cpp on
 //   Linux).
 // - SoundBuffer::loadPcmFromMemory() validates the format before it touches
 //   the buffer: a channel count below 1, or a byte size that is not a whole
@@ -55,9 +55,7 @@
 //   that decodes to more than its reservation still ends with one buffer
 //   of exactly its length. The same holds for Ogg Vorbis (vorbisTone.cpp),
 //   whose stated length (the last page's granule) may also be unknown.
-//   Near a memory limit the buffer grows in smaller steps, whether the limit
-//   shows as a refused check (setAllocationLimitForTests, as on the web) or
-//   as a std::bad_alloc (allocProbe.cpp, elsewhere).
+//   A failed allocation ends the load cleanly and keeps previous PCM.
 // - A voice on a buffer with no frames, or with fewer samples than
 //   numSamples * channels, stops at its first mix (looping or not), and
 //   setPosition() on an empty buffer lands on 0.
@@ -524,103 +522,6 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
                                                    v.capacity() == 5000);
     }
 
-    // Growth under a memory limit (internal::setAllocationLimitForTests
-    // refuses what the web's malloc probe would): when the doubled size does
-    // not fit, the largest of the smaller steps that fits is taken, so the
-    // buffer is reallocated a logarithmic number of times on its way to the
-    // limit rather than once per append, and growth fails as soon as the
-    // next append no longer fits.
-    {
-        using internal::growSampleBuffer;
-        using internal::setAllocationLimitForTests;
-        vector<float> v;
-        v.reserve(1000);
-        setAllocationLimitForTests(1300 * sizeof(float));
-        const bool stepped = growSampleBuffer(v, 1001);
-        setAllocationLimitForTests(0);
-        check("grow: under a limit takes the largest smaller step that fits",
-              stepped && v.capacity() == 1250, to_string(v.capacity()));
-        v = vector<float>();
-        v.reserve(1000);
-        setAllocationLimitForTests(1001 * sizeof(float));
-        const bool exact = growSampleBuffer(v, 1001);
-        setAllocationLimitForTests(0);
-        check("grow: under a limit takes what is needed when only that fits",
-              exact && v.capacity() == 1001, to_string(v.capacity()));
-
-        // 1024 samples per append from 600 towards a limit of 2^20: doubling
-        // stops at 614400, and appending up to the limit takes 424 appends
-        const size_t limit = (size_t)1 << 20;
-        const size_t step = 1024;
-        v = vector<float>();
-        v.reserve(600);
-        setAllocationLimitForTests(limit * sizeof(float));
-        int reallocs = 0;
-        bool refused = false;
-        for (size_t i = 0; i <= limit / step; ++i) {
-            const size_t before = v.capacity();
-            if (!growSampleBuffer(v, v.size() + step)) {
-                refused = true;
-                break;
-            }
-            if (v.capacity() != before) ++reallocs;
-            v.resize(v.size() + step);
-        }
-        const size_t fullSize = v.size();
-        const size_t fullCapacity = v.capacity();
-        const bool refusedAgain = !growSampleBuffer(v, v.size() + step);
-        setAllocationLimitForTests(0);
-        check("grow: under a limit it fills up to the limit, then refuses",
-              refused && fullSize == limit && fullCapacity == limit,
-              to_string(fullSize) + " samples, capacity " + to_string(fullCapacity));
-        check("grow: under a limit it reallocates a logarithmic number of times",
-              reallocs <= 30, to_string(reallocs) + " reallocations");
-        check("grow: past the limit it keeps refusing with the buffer unchanged",
-              refusedAgain && v.capacity() == fullCapacity && v.size() == fullSize);
-    }
-
-#ifndef __EMSCRIPTEN__
-    // Growth where a reserve throws std::bad_alloc (allocProbeFailAbove), with
-    // no allocationFits limit set: the same smaller steps are tried, and
-    // growth is refused only when `needed` cannot be allocated either.
-    // (Web builds do not catch exceptions; there allocationFits decides.)
-    {
-        using internal::growSampleBuffer;
-        auto growFailingAbove = [](vector<float>& v, size_t needed, size_t failAboveBytes,
-                                   bool& threw) {
-            bool grown = false;
-            threw = false;
-            allocProbeFailAbove(failAboveBytes);
-            try {
-                grown = growSampleBuffer(v, needed);
-            } catch (const bad_alloc&) {
-                threw = true;
-            }
-            allocProbeFailAbove(0);
-            return grown;
-        };
-        bool threw = false;
-        vector<float> v;
-        v.reserve(1000);
-        const bool stepped = growFailingAbove(v, 1001, 1300 * sizeof(float), threw);
-        check("grow: a failing reserve falls back to the largest smaller step",
-              stepped && !threw && v.capacity() == 1250,
-              to_string(v.capacity()) + (threw ? ", threw" : ""));
-        v = vector<float>();
-        v.reserve(1000);
-        const bool exact = growFailingAbove(v, 1001, 1001 * sizeof(float), threw);
-        check("grow: a failing reserve falls back to what is needed",
-              exact && !threw && v.capacity() == 1001,
-              to_string(v.capacity()) + (threw ? ", threw" : ""));
-        v = vector<float>();
-        v.reserve(1000);
-        const bool refused = !growFailingAbove(v, 1001, 1000 * sizeof(float), threw);
-        check("grow: when no reserve succeeds it refuses with the buffer unchanged",
-              refused && !threw && v.capacity() == 1000,
-              to_string(v.capacity()) + (threw ? ", threw" : ""));
-    }
-#endif
-
     // A FLAC whose STREAMINFO states far more samples than its frames hold
     // (a 36-bit field): the load gets the frames that decode, and no
     // allocation along the way is sized from the stated length (2^27 frames
@@ -684,53 +585,21 @@ static void checkDecodeSizing(const fs::path& dir, const string& tag) {
           allocProbeLargest() <= longFrames * sizeof(float) + 4096,
           to_string(allocProbeLargest()) + " bytes requested");
 
-    // The same FLAC under a memory limit below its length: the load fails
-    // with an error once the buffer cannot grow any further
+#ifndef __EMSCRIPTEN__
+    // A real bad_alloc from vector growth must fail once, preserving old PCM.
     SoundBuffer limited;
     limited.samples = {0.25f};
     limited.channels = 1;
     limited.sampleRate = 48000;
     limited.numSamples = 1;
     const auto allocationErrorsBefore = countLogs(LogLevel::Error, "audio allocation failed");
-#ifndef __EMSCRIPTEN__
     allocProbeFailAbove((size_t)(longFrames / 2) * sizeof(float));
-#else
-    internal::setAllocationLimitForTests((size_t)(longFrames / 2) * sizeof(float));
-#endif
     const bool limitedOk = (bool)limited.loadFlacFromMemory(longFlac.data(), longFlac.size());
-#ifndef __EMSCRIPTEN__
     allocProbeFailAbove(0);
-#else
-    internal::setAllocationLimitForTests(0);
-#endif
-    check("decode: a FLAC that does not fit under a memory limit fails to load", !limitedOk,
-          to_string(limited.numSamples) + " frames");
     check("decode: allocation failure is a clean Error and preserves previous PCM and metadata",
-          limited.samples == vector<float>{0.25f} && limited.channels == 1 &&
+          !limitedOk && limited.samples == vector<float>{0.25f} && limited.channels == 1 &&
           limited.sampleRate == 48000 && limited.numSamples == 1 &&
           countLogs(LogLevel::Error, "audio allocation failed") == allocationErrorsBefore + 1);
-
-#ifndef __EMSCRIPTEN__
-    // A FLAC stating more than it holds, where every reserve above its
-    // decoded length (plus 4 KiB for MSVC's allocator) throws
-    // std::bad_alloc: the doubled size fails, smaller steps are taken, and
-    // the load still gets every frame
-    {
-        const vector<char> overstated = flacBytes(longBlocks, (uint64_t)1 << 27);
-        SoundBuffer tight;
-        allocProbeFailAbove((size_t)longFrames * sizeof(float) + 4096);
-        bool tightOk = false;
-        bool threw = false;
-        try {
-            tightOk = (bool)tight.loadFlacFromMemory(overstated.data(), overstated.size());
-        } catch (const bad_alloc&) {
-            threw = true;
-        }
-        allocProbeFailAbove(0);
-        check("decode: a FLAC loads when a reserve near its length fails",
-              tightOk && !threw && flacIntact(tight, longBlocks),
-              to_string(tight.numSamples) + " frames" + (threw ? ", threw" : ""));
-    }
 #endif
 
     // A WAV decodes in steps to exactly its frames
@@ -850,8 +719,8 @@ static void checkVorbisSizing(const fs::path& dir, const string& tag) {
               to_string(b.numSamples) + " frames");
         check(name + " stays within the reservation bound", allocProbeLargest() <= capBytes,
               to_string(allocProbeLargest()) + " bytes requested");
-        check(name + " keeps no capacity from the stated length",
-              b.samples.capacity() <= b.samples.size() + b.samples.size() / 8,
+        check(name + " keeps only geometric spare capacity",
+              b.samples.capacity() < b.samples.size() * 2,
               to_string(b.samples.capacity()));
     }
 }

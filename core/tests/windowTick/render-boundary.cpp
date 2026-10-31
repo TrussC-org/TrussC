@@ -1,21 +1,103 @@
 // Real GPU regression for #239: no native window or presentation mock.
+#define GL_GLEXT_PROTOTYPES
 #include <TrussC.h>
 #include "../common/tcCoreTest.h"
 #include <EGL/egl.h>
+#if defined(SOKOL_GLES3)
+#include <GLES3/gl3.h>
+#else
 #include <GL/gl.h>
+#endif
 #include <cstdio>
 #include <array>
 using namespace tc;
+static int legacySwapchains;
+extern "C" sapp_swapchain __wrap_sapp_get_swapchain() { ++legacySwapchains; return {}; }
+
+namespace renewal {
+using _sapp_tc_x11_surface_t = EGLSurface;
+struct _sapp_tc_window_t { uint32_t win_id = 7; EGLSurface drawable{}; uintptr_t xwin = 1; int swap_interval = 1; };
+static struct { EGLDisplay egl_display{}; EGLConfig fbconfig{}; int error_code = 0; size_t window_slots = 1;
+    _sapp_tc_window_t* windows[1]{}; } _sapp_tc;
+static _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
+    auto* w = _sapp_tc.windows[0]; return w && w->win_id == h.id ? w : nullptr;
+}
+static void _sapp_tc_x11_grab_error_handler() {}
+static void _sapp_tc_x11_release_error_handler() {}
+static void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*, int) {}
+static EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, EGLNativeWindowType, const EGLint*) { return EGL_NO_SURFACE; }
+#if !defined(SOKOL_GLES3)
+#define SOKOL_GLES3
+#include "renewal.inc"
+#undef SOKOL_GLES3
+#else
+#include "renewal.inc"
+#endif
+}
 namespace {
 int failures;
 void check(const char* name, bool ok) {
     std::printf("render-boundary: %s: %s\n", name, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
 }
+void failedCurrentRenewal(EGLDisplay display, EGLConfig config, EGLSurface& surface) {
+    renewal::_sapp_tc_window_t window;
+    window.drawable = surface;
+    renewal::_sapp_tc.egl_display = display; renewal::_sapp_tc.fbconfig = config;
+    renewal::_sapp_tc.windows[0] = &window;
+    const auto context = eglGetCurrentContext();
+    check("failed renewal leaves a terminal window without a drawable",
+        !renewal::_sapp_tc_x11_resize_surface(&window) && !window.drawable);
+    check("failed current drawable is unbound before the native failure exit",
+        eglGetCurrentContext() == EGL_NO_CONTEXT &&
+        eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE);
+    // The native caller fails this window. Recreate only the test fixture so
+    // the independent rendering checks below still have a real EGL context.
+    const EGLint size[] = {EGL_WIDTH,64,EGL_HEIGHT,64,EGL_NONE};
+    surface = ::eglCreatePbufferSurface(display, config, size);
+    check("fixture restores its drawable", surface != EGL_NO_SURFACE &&
+        eglMakeCurrent(display, surface, surface, context));
+    renewal::_sapp_tc.windows[0] = nullptr;
+}
+void processPasses() {
+    internal::restoreWindowContext(nullptr);
+    auto& context = internal::currentWindowContext();
+    int warnings = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning && event.message.find("No Window selected") != std::string::npos) {
+            ++warnings;
+            check("process draw warning names window callback and Fbo", event.message.find("window callback") != std::string::npos &&
+                event.message.find("Fbo") != std::string::npos);
+        }
+    });
+    // Loaded is the only seam: refusal must precede any shader/pipeline use.
+    struct DrawProbe : FullscreenShader { DrawProbe() { loaded = true; } } shader;
+    glClearColor(1, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
+    const int before = legacySwapchains;
+    std::thread worker([&] { runOnMainThread([&] {
+        clear(0, 1, 0, 1); shader.draw(); shader.draw();
+        check("process root pass cleanly refuses", !internal::ensureCurrentPass() && !context.swapchainTarget.inPass);
+        Fbo fbo; fbo.allocate(8, 8);
+        fbo.begin(0, 1, 0); clear(0, 1, 0, 1);
+        unsigned char pixel[4]{}; glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        check("explicit process Fbo renders real green pixels", pixel[0] == 0 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255);
+        fbo.end();
+    }); });
+    worker.join();
+    { internal::HostTurnScope turn; }
+    check("process root refusal warns once and never acquires legacy main swapchain", warnings == 1 && legacySwapchains == before);
+    check("process pass never imports main dimensions", context.fbWidth == 0 && context.fbHeight == 0 &&
+        context.swapchainTarget.width == 0 && context.swapchainTarget.height == 0);
+    internal::parkWindowPass();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    unsigned char pixel[4]{}; glReadPixels(0, 0, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    check("queued process clear and Shader draw leave window pixels untouched", pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0);
+    sg_reset_state_cache();
+}
 struct WindowProbe : Window {
     int nativeStandIn = 0;
-    WindowProbe() { native_ = &nativeStandIn; }
-    ~WindowProbe() { native_ = nullptr; internal::WindowRequestAccess::endApp(*this); }
+    WindowProbe() { native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~WindowProbe() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
 };
 bool rejectSwapchain = false;
 sg_swapchain swapchain(void*) {
@@ -23,8 +105,59 @@ sg_swapchain swapchain(void*) {
     s.color_format = SG_PIXELFORMAT_RGBA8; s.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
     return s;
 }
+void recordingIsolation() {
+    WindowProbe owner;
+    auto& ctx = owner.context();
+    internal::currentWindowCtx() = &ctx;
+    ctx.fbWidth = ctx.fbHeight = 64; ctx.dpiScale = 1;
+    ctx.swapchainTarget.width = ctx.swapchainTarget.height = 64;
+    ctx.swapchainTarget.sampleCount = 1; ctx.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
+    ctx.acquireSwapchain = swapchain;
+    beginFrame();
+    clear(1, 0, 0, 1); setColor(1, 0, 0); drawRect(0, 0, 64, 64);
+    const int before = sgl_num_vertices();
+    check("caller has pending red geometry before process recording", before == 6);
+    const auto caller = sgl_get_context();
+    auto& process = internal::nonWindowContext();
+    process.processSwapchainWarned = false;
+    int warnings = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning && event.message.find("No Window selected") != std::string::npos) {
+            ++warnings;
+            check("recording refusal uses the shared guidance", event.message.find("window callback") != std::string::npos &&
+                event.message.find("Fbo") != std::string::npos);
+        }
+    });
+    std::thread worker([&] { runOnMainThread([&] {
+        check("process recording selects no Window or SGL context", !internal::currentWindowContext().hostWindow && !sgl_get_context().id);
+        setColor(0, 1, 0); drawRect(0, 0, 64, 64); drawRect(0, 0, 64, 64);
+        pushMatrix(); translate(300, 400); scale(2, 3); popMatrix();
+        setBlendMode(BlendMode::Add);
+        check("refused immediate recording emits no vertices", sgl_num_vertices() == 0);
+        Fbo fbo; fbo.allocate(8, 8);
+        fbo.begin(1, 0, 0); resetBlendMode(); setColor(0, 1, 0); drawRect(0, 0, 8, 8);
+        internal::currentTarget().flushLayers();
+        unsigned char pixel[4]{}; glReadPixels(4, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+        check("process immediate Fbo drawing produces green pixels", pixel[0] == 0 && pixel[1] == 255 && pixel[2] == 0 && pixel[3] == 255);
+        fbo.end();
+        check("process Fbo exit selects no SGL context", !sgl_get_context().id);
+        drawRect(0, 0, 64, 64);
+    }); });
+    worker.join();
+    { internal::HostTurnScope turn; }
+    check("process root recording warns once per context", warnings == 1);
+    check("caller SGL recording and vertex count are unchanged", sgl_get_context().id == caller.id && sgl_num_vertices() == before);
+    // Flush the retained red prefix so any injected green geometry remains visible.
+    internal::ensureCurrentPass(); ctx.swapchainTarget.flushLayers();
+    unsigned char pixel[4]{}; glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    check("caller frame stays red after process immediate drawing", pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0 && pixel[3] == 255);
+    ctx.swapchainTarget.endPass();
+    internal::restoreWindowContext(nullptr);
+    sg_reset_state_cache();
+}
 struct Resources {
     WindowProbe window;
+    std::shared_ptr<App> queryOwner = internal::makeConstructedAppAt<App>(&window.context());
     Light light;
     Fbo fbo, sink;
     EventListener draw;
@@ -36,6 +169,7 @@ struct Resources {
     double sourceDuration = 1.0 / 60;
     int offscreenRecordings = 0;
     void renderOffscreen() {
+        internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
         auto& ctx = window.context();
         const auto tick = internal::resourceFrameKey();
         auto receiver = createPlane(8, 8);
@@ -63,15 +197,16 @@ struct Resources {
         ++offscreenRecordings;
     }
     void setup(bool sync) {
+        internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
         synchronized = sync;
         auto& ctx = window.context(); internal::currentWindowCtx() = &ctx;
         ctx.fbWidth = ctx.fbHeight = 64; ctx.dpiScale = 1;
         ctx.swapchainTarget.width = ctx.swapchainTarget.height = 64;
         ctx.swapchainTarget.sampleCount = 1; ctx.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
         ctx.acquireSwapchain = swapchain;
-        if (synchronized) setFps(VSYNC); else setIndependentFps(EVENT_DRIVEN, VSYNC);
+        if (synchronized) window.setFps(VSYNC); else window.setIndependentFps(EVENT_DRIVEN, VSYNC);
         light.enableShadow(32); addLight(light); fbo.allocate(16,16); sink.allocate(16,16);
-        draw = events().draw.listen([this] {
+        draw = window.events().draw.listen([this] {
             auto& ctx = window.context();
             check("public count contract", getFrameCount() == getUpdateCount());
             check("draws without updates", synchronized || getUpdateCount() == 0);
@@ -98,6 +233,7 @@ struct Resources {
         });
     }
     void tick(int n, bool force = false) {
+        internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
         internal::restoreWindowContext(&window.context());
         internal::runWindowTick(std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(17*n), sourceDuration, force);
     }
@@ -109,8 +245,32 @@ struct ShadowReplayProbe {
     bool acquired = false;
     static void read(sg_image image, float* pixels) {
         const auto native = sg_gl_query_image_info(image);
+#if defined(SOKOL_GLES3)
+        // GLES has no glGetTexImage. Read every array layer through an FBO;
+        // RGBA float readback also works for the single-channel shadow target.
+        GLint previous = 0;
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &previous);
+        GLuint fbo = 0;
+        glGenFramebuffers(1, &fbo);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
+        std::array<float, 32*32*4> rgba{};
+        for (int layer = 0; layer < internal::maxShadowLights; ++layer) {
+            glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                native.tex[native.active_slot], 0, layer);
+            check("GLES shadow readback FBO complete",
+                glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+            glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glReadPixels(0, 0, 32, 32, GL_RGBA, GL_FLOAT, rgba.data());
+            for (int pixel = 0; pixel < 32*32; ++pixel)
+                pixels[layer*32*32+pixel] = rgba[pixel*4];
+        }
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, previous);
+        glDeleteFramebuffers(1, &fbo);
+        check("GLES shadow readback succeeds", glGetError() == GL_NO_ERROR);
+#else
         glBindTexture(GL_TEXTURE_2D_ARRAY, native.tex[native.active_slot]);
         glGetTexImage(GL_TEXTURE_2D_ARRAY, 0, GL_RED, GL_FLOAT, pixels);
+#endif
         sg_reset_state_cache();
     }
     static sg_swapchain acquire(void* user) {
@@ -124,7 +284,7 @@ void pendingShadowConsumer(Resources& owner) {
     auto& ctx = owner.window.context();
     internal::restoreWindowContext(&ctx);
     owner.draw = {};
-    setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
+    owner.window.setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
     owner.tick(105); // a newly admitted secondary tick, before any shadow producer
     owner.light.setShadowArea(Vec3(0,0,0),16);
     auto mesh = createBox(8);
@@ -165,14 +325,21 @@ TC_CORE_TEST_MAIN() {
     EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     EGLint major, minor;
     if (!eglInitialize(display, &major, &minor)) return 2;
+#if defined(SOKOL_GLES3)
+    eglBindAPI(EGL_OPENGL_ES_API);
+    const EGLint renderable = EGL_OPENGL_ES3_BIT;
+    const EGLint version[] = {EGL_CONTEXT_CLIENT_VERSION,3,EGL_NONE};
+#else
     eglBindAPI(EGL_OPENGL_API);
-    const EGLint attrs[] = {EGL_SURFACE_TYPE,EGL_PBUFFER_BIT,EGL_RENDERABLE_TYPE,EGL_OPENGL_BIT,
+    const EGLint renderable = EGL_OPENGL_BIT;
+    const EGLint version[] = {EGL_CONTEXT_MAJOR_VERSION,3,EGL_CONTEXT_MINOR_VERSION,3,EGL_NONE};
+#endif
+    const EGLint attrs[] = {EGL_SURFACE_TYPE,EGL_PBUFFER_BIT,EGL_RENDERABLE_TYPE,renderable,
         EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,EGL_DEPTH_SIZE,24,EGL_STENCIL_SIZE,8,EGL_NONE};
     EGLConfig config; EGLint count;
     if (!eglChooseConfig(display, attrs, &config, 1, &count) || count != 1) return 2;
     const EGLint size[] = {EGL_WIDTH,64,EGL_HEIGHT,64,EGL_NONE};
     auto surface = eglCreatePbufferSurface(display, config, size);
-    const EGLint version[] = {EGL_CONTEXT_MAJOR_VERSION,3,EGL_CONTEXT_MINOR_VERSION,3,EGL_NONE};
     auto context = eglCreateContext(display, config, EGL_NO_CONTEXT, version);
     if (!eglMakeCurrent(display, surface, surface, context)) return 2;
     getMainThreadId();
@@ -184,6 +351,9 @@ TC_CORE_TEST_MAIN() {
 #include "gpu-pools.inc"
     sg_setup(&gd);
     sgl_desc_t sd{}; sd.max_vertices = 65536; sd.logger.func = internal::sokolLog; sgl_setup(&sd);
+    failedCurrentRenewal(display, config, surface);
+    processPasses();
+    recordingIsolation();
     uint8_t glyph[13] = {};
     bitmapfont::registerGlyph({65, glyph, bitmapfont::Width::Halfwidth});
     internal::bitmapFontAtlas().initialized = true;
@@ -208,7 +378,9 @@ TC_CORE_TEST_MAIN() {
         check("native gate cannot commit foreign GPU work", internal::shaderStreamFrame() == gpuFrame);
         internal::endGpuFrame();
         // Hidden forced capture is a real draw, with the same resource boundaries.
-        slow.window.context().suspended = true;
+        auto hiddenMetadata = internal::WindowRequestAccess::binding(slow.window).metadata;
+        hiddenMetadata.trust_hidden_signals = true; hiddenMetadata.occluded = true;
+        internal::publishWindowMetadata(slow.window, hiddenMetadata);
         slow.tick(30, true); slow.tick(31, true);
         check("hidden capture counts real draws", slow.draws == 10);
         for (int n = 32; n < 36; ++n) fast.tick(n);
@@ -219,11 +391,11 @@ TC_CORE_TEST_MAIN() {
         internal::restoreWindowContext(&fast.window.context());
         fast.firstImage = 0; // establish a fresh storage reference for the control phase
         const auto synchronizedDraws = fast.draws;
-        fast.synchronized = true; setFps(VSYNC);
+        fast.synchronized = true; fast.window.setFps(VSYNC);
         for (int n = 40; n < 52; ++n) fast.tick(n);
         check("synchronized control updates and draws", fast.draws == synchronizedDraws + 12 && fast.window.context().updateCount == 12);
         auto& owner = slow; auto& other = fast;
-        owner.window.context().suspended = false;
+        hiddenMetadata.occluded = false; internal::publishWindowMetadata(owner.window, hiddenMetadata);
         owner.tick(40);
         // Prelude FBO revisions belong to the next draw of their owner. A GPU
         // commit from another window cannot retire the first sampled revision.
@@ -246,11 +418,11 @@ TC_CORE_TEST_MAIN() {
         // Run the resource-bearing listener on twelve update-only commits.
         internal::restoreWindowContext(&other.window.context());
         other.draw = {}; other.firstImage = 0;
-        setIndependentFps(VSYNC, EVENT_DRIVEN);
+        other.window.setIndependentFps(VSYNC, EVENT_DRIVEN);
         other.window.context().loop.redrawCount = 0;
         int afterFrames = 0;
-        auto after = events().afterFrame.listen([&] { ++afterFrames; });
-        auto update = events().update.listen([&] { other.renderOffscreen(); });
+        auto after = other.window.events().afterFrame.listen([&] { ++afterFrames; });
+        auto update = other.window.events().update.listen([&] { other.renderOffscreen(); });
         const auto before = other.window.context().drawCount;
         for (int n = 54; n < 66; ++n) {
             const auto tick = other.window.context().resourceTickCount;
@@ -264,14 +436,14 @@ TC_CORE_TEST_MAIN() {
         other.shadowPass = true; other.expectedShadowSlots = -1;
         update = {};
         // Idle callbacks retain the base secondary admission key.
-        setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
+        other.window.setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
         const auto idleRecording = other.window.context().resourceTickCount;
         other.tick(68);
         check("idle secondary callback advances the base admission key", other.window.context().resourceTickCount == idleRecording + 1);
         // Keep the draw listener through every invalid-swapchain attempt and
         // recovery: these attempts commit offscreen resources, but no real draw.
-        setIndependentFps(EVENT_DRIVEN, VSYNC);
-        other.draw = events().draw.listen([&] { other.renderOffscreen(); });
+        other.window.setIndependentFps(EVENT_DRIVEN, VSYNC);
+        other.draw = other.window.events().draw.listen([&] { other.renderOffscreen(); });
         rejectSwapchain = true;
         const auto attemptsBefore = other.offscreenRecordings;
         for (int n = 69; n < 81; ++n) {

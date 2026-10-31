@@ -1,6 +1,7 @@
 // Lost OS releases must end the press through the normal App / node path.
 // Headless: inject sapp events into the existing main-window callback.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <string>
@@ -11,7 +12,7 @@
     (defined(__linux__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__ANDROID__))
 #define TC_TEST_SECONDARY_DISPATCH
 namespace trussc::internal {
-void dispatchSecondaryWindowEventForTests(const sapp_event* ev, Window& win);
+void dispatchWindowEventForTests(const sapp_event* ev, Window& win);
 }
 #endif
 
@@ -19,6 +20,7 @@ using namespace tc;
 
 namespace {
 int failures = 0;
+Window* initialFixture = nullptr;
 void check(const char* label, bool ok) {
     std::printf("%-70s %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
@@ -44,7 +46,6 @@ struct TestApp : App {
     void mouseMoved(const MouseMoveEventArgs&) override { ++moves; }
     void mouseDragged(const MouseDragEventArgs& e) override { ++drags; dragButtons.push_back(e.button); }
 };
-TestApp* activeApp = nullptr;
 
 void feed(sapp_event_type type, int button = SAPP_MOUSEBUTTON_LEFT,
           unsigned int modifiers = 0, float x = 10, float y = 20) {
@@ -53,7 +54,7 @@ void feed(sapp_event_type type, int button = SAPP_MOUSEBUTTON_LEFT,
     e.mouse_button = static_cast<sapp_mousebutton>(button);
     e.modifiers = modifiers;
     e.mouse_x = x; e.mouse_y = y;
-    internal::_event_cb(&e);
+    tcCoreTest::dispatchMainEvent(&e);
 }
 
 bool moveBitsSupported() {
@@ -83,7 +84,7 @@ void feedTouch(sapp_event_type type) {
     e.touches[0].identifier = 42;
     e.touches[0].pos_x = 10; e.touches[0].pos_y = 20;
     e.touches[0].changed = true;
-    internal::_event_cb(&e);
+    tcCoreTest::dispatchMainEvent(&e);
 }
 
 #ifdef TC_TEST_SECONDARY_DISPATCH
@@ -91,44 +92,57 @@ void feedTouch(sapp_event_type type) {
 // window, and remove the stand-in before the platform destructor runs.
 struct HeadlessWindow : tc::Window {
     int standIn = 0; // setApp() needs an open Window; dispatch never reads native_
-    HeadlessWindow() { native_ = &standIn; }
-    ~HeadlessWindow() { native_ = nullptr; }
+    HeadlessWindow() { native_ = &standIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~HeadlessWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 #endif
 
 struct Fixture {
-    std::shared_ptr<TestApp> app = std::make_shared<TestApp>();
+    std::shared_ptr<TestApp> app = internal::makeConstructedApp<TestApp>();
     std::shared_ptr<Probe> probe = std::make_shared<Probe>();
     internal::WindowContext* previous = internal::currentWindowCtx();
 #ifdef TC_TEST_SECONDARY_DISPATCH
     std::unique_ptr<HeadlessWindow> window;
 #endif
+    bool windowForFixture() const {
+#ifdef TC_TEST_SECONDARY_DISPATCH
+        return bool(window);
+#else
+        return false;
+#endif
+    }
+    std::unique_ptr<internal::AppOwnerScope> ownership;
     explicit Fixture(bool secondary) {
         app->RectNode::setSize(100, 100);
         app->addChild(probe);
 #ifdef TC_TEST_SECONDARY_DISPATCH
         if (secondary) {
             window = std::make_unique<HeadlessWindow>();
-            window->setApp(app);
+            internal::WindowRequestAccess::attachCandidate(*window, app);
             internal::applyPendingAppForTests(*window);
             internal::currentWindowCtx() = &window->context();
         }
 #else
         (void)secondary;
 #endif
-        activeApp = app.get();
+        if (!secondary) {
+            internal::currentWindowCtx() = &initialFixture->context();
+            internal::attachCandidate(*initialFixture, app);
+        }
         auto& ctx = internal::currentWindowContext();
         ctx.rootNode = app;
         ctx.pressedMouseButtons = 0;
-        internal::currentMouseButton = -1;
+        internal::currentWindowContext().mouseButton = -1;
         ctx.mousePressed = false; ctx.mouseButton = -1;
+        ownership = std::make_unique<internal::AppOwnerScope>(internal::appOwner(*app));
     }
     ~Fixture() {
+        ownership.reset();
 #ifdef TC_TEST_SECONDARY_DISPATCH
         if (window) internal::WindowRequestAccess::endApp(*window);
 #endif
+        if (!windowForFixture()) { initialFixture->destroyApp(); internal::applyPendingAppForTests(*initialFixture); }
         internal::currentWindowCtx() = previous;
-        activeApp = nullptr;
     }
     void send(sapp_event_type type, int button = SAPP_MOUSEBUTTON_LEFT,
               unsigned int modifiers = 0, float x = 10, float y = 20) {
@@ -137,7 +151,7 @@ struct Fixture {
             sapp_event e{};
             e.type = type; e.mouse_button = static_cast<sapp_mousebutton>(button);
             e.modifiers = modifiers; e.mouse_x = x; e.mouse_y = y;
-            internal::dispatchSecondaryWindowEventForTests(&e, *window);
+            internal::dispatchWindowEventForTests(&e, *window);
             return;
         }
 #endif
@@ -157,7 +171,7 @@ void scenario(int kind, int button, unsigned int bit, bool secondary = false) {
     auto releaseListener = events().mouseReleased.listen([&](const MouseEventArgs& e) {
         ++releases; lastRelease = e; order += 'R';
         stateClearAtRelease = !isMousePressed() && ctx.mouseButton == -1 &&
-            internal::currentMouseButton == -1;
+            internal::currentWindowContext().mouseButton == -1;
     });
     auto moveListener = events().mouseMoved.listen([&](const MouseMoveEventArgs&) { ++moves; order += 'M'; });
     auto dragListener = events().mouseDragged.listen([&](const MouseDragEventArgs&) { ++drags; order += 'D'; });
@@ -310,7 +324,10 @@ TC_CORE_TEST_MAIN() {
     internal::pixelPerfectMode() = true; // avoid querying DPI without a native window
     setTouchAsMouse(true);
     getMainThreadId();
-    internal::registerAppEventListeners([] { return activeApp; });
+    auto launch = internal::prepareLaunchWindow(WindowSettings{});
+    initialFixture = launch.get();
+    internal::WindowRequestAccess::bindForTests(*launch, 101);
+    internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 100;
     // One line covers all gated move-bit scenarios, in either dispatch path.
     if (!moveBitsSupported()) printMoveBitsSkip();
     const unsigned int bits[] = {SAPP_MODIFIER_LMB, SAPP_MODIFIER_RMB, SAPP_MODIFIER_MMB};
@@ -349,6 +366,6 @@ TC_CORE_TEST_MAIN() {
 #else
     std::puts("SKIP: secondary-window dispatch (no adapter for this platform/backend)");
 #endif
-    internal::mainWindowContext().appEventListeners.clear();
+    internal::shutdownRuntime();
     return failures ? 1 : 0;
 }

@@ -16,12 +16,7 @@
 //   the window's own tick and, when no tick comes, answered by the 5 s
 //   timeout
 //
-// A headless test has no native window the OS could cover or minimize, so
-// the flag is driven through the test seam
-// internal::windowOccludedHookForTests(), which Window::isOccluded() consults
-// before the native flag. The native flags themselves (NSWindow
-// occlusionState, WM_SIZE / DXGI_STATUS_OCCLUDED, X11 WM_STATE /
-// VisibilityNotify) are checked by hand on each platform.
+// The test publishes native metadata through the common host snapshot seam.
 //
 // The main thread pumps mcp::processHttpQueue() and the main window's
 // mcp::internal::drainDeferredResponses() the way the frame loop does; the requests run
@@ -54,25 +49,14 @@ static void check(const string& name, bool ok, const string& detail = "") {
     if (!ok) ++g_fail;
 }
 
-// A Window made in a headless test has no native side: it is a closed window
-// (isOpen() is false) and openWindows() skips it. OpenWindow stands in for an
-// open one. Its native_ points at zeroed memory: the platform adapter reads
-// it as its state, whose sapp_window handle is then 0, the invalid handle, so
-// getWidth() / getHeight() report 0 and the native occluded flag is false.
-// native_ is cleared before ~Window() would close() it.
-alignas(16) static unsigned char g_nativeStandIn[256] = {};
+// Explicit fake bindings use the same stored metadata as live Windows.
 struct OpenWindow : Window {
     explicit OpenWindow(const string& title) {
         title_ = title;
-        native_ = g_nativeStandIn;
+        internal::WindowRequestAccess::bindForTests(*this, title == "hidden" ? 303 : 202);
     }
-    ~OpenWindow() { native_ = nullptr; }
+    ~OpenWindow() { internal::WindowRequestAccess::unbind(*this); }
 };
-
-static OpenWindow* g_hidden = nullptr;    // window 2 (window 1 stays visible)
-
-// Called on the main thread (tool handlers run in processHttpQueue()).
-static bool occludedHook(const Window& w) { return &w == g_hidden; }
 
 static string toolCall(const string& name, const string& args) {
     return R"({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":")" + name +
@@ -111,8 +95,9 @@ static bool contains(const string& s, const string& part) { return s.find(part) 
 
 TC_CORE_TEST_MAIN() {
     OpenWindow visible("visible"), hidden("hidden");
-    g_hidden = &hidden;
-    internal::windowOccludedHookForTests() = &occludedHook;
+    sapp_tc_window_metadata hiddenMetadata{};
+    hiddenMetadata.trust_hidden_signals = true; hiddenMetadata.occluded = true;
+    internal::publishWindowMetadata(hidden, hiddenMetadata);
 
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::startHttpServer();
@@ -152,36 +137,35 @@ TC_CORE_TEST_MAIN() {
         // --- tc_list_windows: the flag per secondary window ---------------
         json list = call(*cli, "tc_list_windows", "{}");
         const json wins = list.is_object() ? list.value("windows", json::array()) : json::array();
-        check("tc_list_windows lists main + 2 secondary windows", wins.size() == 3, list.dump());
-        if (wins.size() == 3) {
-            check("main entry has no occluded field", !wins[0].contains("occluded"), wins[0].dump());
+        check("tc_list_windows lists both positive Window IDs", wins.size() == 2, list.dump());
+        if (wins.size() == 2) {
             check("visible window: occluded false",
-                  wins[1].value("title", "") == "visible" && wins[1].contains("occluded") &&
-                  wins[1]["occluded"] == false, wins[1].dump());
+                  wins[0].value("title", "") == "visible" && wins[0].contains("occluded") &&
+                  wins[0]["occluded"] == false, wins[0].dump());
             check("hidden window: occluded true",
-                  wins[2].value("title", "") == "hidden" && wins[2].contains("occluded") &&
-                  wins[2]["occluded"] == true, wins[2].dump());
+                  wins[1].value("title", "") == "hidden" && wins[1].contains("occluded") &&
+                  wins[1]["occluded"] == true, wins[1].dump());
         }
 
         // --- hidden window: both screenshot tools fail at once ------------
         double sec = 0;
-        json r = call(*cli, "tc_get_screenshot", R"({"window":2})", &sec);
+        json r = call(*cli, "tc_get_screenshot", R"({"window":303})", &sec);
         check("tc_get_screenshot hidden window -> error", statusOf(r) == "error", r.dump());
         check("  names the window and why",
-              contains(messageOf(r), "window 2 is not visible (the OS reports it hidden"), r.dump());
+              contains(messageOf(r), "window 303 is not visible (the OS reports it hidden"), r.dump());
         check("  answered at once (< 2 s, not the 5 s timeout)", sec < 2.0, to_string(sec) + " s");
 
-        r = call(*cli, "tc_save_screenshot", R"({"window":2,"path":)" + savePathJson + "}", &sec);
+        r = call(*cli, "tc_save_screenshot", R"({"window":303,"path":)" + savePathJson + "}", &sec);
         check("tc_save_screenshot hidden window -> error", statusOf(r) == "error", r.dump());
         check("  names the window and why",
-              contains(messageOf(r), "window 2 is not visible (the OS reports it hidden"), r.dump());
+              contains(messageOf(r), "window 303 is not visible (the OS reports it hidden"), r.dump());
         check("  answered at once (< 2 s, not the 5 s timeout)", sec < 2.0, to_string(sec) + " s");
         // No "no file written" check: headless, a secondary window's capture
         // has no framebuffer to read (0x0), so no file could appear either way.
 
         // Unchanged: an index past the open windows.
-        r = call(*cli, "tc_get_screenshot", R"({"window":3})");
-        check("out-of-range window -> index error", contains(messageOf(r), "out of range"), r.dump());
+        r = call(*cli, "tc_get_screenshot", R"({"window":999})");
+        check("out-of-range window -> index error", contains(messageOf(r), "positive window ID"), r.dump());
 
         // --- visible window: unchanged, deferred to its tick --------------
         // The stand-in never ticks, so the main window's drain answers both
@@ -191,9 +175,9 @@ TC_CORE_TEST_MAIN() {
         thread saver([&] {
             auto c2 = makeClient();
             saveReply = call(*c2, "tc_save_screenshot",
-                             R"({"window":1,"path":)" + savePathJson + "}", &saveSec);
+                             R"({"window":202,"path":)" + savePathJson + "}", &saveSec);
         });
-        getReply = call(*cli, "tc_get_screenshot", R"({"window":1})", &getSec);
+        getReply = call(*cli, "tc_get_screenshot", R"({"window":202})", &getSec);
         saver.join();
         const string timeoutMsg = "rendered no frame within 5 s";
         check("tc_get_screenshot visible window -> deferred, then timeout",
@@ -203,15 +187,15 @@ TC_CORE_TEST_MAIN() {
               saveReply.value("isError", false) && contains(messageOf(saveReply), timeoutMsg), saveReply.dump());
         check("  waited for the window's tick (>= 4.5 s)", saveSec >= 4.5, to_string(saveSec) + " s");
 
-        // --- no hook: the native flag of a window the OS never hid --------
-        // Main reads the hook only while it handles a request; the request
+        // --- a fresh visible native observation clears the common snapshot ---
+        // Main reads the snapshot while handling a request; the request
         // channel orders this write before the next read.
-        internal::windowOccludedHookForTests() = nullptr;
+        internal::publishWindowMetadata(hidden, {});
         list = call(*cli, "tc_list_windows", "{}");
         const json wins2 = list.is_object() ? list.value("windows", json::array()) : json::array();
-        check("without the hook: both windows occluded false",
-              wins2.size() == 3 && wins2[1].value("occluded", true) == false &&
-              wins2[2].value("occluded", true) == false, list.dump());
+        check("after visible observation: both windows occluded false",
+              wins2.size() == 2 && wins2[0].value("occluded", true) == false &&
+              wins2[1].value("occluded", true) == false, list.dump());
 
         done = true;
     });
@@ -222,7 +206,7 @@ TC_CORE_TEST_MAIN() {
     auto deadline = chrono::steady_clock::now() + chrono::seconds(40);
     while (!done && chrono::steady_clock::now() < deadline) {
         mcp::processHttpQueue();
-        mcp::internal::drainDeferredResponses();
+        mcp::internal::drainDeferredResponses(nullptr, false);
         this_thread::sleep_for(chrono::milliseconds(1));
     }
     check("finished before the deadline", done.load());
@@ -232,7 +216,7 @@ TC_CORE_TEST_MAIN() {
     }
     worker.join();
     mcp::stopHttpServer();
-    internal::windowOccludedHookForTests() = nullptr;
+    internal::publishWindowMetadata(hidden, {});
     error_code ec;
     filesystem::remove(savePath, ec);
 

@@ -72,6 +72,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -1137,6 +1138,7 @@ static void scenario() {
 namespace {
 void asyncReceiveReconnect() {
     TcpServer server;
+    server.setBindAddress("127.0.0.1");
     check("daily async fixture starts", server.start(0));
     TcpClient client;
     atomic<int> receives{0};
@@ -1206,6 +1208,7 @@ TC_CORE_TEST_MAIN() {
     // Before the scenario: the threads the process starts with
     const int threadsAtStart = countThreads();
 
+    tcCoreTest::WindowFixture loopWindow;
     g_phase = "the scenario";
     if (!completesWithin(60000, scenario)) {
         check("scenario finished within 60 s", false);

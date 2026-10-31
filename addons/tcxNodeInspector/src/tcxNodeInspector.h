@@ -279,6 +279,7 @@ private:
     friend void internal::recordTouchedForTests(NodeInspector&, ::tc::Node*, ::tc::Mod*,
                                                 const std::string&);
 
+    std::shared_ptr<int> retirementLifetime_ = std::make_shared<int>(0);
     Style    style_;
     bool     enabled_      = true;
     char     nameBuf_[128] = "";

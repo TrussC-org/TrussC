@@ -103,8 +103,7 @@ private:
 };
 
 struct VideoPlayerState {
-    std::shared_ptr<internal::VideoDecodeBudget> budget_ = std::make_shared<internal::VideoDecodeBudget>();
-    size_t fixedBytes_ = 0;
+    std::shared_ptr<internal::VideoDecodeStatus> status_ = std::make_shared<internal::VideoDecodeStatus>();
     internal::VideoNotifyQueue notifications;
     internal::VideoErrorQueue playbackErrors_;
     bool mfInitialized = false;
@@ -182,7 +181,7 @@ public:
     // Event handler (called by the main-thread queue drain)
     void onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2);
 
-    std::shared_ptr<internal::VideoDecodeBudget> budget() const { return state_->budget_; }
+    std::shared_ptr<internal::VideoDecodeStatus> status() const { return state_->status_; }
     int getWidth() const { return state_->width_; }
     int getHeight() const { return state_->height_; }
 
@@ -380,15 +379,9 @@ bool TCVideoPlayerImpl::createMediaEngine(const std::string& path) {
 bool TCVideoPlayerImpl::createRenderTexture() {
     size_t bytes = 0;
     if (!internal::VideoDecodeLimits::rgba(state_->width_, state_->height_, bytes)) {
-        state_->budget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
-        state_->budget_->warn(); return false;
+        state_->status_->reject(bytes, 0);
+        state_->status_->warn(); return false;
     }
-    if (state_->fixedBytes_) { state_->budget_->release(state_->fixedBytes_); state_->fixedBytes_ = 0; }
-    const size_t fixedBytes = bytes * 2; // backend mirror and public mirror
-    if (!state_->budget_->acquire(fixedBytes)) {
-        state_->budget_->reject(fixedBytes, internal::VideoDecodeLimits::workingBytes); return false;
-    }
-    state_->fixedBytes_ = fixedBytes;
     state_->renderTexture_.Reset();
     state_->stagingTexture_.Reset();
     std::vector<unsigned char>().swap(state_->pixels_);
@@ -424,8 +417,8 @@ bool TCVideoPlayerImpl::createRenderTexture() {
 
     // Allocate pixel buffer
     try { state_->pixels_.assign(bytes, 0); }
-    catch (const std::bad_alloc&) {
-        state_->budget_->reject(bytes, internal::VideoDecodeLimits::workingBytes); return false;
+    catch (const std::exception&) {
+        state_->status_->reject(bytes, 0); return false;
     }
 
     return true;
@@ -444,7 +437,7 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     size_t actualBytes = 0;
     if (FAILED(state_->mediaEngine_->GetNativeVideoSize(&actualWidth, &actualHeight)) ||
         !internal::VideoDecodeLimits::rgba(actualWidth, actualHeight, actualBytes)) {
-        state_->budget_->reject(actualBytes, internal::VideoDecodeLimits::frameBytes);
+        state_->status_->reject(actualBytes, 0);
         state_->playbackErrors_.report("Video frame dimensions exceed decode limits", E_INVALIDARG);
         return false;
     }
@@ -474,8 +467,8 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
     hr = state_->d3dContext_->Map(state_->stagingTexture_.Get(), 0, D3D11_MAP_READ, 0, &mapped);
     if (SUCCEEDED(hr)) {
         if (!mapped.pData || !internal::VideoDecodeLimits::rows(size_t(state_->width_), size_t(state_->height_),
-                mapped.RowPitch, internal::VideoDecodeLimits::frameBytes)) {
-            state_->budget_->reject(mapped.RowPitch, internal::VideoDecodeLimits::frameBytes);
+                mapped.RowPitch, size_t(mapped.RowPitch) * size_t(state_->height_))) {
+            state_->status_->reject(mapped.RowPitch, size_t(mapped.RowPitch) * size_t(state_->height_));
             state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0);
             state_->playbackErrors_.report("Video frame stride exceeds decode limits", E_INVALIDARG);
             return false;
@@ -534,9 +527,8 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
     // known dimensions here; the engine's output boundary checks them again.
     if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &videoType))) {
         if (SUCCEEDED(MFGetAttributeSize(videoType.Get(), MF_MT_FRAME_SIZE, &metadataWidth, &metadataHeight)) &&
-            (metadataWidth > internal::VideoDecodeLimits::axis || metadataHeight > internal::VideoDecodeLimits::axis ||
-             (metadataWidth && metadataHeight && !internal::VideoDecodeLimits::rgba(metadataWidth, metadataHeight, metadataBytes)))) {
-            state_->budget_->reject(metadataBytes, internal::VideoDecodeLimits::frameBytes);
+            (metadataWidth && metadataHeight && !internal::VideoDecodeLimits::rgba(metadataWidth, metadataHeight, metadataBytes))) {
+            state_->status_->reject(metadataBytes, 0);
             return false;
         }
         if (SUCCEEDED(MFGetAttributeRatio(videoType.Get(), MF_MT_FRAME_RATE, &numerator, &denominator)) &&
@@ -615,8 +607,8 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
 
     // Read all audio samples
     std::vector<uint8_t> audioData;
-    internal::VideoAudioStorage storage(audioData, *state->budget_);
-    struct Warning { internal::VideoDecodeBudget& budget; ~Warning() { budget.warn(); } } warning{*state->budget_};
+    internal::VideoAudioStorage storage(audioData, *state->status_);
+    struct Warning { internal::VideoDecodeStatus& status; ~Warning() { status.warn(); } } warning{*state->status_};
 
     while (true) {
         ComPtr<IMFSample> sample;
@@ -629,12 +621,10 @@ std::vector<uint8_t> TCVideoPlayerImpl::getAudioData() const {
         if (!sample) continue;
 
         DWORD sampleBytes = 0;
-        const size_t headerBytes = isAAC ? 7 : 0;
         if (FAILED(sample->GetTotalLength(&sampleBytes)) ||
-            sampleBytes > internal::VideoDecodeLimits::inputBytes - audioData.size() ||
-            headerBytes > internal::VideoDecodeLimits::inputBytes - audioData.size() - sampleBytes ||
+            sampleBytes > internal::VideoDecodeLimits::inputBytes ||
             (isAAC && sampleBytes > internal::VideoDecodeLimits::adtsPayloadBytes)) {
-            state->budget_->reject(sampleBytes, internal::VideoDecodeLimits::inputBytes);
+            state->status_->reject(sampleBytes, internal::VideoDecodeLimits::inputBytes);
             return {};
         }
         ComPtr<IMFMediaBuffer> buffer;
@@ -680,7 +670,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     }
 
     loadMediaInfo(path);
-    if (state_->budget_->rejected() != 0) return false;
+    if (state_->status_->rejected() != 0) return false;
 
     if (!createMediaEngine(path)) {
         return false;
@@ -690,7 +680,7 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
     // In production, this should be async with callbacks
     // Bound (platform): metadata readiness waits at most 5 s (steady clock). Overflow fails load() and logs one Error.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-    while (!state_->isReady_ && state_->budget_->rejected() == 0 && std::chrono::steady_clock::now() < deadline) {
+    while (!state_->isReady_ && state_->status_->rejected() == 0 && std::chrono::steady_clock::now() < deadline) {
         Sleep(10);
 
         drainNotifications();
@@ -715,7 +705,6 @@ bool TCVideoPlayerImpl::load(const std::string& path, VideoPlayer* player) {
 
 void TCVideoPlayerImpl::close() {
     if (!state_) return;
-    if (state_->fixedBytes_) { state_->budget_->release(state_->fixedBytes_); state_->fixedBytes_ = 0; }
     state_->notifications.close();
 
     if (state_->mediaEngine_) {
@@ -808,7 +797,7 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
         if (player && !state_->pixels_.empty()) {
             unsigned char* playerPixels = player->getPixels();
             if (playerPixels) {
-                memcpy(playerPixels, state_->pixels_.data(), state_->width_ * state_->height_ * 4);
+                memcpy(playerPixels, state_->pixels_.data(), size_t(state_->width_) * state_->height_ * 4);
             }
         }
     }
@@ -908,8 +897,8 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
             }
 
             else {
-                state_->budget_->reject(bytes, internal::VideoDecodeLimits::frameBytes);
-                state_->budget_->warn();
+                state_->status_->reject(bytes, 0);
+                state_->status_->warn();
                 state_->playbackErrors_.report("Video metadata exceeds decode limits", E_INVALIDARG);
                 break;
             }
@@ -954,16 +943,16 @@ void TCVideoPlayerImpl::onMediaEvent(DWORD event, DWORD_PTR param1, DWORD param2
 namespace trussc {
 
 bool VideoPlayer::loadPlatform(const fs::path& path) {
-    auto impl = new TCVideoPlayerImpl();
-    decodeBudget_ = impl->budget();
+    auto owned = std::make_unique<TCVideoPlayerImpl>();
+    auto* impl = owned.get();
+    decodeStatus_ = impl->status();
 
     // Impl-side strings are UTF-8 (converted to wide via CP_UTF8 internally)
     if (!impl->load(internal::pathToUtf8(path), this)) {
-        delete impl;
         return false;
     }
 
-    platformHandle_ = impl;
+    platformHandle_ = owned.release();
     width_ = impl->getWidth();
     height_ = impl->getHeight();
 
@@ -1160,9 +1149,9 @@ std::string VideoPlayer::getHwAccelNamePlatform() const {
 // keyframe at or before timeSec — which is faster but time-approximate.
 static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                                   float timeSec, float* outDuration, bool exact,
-                                  std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    if (!budget) budget = std::make_shared<internal::VideoDecodeBudget>();
-    struct Warning { internal::VideoDecodeBudget& budget; ~Warning() { budget.warn(); } } warning{*budget};
+                                  std::shared_ptr<internal::VideoDecodeStatus> status) {
+    if (!status) status = std::make_shared<internal::VideoDecodeStatus>();
+    struct Warning { internal::VideoDecodeStatus& status; ~Warning() { status.warn(); } } warning{*status};
     if (!InitMediaFoundation()) {
         return false;
     }
@@ -1199,9 +1188,8 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
             size_t bytes = 0;
             if (SUCCEEDED(reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &nativeType)) &&
                 SUCCEEDED(MFGetAttributeSize(nativeType.Get(), MF_MT_FRAME_SIZE, &nativeWidth, &nativeHeight)) &&
-                (nativeWidth > internal::VideoDecodeLimits::axis || nativeHeight > internal::VideoDecodeLimits::axis ||
-                 (nativeWidth && nativeHeight && !internal::VideoDecodeLimits::rgba(nativeWidth, nativeHeight, bytes)))) {
-                budget->reject(bytes, internal::VideoDecodeLimits::frameBytes); hr = E_INVALIDARG;
+                (nativeWidth && nativeHeight && !internal::VideoDecodeLimits::rgba(nativeWidth, nativeHeight, bytes))) {
+                status->reject(bytes, 0); hr = E_INVALIDARG;
             }
         }
 
@@ -1257,9 +1245,8 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
             size_t frameBytes = 0;
             if (SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, &frameType)) &&
                 SUCCEEDED(MFGetAttributeSize(frameType.Get(), MF_MT_FRAME_SIZE, &frameWidth, &frameHeight)) &&
-                (frameWidth > internal::VideoDecodeLimits::axis || frameHeight > internal::VideoDecodeLimits::axis ||
-                 (frameWidth && frameHeight && !internal::VideoDecodeLimits::rgba(frameWidth, frameHeight, frameBytes)))) {
-                budget->reject(frameBytes, internal::VideoDecodeLimits::frameBytes); hr = E_INVALIDARG; break;
+                (frameWidth && frameHeight && !internal::VideoDecodeLimits::rgba(frameWidth, frameHeight, frameBytes))) {
+                status->reject(frameBytes, 0); hr = E_INVALIDARG; break;
             }
             DWORD flags = 0;
             LONGLONG llTimestamp = 0;
@@ -1292,20 +1279,20 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                 if (SUCCEEDED(curType->GetUINT32(MF_MT_DEFAULT_STRIDE, &mfStride))) {
                     stride = (LONG)(INT32)mfStride;  // negative => bottom-up
                 } else {
-                    if (width <= internal::VideoDecodeLimits::axis) stride = LONG(width * 4);
-                    else { budget->reject(width, internal::VideoDecodeLimits::axis); hr = E_INVALIDARG; }
+                    if (width <= uint32_t((std::numeric_limits<LONG>::max)() / 4)) stride = LONG(width * 4);
+                    else { status->reject(width, (std::numeric_limits<LONG>::max)() / 4); hr = E_INVALIDARG; }
                 }
             }
         }
 
         size_t outputBytes = 0;
         if (SUCCEEDED(hr) && sample && !internal::VideoDecodeLimits::rgba(width, height, outputBytes)) {
-            budget->reject(outputBytes, internal::VideoDecodeLimits::frameBytes); hr = E_INVALIDARG;
+            status->reject(outputBytes, 0); hr = E_INVALIDARG;
         }
         if (SUCCEEDED(hr) && sample && width > 0 && height > 0) {
             DWORD sampleBytes = 0;
-            if (FAILED(sample->GetTotalLength(&sampleBytes)) || sampleBytes > internal::VideoDecodeLimits::frameBytes) {
-                budget->reject(sampleBytes, internal::VideoDecodeLimits::frameBytes); hr = E_INVALIDARG;
+            if (FAILED(sample->GetTotalLength(&sampleBytes))) {
+                status->reject(sampleBytes, 0); hr = E_INVALIDARG;
             }
             ComPtr<IMFMediaBuffer> buffer;
             if (SUCCEEDED(hr)) hr = sample->ConvertToContiguousBuffer(&buffer);
@@ -1315,13 +1302,13 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                 hr = buffer->Lock(&data, nullptr, &length);
                 if (SUCCEEDED(hr)) {
                     const size_t absStride = size_t(stride < 0 ? -int64_t(stride) : int64_t(stride));
-                    if (!data || length > internal::VideoDecodeLimits::frameBytes || !internal::VideoDecodeLimits::rows(width, height, absStride, length)) {
-                        budget->reject(length, internal::VideoDecodeLimits::frameBytes);
+                    if (!data || !internal::VideoDecodeLimits::rows(width, height, absStride, length)) {
+                        status->reject(length, 0);
                         buffer->Unlock();
                     } else {
                         try { decoded.allocate((int)width, (int)height, 4); }
                         catch (const std::bad_alloc&) {
-                            budget->reject(outputBytes, internal::VideoDecodeLimits::workingBytes);
+                            status->reject(outputBytes, 0);
                             decoded.clear();
                         }
                         if (decoded.getData()) {
@@ -1362,21 +1349,21 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
 }
 
 bool VideoPlayer::extractFramePlatform(const fs::path& path, Pixels& outPixels,
-                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    return tcv_extract_frame_win(internal::pathToUtf8(path), outPixels, timeSec, outDuration, /*exact=*/true, budget);
+                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeStatus> status) {
+    return tcv_extract_frame_win(internal::pathToUtf8(path), outPixels, timeSec, outDuration, /*exact=*/true, status);
 }
 
 bool VideoPlayer::extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
-                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget> budget) {
-    if (!budget) budget = std::make_shared<internal::VideoDecodeBudget>();
-    const uint64_t previousRejections = budget->rejected();
+                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeStatus> status) {
+    if (!status) status = std::make_shared<internal::VideoDecodeStatus>();
+    const uint64_t previousRejections = status->rejected();
     std::string p = internal::pathToUtf8(path);
-    if (tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/false, budget)) {
+    if (tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/false, status)) {
         return true;
     }
     // No keyframe reachable — fall back to an exact decode.
-    if (budget->rejected() != previousRejections) return false;
-    return tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/true, budget);
+    if (status->rejected() != previousRejections) return false;
+    return tcv_extract_frame_win(p, outPixels, timeSec, outDuration, /*exact=*/true, status);
 }
 
 } // namespace trussc

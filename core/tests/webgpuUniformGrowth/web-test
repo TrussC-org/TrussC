@@ -1,0 +1,2 @@
+# Web CI compiles this harness; its Node mode explicitly skips browser pixels.
+# Run run.py in Chrome for the mandatory WebGPU verdict.

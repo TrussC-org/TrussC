@@ -155,65 +155,63 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["togglePause"] = &trussc::VideoPlayerBase::togglePause;
         t["update"] = &trussc::VideoPlayerBase::update;
     }
-    lua->new_usertype<trussc::Cursor>("Cursor",
-        sol::meta_function::equal_to, [](trussc::Cursor a, trussc::Cursor b){ return a == b; },
-        "Default", sol::var(trussc::Cursor::Default),
-        "Arrow", sol::var(trussc::Cursor::Arrow),
-        "IBeam", sol::var(trussc::Cursor::IBeam),
-        "Crosshair", sol::var(trussc::Cursor::Crosshair),
-        "Hand", sol::var(trussc::Cursor::Hand),
-        "ResizeEW", sol::var(trussc::Cursor::ResizeEW),
-        "ResizeNS", sol::var(trussc::Cursor::ResizeNS),
-        "ResizeNWSE", sol::var(trussc::Cursor::ResizeNWSE),
-        "ResizeNESW", sol::var(trussc::Cursor::ResizeNESW),
-        "ResizeAll", sol::var(trussc::Cursor::ResizeAll),
-        "NotAllowed", sol::var(trussc::Cursor::NotAllowed),
-        "Custom0", sol::var(trussc::Cursor::Custom0),
-        "Custom1", sol::var(trussc::Cursor::Custom1),
-        "Custom2", sol::var(trussc::Cursor::Custom2),
-        "Custom3", sol::var(trussc::Cursor::Custom3),
-        "Custom4", sol::var(trussc::Cursor::Custom4),
-        "Custom5", sol::var(trussc::Cursor::Custom5),
-        "Custom6", sol::var(trussc::Cursor::Custom6),
-        "Custom7", sol::var(trussc::Cursor::Custom7),
-        "Custom8", sol::var(trussc::Cursor::Custom8),
-        "Custom9", sol::var(trussc::Cursor::Custom9),
-        "Custom10", sol::var(trussc::Cursor::Custom10),
-        "Custom11", sol::var(trussc::Cursor::Custom11),
-        "Custom12", sol::var(trussc::Cursor::Custom12),
-        "Custom13", sol::var(trussc::Cursor::Custom13),
-        "Custom14", sol::var(trussc::Cursor::Custom14),
-        "Custom15", sol::var(trussc::Cursor::Custom15));
     {
-        auto constructors = tcxLuaConstructors<trussc::ColorHSB
-            , trussc::ColorHSB()
-            , trussc::ColorHSB(float, float, float)
-            , trussc::ColorHSB(float, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::ColorLinear
+            , trussc::ColorLinear()
+            , trussc::ColorLinear(float, float, float)
+            , trussc::ColorLinear(float, float, float, float)
+            , trussc::ColorLinear(float)
+            , trussc::ColorLinear(float, float)
         >();
-        sol::usertype<trussc::ColorHSB> t = lua->new_usertype<trussc::ColorHSB>("ColorHSB", constructors, sol::call_constructor, constructors);
-        t["a"] = &trussc::ColorHSB::a;
-        t["b"] = &trussc::ColorHSB::b;
-        t["h"] = &trussc::ColorHSB::h;
-        t["s"] = &trussc::ColorHSB::s;
-        t["lerp"] = sol::overload([](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t) { return self.lerp(target, t); }, [](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
-        t["toLinear"] = &trussc::ColorHSB::toLinear;
-        t["toOKLCH"] = &trussc::ColorHSB::toOKLCH;
-        t["toOKLab"] = &trussc::ColorHSB::toOKLab;
-        t["toRGB"] = &trussc::ColorHSB::toRGB;
+        sol::usertype<trussc::ColorLinear> t = lua->new_usertype<trussc::ColorLinear>("ColorLinear", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = sol::overload([](const trussc::ColorLinear& a, float b){ return a * b; }, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a * b; });
+        t[sol::meta_function::addition] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a - b; };
+        t[sol::meta_function::division] = [](const trussc::ColorLinear& a, float b){ return a / b; };
+        t[sol::meta_function::equal_to] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a == b; };
+        t["a"] = &trussc::ColorLinear::a;
+        t["b"] = &trussc::ColorLinear::b;
+        t["g"] = &trussc::ColorLinear::g;
+        t["r"] = &trussc::ColorLinear::r;
+        t["clamped"] = &trussc::ColorLinear::clamped;
+        t["clampedLDR"] = &trussc::ColorLinear::clampedLDR;
+        t["lerp"] = &trussc::ColorLinear::lerp;
+        t["toHSB"] = &trussc::ColorLinear::toHSB;
+        t["toOKLCH"] = &trussc::ColorLinear::toOKLCH;
+        t["toOKLab"] = &trussc::ColorLinear::toOKLab;
+        t["toSRGB"] = &trussc::ColorLinear::toSRGB;
     }
     {
-        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
-        t["duration"] = &trussc::PlayingSoundInfo::duration;
-        t["level"] = &trussc::PlayingSoundInfo::level;
-        t["loop"] = &trussc::PlayingSoundInfo::loop;
-        t["pan"] = &trussc::PlayingSoundInfo::pan;
-        t["path"] = &trussc::PlayingSoundInfo::path;
-        t["paused"] = &trussc::PlayingSoundInfo::paused;
-        t["position"] = &trussc::PlayingSoundInfo::position;
-        t["slot"] = &trussc::PlayingSoundInfo::slot;
-        t["speed"] = &trussc::PlayingSoundInfo::speed;
-        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
-        t["volume"] = &trussc::PlayingSoundInfo::volume;
+        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
+        t["alt"] = &trussc::MouseDragEventArgs::alt;
+        t["button"] = &trussc::MouseDragEventArgs::button;
+        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
+        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
+        t["delta"] = &trussc::MouseDragEventArgs::delta;
+        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
+        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
+        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
+        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
+        t["pos"] = &trussc::MouseDragEventArgs::pos;
+        t["shift"] = &trussc::MouseDragEventArgs::shift;
+        t["super"] = &trussc::MouseDragEventArgs::super;
+        t["x"] = &trussc::MouseDragEventArgs::x;
+        t["y"] = &trussc::MouseDragEventArgs::y;
+        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
+    }
+    {
+        sol::usertype<trussc::ScrollEventArgs> t = lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
+        t["alt"] = &trussc::ScrollEventArgs::alt;
+        t["consumed"] = &trussc::ScrollEventArgs::consumed;
+        t["ctrl"] = &trussc::ScrollEventArgs::ctrl;
+        t["globalPos"] = &trussc::ScrollEventArgs::globalPos;
+        t["pos"] = &trussc::ScrollEventArgs::pos;
+        t["scroll"] = &trussc::ScrollEventArgs::scroll;
+        t["scrollX"] = &trussc::ScrollEventArgs::scrollX;
+        t["scrollY"] = &trussc::ScrollEventArgs::scrollY;
+        t["shift"] = &trussc::ScrollEventArgs::shift;
+        t["super"] = &trussc::ScrollEventArgs::super;
+        t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
     }
     {
         sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
@@ -235,29 +233,32 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["shift"] = &trussc::KeyEventArgs::shift;
         t["super"] = &trussc::KeyEventArgs::super;
     }
-    lua->new_usertype<trussc::MouseButton>("MouseButton",
-        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
-        "Left", sol::var(trussc::MouseButton::Left),
-        "Right", sol::var(trussc::MouseButton::Right),
-        "Middle", sol::var(trussc::MouseButton::Middle),
-        "None", sol::var(trussc::MouseButton::None));
-    lua->new_usertype<trussc::PointStyle>("PointStyle",
-        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
-        "Square", sol::var(trussc::PointStyle::Square),
-        "Round", sol::var(trussc::PointStyle::Round),
-        "Pixel", sol::var(trussc::PointStyle::Pixel));
-    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
-        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
-        "Nearest", sol::var(trussc::TextureFilter::Nearest),
-        "Linear", sol::var(trussc::TextureFilter::Linear));
     {
-        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
-        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
-        t["reason"] = &trussc::DeviceLostEventArgs::reason;
+        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
+        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
+        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
     }
     {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
+        t["data"] = &trussc::UdpReceiveEventArgs::data;
+        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
+        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
+    }
+    lua->new_usertype<trussc::WritingMode>("WritingMode",
+        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
+        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
+        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
+    {
+        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
+        t["message"] = &trussc::TcpConnectEventArgs::message;
+        t["success"] = &trussc::TcpConnectEventArgs::success;
+    }
+    {
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
     }
 }
 #ifdef _MSC_VER

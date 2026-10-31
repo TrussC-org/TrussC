@@ -6,9 +6,12 @@
 #include <cstring>
 #include <type_traits>
 #include <initializer_list>
+#include <vector>
+#include <chrono>
+#include <thread>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
 namespace {
-int failures, callbacks, liveWindows, presents;
+int failures, callbacks, liveWindows, presents, resizeTicks;
 bool failSurface, noHighDpi, didInitialize, coveredFirst;
 int launchHidden;
 Window firstXwin;
@@ -23,6 +26,18 @@ void check(const char* name, bool passed) {
     if (!passed) ++failures;
 }
 void onEvent(const sapp_event* event, sapp_window, void*) { received = *event; ++callbacks; }
+bool waitForClientSize(Window window, int width, int height) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    XWindowAttributes actual{};
+    do {
+        if (XGetWindowAttributes(_sapp_tc.display, window, &actual) &&
+            actual.width == width && actual.height == height) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    } while (std::chrono::steady_clock::now() < deadline);
+    std::fprintf(stderr, "nativeWindow: timed out after 2 s waiting for WM client resize to %dx%d (last observed %dx%d)\n",
+        width, height, actual.width, actual.height);
+    return false;
+}
 void initialized() {
     didInitialize = true;
     auto* first = _sapp_tc.app.main;
@@ -146,6 +161,40 @@ void initialized() {
     presents = 0; sapp_tc_window_skip_present({0});
     _sapp_tc_x11_tick(other); _sapp_tc_x11_tick(first);
     check("zero skip suppresses only first presentation", presents == 1 && presentedDrawable == (uintptr_t)other->drawable);
+    // An external configure must replace the old-sized native back buffer
+    // before its first frame, without changing the Window identity. Exercise
+    // successful renewal without a recovery drawable.
+    _sapp_tc_x11_make_current(first);
+    const auto caller = sapp_tc_gl_save();
+    XResizeWindow(_sapp_tc.display, other->xwin, 100, 60);
+    XSync(_sapp_tc.display, False);
+    // XSync only completes the ConfigureRequest; a real WM may grant it later.
+    // Wait for the server's actual size before injecting surface failure.
+    const bool resized = waitForClientSize(other->xwin, 100, 60);
+    check("WM applied requested client size before resize failure", resized);
+    if (!resized) { sapp_quit(); return; }
+    callbacks = presents = 0;
+    other->desc.tick_cb = [](sapp_window handle, void*) {
+        ++resizeTicks;
+        sapp_tc_window_metadata metadata{};
+        check("resized native frame publishes new metadata", sapp_tc_window_read_metadata(handle, &metadata) &&
+            metadata.fb_width == 100 && metadata.fb_height == 60);
+        glViewport(0, 0, metadata.fb_width, metadata.fb_height);
+        glClearColor(1, 0, 0, 1); glClear(GL_COLOR_BUFFER_BIT);
+        std::vector<unsigned char> pixels(100 * 60 * 4);
+        glReadPixels(0, 0, 100, 60, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        bool solid = true;
+        for (size_t i = 0; i < pixels.size(); i += 4)
+            solid &= pixels[i] == 255 && pixels[i + 1] == 0 && pixels[i + 2] == 0 && pixels[i + 3] == 255;
+        check("first resized native clear covers all 100x60 pixels", solid && glGetError() == GL_NO_ERROR);
+    };
+    _sapp_tc_x11_tick(other);
+    const auto restored = sapp_tc_gl_save();
+    check("successful resize draws exactly once with the same identity", resizeTicks == 1 && presents == 1 &&
+        other->drawable && !other->surface_resize_pending && sapp_window_valid(second));
+    check("successful resize restores actual native caller", restored.display == caller.display &&
+        restored.context == caller.context && restored.draw == caller.draw && restored.read == caller.read);
+    other->desc.tick_cb = [](sapp_window, void*) { ++callbacks; };
     first->in_tick = true;
     const float savedDpi = _sapp_tc.dpi;
     _sapp_tc.dpi = 9.6e-7f;
@@ -166,7 +215,15 @@ void initialized() {
     check("last identity is valid", last.id == UINT32_MAX);
     if (last.id) sapp_destroy_window(last);
     check("identity exhaustion rejects cleanly", sapp_create_window(&desc).id == 0 && _sapp_tc.next_id == UINT32_MAX && liveWindows == before);
-    sapp_destroy_window(second);
+    XResizeWindow(_sapp_tc.display, other->xwin, 120, 80);
+    XSync(_sapp_tc.display, False);
+    check("WM applied terminal resize", waitForClientSize(other->xwin, 120, 80));
+    first->in_tick = false;
+    callbacks = presents = 0; failSurface = true;
+    _sapp_tc_x11_tick(other);
+    failSurface = false;
+    check("failed renewal closes the Window and ends the backend without another frame",
+        !callbacks && !presents && !sapp_window_valid(second) && _sapp_tc.app.quit_ordered);
     sapp_quit();
 }
 }

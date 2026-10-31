@@ -19,8 +19,7 @@
 // looked up by that identifier, not by its index in the touch array.
 //
 // Kept free of sokol and window state so it can be driven headless
-// (core/tests/touchAsMouse). The instance used by the event callback is
-// internal::touchMouseMapper() (tcGlobal.cpp).
+// (core/tests/touchAsMouse). Each WindowContext owns its mapper.
 // =============================================================================
 
 #include <cstdint>
@@ -31,11 +30,12 @@ namespace internal {
 
 enum class TouchPhase { Began, Moved, Ended, Cancelled };
 
-// One touch point as delivered by the platform (position already in app units).
+// One touch point in the caller's coordinate basis. The mapper retains only identity,
+// so each action uses the current packet's coordinates without a DPI round trip.
 struct TouchSample {
     uintptr_t id = 0;
-    float x = 0.0f;
-    float y = 0.0f;
+    double x = 0.0;
+    double y = 0.0;
     bool changed = false;
 };
 
@@ -43,8 +43,8 @@ struct TouchSample {
 struct TouchMouseAction {
     enum class Kind { None, Press, Drag, Release };
     Kind kind = Kind::None;
-    float x = 0.0f;
-    float y = 0.0f;
+    double x = 0.0;
+    double y = 0.0;
 };
 
 class TouchMouseMapper {
@@ -109,9 +109,6 @@ private:
 
     std::optional<uintptr_t> primaryId_;
 };
-
-// The mapper used by the main window's event callback (defined in tcGlobal.cpp).
-TouchMouseMapper& touchMouseMapper();
 
 } // namespace internal
 } // namespace trussc

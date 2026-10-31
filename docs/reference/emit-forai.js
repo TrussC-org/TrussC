@@ -2,6 +2,7 @@
 // ============================================================================
 // emit-forai.js — emit the C++ API index into FOR_AI_ASSISTANT.md from the
 // canonical reference-data.json (a downstream consumer; see README.md).
+// App lifetime prose comes from the authored ARCHITECTURE.md section.
 //
 // Index policy (chosen with the user): DOCUMENTED symbols only, ONE LINE per
 // symbol (overloads collapsed, "[+N]" marks extra overloads), English desc.
@@ -120,6 +121,36 @@ const block = header + out + '\n';
 if (argv.includes('--dry')) { process.stdout.write(block); process.exit(0); }
 
 let md = fs.readFileSync(MD, 'utf8');
+// Keep the authored architecture as the source for this generated introduction.
+// The index below remains entirely driven by the canonical API reference data.
+const appStart = md.indexOf('## App Structure\n\n');
+if (appStart >= 0) {
+    const layoutStart = md.indexOf('### File Layout', appStart);
+    const architecture = fs.readFileSync(path.join(__dirname, '../ARCHITECTURE.md'), 'utf8');
+    const heading = 'Window handles and App lifetimes\n-------------------------------\n\n';
+    const lifetimeStart = architecture.indexOf(heading);
+    if (layoutStart < 0 || lifetimeStart < 0) {
+        console.error('App structure or authored lifetime section not found');
+        process.exit(1);
+    }
+    const lifetime = architecture.slice(lifetimeStart + heading.length)
+        .split(/\n(?=#+ |[^\n]+\n[-=]{3,}\n)/)[0].trim();
+    md = md.slice(0, appStart) + '## App Structure\n\n' + lifetime + '\n\n' + md.slice(layoutStart);
+}
+
+// Refresh the preserved topic paragraphs from the same authored source.
+const authoredArchitecture = fs.readFileSync(path.join(__dirname, '../ARCHITECTURE.md'), 'utf8');
+const authoredParagraphs = authoredArchitecture.split(/\n\s*\n/);
+for (const [oldPrefix, newPrefix] of [
+    ['Yes — macOS, Windows and Linux X11', 'Multiple Windows are supported'],
+    ['On the main window (also Android/iOS/Web)', 'Every Window keeps stable App event slots'],
+    ["The App's own `audioOut()`", 'App audio callbacks attach']
+]) {
+    const paragraph = authoredParagraphs.find(text => text.startsWith(newPrefix));
+    if (!paragraph) throw new Error('Authored Window paragraph not found: ' + newPrefix);
+    md = md.split('\n\n').map(text => text.startsWith(oldPrefix) || text.startsWith(newPrefix) ? paragraph.trim() : text).join('\n\n');
+}
+
 const a = md.indexOf(START), b = md.indexOf(END);
 if (a < 0 || b < 0) { console.error(`markers ${START} / ${END} not found in ${MD}`); process.exit(1); }
 md = md.slice(0, a + START.length) + '\n' + block + md.slice(b);

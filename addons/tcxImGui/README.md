@@ -49,8 +49,80 @@ void tcApp::draw() {
 ImGui renders on top of all TrussC content automatically via the `onRender` event.
 Teardown is automatic too — the addon listens to the framework's exit event and
 shuts itself down when the app closes, so there is nothing to call in `cleanup()`.
-With hot reload, the same teardown runs on `events().hotReloadUnload` before
-each reload, and the new build sets ImGui up again in its `setup()`.
+With hot reload, the same teardown runs on its App’s `events().hotReloadUnload` before
+that generation reloads, and the new build sets ImGui up again in its `setup()`.
+
+## Vertex and index buffers / 頂点・インデックスバッファ / 정점·인덱스 버퍼
+
+### English
+
+`imguiSetup()` starts each context with room for 65,536 vertices and three
+times as many indices. Before uploading a frame, both CPU staging blocks and
+GPU buffers double until all command lists fit. That frame renders in full.
+Capacity belongs to each window or offscreen context, follows its peak, and
+does not shrink. The first growth in each context logs one Notice with the
+frame's vertex count, previous capacity, and a suggestion to start larger.
+Later growth does not repeat the Notice.
+
+```cpp
+void tcApp::setup() {
+    imguiSetup(200000);  // start with room for 200k vertices; grows automatically if needed
+}
+```
+
+`ImGuiManager::setup(int initialVertices)` and
+`setupOffscreen(int initialVertices)` accept the same initial capacity.
+The no-argument forms remain available; values below 1 select the default.
+There is no configured upper cap: representable sizes and available memory
+limit growth. Indices always have three times the vertex capacity, so an
+index-heavy frame can trigger growth before the vertex capacity is reached.
+If an allocation failure is detected, the previous buffers remain usable: one Error reports
+that part of this frame's UI was not drawn, and the complete command lists
+that fit are rendered. The next frame can try again.
+Limits: on GL/GLES/WebGL, sokol reports buffer creation as valid even if the driver
+runs out of memory, so GPU out-of-memory during growth may go undetected
+and drawing may be lost for that frame.
+This does not change Dear ImGui's 16-bit index limit for a single primitive.
+
+### 日本語
+
+`imguiSetup()` の初期容量はコンテキストごとに65,536頂点で、インデックスは
+その3倍です。各フレームの転送前にCPU作業領域とGPUバッファを倍増し、すべての
+描画リストが収まるようにするため、拡張したフレームも全体を描画します。
+容量はウィンドウ・オフスクリーンの各コンテキストで独立し、最大使用量に合わせて
+増え、縮小しません。最初の拡張時だけNoticeを出し、必要な頂点数、以前の容量、
+初期容量を増やす方法を案内します。その後の拡張ではNoticeを繰り返しません。
+
+上の `imguiSetup(200000)` の例で初期容量を20万頂点にできます。
+`ImGuiManager::setup(int initialVertices)` と `setupOffscreen(int initialVertices)`
+にも同じ値を指定できます。引数なしの呼び出しは従来どおり使え、1未満の値は既定値を
+選びます。独自の上限は設けず、サイズの表現可能範囲と空きメモリが限界です。
+インデックス容量は常に頂点容量の3倍なので、インデックスが多い描画でも拡張します。
+確保の失敗を検知した場合は以前のバッファを保持し、そのフレームのUIの一部を描画できなかった
+ことをErrorで1回通知します。収まる描画リストまでは描画し、次のフレームで再試行できます。
+GL/GLES/WebGLではドライバがメモリ不足でもsokolがバッファ作成を有効と報告するため、
+拡張時のGPUメモリ不足を検知できず、そのフレームの描画が失われる場合があります。
+Dear ImGuiの単一プリミティブに対する16ビットインデックスの制限は変わりません。
+
+### 한국어
+
+`imguiSetup()`의 초기 용량은 컨텍스트마다 정점 65,536개이며 인덱스는 그 3배입니다.
+매 프레임 업로드 전에 CPU 임시 저장 공간과 GPU 버퍼를 두 배씩 늘려 모든 그리기 목록을
+담으므로, 확장한 프레임도 전체 UI를 그립니다. 용량은 창과 오프스크린 컨텍스트마다
+독립적이며 최대 사용량을 따라 늘어나고 줄어들지 않습니다. 각 컨텍스트의 첫 확장에만
+Notice로 필요한 정점 수, 이전 용량, 초기 용량을 늘리는 방법을 알립니다.
+이후 확장에서는 Notice를 반복하지 않습니다.
+
+위의 `imguiSetup(200000)` 예제로 초기 용량을 정점 20만 개로 설정할 수 있습니다.
+`ImGuiManager::setup(int initialVertices)`와 `setupOffscreen(int initialVertices)`도
+같은 값을 받습니다. 인수 없는 호출은 그대로 사용할 수 있고 1 미만은 기본값을 선택합니다.
+별도의 상한은 없으며 표현 가능한 크기와 사용 가능한 메모리가 한계입니다.
+인덱스 용량은 항상 정점 용량의 3배이므로 인덱스가 많은 프레임도 확장을 일으킬 수 있습니다.
+할당 실패를 감지하면 이전 버퍼를 유지하고 해당 프레임의 UI 일부를 그리지 못했다는 Error를
+한 번 기록합니다. 들어가는 완전한 목록까지 그리며 다음 프레임에서 다시 시도할 수 있습니다.
+GL/GLES/WebGL에서는 드라이버 메모리가 부족해도 sokol이 버퍼 생성을 유효하다고
+보고하므로 확장 중 GPU 메모리 부족을 감지하지 못해 해당 프레임의 그리기가 사라질 수 있습니다.
+Dear ImGui의 단일 프리미티브에 대한 16비트 인덱스 제한은 바뀌지 않습니다.
 
 ## Offscreen UI
 
@@ -91,7 +163,7 @@ imguiEnd();
 
 | Function | Description |
 |----------|-------------|
-| `imguiSetup()` | Initialize ImGui (call in setup) |
+| `imguiSetup()` / `imguiSetup(int initialVertices)` | Initialize ImGui with an optional initial vertex capacity (call in setup) |
 | `imguiShutdown()` | Shut down ImGui early (optional — runs automatically on app exit) |
 | `imguiBegin()` | Attempt to start a window UI frame; returns false on refusal. Always pair with `imguiEnd()` |
 | `imguiEnd()` | End ImGui frame (rendering is deferred to onRender) |
@@ -150,8 +222,9 @@ void tcApp::setup() {
 | `tcx_imgui_checkbox` | `label`, `value`, `window`, `windowId` (optional) | Toggle or set a checkbox |
 
 `window` is the ImGui window (panel) name. `windowId` is the OS window as
-`tc_list_windows` numbers it (0 = main); you only need it when the same panel
-exists in two OS windows.
+the positive native ID returned by `tc_list_windows`. Actions may omit it only
+when exactly one Window is open; zero is not an alias. Widget listing may omit
+the filter to list every context. Closed Window IDs never select a new Window.
 
 These tools use ImGui's Test Engine hooks plus a small patch to the bundled
 Dear ImGui that hands each value widget's variable to tcxImGui. See
@@ -163,7 +236,7 @@ Each value widget in `tcx_imgui_get_widgets` carries `widget`, `valueType` and
 `value`, plus `touched` (changed by hand, see below):
 
 ```json
-{"label": "speed", "window": "Params", "windowId": 0, "type": "input",
+{"label": "speed", "window": "Params", "windowId": 101, "type": "input",
  "widget": "slider", "valueType": "float", "value": 0.35, "touched": true, "rect": {...}}
 ```
 
@@ -210,7 +283,7 @@ when the widget returns, and checked again when the widget runs in the next
 frame.
 
 ```json
-{"label": "position", "window": "Params", "windowId": 0, "status": "ok",
+{"label": "position", "window": "Params", "windowId": 101, "status": "ok",
  "widget": "drag", "valueType": "float", "value": [0.5, -1, 2.25]}
 ```
 
@@ -283,9 +356,9 @@ the code, and calls `tcx_imgui_reset_touched`.
 ```json
 {"status": "ok", "count": 2,
  "widgets": [
-   {"label": "speed", "window": "Params", "windowId": 0, "widget": "slider",
+   {"label": "speed", "window": "Params", "windowId": 101, "widget": "slider",
     "valueType": "float", "value": 0.35, "visible": true},
-   {"label": "tint", "window": "Params", "windowId": 0, "widget": "color",
+   {"label": "tint", "window": "Params", "windowId": 101, "widget": "color",
     "valueType": "color", "value": [1, 0.4, 0.2, 1], "colorSpace": "rgb", "visible": false}
  ],
  "inspector": []}
@@ -334,7 +407,7 @@ tcxImGui connects to TrussC via these core events:
 
 - **`events().rawEvent`** (priority: BeforeApp) — Routes input events to ImGui
 - **`events().onRender`** (priority: 1000) — Renders ImGui after all sokol_gl content is flushed
-- **the main window's `events().afterFrame`** (priority: BeforeApp) — Answers a
+- **Runtime maintenance** (before MCP expiry, independent of drawing) — Answers a
   `tcx_imgui_input` whose check frame did not come in time (see
   [Setting values](#setting-values)), before the MCP server's own timeout
 
@@ -353,3 +426,43 @@ C++ OOM recovery requires Release builds, or iterator debugging off (`_ITERATOR_
 ## License
 
 Dear ImGui is licensed under the MIT License. See [imgui/LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt).
+
+App-owned registrations
+-----------------------
+
+Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown runs App cleanup and window exit hooks before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.
+
+App-tied code, including addon state owned by an App, uses `events()`;
+process-wide observers use `runtime().events()`. The manager keeps input/render hooks on its addressed Window, settles widget
+deadlines from Runtime maintenance before MCP reply expiry even without a
+frame, and subscribes to its App’s `events().hotReloadUnload` for generation
+teardown. Only Apps in the retiring generation receive that notification;
+other Apps keep their ImGui state. The App owner token retires registrations
+on swap or close.
+
+Runtime owns the process `hotReloadUnload` subscription and maintenance tick. Per-App hooks belong on that App’s `events().hotReloadUnload`; they retire with its token. Runtime notifies before reverse attachment ending at the outer main-thread reload safe point. Ending App A does not retire same-generation App B; generation retirement removes generation registrations after its Apps. Old DLL/dylib/.so modules remain pinned for process lifetime, including retained callback/control-block storage. Maintenance runs without relying on a drawing Window.
+
+## MCP edits
+
+MCP edits have no addon limits on pending values, input events or bytes.
+The 2-second write deadline and core MCP ingress bounds (64 MiB HTTP body,
+sockets and workers) still apply. Allocation failure inside Dear ImGui behaves
+as it does for any ImGui frame.
+Text edits settle in linear time. For very large text-edit bursts, remaining
+growth comes from Dear ImGui's own event queue, including the backward search
+in `AddMousePosEvent()`; Dear ImGui is unchanged.
+
+MCP 編集にはアドオン独自の待機値・入力イベント数・バイト数の上限はありません。
+2 秒の書き込み期限と core MCP の受付上限（HTTP 本文 64 MiB、ソケット数、
+ワーカー数）は引き続き適用されます。Dear ImGui 内のメモリ確保失敗時の動作は、
+通常の ImGui フレームと同じです。
+テキスト編集の後処理は線形時間です。非常に大量のテキスト編集で残る処理時間の増加は、
+`AddMousePosEvent()` の後方検索を含む Dear ImGui 自身のイベントキューによるものです。
+Dear ImGui は変更していません。
+
+MCP 편집에는 애드온 자체의 대기 값, 입력 이벤트 수, 바이트 수 상한이 없습니다.
+2초 쓰기 기한과 core MCP 수신 상한(HTTP 본문 64 MiB, 소켓 수, 작업자 수)은
+계속 적용됩니다. Dear ImGui 내부의 메모리 할당 실패 동작은 일반 ImGui 프레임과 같습니다.
+텍스트 편집의 정리는 선형 시간에 처리됩니다. 매우 큰 텍스트 편집 묶음에서 남는
+처리 시간 증가는 `AddMousePosEvent()`의 역방향 검색을 포함한 Dear ImGui 자체의
+이벤트 큐에서 발생합니다. Dear ImGui는 변경하지 않았습니다.

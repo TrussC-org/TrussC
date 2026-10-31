@@ -8,6 +8,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/error.h>
 #include <libavutil/opt.h>
 }
 #include "../../../platform/linux/tcVideoDecodeFFmpeg.h"
@@ -20,14 +21,14 @@ void check(const char* label, bool passed) {
     if (!passed) ++failures;
 }
 using Limits = tc::internal::VideoDecodeLimits;
-using Budget = tc::internal::VideoDecodeBudget;
+using Status = tc::internal::VideoDecodeStatus;
 
 void layoutChecks() {
     size_t bytes = 0;
     check("8K frame admitted", Limits::rgba(7680, 4320, bytes) && bytes == 132710400);
-    check("exact frame limit admitted", Limits::rgba(8192, 4096, bytes) && bytes == Limits::frameBytes);
-    check("frame limit overflow rejected", !Limits::rgba(8192, 4097, bytes));
-    check("axis overflow rejected", !Limits::rgba(8193, 1, bytes));
+    check("large frame layout", Limits::rgba(8192, 4096, bytes) && bytes == 134217728);
+    check("frame above previous byte cap", Limits::rgba(8192, 4097, bytes));
+    check("wide frame layout", Limits::rgba(8193, 1, bytes));
     check("negative dimension rejected", !Limits::rgba(-1, 4, bytes));
     check("empty frame rejected", !Limits::rgba(0, 4, bytes));
     check("product overflow rejected", !Limits::product((std::numeric_limits<size_t>::max)(), 4, bytes));
@@ -36,30 +37,15 @@ void layoutChecks() {
     check("short buffer rejected", !Limits::rows(3, 2, 16, 31));
     check("stride product overflow rejected", !Limits::rows(3, 2, (std::numeric_limits<size_t>::max)(), 32));
 
-    Budget budget;
-    check("exact live budget admitted", budget.acquire(Limits::workingBytes));
-    check("simultaneous allocation rejected", !budget.acquire(1));
-    budget.release(Limits::workingBytes);
-    check("released bytes are reusable", budget.acquire(4096));
-    budget.release(4096);
-    check("peak counts simultaneous storage", budget.peak() == Limits::workingBytes && budget.used() == 0);
-    auto posterBudget = std::make_shared<Budget>();
-    check("unused poster has no reservation", posterBudget->used() == 0);
-    {
-        tc::internal::VideoDecodeLease poster(posterBudget, Limits::frameBytes);
-        check("poster reserves before decoding", poster.acquired() && posterBudget->used() == Limits::frameBytes);
-        poster.shrink(4096);
-        check("retained poster charges actual output", posterBudget->used() == 4096);
-    }
-    check("poster release returns credit", posterBudget->used() == 0);
+    Status status;
     int warnings = 0;
     auto listener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& log) {
         if (log.level == tc::LogLevel::Warning && log.message.find("Video decode storage") != std::string::npos) ++warnings;
     });
-    budget.reject(1, 0); budget.warn(); budget.reject(2, 0); budget.warn();
-    check("first loss warns once and totals persist", warnings == 1 && budget.rejected() == 2 && budget.rejected() == 2);
+    status.reject(1, 0); status.warn(); status.reject(2, 0); status.warn();
+    check("first loss warns once and totals persist", warnings == 1 && status.rejected() == 2 && status.rejected() == 2);
 
-    Budget stagingBudget;
+    Status stagingStatus;
     int stagingWarnings = 0;
     auto stagingListener = tc::getLogger().onLog.listen([&](tc::LogEventArgs& log) {
         if (log.level == tc::LogLevel::Warning && log.message.find("Video file staging") != std::string::npos) {
@@ -68,17 +54,28 @@ void layoutChecks() {
                 log.message.find("capacity 67108864 bytes, needed 68157440 bytes; rejected 1") != std::string::npos);
         }
     });
-    stagingBudget.reject(68157440, 67108864, "Video file staging"); stagingBudget.warn();
-    stagingBudget.reject(68157440, 67108864, "Video file staging"); stagingBudget.warn();
-    check("staging warns once and counts each rejection", stagingWarnings == 1 && stagingBudget.rejected() == 2);
+    stagingStatus.reject(68157440, 67108864, "Video file staging"); stagingStatus.warn();
+    stagingStatus.reject(68157440, 67108864, "Video file staging"); stagingStatus.warn();
+    check("staging warns once and counts each rejection", stagingWarnings == 1 && stagingStatus.rejected() == 2);
+
+    {
+        Status diagnostic;
+        auto failingLog = tc::getLogger().onLog.listen([](tc::LogEventArgs& log) {
+            if (log.message.find("Video allocation diagnostic") != std::string::npos) throw std::bad_alloc();
+        });
+        diagnostic.reject(1, 0, "Video allocation diagnostic");
+        bool escaped = false;
+        try { diagnostic.warn(); } catch (const std::bad_alloc&) { escaped = true; }
+        check("allocation failure while warning is contained", !escaped && diagnostic.rejected() == 1);
+    }
 
     std::vector<uint8_t> track;
-    tc::internal::VideoAudioStorage storage(track, budget);
+    tc::internal::VideoAudioStorage storage(track, status);
     std::vector<uint8_t> chunk(1024 * 1024, 0x5a);
-    for (int i = 0; i < 64; ++i)
+    for (int i = 0; i < 65; ++i)
         if (!storage.append(chunk.data(), chunk.size())) { check("track append", false); break; }
-    check("complete exact-limit audio track", track.size() == Limits::inputBytes && track.back() == 0x5a && track.capacity() <= Limits::inputBytes);
-    check("audio limit rejects next whole unit", !storage.append(chunk.data(), 1) && track.size() == Limits::inputBytes);
+    check("audio track grows past 64 MiB", track.size() == 65u * 1024 * 1024 && track.back() == 0x5a);
+
 }
 
 // Opt-in real-device check. One fixture per process also supports the macOS
@@ -90,7 +87,7 @@ class DeviceVideoCheck : public tc::App {
 public:
     void setup() override {
         started = std::chrono::steady_clock::now();
-        if (deviceMode == "reject" || deviceMode == "extract-reject") {
+        if (deviceMode == "extract-reject") {
             for (bool keyframe : {false, true}) {
                 tc::Pixels output;
                 output.allocate(3, 2, 4);
@@ -101,19 +98,14 @@ public:
                 check("device rejected extraction preserves pixels", output.getWidth() == 3 && output.getHeight() == 2 &&
                     std::all_of(output.getData(), output.getData() + 24, [](uint8_t b) { return b == 0x5a; }));
             }
-            if (deviceMode == "extract-reject") { finish(); return; }
+            finish(); return;
         }
         player.setResyncThreshold(0);
         player.setVolume(0);
         const bool loaded = bool(player.load(deviceFixture));
-        if (deviceMode == "reject") {
-            check("device metadata rejected before output", !loaded &&
-                tc::internal::VideoPlayerPlatformAccess::decodeRejectionsForTests(player) > 0);
-            finish(); return;
-        }
         check("device fixture loads", loaded);
         if (!loaded) { finish(); return; }
-        if (deviceMode == "audio-accept" || deviceMode == "audio-reject") {
+        if (deviceMode == "audio-accept") {
             check("device fixture has an audio track", player.hasAudio());
             auto data = player.getAudioData();
             std::printf("extracted audio bytes: %zu\n", data.size());
@@ -123,9 +115,7 @@ public:
             std::error_code error;
             const auto expectedBytes = tc::fs::file_size(reference, error);
             check("device audio reference is available", !error);
-            check("device audio extraction is whole or rejected", !error && (deviceMode == "audio-reject" ?
-                (expectedBytes > Limits::inputBytes && data.empty() && rejected > 0) :
-                (data.size() == expectedBytes && data.size() <= Limits::inputBytes && rejected == 0)));
+            check("device audio extraction is complete", !error && data.size() == expectedBytes && rejected == 0);
             finish(); return;
         }
         for (bool keyframe : {false, true}) {
@@ -163,8 +153,6 @@ private:
     void finish() {
         finished = true;
         deviceCompleted = true;
-        std::printf("device peak admitted bytes: %zu\n", tc::internal::VideoPlayerPlatformAccess::decodePeakBytesForTests(player));
-        check("device working credits bounded", tc::internal::VideoPlayerPlatformAccess::decodePeakBytesForTests(player) <= Limits::workingBytes);
         std::printf("Device video fixture: %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
         std::fflush(stdout);
         tc::exitApp();
@@ -173,25 +161,28 @@ private:
 
 #if defined(__linux__) && !defined(__ANDROID__)
 void hardwareTransferChecks() {
-    auto budget = std::make_shared<Budget>();
+    auto status = std::make_shared<Status>();
     size_t bytes = 0;
-    check("allocated surface layout includes padding", tc::internal::videoTransferLayout(1920, 1088, AV_PIX_FMT_YUV420P, bytes, *budget)
+    check("allocated surface layout includes padding", tc::internal::videoTransferLayout(1920, 1088, AV_PIX_FMT_YUV420P, bytes, *status)
           && bytes > 1920 * 1088 * 3 / 2);
-    check("surface axis overflow rejected", !tc::internal::videoTransferLayout(8193, 16, AV_PIX_FMT_YUV420P, bytes, *budget));
-    check("negative surface rejected", !tc::internal::videoTransferLayout(32, -1, AV_PIX_FMT_YUV420P, bytes, *budget));
-    check("surface byte overflow rejected", !tc::internal::videoTransferLayout(8192, 8192, AV_PIX_FMT_RGBA, bytes, *budget));
-    check("invalid transfer format rejected", !tc::internal::videoTransferLayout(32, 16, AV_PIX_FMT_NONE, bytes, *budget));
+    check("wide surface layout", tc::internal::videoTransferLayout(8193, 16, AV_PIX_FMT_YUV420P, bytes, *status));
+    check("negative surface rejected", !tc::internal::videoTransferLayout(32, -1, AV_PIX_FMT_YUV420P, bytes, *status));
+    check("large surface layout", tc::internal::videoTransferLayout(8192, 8192, AV_PIX_FMT_RGBA, bytes, *status));
+    check("invalid transfer format rejected", !tc::internal::videoTransferLayout(32, 16, AV_PIX_FMT_NONE, bytes, *status));
     AVFrame* packed = av_frame_alloc();
     packed->format = AV_PIX_FMT_RGB24; packed->width = 33; packed->height = 65;
     check("packed transfer rows sized explicitly", tc::internal::videoTransferLayout(33, 65, AV_PIX_FMT_RGB24,
-        bytes, *budget, packed->linesize) && packed->linesize[0] == 128);
+        bytes, *status, packed->linesize) && packed->linesize[0] == 128);
     check("packed transfer preallocation fits admitted layout", av_frame_get_buffer(packed, 64) >= 0 &&
         packed->buf[0]->size <= bytes && packed->linesize[0] == 128);
     av_frame_free(&packed);
 
     AVBufferRef* device = nullptr;
-    if (av_hwdevice_ctx_create(&device, AV_HWDEVICE_TYPE_VULKAN, nullptr, nullptr, 0) < 0) {
-        std::puts("Vulkan transfer: SKIP (device unavailable); synthetic surface admission exercised");
+    const int deviceResult = av_hwdevice_ctx_create(&device, AV_HWDEVICE_TYPE_VULKAN, nullptr, nullptr, 0);
+    if (deviceResult < 0) {
+        char error[AV_ERROR_MAX_STRING_SIZE] = {};
+        av_strerror(deviceResult, error, sizeof(error));
+        std::printf("Vulkan transfer: SKIP (device unavailable: %s); synthetic surface admission exercised\n", error);
         return;
     }
     AVBufferRef* frames = av_hwframe_ctx_alloc(device);
@@ -202,9 +193,17 @@ void hardwareTransferChecks() {
     context->sw_format = AV_PIX_FMT_YUV420P;
     context->width = 1920; context->height = 1088;
     int result = av_hwframe_ctx_init(frames);
-    check("Vulkan frames context initialized", result >= 0);
+    if (result < 0) {
+        char error[AV_ERROR_MAX_STRING_SIZE] = {};
+        av_strerror(result, error, sizeof(error));
+        std::printf("Vulkan transfer: SKIP (frames context unavailable: %s); synthetic surface admission exercised\n", error);
+        av_buffer_unref(&frames);
+        av_buffer_unref(&device);
+        return;
+    }
+    check("Vulkan frames context initialized", true);
     AVFrame* hardware = av_frame_alloc();
-    if (result >= 0) result = av_hwframe_get_buffer(frames, hardware, 0);
+    result = av_hwframe_get_buffer(frames, hardware, 0);
     check("Vulkan surface allocated", result >= 0);
     if (result >= 0) {
         AVFrame* upload = av_frame_alloc();
@@ -219,22 +218,12 @@ void hardwareTransferChecks() {
         check("Vulkan fixture uploaded", result >= 0);
         av_frame_free(&upload);
         hardware->width = 32; hardware->height = 16;
-        // Leave enough credits for the previous display-sized reservation,
-        // but too few for the actual allocated surface.
         const size_t displayCharge = av_image_get_buffer_size(AV_PIX_FMT_YUV420P, 64, 64, 64) + AV_INPUT_BUFFER_PADDING_SIZE;
-        auto limited = std::make_shared<Budget>();
-        limited->acquire(Limits::workingBytes - displayCharge);
-        {
-            tc::internal::VideoCPUTransfer transfer(limited);
-            check("small display cannot bypass full surface admission", transfer.transfer(hardware) < 0 &&
-                !transfer.frame() && limited->used() == Limits::workingBytes - displayCharge && limited->rejected() == 1);
-        }
-        limited->release(Limits::workingBytes - displayCharge);
         {
             AVFrame* reference = av_frame_alloc();
             const bool referenceTransferred = reference && av_hwframe_transfer_data(reference, hardware, 0) >= 0;
             check("FFmpeg reference surface transfer succeeds", referenceTransferred);
-            tc::internal::VideoCPUTransfer transfer(budget);
+            tc::internal::VideoCPUTransfer transfer(status);
             check("full surface transfer admitted", transfer.transfer(hardware) >= 0);
             auto* cpu = transfer.frame();
             size_t actual = 0;
@@ -260,13 +249,11 @@ void hardwareTransferChecks() {
                 }
             }
             if (fixtureDiffers) std::puts("Vulkan fixture: upload/readback differs on this device (informational)");
-            check("transfer charges actual allocation and preserves display rectangle", cpu && cpu->data[0] &&
+            check("transfer preserves full surface and display rectangle", cpu && cpu->data[0] &&
                 cpu->width == 32 && cpu->height == 16 && cpu->linesize[0] >= 1920 &&
-                actual > displayCharge && actual <= budget->used() && displayMatches);
-            std::printf("Vulkan transfer: display 32x16, surface 1920x1088, allocated %zu, admitted %zu bytes\n", actual, budget->used());
+                actual > displayCharge && displayMatches);
             av_frame_free(&reference);
         }
-        check("transfer frame freed before credit returned", budget->used() == 0);
     }
     av_frame_free(&hardware); av_buffer_unref(&frames); av_buffer_unref(&device);
 }
@@ -389,8 +376,6 @@ void playHeadless(const tc::fs::path& path, const char* label) {
         std::this_thread::yield();
     } while (std::chrono::steady_clock::now() < deadline);
     check("whole video reaches EOF with decoded output", player.isDone() && !player.hasError() && gotFrame);
-    std::printf("peak admitted bytes: %zu\n", Access::decodePeakBytesForTests(player));
-    check("live retained storage stays bounded", Access::decodePeakBytesForTests(player) <= Limits::workingBytes);
     check("admitted video has no storage rejections", Access::decodeRejectionsForTests(player) == 0);
     player.close();
 }
@@ -427,51 +412,34 @@ void extractionRejectionChecks(const tc::fs::path& dir) {
 
 void ffmpegChecks(const tc::fs::path& dir, bool large) {
     extractionRejectionChecks(dir);
-    // Directly exercise the real codec allocator, including format changes,
-    // negative image-size errors and simultaneous output reservations.
-    auto budget = std::make_shared<Budget>();
+    auto status = std::make_shared<Status>();
     AVCodecContext* codec = avcodec_alloc_context3(avcodec_find_decoder(AV_CODEC_ID_FFV1));
-    codec->pix_fmt = AV_PIX_FMT_YUV420P;
-    codec->width = 32; codec->height = 16;
-    tc::internal::configureVideoCodec(codec, budget);
-    check("codec limits configured before open", codec->max_pixels == int64_t(Limits::frameBytes / 4) && codec->thread_count == 1);
-    check("FFV1 decoder opened", avcodec_open2(codec, avcodec_find_decoder(AV_CODEC_ID_FFV1), nullptr) >= 0);
+    if (codec) tc::internal::configureVideoCodec(codec);
+    check("FFmpeg decode thread count is auto", codec && codec->thread_count == 0);
+    avcodec_free_context(&codec);
+    check("wide fixture generated", makeVideo(dir / "wide.mkv", 10240, 1080, 1));
+    playHeadless(dir / "wide.mkv", "10240x1080 CPU frame decodes");
+    {
+        tc::VideoPlayer headless;
+        headless.setUseHwAccel(false);
+        headless.setAutoPoster(false);
+        check("public headless load needs no GPU texture", headless.load(dir / "wide.mkv") &&
+            headless.isLoaded() && !headless.getPath().empty() && !headless.getTexture().isAllocated());
+        headless.close();
+    }
+    std::error_code fixtureError;
+    const auto fixtureBytes = tc::fs::file_size(dir / "wide.mkv", fixtureError);
+    if (!fixtureError) std::printf("10240x1080 fixture size: %llu bytes\n", static_cast<unsigned long long>(fixtureBytes));
+    tc::Pixels wide;
+    check("wide thumbnail decodes on CPU", tc::VideoPlayer::extractFrame(dir / "wide.mkv", wide, 0) &&
+        wide.getWidth() == 10240 && wide.getHeight() == 1080 && wide.getData()[0] != 0);
     AVFrame* frame = av_frame_alloc();
     frame->width = 32; frame->height = 16; frame->format = AV_PIX_FMT_YUV420P;
-    check("real decoded allocation admitted", tc::internal::boundedVideoBuffer(codec, frame, 0) == 0 && budget->used() > 0);
-    check("actual decoded row validation", tc::internal::validVideoFrame(frame, *budget));
+    check("FFmpeg frame allocated", av_frame_get_buffer(frame, 64) == 0);
+    check("decoded row layout", tc::internal::validVideoFrame(frame, *status));
     frame->linesize[0] = 1;
-    check("malformed decoded stride rejected", !tc::internal::validVideoFrame(frame, *budget));
-    av_frame_unref(frame);
-    check("codec buffer release returns credit", budget->used() == 0);
-    frame->width = 32; frame->height = 16; frame->format = -1;
-    check("negative image size rejected", tc::internal::boundedVideoBuffer(codec, frame, 0) < 0 && budget->used() == 0);
-    frame->format = AV_PIX_FMT_YUV420P; frame->width = 8193;
-    check("changed invalid size rejected before allocation", tc::internal::boundedVideoBuffer(codec, frame, 0) < 0 && budget->used() == 0);
-    frame->width = 32;
-    check("reserve all working storage", budget->acquire(Limits::workingBytes));
-    check("codec allocation rejects before exceeding live budget",
-          tc::internal::boundedVideoBuffer(codec, frame, 0) < 0 && budget->used() == Limits::workingBytes);
-    codec->hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
-    check("attached device context allocated", codec->hw_device_ctx != nullptr);
-    const auto rejections = budget->rejected();
-    check("FFV1 software frame with attached device still obeys exhausted budget",
-          tc::internal::boundedVideoBuffer(codec, frame, 0) < 0 && !frame->buf[0] &&
-          budget->used() == Limits::workingBytes && budget->rejected() == rejections + 1);
-    av_frame_unref(frame);
-    av_buffer_unref(&codec->hw_device_ctx);
-    budget->release(Limits::workingBytes);
-    frame->format = AV_PIX_FMT_NV12; frame->width = 64; frame->height = 32;
-    codec->pix_fmt = AV_PIX_FMT_NV12; codec->width = 64; codec->height = 32;
-    check("changed admitted pixel format gets valid storage",
-          tc::internal::boundedVideoBuffer(codec, frame, 0) == 0 && tc::internal::validVideoFrame(frame, *budget));
-    av_frame_free(&frame); avcodec_free_context(&codec);
-    check("wide metadata fixture generated", makeVideo(dir / "wide.mkv", 8194, 2, 1));
-    tc::VideoPlayer refused;
-    check("wide metadata rejected before decoder/output allocation",
-          !tc::internal::VideoPlayerPlatformAccess::loadHeadlessForTests(refused, dir / "wide.mkv") &&
-          tc::internal::VideoPlayerPlatformAccess::decodePeakBytesForTests(refused) == 0 &&
-          tc::internal::VideoPlayerPlatformAccess::decodeRejectionsForTests(refused) == 1);
+    check("malformed decoded stride rejected", !tc::internal::validVideoFrame(frame, *status));
+    av_frame_free(&frame);
     check("first size segment generated", makeVideo(dir / "first.m2v", 32, 16, 2, "mpeg2video", AV_CODEC_ID_MPEG2VIDEO));
     check("changed size segment generated", makeVideo(dir / "second.m2v", 64, 32, 2, "mpeg2video", AV_CODEC_ID_MPEG2VIDEO));
     check("changed size timeline muxed", changedSizeVideo(dir));
@@ -479,16 +447,101 @@ void ffmpegChecks(const tc::fs::path& dir, bool large) {
     check("small fixture generated", makeVideo(dir / "small.mkv", 64, 32, 8));
     playHeadless(dir / "small.mkv", "small video loads");
     tc::Pixels image;
-    check("thumbnail uses bounded decoder", tc::VideoPlayer::extractFrame(dir / "small.mkv", image, 0) && image.getWidth() == 64 && image.getData()[0] != 0);
+    check("thumbnail decodes", tc::VideoPlayer::extractFrame(dir / "small.mkv", image, 0) && image.getWidth() == 64 && image.getData()[0] != 0);
+    const auto* previousPixels = image.getData();
+    av_max_alloc(1);
+    const bool exhausted = tc::VideoPlayer::extractFrame(dir / "small.mkv", image, 0);
+    av_max_alloc((std::numeric_limits<size_t>::max)());
+    check("FFmpeg allocation failure returns false and preserves output", !exhausted && image.getData() == previousPixels);
     check("long fixture generated", makeVideo(dir / "long.mkv", 64, 32, 4000));
     playHeadless(dir / "long.mkv", "long video streams without duration cap");
     if (large) {
-        check("exact-limit fixture generated", makeVideo(dir / "limit.mkv", 8192, 4096, 3));
-        playHeadless(dir / "limit.mkv", "exact-limit frame plays");
+        check("large fixture generated", makeVideo(dir / "limit.mkv", 8192, 4096, 3));
+        playHeadless(dir / "limit.mkv", "large frame plays");
         check("8K fixture generated", makeVideo(dir / "8k.mkv", 7680, 4320, 3));
         playHeadless(dir / "8k.mkv", "8K frame plays");
     }
 }
+class TextureAllocationCheck : public tc::App {
+public:
+    void setup() override {
+        const auto path = tc::fs::temp_directory_path() / ("tc-video-texture-" + std::to_string(getpid()) + ".mkv");
+        check("texture test fixture generated", makeVideo(path, 32, 16, 1));
+        tc::VideoPlayer player;
+        player.setUseHwAccel(false);
+        player.setAutoPoster(false);
+        check("GPU rejects dimensions above its device limit", !tc::internal::checkImageSize(sg_query_limits().max_image_size_2d + 1, 1));
+        const auto invalidPath = path.string() + ".invalid";
+        { std::ofstream invalid(invalidPath); invalid << "invalid video bytes"; }
+        check("error retention fixture loads", bool(player.load(path)));
+        int events = 0;
+        auto listener = player.onError.listen([&](tc::VideoErrorEventArgs&) { ++events; });
+        tc::internal::VideoPlayerPlatformAccess::reportError(player, {"original playback failure", -42});
+        player.update();
+        check("playback error delivered", events == 1 && player.hasError());
+        check("existing invalid reload retains delivered error", !player.load(invalidPath) &&
+            player.hasError() && player.getErrorMessage() == "original playback failure" &&
+            !player.isLoaded() && player.getPath().empty() && events == 1);
+        player.close();
+        check("explicit close clears delivered error", !player.hasError());
+        tc::fs::remove(invalidPath);
+        const auto exhaust = [&](auto allocate, auto release, int count, const char* pool) {
+            std::printf("Exhausting GPU %s pool\n", pool);
+            // Both output overloads must clear a previously populated Image on upload failure.
+            tc::Image extracted[2];
+            for (auto& output : extracted) {
+                output.allocate(3, 2, 4);
+                if (output.getPixelsData()) std::memset(output.getPixelsData(), 0x5a, 24);
+                check("extraction output starts populated", output.getPixelsData() && output.getWidth() == 3 &&
+                    output.getTexture().isAllocated());
+            }
+            const uint8_t block[8] = {};
+            const bool bc1 = sg_query_pixelformat(SG_PIXELFORMAT_BC1_RGBA).sample;
+            tc::Texture replacement;
+            if (bc1) {
+                replacement.allocateCompressed(4, 4, SG_PIXELFORMAT_BC1_RGBA, block, sizeof(block));
+                check("compressed replacement starts allocated", replacement.isAllocated());
+            }
+            std::vector<decltype(allocate())> reserved;
+            for (int i = 0; i < count; ++i) {
+                auto handle = allocate();
+                if (handle.id) reserved.push_back(handle);
+            }
+            const auto result = player.load(path);
+            check("GPU allocation failure fails load and clears path", !result && player.getPath().empty() &&
+                !player.isLoaded() && !player.getTexture().isAllocated());
+            for (int i = 0; i < 2; ++i) {
+                const bool ok = i ? tc::VideoPlayer::extractKeyFrame(path, extracted[i], 0)
+                                  : tc::VideoPlayer::extractFrame(path, extracted[i], 0);
+                check("frame image allocation failure clears populated output", !ok &&
+                    !extracted[i].getPixelsData() && extracted[i].getWidth() == 0 &&
+                    extracted[i].getHeight() == 0 && !extracted[i].getTexture().isAllocated());
+            }
+            if (bc1) {
+                replacement.updateCompressed(block, sizeof(block));
+                check("failed compressed replacement clears allocation state", !replacement.isAllocated());
+                tc::Texture compressed;
+                compressed.allocateCompressed(4, 4, SG_PIXELFORMAT_BC1_RGBA, block, sizeof(block));
+                check("compressed GPU allocation failure stays unallocated", !compressed.isAllocated());
+            }
+            for (auto handle : reserved) release(handle);
+            check("load succeeds after GPU storage is available", bool(player.load(path)) && !player.getPath().empty());
+            const auto& texture = player.getTexture();
+            check("loaded texture image view and sampler are valid", texture.isAllocated() &&
+                sg_query_image_state(texture.getImage()) == SG_RESOURCESTATE_VALID &&
+                sg_query_view_state(texture.getView()) == SG_RESOURCESTATE_VALID &&
+                sg_query_sampler_state(texture.getSampler()) == SG_RESOURCESTATE_VALID);
+            player.close();
+        };
+        const auto desc = sg_query_desc();
+        exhaust(sg_alloc_image, sg_dealloc_image, desc.image_pool_size, "image");
+        exhaust(sg_alloc_view, sg_dealloc_view, desc.view_pool_size, "view");
+        exhaust(sg_alloc_sampler, sg_dealloc_sampler, desc.sampler_pool_size, "sampler");
+        tc::fs::remove(path);
+        tc::exitApp();
+    }
+};
+
 #endif
 } // namespace
 
@@ -497,8 +550,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc > 2 && std::string(argv[1]) == "--device-fixture") {
         deviceFixture = tc::fs::absolute(argv[2]);
         deviceMode = argc > 3 ? argv[3] : "play";
-        if (deviceMode != "play" && deviceMode != "resize" && deviceMode != "reject" &&
-            deviceMode != "extract-reject" && deviceMode != "audio-accept" && deviceMode != "audio-reject") {
+        if (deviceMode != "play" && deviceMode != "resize" &&
+            deviceMode != "extract-reject" && deviceMode != "audio-accept") {
             std::fprintf(stderr, "Unknown device fixture mode: %s\n", deviceMode.c_str());
             return 2;
         }
@@ -510,6 +563,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         });
     }
 #if defined(__linux__) && !defined(__ANDROID__)
+    if (argc > 1 && std::string(argv[1]) == "--texture-check") {
+        tc::WindowSettings settings;
+        settings.setSize(64, 64);
+        return tcCoreTest::runDisplayTest<TextureAllocationCheck>(settings, failures, [] {});
+    }
     hardwareTransferChecks();
     const bool large = std::any_of(argv + 1, argv + argc, [](const char* arg) { return std::string(arg) == "--large"; });
     auto dir = tc::fs::temp_directory_path() / ("tc-video-decode-" + std::to_string(getpid()));

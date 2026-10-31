@@ -72,16 +72,14 @@ public:
     }
     bool isAudioStreaming() const { return audioStreaming_; }
 
-    LoadResult load(const fs::path& path) override {
+    LoadResult load(const fs::path& path) override try {
         internal::clearLoadName(sourcePath_);
-        const auto previousError = errorMessage_;
         if (initialized_) {
-            close();
+            closeInternal(false);
         }
-        errorMessage_ = previousError;
 
         // Resolve relative paths via getDataPath; URLs pass through untouched
-        // (the web backend streams straight from them). Display conversion
+        // (supported platform decoders stream straight from them). Display conversion
         // cannot create or hide the ASCII URL prefix, and accepts Windows
         // names holding unpaired UTF-16 surrogates.
         const std::string pathStr = internal::pathToDisplayUtf8(path);
@@ -93,14 +91,21 @@ public:
 
         // Platform-specific load
         if (!loadPlatform(resolvedPath)) {
-            auto warningBudget = decodeBudget_;
-            if (warningBudget) warningBudget->warn();
+            initialized_ = true;
+            closeInternal(false);
 #ifdef __EMSCRIPTEN__
             if (!webLoadResult_) return webLoadResult_;
 #endif
             return LoadResult::fail(LoadError::DecodeFailed,
                                     "platform decoder failed to open: " +
                                     internal::pathToDisplayUtf8(resolvedPath));
+        }
+
+        auto sizeResult = internal::checkImageSize(width_, height_);
+        if (!sizeResult) {
+            initialized_ = true;
+            closeInternal(false);
+            return sizeResult;
         }
 
         // Remember the resolved path so instance-level frame extraction
@@ -126,6 +131,14 @@ public:
             }
         }
 
+        if (sg_isvalid() && !(nv12Mode_
+                ? textureY_.isAllocated() && textureUV_.isAllocated()
+                : texture_.isAllocated())) {
+            initialized_ = true;
+            closeInternal(false);
+            return LoadResult::fail(LoadError::Unknown, "video texture allocation failed");
+        }
+
         clearPlaybackError();
         initialized_ = true;
         applyCachedStateToPlatform();
@@ -146,13 +159,21 @@ public:
         if (!postered) clearTexture();
 #endif
         return LoadResult::success();
+    } catch (const std::bad_alloc&) {
+        initialized_ = true;
+        closeInternal(false);
+        return LoadResult::fail(LoadError::Unknown);
     }
 
-    void close() override {
-        if (!initialized_) { clearPlaybackError(); return; }
+    void close() override { closeInternal(true); }
+
+private:
+    // Failed loads release partial resources without discarding a delivered error.
+    void closeInternal(bool clearError) {
+        if (!initialized_) { if (clearError) clearPlaybackError(); return; }
 
         closePlatform();
-        clearPlaybackError();
+        if (clearError) clearPlaybackError();
 
         texture_.clear();
         textureY_.clear();
@@ -171,7 +192,7 @@ public:
         firstFrameReceived_ = false;
         posterActive_ = false;
         posterUploadPending_ = false;
-        posterPx_.clear(); posterCredit_.reset();
+        posterPx_.clear();
         texUploadFrame_ = ~0ull;
         lastShownTime_ = -1.0f;
         pendingSeekSec_ = -1.0f;
@@ -179,17 +200,18 @@ public:
         width_ = 0;
         height_ = 0;
         sourcePath_.clear();
-        auto warningBudget = decodeBudget_;
-        if (warningBudget) warningBudget->warn();
+        auto warningStatus = decodeStatus_;
+        if (warningStatus) warningStatus->warn();
     }
 
+public:
     // =========================================================================
     // Update
     // =========================================================================
 
     void update() override {
-        auto warningBudget = decodeBudget_;
-        if (warningBudget) warningBudget->warn();
+        auto warningStatus = decodeStatus_;
+        if (warningStatus) warningStatus->warn();
         if (!initialized_) return;
 
         frameNew_ = false;
@@ -242,13 +264,13 @@ public:
         if (posterUploadPending_) {
             if (frameNew_) {
                 posterUploadPending_ = false;
-                posterPx_.clear(); posterCredit_.reset();
+                posterPx_.clear();
             } else if (posterPx_.isAllocated() && texture_.isAllocated()
                        && texUploadFrame_ != internal::deviceFrameCount()) {
                 texture_.loadData(posterPx_.getData(), width_, height_, 4);
                 texUploadFrame_ = internal::deviceFrameCount();
                 posterUploadPending_ = false;
-                posterPx_.clear(); posterCredit_.reset();
+                posterPx_.clear();
             }
         }
     }
@@ -476,7 +498,6 @@ private:
     bool  nv12Mode_       = false;
     bool  autoPoster_     = true;   // extract-and-show a poster on load/play
     bool  posterActive_   = false;  // poster currently on texture_ (until live)
-    std::shared_ptr<internal::VideoDecodeLease> posterCredit_;
     Pixels posterPx_;               // poster awaiting upload (deferred one frame)
     bool  posterUploadPending_ = false;  // upload posterPx_ on the next update()
     uint64_t texUploadFrame_ = ~0ull;    // sapp frame of the last texture_ upload
@@ -493,7 +514,7 @@ private:
 
     // Platform-specific handle
     void* platformHandle_ = nullptr;
-    std::shared_ptr<internal::VideoDecodeBudget> decodeBudget_;
+    std::shared_ptr<internal::VideoDecodeStatus> decodeStatus_;
 
     // Resolved path of the currently loaded video (empty when not loaded).
     // Used by getPath() and the instance-level frame-extraction overloads.
@@ -526,7 +547,6 @@ private:
         autoPoster_      = other.autoPoster_;
         posterActive_    = other.posterActive_;
         posterPx_        = std::move(other.posterPx_);
-        posterCredit_ = std::move(other.posterCredit_);
         posterUploadPending_ = other.posterUploadPending_;
         texUploadFrame_  = other.texUploadFrame_;
         lastShownTime_   = other.lastShownTime_;
@@ -534,11 +554,7 @@ private:
         nv12ShaderHandle_ = other.nv12ShaderHandle_;
         audioStreaming_ = other.audioStreaming_;
         platformHandle_  = other.platformHandle_;
-        decodeBudget_ = std::move(other.decodeBudget_);
-#ifdef __EMSCRIPTEN__
-        webDecodeBytes_ = other.webDecodeBytes_;
-        other.webDecodeBytes_ = 0;
-#endif
+        decodeStatus_ = std::move(other.decodeStatus_);
         sourcePath_      = std::move(other.sourcePath_);
 
         other.pixels_    = nullptr;
@@ -559,23 +575,20 @@ private:
     // timeSec <= 0 uses the keyframe path (frame 0 is a keyframe: exact+fast).
     // Marks the player ready (isReady) - drawing now shows a real picture.
     // Returns false when extraction is unavailable/failed (caller clears).
-    bool loadPosterFrame(float timeSec) {
+    bool loadPosterFrame(float timeSec) try {
         if (sourcePath_.empty() || width_ <= 0 || height_ <= 0) return false;
-        posterPx_.clear(); posterCredit_.reset();
+        posterPx_.clear();
         posterUploadPending_ = false;
-        auto credit = decodeBudget_ ? std::make_shared<internal::VideoDecodeLease>(
-            decodeBudget_, internal::VideoDecodeLimits::frameBytes) : nullptr;
-        if (credit && !credit->acquired()) { decodeBudget_->warn(); return false; }
         Pixels px;
         bool ok = (timeSec <= 0.001f)
-                      ? extractKeyFramePlatform(sourcePath_, px, 0.0f, nullptr, decodeBudget_)
-                      : extractFramePlatform(sourcePath_, px, timeSec, nullptr, decodeBudget_);
+                      ? extractKeyFramePlatform(sourcePath_, px, 0.0f, nullptr, decodeStatus_)
+                      : extractFramePlatform(sourcePath_, px, timeSec, nullptr, decodeStatus_);
         if (!ok || px.getWidth() != width_ || px.getHeight() != height_) return false;
-        if (credit) credit->shrink(size_t(width_) * height_ * 4);
         bool freshTexture = !texture_.isAllocated();
         if (freshTexture) {
             texture_.allocate(width_, height_, 4, TextureUsage::Stream);
         }
+        if (sg_isvalid() && !texture_.isAllocated()) return false;
         {
             // keep the CPU mirror in sync so getPixels() matches what is shown
             std::lock_guard<std::mutex> lock(mutex_);
@@ -592,22 +605,23 @@ private:
             texture_.loadData(px.getData(), width_, height_, 4);
             texUploadFrame_ = internal::deviceFrameCount();
             posterUploadPending_ = false;
-            posterPx_.clear(); posterCredit_.reset();
+            posterPx_.clear();
         } else {
             posterPx_ = std::move(px);
-            posterCredit_ = std::move(credit);
             posterUploadPending_ = true;
         }
         posterActive_ = true;
         lastShownTime_ = timeSec;    // the picture now belongs to this moment
         firstFrameReceived_ = true;  // isReady: a real picture is on the texture
         return true;
+    } catch (const std::bad_alloc&) {
+        return false;
     }
 
     void clearTexture() {
         if (width_ > 0 && height_ > 0 && pixels_) {
             std::lock_guard<std::mutex> lock(mutex_);
-            std::memset(pixels_, 0, width_ * height_ * 4);
+            std::memset(pixels_, 0, size_t(width_) * height_ * 4);
             texture_.loadData(pixels_, width_, height_, 4);
             texUploadFrame_ = internal::deviceFrameCount();
         }
@@ -619,7 +633,6 @@ private:
     bool loadPlatform(const fs::path& path);
 #ifdef __EMSCRIPTEN__
     LoadResult webLoadResult_;
-    size_t webDecodeBytes_ = 0;
 #endif
     void closePlatform();
     void playPlatform();
@@ -679,8 +692,10 @@ public:
     /// @param outDuration If non-null, receives video duration in seconds
     /// @return true on success
     static bool extractFrame(const fs::path& path, Pixels& outPixels,
-                             float timeSec, float* outDuration = nullptr) {
+                             float timeSec, float* outDuration = nullptr) try {
         return extractFramePlatform(path, outPixels, timeSec, outDuration);
+    } catch (const std::bad_alloc&) {
+        return false;
     }
 
     /// Extract the nearest keyframe at or before a time (static, faster).
@@ -691,8 +706,10 @@ public:
     /// @param outDuration If non-null, receives video duration in seconds
     /// @return true on success
     static bool extractKeyFrame(const fs::path& path, Pixels& outPixels,
-                                float timeSec, float* outDuration = nullptr) {
+                                float timeSec, float* outDuration = nullptr) try {
         return extractKeyFramePlatform(path, outPixels, timeSec, outDuration);
+    } catch (const std::bad_alloc&) {
+        return false;
     }
 
     /// Extract the exact frame at a time from the currently loaded video
@@ -700,7 +717,7 @@ public:
     bool extractFrame(Pixels& outPixels, float timeSec,
                       float* outDuration = nullptr) const {
         if (sourcePath_.empty()) return false;
-        return extractFramePlatform(sourcePath_, outPixels, timeSec, outDuration);
+        return extractFrame(sourcePath_, outPixels, timeSec, outDuration);
     }
 
     /// Extract the nearest keyframe at or before a time from the currently
@@ -708,7 +725,7 @@ public:
     bool extractKeyFrame(Pixels& outPixels, float timeSec,
                          float* outDuration = nullptr) const {
         if (sourcePath_.empty()) return false;
-        return extractKeyFramePlatform(sourcePath_, outPixels, timeSec, outDuration);
+        return extractKeyFrame(sourcePath_, outPixels, timeSec, outDuration);
     }
 
     // -------------------------------------------------------------------------
@@ -721,9 +738,8 @@ public:
     static bool extractFrame(const fs::path& path, Image& outImage,
                              float timeSec, float* outDuration = nullptr) {
         Pixels px;
-        if (!extractFramePlatform(path, px, timeSec, outDuration)) return false;
-        pixelsToImage(px, outImage);
-        return true;
+        if (!extractFrame(path, px, timeSec, outDuration)) return false;
+        return pixelsToImage(px, outImage);
     }
 
     /// Extract the nearest keyframe at or before a time into a ready-to-draw
@@ -731,9 +747,8 @@ public:
     static bool extractKeyFrame(const fs::path& path, Image& outImage,
                                 float timeSec, float* outDuration = nullptr) {
         Pixels px;
-        if (!extractKeyFramePlatform(path, px, timeSec, outDuration)) return false;
-        pixelsToImage(px, outImage);
-        return true;
+        if (!extractKeyFrame(path, px, timeSec, outDuration)) return false;
+        return pixelsToImage(px, outImage);
     }
 
     /// Extract the exact frame from the currently loaded video into a
@@ -754,20 +769,30 @@ public:
 
 private:
     // Move extracted pixels into a drawable Image (allocate + upload).
-    static void pixelsToImage(const Pixels& px, Image& img) {
+    // On failure the Image is left empty (cleared). Decode failures return before this step.
+    static bool pixelsToImage(const Pixels& px, Image& img) try {
         img.allocate(px.getWidth(), px.getHeight(), 4);
+        if (!img.getPixelsData()) return false;
         std::memcpy(img.getPixelsData(), px.getData(),
                     (size_t)px.getWidth() * px.getHeight() * 4);
         img.setDirty();
         img.update();
+        if (sg_isvalid() && !img.getTexture().isAllocated()) {
+            img.clear();
+            return false;
+        }
+        return true;
+    } catch (const std::bad_alloc&) {
+        img.clear();
+        return false;
     }
 
     static bool extractFramePlatform(const fs::path& path, Pixels& outPixels,
                                      float timeSec, float* outDuration,
-                                     std::shared_ptr<internal::VideoDecodeBudget> budget = {});
+                                     std::shared_ptr<internal::VideoDecodeStatus> status = {});
     static bool extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
                                         float timeSec, float* outDuration,
-                                     std::shared_ptr<internal::VideoDecodeBudget> budget = {});
+                                     std::shared_ptr<internal::VideoDecodeStatus> status = {});
 
     // Allow platform implementations to access internals
     friend class internal::VideoPlayerPlatformAccess;
@@ -790,7 +815,7 @@ public:
     static bool loadHeadlessForTests(VideoPlayer& player, const fs::path& path) {
         player.setUseHwAccel(false);
         if (!player.loadPlatform(path)) {
-            if (player.decodeBudget_) player.decodeBudget_->warn();
+            if (player.decodeStatus_) player.decodeStatus_->warn();
             return false;
         }
         player.initialized_ = true;
@@ -798,8 +823,8 @@ public:
     }
     static void playHeadlessForTests(VideoPlayer& player) { player.playPlatform(); }
     static void updateHeadlessForTests(VideoPlayer& player) {
-        auto warningBudget = player.decodeBudget_;
-        if (warningBudget) warningBudget->warn();
+        auto warningStatus = player.decodeStatus_;
+        if (warningStatus) warningStatus->warn();
         if (!player.initialized_) return;
         player.updatePlatform();
         player.dispatchPlaybackError();
@@ -818,10 +843,7 @@ public:
     }
 #endif
     static uint64_t decodeRejectionsForTests(const VideoPlayer& player) {
-        return player.decodeBudget_ ? player.decodeBudget_->rejected() : 0;
-    }
-    static size_t decodePeakBytesForTests(const VideoPlayer& player) {
-        return player.decodeBudget_ ? player.decodeBudget_->peak() : 0;
+        return player.decodeStatus_ ? player.decodeStatus_->rejected() : 0;
     }
     static void setDimensions(VideoPlayer& player, int w, int h) {
         player.width_ = w;

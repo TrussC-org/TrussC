@@ -606,7 +606,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     };
     check(complete(packed) && writer.getFrameCount() == 1,
           "recorder encodes frames that match the take size");
-    std::fill(destination.begin(), destination.end(), 0x7b);
+    std::fill(destination.begin(), destination.end(), static_cast<unsigned char>(0x7b));
     const std::vector<RecorderFrameLayout> differentSources = {
         internal::recorderPackedLayout(width, height * 2, F::BGRA8),
         internal::recorderPackedLayout(width * 2, height, F::BGRA8),

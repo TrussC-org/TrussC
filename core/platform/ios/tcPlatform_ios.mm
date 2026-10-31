@@ -97,12 +97,12 @@ float getDisplayScaleFactor() {
     return (float)[UIScreen mainScreen].scale;
 }
 
-IVec2 internal::mainWindowPosition() {
+IVec2 internal::singleWindowPosition() {
     logWarning("Platform") << "getWindowPosition() is not supported on iOS";
     return IVec2(-1, -1);
 }
 
-void internal::setMainWindowPosition(int x, int y) {
+void internal::setSingleWindowPosition(int x, int y) {
     logWarning("Platform") << "setWindowPosition() is not supported on iOS";
     (void)x; (void)y;
 }
@@ -112,7 +112,7 @@ void setWindowDecorated(bool decorated) {
     (void)decorated;
 }
 
-void internal::setMainWindowSizeLogical(int width, int height) {
+void internal::setSingleWindowSizeLogical(int width, int height) {
     // no-op on iOS (window size is fixed to screen size)
     (void)width;
     (void)height;
@@ -154,11 +154,8 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    // Admission also runs in the next frame's prelude, before any drawable
-    // exists. Query native framebuffer dimensions without acquiring or messaging
-    // the borrowed drawable from a swapchain pass.
-    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    const auto dimensions = windowDimensions(ctx);
+    return {size_t(std::max(0, dimensions.fbWidth)), size_t(std::max(0, dimensions.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {

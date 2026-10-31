@@ -109,7 +109,7 @@
         Use the following simgui_desc_t members to configure behaviour:
 
             int max_vertices
-                The maximum number of vertices used for UI rendering, default is 65536.
+                The initial vertex capacity for UI rendering, default is 65536; grows automatically.
                 sokol-imgui will use this to compute the size of the vertex-
                 and index-buffers allocated via sokol_gfx.h
 
@@ -458,7 +458,8 @@ extern "C" {
 #define _SIMGUI_LOG_ITEMS \
     _SIMGUI_LOGITEM_XMACRO(OK, "Ok") \
     _SIMGUI_LOGITEM_XMACRO(MALLOC_FAILED, "memory allocation failed") \
-    _SIMGUI_LOGITEM_XMACRO(BUFFER_OVERFLOW, "internal vertex/index buffer overflow (increase simgui_desc_t.max_vertices)")
+    _SIMGUI_LOGITEM_XMACRO(BUFFER_OVERFLOW, "internal vertex/index buffer overflow (increase simgui_desc_t.max_vertices)") \
+    _SIMGUI_LOGITEM_XMACRO(BUFFER_GROWN, "ImGui buffers grew") /* [TrussC] */
 
 #define _SIMGUI_LOGITEM_XMACRO(item,msg) SIMGUI_LOGITEM_##item,
 typedef enum simgui_log_item_t {
@@ -503,7 +504,7 @@ typedef struct simgui_logger_t {
 } simgui_logger_t;
 
 typedef struct simgui_desc_t {
-    int max_vertices;               // default: 65536
+    int max_vertices;               // initial capacity, default: 65536
     sg_pixel_format color_format;
     sg_pixel_format depth_format;
     int sample_count;
@@ -603,6 +604,8 @@ SOKOL_IMGUI_API_DECL void simgui_tc_destroy_context(simgui_tc_context ctx);
 
 #include <string.h> // memset
 #include <stdlib.h> // malloc/free
+#include <stdio.h> // snprintf
+#include <limits.h> // INT_MAX (sokol byte offsets)
 
 #if defined(__EMSCRIPTEN__) && !defined(SOKOL_DUMMY_BACKEND)
 #include <emscripten.h>
@@ -657,6 +660,7 @@ typedef struct {
     sg_pipeline pip_unfilterable;
     sg_range vertices;
     sg_range indices;
+    bool buffers_grown; // [TrussC] first-grow Notice is per context
     bool is_osx;
     void* imgui_ctx;    // [TrussC] the ImGuiContext* owned by this instance
 } _simgui_state_t;
@@ -2107,7 +2111,7 @@ static bool _simgui_is_osx(void) {
 static simgui_desc_t _simgui_desc_defaults(const simgui_desc_t* desc) {
     SOKOL_ASSERT((desc->allocator.alloc_fn && desc->allocator.free_fn) || (!desc->allocator.alloc_fn && !desc->allocator.free_fn));
     simgui_desc_t res = *desc;
-    res.max_vertices = _simgui_def(res.max_vertices, 65536);
+    res.max_vertices = res.max_vertices < 1 ? 65536 : res.max_vertices; // [TrussC]
     return res;
 }
 
@@ -2428,6 +2432,83 @@ static void _simgui_update_texture(ImTextureData* tex) {
 // ██       ██████  ██████  ███████ ██  ██████
 //
 // >>public
+// [TrussC] Grow before this frame's only upload. Failed replacements never
+// publish partial state; normal sokol destruction retires earlier GPU uses.
+static bool _simgui_buffer_sizes(size_t capacity, size_t* vertex_bytes, size_t* index_bytes) {
+    const size_t size_limit = (size_t)-1;
+    if (capacity > size_limit / sizeof(ImDrawVert) ||
+        capacity > size_limit / (3 * sizeof(ImDrawIdx))) {
+        return false;
+    }
+    *vertex_bytes = capacity * sizeof(ImDrawVert);
+    *index_bytes = capacity * 3 * sizeof(ImDrawIdx);
+    // Bound (representation): sokol stores both buffer byte sizes as signed int.
+    return *vertex_bytes <= INT_MAX && *index_bytes <= INT_MAX;
+}
+
+static void* _simgui_try_alloc(size_t bytes) {
+    return _simgui.desc.allocator.alloc_fn
+        ? _simgui.desc.allocator.alloc_fn(bytes, _simgui.desc.allocator.user_data)
+        : malloc(bytes);
+}
+
+static bool _simgui_grow_buffers(size_t vertex_bytes, size_t index_bytes) {
+    // Bound (representation): cap doubling so both 1:3 buffer byte sizes fit sokol's signed int storage.
+    const size_t vertex_limit = (size_t)INT_MAX / sizeof(ImDrawVert);
+    const size_t index_limit = (size_t)INT_MAX / (3 * sizeof(ImDrawIdx));
+    const size_t capacity_limit = vertex_limit < index_limit ? vertex_limit : index_limit;
+    size_t max_vertex_bytes, max_index_bytes;
+    if (!_simgui_buffer_sizes(capacity_limit, &max_vertex_bytes, &max_index_bytes) ||
+        vertex_bytes > max_vertex_bytes || index_bytes > max_index_bytes) return false;
+    size_t capacity = _simgui.vertices.size / sizeof(ImDrawVert);
+    size_t new_vertex_bytes = _simgui.vertices.size;
+    size_t new_index_bytes = _simgui.indices.size;
+    while (new_vertex_bytes < vertex_bytes || new_index_bytes < index_bytes) {
+        capacity = capacity > capacity_limit / 2 ? capacity_limit : capacity * 2;
+        if (!_simgui_buffer_sizes(capacity, &new_vertex_bytes, &new_index_bytes)) return false;
+    }
+    void* vertices = _simgui_try_alloc(new_vertex_bytes);
+    if (!vertices) return false;
+    void* indices = _simgui_try_alloc(new_index_bytes);
+    if (!indices) {
+        _simgui_free(vertices);
+        return false;
+    }
+    sg_buffer_desc vb_desc = sg_query_buffer_desc(_simgui.vbuf);
+    sg_buffer_desc ib_desc = sg_query_buffer_desc(_simgui.ibuf);
+    vb_desc.size = new_vertex_bytes;
+    ib_desc.size = new_index_bytes;
+    sg_buffer vbuf = sg_make_buffer(&vb_desc);
+    sg_buffer ibuf = sg_make_buffer(&ib_desc);
+    if (sg_query_buffer_state(vbuf) != SG_RESOURCESTATE_VALID ||
+        sg_query_buffer_state(ibuf) != SG_RESOURCESTATE_VALID) {
+        sg_destroy_buffer(vbuf);
+        sg_destroy_buffer(ibuf);
+        _simgui_free(vertices);
+        _simgui_free(indices);
+        return false;
+    }
+    const size_t previous_capacity = _simgui.vertices.size / sizeof(ImDrawVert);
+    sg_destroy_buffer(_simgui.vbuf);
+    sg_destroy_buffer(_simgui.ibuf);
+    _simgui_free((void*)_simgui.vertices.ptr);
+    _simgui_free((void*)_simgui.indices.ptr);
+    _simgui.vertices.ptr = vertices;
+    _simgui.vertices.size = new_vertex_bytes;
+    _simgui.indices.ptr = indices;
+    _simgui.indices.size = new_index_bytes;
+    _simgui.vbuf = vbuf;
+    _simgui.ibuf = ibuf;
+    if (!_simgui.buffers_grown) {
+        char message[256];
+        snprintf(message, sizeof(message), "ImGui draw data needed %zu vertices (had %zu); grew the buffers. Call imguiSetup(<vertices>) to start larger.",
+            vertex_bytes / sizeof(ImDrawVert), previous_capacity);
+        _simgui_log(SIMGUI_LOGITEM_BUFFER_GROWN, 3, message, __LINE__);
+        _simgui.buffers_grown = true;
+    }
+    return true;
+}
+
 SOKOL_API_IMPL void simgui_setup(const simgui_desc_t* desc) {
     SOKOL_ASSERT(desc);
     _simgui_clear(&_simgui, sizeof(_simgui));
@@ -2442,9 +2523,12 @@ SOKOL_API_IMPL void simgui_setup(const simgui_desc_t* desc) {
 
     // allocate an intermediate vertex- and index-buffer
     SOKOL_ASSERT(_simgui.desc.max_vertices > 0);
-    _simgui.vertices.size = (size_t)_simgui.desc.max_vertices * sizeof(ImDrawVert);
+    // [TrussC] Reject unrepresentable initial sizes before CPU/GPU allocation.
+    if (!_simgui_buffer_sizes((size_t)_simgui.desc.max_vertices, &_simgui.vertices.size, &_simgui.indices.size)) {
+        _SIMGUI_PANIC(MALLOC_FAILED);
+        return;
+    }
     _simgui.vertices.ptr = _simgui_malloc(_simgui.vertices.size);
-    _simgui.indices.size = (size_t)_simgui.desc.max_vertices * 3 * sizeof(ImDrawIdx);
     _simgui.indices.ptr = _simgui_malloc(_simgui.indices.size);
 
     // initialize Dear ImGui
@@ -2756,6 +2840,33 @@ SOKOL_API_IMPL void simgui_render(void) {
         return;
     }
 
+    // [TrussC] Preflight every list before copying/uploading anything.
+    size_t needed_vertices = 0;
+    size_t needed_indices = 0;
+    bool sizes_valid = true;
+    for (int i = 0; i < draw_data->CmdLists.Size; ++i) {
+        ImDrawList* cl = _simgui_imdrawlist_at(draw_data, i);
+        const size_t vcount = (size_t)cl->VtxBuffer.Size;
+        const size_t icount = (size_t)cl->IdxBuffer.Size;
+        if (vcount > (size_t)-1 / sizeof(ImDrawVert) ||
+            icount > (size_t)-1 / sizeof(ImDrawIdx)) { sizes_valid = false; break; }
+        const size_t vbytes = vcount * sizeof(ImDrawVert);
+        const size_t ibytes = icount * sizeof(ImDrawIdx);
+        if (vbytes > (size_t)-1 - needed_vertices ||
+            ibytes > (size_t)-1 - needed_indices) { sizes_valid = false; break; }
+        needed_vertices += vbytes;
+        needed_indices += ibytes;
+    }
+    // Bound (representation): sokol binding byte offsets are signed int, even on 64-bit platforms.
+    sizes_valid = sizes_valid && needed_vertices <= INT_MAX && needed_indices <= INT_MAX;
+    if (!sizes_valid || ((needed_vertices > _simgui.vertices.size || needed_indices > _simgui.indices.size) &&
+        !_simgui_grow_buffers(needed_vertices, needed_indices))) {
+        char message[192];
+        snprintf(message, sizeof(message), "ImGui buffers could not grow to %zu vertices; part of the UI was not drawn this frame.",
+            needed_vertices / sizeof(ImDrawVert));
+        _simgui_log(SIMGUI_LOGITEM_BUFFER_OVERFLOW, 1, message, __LINE__);
+    }
+
     // copy vertices and indices into an intermediate buffer so that
     // they can be updated with a single sg_update_buffer() call each
     // (sg_append_buffer() has performance problems on some GL platforms),
@@ -2766,14 +2877,17 @@ SOKOL_API_IMPL void simgui_render(void) {
     int cmd_list_count = 0;
     for (int cl_index = 0; cl_index < draw_data->CmdLists.Size; cl_index++, cmd_list_count++) {
         ImDrawList* cl = _simgui_imdrawlist_at(draw_data, cl_index);
+        if ((size_t)cl->VtxBuffer.Size > (size_t)-1 / sizeof(ImDrawVert) ||
+            (size_t)cl->IdxBuffer.Size > (size_t)-1 / sizeof(ImDrawIdx)) break;
         const size_t vtx_size = (size_t)cl->VtxBuffer.Size * sizeof(ImDrawVert);
         const size_t idx_size = (size_t)cl->IdxBuffer.Size * sizeof(ImDrawIdx);
 
-        // check for buffer overflow
-        if (((all_vtx_size + vtx_size) > _simgui.vertices.size) ||
-            ((all_idx_size + idx_size) > _simgui.indices.size))
+        // Bound (representation): copied byte totals must fit sokol's signed int binding offsets.
+        if ((vtx_size > _simgui.vertices.size - all_vtx_size) ||
+            (idx_size > _simgui.indices.size - all_idx_size) ||
+            (vtx_size > (size_t)INT_MAX - all_vtx_size) ||
+            (idx_size > (size_t)INT_MAX - all_idx_size))
         {
-            _SIMGUI_ERROR(BUFFER_OVERFLOW);
             break;
         }
 

@@ -1,5 +1,7 @@
 # Migrating to v0.8.0
 
+After updating to v0.8.0, delete existing build folders (or run a clean build).
+
 ## Box2D ownership and contact delivery
 
 World, Body, CircleBody, RectBody and PolyShape cannot be moved; construct them in place and store/move smart pointers when needed.
@@ -21,18 +23,22 @@ and is immediately reusable; a second `setup()` replaces the physics world.
 
 ## Stdin commands need `console::start()`
 
-Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. If your app subscribes to `events().console`, add `console::start()` in `setup()`:
+Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. `CoreEvents::console` / `events().console` has been removed. Subscribe once to
+`runtime().events().console` and add `console::start()` in `setup()`:
 
 ```cpp
 void MyApp::setup() {
-    consoleListener_ = events().console.listen([this](ConsoleEventArgs& e) {
+    consoleListener_ = runtime().events().console.listen([this](ConsoleEventArgs& e) {
         handleCommand(e);
     });
     console::start();
 }
 ```
 
-Keep `consoleListener_` as an `EventListener` member. Both runners pump commands on the main thread and stop delivery before `exit()` / `cleanup()`; no manual pump is needed.
+Keep `consoleListener_` as an `EventListener` member. Runtime pumps commands once on the main thread, before the first draw, after
+the first Window closes, with zero Windows and headless. Console has no App
+fan-out; subscriptions still carry their App owner token and retire on App
+ending. The service stops after App ending; no manual pump is needed.
 
 `console::stop()` disables delivery and drains pending commands. `console::start()` drains pending commands before enabling delivery again. The first start creates the process's only detached stdin reader, which continues consuming and discarding lines while stopped and ends at EOF. Restarting delivery does not create a new reader or replay discarded lines. Apps that never opt in leave stdin untouched. Web support remains unavailable.
 
@@ -227,3 +233,61 @@ Logical blend/depth flags retain continuity, separately from scoped pipeline sel
 The existing screen blend-after-Fbo behavior, offscreen premult handling and GPU point
 transform/size corrections remain for PR 4. Repeating `setBlendMode` explicitly selects
 that blend pipeline, even when the logical value already matches.
+
+## Default listener priority on App events is now 0
+
+On the events an App also receives (update, draw, exit, key, mouse, touch,
+windowResized and so on), `listen()` without a priority now registers at
+`EventPriority::BeforeApp` (`0`) instead of `100`. Other events still default
+to `100`.
+
+- A default listener ties with an explicit `0` and runs in registration order.
+  A default `a` registered before an explicit-0 `b` now runs `a`, then `b`
+  (before: `b`, then `a`).
+- Default listeners now run before explicit `1`–`99` (before: after them) and
+  before explicit `100` (before: same priority, mixed by registration order).
+- So a default listener that sets `e.consumed = true` now stops even an
+  explicit-100 listener that was registered earlier.
+
+Check listeners whose order matters, and give them an explicit priority:
+
+```cpp
+overlayListener = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 50);
+pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ });
+// Before (v0.7): pickListener had priority 100, so it ran after overlayListener.
+// After (v0.8):  pickListener has priority 0, so it now runs first.
+
+// To keep it after overlayListener, give it a priority above 50:
+pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 60);
+```
+
+## Process events and closing a Window
+
+App code uses `events()`; non-App code (addons, app-wide handling) uses
+`runtime().events()`. `exitRequested`, `deviceLost`, and `hotReloadUnload` retain
+the same names on both hubs. Runtime receives them first, then attached Apps in
+reverse attachment order (hot reload targets only replacing Apps). Quit and OS
+close give every listener fresh `cancel=false`, OR all vetoes, and count a throwing listener as a veto. Only process quit retains the first nonempty veto reason. Device loss keeps
+its mutable cancellation behavior.
+
+OS close queries the addressed Window's `closeRequested`, then (for last-window or quit-on-close) asks `exitRequested` before any closure. Either veto keeps all Windows open; both accepted use common process ending. A non-last ordinary OS close closes only that Window. Code `Window::close()` skips `closeRequested`. For the last open Window or `setQuitOnClose(true)`, it asks `exitRequested` before closing anything; any veto keeps every Window open. Otherwise it closes only that Window without events.
+
+
+App::exit also runs on setApp, destroyApp and reload, so it is unsuitable for a
+Window-close policy. Use setQuitOnClose for that policy; its process veto runs before closing anything. A Window exit listener runs after closure and cannot provide that guarantee.
+
+### OS close and process veto
+
+OS close first queries that Window's `closeRequested`. If accepted and the Window is the last open one or has `setQuitOnClose(true)`, Runtime queries `exitRequested` before closing anything. Either veto leaves every Window open. Both accepted use common process ending. Non-last ordinary OS close asks only `closeRequested`; `exitApp()` / Cmd+Q ask only `exitRequested`. Code `Window::close()` skips `closeRequested`; last-window/quit-on-close asks `exitRequested` before closing anything, and any veto keeps every Window open. A non-last plain code close asks no events. `CloseRequestEventArgs` contains only `cancel`; remove uses of its former `reason` field. `ExitRequestEventArgs::reason` remains the optional Windows shutdown-block text.
+
+```cpp
+class Document : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; // also keeps the last Window open on ×
+        });
+    }
+};
+```

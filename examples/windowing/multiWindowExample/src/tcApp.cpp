@@ -17,20 +17,20 @@
 
 void tcApp::setup() {
     logNotice("tcApp") << "Press W to open/close the second window";
-    fbo.allocate(320, 240);
+    fbo->allocate(320, 240);
 }
 
 void tcApp::update() {
     t += getDeltaTime();
 
     // Animate something into the shared FBO every main-window frame
-    fbo.begin();
+    fbo->begin();
     clear(0.1f, 0.1f, 0.15f);
     setColor(Color::fromHSB(fmodf(t * 0.1f, 1.0f), 0.7f, 1.0f));
     float cx = 160 + cosf(t * TAU * 0.25f) * 100;
     float cy = 120 + sinf(t * TAU * 0.4f) * 60;
     drawCircle(cx, cy, 40);
-    fbo.end();
+    fbo->end();
 }
 
 void tcApp::draw() {
@@ -49,7 +49,7 @@ void tcApp::draw() {
 
     // The same FBO also drawn here
     setColor(1.0f);
-    fbo.draw(20, 80, 320, 240);
+    fbo->draw(20, 80, 320, 240);
 
     // Main window's own mouse
     setColor(0.2f, 1.0f, 0.5f);
@@ -87,9 +87,7 @@ void tcApp::keyPressed(int key) {
         second = createWindow(ws);
         logNotice("tcApp") << (second ? "second window created" : "createWindow failed");
         if (second) {
-            subApp = make_shared<SubApp>();
-            subApp->sharedFbo = &fbo;
-            second->setApp(subApp);
+            second->setApp<SubApp>(fbo);
             // Place it where this app thinks it is, so the arrow keys and the
             // window agree from the first press.
             second->setPosition(secondPos.x, secondPos.y);

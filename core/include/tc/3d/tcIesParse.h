@@ -42,23 +42,22 @@ inline bool parseIes(const std::string& data, IesParseResult& result,
         return false;
     }
 
-    // Tokenizing the optional TILT block too bounds its skip by actual data.
-    // Extraction stops immediately on a failed stream.
+    // Collect only required values, including the optional TILT block.
+    // Grow storage only after extracting an actual finite value, never from a count.
     std::vector<float> tokens;
-    float value;
-    for (;;) {
-        // Establish clean EOF before attempting a token. A token extraction
-        // failure is malformed even when it also consumes the end of input.
-        iss >> std::ws;
-        if (iss.eof()) break;
-        if (!(iss >> value)) { error = "invalid numeric IES data"; return false; }
-        if (!std::isfinite(value)) { error = "non-finite IES value"; return false; }
-        tokens.push_back(value);
-    }
+    const auto readTokens = [&](std::size_t count) {
+        for (std::size_t n = 0; n < count; ++n) {
+            float value;
+            if (!(iss >> value)) { error = "invalid numeric IES data"; return false; }
+            if (!std::isfinite(value)) { error = "non-finite IES value"; return false; }
+            tokens.push_back(value);
+        }
+        return true;
+    };
 
     const auto validCount = [](float count, int minimum, std::size_t remaining) {
         // Compare without rounding INT_MAX up to the next float before casting.
-        // Bound (abi): file angle counts must fit int indices and the available token count. Overflow rejects the IES data.
+        // Bound (abi): file counts must fit int indices and available input bytes; actual values are checked before output allocation. Overflow rejects the IES data.
         return std::isfinite(count) && std::trunc(count) == count && count >= minimum &&
                static_cast<double>(count) <= std::numeric_limits<int>::max() &&
                static_cast<long double>(count) <= remaining;
@@ -67,29 +66,28 @@ inline bool parseIes(const std::string& data, IesParseResult& result,
     std::size_t idx = 0;
     if (includeTilt) {
         // <orientation> <numPairs> <angles...> <factors...>
-        if (tokens.size() < 2 || !validCount(tokens[1], 0, tokens.size() - 2)) {
+        if (!readTokens(2)) return false;
+        if (!validCount(tokens[1], 0, data.size() - 2)) {
             error = "invalid TILT pair count";
             return false;
         }
         const auto numPairs = static_cast<std::size_t>(static_cast<int>(tokens[1]));
-        if (numPairs > (tokens.size() - 2) / 2) {
+        // Bound (abi): the TILT pair product must fit available input bytes before extraction. Overflow rejects the IES data.
+        if (numPairs > (data.size() - 2) / 2) {
             error = "not enough TILT data";
             return false;
         }
+        if (!readTokens(numPairs * 2)) return false;
         idx = 2 + numPairs * 2;
     }
 
     constexpr std::size_t headerSize = 13;
-    if (tokens.size() - idx < headerSize) {
-        error = "insufficient numeric data";
-        return false;
-    }
+    if (!readTokens(headerSize)) return false;
     const float candelaMultiplier = tokens[idx + 2];
     const float vertCount = tokens[idx + 3];
     const float horizCount = tokens[idx + 4];
     idx += headerSize;
-    const std::size_t remaining = tokens.size() - idx;
-    if (!validCount(vertCount, 1, remaining) || !validCount(horizCount, 1, remaining)) {
+    if (!validCount(vertCount, 1, data.size()) || !validCount(horizCount, 1, data.size())) {
         error = "invalid angle count";
         return false;
     }
@@ -104,6 +102,11 @@ inline bool parseIes(const std::string& data, IesParseResult& result,
         return false;
     }
     const std::size_t needed = numVert + numHoriz + numVert * numHoriz;
+    if (!readTokens(needed)) return false;
+    // Trailing means every byte after the last required value: ignore the
+    // remainder without parsing, including a lone DOS EOF (0x1A), 0x1A followed
+    // by bytes, text, and extra numeric values (as the old numeric-prefix parser did).
+    const std::size_t remaining = tokens.size() - idx;
     // Bound (security): untrusted IES table dimensions must fit actual file tokens to bound output allocation by input. Overflow rejects the IES data.
     if (needed > remaining) {
         error = "not enough angle or candela data";

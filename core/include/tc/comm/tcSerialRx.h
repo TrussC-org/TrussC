@@ -27,10 +27,12 @@ struct SerialRxBuffer {
     // Internal allocation seam: a null result must work without exceptions,
     // including Web builds. Successful allocations must be free()-compatible.
     using Allocate = void* (*)(size_t);
-    explicit SerialRxBuffer(Allocate allocate = std::malloc) : allocate_(allocate) {}
+    explicit SerialRxBuffer(Allocate allocate = std::malloc, size_t limit = capacity)
+        : allocate_(allocate), limit_(limit) {}
     ~SerialRxBuffer() { clear(); }
 
     size_t size() const { return size_; }
+    size_t capacityBytes() const { return limit_; }
     size_t allocatedBytes() const { return chunks_ * sizeof(Chunk); }
 
     void clear() {
@@ -53,9 +55,9 @@ struct SerialRxBuffer {
         const size_t needed = length > std::numeric_limits<size_t>::max() - size_
                             ? std::numeric_limits<size_t>::max() : size_ + length;
         // Subtract first: even a single enormous driver chunk cannot wrap.
-        const size_t incomingSkip = length > capacity ? length - capacity : 0;
+        const size_t incomingSkip = length > limit_ ? length - limit_ : 0;
         const size_t retained = length - incomingSkip;
-        const size_t fromBuffer = size_ > capacity - retained ? size_ - (capacity - retained) : 0;
+        const size_t fromBuffer = size_ > limit_ - retained ? size_ - (limit_ - retained) : 0;
         discard(fromBuffer);
         countLoss(fromBuffer + incomingSkip);
         data += incomingSkip;
@@ -139,6 +141,7 @@ private:
     Chunk* tail_ = nullptr;
     size_t size_ = 0, chunks_ = 0;
     Allocate allocate_;
+    const size_t limit_;
     OnceGate backlogWarned_, dropWarned_;
     // Captured by append, under mutex; flush/read cannot change a pending
     // diagnostic. The main thread takes these plain values; the worker

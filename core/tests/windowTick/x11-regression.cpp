@@ -268,6 +268,7 @@ static void frame() {
 }
 static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display* display) {
     _sapp_tc = {}; main = {};
+    main.win_id = 1;
     main.is_main = main.ready = main.trust_hidden_signals = true; main.xwin = 1; main.drawable = (EGLSurface)1;
     main.dpi_scale = 1; main.fb_width = main.fb_height = 64;
     main.desc.event_cb = _sapp_tc_main_event_tramp;
@@ -324,6 +325,7 @@ int main() {
     }
     _sapp_tc_window_t secondary{}; secondary.ready = secondary.trust_hidden_signals = true; secondary.xwin = 2;
     secondary.drawable = (EGLSurface)2; secondary.earliest_next = 20;
+    secondary.fb_width = secondary.fb_height = 64; // initialized native metadata precedes readiness
     _sapp_tc_window_t* pair[] = { &main, &secondary };
     reset(main, pair, display); _sapp_tc.window_slots = 2;
     main.win_id = 1; secondary.win_id = 2;

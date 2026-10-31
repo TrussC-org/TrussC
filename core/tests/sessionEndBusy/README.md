@@ -1,43 +1,24 @@
-# macOS session end while a callback is paused (#239)
+# OS session ending
 
-A logout, restart or shutdown that reaches a macOS app while one of its native
-callbacks is on the stack (here: an `update()` spinning the run loop) is
-handled like Win32's WM_ENDSESSION. The App is not asked, and the session is
-not cancelled. From the moment the session-end path starts until the process
-ends, the framework is frozen: only the exit notifications, audio stop and the
-exit log run. No tick, event, App attach/detach, deferred close or window
-creation is admitted, and a Window released by an exit hook is not torn down.
-A window released during the session-end notification is still notified, but
-weak_ptrs to it expire as usual.
+Run `test.py` and `native-test.py` through tcbuild.sh on Linux.
+These tests never log out the host. Historical HEAD-negative probes and their failing assertions are retained in
+`.verification/c3-trim/regressions/` and the matching logs.
 
-The notification reaches the windows open when it starts: main first, then the
-others newest first, each in its own window context, and only the BeforeApp
-and App bands of `events().exit` (protected AfterApp hooks are skipped). Then
-the backend ends the process with `_exit(app exit code)`. No GPU, window or
-App teardown happens, and no atexit handler or static destructor runs.
+Busy means App code on the main stack, including constructors and native ticks.
+Busy commit calls no App exit, cleanup or watchdog. Windows returns to the OS;
+macOS takes `_exit(0)` without static destructors or an App callback. The Linux
+seam compiles the actual mac busy probe and commit decision to verify that route.
+Workers alone do not bypass an idle main's veto.
 
-Run without arguments, the test launches itself as a real TrussC app once per
-scenario. Each child's App owns two secondary windows, A then B. Each child
-dispatches a logout quit Apple event in-process. The parent checks the child's
-output and exit status:
+Idle coverage retains veto/cancel/query dedupe, reverse exact-once exits,
+commit dedupe, complete cleanup, one shared deadline (default 3 seconds), numeric
+configuration and zero/infinity. Native seams retain Windows hidden-HWND
+session authority, macOS reasons and main-queue workspace notification delivery.
+`test.py --tsan` instruments Runtime and the deadline implementation.
 
-- **busy, code 7 and code 0:** exit status equals the app code. Every
-  `App::exit` runs exactly once, in the order main, B, A, each seeing its own
-  window's width and `events()`, with the App still attached. No AfterApp exit
-  hook and no `App::cleanup()` runs. At the final exit log line the GPU is
-  still valid and audio is stopped. No atexit or static-destructor marker
-  appears, and control never returns to the paused callback.
-- **exit hooks that act:** main's `App::exit` requests and reaches a detach of
-  A, creates windows, dispatches a second logout, sends a key to B and spins
-  the run loop; A's `App::exit` drops A's last owner. All of that is inert:
-  each `App::exit` still runs once, creation is refused (logged once, no
-  native window), and no tick or event reaches an App.
-- **busy in A's callback:** main's `App::exit` drops A, whose context is the
-  interrupted one; the session end keeps it valid (checked under ASan too).
-- **not busy, code 7:** the normal path, recording the normal order (main,
-  then B, A as main's App releases its members). Full cleanup runs every
-  App's exit and cleanup, the AfterApp hooks and GPU teardown; `std::exit`
-  runs the process exit handlers, and the status is 7.
-
-It needs a window server session (any macOS desktop or CI runner). Other
-platforms print SKIP.
+`--mac-device` runs only idle and busy-no-exit Apple-event children on a real
+Mac. Run under an external timeout; no macOS device result is claimed on Linux.
+Real Win/mac drag/modal logout, idle 2/5/10-second exits, the hidden HWND and
+headless delivery still require supervised device passes. The workspace observer
+stays until a device pass establishes whether every termination Apple event
+arrives, making the observer redundant.

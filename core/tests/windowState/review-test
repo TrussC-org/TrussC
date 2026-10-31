@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Link real host/runtime with each desktop tick and the Linux native event bridge.
+
+Run through tcbuild.sh after building allCoreTests. TC_WINDOW_REVIEW_SOURCE may
+select a private source overlay for pre-fix/mutation runs. No SDK/device claim
+is made for the extracted Win32/macOS adapter bodies.
+"""
+from pathlib import Path
+from contextlib import nullcontext
+import json
+import os
+import shlex
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / 'tools/tests'))
+from test_web_window_controls import body
+
+OVERLAY = Path(os.environ.get('TC_WINDOW_REVIEW_SOURCE', ROOT))
+BUILD = Path(os.environ.get('TC_WINDOW_REVIEW_BUILD', ROOT / 'core/tests/allCoreTests/build-linux'))
+
+
+def source(name):
+    path = OVERLAY / name
+    return path if path.exists() else ROOT / name
+
+
+def main():
+    commands = json.loads((BUILD / 'compile_commands.json').read_text())
+    entry = next(x for x in commands if x['file'].endswith('tcWindowRuntime.cpp'))
+    flags = shlex.split(entry['command'])
+    compiler, flags = flags[0], flags[1:]
+    # Preserve the production backend, include paths and definitions. Redirect
+    # private EGL source includes to this checkout and any requested overlay.
+    include_root = Path(entry['file']).parents[2]
+    flags = [x.replace(str(include_root), str(ROOT / 'core/include')) for x in flags]
+    stripped, skip = [], False
+    for flag in flags:
+        if skip:
+            skip = False
+        elif flag == '-o':
+            skip = True
+        elif flag != '-c' and not flag.endswith('tcWindowRuntime.cpp') and not flag.startswith(('-O', '-g')):
+            stripped.append(flag)
+    flags = ['-I' + str(OVERLAY / 'core/include'), *stripped, '-O0', '-g0']
+    probe = '#include <TrussC.h>\n#include <cstdio>\n#include <stdexcept>\nusing namespace trussc;\n'
+    probe += '#include "' + str(ROOT / 'core/tests/windowState/src/resizeDeliveryChecks.h') + '"\n'
+    probe += r'''
+int checks=0, failures=0;
+void check(const char* name, bool ok) {
+    ++checks; if (!ok) { ++failures; printf("hidden-reentry: FAIL: %s\n", name); }
+}
+struct Native { sapp_tc_window_metadata metadata{}; int acquisitions=0; };
+bool read(sapp_window, void* p, sapp_tc_window_metadata& m) { m=static_cast<Native*>(p)->metadata; return true; }
+sg_swapchain acquire(sapp_window, void* p) { ++static_cast<Native*>(p)->acquisitions; return {}; }
+const internal::WindowNativeOperations operations{read,acquire,nullptr};
+struct Probe : App {
+    Window* owner=nullptr;
+    bool nested=false, resizing=false, cleanedInside=false, exitedInside=false;
+    int sizes=0, cleanups=0, exits=0;
+    void windowResized(int,int) override {
+        ++sizes;
+        if (!nested) return;
+        resizing=true;
+        owner->setApp(std::make_shared<App>());
+        sapp_event event{}; event.type=SAPP_EVENTTYPE_FOCUSED;
+        internal::mainWindowEvent(&event,{700},owner);
+        check("replacement remains queued until resize returns", owner->getApp().get()==this && cleanups==0 && exits==0);
+        resizing=false;
+    }
+    void cleanup() override { ++cleanups; cleanedInside |= resizing; }
+    void exit() override { ++exits; exitedInside |= resizing; }
+};
+void exercise(void (*tick)(sapp_window,void*), const char* name) {
+    Window window; Native native;
+    auto& m=native.metadata;
+    m.fb_width=m.fb_height=100; m.dpi_scale=1; m.sample_count=1;
+    m.color_format=SAPP_PIXELFORMAT_RGBA8; m.depth_format=SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    m.trust_hidden_signals=true;
+    check("bind real host state", internal::bindWindow(window,{700},operations,&native));
+    auto app=std::make_shared<Probe>(); app->owner=&window;
+    window.setApp(app); internal::applyPendingAppForTests(window);
+    const int initialSizes=app->sizes;
+    auto raw=window.events().rawEvent.listen([](const sapp_event& event) {
+        if (event.type==SAPP_EVENTTYPE_RESIZED) throw std::runtime_error("review resize interruption");
+    });
+    m.fb_width=m.fb_height=150;
+    sapp_event event{}; event.type=SAPP_EVENTTYPE_RESIZED;
+    internal::mainWindowEvent(&event,{700},&window);
+    check("raw exception leaves native/App size out of sync", window.context().fbWidth==150 && app->getWidth()==100 && app->sizes==initialSizes);
+    raw.disconnect();
+    m.occluded=true; app->nested=true;
+    tick({700},&window);
+    check("hidden resize runs callback once", app->sizes==initialSizes+1);
+    check("hidden callback never cleans or exits its outgoing App", !app->cleanedInside && !app->exitedInside);
+    check("hidden boundary applies queued replacement afterward", window.getApp()!=app && app->cleanups==1 && app->exits==1);
+    check("hidden size delivery acquires no drawable", native.acquisitions==0);
+    internal::WindowRequestAccess::unbind(window); internal::WindowRequestAccess::endApp(window);
+    printf("hidden-reentry: %s completed\n",name);
+}
+void resizeDelivery(bool main, bool pixels) {
+    internal::pixelPerfectMode()=pixels;
+    Window secondary;
+    Window& window=main ? *internal::mainWindow() : secondary;
+    internal::WindowRequestAccess::resetForLaunch(window);
+    Native native;
+    auto& m=native.metadata;
+    m.fb_width=m.fb_height=100; m.dpi_scale=2; m.sample_count=1;
+    m.color_format=SAPP_PIXELFORMAT_RGBA8; m.depth_format=SAPP_PIXELFORMAT_DEPTH_STENCIL;
+    m.trust_hidden_signals=true; m.occluded=true;
+    const sapp_window handle{main ? 801u : 802u};
+    check("resize probe binds both ownership roots", internal::bindWindow(window,handle,operations,&native));
+    auto app=std::make_shared<Probe>(); app->owner=&window;
+    window.setApp(app); internal::applyPendingAppForTests(window);
+    // Prevent GPU work in the main frame body; size admission still executes.
+    window.setIndependentFps(4,EVENT_DRIVEN); window.context().loop.redrawCount=0;
+    auto event=[&] {
+        sapp_event e{}; e.type=SAPP_EVENTTYPE_RESIZED;
+        if (main) internal::mainWindowEvent(&e,handle,&window);
+        else internal::mainWindowEvent(&e,handle,&window);
+    };
+    auto tick=[&] {
+        internal::windowTick(handle, &window);
+    };
+    checkResizeDelivery(window,m,app,event,tick,check);
+    check("resize probe does not acquire a drawable", native.acquisitions==0);
+    internal::WindowRequestAccess::unbind(window); internal::WindowRequestAccess::endApp(window);
+    printf("resize-delivery: %s %s completed\n",main?"main":"secondary",pixels?"pixels":"logical");
+}
+int main() {
+    getMainThreadId();
+    exercise(internal::windowTick,"common host tick");
+    for (bool pixels : {false,true}) {
+        resizeDelivery(true,pixels); resizeDelivery(false,pixels);
+    }
+    printf("hidden-reentry: %d checks, %d failures\n",checks,failures);
+    return failures?1:0;
+}
+'''
+    output = os.environ.get('TC_WINDOW_REVIEW_OUTPUT')
+    if output:
+        Path(output).mkdir(parents=True, exist_ok=True)
+    with (nullcontext(output) if output else tempfile.TemporaryDirectory(prefix='tc-hidden-reentry-')) as folder:
+        folder = Path(folder)
+        generated = folder / 'probe.cpp'
+        generated.write_text(probe)
+        objects = []
+        compile_commands = []
+        for label, path in [('probe', generated), ('global', source('core/include/tc/app/tcGlobal.cpp')),
+                            ('runtime', source('core/include/tc/app/tcWindowRuntime.cpp'))]:
+            obj = folder / (label + '.o')
+            command = [compiler, *flags, '-I' + str(ROOT / 'core/include/tc/app'), '-c', str(path), '-o', str(obj)]
+            compile_commands.append(command)
+            subprocess.run(command, check=True)
+            objects.append(str(obj))
+        link = shlex.split((BUILD / 'CMakeFiles/allCoreTests.dir/link.txt').read_text())
+        libraries = link[next(i for i, x in enumerate(link) if x.endswith('libTrussC.a')):]
+        binary = folder / 'probe'
+        command = [link[0], *objects, *libraries, '-o', str(binary)]
+        (folder / 'commands.json').write_text(json.dumps({'compile': compile_commands, 'link': command, 'cwd': str(BUILD)}, indent=2))
+        subprocess.run(command, cwd=BUILD, check=True)
+        subprocess.run([str(binary)], check=True)
+
+
+if __name__ == '__main__':
+    main()

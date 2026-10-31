@@ -1,3 +1,2 @@
-trussc_compile_shaders(pipelineLut "${TRUSSC_DIR}/../addons/tcxLut/src/shaders")
-trussc_compile_shaders(pipelineHap "${TRUSSC_DIR}/../addons/tcxHap/src/shaders")
-target_link_libraries(${PROJECT_NAME} PRIVATE pipelineLut_shaders pipelineHap_shaders)
+# Synthetic inputs exercise draw paths without codec or addon dependencies.
+include("${CMAKE_CURRENT_LIST_DIR}/../common/drawPathShaders.cmake")

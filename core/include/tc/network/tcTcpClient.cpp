@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "tc/network/tcTcpClient.h"
+#include <stdexcept>
 #ifndef _WIN32
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -17,6 +18,7 @@
 #include <cstring>
 #include <algorithm>
 #include <climits>
+#include <limits>
 
 namespace trussc {
 namespace {
@@ -450,27 +452,9 @@ void TcpClient::State::resetConnection() {
     if (tcpWorkerState != this) keptThreads_.release(receiveThread_);
 }
 
-bool TcpClient::State::deliverReceive(TcpReceiveEventArgs& args) {
+void TcpClient::State::deliverReceive(TcpReceiveEventArgs& args) {
     auto run = internal::sharedLoad(receiveDeliveryRun_);
-    if (onReceive.notifyExternal(args, run)) return true;
-    run->store(false, std::memory_order_release);
-    // An Inline listener may have reconnected or destroyed the owner. The old
-    // run still loses its queued chunks, but must not notify the replacement.
-    if (!*alive_) return false;
-    // A missing chunk is a stream gap. Close before notifying user code;
-    // socket teardown runs inline; send completions keep their uncapped path.
-    running_ = false;
-    connected_ = false;
-    connectPending_ = false;
-    resetConnection();
-    // Teardown can complete pending sends, whose Inline listeners may
-    // reconnect; check again so a retired run never notifies the replacement.
-    if (!*alive_) return false;
-    TcpDisconnectEventArgs disconnected;
-    disconnected.reason = "External main-thread delivery overflow";
-    disconnected.wasClean = false;
-    onDisconnect.notify(disconnected);
-    return false;
+    onReceive.notifyExternal(args, run);
 }
 
 bool TcpClient::State::isConnected() const {
@@ -491,7 +475,9 @@ bool TcpClient::State::send(const void* data, size_t size) {
     internal::TcpSendItem item;
     item.borrowed = data;
     item.size = size;
-    auto waiter = std::make_shared<internal::TcpSendWaiter>();
+    std::shared_ptr<internal::TcpSendWaiter> waiter;
+    try { waiter = std::make_shared<internal::TcpSendWaiter>(); }
+    catch (const std::bad_alloc&) { return false; }
     item.waiter = waiter;
     if (!enqueue(std::move(item))) return false;
     if (!ch->threaded) {
@@ -631,7 +617,8 @@ SendResult TcpClient::State::enqueue(internal::TcpSendItem&& item) {
     std::unique_lock<std::mutex> lock(ch->mutex);
     auto room = [&] {
         size_t mark = sendAsyncBufferSize_;
-        return !ch->open || mark == 0 || ch->pendingBytes < mark;
+        return !ch->open || ((mark == 0 || ch->pendingBytes < mark) &&
+            item.size <= (std::numeric_limits<size_t>::max)() - ch->pendingBytes);
     };
     if (!room()) {
         if (!item.waiter) {
@@ -658,7 +645,8 @@ SendResult TcpClient::State::enqueue(internal::TcpSendItem&& item) {
     }
     item.id = ++nextSendId_;
     const uint64_t id = item.id;
-    ch->queue.push_back(std::move(item));
+    try { ch->queue.push_back(std::move(item)); }
+    catch (const std::bad_alloc&) { return {SendError::AllocationFailed, 0}; }
     ch->pendingBytes += ch->queue.back().size;
     lock.unlock();
     ch->queued.notify_one();
@@ -667,9 +655,15 @@ SendResult TcpClient::State::enqueue(internal::TcpSendItem&& item) {
 
 SendResult TcpClient::State::sendAsync(const void* data, size_t size) {
     internal::TcpSendItem item;
-    auto bytes = std::make_shared<std::vector<char>>(size);
-    if (size) std::memcpy(bytes->data(), data, size);
-    item.owned = std::move(bytes);
+    try {
+        auto bytes = std::make_shared<std::vector<char>>(size);
+        if (size) std::memcpy(bytes->data(), data, size);
+        item.owned = std::move(bytes);
+    } catch (const std::bad_alloc&) {
+        return {SendError::AllocationFailed, 0};
+    } catch (const std::length_error&) {
+        return {SendError::AllocationFailed, 0};
+    }
     item.size = size;
     return enqueue(std::move(item));
 }
@@ -677,7 +671,8 @@ SendResult TcpClient::State::sendAsync(const void* data, size_t size) {
 SendResult TcpClient::State::sendAsync(std::vector<char>&& data) {
     internal::TcpSendItem item;
     item.size = data.size();
-    item.owned = std::make_shared<const std::vector<char>>(std::move(data));
+    try { item.owned = std::make_shared<const std::vector<char>>(std::move(data)); }
+    catch (const std::bad_alloc&) { return {SendError::AllocationFailed, 0}; }
     return enqueue(std::move(item));
 }
 
@@ -925,7 +920,7 @@ bool TcpClient::State::processPlainNetworkStep(const AliveToken& alive) {
         if (received > 0) {
             TcpReceiveEventArgs args;
             args.data.assign(recvBuf_.begin(), recvBuf_.begin() + received);
-            if (!deliverReceive(args)) return false;
+            deliverReceive(args);
             // An onReceive listener may have destroyed the client (an owner
             // that replaces it from a close it handles inline, say)
             if (!*alive) return false;

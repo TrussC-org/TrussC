@@ -1,4 +1,6 @@
 #include <TrussC.h>
+#include "../../common/tcInjectedWindowTest.h"
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
@@ -10,6 +12,7 @@ namespace {
 int failures = 0;
 void check(const char* label, bool ok) {
     std::printf("appEventDelivery: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
     if (!ok) ++failures;
 }
 std::map<std::string, std::string> order;
@@ -18,6 +21,7 @@ bool treeConsumes = false, releaseConsumes = false, rootConsumes = false, dragCo
 int updates = 0, draws = 0, exits = 0, touches = 0;
 bool tested = false;
 int postClearFrames = 0;
+int resizeExtent = 100;
 
 // Stages are installed on both sides of the actual launcher binding.
 void stages(bool before) {
@@ -40,17 +44,38 @@ void stages(bool before) {
     STAGE(windowResized); STAGE(filesDropped);
 #undef STAGE
 }
+bool readResizeMetadata(sapp_window, void* user, sapp_tc_window_metadata& out) {
+    out = *static_cast<sapp_tc_window_metadata*>(user); return true;
+}
 void feed(sapp_event_type type, float x = 20, float y = 20, unsigned int modifiers = 0) {
     sapp_event e{};
     e.type = type; e.key_code = SAPP_KEYCODE_A;
     e.mouse_button = SAPP_MOUSEBUTTON_LEFT;
     e.mouse_x = x; e.mouse_y = y; e.modifiers = modifiers;
     e.scroll_y = 1;
+    auto& binding = internal::WindowRequestAccess::binding(*internal::resolveWindow());
+    const auto* originalOperations = binding.operations;
+    void* originalUser = binding.user;
+    auto operations = originalOperations ? *originalOperations : internal::WindowNativeOperations{};
+    auto metadata = binding.metadata;
+    if (type == SAPP_EVENTTYPE_RESIZED) {
+        // Real input refreshes the actual native extent between these injected
+        // events. Alternate explicit revisions, independent of that refresh.
+        resizeExtent = resizeExtent == 96 ? 100 : 96;
+        metadata.fb_width = metadata.fb_height = resizeExtent;
+        metadata.dpi_scale = internal::windowApiContext().dpiScale;
+        if (metadata.sample_count <= 0) metadata.sample_count = internal::windowApiContext().swapchainTarget.sampleCount;
+        if (metadata.color_format == SAPP_PIXELFORMAT_NONE) metadata.color_format = SAPP_PIXELFORMAT_RGBA8;
+        if (metadata.depth_format == SAPP_PIXELFORMAT_NONE) metadata.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
+        operations.readMetadata = readResizeMetadata;
+        binding.operations = &operations; binding.user = &metadata;
+    }
     if (type >= SAPP_EVENTTYPE_TOUCHES_BEGAN && type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED) {
         e.num_touches = 1; e.touches[0].identifier = 42;
         e.touches[0].pos_x = x; e.touches[0].pos_y = y; e.touches[0].changed = true;
     }
-    internal::_event_cb(&e);
+    tcCoreTest::dispatchMainEvent(&e);
+    binding.operations = originalOperations; binding.user = originalUser;
 }
 void expect(const char* name, const char* expected) {
     if (order[name] != expected)
@@ -72,13 +97,27 @@ struct Probe : RectNode {
     bool onMousePress(const MouseEventArgs&) override { order["mousePressed"] += 't'; return treeConsumes; }
     bool onMouseRelease(const MouseEventArgs&) override { order["mouseReleased"] += 't'; return releaseConsumes; }
     bool onMouseDrag(const MouseDragEventArgs&) override { order["mouseDragged"] += 't'; return treeConsumes && dragConsumes; }
-    bool onMouseMove(const MouseMoveEventArgs&) override { order[internal::currentMouseButton < 0 ? "mouseMoved" : "mouseDragged"] += 't'; return treeConsumes; }
+    bool onMouseMove(const MouseMoveEventArgs&) override { order[internal::currentWindowContext().mouseButton < 0 ? "mouseMoved" : "mouseDragged"] += 't'; return treeConsumes; }
     bool onMouseScroll(const ScrollEventArgs&) override { order["mouseScrolled"] += 't'; return treeConsumes; }
     bool onKeyPress(const KeyEventArgs&) override { order["keyPressed"] += 't'; return treeConsumes; }
     bool onKeyRelease(const KeyEventArgs&) override { order["keyReleased"] += 't'; return treeConsumes; }
 };
+void inputChecks(); void cameraChecks(); void clearChecks();
+bool exitOrderMode = false;
 struct DeliveryApp : App {
-    DeliveryApp() { stages(false); }
+    DeliveryApp() {
+        stages(true); stages(false);
+        listeners.push_back(events().afterFrame.listen([] {
+            if (exitOrderMode) { exitApp(); return; }
+            if (!tested) {
+                expect("update", "cdpatblz"); expect("draw", "cdpatblz");
+                inputChecks(); cameraChecks(); clearChecks(); tested = true;
+            } else {
+                expect("update", "at"); expect("draw", "at");
+                if (++postClearFrames == 2) exitApp();
+            }
+        }));
+    }
     void setup() override { enableEvents(); addChild(std::make_shared<Probe>()); }
     void update() override { ++updates; order["update"] += 'a'; }
     void draw() override { ++draws; order["draw"] += 'a'; }
@@ -103,21 +142,21 @@ void inputChecks() {
     order.clear();
     auto keyDown = events().keyPressed.listen([](auto& e) { check("listener observes held key", isKeyPressed(e.key)); });
     auto keyUp = events().keyReleased.listen([](auto& e) { check("listener observes released key", !isKeyPressed(e.key)); });
-    feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN); expect("mousePressed", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 30, 30, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_UP); expect("mouseReleased", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE); expect("mouseMoved", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpbatlz");
+    feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpatblz");
+    feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN); expect("mousePressed", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 30, 30, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_UP); expect("mouseReleased", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE); expect("mouseMoved", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpatblz");
     setTouchAsMouse(false);
-    feed(SAPP_EVENTTYPE_TOUCHES_BEGAN); expect("touchPressed", "cdpbalz");
-    feed(SAPP_EVENTTYPE_TOUCHES_MOVED); expect("touchMoved", "cdpbalz");
-    feed(SAPP_EVENTTYPE_TOUCHES_ENDED); expect("touchReleased", "cdpbalz");
+    feed(SAPP_EVENTTYPE_TOUCHES_BEGAN); expect("touchPressed", "cdpablz");
+    feed(SAPP_EVENTTYPE_TOUCHES_MOVED); expect("touchMoved", "cdpablz");
+    feed(SAPP_EVENTTYPE_TOUCHES_ENDED); expect("touchReleased", "cdpablz");
     order["windowResized"].clear();
-    feed(SAPP_EVENTTYPE_RESIZED); expect("windowResized", "cdpbalz");
-    feed(SAPP_EVENTTYPE_FILES_DROPPED); expect("filesDropped", "cdpbalz");
-    internal::appWindowResizedFunc(128, 128); order.clear();
+    feed(SAPP_EVENTTYPE_RESIZED); expect("windowResized", "cdpablz");
+    feed(SAPP_EVENTTYPE_FILES_DROPPED); expect("filesDropped", "cdpablz");
+    internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 128; internal::syncWindowAppSize(*internal::resolveWindow()); order.clear();
     for (int priority : {-20, 0, 50}) {
         auto consumer = events().mousePressed.listen([](auto& e) { e.consumed = true; }, priority);
         feed(SAPP_EVENTTYPE_MOUSE_DOWN);
@@ -125,33 +164,33 @@ void inputChecks() {
         order.clear(); feed(SAPP_EVENTTYPE_MOUSE_UP); order.clear();
     }
     treeConsumes = true;
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN); expect("mousePressed", "cdpbat");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN); expect("mousePressed", "cdpat");
     dragConsumes = false;
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 30, 30, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbatt");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 30, 30, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpatt");
     treeConsumes = false;
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 35, 35, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbattlz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 35, 35, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpattblz");
     treeConsumes = dragConsumes = true;
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 200, 200, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbat");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 200, 200, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpat");
     // A grabbed release returning false is delivered once and reaches AfterApp.
-    feed(SAPP_EVENTTYPE_MOUSE_UP, 200, 200); expect("mouseReleased", "cdpbatlz");
+    feed(SAPP_EVENTTYPE_MOUSE_UP, 200, 200); expect("mouseReleased", "cdpatblz");
     feed(SAPP_EVENTTYPE_MOUSE_DOWN); order.clear(); releaseConsumes = true;
-    feed(SAPP_EVENTTYPE_MOUSE_UP, 200, 200); expect("mouseReleased", "cdpbat");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE); expect("mouseMoved", "cdpbat");
-    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpbat");
-    feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpbat");
-    feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpbat");
+    feed(SAPP_EVENTTYPE_MOUSE_UP, 200, 200); expect("mouseReleased", "cdpat");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE); expect("mouseMoved", "cdpat");
+    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpat");
+    feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpat");
+    feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpat");
     treeConsumes = releaseConsumes = false;
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpbalz");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 95, 95, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbalz");
-    feed(SAPP_EVENTTYPE_MOUSE_UP, 95, 95); expect("mouseReleased", "cdpbalz");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpablz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 95, 95, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpablz");
+    feed(SAPP_EVENTTYPE_MOUSE_UP, 95, 95); expect("mouseReleased", "cdpablz");
     rootConsumes = true;
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpba");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 95, 95, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbalz");
-    feed(SAPP_EVENTTYPE_MOUSE_UP, 95, 95); expect("mouseReleased", "cdpbalz");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpa");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 95, 95, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpablz");
+    feed(SAPP_EVENTTYPE_MOUSE_UP, 95, 95); expect("mouseReleased", "cdpablz");
     rootConsumes = false;
-    auto root = std::static_pointer_cast<App>(internal::mainWindowContext().rootNode.lock());
+    auto root = std::static_pointer_cast<App>(internal::windowApiContext().rootNode.lock());
     auto rootConsumer = root->RectNode::mousePressed.listen([](auto& e) { e.consumed = true; });
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpba");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpa");
     feed(SAPP_EVENTTYPE_MOUSE_UP, 90, 90); order.clear(); rootConsumer.disconnect();
     auto edit = events().mouseMoved.listen([](auto& e) { e.pos.x = 31; e.delta.x = 7; });
     feed(SAPP_EVENTTYPE_MOUSE_MOVE);
@@ -161,15 +200,15 @@ void inputChecks() {
     auto resizeEdit = events().windowResized.listen([](auto& e) { e.width = 123; e.height = 124; });
     feed(SAPP_EVENTTYPE_RESIZED);
     check("resize listener edits reach App event path", app->getWidth() == 123 && app->getHeight() == 124);
-    resizeEdit.disconnect(); internal::appWindowResizedFunc(128, 128); order.clear();
+    resizeEdit.disconnect(); internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 128; internal::syncWindowAppSize(*internal::resolveWindow()); order.clear();
     auto scrollConsumer = app->RectNode::mouseScrolled.listen([](auto& e) { e.consumed = true; });
     feed(SAPP_EVENTTYPE_MOUSE_MOVE, 90, 90); order.clear();
-    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpba");
+    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpa");
     scrollConsumer.disconnect(); order.clear();
 
     mcp::setToolLevel(mcp::ToolLevel::Control);
-    tool("tc_key_press", {{"key", SAPP_KEYCODE_A}}); expect("keyPressed", "cdpbatlz");
-    tool("tc_key_release", {{"key", SAPP_KEYCODE_A}}); expect("keyReleased", "cdpbatlz");
+    tool("tc_key_press", {{"key", SAPP_KEYCODE_A}}); expect("keyPressed", "cdpatblz");
+    tool("tc_key_release", {{"key", SAPP_KEYCODE_A}}); expect("keyReleased", "cdpatblz");
     {
         auto consumeDown = events().keyPressed.listen([](auto& e) { e.consumed = true; }, -20);
         auto consumeUp = events().keyReleased.listen([](auto& e) { e.consumed = true; }, -20);
@@ -247,7 +286,7 @@ void cameraChecks() {
         sapp_event e{}; e.type = type; e.mouse_button = button;
         e.mouse_x = 90; e.mouse_y = 20;
         e.modifiers = SAPP_MODIFIER_LMB | SAPP_MODIFIER_MMB;
-        internal::_event_cb(&e);
+        tcCoreTest::dispatchMainEvent(&e);
     };
     buttonEvent(SAPP_EVENTTYPE_MOUSE_DOWN, SAPP_MOUSEBUTTON_LEFT);
     buttonEvent(SAPP_EVENTTYPE_MOUSE_DOWN, SAPP_MOUSEBUTTON_MIDDLE);
@@ -303,49 +342,45 @@ void finalChecks() {
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     internal::pixelPerfectMode() = true;
-    stages(true);
+
     WindowSettings settings; settings.width = settings.height = 128; settings.pixelPerfect = true;
     bool exitOrder = argc > 1 && std::string(argv[1]) == "--exit-order";
+    exitOrderMode = exitOrder;
     bool display = exitOrder || (argc > 1 && std::string(argv[1]) == "--display");
     if (exitOrder) {
-        auto quit = events().afterFrame.listen([] { exitApp(); });
         return tcCoreTest::runDisplayTest<DeliveryApp>(settings, failures, [] {
             check("exit listener calls App exactly once", exits == 1);
-            expect("exit", "cdpbalz");
+            expect("exit", "cdpablz");
         });
     }
-    auto step = events().afterFrame.listen([] {
-        if (!tested) {
-            expect("update", "cdpbatlz"); expect("draw", "cdpbatlz");
-            inputChecks(); cameraChecks(); clearChecks(); tested = true;
-        } else {
-            expect("update", "at"); expect("draw", "at");
-            if (++postClearFrames == 2) exitApp();
-        }
-    });
     if (display) return tcCoreTest::runDisplayTest<DeliveryApp>(settings, failures, finalChecks);
     // Core sweep also covers delivery without requiring an OS window.
     // Android creates its descriptor on the Activity thread, then runs App
     // callbacks on the native loop thread. Registration must not claim the
     // descriptor thread as the App thread; _setup_cb records that identity.
-    std::thread descriptorThread([settings] {
+    Window* launch = nullptr;
+    std::thread descriptorThread([settings, &launch] {
         auto descriptorSettings = settings;
         descriptorSettings.pixelPerfect = false; // no display query on this thread
-        (void)buildAppDescriptor<DeliveryApp>(descriptorSettings);
+        auto descriptor = buildAppDescriptor<DeliveryApp>(descriptorSettings);
+        launch = static_cast<Window*>(descriptor._tc_bind_user);
     });
     descriptorThread.join();
     getMainThreadId(); // model _setup_cb on the actual App thread
     check("descriptor creation does not claim the App thread", isMainThread());
     internal::pixelPerfectMode() = true;
-    internal::WindowRequestAccess::openMain(*internal::mainWindow());
+    tcCoreTest::InjectedWindow native(*launch);
+    internal::currentWindowCtx() = &internal::windowApiContext();
+    native.metadata.fb_width = native.metadata.fb_height = 128;
+    internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 128;
     internal::appSetupFunc();
-    internal::appWindowResizedFunc(128, 128);
-    internal::appUpdateFunc(); internal::appDrawFunc();
+    internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 128; internal::syncWindowAppSize(*internal::resolveWindow());
+    events().update.notify(); events().draw.notify();
     events().afterFrame.notify();
     for (int pass = 0; pass < 2; ++pass) {
-        internal::appUpdateFunc(); internal::appDrawFunc();
+        events().update.notify(); events().draw.notify();
         events().afterFrame.notify();
     }
-    internal::appCleanupFunc(); finalChecks();
+    internal::shutdownRuntime(); finalChecks();
     return failures ? 1 : 0;
 }

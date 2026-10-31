@@ -1,6 +1,5 @@
 #include "tcApp.h"
 #include <iostream>
-#include <cstdlib>
 
 using namespace std;
 
@@ -278,14 +277,14 @@ void tcApp::spawnParticle(float x, float y) {
     p.pos = Vec2(x, y);
 
     // Random direction
-    float angle = (float)rand() / RAND_MAX * TAU;
-    float speed = 50 + (float)rand() / RAND_MAX * 100;
+    float angle = random(TAU);
+    float speed = random(50, 150);
     p.vel = Vec2::fromAngle(angle, speed);
 
     p.acc = Vec2(0, 50);  // Gravity
-    p.radius = 5 + (float)rand() / RAND_MAX * 10;
-    p.hue = (float)rand() / RAND_MAX;
-    p.life = 2.0f + (float)rand() / RAND_MAX * 2.0f;
+    p.radius = random(5, 15);
+    p.hue = tc::random();
+    p.life = random(2, 4);
     p.maxLife = p.life;
 
     particles_.push_back(p);

@@ -44,6 +44,7 @@ public:
         prev_ = ImGui::GetCurrentContext();
         ctx_ = ImGui::CreateContext();
         ImGui::SetCurrentContext(ctx_);
+        tcx::imgui::setContextOwner(ctx_, &tc::internal::currentWindowContext());
         ImGuiIO& io = ImGui::GetIO();
         io.DisplaySize = ImVec2(1024, 768);
         io.DeltaTime = 1.0f / 60.0f;
@@ -76,7 +77,7 @@ public:
     // Whether the window renders a frame at all (checked at the start of each
     // frame). Null: every frame. A frame where it is false does nothing, as
     // for a window that is throttled very low or stopped rendering; callTool()
-    // still runs the main window's afterFrame work after it.
+    // still runs Runtime maintenance work after it.
     void setRenderWhen(std::function<bool()> when) { renderWhen_ = std::move(when); }
 
     // One window frame, as tcxImGui runs it: imguiBegin() ... imguiEnd() +
@@ -156,7 +157,7 @@ private:
 // Calls an MCP tool the way tc::mcp::processHttpQueue() does, on this thread.
 // A tool that defers its reply is stashed with a promise, as processHttpQueue()
 // stashes it, and frames are run by `h` until the reply is produced: after
-// each frame the main window's afterFrame work runs (tcxImGui's settling of
+// each frame Runtime maintenance work runs (tcxImGui's settling of
 // overdue values, then the core's drain), and a deferral aimed at another
 // target is answered when its owner drains it (up to `maxFrames`).
 // Returns the tool's result (the JSON in its text content). `deferred` tells

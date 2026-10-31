@@ -2,7 +2,7 @@
 // tcSound_win.cpp - Windows AAC decoding using Media Foundation
 // =============================================================================
 
-#include "tc/sound/internal/tcAudioDecodeBudget.h"
+#include "tc/sound/internal/tcAudioDecode.h"
 #include <cstdio>
 #include <mutex>
 
@@ -46,39 +46,9 @@ namespace {
         }
     }
 
-    bool CheckReaderLength(IMFSourceReader* pReader, internal::AudioDecodeBudget& budget, UINT32 channels, UINT32 sampleRate) {
-        PROPVARIANT duration;
-        PropVariantInit(&duration);
-        const HRESULT durationResult = pReader->GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE, MF_PD_DURATION, &duration);
-        bool lengthOk = true;
-        if (SUCCEEDED(durationResult) && duration.vt == VT_UI8) {
-            const uint64_t ticks = duration.uhVal.QuadPart;
-            if (ticks > (UINT64_MAX - 9999999) / sampleRate) {
-                budget.reject("AAC duration", ticks, UINT64_MAX / sampleRate);
-                lengthOk = false;
-            } else lengthOk = budget.pcm((ticks * sampleRate + 9999999) / 10000000, channels);
-        }
-        PropVariantClear(&duration);
-        return lengthOk;
-
-    }
-
     // Common logic for configuring Source Reader and reading samples
-    bool ReadFromSourceReader(IMFSourceReader* pReader, SoundBuffer* buffer) {
-        internal::AudioDecodeBudget budget;
-        IMFMediaType* native = nullptr;
-        if (SUCCEEDED(pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &native))) {
-            UINT32 channels = 0, rate = 0;
-            const bool hasChannels = SUCCEEDED(native->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels));
-            const bool hasRate = SUCCEEDED(native->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate));
-            SafeRelease(&native);
-            if ((hasChannels && (channels == 0 || channels > internal::audioChannelLimit)) ||
-                (hasRate && (rate == 0 || rate > internal::audioRateLimit))) {
-                budget.format(hasChannels ? channels : 1, hasRate ? rate : 1);
-                return false;
-            }
-            if (hasChannels && hasRate && !CheckReaderLength(pReader, budget, channels, rate)) return false;
-        }
+    bool ReadFromSourceReader(IMFSourceReader* pReader, SoundBuffer* buffer, internal::AudioDecodeStatus& status,
+                              const std::string& input = "memory input") {
         HRESULT hr = S_OK;
         IMFMediaType* pPartialType = NULL;
         IMFMediaType* pUncompressedAudioType = NULL;
@@ -118,8 +88,7 @@ namespace {
         if (FAILED(hr)) { SafeRelease(&pUncompressedAudioType); return false; }
 
         SafeRelease(&pUncompressedAudioType);
-        if (!budget.format(channels, sampleRate)) return false;
-        if (!CheckReaderLength(pReader, budget, channels, sampleRate)) return false;
+        if (!channels || channels > INT_MAX || !sampleRate || !status.sampleRateFits(sampleRate, input)) return false;
 
         // Read samples
         std::vector<float> allSamples;
@@ -151,19 +120,9 @@ namespace {
                 // A notification can refine compressed metadata without
                 // changing decoded PCM. Keep that supported transition.
                 if (!compatible) {
-                    budget.reject("AAC decoded format change", changedChannels, channels);
+                    status.reject("AAC decoded format change", changedChannels, channels);
                     SafeRelease(&pSample);
                     return false;
-                }
-                if (SUCCEEDED(pReader->GetNativeMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &changed)) && changed) {
-                    UINT32 nativeChannels = 0, nativeRate = 0;
-                    changed->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &nativeChannels);
-                    changed->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &nativeRate);
-                    SafeRelease(&changed);
-                    if (!budget.format(nativeChannels ? nativeChannels : 1, nativeRate ? nativeRate : 1)) {
-                        SafeRelease(&pSample);
-                        return false;
-                    }
                 }
             }
             if (dwFlags & MF_SOURCE_READERF_ENDOFSTREAM) ended = true;
@@ -173,16 +132,7 @@ namespace {
             }
 
             DWORD sampleBytes = 0;
-            if (FAILED(pSample->GetTotalLength(&sampleBytes)) || sampleBytes % (channels * sizeof(float))) {
-                SafeRelease(&pSample);
-                return false;
-            }
-            if (sampleBytes > SIZE_MAX / 2) {
-                budget.reject("AAC sample bytes", sampleBytes, SIZE_MAX / 2);
-                SafeRelease(&pSample);
-                return false;
-            }
-            if (!budget.admit(size_t(sampleBytes) * 2, allSamples.capacity() * sizeof(float))) {
+            if (FAILED(pSample->GetTotalLength(&sampleBytes)) || sampleBytes / sizeof(float) % channels || sampleBytes % sizeof(float)) {
                 SafeRelease(&pSample);
                 return false;
             }
@@ -197,7 +147,7 @@ namespace {
                 if (SUCCEEDED(hr)) {
                     const bool appended = cbBuffer == sampleBytes &&
                         internal::appendAudio(allSamples, reinterpret_cast<const float*>(pAudioData),
-                                              cbBuffer / sizeof(float), budget, size_t(sampleBytes) * 2);
+                                              cbBuffer / sizeof(float), status);
                     pBuffer->Unlock();
                     if (!appended) hr = E_FAIL;
                 }
@@ -220,9 +170,14 @@ namespace {
 
 namespace {
 LoadResult decodeAacMemory(const void* data, size_t dataSize, SoundBuffer& out) {
-    internal::AudioDecodeBudget budget;
-    if (!data || !dataSize || !budget.encoded(dataSize) || !budget.admit(dataSize))
-        return LoadResult::fail(LoadError::DecodeFailed, "AAC input rejected; use SoundStream::loadStream()");
+    internal::AudioDecodeStatus status;
+    if (!data || !dataSize)
+        return LoadResult::fail(LoadError::DecodeFailed, "empty AAC memory input");
+    // Bound (abi): SHCreateMemStream takes a UINT byte length; larger inputs fail before narrowing.
+    if (dataSize > size_t(UINT_MAX)) {
+        logError("SoundBuffer") << "AAC memory input size does not fit the Windows stream's UINT byte length";
+        return LoadResult::fail(LoadError::DecodeFailed, "AAC input size cannot be represented");
+    }
     EnsureMFStartup();
     IStream* stream = SHCreateMemStream(static_cast<const BYTE*>(data), UINT(dataSize));
     if (!stream) {
@@ -243,20 +198,28 @@ LoadResult decodeAacMemory(const void* data, size_t dataSize, SoundBuffer& out) 
         logError("SoundBuffer") << "failed to create AAC source reader; previous PCM kept";
         return LoadResult::fail(LoadError::DecodeFailed, "failed to create AAC source reader");
     }
-    const bool ok = ReadFromSourceReader(reader, &out);
+    const bool ok = ReadFromSourceReader(reader, &out, status);
     SafeRelease(&reader);
-    if (!ok) logError("SoundBuffer") << "AAC decoder failed; previous PCM kept";
+    if (!ok && !status.rejected && !status.allocationFailed) logError("SoundBuffer") << "AAC decoder failed; previous PCM kept";
     return ok ? LoadResult::success() : LoadResult::fail(LoadError::DecodeFailed,
         "AAC decode failed; load long audio with SoundStream::loadStream()");
 }
 } // namespace
 
 LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
-    internal::AudioDecodeBudget budget;
-    std::vector<unsigned char> bytes;
-    if (!internal::readAudioFile(path, bytes, budget))
-        return LoadResult::fail(LoadError::DecodeFailed, "AAC input rejected; use SoundStream::loadStream()");
-    return decodeAacMemory(bytes.data(), bytes.size(), *this);
+    internal::AudioDecodeStatus status;
+    EnsureMFStartup();
+    IMFSourceReader* reader = nullptr;
+    HRESULT result = MFCreateSourceReaderFromURL(path.c_str(), nullptr, &reader);
+    if (FAILED(result)) {
+        logError("SoundBuffer") << "failed to open AAC file";
+        return LoadResult::fail(LoadError::DecodeFailed, "failed to open AAC file");
+    }
+    const bool ok = ReadFromSourceReader(reader, this, status, internal::pathToDisplayUtf8(path));
+    SafeRelease(&reader);
+    if (!ok && !status.rejected && !status.allocationFailed)
+        logError("SoundBuffer") << "AAC decoder failed; previous PCM kept";
+    return ok ? LoadResult::success() : LoadResult::fail(LoadError::DecodeFailed, "AAC decode failed");
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {

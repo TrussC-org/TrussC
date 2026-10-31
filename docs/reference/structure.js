@@ -39,6 +39,10 @@ function pickCxx() {
     }
     return 'c++';   // none found: fall through so the failure path reports why
 }
+function dumpFailure(cause) {
+    process.stderr.write(`structure: AST dump could not be read/parsed: ${cause}\n`);
+    process.exit(1);
+}
 function dumpAst() {
     const CXX = pickCxx();
     const extra = (process.env.TC_COVERAGE_CXXFLAGS || '').split(/\s+/).filter(Boolean);
@@ -58,14 +62,18 @@ function dumpAst() {
         : 'SOKOL_GLCORE');
     const args = ['-std=c++20', '-DNDEBUG', `-D${backend}`, '-I', INCLUDE, '-Xclang', '-ast-dump=json',
         '-Xclang', '-ast-dump-filter=trussc', '-fsyntax-only', ...extra, tmp];
-    process.stderr.write('structure: running clang AST dump (~280 MB, a few seconds)…\n');
+    process.stderr.write('structure: running clang AST dump…\n');
+    // Bound (local tooling): capture at most 1 GiB of compiler output; a larger dump fails with an explicit message.
+    const maxBuffer = 1024 * 1024 * 1024;
     try {
-        return execSync(`${CXX} ${args.map(a => `'${a}'`).join(' ')}`, { maxBuffer: 1024 * 1024 * 1024 }).toString();
+        return execSync(`${CXX} ${args.map(a => `'${a}'`).join(' ')}`, { maxBuffer });
     } catch (e) {
         // Even a large AST can be truncated by a fatal diagnostic. Never let
         // check.js or an emitter consume that incomplete API surface.
         const err = (e.stderr || '').toString();
-        process.stderr.write(`structure: clang AST dump FAILED using CXX=${CXX}.\n`);
+        if (e.code === 'ENOBUFS') dumpFailure(`clang output exceeded the ${maxBuffer}-byte capture limit (maxBuffer in structure.js)`);
+        if (e.code || (e.status == null && !err)) dumpFailure(e.message || String(e));
+        process.stderr.write(`structure: clang AST dump FAILED using CXX=${CXX}: ${e.message || `exit status ${e.status}`}\n`);
         if (/fatal error:/.test(err)) {
             process.stderr.write('structure: hint: core/include/tc/gpu/shaders/*.glsl.h may be missing; generate the shaders first with docs/reference/regenerate.sh --shaders-only.\n');
         }
@@ -73,32 +81,44 @@ function dumpAst() {
             process.stderr.write('structure: that compiler is not clang -- this dump requires clang (-Xclang -ast-dump=json).\n'
                 + 'structure: install clang or set CXX=/path/to/clang++.\n');
         }
-        process.stderr.write('structure: compiler stderr:\n' + err + '\n');
+        if (err) process.stderr.write('structure: compiler stderr:\n' + err + '\n');
         process.exit(1);
     }
 }
 const cached = argVal('--ast');
-let astText = cached ? fs.readFileSync(cached, 'utf8') : dumpAst();
+let astBuffer;
+if (cached) {
+    try { astBuffer = fs.readFileSync(cached); }
+    catch (e) { dumpFailure(`${cached}: ${e.message}`); }
+} else { astBuffer = dumpAst(); }
 const saveTo = argVal('--save-ast');
-if (saveTo) { fs.writeFileSync(saveTo, astText); process.stderr.write(`AST dump written to ${saveTo}\n`); process.exit(0); }
+if (saveTo) { fs.writeFileSync(saveTo, astBuffer); process.stderr.write(`AST dump written to ${saveTo}\n`); process.exit(0); }
 
 // --- 2. split + enumerate ---------------------------------------------------
-function splitTopLevel(s) {
-    const objs = []; let i = 0; const n = s.length;
+// Scan bytes, not one giant JS string: the full dump can exceed V8's string
+// limit, while each namespace object is much smaller. Only decode one at a time.
+function* splitTopLevel(s) {
+    let i = 0; const n = s.length;
+    let count = 0;
     while (i < n) {
-        while (i < n && /\s/.test(s[i])) i++;
+        while (i < n && (s[i] === 32 || s[i] === 9 || s[i] === 10 || s[i] === 13)) i++;
         if (i >= n) break;
-        if (s[i] !== '{') { i++; continue; }
+        if (s[i] !== 123) dumpFailure(`expected '{' at byte ${i}`);
         const start = i; let depth = 0, inStr = false, esc = false;
         for (; i < n; i++) {
             const c = s[i];
-            if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
-            if (c === '"') { inStr = true; continue; }
-            if (c === '{') depth++; else if (c === '}') { depth--; if (depth === 0) { i++; break; } }
+            if (inStr) { if (esc) esc = false; else if (c === 92) esc = true; else if (c === 34) inStr = false; continue; }
+            if (c === 34) { inStr = true; continue; }
+            if (c === 123) depth++; else if (c === 125) { depth--; if (depth === 0) { i++; break; } }
         }
-        objs.push(s.slice(start, i));
+        if (depth !== 0) dumpFailure(`unterminated object starting at byte ${start} (end at byte ${n})`);
+        let node;
+        try { node = JSON.parse(s.subarray(start, i).toString('utf8')); }
+        catch (e) { dumpFailure(`object starting at byte ${start}: ${e.message}`); }
+        count++;
+        yield node;
     }
-    return objs;
+    if (!count) dumpFailure('no top-level JSON objects');
 }
 const deprecatedOf = (node) => {
     const a = (node.inner || []).find(x => x.kind === 'DeprecatedAttr');
@@ -300,7 +320,7 @@ function enumerate(objs) {
             }
         }
     }
-    for (const o of objs) { let node; try { node = JSON.parse(o); } catch (e) { continue; } if (node.kind === 'NamespaceDecl') walkNamespace(node, ''); }
+    for (const node of objs) { if (node.kind === 'NamespaceDecl') walkNamespace(node, ''); }
     return syms;
 }
 
@@ -338,7 +358,7 @@ function parseSig(sig) {
 }
 
 // --- 4. build the structure map (overloads merged into one entry) -----------
-const syms = enumerate(splitTopLevel(astText));
+const syms = enumerate(splitTopLevel(astBuffer));
 let pub = syms.filter(s => isTc(s.file) && !isHidden(s) && !noise(s) && symbolId(s));
 // drop OPAQUE enum declarations (`enum class StrokeCap;`) when the same enum is
 // also seen complete. An opaque decl carries no enumerators, and it can live in a

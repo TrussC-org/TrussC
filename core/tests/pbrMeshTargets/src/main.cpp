@@ -46,8 +46,7 @@ void topologyChecks() {
     }
     check("two vertices make no triangle", meshListIndices(P::TriangleStrip, 2, {}).empty() &&
           meshListIndices(P::TriangleFan, 2, {}).empty());
-    internal::WindowContext secondary;
-    secondary.isMain = false;
+    internal::WindowRequestAccess::HostState secondaryState; internal::WindowContext& secondary = secondaryState.context;
     secondary.swapchainTarget.colorFormat = SG_PIXELFORMAT_BGRA8;
     secondary.swapchainTarget.sampleCount = 1;
     auto target = internal::swapchainTargetFormat(secondary);
@@ -90,11 +89,12 @@ Mesh makeMesh(PrimitiveMode mode) {
 
 class SecondaryApp : public App {
 public:
+    explicit SecondaryApp(InspectShader* source) : shader(source) {}
     InspectShader* shader = nullptr;
     void draw() override {
         if (completed) return;
         auto& ctx = internal::currentWindowContext();
-        check("real secondary window context", !ctx.isMain && ctx.swapchainTarget.sampleCount > 0);
+        check("real secondary window context", ctx.hostWindow && ctx.swapchainTarget.sampleCount > 0);
         Material mat;
         mat.setEmissive(1, 0, 0);
         setMaterial(mat);
@@ -132,11 +132,10 @@ public:
         settings.setSize(64, 64);
         settings.sampleCount = 1;
         secondary = createWindow(settings);
+        if (secondary) secondary->setPosition(32, 32);
         check("secondary window created", bool(secondary));
         if (secondary) {
-            auto app = std::make_shared<SecondaryApp>();
-            app->shader = &shader;
-            secondary->setApp(app);
+            secondary->setApp<SecondaryApp>(&shader);
         }
     }
     void draw() override {
@@ -166,7 +165,6 @@ public:
         setMaterial(targetMaterial);
         Mesh targetMesh = makeMesh(PrimitiveMode::Triangles);
         Mesh targetPoints = makeMesh(PrimitiveMode::Points);
-        ctx.isMain = false;
         for (auto format : {SG_PIXELFORMAT_RGBA8, SG_PIXELFORMAT_BGRA8}) {
             for (int samples : {1, 4}) {
                 ctx.swapchainTarget.colorFormat = format;
@@ -189,7 +187,6 @@ public:
             }
         }
         clearMaterial();
-        ctx.isMain = true;
         ctx.swapchainTarget.colorFormat = savedFormat;
         ctx.swapchainTarget.sampleCount = savedSamples;
         check("main Shader reuses the target-owned pipeline", shader.targetPipeline().id == mainPipeline.id);

@@ -75,6 +75,16 @@ runApp<App>(settings);'''
                 path.write_text('runApp<App>(s); return failures;', encoding="utf-8")
             self.assertEqual(len(check.check(root)), 5)
 
+    def test_setup_quit_post_run_exception_stays_narrow(self):
+        path = 'core/tests/headlessConsole/src/windowConsoleChecks.h'
+        source = ('// runapp-verdict: returning-setup-quit -- auditor requires final post-run counters\n'
+                  'const int result = runApp<SetupQuit>(settings); check(updates == 0);')
+        self.assertEqual(check.violations(source, path), [])
+        self.assertTrue(check.violations(source, 'core/tests/new/src/main.cpp'))
+        self.assertTrue(check.violations(source.split('\n', 1)[1], path))
+        self.assertTrue(check.violations(source.replace(' -- auditor requires final post-run counters', ''), path))
+        self.assertTrue(check.violations(source + '\nrunApp<Other>(settings);', path))
+
     def test_repository_display_verdicts(self):
         self.assertEqual(check.check(), [])
 

@@ -10,8 +10,10 @@
 # registered entry (core/tests/common/tcCoreTest.h). A test's own quoted
 # includes resolve relative to its source file, as when it is built alone.
 #
-# A test's own local.cmake is NOT included here (it is written for its own
-# target and dir); what a combined test needs from it is repeated below.
+# The same selected inventory supplies sources, src/ shaders and local.cmake
+# build steps, so plain trusscli builds and build_all.py cannot skip a step.
+# Link-time mocks must be own-binary unless reviewed to forward while inactive;
+# tools/tests/test_core_test_build_steps.py guards the reviewed exceptions.
 
 # TC_CORE_TEST_SELECT: a ;-list of the combined tests to compile. Set by
 # examples/build_all.py (--shard, CI splits the core tests over several jobs)
@@ -43,64 +45,31 @@ foreach(_TC_DIR IN LISTS _TC_CORE_TEST_DIRS)
     list(APPEND _TC_CORE_TEST_NAMES "${_TC_NAME}")
 endforeach()
 
-if("renderRegression" IN_LIST _TC_CORE_TEST_NAMES)
-    # Its own shader target: the app's <name>_shaders already exists (#820).
-    trussc_compile_shaders(renderRegression "${_TC_CORE_TESTS_DIR}/renderRegression/src")
-    target_link_libraries(${PROJECT_NAME} PRIVATE renderRegression_shaders)
-endif()
-if("renderPassStack" IN_LIST _TC_CORE_TEST_NAMES)
-    trussc_compile_shaders(renderPassStack "${_TC_CORE_TESTS_DIR}/renderPassStack/src")
-    target_link_libraries(${PROJECT_NAME} PRIVATE renderPassStack_shaders)
-endif()
-if("pipelineSelection" IN_LIST _TC_CORE_TEST_NAMES)
-    trussc_compile_shaders(pipelineSelection "${_TC_CORE_TESTS_DIR}/pipelineSelection/src")
-    target_link_libraries(${PROJECT_NAME} PRIVATE pipelineSelection_shaders)
-endif()
-if("renderTargetState" IN_LIST _TC_CORE_TEST_NAMES OR "pipelineSelection" IN_LIST _TC_CORE_TEST_NAMES)
-    trussc_compile_shaders(renderTargetState "${_TC_CORE_TESTS_DIR}/renderTargetState/src")
-    target_link_libraries(${PROJECT_NAME} PRIVATE renderTargetState_shaders)
-    # Synthetic inputs exercise these draw paths without codec or addon dependencies.
-    trussc_compile_shaders(targetStateLut "${TRUSSC_DIR}/../addons/tcxLut/src/shaders")
-    trussc_compile_shaders(targetStateHap "${TRUSSC_DIR}/../addons/tcxHap/src/shaders")
-    target_link_libraries(${PROJECT_NAME} PRIVATE targetStateLut_shaders targetStateHap_shaders)
-endif()
+# local.cmake files use their test's source directory and the combined app's
+# target. A function keeps path/settings variables local to each test.
+function(_tc_core_test_build_steps _TC_TEST_DIR _TC_TEST_NAME)
+    set(CMAKE_CURRENT_SOURCE_DIR "${_TC_TEST_DIR}")
+    if(EXISTS "${_TC_TEST_DIR}/local.cmake")
+        include("${_TC_TEST_DIR}/local.cmake")
+    endif()
+    # Match trussc_app()'s automatic shader step for each test's own src/.
+    trussc_compile_shaders(${_TC_TEST_NAME} "${_TC_TEST_DIR}/src")
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${_TC_TEST_NAME}_shaders)
+endfunction()
+
+# All sources are present before build steps run (including source properties).
+foreach(_TC_NAME IN LISTS _TC_CORE_TEST_NAMES)
+    _tc_core_test_build_steps("${_TC_CORE_TESTS_DIR}/${_TC_NAME}" "${_TC_NAME}")
+endforeach()
+
+# Include shaders declared by local.cmake in MSVC/Ninja's object dependencies,
+# just as trussc_app() does for its app and addon shaders.
+get_target_property(_TC_CORE_LINKS ${PROJECT_NAME} LINK_LIBRARIES)
+foreach(_TC_LINK IN LISTS _TC_CORE_LINKS)
+    if(_TC_LINK MATCHES "_shaders$" AND TARGET "${_TC_LINK}")
+        trussc_shader_object_depends(${PROJECT_NAME} ${_TC_LINK})
+    endif()
+endforeach()
+
 list(LENGTH _TC_CORE_TEST_NAMES _TC_CORE_TEST_COUNT)
 message(STATUS "[${PROJECT_NAME}] ${_TC_CORE_TEST_COUNT} core tests: ${_TC_CORE_TEST_NAMES}")
-
-# trusscliPresets (see its local.cmake): trusscli's project-generation sources
-# and their include dir. The include dir goes on that test's source only.
-if("trusscliPresets" IN_LIST _TC_CORE_TEST_NAMES)
-    set(_TC_TRUSSCLI_SRC "${_TC_CORE_TESTS_DIR}/../../tools/src")
-    get_filename_component(_TC_TRUSSCLI_SRC "${_TC_TRUSSCLI_SRC}" ABSOLUTE)
-    target_sources(${PROJECT_NAME} PRIVATE
-        "${_TC_TRUSSCLI_SRC}/ProjectGenerator.cpp"
-        "${_TC_TRUSSCLI_SRC}/ProjectState.cpp"
-        "${_TC_TRUSSCLI_SRC}/BuildSetup.cpp"
-        "${_TC_TRUSSCLI_SRC}/IdeHelper.cpp"
-        "${_TC_TRUSSCLI_SRC}/VsDetector.cpp"
-        "${_TC_TRUSSCLI_SRC}/GeneratedFile.cpp"
-    )
-    set_property(SOURCE "${_TC_CORE_TESTS_DIR}/trusscliPresets/src/main.cpp"
-        APPEND PROPERTY INCLUDE_DIRECTORIES "${_TC_TRUSSCLI_SRC}")
-endif()
-
-if("captureSubmission" IN_LIST _TC_CORE_TEST_NAMES)
-    # Match the fixture's test-only declarations in the Sokol implementation.
-    target_compile_definitions(TrussC PRIVATE SOKOL_TC_TEST_HOOKS)
-endif()
-
-if("audioDecodeBounds" IN_LIST _TC_CORE_TEST_NAMES AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(${PROJECT_NAME} PRIVATE "-Wl,--wrap=malloc")
-endif()
-
-if("externalMainDelivery" IN_LIST _TC_CORE_TEST_NAMES)
-    set_property(SOURCE "${_TC_CORE_TESTS_DIR}/externalMainDelivery/src/main.cpp"
-        APPEND PROPERTY INCLUDE_DIRECTORIES "${_TC_CORE_TESTS_DIR}/../../addons/tcxMidi/tests/mocks" "${_TC_CORE_TESTS_DIR}/../../addons/tcxTls/src")
-endif()
-
-if("eglWindowSurfaces" IN_LIST _TC_CORE_TEST_NAMES)
-    target_compile_definitions(TrussC PRIVATE SOKOL_TC_TEST_HOOKS)
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        target_link_options(${PROJECT_NAME} PRIVATE -Wl,--wrap=eglMakeCurrent)
-    endif()
-endif()

@@ -36,8 +36,8 @@ bool record(Window& window, internal::WindowControl op, int x, int y, const std:
 }
 struct Secondary : Window {
     int standIn = 0;
-    Secondary() { native_ = &standIn; }
-    ~Secondary() { native_ = nullptr; internal::WindowRequestAccess::endApp(*this); }
+    Secondary() { native_ = &standIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~Secondary() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
 };
 struct Probe : App {
     void setup() override { setWindowPosition(-1920, 0); setFullscreen(true); setWindowTitle("Secondary"); }
@@ -185,11 +185,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         });
     }
     auto* previous = internal::currentWindowCtx();
-    auto mainWindow = internal::WindowRequestAccess::makeMain();
-    internal::WindowRequestAccess::openMain(*mainWindow);
+    auto mainWindow = std::make_unique<tc::Window>();
+    internal::WindowRequestAccess::bindForTests(*mainWindow, 101);
     Secondary secondary;
-    auto app = std::make_shared<Probe>();
-    secondary.setApp(app);
+    auto app = internal::makeConstructedApp<Probe>();
+    internal::WindowRequestAccess::attachCandidate(secondary, app);
     internal::applyPendingAppForTests(secondary);
     // The stand-in has no native fullscreen state (especially on AppKit).
     internal::windowFullscreenHookForTests() = [](const tc::Window&) { return internal::WindowFullscreenPhase::Windowed; };
@@ -208,8 +208,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     KeyEventArgs key{};
     secondary.events().keyPressed.notify(key);
     expect(secondary, internal::WindowControl::Position, "event position targets secondary");
+    { internal::AppOwnerScope owner(internal::appOwner(*app));
     check("global getter reports actual target position", getWindowPosition() == IVec2(-1730, 41));
-    expect(secondary, internal::WindowControl::PositionQuery, "getter follows secondary context");
+    expect(secondary, internal::WindowControl::PositionQuery, "getter follows secondary context"); }
     mainWindow->setPosition(10, 20);
     expect(*mainWindow, internal::WindowControl::Position, "main handle from secondary callback context");
     check("explicit main restores secondary context", internal::currentWindowCtx() == &secondary.context());
@@ -220,8 +221,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     mainWindow->events().update.notify();
     expect(secondary, internal::WindowControl::Size, "App::setSize targets own window from main");
     check("App::setSize restores main", internal::currentWindowCtx() == &mainWindow->context());
+    const auto beforeAmbiguous = calls.size();
     setWindowPosition(50, 60);
-    expect(*mainWindow, internal::WindowControl::Position, "main global position");
+    check("unowned ambiguous position changes no Window", calls.size() == beforeAmbiguous);
     secondary.setPosition(-100, -200);
     expect(secondary, internal::WindowControl::Position, "explicit secondary from main");
     throws = true;

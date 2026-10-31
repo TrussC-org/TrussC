@@ -1694,15 +1694,12 @@ static int stbtt__close_shape(stbtt_vertex *vertices, int num_vertices, int was_
 }
 
 #ifndef STBTT_VALIDATE_GLYPH
-#define STBTT_VALIDATE_GLYPH(info, glyph) (1)
-#endif
-#ifndef STBTT_REPORT_FAILURE
-#define STBTT_REPORT_FAILURE() ((void)0)
+#define STBTT_VALIDATE_GLYPH(info, glyph, rejected) (!(rejected))
 #endif
 // TrussC patch: vertex counting of a glyph stops within the range stb
 // handles (int count, size_t allocation). STBTT_DEFAULT_MAX_VERTICES is that
 // range; STBTT_MAX_VERTICES may be predefined (lower, or read at run time).
-// Bound (abi): outline counts and byte products must fit int and size_t. Overflow rejects the whole glyph and is counted.
+// Bound (abi): outline counts and byte products must fit int and size_t. Overflow rejects the whole glyph.
 #define STBTT_DEFAULT_MAX_VERTICES \
    ((size_t)(~0u >> 1) < (size_t)-1 / sizeof(stbtt_vertex) \
       ? (int)(~0u >> 1) : (int)((size_t)-1 / sizeof(stbtt_vertex)))
@@ -1710,7 +1707,7 @@ static int stbtt__close_shape(stbtt_vertex *vertices, int num_vertices, int was_
 #define STBTT_MAX_VERTICES STBTT_DEFAULT_MAX_VERTICES
 #endif
 
-static int stbtt__GetGlyphShapeTT(const stbtt_fontinfo *info, int glyph_index, stbtt_vertex **pvertices, int depth, unsigned int *visits, unsigned int *copies)
+static int stbtt__GetGlyphShapeTT(const stbtt_fontinfo *info, int glyph_index, stbtt_vertex **pvertices, int depth, int *rejected)
 {
    stbtt_int16 numberOfContours;
    stbtt_uint8 *endPtsOfContours;
@@ -1720,13 +1717,11 @@ static int stbtt__GetGlyphShapeTT(const stbtt_fontinfo *info, int glyph_index, s
    int g;
 
    *pvertices = NULL;
-   // Bound (security): 65536 expanded glyph visits per shape allow generous real-font composition while bounding repeated-component work, even for empty glyphs. Overflow rejects the whole glyph and is counted.
-   if (++*visits > 65536) { STBTT_REPORT_FAILURE(); return 0; }
-   if (!STBTT_VALIDATE_GLYPH(info, glyph_index)) { STBTT_REPORT_FAILURE(); return 0; }
+   if (!STBTT_VALIDATE_GLYPH(info, glyph_index, *rejected)) return 0;
    g = stbtt__GetGlyfOffset(info, glyph_index);
 
-   // Bound (security): compound glyph recursion must keep the decoder stack finite. Overflow rejects the whole glyph and is counted.
-   if (depth >= 64) { STBTT_REPORT_FAILURE(); return 0; }
+   // Bound (security): compound glyph recursion must keep the decoder stack finite. Overflow rejects the whole glyph.
+   if (depth >= 64) { *rejected = 1; return 0; }
    if (g < 0) return 0;
 
    numberOfContours = ttSHORT(data + g);
@@ -1743,7 +1738,7 @@ static int stbtt__GetGlyphShapeTT(const stbtt_fontinfo *info, int glyph_index, s
       n = 1+ttUSHORT(endPtsOfContours + numberOfContours*2-2);
 
       m = n + 2*numberOfContours;  // a loose bound on how many vertices we might need
-      if (m > STBTT_MAX_VERTICES) { STBTT_REPORT_FAILURE(); return 0; }
+      if (m > STBTT_MAX_VERTICES) { *rejected = 1; return 0; }
       vertices = (stbtt_vertex *) STBTT_malloc((size_t)m * sizeof(vertices[0]), info->userdata);
       if (vertices == 0)
          return 0;
@@ -1902,23 +1897,13 @@ static int stbtt__GetGlyphShapeTT(const stbtt_fontinfo *info, int glyph_index, s
          n = (float) STBTT_sqrt(mtx[2]*mtx[2] + mtx[3]*mtx[3]);
 
          // Get indexed glyph.
-         comp_num_verts = stbtt__GetGlyphShapeTT(info, gidx, &comp_verts, depth + 1, visits, copies);
-         if (*visits > 65536 || *copies > 1048576) {
+         comp_num_verts = stbtt__GetGlyphShapeTT(info, gidx, &comp_verts, depth + 1, rejected);
+         if (*rejected) {
             STBTT_free(vertices, info->userdata);
             STBTT_free(comp_verts, info->userdata);
             return 0;
          }
          if (comp_num_verts > 0) {
-            // Bound (security): charge every appended vertex copy, including earlier components, against 1048576 copies per shape. This also bounds component transforms. Exhaustion rejects the whole glyph and marks its owning workspace.
-            if ((unsigned int)comp_num_verts > 1048576 - *copies ||
-                (unsigned int)num_vertices > 1048576 - *copies - (unsigned int)comp_num_verts) {
-               *copies = 1048577; // propagate rejection even without a failure hook
-               STBTT_REPORT_FAILURE();
-               STBTT_free(vertices, info->userdata);
-               STBTT_free(comp_verts, info->userdata);
-               return 0;
-            }
-            *copies += (unsigned int)num_vertices + (unsigned int)comp_num_verts;
             // Transform vertices.
             for (i = 0; i < comp_num_verts; ++i) {
                stbtt_vertex* v = &comp_verts[i];
@@ -1931,9 +1916,9 @@ static int stbtt__GetGlyphShapeTT(const stbtt_fontinfo *info, int glyph_index, s
                v->cy = (stbtt_vertex_type)(n * (mtx[1]*x + mtx[3]*y + mtx[5]));
             }
             // Append vertices.
-            // Bound (abi): combined outline counts must fit the vertex workspace before addition. Overflow rejects the whole glyph and is counted.
+            // Bound (abi): combined outline counts must fit the vertex workspace before addition. Overflow rejects the whole glyph.
             if (comp_num_verts > STBTT_MAX_VERTICES - num_vertices) {
-               STBTT_REPORT_FAILURE();
+               *rejected = 1;
                STBTT_free(vertices, info->userdata);
                STBTT_free(comp_verts, info->userdata);
                return 0;
@@ -1991,7 +1976,6 @@ static void stbtt__csctx_v(stbtt__csctx *c, stbtt_uint8 type, stbtt_int32 x, stb
 {
    // TrussC patch: stop counting at STBTT_MAX_VERTICES (see there).
    if (c->bounds && c->num_vertices >= STBTT_MAX_VERTICES) {
-      STBTT_REPORT_FAILURE();
       c->stopped = 1;
       return;
    }
@@ -2087,7 +2071,6 @@ static int stbtt__run_charstring(const stbtt_fontinfo *info, int glyph_index, st
 {
    int in_header = 1, maskbits = 0, subr_stack_height = 0, sp = 0, v, i, b0;
    int has_subrs = 0, clear_stack;
-   unsigned int instructions = 0, subr_calls = 0;
    float s[48];
    stbtt__buf subr_stack[10], subrs = info->subrs, b;
    float f;
@@ -2097,8 +2080,6 @@ static int stbtt__run_charstring(const stbtt_fontinfo *info, int glyph_index, st
    // this currently ignores the initial width value, which isn't needed if we have hmtx
    b = stbtt__cff_index_get(info->charstrings, glyph_index);
    while (b.cursor < b.size) {
-      // Bound (security): each glyph interpreter pass allows 524288 dispatches, including operands, stems and subroutine bodies. Each dispatch has bounded operand work; metrics, counting and output independently reject exhaustion and mark the owning workspace.
-      if (++instructions > 524288) { STBTT_REPORT_FAILURE(); return STBTT__CSERR("instruction work"); }
       // TrussC patch: a counting pass that reached STBTT_MAX_VERTICES ends
       // here (subroutine calls run in this loop too).
       if (c->stopped) return STBTT__CSERR("vertex count");
@@ -2223,8 +2204,6 @@ static int stbtt__run_charstring(const stbtt_fontinfo *info, int glyph_index, st
          }
          // FALLTHROUGH
       case 0x1D: // callgsubr
-         // Bound (security): retain the 65536-call expansion ceiling as well as the total instruction allowance. Exhaustion rejects the glyph and marks its owning workspace.
-         if (++subr_calls > 65536) { STBTT_REPORT_FAILURE(); return STBTT__CSERR("subroutine work"); }
          if (sp < 1) return STBTT__CSERR("call(g|)subr stack");
          v = (int) s[--sp];
          if (subr_stack_height >= 10) return STBTT__CSERR("recursion limit");
@@ -2386,8 +2365,11 @@ static int stbtt__GetGlyphInfoT2(const stbtt_fontinfo *info, int glyph_index, in
 STBTT_DEF int stbtt_GetGlyphShape(const stbtt_fontinfo *info, int glyph_index, stbtt_vertex **pvertices)
 {
    if (!info->cff.size) {
-      unsigned int visits = 0, copies = 0;
-      return stbtt__GetGlyphShapeTT(info, glyph_index, pvertices, 0, &visits, &copies);
+      int rejected = 0;
+      int num_vertices = stbtt__GetGlyphShapeTT(info, glyph_index, pvertices, 0, &rejected);
+      // TrussC patch: let the validation hook observe whole-shape rejection.
+      if (rejected) (void) STBTT_VALIDATE_GLYPH(info, glyph_index, rejected);
+      return num_vertices;
    }
    else
       return stbtt__GetGlyphShapeT2(info, glyph_index, pvertices);
@@ -3400,7 +3382,7 @@ static void stbtt__rasterize_sorted_edges(stbtt__bitmap *result, stbtt__edge *e,
       scanline = scanline_data;
 
    // TrussC patch: allocation failure must return before pointer arithmetic or writes.
-   if (!scanline) { STBTT_REPORT_FAILURE(); return; }
+   if (!scanline) return;
    scanline2 = scanline + result->w;
 
    y = off_y;
@@ -3797,7 +3779,7 @@ static stbtt__point *stbtt_FlattenCurves(stbtt_vertex *vertices, int num_verts, 
          }
          // TrussC patch: counting stops once the glyph has more than
          // STBTT_MAX_POINTS points (see there); it then gets no points.
-         if (pass == 0 && num_points > STBTT_MAX_POINTS) { STBTT_REPORT_FAILURE(); goto error; }
+         if (pass == 0 && num_points > STBTT_MAX_POINTS) goto error;
       }
       (*contour_lengths)[n] = num_points - start;
    }

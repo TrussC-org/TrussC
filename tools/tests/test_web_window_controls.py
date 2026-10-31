@@ -34,7 +34,7 @@ def main():
     sokol = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
     platform = (ROOT / 'core/platform/web/tcPlatform_web.cpp').read_text(encoding='utf-8')
     title = body(sokol, 'SOKOL_API_IMPL void sapp_set_window_title(')
-    size = body(platform, 'void internal::setMainWindowSizeLogical(')
+    size = body(platform, 'void internal::setSingleWindowSizeLogical(')
     window = (ROOT / 'core/include/tc/app/tcWindow.h').read_text(encoding='utf-8')
     public = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
     global_cpp = (ROOT / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
@@ -60,6 +60,7 @@ def main():
 #include <memory>
 #include <string>
 #include "tc/app/internal/tcWindowFullscreen.h"
+#include "sokol/util/sokol_window_size.h"
 using trussc::internal::WindowGeometryCall;
 using trussc::internal::WindowFullscreenPhase;
 #define SOKOL_API_IMPL
@@ -89,27 +90,32 @@ Log logWarning(const char*) { return {}; }
 namespace internal {
 using trussc::internal::WindowGeometryCall;
 using trussc::internal::WindowFullscreenPhase;
-WindowFullscreenPhase mainWindowFullscreenPhase() { return WindowFullscreenPhase::Fullscreen; }
+WindowFullscreenPhase singleWindowFullscreenPhase() { return WindowFullscreenPhase::Fullscreen; }
 bool ignoreFullscreenGeometry(WindowFullscreenPhase, WindowGeometryCall) { assert(false); return true; }
-void setMainFullscreen(bool) {}
-void setMainWindowSizeLogical(int, int);
+void setSingleWindowFullscreen(bool) {}
+void setSingleWindowSizeLogical(int, int);
+constexpr bool supportsSecondaryWindows() { return false; }
 enum class WindowControl { Title, PixelSize, Size, Position, PositionQuery, Fullscreen, ToggleFullscreen };
 bool& pixelPerfectMode() { return pixelPerfect; }
-void setMainWindowPosition(int, int) {}
-IVec2 mainWindowPosition() { return {-1, -1}; }
+void setSingleWindowPosition(int, int) {}
+IVec2 singleWindowPosition() { return {-1, -1}; }
 }
-namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
+namespace mcp::internal { std::string markedWindowTitle(const std::string& title) { return title; } }
 struct RectNode { void setSize(float, float) { assert(false); } };
+struct Window;
+struct RecordingOperations {
+    void (*setTitle)(Window&, const char*) = nullptr;
+    void (*setSize)(Window&, double, double, bool) = nullptr;
+    void (*setPosition)(Window&, int, int) = nullptr;
+    IVec2 (*position)(const Window&) = nullptr;
+    void (*setFullscreen)(Window&, bool) = nullptr;
+    void (*toggleFullscreen)(Window&) = nullptr;
+};
 struct Window {
+    struct { const RecordingOperations* operations = nullptr; } binding_;
     struct { bool isMain = true; float dpiScale = 2; } ctx_;
     std::string title_;
     bool isOpen() const { return valid; }
-    void setSecondaryTitle(const std::string&) { assert(false); }
-    void setSecondarySize(double, double, bool = false) { assert(false); }
-    void setSecondaryPosition(int, int) { assert(false); }
-    IVec2 getSecondaryPosition() { assert(false); return {}; }
-    bool isSecondaryFullscreen() const { return false; }
-    void setSecondaryFullscreen(bool) { assert(false); }
     IVec2 control(internal::WindowControl, int = 0, int = 0, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
     void setSize(int, int);
 };
@@ -147,7 +153,7 @@ int main() {
     sapp_set_window_title("Unicode \xe9\x89\x84\xe5\xa1\x94 <literal>");
     assert(EM_ASM_INT({ return document.title === 'Unicode 鉄塔 <literal>'; }));
     EM_ASM({ globalThis.canvas = {}; canvas.width = 2000; canvas.height = 1314; canvas.style = {}; canvas.style.width = '100%'; canvas.style.height = '100%'; document.querySelector = (selector) => canvas; });
-    internal::setMainWindowSizeLogical(800, 600);
+    internal::setSingleWindowSizeLogical(800, 600);
     assert(EM_ASM_INT({ return canvas.width === 2000 && canvas.height === 1314 && canvas.style.width === '100%' && canvas.style.height === '100%'; }));
     assert(notices == 1);
     assert(noticeText.find("ENDPOINT_PLATFORM") != std::string::npos);
@@ -163,10 +169,11 @@ int main() {
     // Repeat every API, including positive framebuffer extents which truncate
     // to logical zero at DPR 2, and invalid extents which used to return early.
     const int sizes[][2] = {{800, 600}, {1, 1}, {0, 100}, {100, 0}, {-1, 100}, {100, -1}};
-    // Include pre-window globals and closed Window handles: Notice comes first.
+    // Omitted globals require an open Window; explicit screen-size controls
+    // retain the Notice endpoint before extent validation.
     current = nullptr;
-    setWindowSize(0, 0); verify();
-    setWindowSizeLogical(0, 0); verify();
+    setWindowSize(0, 0); assert(notices == expectedNotices);
+    setWindowSizeLogical(0, 0); assert(notices == expectedNotices);
     current = &window;
     valid = false;
     window.setSize(0, 0); verify();
@@ -203,7 +210,7 @@ int main() {
                 target_detection += '\n#undef __APPLE__\n#undef __ANDROID__\n#define __EMSCRIPTEN__ 1\n'
                 folder, extension = ('ios', 'mm') if target == 'iOS' else ('android', 'cpp')
                 native = (ROOT / f'core/platform/{folder}/tcPlatform_{folder}.{extension}').read_text(encoding='utf-8')
-                endpoint = body(native, 'void internal::setMainWindowSizeLogical(')
+                endpoint = body(native, 'void internal::setSingleWindowSizeLogical(')
             fixture = source.replace(size, endpoint).replace('PLATFORM_DETECTION', target_detection).replace('SIZE_PREDICATE', predicate).replace('ENDPOINT_PLATFORM', target)
             (path / 'main.cpp').write_text(fixture, encoding='utf-8')
             subprocess.run([compiler, '-std=c++20', '-I' + str(ROOT / 'core/include'), str(path / 'main.cpp'), '-o', str(path / 'test.js'), '-sENVIRONMENT=node', '-sSINGLE_FILE=1', '-sASSERTIONS=1'], check=True)

@@ -2,13 +2,16 @@
 // presentation and App-priority callbacks. Unit draws omit Node transforms;
 // display mode exercises the production App draw binding. No sleeps.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
+int runResizeFirstFrameTest();
 #include <cstdio>
 using namespace tc;
 namespace {
 using Clock = std::chrono::steady_clock;
 int failures = 0;
+Window* initialFixture = nullptr;
 void check(const char* label, bool ok) {
     std::printf("windowTick: %s: %s\n", label, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
@@ -22,8 +25,8 @@ Clock::time_point fakeNow;
 Clock::time_point readFakeClock() { return fakeNow; }
 uint64_t nativeStandIn = 0;
 struct Secondary : Window {
-    Secondary() { native_ = &nativeStandIn; }
-    ~Secondary() { native_ = nullptr; internal::WindowRequestAccess::endApp(*this); }
+    Secondary() { context().fbWidth = context().fbHeight = 100; native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~Secondary() { context().fbWidth = context().fbHeight = 100; native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
 };
 struct Probe : App {
     int updates = 0, draws = 0;
@@ -61,7 +64,7 @@ void independentTargets(Window& main) {
     internal::currentWindowCtx() = previous;
 }
 void setUnitApp(Window& window, std::shared_ptr<App> app) {
-    window.setApp(std::move(app));
+    internal::WindowRequestAccess::attachCandidate(window, std::move(app));
     internal::applyPendingAppForTests(window);
     // Window::prepareAppEvents installs update, draw, then the other App
     // bindings. Keep its update/timer path, but replace the draw slot: even
@@ -79,13 +82,9 @@ void setUnitApp(Window& window, std::shared_ptr<App> app) {
 const internal::WindowTickPresentation fakePresentation{[] {}, [] { return true; }, [] {}};
 bool tick(Window& window, double seconds, bool force = false) {
     fakeNow = at(seconds);
-    auto* previous = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &window.context();
-    bool result;
-    { internal::WindowDispatchScope scope(window);
-      result = internal::runWindowTick(at(seconds), 0.25, force, &fakePresentation); }
-    internal::currentWindowCtx() = previous;
-    return result;
+    internal::WindowEntryScope entry(window, true);
+    if (!entry) return false;
+    return internal::runWindowTick(at(seconds), .25, force, &fakePresentation);
 }
 void nativeGatedTicks(Window& window) {
     auto* previous = internal::currentWindowCtx();
@@ -93,12 +92,12 @@ void nativeGatedTicks(Window& window) {
     internal::currentWindowCtx() = &ctx;
     const auto updates = ctx.updateCount, draws = ctx.drawCount;
     ctx.loop = {};
-    setFps(VSYNC);
+    window.setFps(VSYNC);
     internal::runWindowTick(at(0), .25, false, &fakePresentation, true);
     internal::runWindowTick(at(1), .25, true, &fakePresentation, true);
     check("native gated callback retains secondary pause including capture",
-        ctx.isMain || ctx.updateCount == updates);
-    check("native gate keeps main decision B", !ctx.isMain || ctx.updateCount == updates + 2);
+        !ctx.pauseUpdatesWhenHidden || ctx.updateCount == updates);
+    check("native gate keeps main decision B", !!ctx.pauseUpdatesWhenHidden || ctx.updateCount == updates + 2);
     check("native gate never completes a draw", ctx.drawCount == draws);
     // Leave the regular fixture's counters and phase untouched.
     ctx.updateCount = updates; ctx.drawCount = draws;
@@ -109,19 +108,25 @@ void nativeGatedTicks(Window& window) {
 }
 
 // The key is a compatibility rule, independent of GPU completion and draw success.
+void publishHidden(Window& window, bool hidden) {
+    auto metadata = internal::WindowRequestAccess::binding(window).metadata;
+    metadata.trust_hidden_signals = true; metadata.iconified = false; metadata.occluded = hidden;
+    internal::publishWindowMetadata(window, metadata);
+}
 void resourceKeyPlacement(Window& main) {
     Secondary owner, other;
-    setUnitApp(main, std::make_shared<Probe>());
-    setUnitApp(owner, std::make_shared<Probe>());
-    setUnitApp(other, std::make_shared<Probe>());
+    setUnitApp(main, internal::makeConstructedApp<Probe>());
+    setUnitApp(owner, internal::makeConstructedApp<Probe>());
+    setUnitApp(other, internal::makeConstructedApp<Probe>());
     for (auto* window : {&main, static_cast<Window*>(&owner)}) {
         auto& ctx = window->context();
         internal::currentWindowCtx() = &ctx;
+        internal::AppOwnerScope fixtureOwner(internal::appOwner(*window->getApp()));
         uint64_t expected = internal::resourceFrameKey();
         bool callbackPlacement = true;
         auto observe = [&] {
             callbackPlacement &= internal::resourceFrameKey() ==
-                (ctx.isMain ? getUpdateCount() : expected);
+                expected;
         };
         auto update = events().update.listen(observe);
         auto draw = events().draw.listen(observe);
@@ -129,11 +134,11 @@ void resourceKeyPlacement(Window& main) {
         auto attempt = [&](const char* label, bool force, bool rejected, bool gated, bool skipAdmission = false) {
             const auto before = internal::resourceFrameKey();
             const auto foreign = other.context().resourceTickCount;
-            expected = before + (!ctx.isMain && !gated && !skipAdmission ? 1 : 0);
+            expected = before + (!gated && !skipAdmission ? 1 : 0);
             const internal::WindowTickPresentation presentation{[] {}, [=] { return !rejected; }, [] {}};
             fakeNow = at(seconds++);
             internal::runWindowTick(fakeNow, .25, force, &presentation, gated);
-            check(label, internal::resourceFrameKey() == (ctx.isMain ? ctx.updateCount : expected));
+            check(label, internal::resourceFrameKey() == expected);
             check("resource key is placed before update/draw listeners", callbackPlacement);
             check("owner tick leaves another secondary resource key unchanged", other.context().resourceTickCount == foreign);
             const auto saved = internal::resourceFrameKey();
@@ -158,11 +163,11 @@ void resourceKeyPlacement(Window& main) {
         setFps(EVENT_DRIVEN); ctx.loop.redrawCount = 0;
         attempt("resource key: synchronized idle callback has no admission", false, false, false, true);
         setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
-        ctx.suspended = true;
+        publishHidden(*window, true);
         attempt("resource key: hidden capture admitted tick", true, false, false);
-        attempt("resource key: paused secondary tick", false, false, false, !ctx.isMain);
+        attempt("resource key: paused secondary tick", false, false, false, ctx.pauseUpdatesWhenHidden);
         attempt("resource key: native gate including capture never advances secondary", true, false, true);
-        ctx.suspended = false;
+        publishHidden(*window, false);
         setIndependentFps(4, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
         attempt("resource key: initial fixed update tick", false, false, false);
         const auto catchupUpdates = ctx.updateCount;
@@ -179,8 +184,9 @@ void exercise(Window& window) {
     auto& ctx = window.context();
     internal::currentWindowCtx() = &ctx;
     ctx.loop = {};
-    auto app = std::make_shared<Probe>();
+    auto app = internal::makeConstructedApp<Probe>();
     setUnitApp(window, app);
+    internal::AppOwnerScope fixtureOwner(internal::appOwner(*app));
     setIndependentFps(4, EVENT_DRIVEN);
     check("independent rates target current window", ctx.loop.updateTargetFps == 4 && ctx.loop.drawTargetFps == 0 && !ctx.loop.updateSyncedToDraw);
     check("getFpsSettings reads current window", getFpsSettings().updateFps == 4 && !getFpsSettings().synced);
@@ -231,26 +237,26 @@ void exercise(Window& window) {
     check("Window::setFps drives this scheduler", getUpdateCount() - updates == 4 && getDrawCount() - draws == 4 && window.getFps() == 2);
     setIndependentFps(4, EVENT_DRIVEN);
     tick(window, 5);
-    ctx.suspended = true;
+    publishHidden(window, true);
     auto count = getUpdateCount();
-    if (ctx.isMain) {
+    if (!ctx.pauseUpdatesWhenHidden) {
         tick(window, 5.25);
         check("hidden main keeps updating", getUpdateCount() == count + 1);
-        ctx.suspended = false;
+        publishHidden(window, false);
         setFps(VSYNC); setIndependentFps(4, EVENT_DRIVEN); tick(window, 7205);
     } else {
         tick(window, 3605);
         check("hidden secondary retains native pause policy", getUpdateCount() == count);
-        ctx.suspended = false; tick(window, 7205);
+        publishHidden(window, false); tick(window, 7205);
         check("resume does not replay hidden time", getUpdateCount() == count + 1);
     }
     setFps(VSYNC); setIndependentFps(4, EVENT_DRIVEN);
-    internal::observeWindowVisibility(ctx, SAPP_EVENTTYPE_SUSPENDED);
+    publishHidden(window, true); internal::observeWindowVisibility(ctx, SAPP_EVENTTYPE_SUSPENDED);
     const auto captureDraws = getDrawCount(), captureUpdates = getUpdateCount();
     check("hidden capture still renders and serves afterFrame", tick(window, 7205.05, true) && getDrawCount() == captureDraws + 1);
     tick(window, 7205.1, true);
     check("hidden forced frames preserve fixed update pacing", getUpdateCount() == captureUpdates + 1);
-    ctx.suspended = false;
+    publishHidden(window, false);
     setFps(VSYNC); setIndependentFps(4, EVENT_DRIVEN); tick(window, 7205.2);
     int eventTimer = 0;
     fakeNow = at(7205.2); ctx.tickTime = fakeNow; ctx.tickActive = true;
@@ -299,23 +305,49 @@ void exercise(Window& window) {
     {
         internal::WindowCallbackTimeScope eventScope;
         const auto eventTime = internal::getUpdateTime();
-        setIndependentFps(4, VSYNC); tick(window, 7211);
+        setIndependentFps(4, VSYNC);
+        const auto updates = ctx.updateCount;
+        check("common entry refuses a tick during its callback", !tick(window, 7211) && ctx.updateCount == updates);
         check("nested tick restores the event timing scope", ctx.inUpdate && ctx.inCallbackClock && !ctx.fixedStepUpdate && internal::getUpdateTime() == eventTime);
     }
     check("event timing scope restores its caller", !ctx.inUpdate && !ctx.inCallbackClock);
     internal::currentWindowCtx() = previous;
 }
 std::shared_ptr<Window> displaySecondary;
-bool displayDone = false, hideMain = false;
-bool visibilityHook(const Window& window) { return &window == internal::mainWindow() && hideMain; }
+bool displayDone = false, hideMain = false, secondaryExited = false, secondaryCleaned = false;
+bool readVisibility(sapp_window handle, void* user, sapp_tc_window_metadata& metadata) {
+    auto& w = *static_cast<Window*>(user);
+    if (!sapp_tc_window_read_metadata(handle, &metadata)) metadata = internal::WindowRequestAccess::binding(w).metadata;
+    metadata.trust_hidden_signals = true;
+    metadata.occluded = &w == initialFixture && hideMain;
+    return true;
+}
+const internal::WindowNativeOperations& visibilityOperations() {
+    static const auto operations = [] {
+        auto ops = internal::productionWindowOperations(); ops.readMetadata = readVisibility;
+        // Unit bindings have no native record; display mode reads the real close observation.
+        ops.closeRecorded = [](sapp_window handle, void*) { return sapp_isvalid() && sapp_tc_window_close_recorded(handle); };
+        return ops;
+    }();
+    return operations;
+}
+void setMainHidden(bool hidden) {
+    hideMain = hidden;
+    auto& w = *initialFixture;
+    auto& b = internal::WindowRequestAccess::binding(w);
+    b.operations = &visibilityOperations(); b.user = &w;
+    internal::refreshWindowMetadata(w);
+}
 void hiddenInterval(Window& main) {
     Secondary visible;
-    setUnitApp(main, std::make_shared<Probe>());
-    setUnitApp(visible, std::make_shared<Probe>());
+    main.context().pauseUpdatesWhenHidden = false;
+    setUnitApp(main, internal::makeConstructedApp<Probe>());
+    setUnitApp(visible, internal::makeConstructedApp<Probe>());
     internal::currentWindowCtx() = &main.context();
+    internal::AppOwnerScope fixtureOwner(internal::appOwner(*main.getApp()));
     setIndependentFps(4, EVENT_DRIVEN); tick(main, 8000);
     visible.setFps(4); tick(visible, 8000);
-    internal::windowOccludedHookForTests() = visibilityHook; hideMain = true;
+    setMainHidden(true);
     const auto updates = main.context().updateCount, draws = main.context().drawCount;
     const auto visibleDraws = visible.context().drawCount;
     for (int i = 1; i <= 8; ++i) {
@@ -330,18 +362,19 @@ void hiddenInterval(Window& main) {
     const auto syncedUpdates = main.context().updateCount, syncedDraws = main.context().drawCount;
     for (int i = 0; i < 8; ++i) tick(main, 8003 + i * .25);
     check("hidden synced main keeps configured pacing", main.context().updateCount == syncedUpdates + 4 && main.context().drawCount == syncedDraws + 4);
-    hideMain = false; internal::windowOccludedHookForTests() = nullptr;
+    setMainHidden(false);
     internal::currentWindowCtx() = nullptr;
 }
 #ifndef __EMSCRIPTEN__
 void captureExpiryWithoutPresentation(Window& main) {
     using namespace mcp::internal;
+    internal::AppOwnerScope fixtureOwner(internal::appOwner(*main.getApp()));
     internal::currentWindowCtx() = &main.context();
     setFps(EVENT_DRIVEN);
     int afterFrames = 0, produced = 0;
     auto completion = events().afterFrame.listen([&] {
         ++afterFrames;
-        drainDeferredResponses(); // same successful-frame drain as the runner
+        drainDeferredResponses(&main.context()); // addressed successful-frame drain
     });
     const internal::WindowTickPresentation rejected{[] {}, [] { return false; }, [] {}};
     const auto draws = getDrawCount();
@@ -349,7 +382,10 @@ void captureExpiryWithoutPresentation(Window& main) {
     auto attempt = [](Clock::time_point now, double duration, bool force,
                       const internal::WindowTickPresentation* presentation) {
         fakeNow = now;
-        return internal::runWindowTick(now, duration, force, presentation);
+        internal::beforeHostTurn();
+        const bool drawn = internal::runWindowTick(now, duration, force, presentation);
+        internal::afterHostTurn();
+        return drawn;
     };
     Secondary target;
     auto enqueue = [&](const void* window, Clock::time_point deadline, int id) {
@@ -388,8 +424,8 @@ void captureExpiryWithoutPresentation(Window& main) {
     auto promise = std::make_shared<std::promise<ReplyThunk>>();
     auto capture = promise->get_future();
     const Json request = {{"jsonrpc", "2.0"}, {"id", 307}, {"method", "tools/call"},
-        {"params", {{"name", "tc_get_screenshot"}, {"arguments", {{"window", 0}}}}}};
-    getHttpChannel().send(mcp::McpRequest{request.dump(), promise, std::make_shared<WorkBudget>(true)});
+        {"params", {{"name", "tc_get_screenshot"}, {"arguments", {{"window", 101}}}}}};
+    getHttpChannel().send(mcp::McpRequest{request.dump(), promise});
     mcp::processHttpQueue();
     Clock::time_point deadline{};
     {
@@ -409,11 +445,10 @@ void captureExpiryWithoutPresentation(Window& main) {
     attempt(deadline, .25, true, &rejected);
     check("main capture times out at its deadline without a successful frame", timedOut(capture, 307) && !hasDeferredResponses() && produced == 0);
     check("capture timeout preserves failed-admission draw and afterFrame contract", afterFrames == 0 && getDrawCount() == draws);
-    check("capture timeout releases request working credits", workingMemory() == 0);
     mcp::setToolLevel(grant);
     mcp::stopHttpServer();
 
-    auto blocked = enqueue(nullptr, deadline, 987);
+    auto blocked = enqueue(&main.context(), deadline, 987);
     const internal::WindowTickPresentation slowAdmission{[] {}, [] {
         fakeNow += std::chrono::seconds(1); // native admission can block
         return false;
@@ -421,13 +456,13 @@ void captureExpiryWithoutPresentation(Window& main) {
     attempt(deadline - std::chrono::seconds(1), .25, true, &slowAdmission);
     check("admission work counts toward the capture deadline", timedOut(blocked, 987) && produced == 0 && afterFrames == 0 && getDrawCount() == draws);
 
-    auto retry = enqueue(nullptr, deadline + kTargetedDeferralTimeout, 984);
+    auto retry = enqueue(&main.context(), deadline + kTargetedDeferralTimeout, 984);
     attempt(deadline, .25, true, &rejected);
     check("unexpired capture remains queued after rejected admission", !ready(retry) && produced == 0);
     attempt(deadline + std::chrono::milliseconds(1), .25, true, &fakePresentation);
     check("capture producer runs once after admission recovers", ready(retry) && retry.get()() == "captured" && produced == 1 && afterFrames == 1);
 
-    auto idle = enqueue(nullptr, deadline, 985);
+    auto idle = enqueue(&main.context(), deadline, 985);
     main.context().loop.redrawCount = 0;
     attempt(deadline, .25, false, &fakePresentation);
     check("idle non-presenting main tick also expires replies", timedOut(idle, 985) && afterFrames == 1);
@@ -444,6 +479,12 @@ sg_swapchain unavailableSwapchain(void*) {
 }
 struct SecondaryDisplayApp : App {
     int draws = 0;
+    void exit() override {
+        check("secondary close detaches App before exit", getWindow() == nullptr);
+        displaySecondary.reset();
+        secondaryExited = true;
+    }
+    void cleanup() override { secondaryCleaned = true; }
     void setup() override { setIndependentFps(VSYNC, EVENT_DRIVEN); redraw(3); }
     void draw() override {
         ++draws;
@@ -455,7 +496,7 @@ void onNextPrelude(std::function<void()> callback) {
 #ifndef __EMSCRIPTEN__
     // runOnMainThread executes inline on main; enqueue explicitly so this
     // test exercises the next native tick's prelude, outside any active tick.
-    internal::mainThreadQueue().send(std::move(callback));
+    internal::mainThreadQueue().send(internal::attributeMainThreadWork(std::move(callback)));
 #else
     runOnMainThread(std::move(callback)); // display mode requires desktop
 #endif
@@ -469,6 +510,7 @@ struct MainDisplayApp : App {
     uint32_t uploadFrame = 0;
     int hiddenUploads = 0, uploadRejections = 0;
     EventListener uploadLog;
+    sg_swapchain (*savedAcquire)(void*) = nullptr;
     void queueHiddenUpload() {
         onNextPrelude([this] {
             check("prelude upload runs while main hidden", hideMain);
@@ -480,7 +522,13 @@ struct MainDisplayApp : App {
             if (!hiddenUploads) {
                 // Two synthetic hidden ticks with no intervening secondary
                 // commit: a visible window must not mask the missing boundary.
-                auto& ctx = internal::mainWindowContext();
+                auto& ctx = internal::windowApiContext();
+                auto* caller = internal::currentWindowCtx();
+                internal::restoreWindowContext(&ctx);
+                struct RestoreCaller {
+                    internal::WindowContext* caller;
+                    ~RestoreCaller() { internal::restoreWindowContext(caller); }
+                } restoreCaller{caller};
                 const auto loop = ctx.loop;
                 ctx.loop.updateTargetFps = EVENT_DRIVEN;
                 ctx.loop.redrawCount = 0;
@@ -496,6 +544,8 @@ struct MainDisplayApp : App {
         });
     }
     void setup() override {
+        initialFixture = getWindow();
+        getWindow()->context().pauseUpdatesWhenHidden = false;
         setIndependentFps(VSYNC, EVENT_DRIVEN);
         getWindow()->setClearColor(Color(1, 0, 0, 1));
         pixels.allocate(4, 4, 4);
@@ -503,7 +553,7 @@ struct MainDisplayApp : App {
         WindowSettings settings; settings.width = settings.height = 64;
         displaySecondary = createWindow(settings);
         check("native secondary created", bool(displaySecondary));
-        if (displaySecondary) displaySecondary->setApp(std::make_shared<SecondaryDisplayApp>());
+        if (displaySecondary) displaySecondary->setApp<SecondaryDisplayApp>();
         after = events().afterFrame.listen([this] {
             if (draws <= 2) {
                 Pixels screen;
@@ -534,11 +584,11 @@ struct MainDisplayApp : App {
             if (++idleUploads == 2) { phase = 1; redraw(); }
         } else if (phase == 1 && draws == 2) {
             phase = 2;
-            internal::windowOccludedHookForTests() = visibilityHook;
             onNextPrelude([this] {
-                hideMain = true;
+                setMainHidden(true);
                 check("main visibility reports scheduler input", getWindow()->isOccluded());
-                hiddenUpdates = getUpdateCount(); hiddenDraws = getDrawCount();
+                const auto& main = internal::windowApiContext();
+                hiddenUpdates = main.updateCount; hiddenDraws = main.drawCount;
                 visibleDraws = displaySecondary->context().drawCount;
                 displaySecondary->setFps(VSYNC);
                 uploadLog = getLogger().onLog.listen([this](LogEventArgs& e) {
@@ -553,18 +603,21 @@ struct MainDisplayApp : App {
             check("display hidden interval: visible secondary draws advance", displaySecondary->context().drawCount >= visibleDraws + 3);
             check("hidden prelude uploads avoid VALIDATE_UPDIMG_ONCE", uploadRejections == 0);
             uploadLog.disconnect();
-            hideMain = false;
+            setMainHidden(false);
             check("main visible again", !getWindow()->isOccluded());
-            internal::windowOccludedHookForTests() = nullptr;
             // Exercise Sokol's actual non-throwing invalid-swapchain path.
-            internal::mainWindowContext().acquireSwapchain = unavailableSwapchain;
+            savedAcquire = internal::windowApiContext().acquireSwapchain;
+            internal::windowApiContext().acquireSwapchain = unavailableSwapchain;
             redraw(); phase = 3;
         } else if (phase == 3) {
             check("invalid native swapchain does not count a completed draw", getDrawCount() == 2 && internal::mainLoop().redrawCount == 1);
-            internal::mainWindowContext().acquireSwapchain = nullptr;
+            internal::windowApiContext().acquireSwapchain = savedAcquire;
             phase = 4;
         } else if (phase == 4 && getDrawCount() == 3) {
             check("valid native swapchain retries pending redraw", internal::mainLoop().redrawCount == 0);
+            displaySecondary->close(); phase = 5;
+        } else if (phase == 5 && !displaySecondary) {
+            check("common native close retains Window through exit and cleanup", secondaryExited && secondaryCleaned);
             displayDone = true;
             exitApp();
         }
@@ -575,7 +628,7 @@ struct MainDisplayApp : App {
         if (draws == 1) { texture.loadData(pixels); firstDevice = internal::deviceFrameCount(); }
         if (draws == 2) clear(0, 0, 1, 1);
     }
-    void cleanup() override { displaySecondary.reset(); internal::windowOccludedHookForTests() = nullptr; }
+    void cleanup() override { displaySecondary.reset(); setMainHidden(false); }
 };
 struct HeadlessProbe : App {
     void update() override {
@@ -587,6 +640,7 @@ struct HeadlessProbe : App {
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     getMainThreadId();
+    if (argc > 1 && std::string(argv[1]) == "--resize-first-frame") return runResizeFirstFrameTest();
     if (argc > 1 && std::string(argv[1]) == "--display") {
         if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: windowTick display requires desktop secondary windows"); return 0; }
         WindowSettings settings; settings.width = settings.height = 128;
@@ -595,9 +649,11 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             check("display test completed", displayDone);
         });
     }
-    internal::createMainWindow(WindowSettings{});
-    auto& main = *internal::mainWindow();
-    internal::WindowRequestAccess::openMain(main);
+    auto launch = internal::prepareLaunchWindow(WindowSettings{});
+    auto& main = *launch;
+    initialFixture = &main;
+    internal::WindowRequestAccess::bindForTests(main, 101);
+    main.context().fbWidth = main.context().fbHeight = 100;
     internal::windowClockForTests() = readFakeClock;
     independentTargets(main);
     nativeGatedTicks(main);
@@ -612,7 +668,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     const auto savedUpdates = main.context().updateCount;
     const auto savedDraws = main.context().drawCount;
-    main.setApp(std::make_shared<Probe>());
+    main.setApp<Probe>();
     internal::applyPendingAppForTests(main);
     check("App swap retains host scheduler and counters", main.context().updateCount == savedUpdates && main.context().drawCount == savedDraws && main.context().loop.updateTargetFps == mainLoop.updateTargetFps);
     {
@@ -620,24 +676,27 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             if (event.type == SAPP_EVENTTYPE_SUSPENDED) throw std::runtime_error("visibility listener probe");
         });
         sapp_event event{}; event.type = SAPP_EVENTTYPE_SUSPENDED;
-        internal::_event_cb(&event);
+        setMainHidden(true);
+        tcCoreTest::dispatchMainEvent(&event);
         check("suspension survives a throwing raw listener", main.context().suspended && !main.context().inUpdate && !main.context().inCallbackClock);
-        throwing.disconnect(); event.type = SAPP_EVENTTYPE_RESUMED;
-        internal::_event_cb(&event);
+        throwing.disconnect(); event.type = SAPP_EVENTTYPE_RESUMED; setMainHidden(false);
+        tcCoreTest::dispatchMainEvent(&event);
         check("resume clears suspension after listener exception", !main.context().suspended);
     }
 #ifndef __EMSCRIPTEN__
     captureExpiryWithoutPresentation(main);
 #endif
     resourceKeyPlacement(main);
-    internal::destroyMainWindow();
+    internal::shutdownRuntime();
+    internal::beginRuntimeRun();
+    internal::beginFrameworkLifetime();
     {
         struct LongSetup : App {
             int fired = 0;
             void setup() override { fakeNow += std::chrono::seconds(3); callAfter(2, [this] { ++fired; }); }
         };
         Secondary window;
-        auto app = std::make_shared<LongSetup>(); setUnitApp(window, app);
+        auto app = internal::makeConstructedApp<LongSetup>(); setUnitApp(window, app);
         window.setFps(VSYNC);
         tick(window, 100);
         tick(window, 103.25);
@@ -649,8 +708,9 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     }
     {
         Secondary window;
-        auto app = std::make_shared<Probe>(); setUnitApp(window, app);
+        auto app = internal::makeConstructedApp<Probe>(); setUnitApp(window, app);
         internal::currentWindowCtx() = &window.context();
+        internal::AppOwnerScope fixtureOwner(internal::appOwner(*app));
         setIndependentFps(4, EVENT_DRIVEN);
         bool fired = false;
         auto listener = events().update.listen([&] {
@@ -666,8 +726,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     for (float dpi : {2.0f, 1.25f, 1.5f, 1.75f}) {
         const int expectedWidth = static_cast<int>(1286 / dpi);
         const int expectedHeight = static_cast<int>(967 / dpi);
-        internal::WindowContext ctx; ctx.isMain = false;
-        ctx.fbWidth = 1286; ctx.fbHeight = 967; ctx.dpiScale = dpi;
+        tcCoreTest::WindowFixture dpiWindow; internal::WindowContext& ctx = dpiWindow.window->context(); ctx.fbWidth = 1286; ctx.fbHeight = 967; ctx.dpiScale = dpi;
         internal::currentWindowCtx() = &ctx;
         const auto getterWidth = getWindowWidth(), getterHeight = getWindowHeight();
         const auto event = internal::framebufferResizeArgs(1286, 967, dpi);
@@ -675,7 +734,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         internal::currentWindowCtx() = nullptr;
     }
     check("#984 200 percent truncates 1286x967 to 643x483", internal::framebufferToLogical(1286, 2) == 643 && internal::framebufferToLogical(967, 2) == 483);
-    internal::mainWindowContext().drawCount = 0;
+    internal::nonWindowContext().drawCount = 0;
     runHeadlessApp<HeadlessProbe>();
     return failures ? 1 : 0;
 }

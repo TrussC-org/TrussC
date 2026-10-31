@@ -1,11 +1,56 @@
 # Windowed app exit protocol
 
-Window close, Windows session end (including `ENDSESSION_CLOSEAPP`), macOS
-application termination and Linux/macOS SIGTERM/SIGINT issue the ordinary
-`events().exitRequested` event. Setting `cancel` vetoes that request. Windows
-uses `reason` as the shutdown-block explanation, or “The app is still busy.”
-when it is empty. After cancellation, the user starts shutdown again. The
-block is removed when the request is resolved or Windows cancels session end.
+OS close asks the addressed Window's closeRequested. If accepted, quitOnClose
+or the last open Window asks process exitRequested before any Window closes.
+Either veto keeps every Window open; acceptance uses common process ending. Runtime dispatches
+exitRequested first to its own listeners and then to attached Apps in reverse
+attachment order, ORing vetoes and retaining the first nonempty explanation.
+Code Window::close() skips closeRequested. For the last open Window or
+setQuitOnClose(true), Runtime asks exitRequested once before anything closes.
+Any veto keeps all Windows open; acceptance uses normal process ending.
+A non-last plain code close closes only that Window without events.
+Each close() is decided when it is called; a later exitRequested veto does not undo an earlier close() from the same frame.
+Process shutdown bypasses closeRequested.
+
+OS session query and commit belong to Runtime. Windows receives
+WM_QUERYENDSESSION/WM_ENDSESSION on its own hidden top-level control HWND;
+closing the first user Window cannot remove that authority. Idle queries reuse
+the process veto dispatcher and register its explanation with Windows. A nested
+busy query accepts without reentering user callbacks. WM_ENDSESSION(FALSE)
+resolves the query without ending the Runtime. A committed session end, including
+ENDSESSION_CLOSEAPP, bypasses veto. macOS applicationShouldTerminate forwards
+logout/restart/shutdown Apple-event reasons through the same query/commit;
+NSWorkspaceWillPowerOff commits on the main operation queue. Ordinary Cmd+Q remains deferred and
+vetoable at the existing safe boundary.
+
+Busy means App code on the main stack: a host callback, constructor, native
+callback or tick. Workers do not make an idle main busy. A busy query accepts
+without entering App callbacks. On busy commit, no App::exit, exit events,
+cleanup or watchdog runs. Windows returns from WM_ENDSESSION and the OS ends
+the process. macOS calls _exit(0) before returning NSTerminateNow; it never
+uses an unanswered NSTerminateLater that could block logout. A blocked main
+that cannot receive the callback is subject to the OS termination policy.
+
+An idle commit runs normal reverse attachment ending synchronously: exit events,
+exactly one App::exit, audio detach and cleanup, then complete service/device
+cleanup. One process-wide watchdog (default 3 seconds,
+runtime().setLogoutTimeout(float seconds)) bounds the whole idle ending.
+Negative or NaN values log Error and retain the old setting; zero ends
+immediately, positive infinity disables the deadline. Ordinary quit arms none.
+Windows may impose an earlier deadline. After idle cleanup, Runtime closes the
+Logger file sink and flushes stdout/stderr, preserving the final exit lines
+before terminal process exit. Busy termination does not flush sinks.
+After idle cleanup, Windows uses
+TerminateProcess; macOS uses _exit. Neither returns to frames. A host without
+a session receiver cannot promise logout delivery.
+
+A quit requested during setup (exitApp/requestExitApp) is handled before the
+first service prelude, and exitRequested still gets its veto. For a Window's root
+App (including headless), the rule is:
+**exit requested in setup → no further App callbacks (no console, no update)**.
+If vetoed, the loop continues normally.
+A child App leaves quit pending until the current tree traversal unwinds; the
+outer turn handles it before the next services, with no callbacks after cleanup.
 
 The first SIGTERM/SIGINT only records a flag in the signal handler. The next
 frame requests exit on the main thread, even in event-driven rendering. A
@@ -13,20 +58,15 @@ second signal while that request is still pending, including during cleanup,
 terminates immediately without another event or cleanup. A veto clears the
 pending signal and its delivery state: the next signal starts a fresh,
 cancellable request, and only another signal while that request is pending
-forces immediate exit (status `128 + signal`, normally 130 or 143). Forced OS shutdown
-and SIGKILL cannot be vetoed. Windows runs cleanup inside `WM_ENDSESSION(TRUE)`
-even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)` inside
-that message, including for `ENDSESSION_CLOSEAPP`. This prevents returning to
-interrupted user code or running DLL detach/guest static destructors after
-teardown. Cleanup and its log writes finish first. Windows grants only a few
-seconds: keep exit handlers short.
+forces immediate exit (status `128 + signal`, normally 130 or 143). SIGKILL
+cannot deliver a callback or cleanup.
 
 The Logger emits these stable **message payloads**, with its usual timestamp,
 level and `[System]` prefix:
 
 ```text
-exit: begin reason=os-session-end pid=1234
-exit: clean reason=os-session-end code=0 pid=1234
+exit: begin reason=exit-app pid=1234
+exit: clean reason=exit-app code=0 pid=1234
 ```
 
 `begin` is emitted at the start of `_cleanup_cb`, before MCP, app `exit()` and
@@ -42,8 +82,7 @@ level filtering. `onLog` listeners receive both records normally. Ordinary
 log records still obey the file level; the bypass is internal to the runtime.
 
 Known reason tokens are `window-close`, `request-exit-app`, `exit-app`,
-`tc-quit`, `os-session-end` (Windows), `os-logoff`, `os-restart`, `os-shutdown`
-(macOS when supplied by the quit Apple event), `app-quit` (macOS: a quit Apple
+`tc-quit`, `os-session-end` (idle desktop session commit), `app-quit` (macOS: a quit Apple
 event without one of those reasons, i.e. Cmd+Q, the Dock's Quit or an
 AppleScript `quit`), `sigterm`, `sigint`, and `device-lost` where the backend
 detects loss. A cancelled request clears its origin. Cleanup freezes it so
@@ -54,7 +93,6 @@ callbacks cannot change the reason halfway through the pair.
 | `begin` and `clean` | Normal exit completed |
 | `begin` only | Interrupted during cleanup |
 | Neither | No observed cleanup; unknown, not necessarily a crash |
-| Crash marker from the crash-reporting protocol (#252) | Crash |
 
 At MCP HTTP shutdown, all queued requests and deferred replies receive a
 JSON-RPC response containing `the app is exiting normally (reason=TOKEN)`.
@@ -67,16 +105,18 @@ Headless log-file/MCP startup and anchorbolt classification are separate work.
 
 ## Platform verification
 
-Run `osExit --window accept` and `osExit --window cancel` (or
-`allCoreTests osExit --window ...`). On Windows also run `--window cancel-empty` for the generic explanation and
-`--window forced`
-to send an accepted `ENDSESSION_CLOSEAPP` notification after a veto. Accepted
-session-end tests verify cleanup before process termination, which skips
-`atexit`; check status 0 and one begin/clean pair in `TRUSSC_LOG_FILE` as well.
-These use synthetic messages; verify real logoff/restart/shutdown separately, including Restart
-Manager, a custom/empty block reason, cancellation by another application,
-and forced shutdown while a modal dialog or window drag is active. Check the
-app's saved state and the single log pair after signing back in.
+Run the Linux-compiled session policy and native seam tests described in
+core/tests/sessionEndBusy/README.md. Windows osExit --window accept/cancel/
+cancel-empty/forced addresses the hidden Runtime HWND; it schedules the query
+outside update so veto is meaningful. Native user HWND tests assert that neither
+first nor subsequent user windows own session termination.
+
+Actual Windows logout/restart/shutdown and macOS Air logout with 2/5/10-second
+exit delays require separate auditor supervision. Check busy main drag/modal
+logout gets no App exit and does not block shutdown; separately check synchronous
+performClose with two secondaries during update. Check
+saved state and OS deadlines separately; busy termination has no clean log claim.
+No worker initiates real logout on an unattended host.
 
 On macOS verify Cmd+Q and real logout/restart/shutdown with and without a veto,
 including the Apple event reason and a modal dialog. On Linux/macOS also run

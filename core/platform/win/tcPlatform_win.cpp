@@ -16,7 +16,6 @@
 #include <windows.h>
 #include <shellscalingapi.h>
 #include <d3d11.h>
-#include "tcCaptureTrace_win.h"
 
 // sokol_app のウィンドウ取得
 #include "sokol_app_tc.h"
@@ -28,8 +27,68 @@
 
 namespace trussc {
 
+namespace internal {
+namespace {
+LRESULT CALLBACK sessionAuthorityProc(HWND hwnd, UINT message, WPARAM value, LPARAM flags) {
+    if (message == WM_QUERYENDSESSION) {
+        if (querySessionEnd()) { ShutdownBlockReasonDestroy(hwnd); return TRUE; }
+        // Preserve C2's first nonempty veto explanation. Optional text failure
+        // cannot remove the veto and never escapes the native callback.
+        try {
+            const auto reason = exitBlockReason();
+            if (reason.empty()) ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
+            else {
+                const int count = MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, nullptr, 0);
+                if (count > 0) {
+                    std::wstring wide(static_cast<size_t>(count), L'\0');
+                    MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, wide.data(), count);
+                    ShutdownBlockReasonCreate(hwnd, wide.c_str());
+                } else ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
+            }
+        } catch (...) { ShutdownBlockReasonCreate(hwnd, L"The app is still busy."); }
+        return FALSE;
+    }
+    if (message == WM_ENDSESSION) {
+        ShutdownBlockReasonDestroy(hwnd);
+        if (value) commitSessionEnd();
+        cancelSessionEnd();
+        return 0;
+    }
+    return DefWindowProcW(hwnd, message, value, flags);
+}
+}
+void* createSessionAuthority() {
+    WNDCLASSW type{};
+    type.lpfnWndProc = sessionAuthorityProc;
+    type.hInstance = GetModuleHandleW(nullptr);
+    type.lpszClassName = L"TrussC.Runtime.Session";
+    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        throw std::runtime_error("Unable to register Runtime session authority");
+    // HWND_MESSAGE does not receive WM_QUERYENDSESSION broadcasts. This is an
+    // unshown top-level control window, owned for the whole Runtime run.
+    HWND hwnd = CreateWindowExW(0, type.lpszClassName, L"TrussC", WS_OVERLAPPED,
+        0, 0, 0, 0, nullptr, nullptr, type.hInstance, nullptr);
+    if (!hwnd) throw std::runtime_error("Unable to create Runtime session authority");
+    return hwnd;
+}
+void pollSessionAuthority(void* authority) noexcept {
+    // Headless has no user-window pump. Sent session messages are dispatched
+    // by PeekMessage on the Runtime main thread as well.
+    MSG message;
+    while (authority && PeekMessageW(&message, static_cast<HWND>(authority), 0, 0, PM_REMOVE)) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+}
+void destroySessionAuthority(void* authority) noexcept {
+    if (authority) DestroyWindow(static_cast<HWND>(authority));
+}
+}
+
 void bringWindowToFront() {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
+    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(internal::WindowRequestAccess::binding(*target).handle);
     if (hwnd) {
         SetForegroundWindow(hwnd);
     }
@@ -50,23 +109,7 @@ float getDisplayScaleFactor() {
         // SetProcessDpiAwarenessContext は sokol_app が行うはずなので
         // ここでは単にDPIを取得する
 
-        // まずウィンドウハンドルを試す
-        HWND hwnd = (HWND)sapp_win32_get_hwnd();
-        if (hwnd) {
-            // GetDpiForWindow は Windows 10 1607 以降で利用可能
-            typedef UINT (WINAPI *GetDpiForWindowFunc)(HWND);
-            HMODULE user32 = GetModuleHandleW(L"user32.dll");
-            if (user32) {
-                auto getDpiForWindow = (GetDpiForWindowFunc)GetProcAddress(user32, "GetDpiForWindow");
-                if (getDpiForWindow) {
-                    UINT dpi = getDpiForWindow(hwnd);
-                    scaleFactor = dpi / 96.0f;
-                    return scaleFactor;
-                }
-            }
-        }
-
-        // フォールバック: GetDpiForSystem
+        // Display scale is process-wide; no Window is selected here.
         typedef UINT (WINAPI *GetDpiForSystemFunc)();
         HMODULE user32 = GetModuleHandleW(L"user32.dll");
         if (user32) {
@@ -97,17 +140,15 @@ bool getImmersiveMode() { return false; }
 // Orientation (no-op on desktop)
 void setOrientation(Orientation mask) { (void)mask; }
 
-// Keep screen on (SetThreadExecutionState)
-static bool keepScreenOn_ = false;
-void setKeepScreenOn(bool enabled) {
-    keepScreenOn_ = enabled;
-    if (enabled) {
-        SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS);
-    } else {
-        SetThreadExecutionState(ES_CONTINUOUS);
-    }
+// SetThreadExecutionState belongs to the host main thread, including release.
+namespace internal {
+void applyKeepScreenOn(bool enabled, bool headless) {
+    (void)headless;
+    SetThreadExecutionState(enabled
+        ? ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS
+        : ES_CONTINUOUS);
 }
-bool getKeepScreenOn() { return keepScreenOn_; }
+} // namespace internal
 
 // ---------------------------------------------------------------------------
 // setWindowSize - ウィンドウサイズを変更
@@ -129,11 +170,13 @@ void internal::setWindowPositionNative(const void* handle, int x, int y) {
     SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
-IVec2 internal::mainWindowPosition() { return windowPositionNative(sapp_win32_get_hwnd()); }
-void internal::setMainWindowPosition(int x, int y) { setWindowPositionNative(sapp_win32_get_hwnd(), x, y); }
+IVec2 internal::singleWindowPosition() { return windowPositionNative(sapp_win32_get_hwnd()); }
+void internal::setSingleWindowPosition(int x, int y) { setWindowPositionNative(sapp_win32_get_hwnd(), x, y); }
 
 void setWindowDecorated(bool decorated) {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
+    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(internal::WindowRequestAccess::binding(*target).handle);
     if (!hwnd) return;
 
     // Toggle the caption/border/system-menu bits. Keyboard focus and the quit
@@ -201,7 +244,7 @@ void internal::setWindowSizeWin32(const void* handle, double logicalWidth, doubl
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void internal::setMainWindowSizeLogical(int width, int height) {
+void internal::setSingleWindowSizeLogical(int width, int height) {
     internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height);
 }
 
@@ -279,60 +322,17 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
-namespace {
-internal::D3D11CaptureTraceHook captureTraceHook = nullptr;
-struct CaptureTraceScope {
-    internal::D3D11CaptureTrace trace;
-    internal::D3D11CaptureTraceHook hook;
-    CaptureTraceScope() : hook(captureTraceHook) {
-        const auto& ctx = internal::currentWindowContext();
-        if (ctx.isMain) hook = nullptr;
-        if (!hook) return;
-        trace.isMain = ctx.isMain;
-        trace.fbWidth = ctx.fbWidth; trace.fbHeight = ctx.fbHeight;
-        trace.lastWidth = ctx.lastSwapchain.width; trace.lastHeight = ctx.lastSwapchain.height;
-        trace.lastFormat = int(ctx.lastSwapchain.color_format); trace.lastSamples = ctx.lastSwapchain.sample_count;
-        trace.lastRenderView = ctx.lastSwapchain.d3d11.render_view;
-        trace.lastResolveView = ctx.lastSwapchain.d3d11.resolve_view;
-    }
-    ~CaptureTraceScope() { if (hook) hook(trace); }
-};
-}
-void internal::setD3D11CaptureTraceForTests(D3D11CaptureTraceHook hook) {
-    captureTraceHook = hook;
-}
-
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    // Acquisition-free estimate, also before B's first pass or after resize.
-    // lastSwapchain may still refer to the previous native resource generation.
-    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
-    const void* view = sapp_get_swapchain().d3d11.render_view;
-    if (view) {
-        ID3D11Resource* resource = nullptr;
-        ((ID3D11RenderTargetView*)view)->GetResource(&resource);
-        if (resource) {
-            ID3D11Texture2D* texture = nullptr;
-            const HRESULT hr = resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
-            resource->Release();
-            if (SUCCEEDED(hr) && texture) {
-                D3D11_TEXTURE2D_DESC desc;
-                texture->GetDesc(&desc);
-                texture->Release();
-                return {size_t(desc.Width), size_t(desc.Height)};
-            }
-        }
-    }
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    const auto dimensions = windowDimensions(ctx);
+    return {size_t(std::max(0, dimensions.fbWidth)), size_t(std::max(0, dimensions.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {
     if (!sg_isvalid()) return false;
     if (internal::hasPublicFboActivation()) return false;
     internal::CapturePrefixScope capturePhase;
-    CaptureTraceScope diagnostic;
     const auto source = internal::windowCaptureSource();
     const void* renderView = source.swapchain.d3d11.render_view;
-    diagnostic.trace.selectedView = renderView;
     if (!renderView) {
         logError() << "[Screenshot] D3D11 render target view is null";
         return false;
@@ -360,12 +360,8 @@ bool captureWindow(Pixels& outPixels) {
     // テクスチャの情報を取得
     D3D11_TEXTURE2D_DESC desc;
     backBuffer->GetDesc(&desc);
-    diagnostic.trace.selectedTexture = backBuffer;
-    diagnostic.trace.width = desc.Width; diagnostic.trace.height = desc.Height;
-    diagnostic.trace.format = unsigned(desc.Format); diagnostic.trace.samples = desc.SampleDesc.Count;
     try {
         mcp::internal::reconcileWindowCapture(desc.Width, desc.Height);
-        diagnostic.trace.reconciledWidth = desc.Width; diagnostic.trace.reconciledHeight = desc.Height;
     } catch (...) {
         backBuffer->Release();
         throw;
@@ -516,8 +512,6 @@ bool captureWindow(Pixels& outPixels) {
     context->Unmap(stagingTexture, 0);
     stagingTexture->Release();
 
-    diagnostic.trace.succeeded = true;
-    diagnostic.trace.pixelWidth = outPixels.getWidth(); diagnostic.trace.pixelHeight = outPixels.getHeight();
     return true;
 }
 

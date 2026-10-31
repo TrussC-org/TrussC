@@ -59,7 +59,16 @@ def main():
 namespace trussc {
 struct IVec2 { int x, y; };
 struct Window;
-struct AdapterState { int win = 2; };
+struct RecordingOperations {
+    void (*setTitle)(Window&, const char*) = nullptr;
+    void (*setSize)(Window&, double, double, bool) = nullptr;
+    void (*setPosition)(Window&, int, int) = nullptr;
+    IVec2 (*position)(const Window&) = nullptr;
+    void (*setFullscreen)(Window&, bool) = nullptr;
+    void (*toggleFullscreen)(Window&) = nullptr;
+};
+extern const RecordingOperations recordingOperations;
+
 float dpi = 1;
 double seenWidth = 0, seenHeight = 0;
 int calls = 0;
@@ -80,38 +89,36 @@ Hook windowControlHookForTests() { return nullptr; }
 struct WindowRequestAccess {
     static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
 };
-void setMainFullscreen(bool) {}
-void setMainWindowSizeLogical(int, int) { assert(false); }
-void setMainWindowPosition(int, int) {}
-IVec2 mainWindowPosition() { return {}; }
+void setSingleWindowFullscreen(bool) {}
+void setSingleWindowSizeLogical(int, int) { assert(false); }
+void setSingleWindowPosition(int, int) {}
+IVec2 singleWindowPosition() { return {}; }
 void setWindowSizeWin32(const void* handle, double w, double h) {
     ++calls; seenHandle = handle; seenWidth = w; seenHeight = h;
 }
 CLIENT_CONVERSION
 }
-namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
+namespace mcp::internal { std::string markedWindowTitle(const std::string& title) { return title; } }
 struct Window {
     struct { bool isMain = false; float dpiScale = 1; } ctx_;
     void* native_ = nullptr;
     std::string title_;
     bool isOpen() const { return true; }
-    void setSecondaryTitle(const std::string&) {}
-    void setSecondaryPosition(int, int) {}
-    IVec2 getSecondaryPosition() { return {}; }
-    bool isSecondaryFullscreen() const { return false; }
-    void setSecondaryFullscreen(bool) {}
-    void setSecondarySize(double, double, bool = false);
+    struct { const RecordingOperations* operations = &recordingOperations; int handle = 2; } binding_;
+    auto& context() { return ctx_; }
     IVec2 control(internal::WindowControl, int, int, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
-CONTROL_BODY
+namespace internal { int handle(const Window& w) { return w.binding_.handle; }
 SECONDARY_BODY
+}
+const RecordingOperations recordingOperations{nullptr, internal::nativeWindowSetSize};
+CONTROL_BODY
 }
 int main() {
     using namespace trussc;
-    AdapterState state;
-    Window window; window.native_ = &state;
+    Window window;
     for (bool mainWindow : {false, true}) {
-        window.ctx_.isMain = mainWindow;
+        window.ctx_.isMain = mainWindow; window.binding_.handle = mainWindow ? 1 : 2;
         for (float scale : {1.25f, 1.5f, 1.75f, 2.0f}) {
             dpi = window.ctx_.dpiScale = scale;
             const int previousCalls = calls;
@@ -132,7 +139,7 @@ int main() {
 }
 '''
     source = source.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
-    source = source.replace('SECONDARY_BODY', body(win, 'void Window::setSecondarySize('))
+    source = source.replace('SECONDARY_BODY', body(win, 'void nativeWindowSetSize('))
     source = source.replace('CLIENT_CONVERSION', body(platform, 'constexpr int windowClientExtentPixels('))
     with tempfile.TemporaryDirectory(prefix='window-pixel-size-') as scratch:
         cpp = Path(scratch) / 'probe.cpp'
@@ -152,16 +159,18 @@ def creation_source(backend, *, native_path=None):
     """
     header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
     native = (native_path or ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
-    launcher = between(body(header, 'inline sapp_desc buildWindowDescriptor('), '{', '    const auto& windowTitle')
+    launcher = between(body(header, 'inline sapp_desc buildWindowDescriptor('), '{', '    const auto windowTitle')
     normal = before(split_marker(body(header, 'sapp_desc buildAppDescriptor('), '    return ', last=True)[1], ';')
     normal = 'return ' + normal + ';'
     hot_header = (ROOT / 'core/include/tc/app/tcHotReloadHost.h').read_text(encoding='utf-8')
-    hot = between(body(hot_header, 'inline int runHotReloadApp('), '    sapp_desc desc = ', '    desc.frame_cb')
+    hot = between(body(hot_header, 'inline int runHotReloadApp('), '    sapp_desc desc = ', '    setHostReloadPoll')
     hot = 'sapp_desc desc = ' + hot
     adapter_path = {'win': 'win/tcWindowWin.cpp', 'x11': 'linux/tcWindowLinux.cpp',
                     'mac': 'mac/tcWindowMac.mm', 'egl': 'linux/tcWindowLinux.cpp'}[backend]
     adapter = (ROOT / 'core/platform' / adapter_path).read_text(encoding='utf-8')
-    secondary = between(adapter, '    sapp_window_desc d = {};', '    d.title')
+    secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.title = win->title_.c_str();')
+    secondary = '    sapp_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
+    secondary = secondary.replace('settings, pixelPerfectMode()', 'settings, settings.pixelPerfect').replace('    d.mtl_device = sglue_environment().metal.device;\n', '')
     main_signature = {'win': 'static bool _sapp_tc_win32_create_main_window(',
                       'x11': 'static bool _sapp_tc_x11_create_main_window(',
                       'mac': 'static bool _sapp_tc_mac_create_main_window(',
@@ -175,7 +184,7 @@ def creation_source(backend, *, native_path=None):
     win_creator = ''
     if backend == 'win':
         launcher += 'desc.high_dpi = ' + between(header, '    desc.high_dpi = ', ';') + ';'
-        secondary += 'd.no_high_dpi = ' + between(adapter, '    d.no_high_dpi = ', ';') + ';'
+        # High-DPI forwarding is executed in the shared descriptor producer.
         # Both entry points feed the same constructor. Replay their production
         # normalization and its descriptor copy, then the entire native creator
         # (including the target-DPI correction condition and SetWindowPos call).
@@ -247,7 +256,7 @@ def creation_source(backend, *, native_path=None):
         validation = 'if (!' + guard(creator) + ') return false;'
         arithmetic = 'return roundMac(' + call + ');'
     template = (ROOT / 'tools/tests/window_creation_size.cpp').read_text(encoding='utf-8')
-    return (template.replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
+    return (template.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('HOT_LAUNCHER', hot)
             .replace('WIN32_NORMALIZERS', normalizers).replace('WIN32_NATIVE_CREATOR', win_creator)
             .replace('WIN32_SECONDARY_TRANSFER', secondary_transfer).replace('WIN32_COMMON_TRANSFER', common_transfer)
             .replace('MAC_TRANSFERS', mac_transfers)
@@ -344,9 +353,9 @@ class WindowPixelSizeTests(unittest.TestCase):
         # including shared normalization, adapters and desktop entry points.
         cases = (
             ('win', 'inline sapp_desc buildWindowDescriptor('),
-            ('win', '    const auto& windowTitle'),
+            ('win', '    const auto windowTitle'),
             ('win', '    sapp_desc desc = '),
-            ('win', '    sapp_window_desc d = {};'),
+            ('win', '    sapp_window_desc d = internal::buildNativeWindowDescriptor('),
             ('win', 'static bool _sapp_tc_win32_create_main_window('),
             ('win', 'static _sapp_tc_window_t* _sapp_tc_win32_create_window('),
             ('win', 'sapp_window sapp_create_window('),
@@ -388,12 +397,14 @@ class WindowPixelSizeTests(unittest.TestCase):
         # Isolate expected assertion failures in child processes and compare real
         # native creation/default selection to the target branch, per dimension.
         header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
-        launcher = between(body(header, 'inline sapp_desc buildWindowDescriptor('), '{', '    const auto& windowTitle')
+        launcher = between(body(header, 'inline sapp_desc buildWindowDescriptor('), '{', '    const auto windowTitle')
         normal = 'return ' + before(split_marker(body(header, 'sapp_desc buildAppDescriptor('), '    return ', last=True)[1], ';') + ';'
         source = (ROOT / 'tools/tests/window_creation_native.cpp').read_text(encoding='utf-8')
         adapter = (ROOT / 'core/platform/linux/tcWindowLinux.cpp').read_text(encoding='utf-8')
-        secondary = between(adapter, '    sapp_window_desc d = {};', '    d.title')
-        source = source.replace('NORMAL_LAUNCHER', normal).replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
+        secondary = between(adapter, '    sapp_window_desc d = internal::buildNativeWindowDescriptor(', '    d.title = win->title_.c_str();')
+        secondary = '    sapp_window_desc d = internal::buildNativeWindowDescriptor(' + secondary
+        secondary = secondary.replace('settings, pixelPerfectMode()', 'settings, settings.pixelPerfect').replace('    d.mtl_device = sglue_environment().metal.device;\n', '')
+        source = source.replace('SHARED_DESCRIPTOR', body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(').replace('WindowSettings', 'Settings')).replace('NORMAL_LAUNCHER', normal).replace('LAUNCHER', launcher).replace('SECONDARY', secondary)
         runner = r'''import re, subprocess, sys
 for binary in sys.argv[1:-1]:
     for pixels in (False, True):
@@ -448,8 +459,8 @@ subprocess.run([glx,'tiny','640','400','1'], check=True)
         template = (ROOT / 'tools/tests/window_mac_size.cpp').read_text(encoding='utf-8')
         source = template.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
         for token, path, signature in (
-                ('MAC_MAIN_CALL', 'core/platform/mac/tcPlatform_mac.mm', 'void internal::setMainWindowSizeFractionalMac('),
-                ('MAC_SECONDARY_CALL', 'core/platform/mac/tcWindowMac.mm', 'void Window::setSecondarySize(')):
+                ('MAC_MAIN_CALL', 'core/platform/mac/tcPlatform_mac.mm', 'void internal::setSingleWindowSizeFractionalMac('),
+                ('MAC_SECONDARY_CALL', 'core/platform/mac/tcWindowMac.mm', 'void nativeWindowSetSize(')):
             endpoint = body((ROOT / path).read_text(encoding='utf-8'), signature)
             arguments = between(endpoint, 'NSMakeSize(', ')];')
             source = source.replace(token, arguments)
@@ -475,7 +486,7 @@ subprocess.run([glx,'tiny','640','400','1'], check=True)
             'inline void setWindowSize('))
         seed = body((ROOT / 'core/platform/linux/tcPlatform_linux.cpp').read_text(encoding='utf-8'),
                     'internal::X11GeometryState& mainGeometryState(')
-        seed = 'geometry =' + between(seed, 'mainGeometry =', ';') + ';'
+        seed = 'geometry =' + between(seed, 'binding.geometry =', ';') + ';'
         source = source.replace('CREATION_GEOMETRY_SEED', seed)
         with tempfile.TemporaryDirectory(prefix='window-pixel-x11-') as scratch:
             cpp = Path(scratch) / 'probe.cpp'

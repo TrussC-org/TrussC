@@ -1,10 +1,10 @@
 #include <TrussC.h>
 #include "tcAnalyzeImage.h"
-#include "../../impl/tcMcpImageAdmission.h"
 #include "../../impl/tcImageDecode.h"
 #include <array>
 #include <climits>
 #include <stdexcept>
+#include <string_view>
 
 namespace trussc::mcp::internal {
 namespace {
@@ -80,16 +80,6 @@ Channels mean(const Pixels& p, Rect r) {
     for (auto& c : sum) c /= double(r.w) * r.h;
     return sum;
 }
-void reservePixels(const Pixels& p, size_t bytesPerPixel = 8) {
-    const auto limit = getAdmissionLimits().workingBytes;
-    // Bound (security): analysis image copies and encoders need credits before allocation. Overflow returns an error and is counted.
-    if (p.getWidth() <= 0 || p.getHeight() <= 0 || size_t(p.getWidth()) > limit / size_t(p.getHeight()) / bytesPerPixel) {
-        const uint64_t area = uint64_t(std::max(0, p.getWidth())) * std::max(0, p.getHeight());
-        admissionRejected(AdmissionStore::Working, limit, area > SIZE_MAX / bytesPerPixel ? SIZE_MAX : size_t(area) * bytesPerPixel);
-        throw AdmissionError();
-    }
-    reserveWork(size_t(p.getWidth()) * p.getHeight() * bytesPerPixel);
-}
 void save(const Pixels& p, const json& path) {
     // Reuse both the path resolver and native screenshot encoders (including
     // TIFF/GIF on macOS and TGA on Windows). The writer expects RGBA8.
@@ -99,7 +89,6 @@ void save(const Pixels& p, const json& path) {
     std::filesystem::create_directories(dest.parent_path(), ec);
     if (ec) throw std::runtime_error("failed to create image parent directory");
     Pixels u8;
-    reservePixels(p, 64);
     u8.allocate(p.getWidth(), p.getHeight(), 4);
     for (int y = 0; y < p.getHeight(); ++y) for (int x = 0; x < p.getWidth(); ++x) {
         auto c = color(p, x, y);
@@ -192,7 +181,7 @@ json operation(const Pixels& p, const json& op) {
         if (threshold<0) throw std::runtime_error("threshold must be nonnegative");
         Pixels diff;
         bool write=op.contains("save")&&!op.at("save").is_null();
-        if (write) { reservePixels(p); diff.allocate(p.getWidth(),p.getHeight(),4); }
+        if (write) { diff.allocate(p.getWidth(),p.getHeight(),4); }
         Matches m; double largest=0;
         for (int y=r.y;y<r.y+r.h;++y) for (int x=r.x;x<r.x+r.w;++x) {
             auto a=color(p,x,y),b=color(ref,x,y); double d=0;
@@ -210,114 +199,8 @@ json operation(const Pixels& p, const json& op) {
     return out;
 }
 }
-size_t reserveImageDecode(int width, int height, size_t sourceBytesPerPixel) {
-    const auto limit = getAdmissionLimits().workingBytes;
-    checkAdmission(sourceBytesPerPixel, limit > 4 ? (limit - 4) / 4 : 0, AdmissionStore::Working);
-    const size_t bytesPerPixel = std::max<size_t>(64, sourceBytesPerPixel * 4 + 4);
-    // Include codec block padding, including narrow images with padded planes.
-    const uint64_t paddedWidth = (uint64_t(width) + 31) & ~uint64_t(31);
-    const uint64_t paddedHeight = (uint64_t(height) + 31) & ~uint64_t(31);
-    const uint64_t workspacePixels = paddedWidth * paddedHeight;
-    // Bound (security): decoded channels, retained RGBA and codec workspace
-    // must fit the budget before either stb or a platform decoder allocates.
-    if (workspacePixels > limit / bytesPerPixel) {
-        admissionRejected(AdmissionStore::Working, limit,
-            workspacePixels > SIZE_MAX / bytesPerPixel ? SIZE_MAX : size_t(workspacePixels) * bytesPerPixel);
-        throw AdmissionError();
-    }
-    const size_t bytes = size_t(workspacePixels) * bytesPerPixel;
-    reserveWork(bytes);
-    return bytes;
-}
-bool loadMcpImage(Pixels& pixels, const fs::path& source) try {
-    WorkScope workScope;
-    trussc::internal::ImageDecodeAllocationScope failure;
-    reserveWork(1024 * 1024); // Fixed metadata, palette and codec-table allowance.
-    const auto path = trussc::internal::resolveLoadPath(source);
-    std::error_code ec;
-    const auto length = fs::file_size(path, ec);
-    if (ec || !length) return false;
-    const auto imageSize = trussc::internal::admitImageEncodedSize(length > SIZE_MAX ? SIZE_MAX : size_t(length));
-    if (!imageSize) {
-        return false;
-    }
-    const auto limits = getAdmissionLimits();
-    // Bound (abi): stb's immutable input view uses an int byte length. Overflow rejects the image and is counted.
-    checkAdmission(length > SIZE_MAX ? SIZE_MAX : size_t(length), size_t(INT_MAX), AdmissionStore::Working);
-    // Bound (security): encoded copies and decoder buffers share working credits. Overflow rejects the image before reading and is counted.
-    if (length > limits.workingBytes / 4) {
-        admissionRejected(AdmissionStore::Working, limits.workingBytes, length > SIZE_MAX / 4 ? SIZE_MAX : size_t(length) * 4);
-        throw AdmissionError();
-    }
-    reserveWork(size_t(length) * 4);
-    LoadResult entry;
-    auto closeFile = [](FILE* handle) { std::fclose(handle); };
-    std::unique_ptr<FILE, decltype(closeFile)> file(
-        trussc::internal::openLoadFile(path, "MCP", entry), closeFile);
-    if (!file) return false;
-    std::unique_ptr<unsigned char[]> encoded(trussc::internal::imageDecodeAllocationAllowed(size_t(length))
-        ? new (std::nothrow) unsigned char[size_t(length)] : nullptr);
-    if (!encoded) { trussc::internal::imageDecodeOutOfMemory(); return false; }
-    if (std::fread(encoded.get(), 1, size_t(length), file.get()) != size_t(length) ||
-        std::fgetc(file.get()) != EOF || std::ferror(file.get())) return false;
-    if (!trussc::internal::admitImageHeader(encoded.get(), size_t(length))) return false;
-    int width = 0, height = 0, channels = 0;
-    size_t denied = 0;
-    bool metadata = false;
-    {
-        ImageAllocationScope allocation(1024 * 1024);
-        metadata = stbi_info_from_memory(encoded.get(), int(size_t(length)), &width, &height, &channels) != 0;
-        if (allocation.exceeded()) denied = allocation.needed();
-    }
-    if (denied) { admissionRejected(AdmissionStore::Working, 1024 * 1024, denied); throw AdmissionError(); }
-    if (failure.failed()) {
-        trussc::internal::imageDecodeOutOfMemory();
-        return false;
-    }
-    auto platformDecode = [&] {
-#ifdef __APPLE__
-        return loadMcpPlatformImage(pixels, encoded.get(), size_t(length));
-#else
-        // Pixels::loadPlatform is a stub here (including Windows and Android).
-        return false;
-#endif
-    };
-    if (!metadata || width <= 0 || height <= 0) return platformDecode();
-    const auto imageDimensions = trussc::internal::admitImageDimensions(width, height, 4,
-        stbi_is_hdr_from_memory(encoded.get(), int(size_t(length))) ? sizeof(float) : 2);
-    if (!imageDimensions) {
-        return false;
-    }
-    const uint64_t count = uint64_t(width) * height;
-    const size_t workspace = reserveImageDecode(width, height);
-    const size_t decoderAllowance = 1024 * 1024 + size_t(length) * 3 + workspace - size_t(count) * 4;
-    bool loaded = false;
-    {
-        ImageAllocationScope allocation(decoderAllowance);
-        int decodedWidth = 0, decodedHeight = 0;
-        std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> decoded(
-            stbi_load_from_memory(encoded.get(), int(size_t(length)), &decodedWidth, &decodedHeight, &channels, 4),
-            &stbi_image_free);
-        if (decoded && decodedWidth == width && decodedHeight == height && !allocation.exceeded()) {
-            if (!trussc::internal::ImageLoadAccess::allocate(pixels, width, height)) {
-                trussc::internal::imageDecodeOutOfMemory();
-                return false;
-            }
-            std::memcpy(pixels.getData(), decoded.get(), size_t(count) * 4);
-            loaded = true;
-        }
-        if (allocation.exceeded()) denied = allocation.needed();
-    }
-    if (denied) { admissionRejected(AdmissionStore::Working, decoderAllowance, denied); throw AdmissionError(); }
-    if (failure.failed()) {
-        trussc::internal::imageDecodeOutOfMemory();
-        return false;
-    }
-    return loaded || platformDecode();
-} catch (const std::bad_alloc&) {
-    pixels.clear();
-    trussc::internal::imageDecodeOutOfMemory();
-    return false;
+bool loadMcpImage(Pixels& pixels, const fs::path& source) {
+    return bool(pixels.load(source));
 }
 void validateAnalyzeArguments(const json& args) {
     const auto& ops = args.at("ops");
@@ -342,34 +225,12 @@ void validateAnalyzeArguments(const json& args) {
     }
 }
 json analyzeImage(const Pixels& p, const json& args, const char* colorSpace) {
-    WorkScope workScope;
     json result{{"width",p.getWidth()},{"height",p.getHeight()},
                 {"format",p.isFloat()?"float":"RGBA8"},{"colorSpace",colorSpace}};
     try {
         if (!p.isAllocated()||p.getWidth()<=0||p.getHeight()<=0) throw std::runtime_error("image is empty");
         validateAnalyzeArguments(args);
         const auto& ops=args.at("ops");
-        // Reserve worst-case JSON nodes, vector capacity, scalar formatting and
-        // escaped envelopes for every operation before any operation runs.
-        for (const auto& op : ops) {
-            uint64_t scalars = 32;
-            const auto name = op.at("op").get<std::string>();
-            if (name == "histogram") scalars += uint64_t(integer(op.at("bins"))) * 4;
-            if (name == "grid") scalars += uint64_t(integer(op.at("cols"))) * uint64_t(integer(op.at("rows"))) * 4;
-            if (name == "line") scalars += uint64_t(std::max(p.getWidth(), p.getHeight())) * 4;
-            const auto limit = getAdmissionLimits().replyBytes;
-            if (scalars > limit / 32) {
-                admissionRejected(AdmissionStore::Reply, limit, scalars > SIZE_MAX / 32 ? SIZE_MAX : size_t(scalars) * 32);
-                throw AdmissionError();
-            }
-            // Bound (abi): scratch estimates must fit size_t before multiplication. Overflow returns an error and is counted.
-            if (scalars > getAdmissionLimits().workingBytes / 64) {
-                admissionRejected(AdmissionStore::Working, getAdmissionLimits().workingBytes, scalars > SIZE_MAX / 64 ? SIZE_MAX : size_t(scalars) * 64);
-                throw AdmissionError();
-            }
-            reserveReply(size_t(scalars) * 32);
-            reserveWork(size_t(scalars) * 64);
-        }
         json results=json::array();
         for(const auto& op:ops) results.push_back(operation(p,op));
         if(args.contains("save")&&!args.at("save").is_null()) save(p,args.at("save"));

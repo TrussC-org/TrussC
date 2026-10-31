@@ -77,7 +77,11 @@ public:
             if (fs::file_size(resolved, ec) > 16u * 1024u * 1024u && !ec)
                 logNotice("IesProfile") << "loading a local IES document larger than 16 MiB";
             std::string data;
-            if (!internal::readDocumentBytes(ifs, data)) { internal::reportImportError("IesProfile", "failed to read the complete IES document: ", resolved); return false; }
+            const char* readError = nullptr;
+            if (!internal::readDocumentBytes(ifs, data, &readError)) {
+                internal::reportImportError("IesProfile", "failed to read the complete IES document: ", resolved, readError);
+                return false;
+            }
             return loadDocument(data, &resolved);
         } catch (const std::exception&) {
             internal::reportImportError("IesProfile", "cannot allocate IES document: ", resolved.empty() ? path : resolved);

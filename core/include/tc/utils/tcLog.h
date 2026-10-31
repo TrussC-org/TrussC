@@ -41,7 +41,6 @@
 // Uses Event system
 #include "../events/tcEvent.h"
 #include "../events/tcEventListener.h"
-#include "../app/tcCrashHandler.h"
 #include "tcFileIO.h"   // fs alias + pathToUtf8
 
 namespace trussc {
@@ -352,10 +351,6 @@ private:
     }
 
     void closeFileLocked(bool report = true) {
-        if (crashLogOwner_) {
-            internal::closeCrashLogFile();
-            crashLogOwner_ = false;
-        }
         if (fileStream_.is_open()) {
             errno = 0;
             fileStream_.close();
@@ -381,7 +376,6 @@ private:
 
     // File
     std::ofstream fileStream_;
-    bool crashLogOwner_ = false;
     fs::path filePath_;
     std::atomic<LogLevel> fileLevel_{LogLevel::Notice};
 

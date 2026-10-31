@@ -12,11 +12,11 @@
 #include <string>
 #include <stdexcept>
 namespace trussc::internal {
+void setSessionActivityProbe(bool (*)()) noexcept {}
 void setExitReasonIfEmpty(const char*) {}
 void setExitReason(const char*) {}
 int& appExitCode() { static int code = 0; return code; }
 bool& appSetupCalled() { static bool called = true; return called; }
-bool& sessionEndExit() { static bool active = false; return active; }
 }
 namespace {
 int failures, callbacks, acquired, mainFrames, mainDrawables, showsChecked;
@@ -85,7 +85,7 @@ void recordShow(id self, SEL cmd, id sender) {
     _sapp_tc_window_t* found = nullptr;
     for (auto* w : _sapp_tc.windows) if (w && w->window == self) found = w;
     if (!found) std::printf("nativeWindow: show of unregistered window \"%s\"\n", ((NSWindow*)self).title.UTF8String);
-    check("published window has initial scale and dimensions before it is shown", found && found->ready &&
+    check("published window has initial scale and dimensions before it is shown", found && found->ready && found->constructing &&
         found->fb_width > 0 && found->fb_height > 0 && found->win_width > 0 && found->win_height > 0 &&
         found->dpi_scale == (found->desc.no_high_dpi ? 1.0f : (float)((NSWindow*)self).backingScaleFactor) &&
         found->fb_width == (int)(found->win_width * found->dpi_scale) &&
@@ -214,11 +214,14 @@ sapp_window makeVictim() {
     return sapp_create_window(&d);
 }
 void destroyInCallbackChecks() {
-    enum Path { LinkTick, FallbackTick, Miniaturize, Deminiaturize, TickResize, KeyDown };
+    enum Path { LinkTick, FallbackTick, Occlusion, Miniaturize, Deminiaturize, TickResize, KeyDown };
     struct Case { const char* name; Path path; sapp_event_type type; };
     const Case cases[] = {
         {"SUSPENDED from the display-link shim", LinkTick, SAPP_EVENTTYPE_SUSPENDED},
         {"SUSPENDED from the fallback-timer shim", FallbackTick, SAPP_EVENTTYPE_SUSPENDED},
+        {"RESUMED from the display-link shim", LinkTick, SAPP_EVENTTYPE_RESUMED},
+        {"RESUMED from the fallback-timer shim", FallbackTick, SAPP_EVENTTYPE_RESUMED},
+        {"SUSPENDED from windowDidChangeOcclusionState", Occlusion, SAPP_EVENTTYPE_SUSPENDED},
         {"SUSPENDED from windowDidMiniaturize", Miniaturize, SAPP_EVENTTYPE_SUSPENDED},
         {"ICONIFIED from windowDidMiniaturize", Miniaturize, SAPP_EVENTTYPE_ICONIFIED},
         {"RESUMED from windowDidDeminiaturize", Deminiaturize, SAPP_EVENTTYPE_RESUMED},
@@ -236,8 +239,15 @@ void destroyInCallbackChecks() {
             NSWindow* window = w->window;
             destroyOn = c.type; destroyedInCallback = false;
             switch (c.path) {
-            case LinkTick: forceHidden = window; [view tick:nil]; break;
-            case FallbackTick: forceHidden = window; [view fallbackTick:nil]; break;
+            case LinkTick:
+            case FallbackTick:
+                if (c.type == SAPP_EVENTTYPE_RESUMED) {
+                    forceHidden = window; _sapp_tc_mac_observe(w);
+                    forceHidden = nil; forceVisible = window;
+                } else forceHidden = window;
+                if (c.path == LinkTick) [view tick:nil]; else [view fallbackTick:nil];
+                break;
+            case Occlusion: forceHidden = window; [delegate windowDidChangeOcclusionState:nil]; break;
             case Miniaturize: forceHidden = window; [delegate windowDidMiniaturize:nil]; break;
             case Deminiaturize:
                 forceHidden = window; _sapp_tc_mac_observe(w);   // suspended: RESUMED follows
@@ -267,8 +277,9 @@ void destroyInCallbackChecks() {
         for (auto* r : _sapp_tc.windows) after += r != nullptr;
         std::printf("nativeWindow: destroy on first FOCUSED during creation: destroyed=%d returned id=%u\n",
             destroyedInCallback, victim.id);
-        check("destroying the window from its first FOCUSED during creation is safe and returns invalid",
-            destroyedInCallback && victim.id == 0 && after == before);
+        check("destroy from first FOCUSED waits for construction return",
+            destroyedInCallback && victim.id && _sapp_tc_lookup(victim) &&
+            !_sapp_tc_lookup(victim)->constructing && _sapp_tc_lookup(victim)->close_requested && after == before + 1);
         if (victim.id && sapp_window_valid(victim)) sapp_destroy_window(victim);
     }
 }
@@ -298,13 +309,21 @@ void nestClose(sapp_window win, void*) {
 
 // Throwing clients: the native boundary contains the exception and recovers.
 int throwTicks, throwEventTicks;
+int resizeThrowSampleTicks;
+double resizeThrowTime;
 bool throwClosed, eventThrown, mainThrowOnce, mainThrew;
 sapp_window throwWindow;
 void throwTick(sapp_window, void*) { if (++throwTicks == 3) throw std::runtime_error("tick_cb test throw"); }
-void countTick(sapp_window, void*) { ++throwEventTicks; }
+void countTick(sapp_window, void*) {
+    ++throwEventTicks;
+    if (eventThrown && now() - resizeThrowTime < 1.0) ++resizeThrowSampleTicks;
+}
 bool keyThrown;
 void throwEvent(const sapp_event* event, sapp_window, void*) {
-    if (event->type == SAPP_EVENTTYPE_RESIZED && !eventThrown) { eventThrown = true; throw 7; }
+    if (event->type == SAPP_EVENTTYPE_RESIZED && !eventThrown) {
+        eventThrown = true; resizeThrowTime = now();
+        throw 7;
+    }
     if (event->type == SAPP_EVENTTYPE_KEY_DOWN && !keyThrown) { keyThrown = true; throw std::runtime_error("key event test throw"); }
 }
 void throwClose(sapp_window win, void*) {
@@ -466,11 +485,9 @@ void mainCleanup() {
         std::printf("nativeWindow: session-end cleanup ran (inside callback=%d, quit requests=%d)\n", cleanupInsideCallback, quitRequests);
         std::fflush(stdout);
     }
-    // Mirrors TrussC's _cleanup_cb_impl on macOS (TrussC.h): during the busy
-    // session end it runs only the minimal ending and returns; otherwise a
-    // non-zero app code leaves through std::exit at the end of cleanup.
-    if (trussc::internal::sessionEndExit()) return;
-    if (trussc::internal::appExitCode() != 0) std::exit(trussc::internal::appExitCode());
+    // Busy session commit never reaches cleanup. Idle commit ends itself
+    // after cleanup; ordinary nonzero exits retain std::exit behavior.
+    if (!sessionEndNotBusyMode && trussc::internal::appExitCode() != 0) std::exit(trussc::internal::appExitCode());
 }
 // A real synchronous modal (NSAlert runModal) opened from a key handler.
 int modalRound, modalOwnerTicks, modalOtherAt, modalOwnerAt, modalOwnerAfterAt;
@@ -501,7 +518,7 @@ void modalEvent(const sapp_event* event, sapp_window win, void*) {
     std::printf("nativeWindow: modal round %d: %.2fs, owner ticked %d, other window ticked %.1f/s\n", modalRound,
         seconds, modalOwnerTicks - modalOwnerAt, (callbacks - modalOtherAt) / seconds);
     check("owner window gets no tick while its key handler is in a modal", modalOwnerTicks == modalOwnerAt);
-    check("other windows keep ticking during the modal", (callbacks - modalOtherAt) / seconds > 20);
+    check("all other windows pause during the modal callback", callbacks == modalOtherAt);
     modalOwnerAfterAt = modalOwnerTicks;
     modalActive = false;
     modalHandlerDone = true;
@@ -757,7 +774,8 @@ void step() {
         fsCreatedId = fsCreated ? fsCreated->win_id : 0;
         std::printf("nativeWindow: startup fullscreen creation: destroyed during creation=%d returned=%d\n",
             destroyedInCallback, fsCreated != nullptr);
-        check("destroy during startup-fullscreen creation returns invalid", !destroyedInCallback || fsCreated == nullptr);
+        check("destroy during startup-fullscreen creation defers physical destruction", !destroyedInCallback ||
+            (fsCreated && !fsCreated->constructing && fsCreated->close_requested));
         enter(FsSettle);
         break;
     }
@@ -798,14 +816,17 @@ void step() {
     }
     case ThrowEventStart:
         throwEventTicks = 0; throwClosed = eventThrown = false;
+        resizeThrowTime = 0;
+        resizeThrowSampleTicks = 0; sampleStart = 0; keyThrown = false;
         throwWindow = makeProbe(countTick, throwEvent, throwClose, "throwing event");
         enter(ThrowEventWait);
         break;
     case ThrowEventWait: {
         _sapp_tc_window_t* w = _sapp_tc_lookup(throwWindow);
         if (w && !waited(0.3)) break;
-        if (w && !eventThrown && sampleStart == 0) {
-            w->fb_width = 1; sampleStart = now();                    // RESIZED next tick (in-tick throw)
+        if (w && sampleStart == 0) {
+            if (!eventThrown) w->fb_width = 1;                      // RESIZED next tick if no natural throw yet
+            sampleStart = now();
             _sapp_tc_view* view = w->view;                           // and an out-of-tick throw from AppKit input
             NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
                 timestamp:0 windowNumber:w->window.windowNumber context:nil characters:@"a"
@@ -814,10 +835,16 @@ void step() {
             check("an out-of-tick event_cb throw is contained at the input boundary", keyThrown);
             break;
         }
-        if (w && now() - sampleStart < 1.0) break;
+        // Natural startup RESIZED can throw before this phase's 0.3s delay.
+        // The callback timestamps that throw; count only its fixed 1s window.
+        if (w && (eventThrown ? now() - resizeThrowTime < 1.0 : !waited(2.0))) break;
         if (w && !w->close_requested && !throwClosed) {
             std::printf("nativeWindow: throwing event_cb: threw=%d, %d ticks\n", eventThrown, throwEventTicks);
-            check("ticks continue after event_cb throws", eventThrown && throwEventTicks >= 10 && !w->in_tick);
+            const CAFrameRateRange range = w->link.preferredFrameRateRange;
+            std::printf("nativeWindow: after RESIZED throw: %d ticks in fixed 1.000s, checked at %.3fs, source=%s, range=%.1f/%.1f/%.1f, callback_depth=%d\n",
+                resizeThrowSampleTicks, resizeThrowTime ? now() - resizeThrowTime : 0,
+                w->fallback_active ? "fallback" : "display link", range.minimum, range.maximum, range.preferred, w->callback_depth);
+            check("ticks continue after event_cb throws", eventThrown && resizeThrowSampleTicks >= 10 && !w->in_tick);
             sapp_window_request_close(throwWindow);
             break;
         }
@@ -864,6 +891,7 @@ void step() {
     }
     case ModalAfter:
         if (!waited(1.0)) break;
+        check("other window resumes after the modal callback", modalHandlerDone && callbacks - modalOtherAt >= 20);
         if (modalRound == 0) {
             const double resume = modalResumedAt > 0 ? modalResumedAt - modalEnd : -1;
             std::printf("nativeWindow: owner resumed %.3fs after the modal, %d ticks in the following second\n",
@@ -1039,16 +1067,16 @@ void step() {
             status == 0 && [text containsString:@"terminate scenario complete"] && ![text containsString:@": FAIL"]);
         text = runChild(@"--session-end-in-callback", &status);
         std::printf("nativeWindow: session-end child exited with %d\n", status);
-        check("session end inside a callback (child): not asked, cleanup once, _exit(app code), never back in the callback",
-            status == 7 && [text componentsSeparatedByString:@"session-end cleanup ran"].count == 2 &&
+        check("session end inside a callback (child): no App exit or cleanup, _exit(0), never resumes",
+            status == 0 && ![text containsString:@"session-end cleanup ran"] &&
             ![text containsString:@"QUIT_REQUESTED delivered"] && ![text containsString:@"returned into the callback"] &&
             ![text containsString:@": FAIL"]);
         check("busy session end leaves through _exit only: no atexit or static destructor ran",
             ![text containsString:@"marker ran"]);
         text = runChild(@"--session-end-not-busy", &status);
         std::printf("nativeWindow: not-busy session-end child exited with %d\n", status);
-        check("not-busy session end keeps the normal std::exit path with the app code (markers ran)",
-            status == 7 && [text containsString:@"atexit marker ran"] && [text containsString:@"static destructor marker ran"] &&
+        check("idle session end forwards commit and ends without static destruction",
+            status == 7 && ![text containsString:@"atexit marker ran"] && ![text containsString:@"static destructor marker ran"] &&
             [text containsString:@"session-end cleanup ran (inside callback=0"] && ![text containsString:@": FAIL"]);
         text = runChild(@"--plain-quit-in-callback", &status);
         check("plain quit Apple event inside a callback (child) still defers until it returns",
@@ -1227,6 +1255,23 @@ void finish() {
         _exit(failures ? 1 : trussc::internal::appExitCode());   // keep the app code
     }
     _exit(failures ? 1 : 0);
+}
+}
+
+// The standalone native fixture supplies the Runtime adapter boundary; the
+// actual retained-ledger policy is linked by sessionEndBusy/test.py.
+namespace trussc::internal {
+bool querySessionEnd() noexcept { return _sapp_tc_mac_busy() || _sapp_tc_request_exit(); }
+void cancelSessionEnd() noexcept {}
+void shutdownRuntime() noexcept {}
+void commitSessionEnd() noexcept {
+    static bool committed = false;
+    if (committed) return;
+    committed = true;
+    if (_sapp_tc_mac_session_busy()) _exit(0);
+    _sapp_tc.app.quit_ordered = true;
+    if (!_sapp_tc.app.cleanup_called) { _sapp_tc.app.cleanup_called = true; mainCleanup(); }
+    _exit(appExitCode());
 }
 }
 

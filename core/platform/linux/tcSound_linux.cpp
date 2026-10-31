@@ -6,7 +6,7 @@
 // in that it delegates codec handling to the OS/system.
 // =============================================================================
 
-#include "tc/sound/internal/tcAudioDecodeBudget.h"
+#include "tc/sound/internal/tcAudioDecode.h"
 
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
@@ -31,11 +31,11 @@ public:
         cleanup();
     }
 
-    bool decodeFile(const std::string& path, SoundBuffer& buffer) {
-        internal::AudioDecodeBudget budget;
+    bool decodeFile(const fs::path& path, SoundBuffer& buffer) {
+        internal::AudioDecodeStatus status;
         std::vector<unsigned char> bytes;
-        if (!internal::readAudioFile(internal::utf8ToPath(path), bytes, budget)) return false;
-        return decodeMemoryInput(bytes.data(), bytes.size(), buffer, path);
+        if (!internal::readAudioFile(path, bytes, status)) return false;
+        return decodeMemoryInput(bytes.data(), bytes.size(), buffer, internal::pathToDisplayUtf8(path));
     }
 
     bool decodeMemory(const void* data, size_t dataSize, SoundBuffer& buffer) {
@@ -43,8 +43,12 @@ public:
     }
 private:
     bool decodeMemoryInput(const void* data, size_t dataSize, SoundBuffer& buffer, const std::string& label) {
-        internal::AudioDecodeBudget entry;
-        if (!data || !dataSize || !entry.encoded(dataSize)) return false;
+        if (!data || !dataSize) return false;
+        // Bound (abi): appsrc exposes its byte length as gint64; larger inputs fail before narrowing.
+        if (dataSize > uint64_t(G_MAXINT64)) {
+            logError("SoundBuffer") << "AAC memory input size does not fit GStreamer's gint64 byte length";
+            return false;
+        }
         // Store memory data for appsrc callback
         memoryData_ = static_cast<const uint8_t*>(data);
         memorySize_ = dataSize;
@@ -56,7 +60,7 @@ private:
             "decodebin name=decoder ! "
             "audioconvert ! "
             "audioresample ! "
-            "audio/x-raw,format=F32LE,rate=44100 ! "
+            "capsfilter name=output caps=audio/x-raw,format=F32LE,layout=interleaved,rate=44100 ! "
             "appsink name=sink sync=false";
 
         return runPipeline(pipelineStr, buffer, label, true);
@@ -80,11 +84,10 @@ private:
 
         GstElement* decoder = gst_bin_get_by_name(GST_BIN(pipeline_), "decoder");
         if (decoder) {
-            g_signal_connect(decoder, "autoplug-continue", G_CALLBACK(onAutoplug), this);
             g_signal_connect(decoder, "pad-added", G_CALLBACK(onPadAdded), this);
             gst_object_unref(decoder);
         }
-        internal::AudioDecodeBudget budget;
+        internal::AudioDecodeStatus status;
         // Get appsink element
         GstElement* sink = gst_bin_get_by_name(GST_BIN(pipeline_), "sink");
         if (!sink) {
@@ -96,7 +99,7 @@ private:
         // Configure appsink
         gst_app_sink_set_emit_signals(GST_APP_SINK(sink), FALSE);
         gst_app_sink_set_drop(GST_APP_SINK(sink), FALSE);
-        // Bound (security): queued SDK output is backpressured before collecting a full track. Overflow waits; format rejection rejects the whole sound and is counted.
+        // Bound (security): queued SDK output is backpressured before collecting a full track. Overflow waits; later samples wait for the consumer.
         gst_app_sink_set_max_buffers(GST_APP_SINK(sink), 1);
 
         // Setup appsrc if decoding from memory
@@ -104,7 +107,7 @@ private:
             GstElement* src = gst_bin_get_by_name(GST_BIN(pipeline_), "src");
             if (src) {
                 // Set stream type and size
-                // Bound (security): a 64 KiB appsrc threshold limits queued external input references; complete random-access requests may cross it. Overflow waits for queue space; encoded-input rejection rejects the whole sound and is counted.
+                // Bound (security): a 64 KiB appsrc threshold limits queued external input references; complete random-access requests may cross it. Overflow waits for queue space; later input waits for the consumer.
                 g_object_set(src,
                     "max-bytes", guint64(65536), "block", TRUE,
                     "stream-type", GST_APP_STREAM_TYPE_RANDOM_ACCESS,
@@ -156,10 +159,6 @@ private:
                     // drained, so keep pulling until it does.
                     gst_message_unref(msg);
                 }
-                if (invalidFormat_.load()) {
-                    budget.reject("AAC source format", 0, internal::audioChannelLimit);
-                    decodeFailed = true;
-                }
                 if (decodeFailed || eos) break;
                 continue;
             }
@@ -171,32 +170,21 @@ private:
                 gst_structure_get_int(structure, "channels", &sampleChannels);
                 gst_structure_get_int(structure, "rate", &sampleRate);
             }
-            if (invalidFormat_.load() || !budget.format(sampleChannels, sampleRate) ||
-                (channels && channels != sampleChannels)) {
-                budget.reject("AAC format change", sampleChannels, channels);
+            if (sampleChannels < 1 || sampleRate < 1) {
+                logWarning("SoundBuffer") << "invalid AAC decoded output format";
                 decodeFailed = true;
             }
             channels = sampleChannels;
-            gint64 duration = 0;
-            if (!decodeFailed && gst_element_query_duration(pipeline_, GST_FORMAT_TIME, &duration) && duration > 0) {
-                const uint64_t frames = gst_util_uint64_scale_ceil(uint64_t(duration), 44100, GST_SECOND);
-                if (!budget.pcm(frames, channels)) decodeFailed = true;
-            }
             GstBuffer* gstBuffer = gst_sample_get_buffer(sample);
             if (!decodeFailed && gstBuffer) {
                 const size_t bytes = gst_buffer_get_size(gstBuffer);
                 if (bytes % (sizeof(float) * channels)) decodeFailed = true;
-                else if (bytes > SIZE_MAX / 3) {
-                    budget.reject("AAC sample bytes", bytes, SIZE_MAX / 3);
-                    decodeFailed = true;
-                } else if (!budget.admit(bytes * 3, allSamples.capacity() * sizeof(float))) {
-                    decodeFailed = true;
-                } else {
+                else {
                     GstMapInfo map;
                     if (!gst_buffer_map(gstBuffer, &map, GST_MAP_READ)) decodeFailed = true;
                     else {
                         if (!internal::appendAudio(allSamples, reinterpret_cast<const float*>(map.data),
-                                                   map.size / sizeof(float), budget, bytes * 3)) decodeFailed = true;
+                                                   map.size / sizeof(float), status)) decodeFailed = true;
                         gst_buffer_unmap(gstBuffer, &map);
                     }
                 }
@@ -209,7 +197,11 @@ private:
         gst_object_unref(sink);
         cleanup();
 
-        if (decodeFailed || inputFailed_.load()) return false;
+        if (decodeFailed) return false;
+        if (inputFailed_.load()) {
+            logError("SoundBuffer") << "AAC input failed; previous PCM kept";
+            return false;
+        }
 
         if (allSamples.empty()) {
             logError("SoundBuffer") << "no audio samples decoded";
@@ -256,7 +248,11 @@ private:
         GstBuffer* buffer = gst_buffer_new_wrapped_full(GST_MEMORY_FLAG_READONLY,
             const_cast<uint8_t*>(self->memoryData_), self->memorySize_,
             self->memoryPos_, toSend, nullptr, nullptr);
-        if (!buffer) { gst_app_src_end_of_stream(GST_APP_SRC(src)); self->inputFailed_.store(true); return; }
+        if (!buffer) {
+            self->inputFailed_.store(true);
+            gst_app_src_end_of_stream(GST_APP_SRC(src));
+            return;
+        }
         self->memoryPos_ += toSend;
 
         // Push buffer
@@ -283,47 +279,29 @@ private:
         return FALSE;
     }
 
-    void checkRawCaps(GstCaps* caps) {
-        if (!caps || !gst_caps_get_size(caps)) return;
-        auto* st = gst_caps_get_structure(caps, 0);
-        if (!gst_structure_has_name(st, "audio/x-raw")) return;
-        int channels = 0, rate = 0;
-        if (!gst_structure_get_int(st, "channels", &channels) || !gst_structure_get_int(st, "rate", &rate)) return;
-        const int previousChannels = rawChannels_.exchange(channels);
-        const int previousRate = rawRate_.exchange(rate);
-        if (channels < 1 || channels > int(internal::audioChannelLimit) || rate < 1 || rate > int(internal::audioRateLimit) ||
-            (previousChannels && previousChannels != channels) || (previousRate && previousRate != rate)) invalidFormat_.store(true);
-    }
-    static GstPadProbeReturn onCapsEvent(GstPad* pad, GstPadProbeInfo* info, gpointer data) {
-        if (!gst_pad_is_linked(pad)) return GST_PAD_PROBE_OK;
-        GstEvent* event = GST_PAD_PROBE_INFO_EVENT(info);
-        if (event && GST_EVENT_TYPE(event) == GST_EVENT_CAPS) {
-            GstCaps* caps = nullptr;
-            gst_event_parse_caps(event, &caps);
-            static_cast<GstAacDecoder*>(data)->checkRawCaps(caps);
-        }
-        return GST_PAD_PROBE_OK;
-    }
     static void onPadAdded(GstElement*, GstPad* pad, gpointer data) {
-        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, onCapsEvent, data, nullptr);
+        auto* self = static_cast<GstAacDecoder*>(data);
         GstCaps* caps = gst_pad_get_current_caps(pad);
-        if (gst_pad_is_linked(pad)) static_cast<GstAacDecoder*>(data)->checkRawCaps(caps);
+        int channels = 0;
+        if (caps && !self->outputChannels_) {
+            auto* structure = gst_caps_get_structure(caps, 0);
+            if (gst_structure_has_name(structure, "audio/x-raw") &&
+                gst_structure_get_int(structure, "channels", &channels) && channels > 0) {
+                // Keep the first output channel count; audioconvert handles later input changes.
+                self->outputChannels_ = channels;
+                GstElement* output = gst_bin_get_by_name(GST_BIN(self->pipeline_), "output");
+                GstCaps* outputCaps = gst_caps_new_simple("audio/x-raw",
+                    "format", G_TYPE_STRING, "F32LE", "layout", G_TYPE_STRING, "interleaved",
+                    "rate", G_TYPE_INT, 44100, "channels", G_TYPE_INT, channels, nullptr);
+                g_object_set(output, "caps", outputCaps, nullptr);
+                gst_caps_unref(outputCaps);
+                gst_object_unref(output);
+            }
+        }
         if (caps) gst_caps_unref(caps);
     }
-    // Compressed metadata is available before decodebin instantiates its decoder.
-    static gboolean onAutoplug(GstElement*, GstPad*, GstCaps* caps, gpointer data) {
-        auto& self = *static_cast<GstAacDecoder*>(data);
-        int channels = 0, rate = 0;
-        auto* st = gst_caps_get_structure(caps, 0);
-        const bool badChannels = gst_structure_get_int(st, "channels", &channels) &&
-            (channels < 1 || channels > int(internal::audioChannelLimit));
-        const bool badRate = gst_structure_get_int(st, "rate", &rate) &&
-            (rate < 1 || rate > int(internal::audioRateLimit));
-        if (badChannels || badRate) { self.invalidFormat_.store(true); return FALSE; }
-        return TRUE;
-    }
-    std::atomic<bool> invalidFormat_{false}, inputFailed_{false};
-    std::atomic<int> rawChannels_{0}, rawRate_{0};
+    int outputChannels_ = 0;
+    std::atomic<bool> inputFailed_{false};
     GstElement* pipeline_ = nullptr;
 
     // Memory buffer for appsrc
@@ -334,7 +312,7 @@ private:
 
 LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
     GstAacDecoder decoder;
-    return decoder.decodeFile(internal::pathToUtf8(path), *this)
+    return decoder.decodeFile(path, *this)
                ? LoadResult::success()
                : LoadResult::fail(LoadError::DecodeFailed,
                                   "GStreamer failed to decode AAC: " +

@@ -221,22 +221,31 @@ protected:
     // to let an ancestor (e.g. a draggable panel behind this label) take the
     // gesture. The press consumer becomes the grab target for drag/release.
     bool onMousePress(const MouseEventArgs& e) override {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), e.button);
+        if (!dispatch.current(e.button)) return false;
         MouseEventArgs args = e;  // already localized to this node
         mousePressed.notify(args);
+        if (!dispatch.current(e.button)) return false;
         onMousePress(e.pos, e.button);  // legacy subclass hook
         return true;  // Consume event (return false to bubble to parent)
     }
 
     bool onMouseRelease(const MouseEventArgs& e) override {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current(e.button)) return false;
         MouseEventArgs args = e;
         mouseReleased.notify(args);
+        if (!dispatch.current(e.button)) return false;
         onMouseRelease(e.pos, e.button);  // legacy subclass hook
         return true;
     }
 
     bool onMouseDrag(const MouseDragEventArgs& e) override {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current()) return false;
         MouseDragEventArgs args = e;
         mouseDragged.notify(args);
+        if (!dispatch.current()) return false;
         onMouseDrag(e.pos, e.button);  // legacy subclass hook
         return true;
     }

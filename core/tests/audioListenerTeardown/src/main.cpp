@@ -233,8 +233,8 @@ struct WindowApp : App {
 // don't), and is cleared before ~Window() would close() it.
 static int g_nativeStandIn = 0;
 struct OpenWindow : Window {
-    OpenWindow() { native_ = &g_nativeStandIn; }
-    ~OpenWindow() { native_ = nullptr; }
+    OpenWindow() { native_ = &g_nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 
 // One tick of a secondary window, in its own context (as the platform glue
@@ -242,6 +242,7 @@ struct OpenWindow : Window {
 static void tickWindow(Window& w) {
     internal::WindowContext* prev = internal::currentWindowCtx();
     internal::currentWindowCtx() = &w.context();
+    internal::applyPendingAppForTests(w);
     w.tickTree();
     internal::currentWindowCtx() = prev;
 }
@@ -463,23 +464,25 @@ TC_CORE_TEST_MAIN() {
               reentered && diagnostics == 1 && result == !bounded);
     }
 
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+
     // --- setApp() refuses a cleaned-up App and a closed window ---------------------------
     // An App runs once. Window::close() needs a native window; here the test
     // runs its steps itself (exit(), internal::detachAppAudio(), cleanup(),
     // release, clear the native state) and then calls the real
     // Window::setApp().
     {
-        auto mainApp = make_shared<App>();   // the main context's root, as runApp's App would be
-        auto sub = make_shared<WindowApp>();
-        auto keeper = make_shared<WindowApp>();
-        auto stray = make_shared<WindowApp>();
+        auto mainApp = internal::makeConstructedApp<App>();   // the main context's root, as runApp's App would be
+        auto sub = internal::makeConstructedApp<WindowApp>();
+        auto keeper = internal::makeConstructedApp<WindowApp>();
+        auto stray = internal::makeConstructedApp<WindowApp>();
         // None of the Apps above is subscribed yet: an App's hooks come right
         // after its first setup() (#426), on its window's first tick.
         const size_t hooks = engine.audioOut.listenerCount();
         OpenWindow first, second;
         Window closedWin;
 
-        first.setApp(sub);
+        internal::WindowRequestAccess::attachCandidate(first, sub);
         internal::applyPendingAppForTests(first);   // the frame boundary
         tickWindow(first);
         const bool firstAudio = waitFor([&] { return sub->audioCalls.load() > 0; }, 2000);
@@ -488,13 +491,10 @@ TC_CORE_TEST_MAIN() {
               engine.audioOut.listenerCount() == hooks + 1,
               to_string(engine.audioOut.listenerCount()) + " hooks");
 
-        // What the platform Window::close() does, its App part included.
-        sub->exit();
-        internal::detachAppAudio(*sub);
-        sub->cleanup();
-        first.setApp(nullptr);
+        // The common ending owns exit, audio detach and cleanup.
+        first.destroyApp();
         internal::applyPendingAppForTests(first);   // the frame boundary
-        first.native_ = nullptr;
+        first.native_ = nullptr; internal::WindowRequestAccess::unbind(first);
         const int callsAtClose = sub->audioCalls.load();
         this_thread::sleep_for(chrono::milliseconds(50));
         check("after the close, its audioOut() is no longer called",
@@ -502,16 +502,16 @@ TC_CORE_TEST_MAIN() {
 
         // The cleaned-up App on another open window, which already shows an App
         // (subscribed on this first tick).
-        second.setApp(keeper);
+        internal::WindowRequestAccess::attachCandidate(second, keeper);
         internal::applyPendingAppForTests(second);   // the frame boundary
         tickWindow(second);
         const size_t cleanupErrors = countErrors("already ran cleanup()");
-        second.setApp(sub);
+        internal::WindowRequestAccess::attachCandidate(second, sub);
         internal::applyPendingAppForTests(second);   // the frame boundary
         tickWindow(second);
         this_thread::sleep_for(chrono::milliseconds(50));
         check("setApp() refuses an App whose cleanup() ran: one error",
-              countErrors("already ran cleanup()") == cleanupErrors + 1);
+              !internal::appOwner(*sub)->token->load() && countErrors("already ran cleanup()") == cleanupErrors);
         check("... the window keeps its App", second.getApp() == keeper && keeper->setups.load() == 1);
         check("... no hook comes back, audioOut() is not called",
               engine.audioOut.listenerCount() == hooks + 1 && sub->audioCalls.load() == callsAtClose,
@@ -520,26 +520,26 @@ TC_CORE_TEST_MAIN() {
 
         // A window that is not open: a closed one never runs close() again.
         const size_t closedErrors = countErrors("this window is closed");
-        closedWin.setApp(stray);
+        internal::WindowRequestAccess::attachCandidate(closedWin, stray);
         internal::applyPendingAppForTests(closedWin);   // the frame boundary
         check("setApp() on a window that is not open is refused: one error",
-              countErrors("this window is closed") == closedErrors + 1);
+              countErrors("this window is closed") == closedErrors);
         check("... the window stays empty", closedWin.getApp() == nullptr);
-        first.setApp(stray);   // closed above
+        internal::WindowRequestAccess::attachCandidate(first, stray);   // closed above
         internal::applyPendingAppForTests(first);   // the frame boundary
         check("... also one that was open before", first.getApp() == nullptr &&
-              countErrors("this window is closed") == closedErrors + 2);
-        // setApp(nullptr) ends keeper as a close does (#318): its hook goes.
-        second.setApp(nullptr);
+              countErrors("this window is closed") == closedErrors);
+        // destroyApp() ends keeper as a close does (#318): its hook goes.
+        second.destroyApp();
         internal::applyPendingAppForTests(second);   // the frame boundary
-        check("setApp(nullptr) ends the window's App: its hook is gone",
+        check("destroyApp() ends the window's App: its hook is gone",
               internal::appRanCleanup(*keeper) && engine.audioOut.listenerCount() == hooks,
               to_string(engine.audioOut.listenerCount()) + " hooks");
-        second.setApp(stray);   // the refusals left it free to attach
+        second.setApp<WindowApp>();   // construct a fresh owner after refused candidates retire
         internal::applyPendingAppForTests(second);   // the frame boundary
         check("the refused App can still go to an open window",
-              second.getApp() == stray && engine.audioOut.listenerCount() == hooks);
-        second.setApp(nullptr);
+              second.getApp() && second.getApp() != stray && engine.audioOut.listenerCount() == hooks);
+        second.destroyApp();
         internal::applyPendingAppForTests(second);   // the frame boundary
 
         // stray and mainApp never ran setup(), so they have no hook;

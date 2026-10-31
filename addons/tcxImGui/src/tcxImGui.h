@@ -27,6 +27,8 @@ public:
     // the manager binds to whichever window's context is current, so an
     // imguiSetup() inside a secondary window's App wires imgui to THAT window)
     void setup();
+    // Initial capacity only; grows automatically. Values below 1 use 65536.
+    void setup(int initialVertices);
 
     // Shutdown
     void shutdown();
@@ -37,6 +39,8 @@ public:
     ImGuiManager(const ImGuiManager&) = delete;
     ImGuiManager& operator=(const ImGuiManager&) = delete;
     void setupOffscreen();
+    // Same capacity policy as setup(int).
+    void setupOffscreen(int initialVertices);
 
     // Returns false on a refused attempt. Pair every begin with end, and only
     // submit widgets when begin succeeds. Prefer scoped() for offscreen UI.
@@ -73,9 +77,10 @@ public:
     // exit/unload hooks; other process statics may already be gone at destruction.
     ~ImGuiManager();
 private:
+    std::shared_ptr<int> retirementLifetime_ = std::make_shared<int>(0);
     void installDeadlineListeners_();
 
-    void initializeContext_();
+    void initializeContext_(int initialVertices);
 
     static std::unordered_map<tc::internal::WindowContext*,
                               std::unique_ptr<ImGuiManager>>& registry();
@@ -91,9 +96,9 @@ private:
     bool offscreenFrameCompleted_ = false;
     std::vector<bool> attempts_;
     tc::EventListener exitListener_;
-    tc::EventListener hotReloadUnloadListener_;   // on the main window's hotReloadUnload
+    tc::EventListener hotReloadUnloadListener_;   // on Runtime hotReloadUnload
     tc::EventListener renderListener_;
-    tc::EventListener overdueListener_;   // on the main window's afterFrame
+    tc::EventListener overdueListener_;   // on Runtime maintenance before MCP expiry
     tc::EventListener eventListener_;
 
     // Input arbitration: consume listeners (-20) + pointer-gesture capture.
@@ -112,6 +117,7 @@ private:
 // ---------------------------------------------------------------------------
 
 void imguiSetup();
+void imguiSetup(int initialVertices);
 
 void imguiShutdown();
 

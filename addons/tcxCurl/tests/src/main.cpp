@@ -89,55 +89,13 @@ static string replayPieces(const std::vector<Step>& steps, size_t piece) {
 }
 
 static void testResponseBounds() {
-    size_t jsonWarnings = 0;
-    auto listener = trussc::getLogger().onLog.listen([&](trussc::LogEventArgs& event) {
-        if (event.level == trussc::LogLevel::Warning && event.message.find("response JSON") != string::npos) ++jsonWarnings;
-    });
-    const size_t before = responseLossCountForTests(ResponseLoss::Json);
     tcx::curl::HttpResponse response;
     response.body = "{\"ok\":[1,true,\"complete\"]}";
-#ifdef __linux__
-    responseMemoryTrace::begin();
-#endif
     check("JSON complete object", response.json()["ok"].size() == 3);
-    response.body = string(jsonDepthLimit, '[') + "0" + string(jsonDepthLimit, ']');
-    check("JSON depth boundary", response.json().is_array());
-    response.body = "[" + response.body + "]";
-    auto rejected = response.json();
-    check("JSON depth admission", rejected.is_object() && rejected.empty());
-    rejected = nullptr;
-    response.body.assign(jsonByteLimit + 1, ' ');
-    check("JSON byte admission", response.json().empty());
-    response.body = string(jsonByteLimit - 2, ' ') + "[]";
-    check("JSON byte boundary", response.json().is_array());
-    response.body = "[";
-    for (size_t i = 0; i < 100000; ++i) response.body += "{},";
-    response.body.back() = ']';
-    auto complete = response.json();
-    check("JSON full DOM under budget", complete.is_array() && complete.size() == 100000 && complete.back().is_object());
-    complete = nullptr;
-    response.body = "\"" + string(jsonByteLimit - 2, 'j') + "\"";
-    complete = response.json();
-    check("JSON full string boundary", complete.is_string() && complete.get_ref<const string&>().size() == jsonByteLimit - 2);
-    complete = nullptr;
-    response.body = "\"" + string(jsonByteLimit - 1, 'j');
-    check("JSON incomplete long string rejected whole", response.json().empty());
-    response.body.assign(jsonByteLimit, '9');
-    check("JSON unrepresentable number rejected whole", response.json().empty());
-    response.body = "[";
-    for (size_t i = 0; i < 600000; ++i) response.body += "[],";
-    response.body.back() = ']';
-    check("JSON working admission", response.json().empty());
-    check("JSON rejection counter persists", responseLossCountForTests(ResponseLoss::Json) == before + 3);
-
-#ifdef __linux__
-    responseMemoryTrace::end();
-    check("JSON measured C++ working allocation budget", responseMemoryTrace::peak.load() <= jsonWorkingLimit);
-    string().swap(response.body);
-    string().swap(response.error);
-    check("JSON working storage released", responseMemoryTrace::live.load() == 0);
-#endif
-    check("one JSON first-loss Warning", jsonWarnings == 1);
+    response.body = string(65, '[') + "0" + string(65, ']');
+    check("JSON deeper than previous limit", response.json().is_array());
+    response.body = "{";
+    check("invalid JSON returns empty object", response.json().is_object() && response.json().empty());
     ResponseBuffer buffer;
     check("response storage is lazy", buffer.capacity == 0 && !buffer.first);
     string block(16384, 'b');

@@ -5,6 +5,7 @@
 #include "impl/httplib.h"
 #endif
 #include "../../common/tcCoreTest.h"
+#include "../../common/tcDeferredWindowTest.h"
 
 #include <cstdio>
 #include <stdexcept>
@@ -39,13 +40,14 @@ json deferredCall(const std::string& name) {
     auto future = promise->get_future();
     mcp::internal::getHttpChannel().send(mcp::McpRequest{request(name), promise});
     mcp::processHttpQueue();
-    mcp::internal::drainDeferredResponses();
+    tcCoreTest::drainDeferredFrame();
     return json::parse(future.get()());
 }
 #endif
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    auto deferredWindow = tcCoreTest::deferredWindow();
     try {
         int logs = 0;
         auto listener = getLogger().onLog.listen([&](LogEventArgs&) { ++logs; });

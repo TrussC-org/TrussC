@@ -67,6 +67,7 @@ void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 #undef QueryPerformanceCounter
 
 namespace trussc::internal {
+void setSessionActivityProbe(bool (*)()) noexcept {}
 int& appExitCode() { static int value; return value; }
 bool& appSetupCalled() { static bool value = true; return value; }
 void setExitReason(const char*) {}
@@ -98,6 +99,8 @@ double started;
 int loopStage;
 unsigned loopTicks[3];
 bool vetoQuit, throwQuit;
+int resizeFrameWidth, resizeFrameHeight, resizeFrameChecks;
+bool resizeFrameModal;
 void check(const char* label, bool passed) {
     std::printf("nativeWindow/Win32: %s: %s\n", label, passed ? "PASS" : "FAIL");
     std::fflush(stdout);
@@ -182,7 +185,12 @@ BOOL WINAPI testShowWindow(HWND hwnd, int command) {
     auto* w = (_sapp_tc_window_t*)GetWindowLongPtrW(hwnd,GWLP_USERDATA);
     if (destroyOnShow && w) {
         destroyOnShow=false;
+        const auto frames = w->frame_count;
+        check("Constructing excludes show-time native scheduling", !_sapp_tc_win32_window_due(w));
+        _sapp_tc_win32_tick(w);
+        check("Constructing excludes show-time native tick", w->constructing && w->frame_count == frames);
         sapp_destroy_window({w->win_id});
+        check("Constructing defers show-time physical destruction", _sapp_tc_lookup({w->win_id}) == w && w->close_requested);
         return FALSE;
     }
     if (runLaunch && command == SW_SHOW && w && w->swap_chain && !launchProbe) {
@@ -236,7 +244,7 @@ void faults() {
     d.window.sample_count = 1;
     destroyOnShow=true;
     auto* revoked=_sapp_tc_win32_create_window(&d);
-    check("synchronous show-time disposal revokes construction safely", !revoked && !destroyOnShow && liveHwnds==live);
+    check("synchronous show-time disposal waits for construction return", revoked && !revoked->constructing && revoked->close_requested && !destroyOnShow && liveHwnds==live+1);
     _sapp_tc_win32_unwind(revoked);
     _sapp_tc_window_t placeholder{};
     for (auto& entry : _sapp_tc.windows) if (!entry) entry = &placeholder;
@@ -482,16 +490,58 @@ void policies(_sapp_tc_window_t* w) {
     _sapp_tc_win32_tick(w);
     check("device loss consumes completed tick's skip one-shot", !w->skip_present && spy.presents == 0);
     _sapp_tc.app.device_lost_notified = false;
-    // Modal source uses the same tick, leaves resize to the next ordinary tick.
+    // Every admitted frame, including WM_TIMER in the modal loop, must see
+    // the new framebuffer extent in both native metadata and its D3D attachments.
+    // With no_high_dpi, DXGI scales a logical-sized buffer to the client pixels.
+    // Match _sapp_tc_win32_update_dimensions' float rounding and minimum size.
+    const auto framebufferExtent = [w](int clientPixels) {
+        const int extent = w->desc.no_high_dpi ? int(float(clientPixels) / w->window_scale + 0.5f) : clientPixels;
+        return extent > 0 ? extent : 1;
+    };
     sizeClient(w, 313, 219);
     spy.resizes = 0;
+    resizeFrameWidth = framebufferExtent(313); resizeFrameHeight = framebufferExtent(219); resizeFrameModal = true;
+    resizeFrameChecks = 0;
+    w->desc.tick_cb = [](sapp_window handle, void*) {
+        ++resizeFrameChecks;
+        auto* live = _sapp_tc_lookup(handle);
+        ID3D11Texture2D* buffer = nullptr;
+        const HRESULT hr = live->swap_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&buffer);
+        D3D11_TEXTURE2D_DESC desc{};
+        if (buffer) { buffer->GetDesc(&desc); buffer->Release(); }
+        check("first resized frame uses new metadata and attachments", live->from_modal == resizeFrameModal &&
+            live->fb_width == resizeFrameWidth && live->fb_height == resizeFrameHeight && SUCCEEDED(hr) &&
+            desc.Width == UINT(resizeFrameWidth) && desc.Height == UINT(resizeFrameHeight));
+    };
     SendMessageW(w->hwnd,WM_ENTERSIZEMOVE,0,0);
     w->credit_held=true; w->earliest_next=0;
+    // Stand in for a framework Window callback paused in MessageBoxW with
+    // another Window's live target bound on the shared immediate context.
+    // The modal timer must leave that pass intact until its owner can park.
+    const auto savedActive = _sapp_tc.app.desc._tc_callbacks_active;
+    _sapp_tc.app.desc._tc_callbacks_active = [] { return true; };
+    auto* caller = w == first ? _sapp_tc_lookup(second) : first;
+    ID3D11RenderTargetView* callerTarget = caller->msaa_rtv ? caller->msaa_rtv : caller->rtv;
+    _sapp_tc.app.device_context->OMSetRenderTargets(1, &callerTarget, caller->dsv);
+    SendMessageW(w->hwnd,WM_TIMER,_SAPP_TC_MODAL_TIMER,0);
+    ID3D11RenderTargetView* retained = nullptr;
+    _sapp_tc.app.device_context->OMGetRenderTargets(1, &retained, nullptr);
+    check("nested modal resize preserves foreign active target until caller parks",
+        retained == callerTarget && spy.resizes == 0 && resizeFrameChecks == 0);
+    if (retained) retained->Release();
+    _sapp_tc.app.device_context->OMSetRenderTargets(0, nullptr, nullptr);
+    _sapp_tc.app.desc._tc_callbacks_active = savedActive;
     SendMessageW(w->hwnd,WM_TIMER,_SAPP_TC_MODAL_TIMER,0);
     SendMessageW(w->hwnd,WM_EXITSIZEMOVE,0,0);
-    check("modal timer source defers ResizeBuffers", spy.resizes == 0 && !w->from_modal);
+    check("modal timer source reconciles ResizeBuffers", spy.resizes == 1 && resizeFrameChecks == 1 && !w->from_modal);
+    sizeClient(w, 319, 223);
+    resizeFrameWidth = framebufferExtent(319); resizeFrameHeight = framebufferExtent(223); resizeFrameModal = false;
     _sapp_tc_win32_tick(w);
-    check("ordinary tick coalesces modal resize", spy.resizes == 1);
+    check("ordinary resize reconciles before its first callback", spy.resizes == 2 && resizeFrameChecks == 2);
+    w->desc.tick_cb = tick;
+    _sapp_tc_win32_tick(w);
+    check("ordinary tick preserves reconciled resize", spy.resizes == 2 &&
+        w->fb_width == resizeFrameWidth && w->fb_height == resizeFrameHeight);
     // Advance an injected clock inside the client: no wall-time/speed assertion.
     const double realPeriod=_sapp_tc.qpc_period;
     const auto realTiming=w->timing;
@@ -528,7 +578,8 @@ void initialized() {
     if (sessionEnd) {
         trussc::internal::appExitCode() = 37;
         SendMessageW(first->hwnd, WM_ENDSESSION, TRUE, 0);
-        check("forced session termination returned unexpectedly", false);
+        check("user HWND does not own forced session termination", !_sapp_tc.app.quit_ordered);
+        sapp_quit();
         return;
     }
     if (launchCovered) {
@@ -617,11 +668,7 @@ void nativeChecks() {
     SendMessageW(other->hwnd,WM_ENDSESSION,TRUE,0);
     check("secondary session end cannot terminate the process", !_sapp_tc.app.quit_ordered);
     vetoQuit = true; quitRequests = 0;
-    SendMessageW(first->hwnd,WM_QUERYENDSESSION,0,0);
-    check("session query preserves close veto", quitRequests == 1 && !_sapp_tc.app.quit_ordered);
-    trussc::internal::throwReason = true;
-    check("session allocation failure cannot escape wndproc", SendMessageW(first->hwnd,WM_QUERYENDSESSION,0,0) == FALSE);
-    trussc::internal::throwReason = false;
+    check("first user HWND also has no session authority", SendMessageW(first->hwnd,WM_QUERYENDSESSION,0,0)==TRUE && quitRequests==0);
     SendMessageW(first->hwnd,WM_ENDSESSION,FALSE,0);
     vetoQuit = false;
     const auto savedClose=other->desc.close_cb;

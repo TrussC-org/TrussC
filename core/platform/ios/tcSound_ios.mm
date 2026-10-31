@@ -63,9 +63,15 @@ static SInt64 MemoryAudioFile_GetSizeProc(void* inClientData) {
 }
 
 namespace {
-LoadResult decodeAacMemory(const void* data, size_t dataSize, SoundBuffer& out, internal::AudioDecodeBudget& budget) {
-    if (!data || !dataSize || !budget.encoded(dataSize))
-        return LoadResult::fail(LoadError::DecodeFailed, "AAC input rejected; use SoundStream::loadStream()");
+LoadResult decodeAacMemory(const void* data, size_t dataSize, SoundBuffer& out, internal::AudioDecodeStatus& status,
+                           const std::string& input = "memory input") {
+    if (!data || !dataSize)
+        return LoadResult::fail(LoadError::DecodeFailed, "empty AAC memory input");
+    // Bound (abi): AudioFile callbacks expose their size as SInt64; larger inputs fail before narrowing.
+    if (dataSize > uint64_t(INT64_MAX)) {
+        logError("SoundBuffer") << "AAC memory input size does not fit AudioFile's SInt64 byte length";
+        return LoadResult::fail(LoadError::DecodeFailed, "AAC input size cannot be represented");
+    }
     MemoryAudioFileData memory{static_cast<const uint8_t*>(data), dataSize, 0};
     AudioFileID file = nullptr;
     const AudioFileTypeID types[] = {kAudioFileAAC_ADTSType, kAudioFileM4AType, 0};
@@ -79,27 +85,27 @@ LoadResult decodeAacMemory(const void* data, size_t dataSize, SoundBuffer& out, 
         logError("SoundBuffer") << "failed to open AAC memory; previous PCM kept";
         return LoadResult::fail(LoadError::DecodeFailed, "failed to open AAC memory");
     }
-    auto result = internal::decodeAudioToolbox(file, out, budget);
+    auto result = internal::decodeAudioToolbox(file, out, status, input);
     AudioFileClose(file);
-    if (!result && !budget.rejected && !budget.allocationFailed)
+    if (!result && !status.rejected && !status.allocationFailed)
         logError("SoundBuffer") << "AAC decoder failed; previous PCM kept";
     return result;
 }
 } // namespace
 
 LoadResult SoundBuffer::loadAacPlatform(const fs::path& path) {
-    internal::AudioDecodeBudget budget;
+    internal::AudioDecodeStatus status;
     std::vector<unsigned char> bytes;
-    if (!internal::readAudioFile(path, bytes, budget))
+    if (!internal::readAudioFile(path, bytes, status))
         return LoadResult::fail(LoadError::DecodeFailed, "AAC input rejected; use SoundStream::loadStream()");
-    return decodeAacMemory(bytes.data(), bytes.size(), *this, budget);
+    return decodeAacMemory(bytes.data(), bytes.size(), *this, status, internal::pathToDisplayUtf8(path));
 }
 
 LoadResult SoundBuffer::loadAacFromMemory(const void* data, size_t dataSize) {
     async_.cancel();
     internal::clearLoadName(path_);
-    internal::AudioDecodeBudget budget;
-    return decodeAacMemory(data, dataSize, *this, budget);
+    internal::AudioDecodeStatus status;
+    return decodeAacMemory(data, dataSize, *this, status);
 }
 
 } // namespace trussc

@@ -1,6 +1,7 @@
 // #258: headless policy tests by default; optional --window-* smoke tests
 // exercise runApp/cleanup under a real display or Xvfb. No forced GPU reset.
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "sokol/util/sokol_d3d11_device_loss.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -22,7 +23,7 @@ void notifyLoss() {
     sapp_event ev{};
     ev.type = SAPP_EVENTTYPE_TC_DEVICE_LOST;
     ev.device_lost_reason = hung; // reason differs from the triggering HRESULT
-    internal::_event_cb(&ev);
+    tcCoreTest::dispatchMainEvent(&ev);
 }
 
 string mode;
@@ -69,6 +70,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         });
     }
 
+    getMainThreadId();
+    auto launch = internal::prepareLaunchWindow(WindowSettings{});
+    internal::WindowRequestAccess::bindForTests(*launch, 239);
+
     for (uint32_t hr : {0u, 0x087A0001u, 0x087A0007u, 0x887A000Au, hung, 0x80004005u}) {
         bool notified = false;
         check(!_sapp_tc_d3d11_is_device_loss(hr), "success/status/busy/unrelated failure is not loss");
@@ -97,7 +102,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         if (_sapp_tc_d3d11_first_device_loss(first, &notified)) pending = true;
         dispatchPending();
         check(notified && pending, "pre-init loss remains latched and pending");
-        auto deferred = events().deviceLost.listen([&](DeviceLostEventArgs& args) {
+        auto deferred = runtime().events().deviceLost.listen([&](DeviceLostEventArgs& args) {
             ++deferredCalls;
             check(initialized && args.reason == hung, "deferred loss delivered after init with reason");
             check(!pending, "pending cleared before app callback");
@@ -119,7 +124,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         if (args.level == LogLevel::Error && args.message.find("887a0006") != string::npos)
             ++errorLogs;
     });
-    auto cancel = events().deviceLost.listen([&](DeviceLostEventArgs& args) {
+    auto cancel = runtime().events().deviceLost.listen([&](DeviceLostEventArgs& args) {
         ++lossCalls;
         check(args.reason == hung && !args.cancel, "reason and cancel defaults");
         args.cancel = true;
@@ -144,6 +149,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
           "explicit exit code reaches clean log");
     exitApp();
     check(internal::appExitCode() == 0, "no-argument exit remains success");
+    internal::shutdownRuntime();
     std::printf("deviceLost headless: %d failures\n", failures);
     return failures ? 1 : 0;
 }

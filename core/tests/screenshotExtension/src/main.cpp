@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 // #455: screenshot fallback paths, warnings, MCP replies and native encoders.
 // Default: no GPU. --screen: also exercise deferred and synchronous captures.
 #include <TrussC.h>
@@ -54,13 +55,11 @@ void checkMcp(const fs::path& requested, const fs::path& expected) {
     check("MCP fallback warns once", warnings.size() == count + 1);
     check("MCP warning names actual destination", warnings.size() > count &&
           warnings.back().find(internal::pathToUtf8(expected)) != string::npos);
-    check("MCP capture retains admission credits", mcp::internal::workingMemory() > 0);
     check("MCP capture leaves application queue independent", internal::currentWindowContext().pendingScreenshotPaths.empty());
     // No GPU in this tier: cancel the queued producer after checking its
-    // admitted lifetime. Native file encoders are exercised by --screen.
+    // deferred destination. Native file encoders are exercised by --screen.
     deferred.envelope = {};
     deferred.hasEnvelope = false;
-    check("cancelled MCP capture releases credits", mcp::internal::workingMemory() == 0);
 }
 
 void checkFile(const fs::path& path, const string& magic) {
@@ -111,6 +110,7 @@ public:
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    auto fixture = std::make_unique<tcCoreTest::WindowFixture>();
     sandbox = fs::temp_directory_path() / "tc_screenshotExtension";
     fs::remove_all(sandbox);
     fs::create_directories(sandbox);
@@ -134,6 +134,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     checkMcp("mcp.xyz", sandbox / "mcp.xyz.png");
     checkMcp(sandbox / "mcp", sandbox / "mcp.png");
     if (argc > 1 && strcmp(argv[1], "--screen") == 0) {
+        fixture.reset();
         WindowSettings settings;
         settings.setSize(64, 48);
         settings.setHighDpi(false);

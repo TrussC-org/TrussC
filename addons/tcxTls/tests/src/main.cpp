@@ -82,6 +82,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../../../core/tests/common/tcWindowTest.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -185,7 +186,7 @@ static void check(const char* name, bool ok) {
 template <typename F>
 static bool completesWithin(int ms, F fn) {
     auto done = make_shared<atomic<bool>>(false);
-    thread worker([done, fn = move(fn)]() mutable { fn(); done->store(true); });
+    thread worker([done, fn = std::move(fn)]() mutable { fn(); done->store(true); });
     const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(ms);
     while (!done->load() && chrono::steady_clock::now() < deadline) {
         this_thread::sleep_for(chrono::milliseconds(5));
@@ -1730,6 +1731,7 @@ int main(int argc, char** argv) {
     std::thread([] {}).join();
     const int threadsAtStart = countEntries("/proc/self/task");
 #endif
+    tcCoreTest::WindowFixture loopWindow;
     g_phase = "the scenario";
     // Keep these fixtures through the thread-count assertion, then destroy
     // them normally so LeakSanitizer can verify their owned resources too.

@@ -17,15 +17,9 @@
 #include <tcxBox2d.h>
 #include <vector>
 #include <memory>
-#include <cstdlib>
 
 using namespace tc;
 using namespace tcx;
-
-// Generate random float (min to max)
-float randomFloat(float min, float max) {
-    return min + (float)rand() / RAND_MAX * (max - min);
-}
 
 class tcApp : public tc::App {
 public:
@@ -109,7 +103,7 @@ public:
             } else {
                 // Otherwise add a circle
                 auto circle = std::make_shared<box2d::CircleBody>();
-                circle->setup(world, e.pos.x, e.pos.y, randomFloat(15, 40));
+                circle->setup(world, e.pos.x, e.pos.y, random(15, 40));
                 circle->setRestitution(0.7f);  // Bouncy
                 circles.push_back(circle);
                 addChild(circle);
@@ -118,7 +112,7 @@ public:
         else if (e.button == MOUSE_BUTTON_RIGHT) {
             // Right click: add rectangle
             auto rect = std::make_shared<box2d::RectBody>();
-            rect->setup(world, e.pos.x, e.pos.y, randomFloat(30, 60), randomFloat(20, 40));
+            rect->setup(world, e.pos.x, e.pos.y, random(30, 60), random(20, 40));
             rect->setRestitution(0.3f);
             rects.push_back(rect);
             addChild(rect);

@@ -86,19 +86,16 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["sendAsync"] = [](trussc::TcpServer& self, int clientId, const std::string & message) { return self.sendAsync(clientId, message); };
 #endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
+        t["setBindAddress"] = &trussc::TcpServer::setBindAddress;
+#endif
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
         t["setReceiveBufferSize"] = &trussc::TcpServer::setReceiveBufferSize;
 #endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
         t["setSendAsyncBufferSize"] = &trussc::TcpServer::setSendAsyncBufferSize;
 #endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
-        t["setSendItemLimit"] = &trussc::TcpServer::setSendItemLimit;
-#endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
         t["setSendTimeout"] = &trussc::TcpServer::setSendTimeout;
-#endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
-        t["setTotalSendBufferSize"] = &trussc::TcpServer::setTotalSendBufferSize;
 #endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
         t["start"] = sol::overload([](trussc::TcpServer& self, int port) { return self.start(port); }, [](trussc::TcpServer& self, int port, int maxClients) { return self.start(port, maxClients); });
@@ -142,59 +139,62 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["set"] = sol::overload([](trussc::Vec2& self, float x_, float y_) -> decltype(auto) { return self.set(x_, y_); }, [](trussc::Vec2& self, const trussc::Vec2 & v) -> decltype(auto) { return self.set(v); });
         t["fromAngle"] = sol::overload([](float radians) { return trussc::Vec2::fromAngle(radians); }, [](float radians, float length) { return trussc::Vec2::fromAngle(radians, length); });
     }
+    lua->new_usertype<trussc::Cursor>("Cursor",
+        sol::meta_function::equal_to, [](trussc::Cursor a, trussc::Cursor b){ return a == b; },
+        "Default", sol::var(trussc::Cursor::Default),
+        "Arrow", sol::var(trussc::Cursor::Arrow),
+        "IBeam", sol::var(trussc::Cursor::IBeam),
+        "Crosshair", sol::var(trussc::Cursor::Crosshair),
+        "Hand", sol::var(trussc::Cursor::Hand),
+        "ResizeEW", sol::var(trussc::Cursor::ResizeEW),
+        "ResizeNS", sol::var(trussc::Cursor::ResizeNS),
+        "ResizeNWSE", sol::var(trussc::Cursor::ResizeNWSE),
+        "ResizeNESW", sol::var(trussc::Cursor::ResizeNESW),
+        "ResizeAll", sol::var(trussc::Cursor::ResizeAll),
+        "NotAllowed", sol::var(trussc::Cursor::NotAllowed),
+        "Custom0", sol::var(trussc::Cursor::Custom0),
+        "Custom1", sol::var(trussc::Cursor::Custom1),
+        "Custom2", sol::var(trussc::Cursor::Custom2),
+        "Custom3", sol::var(trussc::Cursor::Custom3),
+        "Custom4", sol::var(trussc::Cursor::Custom4),
+        "Custom5", sol::var(trussc::Cursor::Custom5),
+        "Custom6", sol::var(trussc::Cursor::Custom6),
+        "Custom7", sol::var(trussc::Cursor::Custom7),
+        "Custom8", sol::var(trussc::Cursor::Custom8),
+        "Custom9", sol::var(trussc::Cursor::Custom9),
+        "Custom10", sol::var(trussc::Cursor::Custom10),
+        "Custom11", sol::var(trussc::Cursor::Custom11),
+        "Custom12", sol::var(trussc::Cursor::Custom12),
+        "Custom13", sol::var(trussc::Cursor::Custom13),
+        "Custom14", sol::var(trussc::Cursor::Custom14),
+        "Custom15", sol::var(trussc::Cursor::Custom15));
     {
-        auto constructors = tcxLuaConstructors<trussc::Rect
-            , trussc::Rect()
-            , trussc::Rect(float, float, float, float)
-            , trussc::Rect(const trussc::Vec2 &, float, float)
-            , trussc::Rect(const trussc::Vec3 &, float, float)
-            , trussc::Rect(float, float, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::IVec2
+            , trussc::IVec2()
+            , trussc::IVec2(int, int)
+            , trussc::IVec2(int)
         >();
-        sol::usertype<trussc::Rect> t = lua->new_usertype<trussc::Rect>("Rect", constructors, sol::call_constructor, constructors);
-        t["height"] = &trussc::Rect::height;
-        t["width"] = &trussc::Rect::width;
-        t["x"] = &trussc::Rect::x;
-        t["y"] = &trussc::Rect::y;
-        t["contains"] = &trussc::Rect::contains;
-        t["getBottom"] = &trussc::Rect::getBottom;
-        t["getCenter"] = &trussc::Rect::getCenter;
-        t["getCenterX"] = &trussc::Rect::getCenterX;
-        t["getCenterY"] = &trussc::Rect::getCenterY;
-        t["getRight"] = &trussc::Rect::getRight;
-        t["intersects"] = &trussc::Rect::intersects;
-        t["set"] = sol::overload([](trussc::Rect& self, float x_, float y_, float w_, float h_) -> decltype(auto) { return self.set(x_, y_, w_, h_); }, [](trussc::Rect& self, const trussc::Vec2 & pos, float w_, float h_) -> decltype(auto) { return self.set(pos, w_, h_); });
+        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = [](const trussc::IVec2& a, int b){ return a * b; };
+        t[sol::meta_function::addition] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; };
+        t[sol::meta_function::unary_minus] = [](const trussc::IVec2& a){ return -a; };
+        t[sol::meta_function::equal_to] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; };
+        t["x"] = &trussc::IVec2::x;
+        t["y"] = &trussc::IVec2::y;
+        t["toVec2"] = &trussc::IVec2::toVec2;
     }
     {
-        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
-        t["alt"] = &trussc::MouseDragEventArgs::alt;
-        t["button"] = &trussc::MouseDragEventArgs::button;
-        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
-        t["delta"] = &trussc::MouseDragEventArgs::delta;
-        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
-        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
-        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
-        t["pos"] = &trussc::MouseDragEventArgs::pos;
-        t["shift"] = &trussc::MouseDragEventArgs::shift;
-        t["super"] = &trussc::MouseDragEventArgs::super;
-        t["x"] = &trussc::MouseDragEventArgs::x;
-        t["y"] = &trussc::MouseDragEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
-    }
-    {
-        sol::usertype<trussc::ScrollEventArgs> t = lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
-        t["alt"] = &trussc::ScrollEventArgs::alt;
-        t["consumed"] = &trussc::ScrollEventArgs::consumed;
-        t["ctrl"] = &trussc::ScrollEventArgs::ctrl;
-        t["globalPos"] = &trussc::ScrollEventArgs::globalPos;
-        t["pos"] = &trussc::ScrollEventArgs::pos;
-        t["scroll"] = &trussc::ScrollEventArgs::scroll;
-        t["scrollX"] = &trussc::ScrollEventArgs::scrollX;
-        t["scrollY"] = &trussc::ScrollEventArgs::scrollY;
-        t["shift"] = &trussc::ScrollEventArgs::shift;
-        t["super"] = &trussc::ScrollEventArgs::super;
-        t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
+        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
+        t["audio"] = &trussc::VideoRecordSettings::audio;
+        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
+        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
+        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
+        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
+        t["codec"] = &trussc::VideoRecordSettings::codec;
+        t["duration"] = &trussc::VideoRecordSettings::duration;
+        t["fps"] = &trussc::VideoRecordSettings::fps;
+        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
     }
     {
         sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
@@ -206,18 +206,18 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
         t["name"] = &trussc::GraphicsBackend::name;
     }
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
+    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
+        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
+        "None", sol::var(trussc::AudioInitFailure::None),
+        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
+        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
+        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
     {
-        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
-        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
-        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::RuntimeEvents> t = lua->new_usertype<trussc::RuntimeEvents>("RuntimeEvents");
+        t["console"] = &trussc::RuntimeEvents::console;
+        t["deviceLost"] = &trussc::RuntimeEvents::deviceLost;
+        t["exitRequested"] = &trussc::RuntimeEvents::exitRequested;
+        t["hotReloadUnload"] = &trussc::RuntimeEvents::hotReloadUnload;
     }
     lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
         sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
@@ -225,18 +225,15 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         "Round", sol::var(trussc::StrokeJoin::Round),
         "Bevel", sol::var(trussc::StrokeJoin::Bevel));
     {
-        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
-        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
-        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
+        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
+        t["files"] = &trussc::DragDropEventArgs::files;
+        t["x"] = &trussc::DragDropEventArgs::x;
+        t["y"] = &trussc::DragDropEventArgs::y;
     }
     {
-        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
-        t["args"] = &trussc::ConsoleEventArgs::args;
-        t["raw"] = &trussc::ConsoleEventArgs::raw;
-    }
-    {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
 }
 #ifdef _MSC_VER

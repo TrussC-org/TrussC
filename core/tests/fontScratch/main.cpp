@@ -22,18 +22,14 @@ int main() {
     vector<unsigned char> bitmap(128 * 128);
     bool sawFailure = false, sawSuccess = false;
     for (int successes = 0; successes < 12; ++successes) {
-        trussc::internal::FontScratchScope scratch(font.size(), bitmap.size());
-        const size_t remaining = trussc::internal::fontScratchRemaining();
+        trussc::internal::FontScratchScope scratch(font.size());
         trussc::internal::failFontScratchAllocationAfterForTests(successes);
-        fill(bitmap.begin(), bitmap.end(), 0);
+        fill(bitmap.begin(), bitmap.end(), static_cast<unsigned char>(0));
         stbtt_MakeGlyphBitmap(&info, bitmap.data(), 128, 128, 128,
                              0.128f, 0.128f, stbtt_FindGlyphIndex(&info, 'A'));
         sawFailure |= scratch.failed();
         sawSuccess |= !scratch.failed() && any_of(bitmap.begin(), bitmap.end(), [](unsigned char pixel) { return pixel != 0; });
-        if (trussc::internal::fontScratchRemaining() != remaining) {
-            std::printf("scratch retained an allocation at failure step %d\n", successes);
-            return 1;
-        }
+
     }
     trussc::internal::failFontScratchAllocationAfterForTests(-1);
     auto malformed = font;
@@ -63,9 +59,9 @@ int main() {
         stbtt_vertex* vertices = nullptr;
         const int count = stbtt_GetGlyphShape(&malformedInfo, 1, &vertices);
         if (vertices) stbtt_FreeShape(&malformedInfo, vertices);
-        if (count || !scratch.failed()) return 1;
+        if (count || vertices) return 1;
     }
-    // Reuse the round-1 generated compound fixture, with an empty leaf.
+    // Finite empty composition beyond the former visit allowance is accepted.
     vector<Bytes> doubled(21);
     for (size_t i = 0; i + 1 < doubled.size(); ++i) {
         auto& bytes = doubled[i];
@@ -77,16 +73,16 @@ int main() {
     doubled.back().resize(10);
     const auto repeated = makeFont(doubled);
     if (!stbtt_InitFont(&malformedInfo, repeated.data(), 0)) return 1;
-    bool bounded = false;
+    bool expandedAccepted = false;
     {
         trussc::internal::FontScratchScope scratch(repeated.size());
         stbtt_vertex* vertices = nullptr;
         const int count = stbtt_GetGlyphShape(&malformedInfo, 0, &vertices);
         if (vertices) stbtt_FreeShape(&malformedInfo, vertices);
-        bounded = !count && scratch.failed();
+        expandedAccepted = !count && !scratch.failed();
     }
-    std::printf("fontScratch: total compound work rejected: %s\n", bounded ? "PASS" : "FAIL");
-    // Flat nonempty components exercise accumulated append copies, not visits.
+    std::printf("fontScratch: expanded empty compound accepted: %s\n", expandedAccepted ? "PASS" : "FAIL");
+    // Finite outlines beyond the former append-copy allowance still render.
     Bytes flat;
     put16(flat, 0xffff);
     for (int i = 0; i < 4; ++i) put16(flat, 0);
@@ -96,17 +92,15 @@ int main() {
     }
     const auto flatFont = makeFont({Bytes{}, boxGlyph(0, 0, 100, 100), flat, Bytes{}});
     if (!stbtt_InitFont(&malformedInfo, flatFont.data(), 0)) return 1;
-    bool copiesBounded = false;
+    bool expandedRendered = false;
     {
         trussc::internal::FontScratchScope scratch(flatFont.size());
-        const auto remaining = trussc::internal::fontScratchRemaining();
         stbtt_vertex* vertices = nullptr;
         const int count = stbtt_GetGlyphShape(&malformedInfo, 2, &vertices);
-        copiesBounded = !count && !vertices && scratch.failed() &&
-            trussc::internal::fontScratchRemaining() == remaining;
+        expandedRendered = count == 2048 * 5 && vertices && !scratch.failed();
         if (vertices) stbtt_FreeShape(&malformedInfo, vertices);
     }
-    std::printf("fontScratch: accumulated compound copies rejected and released: %s\n", copiesBounded ? "PASS" : "FAIL");
+    std::printf("fontScratch: expanded compound renders: %s\n", expandedRendered ? "PASS" : "FAIL");
     // A normal compound with two distinct simple glyphs still rasterizes.
     Bytes pair;
     put16(pair, 0xffff);
@@ -117,13 +111,13 @@ int main() {
     if (!stbtt_InitFont(&malformedInfo, normal.data(), 0)) return 1;
     bool compoundRendered = false;
     {
-        trussc::internal::FontScratchScope scratch(normal.size(), bitmap.size());
-        fill(bitmap.begin(), bitmap.end(), 0);
+        trussc::internal::FontScratchScope scratch(normal.size());
+        fill(bitmap.begin(), bitmap.end(), static_cast<unsigned char>(0));
         stbtt_MakeGlyphBitmap(&malformedInfo, bitmap.data(), 128, 128, 128, 0.128f, 0.128f, 3);
         compoundRendered = !scratch.failed() && any_of(bitmap.begin(), bitmap.end(), [](unsigned char p) { return p != 0; });
     }
     std::printf("fontScratch: normal compound renders: %s\n", compoundRendered ? "PASS" : "FAIL");
     std::printf("fontScratch: malformed records and compound depth reject before allocation\n");
-    std::printf("fontScratch: clean failures=%d, complete render=%d, no retained workspace\n", sawFailure, sawSuccess);
-    return sawFailure && sawSuccess && bounded && copiesBounded && compoundRendered ? 0 : 1;
+    std::printf("fontScratch: clean failures=%d, complete render=%d, allocation failures observed\n", sawFailure, sawSuccess);
+    return sawFailure && sawSuccess && expandedAccepted && expandedRendered && compoundRendered ? 0 : 1;
 }

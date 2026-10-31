@@ -11,6 +11,8 @@ public:
     void keyPressed(int key) override;
 
 private:
-    EventListener exitListener_;
+    EventListener exitListener_, closeListener_;
+    bool quitConfirmed_ = false, confirmationPending_ = false;
+    void confirmExit();
     void onExitRequested(ExitRequestEventArgs& args);
 };

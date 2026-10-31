@@ -97,11 +97,11 @@ protected:
             skippedBlocks_ = 0;
             fileSize_ = 0;
             cursor_ = 0;
-            slots_ = {};
             std::vector<std::uint8_t>().swap(scratch_);
             warnedSkippedBlock_ = false;
             // getDataPath passes absolute paths through unchanged
             std::filesystem::path resolved = getDataPath(path);
+            slots_ = {};
             file_.open(resolved, std::ios::binary);
             if (!file_) {
                 logError("tcxDepthRecord") << "PlaybackDepthCamera: cannot open " << resolved;
@@ -127,10 +127,7 @@ protected:
             // with int sizes and indices. DepthRecorder copies the first frame's
             // size, and a DepthFrame starts at 0x0, so a 0x0 header is kept (the
             // file plays without depth).
-            const std::uint64_t rgbaBytes = header_.width > 0 && header_.height > 0
-                ? static_cast<std::uint64_t>(header_.width) * static_cast<std::uint64_t>(header_.height) * 4 : 0;
-            // Bound (security): recorded frames obey 8192-axis and 128 MiB image limits before allocation. Overflow refuses the file with an Error.
-            if (header_.width < 0 || header_.height < 0 || header_.width > 8192 || header_.height > 8192 || rgbaBytes > tcd_detail::playbackFrameBytes) {
+            if (header_.width < 0 || header_.height < 0) {
                 logError("tcxDepthRecord")
                     << "PlaybackDepthCamera: the frame size " << header_.width << "x"
                     << header_.height << " is out of range: " << resolved;
@@ -175,14 +172,8 @@ protected:
                 if (!loop_) return fresh;
                 cursor_ = 0;
             }
-            // The base rotates at most three stable frame addresses. Save sizes,
-            // not pointers to read from other threads, when a capture completes.
             Slot* slot = nullptr;
-            std::uint64_t otherSlotsBytes = 0;
-            for (auto& candidate : slots_) {
-                if (candidate.frame == &dst) slot = &candidate;
-                else otherSlotsBytes += candidate.bytes;
-            }
+            for (auto& candidate : slots_) if (candidate.frame == &dst) slot = &candidate;
             if (!slot) for (auto& candidate : slots_) if (!candidate.frame) { slot = &candidate; break; }
             if (!slot) {
                 reportSkippedBlock(0, "more than three live playback slots");
@@ -231,8 +222,8 @@ protected:
                     std::uint64_t used = 0;
                     const char* why = nullptr;
                     const bool ok = (type == BLOCK_DEPTH)
-                        ? tcd_detail::parseDepthPayload(file_, header_, len, room, dst, scratch_, used, why, otherSlotsBytes)
-                        : tcd_detail::parseColorPayload(file_, header_, len, room, dst, scratch_, used, why, otherSlotsBytes);
+                        ? tcd_detail::parseDepthPayload(file_, header_, len, room, dst, scratch_, used, why)
+                        : tcd_detail::parseColorPayload(file_, header_, len, room, dst, scratch_, used, why);
                     if (ok) {
                         if (type == BLOCK_DEPTH) fresh.depth = true;
                         else fresh.color = true;
@@ -252,7 +243,7 @@ protected:
                 } else {
                     // Preserve the hook for subclasses that consume a type
                     // without advertising it through decodesBlockType().
-                    // Bound (security): custom block metadata is limited to 64 MiB before copy and fits the 512 MiB triple-buffered playback set. Overflow skips the whole block and is counted.
+                    // Bound (security): custom block metadata is limited to 64 MiB before copy. Overflow skips the whole block and is counted.
                     if (scratch_.capacity() != len) std::vector<std::uint8_t>().swap(scratch_);
                     if (!tcd_detail::playbackResize(scratch_, len)) {
                         logError("tcxDepthRecord") << "PlaybackDepthCamera: custom block allocation failed";
@@ -269,7 +260,6 @@ protected:
                 file_.clear();
                 file_.seekg(static_cast<std::streamoff>(next));
             }
-            slot->bytes = dst.depth.capacity() * sizeof(std::uint16_t) + dst.color.getTotalBytes();
             ++cursor_;
             return fresh;
         }
@@ -318,9 +308,9 @@ protected:
                 entry.offset >= sizeof(TcdcHeader) && entry.offset <= header_.indexOffset &&
                 header_.indexOffset - entry.offset >= sizeof(double);
         }
-        struct Slot { const DepthFrame* frame = nullptr; std::uint64_t bytes = 0; };
-        std::array<Slot, 3> slots_{};
         std::uint64_t skippedBlocks_ = 0;
+        struct Slot { const DepthFrame* frame = nullptr; };
+        std::array<Slot, 3> slots_{};
         friend struct PlaybackBudgetTestAccess;
         std::size_t cursor_ = 0;
         std::vector<std::uint8_t> scratch_;

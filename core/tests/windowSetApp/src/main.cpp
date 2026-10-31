@@ -1,365 +1,251 @@
-// =============================================================================
-// core/tests/windowSetApp — behavioral regression test for #318: an App runs
-// once, and it ends when it leaves its window, whether the window closes or
-// Window::setApp() swaps it out or removes it.
-//
-// Headless, console, exit code = pass/fail (build_all.py runs it in CI).
-// The real AudioEngine runs on miniaudio's null backend
-// (AudioSettings::backend = AudioBackend::Null), so an App's audioOut() is called
-// on the audio thread without a sound card.
-//
-// Guards the invariants:
-//   - setApp(other) runs the outgoing App's exit() and then cleanup(), once
-//     each, with audioOut() / audioIn() detached before cleanup() (#698).
-//     The window shows the incoming App, whose setup() runs on its first tick.
-//   - Attaching the swapped-out App again is refused with one error, and the
-//     window keeps its current App; its setup() does not run again.
-//   - setApp(nullptr) runs the same teardown.
-//   - An App that already ran cleanup() is not ended a second time.
-//   - The same from the App's own update() (the window's tick).
-//   - An App whose own setup() requests a swap detaches its audio hooks
-//     when that swap lands at the boundary.
-//   - An App added as a child with addChild() and destroyed has its audio
-//     hooks detached by cleanupTree().
-// =============================================================================
-
+// Constructor ownership, stable attachment slots and the shared normal ending.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
-
-#include <atomic>
-#include <chrono>
 #include <cstdio>
-#include <cstdlib>
-#include <mutex>
-#include <string>
-#include <thread>
-#include <vector>
-
-using namespace std;
+#include <stdexcept>
 using namespace tc;
-
 namespace {
-
-static int g_fail = 0;
-static void check(const string& name, bool ok, const string& detail = "") {
-    printf("%-72s %s%s\n", name.c_str(), ok ? "PASS" : "FAIL",
-           ok || detail.empty() ? "" : ("  -- " + detail).c_str());
-    fflush(stdout);   // flush per line so CI logs survive a later crash
-    if (!ok) ++g_fail;
+int failures = 0;
+void check(const char* name, bool okay) {
+    std::printf("windowSetApp: %s: %s\n", name, okay ? "PASS" : "FAIL");
+    if (!okay) ++failures;
 }
-
-template <class Pred>
-static bool waitFor(Pred pred, int timeoutMs) {
-    // Steady-clock deadline: sleep granularity differs (about 15.6 ms on Windows).
-    const auto deadline = chrono::steady_clock::now() + chrono::milliseconds(timeoutMs);
-    while (chrono::steady_clock::now() < deadline) {
-        if (pred()) return true;
-        this_thread::sleep_for(chrono::milliseconds(1));
+Event<void> appSignal;
+std::vector<std::string> trace;
+struct State {
+    int setups = 0, updates = 0, exits = 0, cleanups = 0, calls = 0, constructorUpdates = 0;
+    internal::WindowContext* constructorContext = nullptr;
+    std::shared_ptr<std::atomic<bool>> token;
+    const void* owner = nullptr;
+    Window* window = nullptr;
+    bool detached = false;
+};
+struct Probe : App {
+    State& state;
+    std::string name;
+    EventListener listener, constructorListener;
+    std::shared_ptr<Window> self;
+    bool throwExit = false, throwCleanup = false;
+    Probe(State& s, std::string n) : state(s), name(std::move(n)) {
+        state.token = internal::appRunToken();
+        state.owner = mcp::internal::registrationOwner();
+        state.constructorContext = internal::currentAppOwner()->context;
+        constructorListener = events().update.listen([this] { ++state.constructorUpdates; });
+        listener = appSignal.listen([this] {
+            ++state.calls;
+            mcp::tool(name + ":lazy", "lazy registration").bind([]() -> json { return true; });
+        });
+        mcp::tool(name, "lifetime probe").bind([this]() -> int { return state.calls; });
     }
-    return pred();
-}
-
-// An App that counts its lifecycle calls. `order` records them as letters:
-// S = setup(), E = exit(), C = cleanup(). In update() / setup() it can ask
-// its window for a swap.
-struct CountApp : App {
-    atomic<int> setups{0}, exits{0}, cleanups{0}, audioCalls{0};
-    string order;
-    size_t outHooksAtCleanup = 0;
-    Window* window = nullptr;           // the window the swaps below act on
-    shared_ptr<App> swapInUpdate;       // set: update() calls window->setApp(it)
-    bool requestKeptAppLive = false;
-    bool removeInUpdate = false;        // update() calls window->setApp(nullptr)
-    shared_ptr<App> swapInSetup;        // set: setup() calls window->setApp(it)
-    // What window->getApp() returned inside exit() / cleanup() (when window is set).
-    bool sawWindowAtExit = false, sawWindowAtCleanup = false;
-    App* appAtExit = nullptr;
-    App* appAtCleanup = nullptr;
-
     void setup() override {
-        ++setups;
-        order += 'S';
-        if (swapInSetup && window) {
-            window->setApp(swapInSetup);
-            noteRequest();
-        }
+        ++state.setups;
+        state.window = getWindow();
+        check("size seeded before setup", getWidth() == 320 && getHeight() == 200);
     }
-    void update() override {
-        if (!window) return;
-        if (swapInUpdate) {
-            auto next = swapInUpdate;
-            swapInUpdate.reset();
-            window->setApp(next);
-            noteRequest();
-        }
-        if (removeInUpdate) {
-            removeInUpdate = false;
-            window->setApp(nullptr);
-            noteRequest();
-        }
-    }
-    void noteRequest() {
-        requestKeptAppLive = window->getApp().get() == this &&
-            exits.load() == 0 && cleanups.load() == 0;
-    }
+    void update() override { ++state.updates; trace.push_back(name + ":update"); }
     void exit() override {
-        ++exits;
-        order += 'E';
-        if (window) { sawWindowAtExit = true; appAtExit = window->getApp().get(); }
+        ++state.exits;
+        state.detached = !getWindow() && !getRootNode();
+        trace.push_back(name + ":exit");
+        if (internal::runtimeEnding()) exitApp(99); // harmless during Runtime shutdown
+        if (throwExit) throw std::runtime_error("exit probe");
     }
     void cleanup() override {
-        ++cleanups;
-        order += 'C';
-        if (window) { sawWindowAtCleanup = true; appAtCleanup = window->getApp().get(); }
-        outHooksAtCleanup = AudioEngine::getInstance().audioOut.listenerCount();
+        ++state.cleanups;
+        check("audio detached before cleanup", !internal::appOwner(*this)->retiring && internal::appRanCleanup(*this));
+        trace.push_back(name + ":cleanup");
+        if (throwCleanup) throw std::runtime_error("cleanup probe");
     }
-    void audioOut(AudioOutBuffer&) override { ++audioCalls; }
 };
-
-// A Window made in a headless test has no native side: it is a closed window
-// (isOpen() is false), and setApp() only takes an open one. OpenWindow stands
-// in for an open one: its native_ points at a dummy that nothing here
-// dereferences (setApp() and tickTree() don't), and is cleared before
-// ~Window() would close() it.
-static int g_nativeStandIn = 0;
-struct OpenWindow : Window {
-    OpenWindow() { native_ = &g_nativeStandIn; }
-    ~OpenWindow() { native_ = nullptr; }
-};
-
-// One tick of a secondary window, in its own context (as the platform glue
-// does): setup() runs on the window's first tick.
-static void tickWindow(Window& w) {
-    internal::WindowContext* prev = internal::currentWindowCtx();
+std::shared_ptr<Window> window(uint32_t id) {
+    auto result = std::make_shared<Window>();
+    internal::WindowRequestAccess::bindForTests(*result, id);
+    result->context().fbWidth = 320;
+    result->context().fbHeight = 200;
+    result->context().dpiScale = 1;
+    internal::retainRuntimeWindow(result);
+    return result;
+}
+void apply(Window& w) { internal::applyPendingAppForTests(w); }
+void tick(Window& w) {
+    auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &w.context();
-    {
-        internal::WindowDispatchScope scope(w);
-        w.tickTree();
+    { internal::WindowEntryScope entry(w); if (entry) w.events().update.notify(); }
+    internal::currentWindowCtx() = previous;
+}
+bool nakedBody = false;
+struct Naked : App { Naked() { nakedBody = true; } };
+struct NestedNaked : App { NestedNaked() { Naked child; } };
+struct EarlierNaked { EarlierNaked() { Naked child; } };
+struct EarlierParent : EarlierNaked, App {};
+struct EarlierMember { Naked child; };
+struct MemberParent : EarlierMember, App {};
+struct DestructorProbe final : App {
+    State& state;
+    explicit DestructorProbe(State& s) : state(s) {
+        state.token = internal::appRunToken();
     }
-    internal::currentWindowCtx() = prev;
+    ~DestructorProbe() override {
+        auto owner = internal::currentAppOwner();
+        state.detached = owner && owner->retiring && !owner->token->load() && internal::appRunToken() == state.token;
+        runOnMainThread([&state = state] { ++state.calls; });
+        mcp::tool("retired-destructor", "must be refused").bind([]() -> json { return true; });
+    }
+};
+struct Throwing : App {
+    EventListener listener;
+    Throwing(State& state) {
+        state.token = internal::appRunToken();
+        listener = appSignal.listen([&state] { ++state.calls; });
+        mcp::tool("throwing-candidate", "throw").bind([]() -> json { return true; });
+        throw std::runtime_error("constructor probe");
+    }
+};
+struct Nested : Probe {
+    Nested(State& a, State& b, Window& other, std::string name) : Probe(a, std::move(name)) {
+        auto before = internal::appRunToken();
+        other.setApp<Probe>(b, "nested-B");
+        check("nested constructor restores A token and MCP owner", internal::appRunToken() == before && mcp::internal::registrationOwner() == a.owner);
+    }
+};
+struct VirtualProbe : App {
+    static int childUpdates, childCleanups, exits, cleanups;
+    struct Child : Node {
+        void update() override { ++childUpdates; }
+        void cleanup() override { ++childCleanups; }
+    };
+    void setup() override { addChild(std::make_shared<Child>()); }
+    void update() override { requestExit(); }
+    void exit() override { ++exits; check("headless ending has no Window or root", !getWindow() && !getRootNode()); }
+    void cleanup() override { ++cleanups; }
+};
+int VirtualProbe::childUpdates = 0, VirtualProbe::childCleanups = 0, VirtualProbe::exits = 0, VirtualProbe::cleanups = 0;
 }
-
-// True if `app`'s audioOut() stays stopped while ten real audio passes finish.
-static bool audioStopped(CountApp& app) {
-    auto& engine = AudioEngine::getInstance();
-    engine.waitForAudioCallbacks();
-    const int calls = app.audioCalls.load();
-    atomic<int> passes{0};
-    auto monitor = engine.audioOut.listen([&](AudioOutBuffer&) { ++passes; });
-    const bool advanced = waitFor([&] { return passes.load() >= 10; }, 2000);
-    monitor.disconnect();
-    engine.waitForAudioCallbacks();
-    return advanced && app.audioCalls.load() == calls;
-}
-
-// True if `app`'s audioOut() is called a few more times.
-static bool audioRuns(CountApp& app) {
-    const int calls = app.audioCalls.load();
-    return waitFor([&] { return app.audioCalls.load() >= calls + 3; }, 2000);
-}
-
-// -----------------------------------------------------------------------------
-
-} // namespace
-
 TC_CORE_TEST_MAIN() {
-    // A wait that never ends would hang CI; fail loudly instead.
-    thread([] {
-        this_thread::sleep_for(chrono::seconds(60));
-        printf("FAIL: watchdog timeout\n");
-        fflush(stdout);
-        _Exit(3);
-    }).detach();
+    getMainThreadId();
+    internal::beginRuntimeRun();
+    internal::beginFrameworkLifetime();
+    try { Naked object; check("factory-only constructor throws", false); }
+    catch (const std::logic_error&) { check("factory rejection precedes derived body", !nakedBody); }
+    try { auto parent = internal::makeConstructedApp<NestedNaked>(); check("nested naked constructor throws", false); }
+    catch (const std::logic_error&) { check("nested rejection precedes child body", !nakedBody); }
+    nakedBody = false;
+    try { auto parent = internal::makeConstructedApp<EarlierParent>(); check("earlier-base naked constructor throws", false); }
+    catch (const std::logic_error&) { check("earlier-base child cannot steal factory allocation", !nakedBody); }
 
-    getMainThreadId();   // this thread is the main thread
-
-    mutex logMutex;
-    vector<string> errors;
-    EventListener logSub = getLogger().onLog.listen([&](LogEventArgs& e) {
-        if (e.level != LogLevel::Error) return;
-        lock_guard<mutex> lock(logMutex);
-        errors.push_back(e.message);
-    });
-    auto countErrors = [&](const string& needle) {
-        lock_guard<mutex> lock(logMutex);
-        size_t n = 0;
-        for (auto& m : errors) if (m.find(needle) != string::npos) ++n;
-        return n;
-    };
-
-    auto& engine = AudioEngine::getInstance();
-    AudioSettings settings;
-    settings.backend = AudioBackend::Null;
-    settings.sampleRate = 48000;
-    settings.channels = 2;
-    settings.bufferSize = 256;
-    const bool started = engine.init(settings);
-    check("engine starts on the null backend", started && engine.isInitialized());
-    if (!started) return 1;
-    const size_t outBase = engine.audioOut.listenerCount();
-    const size_t inBase = engine.audioIn.listenerCount();
-    auto hooksAtBase = [&] {
-        return engine.audioOut.listenerCount() == outBase &&
-               engine.audioIn.listenerCount() == inBase;
-    };
-    auto hooks = [&] { return to_string(engine.audioOut.listenerCount()) + " audioOut hooks"; };
-
-    // --- setApp(other) from outside the window, then re-attach, then nullptr -------
-    {
-        OpenWindow win, other;
-        auto a = make_shared<CountApp>();
-        auto b = make_shared<CountApp>();
-        a->window = &win;   // records getApp() in exit() / cleanup(); a and b
-        b->window = &win;   // make no requests of their own here
-        win.setApp(a);
-        tickWindow(win);
-        check("a: attached, setup() once, audioOut() called",
-              a->setups.load() == 1 && audioRuns(*a));
-
-        win.setApp(b);
-        check("swap request: current App stays live until the boundary",
-              win.getApp() == a && a->exits.load() == 0 && a->cleanups.load() == 0);
-        internal::applyPendingAppForTests(win);
-        check("swap: the outgoing App's exit() and cleanup() ran once each",
-              a->exits.load() == 1 && a->cleanups.load() == 1, a->order);
-        check("swap: exit() before cleanup(), its hooks detached before cleanup()",
-              a->order == "SEC" && a->outHooksAtCleanup == outBase, a->order);
-        check("swap: its audioOut() is not called again", audioStopped(*a) && hooksAtBase(), hooks());
-        // Like close(): the window drops the App before running its exit() /
-        // cleanup(), so getApp() there already returns the incoming App.
-        check("swap: inside the outgoing exit() / cleanup(), getApp() is the incoming App",
-              a->sawWindowAtExit && a->sawWindowAtCleanup &&
-              a->appAtExit == b.get() && a->appAtCleanup == b.get());
-        check("swap: the window shows the incoming App",
-              win.getApp() == b && b->setups.load() == 0 && b->exits.load() == 0);
-        tickWindow(win);
-        check("swap: the incoming App's setup() runs on the next tick",
-              b->setups.load() == 1 && audioRuns(*b));
-
-        const size_t refused = countErrors("already ran cleanup()");
-        win.setApp(a);
-        tickWindow(win);
-        check("re-attach to the same window: refused with one error",
-              countErrors("already ran cleanup()") == refused + 1);
-        check("... the window keeps its current App, which keeps running",
-              win.getApp() == b && b->exits.load() == 0 && audioRuns(*b));
-        check("... and the refused App runs nothing",
-              a->setups.load() == 1 && a->exits.load() == 1 && audioStopped(*a));
-        other.setApp(a);
-        check("re-attach to another window: refused with one error",
-              other.getApp() == nullptr && countErrors("already ran cleanup()") == refused + 2);
-
-        win.setApp(nullptr);
-        internal::applyPendingAppForTests(win);
-        check("setApp(nullptr): exit() and cleanup() ran once each",
-              b->order == "SEC" && b->exits.load() == 1 && b->cleanups.load() == 1, b->order);
-        check("setApp(nullptr): inside its exit() / cleanup(), getApp() is null",
-              b->sawWindowAtExit && b->sawWindowAtCleanup &&
-              b->appAtExit == nullptr && b->appAtCleanup == nullptr);
-        check("setApp(nullptr): its audioOut() is not called again, the window is empty",
-              audioStopped(*b) && hooksAtBase() && win.getApp() == nullptr, hooks());
-        check("the earlier App was not ended a second time",
-              a->exits.load() == 1 && a->cleanups.load() == 1, a->order);
+    auto invalidSubscription = events().update.listen([] {});
+    check("no-window omission has no subscription or dimensions", !invalidSubscription && getDpiScale() == 0 && getWindowWidth() == 0);
+    auto a = window(101), b = window(202);
+    nakedBody = false;
+    try { a->setApp<MemberParent>(); check("App member composition fails outer construction", false); }
+    catch (const std::logic_error& error) {
+        check("known range gap admits member body but rejects outer App",
+              nakedBody && std::string(error.what()).find("App construction requires") != std::string::npos && !a->getApp());
     }
-
-    // --- an App whose cleanup() already ran is not ended twice -------------------
+    check("quit-on-close defaults false", !WindowSettings{}.quitOnClose && !internal::WindowRequestAccess::quitOnClose(*a));
+    a->setQuitOnClose(true);
+    check("quit-on-close live setter updates this Window", internal::WindowRequestAccess::quitOnClose(*a) && !internal::WindowRequestAccess::quitOnClose(*b));
+    a->setQuitOnClose(false);
+    State first, second, discarded, throwing;
+    a->setApp<Probe>(first, "A"); apply(*a); tick(*a);
+    auto firstApp = std::dynamic_pointer_cast<Probe>(a->getApp());
+    try { a->setApp<Throwing>(throwing); check("throw propagates", false); }
+    catch (const std::runtime_error&) {}
+    check("throw preserves current attachment", a->getApp() == firstApp);
+    check("throw retires only candidate token and tool", throwing.token && !throwing.token->load() && first.token->load() && !mcp::hasTool("throwing-candidate"));
+    appSignal.notify();
+    check("lazy registration inherits A owner", mcp::hasTool("A:lazy"));
+    b->setApp<Probe>(second, "B"); apply(*b); tick(*b);
+    auto foreignNode = std::make_shared<RectNode>(); firstApp->addChild(foreignNode);
+    auto ownNode = std::make_shared<RectNode>(); b->getApp()->addChild(ownNode);
+    b->context().hoveredNode = foreignNode; b->context().grabbedNode = foreignNode;
+    b->context().grabbedButton = 0; b->context().selectedNode = ownNode;
+    a->setApp<Probe>(discarded, "discarded");
+    a->destroyApp(); apply(*a);
+    check("unpublished candidate has no invented lifecycle", discarded.setups == 0 && discarded.exits == 0 && discarded.cleanups == 0 && !discarded.token->load());
+    check("destroy detaches root and App before ending", !a->getApp() && first.detached && first.exits == 1 && first.cleanups == 1 && a->isOpen());
+    check("ending clears foreign tree refs and preserves B's live selection",
+          b->context().hoveredNode.expired() && b->context().grabbedNode.expired() &&
+          b->context().grabbedButton == -1 && b->context().selectedNode.lock() == ownNode &&
+          b->context().rootNode.lock() == b->getApp());
+    check("A ending preserves B tools and token", !first.token->load() && second.token->load() && !mcp::hasTool("A") && !mcp::hasTool("A:lazy") && mcp::hasTool("B"));
+    const int oldCalls = first.calls;
+    appSignal.notify();
+    check("retired subscriptions cannot run", first.calls == oldCalls && second.calls == 1);
+    firstApp.reset();
+    State nestedA, nestedB;
+    a->setApp<Nested>(nestedA, nestedB, *b, "nested-A"); apply(*a); apply(*b); tick(*a); tick(*b);
+    check("nested candidate owns an independent token", nestedA.token != nestedB.token && nestedA.owner != nestedB.owner);
+    check("constructor events select the receiving Window outside a callback", nestedA.constructorContext == &a->context() && nestedB.constructorContext == &b->context() && nestedA.constructorUpdates == 1 && nestedB.constructorUpdates == 1);
     {
-        OpenWindow win;
-        auto a = make_shared<CountApp>();
-        win.setApp(a);
-        tickWindow(win);
-        // What the platform Window::close() does with the App before it lets go.
-        a->exit();
-        internal::detachAppAudio(*a);
-        a->cleanup();
-        win.setApp(nullptr);
-        internal::applyPendingAppForTests(win);
-        check("setApp(nullptr) after the App's end: no second exit() / cleanup()",
-              a->exits.load() == 1 && a->cleanups.load() == 1, a->order);
+        internal::AppOwnerScope scope(internal::appOwner(*a->getApp()));
+        State callbackA, callbackB;
+        a->setApp<Nested>(callbackA, callbackB, *b, "callback-A");
+        check("constructor inside A callback restores caller owner", internal::appRunToken() == nestedA.token);
+        a->destroyApp(); b->destroyApp();
     }
-
-    // --- from the App's own update() ---------------------------------------------
+    apply(*a); apply(*b);
+    State stable;
+    a->setApp<Probe>(stable, "stable"); apply(*a);
+    std::vector<std::string> observed;
+    auto equal = a->events().update.listen([&] { observed = trace; }, EventPriority::App);
+    trace.clear(); tick(*a);
+    check("App slot stays before later equal-priority listeners", observed == std::vector<std::string>{"stable:update"});
+    State pending;
+    a->setApp<Probe>(pending, "pending-close");
+    a->close(); apply(*a);
+    check("close cancels pending replacement", !pending.token->load() && pending.exits == 0 && pending.setups == 0);
+    internal::WindowRequestAccess::teardown(*a);
+    internal::WindowRequestAccess::teardown(*a);
+    check("explicit close ends once and leaves B open", stable.exits == 1 && stable.cleanups == 1 && !a->isOpen() && b->isOpen());
+    State workerState;
+    b->setApp<Probe>(workerState, "worker-B"); apply(*b); tick(*b);
+    Event<void> workerSignal;
+    EventListener workerListener;
+    std::weak_ptr<int> queuedCapture;
+    int workerCalls = 0;
     {
-        OpenWindow win;
-        auto c = make_shared<CountApp>();
-        auto d = make_shared<CountApp>();
-        c->window = &win;
-        d->window = &win;
-        win.setApp(c);
-        tickWindow(win);
-        check("in update(): c set up, audioOut() called", c->setups.load() == 1 && audioRuns(*c));
-
-        c->swapInUpdate = d;
-        tickWindow(win);
-        check("in update(): setApp(other) ran c's exit() and cleanup() once each",
-              c->order == "SEC" && c->requestKeptAppLive && win.getApp() == d, c->order);
-        check("in update(): c's audioOut() is not called again", audioStopped(*c), hooks());
-        tickWindow(win);
-        check("in update(): d is set up on the next tick", d->setups.load() == 1 && audioRuns(*d));
-
-        const size_t refused = countErrors("already ran cleanup()");
-        d->swapInUpdate = c;
-        tickWindow(win);
-        check("in update(): re-attach is refused and the current App keeps running",
-              countErrors("already ran cleanup()") == refused + 1 &&
-              win.getApp() == d && d->requestKeptAppLive && audioRuns(*d) &&
-              c->setups.load() == 1 && c->cleanups.load() == 1);
-
-        d->removeInUpdate = true;
-        tickWindow(win);
-        check("in update(): setApp(nullptr) ran d's exit() and cleanup() once each",
-              d->order == "SEC" && d->requestKeptAppLive && win.getApp() == nullptr, d->order);
-        check("in update(): d's audioOut() is not called again",
-              audioStopped(*d) && hooksAtBase(), hooks());
-        tickWindow(win);
-        check("in update(): c was not ended a second time", c->order == "SEC", c->order);
+        internal::AppOwnerScope scope(internal::appOwner(*b->getApp()));
+        auto held = std::make_shared<int>(1);
+        queuedCapture = held;
+        workerListener = workerSignal.listen([&, held] { ++workerCalls; }, Deliver::Main);
     }
-
-    // --- an App whose setup() swaps its window to another App ---------------------
-    {
-        OpenWindow win;
-        auto f = make_shared<CountApp>();
-        auto g = make_shared<CountApp>();
-        f->window = &win;
-        f->swapInSetup = g;
-        win.setApp(f);
-        tickWindow(win);
-        check("in setup(): the swap ends the App (exit(), cleanup())",
-              f->order == "SEC" && f->requestKeptAppLive && win.getApp() == g, f->order);
-        tickWindow(win);
-        check("in setup(): the swapped-out App has no audio hooks after the boundary",
-              audioStopped(*f) && g->setups.load() == 1 &&
-              engine.audioOut.listenerCount() == outBase + 1,
-              to_string(f->audioCalls.load()) + " calls, " + hooks());
-        win.setApp(nullptr);
-        internal::applyPendingAppForTests(win);
-        check("in setup(): the incoming App ends on setApp(nullptr)",
-              g->order == "SEC" && hooksAtBase(), g->order);
-    }
-
-    // --- an App added as a child and destroyed -----------------------------------
-    {
-        OpenWindow win;
-        auto root = make_shared<CountApp>();
-        auto child = make_shared<CountApp>();
-        win.setApp(root);
-        root->addChild(child);
-        tickWindow(win);
-        check("child App: set up on the tick, audioOut() called",
-              child->setups.load() == 1 && audioRuns(*child));
-        child->destroy();
-        tickWindow(win);
-        check("child App: destroy() runs its cleanup()", child->cleanups.load() == 1, child->order);
-        check("child App: its audioOut() is not called again",
-              audioStopped(*child) && engine.audioOut.listenerCount() == outBase + 1, hooks());
-        win.setApp(nullptr);
-        internal::applyPendingAppForTests(win);
-        check("child App case: no hook left", hooksAtBase(), hooks());
-    }
-
-    engine.shutdown();
-
-    printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED",
-           g_fail, g_fail == 1 ? "" : "s");
-    return g_fail ? 1 : 0;
+    std::thread delivery([&] { workerSignal.notify(); });
+    delivery.join();
+    b->destroyApp(); apply(*b);
+    check("retirement releases queued callback captures before a drain", queuedCapture.expired());
+    internal::drainMainThreadQueue();
+    check("retired worker delivery cannot invoke App code", workerCalls == 0);
+    auto c = window(303);
+    State lastB, lastC;
+    b->setApp<Probe>(lastB, "last-B"); c->setApp<Probe>(lastC, "last-C");
+    apply(*b); apply(*c); tick(*b); tick(*c);
+    std::dynamic_pointer_cast<Probe>(b->getApp())->self = b;
+    std::dynamic_pointer_cast<Probe>(c->getApp())->throwExit = true;
+    std::dynamic_pointer_cast<Probe>(c->getApp())->throwCleanup = true;
+    std::weak_ptr<App> weakB = b->getApp();
+    auto* retained = c.get();
+    std::weak_ptr<Window> weakC = c;
+    c.reset();
+    check("dropping every external handle leaves Window live", !weakC.expired() && retained->isOpen());
+    State retainedState;
+    auto retainedWindow = window(404);
+    retainedWindow->setApp<DestructorProbe>(retainedState); apply(*retainedWindow);
+    auto retainedApp = retainedWindow->getApp();
+    retainedWindow->destroyApp(); apply(*retainedWindow);
+    trace.clear(); internal::shutdownRuntime();
+    check("shutdown uses one reverse attachment snapshot despite throws", trace == std::vector<std::string>{"last-C:exit", "last-C:cleanup", "last-B:exit", "last-B:cleanup"});
+    check("shutdown cuts self-held handle cycles and retires owners", weakB.expired() && !lastB.token->load() && !lastC.token->load() && !b->isOpen());
+    internal::endFrameworkLifetime();
+    const auto oldId = internal::WindowRequestAccess::creationId(*b);
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+    b->close(); b->setTitle("old epoch");
+    retainedApp.reset();
+    check("late derived destructor keeps its retired owner in a new run", retainedState.detached && retainedState.calls == 0 && !mcp::hasTool("retired-destructor"));
+    check("late App destruction restores the new Runtime token", internal::appRunToken() != retainedState.token && internal::appRunToken()->load());
+    check("late handle remains closed in a new run", !b->isOpen() && internal::WindowRequestAccess::creationId(*b) == oldId);
+    internal::shutdownRuntime(); internal::endFrameworkLifetime();
+    check("headless launcher uses the common ending", runHeadlessApp<VirtualProbe>() == 0 && VirtualProbe::exits == 1 && VirtualProbe::cleanups == 1);
+    check("headless remains virtual-only", VirtualProbe::childUpdates == 0 && VirtualProbe::childCleanups == 0);
+    return failures ? 1 : 0;
 }

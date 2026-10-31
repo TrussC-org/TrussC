@@ -404,9 +404,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
 #if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getImmersiveMode", []() { return trussc::getImmersiveMode(); });
 #endif
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getKeepScreenOn", []() { return trussc::getKeepScreenOn(); });
-#endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getLocalIp", []() { return trussc::getLocalIp(); });
 #endif
@@ -436,6 +434,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getPointSize", []() { return trussc::getPointSize(); });
     lua->set_function("getPointStyle", []() { return trussc::getPointStyle(); });
     lua->set_function("getProjectionMatrix", []() { return trussc::getProjectionMatrix(); });
+    lua->set_function("getResourceLoadConcurrency", []() { return trussc::getResourceLoadConcurrency(); });
     lua->set_function("getRootNode", []() { return trussc::getRootNode(); });
     lua->set_function("getScale", []() { return trussc::getScale(); });
     lua->set_function("getSeconds", []() { return trussc::getSeconds(); });
@@ -666,6 +665,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
         [](std::function<void ()> fn) { return trussc::runOnMainThread(fn); },
         [](std::function<void ()> fn, std::weak_ptr<std::atomic<bool>> token) { return trussc::runOnMainThread(fn, token); }
     ));
+    lua->set_function("runtime", []() -> decltype(auto) { return trussc::runtime(); });
     lua->set_function("sameSubnet", [](const std::string & a, const std::string & b, const std::string & netmask) { return trussc::sameSubnet(a, b, netmask); });
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__ANDROID__)
     lua->set_function("saveDialog", sol::overload(
@@ -742,9 +742,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setImmersiveMode", [](bool enabled) { return trussc::setImmersiveMode(enabled); });
 #endif
     lua->set_function("setIndependentFps", [](float updateFps, float drawFps) { return trussc::setIndependentFps(updateFps, drawFps); });
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setKeepScreenOn", [](bool enabled) { return trussc::setKeepScreenOn(enabled); });
-#endif
     lua->set_function("setLogFile", [](const fs::path & path) { return trussc::setLogFile(path); });
     lua->set_function("setLogLevel", [](trussc::LogLevel level) { return trussc::setLogLevel(level); });
     lua->set_function("setMaterial", [](trussc::Material & material) { return trussc::setMaterial(material); });
@@ -756,6 +754,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
 #endif
     lua->set_function("setPointSize", [](float px) { return trussc::setPointSize(px); });
     lua->set_function("setPointStyle", [](trussc::PointStyle s) { return trussc::setPointStyle(s); });
+    lua->set_function("setResourceLoadConcurrency", [](int count) { return trussc::setResourceLoadConcurrency(count); });
     lua->set_function("setScissor", sol::overload(
         [](float x, float y, float w, float h) { return trussc::setScissor(x, y, w, h); },
         [](int x, int y, int w, int h) { return trussc::setScissor(x, y, w, h); }

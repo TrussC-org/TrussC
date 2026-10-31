@@ -92,7 +92,7 @@ async function test(name, run) {
 }
 async function main() {
     await test('Web metadata admission', () => {
-        for (const [width, height, accepted] of [[7680,4320,true], [8192,4096,true], [8192,4097,false], [8193,1,false]]) {
+        for (const [width, height, accepted] of [[7680,4320,true], [8192,4096,true], [8192,4097,true], [10240,1080,true]]) {
             const result = load({width, height});
             result.video.onloadedmetadata();
             assert.equal(result.context.window._trussc_player_ready, accepted);
@@ -194,7 +194,7 @@ async function main() {
     const copyScript = scripts[fixed ? 0 : 1][1].replace('%d', '32').replace('%d', '16').replace('%u', '0');
     await test('Web size/layout changes immediately before copy leave the mirror intact', () => {
         for (const [width, height, result, rejected, deliveredBytes] of [
-            [32,16,1,false,2048], [64,32,0,false,2048], [8193,1,0,true,2048],
+            [32,16,1,false,2048], [64,32,0,false,2048], [10240,1080,0,false,2048],
             [32,16,0,true,2047], [32,16,0,true,2049]]) {
             let draws = 0;
             const state = {

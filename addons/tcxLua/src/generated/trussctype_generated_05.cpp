@@ -140,45 +140,48 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["update"] = &trussc::RectNodeButton::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::StrokeMesh
-            , trussc::StrokeMesh()
-            , trussc::StrokeMesh(const trussc::Path &)
+        auto constructors = tcxLuaConstructors<trussc::LayoutMod
+            , trussc::LayoutMod()
+            , trussc::LayoutMod(trussc::LayoutDirection)
+            , trussc::LayoutMod(trussc::LayoutDirection, float)
         >();
-        sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh", constructors, sol::call_constructor, constructors);
-        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
-        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
-        t["clear"] = &trussc::StrokeMesh::clear;
-        t["draw"] = &trussc::StrokeMesh::draw;
-        t["getMesh"] = &trussc::StrokeMesh::getMesh;
-        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
-        t["setCapType"] = &trussc::StrokeMesh::setCapType;
-        t["setClosed"] = &trussc::StrokeMesh::setClosed;
-        t["setColor"] = &trussc::StrokeMesh::setColor;
-        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
-        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
-        t["setShape"] = &trussc::StrokeMesh::setShape;
-        t["setWidth"] = &trussc::StrokeMesh::setWidth;
-        t["setWidths"] = &trussc::StrokeMesh::setWidths;
-        t["update"] = &trussc::StrokeMesh::update;
+        sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod", constructors, sol::call_constructor, constructors);
+        t["getCrossAxis"] = &trussc::LayoutMod::getCrossAxis;
+        t["getDirection"] = &trussc::LayoutMod::getDirection;
+        t["getMainAxis"] = &trussc::LayoutMod::getMainAxis;
+        t["getOwner"] = [](trussc::LayoutMod& self) { return self.getOwner(); };
+        t["getPaddingBottom"] = &trussc::LayoutMod::getPaddingBottom;
+        t["getPaddingLeft"] = &trussc::LayoutMod::getPaddingLeft;
+        t["getPaddingRight"] = &trussc::LayoutMod::getPaddingRight;
+        t["getPaddingTop"] = &trussc::LayoutMod::getPaddingTop;
+        t["getSpacing"] = &trussc::LayoutMod::getSpacing;
+        t["setCrossAxis"] = &trussc::LayoutMod::setCrossAxis;
+        t["setDirection"] = &trussc::LayoutMod::setDirection;
+        t["setMainAxis"] = &trussc::LayoutMod::setMainAxis;
+        t["setPadding"] = sol::overload([](trussc::LayoutMod& self, float padding) -> decltype(auto) { return self.setPadding(padding); }, [](trussc::LayoutMod& self, float vertical, float horizontal) -> decltype(auto) { return self.setPadding(vertical, horizontal); }, [](trussc::LayoutMod& self, float top, float right, float bottom, float left) -> decltype(auto) { return self.setPadding(top, right, bottom, left); });
+        t["setPaddingBottom"] = &trussc::LayoutMod::setPaddingBottom;
+        t["setPaddingLeft"] = &trussc::LayoutMod::setPaddingLeft;
+        t["setPaddingRight"] = &trussc::LayoutMod::setPaddingRight;
+        t["setPaddingTop"] = &trussc::LayoutMod::setPaddingTop;
+        t["setSpacing"] = &trussc::LayoutMod::setSpacing;
+        t["updateLayout"] = &trussc::LayoutMod::updateLayout;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::ChipSoundNote
-            , trussc::ChipSoundNote()
-            , trussc::ChipSoundNote(trussc::Wave, float, float)
-            , trussc::ChipSoundNote(trussc::Wave, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
+            , trussc::JsonReadReflector(trussc::Json)
         >();
-        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote", constructors, sol::call_constructor, constructors);
-        t["attack"] = &trussc::ChipSoundNote::attack;
-        t["decay"] = &trussc::ChipSoundNote::decay;
-        t["duration"] = &trussc::ChipSoundNote::duration;
-        t["hz"] = &trussc::ChipSoundNote::hz;
-        t["release"] = &trussc::ChipSoundNote::release;
-        t["sustain"] = &trussc::ChipSoundNote::sustain;
-        t["volume"] = &trussc::ChipSoundNote::volume;
-        t["wave"] = &trussc::ChipSoundNote::wave;
-        t["build"] = &trussc::ChipSoundNote::build;
-        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
-        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector", constructors, sol::call_constructor, constructors);
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
+        t["isDerived"] = &trussc::JsonReadReflector::isDerived;
+        t["isReadOnly"] = &trussc::JsonReadReflector::isReadOnly;
+        t["popDerived"] = &trussc::JsonReadReflector::popDerived;
+        t["popReadOnly"] = &trussc::JsonReadReflector::popReadOnly;
+        t["pushDerived"] = &trussc::JsonReadReflector::pushDerived;
+        t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::IesProfile
@@ -203,41 +206,37 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
         t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
-    lua->new_usertype<trussc::Direction>("Direction",
-        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
-        "Left", sol::var(trussc::Direction::Left),
-        "Center", sol::var(trussc::Direction::Center),
-        "Right", sol::var(trussc::Direction::Right),
-        "Top", sol::var(trussc::Direction::Top),
-        "Bottom", sol::var(trussc::Direction::Bottom),
-        "Baseline", sol::var(trussc::Direction::Baseline));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
+    lua->new_usertype<trussc::SaveError>("SaveError",
+        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
+        "None", sol::var(trussc::SaveError::None),
+        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
+        "NoSpace", sol::var(trussc::SaveError::NoSpace),
+        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
+        "Unknown", sol::var(trussc::SaveError::Unknown));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
     lua->new_usertype<trussc::LightType>("LightType",
         sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
         "Directional", sol::var(trussc::LightType::Directional),
         "Point", sol::var(trussc::LightType::Point),
         "Spot", sol::var(trussc::LightType::Spot));
+    lua->new_usertype<trussc::EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
+        "In", sol::var(trussc::EaseMode::In),
+        "Out", sol::var(trussc::EaseMode::Out),
+        "InOut", sol::var(trussc::EaseMode::InOut));
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
     {
-        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
-        t["getHost"] = &trussc::TcpServerClient::getHost;
-        t["getId"] = &trussc::TcpServerClient::getId;
-        t["getPort"] = &trussc::TcpServerClient::getPort;
-    }
-    {
-        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
-        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
-        t["reason"] = &trussc::ExitRequestEventArgs::reason;
-    }
-    {
-        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
-        t["hit"] = &trussc::Ray::Hit::hit;
-        t["point"] = &trussc::Ray::Hit::point;
-        t["t"] = &trussc::Ray::Hit::t;
+        sol::usertype<trussc::Runtime> t = lua->new_usertype<trussc::Runtime>("Runtime");
+        t["events"] = &trussc::Runtime::events;
+        t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
     }
 }
 #ifdef _MSC_VER

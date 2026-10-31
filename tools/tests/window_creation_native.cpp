@@ -6,17 +6,19 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
-struct Settings { int width, height; bool pixelPerfect; bool highDpi = true; };
+struct Settings { int width, height; bool pixelPerfect; bool highDpi = true, decorated=true, fullscreen=false; int swapInterval=1,sampleCount=1; std::string title="probe"; };
 struct Platform { static constexpr bool isDesktop() { return true; } };
 float getDisplayScaleFactor() { return 2; }
 namespace internal {
-sapp_desc buildWindowDescriptor(const Settings& settings) {
+SHARED_DESCRIPTOR
+sapp_desc buildWindowDescriptor(const Settings& settings, [[maybe_unused]] void* target) {
     LAUNCHER
     return desc;
 }
 }
-sapp_desc normalDescriptor(const Settings& settings) { NORMAL_LAUNCHER }
+sapp_desc normalDescriptor(const Settings& settings) { struct Handle { void* get() { return nullptr; } } window; NORMAL_LAUNCHER }
 sapp_desc baseDescriptor(const Settings& settings) {
     // Launcher sizing from next/window 4b26a8b1, before pixel creation overrides.
     sapp_desc desc = {};
@@ -34,7 +36,7 @@ bool tinyScale = false, tinySecondary = false, baseMode = false;
 Settings requested{};
 bool pixelPerfectMode() { return requested.pixelPerfect; }
 sapp_window_desc secondaryDescriptor(const Settings& settings) {
-    sapp_window_desc d = {};
+    using internal::buildNativeWindowDescriptor;
     SECONDARY
     return d;
 }

@@ -11,18 +11,28 @@
 #include <vector>
 #include <type_traits>
 
+namespace trussc {
+
+// Main thread. Shared Image/SoundBuffer/Font preparation slots, default 4.
+// Values below 1 become 1 with a Notice; there is no upper cap.
+void setResourceLoadConcurrency(int count);
+int getResourceLoadConcurrency();
+
+} // namespace trussc
+
 namespace trussc::internal {
 
-// Allocate generic callback storage only when enqueueing. Keeping the vector
-// behind a pointer makes empty construction, move and destruction allocation-free
-// even on MSVC Debug, where constructing/moving a vector allocates an iterator
-// proxy. Resource results and the Notice retain their preallocated slots.
+struct ResourceLoadState;
 struct ResourceLoadBatch {
-    std::unique_ptr<std::vector<std::function<void()>>> callbacks;
-    MainThreadSlotBatch results;
-    bool empty() const noexcept { return (!callbacks || callbacks->empty()) && results.empty(); }
-    // As before, clear only generic jobs; result slots belong to the snapshot.
-    void clear() noexcept { callbacks.reset(); }
+    std::vector<std::function<void()>> callbacks;
+    std::vector<std::shared_ptr<ResourceLoadState>> results;
+    MainThreadSlotBatch warnings;
+    ResourceLoadBatch() = default;
+    ResourceLoadBatch(ResourceLoadBatch&&) = default;
+    ResourceLoadBatch& operator=(ResourceLoadBatch&&);
+    ~ResourceLoadBatch();
+    bool empty() const { return callbacks.empty() && results.empty() && warnings.empty(); }
+    void clear() { callbacks.clear(); }
 };
 void enqueueResourceLoad(std::function<void()> completion);
 ResourceLoadBatch takeResourceLoadBatch();
@@ -41,19 +51,18 @@ void probeResourceLoad(const char* stage, const std::filesystem::path& path);
 void waitForResourceLoadsForTests();
 size_t resourceLoadWorkersForTests();
 
-struct ResourceLoadState : MainThreadSlot, std::enable_shared_from_this<ResourceLoadState> {
-    ResourceLoadState();
+struct ResourceLoadState : std::enable_shared_from_this<ResourceLoadState> {
     virtual ~ResourceLoadState();
     using Target = std::function<void(ResourceLoadState&)>;
     std::atomic<bool> cancelled{false};
     std::weak_ptr<std::atomic<bool>> run;
+    std::weak_ptr<AppOwner> appOwner;
     std::weak_ptr<Target> apply;
     EventSnapshotDelivery<LoadResult> event;
     LoadResult result;
     // Completion/cancel fields are guarded by the host mutex, never held
     // over decoding, application code, event delivery or a worker join.
     bool completed = false;
-    bool delivering = false;
     size_t credits = 0;
     bool requestCredit = false;
     bool localFile = false; // path entry points classify explicitly; network buffers default external
@@ -75,46 +84,26 @@ struct ResourceLoadState : MainThreadSlot, std::enable_shared_from_this<Resource
 bool resourceLoadIsLocalPath(const std::filesystem::path& path,
                              const std::filesystem::path& resolvedPath = {});
 // startResourceLoad / enqueueResourceLoad remain growable for app-authored jobs.
-// Web CMake propagates exception support. With custom app flags disabling
-// it, recovery from allocation failure is guaranteed only for TrussC's
-// out-of-line host code. Inline helpers from headers may be compiled into the
-// application without exception support; allocation failure inside them is a
-// known limitation.
 void startExternalResourceLoad(std::shared_ptr<ResourceLoadState> state, std::function<void()> preparation);
 // The guard is compiled in the host, including exception-enabled Web code.
 bool prepareResourceLoad(ResourceLoadState& state, const std::function<void()>& preparation);
 void completeResourceLoad(const std::shared_ptr<ResourceLoadState>& state);
 template<class State, class Prepare> requires std::is_empty_v<Prepare>
 void startExternalResourceLoad(const std::shared_ptr<State>& state, Prepare) {
-    try {
-        // The host job owns State; the thunk only borrows it. Never create an
-        // owning temporary in an application TU with disabled Web unwinding.
-        // A trivial pointer-sized thunk fits the supported
-        // standard libraries' inline function storage, also on Web.
-        std::function<void()> work = [raw = state.get()] {
-            Prepare{}(raw);
-        };
-        startExternalResourceLoad(std::shared_ptr<ResourceLoadState>(state), std::move(work));
-    } catch (...) {
-        state->result.error = LoadError::Unknown;
-        state->result.message.clear();
-        completeResourceLoad(state);
-    }
+    startExternalResourceLoad(std::shared_ptr<ResourceLoadState>(state), [raw = state.get()] {
+        Prepare{}(raw);
+    });
 }
 struct ResourceLoadUsage { size_t active, pending, retainedBytes; uint64_t rejected; size_t outstanding; };
 ResourceLoadUsage resourceLoadUsageForTests();
+// Test the retained URL admission limits.
 void setResourceLoadLimitsForTests(size_t active, size_t pending, size_t bytes);
-void failResourceLoadLaunchForTests(bool fail);
 
 template<class State> class ResourceLoadSlot {
 public:
     ResourceLoadSlot() = default;
-    ResourceLoadSlot(const ResourceLoadSlot&) {}
-    ResourceLoadSlot(ResourceLoadSlot&& other) noexcept { other.cancel(); }
-    ResourceLoadSlot& operator=(const ResourceLoadSlot&) { cancel(); return *this; }
-    ResourceLoadSlot& operator=(ResourceLoadSlot&& other) noexcept {
-        cancel(); other.cancel(); return *this;
-    }
+    ResourceLoadSlot(const ResourceLoadSlot&) = delete;
+    ResourceLoadSlot& operator=(const ResourceLoadSlot&) = delete;
     ~ResourceLoadSlot() { cancel(); gate_->close(); }
 
     bool loading() const { return state_ && !state_->cancelled.load() && appRunIsAlive(state_->run); }
@@ -128,9 +117,13 @@ public:
         cancel();
         auto state = std::make_shared<State>();
         state->run = appRunToken();
-        state->stop = registerResourceStop([weak = std::weak_ptr<State>(state)] {
+        state->appOwner = currentAppOwner();
+        auto cancel = [weak = std::weak_ptr<State>(state)] {
             if (auto live = weak.lock()) live->cancel();
-        });
+        };
+        state->stop = registerResourceStop(cancel);
+        // Completion checks the originating App run token; completed loads
+        // leave no cancellation registration on that App.
         event_ = EventSnapshotDelivery<LoadResult>::bind(event, gate_);
         state->event.target = event_;
         apply_ = std::make_shared<ResourceLoadState::Target>(
@@ -142,8 +135,7 @@ public:
                 // after notify (including access to this slot).
                 auto delivery = event_;
                 auto application = [&] { apply(ready); };
-                if (!prepareResourceLoad(ready, std::ref(application)))
-                    (void)prepareResourceLoad(ready, std::ref(application)); // whole-failure cleanup
+                application();
                 ready.cancel(); // application consumed the external payload
                 state_.reset();
                 apply_.reset();

@@ -8,7 +8,7 @@
 
 #include "TrussC.h"
 
-#pragma message("STUB: tcVideoPlayer_android.cpp — needs MediaCodec NDK implementation")
+// Not implemented on Android yet (#1113): needs MediaCodec NDK implementation.
 
 namespace trussc {
 
@@ -48,13 +48,13 @@ bool VideoPlayer::isUsingHwAccelPlatform() const { return false; }
 std::string VideoPlayer::getHwAccelNamePlatform() const { return "none"; }
 
 bool VideoPlayer::extractFramePlatform(const fs::path& path, Pixels& outPixels,
-                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget>) {
+                                       float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeStatus>) {
     (void)path; (void)outPixels; (void)timeSec; (void)outDuration;
     return false;
 }
 
 bool VideoPlayer::extractKeyFramePlatform(const fs::path& path, Pixels& outPixels,
-                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeBudget>) {
+                                          float timeSec, float* outDuration, std::shared_ptr<internal::VideoDecodeStatus>) {
     (void)path; (void)outPixels; (void)timeSec; (void)outDuration;
     return false;
 }

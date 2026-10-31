@@ -1,1 +1,1 @@
-Launches itself as GUI child processes that end through _exit or std::exit; process exit is the observable, so it must not share a binary.
+Production-linked session tests need their own process; terminal scenarios are supervised by test.py. Explicit --mac-device retains native Apple-event probes.

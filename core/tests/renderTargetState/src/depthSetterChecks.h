@@ -73,13 +73,13 @@ void drawDepthSetterFixture(int variant) {
 void runFractionalDpiChecks() {
     auto& window = internal::currentWindowContext();
     auto& target = internal::currentTarget();
-    const bool main = window.isMain, pixel = internal::pixelPerfectMode();
+    const bool pixel = internal::pixelPerfectMode();
     const float dpi = window.dpiScale;
     const int fbW = window.fbWidth, fbH = window.fbHeight;
     const int width = target.width, height = target.height;
     const auto camera = target.camera;
     const auto role = target.selectedPipeline;
-    window.isMain = false; window.dpiScale = 1.5f;
+    window.dpiScale = 1.5f;
     window.fbWidth = target.width = 1001; window.fbHeight = target.height = 751;
     for (bool pixelMode : {false, true}) {
         internal::pixelPerfectMode() = pixelMode;
@@ -110,7 +110,7 @@ void runFractionalDpiChecks() {
 #endif
         verify("enable3DPerspective");
     }
-    window.isMain = main; window.dpiScale = dpi; window.fbWidth = fbW; window.fbHeight = fbH;
+    window.dpiScale = dpi; window.fbWidth = fbW; window.fbHeight = fbH;
     target.width = width; target.height = height; target.camera = camera; target.selectedPipeline = role;
     internal::pixelPerfectMode() = pixel;
     internal::applyTargetDrawingState();

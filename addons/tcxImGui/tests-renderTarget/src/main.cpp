@@ -77,8 +77,8 @@ void transparent(int samples, TextureFormat format, bool unfilterable) {
         simgui_imtextureid(white.getView());
     fbo.begin(0,0,0,0);
     const bool savedMode=internal::pixelPerfectMode(); auto& window=internal::currentWindowContext();
-    const auto savedDpi=window.dpiScale; const bool savedMain=window.isMain;
-    window.isMain=false; window.dpiScale=2; internal::pixelPerfectMode()=true;
+    const auto savedDpi=window.dpiScale;
+    window.dpiScale=2; internal::pixelPerfectMode()=true;
     {
         auto scope=ui.scoped(); fixedContext(); check("offscreen scope accepted",bool(scope));
         check("offscreen takes Fbo extent and density",ImGui::GetIO().DisplaySize.x==128 &&
@@ -105,7 +105,7 @@ void transparent(int samples, TextureFormat format, bool unfilterable) {
             color.blend.src_factor_alpha==SG_BLENDFACTOR_ONE && color.blend.dst_factor_alpha==SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA);
     }
     check("both ImGui sampling recipes selected",recipesChecked==2);
-    window.isMain=savedMain; window.dpiScale=savedDpi; internal::pixelPerfectMode()=savedMode;
+    window.dpiScale=savedDpi; internal::pixelPerfectMode()=savedMode;
     setupScreenOrtho(); setColor(0,0,1); drawRect(120,40,8,8);
     fbo.end();
     auto attachment=read(fbo);
@@ -245,8 +245,8 @@ void targetAssociation() {
 void screenUi(bool pixelMode) {
     auto& window=internal::currentWindowContext();
     if(!nativeDpi2) {
-        if(window.isMain) {window.fbWidth=sapp_width(); window.fbHeight=sapp_height();}
-        window.isMain=false; window.dpiScale=2;
+        check("main framebuffer metadata initialized", window.hostWindow && window.fbWidth==sapp_width() && window.fbHeight==sapp_height());
+        window.dpiScale=2;
     }
     internal::pixelPerfectMode()=pixelMode;
     imguiBegin();
@@ -386,6 +386,9 @@ public:
         imguiSetup(); fixedContext(); offscreen_.setupOffscreen(); fixedContext();
         tcx::NodeInspector::setToggleKey(KEY_F1);
         ordinary_ = events().exit.listen([this] { ++ordinaryCalls_; }, EventPriority::AfterApp);
+        {
+        // Observe mandatory cleanup from Runtime; retiring App callbacks are inert.
+        internal::AppOwnerScope observer(nullptr);
         log_ = getLogger().onLog.listen([this](LogEventArgs& e) {
             if (secondaryExitSkippedNoTick) return;
             if (e.message == "ImGui shutdown") {
@@ -395,6 +398,7 @@ public:
                 ++finalized_; check("secondary recorder finalization follows App exit", exits_ == 1 && exitFinished_);
             }
         });
+        }
 #ifndef __EMSCRIPTEN__
         // Media Foundation H.264 rejects frames of 32x32 or smaller (#886).
         fbo_.allocate(64, 64); fbo_.begin(1, 0, 0, 1); fbo_.end();
@@ -428,8 +432,9 @@ public:
         check("secondary App exits once", exits_ == 1 && exitFinished_);
         check("secondary ordinary hook removed by clear", ordinaryCalls_ == 0);
         check("both secondary ImGui hooks survive clear", shutdowns_ == 2 && !offscreen_.isInitialized());
-        check("secondary inspector hook survives clear", events().keyPressed.listenerCount() == 0);
-        check("secondary mandatory hooks disconnect", events().exit.listenerCount() == 0);
+        // C1 retains the App's own bindings through cleanup().
+        check("secondary inspector hook survives clear", events().keyPressed.listenerCount() == 1);
+        check("secondary mandatory hooks disconnect", events().exit.listenerCount() == 1);
 #ifndef __EMSCRIPTEN__
         check("secondary recorder hook survives clear", !recorder_.isRecording() && finalized_ == 1);
         VideoPlayer player; check("secondary recording finalized and loads", bool(player.load(file_))); player.close();
@@ -445,9 +450,10 @@ public:
         WindowSettings s; s.setSize(128, 128);
         exitWindow = createWindow(s); check("secondary teardown display created", bool(exitWindow));
         if (exitWindow) {
+            exitWindow->setPosition(256, 0);
             secondaryExitUpdate = exitWindow->events().update.listen([] { secondaryExitTicked = true; }, -1000);
             secondaryExitDraw = exitWindow->events().draw.listen([] { secondaryExitTicked = true; }, -1000);
-            exitWindow->setApp(std::make_shared<SecondaryExitApp>());
+            exitWindow->setApp<SecondaryExitApp>();
         }
         else exitApp();
     }
@@ -490,8 +496,7 @@ public:
         check("ImGui remains initialized inside App::exit", manager && manager->isInitialized());
 #ifndef TC_IMGUI_BASE_FIXTURE
         if (!screenOnly) check("offscreen ImGui remains initialized inside App::exit", recovery_.isInitialized());
-        // Keep the actual inspector hook live, with observable teardown state.
-        tcx::NodeInspector::attach();
+        // The inspector hook was attached before process ending began.
         check("NodeInspector remains attached inside App::exit", tcx::NodeInspector::isAttached());
 #ifndef __EMSCRIPTEN__
         if (!screenOnly) check("recorder remains live inside App::exit", isRecording() && recordingFrameCount()>0);
@@ -542,8 +547,11 @@ public:
         inputPriorityChecks();
 #endif
         sg_enable_stats();
-        log_=getLogger().onLog.listen([this](LogEventArgs& args){
-            if(args.message=="ImGui shutdown" && exitCalls_ && internal::currentWindowContext().isMain) {
+        {
+        // Observe mandatory cleanup from Runtime; retiring App callbacks are inert.
+        internal::AppOwnerScope observer(nullptr);
+        log_=getLogger().onLog.listen([this, owner=&internal::currentWindowContext()](LogEventArgs& args){
+            if(args.message=="ImGui shutdown" && exitCalls_ && &internal::currentWindowContext()==owner) {
                 ++imguiShutdowns_;
                 check("ImGui teardown follows App::exit", appExitFinished_);
             }
@@ -556,6 +564,7 @@ public:
                 if(args.message.find("[sg]")!=std::string::npos) ++validationErrors;
             }
         });
+        }
         imguiSetup(); fixedContext();
         userExit_=events().exit.listen([this] { ++userExitCalls_; }, EventPriority::AfterApp);
         manifest["requestedScreenSamples"]=screenSamples;
@@ -563,10 +572,6 @@ public:
         manifest["version"]=getVersion();
         manifest["dpiSource"]=nativeDpi2?"native window DPI from Xft.dpi":"simulated window metrics";
         manifest["backend"]=getBackendName(); manifest["baseCapability"]=screenOnly?"screen-only; target-bound UI unavailable on base":"target-bound UI";
-        // Restore the simulated main-window identity before present() returns.
-        render_=events().onRender.listen([] {
-            internal::currentWindowContext().isMain=true;
-        },2000);
         after_=events().afterFrame.listen([this] {
 #ifndef TC_IMGUI_BASE_FIXTURE
             if(pendingReadback_) {
@@ -652,9 +657,10 @@ public:
             WindowSettings secondarySettings; secondarySettings.setSize(nativeDpi2?256:512,nativeDpi2?192:384); secondarySettings.setHighDpi(nativeDpi2); secondarySettings.sampleCount=screenSamples;
             lastSecondaryFrame=Clock::now();
             secondary_=createWindow(secondarySettings); check("real secondary window created",bool(secondary_));
-            if(secondary_) secondary_->setApp(std::make_shared<SecondaryFixture>());
+            if(secondary_) { secondary_->setPosition(640, 0); secondary_->setApp<SecondaryFixture>(); }
             else secondaryComplete=true; // Creation already failed; do not wait for a tick.
         }
+
 #ifndef TC_IMGUI_BASE_FIXTURE
         if(frame_==0 && !screenOnly) {
             recovery_.setupOffscreen(); fixedContext(); recoveryFbo_.allocate(32,32);
@@ -689,12 +695,14 @@ public:
 #endif
         if(frame_>=5 && secondaryComplete) {
             if(secondary_) secondary_->close();
+#ifndef TC_IMGUI_BASE_FIXTURE
+            tcx::NodeInspector::attach();
+#endif
             check("zero sokol validation errors",validationErrors==0);
             check("only expected refusal/association Errors",errors==(screenOnly?0:7));
             manifest["expectedTcErrors"]=screenOnly?0:7;
             manifest["tcErrors"]=errors; manifest["sokolValidationErrors"]=validationErrors;
             if(!output.empty()) { std::ofstream file(output/"samples.json"); file<<manifest.dump(2)<<'\n'; }
-            internal::currentWindowContext().isMain=true;
             completed=true; exitApp();
         }
         ++frame_;

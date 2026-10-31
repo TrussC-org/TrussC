@@ -37,10 +37,12 @@ template<class T> using External = internal::ExternalEventDelivery<T>;
 struct CopyProbe {
     int value = 7;
     static std::atomic<int> copies;
+    static bool failCopy;
     CopyProbe() = default;
-    CopyProbe(const CopyProbe& other) : value(other.value) { ++copies; }
+    CopyProbe(const CopyProbe& other) : value(other.value) { if (failCopy) throw std::bad_alloc(); ++copies; }
 };
 std::atomic<int> CopyProbe::copies{0};
+bool CopyProbe::failCopy = false;
 
 struct ClosureProbe {
     static std::atomic<int> copies;
@@ -49,15 +51,196 @@ struct ClosureProbe {
 };
 std::atomic<int> ClosureProbe::copies{0};
 
+template<class T> void cancelledSlot(bool clear) {
+    Event<T> source;
+    source.setMainThreadDeliveryLimit(1);
+    int calls = 0;
+    auto first = source.listen([&](auto&...) { ++calls; }, Deliver::Main);
+    auto emit = [&] {
+        if constexpr (std::is_void_v<T>) return External<T>::notify(source);
+        else { T value{}; return External<T>::notify(source, value); }
+    };
+    std::thread queued([&] { check("copy accepted before cancellation", emit()); });
+    queued.join();
+    auto store = External<T>::diagnostics(source);
+    if (clear) source.clear();
+    else first.disconnect();
+    check("cancelled copy retains slot before next drain", store->pending == 1);
+    auto replacement = source.listen([&](auto&...) { ++calls; }, Deliver::Main);
+    std::thread beforeDrain([&] { check("replacement drops while cancelled copy awaits drain", !emit()); });
+    beforeDrain.join();
+    check("replacement starts overflow episode before drain", store->pending == 1 && store->overflowing);
+    internal::drainMainThreadQueue();
+    check("drain discards cancelled copy and returns slot", calls == 0 && store->pending == 0);
+    std::thread afterDrain([&] { check("replacement accepted after drain", emit()); });
+    afterDrain.join();
+    internal::drainMainThreadQueue();
+    check("replacement runs after slot returned", calls == 1 && store->pending == 0);
+}
+
+template<class T> void overflowWarnings() {
+    internal::drainMainThreadQueue();
+    int warnings = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning && event.message.find(
+                "[Event] Main delivery limit (1) reached;") == 0) {
+            check("overflow Warning runs on Main", isMainThread());
+            ++warnings;
+        }
+    });
+    Event<T> source;
+    source.setMainThreadDeliveryLimit(1);
+    auto listener = source.listen([](auto&...) {}, Deliver::Main);
+    for (int episode = 1; episode <= 2; ++episode) {
+        std::thread worker([&] {
+            auto emit = [&] {
+                if constexpr (std::is_void_v<T>) return External<T>::notify(source);
+                else { T value{}; return External<T>::notify(source, value); }
+            };
+            check("episode accepts first copy", emit());
+            for (int i = 0; i < 100; ++i) check("episode drops burst", !emit());
+        });
+        worker.join();
+        check("Warning waits for Main drain", warnings == episode - 1);
+        internal::drainMainThreadQueue();
+        check("one Warning per episode including repeated overflow", warnings == episode);
+        auto store = External<T>::diagnostics(source);
+        check("full drain rearms overflow Warning", store->pending == 0 && !store->overflowing);
+    }
+}
+
+template<class T> void sustainedOverflowWarnings() {
+    internal::drainMainThreadQueue();
+    int warnings = 0, calls = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.level == LogLevel::Warning && event.message.find(
+                "[Event] Main delivery limit (2) reached;") == 0) {
+            check("sustained overflow Warning runs on Main", isMainThread());
+            ++warnings;
+        }
+    });
+    Event<T> source;
+    source.setMainThreadDeliveryLimit(2);
+    auto listener = source.listen([&](auto&...) { ++calls; }, Deliver::Main);
+    auto emit = [&] {
+        if constexpr (std::is_void_v<T>) return External<T>::notify(source);
+        else { T value{}; return External<T>::notify(source, value); }
+    };
+    std::thread initial([&] {
+        check("sustained episode accepts first copy", emit());
+        check("sustained episode fills backlog", emit());
+        check("sustained episode starts overflow", !emit());
+    });
+    initial.join();
+    auto store = External<T>::diagnostics(source);
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        // Drain exactly one delivery, including any Warning ahead of it.
+        // Release its closure before refilling so its lease returns one slot.
+        int before = calls;
+        while (calls == before) {
+            std::function<void()> next;
+            if (!internal::mainThreadQueue().tryReceive(next)) {
+                check("sustained episode has a queued copy", false);
+                break;
+            }
+            next();
+        }
+        check("partial drain keeps overflow active", store->pending == 1 && store->overflowing);
+        std::thread refill([&] {
+            check("sustained episode refills one slot", emit());
+            check("sustained episode drops at limit", !emit());
+        });
+        refill.join();
+        check("sustained backlog stays at limit", store->pending == 2 && store->overflowing);
+    }
+    internal::drainMainThreadQueue();
+    check("sustained overload logs exactly one Warning", warnings == 1);
+    check("sustained accepted copies all run", calls == 102);
+    check("sustained episode rearms only after full drain", store->pending == 0 && !store->overflowing);
+}
+
+void allocationFailure() {
+    Event<CopyProbe> source;
+    source.setMainThreadDeliveryLimit(0);
+    int calls = 0;
+    auto listener = source.listen([&](auto&) { ++calls; }, Deliver::Main);
+    std::thread producer([&] {
+        CopyProbe value;
+        CopyProbe::failCopy = true;
+        check("failed payload allocation returns cleanly", !External<CopyProbe>::notify(source, value));
+        CopyProbe::failCopy = false;
+        check("delivery works after allocation failure", External<CopyProbe>::notify(source, value));
+    });
+    producer.join();
+    auto store = External<CopyProbe>::diagnostics(source);
+    check("failed copy releases pending slot without overflow", store->pending == 1 && !store->overflowing);
+    source.setMainThreadDeliveryLimit(1);
+    internal::drainMainThreadQueue();
+    check("lowering optional limit retains accepted copy", calls == 1 && store->pending == 0);
+}
+
+template<class T> void optionalTransportLimit() {
+    Event<T> source;
+    source.setMainThreadDeliveryLimit(1);
+    int mainCalls = 0, inlineCalls = 0;
+    auto mainListener = source.listen([&](T&) { ++mainCalls; }, Deliver::Main);
+    auto inlineListener = source.listen([&](T&) { ++inlineCalls; });
+    auto gate = std::make_shared<internal::NetworkDelivery>();
+    auto target = internal::EventSnapshotDelivery<T>::bind(source, gate);
+    internal::EventSnapshotDelivery<T> ingress{target};
+    std::thread worker([&] {
+        T value;
+        check("transport first Main copy accepted", ingress.notifyExternal(value));
+        check("transport explicit limit drops second Main copy", !ingress.notifyExternal(value));
+    });
+    worker.join();
+    auto store = External<T>::diagnostics(source);
+    check("transport overflows while Inline delivery continues", store->pending == 1 && store->overflowing && inlineCalls == 2);
+    internal::drainMainThreadQueue();
+    check("transport accepted copy runs", mainCalls == 1 && store->pending == 0);
+}
+
+void noPayloadByteLimit() {
+    Event<std::string> source;
+    int calls = 0;
+    auto listener = source.listen([&](std::string& value) { check("reserved payload delivered whole", value == "x"); ++calls; }, Deliver::Main);
+    std::thread producer([&] {
+        std::string value = "x";
+        value.reserve(65 * 1024 * 1024);
+        check("source capacity above old byte cap accepted", External<std::string>::notify(source, value));
+    });
+    producer.join();
+    internal::drainMainThreadQueue();
+    check("large source capacity has no delivery byte charge", calls == 1);
+}
+
+void optionalVoidLimit() {
+    Event<void> source;
+    source.setMainThreadDeliveryLimit(1);
+    int calls = 0;
+    auto first = source.listen([&] { ++calls; }, Deliver::Main);
+    auto second = source.listen([&] { ++calls; }, Deliver::Main);
+    std::thread producer([&] { check("void event shares limit across listeners", !External<void>::notify(source)); });
+    producer.join();
+    auto store = External<void>::diagnostics(source);
+    check("void event whole-copy overflow", store->pending == 1 && store->overflowing);
+    source.setMainThreadDeliveryLimit(0);
+    std::thread unlimited([&] { check("zero restores unlimited void delivery", External<void>::notify(source)); });
+    unlimited.join();
+    internal::drainMainThreadQueue();
+    check("accepted void calls survive limit changes", calls == 3 && store->pending == 0);
+}
+
 void countAndFanout() {
     Event<CopyProbe> source;
+    source.setMainThreadDeliveryLimit(1024);
     int called = 0;
     bool checkedExecuting = false;
     auto first = source.listen([&, tracked = ClosureProbe{}](CopyProbe& p) {
         (void)tracked;
         if (!checkedExecuting) {
             checkedExecuting = true;
-            std::thread producer([&] { CopyProbe value; check("executing copies retain credits", !External<CopyProbe>::notify(source, value)); });
+            std::thread producer([&] { CopyProbe value; check("executing copies retain slots", !External<CopyProbe>::notify(source, value)); });
             producer.join();
             const int captureCopies = ClosureProbe::copies;
             std::thread registrar([&] {
@@ -82,51 +265,17 @@ void countAndFanout() {
     check("1024 copies pending before any drain", store && store->pending == 1024 && called == 0);
     check("rejection occurs before payload copying", CopyProbe::copies == 1024);
     check("only admitted notifications copy callable captures", ClosureProbe::copies == 512);
-    check("every rejected Main copy counted", store->rejectedCopies == 202);
+    check("burst keeps one overflow episode active", store->overflowing);
     internal::drainMainThreadQueue();
     check("all admitted listeners run", called == 1024);
-    check("repeated losses schedule only one Warning job", internal::getMainThreadQueuePending() == 1025);
-    check("credits returned", store->pending == 0 && store->retainedBytes == 0);
-    check("rejections remain cumulative after drain", store->rejectedCopies == 204);
-}
-
-void bytesAndUnits() {
-    Event<tcx::websocket::WebSocketEventArgs> source;
-    tcx::websocket::WebSocketEventArgs payload;
-    payload.data.resize(1024 * 1024);
-    payload.message.assign(1024 * 1024, 'w');
-    const size_t charge = internal::ExternalPayload<tcx::websocket::WebSocketEventArgs>::bytes(payload);
-    const size_t admittedCopies = Store::byteLimit / charge;
-    const size_t admitted = admittedCopies / 2;
-    int calls = 0;
-    auto first = source.listen([&](tcx::websocket::WebSocketEventArgs& p) { check("whole WebSocket payload", p.data.size() == payload.data.size() && p.message == payload.message); ++calls; }, Deliver::Main);
-    auto second = source.listen([&](tcx::websocket::WebSocketEventArgs&) { ++calls; }, Deliver::Main);
-    auto gate = std::make_shared<internal::NetworkDelivery>();
-    auto target = internal::EventSnapshotDelivery<tcx::websocket::WebSocketEventArgs>::bind(source, gate);
-    internal::EventSnapshotDelivery<tcx::websocket::WebSocketEventArgs> ingress{target};
-    std::thread worker([&] {
-        for (size_t i = 0; i < admitted; ++i) check("byte admission", ingress.notifyExternal(payload));
-        check("aggregate fanout byte overflow rejects whole copies", !ingress.notifyExternal(payload));
-    });
-    worker.join();
-    auto store = External<tcx::websocket::WebSocketEventArgs>::diagnostics(source);
-    check("aggregate retained payload includes both representations and listeners", store->retainedBytes == admittedCopies * charge && store->retainedBytes <= Store::byteLimit);
-    check("byte rejection before count bound", store->pending < 1024 && store->rejectedCopies == 2 - admittedCopies % 2);
-    internal::drainMainThreadQueue();
-    check("only whole admitted copies run", calls == static_cast<int>(admittedCopies));
-
-    Event<std::string> oversized;
-    int rejectedCalls = 0;
-    auto listener = oversized.listen([&](std::string&) { ++rejectedCalls; }, Deliver::Main);
-    std::string large(Store::byteLimit + 1, 'x');
-    std::thread producer([&] { check("single oversized event rejected", !External<std::string>::notify(oversized, large)); });
-    producer.join();
-    internal::drainMainThreadQueue();
-    check("oversized event has no prefix delivery", rejectedCalls == 0);
+    check("accepted copies and one episode warning queued", internal::getMainThreadQueuePending() == 1025);
+    check("pending slots returned", store->pending == 0);
+    check("drain ends overflow episode", !store->overflowing);
 }
 
 void oscAndMidi() {
     tcx::osc::OscReceiver osc;
+    osc.onMessageReceived.setMainThreadDeliveryLimit(1024);
     tcx::osc::OscMessage message("/bounded");
     message.addString("complete");
     const auto bytes = message.toBytes();
@@ -137,6 +286,7 @@ void oscAndMidi() {
         check("whole OSC message", p.getArgAsString(0) == "complete"); ++oscCalls;
     }, Deliver::Main);
     tcx::midi::MidiIn midi;
+    midi.onMessage.setMainThreadDeliveryLimit(1024);
     int midiCalls = 0;
     auto midiListener = midi.onMessage.listen([&](tcx::midi::MidiMessage& p) {
         check("whole MIDI message", p.bytes == std::vector<unsigned char>({0x90, 60, 100})); ++midiCalls;
@@ -152,20 +302,14 @@ void oscAndMidi() {
     worker.join();
     auto oscStore = External<tcx::osc::OscMessage>::diagnostics(osc.onMessageReceived);
     auto midiStore = External<tcx::midi::MidiMessage>::diagnostics(midi.onMessage);
-    check("OSC stalled Main with polling never enabled", oscCalls == 0 && oscStore->pending == 1024 && oscStore->rejectedCopies == 1);
-    check("MIDI stalled Main with polling never enabled", midiCalls == 0 && midiStore->pending == 1024 && midiStore->rejectedCopies == 1);
+    check("OSC stalled Main with polling never enabled", oscCalls == 0 && oscStore->pending == 1024 && oscStore->overflowing);
+    check("MIDI stalled Main with polling never enabled", midiCalls == 0 && midiStore->pending == 1024 && midiStore->overflowing);
     internal::drainMainThreadQueue();
     check("OSC/MIDI whole-unit drop", oscCalls == 1024 && midiCalls == 1024);
     midi.closePort();
     libremidi::test::inputCallback = {};
 
-    tcx::osc::OscMessage blob("/blob");
-    std::vector<uint8_t> data(1024, 1);
-    blob.addBlob(data.data(), data.size());
-    tcx::osc::OscBundle child, tree;
-    child.addMessage(blob);
-    tree.addBundle(child);
-    check("OSC nested allocations charged", internal::ExternalPayload<tcx::osc::OscBundle>::bytes(tree) > 1024 + sizeof(tree) + sizeof(child) + sizeof(blob));
+
 }
 
 // Two targets share the production acquisition gate. Removing the final
@@ -222,16 +366,11 @@ void lockOrder() {
 
 void oscForwardedErrors() {
     tcx::osc::OscReceiver receiver;
+    receiver.onParseError.setMainThreadDeliveryLimit(1024);
     // Install the real socket forwarding listeners. Error injection below
     // exercises UDP classification without depending on a failing OS socket.
     tcx::osc::OscDeliveryTestAccess::prepare(receiver);
-    int calls = 0, appCalls = 0, warnings = 0;
-    auto logger = getLogger().onLog.listen([&](LogEventArgs& args) {
-        if (args.level == LogLevel::Warning && args.message.find("[ExternalDelivery]") != std::string::npos) {
-            check("forwarded loss Warning runs on main", isMainThread());
-            ++warnings;
-        }
-    });
+    int calls = 0, appCalls = 0;
     auto listener = receiver.onParseError.listen([&](std::string& msg) {
         ++calls;
         if (msg.find("Application operation") != std::string::npos) ++appCalls;
@@ -241,10 +380,10 @@ void oscForwardedErrors() {
     });
     worker.join();
     auto store = External<std::string>::diagnostics(receiver.onParseError);
-    check("forwarded receive errors bound pending copies and count every rejection",
-          store && store->pending == 1024 && store->rejectedCopies == 8976);
+    check("forwarded receive errors bound pending copies and enter overflow",
+          store && store->pending == 1024 && store->overflowing);
 #if !defined(__EMSCRIPTEN__)
-    check("forwarded receive errors queue one Warning alongside admitted copies",
+    check("forwarded receive errors queue only accepted copies",
           internal::mainThreadQueue().size() == 1025);
 #endif
     std::thread app([&] {
@@ -252,138 +391,13 @@ void oscForwardedErrors() {
     });
     app.join();
     check("forwarded app errors bypass saturated external store",
-          store && store->pending == 1024 && store->rejectedCopies == 8976);
+          store && store->pending == 1024 && store->overflowing);
 #if !defined(__EMSCRIPTEN__)
     check("forwarded app error copies stay growable", internal::mainThreadQueue().size() == 11025);
 #endif
     internal::drainMainThreadQueue();
     check("forwarded receive/app error callbacks remain whole", calls == 11024 && appCalls == 10000);
-    check("forwarded receive loss warns exactly once without polling", warnings == 1);
-    check("forwarded error credits released after drain", store && store->pending == 0 && store->retainedBytes == 0);
-}
-
-struct ReentrantDeliveryClient : TcpClient {
-    struct ConnectionTransport : Transport {
-        bool connectSocket(State& st, const std::string&, int) override {
-            st.running_ = true;
-            return true;
-        }
-    };
-    ReentrantDeliveryClient() { setTransport(std::make_shared<ConnectionTransport>()); setUseThread(false); }
-    bool receive(TcpReceiveEventArgs& arg) { auto run = state(); return run->deliverReceive(arg); }
-};
-
-// Overflow teardown completes the pending send; its Inline completion
-// listener reconnects before the overflow disconnect would be emitted.
-void overflowCompletionReconnect() {
-    ReentrantDeliveryClient client;
-    int completions = 0, unclean = 0, staleUnclean = 0;
-    bool reconnected = false;
-    auto main = client.onReceive.listen([](auto&) {}, Deliver::Main);
-    auto completion = client.onSendComplete.listen([&](auto&) {
-        if (++completions == 1) reconnected = client.connect("replacement", 2);
-    });
-    auto close = client.onDisconnect.listen([&](auto& args) {
-        if (!args.wasClean) {
-            ++unclean;
-            if (client.isConnected()) ++staleUnclean;
-        }
-    });
-    check("completion test transport connected", client.connect("initial", 1));
-    auto pending = client.sendAsync("pending send");
-    check("completion test send pending", static_cast<int>(pending.error) == 0);
-    std::thread worker([&] {
-        TcpReceiveEventArgs args; args.data = {'a'};
-        for (int i = 0; i < 1024; ++i) client.receive(args);
-        check("completion test overflow rejects the chunk", !client.receive(args));
-    });
-    worker.join();
-    check("teardown completion reconnect gets no stale overflow disconnect", reconnected && staleUnclean == 0 && unclean == 0);
-    check("completion reconnect leaves replacement connected", client.isConnected());
-    internal::drainMainThreadQueue();
-}
-
-void overflowReconnect() {
-    ReentrantDeliveryClient client;
-    int inlineCalls = 0, mainCalls = 0, clean = 0, unclean = 0;
-    bool reconnected = false;
-    auto main = client.onReceive.listen([&](auto&) { ++mainCalls; }, Deliver::Main);
-    auto inlineListener = client.onReceive.listen([&](auto&) {
-        if (++inlineCalls == 1025) reconnected = client.connect("replacement", 2);
-    });
-    auto close = client.onDisconnect.listen([&](auto& args) {
-        if (args.wasClean) ++clean;
-        else ++unclean;
-    });
-    check("initial transport connected", client.connect("initial", 1));
-    std::thread worker([&] {
-        TcpReceiveEventArgs args; args.data = {'a'};
-        for (int i = 0; i < 1024; ++i) check("reentrant test fills receive credits", client.receive(args));
-        check("reentrant overflow rejects the chunk", !client.receive(args));
-    });
-    worker.join();
-    check("Inline overflow reconnect emits exactly one clean disconnect", clean == 1 && unclean == 0);
-    check("overflow leaves replacement connected", reconnected && client.isConnected());
-    internal::drainMainThreadQueue();
-    check("retired overflow run still invalidates queued chunks", mainCalls == 0);
-    TcpReceiveEventArgs replacement; replacement.data = {'b'};
-    std::thread replacementWorker([&] { check("replacement admits fresh receive", client.receive(replacement)); });
-    replacementWorker.join();
-    internal::drainMainThreadQueue();
-    check("replacement receives after retired overflow", mainCalls == 1 && client.isConnected());
-}
-
-void tcpOverflow(bool serverSide) {
-    TcpServer server;
-    server.setReceiveBufferSize(1);
-    check("TCP server starts", server.start(0));
-    TcpClient client;
-    client.setReceiveBufferSize(1);
-    std::atomic<int> received{0}, disconnected{0};
-    int mainCalls = 0, mainDisconnects = 0, completions = 0;
-    std::atomic<bool> completionQueued{false};
-    EventListener data, observe, close, closeMain, completion, completionObserved;
-    if (serverSide) {
-        data = server.onReceive.listen([&](TcpServerReceiveEventArgs&) { ++mainCalls; }, Deliver::Main);
-        observe = server.onReceive.listen([&](TcpServerReceiveEventArgs&) { ++received; });
-        closeMain = server.onClientDisconnect.listen([&](TcpClientDisconnectEventArgs&) { ++mainDisconnects; }, Deliver::Main);
-        close = server.onClientDisconnect.listen([&](TcpClientDisconnectEventArgs& p) { if (!p.wasClean) ++disconnected; });
-    } else {
-        data = client.onReceive.listen([&](TcpReceiveEventArgs&) { ++mainCalls; }, Deliver::Main);
-        observe = client.onReceive.listen([&](TcpReceiveEventArgs&) { ++received; });
-        closeMain = client.onDisconnect.listen([&](TcpDisconnectEventArgs&) { ++mainDisconnects; }, Deliver::Main);
-        close = client.onDisconnect.listen([&](TcpDisconnectEventArgs& p) { if (!p.wasClean) ++disconnected; });
-        completion = server.onSendComplete.listen([&](TcpSendCompleteEventArgs&) { ++completions; }, Deliver::Main);
-        completionObserved = server.onSendComplete.listen([&](TcpSendCompleteEventArgs&) { completionQueued = true; });
-    }
-    check("TCP loopback connects", client.connect("127.0.0.1", server.getPort()));
-    check("TCP accepted", until([&] { return server.getClientCount() == 1; }));
-    std::string bytes(1025, 't');
-    if (serverSide) check("send to server", client.send(bytes));
-    else server.broadcast(bytes);
-    check("TCP overflow disconnect reported without drain", until([&] { return disconnected == 1; }));
-    check("TCP Inline observes the chunk whose Main copy overflowed", received == 1025);
-    check("no Main receive runs during stall", mainCalls == 0);
-    check("overflow closes TCP run", serverSide ? until([&] { return server.getClientCount() == 0; }) : !client.isConnected());
-    // Observers are registered after the Main listeners, so these signals
-    // establish queue admission, independently of worker scheduling.
-    if (!serverSide) check("send completion queued", until([&] { return completionQueued.load(); }));
-    internal::drainMainThreadQueue();
-    check("all queued chunks of overflowed TCP run invalidated", mainCalls == 0);
-    check("disconnect teardown delivery preserved", mainDisconnects == 1);
-    if (!serverSide) check("send completion delivery preserved", completions == 1);
-    client.disconnect();
-    check("old TCP client removed", until([&] { return server.getClientCount() == 0; }));
-    check("TCP reconnect after overflow", client.connect("127.0.0.1", server.getPort()));
-    check("replacement TCP accepted", until([&] { return server.getClientCount() == 1; }));
-    if (serverSide) check("send replacement byte", client.send("r"));
-    else server.broadcast("r");
-    check("replacement run receives", until([&] { return received == 1026; }));
-    internal::drainMainThreadQueue();
-    check("replacement TCP run has a fresh delivery token", mainCalls == 1);
-    client.disconnect();
-    server.stop();
-    internal::drainMainThreadQueue();
+    check("forwarded error pending slots released after drain", store && store->pending == 0);
 }
 
 void retainedSnapshotDestruction() {
@@ -403,7 +417,7 @@ void retainedSnapshotDestruction() {
     check("Event destruction cancels queued Main with snapshot still retained", calls == 0);
     release.set_value();
     worker.join();
-    check("retained-snapshot destruction releases all credits", store->pending == 0);
+    check("retained-snapshot destruction releases all pending slots", store->pending == 0);
 
     std::promise<void> voidEntered, voidRelease;
     auto voidReady = voidEntered.get_future();
@@ -420,7 +434,7 @@ void retainedSnapshotDestruction() {
     check("void Event destruction cancels queued Main with snapshot retained", calls == 0);
     voidRelease.set_value();
     voidWorker.join();
-    check("void retained-snapshot destruction releases credits", voidStore->pending == 0);
+    check("void retained-snapshot destruction releases pending slots", voidStore->pending == 0);
 
     int synchronousCalls = 0;
     auto synchronous = std::make_unique<Event<int>>();
@@ -474,67 +488,48 @@ void orderedCopies() {
     External<std::string>::notify(edited, value);
     check("Main copies see earlier Inline edits on worker and main", seen == std::vector<std::string>({"edited", "edited again", "edited", "edited again"}));
 
-    Event<std::string> growing;
-    int calls = 0, inlineCalls = 0;
-    auto small = growing.listen([&](std::string& value) { check("earlier copy keeps its complete value", value == "small"); ++calls; }, Deliver::Main);
-    auto grow = growing.listen([](std::string& value) { value.assign(Store::byteLimit + 1, 'x'); });
-    auto large = growing.listen([&](std::string&) { ++calls; }, Deliver::Main);
-    auto tail = growing.listen([&](std::string&) { ++inlineCalls; });
-    size_t charge = 0;
-    std::thread grower([&] {
-        std::string input = "small";
-        charge = internal::ExternalPayload<std::string>::bytes(input);
-        check("later oversized copy rejected after Inline growth", !External<std::string>::notify(growing, input));
-    });
-    grower.join();
-    auto store = External<std::string>::diagnostics(growing);
-    check("only storage measured at each listener turn is reserved", store->pending == 1 && store->retainedBytes == charge && store->rejectedCopies == 1);
-    check("rejected Main copy preserves subsequent Inline delivery", inlineCalls == 1);
-    internal::drainMainThreadQueue();
-    check("Inline growth cannot escape admission", calls == 1 && store->pending == 0 && store->retainedBytes == 0);
+
 }
 
-struct DeliveryClient : TcpClient {
-    void connectedForTest() { state()->connected_ = true; }
-    bool receiveForTest(TcpReceiveEventArgs& args) { return state()->deliverReceive(args); }
-};
-
-void appNetworkNotifications() {
-    DeliveryClient client;
-    int errors = 0, clean = 0, overflow = 0, receives = 0, inlineCloses = 0;
-    auto error = client.onError.listen([&](TcpErrorEventArgs&) { ++errors; }, Deliver::Main);
-    auto close = client.onDisconnect.listen([&](TcpDisconnectEventArgs& args) {
-        if (args.wasClean) ++clean;
-        if (args.reason == "External main-thread delivery overflow") ++overflow;
-    }, Deliver::Main);
-    auto inlineClose = client.onDisconnect.listen([&](TcpDisconnectEventArgs&) { ++inlineCloses; });
-    auto receive = client.onReceive.listen([&](TcpReceiveEventArgs&) { ++receives; }, Deliver::Main);
-    std::thread worker([&] {
-        // Fill the external disconnect store independently of application
-        // operations, so teardown must bypass an already saturated store.
-        TcpDisconnectEventArgs peerClose;
-        peerClose.wasClean = false;
-        for (int i = 0; i < 1024; ++i) External<TcpDisconnectEventArgs>::notify(client.onDisconnect, peerClose);
-        for (int i = 0; i < 1025; ++i) {
-            client.sendAsync("not connected");
-            client.connectedForTest();
-            client.disconnect();
-        }
-        TcpReceiveEventArgs chunk;
-        chunk.data = {'x'};
-        for (int i = 0; i < 1024; ++i) check("receive copy admitted before overflow", client.receiveForTest(chunk));
-        check("receive overflow closes and reports", !client.receiveForTest(chunk));
-    });
-    worker.join();
-    auto closes = External<TcpDisconnectEventArgs>::diagnostics(client.onDisconnect);
-    auto data = External<TcpReceiveEventArgs>::diagnostics(client.onReceive);
-    check("app disconnects and overflow bypass saturated disconnect store", closes->pending == 1024 && closes->rejectedCopies == 0 && inlineCloses == 2050);
-    check("app send rejections never allocate an external store", !External<TcpErrorEventArgs>::diagnostics(client.onError));
-    check("overflow leaves receive store saturated until queued copies die", data->pending == 1024 && data->rejectedCopies == 1);
+// One-byte reads make the number of queued TCP chunks deterministic.
+void tcpBacklog(bool serverSide, bool limited) {
+    TcpServer server;
+    server.setBindAddress("127.0.0.1");
+    server.setReceiveBufferSize(1);
+    TcpClient client;
+    client.setReceiveBufferSize(1);
+    if (limited) {
+        server.onReceive.setMainThreadDeliveryLimit(7);
+        client.onReceive.setMainThreadDeliveryLimit(7);
+    }
+    int calls = 0;
+    std::atomic<int> received{0}, disconnected{0};
+    EventListener main, observe, close;
+    if (serverSide) {
+        main = server.onReceive.listen([&](auto& args) { check("whole server chunk", args.data == vector<char>{'t'}); ++calls; }, Deliver::Main);
+        observe = server.onReceive.listen([&](auto&) { ++received; });
+        close = server.onClientDisconnect.listen([&](auto&) { ++disconnected; });
+    } else {
+        main = client.onReceive.listen([&](auto& args) { check("whole client chunk", args.data == vector<char>{'t'}); ++calls; }, Deliver::Main);
+        observe = client.onReceive.listen([&](auto&) { ++received; });
+        close = client.onDisconnect.listen([&](auto&) { ++disconnected; });
+    }
+    check("backlog server starts", server.start(0));
+    check("backlog client connects", client.connect("127.0.0.1", server.getPort()));
+    check("backlog client accepted", until([&] { return server.getClientCount() == 1; }));
+    const std::string bytes(1500, 't');
+    if (serverSide) check("send backlog to server", client.send(bytes));
+    else server.broadcast(bytes);
+    check("all TCP chunks read before next frame", until([&] { return received == 1500; }));
+    check("backlog keeps TCP connection open", calls == 0 && disconnected == 0 && client.isConnected() && server.getClientCount() == 1);
+    auto store = serverSide ? External<TcpServerReceiveEventArgs>::diagnostics(server.onReceive)
+                            : External<TcpReceiveEventArgs>::diagnostics(client.onReceive);
+    check("only explicit limit drops copies", store->pending == (limited ? 7u : 1500u) && store->overflowing == limited);
     internal::drainMainThreadQueue();
-    check("all 1025 sendAsync errors delivered", errors == 1025);
-    check("all 1025 application disconnects delivered", clean == 1025);
-    check("overflow teardown delivered with both external stores full", overflow == 1 && receives == 0);
+    check("all accepted chunks arrive", calls == (limited ? 7 : 1500) && store->pending == 0);
+    client.disconnect();
+    server.stop();
+    internal::drainMainThreadQueue();
 }
 
 struct MoveOnlyProbe {
@@ -551,7 +546,7 @@ void lifetimeAndAppWork() {
     auto store = External<int>::diagnostics(*source);
     source.reset();
     internal::drainMainThreadQueue();
-    check("source destruction cancels external delivery and releases credits", calls == 0 && store->pending == 0);
+    check("source destruction cancels external delivery and releases pending slots", calls == 0 && store->pending == 0);
 
     Event<int> cleared;
     auto removed = cleared.listen([&](int&) { ++calls; }, Deliver::Main);
@@ -560,7 +555,7 @@ void lifetimeAndAppWork() {
     auto clearedStore = External<int>::diagnostics(cleared);
     cleared.clear();
     internal::drainMainThreadQueue();
-    check("clear cancels external deliveries and releases credits", calls == 0 && clearedStore->pending == 0);
+    check("clear cancels external deliveries and releases pending slots", calls == 0 && clearedStore->pending == 0);
 
     Event<int> inlineSource;
     auto inlineListener = inlineSource.listen([](int&) {});
@@ -597,38 +592,26 @@ void lifetimeAndAppWork() {
 TC_CORE_TEST_MAIN() {
     Watchdog watchdog;
     getMainThreadId();
-    std::atomic<int> warnings{0};
-    std::atomic<bool> safeWarnings{true};
-    auto logger = getLogger().onLog.listen([&](LogEventArgs& e) {
-        if (e.message.find("[ExternalDelivery]") != std::string::npos && e.level == LogLevel::Warning) {
-            ++warnings;
-            if (!isMainThread()) safeWarnings = false;
-        }
-    });
-    if (const char* selected = std::getenv("TC_EXTERNAL_DELIVERY_CASE")) {
-        const std::string name(selected);
-        if (name == "lock-order") lockOrder();
-        else if (name == "osc-errors") oscForwardedErrors();
-        else if (name == "overflow-reconnect") overflowReconnect();
-        else if (name == "overflow-completion") overflowCompletionReconnect();
-        else return 2;
-        return failures ? 1 : 0;
-    }
+    overflowWarnings<int>();
+    overflowWarnings<void>();
+    sustainedOverflowWarnings<int>();
+    sustainedOverflowWarnings<void>();
     lockOrder();
+    optionalTransportLimit<UdpReceiveEventArgs>();
+    optionalTransportLimit<tcx::websocket::WebSocketEventArgs>();
+    noPayloadByteLimit();
+    optionalVoidLimit();
+    for (bool clear : {false, true}) { cancelledSlot<int>(clear); cancelledSlot<void>(clear); }
+    allocationFailure();
     countAndFanout();
-    check("first loss Warning delivered automatically", warnings == 1 && safeWarnings);
-    bytesAndUnits();
     oscAndMidi();
     callableCopies();
     orderedCopies();
-    appNetworkNotifications();
     oscForwardedErrors();
-    overflowReconnect();
-    overflowCompletionReconnect();
-    tcpOverflow(false);
-    tcpOverflow(true);
     retainedSnapshotDestruction();
     lifetimeAndAppWork();
-    check("one Warning per rejecting store on main", warnings == 12 && safeWarnings);
+    for (bool serverSide : {false, true}) {
+        for (bool limited : {false, true}) tcpBacklog(serverSide, limited);
+    }
     return failures ? 1 : 0;
 }

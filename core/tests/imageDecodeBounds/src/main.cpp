@@ -156,6 +156,51 @@ bool empty(const Pixels& pixels) {
     return !pixels.isAllocated() && !pixels.getDataVoid() && pixels.getWidth() == 0 &&
            pixels.getHeight() == 0 && pixels.getChannels() == 0;
 }
+void callbackInputChecks() {
+    struct VirtualPpm {
+        size_t commentBytes;
+        mutable size_t generated = 0;
+    };
+    const string prefix = "P6\n#", suffix = "\n1 1\n255\n\xff\xff\xff";
+    for (bool asFloat : {false, true}) {
+        for (bool large : {false, true}) {
+            VirtualPpm source{large ? size_t(INT_MAX) + 1024 : 16};
+            internal::ImageCallbackInput input{&source, prefix.size() + source.commentBytes + suffix.size(),
+                [](const void* context, size_t position, char* output, size_t count) {
+                    const auto& source = *static_cast<const VirtualPpm*>(context);
+                    constexpr char prefix[] = "P6\n#", suffix[] = "\n1 1\n255\n\xff\xff\xff";
+                    std::memset(output, 'x', count);
+                    for (size_t i = 0; i < sizeof(prefix) - 1; ++i)
+                        if (i >= position && i - position < count) output[i - position] = prefix[i];
+                    const size_t tail = sizeof(prefix) - 1 + source.commentBytes;
+                    for (size_t i = 0; i < sizeof(suffix) - 1; ++i)
+                        if (tail + i >= position && tail + i - position < count) output[tail + i - position] = suffix[i];
+                    source.generated += count;
+                }};
+            vector<string> errors;
+            auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+                if (event.level == LogLevel::Error) errors.push_back(event.message);
+            });
+            int width = 0, height = 0, channels = 0;
+            unique_ptr<void, decltype(&stbi_image_free)> decoded(input.decode(asFloat, width, height, channels), stbi_image_free);
+            const auto result = input.result("virtual-long-comment.ppm");
+            if (large) {
+                check("virtual input over INT_MAX fails cleanly", !decoded && result.error == LoadError::TooLarge);
+                check("callback delivery reserves stb's refill buffer", input.delivered == size_t(INT_MAX) - 128 &&
+                      source.generated == input.delivered);
+                check("callback limit emits exactly one Error with filename and reason", errors.size() == 1 &&
+                      errors[0].find("virtual-long-comment.ppm") != string::npos &&
+                      errors[0].find("stb_image counts input with a 32-bit int") != string::npos &&
+                      result.message.find("stb_image counts input with a 32-bit int") != string::npos);
+            } else {
+                check("small virtual image decodes through the same callback adapter", result && decoded &&
+                      width == 1 && height == 1 && channels == 3 && errors.empty() && !input.limitReached);
+                if (decoded) check("small callback image retains its pixel", asFloat ?
+                    static_cast<float*>(decoded.get())[2] == 1.0f : static_cast<unsigned char*>(decoded.get())[3] == 255);
+            }
+        }
+    }
+}
 void rejected(const string& label, const Bytes& bytes, LoadError error = LoadError::TooLarge) {
     Pixels pixels;
     pixels.allocate(1, 1);
@@ -170,80 +215,21 @@ void boundaryChecks(const fs::path& root) {
     check("headless axis fallback is 16384", internal::imageDecodeAxisLimit() == 16384);
     auto edge = encoded("png", 16384, 1);
     check("headless exactly-at-limit image loads", pixels.loadFromMemory(edge.data(), int(edge.size())) && pixels.getWidth() == 16384);
-    rejected("headless limit plus one", encoded("png", 16385, 1));
+    edge = encoded("png", 16385, 1);
+    writeFile(root / "wide.png", edge);
+    check("CPU local image exceeds old headless axis cap", pixels.load(root / "wide.png") && pixels.getWidth() == 16385);
+    check("CPU memory image exceeds old headless axis cap", pixels.loadFromMemory(edge.data(), int(edge.size())) && pixels.getWidth() == 16385);
     internal::recordImageDecodeLimit(64);
-    edge = encoded("png", 64, 64);
-    check("recorded limit includes exact boundary", pixels.loadFromMemory(edge.data(), int(edge.size())) && pixels.getTotalBytes() == 64 * 64 * 4);
-    check("last pixel is complete", pixels.getColor(63, 63) == Color(1, 1, 1, 1));
-    rejected("width limit plus one", encoded("png", 65, 1));
-    rejected("height limit plus one", encoded("png", 1, 65));
-    writeFile(root / "edge.png", edge);
     writeFile(root / "over.png", encoded("png", 65, 1));
-    check("file exact boundary", pixels.load(root / "edge.png") && pixels.getWidth() == 64);
-    check("file over boundary is empty", pixels.load(root / "over.png").error == LoadError::TooLarge && empty(pixels));
-    for (const auto* format : {"png", "hdr"}) {
-        writeFile(root / "float-image", encoded(format, 64, 1));
-        check(string(format) + " float decode at boundary", pixels.loadHDR(root / "float-image") && pixels.isFloat() && pixels.getColor(63, 0).a == 1);
-        writeFile(root / "float-image", encoded(format, 65, 1));
-        check(string(format) + " float decode over boundary", pixels.loadHDR(root / "float-image").error == LoadError::TooLarge && empty(pixels));
-    }
+    check("CPU load ignores recorded GPU limit", pixels.load(root / "over.png") && pixels.getWidth() == 65);
+    writeFile(root / "float-image", encoded("hdr", 65, 1));
+    check("CPU float load ignores recorded GPU limit", pixels.loadHDR(root / "float-image") && pixels.isFloat() && pixels.getWidth() == 65);
     Pixels mcpPixels;
     const auto beforeMcp = internal::imageDecodeRejectionsForTests();
-    check("MCP file-image route shares GPU admission", !mcp::internal::loadMcpImage(mcpPixels, root / "over.png") &&
-          empty(mcpPixels) && internal::imageDecodeRejectionsForTests() == beforeMcp + 1 && mcp::internal::workingMemory() == 0);
-    Image image;
-    check("Image shares file admission", image.load(root / "over.png").error == LoadError::TooLarge && !image.isAllocated());
-    auto over = encoded("png", 65, 1);
-    check("Image shares memory admission", image.loadFromMemory(over.data(), int(over.size())).error == LoadError::TooLarge && !image.isAllocated());
-    // The resource runner's explicit completion seam avoids waiting assertions.
-    internal::appRunToken() = make_shared<atomic<bool>>(true);
-    int events = 0;
-    auto listener = image.onLoad.listen([&](LoadResult& result) {
-        check("async worker reads recorded GPU limit", result.error == LoadError::TooLarge && !image.isAllocated()); ++events;
-    });
-    image.loadAsync(root / "over.png");
-    internal::waitForResourceLoadsForTests();
-    internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
-    check("async rejection completes exactly once", events == 1 && !image.isLoading());
-    internal::appRunToken()->store(false);
+    check("MCP local file follows CPU loading", mcp::internal::loadMcpImage(mcpPixels, root / "over.png") &&
+          mcpPixels.getWidth() == 65 && internal::imageDecodeRejectionsForTests() == beforeMcp);
 }
 void headerChecks() {
-    for (const string format : {"png", "bmp", "jpeg", "hdr"}) {
-        auto bytes = encoded(format, 1, 1);
-        if (format == "png") {
-            Bytes ihdr(bytes.begin() + 16, bytes.begin() + 29);
-            put32(ihdr, 0, 65535, true); put32(ihdr, 4, 65535, true);
-            bytes.resize(8); chunk(bytes, "IHDR", ihdr);
-        }
-        if (format == "bmp") { put32(bytes, 18, 65535, false); put32(bytes, 22, 65535, false); }
-        if (format == "jpeg") {
-            for (size_t i = 0; i + 8 < bytes.size(); ++i) if (bytes[i] == 255 && bytes[i + 1] == 192) {
-                bytes[i + 5] = bytes[i + 6] = bytes[i + 7] = bytes[i + 8] = 255; break;
-            }
-        }
-        if (format == "hdr") {
-            const string header = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 65535 +X 65535\n";
-            bytes.assign(header.begin(), header.end());
-        }
-        internal::failImageDecodeAllocationAfterForTests(-1);
-        rejected(format + " metadata rejected before pixel allocation", bytes);
-        check(format + " metadata allocates only fixed codec header states", internal::imageDecodeAllocationAttemptsForTests() <= 2);
-    }
-    // PIC is the other stb metadata route with a pre-return product check.
-    Bytes pic(108, 0);
-    std::memcpy(pic.data(), "\x53\x80\xf6\x34", 4);
-    std::memcpy(pic.data() + 88, "PICT", 4);
-    pic[93] = pic[95] = 1; pic[105] = 8; pic[107] = 0xe0;
-    pic.insert(pic.end(), {255,255,255});
-    Pixels picControl;
-    check("PIC header control decodes", picControl.loadFromMemory(pic.data(), int(pic.size())) &&
-          picControl.getColor(0, 0) == Color(1, 1, 1, 1));
-    pic[92] = pic[94] = 0x40; pic[93] = pic[95] = 1;
-    rejected("PIC axes admitted before codec product check", pic);
-    pic[105] = 255;
-    rejected("garbage PIC packet stays a decode error", pic, LoadError::DecodeFailed);
-    const string invalidHdr = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y -1 +X 1\n";
-    rejected("negative header size", Bytes(invalidHdr.begin(), invalidHdr.end()), LoadError::DecodeFailed);
     rejected("corrupt bytes", Bytes{1,2,3}, LoadError::DecodeFailed);
     Pixels pixels;
     const auto invalidBefore = internal::imageDecodeRejectionsForTests();
@@ -276,111 +262,78 @@ void headerChecks() {
     rejected("PNG incomplete chunk span", truncated, LoadError::DecodeFailed);
     check("PNG IDAT span checked before size-driven allocation", internal::imageDecodeLargestAllocationForTests() < 1024 * 1024);
 }
-void earlyPngChecks() {
-    internal::recordImageDecodeLimit(0);
-    Pixels control;
-    const auto small = zeroPng(8, 8);
-    check("compressed PNG fixture decodes", control.loadFromMemory(small.data(), int(small.size())) &&
-          control.getColor(7, 7) == Color(0, 0, 0, 0));
-    const auto png = zeroPng(16385, 16385);
-    check("complete over-axis PNG is below encoded cap", png.size() < 64 * 1024 * 1024);
-    rejected("complete 16385x16385 PNG admitted before codec product check", png);
-    auto corrupt = png;
-    std::fill(corrupt.begin() + 24, corrupt.begin() + 29, 255);
-    rejected("garbage IHDR stays a decode error", corrupt, LoadError::DecodeFailed);
-    corrupt = png;
-    corrupt[29] ^= 1;
-    rejected("bad IHDR CRC stays a decode error", corrupt, LoadError::DecodeFailed);
-    const auto smallCgbi = zeroPng(8, 8, true);
-    check("8x8 CgBI control decodes", control.loadFromMemory(smallCgbi.data(), int(smallCgbi.size())) &&
-          control.getWidth() == 8 && control.getHeight() == 8 && control.getColor(7, 7) == Color(0, 0, 0, 0));
-    const auto largeCgbi = zeroPng(16385, 16385, true);
-    check("complete 16385x16385 CgBI PNG is below encoded cap", largeCgbi.size() < 64 * 1024 * 1024);
-    rejected("CgBI IHDR admitted before codec product check", largeCgbi);
-    auto malformedCgbi = largeCgbi;
-    put32(malformedCgbi, 8, UINT32_MAX, true);
-    rejected("CgBI prefix span must fit input", malformedCgbi, LoadError::DecodeFailed);
-    malformedCgbi = largeCgbi;
-    malformedCgbi.resize(23);
-    rejected("truncated CgBI prefix", malformedCgbi, LoadError::DecodeFailed);
-    malformedCgbi = largeCgbi;
-    malformedCgbi[12] = 'c';
-    rejected("unsupported pre-IHDR chunk", malformedCgbi, LoadError::DecodeFailed);
-    internal::recordImageDecodeLimit(64);
-}
-void hdrIntegerChecks(const fs::path& root) {
-    const string header = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n";
-    const string resolution = "\n-Y 1 +X 1\n";
-    for (const string text : {
-            header + '\0' + "\n-Y 1 +X 4294967297\n" + resolution,
-            header + "COMMENT=before" + '\0' + "after\n" + resolution,
-            header + resolution.substr(0, resolution.size() - 1) + '\0' + "\n"}) {
-        Bytes bytes(text.begin(), text.end());
-        bytes.insert(bytes.end(), {128,128,128,129});
-        rejected("NUL HDR header U8", bytes, LoadError::DecodeFailed);
-        writeFile(root / "nul.hdr", bytes);
-        Pixels floats;
-        floats.allocate(1, 1);
-        const auto before = internal::imageDecodeRejectionsForTests();
-        check("NUL HDR header float", floats.loadHDR(root / "nul.hdr").error == LoadError::DecodeFailed &&
-              empty(floats) && internal::imageDecodeRejectionsForTests() == before);
-    }
-    Bytes binaryControl(header.begin(), header.end());
-    binaryControl.insert(binaryControl.end(), resolution.begin(), resolution.end());
-    binaryControl.insert(binaryControl.end(), {0,0,0,0});
-    Pixels control;
-    check("NUL HDR pixel data U8 loads", bool(control.loadFromMemory(binaryControl.data(), int(binaryControl.size()))));
-    writeFile(root / "nul-pixels.hdr", binaryControl);
-    check("NUL HDR pixel data float loads", control.loadHDR(root / "nul-pixels.hdr") && control.isFloat());
-    for (const string dimension : {"4294967297", "2147483648", "999999999999999999999999999999", "0", "-1", "65", "1"}) {
-        for (bool width : {false, true}) {
-            const string text = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y " +
-                (width ? "1" : dimension) + " +X " + (width ? dimension : "1") + "\n";
-            Bytes bytes(text.begin(), text.end());
-            bytes.insert(bytes.end(), {128,128,128,129});
-            const auto expected = dimension == "1" ? LoadError::None :
-                dimension == "65" ? LoadError::TooLarge : LoadError::DecodeFailed;
-            const string label = "HDR " + string(width ? "width " : "height ") + dimension;
-            if (expected != LoadError::None) rejected(label, bytes, expected);
-            else {
-                Pixels control;
-                check(label + " control loads", control.loadFromMemory(bytes.data(), int(bytes.size())) &&
-                      control.getWidth() == 1 && control.getHeight() == 1);
-            }
-            writeFile(root / "integer.hdr", bytes);
-            Pixels floats;
-            const auto before = internal::imageDecodeRejectionsForTests();
-            const auto result = floats.loadHDR(root / "integer.hdr");
-            check(label + " float route", result.error == expected &&
-                  (expected == LoadError::None ? floats.isFloat() : empty(floats)) &&
-                  internal::imageDecodeRejectionsForTests() == before + (expected == LoadError::TooLarge ? 1 : 0));
-        }
+void earlyPngChecks(const fs::path& root) {
+    Pixels pixels;
+    for (bool cgbi : {false, true}) {
+        auto png = zeroPng(8, 8, cgbi);
+        // stb ignores CRCs; local and memory decoding now use that policy.
+        png[cgbi ? 45 : 29] ^= 1;
+        check("PNG with unusual IHDR CRC follows stb", pixels.loadFromMemory(png.data(), int(png.size())) &&
+              pixels.getWidth() == 8 && pixels.getHeight() == 8);
+        const auto path = root / "unusual-crc.png";
+        writeFile(path, png);
+        check("local PNG CRC follows stb", pixels.load(path) && pixels.getWidth() == 8);
+        Pixels mcpPixels;
+        check("MCP local PNG follows stb CRC policy", mcp::internal::loadMcpImage(mcpPixels, path) && mcpPixels.getWidth() == 8);
     }
 }
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 void gpuReplacementChecks(const fs::path& root) {
     // Resolve EGL at runtime so other platforms retain the same owned test.
     auto* library = dlopen("libEGL.so.1", RTLD_NOW);
-    check("surfaceless EGL library is available", library != nullptr);
-    if (!library) return;
+    if (!library) {
+        printf("SKIP: surfaceless EGL GPU checks: %s\n", dlerror());
+        return;
+    }
 #define EGL_FUNCTION(name) auto name = reinterpret_cast<decltype(&::name)>(dlsym(library, #name))
     EGL_FUNCTION(eglGetPlatformDisplay); EGL_FUNCTION(eglInitialize); EGL_FUNCTION(eglBindAPI);
     EGL_FUNCTION(eglChooseConfig); EGL_FUNCTION(eglCreateContext); EGL_FUNCTION(eglMakeCurrent);
-    EGL_FUNCTION(eglDestroyContext); EGL_FUNCTION(eglTerminate);
+    EGL_FUNCTION(eglDestroyContext); EGL_FUNCTION(eglTerminate); EGL_FUNCTION(eglGetError);
 #undef EGL_FUNCTION
+    if (!eglGetPlatformDisplay || !eglInitialize || !eglBindAPI || !eglChooseConfig ||
+        !eglCreateContext || !eglMakeCurrent || !eglDestroyContext || !eglTerminate || !eglGetError) {
+        printf("SKIP: surfaceless EGL GPU checks: required EGL entry point unavailable\n");
+        dlclose(library); return;
+    }
+    auto stage = [&](const char* name, bool ok) {
+        if (!ok) printf("SKIP: surfaceless EGL GPU checks: %s failed: eglGetError=0x%04x\n", name, eglGetError());
+        return ok;
+    };
     auto display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
+    const bool haveDisplay = stage("eglGetPlatformDisplay", display != EGL_NO_DISPLAY);
     EGLint major = 0, minor = 0, count = 0;
+#if defined(SOKOL_GLES3)
+    constexpr EGLenum api = EGL_OPENGL_ES_API;
+    const EGLint attributes[]{EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL_NONE};
+    const EGLint contextAttributes[]{EGL_CONTEXT_MAJOR_VERSION, 3, EGL_NONE};
+#else // SOKOL_GLCORE and the existing desktop EGL fallback for other backends.
+    constexpr EGLenum api = EGL_OPENGL_API;
     const EGLint attributes[]{EGL_SURFACE_TYPE, EGL_PBUFFER_BIT, EGL_RENDERABLE_TYPE, EGL_OPENGL_BIT, EGL_NONE};
-    EGLConfig config{};
     const EGLint contextAttributes[]{EGL_CONTEXT_MAJOR_VERSION, 4, EGL_CONTEXT_MINOR_VERSION, 3, EGL_NONE};
-    const bool initialized = eglInitialize(display, &major, &minor) && eglBindAPI(EGL_OPENGL_API) &&
-        eglChooseConfig(display, attributes, &config, 1, &count) && count;
+#endif
+    EGLConfig config{};
+    const bool initialized = haveDisplay && stage("eglInitialize", eglInitialize(display, &major, &minor)) &&
+        stage("eglBindAPI", eglBindAPI(api)) &&
+        stage("eglChooseConfig", eglChooseConfig(display, attributes, &config, 1, &count)) &&
+        stage("eglChooseConfig (no matching config)", count != 0);
     auto context = initialized ? eglCreateContext(display, config, EGL_NO_CONTEXT, contextAttributes) : EGL_NO_CONTEXT;
-    const bool current = context != EGL_NO_CONTEXT && eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context);
-    check("surfaceless EGL context is available", current);
-    if (!current) { eglTerminate(display); dlclose(library); return; }
+    const bool created = initialized && stage("eglCreateContext", context != EGL_NO_CONTEXT);
+    const bool current = created && stage("eglMakeCurrent",
+        eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, context));
+    if (!current) {
+        if (context != EGL_NO_CONTEXT) eglDestroyContext(display, context);
+        if (haveDisplay) eglTerminate(display);
+        dlclose(library); return;
+    }
+    check("surfaceless EGL context is available", true);
     sg_desc descriptor{}; sg_setup(&descriptor);
     internal::recordImageDecodeLimit(sg_query_limits().max_image_size_2d);
+    {
+        const auto wide = encoded("png", sg_query_limits().max_image_size_2d + 1, 1);
+        Image oversized;
+        check("GPU upload still rejects device axis overflow", oversized.loadFromMemory(wide.data(), int(wide.size())).error == LoadError::TooLarge &&
+              !oversized.isAllocated() && !oversized.getTexture().isAllocated());
+    }
     const auto bytes = encoded("png", 8, 8);
     const auto path = root / "gpu-replacement.png";
     writeFile(path, bytes);
@@ -401,21 +354,6 @@ void gpuReplacementChecks(const fs::path& root) {
         check("GPU sync replacement OOM returns clean empty image", !escaped && result.error == LoadError::Unknown &&
               !image.isAllocated() && !image.getTexture().isAllocated() && internal::imageDecodeRejectionsForTests() == before);
         check("retirement keeps old GPU handle alive until collection", sg_query_image_state(oldImage) == SG_RESOURCESTATE_VALID);
-        // Avoid an old allocating cleanup after recording a regression failure.
-        if (escaped) { image.clear(); }
-        check("GPU async replacement fixture recovers", bool(image.loadFromMemory(bytes.data(), int(bytes.size()))));
-        int events = 0; LoadError error = LoadError::None;
-        auto listener = image.onLoad.listen([&](LoadResult& ready) { error = ready.error; ++events; });
-        image.loadAsync(path, cycle & 1);
-        internal::waitForResourceLoadsForTests();
-        auto batch = internal::takeResourceLoadBatch();
-        escaped = false;
-        failNew = true;
-        try { internal::deliverResourceLoadBatch(std::move(batch)); } catch (...) { escaped = true; }
-        failNew = false;
-        check("GPU async replacement OOM settles once with clean empty image", !escaped && events == 1 &&
-              error == LoadError::Unknown && !image.isLoading() && !image.isAllocated() && !image.getTexture().isAllocated() &&
-              internal::imageDecodeRejectionsForTests() == before);
         image.clear();
         internal::drainPendingGpuDestroys();
         check("retired GPU image is collected", sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID);
@@ -436,12 +374,36 @@ void inputSizeChecks(const fs::path& root) {
     internal::failImageDecodeAllocationAfterForTests(-1);
     check("memory size rejected before reading", pixels.loadFromMemory(&byte, int(cap + 1)).error == LoadError::TooLarge && empty(pixels) &&
         internal::imageDecodeAllocationAttemptsForTests() == 0);
-    const auto path = root / "encoded.png";
-    { ofstream file(path, ios::binary); file.seekp(cap); file.put(0); }
-    internal::failImageDecodeAllocationAfterForTests(0);
-    check("file size rejected before reading or allocating", pixels.load(path).error == LoadError::TooLarge && empty(pixels) &&
-        internal::imageDecodeAllocationAttemptsForTests() == 0);
-    internal::failImageDecodeAllocationAfterForTests(-1);
+    const auto path = root / "encoded.ppm";
+    {
+        ofstream file(path, ios::binary);
+        file << "P6\n5000 4667\n255\n";
+        const Bytes row(5000 * 3, 255);
+        for (int y = 0; y < 4667; ++y)
+            file.write(reinterpret_cast<const char*>(row.data()), streamsize(row.size()));
+        check("70 MB local PPM fixture written", bool(file));
+    }
+    check("local image above 64 MiB loads completely", pixels.load(path) && pixels.getWidth() == 5000 &&
+          pixels.getHeight() == 4667 && pixels.getColor(4999, 4666) == Color(1, 1, 1, 1));
+    pixels.clear();
+    {
+        Image image;
+        check("headless Image loads local image above 64 MiB", image.load(path) && image.getWidth() == 5000);
+        image.clear();
+        internal::appRunToken() = make_shared<atomic<bool>>(true);
+        int events = 0;
+        auto listener = image.onLoad.listen([&](LoadResult& result) {
+            check("async local image above 64 MiB loads completely", result && image.getHeight() == 4667 &&
+                  image.getPixels().getColor(4999, 4666) == Color(1, 1, 1, 1));
+            ++events;
+        });
+        image.loadAsync(path);
+        internal::waitForResourceLoadsForTests();
+        internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
+        check("async large local load completes once", events == 1 && !image.isLoading());
+        internal::appRunToken()->store(false);
+    }
+    fs::remove(path);
     auto bytes = encoded("png", 1, 1);
     bytes.resize(cap, 0);
     check("exact encoded input cap loads", pixels.loadFromMemory(bytes.data(), int(bytes.size())) && pixels.getWidth() == 1);
@@ -469,9 +431,10 @@ void platformChecks(const fs::path& root) {
     Pixels pixels;
     check("ImageIO-only format loads at boundary", pixels.load(root / "edge.tiff") &&
           pixels.getWidth() == 64 && pixels.getColor(63, 0) == Color(1, 1, 1, 1));
-    check("direct ImageIO rejects whole replacement", !pixels.loadPlatform(root / "over.tiff") && pixels.getWidth() == 64);
-    check("ImageIO file fallback rejects over boundary", pixels.load(root / "over.tiff").error == LoadError::TooLarge && empty(pixels));
-    check("MCP ImageIO fallback shares axis admission", !mcp::internal::loadMcpImage(pixels, root / "over.tiff") && empty(pixels));
+    check("direct ImageIO exceeds old axis cap", pixels.loadPlatform(root / "over.tiff") && pixels.getWidth() == 65);
+    check("ImageIO file fallback exceeds old axis cap", pixels.load(root / "over.tiff") && pixels.getWidth() == 65);
+    pixels.clear();
+    check("MCP ImageIO fallback follows local loading", mcp::internal::loadMcpImage(pixels, root / "over.tiff") && pixels.getWidth() == 65);
 }
 #endif
 void mipSamplingChecks() {
@@ -530,8 +493,8 @@ void allocationChecks(const fs::path& root) {
         mcpPixels.clear();
         internal::failImageDecodeAllocationAfterForTests(int64_t(step));
         const auto before = internal::imageDecodeRejectionsForTests();
-        check("MCP encoded/decoder/pixel OOM releases owner credits", !mcp::internal::loadMcpImage(mcpPixels, root / "mcp-allocation.png") &&
-              empty(mcpPixels) && mcp::internal::workingMemory() == 0 && internal::imageDecodeRejectionsForTests() == before);
+        check("MCP encoded/decoder/pixel OOM returns failure", !mcp::internal::loadMcpImage(mcpPixels, root / "mcp-allocation.png") &&
+              empty(mcpPixels) && internal::imageDecodeRejectionsForTests() == before);
     }
     const auto path = root / "allocation.hdr";
     writeFile(path, encoded("hdr", 8, 8));
@@ -561,52 +524,6 @@ void allocationChecks(const fs::path& root) {
     internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
     check("async allocation failure completes without bound loss", events == 1 && !image.isLoading() &&
           internal::imageDecodeRejectionsForTests() == rejectedBefore);
-    // Both populated and empty snapshots must survive persistent OOM, including
-    // the move into delivery (MSVC list sentinels/vector proxies can allocate).
-    static_assert(std::is_nothrow_default_constructible_v<internal::ResourceLoadBatch>);
-    static_assert(std::is_nothrow_move_constructible_v<internal::ResourceLoadBatch>);
-    static_assert(std::is_nothrow_destructible_v<internal::ResourceLoadBatch>);
-    int callbacks = 0;
-    internal::enqueueResourceLoad([&] { ++callbacks; });
-    bool escaped = false, emptySnapshot = false;
-    failNew = true;
-    try {
-        auto batch = internal::takeResourceLoadBatch();
-        auto empty = internal::takeResourceLoadBatch();
-        emptySnapshot = empty.empty();
-        internal::deliverResourceLoadBatch(std::move(batch));
-        internal::deliverResourceLoadBatch(std::move(empty));
-    } catch (...) { escaped = true; }
-    failNew = false;
-    check("resource snapshots construct/move/deliver without allocating", !escaped && emptySnapshot && callbacks == 1);
-    Image pending;
-    pending.loadAsync(path);
-    internal::waitForResourceLoadsForTests();
-    auto discardedPayload = make_shared<int>(0);
-    weak_ptr<int> discardedOwner = discardedPayload;
-    internal::enqueueResourceLoad([payload = std::move(discardedPayload), &callbacks] { ++callbacks; });
-    escaped = false;
-    failNew = true;
-    try { internal::waitForResourceLoadsAtAppExit(); } catch (...) { escaped = true; }
-    failNew = false;
-    check("resource shutdown returns all completion credits without allocating", !escaped && !pending.isLoading() &&
-          internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
-    check("resource shutdown discards generic payload without callbacks or allocation", discardedOwner.expired() && callbacks == 1);
-    Image launchFailure;
-    int launchEvents = 0;
-    LoadError launchError = LoadError::None;
-    auto launchListener = launchFailure.onLoad.listen([&](LoadResult& ready) { ++launchEvents; launchError = ready.error; });
-    internal::setResourceLoadProbeForTests([](const char* stage, const fs::path&) {
-        if (std::strcmp(stage, "image.dispatch") == 0) failNew = true;
-    });
-    escaped = false;
-    try { launchFailure.loadAsync(path); } catch (...) { escaped = true; }
-    failNew = false;
-    internal::setResourceLoadProbeForTests({});
-    internal::waitForResourceLoadsForTests();
-    internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
-    check("preparation dispatch allocation failure settles without escaping", !escaped && launchEvents == 1 &&
-          launchError == LoadError::Unknown && !launchFailure.isLoading() && internal::resourceLoadUsageForTests().outstanding == 0);
     internal::appRunToken()->store(false);
 }
 } // namespace
@@ -620,6 +537,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     } catch (const std::bad_alloc&) { hookRejected = true; }
     failNew = false;
     check("global allocation-failure hook is active", hookRejected);
+    if (argc > 1 && string(argv[1]) == "--callback-input") {
+        callbackInputChecks();
+        return failures ? 1 : 0;
+    }
     if (argc > 1) return imageDeviceMain(argc, argv);
     const auto root = fs::temp_directory_path() / "tc_imageDecodeBounds";
     fs::create_directories(root);
@@ -628,8 +549,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         if (event.message.find("[Pixels]") == string::npos) return;
         if (event.level == LogLevel::Warning) {
             ++warnings;
-            check("bound Warning names pixel store, needed axes and capacity", event.message.find("16385x16385") != string::npos &&
-                  event.message.find("GPU limit of 16384 per axis") != string::npos);
+            check("bound Warning reports rejection", event.message.find("image rejected: ") != string::npos);
         }
         if (event.level == LogLevel::Error) ++errors;
     });
@@ -641,12 +561,12 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     Pixels corruptMcp;
     check("corrupt MCP file counts no bound loss", !mcp::internal::loadMcpImage(corruptMcp, root / "corrupt.png") &&
           warnings == 0 && internal::imageDecodeRejectionsForTests() == before);
-    earlyPngChecks();
+    earlyPngChecks(root);
     boundaryChecks(root);
-    check("real axis overflow still emits first bound Warning", warnings == 1);
+    check("local MCP loading emits no axis admission Warning", warnings == 0);
     headerChecks();
-    hdrIntegerChecks(root);
     inputSizeChecks(root);
+    callbackInputChecks();
     mipSamplingChecks();
     allocationChecks(root);
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)

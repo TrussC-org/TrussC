@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <thread>
 
 using namespace std;
@@ -160,7 +161,12 @@ public:
             if (log.message.find("[VideoPlayer]") != 0) return;
             if (log.level == LogLevel::Error) ++errorLogs;
             if (log.level == LogLevel::Warning && log.message.find("skipping invalid") != string::npos) {
-                if (log.message.find("skipped 2 invalid packets and 0 invalid frames since the last report") != string::npos)
+                // Frame-threaded codecs can report corrupt packets at receive time.
+                const auto summary = log.message.find("skipped ");
+                unsigned long long skippedPackets = 0, skippedFrames = 0;
+                if (summary != string::npos && std::sscanf(log.message.c_str() + summary,
+                        "skipped %llu invalid packets and %llu invalid frames", &skippedPackets, &skippedFrames) == 2 &&
+                    skippedPackets + skippedFrames == 2)
                     sawSkippedCount = true;
                 ++badPackets;
             }
@@ -211,6 +217,17 @@ public:
         }
         player.update();
         if (!player.hasError() && !player.isDone()) return;
+        // The decoder publishes its terminal error asynchronously. A transient
+        // done flag can precede that publication; classify after notification,
+        // with a hang guard that still reaches the existing failure assertions.
+        if (expectVideoError && !player.hasError() && events == 0) {
+            const auto now = chrono::steady_clock::now();
+            if (!terminalWaitStarted) {
+                terminalWaitStarted = true;
+                terminalWaitDeadline = now + chrono::seconds(10);
+            }
+            if (now < terminalWaitDeadline) return;
+        }
         if (player.hasError() && hadFrameBeforeError) {
             check("real failure keeps last pixels and texture", !before.empty() &&
                   player.getPixels() &&
@@ -272,6 +289,11 @@ private:
             auto message = player.getErrorMessage();
             check("failed reload stays a load failure", !player.load(videoPath / "missing-file"));
             check("failed reload retains runtime message", player.getErrorMessage() == message);
+            const auto invalid = fs::temp_directory_path() / "tc-video-error-invalid.mkv";
+            { std::ofstream file(invalid); file << "invalid video bytes"; }
+            check("existing invalid reload fails", !player.load(invalid));
+            check("decoder-open failure retains runtime message", player.hasError() && player.getErrorMessage() == message);
+            fs::remove(invalid);
         }
         player.close();
         check("real close clears error", !player.hasError());
@@ -290,6 +312,8 @@ private:
     int events = 0;
     bool hadFrameBeforeError = false;
     bool checkingRecoverySeek = false;
+    bool terminalWaitStarted = false;
+    chrono::steady_clock::time_point terminalWaitDeadline;
     string errorBeforeSeek;
     uint32_t seekUploadFrame = 0;
 };

@@ -10,14 +10,19 @@ directory is then this test's one configured build-* dir that holds a guest.
 import argparse
 import os
 from pathlib import Path
-import subprocess
 import time
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+from check_build_warnings import run_build
 
 
 def bump(path):
-    # An explicit future mtime: a coarse-timestamp filesystem cannot make the
-    # edit look older than the generated header.
+    # Establish ordering even on coarse-timestamp filesystems. Wait until the
+    # timestamp is real: a future input makes Make emit clock-skew warnings.
     stamp = max(time.time(), path.stat().st_mtime) + 2
+    while (remaining := stamp - time.time()) > 0:
+        time.sleep(min(remaining, 0.05))
     os.utime(path, (stamp, stamp))
 
 
@@ -60,12 +65,17 @@ def main():
     command = ['cmake', '--build', str(args.build), '--target', 'guest',
                '--config', args.config]
 
-    def build_guest(capture=False):
-        result = subprocess.run(command, check=True,
-                                stdout=subprocess.PIPE if capture else None,
-                                stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+    def build_guest():
+        shader_compiled = False
+
+        def observe(line):
+            nonlocal shader_compiled
+            shader_compiled |= 'Compiling shader: reloadProbe.glsl' in line
+
+        run_build(command, check=True, on_line=observe,
+                  text=True, encoding="utf-8", errors="replace")
         assert host.stat().st_mtime_ns == before_host, 'guest build relinked the host executable'
-        return result
+        return shader_compiled
 
     try:
         # A content edit is needed for Ninja's intentional copy_if_different:
@@ -86,9 +96,7 @@ def main():
         # reload used to relink the Host on Windows (#827).
         build_guest()
         bump(shader)
-        result = build_guest(capture=True)
-        print(result.stdout, end='', flush=True)
-        assert 'Compiling shader: reloadProbe.glsl' in result.stdout, 'mtime bump did not run shader compiler'
+        assert build_guest(), 'mtime bump did not run shader compiler'
         print('Shader mtime bump: generator completed', flush=True)
         for generation in (1, 2):
             before_guest = guest.stat().st_mtime_ns

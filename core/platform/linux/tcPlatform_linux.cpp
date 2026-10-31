@@ -27,10 +27,12 @@
 namespace trussc {
 
 void bringWindowToFront() {
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
     Display* display = XOpenDisplay(nullptr);
     if (!display) return;
     // ::Window = the X11 window id type (trussc::Window shadows it in this ns)
-    ::Window window = (::Window)(uintptr_t)sapp_x11_get_window();
+    ::Window window = (::Window)(uintptr_t)sapp_window_x11_get_window(internal::WindowRequestAccess::binding(*target).handle);
     if (window) {
         XRaiseWindow(display, window);
         XSetInputFocus(display, window, RevertToParent, CurrentTime);
@@ -75,10 +77,6 @@ bool getImmersiveMode() { return false; }
 // Orientation (no-op on desktop)
 void setOrientation(Orientation mask) { (void)mask; }
 
-// Keep screen on (TODO: xdg-screensaver or systemd-inhibit — no-op for now)
-void setKeepScreenOn(bool enabled) { (void)enabled; }
-bool getKeepScreenOn() { return false; }
-
 IVec2 internal::windowPositionNative(const void* handle) {
     auto* dpy = (Display*)sapp_x11_get_display();
     if (!dpy || !handle) {
@@ -88,34 +86,33 @@ IVec2 internal::windowPositionNative(const void* handle) {
     return x11FramePosition(dpy, (::Window)(uintptr_t)handle);
 }
 namespace {
-// Main-window storage belongs to the platform TU, never to an inline header.
-// Each secondary owns the same state in its AdapterState.
-internal::X11GeometryState mainGeometry;
-::Window mainGeometryWindow = 0;
 internal::X11GeometryState& mainGeometryState() {
-    const auto window = (::Window)(uintptr_t)sapp_x11_get_window();
-    if (window != mainGeometryWindow) {
+    auto& binding = internal::WindowRequestAccess::binding(*internal::resolveWindow());
+    if (!binding.geometryInitialized) {
         const auto desc = sapp_query_desc();
-        mainGeometry = {
-            _sapp_tc_window_points(desc.width, desc._tc_pixel_width, sapp_dpi_scale()),
-            _sapp_tc_window_points(desc.height, desc._tc_pixel_height, sapp_dpi_scale()),
+        const float dpi = internal::windowApiContext().dpiScale;
+        binding.geometry = {
+            _sapp_tc_window_points(desc.width, desc._tc_pixel_width, dpi),
+            _sapp_tc_window_points(desc.height, desc._tc_pixel_height, dpi),
             desc._tc_pixel_width > 0 || desc._tc_pixel_height > 0};
-        mainGeometryWindow = window;
+        binding.geometryInitialized = true;
     }
-    return mainGeometry;
+    return binding.geometry;
 }
 }
-IVec2 internal::mainWindowPosition() { return windowPositionNative(sapp_x11_get_window()); }
-void internal::setMainWindowPosition(int x, int y) {
+IVec2 internal::singleWindowPosition() { return windowPositionNative(sapp_x11_get_window()); }
+void internal::setSingleWindowPosition(int x, int y) {
     x11Geometry((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_x11_get_window(),
-        mainGeometryState(), true, x, y, 0, 0, sapp_dpi_scale(), sapp_is_fullscreen());
+        mainGeometryState(), true, x, y, 0, 0, internal::windowApiContext().dpiScale, sapp_is_fullscreen());
 }
 
 void setWindowDecorated(bool decorated) {
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
     Display* display = XOpenDisplay(nullptr);
     if (!display) return;
     // ::Window = the X11 window id type (trussc::Window shadows it in this ns)
-    ::Window window = (::Window)(uintptr_t)sapp_x11_get_window();
+    ::Window window = (::Window)(uintptr_t)sapp_window_x11_get_window(internal::WindowRequestAccess::binding(*target).handle);
     if (window) {
         // Motif WM hints: clear the decorations flag to drop the WM-drawn frame.
         struct {
@@ -135,14 +132,14 @@ void setWindowDecorated(bool decorated) {
     XCloseDisplay(display);
 }
 
-void internal::setMainWindowSizeFractionalX11(double width, double height) {
+void internal::setSingleWindowSizeFractionalX11(double width, double height) {
     x11Geometry((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_x11_get_window(),
-        mainGeometryState(), false, 0, 0, width, height, sapp_dpi_scale(), sapp_is_fullscreen(), true);
+        mainGeometryState(), false, 0, 0, width, height, internal::windowApiContext().dpiScale, sapp_is_fullscreen(), true);
 }
 
-void internal::setMainWindowSizeLogical(int width, int height) {
+void internal::setSingleWindowSizeLogical(int width, int height) {
     internal::x11Geometry((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_x11_get_window(),
-        mainGeometryState(), false, 0, 0, width, height, sapp_dpi_scale(), sapp_is_fullscreen());
+        mainGeometryState(), false, 0, 0, width, height, internal::windowApiContext().dpiScale, sapp_is_fullscreen());
 }
 
 fs::path getExecutablePath() {
@@ -212,9 +209,8 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    if (!ctx.isMain && ctx.fbWidth > 0 && ctx.fbHeight > 0)
-        return {size_t(ctx.fbWidth), size_t(ctx.fbHeight)};
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    const auto dimensions = windowDimensions(ctx);
+    return {size_t(std::max(0, dimensions.fbWidth)), size_t(std::max(0, dimensions.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {

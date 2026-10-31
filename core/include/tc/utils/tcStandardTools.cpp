@@ -44,39 +44,11 @@
 extern "C" unsigned char *stbi_write_png_to_mem(const unsigned char *pixels, int stride_bytes, int x, int y, int n, int *out_len);
 
 namespace trussc {
+namespace internal { double measuredWindowRate(const WindowContext&); }
 namespace {
-// The writer checks each field before JsonWriteReflector copies its value.
-class McpJsonWriteReflector : public JsonWriteReflector {
-    void account(const char* name, size_t bytes = 32) {
-        if (!mcp::internal::currentWorkBudget()) return;
-        const auto limit = mcp::getAdmissionLimits().replyBytes;
-        const size_t nameBytes = std::char_traits<char>::length(name);
-        // Bound (security): reflected strings and fields are reply construction. Overflow returns an error before copying and is counted.
-        if (bytes > limit / 8 || nameBytes > limit / 8) {
-            const size_t fieldBytes = std::max(bytes, nameBytes);
-            mcp::internal::admissionRejected(mcp::internal::AdmissionStore::Reply, limit, fieldBytes > SIZE_MAX / 8 ? SIZE_MAX : fieldBytes * 8);
-            throw mcp::internal::AdmissionError();
-        }
-        mcp::internal::reserveReply((nameBytes + bytes) * 6 + 128);
-        mcp::internal::reserveWork((nameBytes + bytes) * 8 + 512);
-    }
-public:
-    bool visit(const char* name, float& v) override { account(name); return JsonWriteReflector::visit(name, v); }
-    bool visit(const char* name, int& v) override { account(name); return JsonWriteReflector::visit(name, v); }
-    bool visit(const char* name, bool& v) override { account(name); return JsonWriteReflector::visit(name, v); }
-    bool visit(const char* name, std::string& v) override { account(name, v.size()); return JsonWriteReflector::visit(name, v); }
-    bool visit(const char* name, Vec2& v) override { account(name); return JsonWriteReflector::visit(name, v); }
-    bool visit(const char* name, Vec3& v) override { account(name); return JsonWriteReflector::visit(name, v); }
-    bool visit(const char* name, Color& v) override { account(name); return JsonWriteReflector::visit(name, v); }
-    bool visit(const char* name, int& v, const EnumLabelSpan& labels) override {
-        account(name, labels.labels && v >= 0 && v < labels.count && labels.labels[v] ? std::char_traits<char>::length(labels.labels[v]) : 32);
-        return JsonWriteReflector::visit(name, v, labels);
-    }
-    void beginGroup(const char* name) override { account(name); JsonWriteReflector::beginGroup(name); }
-};
 template<class T>
 void writeMcpMembers(T& object, Json& out, bool includeDerived) {
-    McpJsonWriteReflector writer;
+    JsonWriteReflector writer;
     writer.includeDerived = includeDerived;
     object.reflectMembers(writer);
     if (!writer.members.empty()) out["members"] = std::move(writer.members);
@@ -85,8 +57,6 @@ void writeMcpMembers(T& object, Json& out, bool includeDerived) {
 }
 
 Json nodeToJson(Node& node, int maxDepth, bool includeDerived) {
-    mcp::internal::reserveReply(1024 + node.getName().size() * 6);
-    mcp::internal::reserveWork(4096);
     Json j = Json::object();
     j["type"] = node.getTypeName();
     if (node.hasName()) j["name"] = node.getName();
@@ -186,44 +156,9 @@ int inputMouseButton(const json& a, bool move = false) {
 
 } // namespace
 
-void reserveWindowReadback() {
-    const auto [width, height] = trussc::internal::captureWindowSize(trussc::internal::currentWindowContext());
-    // Bound (security): framebuffer readback reserves 8 bytes per pixel before allocation. Overflow returns an error and is counted.
-    reserveWindowCapture(width, height);
-}
-
-// Admit both the GPU staging/readback and the file encoder before either runs.
-// A queued capture repeats this check at drain time, when dimensions may differ.
-void reserveWindowSave(const trussc::internal::WindowContext& ctx) {
-    const auto [width, height] = trussc::internal::captureWindowSize(ctx);
-    // Bound (security): capture/encoder workspace uses 64 bytes per pixel plus 1 MiB codec overhead. Overflow rejects before readback and is counted.
-    reserveWindowCapture(width, height, 64, 1024 * 1024);
-}
-
-// Each entry includes map/string nodes, vector growth and escaped output.
-void reserveDebugObjectJson(const std::string& name) {
-    const auto limit = getAdmissionLimits().replyBytes;
-    // Bound (security): registry replies admit each name and JSON entry before copying. Overflow rejects the tool and is counted.
-    constexpr size_t overhead = 2048;
-    if (limit < overhead || name.size() > (limit - overhead) / 6) {
-        admissionRejected(AdmissionStore::Reply, limit,
-            name.size() > (SIZE_MAX - overhead) / 6 ? SIZE_MAX : name.size() * 6 + overhead);
-        throw AdmissionError();
-    }
-    reserveReply(name.size() * 6 + overhead);
-    reserveWork(name.size() + overhead);
-}
-
 void downscaleImage(const unsigned char* src, int srcW, int srcH, int channels,
                     std::vector<unsigned char>& dst, int dstW, int dstH) {
     if (dstW <= 0 || dstH <= 0 || channels <= 0) throw std::runtime_error("invalid image dimensions");
-    const auto limit = getAdmissionLimits().workingBytes;
-    // Bound (security): image scratch dimensions must fit before resize. Overflow returns an error and is counted.
-    if (size_t(dstW) > limit / size_t(dstH) / size_t(channels)) {
-        admissionRejected(AdmissionStore::Working, limit, size_t(dstW));
-        throw AdmissionError();
-    }
-    reserveWork(size_t(dstW) * dstH * channels);
     dst.resize(size_t(dstW) * dstH * channels);
     for (int y = 0; y < dstH; ++y) {
         int sy0 = int(size_t(y) * srcH / dstH);
@@ -251,15 +186,6 @@ json pixelsToImageJson(const trussc::Pixels& px, const std::string& format,
     int dstW = (reqWidth > 0) ? std::min(reqWidth, srcW) : srcW;
     int dstH = std::max(1, (int)std::lround((double)srcH * dstW / srcW));
 
-    const auto limit = getAdmissionLimits().replyBytes;
-    // Bound (security): image encoding and base64 copies need credits before construction. Overflow returns an error and is counted.
-    if (dstW <= 0 || ch <= 0 || size_t(dstW) > limit / size_t(dstH) / size_t(ch) / 8) {
-        admissionRejected(AdmissionStore::Reply, limit, size_t(dstW));
-        throw AdmissionError();
-    }
-    const size_t rawBytes = size_t(dstW) * dstH * ch;
-    reserveReply(rawBytes * 8);
-    reserveWork(rawBytes * 16);
     const unsigned char* data = px.getData();
     std::vector<unsigned char> scaled;
     if (dstW != srcW) {
@@ -270,11 +196,11 @@ json pixelsToImageJson(const trussc::Pixels& px, const std::string& format,
     std::vector<unsigned char> out;
     if (format == "png") {
         int len = 0;
-        unsigned char* png = stbi_write_png_to_mem(data, 0, dstW, dstH, ch, &len);
-        if (png) {
-            out.assign(png, png + len);
-            std::free(png);
-        }
+        std::unique_ptr<unsigned char, decltype(&std::free)> png(
+            stbi_write_png_to_mem(data, 0, dstW, dstH, ch, &len), &std::free);
+        // The C encoder returned safely; throw only here, after all C frames ended.
+        if (!png) throw std::bad_alloc();
+        out.assign(png.get(), png.get() + len);
     } else {
         stbi_write_jpg_to_func(
             [](void* ctx, void* d, int size) {
@@ -308,6 +234,7 @@ json imageContentResult(json img) {
 void addStatusEntry(StatusEntry entry) {
     if (mcp::internal::refuseRetiringRegistration("status", entry.name)) return;
     entry.owner = mcp::internal::registrationOwner();
+    entry.getter = ::trussc::internal::appOwnedCallback(entry.getter);
     auto& reg = statusRegistry();
     for (auto& e : reg) {
         if (e.name == entry.name) { e = std::move(entry); return; }
@@ -371,6 +298,7 @@ void statusGraph(const std::string& name, std::function<double()> getter) {
 
 void statusImage(const std::string& name, std::function<trussc::Pixels()> getter) {
     if (internal::refuseRetiringRegistration("status image", name)) return;
+    getter = ::trussc::internal::appOwnedCallback(std::move(getter));
     auto& reg = internal::statusImageRegistry();
     const void* owner = mcp::internal::registrationOwner();
     for (auto& e : reg) {
@@ -394,31 +322,109 @@ void registerInspectionTools() { setToolLevel(ToolLevel::ReadOnly); }
 
 namespace trussc::mcp::internal {
 
-void fillKeyModifiers(KeyEventArgs& args, int key, bool down) {
-    auto heldAfter = [key, down](int code) {
-        return code == key ? down : isKeyPressed(code);
-    };
-    args.shift = heldAfter(SAPP_KEYCODE_LEFT_SHIFT)   || heldAfter(SAPP_KEYCODE_RIGHT_SHIFT);
-    args.ctrl  = heldAfter(SAPP_KEYCODE_LEFT_CONTROL) || heldAfter(SAPP_KEYCODE_RIGHT_CONTROL);
-    args.alt   = heldAfter(SAPP_KEYCODE_LEFT_ALT)     || heldAfter(SAPP_KEYCODE_RIGHT_ALT);
-    args.super = heldAfter(SAPP_KEYCODE_LEFT_SUPER)   || heldAfter(SAPP_KEYCODE_RIGHT_SUPER);
-}
-
-void injectKeyDown(int key) {
-    KeyEventArgs args;
-    args.key = key;
-    fillKeyModifiers(args, key, true);
-    ::trussc::internal::currentWindowContext().keysPressed.insert(key);
-    events().keyPressed.notify(args);
-}
-
-void injectKeyUp(int key) {
-    KeyEventArgs args;
-    args.key = key;
-    fillKeyModifiers(args, key, false);
-    ::trussc::internal::currentWindowContext().keysPressed.erase(key);
-    events().keyReleased.notify(args);
-}
+// A whole input call targets one explicit Window, including both halves of a click.
+struct InputTarget {
+    static trussc::Window& targetWindow(const json& args) {
+        const auto windows = trussc::internal::openWindows();
+        json ids = json::array();
+        trussc::Window* target = nullptr;
+        uint64_t id = 0;
+        if (args.contains("window")) {
+            const auto& value = args.at("window");
+            if (!value.is_number_integer() || value < 1 || value > UINT32_MAX)
+                throw InputArgumentError("window must be a positive Window ID");
+            id = value.get<uint64_t>();
+        }
+        for (auto* window : windows) {
+            auto candidate = trussc::internal::WindowRequestAccess::creationId(*window);
+            ids.push_back(candidate);
+            if (candidate == id || (!args.contains("window") && windows.size() == 1)) target = window;
+        }
+        if (!target) throw InputArgumentError("Specify a Window ID; available IDs: " + ids.dump());
+        return *target;
+    }
+    trussc::Window& window;
+    std::optional<trussc::internal::WindowEntryScope> entry;
+    sapp_tc_window_metadata snapshot{};
+    trussc::internal::WindowContext& ctx = window.context();
+    explicit InputTarget(const json& args) : window(targetWindow(args)) {
+        if (!window.isOpen()) throw InputArgumentError("target window is not available for input");
+        const auto& b = trussc::internal::WindowRequestAccess::binding(window);
+        snapshot = b.metadata;
+        if (b.operations && b.operations->readMetadata && !b.operations->readMetadata(b.handle, b.user, snapshot))
+            throw InputArgumentError("target window is not available for input");
+    }
+    void begin() {
+        if (!entry) {
+            entry.emplace(window, false, false, false);
+            if (!*entry) throw InputArgumentError("target window is not available for input");
+        }
+        const auto& b = trussc::internal::WindowRequestAccess::binding(window);
+        if (b.operations && b.operations->readMetadata && !b.operations->readMetadata(b.handle, b.user, snapshot))
+            throw InputArgumentError("target window is not available for input");
+    }
+    uint32_t modifiers(int key = -1, bool down = false) const {
+        const auto held = [&](int code) { return code == key ? down : ctx.keysPressed.contains(code); };
+        uint32_t result = 0;
+        if (held(SAPP_KEYCODE_LEFT_SHIFT) || held(SAPP_KEYCODE_RIGHT_SHIFT)) result |= SAPP_MODIFIER_SHIFT;
+        if (held(SAPP_KEYCODE_LEFT_CONTROL) || held(SAPP_KEYCODE_RIGHT_CONTROL)) result |= SAPP_MODIFIER_CTRL;
+        if (held(SAPP_KEYCODE_LEFT_ALT) || held(SAPP_KEYCODE_RIGHT_ALT)) result |= SAPP_MODIFIER_ALT;
+        if (held(SAPP_KEYCODE_LEFT_SUPER) || held(SAPP_KEYCODE_RIGHT_SUPER)) result |= SAPP_MODIFIER_SUPER;
+        if (ctx.pressedMouseButtons & 1) result |= SAPP_MODIFIER_LMB;
+        if (ctx.pressedMouseButtons & 2) result |= SAPP_MODIFIER_RMB;
+        if (ctx.pressedMouseButtons & 4) result |= SAPP_MODIFIER_MMB;
+        return result;
+    }
+    sapp_event pointer(sapp_event_type type, float x, float y, int button = -1) {
+        // Validate the original transform before entry can call App code, then
+        // rebuild from the current native revision after pending requests.
+        buildPointer(type, x, y, button);
+        begin();
+        return buildPointer(type, x, y, button);
+    }
+    sapp_event buildPointer(sapp_event_type type, float x, float y, int button) const {
+        sapp_event event{}; event.type = type; event.modifiers = modifiers();
+        event.mouse_button = button >= 0 ? static_cast<sapp_mousebutton>(button) : SAPP_MOUSEBUTTON_INVALID;
+        if (type == SAPP_EVENTTYPE_MOUSE_DOWN && button >= 0) event.modifiers |= SAPP_MODIFIER_LMB << button;
+        if (type == SAPP_EVENTTYPE_MOUSE_UP && button >= 0) event.modifiers &= ~(SAPP_MODIFIER_LMB << button);
+        const double dpi = snapshot.dpi_scale > 0 ? snapshot.dpi_scale : ctx.dpiScale;
+        const double factor = trussc::internal::pixelPerfectMode() ? 1 : dpi;
+        const double nx = double(x) * factor, ny = double(y) * factor;
+        const double basis = trussc::internal::pixelPerfectMode() ? dpi : 1;
+        const double dx = ctx.pointerValid ? double(x) - double(ctx.pointerLogicalX) * basis : 0;
+        const double dy = ctx.pointerValid ? double(y) - double(ctx.pointerLogicalY) * basis : 0;
+        // Bound (abi): transformed positions and differences must fit finite float event fields; reject before injection.
+        for (double value : {nx, ny, dx, dy, dx * factor, dy * factor})
+            if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
+                throw InputArgumentError("transformed pointer position or delta is out of range");
+        event.mouse_x = float(nx); event.mouse_y = float(ny);
+        event.mouse_dx = float(dx * factor); event.mouse_dy = float(dy * factor);
+        return event;
+    }
+    void send(sapp_event event, const void* pressOwner = nullptr) {
+        begin();
+        const auto& binding = trussc::internal::WindowRequestAccess::binding(window);
+        event.source = SAPP_EVENTSOURCE_INJECTED;
+        struct PressOwnerScope {
+            trussc::internal::WindowContext& ctx;
+            const void* previous;
+            ~PressOwnerScope() { ctx.pendingMousePressOwner = previous; }
+        } ownerScope{ctx, ctx.pendingMousePressOwner};
+        ctx.pendingMousePressOwner = pressOwner;
+        bool delivered = false;
+        if constexpr (trussc::internal::supportsSecondaryWindows()) {
+            delivered = binding.operations && binding.operations->injectEvent &&
+                binding.operations->injectEvent(binding.handle, binding.user, &event);
+        } else delivered = sapp_window_inject_event(binding.handle, &event);
+        if (!delivered) throw InputArgumentError("target window rejected input");
+    }
+    void key(int key, bool down) {
+        sapp_event event{};
+        event.type = down ? SAPP_EVENTTYPE_KEY_DOWN : SAPP_EVENTTYPE_KEY_UP;
+        event.key_code = static_cast<sapp_keycode>(key); event.modifiers = modifiers(key, down);
+        send(event);
+    }
+};
 
 json heldKeysJson() {
     std::vector<int> held(::trussc::internal::currentWindowContext().keysPressed.begin(),
@@ -445,28 +451,30 @@ namespace internal {
 void registerStandardTools(Server& server) {
     registerAudioTools(server);
 
-    // Resolve the optional MCP "window" arg (0 = main window; 1..N = open
-    // secondary windows in the order tc_list_windows reports). Returns the
-    // WindowContext to capture from, or null on a bad index or a hidden
+    // Resolve the optional positive Window ID. Omission requires one open
+    // Window. Returns its WindowContext, or null on an invalid ID or a hidden
     // window (error filled in).
     // Resolved when the request is handled; the capture itself then runs in
     // that window's own tick (deferral target), see drainPendingScreenshots().
-    auto resolveWindowCtx = [](int windowIdx, json& err) -> trussc::internal::WindowContext* {
-        if (windowIdx == 0) return &trussc::internal::mainWindowContext();
+    auto resolveWindowCtx = [](int64_t windowIdx, json& err, bool omitted = false, bool requireVisible = true) -> trussc::internal::WindowContext* {
         auto wins = trussc::internal::openWindows();
-        wins.erase(std::remove_if(wins.begin(), wins.end(), [](auto* w) { return w->context().isMain; }), wins.end());
-        if (windowIdx < 0 || (size_t)windowIdx > wins.size()) {
-            err = json{{"status", "error"},
-                       {"message", "window index out of range (0=main, 1.." +
-                                   std::to_string(wins.size()) + " secondary)"}};
+        json ids = json::array();
+        trussc::Window* win = nullptr;
+        for (auto* candidate : wins) {
+            const auto id = trussc::internal::WindowRequestAccess::creationId(*candidate);
+            ids.push_back(id);
+            if (windowIdx > 0 && id == static_cast<uint64_t>(windowIdx)) win = candidate;
+        }
+        if (omitted && wins.size() == 1) win = wins.front();
+        if (!win) {
+            err = json{{"status", "error"}, {"message", "Specify a positive window ID from tc_list_windows; omission requires exactly one open window"}, {"windows", ids}};
             return nullptr;
         }
-        trussc::Window* win = wins[(size_t)windowIdx - 1];
-        // The OS reports the window hidden, and a hidden secondary window
+        // The OS reports the window hidden, and a hidden Window
         // runs no tick, so a capture deferred to it could only time out after
         // kTargetedDeferralTimeout (#347). Only this direct signal fails fast;
         // a window that turns hidden later still gets the timeout.
-        if (win->isOccluded()) {
+        if (requireVisible && win->isOccluded()) {
             err = json{{"status", "error"},
                        {"message", "window " + std::to_string(windowIdx) +
                                    " is not visible (the OS reports it hidden: minimized, "
@@ -478,17 +486,12 @@ void registerStandardTools(Server& server) {
         return &win->context();
     };
 
-    coreTool(server, "tc_list_windows", "List open windows (index 0 = main; use the index as the 'window' arg of tc_get_screenshot / tc_save_screenshot). Each secondary window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
+    coreTool(server, "tc_list_windows", "List open windows with positive IDs (use index as the window argument). Each window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
         .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             json arr = json::array();
-            // The main window keeps rendering while hidden: no occluded field.
-            arr.push_back(json{{"index", 0}, {"main", true},
-                               {"width", getWindowWidth()}, {"height", getWindowHeight()}});
-            int i = 1;
             for (auto* w : trussc::internal::openWindows()) {
-                if (w->context().isMain) continue;
-                arr.push_back(json{{"index", i++}, {"main", false},
+                arr.push_back(json{{"index", trussc::internal::WindowRequestAccess::creationId(*w)},
                                    {"title", w->getTitle()},
                                    {"width", w->getWidth()}, {"height", w->getHeight()},
                                    {"occluded", w->isOccluded()}});
@@ -498,40 +501,26 @@ void registerStandardTools(Server& server) {
 
     // Lists and source lookup use the same process-wide lifetime registry.
     auto listImages = []() -> json {
-        try {
-            reserveReply(512);
-            reserveWork(1024);
-            json arr = json::array();
-            for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Image)) {
-                reserveDebugObjectJson(e.name);
-                const auto& p = static_cast<Image*>(e.object)->getPixels();
-                arr.push_back({{"index",e.index},{"name",e.name},{"width",p.getWidth()},
-                               {"height",p.getHeight()},{"format",p.isFloat()?"float":"RGBA8"}});
-            }
-            json result = json::object();
-            result["images"] = std::move(arr);
-            return result;
-        } catch (const AdmissionError& e) {
-            return json{{"status", "error"}, {"message", e.what()}};
+        json arr = json::array();
+        for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Image)) {
+            const auto& p = static_cast<Image*>(e.object)->getPixels();
+            arr.push_back({{"index",e.index},{"name",e.name},{"width",p.getWidth()},
+                           {"height",p.getHeight()},{"format",p.isFloat()?"float":"RGBA8"}});
         }
+        json result = json::object();
+        result["images"] = std::move(arr);
+        return result;
     };
     auto listFbos = []() -> json {
-        try {
-            reserveReply(512);
-            reserveWork(1024);
-            json arr = json::array();
-            for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo)) {
-                reserveDebugObjectJson(e.name);
-                const auto& f = *static_cast<Fbo*>(e.object);
-                arr.push_back({{"index",e.index},{"name",e.name},{"width",f.getWidth()},
-                               {"height",f.getHeight()},{"format",isFloatFormat(f.getTextureFormat())?"float":"RGBA8"}});
-            }
-            json result = json::object();
-            result["fbos"] = std::move(arr);
-            return result;
-        } catch (const AdmissionError& e) {
-            return json{{"status", "error"}, {"message", e.what()}};
+        json arr = json::array();
+        for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo)) {
+            const auto& f = *static_cast<Fbo*>(e.object);
+            arr.push_back({{"index",e.index},{"name",e.name},{"width",f.getWidth()},
+                           {"height",f.getHeight()},{"format",isFloatFormat(f.getTextureFormat())?"float":"RGBA8"}});
         }
+        json result = json::object();
+        result["fbos"] = std::move(arr);
+        return result;
     };
     coreTool(server, "tc_list_images", "List live Images: index, name, width, height, format (RGBA8 or float).")
         .level(ToolLevel::ReadOnly)
@@ -543,7 +532,7 @@ void registerStandardTools(Server& server) {
     Tool analyze;
     analyze.level = ToolLevel::ReadOnly;
     analyze.name = "tc_analyze_image";
-    analyze.description = "Analyze pixels without returning an image. Source: exactly one of {window:index}, {fbo:name or index}, {image:name or index}, {path:file}. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), results in ops order. Colors are RGBA, 0-1 for bytes; float values are unchanged. Ops: pixel(x,y)->color; histogram(bins)->histogram[RGBA][bin] (0-1, outliers in end bins); count(color,tolerance OR min,max)->count,bbox,centroid; stats()->mean,min,max; grid(cols,rows)->colors[row][col]; diff(path,threshold,save optional)->count,bbox,maxDifference; line(x0,y0,x1,y1)->colors. Every op accepts rect:[x,y,w,h], default whole image. Coordinates are top-left, line includes endpoints and clips to rect. Bbox is [x,y,w,h]; empty matches give null bbox/centroid. Diff uses max absolute RGBA difference, compares raw values and counts strictly above threshold. Save paths follow tc_save_screenshot; float file output is clamped to 0-1, analysis is unchanged. Fbo/window capture runs after frame completion. Web Fbo readback and iOS float Fbo readback return errors; non-float Fbo formats are converted to RGBA8 for byte readback.";
+    analyze.description = "Analyze pixels without returning an image. Source: exactly one of {window:positiveID}, {fbo:name or index}, {image:name or index}, {path:file}. Returns width, height, format (RGBA8/float), colorSpace (sRGB/linear), results in ops order. Colors are RGBA, 0-1 for bytes; float values are unchanged. Ops: pixel(x,y)->color; histogram(bins)->histogram[RGBA][bin] (0-1, outliers in end bins); count(color,tolerance OR min,max)->count,bbox,centroid; stats()->mean,min,max; grid(cols,rows)->colors[row][col]; diff(path,threshold,save optional)->count,bbox,maxDifference; line(x0,y0,x1,y1)->colors. Every op accepts rect:[x,y,w,h], default whole image. Coordinates are top-left, line includes endpoints and clips to rect. Bbox is [x,y,w,h]; empty matches give null bbox/centroid. Diff uses max absolute RGBA difference, compares raw values and counts strictly above threshold. Save paths follow tc_save_screenshot; float file output is clamped to 0-1, analysis is unchanged. Fbo/window capture runs after frame completion. Web Fbo readback and iOS float Fbo readback return errors; non-float Fbo formats are converted to RGBA8 for byte readback.";
     analyze.args = {{"source","object","Image source (exactly one selector)",true},
                     {"save","string|null","Optional capture file path; omitted/null writes nothing",false},
                     {"ops","array","Ordered image operations and their arguments",true}};
@@ -615,16 +604,6 @@ void registerStandardTools(Server& server) {
                     if(current && current->isAllocated()) {
                         bool floating=isFloatFormat(current->getTextureFormat());
                         if (floating || channelCount(current->getTextureFormat())<=2) colorSpace="linear";
-                        const auto limit = getAdmissionLimits().workingBytes;
-                        const size_t bytesPerPixel = floating ? 32 : 8;
-                        // Bound (security): readback copies need credits before allocation. Overflow returns an error and is counted.
-                        if (current->getWidth() <= 0 || current->getHeight() <= 0 ||
-                            size_t(current->getWidth()) > limit / size_t(current->getHeight()) / bytesPerPixel) {
-                            const uint64_t area = uint64_t(std::max(0, current->getWidth())) * std::max(0, current->getHeight());
-                            admissionRejected(AdmissionStore::Working, limit, area > SIZE_MAX / bytesPerPixel ? SIZE_MAX : size_t(area) * bytesPerPixel);
-                            throw AdmissionError();
-                        }
-                        reserveWork(size_t(current->getWidth()) * current->getHeight() * bytesPerPixel);
                         p->allocate(current->getWidth(),current->getHeight(),4,floating?PixelFormat::F32:PixelFormat::U8);
                         if(floating) {
 #if !defined(__APPLE__) || !TARGET_OS_IPHONE
@@ -651,17 +630,16 @@ void registerStandardTools(Server& server) {
             if(source.contains("window")) {
                 if (!source.at("window").is_number_integer()) return error("window must be an integer");
                 json err;
-                auto* ctx=resolveWindowCtx(source.at("window").get<int>(),err);
+                auto* ctx=resolveWindowCtx(source.at("window").get<int64_t>(),err);
                 if(!ctx) return err;
                 mcp::deferToolResultTwoStage([args,error]() -> std::function<json()> {
                     auto p=std::make_shared<Pixels>();
-                    reserveWindowReadback();
                     bool ok=captureWindow(*p);
                     return [p,args,ok,error]() -> json {
                         if(!ok) return error("failed to grab screen");
                         return internal::analyzeImage(*p,args,"sRGB");
                     };
-                },ctx->isMain?nullptr:ctx);
+                },ctx);
                 return nullptr;
             }
             return error("unknown image source");
@@ -669,12 +647,12 @@ void registerStandardTools(Server& server) {
     };
     server.registerTool(analyze);
 
-    coreTool(server, "tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
+    coreTool(server, "tc_get_screenshot", "Screenshot as Base64 PNG/JPEG. Defaults to full-resolution PNG; pass width for a downscaled monitoring thumbnail (aspect preserved, never upscales) and format 'jpg' for small payloads. Cheap to poll at any settings: only the framebuffer readback touches the frame loop — downscale + encode run on the HTTP worker thread, so polling does not stutter the app. A Window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
         .level(ToolLevel::ReadOnly)
         .arg<std::string>("format", "'png' (default, lossless) or 'jpg'", false)
         .arg<int>("width", "Target width in pixels, aspect preserved (clamped 16-4096; never upscales; omit = full resolution)", false)
         .arg<int>("quality", "JPEG quality 1-100 (default 75; ignored for png)", false)
-        .arg<int>("window", "Window index from tc_list_windows (default 0 = main; a secondary window must be visible)", false)
+        .arg<int>("window", "Positive window ID from tc_list_windows; omit only with exactly one open window; target must be visible", false)
         .bind([resolveWindowCtx](const json& args) -> json {
             std::string format = "png";
             if (args.contains("format") && args.at("format").is_string()) {
@@ -691,10 +669,10 @@ void registerStandardTools(Server& server) {
                 reqWidth = std::clamp(args.at("width").get<int>(), 16, 4096);
             if (args.contains("quality") && args.at("quality").is_number())
                 quality = std::clamp(args.at("quality").get<int>(), 1, 100);
-            const int windowIdx = args.value("window", 0);
+            const int64_t windowIdx = args.value("window", int64_t(0));
 
             json err;
-            auto* ctx = resolveWindowCtx(windowIdx, err);
+            auto* ctx = resolveWindowCtx(windowIdx, err, !args.contains("window"));
             if (!ctx) return err;
 
             // Two-stage deferral: the main stage runs right after the TARGET
@@ -706,7 +684,6 @@ void registerStandardTools(Server& server) {
             // runs on the HTTP worker blocked on this reply.
             mcp::deferToolResultTwoStage([format, reqWidth, quality]() -> std::function<json()> {
                 auto px = std::make_shared<trussc::Pixels>();
-                reserveWindowReadback();
                 bool grabbed = trussc::captureWindow(*px);
                 return [px, grabbed, format, reqWidth, quality]() -> json {
                     if (!grabbed) {
@@ -714,41 +691,37 @@ void registerStandardTools(Server& server) {
                     }
                     return internal::imageContentResult(internal::pixelsToImageJson(*px, format, reqWidth, quality));
                 };
-            }, ctx->isMain ? nullptr : ctx);
+            }, ctx);
             return json(nullptr);  // ignored — deferred result is sent instead
         });
 
-    coreTool(server, "tc_save_screenshot", "Save screenshot to file. A secondary window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
+    coreTool(server, "tc_save_screenshot", "Save screenshot to file. A Window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
         .level(ToolLevel::ReadOnly)
         .arg<std::string>("path", "File path")
-        .arg<int>("window", "Window index from tc_list_windows (default 0 = main; a secondary window must be visible)", false)
+        .arg<int>("window", "Positive window ID from tc_list_windows; omit only with exactly one open window; target must be visible", false)
         .bind([resolveWindowCtx](const json& args) -> json {
             // JSON strings are UTF-8 — convert explicitly (fs::path(string)
             // would interpret them in the ACP on Windows)
             const std::string path = args.at("path").get<std::string>();
-            const int windowIdx = args.value("window", 0);
+            const int64_t windowIdx = args.value("window", int64_t(0));
             json err;
-            auto* ctx = resolveWindowCtx(windowIdx, err);
+            auto* ctx = resolveWindowCtx(windowIdx, err, !args.contains("window"));
             if (!ctx) return err;
             auto credit = acquireScreenshotCredit();
-            auto budget = currentWorkBudget();
-            reserveWindowSave(*ctx);
             const auto destination = trussc::internal::resolveScreenshotPath(
                 trussc::internal::utf8ToPath(path));
             std::filesystem::path prepared;
             if (!trussc::internal::prepareOutputPath(destination, prepared, "Screenshot"))
                 return json{{"status", "error"}, {"message", "Failed to prepare screenshot destination"}};
-            // Both windows use MCP deferral: the slot and budget live until
+            // Both windows use MCP deferral: the slot lives until
             // capture, expiration, owner cleanup or shutdown releases the job.
             // App-authored saveScreenshot() keeps its independent path queue.
-            mcp::deferToolResultUntilAfterFrame([windowIdx, destination, credit, budget]() -> json {
-                WorkScope scope(budget);
-                reserveWindowSave(trussc::internal::currentWindowContext());
+            mcp::deferToolResultUntilAfterFrame([windowIdx, destination, credit]() -> json {
                 WindowCaptureAdmission admission(credit);
                 bool ok = trussc::internal::captureWindowToFile(destination);
                 if (ok) return json{{"status", "ok"}, {"path", trussc::internal::pathToUtf8(destination)}, {"window", windowIdx}};
                 return json{{"status", "error"}, {"message", "Failed to capture window " + std::to_string(windowIdx)}};
-            }, ctx->isMain ? nullptr : ctx);
+            }, ctx);
             return json(nullptr);  // deferred result is sent instead
         });
 
@@ -833,23 +806,38 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_get_health", "Lightweight liveness snapshot: fps (measured average), frame count, uptime seconds, window size, TrussC version, pid, process RSS bytes, main-thread queue backlog, sokol-tracked bytes. Cheap enough to poll — reads counters only, touches no GPU state. pid lets a supervisor confirm it is talking to ITS child (port collisions); rssBytes is the number to graph for leak hunting; mainQueuePending is how many runOnMainThread / Deliver::Main calls this frame's drain started with (a number that keeps growing means workers queue faster than the app runs them).")
         .level(ToolLevel::Public)
-        .bind(std::function<json()>([]() -> json {
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
+        .bind([resolveWindowCtx](const json& args) -> json {
+            json error;
+            const bool specified = args.is_object() && args.contains("window");
+            auto* target = resolveWindowCtx(specified ? args.at("window").get<int64_t>() : 0, error, !specified, false);
+            if (!target && (!trussc::headless::isActive() || specified)) {
+                error["buildKind"] = internal::isDevBuild() ? "dev" : "default";
+                error["toolLevel"] = internal::toolLevelName(getToolLevel());
+                error["pid"] = internal::currentPid();
+                error["uptimeSec"] = trussc::internal::getUptimeSeconds();
+                return error;
+            }
+            const auto& ctx = target ? *target : trussc::internal::nonWindowContext();
+            const auto dimensions = trussc::internal::windowDimensions(ctx);
+            const auto size = trussc::internal::framebufferResizeArgs(dimensions.fbWidth, dimensions.fbHeight,
+                trussc::internal::appSizeDpi(dimensions.dpiScale));
             return json{{"status", "ok"},
                         {"buildKind", internal::isDevBuild() ? "dev" : "default"},
                         {"toolLevel", internal::toolLevelName(getToolLevel())},
-                        {"fps", trussc::getFps()},
-                        {"frameCount", trussc::getFrameCount()},
+                        {"fps", static_cast<float>(trussc::internal::measuredWindowRate(ctx))},
+                        {"frameCount", ctx.updateCount},
                         // Process uptime: the framework clock, which
                         // resetElapsedTimeCounter() does not touch (#229).
                         {"uptimeSec", trussc::internal::getUptimeSeconds()},
-                        {"width", trussc::getWindowWidth()},
-                        {"height", trussc::getWindowHeight()},
+                        {"width", size.width},
+                        {"height", size.height},
                         {"version", trussc::getVersion()},
                         {"pid", internal::currentPid()},
                         {"rssBytes", internal::processRssBytes()},
                         {"mainQueuePending", trussc::internal::getMainThreadQueuePending()},
                         {"memoryBytes", trussc::getSokolMemoryBytes()}};
-        }));
+        });
 
     coreTool(server, "tc_get_audio_state", "Audio engine diagnostics (read-only; never starts the engine): running; initFailure (last failed init reason, miniaudio result, backend and requested device; omitted after success); stalled (no callback finished for 250 ms or 4 periods; meters and voice levels read zero); underrunFrames (silent output frames per stream voice, excluding startup); voicesStoppedByReinit (decoder could not reopen at the new rate); playingSounds {slot, path, streaming, position/duration s, volume, pan, speed, loop, paused, level = peak of the playback's output}, master peak / RMS (linear, before clipping) and clipped-sample count, plays dropped since startup by reason (polyphonyLimit = every playback slot busy, streamLimit = a stream's maxPolyphony, decoderError, notRunning = no device), audio-thread cpuUsage / cpuUsagePeak (audio-thread time / audio time; 1.0 = a callback took as long as the audio it produced), and the output / input devices. Pass devices=false to skip the device enumeration (slow on some backends) when polling.")
         .level(ToolLevel::ReadOnly)
@@ -924,11 +912,16 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_start_recording", "Start recording the window to a video file (the screenshot's video counterpart). Omit path for a timestamped file in the data dir; give duration for a fixed-length clip that auto-stops and finalizes itself.")
         .level(ToolLevel::ReadOnly)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<std::string>("path", "Output file path (relative paths resolve to the data dir). Omit for recording-<timestamp>.mp4/.mov in the data dir.", false)
         .arg<float>("duration", "Fixed length in seconds; the file auto-stops & finalizes at that length. Omit or 0 = unlimited (tc_stop_recording to end).", false)
         .arg<float>("fps", "Target frame rate (default 60; ProMotion frames are decimated to it)", false)
         .arg<std::string>("codec", "h264 (default) | hevc | prores422 | prores4444 (.mov, macOS)", false)
-        .bind([](const json& args) -> json {
+        .bind([resolveWindowCtx](const json& args) -> json {
+            json error;
+            auto* context = resolveWindowCtx(args.value("window", int64_t(0)), error, !args.contains("window"));
+            if (!context) return error;
+            trussc::internal::WindowContextScope selected(context);
             trussc::VideoRecordSettings settings;
             if (args.contains("fps") && args.at("fps").is_number()) {
                 settings.fps = args.at("fps").get<float>();
@@ -953,7 +946,7 @@ void registerStandardTools(Server& server) {
                 path = "recording-" + trussc::getTimestampString("%Y-%m-%d-%H-%M-%S")
                      + (isProRes ? ".mov" : ".mp4");
             }
-            auto ok = trussc::startRecording(trussc::internal::utf8ToPath(path), settings);
+            auto ok = trussc::internal::ScreenRecorderWindowAccess::start(*context, trussc::internal::utf8ToPath(path), settings);
             json r{{"status", ok ? "ok" : "error"},
                    {"path", trussc::internal::pathToUtf8(trussc::recordingPath())},
                    {"fps", settings.fps},
@@ -986,10 +979,13 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_get_node_tree", "Dump the node tree as JSON: per node {type, name, id, members (reflected, rotation in radians, derived rotationDeg in degrees, colors 0-1), derived, mods, children}. \"derived\" names members computed from another member (e.g. globalPos from pos, rotationDeg from rotation): editable, but not saved, and when a write carries both, the canonical one (pos or rotation) wins. Where depth cuts children off, childCount marks how many were omitted — drill in with another call passing that node's id")
         .level(ToolLevel::ReadOnly)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("id", "Subtree root instance id (omit for the whole tree)", false)
         .arg<int>("depth", "Max child depth (omit for unlimited, 0 = the node only)", false)
         .bind([](const json& args) -> json {
-            Node* root = getRootNode();
+            auto& window = internal::InputTarget::targetWindow(args);
+            auto rootOwner = window.context().rootNode.lock();
+            Node* root = rootOwner.get();
             if (!root) {
                 return json{{"status", "error"}, {"message", "App is not running"}};
             }
@@ -1009,26 +1005,29 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_get_selected_node", "Get the currently selected node (type, name, id, reflected members), or null if nothing is selected")
         .level(ToolLevel::ReadOnly)
-        .bind(std::function<json()>([]() -> json {
-            Node* n = getSelectedNode();
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
+        .bind([](const json& args) -> json {
+            auto& window = internal::InputTarget::targetWindow(args);
+            auto selected = window.context().selectedNode.lock();
+            Node* n = selected.get();
             if (!n) {
                 return json{{"status", "ok"}, {"selected", nullptr}};
             }
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
-        }));
+        });
 
     coreTool(server, "tc_quit", "Quit the application gracefully")
         .level(ToolLevel::Control)
-        .bind(std::function<json()>([]() -> json {
-            trussc::internal::setExitReason("tc-quit");
-            sapp_request_quit();
+        .bind([]() -> json {
+            trussc::internal::requestNormalQuit("tc-quit");
             return json{{"status", "ok"}};
-        }));
+        });
 
     // --- Mouse Tools ---
 
     coreTool(server, "tc_mouse_move", "Move mouse cursor (with a button held, emits a drag)")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button held during the move (0:left, 1:right, 2:middle; omit or -1 for a plain move)", false)
@@ -1038,23 +1037,12 @@ void registerStandardTools(Server& server) {
             float x = internal::inputFloat(a, "x");
             float y = internal::inputFloat(a, "y");
             int button = internal::inputMouseButton(a, true);
-            // If button is pressed, treat as drag
-            if (button >= 0) {
-                trussc::internal::MouseEventRaw args;
-                args.pos = args.globalPos = Vec2(x, y);
-                args.button = button;
-                MouseDragEventArgs dragArgs = trussc::internal::toDragArgs(args);
-                events().mouseDragged.notify(dragArgs);
-            } else {
-                trussc::internal::MouseEventRaw args;
-                args.pos = args.globalPos = Vec2(x, y);
-                MouseMoveEventArgs moveArgs = trussc::internal::toMoveArgs(args);
-                events().mouseMoved.notify(moveArgs);
-            }
-
-            // Update global mouse state
-            ::trussc::internal::currentWindowContext().mouseX = x;
-            ::trussc::internal::currentWindowContext().mouseY = y;
+            internal::InputTarget target(a);
+            auto event = target.pointer(SAPP_EVENTTYPE_MOUSE_MOVE, x, y);
+            event.button_snapshot = true;
+            event.modifiers &= ~(SAPP_MODIFIER_LMB | SAPP_MODIFIER_RMB | SAPP_MODIFIER_MMB);
+            if (button >= 0) event.modifiers |= SAPP_MODIFIER_LMB << button;
+            target.send(event);
 
             return json{{"status", "ok"}};
         });
@@ -1065,46 +1053,37 @@ void registerStandardTools(Server& server) {
     // mouse position at press keeps the first drag delta sane.
     coreTool(server, "tc_mouse_press", "Press and hold a mouse button (start of a drag; pair with tc_mouse_move + tc_mouse_release)")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
-            MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
-            args.button = internal::inputMouseButton(a);
-            args.syncLegacy();
-
-            ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
-            ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
-
-            events().mousePressed.notify(args);
-
+            const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
+            const int button = internal::inputMouseButton(a);
+            internal::InputTarget target(a);
+            target.send(target.pointer(SAPP_EVENTTYPE_MOUSE_DOWN, x, y, button));
 
             return json{{"status", "ok"}};
         });
 
     coreTool(server, "tc_mouse_release", "Release a mouse button (end of a drag)")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
         .bind([](const json& a) -> json {
-            MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
-            args.button = internal::inputMouseButton(a);
-            args.syncLegacy();
-
-            ::trussc::internal::currentWindowContext().mouseX = args.pos.x;
-            ::trussc::internal::currentWindowContext().mouseY = args.pos.y;
-
-            events().mouseReleased.notify(args);
-
+            const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
+            const int button = internal::inputMouseButton(a);
+            internal::InputTarget target(a);
+            target.send(target.pointer(SAPP_EVENTTYPE_MOUSE_UP, x, y, button));
 
             return json{{"status", "ok"}};
         });
 
     coreTool(server, "tc_mouse_click", "Click mouse button (optionally with modifier keys held)")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("x", "X coordinate")
         .arg<float>("y", "Y coordinate")
         .arg<int>("button", "Button (0:left, 1:right, 2:middle)", false)
@@ -1114,40 +1093,91 @@ void registerStandardTools(Server& server) {
         .arg<bool>("super", "Hold Cmd/Super", false)
         .bind([](const json& a) -> json {
             internal::validateInputModifiers(a);
-            MouseEventArgs args;
-            args.pos = args.globalPos = Vec2(internal::inputFloat(a, "x"), internal::inputFloat(a, "y"));
-            args.button = internal::inputMouseButton(a);
-            args.shift = a.value("shift", false);
-            args.ctrl  = a.value("ctrl", false);
-            args.alt   = a.value("alt", false);
-            args.super = a.value("super", false);
-            args.syncLegacy();
-
-            // Press
-            events().mousePressed.notify(args);
-
-
-            // Release (fresh consumed flag — the press consumer may differ)
-            MouseEventArgs rel = args;
-            rel.consumed = false;
-            events().mouseReleased.notify(rel);
-
+            const float x = internal::inputFloat(a, "x"), y = internal::inputFloat(a, "y");
+            const int button = internal::inputMouseButton(a);
+            internal::InputTarget target(a);
+            auto press = target.pointer(SAPP_EVENTTYPE_MOUSE_DOWN, x, y, button);
+            target.begin();
+            // Prepare modifier nodes before changing held input. Restoration uses
+            // those nodes without allocation and preserves callback changes to other keys.
+            constexpr std::array<int, 8> modifierKeys{SAPP_KEYCODE_LEFT_SHIFT, SAPP_KEYCODE_RIGHT_SHIFT,
+                SAPP_KEYCODE_LEFT_CONTROL, SAPP_KEYCODE_RIGHT_CONTROL, SAPP_KEYCODE_LEFT_ALT,
+                SAPP_KEYCODE_RIGHT_ALT, SAPP_KEYCODE_LEFT_SUPER, SAPP_KEYCODE_RIGHT_SUPER};
+            std::unordered_set<int> saved, requested;
+            for (int code : modifierKeys) if (target.ctx.keysPressed.contains(code)) saved.insert(code);
+            for (auto [name, code] : {std::pair{"shift", SAPP_KEYCODE_LEFT_SHIFT},
+                 {"ctrl", SAPP_KEYCODE_LEFT_CONTROL}, {"alt", SAPP_KEYCODE_LEFT_ALT}, {"super", SAPP_KEYCODE_LEFT_SUPER}})
+                if (a.value(name, false)) requested.insert(code);
+            // Native key codes fit the SDK domain; later callbacks cannot exhaust this capacity.
+            target.ctx.keysPressed.reserve(SAPP_MAX_KEYCODES);
+            struct RestoreModifiers {
+                std::unordered_set<int>& held;
+                const std::array<int, 8>& codes;
+                std::array<std::unordered_set<int>::node_type, 8> nodes;
+                RestoreModifiers(std::unordered_set<int>& held, const std::array<int, 8>& codes,
+                                 std::unordered_set<int>& saved) : held(held), codes(codes) {
+                    for (size_t i = 0; i < codes.size(); ++i) nodes[i] = saved.extract(codes[i]);
+                }
+                ~RestoreModifiers() {
+                    for (int code : codes) held.erase(code);
+                    for (auto& node : nodes) if (node) held.insert(std::move(node));
+                }
+            } restore{target.ctx.keysPressed, modifierKeys, saved};
+            for (int code : modifierKeys) target.ctx.keysPressed.erase(code);
+            while (!requested.empty()) target.ctx.keysPressed.insert(requested.extract(requested.begin()));
+            constexpr uint32_t keyboardModifiers = SAPP_MODIFIER_SHIFT | SAPP_MODIFIER_CTRL |
+                SAPP_MODIFIER_ALT | SAPP_MODIFIER_SUPER;
+            const uint32_t clickModifiers = target.modifiers() & keyboardModifiers;
+            press.modifiers = (press.modifiers & ~keyboardModifiers) | clickModifiers;
+            auto release = target.pointer(SAPP_EVENTTYPE_MOUSE_UP, x, y, button);
+            struct ReleaseRecovery {
+                trussc::internal::WindowContext& ctx;
+                int button;
+                uint64_t epoch;
+                ~ReleaseRecovery() {
+                    // A delivered UP retires the ledger; a newer DOWN replaces this owner.
+                    // Only a remaining grab from this gesture still needs cleanup after UP.
+                    if (ctx.mousePressGenerations[button] != epoch) return;
+                    if (ctx.mousePressOwners[button] != this) return;
+                    ctx.mousePressOwners[button] = nullptr;
+                    ctx.pressedMouseButtons &= ~(1u << button);
+                    ctx.snapshotMouseButtons &= ~(1u << button);
+                    if (ctx.mouseButton == button) { ctx.mouseButton = -1; ctx.mousePressed = false; }
+                    if (ctx.grabbedButton == button) { ctx.grabbedNode.reset(); ctx.grabbedButton = -1; }
+                }
+            } recovery{target.ctx, button, target.ctx.mousePressGenerations[button] + 1};
+            target.send(press, &recovery);
+            if (target.ctx.mousePressGenerations[button] != recovery.epoch) return json{{"status", "ok"}};
+            try {
+                release = target.pointer(SAPP_EVENTTYPE_MOUSE_UP, x, y, button);
+            } catch (const internal::InputArgumentError&) {
+                // A press callback may change DPI. Keep the release representable
+                // in the current native basis even if the requested position no longer fits.
+                const double factor = trussc::internal::pixelPerfectMode() ? 1 : target.snapshot.dpi_scale;
+                // Bound (abi): clamp recovery coordinates to finite native floats so UP can complete after a DPI change.
+                const double limit = std::nextafter(float(std::numeric_limits<float>::max() / std::max(1.0, factor)), 0.0f);
+                release = target.pointer(SAPP_EVENTTYPE_MOUSE_UP,
+                    float(std::clamp(double(x), -limit, limit)),
+                    float(std::clamp(double(y), -limit, limit)), button);
+            }
+            release.modifiers = (release.modifiers & ~keyboardModifiers) | clickModifiers;
+            target.send(release, &recovery);
 
             return json{{"status", "ok"}};
         });
 
     coreTool(server, "tc_mouse_scroll", "Scroll mouse wheel")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<float>("dx", "Horizontal scroll delta")
         .arg<float>("dy", "Vertical scroll delta")
         .bind([](const json& a) -> json {
             const float dx = internal::inputFloat(a, "dx");
             const float dy = internal::inputFloat(a, "dy");
-            ScrollEventArgs args;
-            args.pos = args.globalPos = Vec2(::trussc::internal::currentWindowContext().mouseX, ::trussc::internal::currentWindowContext().mouseY);
-            args.scroll = Vec2(dx, dy);
-            args.syncLegacy();
-            events().mouseScrolled.notify(args);
+            internal::InputTarget target(a);
+            sapp_event event{}; event.type = SAPP_EVENTTYPE_MOUSE_SCROLL;
+            event.scroll_x = dx; event.scroll_y = dy; event.modifiers = target.modifiers();
+            target.send(event);
 
             return json{{"status", "ok"}};
         });
@@ -1166,6 +1196,7 @@ void registerStandardTools(Server& server) {
          "pair it with the same flag on tc_key_release, or hold a modifier across several "
          "keys by pressing/releasing its keycode explicitly")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("key", "Defined nonzero sokol_app key code; letters are uppercase ASCII: 'A'=65..'Z'=90")
         .arg<bool>("shift", "Hold Shift for this press", false)
         .arg<bool>("ctrl", "Hold Ctrl for this press", false)
@@ -1174,13 +1205,14 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             const int key = internal::inputKey(a);
             internal::validateInputModifiers(a);
+            internal::InputTarget target(a); target.begin();
 
             // Press the requested modifiers first (skip any already held —
             // whichever side, so an explicit RIGHT_SHIFT hold is respected).
             json pressedMods = json::array();
             auto holdMod = [&](const char* flag, bool alreadyHeld, int code) {
                 if (a.value(flag, false) && !alreadyHeld) {
-                    internal::injectKeyDown(code);
+                    target.key(code, true);
                     pressedMods.push_back(code);
                 }
             };
@@ -1189,7 +1221,7 @@ void registerStandardTools(Server& server) {
             holdMod("alt",   isAltPressed(),     SAPP_KEYCODE_LEFT_ALT);
             holdMod("super", isSuperPressed(),   SAPP_KEYCODE_LEFT_SUPER);
 
-            internal::injectKeyDown(key);
+            target.key(key, true);
 
             return json{{"status", "ok"},
                         {"modifiersPressed", pressedMods},
@@ -1202,6 +1234,7 @@ void registerStandardTools(Server& server) {
          "(shift -> keycode 340, ctrl -> 341, alt -> 342, super -> 343), "
          "mirroring tc_key_press")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("key", "Defined nonzero sokol_app key code; letters are uppercase ASCII: 'A'=65..'Z'=90")
         .arg<bool>("shift", "Also release Shift after this key", false)
         .arg<bool>("ctrl", "Also release Ctrl after this key", false)
@@ -1210,15 +1243,16 @@ void registerStandardTools(Server& server) {
         .bind([](const json& a) -> json {
             const int key = internal::inputKey(a);
             internal::validateInputModifiers(a);
+            internal::InputTarget target(a); target.begin();
 
             // The key goes up first — while the modifiers are still held, so
             // this event still carries them (as it does on a real keyboard).
-            internal::injectKeyUp(key);
+            target.key(key, false);
 
             json releasedMods = json::array();
             auto dropMod = [&](const char* flag, int code) {
                 if (a.value(flag, false) && isKeyPressed(code)) {
-                    internal::injectKeyUp(code);
+                    target.key(code, false);
                     releasedMods.push_back(code);
                 }
             };
@@ -1236,28 +1270,35 @@ void registerStandardTools(Server& server) {
 
     coreTool(server, "tc_select_node", "Select a node by instance id (0 clears the selection); drives the same selection an inspector shows")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("id", "Instance id from tc_get_node_tree (0 to clear)")
-        .bind<int>([](int id) {
+        .bind([](const json& args) -> json {
+            const auto id = args.at("id").get<uint64_t>();
+            auto& window = internal::InputTarget::targetWindow(args);
             if (id == 0) {
-                setSelectedNode(nullptr);
+                window.context().selectedNode.reset();
                 return json{{"status", "ok"}, {"selected", nullptr}};
             }
-            Node* root = getRootNode();
+            auto rootOwner = window.context().rootNode.lock();
+            Node* root = rootOwner.get();
             Node* n = root ? root->findByInstanceId(static_cast<uint64_t>(id)) : nullptr;
             if (!n) {
                 return json{{"status", "error"}, {"message", "No node with id " + std::to_string(id)}};
             }
-            setSelectedNode(n);
+            window.context().selectedNode = n->weak_from_this();
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
         });
 
     coreTool(server, "tc_set_node_members", "Set reflected members of a node — or one of its mods — from a JSON object (same encoding as tc_get_node_tree: Vec3 [x,y,z], Color [r,g,b,a], rotation in radians, derived rotationDeg in degrees, enums by label string). A derived member (e.g. globalPos or rotationDeg) is applied before its canonical member (pos or rotation), so when both are given the canonical one wins")
         .level(ToolLevel::Control)
+        .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .arg<int>("id", "Instance id from tc_get_node_tree")
         .arg<json>("members", "Member values to apply, e.g. {\"pos\":[10,20,0],\"visible\":true}")
         .arg<std::string>("mod", "Mod short type name (e.g. \"LayoutMod\") to target a mod attached to the node instead of the node itself", false)
         .bind([](const json& args) -> json {
-            Node* root = getRootNode();
+            auto& window = internal::InputTarget::targetWindow(args);
+            auto rootOwner = window.context().rootNode.lock();
+            Node* root = rootOwner.get();
             uint64_t id = args.at("id").get<uint64_t>();
             Node* n = root ? root->findByInstanceId(id) : nullptr;
             if (!n) {
@@ -1285,12 +1326,7 @@ void registerStandardTools(Server& server) {
                 {"applied", r.applied},
                 {"members", std::move(after)}
             };
-            if (!r.skipped.empty() || trussc::internal::JsonReadResultAccess::rejected(r)) {
-                result["status"] = "error";
-                result["message"] = "Settings transaction rejected at field " +
-                    (r.skipped.empty() ? std::string("$") : r.skipped.front());
-                if (!r.skipped.empty()) result["skipped"] = r.skipped;
-            }
+            if (!r.skipped.empty()) result["skipped"] = r.skipped;
             if (!r.readOnly.empty()) result["readOnly"] = r.readOnly;
             auto unknown = r.unknownKeys();
             if (!unknown.empty()) result["unknown"] = unknown;

@@ -9,3 +9,6 @@ python3 test_shader_rebuild.py {test}
 # App lifetime and registration ownership (#239 PR-A): reentrant retirement,
 # the replacement keeping its registrations, guarded startup/reload resize.
 {test} --lifetime-checks
+
+# C4 actual DSO registry and reload safe-point/target regressions.
+{test} --c4-checks

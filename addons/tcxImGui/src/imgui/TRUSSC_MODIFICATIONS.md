@@ -17,11 +17,11 @@ addons/tcxImGui/src/
 ├── imgui/
 │   ├── imconfig.h            # Modified (test engine hooks on + value hook)
 │   ├── imgui_widgets.cpp     # Modified (19 value-hook call sites + 24 wrapped returns, one line each)
-│   ├── imgui.cpp             # Modified (local import checks)
+│   ├── imgui.cpp             # Untouched
 │   ├── imgui.h               # Untouched
-│   ├── imgui_internal.h      # Modified (empty reserved chunk stream)
-│   ├── imgui_draw.cpp        # Modified (font import checks/shared backend)
-│   ├── imgui_tables.cpp      # Modified (ini column bound comment)
+│   ├── imgui_internal.h      # Untouched
+│   ├── imgui_draw.cpp        # Untouched
+│   ├── imgui_tables.cpp      # Untouched
 │   ├── imgui_demo.cpp        # Untouched
 │   ├── imstb_*.h             # Untouched
 │   └── TRUSSC_MODIFICATIONS.md
@@ -41,7 +41,7 @@ is copied verbatim.
 
 ## imconfig.h
 
-### 1. Test engine hooks on
+### I1. Test engine hooks on
 
 **Purpose:** Collect every widget's ID, label, rect and status flags each frame
 for the MCP tools (`tcx_imgui_get_widgets`, `tcx_imgui_click`, ...).
@@ -54,7 +54,7 @@ for the MCP tools (`tcx_imgui_get_widgets`, `tcx_imgui_click`, ...).
   They run only for contexts whose `TestEngineHookItems` is set, which
   tcxImGui does when `imguiSetup()` registers its MCP tools (independent of the grant).
 
-### 2. Widget value hook (`IMGUI_TC_ITEM_VALUE`)
+### I2. Widget value hook (`IMGUI_TC_ITEM_VALUE`)
 
 **Purpose:** Let the MCP tools report the VALUE of value widgets (sliders,
 drags, inputs, colors, combos, text fields), and which widgets the user
@@ -116,7 +116,7 @@ value pointer, hence this patch.
 
 ## imgui_widgets.cpp
 
-### 3. Value hook call sites
+### I2. Value hook call sites
 
 **Purpose:** Declare `IMGUI_TC_ITEM_VALUE(...)` once in each value widget,
 where the pointer to the caller's variable and its type are in hand.
@@ -236,7 +236,7 @@ How the hooks behave (in `tcImGuiHooksImpl.h`):
   no imgui for that context, from tcxImGui's render listener
   (`settleWithoutImGuiFrame()`). A value whose next-frame check has not come
   by its check deadline (the window renders no frame) is settled on its
-  read-back at return from the main window's afterFrame
+  read-back at return from Runtime maintenance
   (`settleOverdueValues()`). The write sets no Edited flag, so it is not
   recorded as touched. Text (buffer size unknown) and the openers (`BeginCombo`,
   `BeginListBox`: no variable) are never written. `ColorPicker3` and
@@ -280,7 +280,7 @@ cherry-pick below. It must stay in step with the core `sokol_gfx.h`: upstream
 `sokol_imgui.h` after `082152c` moves to `sg_write_buffer_transient()`, which
 the bundled `sokol_gfx.h` does not have yet.
 
-### 4. Multi-context API (`simgui_tc_*`)
+### I5. Multi-context API (`simgui_tc_*`)
 
 **Purpose:** One independent sokol_imgui instance (own ImGui context, font
 atlas, buffers, pipeline) per window, for multi-window apps.
@@ -297,11 +297,29 @@ atlas, buffers, pipeline) per window, for multi-window apps.
   previous context before returning).
 - The implementation of the five functions at the end of the file.
 
-### 5. Upstream cherry-pick `544c0ef` (for Dear ImGui 1.92.9)
+### I6. Upstream cherry-pick `544c0ef` (for Dear ImGui 1.92.9)
 
 `draw_data->CmdListsCount` → `draw_data->CmdLists.Size` (3 lines; 1.92.9
 marked `CmdListsCount` obsolete). Identical to upstream, so it carries no
 marker and merges cleanly on the next update.
+
+### 6. Automatic vertex/index buffer growth (#340)
+
+Before copying a frame, `simgui_render()` sums vertex/index bytes with checked
+arithmetic and doubles the active context's capacity until both fit (indices
+remain 3x vertices). Final byte sizes must fit Sokol's signed int storage
+before allocation; doubling caps at that representation limit, and setup
+checks the initial size too. CPU blocks and GPU buffers are replaced transactionally;
+detected allocation failure keeps the old buffers and draws complete lists that fit,
+with one useful Error per failed frame. Old GPU buffers use normal
+`sg_destroy_buffer()` before this frame's single upload per buffer.
+The first successful grow per context emits a sized message in Release too;
+`ImGuiManager` maps this backend info item to Notice. Initial capacity is
+configurable through `imguiSetup(int)`, `setup(int)`, and `setupOffscreen(int)`.
+No Dear ImGui core file changes are needed.
+
+On the next sokol sync, move this logic to the `sg_write_buffer_transient()`
+path, which replaces CPU staging in upstream versions after `082152c`.
 
 ---
 
@@ -317,14 +335,13 @@ Expected counts (lines containing the marker; this file excluded):
 |---|---|
 | `imgui/imconfig.h` | 4 (the hooks-on line, `begin`, a comment, `end`) |
 | `imgui/imgui_widgets.cpp` | 43 (19 call sites + 24 wrapped returns) |
-| `sokol_imgui.h` | 5 |
+| `sokol_imgui.h` | 11 |
 
 ---
 
 ## How to Update Dear ImGui
 
-Patched files (`imconfig.h`, `imgui_widgets.cpp`, `imgui.cpp`,
-`imgui_draw.cpp`, `imgui_tables.cpp`, `imgui_internal.h`) are updated with a 3-way
+Patched files (`imconfig.h`, `imgui_widgets.cpp`) are updated with a 3-way
 merge, not by overwriting and hand-copying the patches. That avoids slips when
 copying patches by hand. Every other file is overwritten from the new tag.
 
@@ -334,7 +351,7 @@ copying patches by hand. Every other file is overwritten from the new tag.
 git clone https://github.com/ocornut/imgui.git /tmp/imgui
 OLD=v1.92.9b                 # the upstream base recorded above
 NEW=<new stable tag>
-for f in imconfig.h imgui_widgets.cpp imgui.cpp imgui_draw.cpp imgui_tables.cpp imgui_internal.h; do
+for f in imconfig.h imgui_widgets.cpp; do
   git -C /tmp/imgui show $OLD:$f > /tmp/BASE_$f      # upstream, pre-patch
   git -C /tmp/imgui show $NEW:$f > /tmp/THEIRS_$f    # upstream, target
   cp addons/tcxImGui/src/imgui/$f /tmp/OURS_$f       # current TrussC copy
@@ -350,7 +367,7 @@ there.)
 ### 2. Overwrite the untouched files
 
 ```bash
-for f in imgui.h imgui_demo.cpp imstb_rectpack.h imstb_textedit.h imstb_truetype.h; do
+for f in imgui.cpp imgui_draw.cpp imgui_internal.h imgui_tables.cpp imgui.h imgui_demo.cpp imstb_rectpack.h imstb_textedit.h imstb_truetype.h; do
   git -C /tmp/imgui show $NEW:$f > addons/tcxImGui/src/imgui/$f
 done
 ```
@@ -405,25 +422,15 @@ update it together with the core sokol headers (the `sokol_gfx.h` API it
 calls must match), and record the new base commit in both TRUSSC_MODIFICATIONS
 files.
 
-## Local ini and font imports (v0.8)
+## Ini and font imports
 
-`imgui.cpp` checks file-size conversion and padding arithmetic before reading,
-and ini imports preflight the actual int-sized text/chunk storage, builtin table counts, retained decoded
-window/table chunks (existing and repeated IDs reuse storage; only table capacity
-increases append another retained chunk) and embedded terminators before replacing settings text or
-calling handlers. `ImChunkStream::begin()` checks used size so reserved empty storage is not
-visited as a chunk. Text/decoded buffers are allocated first and an aliased old
-source buffer stays alive through parsing. Large local ini imports produce a Notice.
-`imgui_draw.cpp` validates sfnt structure before importing a font, checks compressed
-font token spans and decoded workspace before allocation, and shares core's
-patched stb_truetype backend and glyph workspace. Raster dimensions are checked
-before packing or allocating scratch; failure does not publish a glyph. Local
-files have no additional byte-size cap. Checked font allocation recovery covers
-TrussC's font-loader storage and decoder workspace only. ImGui's upstream atlas,
-font-object and vector allocations in `AddFont`/`ImFontAtlasBuildInit` remain
-unchecked and are outside the allocation-recovery guarantee. Keep these `[TrussC]`
-patches on update. Import recovery diagnostics use a guarded direct logger with
-a C stdio fallback so persistent C++ allocation exhaustion cannot terminate in
-`LogStream` destruction. File imports pass their filename explicitly through the
-shared ini/font implementations into those diagnostics; memory imports keep
-their pathless messages. No ambient filename state or public API is added.
+Ini and font imports use unmodified Dear ImGui 1.92.9b code. The former I3
+(ini preflight) and I4 (font import checks/shared framework backend) patches
+were removed in #1073. Invalid ini data and malformed font files now receive
+upstream handling, without TrussC import diagnostics or recovery guarantees.
+
+`imgui_draw.cpp` uses the bundled upstream `imstb_truetype.h` and defines
+`STBTT_STATIC` before `STB_TRUETYPE_IMPLEMENTATION`. Its `stbtt_*` definitions
+therefore have internal linkage, separate from the framework's backend in
+`core/include/impl/stb_impl.cpp` on every platform. Keep the upstream static
+implementation enabled when updating; do not redirect it to the framework header.

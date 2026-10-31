@@ -106,7 +106,7 @@ struct Main : App {
         windowStartFrame = mainFrames;
         check(bool(window), "createWindow failed");
         if (!window) { exitApp(); return; }
-        window->setApp(std::make_shared<Secondary>(probe));
+        window->setApp<Secondary>(probe);
         // Exercise a request made before the first tick has allocated anything.
         if (mode == "early") window->close();
     }

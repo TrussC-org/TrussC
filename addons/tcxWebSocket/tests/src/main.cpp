@@ -51,6 +51,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../../../core/tests/common/tcWindowTest.h"
 #include <tcWebSocketClient.h>
 
 #include <atomic>
@@ -155,6 +156,7 @@ struct FakeServer {
     bool handshakeDone = false;
 
     bool start() {
+        server.setBindAddress("127.0.0.1");
         connectL = server.onClientConnect.listen([this](TcpClientConnectEventArgs& a) {
             lock_guard<mutex> lock(m);
             clientId = a.clientId;
@@ -785,6 +787,7 @@ struct HeadlessTimeoutApp : App {
     bool callbacksOnMain = true;
     chrono::steady_clock::time_point deadline;
     void setup() override {
+        silent.setBindAddress("127.0.0.1");
         received = silent.onReceive.listen([this](TcpServerReceiveEventArgs&) { gotRequest = true; });
         error = client.onError.listen([this](TcpErrorEventArgs& e) {
             lock_guard<mutex> lock(deliveryMutex);
@@ -837,6 +840,7 @@ int main(int argc, char** argv) {
 #ifndef __EMSCRIPTEN__
     checkHeadlessTimeout();
 #endif
+    tcCoreTest::WindowFixture loopWindow;
     runIngressTests();
     {
         auto bytes = emscriptenText("hello");

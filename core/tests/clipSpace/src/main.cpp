@@ -10,6 +10,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 
 #include <cmath>
@@ -53,6 +54,7 @@ static CameraContext makeContext(const Mat4& glProj, const Mat4& view, float w, 
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    tcCoreTest::WindowFixture fixture;
     const float W = 800.0f, H = 600.0f;
     const Vec3 probe(120.0f, -40.0f, 100.0f);
 

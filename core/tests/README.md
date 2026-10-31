@@ -12,6 +12,21 @@ the API still compiles/links/instantiates but do not assert runtime behaviour.
 
 ## What belongs here
 
+`windowState` also has a production-linked hidden-resize reentry probe. After
+building `allCoreTests`, run `tcbuild.sh python3 core/tests/windowState/review-test`
+from the repository root. It uses the build's compilation database and library;
+`TC_WINDOW_REVIEW_BUILD` can select a private EGL build directory. The Linux
+event bridge and all three desktop tick bodies are extracted without changing
+their control flow. The same probe calls the actual addressed event/frame entries
+and Linux event/tick entries for nested newer sizes, interrupted typed delivery,
+one retry per tick under persistent failure, argument-edit collisions and
+deduplication in both coordinate modes. Shared assertions also run in the
+aggregate `windowState` test. `tcbuild.sh python3 core/tests/windowState/size-mutations`
+requires runtime assertion failures when premature claiming or reentrant outer
+claim overwrite is restored. Win32/macOS extraction does not imply an SDK/device run.
+`tools/tests/test_window_lifecycle_regressions.py` separately exercises the
+macOS rejected-binding interval and Android resume/focus frame-entry ordering.
+
 - A test guards **one invariant or one fixed bug** — a contract a future refactor
   could silently break while still compiling. Not "exercise the API for coverage"
   (that's what `AllFeaturesExample` is for).
@@ -133,10 +148,8 @@ LSAN_OPTIONS="suppressions=$PWD/core/tests/lsan.supp" \
 Keep symbolization enabled and a symbolizer available so the named LSan
 suppression can match. `lsan.supp` covers fontconfig's retained cache and
 the deliberately retained reconnect clients; other leaks remain errors.
-`crashHandler` logs each skipped signal case under ASan, while its exception
-and terminate cases still run. Run a normal sweep as well to cover those
-signal cases. Use fresh build directories or explicitly reset the cached
-compiler and linker flags when switching back to a normal build.
+Use fresh build directories or explicitly reset the cached compiler and
+linker flags when switching back to a normal build.
 
 ### Also on web (`web-test` marker)
 
@@ -213,11 +226,10 @@ Fitting requests run every check strictly, without SKIPs.
   final draw, at samples 1/4 with and without mips. Checks every RGBA pixel,
   copyTo under a parent scissor, an empty clipped CLEAR pass, and clipping in
   the following pass. Run with `--gpu-check` on GLCORE and GLES3.
-- `mcpAdmissionConstruction/` — admission construction/model checks, real
-  framebuffer rejection (`--gpu-check --dpi=1|2`), and native cross-frame
-  resize/save cycles (`--gpu-check-resize --dpi=1|2`). See its
-  [README](mcpAdmissionConstruction/README.md) for exact Linux, Air and Windows
-  commands and the current DPI 2 / 8 MiB budget limitation.
+- `mcpAdmissionConstruction/` — large screenshot save/image analysis and allocation-error reply checks, including numeric/string request IDs, PNG roundtrips, deferred payload lifetime and bounded HTTP framing reads. The GPU-free framebuffer seam uses an addressed Window.
+- `asyncLoads/` — small resource-load smoke test and worker-to-main exit request.
+- `captureSubmission/` — five asynchronous screenshots of a presented frame, writer queue and shutdown disposition.
+- `asyncScreenshotMic/` — microphone startup, permission and owning-worker teardown checks; Web screenshot smoke coverage lives in `asyncScreenshotMicWeb/`.
 
 - `webDropSize/` — Web dropped-file size and reader limits. The Web build
   exercises the complete application header with mock FileReaders under Node;
@@ -231,12 +243,7 @@ Fitting requests run every check strictly, without SKIPs.
   inert and cannot change the new run's count. Run the Web build
   with `emcmake cmake -S core/tests/webDropSize -B /tmp/webDropSize`,
   `cmake --build /tmp/webDropSize`, then `node /tmp/webDropSize/webDropSize.js`.
-- `hotReloadDiagnostics/` — the shared Windows guest linker-error matcher:
-  MSVC LNK2019/LNK2001 and lld-link undefined symbols trigger the import-contract
-  hint; compile errors, host link failures and successful guest builds stay quiet.
-  Output/project ownership excludes input-library and status-line false positives.
-  On Windows it also checks separate stdout/stderr destinations, capture beyond
-  pipe-buffer capacity, and the failing exit code.
+- `hotReloadDiagnostics/` — Windows-only stdout/stderr build capture and failed exit code. Failed Windows guest builds emit one fixed visibility reminder; there is no diagnostic classifier.
 - `shaderBindingSlots/` — headless Shader/FullscreenShader slot limits (#362):
   rejected view/image slots leave pending bindings and the image cache unchanged;
   every valid view slot binds, but only supported sampler slots are written.
@@ -244,7 +251,7 @@ Fitting requests run every check strictly, without SKIPs.
   canary, with zero and nonzero sentinels. Uniform slots retain their bytes or
   are rejected before copying; repeated invalid calls warn only once.
 - `shaderStreamOverflow/` — dummy-backend custom Shader stream accounting and
-  replay (#271): pre-append overflow detection, growth on the next sokol frame,
+  replay (#271): in-frame vertex/index buffer growth,
   32-bit relative indices, multiple passes, and captured-resource lifetime.
   Standalone CMake unit test with a plain `int main()`; run in Debug and Release.
 - `shaderStreamDraws/` — custom Shader and FullscreenShader index formats.
@@ -491,7 +498,7 @@ Fitting requests run every check strictly, without SKIPs.
   after a second meanwhile) and goes on once it returns; an App runs once:
   `Window::setApp()` refuses an App whose window closed (one error, the
   window keeps its App, no hook comes back, no second `setup()`) and any App
-  on a window that is not open, and `setApp(nullptr)` removes the window
+  on a window that is not open, and `destroyApp()` removes the window
   App's hook;
   `AudioRecorder::stop()` waits for the pass in flight, and a capture held in
   flight by a test hook (`internal::setAudioRecorderCaptureHookForTests()`)
@@ -520,7 +527,7 @@ Fitting requests run every check strictly, without SKIPs.
   secondary window's App (setup on the window's first tick), whose `setup()`
   allocates what `audioOut()` reads, no `audioOut()` runs before `setup()`
   has returned and no hook is subscribed while it runs; afterwards there is
-  exactly one hook each, also after more ticks, and `setApp(nullptr)` removes
+  exactly one hook each, also after more ticks, and `destroyApp()` removes
   them;
   an App that is constructed but never run gets no callbacks; the App's
   `audioOut()` still runs before the default-priority listeners its `setup()`
@@ -594,12 +601,7 @@ Fitting requests run every check strictly, without SKIPs.
   requested spelling. `--screen` (needs a display, e.g. Xvfb) also checks the
   deferred PNG/JPEG/BMP files, direct file capture and absence of duplicate
   suffixes. The default run needs no GPU.
-- `screenshotContract/` — *(also on web)* screenshot contracts (#230, #298).
-  Web: `grabScreen()` returns false and warns once; `saveScreenshot()` queues
-  a canvas download without creating folders. A mock DOM under node checks
-  filenames, PNG/JPEG selection, deferred callbacks, resource cleanup and
-  errors (including a tainted canvas). Native: the destination folder is
-  created and capture is queued. The web half runs in the daily sweep.
+- `screenshotContract/` — a pending screenshot receives one main-thread failure completion when the addressed Window ends.
 - `mcpHttpGuard/` — a web page in the user's browser cannot drive the
   loopback MCP server (#238): a foreign Host (DNS rebinding) or Origin gets
   403, a non-JSON POST 415, and a missing or wrong bearer token 401, while
@@ -681,7 +683,7 @@ Fitting requests run every check strictly, without SKIPs.
   it will not render. A window whose flag is not set is unchanged: the
   request is deferred to its tick and, with no tick, answered by the 5 s
   timeout. Headless: the flag is driven through the test seam
-  `internal::windowOccludedHookForTests()`; the native flags (macOS
+  `internal::publishWindowMetadata()`; the native flags (macOS
   occlusionState, Win32 `WM_SIZE` / `DXGI_STATUS_OCCLUDED`, X11 `WM_STATE` /
   `VisibilityNotify`) are checked by hand.
 - `serialHangup/` — a lost serial device is reported (#260): when the device
@@ -732,12 +734,14 @@ Fitting requests run every check strictly, without SKIPs.
   end event was lost (not among the touches at the next BEGAN) is dropped so
   the next finger down presses.
 - `headlessExit/` — headless exit protocol (#378, #383): pending-signal
-  retention and second-signal escalation (POSIX child processes), forced and cancellable
+  retention and second-signal escalation (POSIX child processes), immediate signal/App-flag stops and cancellable process
   exits, cleanup and exit codes, main-thread dispatch, signal reasons, clean
   consecutive runs, and deterministic 100-step catch-up passes that stop only
-  for uncancellable exits. No display or timing-dependent assertions.
-- `secondaryTimerCreation/`: native #307 pre-creation delta regression with deterministic timestamps; the same source runs on the pre-Q2 base. Use `--display`.
-- `windowTick`: #239 Q2 / #307 / #984 common-tick scheduling, listener timers, frame samples, read-only FPS, real draw counts, headless zero draws and fractional DPI conversion. `--display` checks native presentation and main clear color/visibility, hidden-main updates while a visible secondary draws, upload-only GPU boundaries, and non-throwing invalid-swapchain retry. Hidden main drawing is skipped in idle EVENT_DRIVEN mode or retains configured/native pacing.
+  for immediate signal/App-flag stops. Runtime-first headless quit and fresh per-listener false preserve a veto against later false. No display or timing-dependent assertions.
+- `secondaryTimerCreation/`: native pre-creation delta regression with deterministic timestamps. Use `--display`.
+- `windowTick`: common-tick scheduling, listener timers, frame samples, read-only FPS, real draw counts, headless zero draws and fractional DPI conversion. `--display` checks native presentation and main clear color/visibility, hidden-main updates while a visible secondary draws, upload-only GPU boundaries, and non-throwing invalid-swapchain retry. Hidden drawing is skipped in idle EVENT_DRIVEN mode or retains configured/native pacing when hidden updates are enabled.
+  `tcbuild.sh env python3 core/tests/windowTick/host-entry-test` links the production common entry/coordinator and exercises addressed Window and process entries without a display. Add `TC_HOST_ENTRY_MUTATIONS=1 TC_HOST_ENTRY_EXTRA_MUTATIONS=1` after `env` to run compiled host, launch-client and scheduler mutations. `tcbuild.sh env TC_HOST_TURN_MUTATIONS=1 python3 tools/tests/test_host_turn_hooks.py` executes native event guards, no-draw X11 turns and nested AppKit turn arbitration with stubs; it does not claim Windows/macOS SDK compilation.
+  Bootstrap tests preserve base native admission: construction and queued-before-first-tick notifications are dropped; desktop init-time notifications reach host listeners synchronously, including constructor resize and the Windows QUERYENDSESSION exitRequested veto. The host probe extracts production sends, predicates, init helpers and complete Win32/X11 loops (GLX and EGL), plus the macOS observer/callback boundary. Mutations initialize before the first drain or drop during init. Post-init input arrives before the first draw in order exactly once with each drop’s own paths. Tests check the authoritative hidden snapshot at setup and preserve per-Window last-delivered visibility. `tcbuild.sh env TC_BOOTSTRAP_MUTATIONS=1 python3 tools/tests/test_host_bootstrap_readiness.py` checks construction and init-in-progress admission on all three desktop ports and the base flag-after-init ordering on Web/iOS/Android. `tcbuild.sh env TC_SINGLE_WINDOW_MUTATIONS=1 python3 tools/tests/test_single_window_host_bridge.py` checks real 120 Hz source timing, native single-window skip endpoints and Android's pre-swap suppression, and links production Web sokol with the common tick body using Emscripten (`EMXX` or the installed SDK). These checks use native stubs and make no mobile device claim.
   Its deterministic tests also cover capture retry/expiry during persistent admission failure without afterFrame. `sh core/tests/windowTick/egl-wait-test` extracts the production EGL frame function and checks readable-fd wake-up, Xlib-buffered input, work/deadline accounting, EINTR and no catch-up without sleep-duration assertions.
 - `frameTiming/` — time handling (#228, #229): one steady elapsed clock with its
   origin at program start, `resetElapsedTimeCounter()` as a display offset only,
@@ -791,21 +795,13 @@ Fitting requests run every check strictly, without SKIPs.
   window's context and in the main one. A freed probe's memory holds a
   sentinel node that counts any call reaching it, so a stale pointer fails
   the test instead of depending on heap reuse.
-- `windowAppSwap/` — a secondary window's `setApp()` and `close()` are
-  requests that land at the window's next frame boundary (#315). Called from
-  the window's own App (`update()`, `keyPressed()`) or from its child
-  (`update()`, `onKeyPress()`), the window is unchanged until the tick or
-  event ends (`getApp()`, `App::getWindow()`, `isOpen()`), the App and its
-  children stay alive for the rest of it, and then the swap lands; a request
-  from outside a tick lands when the next tick starts. Two `setApp()` in one
-  frame: the last wins and the other App is never attached. `close()` with a
-  `setApp()` in the same frame: `close()` wins (the pending App is dropped
-  with a warning; a `setApp()` after `close()` is an error at the call). The
-  checks run again when a request is applied (the same App requested on two
-  windows lands on the first only), and the teardown detaches the App before
-  its `exit()` / `cleanup()`, so `setApp()` / `close()` from there find a
-  closed window. The tick / event bracket is the glue's
-  `internal::WindowDispatchScope`; build with `-fsanitize=address` for the
+- `windowAppSwap/` — typed App replacement and close requests land at a safe
+  Window frame boundary. Calls from App or child callbacks preserve the outgoing
+  App through the rest of that entry. The last pending constructor candidate wins;
+  close cancels pending candidates without inventing setup, exit or cleanup.
+  Stable framework event slots remain while an App is replaced or destroyed.
+  Attachment rollback, lifecycle reentry, event ordering and native teardown use
+  the common `internal::WindowEntryScope`; build with AddressSanitizer for the
   memory side. The same test also has real-window pipeline lifetime checks:
   `allCoreTests windowAppSwap --pipeline-cycles self 100` closes from the
   secondary App's third update; replace `self` with `main` to close from the
@@ -878,18 +874,12 @@ Fitting requests run every check strictly, without SKIPs.
   accept thread cannot start, `start()` returns false, reports it once and
   leaves nothing listening, and a later `start()` on that port works. Each
   server binds a port the OS just handed out, not a fixed one.
-- `appRoot/` — the running App is `getRootNode()` (#255): the root is a weak
-  reference, so the App can't register itself from its constructor, and the
-  code that creates it through a `shared_ptr` does. `runApp()`'s setup
-  callback (called here without `sapp_run()`) registers the App, and the
-  root is gone once the cleanup callback freed it. Inside the App's
-  constructor `getRootNode()` is not the App yet and `App::setSize()`
-  resizes no window and warns once however often it is called (an App on
-  the stack likewise); from `setup()` it goes to the main window without a
-  warning. `runHeadlessApp()` owns
-  the App with a `shared_ptr`, so it is the root in `setup()`, `update()` and
-  `cleanup()`, `setup()` can `addChild()`, and the root is cleared when the
-  run ends.
+- `appRoot/` — typed construction publishes the App as a weak scene root only
+  after its constructor finishes. Constructor-only registrations belong to its
+  token; constructor sizing changes its own RectNode until attachment. Setup
+  resolves the App's Window. Ending clears the root and `getWindow()` before
+  exit and cleanup. Headless execution keeps the virtual root and providers
+  without executing the scene tree or owning a native Window.
 - `pixelsIndex/` — `Pixels` indexes with `size_t`, so images past `INT_MAX`
   bytes work: the offset of the far corner of a 23171x23171 RGBA image, and
   an `allocate()` byte count that is checked before it can wrap (against a
@@ -1044,18 +1034,10 @@ Fitting requests run every check strictly, without SKIPs.
   `tools/src/main.cpp` (including the ones that call the build / clean
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
-- `windowSetApp/` — an App ends when it leaves its window (#318), on the real
-  `AudioEngine` over miniaudio's null backend: `Window::setApp(other)` and
-  `setApp(nullptr)` run the outgoing App's `exit()` and then `cleanup()`, once
-  each, and detach its `audioOut()` / `audioIn()` (not called again); the
-  incoming App's `setup()` runs on the window's next tick; attaching the
-  swapped-out App again is refused with one error and the window keeps its
-  App; an App whose `cleanup()` already ran is not ended twice. Also from the
-  App's own `update()`, from its `setup()` (the swapped-out App's audio
-  hooks are detached at the boundary), and for an App added with `addChild()`
-  and destroyed (its hooks go with `cleanupTree()`). Requests leave the App
-  live inside its callback and run teardown at the frame boundary (#315).
-  Audio-stop checks wait for actual callbacks. Not covered: a native window.
+- `windowSetApp/` — constructor-only App ownership, nested constructor attribution,
+  cancelled candidates, stable event slots, per-App MCP and async retirement,
+  retained handles across epochs and reverse shutdown despite callback throws.
+  `appAudioTeardown/` separately exercises the real null AudioEngine barrier.
 - `nodeReflectRoundTrip/` — derived values in reflection (#287), with Node's
   `globalPos` (`TC_DERIVED`, derived from `pos`): `reflectToJson()` writes
   `pos` and no `globalPos` (`reflectToJson(obj, true)` writes both), and a
@@ -1102,16 +1084,23 @@ Fitting requests run every check strictly, without SKIPs.
   remain manual in `repro/appSetSizeTest` on `test/app-setsize-own-window`
   (see its `repro/README.md`). Headless S6 does not prove that another window
   is not resized.
-- `mainWindowAttach/` — main Window ownership, identity, shared admission,
-  deferred swap, replacement size and main-close quit. Display modes also
-  cover callback exit, process teardown with a pending swap, and constructor
-  failure contained at the C callback boundary.
-- `mainWindowRouting/` — standalone recording unit for the common main-window
+- `windowState/` — deterministic equal Window ownership, positive native
+  binding IDs, per-window native operations, framebuffer/DPI before initial
+  App sizing, trusted effective-hidden snapshots, size deduplication and
+  headless fallback/reference lifetime through the common production path.
+- `mainWindowAttach/` — equal Window ownership and explicit close. Its display
+  mode closes the earlier Window while a surviving Window uploads textures/Fbos
+  and continues drawing. Dropping all external handles leaves a Window live.
+- `windowTick/guest-storage-test.py` — real Linux dynamic-library retirement,
+  persistent OOM disconnects, queued callbacks, retained App handles and weak
+  control blocks. Physical unloading waits for the last defining-code holder;
+  released storage can be rebuilt and notified after unloading.
+- `mainWindowRouting/` — standalone recording unit for the addressed Window
   title/size/fullscreen dispatcher and own-window DPI conversion. Its plain
   `main()` uses recording sapp entry points; native support limits remain
   device checks.
 
-OOM recovery tests support Release builds, or iterator debugging off. Under MSVC iterator debugging, persistent cases that construct or move string/container storage while failure is armed SKIP with a reason; allocation-free recovery and targeted one-shot payload failure cases still run. Exhaustive one-shot STL sweeps also skip if they target allocating noexcept proxy construction/moves. `common/tcTestFailure.h` redirects MSVC Debug CRT reports and GUI assertions to stderr and suppresses CRT abort and OS fault dialogs at static initialization. This setup is Debug-only; default invalid-parameter termination and installed crash handlers remain in place. Core test entries include it through `tcCoreTest.h`; standalone unit tests keep their plain `main()`.
+OOM recovery tests support Release builds, or iterator debugging off. Under MSVC iterator debugging, persistent cases that construct or move string/container storage while failure is armed SKIP with a reason; allocation-free recovery and targeted one-shot payload failure cases still run. Exhaustive one-shot STL sweeps also skip if they target allocating noexcept proxy construction/moves. `common/tcTestFailure.h` redirects MSVC Debug CRT reports and GUI assertions to stderr and suppresses CRT abort and OS fault dialogs at static initialization. This setup is Debug-only; default invalid-parameter termination remains in place. Core test entries include it through `tcCoreTest.h`; standalone unit tests keep their plain `main()`.
 
 For #239 render-boundary regressions, after building the core archive and combined
 runner, run `tcbuild.sh sh core/tests/windowTick/render-boundary-test` (surfaceless
@@ -1123,3 +1112,30 @@ resource-bearing listeners, the atlas same-key upload deferral, shadow consumer
 replay before a referenced slot is overwritten, and native secondary policy
 routing. Resource lifetimes keep base's rules (see #995); these tests do not
 check FBO consumers carried across idle commits.
+
+Process and close coverage:
+
+- `mainWindowAttach/src/c2ProcessChecks.h` checks Runtime-first/reverse-attachment
+  lifecycle delivery, unsaved A/clean B in both orders, later false, first veto
+  reason, throwing listeners, subscriber stack restoration, sibling close/swap,
+  generation-filtered unload, unchanged device-loss mutation, both-window OS
+  close veto/allow, code-close bypass, quitOnClose, last close, Window0 services,
+  the manual Window-exit quit listener, and inert exitApp in App::exit. The
+  surface-only close fixture verifies deferred retirement at the host boundary.
+- `secondaryEventDelivery --display` also checks Runtime/local quit ordering and
+  OS-close veto with later false on a live secondary native Window.
+- `headlessConsole --windowed` uses the real native host and deterministic queued
+  commands: before first draw, after the initial Window closes, then Window0
+  after vetoing last-window process quit. It checks subscriber owner scope,
+  registration retirement and exactly-once Runtime console delivery. The normal
+  headless stdin subprocess cases remain part of the own-binary suite.
+- `windowTick/event-converter-test` classifies quit/device loss as process events;
+  they have no Window raw-event fan-out. Native input keeps raw-before-typed order.
+
+### Session authority and OS-only exit deadline
+
+`sessionEndBusy` covers idle veto/cancel/dedupe, reverse exact-once ending and
+one shared deadline. Busy main-stack commits call no App exit and arm no watchdog;
+workers alone retain idle veto behavior. `native-test.py` compiles the mac busy
+probe through `_exit` on Linux. The explicit `--mac-device` probe covers idle and
+busy-no-exit Apple events; real logout remains a supervised device pass.

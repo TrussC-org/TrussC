@@ -186,6 +186,7 @@ class BuildWorkflowCacheTests(unittest.TestCase):
         self.assertEqual(prune['permissions'], {'actions': 'write'})
         savers = sorted(name for name, job in jobs.items()
                         if any(step.get('uses', '').startswith('hendrikmuhs/ccache-action@')
+                               and step.get('with', {}).get('save', 'true') != 'false'
                                for step in job.get('steps', [])))
         self.assertEqual(sorted(prune['needs']), savers)
         self.assertNotIn('ccache-prune', jobs['ci-ok']['needs'])

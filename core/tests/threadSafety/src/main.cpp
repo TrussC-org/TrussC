@@ -149,6 +149,27 @@ struct FloodApp : App {
 TC_CORE_TEST_MAIN() {
     getMainThreadId();   // record the main thread id (headless test has no _setup_cb)
 
+    {
+        constexpr int count = 100000;
+        auto start = chrono::steady_clock::now();
+        for (int i = 0; i < count; ++i) { Node node; }
+        check("100k Node constructions on main within 30 seconds",
+              chrono::steady_clock::now() - start < chrono::seconds(30));
+        Event<int> event;
+        start = chrono::steady_clock::now();
+        for (int i = 0; i < count; ++i) { auto listener = event.listen([](int&) {}); }
+        check("100k listen/unlisten within 30 seconds",
+              chrono::steady_clock::now() - start < chrono::seconds(30));
+        int delivered = 0;
+        auto listener = event.listen([&](int&) { ++delivered; }, Deliver::Main);
+        start = chrono::steady_clock::now();
+        thread worker([&] { for (int i = 0; i < count; ++i) { int value = i; event.notify(value); } });
+        worker.join();
+        internal::drainMainThreadQueue();
+        check("100k cross-thread Main notifies delivered within 30 seconds",
+              delivered == count && chrono::steady_clock::now() - start < chrono::seconds(30));
+    }
+
     // --- 1. runOnMainThread defers off-thread work and runs it ON the main thread ---
     {
         atomic<bool> ran{false};

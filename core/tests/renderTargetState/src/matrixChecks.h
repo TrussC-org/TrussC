@@ -42,7 +42,7 @@ void runNativeClipChecks() {
         check("native RectNode Fbo matches real framebuffer and uses pixel coordinates",
               target.getWidth() == getFramebufferWidth() && target.getHeight() == getFramebufferHeight() &&
               tc::getWidth() == target.getWidth() && tc::getHeight() == target.getHeight() && internal::targetPixelScale() == 1);
-        auto node = std::make_shared<ClipFixture>();
+        auto node = internal::makeConstructedApp<ClipFixture>();
         node->setPos(10, 10); node->setSize(20, 20); node->setClipping(true); node->handleDraw();
         check("native RectNode pop restores inactive empty clip", !internal::currentTarget().currentScissor.active &&
               internal::currentTarget().scissorStack.empty());
@@ -219,13 +219,12 @@ void runMatrixChecks() {
     }
     popScissor(); popMatrix(); screen.viewport = savedViewport;
 
-    // Force host DPI through the same context fields used by secondary windows.
+    // Force host DPI through the context fields shared by all windows.
     // GPU resources remain this window's actual context; Fbo pixels are DPI 1.
-    const bool mainWindow = window.isMain;
     const auto hostDpi = window.dpiScale;
     const int hostW = window.fbWidth, hostH = window.fbHeight;
     const bool pixelMode = internal::pixelPerfectMode();
-    window.isMain = false; window.fbWidth = 192; window.fbHeight = 128;
+    window.fbWidth = 192; window.fbHeight = 128;
     for (float dpi : {1.0f, 2.0f}) for (bool pixelPerfect : {false, true}) {
         window.dpiScale = dpi; internal::pixelPerfectMode() = pixelPerfect;
         std::printf("RECTNODE simulated hostDpi=%g framebuffer=%dx%d fbo=%dx%d pixelPerfect=%d\n",
@@ -236,7 +235,7 @@ void runMatrixChecks() {
         first.begin(0, 0, 0); setupScreenOrtho(); setBlendMode(BlendMode::Alpha); disableDepthTest();
         check("Fbo coordinate scale ignores host DPI and pixelPerfect", internal::targetPixelScale() == 1 && tc::getWidth() == 160 && tc::getHeight() == 96 &&
               getFramebufferWidth() == 192 && getWindowWidth() == int(192 / (pixelPerfect ? 1 : dpi)));
-        auto node = std::make_shared<ClipFixture>();
+        auto node = internal::makeConstructedApp<ClipFixture>();
         node->setPos(10, 10); node->setSize(20, 20); node->setClipping(true); node->handleDraw();
         check("clipped node geometry stays object-local", node->getWidth() == 20 && node->getHeight() == 20 && node->getSize().x == 20);
         setColor(1, 0, 0); drawRect(40, 10, 5, 5);
@@ -290,7 +289,7 @@ void runMatrixChecks() {
         check("point target extent and model transform at host DPI 2", lastX - firstX + 1 == extent && lastY - firstY + 1 == extent &&
               count == extent * extent && firstX + lastX == 119 && firstY + lastY == 99);
     }
-    window.isMain = mainWindow; window.dpiScale = hostDpi; window.fbWidth = hostW; window.fbHeight = hostH;
+    window.dpiScale = hostDpi; window.fbWidth = hostW; window.fbHeight = hostH;
     internal::pixelPerfectMode() = pixelMode;
     // Direct fullscreen drawing retains a custom target camera, model and clip.
     first.begin(0, 0, 0); setupScreenFovWithSize(0, 160, 96, 0.25f, 600);

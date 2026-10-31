@@ -1228,7 +1228,7 @@ private:
 // static instance — inline would give each module its own copy on Windows.
 // ---------------------------------------------------------------------------
 RenderContext& getDefaultContext();
-RenderContext& mainRenderContext();
+RenderContext& processRenderContext();
 
 // Wraps one entry point where TrussC calls app code (#349), as one line at
 // the top of its scope: `EntryStackGuard guard(AppEntry::Update);`. The
@@ -1243,6 +1243,7 @@ public:
           matrixDepth_(rc_.getMatrixStackDepth()), styleDepth_(rc_.getStyleStackDepth()), target_(&currentTarget()),
           previousEntry_(std::exchange(rc_.activeEntry_, entry)) {}
     ~EntryStackGuard() {
+        if (frameworkShutdown()) return;
         // present() owns Draw's stack reset. Nested update/setup/event guards
         // temporarily override Draw, even when a native pass is already open.
         TeardownSteps steps;

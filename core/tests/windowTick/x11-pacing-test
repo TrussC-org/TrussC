@@ -33,15 +33,17 @@ probe = r'''
 #include <cstdio>
 #include <cstddef>
 struct sapp_window { int id; };
+struct sapp_event { int type=0; };
+QUIT_RESULT
 struct _sapp_tc_window_t {
-    bool ready=true, in_tick=false, close_requested=false, input_delivered=false;
+    bool is_main=false, ready=true, constructing=false, surface_resize_pending=false, in_tick=false, close_requested=false, input_delivered=false;
     int drawable=1, frame_count=0, swap_interval=0, win_id=1;
     bool draw_while_hidden=true, skip_present=false;
     double earliest_next=0, frame_duration=0, last_present=0;
     struct { double smooth_dt=1.0/62.0, last=0; } timing;
     struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; } desc;
 };
-struct App { bool quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
+struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; } desc; bool init_called=true, quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
 struct { App app; int display=0; size_t window_slots=2; double refresh_period=1.0/62.0;
     _sapp_tc_window_t* windows[2]; } _sapp_tc;
 struct XEvent {};
@@ -62,6 +64,12 @@ void lowerFps(sapp_window, void*) noexcept {
     if (_sapp_tc.windows[1]->frame_count==limit-1) _sapp_tc.app.quit_ordered=true;
 }
 void renderWork(sapp_window,void*) noexcept { clockValue+=callbackWork; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
+    for (auto* w : _sapp_tc.windows) if (w && w->win_id==h.id) return w;
+    return nullptr;
+}
+void sapp_destroy_window(sapp_window h) { for (auto*& w : _sapp_tc.windows) if (w && w->win_id==h.id) w=nullptr; }
+void _sapp_tc_x11_init_client() {}
 double _sapp_tc_now() { return clockValue; }
 int XPending(int) { return 0; }
 void XFlush(int) {}
@@ -72,6 +80,8 @@ void _sapp_tc_x11_wait_until(double deadline) { clockValue=deadline; }
 void _sapp_tc_x11_process_event(XEvent*) {}
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
+RUNTIME_QUIT_HELPER
+QUIT_DECISION
 PERIODIC
 DUE
 struct _sapp_tc_x11_surface_scope {};
@@ -83,6 +93,7 @@ void _sapp_tc_timing_update(decltype(_sapp_tc_window_t::timing)* t) {
     t->last=clockValue;
 }
 bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t*) { return false; }
+bool _sapp_tc_x11_resize_surface(_sapp_tc_window_t*) { return true; }
 bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
     // A native boundary outside swap supplies the observed main cadence.
     // No claim that this is the particular blocking boundary on the Pi.
@@ -111,7 +122,7 @@ int main() {
     for (bool burst : {false, true}) for (double work : {0.0, .0001, .001}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.swap_interval=1; clockValue=10; tail=work; queued=burst;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; clockValue=10; tail=work; queued=burst;
         _sapp_tc_x11_run_loop();
         // Steady swaps should admit almost every tick. Queued EGL swaps may
         // teach the existing estimator a doubled period, so allow half cadence.
@@ -130,7 +141,7 @@ int main() {
     for (bool heavy : {false,true}) for (bool lower : {false,true}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.swap_interval=1;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1;
         clockValue=nextMain=10; mainPeriod=period-.0001;
         main.last_present=10; secondary.earliest_next=10+mainPeriod+.0001;
         nonblocking=true; queued=false; tail=heavy?.00005:.0002; callbackWork=heavy?period:0;
@@ -152,7 +163,7 @@ int main() {
     {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.swap_interval=1; main.last_present=10;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; main.last_present=10;
         clockValue=nextMain=10; mainPeriod=.001; tail=0;
         previousSecondary=0; minSecondaryGap=100;
         _sapp_tc_x11_run_loop();
@@ -171,7 +182,7 @@ int main() {
     {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.swap_interval=1; main.last_present=10;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; main.last_present=10;
         main.draw_while_hidden=false;
         clockValue=nextMain=10; mainPeriod=period; tail=0;
         secondary.earliest_next=10+.25*period+.00005;
@@ -190,7 +201,7 @@ int main() {
     for (bool absent : {false,true}) for (bool iconify : {false,true}) for (bool lower : {false,true}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=absent?nullptr:&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=absent?nullptr:&main; main.swap_interval=1; main.draw_while_hidden=false;
+        _sapp_tc.app.main=absent?nullptr:&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; main.draw_while_hidden=false;
         clockValue=10; hideMain=!iconify; iconMain=iconify; tail=0;
         previousSecondary=0; minSecondaryGap=100;
         secondaryDraws=0; previousDrawTick=10; drawAccumulator=0;
@@ -225,10 +236,14 @@ int main() {
 '''
 probe = '#include <initializer_list>\n#include <algorithm>\n' + probe
 saved_source = source
+source = (root / 'core/include/sokol/util/sokol_window_event.h').read_text(encoding='utf-8')
+probe = probe.replace('QUIT_RESULT', body('struct _sapp_tc_event_result {') + ';')
+probe = probe.replace('RUNTIME_QUIT_HELPER', body('template<class Descriptor>\nstatic inline _sapp_tc_event_result _sapp_tc_deliver_runtime_quit('))
 source = (root / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
 probe = probe.replace('FRAME_SKIP', body('bool frameSkipShouldTick('))
 source = saved_source
 for placeholder, marker in (
+    ('QUIT_DECISION', 'static void _sapp_tc_x11_request_exit('),
     ('PERIODIC', 'static void _sapp_tc_x11_pace_periodic('),
     ('DUE', 'static bool _sapp_tc_x11_window_due('),
     ('PACE', 'static void _sapp_tc_x11_pace('),
@@ -244,5 +259,5 @@ with tempfile.TemporaryDirectory(prefix='tc-an2a-pacing2-', dir=os.environ.get('
         subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-O1', '-DSOKOL_'+backend,
                         str(scratch/'probe.cpp'), '-o', str(scratch/'probe')], check=True)
         print(backend, flush=True)
-        failed |= subprocess.run([str(scratch/'probe')]).returncode != 0
+        failed |= subprocess.run([str(scratch/'probe')], timeout=20).returncode != 0
     raise SystemExit(int(failed))

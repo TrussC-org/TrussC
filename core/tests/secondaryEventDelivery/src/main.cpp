@@ -7,7 +7,7 @@
 
 #if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || (defined(__linux__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__ANDROID__))
 namespace trussc::internal {
-void dispatchSecondaryDisplayEventForTests(const sapp_event*, Window&);
+void dispatchWindowDisplayEventForTests(const sapp_event*, Window&);
 }
 using namespace tc;
 namespace {
@@ -17,6 +17,7 @@ void check(const char* label, bool ok) {
     if (!ok) ++failures;
 }
 std::shared_ptr<Window> secondary;
+std::shared_ptr<App> observerOwner;
 CoreEvents& source() { return secondary->events(); }
 std::map<std::string, std::string> order;
 std::vector<EventListener> listeners;
@@ -51,7 +52,7 @@ void feed(sapp_event_type type, float x = 20, float y = 20, unsigned int modifie
     e.mouse_button = SAPP_MOUSEBUTTON_LEFT;
     const float dpi = secondary->context().dpiScale;
     e.mouse_x = x * dpi; e.mouse_y = y * dpi; e.modifiers = modifiers; e.scroll_y = 1;
-    internal::dispatchSecondaryDisplayEventForTests(&e, *secondary);
+    internal::dispatchWindowDisplayEventForTests(&e, *secondary);
 }
 struct Probe : RectNode {
     Probe() { setPos(10, 10); setSize(60, 60); enableEvents(); }
@@ -106,15 +107,15 @@ void inputChecks() {
     order.clear();
     auto down = source().keyPressed.listen([](auto& e) { check("listener sees held key", isKeyPressed(e.key)); });
     auto up = source().keyReleased.listen([](auto& e) { check("listener sees released key", !isKeyPressed(e.key)); });
-    feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN); expect("mousePressed", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 30, 30, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_UP); expect("mouseReleased", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE); expect("mouseMoved", "cdpbatlz");
-    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpbatlz");
+    feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpatblz");
+    feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN); expect("mousePressed", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 30, 30, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_UP); expect("mouseReleased", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE); expect("mouseMoved", "cdpatblz");
+    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpatblz");
     extraEvents();
-    for (auto name : {"touchPressed", "touchMoved", "touchReleased", "filesDropped", "windowResized"}) expect(name, "cdpbalz");
+    for (auto name : {"touchPressed", "touchMoved", "touchReleased", "filesDropped", "windowResized"}) expect(name, "cdpablz");
     for (int priority : {-20, 0, 50}) {
         auto consumer = source().mousePressed.listen([](auto& e) { e.consumed = true; }, priority);
         feed(SAPP_EVENTTYPE_MOUSE_DOWN);
@@ -130,30 +131,30 @@ void inputChecks() {
         check("consumed release still clears held state", !isKeyPressed(SAPP_KEYCODE_A));
     }
     treeConsumes = true;
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN); expect("mousePressed", "cdpbat");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN); expect("mousePressed", "cdpat");
     dragConsumes = false;
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 30, 30, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbatt");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 30, 30, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpatt");
     treeConsumes = false;
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 35, 35, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbattlz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 35, 35, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpattblz");
     treeConsumes = dragConsumes = true;
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 200, 200, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbat");
-    feed(SAPP_EVENTTYPE_MOUSE_UP, 200, 200); expect("mouseReleased", "cdpbatlz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 200, 200, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpat");
+    feed(SAPP_EVENTTYPE_MOUSE_UP, 200, 200); expect("mouseReleased", "cdpatblz");
     feed(SAPP_EVENTTYPE_MOUSE_DOWN); order.clear(); releaseConsumes = true;
-    feed(SAPP_EVENTTYPE_MOUSE_UP, 200, 200); expect("mouseReleased", "cdpbat");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE); expect("mouseMoved", "cdpbat");
-    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpbat");
-    feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpbat");
-    feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpbat");
+    feed(SAPP_EVENTTYPE_MOUSE_UP, 200, 200); expect("mouseReleased", "cdpat");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE); expect("mouseMoved", "cdpat");
+    feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpat");
+    feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpat");
+    feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpat");
     treeConsumes = releaseConsumes = false;
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpbalz");
-    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 95, 95, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpbalz");
-    feed(SAPP_EVENTTYPE_MOUSE_UP, 95, 95); expect("mouseReleased", "cdpbalz");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpablz");
+    feed(SAPP_EVENTTYPE_MOUSE_MOVE, 95, 95, SAPP_MODIFIER_LMB); expect("mouseDragged", "cdpablz");
+    feed(SAPP_EVENTTYPE_MOUSE_UP, 95, 95); expect("mouseReleased", "cdpablz");
     rootConsumes = true;
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpba");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpa");
     feed(SAPP_EVENTTYPE_MOUSE_UP, 90, 90); order.clear(); rootConsumes = false;
     auto app = std::static_pointer_cast<DeliveryApp>(secondary->getApp());
     auto rootConsumer = app->RectNode::mousePressed.listen([](auto& e) { e.consumed = true; });
-    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpba");
+    feed(SAPP_EVENTTYPE_MOUSE_DOWN, 90, 90); expect("mousePressed", "cdpa");
     feed(SAPP_EVENTTYPE_MOUSE_UP, 90, 90); order.clear(); rootConsumer.disconnect();
     auto edit = source().mouseMoved.listen([](auto& e) { e.pos.x = 31; e.delta.x = 7; });
     feed(SAPP_EVENTTYPE_MOUSE_MOVE);
@@ -197,14 +198,14 @@ struct SwapApp : App {
             check("nested input keeps outgoing App for tick", secondary->getApp().get() == this);
         }
         if (index == 0 && counts[0].updates == 2) {
-            secondary->setApp(std::make_shared<SwapApp>(1));
+            secondary->setApp<SwapApp>(1);
             check("update swap remains pending", secondary->getApp().get() == this && getWindow() == secondary.get());
         }
     }
     void draw() override { ++counts[index].draws; }
     void keyPressed(const KeyEventArgs&) override {
         if (index == 1) {
-            secondary->setApp(std::make_shared<SwapApp>(2));
+            secondary->setApp<SwapApp>(2);
             check("input swap remains pending", secondary->getApp().get() == this);
         }
     }
@@ -224,19 +225,39 @@ struct SwapApp : App {
 void closeOrderChecks() {
     secondary = createWindow(); check("close-order secondary created", bool(secondary));
     if (!secondary) return;
+    auto observer = internal::makeConstructedAppAt<App>(&secondary->context());
+    internal::AppOwnerScope observation(internal::appOwner(*observer));
     order.clear(); stages(true);
     struct ExitOrderApp : App {
-        void exit() override { order["exit"] += 'a'; check("close uses secondary context", !internal::currentWindowContext().isMain && !getWindow()); }
+        void exit() override { order["exit"] += 'a'; check("close uses secondary context", internal::currentWindowContext().hostWindow && !getWindow()); }
     };
-    auto app = std::make_shared<ExitOrderApp>(); std::weak_ptr<App> outgoing = app;
-    secondary->setApp(app); internal::applyPendingAppForTests(*secondary); stages(false); app.reset();
+    auto app = internal::makeConstructedAppAt<ExitOrderApp>(&secondary->context()); std::weak_ptr<App> outgoing = app;
+    internal::WindowRequestAccess::attachCandidate(*secondary, app); internal::applyPendingAppForTests(*secondary); stages(false); app.reset();
+    std::string quitOrder;
+    auto processQuit = runtime().events().exitRequested.listen([&](ExitRequestEventArgs& e) {
+        quitOrder += 'R'; e.cancel = true; e.reason = "secondary unsaved";
+    });
+    auto appQuit = secondary->events().exitRequested.listen([&](ExitRequestEventArgs& e) {
+        check("secondary quit fresh payload after Runtime veto", !e.cancel && e.reason.empty());
+        quitOrder += 'S'; e.cancel = false;
+    });
+    check("secondary process veto retains Runtime reason", !internal::dispatchExitRequested() && internal::exitBlockReason() == "secondary unsaved");
+    check("secondary process Runtime then App slot", quitOrder == "RS");
+    auto closeVeto = secondary->events().closeRequested.listen([](CloseRequestEventArgs& e) { e.cancel = true; });
+    auto closeFalse = secondary->events().closeRequested.listen([](CloseRequestEventArgs& e) {
+        check("secondary close later false begins fresh", !e.cancel); e.cancel = false;
+    });
+    const auto handle = internal::WindowRequestAccess::binding(*secondary).handle;
+    check("secondary OS close veto with later false", !internal::allowWindowClose(handle, secondary.get()) && secondary->isOpen());
+    closeVeto.disconnect(); closeFalse.disconnect(); processQuit.disconnect(); appQuit.disconnect();
     auto held = source().exit.listen([&] { check("outgoing App held through AfterApp", !outgoing.expired()); }, EventPriority::AfterApp);
-    secondary.reset(); // last-owner destruction uses the same real close path
-    expect("exit", "cdpbalz");
+    internal::WindowRequestAccess::teardown(*secondary);
+    secondary.reset(); // Runtime retention requires an explicit close
+    expect("exit", "cdpablz");
     check("outgoing released after complete exit delivery", outgoing.expired());
     secondary = createWindow(); check("exit-clear secondary created", bool(secondary));
     if (secondary) {
-        secondary->setApp(std::make_shared<ExitOrderApp>()); internal::applyPendingAppForTests(*secondary);
+        secondary->setApp<ExitOrderApp>(); internal::applyPendingAppForTests(*secondary);
         auto clearer = source().exit.listen([] { source().exit.clear(); }, -100);
         // Keep the owning window available to the clearer during teardown.
         internal::WindowRequestAccess::teardown(*secondary);
@@ -246,6 +267,8 @@ void closeOrderChecks() {
     auto emptyWindow = createWindow(); check("empty secondary created", bool(emptyWindow));
     if (emptyWindow) {
         int emptyExits = 0; auto subscription = emptyWindow->events().exit.listen([&] { ++emptyExits; });
+        internal::WindowRequestAccess::teardown(*emptyWindow);
+        internal::WindowRequestAccess::teardown(*emptyWindow);
         emptyWindow.reset(); check("window without App notifies exit once", emptyExits == 1);
     }
 }
@@ -256,14 +279,16 @@ struct Harness : App {
         WindowSettings s; s.width = s.height = 128; s.highDpi = false;
         secondary = createWindow(s); check("real secondary window created", bool(secondary));
         if (!secondary) { exitApp(); return; }
+        observerOwner = internal::makeConstructedAppAt<App>(&secondary->context());
+        internal::AppOwnerScope observation(internal::appOwner(*observerOwner));
         // Observe the event stream independently of the App bindings under test.
         firstUpdate = source().update.listen([] { secondaryTicked = true; }, -1000);
         firstDraw = source().draw.listen([] { secondaryTicked = true; }, -1000);
-        stages(true); secondary->setApp(std::make_shared<DeliveryApp>());
+        stages(true); secondary->setApp<DeliveryApp>();
         internal::applyPendingAppForTests(*secondary); stages(false);
         after = source().afterFrame.listen([] {
             if (!inputsDone) {
-                expect("update", "cdpbatlz"); expect("draw", "cdpbatlz");
+                expect("update", "cdpatblz"); expect("draw", "cdpatblz");
                 inputChecks(); inputsDone = true;
             } else if (phase == 0) {
                 expect("update", "at"); expect("draw", "at");
@@ -271,7 +296,7 @@ struct Harness : App {
                 check("tick hover retains fractional point", secondary->context().hoveredNode.lock() == app->probe);
                 if (++framesAfterClear == 2) {
                     app->hoverPhase = false;
-                    secondary->setApp(std::make_shared<SwapApp>(0)); phase = 1;
+                    secondary->setApp<SwapApp>(0); phase = 1;
                 }
             } else if (phase == 1 && counts[1].updates) {
                 check("A keeps update and draw until boundary", counts[0].updates == 2 && counts[0].draws == 2 && counts[0].exits == 1 && counts[0].cleanups == 1);
@@ -283,12 +308,14 @@ struct Harness : App {
                 check("input swaps App exactly once after its full tick", counts[1].updates == 1 && counts[1].draws == 1 && counts[1].exits == 1 && counts[1].cleanups == 1);
                 // Cancellation and refusal do not disturb bindings.
                 auto current = secondary->getApp();
-                secondary->setApp(std::make_shared<SwapApp>(3)); secondary->setApp(current);
-                secondary->setApp(internal::mainWindowContext().rootNode.lock() ? std::static_pointer_cast<App>(internal::mainWindowContext().rootNode.lock()) : nullptr);
+                auto cancelled = internal::makeConstructedApp<SwapApp>(3);
+                internal::retireAppOwner(internal::appOwner(*cancelled));
+                internal::WindowRequestAccess::attachCandidate(*secondary, cancelled);
+                internal::WindowRequestAccess::attachCandidate(*secondary, current);
                 phase = 3;
             } else if (phase == 3) {
                 check("cancel/refuse preserves current binding", secondary->getApp() && static_cast<SwapApp*>(secondary->getApp().get())->index == 2 && counts[2].exits == 0 && counts[3].updates == 0);
-                secondary->setApp(nullptr); phase = 4;
+                secondary->destroyApp(); phase = 4;
             }
         });
         // The exit clearer above removes the ordinary counter on close only.
@@ -298,7 +325,7 @@ struct Harness : App {
         if (!secondary) return;
         if (phase == 4 && !secondary->getApp()) {
             check("A to null calls exit and cleanup once without exit event", counts[2].exits == 1 && counts[2].cleanups == 1 && closeEvents == 0);
-            check("null attachment removes App bindings", source().keyPressed.listenerCount() == 0 && source().update.listenerCount() == 0);
+            check("null attachment retains stable no-op Window slots", source().keyPressed.listenerCount() == 1 && source().update.listenerCount() == 1);
             // The exit clearer would erase the ordinary counter; replace it
             // with protected observers for close and the App's clear in exit.
             source().exit.clear();
@@ -307,7 +334,7 @@ struct Harness : App {
                 check("mandatory teardown survives App exit clear", counts[3].exits == 1 && counts[3].cleanups == 0);
                 check("outgoing held through AfterApp", !secondary->getApp());
             }, EventPriority::AfterApp);
-            secondary->setApp(std::make_shared<SwapApp>(3)); phase = 5;
+            secondary->setApp<SwapApp>(3); phase = 5;
         } else if (phase == 5 && counts[3].draws) { secondary->close(); phase = 6; }
         else if (phase == 6 && !secondary->isOpen()) {
             check("close notifies exit exactly once", closeEvents == 1 && counts[3].exits == 1 && counts[3].cleanups == 1);
@@ -315,6 +342,7 @@ struct Harness : App {
             check("repeated teardown does not redeliver exit", closeEvents == 1 && counts[3].exits == 1);
             check("closed window has no App bindings", secondary->context().appEventListeners.empty());
             secondary.reset(); after.disconnect(); closeCounter.disconnect(); mandatory.disconnect(); listeners.clear();
+            observerOwner.reset();
             closeOrderChecks(); completed = true; exitApp();
         }
         if (++mainFrames == 600) {

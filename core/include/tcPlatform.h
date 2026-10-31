@@ -130,14 +130,14 @@ constexpr bool windowSizeIsScreenControlled() {
 }
 IVec2 windowPositionNative(const void* handle);
 void setWindowPositionNative(const void* handle, int x, int y);
-IVec2 mainWindowPosition();
-void setMainWindowPosition(int x, int y);
-void setMainWindowSizeLogical(int width, int height);
+IVec2 singleWindowPosition();
+void setSingleWindowPosition(int x, int y);
+void setSingleWindowSizeLogical(int width, int height);
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
-void setMainWindowSizeFractionalMac(double width, double height);
+void setSingleWindowSizeFractionalMac(double width, double height);
 #endif
 #if defined(__linux__) && !defined(__ANDROID__)
-void setMainWindowSizeFractionalX11(double width, double height);
+void setSingleWindowSizeFractionalX11(double width, double height);
 #endif
 }
 
@@ -195,15 +195,24 @@ TC_PLATFORMS("android,ios") void setImmersiveMode(bool enabled);
 TC_PLATFORMS("android,ios") bool getImmersiveMode();
 
 // ---------------------------------------------------------------------------
-// Keep screen on (prevent display sleep / auto-lock)
+// Keep screen on (request display-sleep inhibition; OS limits apply)
 // Android: AWINDOW_FLAG_KEEP_SCREEN_ON
 // iOS: UIApplication.idleTimerDisabled
 // macOS: IOPMAssertion (kIOPMAssertionTypeNoDisplaySleep)
 // Windows: SetThreadExecutionState(ES_DISPLAY_REQUIRED | ES_CONTINUOUS)
-// Linux / Web: no-op
+// Linux: the X server's own screen saver and blanking
+// Web: Screen Wake Lock API while visible in a secure context
 // ---------------------------------------------------------------------------
-TC_PLATFORMS("macos,windows,android,ios") void setKeepScreenOn(bool enabled);
-TC_PLATFORMS("macos,windows,android,ios") bool getKeepScreenOn();
+TC_PLATFORMS("macos,windows,linux,android,ios,web") void setKeepScreenOn(bool enabled);
+TC_PLATFORMS("macos,windows,linux,android,ios,web") bool getKeepScreenOn();
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__EMSCRIPTEN__)
+namespace internal {
+#if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
+    void updateKeepScreenOn(bool headless = false) noexcept;
+#endif
+    void shutdownKeepScreenOn() noexcept;
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // Screenshot functionality

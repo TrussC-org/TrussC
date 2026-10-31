@@ -10,7 +10,7 @@ namespace {
 int failures = 0;
 struct SizeProbe : App {
     void setup() override {
-        auto other = std::make_shared<App>();
+        auto other = internal::makeConstructedApp<App>();
         other->setSize(123, 45);
         if (other->getWidth() != 123 || other->getHeight() != 45) ++failures;
         std::printf("appSetSize S6: %s\n", failures ? "FAIL" : "PASS");

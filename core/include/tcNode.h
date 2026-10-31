@@ -134,8 +134,10 @@ inline bool isOverlayFocused() {
 // =============================================================================
 
 class Node : public std::enable_shared_from_this<Node> {
+    friend void internal::deliverAppExit(App&);
     friend class App;     // Allow App to call dispatch methods
-    friend class Window;  // Secondary windows drive their own tree (tcWindow.h)
+    friend class Window;
+    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool) noexcept;  // Secondary windows drive their own tree (tcWindow.h)
     friend class Mod;  // Allow Mod to access owner_
     friend void internal::setupNodeOnce(Node& node);
 
@@ -788,23 +790,31 @@ private:
     // Fire an input event to this node's own handler AND its mods; consumed if
     // either consumes. Mouse events go to the hit/grabbed node, keys broadcast.
     bool fireMousePress(const MouseEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext(), e.button);
+        if (!dispatch.current(e.button)) return false;
         bool consumed = onMousePress(e);
-        forEachMod([&](Mod* m) { if (m->onMousePress(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current(e.button) && m->onMousePress(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseRelease(const MouseEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current(e.button)) return false;
         bool consumed = onMouseRelease(e);
-        forEachMod([&](Mod* m) { if (m->onMouseRelease(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current(e.button) && m->onMouseRelease(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseMove(const MouseMoveEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current()) return false;
         bool consumed = onMouseMove(e);
-        forEachMod([&](Mod* m) { if (m->onMouseMove(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current() && m->onMouseMove(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseDrag(const MouseDragEventArgs& e) {
+        internal::MouseDispatchScope dispatch(internal::currentWindowContext());
+        if (!dispatch.current()) return false;
         bool consumed = onMouseDrag(e);
-        forEachMod([&](Mod* m) { if (m->onMouseDrag(e)) consumed = true; });
+        forEachMod([&](Mod* m) { if (dispatch.current() && m->onMouseDrag(e)) consumed = true; });
         return consumed;
     }
     bool fireMouseScroll(const ScrollEventArgs& e) {
@@ -918,9 +928,14 @@ private:
         // because a child's cleanup() may reach back and mutate this node's
         // children_ (uncommon but legal — e.g. a child that unregisters
         // siblings from its parent on destruction).
-        auto snapshot = children_;
+        internal::TeardownSteps steps;
+        std::vector<Ptr> snapshot;
+        steps.run("cleanup child snapshot", [&] { snapshot = children_; });
+        // If a snapshot cannot be copied, retain children by moving the vector.
+        // Ending must still visit every child and the root's cleanup hook.
+        if (snapshot.empty() && !children_.empty()) snapshot.swap(children_);
         for (auto& child : snapshot) {
-            child->cleanupTree();
+            steps.run("child cleanup", [&] { child->cleanupTree(); });
         }
 
         // A destroyed node leaves hover, grab and selection at once, even
@@ -938,8 +953,8 @@ private:
         if (isThis(ctx.selectedNode)) ctx.selectedNode.reset();
 
         dead_ = true;
-        onCleanupStart();
-        cleanup();
+        steps.run("node cleanup hook", [&] { onCleanupStart(); });
+        steps.run("node cleanup", [&] { cleanup(); });
     }
 
     // Recursively draw self and child nodes
@@ -1057,7 +1072,10 @@ private:
     // it (the same idea as destroy()).
     Ptr dispatchMousePress(const MouseEventArgs& e) {
         auto& ctx = internal::currentWindowContext();
+        internal::MouseDispatchScope dispatch(ctx, e.button);
+        if (!dispatch.current(e.button)) return nullptr;
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
+        if (!dispatch.current(e.button)) return nullptr;
 
         // Selection: clicking a node selects it; clicking empty space clears it.
         // (Selection follows the front-most hit, not the consumer — it is a
@@ -1067,7 +1085,9 @@ private:
         // Bubble up from the hit node until consumed
         for (Ptr current = result.node; current; current = current->getParent()) {
             MouseEventArgs local = current->localizeMouse(e);
-            if (current->fireMousePress(local)) {
+            const bool handled = current->fireMousePress(local);
+            if (!dispatch.current(e.button)) return nullptr;
+            if (handled) {
                 // The consumer grabs the pointer for drag tracking
                 ctx.grabbedNode = current;
                 ctx.grabbedButton = e.button;
@@ -1080,6 +1100,8 @@ private:
 
     Ptr dispatchMouseRelease(const MouseEventArgs& e) {
         auto& ctx = internal::currentWindowContext();
+        internal::MouseDispatchScope dispatch(ctx);
+        if (!dispatch.current(e.button)) return nullptr;
 
         // Send release to the grabbed node. A grab whose node is gone (freed
         // after it was removed) is dropped, and the release falls back to the
@@ -1089,6 +1111,7 @@ private:
             if (grabbed) {
                 MouseEventArgs local = grabbed->localizeMouse(e);
                 const bool handled = grabbed->fireMouseRelease(local);
+                if (!dispatch.current(e.button)) return nullptr;
                 ctx.grabbedNode.reset();
                 ctx.grabbedButton = -1;
                 return handled ? grabbed : nullptr;
@@ -1101,12 +1124,13 @@ private:
 
         // Fallback (no grab): bubble from the hit node like press
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
+        if (!dispatch.current(e.button)) return nullptr;
 
         for (Ptr current = result.node; current; current = current->getParent()) {
             MouseEventArgs local = current->localizeMouse(e);
-            if (current->fireMouseRelease(local)) {
-                return current;
-            }
+            const bool handled = current->fireMouseRelease(local);
+            if (!dispatch.current(e.button)) return nullptr;
+            if (handled) return current;
         }
 
         return nullptr;
@@ -1114,6 +1138,10 @@ private:
 
     Ptr dispatchMouseMove(const internal::MouseEventRaw& e) {
         auto& ctx = internal::currentWindowContext();
+        internal::MouseDispatchScope dispatch(ctx);
+        if (!dispatch.current()) return nullptr;
+        // App/BeforeApp reentry can replace the grab with another button.
+        dispatch.trackMotionButtons();
 
         Ptr dragConsumer;
         // Send drag event to grabbed node
@@ -1124,13 +1152,18 @@ private:
             if (grabbed->fireMouseDrag(internal::toDragArgs(local))) dragConsumer = grabbed;
         }
 
+        if (!dispatch.current()) return nullptr;
+
         // Also send move event, bubbling from the hit node (hover itself is
         // handled separately by updateHoverState and stays front-most-only)
         HitResult result = findHitNodeFromScreen(e.globalPos.x, e.globalPos.y);
 
+        if (!dispatch.current()) return nullptr;
         for (Ptr current = result.node; current; current = current->getParent()) {
             internal::MouseEventRaw local = current->localizeMouse(e);
-            if (current->fireMouseMove(internal::toMoveArgs(local))) {
+            const bool handled = current->fireMouseMove(internal::toMoveArgs(local));
+            if (!dispatch.current()) return nullptr;
+            if (handled) {
                 return current;
             }
         }
@@ -1732,9 +1765,6 @@ namespace internal {
 inline void setupNodeOnce(Node& node) {
     if (node.setupCalled_) return;
     EntryStackGuard guard(AppEntry::Setup);
-    // A windowed App's setup() runs inside its first update or draw; report
-    // a crash there as "setup", not as the enclosing phase.
-    CrashPhaseScope crashPhase("setup");
     node.setupOnce();
 }
 }
@@ -1752,9 +1782,12 @@ inline void Mod::removeSelf() {
 // returns is for the current call; to keep the node, keep
 // n->weak_from_this(), not the pointer. setSelectedNode() with a node that is
 // not owned by a shared_ptr (weak_from_this() empty) clears the selection.
-inline Node* getSelectedNode() { return internal::currentWindowContext().selectedNode.lock().get(); }
+inline Node* getSelectedNode() {
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->selectedNode.lock().get() : nullptr;
+}
 inline void setSelectedNode(Node* n) {
-    internal::currentWindowContext().selectedNode = n ? n->weak_from_this() : NodeWeakPtr();
+    if (auto* ctx = internal::findWindowApiContext()) ctx->selectedNode = n ? n->weak_from_this() : NodeWeakPtr();
 }
 
 // The running App as the root of the node tree (set by the framework while the
@@ -1763,6 +1796,9 @@ inline void setSelectedNode(Node* n) {
 // framework registers the App once it is made (runApp(), runHeadlessApp(),
 // the hot reload host): inside the App's own constructor this is not the App
 // yet. Use it from setup() on.
-inline Node* getRootNode() { return internal::currentWindowContext().rootNode.lock().get(); }
+inline Node* getRootNode() {
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->rootNode.lock().get() : nullptr;
+}
 
 } // namespace trussc

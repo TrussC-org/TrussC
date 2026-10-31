@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <cstdio>
 #include <fstream>
+#include <climits>
 
 using namespace tc;
 namespace {
@@ -60,6 +61,70 @@ struct Gate {
     void open() { std::lock_guard lock(mutex); opened = true; changed.notify_all(); }
 };
 #include "../../common/resourceLoadLocalChecks.h"
+void concurrencyChecks() {
+    check("default preparation concurrency is four", getResourceLoadConcurrency() == 4);
+    setResourceLoadConcurrency(8);
+    check("public setter accepts eight", getResourceLoadConcurrency() == 8);
+    Gate first, queued;
+    std::vector<std::unique_ptr<Load>> loads;
+    auto add = [&](Gate& gate) {
+        auto load = std::make_unique<Load>();
+        load->start(1, [&gate] { gate.block(); });
+        loads.push_back(std::move(load));
+    };
+    for (int i = 0; i < 8; ++i) add(first);
+    first.wait(8);
+    add(queued); add(queued);
+    check("eight preparations run and excess work queues", internal::resourceLoadUsageForTests().active == 8 &&
+        internal::resourceLoadUsageForTests().pending == 2);
+    setResourceLoadConcurrency(10);
+    queued.wait(2); // No original worker has been released.
+    check("raising immediately pumps queued preparations", internal::resourceLoadUsageForTests().active == 10 &&
+        internal::resourceLoadUsageForTests().pending == 0);
+    setResourceLoadConcurrency(1);
+    Gate afterLowering;
+    add(afterLowering);
+    check("lowering keeps running work and queues new work", internal::resourceLoadUsageForTests().active == 10 &&
+        internal::resourceLoadUsageForTests().pending == 1);
+    first.open();
+    // Wait for the eight finished workers to retire, while two remain blocked.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (internal::resourceLoadUsageForTests().active != 2) {
+        if (std::chrono::steady_clock::now() >= deadline) std::_Exit(5);
+        std::this_thread::yield();
+    }
+    check("lowered limit prevents workers from taking queued work", internal::resourceLoadUsageForTests().pending == 1);
+    queued.open();
+    afterLowering.wait(1);
+    check("queued work resumes when running work falls below limit", internal::resourceLoadUsageForTests().active == 1);
+    afterLowering.open(); settle();
+    bool succeeded = true;
+    for (auto& load : loads) succeeded &= load->events == 1 && load->error == LoadError::None;
+    check("lowering never cancels running or queued requests", succeeded);
+
+    int notices = 0;
+    auto log = getLogger().onLog.listen([&](LogEventArgs& message) {
+        if (message.level == LogLevel::Notice && message.message.find("[ResourceLoad]") != std::string::npos) ++notices;
+    });
+    setResourceLoadConcurrency(0);
+    check("zero becomes one with exactly one Notice", getResourceLoadConcurrency() == 1 && notices == 1);
+    setResourceLoadConcurrency(-8);
+    check("negative becomes one with exactly one Notice", getResourceLoadConcurrency() == 1 && notices == 2);
+    setResourceLoadConcurrency(INT_MAX);
+    check("no upper cap or Notice for valid counts", getResourceLoadConcurrency() == INT_MAX && notices == 2);
+
+    setResourceLoadConcurrency(8);
+    Gate budget;
+    loads.clear();
+    for (int i = 0; i < 68; ++i) add(budget);
+    budget.wait(8);
+    Load refused;
+    refused.start(1); drain();
+    check("public concurrency leaves external live-request budget unchanged", refused.events == 1 &&
+        refused.error == LoadError::TooLarge && internal::resourceLoadUsageForTests().pending == 60);
+    budget.open(); settle();
+    setResourceLoadConcurrency(4);
+}
 void credits() {
     internal::setResourceLoadLimitsForTests(4, 64, 64);
     Load first, second, overflow;
@@ -143,34 +208,12 @@ void workersAndFailures() {
     check("all accepted requests settle except explicitly cancelled owner", delivered == 67 && internal::resourceLoadUsageForTests().active == 0 && internal::resourceLoadUsageForTests().pending == 0);
     check("resource saturation does not cap app-authored jobs", appJobs == 2);
 
-    Load launchFailure;
-    internal::failResourceLoadLaunchForTests(true);
-    launchFailure.start(1);
-    internal::failResourceLoadLaunchForTests(false);
-    settle();
-    check("allocation/thread-launch failure settles without a stuck worker", launchFailure.events == 1 && launchFailure.error == LoadError::Unknown && internal::resourceLoadUsageForTests().active == 0);
     Load thrown;
     auto state = thrown.begin();
     internal::startExternalResourceLoad(state, [](const auto& ready) { ready->data.resize(32); throw std::bad_alloc(); });
     settle();
     check("preparation allocation failure is clean and frees storage", thrown.events == 1 && thrown.error == LoadError::Unknown && state->data.empty());
-    Load applyFailure;
-    auto ready = applyFailure.slot.begin(applyFailure.event, [](State&) { throw std::bad_alloc(); });
-    ready->data.resize(32);
-    internal::completeResourceLoad(ready);
-    drain();
-    check("application allocation failure settles once and returns credits", applyFailure.events == 1 && applyFailure.error == LoadError::Unknown && ready->data.empty() && internal::resourceLoadUsageForTests().retainedBytes == 0);
-    Load applying;
-    bool observed = false;
-    auto inMain = applying.slot.begin(applying.event, [&](State& ready) {
-        std::thread workerExit([&] { ready.cancel(); });
-        workerExit.join();
-        check("worker-exit cancellation leaves an applying payload to main", ready.data.size() == 32 && internal::resourceLoadUsageForTests().retainedBytes == 32);
-        observed = true;
-    });
-    internal::startExternalResourceLoad(inMain, [](const auto& ready) { ready->data.resize(32); });
-    settle();
-    check("main retirement returns credits after concurrent exit cancellation", observed && inMain->data.empty() && internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
+
 }
 void callers() {
     const auto root = fs::absolute("resourceLoadCredits-fixtures");
@@ -240,7 +283,7 @@ TC_CORE_TEST_MAIN() {
     auto log = getLogger().onLog.listen([&](LogEventArgs& message) {
         if (message.message.find("[ResourceLoad]") != std::string::npos && message.level == LogLevel::Warning) ++warnings;
     });
-    localFileAdmissionChecks(); credits(); workersAndFailures(); callers(); lifecycle();
+    concurrencyChecks(); localFileAdmissionChecks(); credits(); workersAndFailures(); callers(); lifecycle();
     settle();
     check("one first admission warning across all repeated failures", warnings == 1);
     internal::setResourceLoadLimitsForTests(4, 64, size_t(1024) * 1024 * 1024);

@@ -1,18 +1,32 @@
 #include "tcDebugName.h"
-#include "tcMcpLimits.h"
+#include <atomic>
 #include <map>
 #include <mutex>
+#include <type_traits>
 #include <utility>
 
 namespace trussc::internal {
+bool frameworkShutdown() noexcept;
 namespace {
+// The registry can die before a user global that owns an Fbo or Image. The
+// marker closes it first; the constant-initialized atomic outlives both.
+constinit std::atomic<bool> debugRegistryDestroyed{false};
+static_assert(std::is_trivially_destructible_v<decltype(debugRegistryDestroyed)>);
+struct RegistryLifetimeMark {
+    ~RegistryLifetimeMark() { debugRegistryDestroyed.store(true, std::memory_order_release); }
+};
 struct Entry { DebugObjectKind kind; DebugName* debug; void* object; };
 struct Registry {
     std::mutex mutex;
     uint64_t next = 1;
     std::map<uint64_t, Entry> entries;
 };
-Registry& registry() { static Registry r; return r; }
+Registry& registry() {
+    static Registry r;
+    static RegistryLifetimeMark lifetime;
+    (void)lifetime;
+    return r;
+}
 }
 DebugName::DebugName(DebugObjectKind kind, void* object) : kind_(kind), object_(object) {
     auto& r = registry();
@@ -23,6 +37,8 @@ DebugName::DebugName(DebugObjectKind kind, void* object) : kind_(kind), object_(
 DebugName::DebugName(DebugName&& other, void* object) noexcept
     : kind_(other.kind_), object_(object) { moveFrom(other); }
 DebugName::~DebugName() {
+    // Runner shutdown leaves this CPU registry alive for the next run.
+    if (debugRegistryDestroyed.load(std::memory_order_acquire)) return;
     auto& r = registry();
     std::lock_guard lock(r.mutex);
     r.entries.erase(index_);
@@ -46,26 +62,12 @@ void DebugName::set(const std::string& name) {
     }
 }
 std::vector<DebugObjectEntry> debugObjects(DebugObjectKind kind) {
+    if (frameworkShutdown() || debugRegistryDestroyed.load(std::memory_order_acquire)) return {};
     auto& r = registry();
     std::unique_lock lock(r.mutex);
-    size_t count = 0, total = 0;
-    for (const auto& [index, e] : r.entries) {
-        if (e.kind != kind) continue;
-        // Bound (security): size the complete snapshot before copying. Saturating arithmetic rejects overflow; diagnostics run only after unlocking.
-        const auto bytes = e.debug->get().size();
-        constexpr size_t overhead = sizeof(DebugObjectEntry) + 1;
-        total = bytes > SIZE_MAX - overhead || total > SIZE_MAX - overhead - bytes
-            ? SIZE_MAX : total + overhead + bytes;
-        ++count;
-    }
-    if (auto budget = mcp::internal::currentWorkBudget()) {
-        size_t limit, needed;
-        if (!budget->tryReserve(total, limit, needed)) {
-            lock.unlock();
-            mcp::internal::admissionRejected(mcp::internal::AdmissionStore::Working, limit, needed);
-            throw mcp::internal::AdmissionError();
-        }
-    }
+    size_t count = 0;
+    for (const auto& [index, e] : r.entries)
+        if (e.kind == kind) ++count;
     std::vector<DebugObjectEntry> result;
     result.reserve(count);
     for (const auto& [index, e] : r.entries)

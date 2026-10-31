@@ -236,3 +236,10 @@ trusscli run        # build + launch
 ## License
 
 MIT — see [LICENSES.md](LICENSES.md).
+
+App-owned inspector state subscribes to `events().hotReloadUnload` for cleanup
+before its generation is replaced. Other Apps retain their inspector input and
+render hooks. App ending also releases the protected exit hook, including when the App is
+removed before its generation unloads, and retires owner-scoped registrations. App-tied code,
+including addons, uses `events()`; process-wide observers use
+`runtime().events()`.

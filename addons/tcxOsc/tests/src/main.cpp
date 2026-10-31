@@ -2,7 +2,7 @@
 // =============================================================================
 // tcxOsc tests - headless behavioral test (no window).
 //
-// Built and run by CI on every push/PR across macOS / Windows / Linux via
+// Built and run by daily CI across macOS / Windows / Linux via
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
 // Console only, so it runs on headless runners. Uses tc::UdpSocket through
 // OscSender/OscReceiver (not raw POSIX sockets) so it compiles on Windows too.
@@ -49,7 +49,7 @@
 //   - only the tags with data store an argument object (T F N I [ ] none)
 // =============================================================================
 
-#include <tcxOsc.h>
+#include "oscTestAccess.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -122,9 +122,13 @@ static Recv sendAndExpectNone(OscReceiver& rx, OscSender& tx,
 // They avoid 9000/9001 as well: the tcxOsc examples bind those, and 9000 is
 // about the most common OSC port in the wild, so it is the LEAST safe choice
 // on a machine that does OSC work.
-static int bindFirstFree(OscReceiver& rx, const int (&candidates)[4]) {
+static int bindFirstFree(OscReceiver& rx, const int (&candidates)[4], bool unicast = true) {
+    if (unicast) tcx::osc::OscReceiverTestAccess::socket(rx).setBindAddress("127.0.0.1");
     for (int port : candidates) {
-        if (rx.setup(port)) return port;
+        if (rx.setup(port)) {
+            if (unicast) check("unicast fixture binds loopback", oscBoundToLoopback(rx));
+            return port;
+        }
         // setup() creates the socket and registers its listeners even when the
         // bind fails; close() undoes both so the next attempt starts clean.
         rx.close();
@@ -548,10 +552,11 @@ int main() {
     tx.setMulticastLoopback(true);    // deliver to local listeners on this host
     tx.setMulticastInterface(MIF);
 
-    // Exclusive setup must reject a second listener and allow port fallback.
+    // Compare wildcard binds throughout: exclusivity is against the same address.
+    // Unicast data-path fixtures below continue to use loopback.
     {
         OscReceiver owner;
-        const int occupied = bindFirstFree(owner, UNI_PORTS);
+        const int occupied = bindFirstFree(owner, UNI_PORTS, false);
         check("exclusive: first receiver bound", occupied != 0);
         if (occupied) {
             OscReceiver second;
@@ -573,6 +578,7 @@ int main() {
             };
             expectSetupFailure("exclusive: second setup fails",
                 [&] { return second.setup(occupied); }, std::to_string(occupied));
+            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("");
             expectSetupFailure("exclusive: shared setup cannot take owned port",
                 [&] { return second.setupMulticast(occupied, GROUP_A, MIF); }, std::to_string(occupied));
 
@@ -584,10 +590,11 @@ int main() {
             sharing.close();
 
             const int candidates[4] = { occupied, MC_PORTS[0], MC_PORTS[1], MC_PORTS[2] };
-            const int freePort = bindFirstFree(second, candidates);
+            const int freePort = bindFirstFree(second, candidates, false);
             check("exclusive: bindFirstFree skips occupied port", freePort != 0 && freePort != occupied);
             second.close();
 
+            tcx::osc::OscReceiverTestAccess::socket(second).setBindAddress("");
             expectSetupFailure("multicast setup: invalid group fails",
                 [&] { return second.setupMulticast(freePort, "invalid-group", MIF); }, "Invalid multicast/interface");
             expectSetupFailure("multicast setup: invalid interface fails",
@@ -599,10 +606,27 @@ int main() {
         }
     }
 
+#if defined(__linux__)
+    // Linux also refuses a wildcard reuse bind over an exclusive loopback bind.
+    // macOS and Windows allow this different-address combination.
+    {
+        tc::UdpSocket owner, sharing;
+        owner.setBindAddress("127.0.0.1");
+        const bool bound = owner.bind(0, false);
+        check("Linux: exclusive loopback socket bound", bound);
+        if (bound) {
+            check("Linux: wildcard socket enables address reuse", sharing.setReuseAddress(true));
+            check("Linux: wildcard socket enables port reuse", sharing.setReusePort(true));
+            check("Linux: wildcard reuse cannot share exclusive loopback port",
+                  !sharing.bind(owner.getLocalPort(), false));
+        }
+    }
+#endif
+
     // Both receivers must receive the same multicast datagram on a shared port.
     {
         OscReceiver first, second;
-        const int port = bindFirstFree(first, MC_PORTS);
+        const int port = bindFirstFree(first, MC_PORTS, false);
         check("shared multicast: candidate port found", port != 0);
         first.close();
         OscMessage message("/shared");
@@ -656,6 +680,31 @@ int main() {
         check("unicast: message received", ok);
         check("unicast: address == /uni", ok && got.getAddress() == "/uni");
         check("unicast: arg == 42", ok && got.getArgCount() == 1 && got.getArgAsInt(0) == 42);
+        // T/F tags carry no payload: 5000 elements exceed the former 4096 cap
+        // while the whole datagram fits macOS's default 9216-byte UDP limit.
+        constexpr size_t sampleCount = 5000;
+        OscMessage samples("/samples");
+        for (size_t i = 0; i < sampleCount; ++i) samples.addBool(i % 2 == 0);
+        check("unicast: >4096 elements fit the platform datagram limit",
+              samples.getArgCount() > 4096 && samples.toBytes().size() <= 9216);
+        rx.hasNewMessage();
+        check("unicast: send 5000 bools", tx.sendTo("127.0.0.1", portUni, samples));
+        bool receivedSamples = false;
+        const auto sampleDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (!receivedSamples && std::chrono::steady_clock::now() < sampleDeadline) {
+            while (rx.getNextMessage(got)) {
+                if (got.getAddress() == "/samples") { receivedSamples = true; break; }
+            }
+            if (!receivedSamples) sleepMs(2);
+        }
+        bool intact = receivedSamples && got.getArgCount() == sampleCount;
+        if (intact) {
+            for (size_t i = 0; i < sampleCount; ++i) {
+                const bool expected = i % 2 == 0;
+                intact &= got.getArgType(i) == (expected ? 'T' : 'F') && got.getArgAsBool(i) == expected;
+            }
+        }
+        check("unicast: 5000 bools received intact", intact);
         rx.close();
     }
 
@@ -665,7 +714,7 @@ int main() {
     // IS routable (Linux/Windows CI, local macOS), which is the real coverage.
     {
         OscReceiver rx;
-        const int portMc = bindFirstFree(rx, MC_PORTS);
+        const int portMc = bindFirstFree(rx, MC_PORTS, false);
         check("multicast: receiver bound", portMc != 0);
         if (portMc) std::printf("  (multicast port %d)\n", portMc);
         check("multicast: joinMulticast(A)", rx.joinMulticast(GROUP_A, MIF));

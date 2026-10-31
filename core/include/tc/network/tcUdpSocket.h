@@ -26,7 +26,7 @@
     #define INVALID_SOCKET_HANDLE (-1)
 #endif
 namespace trussc {
-namespace internal { struct UdpSocketTestAccess; struct UdpSocketLifecycleTestAccess; struct ExternalUdpDeliveryTestAccess; }
+namespace internal { struct UdpSocketBindAddressTestAccess; struct UdpSocketTestAccess; struct UdpSocketLifecycleTestAccess; struct ExternalUdpDeliveryTestAccess; }
 // ---------------------------------------------------------------------------
 // UDP receive event arguments
 // ---------------------------------------------------------------------------
@@ -53,12 +53,19 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         std::atomic<bool> closed{false};   // shut down by close(); never reused
         std::mutex mutex;
     };
+    struct BindConfiguration {
+        std::mutex mutex;
+        std::string address;
+        std::string error;
+    };
     struct State : std::enable_shared_from_this<State> {
-        explicit State(std::shared_ptr<Socket> socket = std::make_shared<Socket>())
-            : socket_(std::move(socket)) {}
+        explicit State(std::shared_ptr<Socket> socket = std::make_shared<Socket>(),
+                       std::shared_ptr<BindConfiguration> bindConfiguration = std::make_shared<BindConfiguration>())
+            : socket_(std::move(socket)), bindConfiguration_(std::move(bindConfiguration)) {}
         internal::EventSnapshotDelivery<UdpReceiveEventArgs> onReceive;
         internal::EventSnapshotDelivery<UdpErrorEventArgs> onError;
         bool create();
+        void setBindAddress(const std::string& address);
         bool bind(int port, bool startReceiving = true);
         bool connect(const std::string& host, int port);
         void close();
@@ -104,8 +111,10 @@ class TC_PLATFORMS("macos,windows,linux,android,ios") UdpSocket {
         ErrorLogState errorLogs_[3];
         std::mutex errorLogMutex_;
         std::shared_ptr<Socket> socket_;
+        // Shared across receive runs so a setter on a retired State remains effective.
+        std::shared_ptr<BindConfiguration> bindConfiguration_;
         int localPort_ = 0;
-        bool bound_ = false;
+        std::atomic<bool> bound_{false};
         bool reuseAddress_ = false;
         bool reusePort_ = false;
         std::string connectedHost_;
@@ -166,11 +175,19 @@ public:
     // -------------------------------------------------------------------------
     // Create socket (usually not needed as bind/connect auto-create)
     bool create();
+    // Choose a numeric IPv4 listen address. Empty or "0.0.0.0" selects every
+    // interface (default); "127.0.0.1" accepts traffic from this machine only.
+    // Invalid input, IPv6 and nonlocal addresses make bind() return false
+    // and report onError. Configure before bind().
+    // A change while bound (including stopped reception) logs a Warning,
+    // leaves the active socket unchanged, and applies after close() and bind().
+    void setBindAddress(const std::string& address);
     // Bind port for receiving
     // startReceiving=true automatically starts receive thread
-    // Without setReuseAddress(true) / setReusePort(true) the port is exclusive
-    // on every platform: on Windows bind() sets SO_EXCLUSIVEADDRUSE, so a later
-    // socket using SO_REUSEADDR cannot bind over it either.
+    // Without setReuseAddress(true) / setReusePort(true), binding is exclusive
+    // against binds to the same address (SO_EXCLUSIVEADDRUSE on Windows).
+    // With a specific setBindAddress(), macOS and Windows still allow a socket
+    // binding all addresses with reuse enabled to share the port; Linux refuses.
     bool bind(int port, bool startReceiving = true);
     // Set destination (after setting, can send via send(data, size))
     bool connect(const std::string& host, int port);
@@ -271,6 +288,7 @@ private:
     std::shared_ptr<internal::EventSnapshotDelivery<UdpErrorEventArgs>::Target> onErrorTarget_;
     void attachTargets();
     friend struct internal::UdpSocketTestAccess;
+    friend struct internal::UdpSocketBindAddressTestAccess;
     friend struct internal::ExternalUdpDeliveryTestAccess;
     friend struct internal::UdpSocketLifecycleTestAccess;
     using ErrorKind = State::ErrorKind;

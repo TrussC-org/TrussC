@@ -277,7 +277,6 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofGetKeyPressed` | `isKeyPressed(key)` |  |
 | `ofGetMousePressed` | `isMousePressed()` |  |
 | `ofSystemLoadDialog` | `loadDialog(title, message, defaultPath, folderSelection)` |  |
-| `ofExit` | `requestExitApp()` |  |
 | `ofSystemSaveDialog` | `saveDialog(title, message, defaultPath, defaultName)` |  |
 | `ofSetFullscreen` | `setFullscreen(full)` |  |
 | `ofShowCursor` | `showCursor()` |  |

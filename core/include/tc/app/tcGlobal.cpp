@@ -26,13 +26,15 @@
 #include "impl/tcImageDecode.h"
 #include "internal/tcBuildOutputCapture.h"
 #include "internal/tcHotReloadScan.h"
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-#include "../../../platform/gl/tcShadowAllocation.h"
-#endif
 #ifdef _WIN32
 #include <windows.h>
 #endif
 #include <algorithm>
+#if defined(SOKOL_GLCORE)
+#include <GL/gl.h>
+#elif defined(SOKOL_GLES3)
+#include <GLES3/gl3.h>
+#endif
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -48,27 +50,38 @@
 #include "tc/gpu/shaders/sglCoverage.glsl.h"
 
 #ifdef __APPLE__
+#include <pthread.h>
 #include <os/log.h>   // the Logger's platform sink (internal::writeSystemLog)
+#include <unistd.h>
 #endif
 #include <cstdlib>
 
 namespace trussc {
 
-// A replacement main App needs the same size seed as the initial App before
-// its first setup/input. This is a direct App-only seed, like startup/reload;
-// it does not synthesize a native resize or change main-loop scheduling.
-void Window::seedMainAppSize() {
-    auto app = app_;
-    if (!app || app->setupCalled_ || !sapp_isvalid()) return;
-    const float dpi = internal::appSizeDpi(sapp_dpi_scale());
-    const int width = internal::framebufferToLogical(sapp_width(), dpi), height = internal::framebufferToLogical(sapp_height(), dpi);
-    if (app->getWidth() == width && app->getHeight() == height) return;
-    internal::EntryStackGuard guard(internal::AppEntry::Event, "windowResized()");
-    internal::WindowCallbackTimeScope callbackTime;
-    app->handleWindowResized(width, height);
+namespace internal {
+namespace {
+thread_local bool shaderStreamBufferAllocation = false;
 }
 
-namespace internal {
+sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
+    struct AllocationScope {
+        bool previous = std::exchange(shaderStreamBufferAllocation, true);
+        ~AllocationScope() { shaderStreamBufferAllocation = previous; }
+    } scope;
+    return makeShaderStreamBuffer(bytes, index);
+}
+
+void reportShaderStreamFailure(size_t vertices) noexcept {
+    static OnceGate reported;
+    if (!reported.isFirstTime()) return;
+    // Logging allocates too. Never let allocation failure escape a draw callback.
+    try {
+        logError("Shader") << "Shader stream could not allocate vertex/index storage for " << vertices
+            << " vertices; this draw was skipped. Reduce geometry submitted with "
+               "Shader::submitVertices() to lower stream storage demand";
+    } catch (...) {}
+}
+
 BuildOutputLoss& buildOutputLoss() { static BuildOutputLoss loss; return loss; }
 void BuildOutputLoss::record(uint64_t omitted) {
     if (!omitted) return;
@@ -112,48 +125,93 @@ void BuildOutputLoss::recordForwardingFailure() {
 #endif
     }
 }
-HotReloadScanLoss& hotReloadCacheLoss() { static HotReloadScanLoss loss; return loss; }
 namespace { void discardRetiredShadows() noexcept; }
-// Metal's host backend inspects native objects in its implementation TU.
-bool shadowNativeValid(sg_image);
-bool shadowNativeValid(sg_view);
-bool shadowNativeValid(sg_sampler);
+#if defined(SOKOL_METAL)
+bool shadowTextureViewCreated(sg_view);
+#endif
+}
+
+namespace {
+struct GraphicsPoolSizes {
+    int resources = 10000;
+    int shaders = 1024;
+    int pipelines = 1024;
+};
+GraphicsPoolSizes requestedGraphicsPools;
+GraphicsPoolSizes activeGraphicsPools;
+// Process lifetime: graphics restarts and hot reload must not repeat errors.
+std::atomic<bool> poolExhaustionReported[7]{};
+
+// Bound (representation): 16-bit sokol pool indices would alias handles above 65535; log Error and use 65535.
+constexpr int maxGraphicsPoolSize = 65535;
+
+int graphicsPoolSize(int count, int defaultCount, const char* setter) {
+    if (count > maxGraphicsPoolSize) {
+        logError("WindowSettings") << setter << "(" << count << "): sokol handles index pools with 16 bits; using " << maxGraphicsPoolSize;
+        return maxGraphicsPoolSize;
+    }
+    if (count < 0) {
+        logNotice("WindowSettings") << setter << "() received a negative count; using default " << defaultCount;
+    }
+    return count > 0 ? count : defaultCount;
+}
+}
+
+namespace internal {
+void configureGraphicsPools(const WindowSettings& settings) {
+    requestedGraphicsPools = {settings.resourcePoolSize, settings.shaderPoolSize, settings.pipelinePoolSize};
+}
+sgl_desc_t sglSetupDescriptor() {
+    sgl_desc_t desc = {};
+    desc.logger.func = sokolLog;
+    // Use the same count for sgl: its small CPU slots (32 B) should not impose
+    // a separate hidden limit. Each sgl pipeline still needs up to 5 sg slots.
+    // The sgl context pool keeps its existing automatic growth behavior.
+    desc.pipeline_pool_size = activeGraphicsPools.pipelines;
+    // sokol_gl's default of 4 contexts runs out fast: the swapchain takes one,
+    // every secondary window takes one more, and Fbo::ensureShared() takes one
+    // per (sample count, color format) combination. An app with a second window
+    // and a couple of float FBO formats is already past four, and the overflow
+    // is a per-frame SGL_LOGITEM_CONTEXT_POOL_EXHAUSTED with nothing drawn.
+    desc.context_pool_size = 64;
+    desc.max_vertices = sglBudget().maxVertices;
+    desc.max_commands = sglBudget().maxCommands;
+    desc.allocator.alloc_fn = smemtrack_alloc;
+    desc.allocator.free_fn = smemtrack_free;
+    return desc;
+}
+
 }
 
 // ---------------------------------------------------------------------------
 // Initialization (setup)
 // ---------------------------------------------------------------------------
 void setup() {
+    internal::beginFrameworkLifetime();
     // Initialize sokol_gfx (with memory tracking allocator)
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
     sgdesc.logger.func = internal::sokolLog;
-    // Shader and pipeline pools are fixed at sg_setup(): sg resources point
-    // into the pool arrays, so these pools cannot grow (#317). 10000 like the
-    // pools below would cost ~34 MB (shader slot ~3.4 KB) and ~12 MB
-    // (pipeline slot ~1.2 KB). 1024 shaders (~3.5 MB) leaves room for many
-    // loaded Shader objects next to TrussC's own dozen or so. 1024 pipelines
-    // (~1.2 MB) is ~200 sgl pipelines (5 sg pipelines each) plus the PBR /
-    // point / Shader pipelines per target format.
-    sgdesc.shader_pool_size = 1024;   // sokol default 32
-    sgdesc.pipeline_pool_size = 1024; // sokol default 64
-    sgdesc.buffer_pool_size = 10000;  // default 128 too small with many meshes (only CPU slot table, not GPU memory)
-    sgdesc.image_pool_size = 10000;
-    sgdesc.view_pool_size = 10000;
-    sgdesc.sampler_pool_size = 10000;
+    // Fixed at sg_setup: slots hold CPU tables (~3.4 KB/shader, ~1.2 KB/pipeline).
+    // Resolve the requested counts once; later sgl rebuilds retain these values.
+    activeGraphicsPools = {
+        graphicsPoolSize(requestedGraphicsPools.resources, 10000, "setResourcePoolSize"),
+        graphicsPoolSize(requestedGraphicsPools.shaders, 1024, "setShaderPoolSize"),
+        graphicsPoolSize(requestedGraphicsPools.pipelines, 1024, "setPipelinePoolSize")
+    };
+    sgdesc.shader_pool_size = activeGraphicsPools.shaders;
+    sgdesc.pipeline_pool_size = activeGraphicsPools.pipelines;
+    sgdesc.buffer_pool_size = activeGraphicsPools.resources;
+    sgdesc.image_pool_size = activeGraphicsPools.resources;
+    sgdesc.view_pool_size = activeGraphicsPools.resources;
+    sgdesc.sampler_pool_size = activeGraphicsPools.resources;
     // Per-frame uniform ring buffer (Metal/WebGPU/Vulkan; GL/D3D11 ignore it).
-    // On Metal the ring auto-grows on overflow (x2 per step, with a warning log
-    // — TrussC patch in sokol_gfx.h), so start small (1MB ≈ 2k draw calls per
-    // frame, each apply 256-byte aligned) and let heavy scenes grow to size;
-    // WindowSettings::reserveUniformBuffer just skips the one-time grow hitch.
-    // WebGPU/Vulkan do NOT auto-grow: keep the 4MB sokol default there — past
-    // the cap, RELEASE builds silently write out of bounds (garbage uniforms
-    // render as flipped or fully black frames), so high-draw-count apps must
-    // reserve enough up front. The backend allocates it x2 in-flight frames.
+    // Metal and WebGPU grow on demand; the reserve skips initial growth.
+    // Start with 1 MiB of app-produced uniforms. Vulkan keeps its fixed reserve.
     if (internal::gpuUniformBufferReserve > 0) {
         sgdesc.uniform_buffer_size = internal::gpuUniformBufferReserve;
     }
-    #if defined(SOKOL_METAL)
+    #if defined(SOKOL_METAL) || defined(SOKOL_WGPU)
     else {
         sgdesc.uniform_buffer_size = 1024 * 1024;
     }
@@ -163,35 +221,21 @@ void setup() {
     sg_setup(&sgdesc);
     internal::recordImageDecodeLimit(sg_isvalid() ? sg_query_limits().max_image_size_2d : 0);
 
-    // Initialize sokol_gl (with memory tracking allocator)
-    sgl_desc_t sgldesc = {};
-    sgldesc.logger.func = internal::sokolLog;
-    // sgl pipeline slots are small (32 B); the sg pipeline pool above is the
-    // real limit, since each sgl pipeline uses 5 sg pipelines.
-    sgldesc.pipeline_pool_size = 256;
-    // Start with 64 contexts: the swapchain takes one, every secondary window
-    // takes one more, and Fbo::ensureShared() takes one per (sample count, color
-    // format) combination. sokol_gl_tc.h still grows the pool when full.
-    sgldesc.context_pool_size = 64;
-    sgldesc.max_vertices = internal::sglBudget().maxVertices;
-    sgldesc.max_commands = internal::sglBudget().maxCommands;
-    sgldesc.allocator.alloc_fn = smemtrack_alloc;
-    sgldesc.allocator.free_fn = smemtrack_free;
+    // Initialize sokol_gl with the same descriptor used for later rebuilds.
+    auto sgldesc = internal::sglSetupDescriptor();
     sgl_setup(&sgldesc);
 
     // RenderTarget: the swapchain target uses the default sgl context (carries the
     // swapchain color/depth format + sample count). Pipelines build lazily on first use.
-    internal::currentWindowContext().swapchainTarget.resources().context = sgl_default_context();
+    internal::nonWindowContext().swapchainTarget.resources().context = sgl_default_context();
     sgl_tc_context_target_owned(sgl_default_context());
-#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
-    internal::mainWindowContext().activateNative = [](void*) { sapp_tc_gl_make_current({0}); };
-#endif
     internal::currentWindowContext().swapchainTarget.isFbo = false;
     auto& target = internal::currentWindowContext().swapchainTarget;
     target.colorFormat = sgdesc.environment.defaults.color_format;
     target.sampleCount = sgdesc.environment.defaults.sample_count;
-    target.width = sapp_width();
-    target.height = sapp_height();
+    target.width = internal::currentWindowContext().fbWidth;
+    target.height = internal::currentWindowContext().fbHeight;
+    internal::prepareWindowTarget();
 
     // Initialize bitmap font sampler + pipeline. The atlas TEXTURE itself is
     // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
@@ -233,13 +277,14 @@ void setup() {
 // Cleanup (shutdown)
 // ---------------------------------------------------------------------------
 void cleanup() {
-    internal::mainWindowContext().teardownTargets();
+    internal::shutdownRuntime();
     // Parked/cancelled frames can still own an enqueued renderer prefix.
     // Submit it without presentation before Metal waits for semaphore permits
     // during shutdown, and before destroying any referenced native resources.
     if (sg_isvalid()) sg_tc_submit_prefix();
     // Retired handles belong to this device. Dispose of them before shutdown
     // can recycle their IDs into another device's live resources.
+    internal::drainPendingGpuDestroys();
     internal::discardRetiredShadows();
     // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
     // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
@@ -260,6 +305,7 @@ void cleanup() {
         }
         fontAtlas.initialized = false;
     }
+    internal::endFrameworkLifetime();
     sgl_shutdown();
     internal::recordImageDecodeLimit(0);
     sg_shutdown();
@@ -369,6 +415,8 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
     if (headless::isActive()) return;
 
     auto& ctx = internal::currentWindowContext();
+    if (ctx.currentTarget->passKind == internal::TargetPassKind::Swapchain &&
+        !internal::admitRootSwapchainPass()) return;
     if (ctx.currentTarget->isFbo) {
         ctx.currentTarget->restartClear(r, g, b, a);
     } else if (ctx.swapchainTarget.inPass) {
@@ -439,13 +487,9 @@ WindowCaptureSource windowCaptureSource() {
     // A cleared frame source must fail rather than acquire another window's
     // or the next frame's drawable. Also scrub the copied swapchain alias.
     source.swapchain.metal.current_drawable = source.drawable;
-#elif defined(SOKOL_D3D11)
-    // A missing secondary source must fail capture, never read the main window.
-    if (window.isMain)
-        source.swapchain = sglue_swapchain();
 #endif
-    source.width = window.isMain ? sapp_width() : window.fbWidth;
-    source.height = window.isMain ? sapp_height() : window.fbHeight;
+    source.width = window.fbWidth;
+    source.height = window.fbHeight;
     return source;
 }
 bool finishWindowCaptureSource(RenderTarget&) {
@@ -468,12 +512,14 @@ void reportTeardownFailure(const char* step) noexcept {
 }
 
 WindowContext::~WindowContext() {
+    if (hostWindow || targetsClosed || frameworkShutdown()) return;
     targetsClosed = true;
     teardownTargets();
     if (currentWindowCtx() == this) currentWindowCtx() = nullptr;
 }
 
 void WindowContext::teardownTargets() noexcept {
+    if (frameworkShutdown()) return;
     // popTarget resolves through the current window. Destruction may be
     // dispatched while a different window is current.
     TeardownSteps steps;
@@ -551,6 +597,10 @@ void selectTarget(RenderTarget& target) {
         sgl_layer(target.sglLayerNext);
         if (target.windowDrawingSizeStale) refreshWindowDrawingSize();
         applyTargetDrawingState();
+    } else if (sg_isvalid()) {
+        // In particular, returning from a process Fbo must not leave its
+        // pooled recording selected as the targetless process root.
+        sgl_set_context({0});
     }
 }
 }
@@ -558,6 +608,7 @@ void selectTarget(RenderTarget& target) {
 void RenderTarget::beginPass(TargetPassStart reason) {
     auto& window = currentWindowContext();
     assert(window.currentTarget == this && !inPass);
+    if (passKind == TargetPassKind::Swapchain && !admitRootSwapchainPass()) return;
     if (frameEpoch != window.renderEpoch) {
         frameEpoch = window.renderEpoch;
         passStartedThisFrame = false;
@@ -574,6 +625,17 @@ void RenderTarget::beginPass(TargetPassStart reason) {
             // Acquire exactly once per window frame, including on Metal.
             binding.swapchain = window.acquireSwapchain
                 ? window.acquireSwapchain(window.acquireSwapchainUser) : sglue_swapchain();
+            // The acquired attachments define this frame on every host,
+            // including sole-surface ports without a WindowBinding adapter.
+            if (binding.swapchain.width > 0 && binding.swapchain.height > 0) {
+                if (window.hostWindow) {
+                    auto metadata = WindowRequestAccess::binding(*window.hostWindow).metadata;
+                    metadata.fb_width = binding.swapchain.width;
+                    metadata.fb_height = binding.swapchain.height;
+                    if constexpr (!supportsSecondaryWindows()) metadata.dpi_scale = sapp_dpi_scale();
+                    publishWindowMetadata(*window.hostWindow, metadata);
+                }
+            }
             window.lastSwapchain = binding.swapchain;
             window.lastSwapchainDrawable = binding.swapchain.metal.current_drawable;
             if (!sg_tc_mtl_register_drawable(&binding.swapchain, ownerId,
@@ -606,6 +668,9 @@ void RenderTarget::beginPass(TargetPassStart reason) {
         // Metal's swapchain adapter also uses depth STORE to retain MSAA samples.
         pass.action.depth.store_action = resumable ? SG_STOREACTION_STORE : SG_STOREACTION_DONTCARE;
     }
+    // Absorb the acquired extent before the backend begins its pass/clear.
+    // Existing parked frames still retain their original attachments.
+    if (passKind == TargetPassKind::Swapchain) refreshWindowDrawingSize();
     sg_begin_pass(&pass);
     if (hasFixedPipeline) {
         const auto selected = pipeline(fixedPipeline);
@@ -632,32 +697,15 @@ void RenderTarget::endPass() {
     }
 }
 
-void RenderTarget::failRecording(const char* reason) {
-    auto& window = currentWindowContext();
-    deferredShaderDraws.clear(); deferredPbrDraws.clear(); deferredPointDraws.clear();
-    for (size_t i = window.shaderScopeTargets.size(); i-- > 0;) {
-        if (window.shaderScopeTargets[i].target == this) {
-            window.shaderScopeTargets.erase(window.shaderScopeTargets.begin() + i);
-            window.shaderStack.erase(window.shaderStack.begin() + i);
-        }
-    }
-    openShaderScopes = 0; sglLayerNext = 0; recordingFailed = true;
-    if (resources().context.id) sgl_tc_context_complete(resources().context);
-    logError("RenderTarget") << reason << "; discarded this target's recording";
-}
-bool RenderTarget::advanceLayer() {
-    // Bound (abi): SGL layer identifiers must fit signed int. Overflow discards the target's recording and is reported by failRecording logging an error and advanceLayer returning false.
-    if (recordingFailed) return false;
-    if (sglLayerNext == INT_MAX) { failRecording("layer identifier cannot be represented"); return false; }
+void RenderTarget::advanceLayer() {
     sgl_layer(++sglLayerNext);
-    return true;
 }
 
 void RenderTarget::flushLayers() {
     assert(currentWindowContext().currentTarget == this);
     if (!inPass || !resources().context.id) return;
     const auto err = sgl_context_error(resources().context);
-    const bool overflow = recordingFailed || err.vertices_full || err.commands_full || err.uniforms_full;
+    const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
         for (auto& draw : deferredShaderDraws)
@@ -698,7 +746,6 @@ uint64_t pushTarget(RenderTarget& target, bool prepareOnly) {
     target.activation = token;
     target.activeWindow = &window;
     target.passStartedThisFrame = false;
-    target.recordingFailed = false;
     target.frameEpoch = window.renderEpoch;
     // A scope constructor has no destructor if target setup throws. Roll back
     // a published activation here, without finalizing an unprepared owner.
@@ -796,7 +843,17 @@ bool popTarget(RenderTarget& target, uint64_t token) {
     return true;
 }
 
-void ensureCurrentPass() {
+bool admitRootSwapchainPass() {
+    auto& context = currentWindowContext();
+    if (context.hostWindow) return true;
+    if (!context.processSwapchainWarned) {
+        context.processSwapchainWarned = true;
+        logWarning("RenderTarget") << "No Window selected: draw inside a window callback or into an Fbo";
+    }
+    return false;
+}
+
+bool ensureCurrentPass() {
     auto& window = currentWindowContext();
     ensureTargetStack(window);
     auto& target = *window.currentTarget;
@@ -805,6 +862,7 @@ void ensureCurrentPass() {
         target.beginPass(target.passStartedThisFrame ? TargetPassStart::Resume : TargetPassStart::Initial);
         selectTarget(target);
     }
+    return target.inPass;
 }
 
 bool hasPublicFboActivation() {
@@ -848,6 +906,7 @@ TargetPassScope::TargetPassScope(const sg_pass& pass, int width, int height,
     token_ = pushTarget(owned_);
 }
 TargetPassScope::~TargetPassScope() noexcept {
+    if (frameworkShutdown()) return;
     try {
         if (token_ && target_->activation == token_ && !popTarget(*target_, token_)) {
             // An owned scope cannot disappear while children still borrow it.
@@ -907,7 +966,6 @@ void internal::endGpuFrame() {
     // their pass-consumption lifetime, including on upload-only boundaries.
     auto& target = internal::currentWindowContext().swapchainTarget;
     if (target.resources().context.id) sgl_tc_context_complete(target.resources().context);
-    target.recordingFailed = false;
 
     // Retire submitted resources while preserving typed dependencies of every
     // still-unconsumed recording, including suspended foreign targets.
@@ -929,10 +987,10 @@ void present() {
     // Registered callbacks can push targets. Select stores before creating the
     // encoder; a proven uninterrupted final pass keeps resolve-only/depth discard.
     if (!window.swapchainTarget.inPass)
-        window.swapchainTarget.resumable = events().onRender.listenerCount() != 0;
-    internal::ensureCurrentPass();
+        window.swapchainTarget.resumable = internal::currentWindowContext().coreEvents->onRender.listenerCount() != 0;
+    if (!internal::ensureCurrentPass()) return;
     window.swapchainTarget.flushLayers();
-    events().onRender.notify();
+    internal::currentWindowContext().coreEvents->onRender.notify();
     if (window.targetStack.size() != 1) {
         logWarning("RenderTarget") << "onRender left unfinished target scopes";
         while (window.targetStack.size() > 1) {
@@ -940,9 +998,10 @@ void present() {
             internal::popTarget(*entry.target, entry.token);
         }
     }
+    const bool closing = internal::currentWindowCloseRecorded();
     window.swapchainTarget.flushLayers();
     window.swapchainTarget.endPass();
-    if (internal::finishWindowCaptureSource(window.swapchainTarget)) {
+    if (!closing && internal::finishWindowCaptureSource(window.swapchainTarget)) {
         if (!sg_tc_mtl_authorize_drawable(window.swapchainTarget.ownerId,
                 window.swapchainTarget.resources().generation, window.renderEpoch))
             sg_tc_mtl_cancel_drawables(window.swapchainTarget.ownerId);
@@ -974,33 +1033,41 @@ bool isInSwapchainPass() {
 
 namespace internal {
 namespace {
-// Main-thread-only lighting cleanup can outlive these function-local statics
+// Constant initialization and trivial destruction keep this readable after all
+// static destructors, without consulting a singleton. Atomic publication covers
+// a handle released by a worker after the framework run has ended.
+constinit std::atomic<bool> frameworkStopped{false};
+static_assert(std::is_trivially_destructible_v<decltype(frameworkStopped)>);
+
+// Lighting cleanup can outlive these function-local statics
 // (e.g. a sketch's global Material). Constant initialization and trivial
-// destruction keep the flag readable throughout static destruction.
-constinit bool windowStateDestroyed = false;
-constinit WindowContext* initializedMainWindowContext = nullptr;
+// destruction keep the pointers readable throughout static destruction.
 constinit std::vector<Window*>* initializedWindowRegistry = nullptr;
 
 struct WindowStateLifetimeMark {
-    explicit WindowStateLifetimeMark(WindowContext* ctx) { initializedMainWindowContext = ctx; }
     explicit WindowStateLifetimeMark(std::vector<Window*>* list) { initializedWindowRegistry = list; }
-    ~WindowStateLifetimeMark() { windowStateDestroyed = true; }
+    ~WindowStateLifetimeMark() {
+        initializedWindowRegistry = nullptr;
+        endFrameworkLifetime();
+    }
 };
 } // namespace
 
-// The main window's state container. Non-inline so a hot-reload guest binds
-// to the host's instance (same pattern as events()/getDefaultContext()).
-WindowContext& mainWindowContext() {
-    static WindowContext ctx;
-    // Destroyed before ctx, like LoggerLifetimeMark below.
-    static WindowStateLifetimeMark lifetimeMark(&ctx);
-    (void)lifetimeMark;
-    return ctx;
-}
+bool frameworkShutdown() noexcept { return frameworkStopped.load(std::memory_order_acquire); }
+void beginFrameworkLifetime() noexcept { frameworkStopped.store(false, std::memory_order_release); }
+void endFrameworkLifetime() noexcept { frameworkStopped.store(true, std::memory_order_release); }
 
 // Open-window registry (see tcWindow.h). Non-inline for the same host/guest
-// reason as mainWindowContext(). Main thread only.
+// reason as windowApiContext(). Running access remains main-thread-only;
+// stopped destructors share this lock with the CPU lighting scrubs.
+static std::mutex& windowRegistryMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
 static std::vector<Window*>& windowRegistryStorage() {
+    // Outlive the list and the Window/non-window contexts (their construction
+    // initializes this registry), including on MSVC where mutex has a destructor.
+    windowRegistryMutex();
     static std::vector<Window*> list;
     // Either storage may be initialized first; stop cleanup before either dies.
     static WindowStateLifetimeMark lifetimeMark(&list);
@@ -1008,135 +1075,71 @@ static std::vector<Window*>& windowRegistryStorage() {
     return list;
 }
 void registerWindow(Window* w) {
+    std::lock_guard lock(windowRegistryMutex());
     windowRegistryStorage().push_back(w);
 }
 void unregisterWindow(Window* w) {
-    auto& list = windowRegistryStorage();
+    // The existing marker clears this pointer only at static destruction.
+    // A stopped runner still owns live CPU storage that a later run will use.
+    if (!initializedWindowRegistry) return;
+    std::lock_guard lock(windowRegistryMutex());
+    auto& list = *initializedWindowRegistry;
     list.erase(std::remove(list.begin(), list.end(), w), list.end());
 }
-// All mutable window identity/ownership state lives in the framework host.
-uint64_t nextWindowId() {
-    static uint64_t lastId = 0;
-    if (lastId == UINT64_MAX) throw std::overflow_error("Window identity exhausted");
-    return ++lastId;
-}
-CoreEvents& mainCoreEvents() {
-    static CoreEvents instance;
-    return instance;
-}
-static std::unique_ptr<Window>& mainWindowOwner() {
-    // Initialize dependencies before the owner so they outlive its destructor.
-    mainWindowContext();
-    mainCoreEvents();
-    mainRenderContext();
-    mcp::internal::mainWindowTitleStorage();
-    getLogger();
-    windowRegistryStorage();
-    attachedApps();
-    // A guest App's deleter retires MCP registrations on std::exit too.
-    // These host registries must outlive the runner, like events/render/logger.
-    mcp::internal::Server::instance();
-    mcp::internal::ownerCleanupHooks();
-    mcp::internal::statusRegistry();
-    mcp::internal::statusImageRegistry();
-    mcp::internal::deferredResponsesMutex();
-    mcp::internal::deferredResponses();
-    static std::unique_ptr<Window> owner;
-    return owner;
-}
-Window* mainWindow() { return mainWindowOwner().get(); }
-void createMainWindow(const WindowSettings& settings) {
-    destroyMainWindow();
-    auto* previous = currentWindowCtx();
-    currentWindowCtx() = nullptr;
-    try {
-        auto window = WindowRequestAccess::makeMain();
-        window->title_ = mcp::internal::mainWindowTitle(settings.title);
-        mainWindowOwner() = std::move(window);
-    } catch (...) { currentWindowCtx() = previous; throw; }
-    currentWindowCtx() = previous;
-}
-MainWindowDispatchScope::MainWindowDispatchScope(bool seedSize) : window(mainWindow()) {
-    if (!window) return;
-    WindowRequestAccess::applyPendingApp(*window);
-    ++window->dispatchDepth_;
-    if (!seedSize) return;
-    try { WindowRequestAccess::seedMainAppSize(*window); }
-    catch (...) { --window->dispatchDepth_; throw; }
-}
-MainWindowDispatchScope::~MainWindowDispatchScope() {
-    if (!window) return;
-    --window->dispatchDepth_;
-    TeardownSteps steps;
-    steps.run("main App boundary", [&] { WindowRequestAccess::applyPendingApp(*window); });
-}
-bool mainWindowDispatchActive() {
-    auto* window = mainWindow();
-    return window && WindowRequestAccess::dispatchActive(*window);
-}
-void prepareMainAppBindings() {
-    if (auto* window = mainWindow()) WindowRequestAccess::prepareInitialBindings(*window);
-}
-void openMainWindow() {
-    if (auto* window = mainWindow()) {
-        window->ctx_.dpiScale = sapp_dpi_scale();
-        WindowRequestAccess::openMain(*window);
+RenderTarget* drawingApiTarget() {
+    // An App constructor or late destructor can select an owner without changing
+    // the physical caller. Never borrow that caller's Fbo across owner scopes.
+    if (currentAppOwner()) {
+        auto* context = findWindowApiContext();
+        return context ? context->currentTarget : nullptr;
     }
+    if (currentTarget().isFbo) return &currentTarget();
+    auto* context = findWindowApiContext();
+    return context ? context->currentTarget : nullptr;
 }
-std::shared_ptr<App> mainApp() {
-    auto* window = mainWindow();
-    return window ? window->getApp() : nullptr;
+CoreEvents& processCoreEvents() { return *nonWindowContext().coreEvents; }
+RenderContext& processRenderContext() { return *nonWindowContext().render; }
+void prepareRuntimeExit() {
+    // Register after every host dependency so std::exit follows the same
+    // App-before-backing ending while registries, services and logger are alive.
+    static const bool installed = [] {
+        getLogger();
+        windowRegistryStorage();
+        nonWindowContext();
+        mcp::internal::Server::instance();
+        mcp::internal::ownerCleanupHooks();
+        mcp::internal::statusRegistry();
+        mcp::internal::statusImageRegistry();
+        mcp::internal::deferredResponsesMutex();
+        mcp::internal::deferredResponses();
+#ifndef __EMSCRIPTEN__
+        (void)mcp::internal::getHttpThread(); // state/exit hook only; no thread or listener starts
+#endif
+        if (std::atexit([] {
+            shutdownRuntime();
+            endFrameworkLifetime();
+        }) != 0) throw std::runtime_error("Unable to register Runtime ending");
+        return true;
+    }();
+    (void)installed;
 }
-void resizeMainApp(int width, int height) {
-    // App code: run inside the dispatch scope, with the receiver retained, so a
-    // setApp()/reload() requested by windowResized() waits for the boundary
-    // even if native events are pumped inside it.
-    MainWindowDispatchScope dispatch(false);
-    WindowCallbackTimeScope callbackTime;
-    if (auto app = mainApp()) app->handleWindowResized(width, height);
+std::shared_ptr<Window> prepareLaunchWindow(const WindowSettings& settings) {
+    beginFrameworkLifetime();
+    auto window = std::make_shared<Window>();
+    window->setQuitOnClose(settings.quitOnClose);
+    window->title_ = mcp::internal::markedWindowTitle(settings.title);
+    WindowRequestAccess::binding(*window).geometry = {double(settings.width), double(settings.height), settings.pixelPerfect};
+    retainRuntimeWindow(window);
+    return window;
 }
-bool attachMainApp(std::shared_ptr<App> app) {
-    auto* window = mainWindow();
-    if (!window) return false;
-    window->setApp(app);
-    WindowRequestAccess::applyPendingApp(*window);
-    return window->getApp() == app;
+const char* launchWindowTitle(Window& window) { return window.title_.c_str(); }
+void configureLaunchWindow(Window& window, const WindowSettings& settings) {
+    window.context().clipboardSize = settings.clipboardSize;
 }
-void detachMainApp() {
-    if (auto* window = mainWindow()) {
-        window->setApp(nullptr);
-        WindowRequestAccess::applyPendingApp(*window);
-    }
-}
-void destroyMainWindow() noexcept {
-    auto& owner = mainWindowOwner();
-    if (owner) WindowRequestAccess::endMain(*owner);
-    owner.reset();
-}
-// Session end under a paused callback (the native backend _exits right after).
-// The framework is frozen (sessionEndExit()): no tick, event, App attachment,
-// deferred close or window creation runs, and a released Window is not torn
-// down. Deliver events().exit (App::exit and its BeforeApp/App listeners) to
-// the windows open before the first notification: main first, then the others
-// newest first. Each delivery selects only that window's event/state context;
-// no detach, close, App::cleanup() or GPU work.
-void notifyAppExitsAtSessionEnd() noexcept {
-    TeardownSteps steps;
-    auto* previous = currentWindowCtx();
-    std::vector<Window*> order;
-    steps.run("session-end window snapshot", [&] {
-        Window* main = mainWindow();
-        if (main) order.push_back(main);
-        auto open = openWindows();
-        for (auto it = open.rbegin(); it != open.rend(); ++it) {
-            if (*it != main) order.push_back(*it);
-        }
-    });
-    for (Window* w : order) {
-        currentWindowCtx() = &w->context();
-        FrameworkEventAccess::notifySessionEnd(w->events().exit, steps);
-        currentWindowCtx() = previous;
-    }
+bool attachCandidate(Window& window, std::shared_ptr<App> app) {
+    WindowRequestAccess::attachCandidate(window, app);
+    WindowRequestAccess::applyPendingApp(window);
+    return window.getApp() == app;
 }
 
 WindowFullscreenHook& windowFullscreenHookForTests() {
@@ -1148,11 +1151,9 @@ WindowControlHook& windowControlHookForTests() {
     return hook;
 }
 
-WindowOccludedHook& windowOccludedHookForTests() {
-    static WindowOccludedHook hook = nullptr;
-    return hook;
-}
 std::vector<Window*> openWindows() {
+    if (frameworkShutdown()) return {};
+    std::lock_guard lock(windowRegistryMutex());
     std::vector<Window*> out;
     for (Window* w : windowRegistryStorage()) {
         if (w && w->isOpen()) out.push_back(w);
@@ -1160,15 +1161,18 @@ std::vector<Window*> openWindows() {
     return out;
 }
 
-// Main thread only. These scrubs perform only raw-pointer assignment/erasure:
-// context() is non-virtual and no user code, close, or registration is invoked.
-// Thus the registry cannot mutate during this walk. Include closed windows too:
+// These scrubs perform only raw-pointer assignment/erasure under the registry
+// lock: context() is non-virtual; no callbacks, GPU/native calls or other locks.
+// Unregistration precedes destruction of a Window's context. Include closed windows too:
 // their contexts can still retain lighting pointers until Window destruction.
 // Do not initialize either storage from a destructor under allocation failure.
 namespace {
 template<class Scrub> void scrubLightingContexts(Scrub scrub) noexcept {
-    if (windowStateDestroyed) return;
-    if (initializedMainWindowContext) scrub(*initializedMainWindowContext);
+    // All three storages can have died during static teardown. Do not touch
+    // the mutex then; the existing storage markers remain the lifetime guards.
+    if (!nonWindowContextIfInitialized() && !initializedWindowRegistry) return;
+    std::lock_guard lock(windowRegistryMutex());
+    if (auto* ctx = nonWindowContextIfInitialized()) scrub(*ctx);
     if (initializedWindowRegistry) {
         for (Window* w : *initializedWindowRegistry) {
             if (w) scrub(w->context());
@@ -1197,34 +1201,74 @@ void clearEnvironmentFromAllContexts(Environment* environment) {
     });
 }
 
-// Declared in tcWindowContext.h. Every registered window, not only the open
-// ones: a closed Window the app still holds keeps its context, and with it
-// the hover / grab / selection it had when it closed.
-void resetNodeRefsForUnload() {
-    auto reset = [](WindowContext& ctx) {
-        ctx.hoveredNode.reset();
-        ctx.prevHoveredNode.reset();
-        ctx.grabbedNode.reset();
-        ctx.grabbedButton = -1;
-        ctx.selectedNode.reset();
+// Ending an attachment clears only references to that tree (and already
+// expired references), including closed or unbound Window storage. Copying a
+// weak pointer never allocates. Release control blocks outside the registry
+// mutex: their allocator/deleter storage can reenter the host.
+void resetAppNodeReferences(const App& app) noexcept {
+    auto field = [](WindowContext& ctx, int slot) -> std::weak_ptr<Node>& {
+        switch (slot) {
+            case 0: return ctx.rootNode;
+            case 1: return ctx.hoveredNode;
+            case 2: return ctx.prevHoveredNode;
+            case 3: return ctx.grabbedNode;
+            default: return ctx.selectedNode;
+        }
     };
-    reset(mainWindowContext());
-    mainWindowContext().rootNode.reset();
-    for (Window* w : windowRegistryStorage()) {
-        if (w) reset(w->context());
+    auto belongs = [&](const std::weak_ptr<Node>& ref) {
+        auto node = ref.lock();
+        if (!node) return true;
+        for (; node; node = node->getParent()) if (node.get() == &app) return true;
+        return false;
+    };
+    auto scrub = [&](Window* window) {
+        for (int slot = 0; slot < 5; ++slot) {
+            std::weak_ptr<Node> ref, retired;
+            auto context = [&]() -> WindowContext* {
+                if (!window) return nonWindowContextIfInitialized();
+                if (!initializedWindowRegistry ||
+                    std::find(initializedWindowRegistry->begin(), initializedWindowRegistry->end(), window) == initializedWindowRegistry->end()) return nullptr;
+                return &window->context();
+            };
+            {
+                std::lock_guard lock(windowRegistryMutex());
+                if (auto* ctx = context()) ref = field(*ctx, slot);
+            }
+            if (!belongs(ref)) continue;
+            {
+                std::lock_guard lock(windowRegistryMutex());
+                if (auto* ctx = context()) {
+                    auto& current = field(*ctx, slot);
+                    if (!ref.owner_before(current) && !current.owner_before(ref)) {
+                        retired = std::move(current);
+                        if (slot == 3) ctx->grabbedButton = -1;
+                    }
+                }
+            }
+        }
+    };
+    scrub(nullptr);
+    size_t index = 0;
+    for (;;) {
+        Window* window;
+        {
+            std::lock_guard lock(windowRegistryMutex());
+            if (!initializedWindowRegistry || index >= initializedWindowRegistry->size()) break;
+            window = (*initializedWindowRegistry)[index];
+        }
+        scrub(window);
+        {
+            std::lock_guard lock(windowRegistryMutex());
+            if (initializedWindowRegistry && index < initializedWindowRegistry->size() && (*initializedWindowRegistry)[index] == window) ++index;
+        }
     }
 }
+
 } // namespace internal
 
 CoreEvents& events() {
-    // The CoreEvents instance is owned per window context. The main window's
-    // is wired lazily here (preserving the pre-context construction timing);
-    // Phase 1 pre-wires the pointer when constructing secondary contexts.
-    auto& ctx = internal::currentWindowContext();
-    if (!ctx.coreEvents) {
-        ctx.coreEvents = &internal::mainCoreEvents();
-    }
-    return *ctx.coreEvents;
+    if (auto* ctx = internal::findWindowApiContext()) return *ctx->coreEvents;
+    return internal::unavailableWindowEvents();
 }
 
 // ---------------------------------------------------------------------------
@@ -1317,14 +1361,12 @@ void runMainUpdate(double fixedDelta,
         }
     } restore{wctx, previous, previousCallback, previousFixed, previousTime};
     ++wctx.updateCount;
-    CrashPhaseScope crashPhase("update");
     EntryStackGuard guard(AppEntry::Update);
-    if (wctx.isMain && appUpdateFunc) appUpdateFunc();
-    else events().update.notify();
+    internal::currentWindowContext().coreEvents->update.notify();
 }
 
 // Update processing of one window-loop frame when update is NOT synced to
-// draw (setIndependentFps). Split out of _frame_cb so the stepping can be
+// draw (setIndependentFps). The common scheduler uses this stepping; it can be
 // driven headless (core/tests/frameTiming).
 //   VSYNC:        one update per frame, measured dt.
 //   fixed Hz:     accumulator steps at the nominal 1/updateFps, at most
@@ -1348,9 +1390,8 @@ void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
 
         FixedStepAdvance adv = advanceFixedStep(loop.updateAccumulator, elapsed, updateInterval,
                                                 getMaxUpdateSteps());
-        if (adv.droppedTime > 0.0) {
-            warnUpdateStepsDropped(FixedStepLoop::Main, adv.droppedTime, updateInterval, adv.steps);
-        }
+        warnUpdateStepsDropped(FixedStepLoop::Main, loop.updateStepsDropWarned,
+                               adv.droppedTime, updateInterval, adv.steps);
         // The frame's steps are the latest adv.steps intervals on the
         // loop's timeline, ending one leftover accumulator before `now`.
         const double leftover = loop.updateAccumulator;
@@ -1372,8 +1413,8 @@ void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
     }
 }
 
-// Draw decision of one window-loop frame (before _frame_cb's capture
-// override). Split out of _frame_cb so it can be driven headless.
+// Draw decision of one window-loop frame (before the capture override).
+// The common scheduler uses this decision; it can also be driven headless.
 //   VSYNC:        every frame.
 //   fixed fps:    frame skipping; at most one draw per tick, with a
 //                 half-tick tolerance so a target at or just above the
@@ -1400,7 +1441,7 @@ bool mainLoopShouldDraw(std::chrono::steady_clock::time_point now) {
 
 // The update of a drawn frame when update is synced to draw (setFps:
 // VSYNC, a fixed rate or EVENT_DRIVEN): one update per drawn frame with
-// the measured dt, and its getFrameRate() sample. _frame_cb runs it after
+// the measured dt, and its getFrameRate() sample. The scheduler runs it after
 // beginFrame(). Split out so it can be driven headless.
 void runSyncedUpdate() {
     if (!mainLoop().updateSyncedToDraw) return;
@@ -1443,11 +1484,6 @@ float appPointerScale(float dpi) {
     return std::isfinite(scale) ? scale : 1.0f;
 }
 
-void syncSecondaryAppSize(Window& window, int width, int height) {
-    const auto size = framebufferResizeArgs(width, height, appSizeDpi(window.context().dpiScale));
-    window.syncRootSize(float(size.width), float(size.height));
-}
-
 ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {
     ResizeEventArgs args;
     args.width = framebufferToLogical(width, dpi);
@@ -1457,15 +1493,20 @@ ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {
 
 uint64_t resourceFrameKey() {
     const auto& ctx = currentWindowContext();
-    return ctx.isMain ? ctx.updateCount : ctx.resourceTickCount;
+    // The explicit non-window headless loop has updates, without native Window admissions.
+    if (&ctx == nonWindowContextIfInitialized()) return ctx.updateCount;
+    return ctx.resourceTickCount;
 }
 
-uint64_t deviceFrameCount() { return sapp_frame_count(); }
+uint64_t deviceFrameCount() {
+    // Upload admission follows shared GPU commits, including no-window-draw turns.
+    return sg_isvalid() ? sg_query_stats().prev_frame.frame_index : 0;
+}
 
 // Single occlusion policy for all windows. Desktop secondary native sources
 // deliver gated callbacks here before drawable admission. Main keeps
 // updating on every supplied tick, independently of its visibility snapshot.
-static bool occlusionPausesUpdate(const WindowContext& ctx) { return !ctx.isMain; }
+static bool occlusionPausesUpdate(const WindowContext& ctx) { return ctx.pauseUpdatesWhenHidden; }
 
 static bool nativeSuspensionPausesUpdate() {
 #if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
@@ -1481,17 +1522,29 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
 #if defined(__ANDROID__)
     if (type == SAPP_EVENTTYPE_UNFOCUSED) ctx.visibilityPaused = true;
 #endif
-    if (type == SAPP_EVENTTYPE_SUSPENDED || type == SAPP_EVENTTYPE_ICONIFIED) {
-        ctx.suspended = true;
-        if (occlusionPausesUpdate(ctx) || nativeSuspensionPausesUpdate()) {
+    if constexpr (supportsSecondaryWindows()) {
+        for (auto* w : openWindows()) if (&w->context() == &ctx) {
+            refreshWindowMetadata(*w);
+            const auto& m = WindowRequestAccess::binding(*w).metadata;
+            ctx.suspended = m.trust_hidden_signals && (m.iconified || m.occluded);
+            if (ctx.suspended && occlusionPausesUpdate(ctx)) {
+                ctx.visibilityPaused = true;
+                ctx.mainUpdateCallTimeInitialized = false;
+            }
+            return;
+        }
+    }
+    // Lifecycle suspension has a separate reason. Visibility was sampled before
+    // this call and remains authoritative for raw listeners and the typed event.
+    if (type == SAPP_EVENTTYPE_SUSPENDED) {
+        ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();
+        if (ctx.lifecycleSuspended || (ctx.suspended && occlusionPausesUpdate(ctx))) {
             ctx.visibilityPaused = true;
             ctx.mainUpdateCallTimeInitialized = false;
         }
-    } else if (type == SAPP_EVENTTYPE_RESUMED || type == SAPP_EVENTTYPE_RESTORED) {
-        ctx.suspended = false;
+    } else if (type == SAPP_EVENTTYPE_RESUMED) {
+        ctx.lifecycleSuspended = false;
 #if defined(__EMSCRIPTEN__)
-        // Browsers may stop rAF entirely. Rebase the first returned tick,
-        // without suppressing any callback actually delivered while hidden.
         ctx.visibilityPaused = true;
 #endif
     }
@@ -1507,12 +1560,14 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     ctx.tickDuration = sourceDuration;
     ctx.frameUptime = now - clockOrigin();
     ctx.frameUptimeSampled = true;
-    auto* window = currentWindow();
-    const bool hidden = nativeDrawGated || ctx.suspended || (window && window->isOccluded());
+    auto* window = ctx.hostWindow;
+    if (window) ctx.suspended = window->isOccluded();
+    const bool hidden = nativeDrawGated || ctx.suspended || ctx.lifecycleSuspended;
     // Preserve the existing capture override even while main is hidden.
     const bool capturePending = forceDraw || !ctx.pendingScreenshotPaths.empty()
         || !ctx.asyncScreenshots.pending.empty();
     const auto nonPresentingExit = [&] {
+        if (currentWindowCloseRecorded()) sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
         // Prelude callbacks can upload or render FBOs even without a draw.
         // Native gates have not activated this window's GPU context. In
         // particular, a nested gated callback must not commit foreign work.
@@ -1523,7 +1578,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
         // Expiry does not require a frame. Keep producers queued for a safe
         // readback after a later admitted frame, until their existing deadline.
         // Admission itself may block, so expiry uses a fresh clock sample.
-        mcp::internal::drainDeferredResponses(ctx.isMain ? nullptr : &ctx, false, windowClockNow());
+        mcp::internal::drainDeferredResponses(ctx.deferredResponseTarget, false, windowClockNow(), false);
 #endif
         return false;
     };
@@ -1543,9 +1598,10 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     // Independent callbacks pass the old free-running secondary admission
     // point before updates. Synchronized ticks first pass the draw throttle.
     const bool independentTick = !ctx.loop.updateSyncedToDraw;
-    if (!ctx.isMain && !nativeDrawGated && independentTick) ++ctx.resourceTickCount;
+    if (!nativeDrawGated && independentTick) ++ctx.resourceTickCount;
     const auto updatesBefore = ctx.updateCount;
     if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);
+    if (currentWindowCloseRecorded()) return nonPresentingExit();
     if (nativeDrawGated) {
         // The native gate forbids all rendering, including forced captures.
         // A future secondary policy change can run updates on delivered ticks.
@@ -1558,24 +1614,18 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     if (!shouldDraw) return nonPresentingExit();
     // Base increment point for synchronized ticks: after throttle, before
     // beginFrame/update, including a later failed render admission.
-    if (!ctx.isMain && !independentTick) ++ctx.resourceTickCount;
+    if (!independentTick) ++ctx.resourceTickCount;
     if (presentation) presentation->begin();
     else {
-        if (!ctx.isMain && ctx.swapchainTarget.resources().context.id == SG_INVALID_ID) {
-            sgl_context_desc_t desc = {};
-            desc.max_vertices = sglBudget().maxVertices;
-            desc.max_commands = sglBudget().maxCommands;
-            desc.color_format = ctx.swapchainTarget.colorFormat;
-            desc.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-            desc.sample_count = ctx.swapchainTarget.sampleCount;
-            ctx.swapchainTarget.resources().makeContext(desc, "a window");
-        }
-        if (!ctx.isMain) { sgl_set_context(ctx.swapchainTarget.resources().context); sgl_defaults(); }
         beginFrame();
     }
     // A mode switch from an independent update applies on the next tick;
     // never add a second, synchronized update to that same tick.
     if (ctx.updateCount == updatesBefore) runSyncedUpdate();
+    if (currentWindowCloseRecorded()) {
+        sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
+        return nonPresentingExit();
+    }
     // Reserve before notifying so redraw() from draw/afterFrame survives.
     // A failed draw/present keeps the original request for a later tick.
     struct RedrawReservation {
@@ -1592,10 +1642,14 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
         EntryStackGuard guard(AppEntry::Draw);
         if (!presentation) {
             refreshWindowDrawingSize();
-            if (window && (!ctx.isMain || window->clearColorSet_)) { const auto& c = window->clearColor_; clear(c.r, c.g, c.b, c.a); }
+            if (window && window->clearColorSet_) { const auto& c = window->clearColor_; clear(c.r, c.g, c.b, c.a); }
         }
         WindowCallbackTimeScope callbackTime;
-        events().draw.notify();
+        internal::currentWindowContext().coreEvents->draw.notify();
+        if (currentWindowCloseRecorded()) {
+            sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
+            return nonPresentingExit();
+        }
         if (presentation) admitted = presentation->present();
         else {
             resetShaderStack(); present();
@@ -1604,12 +1658,14 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
             admitted = !ctx.swapchainTarget.binding.swapchain.invalid;
         }
     }
-    if (!admitted) return nonPresentingExit();
+    if (!admitted || currentWindowCloseRecorded()) return nonPresentingExit();
     reservation.completed = true;
     ++ctx.drawCount;
-    { EntryStackGuard guard(AppEntry::AfterFrame); events().afterFrame.notify(); }
+    { EntryStackGuard guard(AppEntry::AfterFrame); internal::currentWindowContext().coreEvents->afterFrame.notify(); }
+    // Snapshot screenshot requests only after all listeners, including those
+    // installed by App::setup(), have queued captures of this finished frame.
     if (presentation) presentation->finish();
-    else if (!ctx.isMain) drainPendingScreenshots();
+    else drainPendingScreenshots();
     return true;
 }
 
@@ -1721,12 +1777,16 @@ bool frameSkipShouldTick(double& accumulator, double elapsed, double interval) {
     return true;
 }
 
-void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double interval,
+void warnUpdateStepsDropped(FixedStepLoop loop, bool& warned,
+                            double droppedTime, double interval,
                             int stepsRun) {
-    // One flag per loop: each loop reports its own first drop.
-    static std::atomic<bool> warned[2] = {false, false};
+    // The owning loop supplies its main-thread-only episode flag.
+    // A pass without dropped time ends only that loop's episode.
     const bool headless = (loop == FixedStepLoop::Headless);
-    if (warned[headless ? 1 : 0].exchange(true)) return;
+    const bool dropped = droppedTime > 0.0;
+    const bool alreadyWarned = warned;
+    warned = dropped;
+    if (!dropped || alreadyWarned) return;
     const char* where = headless ? "Headless loop" : "Update loop";
     const char* frame = headless ? "loop pass" : "frame";
     // stepsRun is the cap (getMaxUpdateSteps()): time is only dropped once
@@ -1748,7 +1808,7 @@ void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double inter
         warning << ", or the update rate is more than " << stepsRun
             << "x the display's frame rate";
     }
-    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once.";
+    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once per stall.";
 }
 } // namespace internal
 
@@ -1773,7 +1833,9 @@ double getElapsedTime() {
 }
 
 double getFrameElapsedTime() {
-    auto& ctx = internal::currentWindowContext();
+    auto* resolved = internal::findWindowApiContext();
+    if (!resolved) return 0;
+    auto& ctx = *resolved;
     // Before this window's first frame (e.g. during a window's own setup),
     // fall back to the live clock.
     if (!ctx.frameUptimeSampled) return getElapsedTime();
@@ -1782,17 +1844,19 @@ double getFrameElapsedTime() {
     return std::chrono::duration<double>(d).count();
 }
 
-uint64_t getUpdateCount() { return internal::currentWindowContext().updateCount; }
-uint64_t getDrawCount() { return internal::currentWindowContext().drawCount; }
+uint64_t getUpdateCount() { auto* ctx = internal::findWindowApiContext(); return ctx ? ctx->updateCount : 0; }
+uint64_t getDrawCount() { auto* ctx = internal::findWindowApiContext(); return ctx ? ctx->drawCount : 0; }
 uint64_t getFrameCount() { return getUpdateCount(); }
 
 double getDeltaTime() {
     // Per-window: inside a secondary window's update/draw this is that
-    // window's own tick delta, not the main window's.
-    return internal::currentWindowContext().updateDeltaTime;
+    // window's own tick delta, rather than a process clock.
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->updateDeltaTime : 0;
 }
 
-double getFrameRate() {
+namespace internal {
+double measuredWindowRate(const WindowContext& ctx) {
     // Measured update rate over the last few frames: update steps divided by
     // the wall time they covered. Recorded by the main and headless loops
     // (recordUpdateRateSample), so reading it has no side effects. In fixed-Hz
@@ -1800,7 +1864,6 @@ double getFrameRate() {
     // the fixed-step loops count the time their steps consumed (fractional
     // steps), so a rate that isn't a multiple of the frame rate reads steady,
     // and dropped time lowers it.
-    auto& ctx = internal::currentWindowContext();
     double time = 0.0;
     double steps = 0.0;
     for (int i = 0; i < ctx.rateCount; i++) {
@@ -1809,6 +1872,8 @@ double getFrameRate() {
     }
     return time > 0.0 ? steps / time : 0.0;
 }
+}
+double getFrameRate() { auto* ctx = internal::findWindowApiContext(); return ctx ? internal::measuredWindowRate(*ctx) : 0; }
 
 namespace {
 // Set during static destruction, right before getLogger()'s Logger is
@@ -1899,10 +1964,6 @@ SaveResult Logger::setLogFile(const fs::path& path) {
         closeFileLocked();
         fileStream_ = std::move(stream);
         filePath_ = resolved;
-        if (this == &getLogger()) {
-            internal::setCrashLogFile(resolved);
-            crashLogOwner_ = true;
-        }
     }
     return SaveResult::success();
 }
@@ -1960,9 +2021,44 @@ std::string sokolLogMessage(const char* tag, uint32_t logItem,
     return text;
 }
 
+namespace {
+bool logPoolExhaustion(const char* tag, uint32_t logItem) {
+    int pool = -1;
+    if (tag && std::strcmp(tag, "sg") == 0) {
+        switch (logItem) {
+            case SG_LOGITEM_BUFFER_POOL_EXHAUSTED: pool = 0; break;
+            case SG_LOGITEM_IMAGE_POOL_EXHAUSTED: pool = 1; break;
+            case SG_LOGITEM_VIEW_POOL_EXHAUSTED: pool = 2; break;
+            case SG_LOGITEM_SAMPLER_POOL_EXHAUSTED: pool = 3; break;
+            case SG_LOGITEM_SHADER_POOL_EXHAUSTED: pool = 4; break;
+            case SG_LOGITEM_PIPELINE_POOL_EXHAUSTED: pool = 5; break;
+            default: break;
+        }
+    } else if (tag && std::strcmp(tag, "sgl") == 0 && logItem == SGL_LOGITEM_PIPELINE_POOL_EXHAUSTED) {
+        pool = 6;
+    }
+    if (pool < 0) return false;
+    if (!poolExhaustionReported[pool].exchange(true)) {
+        const char* names[] = {"buffer", "image", "view", "sampler", "shader", "pipeline", "pipeline"};
+        const int count = pool < 4 ? activeGraphicsPools.resources :
+                          pool == 4 ? activeGraphicsPools.shaders : activeGraphicsPools.pipelines;
+        const char* setter = pool < 4 ? "setResourcePoolSize" :
+                             pool == 4 ? "setShaderPoolSize" : "setPipelinePoolSize";
+        getLogger().log(LogLevel::Error, std::string(names[pool]) + " pool exhausted (" +
+            std::to_string(count) + " " + names[pool] + "s in use); raise it with WindowSettings::" +
+            setter + "() before runApp()");
+    }
+    return true;
+}
+}
+
 void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
               const char* message, uint32_t lineNr, const char* filename,
               void* userData) {
+    // A failed stream replacement gets one actionable Shader Error after the
+    // allocation returns. Avoid duplicating its immediate backend errors. Fatal
+    // errors, warnings and asynchronous errors on other threads keep their path.
+    if (shaderStreamBufferAllocation && logLevel == 1 && tag && std::strcmp(tag, "sg") == 0) return;
     // Called from sokol's C code: nothing may throw out of here, and a panic
     // must reach slog_func (the abort) whatever happens before it.
     const bool noLogger = loggerDestroyed.load();
@@ -1975,6 +2071,9 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                 if (!v3dResolveFlushNoticed.exchange(true)) {
                     logNotice("RenderTarget") << "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)";
                 }
+            } else if (logPoolExhaustion(tag, logItem)) {
+                // Keep sokol's own line at debug verbosity, including repeats.
+                getLogger().log(LogLevel::Verbose, sokolLogMessage(tag, logItem, message, lineNr));
             } else if (logLevel == 0) {
                 // A panic: the process ends right after, so the sinks do not
                 // wait for the lock (a thread holding it may never let go).
@@ -2006,6 +2105,27 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
 // Logger platform sink (declared in tcLog.h)
 // ---------------------------------------------------------------------------
 #if TC_LOG_SYSTEM_SINK
+#if defined(__APPLE__)
+namespace {
+// libtrace/libdispatch state inherited across fork is not usable until exec.
+// Constant initialization also permits logging from user global constructors.
+constinit std::atomic<bool> systemLogForked{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+constinit std::atomic<pid_t> systemLogProcess{0};
+static_assert(std::atomic<pid_t>::is_always_lock_free);
+void systemLogForkChild() {
+    systemLogForked.store(true, std::memory_order_relaxed);
+}
+struct SystemLogForkGuard {
+    SystemLogForkGuard() {
+        systemLogProcess.store(getpid(), std::memory_order_relaxed);
+        // Register at image load, before an app can fork without logging.
+        // The PID check also protects forks if registration ever fails.
+        pthread_atfork(nullptr, nullptr, systemLogForkChild);
+    }
+} systemLogForkGuard;
+}
+#endif
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 namespace {
 // True when os_log lines are mirrored into the console that already shows
@@ -2028,6 +2148,12 @@ namespace internal {
 
 void writeSystemLog(const LogEventArgs& e) {
 #if defined(__APPLE__)
+    if (systemLogForked.load(std::memory_order_relaxed)) return;
+    // Zero means our load-time constructor has not run yet: early parent
+    // global constructors must still be able to log.
+    // Only the PID itself is published; no other state needs synchronization.
+    const pid_t parentProcess = systemLogProcess.load(std::memory_order_relaxed);
+    if (parentProcess != 0 && getpid() != parentProcess) return;
 #if !TARGET_OS_IPHONE
     if (osLogMirroredToConsole()) return;
 #endif
@@ -2105,29 +2231,13 @@ std::atomic<bool>& spawned() {
 
 namespace internal {
 
-std::shared_ptr<std::atomic<bool>>& appRunToken() {
-    static auto* token = new std::shared_ptr<std::atomic<bool>>;
-    return *token;
-}
-
-// Constant-initialized and trivially destructible: workers may post while
-// static destructors run, after the queue below has been destroyed.
+// Preserve the allocation-free CP3 mailbox even before Runtime's first use.
+// Workers can post while static destructors run; this atomic never dies.
 std::atomic<MainThreadSlot*>& mainThreadSlots() noexcept {
     static constinit std::atomic<MainThreadSlot*> head{nullptr};
     static_assert(std::is_trivially_destructible_v<std::atomic<MainThreadSlot*>>);
     return head;
 }
-
-#if !defined(__EMSCRIPTEN__)
-ThreadChannel<std::function<void()>>& mainThreadQueue() {
-    static ThreadChannel<std::function<void()>> q;
-    return q;
-}
-std::atomic<size_t>& mainThreadQueuePendingCount() {
-    static std::atomic<size_t> n{0};
-    return n;
-}
-#endif
 
 AsyncScheduler::AsyncScheduler() {
 #ifdef _WIN32
@@ -2217,6 +2327,7 @@ namespace {
 ShadowStorage* retiredShadows = nullptr;
 
 void retireShadowStorage(ShadowStorage* storage) noexcept {
+    if (frameworkShutdown()) { delete storage; return; }
     if (!sg_isvalid()) { delete storage; return; }
     storage->retiredNext = retiredShadows;
     retiredShadows = storage;
@@ -2265,6 +2376,7 @@ PendingGpuDestroys& pendingGpuDestroys() {
 } // anonymous namespace
 
 TextureRetirement::~TextureRetirement() noexcept {
+    if (frameworkShutdown()) return;
     if (!sg_isvalid()) return;
     for (auto handle : cubeViews) if (handle.id) sg_destroy_view(handle);
     for (auto handle : mipAttachments) if (handle.id) sg_destroy_view(handle);
@@ -2275,6 +2387,7 @@ TextureRetirement::~TextureRetirement() noexcept {
     if (sampler.id) sg_destroy_sampler(sampler);
 }
 void retireTexture(TextureRetirement* storage) noexcept {
+    if (frameworkShutdown()) { delete storage; return; }
     if (!sg_isvalid()) { delete storage; return; }
     storage->next = retiredTextures;
     retiredTextures = storage;
@@ -2283,6 +2396,7 @@ void retireTexture(TextureRetirement* storage) noexcept {
 namespace {
 template<class Handle, class Queue>
 void enqueueGpuRetirement(Handle handle, Queue&& queue) noexcept {
+    if (frameworkShutdown()) return;
     if (!handle.id) return;
     try { queue(pendingGpuDestroys()).push_back(handle); }
     catch (...) {
@@ -2367,56 +2481,46 @@ void drainPendingGpuDestroys() {
         discardRetiredTextures();
         return;
     }
-    try {
-        RecordingReferences refs;
-        std::unordered_set<WindowContext*> windows{&mainWindowContext(), &currentWindowContext()};
-        for (auto* window : openWindows()) windows.insert(&window->context());
-        for (auto* window : windows) {
-            refs.target(window->swapchainTarget);
-            for (const auto& entry : window->targetStack)
-                if (entry.target != &window->swapchainTarget) refs.target(*entry.target);
-        }
-        auto retire = [](auto& handles, const auto& pinned, auto destroy) {
-            handles.erase(std::remove_if(handles.begin(), handles.end(), [&](auto handle) {
-                if (pinned.count(handle.id)) return false;
-                destroy(handle);
-                return true;
-            }), handles.end());
-        };
-        retire(q.buffers, refs.buffers, sg_destroy_buffer);
-        retire(q.views, refs.views, sg_destroy_view);
-        retire(q.images, refs.images, sg_destroy_image);
-        retire(q.samplers, refs.samplers, sg_destroy_sampler);
-        retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
-        retire(q.shaders, refs.shaders, sg_destroy_shader);
-        auto** textureLink = &retiredTextures;
-        while (auto* storage = *textureLink) {
-            bool pinned = refs.images.count(storage->image.id) || refs.views.count(storage->view.id) ||
-                refs.views.count(storage->attachment.id) || refs.samplers.count(storage->sampler.id);
-            for (const auto* views : {&storage->cubeViews, &storage->mipAttachments, &storage->mipViews})
-                for (auto view : *views) pinned |= refs.views.count(view.id) != 0;
-            if (pinned) { textureLink = &storage->next; continue; }
-            *textureLink = storage->next;
-            delete storage;
-        }
-        auto** link = &retiredShadows;
-        while (auto* storage = *link) {
-            bool pinned = refs.images.count(storage->colorImage.id) ||
-                refs.images.count(storage->depthImage.id) || refs.samplers.count(storage->sampler.id) ||
-                refs.views.count(storage->colorTexture.id) || refs.views.count(storage->depthAttachment.id);
-            for (auto view : storage->colorAttachments) pinned |= refs.views.count(view.id) != 0;
-            if (pinned) { link = &storage->retiredNext; continue; }
-            *link = storage->retiredNext;
-            delete storage;
-        }
-    } catch (const std::bad_alloc&) {
-        // No handle retires before the complete reference closure is known.
-        // Keep this batch intact and retry at the next device boundary.
-        try { getLogger().log(LogLevel::Warning, "[RenderTarget] resource retirement allocation failed; deferred collection"); }
-        catch (...) {} // Collection must also survive sustained allocation failure.
-    } catch (const std::length_error&) {
-        try { getLogger().log(LogLevel::Warning, "[RenderTarget] resource retirement size cannot be represented; deferred collection"); }
-        catch (...) {}
+    RecordingReferences refs;
+    std::unordered_set<WindowContext*> windows{&nonWindowContext(), &currentWindowContext()};
+    for (auto* window : openWindows()) windows.insert(&window->context());
+    for (auto* window : windows) {
+        refs.target(window->swapchainTarget);
+        for (const auto& entry : window->targetStack)
+            if (entry.target != &window->swapchainTarget) refs.target(*entry.target);
+    }
+    auto retire = [](auto& handles, const auto& pinned, auto destroy) {
+        handles.erase(std::remove_if(handles.begin(), handles.end(), [&](auto handle) {
+            if (pinned.count(handle.id)) return false;
+            destroy(handle);
+            return true;
+        }), handles.end());
+    };
+    retire(q.buffers, refs.buffers, sg_destroy_buffer);
+    retire(q.views, refs.views, sg_destroy_view);
+    retire(q.images, refs.images, sg_destroy_image);
+    retire(q.samplers, refs.samplers, sg_destroy_sampler);
+    retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
+    retire(q.shaders, refs.shaders, sg_destroy_shader);
+    auto** textureLink = &retiredTextures;
+    while (auto* storage = *textureLink) {
+        bool pinned = refs.images.count(storage->image.id) || refs.views.count(storage->view.id) ||
+            refs.views.count(storage->attachment.id) || refs.samplers.count(storage->sampler.id);
+        for (const auto* views : {&storage->cubeViews, &storage->mipAttachments, &storage->mipViews})
+            for (auto view : *views) pinned |= refs.views.count(view.id) != 0;
+        if (pinned) { textureLink = &storage->next; continue; }
+        *textureLink = storage->next;
+        delete storage;
+    }
+    auto** link = &retiredShadows;
+    while (auto* storage = *link) {
+        bool pinned = refs.images.count(storage->colorImage.id) ||
+            refs.images.count(storage->depthImage.id) || refs.samplers.count(storage->sampler.id) ||
+            refs.views.count(storage->colorTexture.id) || refs.views.count(storage->depthAttachment.id);
+        for (auto view : storage->colorAttachments) pinned |= refs.views.count(view.id) != 0;
+        if (pinned) { link = &storage->retiredNext; continue; }
+        *link = storage->retiredNext;
+        delete storage;
     }
 }
 
@@ -2431,6 +2535,7 @@ ScreenRecorder& globalScreenRecorder() {
 }
 
 ShadowStorage::~ShadowStorage() noexcept {
+    if (frameworkShutdown()) return;
     if (!sg_isvalid()) return;
     for (auto view : colorAttachments) if (view.id) sg_destroy_view(view);
     if (colorTexture.id) sg_destroy_view(colorTexture);
@@ -2440,61 +2545,11 @@ ShadowStorage::~ShadowStorage() noexcept {
     if (sampler.id) sg_destroy_sampler(sampler);
 }
 
-#if defined(SOKOL_D3D11)
-bool shadowNativeValid(sg_image image) {
-    return sg_d3d11_query_image_info(image).res != nullptr;
-}
-bool shadowNativeValid(sg_view view) {
-    const auto desc = sg_query_view_desc(view);
-    const auto info = sg_d3d11_query_view_info(view);
-    if (desc.texture.image.id) return info.srv != nullptr;
-    if (desc.color_attachment.image.id) return info.rtv != nullptr;
-    return desc.depth_stencil_attachment.image.id && info.dsv != nullptr;
-}
-bool shadowNativeValid(sg_sampler sampler) {
-    return sg_d3d11_query_sampler_info(sampler).smp != nullptr;
-}
-#elif !defined(SOKOL_METAL) && !defined(SOKOL_GLCORE) && !defined(SOKOL_GLES3)
-bool shadowNativeValid(sg_image) { return true; }
-bool shadowNativeValid(sg_view) { return true; }
-bool shadowNativeValid(sg_sampler) { return true; }
-#endif
-
-namespace {
-// Prepared before main: reporting CPU exhaustion must not build a LogStream or
-// copy its message. Inline listeners and the normal console sink need no new
-// allocation. If an application listener/sink throws, retain the stderr Error.
-LogEventArgs shadowAllocationError{LogLevel::Error,
-    "[Shadow] could not allocate this window's shadow maps; shadow use discarded"};
-
-void reportShadowAllocationFailure() noexcept {
-    try { getLogger().onLog.notify(shadowAllocationError); }
-    catch (...) { std::fputs("[ERROR] [Shadow] shadow use discarded (allocation failure)\n", stderr); } // log-check: allow (allocation-free fallback)
-}
-
-template<class Handle, class Desc, class Make, class State>
-bool makeShadowResource(Handle& handle, const Desc& desc, Make make, State state) {
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    const bool gl = sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3;
-    GLPendingErrors pending;
-    if (gl) pending = beginGLShadowCreation();
-#endif
-    handle = make(&desc);
-#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
-    const bool nativeOK = !gl || endGLShadowCreation();
-    reportGLPendingErrors(pending);
-    return state(handle) == SG_RESOURCESTATE_VALID && nativeOK && shadowNativeValid(handle);
-#else
-    return state(handle) == SG_RESOURCESTATE_VALID && shadowNativeValid(handle);
-#endif
-}
-} // namespace
-
 bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, size_t& totalBytes) {
     colorBytes = depthBytes = totalBytes = 0;
     if (resolution <= 0) return false;
     const size_t side = static_cast<size_t>(resolution);
-    // Bound (representation): image byte products and their sum must fit size_t. Overflow rejects a generation and is counted in its owner's allocationFailures by ensureShadowStorage.
+    // Bound (representation): image byte products and their sum must fit size_t; overflow rejects the generation with an Error.
     if (side > SIZE_MAX / side) return false;
     const size_t texels = side * side;
     constexpr size_t colorTexelBytes = maxShadowLights * 4; // four R32F layers
@@ -2508,25 +2563,24 @@ bool shadowImageLayout(int resolution, size_t& colorBytes, size_t& depthBytes, s
 
 bool ensureShadowStorage(WindowContext& window, int resolution) {
     auto& sh = window.shadow;
-    auto fail = [&] {
-        sh.count = 0;
-        sh.current = -1;
-        sh.storage.reset();
-        ++sh.allocationFailures;
-        reportShadowAllocationFailure();
-        return false;
-    };
     size_t colorBytes, depthBytes, totalBytes;
     const auto limits = sg_query_limits();
-    // Bound (device): attachment extents and array layers must fit Sokol's device limits. Overflow discards this owner's shadow use, emits an Error and is counted in allocationFailures.
+    // Bound (device): attachment extents and layers must fit device limits; failure rejects the generation with an Error.
     if (!shadowImageLayout(resolution, colorBytes, depthBytes, totalBytes) ||
         resolution > limits.max_image_size_2d || resolution > limits.max_image_size_array ||
-        maxShadowLights > limits.max_image_array_layers) return fail();
+        maxShadowLights > limits.max_image_array_layers) {
+        reportImportError("Shadow", "shadow resolution or layers exceed the device limits");
+        return false;
+    }
     if (sh.storage && resolution <= sh.storage->resolution) return true;
     try {
         auto next = std::shared_ptr<ShadowStorage>(new ShadowStorage, retireShadowStorage);
         next->resolution = resolution;
         next->imageBytes = totalBytes;
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        const bool gl = sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3;
+        if (gl) while (glGetError() != GL_NO_ERROR) {}
+#endif
         sg_image_desc cd = {};
         cd.type = SG_IMAGETYPE_ARRAY;
         cd.num_slices = maxShadowLights;
@@ -2535,39 +2589,78 @@ bool ensureShadowStorage(WindowContext& window, int resolution) {
         cd.pixel_format = SG_PIXELFORMAT_R32F;
         cd.sample_count = 1;
         cd.label = "tc_shadow_color_array";
-        if (!makeShadowResource(next->colorImage, cd, static_cast<sg_image (*)(const sg_image_desc*)>(sg_make_image), sg_query_image_state)) return fail();
+        next->colorImage = sg_make_image(&cd);
+        if (sg_query_image_state(next->colorImage) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         for (int slot = 0; slot < maxShadowLights; ++slot) {
             sg_view_desc vd = {};
             vd.color_attachment.image = next->colorImage;
             vd.color_attachment.slice = slot;
-            if (!makeShadowResource(next->colorAttachments[slot], vd, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+            next->colorAttachments[slot] = sg_make_view(&vd);
+            if (sg_query_view_state(next->colorAttachments[slot]) != SG_RESOURCESTATE_VALID) {
+                reportImportError("Shadow", "could not create shadow resource");
+                return false;
+            }
         }
         sg_view_desc tv = {};
         tv.texture.image = next->colorImage;
-        if (!makeShadowResource(next->colorTexture, tv, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        next->colorTexture = sg_make_view(&tv);
+        if (sg_query_view_state(next->colorTexture) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_image_desc dd = {};
         dd.usage.depth_stencil_attachment = true;
         dd.width = dd.height = resolution;
         dd.pixel_format = SG_PIXELFORMAT_DEPTH;
         dd.sample_count = 1;
         dd.label = "tc_shadow_depth";
-        if (!makeShadowResource(next->depthImage, dd, static_cast<sg_image (*)(const sg_image_desc*)>(sg_make_image), sg_query_image_state)) return fail();
+        next->depthImage = sg_make_image(&dd);
+        if (sg_query_image_state(next->depthImage) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_view_desc dv = {};
         dv.depth_stencil_attachment.image = next->depthImage;
-        if (!makeShadowResource(next->depthAttachment, dv, static_cast<sg_view (*)(const sg_view_desc*)>(sg_make_view), sg_query_view_state)) return fail();
+        next->depthAttachment = sg_make_view(&dv);
+        if (sg_query_view_state(next->depthAttachment) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
         sg_sampler_desc sd = {};
         sd.min_filter = sd.mag_filter = SG_FILTER_NEAREST;
         sd.wrap_u = sd.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         sd.label = "tc_shadow_smp";
-        if (!makeShadowResource(next->sampler, sd, static_cast<sg_sampler (*)(const sg_sampler_desc*)>(sg_make_sampler), sg_query_sampler_state)) return fail();
+        next->sampler = sg_make_sampler(&sd);
+        if (sg_query_sampler_state(next->sampler) != SG_RESOURCESTATE_VALID) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        // Bound (device): Sokol's GL create path can report VALID after a failed native allocation; reject this shadow replacement.
+        if (gl && glGetError() != GL_NO_ERROR) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#elif defined(SOKOL_METAL)
+        // Bound (device): Sokol's Metal create path can report VALID for a nil native texture view; reject this shadow replacement.
+        if (!shadowTextureViewCreated(next->colorTexture)) {
+            reportImportError("Shadow", "could not create shadow resource");
+            return false;
+        }
+#endif
         // Publish only a complete generation. New storage contains no old slots;
         // previously queued draws retain both the old maps and copied matrices.
         sh.storage = std::move(next);
         sh.count = 0;
         sh.current = -1;
         return true;
-    } catch (const std::bad_alloc&) { return fail(); }
-      catch (const std::length_error&) { return fail(); }
+    } catch (const std::bad_alloc&) {
+        reportImportError("Shadow", "could not allocate shadow storage");
+        return false;
+    }
 }
 
 void consumeShadowSlot(int slot) {
@@ -2599,14 +2692,6 @@ void consumeShadowSlot(int slot) {
             target.flushLayers();
             target.endPass();
         }
-    } catch (const std::bad_alloc&) {
-        failure = std::current_exception();
-        currentTarget().failRecording("shadow consumer replay allocation failed");
-        currentTarget().endPass();
-    } catch (const std::length_error&) {
-        failure = std::current_exception();
-        currentTarget().failRecording("shadow consumer replay size cannot be represented");
-        currentTarget().endPass();
     } catch (...) {
         failure = std::current_exception();
         currentTarget().endPass();
@@ -2721,6 +2806,7 @@ PipelineKey PipelineKey::immediate(ImmediateSelection selection) {
     return key;
 }
 PipelineGeneration::~PipelineGeneration() {
+    if (frameworkShutdown()) return;
     for (const auto& entry : cache) deferGpuDestroy(entry.second);
 }
 bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const char* what) {
@@ -2734,6 +2820,7 @@ bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const ch
     return !contextFailed;
 }
 void RenderTargetResources::release() {
+    if (frameworkShutdown() || !sg_isvalid()) return;
     for (const auto& entry : cache) {
         if (entry.second.id) sgl_destroy_pipeline(entry.second);
 #ifndef NDEBUG
@@ -2742,7 +2829,7 @@ void RenderTargetResources::release() {
     }
     cache.clear(); selections.clear(); rawCache.reset();
     // sokol_gl owns its mandatory default context until shutdown. A resized
-    // main window switches to a dedicated context without trying to destroy it.
+    // Window may switch to a dedicated context without destroying that default.
     if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
     context = {}; contextFailed = false;
 }
@@ -2808,6 +2895,7 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     return result;
 }
 void retirePipelineProgram(sg_shader shader) {
+    if (frameworkShutdown()) return;
     auto erase = [&](RenderTargetResources& bundle) {
         if (!bundle.rawCache) return;
         auto& cache = bundle.rawCache->cache;
@@ -2831,6 +2919,7 @@ void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format
     for (auto& lease : bucket.leases) if (!lease->leased) lease->release();
 }
 void returnTargetResources(RenderTargetResources& lease) {
+    if (frameworkShutdown()) return;
     lease.leased = false;
     // An invalidated parked generation lives through its activation, then
     // retires immediately. Idle leases never pin obsolete raw caches.
@@ -2860,9 +2949,10 @@ void refreshWindowDrawingSize() {
     // records any geometry, without acquiring another swapchain. A begun
     // frame (including a parked foreign owner) keeps its acquired attachments.
     const bool retainedFrame = target.inPass || target.passStartedThisFrame;
-    const int width = retainedFrame ? target.width : getFramebufferWidth();
-    const int height = retainedFrame ? target.height : getFramebufferHeight();
-    const float scale = pixelPerfectMode() ? 1.0f : getDpiScale();
+    const auto dimensions = windowDimensions(currentWindowContext());
+    const int width = retainedFrame ? target.width : dimensions.fbWidth;
+    const int height = retainedFrame ? target.height : dimensions.fbHeight;
+    const float scale = pixelPerfectMode() ? 1.0f : dimensions.dpiScale;
     const bool extentChanged = target.width != width || target.height != height;
     const auto& vp = target.viewport;
     const bool automaticViewport = target.automaticViewport && vp.active && vp.x == 0 && vp.y == 0 &&
@@ -2903,13 +2993,10 @@ void prepareWindowTarget() {
     if (window.targetsClosed) return;
     auto& target = window.swapchainTarget;
     auto& resources = target.resources();
-    const auto native = window.isMain ? sglue_environment().defaults : sg_environment_defaults{};
-    const auto format = window.isMain
-        ? SwapchainTargetFormat{native.color_format, native.sample_count}
-        : swapchainTargetFormat(window);
-    const int width = window.isMain ? sapp_width() : window.fbWidth;
-    const int height = window.isMain ? sapp_height() : window.fbHeight;
-    const auto depth = window.isMain ? native.depth_format : target.depthFormat;
+    const auto format = swapchainTargetFormat(window);
+    const int width = window.fbWidth;
+    const int height = window.fbHeight;
+    const auto depth = target.depthFormat;
     const bool changed = resources.width && (resources.width != width || resources.height != height ||
         resources.color != format.colorFormat || resources.samples != format.sampleCount || resources.depth != depth);
     if (changed && hasRecordedWork(target)) {
@@ -2945,8 +3032,8 @@ void prepareWindowTarget() {
     }
 }
 bool rebuildTargetResources() {
-    std::vector<WindowContext*> windows{&mainWindowContext()};
-    for (auto* window : openWindows()) if (&window->context() != &mainWindowContext()) windows.push_back(&window->context());
+    std::vector<WindowContext*> windows{&nonWindowContext()};
+    for (auto* window : openWindows()) windows.push_back(&window->context());
     std::erase_if(windows, [](const WindowContext* window) { return window->targetsClosed; });
     // Foreign submissions preserve CPU recordings. Re-evaluate all immediate
     // and raw queues on every retry before destroying any context.
@@ -2967,13 +3054,7 @@ bool rebuildTargetResources() {
         entry.second.generation.reset(); entry.second.allocationFailed = false;
         for (auto& lease : entry.second.leases) { assert(!lease->leased); discard(*lease); }
     }
-    sgl_desc_t desc = {};
-    desc.logger.func = sokolLog;
-    // Bound (retain existing pool budget; growth belongs to #863's sgl lane): 256 slots; pipeline creation fails on overflow and affected draws are skipped with a log.
-    desc.pipeline_pool_size = 256;
-    desc.context_pool_size = 64;   // same reason as in the setup path above
-    desc.max_vertices = sglBudget().maxVertices; desc.max_commands = sglBudget().maxCommands;
-    desc.allocator.alloc_fn = smemtrack_alloc; desc.allocator.free_fn = smemtrack_free;
+    auto desc = sglSetupDescriptor();
     sgl_setup(&desc);
     sgl_tc_context_target_owned(sgl_default_context());
     for (auto* window : windows) {
@@ -3112,23 +3193,10 @@ bool& touchAsMouse() {
     return enabled;
 }
 
-TouchMouseMapper& touchMouseMapper() {
-    static TouchMouseMapper mapper;
-    return mapper;
-}
-
 // Whether the setup callback ran in the current launch (#394).
 bool& appSetupCalled() {
     static bool called = false;
     return called;
-}
-
-// Set by a native backend that ends the process itself (_exit) right after
-// cleanup, e.g. a macOS session end while a callback is paused: cleanup must
-// then not leave through std::exit (atexit handlers, static destructors).
-bool& sessionEndExit() {
-    static bool active = false;
-    return active;
 }
 
 DataPathState& dataPathState() {
@@ -3351,16 +3419,8 @@ std::atomic<size_t>& fboCount() {
     return count;
 }
 
-namespace {
-WindowContext* currentWindowCtxStorage = nullptr;
-} // anonymous namespace
-
-WindowContext*& currentWindowCtx() {
-    return currentWindowCtxStorage;
-}
-
 WindowContext& currentWindowContext() {
-    return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
+    return currentWindowCtx() ? *currentWindowCtx() : nonWindowContext();
 }
 
 void parkWindowPass() {
@@ -3370,12 +3430,11 @@ void parkWindowPass() {
     if (outgoing.currentTarget->inPass) {
         try { outgoing.currentTarget->flushLayers(); }
         catch (const std::bad_alloc&) {
-            outgoing.currentTarget->failRecording("parked replay allocation failed");
+            reportImportError("RenderTarget", "parked replay allocation failed");
         } catch (const std::length_error&) {
-            outgoing.currentTarget->failRecording("parked replay size cannot be represented");
+            reportImportError("RenderTarget", "parked replay size cannot be represented");
         }
-        // Even a failed recording must release the native encoder before a
-        // foreign window can render or enter its noexcept teardown.
+        // Release the encoder before a foreign window renders or tears down.
         outgoing.currentTarget->endPass();
     }
 }
@@ -3405,13 +3464,14 @@ CapturePrefixScope::CapturePrefixScope(CaptureSource source)
     submitCapturePrefix();
 }
 CapturePrefixScope::~CapturePrefixScope() noexcept {
+    if (frameworkShutdown()) return;
     if (!resume_ || &currentWindowContext() != window_ || window_->currentTarget != target_ || target_->activation != token_) return;
     try { ensureCurrentPass(); }
     catch (...) { reportTeardownFailure("capture target resumption"); }
 }
 
 void restoreWindowContext(WindowContext* previous) {
-    auto* incoming = previous ? previous : &mainWindowContext();
+    auto* incoming = previous ? previous : &nonWindowContext();
     if (&currentWindowContext() != incoming && sg_isvalid()) parkWindowPass();
     currentWindowCtx() = previous;
     // A closed owner can remain selected during exit/cleanup. Restoring that
@@ -3427,16 +3487,14 @@ void restoreWindowContext(WindowContext* previous) {
     if (sg_isvalid() && context.id) {
         sgl_tc_context_target_owned(context);
         sgl_set_context(context);
+    } else if (sg_isvalid()) {
+        // Zero is an invalid SGL handle (the default has its own nonzero id).
+        // Immediate colour, transform, pipeline and vertex calls then no-op
+        // instead of mutating the previously selected Window's recording.
+        sgl_set_context({0});
     }
 }
 
-// Window::applyPendingApp() adds to it and the platform teardown (host code)
-// removes from it. Leaked like the ones above: ~Window() calls the teardown, and a
-// Window an app keeps in a global is destroyed at exit.
-std::unordered_set<const App*>& attachedApps() {
-    static auto* apps = new std::unordered_set<const App*>();
-    return *apps;
-}
 
 } // namespace internal
 
@@ -3586,9 +3644,9 @@ SaveResult ScreenRecorder::State::startSource(Source src, const Fbo* fbo, int w,
     //   reads the window's framebuffer at its own size (see the captureWindow
     //   backends). Fbo-source recording is per-window everywhere (it reads the
     //   passed Fbo, not the swapchain).
-    afterFrameListener_ = events().afterFrame.listen([state = shared_from_this()]() { state->onAfterFrame(); });
+    afterFrameListener_ = internal::currentWindowContext().coreEvents->afterFrame.listen([state = shared_from_this()]() { state->onAfterFrame(); });
     // App::exit() may clear application subscriptions during this notification.
-    exitListener_ = internal::FrameworkEventAccess::listen(events().exit,
+    exitListener_ = internal::FrameworkEventAccess::listen(internal::currentWindowContext().coreEvents->exit,
         [state = shared_from_this()]() { state->stop(); }, EventPriority::AfterApp);
     return SaveResult::success();
 }
@@ -3724,45 +3782,27 @@ void ScreenRecorder::State::onAfterFrame() {
 namespace trussc {
 void setWindowPosition(int x, int y) {
     if (auto* w = internal::currentWindow()) internal::WindowRequestAccess::setPosition(*w, x, y, internal::WindowGeometryCall::GlobalPosition);
-    else {
-        if constexpr (!internal::windowSizeIsScreenControlled()) {
-            if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalPosition)) return;
-        }
-        internal::setMainWindowPosition(x, y);
-    }
 }
 IVec2 getWindowPosition() {
     if (auto* w = internal::currentWindow()) return w->getPosition();
-    return internal::mainWindowPosition();
+    return {};
 }
 }
 
 namespace trussc {
 void setWindowSizeLogical(int width, int height) {
-    if constexpr (internal::windowSizeIsScreenControlled()) {
-        internal::setMainWindowSizeLogical(width, height);
-        return;
-    }
-    if (internal::routeSetWindowSizeToWindow(width, height)) return;
-    if (internal::ignoreFullscreenGeometry(internal::mainWindowFullscreenPhase(), internal::WindowGeometryCall::GlobalLogicalSize)) return;
-    if (width > 0 && height > 0) internal::setMainWindowSizeLogical(width, height);
+    internal::routeSetWindowSizeToWindow(width, height, internal::WindowGeometryCall::GlobalLogicalSize);
 }
 }
 
 namespace trussc::internal {
-WindowFullscreenPhase mainWindowFullscreenPhase() {
-#if defined(__APPLE__) && TARGET_OS_OSX
-    return macWindowFullscreenPhase();
-#else
-    return sapp_is_fullscreen() ? WindowFullscreenPhase::Fullscreen : WindowFullscreenPhase::Windowed;
-#endif
+WindowFullscreenPhase singleWindowFullscreenPhase() {
+    if constexpr (supportsSecondaryWindows()) return WindowFullscreenPhase::Windowed;
+    else return sapp_is_fullscreen() ? WindowFullscreenPhase::Fullscreen : WindowFullscreenPhase::Windowed;
 }
-void setMainFullscreen(bool full) {
-#if defined(__APPLE__) && TARGET_OS_OSX
-    setMacWindowFullscreen(0, full);
-#else
-    if (full != sapp_is_fullscreen()) sapp_toggle_fullscreen();
-#endif
+void setSingleWindowFullscreen(bool full) {
+    if constexpr (!supportsSecondaryWindows())
+        if (full != sapp_is_fullscreen()) sapp_toggle_fullscreen();
 }
 bool ignoreFullscreenGeometry(WindowFullscreenPhase phase, WindowGeometryCall call, const std::string* title) {
     const char* reason = windowGeometryIgnoredReason(phase);

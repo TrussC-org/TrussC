@@ -3,6 +3,7 @@
 #define SOKOL_WINDOW_NATIVE_INCLUDED
 #include <stdint.h>
 #include "sokol_window_fullscreen.h"
+#include "sokol_window_creation.h"
 
 struct _sapp_tc_timing_t {
     double last, ema, smooth_dt, dt;
@@ -16,6 +17,9 @@ struct _sapp_tc_native_window_t {
     uint64_t frame_count;
     bool is_main; // process quit/session authority only
     bool ready, in_tick, close_requested;
+    bool constructing; // tentative binding/show cannot tick or destroy this record
+    bool close_recorded; // physical close observation, separate from a queued request
+    uint64_t close_recorded_frame;
     bool skip_present, draw_while_hidden;
     bool trust_hidden_signals;
     bool iconified, occluded;
@@ -54,6 +58,8 @@ static inline bool _sapp_tc_native_hidden(const _sapp_tc_native_window_t* w) {
 
 struct _sapp_tc_native_desc {
     sapp_window_desc window;
+    // Install client readiness before publication/show can synchronously deliver events.
+    bool (*events_enabled)();
     int swap_interval;
     bool fullscreen;
     bool draw_while_hidden;
@@ -68,6 +74,8 @@ struct _sapp_tc_native_desc {
 // passed to the OS; secondary descriptors keep the existing 640 x 480 fallback.
 static inline sapp_window_desc _sapp_tc_normalize_main_window(const sapp_desc* d) {
     sapp_window_desc window = {};
+    window.bind_cb = d->_tc_bind_cb;
+    window.user_data = d->_tc_bind_user;
     window.x = window.y = -1;
     window.width = d->width;
     window.height = d->height;

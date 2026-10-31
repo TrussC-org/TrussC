@@ -150,51 +150,57 @@ namespace internal {
 // Headless deliberately dispatches only the App virtuals, not the node tree
 // (children, mods and timers have a separate lifecycle decision).
 inline std::vector<EventListener> registerHeadlessAppEventListeners(
-        const std::shared_ptr<App>& app) {
+        const std::shared_ptr<std::weak_ptr<App>>& target) {
     std::vector<EventListener> listeners;
     auto warned = std::make_shared<std::atomic<bool>>(false);
     // A worker may retain a notify snapshot through shutdown. It must not
     // retain the App and eventually run its destructor on that worker.
-    std::weak_ptr<App> target = app;
-    auto bind = [&](auto& event, auto callback) {
+    auto bind = [&](auto& event, auto callback, bool exiting = false) {
         listeners.push_back(FrameworkEventAccess::listen(event,
-            [target, callback, warned] {
+            [target, callback, warned, exiting] {
                 if (!isMainThread()) {
                     if (!warned->exchange(true))
                         logWarning("App") << "App events must be delivered on the main thread";
                     return;
                 }
-                if (auto owner = target.lock()) callback(*owner);
+                if (auto owner = target->lock()) {
+                    auto lifetime = appOwner(*owner);
+                    if (!lifetime || (!exiting && !lifetime->token->load())) return;
+                    AppOwnerScope scope(lifetime);
+                    callback(*owner);
+                }
             }, EventPriority::App));
     };
-    bind(events().update, [](App& target) { target.update(); });
-    bind(events().exit, [](App& target) { target.exit(); });
+    bind(nonWindowContext().coreEvents->update, [](App& target) { target.update(); });
+    bind(nonWindowContext().coreEvents->exit, [](App& target) { deliverAppExit(target); }, true);
     return listeners;
 }
+
+struct HeadlessUpdateState {
+    double accumulator = 0.0;
+    bool updateStepsDropWarned = false; // Main-thread-only warning episode
+};
 
 // One pass, with elapsed time supplied by the runner (or a deterministic
 // test). A cancellable request is dispatched only after all owed steps.
 inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
-                                  double& accumulator, double elapsed,
+                                  HeadlessUpdateState& state, double elapsed,
                                   double targetDelta) {
+    RuntimeActivityScope activity;
     FixedStepAdvance adv = advanceFixedStep(
-        accumulator, elapsed, targetDelta, getMaxUpdateSteps());
-    if (adv.droppedTime > 0.0) {
-        warnUpdateStepsDropped(FixedStepLoop::Headless,
-                               adv.droppedTime, targetDelta, adv.steps);
-    }
+        state.accumulator, elapsed, targetDelta, getMaxUpdateSteps());
+    warnUpdateStepsDropped(FixedStepLoop::Headless, state.updateStepsDropWarned,
+                           adv.droppedTime, targetDelta, adv.steps);
     int ran = 0;
     for (; ran < adv.steps; ++ran) {
         headless::pollExitSignal();
         if (!headless::running || app.isExitRequested()) break;
         ctx.updateDeltaTime = targetDelta;
         EntryStackGuard guard(AppEntry::Update);
-        crashFrame(headless::frameCount);
-        CrashPhaseScope updatePhase("update");
         // Services such as Box2d guard against stepping twice in one update.
         // Match the windowed loop's counter before delivering this step.
         ++ctx.updateCount;
-        events().update.notify();
+        ctx.coreEvents->update.notify();
         headless::frameCount++;
     }
     // As in the windowed loop, steps cut short do not count toward the rate.
@@ -204,20 +210,8 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
     headless::pollExitSignal();
     if (headless::running && !app.isExitRequested()
             && headless::quitRequested.exchange(false)) {
-        EntryStackGuard guard(AppEntry::Event);
-        setExitBlockReason("");
-        ExitRequestEventArgs args;
-        events().exitRequested.notify(args);
+        if (dispatchExitRequested()) headless::running = false;
         headless::pollExitSignal();
-        if (args.cancel) {
-            // A listener may also issue an uncancellable exit.
-            if (headless::running) {
-                setExitBlockReason(args.reason);
-                clearExitReason();
-            }
-        } else {
-            headless::running = false;
-        }
     }
 }
 } // namespace internal
@@ -239,8 +233,15 @@ struct HeadlessSettings {
 // ---------------------------------------------------------------------------
 template<typename AppClass>
 int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
-    internal::installCrashHandler();
-    internal::CrashPhaseScope crashPhase("headless");
+    internal::beginRuntimeRun();
+    internal::beginFrameworkLifetime();
+    struct EndFrameworkLifetime {
+        ~EndFrameworkLifetime() {
+            if (auto token = internal::appRunToken()) token->store(false);
+            headless::active = false;
+            internal::endFrameworkLifetime();
+        }
+    } endFrameworkLifetime;
 
     // Set target FPS
     headless::targetFps = settings.targetFps;
@@ -264,48 +265,75 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::HeadlessConsoleUtf8 consoleUtf8;
 #endif
 
+    struct StopHeadlessServices {
+        ~StopHeadlessServices() {
+            internal::shutdownRuntime();
+            internal::TeardownSteps steps;
+            steps.run("headless resource cancellation", [] { internal::cancelResourceBackends(); });
+#ifndef __EMSCRIPTEN__
+            steps.run("headless MCP stop", [] { mcp::stopHttpServer(); });
+#endif
+            steps.run("headless console stop", [] { console::stop(); });
+            steps.run("headless resource completion", [] { internal::waitForResourceLoadsAtAppExit(); });
+        }
+    } stopServices;
+
     // Record the main thread id (this runner owns the app/update loop), so
     // isMainThread() / runOnMainThread() behave the same as in the windowed app.
     getMainThreadId();
-
-    if (auto token = internal::appRunToken()) token->store(false);
-    internal::cancelResourceBackends();
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
 
     // Reset state
     headless::active = true;
     headless::frameCount = 0;
 
-    // Headless apps run in the main window's (GPU-less) context: that is
-    // where getDeltaTime() / getFrameRate() / getFrameElapsedTime() read.
-    auto& ctx = internal::mainWindowContext();
+    // Headless callbacks use the non-window context without registering a Window.
+    auto& ctx = internal::nonWindowContext();
+    auto* previousContext = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &ctx;
+    struct RestoreContext {
+        internal::WindowContext* previous;
+        ~RestoreContext() { internal::currentWindowCtx() = previous; }
+    } restoreContext{previousContext};
     ctx.drawCount = 0;
+    ctx.updateCount = 0;
+    ctx.resourceTickCount = 0;
     internal::sampleFrameTime(ctx);
 
-    // Create app instance. Owned by a shared_ptr, as runApp() owns the
-    // windowed App: it is the main window's scene-graph root (getRootNode(),
-    // held weakly) while it runs, and weak_from_this() works, so setup() can
-    // addChild().
-    auto app = std::make_shared<AppClass>();
+    // Construct the virtual attachment with the same owner token as a Window
+    // attachment. Its shared ownership initializes weak_from_this(); headless
+    // execution still skips scene-tree update, draw and cleanup.
+    auto appSlot = std::make_shared<std::weak_ptr<App>>();
+    auto appListeners = internal::registerHeadlessAppEventListeners(appSlot);
+    std::shared_ptr<AppClass> app;
+    app = internal::makeConstructedAppAt<AppClass>(&ctx);
+    internal::recordHeadlessAttachment(app, ctx);
+    struct EndAttachment {
+        ~EndAttachment() { internal::shutdownRuntime(); }
+    } endAttachment;
     ctx.rootNode = app;
-    auto appListeners = internal::registerHeadlessAppEventListeners(app);
+    *appSlot = app;
+    internal::appOwner(*app)->notifyWindowExit = true;
 
     // setup() once, then the framework's post-setup hook, as the windowed
     // App gets them on its first tree update: the App's audioOut() /
     // audioIn() are subscribed only once setup() has returned (#426).
-    internal::setupNodeOnce(*app);
+    {
+        internal::RuntimeActivityScope activity;
+        internal::AppOwnerScope owner(internal::appOwner(*app));
+        internal::setupNodeOnce(*app);
+    }
 
     // Main loop: fixed timestep at the nominal 1/fps (getDeltaTime() reports
     // exactly that), at most getMaxUpdateSteps() steps per pass (the main
     // loop's cap per frame, setMaxUpdateSteps; default 10). After a stall
     // (sleep/resume) or when update() is slower than its rate, the excess
-    // time is dropped with a one-time warning instead of replayed, and
+    // time is dropped with one warning per stall instead of replayed, and
     // runOnMainThread work is drained between bounded passes (#228). Between
     // passes the loop sleeps until the next step is due, at most 1 ms, on a
     // precise timer (HeadlessSleeper), so a fast rate stays well under the
     // cap per pass.
     const double targetDelta = 1.0 / headless::targetFps;
-    double accumulator = 0.0;
+    internal::HeadlessUpdateState updateState;
     auto lastTime = std::chrono::steady_clock::now();
     internal::HeadlessSleeper sleeper;
 
@@ -316,52 +344,30 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
         double elapsed = std::chrono::duration<double>(now - lastTime).count();
         lastTime = now;
 
-        auto resourceLoads = internal::takeResourceLoadBatch();
         internal::sampleFrameTime(ctx);
-
-        // Run work marshalled from worker threads (runOnMainThread, Event
-        // Deliver::Main) on the main thread, mirroring the windowed _frame_cb.
-        // Each app-code call here is an entry point, as in the windowed loop
-        // (#349): the stacks go back to their depth before it.
         {
-            internal::EntryStackGuard guard(internal::AppEntry::Prelude);
-            internal::deliverResourceLoadBatch(std::move(resourceLoads));
-            internal::drainMainThreadQueue();
-            internal::pumpAudioDiagnostics();
-#ifndef __EMSCRIPTEN__
-            console::internal::processQueue();
-            mcp::processHttpQueue();
-#endif
+            internal::HostTurnScope turn;
+            internal::runHeadlessUpdatePass(*app, ctx, updateState, elapsed, targetDelta);
         }
-
-        internal::runHeadlessUpdatePass(*app, ctx, accumulator, elapsed, targetDelta);
         if (!headless::running || app->isExitRequested()) break;
 
         // Sleep until the next step is due (at most 1 ms), counted from the
         // pass start: the steps above already took part of that time.
         const double spent = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - now).count();
-        sleeper.sleep(internal::headlessSleepTime(accumulator, targetDelta, spent));
+        sleeper.sleep(internal::headlessSleepTime(updateState.accumulator, targetDelta, spent));
     }
 
-    if (auto token = internal::appRunToken()) token->store(false);
+    internal::shutdownRuntime();
     internal::cancelResourceBackends();
-
-    // Finish MCP workers before their app-owned handlers are destroyed.
 #ifndef __EMSCRIPTEN__
     mcp::stopHttpServer();
 #endif
     console::stop();
 
-    // App exit at 100, then protected framework teardown at AfterApp.
-    {
-        internal::EntryStackGuard guard(internal::AppEntry::Exit);
-        events().exit.notify();
-        // The device keeps running; finish any callback before cleanup().
-        internal::detachAppAudio(*app);
-        app->cleanup();
-    }
-
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__EMSCRIPTEN__)
+    internal::shutdownKeepScreenOn();
+#endif
     internal::waitForResourceLoadsAtAppExit();
     appListeners.clear();
     ctx.rootNode.reset();   // no longer the running App

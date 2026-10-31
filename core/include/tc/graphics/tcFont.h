@@ -363,6 +363,7 @@ private:
 public:
 
     void cleanup() {
+        if (internal::frameworkShutdown()) return;
         // Only release GPU resources if sokol is still valid
         // (may have already shut down at program exit). Destruction is
         // deferred: cleanup() also runs mid-frame when a font is re-loaded
@@ -474,11 +475,6 @@ public:
 
         const auto freeShape = [&](stbtt_vertex* shape) { stbtt_FreeShape(&fontInfo_, shape); };
         std::unique_ptr<stbtt_vertex, decltype(freeShape)> shape(vertices, freeShape);
-        // Bound (security): each outline vertex emits at most 17 path points, with vector growth and subpath bookkeeping. Overflow rejects the whole outline and is counted.
-        if (size_t(numVerts) > fontScratchRemaining() / (51 * sizeof(Vec3) + 4 * sizeof(size_t))) {
-            internal::reportImportError("Font", "glyph path exceeds outline workspace");
-            return Path();
-        }
         try {
         // stbtt returns vertex coords in font design units, Y-up.
         // Multiply by emScale to get em units (1.0 = em); negate Y for screen Y-down.
@@ -880,8 +876,7 @@ private:
             return false;
         }
         const size_t bitmapBytes = size_t(glyphWidth) * size_t(glyphHeight);
-        FontScratchScope scratch(fontData_.size(), bitmapBytes);
-        if (scratch.failed()) { internal::reportImportError("Font", "glyph bitmap exceeds raster workspace"); return false; }
+        FontScratchScope scratch(fontData_.size());
         std::vector<uint8_t> glyphBitmap;
         try { glyphBitmap.resize(bitmapBytes, 0); }
         catch (const std::bad_alloc&) { internal::reportImportError("Font", "cannot allocate glyph bitmap"); return false; }
@@ -1217,7 +1212,7 @@ class Font {
         std::shared_ptr<internal::FontAtlasManager> candidate;
         float dpi = 1;
         int size = 0, limit = 4096;
-        bool preflightFailure = false, unsupportedUrl = false, urlTimeout = false;
+        bool unsupportedUrl = false, urlTimeout = false;
         bool cached = false;
         size_t retainedBytes() const noexcept override {
             return candidate && !cached ? candidate->preparedResourceBytes() : 0;
@@ -1242,19 +1237,19 @@ public:
     virtual ~Font() { cancelAsync(); }
 
     // Copies share the committed atlas, start idle and have empty listeners.
-    // Assignments keep the destination listeners. Moving cancels both runs.
+    // Copying, assigning or moving a loading resource is unsupported; the destination is not loading.
     Font(const Font& other) { copyCommitted(other); }
     Font& operator=(const Font& other) {
-        if (this != &other) { cancelAsync(); copyCommitted(other); }
+        cancelAsync();
+        if (this != &other) copyCommitted(other);
         return *this;
     }
     Font(Font&& other) noexcept {
-        other.cancelAsync(); moveCommitted(other);
+        moveCommitted(other);
     }
     Font& operator=(Font&& other) noexcept {
-        if (this != &other) {
-            cancelAsync(); other.cancelAsync(); moveCommitted(other);
-        }
+        cancelAsync();
+        if (this != &other) moveCommitted(other);
         return *this;
     }
 
@@ -1362,12 +1357,14 @@ private:
         internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
     }
 
+    static float loadDpiScale();
+
 public:
     LoadResult load(const fs::path& nameOrPath, int size, int faceIndex = 0) {
         cancelAsync();
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
-        dpiScale_ = getDpiScale();
+        dpiScale_ = loadDpiScale();
         int physicalSize = (int)(size * dpiScale_ + 0.5f);
         logicalSize_ = size;
 
@@ -1443,11 +1440,6 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
-    // Web CMake propagates exception support. With custom app flags disabling
-    // it, recovery from allocation failure is guaranteed only for TrussC's
-    // out-of-line host code. Inline helpers from headers may be compiled into the
-    // application without exception support; allocation failure inside them is a
-    // known limitation.
     void loadAsync(const fs::path& nameOrPath, int size, int faceIndex = 0);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }
