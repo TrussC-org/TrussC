@@ -8,13 +8,16 @@
 
 #ifdef TC_ADMISSION_CAPTURE_PROBE
 extern "C" void* __real_malloc(size_t);
+extern "C" unsigned char* stbi_write_png_to_mem(const unsigned char*, int, int, int, int, int*);
 #endif
 // This test owns its binary: interposition must not affect other harnesses.
 namespace {
 thread_local bool failNextAllocation = false;
 thread_local int failAllocationAfter = -1;
 #ifdef TC_ADMISSION_CAPTURE_PROBE
-thread_local int failEncoderMallocAfter = -1;
+thread_local size_t encoderMallocSize = 0;
+thread_local int encoderMallocMatches = 0;
+thread_local bool failEncoderMalloc = false;
 std::atomic<bool> failParsingOnce{false};
 std::atomic<size_t> serverBytesRead{0};
 std::atomic<bool> countServerReads{false};
@@ -51,9 +54,12 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 #ifdef TC_ADMISSION_CAPTURE_PROBE
 #include <GL/gl.h>
 extern "C" void* __wrap_malloc(size_t size) {
-    if (failEncoderMallocAfter >= 0 && failEncoderMallocAfter-- == 0) {
-        failEncoderMallocAfter = -1;
-        return nullptr;
+    if (encoderMallocSize != 0 && size == encoderMallocSize) {
+        ++encoderMallocMatches;
+        if (failEncoderMalloc) {
+            failEncoderMalloc = false;
+            return nullptr;
+        }
     }
     return __real_malloc(size);
 }
@@ -226,20 +232,40 @@ TC_CORE_TEST_MAIN() {
         check("partition retry resolves all requests and releases producers", resolved && lifetime.expired());
     }
 #ifdef TC_ADMISSION_CAPTURE_PROBE
-    // Select inside the handler: dispatch itself must retain a parsed request id.
-    // malloc indices: filtered pixels, line storage, compressor hash, final PNG.
-    // Compressor-internal failures are an upstream limitation, so skip index 2.
-    for (int allocation : {0, 1, 3, 4}) {
-        mcp::tool("allocation_png", "encoder malloc failure").bind([allocation]() -> json {
-            Pixels pixels; pixels.allocate(64, 64, 4);
-            std::memset(pixels.getData(), 127, pixels.getTotalBytes());
-            if (allocation == 4) failNextAllocation = true; // C++ output-vector copy, after the C encoder returns
-            else failEncoderMallocAfter = allocation;
-            auto image = mcp::internal::pixelsToImageJson(pixels, "png", 0, 90);
-            failEncoderMallocAfter = -1;
-            return image;
+    // Calibrate the final buffer size with the same input/settings. A malloc
+    // index is unstable: optimization can turn compressor realloc(NULL) into malloc.
+    Pixels encoderPixels; encoderPixels.allocate(64, 64, 4);
+    std::memset(encoderPixels.getData(), 127, encoderPixels.getTotalBytes());
+    int pngSize = 0;
+    auto* encoded = stbi_write_png_to_mem(encoderPixels.getData(), 0, 64, 64, 4, &pngSize);
+    check("PNG allocation probe obtains final buffer size", encoded && pngSize > 0);
+    std::free(encoded);
+    if (!encoded || pngSize <= 0) return 1;
+    // Filtered pixels, line storage, final PNG; zero selects the C++ output copy.
+    for (size_t allocationSize : {size_t((64 * 4 + 1) * 64), size_t(64 * 4), size_t(pngSize), size_t(0)}) {
+        if (allocationSize != 0) {
+            encoderMallocSize = allocationSize;
+            encoderMallocMatches = 0;
+            (void)mcp::internal::pixelsToImageJson(encoderPixels, "png", 0, 90);
+            encoderMallocSize = 0;
+            // Refuse an ambiguous predicate rather than failing compressor growth.
+            check("PNG size predicate uniquely identifies its allocation", encoderMallocMatches == 1);
+            if (encoderMallocMatches != 1) return 1;
+        }
+        // Select inside the handler: dispatch must retain a parsed request id.
+        mcp::tool("allocation_png", "encoder malloc failure").bind([allocationSize, &encoderPixels]() -> json {
+            encoderMallocMatches = 0;
+            if (allocationSize == 0) failNextAllocation = true;
+            else {
+                encoderMallocSize = allocationSize;
+                failEncoderMalloc = true;
+            }
+            return mcp::internal::pixelsToImageJson(encoderPixels, "png", 0, 90);
         });
         const auto reply = dispatch(request("allocation_png"));
+        encoderMallocSize = 0;
+        check("PNG allocation failure injection was consumed", allocationSize == 0 ? !failNextAllocation :
+            !failEncoderMalloc && encoderMallocMatches == 1);
         check("PNG encoder allocation failure returns an MCP error with id", reply.at("id") == 19 &&
             reply.contains("error"));
     }
