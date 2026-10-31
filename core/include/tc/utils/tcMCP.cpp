@@ -298,6 +298,7 @@ public:
         bodyLengthKnown_ = !req.has_header("Transfer-Encoding");
         bodyRemaining_ = req.get_header_value_u64("Content-Length");
     }
+    bool headersComplete() const { return bodyConfigured_; }
     bool refused() const { return refused_ || overflow_; }
     bool overflowed() const { return overflow_; }
     void response(const httplib::Request& req) {
@@ -495,7 +496,8 @@ class McpSocketServer final : public httplib::Server {
                     activeIngressStream = &ingress;
                     const bool ok = process_request(ingress, remote, remotePort, local, localPort,
                         close, closed, [&](httplib::Request& req) { ingress.body(req); });
-                    refusalClose = ingress.refused();
+                    // Bound (network input): refusals before header completion close without draining past the framing limits.
+                    refusalClose = ingress.refused() && ingress.headersComplete();
                     refusalRemainder = ingress.refusalRemainder();
                     if (ingress.overflowed()) ingress.write("", 0);
                     closed = closed || ingress.refused();
