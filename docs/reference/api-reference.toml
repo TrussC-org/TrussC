@@ -5490,11 +5490,15 @@ details.ko = '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 EventListener unloadListener;
+MyWorker worker;   // class MyWorker : public Thread
 
 // tcApp.cpp
 void tcApp::setup() {
-    unloadListener = events().hotReloadUnload.listen([] {
-        logNotice() << "this App is about to be replaced";
+    worker.startThread();
+    callEveryAsync(1.0, [] { logNotice() << "tick"; });
+    unloadListener = events().hotReloadUnload.listen([this] {
+        cancelAllAsyncTimers();   // async timers keep running across a reload
+        worker.waitForThread();   // stops the thread and waits for it to end
     });
 }
 '''
@@ -63337,7 +63341,7 @@ details.en = '''
 - App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. An addon that belongs to an App listens on that App's `events()`.
 - It is sent only in a hot reload build (`TC_HOT_RELOAD`), after a successful rebuild and before the old App's `exit()` and `cleanup()`. The old App is still alive at that point. It has no argument and cannot be cancelled. If the rebuild fails, the running App is kept and this event is not sent.
 - The listeners here run first, then the old App's `events().hotReloadUnload`. When the process ends, it is sent once more, only to the listeners here, after every App has ended.
-- Use it to stop threads and other work that the App started itself; hot reload does not stop them for you. Also release what would outlive the App, such as listeners held by singletons or function-local statics. `tcxImGui` and `tcxNodeInspector` already do this for themselves.
+- Stop threads, async timers (`callAfterAsync` / `callEveryAsync`) and other background work that the App started; hot reload does not stop or guard them. Also release what would outlive the App, such as listeners held by singletons or function-local statics. `tcxImGui` and `tcxNodeInspector` already do this for themselves.
 - **Hot reload supports a single window only.** While it is active, TrussC logs a warning each time a second or later window is opened, and the behaviour is not guaranteed.
 - Reload happens on the main thread, at a safe point of the main loop outside any callback, and not during a session end. Hot reload works on macOS, Windows and Linux. On iOS, Android and the web, the app is built without it and this event is not sent.
 '''
@@ -63345,7 +63349,7 @@ details.ja = '''
 - App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。App に属するアドオンは、その App の `events()` で listen してください。
 - ホットリロードのビルド（`TC_HOT_RELOAD`）でだけ届きます。再ビルドが成功したあと、古い App の `exit()` と `cleanup()` より前です。この時点では、古い App はまだ生きています。引数はなく、取り消しもできません。再ビルドに失敗した場合は、動いている App がそのまま残り、このイベントは届きません。
 - ここに登録したリスナーが先に呼ばれ、そのあと古い App の `events().hotReloadUnload` が呼ばれます。プロセスの終了時にも、すべての App が終わったあとで、ここに登録したリスナーにだけもう一度届きます。
-- App が自分で始めたスレッドなどの処理を止めるのに使います。ホットリロードはそれらを止めてくれません。シングルトンや関数内の static 変数が持つリスナーなど、App より長く残るものもここで解放してください。`tcxImGui` と `tcxNodeInspector` は、これを自分で行っています。
+- App が始めたスレッド、非同期タイマー（`callAfterAsync` / `callEveryAsync`）などのバックグラウンド処理は、ここで止めてください。ホットリロードはそれらを止めず、保護もしません。シングルトンや関数内の static 変数が持つリスナーなど、App より長く残るものもここで解放してください。`tcxImGui` と `tcxNodeInspector` は、これを自分で行っています。
 - **ホットリロードが対応しているのは 1 ウィンドウだけです。** 有効な間は、2 つ目以降のウィンドウを開くたびに TrussC が警告を記録し、動作は保証されません。
 - リロードはメインスレッドで、メインループのどのコールバックの中でもない安全なタイミングで行われます。セッション終了の間は行われません。ホットリロードは macOS、Windows、Linux で使えます。iOS、Android、Web ではホットリロードなしでビルドされ、このイベントは届きません。
 '''
@@ -63353,18 +63357,22 @@ details.ko = '''
 - App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다. App에 속하는 애드온은 그 App의 `events()`에서 listen하세요.
 - 핫 리로드 빌드(`TC_HOT_RELOAD`)에서만 전달됩니다. 재빌드가 성공한 뒤, 이전 App의 `exit()`와 `cleanup()`보다 먼저입니다. 이 시점에 이전 App은 아직 살아 있습니다. 인수가 없고 취소할 수도 없습니다. 재빌드에 실패하면 실행 중인 App이 그대로 유지되며 이 이벤트는 전달되지 않습니다.
 - 여기에 등록한 리스너가 먼저 호출되고, 그다음 이전 App의 `events().hotReloadUnload`가 호출됩니다. 프로세스가 종료될 때도 모든 App이 끝난 뒤, 여기에 등록한 리스너에게만 한 번 더 전달됩니다.
-- App이 직접 시작한 스레드 등의 작업을 멈추는 데 사용합니다. 핫 리로드는 이를 멈춰 주지 않습니다. 싱글턴이나 함수 안의 static 변수가 가진 리스너처럼 App보다 오래 남는 것도 여기서 해제하세요. `tcxImGui`와 `tcxNodeInspector`는 이를 스스로 처리합니다.
+- App이 시작한 스레드, 비동기 타이머(`callAfterAsync` / `callEveryAsync`) 등의 백그라운드 작업은 여기서 멈추세요. 핫 리로드는 이를 멈추지도, 보호하지도 않습니다. 싱글턴이나 함수 안의 static 변수가 가진 리스너처럼 App보다 오래 남는 것도 여기서 해제하세요. `tcxImGui`와 `tcxNodeInspector`는 이를 스스로 처리합니다.
 - **핫 리로드는 창 하나만 지원합니다.** 활성화된 동안에는 두 번째 이후의 창을 열 때마다 TrussC가 경고를 기록하며, 동작은 보장되지 않습니다.
 - 리로드는 메인 스레드에서, 메인 루프의 어떤 콜백 안도 아닌 안전한 시점에 이루어지며, 세션 종료 중에는 이루어지지 않습니다. 핫 리로드는 macOS, Windows, Linux에서 사용할 수 있습니다. iOS, Android, 웹에서는 핫 리로드 없이 빌드되며 이 이벤트는 전달되지 않습니다.
 '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 EventListener unloadListener;
+MyWorker worker;   // class MyWorker : public Thread
 
 // tcApp.cpp
 void tcApp::setup() {
-    unloadListener = events().hotReloadUnload.listen([] {
-        logNotice() << "this App is about to be replaced";
+    worker.startThread();
+    callEveryAsync(1.0, [] { logNotice() << "tick"; });
+    unloadListener = events().hotReloadUnload.listen([this] {
+        cancelAllAsyncTimers();   // async timers keep running across a reload
+        worker.waitForThread();   // stops the thread and waits for it to end
     });
 }
 '''
