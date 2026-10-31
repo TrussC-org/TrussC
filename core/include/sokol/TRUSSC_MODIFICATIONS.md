@@ -696,3 +696,11 @@ This patch does not change Metal or Vulkan, or TrussC's API. In this sokol fork
 it adds two `sg_log_item` entries (`WGPU_UNIFORM_BUFFER_GROWN`,
 `WGPU_UNIFORM_UPLOAD_FAILED`). The earlier note that WebGPU is untouched
 applies only to the historical Metal-only patch.
+
+## Screenshot smoke trim (2026-10-31)
+
+Removed the unused `SOKOL_TC_TEST_HOOKS` Metal drawable trace typedef, setter,
+storage, helper and emissions formerly used by captureSubmission. Drawable
+registration, authorization, cancellation, retention and presentation are unchanged.
+The earlier target-completion section records the original addition; this entry
+supersedes its trace-hook description. All other modification records are retained.

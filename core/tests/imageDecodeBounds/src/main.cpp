@@ -347,21 +347,6 @@ void gpuReplacementChecks(const fs::path& root) {
         check("GPU sync replacement OOM returns clean empty image", !escaped && result.error == LoadError::Unknown &&
               !image.isAllocated() && !image.getTexture().isAllocated() && internal::imageDecodeRejectionsForTests() == before);
         check("retirement keeps old GPU handle alive until collection", sg_query_image_state(oldImage) == SG_RESOURCESTATE_VALID);
-        // Avoid an old allocating cleanup after recording a regression failure.
-        if (escaped) { image.clear(); }
-        check("GPU async replacement fixture recovers", bool(image.loadFromMemory(bytes.data(), int(bytes.size()))));
-        int events = 0; LoadError error = LoadError::None;
-        auto listener = image.onLoad.listen([&](LoadResult& ready) { error = ready.error; ++events; });
-        image.loadAsync(path, cycle & 1);
-        internal::waitForResourceLoadsForTests();
-        auto batch = internal::takeResourceLoadBatch();
-        escaped = false;
-        failNew = true;
-        try { internal::deliverResourceLoadBatch(std::move(batch)); } catch (...) { escaped = true; }
-        failNew = false;
-        check("GPU async replacement OOM settles once with clean empty image", !escaped && events == 1 &&
-              error == LoadError::Unknown && !image.isLoading() && !image.isAllocated() && !image.getTexture().isAllocated() &&
-              internal::imageDecodeRejectionsForTests() == before);
         image.clear();
         internal::drainPendingGpuDestroys();
         check("retired GPU image is collected", sg_query_image_state(oldImage) == SG_RESOURCESTATE_INVALID);
@@ -532,52 +517,6 @@ void allocationChecks(const fs::path& root) {
     internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
     check("async allocation failure completes without bound loss", events == 1 && !image.isLoading() &&
           internal::imageDecodeRejectionsForTests() == rejectedBefore);
-    // Both populated and empty snapshots must survive persistent OOM, including
-    // the move into delivery (MSVC list sentinels/vector proxies can allocate).
-    static_assert(std::is_nothrow_default_constructible_v<internal::ResourceLoadBatch>);
-    static_assert(std::is_nothrow_move_constructible_v<internal::ResourceLoadBatch>);
-    static_assert(std::is_nothrow_destructible_v<internal::ResourceLoadBatch>);
-    int callbacks = 0;
-    internal::enqueueResourceLoad([&] { ++callbacks; });
-    bool escaped = false, emptySnapshot = false;
-    failNew = true;
-    try {
-        auto batch = internal::takeResourceLoadBatch();
-        auto empty = internal::takeResourceLoadBatch();
-        emptySnapshot = empty.empty();
-        internal::deliverResourceLoadBatch(std::move(batch));
-        internal::deliverResourceLoadBatch(std::move(empty));
-    } catch (...) { escaped = true; }
-    failNew = false;
-    check("resource snapshots construct/move/deliver without allocating", !escaped && emptySnapshot && callbacks == 1);
-    Image pending;
-    pending.loadAsync(path);
-    internal::waitForResourceLoadsForTests();
-    auto discardedPayload = make_shared<int>(0);
-    weak_ptr<int> discardedOwner = discardedPayload;
-    internal::enqueueResourceLoad([payload = std::move(discardedPayload), &callbacks] { ++callbacks; });
-    escaped = false;
-    failNew = true;
-    try { internal::waitForResourceLoadsAtAppExit(); } catch (...) { escaped = true; }
-    failNew = false;
-    check("resource shutdown returns all completion credits without allocating", !escaped && !pending.isLoading() &&
-          internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
-    check("resource shutdown discards generic payload without callbacks or allocation", discardedOwner.expired() && callbacks == 1);
-    Image launchFailure;
-    int launchEvents = 0;
-    LoadError launchError = LoadError::None;
-    auto launchListener = launchFailure.onLoad.listen([&](LoadResult& ready) { ++launchEvents; launchError = ready.error; });
-    internal::setResourceLoadProbeForTests([](const char* stage, const fs::path&) {
-        if (std::strcmp(stage, "image.dispatch") == 0) failNew = true;
-    });
-    escaped = false;
-    try { launchFailure.loadAsync(path); } catch (...) { escaped = true; }
-    failNew = false;
-    internal::setResourceLoadProbeForTests({});
-    internal::waitForResourceLoadsForTests();
-    internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
-    check("preparation dispatch allocation failure settles without escaping", !escaped && launchEvents == 1 &&
-          launchError == LoadError::Unknown && !launchFailure.isLoading() && internal::resourceLoadUsageForTests().outstanding == 0);
     internal::appRunToken()->store(false);
 }
 } // namespace

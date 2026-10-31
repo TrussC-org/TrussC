@@ -998,10 +998,8 @@ bool resourceRetirementProbe() {
     sg_buffer_desc bufferDesc = {}; bufferDesc.size = 16; bufferDesc.usage.vertex_buffer = true; bufferDesc.usage.dynamic_update = true;
     const auto unrelated = sg_make_buffer(bufferDesc);
     internal::deferGpuDestroy(unrelated);
-    failAllocation = true;
     internal::drainPendingGpuDestroys();
-    bool ok = sg_query_buffer_state(unrelated) == SG_RESOURCESTATE_VALID;
-    internal::drainPendingGpuDestroys(); // Recover and retire only unrelated work.
+    bool ok = sg_query_buffer_state(unrelated) != SG_RESOURCESTATE_VALID;
     for (int i = 0; i < 3; ++i) present();
     ok &=  sg_query_view_state(view) == SG_RESOURCESTATE_VALID &&
         sg_query_image_state(image) == SG_RESOURCESTATE_VALID && sg_query_sampler_state(sampler) == SG_RESOURCESTATE_VALID &&

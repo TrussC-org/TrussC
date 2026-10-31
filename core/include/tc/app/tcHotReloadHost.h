@@ -47,7 +47,6 @@ extern char** environ;
 #include <string>
 #include <vector>
 #include <cstdlib>
-#include "internal/tcHotReloadDiagnostics.h"
 #include "internal/tcWindowsBuildOutput.h"
 #include "internal/tcHotReloadScan.h"
 #include "internal/tcPosixBuildOutput.h"
@@ -526,9 +525,8 @@ struct Host {
         if (rc != 0) {
             logError() << "[HotReload] Build failed (exit code " << rc << ")";
 #ifdef _WIN32
-            if (internal::hasWindowsGuestLinkError(output)) {
-                logWarning() << internal::windowsGuestLinkHint();
-            }
+            logWarning("HotReload") << "The guest can use only TrussC and code linked into the guest; "
+                << "main.cpp functions and host-only libraries are not visible.";
 #endif
             return false;
         }

@@ -1823,7 +1823,7 @@ The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`
 
 Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
 
-OOM recovery is supported in Release builds, or with iterator debugging off (`_ITERATOR_DEBUG_LEVEL=0` on MSVC). With iterator debugging enabled, constructing or moving even an empty `LoadResult` / `SaveResult` string or STL container can allocate a container proxy, so persistent allocation failure can terminate in a `noexcept` operation. Diagnostic text and logging remain best effort.
+Allocation failure in resource-load or screenshot bookkeeping follows the normal exception policy; completion under OOM is not guaranteed. See [Asynchronous resource loading](ASYNC_LOADING.md) for handle lifetime and copy rules.
 
 
 Addons must use `pathToUtf8()` / `utf8ToPath()` for IO or display instead of `path.string()`, and `log << path` for logging; third-party narrow file IO still needs the Windows UTF-8 manifest described above.

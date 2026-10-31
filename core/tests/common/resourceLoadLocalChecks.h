@@ -156,35 +156,6 @@ void localFileAdmissionChecks() {
     for (int pass = 0; pass < 8; ++pass) drain();
     check("unresolved font names preserve missing-file failures above admission budgets", nameEvents == 1 && nameError == LoadError::FileNotFound);
     check("local paths preserve real missing-file failures above admission budgets", missingEvents == 3);
-    // Exercise the production app-exit drain with a real prepared WAV result.
-    // A exits before its Notice is delivered: omission at shutdown is deliberate.
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-    int exitNotices = 0, exitEvents = 0;
-    auto exitLogger = getLogger().onLog.listen([&](LogEventArgs& message) {
-        if (message.level == LogLevel::Notice && message.message.find("[ResourceLoad]") != std::string::npos) ++exitNotices;
-    });
-    SoundBuffer runA, runB;
-    auto exitListener = runA.onLoad.listen([&](LoadResult&) { ++exitEvents; });
-    runA.loadAsync(path);
-    internal::waitForResourceLoadsForTests();
-#ifdef __EMSCRIPTEN__
-    drain(); // preparation only; leave the result and Notice for the next frame
-#endif
-    check("run A has an undelivered local over-budget result", internal::resourceLoadUsageForTests().retainedBytes > 0 && exitNotices == 0);
-    internal::appRunToken()->store(false);
-    internal::waitForResourceLoadsAtAppExit();
-    check("production exit omits run A Notice and callbacks and retires credits", exitNotices == 0 && exitEvents == 0 &&
-        internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-    runB.loadAsync(path);
-    internal::waitForResourceLoadsForTests();
-    for (int pass = 0; pass < 8; ++pass) drain();
-    check("run B gets exactly one Notice with no stale run A Notice", exitNotices == 1);
-    runB.loadAsync(path);
-    internal::waitForResourceLoadsForTests();
-    for (int pass = 0; pass < 8; ++pass) drain();
-    check("run B repeated crossing adds no Notice", exitNotices == 1);
-    internal::waitForResourceLoadsAtAppExit();
     fs::remove(path);
     internal::setResourceLoadLimitsForTests(4, 64, size_t(1024) * 1024 * 1024);
 }

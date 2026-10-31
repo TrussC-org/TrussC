@@ -20,10 +20,6 @@ REVIEWED_TARGET_OPTIONS = {
     # explicitly armed by audioDecodeBounds, and otherwise calls __real_malloc.
     ('audioDecodeBounds', 'target_link_options',
      ('allCoreTests', 'PRIVATE', '-Wl,--wrap=malloc')),
-    # Adds only an optional Metal trace callback; Sokol checks it for null.
-    # Only captureSubmission installs it. Other backends' setter is a no-op.
-    ('captureSubmission', 'target_compile_definitions',
-     ('TrussC', 'PRIVATE', 'SOKOL_TC_TEST_HOOKS')),
     # Enables C++ catching on Web; does not replace or intercept any function.
     ('saveContract', 'target_compile_options',
      ('allCoreTests', 'PRIVATE', '-fexceptions')),

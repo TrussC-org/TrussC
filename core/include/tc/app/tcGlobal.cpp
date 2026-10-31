@@ -2014,56 +2014,46 @@ void drainPendingGpuDestroys() {
         discardRetiredTextures();
         return;
     }
-    try {
-        RecordingReferences refs;
-        std::unordered_set<WindowContext*> windows{&mainWindowContext(), &currentWindowContext()};
-        for (auto* window : openWindows()) windows.insert(&window->context());
-        for (auto* window : windows) {
-            refs.target(window->swapchainTarget);
-            for (const auto& entry : window->targetStack)
-                if (entry.target != &window->swapchainTarget) refs.target(*entry.target);
-        }
-        auto retire = [](auto& handles, const auto& pinned, auto destroy) {
-            handles.erase(std::remove_if(handles.begin(), handles.end(), [&](auto handle) {
-                if (pinned.count(handle.id)) return false;
-                destroy(handle);
-                return true;
-            }), handles.end());
-        };
-        retire(q.buffers, refs.buffers, sg_destroy_buffer);
-        retire(q.views, refs.views, sg_destroy_view);
-        retire(q.images, refs.images, sg_destroy_image);
-        retire(q.samplers, refs.samplers, sg_destroy_sampler);
-        retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
-        retire(q.shaders, refs.shaders, sg_destroy_shader);
-        auto** textureLink = &retiredTextures;
-        while (auto* storage = *textureLink) {
-            bool pinned = refs.images.count(storage->image.id) || refs.views.count(storage->view.id) ||
-                refs.views.count(storage->attachment.id) || refs.samplers.count(storage->sampler.id);
-            for (const auto* views : {&storage->cubeViews, &storage->mipAttachments, &storage->mipViews})
-                for (auto view : *views) pinned |= refs.views.count(view.id) != 0;
-            if (pinned) { textureLink = &storage->next; continue; }
-            *textureLink = storage->next;
-            delete storage;
-        }
-        auto** link = &retiredShadows;
-        while (auto* storage = *link) {
-            bool pinned = refs.images.count(storage->colorImage.id) ||
-                refs.images.count(storage->depthImage.id) || refs.samplers.count(storage->sampler.id) ||
-                refs.views.count(storage->colorTexture.id) || refs.views.count(storage->depthAttachment.id);
-            for (auto view : storage->colorAttachments) pinned |= refs.views.count(view.id) != 0;
-            if (pinned) { link = &storage->retiredNext; continue; }
-            *link = storage->retiredNext;
-            delete storage;
-        }
-    } catch (const std::bad_alloc&) {
-        // No handle retires before the complete reference closure is known.
-        // Keep this batch intact and retry at the next device boundary.
-        try { getLogger().log(LogLevel::Warning, "[RenderTarget] resource retirement allocation failed; deferred collection"); }
-        catch (...) {} // Collection must also survive sustained allocation failure.
-    } catch (const std::length_error&) {
-        try { getLogger().log(LogLevel::Warning, "[RenderTarget] resource retirement size cannot be represented; deferred collection"); }
-        catch (...) {}
+    RecordingReferences refs;
+    std::unordered_set<WindowContext*> windows{&mainWindowContext(), &currentWindowContext()};
+    for (auto* window : openWindows()) windows.insert(&window->context());
+    for (auto* window : windows) {
+        refs.target(window->swapchainTarget);
+        for (const auto& entry : window->targetStack)
+            if (entry.target != &window->swapchainTarget) refs.target(*entry.target);
+    }
+    auto retire = [](auto& handles, const auto& pinned, auto destroy) {
+        handles.erase(std::remove_if(handles.begin(), handles.end(), [&](auto handle) {
+            if (pinned.count(handle.id)) return false;
+            destroy(handle);
+            return true;
+        }), handles.end());
+    };
+    retire(q.buffers, refs.buffers, sg_destroy_buffer);
+    retire(q.views, refs.views, sg_destroy_view);
+    retire(q.images, refs.images, sg_destroy_image);
+    retire(q.samplers, refs.samplers, sg_destroy_sampler);
+    retire(q.pipelines, refs.pipelines, sg_destroy_pipeline);
+    retire(q.shaders, refs.shaders, sg_destroy_shader);
+    auto** textureLink = &retiredTextures;
+    while (auto* storage = *textureLink) {
+        bool pinned = refs.images.count(storage->image.id) || refs.views.count(storage->view.id) ||
+            refs.views.count(storage->attachment.id) || refs.samplers.count(storage->sampler.id);
+        for (const auto* views : {&storage->cubeViews, &storage->mipAttachments, &storage->mipViews})
+            for (auto view : *views) pinned |= refs.views.count(view.id) != 0;
+        if (pinned) { textureLink = &storage->next; continue; }
+        *textureLink = storage->next;
+        delete storage;
+    }
+    auto** link = &retiredShadows;
+    while (auto* storage = *link) {
+        bool pinned = refs.images.count(storage->colorImage.id) ||
+            refs.images.count(storage->depthImage.id) || refs.samplers.count(storage->sampler.id) ||
+            refs.views.count(storage->colorTexture.id) || refs.views.count(storage->depthAttachment.id);
+        for (auto view : storage->colorAttachments) pinned |= refs.views.count(view.id) != 0;
+        if (pinned) { link = &storage->retiredNext; continue; }
+        *link = storage->retiredNext;
+        delete storage;
     }
 }
 

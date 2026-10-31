@@ -5408,13 +5408,7 @@ SOKOL_GFX_API_DECL const void* sg_tc_mtl_command_buffer(void);
 SOKOL_GFX_API_DECL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, uint64_t owner, uint64_t generation, uint64_t frame);
 SOKOL_GFX_API_DECL bool sg_tc_mtl_authorize_drawable(uint64_t owner, uint64_t generation, uint64_t frame);
 SOKOL_GFX_API_DECL void sg_tc_mtl_cancel_drawables(uint64_t owner);
-#if defined(SOKOL_TC_TEST_HOOKS)
-// [TrussC] Framework seam, not app API. Test-only native-device verification
-// trace (typedef and setter). No history is retained.
-// action: 0 registered, 1 authorized, 2 presented, 3 cancelled, 4 prefix submit.
-typedef void (*sg_tc_mtl_drawable_trace)(int action, uint64_t owner, uint64_t generation, uint64_t frame, void* user);
-SOKOL_GFX_API_DECL void sg_tc_mtl_set_drawable_trace(sg_tc_mtl_drawable_trace trace, void* user);
-#endif
+// [TrussC] Unused native scheduling test trace removed with screenshot smoke trim.
 // Metal: get internal __bridge-casted buffer resource objects
 SOKOL_GFX_API_DECL sg_mtl_buffer_info sg_mtl_query_buffer_info(sg_buffer buf);
 // Metal: get internal __bridge-casted image resource objects
@@ -6879,10 +6873,6 @@ typedef struct {
     id<CAMetalDrawable> cur_drawable;
     NSMutableArray* pending_drawables; // [TrussC] unmanaged Sokol drawables
     NSMutableArray* managed_drawables; // [TrussC] strong drawable + owner/generation/frame/ready
-    #if defined(SOKOL_TC_TEST_HOOKS)
-    sg_tc_mtl_drawable_trace drawable_trace;
-    void* drawable_trace_user;
-    #endif
     id<MTLBuffer> uniform_buffers[SG_NUM_INFLIGHT_FRAMES];
 } _sg_mtl_backend_t;
 
@@ -16429,17 +16419,7 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
     // legitimately use blocks from several buffer generations after growth.
 }
 
-// [TrussC] Trace native scheduling without a second registry or retained log.
-_SOKOL_PRIVATE void _sg_mtl_trace_drawable(int action, NSDictionary* record) {
-    #if defined(SOKOL_TC_TEST_HOOKS)
-    if (_sg.mtl.drawable_trace) _sg.mtl.drawable_trace(action,
-        [record[@"owner"] unsignedLongLongValue], [record[@"generation"] unsignedLongLongValue],
-        [record[@"frame"] unsignedLongLongValue], _sg.mtl.drawable_trace_user);
-    #else
-    _SOKOL_UNUSED(action); _SOKOL_UNUSED(record);
-    #endif
-}
-
+// [TrussC] Drawable lifetime tracking continues without test-only trace callbacks.
 _SOKOL_PRIVATE void _sg_mtl_end_pass(const _sg_attachments_ptrs_t* atts) {
     _SOKOL_UNUSED(atts);
     if (nil != _sg.mtl.render_cmd_encoder) {
@@ -16499,7 +16479,6 @@ _SOKOL_PRIVATE void _sg_mtl_commit(void) {
         NSDictionary* record = _sg.mtl.managed_drawables[(NSUInteger)i];
         if ([record[@"ready"] boolValue]) {
             [_sg.mtl.cmd_buffer presentDrawable:record[@"drawable"]];
-            _sg_mtl_trace_drawable(2, record);
             [_sg.mtl.managed_drawables removeObjectAtIndex:(NSUInteger)i];
         }
     }
@@ -26902,7 +26881,6 @@ SOKOL_API_IMPL void sg_tc_submit_prefix(void) {
         if (_sg.mtl.cmd_buffer) {
             [_sg.mtl.cmd_buffer commit];
             _sg.mtl.cmd_buffer = nil;
-            _sg_mtl_trace_drawable(4, nil);
         }
     #elif defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
         glFlush();
@@ -26927,18 +26905,6 @@ SOKOL_API_IMPL const void* sg_tc_mtl_command_buffer(void) {
     #endif
 }
 
-#if defined(SOKOL_TC_TEST_HOOKS)
-SOKOL_API_IMPL void sg_tc_mtl_set_drawable_trace(sg_tc_mtl_drawable_trace trace, void* user) {
-    #if defined(SOKOL_METAL)
-        _sg.mtl.drawable_trace = trace;
-        _sg.mtl.drawable_trace_user = user;
-    #else
-        _SOKOL_UNUSED(trace); _SOKOL_UNUSED(user);
-    #endif
-}
-
-#endif // SOKOL_TC_TEST_HOOKS
-
 SOKOL_API_IMPL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, uint64_t owner, uint64_t generation, uint64_t frame) {
     #if defined(SOKOL_METAL)
         if (!swapchain || !swapchain->metal.current_drawable) return false;
@@ -26960,7 +26926,6 @@ SOKOL_API_IMPL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, u
         if (swapchain->metal.msaa_color_texture) [attachments addObject:(__bridge id)swapchain->metal.msaa_color_texture];
         record[@"attachments"] = [NSArray arrayWithArray:attachments];
         [_sg.mtl.managed_drawables addObject:record];
-        _sg_mtl_trace_drawable(0, record);
         _SG_OBJC_RELEASE(record);
     #else
         _SOKOL_UNUSED(swapchain); _SOKOL_UNUSED(owner); _SOKOL_UNUSED(generation); _SOKOL_UNUSED(frame);
@@ -26975,7 +26940,6 @@ SOKOL_API_IMPL bool sg_tc_mtl_authorize_drawable(uint64_t owner, uint64_t genera
                 [record[@"generation"] unsignedLongLongValue] == generation &&
                 [record[@"frame"] unsignedLongLongValue] == frame && ![record[@"ready"] boolValue]) {
                 record[@"ready"] = @YES;
-                _sg_mtl_trace_drawable(1, record);
                 return true;
             }
         }
@@ -26991,7 +26955,6 @@ SOKOL_API_IMPL void sg_tc_mtl_cancel_drawables(uint64_t owner) {
         for (NSInteger i = (NSInteger)_sg.mtl.managed_drawables.count - 1; i >= 0; --i) {
             NSDictionary* record = _sg.mtl.managed_drawables[(NSUInteger)i];
             if ([record[@"owner"] unsignedLongLongValue] == owner) {
-                _sg_mtl_trace_drawable(3, record);
                 [_sg.mtl.managed_drawables removeObjectAtIndex:(NSUInteger)i];
             }
         }
