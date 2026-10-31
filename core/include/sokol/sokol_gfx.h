@@ -5408,7 +5408,6 @@ SOKOL_GFX_API_DECL const void* sg_tc_mtl_command_buffer(void);
 SOKOL_GFX_API_DECL bool sg_tc_mtl_register_drawable(const sg_swapchain* swapchain, uint64_t owner, uint64_t generation, uint64_t frame);
 SOKOL_GFX_API_DECL bool sg_tc_mtl_authorize_drawable(uint64_t owner, uint64_t generation, uint64_t frame);
 SOKOL_GFX_API_DECL void sg_tc_mtl_cancel_drawables(uint64_t owner);
-// [TrussC] Unused native scheduling test trace removed with screenshot smoke trim.
 // Metal: get internal __bridge-casted buffer resource objects
 SOKOL_GFX_API_DECL sg_mtl_buffer_info sg_mtl_query_buffer_info(sg_buffer buf);
 // Metal: get internal __bridge-casted image resource objects
@@ -16419,7 +16418,6 @@ _SOKOL_PRIVATE void _sg_mtl_begin_pass(const sg_pass* pass, const _sg_attachment
     // legitimately use blocks from several buffer generations after growth.
 }
 
-// [TrussC] Drawable lifetime tracking continues without test-only trace callbacks.
 _SOKOL_PRIVATE void _sg_mtl_end_pass(const _sg_attachments_ptrs_t* atts) {
     _SOKOL_UNUSED(atts);
     if (nil != _sg.mtl.render_cmd_encoder) {

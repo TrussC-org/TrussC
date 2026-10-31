@@ -595,15 +595,11 @@ header-inline mutable state, or Mesa version check is added.
 
 All changes carry `[TrussC]` markers; no upstream Sokol API is replaced.
 
-The twelve declarations `sgl_tc_context_target_owned`, `sgl_tc_context_complete`,
+The ten declarations `sgl_tc_context_target_owned`, `sgl_tc_context_complete`,
 `sgl_tc_context_dependencies`, `sg_tc_submit_prefix`, `sg_tc_gl_resolve_swapchain`,
 `sg_tc_mtl_command_buffer`, `sg_tc_mtl_register_drawable`,
-`sg_tc_mtl_authorize_drawable`, `sg_tc_mtl_cancel_drawables`,
-`sg_tc_mtl_drawable_trace`, `sg_tc_mtl_set_drawable_trace`, and
+`sg_tc_mtl_authorize_drawable`, `sg_tc_mtl_cancel_drawables`, and
 `sapp_tc_gl_make_current` are each a TrussC-internal framework seam, not app API.
-The trace typedef, setter, storage and callback emission exist only with
-`SOKOL_TC_TEST_HOOKS`; tests enable it in both the consumer and Sokol implementation.
-Production builds omit the declarations and storage and use a no-op emission helper.
 
 - `sgl_tc_context_target_owned()` opts framework-created contexts into explicit
   CPU completion. Every device commit invalidates their upload epoch/cache;
@@ -694,11 +690,3 @@ This patch does not change Metal or Vulkan, or TrussC's API. In this sokol fork
 it adds two `sg_log_item` entries (`WGPU_UNIFORM_BUFFER_GROWN`,
 `WGPU_UNIFORM_UPLOAD_FAILED`). The earlier note that WebGPU is untouched
 applies only to the historical Metal-only patch.
-
-## Screenshot smoke trim (2026-10-31)
-
-Removed the unused `SOKOL_TC_TEST_HOOKS` Metal drawable trace typedef, setter,
-storage, helper and emissions formerly used by captureSubmission. Drawable
-registration, authorization, cancellation, retention and presentation are unchanged.
-The earlier target-completion section records the original addition; this entry
-supersedes its trace-hook description. All other modification records are retained.
