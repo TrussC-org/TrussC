@@ -32,6 +32,10 @@ set(LIBREMIDI_NO_PIPEWIRE  ON  CACHE BOOL "" FORCE)
 set(LIBREMIDI_NO_NETWORK   ON  CACHE BOOL "" FORCE)
 set(LIBREMIDI_EXAMPLES     OFF CACHE BOOL "" FORCE)
 set(LIBREMIDI_TESTS        OFF CACHE BOOL "" FORCE)
+if(MSVC)
+    # Skip upstream's PRIVATE /W4 before adding /w below, avoiding D9025.
+    set(LIBREMIDI_NO_WARNINGS ON CACHE BOOL "" FORCE)
+endif()
 
 # URL (release tarball) instead of GIT_REPOSITORY: works even without git
 # installed, and the archive caches/extracts faster than a clone. URL_HASH
@@ -51,6 +55,11 @@ FetchContent_Declare(
         -P ${CMAKE_CURRENT_LIST_DIR}/cmake/PatchLibremidi.cmake
 )
 FetchContent_MakeAvailable(libremidi)
+# Keep MSVC diagnostics quiet in fetched sources, including cmidi2.hpp when
+# compiled by libremidi's own translation units. Do not pass /w to consumers.
+if(MSVC)
+    target_compile_options(libremidi PRIVATE /w)
+endif()
 # PATCH_COMMAND is skipped for source overrides and may be skipped in reused
 # caches. Require upstream input files and the checked ALSA output patch.
 execute_process(COMMAND ${CMAKE_COMMAND}

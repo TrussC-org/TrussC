@@ -8,13 +8,16 @@
 
 #ifdef TC_ADMISSION_CAPTURE_PROBE
 extern "C" void* __real_malloc(size_t);
+extern "C" unsigned char* stbi_write_png_to_mem(const unsigned char*, int, int, int, int, int*);
 #endif
 // This test owns its binary: interposition must not affect other harnesses.
 namespace {
 thread_local bool failNextAllocation = false;
 thread_local int failAllocationAfter = -1;
 #ifdef TC_ADMISSION_CAPTURE_PROBE
-thread_local int failEncoderMallocAfter = -1;
+thread_local size_t encoderMallocSize = 0;
+thread_local int encoderMallocMatches = 0;
+thread_local bool failEncoderMalloc = false;
 std::atomic<bool> failParsingOnce{false};
 std::atomic<size_t> serverBytesRead{0};
 std::atomic<bool> countServerReads{false};
@@ -51,9 +54,12 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 #ifdef TC_ADMISSION_CAPTURE_PROBE
 #include <GL/gl.h>
 extern "C" void* __wrap_malloc(size_t size) {
-    if (failEncoderMallocAfter >= 0 && failEncoderMallocAfter-- == 0) {
-        failEncoderMallocAfter = -1;
-        return nullptr;
+    if (encoderMallocSize != 0 && size == encoderMallocSize) {
+        ++encoderMallocMatches;
+        if (failEncoderMalloc) {
+            failEncoderMalloc = false;
+            return nullptr;
+        }
     }
     return __real_malloc(size);
 }
@@ -226,20 +232,40 @@ TC_CORE_TEST_MAIN() {
         check("partition retry resolves all requests and releases producers", resolved && lifetime.expired());
     }
 #ifdef TC_ADMISSION_CAPTURE_PROBE
-    // Select inside the handler: dispatch itself must retain a parsed request id.
-    // malloc indices: filtered pixels, line storage, compressor hash, final PNG.
-    // Compressor-internal failures are an upstream limitation, so skip index 2.
-    for (int allocation : {0, 1, 3, 4}) {
-        mcp::tool("allocation_png", "encoder malloc failure").bind([allocation]() -> json {
-            Pixels pixels; pixels.allocate(64, 64, 4);
-            std::memset(pixels.getData(), 127, pixels.getTotalBytes());
-            if (allocation == 4) failNextAllocation = true; // C++ output-vector copy, after the C encoder returns
-            else failEncoderMallocAfter = allocation;
-            auto image = mcp::internal::pixelsToImageJson(pixels, "png", 0, 90);
-            failEncoderMallocAfter = -1;
-            return image;
+    // Calibrate the final buffer size with the same input/settings. A malloc
+    // index is unstable: optimization can turn compressor realloc(NULL) into malloc.
+    Pixels encoderPixels; encoderPixels.allocate(64, 64, 4);
+    std::memset(encoderPixels.getData(), 127, encoderPixels.getTotalBytes());
+    int pngSize = 0;
+    auto* encoded = stbi_write_png_to_mem(encoderPixels.getData(), 0, 64, 64, 4, &pngSize);
+    check("PNG allocation probe obtains final buffer size", encoded && pngSize > 0);
+    std::free(encoded);
+    if (!encoded || pngSize <= 0) return 1;
+    // Filtered pixels, line storage, final PNG; zero selects the C++ output copy.
+    for (size_t allocationSize : {size_t((64 * 4 + 1) * 64), size_t(64 * 4), size_t(pngSize), size_t(0)}) {
+        if (allocationSize != 0) {
+            encoderMallocSize = allocationSize;
+            encoderMallocMatches = 0;
+            (void)mcp::internal::pixelsToImageJson(encoderPixels, "png", 0, 90);
+            encoderMallocSize = 0;
+            // Refuse an ambiguous predicate rather than failing compressor growth.
+            check("PNG size predicate uniquely identifies its allocation", encoderMallocMatches == 1);
+            if (encoderMallocMatches != 1) return 1;
+        }
+        // Select inside the handler: dispatch must retain a parsed request id.
+        mcp::tool("allocation_png", "encoder malloc failure").bind([allocationSize, &encoderPixels]() -> json {
+            encoderMallocMatches = 0;
+            if (allocationSize == 0) failNextAllocation = true;
+            else {
+                encoderMallocSize = allocationSize;
+                failEncoderMalloc = true;
+            }
+            return mcp::internal::pixelsToImageJson(encoderPixels, "png", 0, 90);
         });
         const auto reply = dispatch(request("allocation_png"));
+        encoderMallocSize = 0;
+        check("PNG allocation failure injection was consumed", allocationSize == 0 ? !failNextAllocation :
+            !failEncoderMalloc && encoderMallocMatches == 1);
         check("PNG encoder allocation failure returns an MCP error with id", reply.at("id") == 19 &&
             reply.contains("error"));
     }
@@ -293,6 +319,38 @@ TC_CORE_TEST_MAIN() {
         check("1 MiB request line is refused without reading it all", closed && response.find("414") != std::string::npos &&
             response.find("HTTP/1.1", 1) == std::string::npos && serverBytesRead > 0 && serverBytesRead <= 16384);
         printf("request-line server bytes read: %zu\n", serverBytesRead.load());
+    }
+    {
+        serverBytesRead = 0;
+        countServerReads = true;
+        const auto sock = socket(AF_INET, SOCK_STREAM, 0);
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(mcp::getHttpPort());
+        inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+        check("header probe connects", connect(sock, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+        timeval timeout{3, 0};
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        std::string wire = "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n";
+        for (int i = 0; i < 1024; ++i) wire += "X-Probe: " + std::string(1024, 'a') + "\r\n";
+        wire += "\r\n";
+        size_t sent = 0;
+        while (sent < wire.size()) {
+            const auto n = send(sock, wire.data() + sent, wire.size() - sent, MSG_NOSIGNAL);
+            if (n <= 0) break;
+            sent += size_t(n);
+        }
+        std::string response;
+        char buffer[1024];
+        ssize_t received;
+        while ((received = recv(sock, buffer, sizeof(buffer), 0)) > 0) response.append(buffer, size_t(received));
+        const bool closed = received == 0 || errno == ECONNRESET;
+        close(sock);
+        countServerReads = false;
+        // Bound (network input): this short request line and 64 KiB header cap fit within one extra read-ahead block.
+        check("oversized headers are refused without reading beyond the header bound", closed && response.find("431") != std::string::npos &&
+            response.find("HTTP/1.1", 1) == std::string::npos && serverBytesRead > 0 && serverBytesRead <= 64 * 1024 + 4096);
+        printf("header server bytes read: %zu\n", serverBytesRead.load());
     }
 #endif
     for (const char* name : {"allocation_pixels", "allocation_json", "allocation_main", "allocation_worker", "allocation_envelope"}) {

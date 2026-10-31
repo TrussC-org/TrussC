@@ -170,11 +170,6 @@ public:
     // App exit waits for loads still decoding; cancelling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
-    // Web CMake propagates exception support. With custom app flags disabling
-    // it, recovery from allocation failure is guaranteed only for TrussC's
-    // out-of-line host code. Inline helpers from headers may be compiled into the
-    // application without exception support; allocation failure inside them is a
-    // known limitation.
     void loadAsync(const fs::path& path);
     Event<LoadResult> onLoad;
     bool isLoading() const { return async_.loading(); }
@@ -530,13 +525,8 @@ public:
         const size_t endFrame = offsetSamples + otherFrames;
         if (samples.size() < needed) {
             // A failed reserve leaves the current samples intact.
-            bool grown = false;
-            try {
-                grown = internal::growSampleBuffer(samples, needed);
-                if (grown) samples.resize(needed, 0.0f);
-            } catch (const std::bad_alloc&) {
-                grown = false;
-            }
+            const bool grown = internal::growSampleBuffer(samples, needed);
+            if (grown) samples.resize(needed, 0.0f);
             if (!grown) {
                 logError("SoundBuffer") << "mixFrom: out of memory growing to " << endFrame
                                         << " frames, nothing mixed";

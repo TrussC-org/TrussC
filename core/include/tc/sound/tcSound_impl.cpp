@@ -196,8 +196,8 @@ SoundBuffer::SoundBuffer(const SoundBuffer& other) : SoundBuffer() {
     *this = other;
 }
 SoundBuffer& SoundBuffer::operator=(const SoundBuffer& other) {
-    if (this == &other) return *this;
     async_.cancel();
+    if (this == &other) return *this;
     samples = other.samples;
     channels = other.channels;
     sampleRate = other.sampleRate;
@@ -209,9 +209,8 @@ SoundBuffer::SoundBuffer(SoundBuffer&& other) noexcept : SoundBuffer() {
     *this = std::move(other);
 }
 SoundBuffer& SoundBuffer::operator=(SoundBuffer&& other) noexcept {
-    if (this == &other) return *this;
     async_.cancel();
-    other.async_.cancel();
+    if (this == &other) return *this;
     samples = std::move(other.samples);
     channels = other.channels;
     sampleRate = other.sampleRate;
@@ -248,10 +247,7 @@ void SoundBuffer::loadAsync(const fs::path& path) {
                 state->backendPending = true;
                 loadAacWebAsync(state->decoded, [state](LoadResult result) {
                     state->result = std::move(result);
-                    if (state->result) {
-                        try { internal::setLoadName(state->decoded->path_, state->path); }
-                        catch (...) { state->result.error = LoadError::Unknown; state->result.message.clear(); }
-                    }
+                    if (state->result) internal::setLoadName(state->decoded->path_, state->path);
                     internal::completeResourceLoad(state);
                 }, state->path, state);
                 return;

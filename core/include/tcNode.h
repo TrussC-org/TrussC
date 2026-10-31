@@ -1735,7 +1735,6 @@ inline void setupNodeOnce(Node& node) {
     EntryStackGuard guard(AppEntry::Setup);
     // A windowed App's setup() runs inside its first update or draw; report
     // a crash there as "setup", not as the enclosing phase.
-    CrashPhaseScope crashPhase("setup");
     node.setupOnce();
 }
 }

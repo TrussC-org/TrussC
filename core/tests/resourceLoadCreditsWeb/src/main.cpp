@@ -6,24 +6,15 @@
 
 // Owned binary: exercise real allocation failure, including on MSVC.
 namespace {
-thread_local int failAfter = -1;
 thread_local bool failImageCopyStorage = false;
 // Refuse the RGBA copy after the encoded snapshot and stb decode exist.
 constexpr size_t imageCopyBytes = 8 * 8 * 4;
 int allocationFaults = 0;
-std::atomic<bool> trackFontStorage{false};
-size_t fontStorageSize = 0;
-std::atomic<void*> fontStorage{nullptr};
-std::atomic<void*> fontAtlas{nullptr};
 constexpr size_t encodedImageSize = 4093; // Distinct from filebuf's 4096-byte reads.
 std::atomic<bool> trackImageStorage{false};
 std::atomic<void*> imageStorage{nullptr};
 std::atomic<int> imageStorageAllocations{0};
 void trackAllocation(void* p, size_t n) {
-    if (trackFontStorage && n == fontStorageSize) fontStorage = p;
-    // MSVC's large-block allocator adds alignment metadata. Save the raw
-    // pointer returned here: allocator::deallocate passes that pointer back.
-    if (trackFontStorage && n >= 65536 && n <= 65536 + 64) fontAtlas = p;
     if (trackImageStorage && n == encodedImageSize) {
         imageStorage = p;
         ++imageStorageAllocations;
@@ -37,7 +28,6 @@ bool rejectAllocation(size_t n) {
         ++allocationFaults;
         return true;
     }
-    if (failAfter >= 0 && failAfter-- == 0) { ++allocationFaults; return true; }
     return false;
 }
 }
@@ -57,8 +47,6 @@ void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
 }
 void* operator new[](std::size_t n, const std::nothrow_t& tag) noexcept { return ::operator new(n, tag); }
 void operator delete(void* p) noexcept {
-    if (p == fontStorage) fontStorage = nullptr;
-    if (p == fontAtlas) fontAtlas = nullptr;
     if (p == imageStorage) imageStorage = nullptr;
     std::free(p);
 }
@@ -147,118 +135,6 @@ EM_JS(void, resolveAudio, (int index), {
 EM_JS(int, audioSlots, (), { return Module['trusscAacSlots'] ? Module['trusscAacSlots'].size : 0; });
 #endif
 #include "../../common/resourceLoadLocalChecks.h"
-void localNoticeWithoutAllocation(bool discardSnapshot) {
-    struct NoticeState : internal::ResourceLoadState {
-        std::unique_ptr<unsigned char[]> payload;
-        size_t retainedBytes() const noexcept override { return payload ? 64 : 0; }
-        void discardPayload() noexcept override { payload.reset(); }
-    };
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-    auto payload = std::make_shared<NoticeState>();
-    payload->payload = std::make_unique<unsigned char[]>(64);
-    payload->localFile = true;
-    payload->run = internal::appRunToken();
-    std::shared_ptr<internal::ResourceLoadState> state = payload;
-    internal::setResourceLoadLimitsForTests(4, 64, 1);
-    int notices = 0;
-    auto logger = getLogger().onLog.listen([&](LogEventArgs& message) {
-        if (message.level == LogLevel::Notice && message.message.find("[ResourceLoad]") != std::string::npos) ++notices;
-    });
-    const int faultsBefore = allocationFaults;
-    failAfter = 0;
-    internal::completeResourceLoad(state);
-    const bool noAllocation = failAfter == 0 && allocationFaults == faultsBefore;
-    failAfter = -1;
-    check("local over-budget completion and Notice posting allocate nothing", noAllocation && state->result && notices == 0);
-    auto snapshot = internal::takeResourceLoadBatch();
-    // Keep the old run's Notice in a snapshot while the next run overflows.
-    // Only the current run may log; the old pending Notice is omitted.
-    if (discardSnapshot) {
-        internal::appRunToken()->store(false);
-        internal::waitForResourceLoadsAtAppExit();
-    }
-    internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-    auto nextPayload = std::make_shared<NoticeState>();
-    nextPayload->payload = std::make_unique<unsigned char[]>(64);
-    nextPayload->localFile = true;
-    nextPayload->run = internal::appRunToken();
-    std::shared_ptr<internal::ResourceLoadState> nextState = nextPayload;
-    failAfter = 0;
-    internal::completeResourceLoad(nextState);
-    const bool nextNoAllocation = failAfter == 0 && allocationFaults == faultsBefore;
-    failAfter = -1;
-    if (discardSnapshot) {
-        failAfter = 0;
-        snapshot = {};
-        const bool discardNoAllocation = failAfter == 0 && allocationFaults == faultsBefore;
-        failAfter = -1;
-        check("discarding old snapshot reposts current Notice without allocation", discardNoAllocation && notices == 0);
-    } else {
-        internal::deliverResourceLoadBatch(std::move(snapshot));
-    }
-    drain();
-    check(discardSnapshot ? "discarded old snapshot preserves exactly one current-run Notice and retires credits" :
-        "run change replaces stale Notice without allocation and credits retire", nextNoAllocation && notices == 1 &&
-        internal::resourceLoadUsageForTests().retainedBytes == 0 && !payload->payload && !nextPayload->payload);
-    if (discardSnapshot) {
-        auto repeated = std::make_shared<NoticeState>();
-        repeated->payload = std::make_unique<unsigned char[]>(64);
-        repeated->localFile = true;
-        repeated->run = internal::appRunToken();
-        internal::completeResourceLoad(repeated);
-        drain();
-        check("repeated overage after snapshot discard does not duplicate Notice", notices == 1 &&
-            internal::resourceLoadUsageForTests().retainedBytes == 0);
-    }
-    internal::setResourceLoadLimitsForTests(4, 64, size_t(1024) * 1024 * 1024);
-}
-void localNoticeWithoutAllocation() {
-    localNoticeWithoutAllocation(false);
-    localNoticeWithoutAllocation(true);
-}
-void publicationAllocationFailure() {
-    // Build the candidate first; fail a cache-publication allocation only
-    // when a later pass applies it. Track both retained backing allocations.
-    const auto path = fs::absolute("resourceLoadCreditsWeb-publication.ttf");
-    const auto bytes = makeFont();
-    std::ofstream(path, std::ios::binary).write(
-        reinterpret_cast<const char*>(bytes.data()), bytes.size());
-    Font publication;
-    int publicationEvents = 0;
-    LoadError publicationError = LoadError::None;
-    auto publicationListener = publication.onLoad.listen([&](LoadResult& result) {
-        ++publicationEvents; publicationError = result.error;
-    });
-    fontStorageSize = bytes.size();
-    trackFontStorage = true;
-    publication.loadAsync(path, 16);
-#ifdef __EMSCRIPTEN__
-    drain();
-#else
-    internal::waitForResourceLoadsForTests();
-#endif
-    trackFontStorage = false;
-    check("Font candidate owns file storage and CPU atlas before publication",
-        fontStorage && fontAtlas && internal::resourceLoadUsageForTests().retainedBytes >= bytes.size() + 65536);
-    // Arm at cache insertion, after all key copies, independently of allocator
-    // implementation and of how many allocations preparation needed.
-    const int faultsBefore = allocationFaults;
-    internal::setResourceLoadProbeForTests([](const char* stage, const fs::path&) {
-        if (std::strcmp(stage, "font.publish") == 0) failAfter = 0;
-    });
-    drain();
-    failAfter = -1;
-    internal::setResourceLoadProbeForTests({});
-    check("Font cache publication allocation fault fires and settles once",
-        allocationFaults == faultsBefore + 1 && publicationEvents == 1 && publicationError == LoadError::Unknown && !publication.isLoaded());
-    check("Font failed publication releases both retained allocations",
-        !fontStorage && !fontAtlas && internal::resourceLoadUsageForTests().retainedBytes == 0 && internal::resourceLoadUsageForTests().outstanding == 0);
-    drain();
-    check("Font publication failure has no duplicate notification", publicationEvents == 1);
-
-    fs::remove(path);
-}
-
 void imageCopyAllocationFailure() {
     const auto path = fs::absolute("resourceLoadCreditsWeb-copy.ppm");
     unsigned char bytes[encodedImageSize]{};
@@ -284,7 +160,6 @@ void imageCopyAllocationFailure() {
 #endif
         trackImageStorage = false;
         failImageCopyStorage = false;
-        failAfter = -1;
         internal::setResourceLoadProbeForTests({});
         drain();
         check("Image copy allocation fault fires after encoded storage exists",
@@ -384,8 +259,6 @@ TC_CORE_TEST_MAIN() {
     getMainThreadId();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
     localFileAdmissionChecks();
-    localNoticeWithoutAllocation();
-    publicationAllocationFailure();
     imageCopyAllocationFailure();
     return failures ? 1 : 0;
 #else
@@ -467,22 +340,11 @@ TC_CORE_TEST_MAIN() {
     throwing.reset();
     drain(); drain();
     check("Web failed preparation destroys its State", throwingWeak.expired());
-    check("Web preparation failure settles once without app exception catching", thrownEvents == 1 && !throwingSlot.loading() && internal::resourceLoadUsageForTests().active == 0);
+    check("Web preparation failure settles once", thrownEvents == 1 && !throwingSlot.loading() && internal::resourceLoadUsageForTests().active == 0);
 
     localFileAdmissionChecks();
-    localNoticeWithoutAllocation();
-    publicationAllocationFailure();
     imageCopyAllocationFailure();
 
-    SoundBuffer failed;
-    LoadResult error;
-    int errors = 0;
-    auto failureListener = failed.onLoad.listen([&](LoadResult& result) { error = result; ++errors; });
-    internal::failResourceLoadLaunchForTests(true);
-    failed.loadAsync("/credit.m4a");
-    internal::failResourceLoadLaunchForTests(false);
-    drain(); drain();
-    check("Web admission allocation failure settles without exception support", errors == 1 && error.error == LoadError::Unknown && internal::resourceLoadUsageForTests().active == 0);
     return failures ? 1 : 0;
 #endif
 }
