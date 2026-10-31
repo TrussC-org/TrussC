@@ -54,7 +54,6 @@ callbacks cannot change the reason halfway through the pair.
 | `begin` and `clean` | Normal exit completed |
 | `begin` only | Interrupted during cleanup |
 | Neither | No observed cleanup; unknown, not necessarily a crash |
-| Crash marker from the crash-reporting protocol (#252) | Crash |
 
 At MCP HTTP shutdown, all queued requests and deferred replies receive a
 JSON-RPC response containing `the app is exiting normally (reason=TOKEN)`.
