@@ -3949,7 +3949,7 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Processes one refle
 
 ```cpp
 RuntimeEvents & Runtime::events()  // Returns the events that belong to the whole process.
-void Runtime::setLogoutTimeout(float seconds)  // Sets how long TrussC waits for exit() when the OS logs out, restarts or shuts down.
+void Runtime::setLogoutTimeout(float seconds)  // Sets the time limit for the normal ending when the OS logs out, restarts or shuts down.
 ```
 
 ### RuntimeEvents — Holds the events that belong to the whole process rather than to one window.
