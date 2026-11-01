@@ -41770,21 +41770,21 @@ details.en = '''
 - `alertDialogAsync(title, message, callback)` displays a heading and body text; the optional `void()` callback defaults to `nullptr` and is called after dismissal or completion of the platform fallback.
 - Call the Async dialog family on the main thread; macOS and iOS deliver callbacks on the main thread, while Windows, Linux, Android, and Web invoke them on the calling thread without starting a worker.
 - Async does not guarantee a deferred callback: Windows, Linux, and Web block until their supported dialogs close, Android completes immediately, and macOS blocks when there is no key window; callbacks can run before the function returns.
-- On macOS and iOS, callbacks are delivered only while the app run that requested them remains active; ending that run or replacing it during hot reload suppresses pending callbacks.
+- On macOS and iOS, callbacks are delivered only while the app run that requested them remains active; ending that run or replacing it during hot reload suppresses pending callbacks. On macOS, accepted process quit first cancels open sheets and invokes their live callbacks before App exit/cleanup (alert has no result, confirm receives `false`, load/save receive an empty unsuccessful result); a quit veto leaves sheets pending.
 - On iOS, a missing root view controller logs an error and invokes the callback without showing a dialog.
 '''
 details.ja = '''
 - `alertDialogAsync(title, message, callback)` は見出しと本文を表示します。省略可能な `void()` コールバックの既定値は `nullptr` で、ダイアログを閉じた後、またはプラットフォームの代替処理が完了した後に呼ばれます。
 - Async ダイアログ群はメインスレッドで呼んでください。macOS と iOS のコールバックはメインスレッドで呼ばれ、Windows、Linux、Android、Web ではワーカースレッドを作らず、呼び出したスレッドで呼ばれます。
 - Async という名前でもコールバックが後回しになるとは限りません。Windows、Linux、Web では対応するダイアログを閉じるまで処理が止まり、Android は即座に完了し、macOS もキーウィンドウがなければ処理が止まります。関数から戻る前にコールバックが呼ばれる場合があります。
-- macOS と iOS では、要求したアプリの実行が有効な間だけコールバックを呼びます。その実行が終了した場合やホットリロードで置き換わった場合は、保留中のコールバックを呼びません。
+- macOS と iOS では、要求したアプリの実行が有効な間だけコールバックを呼びます。その実行が終了した場合やホットリロードで置き換わった場合は、保留中のコールバックを呼びません。macOS では、プロセスの終了が承認されると、App の exit/cleanup 前に開いているシートをキャンセルし、有効なコールバックを呼びます（alert は戻り値なし、confirm は `false`、load/save は空の失敗結果）。終了が拒否された場合はシートを保持します。
 - iOS でルートビューコントローラーがない場合は、エラーをログに出力し、ダイアログを表示せずにコールバックを呼びます。
 '''
 details.ko = '''
 - `alertDialogAsync(title, message, callback)`은 제목과 본문을 표시합니다. 선택적인 `void()` 콜백의 기본값은 `nullptr`이며 대화상자를 닫거나 플랫폼의 대체 처리가 끝나면 호출합니다.
 - Async 대화상자 계열은 메인 스레드에서 호출하세요. macOS와 iOS는 메인 스레드에서 콜백을 호출하며, Windows, Linux, Android, Web은 작업 스레드를 만들지 않고 호출한 스레드에서 콜백을 호출합니다.
 - Async라는 이름이 콜백의 지연 실행을 보장하지는 않습니다. Windows, Linux, Web에서는 지원하는 대화상자가 닫힐 때까지 실행이 멈추고, Android는 즉시 완료하며, macOS도 키 윈도우가 없으면 실행이 멈춥니다. 함수가 반환하기 전에 콜백이 실행될 수 있습니다.
-- macOS와 iOS는 요청한 앱 실행이 활성 상태인 동안에만 콜백을 호출합니다. 해당 실행이 끝나거나 핫 리로드로 교체되면 대기 중인 콜백을 호출하지 않습니다.
+- macOS와 iOS는 요청한 앱 실행이 활성 상태인 동안에만 콜백을 호출합니다. 해당 실행이 끝나거나 핫 리로드로 교체되면 대기 중인 콜백을 호출하지 않습니다. macOS에서 프로세스 종료가 승인되면 App의 exit/cleanup 전에 열린 시트를 취소하고 유효한 콜백을 호출합니다(alert는 결과 없음, confirm은 `false`, load/save는 빈 실패 결과). 종료가 거부되면 시트를 유지합니다.
 - iOS에서 루트 뷰 컨트롤러가 없으면 오류를 로그에 출력하고 대화상자를 표시하지 않은 채 콜백을 호출합니다.
 '''
 related = ["confirmDialogAsync", "alertDialog"]
