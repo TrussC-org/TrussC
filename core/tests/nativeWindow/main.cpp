@@ -166,6 +166,14 @@ void initialized() {
     // successful renewal without a recovery drawable.
     _sapp_tc_x11_make_current(first);
     const auto caller = sapp_tc_gl_save();
+    // Match x11PinMoveGravity in core/platform/linux/tcWindowGeometryX11.h:
+    // CenterGravity can leave Mutter one pixel off after an odd size delta.
+    XSizeHints hints{};
+    long supplied = 0;
+    if (!XGetWMNormalHints(_sapp_tc.display, other->xwin, &hints, &supplied)) hints = XSizeHints{};
+    hints.flags |= PWinGravity;
+    hints.win_gravity = NorthWestGravity;
+    XSetWMNormalHints(_sapp_tc.display, other->xwin, &hints);
     XResizeWindow(_sapp_tc.display, other->xwin, 100, 60);
     XSync(_sapp_tc.display, False);
     // XSync only completes the ConfigureRequest; a real WM may grant it later.
