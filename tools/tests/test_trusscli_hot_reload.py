@@ -114,6 +114,16 @@ file(APPEND "${{CMAKE_BINARY_DIR}}/configure-calls" "configure\\n")
             app_source.write_text(base + 'TC_HOT_RELOAD(tcApp)\n', encoding='utf-8')
             build_app('ON', 6)
             build_app('ON', 6)
+            # Relative explicit SOURCES resolve against the source directory, so the
+            # pre-check sees the same files from the build directory.
+            cmakelists.write_text(cmakelists.read_text().replace('"${CMAKE_CURRENT_SOURCE_DIR}/src/', '"src/'),
+                                  encoding='utf-8')
+            app_source.write_text(base, encoding='utf-8')
+            build_app('OFF', 7)
+            build_app('OFF', 7)
+            app_source.write_text(base + 'TC_HOT_RELOAD(tcApp)\n', encoding='utf-8')
+            build_app('ON', 8)
+            build_app('ON', 8)
 
 
 if __name__ == '__main__':
