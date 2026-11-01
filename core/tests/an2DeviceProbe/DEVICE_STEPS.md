@@ -10,7 +10,7 @@ In the probe log, the success marker for a normal ending is the framework line `
 |---|---:|---:|---|
 | Air | 10 | 7 | 3–5 hours plus session restarts |
 | win-regression-test | 10 | 9 | 3–5 hours plus session restarts |
-| trussc-gdm | 5 | 4 | 45–90 minutes |
+| trussc-gdm | 4 | 3 | 45–90 minutes |
 | RasPi | 4 | 1 | 2–3 hours |
 
 ## Air — macOS Apple Silicon / Metal and iOS
@@ -115,7 +115,8 @@ The suite builds and runs tests; inspect its summary. If trusscli or another pre
 
 3. **[HUMAN]** Run `"$PROBE" cursor > "$HOME/device-239-gdm/3-cursor.log" 2>&1; echo $?`; press 1–5/B/U/H/S in each window and move pointer across both. Screen state and actual cursor must agree app-wide. Run `"$PROBE" drop > "$HOME/device-239-gdm/3-drop.log" 2>&1; echo $?`; drop files on each window, checking only that receiver ID/count/all paths. Close both windows after each run, expect 0.
 4. **[HUMAN]** Run `"$PROBE" close > "$HOME/device-239-gdm/4.log" 2>&1; echo $?`. × on quitOnClose A first vetoes (both stay, auto-off), second accepts. Relaunch for C in A (no closeRequested), then B first and last-window A veto/accept. V rearms. Screen shows last key receiver; expect exit/cleanup count=1 per App, process exit once, exit 0. Send `~/device-239-probe.log` for all modes.
-5. **[HUMAN] LAST:** Run `"$PROBE" session > "$HOME/device-239-gdm/5.log" 2>&1; echo $?`. Save other work; T cycles 2/5/10 s timeout. In separate launches perform real logout idle at each value, then D and logout during its logged 30 s main-thread block. Inspect `~/device-239-probe.log` after login. Screen explains native mapping limitations: Linux session-manager delivery varies; report only observed public exitRequested/exit/cleanup/framework final clean line. Native callbacks/cancellation remain UNVERIFIED. A normal window close can first check durable logging without ending the session.
+
+No logout step on Linux: TrussC has no Linux session receiver by design, so there is no TrussC session-end behaviour to verify here.
 
 Report back one line per step: `<step#> PASS|FAIL|SKIP|UNVERIFIED <log path> <one-line note>`. An unavailable platform feature is SKIP; only a wrong result is FAIL; anything not run is UNVERIFIED, never PASS. For mixed results give separate lines with the same step number.
 
