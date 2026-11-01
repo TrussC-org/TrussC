@@ -897,16 +897,16 @@ OnceGate& sglStackErrorReportGate(bool inFbo) {
 }
 
 void reportSglStackErrors(sgl_error_t err, bool inFbo) {
-    // Matrix stack errors (#232): TrussC keeps its push/pop balanced per node
+    // Stack errors (#232, #331): TrussC keeps its push/pop balanced per node
     // and per frame. FBO contexts are reset at begin() (#327). Reported once, then
-    // at most every 5 s per place — the flags are cleared again at sg_commit().
+    // at most every 5 s per place. Target completion clears their error flags.
     if (err.stack_overflow || err.stack_underflow) {
         if (sglStackErrorReportGate(inFbo).isFirstTime()) {
-            logWarning("sokol_gl") << "matrix stack "
-                << (err.stack_overflow ? "overflow (more than 64 temporary sgl matrix levels)"
-                                       : "underflow (sgl_pop_matrix without a push)")
+            logWarning("sokol_gl") << "stack "
+                << (err.stack_overflow ? "overflow (pipeline stack limit or matrix stack out of memory)"
+                                       : "underflow (sgl_pop_matrix/sgl_pop_pipeline without a push)")
                 << (inFbo ? " in an Fbo pass" : " on screen")
-                << "; transforms past that point are wrong this frame";
+                << "; subsequent immediate-mode draws are dropped until the context is reset";
         }
     }
 }
