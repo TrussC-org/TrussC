@@ -432,16 +432,25 @@ execute_process(
 )
 
 # Extract symbol names from the public symbols section
-# An actual symbol line looks like \"  XXXXXX symbol-name\" (a hex address of 6+ digits)
+# A symbol line is \"  <hex offset> symbol-name\" at the start of a line.
+# dumpbin doesn't zero-pad the offset, so it can be any number of digits.
 set(SYMBOLS \"\")
-string(REGEX MATCHALL \"[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
+# Lines are matched after a newline, so give the first line one too.
+set(DUMP_OUT \"\\n\${DUMP_OUT}\")
+# Drop the '     8E9 public symbols' count line; it has the same layout.
+string(REGEX REPLACE \"\\n *[0-9A-Fa-f]+ public symbols\" \"\" DUMP_OUT \"\${DUMP_OUT}\")
+string(REGEX MATCHALL \"\\n *[0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
 foreach(ENTRY \${ENTRIES})
-    string(REGEX MATCH \"^[0-9A-Fa-f]+ (.+)\" _ \"\${ENTRY}\")
+    string(REGEX MATCH \"^\\n *[0-9A-Fa-f]+ (.+)\" _ \"\${ENTRY}\")
     if(CMAKE_MATCH_1)
         set(SYM \"\${CMAKE_MATCH_1}\")
         # Filter: skip symbols that cannot be exported
         if(SYM MATCHES \"^__imp_\")
             # Import thunk
+        elseif(SYM MATCHES \"^[?][?]_[GE]\")
+            # Scalar/vector deleting destructors cause LNK4102 when exported.
+            # Virtual deletion uses the vtable to reach the destructor body
+            # in the defining module, without a named guest import.
         elseif(SYM MATCHES \"^[.]\")
             # Section name (.CRT$XCU, .rdata, etc.)
         elseif(SYM MATCHES \"/\")
@@ -455,11 +464,7 @@ foreach(ENTRY \${ENTRIES})
         elseif(SYM MATCHES \"^_RTC_\")
             # Internal symbol for runtime checks
         elseif(SYM MATCHES \"^(size|mode|uid|gid)$\")
-            # Archive member header metadata, not a symbol. The header lines
-            # ('    2A4B8 size', '       0 mode', ...) only match the
-            # hex-address regex once a member grows to a 6-hex-digit size
-            # field (>= 1 MB object file), which is why small libs never hit
-            # this.
+            # Archive member header metadata ('    2A4B8 size', '       0 mode'), not symbols.
         else()
             list(APPEND SYMBOLS \"\${SYM}\")
         endif()
@@ -527,7 +532,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                 OUTPUT "${_TC_HOST_IMPORT_LIB}"
                 BYPRODUCTS "${_TC_HOST_IMPORT_DEF}"
                 COMMAND ${CMAKE_COMMAND} -P "${_TC_HOST_IMPORT_SCRIPT}"
-                COMMAND ${CMAKE_AR} /NOLOGO /IGNORE:4102
+                COMMAND ${CMAKE_AR} /NOLOGO
                     /DEF:${_TC_HOST_IMPORT_DEF}
                     /OUT:${_TC_HOST_IMPORT_LIB}
                     /MACHINE:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}
