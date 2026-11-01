@@ -11,6 +11,77 @@ SOURCE = Path(os.environ.get('TC_WIN32_FIXTURE_SOURCE', ROOT / 'core/tests/nativ
 
 
 class NativeFixtureTests(unittest.TestCase):
+    def test_initial_dimensions_use_granted_client_area(self):
+        source = SOURCE.read_text(encoding='utf-8')
+        predicate = body(source, 'bool initialDimensionsMatchClient(')
+        code = r'''
+#include <cassert>
+struct RECT { long left, top, right, bottom; };
+RECT granted{};
+bool clientAvailable = true;
+unsigned dpi = 96;
+bool GetClientRect(int, RECT* client) { *client = granted; return clientAvailable; }
+unsigned getDpi(int) { return dpi; }
+struct { unsigned (*GetDpiForWindow)(int) = getDpi; } _sapp_tc;
+struct _sapp_tc_window_t {
+    int hwnd = 1, frame_count = 0, fb_width = 0, fb_height = 0;
+    int win_width = 0, win_height = 0;
+    float dpi_scale = 0;
+    struct { bool no_high_dpi = false; } desc;
+};
+''' + predicate + r'''
+int main() {
+    for (unsigned monitorDpi : {96u, 120u, 144u, 192u}) {
+        dpi = monitorDpi;
+        const float scale = float(dpi) / 96.f;
+        for (bool highDpi : {false, true}) {
+            for (bool pixels : {false, true}) {
+                // Ordinary grants preserve the old requested-size expectation;
+                // 200% also exercises the auditor's clamped physical client size.
+                for (bool clamped : {false, true}) {
+                    const float clientScale = pixels && highDpi ? 1.f : scale;
+                    granted = {0, 0, clamped ? 1924 : int(1001 * clientScale + .5f),
+                        clamped ? 1159 : int(667 * clientScale + .5f)};
+                    _sapp_tc_window_t w;
+                    w.desc.no_high_dpi = !highDpi;
+                    w.win_width = int(float(granted.right) / scale + .5f);
+                    w.win_height = int(float(granted.bottom) / scale + .5f);
+                    w.fb_width = highDpi ? int(granted.right) : w.win_width;
+                    w.fb_height = highDpi ? int(granted.bottom) : w.win_height;
+                    w.dpi_scale = highDpi ? scale : 1.f;
+                    assert(initialDimensionsMatchClient(&w));
+                    if (!clamped) {
+                        const float renderScale = highDpi ? scale : 1.f;
+                        assert(w.fb_width == (pixels ? 1001 : int(1001 * renderScale + .5f)));
+                        assert(w.fb_height == (pixels ? 667 : int(667 * renderScale + .5f)));
+                    }
+                    auto bad = w; ++bad.fb_width; assert(!initialDimensionsMatchClient(&bad));
+                    bad = w; ++bad.fb_height; assert(!initialDimensionsMatchClient(&bad));
+                    bad = w; ++bad.win_width; assert(!initialDimensionsMatchClient(&bad));
+                    bad = w; ++bad.win_height; assert(!initialDimensionsMatchClient(&bad));
+                    bad = w; bad.dpi_scale += .25f; assert(!initialDimensionsMatchClient(&bad));
+                    bad = w; bad.frame_count = 1; assert(!initialDimensionsMatchClient(&bad));
+                    bad = w; bad.fb_width = 0; assert(!initialDimensionsMatchClient(&bad));
+                    clientAvailable = false; assert(!initialDimensionsMatchClient(&w));
+                    clientAvailable = true;
+                    if (clamped && highDpi && dpi == 192 && !pixels) {
+                        bad = w; bad.fb_width = 2002; bad.fb_height = 1334;
+                        assert(!initialDimensionsMatchClient(&bad));
+                    }
+                    granted.right = 0; assert(!initialDimensionsMatchClient(&w));
+                }
+            }
+        }
+    }
+}
+'''
+        code = '#include <initializer_list>\n' + code
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / 'dimensions.cpp').write_text(code, encoding='utf-8')
+            subprocess.run(['c++', '-std=c++20', str(path / 'dimensions.cpp'), '-o', str(path / 'dimensions')], check=True)
+            subprocess.run([str(path / 'dimensions')], check=True)
+
     def test_close_policy_and_session_launch(self):
         source = SOURCE.read_text(encoding='utf-8')
         # Compile the fixture's actual descriptor setup and early launch routing.
