@@ -2,10 +2,9 @@
 // =============================================================================
 // sglCoverage.glsl — sokol_gl shader for single-channel coverage textures.
 // =============================================================================
-// Drop-in shader for an sgl pipeline, with the same vertex stage and ABI as
-// sglPremult.glsl and the shader embedded in sokol_gl_tc.h (vertex layout
-// pos/uv/color/psize, vs_params = mvp+tm, tex/smp at binding 0), so sgl can use
-// it via sg_pipeline_desc.shader.
+// Uses the same explicit pos/uv/color layout and 40-byte vertex stride as
+// sglPremult.glsl, skipping the unused point-size slot. Uniforms (vs_params =
+// mvp+tm) and tex/smp at binding 0 match sokol_gl's built-in shader.
 //
 // The texture holds coverage in its R channel (the TrueType glyph atlas, R8,
 // one byte per texel). The fragment stage uses that coverage as alpha:
@@ -22,14 +21,12 @@ layout(binding=0) uniform vs_params {
 in vec4 position;
 in vec2 texcoord0;
 in vec4 color0;
-in float psize;
 out vec4 uv;
 out vec4 color;
 void main() {
     gl_Position = mvp * position;
     // No gl_PointSize write (see sglPremult.glsl): this shader is only bound for
-    // textured quads. psize stays declared so the vertex layout sgl forces still
-    // matches.
+    // textured quads.
     uv = tm * vec4(texcoord0, 0.0, 1.0);
     color = color0;
 }

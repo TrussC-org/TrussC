@@ -2,13 +2,12 @@
 // =============================================================================
 // sglPremult.glsl — premultiplied-alpha variant of sokol_gl's built-in shader.
 // =============================================================================
-// Drop-in replacement shader for an sgl pipeline: the vertex stage and the whole
-// ABI (vertex layout pos/uv/color/psize, vs_params = mvp+tm, tex/smp at binding 0)
-// are IDENTICAL to the shader embedded in sokol_gl_tc.h, so sgl can use it via
-// sg_pipeline_desc.shader (see _sgl_init_pipeline: a caller-supplied shader is
-// kept, only the vertex layout is forced).
+// Replacement shader for an sgl pipeline: reads pos/uv/color from the standard
+// 40-byte sgl vertex, using an explicit three-attribute sg_pipeline_desc.layout.
+// The unused point-size slot is skipped. Uniforms (vs_params = mvp+tm) and
+// tex/smp at binding 0 match the shader embedded in sokol_gl_tc.h.
 //
-// The ONLY difference is the fragment stage: the output is PREMULTIPLIED
+// The fragment stage's output is PREMULTIPLIED
 // (rgb *= a). This is what lets the Screen / Multiply blend modes respect source
 // alpha — with a straight-alpha fragment output their fixed-function blend
 // equations ignore α (Screen) or can't fade by it (Multiply). With premultiplied
@@ -29,15 +28,13 @@ layout(binding=0) uniform vs_params {
 in vec4 position;
 in vec2 texcoord0;
 in vec4 color0;
-in float psize;
 out vec4 uv;
 out vec4 color;
 void main() {
     gl_Position = mvp * position;
     // NOTE: no gl_PointSize write — this variant is only bound for Screen/Multiply
     // filled primitives, and writing a non-constant PointSize fails shdc/SPIRV-Cross
-    // validation. The psize attribute stays declared so the vertex layout (forced by
-    // sgl to 4 attrs) still matches.
+    // validation.
     uv = tm * vec4(texcoord0, 0.0, 1.0);
     color = color0;
 }
