@@ -1,6 +1,6 @@
 # #239 combined device pass
 
-The probe branch is next/window df87610f plus this test-only probe. All other steps test df87610f code. Each launch appends to the same durable probe log; send that file along with the per-step stdout logs. Every mode draws its instructions on screen. No arguments (or an unknown mode) prints usage and exits 0 without a window. Do not install missing prerequisites without owner approval.
+The probe branch is next/window 512a210e plus this test-only probe. All other steps test 512a210e code. Each launch appends to the same durable probe log; send that file along with the per-step stdout logs. Every mode draws its instructions on screen. No arguments (or an unknown mode) prints usage and exits 0 without a window. Do not install missing prerequisites without owner approval.
 
 Build order matters: core sweep, then addon sweep, then the standalone nativeWindow harness (build_all does not rebuild it; always configure and build it fresh after checkout), then the hot-reload host rebuild. Run the commands in the order shown.
 
