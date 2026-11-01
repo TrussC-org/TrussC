@@ -15,31 +15,89 @@ details.ko = "- `main()` 안에서 `return TC_RUN_APP(tcApp, settings);`처럼 �
 signature = "TC_HOT_RELOAD(AppClass)"
 category = "Application"
 keywords = ["hot reload", "guest", "development"]
-description.en = "Enables hot reload for an App when placed in its .cpp file."
-description.ja = "App の .cpp ファイルに置くと、その App のホットリロードを有効にします。"
-description.ko = "App의 .cpp 파일에 넣어 해당 App의 핫 리로드를 활성화합니다."
-details.en = "Use TC_RUN_APP in main.cpp. trusscli build reconfigures when this marker is added or removed. Each reload creates a fresh App. macOS, Linux and Windows support hot reload; other platforms build normally."
-details.ja = "main.cpp では TC_RUN_APP を使います。このマーカーを追加・削除すると trusscli build が再構成します。リロードごとに新しい App が作られます。macOS・Linux・Windows で対応し、その他のプラットフォームでは通常ビルドになります。"
-details.ko = "main.cpp에서는 TC_RUN_APP을 사용합니다. 이 마커를 추가하거나 제거하면 trusscli build가 다시 구성합니다. 리로드마다 새 App을 만듭니다. macOS, Linux, Windows에서 지원하며 다른 플랫폼에서는 일반 빌드가 됩니다."
+description.en = "Turns on hot reload, so saving your code rebuilds and reloads the running app without restarting it."
+description.ja = "ホットリロードを有効にし、コードを保存すると実行中のアプリを再起動せずに再ビルドして読み込み直す。"
+description.ko = "핫 리로드를 켜서, 코드를 저장하면 실행 중인 앱을 다시 시작하지 않고 다시 빌드해 불러온다."
+details.en = '''
+- While the app runs, saving your source files rebuilds your app code and swaps it in without closing the window. Put `TC_HOT_RELOAD(tcApp)` in `tcApp.cpp`, not in `main.cpp`, and keep `TC_RUN_APP` in `main()`.
+- Hot reload is turned on or off when CMake configures the project. After you add or remove the line, `trusscli build` reconfigures automatically; with plain CMake, the build stops once and you build again. To turn it off, delete the line or comment it out with `//`; a `/* */` comment is not detected.
+- Each reload creates a new `App`, so its member values start over and `setup()` runs again. Save anything you want to keep yourself.
+- If a rebuild fails to compile, the previous code keeps running. Fix the error and save again.
+- Hot reload works on macOS, Windows and Linux. On Android, iOS and the web, the macro does nothing and the app builds normally.
+- Code that cannot be hot-reloaded can say so with `TC_NO_HOT_RELOAD`. With `TC_HOT_RELOAD` on, the build then stops with that reason, and you remove `TC_HOT_RELOAD` to build normally. For example, tcxHap does this on Windows.
+'''
+details.ja = '''
+- アプリの実行中にソースファイルを保存すると、アプリのコードが再ビルドされ、ウィンドウを閉じずに差し替わります。`TC_HOT_RELOAD(tcApp)` は `main.cpp` ではなく `tcApp.cpp` に書き、`main()` には `TC_RUN_APP` を置いたままにしてください。
+- ホットリロードのオン・オフは、CMake がプロジェクトを構成するときに切り替わります。この行を追加・削除すると、`trusscli build` は自動で再構成します。CMake を直接使う場合は、ビルドが一度止まるので、もう一度ビルドしてください。オフにするには、行を削除するか `//` でコメントアウトします。`/* */` のコメントは検出されません。
+- リロードのたびに新しい `App` が作られるため、メンバーの値は最初からになり、`setup()` ももう一度呼ばれます。残したい値は自分で保存してください。
+- 再ビルドでコンパイルに失敗した場合は、前のコードのまま動き続けます。エラーを直して、もう一度保存してください。
+- ホットリロードは macOS、Windows、Linux で使えます。Android、iOS、web ではこのマクロは何もせず、通常どおりビルドされます。
+- ホットリロードできないコードは、`TC_NO_HOT_RELOAD` でそれを宣言できます。`TC_HOT_RELOAD` がオンだとビルドがその理由で止まるので、通常どおりビルドするには `TC_HOT_RELOAD` を外します。たとえば tcxHap は Windows でこれを使っています。
+'''
+details.ko = '''
+- 앱 실행 중에 소스 파일을 저장하면 앱 코드가 다시 빌드되어 창을 닫지 않고 교체됩니다. `TC_HOT_RELOAD(tcApp)`는 `main.cpp`가 아니라 `tcApp.cpp`에 쓰고, `main()`에는 `TC_RUN_APP`을 그대로 두세요.
+- 핫 리로드의 켜기와 끄기는 CMake가 프로젝트를 구성할 때 바뀝니다. 이 줄을 추가하거나 지우면 `trusscli build`가 자동으로 다시 구성합니다. CMake를 직접 쓰는 경우에는 빌드가 한 번 멈추므로 다시 빌드하세요. 끄려면 줄을 지우거나 `//`로 주석 처리합니다. `/* */` 주석은 감지되지 않습니다.
+- 리로드할 때마다 새 `App`이 만들어지므로 멤버 값은 처음부터 시작하고 `setup()`도 다시 호출됩니다. 남기고 싶은 값은 직접 저장하세요.
+- 다시 빌드할 때 컴파일에 실패하면 이전 코드가 계속 실행됩니다. 오류를 고치고 다시 저장하세요.
+- 핫 리로드는 macOS, Windows, Linux에서 쓸 수 있습니다. Android, iOS, web에서는 이 매크로가 아무 일도 하지 않고 평소대로 빌드됩니다.
+- 핫 리로드할 수 없는 코드는 `TC_NO_HOT_RELOAD`로 그것을 선언할 수 있습니다. `TC_HOT_RELOAD`가 켜져 있으면 빌드가 그 이유로 멈추므로, 평소대로 빌드하려면 `TC_HOT_RELOAD`를 뺍니다. 예를 들어 tcxHap은 Windows에서 이것을 사용합니다.
+'''
 snippet = '''
+// tcApp.cpp
 #include "tcApp.h"
+
 TC_HOT_RELOAD(tcApp)
+
+// main.cpp (unchanged)
+int main() {
+    WindowSettings settings;
+    settings.setSize(960, 600);
+    return TC_RUN_APP(tcApp, settings);
+}
 '''
 related = ["TC_NO_HOT_RELOAD", "runApp"]
 
 [TC_NO_HOT_RELOAD]
 signature = "TC_NO_HOT_RELOAD(\"reason\");"
 category = "Application"
-keywords = ["hot reload", "addon", "guest", "opt out"]
-description.en = "Declares that addon or user code cannot compile as a hot-reload guest, with a reason."
-description.ja = "アドオンやユーザーコードがホットリロードの guest としてコンパイルできない理由を宣言します。"
-description.ko = "애드온이나 사용자 코드가 핫 리로드 guest로 컴파일될 수 없는 이유를 선언합니다."
-details.en = "Place this macro at namespace scope in a header or .cpp file, with a string literal reason and a trailing semicolon. Guest compilation fails with 'hot reload is not supported here:' followed by the reason. It expands to nothing in ordinary and host builds. Remove TC_HOT_RELOAD to build normally. tcxHap uses it on Windows because snappy is not linked into the guest."
-details.ja = "ヘッダーや .cpp の名前空間スコープに、理由の文字列リテラルと末尾のセミコロンを付けて置きます。guest のコンパイル時だけ「hot reload is not supported here:」に続けて理由が表示され、エラーになります。通常ビルドと host では何も展開しません。通常ビルドに戻すには TC_HOT_RELOAD を削除します。tcxHap は Windows の guest に snappy がリンクされないため、このマクロを使います。"
-details.ko = "헤더나 .cpp의 네임스페이스 범위에 이유 문자열 리터럴과 끝의 세미콜론을 붙여 넣습니다. guest 컴파일만 'hot reload is not supported here:' 뒤에 이유를 표시하며 실패합니다. 일반 빌드와 host에서는 아무것도 확장하지 않습니다. 일반 빌드로 돌아가려면 TC_HOT_RELOAD를 제거합니다. tcxHap은 Windows guest에 snappy가 링크되지 않아 이 매크로를 사용합니다."
+keywords = ["hot reload", "addon", "guest", "host", "opt out"]
+description.en = "Declares that this code cannot be hot-reloaded, so a hot-reload build stops with your reason."
+description.ja = "このコードはホットリロードできないと宣言し、ホットリロードのビルドを理由付きのエラーで止める。"
+description.ko = "이 코드는 핫 리로드할 수 없다고 선언하고, 핫 리로드 빌드를 이유가 담긴 오류로 멈춘다."
+details.en = '''
+- Use it in code that cannot work with hot reload, such as an addon whose library is not linked into the hot-reload build. Give the reason as a string literal and end the line with a semicolon. Put it outside any function or class, at namespace scope.
+- When `TC_HOT_RELOAD` is on, the part of the app that hot reload rebuilds (the guest) fails to compile with `hot reload is not supported here:` followed by your reason. You see the cause right away, instead of a link error later.
+- In every other build it does nothing: an ordinary build, the part of a hot-reload build that keeps running (the host), and platforms without hot reload. So `main.cpp` can include the same header safely.
+- To build an app that uses such code, remove `TC_HOT_RELOAD` (see `TC_HOT_RELOAD`).
+- In an addon, put it in a public header that apps include, after `#include <TrussC.h>`. If only one platform is affected, wrap it in `#ifdef`. tcxHap declares it in `tcxHapDecoder.h` under `#ifdef _WIN32`, because its snappy library is not linked into the hot-reload build on Windows.
+'''
+details.ja = '''
+- ホットリロードでは動かせないコードで使います。たとえば、依存するライブラリがホットリロード用のビルドにリンクされないアドオンです。理由は文字列リテラルで書き、行の最後にセミコロンを付けます。関数やクラスの外、名前空間スコープに置いてください。
+- `TC_HOT_RELOAD` がオンのときは、ホットリロードで再ビルドされる部分（guest）のコンパイルが `hot reload is not supported here:` とその理由を表示して失敗します。あとでリンクエラーになるのではなく、すぐに原因が分かります。
+- それ以外のビルドでは何もしません。通常のビルド、ホットリロードのビルドで動き続ける部分（host）、ホットリロードのないプラットフォームが該当します。そのため、同じヘッダーを `main.cpp` からインクルードしても問題ありません。
+- このようなコードを使うアプリをビルドするには、`TC_HOT_RELOAD` を外してください（`TC_HOT_RELOAD` を参照）。
+- アドオンでは、アプリがインクルードする公開ヘッダーの `#include <TrussC.h>` のあとに書きます。影響するのが一部のプラットフォームだけなら、`#ifdef` で囲みます。tcxHap は、Windows では依存する snappy がホットリロード用のビルドにリンクされないため、`tcxHapDecoder.h` で `#ifdef _WIN32` の中に宣言しています。
+'''
+details.ko = '''
+- 핫 리로드로는 동작할 수 없는 코드에서 사용합니다. 예를 들어 의존하는 라이브러리가 핫 리로드용 빌드에 링크되지 않는 애드온입니다. 이유는 문자열 리터럴로 쓰고 줄 끝에 세미콜론을 붙입니다. 함수나 클래스 밖, 네임스페이스 범위에 두세요.
+- `TC_HOT_RELOAD`가 켜져 있으면 핫 리로드가 다시 빌드하는 부분(guest)의 컴파일이 `hot reload is not supported here:`와 그 이유를 표시하며 실패합니다. 나중에 링크 오류가 나는 대신 바로 원인을 알 수 있습니다.
+- 그 밖의 빌드에서는 아무 일도 하지 않습니다. 일반 빌드, 핫 리로드 빌드에서 계속 실행되는 부분(host), 핫 리로드가 없는 플랫폼이 여기에 해당합니다. 그래서 같은 헤더를 `main.cpp`에서 포함해도 문제없습니다.
+- 이런 코드를 쓰는 앱을 빌드하려면 `TC_HOT_RELOAD`를 빼세요(`TC_HOT_RELOAD` 참조).
+- 애드온에서는 앱이 포함하는 공개 헤더의 `#include <TrussC.h>` 뒤에 씁니다. 영향을 받는 플랫폼이 일부뿐이면 `#ifdef`로 감쌉니다. tcxHap은 Windows에서 의존하는 snappy가 핫 리로드용 빌드에 링크되지 않으므로, `tcxHapDecoder.h`에서 `#ifdef _WIN32` 안에 선언합니다.
+'''
 snippet = '''
+// In your own code, e.g. a source file of your app
 #include "TrussC.h"
+
 TC_NO_HOT_RELOAD("this code keeps state that cannot survive reloads");
+
+// In an addon's public header, only where the problem exists
+#pragma once
+#include <TrussC.h>
+
+#ifdef _WIN32
+TC_NO_HOT_RELOAD("tcxMyAddon: its library is not linked into the hot-reload build on Windows");
+#endif
 '''
 related = ["TC_HOT_RELOAD"]
 
