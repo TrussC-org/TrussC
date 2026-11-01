@@ -32,6 +32,8 @@ the process. macOS calls _exit(0) before returning NSTerminateNow; it never
 uses an unanswered NSTerminateLater that could block logout. A blocked main
 that cannot receive the callback is subject to the OS termination policy.
 Busy termination and OS-killed ends skip atexit handlers and C++ static destructors.
+A logout that arrives while a framework call is pumping messages synchronously
+(for example, Windows VideoPlayer::load waiting for metadata) also counts as busy.
 
 An idle commit runs normal reverse attachment ending synchronously: exit events,
 exactly one App::exit, audio detach and cleanup, then complete service/device
