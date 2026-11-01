@@ -2889,8 +2889,8 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
             bundle.selections[found->second.id] = request.selection;
             result.immediate = found->second; return result;
         }
-        // sgl supplies its vertex layout and default shader; keep those fields
-        // unset rather than passing raw-sg's inferred defaults to its backend.
+        // sgl supplies the default shader/layout when unset and preserves an
+        // explicit custom-shader layout; pass the request before raw-sg defaults.
         auto pipeline = programReady ? sgl_context_make_pipeline(bundle.context, &desc) : sgl_pipeline{};
         bundle.cache.emplace(key, pipeline);
         bundle.selections[pipeline.id] = request.selection;

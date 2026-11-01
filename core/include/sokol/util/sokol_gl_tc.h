@@ -172,14 +172,18 @@
         function is intended. sgl_make_pipeline() also takes a standard
         sokol-gfx sg_pipeline_desc object to describe the render state, but
         without:
-            - shader
-            - vertex layout
             - color- and depth-pixel-formats
             - primitive type (lines, triangles, ...)
             - MSAA sample count
         Those will be filled in by sgl_make_pipeline(). Note that each
         call to sgl_make_pipeline() needs to create several sokol-gfx
         pipeline objects (one for each primitive type).
+
+        [TrussC] A caller-supplied shader is preserved. With a custom shader,
+        layout.attrs[0].format != SG_VERTEXFORMAT_INVALID selects an explicit
+        vertex layout, which must describe the existing sokol-gl vertex buffer
+        (including its stride). Otherwise the standard pos/uv/color/psize layout
+        is supplied. The built-in shader always uses that standard layout.
 
         'depth.write_enabled' will be forced to 'false' if the context this
         pipeline object is intended for has its depth pixel format set to
@@ -2906,26 +2910,30 @@ static void _sgl_init_pipeline(sgl_pipeline pip_id, const sg_pipeline_desc* in_d
 
     /* create a new desc with 'patched' shader and pixel format state */
     sg_pipeline_desc desc = *in_desc;
-    desc.layout.buffers[0].stride = sizeof(_sgl_vertex_t);
-    {
-        sg_vertex_attr_state* pos = &desc.layout.attrs[0];
-        pos->offset = offsetof(_sgl_vertex_t, pos);
-        pos->format = SG_VERTEXFORMAT_FLOAT3;
-    }
-    {
-        sg_vertex_attr_state* uv = &desc.layout.attrs[1];
-        uv->offset = offsetof(_sgl_vertex_t, uv);
-        uv->format = SG_VERTEXFORMAT_FLOAT2;
-    }
-    {
-        sg_vertex_attr_state* rgba = &desc.layout.attrs[2];
-        rgba->offset = offsetof(_sgl_vertex_t, rgba);
-        rgba->format = SG_VERTEXFORMAT_FLOAT4;
-    }
-    {
-        sg_vertex_attr_state* psize = &desc.layout.attrs[3];
-        psize->offset = offsetof(_sgl_vertex_t, psize);
-        psize->format = SG_VERTEXFORMAT_FLOAT;
+    /* [TrussC] Custom shaders may describe only the vertex attributes they read.
+       Keep the standard layout for the built-in shader and unspecified layouts. */
+    if ((desc.shader.id == SG_INVALID_ID) || (desc.layout.attrs[0].format == SG_VERTEXFORMAT_INVALID)) {
+        desc.layout.buffers[0].stride = sizeof(_sgl_vertex_t);
+        {
+            sg_vertex_attr_state* pos = &desc.layout.attrs[0];
+            pos->offset = offsetof(_sgl_vertex_t, pos);
+            pos->format = SG_VERTEXFORMAT_FLOAT3;
+        }
+        {
+            sg_vertex_attr_state* uv = &desc.layout.attrs[1];
+            uv->offset = offsetof(_sgl_vertex_t, uv);
+            uv->format = SG_VERTEXFORMAT_FLOAT2;
+        }
+        {
+            sg_vertex_attr_state* rgba = &desc.layout.attrs[2];
+            rgba->offset = offsetof(_sgl_vertex_t, rgba);
+            rgba->format = SG_VERTEXFORMAT_FLOAT4;
+        }
+        {
+            sg_vertex_attr_state* psize = &desc.layout.attrs[3];
+            psize->offset = offsetof(_sgl_vertex_t, psize);
+            psize->format = SG_VERTEXFORMAT_FLOAT;
+        }
     }
     if (in_desc->shader.id == SG_INVALID_ID) {
         desc.shader = _sgl.shd;

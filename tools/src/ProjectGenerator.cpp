@@ -355,6 +355,30 @@ void ProjectGenerator::cleanBuildDirectories(const string& path) {
     }
 }
 
+#ifdef _WIN32
+static WindowsToolchainPins selectedWindowsToolchainPins(const ProjectSettings& settings) {
+    if (!settings.installedVsVersions.empty() &&
+        settings.selectedVsIndex < (int)settings.installedVsVersions.size()) {
+        return windowsToolchainPins(settings.installedVsVersions[settings.selectedVsIndex]);
+    }
+    return {};
+}
+#endif
+
+static void checkWebNinja(const ProjectSettings& settings) {
+#ifdef _WIN32
+    // Kept targets retain their existing configure-failure warning behavior.
+    if (settings.generateWebBuild && !settings.webKept &&
+        selectedWindowsToolchainPins(settings).makeProgram.empty() &&
+        executeCommand("ninja --version").first != 0) {
+        throw runtime_error("Ninja not found for Web builds. Install Visual Studio's "
+                            "C++ CMake tools for Windows or put ninja on PATH.");
+    }
+#else
+    (void)settings;
+#endif
+}
+
 void ProjectGenerator::writeCMakePresets(const string& destPath) {
     log("Writing CMakePresets.json...");
 
@@ -407,22 +431,15 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         windowsPreset["cacheVariables"]["TRUSSC_DIR"] = trusscDir;
     }
 
-    // Add ninja path and environment if VS info available
-    if (!settings_.installedVsVersions.empty() &&
-        settings_.selectedVsIndex < (int)settings_.installedVsVersions.size()) {
-        const auto& vsInfo = settings_.installedVsVersions[settings_.selectedVsIndex];
-
-        // CMAKE_MAKE_PROGRAM and the INCLUDE / LIB / PATH environment
-        // (`trusscli build` re-pins the same values after a VS change)
-        const WindowsToolchainPins pins = windowsToolchainPins(vsInfo);
-        if (!pins.makeProgram.empty()) {
-            windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
-        }
-        if (!pins.include.empty()) {
-            windowsPreset["environment"]["INCLUDE"] = pins.include;
-            windowsPreset["environment"]["LIB"] = pins.lib;
-            windowsPreset["environment"]["PATH"] = pins.path;
-        }
+    // `trusscli build` re-pins the same values after a VS change.
+    const WindowsToolchainPins pins = selectedWindowsToolchainPins(settings_);
+    if (!pins.makeProgram.empty()) {
+        windowsPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
+    }
+    if (!pins.include.empty()) {
+        windowsPreset["environment"]["INCLUDE"] = pins.include;
+        windowsPreset["environment"]["LIB"] = pins.lib;
+        windowsPreset["environment"]["PATH"] = pins.path;
     }
     presets["configurePresets"].push_back(windowsPreset);
 
@@ -519,7 +536,17 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["name"] = "web";
         webPreset["displayName"] = "Web (Emscripten)";
         webPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("web");
+        // Match the native preset's host rule; Windows does not require make.
+#ifdef _WIN32
+        webPreset["generator"] = "Ninja";
+        // Ninja needs no VS compiler environment; emcc comes from toolchainFile.
+        // With no VS Ninja pin, leave CMake to find Ninja on PATH.
+        if (!pins.makeProgram.empty()) {
+            webPreset["cacheVariables"]["CMAKE_MAKE_PROGRAM"] = pins.makeProgram;
+        }
+#else
         webPreset["generator"] = "Unix Makefiles";
+#endif
         // Emscripten toolchain found in this shell, else the saved one if it
         // still exists (update run without emsdk_env), else $env{EMSDK}
         string emDetected = detectEmscriptenToolchain();
@@ -608,6 +635,7 @@ string ProjectGenerator::generate() {
     bool folderExists = fs::is_directory(destPath);
 
     try {
+        checkWebNinja(settings_);
         log("Creating project: " + settings_.projectName);
 
         // Create parent directory
@@ -681,6 +709,7 @@ string ProjectGenerator::update(const string& projectPath_) {
     // Resolve project paths against the CLI working directory.
     string projectPath = fs::absolute(projectPath_).string();
     try {
+        checkWebNinja(settings_);
         // Safety check: if an existing CMakeLists.txt is present, verify it's
         // actually a TrussC project before overwriting. This guards against
         // accidentally clobbering an unrelated project whose directory just
@@ -1067,13 +1096,8 @@ void ProjectGenerator::generateWebBuildFiles(const string& path) {
 #endif
 }
 
-// Run CMake configure to generate compile_commands.json for IntelliSense.
-//
-// On Windows, we use VS-bundled cmake and ninja via vcvarsall.bat.
-// This sets up the environment (cl.exe, ninja, cmake in PATH) properly.
-//
-// Unix Makefiles (macOS/Linux) and Ninja both support CMAKE_EXPORT_COMPILE_COMMANDS.
-// Visual Studio generator does NOT support compile_commands.json.
+// Cross targets select their compiler through toolchainFile. Web's Ninja pin
+// needs no VS compiler environment or vcvarsall.bat.
 bool ProjectGenerator::runCrossCompilePresets(const string& path) {
     // Collect presets to configure
     vector<string> presets;
@@ -1125,6 +1149,8 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
     return ok;
 }
 
+// Native configure generates compile_commands.json for IntelliSense. Windows
+// sets up the MSVC environment with vcvarsall.bat before running CMake.
 void ProjectGenerator::runCMakeConfigure(const string& path) {
 #ifdef _WIN32
     string preset = "windows";
