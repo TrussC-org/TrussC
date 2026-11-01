@@ -435,6 +435,8 @@ execute_process(
 # A symbol line is \"  <hex offset> symbol-name\" at the start of a line.
 # dumpbin doesn't zero-pad the offset, so it can be any number of digits.
 set(SYMBOLS \"\")
+# Lines are matched after a newline, so give the first line one too.
+set(DUMP_OUT \"\\n\${DUMP_OUT}\")
 # Drop the '     8E9 public symbols' count line; it has the same layout.
 string(REGEX REPLACE \"\\n *[0-9A-Fa-f]+ public symbols\" \"\" DUMP_OUT \"\${DUMP_OUT}\")
 string(REGEX MATCHALL \"\\n *[0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
