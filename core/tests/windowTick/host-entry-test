@@ -54,7 +54,7 @@ if os.environ.get('TC_HOST_ENTRY_MUTATIONS'):
       ('turn_unwind_skips_maintenance','HostTurnScope::~HostTurnScope() noexcept { afterHostTurn(); }', 'HostTurnScope::~HostTurnScope() noexcept {}'),
       ('native_deferral_misses_callbacks','return coordinator().entries || coordinator().servicing;', 'return false;'),
       ('unguarded_lifecycle_callbacks','    ++window_.entryDepth_;\n    ++coordinator().entries;','    /* mutation: no lifecycle admission barrier */'),
-      ('allow_callback_tick','window.entryDepth_ || window.context().inCallbackClock ||\n        window.context().inUpdate || coordinator().servicing || WindowRequestAccess::dispatchActive(window)','false'),
+      ('allow_callback_tick','window.entryDepth_ || WindowRequestAccess::context(window).inCallbackClock ||\n        WindowRequestAccess::context(window).inUpdate || coordinator().servicing || WindowRequestAccess::dispatchActive(window)','false'),
       ('launch_event_ignores_delivered_identity','enterWindowEvent(event, handle, user);','enterWindowEvent(event, WindowRequestAccess::binding(*static_cast<Window*>(user)).handle, user);'),
       ('wrong_tick_identity','if (WindowRequestAccess::binding(window).handle.id != handle.id) return false;','if (false) return false;'),
       ('ignore_metadata_rejection','if (!refreshWindowEntryMetadata(window)) return;', '(void)refreshWindowEntryMetadata(window);'),
@@ -71,7 +71,7 @@ if os.environ.get('TC_HOST_ENTRY_MUTATIONS'):
       ('reload_skipped','if (state.reload) state.reload();','/* mutation: omit reload */'),
       ('maintenance_skipped','if (auto maintenance = hostServiceOperationsForTests().maintenance) maintenance();','/* mutation: omit maintenance */'),
       ('services_inside_callbacks','state.turns++ || state.entries || state.servicing','state.turns++ || state.servicing'),
-      ('caller_not_restored','    currentWindowCtx() = previous_;','    currentWindowCtx() = &window_.context();'),
+      ('caller_not_restored','    currentWindowCtx() = previous_;','    currentWindowCtx() = &WindowRequestAccess::context(window_);'),
     ]
     for name,old,new in changes:
         if source.count(old)!=1: raise SystemExit(f'{name}: mutation marker count {source.count(old)}')

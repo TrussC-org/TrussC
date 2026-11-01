@@ -11,7 +11,7 @@ inline std::shared_ptr<tc::Window> deferredWindow() {
 }
 inline void drainDeferredFrame() {
     auto* window = tc::internal::resolveWindow();
-    if (window) tc::mcp::internal::drainDeferredResponses(&window->context(), true,
+    if (window) tc::mcp::internal::drainDeferredResponses(&trussc::internal::WindowRequestAccess::context(*window), true,
         std::chrono::steady_clock::now(), false);
     tc::mcp::internal::drainDeferredResponses(nullptr, false);
 }

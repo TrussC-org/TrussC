@@ -87,7 +87,7 @@ void submit(Shader& shader) {
 static uint32_t nextDrawingWindowId = 600;
 struct DrawingWindowState {
     Window owner;
-    internal::WindowContext& context = owner.context();
+    internal::WindowContext& context = trussc::internal::WindowRequestAccess::context(owner);
     std::shared_ptr<App> queryCandidate = internal::makeConstructedAppAt<App>(&context);
     internal::AppOwnerScope queryScope{internal::appOwner(*queryCandidate)};
     DrawingWindowState() { internal::WindowRequestAccess::bindForTests(owner, ++nextDrawingWindowId); }
@@ -424,7 +424,7 @@ struct DummyWindowPair {
     internal::WindowContext* previous = internal::currentWindowCtx();
     DummyWindowPair() {
         secondary.native_ = this; internal::WindowRequestAccess::bindForTests(secondary, 202); // isOpen() only; never passed to native APIs.
-        for (auto* window : {&main, &secondary.context()}) {
+        for (auto* window : {&main, &trussc::internal::WindowRequestAccess::context(secondary)}) {
             window->fbWidth = 256; window->fbHeight = 192;
             window->acquireSwapchain = dummySwapchain;
             internal::currentWindowCtx() = window;
@@ -434,8 +434,8 @@ struct DummyWindowPair {
     }
     ~DummyWindowPair() {
         secondary.native_ = nullptr; internal::WindowRequestAccess::unbind(secondary);
-        secondary.context().teardownTargets();
-        secondary.context().swapchainTarget.resources().release();
+        trussc::internal::WindowRequestAccess::context(secondary).teardownTargets();
+        trussc::internal::WindowRequestAccess::context(secondary).swapchainTarget.resources().release();
         internal::restoreWindowContext(previous);
     }
 };
@@ -457,7 +457,7 @@ bool windowTickRestoreProbe(bool dimensions) {
     // Mirror a secondary tick, including the exact helper used by all native
     // adapters. The main recording happens AFTER that tick's global commit.
     auto* previous = internal::currentWindowCtx();
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     sgl_defaults(); beginFrame(); present();
     internal::restoreWindowContext(previous);
     const bool restored = sgl_get_context().id == mainContext.id;
@@ -471,7 +471,7 @@ bool windowTickRestoreProbe(bool dimensions) {
     // A boundary may also return to a parked Fbo, rather than a bottom target.
     Fbo fbo; fbo.allocate(8,8); fbo.begin(0,0,0);
     const auto fboContext = internal::currentTarget().resources().context;
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     internal::restoreWindowContext(previous);
     ok &= sgl_get_context().id == fboContext.id;
     fbo.end(); present();
@@ -493,7 +493,7 @@ bool interleavedRewindProbe(bool resize, bool raw) {
         shader.begin(); submit(shader); shader.end();
         ok &= !target.deferredShaderDraws.empty();
     }
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     if (resize) {
         internal::resizeSgl(2048,333);
         // A repeated request must retain the latest explicit capacities.
@@ -600,7 +600,7 @@ bool rawKindsLifetimeProbe() {
     pbr.generation.reset(); point.generation.reset(); generation.reset();
     internal::deferGpuDestroy(buffer);
     internal::endGpuFrame(); // an own upload/completion does not consume raw draws
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     for (int i = 0; i < 3; ++i) present();
     internal::restoreWindowContext(&(*renderFixture));
     ok &= !lifetime.expired() && target.deferredPbrDraws.size() == 1 && target.deferredPointDraws.size() == 1 &&
@@ -638,7 +638,7 @@ bool parkedWindowProbe(bool fboTop) {
     shader.begin(); submit(shader); recordTriangle();
     const auto stackSize = windows.main.targetStack.size();
     const auto startDraws = submittedDraws;
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     ok &= !target.inPass && target.activation == token && target.openShaderScopes == 1 &&
         windows.main.targetStack.size() == stackSize && submittedDraws == startDraws + 2;
     for (int i = 0; i < 3; ++i) present();
@@ -743,7 +743,7 @@ bool shadowDeviceRestartProbe() {
 bool shadowOwnershipProbe() {
     DummyWindowPair windows;
     auto& a = windows.main;
-    auto& b = windows.secondary.context();
+    auto& b = trussc::internal::WindowRequestAccess::context(windows.secondary);
     internal::restoreWindowContext(&a);
     bool ok = !a.shadow.storage && !b.shadow.storage;
     ok &= internal::ensureShadowStorage(a,64) && internal::ensureShadowStorage(b,128);
@@ -832,7 +832,7 @@ bool parkedShadowProbe() {
         const int start = submittedDraws;
         shadowDraw(mesh);
         prefix = submittedDraws - start;
-        internal::restoreWindowContext(&windows.secondary.context()); present();
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary)); present();
         internal::restoreWindowContext(&(*renderFixture));
         const int beforeSuffix = submittedDraws;
         shadowDraw(mesh);
@@ -862,7 +862,7 @@ bool foreignTeardownReplayFailureProbe() {
     const auto token = target.activation;
     const auto before = submittedDraws;
     failAllocation = true;
-    windows.secondary.context().teardownTargets();
+    trussc::internal::WindowRequestAccess::context(windows.secondary).teardownTargets();
     ok &= !failAllocation && !target.inPass && !_sg.cur_pass.in_pass &&
         target.deferredShaderDraws.empty() && target.openShaderScopes == 1 &&
         !windows.main.shaderStack.empty() && windows.main.shaderStack.back() == &shader &&
@@ -885,8 +885,8 @@ bool foreignTeardownReplayFailureProbe() {
 // inside present() and a foreign tick. The dummy backend cannot test GPU waits.
 bool synchronousCapturePhaseProbe(bool secondary) {
     DummyWindowPair windows;
-    auto* owner = secondary ? &windows.secondary.context() : &windows.main;
-    auto* foreign = secondary ? &windows.main : &windows.secondary.context();
+    auto* owner = secondary ? &trussc::internal::WindowRequestAccess::context(windows.secondary) : &windows.main;
+    auto* foreign = secondary ? &windows.main : &trussc::internal::WindowRequestAccess::context(windows.secondary);
     auto queryCandidate = internal::makeConstructedAppAt<App>(owner);
     internal::AppOwnerScope queryOwner(internal::appOwner(*queryCandidate));
     internal::restoreWindowContext(owner);
@@ -976,7 +976,7 @@ bool begunResizeProbe() {
     submittedDraws = 0;
     internal::ensureCurrentPass(); recordTriangle(); target.flushLayers();
     bool ok = target.passStartedThisFrame && !sgl_tc_context_has_pending_draws(context);
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     // Model native resize replacing the attachment generation while A is
     // parked. Dummy pointers test descriptor identity, not Objective-C retain.
     acquired.metal.current_drawable = &newDrawable;
@@ -1022,7 +1022,7 @@ bool resourceRetirementProbe() {
     const auto sampler = sg_make_sampler(sg_sampler_desc{});
     sgl_enable_texture(); sgl_texture(view, sampler); recordTriangle(); sgl_disable_texture();
     internal::deferGpuDestroy(view); internal::deferGpuDestroy(image); internal::deferGpuDestroy(sampler);
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     present(); // Warm B's caches; A's referenced resources remain pending.
     sg_buffer_desc bufferDesc = {}; bufferDesc.size = 16; bufferDesc.usage.vertex_buffer = true; bufferDesc.usage.dynamic_update = true;
     const auto unrelated = sg_make_buffer(bufferDesc);
@@ -1104,8 +1104,8 @@ bool curveRollbackProbe() {
 
 bool rawFailureProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(&windows.secondary.context()); recordTriangle();
-    const auto foreign = windows.secondary.context().swapchainTarget.resources().context;
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary)); recordTriangle();
+    const auto foreign = trussc::internal::WindowRequestAccess::context(windows.secondary).swapchainTarget.resources().context;
     internal::restoreWindowContext(&(*renderFixture)); recordTriangle();
     auto& target = internal::currentTarget();
     bool ok = true;
@@ -1118,7 +1118,7 @@ bool rawFailureProbe() {
     submittedDraws = 0;
     present();
     ok &= submittedDraws == 1;
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     submittedDraws = 0; present(); ok &= submittedDraws == 1;
     // Curve allocation failure also logs and returns without escaping.
     const std::vector<Vec3> points(4, Vec3{});
@@ -1893,7 +1893,7 @@ bool closedWindowContextProbe() {
             app.reset(); // Only the window owns the outgoing App.
             ok &= contextCreations() - before == 2 && liveContexts() == live + 2;
             parent.finish(); parent.finish();
-            ok &= !parent.context().swapchainTarget.resources().context.id;
+            ok &= !trussc::internal::WindowRequestAccess::context(parent).swapchainTarget.resources().context.id;
         }
         const auto creates = contextCreations() - before;
         const auto destroys = live + int(creates) - liveContexts();

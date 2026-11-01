@@ -267,7 +267,7 @@ class WindowDriver : public Driver {
 public:
     WindowDriver() {
         prev_ = internal::currentWindowCtx();
-        internal::currentWindowCtx() = &win_.context();
+        internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(win_);
         win_.native_ = &nativeStandIn_; internal::WindowRequestAccess::bindForTests(win_, 202);
         app_ = internal::makeConstructedApp<App>();
         internal::WindowRequestAccess::attachCandidate(win_, app_);
@@ -282,14 +282,14 @@ public:
     }
 
 protected:
-    void doPress(const MouseEventArgs& e) override { win_.dispatchMousePressToTree(e); }
-    void doRelease(const MouseEventArgs& e) override { win_.dispatchMouseReleaseToTree(e); }
-    void doMove(const internal::MouseEventRaw& e) override { win_.dispatchMouseMoveToTree(e); }
-    void doScroll(const ScrollEventArgs& e) override { win_.dispatchMouseScrollToTree(e); }
+    void doPress(const MouseEventArgs& e) override { trussc::internal::WindowRequestAccess::dispatchMousePressToTree(win_, e); }
+    void doRelease(const MouseEventArgs& e) override { trussc::internal::WindowRequestAccess::dispatchMouseReleaseToTree(win_, e); }
+    void doMove(const internal::MouseEventRaw& e) override { trussc::internal::WindowRequestAccess::dispatchMouseMoveToTree(win_, e); }
+    void doScroll(const ScrollEventArgs& e) override { trussc::internal::WindowRequestAccess::dispatchMouseScrollToTree(win_, e); }
     void doTick(Vec2 p) override {
-        win_.context().mouseX = p.x;
-        win_.context().mouseY = p.y;
-        win_.tickTree();
+        trussc::internal::WindowRequestAccess::context(win_).mouseX = p.x;
+        trussc::internal::WindowRequestAccess::context(win_).mouseY = p.y;
+        trussc::internal::WindowRequestAccess::tickTree(win_);
     }
 
 private:

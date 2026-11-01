@@ -144,31 +144,32 @@ public:
     void setIndependentFps(float updateFps, float drawFps);
     float getFps() const { return ctx_.loop.drawTargetFps; }
 
-    internal::WindowContext& context() { return ctx_; }
+private:
+    TC_LUA_SKIP internal::WindowContext& context() { return ctx_; }
 
     // --- tree driving (called by the platform glue; friend access to Node) ---
     // The root is locked once per call, so it stays alive for the whole call
     // even if a handler detaches the window's App (destroyApp()).
-    void dispatchMousePressToTree(const MouseEventArgs& e) {
+    TC_LUA_SKIP void dispatchMousePressToTree(const MouseEventArgs& e) {
         internal::MouseDispatchScope dispatch(ctx_, e.button, true);
         if (auto root = ctx_.rootNode.lock()) root->dispatchMousePress(e);
     }
-    void dispatchMouseReleaseToTree(const MouseEventArgs& e) {
+    TC_LUA_SKIP void dispatchMouseReleaseToTree(const MouseEventArgs& e) {
         if (auto root = ctx_.rootNode.lock()) root->dispatchMouseRelease(e);
     }
-    void dispatchMouseMoveToTree(const internal::MouseEventRaw& e) {
+    TC_LUA_SKIP void dispatchMouseMoveToTree(const internal::MouseEventRaw& e) {
         if (auto root = ctx_.rootNode.lock()) root->dispatchMouseMove(e);
     }
-    void dispatchMouseScrollToTree(const ScrollEventArgs& e) {
+    TC_LUA_SKIP void dispatchMouseScrollToTree(const ScrollEventArgs& e) {
         if (auto root = ctx_.rootNode.lock()) root->dispatchMouseScroll(e);
     }
-    void dispatchKeyPressToTree(const KeyEventArgs& e) {
+    TC_LUA_SKIP void dispatchKeyPressToTree(const KeyEventArgs& e) {
         if (auto root = ctx_.rootNode.lock()) root->dispatchKeyPress(e);
     }
-    void dispatchKeyReleaseToTree(const KeyEventArgs& e) {
+    TC_LUA_SKIP void dispatchKeyReleaseToTree(const KeyEventArgs& e) {
         if (auto root = ctx_.rootNode.lock()) root->dispatchKeyRelease(e);
     }
-    void tickTree() {
+    TC_LUA_SKIP void tickTree() {
         auto root = ctx_.rootNode.lock();
         if (!root) return;
         internal::AppCallbackScope owner(app_ ? internal::appOwner(*app_) : nullptr);
@@ -177,7 +178,7 @@ public:
         root->updateTree();
         root->updateHoverState(ctx_.mouseX, ctx_.mouseY);
     }
-    void drawTreeNow() {
+    TC_LUA_SKIP void drawTreeNow() {
         if (auto root = ctx_.rootNode.lock()) {
             internal::AppCallbackScope owner(app_ ? internal::appOwner(*app_) : nullptr);
             internal::setupNodeOnce(*root);   // the setup() entry point (#349)
@@ -189,7 +190,7 @@ public:
     // App's coordinate size (pixels in pixelPerfect mode, otherwise logical)
     // before its first setup and on every resize/display change.
     // A plain Node root is left untouched.
-    void syncRootSize(float wPts, float hPts) {
+    TC_LUA_SKIP void syncRootSize(float wPts, float hPts) {
         if (!app_) return;
         // handleWindowResized() = RectNode::setSize (non-virtual; App::setSize
         // is overridden to resize the OS window) + the windowResized() hook —
@@ -201,6 +202,7 @@ public:
         events_.windowResized.notify(args);
     }
 
+public:
     // --- internal (used by the platform glue; not user API) ---
     Window();
     std::shared_ptr<App> app_;               // set via setApp (may be null)
@@ -298,6 +300,17 @@ namespace internal {
 // VideoPlayer to its platform code.
 class WindowRequestAccess {
 public:
+    // Internal tree/context access for framework plumbing and in-repo fixtures.
+    static WindowContext& context(Window& w) { return w.context(); }
+    static void dispatchMousePressToTree(Window& w, const MouseEventArgs& e) { w.dispatchMousePressToTree(e); }
+    static void dispatchMouseReleaseToTree(Window& w, const MouseEventArgs& e) { w.dispatchMouseReleaseToTree(e); }
+    static void dispatchMouseMoveToTree(Window& w, const MouseEventRaw& e) { w.dispatchMouseMoveToTree(e); }
+    static void dispatchMouseScrollToTree(Window& w, const ScrollEventArgs& e) { w.dispatchMouseScrollToTree(e); }
+    static void dispatchKeyPressToTree(Window& w, const KeyEventArgs& e) { w.dispatchKeyPressToTree(e); }
+    static void dispatchKeyReleaseToTree(Window& w, const KeyEventArgs& e) { w.dispatchKeyReleaseToTree(e); }
+    static void tickTree(Window& w) { w.tickTree(); }
+    static void drawTreeNow(Window& w) { w.drawTreeNow(); }
+    static void syncRootSize(Window& w, float width, float height) { w.syncRootSize(width, height); }
     static void attachCandidate(Window& w, std::shared_ptr<App> app) { w.requestApp(std::move(app)); }
     static bool acceptsBinding(const Window& w) { return !w.exitDelivered_ && w.epoch_ == runtimeEpoch() && !runtimeEnding(); }
     static const AppConstructionTicket& constructionTicket(const App& app) { return app.constructorTicket_; }

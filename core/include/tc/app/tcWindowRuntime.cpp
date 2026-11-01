@@ -468,7 +468,7 @@ WindowContext* findWindowApiContext() {
         logError("Window") << "This App has no attached window context";
         return nullptr;
     }
-    if (auto* window = resolveWindow(true)) return &window->context();
+    if (auto* window = resolveWindow(true)) return &WindowRequestAccess::context(*window);
     return nullptr;
 }
 WindowContextScope::WindowContextScope(WindowContext* context) : previous_(currentWindowCtx()) {
@@ -967,7 +967,7 @@ const WindowNativeOperations& productionWindowOperations() {
 }
 void publishWindowMetadata(Window& window, const sapp_tc_window_metadata& metadata) {
     auto& b = WindowRequestAccess::binding(window);
-    auto& ctx = window.context();
+    auto& ctx = WindowRequestAccess::context(window);
     b.metadata = metadata;
     // Minimized zero extents describe availability, not a new App coordinate size.
     if (metadata.fb_width > 0 && metadata.fb_height > 0 &&
@@ -1002,7 +1002,7 @@ bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations
     auto& b = WindowRequestAccess::binding(window);
     if (b.handle.id != handle.id) {
         b.lastDeliveredHidden = false; b.visibilityReady = false;
-        window.context().pointerValid = false; window.context().touchMapper.reset();
+        WindowRequestAccess::context(window).pointerValid = false; WindowRequestAccess::context(window).touchMapper.reset();
     }
     b.handle = handle; b.operations = &operations; b.user = user; b.bound = true;
     publishWindowMetadata(window, metadata);
@@ -1013,9 +1013,9 @@ bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations
         geometry.requestedHeight = geometry.requestedHeight > 0 ? geometry.requestedHeight / scale : metadata.height;
         b.geometryInitialized = true;
     }
-    window.context().acquireSwapchain = acquireBoundSwapchain;
-    window.context().acquireSwapchainUser = &window;
-    window.context().activateNative = activateBinding;
+    WindowRequestAccess::context(window).acquireSwapchain = acquireBoundSwapchain;
+    WindowRequestAccess::context(window).acquireSwapchainUser = &window;
+    WindowRequestAccess::context(window).activateNative = activateBinding;
     return true;
 }
 bool bindNativeWindow(uint32_t id, void* user) noexcept {
@@ -1025,7 +1025,7 @@ bool bindNativeWindow(uint32_t id, void* user) noexcept {
 }
 void syncWindowAppSize(Window& window, bool initial) {
     const auto app = window.getApp();
-    const auto& ctx = window.context();
+    const auto& ctx = WindowRequestAccess::context(window);
     if (!app || window.appSizeDelivering_ || (initial && window.appSizeSeeded_)) return;
     window.appSizeDelivering_ = true;
     struct DeliveryScope {
@@ -1045,7 +1045,7 @@ void syncWindowAppSize(Window& window, bool initial) {
             const bool alreadySeeded = initial && app->getWidth() == size.width && app->getHeight() == size.height;
             if (!alreadySeeded) {
                 if (initial && !WindowRequestAccess::appStarted(window)) app->handleWindowResized(size.width, size.height);
-                else window.syncRootSize(float(size.width), float(size.height));
+                else WindowRequestAccess::syncRootSize(window, float(size.width), float(size.height));
             }
         } catch (...) {
             // Contain at the native boundary and fail this Window; no replay.
@@ -1240,18 +1240,18 @@ WindowEntryScope::WindowEntryScope(Window& window, bool tick, bool bootstrap, bo
     : window_(window), keepAlive_(window.hostOwner_.lock()), previous_(currentWindowCtx()),
       previousSgl_(sg_isvalid() ? sgl_get_context() : sgl_context{}),
       native_(sapp_tc_gl_save()) {
-    if (runtimeEnding() || !window.isOpen() || (tick && (window.entryDepth_ || window.context().inCallbackClock ||
-        window.context().inUpdate || coordinator().servicing || WindowRequestAccess::dispatchActive(window)))) return;
+    if (runtimeEnding() || !window.isOpen() || (tick && (window.entryDepth_ || WindowRequestAccess::context(window).inCallbackClock ||
+        WindowRequestAccess::context(window).inUpdate || coordinator().servicing || WindowRequestAccess::dispatchActive(window)))) return;
     ++coordinator().entries;
     ++window.entryDepth_;
     entered_ = true;
     try {
         // Park the actual caller before installing the receiver. No drawable is acquired here.
-        if (&currentWindowContext() != &window.context() && sg_isvalid()) parkWindowPass();
-        currentWindowCtx() = &window.context();
+        if (&currentWindowContext() != &WindowRequestAccess::context(window) && sg_isvalid()) parkWindowPass();
+        currentWindowCtx() = &WindowRequestAccess::context(window);
         if (!refreshWindowEntryMetadata(window)) return;
         requestsReady_ = true;
-        restoreWindowContext(&window.context());
+        restoreWindowContext(&WindowRequestAccess::context(window));
         if (window.entryDepth_ == 1) WindowRequestAccess::applyPendingApp(window);
         if (runtimeEnding() || !window.isOpen() || (tick && WindowRequestAccess::closeRequested(window))) return;
         if (bootstrap) { admitted_ = true; return; }
@@ -1362,7 +1362,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
     return VisibilityDelivery::RawThenTyped;
 }
     void convertWindowEvent(const sapp_event* ev, Window& window) {
-        auto& ctx = window.context();
+        auto& ctx = WindowRequestAccess::context(window);
         const void* pressOwner = (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN || ev->type == SAPP_EVENTTYPE_MOUSE_UP)
             ? std::exchange(ctx.pendingMousePressOwner, nullptr) : nullptr;
         const bool hidden = window.isOccluded();
@@ -1761,7 +1761,7 @@ void dispatchWindowEventForTests(const sapp_event* input, Window& window) {
     if (!input) return;
     sapp_event event = *input;
     const auto& b = WindowRequestAccess::binding(window);
-    if (!(event.dpi_scale > 0)) event.dpi_scale = window.context().dpiScale;
+    if (!(event.dpi_scale > 0)) event.dpi_scale = WindowRequestAccess::context(window).dpiScale;
     event.window_id = b.handle.id;
 #if defined(_WIN32) || defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
     event.reliable_button_bits = true;
@@ -1805,8 +1805,8 @@ void enterWindowEvent(const sapp_event* event, sapp_window handle, void* user) n
         if (!event || !window || WindowRequestAccess::binding(*window).handle.id != handle.id) return;
         WindowEntryScope entry(*window, false, false, false);
         if (!entry) return;
-        observeWindowVisibility(window->context(), event->type);
-        restoreWindowContext(&window->context());
+        observeWindowVisibility(WindowRequestAccess::context(*window), event->type);
+        restoreWindowContext(&WindowRequestAccess::context(*window));
         if (!coordinator().bootstrapping && event->type != SAPP_EVENTTYPE_SUSPENDED && event->type != SAPP_EVENTTYPE_RESUMED &&
             event->type != SAPP_EVENTTYPE_ICONIFIED && event->type != SAPP_EVENTTYPE_RESTORED)
             deliverPendingWindowVisibilityAtReadyEntry(*window);
@@ -1821,7 +1821,7 @@ bool enterWindowTick(Window& window, sapp_window handle, std::chrono::steady_clo
     if (WindowRequestAccess::binding(window).handle.id != handle.id) return false;
     WindowEntryScope entry(window, true);
     if (!entry) return false;
-    auto& ctx = window.context();
+    auto& ctx = WindowRequestAccess::context(window);
     syncWindowAppSize(window);
     const auto& metadata = WindowRequestAccess::binding(window).metadata;
     const bool gated = (window.isOccluded() && !ctx.drawWhileHidden) || ctx.fbWidth <= 0 || ctx.fbHeight <= 0;

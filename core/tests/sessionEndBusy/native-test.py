@@ -179,7 +179,7 @@ def orderingRegression():
      auto getApp(){return app;}auto& context(){return resize::context;}bool isOpen(){return open;}
      void syncRootSize(float,float){++calls;throw 1;}
     };
-    struct WindowRequestAccess{static bool appStarted(Window&){return true;}static void teardown(Window& w){w.open=false;w.app.reset();}};
+    struct WindowRequestAccess{static auto& context(Window& w){return w.context();}static void syncRootSize(Window& w,float x,float y){w.syncRootSize(x,y);}static bool appStarted(Window&){return true;}static void teardown(Window& w){w.open=false;w.app.reset();}};
     int appOwner(App&){return 0;}struct AppCallbackScope{AppCallbackScope(int){}};
     enum class AppEntry{Event};struct EntryStackGuard{EntryStackGuard(AppEntry,const char*){}};
     struct WindowCallbackTimeScope{};

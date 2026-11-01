@@ -107,7 +107,7 @@ sg_swapchain swapchain(void*) {
 }
 void recordingIsolation() {
     WindowProbe owner;
-    auto& ctx = owner.context();
+    auto& ctx = trussc::internal::WindowRequestAccess::context(owner);
     internal::currentWindowCtx() = &ctx;
     ctx.fbWidth = ctx.fbHeight = 64; ctx.dpiScale = 1;
     ctx.swapchainTarget.width = ctx.swapchainTarget.height = 64;
@@ -157,7 +157,7 @@ void recordingIsolation() {
 }
 struct Resources {
     WindowProbe window;
-    std::shared_ptr<App> queryOwner = internal::makeConstructedAppAt<App>(&window.context());
+    std::shared_ptr<App> queryOwner = internal::makeConstructedAppAt<App>(&trussc::internal::WindowRequestAccess::context(window));
     Light light;
     Fbo fbo, sink;
     EventListener draw;
@@ -170,7 +170,7 @@ struct Resources {
     int offscreenRecordings = 0;
     void renderOffscreen() {
         internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
-        auto& ctx = window.context();
+        auto& ctx = trussc::internal::WindowRequestAccess::context(window);
         const auto tick = internal::resourceFrameKey();
         auto receiver = createPlane(8, 8);
         if (shadowPass) {
@@ -199,7 +199,7 @@ struct Resources {
     void setup(bool sync) {
         internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
         synchronized = sync;
-        auto& ctx = window.context(); internal::currentWindowCtx() = &ctx;
+        auto& ctx = trussc::internal::WindowRequestAccess::context(window); internal::currentWindowCtx() = &ctx;
         ctx.fbWidth = ctx.fbHeight = 64; ctx.dpiScale = 1;
         ctx.swapchainTarget.width = ctx.swapchainTarget.height = 64;
         ctx.swapchainTarget.sampleCount = 1; ctx.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
@@ -207,7 +207,7 @@ struct Resources {
         if (synchronized) window.setFps(VSYNC); else window.setIndependentFps(EVENT_DRIVEN, VSYNC);
         light.enableShadow(32); addLight(light); fbo.allocate(16,16); sink.allocate(16,16);
         draw = window.events().draw.listen([this] {
-            auto& ctx = window.context();
+            auto& ctx = trussc::internal::WindowRequestAccess::context(window);
             check("public count contract", getFrameCount() == getUpdateCount());
             check("draws without updates", synchronized || getUpdateCount() == 0);
             if (shadowPass) {
@@ -234,7 +234,7 @@ struct Resources {
     }
     void tick(int n, bool force = false) {
         internal::AppOwnerScope owner(internal::appOwner(*queryOwner));
-        internal::restoreWindowContext(&window.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(window));
         internal::runWindowTick(std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(17*n), sourceDuration, force);
     }
 };
@@ -281,7 +281,7 @@ struct ShadowReplayProbe {
     }
 };
 void pendingShadowConsumer(Resources& owner) {
-    auto& ctx = owner.window.context();
+    auto& ctx = trussc::internal::WindowRequestAccess::context(owner.window);
     internal::restoreWindowContext(&ctx);
     owner.draw = {};
     owner.window.setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
@@ -365,9 +365,9 @@ TC_CORE_TEST_MAIN() {
             if (n % 3 == 0) slow.tick(n);
         }
         check("two windows draw at different rates without updates", fast.draws == 24 && slow.draws == 8 &&
-            fast.window.context().updateCount == 0 && slow.window.context().updateCount == 0);
+            trussc::internal::WindowRequestAccess::context(fast.window).updateCount == 0 && trussc::internal::WindowRequestAccess::context(slow.window).updateCount == 0);
         // Base's atlas guard suppresses a repeat upload at the same resource key.
-        internal::restoreWindowContext(&fast.window.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(fast.window));
         bitmapfont::updateGlyph(65, glyph); ensureFontAtlasForText("A");
         const auto uploaded = internal::bitmapFontAtlas().version;
         bitmapfont::updateGlyph(65, glyph); ensureFontAtlasForText("A");
@@ -388,18 +388,18 @@ TC_CORE_TEST_MAIN() {
         slow.tick(32, true);
         slow.expectedShadowSlots = 0; slow.tick(33, true);
         slow.shadowPass = true; slow.expectedShadowSlots = -1;
-        internal::restoreWindowContext(&fast.window.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(fast.window));
         fast.firstImage = 0; // establish a fresh storage reference for the control phase
         const auto synchronizedDraws = fast.draws;
         fast.synchronized = true; fast.window.setFps(VSYNC);
         for (int n = 40; n < 52; ++n) fast.tick(n);
-        check("synchronized control updates and draws", fast.draws == synchronizedDraws + 12 && fast.window.context().updateCount == 12);
+        check("synchronized control updates and draws", fast.draws == synchronizedDraws + 12 && trussc::internal::WindowRequestAccess::context(fast.window).updateCount == 12);
         auto& owner = slow; auto& other = fast;
         hiddenMetadata.occluded = false; internal::publishWindowMetadata(owner.window, hiddenMetadata);
         owner.tick(40);
         // Prelude FBO revisions belong to the next draw of their owner. A GPU
         // commit from another window cannot retire the first sampled revision.
-        internal::restoreWindowContext(&owner.window.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(owner.window));
         owner.fbo.begin(); clear(0,0,0,1); owner.fbo.end(); owner.fbo.draw(0,0);
         auto first = owner.fbo.getTexture().getImage().id;
         Fbo completedSource;
@@ -408,7 +408,7 @@ TC_CORE_TEST_MAIN() {
         owner.sink.begin(0,0,0); completedSource.draw(0,0); owner.sink.end();
         const auto completed = completedSource.getColorImage();
         other.tick(52); other.tick(53);
-        internal::restoreWindowContext(&owner.window.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(owner.window));
         completedSource.begin(0,1,0); completedSource.end();
         check("foreign commits do not reset FBO owner tick after offscreen consumption",
             completedSource.getColorImage().id != completed.id);
@@ -416,30 +416,30 @@ TC_CORE_TEST_MAIN() {
         check("other window commits do not recycle owner FBO revisions", owner.fbo.getTexture().getImage().id != first);
         internal::endGpuFrame();
         // Run the resource-bearing listener on twelve update-only commits.
-        internal::restoreWindowContext(&other.window.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(other.window));
         other.draw = {}; other.firstImage = 0;
         other.window.setIndependentFps(VSYNC, EVENT_DRIVEN);
-        other.window.context().loop.redrawCount = 0;
+        trussc::internal::WindowRequestAccess::context(other.window).loop.redrawCount = 0;
         int afterFrames = 0;
         auto after = other.window.events().afterFrame.listen([&] { ++afterFrames; });
         auto update = other.window.events().update.listen([&] { other.renderOffscreen(); });
-        const auto before = other.window.context().drawCount;
+        const auto before = trussc::internal::WindowRequestAccess::context(other.window).drawCount;
         for (int n = 54; n < 66; ++n) {
-            const auto tick = other.window.context().resourceTickCount;
+            const auto tick = trussc::internal::WindowRequestAccess::context(other.window).resourceTickCount;
             other.tick(n);
-            check("update-only work completes one owner tick", other.window.context().resourceTickCount == tick + 1);
+            check("update-only work completes one owner tick", trussc::internal::WindowRequestAccess::context(other.window).resourceTickCount == tick + 1);
         }
         check("twelve update-only ticks keep real draw count", other.offscreenRecordings == 12 &&
-            other.window.context().drawCount == before && afterFrames == 0);
+            trussc::internal::WindowRequestAccess::context(other.window).drawCount == before && afterFrames == 0);
         other.shadowPass = false; other.expectedShadowSlots = 1; other.tick(66);
         other.expectedShadowSlots = 0; other.tick(67);
         other.shadowPass = true; other.expectedShadowSlots = -1;
         update = {};
         // Idle callbacks retain the base secondary admission key.
         other.window.setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
-        const auto idleRecording = other.window.context().resourceTickCount;
+        const auto idleRecording = trussc::internal::WindowRequestAccess::context(other.window).resourceTickCount;
         other.tick(68);
-        check("idle secondary callback advances the base admission key", other.window.context().resourceTickCount == idleRecording + 1);
+        check("idle secondary callback advances the base admission key", trussc::internal::WindowRequestAccess::context(other.window).resourceTickCount == idleRecording + 1);
         // Keep the draw listener through every invalid-swapchain attempt and
         // recovery: these attempts commit offscreen resources, but no real draw.
         other.window.setIndependentFps(EVENT_DRIVEN, VSYNC);
@@ -447,18 +447,18 @@ TC_CORE_TEST_MAIN() {
         rejectSwapchain = true;
         const auto attemptsBefore = other.offscreenRecordings;
         for (int n = 69; n < 81; ++n) {
-            const auto tick = other.window.context().resourceTickCount;
+            const auto tick = trussc::internal::WindowRequestAccess::context(other.window).resourceTickCount;
             other.tick(n);
-            check("failed admission completes one owner tick", other.window.context().resourceTickCount == tick + 1);
+            check("failed admission completes one owner tick", trussc::internal::WindowRequestAccess::context(other.window).resourceTickCount == tick + 1);
             check("failed admission retains real draw identity and no afterFrame",
-                other.window.context().drawCount == before && afterFrames == 0);
+                trussc::internal::WindowRequestAccess::context(other.window).drawCount == before && afterFrames == 0);
         }
         check("resource listener runs on all rejected attempts", other.offscreenRecordings == attemptsBefore + 12);
         other.shadowPass = false; other.expectedShadowSlots = 1; other.tick(81);
         other.expectedShadowSlots = 0; other.tick(82);
         other.shadowPass = true; other.expectedShadowSlots = -1;
         rejectSwapchain = false; other.tick(83);
-        check("first recovered draw completes normally", other.window.context().drawCount == before + 1 && afterFrames == 1);
+        check("first recovered draw completes normally", trussc::internal::WindowRequestAccess::context(other.window).drawCount == before + 1 && afterFrames == 1);
         pendingShadowConsumer(other);
         internal::currentWindowCtx() = nullptr;
     }

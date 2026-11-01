@@ -46,13 +46,13 @@ int main() {
     auto* previous = internal::currentWindowCtx();
     bool oddPixels = true;
     for (float dpi : {1.25f, 1.5f, 1.75f, 2.0f}) {
-        handle->context().dpiScale = dpi;
-        internal::currentWindowCtx() = &other.context();
+        trussc::internal::WindowRequestAccess::context(*handle).dpiScale = dpi;
+        internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(other);
         handle->getApp()->setSize(1001, 667);
-        oddPixels &= width == 1001.0 / dpi && height == 667.0 / dpi && internal::currentWindowCtx() == &other.context();
+        oddPixels &= width == 1001.0 / dpi && height == 667.0 / dpi && internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(other);
     }
     internal::currentWindowCtx() = previous;
-    auto& a = handle->context();
+    auto& a = trussc::internal::WindowRequestAccess::context(*handle);
     a.fbWidth = 640; a.fbHeight = 480; a.dpiScale = 1;
     a.swapchainTarget.width = 640; a.swapchainTarget.height = 480;
     a.currentTarget = &a.swapchainTarget;
@@ -61,7 +61,7 @@ int main() {
     Window peer;
     internal::WindowRequestAccess::bindForTests(peer, 202);
     peer.setApp<App>(); internal::applyPendingAppForTests(peer);
-    auto& b = peer.context();
+    auto& b = trussc::internal::WindowRequestAccess::context(peer);
     b.fbWidth = 300; b.fbHeight = 200; b.dpiScale = 1;
     b.currentTarget->width = 300; b.currentTarget->height = 200;
     b.currentTarget->camera.currentViewW = 300; b.currentTarget->camera.currentViewH = 200;

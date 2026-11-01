@@ -76,7 +76,7 @@ struct RestartFirst : App {
         retainedLight = std::make_unique<Light>();
         retainedMaterial = std::make_unique<Material>();
         retainedEnvironment = std::make_unique<Environment>();
-        for (auto* ctx : {&internal::nonWindowContext(), &internal::resolveWindow()->context(), &retained->context()}) {
+        for (auto* ctx : {&internal::nonWindowContext(), &trussc::internal::WindowRequestAccess::context(*internal::resolveWindow()), &trussc::internal::WindowRequestAccess::context(*retained)}) {
             ctx->activeLights.push_back(retainedLight.get());
             ctx->currentMaterial = retainedMaterial.get();
             ctx->currentEnvironment = retainedEnvironment.get();
@@ -98,9 +98,9 @@ struct RestartFirst : App {
                 ctx.currentEnvironment = concurrentObjects.front().front().environment.get();
             };
             populate(internal::nonWindowContext());
-            populate(internal::resolveWindow()->context());
-            populate(retained->context());
-            for (auto& batch : concurrentObjects) for (auto& objects : batch) populate(objects.window->context());
+            populate(trussc::internal::WindowRequestAccess::context(*internal::resolveWindow()));
+            populate(trussc::internal::WindowRequestAccess::context(*retained));
+            for (auto& batch : concurrentObjects) for (auto& objects : batch) populate(trussc::internal::WindowRequestAccess::context(*objects.window));
         }
         requestExitApp();
     }
@@ -113,7 +113,7 @@ struct RestartSecond : App {
                      "Image registry empty after restart");
         restartCheck(internal::openWindows().size() == initialWindows, "window registry empty after restart");
         checkLighting(internal::nonWindowContext());
-        checkLighting(internal::resolveWindow()->context());
+        checkLighting(trussc::internal::WindowRequestAccess::context(*internal::resolveWindow()));
         requestExitApp();
     }
 };
@@ -236,7 +236,7 @@ int main(int argc, char** argv) {
             restartCheck(internal::debugObjects(internal::DebugObjectKind::Image).empty(), "stopped Image enumeration");
         }
         retainedLight.reset(); retainedMaterial.reset(); retainedEnvironment.reset();
-        checkLighting(retained->context());
+        checkLighting(trussc::internal::WindowRequestAccess::context(*retained));
         retainedFbo.reset(); retainedImage.reset(); retained.reset();
         forbidLateCalls.store(false, std::memory_order_release);
         if (runHeadlessApp<RestartSecond>()) return 2;

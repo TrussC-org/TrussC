@@ -40871,46 +40871,6 @@ details.ko = '''
 '''
 related = ["Window::setFullscreen", "Window::isFullscreen"]
 
-["Window::context"]
-hide = true
-keywords = ["internal"]
-
-["Window::dispatchMousePressToTree"]
-hide = true
-keywords = ["internal"]
-
-["Window::dispatchMouseReleaseToTree"]
-hide = true
-keywords = ["internal"]
-
-["Window::dispatchMouseMoveToTree"]
-hide = true
-keywords = ["internal"]
-
-["Window::dispatchMouseScrollToTree"]
-hide = true
-keywords = ["internal"]
-
-["Window::dispatchKeyPressToTree"]
-hide = true
-keywords = ["internal"]
-
-["Window::dispatchKeyReleaseToTree"]
-hide = true
-keywords = ["internal"]
-
-["Window::syncRootSize"]
-hide = true
-keywords = ["internal"]
-
-["Window::tickTree"]
-hide = true
-keywords = ["internal"]
-
-["Window::drawTreeNow"]
-hide = true
-keywords = ["internal"]
-
 ["createWindow"]
 keywords = ["multi window", "second window", "open window", "display"]
 description.en = "Opens a new, empty window."

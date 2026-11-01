@@ -42,7 +42,7 @@ auto queue(const char* tool, json args = json::object()) {
 void frame(Window& target) {
     auto now = std::chrono::steady_clock::now();
     mcp::internal::drainDeferredResponses(nullptr, false, now);
-    mcp::internal::drainDeferredResponses(&target.context(), true, now, false);
+    mcp::internal::drainDeferredResponses(&trussc::internal::WindowRequestAccess::context(target), true, now, false);
     mcp::internal::drainDeferredResponses(nullptr, false, now);
 }
 json reply(std::future<mcp::internal::ReplyThunk>& future) {
@@ -231,9 +231,9 @@ void survivingQuitReceiver() {
     a->close(); internal::WindowRequestAccess::teardown(*a);
     sapp_event event{}; event.type = SAPP_EVENTTYPE_QUIT_REQUESTED;
     auto* caller = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &b->context(); // An already-selected receiver still needs admission.
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*b); // An already-selected receiver still needs admission.
     internal::windowEvent(&event, {0}, nullptr);
-    check("Runtime quit restores the caller Window selection", internal::currentWindowCtx() == &b->context());
+    check("Runtime quit restores the caller Window selection", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(*b));
     internal::currentWindowCtx() = caller;
     check("Runtime asks surviving B after first-created A closes", aCalls == 0 && bCalls == 1);
     b->close(); internal::WindowRequestAccess::teardown(*b);
@@ -254,7 +254,7 @@ void throwingQuitStacks() {
     }
     sapp_event event{}; event.type = SAPP_EVENTTYPE_QUIT_REQUESTED;
     auto inspect = [&](const char* label) {
-        internal::WindowContextScope selection(&target->context());
+        internal::WindowContextScope selection(&trussc::internal::WindowRequestAccess::context(*target));
         auto& rc = internal::getDefaultContext();
         const auto color = rc.getColor();
         std::printf("quitguard: %s style=%zu matrix=%zu color=%.1f,%.1f,%.1f scale=%.1f\n",
@@ -262,7 +262,7 @@ void throwingQuitStacks() {
         check(label, rc.getStyleStackDepth() == 0 && rc.getMatrixStackDepth() == 0 &&
               color.r == 1 && color.g == 1 && color.b == 1 && rc.getScale() == 1);
     };
-    { internal::WindowContextScope selection(&target->context()); setColor(1.f, 1.f, 1.f); }
+    { internal::WindowContextScope selection(&trussc::internal::WindowRequestAccess::context(*target)); setColor(1.f, 1.f, 1.f); }
     internal::dispatchWindowEventForTests(&event, *target);
     inspect("addressed quit restores stacks");
     const int beforeCancel = quitCancellations;
@@ -320,7 +320,7 @@ void deferrals() {
         check("ambiguous omission errors immediately with positive IDs", result["result"].value("isError", false) && result.dump().find("101") != std::string::npos && result.dump().find("202") != std::string::npos);
     }
     target->setApp<Empty>(); internal::applyPendingAppForTests(*target);
-    target->context().fbWidth = 640;
+    trussc::internal::WindowRequestAccess::context(*target).fbWidth = 640;
     auto owner = internal::appOwner(*target->getApp());
     Event<void> lazy;
     std::vector<EventListener> listeners;
@@ -344,7 +344,7 @@ void deferrals() {
                     listeners.push_back(lazy.listen([&] { ++lazyCalls; }));
                     ++workerCalls; return true;
                 };
-            }, &target->context()); return nullptr;
+            }, &trussc::internal::WindowRequestAccess::context(*target)); return nullptr;
         });
     }
     for (auto tool : {"owned-single", "owned-double"}) {

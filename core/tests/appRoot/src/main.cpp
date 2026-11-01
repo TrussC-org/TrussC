@@ -23,7 +23,7 @@ TC_CORE_TEST_MAIN() {
     internal::WindowRequestAccess::bindForTests(*window, 101);
     internal::retainRuntimeWindow(window);
     window->setApp<Root>();
-    check("pending candidate is not a root", !window->context().rootNode.lock());
+    check("pending candidate is not a root", !trussc::internal::WindowRequestAccess::context(*window).rootNode.lock());
     internal::applyPendingAppForTests(*window);
     std::weak_ptr<App> weak = window->getApp();
     {
@@ -34,7 +34,7 @@ TC_CORE_TEST_MAIN() {
         window->events().update.notify();
     }
     window->destroyApp(); internal::applyPendingAppForTests(*window);
-    check("tree cleanup and owner release finish together", weak.expired() && exits == 1 && cleanups == 1 && childCleanups == 1 && !window->context().rootNode.lock());
+    check("tree cleanup and owner release finish together", weak.expired() && exits == 1 && cleanups == 1 && childCleanups == 1 && !trussc::internal::WindowRequestAccess::context(*window).rootNode.lock());
     internal::shutdownRuntime(); internal::endFrameworkLifetime();
     check("headless publishes and detaches the same root", runHeadlessApp<HeadlessRoot>() == 0 && exits == 2 && cleanups == 2 && !internal::nonWindowContext().rootNode.lock());
     return failures ? 1 : 0;

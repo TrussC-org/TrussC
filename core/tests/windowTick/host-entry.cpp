@@ -68,7 +68,7 @@ struct Probe : App {
 using TestDispatch = void (*)(const sapp_event*, sapp_window, Window*, internal::WindowContext&);
 void deliver(const sapp_event* event, sapp_window handle, Window* window, TestDispatch dispatch = nullptr) {
     auto listener = window->events().rawEvent.listen([&](const sapp_event& e) {
-        if (dispatch && event && e.type == event->type) dispatch(&e, handle, window, window->context());
+        if (dispatch && event && e.type == event->type) dispatch(&e, handle, window, trussc::internal::WindowRequestAccess::context(*window));
     });
     internal::enterWindowEvent(event, handle, window);
 }
@@ -77,9 +77,9 @@ void event(Window& window, TestDispatch dispatch = nullptr) {
     deliver(&e, internal::WindowRequestAccess::binding(window).handle, &window, dispatch);
 }
 void plainDraw(Window& window) {
-    check("App draw binding exists after attachment", window.context().appEventListeners.size() >= 2);
-    if (window.context().appEventListeners.size() < 2) return;
-    window.context().appEventListeners.at(1) = internal::FrameworkEventAccess::listen(
+    check("App draw binding exists after attachment", trussc::internal::WindowRequestAccess::context(window).appEventListeners.size() >= 2);
+    if (trussc::internal::WindowRequestAccess::context(window).appEventListeners.size() < 2) return;
+    trussc::internal::WindowRequestAccess::context(window).appEventListeners.at(1) = internal::FrameworkEventAccess::listen(
         window.events().draw, [&window] { if (auto app = window.getApp()) app->draw(); }, EventPriority::App);
 }
 int bootstrapCallbacks = 0, dropGetterCalls = 0, peerEvents = 0;
@@ -102,7 +102,7 @@ struct BootstrapProbe : Probe {
         ++setups;
         auto& window = *testWindow();
         check("ctx/getter equal authoritative hidden snapshot at setup",
-              window.context().suspended && window.isOccluded() &&
+              trussc::internal::WindowRequestAccess::context(window).suspended && window.isOccluded() &&
               internal::WindowRequestAccess::binding(window).metadata.occluded);
     }
     void windowResized(int w, int h) override {
@@ -118,17 +118,17 @@ void bootstrap() {
         internal::WindowRequestAccess::binding(window).operations = &bootstrapOperations;
         Window other; Native peerNative; bind(other, peerNative, 716);
         bootstrapCallbacks = dropGetterCalls = 0; bootstrapReady = false;
-        window.context().drawCount = 0;
+        trussc::internal::WindowRequestAccess::context(window).drawCount = 0;
         // Exercise hidden startup updates explicitly for every Window fixture.
-        window.context().pauseUpdatesWhenHidden = false;
-        window.context().drawWhileHidden = true;
+        trussc::internal::WindowRequestAccess::context(window).pauseUpdatesWhenHidden = false;
+        trussc::internal::WindowRequestAccess::context(window).drawWhileHidden = true;
         std::vector<sapp_event_type> delivered;
         std::vector<std::vector<std::string>> drops;
         std::vector<int> keys;
         int exitRequests = 0; peerEvents = 0;
         auto listener = window.events().rawEvent.listen([&](const sapp_event& event) {
             ++bootstrapCallbacks; delivered.push_back(event.type);
-            check("every startup notification precedes first draw", window.context().drawCount == 0);
+            check("every startup notification precedes first draw", trussc::internal::WindowRequestAccess::context(window).drawCount == 0);
             if (bootstrapReady)
                 check("post-init input sees attached seeded App", window.getApp() == bootstrapApp && bootstrapApp->sizes == 1 && bootstrapApp->setups == 0);
         });
@@ -165,7 +165,7 @@ void bootstrap() {
         bootstrapReady = true;
         check("init notifications delivered once including size-seeding callback", delivered == expected);
         check("during-init input and native drop paths delivered", keys == std::vector<int>{SAPP_KEYCODE_B, -SAPP_KEYCODE_B} && drops == std::vector<std::vector<std::string>>{{"/tmp/during-init.txt"}});
-        check("hidden seed leaves visibility pending for checkpoint 3", window.isOccluded() && window.context().suspended && !internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
+        check("hidden seed leaves visibility pending for checkpoint 3", window.isOccluded() && trussc::internal::WindowRequestAccess::context(window).suspended && !internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
         check("visibility history belongs to each Window", !internal::WindowRequestAccess::binding(other).lastDeliveredHidden);
         check("initial App attached and size seeded before setup", window.getApp() == bootstrapApp && bootstrapApp->sizes == 1 && bootstrapApp->seeded && bootstrapApp->setups == 0);
         expected.push_back(SAPP_EVENTTYPE_SUSPENDED);
@@ -177,7 +177,7 @@ void bootstrap() {
             nativeDropPaths = paths; expected.push_back(SAPP_EVENTTYPE_FILES_DROPPED); nativeSend(SAPP_EVENTTYPE_FILES_DROPPED);
         }
         check("each post-init drop reads its own paths", drops == std::vector<std::vector<std::string>>{{"/tmp/during-init.txt"}, {"/tmp/A.txt", "/tmp/A2.txt"}, {"/tmp/B.txt"}});
-        check("startup input arrives exactly once without replay", delivered == expected && bootstrapCallbacks == int(expected.size()) && window.context().keysPressed.empty());
+        check("startup input arrives exactly once without replay", delivered == expected && bootstrapCallbacks == int(expected.size()) && trussc::internal::WindowRequestAccess::context(window).keysPressed.empty());
         plainDraw(window); tick(window);
         check("setup ran with authoritative snapshot", bootstrapApp->setups == 1);
         check("ready entry delivers pending visibility once", internal::WindowRequestAccess::binding(window).lastDeliveredHidden);
@@ -345,7 +345,7 @@ void constructorsAndEpochs() {
 void processToolSnapshots() {
     auto& window = *testWindow();
     Native native; bind(window, native, 141);
-    auto& ctx = window.context();
+    auto& ctx = trussc::internal::WindowRequestAccess::context(window);
     const auto updates = ctx.updateCount;
     const auto rates = ctx.rateCount;
     const auto duration = ctx.rateDurations[0], steps = ctx.rateSteps[0];
@@ -403,10 +403,10 @@ void roots() {
         Native native, peerNative;
         bind(window, native, runner ? 718u : 719u); bind(peer, peerNative, 720);
         auto app = internal::makeConstructedApp<Probe>();
-        window.setIndependentFps(VSYNC, EVENT_DRIVEN); window.context().loop.redrawCount = 0;
+        window.setIndependentFps(VSYNC, EVENT_DRIVEN); trussc::internal::WindowRequestAccess::context(window).loop.redrawCount = 0;
         internal::WindowRequestAccess::attachCandidate(window, app);
         auto* previous = internal::currentWindowCtx();
-        internal::currentWindowCtx() = &peer.context();
+        internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(peer);
         inputs = 0;
         event(window, input);
         check("entry delivers first input exactly once", inputs == 1);
@@ -420,38 +420,38 @@ void roots() {
             internal::windowEvent(&e, {native.expected}, &window);
             check("launch event client uses the common binding and converter", rawEvents == 1);
         }
-        check("event restores the actual peer caller", internal::currentWindowCtx() == &peer.context());
+        check("event restores the actual peer caller", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(peer));
         check("entry acquires no drawable before draw admission", native.acquisitions == 0);
-        window.setIndependentFps(VSYNC, EVENT_DRIVEN); window.context().loop.redrawCount = 0;
+        window.setIndependentFps(VSYNC, EVENT_DRIVEN); trussc::internal::WindowRequestAccess::context(window).loop.redrawCount = 0;
         const auto before = app->updates;
         native.metadata.source_interval = .25;
         check("EVENT_DRIVEN no-draw tick is accepted", !tick(window) && app->updates == before + 1);
         check("setup precedes first update with seeded dimensions", app->setups == 1 && app->seeded);
-        check("tick uses metadata source interval", window.context().tickDuration == .25);
-        check("tick restores the actual peer caller", internal::currentWindowCtx() == &peer.context());
-        window.setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); window.context().loop.redrawCount = 0;
-        const auto idleUpdates = window.context().updateCount, idleResources = window.context().resourceTickCount;
+        check("tick uses metadata source interval", trussc::internal::WindowRequestAccess::context(window).tickDuration == .25);
+        check("tick restores the actual peer caller", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(peer));
+        window.setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN); trussc::internal::WindowRequestAccess::context(window).loop.redrawCount = 0;
+        const auto idleUpdates = trussc::internal::WindowRequestAccess::context(window).updateCount, idleResources = trussc::internal::WindowRequestAccess::context(window).resourceTickCount;
         tick(window);
-        check("idle independent admission has equal resource semantics for both roots", window.context().updateCount == idleUpdates && window.context().resourceTickCount == idleResources + 1);
+        check("idle independent admission has equal resource semantics for both roots", trussc::internal::WindowRequestAccess::context(window).updateCount == idleUpdates && trussc::internal::WindowRequestAccess::context(window).resourceTickCount == idleResources + 1);
         event(window, [](const sapp_event*, sapp_window, Window*, internal::WindowContext& ctx) {
             check("resource key follows common admitted tick count", internal::resourceFrameKey() == ctx.resourceTickCount);
         });
-        const auto updates = window.context().updateCount;
+        const auto updates = trussc::internal::WindowRequestAccess::context(window).updateCount;
         deliver(nullptr, {native.expected}, &window, input);
         sapp_event e{};
         deliver(&e, {9999}, &window, input);
         check("invalid events are rejected without delivery", inputs == 1);
         const int readsBefore = native.reads;
-        check("stale tick identity is rejected", !internal::enterWindowTick(window, {9999}, now, .1, &presentation) && window.context().updateCount == updates && native.reads == readsBefore);
+        check("stale tick identity is rejected", !internal::enterWindowTick(window, {9999}, now, .1, &presentation) && trussc::internal::WindowRequestAccess::context(window).updateCount == updates && native.reads == readsBefore);
         native.live = false;
         event(window, [](const sapp_event*, sapp_window, Window*, internal::WindowContext&) { ++inputs; });
-        check("failed metadata read rejects stale binding entry", inputs == 1 && internal::currentWindowCtx() == &peer.context());
+        check("failed metadata read rejects stale binding entry", inputs == 1 && internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(peer));
         native.live = true;
         auto throwing = window.events().keyPressed.listen([](KeyEventArgs&) { throw 1; });
         event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
             /* Common converter performs typed delivery. */
         });
-        check("throwing event restores caller and dispatch depth", internal::currentWindowCtx() == &peer.context() && window.dispatchDepth_ == 0 && !internal::WindowRequestAccess::dispatchActive(window));
+        check("throwing event restores caller and dispatch depth", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(peer) && window.dispatchDepth_ == 0 && !internal::WindowRequestAccess::dispatchActive(window));
         throwing.disconnect();
         // A -> B -> A cannot tick A while A's callback remains on the stack.
         auto peerInput = peer.events().keyPressed.listen([&](KeyEventArgs&) {
@@ -461,7 +461,7 @@ void roots() {
             event(peer, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
                 /* Common converter performs typed delivery. */
             });
-            check("nested peer event restores receiving A", internal::currentWindowCtx() == &window.context());
+            check("nested peer event restores receiving A", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(window));
         });
         event(window, [](const sapp_event*, sapp_window, Window* w, internal::WindowContext&) {
             /* Common converter performs typed delivery. */
@@ -493,16 +493,16 @@ void roots() {
         // Capture existing policy as data; no ownership selector enters admission.
         native.metadata.occluded = true;
         next->seeded = true;
-        window.setIndependentFps(VSYNC, EVENT_DRIVEN); window.context().loop.redrawCount = 0;
+        window.setIndependentFps(VSYNC, EVENT_DRIVEN); trussc::internal::WindowRequestAccess::context(window).loop.redrawCount = 0;
         const auto hiddenBefore = next->updates;
         tick(window);
-        check("existing hidden policy survives common entry", next->updates == hiddenBefore + (window.context().pauseUpdatesWhenHidden ? 0 : 1));
+        check("existing hidden policy survives common entry", next->updates == hiddenBefore + (trussc::internal::WindowRequestAccess::context(window).pauseUpdatesWhenHidden ? 0 : 1));
         check("hidden entry acquires no drawable", native.acquisitions == 0);
-        window.context().drawWhileHidden = false;
-        window.context().pauseUpdatesWhenHidden = false;
+        trussc::internal::WindowRequestAccess::context(window).drawWhileHidden = false;
+        trussc::internal::WindowRequestAccess::context(window).pauseUpdatesWhenHidden = false;
         window.setFps(VSYNC);
-        const auto noDrawCount = window.context().drawCount;
-        check("hidden draw gate runs before fake presentation", !tick(window) && window.context().drawCount == noDrawCount);
+        const auto noDrawCount = trussc::internal::WindowRequestAccess::context(window).drawCount;
+        check("hidden draw gate runs before fake presentation", !tick(window) && trussc::internal::WindowRequestAccess::context(window).drawCount == noDrawCount);
         window.closeRequested_ = true;
         { internal::WindowEntryScope closedEntry(window, true); check("pending close rejects tick entry itself", !closedEntry); }
         auto refused = internal::makeConstructedApp<Probe>(); window.pendingApp_ = refused; window.appRequested_ = true;
@@ -516,8 +516,8 @@ void roots() {
         internal::enterWindowEvent(&quit, {native.expected}, &window);
         check("pending close still delivers the existing quit-veto endpoint", vetoes == 1 && !window.closeRequested_);
         veto.disconnect();
-        window.context().drawWhileHidden = runner;
-        window.context().pauseUpdatesWhenHidden = !runner;
+        trussc::internal::WindowRequestAccess::context(window).drawWhileHidden = runner;
+        trussc::internal::WindowRequestAccess::context(window).pauseUpdatesWhenHidden = !runner;
         internal::currentWindowCtx() = previous;
         internal::WindowRequestAccess::unbind(window); internal::WindowRequestAccess::endApp(window);
         internal::WindowRequestAccess::unbind(peer); internal::WindowRequestAccess::endApp(peer);
@@ -611,7 +611,7 @@ void turns() {
     internal::currentWindowCtx() = caller;
 #ifndef __EMSCRIPTEN__
     mcp::internal::DeferredResponse response;
-    response.id = 239; response.target = &window.context(); response.deadline = now;
+    response.id = 239; response.target = &trussc::internal::WindowRequestAccess::context(window); response.deadline = now;
     response.response = std::make_shared<std::promise<mcp::internal::ReplyThunk>>();
     auto expired = response.response->get_future();
     int produced = 0;

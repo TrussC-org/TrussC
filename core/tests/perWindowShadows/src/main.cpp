@@ -47,7 +47,7 @@ class ShadowApp : public App {
     std::optional<internal::EntryStackGuard> secondaryDraw_;
 #endif
 
-    internal::WindowContext& owner(int n) { return n ? b_->context() : *a_; }
+    internal::WindowContext& owner(int n) { return n ? trussc::internal::WindowRequestAccess::context(*b_) : *a_; }
     void select(int n) {
 #if defined(SOKOL_D3D11) && defined(_WIN32)
         secondaryDraw_.reset();
@@ -244,7 +244,7 @@ class ShadowApp : public App {
             check("requested owner closed at native safe point", !b_->isOpen());
             internal::endGpuFrame();
             check("close retires pending owner maps", closing_.expired() &&
-                !b_->context().shadow.storage && sg_query_image_state(closingImage_) == SG_RESOURCESTATE_INVALID);
+                !trussc::internal::WindowRequestAccess::context(*b_).shadow.storage && sg_query_image_state(closingImage_) == SG_RESOURCESTATE_INVALID);
             check("closing B preserves A maps", a_->shadow.storage &&
                 sg_query_image_state(a_->shadow.storage->colorImage) == SG_RESOURCESTATE_VALID);
             check("no unexpected rendering errors", unexpectedErrors_ == 0);
@@ -254,13 +254,13 @@ class ShadowApp : public App {
         }
         ran_ = true;
         // PBR without a shadow pass must not allocate an owner's map set.
-        internal::restoreWindowContext(&unused_->context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*unused_));
 #if defined(SOKOL_D3D11) && defined(_WIN32)
         {
         internal::EntryStackGuard unusedDraw(internal::AppEntry::Draw);
 #endif
         internal::prepareWindowTarget(); beginFrame(); clear(0,0,0,1); queue();
-        check("PBR without shadows has no shadow generation", !unused_->context().shadow.storage &&
+        check("PBR without shadows has no shadow generation", !trussc::internal::WindowRequestAccess::context(*unused_).shadow.storage &&
             !internal::currentTarget().deferredPbrDraws.back().cmd.shadowGeneration);
         present();
 #if defined(SOKOL_D3D11) && defined(_WIN32)
@@ -269,12 +269,12 @@ class ShadowApp : public App {
         // Both owners initially use the public default; unused_ never shadows.
         pair(0,1024,1024);
         check("default unchanged for both windows", a_->shadow.storage->resolution == 1024 &&
-            b_->context().shadow.storage->resolution == 1024);
+            trussc::internal::WindowRequestAccess::context(*b_).shadow.storage->resolution == 1024);
         reportBytes();
-        check("real unused window allocates zero shadow bytes", !unused_->context().shadow.storage);
+        check("real unused window allocates zero shadow bytes", !trussc::internal::WindowRequestAccess::context(*unused_).shadow.storage);
         // Release the default sets before exercising smaller, distinct sizes.
-        a_->shadow.storage.reset(); b_->context().shadow.storage.reset();
-        a_->shadow.count = b_->context().shadow.count = 0;
+        a_->shadow.storage.reset(); trussc::internal::WindowRequestAccess::context(*b_).shadow.storage.reset();
+        a_->shadow.count = trussc::internal::WindowRequestAccess::context(*b_).shadow.count = 0;
         pair(1,64,128);
         reportBytes();
         pair(0,64,128,true);
@@ -337,8 +337,8 @@ class ShadowApp : public App {
         }
 
         start(1,128); shadow(1); queue();
-        closingImage_ = b_->context().shadow.storage->colorImage;
-        closing_ = b_->context().shadow.storage;
+        closingImage_ = trussc::internal::WindowRequestAccess::context(*b_).shadow.storage->colorImage;
+        closing_ = trussc::internal::WindowRequestAccess::context(*b_).shadow.storage;
         select(0);
         b_->close(); // Verify actual native teardown on the next main tick.
     }
@@ -358,11 +358,11 @@ public:
         if (unused_) unused_->setPosition(64, 64);
         check("secondary and unused windows created", b_ && unused_);
         check("all windows start without shadow maps", !a_->shadow.storage &&
-            b_ && !b_->context().shadow.storage && unused_ && !unused_->context().shadow.storage);
+            b_ && !trussc::internal::WindowRequestAccess::context(*b_).shadow.storage && unused_ && !trussc::internal::WindowRequestAccess::context(*unused_).shadow.storage);
 #if defined(SOKOL_D3D11) && defined(_WIN32)
         for (const auto& window : {b_,unused_}) {
             if (!window) continue;
-            auto& ctx = window->context();
+            auto& ctx = trussc::internal::WindowRequestAccess::context(*window);
             const auto sc = ctx.acquireSwapchain(ctx.acquireSwapchainUser);
             check("D3D11 secondary views available before native tick", sc.d3d11.render_view &&
                 sc.d3d11.depth_stencil_view && !sc.d3d11.resolve_view &&

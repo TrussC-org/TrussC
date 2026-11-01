@@ -25,8 +25,8 @@ Clock::time_point fakeNow;
 Clock::time_point readFakeClock() { return fakeNow; }
 uint64_t nativeStandIn = 0;
 struct Secondary : Window {
-    Secondary() { context().fbWidth = context().fbHeight = 100; native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
-    ~Secondary() { context().fbWidth = context().fbHeight = 100; native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
+    Secondary() { internal::WindowRequestAccess::context(*this).fbWidth = internal::WindowRequestAccess::context(*this).fbHeight = 100; native_ = &nativeStandIn; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~Secondary() { internal::WindowRequestAccess::context(*this).fbWidth = internal::WindowRequestAccess::context(*this).fbHeight = 100; native_ = nullptr; internal::WindowRequestAccess::unbind(*this); internal::WindowRequestAccess::endApp(*this); }
 };
 struct Probe : App {
     int updates = 0, draws = 0;
@@ -37,30 +37,30 @@ void independentTargets(Window& main) {
     auto* previous = internal::currentWindowCtx();
     Secondary secondary;
     secondary.setFps(12);
-    internal::currentWindowCtx() = &secondary.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(secondary);
     main.setIndependentFps(30, VSYNC);
     check("Window::setIndependentFps targets main from secondary context",
-        main.context().loop.updateTargetFps == 30 && main.context().loop.drawTargetFps == VSYNC &&
-        !main.context().loop.updateSyncedToDraw);
+        trussc::internal::WindowRequestAccess::context(main).loop.updateTargetFps == 30 && trussc::internal::WindowRequestAccess::context(main).loop.drawTargetFps == VSYNC &&
+        !trussc::internal::WindowRequestAccess::context(main).loop.updateSyncedToDraw);
     check("main independent setter leaves secondary untouched",
-        secondary.context().loop.updateTargetFps == 12 && secondary.context().loop.drawTargetFps == 12 &&
-        secondary.context().loop.updateSyncedToDraw);
-    check("main independent setter restores secondary context", internal::currentWindowCtx() == &secondary.context());
-    internal::currentWindowCtx() = &main.context();
+        trussc::internal::WindowRequestAccess::context(secondary).loop.updateTargetFps == 12 && trussc::internal::WindowRequestAccess::context(secondary).loop.drawTargetFps == 12 &&
+        trussc::internal::WindowRequestAccess::context(secondary).loop.updateSyncedToDraw);
+    check("main independent setter restores secondary context", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(secondary));
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(main);
     secondary.setIndependentFps(24, 8);
     check("Window::setIndependentFps targets secondary from main context",
-        secondary.context().loop.updateTargetFps == 24 && secondary.context().loop.drawTargetFps == 8 &&
-        !secondary.context().loop.updateSyncedToDraw);
+        trussc::internal::WindowRequestAccess::context(secondary).loop.updateTargetFps == 24 && trussc::internal::WindowRequestAccess::context(secondary).loop.drawTargetFps == 8 &&
+        !trussc::internal::WindowRequestAccess::context(secondary).loop.updateSyncedToDraw);
     check("secondary independent setter leaves main untouched",
-        main.context().loop.updateTargetFps == 30 && main.context().loop.drawTargetFps == VSYNC &&
-        !main.context().loop.updateSyncedToDraw);
-    check("secondary independent setter restores main context", internal::currentWindowCtx() == &main.context());
+        trussc::internal::WindowRequestAccess::context(main).loop.updateTargetFps == 30 && trussc::internal::WindowRequestAccess::context(main).loop.drawTargetFps == VSYNC &&
+        !trussc::internal::WindowRequestAccess::context(main).loop.updateSyncedToDraw);
+    check("secondary independent setter restores main context", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(main));
     internal::currentWindowCtx() = nullptr;
     secondary.setIndependentFps(15, EVENT_DRIVEN);
     check("independent setter restores null context", internal::currentWindowCtx() == nullptr);
     check("independent setter targets secondary outside callbacks",
-        secondary.context().loop.updateTargetFps == 15 && secondary.context().loop.drawTargetFps == EVENT_DRIVEN &&
-        main.context().loop.updateTargetFps == 30 && main.context().loop.drawTargetFps == VSYNC);
+        trussc::internal::WindowRequestAccess::context(secondary).loop.updateTargetFps == 15 && trussc::internal::WindowRequestAccess::context(secondary).loop.drawTargetFps == EVENT_DRIVEN &&
+        trussc::internal::WindowRequestAccess::context(main).loop.updateTargetFps == 30 && trussc::internal::WindowRequestAccess::context(main).loop.drawTargetFps == VSYNC);
     internal::currentWindowCtx() = previous;
 }
 void setUnitApp(Window& window, std::shared_ptr<App> app) {
@@ -71,7 +71,7 @@ void setUnitApp(Window& window, std::shared_ptr<App> app) {
     // an empty App::draw() goes through Node::drawTree() and touches sgl,
     // which this deterministic fixture deliberately does not initialize.
     // Resolve the current App at delivery so swaps retain the same slot.
-    window.context().appEventListeners.at(1) = internal::FrameworkEventAccess::listen(
+    trussc::internal::WindowRequestAccess::context(window).appEventListeners.at(1) = internal::FrameworkEventAccess::listen(
         window.events().draw, [&window] {
             if (auto app = window.getApp()) {
                 internal::setupNodeOnce(*app);
@@ -88,7 +88,7 @@ bool tick(Window& window, double seconds, bool force = false) {
 }
 void nativeGatedTicks(Window& window) {
     auto* previous = internal::currentWindowCtx();
-    auto& ctx = window.context();
+    auto& ctx = trussc::internal::WindowRequestAccess::context(window);
     internal::currentWindowCtx() = &ctx;
     const auto updates = ctx.updateCount, draws = ctx.drawCount;
     ctx.loop = {};
@@ -119,7 +119,7 @@ void resourceKeyPlacement(Window& main) {
     setUnitApp(owner, internal::makeConstructedApp<Probe>());
     setUnitApp(other, internal::makeConstructedApp<Probe>());
     for (auto* window : {&main, static_cast<Window*>(&owner)}) {
-        auto& ctx = window->context();
+        auto& ctx = trussc::internal::WindowRequestAccess::context(*window);
         internal::currentWindowCtx() = &ctx;
         internal::AppOwnerScope fixtureOwner(internal::appOwner(*window->getApp()));
         uint64_t expected = internal::resourceFrameKey();
@@ -133,14 +133,14 @@ void resourceKeyPlacement(Window& main) {
         double seconds = 9000;
         auto attempt = [&](const char* label, bool force, bool rejected, bool gated, bool skipAdmission = false) {
             const auto before = internal::resourceFrameKey();
-            const auto foreign = other.context().resourceTickCount;
+            const auto foreign = trussc::internal::WindowRequestAccess::context(other).resourceTickCount;
             expected = before + (!gated && !skipAdmission ? 1 : 0);
             const internal::WindowTickPresentation presentation{[] {}, [=] { return !rejected; }, [] {}};
             fakeNow = at(seconds++);
             internal::runWindowTick(fakeNow, .25, force, &presentation, gated);
             check(label, internal::resourceFrameKey() == expected);
             check("resource key is placed before update/draw listeners", callbackPlacement);
-            check("owner tick leaves another secondary resource key unchanged", other.context().resourceTickCount == foreign);
+            check("owner tick leaves another secondary resource key unchanged", trussc::internal::WindowRequestAccess::context(other).resourceTickCount == foreign);
             const auto saved = internal::resourceFrameKey();
             tick(other, seconds);
             check("another window tick leaves selected resource key unchanged", internal::resourceFrameKey() == saved);
@@ -181,7 +181,7 @@ void resourceKeyPlacement(Window& main) {
 
 void exercise(Window& window) {
     auto* previous = internal::currentWindowCtx();
-    auto& ctx = window.context();
+    auto& ctx = trussc::internal::WindowRequestAccess::context(window);
     internal::currentWindowCtx() = &ctx;
     ctx.loop = {};
     auto app = internal::makeConstructedApp<Probe>();
@@ -340,28 +340,28 @@ void setMainHidden(bool hidden) {
 }
 void hiddenInterval(Window& main) {
     Secondary visible;
-    main.context().pauseUpdatesWhenHidden = false;
+    trussc::internal::WindowRequestAccess::context(main).pauseUpdatesWhenHidden = false;
     setUnitApp(main, internal::makeConstructedApp<Probe>());
     setUnitApp(visible, internal::makeConstructedApp<Probe>());
-    internal::currentWindowCtx() = &main.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(main);
     internal::AppOwnerScope fixtureOwner(internal::appOwner(*main.getApp()));
     setIndependentFps(4, EVENT_DRIVEN); tick(main, 8000);
     visible.setFps(4); tick(visible, 8000);
     setMainHidden(true);
-    const auto updates = main.context().updateCount, draws = main.context().drawCount;
-    const auto visibleDraws = visible.context().drawCount;
+    const auto updates = trussc::internal::WindowRequestAccess::context(main).updateCount, draws = trussc::internal::WindowRequestAccess::context(main).drawCount;
+    const auto visibleDraws = trussc::internal::WindowRequestAccess::context(visible).drawCount;
     for (int i = 1; i <= 8; ++i) {
         tick(main, 8000 + i * .25); tick(visible, 8000 + i * .25);
     }
-    check("hidden interval: main updates advance", main.context().updateCount == updates + 8);
-    check("hidden interval: idle EVENT_DRIVEN main skips draws", main.context().drawCount == draws);
-    check("hidden interval: visible window draws normally", visible.context().drawCount == visibleDraws + 8);
+    check("hidden interval: main updates advance", trussc::internal::WindowRequestAccess::context(main).updateCount == updates + 8);
+    check("hidden interval: idle EVENT_DRIVEN main skips draws", trussc::internal::WindowRequestAccess::context(main).drawCount == draws);
+    check("hidden interval: visible window draws normally", trussc::internal::WindowRequestAccess::context(visible).drawCount == visibleDraws + 8);
     // Synchronized main also retains configured updates while hidden. Draws
     // are paced by the configured rate and native tick source, as on HEAD.
     main.setFps(2);
-    const auto syncedUpdates = main.context().updateCount, syncedDraws = main.context().drawCount;
+    const auto syncedUpdates = trussc::internal::WindowRequestAccess::context(main).updateCount, syncedDraws = trussc::internal::WindowRequestAccess::context(main).drawCount;
     for (int i = 0; i < 8; ++i) tick(main, 8003 + i * .25);
-    check("hidden synced main keeps configured pacing", main.context().updateCount == syncedUpdates + 4 && main.context().drawCount == syncedDraws + 4);
+    check("hidden synced main keeps configured pacing", trussc::internal::WindowRequestAccess::context(main).updateCount == syncedUpdates + 4 && trussc::internal::WindowRequestAccess::context(main).drawCount == syncedDraws + 4);
     setMainHidden(false);
     internal::currentWindowCtx() = nullptr;
 }
@@ -369,12 +369,12 @@ void hiddenInterval(Window& main) {
 void captureExpiryWithoutPresentation(Window& main) {
     using namespace mcp::internal;
     internal::AppOwnerScope fixtureOwner(internal::appOwner(*main.getApp()));
-    internal::currentWindowCtx() = &main.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(main);
     setFps(EVENT_DRIVEN);
     int afterFrames = 0, produced = 0;
     auto completion = events().afterFrame.listen([&] {
         ++afterFrames;
-        drainDeferredResponses(&main.context()); // addressed successful-frame drain
+        drainDeferredResponses(&trussc::internal::WindowRequestAccess::context(main)); // addressed successful-frame drain
     });
     const internal::WindowTickPresentation rejected{[] {}, [] { return false; }, [] {}};
     const auto draws = getDrawCount();
@@ -407,7 +407,7 @@ void captureExpiryWithoutPresentation(Window& main) {
         return reply.is_object() && reply["id"] == id && reply["result"].value("isError", false)
             && reply.dump().find("the window rendered no frame within 5 s") != std::string::npos;
     };
-    auto expired = enqueue(&target.context(), start - std::chrono::seconds(1), 239);
+    auto expired = enqueue(&trussc::internal::WindowRequestAccess::context(target), start - std::chrono::seconds(1), 239);
     for (int i = 0; i < 8; ++i)
         attempt(start + std::chrono::milliseconds(100 * i), .1, true, &rejected);
     check("expired targeted reply completes through repeated failed admissions", timedOut(expired, 239) && produced == 0 && !hasDeferredResponses());
@@ -448,7 +448,7 @@ void captureExpiryWithoutPresentation(Window& main) {
     mcp::setToolLevel(grant);
     mcp::stopHttpServer();
 
-    auto blocked = enqueue(&main.context(), deadline, 987);
+    auto blocked = enqueue(&trussc::internal::WindowRequestAccess::context(main), deadline, 987);
     const internal::WindowTickPresentation slowAdmission{[] {}, [] {
         fakeNow += std::chrono::seconds(1); // native admission can block
         return false;
@@ -456,19 +456,19 @@ void captureExpiryWithoutPresentation(Window& main) {
     attempt(deadline - std::chrono::seconds(1), .25, true, &slowAdmission);
     check("admission work counts toward the capture deadline", timedOut(blocked, 987) && produced == 0 && afterFrames == 0 && getDrawCount() == draws);
 
-    auto retry = enqueue(&main.context(), deadline + kTargetedDeferralTimeout, 984);
+    auto retry = enqueue(&trussc::internal::WindowRequestAccess::context(main), deadline + kTargetedDeferralTimeout, 984);
     attempt(deadline, .25, true, &rejected);
     check("unexpired capture remains queued after rejected admission", !ready(retry) && produced == 0);
     attempt(deadline + std::chrono::milliseconds(1), .25, true, &fakePresentation);
     check("capture producer runs once after admission recovers", ready(retry) && retry.get()() == "captured" && produced == 1 && afterFrames == 1);
 
-    auto idle = enqueue(&main.context(), deadline, 985);
-    main.context().loop.redrawCount = 0;
+    auto idle = enqueue(&trussc::internal::WindowRequestAccess::context(main), deadline, 985);
+    trussc::internal::WindowRequestAccess::context(main).loop.redrawCount = 0;
     attempt(deadline, .25, false, &fakePresentation);
     check("idle non-presenting main tick also expires replies", timedOut(idle, 985) && afterFrames == 1);
-    internal::currentWindowCtx() = &target.context();
-    target.context().suspended = true;
-    auto paused = enqueue(&target.context(), deadline, 986);
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(target);
+    trussc::internal::WindowRequestAccess::context(target).suspended = true;
+    auto paused = enqueue(&trussc::internal::WindowRequestAccess::context(target), deadline, 986);
     attempt(deadline, .25, false, &rejected);
     check("paused secondary tick also expires its own replies", timedOut(paused, 986) && !hasDeferredResponses());
     internal::currentWindowCtx() = nullptr;
@@ -545,7 +545,7 @@ struct MainDisplayApp : App {
     }
     void setup() override {
         initialFixture = getWindow();
-        getWindow()->context().pauseUpdatesWhenHidden = false;
+        trussc::internal::WindowRequestAccess::context(*getWindow()).pauseUpdatesWhenHidden = false;
         setIndependentFps(VSYNC, EVENT_DRIVEN);
         getWindow()->setClearColor(Color(1, 0, 0, 1));
         pixels.allocate(4, 4, 4);
@@ -589,7 +589,7 @@ struct MainDisplayApp : App {
                 check("main visibility reports scheduler input", getWindow()->isOccluded());
                 const auto& main = internal::windowApiContext();
                 hiddenUpdates = main.updateCount; hiddenDraws = main.drawCount;
-                visibleDraws = displaySecondary->context().drawCount;
+                visibleDraws = trussc::internal::WindowRequestAccess::context(*displaySecondary).drawCount;
                 displaySecondary->setFps(VSYNC);
                 uploadLog = getLogger().onLog.listen([this](LogEventArgs& e) {
                     if (e.message.find("sg_update_image: only one update allowed per image and frame") != std::string::npos) ++uploadRejections;
@@ -597,10 +597,10 @@ struct MainDisplayApp : App {
                 queueHiddenUpload();
             });
         } else if (phase == 2 && hideMain && displaySecondary &&
-                   getUpdateCount() >= hiddenUpdates + 8 && displaySecondary->context().drawCount >= visibleDraws + 3 && hiddenUploads == 2) {
+                   getUpdateCount() >= hiddenUpdates + 8 && trussc::internal::WindowRequestAccess::context(*displaySecondary).drawCount >= visibleDraws + 3 && hiddenUploads == 2) {
             check("display hidden interval: main updates advance", getUpdateCount() > hiddenUpdates);
             check("display hidden interval: idle main draws skipped", getDrawCount() == hiddenDraws);
-            check("display hidden interval: visible secondary draws advance", displaySecondary->context().drawCount >= visibleDraws + 3);
+            check("display hidden interval: visible secondary draws advance", trussc::internal::WindowRequestAccess::context(*displaySecondary).drawCount >= visibleDraws + 3);
             check("hidden prelude uploads avoid VALIDATE_UPDIMG_ONCE", uploadRejections == 0);
             uploadLog.disconnect();
             setMainHidden(false);
@@ -653,24 +653,24 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     auto& main = *launch;
     initialFixture = &main;
     internal::WindowRequestAccess::bindForTests(main, 101);
-    main.context().fbWidth = main.context().fbHeight = 100;
+    trussc::internal::WindowRequestAccess::context(main).fbWidth = trussc::internal::WindowRequestAccess::context(main).fbHeight = 100;
     internal::windowClockForTests() = readFakeClock;
     independentTargets(main);
     nativeGatedTicks(main);
     exercise(main);
     hiddenInterval(main);
-    const auto mainLoop = main.context().loop;
+    const auto mainLoop = trussc::internal::WindowRequestAccess::context(main).loop;
     {
         Secondary second;
         nativeGatedTicks(second);
         exercise(second);
-        check("secondary APIs leave main scheduler alone", main.context().loop.updateTargetFps == mainLoop.updateTargetFps && main.context().loop.redrawCount == mainLoop.redrawCount);
+        check("secondary APIs leave main scheduler alone", trussc::internal::WindowRequestAccess::context(main).loop.updateTargetFps == mainLoop.updateTargetFps && trussc::internal::WindowRequestAccess::context(main).loop.redrawCount == mainLoop.redrawCount);
     }
-    const auto savedUpdates = main.context().updateCount;
-    const auto savedDraws = main.context().drawCount;
+    const auto savedUpdates = trussc::internal::WindowRequestAccess::context(main).updateCount;
+    const auto savedDraws = trussc::internal::WindowRequestAccess::context(main).drawCount;
     main.setApp<Probe>();
     internal::applyPendingAppForTests(main);
-    check("App swap retains host scheduler and counters", main.context().updateCount == savedUpdates && main.context().drawCount == savedDraws && main.context().loop.updateTargetFps == mainLoop.updateTargetFps);
+    check("App swap retains host scheduler and counters", trussc::internal::WindowRequestAccess::context(main).updateCount == savedUpdates && trussc::internal::WindowRequestAccess::context(main).drawCount == savedDraws && trussc::internal::WindowRequestAccess::context(main).loop.updateTargetFps == mainLoop.updateTargetFps);
     {
         auto throwing = events().rawEvent.listen([](const sapp_event& event) {
             if (event.type == SAPP_EVENTTYPE_SUSPENDED) throw std::runtime_error("visibility listener probe");
@@ -678,10 +678,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         sapp_event event{}; event.type = SAPP_EVENTTYPE_SUSPENDED;
         setMainHidden(true);
         tcCoreTest::dispatchMainEvent(&event);
-        check("suspension survives a throwing raw listener", main.context().suspended && !main.context().inUpdate && !main.context().inCallbackClock);
+        check("suspension survives a throwing raw listener", trussc::internal::WindowRequestAccess::context(main).suspended && !trussc::internal::WindowRequestAccess::context(main).inUpdate && !trussc::internal::WindowRequestAccess::context(main).inCallbackClock);
         throwing.disconnect(); event.type = SAPP_EVENTTYPE_RESUMED; setMainHidden(false);
         tcCoreTest::dispatchMainEvent(&event);
-        check("resume clears suspension after listener exception", !main.context().suspended);
+        check("resume clears suspension after listener exception", !trussc::internal::WindowRequestAccess::context(main).suspended);
     }
 #ifndef __EMSCRIPTEN__
     captureExpiryWithoutPresentation(main);
@@ -709,7 +709,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     {
         Secondary window;
         auto app = internal::makeConstructedApp<Probe>(); setUnitApp(window, app);
-        internal::currentWindowCtx() = &window.context();
+        internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(window);
         internal::AppOwnerScope fixtureOwner(internal::appOwner(*app));
         setIndependentFps(4, EVENT_DRIVEN);
         bool fired = false;
@@ -726,7 +726,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     for (float dpi : {2.0f, 1.25f, 1.5f, 1.75f}) {
         const int expectedWidth = static_cast<int>(1286 / dpi);
         const int expectedHeight = static_cast<int>(967 / dpi);
-        tcCoreTest::WindowFixture dpiWindow; internal::WindowContext& ctx = dpiWindow.window->context(); ctx.fbWidth = 1286; ctx.fbHeight = 967; ctx.dpiScale = dpi;
+        tcCoreTest::WindowFixture dpiWindow; internal::WindowContext& ctx = trussc::internal::WindowRequestAccess::context(*dpiWindow.window); ctx.fbWidth = 1286; ctx.fbHeight = 967; ctx.dpiScale = dpi;
         internal::currentWindowCtx() = &ctx;
         const auto getterWidth = getWindowWidth(), getterHeight = getWindowHeight();
         const auto event = internal::framebufferResizeArgs(1286, 967, dpi);

@@ -174,7 +174,7 @@ struct GuestLibrary {
 
             internal::AppConstructionTicket ticket;
             ticket.registrationOwner = mcpOwner;
-            ticket.context = &target->context();
+            ticket.context = &trussc::internal::WindowRequestAccess::context(*target);
             {
                 internal::AppConstructionScope construction(ticket);
                 raw = createApp();

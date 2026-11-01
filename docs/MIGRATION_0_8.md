@@ -291,3 +291,11 @@ class Document : public tc::App {
     }
 };
 ```
+
+## Window tree-dispatch methods are internal (v0.8.0)
+
+`Window::context()`, `dispatchMousePressToTree`, `dispatchMouseReleaseToTree`,
+`dispatchMouseMoveToTree`, `dispatchMouseScrollToTree`, `dispatchKeyPressToTree`,
+`dispatchKeyReleaseToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal
+in v0.8.0 and are no longer public C++ or Lua API. There is no public replacement
+yet; the synthetic-input design remains open.

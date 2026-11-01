@@ -109,6 +109,7 @@ Window* openWindows[1]={&owner};
 // Only used by the discarded desktop branch of visibility observation.
 auto& windows() { return openWindows; }
 struct WindowRequestAccess {
+    static WindowContext& context(Window& w) { return w.ctx; }
     static auto& binding(Window& w) { return w.binding_; }
     static void applyPendingApp(Window&) {}
 };
@@ -127,7 +128,7 @@ void publishWindowMetadata(Window& w, const sapp_tc_window_metadata& m) {
     w.ctx.suspended=m.trust_hidden_signals && (m.iconified || m.occluded);
 }
 ''' + body(runtime, 'void refreshSelectedWindowMetadata()') + r'''
-''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool occlusionPausesUpdate(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()') + r'''
+''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool occlusionPausesUpdate(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()').replace('trussc::internal::WindowRequestAccess::', 'WindowRequestAccess::') + r'''
 enum class VisibilityDelivery { Drop, RawOnly, RawThenTyped };
 struct sapp_event {
     sapp_event_type type{}; unsigned window_id=0; uint64_t frame_count=0;

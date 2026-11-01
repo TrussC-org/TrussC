@@ -127,7 +127,7 @@ void checkLogicalHandoff() {
 }
 void checkCpuCoordinates() {
     tc::Window fixture; internal::WindowRequestAccess::bindForTests(fixture, 101);
-    auto& window = fixture.context();
+    auto& window = trussc::internal::WindowRequestAccess::context(fixture);
     window.fbWidth = 512; window.fbHeight = 384;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;

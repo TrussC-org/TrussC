@@ -68,14 +68,14 @@ class Driver {
 public:
     Driver() {
         prev_ = tc::internal::currentWindowCtx();
-        tc::internal::currentWindowCtx() = &win_.context();
+        tc::internal::currentWindowCtx() = &tc::internal::WindowRequestAccess::context(win_);
     }
     ~Driver() {
-        win_.context().rootNode.reset();
+        tc::internal::WindowRequestAccess::context(win_).rootNode.reset();
         tc::internal::currentWindowCtx() = prev_;
     }
-    void setRoot(const Node::Ptr& root) { win_.context().rootNode = root; }
-    void tick() { win_.tickTree(); }
+    void setRoot(const Node::Ptr& root) { tc::internal::WindowRequestAccess::context(win_).rootNode = root; }
+    void tick() { tc::internal::WindowRequestAccess::tickTree(win_); }
 private:
     Window win_;
     tc::internal::WindowContext* prev_ = nullptr;

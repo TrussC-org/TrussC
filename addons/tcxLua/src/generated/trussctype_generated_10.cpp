@@ -213,17 +213,16 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
         "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
     {
-        sol::usertype<trussc::RuntimeEvents> t = lua->new_usertype<trussc::RuntimeEvents>("RuntimeEvents");
-        t["console"] = &trussc::RuntimeEvents::console;
-        t["deviceLost"] = &trussc::RuntimeEvents::deviceLost;
-        t["exitRequested"] = &trussc::RuntimeEvents::exitRequested;
-        t["hotReloadUnload"] = &trussc::RuntimeEvents::hotReloadUnload;
+        auto constructors = tcxLuaConstructors<trussc::LogStream
+            , trussc::LogStream(trussc::LogLevel)
+            , trussc::LogStream(trussc::LogLevel, const std::string &)
+        >();
+        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
     }
-    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
-        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
-        "Miter", sol::var(trussc::StrokeJoin::Miter),
-        "Round", sol::var(trussc::StrokeJoin::Round),
-        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
     {
         sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
         t["files"] = &trussc::DragDropEventArgs::files;
@@ -231,9 +230,13 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["y"] = &trussc::DragDropEventArgs::y;
     }
     {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
+        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
+        t["height"] = &trussc::ResizeEventArgs::height;
+        t["width"] = &trussc::ResizeEventArgs::width;
+    }
+    {
+        sol::usertype<trussc::CloseRequestEventArgs> t = lua->new_usertype<trussc::CloseRequestEventArgs>("CloseRequestEventArgs");
+        t["cancel"] = &trussc::CloseRequestEventArgs::cancel;
     }
 }
 #ifdef _MSC_VER

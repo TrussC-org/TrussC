@@ -142,61 +142,53 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
-        t["alt"] = &trussc::MouseEventArgs::alt;
-        t["button"] = &trussc::MouseEventArgs::button;
-        t["consumed"] = &trussc::MouseEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseEventArgs::ctrl;
-        t["globalPos"] = &trussc::MouseEventArgs::globalPos;
-        t["pos"] = &trussc::MouseEventArgs::pos;
-        t["shift"] = &trussc::MouseEventArgs::shift;
-        t["super"] = &trussc::MouseEventArgs::super;
-        t["x"] = &trussc::MouseEventArgs::x;
-        t["y"] = &trussc::MouseEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
+        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
+        t["buffer"] = &trussc::PlayingSound::buffer;
+        t["level"] = &trussc::PlayingSound::level;
+        t["loop"] = &trussc::PlayingSound::loop;
+        t["mixMode"] = &trussc::PlayingSound::mixMode;
+        t["pan"] = &trussc::PlayingSound::pan;
+        t["paused"] = &trussc::PlayingSound::paused;
+        t["playing"] = &trussc::PlayingSound::playing;
+        t["positionF"] = &trussc::PlayingSound::positionF;
+        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
+        t["speed"] = &trussc::PlayingSound::speed;
+        t["volume"] = &trussc::PlayingSound::volume;
     }
     {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["endGroup"] = &trussc::Reflector::endGroup;
-        t["isDerived"] = &trussc::Reflector::isDerived;
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["popDerived"] = &trussc::Reflector::popDerived;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["pushDerived"] = &trussc::Reflector::pushDerived;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
+        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
+        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
+        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
+        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
     }
+    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
+        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
+        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
+        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
     {
-        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
-        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
-        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
-        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
-        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
+        sol::usertype<trussc::RuntimeEvents> t = lua->new_usertype<trussc::RuntimeEvents>("RuntimeEvents");
+        t["console"] = &trussc::RuntimeEvents::console;
+        t["deviceLost"] = &trussc::RuntimeEvents::deviceLost;
+        t["exitRequested"] = &trussc::RuntimeEvents::exitRequested;
+        t["hotReloadUnload"] = &trussc::RuntimeEvents::hotReloadUnload;
     }
+    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
+        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
+        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
     {
-        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
-        t["channels"] = &trussc::AudioOutBuffer::channels;
-        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
-        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
-        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
-    }
-    lua->new_usertype<trussc::TcyMode>("TcyMode",
-        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
-        "Rotate", sol::var(trussc::TcyMode::Rotate),
-        "Upright", sol::var(trussc::TcyMode::Upright),
-        "Combine", sol::var(trussc::TcyMode::Combine));
-    {
-        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
-        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
-        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
+        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
+        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
+        t["message"] = &trussc::VideoErrorEventArgs::message;
     }
     lua->new_usertype<trussc::Deliver>("Deliver",
         sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
         "Inline", sol::var(trussc::Deliver::Inline),
         "Main", sol::var(trussc::Deliver::Main));
-    {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
-    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

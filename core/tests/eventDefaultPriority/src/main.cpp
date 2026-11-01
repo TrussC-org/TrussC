@@ -190,7 +190,7 @@ void appTouchOrder() {
     auto* launch = static_cast<Window*>(descriptor._tc_bind_user);
     // Model the runner opening its main Window without starting sokol.
     internal::WindowRequestAccess::bindForTests(*launch, 101);
-    internal::currentWindowCtx() = &launch->context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*launch);
     internal::appSetupFunc();
     events().update.notify();
     for (auto* event : {&events().touchPressed, &events().touchMoved, &events().touchReleased}) {

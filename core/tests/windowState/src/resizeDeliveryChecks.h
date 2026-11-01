@@ -24,7 +24,7 @@ void checkResizeDelivery(tc::Window& window, sapp_tc_window_metadata& metadata,
     const auto beforeNested = app->sizes;
     observe(150);
     check("nested newer resize wins before outer native callback returns",
-          matches(200) && window.context().fbWidth == 200 && notifications == 2 && app->sizes == beforeNested + 2);
+          matches(200) && trussc::internal::WindowRequestAccess::context(window).fbWidth == 200 && notifications == 2 && app->sizes == beforeNested + 2);
     tick();
     check("next tick retains newest App extent and deduplicates it",
           matches(200) && notifications == 2 && app->sizes == beforeNested + 2);
@@ -45,21 +45,21 @@ void checkResizeDelivery(tc::Window& window, sapp_tc_window_metadata& metadata,
         check("feedback leaves App at a delivered size the native window actually had",
               (matches(150) || matches(200)) && app->getWidth() == lastExtent && app->getHeight() == lastExtent);
         check("feedback retains the newest observation for another tick",
-              window.context().fbWidth == (lastExtent == extent(150) ? 200 : 150) &&
-              window.context().fbHeight == window.context().fbWidth);
+              trussc::internal::WindowRequestAccess::context(window).fbWidth == (lastExtent == extent(150) ? 200 : 150) &&
+              trussc::internal::WindowRequestAccess::context(window).fbHeight == trussc::internal::WindowRequestAccess::context(window).fbWidth);
     };
     const auto beforeFeedback = app->sizes;
     observe(150);
     checkFeedbackEntry(150, beforeFeedback);
     for (int i = 0; i != 4; ++i) {
-        const int pendingPixels = window.context().fbWidth;
+        const int pendingPixels = trussc::internal::WindowRequestAccess::context(window).fbWidth;
         const auto beforeTick = app->sizes;
         entryNotifications = firstExtent = lastExtent = 0;
         tick();
         checkFeedbackEntry(pendingPixels, beforeTick);
     }
     feedback.disconnect();
-    const int pendingPixels = window.context().fbWidth;
+    const int pendingPixels = trussc::internal::WindowRequestAccess::context(window).fbWidth;
     const auto beforeCatchup = app->sizes;
     tick();
     check("feedback disconnect lets the next tick deliver the outstanding extent",

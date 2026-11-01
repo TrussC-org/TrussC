@@ -102,10 +102,10 @@ struct OpenWindow : Window {
 
 void tick(Window& window) {
     auto* previous = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &window.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(window);
     {
         internal::WindowEntryScope scope(window);
-        window.tickTree();
+        trussc::internal::WindowRequestAccess::tickTree(window);
     }
     internal::currentWindowCtx() = previous;
 }

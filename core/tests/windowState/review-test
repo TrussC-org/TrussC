@@ -89,7 +89,7 @@ void exercise(void (*tick)(sapp_window,void*), const char* name) {
     m.fb_width=m.fb_height=150;
     sapp_event event{}; event.type=SAPP_EVENTTYPE_RESIZED;
     internal::mainWindowEvent(&event,{700},&window);
-    check("raw exception leaves native/App size out of sync", window.context().fbWidth==150 && app->getWidth()==100 && app->sizes==initialSizes);
+    check("raw exception leaves native/App size out of sync", trussc::internal::WindowRequestAccess::context(window).fbWidth==150 && app->getWidth()==100 && app->sizes==initialSizes);
     raw.disconnect();
     m.occluded=true; app->nested=true;
     tick({700},&window);
@@ -115,7 +115,7 @@ void resizeDelivery(bool main, bool pixels) {
     auto app=std::make_shared<Probe>(); app->owner=&window;
     window.setApp(app); internal::applyPendingAppForTests(window);
     // Prevent GPU work in the main frame body; size admission still executes.
-    window.setIndependentFps(4,EVENT_DRIVEN); window.context().loop.redrawCount=0;
+    window.setIndependentFps(4,EVENT_DRIVEN); trussc::internal::WindowRequestAccess::context(window).loop.redrawCount=0;
     auto event=[&] {
         sapp_event e{}; e.type=SAPP_EVENTTYPE_RESIZED;
         if (main) internal::mainWindowEvent(&e,handle,&window);

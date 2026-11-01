@@ -194,8 +194,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     // The stand-in has no native fullscreen state (especially on AppKit).
     internal::windowFullscreenHookForTests() = [](const tc::Window&) { return internal::WindowFullscreenPhase::Windowed; };
     internal::windowControlHookForTests() = record;
-    internal::currentWindowCtx() = callerContext = &secondary.context();
-    secondary.tickTree(); // real App setup/update binding without GPU drawing
+    internal::currentWindowCtx() = callerContext = &trussc::internal::WindowRequestAccess::context(secondary);
+    trussc::internal::WindowRequestAccess::tickTree(secondary); // real App setup/update binding without GPU drawing
     check("setup moves current secondary before fullscreen", calls.size() >= 3 &&
         calls[0].window == &secondary && calls[0].op == internal::WindowControl::Position && calls[0].x == -1920 &&
         calls[1].window == &secondary && calls[1].op == internal::WindowControl::Fullscreen);
@@ -203,7 +203,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     auto fromSecondaryEvent = secondary.events().keyPressed.listen([&](const KeyEventArgs&) {
         mainWindow->setPosition(10, 20);
         expect(*mainWindow, internal::WindowControl::Position, "main handle inside secondary event");
-        check("event restores secondary context", internal::currentWindowCtx() == &secondary.context());
+        check("event restores secondary context", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(secondary));
     });
     KeyEventArgs key{};
     secondary.events().keyPressed.notify(key);
@@ -213,14 +213,14 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     expect(secondary, internal::WindowControl::PositionQuery, "getter follows secondary context"); }
     mainWindow->setPosition(10, 20);
     expect(*mainWindow, internal::WindowControl::Position, "main handle from secondary callback context");
-    check("explicit main restores secondary context", internal::currentWindowCtx() == &secondary.context());
+    check("explicit main restores secondary context", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(secondary));
     mainWindow->setTitle("Main");
     expect(*mainWindow, internal::WindowControl::Title, "title uses same adapter");
-    internal::currentWindowCtx() = callerContext = &mainWindow->context();
+    internal::currentWindowCtx() = callerContext = &trussc::internal::WindowRequestAccess::context(*mainWindow);
     auto fromMainUpdate = mainWindow->events().update.listen([&] { app->setSize(640, 480); });
     mainWindow->events().update.notify();
     expect(secondary, internal::WindowControl::Size, "App::setSize targets own window from main");
-    check("App::setSize restores main", internal::currentWindowCtx() == &mainWindow->context());
+    check("App::setSize restores main", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(*mainWindow));
     const auto beforeAmbiguous = calls.size();
     setWindowPosition(50, 60);
     check("unowned ambiguous position changes no Window", calls.size() == beforeAmbiguous);
@@ -228,7 +228,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     expect(secondary, internal::WindowControl::Position, "explicit secondary from main");
     throws = true;
     try { secondary.setSize(12, 13); check("fault injected", false); } catch (const std::runtime_error&) {}
-    check("throw restores context", internal::currentWindowCtx() == &mainWindow->context());
+    check("throw restores context", internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(*mainWindow));
     throws = false;
     internal::currentWindowCtx() = callerContext = nullptr;
     secondary.setFullscreen(false);

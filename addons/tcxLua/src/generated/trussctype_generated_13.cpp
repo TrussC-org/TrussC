@@ -104,37 +104,48 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        auto constructors = tcxLuaConstructors<trussc::FullscreenShader
-            , trussc::FullscreenShader()
+        auto constructors = tcxLuaConstructors<trussc::LayoutMod
+            , trussc::LayoutMod()
+            , trussc::LayoutMod(trussc::LayoutDirection)
+            , trussc::LayoutMod(trussc::LayoutDirection, float)
         >();
-        sol::usertype<trussc::FullscreenShader> t = lua->new_usertype<trussc::FullscreenShader>("FullscreenShader", constructors, sol::call_constructor, constructors);
-        t["begin"] = &trussc::FullscreenShader::begin;
-        t["clear"] = &trussc::FullscreenShader::clear;
-        t["draw"] = &trussc::FullscreenShader::draw;
-        t["end"] = &trussc::FullscreenShader::end;
-        t["isLoaded"] = &trussc::FullscreenShader::isLoaded;
-        t["load"] = &trussc::FullscreenShader::load;
-        t["setTexture"] = sol::overload([](trussc::FullscreenShader& self, int slot, sg_image image, sg_sampler sampler) { return self.setTexture(slot, image, sampler); }, [](trussc::FullscreenShader& self, int slot, sg_view view, sg_sampler sampler) { return self.setTexture(slot, view, sampler); });
-        t["setUniform"] = sol::overload([](trussc::FullscreenShader& self, int slot, float value) { return self.setUniform(slot, value); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec2 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec3 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Vec4 & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const trussc::Color & c) { return self.setUniform(slot, c); }, [](trussc::FullscreenShader& self, int slot, const std::vector<float> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec2> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec3> & v) { return self.setUniform(slot, v); }, [](trussc::FullscreenShader& self, int slot, const std::vector<trussc::Vec4> & v) { return self.setUniform(slot, v); });
+        sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod", constructors, sol::call_constructor, constructors);
+        t["getCrossAxis"] = &trussc::LayoutMod::getCrossAxis;
+        t["getDirection"] = &trussc::LayoutMod::getDirection;
+        t["getMainAxis"] = &trussc::LayoutMod::getMainAxis;
+        t["getOwner"] = [](trussc::LayoutMod& self) { return self.getOwner(); };
+        t["getPaddingBottom"] = &trussc::LayoutMod::getPaddingBottom;
+        t["getPaddingLeft"] = &trussc::LayoutMod::getPaddingLeft;
+        t["getPaddingRight"] = &trussc::LayoutMod::getPaddingRight;
+        t["getPaddingTop"] = &trussc::LayoutMod::getPaddingTop;
+        t["getSpacing"] = &trussc::LayoutMod::getSpacing;
+        t["setCrossAxis"] = &trussc::LayoutMod::setCrossAxis;
+        t["setDirection"] = &trussc::LayoutMod::setDirection;
+        t["setMainAxis"] = &trussc::LayoutMod::setMainAxis;
+        t["setPadding"] = sol::overload([](trussc::LayoutMod& self, float padding) -> decltype(auto) { return self.setPadding(padding); }, [](trussc::LayoutMod& self, float vertical, float horizontal) -> decltype(auto) { return self.setPadding(vertical, horizontal); }, [](trussc::LayoutMod& self, float top, float right, float bottom, float left) -> decltype(auto) { return self.setPadding(top, right, bottom, left); });
+        t["setPaddingBottom"] = &trussc::LayoutMod::setPaddingBottom;
+        t["setPaddingLeft"] = &trussc::LayoutMod::setPaddingLeft;
+        t["setPaddingRight"] = &trussc::LayoutMod::setPaddingRight;
+        t["setPaddingTop"] = &trussc::LayoutMod::setPaddingTop;
+        t["setSpacing"] = &trussc::LayoutMod::setSpacing;
+        t["updateLayout"] = &trussc::LayoutMod::updateLayout;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::ChipSoundNote
-            , trussc::ChipSoundNote()
-            , trussc::ChipSoundNote(trussc::Wave, float, float)
-            , trussc::ChipSoundNote(trussc::Wave, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
+            , trussc::JsonReadReflector(trussc::Json)
         >();
-        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote", constructors, sol::call_constructor, constructors);
-        t["attack"] = &trussc::ChipSoundNote::attack;
-        t["decay"] = &trussc::ChipSoundNote::decay;
-        t["duration"] = &trussc::ChipSoundNote::duration;
-        t["hz"] = &trussc::ChipSoundNote::hz;
-        t["release"] = &trussc::ChipSoundNote::release;
-        t["sustain"] = &trussc::ChipSoundNote::sustain;
-        t["volume"] = &trussc::ChipSoundNote::volume;
-        t["wave"] = &trussc::ChipSoundNote::wave;
-        t["build"] = &trussc::ChipSoundNote::build;
-        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
-        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector", constructors, sol::call_constructor, constructors);
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
+        t["isDerived"] = &trussc::JsonReadReflector::isDerived;
+        t["isReadOnly"] = &trussc::JsonReadReflector::isReadOnly;
+        t["popDerived"] = &trussc::JsonReadReflector::popDerived;
+        t["popReadOnly"] = &trussc::JsonReadReflector::popReadOnly;
+        t["pushDerived"] = &trussc::JsonReadReflector::pushDerived;
+        t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
     }
     lua->new_usertype<trussc::EaseType>("EaseType",
         sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
@@ -151,17 +162,13 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         "Bounce", sol::var(trussc::EaseType::Bounce),
         "Custom", sol::var(trussc::EaseType::Custom));
     {
-        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
-        t["date"] = &trussc::BuildInfo::date;
-        t["dateTime"] = &trussc::BuildInfo::dateTime;
-        t["day"] = &trussc::BuildInfo::day;
-        t["hour"] = &trussc::BuildInfo::hour;
-        t["minute"] = &trussc::BuildInfo::minute;
-        t["month"] = &trussc::BuildInfo::month;
-        t["second"] = &trussc::BuildInfo::second;
-        t["time"] = &trussc::BuildInfo::time;
-        t["timestamp"] = &trussc::BuildInfo::timestamp;
-        t["year"] = &trussc::BuildInfo::year;
+        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
+        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
+        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
+        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
+        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
+        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
     lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
         sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
@@ -176,28 +183,25 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         "HEVC", sol::var(trussc::VideoCodec::HEVC),
         "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
         "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
+    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
+        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
+        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
+        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
     {
-        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
-        t["changed"] = &trussc::TouchPoint::changed;
-        t["id"] = &trussc::TouchPoint::id;
-        t["pressure"] = &trussc::TouchPoint::pressure;
-        t["x"] = &trussc::TouchPoint::x;
-        t["y"] = &trussc::TouchPoint::y;
+        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
+        t["getHost"] = &trussc::TcpServerClient::getHost;
+        t["getId"] = &trussc::TcpServerClient::getId;
+        t["getPort"] = &trussc::TcpServerClient::getPort;
     }
-    lua->new_usertype<trussc::AxisMode>("AxisMode",
-        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
-        "None", sol::var(trussc::AxisMode::None),
-        "Fill", sol::var(trussc::AxisMode::Fill),
-        "Content", sol::var(trussc::AxisMode::Content));
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
     {
-        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
-        t["note"] = &trussc::ChipSoundBundle::Entry::note;
-        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

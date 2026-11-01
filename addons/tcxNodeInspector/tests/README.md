@@ -2,7 +2,7 @@
 
 Headless console test (no window, no GPU). Hand edits are recorded through
 `NodeInspector::recordTouchedForTests()`, the entry point the Inspector panel
-uses, and the node tree is updated through a headless `Window`'s `tickTree()`,
+uses, and the node tree is updated through the internal Window test driver,
 which runs `updateTree()` and so sweeps destroyed children. The checks read
 `NodeInspector::getTouched()`, the JSON `tcx_imgui_get_touched` reports under
 `inspector`.

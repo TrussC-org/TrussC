@@ -56,22 +56,22 @@ public:
     Driver() {
         tc::internal::WindowRequestAccess::bindForTests(win_, 101);
         prev_ = tc::internal::currentWindowCtx();
-        tc::internal::currentWindowCtx() = &win_.context();
+        tc::internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(win_);
     }
     ~Driver() {
-        win_.context().rootNode.reset();
+        trussc::internal::WindowRequestAccess::context(win_).rootNode.reset();
         tc::internal::currentWindowCtx() = prev_;
     }
-    void setRoot(const Node::Ptr& root) { win_.context().rootNode = root; }
+    void setRoot(const Node::Ptr& root) { trussc::internal::WindowRequestAccess::context(win_).rootNode = root; }
     void press(float x, float y) {
         MouseEventArgs e;
         e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = 0;
         e.syncLegacy();
-        win_.dispatchMousePressToTree(e);
+        trussc::internal::WindowRequestAccess::dispatchMousePressToTree(win_, e);
         MouseEventArgs r = e;
-        win_.dispatchMouseReleaseToTree(r);
+        trussc::internal::WindowRequestAccess::dispatchMouseReleaseToTree(win_, r);
     }
-    void tick() { win_.tickTree(); }
+    void tick() { trussc::internal::WindowRequestAccess::tickTree(win_); }
 private:
     Window win_;
     tc::internal::WindowContext* prev_ = nullptr;

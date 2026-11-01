@@ -200,15 +200,15 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["y"] = &trussc::MouseMoveEventArgs::y;
         t["syncLegacy"] = &trussc::MouseMoveEventArgs::syncLegacy;
     }
-    lua->new_usertype<trussc::ChipSoundNote::Wave>("ChipSoundNoteWave",
-        sol::meta_function::equal_to, [](trussc::ChipSoundNote::Wave a, trussc::ChipSoundNote::Wave b){ return a == b; },
-        "Sin", sol::var(trussc::ChipSoundNote::Wave::Sin),
-        "Square", sol::var(trussc::ChipSoundNote::Wave::Square),
-        "Triangle", sol::var(trussc::ChipSoundNote::Wave::Triangle),
-        "Sawtooth", sol::var(trussc::ChipSoundNote::Wave::Sawtooth),
-        "Noise", sol::var(trussc::ChipSoundNote::Wave::Noise),
-        "PinkNoise", sol::var(trussc::ChipSoundNote::Wave::PinkNoise),
-        "Silent", sol::var(trussc::ChipSoundNote::Wave::Silent));
+    lua->new_usertype<trussc::Orientation>("Orientation",
+        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
+        "Portrait", sol::var(trussc::Orientation::Portrait),
+        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
+        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
+        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
+        "Landscape", sol::var(trussc::Orientation::Landscape),
+        "All", sol::var(trussc::Orientation::All),
+        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
     {
         sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
         t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
@@ -218,22 +218,24 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
         t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
     }
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
     {
-        sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
-        t["channels"] = &trussc::AudioInBuffer::channels;
-        t["frameCount"] = &trussc::AudioInBuffer::frameCount;
-        t["framePosition"] = &trussc::AudioInBuffer::framePosition;
-        t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
+        auto constructors = tcxLuaConstructors<trussc::EventListener
+            , trussc::EventListener()
+        >();
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
     }
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    {
+        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
+        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
+        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
+        t["message"] = &trussc::TcpServerErrorEventArgs::message;
+    }
+    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
+        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
+        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
+        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
     {
         sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
         t["mode"] = &trussc::CurveStyle::mode;
@@ -241,9 +243,9 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["tolerance"] = &trussc::CurveStyle::tolerance;
     }
     {
-        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
-        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
-        t["message"] = &trussc::TcpErrorEventArgs::message;
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
 }
 #ifdef _MSC_VER

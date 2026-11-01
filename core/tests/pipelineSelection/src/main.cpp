@@ -323,7 +323,7 @@ void lazyResizeChecks() {
         // A secondary-window coordinator using this native drawable. Alter its
         // reported dimensions exactly as the reviewer's windowless probe did.
         Window secondaryOwner;
-        auto& secondary = secondaryOwner.context();
+        auto& secondary = trussc::internal::WindowRequestAccess::context(secondaryOwner);
         internal::WindowRequestAccess::binding(secondaryOwner).metadata.dpi_scale = secondary.dpiScale;
         secondary.fbWidth=256; secondary.fbHeight=192;
         secondary.swapchainTarget.colorFormat=main.swapchainTarget.colorFormat;
@@ -408,9 +408,9 @@ public:
             // the window must never retain contexts from the previous setup.
             survivor_.begin(1,0,0); const auto old=internal::currentTarget().resources().generation; survivor_.end();
             otherSurvivor_.begin(0,0,1); otherSurvivor_.end();
-            const auto windowGeneration = secondary_ ? secondary_->context().swapchainTarget.resources().generation : 0;
+            const auto windowGeneration = secondary_ ? trussc::internal::WindowRequestAccess::context(*secondary_).swapchainTarget.resources().generation : 0;
             internal::resizeSgl(baseVertices_+(frame_%2?0:64),baseCommands_+(frame_%2?0:16));
-            if(secondary_) check("sgl resize replaces secondary window generation",secondary_->context().swapchainTarget.resources().generation != windowGeneration && secondary_->context().swapchainTarget.resources().context.id != 0);
+            if(secondary_) check("sgl resize replaces secondary window generation",trussc::internal::WindowRequestAccess::context(*secondary_).swapchainTarget.resources().generation != windowGeneration && trussc::internal::WindowRequestAccess::context(*secondary_).swapchainTarget.resources().context.id != 0);
             otherSurvivor_.begin(0,0,1); otherSurvivor_.end();
             expect(read(otherSurvivor_),4,4,Color(0,0,1),"second surviving lease after global resize");
             survivor_.allocate(frame_%2?113:160,frame_%2?79:96,frame_%2?4:1,frame_%2?TextureFormat::RGBA16F:TextureFormat::RGBA8);

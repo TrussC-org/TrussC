@@ -72,7 +72,7 @@ struct SizeEvidence : App {
             w, h, receivedDpi, receivedScale);
     }
     void printSizeEvidence(const char* role) {
-        const auto& ctx = getWindow()->context();
+        const auto& ctx = trussc::internal::WindowRequestAccess::context(*getWindow());
         std::printf("%s App=%gx%g received=%dx%d received-dpi=%.6g received-scale=%.6g resizes=%d "
             "context-dpi=%.6g context-fb=%dx%d target-fb=%dx%d\n",
             role, double(getWidth()), double(getHeight()), receivedWidth, receivedHeight,
@@ -91,7 +91,7 @@ struct CreationApp : SizeEvidence {
     void skip(const char* label, int w, int h) const {
         std::printf("SKIP: %s: requested native %dx%d exceeds usable area %dx%d (%s); a window manager may constrain the first map before main's setup snapshot or before/after phase 0. Rerun with a size that fits. snapshot=%dx%d live main=%dx%d secondary=%dx%d\n",
             label, expectedWidth, expectedHeight, area.width, area.height, area.source, w, h, sapp_width(), sapp_height(),
-            secondary->context().fbWidth, secondary->context().fbHeight);
+            trussc::internal::WindowRequestAccess::context(*secondary).fbWidth, trussc::internal::WindowRequestAccess::context(*secondary).fbHeight);
     }
     bool nonGrowing(int w, int h) const {
         return w > 0 && h > 0 && w <= expectedWidth && h <= expectedHeight;
@@ -107,7 +107,7 @@ struct CreationApp : SizeEvidence {
         if (!secondary) { exitApp(1); return; }
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
         // Keep constructor dimensions before the secondary's first adapter tick.
-        secondWidth = secondary->context().fbWidth; secondHeight = secondary->context().fbHeight;
+        secondWidth = trussc::internal::WindowRequestAccess::context(*secondary).fbWidth; secondHeight = trussc::internal::WindowRequestAccess::context(*secondary).fbHeight;
 #endif
         secondary->setApp<Secondary>();
         mainWidth = sapp_width(); mainHeight = sapp_height();
@@ -128,7 +128,7 @@ struct CreationApp : SizeEvidence {
             expectedHeight = pixels ? requestHeight : int(requestHeight * sapp_dpi_scale() + 0.5f);
             skipMain = skipSecondary = area.exceededBy(expectedWidth, expectedHeight);
 #else
-            secondWidth = secondary->context().fbWidth; secondHeight = secondary->context().fbHeight;
+            secondWidth = trussc::internal::WindowRequestAccess::context(*secondary).fbWidth; secondHeight = trussc::internal::WindowRequestAccess::context(*secondary).fbHeight;
 #endif
             std::printf("creation pixelPerfect=%d dpi=%.2f request=%dx%d main=%dx%d secondary=%dx%d\n",
                 pixels, sapp_dpi_scale(), requestWidth, requestHeight, mainWidth, mainHeight, secondWidth, secondHeight);
@@ -166,7 +166,7 @@ struct CreationApp : SizeEvidence {
                         mainWidth, mainHeight, scale, sapp_width(), sapp_height());
             }
             if (skipSecondary) {
-                check("secondary native size does not grow", nonGrowing(secondary->context().fbWidth, secondary->context().fbHeight));
+                check("secondary native size does not grow", nonGrowing(trussc::internal::WindowRequestAccess::context(*secondary).fbWidth, trussc::internal::WindowRequestAccess::context(*secondary).fbHeight));
                 skip("secondary App receives creation size", secondWidth, secondHeight);
             } else {
                 check("secondary App receives creation size", app->getWidth() == int(secondWidth / scale) && app->getHeight() == int(secondHeight / scale));
@@ -206,22 +206,22 @@ struct CreationApp : SizeEvidence {
             if (app->updates == fullscreenUpdate) return;
             if (skipMain || skipSecondary) {
                 check("fullscreen native sizes do not grow",
-                    nonGrowing(sapp_width(), sapp_height()) && nonGrowing(secondary->context().fbWidth, secondary->context().fbHeight));
+                    nonGrowing(sapp_width(), sapp_height()) && nonGrowing(trussc::internal::WindowRequestAccess::context(*secondary).fbWidth, trussc::internal::WindowRequestAccess::context(*secondary).fbHeight));
                 skip("ignored fullscreen requests preserve both native sizes", skipMain ? mainWidth : secondWidth, skipMain ? mainHeight : secondHeight);
             } else {
                 check("ignored fullscreen requests preserve both native sizes",
                     sapp_width() == mainWidth && sapp_height() == mainHeight &&
-                    secondary->context().fbWidth == secondWidth && secondary->context().fbHeight == secondHeight);
+                    trussc::internal::WindowRequestAccess::context(*secondary).fbWidth == secondWidth && trussc::internal::WindowRequestAccess::context(*secondary).fbHeight == secondHeight);
                 if (sapp_width() != mainWidth || sapp_height() != mainHeight ||
-                    secondary->context().fbWidth != secondWidth || secondary->context().fbHeight != secondHeight) {
+                    trussc::internal::WindowRequestAccess::context(*secondary).fbWidth != secondWidth || trussc::internal::WindowRequestAccess::context(*secondary).fbHeight != secondHeight) {
                     std::printf("fullscreen size mismatch: main actual=%dx%d expected=%dx%d secondary actual=%dx%d expected=%dx%d\n",
                         sapp_width(), sapp_height(), mainWidth, mainHeight,
-                        secondary->context().fbWidth, secondary->context().fbHeight, secondWidth, secondHeight);
+                        trussc::internal::WindowRequestAccess::context(*secondary).fbWidth, trussc::internal::WindowRequestAccess::context(*secondary).fbHeight, secondWidth, secondHeight);
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
                     for (auto* target : {getWindow(), secondary.get()}) {
-                        const int liveWidth = target == getWindow() ? sapp_width() : secondary->context().fbWidth;
-                        const int liveHeight = target == getWindow() ? sapp_height() : secondary->context().fbHeight;
-                        const float targetScale = pixels ? 1 : target == getWindow() ? sapp_dpi_scale() : secondary->context().dpiScale;
+                        const int liveWidth = target == getWindow() ? sapp_width() : trussc::internal::WindowRequestAccess::context(*secondary).fbWidth;
+                        const int liveHeight = target == getWindow() ? sapp_height() : trussc::internal::WindowRequestAccess::context(*secondary).fbHeight;
+                        const float targetScale = pixels ? 1 : target == getWindow() ? sapp_dpi_scale() : trussc::internal::WindowRequestAccess::context(*secondary).dpiScale;
                         struct RejectedSize { int width, height; };
                         for (const auto rejected : {RejectedSize{213, 157}, RejectedSize{215, 159}}) {
                             const int nativeWidth = int(rejected.width * targetScale), nativeHeight = int(rejected.height * targetScale);
@@ -250,8 +250,8 @@ struct CreationApp : SizeEvidence {
                 // setSize must reach the request, as observed on Pi/labwc.
                 if (sapp_width() != (skipMain ? expectedWidth : mainWidth) ||
                     sapp_height() != (skipMain ? expectedHeight : mainHeight) ||
-                    secondary->context().fbWidth != (skipSecondary ? expectedWidth : secondWidth) ||
-                    secondary->context().fbHeight != (skipSecondary ? expectedHeight : secondHeight)) return;
+                    trussc::internal::WindowRequestAccess::context(*secondary).fbWidth != (skipSecondary ? expectedWidth : secondWidth) ||
+                    trussc::internal::WindowRequestAccess::context(*secondary).fbHeight != (skipSecondary ? expectedHeight : secondHeight)) return;
                 check("creation equals setSize on both windows", true);
             } else {
                 const float dpi = sapp_dpi_scale();

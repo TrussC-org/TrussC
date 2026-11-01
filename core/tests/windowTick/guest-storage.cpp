@@ -39,7 +39,7 @@ int main(int argc, char** argv) {
         internal::WindowRequestAccess::bindForTests(*window, 101);
         Window peer; // retained unbound CPU storage also participates in retirement
         auto peerNode = std::make_shared<RectNode>();
-        peer.context().selectedNode = peerNode;
+        trussc::internal::WindowRequestAccess::context(peer).selectedNode = peerNode;
         Event<void> zero;
         Event<int> typed;
         storageVoid = &zero; storageTyped = &typed;
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
         const auto generation = internal::nextAppGeneration();
         auto createAt = [&](Window& target, internal::AppConstructionTicket& ticket) {
             ticket.registrationOwner = generation;
-            ticket.context = &target.context();
+            ticket.context = &trussc::internal::WindowRequestAccess::context(target);
             std::shared_ptr<App> app;
             {
                 internal::AppConstructionScope scope(ticket);
@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         check("guest typed construction inherits its caller cohort", bool(youngest));
         if (!youngest) return 2;
         auto addNode = reinterpret_cast<std::shared_ptr<Node> (*)(App*)>(dlsym(handle, "storageNode"));
-        { auto node = addNode(app.get()); peer.context().hoveredNode = node; peer.context().grabbedNode = node; peer.context().grabbedButton = 0; }
+        { auto node = addNode(app.get()); trussc::internal::WindowRequestAccess::context(peer).hoveredNode = node; trussc::internal::WindowRequestAccess::context(peer).grabbedNode = node; trussc::internal::WindowRequestAccess::context(peer).grabbedButton = 0; }
         auto makeWeak = reinterpret_cast<std::weak_ptr<void> (*)()>(dlsym(handle, "storageWeak"));
         auto weak = makeWeak();
         auto makeWorker = reinterpret_cast<mcp::internal::ReplyThunk (*)()>(dlsym(handle, "storageWorker"));
@@ -104,8 +104,8 @@ int main(int argc, char** argv) {
         else internal::retireAppGeneration(generation);
         failAllocation = false;
         check("OOM ending clears foreign guest node refs while preserving unrelated live nodes",
-              peer.context().hoveredNode.expired() && peer.context().grabbedNode.expired() &&
-              peer.context().grabbedButton == -1 && peer.context().selectedNode.lock() == peerNode);
+              trussc::internal::WindowRequestAccess::context(peer).hoveredNode.expired() && trussc::internal::WindowRequestAccess::context(peer).grabbedNode.expired() &&
+              trussc::internal::WindowRequestAccess::context(peer).grabbedButton == -1 && trussc::internal::WindowRequestAccess::context(peer).selectedNode.lock() == peerNode);
         check("reentrant cohort retirement ends all Apps once in reverse attachment order",
               storageExits == 3 && storageCleanups == 3 && storageEndingOrder[0] == 303 &&
               storageEndingOrder[1] == 202 && storageEndingOrder[2] == 101);
