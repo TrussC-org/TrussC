@@ -111,8 +111,9 @@ struct { int display=0; double refresh_period=1.0/60.0; size_t window_slots=1; _
     struct { bool init_called=false,quit_ordered=false,quit_requested=false; Descriptor desc; _sapp_tc_window_t* main=&window; } app; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==window.win_id ? &window : nullptr; }
 int before=0,after=0,init=0,ticks=0,clockCalls=0;
+bool idleCurrent=false;
 void initialize() { ++init; check("native bootstrap excludes its own tick", window.in_tick); }
-void begin() { ++before; }
+void begin() { ++before; check("X11 host services run with the idle drawable current", idleCurrent); idleCurrent=false; }
 void end() { if (++after==3) _sapp_tc.app.quit_ordered=true; }
 double _sapp_tc_now() {
     // Bound (probe termination): a missing after-turn hook still returns a runtime assertion result.
@@ -128,6 +129,7 @@ void _sapp_tc_x11_tick(_sapp_tc_window_t*) { ++ticks; }
 bool _sapp_tc_native_hidden(_sapp_tc_window_t*) { return false; }
 bool _sapp_tc_native_iconified(_sapp_tc_window_t*) { return false; }
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
+bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) { idleCurrent = !w; return true; }
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
 '''+extract(NATIVE,'static void _sapp_tc_x11_request_exit(')+'\n'+extract(NATIVE,'static bool _sapp_tc_x11_window_due(')+'\n'+extract(NATIVE,'static void _sapp_tc_x11_run_loop(').replace('poll(&pfd','fake_poll(&pfd')+r'''
 void run() {
@@ -252,12 +254,15 @@ if os.environ.get('TC_HOST_TURN_MUTATIONS'):
     old='    if (_sapp_tc.app.host_loop_depth > 1) return;'
     assert old in source
     variants.append(('nested_appkit_turn',source.replace(old,'')))
-    old='if (_sapp_tc.app.desc._tc_before_turn) _sapp_tc.app.desc._tc_before_turn();'
+    old='_sapp_tc.app.desc._tc_before_turn();'
+    idle='_sapp_tc_x11_make_current(nullptr);'
+    assert x11.count(idle)==1
     assert old in x11
     end_hook='if (_sapp_tc.app.desc._tc_after_turn) _sapp_tc.app.desc._tc_after_turn();'
     assert end_hook in x11
     variants.append(('x11_no_end_services',source.replace(x11,x11.replace(end_hook,'/* mutation: omitted turn end */'))))
     variants.append(('x11_no_draw_services',source.replace(x11,x11.replace(old,'/* mutation: omitted turn service */'))))
+    variants.append(('x11_services_without_idle_context',source.replace(x11,x11.replace(idle,'/* mutation: no idle context */'))))
 results=[]
 with tempfile.TemporaryDirectory(prefix='tc-host-turn-') as folder:
     for name,code in variants:
