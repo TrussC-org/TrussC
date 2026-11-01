@@ -10,11 +10,26 @@ int failures=0, exits=0, cleanups=0, queryCalls=0;
 float delay=0;
 bool idleCommit=false;
 bool logCommit=false;
+bool blockProcessExit=false;
 std::shared_ptr<Window> windows[3];
 void check(const char* label,bool good) {
     std::printf("sessionEndBusy: %s: %s\n",label,good?"PASS":"FAIL");
     if (!good) ++failures;
 }
+void processExit() {
+    check("atexit after cleanup and file close", exits==3 && cleanups==3 && !getLogger().isFileOpen());
+    logNotice("idle-log") << "ATEXIT";
+    if (blockProcessExit) {
+        // Only the still-armed production watchdog can end this child.
+        for (;;) std::this_thread::yield();
+    }
+}
+struct StaticExitProbe {
+    ~StaticExitProbe() {
+        check("static destructor after cleanup and file close", exits==3 && cleanups==3 && !getLogger().isFileOpen());
+        logNotice("idle-log") << "STATIC-DESTRUCTOR";
+    }
+};
 struct Probe : App {
     int id;
     explicit Probe(int value):id(value) {}
@@ -88,6 +103,14 @@ TC_CORE_TEST_MAIN(int argc,char** argv) {
         internal::currentWindowCtx()=&trussc::internal::WindowRequestAccess::context(*w);trussc::internal::WindowRequestAccess::tickTree(*w);
     }
     internal::currentWindowCtx()=nullptr;
+    if (logCommit || mode=="idle-exit-block") {
+        // Construct after Logger so this destructor can log after closeLogFile,
+        // while Logger itself is still alive, as in ordinary process exit.
+        static StaticExitProbe staticExit;
+        std::atexit(processExit);
+        internal::appExitCode()=17;
+        blockProcessExit=mode=="idle-exit-block";
+    }
     auto veto=runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) { ++queryCalls;e.cancel=true; });
     if (mode=="query" || mode=="worker-query") {
         std::atomic<bool> entered=false,stop=false;

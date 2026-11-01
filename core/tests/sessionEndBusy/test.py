@@ -29,7 +29,7 @@ for symbol in ['retainGuestCodeFor','makeCodeShared','dladdr']:
  if symbol in symbols:raise SystemExit('FAIL: combined binary still contains '+symbol)
 print('PASS: combined binary has no per-object guest retention or dladdr symbol',flush=True)
 records=[]
-def run(name,args,expected=None,deadline=8):
+def run(name,args,expected=None,deadline=8,exitcode=0):
  start=time.monotonic()
  for attempt in range(100 if sanitized else 1):
   r=subprocess.run([str(binary),*args],capture_output=True,text=True,encoding='utf-8',timeout=deadline,env=dict(os.environ,TSAN_OPTIONS='halt_on_error=1'))
@@ -38,7 +38,7 @@ def run(name,args,expected=None,deadline=8):
   if not (sanitized and startup):break
   (out/('tsan-startup-'+name+'-'+str(attempt)+'.log')).write_text(log,encoding='utf-8')
  elapsed=time.monotonic()-start;log=r.stdout+r.stderr;(out/(('session-tsan-' if sanitized else 'session-')+name+'.log')).write_text(log,encoding='utf-8')
- good=r.returncode==0 and ': FAIL' not in log
+ good=r.returncode==exitcode and ': FAIL' not in log
  if expected:good &= all(x in log for x in expected)
  records.append(dict(name=name,exit=r.returncode,seconds=elapsed,valid=good))
  (out/('session-tsan-results.json' if sanitized else 'session-results.json')).write_text(json.dumps(records,indent=2)+'\n',encoding='utf-8')
@@ -54,10 +54,15 @@ if not sanitized:
 if sanitized:raise SystemExit(0)
 logfile = scratch/'idle-final.log'
 logfile.unlink(missing_ok=True)
-run('idle-log',['idle-log','0','inf',str(logfile)],['App final stdout exit line','exit: clean','App final exit line 1'])
+run('idle-log',['idle-log','0','inf',str(logfile)],['App final stdout exit line','exit: clean','App final exit line 1',
+    'atexit after cleanup and file close: PASS','static destructor after cleanup and file close: PASS',
+    'ATEXIT','STATIC-DESTRUCTOR'],exitcode=17)
 text = logfile.read_text(encoding='utf-8')
 assert 'exit: clean' in text and 'App final exit line 1' in text, 'idle commit lost final file log lines'
+assert 'ATEXIT' not in text and 'STATIC-DESTRUCTOR' not in text, 'process destructors wrote to the closed file sink'
 print('PASS: idle commit preserves final exit lines in file and captured stdout',flush=True)
+run('idle-exit-block',['idle-exit-block','0','0.05'],['atexit after cleanup and file close: PASS','ATEXIT'])
+assert 'STATIC-DESTRUCTOR' not in (out/'session-idle-exit-block.log').read_text(encoding='utf-8')
 run('idle-check',['idle-check','0','inf'],['idle common ending includes every cleanup: PASS'])
 run('idle',['idle','0','inf'],['EXIT 3','RETURN 1'])
 for mode in ['negative','nan']:

@@ -20,11 +20,15 @@ extern "C" void sessionEndAfter(double, void (*)());
 using namespace tc;
 namespace {
 bool busyChild = false;
-void marker() { std::puts("STATIC-EXIT"); std::fflush(stdout); }
+void marker() { std::puts("ATEXIT"); std::fflush(stdout); }
+struct StaticExitProbe {
+    ~StaticExitProbe() { std::puts("STATIC-DESTRUCTOR"); std::fflush(stdout); }
+};
 struct DeviceApp : App {
     bool fired = false;
     void setup() override {
         runtime().setLogoutTimeout(3);
+        internal::appExitCode() = 17;
         if (!busyChild) sessionEndAfter(0.1, sessionEndDispatchLogout);
     }
     void update() override {
@@ -42,6 +46,7 @@ int runSessionEndDeviceProbe(int argc, char** argv) {
     if (argc > 1) {
         busyChild = std::string(argv[1]) == "busy";
         std::setvbuf(stdout, nullptr, _IONBF, 0);
+        static StaticExitProbe staticExit;
         std::atexit(marker);
         WindowSettings settings; settings.title = "sessionEndBusy";
         return runApp<DeviceApp>(settings);
@@ -87,10 +92,12 @@ int runSessionEndDeviceProbe(int argc, char** argv) {
             reaped = waited == child;
         }
         const bool idle = std::string(scenario) == "idle";
-        const bool ok = !timedOut && eof && reaped && WIFEXITED(status) && WEXITSTATUS(status) == 0 &&
+        const bool ok = !timedOut && eof && reaped && WIFEXITED(status) && WEXITSTATUS(status) == (idle ? 17 : 0) &&
             (output.find("APP-EXIT") != std::string::npos) == idle &&
             (output.find("APP-CLEANUP") != std::string::npos) == idle &&
-            output.find("RESUMED-APP") == std::string::npos && output.find("STATIC-EXIT") == std::string::npos;
+            output.find("RESUMED-APP") == std::string::npos &&
+            (output.find("ATEXIT") != std::string::npos) == idle &&
+            (output.find("STATIC-DESTRUCTOR") != std::string::npos) == idle;
         std::printf("sessionEndBusy mac %s: %s\n%s", scenario, ok ? "PASS" : "FAIL", output.c_str());
         failures += !ok;
     }
