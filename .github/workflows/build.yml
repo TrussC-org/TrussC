@@ -1011,6 +1011,9 @@ jobs:
       - name: Install doc tooling deps
         run: cd docs && npm ci
 
+      - name: Reference generator tests
+        run: CXX=clang++ node --test 'docs/reference/tests/*.test.js'
+
       # check.js also parses the headers, so bootstrap shaders before its AST.
       - name: Generate reference shader headers
         run: docs/reference/regenerate.sh --shaders-only

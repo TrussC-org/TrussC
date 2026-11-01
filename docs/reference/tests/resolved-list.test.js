@@ -68,6 +68,19 @@ const structureFile = path.join(tmp, 'structure.json');
 run('structure.js', ['--ast', ast, '--json', structureFile]);
 const data = JSON.parse(fs.readFileSync(structureFile, 'utf8'));
 
+test('public macros include object-like definitions and remain non-callable', () => {
+    const macros = Object.values(data).filter(e => e.kind === 'macro');
+    assert.equal(macros.length, 11);
+    assert.ok(data.TC_RUN_APP);
+    assert.ok(data.TC_LUA_SKIP); // no parentheses in this macro's #define
+    for (const entry of macros) {
+        assert.equal(entry.platforms, null, entry.id);
+        assert.equal(entry.deprecated, null, entry.id);
+        assert.equal(entry.lua_skip, true, entry.id);
+        assert.deepEqual(entry.signatures, [], entry.id);
+    }
+});
+
 test('annotations resolve from declaration or owner for all entry kinds', () => {
     assert.deepEqual(data.Fbo.platforms, ['linux']);
     assert.deepEqual(data.Fbo.constructors.map(s => s.platforms), [['linux'], ['web'], ['linux']]);
@@ -123,6 +136,10 @@ test('the join preserves inherited metadata and prose for coverage, but docs omi
     assert.equal(joined['Fbo::hasTexture'].declaredIn, 'HasTexture');
     assert.equal(joined['Fbo::hasTexture'].documented, true);
     assert.deepEqual(joined['Fbo::hasTexture'].description, joined['HasTexture::hasTexture'].description);
+    assert.equal(joined.TC_LUA_SKIP.signature, 'TC_LUA_SKIP <decl>');
+    assert.equal(joined.TC_NO_HOT_RELOAD.signature, 'TC_NO_HOT_RELOAD("reason");');
+    assert.equal(joined.TC_LUA_SKIP.lua_skip, true);
+    assert.ok(run('emit-forai.js', ['--data', joinedFile, '--dry']).includes('TC_LUA_SKIP <decl>  //'));
     const withoutCopies = Object.fromEntries(Object.entries(joined).filter(([, e]) => !e.declaredIn));
     const ownFile = path.join(tmp, 'own.json');
     fs.writeFileSync(ownFile, JSON.stringify(withoutCopies));
@@ -146,4 +163,7 @@ test('coverage uses entry guards, skips deprecation, and calls const overloads o
     assert.match(output, /#if defined\(AF_WEB\)\n\s*\(void\)af::val<Fbo>\(\)\.fieldPlatform;/);
     assert.doesNotMatch(output, /Cover_Obsolete|Fbo\(af::val<float>|mixed\(af::val<int>/);
     assert.match(output, /mixed\(af::val<float>\(\)\)/);
+    for (const entry of Object.values(data).filter(e => e.kind === 'macro')) {
+        assert.ok(!output.includes(entry.name), entry.id);
+    }
 });

@@ -55,3 +55,23 @@ test('members copied from a base carry the declaring type; own members do not', 
     assert.equal(methods('Derived').own.inherited, undefined);
     assert.equal(methods('Base').shared.inherited, undefined);
 });
+
+test('macro cards use resolved prose and curated signatures with the existing web shape', () => {
+    const api = emit({
+        TC_NO_HOT_RELOAD: symbol('TC_NO_HOT_RELOAD', 'macro', {
+            signature: 'TC_NO_HOT_RELOAD("reason");',
+            description: { en: 'English', ja: '日本語', ko: '한국어' },
+            ...fields,
+        }),
+        TC_LUA_SKIP: symbol('TC_LUA_SKIP', 'macro', { signature: 'TC_LUA_SKIP <decl>' }),
+        Hidden: symbol('Hidden', 'macro', { hidden: true }),
+    });
+    assert.deepEqual(api.macros, [{
+        name: 'TC_NO_HOT_RELOAD', signature: 'TC_NO_HOT_RELOAD("reason");',
+        desc: 'English', desc_ja: '日本語', desc_ko: '한국어',
+        details: 'English', details_ja: '日本語', details_ko: '한국어',
+    }, {
+        name: 'TC_LUA_SKIP', signature: 'TC_LUA_SKIP <decl>',
+        desc: '', desc_ja: '', desc_ko: '',
+    }]);
+});
