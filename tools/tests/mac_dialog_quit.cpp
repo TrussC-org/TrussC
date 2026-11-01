@@ -23,7 +23,8 @@ struct Probe : App {
     void setup() override {
         quit = events().exitRequested.listen([](ExitRequestEventArgs& args) {
             ++requests;
-            check(callbacks == 0, "sheet pending during exitRequested");
+            // AppKit dismisses a one-button alert inside terminate:, before this query.
+            if (dialog != "alert") check(callbacks == 0, "sheet pending during exitRequested");
             if (action == "veto" && requests == 1) {
                 args.cancel = true;
                 logNotice("sheetquit") << "veto: sheet must remain visible";
@@ -49,7 +50,8 @@ struct Probe : App {
             // manual: send SIGTERM externally, Cmd+Q, or perform supervised logout.
         }
         if (action == "veto" && frames == 120) {
-            check(callbacks == 0 && requests == 1, "veto kept callback pending");
+            if (dialog == "alert") check(callbacks == 1 && requests == 1, "veto after alert auto-dismiss");
+            else check(callbacks == 0 && requests == 1, "veto kept callback pending");
             requestExitApp();
         }
     }

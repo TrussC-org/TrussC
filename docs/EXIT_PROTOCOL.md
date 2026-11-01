@@ -14,8 +14,10 @@ Each close() is decided when it is called; a later exitRequested veto does not u
 Process shutdown bypasses closeRequested.
 
 On macOS, accepted process ending cancels open async dialog sheets before
-App ending and AppKit window closure. A veto leaves the sheets and callbacks
-pending. Cancellation invokes each live owner's callback once, before its
+App ending and AppKit window closure. A veto leaves confirm, load and save
+sheets and their callbacks pending. An open `alertDialogAsync` sheet is the
+exception: AppKit dismisses a one-button alert as soon as quit starts, before
+exitRequested, so its callback runs even if the quit is then vetoed. Cancellation invokes each live owner's callback once, before its
 exit/cleanup: alert completes without a result, confirm receives `false`,
 and load/save receive an empty unsuccessful result. AppKit's later completion
 does not invoke the callback again. Callbacks of an already ended App remain
