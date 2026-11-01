@@ -176,9 +176,12 @@ trusscli build -j 4 --dry-run
 
 **Web Build (WASM):**
 The Web preset uses Ninja on Windows and Unix Makefiles on macOS/Linux,
-matching the native presets. Windows Web builds require `ninja` on `PATH`:
-install Ninja separately or use the copy included with the Visual Studio
-CMake tools. Do not assume the Emscripten SDK provides it.
+matching the native presets. On Windows, trusscli automatically uses the
+Ninja bundled with the detected Visual Studio installation (the **C++ CMake
+tools for Windows** component). Otherwise, `ninja` must be on `PATH`.
+The Web preset pins only the Ninja executable; Emscripten supplies the
+compiler, and no Visual Studio developer shell is needed. Do not assume
+the Emscripten SDK provides Ninja.
 
 Before `trusscli update --web` or a manual Web build, activate the SDK in
 the terminal you will build from: run `emsdk_env.bat` in cmd (its environment

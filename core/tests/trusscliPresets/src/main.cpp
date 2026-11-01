@@ -1481,6 +1481,8 @@ static void testToolchainCheck() {
         vs.vcToolsVersion = "14.99.99999";
         vs.windowsSdkVersion = "10.0.99999.0";
         s.installedVsVersions = {vs};
+        s.generateWebBuild = true;
+        EnvOverride noPath("PATH", "");  // the VS pin must not need Ninja on PATH
         bool written = writePresets(s, project);
         ToolchainCheck c = checkPresetToolchain(
             readFile(project / "CMakePresets.json"),
@@ -1492,8 +1494,17 @@ static void testToolchainCheck() {
         Json j = Json::parse(readFile(project / "CMakePresets.json"), nullptr, false);
         WindowsToolchainPins pins = windowsToolchainPins(vs);
         bool same = false;
+        bool webSame = false;
         if (j.is_object()) {
             for (const auto& p : j["configurePresets"]) {
+                if (p.value("name", "") == "web") {
+                    webSame = p["cacheVariables"].value("CMAKE_MAKE_PROGRAM", "") == pins.makeProgram &&
+                              p.value("generator", "") == "Ninja" &&
+                              p.contains("toolchainFile") &&
+                              !p.contains("environment") && !p.contains("inherits") &&
+                              !p["cacheVariables"].contains("CMAKE_C_COMPILER") &&
+                              !p["cacheVariables"].contains("CMAKE_CXX_COMPILER");
+                }
                 if (p.value("name", "") != "windows" || !p.contains("cacheVariables") ||
                     !p.contains("environment")) continue;
                 same = p["cacheVariables"].value("CMAKE_MAKE_PROGRAM", "") == pins.makeProgram &&
@@ -1503,6 +1514,31 @@ static void testToolchainCheck() {
             }
         }
         check("toolchain (Windows): writer pins what windowsToolchainPins() gives", written && same);
+        check("web (Windows): same VS Ninja without PATH or MSVC environment", written && webSame);
+
+        s.installedVsVersions[0].ninjaPath.clear();
+        written = writePresets(s, project);
+        j = Json::parse(readFile(project / "CMakePresets.json"), nullptr, false);
+        bool unpinned = false;
+        if (j.is_object()) {
+            for (const auto& p : j["configurePresets"]) {
+                if (p.value("name", "") == "web") {
+                    unpinned = !p["cacheVariables"].contains("CMAKE_MAKE_PROGRAM");
+                }
+            }
+        }
+        check("web (Windows): no VS Ninja leaves CMake's PATH lookup unset", written && unpinned);
+
+        ProjectGenerator missing(s);
+        const string error = missing.update(project.string());
+        check("web (Windows): neither Ninja found names both remedies before configure",
+              error == "Ninja not found for Web builds. Install Visual Studio's "
+                       "C++ CMake tools for Windows or put ninja on PATH." &&
+              !fs::exists(project / "CMakeLists.txt"));
+
+        s.generateWebBuild = false;
+        check("web (Windows): missing Ninja does not affect native preset writing",
+              writePresets(s, project));
     }
 #endif
 }
