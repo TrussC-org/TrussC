@@ -247,11 +247,14 @@ void destroyInCallbackChecks() {
                 } else forceHidden = window;
                 if (c.path == LinkTick) [view tick:nil]; else [view fallbackTick:nil];
                 break;
-            case Occlusion: forceHidden = window; [delegate windowDidChangeOcclusionState:nil]; break;
-            case Miniaturize: forceHidden = window; [delegate windowDidMiniaturize:nil]; break;
+            case Occlusion: forceHidden = window; [delegate windowDidChangeOcclusionState:
+                [NSNotification notificationWithName:NSWindowDidChangeOcclusionStateNotification object:window]]; break;
+            case Miniaturize: forceHidden = window; [delegate windowDidMiniaturize:
+                [NSNotification notificationWithName:NSWindowDidMiniaturizeNotification object:window]]; break;
             case Deminiaturize:
                 forceHidden = window; _sapp_tc_mac_observe(w);   // suspended: RESUMED follows
-                forceHidden = nil; forceVisible = window; [delegate windowDidDeminiaturize:nil]; break;
+                forceHidden = nil; forceVisible = window; [delegate windowDidDeminiaturize:
+                    [NSNotification notificationWithName:NSWindowDidDeminiaturizeNotification object:window]]; break;
             case TickResize: w->fb_width = 1; _sapp_tc_mac_tick(w, nil); break;
             case KeyDown: {
                 NSEvent* key = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
@@ -380,7 +383,7 @@ void ccClose(sapp_window win, void*) {
 }
 
 // Cross-window cases, from window X's key callback while it spins the run loop:
-// kind 4: performClose: of the FIRST window (its vetoable QUIT_REQUESTED must come
+// kind 4: performClose: of the quit-on-close window (its vetoable QUIT_REQUESTED must come
 // after the callback); kind 5: a direct close of another window Y, which must not
 // tick between its native close and its deferred close handling.
 int xKind, xQuitBefore, yTicksAfterClose, yCloses;
@@ -460,7 +463,7 @@ void dispatchQuitEvent(OSType why) {
         returnID:kAutoGenerateReturnID transactionID:kAnyTransactionID];
     if (why) [event setParamDescriptor:[NSAppleEventDescriptor descriptorWithEnumCode:why] forKeyword:kAEQuitReason];
     AppleEvent reply = {typeNull, nullptr};
-    [[NSAppleEventManager sharedAppleEventManager] dispatchRawAppleEvent:event.aeDesc withRawReply:&reply handlerRefCon:0];
+    [[NSAppleEventManager sharedAppleEventManager] dispatchRawAppleEvent:event.aeDesc withRawReply:&reply handlerRefCon:(__bridge void*)event];
     AEDisposeDesc(&reply);
 }
 void spinWithQuitEvent(OSType why) {
@@ -975,9 +978,9 @@ void step() {
     case XWait:
         if (!waited(1.0)) break;
         if (xKind == 4) {
-            std::printf("nativeWindow: performClose: of the first window inside another window's callback: quit requests %d, inside callback=%d\n",
+            std::printf("nativeWindow: performClose: of the quit-on-close window inside another window's callback: quit requests %d, inside callback=%d\n",
                 quitRequests - xQuitBefore, xQuitInside);
-            check("first-window performClose: inside a callback asks to quit once, after it returns (vetoed)",
+            check("quit-on-close performClose: inside a callback asks to quit once, after it returns (vetoed)",
                 xSpinDone && quitRequests - xQuitBefore == 1 && !xQuitInside && _sapp_tc.app.main && first->window.visible);
             quitRequests = xQuitBefore;   // keep the scenario's own quit count
         } else {
@@ -1095,10 +1098,10 @@ void step() {
     case VetoQuit:
         if (quitRequests == 0 && !waited(3)) break;
         if (!waited(0.3)) break;
-        check("first-window close request is a vetoable process quit", quitRequests == 1 &&
+        check("quit-on-close request is a vetoable process quit", quitRequests == 1 &&
             _sapp_tc.app.main == first && first->window.visible);
         allowQuit = true;
-        sapp_destroy_window({first->win_id});   // redirects to the same quit request
+        sapp_window_request_close({first->win_id});
         enter(Done);
         break;
     case Done:
@@ -1115,6 +1118,14 @@ void mainEvent(const sapp_event* event) {
         if (ccInCallback) xQuitInside = true;
         if (!allowQuit) sapp_cancel_quit();
     }
+}
+
+// C1 moved close policy to Runtime. This native-only fixture explicitly models
+// quitOnClose for its launch window, even while peers remain open. Keep the
+// window until the deferred process quit has been accepted by mainEvent.
+bool quitOnClose(sapp_window, void*) {
+    sapp_request_quit();
+    return false;
 }
 
 void mainFrame() {
@@ -1308,6 +1319,7 @@ int main(int argc, char** argv) {
     desc._tc_draw_while_hidden = launchHidden; desc.width = 101; desc.height = 77;
     desc.high_dpi = !noHighDpi; desc.init_cb = initialized; desc.frame_cb = mainFrame;
     desc.event_cb = mainEvent; desc.window_title = "nativeWindow";
+    desc._tc_close_request_cb = quitOnClose;
     desc.cleanup_cb = mainCleanup;
     sapp_run(&desc);
     check("sapp_run returns only after a failed launch", false);

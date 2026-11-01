@@ -62,6 +62,22 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### macOS failed-startup termination notification (#239)
+
+The failed-startup cleanup call supplies an NSApplicationWillTerminateNotification
+with NSApp as its object, matching AppKit's nonnull delegate contract and avoiding
+clang 21's `-Wnonnull` diagnostic. Normal termination and cleanup order are unchanged.
+
+### macOS launch host-turn observer depth (#239)
+
+The host-turn observer seeds its existing nesting depth from
+CFRunLoopCopyCurrentMode at installation. `applicationDidFinishLaunching:` may
+run before the first run-loop entry; assuming depth one then misclassified every
+outer iteration as nested and prevented reload polling and process queues (MCP
+included) from running. Installation inside a running loop still starts at one.
+The returned mode is released after sampling. Native tick/init admission and
+nested-loop arbitration are unchanged.
+
 ### Creation sizes in pixelPerfect mode (#1018)
 
 The internal `_tc_pixel_width` / `_tc_pixel_height` descriptor fields preserve

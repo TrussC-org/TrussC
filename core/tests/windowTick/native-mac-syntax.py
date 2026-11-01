@@ -95,5 +95,53 @@ static void _sapp_tc_mac_update_suspension(_sapp_tc_window_t*);
                   valid=result.returncode == 0)
     results.append(record)
     print(record, flush=True)
+
+    # Compile the actual notification/Apple-event call sites against nonnull
+    # AppKit declarations, without needing a macOS SDK on this syntax lane.
+    harness = (root / 'core/tests/nativeWindow/main_mac.mm').read_text(encoding='utf-8')
+    cleanup = re.search(r'\[_sapp_tc\.app\.dlg applicationWillTerminate:.*?\];', source, re.S)[0]
+    notifications = re.findall(r'\[delegate windowDid(?:ChangeOcclusionState|Miniaturize|Deminiaturize):.*?\];', harness, re.S)
+    dispatch = re.search(r'\[\[NSAppleEventManager sharedAppleEventManager\] dispatchRawAppleEvent:.*?\];', harness, re.S)[0]
+    assert len(notifications) == 3
+    nonnull = r'''
+#define nil ((id)0)
+__attribute__((objc_root_class)) @interface NSObject @end
+@class NSString;
+@interface NSNotification : NSObject
++ (instancetype _Nonnull)notificationWithName:(NSString* _Nonnull)name object:(id _Nullable)object;
+@end
+@interface NSApplication : NSObject
+@end
+extern NSApplication* NSApp;
+extern NSString *NSApplicationWillTerminateNotification, *NSWindowDidChangeOcclusionStateNotification,
+    *NSWindowDidMiniaturizeNotification, *NSWindowDidDeminiaturizeNotification;
+@interface Delegate : NSObject
+- (void)applicationWillTerminate:(NSNotification* _Nonnull)n;
+- (void)windowDidChangeOcclusionState:(NSNotification* _Nonnull)n;
+- (void)windowDidMiniaturize:(NSNotification* _Nonnull)n;
+- (void)windowDidDeminiaturize:(NSNotification* _Nonnull)n;
+@end
+struct AppleEvent {};
+@interface NSAppleEventDescriptor : NSObject
+@property(readonly) const AppleEvent* _Nonnull aeDesc;
+@end
+@interface NSAppleEventManager : NSObject
++ (instancetype _Nonnull)sharedAppleEventManager;
+- (void)dispatchRawAppleEvent:(const AppleEvent* _Nonnull)e withRawReply:(AppleEvent* _Nonnull)reply handlerRefCon:(void* _Nonnull)context;
+@end
+struct { struct { Delegate* dlg; } app; } _sapp_tc;
+void calls(Delegate* delegate, id window, NSAppleEventDescriptor* event) {
+    AppleEvent reply;
+''' + cleanup + '\n' + '\n'.join(notifications) + '\n' + dispatch + '\n}\n'
+    path = out / 'nonnull-calls.mm'
+    path.write_text(nonnull, encoding='utf-8')
+    command = [clang, '-std=c++20', '-fsyntax-only', '-fobjc-arc', '-fobjc-runtime=macosx-10.13',
+               '-Werror=nonnull', str(path)]
+    with (out / 'nonnull-calls.log').open('w', encoding='utf-8') as log:
+        result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+    record = dict(name='objc_nonnull_calls', command=command, returncode=result.returncode,
+                  valid=result.returncode == 0)
+    results.append(record)
+    print(record, flush=True)
 (out / 'results.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
 raise SystemExit(any(not r['valid'] for r in results))

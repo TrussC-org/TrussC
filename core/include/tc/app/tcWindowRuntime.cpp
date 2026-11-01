@@ -96,6 +96,7 @@ struct Runtime {
     void (*reload)() = nullptr;
     std::string hotReloadType, hotReloadFile;
     HostServiceOperations services{processQueues, processMaintenance};
+    std::mutex runTokenMutex;
     std::shared_ptr<std::atomic<bool>> runToken;
     AppConstructionTicket* constructor = nullptr;
     WindowContext* selected = nullptr;
@@ -285,7 +286,10 @@ void beginRuntimeRun() {
         RuntimeActivityScope starting;
         cancelResourceBackends();
     }
-    std::atomic_store(&state.runToken, std::move(token));
+    {
+        std::lock_guard lock(state.runTokenMutex);
+        state.runToken = std::move(token);
+    }
     ++state.epoch;
     state.servicedTurn = false;
     state.stopping = false;
@@ -306,7 +310,12 @@ void requestNormalQuit(const char* reason, std::optional<int> code) {
     if (!isMainThread()) {
         // A process request outlives its App, but never its Runtime run. Read
         // only the published run token here; main owns all exit-state checks.
-        auto run = std::atomic_load(&runtime().runToken);
+        std::shared_ptr<std::atomic<bool>> run;
+        {
+            auto& state = runtime();
+            std::lock_guard lock(state.runTokenMutex);
+            run = state.runToken;
+        }
         if (!run || !run->load()) return;
         mainThreadQueue().send([run = std::move(run), reason = std::string(reason), code] {
             if (!run->load() || run != runtime().runToken || runtimeEnding()) return;
