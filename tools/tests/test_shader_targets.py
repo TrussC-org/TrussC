@@ -48,9 +48,13 @@ class ShaderTargetTests(unittest.TestCase):
         expected = symbols[4:8] + symbols[9:12]
         with tempfile.TemporaryDirectory(prefix='tc exports ') as temporary:
             fixture = Path(temporary)
+            # dumpbin doesn't zero-pad offsets: objects early in the lib have
+            # short ones, and member headers/counts use the same layout.
+            offsets = [0x8, 0x1F, 0xAB, 0x3FC, 0x1234, 0xFFFFF, 0x100000, 0xABCDEF]
             (fixture / 'dumpbin.txt').write_text(
-                'Archive member name at 1234: object.obj\n\n public symbols\n' +
-                ''.join(f'  {index + 0xABCDEF:X} {symbol}\n'
+                'Archive member name at 8: /\n           0 mode\n       2A4B8 size\n'
+                '\n         8E9 public symbols\n\n' +
+                ''.join(f'  {offsets[index % len(offsets)]:X} {symbol}\n'
                         for index, symbol in enumerate(symbols)), encoding="utf-8")
             (fixture / 'dumpbin.cmake').write_text(
                 'execute_process(COMMAND "${CMAKE_COMMAND}" -E cat '

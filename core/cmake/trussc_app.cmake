@@ -432,11 +432,12 @@ execute_process(
 )
 
 # Extract symbol names from the public symbols section
-# An actual symbol line looks like \"  XXXXXX symbol-name\" (a hex address of 6+ digits)
+# A symbol line is \"  <hex offset> symbol-name\" at the start of a line.
+# dumpbin doesn't zero-pad the offset, so it can be any number of digits.
 set(SYMBOLS \"\")
-string(REGEX MATCHALL \"[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
+string(REGEX MATCHALL \"\\n *[0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
 foreach(ENTRY \${ENTRIES})
-    string(REGEX MATCH \"^[0-9A-Fa-f]+ (.+)\" _ \"\${ENTRY}\")
+    string(REGEX MATCH \"^\\n *[0-9A-Fa-f]+ (.+)\" _ \"\${ENTRY}\")
     if(CMAKE_MATCH_1)
         set(SYM \"\${CMAKE_MATCH_1}\")
         # Filter: skip symbols that cannot be exported
@@ -458,12 +459,9 @@ foreach(ENTRY \${ENTRIES})
             # NULL thunk data
         elseif(SYM MATCHES \"^_RTC_\")
             # Internal symbol for runtime checks
-        elseif(SYM MATCHES \"^(size|mode|uid|gid)$\")
-            # Archive member header metadata, not a symbol. The header lines
-            # ('    2A4B8 size', '       0 mode', ...) only match the
-            # hex-address regex once a member grows to a 6-hex-digit size
-            # field (>= 1 MB object file), which is why small libs never hit
-            # this.
+        elseif(SYM MATCHES \"^(size|mode|uid|gid|public)$\")
+            # Archive member header metadata ('    2A4B8 size', '       0 mode')
+            # and the '     8E9 public symbols' count line, not symbols.
         else()
             list(APPEND SYMBOLS \"\${SYM}\")
         endif()
