@@ -141,7 +141,7 @@ int main() {
 }
 ```
 
-`RuntimeSettings::reserveUniformBuffer()` reserves the process-wide GPU uniform buffer; pass it as the second argument to `runApp<T>(windowSettings, runtimeSettings)`. The current v0.8.0 OS clipboard buffer limit is 65,536 bytes; removing this limit is planned for v0.8.x. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
+`RuntimeSettings::reserveUniformBuffer()` reserves the process-wide GPU uniform buffer; pass it as the second argument to `runApp<T>(windowSettings, runtimeSettings)`. Clipboard text, dropped file counts and UTF-8 drop path lengths have no TrussC size limit; storage grows with the actual content. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
 
 Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. `showCursor()`, `hideCursor()`, `setCursor()`, `bindCursorImage()` and `unbindCursorImage()` do nothing before native app startup or after native app cleanup, including in a headless app.
 

@@ -6139,15 +6139,15 @@ description.ja = "ドロップされたファイルのパス（デスクトッ�
 description.ko = "드롭된 파일의 경로(데스크톱) 또는 파일 이름(Web)을 저장한다."
 details.en = '''
 - A `vector<string>` containing copies of desktop file paths or Web file names only; it is empty by default.
-- The standard application configuration accepts up to 16 files and omits additional files; each UTF-8 path (or file name on Web) must fit in 2048 bytes including the terminating zero, or the drop is rejected.
+- There is no TrussC limit on file count or UTF-8 path length (file name on Web); storage grows with the actual drop. Allocation and platform limits still apply.
 '''
 details.ja = '''
 - デスクトップではファイルのパスのコピーを、Web ではファイル名のコピーのみを格納する `vector<string>` です。既定では空です。
-- 標準のアプリ設定では最大 16 ファイルを受け取り、それを超えるファイルは省略します。UTF-8 の各パス（Web ではファイル名）は終端のゼロを含めて 2048 バイト以内に収まる必要があり、収まらない場合はドロップ全体を受け付けません。
+- ファイル数と UTF-8 パス長（Web ではファイル名）に TrussC の上限はありません。実際のドロップに合わせてメモリを確保します。メモリ確保とプラットフォームの制約は適用されます。
 '''
 details.ko = '''
 - 데스크톱에서는 파일 경로의 복사본을, Web에서는 파일 이름의 복사본만 담는 `vector<string>`입니다. 기본값은 비어 있습니다.
-- 기본 앱 설정에서는 최대 16개 파일을 받고 초과한 파일은 제외합니다. 각 UTF-8 경로(Web에서는 파일 이름)는 끝의 널 문자를 포함하여 2048바이트 안에 들어가야 하며, 들어가지 않으면 전체 드롭을 거부합니다.
+- 파일 수와 UTF-8 경로 길이(Web에서는 파일 이름)에 TrussC의 제한은 없습니다. 실제 드롭에 맞춰 메모리를 할당합니다. 메모리 할당과 플랫폼 제약은 적용됩니다.
 '''
 
 ["DragDropEventArgs::x"]
@@ -45373,19 +45373,19 @@ description.ko = "클립보드의 텍스트를 반환한다."
 details.en = '''
 - Returns a `string` copy of the clipboard text; desktop implementations query the system clipboard, and disabled clipboard support returns an empty string.
 - Web returns the buffer populated by browser paste events rather than querying the clipboard synchronously; iOS and Android return the internal buffer without reading the system clipboard.
-- The current v0.8.0 buffer limit is 65,536 bytes; removing this limit is planned for v0.8.x; oversized text may be truncated or rejected depending on the platform.
+- TrussC imposes no clipboard text size limit and does not truncate text; storage grows with the actual content. Allocation and platform limits still apply.
 - If the underlying clipboard read returns a null pointer, returns an empty string.
 '''
 details.ja = '''
 - クリップボードのテキストを `string` にコピーして返します。デスクトップ実装はシステムのクリップボードを読み取り、クリップボード機能が無効な場合は空文字列を返します。
 - Web では同期的にクリップボードを読み取らず、ブラウザの貼り付けイベントで更新されたバッファを返します。iOS と Android ではシステムのクリップボードを読み取らず、内部バッファを返します。
-- 現在の v0.8.0 のバッファー上限は 65,536 バイトです。この制限の撤廃は v0.8.x で予定されています。容量を超えるテキストは、プラットフォームによって切り詰められるか拒否されることがあります。
+- クリップボードのテキストサイズに TrussC の上限はなく、切り詰めません。実際の内容に合わせてメモリを確保します。メモリ確保とプラットフォームの制約は適用されます。
 - 内部のクリップボード読み取りがヌルポインターを返した場合は、空文字列を返します。
 '''
 details.ko = '''
 - 클립보드 텍스트를 `string`으로 복사해 반환합니다. 데스크톱 구현은 시스템 클립보드를 읽으며, 클립보드 기능이 비활성화되어 있으면 빈 문자열을 반환합니다.
 - Web에서는 클립보드를 동기식으로 읽지 않고 브라우저 붙여넣기 이벤트로 갱신된 버퍼를 반환합니다. iOS와 Android에서는 시스템 클립보드를 읽지 않고 내부 버퍼를 반환합니다.
-- 현재 v0.8.0의 버퍼 한도는 65,536바이트입니다. 이 제한은 v0.8.x에서 제거할 예정입니다. 용량을 넘는 텍스트는 플랫폼에 따라 잘리거나 거부될 수 있습니다.
+- TrussC는 클립보드 텍스트 크기를 제한하거나 자르지 않습니다. 실제 내용에 맞춰 메모리를 할당합니다. 메모리 할당과 플랫폼 제약은 적용됩니다.
 - 내부 클립보드 읽기가 널 포인터를 반환하면 빈 문자열을 반환합니다.
 '''
 related = ["setClipboardString"]
@@ -51240,17 +51240,17 @@ description.ja = "テキストをクリップボードにコピーする。"
 description.ko = "텍스트를 클립보드에 복사한다."
 details.en = '''
 - Pass a UTF-8 string; the function returns `void` and provides no success status.
-- The current v0.8.0 clipboard buffer limit is 65,536 bytes; removing this limit is planned for v0.8.x. Text at least that many bytes logs a truncation warning, but actual behavior varies: Linux with desktop GL rejects oversized text, while Linux with GLES logs an additional Error, still attempts to take clipboard ownership, and truncates text to the buffer capacity minus one byte; macOS limits its local buffer, and Windows can reject text that does not fit its conversion buffer.
+- TrussC imposes no clipboard text size limit and does not truncate text; storage grows with the actual content. Allocation and platform limits still apply.
 - On Web, call from a user input event handler to request a browser copy. On iOS and Android, only the internal clipboard buffer is updated; the system clipboard is not written.
 '''
 details.ja = '''
 - UTF-8 の文字列を渡します。戻り値は `void` で、成功したかどうかは返しません。
-- 現在の v0.8.0 のクリップボード用バッファー上限は 65,536 バイトです。この制限の撤廃は v0.8.x で予定されています。そのバイト数以上のテキストでは切り詰めの警告を記録しますが、実際の動作は環境で異なります。デスクトップ GL を使う Linux は大きすぎるテキストを拒否します。GLES を使う Linux は追加の Error を記録しますが、クリップボードの所有権の取得を続けて試み、テキストをバッファー容量から 1 バイトを引いた長さに切り詰めます。macOS は内部バッファーを制限し、Windows は変換用バッファーに収まらないテキストを拒否する場合があります。
+- クリップボードのテキストサイズに TrussC の上限はなく、切り詰めません。実際の内容に合わせてメモリを確保します。メモリ確保とプラットフォームの制約は適用されます。
 - Web では、ユーザー入力のイベントハンドラー内から呼び出してブラウザにコピーを要求してください。iOS と Android では内部クリップボードバッファーだけを更新し、システムのクリップボードには書き込みません。
 '''
 details.ko = '''
 - UTF-8 문자열을 전달합니다. 반환형은 `void`이며 성공 여부를 반환하지 않습니다.
-- 현재 v0.8.0의 클립보드 버퍼 한도는 65,536바이트입니다. 이 제한은 v0.8.x에서 제거할 예정입니다. 해당 바이트 수 이상의 텍스트는 잘림 경고를 기록하지만 실제 동작은 환경마다 다릅니다. 데스크톱 GL을 사용하는 Linux는 너무 큰 텍스트를 거부합니다. GLES를 사용하는 Linux는 추가 Error를 기록하지만 계속 클립보드 소유권 획득을 시도하고 텍스트를 버퍼 용량에서 1바이트를 뺀 길이로 자릅니다. macOS는 내부 버퍼를 제한하며 Windows는 변환 버퍼에 들어가지 않는 텍스트를 거부할 수 있습니다.
+- TrussC는 클립보드 텍스트 크기를 제한하거나 자르지 않습니다. 실제 내용에 맞춰 메모리를 할당합니다. 메모리 할당과 플랫폼 제약은 적용됩니다.
 - Web에서는 사용자 입력 이벤트 핸들러에서 호출하여 브라우저에 복사를 요청하세요. iOS와 Android에서는 내부 클립보드 버퍼만 갱신하며 시스템 클립보드에는 쓰지 않습니다.
 '''
 related = ["getClipboardString"]

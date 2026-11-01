@@ -328,7 +328,7 @@ yet; the synthetic-input design remains open.
 ## Window and runtime settings, cursor and MCP window ids (v0.8.0)
 
 - Move `WindowSettings::uniformBufferReserve` / `reserveUniformBuffer()` to `RuntimeSettings` and call `runApp<T>(windowSettings, runtimeSettings)`. The one-argument `runApp<T>(windowSettings)` uses default runtime settings.
-- `WindowSettings::clipboardSize` / `setClipboardSize()` are removed. The current v0.8.0 internal OS clipboard buffer limit is 65,536 bytes; removing this limit is planned for v0.8.x. Drop limits are unchanged.
+- `WindowSettings::clipboardSize` / `setClipboardSize()` are removed. Clipboard text is no longer truncated at 65,536 bytes. Dropped file counts and UTF-8 paths no longer have the 16-file / 2048-byte limits. Storage grows with the actual content; allocation and platform limits still apply. The low-level `sapp_desc::clipboard_size`, `max_dropped_files` and `max_dropped_file_path_length` fields are removed; remove assignments to these fields.
 - Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. ImGui contexts change it only while their own window is under the pointer.
 - `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
 - `tc_list_windows` returns each window's positive native identity as `id` instead of `index`. Pass that `id` as other tools' `window` argument; resource list indices are unchanged.
