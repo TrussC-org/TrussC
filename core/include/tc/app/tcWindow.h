@@ -17,6 +17,7 @@
 // This file is included from TrussC.h (after Node / CoreEvents / WindowSettings).
 
 #include "internal/tcWindowRuntime.h"
+#include "tcExit.h"
 
 namespace trussc {
 
@@ -646,7 +647,10 @@ inline void Window::teardown() noexcept {
     steps.run("window GPU release", [&] { ctx_.swapchainTarget.resources().release(); });
     ctx_.targetsClosed = true;
     sapp_tc_gl_activate_idle();
-    if (native_) disposeNativeBacking();
+    if (internal::sessionEndCommitted()) {
+        // Windows can end a logging-off process at the last top-level window's
+        // destruction; process exit reclaims the windows.
+    } else if (native_) disposeNativeBacking();
     else if (binding_.handle.id) steps.run("window native disposal", [&] { sapp_destroy_window(binding_.handle); });
     internal::WindowRequestAccess::unbind(*this);
     ctx_.acquireSwapchain = nullptr;

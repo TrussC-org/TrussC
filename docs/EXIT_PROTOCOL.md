@@ -49,6 +49,8 @@ session ending cancels it through normal ending. A synchronous modal call
 still on an App's stack counts as busy and follows the existing immediate
 session termination policy, without dialog callbacks or App cleanup.
 
+Committed OS session ending leaves native windows and the session receiver to process exit, so destroying the last top-level window cannot make Windows end the logging-off process during cleanup.
+
 An idle commit runs normal reverse attachment ending synchronously: exit events,
 exactly one App::exit, audio detach and cleanup, then complete service/device
 cleanup. One process-wide watchdog (default 3 seconds,
