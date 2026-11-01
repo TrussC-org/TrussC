@@ -6,6 +6,11 @@
 // Wraps the Vidvox HAP reference decoder for easy use in TrussC.
 // Decodes HAP frames to DXT/BC compressed texture data.
 
+#include <TrussC.h>
+#ifdef _WIN32
+TC_NO_HOT_RELOAD("tcxHap: snappy is not linked into the hot-reload guest on Windows");
+#endif
+
 #include <vector>
 #include <cstdint>
 #include <functional>
