@@ -108,12 +108,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         WindowSettings settings;
         settings.setSize(128, 96).setHighDpi(false).setSwapInterval(0);
         settings.sampleCount = 1;
-        settings.reserveUniformBuffer(256);
+        RuntimeSettings runtime;
+        runtime.reserveUniformBuffer(256);
         return tcCoreTest::runDisplayTest<GrowthApp>(settings, failures, [] {
             check("all twelve frames completed", completed);
             std::printf("metalUniformGrowth: %s (split-PBR=6, frames=12, passes=36, compute, rollback)\n",
                         failures ? "FAIL" : "PASS");
-        });
+        }, runtime);
     }
 #else
     (void)argc; (void)argv;

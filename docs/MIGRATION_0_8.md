@@ -324,3 +324,12 @@ class Document : public tc::App {
 `dispatchKeyReleaseToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal
 in v0.8.0 and are no longer public C++ or Lua API. There is no public replacement
 yet; the synthetic-input design remains open.
+
+## Window and runtime settings, cursor and MCP window ids (v0.8.0)
+
+- Move `WindowSettings::uniformBufferReserve` / `reserveUniformBuffer()` to `RuntimeSettings` and call `runApp<T>(windowSettings, runtimeSettings)`. The one-argument `runApp<T>(windowSettings)` uses default runtime settings.
+- `WindowSettings::clipboardSize` / `setClipboardSize()` are removed. The current v0.8.0 internal OS clipboard buffer limit is 65,536 bytes; removing this limit is planned for v0.8.x. Drop limits are unchanged.
+- Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. ImGui contexts change it only while their own window is under the pointer.
+- `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
+- `tc_list_windows` returns each window's positive native identity as `id` instead of `index`. Pass that `id` as other tools' `window` argument; resource list indices are unchanged.
+- `exitApp()` now goes through `exitRequested`, whose listeners can veto it; before 0.8 it could not be cancelled. A “show a confirm dialog, then call `exitApp()`” pattern receives `exitRequested` again on that call, so remember acceptance in a flag, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).

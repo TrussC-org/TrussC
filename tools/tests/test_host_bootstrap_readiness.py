@@ -36,7 +36,6 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
             '[window makeKeyAndOrderFront:nil]': 'show()',
             '[window orderOut:nil]': 'order_out()',
             'NSWindow* window = w->window;': 'int window=0;',
-            '[w->view registerForDraggedTypes:@[NSPasteboardTypeFileURL]]': 'register_drop()',
             '(__bridge const void*)_sapp_tc.app.device': '_sapp_tc.app.device',
         }
         for old, new in seams.items():

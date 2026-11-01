@@ -139,6 +139,9 @@ TC_CORE_TEST_MAIN() {
         const json wins = list.is_object() ? list.value("windows", json::array()) : json::array();
         check("tc_list_windows lists both positive Window IDs", wins.size() == 2, list.dump());
         if (wins.size() == 2) {
+            check("window identities use id", wins[0].value("id", 0) == 202 &&
+                  wins[1].value("id", 0) == 303 && !wins[0].contains("index") &&
+                  !wins[1].contains("index"), wins.dump());
             check("visible window: occluded false",
                   wins[0].value("title", "") == "visible" && wins[0].contains("occluded") &&
                   wins[0]["occluded"] == false, wins[0].dump());
@@ -163,9 +166,9 @@ TC_CORE_TEST_MAIN() {
         // No "no file written" check: headless, a secondary window's capture
         // has no framebuffer to read (0x0), so no file could appear either way.
 
-        // Unchanged: an index past the open windows.
+        // Unchanged: an ID outside the open windows.
         r = call(*cli, "tc_get_screenshot", R"({"window":999})");
-        check("out-of-range window -> index error", contains(messageOf(r), "positive window ID"), r.dump());
+        check("unknown window -> ID error", contains(messageOf(r), "positive window ID"), r.dump());
 
         // --- visible window: unchanged, deferred to its tick --------------
         // The stand-in never ticks, so the main window's drain answers both

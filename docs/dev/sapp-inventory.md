@@ -75,7 +75,7 @@ code, and only in the trivial "Esc to quit" idiom (9 sites). Nothing in
 | `sapp_set_clipboard_string` | 1 (core) + 1 (sokol_imgui.h) | TrussC.h (`setClipboardString`), sokol_imgui.h (ImGui `SetClipboardTextFn`) | Write OS clipboard | app-global | all |
 | `sapp_get_clipboard_string` | 1 (core) + 1 (sokol_imgui.h) | TrussC.h (`getClipboardString`), sokol_imgui.h (ImGui `GetClipboardTextFn`) | Read OS clipboard | app-global | all |
 | `SAPP_EVENTTYPE_CLIPBOARD_PASTED` | 1 | TrussC.h `_event_cb` | Notifies when web clipboard content becomes available (web needs the paste event; desktop can read clipboard synchronously) | app-global | primarily web |
-| `desc.enable_clipboard` / `desc.clipboard_size` | (part of `sapp_desc` count above) | TrussC.h `buildAppDescriptor`, tcHotReloadHost.h | Enables clipboard subsystem + buffer size (mirrored into `WindowContext::clipboardSize` for overflow warnings) | app-global | all |
+| `desc.enable_clipboard` / `desc.clipboard_size` | (part of `sapp_desc` count above) | TrussC.h `buildAppDescriptor`, tcHotReloadHost.h | Enables clipboard subsystem + fixed 64 KB buffer | app-global | all |
 
 ### Swapchain / native handles
 

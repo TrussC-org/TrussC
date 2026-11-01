@@ -183,6 +183,8 @@ int main() {
 }
 ```
 
+`RuntimeSettings` holds `uniformBufferReserve` and `reserveUniformBuffer()`; pass it to `runApp<T>(WindowSettings, RuntimeSettings)` for process-wide startup reservation. The OS clipboard buffer is fixed at 64 KB. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window. Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over.
+
 ### Global Helper Functions
 
 ```cpp
@@ -781,6 +783,8 @@ Every Window keeps stable App event slots installed before construction. BeforeA
 App audio callbacks attach after the first setup completes. Ending detaches the Window/root, delivers exit once, disconnects this App's audio callbacks and waits for callbacks already running, then calls cleanup and retires its owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
 
 Guest retirement cancels registered callbacks and releases their captures. Queued main-thread copies check owner liveness at execution and retain captures until the queue destroys them. Every successfully loaded module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
+
+Under hot reload (TC_HOT_RELOAD), RuntimeSettings is not applied; the default uniform reservation is used.
 
 Hot reload supports a single window. While a hot-reload guest is loaded, creating a second or later open window emits a Warning each time; behaviour is not guaranteed. Reload happens at the main-thread outer-turn safe point and replaces the launch Window App if that Window is still open. Stop and join App-owned threads, cancel timers and finish async work in `events().hotReloadUnload` before the old App ends. Reload does not wait for or exclude that work; a worker already admitted before retirement can overlap it. Successfully loaded modules stay mapped for the process lifetime, and repeated reloads can grow process memory. iOS/Android/Web use the static fallback.
 

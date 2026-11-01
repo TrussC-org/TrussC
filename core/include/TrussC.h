@@ -261,7 +261,7 @@ class Window;
 struct WindowSettings;
 class App;
 namespace internal {
-    // clipboardSize / ScissorRect / scissorStack / currentScissor moved to
+    // ScissorRect / scissorStack / currentScissor moved to
     // WindowContext (tc/app/tcWindowContext.h).
 
     // sokol_gl vertex buffer management (auto-grows on overflow). Defined in
@@ -283,7 +283,7 @@ namespace internal {
     // Per-frame uniform buffer reservation passed to sg_setup (Metal/WebGPU/Vulkan
     // ring buffer; GL/D3D11 ignore it). 0 = default: 1 MiB on Metal/WebGPU
     // (grows on overflow), 4 MiB on Vulkan (fixed capacity). Set this via
-    // WindowSettings::reserveUniformBuffer to reserve capacity at startup.
+    // RuntimeSettings::reserveUniformBuffer to reserve capacity at startup.
     // Host-only, so a per-module copy is fine (tools/header_state_allowlist.txt):
     // the launcher sets it and setup() (tcGlobal.cpp) reads it.
     inline int gpuUniformBufferReserve = 0;
@@ -328,7 +328,6 @@ namespace internal {
     bool routeToggleFullscreenToWindow();
     bool routeIsFullscreenFromWindow(bool& out);
     const char* launchWindowTitle(Window&);
-    void configureLaunchWindow(Window&, const WindowSettings&);
     bool attachCandidate(Window&, std::shared_ptr<App>);
 
 }
@@ -1502,6 +1501,10 @@ inline void setWindowTitle(const std::string& title) {
 
 }
 
+// App callbacks use their Window; other callers need exactly one open Window.
+const std::string& getWindowTitle();
+bool isWindowOccluded();
+
 // ---------------------------------------------------------------------------
 // Cursor
 // ---------------------------------------------------------------------------
@@ -1537,19 +1540,21 @@ enum class Cursor {
     Custom15    = SAPP_MOUSECURSOR_CUSTOM_15,
 };
 
-// Cursor shape and visibility are process-wide native state. Resolve the
-// caller's Window before changing them; every Window has the same capability.
+// Cursor shape, visibility and custom images are app-wide native state.
 inline void showCursor() {
-    if (internal::findWindowApiContext()) sapp_show_mouse(true);
+    if (!sapp_isvalid()) return;
+    sapp_show_mouse(true);
 }
 inline void hideCursor() {
-    if (internal::findWindowApiContext()) sapp_show_mouse(false);
+    if (!sapp_isvalid()) return;
+    sapp_show_mouse(false);
 }
 inline void setCursor(Cursor cursor) {
-    if (internal::findWindowApiContext()) sapp_set_mouse_cursor((sapp_mouse_cursor)cursor);
+    if (!sapp_isvalid()) return;
+    sapp_set_mouse_cursor((sapp_mouse_cursor)cursor);
 }
 inline Cursor getCursor() {
-    return internal::findWindowApiContext() ? (Cursor)sapp_get_mouse_cursor() : Cursor::Default;
+    return (Cursor)sapp_get_mouse_cursor();
 }
 
 // Bind a custom RGBA image to a cursor slot
@@ -1557,6 +1562,7 @@ inline Cursor getCursor() {
 inline void bindCursorImage(Cursor cursor, int width, int height,
                             const unsigned char* pixels,
                             int hotspotX = 0, int hotspotY = 0) {
+    if (!sapp_isvalid()) return;
     sapp_image_desc desc = {};
     desc.width = width;
     desc.height = height;
@@ -1571,6 +1577,7 @@ inline void bindCursorImage(Cursor cursor, int width, int height,
 
 // Unbind a custom cursor image, restoring the default system cursor for that slot
 inline void unbindCursorImage(Cursor cursor) {
+    if (!sapp_isvalid()) return;
     sapp_unbind_mouse_cursor_image((sapp_mouse_cursor)cursor);
 }
 
@@ -1580,9 +1587,9 @@ inline void unbindCursorImage(Cursor cursor) {
 
 // Copy string to clipboard
 inline void setClipboardString(const std::string& text) {
-    if (static_cast<int>(text.size()) >= internal::currentWindowContext().clipboardSize) {
+    if (text.size() >= 65536) {
         logWarning("Clipboard") << "Text truncated (" << text.size() << " bytes > "
-            << internal::currentWindowContext().clipboardSize << " buffer). Use WindowSettings::setClipboardSize() to increase.";
+            << "65536-byte fixed buffer).";
     }
     sapp_set_clipboard_string(text.c_str());
 }
@@ -2242,18 +2249,13 @@ struct WindowSettings {
     std::string title = "TrussC App";
     bool highDpi = true;  // High DPI support (sharp rendering on Retina)
     bool pixelPerfect = false;  // true: coords = framebuffer size, false: coords = logical size
+    // process-wide in v0.8.0: the launch window's setting applies to every window
     int sampleCount = 4;  // MSAA (default 4x, 8x not supported on some devices)
     bool quitOnClose = false;
     WindowSettings& setQuitOnClose(bool enabled) { quitOnClose = enabled; return *this; }
     bool fullscreen = false;
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
-    // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
-    int clipboardSize = 65536;  // Clipboard buffer size (default 64KB)
     int swapInterval = 1;  // VSync: 1 = on (default), 0 = off
-    int uniformBufferReserve = 0;  // per-frame GPU uniform reservation in bytes;
-                                   // 0 = backend default (4MB ≈ 8k draws). Only
-                                   // Metal/WebGPU/Vulkan use it (ring buffer);
-                                   // GL/D3D11 have no such cap.
     // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
@@ -2297,12 +2299,6 @@ struct WindowSettings {
         return *this;
     }
 
-    // OS clipboard text needs finite storage in the window backend. On reads, macOS and web truncate to size - 1 bytes; Windows fails UTF-8 conversion on overflow; X11 rejects oversized or incremental selections (standalone returns empty, legacy returns null). On writes, macOS and web send the full text to the OS and truncate the local copy; Windows rejects overflowing UTF-16 conversion and truncates the local UTF-8 copy after success; standalone X11 rejects oversized writes, while legacy X11 logs and truncates. Clipboard access is unsupported on iOS and Android.
-    WindowSettings& setClipboardSize(int size) {
-        clipboardSize = size;
-        return *this;
-    }
-
     // VSync / present interval. 1 = sync to display refresh (default), 0 = off.
     // N > 1 presents every Nth refresh: on a 120Hz display, 2 -> 60fps, 4 -> 30.
     // On Apple this also drives the display-link rate (true sub-refresh fps,
@@ -2328,6 +2324,16 @@ struct WindowSettings {
         return *this;
     }
 
+    // Keep settings aggregate-initializable, like the existing public fields.
+    int resourcePoolSize = 0;
+    int shaderPoolSize = 0;
+    int pipelinePoolSize = 0;
+};
+
+// Process-wide startup settings, shared by all windows.
+struct RuntimeSettings {
+    int uniformBufferReserve = 0;  // 0 = backend default; GL/D3D11 ignore it.
+
     // Reserve the per-frame GPU uniform buffer, in bytes (0 = default: 1MB on
     // Metal/WebGPU, 4MB on Vulkan). Like std::vector::reserve: on Metal/WebGPU
     // the ring grows (with a warning log) when a frame overflows it,
@@ -2337,15 +2343,10 @@ struct WindowSettings {
     // overflowing frame is still an error, so size this generously for very
     // high draw-call scenes. GL/D3D11 ignore it — they have no such cap.
     // Metal/WebGPU/Vulkan allocate it x2 (in-flight frames).
-    WindowSettings& reserveUniformBuffer(int bytes) {
+    RuntimeSettings& reserveUniformBuffer(int bytes) {
         uniformBufferReserve = bytes;
         return *this;
     }
-
-    // Keep settings aggregate-initializable, like the existing public fields.
-    int resourcePoolSize = 0;
-    int shaderPoolSize = 0;
-    int pipelinePoolSize = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -2573,9 +2574,9 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
     desc.max_dropped_file_path_length = 2048;  // Max path length
 
     // Enable clipboard
+    // Bound (security): OS clipboard text needs finite storage. Overflow truncates or rejects oversized text, depending on the backend.
     desc.enable_clipboard = true;
-    desc.clipboard_size = settings.clipboardSize;
-    configureLaunchWindow(*target, settings);
+    desc.clipboard_size = 65536;  // Fixed OS clipboard buffer capacity.
 
     // Windows: keep console input and output UTF-8 while the app runs.
     // Takes effect whenever the process has a console (Debug builds,
@@ -2595,7 +2596,8 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
 // Build sapp_desc without starting the event loop.
 // Used by runApp() on desktop and by sokol_main() on Android.
 template<typename AppClass>
-sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) {
+sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings(),
+                             const RuntimeSettings& runtime = RuntimeSettings()) {
     internal::beginRuntimeRun();
     internal::appExitCode() = 0;
 
@@ -2606,7 +2608,7 @@ sapp_desc buildAppDescriptor(const WindowSettings& settings = WindowSettings()) 
     internal::windowDecorated = settings.decorated;
 
     // Per-frame uniform reservation for sg_setup (consumed in internal::setup()).
-    internal::gpuUniformBufferReserve = settings.uniformBufferReserve;
+    internal::gpuUniformBufferReserve = runtime.uniformBufferReserve;
     internal::configureGraphicsPools(settings);
 
     auto window = internal::prepareLaunchWindow(settings);
@@ -2688,18 +2690,18 @@ namespace internal {
 }
 
 template<typename AppClass>
-int runApp(const WindowSettings& settings = WindowSettings()) {
+int runApp(const WindowSettings& settings, const RuntimeSettings& runtime) {
     internal::openEnvLogFile();   // before sokol starts the app
-    internal::g_androidDesc = buildAppDescriptor<AppClass>(settings);
+    internal::g_androidDesc = buildAppDescriptor<AppClass>(settings, runtime);
     // On Android, sokol_main() will return g_androidDesc.
     // runApp() is called from sokol_main() context, so just return.
     return 0;
 }
 #else
 template<typename AppClass>
-int runApp(const WindowSettings& settings = WindowSettings()) {
+int runApp(const WindowSettings& settings, const RuntimeSettings& runtime) {
     internal::openEnvLogFile();   // before sapp_run(): init-time failures too
-    sapp_desc desc = buildAppDescriptor<AppClass>(settings);
+    sapp_desc desc = buildAppDescriptor<AppClass>(settings, runtime);
 #ifdef _WIN32
     internal::ConsoleCPCtrlGuard consoleCtrl;   // restore both console code pages on exit
 #endif
@@ -2715,6 +2717,11 @@ int runApp(const WindowSettings& settings = WindowSettings()) {
 #endif
 }
 #endif
+
+template<typename AppClass>
+int runApp(const WindowSettings& settings = WindowSettings()) {
+    return runApp<AppClass>(settings, RuntimeSettings());
+}
 
 } // namespace trussc
 

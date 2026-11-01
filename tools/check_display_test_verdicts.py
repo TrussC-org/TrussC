@@ -19,6 +19,7 @@ LAUNCHERS = {"runApp", "TC_RUN_APP", "runDisplayTest"}
 SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl", ".m", ".mm"}
 # Exceptions are individual annotated calls, never an excluded test file.
 EXCEPTIONS = {
+    ("core/tests/runtimeSettings/src/main.cpp", "linux-returning-lifetime"),
     ("core/tests/startupExit/src/main.cpp", "returning-startup-failure"),
     ("core/tests/loggerThreadSafety/src/main.cpp", "expected-abort"),
     ("core/tests/hotReloadLifecycle/src/main.cpp", "atexit-verdict"),

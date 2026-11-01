@@ -39,6 +39,7 @@ struct Range { float minimum=0,maximum=0,preferred=0; };
 Range CAFrameRateRangeMake(float a,float b,float c) { return {a,b,c}; }
 struct Layer { const void* device=nullptr; int pixelFormat=0,magnificationFilter=0; bool opaque=false,framebufferOnly=true; };
 struct View { _sapp_tc_window_t* w=nullptr; bool wantsLayer=false; Layer* layer=nullptr; };
+void register_drop(View*) {}
 struct Delegate { _sapp_tc_window_t* w=nullptr; };
 struct Link { Range preferredFrameRateRange; };
 struct DeviceContext { void ClearRenderTargetView(int,const float*) {} };

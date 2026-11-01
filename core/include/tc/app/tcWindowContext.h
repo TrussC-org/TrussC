@@ -274,8 +274,6 @@ struct WindowContext {
     int rateIndex = 0;
     int rateCount = 0;
     // --- misc per-window ---
-    // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
-    int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
     // Resolved absolute paths (download names on web) queued by saveScreenshot()
     // on THIS window. The common host tick drains after the complete afterFrame
     // notification while this context and lastSwapchainDrawable are current,

@@ -1133,9 +1133,6 @@ std::shared_ptr<Window> prepareLaunchWindow(const WindowSettings& settings) {
     return window;
 }
 const char* launchWindowTitle(Window& window) { return window.title_.c_str(); }
-void configureLaunchWindow(Window& window, const WindowSettings& settings) {
-    trussc::internal::WindowRequestAccess::context(window).clipboardSize = settings.clipboardSize;
-}
 bool attachCandidate(Window& window, std::shared_ptr<App> app) {
     WindowRequestAccess::attachCandidate(window, app);
     WindowRequestAccess::applyPendingApp(window);
@@ -1269,6 +1266,18 @@ void resetAppNodeReferences(const App& app) noexcept {
 CoreEvents& events() {
     if (auto* ctx = internal::findWindowApiContext()) return *ctx->coreEvents;
     return internal::unavailableWindowEvents();
+}
+
+// App callbacks and unowned callers share the existing Window resolution rule.
+const std::string& getWindowTitle() {
+    if (auto* window = internal::currentWindow()) return window->getTitle();
+    static const std::string empty;
+    return empty;
+}
+
+bool isWindowOccluded() {
+    if (auto* window = internal::currentWindow()) return window->isOccluded();
+    return false;
 }
 
 // ---------------------------------------------------------------------------

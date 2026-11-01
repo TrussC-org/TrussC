@@ -304,6 +304,22 @@ int main(int argc, char** argv) {
         sol::protected_function_result r = L.safe_script(string("return ") + expr, sol::script_pass_on_error);
         return r.valid() && r.get_type() == sol::type::boolean && r.get<bool>();
     };
+    check("RuntimeSettings reservation defaults/setter/field", luaBool(R"(
+        (function()
+            local runtime = RuntimeSettings.new()
+            if runtime.uniformBufferReserve ~= 0 then return false end
+            runtime:reserveUniformBuffer(4096)
+            if runtime.uniformBufferReserve ~= 4096 then return false end
+            runtime.uniformBufferReserve = 8192
+            return runtime.uniformBufferReserve == 8192
+        end)()
+    )"));
+    check("WindowSettings has no runtime/clipboard controls", luaBool(R"(
+        WindowSettings.uniformBufferReserve == nil and
+        WindowSettings.reserveUniformBuffer == nil and
+        WindowSettings.clipboardSize == nil and WindowSettings.setClipboardSize == nil
+    )"));
+    check("window query globals bound", luaBool("type(getWindowTitle) == 'function' and type(isWindowOccluded) == 'function'"));
     // #239 D6: Window internals must stay absent from the Lua type table.
     for (const char* name : {"context", "dispatchMousePressToTree", "dispatchMouseReleaseToTree",
             "dispatchMouseMoveToTree", "dispatchMouseScrollToTree", "dispatchKeyPressToTree",

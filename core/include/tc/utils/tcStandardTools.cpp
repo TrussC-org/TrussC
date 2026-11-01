@@ -486,12 +486,12 @@ void registerStandardTools(Server& server) {
         return &trussc::internal::WindowRequestAccess::context(*win);
     };
 
-    coreTool(server, "tc_list_windows", "List open windows with positive IDs (use index as the window argument). Each window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
+    coreTool(server, "tc_list_windows", "List open windows with positive IDs (use id as the window argument). Each window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
         .level(ToolLevel::ReadOnly)
         .bind(std::function<json()>([]() -> json {
             json arr = json::array();
             for (auto* w : trussc::internal::openWindows()) {
-                arr.push_back(json{{"index", trussc::internal::WindowRequestAccess::creationId(*w)},
+                arr.push_back(json{{"id", trussc::internal::WindowRequestAccess::creationId(*w)},
                                    {"title", w->getTitle()},
                                    {"width", w->getWidth()}, {"height", w->getHeight()},
                                    {"occluded", w->isOccluded()}});
