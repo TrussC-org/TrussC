@@ -989,6 +989,25 @@ static void testBuildDirMapping() {
     }
     check("written presets' binaryDir match the helper",
           written && presets >= 3 && matching == presets);
+
+    // Check the real writer on each CI host; no simulated host setting exists.
+    string nativeGenerator, webGenerator;
+    if (j.is_object() && j.contains("configurePresets")) {
+        for (const auto& p : j["configurePresets"]) {
+            const string name = p.value("name", "");
+            if (name == "web") webGenerator = p.value("generator", "");
+            if (name == "windows" || name == "macos" || name == "linux") {
+                nativeGenerator = p.value("generator", "");
+            }
+        }
+    }
+#ifdef _WIN32
+    check("web generator: Ninja, matching Windows native preset",
+          written && webGenerator == "Ninja" && nativeGenerator == webGenerator);
+#else
+    check("web generator: Unix Makefiles, matching macOS/Linux native preset",
+          written && webGenerator == "Unix Makefiles" && nativeGenerator == webGenerator);
+#endif
 }
 
 // -----------------------------------------------------------------------------

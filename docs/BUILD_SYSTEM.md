@@ -175,6 +175,18 @@ trusscli build -j 4 --dry-run
 ```
 
 **Web Build (WASM):**
+The Web preset uses Ninja on Windows and Unix Makefiles on macOS/Linux,
+matching the native presets. Windows Web builds require `ninja` on `PATH`:
+install Ninja separately or use the copy included with the Visual Studio
+CMake tools. Do not assume the Emscripten SDK provides it.
+
+Before `trusscli update --web` or a manual Web build, activate the SDK in
+the terminal you will build from: run `emsdk_env.bat` in cmd (its environment
+persists in that cmd session), `./emsdk_env.ps1` in PowerShell, or
+`source ./emsdk_env.sh` in Git Bash, from the SDK directory. With `MSYSTEM`
+inherited from Git Bash, `emsdk_env.bat` only prints Bash exports; use the
+shell script in Git Bash.
+
 The Project Generator creates a helper script (`build-web.command`, `build-web.bat`, or `build-web.sh`) in your project folder. This script automatically handles Emscripten environment setup.
 
 ```bash

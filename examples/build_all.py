@@ -536,7 +536,7 @@ def find_node():
 
 def build_and_run_web_test(test_dir, pg_bin, platform_info, args):
     # Build a core test for WebAssembly, then run its JavaScript under node
-    # (non-zero exit = failure). Project tests use trusscli + emcmake like Web
+    # (non-zero exit = failure). Project tests use trusscli's Web preset like Web
     # examples; standalone tests use their own CMake project. Neither needs
     # a canvas or GPU, and the project test's .html shell is unused.
     node = find_node()
@@ -551,7 +551,9 @@ def build_and_run_web_test(test_dir, pg_bin, platform_info, args):
         if not run_command(pg_cmd, cwd=ROOT_DIR, verbose=args.verbose):
             return False, "update"
 
-    if shutil.which("emcmake"):
+    if not standalone:
+        cmd_config = ["cmake", "--preset", "web"]
+    elif shutil.which("emcmake"):
         cmd_config = ["emcmake", "cmake", "-S", ".", "-B", "build-web"]
     else:
         cmd_config = ["cmake", "-S", ".", "-B", "build-web"]
@@ -823,10 +825,9 @@ def main():
             if args.clean and os.path.exists(build_dir_web):
                 shutil.rmtree(build_dir_web)
 
-            if shutil.which("emcmake"):
-                cmd_config_web = ["emcmake", "cmake", "-S", ".", "-B", "build-web"]
-            else:
-                cmd_config_web = ["cmake", "-S", ".", "-B", "build-web"]
+            # The generated preset carries the host generator and toolchain.
+            # emcmake may add its own -G on Windows, overriding that choice.
+            cmd_config_web = ["cmake", "--preset", "web"]
             
             if not run_command(cmd_config_web, cwd=example_dir, verbose=args.verbose):
                 Colors.print(f"  Web Configure failed!", Colors.RED)

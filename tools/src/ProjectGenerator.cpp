@@ -519,7 +519,12 @@ void ProjectGenerator::writeCMakePresets(const string& destPath) {
         webPreset["name"] = "web";
         webPreset["displayName"] = "Web (Emscripten)";
         webPreset["binaryDir"] = "${sourceDir}/" + buildDirForPreset("web");
+        // Match the native preset's host rule; Windows does not require make.
+#ifdef _WIN32
+        webPreset["generator"] = "Ninja";
+#else
         webPreset["generator"] = "Unix Makefiles";
+#endif
         // Emscripten toolchain found in this shell, else the saved one if it
         // still exists (update run without emsdk_env), else $env{EMSDK}
         string emDetected = detectEmscriptenToolchain();
