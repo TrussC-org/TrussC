@@ -17,9 +17,16 @@ underlying core `tc::UdpSocket` multicast API) provide:
 It also checks bundle parsing and dispatch (unicast loopback into `OscReceiver`,
 plus `OscBundle::fromBytes` directly):
 
-- bundles nest up to `OscBundle::MAX_NESTING_DEPTH` levels; one level more, or a
-  nested bundle that fails to parse, is exactly one `onParseError` and delivers
-  nothing;
+- bundles nest without a depth limit: 17 and 100 levels (the old cap was 16)
+  parse with every level kept, 17 and 400 levels (a datagram under 9 KiB, which every OS
+  delivers over loopback) arrive through an `OscReceiver`, and a bundle as deep as fits in 65,536 bytes (3276 levels) is
+  parsed, dispatched, copied, serialized and freed on a thread with a 64 KiB
+  stack; a nested bundle that fails to parse is exactly one `onParseError` and
+  delivers nothing;
+- the deepest packet (3276 levels) delivered to a `Deliver::Main` listener
+  allocates memory proportional to the packet (checked with a counting
+  `operator new`), and a Main listener's copy never sees edits that other
+  listeners make to the tree afterwards (`storageBounds.cpp`);
 - a 10-level bundle delivers each inner message exactly once, and
   `onBundleReceived` listeners get the parsed bundles themselves, not copies;
 - a bundle element or blob whose size runs past the end of the data fails to
@@ -55,7 +62,7 @@ And the polling queue:
   and counted in `getDroppedMessageCount()`;
 - first loss logs once on the main thread automatically, even without another poll;
 - shrinking keeps the newest whole messages and preserves the lifetime counter;
-- 5000-float messages parse and arrive whole; datagram size and nesting bounds remain;
+- 5000-float messages parse and arrive whole; the datagram size bound remains;
 - retained-storage eviction accounts for empty arguments, blobs and queue nodes;
 - parsed addresses, string arguments and type tags at lengths 15, 16, 17, 29,
   30 and 31 poll intact with zero drops from an empty queue; charges match the

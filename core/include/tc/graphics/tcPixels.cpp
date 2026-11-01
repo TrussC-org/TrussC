@@ -22,7 +22,6 @@ thread_local ImageDecodeAllocationScope* imageDecodeAllocation = nullptr;
 thread_local int64_t imageDecodeFailAfter = -1;
 thread_local size_t imageDecodeAllocationAttempts = 0;
 thread_local size_t imageDecodeLargestAllocation = 0;
-constexpr size_t encodedImageLimit = 64 * 1024 * 1024;
 }
 void recordImageDecodeLimit(int axis) { imageDecodeLimit.store(axis > 0 ? axis : 0, std::memory_order_relaxed); }
 int imageDecodeAxisLimit() {
@@ -49,13 +48,6 @@ LoadResult imageDecodeOutOfMemory() noexcept {
     return result;
 }
 
-LoadResult admitImageEncodedSize(size_t bytes) {
-    // Bound (security): 64 MiB limits untrusted encoded input storage before decoding. Overflow rejects the whole image and is counted.
-    if (bytes > encodedImageLimit)
-        return rejectImageDecode(LoadError::TooLarge,
-            ("encoded size " + std::to_string(bytes) + " exceeds 64 MiB").c_str());
-    return LoadResult::success();
-}
 LoadResult admitImageDimensions(int64_t width, int64_t height, size_t channels, size_t elementBytes) {
     if (width <= 0 || height <= 0 || channels == 0 || elementBytes == 0)
         return LoadResult::fail(LoadError::DecodeFailed, "invalid image dimensions or format");
@@ -241,10 +233,7 @@ LoadResult Pixels::loadFromMemory(const unsigned char* buffer, int len) try {
     clear();
     if (!buffer || len <= 0)
         return LoadResult::fail(LoadError::DecodeFailed, "invalid encoded image data");
-    auto admitted = internal::admitImageEncodedSize(size_t(len));
-    if (!admitted) return admitted;
-    auto result = loadEncoded(buffer, len, false);
-    return result;
+    return loadEncoded(buffer, len, false);
 } catch (const std::bad_alloc&) {
     clear();
     return internal::imageDecodeOutOfMemory();

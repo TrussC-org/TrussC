@@ -2655,7 +2655,7 @@ size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // 
 int AudioEngine::getBufferSize() const  // Returns the requested audio buffer size.
 int AudioEngine::getChannels() const  // Returns the engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Returns the global AudioEngine singleton.
-int AudioEngine::getMaxPolyphony() const  // Returns the engine's playback slot capacity.
+int AudioEngine::getMaxPolyphony() const  // Returns the engine's voice cap, 0 for no cap.
 std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Returns a snapshot of playing and paused sounds.
 int AudioEngine::getSampleRate() const  // Returns the engine output sample rate.
 AudioStats AudioEngine::getStats() const  // Returns a snapshot of audio engine diagnostics.
@@ -5105,7 +5105,7 @@ AudioSettings as;
 as.sampleRate   = 48000;          // default 48000 (changed from old 96000)
 as.channels     = 2;
 as.bufferSize   = 256;            // 0 = let miniaudio choose
-as.maxPolyphony = 32;
+as.maxPolyphony = 0;              // 0 = no cap on simultaneous voices (default); a positive value is a cap
 as.deviceName   = "";             // empty = system default
 engine.init(as);
 
