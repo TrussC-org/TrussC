@@ -154,7 +154,7 @@ with tempfile.TemporaryDirectory(prefix='tc-sheetquit-') as folder:
         source.write_text(text, encoding='utf-8')
         subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
                         '-I'+str(ROOT / 'core/include'), str(source), '-o', str(binary)], check=True)
-        result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=15)
+        result = subprocess.run([str(binary)], capture_output=True, text=True, encoding="utf-8", timeout=15)
         print(name, result.stdout, result.stderr, flush=True)
         expected = result.returncode == 0 if name == 'baseline' else result.returncode == 1 and ': FAIL' in result.stdout
         if not expected:
