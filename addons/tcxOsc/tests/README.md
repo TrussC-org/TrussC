@@ -18,8 +18,8 @@ It also checks bundle parsing and dispatch (unicast loopback into `OscReceiver`,
 plus `OscBundle::fromBytes` directly):
 
 - bundles nest without a depth limit: 17 and 100 levels (the old cap was 16)
-  parse with every level kept, 17 and 3200 levels arrive through an
-  `OscReceiver`, and a bundle as deep as fits in 65,536 bytes (3276 levels) is
+  parse with every level kept, 17 and 400 levels (a datagram under 9 KiB, which every OS
+  delivers over loopback) arrive through an `OscReceiver`, and a bundle as deep as fits in 65,536 bytes (3276 levels) is
   parsed, dispatched, copied, serialized and freed on a thread with a 64 KiB
   stack; a nested bundle that fails to parse is exactly one `onParseError` and
   delivers nothing;

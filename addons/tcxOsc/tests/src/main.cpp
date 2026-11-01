@@ -955,12 +955,19 @@ int main() {
                       got && messages == 17 && bundles == 17 && errors == 0 && sameObjects);
             }
 
-            // Thousands of levels in one datagram
-            got = deliver(deepBundleBytes(3200));
+            // Hundreds of levels in one datagram of a size every OS delivers over
+            // loopback (8,012 bytes): macOS refuses to send a UDP datagram over
+            // net.inet.udp.maxdgram (9,216 by default), which is a property of
+            // the transport, not of the parser. The deepest packet that fits
+            // the 65,536-byte bound goes through OscReceiver's own dispatch
+            // without a socket in section 4.
+            const std::vector<uint8_t> hundreds = deepBundleBytes(400);
+            check("nesting: the 400-level packet fits a portable datagram", hundreds.size() < 9000);
+            got = deliver(hundreds);
             {
                 std::lock_guard<std::mutex> lock(mtx);
-                check("nesting: 3200 levels delivered",
-                      got && messages == 1 && bundles == 3200 && errors == 0 && sameObjects);
+                check("nesting: 400 levels delivered",
+                      got && messages == 1 && bundles == 400 && errors == 0 && sameObjects);
             }
 
             // A nested bundle that fails to parse
