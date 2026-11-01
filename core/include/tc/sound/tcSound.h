@@ -755,7 +755,7 @@ struct AudioSettings {
                                 // 0 = AudioEngine::DEFAULT_SAMPLE_RATE (48 kHz)
     int channels     = 2;       // engine output channel count (1 = mono, 2 = stereo)
     int bufferSize   = 0;       // requested device buffer size in frames; 0 = let miniaudio choose
-    int maxPolyphony = 32;      // max simultaneously-playing Sound voices
+    int maxPolyphony = 0;       // cap on simultaneously-playing Sound voices; 0 (or less) = unlimited
     std::string deviceName;     // playback device name; empty = system default
     AudioBackend backend = AudioBackend::Default; // Null = silent, device-less mixer clock
 };
@@ -828,7 +828,7 @@ struct AudioInBuffer {
 // the engine lock, so later changes to the playback are not reflected.
 // ---------------------------------------------------------------------------
 struct PlayingSoundInfo {
-    int         slot = 0;           // playback slot index (0 .. maxPolyphony-1)
+    int         slot = 0;           // playback slot index (0 .. slots in use - 1)
     fs::path    path;               // resolved source file (same as getPath()); empty for generated / memory buffers
     bool        streaming = false;  // true for SoundStream (loadStream), false for an eager SoundBuffer
     bool        paused = false;
@@ -853,7 +853,7 @@ struct AudioStats {
     // Plays AudioEngine::play() refused (Sound::play() returned false),
     // in total and by reason.
     uint64_t droppedPlays = 0;
-    uint64_t droppedPolyphonyLimit = 0; // every playback slot busy (AudioSettings::maxPolyphony)
+    uint64_t droppedPolyphonyLimit = 0; // the AudioSettings::maxPolyphony cap reached (always 0 when no cap is set)
     uint64_t droppedStreamLimit = 0;   // the SoundStream's own maxPolyphony reached (copies of one streamed Sound)
     uint64_t droppedDecoderError = 0;  // the stream's file could not be reopened for a new playback
     uint64_t droppedNotRunning = 0;    // no running output device (init failed or engine shut down)
@@ -1030,7 +1030,7 @@ public:
     // init({.sampleRate = 96000}) to opt into a higher rate when needed.
     static constexpr int DEFAULT_SAMPLE_RATE = 48000;
     static constexpr int DEFAULT_CHANNELS = 2;
-    static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 32;
+    static constexpr int DEFAULT_MAX_PLAYING_SOUNDS = 0;  // 0 = no cap on playing voices
     static constexpr int DEFAULT_BUFFER_SIZE = 0;  // 0 = let miniaudio choose
 
     // The one engine per process. Defined in tcAudio_impl.cpp, not inline: a
@@ -1086,7 +1086,7 @@ public:
     // value being sensible.
     int getSampleRate()   const { return sampleRate_; }
     int getChannels()     const { return channels_; }
-    int getMaxPolyphony() const { return (int)playingSounds_.size(); }
+    int getMaxPolyphony() const { return maxPolyphony_; }  // 0 = unlimited
     int getBufferSize()   const { return bufferSize_; }
     bool isInitialized()  const { return initialized_; }
 
@@ -1448,7 +1448,12 @@ private:
                                // CoreAudio internal state stays consistent
                                // when devices are torn down + recreated.
     bool initialized_ = false;
+    // Voice slots. Grown by play() (under mutex_) when every slot is in use,
+    // never shrunk except by a re-init with a smaller cap. maxPolyphony_ is
+    // the opt-in cap on slots (0 = unlimited); it is only written by init()
+    // with the device stopped.
     std::vector<std::shared_ptr<PlayingSound>> playingSounds_;
+    int maxPolyphony_ = DEFAULT_MAX_PLAYING_SOUNDS;
     mutable std::mutex mutex_;  // mutable: getPlayingSounds() const locks it
 
     // Runtime engine configuration. Initialized to defaults; overwritten by
@@ -1648,8 +1653,8 @@ public:
 
     // Start playing from the beginning (this Sound's previous voice is
     // stopped first). Returns false when nothing will play: not loaded, or
-    // the engine dropped the play — every playback slot busy
-    // (AudioSettings::maxPolyphony), the stream's own maxPolyphony reached
+    // the engine dropped the play — the AudioSettings::maxPolyphony cap, if
+    // you set one, reached, the stream's own maxPolyphony reached
     // (copies of a streamed Sound share it), the stream file could not be
     // reopened, or no output device is running. Drops are logged as
     // warnings and counted in AudioEngine::getStats().

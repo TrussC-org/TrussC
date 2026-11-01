@@ -338,3 +338,11 @@ yet; the synthetic-input design remains open.
 - `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
 - `tc_list_windows` returns each window's positive native identity as `id` instead of `index`. Pass that `id` as other tools' `window` argument; resource list indices are unchanged.
 - `exitApp()` now goes through `exitRequested`, whose listeners can veto it; before 0.8 it could not be cancelled. A “show a confirm dialog, then call `exitApp()`” pattern receives `exitRequested` again on that call, so remember acceptance in a flag, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
+
+## No caps on image size, sound polyphony or OSC nesting
+
+These limits are gone; if your app needs a cap, set it yourself.
+
+- **Image:** the 64 MiB limit on encoded image input from memory (`Pixels::loadFromMemory`, `Image::loadFromMemory`, URL and network-buffer loads) is removed, as it never applied to local files. `LoadError::TooLarge` stays for its other reasons (GPU texture size, URL/network admission, platform size). Nothing to change.
+- **Sound:** `AudioSettings::maxPolyphony` now defaults to `0`, which means no cap (it was `32`), and `AudioEngine::DEFAULT_MAX_PLAYING_SOUNDS` is `0`. The 33rd simultaneous `Sound::play()` used to return `false` and was counted in `droppedPolyphonyLimit`; it now plays. `AudioEngine::getMaxPolyphony()`, `AudioDeviceChangedArgs::maxPolyphony` and the `tc_get_audio_state` field report the cap, so they read `0` when none is set, not the number of slots. A positive value still works as a cap; negative values mean no cap, as `0` does. `PlayingSoundInfo::slot` is no longer bounded by a fixed range. A `SoundStream`'s own `loadStream(path, maxPolyphony)` default of `1` is unchanged.
+- **OSC:** `OscBundle::MAX_NESTING_DEPTH` is removed, and bundles nest as deep as the 65,536-byte packet allows (the datagram bound stays). If you used the constant, delete the check or replace it with a limit of your own in an `onBundleReceived` handler. `OscBundle` copies are now shallow: nested bundles are shared between a bundle and its copies (they are never modified once added), so a copy costs one level, and the destructor walks the nesting without recursion. `OscBundle::Element` is now `std::variant<OscMessage, std::shared_ptr<OscBundle>>`.

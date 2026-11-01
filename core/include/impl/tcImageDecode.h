@@ -18,7 +18,6 @@ LoadResult imageDecodeOutOfMemory() noexcept;
 LoadResult admitImageDimensions(int64_t width, int64_t height,
                                 size_t channels, size_t elementBytes);
 LoadResult readEncodedImage(const std::filesystem::path& path, std::unique_ptr<unsigned char[]>& bytes, size_t& length);
-LoadResult admitImageEncodedSize(size_t bytes);
 
 // Local snapshot adapter; copyAt also permits generated input in seam tests.
 struct ImageCallbackInput {

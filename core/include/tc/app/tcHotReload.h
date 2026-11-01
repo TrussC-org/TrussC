@@ -79,6 +79,14 @@ namespace trussc {
 
 #endif // TC_HOT_RELOAD_BUILD
 
+// Reject incompatible addon or user code only in the hot-reload guest.
+// The host also defines TC_HOT_RELOAD_BUILD and can include the same headers.
+#ifdef TC_HOT_RELOAD_GUEST
+#define TC_NO_HOT_RELOAD(reason) static_assert(false, "hot reload is not supported here: " reason)
+#else
+#define TC_NO_HOT_RELOAD(reason) /* ordinary and host builds — no-op */
+#endif
+
 // ---------------------------------------------------------------------------
 // TC_RUN_APP(AppClass, settings)
 //

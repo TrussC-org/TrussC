@@ -41,13 +41,13 @@ api-reference.toml  ──────────►  prose      (symbol-id →
 | `emit-forai.js` | injects the C++ API index into `../FOR_AI_ASSISTANT.md` (documented-only, overloads collapsed, enum values, category-grouped), and refreshes its App lifetime introduction from `../ARCHITECTURE.md`. |
 | `emit-of.js`    | the openFrameworks↔TrussC migration guide → `trussc.org/generated/of-mapping.json` + `../TrussC_vs_openFrameworks.md` §5. Grouping/notes from `of-mapping-config.js`. |
 | `emit-coverage.js` | the CI compile-and-link canary → `examples/tests/AllFeaturesExample/src/coverage_generated.cpp`: every documented public core function / method / field / constant / constructor referenced once (never run), with `TC_PLATFORMS` guards, so each CI platform links it against its own implementation. Re-run after an API change and commit the output. Deprecating, removing or renaming a documented API, or dropping a platform's implementation along with its `TC_PLATFORMS` entry, needs the regenerated file in the **same PR**: the committed file still calls the old API, so CI fails. Regenerate with `./regenerate.sh` on macOS. |
-| `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Reads `reference-data.json` + `extras.json` (macros / keywords / constant values / example links) + `colors.json`. |
+| `../scripts/emit-web.js` | the web reference data → `trussc.org/generated/trussc-api.js` (full public surface, same shape the site consumes). Reads `reference-data.json` + `extras.json` (keywords / constant values / example links) + `colors.json`. |
 | `../scripts/emit-api-details.js` | the details + snippet of every entry, in TOML order, as one text file for an LLM's reference files (Gem etc.). Run by `../scripts/generateDocsForAI.sh` next to its other `.txt` files; not committed. Reads `api-reference.toml` directly. |
 
 The legacy `api-definition.yaml` and its `generate-docs.js` / `mine.js` are
 **retired** (deleted). Structure comes from the AST, prose from
 `api-reference.toml`, and the few things derivable from neither live in small
-dedicated sources: `extras.json` (macros, keywords, constant values, manual
+dedicated sources: `extras.json` (keywords, constant values, manual
 example links) and `colors.json` (the swatch palette, generated from
 `tcColor.h` by `scripts/gen-colors.js`).
 
@@ -76,7 +76,8 @@ can differ; committed outputs are generated on macOS.
 
 The macOS `reference-check` CI job runs `check.js --strict`, regenerates, and fails
 if any tracked FOR_AI, oF Markdown, coverage or Lua output differs. It runs in the
-PR lane and merge queue. On drift, download the `regenerated-patch` artifact,
+PR lane and merge queue. It also runs all three generator test suites with
+`CXX=clang++ node --test 'docs/reference/tests/*.test.js'`. On drift, download the `regenerated-patch` artifact,
 apply `regenerated.patch` with `git apply`, and include those changes in the PR.
 
 ## `reference-data.json` — the canonical format
@@ -88,7 +89,7 @@ else. Schema of one entry:
 ```jsonc
 "Color::fromHSB": {
   "id":      "Color::fromHSB",   // canonical symbol-id (== the key)
-  "kind":    "method",           // var | field | method | func | type | enum | typedef
+  "kind":    "method",           // var | field | method | func | type | enum | typedef | macro
   "name":    "fromHSB",          // bare display name
   "owner":   "Color",            // enclosing type   (method/field; absent for free fns)
   "ns":      "EventPriority",    // enclosing namespace/enum (enum members & ns'd symbols)
@@ -143,7 +144,12 @@ This is the whole point: one key, one prose blurb, N signatures.
 - **Enum values** are NOT nested under the enum `type` entry. They are sibling
   `kind:"var"` entries with `ns` = the enum name (`BlendMode::Add`, ns `BlendMode`).
   Group by `ns` to reconstruct an enum's members.
-- **`signatures: []`** for `type`/`enum`/`typedef` (non-callable).
+- **`signatures: []`** for `type`/`enum`/`typedef`/`macro` (non-callable).
+- **Macro cards** live in `api-reference.toml`, in web display order. Their
+  curated `signature` string passes through `generate.js` alongside the localized
+  description/details. `structure.js` includes a macro only while its public
+  header defines it, and marks it `lua_skip: true`. Coverage and Lua emitters
+  ignore this non-callable kind; FOR_AI and the web render the same cards.
 - **Bindability** (Lua): derive from the signature. `shared_ptr<BoundType>` IS
   bindable. Unbindable: raw out-params, raw pointers, raw C arrays, and any
   signature with **`tmpl: true`** (a template overload needing explicit

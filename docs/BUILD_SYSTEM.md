@@ -591,6 +591,11 @@ On the next build, cmake reconfigures back to a single static binary. The `TC_RU
 
 ### Limitations
 
+- **Incompatible code**: addon headers and user code can declare a hot-reload limitation at namespace scope:
+  ```cpp
+  TC_NO_HOT_RELOAD("this code keeps state that cannot survive reloads");
+  ```
+  A hot-reload guest fails to compile with `hot reload is not supported here:` followed by the reason. The macro expands to nothing in ordinary builds and in the host, even when `main.cpp` includes the same header. Remove `TC_HOT_RELOAD` to build the app normally. `tcxHap` uses this macro on Windows because its snappy dependency is not linked into the guest.
 - **Supported platforms**: macOS (`.dylib`), Linux (`.so`), Windows (`.dll`). Wasm / iOS / Android fall back to static mode automatically.
 - **Windows guest state**: the guest DLL compiles its own copy of every header-inline variable, so framework state that host and app code share lives in the host behind non-inline functions ([ARCHITECTURE.md §5.G](ARCHITECTURE.md#g-one-instance-per-process-header-inline-state)): MCP tools, events, timers, audio, recording, the main-thread queue, `setFps()` / `redraw()`, the clip / fov defaults, touch-as-mouse, the data path root, bitmap-font glyphs, the overlay (tcxImGui) queries, the debug counters behind `getNodeCount()` / `getTextureCount()` / `getFboCount()`, the current window context and the secondary windows' double-attach guard (so guest code sees the host's release when a window closes; a closed App is not attached again, so after that you attach a new App) all reach the host from a Windows guest too, and guest code sees the host's `WindowSettings::pixelPerfect` and sokol_gl budget. The GPU caches (FBO contexts and pipelines, IBL bake pipelines, font atlases and samplers) are the host's as well, so a reload reuses them instead of filling the host's sokol pools with a new set each time. What each module still keeps for itself is listed in `tools/header_state_allowlist.txt` with the reason it is harmless: small derived caches (demangled type names). Warn-once gates (`static OnceGate`) are per module too; after a reload a warning can show once more. Addons' own header-inline state is the guest's by design.
 - **Comment style**: Use `//` to disable. `/* */` block comments are not detected by the cmake scanner.
