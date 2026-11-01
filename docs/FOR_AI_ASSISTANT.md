@@ -926,6 +926,7 @@ While the app is running, saving any source file in `src/` triggers an automatic
 
 - **State resets on each reload** (the old generation's exit() and cleanup() run, then setup() runs again) — same model as Processing/p5.js
 - **Disable**: comment out `TC_HOT_RELOAD` with `//`
+- **Opt out in code**: put `TC_NO_HOT_RELOAD("reason");` at namespace scope in an addon header or user source. Only the guest fails to compile, with the reason; host and ordinary builds are unaffected. tcxHap declares this limitation on Windows because snappy is not linked into the guest.
 - **Build errors**: the previous version keeps running; fix and save again
 - Works on macOS, Linux, and Windows. Wasm/iOS/Android fall back to static mode
 
@@ -2711,7 +2712,7 @@ size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // 
 int AudioEngine::getBufferSize() const  // Returns the requested audio buffer size.
 int AudioEngine::getChannels() const  // Returns the engine output channel count.
 AudioEngine & AudioEngine::getInstance()  // Returns the global AudioEngine singleton.
-int AudioEngine::getMaxPolyphony() const  // Returns the engine's playback slot capacity.
+int AudioEngine::getMaxPolyphony() const  // Returns the engine's voice cap, 0 for no cap.
 std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Returns a snapshot of playing and paused sounds.
 int AudioEngine::getSampleRate() const  // Returns the engine output sample rate.
 AudioStats AudioEngine::getStats() const  // Returns a snapshot of audio engine diagnostics.
@@ -4918,6 +4919,22 @@ using XmlNode  // Represents a node within an XML document.
 using XmlParseResult  // Reports the outcome of parsing an XML document.
 ```
 
+## Macros
+
+```cpp
+TC_RUN_APP(AppClass, settings)  // Runs your App subclass with the given window settings; use it in main().
+TC_HOT_RELOAD(AppClass)  // Turns on hot reload, so saving your code rebuilds and reloads the running app without restarting it.
+TC_NO_HOT_RELOAD("reason");  // Declares that this code cannot be hot-reloaded, so a hot-reload build stops with your reason.
+TC_REFLECT(Self, ...Bases) { TC_VALUE(...) ... }  // Declare a class's reflected members — exposed to the inspector, serialization, and MCP — with no hand-written plumbing.
+TC_REFLECT_ROOT(Self) { TC_VALUE(...) ... }  // Like TC_REFLECT, for a type at the root of a hierarchy (no reflected base classes).
+TC_REFLECT_FREE(Type) { TC_VALUE(...) ... }  // Reflect an external type you can't edit, declared at namespace scope.
+TC_VALUE(member) | TC_VALUE(name, getter) | TC_VALUE(name, getter, setter)  // Declare one reflected member; arity picks access (1=in-place, 2=read-only, 3=getter/setter).
+TC_ENUM_LABELS(EnumType, "Label0", "Label1", ...)  // Give an enum string labels (labels[(int)value]==name), used by the inspector and serialization.
+TC_PLATFORMS("macos,windows,linux,web,android,ios") <decl>  // Annotate a symbol as available only on the listed platforms (reference metadata).
+TC_LUA_BIND("float,Vec2,Vec3,Color") <template decl>  // Declare which template instantiations the Lua binding generator should bind (reference metadata).
+TC_LUA_SKIP <decl>  // Mark a declaration as not exposed to Lua (reference metadata).
+```
+
 <!-- API-INDEX-END -->
 
 ## Addons
@@ -5208,7 +5225,7 @@ AudioSettings as;
 as.sampleRate   = 48000;          // default 48000 (changed from old 96000)
 as.channels     = 2;
 as.bufferSize   = 256;            // 0 = let miniaudio choose
-as.maxPolyphony = 32;
+as.maxPolyphony = 0;              // 0 = no cap on simultaneous voices (default); a positive value is a cap
 as.deviceName   = "";             // empty = system default
 engine.init(as);
 

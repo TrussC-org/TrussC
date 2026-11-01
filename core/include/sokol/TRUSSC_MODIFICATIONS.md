@@ -498,6 +498,18 @@ context pool grows like the buffers in 11.
 
 Regression test: `core/tests/sglPoolLimits` (dummy backend).
 
+### Growable matrix stacks (#331)
+
+Each context owns a heap array per matrix mode, starting with only the base
+identity matrix. `sgl_push_matrix()` doubles its mode's capacity as needed,
+copies the live matrices through the configured allocator; growth is silent.
+Context destruction frees all three arrays. No fixed nesting limit
+remains; underflow is unchanged. Allocation/representable-capacity failure
+keeps the existing stack and reports out of memory plus `stack_overflow`.
+The fixed pipeline stack still uses `stack_overflow`, so that public flag stays.
+The shared screen/Fbo warning now describes dropped draws and these remaining
+causes; target completion already reports and clears Fbo context errors.
+
 ### 15. Explicit custom-shader vertex layouts
 
 **Purpose:** Custom sgl shaders can declare only the attributes they read,

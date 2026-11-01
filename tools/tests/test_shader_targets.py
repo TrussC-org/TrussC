@@ -14,6 +14,58 @@ from check_build_warnings import run_build
 
 
 class ShaderTargetTests(unittest.TestCase):
+    def test_fresh_guest_build_generates_app_and_addon_headers(self):
+        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding='utf-8')
+        block = source[source.index('    # The shader interface exists'):
+                       source.index('    # Output settings')]
+        shader = (ROOT / 'core/tests/hotReloadLifecycle/src/shaders/reloadProbe.glsl').read_text(encoding='utf-8')
+        for generator in (None, 'Ninja'):
+            if generator == 'Ninja' and not shutil.which('ninja'):
+                continue
+            with self.subTest(generator=generator), tempfile.TemporaryDirectory(prefix='tc guest ') as temporary:
+                project = Path(temporary)
+                for directory, name in (('src/shaders', 'app'), ('core-shaders', 'core')):
+                    folder = project / directory
+                    folder.mkdir(parents=True)
+                    (folder / f'{name}.glsl').write_text(shader.replace('reload_probe', name), encoding='utf-8')
+                addon = project / 'tcxHap/shaders'
+                addon.mkdir(parents=True)
+                shutil.copyfile(ROOT / 'addons/tcxHap/src/shaders/ycocg.glsl', addon / 'ycocg.glsl')
+                (project / 'main.cpp').write_text('int main() { return 0; }\n', encoding='utf-8')
+                (project / 'guest.cpp').write_text('''
+#include "sokol_gfx.h"
+#include "core.glsl.h"
+#include "shaders/app.glsl.h"
+#include "ycocg.glsl.h"
+int guest_probe() { return 42; }
+''', encoding='utf-8')
+                (project / 'CMakeLists.txt').write_text(f'''
+cmake_minimum_required(VERSION 3.20)
+project(shader_probe CXX)
+include([==[{ROOT.as_posix()}/core/cmake/trussc_shaders.cmake]==])
+add_executable(shader_probe EXCLUDE_FROM_ALL main.cpp)
+add_library(guest SHARED guest.cpp)
+set_target_properties(guest PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+target_include_directories(guest PRIVATE [==[{ROOT.as_posix()}/core/include/sokol]==])
+target_compile_definitions(guest PRIVATE SOKOL_GLCORE)
+trussc_compile_shaders(TrussC "${{CMAKE_CURRENT_SOURCE_DIR}}/core-shaders")
+trussc_compile_shaders(tcxHap "${{CMAKE_CURRENT_SOURCE_DIR}}/tcxHap/shaders")
+set(_TC_LOADED_ADDONS tcxHap shaderlessAddon)
+{block}
+''', encoding='utf-8')
+                build = project / 'build'
+                command = ['cmake', '-S', str(project), '-B', str(build)]
+                if generator:
+                    command += ['-G', generator]
+                run_build(command, check=True)
+                self.assertEqual(list(project.rglob('*.glsl.h')), [])
+                # Build guest alone: app-target dependencies cannot mask a missing guest edge.
+                run_build(['cmake', '--build', str(build), '--target', 'guest',
+                           '--config', 'Release', '-j4'], check=True)
+                for header in ('src/shaders/app.glsl.h', 'core-shaders/core.glsl.h',
+                               'tcxHap/shaders/ycocg.glsl.h'):
+                    self.assertTrue((project / header).is_file(), header)
+
     def test_windows_guest_imports_do_not_depend_on_host_target(self):
         source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
         self.assertNotIn('target_link_libraries(guest PRIVATE ${PROJECT_NAME})', source)
@@ -24,14 +76,52 @@ class ShaderTargetTests(unittest.TestCase):
         command = source[source.index('set(_TC_HOST_IMPORT_LIB '):
                          source.index('add_custom_target(_tc_host_import ')]
         for setting in ('/trussc_host_import_$<CONFIG>.lib', '/DEF:${_TC_HOST_IMPORT_DEF}',
-                        '/IGNORE:4102',
                         '/MACHINE:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}',
                         'DEPENDS _tc_gen_exports "${_TC_DEF_FILE}"'):
             self.assertIn(setting, command)
+        self.assertNotIn('/IGNORE:4102', source)
         # TARGET_FILE_NAME has no target dependency (CMP0112 NEW, CMake 3.20).
         # TARGET_FILE / TARGET_LINKER_FILE would reintroduce one.
         self.assertNotIn('$<TARGET_FILE:', command)
         self.assertNotIn('$<TARGET_LINKER_FILE:', command)
+
+    def test_windows_export_definition_excludes_deleting_destructors(self):
+        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
+        block = source[source.index('            file(WRITE "${_TC_DEF_SCRIPT}"'):
+                       source.index('            # Detect the path to dumpbin.exe')]
+        # Generate and run the production script, including both CMake quoting
+        # layers, with a fake dumpbin public-symbol listing. Ordinary destructors,
+        # vtables and similar-looking names must remain available to guests.
+        symbols = ['??_GWidget@@UEAAPEAXI@Z', '??_EWidget@@UEAAPEAXI@Z',
+                   '??_GOther@@QEAAPEAXI@Z', '??_EOther@@QEAAPEAXI@Z',
+                   '??1Widget@@UEAA@XZ', '??_7Widget@@6B@', '?update@Widget@@QEAAXXZ',
+                   'core_function', 'core_function', '??_FWidget@@QEAAXXZ',
+                   '?_Ghelper@@YAXXZ', 'prefix??_EWidget', '__imp_core_function', 'public']
+        # An extern "C" function may be named public; only the count line is dropped.
+        expected = symbols[4:8] + symbols[9:12] + ['public']
+        with tempfile.TemporaryDirectory(prefix='tc exports ') as temporary:
+            fixture = Path(temporary)
+            # dumpbin doesn't zero-pad offsets: objects early in the lib have
+            # short ones, and member headers/counts use the same layout.
+            offsets = [0x8, 0x1F, 0xAB, 0x3FC, 0x1234, 0xFFFFF, 0x100000, 0xABCDEF]
+            (fixture / 'dumpbin.txt').write_text(
+                'Archive member name at 8: /\n           0 mode\n       2A4B8 size\n'
+                '\n         8E9 public symbols\n\n' +
+                ''.join(f'  {offsets[index % len(offsets)]:X} {symbol}\n'
+                        for index, symbol in enumerate(symbols)), encoding="utf-8")
+            (fixture / 'dumpbin.cmake').write_text(
+                'execute_process(COMMAND "${CMAKE_COMMAND}" -E cat '
+                '"${CMAKE_CURRENT_LIST_DIR}/dumpbin.txt")\n', encoding="utf-8")
+            (fixture / 'generate.cmake').write_text('''
+set(_TC_DEF_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/exports.cmake")
+set(LIB_FILE "unused.lib")
+set(DEF_FILE "${CMAKE_CURRENT_LIST_DIR}/exports.def")
+set(DUMPBIN "${CMAKE_COMMAND};-P;${CMAKE_CURRENT_LIST_DIR}/dumpbin.cmake")
+''' + block + '\ninclude("${_TC_DEF_SCRIPT}")\n', encoding="utf-8")
+            run_build(['cmake', '-P', str(fixture / 'generate.cmake')], check=True,
+                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            self.assertEqual((fixture / 'exports.def').read_text(encoding="utf-8"),
+                             'EXPORTS\n' + ''.join(f'    {symbol}\n' for symbol in expected))
 
     def check_import_definition(self, config, librarian=None, readobj=None):
         # Execute the actual CMake block, including its generated script. The
@@ -71,7 +161,7 @@ set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID x64)
                 for arch in ('x64', 'ARM64'):
                     with self.subTest(config=config, arch=arch):
                         library = build / f'imports_{arch}.lib'
-                        run(librarian, '/NOLOGO', '/IGNORE:4102', f'/DEF:{definition}',
+                        run(librarian, '/NOLOGO', f'/DEF:{definition}',
                             f'/OUT:{library}', f'/MACHINE:{arch}')
                         records = run(readobj, '--coff-imports', str(library))
                         # For short COFF import objects, readobj displays the

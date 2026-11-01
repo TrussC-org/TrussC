@@ -188,8 +188,11 @@ jobs:
 
       - name: Build trusscli
         id: daily_tools_native
+        env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/daily_tools_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
@@ -212,8 +215,11 @@ jobs:
 
       - name: Build every example
         id: daily_examples_native
+        env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_examples_native.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --verbose
@@ -227,8 +233,11 @@ jobs:
       # The behavioral tests again, on top of the full build (cheap next to it).
       - name: Build & run addon tests
         id: daily_addon_tests
+        env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_addon_tests.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           ./examples/build_all.py --addon-tests-only --include-daily --verbose
           TC_BUILD
@@ -240,8 +249,11 @@ jobs:
 
       - name: Build & run core tests
         id: daily_core_tests
+        env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_core_tests.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           ./examples/build_all.py --core-tests-only --include-daily --verbose
           TC_BUILD
