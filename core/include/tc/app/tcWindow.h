@@ -1,4 +1,5 @@
 #pragma once
+#include "internal/tcSessionTrace.h"
 
 // =============================================================================
 // tcWindow.h - Application windows
@@ -638,17 +639,33 @@ inline void Window::teardown() noexcept {
         windowExitNotified_ = true;
         internal::FrameworkEventAccess::notifyShutdown(events_.exit, steps);
     }
+    TC_STRACE("Window screenshot close begin", reinterpret_cast<unsigned long long>(this));
     internal::closeScreenshots(ctx_.asyncScreenshots);
+    TC_STRACE("Window screenshot close end", reinterpret_cast<unsigned long long>(this));
+    TC_STRACE("Window MCP target retirement begin", reinterpret_cast<unsigned long long>(this));
     mcp::internal::retireDeferredTarget(&ctx_);
+    TC_STRACE("Window MCP target retirement end", reinterpret_cast<unsigned long long>(this));
     if (appEventState_) appEventState_->active.store(false);
+    TC_STRACE("Window event listeners clear begin", reinterpret_cast<unsigned long long>(this));
     ctx_.appEventListeners.clear();
+    TC_STRACE("Window event listeners clear end", reinterpret_cast<unsigned long long>(this));
+    TC_STRACE("Window targets cleanup begin", reinterpret_cast<unsigned long long>(this));
     steps.run("window target cleanup", [&] { ctx_.teardownTargets(); });
+    TC_STRACE("Window targets cleanup end", reinterpret_cast<unsigned long long>(this));
+    TC_STRACE("Window GPU release begin", reinterpret_cast<unsigned long long>(this));
     steps.run("window GPU release", [&] { ctx_.swapchainTarget.resources().release(); });
+    TC_STRACE("Window GPU release end", reinterpret_cast<unsigned long long>(this));
     ctx_.targetsClosed = true;
+    TC_STRACE("Window idle context begin", reinterpret_cast<unsigned long long>(this));
     sapp_tc_gl_activate_idle();
+    TC_STRACE("Window idle context end", reinterpret_cast<unsigned long long>(this));
+    TC_STRACE("Window native disposal begin", reinterpret_cast<unsigned long long>(this));
     if (native_) disposeNativeBacking();
     else if (binding_.handle.id) steps.run("window native disposal", [&] { sapp_destroy_window(binding_.handle); });
+    TC_STRACE("Window native disposal end", reinterpret_cast<unsigned long long>(this));
+    TC_STRACE("Window unbind begin", reinterpret_cast<unsigned long long>(this));
     internal::WindowRequestAccess::unbind(*this);
+    TC_STRACE("Window unbind end", reinterpret_cast<unsigned long long>(this));
     ctx_.acquireSwapchain = nullptr;
     ctx_.acquireSwapchainUser = nullptr;
     ctx_.activateNative = nullptr;

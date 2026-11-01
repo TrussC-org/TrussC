@@ -119,6 +119,12 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${TC_ALL_SOURCES})
 
 add_library(TrussC STATIC ${TC_ALL_SOURCES})
 
+# Test-only diagnostic branch: PUBLIC also instruments inline app callbacks.
+option(TC_SESSION_TRACE "Enable test-only session teardown trace" OFF)
+if(TC_SESSION_TRACE)
+    target_compile_definitions(TrussC PUBLIC TC_SESSION_TRACE)
+endif()
+
 # PRIVATE (not PUBLIC): the core lib's own TUs must not emit TrussC.h's
 # /subsystem:windows pragma — a library .drectve overrides the command-line
 # /SUBSYSTEM and would flip console tools to the GUI subsystem. The app's own

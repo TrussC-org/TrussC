@@ -458,6 +458,7 @@ std::shared_ptr<std::function<void()>> registerResourceStop(std::function<void()
     return registration;
 }
 void cancelResourceBackends() {
+    TC_STRACE("resource cancel begin");
     auto& owner = host();
     std::vector<std::weak_ptr<std::function<void()>>> stops;
     {
@@ -465,8 +466,11 @@ void cancelResourceBackends() {
         stops = owner.stops;
     }
     for (auto& entry : stops) {
+        TC_STRACE("resource cancel callback begin");
         if (auto stop = entry.lock()) (*stop)();
+        TC_STRACE("resource cancel callback end");
     }
+    TC_STRACE("resource cancel end");
 }
 void finishResourceLoadsAtExit() {
     if (auto token = appRunToken()) token->store(false);
@@ -498,11 +502,17 @@ void waitForResourceLoadsForTests() {
 #endif
 }
 void waitForResourceLoadsAtAppExit() {
+    TC_STRACE("resource exit cancel begin");
     cancelResourceBackends();
+    TC_STRACE("resource exit cancel end");
+    TC_STRACE("resource wait for workers begin");
     waitForResourceLoadsForTests();
+    TC_STRACE("resource wait for workers end");
     // Cache hits can retain a committed GPU atlas. Release invalidated queue
     // entries here, on main and before the old GPU context is torn down.
+    TC_STRACE("resource take batch begin");
     auto discarded = takeResourceLoadBatch();
+    TC_STRACE("resource take batch end");
 }
 size_t resourceLoadWorkersForTests() {
 #ifndef __EMSCRIPTEN__

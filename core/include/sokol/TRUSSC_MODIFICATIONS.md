@@ -585,6 +585,14 @@ All modifications by tettou771
 - Shared runtime signal handling, Logger markers and MCP drain semantics are
   documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).
 
+## Test-only session teardown trace (#239)
+
+- This disposable diagnostic branch adds `TC_STRACE` entry/exit markers to the
+  Win32 user-HWND WM_ENDSESSION acknowledgement. They are empty unless
+  `TC_SESSION_TRACE` is defined (default off); session ownership and lifetime
+  are unchanged. The helper writes flushed durable Win32 records and debugger
+  output, independent of the framework Logger.
+
 ## Mesa V3D pre-resolve submission and activation Notice (#858)
 
 At GL backend setup, `GL_RENDERER` must start with the exact `V3D ` prefix

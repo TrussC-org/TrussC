@@ -368,6 +368,7 @@ void recordHeadlessAttachment(const std::shared_ptr<App>& app, WindowContext& co
     runtime().attachments.push_back(app);
 }
 void shutdownRuntime() noexcept {
+    TC_STRACE("shutdownRuntime enter");
     auto& state = runtime();
     if (state.stopping) return;
     if (!state.stopping) state.endingWindows.swap(state.windows);
@@ -392,7 +393,13 @@ void shutdownRuntime() noexcept {
             }
         }
     }
-    for (auto& window : windows) WindowRequestAccess::teardown(*window);
+    TC_STRACE("shutdownRuntime App ending done");
+    for (auto& window : windows) {
+        TC_STRACE("shutdownRuntime Window teardown begin", reinterpret_cast<unsigned long long>(window.get()));
+        WindowRequestAccess::teardown(*window);
+        TC_STRACE("shutdownRuntime Window teardown end", reinterpret_cast<unsigned long long>(window.get()));
+    }
+    TC_STRACE("shutdownRuntime remaining owners begin");
     // Unpublished candidates also belong to this run. They receive no invented
     // setup/exit, but their constructor-owned work must stop before services.
     while (!state.owners.empty()) {
@@ -400,14 +407,28 @@ void shutdownRuntime() noexcept {
         if (owner) retireAppOwner(owner);
         else state.owners.pop_back();
     }
+    TC_STRACE("shutdownRuntime remaining owners end");
+    TC_STRACE("shutdownRuntime run token begin");
     if (state.runToken) state.runToken->store(false);
+    TC_STRACE("shutdownRuntime run token end");
+    TC_STRACE("shutdownRuntime idle context begin");
     if (sg_isvalid()) sapp_tc_gl_activate_idle();
+    TC_STRACE("shutdownRuntime idle context end");
+    TC_STRACE("shutdownRuntime Window handles release begin");
     windows.clear();
+    TC_STRACE("shutdownRuntime Window handles release end");
+    TC_STRACE("shutdownRuntime App handles release begin");
     while (!attachments.empty()) { auto retired = attachments.extract(attachments.first()); }
+    TC_STRACE("shutdownRuntime App handles release end");
+    TC_STRACE("shutdownRuntime watchdog cancel begin");
     if (!state.sessionCommitted) cancelLogoutWatchdog();
+    TC_STRACE("shutdownRuntime watchdog cancel end");
 #ifdef _WIN32
+    TC_STRACE("shutdownRuntime authority destroy begin");
     destroySessionAuthority(std::exchange(state.sessionAuthority, nullptr));
+    TC_STRACE("shutdownRuntime authority destroy end");
 #endif
+    TC_STRACE("shutdownRuntime return");
 }
 bool sessionEndCommitted() noexcept { return runtime().sessionCommitted; }
 void setSessionActivityProbe(bool (*probe)()) noexcept { runtime().nativeSessionActivity = probe; }
@@ -431,31 +452,47 @@ void cancelSessionEnd() noexcept {
     runtime().sessionAllowed = true;
 }
 bool endRuntimeForSession() noexcept {
+    TC_STRACE("endRuntimeForSession enter");
     auto& state = runtime();
-    if (state.sessionCommitted) return false;
+    if (state.sessionCommitted) { TC_STRACE("endRuntimeForSession duplicate return"); return false; }
     state.sessionCommitted = true;
     // Busy means App code on the main stack; unrelated workers do not count.
     if (hostCallbacksActive() || state.constructor ||
-            (state.nativeSessionActivity && state.nativeSessionActivity())) return false;
+            (state.nativeSessionActivity && state.nativeSessionActivity())) {
+        TC_STRACE("endRuntimeForSession busy return");
+        return false;
+    }
     armLogoutWatchdog(state.logoutTimeout);
     setExitReason("os-session-end");
+    TC_STRACE("endRuntimeForSession _cleanup_cb begin");
     _cleanup_cb();
+    TC_STRACE("endRuntimeForSession _cleanup_cb end");
+    TC_STRACE("endRuntimeForSession return true");
     return true;
 }
 void commitSessionEnd() noexcept {
-    if (runtime().sessionCommitted) return;
+    TC_STRACE("commitSessionEnd enter");
+    if (runtime().sessionCommitted) { TC_STRACE("commitSessionEnd duplicate return"); return; }
     if (!endRuntimeForSession()) {
 #ifdef __APPLE__
         // No App callbacks or static destructors, and never block logout.
         _exit(0);
 #endif
+        TC_STRACE("commitSessionEnd busy return");
         return; // Returning WM_ENDSESSION lets Windows terminate the process.
     }
     // Match ordinary exit: run atexit handlers and static destructors after
     // cleanup. The armed, lock-free watchdog also bounds these user handlers.
+    TC_STRACE("commitSessionEnd closeLogFile begin");
     closeLogFile();
+    TC_STRACE("commitSessionEnd closeLogFile end");
+    TC_STRACE("commitSessionEnd fflush stdout begin");
     std::fflush(stdout);
+    TC_STRACE("commitSessionEnd fflush stdout end");
+    TC_STRACE("commitSessionEnd fflush stderr begin");
     std::fflush(stderr);
+    TC_STRACE("commitSessionEnd fflush stderr end");
+    TC_STRACE("commitSessionEnd std::exit call");
     std::exit(appExitCode());
 }
 Window* resolveWindow(bool report) {
@@ -677,6 +714,7 @@ bool isAppExitEvent(const void* event) noexcept {
 }
 void retireAppOwner(const std::shared_ptr<AppOwner>& owner) noexcept {
     if (!owner || owner->retiring.exchange(true)) return;
+    TC_STRACE("retireAppOwner begin", reinterpret_cast<unsigned long long>(owner.get()));
     runtime().attachments.erase(owner->app);
     std::erase_if(runtime().owners, [&](const auto& weak) { auto live = weak.lock(); return !live || live == owner; });
     owner->token->store(false, std::memory_order_release);
@@ -687,7 +725,9 @@ void retireAppOwner(const std::shared_ptr<AppOwner>& owner) noexcept {
     }
     AppOwnerScope scope(owner);
     TeardownSteps steps;
+    TC_STRACE("retireAppOwner MCP begin", reinterpret_cast<unsigned long long>(owner.get()));
     steps.run("App MCP retirement", [&] { mcp::internal::removeRegistrationsOwnedBy(owner->token.get()); });
+    TC_STRACE("retireAppOwner MCP end", reinterpret_cast<unsigned long long>(owner.get()));
     // Admission and extraction share a lock; invocation and capture destruction
     // stay outside it. Extract in place so OOM teardown needs no container move.
     for (size_t index = 0;; ++index) {
@@ -700,9 +740,12 @@ void retireAppOwner(const std::shared_ptr<AppOwner>& owner) noexcept {
             }
             cancel = std::move(owner->cancellations[index]);
         }
+        TC_STRACE("retireAppOwner callback begin", reinterpret_cast<unsigned long long>(owner.get()));
         steps.run("App callback retirement", cancel);
+        TC_STRACE("retireAppOwner callback end", reinterpret_cast<unsigned long long>(owner.get()));
     }
     owner->app = nullptr;
+    TC_STRACE("retireAppOwner end", reinterpret_cast<unsigned long long>(owner.get()));
 }
 AppConstructionScope::AppConstructionScope(AppConstructionTicket& ticket)
     : ticket_(ticket), previous_(currentAppConstruction()) {
@@ -802,6 +845,7 @@ void endAppAttachment(const std::shared_ptr<App>& app, WindowContext& context, b
     resetAppNodeReferences(*app);
     if (virtualOnly) steps.run("App virtual cleanup", [&] { app->cleanup(); });
     else steps.run("App tree cleanup", [&] { app->cleanupTree(); });
+    TC_STRACE("endAppAttachment App cleanup returned", reinterpret_cast<unsigned long long>(app.get()));
     resetAppNodeReferences(*app);
     context.hoveredNode.reset();
     context.prevHoveredNode.reset();

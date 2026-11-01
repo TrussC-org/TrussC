@@ -277,15 +277,23 @@ void setup() {
 // Cleanup (shutdown)
 // ---------------------------------------------------------------------------
 void cleanup() {
+    TC_STRACE("device shutdownRuntime begin");
     internal::shutdownRuntime();
+    TC_STRACE("device shutdownRuntime end");
     // Parked/cancelled frames can still own an enqueued renderer prefix.
     // Submit it without presentation before Metal waits for semaphore permits
     // during shutdown, and before destroying any referenced native resources.
+    TC_STRACE("device submit prefix begin");
     if (sg_isvalid()) sg_tc_submit_prefix();
+    TC_STRACE("device submit prefix end");
     // Retired handles belong to this device. Dispose of them before shutdown
     // can recycle their IDs into another device's live resources.
+    TC_STRACE("device drain GPU destroys begin");
     internal::drainPendingGpuDestroys();
+    TC_STRACE("device drain GPU destroys end");
+    TC_STRACE("device retired shadows begin");
     internal::discardRetiredShadows();
+    TC_STRACE("device retired shadows end");
     // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
     // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
     // global pool (sgl_destroy_context() frees only the context's own default
@@ -294,6 +302,7 @@ void cleanup() {
     // frees its own on close() (RenderTarget::release()).
 
     // Release font resources
+    TC_STRACE("device font release begin");
     auto& fontAtlas = internal::bitmapFontAtlas();
     if (fontAtlas.initialized) {
         sg_destroy_sampler(fontAtlas.sampler);
@@ -305,10 +314,19 @@ void cleanup() {
         }
         fontAtlas.initialized = false;
     }
+    TC_STRACE("device font release end");
+    TC_STRACE("device endFrameworkLifetime begin");
     internal::endFrameworkLifetime();
+    TC_STRACE("device endFrameworkLifetime end");
+    TC_STRACE("device sgl_shutdown begin");
     sgl_shutdown();
+    TC_STRACE("device sgl_shutdown end");
+    TC_STRACE("device reset image decode limit begin");
     internal::recordImageDecodeLimit(0);
+    TC_STRACE("device reset image decode limit end");
+    TC_STRACE("device sg_shutdown begin");
     sg_shutdown();
+    TC_STRACE("device sg_shutdown end");
 }
 
 // ---------------------------------------------------------------------------

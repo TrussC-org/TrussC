@@ -31,7 +31,12 @@ namespace internal {
 namespace {
 LRESULT CALLBACK sessionAuthorityProc(HWND hwnd, UINT message, WPARAM value, LPARAM flags) {
     if (message == WM_QUERYENDSESSION) {
-        if (querySessionEnd()) { ShutdownBlockReasonDestroy(hwnd); return TRUE; }
+        TC_STRACE("authority WM_QUERYENDSESSION enter", reinterpret_cast<unsigned long long>(hwnd));
+        if (querySessionEnd()) {
+            ShutdownBlockReasonDestroy(hwnd);
+            TC_STRACE("authority WM_QUERYENDSESSION exit TRUE", reinterpret_cast<unsigned long long>(hwnd));
+            return TRUE;
+        }
         // Preserve C2's first nonempty veto explanation. Optional text failure
         // cannot remove the veto and never escapes the native callback.
         try {
@@ -46,12 +51,16 @@ LRESULT CALLBACK sessionAuthorityProc(HWND hwnd, UINT message, WPARAM value, LPA
                 } else ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
             }
         } catch (...) { ShutdownBlockReasonCreate(hwnd, L"The app is still busy."); }
+        TC_STRACE("authority WM_QUERYENDSESSION exit FALSE", reinterpret_cast<unsigned long long>(hwnd));
         return FALSE;
     }
     if (message == WM_ENDSESSION) {
+        TC_STRACE(value ? "authority WM_ENDSESSION enter TRUE" : "authority WM_ENDSESSION enter FALSE",
+            reinterpret_cast<unsigned long long>(hwnd));
         ShutdownBlockReasonDestroy(hwnd);
         if (value) commitSessionEnd();
         cancelSessionEnd();
+        TC_STRACE("authority WM_ENDSESSION exit", reinterpret_cast<unsigned long long>(hwnd));
         return 0;
     }
     return DefWindowProcW(hwnd, message, value, flags);
@@ -81,7 +90,9 @@ void pollSessionAuthority(void* authority) noexcept {
     }
 }
 void destroySessionAuthority(void* authority) noexcept {
+    TC_STRACE("destroySessionAuthority DestroyWindow begin", reinterpret_cast<unsigned long long>(authority));
     if (authority) DestroyWindow(static_cast<HWND>(authority));
+    TC_STRACE("destroySessionAuthority DestroyWindow end", reinterpret_cast<unsigned long long>(authority));
 }
 }
 

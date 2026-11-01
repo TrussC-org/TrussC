@@ -65,6 +65,7 @@ void record(const std::string& text) {
     while (std::getline(lines, line)) writeLine(timestamp() + " " + line);
 }
 void processExit() {
+    TC_STRACE("probe atexit begin");
     auto& s = state();
     record("process exit attached=" + std::to_string(s.attached) + " exit="
         + std::to_string(s.exited) + " cleanup=" + std::to_string(s.cleaned));
@@ -75,6 +76,7 @@ void processExit() {
     else
         record("exit: incomplete (inspect framework log)");
     if (s.file) { std::fclose(s.file); s.file = nullptr; }
+    TC_STRACE("probe atexit end");
 }
 fs::path probeLogPath() {
 #ifdef _WIN32
@@ -329,6 +331,7 @@ public:
 } // namespace
 
 int main(int argc, char** argv) {
+    TC_STRACE("probe main");
     auto& s = state();
     s.logPath = probeLogPath();
     s.mode = argc == 2 ? argv[1] : "";

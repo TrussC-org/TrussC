@@ -24,6 +24,7 @@
 // Use the WAV field's full range instead of dr_wav's default rate policy.
 // <cstdint> first: on MSVC nothing in this TU declares UINT32_MAX before miniaudio.
 #include <cstdint>
+#include "tc/app/internal/tcSessionTrace.h"
 #define MA_DR_WAV_MAX_SAMPLE_RATE UINT32_MAX
 #define MINIAUDIO_IMPLEMENTATION
 #include "tc/sound/tcAudioDeviceInternal.h"
@@ -2257,15 +2258,20 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
 }
 
 void AudioEngine::shutdown() {
+    TC_STRACE("AudioEngine shutdown begin");
     if (device_) {
         ma_device* device = static_cast<ma_device*>(device_);
+        TC_STRACE("audio ma_device_uninit begin");
         ma_device_uninit(device);
+        TC_STRACE("audio ma_device_uninit end");
         delete device;
         device_ = nullptr;
     }
     if (context_) {
         ma_context* ctx = static_cast<ma_context*>(context_);
+        TC_STRACE("audio ma_context_uninit begin");
         ma_context_uninit(ctx);
+        TC_STRACE("audio ma_context_uninit end");
         delete ctx;
         context_ = nullptr;
     }
@@ -2281,6 +2287,7 @@ void AudioEngine::shutdown() {
     // calls this unconditionally, also when audio was never used.
     if (initialized_) logNotice("AudioEngine") << "shutdown";
     initialized_ = false;
+    TC_STRACE("AudioEngine shutdown end");
 }
 
 void AudioEngine::mixAudio(float* buffer, int num_frames, int num_channels) {

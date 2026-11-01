@@ -2555,6 +2555,7 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 #define SOKOL_APP_TC_IMPL_DONE (1)
 
 #include "../tc/app/tcExit.h"
+#include "../tc/app/internal/tcSessionTrace.h" // [TrussC] Test-only session trace.
 #include "util/sokol_window_event.h"
 #include "util/sokol_window_creation.h"
 
@@ -7963,7 +7964,11 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         // A Runtime-owned hidden top-level HWND receives session broadcasts.
         // User windows never own query/commit or retain shutdown authority.
         case WM_QUERYENDSESSION: return TRUE;
-        case WM_ENDSESSION: return 0;
+        case WM_ENDSESSION:
+            TC_STRACE(wParam ? "user HWND WM_ENDSESSION enter TRUE" : "user HWND WM_ENDSESSION enter FALSE",
+                reinterpret_cast<unsigned long long>(hwnd));
+            TC_STRACE("user HWND WM_ENDSESSION exit", reinterpret_cast<unsigned long long>(hwnd));
+            return 0;
         case WM_CLOSE:
             if (w->constructing || w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) w->close_requested = true;
             else _sapp_tc_win32_close(w);

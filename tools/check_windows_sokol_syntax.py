@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sdk-root', type=Path)
     parser.add_argument('--mutations', action='store_true')
+    parser.add_argument('--session-trace', action='store_true', help='Enable test-only TC_SESSION_TRACE')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     prefix = args.sdk_root or os.environ.get('TC_WINDOWS_SYNTAX_SDK')
@@ -37,6 +38,8 @@ def main():
     cxx = cxx[-1]
     flags = [compiler, '-target', 'x86_64-w64-windows-gnu', '-std=c++20',
              '-fsyntax-only', '-DSOKOL_D3D11']
+    if args.session_trace:
+        flags += ['-DTC_SESSION_TRACE']
     for include in [cxx, cxx / 'x86_64-w64-mingw32', headers]:
         flags += ['-isystem', str(include)]
     source = root / 'core/platform/win/sokol_impl.cpp'

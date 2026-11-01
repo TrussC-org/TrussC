@@ -1,4 +1,5 @@
 #pragma once
+#include "tc/app/internal/tcSessionTrace.h"
 
 // =============================================================================
 // TrussC - Thin, Modern, and Native Creative Coding Framework
@@ -2454,32 +2455,64 @@ namespace internal {
     inline void _cleanup_cb_impl() {
         if (!beginExitCleanup()) return;
         TeardownSteps steps;
+        TC_STRACE("cleanup exit begin log begin");
         steps.run("exit begin log", [&] { writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(false)); });
+        TC_STRACE("cleanup exit begin log end");
+        TC_STRACE("cleanup shutdownRuntime begin");
         shutdownRuntime();
+        TC_STRACE("cleanup shutdownRuntime end");
+        TC_STRACE("cleanup shutdown process context begin");
         steps.run("shutdown process context", [] { restoreWindowContext(nullptr); });
+        TC_STRACE("cleanup shutdown process context end");
+        TC_STRACE("cleanup resource cancellation begin");
         steps.run("resource cancellation", [] { cancelResourceBackends(); });
+        TC_STRACE("cleanup resource cancellation end");
 #ifndef __EMSCRIPTEN__
+        TC_STRACE("cleanup MCP stop begin");
         steps.run("MCP stop", [] { mcp::stopHttpServer(); });
+        TC_STRACE("cleanup MCP stop end");
 #endif
+        TC_STRACE("cleanup console stop begin");
         steps.run("console stop", [] { console::stop(); });
+        TC_STRACE("cleanup console stop end");
+        TC_STRACE("cleanup launcher cleanup begin");
         steps.run("launcher cleanup", [] { if (appCleanupFunc) appCleanupFunc(); });
+        TC_STRACE("cleanup launcher cleanup end");
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || defined(__EMSCRIPTEN__)
+        TC_STRACE("cleanup keep screen on shutdown begin");
         steps.run("keep screen on shutdown", [] { shutdownKeepScreenOn(); });
+        TC_STRACE("cleanup keep screen on shutdown end");
 #endif
+        TC_STRACE("cleanup resource completion begin");
         steps.run("resource completion", [] { waitForResourceLoadsAtAppExit(); });
+        TC_STRACE("cleanup resource completion end");
+        TC_STRACE("cleanup audio stop begin");
         steps.run("audio stop", [] { trussc::shutdownAudio(); });
+        TC_STRACE("cleanup audio stop end");
+        TC_STRACE("cleanup device cleanup begin");
         steps.run("device cleanup", [] { if (!headless::isActive()) cleanup(); });
+        TC_STRACE("cleanup device cleanup end");
+        TC_STRACE("cleanup exit: clean write begin");
         steps.run("exit end log", [] { writeProtocolLine(LogLevel::Notice, "[System] " + exitLogMessage(true)); });
+        TC_STRACE("cleanup exit: clean write end");
+        TC_STRACE("cleanup restore signals begin");
         steps.run("restore signals", [] { restoreWindowExitSignals(); });
+        TC_STRACE("cleanup restore signals end");
 #if defined(__APPLE__) && TARGET_OS_OSX
         if (!sessionEndCommitted() && appExitCode() != 0) std::exit(appExitCode());
 #endif
     }
 
     inline void _cleanup_cb() noexcept {
+        TC_STRACE("_cleanup_cb begin");
         TeardownSteps steps;
+        TC_STRACE("cleanup main native callback begin");
         steps.run("main native callback", [&] { _cleanup_cb_impl(); });
+        TC_STRACE("cleanup main native callback end");
+        TC_STRACE("cleanup endFrameworkLifetime begin");
         endFrameworkLifetime();
+        TC_STRACE("cleanup endFrameworkLifetime end");
+        TC_STRACE("_cleanup_cb end");
     }
 
 

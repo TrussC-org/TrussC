@@ -1,4 +1,5 @@
 #include "tcExit.h"
+#include "internal/tcSessionTrace.h"
 #include <mutex>
 #include <atomic>
 #include <csignal>
@@ -62,6 +63,7 @@ LogoutWorker& logoutWorker() { static auto* worker = new LogoutWorker; return *w
 }
 #endif
 void prepareLogoutWatchdog() {
+    TC_STRACE("watchdog prepare");
 #ifndef __EMSCRIPTEN__
     cancelLogoutWatchdog();
     // Prepare storage and the worker at run admission, before constructors or
@@ -71,7 +73,10 @@ void prepareLogoutWatchdog() {
     worker.stop.store(false, std::memory_order_release);
     worker.thread = std::thread([state = &worker] {
         while (!state->stop.load(std::memory_order_acquire)) {
-            if (state->deadline.expire(LogoutDeadline::Clock::now())) terminateSessionProcess();
+            if (state->deadline.expire(LogoutDeadline::Clock::now())) {
+                TC_STRACE("watchdog thread expired: terminateSessionProcess");
+                terminateSessionProcess();
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     });
@@ -86,14 +91,19 @@ void cancelLogoutWatchdog() noexcept {
 #endif
 }
 void armLogoutWatchdog(float seconds) noexcept {
+    TC_STRACE("watchdog arm begin");
 #ifndef __EMSCRIPTEN__
     auto& worker = logoutWorker();
     const auto now = LogoutDeadline::Clock::now();
     worker.deadline.arm(seconds, now);
-    if (worker.deadline.expire(now)) terminateSessionProcess();
+    if (worker.deadline.expire(now)) {
+        TC_STRACE("watchdog immediate expiry: terminateSessionProcess");
+        terminateSessionProcess();
+    }
 #else
     if (seconds == 0) terminateSessionProcess();
 #endif
+    TC_STRACE("watchdog arm end");
 }
 namespace {
 std::mutex exitMutex;
