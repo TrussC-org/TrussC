@@ -314,9 +314,7 @@ std::string sourceLabel(const SoundSource* source) {
 } // namespace
 
 AudioEngine::AudioEngine()
-    : diag_(std::make_unique<AudioDiagnostics>()) {
-    playingSounds_.resize(DEFAULT_MAX_PLAYING_SOUNDS);
-}
+    : diag_(std::make_unique<AudioDiagnostics>()) {}
 
 internal::AudioOutputSnapshot internal::AudioAnalysisAccess::snapshot(AudioEngine& engine, size_t frames) {
     std::unique_lock<std::mutex> lock(engine.analysisMutex_);
@@ -371,9 +369,10 @@ void AudioEngine::noteDroppedPlay(DropReason reason, const SoundSource* source, 
     auto line = logWarning(dropModule(r));
     switch (reason) {
         case DropReason::PolyphonyLimit:
-            line << "play dropped: all " << playingSounds_.size() << " playback slots are busy ("
-                 << sourceLabel(source) << "). Raise AudioSettings::maxPolyphony or stop "
-                    "sounds that no longer need to play";
+            line << "play dropped: AudioSettings::maxPolyphony=" << maxPolyphony_
+                 << " voices are already playing (" << sourceLabel(source)
+                 << "). Raise the cap, set it to 0 for no cap, or stop sounds that no "
+                    "longer need to play";
             break;
         case DropReason::StreamLimit:
             line << "play dropped: maxPolyphony="
@@ -1462,11 +1461,15 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
         auto* s = static_cast<SoundStream*>(source.get());
 
         // Count active stream voices for this same source — refuse to
-        // exceed maxPolyphony. Walking the slot list is O(MAX_PLAYING_SOUNDS)
-        // but MAX is small (32) so this is fine in practice.
+        // exceed maxPolyphony. Walking the slot list is O(voices); the
+        // mixer walks it every callback anyway.
+        // Under the engine lock: another play() may be growing the slot list.
         int active = 0;
-        for (auto& slot : playingSounds_) {
-            if (slot && slot->playing && slot->buffer.get() == s) ++active;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto& slot : playingSounds_) {
+                if (slot && slot->playing && slot->buffer.get() == s) ++active;
+            }
         }
         if (active >= s->getMaxPolyphony()) {
             // Reject. A single Sound never gets here: Sound::play() stops its
@@ -1490,35 +1493,48 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
     {
         std::lock_guard<std::mutex> lock(mutex_);
 
+        // Reuse a finished slot, else grow the pool by one (unless the
+        // opt-in cap maxPolyphony_ is reached). The growth runs here, on the
+        // calling thread, under mutex_: the mixer takes the same lock around
+        // its walk of playingSounds_, so it never sees a vector mid-growth,
+        // and a reallocation's old storage is freed by this thread, not by
+        // the audio thread. The mixer itself never allocates or frees slots.
+        std::shared_ptr<PlayingSound>* target = nullptr;
         for (auto& slot : playingSounds_) {
-            if (!slot || !slot->playing) {
-                slot = std::make_shared<PlayingSound>();
-                slot->buffer = source;
-                slot->stream = stream;
-                slot->positionF = 0.0;
-                // A stream's positionF counts frames of its decoder's output,
-                // at the engine rate; an eager voice's counts source frames.
-                slot->positionRateHz_.store(
-                    source->kind() == SoundSource::Stream ? sampleRate_ : source->sampleRate,
-                    std::memory_order_relaxed);
-                slot->volume = 1.0f;
-                slot->pan = 0.0f;
-                slot->speed = 1.0f;
-                slot->loop = false;
-                slot->playing = true;
-                slot->paused = false;
-                // For streams the decoder already resampled to engine rate, so
-                // rateRatio = 1.0 (no pitch adjust). For eager buffers, retain
-                // the existing buffer/engine ratio compensation.
-                if (source->kind() == SoundSource::Eager) {
-                    slot->rateRatio = (source->sampleRate > 0 && sampleRate_ > 0)
-                        ? ((float)source->sampleRate / (float)sampleRate_)
-                        : 1.0f;
-                } else {
-                    slot->rateRatio = 1.0f;
-                }
-                return slot;
+            if (!slot || !slot->playing) { target = &slot; break; }
+        }
+        if (!target && (maxPolyphony_ <= 0 || (int)playingSounds_.size() < maxPolyphony_)) {
+            playingSounds_.emplace_back();
+            target = &playingSounds_.back();
+        }
+        if (target) {
+            auto& slot = *target;
+            slot = std::make_shared<PlayingSound>();
+            slot->buffer = source;
+            slot->stream = stream;
+            slot->positionF = 0.0;
+            // A stream's positionF counts frames of its decoder's output,
+            // at the engine rate; an eager voice's counts source frames.
+            slot->positionRateHz_.store(
+                source->kind() == SoundSource::Stream ? sampleRate_ : source->sampleRate,
+                std::memory_order_relaxed);
+            slot->volume = 1.0f;
+            slot->pan = 0.0f;
+            slot->speed = 1.0f;
+            slot->loop = false;
+            slot->playing = true;
+            slot->paused = false;
+            // For streams the decoder already resampled to engine rate, so
+            // rateRatio = 1.0 (no pitch adjust). For eager buffers, retain
+            // the existing buffer/engine ratio compensation.
+            if (source->kind() == SoundSource::Eager) {
+                slot->rateRatio = (source->sampleRate > 0 && sampleRate_ > 0)
+                    ? ((float)source->sampleRate / (float)sampleRate_)
+                    : 1.0f;
+            } else {
+                slot->rateRatio = 1.0f;
             }
+            return slot;
         }
     }  // engine lock released: the drop is logged without stalling the mixer
 
@@ -1883,7 +1899,7 @@ bool AudioEngine::init() {
         .sampleRate   = sampleRate_,
         .channels     = channels_,
         .bufferSize   = bufferSize_,
-        .maxPolyphony = (int)playingSounds_.size(),
+        .maxPolyphony = maxPolyphony_,
         .deviceName   = std::string(),
     });
 }
@@ -1933,15 +1949,14 @@ bool AudioEngine::init(const AudioSettings& settings) {
         std::fill_n(analysisCopy_, ANALYSIS_BUFFER_SIZE, 0.0f);
     }
 
-    int polyphony = settings.maxPolyphony > 0
-                  ? settings.maxPolyphony
-                  : DEFAULT_MAX_PLAYING_SOUNDS;
-    if ((int)playingSounds_.size() != polyphony) {
-        // Preserve existing slots up to the new size; truncating drops the
-        // oldest extra voices (which is the same policy as play() reusing
-        // dead slots — losing them is unavoidable if the user shrinks the
-        // pool while voices are active).
-        playingSounds_.resize(polyphony);
+    // 0 (or less) = no cap; slots are added by play() as voices need them.
+    maxPolyphony_ = settings.maxPolyphony > 0 ? settings.maxPolyphony : 0;
+    if (maxPolyphony_ > 0 && (int)playingSounds_.size() > maxPolyphony_) {
+        // A cap below the slots in use: keep existing slots up to the cap.
+        // Truncating drops the extra voices (the same policy as play()
+        // reusing dead slots — unavoidable if the user lowers the cap while
+        // voices are active). The device is stopped here.
+        playingSounds_.resize(maxPolyphony_);
     }
 
     // Re-init only: migrate active voices so they continue from the same
@@ -2064,7 +2079,8 @@ bool AudioEngine::init(const AudioSettings& settings) {
         logNotice("AudioEngine") << "audio backend: Null (requested); output is silent";
     }
     logNotice("AudioEngine") << "initialized (" << sampleRate_ << " Hz, " << channels_ << " ch, "
-                             << playingSounds_.size() << " playback slots, "
+                             << (maxPolyphony_ > 0 ? "max " + std::to_string(maxPolyphony_) + " voices, "
+                                                   : std::string("no voice cap, "))
                              << ma_get_backend_name(ctxArg->backend) << ": "
                              << device->playback.name << ")";
 
@@ -2091,7 +2107,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
             ? (int)(((uint64_t)period * (uint64_t)sampleRate_ + deviceRate / 2) / deviceRate)
             : (int)period;
     }
-    args.maxPolyphony = (int)playingSounds_.size();
+    args.maxPolyphony = maxPolyphony_;   // 0 = unlimited
 
     // Use the selection ID: playback.id may be zeroed for the default.
     {

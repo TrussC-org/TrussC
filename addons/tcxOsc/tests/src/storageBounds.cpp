@@ -50,7 +50,7 @@ void preflight() {
     Access::parse(receiver, bytes);
     require(calls == 1 && Access::rejected(receiver) == 0, "5000-float receiver succeeds");
 }
-void packetSizeAndDepth() {
+void packetSize() {
     OscReceiver receiver;
     int messages = 0, bundles = 0, warnings = 0;
     auto messageListener = receiver.onMessageReceived.listen([&](OscMessage&) { ++messages; });
@@ -84,28 +84,10 @@ void packetSizeAndDepth() {
     }
     std::thread producer([&] { Access::parse(receiver, bytes); });
     producer.join();
-    OscBundle nested;
-    nested.addMessage(OscMessage("/depth"));
-    for (int depth = 2; depth <= 17; ++depth) {
-        OscBundle outer;
-        outer.addMessage(OscMessage("/prefix"));
-        outer.addBundle(nested);
-        nested = std::move(outer);
-    }
-    bytes = nested.toBytes();
-    if (!tcTest::skipPersistentAllocationFailure("OSC bundle result at depth limit")) {
-        bool allocated = false;
-        rejectAllocations = true;
-        try { OscBundle::fromBytes(bytes.data(), bytes.size(), ok); }
-        catch (const std::bad_alloc&) { allocated = true; }
-        rejectAllocations = false;
-        require(!ok && !allocated, "depth overflow rejects whole before allocation");
-    }
-    Access::parse(receiver, bytes);
     Access::parse(receiver, OscMessage("/next").toBytes());
     tc::internal::drainMainThreadQueue();
-    require(messages == 2 && bundles == 0 && Access::rejected(receiver) == 2 && warnings == 1,
-            "size/depth rejection is whole, counted once, recoverable and reported per store");
+    require(messages == 2 && bundles == 0 && Access::rejected(receiver) == 1 && warnings == 1,
+            "size rejection is whole, counted once, recoverable and reported per store");
 }
 // Exercise allocation rounding even when this host's string copy constructor
 // happens to allocate exactly size(). This models a different library policy.
@@ -365,7 +347,7 @@ void udpStorage() {
 }
 void testStorageBounds() {
     preflight();
-    packetSizeAndDepth();
+    packetSize();
     roundedCopyAdmission();
     pollingStrings();
     polling();

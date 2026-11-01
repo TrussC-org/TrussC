@@ -265,22 +265,34 @@ private:
                                         "to 4 bytes; accepted (logged once per receiver)";
         }
 
-        // Recursively dispatch messages inside bundle. Walks the parsed tree in
-        // place (no per-level copy); fromBytes() bounds the depth.
+        // Dispatch the messages inside a bundle, depth first. Walks the parsed
+        // tree in place (no per-level copy) with a heap stack, not recursion:
+        // the depth of an untrusted packet must not decide call-stack use.
         void dispatchBundle(const OscBundle& bundle, uint64_t generation) {
+            struct Level { const OscBundle* bundle; size_t next; };
+            std::vector<Level> stack;
             // Event<T>::notify() takes T&, and listeners could always edit the
             // bundle before its elements are dispatched. Every node belongs to
             // the non-const bundle parsePacket() owns, so the cast is well-defined.
             onBundleReceived.notifyExternal(const_cast<OscBundle&>(bundle));
+            stack.push_back({&bundle, 0});
 
-            for (size_t i = 0; i < bundle.getElementCount() && generation == generation_; ++i) {
-                if (bundle.isMessage(i)) {
-                    OscMessage msg = bundle.getMessageAt(i);
+            while (!stack.empty() && generation == generation_) {
+                Level& level = stack.back();
+                // Re-read the count each time: a listener may have edited the bundle.
+                if (level.next >= level.bundle->getElementCount()) {
+                    stack.pop_back();
+                    continue;
+                }
+                const size_t i = level.next++;
+                if (level.bundle->isMessage(i)) {
+                    OscMessage msg = level.bundle->getMessageAt(i);
                     enqueue(msg);  // only if the polling queue is enabled
                     onMessageReceived.notifyExternal(msg);
                 }
-                else if (const OscBundle* child = bundle.bundleAt(i)) {
-                    dispatchBundle(*child, generation);
+                else if (const OscBundle* child = level.bundle->bundleAt(i)) {
+                    onBundleReceived.notifyExternal(const_cast<OscBundle&>(*child));
+                    stack.push_back({child, 0});   // invalidates `level`
                 }
             }
         }

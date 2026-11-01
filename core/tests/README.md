@@ -405,6 +405,9 @@ LIBGL_ALWAYS_SOFTWARE=1 \
   move keeps the moved voice playing), a paused voice is released too, and a
   streamed voice closes its file on `stop()` and when its last handle goes
   away (checked through `/proc/self/fd` on Linux).
+  With no cap (`maxPolyphony` 0, the default) 100, then 200, `Sound`s play at
+  once and all are mixed, nothing is dropped, and released slots are reused;
+  a cap set again by re-init still refuses the voice past it.
 - `streamSeekRepeat/` — daily-only repetition of the exhausted non-looping
   stream's pending seek to frame 0 (#582), 50 times on the null audio backend.
   It checks that target audio returns after the worker stall is released.

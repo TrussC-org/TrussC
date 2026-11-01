@@ -17,13 +17,21 @@ public:
     // Timetag representing immediate execution
     static constexpr uint64_t TIMETAG_IMMEDIATELY = 1;
 
-    // Deepest bundle nesting fromBytes() accepts, counting the outermost
-    // bundle as level 1. Data nested deeper fails to parse as a whole.
-    // Bound (security): untrusted bundles can nest recursively; a depth cap bounds stack memory. Overflow rejects the whole packet; the receiver counts rejected datagrams.
-    static constexpr int MAX_NESTING_DEPTH = 16;
+    // Bundles nest to any depth that fits in the packet. Parsing, copying,
+    // destroying and serializing a bundle walk the nesting with a heap stack,
+    // not recursion, so depth never costs call-stack space (a 64 KiB datagram
+    // can hold a bit over 3000 levels).
 
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}
     explicit OscBundle(uint64_t timetag) : timetag_(timetag) {}
+
+    // Copy and destruction are iterative (see above); moves just hand over
+    // the element vector.
+    OscBundle(const OscBundle& other);
+    OscBundle& operator=(const OscBundle& other);
+    OscBundle(OscBundle&&) noexcept = default;
+    OscBundle& operator=(OscBundle&&) noexcept = default;
+    ~OscBundle();
 
     // -------------------------------------------------------------------------
     // Timetag (NTP format)
@@ -86,12 +94,11 @@ public:
     // Serialize
     // -------------------------------------------------------------------------
     std::vector<uint8_t> toBytes() const;
-    // ok is false when nesting exceeds MAX_NESTING_DEPTH, any element is
-    // truncated (its size runs past the end of the data), or any nested
-    // message or bundle fails to parse (see OscMessage::fromBytes()): the
-    // whole bundle is rejected, not a part of it.
-    // Allocation-free preflight also limits the whole outer packet to
-    // 65,536 bytes and 4096 bundle elements/argument tags combined.
+    // ok is false when any element is truncated (its size runs past the end
+    // of the data), or any nested message or bundle fails to parse (see
+    // OscMessage::fromBytes()): the whole bundle is rejected, not a part of
+    // it. The preflight also limits the whole outer packet to 65,536 bytes
+    // (the UDP datagram size); nesting depth has no limit of its own.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
     // Same, and paddingMissing tells whether any message in the bundle ends
     // before its zero padding to 4 bytes (it still parses, as in
@@ -117,9 +124,7 @@ public:
     }
 
 private:
-    // fromBytes() for a bundle at nesting level `depth` (1 = outermost)
-    static OscBundle fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok,
-                                      bool& paddingMissing, int depth);
+    void copyElementsFrom(const OscBundle& other);
 
     uint64_t timetag_;
     std::vector<Element> elements_;
