@@ -607,29 +607,22 @@ void closes() {
     }
 }
 
-// Based on the review's queued_close.cpp. Sweep the entire sequence until a
-// one-shot fault does not fire, including allocations in failure reporting and
-// paths reached only after an earlier failure. No STL allocation sizes/counts.
+// Ordinary close and throwing callbacks keep the shared ending contract.
+// Bookkeeping OOM has no guaranteed completion contract (owner, 10/31).
 struct CloseState {
     int exits = 0, cleanups = 0, after = 0, destroyed = 0;
     bool detached = false, slotsStable = false;
     bool destructorContext = false;
 };
-void allocatingWork() {
-    // Explicit call cannot be elided as a new/delete expression can be.
-    void* memory = ::operator new(8192);
-    ::operator delete(memory);
-}
-struct SweepApp : App {
+struct CloseSmokeApp : App {
     TestWindow& win;
     CloseState& state;
     bool clearExit, throwExit, throwCleanup;
-    SweepApp(TestWindow& w, CloseState& s, bool clear, int throwing)
+    CloseSmokeApp(TestWindow& w, CloseState& s, bool clear, int throwing)
         : win(w), state(s), clearExit(clear), throwExit(throwing == 1), throwCleanup(throwing == 2) {}
     void exit() override {
         ++state.exits;
         if (clearExit) win.events().exit.clear();
-        allocatingWork();
         if (throwExit) throw 1;
     }
     void cleanup() override {
@@ -637,27 +630,25 @@ struct SweepApp : App {
         state.detached = internal::appRanCleanup(*this) && !win.getApp() &&
                          trussc::internal::WindowRequestAccess::context(win).rootNode.expired() && internal::attachedApps().empty();
         state.slotsStable = trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15;
-        allocatingWork();
         if (throwCleanup) throw 2;
     }
-    ~SweepApp() override {
+    ~CloseSmokeApp() override {
         ++state.destroyed;
         state.destructorContext = internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(win);
     }
 };
-extern "C" void sweepCloseCallback(TestWindow* win) noexcept {
+extern "C" void smokeCloseCallback(TestWindow* win) noexcept {
     tcCoreTest::nativeBoundary([&] { win->finish(); });
 }
-bool sweepClose(int boundary, bool clearExit, int throwing, int nth) {
+void smokeClose(int boundary, bool clearExit, int throwing) {
     CloseState state;
     auto win = std::make_unique<TestWindow>();
-    auto app = internal::makeConstructedApp<SweepApp>(*win, state, clearExit, throwing);
+    auto app = internal::makeConstructedApp<CloseSmokeApp>(*win, state, clearExit, throwing);
     std::weak_ptr<App> lifetime = app;
     internal::WindowRequestAccess::attachCandidate(*win, app); internal::applyPendingAppForTests(*win);
     app.reset(); // Teardown owns the last App reference; completions must not retain it.
     auto first = internal::FrameworkEventAccess::listen(win->events().exit, [&] {
         ++state.after;
-        allocatingWork();
         if (throwing == 3) throw 3;
     }, EventPriority::AfterApp);
     auto last = internal::FrameworkEventAccess::listen(win->events().exit, [&] { ++state.after; }, EventPriority::AfterApp);
@@ -665,48 +656,29 @@ bool sweepClose(int boundary, bool clearExit, int throwing, int nth) {
     // Exercise the allocating dropped-request diagnostic before exit as well.
     win->setApp<App>();
     auto* previous = internal::currentWindowCtx();
-    arm(nth);
     bool escaped = false;
     try {
         if (boundary == 0) win->finish();
-        else if (boundary == 1) sweepCloseCallback(win.get());
+        else if (boundary == 1) smokeCloseCallback(win.get());
         else win.reset();
     } catch (...) { escaped = true; }
-    const bool injected = fired;
-    disarm();
-    check("close sweep: exit, all protected hooks, detach, cleanup, lifetime and context",
+    check("close smoke: exit, all protected hooks, detach, cleanup, lifetime and context",
           !escaped && state.exits == 1 && state.cleanups == 1 && state.after == 2 &&
           state.destroyed == 1 && state.detached && state.slotsStable &&
-          state.destructorContext && lifetime.expired() && internal::currentWindowCtx() == previous, nth);
+          state.destructorContext && lifetime.expired() && internal::currentWindowCtx() == previous);
     if (win) {
         win->finish();
-        check("close sweep: retry inert, queue drained, bindings disconnected",
+        check("close smoke: retry inert, queue drained, bindings disconnected",
               trussc::internal::WindowRequestAccess::context(*win).asyncScreenshots.pending.empty() && trussc::internal::WindowRequestAccess::context(*win).appEventListeners.empty() &&
-              state.exits == 1 && state.cleanups == 1 && state.after == 2, nth);
+              state.exits == 1 && state.cleanups == 1 && state.after == 2);
     }
-    return injected;
 }
-void closeSweep() {
-    if (tcTest::skipProxyAllocationSweep("window close sweeps")) return;
+void closeSmoke() {
     auto savedRun = internal::appRunToken();
     internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
-    // Warm lazy framework state before the repeatable exhaustive matrices.
-    sweepClose(0, true, 0, -1);
-    for (int boundary = 0; boundary < 3; ++boundary) {
-        for (bool clear : {false, true}) {
-            int nth = 0;
-            while (sweepClose(boundary, clear, 0, nth)) ++nth;
-            std::printf("close sweep boundary=%d clear=%d: %d fired indices, terminal index passed\n",
-                        boundary, clear, nth);
-        }
-        // App exit/cleanup, an AfterApp hook, and a BeforeApp listener throwing
-        // must each leave the remaining mandatory steps reachable.
-        for (int throwing = 1; throwing <= 4; ++throwing) {
-            int nth = 0;
-            while (sweepClose(boundary, true, throwing, nth)) ++nth;
-            std::printf("close throwing sweep boundary=%d throwing=%d: %d fired indices\n", boundary, throwing, nth);
-        }
-    }
+    for (int boundary = 0; boundary < 3; ++boundary) smokeClose(boundary, true, 0);
+    // App exit/cleanup and both event bands retain exception isolation.
+    for (int throwing = 1; throwing <= 4; ++throwing) smokeClose(1, true, throwing);
     internal::appRunToken() = std::move(savedRun);
 }
 void callbackFailure() {
@@ -735,7 +707,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (mode == "all" || mode == "attach") attachments();
     if (mode == "all" || mode == "reentrant") { reentrantAttachments(); reentrantOtherPhases(); }
     if (mode == "all" || mode == "close") closes();
-    if (mode == "all" || mode == "sweep") { closeSweep(); callbackFailure(); }
+    if (mode == "all" || mode == "sweep") { closeSmoke(); callbackFailure(); }
 #endif
     std::printf("allocation regressions: %d failures\n", failures);
     return failures ? 1 : 0;

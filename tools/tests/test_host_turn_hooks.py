@@ -48,9 +48,17 @@ void run() {
 }
 ''')
 observer=extract(NATIVE,'static void _sapp_tc_mac_host_turn(')
+launch=extract(NATIVE,'- (void)applicationDidFinishLaunching:')
+depth_init=launch[launch.index('    CFStringRef current_mode ='):launch.index('    _sapp_tc.app.host_turn_observer =')]
 mac=r'''
 namespace mac {
 using CFRunLoopObserverRef=void*; using CFRunLoopActivity=unsigned;
+using CFStringRef=void*;
+bool loopRunning=false;
+int modeReleases=0;
+void* CFRunLoopGetMain() { return nullptr; }
+CFStringRef CFRunLoopCopyCurrentMode(void*) { return loopRunning ? &loopRunning : nullptr; }
+void CFRelease(CFStringRef mode) { check("AppKit releases the sampled running mode",mode==&loopRunning); ++modeReleases; }
 enum { kCFRunLoopEntry=1,kCFRunLoopExit=2,kCFRunLoopBeforeSources=4,kCFRunLoopBeforeWaiting=8 };
 struct _sapp_tc_window_t { unsigned win_id=1; int callback_depth=0; bool in_tick=false; };
 constexpr int _SAPP_TC_MAX_WINDOWS=1;
@@ -64,8 +72,21 @@ int before=0,after=0;
 void begin() { ++before; check("AppKit process callbacks share native busy scope",_sapp_tc.callbacks_active>0); } void end() { ++after; check("AppKit end callbacks share native busy scope",_sapp_tc.callbacks_active>0); }
 '''+extract(NATIVE,'struct _sapp_tc_mac_callback_scope {')+';\n'+observer+r'''
 void observe(unsigned activity) { _sapp_tc_mac_host_turn(nullptr,activity,nullptr); }
+void installDepth() {
+'''+depth_init+r'''
+}
 void run() {
     _sapp_tc.app.desc={begin,end};
+    // CLI finishLaunching can install the observer before NSApplication starts
+    // its first loop. Compile the production initialization, then deliver the
+    // real Entry/Sources/Waiting/Exit ordering without a window tick.
+    installDepth();
+    observe(kCFRunLoopEntry); observe(kCFRunLoopBeforeSources);
+    check("AppKit launch before the first loop services its first outer turn",before==1 && after==0);
+    observe(kCFRunLoopBeforeWaiting); observe(kCFRunLoopExit);
+    check("AppKit first loop returns to depth zero",after==1 && _sapp_tc.app.host_loop_depth==0 && modeReleases==0);
+    before=after=0; loopRunning=true; installDepth();
+    check("AppKit installation inside a loop retains its current depth",_sapp_tc.app.host_loop_depth==1 && modeReleases==1);
     observe(kCFRunLoopBeforeSources);
     check("AppKit starts one turn without a window draw",before==1 && after==0);
     observe(kCFRunLoopEntry); observe(kCFRunLoopBeforeSources); observe(kCFRunLoopBeforeWaiting);
@@ -216,6 +237,9 @@ int main() { event_0::run();event_1::run();event_2::run();mac::run();x11::run();
 '''
 variants=[('baseline',source)]
 if os.environ.get('TC_HOST_TURN_MUTATIONS'):
+    old='_sapp_tc.app.host_loop_depth = current_mode ? 1 : 0;'
+    assert old in source
+    variants.append(('appkit_launch_assumes_running_loop',source.replace(old,'_sapp_tc.app.host_loop_depth = 1;')))
     old='    w->in_tick = true;'
     assert source.count(old)==1
     variants.append(('common_event_guard',source.replace(old,'    /* mutation: event callback unguarded */')))
