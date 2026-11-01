@@ -4833,6 +4833,22 @@ using XmlNode  // Represents a node within an XML document.
 using XmlParseResult  // Reports the outcome of parsing an XML document.
 ```
 
+## Macros
+
+```cpp
+TC_RUN_APP(AppClass, settings)  // Runs your App subclass with the given window settings; use it in main().
+TC_HOT_RELOAD(AppClass)  // Enables hot reload for an App when placed in its .cpp file.
+TC_NO_HOT_RELOAD("reason");  // Declares that addon or user code cannot compile as a hot-reload guest, with a reason.
+TC_REFLECT(Self, ...Bases) { TC_VALUE(...) ... }  // Declare a class's reflected members — exposed to the inspector, serialization, and MCP — with no hand-written plumbing.
+TC_REFLECT_ROOT(Self) { TC_VALUE(...) ... }  // Like TC_REFLECT, for a type at the root of a hierarchy (no reflected base classes).
+TC_REFLECT_FREE(Type) { TC_VALUE(...) ... }  // Reflect an external type you can't edit, declared at namespace scope.
+TC_VALUE(member) | TC_VALUE(name, getter) | TC_VALUE(name, getter, setter)  // Declare one reflected member; arity picks access (1=in-place, 2=read-only, 3=getter/setter).
+TC_ENUM_LABELS(EnumType, "Label0", "Label1", ...)  // Give an enum string labels (labels[(int)value]==name), used by the inspector and serialization.
+TC_PLATFORMS("macos,windows,linux,web,android,ios") <decl>  // Annotate a symbol as available only on the listed platforms (reference metadata).
+TC_LUA_BIND("float,Vec2,Vec3,Color") <template decl>  // Declare which template instantiations the Lua binding generator should bind (reference metadata).
+TC_LUA_SKIP <decl>  // Mark a declaration as not exposed to Lua (reference metadata).
+```
+
 <!-- API-INDEX-END -->
 
 ## Addons

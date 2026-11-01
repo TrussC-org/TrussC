@@ -48,7 +48,13 @@ const prose = TOML.parse(fs.readFileSync(path.join(__dirname, 'api-reference.tom
 
 // --- join: structure is the spine; prose enriches ---
 const joined = {};
-for (const id of Object.keys(structure).sort()) {
+// Macro display order follows the cards in TOML (the web's curated order).
+// Keep undocumented macros on the surface too, so check.js can report them.
+const macroIds = Object.keys(structure).filter(id => structure[id].kind === 'macro');
+const ids = [...Object.keys(structure).sort().filter(id => structure[id].kind !== 'macro'),
+    ...Object.keys(prose).filter(id => macroIds.includes(id)),
+    ...macroIds.sort().filter(id => !prose[id])];
+for (const id of ids) {
     const s = structure[id];
     // Inherited copies share their declaration's prose; the resolved metadata
     // passes through unchanged for every downstream consumer.
@@ -69,6 +75,7 @@ for (const id of Object.keys(structure).sort()) {
         category: p.category, keywords: p.keywords, of: p.of,
         of_category: p.of_category, of_notes: p.of_notes,   // oF mapping prose
         description: p.description,                          // {en,ja,ko}
+        signature: p.signature,                            // curated macro display signature (not an AST callable)
         details: p.details, snippet: p.snippet,             // snippet = authorable example code
         related: p.related, platform_note: p.platform_note, // related symbols, platform behaviour note
         value_desc: p.value_desc,                           // enum: per-value descriptions {Member:{en,ja,ko}}

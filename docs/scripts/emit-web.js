@@ -1,33 +1,18 @@
 #!/usr/bin/env node
 /**
- * emit-web.js — emit the website's web-player API data (trussc.org/generated/
- * trussc-api.js). SUPERSEDES the trussc-api.js path of scripts/generate-docs.js.
+ * emit-web.js — emit the website API data in the shape consumed by
+ * reference/reference.js and examples/code-reference.js.
  *
- * APPROACH (a): keep the intermediate web artifact in its existing shape (so
- * reference/reference.js and examples/code-reference.js keep working unchanged),
- * but source its symbol PROSE + STRUCTURE from the overhauled canonical data,
- * docs/reference/reference-data.json, instead of re-reading the deprecated
- * api-definition.yaml for that.
+ * reference-data.json supplies the resolved public structure and TOML prose,
+ * including macro cards and their curated signatures. Macro display order
+ * follows api-reference.toml, just like their descriptions and details.
+ * extras.json supplies language keywords, constant values and manual example
+ * links; colors.json supplies the swatch palette. The optional legacy
+ * api-definition.yaml sidecar provides display-field fallbacks when present.
+ * examples.json + scan-examples.js supply symbol-to-example links.
  *
- *   reference-data.json (CANONICAL) supplies, per symbol-id:
- *       description {en,ja,ko}, keywords, details, deprecated.reason (from the
- *       C++ [[deprecated]] attribute), and the clean `Owner::name` ids that make
- *       static methods render as `Color::fromOKLab` (never `Color_fromOKLab`).
- *
- *   api-definition.yaml is still joined as an AUXILIARY sidecar for everything
- *   reference-data.json does NOT (yet) carry — see README §"Notes for consumers":
- *       the category/type DISPLAY STRUCTURE + order, signatures-as-authored,
- *       related[], platforms/platformNote, operator schema, property types,
- *       constructors, enum value numbers + per-value descriptions, constant
- *       values, macros, top-level language keywords, deprecated.replacement/url,
- *       and the grouped color palette.
- *   (Once those migrate into the reference pipeline the yaml join can be dropped
- *    and api-definition.yaml deleted — that is the remaining retirement step.)
- *
- *   examples.json + scan-examples.js → symbol → example links (unchanged).
- *
- * Usage:  node emit-web.js [--dry]
- * Output: ../../../trussc.org/generated/trussc-api.js
+ * Usage: node emit-web.js [--dry] [--out <file>]
+ * Default output: ../../../trussc.org/generated/trussc-api.js
  */
 
 const fs = require('fs');
@@ -156,7 +141,7 @@ function mergeDeprecated(refId, ym, trustRef = true) {
 
 // === auxiliary: api-definition.yaml (display structure + un-migrated fields) =
 // Legacy yaml sidecar — OPTIONAL now (being retired). All prose comes from
-// reference-data; macros/keywords/constant-values/example-links come from
+// reference-data (including macros); keywords/constant-values/example-links come from
 // reference/extras.json; colors from reference/colors.json.
 const API = fs.existsSync(API_YAML) ? yaml.load(fs.readFileSync(API_YAML, 'utf8')) : { categories: [], types: [], enums: [], constants: [] };
 const EXTRAS = JSON.parse(fs.readFileSync(path.join(__dirname, '../reference/extras.json'), 'utf8'));
@@ -315,7 +300,7 @@ function buildExamplesMap() {
 // strings). The api-definition.yaml is consulted ONLY as an id-keyed sidecar
 // (YML_* maps) for fields reference-data does not yet carry: authored sigDesc,
 // related[], details ja/ko, constructors, property types, operators, plus the
-// per-enum-value numbers/descriptions, constant values, macros, top-level
+// per-enum-value numbers/descriptions, constant values, top-level
 // language keywords and the color palette. The output JSON shape is unchanged.
 function build(examplesMap) {
     const version = getVersion();
@@ -580,18 +565,13 @@ function build(examplesMap) {
         enums.push(out);
     }
 
-    // --- macros (yaml only — not C++ symbols) ---
-    const macros = (EXTRAS.macros || []).map(m => {
-        const e = {
-            name: m.name,
-            signature: m.signature || m.name,
-            desc: m.description,
-            desc_ja: m.description_ja || '',
-            desc_ko: m.description_ko || '',
-        };
-        if (m.details) { e.details = m.details; e.details_ja = m.details_ja || ''; e.details_ko = m.details_ko || ''; }
-        return e;
-    });
+    // --- macros (resolved structure + api-reference.toml cards) ---
+    const macros = REF_VALS.filter(m => m.kind === 'macro').map(m => ({
+        name: m.name,
+        signature: m.signature || m.name,
+        ...descTrio(m.id, null),
+        ...detailsOf(m.details),
+    }));
 
     return {
         version,

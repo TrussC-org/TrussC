@@ -455,12 +455,26 @@ for (const s of require('./std-symbols.js')) {
         signatures: s.signatures || [], static: false, provider: s.provider, platforms: null, deprecated: null };
 }
 
-// Hot-reload opt-in/opt-out macros have no AST declarations. Keep their cards
-// on the reference surface only while the public header defines them.
-const hotReloadHeader = fs.readFileSync(path.join(ROOT, 'core/include/tc/app/tcHotReload.h'), 'utf8');
-for (const name of ['TC_HOT_RELOAD', 'TC_NO_HOT_RELOAD']) {
-    if (!new RegExp(`^#define ${name}\\(`, 'm').test(hotReloadHeader)) continue;
-    structure[name] = { id: name, kind: 'macro', name, signatures: [], lua_skip: true };
+// Public macros have no AST declarations. Keep their cards on the reference
+// surface only while the corresponding public header still defines them.
+const publicMacros = {
+    TC_RUN_APP: 'tc/app/tcHotReload.h',
+    TC_HOT_RELOAD: 'tc/app/tcHotReload.h',
+    TC_NO_HOT_RELOAD: 'tc/app/tcHotReload.h',
+    TC_REFLECT: 'tc/utils/tcReflect.h',
+    TC_REFLECT_ROOT: 'tc/utils/tcReflect.h',
+    TC_REFLECT_FREE: 'tc/utils/tcReflect.h',
+    TC_VALUE: 'tc/utils/tcReflect.h',
+    TC_ENUM_LABELS: 'tc/utils/tcReflect.h',
+    TC_PLATFORMS: 'tc/utils/tcAnnotations.h',
+    TC_LUA_BIND: 'tc/utils/tcAnnotations.h',
+    TC_LUA_SKIP: 'tc/utils/tcAnnotations.h',
+};
+for (const [name, header] of Object.entries(publicMacros)) {
+    const source = fs.readFileSync(path.join(INCLUDE, header), 'utf8');
+    if (!new RegExp(`^#define ${name}(?:\\(|\\s)`, 'm').test(source)) continue;
+    structure[name] = { id: name, kind: 'macro', name, signatures: [], lua_skip: true,
+        platforms: null, deprecated: null };
 }
 
 // --- 4c. reconcile per-overload deprecation ---------------------------------
