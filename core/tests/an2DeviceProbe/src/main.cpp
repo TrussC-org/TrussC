@@ -8,6 +8,9 @@
 #include <iomanip>
 #include <sstream>
 #include <thread>
+#ifdef _WIN32
+#include <share.h>
+#endif
 
 using namespace tc;
 
@@ -251,7 +254,8 @@ int main(int argc, char** argv) {
         return 0;
     }
 #ifdef _WIN32
-    _wfopen_s(&s.file, s.logPath.c_str(), L"a");
+    // Shared append: setLogFile opens the same path again.
+    s.file = _wfsopen(s.logPath.c_str(), L"a", _SH_DENYNO);
 #else
     s.file = std::fopen(s.logPath.c_str(), "a");
 #endif
