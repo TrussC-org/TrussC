@@ -1,6 +1,8 @@
 # #239 combined device pass
 
-The probe branch is next/window d8b2ec09 plus this test-only probe. All other steps still test d8b2ec09 code. Each launch appends to the same durable probe log; send that file along with the per-step stdout logs. Every mode draws its instructions on screen. No arguments (or an unknown mode) prints usage and exits 0 without a window. Do not install missing prerequisites without owner approval.
+The probe branch is next/window df87610f plus this test-only probe. All other steps test df87610f code. Each launch appends to the same durable probe log; send that file along with the per-step stdout logs. Every mode draws its instructions on screen. No arguments (or an unknown mode) prints usage and exits 0 without a window. Do not install missing prerequisites without owner approval.
+
+Build order matters: core sweep, then addon sweep, then the standalone nativeWindow harness (build_all does not rebuild it; always configure and build it fresh after checkout), then the hot-reload host rebuild. Run the commands in the order shown.
 
 The probe observes public events only. `rawEvent.window_id` is the same positive creation ID as `tc_list_windows`; before its first raw event the screen says `pending-raw-event`, never a guessed ID. `ExitRequestEventArgs.reason` is a veto explanation and may be empty on this base; the framework final exit line carries causes such as `session-end`, `last-window-close`, or `app-quit`. A session-end request stands for macOS `applicationShouldTerminate` / Windows `WM_QUERYENDSESSION`; exit/cleanup and the framework final `exit: clean` stand for accepted termination / `WM_ENDSESSION`. Native query/cancel/power-off callbacks are not directly observable. The probe adds no hooks, headless mode or artificial idle delay; timeout keys change the watchdog deadline, not cleanup duration. Those unobservable scenarios remain UNVERIFIED.
 
@@ -29,6 +31,8 @@ python3 examples/build_all.py --core-tests-only --include-daily 2>&1 | tee "$HOM
 python3 examples/build_all.py --addon-tests-only --include-daily 2>&1 | tee "$HOME/device-239-air/build-addon.log"
 cmake -S core/tests/nativeWindow -B core/tests/nativeWindow/build-macos -DCMAKE_BUILD_TYPE=Release
 cmake --build core/tests/nativeWindow/build-macos --config Release
+# Rebuild the hot-reload host AFTER the addon sweep (the sweep relinks libTrussC; a stale host exits 65 "host older than TrussC"):
+cmake --build core/tests/hotReloadLifecycle/build-macos --config Release
 ```
 
 The build commands also run the tests. Check their summaries and record their actual status, including any missing prerequisite. For individual generated projects use `trusscli update -p <project> --tc-root "$PWD" --ide cmake`, then `cmake -S <project> -B <project>/build-macos -DCMAKE_BUILD_TYPE=Release` and `cmake --build <project>/build-macos --config Release`. Use the installed trusscli; installing one needs the owner's OK.
@@ -64,6 +68,8 @@ python3 examples/build_all.py --core-tests-only --include-daily 2>&1 | Tee-Objec
 python3 examples/build_all.py --addon-tests-only --include-daily 2>&1 | Tee-Object "$env:USERPROFILE\device-239-win\build-addon.log"
 cmake -S core/tests/nativeWindow -B core/tests/nativeWindow/build-windows -G "Visual Studio 17 2022" -A x64
 cmake --build core/tests/nativeWindow/build-windows --config Release
+# Rebuild the hot-reload host AFTER the addon sweep (the sweep relinks libTrussC; a stale host exits 65 "host older than TrussC"):
+cmake --build core/tests/hotReloadLifecycle/build-windows --config Release
 C:\emsdk\emsdk_env.bat
 python3 examples/build_all.py --web-only 2>&1 | Tee-Object "$env:USERPROFILE\device-239-win\build-web.log"
 ```
@@ -136,6 +142,8 @@ python3 examples/build_all.py --core-tests-only --include-daily 2>&1 | tee "$HOM
 python3 examples/build_all.py --addon-tests-only --include-daily 2>&1 | tee "$HOME/device-239-pi/build-addon.log"
 cmake -S core/tests/nativeWindow -B core/tests/nativeWindow/build-linux -DCMAKE_BUILD_TYPE=Release -DTC_GRAPHICS_BACKEND=GLES3
 cmake --build core/tests/nativeWindow/build-linux --config Release
+# Rebuild the hot-reload host AFTER the addon sweep (the sweep relinks libTrussC; a stale host exits 65 "host older than TrussC"):
+cmake --build core/tests/hotReloadLifecycle/build-linux --config Release
 ```
 
 These suite commands build and run tests. If GLES3 is not selected by the existing configuration, do not treat a different backend as the GLES3 result. Installing a tool or driver needs owner OK.
