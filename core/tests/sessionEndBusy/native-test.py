@@ -22,10 +22,12 @@ def policyRegression():
     code = r'''
     #include <atomic>
     #include <cstdio>
+    #include <cstdlib>
+    #include <string>
     #include <utility>
     #include <unistd.h>
     #include <sys/wait.h>
-    bool busy=false;
+    bool busy=false,hostBusy=false;
     struct { struct {bool init_called=true;} app; } _sapp_tc;
     bool _sapp_tc_mac_busy() { return busy; }
     ''' + body(native, '_sapp_tc_mac_session_busy') + r'''
@@ -38,15 +40,17 @@ def policyRegression():
     } state;
     int exits=0,arms=0,cleanups=0,queries=0;
     auto& runtime() { return state; }
-    bool hostCallbacksActive() { return false; }
+    bool hostCallbacksActive() { return hostBusy; }
     void setExitReason(const char*) {}
     bool dispatchExitRequested() { ++queries;return false; }
     void armLogoutWatchdog(float) { ++arms; }
     void shutdownRuntime() { if(!state.stopping){state.stopping=true;exits+=3;} }
     void _cleanup_cb() { shutdownRuntime(); ++cleanups; }
-    int appExitCode() { return 0; }
+    int appExitCode() { return 17; }
     void closeLogFile() {}
-    [[noreturn]] void terminateSessionProcess(int) { ::_exit(arms==1 && exits==3 && cleanups==1 ? 70 : 91); }
+    [[noreturn]] void terminateSessionProcess(int code) { ::_exit(code); }
+    void processExit() { ::write(STDOUT_FILENO, arms==1 && exits==3 && cleanups==1 ? "A" : "!", 1); }
+    struct StaticExitProbe { ~StaticExitProbe() { ::write(STDOUT_FILENO, "D", 1); } };
     [[noreturn]] void macExit(int code) { ::_exit(code==0 && arms==0 && exits==0 && cleanups==0 ? 71 : 91); }
     #define _exit macExit
     ''' + '\n'.join(body(runtime, n) for n in ['querySessionEnd', 'cancelSessionEnd', 'endRuntimeForSession', 'commitSessionEnd']) + r'''
@@ -56,29 +60,40 @@ def policyRegression():
         using namespace trussc::internal;
         int failures=0;
         for (int scenario : {0,1,2,3,4}) {
+            std::fflush(stdout);
+            int pipefd[2]; if (pipe(pipefd)) return 2;
             pid_t pid=fork();
+            if (pid<0) return 2;
             if (pid==0) {
+                close(pipefd[0]); dup2(pipefd[1],STDOUT_FILENO); close(pipefd[1]);
+                static StaticExitProbe staticExit;
+                std::atexit(processExit);
                 if (scenario==0) {
                     bool veto=!querySessionEnd() && queries==1;
                     cancelSessionEnd();
                     veto=veto && !querySessionEnd() && queries==2;
                     ::_exit(veto?0:91);
                 }
-                if (scenario==1 || scenario==3) busy=true;
+                if (scenario==1) busy=true;
+                if (scenario==3) hostBusy=true;
                 if (scenario==2) state.constructor=&state;
                 if (scenario==4) { commitSessionEnd(); ::_exit(91); }
                 if (!querySessionEnd() || queries) ::_exit(91);
                 commitSessionEnd(); commitSessionEnd();
                 ::_exit(exits==0 && arms==0 && cleanups==0 ? 0 : 91);
             }
+            close(pipefd[1]);
+            std::string markers; char buffer[32]; ssize_t count;
+            while ((count=read(pipefd[0],buffer,sizeof(buffer)))>0) markers.append(buffer,count);
+            close(pipefd[0]);
             int status; waitpid(pid,&status,0);
     #ifdef __APPLE__
-            const int expected=scenario==0?0:scenario==4?70:71;
+            const int expected=scenario==0?0:scenario==4?17:71;
     #else
-            const int expected=scenario==4?70:0;
+            const int expected=scenario==4?17:0;
     #endif
-            const bool ok=WIFEXITED(status) && WEXITSTATUS(status)==expected;
-            std::printf("session-policy %d: %s (status=%d)\n",scenario,ok?"PASS":"FAIL",status);
+            const bool ok=WIFEXITED(status) && WEXITSTATUS(status)==expected && markers==(scenario==4?"AD":"");
+            std::printf("session-policy %d: %s (status=%d, handlers=%s)\n",scenario,ok?"PASS":"FAIL",status,markers.c_str());
             failures+=!ok;
         }
         return failures?1:0;
@@ -87,12 +102,20 @@ def policyRegression():
     with tempfile.TemporaryDirectory(prefix='tc-session-policy-') as folder:
         folder = Path(folder); cpp = folder/'probe.cpp'; cpp.write_text(code, encoding='utf-8')
         failed = False
-        for platform in ['win-return', 'mac-exit']:
-            binary = folder/platform
-            subprocess.run([os.environ.get('CXX','c++'), '-std=c++20', *(['-D__APPLE__'] if platform=='mac-exit' else []), str(cpp), '-o', str(binary)], check=True)
-            result = subprocess.run([str(binary)], text=True, encoding='utf-8', capture_output=True, timeout=10)
-            print(platform, result.stdout, result.stderr, flush=True)
-            failed |= result.returncode != 0
+        anchor = 'std::exit(appExitCode());'
+        assert code.count(anchor)==1, 'idle exit mutation anchor missing'
+        for name, text in [('baseline',code), ('idle-immediate-exit',code.replace(anchor,'terminateSessionProcess(appExitCode());'))]:
+            cpp.write_text(text, encoding='utf-8')
+            for platform in ['win-return', 'mac-exit']:
+                binary = folder/platform
+                subprocess.run([os.environ.get('CXX','c++'), '-std=c++20', *(['-D__APPLE__'] if platform=='mac-exit' else []), str(cpp), '-o', str(binary)], check=True)
+                result = subprocess.run([str(binary)], text=True, encoding='utf-8', capture_output=True, timeout=10)
+                output = result.stdout + result.stderr
+                out = ROOT/os.environ.get('TC_C3_EVIDENCE','.verification/c3')
+                (out/f'native-policy-{platform}-{name}.log').write_text(output,encoding='utf-8')
+                good = result.returncode==0 if name=='baseline' else result.returncode==1 and 'session-policy 4: FAIL' in output
+                print(platform, name, 'PASS' if good else 'FAIL', output, flush=True)
+                failed |= not good
         return int(failed)
 
 def orderingRegression():

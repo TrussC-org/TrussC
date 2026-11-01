@@ -31,6 +31,9 @@ cleanup or watchdog runs. Windows returns from WM_ENDSESSION and the OS ends
 the process. macOS calls _exit(0) before returning NSTerminateNow; it never
 uses an unanswered NSTerminateLater that could block logout. A blocked main
 that cannot receive the callback is subject to the OS termination policy.
+Busy termination and OS-killed ends skip atexit handlers and C++ static destructors.
+A logout that arrives while a framework call is pumping messages synchronously
+(for example, Windows VideoPlayer::load waiting for metadata) also counts as busy.
 
 An idle commit runs normal reverse attachment ending synchronously: exit events,
 exactly one App::exit, audio detach and cleanup, then complete service/device
@@ -40,10 +43,15 @@ Negative or NaN values log Error and retain the old setting; zero ends
 immediately, positive infinity disables the deadline. Ordinary quit arms none.
 Windows may impose an earlier deadline. After idle cleanup, Runtime closes the
 Logger file sink and flushes stdout/stderr, preserving the final exit lines
-before terminal process exit. Busy termination does not flush sinks.
-After idle cleanup, Windows uses
-TerminateProcess; macOS uses _exit. Neither returns to frames. A host without
-a session receiver cannot promise logout delivery.
+before normal process exit. On both Windows and macOS, idle commit calls
+std::exit with the application exit code: atexit handlers and C++ static
+destructors run as on ordinary exit. The watchdog stays armed through these
+handlers and destructors; if they block past the deadline, it ends the process
+immediately without completing them. On Windows, destructors and atexit
+callbacks of loaded DLLs run after the OS has stopped the watchdog thread, so
+only the OS deadline bounds them. Busy termination does not flush sinks.
+Neither path returns to frames. Linux has no session receiver and cannot
+promise logout delivery.
 
 A quit requested during setup (exitApp/requestExitApp) is handled before the
 first service prelude, and exitRequested still gets its veto. For a Window's root
