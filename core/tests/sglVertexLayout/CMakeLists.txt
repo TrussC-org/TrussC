@@ -1,0 +1,13 @@
+# Standalone dummy-backend unit test: no TrussC runtime or display.
+cmake_minimum_required(VERSION 3.16)
+project(sglVertexLayout C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+add_executable(sglVertexLayout main.c)
+target_include_directories(sglVertexLayout PRIVATE ../../include/sokol)
+if(MSVC)
+    target_compile_options(sglVertexLayout PRIVATE /utf-8)
+else()
+    target_compile_options(sglVertexLayout PRIVATE -Wall -Wextra -Wno-unused-function)
+    target_link_libraries(sglVertexLayout PRIVATE m)
+endif()
