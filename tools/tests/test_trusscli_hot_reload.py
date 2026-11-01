@@ -63,8 +63,8 @@ file(APPEND "${{CMAKE_BINARY_DIR}}/configure-calls" "configure\\n")
             def build_app(state, configure_count):
                 output = command([cli, 'build', '-p', str(project), '-j2'])
                 self.assertNotIn('hot reload state changed -- reconfigure required', output)
-                self.assertEqual((build / '.tc_hot_reload_state').read_text().strip(), state)
-                self.assertEqual((build / 'configure-calls').read_text().count('configure\n'),
+                self.assertEqual((build / '.tc_hot_reload_state').read_text(encoding="utf-8").strip(), state)
+                self.assertEqual((build / 'configure-calls').read_text(encoding="utf-8").count('configure\n'),
                                  configure_count, output)
                 if state == 'ON':
                     library = {'linux': 'libguest.so', 'darwin': 'libguest.dylib',
@@ -83,7 +83,7 @@ file(APPEND "${{CMAKE_BINARY_DIR}}/configure-calls" "configure\\n")
             build_app('OFF', 1)
             app_source.write_text(base + 'TC_HOT_RELOAD(tcApp)\n', encoding='utf-8')
             build_app('ON', 2)
-            commands = json.loads((build / 'compile_commands.json').read_text())
+            commands = json.loads((build / 'compile_commands.json').read_text(encoding="utf-8"))
             host = [c['command'] for c in commands if c['file'].endswith('/src/main.cpp')]
             guest = [c['command'] for c in commands if c['file'].endswith('/src/nested/tcApp.cpp')]
             self.assertTrue(host and guest)
@@ -103,7 +103,7 @@ file(APPEND "${{CMAKE_BINARY_DIR}}/configure-calls" "configure\\n")
             self.assertIn('hot reload state changed -- reconfigure required', output)
             build_app('ON', 4)
             # An excluded .cpp must not influence an explicit SOURCES project.
-            cmakelists.write_text(cmakelists.read_text().replace('trussc_app(NAME toggle_probe)',
+            cmakelists.write_text(cmakelists.read_text(encoding="utf-8").replace('trussc_app(NAME toggle_probe)',
                 'trussc_app(NAME toggle_probe SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" '
                 '"${CMAKE_CURRENT_SOURCE_DIR}/src/nested/tcApp.cpp" '
                 '"${CMAKE_CURRENT_SOURCE_DIR}/src/nested/tcApp.h")'), encoding='utf-8')
@@ -116,7 +116,7 @@ file(APPEND "${{CMAKE_BINARY_DIR}}/configure-calls" "configure\\n")
             build_app('ON', 6)
             # Relative explicit SOURCES resolve against the source directory, so the
             # pre-check sees the same files from the build directory.
-            cmakelists.write_text(cmakelists.read_text().replace('"${CMAKE_CURRENT_SOURCE_DIR}/src/', '"src/'),
+            cmakelists.write_text(cmakelists.read_text(encoding="utf-8").replace('"${CMAKE_CURRENT_SOURCE_DIR}/src/', '"src/'),
                                   encoding='utf-8')
             app_source.write_text(base, encoding='utf-8')
             build_app('OFF', 7)
