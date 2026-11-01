@@ -111,9 +111,20 @@ struct { int display=0; double refresh_period=1.0/60.0; size_t window_slots=1; _
     struct { bool init_called=false,quit_ordered=false,quit_requested=false; Descriptor desc; _sapp_tc_window_t* main=&window; } app; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==window.win_id ? &window : nullptr; }
 int before=0,after=0,init=0,ticks=0,clockCalls=0;
-bool idleCurrent=false;
+enum { noContext, idleContext, windowContext };
+int currentContext=noContext, switches=0;
+void* eglGetCurrentContext() { return reinterpret_cast<void*>(uintptr_t(currentContext)); }
+void* glXGetCurrentContext() { return reinterpret_cast<void*>(uintptr_t(currentContext)); }
+constexpr auto EGL_NO_CONTEXT=nullptr;
 void initialize() { ++init; check("native bootstrap excludes its own tick", window.in_tick); }
-void begin() { ++before; check("X11 host services run with the idle drawable current", idleCurrent); idleCurrent=false; }
+void begin() {
+    ++before;
+    check("X11 services fill a missing context with idle and retain a current window",
+        currentContext==(before==2 ? windowContext : idleContext));
+    check("X11 services switch only when no context is bound", switches==(before==3 ? 2 : 1));
+    // Next turn keeps a live window; the following turn models native unbind.
+    currentContext=before==1 ? windowContext : noContext;
+}
 void end() { if (++after==3) _sapp_tc.app.quit_ordered=true; }
 double _sapp_tc_now() {
     // Bound (probe termination): a missing after-turn hook still returns a runtime assertion result.
@@ -129,9 +140,9 @@ void _sapp_tc_x11_tick(_sapp_tc_window_t*) { ++ticks; }
 bool _sapp_tc_native_hidden(_sapp_tc_window_t*) { return false; }
 bool _sapp_tc_native_iconified(_sapp_tc_window_t*) { return false; }
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
-bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) { idleCurrent = !w; return true; }
+bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) { ++switches; currentContext=w ? windowContext : idleContext; return true; }
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
-'''+extract(NATIVE,'static void _sapp_tc_x11_request_exit(')+'\n'+extract(NATIVE,'static bool _sapp_tc_x11_window_due(')+'\n'+extract(NATIVE,'static void _sapp_tc_x11_run_loop(').replace('poll(&pfd','fake_poll(&pfd')+r'''
+'''+extract(NATIVE,'extern "C" bool sapp_tc_gl_ensure_context(void) {\n#if defined(SOKOL_GLES3)').replace('extern "C" ', '')+'\n'+extract(NATIVE,'static void _sapp_tc_x11_request_exit(')+'\n'+extract(NATIVE,'static bool _sapp_tc_x11_window_due(')+'\n'+extract(NATIVE,'static void _sapp_tc_x11_run_loop(').replace('poll(&pfd','fake_poll(&pfd')+r'''
 void run() {
     _sapp_tc.app.desc={initialize,nullptr,nullptr,begin,end};
     _sapp_tc_x11_run_loop();
@@ -255,7 +266,7 @@ if os.environ.get('TC_HOST_TURN_MUTATIONS'):
     assert old in source
     variants.append(('nested_appkit_turn',source.replace(old,'')))
     old='_sapp_tc.app.desc._tc_before_turn();'
-    idle='_sapp_tc_x11_make_current(nullptr);'
+    idle='sapp_tc_gl_ensure_context();'
     assert x11.count(idle)==1
     assert old in x11
     end_hook='if (_sapp_tc.app.desc._tc_after_turn) _sapp_tc.app.desc._tc_after_turn();'
@@ -263,6 +274,7 @@ if os.environ.get('TC_HOST_TURN_MUTATIONS'):
     variants.append(('x11_no_end_services',source.replace(x11,x11.replace(end_hook,'/* mutation: omitted turn end */'))))
     variants.append(('x11_no_draw_services',source.replace(x11,x11.replace(old,'/* mutation: omitted turn service */'))))
     variants.append(('x11_services_without_idle_context',source.replace(x11,x11.replace(idle,'/* mutation: no idle context */'))))
+    variants.append(('x11_services_always_switch_idle',source.replace(x11,x11.replace(idle,'_sapp_tc_x11_make_current(nullptr);'))))
 results=[]
 with tempfile.TemporaryDirectory(prefix='tc-host-turn-') as folder:
     for name,code in variants:

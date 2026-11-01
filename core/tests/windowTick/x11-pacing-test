@@ -103,6 +103,7 @@ bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
     }
     return true;
 }
+bool sapp_tc_gl_ensure_context() { return true; }
 bool _sapp_tc_native_hidden(_sapp_tc_window_t* w) { return (hideMain || iconMain) && w==_sapp_tc.app.main; }
 bool _sapp_tc_native_iconified(_sapp_tc_window_t* w) { return iconMain && w==_sapp_tc.app.main; }
 void _sapp_tc_x11_swap(_sapp_tc_window_t* w) {

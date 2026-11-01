@@ -2548,6 +2548,7 @@ typedef struct sapp_tc_gl_state {
     uint32_t draw_window, read_window;
 } sapp_tc_gl_state;
 SOKOL_APP_API_DECL bool sapp_tc_gl_activate_idle(void);
+SOKOL_APP_API_DECL bool sapp_tc_gl_ensure_context(void);
 SOKOL_APP_API_DECL sapp_tc_gl_state sapp_tc_gl_save(void);
 SOKOL_APP_API_DECL void sapp_tc_gl_restore(sapp_tc_gl_state state);
 // [TrussC] Desktop adapter seam: suppress this secondary window's present.
@@ -11840,6 +11841,15 @@ extern "C" bool sapp_tc_gl_activate_idle(void) {
     return _sapp_tc_x11_make_current(idle);
 }
 
+extern "C" bool sapp_tc_gl_ensure_context(void) {
+#if defined(SOKOL_GLES3)
+    if (eglGetCurrentContext() != EGL_NO_CONTEXT) return true;
+#else
+    if (glXGetCurrentContext() != NULL) return true;
+#endif
+    return _sapp_tc_x11_make_current(nullptr);
+}
+
 #if defined(SOKOL_GLES3)
 static void _sapp_tc_x11_lock_mouse(bool lock) {
     if (!_sapp_tc.app.main) return;
@@ -12273,7 +12283,7 @@ static void _sapp_tc_x11_run_loop(void) {
         }
         if (_sapp_tc.app.desc._tc_before_turn) {
             // Reload polling precedes queue processing and can release GPU resources.
-            _sapp_tc_x11_make_current(nullptr);
+            sapp_tc_gl_ensure_context();
             _sapp_tc.app.desc._tc_before_turn();
         }
         /* drain exactly the already-queued events (can't block: count bounded) */
@@ -12726,7 +12736,7 @@ void sapp_run(const sapp_desc* desc) {
        sokol_gfx here, which still needs a current context) */
     if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
-        sapp_tc_gl_activate_idle();
+        sapp_tc_gl_ensure_context();
         if (_sapp_tc.app.desc.cleanup_cb) {
             _sapp_tc.app.desc.cleanup_cb();
         } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
@@ -18322,6 +18332,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 
 #if !(defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
 extern "C" bool sapp_tc_gl_activate_idle(void) { return true; }
+extern "C" bool sapp_tc_gl_ensure_context(void) { return true; }
 extern "C" sapp_tc_gl_state sapp_tc_gl_save(void) { return {}; }
 extern "C" void sapp_tc_gl_restore(sapp_tc_gl_state) {}
 #endif
