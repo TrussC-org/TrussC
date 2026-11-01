@@ -373,6 +373,9 @@ void shutdownRuntime() noexcept {
     if (!state.stopping) state.endingWindows.swap(state.windows);
     state.stopping = true;
     TeardownSteps steps;
+#if defined(__APPLE__) && TARGET_OS_OSX
+    cancelMacDialogSheets();
+#endif
     // One retained snapshot of attachment order, including headless. Backings
     // are separately retained so user handle cycles cannot postpone disposal.
     auto& windows = state.endingWindows;

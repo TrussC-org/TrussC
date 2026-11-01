@@ -13,6 +13,16 @@ normal Window exit notification and App ending still run.
 Each close() is decided when it is called; a later exitRequested veto does not undo an earlier close() from the same frame.
 Process shutdown bypasses closeRequested.
 
+On macOS, accepted process ending cancels open async dialog sheets before
+App ending and AppKit window closure. A veto leaves confirm, load and save
+sheets and their callbacks pending. An open `alertDialogAsync` sheet is the
+exception: AppKit dismisses a one-button alert as soon as quit starts, before
+exitRequested, so its callback runs even if the quit is then vetoed. Cancellation invokes each live owner's callback once, before its
+exit/cleanup: alert completes without a result, confirm receives `false`,
+and load/save receive an empty unsuccessful result. AppKit's later completion
+does not invoke the callback again. Callbacks of an already ended App remain
+suppressed by the usual ownership token.
+
 OS session query and commit belong to Runtime. Windows receives
 WM_QUERYENDSESSION/WM_ENDSESSION on its own hidden top-level control HWND;
 closing the first user Window cannot remove that authority. Idle queries reuse
@@ -34,6 +44,10 @@ that cannot receive the callback is subject to the OS termination policy.
 Busy termination and OS-killed ends skip atexit handlers and C++ static destructors.
 A logout that arrives while a framework call is pumping messages synchronously
 (for example, Windows VideoPlayer::load waiting for metadata) also counts as busy.
+An open async macOS sheet alone does not make the main thread busy: idle
+session ending cancels it through normal ending. A synchronous modal call
+still on an App's stack counts as busy and follows the existing immediate
+session termination policy, without dialog callbacks or App cleanup.
 
 An idle commit runs normal reverse attachment ending synchronously: exit events,
 exactly one App::exit, audio detach and cleanup, then complete service/device
