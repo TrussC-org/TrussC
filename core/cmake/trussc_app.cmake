@@ -442,6 +442,10 @@ foreach(ENTRY \${ENTRIES})
         # Filter: skip symbols that cannot be exported
         if(SYM MATCHES \"^__imp_\")
             # Import thunk
+        elseif(SYM MATCHES \"^[?][?]_[GE]\")
+            # Scalar/vector deleting destructors cause LNK4102 when exported.
+            # Virtual deletion uses the vtable to reach the destructor body
+            # in the defining module, without a named guest import.
         elseif(SYM MATCHES \"^[.]\")
             # Section name (.CRT$XCU, .rdata, etc.)
         elseif(SYM MATCHES \"/\")
@@ -527,7 +531,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                 OUTPUT "${_TC_HOST_IMPORT_LIB}"
                 BYPRODUCTS "${_TC_HOST_IMPORT_DEF}"
                 COMMAND ${CMAKE_COMMAND} -P "${_TC_HOST_IMPORT_SCRIPT}"
-                COMMAND ${CMAKE_AR} /NOLOGO /IGNORE:4102
+                COMMAND ${CMAKE_AR} /NOLOGO
                     /DEF:${_TC_HOST_IMPORT_DEF}
                     /OUT:${_TC_HOST_IMPORT_LIB}
                     /MACHINE:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}
