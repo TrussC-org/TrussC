@@ -134,7 +134,18 @@ void tick(sapp_window win, void*) {
     _sapp_tc_win32_tick(w);
     check("nested native tick is rejected", w->frame_count == before);
 }
-void close(sapp_window win, void*) { ++closed; sapp_destroy_window(win); }
+bool allowClose(sapp_window win, void*) {
+    // Runtime owns last-window quit policy since C1. Model that client here.
+    int count = 0;
+    for (auto* entry : _sapp_tc.windows) if (entry) ++count;
+    return count > 1 || _sapp_tc_win32_request_exit(_sapp_tc_lookup(win));
+}
+void close(sapp_window win, void*) {
+    ++closed;
+    sapp_destroy_window(win);
+    for (auto* entry : _sapp_tc.windows) if (entry) return;
+    sapp_quit();
+}
 
 // A forwarding COM probe keeps real render/resize resources while counting and
 // injecting only Present outcomes; device removal here is deliberately simulated.
@@ -219,6 +230,7 @@ _sapp_tc_native_desc nativeDesc() {
     d.window.width = 101; d.window.height = 77;
     d.window._tc_pixel_width = d.window._tc_pixel_height = 0;
     d.window.tick_cb = tick; d.window.event_cb = event; d.window.close_cb = close;
+    d.window.close_request_cb = allowClose;
     d.window.title = "Win32 native probe";
     d.swap_interval = 1;
     d.color_format = SAPP_PIXELFORMAT_BGRA8;
@@ -677,8 +689,9 @@ void nativeChecks() {
     check("throwing close client cannot bypass native disposal ownership", IsWindow(other->hwnd) && sapp_window_valid(second));
     other->desc.close_cb=savedClose;
     throwQuit=true;
-    SendMessageW(first->hwnd,WM_CLOSE,0,0);
-    check("throwing process quit client safely vetoes without a retry loop", !_sapp_tc.app.quit_ordered && !_sapp_tc.app.quit_requested && IsWindow(first->hwnd));
+    _sapp_tc_win32_request_exit(first);
+    check("throwing process quit client safely vetoes without a retry loop", quitRequests == 1 &&
+        !_sapp_tc.app.quit_ordered && !_sapp_tc.app.quit_requested && IsWindow(first->hwnd));
     throwQuit=false;
     // The remaining loop is a real DXGI check, not an injected status test.
     first->occluded = other->occluded = false;
@@ -732,7 +745,16 @@ int main(int argc, char** argv) {
     if (pixelSizes) { d._tc_pixel_width=1001; d._tc_pixel_height=667; }
     d.window_title = "Win32 native first";
     d.init_cb=initialized; d.frame_cb=frame; d.event_cb=legacyEvent; d.cleanup_cb=cleanup;
+    d._tc_close_request_cb=allowClose; d._tc_close_cb=close;
     d._tc_draw_while_hidden = launchCovered ? launchPolicy : 1;
+    if (sessionEnd) {
+        // C3 moved session authority off user HWNDs. This is an ordinary
+        // init-quit smoke; it has no secondary windows for nativeChecks().
+        sapp_run(&d);
+        check("session notification returns through ordinary cleanup", cleanupCalls == 1 && liveHwnds == 0);
+        std::printf("nativeWindow/Win32: failures=%d\n",failures);
+        return failures ? 1 : 0;
+    }
     if (launchCovered || initQuit) {
         runLaunch = true;
         sapp_run(&d);
@@ -794,10 +816,10 @@ int main(int argc, char** argv) {
             sapp_window_request_close(second); sapp_window_request_close(third); loopStage=5;
         } else if (loopStage == 5 && !sapp_window_valid(second) && !sapp_window_valid(third)) {
             check("two scripted secondary closes use common close", closed==2);
-            vetoQuit=true; sapp_window_request_close({first->win_id}); loopStage=6;
-        } else if (loopStage == 6 && quitRequests>=3) {
+            quitRequests=0; vetoQuit=true; sapp_window_request_close({first->win_id}); loopStage=6;
+        } else if (loopStage == 6 && quitRequests==1) {
             check("first close reaches process quit veto", !_sapp_tc.app.quit_ordered);
-            vetoQuit=false; sapp_destroy_window({first->win_id}); loopStage=7;
+            vetoQuit=false; sapp_window_request_close({first->win_id}); loopStage=7;
         }
     };
     _sapp_tc_win32_run_loop();

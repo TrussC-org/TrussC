@@ -4280,7 +4280,11 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
         [NSApp postEvent:event atStart:YES];
         return;
     }
-    _sapp_tc.app.host_loop_depth = 1; // observer is installed inside the launch run loop
+    // [TrussC] finishLaunching can precede the first run-loop entry. Seed the
+    // observer from the running mode so that first entry remains an outer turn.
+    CFStringRef current_mode = CFRunLoopCopyCurrentMode(CFRunLoopGetMain());
+    _sapp_tc.app.host_loop_depth = current_mode ? 1 : 0;
+    if (current_mode) CFRelease(current_mode);
     _sapp_tc.app.host_turn_observer = CFRunLoopObserverCreate(kCFAllocatorDefault,
         kCFRunLoopEntry | kCFRunLoopBeforeSources | kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 0,
         _sapp_tc_mac_host_turn, nullptr);
@@ -4576,7 +4580,9 @@ void sapp_run(const sapp_desc* desc) {
     [NSApp run];
     /* Failed startup stops the loop; terminate: would instead exit with 0. */
     if (!_sapp_tc.app.valid) {
-        [_sapp_tc.app.dlg applicationWillTerminate:nil];
+        // [TrussC] Match AppKit's nonnull termination notification contract.
+        [_sapp_tc.app.dlg applicationWillTerminate:
+            [NSNotification notificationWithName:NSApplicationWillTerminateNotification object:NSApp]];
         NSApp.delegate = nil;
         _sapp_tc.app.dlg = nil;
         return;
