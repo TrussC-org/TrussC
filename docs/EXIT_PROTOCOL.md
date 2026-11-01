@@ -47,7 +47,9 @@ before normal process exit. On both Windows and macOS, idle commit calls
 std::exit with the application exit code: atexit handlers and C++ static
 destructors run as on ordinary exit. The watchdog stays armed through these
 handlers and destructors; if they block past the deadline, it ends the process
-immediately without completing them. Busy termination does not flush sinks.
+immediately without completing them. On Windows, destructors and atexit
+callbacks of loaded DLLs run after the OS has stopped the watchdog thread, so
+only the OS deadline bounds them. Busy termination does not flush sinks.
 Neither path returns to frames. Linux has no session receiver and cannot
 promise logout delivery.
 

@@ -289,7 +289,8 @@ At OS session end, an idle main thread allows the process veto query, then runs
 normal ending on commit with one shared logout timeout (3 seconds by default).
 On Windows and macOS, idle ending then calls `std::exit` with the application
 exit code, running atexit handlers and C++ static destructors like ordinary
-exit. The watchdog remains armed through those handlers and destructors.
+exit. The watchdog remains armed through those handlers and destructors
+(on Windows, not through loaded DLLs' destructors, which run after it stops).
 A busy main thread accepts the query and performs no App work on commit: no
 exit events, `App::exit()`, audio detach, cleanup or watchdog. Save promptly
 during normal ending; busy termination cannot save App state. Busy and OS-killed
