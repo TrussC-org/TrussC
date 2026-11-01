@@ -148,7 +148,10 @@ A context may begin once per Sokol frame; rendering UI into another target
 before present requires a separate manager.
 
 Window `imguiBegin()` / `imguiEnd()` retain deferred `onRender` timing and use
-`getDpiScale()` independently of `pixelPerfect`. `imguiBegin()` returns `false`
+`getDpiScale()` independently of `pixelPerfect`. In v0.8.0, `pixelPerfect` is
+process-wide and comes from the launch Window settings. Cursor shape, visibility
+and custom images are also app-wide. A Window ImGui context changes the cursor
+only while the pointer is inside its own Window; an Fbo context leaves it alone. `imguiBegin()` returns `false`
 on refusal. Submit widgets only on success, and pair every attempt, including
 a refused one, with `imguiEnd()`:
 

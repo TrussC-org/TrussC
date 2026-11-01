@@ -65,6 +65,16 @@ Close, replacement, removal and shutdown use the same normal App ending:
 detach, call `exit()` once, disconnect audio and wait, then call `cleanup()`.
 See [App lifetimes](ARCHITECTURE.md#window-handles-and-app-lifetimes).
 
+Inside an App, Window helpers such as `setWindowPosition()`, `getWindowTitle()`
+and `isWindowOccluded()` use that App's Window. Outside an App, they require
+exactly one open Window. Cursor shape, visibility and custom images are app-wide;
+cursor setters do nothing outside the running native app.
+`RuntimeSettings` holds process-wide startup options, passed to
+`runApp<T>(windowSettings, runtimeSettings)`. In v0.8.0, the launch Window's
+`pixelPerfect` setting applies to every Window. `Window::context()` and tree
+driving methods are internal. Both `exitApp(code)` and `requestExitApp()` ask
+`exitRequested`, allowing listeners to veto process quit.
+
 ### **D. Time and Async: Safe Timers**
 
 * **openFrameworks:**

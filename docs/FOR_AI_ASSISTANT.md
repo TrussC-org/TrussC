@@ -75,6 +75,12 @@ OS close asks the addressed Window's closeRequested with the same per-listener O
 
 Runtime queue and maintenance work selects process context and progresses at safe outer host turns, including turns with no Window draws. Swapchain drawing requires a Window callback; explicit offscreen Fbo drawing remains available. Nested entries restore the caller's drawing and native state. Native creation establishes identity, resources, dimensions and binding readiness before App construction. Each resized frame reconciles its Window framebuffer, swapchain and automatic viewport before beginning a pass.
 
+`getWindowTitle()` returns the resolved Window's stored title (`Window::getTitle()`); `isWindowOccluded()` returns its native visibility snapshot (`Window::isOccluded()`). They use the same App-owner / sole-open-Window resolution as other Window helpers. Unowned callers with zero or multiple open Windows get an Error and an empty string or `false`, respectively. An App without a live Window gets those fallback values too.
+
+File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<string>&)` callback receive the paths.
+
+`Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal, unavailable to public C++ and Lua callers. The framework drives the tree; App code overrides callbacks or listens through `events()`.
+
 Multiple Windows are supported on macOS, Windows and Linux X11. Create a Window with `createWindow(settings)`, then request content with `window->setApp<Scene>(args...)`. Unsupported platforms return nullptr with a diagnostic. Each Window owns its App, event stream, clock, input and drawing state. GPU resources such as Texture, Fbo, Mesh and Font can be shared across Windows. The Runtime retains every open Window until explicit close or shutdown; closing the first-created Window leaves the others running. `App::getWindow()` returns its attachment while it is live, and nullptr during ending or in a headless App.
 
 Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Headless executes only the App virtual update and ending, with no tree drawing.
@@ -135,7 +141,9 @@ int main() {
 }
 ```
 
-`RuntimeSettings::reserveUniformBuffer()` reserves the process-wide GPU uniform buffer; pass it as the second argument to `runApp<T>(windowSettings, runtimeSettings)`. The OS clipboard buffer is fixed at 64 KB. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
+`RuntimeSettings::reserveUniformBuffer()` reserves the process-wide GPU uniform buffer; pass it as the second argument to `runApp<T>(windowSettings, runtimeSettings)`. The current v0.8.0 OS clipboard buffer limit is 65,536 bytes; removing this limit is planned for v0.8.x. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
+
+Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. `showCursor()`, `hideCursor()`, `setCursor()`, `bindCursorImage()` and `unbindCursorImage()` do nothing before native app startup or after native app cleanup, including in a headless app.
 
 ### FPS Control
 ```cpp
@@ -1600,13 +1608,16 @@ This also works on the **default screen** (no camera scope): `z = 0` is pixel-id
 
 ### How do I quit the app? (exitApp vs requestExitApp)
 
-Both calls work in windowed and headless apps. In headless mode, `exitApp()`
-stops after the current update step; `requestExitApp()` dispatches the event
-on the main thread after the current pass, including all catch-up steps.
+Both calls request quit in windowed and headless apps. At the next safe point,
+Runtime asks `exitRequested`; a veto keeps the app running. A request from a
+root App's `setup()` is queried as setup returns. In headless mode, requests
+from `update()` are queried after the current update pass.
 
-Two options:
-- **`requestExitApp()`**: *requests* exit. Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set `args.cancel = true` to **cancel** it (for a "save before quit?" prompt). Equivalent to oF's `ofExit`.
-- **`exitApp()`**: exits immediately (not cancellable).
+- **`requestExitApp()`** requests exit without changing the exit code.
+- **`exitApp(code = 0)`** requests exit and sets the exit code.
+
+Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set
+`args.cancel = true` to cancel either request, for example for a save prompt:
 ```cpp
 listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
     if (hasUnsavedChanges) e.cancel = true;   // stops the exit
@@ -1795,7 +1806,7 @@ The listener runs on whichever thread logged (pass `Deliver::Main` to `listen` b
 Normally `setFullscreen(true)` (or `WindowSettings().setFullscreen(true)`) is all you need. To span several displays you make a **borderless window** and place + size it yourself:
 ```cpp
 setWindowDecorated(false);     // borderless (no title bar / frame)
-setWindowPosition(0, 0);       // top-left; macOS / Windows only (no-op elsewhere)
+setWindowPosition(0, 0);       // top-left; macOS / Windows / Linux X11
 setWindowSize(spanW, spanH);   // you supply the combined size — see caveats
 ```
 Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDisplays` / `Monitor` don't exist; `getFramebufferWidth/Height` is the window, not the whole desktop), so you must know `spanW/spanH` yourself (or combine displays via a GPU/OS utility). `(0,0)` depends on **which display is primary**. On **macOS** you must turn **off** Mission Control's *"Displays have separate Spaces"* or one window can't cover multiple displays.
@@ -1804,13 +1815,13 @@ Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDispla
 
 ### How do I receive stdin commands?
 
-Console input is opt-in in both windowed and headless apps. Call `console::start()` in `setup()` and retain an `events().console.listen(...)` listener. Both runners deliver queued `ConsoleEventArgs` on the main thread each loop and call `console::stop()` before app exit/cleanup.
+Console input is opt-in in both windowed and headless apps. Call `console::start()` in `setup()` and retain a `runtime().events().console.listen(...)` listener. Runtime delivers queued `ConsoleEventArgs` on the main thread each service turn and calls `console::stop()` after App ending.
 
 There is one detached stdin reader per process, created on the first `start()`. `stop()` disables delivery and discards queued commands; a later `start()` discards pending commands and enables delivery again. The reader keeps consuming stdin while stopped, dropping those lines, and ends at EOF. It uses raw OS reads, accepts LF/CRLF and a partial last line at EOF, and does not hold a stdio lock that could block process exit. Web has no stdin command support.
 
 External stdin control text is limited to 1 MiB per line (LF excluded, CR included), 1024 pending commands and 16 MiB of queued raw text. Oversized lines are drained and rejected whole; a full queue rejects new whole commands. Reading continues while delivery is stopped or the queue is full. First rejection emits one Warning per store; internal cumulative counters live for the process lifetime.
 
-**v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps that only subscribe to `events().console` must add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
+**v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps must move `events().console` subscriptions to `runtime().events().console` and add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
 
 ### How do I make a console / CLI app (and optionally open a GUI)?
 
@@ -1825,7 +1836,7 @@ int main(int argc, char** argv) {
     return 1;                                                            // exit code
 }
 ```
-If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
+If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp(code)` or `requestExitApp()` (both vetoable through `exitRequested`). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
 
 ### Windows: my console tool detaches from cmd / keeps running after I close the console — how do I make it a real console app?
 
@@ -1875,7 +1886,7 @@ For the other direction, path → string (display, `Font`, JSON, a string compar
 ### "Window / media / basics" → which API?
 
 - Window: `setWindowTitle()` / `setWindowSize()` / `setFullscreen(bool)` / `toggleFullscreen()`
-- Quit: `requestExitApp()` (cancellable) / `exitApp()` (immediate)
+- Quit: `requestExitApp()` / `exitApp(code)` (both vetoable through `exitRequested`)
 - Play a sound: `Sound` (a quick blip: `beep()`) / mic input: `MicInput`
 - Play video: `VideoPlayer` / webcam: `VideoGrabber` (both unsupported on Android)
 - Draw text: `Font` (TTF / system fonts) / `drawBitmapString` (built-in bitmap)
@@ -5066,7 +5077,7 @@ saveScreenshot("capture.png");   // Saves to bin/data/
 ```
 
 ### Cursor
-Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over.
+Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. Setters do nothing before native app startup or after native app cleanup; call them from `setup()` or later callbacks.
 ```cpp
 setCursor(Cursor::Hand);         // System cursors: Default, Arrow, IBeam, Crosshair,
                                  //   Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW,
@@ -5094,19 +5105,35 @@ bindCursorImage(Cursor::Custom1, fboImg, 16, 16);
 ```
 
 ### Exit App
+Both calls request process quit through `exitRequested`; listeners can veto.
 ```cpp
-exitApp();           // Immediate exit (no cancel)
-requestExitApp();    // Cancellable — fires exitRequested event
-
-// Confirm dialog pattern
-events().exitRequested.subscribe([](ExitRequestEventArgs& args) {
-    args.cancel = true;          // Prevent immediate exit
-    showConfirmDialog = true;    // Show your own UI
-});
-
-// When user clicks "Yes":
-exitApp();
+exitApp();           // Request quit with exit code 0
+exitApp(1);          // Request quit with exit code 1
+requestExitApp();    // Request quit without changing the exit code
 ```
+
+Remember confirmation before requesting quit again, because `exitApp()` sends
+`exitRequested` again. For example, inside your App class:
+```cpp
+EventListener quitListener;
+bool quitConfirmed = false;
+bool showConfirmDialog = false;
+
+void setup() override {
+    quitListener = events().exitRequested.listen([this](ExitRequestEventArgs& e) {
+        if (quitConfirmed) return;
+        e.cancel = true;
+        showConfirmDialog = true; // Draw your own confirmation UI
+    });
+}
+
+// Call when the user accepts your confirmation UI.
+void confirmQuit() {
+    quitConfirmed = true;
+    exitApp();
+}
+```
+See [exitExample](../examples/events/exitExample/src/tcApp.cpp) for a complete app.
 
 ## Sound
 

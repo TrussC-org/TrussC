@@ -111,13 +111,15 @@ browser console and `onLog`), not a file. On Android sokol's app messages
 failure is not logged. This is how a supervisor process (e.g. `anchorbolt start`)
 captures logs from an unmodified app.
 
-On desktop, `runApp()` returns **1** when window or GPU startup fails before
-`setup()` runs, and **0** otherwise; `TC_RUN_APP` passes that status to `main()`.
-A supervisor can use the exit code together with `TRUSSC_LOG_FILE` to distinguish
-a failed start from a normal shutdown. Fatal panics still abort the process.
-On Linux, no available X display causes an abort (a nonzero process status).
-Android and Web have OS/browser-owned loops; this return value does not report
-their eventual shutdown.
+On Windows and Linux, `runApp()` returns **1** if framework startup was not
+reached; otherwise it returns the App's exit code, normally **0** or the value
+passed to `exitApp(code)`. On macOS, normal quit ends the process through AppKit
+after cleanup with that exit code; `runApp()` does not return. It returns only
+on startup failure. `TC_RUN_APP` follows the same platform rules. A supervisor
+can combine the process status with `TRUSSC_LOG_FILE` to assess how the run ended.
+Fatal panics still abort the process. On Linux, no available X display causes
+an abort (a nonzero process status). Android and Web have OS/browser-owned loops;
+their immediate return value does not report eventual shutdown.
 
 The audio engine reports through the logger too, so the file also receives
 the plays it had to drop (`Sound::play()` returned false: every playback slot busy, a
@@ -147,7 +149,7 @@ your own tools:
 
 ### Inspection Tools (ReadOnly, except Public health)
 
-Window targets use positive IDs from `tc_list_windows`. Omit a target only when exactly one Window is open. Zero, invalid IDs and ambiguous omissions return an error with the available IDs. This rule also applies to input, node-tree and recording-start tools.
+Window targets use the positive `id` field from `tc_list_windows`. Omit a target only when exactly one Window is open. Zero, invalid IDs and ambiguous omissions return an error with the available IDs. This rule also applies to input, node-tree and recording-start tools.
 
 | Tool | Arguments | Description |
 |------|-----------|-------------|
@@ -196,7 +198,7 @@ capture it inside its own frame. So:
   signal for how it is hidden, or `Window::setFps()` throttles it very low),
   it fails with `the window rendered no frame within 5 s (minimized, hidden
   or closed?)`.
-- These rules apply to every Window. App code may opt into hidden updates or drawing through the Window context; this does not change the positive-ID targeting rule.
+- These rules apply to every Window. `Window::context()` and its scheduling fields are internal; there is no public hidden-update or hidden-draw switch. App code can query the resolved Window with `isWindowOccluded()`.
 
 ### Recording Tools (ReadOnly)
 
@@ -524,8 +526,8 @@ Configure your MCP client with the HTTP URL:
 | Category | Required grant |
 |----------|----------------|
 | `tc_get_health` | Public; also the sole tool on the environment-opened health endpoint |
-| Inspection, screenshots, audio capture, status and alerts | ReadOnly |
-| Recording, input, scene mutation and quit | Control |
+| Inspection, screenshots, recording, audio capture, status and alerts | ReadOnly |
+| Input, scene mutation and quit | Control |
 | ImGui widget/touched queries | ReadOnly |
 | ImGui interaction and touched-record reset | Control |
 | Custom tools | Declared `.level()`, default Public; explicit listener opt-in still required |

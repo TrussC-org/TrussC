@@ -2,7 +2,7 @@
 
 Per-window window control on a **secondary** window: fullscreen, screenshot,
 recording and frame-rate — all driven through the context-aware global
-functions, which route to whichever window's tick is currently running.
+functions, which use the calling App's own Window.
 
 - **Launch window** (800x600, dark, red badge): instructions.
 - **Secondary window** (500x400, blue, moving shape): the window the per-window
@@ -17,7 +17,7 @@ its Window. Closing one leaves the other running; closing the last asks
 ## Keys
 
 `keyPressed` is per-window, so the **focused** window is the one that reacts —
-the context-aware global functions route to whichever window's tick is running.
+the context-aware global functions use that App's Window.
 
 | Key | Action |
 |-----|--------|
@@ -29,7 +29,7 @@ Secondary (blue) window only:
 |-----|--------|
 | `s` | `saveScreenshot("winctrl_secondary.png")` from this window |
 | `r` | Start / stop a 3-second `startRecording("winctrl_secondary.mp4", 3.0f)` from this window |
-| `1` / `2` / `3` | Set the secondary window's fps to 15 / 30 / vsync free-run (`Window::setFps(0)`) |
+| `1` / `2` / `3` | Set the secondary window's fps to 15 / 30 / vsync (`Window::setFps(VSYNC)`) |
 
 ## Autotest
 
