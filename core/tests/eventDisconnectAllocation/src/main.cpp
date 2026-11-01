@@ -55,7 +55,7 @@ struct AttachmentDevice {
         sgl_desc_t gd{}; gd.context_pool_size = 8; gd.pipeline_pool_size = 256;
         sgl_setup(&gd);
         internal::WindowRequestAccess::bindForTests(renderWindow, 303);
-        auto& main = renderWindow.context();
+        auto& main = trussc::internal::WindowRequestAccess::context(renderWindow);
         main.fbWidth = main.fbHeight = 32;
         main.swapchainTarget.width = main.swapchainTarget.height = 32;
         internal::restoreWindowContext(&main);
@@ -180,7 +180,7 @@ bool countsMatch(Window& win, std::size_t) {
 void prepareReleasedTarget(Window& win) {
     if (!sg_isvalid()) return;
     auto* previous = internal::currentWindowCtx();
-    auto& ctx = win.context();
+    auto& ctx = trussc::internal::WindowRequestAccess::context(win);
     ctx.fbWidth = ctx.fbHeight = 80;
     ctx.swapchainTarget.width = ctx.swapchainTarget.height = 80;
     internal::restoreWindowContext(&ctx);
@@ -229,10 +229,10 @@ void swaps(bool callbackBoundary = false) {
         const bool bound = current != nullptr;
         check("swap: contained failure, complete binding set, at most one report",
               !threw && countsMatch(win, bound ? 1 : 0) &&
-              win.context().appEventListeners.size() == 15u &&
+              trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15u &&
               (errors - before <= 1 && (current == b || errors - before == 1)), nth);
         auto* prev = internal::currentWindowCtx();
-        internal::currentWindowCtx() = &win.context();
+        internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(win);
         win.events().update.notify();
         win.events().update.notify();
         internal::currentWindowCtx() = prev;
@@ -242,7 +242,7 @@ void swaps(bool callbackBoundary = false) {
         check("swap: B exit exactly once, no stale framework entries after close",
               b->exits == (current == b ? 1 : 0) && b->cleanups == (current == b ? 1 : 0) &&
               a->exits == 1 && a->cleanups == 1 && countsMatch(win, 0) &&
-              win.context().appEventListeners.empty() && internal::attachedApps().empty(), nth);
+              trussc::internal::WindowRequestAccess::context(win).appEventListeners.empty() && internal::attachedApps().empty(), nth);
         if (sg_isvalid()) internal::drainPendingGpuDestroys();
         if (!injected) {
             std::printf("swap boundary=%d: %d fired indices, terminal index passed\n", callbackBoundary, nth);
@@ -287,9 +287,9 @@ bool attachment(int scenario, bool callback, int nth) {
     const bool committed = current == requested;
     check("attachment: atomic App/root/registry/bindings, request dropped, context restored",
           !escaped && (committed || current == old) &&
-          win.context().rootNode.lock() == current &&
+          trussc::internal::WindowRequestAccess::context(win).rootNode.lock() == current &&
           countsMatch(win, current ? 1 : 0) &&
-          win.context().appEventListeners.size() == 15u &&
+          trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15u &&
           internal::attachedApps().size() == (current ? 1u : 0u) &&
           internal::attachedApps().count(a.get()) == (current == a ? 1u : 0u) &&
           internal::attachedApps().count(b.get()) == (current == b ? 1u : 0u) &&
@@ -306,7 +306,7 @@ bool attachment(int scenario, bool callback, int nth) {
           (!sg_isvalid() || sgl_get_context().id == gpuContext.id), nth);
     // A failed or superseded candidate must have no delivery bindings. An
     // update exercises every live update token, including provisional ones.
-    internal::currentWindowCtx() = &win.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(win);
     win.events().update.notify();
     internal::restoreWindowContext(previous);
     check("attachment: only attached App receives delivery",
@@ -317,13 +317,13 @@ bool attachment(int scenario, bool callback, int nth) {
         internal::WindowRequestAccess::attachCandidate(retry, b); internal::applyPendingAppForTests(retry);
         check("attachment: a cancelled candidate cannot attach elsewhere",
               !retry.getApp() && !internal::appOwner(*b)->token->load() && countsMatch(retry, 0) &&
-              retry.context().appEventListeners.size() == 15, nth);
+              trussc::internal::WindowRequestAccess::context(retry).appEventListeners.size() == 15, nth);
         retry.finish();
     }
     win.finish();
     check("attachment: no stale registry or bindings after close",
           internal::attachedApps().empty() && countsMatch(win, 0) &&
-          win.context().appEventListeners.empty() && internal::currentWindowCtx() == previous, nth);
+          trussc::internal::WindowRequestAccess::context(win).appEventListeners.empty() && internal::currentWindowCtx() == previous, nth);
     if (sg_isvalid()) internal::drainPendingGpuDestroys();
     return injected;
 }
@@ -459,13 +459,13 @@ void mainBoundaryValidation() {
     TestWindow win;
     win.setApp<TestApp>(); attachAtCallbackBoundary(&win);
     auto old = std::static_pointer_cast<TestApp>(win.getApp());
-    auto slots = win.context().appEventListeners.size();
+    auto slots = trussc::internal::WindowRequestAccess::context(win).appEventListeners.size();
     int releases = 0;
     retainUntilRebuild(win.events().update, [] {}, releases);
     win.setApp<TestApp>(); attachAtCallbackBoundary(&win);
     check("stable slots: swap does not reclaim or reorder unrelated listeners",
           win.getApp() != old && releases == 0 && old->exits == 1 && old->cleanups == 1 &&
-          win.context().appEventListeners.size() == slots);
+          trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == slots);
     auto rebuild = win.events().update.listen([] {});
     check("stable slots: explicit rebuild releases the tombstone once", releases == 1);
 }
@@ -527,7 +527,7 @@ void reentrantOtherPhases() {
     int reports = 0;
     auto logger = getLogger().onLog.listen([&](LogEventArgs& e) {
         if (e.level != LogLevel::Error || reports++) return;
-        check("logger reentry: failed ledger preparation retains old App", win.getApp() == old && win.context().rootNode.lock() == old);
+        check("logger reentry: failed ledger preparation retains old App", win.getApp() == old && trussc::internal::WindowRequestAccess::context(win).rootNode.lock() == old);
         win.setApp<TestApp>(); attachAtCallbackBoundary(&win);
     });
     win.setApp<TestApp>(); arm(0); attachAtCallbackBoundary(&win); disarm();
@@ -552,7 +552,7 @@ struct ClearExitApp : TestApp {
     }
     void cleanup() override {
         ++cleanups;
-        finished = win.context().appEventListeners.size() == 15 && internal::appRanCleanup(*this);
+        finished = trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15 && internal::appRanCleanup(*this);
     }
 };
 extern "C" void closeAtCallbackBoundary(TestWindow* win) noexcept { win->finish(); }
@@ -587,7 +587,7 @@ int closeWithClear(int boundary, int nth, bool faultInsideExit = false) {
     if (win) {
         win->finish();
         check("exit.clear: repeated close leaves all bindings disconnected",
-              countsMatch(*win, 0) && win->context().appEventListeners.empty() &&
+              countsMatch(*win, 0) && trussc::internal::WindowRequestAccess::context(*win).appEventListeners.empty() &&
               app->exits == 1 && app->cleanups == 1, nth);
     }
     return total;
@@ -635,14 +635,14 @@ struct SweepApp : App {
     void cleanup() override {
         ++state.cleanups;
         state.detached = internal::appRanCleanup(*this) && !win.getApp() &&
-                         win.context().rootNode.expired() && internal::attachedApps().empty();
-        state.slotsStable = win.context().appEventListeners.size() == 15;
+                         trussc::internal::WindowRequestAccess::context(win).rootNode.expired() && internal::attachedApps().empty();
+        state.slotsStable = trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15;
         allocatingWork();
         if (throwCleanup) throw 2;
     }
     ~SweepApp() override {
         ++state.destroyed;
-        state.destructorContext = internal::currentWindowCtx() == &win.context();
+        state.destructorContext = internal::currentWindowCtx() == &trussc::internal::WindowRequestAccess::context(win);
     }
 };
 extern "C" void sweepCloseCallback(TestWindow* win) noexcept {
@@ -681,7 +681,7 @@ bool sweepClose(int boundary, bool clearExit, int throwing, int nth) {
     if (win) {
         win->finish();
         check("close sweep: retry inert, queue drained, bindings disconnected",
-              win->context().asyncScreenshots.pending.empty() && win->context().appEventListeners.empty() &&
+              trussc::internal::WindowRequestAccess::context(*win).asyncScreenshots.pending.empty() && trussc::internal::WindowRequestAccess::context(*win).appEventListeners.empty() &&
               state.exits == 1 && state.cleanups == 1 && state.after == 2, nth);
     }
     return injected;

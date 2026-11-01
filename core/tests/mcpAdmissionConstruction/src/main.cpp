@@ -109,8 +109,8 @@ json content(const json& reply) {
 TC_CORE_TEST_MAIN() {
     getMainThreadId();
     tcCoreTest::WindowFixture receiver;
-    receiver.window->context().fbWidth = 3840;
-    receiver.window->context().fbHeight = 2160;
+    trussc::internal::WindowRequestAccess::context(*receiver.window).fbWidth = 3840;
+    trussc::internal::WindowRequestAccess::context(*receiver.window).fbHeight = 2160;
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::stopHttpServer();
     mcp::internal::resetHttpChannel();

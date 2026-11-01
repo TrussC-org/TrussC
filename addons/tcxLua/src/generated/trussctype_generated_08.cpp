@@ -60,37 +60,37 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["toFillMesh"] = &trussc::Path::toFillMesh;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::Vec4
-            , trussc::Vec4()
-            , trussc::Vec4(float, float, float, float)
-            , trussc::Vec4(float)
-            , trussc::Vec4(const trussc::Vec3 &)
-            , trussc::Vec4(const trussc::Vec3 &, float)
-            , trussc::Vec4(const trussc::Vec2 &)
-            , trussc::Vec4(const trussc::Vec2 &, float)
-            , trussc::Vec4(const trussc::Vec2 &, float, float)
+        auto constructors = tcxLuaConstructors<trussc::Vec3
+            , trussc::Vec3()
+            , trussc::Vec3(float, float, float)
+            , trussc::Vec3(float)
+            , trussc::Vec3(const trussc::Vec2 &)
+            , trussc::Vec3(const trussc::Vec2 &, float)
         >();
-        sol::usertype<trussc::Vec4> t = lua->new_usertype<trussc::Vec4>("Vec4", constructors, sol::call_constructor, constructors);
-        t[sol::meta_function::multiplication] = sol::overload([](const trussc::Vec4& a, const trussc::Vec4 & b){ return a * b; }, [](const trussc::Vec4& a, float b){ return a * b; });
-        t[sol::meta_function::addition] = [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::Vec4& a){ return -a; };
-        t[sol::meta_function::division] = sol::overload([](const trussc::Vec4& a, const trussc::Vec4 & b){ return a / b; }, [](const trussc::Vec4& a, float b){ return a / b; });
-        t[sol::meta_function::equal_to] = [](const trussc::Vec4& a, const trussc::Vec4 & b){ return a == b; };
-        t[sol::meta_function::index] = [](const trussc::Vec4& a, int b){ return a[b]; };
-        t["w"] = &trussc::Vec4::w;
-        t["x"] = &trussc::Vec4::x;
-        t["y"] = &trussc::Vec4::y;
-        t["z"] = &trussc::Vec4::z;
-        t["dot"] = &trussc::Vec4::dot;
-        t["length"] = &trussc::Vec4::length;
-        t["lengthSquared"] = &trussc::Vec4::lengthSquared;
-        t["lerp"] = &trussc::Vec4::lerp;
-        t["normalize"] = &trussc::Vec4::normalize;
-        t["normalized"] = &trussc::Vec4::normalized;
-        t["set"] = sol::overload([](trussc::Vec4& self, float x_, float y_, float z_, float w_) -> decltype(auto) { return self.set(x_, y_, z_, w_); }, [](trussc::Vec4& self, const trussc::Vec4 & v) -> decltype(auto) { return self.set(v); });
-        t["xy"] = &trussc::Vec4::xy;
-        t["xyz"] = &trussc::Vec4::xyz;
+        sol::usertype<trussc::Vec3> t = lua->new_usertype<trussc::Vec3>("Vec3", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = sol::overload([](const trussc::Vec3& a, float b){ return a * b; }, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a * b; });
+        t[sol::meta_function::addition] = [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a - b; };
+        t[sol::meta_function::unary_minus] = [](const trussc::Vec3& a){ return -a; };
+        t[sol::meta_function::division] = sol::overload([](const trussc::Vec3& a, float b){ return a / b; }, [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a / b; });
+        t[sol::meta_function::equal_to] = [](const trussc::Vec3& a, const trussc::Vec3 & b){ return a == b; };
+        t[sol::meta_function::index] = [](const trussc::Vec3& a, int b){ return a[b]; };
+        t["x"] = &trussc::Vec3::x;
+        t["y"] = &trussc::Vec3::y;
+        t["z"] = &trussc::Vec3::z;
+        t["cross"] = &trussc::Vec3::cross;
+        t["distance"] = &trussc::Vec3::distance;
+        t["distanceSquared"] = &trussc::Vec3::distanceSquared;
+        t["dot"] = &trussc::Vec3::dot;
+        t["length"] = &trussc::Vec3::length;
+        t["lengthSquared"] = &trussc::Vec3::lengthSquared;
+        t["lerp"] = &trussc::Vec3::lerp;
+        t["limit"] = &trussc::Vec3::limit;
+        t["normalize"] = &trussc::Vec3::normalize;
+        t["normalized"] = &trussc::Vec3::normalized;
+        t["reflected"] = &trussc::Vec3::reflected;
+        t["set"] = sol::overload([](trussc::Vec3& self, float x_, float y_, float z_) -> decltype(auto) { return self.set(x_, y_, z_); }, [](trussc::Vec3& self, const trussc::Vec3 & v) -> decltype(auto) { return self.set(v); });
+        t["xy"] = &trussc::Vec3::xy;
     }
     {
         sol::usertype<trussc::AudioStats> t = lua->new_usertype<trussc::AudioStats>("AudioStats");
@@ -111,16 +111,17 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["voicesStoppedByReinit"] = &trussc::AudioStats::voicesStoppedByReinit;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::AudioRecorder
-            , trussc::AudioRecorder()
-        >();
-        sol::usertype<trussc::AudioRecorder> t = lua->new_usertype<trussc::AudioRecorder>("AudioRecorder", constructors, sol::call_constructor, constructors);
-        t["getDroppedFrames"] = &trussc::AudioRecorder::getDroppedFrames;
-        t["getPath"] = &trussc::AudioRecorder::getPath;
-        t["getRecordedSeconds"] = &trussc::AudioRecorder::getRecordedSeconds;
-        t["isRecording"] = &trussc::AudioRecorder::isRecording;
-        t["start"] = sol::overload([](trussc::AudioRecorder& self, const fs::path & path) { return self.start(path); }, [](trussc::AudioRecorder& self, const fs::path & path, const trussc::AudioRecordSettings & settings) { return self.start(path, settings); });
-        t["stop"] = &trussc::AudioRecorder::stop;
+        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
+        t["derived"] = &trussc::JsonWriteReflector::derived;
+        t["includeDerived"] = &trussc::JsonWriteReflector::includeDerived;
+        t["members"] = &trussc::JsonWriteReflector::members;
+        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
+        t["isDerived"] = &trussc::JsonWriteReflector::isDerived;
+        t["isReadOnly"] = &trussc::JsonWriteReflector::isReadOnly;
+        t["popDerived"] = &trussc::JsonWriteReflector::popDerived;
+        t["popReadOnly"] = &trussc::JsonWriteReflector::popReadOnly;
+        t["pushDerived"] = &trussc::JsonWriteReflector::pushDerived;
+        t["pushReadOnly"] = &trussc::JsonWriteReflector::pushReadOnly;
     }
     {
         sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
@@ -135,25 +136,28 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["isWindows"] = &trussc::Platform::isWindows;
         t["name"] = &trussc::Platform::name;
     }
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
-        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
-        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
-        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
     {
-        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
-        t["distance"] = &trussc::Node::HitResult::distance;
-        t["localPoint"] = &trussc::Node::HitResult::localPoint;
-        t["node"] = &trussc::Node::HitResult::node;
-        t["hit"] = &trussc::Node::HitResult::hit;
+        auto constructors = tcxLuaConstructors<trussc::LogEventArgs
+            , trussc::LogEventArgs(trussc::LogLevel, const std::string &)
+        >();
+        sol::usertype<trussc::LogEventArgs> t = lua->new_usertype<trussc::LogEventArgs>("LogEventArgs", constructors, sol::call_constructor, constructors);
+        t["level"] = &trussc::LogEventArgs::level;
+        t["message"] = &trussc::LogEventArgs::message;
+        t["timestamp"] = &trussc::LogEventArgs::timestamp;
+    }
+    {
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
+    }
+    {
+        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
+        t["channels"] = &trussc::AudioOutBuffer::channels;
+        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
+        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
+        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
     }
     lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
         sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
@@ -165,9 +169,9 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["format"] = &trussc::AudioRecordSettings::format;
     }
     {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+        t["message"] = &trussc::UdpErrorEventArgs::message;
     }
 }
 #ifdef _MSC_VER

@@ -3,6 +3,7 @@
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include "resizeDeliveryChecks.h"
+#include "windowInternalAccessChecks.h"
 using namespace tc;
 namespace {
 int checks = 0, failures = 0;
@@ -50,7 +51,7 @@ struct Probe : App {
         if (inspect) {
             auto* w = getWindow();
             check("App size seed sees bound receiver", w && internal::currentWindow() == w);
-            check("fb and DPI published before first App size", w && w->context().fbWidth == 1503 && w->context().fbHeight == 999 && w->context().dpiScale == 1.5f);
+            check("fb and DPI published before first App size", w && trussc::internal::WindowRequestAccess::context(*w).fbWidth == 1503 && trussc::internal::WindowRequestAccess::context(*w).fbHeight == 999 && trussc::internal::WindowRequestAccess::context(*w).dpiScale == 1.5f);
             check("initial size uses logical or pixelPerfect units", width == (internal::pixelPerfectMode() ? 1503 : 1002) && height == (internal::pixelPerfectMode() ? 999 : 666));
             check("size callbacks use the fake clock", internal::getUpdateTime() == fakeTime);
             check("metadata seed acquires no drawable", static_cast<Native*>(internal::WindowRequestAccess::binding(*w).user)->acquisitions == 0);
@@ -59,7 +60,7 @@ struct Probe : App {
 };
 void exercise(Window& w, uint32_t id) {
     internal::WindowRequestAccess::resetForLaunch(w);
-    check("context pointers are prewired to owned state for both roots", w.context().render == &w.render_ && w.context().coreEvents == &w.events());
+    check("context pointers are prewired to owned state for both roots", trussc::internal::WindowRequestAccess::context(w).render == &w.render_ && trussc::internal::WindowRequestAccess::context(w).coreEvents == &w.events());
     Native n;
     n.id = id; n.metadata.fb_width = 1503; n.metadata.fb_height = 999;
     n.metadata.dpi_scale = 1.5f; n.metadata.sample_count = 4;
@@ -70,7 +71,7 @@ void exercise(Window& w, uint32_t id) {
     check("zero ID cannot bind", !internal::bindWindow(w, {0}, operations, &n));
     check("same production binding path for both roots", internal::bindWindow(w, {id}, operations, &n));
     check("identity comes from binding", internal::WindowRequestAccess::creationId(w) == id);
-    check("actual target format is published before callbacks", w.context().swapchainTarget.colorFormat == SG_PIXELFORMAT_RGB10A2 && w.context().swapchainTarget.sampleCount == 4);
+    check("actual target format is published before callbacks", trussc::internal::WindowRequestAccess::context(w).swapchainTarget.colorFormat == SG_PIXELFORMAT_RGB10A2 && trussc::internal::WindowRequestAccess::context(w).swapchainTarget.sampleCount == 4);
     check("metadata query needs no native activation", n.activations == 0 && n.acquisitions == 0);
     auto app = internal::makeConstructedApp<Probe>();
     internal::WindowRequestAccess::attachCandidate(w, app); internal::applyPendingAppForTests(w);
@@ -82,14 +83,14 @@ void exercise(Window& w, uint32_t id) {
         n.metadata.trust_hidden_signals = trust; n.metadata.iconified = iconified; n.metadata.occluded = occluded;
         internal::refreshWindowMetadata(w);
         const bool expected = trust && (iconified || occluded);
-        check("effective hidden agrees with ctx and trust", w.isOccluded() == expected && w.context().suspended == expected);
+        check("effective hidden agrees with ctx and trust", w.isOccluded() == expected && trussc::internal::WindowRequestAccess::context(w).suspended == expected);
         const int queries = n.queries;
         (void)w.isOccluded(); (void)w.isOccluded();
         check("getter has no native side effects", n.queries == queries);
     }
     n.metadata.fb_width = n.metadata.fb_height = 0; n.metadata.drawable_available = false;
     internal::refreshWindowMetadata(w); internal::syncWindowAppSize(w);
-    check("minimized zeros retain last valid size", w.context().fbWidth == 1503 && w.context().fbHeight == 999 && app->sizes == 1);
+    check("minimized zeros retain last valid size", trussc::internal::WindowRequestAccess::context(w).fbWidth == 1503 && trussc::internal::WindowRequestAccess::context(w).fbHeight == 999 && app->sizes == 1);
     n.metadata.fb_width = 1503; n.metadata.fb_height = 999; n.metadata.dpi_scale = 3;
     internal::refreshWindowMetadata(w); internal::syncWindowAppSize(w);
     check("DPI-only revision respects coordinate mode", app->getWidth() == (internal::pixelPerfectMode() ? 1503 : 501) && app->getHeight() == (internal::pixelPerfectMode() ? 999 : 333) && app->sizes == (internal::pixelPerfectMode() ? 1 : 2));
@@ -130,19 +131,19 @@ void exercise(Window& w, uint32_t id) {
     check("metadata never acquires a drawable", n.acquisitions == 0);
     n.metadata.trust_hidden_signals = false;
     internal::refreshWindowMetadata(w);
-    w.context().suspended = true; // stale lifecycle state must not override an untrusted native observation
-    auto* previous = internal::currentWindowCtx(); internal::currentWindowCtx() = &w.context();
-    w.context().loop = {};
-    w.setIndependentFps(4, EVENT_DRIVEN); w.context().loop.redrawCount = 0;
-    const auto before = w.context().updateCount;
+    trussc::internal::WindowRequestAccess::context(w).suspended = true; // stale lifecycle state must not override an untrusted native observation
+    auto* previous = internal::currentWindowCtx(); internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(w);
+    trussc::internal::WindowRequestAccess::context(w).loop = {};
+    w.setIndependentFps(4, EVENT_DRIVEN); trussc::internal::WindowRequestAccess::context(w).loop.redrawCount = 0;
+    const auto before = trussc::internal::WindowRequestAccess::context(w).updateCount;
     const internal::WindowTickPresentation presentation{[] {}, [] { return true; }, [] {}};
     internal::runWindowTick(fakeTime, .25, false, &presentation);
-    check("scheduler reads effective hidden rather than stale suspension", w.context().updateCount == before + 1);
+    check("scheduler reads effective hidden rather than stale suspension", trussc::internal::WindowRequestAccess::context(w).updateCount == before + 1);
     check("both roots run setup once before the first update", app->setups == 1 && app->updates == 1);
     internal::currentWindowCtx() = previous;
     const auto acquisitions = n.acquisitions, activations = n.activations;
-    w.context().activateNative(w.context().acquireSwapchainUser);
-    (void)w.context().acquireSwapchain(w.context().acquireSwapchainUser);
+    trussc::internal::WindowRequestAccess::context(w).activateNative(trussc::internal::WindowRequestAccess::context(w).acquireSwapchainUser);
+    (void)trussc::internal::WindowRequestAccess::context(w).acquireSwapchain(trussc::internal::WindowRequestAccess::context(w).acquireSwapchainUser);
     check("native operations use this window's table and user", n.acquisitions == acquisitions + 1 && n.activations == activations + 1);
     checkResizeDelivery(w, n.metadata, app, sizeEntry, sizeEntry, check);
     internal::WindowRequestAccess::unbind(w);
@@ -155,11 +156,11 @@ TC_CORE_TEST_MAIN() {
     getMainThreadId();
     internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
     auto canonical = internal::prepareLaunchWindow(WindowSettings{});
-    auto* context = &canonical->context();
+    auto* context = &trussc::internal::WindowRequestAccess::context(*canonical);
     auto* events = &canonical->events();
     auto* render = &canonical->render_;
     Window secondary;
-    check("every Window owns distinct state", &secondary.context() != context && &secondary.events() != events && &secondary.render_ != render);
+    check("every Window owns distinct state", &trussc::internal::WindowRequestAccess::context(secondary) != context && &secondary.events() != events && &secondary.render_ != render);
     internal::windowClockForTests() = clockNow;
     for (bool pixels : {false, true}) {
         internal::pixelPerfectMode() = pixels;
@@ -169,7 +170,7 @@ TC_CORE_TEST_MAIN() {
     internal::windowClockForTests() = nullptr;
     internal::shutdownRuntime();
     internal::endFrameworkLifetime();
-    check("retained closed Window keeps CPU state", &canonical->context() == context && &canonical->events() == events && &canonical->render_ == render);
+    check("retained closed Window keeps CPU state", &trussc::internal::WindowRequestAccess::context(*canonical) == context && &canonical->events() == events && &canonical->render_ == render);
     check("headless runner succeeds", runHeadlessApp<HeadlessProbe>() == 0);
     check("headless restores the null process caller", !internal::currentWindowCtx() &&
         &internal::currentWindowContext() == &internal::nonWindowContext());

@@ -60,16 +60,16 @@ struct Probe : App {
 std::shared_ptr<Window> window(uint32_t id) {
     auto result = std::make_shared<Window>();
     internal::WindowRequestAccess::bindForTests(*result, id);
-    result->context().fbWidth = 320;
-    result->context().fbHeight = 200;
-    result->context().dpiScale = 1;
+    trussc::internal::WindowRequestAccess::context(*result).fbWidth = 320;
+    trussc::internal::WindowRequestAccess::context(*result).fbHeight = 200;
+    trussc::internal::WindowRequestAccess::context(*result).dpiScale = 1;
     internal::retainRuntimeWindow(result);
     return result;
 }
 void apply(Window& w) { internal::applyPendingAppForTests(w); }
 void tick(Window& w) {
     auto* previous = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &w.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(w);
     { internal::WindowEntryScope entry(w); if (entry) w.events().update.notify(); }
     internal::currentWindowCtx() = previous;
 }
@@ -158,16 +158,16 @@ TC_CORE_TEST_MAIN() {
     b->setApp<Probe>(second, "B"); apply(*b); tick(*b);
     auto foreignNode = std::make_shared<RectNode>(); firstApp->addChild(foreignNode);
     auto ownNode = std::make_shared<RectNode>(); b->getApp()->addChild(ownNode);
-    b->context().hoveredNode = foreignNode; b->context().grabbedNode = foreignNode;
-    b->context().grabbedButton = 0; b->context().selectedNode = ownNode;
+    trussc::internal::WindowRequestAccess::context(*b).hoveredNode = foreignNode; trussc::internal::WindowRequestAccess::context(*b).grabbedNode = foreignNode;
+    trussc::internal::WindowRequestAccess::context(*b).grabbedButton = 0; trussc::internal::WindowRequestAccess::context(*b).selectedNode = ownNode;
     a->setApp<Probe>(discarded, "discarded");
     a->destroyApp(); apply(*a);
     check("unpublished candidate has no invented lifecycle", discarded.setups == 0 && discarded.exits == 0 && discarded.cleanups == 0 && !discarded.token->load());
     check("destroy detaches root and App before ending", !a->getApp() && first.detached && first.exits == 1 && first.cleanups == 1 && a->isOpen());
     check("ending clears foreign tree refs and preserves B's live selection",
-          b->context().hoveredNode.expired() && b->context().grabbedNode.expired() &&
-          b->context().grabbedButton == -1 && b->context().selectedNode.lock() == ownNode &&
-          b->context().rootNode.lock() == b->getApp());
+          trussc::internal::WindowRequestAccess::context(*b).hoveredNode.expired() && trussc::internal::WindowRequestAccess::context(*b).grabbedNode.expired() &&
+          trussc::internal::WindowRequestAccess::context(*b).grabbedButton == -1 && trussc::internal::WindowRequestAccess::context(*b).selectedNode.lock() == ownNode &&
+          trussc::internal::WindowRequestAccess::context(*b).rootNode.lock() == b->getApp());
     check("A ending preserves B tools and token", !first.token->load() && second.token->load() && !mcp::hasTool("A") && !mcp::hasTool("A:lazy") && mcp::hasTool("B"));
     const int oldCalls = first.calls;
     appSignal.notify();
@@ -176,7 +176,7 @@ TC_CORE_TEST_MAIN() {
     State nestedA, nestedB;
     a->setApp<Nested>(nestedA, nestedB, *b, "nested-A"); apply(*a); apply(*b); tick(*a); tick(*b);
     check("nested candidate owns an independent token", nestedA.token != nestedB.token && nestedA.owner != nestedB.owner);
-    check("constructor events select the receiving Window outside a callback", nestedA.constructorContext == &a->context() && nestedB.constructorContext == &b->context() && nestedA.constructorUpdates == 1 && nestedB.constructorUpdates == 1);
+    check("constructor events select the receiving Window outside a callback", nestedA.constructorContext == &trussc::internal::WindowRequestAccess::context(*a) && nestedB.constructorContext == &trussc::internal::WindowRequestAccess::context(*b) && nestedA.constructorUpdates == 1 && nestedB.constructorUpdates == 1);
     {
         internal::AppOwnerScope scope(internal::appOwner(*a->getApp()));
         State callbackA, callbackB;

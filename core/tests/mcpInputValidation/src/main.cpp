@@ -82,7 +82,7 @@ TC_CORE_TEST_MAIN() {
     getMainThreadId();
     Window window;
     tcCoreTest::InjectedWindow native(window);
-    internal::currentWindowCtx() = &window.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(window);
     mcp::setToolLevel(mcp::ToolLevel::Control);
     auto& ctx = internal::currentWindowContext();
     ctx.keysPressed.clear();

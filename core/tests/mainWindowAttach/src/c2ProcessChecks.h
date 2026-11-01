@@ -83,7 +83,7 @@ void run() {
     state.order.clear(); check("empty earlier veto retains later first reason", !internal::dispatchExitRequested() && internal::exitBlockReason() == "first reason");
     earlyReason.disconnect(); reason.disconnect(); otherReason.disconnect();
     EventListener ownedRuntime;
-    auto* render = a->context().render;
+    auto* render = trussc::internal::WindowRequestAccess::context(*a).render;
     const auto matrixDepth = render->getMatrixStackDepth(), styleDepth = render->getStyleStackDepth();
     {
         internal::AppOwnerScope owner(internal::appOwner(*a->getApp()));

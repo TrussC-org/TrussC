@@ -203,7 +203,7 @@ static std::vector<std::string> awaitPosts(std::vector<PendingPost>& posts, size
         }
         if (hooked) {
             for (auto* window : internal::openWindows())
-                mcp::internal::drainDeferredResponses(&window->context(), true,
+                mcp::internal::drainDeferredResponses(&trussc::internal::WindowRequestAccess::context(*window), true,
                                                     std::chrono::steady_clock::now(), false);
             mcp::internal::drainDeferredResponses(nullptr, false);
         }
@@ -332,7 +332,7 @@ static int runCycles(const std::string& guestPath, int port) {
     const auto mainId = internal::WindowRequestAccess::creationId(*mainHandle);
     struct MainOwnerReset { ~MainOwnerReset() { internal::shutdownRuntime(); } } mainOwnerReset;
     auto* caller = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &mainHandle->context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*mainHandle);
     struct CallerRestore {
         internal::WindowContext* previous;
         ~CallerRestore() { internal::currentWindowCtx() = previous; }
@@ -638,7 +638,7 @@ static int runCycles(const std::string& guestPath, int port) {
         Window keptWindow;
         {
             std::shared_ptr<Node> guestNode = guest->addGuestChild();
-            for (internal::WindowContext* ctx : {&internal::windowApiContext(), &keptWindow.context()}) {
+            for (internal::WindowContext* ctx : {&internal::windowApiContext(), &trussc::internal::WindowRequestAccess::context(keptWindow)}) {
                 ctx->hoveredNode = guestNode;
                 ctx->prevHoveredNode = guestNode;
                 ctx->grabbedNode = guestNode;
@@ -680,11 +680,11 @@ static int runCycles(const std::string& guestPath, int port) {
             const std::weak_ptr<Node> none;
             return !ref.owner_before(none) && !none.owner_before(ref);
         };
-        for (internal::WindowContext* ctx : {&internal::windowApiContext(), &keptWindow.context()}) {
+        for (internal::WindowContext* ctx : {&internal::windowApiContext(), &trussc::internal::WindowRequestAccess::context(keptWindow)}) {
             if (!isReset(ctx->hoveredNode) || !isReset(ctx->prevHoveredNode) || !isReset(ctx->grabbedNode) ||
                 ctx->grabbedButton != -1 || !isReset(ctx->selectedNode)) {
                 return fail(39, std::string("unloading the guest left a reference to one of its nodes in the ") +
-                                (ctx == &keptWindow.context() ? "secondary" : "main") +
+                                (ctx == &trussc::internal::WindowRequestAccess::context(keptWindow) ? "secondary" : "main") +
                                 " window's hover / grab / selection");
             }
         }

@@ -36,7 +36,7 @@ TC_CORE_TEST_MAIN() {
     auto app = internal::makeConstructedApp<App>();
     internal::HeadlessUpdateState updateState;
     auto headlessPass = [&](double elapsed) {
-        internal::runHeadlessUpdatePass(*app, receiver.window->context(),
+        internal::runHeadlessUpdatePass(*app, trussc::internal::WindowRequestAccess::context(*receiver.window),
                                         updateState, elapsed, 0.01);
     };
 
@@ -65,8 +65,8 @@ TC_CORE_TEST_MAIN() {
     {
         tcCoreTest::WindowFixture fast(102), normal(103);
         auto windowPass = [&](tcCoreTest::WindowFixture& receiver, float hz) {
-            internal::currentWindowCtx() = &receiver.window->context();
-            receiver.window->context().loop.updateTargetFps = hz;
+            internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*receiver.window);
+            trussc::internal::WindowRequestAccess::context(*receiver.window).loop.updateTargetFps = hz;
             internal::runIndependentUpdates(now);
         };
         windowPass(fast, 1000);

@@ -64,12 +64,12 @@ void nativeWindowToggleFullscreen(Window& w) { sapp_tc_window_toggle_fullscreen(
 void nativeWindowSetSize(Window& w, double width, double height, bool pixelSize) {
     x11Geometry((Display*)sapp_x11_get_display(),
         (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)), WindowRequestAccess::binding(w).geometry,
-        false, 0, 0, width, height, w.context().dpiScale, w.isFullscreen(), pixelSize);
+        false, 0, 0, width, height, trussc::internal::WindowRequestAccess::context(w).dpiScale, w.isFullscreen(), pixelSize);
 }
 void nativeWindowSetPosition(Window& w, int x, int y) {
     x11Geometry((Display*)sapp_x11_get_display(),
         (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)), WindowRequestAccess::binding(w).geometry,
-        true, x, y, 0, 0, w.context().dpiScale, w.isFullscreen());
+        true, x, y, 0, 0, trussc::internal::WindowRequestAccess::context(w).dpiScale, w.isFullscreen());
 }
 IVec2 nativeWindowPosition(const Window& w) {
     return x11FramePosition((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)));

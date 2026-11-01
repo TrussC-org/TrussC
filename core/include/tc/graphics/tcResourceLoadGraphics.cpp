@@ -286,7 +286,7 @@ float Font::loadDpiScale() {
     // Windows open, omission follows the same sole-Window rule as queries.
     if (internal::openWindows().empty()) return 1.0f;
     if (auto* window = internal::resolveWindow(true))
-        return internal::windowDimensions(window->context()).dpiScale;
+        return internal::windowDimensions(trussc::internal::WindowRequestAccess::context(*window)).dpiScale;
     return 1.0f;
 }
 

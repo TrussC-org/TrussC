@@ -346,7 +346,7 @@ struct InputTarget {
     trussc::Window& window;
     std::optional<trussc::internal::WindowEntryScope> entry;
     sapp_tc_window_metadata snapshot{};
-    trussc::internal::WindowContext& ctx = window.context();
+    trussc::internal::WindowContext& ctx = trussc::internal::WindowRequestAccess::context(window);
     explicit InputTarget(const json& args) : window(targetWindow(args)) {
         if (!window.isOpen()) throw InputArgumentError("target window is not available for input");
         const auto& b = trussc::internal::WindowRequestAccess::binding(window);
@@ -483,7 +483,7 @@ void registerStandardTools(Server& server) {
                                    "retry"}};
             return nullptr;
         }
-        return &win->context();
+        return &trussc::internal::WindowRequestAccess::context(*win);
     };
 
     coreTool(server, "tc_list_windows", "List open windows with positive IDs (use index as the window argument). Each window has 'occluded': true while the OS reports it hidden (minimized, covered, on another Space, or the screen locked or off); it then renders no frames and cannot be captured.")
@@ -984,7 +984,7 @@ void registerStandardTools(Server& server) {
         .arg<int>("depth", "Max child depth (omit for unlimited, 0 = the node only)", false)
         .bind([](const json& args) -> json {
             auto& window = internal::InputTarget::targetWindow(args);
-            auto rootOwner = window.context().rootNode.lock();
+            auto rootOwner = trussc::internal::WindowRequestAccess::context(window).rootNode.lock();
             Node* root = rootOwner.get();
             if (!root) {
                 return json{{"status", "error"}, {"message", "App is not running"}};
@@ -1008,7 +1008,7 @@ void registerStandardTools(Server& server) {
         .arg<int>("window", "Positive Window ID; omit only with exactly one open window", false)
         .bind([](const json& args) -> json {
             auto& window = internal::InputTarget::targetWindow(args);
-            auto selected = window.context().selectedNode.lock();
+            auto selected = trussc::internal::WindowRequestAccess::context(window).selectedNode.lock();
             Node* n = selected.get();
             if (!n) {
                 return json{{"status", "ok"}, {"selected", nullptr}};
@@ -1276,16 +1276,16 @@ void registerStandardTools(Server& server) {
             const auto id = args.at("id").get<uint64_t>();
             auto& window = internal::InputTarget::targetWindow(args);
             if (id == 0) {
-                window.context().selectedNode.reset();
+                trussc::internal::WindowRequestAccess::context(window).selectedNode.reset();
                 return json{{"status", "ok"}, {"selected", nullptr}};
             }
-            auto rootOwner = window.context().rootNode.lock();
+            auto rootOwner = trussc::internal::WindowRequestAccess::context(window).rootNode.lock();
             Node* root = rootOwner.get();
             Node* n = root ? root->findByInstanceId(static_cast<uint64_t>(id)) : nullptr;
             if (!n) {
                 return json{{"status", "error"}, {"message", "No node with id " + std::to_string(id)}};
             }
-            window.context().selectedNode = n->weak_from_this();
+            trussc::internal::WindowRequestAccess::context(window).selectedNode = n->weak_from_this();
             return json{{"status", "ok"}, {"selected", nodeToJson(*n, 0, true)}};
         });
 
@@ -1297,7 +1297,7 @@ void registerStandardTools(Server& server) {
         .arg<std::string>("mod", "Mod short type name (e.g. \"LayoutMod\") to target a mod attached to the node instead of the node itself", false)
         .bind([](const json& args) -> json {
             auto& window = internal::InputTarget::targetWindow(args);
-            auto rootOwner = window.context().rootNode.lock();
+            auto rootOwner = trussc::internal::WindowRequestAccess::context(window).rootNode.lock();
             Node* root = rootOwner.get();
             uint64_t id = args.at("id").get<uint64_t>();
             Node* n = root ? root->findByInstanceId(id) : nullptr;

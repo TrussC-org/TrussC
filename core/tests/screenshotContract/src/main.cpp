@@ -22,7 +22,7 @@ TC_CORE_TEST_MAIN() {
     });
     {
         tcCoreTest::WindowFixture closing;
-        internal::submitScreenshot(&closing.window->context().asyncScreenshots, "closed.png");
+        internal::submitScreenshot(&trussc::internal::WindowRequestAccess::context(*closing.window).asyncScreenshots, "closed.png");
     }
     internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
     if (completions != 1) ++failures;
@@ -35,7 +35,7 @@ TC_CORE_TEST_MAIN() {
         auto app = closing.window->getApp();
         lifetime = app;
         internal::AppOwnerScope owner(internal::appOwner(*app));
-        internal::submitScreenshot(&closing.window->context().asyncScreenshots, "owned-closed.png");
+        internal::submitScreenshot(&trussc::internal::WindowRequestAccess::context(*closing.window).asyncScreenshots, "owned-closed.png");
     }
     internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
     if (!lifetime.expired() || retiredCalls != 0 || completions != 1) ++failures;

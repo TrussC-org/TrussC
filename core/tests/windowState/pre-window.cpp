@@ -141,7 +141,7 @@ int main() {
     getters("live native before launch", sapp_dpi_scale(), sapp_width(), sapp_height());
     changingGetters("prelaunch live readers");
     auto secondary = std::make_shared<Window>();
-    check("secondary", "unbound defaults", secondary->context().dpiScale == 1 && secondary->context().fbWidth == 0 && secondary->context().fbHeight == 0);
+    check("secondary", "unbound defaults", trussc::internal::WindowRequestAccess::context(*secondary).dpiScale == 1 && trussc::internal::WindowRequestAccess::context(*secondary).fbWidth == 0 && trussc::internal::WindowRequestAccess::context(*secondary).fbHeight == 0);
     WindowSettings settings;
     const sapp_desc descriptor = buildAppDescriptor<ConstructorApp>(settings);
     check("descriptor", "App factory is deferred until bootstrap", constructors == 0 && descriptor.init_cb != nullptr);
@@ -166,7 +166,7 @@ int main() {
     check("main metadata", "Window logical height", main->getHeight() == int(1001 / 3.f));
     metadata.fb_width = 701; metadata.fb_height = 501; metadata.dpi_scale = 1.25f;
     internal::publishWindowMetadata(*secondary, metadata);
-    internal::currentWindowCtx() = &secondary->context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*secondary);
     getters("secondary metadata", 1.25f, 701, 501);
     internal::currentWindowCtx() = nullptr;
     getters("main isolated", 3, 1801, 1001);

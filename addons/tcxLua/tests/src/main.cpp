@@ -304,6 +304,15 @@ int main(int argc, char** argv) {
         sol::protected_function_result r = L.safe_script(string("return ") + expr, sol::script_pass_on_error);
         return r.valid() && r.get_type() == sol::type::boolean && r.get<bool>();
     };
+    // #239 D6: Window internals must stay absent from the Lua type table.
+    for (const char* name : {"context", "dispatchMousePressToTree", "dispatchMouseReleaseToTree",
+            "dispatchMouseMoveToTree", "dispatchMouseScrollToTree", "dispatchKeyPressToTree",
+            "dispatchKeyReleaseToTree", "tickTree", "drawTreeNow", "syncRootSize"}) {
+        const string expression = string("Window.") + name + " == nil";
+        check(expression.c_str(), luaBool(expression.c_str()));
+    }
+    check("Window.setClearColor ~= nil", luaBool("Window.setClearColor ~= nil"));
+
     check("Node.callAfterAsync == nil", luaBool("Node.callAfterAsync == nil"));
     check("Node.callEveryAsync == nil", luaBool("Node.callEveryAsync == nil"));
     check("Node.cancelAsyncTimer == nil", luaBool("Node.cancelAsyncTimer == nil"));

@@ -261,7 +261,7 @@ const void* resolveDeferredTarget(const void* targetWindow) {
         throw std::runtime_error("the App has no live Window for a deferred reply");
     }
     auto windows = ::trussc::internal::openWindows();
-    if (windows.size() == 1) return &windows.front()->context();
+    if (windows.size() == 1) return &trussc::internal::WindowRequestAccess::context(*windows.front());
     std::string ids = "[";
     for (auto* window : windows) {
         if (ids.size() > 1) ids += ", ";

@@ -153,50 +153,55 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         "RG32F", sol::var(trussc::TextureFormat::RG32F),
         "BGRA8", sol::var(trussc::TextureFormat::BGRA8),
         "RGBA16", sol::var(trussc::TextureFormat::RGBA16));
-    lua->new_usertype<trussc::LoadError>("LoadError",
-        sol::meta_function::equal_to, [](trussc::LoadError a, trussc::LoadError b){ return a == b; },
-        "None", sol::var(trussc::LoadError::None),
-        "FileNotFound", sol::var(trussc::LoadError::FileNotFound),
-        "UnsupportedFormat", sol::var(trussc::LoadError::UnsupportedFormat),
-        "DecodeFailed", sol::var(trussc::LoadError::DecodeFailed),
-        "Unknown", sol::var(trussc::LoadError::Unknown),
-        "TooLarge", sol::var(trussc::LoadError::TooLarge),
-        "Cancelled", sol::var(trussc::LoadError::Cancelled));
     {
-        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
-        t["backend"] = &trussc::AudioSettings::backend;
-        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
-        t["channels"] = &trussc::AudioSettings::channels;
-        t["deviceName"] = &trussc::AudioSettings::deviceName;
-        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
-        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
+        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
+        t["date"] = &trussc::BuildInfo::date;
+        t["dateTime"] = &trussc::BuildInfo::dateTime;
+        t["day"] = &trussc::BuildInfo::day;
+        t["hour"] = &trussc::BuildInfo::hour;
+        t["minute"] = &trussc::BuildInfo::minute;
+        t["month"] = &trussc::BuildInfo::month;
+        t["second"] = &trussc::BuildInfo::second;
+        t["time"] = &trussc::BuildInfo::time;
+        t["timestamp"] = &trussc::BuildInfo::timestamp;
+        t["year"] = &trussc::BuildInfo::year;
     }
-    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
-        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
-        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
-        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
     {
-        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
-        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
-        t["drawFps"] = &trussc::FpsSettings::drawFps;
-        t["synced"] = &trussc::FpsSettings::synced;
-        t["updateFps"] = &trussc::FpsSettings::updateFps;
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["changed"] = &trussc::TouchPoint::changed;
+        t["id"] = &trussc::TouchPoint::id;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
     }
+    lua->new_usertype<trussc::EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
+        "In", sol::var(trussc::EaseMode::In),
+        "Out", sol::var(trussc::EaseMode::Out),
+        "InOut", sol::var(trussc::EaseMode::InOut));
     {
-        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
-        t["fileName"] = &trussc::FileDialogResult::fileName;
-        t["filePath"] = &trussc::FileDialogResult::filePath;
-        t["success"] = &trussc::FileDialogResult::success;
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
-    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
-        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
-        "U8", sol::var(trussc::PixelFormat::U8),
-        "F32", sol::var(trussc::PixelFormat::F32));
-    {
-        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
-        t["pixels"] = &trussc::GrabberFrame::pixels;
-        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
-    }
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

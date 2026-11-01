@@ -156,26 +156,30 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["stop"] = &trussc::Sound::stop;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::StrokeMesh
-            , trussc::StrokeMesh()
-            , trussc::StrokeMesh(const trussc::Path &)
+        auto constructors = tcxLuaConstructors<trussc::ColorLinear
+            , trussc::ColorLinear()
+            , trussc::ColorLinear(float, float, float)
+            , trussc::ColorLinear(float, float, float, float)
+            , trussc::ColorLinear(float)
+            , trussc::ColorLinear(float, float)
         >();
-        sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh", constructors, sol::call_constructor, constructors);
-        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
-        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
-        t["clear"] = &trussc::StrokeMesh::clear;
-        t["draw"] = &trussc::StrokeMesh::draw;
-        t["getMesh"] = &trussc::StrokeMesh::getMesh;
-        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
-        t["setCapType"] = &trussc::StrokeMesh::setCapType;
-        t["setClosed"] = &trussc::StrokeMesh::setClosed;
-        t["setColor"] = &trussc::StrokeMesh::setColor;
-        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
-        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
-        t["setShape"] = &trussc::StrokeMesh::setShape;
-        t["setWidth"] = &trussc::StrokeMesh::setWidth;
-        t["setWidths"] = &trussc::StrokeMesh::setWidths;
-        t["update"] = &trussc::StrokeMesh::update;
+        sol::usertype<trussc::ColorLinear> t = lua->new_usertype<trussc::ColorLinear>("ColorLinear", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = sol::overload([](const trussc::ColorLinear& a, float b){ return a * b; }, [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a * b; });
+        t[sol::meta_function::addition] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a - b; };
+        t[sol::meta_function::division] = [](const trussc::ColorLinear& a, float b){ return a / b; };
+        t[sol::meta_function::equal_to] = [](const trussc::ColorLinear& a, const trussc::ColorLinear & b){ return a == b; };
+        t["a"] = &trussc::ColorLinear::a;
+        t["b"] = &trussc::ColorLinear::b;
+        t["g"] = &trussc::ColorLinear::g;
+        t["r"] = &trussc::ColorLinear::r;
+        t["clamped"] = &trussc::ColorLinear::clamped;
+        t["clampedLDR"] = &trussc::ColorLinear::clampedLDR;
+        t["lerp"] = &trussc::ColorLinear::lerp;
+        t["toHSB"] = &trussc::ColorLinear::toHSB;
+        t["toOKLCH"] = &trussc::ColorLinear::toOKLCH;
+        t["toOKLab"] = &trussc::ColorLinear::toOKLab;
+        t["toSRGB"] = &trussc::ColorLinear::toSRGB;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::Logger
@@ -221,39 +225,44 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
         t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
     }
-    lua->new_usertype<trussc::Direction>("Direction",
-        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
-        "Left", sol::var(trussc::Direction::Left),
-        "Center", sol::var(trussc::Direction::Center),
-        "Right", sol::var(trussc::Direction::Right),
-        "Top", sol::var(trussc::Direction::Top),
-        "Bottom", sol::var(trussc::Direction::Bottom),
-        "Baseline", sol::var(trussc::Direction::Baseline));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
-    lua->new_usertype<trussc::PointStyle>("PointStyle",
-        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
-        "Square", sol::var(trussc::PointStyle::Square),
-        "Round", sol::var(trussc::PointStyle::Round),
-        "Pixel", sol::var(trussc::PointStyle::Pixel));
     {
-        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
-        t["getHost"] = &trussc::TcpServerClient::getHost;
-        t["getId"] = &trussc::TcpServerClient::getId;
-        t["getPort"] = &trussc::TcpServerClient::getPort;
+        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
+        t["backend"] = &trussc::AudioSettings::backend;
+        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
+        t["channels"] = &trussc::AudioSettings::channels;
+        t["deviceName"] = &trussc::AudioSettings::deviceName;
+        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
     }
     {
-        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
-        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
-        t["reason"] = &trussc::ExitRequestEventArgs::reason;
+        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
+        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
+        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
+        t["id"] = &trussc::TouchEventArgs::id;
+        t["x"] = &trussc::TouchEventArgs::x;
+        t["y"] = &trussc::TouchEventArgs::y;
     }
     {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
+        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
+        t["drawFps"] = &trussc::FpsSettings::drawFps;
+        t["synced"] = &trussc::FpsSettings::synced;
+        t["updateFps"] = &trussc::FpsSettings::updateFps;
+    }
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
+    {
+        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
+        t["message"] = &trussc::TcpConnectEventArgs::message;
+        t["success"] = &trussc::TcpConnectEventArgs::success;
+    }
+    {
+        sol::usertype<trussc::Runtime> t = lua->new_usertype<trussc::Runtime>("Runtime");
+        t["events"] = &trussc::Runtime::events;
+        t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
     }
 }
 #ifdef _MSC_VER

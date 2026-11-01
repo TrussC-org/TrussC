@@ -120,13 +120,13 @@ struct Fixture {
             window = std::make_unique<HeadlessWindow>();
             internal::WindowRequestAccess::attachCandidate(*window, app);
             internal::applyPendingAppForTests(*window);
-            internal::currentWindowCtx() = &window->context();
+            internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*window);
         }
 #else
         (void)secondary;
 #endif
         if (!secondary) {
-            internal::currentWindowCtx() = &initialFixture->context();
+            internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*initialFixture);
             internal::attachCandidate(*initialFixture, app);
         }
         auto& ctx = internal::currentWindowContext();

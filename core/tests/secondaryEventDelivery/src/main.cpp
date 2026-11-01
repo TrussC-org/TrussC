@@ -50,7 +50,7 @@ void stages(bool before) {
 void feed(sapp_event_type type, float x = 20, float y = 20, unsigned int modifiers = 0) {
     sapp_event e{}; e.type = type; e.key_code = SAPP_KEYCODE_A;
     e.mouse_button = SAPP_MOUSEBUTTON_LEFT;
-    const float dpi = secondary->context().dpiScale;
+    const float dpi = trussc::internal::WindowRequestAccess::context(*secondary).dpiScale;
     e.mouse_x = x * dpi; e.mouse_y = y * dpi; e.modifiers = modifiers; e.scroll_y = 1;
     internal::dispatchWindowDisplayEventForTests(&e, *secondary);
 }
@@ -75,7 +75,7 @@ struct DeliveryApp : App {
         order["update"] += 'a';
         if (hoverPhase) {
             // Seed after native input, in the same tick as the hover traversal.
-            auto& ctx = getWindow()->context();
+            auto& ctx = trussc::internal::WindowRequestAccess::context(*getWindow());
             ctx.mouseX = ctx.mouseY = 20.5f;
         }
     }
@@ -101,7 +101,7 @@ void extraEvents() {
     TouchEventArgs touch; DragDropEventArgs files;
     source().touchPressed.notify(touch); source().touchMoved.notify(touch); source().touchReleased.notify(touch);
     source().filesDropped.notify(files);
-    secondary->syncRootSize(secondary->getApp()->getWidth() + 1, secondary->getApp()->getHeight() + 1);
+    trussc::internal::WindowRequestAccess::syncRootSize(*secondary, secondary->getApp()->getWidth() + 1, secondary->getApp()->getHeight() + 1);
 }
 void inputChecks() {
     order.clear();
@@ -160,7 +160,7 @@ void inputChecks() {
     feed(SAPP_EVENTTYPE_MOUSE_MOVE);
     check("typed edits reach App", app->lastMove.pos.x == 31 && app->lastMove.delta.x == 7); edit.disconnect();
     auto resizeEdit = source().windowResized.listen([](auto& e) { e.width = 125; });
-    secondary->syncRootSize(121, 122); check("resize listener edits reach App", app->getWidth() == 125); resizeEdit.disconnect();
+    trussc::internal::WindowRequestAccess::syncRootSize(*secondary, 121, 122); check("resize listener edits reach App", app->getWidth() == 125); resizeEdit.disconnect();
     order.clear();
     auto bind = [](auto& event) { listeners.push_back(event.listen([&event](auto&&...) { event.clear(); }, -100)); };
 #define CLEAR(name) bind(source().name)
@@ -225,13 +225,13 @@ struct SwapApp : App {
 void closeOrderChecks() {
     secondary = createWindow(); check("close-order secondary created", bool(secondary));
     if (!secondary) return;
-    auto observer = internal::makeConstructedAppAt<App>(&secondary->context());
+    auto observer = internal::makeConstructedAppAt<App>(&trussc::internal::WindowRequestAccess::context(*secondary));
     internal::AppOwnerScope observation(internal::appOwner(*observer));
     order.clear(); stages(true);
     struct ExitOrderApp : App {
         void exit() override { order["exit"] += 'a'; check("close uses secondary context", internal::currentWindowContext().hostWindow && !getWindow()); }
     };
-    auto app = internal::makeConstructedAppAt<ExitOrderApp>(&secondary->context()); std::weak_ptr<App> outgoing = app;
+    auto app = internal::makeConstructedAppAt<ExitOrderApp>(&trussc::internal::WindowRequestAccess::context(*secondary)); std::weak_ptr<App> outgoing = app;
     internal::WindowRequestAccess::attachCandidate(*secondary, app); internal::applyPendingAppForTests(*secondary); stages(false); app.reset();
     std::string quitOrder;
     auto processQuit = runtime().events().exitRequested.listen([&](ExitRequestEventArgs& e) {
@@ -279,7 +279,7 @@ struct Harness : App {
         WindowSettings s; s.width = s.height = 128; s.highDpi = false;
         secondary = createWindow(s); check("real secondary window created", bool(secondary));
         if (!secondary) { exitApp(); return; }
-        observerOwner = internal::makeConstructedAppAt<App>(&secondary->context());
+        observerOwner = internal::makeConstructedAppAt<App>(&trussc::internal::WindowRequestAccess::context(*secondary));
         internal::AppOwnerScope observation(internal::appOwner(*observerOwner));
         // Observe the event stream independently of the App bindings under test.
         firstUpdate = source().update.listen([] { secondaryTicked = true; }, -1000);
@@ -293,7 +293,7 @@ struct Harness : App {
             } else if (phase == 0) {
                 expect("update", "at"); expect("draw", "at");
                 auto app = std::static_pointer_cast<DeliveryApp>(secondary->getApp());
-                check("tick hover retains fractional point", secondary->context().hoveredNode.lock() == app->probe);
+                check("tick hover retains fractional point", trussc::internal::WindowRequestAccess::context(*secondary).hoveredNode.lock() == app->probe);
                 if (++framesAfterClear == 2) {
                     app->hoverPhase = false;
                     secondary->setApp<SwapApp>(0); phase = 1;
@@ -304,7 +304,7 @@ struct Harness : App {
                 check("setApp does not notify window exit", closeEvents == 0);
                 phase = 2;
             } else if (phase == 2 && counts[2].updates) {
-                check("swaps retain exactly one App binding per cleared event", source().keyPressed.listenerCount() == 1 && source().update.listenerCount() == 1 && secondary->context().appEventListeners.size() == 15);
+                check("swaps retain exactly one App binding per cleared event", source().keyPressed.listenerCount() == 1 && source().update.listenerCount() == 1 && trussc::internal::WindowRequestAccess::context(*secondary).appEventListeners.size() == 15);
                 check("input swaps App exactly once after its full tick", counts[1].updates == 1 && counts[1].draws == 1 && counts[1].exits == 1 && counts[1].cleanups == 1);
                 // Cancellation and refusal do not disturb bindings.
                 auto current = secondary->getApp();
@@ -340,7 +340,7 @@ struct Harness : App {
             check("close notifies exit exactly once", closeEvents == 1 && counts[3].exits == 1 && counts[3].cleanups == 1);
             internal::WindowRequestAccess::teardown(*secondary);
             check("repeated teardown does not redeliver exit", closeEvents == 1 && counts[3].exits == 1);
-            check("closed window has no App bindings", secondary->context().appEventListeners.empty());
+            check("closed window has no App bindings", trussc::internal::WindowRequestAccess::context(*secondary).appEventListeners.empty());
             secondary.reset(); after.disconnect(); closeCounter.disconnect(); mandatory.disconnect(); listeners.clear();
             observerOwner.reset();
             closeOrderChecks(); completed = true; exitApp();

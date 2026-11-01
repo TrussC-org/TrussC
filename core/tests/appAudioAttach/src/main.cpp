@@ -169,10 +169,10 @@ struct OpenWindow : Window {
 // does): setup() runs here on the window's first tick.
 static void tickWindow(Window& w) {
     internal::WindowContext* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &w.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(w);
     internal::applyPendingAppForTests(w);
     internal::applyPendingAppForTests(w);
-    w.tickTree();
+    trussc::internal::WindowRequestAccess::tickTree(w);
     internal::currentWindowCtx() = prev;
 }
 

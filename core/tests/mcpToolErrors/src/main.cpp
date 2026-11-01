@@ -125,7 +125,7 @@ TC_CORE_TEST_MAIN() {
         auto window = internal::prepareLaunchWindow(WindowSettings{});
         internal::WindowRequestAccess::bindForTests(*window, 683);
         auto productionDrain = [&] {
-            mcp::internal::drainDeferredResponses(&window->context(), true,
+            mcp::internal::drainDeferredResponses(&trussc::internal::WindowRequestAccess::context(*window), true,
                                                 std::chrono::steady_clock::now(), false);
             mcp::internal::drainDeferredResponses(nullptr, false);
         };

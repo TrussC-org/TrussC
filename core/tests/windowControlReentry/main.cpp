@@ -91,11 +91,11 @@ void testPublicFullscreenToggles(Window& main, Window& secondary) {
         for (bool global : {false, true}) {
             auto toggle = [&] {
                 if (global) {
-                    internal::currentWindowCtx() = &target->context();
+                    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*target);
                     fixtureToggleFullscreen();
                 } else {
                     // A handle must act on its target even in another context.
-                    internal::currentWindowCtx() = &(target == &main ? secondary : main).context();
+                    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context((target == &main ? secondary : main));
                     target->toggleFullscreen();
                 }
             };
@@ -230,18 +230,18 @@ void testFullscreenCalls(Window& main, Window& secondary) {
                 internal::pixelPerfectMode() = pixels;
                 for (int value : {320, -1}) {
                     for (int call = 0; call != 6; ++call) {
-                        internal::currentWindowCtx() = &target->context();
+                        internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*target);
                         check("global isFullscreen follows target guard", fixtureIsFullscreen() == (phase != Phase::Windowed));
                         const int beforeMessages = messages, beforeApplied = appliedControls;
                         switch (call) {
                             case 0: fixtureSetWindowSize(value, 240); break;
                             case 1: fixtureSetWindowSizeLogical(value, 240); break;
                             case 2: fixtureSetWindowPosition(value < 0 ? (std::numeric_limits<int>::max)() : value, 20); break;
-                            case 3: internal::currentWindowCtx() = &((target == &main) ? secondary : main).context();
+                            case 3: internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(((target == &main) ? secondary : main));
                                 target->setSize(value, 240); break;
-                            case 4: internal::currentWindowCtx() = &((target == &main) ? secondary : main).context();
+                            case 4: internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(((target == &main) ? secondary : main));
                                 target->setPosition(value < 0 ? (std::numeric_limits<int>::max)() : value, 20); break;
-                            case 5: internal::currentWindowCtx() = &((target == &main) ? secondary : main).context();
+                            case 5: internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(((target == &main) ? secondary : main));
                                 target->getApp()->setSize(value > 0 ? float(value) : NAN, 240); break;
                         }
                         if (phase != Phase::Windowed) {
@@ -266,7 +266,7 @@ void testFullscreenCalls(Window& main, Window& secondary) {
     // The binding query reads native fullscreen intent, even when another
     // window is current. The recording binding operation supplies it.
     internal::windowFullscreenHookForTests() = nullptr;
-    internal::currentWindowCtx() = &main.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(main);
     secondaryFullscreen.phase = Phase::Fullscreen;
     const int beforeMessages = messages, beforeApplied = appliedControls;
     secondary.setSize(320, 240);
@@ -308,7 +308,7 @@ bool reenter(Window& target, internal::WindowControl op, int, int, const std::st
         // The production secondary callback boundary and resize delivery. Its
         // platform-specific event decoder only supplies the dimensions here.
         tcCoreTest::nativeBoundary([&] {
-            publishSize(target, 320, 240, target.context().dpiScale);
+            publishSize(target, 320, 240, trussc::internal::WindowRequestAccess::context(target).dpiScale);
             internal::WindowEntryScope dispatch(target);
             internal::syncWindowAppSize(target);
         });
@@ -323,7 +323,7 @@ bool reenter(Window& target, internal::WindowControl op, int, int, const std::st
     return true;
 }
 int vertices(Window& window) {
-    sgl_set_context(window.context().swapchainTarget.resources().context);
+    sgl_set_context(trussc::internal::WindowRequestAccess::context(window).swapchainTarget.resources().context);
     return sgl_num_vertices();
 }
 }
@@ -361,11 +361,11 @@ int main() {
         testFullscreenCalls(*main, secondary);
         testPublicFullscreenToggles(*main, secondary);
         sgl_context_desc_t cd{};
-        main->context().swapchainTarget.resources().context = sgl_make_context(&cd);
-        secondary.context().swapchainTarget.resources().context = sgl_make_context(&cd);
+        trussc::internal::WindowRequestAccess::context(*main).swapchainTarget.resources().context = sgl_make_context(&cd);
+        trussc::internal::WindowRequestAccess::context(secondary).swapchainTarget.resources().context = sgl_make_context(&cd);
         internal::windowControlHookForTests() = reenter;
 
-        internal::restoreWindowContext(&secondary.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
         const int mainResizes = mainApp->resized;
         secondaryApp->target = main;
         secondaryApp->draw();
@@ -373,10 +373,10 @@ int main() {
         check("secondary subsequent vertices stay secondary", vertices(secondary) == 3);
         check("main received no secondary vertices", vertices(*main) == 0);
         // Reset CPU recordings between the two independent directions.
-        sgl_tc_context_reset(main->context().swapchainTarget.resources().context);
-        sgl_tc_context_reset(secondary.context().swapchainTarget.resources().context);
+        sgl_tc_context_reset(trussc::internal::WindowRequestAccess::context(*main).swapchainTarget.resources().context);
+        sgl_tc_context_reset(trussc::internal::WindowRequestAccess::context(secondary).swapchainTarget.resources().context);
 
-        internal::restoreWindowContext(&main->context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*main));
         const int secondaryResizes = secondaryApp->resized;
         const int reverseMainResizes = mainApp->resized;
         mainApp->target = &secondary;
@@ -398,9 +398,9 @@ int main() {
                 publishSize(secondary, framebufferWidth, framebufferHeight, dpi);
                 const int expectedWidth = enabled ? 1001 : int(1001 / dpi);
                 const int expectedHeight = enabled ? 667 : int(667 / dpi);
-                internal::restoreWindowContext(&secondary.context());
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
                 internal::syncWindowAppSize(secondary);
-                internal::restoreWindowContext(&main->context());
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*main));
                 sapp_event resize{}; resize.type = SAPP_EVENTTYPE_RESIZED;
                 tcCoreTest::dispatchMainEvent(&resize);
                 check("secondary App size and resize arguments match main at non-1 DPI",
@@ -412,7 +412,7 @@ int main() {
                 auto replacement = internal::makeConstructedApp<DrawApp>();
                 internal::WindowRequestAccess::attachCandidate(secondary, replacement);
                 internal::WindowRequestAccess::applyPendingApp(secondary);
-                internal::restoreWindowContext(&secondary.context());
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
                 internal::syncWindowAppSize(secondary);
                 check("secondary replacement seeded before first setup",
                     replacement->getWidth() == expectedWidth && replacement->getHeight() == expectedHeight &&
@@ -432,14 +432,14 @@ int main() {
         // replay identical native events through main and secondary at each DPI.
         for (bool enabled : {false, true}) {
             for (float dpi : {1.0f, 1.5f, 2.0f}) {
-                nativeDpi = main->context().dpiScale = secondary.context().dpiScale = dpi;
+                nativeDpi = trussc::internal::WindowRequestAccess::context(*main).dpiScale = trussc::internal::WindowRequestAccess::context(secondary).dpiScale = dpi;
                 auto appPoint = [&](float x, float y) {
                     return Vec2(enabled ? double(x) : double(x) / dpi,
                                 enabled ? double(y) : double(y) / dpi);
                 };
                 internal::pixelPerfectMode() = enabled;
                 auto deliver = [&](Window& window, const sapp_event& event) {
-                    internal::restoreWindowContext(&window.context());
+                    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(window));
                     internal::dispatchWindowEventForTests(&event, window);
                 };
                 sapp_event ev{};
@@ -447,9 +447,9 @@ int main() {
                 ev.mouse_x = 200; ev.mouse_y = 100;
                 // Initial native deltas can be cleared independently of position.
                 ev.mouse_dx = 0; ev.mouse_dy = 0;
-                main->context().mouseX = main->context().mouseY = 0;
-                secondary.context().mouseX = secondary.context().mouseY = 0;
-                main->context().pointerValid = secondary.context().pointerValid = false;
+                trussc::internal::WindowRequestAccess::context(*main).mouseX = trussc::internal::WindowRequestAccess::context(*main).mouseY = 0;
+                trussc::internal::WindowRequestAccess::context(secondary).mouseX = trussc::internal::WindowRequestAccess::context(secondary).mouseY = 0;
+                trussc::internal::WindowRequestAccess::context(*main).pointerValid = trussc::internal::WindowRequestAccess::context(secondary).pointerValid = false;
                 deliver(*main, ev); deliver(secondary, ev);
                 const Vec2 expected = appPoint(200, 100);
                 const Vec2 moved = appPoint(220, 110);
@@ -486,16 +486,16 @@ int main() {
                 ev.type = SAPP_EVENTTYPE_MOUSE_LEAVE; deliver(secondary, ev);
                 check("secondary leave retains offscreen hover sentinel", same(fixtureCall([] { return getMousePos(); }), Vec2(-1, -1)));
                 for (auto* target : {main, &secondary}) {
-                    target->context().dpiScale = dpi;
+                    trussc::internal::WindowRequestAccess::context(*target).dpiScale = dpi;
                     auto rawDpiChange = target->events().rawEvent.listen([&](const sapp_event&) {
-                        target->context().dpiScale = dpi * 2;
+                        trussc::internal::WindowRequestAccess::context(*target).dpiScale = dpi * 2;
                     });
                     ev.type = SAPP_EVENTTYPE_MOUSE_MOVE; ev.modifiers = 0;
                     ev.mouse_x = 200; ev.mouse_y = 100;
                     deliver(*target, ev);
                     const auto probe = target == main ? mainApp : secondaryApp;
                     check("raw reentry cannot change the current event DPI basis", same(probe->pointer, expected));
-                    target->context().dpiScale = dpi;
+                    trussc::internal::WindowRequestAccess::context(*target).dpiScale = dpi;
                 }
             }
         }
@@ -507,32 +507,32 @@ int main() {
                       "invalid native pointer DPI has finite unit fallback", internal::appPointerScale(invalid) == 1.0f);
         }
         nativeDpi = 1;
-        internal::restoreWindowContext(&secondary.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
         internal::pixelPerfectMode() = true;
-        secondary.context().dpiScale = 1.1f;
+        trussc::internal::WindowRequestAccess::context(secondary).dpiScale = 1.1f;
         int calls = nativeSizes;
         fixtureSetWindowSize(550, 330);
         check("public fractional DPI size reaches native fractional logical size",
               nativeSizes == ++calls && nativeWidth == double(550) / 1.1f && nativeHeight == double(330) / 1.1f);
         // An attached App targets its own secondary even from the main caller.
-        internal::restoreWindowContext(&main->context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*main));
         secondaryApp->setSize(550, 330);
         check("attached App fractional DPI size reaches native fractional logical size",
               nativeSizes == ++calls && nativeWidth == double(550) / 1.1f && nativeHeight == double(330) / 1.1f);
         bool publicSweep = true, appSweep = true;
         for (float scale : {1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f, 2.25f, 3.0f}) {
-            secondary.context().dpiScale = scale;
+            trussc::internal::WindowRequestAccess::context(secondary).dpiScale = scale;
             for (int pixels = 1; pixels <= 4096; ++pixels) {
                 // Pixel requests keep the exact double quotient, including
                 // sub-point extents, until native pixel conversion.
                 const double expected = double(pixels) / scale;
                 const int expectedCalls = 1;
-                internal::restoreWindowContext(&secondary.context());
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
                 calls = nativeSizes;
                 fixtureSetWindowSize(pixels, pixels);
                 publicSweep &= nativeSizes == calls + expectedCalls &&
                     (!expectedCalls || (nativeWidth == expected && nativeHeight == expected));
-                internal::restoreWindowContext(&main->context());
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*main));
                 calls = nativeSizes;
                 // The base App first casts its float extents to int, then
                 // keeps the fractional pixel-to-logical double division.
@@ -543,11 +543,11 @@ int main() {
         }
         check("public size sweep keeps fractional logical size", publicSweep);
         check("attached App size sweep keeps integer pixel casts and fractional logical size", appSweep);
-        internal::restoreWindowContext(&secondary.context());
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
         calls = nativeSizes;
-        secondary.context().dpiScale = 0.5f;
+        trussc::internal::WindowRequestAccess::context(secondary).dpiScale = 0.5f;
         fixtureSetWindowSize((std::numeric_limits<int>::max)(), 330); // logical quotient exceeds int range
-        secondary.context().dpiScale = std::numeric_limits<float>::min();
+        trussc::internal::WindowRequestAccess::context(secondary).dpiScale = std::numeric_limits<float>::min();
         fixtureSetWindowSize(550, 330); // logical quotient exceeds int range
         check("out-of-range logical quotients never reach native size", nativeSizes == calls);
         internal::pixelPerfectMode() = false;

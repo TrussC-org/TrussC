@@ -32,7 +32,7 @@ int64_t windowIdFor(ImGuiContext* ctx) {
     if (it == contexts.end() || !it->second.owner) return -1;
     const void* owner = it->second.owner;
     for (tc::Window* w : tc::internal::openWindows())
-        if (owner == static_cast<const void*>(&w->context()))
+        if (owner == static_cast<const void*>(&tc::internal::WindowRequestAccess::context(*w)))
             return tc::internal::WindowRequestAccess::creationId(*w);
     return -1;
 }

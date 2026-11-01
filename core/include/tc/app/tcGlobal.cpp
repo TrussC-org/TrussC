@@ -1134,7 +1134,7 @@ std::shared_ptr<Window> prepareLaunchWindow(const WindowSettings& settings) {
 }
 const char* launchWindowTitle(Window& window) { return window.title_.c_str(); }
 void configureLaunchWindow(Window& window, const WindowSettings& settings) {
-    window.context().clipboardSize = settings.clipboardSize;
+    trussc::internal::WindowRequestAccess::context(window).clipboardSize = settings.clipboardSize;
 }
 bool attachCandidate(Window& window, std::shared_ptr<App> app) {
     WindowRequestAccess::attachCandidate(window, app);
@@ -1175,7 +1175,7 @@ template<class Scrub> void scrubLightingContexts(Scrub scrub) noexcept {
     if (auto* ctx = nonWindowContextIfInitialized()) scrub(*ctx);
     if (initializedWindowRegistry) {
         for (Window* w : *initializedWindowRegistry) {
-            if (w) scrub(w->context());
+            if (w) scrub(trussc::internal::WindowRequestAccess::context(*w));
         }
     }
 }
@@ -1228,7 +1228,7 @@ void resetAppNodeReferences(const App& app) noexcept {
                 if (!window) return nonWindowContextIfInitialized();
                 if (!initializedWindowRegistry ||
                     std::find(initializedWindowRegistry->begin(), initializedWindowRegistry->end(), window) == initializedWindowRegistry->end()) return nullptr;
-                return &window->context();
+                return &trussc::internal::WindowRequestAccess::context(*window);
             };
             {
                 std::lock_guard lock(windowRegistryMutex());
@@ -1523,7 +1523,7 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
     if (type == SAPP_EVENTTYPE_UNFOCUSED) ctx.visibilityPaused = true;
 #endif
     if constexpr (supportsSecondaryWindows()) {
-        for (auto* w : openWindows()) if (&w->context() == &ctx) {
+        for (auto* w : openWindows()) if (&trussc::internal::WindowRequestAccess::context(*w) == &ctx) {
             refreshWindowMetadata(*w);
             const auto& m = WindowRequestAccess::binding(*w).metadata;
             ctx.suspended = m.trust_hidden_signals && (m.iconified || m.occluded);
@@ -2483,7 +2483,7 @@ void drainPendingGpuDestroys() {
     }
     RecordingReferences refs;
     std::unordered_set<WindowContext*> windows{&nonWindowContext(), &currentWindowContext()};
-    for (auto* window : openWindows()) windows.insert(&window->context());
+    for (auto* window : openWindows()) windows.insert(&trussc::internal::WindowRequestAccess::context(*window));
     for (auto* window : windows) {
         refs.target(window->swapchainTarget);
         for (const auto& entry : window->targetStack)
@@ -3033,7 +3033,7 @@ void prepareWindowTarget() {
 }
 bool rebuildTargetResources() {
     std::vector<WindowContext*> windows{&nonWindowContext()};
-    for (auto* window : openWindows()) windows.push_back(&window->context());
+    for (auto* window : openWindows()) windows.push_back(&trussc::internal::WindowRequestAccess::context(*window));
     std::erase_if(windows, [](const WindowContext* window) { return window->targetsClosed; });
     // Foreign submissions preserve CPU recordings. Re-evaluate all immediate
     // and raw queues on every retry before destroying any context.

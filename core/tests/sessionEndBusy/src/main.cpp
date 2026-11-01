@@ -85,7 +85,7 @@ TC_CORE_TEST_MAIN(int argc,char** argv) {
         internal::WindowRequestAccess::bindForTests(*w,900+i);
         internal::retainRuntimeWindow(w);w->setApp<Probe>(i+1);
         internal::applyPendingAppForTests(*w);
-        internal::currentWindowCtx()=&w->context();w->tickTree();
+        internal::currentWindowCtx()=&trussc::internal::WindowRequestAccess::context(*w);trussc::internal::WindowRequestAccess::tickTree(*w);
     }
     internal::currentWindowCtx()=nullptr;
     auto veto=runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) { ++queryCalls;e.cancel=true; });

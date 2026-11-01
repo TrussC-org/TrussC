@@ -76,7 +76,7 @@ struct OpenWindow : Window {
 // One tick of a window, as the platform glue runs it.
 static void tick(Window& w) {
     internal::WindowContext* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &w.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(w);
     {
         internal::WindowEntryScope scope(w);
         w.events().update.notify();
@@ -87,7 +87,7 @@ static void tick(Window& w) {
 // One key-down event of a window, as the platform glue dispatches it.
 static void pressKey(Window& w, int key) {
     internal::WindowContext* prev = internal::currentWindowCtx();
-    internal::currentWindowCtx() = &w.context();
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(w);
     {
         internal::WindowEntryScope scope(w);
         KeyEventArgs e;

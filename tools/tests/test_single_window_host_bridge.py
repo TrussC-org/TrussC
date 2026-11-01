@@ -31,7 +31,7 @@ struct Window;
 struct Context { Window* hostWindow=nullptr; double tickDuration=0; float mouseX=3,mouseY=4,pmouseX=0,pmouseY=0; struct { bool empty() { return true; } } pendingScreenshotPaths; struct { decltype(pendingScreenshotPaths) pending; } asyncScreenshots; void* deferredResponseTarget=nullptr; bool drawWhileHidden=true; int fbWidth=100,fbHeight=50; };
 struct Binding { sapp_window handle; sapp_tc_window_metadata metadata; };
 struct Window { Binding binding; Context ctx; Context& context() { return ctx; } bool isOccluded() { return false; } } window;
-struct WindowRequestAccess { static Binding& binding(Window& w) { return w.binding; } };
+struct WindowRequestAccess { static Context& context(Window& w) { return w.ctx; } static Binding& binding(Window& w) { return w.binding; } };
 bool hasWindow=true, stopping=false;
 bool runtimeEnding() { return stopping; }
 Window* resolveWindow() { return hasWindow ? &window : nullptr; }

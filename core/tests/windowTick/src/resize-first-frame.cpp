@@ -20,7 +20,7 @@ struct Secondary : tc::App {
     tc::EventListener after;
     void setup() override {
         after = tc::events().afterFrame.listen([] {
-            const auto& ctx = secondary->context();
+            const auto& ctx = trussc::internal::WindowRequestAccess::context(*secondary);
             const auto& target = ctx.swapchainTarget;
             check("first pass matches configured metadata", ctx.fbWidth == 100 && ctx.fbHeight == 60 &&
                 target.binding.swapchain.width == 100 && target.binding.swapchain.height == 60);
@@ -44,7 +44,7 @@ struct Secondary : tc::App {
     }
     void draw() override {
         check("first secondary frame", tc::getDrawCount() == 0);
-        const auto& ctx = getWindow()->context();
+        const auto& ctx = trussc::internal::WindowRequestAccess::context(*getWindow());
         const auto& target = ctx.swapchainTarget;
         check("target and viewport absorb configure before begin-pass",
             ctx.fbWidth == 100 && ctx.fbHeight == 60 &&

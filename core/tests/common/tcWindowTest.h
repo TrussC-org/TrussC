@@ -12,7 +12,7 @@ public:
         if (runtimeEnding()) { beginRuntimeRun(); beginFrameworkLifetime(); }
         window = std::make_shared<trussc::Window>();
         WindowRequestAccess::bindForTests(*window, id);
-        currentWindowCtx() = &window->context();
+        currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*window);
     }
     ~WindowFixture() {
         trussc::internal::WindowRequestAccess::teardown(*window);

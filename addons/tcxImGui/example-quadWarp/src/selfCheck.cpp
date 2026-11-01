@@ -124,7 +124,7 @@ public:
             rawMouse(SAPP_EVENTTYPE_MOUSE_LEAVE);
             int releasesBefore = releaseDeliveries_;
             rawMouse(SAPP_EVENTTYPE_UNFOCUSED);
-            int buttonAfterUnfocus = getWindow()->context().mouseButton;
+            int buttonAfterUnfocus = tc::internal::WindowRequestAccess::context(*getWindow()).mouseButton;
             int releasesAfterUnfocus = releaseDeliveries_;
             // Observe before buttonless-move recovery can clear a stale button.
             check(buttonAfterUnfocus == -1 && releasesAfterUnfocus == releasesBefore + 1,
@@ -136,7 +136,7 @@ public:
             rawMouse(SAPP_EVENTTYPE_MOUSE_MOVE);
             canceledMoveWasHover_ = moveDeliveries_ == movesBefore + 1 && dragDeliveries_ == dragsBefore;
         } else if (frame_ == 17) {
-            check(canceledMoveWasHover_ && getWindow()->context().mouseButton == -1 && !pointerDown_ && mappedPoint_.x >= 0,
+            check(canceledMoveWasHover_ && tc::internal::WindowRequestAccess::context(*getWindow()).mouseButton == -1 && !pointerDown_ && mappedPoint_.x >= 0,
                   "raw buttonless move after cancellation reaches the disarmed App hover handler");
             checkReleasedOutside("coalesced leave/refocus/move releases outside without a click");
             rawMouse(SAPP_EVENTTYPE_MOUSE_MOVE);
