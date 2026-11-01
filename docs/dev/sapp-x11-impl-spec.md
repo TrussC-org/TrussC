@@ -132,8 +132,8 @@ since X11 is UTF-8 native via `UTF8_STRING`). Also `_sapp.gl.framebuffer`
 `glXMakeCurrent` (§3, §7).
 
 `_sapp_init_state(desc)` runs first inside `_sapp_linux_run` (same as the others):
-applies `_sapp_desc_defaults` (sample_count→1, swap_interval→1, clipboard_size→8192,
-max_dropped_files→1, path_length→2048, window_title→"sokol", **and on GLCORE the
+applies `_sapp_desc_defaults` (sample_count→1, swap_interval→1, window_title→"sokol";
+clipboard/drop size defaults are removed in v0.8.0, **and on GLCORE the
 GL version defaults to 4.3 core** — 3529–3536: major=4, minor=3 on non-Apple),
 sets `first_frame=true`, `dpi_scale=1.0`, `mouse.shown=true`,
 `fullscreen=desc.fullscreen`, copies width/height verbatim (**may be 0** — the

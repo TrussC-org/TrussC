@@ -41,11 +41,11 @@ int main() {}
 
     def test_web_callbacks(self):
         native = HEADER.read_text(encoding='utf-8')
-        web = native[native.index('EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_onpaste'):]
+        web = native[native.index('EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_onpaste'):]
         callbacks = '\n'.join(body(web, signature) for signature in (
-            'EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_onpaste',
-            'EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_begin_drop',
-            'EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_drop',
+            'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_onpaste',
+            'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_begin_drop',
+            'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_drop',
             'EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_end_drop'))
         setters = '\n'.join(body(web, signature) for signature in (
             'SOKOL_API_IMPL void sapp_set_clipboard_string',
@@ -107,9 +107,9 @@ function stringToNewUTF8(value) {
 }
 function _free(pointer) { assert(pointers.delete(pointer)); ++frees; }
 let received='', filenames=[];
-function __sapp_tc_emsc_onpaste(pointer) { received=pointers.get(pointer); }
-function __sapp_tc_emsc_begin_drop(count) { filenames=Array(count); }
-function __sapp_tc_emsc_drop(index,pointer) { filenames[index]=pointers.get(pointer); }
+function __sapp_tc_emsc_onpaste(pointer) { received=pointers.get(pointer); return 1; }
+function __sapp_tc_emsc_begin_drop(count) { filenames=Array(count); return 1; }
+function __sapp_tc_emsc_drop(index,pointer) { filenames[index]=pointers.get(pointer); return 1; }
 function __sapp_tc_emsc_end_drop() {}
 const window = {addEventListener(){}};
 Module.sapp_emsc_target = {addEventListener(){}};
@@ -205,6 +205,119 @@ int main(){
     EmptyClipboard();
 }
 ''')
+
+    def test_windows_oom_boundary(self):
+        native = HEADER.read_text(encoding='utf-8')
+        boundary = body(native, 'static LRESULT CALLBACK _sapp_tc_wndproc(')
+        compile_run(r'''
+#include "sokol/sokol_app_tc.h"
+#include <new>
+#include <cassert>
+#include <cstring>
+#define CALLBACK
+using LRESULT=int; using HWND=int; using UINT=unsigned; using WPARAM=int; using LPARAM=int;
+constexpr UINT WM_CLOSE=1, WM_DROPFILES=2, WM_KEYDOWN=3;
+struct { struct { sapp_desc desc{}; } app; } _sapp_tc;
+int reports=0; const char* message=nullptr;
+void _sapp_tc_log(const sapp_logger*, unsigned level, unsigned item, unsigned,
+                  const char*, const char*, const char* text) {
+    assert(level==1 && item==SAPP_LOGITEM_MALLOC_FAILED);
+    ++reports; message=text;
+}
+LRESULT DefWindowProcW(HWND,UINT,WPARAM,LPARAM){return 42;}
+LRESULT _sapp_tc_wndproc_impl(HWND,UINT,WPARAM,LPARAM){throw std::bad_alloc();}
+''' + boundary + r'''
+int main(){
+    assert(_sapp_tc_wndproc(0,WM_DROPFILES,0,0)==42);
+    assert(reports==1 && std::strstr(message,"File drop failed: out of memory"));
+    assert(_sapp_tc_wndproc(0,WM_KEYDOWN,0,0)==42);
+    assert(reports==2 && std::strstr(message,"clipboard handling failed: out of memory"));
+    assert(_sapp_tc_wndproc(0,WM_CLOSE,0,0)==0 && reports==3);
+}
+''')
+
+    def test_web_native_oom_wasm(self):
+        emxx = shutil.which('em++') or '/home/toru/emsdk/upstream/emscripten/em++'
+        if not Path(emxx).is_file():
+            self.skipTest('installed Emscripten required for native bad_alloc -> JS Error seam')
+        native = HEADER.read_text(encoding='utf-8')
+        callbacks = '\n'.join(body(native, signature) for signature in (
+            'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_onpaste',
+            'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_begin_drop',
+            'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_drop',
+            'EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_end_drop'))
+        bridges = '\n'.join(body(native, signature) + ')' for signature in (
+            'EM_JS(void, _sapp_tc_js_add_clipboard_listener',
+            'EM_JS(void, _sapp_tc_js_add_dragndrop_listeners'))
+        source = r'''
+#include "sokol/sokol_app_tc.h"
+#include <emscripten.h>
+#include <string>
+#include <vector>
+#include <new>
+#include <cstdlib>
+EM_JS_DEPS(sokol_app_tc, "$stringToNewUTF8,$findCanvasEventTarget")
+static bool fail_next=false;
+void* operator new(size_t size) {
+    if (fail_next) { fail_next=false; throw std::bad_alloc(); }
+    if (void* p=std::malloc(size)) return p;
+    throw std::bad_alloc();
+}
+void operator delete(void* p) noexcept {std::free(p);}
+void operator delete(void* p, size_t) noexcept {std::free(p);}
+struct {struct {bool enabled=true;} clipboard,drop;
+    struct {float x,y,dx,dy;} mouse; float dpi_scale=1; sapp_event event{};} _sapp_tc;
+std::string _sapp_tc_clipboard_text;
+std::vector<std::string> _sapp_tc_dropped_paths;
+int events=0;
+bool _sapp_tc_events_enabled(){return true;}
+void _sapp_tc_init_event(sapp_event_type type){_sapp_tc.event.type=type;}
+void _sapp_tc_call_event(sapp_event*){++events;}
+void _sapp_tc_clear_drop_buffer(){_sapp_tc_dropped_paths.clear();}
+extern "C" {
+EMSCRIPTEN_KEEPALIVE void arm_oom(){fail_next=true;}
+''' + callbacks + r'''
+}
+''' + bridges + r'''
+EM_JS(void, checkNativeOomErrors, (), {
+        const assert=require('assert');
+        const text='large filename / clipboard '.repeat(10000);
+        const drop={stopPropagation(){},preventDefault(){},dataTransfer:{files:[{name:text}]}};
+        const oom=(fn, message)=>assert.throws(fn, error=>error instanceof Error && error.message===message);
+        // JS malloc succeeds; the next C++ string allocation throws bad_alloc.
+        _arm_oom();
+        oom(()=>Module.sokol_paste({clipboardData:{getData(){return text;}}}),
+            'Out of memory copying clipboard text');
+        // Empty vector: fail its first allocation, before JS copies any names.
+        _arm_oom();
+        oom(()=>Module.sokol_drop(drop),'Out of memory copying dropped filenames');
+        // Pre-size the vector so only the filename string needs an allocation.
+        assert.strictEqual(__sapp_tc_emsc_begin_drop(1),1);
+        _arm_oom();
+        oom(()=>Module.sokol_drop(drop),'Out of memory copying dropped filename');
+        console.log('C++ bad_alloc -> JS OOM Error: paste, drop vector, drop string PASS');
+});
+int main(){
+    EM_ASM({
+        globalThis.window={addEventListener(){}};
+        Module.sapp_emsc_target={addEventListener(){}};
+    });
+    _sapp_tc_js_add_clipboard_listener();
+    _sapp_tc_js_add_dragndrop_listeners();
+    checkNativeOomErrors();
+    return events != 0;
+}
+'''
+        BUILD.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=BUILD, prefix='wasm-oom-') as scratch:
+            cpp = Path(scratch) / 'test.cpp'
+            js = Path(scratch) / 'test.js'
+            cpp.write_text(source, encoding='utf-8')
+            subprocess.run([str(emxx), '-std=c++20', '-O2', '-fexceptions',
+                '-I', str(ROOT / 'core/include'), str(cpp), '-sENVIRONMENT=node',
+                '-sEXIT_RUNTIME=1', '-sEXPORTED_FUNCTIONS=["_main","_malloc","_free"]',
+                '-o', str(js)], check=True)
+            subprocess.run(['node', str(js)], check=True)
 
     def test_x11_and_old_cap_mutants(self):
         BUILD.mkdir(parents=True, exist_ok=True)

@@ -756,3 +756,13 @@ own window receiver. Drop capacities and rejection behavior are unchanged.
 - Verification: `tools/tests/test_drop_clipboard_unbounded.py` exercises the
   real X11 backend on Xvfb, Windows/Web production-source seams and old-cap
   mutants. Native macOS/Windows, browser and Raspberry Pi checks follow separately.
+
+### Follow-up 1
+
+- The Windows window-procedure boundary reports `bad_alloc` through
+  `sapp_desc.logger` at Error level, identifying out-of-memory drop or
+  event/clipboard handling failures. Direct clipboard API calls still propagate
+  `bad_alloc` to their caller.
+- Web paste/drop callbacks catch allocation failures and return their status;
+  the JS bridge raises an Error identifying out of memory after C++ unwinds.
+  Heap text is still freed in `finally`. No recovery or retry is added.

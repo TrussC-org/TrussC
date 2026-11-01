@@ -253,7 +253,7 @@ details.en = '''
 - Override `filesDropped(const vector<string>& files)` in your tcApp.
 - On desktop, each entry is a full (absolute) path in UTF-8 that you can load as is. On Linux, TrussC has already removed the `file://` prefix and decoded `%20` and similar escapes.
 - It is called on the main thread, so you can load images and other GPU objects right here. To check the file type, compare the extension, for example `toLower(getFileExtension(path)) == "png"`.
-- One drop can carry at most 16 files. Any further files are silently ignored. If any path is 2048 bytes or longer, the whole drop is ignored and this function is not called.
+- There is no TrussC limit on file count or UTF-8 path length (file name on Web); storage grows with the actual drop. Allocation and platform limits still apply.
 - The drop position is not passed. `events().filesDropped` listeners receive `DragDropEventArgs` with x/y, but that is the last known mouse position, not the exact drop point.
 - The App attached to the Window receiving the drop gets the callback, including secondary Windows on macOS, Windows and Linux. Headless apps never receive it.
 '''
@@ -262,7 +262,7 @@ details.ja = '''
 - tcApp で `filesDropped(const vector<string>& files)` をオーバーライドします。
 - デスクトップでは、それぞれが UTF-8 のフルパス（絶対パス）なので、そのまま読み込めます。Linux では、`file://` を取り除き、`%20` などの表記も元の文字に戻してあります。
 - メインスレッドで呼ばれるため、ここでそのまま画像や GPU オブジェクトを読み込めます。ファイルの種類は、`toLower(getFileExtension(path)) == "png"` のように拡張子で判定できます。
-- 1 回のドロップで受け取れるのは最大 16 ファイルです。それを超えた分は通知なしに無視されます。1 つでも 2048 バイト以上のパスが含まれていると、ドロップ全体が無視され、この関数は呼ばれません。
+- ファイル数と UTF-8 パス長（Web ではファイル名）に TrussC の上限はありません。実際のドロップに合わせてメモリを確保します。メモリ確保とプラットフォームの制約は適用されます。
 - ドロップした位置は渡されません。`events().filesDropped` のリスナーが受け取る `DragDropEventArgs` には x/y がありますが、これは最後に分かっているマウス位置であり、実際にドロップした位置ではありません。
 - ドロップを受けた Window の App に届きます。macOS、Windows、Linux の副ウィンドウにも届きます。ヘッドレス App には届きません。
 '''
@@ -271,7 +271,7 @@ details.ko = '''
 - tcApp에서 `filesDropped(const vector<string>& files)`를 오버라이드합니다.
 - 데스크톱에서는 각각이 UTF-8 전체 경로(절대 경로)이므로 그대로 로드할 수 있습니다. Linux에서는 `file://`를 제거하고 `%20` 같은 표기도 원래 문자로 되돌려 둡니다.
 - 메인 스레드에서 호출되므로 여기서 바로 이미지나 GPU 객체를 로드할 수 있습니다. 파일 종류는 `toLower(getFileExtension(path)) == "png"`처럼 확장자로 판별할 수 있습니다.
-- 한 번의 드롭으로 받을 수 있는 것은 최대 16개 파일입니다. 그 이상은 알림 없이 무시됩니다. 경로 중 하나라도 2048바이트 이상이면 드롭 전체가 무시되고 이 함수는 호출되지 않습니다.
+- 파일 수와 UTF-8 경로 길이(Web에서는 파일 이름)에 TrussC의 제한은 없습니다. 실제 드롭에 맞춰 메모리를 할당합니다. 메모리 할당과 플랫폼 제약은 적용됩니다.
 - 드롭한 위치는 전달되지 않습니다. `events().filesDropped` 리스너가 받는 `DragDropEventArgs`에는 x/y가 있지만, 이것은 마지막으로 알려진 마우스 위치이며 실제로 드롭한 위치가 아닙니다.
 - 드롭을 받은 Window에 연결된 App으로 전달됩니다. macOS, Windows, Linux의 보조 Window에도 전달됩니다. 헤드리스 App에는 전달되지 않습니다.
 '''

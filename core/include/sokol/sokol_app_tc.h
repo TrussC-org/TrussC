@@ -8155,6 +8155,13 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     try {
         return _sapp_tc_wndproc_impl(hwnd, msg, wParam, lParam);
+    } catch (const std::bad_alloc&) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_MALLOC_FAILED,
+            __LINE__, "error: ", "%s", msg == WM_DROPFILES
+                ? "File drop failed: out of memory"
+                : "Windows event/clipboard handling failed: out of memory");
+        if (msg == WM_CLOSE) return 0;
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
     } catch (...) {
         if (msg == WM_CLOSE) return 0; // a throwing close client must not let DefWindowProc destroy the HWND
         return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -16150,14 +16157,20 @@ extern "C" {
 
 typedef void (*_sapp_tc_html5_fetch_callback) (const sapp_html5_fetch_response*);
 
-EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_onpaste(const char* str) {
+/* Return allocation status so JS can report an OOM Error after C++ unwinds. */
+EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_onpaste(const char* str) {
     if (_sapp_tc.clipboard.enabled) {
-        _sapp_tc_clipboard_text = str;
+        try {
+            _sapp_tc_clipboard_text = str;
+        } catch (const std::bad_alloc&) {
+            return 0;
+        }
         if (_sapp_tc_events_enabled()) {
             _sapp_tc_init_event(SAPP_EVENTTYPE_CLIPBOARD_PASTED);
             _sapp_tc_call_event(&_sapp_tc.event);
         }
     }
+    return 1;
 }
 
 /*  https://developer.mozilla.org/en-US/docs/Web/API/WindowEventHandlers/onbeforeunload */
@@ -16165,16 +16178,26 @@ EMSCRIPTEN_KEEPALIVE int _sapp_tc_html5_get_ask_leave_site(void) {
     return _sapp_tc.html5_ask_leave_site ? 1 : 0;
 }
 
-EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_begin_drop(int num) {
-    if (!_sapp_tc.drop.enabled) return;
+EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_begin_drop(int num) {
+    if (!_sapp_tc.drop.enabled) return 1;
     _sapp_tc_dropped_paths.clear();
-    if (num > 0) _sapp_tc_dropped_paths.resize((size_t)num);
+    try {
+        if (num > 0) _sapp_tc_dropped_paths.resize((size_t)num);
+    } catch (const std::bad_alloc&) {
+        return 0;
+    }
+    return 1;
 }
 
-EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_drop(int i, const char* name) {
+EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_drop(int i, const char* name) {
     /* NOTE: the browser supplies a filename, not a path. */
-    if (!_sapp_tc.drop.enabled || !name || i < 0 || i >= (int)_sapp_tc_dropped_paths.size()) return;
-    _sapp_tc_dropped_paths[i] = name;
+    if (!_sapp_tc.drop.enabled || !name || i < 0 || i >= (int)_sapp_tc_dropped_paths.size()) return 1;
+    try {
+        _sapp_tc_dropped_paths[i] = name;
+    } catch (const std::bad_alloc&) {
+        return 0;
+    }
+    return 1;
 }
 
 EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_end_drop(int x, int y, int mods) {
@@ -16248,7 +16271,9 @@ EM_JS(void, _sapp_tc_js_add_clipboard_listener, (void), {
         const pasted_str = event.clipboardData.getData('text');
         const cstr = stringToNewUTF8(pasted_str);
         if (!cstr) throw new Error('Out of memory copying clipboard text');
-        try { __sapp_tc_emsc_onpaste(cstr); }
+        try {
+            if (!__sapp_tc_emsc_onpaste(cstr)) throw new Error('Out of memory copying clipboard text');
+        }
         finally { _free(cstr); }
     };
     window.addEventListener('paste', Module.sokol_paste);
@@ -16299,11 +16324,13 @@ EM_JS(void, _sapp_tc_js_add_dragndrop_listeners, (void), {
         event.preventDefault();
         const files = event.dataTransfer.files;
         Module.sokol_dropped_files = files;
-        __sapp_tc_emsc_begin_drop(files.length);
+        if (!__sapp_tc_emsc_begin_drop(files.length)) throw new Error('Out of memory copying dropped filenames');
         for (let i = 0; i < files.length; i++) {
             const cstr = stringToNewUTF8(files[i].name);
             if (!cstr) throw new Error('Out of memory copying dropped filename');
-            try { __sapp_tc_emsc_drop(i, cstr); }
+            try {
+                if (!__sapp_tc_emsc_drop(i, cstr)) throw new Error('Out of memory copying dropped filename');
+            }
             finally { _free(cstr); }
         }
         let mods = 0;
