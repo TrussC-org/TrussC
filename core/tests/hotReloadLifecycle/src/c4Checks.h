@@ -12,6 +12,7 @@ int failures = 0, attempts = 0;
 Host* requesting = nullptr;
 void check(const char* label, bool ok) {
     std::printf("hotReloadLifecycle: C4: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
     if (!ok) ++failures;
 }
 std::shared_ptr<Window> window(uint32_t id) {
@@ -192,8 +193,11 @@ int run() {
 #endif
     turn(actual);
     check("constructor request runs once on following poll", actual.reloadCount == beforeConstructor + 2 && !actual.reloadRequested);
-    std::ifstream argv(dir / "build-command-argv"); std::string args((std::istreambuf_iterator<char>(argv)), {});
-    check("build targets guest only", args.find("--target\nguest\n") != std::string::npos && args.find("host") == std::string::npos);
+    {
+        // Release the Windows file handle before another build or remove_all.
+        std::ifstream argv(dir / "build-command-argv"); std::string args((std::istreambuf_iterator<char>(argv)), {});
+        check("build targets guest only", args.find("--target\nguest\n") != std::string::npos && args.find("host") == std::string::npos);
+    }
     // A retained export remains callable after logical retirement.
     auto pinned = actual.guest.createApp;
     GuestLibrary pinnedModule; pinnedModule.handle = actual.guest.handle;
