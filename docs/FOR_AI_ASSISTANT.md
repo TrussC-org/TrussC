@@ -877,6 +877,7 @@ While the app is running, saving any source file in `src/` triggers an automatic
 
 - **State resets on each reload** (the old generation's exit() and cleanup() run, then setup() runs again) — same model as Processing/p5.js
 - **Disable**: comment out `TC_HOT_RELOAD` with `//`
+- **Opt out in code**: put `TC_NO_HOT_RELOAD("reason");` at namespace scope in an addon header or user source. Only the guest fails to compile, with the reason; host and ordinary builds are unaffected. tcxHap declares this limitation on Windows because snappy is not linked into the guest.
 - **Build errors**: the previous version keeps running; fix and save again
 - Works on macOS, Linux, and Windows. Wasm/iOS/Android fall back to static mode
 

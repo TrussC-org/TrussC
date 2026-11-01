@@ -3605,6 +3605,33 @@ static int cmdBuild(const vector<string>& args) {
     cfgIn.mcp = mcp;
     cfgIn.warnings = warnings;
     ConfigurePlan plan = planConfigure(cfgIn);
+    // Reuse CMake's configured scan (including explicit SOURCES and the
+    // platform gate) rather than maintaining a second marker parser here.
+    // A changed state makes the check fail and requests reconfiguration;
+    // plain cmake --build keeps that same fast-fail behavior. Dry-run must
+    // not execute the check, which can touch CMakeLists.txt on a toggle.
+    const fs::path hotReloadCheck = fs::path(cfgIn.buildDir) / "_tc_check_hot_reload.cmake";
+    bool hotReloadChanged = false;
+    if (!dryRun && !plan.configure && cfgIn.isNative &&
+        fs::exists(hotReloadCheck)) {
+        const fs::path projectCwd = fs::current_path();
+        fs::current_path(cfgIn.buildDir); // same working directory as the build target
+        // findCMake() returns fixed executable names/paths, and the script
+        // name is fixed; no project path is interpolated into this shell command.
+#ifdef _WIN32
+        const string checkExe = cmake;
+#else
+        const string checkExe = "'" + cmake + "'";
+#endif
+        // The check's expected fast-fail is replaced by the configure below.
+        hotReloadChanged = captureCommand(checkExe + " -P _tc_check_hot_reload.cmake 2>&1").exitCode != 0;
+        fs::current_path(projectCwd);
+    }
+    if (hotReloadChanged) {
+        cout << "[HotReload] Reconfiguring before build...\n";
+        plan.defines.push_back(mcp ? "-DTRUSSC_MCP_DEV=ON" : "-DTRUSSC_MCP_DEV=OFF");
+        plan.configure = true;
+    }
     for (const string& line : plan.messages) cout << line << "\n";
     cout.flush();   // print before cmake's own output, also through a pipe
     vector<string> cfg = {cmake, "--preset", targetPreset};

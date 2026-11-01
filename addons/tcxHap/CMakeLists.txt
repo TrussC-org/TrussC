@@ -93,8 +93,9 @@ target_include_directories(${ADDON_NAME} PUBLIC
 
 target_link_libraries(${ADDON_NAME} PUBLIC snappy TrussC)
 
-# Snappy requires C++ headers
-target_include_directories(${ADDON_NAME} PRIVATE
+# Public: tcxHapFrameValidation.h includes <snappy-c.h>, and a hot-reload host
+# takes only the addon's interface include directories.
+target_include_directories(${ADDON_NAME} PUBLIC
     ${snappy_SOURCE_DIR}
     ${snappy_BINARY_DIR}
 )

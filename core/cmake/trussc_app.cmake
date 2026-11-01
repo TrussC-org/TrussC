@@ -313,7 +313,7 @@ endif()
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
         )
         target_compile_features(guest PRIVATE cxx_std_20)
-        target_compile_definitions(guest PRIVATE TC_HOT_RELOAD_BUILD TRUSSC_SHOW_CONSOLE)
+        target_compile_definitions(guest PRIVATE TC_HOT_RELOAD_BUILD TC_HOT_RELOAD_GUEST TRUSSC_SHOW_CONSOLE)
         # Guest does NOT link to TrussC (symbols are resolved from the Host at
         # runtime), but it still needs TrussC's PUBLIC compile settings
         # (/utf-8, Windows SDK includes, SOKOL_D3D11, etc.).

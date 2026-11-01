@@ -455,6 +455,14 @@ for (const s of require('./std-symbols.js')) {
         signatures: s.signatures || [], static: false, provider: s.provider, platforms: null, deprecated: null };
 }
 
+// Hot-reload opt-in/opt-out macros have no AST declarations. Keep their cards
+// on the reference surface only while the public header defines them.
+const hotReloadHeader = fs.readFileSync(path.join(ROOT, 'core/include/tc/app/tcHotReload.h'), 'utf8');
+for (const name of ['TC_HOT_RELOAD', 'TC_NO_HOT_RELOAD']) {
+    if (!new RegExp(`^#define ${name}\\(`, 'm').test(hotReloadHeader)) continue;
+    structure[name] = { id: name, kind: 'macro', name, signatures: [], lua_skip: true };
+}
+
 // --- 4c. reconcile per-overload deprecation ---------------------------------
 // A symbol's `deprecated` means EVERY overload is deprecated. It used to mean
 // "at least one is" (the first deprecated decl won, above), and every consumer
