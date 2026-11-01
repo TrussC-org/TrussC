@@ -222,6 +222,8 @@ Fitting requests run every check strictly, without SKIPs.
 
 ## Tests
 
+- `an2DeviceProbe/` — interactive #239 drop/cursor/close/session/keepawake device probe; own binary, no arguments prints usage and exits; see its `DEVICE_STEPS.md`.
+
 - `msaaResolveScissor/` — #861: whole-attachment resolve after a 1x1-scissored
   final draw, at samples 1/4 with and without mips. Checks every RGBA pixel,
   copyTo under a parent scissor, an empty clipped CLEAR pass, and clipping in
