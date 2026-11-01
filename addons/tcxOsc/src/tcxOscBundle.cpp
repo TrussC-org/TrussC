@@ -9,8 +9,9 @@ using namespace osc_internal;
 // Destruction - iterative, so nesting depth never costs call stack.
 // =============================================================================
 // Moves child bundles that nothing else owns out onto a heap stack, so that
-// each bundle is destroyed with no sole-owned child bundles left in it: the
-// destructor never recurses more than a level. A child shared with another
+// each bundle is destroyed with no sole-owned child bundles left in it, so the
+// destructor normally recurses at most a level. (use_count() is a snapshot: a
+// co-owner released on another thread in between can add a level.) A child shared with another
 // bundle is only released here; whoever releases it last takes it apart the
 // same way. If the stack cannot grow (out of memory), the rest is destroyed
 // the ordinary, recursive way.
