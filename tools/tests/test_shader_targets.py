@@ -14,6 +14,58 @@ from check_build_warnings import run_build
 
 
 class ShaderTargetTests(unittest.TestCase):
+    def test_fresh_guest_build_generates_app_and_addon_headers(self):
+        source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding='utf-8')
+        block = source[source.index('    # The shader interface exists'):
+                       source.index('    # Output settings')]
+        shader = (ROOT / 'core/tests/hotReloadLifecycle/src/shaders/reloadProbe.glsl').read_text()
+        for generator in (None, 'Ninja'):
+            if generator == 'Ninja' and not shutil.which('ninja'):
+                continue
+            with self.subTest(generator=generator), tempfile.TemporaryDirectory(prefix='tc guest ') as temporary:
+                project = Path(temporary)
+                for directory, name in (('src/shaders', 'app'), ('core-shaders', 'core')):
+                    folder = project / directory
+                    folder.mkdir(parents=True)
+                    (folder / f'{name}.glsl').write_text(shader.replace('reload_probe', name), encoding='utf-8')
+                addon = project / 'tcxHap/shaders'
+                addon.mkdir(parents=True)
+                shutil.copyfile(ROOT / 'addons/tcxHap/src/shaders/ycocg.glsl', addon / 'ycocg.glsl')
+                (project / 'main.cpp').write_text('int main() { return 0; }\n', encoding='utf-8')
+                (project / 'guest.cpp').write_text('''
+#include "sokol_gfx.h"
+#include "core.glsl.h"
+#include "shaders/app.glsl.h"
+#include "ycocg.glsl.h"
+int guest_probe() { return 42; }
+''', encoding='utf-8')
+                (project / 'CMakeLists.txt').write_text(f'''
+cmake_minimum_required(VERSION 3.20)
+project(shader_probe CXX)
+include([==[{ROOT.as_posix()}/core/cmake/trussc_shaders.cmake]==])
+add_executable(shader_probe EXCLUDE_FROM_ALL main.cpp)
+add_library(guest SHARED guest.cpp)
+set_target_properties(guest PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+target_include_directories(guest PRIVATE [==[{ROOT.as_posix()}/core/include/sokol]==])
+target_compile_definitions(guest PRIVATE SOKOL_GLCORE)
+trussc_compile_shaders(TrussC "${{CMAKE_CURRENT_SOURCE_DIR}}/core-shaders")
+trussc_compile_shaders(tcxHap "${{CMAKE_CURRENT_SOURCE_DIR}}/tcxHap/shaders")
+set(_TC_LOADED_ADDONS tcxHap shaderlessAddon)
+{block}
+''', encoding='utf-8')
+                build = project / 'build'
+                command = ['cmake', '-S', str(project), '-B', str(build)]
+                if generator:
+                    command += ['-G', generator]
+                run_build(command, check=True)
+                self.assertEqual(list(project.rglob('*.glsl.h')), [])
+                # Build guest alone: app-target dependencies cannot mask a missing guest edge.
+                run_build(['cmake', '--build', str(build), '--target', 'guest',
+                           '--config', 'Release', '-j4'], check=True)
+                for header in ('src/shaders/app.glsl.h', 'core-shaders/core.glsl.h',
+                               'tcxHap/shaders/ycocg.glsl.h'):
+                    self.assertTrue((project / header).is_file(), header)
+
     def test_windows_guest_imports_do_not_depend_on_host_target(self):
         source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
         self.assertNotIn('target_link_libraries(guest PRIVATE ${PROJECT_NAME})', source)
