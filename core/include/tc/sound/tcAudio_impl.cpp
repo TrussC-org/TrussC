@@ -1490,53 +1490,81 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
         StreamWorker::getInstance().registerStream(stream);
     }
 
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
+    // Build the whole voice before taking the engine lock: the mixer blocks
+    // on that lock, so nothing under it may allocate or free.
+    auto voice = std::make_shared<PlayingSound>();
+    voice->buffer = source;
+    voice->stream = stream;
+    voice->positionF = 0.0;
+    // A stream's positionF counts frames of its decoder's output,
+    // at the engine rate; an eager voice's counts source frames.
+    voice->positionRateHz_.store(
+        source->kind() == SoundSource::Stream ? sampleRate_ : source->sampleRate,
+        std::memory_order_relaxed);
+    voice->volume = 1.0f;
+    voice->pan = 0.0f;
+    voice->speed = 1.0f;
+    voice->loop = false;
+    voice->playing = true;
+    voice->paused = false;
+    // For streams the decoder already resampled to engine rate, so
+    // rateRatio = 1.0 (no pitch adjust). For eager buffers, retain
+    // the existing buffer/engine ratio compensation.
+    if (source->kind() == SoundSource::Eager) {
+        voice->rateRatio = (source->sampleRate > 0 && sampleRate_ > 0)
+            ? ((float)source->sampleRate / (float)sampleRate_)
+            : 1.0f;
+    } else {
+        voice->rateRatio = 1.0f;
+    }
 
-        // Reuse a finished slot, else grow the pool by one (unless the
-        // opt-in cap maxPolyphony_ is reached). The growth runs here, on the
-        // calling thread, under mutex_: the mixer takes the same lock around
-        // its walk of playingSounds_, so it never sees a vector mid-growth,
-        // and a reallocation's old storage is freed by this thread, not by
-        // the audio thread. The mixer itself never allocates or frees slots.
-        std::shared_ptr<PlayingSound>* target = nullptr;
-        for (auto& slot : playingSounds_) {
-            if (!slot || !slot->playing) { target = &slot; break; }
-        }
-        if (!target && (maxPolyphony_ <= 0 || (int)playingSounds_.size() < maxPolyphony_)) {
-            playingSounds_.emplace_back();
-            target = &playingSounds_.back();
-        }
-        if (target) {
-            auto& slot = *target;
-            slot = std::make_shared<PlayingSound>();
-            slot->buffer = source;
-            slot->stream = stream;
-            slot->positionF = 0.0;
-            // A stream's positionF counts frames of its decoder's output,
-            // at the engine rate; an eager voice's counts source frames.
-            slot->positionRateHz_.store(
-                source->kind() == SoundSource::Stream ? sampleRate_ : source->sampleRate,
-                std::memory_order_relaxed);
-            slot->volume = 1.0f;
-            slot->pan = 0.0f;
-            slot->speed = 1.0f;
-            slot->loop = false;
-            slot->playing = true;
-            slot->paused = false;
-            // For streams the decoder already resampled to engine rate, so
-            // rateRatio = 1.0 (no pitch adjust). For eager buffers, retain
-            // the existing buffer/engine ratio compensation.
-            if (source->kind() == SoundSource::Eager) {
-                slot->rateRatio = (source->sampleRate > 0 && sampleRate_ > 0)
-                    ? ((float)source->sampleRate / (float)sampleRate_)
-                    : 1.0f;
-            } else {
-                slot->rateRatio = 1.0f;
+    // Declared before the lock, so they are destroyed after it is released:
+    // the voice a reused slot held before, and the slot vector a growth
+    // retired. Both are freed here, never by the mixer and never under the lock.
+    std::shared_ptr<PlayingSound> retiredVoice;
+    std::vector<std::shared_ptr<PlayingSound>> spare;   // growth storage, then the retired vector
+    for (;;) {
+        size_t wanted = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+
+            // Reuse a finished slot: a pointer move and a shared_ptr copy.
+            for (auto& slot : playingSounds_) {
+                if (!slot || !slot->playing) {
+                    retiredVoice = std::move(slot);
+                    slot = voice;
+                    return voice;
+                }
             }
-            return slot;
+            // Every slot is in use. Refuse at the opt-in cap, else add one.
+            if (maxPolyphony_ > 0 && (int)playingSounds_.size() >= maxPolyphony_) break;
+
+            // Growth. The mixer takes this lock around its walk of
+            // playingSounds_, so it sees the old vector or the new one. Under
+            // the lock only pointers are moved: into spare capacity of the
+            // current vector, or into `spare`, which was reserved outside the
+            // lock and is then swapped in (O(1)). The old storage ends up in
+            // `spare` and is freed after the unlock.
+            if (playingSounds_.size() < playingSounds_.capacity()) {
+                playingSounds_.push_back(voice);
+                return voice;
+            }
+            if (spare.capacity() > playingSounds_.size()) {
+                spare.insert(spare.end(), std::make_move_iterator(playingSounds_.begin()),
+                             std::make_move_iterator(playingSounds_.end()));
+                spare.push_back(voice);
+                playingSounds_.swap(spare);
+                return voice;
+            }
+            wanted = std::max<size_t>(8, playingSounds_.size() * 2);
+            if (maxPolyphony_ > 0) wanted = std::min<size_t>(wanted, (size_t)maxPolyphony_);
         }
-    }  // engine lock released: the drop is logged without stalling the mixer
+        // No spare room: allocate the bigger vector here, outside the lock,
+        // and look again (the slots can have changed meanwhile).
+        spare = std::vector<std::shared_ptr<PlayingSound>>();
+        spare.reserve(wanted);
+    }
+    // Engine lock released: the drop is logged without stalling the mixer.
 
     // Mark the just-opened stream as disposed so the worker drops it.
     if (stream) stream->disposed.store(true, std::memory_order_release);
