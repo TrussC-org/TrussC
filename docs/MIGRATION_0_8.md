@@ -270,15 +270,40 @@ reverse attachment order (hot reload targets only replacing Apps). Quit and OS
 close give every listener fresh `cancel=false`, OR all vetoes, and count a throwing listener as a veto. Only process quit retains the first nonempty veto reason. Device loss keeps
 its mutable cancellation behavior.
 
-OS close queries the addressed Window's `closeRequested`, then (for last-window or quit-on-close) asks `exitRequested` before any closure. Either veto keeps all Windows open; both accepted use common process ending. A non-last ordinary OS close closes only that Window. Code `Window::close()` skips `closeRequested`. For the last open Window or `setQuitOnClose(true)`, it asks `exitRequested` before closing anything; any veto keeps every Window open. Otherwise it closes only that Window without events.
+`App::exit()` also runs on replacement, removal and hot reload. Use
+`Window::setQuitOnClose(true)` for a window-close policy; it requests process
+quit before closing anything. A Window exit listener runs during ending and
+cannot provide that before-close veto guarantee.
 
+Construct Apps with `Window::setApp<T>(args...)`, `runApp<T>()` or
+`runHeadlessApp<T>()`; replace direct construction or attachment of an existing
+shared App. Runtime retains open Windows and their App attachments. Dropping a
+Window handle does not close it; call `close()` explicitly.
 
-App::exit also runs on setApp, destroyApp and reload, so it is unsuitable for a
-Window-close policy. Use setQuitOnClose for that policy; its process veto runs before closing anything. A Window exit listener runs after closure and cannot provide that guarantee.
+Root App setup-time quit is queried before audio subscription and the next
+process services. Acceptance runs normal ending and prevents later console,
+update and draw callbacks; a veto continues normally. A child App's request
+waits until the current tree traversal unwinds, before the next process services.
+
+At OS session end, an idle main thread allows the process veto query, then runs
+normal ending on commit with one shared logout timeout (3 seconds by default).
+A busy main thread accepts the query and performs no App work on commit: no
+exit events, `App::exit()`, audio detach, cleanup or watchdog. Save promptly
+during normal ending; busy termination cannot save App state.
+
+Hot reload supports one Window and replaces the launch Window's App at the
+main-thread outer-turn safe point. Opening a second or later Window while a
+guest is loaded logs a Warning each time; behaviour is not guaranteed. Stop
+threads, timers and async work in `events().hotReloadUnload`; reload does not
+wait for or exclude that work. Successfully loaded modules stay mapped until
+process exit, so repeated reloads can grow process memory.
+
+TrussC no longer installs a built-in crash handler or writes crash reports; use
+a platform debugger or external crash reporting if your application needs it.
 
 ### OS close and process veto
 
-OS close first queries that Window's `closeRequested`. If accepted and the Window is the last open one or has `setQuitOnClose(true)`, Runtime queries `exitRequested` before closing anything. Either veto leaves every Window open. Both accepted use common process ending. Non-last ordinary OS close asks only `closeRequested`; `exitApp()` / Cmd+Q ask only `exitRequested`. Code `Window::close()` skips `closeRequested`; last-window/quit-on-close asks `exitRequested` before closing anything, and any veto keeps every Window open. A non-last plain code close asks no events. `CloseRequestEventArgs` contains only `cancel`; remove uses of its former `reason` field. `ExitRequestEventArgs::reason` remains the optional Windows shutdown-block text.
+OS close first queries that Window's `closeRequested`. If accepted and the Window is the last open one or has `setQuitOnClose(true)`, Runtime queries `exitRequested` before closing anything. Either veto leaves every Window open. Both accepted use common process ending. Non-last ordinary OS close asks only `closeRequested`; `exitApp()` / Cmd+Q ask only `exitRequested`. Code `Window::close()` skips `closeRequested`; last-window/quit-on-close asks `exitRequested` before closing anything, and any veto keeps every Window open. A non-last plain code close asks no request events; normal Window exit notification and App ending still run. `CloseRequestEventArgs` contains only `cancel`; remove uses of its former `reason` field. `ExitRequestEventArgs::reason` remains the optional Windows shutdown-block text.
 
 ```cpp
 class Document : public tc::App {

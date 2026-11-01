@@ -430,7 +430,7 @@ Dear ImGui is licensed under the MIT License. See [imgui/LICENSE.txt](https://gi
 App-owned registrations
 -----------------------
 
-Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown runs App cleanup and window exit hooks before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.
+Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown detaches the App, sends Window exit notifications around `App::exit()`, disconnects audio and waits for active audio callbacks, then cleans up the App before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.
 
 App-tied code, including addon state owned by an App, uses `events()`;
 process-wide observers use `runtime().events()`. The manager keeps input/render hooks on its addressed Window, settles widget
@@ -440,7 +440,7 @@ teardown. Only Apps in the retiring generation receive that notification;
 other Apps keep their ImGui state. The App owner token retires registrations
 on swap or close.
 
-Runtime owns the process `hotReloadUnload` subscription and maintenance tick. Per-App hooks belong on that App’s `events().hotReloadUnload`; they retire with its token. Runtime notifies before reverse attachment ending at the outer main-thread reload safe point. Ending App A does not retire same-generation App B; generation retirement removes generation registrations after its Apps. Old DLL/dylib/.so modules remain pinned for process lifetime, including retained callback/control-block storage. Maintenance runs without relying on a drawing Window.
+Runtime owns the process `hotReloadUnload` subscription and maintenance tick. Per-App hooks belong on that App’s `events().hotReloadUnload`; they retire with its token. Runtime notifies before App ending at the outer main-thread reload safe point. Hot reload supports one Window; opening a second or later Window logs a Warning and behaviour is not guaranteed. Stop App-owned threads, timers and async work in `hotReloadUnload`; reload does not wait for or exclude them. Ending App A does not retire same-generation App B; generation retirement removes generation registrations after its Apps. Old DLL/dylib/.so modules remain pinned for process lifetime, including retained callback/control-block storage. Maintenance runs without relying on a drawing Window.
 
 ## MCP edits
 

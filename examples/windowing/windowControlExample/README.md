@@ -4,9 +4,15 @@ Per-window window control on a **secondary** window: fullscreen, screenshot,
 recording and frame-rate — all driven through the context-aware global
 functions, which route to whichever window's tick is currently running.
 
-- **Main window** (800x600, dark, red badge): instructions.
+- **Launch window** (800x600, dark, red badge): instructions.
 - **Secondary window** (500x400, blue, moving shape): the window the per-window
   controls act on.
+
+Runtime retains both Windows and their Apps. Releasing a handle does not close
+its Window. Closing one leaves the other running; closing the last asks
+`exitRequested` before normal shutdown. Code `Window::close()` skips
+`closeRequested` but still asks `exitRequested` for the last Window or one with
+`setQuitOnClose(true)`. A veto keeps every currently open Window open.
 
 ## Keys
 

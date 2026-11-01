@@ -179,7 +179,7 @@ C++ OOM recovery requires Release builds, or iterator debugging off (`_ITERATOR_
 App-owned registrations
 -----------------------
 
-Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown runs App cleanup and window exit hooks before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.
+Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown detaches the App, sends Window exit notifications around `App::exit()`, disconnects audio and waits for active audio callbacks, then cleans up the App before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.
 
 Process lifecycle names are the same on App/Window events and
 `runtime().events()`: `exitRequested`, `deviceLost`, `hotReloadUnload`.

@@ -8,7 +8,8 @@ attachment order, ORing vetoes and retaining the first nonempty explanation.
 Code Window::close() skips closeRequested. For the last open Window or
 setQuitOnClose(true), Runtime asks exitRequested once before anything closes.
 Any veto keeps all Windows open; acceptance uses normal process ending.
-A non-last plain code close closes only that Window without events.
+A non-last plain code close closes only that Window without request events;
+normal Window exit notification and App ending still run.
 Each close() is decided when it is called; a later exitRequested veto does not undo an earlier close() from the same frame.
 Process shutdown bypasses closeRequested.
 
@@ -47,10 +48,11 @@ a session receiver cannot promise logout delivery.
 A quit requested during setup (exitApp/requestExitApp) is handled before the
 first service prelude, and exitRequested still gets its veto. For a Window's root
 App (including headless), the rule is:
-**exit requested in setup → no further App callbacks (no console, no update)**.
+**accepted exit requested in root setup → normal ending, then no console, update or draw**.
 If vetoed, the loop continues normally.
 A child App leaves quit pending until the current tree traversal unwinds; the
-outer turn handles it before the next services, with no callbacks after cleanup.
+outer turn handles it before the next services. The current traversal may
+continue; no App callbacks run after cleanup.
 
 The first SIGTERM/SIGINT only records a flag in the signal handler. The next
 frame requests exit on the main thread, even in event-driven rendering. A
@@ -81,7 +83,7 @@ including Warning or Silent. Console and system outputs retain their normal
 level filtering. `onLog` listeners receive both records normally. Ordinary
 log records still obey the file level; the bypass is internal to the runtime.
 
-Known reason tokens are `window-close`, `request-exit-app`, `exit-app`,
+Known reason tokens include `last-window-close` (last-window or quit-on-close), `request-exit-app`, `exit-app`,
 `tc-quit`, `os-session-end` (idle desktop session commit), `app-quit` (macOS: a quit Apple
 event without one of those reasons, i.e. Cmd+Q, the Dock's Quit or an
 AppleScript `quit`), `sigterm`, `sigint`, and `device-lost` where the backend
@@ -101,7 +103,8 @@ code `-32000` and retain their request ID; deferred tools keep their existing
 JSON-RPC tool-result envelope. Requests racing shutdown are answered without
 waiting for another frame. No push channel or session is introduced.
 
-Headless log-file/MCP startup and anchorbolt classification are separate work.
+TrussC installs no built-in crash handler and writes no crash report. Use a
+platform debugger or external crash reporting when needed.
 
 ## Platform verification
 
@@ -112,11 +115,11 @@ outside update so veto is meaningful. Native user HWND tests assert that neither
 first nor subsequent user windows own session termination.
 
 Actual Windows logout/restart/shutdown and macOS Air logout with 2/5/10-second
-exit delays require separate auditor supervision. Check busy main drag/modal
+exit delays require a supervised device check. Check busy main drag/modal
 logout gets no App exit and does not block shutdown; separately check synchronous
 performClose with two secondaries during update. Check
 saved state and OS deadlines separately; busy termination has no clean log claim.
-No worker initiates real logout on an unattended host.
+Run real logout checks only on a supervised host.
 
 On macOS verify Cmd+Q and real logout/restart/shutdown with and without a veto,
 including the Apple event reason and a modal dialog. On Linux/macOS also run

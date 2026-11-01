@@ -35,6 +35,12 @@ cmake --build build-macos --parallel
 ./bin/graphicsExample.app/Contents/MacOS/graphicsExample
 ```
 
+Runtime owns open Windows and their App attachments. Launch an App with
+`TC_RUN_APP`, or create Window content with `window->setApp<Scene>(args...)`.
+Releasing a Window handle does not close it; call `close()` explicitly.
+See [App lifetimes](docs/ARCHITECTURE.md#window-handles-and-app-lifetimes) for
+closing, replacement and shutdown rules.
+
 ### Minimal Code
 
 ```cpp
