@@ -8,8 +8,8 @@
 // Secondary windows: macOS / Windows / Linux; elsewhere W logs an error.
 //
 // Arrow keys move the second window with Window::setPosition(); F sends it
-// fullscreen. Both act on THAT window — setWindowPosition() targets main,
-// and global setFullscreen() in the main App targets main. For a projector or
+// fullscreen. Both act on THAT window. Inside an App, setWindowPosition()
+// and setFullscreen() target that App's own window. For a projector or
 // a video wall on a second display, move the window onto that display FIRST and
 // then go fullscreen: fullscreen covers the display the window is currently on.
 

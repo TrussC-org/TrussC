@@ -10,7 +10,7 @@ using namespace tc;
 // usable directly — one shared sokol_gfx context.
 class SubApp : public App {
 public:
-    explicit SubApp(shared_ptr<Fbo> source) : sharedFbo(std::move(source)) {}
+    SubApp(shared_ptr<Fbo> source) : sharedFbo(std::move(source)) {}
     shared_ptr<Fbo> sharedFbo;   // rendered by the MAIN window's app
 
     void setup() override {

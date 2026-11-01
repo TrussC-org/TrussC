@@ -38,6 +38,9 @@ cmake --build build-macos --parallel
 Runtime owns open Windows and their App attachments. Launch an App with
 `TC_RUN_APP`, or create Window content with `window->setApp<Scene>(args...)`.
 Releasing a Window handle does not close it; call `close()` explicitly.
+Process-wide startup options belong in `RuntimeSettings`, passed to
+`runApp<MyApp>(windowSettings, runtimeSettings)`; `WindowSettings` configures
+window creation.
 See [App lifetimes](docs/ARCHITECTURE.md#window-handles-and-app-lifetimes) for
 closing, replacement and shutdown rules.
 

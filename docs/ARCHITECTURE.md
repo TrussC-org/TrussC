@@ -183,7 +183,7 @@ int main() {
 }
 ```
 
-`RuntimeSettings` holds `uniformBufferReserve` and `reserveUniformBuffer()`; pass it to `runApp<T>(WindowSettings, RuntimeSettings)` for process-wide startup reservation. The OS clipboard buffer is fixed at 64 KB. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window. Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over.
+`RuntimeSettings` holds `uniformBufferReserve` and `reserveUniformBuffer()`; pass it to `runApp<T>(WindowSettings, RuntimeSettings)` for process-wide startup reservation. The current v0.8.0 OS clipboard buffer limit is 65,536 bytes; removing this limit is planned for v0.8.x. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window. Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. `showCursor()`, `hideCursor()`, `setCursor()`, `bindCursorImage()` and `unbindCursorImage()` do nothing before native app startup or after native app cleanup, including in a headless app.
 
 ### Global Helper Functions
 
@@ -204,11 +204,11 @@ namespace tc {
     double getElapsedTime();
     double getFrameElapsedTime();
     double getDeltaTime();
-    uint64_t getFrameNum();
+    uint64_t getFrameCount();
 
     // Loop Control
     void setFps(float fps);
-    void redraw();
+    void redraw(int count = 1);
 }
 ```
 
@@ -775,6 +775,12 @@ App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime
 OS close asks the addressed Window's closeRequested with the same per-listener OR/throw-veto policy. On acceptance, quitOnClose/last-window process quit asks exitRequested before any closure. Either veto keeps all Windows open; both accepted use common ending. Window::close and process shutdown bypass closeRequested. App swap/destroy/reload call App::exit without a Window exit. exitApp inside App::exit or Runtime shutdown is inert; an owned Window exit listener can request normal quit while the process is still running. ImGui deadlines run in Runtime maintenance before MCP expiry, including no-draw turns.
 
 Runtime queue and maintenance work selects process context and progresses at safe outer host turns, including turns with no Window draws. Swapchain drawing requires a Window callback; explicit offscreen Fbo drawing remains available. Nested entries restore the caller's drawing and native state. Native creation establishes identity, resources, dimensions and binding readiness before App construction. Each resized frame reconciles its Window framebuffer, swapchain and automatic viewport before beginning a pass.
+
+`getWindowTitle()` returns the resolved Window's stored title (`Window::getTitle()`); `isWindowOccluded()` returns its native visibility snapshot (`Window::isOccluded()`). They use the same App-owner / sole-open-Window resolution as other Window helpers. Unowned callers with zero or multiple open Windows get an Error and an empty string or `false`, respectively. An App without a live Window gets those fallback values too.
+
+File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<string>&)` callback receive the paths.
+
+`Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal, unavailable to public C++ and Lua callers. The framework drives the tree; App code overrides callbacks or listens through `events()`.
 
 Multiple Windows are supported on macOS, Windows and Linux X11. Create a Window with `createWindow(settings)`, then request content with `window->setApp<Scene>(args...)`. Unsupported platforms return nullptr with a diagnostic. Each Window owns its App, event stream, clock, input and drawing state. GPU resources such as Texture, Fbo, Mesh and Font can be shared across Windows. The Runtime retains every open Window until explicit close or shutdown; closing the first-created Window leaves the others running. `App::getWindow()` returns its attachment while it is live, and nullptr during ending or in a headless App.
 
