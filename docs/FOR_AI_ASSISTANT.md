@@ -4837,8 +4837,8 @@ using XmlParseResult  // Reports the outcome of parsing an XML document.
 
 ```cpp
 TC_RUN_APP(AppClass, settings)  // Runs your App subclass with the given window settings; use it in main().
-TC_HOT_RELOAD(AppClass)  // Enables hot reload for an App when placed in its .cpp file.
-TC_NO_HOT_RELOAD("reason");  // Declares that addon or user code cannot compile as a hot-reload guest, with a reason.
+TC_HOT_RELOAD(AppClass)  // Turns on hot reload, so saving your code rebuilds and reloads the running app without restarting it.
+TC_NO_HOT_RELOAD("reason");  // Declares that this code cannot be hot-reloaded, so a hot-reload build stops with your reason.
 TC_REFLECT(Self, ...Bases) { TC_VALUE(...) ... }  // Declare a class's reflected members — exposed to the inspector, serialization, and MCP — with no hand-written plumbing.
 TC_REFLECT_ROOT(Self) { TC_VALUE(...) ... }  // Like TC_REFLECT, for a type at the root of a hierarchy (no reflected base classes).
 TC_REFLECT_FREE(Type) { TC_VALUE(...) ... }  // Reflect an external type you can't edit, declared at namespace scope.
