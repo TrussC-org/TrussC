@@ -118,8 +118,8 @@ double monotonicTime() noexcept {
 
 template<class Ready>
 bool waitForGeometry(Ready ready) noexcept {
-    // Bound (asynchronous WM geometry): XSync cannot wait for the WM; cap the wait at two seconds, never assert latency.
-    const double deadline = monotonicTime() + 2.0;
+    // Bound (asynchronous WM geometry): allow five seconds for a busy compositor, never assert latency.
+    const double deadline = monotonicTime() + 5.0;
     do {
         if (ready()) return true;
         const timespec pause{0, 5000000};
@@ -165,14 +165,28 @@ void clearColor(float r, float g, float b) noexcept {
 void captureFront(const void* native, const char* path, int channel) noexcept {
     auto* display = (Display*)sapp_x11_get_display();
     const ::Window window = (::Window)(uintptr_t)native;
-    XSync(display, False);
-    XImage* image = XGetImage(display, window, 0, 0, 64, 64, AllPlanes, ZPixmap);
+    // Bound (asynchronous present): XSync does not wait for the compositor; cap color polling at two seconds.
+    const double deadline = monotonicTime() + 2.0;
+    XImage* image = nullptr;
+    unsigned long masks[3]{};
+    bool matched = false;
+    do {
+        if (image) XDestroyImage(image);
+        XSync(display, False);
+        image = XGetImage(display, window, 0, 0, 64, 64, AllPlanes, ZPixmap);
+        if (!image) break;
+        masks[0] = image->red_mask; masks[1] = image->green_mask; masks[2] = image->blue_mask;
+        const unsigned long pixel = XGetPixel(image, 32, 32);
+        matched = (pixel & masks[channel]) == masks[channel] &&
+            (pixel & masks[(channel + 1) % 3]) == 0 && (pixel & masks[(channel + 2) % 3]) == 0;
+        if (matched) break;
+        // The submitted present progresses in Xwayland/compositor; no tick or re-present is needed.
+        const timespec pause{0, 5000000};
+        nanosleep(&pause, nullptr);
+    } while (monotonicTime() < deadline);
     check("front image acquired", image != nullptr);
     if (!image) return;
-    const unsigned long masks[] = {image->red_mask, image->green_mask, image->blue_mask};
-    const unsigned long pixel = XGetPixel(image, 32, 32);
-    check(path, (pixel & masks[channel]) == masks[channel] &&
-        (pixel & masks[(channel + 1) % 3]) == 0 && (pixel & masks[(channel + 2) % 3]) == 0);
+    check(path, matched);
     FILE* file = std::fopen(path, "wb");
     check("capture file opened", file != nullptr);
     if (file) {
