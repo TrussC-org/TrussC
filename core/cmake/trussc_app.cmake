@@ -151,7 +151,13 @@ macro(trussc_app)
 
     # Source files (auto-collect from src/ recursively if not specified)
     if(_TC_APP_SOURCES)
-        set(_TC_SOURCES ${_TC_APP_SOURCES})
+        set(_TC_SOURCES "")
+        foreach(_TC_SOURCE IN LISTS _TC_APP_SOURCES)
+            file(TO_CMAKE_PATH "${_TC_SOURCE}" _TC_SOURCE)
+            get_filename_component(_TC_SOURCE "${_TC_SOURCE}" ABSOLUTE
+                BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+            list(APPEND _TC_SOURCES "${_TC_SOURCE}")
+        endforeach()
     else()
         file(GLOB_RECURSE _TC_SOURCES
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
@@ -186,7 +192,7 @@ macro(trussc_app)
     # The decision (platform gate + scan rule) lives in
     # tc_hot_reload_scan.cmake, shared with the pre-build check below so the
     # two can never disagree (#234, #329).
-    include("${TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake")
+    include("${TC_ROOT}/core/cmake/tc_hot_reload_scan.cmake")
     # Hot reload is unavailable on Android / Emscripten / iOS: TC_HOT_RELOAD in
     # source is a no-op there. Computed once here and baked into the pre-build
     # check, which runs in cmake -P mode where these variables are undefined.
@@ -229,7 +235,7 @@ set(SRC_DIR    [==[${_TC_HR_SRC_DIR}]==])
 set(CMAKELISTS [==[${_TC_HR_CMAKELISTS}]==])
 set(PLATFORM_SUPPORTED ${_TC_HR_PLATFORM_SUPPORTED})
 set(EXPLICIT_SOURCES [==[${_TC_HR_EXPLICIT_SOURCES}]==])
-include([==[${TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake]==])
+include([==[${TC_ROOT}/core/cmake/tc_hot_reload_scan.cmake]==])
 
 set(PREV \"\")
 if(EXISTS \"\${STATE_FILE}\")
