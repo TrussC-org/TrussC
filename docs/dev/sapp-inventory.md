@@ -26,7 +26,7 @@ code, and only in the trivial "Esc to quit" idiom (9 sites). Nothing in
 | sapp API | call sites | files | what it provides | per-window / app-global | platforms |
 |---|---|---|---|---|---|
 | `sapp_run` | 3 | TrussC.h (`runApp`), tcHotReloadHost.h (`runHotReloadApp`) x2 | Starts the sokol_app event loop from a built `sapp_desc` | app-global (one loop) | all desktop (not called on Android — see notes) |
-| `sapp_desc` (type) | 8 | TrussC.h, tcHotReloadHost.h | Descriptor struct: width/height/title/high_dpi/sample_count/fullscreen/swap_interval, `init_cb`/`frame_cb`/`cleanup_cb`/`event_cb`, `logger.func`, `enable_dragndrop`+`max_dropped_files`+`max_dropped_file_path_length`, `enable_clipboard`+`clipboard_size` | app-global | all |
+| `sapp_desc` (type) | 8 | TrussC.h, tcHotReloadHost.h | Descriptor struct: width/height/title/high_dpi/sample_count/fullscreen/swap_interval, `init_cb`/`frame_cb`/`cleanup_cb`/`event_cb`, `logger.func`, `enable_dragndrop`, `enable_clipboard` | app-global | all |
 | `sapp_quit` | 2 | TrussC.h (`exitApp`), tcHotReloadHost.h (host init failure) | Immediate, non-cancellable exit | app-global | all |
 | `sapp_request_quit` | 2 (core) + 9 (examples) | TrussC.h (`requestExitApp`), tcStandardTools.h; examples/\*/tcApp.cpp (9 files: coordinateConversionExample, 3DPrimitivesExample, vectorMathExample, loopModeExample, hitTestExample, nodeExample, graphicsExample, roundedRectExample, colorExample) | Cancellable exit; triggers `SAPP_EVENTTYPE_QUIT_REQUESTED` | app-global | all except Android (patched out — see Table 2 item "Android BACK key") |
 | `sapp_cancel_quit` | 1 | TrussC.h (`_event_cb`, `SAPP_EVENTTYPE_QUIT_REQUESTED` handler) | Cancels a pending quit if `exitRequested` listener sets `args.cancel` | app-global | all |
@@ -75,7 +75,7 @@ code, and only in the trivial "Esc to quit" idiom (9 sites). Nothing in
 | `sapp_set_clipboard_string` | 1 (core) + 1 (sokol_imgui.h) | TrussC.h (`setClipboardString`), sokol_imgui.h (ImGui `SetClipboardTextFn`) | Write OS clipboard | app-global | all |
 | `sapp_get_clipboard_string` | 1 (core) + 1 (sokol_imgui.h) | TrussC.h (`getClipboardString`), sokol_imgui.h (ImGui `GetClipboardTextFn`) | Read OS clipboard | app-global | all |
 | `SAPP_EVENTTYPE_CLIPBOARD_PASTED` | 1 | TrussC.h `_event_cb` | Notifies when web clipboard content becomes available (web needs the paste event; desktop can read clipboard synchronously) | app-global | primarily web |
-| `desc.enable_clipboard` / `desc.clipboard_size` | (part of `sapp_desc` count above) | TrussC.h `buildAppDescriptor`, tcHotReloadHost.h | Enables clipboard subsystem + fixed 64 KB buffer | app-global | all |
+| `desc.enable_clipboard` | (part of `sapp_desc` count above) | TrussC.h `buildAppDescriptor`, tcHotReloadHost.h | Enables clipboard subsystem with growable text storage | app-global | all |
 
 ### Swapchain / native handles
 

@@ -66,7 +66,7 @@ if(TC_X11_AVAILABLE)
     foreach(boundary clock_gettime XPending XFlush XNextEvent XGetWindowAttributes poll
             eglMakeCurrent eglGetCurrentContext eglGetCurrentSurface eglGetCurrentDisplay eglSwapBuffers
             XGrabPointer XUngrabPointer XWarpPointer XSetSelectionOwner XGetSelectionOwner XInternAtom
-            XConvertSelection XDeleteProperty XCheckTypedWindowEvent XGetWindowProperty
+            XConvertSelection XDeleteProperty XCheckTypedWindowEvent XCheckIfEvent XGetWindowProperty
             XLookupString XFilterEvent XSendEvent XGetAtomName XFree)
         target_link_options(x11Regression PRIVATE "-Wl,--wrap=${boundary}")
     endforeach()

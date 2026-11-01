@@ -1,5 +1,7 @@
 # sokol_app.h Emscripten (Web) Backend — Behavioral Specification
 
+> v0.8.0 update (#239): the fixed clipboard and drop buffers described below are superseded. Clipboard text, dropped file counts and UTF-8 path lengths now use growable storage with no TrussC size limit. `sapp_desc::clipboard_size`, `max_dropped_files` and `max_dropped_file_path_length` are removed.
+
 Implementation contract for replacing sokol_app.h's Emscripten/Web main-window /
 app-lifecycle with `sokol_app_tc.h` (project "P3 Web driver"). All line references
 are into `core/include/sokol/sokol_app.h` (14602 lines, this worktree). Focus:
@@ -89,9 +91,8 @@ filled from `desc.html5.canvas_selector`).
 ### `_sapp_init_state(desc)` / `_sapp_desc_defaults` (relevant subset, ~3520–3574)
 `_sapp_def(val,def)` = "use def if val==0" (2291). Web-relevant defaults:
 `sample_count→1` (3527), `swap_interval→1` (3528, **ignored on web** — the browser
-paces via rAF), `html5.canvas_selector→"#canvas"` (3546), `clipboard_size→8192`
-(3547), `max_dropped_files→1` (3548), `max_dropped_file_path_length→2048` (3549),
-`window_title→"sokol"` (3550). The canvas selector string is copied into
+paces via rAF), `html5.canvas_selector→"#canvas"` (3546),
+`window_title→"sokol"` (3550). Clipboard/drop size defaults (3547–3549) are removed in v0.8.0; storage grows with actual content. The canvas selector string is copied into
 `_sapp.html5_canvas_selector` and the desc pointer re-pointed at that stable
 buffer (3573–3574). `_SAPP_FALLBACK_DEFAULT_WINDOW_WIDTH/HEIGHT = 640/480`
 (2301–2302), used only in the `canvas_resize` path (§9).
@@ -810,8 +811,8 @@ at all (only a macOS line) — the web section is entirely new.
 - **App descriptor (`buildAppDescriptor`, TrussC.h 2582–2612):** sets
   `window_title`, `high_dpi = settings.highDpi`, `sample_count`, `fullscreen`
   (overridden false on web, §1), `swap_interval` (ignored on web), the 4 callbacks,
-  logger, `enable_dragndrop=true` + `max_dropped_files=16` +
-  `max_dropped_file_path_length=2048`, `enable_clipboard=true` + `clipboard_size`.
+  logger, `enable_dragndrop=true`, `enable_clipboard=true`. In v0.8.0, drop
+  counts/names and clipboard text use growable storage with no TrussC size limit.
   **It sets NO `desc.html5.*` fields whatsoever** — canvas_selector, canvas_resize,
   premultiplied_alpha, preserve_drawing_buffer, bubble_*, update_document_title,
   use_emsc_set_main_loop all stay at sokol defaults (canvas_selector → `"#canvas"`,
@@ -824,7 +825,7 @@ at all (only a macOS line) — the web section is entirely new.
 callback loop; WGPU async device/swapchain (init_done gate, ProcessEvents per
 frame, emdawnwebgpu); GLES3 context path; all mouse/wheel/key/CHAR/touch/focus/
 fullscreen events; **keyboard-on-canvas patch (§6, default) + shell tabindex/focus**;
-clipboard paste/copy, drag&drop (16 files) + fetch, favicon, custom cursors, resize
+clipboard paste/copy, drag&drop (no TrussC file-count limit) + fetch, favicon, custom cursors, resize
 tracking + RESIZED, beforeunload; the `sapp_get_environment()`/`sapp_get_swapchain()`
 contract consumed by `sglue_*`.
 

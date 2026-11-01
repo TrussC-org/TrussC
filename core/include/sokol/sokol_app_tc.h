@@ -682,14 +682,9 @@
     members:
 
         sapp_desc.enable_clipboard  - set to true to enable clipboard support
-        sapp_desc.clipboard_size    - size of the internal clipboard buffer in bytes
 
-    Enabling the clipboard will dynamically allocate a clipboard buffer
-    for UTF-8 encoded text data of the requested size in bytes, the default
-    size is 8 KBytes. Strings that don't fit into the clipboard buffer
-    (including the terminating zero) will be silently clipped, so it's
-    important that you provide a big enough clipboard size for your
-    use case.
+    Clipboard storage grows with the actual UTF-8 text; there is no fixed
+    clipboard capacity and text is not clipped.
 
     To send data to the clipboard, call sapp_set_clipboard_string() with
     a pointer to an UTF-8 encoded, null-terminated C-string.
@@ -744,17 +739,7 @@
             };
         }
 
-    You can also adjust the maximum number of files that are accepted
-    in a drop operation, and the maximum path length in bytes if needed:
-
-        sapp_desc sokol_main(void) {
-            return (sapp_desc) {
-                .enable_dragndrop = true,               // default is false
-                .max_dropped_files = 8,                 // default is 1
-                .max_dropped_file_path_length = 8192,   // in bytes, default is 2048
-                ...
-            };
-        }
+    Drop storage grows with the actual number of files and UTF-8 path lengths.
 
     When drag'n'drop is enabled, the event callback will be invoked with an
     event of type SAPP_EVENTTYPE_FILES_DROPPED whenever the user drops files on
@@ -793,13 +778,6 @@
 
     Drag'n'drop caveats:
 
-        - if more files are dropped in a single drop-action
-          than sapp_desc.max_dropped_files, the additional
-          files will be silently ignored
-        - if any of the file paths is longer than
-          sapp_desc.max_dropped_file_path_length (in number of bytes, after UTF-8
-          encoding) the entire drop operation will be silently ignored (this
-          needs some sort of error feedback in the future)
         - no mouse positions are reported while the drag is in
           process, this may change in the future
 
@@ -1992,7 +1970,7 @@ typedef struct sapp_allocator {
     _SAPP_LOGITEM_XMACRO(VULKAN_ACQUIRE_NEXT_IMAGE_FAILED, "vulkan: vkAcquireNextImageKHR failed") \
     _SAPP_LOGITEM_XMACRO(VULKAN_QUEUE_PRESENT_FAILED, "vulkan: vkQueuePresentKHR failed") \
     _SAPP_LOGITEM_XMACRO(IMAGE_DATA_SIZE_MISMATCH, "image data size mismatch (must be width*height*4 bytes)") \
-    _SAPP_LOGITEM_XMACRO(DROPPED_FILE_PATH_TOO_LONG, "dropped file path too long (sapp_desc.max_dropped_filed_path_length)") \
+    _SAPP_LOGITEM_XMACRO(DROPPED_FILE_PATH_TOO_LONG, "dropped file path too long") \
     _SAPP_LOGITEM_XMACRO(CLIPBOARD_STRING_TOO_BIG, "clipboard string didn't fit into clipboard buffer") \
     _SAPP_LOGITEM_XMACRO(TOUCHPOINTS_DROPPED, "touch event exceeds SAPP_MAX_TOUCHPOINTS; some points were dropped") \
 
@@ -2212,10 +2190,7 @@ typedef struct sapp_desc {
     bool alpha;                         // whether the framebuffer should have an alpha channel (ignored on some platforms)
     const char* window_title;           // the window title as UTF-8 encoded string
     bool enable_clipboard;              // enable clipboard access, default is false
-    int clipboard_size;                 // max size of clipboard content in bytes
     bool enable_dragndrop;              // enable file dropping (drag'n'drop), default is false
-    int max_dropped_files;              // max number of dropped files to process (default: 1)
-    int max_dropped_file_path_length;   // max length in bytes of a dropped UTF-8 file path (default: 2048)
     sapp_icon_desc icon;                // the initial window icon to set
     sapp_allocator allocator;           // optional memory allocation overrides (default: malloc/free)
     sapp_logger logger;                 // logging callback override (default: NO LOGGING!)
@@ -2588,6 +2563,13 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 #include <math.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <string>
+#include <vector>
+
+// [TrussC] Local drop paths and clipboard text grow with the actual data (#239).
+// Keep C++ storage outside backend records, which are reset with memset.
+static std::string _sapp_tc_clipboard_text;
+static std::vector<std::string> _sapp_tc_dropped_paths;
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #endif
@@ -2735,14 +2717,8 @@ static struct {
         bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
         /* clipboard */
         bool clipboard_enabled;
-        int clipboard_size;
-        char* clipboard;
         /* drag & drop */
         bool drop_enabled;
-        int drop_max_files;
-        int drop_max_path_length;
-        int drop_num_files;
-        char* drop_buffer;
     } app;
 } _sapp_tc;
 
@@ -3367,26 +3343,20 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
     _sapp_tc_window_t* w = self.w;
-    if (!w || !_sapp_tc.app.drop_enabled || !_sapp_tc.app.drop_buffer) return NO;
+    if (!w || !_sapp_tc.app.drop_enabled) return NO;
     NSPasteboard* pboard = sender.draggingPasteboard;
     if (![pboard.types containsObject:NSPasteboardTypeFileURL]) return NO;
-    const int max_files = _sapp_tc.app.drop_max_files;
-    const int max_path = _sapp_tc.app.drop_max_path_length;
-    memset(_sapp_tc.app.drop_buffer, 0, (size_t)max_files * (size_t)max_path);
-    _sapp_tc.app.drop_num_files = 0;
-    int num = (int)pboard.pasteboardItems.count;
-    // Bound (security): OS drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
-    if (num > max_files) num = max_files;
-    for (int i = 0; i < num; i++) {
-        NSString* str = [pboard.pasteboardItems[(NSUInteger)i] stringForType:NSPasteboardTypeFileURL];
+    _sapp_tc_dropped_paths.clear();
+    std::vector<std::string> paths;
+    for (NSUInteger i = 0; i < pboard.pasteboardItems.count; ++i) {
+        NSString* str = [pboard.pasteboardItems[i] stringForType:NSPasteboardTypeFileURL];
         if (!str) return NO;
         NSURL* url = [NSURL URLWithString:str];
         const char* path = url.standardizedURL.path.UTF8String;
-        // Bound (security): OS drop paths must fit fixed per-path storage to keep memory finite. Overflow rejects the drop.
-        if (!path || (int)strlen(path) >= max_path) return NO;  /* path too long: drop everything */
-        strcpy(_sapp_tc.app.drop_buffer + (size_t)i * (size_t)max_path, path);
+        if (!path) return NO;
+        paths.emplace_back(path);
     }
-    _sapp_tc.app.drop_num_files = num;
+    _sapp_tc_dropped_paths = std::move(paths);
     sapp_event e;
     memset(&e, 0, sizeof(e));
     e.type = SAPP_EVENTTYPE_FILES_DROPPED;
@@ -4398,8 +4368,8 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
         [NSEvent removeMonitor:_sapp_tc.app.keyup_monitor];
         _sapp_tc.app.keyup_monitor = nil;
     }
-    if (_sapp_tc.app.clipboard) { free(_sapp_tc.app.clipboard); _sapp_tc.app.clipboard = 0; }
-    if (_sapp_tc.app.drop_buffer) { free(_sapp_tc.app.drop_buffer); _sapp_tc.app.drop_buffer = 0; }
+    _sapp_tc_clipboard_text.clear();
+    _sapp_tc_dropped_paths.clear();
 }
 @end
 
@@ -4545,22 +4515,11 @@ void sapp_run(const sapp_desc* desc) {
     if (d->_tc_draw_while_hidden == 0) d->_tc_draw_while_hidden = 1;
     if (d->sample_count <= 0) d->sample_count = 1;
     if (d->swap_interval <= 0) d->swap_interval = 1;
-    if (d->clipboard_size <= 0) d->clipboard_size = 8192;
-    if (d->max_dropped_files <= 0) d->max_dropped_files = 1;
-    if (d->max_dropped_file_path_length <= 0) d->max_dropped_file_path_length = 2048;
     if (!d->window_title) d->window_title = "sokol";
-    if (d->enable_clipboard) {
-        _sapp_tc.app.clipboard_enabled = true;
-        _sapp_tc.app.clipboard_size = d->clipboard_size;
-        _sapp_tc.app.clipboard = (char*)calloc(1, (size_t)d->clipboard_size);
-    }
-    if (d->enable_dragndrop) {
-        _sapp_tc.app.drop_enabled = true;
-        _sapp_tc.app.drop_max_files = d->max_dropped_files;
-        _sapp_tc.app.drop_max_path_length = d->max_dropped_file_path_length;
-        _sapp_tc.app.drop_buffer = (char*)calloc(
-            (size_t)d->max_dropped_files, (size_t)d->max_dropped_file_path_length);
-    }
+    _sapp_tc.app.clipboard_enabled = d->enable_clipboard;
+    _sapp_tc.app.drop_enabled = d->enable_dragndrop;
+    _sapp_tc_clipboard_text.clear();
+    _sapp_tc_dropped_paths.clear();
     _sapp_tc.app.mouse_shown = true;
     _sapp_tc.app.current_cursor = SAPP_MOUSECURSOR_DEFAULT;
     _sapp_tc_init_keytable();
@@ -4740,26 +4699,20 @@ void sapp_set_clipboard_string(const char* str) {
         [pboard declareTypes:@[NSPasteboardTypeString] owner:nil];
         [pboard setString:[NSString stringWithUTF8String:str] forType:NSPasteboardTypeString];
     }
-    strncpy(_sapp_tc.app.clipboard, str, (size_t)_sapp_tc.app.clipboard_size - 1);
-    _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
+    _sapp_tc_clipboard_text = str;
 }
 
 const char* sapp_get_clipboard_string(void) {
-    if (!_sapp_tc.app.clipboard_enabled || !_sapp_tc.app.clipboard) return "";
+    if (!_sapp_tc.app.clipboard_enabled) return "";
     @autoreleasepool {
-        _sapp_tc.app.clipboard[0] = 0;
+        _sapp_tc_clipboard_text.clear();
         NSPasteboard* pboard = [NSPasteboard generalPasteboard];
         if ([pboard.types containsObject:NSPasteboardTypeString]) {
             NSString* str = [pboard stringForType:NSPasteboardTypeString];
-            if (str) {
-                // Bound (security): OS clipboard text uses finite macOS storage. Overflow truncates to clipboard_size - 1 bytes.
-                strncpy(_sapp_tc.app.clipboard, str.UTF8String,
-                        (size_t)_sapp_tc.app.clipboard_size - 1);
-                _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
-            }
+            if (str && str.UTF8String) _sapp_tc_clipboard_text = str.UTF8String;
         }
     }
-    return _sapp_tc.app.clipboard;
+    return _sapp_tc_clipboard_text.c_str();
 }
 
 void sapp_set_window_title(const char* str) {
@@ -4785,13 +4738,12 @@ void sapp_toggle_fullscreen(void) {
 }
 
 int sapp_get_num_dropped_files(void) {
-    return _sapp_tc.app.drop_enabled ? _sapp_tc.app.drop_num_files : 0;
+    return _sapp_tc.app.drop_enabled ? (int)_sapp_tc_dropped_paths.size() : 0;
 }
 
 const char* sapp_get_dropped_file_path(int index) {
-    if (!_sapp_tc.app.drop_enabled || !_sapp_tc.app.drop_buffer) return "";
-    if (index < 0 || index >= _sapp_tc.app.drop_num_files) return "";
-    return _sapp_tc.app.drop_buffer + (size_t)index * (size_t)_sapp_tc.app.drop_max_path_length;
+    if (!_sapp_tc.app.drop_enabled || index < 0 || index >= (int)_sapp_tc_dropped_paths.size()) return "";
+    return _sapp_tc_dropped_paths[index].c_str();
 }
 
 sapp_pixel_format sapp_color_format(void) {
@@ -5163,17 +5115,10 @@ typedef struct {
 
 typedef struct {
     bool enabled;
-    int buf_size;
-    char* buffer;
 } _sapp_tc_clipboard_t;
 
 typedef struct {
     bool enabled;
-    int max_files;
-    int max_path_length;
-    int num_files;
-    int buf_size;
-    char* buffer;
 } _sapp_tc_drop_t;
 
 typedef struct {
@@ -5318,13 +5263,7 @@ _SOKOL_PRIVATE bool _sapp_tc_call_event(const sapp_event* input) {
 }
 
 
-_SOKOL_PRIVATE char* _sapp_tc_dropped_file_path_ptr(int index) {
-    SOKOL_ASSERT(_sapp_tc.drop.buffer);
-    SOKOL_ASSERT((index >= 0) && (index <= _sapp_tc.drop.max_files));
-    int offset = index * _sapp_tc.drop.max_path_length;
-    SOKOL_ASSERT(offset < _sapp_tc.drop.buf_size);
-    return &_sapp_tc.drop.buffer[offset];
-}
+
 
 /* Copy a string (either zero-terminated or with explicit length)
    into a fixed size buffer with guaranteed zero-termination.
@@ -5388,9 +5327,6 @@ _SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
         #endif
     }
     res.html5.canvas_selector = _sapp_tc_def(res.html5.canvas_selector, "#canvas");
-    res.clipboard_size = _sapp_tc_def(res.clipboard_size, 8192);
-    res.max_dropped_files = _sapp_tc_def(res.max_dropped_files, 1);
-    res.max_dropped_file_path_length = _sapp_tc_def(res.max_dropped_file_path_length, 2048);
     res.window_title = _sapp_tc_def(res.window_title, "sokol");
     return res;
 }
@@ -5401,9 +5337,6 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
     SOKOL_ASSERT(desc->height >= 0);
     SOKOL_ASSERT(desc->sample_count >= 0);
     SOKOL_ASSERT(desc->swap_interval >= 0);
-    SOKOL_ASSERT(desc->clipboard_size >= 0);
-    SOKOL_ASSERT(desc->max_dropped_files >= 0);
-    SOKOL_ASSERT(desc->max_dropped_file_path_length >= 0);
     _SAPP_CLEAR_ARC_STRUCT(_sapp_tc_t, _sapp_tc);
     _sapp_tc.desc = _sapp_tc_desc_defaults(desc);
     _sapp_tc.first_frame = true;
@@ -5419,15 +5352,11 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
     _sapp_tc.html5_ask_leave_site = _sapp_tc.desc.html5.ask_leave_site;
     _sapp_tc.clipboard.enabled = _sapp_tc.desc.enable_clipboard;
     if (_sapp_tc.clipboard.enabled) {
-        _sapp_tc.clipboard.buf_size = _sapp_tc.desc.clipboard_size;
-        _sapp_tc.clipboard.buffer = (char*) _sapp_tc_malloc_clear((size_t)_sapp_tc.clipboard.buf_size);
+        _sapp_tc_clipboard_text.clear();
     }
     _sapp_tc.drop.enabled = _sapp_tc.desc.enable_dragndrop;
     if (_sapp_tc.drop.enabled) {
-        _sapp_tc.drop.max_files = _sapp_tc.desc.max_dropped_files;
-        _sapp_tc.drop.max_path_length = _sapp_tc.desc.max_dropped_file_path_length;
-        _sapp_tc.drop.buf_size = _sapp_tc.drop.max_files * _sapp_tc.drop.max_path_length;
-        _sapp_tc.drop.buffer = (char*) _sapp_tc_malloc_clear((size_t)_sapp_tc.drop.buf_size);
+        _sapp_tc_dropped_paths.clear();
     }
     _sapp_tc_strcpy(_sapp_tc.desc.window_title, _sapp_tc.window_title, sizeof(_sapp_tc.window_title));
     _sapp_tc.desc.window_title = _sapp_tc.window_title;
@@ -5439,12 +5368,10 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
 
 _SOKOL_PRIVATE void _sapp_tc_discard_state(void) {
     if (_sapp_tc.clipboard.enabled) {
-        SOKOL_ASSERT(_sapp_tc.clipboard.buffer);
-        _sapp_tc_free((void*)_sapp_tc.clipboard.buffer);
+        _sapp_tc_clipboard_text.clear();
     }
     if (_sapp_tc.drop.enabled) {
-        SOKOL_ASSERT(_sapp_tc.drop.buffer);
-        _sapp_tc_free((void*)_sapp_tc.drop.buffer);
+        _sapp_tc_dropped_paths.clear();
     }
     for (int i = 0; i < _SAPP_MOUSECURSOR_NUM; i++) {
         sapp_unbind_mouse_cursor_image((sapp_mouse_cursor) i);
@@ -5473,10 +5400,7 @@ _SOKOL_PRIVATE bool _sapp_tc_events_enabled(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_clear_drop_buffer(void) {
-    if (_sapp_tc.drop.enabled) {
-        SOKOL_ASSERT(_sapp_tc.drop.buffer);
-        _sapp_tc_clear(_sapp_tc.drop.buffer, (size_t)_sapp_tc.drop.buf_size);
-    }
+    _sapp_tc_dropped_paths.clear();
 }
 
 _SOKOL_PRIVATE void _sapp_tc_frame(void) {
@@ -6448,7 +6372,7 @@ SOKOL_API_IMPL void sapp_set_clipboard_string(const char* str) {
     #else
         /* not implemented */
     #endif
-    _sapp_tc_strcpy(str, _sapp_tc.clipboard.buffer, (size_t)_sapp_tc.clipboard.buf_size);
+    _sapp_tc_clipboard_text = str;
 }
 
 SOKOL_API_IMPL const char* sapp_get_clipboard_string(void) {
@@ -6458,14 +6382,14 @@ SOKOL_API_IMPL const char* sapp_get_clipboard_string(void) {
     #if defined(_SAPP_MACOS)
         return _sapp_tc_macos_get_clipboard_string();
     #elif defined(_SAPP_EMSCRIPTEN)
-        return _sapp_tc.clipboard.buffer;
+        return _sapp_tc_clipboard_text.c_str();
     #elif defined(_SAPP_WIN32)
         return _sapp_tc_win32_get_clipboard_string();
     #elif defined(_SAPP_LINUX)
         return _sapp_tc_x11_get_clipboard_string();
     #else
         /* not implemented */
-        return _sapp_tc.clipboard.buffer;
+        return _sapp_tc_clipboard_text.c_str();
     #endif
 }
 
@@ -6511,19 +6435,16 @@ SOKOL_API_IMPL int sapp_get_num_dropped_files(void) {
     if (!_sapp_tc.drop.enabled) {
         return 0;
     }
-    return _sapp_tc.drop.num_files;
+    return (int)_sapp_tc_dropped_paths.size();
 }
 
 SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
+    SOKOL_ASSERT((index >= 0) && (index < (int)_sapp_tc_dropped_paths.size()));
     if (!_sapp_tc.drop.enabled) {
         return "";
     }
-    SOKOL_ASSERT(_sapp_tc.drop.buffer);
-    if ((index < 0) || (index >= _sapp_tc.drop.max_files)) {
-        return "";
-    }
-    return (const char*) _sapp_tc_dropped_file_path_ptr(index);
+    if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) return "";
+    return _sapp_tc_dropped_paths[index].c_str();
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
@@ -6540,7 +6461,7 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
     #if defined(_SAPP_EMSCRIPTEN)
         const int index = request->dropped_file_index;
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
-        if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
+        if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
         } else {
             const uint64_t size = sapp_html5_get_dropped_file_size64(index);
@@ -6973,14 +6894,8 @@ static struct {
         UINT orig_input_codepage;
         /* clipboard */
         bool clipboard_enabled;
-        int clipboard_size;
-        char* clipboard;
         /* drag & drop */
         bool drop_enabled;
-        int drop_max_files;
-        int drop_max_path_length;
-        int drop_num_files;
-        char* drop_buffer;
     } app;
 } _sapp_tc;
 
@@ -7750,41 +7665,37 @@ static void _sapp_tc_win32_release_mouse(_sapp_tc_window_t* w, uint8_t btn_mask)
 }
 
 static void _sapp_tc_win32_files_dropped(_sapp_tc_window_t* w, HDROP hdrop) {
-    if (!_sapp_tc.app.drop_enabled || !_sapp_tc.app.drop_buffer) {
+    if (!_sapp_tc.app.drop_enabled) {
         DragFinish(hdrop);
         return;
     }
-    const int max_files = _sapp_tc.app.drop_max_files;
-    const int max_path = _sapp_tc.app.drop_max_path_length;
-    memset(_sapp_tc.app.drop_buffer, 0, (size_t)max_files * (size_t)max_path);
-    _sapp_tc.app.drop_num_files = 0;
-    int num = (int)DragQueryFileW(hdrop, 0xFFFFFFFF, NULL, 0);
-    // Bound (security): OS drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
-    if (num > max_files) num = max_files;
-    bool ok = (num > 0);
-    WCHAR* wpath = (WCHAR*)calloc((size_t)max_path, sizeof(WCHAR));
-    if (!wpath) ok = false;
-    for (int i = 0; ok && (i < num); i++) {
-        if (0 == DragQueryFileW(hdrop, (UINT)i, wpath, (UINT)max_path)) {
+    _sapp_tc_dropped_paths.clear();
+    const UINT num = DragQueryFileW(hdrop, 0xFFFFFFFF, NULL, 0);
+    std::vector<std::string> paths;
+    bool ok = num > 0;
+    for (UINT i = 0; ok && i < num; i++) {
+        const UINT length = DragQueryFileW(hdrop, i, nullptr, 0);
+        std::vector<WCHAR> wpath((size_t)length + 1);
+        if (DragQueryFileW(hdrop, i, wpath.data(), length + 1) != length) {
             ok = false;
             break;
         }
-        char* dst = _sapp_tc.app.drop_buffer + (size_t)i * (size_t)max_path;
-        // Bound (security): OS drop paths must fit fixed UTF-8 storage to keep memory finite. Overflow rejects the drop.
-        if (!_sapp_tc_win32_wide_to_utf8(wpath, dst, max_path)) {
-            ok = false;     /* path too long: drop everything */
+        const int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+            wpath.data(), -1, nullptr, 0, nullptr, nullptr);
+        if (bytes <= 0) { ok = false; break; }
+        std::string path((size_t)bytes, '\0');
+        if (!_sapp_tc_win32_wide_to_utf8(wpath.data(), path.data(), bytes)) {
+            ok = false;
             break;
         }
+        path.resize((size_t)bytes - 1);
+        paths.push_back(std::move(path));
     }
     POINT pt;
     const BOOL in_client = DragQueryPoint(hdrop, &pt);
-    free(wpath);
     DragFinish(hdrop);
-    if (!ok) {
-        memset(_sapp_tc.app.drop_buffer, 0, (size_t)max_files * (size_t)max_path);
-        return;
-    }
-    _sapp_tc.app.drop_num_files = num;
+    if (!ok) return;
+    _sapp_tc_dropped_paths = std::move(paths);
     sapp_event e;
     memset(&e, 0, sizeof(e));
     e.type = SAPP_EVENTTYPE_FILES_DROPPED;
@@ -8244,6 +8155,13 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
 static LRESULT CALLBACK _sapp_tc_wndproc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     try {
         return _sapp_tc_wndproc_impl(hwnd, msg, wParam, lParam);
+    } catch (const std::bad_alloc&) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_MALLOC_FAILED,
+            __LINE__, "error: ", "%s", msg == WM_DROPFILES
+                ? "File drop failed: out of memory"
+                : "Windows event/clipboard handling failed: out of memory");
+        if (msg == WM_CLOSE) return 0;
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
     } catch (...) {
         if (msg == WM_CLOSE) return 0; // a throwing close client must not let DefWindowProc destroy the HWND
         return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -8716,23 +8634,12 @@ void sapp_run(const sapp_desc* desc) {
     sapp_desc* d = &_sapp_tc.app.desc;
     if (d->sample_count <= 0) d->sample_count = 1;
     if (d->swap_interval <= 0) d->swap_interval = 1;
-    if (d->clipboard_size <= 0) d->clipboard_size = 8192;
-    if (d->max_dropped_files <= 0) d->max_dropped_files = 1;
-    if (d->max_dropped_file_path_length <= 0) d->max_dropped_file_path_length = 2048;
     if (d->_tc_draw_while_hidden == 0) d->_tc_draw_while_hidden = 1;
 
-    if (d->enable_clipboard) {
-        _sapp_tc.app.clipboard_enabled = true;
-        _sapp_tc.app.clipboard_size = d->clipboard_size;
-        _sapp_tc.app.clipboard = (char*)calloc(1, (size_t)d->clipboard_size);
-    }
-    if (d->enable_dragndrop) {
-        _sapp_tc.app.drop_enabled = true;
-        _sapp_tc.app.drop_max_files = d->max_dropped_files;
-        _sapp_tc.app.drop_max_path_length = d->max_dropped_file_path_length;
-        _sapp_tc.app.drop_buffer = (char*)calloc(
-            (size_t)d->max_dropped_files, (size_t)d->max_dropped_file_path_length);
-    }
+    _sapp_tc.app.clipboard_enabled = d->enable_clipboard;
+    _sapp_tc.app.drop_enabled = d->enable_dragndrop;
+    _sapp_tc_clipboard_text.clear();
+    _sapp_tc_dropped_paths.clear();
     _sapp_tc.app.mouse_shown = true;
     _sapp_tc.app.current_cursor = SAPP_MOUSECURSOR_DEFAULT;
     LARGE_INTEGER freq;
@@ -8770,8 +8677,8 @@ void sapp_run(const sapp_desc* desc) {
         }
     }
     _sapp_tc_win32_restore_console();
-    if (_sapp_tc.app.clipboard) { free(_sapp_tc.app.clipboard); _sapp_tc.app.clipboard = 0; }
-    if (_sapp_tc.app.drop_buffer) { free(_sapp_tc.app.drop_buffer); _sapp_tc.app.drop_buffer = 0; }
+    _sapp_tc_clipboard_text.clear();
+    _sapp_tc_dropped_paths.clear();
     _sapp_tc.app.valid = false;
 }
 
@@ -8901,12 +8808,14 @@ void sapp_unbind_mouse_cursor_image(sapp_mouse_cursor cursor) {
 }
 
 void sapp_set_clipboard_string(const char* str) {
-    if (!_sapp_tc.app.clipboard_enabled || !_sapp_tc.app.clipboard || !str) return;
+    if (!_sapp_tc.app.clipboard_enabled || !str) return;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w) return;
-    const SIZE_T wchar_buf_size = (SIZE_T)_sapp_tc.app.clipboard_size * sizeof(wchar_t);
+    const int wchar_count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, str, -1, nullptr, 0);
+    if (wchar_count <= 0) return;
+    const SIZE_T wchar_buf_size = (SIZE_T)wchar_count * sizeof(wchar_t);
     HANDLE object = GlobalAlloc(GMEM_MOVEABLE, wchar_buf_size);
-    if (!object) return;
+    if (!object) throw std::bad_alloc();
     wchar_t* wchar_buf = (wchar_t*)GlobalLock(object);
     if (!wchar_buf) {
         GlobalFree(object);
@@ -8929,30 +8838,31 @@ void sapp_set_clipboard_string(const char* str) {
         GlobalFree(object);
         return;
     }
-    strncpy(_sapp_tc.app.clipboard, str, (size_t)_sapp_tc.app.clipboard_size - 1);
-    _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
+    _sapp_tc_clipboard_text = str;
 }
 
 const char* sapp_get_clipboard_string(void) {
-    if (!_sapp_tc.app.clipboard_enabled || !_sapp_tc.app.clipboard) return "";
+    if (!_sapp_tc.app.clipboard_enabled) return "";
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w) return "";
-    _sapp_tc.app.clipboard[0] = 0;
-    if (!OpenClipboard(w->hwnd)) {
-        return _sapp_tc.app.clipboard;
-    }
+    _sapp_tc_clipboard_text.clear();
+    if (!OpenClipboard(w->hwnd)) return "";
     HANDLE object = GetClipboardData(CF_UNICODETEXT);
     if (object) {
         const wchar_t* wchar_buf = (const wchar_t*)GlobalLock(object);
         if (wchar_buf) {
-            // Bound (security): OS clipboard text must fit the Windows UTF-8 buffer. Overflow fails conversion; the buffer is NUL-terminated.
-            _sapp_tc_win32_wide_to_utf8(wchar_buf, _sapp_tc.app.clipboard,
-                                        _sapp_tc.app.clipboard_size);
+            const int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                wchar_buf, -1, nullptr, 0, nullptr, nullptr);
+            if (bytes > 0) {
+                _sapp_tc_clipboard_text.resize((size_t)bytes);
+                _sapp_tc_win32_wide_to_utf8(wchar_buf, _sapp_tc_clipboard_text.data(), bytes);
+                _sapp_tc_clipboard_text.resize((size_t)bytes - 1);
+            }
             GlobalUnlock(object);
         }
     }
     CloseClipboard();
-    return _sapp_tc.app.clipboard;
+    return _sapp_tc_clipboard_text.c_str();
 }
 
 void sapp_set_window_title(const char* str) {
@@ -8978,13 +8888,12 @@ sapp_desc sapp_query_desc(void) { return _sapp_tc.app.desc; }
 void* sapp_userdata(void) { return _sapp_tc.app.desc.user_data; }
 
 int sapp_get_num_dropped_files(void) {
-    return _sapp_tc.app.drop_enabled ? _sapp_tc.app.drop_num_files : 0;
+    return _sapp_tc.app.drop_enabled ? (int)_sapp_tc_dropped_paths.size() : 0;
 }
 
 const char* sapp_get_dropped_file_path(int index) {
-    if (!_sapp_tc.app.drop_enabled || !_sapp_tc.app.drop_buffer) return "";
-    if (index < 0 || index >= _sapp_tc.app.drop_num_files) return "";
-    return _sapp_tc.app.drop_buffer + (size_t)index * (size_t)_sapp_tc.app.drop_max_path_length;
+    if (!_sapp_tc.app.drop_enabled || index < 0 || index >= (int)_sapp_tc_dropped_paths.size()) return "";
+    return _sapp_tc_dropped_paths[index].c_str();
 }
 
 sapp_pixel_format sapp_color_format(void) {
@@ -9244,16 +9153,10 @@ static struct {
         bool custom_cursor_bound[_SAPP_MOUSECURSOR_NUM];
         /* clipboard */
         bool clipboard_enabled;
-        int clipboard_size;
-        char* clipboard;
         /* drag & drop */
         bool drop_enabled;
-        int drop_max_files;
         // Bound (record): inspect the first 1024 offered types; excess types are ignored.
         enum { drop_max_types = 1024 };
-        int drop_max_path_length;
-        int drop_num_files;
-        char* drop_buffer;
     } app;
 } _sapp_tc;
 
@@ -10904,34 +10807,130 @@ static bool _sapp_tc_x11_wait_for_event(Window xwin, int type, double timeout_se
     }
 }
 
-/*-- clipboard (CLIPBOARD selection, UTF8_STRING only, no INCR) ---------------*/
+/*-- clipboard (CLIPBOARD selection, UTF8_STRING and INCR) -------------------*/
+struct _sapp_tc_x11_clipboard_transfer {
+    Window requestor;
+    Atom property;
+    std::string text;
+    size_t offset;
+};
+static std::vector<_sapp_tc_x11_clipboard_transfer> _sapp_tc_x11_clipboard_transfers;
+
+static size_t _sapp_tc_x11_clipboard_chunk_size() {
+    // XChangeProperty must fit a server request, including its header.
+    return (size_t)(XMaxRequestSize(_sapp_tc.display) - 6) * 4;
+}
+
+static void _sapp_tc_x11_send_clipboard_chunk(const XPropertyEvent& event) {
+    if (event.state != PropertyDelete) return;
+    for (auto it = _sapp_tc_x11_clipboard_transfers.begin(); it != _sapp_tc_x11_clipboard_transfers.end(); ++it) {
+        if (it->requestor != event.window || it->property != event.atom) continue;
+        const size_t remaining = it->text.size() - it->offset;
+        const size_t chunk = _sapp_tc_x11_clipboard_chunk_size();
+        const size_t count = remaining < chunk ? remaining : chunk;
+        XChangeProperty(_sapp_tc.display, it->requestor, it->property, _sapp_tc.UTF8_STRING,
+            8, PropModeReplace, (const unsigned char*)it->text.data() + it->offset, (int)count);
+        it->offset += count;
+        if (!count) _sapp_tc_x11_clipboard_transfers.erase(it);
+        XFlush(_sapp_tc.display);
+        return;
+    }
+}
+
 static void _sapp_tc_x11_serve_selection_request(XEvent* event) {
     XSelectionRequestEvent* req = &event->xselectionrequest;
-    if (req->selection != _sapp_tc.CLIPBOARD) return;
-    if (!_sapp_tc.app.clipboard_enabled || !_sapp_tc.app.clipboard) return;
-    XSelectionEvent reply;
-    memset(&reply, 0, sizeof(reply));
+    if (req->selection != _sapp_tc.CLIPBOARD || !_sapp_tc.app.clipboard_enabled) return;
+    XSelectionEvent reply = {};
     reply.type = SelectionNotify;
     reply.display = req->display;
     reply.requestor = req->requestor;
     reply.selection = req->selection;
     reply.target = req->target;
-    reply.property = req->property;
+    reply.property = req->property != None ? req->property : req->target;
     reply.time = req->time;
     if (req->target == _sapp_tc.UTF8_STRING) {
-        XChangeProperty(_sapp_tc.display, req->requestor, req->property,
-                        _sapp_tc.UTF8_STRING, 8, PropModeReplace,
-                        (unsigned char*)_sapp_tc.app.clipboard,
-                        (int)strlen(_sapp_tc.app.clipboard));
+        if (_sapp_tc_clipboard_text.size() <= _sapp_tc_x11_clipboard_chunk_size()) {
+            XChangeProperty(_sapp_tc.display, req->requestor, reply.property,
+                _sapp_tc.UTF8_STRING, 8, PropModeReplace,
+                (const unsigned char*)_sapp_tc_clipboard_text.data(), (int)_sapp_tc_clipboard_text.size());
+        } else {
+            XWindowAttributes attributes = {};
+            XGetWindowAttributes(_sapp_tc.display, req->requestor, &attributes);
+            XSelectInput(_sapp_tc.display, req->requestor,
+                attributes.your_event_mask | PropertyChangeMask | StructureNotifyMask);
+            _sapp_tc_x11_clipboard_transfers.push_back({req->requestor, reply.property, _sapp_tc_clipboard_text, 0});
+            // INCR's 32-bit value is a size hint; the terminating empty chunk ends the transfer.
+            const unsigned long bytes = _sapp_tc_clipboard_text.size() > UINT32_MAX
+                ? UINT32_MAX : (unsigned long)_sapp_tc_clipboard_text.size();
+            XChangeProperty(_sapp_tc.display, req->requestor, reply.property,
+                XInternAtom(_sapp_tc.display, "INCR", False), 32, PropModeReplace,
+                (const unsigned char*)&bytes, 1);
+        }
     } else if (req->target == _sapp_tc.TARGETS) {
-        XChangeProperty(_sapp_tc.display, req->requestor, req->property,
-                        XA_ATOM, 32, PropModeReplace,
-                        (unsigned char*)&_sapp_tc.UTF8_STRING, 1);
+        XChangeProperty(_sapp_tc.display, req->requestor, reply.property,
+            XA_ATOM, 32, PropModeReplace, (const unsigned char*)&_sapp_tc.UTF8_STRING, 1);
     } else {
         reply.property = None;
     }
     XSendEvent(_sapp_tc.display, req->requestor, False, 0, (XEvent*)&reply);
     XFlush(_sapp_tc.display);
+}
+
+// Read the full property in chunks. Xlib allocates each reply from its actual size.
+static bool _sapp_tc_x11_read_text_property(Window window, Atom property, Atom text_type,
+                                           std::string& text, bool& incremental) {
+    long offset = 0;
+    unsigned long bytes_after;
+    incremental = false;
+    do {
+        Atom type = None;
+        int format = 0;
+        unsigned long count = 0;
+        unsigned char* data = nullptr;
+        const int result = XGetWindowProperty(_sapp_tc.display, window, property,
+            offset, 4096, False, AnyPropertyType, &type, &format, &count, &bytes_after, &data);
+        incremental = type == XInternAtom(_sapp_tc.display, "INCR", False);
+        const bool valid = result == Success && (incremental || (type == text_type && format == 8));
+        if (valid && !incremental && count) text.append((const char*)data, count);
+        if (data) XFree(data);
+        if (!valid) return false;
+        if (incremental) break;
+        if (bytes_after && (!count || count % 4 || count / 4 > (unsigned long)(LONG_MAX - offset))) return false;
+        offset += (long)(count / 4);
+    } while (bytes_after);
+    XDeleteProperty(_sapp_tc.display, window, property);
+    XFlush(_sapp_tc.display);
+    return true;
+}
+
+struct _sapp_tc_x11_property_match { Window window; Atom property; };
+static Bool _sapp_tc_x11_clipboard_property_ready(Display*, XEvent* event, XPointer context) {
+    const auto* match = (const _sapp_tc_x11_property_match*)context;
+    return event->type == PropertyNotify && event->xproperty.window == match->window &&
+        event->xproperty.atom == match->property && event->xproperty.state == PropertyNewValue;
+}
+
+static bool _sapp_tc_x11_wait_clipboard_property(Window window, Atom property) {
+    _sapp_tc_x11_property_match match{window, property};
+    const double deadline = _sapp_tc_now() + 0.1;
+    XEvent event;
+    for (;;) {
+        if (XCheckIfEvent(_sapp_tc.display, &event, _sapp_tc_x11_clipboard_property_ready, (XPointer)&match)) return true;
+        const double remaining = deadline - _sapp_tc_now();
+        if (remaining <= 0.0) return false;
+        struct pollfd pfd{ConnectionNumber(_sapp_tc.display), POLLIN, 0};
+        poll(&pfd, 1, (int)(remaining * 1000.0) + 1);
+    }
+}
+
+static bool _sapp_tc_x11_receive_incr(Window window, Atom property, Atom text_type, std::string& text) {
+    for (;;) {
+        if (!_sapp_tc_x11_wait_clipboard_property(window, property)) return false;
+        const size_t previous = text.size();
+        bool incremental;
+        if (!_sapp_tc_x11_read_text_property(window, property, text_type, text, incremental) || incremental) return false;
+        if (text.size() == previous) return true;
+    }
 }
 
 /*-- drag & drop (XDND v5, text/uri-list) -------------------------------------*/
@@ -10942,22 +10941,35 @@ struct _sapp_tc_x11_uri_reader {
     unsigned long count, pos, bytes_after, extent, consumed;
     long offset;
     bool started, failed;
-    // Bound (record): a percent escape needs at most two following bytes of lookahead.
-    unsigned char ahead[2];
-    int ahead_count;
+    std::string incremental_text;
+    bool from_memory;
+
 };
 
 static unsigned char _sapp_tc_x11_uri_read(_sapp_tc_x11_uri_reader* r) {
     if (r->failed) return 0;
+    if (r->from_memory) return r->pos < r->incremental_text.size() ? (unsigned char)r->incremental_text[r->pos++] : 0;
     if (r->pos == r->count) {
         if (r->started && !r->bytes_after) return 0;
         if (r->data) { XFree(r->data); r->data = NULL; }
         Atom actual_type;
         int format;
-        // Bound (storage): stream URI data in per-path-sized replies; parsing retains only the configured paths.
-        const long length = _sapp_tc.app.drop_max_path_length / 4 + (_sapp_tc.app.drop_max_path_length % 4 != 0);
+        // Read in chunks; this does not limit the property or decoded path size.
+        const long length = 4096;
         const int status = XGetWindowProperty(_sapp_tc.display, r->window, r->property,
             r->offset, length, False, r->type, &actual_type, &format, &r->count, &r->bytes_after, &r->data);
+        if (!r->started && status == Success && actual_type == XInternAtom(_sapp_tc.display, "INCR", False)) {
+            if (r->data) { XFree(r->data); r->data = nullptr; }
+            _sapp_tc_x11_property_match match{r->window, r->property};
+            XEvent event;
+            while (XCheckIfEvent(_sapp_tc.display, &event, _sapp_tc_x11_clipboard_property_ready, (XPointer)&match)) {}
+            XDeleteProperty(_sapp_tc.display, r->window, r->property);
+            XFlush(_sapp_tc.display);
+            r->failed = !_sapp_tc_x11_receive_incr(r->window, r->property, r->type, r->incremental_text);
+            r->from_memory = true;
+            r->pos = 0;
+            return _sapp_tc_x11_uri_read(r);
+        }
         r->pos = 0;
         if (status != Success || actual_type != r->type || format != 8 || !r->data ||
             r->count > (unsigned long)length * 4 ||
@@ -10983,94 +10995,34 @@ static unsigned char _sapp_tc_x11_uri_read(_sapp_tc_x11_uri_reader* r) {
     return r->data[r->pos++];
 }
 
-static unsigned char _sapp_tc_x11_uri_peek(_sapp_tc_x11_uri_reader* r, int index) {
-    while (r->ahead_count <= index) r->ahead[r->ahead_count++] = _sapp_tc_x11_uri_read(r);
-    return r->ahead[index];
-}
-
-static unsigned char _sapp_tc_x11_uri_take(_sapp_tc_x11_uri_reader* r) {
-    if (!r->ahead_count) return _sapp_tc_x11_uri_read(r);
-    const unsigned char c = r->ahead[0];
-    if (--r->ahead_count) r->ahead[0] = r->ahead[1];
-    return c;
-}
-
 static bool _sapp_tc_x11_parse_dropped_files_list(_sapp_tc_x11_uri_reader* src) {
-    SOKOL_ASSERT(_sapp_tc.app.drop_buffer);
-
-    memset(_sapp_tc.app.drop_buffer, 0, (size_t)_sapp_tc.app.drop_max_files * (size_t)_sapp_tc.app.drop_max_path_length);
-    _sapp_tc.app.drop_num_files = 0;
-
-    /*
-        src is (potentially percent-encoded) string made of one or multiple paths
-        separated by \r\n, each path starting with 'file://'
-    */
-    bool err = false;
-    int src_count = 0;
-    char src_chr = 0;
-    char* dst_ptr = _sapp_tc.app.drop_buffer;
-    const char* dst_end_ptr = dst_ptr + (_sapp_tc.app.drop_max_path_length - 1); // room for terminating 0
-    while (0 != (src_chr = (char)_sapp_tc_x11_uri_take(src))) {
-        if (src_count < 8) src_count++;
-        char dst_chr = 0;
-        /* check leading 'file://' */
-        if (src_count <= 7) {
-            if (((src_count == 1) && (src_chr != 'f')) ||
-                ((src_count == 2) && (src_chr != 'i')) ||
-                ((src_count == 3) && (src_chr != 'l')) ||
-                ((src_count == 4) && (src_chr != 'e')) ||
-                ((src_count == 5) && (src_chr != ':')) ||
-                ((src_count == 6) && (src_chr != '/')) ||
-                ((src_count == 7) && (src_chr != '/')))
-            {
-                /* non-file: URI in drop list: ignore entry */
-                err = true;
-                break;
+    _sapp_tc_dropped_paths.clear();
+    std::vector<std::string> paths;
+    std::string line;
+    auto append_path = [&]() {
+        if (line.compare(0, 7, "file://") != 0) return false;
+        std::string path;
+        for (size_t i = 7; i < line.size(); ++i) {
+            char c = line[i];
+            if (c == '%' && i + 2 < line.size()) {
+                const char digits[3] = {line[i + 1], line[i + 2], 0};
+                c = (char)strtol(digits, nullptr, 16);
+                i += 2;
             }
-        } else if (src_chr == '\r') {
-            // skip
-        } else if (src_chr == '\n') {
-            src_count = 0;
-            // Empty decoded paths do not retain a file or consume a slot.
-            if (dst_ptr == _sapp_tc.app.drop_buffer + _sapp_tc.app.drop_num_files * _sapp_tc.app.drop_max_path_length) {
-                continue;
-            }
-            _sapp_tc.app.drop_num_files++;
-            // too many files is not an error
-            // Bound (security): X11 drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow stops parsing further files.
-            if (_sapp_tc.app.drop_num_files >= _sapp_tc.app.drop_max_files) {
-                break;
-            }
-            dst_ptr = _sapp_tc.app.drop_buffer + _sapp_tc.app.drop_num_files * _sapp_tc.app.drop_max_path_length;
-            dst_end_ptr = dst_ptr + (_sapp_tc.app.drop_max_path_length - 1);
-        } else if ((src_chr == '%') && _sapp_tc_x11_uri_peek(src, 0) && _sapp_tc_x11_uri_peek(src, 1)) {
-            // a percent-encoded byte (most likely UTF-8 multibyte sequence)
-            const char first = (char)_sapp_tc_x11_uri_take(src);
-            const char second = (char)_sapp_tc_x11_uri_take(src);
-            const char digits[3] = { first, second, 0 };
-            dst_chr = (char) strtol(digits, 0, 16);
-        } else {
-            dst_chr = src_chr;
+            if (c) path.push_back(c);
         }
-        if (dst_chr) {
-            // dst_end_ptr already has adjustment for terminating zero
-            // Bound (security): X11 drop paths must fit fixed per-path storage to keep memory finite. Overflow aborts parsing the drop.
-            if (dst_ptr < dst_end_ptr) {
-                *dst_ptr++ = dst_chr;
-            } else {
-                /* dropped file path too long: abort parse */
-                err = true;
-                break;
-            }
-        }
-    }
-    if (err || src->failed) {
-        memset(_sapp_tc.app.drop_buffer, 0, (size_t)_sapp_tc.app.drop_max_files * (size_t)_sapp_tc.app.drop_max_path_length);
-        _sapp_tc.app.drop_num_files = 0;
-        return false;
-    } else {
+        if (!path.empty()) paths.push_back(std::move(path));
+        line.clear();
         return true;
+    };
+    unsigned char c;
+    while ((c = _sapp_tc_x11_uri_read(src)) != 0) {
+        if (c == '\n') { if (!append_path()) return false; }
+        else if (c != '\r') line.push_back((char)c);
     }
+    if (src->failed) return false;
+    _sapp_tc_dropped_paths = std::move(paths);
+    return true;
 }
 
 /*-- per-window event senders --------------------------------------------------*/
@@ -11222,7 +11174,7 @@ static void _sapp_tc_x11_on_selectionnotify(XEvent* event) {
     data.window = event->xselection.requestor;
     data.property = event->xselection.property;
     data.type = event->xselection.target;
-    const bool success = _sapp_tc_x11_parse_dropped_files_list(&data) && _sapp_tc.app.drop_num_files > 0;
+    const bool success = _sapp_tc_x11_parse_dropped_files_list(&data) && (int)_sapp_tc_dropped_paths.size() > 0;
     if (success) {
         _sapp_tc_window_t* w = _sapp_tc_lookup_xwin(event->xselection.requestor);
         if (!w) w = _sapp_tc.xdnd.over;
@@ -12030,6 +11982,7 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
             }
             break;
         case PropertyNotify:
+            _sapp_tc_x11_send_clipboard_chunk(ev->xproperty);
             /* iconify/restore detection (there is no map/unmap handling) */
             if (w && w->trust_hidden_signals && (ev->xproperty.state == PropertyNewValue) &&
                 (ev->xproperty.atom == _sapp_tc.WM_STATE)) {
@@ -12082,6 +12035,10 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
             _sapp_tc_x11_on_clientmessage(ev);
             break;
         case DestroyNotify:
+            for (auto it = _sapp_tc_x11_clipboard_transfers.begin(); it != _sapp_tc_x11_clipboard_transfers.end();) {
+                if (it->requestor == ev->xdestroywindow.window) it = _sapp_tc_x11_clipboard_transfers.erase(it);
+                else ++it;
+            }
             /* not a bug (upstream parity) */
             break;
         default:
@@ -12662,29 +12619,11 @@ void sapp_run(const sapp_desc* desc) {
 #endif
     if (d->sample_count <= 0) d->sample_count = 1;
     if (d->swap_interval <= 0) d->swap_interval = 1;
-    if (d->clipboard_size <= 0) d->clipboard_size = 8192;
-    if (d->max_dropped_files <= 0) d->max_dropped_files = 1;
-    if (d->max_dropped_file_path_length <= 0) d->max_dropped_file_path_length = 2048;
     if (!d->window_title) d->window_title = "sokol";
-    if (d->enable_clipboard) {
-        _sapp_tc.app.clipboard_enabled = true;
-        _sapp_tc.app.clipboard_size = d->clipboard_size;
-        _sapp_tc.app.clipboard = (char*)_sapp_tc_x11_alloc((size_t)d->clipboard_size, true);
-    }
-    if (d->enable_dragndrop) {
-        _sapp_tc.app.drop_enabled = true;
-        _sapp_tc.app.drop_max_files = d->max_dropped_files;
-        _sapp_tc.app.drop_max_path_length = d->max_dropped_file_path_length;
-        _sapp_tc.app.drop_buffer = (char*)_sapp_tc_x11_alloc(
-            (size_t)d->max_dropped_files * (size_t)d->max_dropped_file_path_length, true);
-    }
-#if defined(SOKOL_GLES3)
-    if ((d->enable_clipboard && !_sapp_tc.app.clipboard) || (d->enable_dragndrop && !_sapp_tc.app.drop_buffer)) {
-        _sapp_tc_log(&_sapp_tc.app.desc.logger, 0, (uint32_t)SAPP_LOGITEM_MALLOC_FAILED, __LINE__,
-            "", "failed to allocate EGL main application storage");
-        abort(); // existing EGL allocator failure contract
-    }
-#endif
+    _sapp_tc.app.clipboard_enabled = d->enable_clipboard;
+    _sapp_tc.app.drop_enabled = d->enable_dragndrop;
+    _sapp_tc_clipboard_text.clear();
+    _sapp_tc_dropped_paths.clear();
     _sapp_tc.app.mouse_shown = true;
     _sapp_tc.app.current_cursor = SAPP_MOUSECURSOR_DEFAULT;
     _sapp_tc.refresh_period = 1.0 / 60.0;
@@ -12773,10 +12712,11 @@ void sapp_run(const sapp_desc* desc) {
 #endif
     _sapp_tc.window_slots = 0;
     _sapp_tc_x11_destroy_cursors();
+    _sapp_tc_x11_clipboard_transfers.clear();
     XCloseDisplay(_sapp_tc.display);
     _sapp_tc.display = 0;
-    if (_sapp_tc.app.clipboard) { _sapp_tc_x11_free(_sapp_tc.app.clipboard); _sapp_tc.app.clipboard = 0; }
-    if (_sapp_tc.app.drop_buffer) { _sapp_tc_x11_free(_sapp_tc.app.drop_buffer); _sapp_tc.app.drop_buffer = 0; }
+    _sapp_tc_clipboard_text.clear();
+    _sapp_tc_dropped_paths.clear();
     _sapp_tc.app.valid = false;
 }
 
@@ -12926,80 +12866,45 @@ void sapp_unbind_mouse_cursor_image(sapp_mouse_cursor cursor) {
 }
 
 void sapp_set_clipboard_string(const char* str) {
-    if (!_sapp_tc.app.clipboard_enabled || !_sapp_tc.app.clipboard || !str) return;
+    if (!_sapp_tc.app.clipboard_enabled || !str) return;
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w) return;
-    // Bound (storage): keep clipboard_size - 1 bytes and a terminator; oversize copies still take ownership.
-    if (strlen(str) >= (size_t)_sapp_tc.app.clipboard_size) {
-        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_CLIPBOARD_STRING_TOO_BIG,
-            __LINE__, "", "clipboard string exceeds the clipboard buffer");
-    }
-    strncpy(_sapp_tc.app.clipboard, str, (size_t)_sapp_tc.app.clipboard_size - 1);
-    _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
+    _sapp_tc_clipboard_text = str;
     XSetSelectionOwner(_sapp_tc.display, _sapp_tc.CLIPBOARD, w->xwin, CurrentTime);
     if (XGetSelectionOwner(_sapp_tc.display, _sapp_tc.CLIPBOARD) != w->xwin) {
-        _sapp_tc.app.clipboard[0] = 0;  /* failed to become selection owner */
+        _sapp_tc_clipboard_text.clear();
     }
 }
 
 const char* sapp_get_clipboard_string(void) {
-    if (!_sapp_tc.app.clipboard_enabled || !_sapp_tc.app.clipboard) return "";
+    if (!_sapp_tc.app.clipboard_enabled) return "";
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     if (!w) return "";
     if (XGetSelectionOwner(_sapp_tc.display, _sapp_tc.CLIPBOARD) == w->xwin) {
-        /* we own the selection: skip the X round-trip */
-        return _sapp_tc.app.clipboard;
+        return _sapp_tc_clipboard_text.c_str();
     }
+    _sapp_tc_clipboard_text.clear();
 #if defined(SOKOL_GLES3)
-    const char* failure = NULL;  // preserve the EGL main API's failed-transfer result
+    const char* failure = NULL; // preserve the EGL main API's failed-transfer result
 #else
-    const char* failure = _sapp_tc.app.clipboard;
-    _sapp_tc.app.clipboard[0] = 0;
+    const char* failure = "";
 #endif
-    const Atom incremental = XInternAtom(_sapp_tc.display, "INCR", False);
-    XConvertSelection(_sapp_tc.display, _sapp_tc.CLIPBOARD, _sapp_tc.UTF8_STRING,
-                      _sapp_tc.SAPP_TC_SELECTION, w->xwin, CurrentTime);
+    const Atom property = _sapp_tc.SAPP_TC_SELECTION;
+    // Discard previous notifications before requesting a new selection.
+    _sapp_tc_x11_property_match match{w->xwin, property};
     XEvent event;
-    if (!_sapp_tc_x11_wait_for_event(w->xwin, SelectionNotify, 0.1, &event)) {
-        return failure;
-    }
-    if (event.xselection.property == None) {
-        return failure;
-    }
-    char* data = NULL;
-    Atom actual_type;
-    int actual_format;
-    unsigned long item_count, bytes_after;
-    const int ret = XGetWindowProperty(_sapp_tc.display,
-        event.xselection.requestor, event.xselection.property,
-        // Bound (storage): request only clipboard storage, rounded up to X11's four-byte units; overflow rejects the selection.
-        0, _sapp_tc.app.clipboard_size / 4 + (_sapp_tc.app.clipboard_size % 4 != 0), True, _sapp_tc.UTF8_STRING,
-        &actual_type, &actual_format, &item_count, &bytes_after,
-        (unsigned char**)&data);
-    if ((ret != Success) || (data == NULL)) {
-        if (data) XFree(data);
-        return failure;
-    }
-    if (bytes_after > 0 && actual_type == _sapp_tc.UTF8_STRING) {
-        XDeleteProperty(_sapp_tc.display, event.xselection.requestor, event.xselection.property);
-    }
-    /* INCR (incremental transfer) is rejected: pastes beyond the buffer fail */
-    // Bound (security): X11 selection data must fit fixed clipboard storage to keep retained memory finite. Overflow rejects the selection.
-    if ((actual_type != incremental) && actual_type == _sapp_tc.UTF8_STRING && actual_format == 8 &&
-        bytes_after == 0 && (item_count < (unsigned long)_sapp_tc.app.clipboard_size)) {
-        strncpy(_sapp_tc.app.clipboard, data, (size_t)_sapp_tc.app.clipboard_size - 1);
-        _sapp_tc.app.clipboard[_sapp_tc.app.clipboard_size - 1] = 0;
-    } else {
-#if defined(SOKOL_GLES3)
-        if (actual_type == incremental || bytes_after > 0 || item_count >= (unsigned long)_sapp_tc.app.clipboard_size)
-            _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_CLIPBOARD_STRING_TOO_BIG,
-                __LINE__, "", "clipboard selection exceeds the clipboard buffer");
-#endif
-        XFree(data);
-        return failure;
-    }
-    XFree(data);
-    return _sapp_tc.app.clipboard;
+    while (XCheckIfEvent(_sapp_tc.display, &event, _sapp_tc_x11_clipboard_property_ready, (XPointer)&match)) {}
+    XConvertSelection(_sapp_tc.display, _sapp_tc.CLIPBOARD, _sapp_tc.UTF8_STRING,
+                      property, w->xwin, CurrentTime);
+    if (!_sapp_tc_x11_wait_for_event(w->xwin, SelectionNotify, 0.1, &event) || event.xselection.property == None) return failure;
+    // Consume the initial PropertyNotify before deleting the initial INCR property.
+    while (XCheckIfEvent(_sapp_tc.display, &event, _sapp_tc_x11_clipboard_property_ready, (XPointer)&match)) {}
+    std::string text;
+    bool incremental;
+    if (!_sapp_tc_x11_read_text_property(w->xwin, property, _sapp_tc.UTF8_STRING, text, incremental)) return failure;
+    if (incremental && !_sapp_tc_x11_receive_incr(w->xwin, property, _sapp_tc.UTF8_STRING, text)) return failure;
+    _sapp_tc_clipboard_text = std::move(text);
+    return _sapp_tc_clipboard_text.c_str();
 }
 
 void sapp_set_window_title(const char* str) {
@@ -13024,13 +12929,12 @@ void sapp_toggle_fullscreen(void) {
 }
 
 int sapp_get_num_dropped_files(void) {
-    return _sapp_tc.app.drop_enabled ? _sapp_tc.app.drop_num_files : 0;
+    return _sapp_tc.app.drop_enabled ? (int)_sapp_tc_dropped_paths.size() : 0;
 }
 
 const char* sapp_get_dropped_file_path(int index) {
-    if (!_sapp_tc.app.drop_enabled || !_sapp_tc.app.drop_buffer) return "";
-    if (index < 0 || index >= _sapp_tc.app.drop_num_files) return "";
-    return _sapp_tc.app.drop_buffer + (size_t)index * (size_t)_sapp_tc.app.drop_max_path_length;
+    if (!_sapp_tc.app.drop_enabled || index < 0 || index >= (int)_sapp_tc_dropped_paths.size()) return "";
+    return _sapp_tc_dropped_paths[index].c_str();
 }
 
 sapp_pixel_format sapp_color_format(void) {
@@ -13440,17 +13344,10 @@ typedef struct {
 
 typedef struct {
     bool enabled;
-    int buf_size;
-    char* buffer;
 } _sapp_tc_clipboard_t;
 
 typedef struct {
     bool enabled;
-    int max_files;
-    int max_path_length;
-    int num_files;
-    int buf_size;
-    char* buffer;
 } _sapp_tc_drop_t;
 
 typedef struct {
@@ -13600,13 +13497,7 @@ _SOKOL_PRIVATE bool _sapp_tc_call_event(const sapp_event* input) {
 }
 
 
-_SOKOL_PRIVATE char* _sapp_tc_dropped_file_path_ptr(int index) {
-    SOKOL_ASSERT(_sapp_tc.drop.buffer);
-    SOKOL_ASSERT((index >= 0) && (index <= _sapp_tc.drop.max_files));
-    int offset = index * _sapp_tc.drop.max_path_length;
-    SOKOL_ASSERT(offset < _sapp_tc.drop.buf_size);
-    return &_sapp_tc.drop.buffer[offset];
-}
+
 
 /* Copy a string (either zero-terminated or with explicit length)
    into a fixed size buffer with guaranteed zero-termination.
@@ -13670,9 +13561,6 @@ _SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
         #endif
     }
     res.html5.canvas_selector = _sapp_tc_def(res.html5.canvas_selector, "#canvas");
-    res.clipboard_size = _sapp_tc_def(res.clipboard_size, 8192);
-    res.max_dropped_files = _sapp_tc_def(res.max_dropped_files, 1);
-    res.max_dropped_file_path_length = _sapp_tc_def(res.max_dropped_file_path_length, 2048);
     res.window_title = _sapp_tc_def(res.window_title, "sokol");
     return res;
 }
@@ -13683,9 +13571,6 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
     SOKOL_ASSERT(desc->height >= 0);
     SOKOL_ASSERT(desc->sample_count >= 0);
     SOKOL_ASSERT(desc->swap_interval >= 0);
-    SOKOL_ASSERT(desc->clipboard_size >= 0);
-    SOKOL_ASSERT(desc->max_dropped_files >= 0);
-    SOKOL_ASSERT(desc->max_dropped_file_path_length >= 0);
     _SAPP_CLEAR_ARC_STRUCT(_sapp_tc_t, _sapp_tc);
     _sapp_tc.desc = _sapp_tc_desc_defaults(desc);
     _sapp_tc.first_frame = true;
@@ -13701,15 +13586,11 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
     _sapp_tc.html5_ask_leave_site = _sapp_tc.desc.html5.ask_leave_site;
     _sapp_tc.clipboard.enabled = _sapp_tc.desc.enable_clipboard;
     if (_sapp_tc.clipboard.enabled) {
-        _sapp_tc.clipboard.buf_size = _sapp_tc.desc.clipboard_size;
-        _sapp_tc.clipboard.buffer = (char*) _sapp_tc_malloc_clear((size_t)_sapp_tc.clipboard.buf_size);
+        _sapp_tc_clipboard_text.clear();
     }
     _sapp_tc.drop.enabled = _sapp_tc.desc.enable_dragndrop;
     if (_sapp_tc.drop.enabled) {
-        _sapp_tc.drop.max_files = _sapp_tc.desc.max_dropped_files;
-        _sapp_tc.drop.max_path_length = _sapp_tc.desc.max_dropped_file_path_length;
-        _sapp_tc.drop.buf_size = _sapp_tc.drop.max_files * _sapp_tc.drop.max_path_length;
-        _sapp_tc.drop.buffer = (char*) _sapp_tc_malloc_clear((size_t)_sapp_tc.drop.buf_size);
+        _sapp_tc_dropped_paths.clear();
     }
     _sapp_tc_strcpy(_sapp_tc.desc.window_title, _sapp_tc.window_title, sizeof(_sapp_tc.window_title));
     _sapp_tc.desc.window_title = _sapp_tc.window_title;
@@ -13721,12 +13602,10 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
 
 _SOKOL_PRIVATE void _sapp_tc_discard_state(void) {
     if (_sapp_tc.clipboard.enabled) {
-        SOKOL_ASSERT(_sapp_tc.clipboard.buffer);
-        _sapp_tc_free((void*)_sapp_tc.clipboard.buffer);
+        _sapp_tc_clipboard_text.clear();
     }
     if (_sapp_tc.drop.enabled) {
-        SOKOL_ASSERT(_sapp_tc.drop.buffer);
-        _sapp_tc_free((void*)_sapp_tc.drop.buffer);
+        _sapp_tc_dropped_paths.clear();
     }
     for (int i = 0; i < _SAPP_MOUSECURSOR_NUM; i++) {
         sapp_unbind_mouse_cursor_image((sapp_mouse_cursor) i);
@@ -13755,10 +13634,7 @@ _SOKOL_PRIVATE bool _sapp_tc_events_enabled(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_clear_drop_buffer(void) {
-    if (_sapp_tc.drop.enabled) {
-        SOKOL_ASSERT(_sapp_tc.drop.buffer);
-        _sapp_tc_clear(_sapp_tc.drop.buffer, (size_t)_sapp_tc.drop.buf_size);
-    }
+    _sapp_tc_dropped_paths.clear();
 }
 
 _SOKOL_PRIVATE void _sapp_tc_frame(void) {
@@ -14878,7 +14754,7 @@ SOKOL_API_IMPL void sapp_set_clipboard_string(const char* str) {
     #else
         /* not implemented */
     #endif
-    _sapp_tc_strcpy(str, _sapp_tc.clipboard.buffer, (size_t)_sapp_tc.clipboard.buf_size);
+    _sapp_tc_clipboard_text = str;
 }
 
 SOKOL_API_IMPL const char* sapp_get_clipboard_string(void) {
@@ -14888,14 +14764,14 @@ SOKOL_API_IMPL const char* sapp_get_clipboard_string(void) {
     #if defined(_SAPP_MACOS)
         return _sapp_tc_macos_get_clipboard_string();
     #elif defined(_SAPP_EMSCRIPTEN)
-        return _sapp_tc.clipboard.buffer;
+        return _sapp_tc_clipboard_text.c_str();
     #elif defined(_SAPP_WIN32)
         return _sapp_tc_win32_get_clipboard_string();
     #elif defined(_SAPP_LINUX)
         return _sapp_tc_x11_get_clipboard_string();
     #else
         /* not implemented */
-        return _sapp_tc.clipboard.buffer;
+        return _sapp_tc_clipboard_text.c_str();
     #endif
 }
 
@@ -14941,19 +14817,16 @@ SOKOL_API_IMPL int sapp_get_num_dropped_files(void) {
     if (!_sapp_tc.drop.enabled) {
         return 0;
     }
-    return _sapp_tc.drop.num_files;
+    return (int)_sapp_tc_dropped_paths.size();
 }
 
 SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
+    SOKOL_ASSERT((index >= 0) && (index < (int)_sapp_tc_dropped_paths.size()));
     if (!_sapp_tc.drop.enabled) {
         return "";
     }
-    SOKOL_ASSERT(_sapp_tc.drop.buffer);
-    if ((index < 0) || (index >= _sapp_tc.drop.max_files)) {
-        return "";
-    }
-    return (const char*) _sapp_tc_dropped_file_path_ptr(index);
+    if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) return "";
+    return _sapp_tc_dropped_paths[index].c_str();
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
@@ -14970,7 +14843,7 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
     #if defined(_SAPP_EMSCRIPTEN)
         const int index = request->dropped_file_index;
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
-        if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
+        if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
         } else {
             const uint64_t size = sapp_html5_get_dropped_file_size64(index);
@@ -15471,17 +15344,10 @@ typedef struct {
 
 typedef struct {
     bool enabled;
-    int buf_size;
-    char* buffer;
 } _sapp_tc_clipboard_t;
 
 typedef struct {
     bool enabled;
-    int max_files;
-    int max_path_length;
-    int num_files;
-    int buf_size;
-    char* buffer;
 } _sapp_tc_drop_t;
 
 typedef struct {
@@ -15633,13 +15499,7 @@ _SOKOL_PRIVATE bool _sapp_tc_call_event(const sapp_event* input) {
 }
 
 
-_SOKOL_PRIVATE char* _sapp_tc_dropped_file_path_ptr(int index) {
-    SOKOL_ASSERT(_sapp_tc.drop.buffer);
-    SOKOL_ASSERT((index >= 0) && (index <= _sapp_tc.drop.max_files));
-    int offset = index * _sapp_tc.drop.max_path_length;
-    SOKOL_ASSERT(offset < _sapp_tc.drop.buf_size);
-    return &_sapp_tc.drop.buffer[offset];
-}
+
 
 /* Copy a string (either zero-terminated or with explicit length)
    into a fixed size buffer with guaranteed zero-termination.
@@ -15703,9 +15563,6 @@ _SOKOL_PRIVATE sapp_desc _sapp_tc_desc_defaults(const sapp_desc* desc) {
         #endif
     }
     res.html5.canvas_selector = _sapp_tc_def(res.html5.canvas_selector, "#canvas");
-    res.clipboard_size = _sapp_tc_def(res.clipboard_size, 8192);
-    res.max_dropped_files = _sapp_tc_def(res.max_dropped_files, 1);
-    res.max_dropped_file_path_length = _sapp_tc_def(res.max_dropped_file_path_length, 2048);
     res.window_title = _sapp_tc_def(res.window_title, "sokol");
     return res;
 }
@@ -15716,9 +15573,6 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
     SOKOL_ASSERT(desc->height >= 0);
     SOKOL_ASSERT(desc->sample_count >= 0);
     SOKOL_ASSERT(desc->swap_interval >= 0);
-    SOKOL_ASSERT(desc->clipboard_size >= 0);
-    SOKOL_ASSERT(desc->max_dropped_files >= 0);
-    SOKOL_ASSERT(desc->max_dropped_file_path_length >= 0);
     _SAPP_CLEAR_ARC_STRUCT(_sapp_tc_t, _sapp_tc);
     _sapp_tc.desc = _sapp_tc_desc_defaults(desc);
     _sapp_tc.first_frame = true;
@@ -15734,15 +15588,11 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
     _sapp_tc.html5_ask_leave_site = _sapp_tc.desc.html5.ask_leave_site;
     _sapp_tc.clipboard.enabled = _sapp_tc.desc.enable_clipboard;
     if (_sapp_tc.clipboard.enabled) {
-        _sapp_tc.clipboard.buf_size = _sapp_tc.desc.clipboard_size;
-        _sapp_tc.clipboard.buffer = (char*) _sapp_tc_malloc_clear((size_t)_sapp_tc.clipboard.buf_size);
+        _sapp_tc_clipboard_text.clear();
     }
     _sapp_tc.drop.enabled = _sapp_tc.desc.enable_dragndrop;
     if (_sapp_tc.drop.enabled) {
-        _sapp_tc.drop.max_files = _sapp_tc.desc.max_dropped_files;
-        _sapp_tc.drop.max_path_length = _sapp_tc.desc.max_dropped_file_path_length;
-        _sapp_tc.drop.buf_size = _sapp_tc.drop.max_files * _sapp_tc.drop.max_path_length;
-        _sapp_tc.drop.buffer = (char*) _sapp_tc_malloc_clear((size_t)_sapp_tc.drop.buf_size);
+        _sapp_tc_dropped_paths.clear();
     }
     _sapp_tc_strcpy(_sapp_tc.desc.window_title, _sapp_tc.window_title, sizeof(_sapp_tc.window_title));
     _sapp_tc.desc.window_title = _sapp_tc.window_title;
@@ -15754,12 +15604,10 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
 
 _SOKOL_PRIVATE void _sapp_tc_discard_state(void) {
     if (_sapp_tc.clipboard.enabled) {
-        SOKOL_ASSERT(_sapp_tc.clipboard.buffer);
-        _sapp_tc_free((void*)_sapp_tc.clipboard.buffer);
+        _sapp_tc_clipboard_text.clear();
     }
     if (_sapp_tc.drop.enabled) {
-        SOKOL_ASSERT(_sapp_tc.drop.buffer);
-        _sapp_tc_free((void*)_sapp_tc.drop.buffer);
+        _sapp_tc_dropped_paths.clear();
     }
     for (int i = 0; i < _SAPP_MOUSECURSOR_NUM; i++) {
         sapp_unbind_mouse_cursor_image((sapp_mouse_cursor) i);
@@ -15788,10 +15636,7 @@ _SOKOL_PRIVATE bool _sapp_tc_events_enabled(void) {
 }
 
 _SOKOL_PRIVATE void _sapp_tc_clear_drop_buffer(void) {
-    if (_sapp_tc.drop.enabled) {
-        SOKOL_ASSERT(_sapp_tc.drop.buffer);
-        _sapp_tc_clear(_sapp_tc.drop.buffer, (size_t)_sapp_tc.drop.buf_size);
-    }
+    _sapp_tc_dropped_paths.clear();
 }
 
 _SOKOL_PRIVATE void _sapp_tc_frame(void) {
@@ -16303,7 +16148,7 @@ _SOKOL_PRIVATE void _sapp_tc_wgpu_frame(void) {
 #if defined(_SAPP_EMSCRIPTEN)
 
 #if defined(EM_JS_DEPS)
-EM_JS_DEPS(sokol_app_tc, "$withStackSave,$stringToUTF8OnStack,$findCanvasEventTarget")
+EM_JS_DEPS(sokol_app_tc, "$stringToNewUTF8,$findCanvasEventTarget")
 #endif
 
 #ifdef __cplusplus
@@ -16312,15 +16157,20 @@ extern "C" {
 
 typedef void (*_sapp_tc_html5_fetch_callback) (const sapp_html5_fetch_response*);
 
-EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_onpaste(const char* str) {
+/* Return allocation status so JS can report an OOM Error after C++ unwinds. */
+EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_onpaste(const char* str) {
     if (_sapp_tc.clipboard.enabled) {
-        // Bound (security): pasted browser text uses finite clipboard storage. Overflow truncates to buf_size - 1 bytes.
-        _sapp_tc_strcpy(str, _sapp_tc.clipboard.buffer, (size_t)_sapp_tc.clipboard.buf_size);
+        try {
+            _sapp_tc_clipboard_text = str;
+        } catch (const std::bad_alloc&) {
+            return 0;
+        }
         if (_sapp_tc_events_enabled()) {
             _sapp_tc_init_event(SAPP_EVENTTYPE_CLIPBOARD_PASTED);
             _sapp_tc_call_event(&_sapp_tc.event);
         }
     }
+    return 1;
 }
 
 /*  https://developer.mozilla.org/en-US/docs/Web/API/WindowEventHandlers/onbeforeunload */
@@ -16328,45 +16178,33 @@ EMSCRIPTEN_KEEPALIVE int _sapp_tc_html5_get_ask_leave_site(void) {
     return _sapp_tc.html5_ask_leave_site ? 1 : 0;
 }
 
-EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_begin_drop(int num) {
-    if (!_sapp_tc.drop.enabled) {
-        return;
+EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_begin_drop(int num) {
+    if (!_sapp_tc.drop.enabled) return 1;
+    _sapp_tc_dropped_paths.clear();
+    try {
+        if (num > 0) _sapp_tc_dropped_paths.resize((size_t)num);
+    } catch (const std::bad_alloc&) {
+        return 0;
     }
-    if (num < 0) {
-        num = 0;
-    }
-    // Bound (security): browser drop lists can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
-    if (num > _sapp_tc.drop.max_files) {
-        num = _sapp_tc.drop.max_files;
-    }
-    _sapp_tc.drop.num_files = num;
-    _sapp_tc_clear_drop_buffer();
+    return 1;
 }
 
-EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_drop(int i, const char* name) {
-    /* NOTE: name is only the filename part, not a path */
-    if (!_sapp_tc.drop.enabled) {
-        return;
+EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_drop(int i, const char* name) {
+    /* NOTE: the browser supplies a filename, not a path. */
+    if (!_sapp_tc.drop.enabled || !name || i < 0 || i >= (int)_sapp_tc_dropped_paths.size()) return 1;
+    try {
+        _sapp_tc_dropped_paths[i] = name;
+    } catch (const std::bad_alloc&) {
+        return 0;
     }
-    if (0 == name) {
-        return;
-    }
-    SOKOL_ASSERT(_sapp_tc.drop.num_files <= _sapp_tc.drop.max_files);
-    if ((i < 0) || (i >= _sapp_tc.drop.num_files)) {
-        return;
-    }
-    // Bound (security): browser drop names must fit fixed per-path storage to keep memory finite. Overflow rejects the drop and logs an error.
-    if (!_sapp_tc_strcpy(name, _sapp_tc_dropped_file_path_ptr(i), (size_t)_sapp_tc.drop.max_path_length)) {
-        _SAPP_ERROR(DROPPED_FILE_PATH_TOO_LONG);
-        _sapp_tc.drop.num_files = 0;
-    }
+    return 1;
 }
 
 EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_end_drop(int x, int y, int mods) {
     if (!_sapp_tc.drop.enabled) {
         return;
     }
-    if (0 == _sapp_tc.drop.num_files) {
+    if (0 == (int)_sapp_tc_dropped_paths.size()) {
         /* there was an error copying the filenames */
         _sapp_tc_clear_drop_buffer();
         return;
@@ -16431,10 +16269,12 @@ EM_JS(void, _sapp_tc_js_remove_beforeunload_listener, (void), {
 EM_JS(void, _sapp_tc_js_add_clipboard_listener, (void), {
     Module.sokol_paste = (event) => {
         const pasted_str = event.clipboardData.getData('text');
-        withStackSave(() => {
-            const cstr = stringToUTF8OnStack(pasted_str);
-            __sapp_tc_emsc_onpaste(cstr);
-        });
+        const cstr = stringToNewUTF8(pasted_str);
+        if (!cstr) throw new Error('Out of memory copying clipboard text');
+        try {
+            if (!__sapp_tc_emsc_onpaste(cstr)) throw new Error('Out of memory copying clipboard text');
+        }
+        finally { _free(cstr); }
     };
     window.addEventListener('paste', Module.sokol_paste);
 })
@@ -16484,12 +16324,14 @@ EM_JS(void, _sapp_tc_js_add_dragndrop_listeners, (void), {
         event.preventDefault();
         const files = event.dataTransfer.files;
         Module.sokol_dropped_files = files;
-        __sapp_tc_emsc_begin_drop(files.length);
+        if (!__sapp_tc_emsc_begin_drop(files.length)) throw new Error('Out of memory copying dropped filenames');
         for (let i = 0; i < files.length; i++) {
-            withStackSave(() => {
-                const cstr = stringToUTF8OnStack(files[i].name);
-                __sapp_tc_emsc_drop(i, cstr);
-            });
+            const cstr = stringToNewUTF8(files[i].name);
+            if (!cstr) throw new Error('Out of memory copying dropped filename');
+            try {
+                if (!__sapp_tc_emsc_drop(i, cstr)) throw new Error('Out of memory copying dropped filename');
+            }
+            finally { _free(cstr); }
         }
         let mods = 0;
         if (event.shiftKey) { mods |= 1; }
@@ -16600,7 +16442,7 @@ EM_JS(void, _sapp_tc_js_cancel_dropped_file_reads, (void), {
 })
 
 SOKOL_API_IMPL uint64_t sapp_html5_get_dropped_file_size64(int index) {
-    if (!_sapp_tc.drop.enabled || (index < 0) || (index >= _sapp_tc.drop.num_files)) {
+    if (!_sapp_tc.drop.enabled || (index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) {
         return 0;
     }
     const double size = _sapp_tc_js_dropped_file_size(index);
@@ -17910,7 +17752,7 @@ SOKOL_API_IMPL void sapp_set_clipboard_string(const char* str) {
     #else
         /* not implemented */
     #endif
-    _sapp_tc_strcpy(str, _sapp_tc.clipboard.buffer, (size_t)_sapp_tc.clipboard.buf_size);
+    _sapp_tc_clipboard_text = str;
 }
 
 SOKOL_API_IMPL const char* sapp_get_clipboard_string(void) {
@@ -17920,14 +17762,14 @@ SOKOL_API_IMPL const char* sapp_get_clipboard_string(void) {
     #if defined(_SAPP_MACOS)
         return _sapp_tc_macos_get_clipboard_string();
     #elif defined(_SAPP_EMSCRIPTEN)
-        return _sapp_tc.clipboard.buffer;
+        return _sapp_tc_clipboard_text.c_str();
     #elif defined(_SAPP_WIN32)
         return _sapp_tc_win32_get_clipboard_string();
     #elif defined(_SAPP_LINUX)
         return _sapp_tc_x11_get_clipboard_string();
     #else
         /* not implemented */
-        return _sapp_tc.clipboard.buffer;
+        return _sapp_tc_clipboard_text.c_str();
     #endif
 }
 
@@ -17975,19 +17817,16 @@ SOKOL_API_IMPL int sapp_get_num_dropped_files(void) {
     if (!_sapp_tc.drop.enabled) {
         return 0;
     }
-    return _sapp_tc.drop.num_files;
+    return (int)_sapp_tc_dropped_paths.size();
 }
 
 SOKOL_API_IMPL const char* sapp_get_dropped_file_path(int index) {
-    SOKOL_ASSERT((index >= 0) && (index < _sapp_tc.drop.num_files));
+    SOKOL_ASSERT((index >= 0) && (index < (int)_sapp_tc_dropped_paths.size()));
     if (!_sapp_tc.drop.enabled) {
         return "";
     }
-    SOKOL_ASSERT(_sapp_tc.drop.buffer);
-    if ((index < 0) || (index >= _sapp_tc.drop.max_files)) {
-        return "";
-    }
-    return (const char*) _sapp_tc_dropped_file_path_ptr(index);
+    if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) return "";
+    return _sapp_tc_dropped_paths[index].c_str();
 }
 
 SOKOL_API_IMPL uint32_t sapp_html5_get_dropped_file_size(int index) {
@@ -18004,7 +17843,7 @@ SOKOL_API_IMPL void sapp_html5_fetch_dropped_file(const sapp_html5_fetch_request
     #if defined(_SAPP_EMSCRIPTEN)
         const int index = request->dropped_file_index;
         sapp_html5_fetch_error error_code = SAPP_HTML5_FETCH_ERROR_NO_ERROR;
-        if ((index < 0) || (index >= _sapp_tc.drop.num_files)) {
+        if ((index < 0) || (index >= (int)_sapp_tc_dropped_paths.size())) {
             error_code = SAPP_HTML5_FETCH_ERROR_OTHER;
         } else {
             const uint64_t size = sapp_html5_get_dropped_file_size64(index);

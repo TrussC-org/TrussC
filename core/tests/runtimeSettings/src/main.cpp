@@ -80,14 +80,14 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     tc::WindowSettings window;
     tc::RuntimeSettings runtime;
     bool ok = globalsOk && runtime.uniformBufferReserve == 0 && &runtime.reserveUniformBuffer(4096) == &runtime;
-    const auto desc = tc::buildAppDescriptor<SmokeApp>(window, runtime);
-    ok = ok && tc::internal::gpuUniformBufferReserve == 4096 && desc.clipboard_size == 65536;
+    tc::buildAppDescriptor<SmokeApp>(window, runtime);
+    ok = ok && tc::internal::gpuUniformBufferReserve == 4096;
     tc::internal::shutdownRuntime();
     tc::internal::endFrameworkLifetime();
     tc::buildAppDescriptor<SmokeApp>(window);
     ok = ok && tc::internal::gpuUniformBufferReserve == 0;
     tc::internal::shutdownRuntime();
     tc::internal::endFrameworkLifetime();
-    std::printf("runtimeSettings: %s (reservation forwarding/reset, fixed clipboard, runApp overloads)\n", ok ? "PASS" : "FAIL");
+    std::printf("runtimeSettings: %s (reservation forwarding/reset, runApp overloads)\n", ok ? "PASS" : "FAIL");
     return ok ? 0 : 1;
 }
