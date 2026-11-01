@@ -62,6 +62,18 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### X11 idle drawable and context during non-window GPU work (#239)
+
+`sapp_tc_gl_activate_idle()` reuses the drawable created with the hidden X11
+window; creating a second EGL surface for that window fails with EGL_BAD_ALLOC.
+`_sapp_tc_x11_make_current(nullptr)` selects this idle drawable. Native close
+selects the closing window before callbacks. Host-turn and cleanup entry, plus
+shared queue and maintenance work, ensure a context is current before GL work,
+selecting idle only when EGL/GLX reports no current context. This avoids idle
+surface switches every frame. Window teardown and runtime shutdown still force
+idle activation at disposal boundaries. Other backends keep the
+internal ensure-context seam as a no-op, like idle activation.
+
 ### macOS failed-startup termination notification (#239)
 
 The failed-startup cleanup call supplies an NSApplicationWillTerminateNotification

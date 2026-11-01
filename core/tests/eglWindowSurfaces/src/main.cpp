@@ -199,8 +199,10 @@ void secondaryTick(sapp_window window, void*) noexcept {
     check("one shared EGL context", eglGetCurrentContext() == sharedContext);
     check("secondary has its own surface", eglGetCurrentSurface(EGL_DRAW) != mainSurface);
     if (window.id == redWindow.id) {
+        const bool closingCaller = closeCaller;
         if (closeCaller) { sapp_destroy_window(greenWindow); closeCaller = false; }
-        ++redDraws; clearColor(1, 0, 0);
+        // Change color on the close tick to prove a fresh front-buffer present.
+        ++redDraws; clearColor(closingCaller ? 0 : 1, closingCaller ? 1 : 0, 0);
     }
     else { ++greenDraws; clearColor(0, 1, 0); }
 }
@@ -316,7 +318,7 @@ void frame() noexcept {
         close.xclient.data.l[0] = (long)XInternAtom(xdisplay, "WM_DELETE_WINDOW", False);
         XSendEvent(xdisplay, close.xclient.window, False, NoEventMask, &close);
         XSync(xdisplay, False);
-    } else {
+    } else if (phase == 2) {
         check("X11 keys route independently", redKeys == 1 && greenKeys == 1);
         // Intermediate WM sizes are valid. The requested final size must be
         // delivered exactly once to red, never green, and remain the last size.
@@ -341,19 +343,30 @@ void frame() noexcept {
         captureFront(sapp_x11_get_window(), capturePaths[0].c_str(), 2);
         sapp_tc_gl_make_current(greenWindow);
         closeCaller = true;
+        const int redBeforeClose = redDraws;
         trussc::internal::tickX11WindowForTests(redWindow);
-        check("closing caller during another tick restores main", !sapp_window_valid(greenWindow) &&
-            eglGetCurrentSurface(EGL_DRAW) == mainSurface && eglGetCurrentContext() == sharedContext);
+        check("closing caller during another tick preserves the executing window",
+            !sapp_window_valid(greenWindow) && sapp_window_valid(redWindow) && redDraws == redBeforeClose + 1);
+        captureFront(sapp_window_x11_get_window(redWindow), capturePaths[1].c_str(), 1);
+        // A closed caller has no surface to restore. A surviving window
+        // selects its own surface on its next tick.
+        trussc::internal::tickX11WindowForTests(redWindow);
+        check("remaining secondary renders on its next tick", redDraws == redBeforeClose + 2);
+        captureFront(sapp_window_x11_get_window(redWindow), capturePaths[1].c_str(), 0);
         sapp_tc_gl_make_current(redWindow);
         sapp_destroy_window(redWindow);
-        check("closing current secondary leaves main current", eglGetCurrentSurface(EGL_DRAW) == mainSurface &&
-            eglGetCurrentContext() == sharedContext && !sapp_window_valid(redWindow));
-        clearColor(0, 0, 1);
+        check("closing current secondary removes its native window", !sapp_window_valid(redWindow));
+        // Return to the native loop: verify the survivor in its next ordinary
+        // frame callback, after the backend has selected its surface again.
+    } else {
+        const bool survivorCurrent = eglGetCurrentSurface(EGL_DRAW) == mainSurface &&
+            eglGetCurrentSurface(EGL_READ) == mainSurface && eglGetCurrentContext() == sharedContext;
+        // A fresh color prevents the pre-close blue buffer passing readback.
+        clearColor(1, 1, 0);
         unsigned char pixel[4]{};
         glReadPixels(32, 32, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
-        check("main still renders after secondary close", pixel[0] == 0 && pixel[1] == 0 && pixel[2] == 255);
-        sapp_destroy_window(greenWindow);
-        check("closing remaining secondary preserves main", eglGetCurrentSurface(EGL_DRAW) == mainSurface);
+        check("remaining window renders on its next tick", survivorCurrent &&
+            pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 0);
         check("no GL or EGL errors", glGetError() == GL_NO_ERROR && eglGetError() == EGL_SUCCESS);
         sapp_quit();
     }
@@ -480,7 +493,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             desc.init_cb = init;
             desc.frame_cb = frame;
             sapp_run(&desc);
-            check("surface exercise completed", phase == 2);
+            check("surface exercise completed", phase == 3);
             check("backend allocator releases its storage", liveAllocations == 0);
             check("repeated launch retains fresh native IDs", redWindow.id > previousId);
             previousId = greenWindow.id;
