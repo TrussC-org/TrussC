@@ -338,3 +338,21 @@ yet; the synthetic-input design remains open.
 - `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
 - `tc_list_windows` returns each window's positive native identity as `id` instead of `index`. Pass that `id` as other tools' `window` argument; resource list indices are unchanged.
 - `exitApp()` now goes through `exitRequested`, whose listeners can veto it; before 0.8 it could not be cancelled. A “show a confirm dialog, then call `exitApp()`” pattern receives `exitRequested` again on that call, so remember acceptance in a flag, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
+
+## Serial follows the device lifecycle (#415)
+
+`Serial` is the first device class on the common surface described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup(...)`, `setup()`, `isConnected()`, `close()` and `onDisconnect`.
+
+- **New:** `serial.setup()` with no arguments reopens the last port with the last baud rate. On failure it logs an error and returns `false`. Reconnecting is app code:
+
+  ```cpp
+  if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+      lastTry = getElapsedTime();
+      serial.setup();
+  }
+  ```
+
+- **`onDisconnect` fires only when the OS reports the device lost.** `close()`, `setup()` on an open port (it closes the previous port first), the destructor and a move assignment no longer fire it. Before, `close()` and `setup()` fired it with `wasClean = true`. A listener that used `wasClean` to tell a lost device from your own `close()` can drop that check: it is only called for a loss now.
+- **The event type changed.** `Event<SerialDisconnectEventArgs>` is now `Event<DeviceDisconnectEventArgs>`, which has one field, `reason`. `SerialDisconnectEventArgs`, `portName`, `baudRate` and `wasClean` are removed. Change `[](SerialDisconnectEventArgs& e)` to `[](DeviceDisconnectEventArgs& e)`. To reconnect from a listener, replace `serial.setup(e.portName, e.baudRate)` with `serial.setup()`. Keep your own copy of the port name or baud rate if the listener needs to show them; `getDevicePath()` still returns the path.
+- A device that went away before an I/O call noticed is now closed silently by `close()` or `setup()` (before it fired `"closed by close()"`).
+- `isConnected()` and `close()` are unchanged. `isInitialized()` stays as an alias of `isConnected()`. `DeviceLostEventArgs` (the graphics device's `deviceLost` event) is not related and is unchanged.

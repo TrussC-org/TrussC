@@ -248,7 +248,7 @@ struct Impl {
     std::shared_ptr<internal::SerialRxState> rx = std::make_shared<internal::SerialRxState>();
 
     // Set by the worker when it finds the device gone. Serial collects it
-    // with close() on the app's thread and fires onDisconnect there; the
+    // from an I/O call on the app's thread and fires onDisconnect there; the
     // worker never notifies. lostReason is written before lost is set and
     // not touched again until closeImpl() has joined the worker.
     std::atomic<bool> lost{false};

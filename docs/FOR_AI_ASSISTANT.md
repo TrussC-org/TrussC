@@ -71,6 +71,8 @@ Argument-free Window APIs in App callbacks, owned listeners and async completion
 
 App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. Runtime owns exitRequested, deviceLost, hotReloadUnload and console. Lifecycle events notify Runtime first, then one reverse-attachment App snapshot (reload targets replacing Apps only). Quit gives every listener fresh cancel=false, ORs all vetoes, keeps the first nonempty veto reason and treats a throw as a veto while continuing. Device loss keeps its mutable cancellation behavior. Console is Runtime-only, once per subscribed slot, with subscriber ownership restored. See MIGRATION_0_8.md for `console::start()` usage.
 
+Device classes (serial ports, cameras, MIDI, depth cameras, audio devices) share one small lifecycle convention: `setup()` / `isConnected()` / `close()` / `onDisconnect`, where `onDisconnect` fires only when the OS reports the device lost. See [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md).
+
 OS close asks the addressed Window's closeRequested with the same per-listener OR/throw-veto policy. On acceptance, quitOnClose/last-window process quit asks exitRequested before any closure. Either veto keeps all Windows open; both accepted use common ending. Window::close and process shutdown bypass closeRequested. App swap/destroy/reload call App::exit without a Window exit. exitApp inside App::exit or Runtime shutdown is inert; an owned Window exit listener can request normal quit while the process is still running. ImGui deadlines run in Runtime maintenance before MCP expiry, including no-draw turns.
 
 Runtime queue and maintenance work selects process context and progresses at safe outer host turns, including turns with no Window draws. Swapchain drawing requires a Window callback; explicit offscreen Fbo drawing remains available. Nested entries restore the caller's drawing and native state. Native creation establishes identity, resources, dimensions and binding readiness before App construction. Each resized frame reconciles its Window framebuffer, swapchain and automatic viewport before beginning a pass.
@@ -2890,6 +2892,11 @@ Color ColorOKLab::toRGB() const  // Converts the color to an sRGB Color.
 ```cpp
 ```
 
+### DeviceDisconnectEventArgs — Carries the reason a device was reported lost.
+
+```cpp
+```
+
 ### DeviceLostEventArgs — Carries information about a lost graphics device.
 
 ```cpp
@@ -4065,7 +4072,7 @@ std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android
 void Serial::printDevices() [macos,windows,linux,android]  // Logs the serial device list.
 int Serial::readByte() [macos,windows,linux,android]  // Reads one received byte.
 int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
-bool Serial::setup(const std::string & portName, int baudRate) [+1] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
+bool Serial::setup(const std::string & portName, int baudRate) [+2] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
 bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Writes one byte to the serial connection.
 int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
 ```
@@ -4076,11 +4083,6 @@ int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linu
 int SerialDeviceInfo::getDeviceID() const  // Returns the device's list index.
 const std::string & SerialDeviceInfo::getDeviceName() const  // Returns the device's display name.
 const std::string & SerialDeviceInfo::getDevicePath() const  // Returns the device path.
-```
-
-### SerialDisconnectEventArgs — Describes a serial connection that ended.
-
-```cpp
 ```
 
 ### Shader — Provides a GPU shader program integrated with TrussC drawing.

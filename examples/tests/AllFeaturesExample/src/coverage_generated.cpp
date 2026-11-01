@@ -1313,6 +1313,13 @@ struct Cover_CurveStyle : af::Scope<CurveStyle> {
     }
 };
 
+struct Cover_DeviceDisconnectEventArgs : af::Scope<DeviceDisconnectEventArgs> {
+    ~Cover_DeviceDisconnectEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<DeviceDisconnectEventArgs>().reason;
+    }
+};
+
 struct Cover_DeviceLostEventArgs : af::Scope<DeviceLostEventArgs> {
     ~Cover_DeviceLostEventArgs(); // Never instantiated.
     static void run() {
@@ -3411,6 +3418,7 @@ struct Cover_Serial : af::Scope<Serial> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().setup(af::val<const std::string>(), af::val<int>());
+        (void)af::val<Serial>().setup();
         (void)af::val<Serial>().setup(af::val<int>(), af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
@@ -3432,16 +3440,6 @@ struct Cover_SerialDeviceInfo : af::Scope<SerialDeviceInfo> {
         (void)af::val<const SerialDeviceInfo>().getDeviceID();
         (void)af::val<const SerialDeviceInfo>().getDeviceName();
         (void)af::val<const SerialDeviceInfo>().getDevicePath();
-    }
-};
-
-struct Cover_SerialDisconnectEventArgs : af::Scope<SerialDisconnectEventArgs> {
-    ~Cover_SerialDisconnectEventArgs(); // Never instantiated.
-    static void run() {
-        (void)af::val<SerialDisconnectEventArgs>().baudRate;
-        (void)af::val<SerialDisconnectEventArgs>().portName;
-        (void)af::val<SerialDisconnectEventArgs>().reason;
-        (void)af::val<SerialDisconnectEventArgs>().wasClean;
     }
 };
 
@@ -5042,6 +5040,7 @@ void af::coverGenerated() {
     af_generated::Cover_ConsoleEventArgs::run();
     af_generated::Cover_CoreEvents::run();
     af_generated::Cover_CurveStyle::run();
+    af_generated::Cover_DeviceDisconnectEventArgs::run();
     af_generated::Cover_DeviceLostEventArgs::run();
     af_generated::Cover_DragDropEventArgs::run();
     af_generated::Cover_EasyCam::run();
@@ -5115,7 +5114,6 @@ void af::coverGenerated() {
     af_generated::Cover_SendResult::run();
     af_generated::Cover_Serial::run();
     af_generated::Cover_SerialDeviceInfo::run();
-    af_generated::Cover_SerialDisconnectEventArgs::run();
     af_generated::Cover_Shader::run();
     af_generated::Cover_ShaderVertex::run();
     af_generated::Cover_Sound::run();

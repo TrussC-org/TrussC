@@ -32,8 +32,8 @@ void tcApp::setup() {
 // =============================================================================
 void tcApp::update() {
     // isConnected() also turns false when the device is unplugged: the
-    // read/write calls below notice it and close the port, and the else
-    // branch then reconnects once the device is back.
+    // read/write calls below notice it and close the port (serial.onDisconnect
+    // fires once then), and the else branch reconnects once the device is back.
     if (serial.isConnected()) {
         // Send message
         if (bSendSerialMessage && !messageToSend.empty()) {
@@ -77,20 +77,29 @@ void tcApp::update() {
             readTime = getElapsedTime();
         }
     } else {
-        // If not connected, retry every 10 seconds. Reconnecting re-asserts
-        // DTR, which resets auto-reset boards such as most Arduinos.
+        // Not connected (never was, or the device was lost): retry every 10
+        // seconds. Reconnecting re-asserts DTR, which resets auto-reset
+        // boards such as most Arduinos.
         float now = getElapsedTime();
         if (now - timeLastTryConnect > 10.0f) {
-            deviceList = serial.listDevices();
             timeLastTryConnect = now;
 
-            int baud = 9600;
-            if (!serialDevicePath.empty()) {
-                logNotice("tcApp") << "Attempting to connect to serial device: " << serialDevicePath;
-                serial.setup(serialDevicePath, baud);
-            } else if (!deviceList.empty()) {
-                logNotice("tcApp") << "Attempting to connect to serial device: 0";
-                serial.setup(0, baud);
+            if (!serial.getDevicePath().empty()) {
+                // It was connected once: reopen the same port with the same
+                // baud rate. Same as `if (!serial.isConnected() && timer) serial.setup();`
+                logNotice("tcApp") << "Attempting to reconnect to " << serial.getDevicePath();
+                serial.setup();
+            } else {
+                // Never connected (no device at startup): look for one
+                int baud = 9600;
+                deviceList = serial.listDevices();
+                if (!serialDevicePath.empty()) {
+                    logNotice("tcApp") << "Attempting to connect to serial device: " << serialDevicePath;
+                    serial.setup(serialDevicePath, baud);
+                } else if (!deviceList.empty()) {
+                    logNotice("tcApp") << "Attempting to connect to serial device: 0";
+                    serial.setup(0, baud);
+                }
             }
         }
     }
