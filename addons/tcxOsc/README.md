@@ -34,8 +34,8 @@ Bundles (with NTP timetags) can nest messages and other bundles.
   tag, argument data that runs past the end of the packet, a `[` or `]` without its
   pair, and a bundle element whose size runs past the end of the data. A bundle with
   a nested message or bundle that fails to parse is rejected as a whole. Bundles
-  nest as deep as the packet holds (no depth limit; parsing, copying and freeing
-  walk the nesting iteratively, not recursively).
+  nest as deep as the packet holds (no depth limit; parsing, dispatching and freeing
+  walk the nesting iteratively, and copies share nested bundles).
 - **Missing padding** — a message that ends before the zero padding of its last
   item (to a 4-byte boundary) is accepted, and each `OscReceiver` logs one warning
   the first time it gets one.

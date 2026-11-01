@@ -23,6 +23,10 @@ plus `OscBundle::fromBytes` directly):
   parsed, dispatched, copied, serialized and freed on a thread with a 64 KiB
   stack; a nested bundle that fails to parse is exactly one `onParseError` and
   delivers nothing;
+- the deepest packet (3276 levels) delivered to a `Deliver::Main` listener
+  allocates memory proportional to the packet (checked with a counting
+  `operator new`), and a Main listener's copy never sees edits that other
+  listeners make to the tree afterwards (`storageBounds.cpp`);
 - a 10-level bundle delivers each inner message exactly once, and
   `onBundleReceived` listeners get the parsed bundles themselves, not copies;
 - a bundle element or blob whose size runs past the end of the data fails to

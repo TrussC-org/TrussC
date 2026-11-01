@@ -6,61 +6,28 @@ namespace tcx::osc {
 using namespace osc_internal;
 
 // =============================================================================
-// Copy and destruction - iterative, so nesting depth never costs call stack.
+// Destruction - iterative, so nesting depth never costs call stack.
 // =============================================================================
-OscBundle::OscBundle(const OscBundle& other) : timetag_(other.timetag_) {
-    copyElementsFrom(other);
-}
-
-OscBundle& OscBundle::operator=(const OscBundle& other) {
-    if (this != &other) {
-        OscBundle copy(other);
-        *this = std::move(copy);
-    }
-    return *this;
-}
-
-// Copies other's elements into this (empty) bundle. A child bundle is added
-// empty, then filled when it is popped from the heap stack. Each bundle's
-// vector is reserved before its children are queued, so the pointers on the
-// stack stay valid until their turn.
-void OscBundle::copyElementsFrom(const OscBundle& other) {
-    struct Job { const OscBundle* from; OscBundle* to; };
-    std::vector<Job> jobs;
-    jobs.push_back({&other, this});
-    while (!jobs.empty()) {
-        const Job job = jobs.back();
-        jobs.pop_back();
-        job.to->elements_.reserve(job.from->elements_.size());
-        for (const auto& element : job.from->elements_) {
-            if (auto* msg = std::get_if<OscMessage>(&element)) {
-                job.to->elements_.emplace_back(*msg);
-            } else {
-                const auto& child = std::get<OscBundle>(element);
-                job.to->elements_.emplace_back(std::in_place_type<OscBundle>, child.timetag_);
-                jobs.push_back({&child, &std::get<OscBundle>(job.to->elements_.back())});
-            }
-        }
-    }
-}
-
-// Moves child bundles out onto a heap stack, so that each bundle is destroyed
-// with no child bundles left in it: the destructor never recurses more than a
-// level. If the stack cannot grow (out of memory), the rest is destroyed the
-// ordinary, recursive way.
+// Moves child bundles that nothing else owns out onto a heap stack, so that
+// each bundle is destroyed with no sole-owned child bundles left in it: the
+// destructor never recurses more than a level. A child shared with another
+// bundle is only released here; whoever releases it last takes it apart the
+// same way. If the stack cannot grow (out of memory), the rest is destroyed
+// the ordinary, recursive way.
 OscBundle::~OscBundle() {
     try {
-        std::vector<OscBundle> pending;
+        std::vector<std::shared_ptr<OscBundle>> pending;
         auto takeChildren = [&pending](OscBundle& bundle) {
             for (auto& element : bundle.elements_)
-                if (auto* child = std::get_if<OscBundle>(&element))
-                    if (!child->elements_.empty()) pending.push_back(std::move(*child));
+                if (auto* child = std::get_if<std::shared_ptr<OscBundle>>(&element))
+                    if (child->use_count() == 1 && !(*child)->elements_.empty())
+                        pending.push_back(std::move(*child));
         };
         takeChildren(*this);
         while (!pending.empty()) {
-            OscBundle bundle = std::move(pending.back());
+            std::shared_ptr<OscBundle> bundle = std::move(pending.back());
             pending.pop_back();
-            takeChildren(bundle);
+            takeChildren(*bundle);
         }
     } catch (...) {
     }
@@ -111,7 +78,7 @@ std::vector<uint8_t> OscBundle::toBytes() const {
             result.insert(result.end(), elementBytes.begin(), elementBytes.end());
             closeElement(sizeAt);
         } else {
-            const auto* child = &std::get<OscBundle>(element);
+            const auto* child = std::get<std::shared_ptr<OscBundle>>(element).get();
             writeHeader(*child);
             stack.push_back({child, 0, sizeAt});
         }
@@ -138,8 +105,8 @@ OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok, bool&
 
     // Nested bundles are parsed with a heap stack of open bundles, not
     // recursion: the packet is untrusted, so its depth must not decide the
-    // call-stack use. A frame's `bundle` points into its parent's element
-    // vector; the parent appends nothing while its child is the top frame.
+    // call-stack use. A frame's `bundle` is a child node of its parent, held
+    // by the parent's shared_ptr, so its address is stable.
     struct Frame {
         OscBundle* bundle;
         const uint8_t* data;
@@ -190,9 +157,10 @@ OscBundle OscBundle::fromBytes(const uint8_t* data, size_t size, bool& ok, bool&
         if (isBundle(elementData, elementSize)) {
             // A nested bundle that fails rejects this bundle too, so the
             // caller sees one parse error instead of a partial bundle.
-            parent->elements_.emplace_back(std::in_place_type<OscBundle>);
-            if (!open(std::get<OscBundle>(parent->elements_.back()), elementData, elementSize))
-                return OscBundle();
+            auto child = std::make_shared<OscBundle>();
+            OscBundle* childNode = child.get();
+            parent->elements_.emplace_back(std::move(child));
+            if (!open(*childNode, elementData, elementSize)) return OscBundle();
         }
         else {
             bool elementOk = false;

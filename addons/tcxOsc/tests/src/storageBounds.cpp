@@ -1,5 +1,6 @@
 #include "../../../../core/tests/common/tcTestFailure.h"
 #include "oscTestAccess.h"
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <new>
@@ -8,11 +9,13 @@
 namespace {
 thread_local bool rejectAllocations = false;
 thread_local bool failReceiveAllocation = false;
+std::atomic<size_t> allocatedBytes{0};   // every operator new, all threads
 }
 // Allocation fault injection is confined to this headless test executable.
 // The receive buffer is 65536 bytes; MSVC's std::allocator pads large blocks
 // for alignment (+39 on x64), so match a small range above it.
 void* operator new(size_t bytes) {
+    allocatedBytes.fetch_add(bytes, std::memory_order_relaxed);
     if (rejectAllocations || (failReceiveAllocation && bytes >= 65536 && bytes < 65536 + 64)) {
         failReceiveAllocation = false;
         throw std::bad_alloc();
@@ -88,6 +91,84 @@ void packetSize() {
     tc::internal::drainMainThreadQueue();
     require(messages == 2 && bundles == 0 && Access::rejected(receiver) == 1 && warnings == 1,
             "size rejection is whole, counted once, recoverable and reported per store");
+}
+// Levels of a bundle by its first-child chain; iterative.
+size_t chainDepth(const OscBundle& root) {
+    size_t depth = 1;
+    const OscBundle* bundle = &root;
+    while (const OscBundle* child = bundle->getElementCount() ? bundle->bundleAt(0) : nullptr) { bundle = child; ++depth; }
+    return depth;
+}
+// A maximally nested packet delivered to a Deliver::Main listener from a
+// receive-style thread: the packet's tree is shared, not copied once per
+// level, so memory traffic is proportional to the packet (about 3,300 levels
+// of 20 bytes), not to its square.
+void mainThreadDeliveryOfDeepBundle() {
+    constexpr size_t levels = 3276;
+    OscBundle nested;
+    nested.addMessage(OscMessage("/deep"));
+    for (size_t n = 1; n < levels; ++n) {
+        OscBundle outer;
+        outer.addBundle(nested);
+        nested = std::move(outer);
+    }
+    const auto bytes = nested.toBytes();
+    require(bytes.size() <= 65536 && bytes.size() + 20 > 65536, "deepest packet fixture");
+    nested.clear();   // the fixture tree is not part of the measurement
+
+    OscReceiver receiver;
+    size_t mainCalls = 0, directCalls = 0;
+    bool depthsMatch = true;
+    auto mainListener = receiver.onBundleReceived.listen([&](OscBundle& bundle) {
+        // The k-th notification (k from 0) is for a bundle with levels - k levels.
+        if (chainDepth(bundle) != levels - mainCalls) depthsMatch = false;
+        ++mainCalls;
+    }, tc::Deliver::Main);
+    auto directListener = receiver.onBundleReceived.listen([&](OscBundle&) { ++directCalls; });
+    const size_t before = allocatedBytes.load();
+    std::thread producer([&] { Access::parse(receiver, bytes); });
+    producer.join();
+    const size_t parsedAndQueued = allocatedBytes.load() - before;
+    tc::internal::drainMainThreadQueue();
+    const size_t total = allocatedBytes.load() - before;
+    require(directCalls == levels, "direct listener sees every level");
+    require(mainCalls == levels && depthsMatch, "Main listener sees every level, in order, with its own subtree");
+    // About 3 MB measured; one copy of the tree per level would be about 600 MB.
+    std::printf("deep Main delivery: %zu bytes allocated while queuing, %zu in total\n", parsedAndQueued, total);
+    require(total < 32u * 1024 * 1024, "Main-thread delivery of the deepest packet allocates O(packet), not O(packet^2)");
+}
+// A Main listener's copy is a value: edits that listeners make to the packet's
+// tree after the copy was taken (to the bundle itself or to a nested bundle
+// that is dispatched later) do not reach it.
+void mainThreadCopiesAreValues() {
+    OscBundle inner;
+    inner.addMessage(OscMessage("/inner"));
+    OscBundle outer;
+    outer.addMessage(OscMessage("/outer"));
+    outer.addBundle(inner);
+    const auto bytes = outer.toBytes();
+
+    OscReceiver receiver;
+    std::vector<size_t> mainSawOuter, mainSawNested, mainSawInner;
+    auto mainListener = receiver.onBundleReceived.listen([&](OscBundle& bundle) {
+        if (bundle.getElementCount() == 2) {                         // the outer bundle
+            mainSawOuter.push_back(bundle.getElementCount());
+            mainSawNested.push_back(bundle.bundleAt(1)->getElementCount());
+        } else {                                                       // the inner bundle
+            mainSawInner.push_back(bundle.getElementCount());
+        }
+    }, tc::Deliver::Main);
+    // Registered after the Main listener: edits the tree it is handed.
+    auto editor = receiver.onBundleReceived.listen([&](OscBundle& bundle) { bundle.addMessage(OscMessage("/edit")); });
+    std::thread producer([&] { Access::parse(receiver, bytes); });
+    producer.join();
+    tc::internal::drainMainThreadQueue();
+    require(mainSawOuter.size() == 1 && mainSawOuter[0] == 2,
+            "Main copy of the outer bundle predates a later listener's edit");
+    require(mainSawNested.size() == 1 && mainSawNested[0] == 1,
+            "Main copy of the outer bundle keeps its nested bundle as it was, though the nested bundle is edited later");
+    require(mainSawInner.size() == 1 && mainSawInner[0] == 1,
+            "Main copy of the nested bundle predates the edit made to it");
 }
 // Exercise allocation rounding even when this host's string copy constructor
 // happens to allocate exactly size(). This models a different library policy.
@@ -348,6 +429,8 @@ void udpStorage() {
 void testStorageBounds() {
     preflight();
     packetSize();
+    mainThreadDeliveryOfDeepBundle();
+    mainThreadCopiesAreValues();
     roundedCopyAdmission();
     pollingStrings();
     polling();

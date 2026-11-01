@@ -24,7 +24,8 @@
 // - Later play() calls fill every voice slot.
 // - With no cap (AudioSettings::maxPolyphony 0, the default) more than 32
 //   Sounds play at once, every one of them is mixed, and nothing is dropped;
-//   a cap set again (re-init) still refuses the voices past it.
+//   a cap set again (re-init), also one below the voices already playing, is
+//   enforced, and released slots are reused.
 // =============================================================================
 
 #include <TrussC.h>
@@ -342,13 +343,44 @@ TC_CORE_TEST_MAIN() {
         many.clear();
         check("unlimited: voices are released", voices() == 0, to_string(voices()));
         {
+            // 200 slots exist now. New voices take the lowest free slots, so 50 of
+            // them occupy slots 0..49 (a pool that grew instead would reach 200+).
             vector<Sound> again(50);
             int playedAgain = 0;
             for (auto& s : again) { s = makeLoop(); if (s.play()) ++playedAgain; }
-            check("unlimited: slots are reused after release", playedAgain == 50 && voices() == 50,
+            int highestSlot = -1;
+            for (const auto& info : engine.getPlayingSounds()) highestSlot = max(highestSlot, info.slot);
+            check("unlimited: 50 voices play after release", playedAgain == 50 && voices() == 50,
                   to_string(voices()));
+            check("unlimited: released slots are reused (highest slot index < 50)", highestSlot >= 0 && highestSlot < 50,
+                  to_string(highestSlot));
         }
         check("unlimited: no voice is left", voices() == 0, to_string(voices()));
+
+        // Unlimited -> a smaller positive cap, with more voices playing than the cap.
+        {
+            vector<Sound> running(20);
+            int playedRunning = 0;
+            for (auto& s : running) { s = makeLoop(); if (s.play()) ++playedRunning; }
+            check("re-cap: 20 voices play without a cap", playedRunning == 20 && voices() == 20,
+                  to_string(voices()));
+            AudioSettings capped = settings;
+            capped.maxPolyphony = 5;
+            check("re-cap: engine re-initializes with a cap of 5", engine.init(capped));
+            check("re-cap: getMaxPolyphony() is 5", engine.getMaxPolyphony() == 5,
+                  to_string(engine.getMaxPolyphony()));
+            check("re-cap: only the slots within the cap keep playing", voices() == 5, to_string(voices()));
+            running.clear();   // handles whose voice was dropped by the smaller pool release cleanly
+            check("re-cap: no voice is left", voices() == 0, to_string(voices()));
+            const uint64_t droppedBeforeCap = engine.getStats().droppedPolyphonyLimit;
+            vector<Sound> more(7);
+            int playedMore = 0;
+            for (auto& s : more) { s = makeLoop(); if (s.play()) ++playedMore; }
+            check("re-cap: the new cap is enforced (5 of 7 play)", playedMore == 5, to_string(playedMore));
+            check("re-cap: the 2 refusals are counted",
+                  engine.getStats().droppedPolyphonyLimit == droppedBeforeCap + 2);
+        }
+        check("re-cap: no voice is left at the end", voices() == 0, to_string(voices()));
     }
 
     engine.shutdown();

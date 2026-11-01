@@ -1,9 +1,12 @@
 #pragma once
 
 #include "tcxOscMessage.h"
+#include <memory>
 #include <variant>
 
 namespace tcx::osc {
+
+namespace osc_internal { struct BundleDispatchAccess; }
 
 // =============================================================================
 // OscBundle - OSC bundle class
@@ -12,23 +15,28 @@ namespace tcx::osc {
 class OscBundle {
 public:
     // Bundle element (message or bundle)
-    using Element = std::variant<OscMessage, OscBundle>;
+    // Child bundles are held by shared_ptr and are never modified once they
+    // are in a bundle, so copying a bundle copies its direct elements only
+    // and shares the nested bundles with the original: a copy costs the size
+    // of one level, not of the whole tree. (OscReceiver is the one exception
+    // to "never modified": it gives itself a private node before it hands a
+    // nested bundle to listeners for editing.)
+    using Element = std::variant<OscMessage, std::shared_ptr<OscBundle>>;
 
     // Timetag representing immediate execution
     static constexpr uint64_t TIMETAG_IMMEDIATELY = 1;
 
-    // Bundles nest to any depth that fits in the packet. Parsing, copying,
-    // destroying and serializing a bundle walk the nesting with a heap stack,
-    // not recursion, so depth never costs call-stack space (a 64 KiB datagram
-    // can hold a bit over 3000 levels).
+    // Bundles nest to any depth that fits in the packet. Parsing, destroying
+    // and serializing a bundle walk the nesting with a heap stack, not
+    // recursion, so depth never costs call-stack space (a 64 KiB datagram can
+    // hold a bit over 3000 levels).
 
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}
     explicit OscBundle(uint64_t timetag) : timetag_(timetag) {}
 
-    // Copy and destruction are iterative (see above); moves just hand over
-    // the element vector.
-    OscBundle(const OscBundle& other);
-    OscBundle& operator=(const OscBundle& other);
+    // Copies are shallow (see Element); destruction is iterative (see above).
+    OscBundle(const OscBundle&) = default;
+    OscBundle& operator=(const OscBundle&) = default;
     OscBundle(OscBundle&&) noexcept = default;
     OscBundle& operator=(OscBundle&&) noexcept = default;
     ~OscBundle();
@@ -48,7 +56,7 @@ public:
     }
 
     OscBundle& addBundle(const OscBundle& bundle) {
-        elements_.emplace_back(bundle);
+        elements_.emplace_back(std::make_shared<OscBundle>(bundle));
         return *this;
     }
 
@@ -59,7 +67,7 @@ public:
 
     bool isBundle(size_t index) const {
         if (index >= elements_.size()) return false;
-        return std::holds_alternative<OscBundle>(elements_[index]);
+        return std::holds_alternative<std::shared_ptr<OscBundle>>(elements_[index]);
     }
 
     bool isMessage(size_t index) const {
@@ -77,8 +85,8 @@ public:
 
     OscBundle getBundleAt(size_t index) const {
         if (index >= elements_.size()) return OscBundle();
-        if (auto* bundle = std::get_if<OscBundle>(&elements_[index])) {
-            return *bundle;
+        if (auto* bundle = std::get_if<std::shared_ptr<OscBundle>>(&elements_[index])) {
+            return **bundle;
         }
         return OscBundle();
     }
@@ -87,7 +95,8 @@ public:
     // Valid while this bundle is alive and no element is added or removed.
     const OscBundle* bundleAt(size_t index) const {
         if (index >= elements_.size()) return nullptr;
-        return std::get_if<OscBundle>(&elements_[index]);
+        if (auto* bundle = std::get_if<std::shared_ptr<OscBundle>>(&elements_[index])) return bundle->get();
+        return nullptr;
     }
 
     // -------------------------------------------------------------------------
@@ -124,7 +133,7 @@ public:
     }
 
 private:
-    void copyElementsFrom(const OscBundle& other);
+    friend struct osc_internal::BundleDispatchAccess;
 
     uint64_t timetag_;
     std::vector<Element> elements_;

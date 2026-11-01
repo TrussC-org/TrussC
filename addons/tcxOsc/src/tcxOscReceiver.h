@@ -17,6 +17,19 @@
 
 namespace tcx::osc {
 namespace osc_internal {
+// Lets the receiver hand a nested bundle to listeners as an editable object.
+// Copies of a bundle share their nested bundles (see OscBundle::Element), and
+// a Main-thread listener holds such a copy, so a shared nested bundle is
+// replaced by a private shallow copy first: edits then reach this packet's
+// tree but never a copy a listener already holds. The copy costs one level.
+struct BundleDispatchAccess {
+    static OscBundle* privateChild(OscBundle& parent, size_t index) {
+        auto* child = std::get_if<std::shared_ptr<OscBundle>>(&parent.elements_[index]);
+        if (!child) return nullptr;
+        if (child->use_count() > 1) *child = std::make_shared<OscBundle>(**child);
+        return child->get();
+    }
+};
 struct PollingStorage {
     static constexpr const char* module = "tcxOsc";
     static constexpr const char* store = "OSC polling queue";
@@ -268,19 +281,16 @@ private:
         // Dispatch the messages inside a bundle, depth first. Walks the parsed
         // tree in place (no per-level copy) with a heap stack, not recursion:
         // the depth of an untrusted packet must not decide call-stack use.
-        void dispatchBundle(const OscBundle& bundle, uint64_t generation) {
-            struct Level { const OscBundle* bundle; size_t next; };
+        void dispatchBundle(OscBundle& bundle, uint64_t generation) {
+            struct Level { OscBundle* bundle; size_t next; };
             std::vector<Level> stack;
-            // Event<T>::notify() takes T&, and listeners could always edit the
-            // bundle before its elements are dispatched. Every node belongs to
-            // the non-const bundle parsePacket() owns, so the cast is well-defined.
-            onBundleReceived.notifyExternal(const_cast<OscBundle&>(bundle));
+            onBundleReceived.notifyExternal(bundle);
             stack.push_back({&bundle, 0});
 
             while (!stack.empty() && generation == generation_) {
                 Level& level = stack.back();
                 // Re-read the count each time: a listener may have edited the bundle.
-                if (level.next >= level.bundle->getElementCount()) {
+                if (level.bundle->getElementCount() <= level.next) {
                     stack.pop_back();
                     continue;
                 }
@@ -290,8 +300,8 @@ private:
                     enqueue(msg);  // only if the polling queue is enabled
                     onMessageReceived.notifyExternal(msg);
                 }
-                else if (const OscBundle* child = level.bundle->bundleAt(i)) {
-                    onBundleReceived.notifyExternal(const_cast<OscBundle&>(*child));
+                else if (OscBundle* child = osc_internal::BundleDispatchAccess::privateChild(*level.bundle, i)) {
+                    onBundleReceived.notifyExternal(*child);
                     stack.push_back({child, 0});   // invalidates `level`
                 }
             }
