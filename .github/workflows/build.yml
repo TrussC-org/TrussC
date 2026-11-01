@@ -313,12 +313,17 @@ jobs:
       - name: Verify cached warning replay (MSVC)
         if: runner.os == 'Windows'
         shell: bash
-        run: python3 tools/verify_warning_cache.py sccache
+        run: |
+          cmake --version
+          python3 tools/verify_warning_cache.py sccache
 
       - name: Build trusscli
         id: warning_build_1
+        env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_1.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" == "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
@@ -370,8 +375,11 @@ jobs:
       - name: Build AllFeaturesExample
         id: warning_build_2
         if: matrix.shard == 1
+        env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_2.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
           ./examples/build_all.py --test-only --verbose
@@ -388,8 +396,11 @@ jobs:
       # This job runs its shard only (see the matrix); ci-ok needs every shard.
       - name: Build & run core tests
         id: warning_build_3
+        env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_3.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           ./examples/build_all.py --core-tests-only --shard ${{ matrix.shard }}/3 --verbose
           TC_BUILD
@@ -509,8 +520,11 @@ jobs:
       - name: Build trusscli
         id: warning_build_4
         if: matrix.selected != '[]'
+        env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture "$RUNNER_TEMP/warning_build_4.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           if [ "$RUNNER_OS" = "macOS" ]; then
             sed -i '' 's/read -r -p/#read -r -p/g' tools/build_mac.command
@@ -532,9 +546,11 @@ jobs:
         id: warning_build_5
         if: matrix.selected != '[]'
         env:
+          VERBOSE: ${{ runner.os == 'Windows' && '1' || '' }}
           SELECTED_ADDONS: ${{ matrix.selected }}
         shell: bash
         run: |
+          if [ "$RUNNER_OS" != "Windows" ]; then unset VERBOSE; fi
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_5.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           python3 - <<'PYTHON'
           import json
