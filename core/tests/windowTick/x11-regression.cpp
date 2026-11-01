@@ -192,6 +192,7 @@ extern "C" int __wrap_XDeleteProperty(Display*, Window, Atom) { ++propertyDelete
 extern "C" Bool __wrap_XCheckTypedWindowEvent(Display*, Window window, int, XEvent* ev) {
     *ev = {}; ev->xselection.requestor = window; ev->xselection.property = 3; return True;
 }
+extern "C" Bool __wrap_XCheckIfEvent(Display*, XEvent*, Bool (*)(Display*, XEvent*, XPointer), XPointer) { return False; }
 extern "C" int __wrap_XLookupString(XKeyEvent*, char*, int, KeySym* sym, XComposeStatus*) { *sym = lookupKeysym; return 0; }
 extern "C" Bool __wrap_XFilterEvent(XEvent*, Window) { return False; }
 extern "C" int __wrap_XSendEvent(Display*, Window, Bool, long, XEvent* ev) { sentEvent = *ev; return 1; }
@@ -200,7 +201,8 @@ extern "C" int __wrap_XFree(void* data) { if (data) ++propertyFrees; std::free(d
 extern "C" int __wrap_XGetWindowProperty(Display*, Window, Atom, long offset, long length, Bool,
     Atom type, Atom* actual, int* format, unsigned long* count, unsigned long* after, unsigned char** data) {
     ++propertyCalls; requestedLength = length;
-    *actual = wrongType ? type + 1 : type;
+    const Atom requestedType = type == AnyPropertyType && !stateProperty && !visibilityProbe ? _sapp_tc.UTF8_STRING : type;
+    *actual = wrongType ? requestedType + 1 : requestedType;
     *format = wrongFormat ? 16 : ((stateProperty || visibilityProbe || typeList) ? 32 : 8);
     if (typeList) {
         const unsigned long n = std::min(offeredCount, (unsigned long)length);
@@ -504,19 +506,20 @@ int main() {
     check("absent main callback leaves batch unmarked", !main.input_delivered);
     _sapp_tc.app.desc.event_cb = event;
 
-    char clipboard[8]{};
-    _sapp_tc.app.clipboard_enabled = true; _sapp_tc.app.clipboard = clipboard; _sapp_tc.app.clipboard_size = sizeof clipboard;
+    _sapp_tc.app.clipboard_enabled = true;
+    _sapp_tc_clipboard_text.clear();
     _sapp_tc.UTF8_STRING = 4;
     sapp_set_clipboard_string("old"); owners = logs = 0;
-    sapp_set_clipboard_string("123456789");
-    check("oversize set truncates prefix, logs and takes ownership", std::strcmp(clipboard, "1234567") == 0 && owners == 1 && logs == 1 && owner == 1);
+    const std::string largeClipboard(200 * 1024, 'c');
+    sapp_set_clipboard_string(largeClipboard.c_str());
+    check("large clipboard set is complete and takes ownership", _sapp_tc_clipboard_text == largeClipboard && owners == 1 && logs == 0 && owner == 1);
     sapp_set_clipboard_string("123456\xc3\xa9");
-    check("truncation matches old byte-prefix contract", std::memcmp(clipboard, "123456\xc3", 8) == 0);
-    owner = 2; property = "123456789"; propertyCalls = 0;
+    check("clipboard set keeps complete UTF-8", _sapp_tc_clipboard_text == "123456\xc3\xa9");
+    owner = 2; property = largeClipboard; propertyCalls = 0;
     const char* result = sapp_get_clipboard_string();
-    check("clipboard acquisition bounded and excess rejects/logs/deletes", requestedLength == 2 && propertyCalls == 1 && result == nullptr && logs == 3 && propertyDeletes == 1);
+    check("clipboard acquisition reads the entire property", result && result == largeClipboard && propertyCalls > 1 && logs == 0 && propertyDeletes == 1);
     property = "paste";
-    check("bounded clipboard accepts fitting value", std::strcmp(sapp_get_clipboard_string(), "paste") == 0);
+    check("clipboard accepts short value after large value", std::strcmp(sapp_get_clipboard_string(), "paste") == 0);
     wrongType = true; check("clipboard rejects wrong type", sapp_get_clipboard_string() == nullptr); wrongType = false;
     wrongFormat = true; check("clipboard rejects wrong format", sapp_get_clipboard_string() == nullptr); wrongFormat = false;
     stateProperty = true; property.clear();
@@ -524,24 +527,25 @@ int main() {
     property = "extra";
     check("WM_STATE retains two-element prefix of longer record", _sapp_tc_x11_get_window_state(&main) == NormalState && requestedLength == 2);
     stateProperty = false;
-    char paths[2 * 8]{};
-    _sapp_tc.app.drop_buffer = paths; _sapp_tc.app.drop_max_files = 2; _sapp_tc.app.drop_max_path_length = 8;
-    check("URI reads bounded chunks and preserves percent decoding across replies",
-        parseDrop("file:///a%20b\r\nfile:///c\r\nfile:///ignored\r\n") && requestedLength == 2 &&
-        propertyCalls == 4 && _sapp_tc.app.drop_num_files == 2 && std::strcmp(paths, "/a b") == 0 && std::strcmp(paths + 8, "/c") == 0);
-    check("oversize URI path rejects and clears retained paths",
-        !parseDrop("file:///123456789\r\n") && _sapp_tc.app.drop_num_files == 0 && paths[0] == 0);
-    check("URI percent escape can straddle acquisition boundary",
-        parseDrop("file://%2Fa\r\n") && _sapp_tc.app.drop_num_files == 1 && std::strcmp(paths, "/a") == 0);
+    check("URI chunk reads retain every path",
+        parseDrop("file:///a%20b\r\nfile:///c\r\nfile:///ignored\r\n") &&
+        _sapp_tc_dropped_paths == std::vector<std::string>{"/a b", "/c", "/ignored"});
+    const std::string longPath = "/" + std::string(6000, 'p');
+    std::string manyPaths;
+    for (int i = 0; i < 20; ++i) manyPaths += "file://" + longPath + std::to_string(i) + "\r\n";
+    check("20 long URI paths arrive complete", parseDrop(manyPaths) && _sapp_tc_dropped_paths.size() == 20 &&
+        _sapp_tc_dropped_paths[19] == longPath + "19");
+    check("URI percent escape decodes", parseDrop("file://%2Fa\r\n") &&
+        _sapp_tc_dropped_paths == std::vector<std::string>{"/a"});
     check("URI continuation preserves ignored CR without a new size limit",
-        parseDrop("file:///a" + std::string(64, '\r') + "\n") && _sapp_tc.app.drop_num_files == 1 && std::strcmp(paths, "/a") == 0);
+        parseDrop("file:///a" + std::string(64, '\r') + "\n") && _sapp_tc_dropped_paths == std::vector<std::string>{"/a"});
     wrongFormat = true;
-    check("URI malformed reply rejects and clears", !parseDrop("file:///a\n") && paths[0] == 0);
+    check("URI malformed reply rejects and clears", !parseDrop("file:///a\n") && _sapp_tc_dropped_paths.empty());
     wrongFormat = false;
     for (int mode : { 1, 2, 3 }) {
         movingProperty = mode;
         check("changing/overflowing URI extent rejects within initial snapshot replies",
-            !parseDrop("") && propertyCalls <= 2 && _sapp_tc.app.drop_num_files == 0 && paths[0] == 0);
+            !parseDrop("") && propertyCalls <= 2 && (int)_sapp_tc_dropped_paths.size() == 0 && _sapp_tc_dropped_paths.empty());
     }
     movingProperty = 0;
 
@@ -564,7 +568,7 @@ int main() {
         check("drop delivery and retained paths match final outcome", good ?
             (dropCallbacks == 1 && main.input_delivered && lastEvent.mouse_x == 0 && lastEvent.mouse_y == 0 &&
                 lastEvent.mouse_dx == 0 && lastEvent.mouse_dy == 0) :
-            (propertyCalls <= 2 && dropCallbacks == 0 && !main.input_delivered && _sapp_tc.app.drop_num_files == 0 && paths[0] == 0));
+            (propertyCalls <= 2 && dropCallbacks == 0 && !main.input_delivered && (int)_sapp_tc_dropped_paths.size() == 0 && _sapp_tc_dropped_paths.empty()));
     }
     movingProperty = 0; wrongFormat = false;
     struct DropCase {
@@ -572,6 +576,7 @@ int main() {
         int retainedFiles;
         const char* retainedPath;
         const char* secondPath = "";
+        const char* thirdPath = "";
     };
     for (const DropCase& test : {
         DropCase{ "file", 0, "" },
@@ -581,7 +586,7 @@ int main() {
         DropCase{ "file://\r\nfile://\r\n", 0, "" },
         DropCase{ "file://\r\nfile:///a\r\n", 1, "/a" },
         DropCase{ "file:///a\r\nfile://\r\nfile:///b\r\n", 2, "/a", "/b" },
-        DropCase{ "file://\r\nfile:///a\r\nfile://\r\nfile:///b\r\nfile://\r\nfile:///ignored\r\n", 2, "/a", "/b" },
+        DropCase{ "file://\r\nfile:///a\r\nfile://\r\nfile:///b\r\nfile://\r\nfile:///ignored\r\n", 3, "/a", "/b", "/ignored" },
         DropCase{ "file:///a\r\n", 1, "/a" },
     }) {
         property = test.payload;
@@ -595,9 +600,10 @@ int main() {
         check("URI content SelectionNotify callback count and main admission", callbacks == (good ? 1 : 0) &&
             dropCallbacks == (good ? 1 : 0) && main.input_delivered == good);
         check("URI content SelectionNotify retains the parser's completed-entry policy",
-            _sapp_tc.app.drop_num_files == test.retainedFiles &&
-            (test.retainedFiles == 0 || std::strcmp(paths, test.retainedPath) == 0) &&
-            (test.retainedFiles < 2 || std::strcmp(paths + _sapp_tc.app.drop_max_path_length, test.secondPath) == 0));
+            (int)_sapp_tc_dropped_paths.size() == test.retainedFiles &&
+            (test.retainedFiles == 0 || _sapp_tc_dropped_paths[0] == test.retainedPath) &&
+            (test.retainedFiles < 2 || _sapp_tc_dropped_paths[1] == test.secondPath) &&
+            (test.retainedFiles < 3 || _sapp_tc_dropped_paths[2] == test.thirdPath));
         check("URI content SelectionNotify Finished flags and action", sentEvent.xclient.message_type == 18 &&
             sentEvent.xclient.data.l[1] == (good ? 1 : 0) && sentEvent.xclient.data.l[2] == (good ? 20 : None));
     }

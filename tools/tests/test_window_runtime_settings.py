@@ -47,6 +47,8 @@ class WindowRuntimeSettings(unittest.TestCase):
         objc = r'''
 #include "sokol/sokol_app_tc.h"
 #include <cstring>
+#include <string>
+#include <vector>
 #define nil ((id)0)
 using NSUInteger=unsigned long; using BOOL=bool;
 constexpr BOOL NO=false,YES=true;
@@ -84,8 +86,8 @@ __attribute__((objc_root_class)) @interface NSObject @end
 - (void)registerForDraggedTypes:(NSArray*)types;
 @end
 struct _sapp_tc_window_t { _sapp_tc_view* view; float dpi_scale; };
-struct { struct { bool drop_enabled,mouse_shown; char* drop_buffer;
-int drop_max_files,drop_max_path_length,drop_num_files; sapp_mouse_cursor current_cursor; } app; } _sapp_tc;
+struct { struct { bool drop_enabled,mouse_shown; sapp_mouse_cursor current_cursor; } app; } _sapp_tc;
+static std::vector<std::string> _sapp_tc_dropped_paths;
 extern NSString* NSPasteboardTypeFileURL;
 static void _sapp_tc_send(_sapp_tc_window_t*,sapp_event*) {}
 static void _sapp_tc_apply_cursor(sapp_mouse_cursor,bool) {}
@@ -273,16 +275,15 @@ assert(runApp<int>(WindowSettings{}, runtime)==23);
 assert(runApp<int>()==23 && internal::gpuUniformBufferReserve==0); }
 ''')
 
-    def test_fixed_clipboard(self):
+    def test_clipboard_settings_removed(self):
         header = read('core/include/TrussC.h')
         settings = body(header, 'struct WindowSettings {') + ';\n'
-        capacity = between(header, '    desc.clipboard_size = ', ';')
+        self.assertNotIn('desc.clipboard_size', header)
         execute('#include <string>\n#include <cassert>\n' + settings + r'''
 template<class T> concept HasClipboardSize = requires(T t) { t.clipboardSize; };
 template<class T> concept HasClipboardSetter = requires(T t) { t.setClipboardSize(1); };
 static_assert(!HasClipboardSize<WindowSettings> && !HasClipboardSetter<WindowSettings>);
-int main(){ struct { int clipboard_size=0; } desc; WindowSettings settings;
-desc.clipboard_size = ''' + capacity + r'''; assert(desc.clipboard_size==65536); }
+int main(){ WindowSettings settings; }
 ''')
         self.assertNotIn('setClipboardSize', body(header, 'inline void setClipboardString('))
 

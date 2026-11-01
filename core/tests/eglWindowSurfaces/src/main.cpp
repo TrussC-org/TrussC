@@ -462,7 +462,6 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         desc.width = 333; desc.height = 257; desc.high_dpi = true;
         desc.window_title = "EGL main regression"; desc.swap_interval = 4;
         desc.enable_clipboard = desc.enable_dragndrop = true;
-        desc.clipboard_size = 8;
         desc.init_cb = mainProbeInit; desc.frame_cb = mainProbeFrame; desc.event_cb = mainProbeEvent;
         desc.allocator.alloc_fn = allocate; desc.allocator.free_fn = release;
         const uint32_t pixels[] = { 0xff0000ff, 0xff00ff00, 0xffff0000, 0xffffffff };

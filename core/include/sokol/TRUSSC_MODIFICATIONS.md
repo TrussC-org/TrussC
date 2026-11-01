@@ -737,3 +737,32 @@ applies only to the historical Metal-only patch.
 `_sapp_tc_mac_create_window_ex` registers file URLs on each content view,
 including secondary views. The existing view handler sends the drop to its
 own window receiver. Drop capacities and rejection behavior are unchanged.
+
+
+## #239 — Growable drop paths and clipboard text (v0.8.0)
+
+- `sokol_app_tc.h` removes `sapp_desc::max_dropped_files`,
+  `max_dropped_file_path_length` and `clipboard_size`; no replacement caps.
+- macOS, Windows, X11 and Web retain all drop paths in growable strings.
+  Windows queries each UTF-16 path length with `DragQueryFileW` before allocation,
+  then queries the UTF-8 conversion size. X11 reads the URI property in chunks
+  and grows each decoded path from the actual input, including INCR drop transfers.
+- Clipboard text grows with actual content on desktop, Web paste/copy and the
+  iOS/Android internal clipboard. Web bridges allocate UTF-8 on the heap instead
+  of the fixed WASM stack. Windows queries conversion lengths; X11
+  supports full properties and INCR transfers in both directions.
+- Allocation failure follows normal C++ allocation failure behavior; no OOM
+  recovery machinery or preallocated slots are added.
+- Verification: `tools/tests/test_drop_clipboard_unbounded.py` exercises the
+  real X11 backend on Xvfb, Windows/Web production-source seams and old-cap
+  mutants. Native macOS/Windows, browser and Raspberry Pi checks follow separately.
+
+### Follow-up 1
+
+- The Windows window-procedure boundary reports `bad_alloc` through
+  `sapp_desc.logger` at Error level, identifying out-of-memory drop or
+  event/clipboard handling failures. Direct clipboard API calls still propagate
+  `bad_alloc` to their caller.
+- Web paste/drop callbacks catch allocation failures and return their status;
+  the JS bridge raises an Error identifying out of memory after C++ unwinds.
+  Heap text is still freed in `finally`. No recovery or retry is added.

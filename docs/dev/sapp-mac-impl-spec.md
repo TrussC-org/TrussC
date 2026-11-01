@@ -1,5 +1,7 @@
 # sokol_app.h macOS (Metal) Backend — Behavioral Specification
 
+> v0.8.0 update (#239): the fixed clipboard and drop buffers described below are superseded. Clipboard text, dropped file counts and UTF-8 path lengths now use growable storage with no TrussC size limit. `sapp_desc::clipboard_size`, `max_dropped_files` and `max_dropped_file_path_length` are removed.
+
 Implementation contract for replacing sokol_app.h's macOS main-window / app-lifecycle
 with `sokol_app_tc.h`. All line references are into
 `core/include/sokol/sokol_app.h` (14602 lines, this worktree). Focus: `_SAPP_MACOS`
@@ -49,8 +51,7 @@ Cross-platform `_sapp` fields the mac path reads/writes: `desc`, `valid`,
 
 `_sapp_init_state()` (**3554**) is called first by `_sapp_macos_run` and initializes
 all of the above from `desc` (defaults applied by `_sapp_desc_defaults` at **3524**:
-sample_count→1, swap_interval→1, clipboard_size→8192, max_dropped_files→1,
-max_dropped_file_path_length→2048, window_title→"sokol"). Notably it sets
+sample_count→1, swap_interval→1, window_title→"sokol"). Clipboard/drop size defaults are removed in v0.8.0; storage grows with actual content. Notably it sets
 `first_frame=true`, `dpi_scale=1.0`, `mouse.shown=true`, `fullscreen=desc.fullscreen`,
 and copies width/height verbatim (**may be 0** — the mac backend must resolve 0).
 
@@ -245,7 +246,7 @@ sticky across window regions. `mouseEntered:` (6157) also re-syncs mouse positio
 ## 7. Drag & drop
 
 - Registration: **always** on the main window (`registerForDraggedTypes:@[NSPasteboardTypeFileURL]` in `_sapp_macos_window initWithContentRect:` at 6050, guarded by `__MAC_OS_X_VERSION_MAX_ALLOWED >= 101300`). Not gated on `enable_dragndrop`; the buffer/handler is what gates.
-- `desc.enable_dragndrop` → `_sapp_init_state` allocates `drop.buffer` of `max_files * max_path_length` bytes and sets `drop.enabled/max_files/max_path_length/buf_size` (3581–3587). Defaults: 1 file, 2048 bytes/path.
+- `desc.enable_dragndrop` enables drops. In v0.8.0, growable storage replaces the historical `drop.buffer` allocation (3581–3587); there is no TrussC file-count or path-length limit.
 - NSDraggingDestination methods on `_sapp_macos_window` (6056–6094): `draggingEntered:`→`NSDragOperationCopy`, `draggingUpdated:`→`NSDragOperationCopy`, `performDragOperation:` does the extraction.
 - `performDragOperation:` (6064): if pasteboard has `NSPasteboardTypeFileURL`: `_sapp_clear_drop_buffer()`; `num_files = min(pasteboardItems.count, drop.max_files)`; for each item build `[NSURL fileURLWithPath:[item stringForType:NSPasteboardTypeFileURL]]` and `_sapp_strcpy(fileUrl.standardizedURL.path.UTF8String, _sapp_dropped_file_path_ptr(i), max_path_length)`. If any path overflows → `_SAPP_ERROR(DROPPED_FILE_PATH_TOO_LONG)`, abort, clear buffer, `num_files=0`. On success, if `_sapp_events_enabled()`: update mouse pos from `draggingLocation`, fire `SAPP_EVENTTYPE_FILES_DROPPED` with `modifiers = _sapp_macos_mods(nil)`. Returns YES if handled.
 - Retrieval: `sapp_get_num_dropped_files()` (14319) returns `drop.num_files` (0 if disabled); `sapp_get_dropped_file_path(i)` (14326) returns `_sapp_dropped_file_path_ptr(i)`.

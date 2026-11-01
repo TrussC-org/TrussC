@@ -1587,10 +1587,6 @@ inline void unbindCursorImage(Cursor cursor) {
 
 // Copy string to clipboard
 inline void setClipboardString(const std::string& text) {
-    if (text.size() >= 65536) {
-        logWarning("Clipboard") << "Text truncated (" << text.size() << " bytes > "
-            << "65536-byte fixed buffer).";
-    }
     sapp_set_clipboard_string(text.c_str());
 }
 
@@ -2568,15 +2564,9 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
 
     // Enable drag and drop
     desc.enable_dragndrop = true;
-    // Bound (security): OS file drops can flood delivery; a fixed cap keeps path storage finite. Overflow omits excess files.
-    desc.max_dropped_files = 16;           // Max 16 files
-    // Bound (security): OS drop paths need finite per-path storage. Overflow rejects the drop if a path does not fit.
-    desc.max_dropped_file_path_length = 2048;  // Max path length
 
     // Enable clipboard
-    // Bound (security): OS clipboard text needs finite storage. Overflow truncates or rejects oversized text, depending on the backend.
     desc.enable_clipboard = true;
-    desc.clipboard_size = 65536;  // Fixed OS clipboard buffer capacity.
 
     // Windows: keep console input and output UTF-8 while the app runs.
     // Takes effect whenever the process has a console (Debug builds,
