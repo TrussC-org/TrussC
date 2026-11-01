@@ -222,7 +222,173 @@ def orderingRegression():
         result=subprocess.run([str(binary)],timeout=10)
         return int(result.returncode != 0)
 
-regressionFailures = policyRegression() + orderingRegression()
+def nativeDestructionRegression():
+    import tempfile
+    root = Path(__file__).resolve().parents[3]
+    out = root / os.environ.get('TC_C3_EVIDENCE', '.verification/c3')
+    out.mkdir(parents=True, exist_ok=True)
+
+    def body(relative, marker):
+        source = (root / relative).read_text(encoding='utf-8')
+        start = source.index(marker)
+        end = source.index('{', start) + 1
+        depth = 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        return source[start:end]
+
+    code = r'''
+#include <atomic>
+#include <cstdio>
+#include <memory>
+#include <utility>
+#include <vector>
+int nativeDisposals = 0, sappDisposals = 0, authorityDisposals = 0;
+int gpuReleases = 0, unbinds = 0, retirements = 0, targetCleanups = 0;
+struct Context {
+    struct Resources { void release() { ++gpuReleases; } };
+    struct Target { Resources value; auto& resources() { return value; } } swapchainTarget;
+    bool targetsClosed = false;
+    int asyncScreenshots = 0;
+    std::vector<int> appEventListeners;
+    void* acquireSwapchain = nullptr;
+    void* acquireSwapchainUser = nullptr;
+    void* activateNative = nullptr;
+    std::shared_ptr<int> rootNode;
+    void teardownTargets() { ++targetCleanups; }
+};
+namespace trussc {
+struct Window {
+    int epoch_ = 1;
+    bool exitDelivered_ = false, closeRequested_ = false, closingApp_ = false;
+    bool windowExitNotified_ = false;
+    std::weak_ptr<Window> hostOwner_;
+    struct Binding { bool bound = true; struct { int id; } handle{1}; } binding_;
+    struct { int exit = 0; } events_;
+    struct EventState { std::atomic<bool> active{true}; };
+    std::shared_ptr<EventState> appEventState_ = std::make_shared<EventState>();
+    Context ctx_;
+    void* native_ = nullptr;
+    void endApp() {}
+    void disposeNativeBacking() { ++nativeDisposals; native_ = nullptr; }
+    void teardown() noexcept;
+};
+namespace mcp::internal { void retireDeferredTarget(Context*) {} }
+namespace internal {
+struct TeardownSteps { template<class F> void run(const char*, F f) { f(); } };
+struct WindowLifecycleScope { explicit WindowLifecycleScope(Window&) {} };
+struct FrameworkEventAccess { static void notifyShutdown(int, TeardownSteps&) {} };
+bool frameworkShutdown() { return false; }
+int runtimeEpoch() { return 1; }
+Context*& currentWindowCtx() { static Context* ctx = nullptr; return ctx; }
+void restoreWindowContext(Context* ctx) { currentWindowCtx() = ctx; }
+void closeScreenshots(int) {}
+void releaseRuntimeWindow(Window&) { ++retirements; }
+struct WindowRequestAccess {
+    static void teardown(Window& w) { w.teardown(); }
+    static void endForShutdown(Window&) {}
+    static void unbind(Window& w) { ++unbinds; w.binding_.bound = false; w.binding_.handle = {}; }
+};
+struct Owner {
+    Window* window = nullptr;
+    Context* context = nullptr;
+    bool ended = false;
+};
+struct Attachment { std::shared_ptr<int> app; Attachment* previous = nullptr; };
+struct Attachments {
+    void appendAll(Attachments&) {}
+    Attachment* first() { return nullptr; }
+    Attachment* last() { return nullptr; }
+    bool empty() { return true; }
+    int extract(Attachment*) { return 0; }
+};
+struct State {
+    bool stopping = false, sessionCommitted = false;
+    std::vector<Window*> windows, endingWindows;
+    Attachments attachments, endingAttachments;
+    std::vector<std::weak_ptr<Owner>> owners;
+    std::shared_ptr<std::atomic<bool>> runToken;
+    void* sessionAuthority = nullptr;
+} state;
+auto& runtime() { return state; }
+std::shared_ptr<Owner> appOwner(int&) { return {}; }
+Context* nonWindowContextIfInitialized() { return nullptr; }
+void endAppAttachment(std::shared_ptr<int>, Context&, bool) {}
+void retireAppOwner(std::shared_ptr<Owner>) { state.owners.pop_back(); }
+void cancelLogoutWatchdog() {}
+void destroySessionAuthority(void* authority) { if (authority) ++authorityDisposals; }
+bool sg_isvalid() { return true; }
+void sapp_tc_gl_activate_idle() {}
+''' + body('core/include/tc/app/tcWindowRuntime.cpp', 'bool sessionEndCommitted() noexcept {') + r'''
+#define _WIN32
+''' + body('core/include/tc/app/tcWindowRuntime.cpp', 'void shutdownRuntime() noexcept {') + r'''
+#undef _WIN32
+}
+void sapp_tc_gl_activate_idle() {}
+template<class T> void sapp_destroy_window(T) { ++sappDisposals; }
+''' + body('core/include/tc/app/tcWindow.h', 'inline void Window::teardown() noexcept {') + r'''
+}
+int main() {
+    using namespace trussc;
+    for (bool shutdown : {false, true}) for (bool committed : {false, true}) {
+        internal::state = {};
+        auto& state = internal::state;
+        state.sessionCommitted = committed;
+        state.sessionAuthority = &state;
+        state.runToken = std::make_shared<std::atomic<bool>>(true);
+        nativeDisposals = sappDisposals = authorityDisposals = 0;
+        gpuReleases = unbinds = retirements = targetCleanups = 0;
+        Window adapter, launch;
+        adapter.native_ = &adapter;
+        if (shutdown) {
+            state.windows = {&adapter, &launch};
+            internal::shutdownRuntime();
+            internal::shutdownRuntime();
+        } else {
+            adapter.teardown(); launch.teardown();
+        }
+        // Closed handles cannot repeat disposal, even when native windows remain.
+        adapter.teardown(); launch.teardown();
+        const bool ok = nativeDisposals == int(!committed) && sappDisposals == int(!committed) &&
+            authorityDisposals == int(shutdown && !committed) && gpuReleases == 2 &&
+            unbinds == 2 && retirements == 2 && targetCleanups == 2 &&
+            !adapter.binding_.bound && !launch.binding_.bound &&
+            !adapter.binding_.handle.id && !launch.binding_.handle.id &&
+            adapter.ctx_.targetsClosed && launch.ctx_.targetsClosed &&
+            !adapter.appEventState_->active && !launch.appEventState_->active &&
+            (!shutdown || (state.windows.empty() && state.endingWindows.empty() && !*state.runToken)) &&
+            state.sessionAuthority == (shutdown && !committed ? nullptr : &state);
+        std::printf("shared disposal %s %s: %s (native=%d sapp=%d authority=%d gpu=%d)\n",
+            shutdown ? "shutdown" : "close", committed ? "committed" : "ordinary",
+            ok ? "PASS" : "FAIL", nativeDisposals, sappDisposals, authorityDisposals, gpuReleases);
+        if (!ok) return 1;
+    }
+}
+'''
+    variants = [('baseline', code)]
+    for name, gate in [('destroy-user-windows', 'if (internal::sessionEndCommitted()) {'),
+                       ('destroy-authority', 'if (state.sessionCommitted) {')]:
+        assert code.count(gate) == 1, name + ' mutation anchor missing'
+        variants.append((name, code.replace(gate, 'if (false) {')))
+    with tempfile.TemporaryDirectory(prefix='tc-native-disposal-') as tmp:
+        folder = Path(tmp)
+        for name, text in variants:
+            cpp, binary = folder / 'probe.cpp', folder / 'probe'
+            cpp.write_text(text, encoding='utf-8')
+            subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', str(cpp), '-o', str(binary)], check=True)
+            result = subprocess.run([str(binary)], capture_output=True, text=True, encoding='utf-8', timeout=10)
+            output = result.stdout + result.stderr
+            (out / ('native-disposal-' + name + '.log')).write_text(output, encoding='utf-8')
+            good = result.returncode == 0 if name == 'baseline' else (
+                result.returncode == 1 and 'committed: FAIL' in output)
+            print('native disposal', name, 'PASS' if good else 'FAIL', output, flush=True)
+            if not good:
+                return 1
+    return 0
+
+
+regressionFailures = nativeDestructionRegression() + policyRegression() + orderingRegression()
 if regressionFailures:
     raise SystemExit(1 if regressionFailures else 0)
 

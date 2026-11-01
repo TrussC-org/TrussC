@@ -35,6 +35,8 @@ Busy termination and OS-killed ends skip atexit handlers and C++ static destruct
 A logout that arrives while a framework call is pumping messages synchronously
 (for example, Windows VideoPlayer::load waiting for metadata) also counts as busy.
 
+Committed OS session ending leaves native windows and the session receiver to process exit, so destroying the last top-level window cannot make Windows end the logging-off process during cleanup.
+
 An idle commit runs normal reverse attachment ending synchronously: exit events,
 exactly one App::exit, audio detach and cleanup, then complete service/device
 cleanup. One process-wide watchdog (default 3 seconds,
