@@ -479,6 +479,8 @@ static void cover_other() {
 #endif
     (void)exitApp(af::val<int>());
     (void)getResourceLoadConcurrency();
+    (void)getWindowTitle();
+    (void)isWindowOccluded();
     (void)onScreenshotSave();
     (void)operator*(af::val<float>(), af::val<const Vec2>());
     (void)operator*(af::val<float>(), af::val<const Vec3>());
@@ -2984,6 +2986,14 @@ struct Cover_RuntimeEvents : af::Scope<RuntimeEvents> {
     }
 };
 
+struct Cover_RuntimeSettings : af::Scope<RuntimeSettings> {
+    ~Cover_RuntimeSettings(); // Never instantiated.
+    static void run() {
+        (void)af::val<RuntimeSettings>().reserveUniformBuffer(af::val<int>());
+        (void)af::val<RuntimeSettings>().uniformBufferReserve;
+    }
+};
+
 struct Cover_SaveResult : af::Scope<SaveResult> {
     ~Cover_SaveResult(); // Never instantiated.
     static void run() {
@@ -4852,7 +4862,6 @@ struct Cover_Window : af::Scope<Window> {
 struct Cover_WindowSettings : af::Scope<WindowSettings> {
     ~Cover_WindowSettings(); // Never instantiated.
     static void run() {
-        (void)af::val<WindowSettings>().clipboardSize;
         (void)af::val<WindowSettings>().decorated;
         (void)af::val<WindowSettings>().fullscreen;
         (void)af::val<WindowSettings>().height;
@@ -4860,10 +4869,8 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().pipelinePoolSize;
         (void)af::val<WindowSettings>().pixelPerfect;
         (void)af::val<WindowSettings>().quitOnClose;
-        (void)af::val<WindowSettings>().reserveUniformBuffer(af::val<int>());
         (void)af::val<WindowSettings>().resourcePoolSize;
         (void)af::val<WindowSettings>().sampleCount;
-        (void)af::val<WindowSettings>().setClipboardSize(af::val<int>());
         (void)af::val<WindowSettings>().setDecorated(af::val<bool>());
         (void)af::val<WindowSettings>().setFullscreen(af::val<bool>());
         (void)af::val<WindowSettings>().setHighDpi(af::val<bool>());
@@ -4879,7 +4886,6 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().shaderPoolSize;
         (void)af::val<WindowSettings>().swapInterval;
         (void)af::val<WindowSettings>().title;
-        (void)af::val<WindowSettings>().uniformBufferReserve;
         (void)af::val<WindowSettings>().width;
     }
 };
@@ -5099,6 +5105,7 @@ void af::coverGenerated() {
     af_generated::Cover_ResizeEventArgs::run();
     af_generated::Cover_Runtime::run();
     af_generated::Cover_RuntimeEvents::run();
+    af_generated::Cover_RuntimeSettings::run();
     af_generated::Cover_SaveResult::run();
     af_generated::Cover_ScreenRecorder::run();
     af_generated::Cover_ScreenshotSaveEventArgs::run();

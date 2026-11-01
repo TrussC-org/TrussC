@@ -703,3 +703,9 @@ This patch does not change Metal or Vulkan, or TrussC's API. In this sokol fork
 it adds two `sg_log_item` entries (`WGPU_UNIFORM_BUFFER_GROWN`,
 `WGPU_UNIFORM_UPLOAD_FAILED`). The earlier note that WebGPU is untouched
 applies only to the historical Metal-only patch.
+
+## macOS multi-window file-drop registration (#239 D-min)
+
+`_sapp_tc_mac_create_window_ex` registers file URLs on each content view,
+including secondary views. The existing view handler sends the drop to its
+own window receiver. Drop capacities and rejection behavior are unchanged.

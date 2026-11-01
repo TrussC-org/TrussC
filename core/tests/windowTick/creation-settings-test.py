@@ -42,6 +42,7 @@ def mac_api(source):
         ('[w->window contentRectForFrameRect:w->window.frame]', 'content_rect(w->window)'),
         ('NSString* ns_title = [NSString stringWithUTF8String:w->title]', 'const char* ns_title = w->title'),
         ('_sapp_tc_view* view = [[_sapp_tc_view alloc] initWithFrame:rect]', 'View* view = new View'),
+        ('[w->view registerForDraggedTypes:@[NSPasteboardTypeFileURL]]', 'register_drop(w->view)'),
         ('[CAMetalLayer layer]', 'new Layer'),
         ('[w->window makeFirstResponder:view]', 'make_first_responder(w->window,view)'),
         ('[w->window center]', 'center(w->window)'),

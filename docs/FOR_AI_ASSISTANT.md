@@ -83,6 +83,8 @@ App audio callbacks attach after the first setup completes. Ending detaches the 
 
 Guest retirement cancels registered callbacks and releases their captures. Queued main-thread copies check owner liveness at execution and retain captures until the queue destroys them. Every successfully loaded module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
 
+Under hot reload (TC_HOT_RELOAD), RuntimeSettings is not applied; the default uniform reservation is used.
+
 Hot reload supports a single window. While a hot-reload guest is loaded, creating a second or later open window emits a Warning each time; behaviour is not guaranteed. Reload happens at the main-thread outer-turn safe point and replaces the launch Window App if that Window is still open. Stop and join App-owned threads, cancel timers and finish async work in `events().hotReloadUnload` before the old App ends. Reload does not wait for or exclude that work; a worker already admitted before retirement can overlap it. Successfully loaded modules stay mapped for the process lifetime, and repeated reloads can grow process memory. iOS/Android/Web use the static fallback.
 
 
@@ -132,6 +134,8 @@ int main() {
     return TC_RUN_APP(tcApp, settings);
 }
 ```
+
+`RuntimeSettings::reserveUniformBuffer()` reserves the process-wide GPU uniform buffer; pass it as the second argument to `runApp<T>(windowSettings, runtimeSettings)`. The OS clipboard buffer is fixed at 64 KB. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
 
 ### FPS Control
 ```cpp
@@ -952,9 +956,9 @@ photo.setDebugName("photo");
 {"source":{"fbo":"bloom"},"ops":[{"op":"stats"}]}
 ```
 
-`source` contains exactly one of `window` (index from `tc_list_windows`),
+`source` contains exactly one of `window` (id from `tc_list_windows`),
 `fbo` or `image` (debug name or index from `tc_list_fbos` / `tc_list_images`),
-or `path` (saved file). Lists contain index, name, width, height and format;
+or `path` (saved file). Image and FBO lists contain index, name, width, height and format;
 unnamed objects remain discoverable by index. Moves transfer names and indices;
 moved-from objects and destroyed objects disappear from the lists. Duplicate
 names require an index. `Texture` is not a source: draw it into a named Fbo.
@@ -1909,7 +1913,7 @@ _Auto-generated C++ API index from `reference-data.json` (structure from the C++
 ### Lifecycle
 
 ```cpp
-int runApp(const WindowSettings & settings = WindowSettings())  // Starts the application loop for an App subclass.
+int runApp(const WindowSettings & settings, const RuntimeSettings & runtime) [+1]  // Starts the application loop for an App subclass.
 ```
 
 ### Graphics - Color
@@ -2594,7 +2598,9 @@ EVENT_DRIVEN  // Selects rendering on demand.
 void exitApp(int code = 0)  // Asks the process to quit, with an exit code.
 float exp2(float x) [std]  // Returns two raised to the given power.
 int getResourceLoadConcurrency()  // Returns how many resource loads can prepare at once.
+const std::string & getWindowTitle()  // Returns the current Window title.
 HALF_TAU  // Represents half a turn in radians.
+bool isWindowOccluded()  // Reports whether the current Window is hidden by native visibility signals.
 KEY_BACKSPACE  // Identifies the Backspace key.
 KEY_DELETE  // Identifies the Delete key.
 KEY_DOWN  // Identifies the Down arrow key.
@@ -3940,6 +3946,12 @@ void Runtime::setLogoutTimeout(float seconds)  // Sets how long TrussC waits for
 ```cpp
 ```
 
+### RuntimeSettings — Configures app-wide runtime values at startup.
+
+```cpp
+RuntimeSettings & RuntimeSettings::reserveUniformBuffer(int bytes)  // Sets the app-wide GPU uniform buffer reservation.
+```
+
 ### SaveResult — Represents the result of a save or recording operation.
 
 ```cpp
@@ -4764,8 +4776,6 @@ void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 ### WindowSettings — Configures the application window at startup.
 
 ```cpp
-WindowSettings & WindowSettings::reserveUniformBuffer(int bytes)  // Sets the initial capacity of the per-frame GPU uniform buffer.
-WindowSettings & WindowSettings::setClipboardSize(int size)  // Sets the clipboard buffer capacity.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
@@ -5056,6 +5066,7 @@ saveScreenshot("capture.png");   // Saves to bin/data/
 ```
 
 ### Cursor
+Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over.
 ```cpp
 setCursor(Cursor::Hand);         // System cursors: Default, Arrow, IBeam, Crosshair,
                                  //   Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW,

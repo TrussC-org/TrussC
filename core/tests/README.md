@@ -1084,6 +1084,7 @@ Fitting requests run every check strictly, without SKIPs.
   remain manual in `repro/appSetSizeTest` on `test/app-setsize-own-window`
   (see its `repro/README.md`). Headless S6 does not prove that another window
   is not resized.
+- `runtimeSettings/` — process-wide uniform reservation forwarding/reset, default settings, fixed clipboard capacity and the two `runApp` overloads. `tools/tests/test_window_runtime_settings.py` also replays the five D-min smokes against `TC_DMIN_REVISION=HEAD` and syntax-checks the macOS drop/cursor methods against native API seams.
 - `windowState/` — deterministic equal Window ownership, positive native
   binding IDs, per-window native operations, framebuffer/DPI before initial
   App sizing, trusted effective-hidden snapshots, size deduplication and

@@ -3353,7 +3353,7 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
     }
 }
 
-/*-- drag & drop (NSDraggingDestination; registered on the main view) -------*/
+/*-- drag & drop (NSDraggingDestination; registered on every view) -------*/
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
     (void)sender;
     return NSDragOperationCopy;
@@ -4076,6 +4076,8 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     _sapp_tc_view* view = [[_sapp_tc_view alloc] initWithFrame:rect];
     if (view == nil) return _sapp_tc_mac_fail(w, "Window view initWithFrame returned nil (no NSError available)");
     w->view = view;
+    /* [TrussC] File drops are registered for every native view. */
+    [w->view registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
     w->layer = [CAMetalLayer layer];
     if (w->layer == nil) return _sapp_tc_mac_fail(w, "CAMetalLayer layer returned nil (no NSError available)");
     w->layer.device = dev;
@@ -4192,8 +4194,6 @@ static bool _sapp_tc_mac_create_main_window(void) {
     w->is_main = true;
     _sapp_tc.app.main = w;
     _sapp_tc.app.desc.window_title = w->title;
-    /* Drop registration stays with the first window until step (b). */
-    [w->view registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
     _sapp_tc.app.valid = true;
     return true;
 }
