@@ -19,8 +19,9 @@ struct DialogSheet {
     std::function<void(NSModalResponse)> completion;
 };
 std::vector<std::shared_ptr<DialogSheet>>& dialogSheets() {
-    static std::vector<std::shared_ptr<DialogSheet>> sheets;
-    return sheets;
+    // Process lifetime: Runtime's atexit shutdown can still cancel sheets.
+    static auto* sheets = new std::vector<std::shared_ptr<DialogSheet>>;
+    return *sheets;
 }
 void completeDialogSheet(const std::shared_ptr<DialogSheet>& sheet, NSModalResponse response) {
     std::erase(dialogSheets(), sheet);
