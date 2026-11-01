@@ -392,7 +392,7 @@
             .vertices_full      - internal vertex buffer is full (checked in sgl_end())
             .uniforms_full      - the internal uniforms buffer is full (checked in sgl_end())
             .commands_full      - the internal command buffer is full (checked in sgl_end())
-            .stack_overflow     - matrix- or pipeline-stack overflow
+            .stack_overflow     - pipeline-stack overflow or matrix-stack allocation failure
             .stack_underflow    - matrix- or pipeline-stack underflow
             .no_context         - the active context no longer exists
 
@@ -2637,7 +2637,9 @@ typedef struct {
     /* matrix stacks */
     _sgl_matrix_mode_t cur_matrix_mode;
     int matrix_tos[SGL_NUM_MATRIXMODES];
-    _sgl_matrix_t matrix_stack[SGL_NUM_MATRIXMODES][_SGL_MAX_STACK_DEPTH];
+    /* [TrussC] Each mode starts with its base matrix and grows on push (#331). */
+    int matrix_cap[SGL_NUM_MATRIXMODES];
+    _sgl_matrix_t* matrix_stack[SGL_NUM_MATRIXMODES];
 } _sgl_context_t;
 
 typedef struct {
@@ -3224,6 +3226,8 @@ static void _sgl_init_context(sgl_context ctx_id, const sgl_context_desc_t* in_d
     ctx->rgba[0] = 1.0f; ctx->rgba[1] = 1.0f; ctx->rgba[2] = 1.0f; ctx->rgba[3] = 1.0f;
     ctx->point_size = 1.0f;
     for (int i = 0; i < SGL_NUM_MATRIXMODES; i++) {
+        ctx->matrix_cap[i] = 1;
+        ctx->matrix_stack[i] = (_sgl_matrix_t*) _sgl_malloc(sizeof(_sgl_matrix_t));
         _sgl_identity(&ctx->matrix_stack[i][0]);
     }
     ctx->pip_stack[0] = ctx->def_pip;
@@ -3248,6 +3252,11 @@ static void _sgl_destroy_context(sgl_context ctx_id) {
         if (ctx->vertices.ptr) _sgl_free(ctx->vertices.ptr);
         if (ctx->uniforms.ptr) _sgl_free(ctx->uniforms.ptr);
         if (ctx->commands.ptr) _sgl_free(ctx->commands.ptr);
+        /* [TrussC] Free all per-mode matrix storage (#331). */
+        for (int i = 0; i < SGL_NUM_MATRIXMODES; i++) {
+            _sgl_free(ctx->matrix_stack[i]);
+            ctx->matrix_stack[i] = 0;
+        }
         ctx->vertices.ptr = 0;
         ctx->uniforms.ptr = 0;
         ctx->commands.ptr = 0;
@@ -4853,15 +4862,25 @@ SOKOL_API_IMPL void sgl_push_matrix(void) {
     }
     SOKOL_ASSERT((ctx->cur_matrix_mode >= 0) && (ctx->cur_matrix_mode < SGL_NUM_MATRIXMODES));
     ctx->matrix_dirty = true;
-    if (ctx->matrix_tos[ctx->cur_matrix_mode] < (_SGL_MAX_STACK_DEPTH - 1)) {
-        const _sgl_matrix_t* src = _sgl_matrix(ctx);
-        ctx->matrix_tos[ctx->cur_matrix_mode]++;
-        _sgl_matrix_t* dst = _sgl_matrix(ctx);
-        *dst = *src;
-    } else {
-        ctx->error.stack_overflow = true;
-        ctx->error.any = true;
+    /* [TrussC] Grow through the configured allocator, never raw realloc (#331). */
+    const int mode = ctx->cur_matrix_mode;
+    const int next = ctx->matrix_tos[mode] + 1;
+    if (next >= ctx->matrix_cap[mode]) {
+        const int capacity = _sgl_checked_capacity(ctx->matrix_cap[mode], next, 1, sizeof(_sgl_matrix_t));
+        _sgl_matrix_t* matrices = capacity ? (_sgl_matrix_t*) _sgl_try_malloc((size_t)capacity * sizeof(_sgl_matrix_t)) : 0;
+        if (!matrices) {
+            ctx->error.stack_overflow = true;
+            ctx->error.any = true;
+            _sgl_log_msg(SGL_LOGITEM_MALLOC_FAILED, 1, "out of memory growing matrix stack", __LINE__);
+            return;
+        }
+        memcpy(matrices, ctx->matrix_stack[mode], (size_t)next * sizeof(_sgl_matrix_t));
+        _sgl_free(ctx->matrix_stack[mode]);
+        ctx->matrix_stack[mode] = matrices;
+        ctx->matrix_cap[mode] = capacity;
     }
+    ctx->matrix_stack[mode][next] = ctx->matrix_stack[mode][next - 1];
+    ctx->matrix_tos[mode] = next;
 }
 
 SOKOL_API_IMPL void sgl_pop_matrix(void) {
