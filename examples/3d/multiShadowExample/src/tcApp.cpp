@@ -38,7 +38,7 @@ void tcApp::setup() {
     warmLight.setDiffuse(1.0f, 0.75f, 0.5f);
     warmLight.setIntensity(9.0f);
     warmLight.setAttenuation(1.0f, 0.0f, 0.0f);
-    warmLight.enableShadow(1024);
+    warmLight.enableShadow(2048);
     warmLight.setShadowBias(2.0f);
 
     coolLight.setSpot(Vec3(450, 420, 220), Vec3(-1.0f, -1.0f, -0.5f),
@@ -46,7 +46,7 @@ void tcApp::setup() {
     coolLight.setDiffuse(0.5f, 0.7f, 1.0f);
     coolLight.setIntensity(9.0f);
     coolLight.setAttenuation(1.0f, 0.0f, 0.0f);
-    coolLight.enableShadow(1024);
+    coolLight.enableShadow(2048);
     coolLight.setShadowBias(2.0f);
 
     // Soft directional fill so shadowed areas aren't pitch black
