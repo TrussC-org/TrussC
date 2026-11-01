@@ -583,6 +583,43 @@ void policies(_sapp_tc_window_t* w) {
     w->desc.tick_cb = savedTick; w->desc.event_cb = savedEvent; w->events_enabled = savedGate;
 }
 
+bool initialDimensionsMatchClient(const _sapp_tc_window_t* w, bool* clamped = nullptr) {
+    RECT client{};
+    if (!GetClientRect(w->hwnd, &client)) return false;
+    const int clientWidth = int(client.right - client.left);
+    const int clientHeight = int(client.bottom - client.top);
+    const float windowScale = float(_sapp_tc.GetDpiForWindow(w->hwnd)) / 96.f;
+    if (clientWidth <= 0 || clientHeight <= 0 || windowScale <= 0) return false;
+    // Windows may clamp the requested size to the monitor. Match the granted
+    // client pixels using the same rounding as _sapp_tc_win32_update_dimensions.
+    const int logicalWidth = int(float(clientWidth) / windowScale + .5f);
+    const int logicalHeight = int(float(clientHeight) / windowScale + .5f);
+    const bool highDpi = !w->desc.no_high_dpi;
+    // Pixel overrides use render DPI, which is 1 when high DPI is disabled.
+    const float requestScale = pixelSizes && highDpi ? 1.f : windowScale;
+    const int requestedWidth = int(1001 * requestScale + .5f);
+    const int requestedHeight = int(667 * requestScale + .5f);
+    RECT outer{0, 0, requestedWidth, requestedHeight};
+    const auto style = DWORD(GetWindowLongPtrW(w->hwnd, GWL_STYLE));
+    const auto ex = DWORD(GetWindowLongPtrW(w->hwnd, GWL_EXSTYLE));
+    if (_sapp_tc.AdjustWindowRectExForDpi) {
+        if (!_sapp_tc.AdjustWindowRectExForDpi(&outer, style, FALSE, ex, _sapp_tc.GetDpiForWindow(w->hwnd))) return false;
+    } else if (!AdjustWindowRectEx(&outer, style, FALSE, ex)) return false;
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    if (!GetMonitorInfoW(MonitorFromWindow(w->hwnd, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
+    // Only an oversized outer request permits a smaller grant, axis by axis.
+    if (clientWidth > requestedWidth || clientHeight > requestedHeight ||
+        (clientWidth != requestedWidth && outer.right - outer.left <= monitor.rcWork.right - monitor.rcWork.left) ||
+        (clientHeight != requestedHeight && outer.bottom - outer.top <= monitor.rcWork.bottom - monitor.rcWork.top)) return false;
+    if (clamped) *clamped = clientWidth < requestedWidth || clientHeight < requestedHeight;
+    return w->frame_count == 0 && w->fb_width > 0 && w->fb_height > 0 &&
+        w->win_width > 0 && w->win_height > 0 &&
+        w->dpi_scale == (highDpi ? windowScale : 1.f) &&
+        w->win_width == logicalWidth && w->win_height == logicalHeight &&
+        w->fb_width == (highDpi ? clientWidth : logicalWidth) &&
+        w->fb_height == (highDpi ? clientHeight : logicalHeight);
+}
+
 void initialized() {
     first = _sapp_tc.app.main;
     lastLaunchId = first->win_id;
@@ -609,12 +646,11 @@ void initialized() {
     check("one main and two secondaries constructed", other && sapp_window_valid(third) && liveHwnds == 3);
     if (!other || !sapp_window_valid(third)) { sapp_quit(); return; }
     const float expected = noHighDpi ? 1 : float(_sapp_tc.GetDpiForWindow(first->hwnd)) / 96;
-    const int width = pixelSizes ? 1001 : int(1001 * expected + .5f);
-    const int height = pixelSizes ? 667 : int(667 * expected + .5f);
     std::printf("nativeWindow/Win32: dpi=%g pixelPerfect=%d noHighDpi=%d main=%dx%d secondary=%dx%d\n", expected,pixelSizes,noHighDpi,first->fb_width,first->fb_height,other->fb_width,other->fb_height);
+    bool firstClamped = false, otherClamped = false;
     check("pre-first-frame dimensions and target-monitor DPI agree", first->dpi_scale == expected && other->dpi_scale == expected &&
-        first->fb_width == width && first->fb_height == height && other->fb_width == width && other->fb_height == height &&
-        first->win_width > 0 && first->win_height > 0 && first->win_width == other->win_width && first->win_height == other->win_height);
+        initialDimensionsMatchClient(first, &firstClamped) && initialDimensionsMatchClient(other, &otherClamped) &&
+        (firstClamped || otherClamped || (first->fb_width == other->fb_width && first->fb_height == other->fb_height)));
     check("initial drawing is descriptor data for every window", first->draw_while_hidden && !other->draw_while_hidden);
     check("formats remain RGB10A2 first and BGRA8 secondary", first->color_format == SAPP_PIXELFORMAT_RGB10A2 && other->color_format == SAPP_PIXELFORMAT_BGRA8);
     started = _sapp_tc_now();
@@ -783,10 +819,7 @@ int main(int argc, char** argv) {
     check("first uses common constructor", _sapp_tc_win32_create_main_window());
     if (!_sapp_tc.app.main) return 1;
     const auto* created = _sapp_tc.app.main;
-    const float launchScale = noHighDpi ? 1.f : float(_sapp_tc.GetDpiForWindow(created->hwnd))/96.f;
-    check("first dimensions are initialized before any tick", created->frame_count == 0 &&
-        created->fb_width == (pixelSizes ? 1001 : int(1001*launchScale+.5f)) &&
-        created->fb_height == (pixelSizes ? 667 : int(667*launchScale+.5f)) && created->dpi_scale == launchScale);
+    check("first dimensions are initialized before any tick", initialDimensionsMatchClient(created));
     _sapp_tc_win32_tick(_sapp_tc.app.main);
     nativeChecks();
     // Init installed independent loop callbacks; use the real run loop,
