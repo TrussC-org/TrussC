@@ -40,8 +40,6 @@ class HotReloadPathTests(unittest.TestCase):
                     (project / 'CMakeLists.txt').write_text(f'''
 cmake_minimum_required(VERSION 3.20)
 project(path_probe NONE)
-# core/CMakeLists.txt supplies the normalized absolute TC_ROOT in a real app.
-set(TC_ROOT [==[{ROOT.as_posix()}]==])
 set(TRUSSC_DIR [==[{raw_core}]==])
 {explicit}
 {block}
@@ -53,17 +51,17 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/verdict.txt" "${{_TC_HOT_RELOAD}}")
                     # Configure from outside the app as well as executing -P there.
                     run_build(['cmake', '-S', str(project), '-B', str(build)], cwd=other, check=True)
                     expected = 'OFF' if layout == 'explicit_without_macro' else 'ON'
-                    self.assertEqual((build / 'verdict.txt').read_text(), expected)
+                    self.assertEqual((build / 'verdict.txt').read_text(encoding='utf-8'), expected)
                     script = build / '_tc_check_hot_reload.cmake'
                     result = subprocess.run(['cmake', '-P', str(script)], cwd=other,
-                                            capture_output=True, text=True)
+                                            capture_output=True, text=True, encoding='utf-8')
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     # The check must still detect a change, and honor explicit SOURCES.
                     changed = main if layout == 'explicit_without_macro' else app
                     changed.write_text('TC_HOT_RELOAD(tcApp)\n' if expected == 'OFF' else '// no macro\n',
                                        encoding='utf-8')
                     result = subprocess.run(['cmake', '-P', str(script)], cwd=other,
-                                            capture_output=True, text=True)
+                                            capture_output=True, text=True, encoding='utf-8')
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn('reconfigure required', result.stderr)
 

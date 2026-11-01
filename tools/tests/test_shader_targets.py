@@ -18,7 +18,7 @@ class ShaderTargetTests(unittest.TestCase):
         source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding='utf-8')
         block = source[source.index('    # The shader interface exists'):
                        source.index('    # Output settings')]
-        shader = (ROOT / 'core/tests/hotReloadLifecycle/src/shaders/reloadProbe.glsl').read_text()
+        shader = (ROOT / 'core/tests/hotReloadLifecycle/src/shaders/reloadProbe.glsl').read_text(encoding='utf-8')
         for generator in (None, 'Ninja'):
             if generator == 'Ninja' and not shutil.which('ninja'):
                 continue
