@@ -1,7 +1,9 @@
 // Interactive #239 device pass. No mode means usage only, including in CI.
 #include <TrussC.h>
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -24,6 +26,7 @@ struct ProbeState {
     bool customBound = false;
     std::string shape = "Default";
     std::string focused = "none (press a key in a window)";
+    std::string clipboardResult = "No clipboard action yet.";
     int timeoutIndex = 0;
     int attached = 0;
     int exited = 0;
@@ -89,6 +92,50 @@ std::string sessionMapping() {
            "Linux logout delivery depends on the session manager; no native hook is added.";
 }
 
+const std::string& generatedClipboardText() {
+    static const std::string text = [] {
+        constexpr size_t bytes = 200 * 1024;
+        const std::string tail = "TC-CLIP-END len=" + std::to_string(bytes) + "\n";
+        std::string result = "TC-CLIP-BEGIN len=" + std::to_string(bytes) + "\n";
+        for (size_t number = 1; ; ++number) {
+            const std::string line = "line=" + std::to_string(number)
+                + " 0123456789 abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ\n";
+            if (result.size() + line.size() + tail.size() > bytes) break;
+            result += line;
+        }
+        const size_t padding = bytes - result.size() - tail.size();
+        if (padding) { result.append(padding - 1, '-'); result += '\n'; }
+        return result + tail;
+    }();
+    return text;
+}
+std::string clipboardChecksum(const std::string& text) {
+    uint32_t hash = 2166136261u;
+    for (unsigned char byte : text) { hash ^= byte; hash *= 16777619u; }
+    std::ostringstream out;
+    out << std::hex << std::setfill('0') << std::setw(8) << hash;
+    return out.str();
+}
+std::string escapedClipboardEdge(const std::string& text) {
+    std::ostringstream out;
+    out << '"';
+    for (unsigned char byte : text) {
+        switch (byte) {
+            case '\n': out << "\\n"; break;
+            case '\r': out << "\\r"; break;
+            case '\t': out << "\\t"; break;
+            case '\\': out << "\\\\"; break;
+            case '"': out << "\\\""; break;
+            default:
+                if (byte >= 32 && byte <= 126) out << static_cast<char>(byte);
+                else out << "\\x" << std::hex << std::setfill('0') << std::setw(2)
+                         << static_cast<unsigned int>(byte);
+        }
+    }
+    out << '"';
+    return out.str();
+}
+
 class ProbeApp : public App {
     std::string label_;
     uint32_t windowId_ = 0;
@@ -120,8 +167,14 @@ public:
         });
         dropListener_ = events().filesDropped.listen([this](DragDropEventArgs& e) {
             record(identity() + " filesDropped count=" + std::to_string(e.files.size()));
-            for (size_t index = 0; index < e.files.size(); ++index)
-                record(identity() + " path[" + std::to_string(index) + "]=" + e.files[index]);
+            size_t longest = 0;
+            for (size_t index = 0; index < e.files.size(); ++index) {
+                const auto& path = e.files[index];
+                longest = std::max(longest, path.size());
+                record(identity() + " path[" + std::to_string(index) + "] bytes="
+                    + std::to_string(path.size()) + " path=" + path);
+            }
+            record(identity() + " filesDropped longestPathBytes=" + std::to_string(longest));
         });
         closeListener_ = events().closeRequested.listen([this](CloseRequestEventArgs&) {
             record(identity() + " closeRequested (OS close only; allowed)");
@@ -131,6 +184,12 @@ public:
         });
         record(identity() + " setup quitOnClose=" + std::to_string(s.mode == "close" && label_ == "A"));
         if (label_ == "A") {
+            if (s.mode == "drop")
+                record("Drop 20+ files, including long UTF-8 paths; every file arrives (no count/length limit). "
+                       "Expect complete paths and matching UTF-8 byte lengths.");
+            if (s.mode == "clipboard")
+                record("Clipboard: C copies exactly 204800 bytes (200 KiB); V reads bytes, head16, tail16, "
+                       "FNV-1a 32-bit and exact match vs generated. Check TC-CLIP-END len=204800 in an editor.");
             if (s.mode == "session") {
                 runtime().setLogoutTimeout(2);
                 record("setLogoutTimeout seconds=2");
@@ -157,8 +216,16 @@ public:
         std::string text = "#239 device probe: " + s.mode + "  " + identity()
             + "\nLog (append + flush): " + pathToUtf8(s.logPath) + "\n\n";
         if (s.mode == "drop")
-            text += "Drop files onto A, then B. Check receiver ID, count and every path.\n"
-                    "Try 16 and >16 files, and long paths. Close both windows to finish.";
+            text += "Drop 20+ files, including long UTF-8 paths; every file arrives\n"
+                    "(no count/length limit). Try A, then B; check count, path byte lengths,\n"
+                    "whole paths and longestPathBytes in the log. Close both to finish.";
+        if (s.mode == "clipboard")
+            text += "C: copy exactly 204800 bytes (200 KiB), ASCII numbered lines.\n"
+                    "Paste into a text editor; check TC-CLIP-END len=204800 at the end.\n"
+                    "Copy ~200 KiB from the editor, then V here to read the clipboard.\n"
+                    "V: byte length, first/last 16 bytes (escaped), FNV-1a 32-bit (hex).\n"
+                    "match=yes means exact equality with the generated text.\n"
+                    "Close the window to finish.\n\nLast result:\n" + s.clipboardResult;
         if (s.mode == "cursor")
             text += "Move the pointer between both windows after every change.\n"
                     "1 Arrow   2 IBeam   3 Crosshair   4 Hand   5 ResizeEW\n"
@@ -191,7 +258,24 @@ public:
         auto& s = state();
         s.focused = identity();
         record(identity() + " key=" + std::to_string(key) + " focused (last key receiver)");
-        if (s.mode == "cursor") {
+        if (s.mode == "clipboard") {
+            if (key == 'C') {
+                const auto& text = generatedClipboardText();
+                setClipboardString(text);
+                s.clipboardResult = "copied bytes=" + std::to_string(text.size())
+                    + " fnv=" + clipboardChecksum(text);
+                record(s.clipboardResult);
+            } else if (key == 'V') {
+                const std::string text = getClipboardString();
+                const std::string bytes = "pasted bytes=" + std::to_string(text.size());
+                const std::string head = "head16=" + escapedClipboardEdge(text.substr(0, 16));
+                const std::string tail = "tail16=" + escapedClipboardEdge(text.substr(text.size() > 16 ? text.size() - 16 : 0));
+                const std::string checksum = "fnv=" + clipboardChecksum(text);
+                const std::string match = std::string("match=") + (text == generatedClipboardText() ? "yes" : "no");
+                record(bytes + " " + head + " " + tail + " " + checksum + " " + match);
+                s.clipboardResult = bytes + "\n" + head + "\n" + tail + "\n" + checksum + " " + match;
+            }
+        } else if (s.mode == "cursor") {
             constexpr std::array<Cursor, 5> shapes{Cursor::Arrow, Cursor::IBeam, Cursor::Crosshair, Cursor::Hand, Cursor::ResizeEW};
             constexpr std::array<const char*, 5> names{"Arrow", "IBeam", "Crosshair", "Hand", "ResizeEW"};
             if (key >= '1' && key <= '5') {
@@ -248,9 +332,9 @@ int main(int argc, char** argv) {
     auto& s = state();
     s.logPath = probeLogPath();
     s.mode = argc == 2 ? argv[1] : "";
-    if (s.mode != "drop" && s.mode != "cursor" && s.mode != "close"
+    if (s.mode != "drop" && s.mode != "clipboard" && s.mode != "cursor" && s.mode != "close"
             && s.mode != "session" && s.mode != "keepawake") {
-        std::printf("Usage: an2DeviceProbe {drop|cursor|close|session|keepawake}\nLog: %s\n", pathToUtf8(s.logPath).c_str());
+        std::printf("Usage: an2DeviceProbe {drop|clipboard|cursor|close|session|keepawake}\nLog: %s\n", pathToUtf8(s.logPath).c_str());
         return 0;
     }
 #ifdef _WIN32
