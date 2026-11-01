@@ -2548,6 +2548,7 @@ typedef struct sapp_tc_gl_state {
     uint32_t draw_window, read_window;
 } sapp_tc_gl_state;
 SOKOL_APP_API_DECL bool sapp_tc_gl_activate_idle(void);
+SOKOL_APP_API_DECL bool sapp_tc_gl_ensure_context(void);
 SOKOL_APP_API_DECL sapp_tc_gl_state sapp_tc_gl_save(void);
 SOKOL_APP_API_DECL void sapp_tc_gl_restore(sapp_tc_gl_state state);
 // [TrussC] Desktop adapter seam: suppress this secondary window's present.
@@ -11254,6 +11255,8 @@ static void _sapp_tc_x11_close(_sapp_tc_window_t* w) {
     if (w->constructing || w->in_tick || (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active())) {
         w->close_requested = true; return;
     }
+    // App exit/cleanup can release GL objects before native disposal.
+    sapp_tc_gl_make_current({w->win_id});
     if (w->desc.close_request_cb && !w->desc.close_request_cb({w->win_id}, w->desc.user_data)) return;
     if (w->desc.close_cb) w->desc.close_cb({w->win_id}, w->desc.user_data);
 }
@@ -11567,6 +11570,8 @@ static bool _sapp_tc_egl_init(void) {
 #endif
 
 static bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
+    // Host services have no Window; use the existing idle drawable.
+    if (!w) return sapp_tc_gl_activate_idle();
 #if defined(SOKOL_GLES3)
     return eglMakeCurrent(_sapp_tc.egl_display, w->drawable, w->drawable, _sapp_tc.ctx) == EGL_TRUE;
 #else
@@ -11826,13 +11831,23 @@ extern "C" bool sapp_tc_gl_activate_idle(void) {
     auto* idle = &_sapp_tc.idle;
     if (!idle->drawable) {
         idle->dpi_scale = 1.0f;
-        if (!_sapp_tc_x11_create_native_window(idle, "", 1, 1, true) ||
-            !_sapp_tc_x11_create_surface(idle)) {
+        // Native creation already creates the drawable. A second EGL surface
+        // for the same X window fails and loses the first surface's handle.
+        if (!_sapp_tc_x11_create_native_window(idle, "", 1, 1, true)) {
             _sapp_tc_x11_destroy_window_resources(idle);
             return false;
         }
     }
     return _sapp_tc_x11_make_current(idle);
+}
+
+extern "C" bool sapp_tc_gl_ensure_context(void) {
+#if defined(SOKOL_GLES3)
+    if (eglGetCurrentContext() != EGL_NO_CONTEXT) return true;
+#else
+    if (glXGetCurrentContext() != NULL) return true;
+#endif
+    return _sapp_tc_x11_make_current(nullptr);
 }
 
 #if defined(SOKOL_GLES3)
@@ -12266,7 +12281,11 @@ static void _sapp_tc_x11_run_loop(void) {
             poll(&pfd, 1, (timeout_s > 0.0) ? (int)(timeout_s * 1000.0) + 1 : 0);
 #endif
         }
-        if (_sapp_tc.app.desc._tc_before_turn) _sapp_tc.app.desc._tc_before_turn();
+        if (_sapp_tc.app.desc._tc_before_turn) {
+            // Reload polling precedes queue processing and can release GPU resources.
+            sapp_tc_gl_ensure_context();
+            _sapp_tc.app.desc._tc_before_turn();
+        }
         /* drain exactly the already-queued events (can't block: count bounded) */
         int count = XPending(_sapp_tc.display);
 #if defined(SOKOL_GLES3)
@@ -12717,6 +12736,7 @@ void sapp_run(const sapp_desc* desc) {
        sokol_gfx here, which still needs a current context) */
     if (_sapp_tc.app.init_called && !_sapp_tc.app.cleanup_called) {
         _sapp_tc.app.cleanup_called = true;
+        sapp_tc_gl_ensure_context();
         if (_sapp_tc.app.desc.cleanup_cb) {
             _sapp_tc.app.desc.cleanup_cb();
         } else if (_sapp_tc.app.desc.cleanup_userdata_cb) {
@@ -18312,6 +18332,7 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { (void)win; return 0; }
 
 #if !(defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
 extern "C" bool sapp_tc_gl_activate_idle(void) { return true; }
+extern "C" bool sapp_tc_gl_ensure_context(void) { return true; }
 extern "C" sapp_tc_gl_state sapp_tc_gl_save(void) { return {}; }
 extern "C" void sapp_tc_gl_restore(sapp_tc_gl_state) {}
 #endif

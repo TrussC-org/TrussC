@@ -1098,7 +1098,7 @@ void processQueues() {
     updateKeepScreenOn(headless::isActive());
 #endif
 
-    if (sg_isvalid()) sapp_tc_gl_activate_idle();
+    if (sg_isvalid()) sapp_tc_gl_ensure_context();
     auto loads = takeResourceLoadBatch();
     EntryStackGuard guard(AppEntry::Prelude);
     deliverResourceLoadBatch(std::move(loads));
@@ -1119,7 +1119,7 @@ void processMaintenance() {
             callback();
         });
     });
-    if (sg_isvalid()) sapp_tc_gl_activate_idle();
+    if (sg_isvalid()) sapp_tc_gl_ensure_context();
 #ifndef __EMSCRIPTEN__
     mcp::internal::drainDeferredResponses(nullptr, false, windowClockNow());
 #endif
