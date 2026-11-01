@@ -12,7 +12,14 @@ Workers alone do not bypass an idle main's veto.
 
 Idle coverage retains veto/cancel/query dedupe, reverse exact-once exits,
 commit dedupe, complete cleanup, one shared deadline (default 3 seconds), numeric
-configuration and zero/infinity. Native seams retain Windows hidden-HWND
+configuration and zero/infinity.
+Idle commit also checks atexit, a C++ static destructor and the application exit
+code, logging safely after the file sink closes. The production watchdog ends a
+blocked atexit handler. The native policy smoke test compiles macOS and Windows
+branches; changing idle std::exit back to immediate exit must fail its handler
+assertions. Busy children run neither process-exit handler.
+
+Native seams retain Windows hidden-HWND
 session authority, macOS reasons and main-queue workspace notification delivery.
 `test.py --tsan` instruments Runtime and the deadline implementation.
 

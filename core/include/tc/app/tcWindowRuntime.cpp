@@ -451,12 +451,12 @@ void commitSessionEnd() noexcept {
 #endif
         return; // Returning WM_ENDSESSION lets Windows terminate the process.
     }
-    // Idle cleanup has written its final protocol line. Terminal process exit
-    // skips Logger/static destruction; the watchdog must remain lock-free.
+    // Match ordinary exit: run atexit handlers and static destructors after
+    // cleanup. The armed, lock-free watchdog also bounds these user handlers.
     closeLogFile();
     std::fflush(stdout);
     std::fflush(stderr);
-    terminateSessionProcess(appExitCode());
+    std::exit(appExitCode());
 }
 Window* resolveWindow(bool report) {
     if (auto owner = currentAppOwner()) return !owner->ended && !owner->retiring ? owner->window : nullptr;
