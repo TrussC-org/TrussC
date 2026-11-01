@@ -11,6 +11,7 @@ details.en = '''
 - `App` is a `RectNode` and the root of the scene graph, so you can call `addChild()` on it directly. Its size uses logical points, or framebuffer pixels with global `pixelPerfect` enabled, for every Window.
 - Keep the constructor to plain member setup, and do tree building, `setSize()` and file loading in `setup()`. In the constructor no `shared_ptr` owns the App yet, so `addChild()` asserts, `setSize()` does not resize the window, and `getRootNode()` is not this App. The same rule for nodes is described in `Node::setup`.
 - Startup order: the App is created after graphics are ready, `windowResized(w, h)` is then called once, and `setup()` runs once on the first update or draw. Therefore `getWidth()`/`getHeight()` already return the window size inside `setup()`.
+- If `setup()` asks to quit (`exitApp()` or `requestExitApp()`) and the quit is accepted, a window's App or a headless App ends right after `setup()` returns: the ending runs before audio, the console and `update()` start. `exitRequested` can still cancel the quit, and then the App runs normally. For an App added as a child node, the quit waits until the current pass over the node tree has finished, and the next turn of the main loop handles it.
 - Each frame calls `update()` and then `draw()`. `events().update`/`events().draw` listeners registered without a priority run before the App; those registered with `EventPriority::AfterApp` run after the App and its child nodes. `update()` also updates child nodes, mods and timers.
 - When a frame is skipped (for example while idle in EVENT_DRIVEN mode), neither update nor draw runs.
 - `audioOut()`/`audioIn()` run on the audio thread (see `App::audioOut`). Every other callback runs on the main thread.
@@ -24,6 +25,7 @@ details.ja = '''
 - `App` は `RectNode` であり、シーングラフのルートです。そのため `addChild()` をそのまま使えます。サイズは主副窓とも論理ポイントを使い、グローバルな `pixelPerfect` が有効ならフレームバッファのピクセルを使います。
 - コンストラクタではメンバーの初期化だけを行い、ツリーの組み立て、`setSize()`、ファイルの読み込みは `setup()` に書いてください。コンストラクタの時点ではまだ `shared_ptr` が App を保持していないため、`addChild()` は assert になり、`setSize()` はウィンドウをリサイズせず、`getRootNode()` もこの App になりません。ノード側の同じルールは `Node::setup` で説明しています。
 - 起動の順番は次のとおりです。グラフィックスの準備ができてから App が作られ、続いて `windowResized(w, h)` が 1 回呼ばれ、最初の update または draw のときに `setup()` が 1 回呼ばれます。そのため、`setup()` の中ではすでに `getWidth()`/`getHeight()` がウィンドウサイズを返します。
+- `setup()` の中で終了を求め（`exitApp()` や `requestExitApp()`）、それが受け入れられた場合、ウィンドウの App やヘッドレス App は `setup()` から戻った直後に終わります。終了処理は、オーディオ、コンソール、`update()` が始まる前に行われます。`exitRequested` で終了を取り消すこともでき、その場合 App は通常どおり動きます。子ノードとして追加した App の場合は、いま進んでいるノードツリーの処理が終わるまで待ち、メインループの次の周回で終了が処理されます。
 - 毎フレーム `update()`、`draw()` の順に呼ばれます。優先度を指定せずに登録した `events().update`/`events().draw` のリスナーは App より前に、`EventPriority::AfterApp` で登録したリスナーは App と子ノードのあとに呼ばれます。`update()` では子ノード、Mod、タイマーも更新されます。
 - フレームがスキップされたとき（EVENT_DRIVEN で待機しているときなど）は、update も draw も呼ばれません。
 - `audioOut()`/`audioIn()` はオーディオスレッドで呼ばれます（`App::audioOut` を参照してください）。それ以外のコールバックはメインスレッドで呼ばれます。
@@ -37,6 +39,7 @@ details.ko = '''
 - `App`은 `RectNode`이며 씬 그래프의 루트입니다. 그래서 `addChild()`를 그대로 사용할 수 있습니다. 크기는 모든 창에서 논리 포인트이며, 전역 `pixelPerfect`가 활성화되면 프레임버퍼 픽셀입니다.
 - 생성자에서는 멤버 초기화만 하고, 트리 구성, `setSize()`, 파일 로드는 `setup()`에 작성하세요. 생성자 시점에는 아직 `shared_ptr`가 App을 보유하지 않으므로 `addChild()`는 assert가 되고, `setSize()`는 윈도우를 리사이즈하지 않으며, `getRootNode()`도 이 App이 아닙니다. 노드 쪽의 같은 규칙은 `Node::setup`에서 설명합니다.
 - 시작 순서는 다음과 같습니다. 그래픽 준비가 끝난 뒤 App이 만들어지고, 이어서 `windowResized(w, h)`가 한 번 호출되며, 첫 update 또는 draw 때 `setup()`이 한 번 호출됩니다. 따라서 `setup()` 안에서는 이미 `getWidth()`/`getHeight()`가 윈도우 크기를 반환합니다.
+- `setup()` 안에서 종료를 요청하고(`exitApp()`이나 `requestExitApp()`) 그 요청이 받아들여지면, 창의 App이나 헤드리스 App은 `setup()`에서 돌아온 직후에 끝납니다. 종료 처리는 오디오, 콘솔, `update()`가 시작되기 전에 진행됩니다. `exitRequested`로 종료를 취소할 수도 있으며, 그 경우 App은 평소대로 동작합니다. 자식 노드로 추가한 App이라면 지금 진행 중인 노드 트리 처리가 끝날 때까지 기다렸다가 메인 루프의 다음 회차에서 종료가 처리됩니다.
 - 매 프레임 `update()`, `draw()` 순서로 호출됩니다. 우선순위를 지정하지 않고 등록한 `events().update`/`events().draw` 리스너는 App보다 먼저, `EventPriority::AfterApp`으로 등록한 리스너는 App과 자식 노드 다음에 호출됩니다. `update()`에서는 자식 노드, Mod, 타이머도 업데이트됩니다.
 - 프레임이 건너뛰어질 때(EVENT_DRIVEN에서 대기 중일 때 등)는 update도 draw도 호출되지 않습니다.
 - `audioOut()`/`audioIn()`은 오디오 스레드에서 호출됩니다(`App::audioOut` 참조). 그 밖의 콜백은 메인 스레드에서 호출됩니다.
@@ -79,7 +82,7 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 - The argument is a read-only `const AudioInBuffer&`. `data` is a `const float*` with `frameCount * channels` interleaved samples, and the buffer also provides `sampleRate` and `framePosition`.
 - Normally, everything else works as in `App::audioOut`: the audio-thread rules, when it starts being called (after the first `setup()` returns; an App that never runs receives no calls), the priority, and the exit order (it is stopped, and a running call is waited for with no time limit, before `cleanup()`).
 - Known issue: [#907](https://github.com/TrussC-org/TrussC/issues/907) (never called).
-- If a session end (logout, restart or shutdown) interrupts running code, `App::exit` is still called, but audio is not stopped or waited for and `cleanup()` is skipped; see `App::exit` and `Runtime::setLogoutTimeout`.
+- At a session end (logout, restart or shutdown), if no App code is running on the main thread, audio is detached and waited for as usual before `cleanup()`. If App code is running at that moment, the OS ends the process and no App work runs. See `App::exit`.
 '''
 details.ja = '''
 - 現在、この関数は呼ばれません。TrussC の core にも addon にも、`AudioEngine::audioIn` を送るコードがないためです。マイクの音が必要な場合は、代わりに `MicInput`（`getMicInput()`, `getMicAnalysisBuffer()`）を使ってください。
@@ -92,7 +95,7 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 - 引数は読み取り専用の `const AudioInBuffer&` です。`data` は `const float*` で、サンプルが `frameCount * channels` 個、チャンネル交互に並んでいます。ほかに `sampleRate` と `framePosition` も持っています。
 - それ以外の動作は、通常 `App::audioOut` と同じです。オーディオスレッドでのルール、呼ばれ始めるタイミング（最初の `setup()` が終わったあと。一度も実行されない App には呼ばれません）、優先度、終了時の順番（`cleanup()` の前に呼び出しが止められ、実行中の呼び出しを時間制限なしで待ちます）も共通です。
 - 既知の問題: [#907](https://github.com/TrussC-org/TrussC/issues/907)（呼ばれない）。
-- セッション終了（ログアウト、再起動、シャットダウン）が実行中の処理を中断した場合も、`App::exit` は呼ばれますが、オーディオは止められず、終わるのも待たれず、`cleanup()` はスキップされます。`App::exit` と `Runtime::setLogoutTimeout` を参照してください。
+- セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、いつもどおりオーディオが切り離され、実行中の呼び出しを待ってから `cleanup()` が呼ばれます。実行中だった場合は OS がプロセスを終了させ、App の処理は何も行われません。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 현재 이 함수는 호출되지 않습니다. TrussC core 에도 addon 에도 `AudioEngine::audioIn` 을 보내는 코드가 없기 때문입니다. 마이크 소리가 필요하면 대신 `MicInput` (`getMicInput()`, `getMicAnalysisBuffer()`) 을 사용하세요.
@@ -105,7 +108,7 @@ size_t n = getMicAnalysisBuffer(samples, 1024);
 - 인자는 읽기 전용 `const AudioInBuffer&` 입니다. `data` 는 `const float*` 로, 샘플이 `frameCount * channels` 개 채널이 번갈아 들어 있습니다. 그 밖에 `sampleRate` 와 `framePosition` 도 가집니다.
 - 그 밖의 동작은 일반적으로 `App::audioOut` 과 같습니다. 오디오 스레드 규칙, 호출이 시작되는 시점 (첫 `setup()` 이 끝난 뒤. 한 번도 실행되지 않는 App 에는 호출되지 않음), 우선순위, 종료 순서 (`cleanup()` 전에 호출이 멈추고, 실행 중인 호출을 시간 제한 없이 기다림) 도 공통입니다.
 - 알려진 문제: [#907](https://github.com/TrussC-org/TrussC/issues/907)(호출되지 않음).
-- 세션 종료(로그아웃, 재시작, 시스템 종료)가 실행 중인 처리를 중단해도 `App::exit`는 호출되지만, 오디오는 멈추지 않고 끝날 때까지 기다리지도 않으며 `cleanup()`은 건너뜁니다. `App::exit`와 `Runtime::setLogoutTimeout`을 참조하세요.
+- 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드에서 App 코드가 실행 중이 아니면, 평소처럼 오디오가 분리되고 실행 중인 호출을 기다린 뒤 `cleanup()`이 호출됩니다. 실행 중이었다면 OS가 프로세스를 종료하며 App 처리는 전혀 실행되지 않습니다. `App::exit`를 참조하세요.
 '''
 related = ["App::audioOut", "AudioInBuffer", "AudioEngine::audioIn", "MicInput", "getMicInput", "getMicAnalysisBuffer", "MicInput::getBuffer", "App::exit"]
 snippet = '''
@@ -134,11 +137,11 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 ```
 
 - It runs on the audio thread, once per device buffer, after all `Sound` voices are mixed. Keep it real-time safe: do not allocate memory, do not call engine functions such as `play()` or `load()`, and do not take heavy locks.
-- It starts being called right after your App's first `setup()` returns, not from the constructor. An App that never runs receives no calls.
+- It starts being called right after your App's first `setup()` returns, not from the constructor. An App that never runs receives no calls. If a window's App (or a headless App) asks to quit in `setup()` and the quit is accepted, the App ends right there, so this function is never called (see `App`).
 - Its priority is `audio::priority::Generator - 1`. It therefore runs before listeners at the default priority (including ones registered before the App existed), and `Effect` / `Monitor` listeners receive what you wrote.
 - Normally, the exit order is: first `exit()`, then audioOut is stopped and TrussC waits, with no time limit, for a call that is still running, and finally `cleanup()`. You can therefore free audio state in `cleanup()`. **Never wait on the main thread or its locks in this function**, or the exit hangs (an error is logged after 1 second).
 - After that it is never registered again, because an App runs only once (see `App`).
-- If a session end (logout, restart or shutdown) interrupts running code, `App::exit` is still called, but audio is not stopped or waited for and `cleanup()` is skipped; see `App::exit` and `Runtime::setLogoutTimeout`.
+- At a session end (logout, restart or shutdown), if no App code is running on the main thread, audio is detached and waited for as usual before `cleanup()`. If App code is running at that moment, the OS ends the process and no App work runs. See `App::exit`.
 '''
 details.ja = '''
 - 自分の音は `buf.data` に `+=` で**足して**ください。ここにはミックス済みの `Sound` の音がすでに入っているため、0 にしたり上書きしたりするとその音が消えてしまいます。すべての書き込みが終わったあと、最終的な音は [-1, 1] の範囲に収められます（クランプ）。
@@ -150,11 +153,11 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 ```
 
 - オーディオスレッドで、デバイスのバッファごとに 1 回、すべての `Sound` がミックスされたあとに呼ばれます。リアルタイム処理のため、メモリの確保、`play()` や `load()` のようなエンジンの呼び出し、重いロックは行わないでください。
-- 呼ばれ始めるのは、App の最初の `setup()` が終わった直後です（コンストラクタの時点ではありません）。一度も実行されない App には呼ばれません。
+- 呼ばれ始めるのは、App の最初の `setup()` が終わった直後です（コンストラクタの時点ではありません）。一度も実行されない App には呼ばれません。ウィンドウの App（またはヘッドレス App）が `setup()` の中で終了を求め、それが受け入れられた場合も、App はその場で終わるため、この関数は呼ばれません（`App` を参照）。
 - 優先度は `audio::priority::Generator - 1` です。そのため、デフォルト優先度のリスナー（App より前に登録したものを含む）より先に呼ばれ、`Effect` や `Monitor` のリスナーはここで書いた音を受け取ります。
 - 通常は、まず `exit()` が呼ばれ、次に audioOut の呼び出しが止められて実行中の呼び出しの終了を時間制限なしで待ち、最後に `cleanup()` が呼ばれます。したがって、`cleanup()` でオーディオ用のデータを解放できます。**この関数の中でメインスレッドやそのロックを待たないでください**。終了処理が止まってしまいます（1 秒たつとエラーログが出ます）。
 - 一度終了すると、二度と登録されません。App は 1 回しか動かないためです（`App` を参照してください）。
-- セッション終了（ログアウト、再起動、シャットダウン）が実行中の処理を中断した場合も、`App::exit` は呼ばれますが、オーディオは止められず、終わるのも待たれず、`cleanup()` はスキップされます。`App::exit` と `Runtime::setLogoutTimeout` を参照してください。
+- セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、いつもどおりオーディオが切り離され、実行中の呼び出しを待ってから `cleanup()` が呼ばれます。実行中だった場合は OS がプロセスを終了させ、App の処理は何も行われません。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 직접 만든 샘플은 `buf.data` 에 `+=` 로 **더하세요**. 여기에는 믹스된 `Sound` 보이스가 이미 들어 있으므로, 0 으로 만들거나 덮어쓰면 그 소리가 사라집니다. 모든 쓰기가 끝난 뒤 최종 믹스는 [-1, 1] 범위로 잘립니다 (클램프).
@@ -166,11 +169,11 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 ```
 
 - 오디오 스레드에서 디바이스 버퍼마다 1 회, 모든 `Sound` 보이스가 믹스된 뒤에 호출됩니다. 실시간 처리이므로 메모리 할당, `play()` 나 `load()` 같은 엔진 호출, 무거운 락은 하지 않아야 합니다.
-- 호출이 시작되는 것은 App 의 첫 `setup()` 이 끝난 직후입니다 (생성자 시점이 아닙니다). 한 번도 실행되지 않는 App 에는 호출되지 않습니다.
+- 호출이 시작되는 것은 App 의 첫 `setup()` 이 끝난 직후입니다 (생성자 시점이 아닙니다). 한 번도 실행되지 않는 App 에는 호출되지 않습니다. 창의 App(또는 헤드리스 App)이 `setup()` 안에서 종료를 요청하고 그 요청이 받아들여진 경우에도 App이 그 자리에서 끝나므로 이 함수는 호출되지 않습니다(`App` 참조).
 - 우선순위는 `audio::priority::Generator - 1` 입니다. 따라서 기본 우선순위 리스너 (App 보다 먼저 등록한 것 포함) 보다 먼저 호출되고, `Effect` / `Monitor` 리스너는 여기서 쓴 소리를 받습니다.
 - 일반적으로 먼저 `exit()` 가 호출되고, 다음으로 audioOut 호출이 멈추며 실행 중인 호출이 끝나기를 시간 제한 없이 기다린 뒤, 마지막으로 `cleanup()` 이 호출됩니다. 따라서 `cleanup()` 에서 오디오용 데이터를 해제할 수 있습니다. **이 함수 안에서 메인 스레드나 그 락을 기다리지 마세요**. 종료 처리가 멈춥니다 (1 초가 지나면 에러 로그가 출력됩니다).
 - 한 번 종료되면 다시 등록되지 않습니다. App 은 한 번만 동작하기 때문입니다 (`App` 참조).
-- 세션 종료(로그아웃, 재시작, 시스템 종료)가 실행 중인 처리를 중단해도 `App::exit`는 호출되지만, 오디오는 멈추지 않고 끝날 때까지 기다리지도 않으며 `cleanup()`은 건너뜁니다. `App::exit`와 `Runtime::setLogoutTimeout`을 참조하세요.
+- 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드에서 App 코드가 실행 중이 아니면, 평소처럼 오디오가 분리되고 실행 중인 호출을 기다린 뒤 `cleanup()`이 호출됩니다. 실행 중이었다면 OS가 프로세스를 종료하며 App 처리는 전혀 실행되지 않습니다. `App::exit`를 참조하세요.
 '''
 related = ["AudioOutBuffer", "AudioEngine::audioOut", "AudioEngine::init", "AudioSettings", "AudioEngine::waitForAudioCallbacks", "audio::priority::Generator", "audio::priority::Effect", "audio::priority::Monitor", "App::audioIn", "App::exit", "App"]
 snippet = '''
@@ -203,7 +206,8 @@ details.en = '''
 - **Do not call `exitApp()` here to quit when the window closes.** This function also runs on replacement, removal and hot reload, and `exitApp()` does nothing inside it. Call `getWindow()->setQuitOnClose(true)` in `setup()` instead.
 - After `exit()`, `cleanup()` runs on the child nodes first and then on the App. In a headless App only the App's `cleanup()` runs.
 - If `exit()` or `cleanup()` throws, the rest of the shutdown and the other Apps still finish. A forced kill or a crash skips these functions.
-- At a session end (logout, restart or shutdown), an idle main thread runs normal ending in reverse attachment order, including `exit()` and `cleanup()`, under one shared timeout (3 seconds by default; see `Runtime::setLogoutTimeout`). A commit received while App or host code is on the main stack runs no App callbacks or cleanup. If the OS ends the process without notifying it, `exit()` is not called.
+- At a session end (the user logs out, restarts or shuts down), what happens depends on whether App code is running on the main thread at that moment. If none is running, the normal ending runs: `exit()` for every App, starting from the most recently attached one, then audio detach and `cleanup()`. All of it shares one time limit, 3 seconds by default (see `Runtime::setLogoutTimeout`), so keep `exit()` short and save only what you need. If App code, or TrussC code serving it, is on the main thread's stack (for example inside `update()`, or in a modal dialog opened from App code), the OS ends the process, and neither `exit()`, `cleanup()` nor any exit event is called. Work on other threads does not count as running App code.
+- This applies on Windows and macOS. Linux has no receiver for the session end. If the OS ends the process without telling it, `exit()` is not called.
 '''
 details.ja = '''
 - 既定では何もしません。設定の保存や、App が始めた処理の停止のためにオーバーライドします。App ごとに 1 回、メインスレッドで呼ばれ、そのあと必ず `cleanup()` が続きます。
@@ -214,7 +218,8 @@ details.ja = '''
 - **ウィンドウを閉じたら終了させる目的で、ここに `exitApp()` を書かないでください。** この関数は置き換えや取り外し、ホットリロードでも呼ばれますし、この中では `exitApp()` は何もしません。代わりに `setup()` で `getWindow()->setQuitOnClose(true)` を呼んでください。
 - `exit()` のあと、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App では App の `cleanup()` だけが呼ばれます。
 - `exit()` や `cleanup()` が例外を投げても、残りの終了処理とほかの App の終了は最後まで行われます。強制終了やクラッシュのときは呼ばれません。
-- セッション終了（ログアウト、再起動、シャットダウン）時にメインスレッドがアイドルなら、アタッチの逆順で `exit()` と `cleanup()` を含む通常の終了処理を行います。制限時間は全体で 1 つ、既定値は 3 秒です（`Runtime::setLogoutTimeout`）。App やホストの処理がメインスタック上にある間に終了が確定した場合、App のコールバックも cleanup も実行しません。OS が通知せずにプロセスを終了させた場合も `exit()` は呼ばれません。
+- セッション終了（ログアウト、再起動、シャットダウン）のときの動作は、その瞬間にメインスレッドで App のコードが実行中かどうかで変わります。実行中でなければ通常の終了処理が行われ、最後にアタッチされた App から順に、すべての App で `exit()` が呼ばれ、オーディオの切り離しと `cleanup()` が続きます。全体で 1 つの制限時間（既定値 3 秒。`Runtime::setLogoutTimeout` を参照）を共有するため、`exit()` は必要なものを保存するだけにして短く済ませてください。App のコードや、それを呼んでいる TrussC のコードがメインスレッドで実行中（`update()` の途中や、App のコードから開いたモーダルダイアログの最中など）なら、OS がプロセスを終了させ、`exit()`・`cleanup()`・終了のイベントはどれも呼ばれません。ほかのスレッドの処理は、App のコードの実行中には数えません。
+- これは Windows と macOS での動作です。Linux にはセッション終了を受け取る仕組みがありません。OS がプロセスに知らせずに終了させた場合、`exit()` は呼ばれません。
 '''
 details.ko = '''
 - 기본적으로는 아무 동작도 하지 않습니다. 설정 저장이나 App이 시작한 처리를 멈추기 위해 오버라이드합니다. App마다 한 번 메인 스레드에서 호출되며, 그다음에는 반드시 `cleanup()`이 이어집니다.
@@ -225,7 +230,8 @@ details.ko = '''
 - **창을 닫으면 종료되게 하려는 목적으로 여기에 `exitApp()`을 쓰지 마세요.** 이 함수는 교체, 제거, 핫 리로드 때도 호출되며, 이 안에서는 `exitApp()`이 아무 동작도 하지 않습니다. 대신 `setup()`에서 `getWindow()->setQuitOnClose(true)`를 호출하세요.
 - `exit()` 다음에는 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서는 App의 `cleanup()`만 호출됩니다.
 - `exit()`나 `cleanup()`이 예외를 던져도 나머지 종료 처리와 다른 App의 종료는 끝까지 진행됩니다. 강제 종료나 크래시 때는 호출되지 않습니다.
-- 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드가 유휴 상태이면 연결의 역순으로 `exit()`와 `cleanup()`을 포함한 정상 종료 처리를 합니다. 제한 시간은 전체에 하나이며 기본값은 3초입니다(`Runtime::setLogoutTimeout` 참조). App이나 호스트 코드가 메인 스택에 있는 동안 종료가 확정되면 App 콜백이나 cleanup을 실행하지 않습니다. OS가 알리지 않고 프로세스를 끝내는 경우에도 `exit()`는 호출되지 않습니다.
+- 세션 종료(로그아웃, 재시작, 시스템 종료) 때의 동작은 그 순간 메인 스레드에서 App 코드가 실행 중인지에 따라 달라집니다. 실행 중이 아니면 일반 종료 처리가 진행되어, 마지막으로 연결된 App부터 차례로 모든 App에서 `exit()`가 호출되고 오디오 분리와 `cleanup()`이 이어집니다. 전체가 하나의 제한 시간(기본값 3초, `Runtime::setLogoutTimeout` 참조)을 공유하므로 `exit()`에서는 필요한 것만 저장하고 짧게 끝내세요. App 코드나 그것을 호출하는 TrussC 코드가 메인 스레드에서 실행 중이면(`update()` 도중이나 App 코드에서 연 모달 대화상자가 떠 있는 동안 등) OS가 프로세스를 종료하며, `exit()`, `cleanup()`, 종료 이벤트는 모두 호출되지 않습니다. 다른 스레드의 처리는 App 코드 실행 중으로 치지 않습니다.
+- 이는 Windows와 macOS에서의 동작입니다. Linux에는 세션 종료를 받는 수신 경로가 없습니다. OS가 프로세스에 알리지 않고 종료시키면 `exit()`는 호출되지 않습니다.
 '''
 related = ["Runtime::setLogoutTimeout", "Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "requestExitApp", "exitApp", "App::requestExit", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App", "App::audioIn", "App::isExitRequested", "App::setSize", "AudioRecorder::stop", "ExitRequestEventArgs::cancel", "TcpClient::disconnect", "Texture::clear", "shutdownAudio", "stopRecording", "console::start"]
 snippet = '''
@@ -249,31 +255,31 @@ description.en = "Called when files are dropped onto this Window, with their pat
 description.ja = "対象 Window にファイルがドロップされたときに、そのパスを受け取って呼ばれる。"
 description.ko = "대상 Window에 파일이 드롭되었을 때 그 경로를 받아 호출된다."
 details.en = '''
-- Window event path: BeforeApp listeners → this App callback at 100 → AfterApp listeners. Earlier payload edits reach the App; there is no node-tree stage.
 - Override `filesDropped(const vector<string>& files)` in your tcApp.
+- `events().filesDropped` listeners registered without a priority (`BeforeApp`) run before this function, and `AfterApp` listeners run after it. If an earlier listener changes the file list, this function receives the changed list. Unlike mouse events, a drop is not passed on to child nodes.
 - On desktop, each entry is a full (absolute) path in UTF-8 that you can load as is. On Linux, TrussC has already removed the `file://` prefix and decoded `%20` and similar escapes.
 - It is called on the main thread, so you can load images and other GPU objects right here. To check the file type, compare the extension, for example `toLower(getFileExtension(path)) == "png"`.
-- There is no TrussC limit on file count or UTF-8 path length (file name on Web); storage grows with the actual drop. Allocation and platform limits still apply.
+- TrussC sets no limit on the number of files or on the length of each UTF-8 path (the file name on the web); memory is allocated to fit the drop. Only the limits of available memory and of the platform apply.
 - The drop position is not passed. `events().filesDropped` listeners receive `DragDropEventArgs` with x/y, but that is the last known mouse position, not the exact drop point.
-- The App attached to the Window receiving the drop gets the callback, including secondary Windows on macOS, Windows and Linux. Headless apps never receive it.
+- It is called on the App of the window that received the drop. On macOS, Windows and Linux this includes secondary windows. A headless App never receives it.
 '''
 details.ja = '''
-- Window のイベント経路は BeforeApp リスナー → この App コールバック (100) → AfterApp リスナーの順です。先行リスナーの引数編集は App に届き、ノードツリーの段階はありません。
 - tcApp で `filesDropped(const vector<string>& files)` をオーバーライドします。
+- 優先度を指定せずに（`BeforeApp` で）登録した `events().filesDropped` のリスナーはこの関数より前に、`AfterApp` のリスナーはあとに呼ばれます。前のリスナーがファイルの一覧を変えると、この関数には変更後の一覧が届きます。マウスのイベントと違い、ドロップは子ノードには渡されません。
 - デスクトップでは、それぞれが UTF-8 のフルパス（絶対パス）なので、そのまま読み込めます。Linux では、`file://` を取り除き、`%20` などの表記も元の文字に戻してあります。
 - メインスレッドで呼ばれるため、ここでそのまま画像や GPU オブジェクトを読み込めます。ファイルの種類は、`toLower(getFileExtension(path)) == "png"` のように拡張子で判定できます。
-- ファイル数と UTF-8 パス長（Web ではファイル名）に TrussC の上限はありません。実際のドロップに合わせてメモリを確保します。メモリ確保とプラットフォームの制約は適用されます。
+- ファイルの数や、UTF-8 のパスの長さ（Web ではファイル名の長さ）に TrussC の上限はありません。ドロップの内容に合わせてメモリを確保し、制約になるのは使えるメモリとプラットフォーム側の制限だけです。
 - ドロップした位置は渡されません。`events().filesDropped` のリスナーが受け取る `DragDropEventArgs` には x/y がありますが、これは最後に分かっているマウス位置であり、実際にドロップした位置ではありません。
-- ドロップを受けた Window の App に届きます。macOS、Windows、Linux の副ウィンドウにも届きます。ヘッドレス App には届きません。
+- ドロップを受けたウィンドウの App で呼ばれます。macOS、Windows、Linux では 2 つ目以降のウィンドウでも呼ばれます。ヘッドレス App では呼ばれません。
 '''
 details.ko = '''
-- Window 이벤트 경로는 BeforeApp 리스너 → 이 App 콜백(100) → AfterApp 리스너 순서입니다. 앞선 페이로드 수정은 App에 전달되며 노드 트리 단계는 없습니다.
 - tcApp에서 `filesDropped(const vector<string>& files)`를 오버라이드합니다.
+- 우선순위 없이(`BeforeApp`으로) 등록한 `events().filesDropped` 리스너는 이 함수보다 먼저, `AfterApp` 리스너는 나중에 호출됩니다. 앞선 리스너가 파일 목록을 바꾸면 이 함수에는 바뀐 목록이 전달됩니다. 마우스 이벤트와 달리 드롭은 자식 노드로 전달되지 않습니다.
 - 데스크톱에서는 각각이 UTF-8 전체 경로(절대 경로)이므로 그대로 로드할 수 있습니다. Linux에서는 `file://`를 제거하고 `%20` 같은 표기도 원래 문자로 되돌려 둡니다.
 - 메인 스레드에서 호출되므로 여기서 바로 이미지나 GPU 객체를 로드할 수 있습니다. 파일 종류는 `toLower(getFileExtension(path)) == "png"`처럼 확장자로 판별할 수 있습니다.
-- 파일 수와 UTF-8 경로 길이(Web에서는 파일 이름)에 TrussC의 제한은 없습니다. 실제 드롭에 맞춰 메모리를 할당합니다. 메모리 할당과 플랫폼 제약은 적용됩니다.
+- 파일 수나 UTF-8 경로 길이(웹에서는 파일 이름 길이)에 TrussC의 제한은 없습니다. 드롭 내용에 맞춰 메모리를 할당하며, 제약이 되는 것은 사용할 수 있는 메모리와 플랫폼 쪽 제한뿐입니다.
 - 드롭한 위치는 전달되지 않습니다. `events().filesDropped` 리스너가 받는 `DragDropEventArgs`에는 x/y가 있지만, 이것은 마지막으로 알려진 마우스 위치이며 실제로 드롭한 위치가 아닙니다.
-- 드롭을 받은 Window에 연결된 App으로 전달됩니다. macOS, Windows, Linux의 보조 Window에도 전달됩니다. 헤드리스 App에는 전달되지 않습니다.
+- 드롭을 받은 창의 App에서 호출됩니다. macOS, Windows, Linux에서는 두 번째 이후 창에서도 호출됩니다. 헤드리스 App에서는 호출되지 않습니다.
 '''
 related = ["CoreEvents::filesDropped", "DragDropEventArgs", "getFileName", "getFileExtension", "Image::load"]
 platform_note.en = "Windows, macOS, Linux and Web only; it is never called on iOS or Android. On Web you receive the browser's file names, not paths that you can load, and TrussC has no helper for reading the contents of dropped files."
@@ -820,34 +826,32 @@ details.en = '''
 - For an attached App on macOS, Windows and Linux X11, size/position requests are ignored while fullscreen, including invalid arguments, with exactly one Notice per call. Nothing is queued; exit restores the entry geometry. Call size/position once `isFullscreen()` returns false. macOS also ignores requests while entering or exiting; Windows/X11 accept them immediately after `setFullscreen(false)`.
 - Notice: `App::setSize() ignored while fullscreen; call it once isFullscreen() returns false`. On macOS the phase text is `ignored: the window is entering fullscreen` or `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false`. Secondary targets include `on "Preview"` after the call name.
 - Non-finite, non-positive or int-unrepresentable dimensions are rejected with a Warning before conversion.
-- Call it from `setup()` or later. In the constructor (or for an App on the stack) no `shared_ptr` owns the App yet, so no window is resized: only the App's own size changes, and a warning is logged once per App. For the lifecycle, see `App`.
+- Call it from `setup()` or later. In the constructor no `shared_ptr` owns the App yet, so no window is resized: only the App's own size changes, and a warning is logged once per App. For the lifecycle, see `App`.
 - **The resize is asynchronous.** Right after the call, `getWidth()`/`getHeight()` still return the old size. They change, and `windowResized()` is called, once the window has actually been resized.
 - The resized window is always the App's own `getWindow()`, regardless of the current callback. Without an attached Window, only the App's own Node size changes.
-- Normally, inside a sub-window App's own `exit()`/`cleanup()`, `getWindow()` is already nullptr, so the call only changes the App's size.
 - It returns nothing and does not report failure. `setWidth()`/`setHeight()` never resize the window.
-- At a session end (logout, restart or shutdown), window operations stop working before `App::exit` is called. Inside `exit()`, `getWindow()` returns `nullptr` and `setSize()` changes only the App's own node size; see `App::exit`.
+- Inside the App's own `exit()` and `cleanup()`, `getWindow()` already returns `nullptr`, so the call changes only the App's own node size (see `App::exit`).
 '''
 details.ja = '''
 - ウィンドウに接続済みの App は macOS・Windows・Linux X11 では fullscreen 中のサイズ・位置要求は無効な引数も含め無視し、呼び出しごとに Notice を 1 回出します。予約・再実行はせず、終了時には開始前の位置とサイズに戻ります。サイズ・位置は `isFullscreen()` が false を返してから指定してください。macOS は移行開始・終了のアニメーション中も無視し、Windows/X11 は `setFullscreen(false)` の直後から受け付けます。
 - Notice は `App::setSize() ignored while fullscreen; call it once isFullscreen() returns false` です。macOS の移行中は `ignored: the window is entering fullscreen` または `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false` になります。副窓では呼び出し名の後に `on "Preview"` のようにタイトルを付けます。
 - 非有限値・正でない値・int で表せない寸法は、変換前に Warning を出して拒否します。
 - `w`/`h` はコンテンツ領域（タイトルバーを除いた部分）のサイズです。単位は通常は論理ポイントで、`WindowSettings` で pixelPerfect にしたときだけ実際のピクセルになります。入力値は DPI 変換前に int に切り捨てられ、その後のピクセル指定の変換は主副窓とも `setWindowSize()` に従います。
-- `setup()` 以降で呼んでください。コンストラクタの中（およびスタック上に置いた App）ではまだ `shared_ptr` が App を保持していないため、ウィンドウはリサイズされません。App 自身のサイズだけが変わり、App ごとに 1 回警告が出ます。ライフサイクルについては `App` を参照してください。
+- `setup()` 以降で呼んでください。コンストラクタの中ではまだ `shared_ptr` が App を保持していないため、ウィンドウはリサイズされません。App 自身のサイズだけが変わり、App ごとに 1 回警告が出ます。ライフサイクルについては `App` を参照してください。
 - **リサイズは非同期で行われます。** 呼んだ直後の `getWidth()`/`getHeight()` はまだ古いサイズを返します。実際にウィンドウのサイズが変わった時点で値が更新され、`windowResized()` が呼ばれます。
 - 現在のコールバックに関係なく、この App 自身の `getWindow()` が返す窓をリサイズします。所属する Window がなければ、この App の Node サイズだけを変更します。
 - 戻り値はなく、失敗しても通知されません。`setWidth()`/`setHeight()` ではウィンドウはリサイズされません。
-- セッション終了（ログアウト、再起動、シャットダウン）のときは、`App::exit` が呼ばれる前にウィンドウの操作が効かなくなります。`exit()` の中では `getWindow()` は `nullptr` を返し、`setSize()` は App 自身のノードのサイズだけを変えます。`App::exit` を参照してください。
+- App 自身の `exit()` と `cleanup()` の中では、`getWindow()` はすでに `nullptr` を返すため、App 自身のノードのサイズだけが変わります（`App::exit` を参照）。
 '''
 details.ko = '''
 - 윈도우에 연결된 App은 macOS, Windows, Linux X11에서 fullscreen 중 크기·위치 요청을 잘못된 인수도 포함해 무시하고 호출마다 Notice를 한 번 출력합니다. 예약하거나 재실행하지 않으며 종료 시 진입 전 위치와 크기를 복원합니다. `isFullscreen()`이 false를 반환한 뒤 크기·위치를 지정하세요. macOS는 진입·종료 애니메이션 중에도 무시하고 Windows/X11은 `setFullscreen(false)` 직후부터 허용합니다.
 - 유한하지 않거나 양수가 아니거나 int로 표현할 수 없는 크기는 변환 전에 Warning을 출력하고 거부합니다.
 - `w`/`h`는 콘텐츠 영역(타이틀 바를 제외한 부분)의 크기입니다. 기본 단위는 논리 포인트이며, `WindowSettings`에서 pixelPerfect로 설정했을 때만 실제 픽셀이 됩니다. 입력값은 DPI 변환 전에 int로 잘리며 이후 픽셀 크기 변환은 메인과 보조 모두 `setWindowSize()`를 따릅니다.
-- `setup()` 이후에 호출하세요. 생성자 안(또는 스택에 둔 App)에서는 아직 `shared_ptr`가 App을 보유하지 않으므로 윈도우가 리사이즈되지 않습니다. App 자신의 크기만 바뀌고 App마다 한 번 경고가 출력됩니다. 라이프사이클은 `App`을 참조하세요.
+- `setup()` 이후에 호출하세요. 생성자 안에서는 아직 `shared_ptr`가 App을 보유하지 않으므로 윈도우가 리사이즈되지 않습니다. App 자신의 크기만 바뀌고 App마다 한 번 경고가 출력됩니다. 라이프사이클은 `App`을 참조하세요.
 - **리사이즈는 비동기로 이루어집니다.** 호출 직후의 `getWidth()`/`getHeight()`는 아직 이전 크기를 반환합니다. 실제로 윈도우 크기가 바뀐 시점에 값이 갱신되고 `windowResized()`가 호출됩니다.
 - 현재 콜백과 관계없이 이 App 자신의 `getWindow()`가 반환하는 윈도우를 리사이즈합니다. 연결된 Window가 없으면 이 App의 Node 크기만 변경합니다.
-- 일반적으로 서브 윈도우 App 자신의 `exit()`/`cleanup()` 안에서는 `getWindow()`가 이미 nullptr이므로 App 크기만 바뀝니다.
 - 반환값이 없으며 실패해도 알려 주지 않습니다. `setWidth()`/`setHeight()`로는 윈도우가 리사이즈되지 않습니다.
-- 세션 종료(로그아웃, 재시작, 시스템 종료) 때는 `App::exit`가 호출되기 전에 창 조작이 동작하지 않게 됩니다. `exit()` 안에서는 `getWindow()`가 `nullptr`를 반환하며, `setSize()`는 App 자신의 노드 크기만 바꿉니다. `App::exit`를 참조하세요.
+- App 자신의 `exit()`와 `cleanup()` 안에서는 `getWindow()`가 이미 `nullptr`를 반환하므로 App 자신의 노드 크기만 바뀝니다(`App::exit` 참조).
 '''
 related = ["getWindowSize", "setWindowSize", "App::getWindow", "App::windowResized", "App", "Window::setSize", "Window::setApp", "WindowSettings", "App::exit"]
 platform_note.en = '''
@@ -5390,21 +5394,21 @@ details.en = '''
 - A listener registered without a priority runs before `App::exit()`. Register it with `EventPriority::AfterApp` to run after `App::exit()`, for example to stop something the App was still using.
 - It has no argument and cannot be cancelled. To ask before the window closes, use `closeRequested`; to ask before the process quits, use `exitRequested`.
 - To quit the process when this window closes, use `Window::setQuitOnClose(true)`. Calling `exitApp()` here, as in the example, also quits, but the window has already closed by then, so a cancelled quit cannot bring it back. Keep the returned `EventListener` as a member. Called on the main thread.
-- If a session-end commit interrupts App or host code on the main stack, neither this event nor `App::exit()` or cleanup runs. An idle commit uses normal ending (see `App::exit`).
+- At a session end (logout, restart or shutdown), if no App code is running on the main thread, it is sent as in a normal ending. If App code is running at that moment, the OS ends the process and no App work runs, so this event is not sent either (see `App::exit`).
 '''
 details.ja = '''
 - ウィンドウが閉じるときに 1 回届きます。プロセスの終了時も含みます。App の置き換え（`setApp`）、取り外し（`destroyApp`）、ホットリロードでは届きません。その場合は `App::exit()` だけが呼ばれます。
 - 優先度を指定せずに登録したリスナーは、`App::exit()` より前に呼ばれます。`App::exit()` のあとに呼びたい場合は、`EventPriority::AfterApp` で登録してください。App がまだ使っていたものを止めたいときなどに使います。
 - 引数はなく、取り消しもできません。ウィンドウを閉じる前に確認するには `closeRequested` を、プロセスの終了前に確認するには `exitRequested` を使ってください。
 - このウィンドウを閉じたらプロセスを終了させたい場合は、`Window::setQuitOnClose(true)` を使ってください。例のようにここで `exitApp()` を呼んでも終了しますが、その時点でウィンドウはもう閉じているため、終了が取り消されてもウィンドウは戻りません。戻り値の `EventListener` はメンバー変数に保持してください。メインスレッドで呼ばれます。
-- App やホストの処理がメインスタック上にある間にセッション終了が確定した場合、このイベントも `App::exit()` も cleanup も実行しません。アイドル時の確定では通常の終了処理を行います（`App::exit` を参照）。
+- セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、通常の終了と同じように届きます。実行中だった場合は OS がプロセスを終了させ、App の処理は何も行われないため、このイベントも届きません（`App::exit` を参照）。
 '''
 details.ko = '''
 - 창이 닫힐 때 한 번 전달됩니다. 프로세스 종료 때도 포함됩니다. App 교체(`setApp`), 제거(`destroyApp`), 핫 리로드에서는 전달되지 않으며, 그때는 `App::exit()`만 호출됩니다.
 - 우선순위를 지정하지 않고 등록한 리스너는 `App::exit()`보다 먼저 호출됩니다. `App::exit()` 다음에 호출하려면 `EventPriority::AfterApp`으로 등록하세요. App이 아직 사용하던 것을 멈추고 싶을 때 등에 사용합니다.
 - 인수가 없고 취소할 수도 없습니다. 창을 닫기 전에 확인하려면 `closeRequested`를, 프로세스 종료 전에 확인하려면 `exitRequested`를 사용하세요.
 - 이 창을 닫으면 프로세스를 종료하고 싶다면 `Window::setQuitOnClose(true)`를 사용하세요. 예시처럼 여기서 `exitApp()`을 호출해도 종료되지만, 그 시점에는 창이 이미 닫혀 있으므로 종료가 취소되어도 창은 돌아오지 않습니다. 반환된 `EventListener`는 멤버 변수로 보관하세요. 메인 스레드에서 호출됩니다.
-- App이나 호스트 코드가 메인 스택에 있는 동안 세션 종료가 확정되면 이 이벤트도 `App::exit()`도 cleanup도 실행하지 않습니다. 유휴 상태에서 확정되면 정상 종료 처리를 합니다(`App::exit` 참조).
+- 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드에서 App 코드가 실행 중이 아니면 일반 종료와 같이 전달됩니다. 실행 중이었다면 OS가 프로세스를 종료하고 App 처리는 전혀 실행되지 않으므로 이 이벤트도 전달되지 않습니다(`App::exit` 참조).
 '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
@@ -6139,15 +6143,15 @@ description.ja = "ドロップされたファイルのパス（デスクトッ�
 description.ko = "드롭된 파일의 경로(데스크톱) 또는 파일 이름(Web)을 저장한다."
 details.en = '''
 - A `vector<string>` containing copies of desktop file paths or Web file names only; it is empty by default.
-- There is no TrussC limit on file count or UTF-8 path length (file name on Web); storage grows with the actual drop. Allocation and platform limits still apply.
+- TrussC sets no limit on the number of files or on the length of each UTF-8 path (the file name on the web); memory is allocated to fit the drop. Only the limits of available memory and of the platform apply.
 '''
 details.ja = '''
 - デスクトップではファイルのパスのコピーを、Web ではファイル名のコピーのみを格納する `vector<string>` です。既定では空です。
-- ファイル数と UTF-8 パス長（Web ではファイル名）に TrussC の上限はありません。実際のドロップに合わせてメモリを確保します。メモリ確保とプラットフォームの制約は適用されます。
+- ファイルの数や、UTF-8 のパスの長さ（Web ではファイル名の長さ）に TrussC の上限はありません。ドロップの内容に合わせてメモリを確保し、制約になるのは使えるメモリとプラットフォーム側の制限だけです。
 '''
 details.ko = '''
 - 데스크톱에서는 파일 경로의 복사본을, Web에서는 파일 이름의 복사본만 담는 `vector<string>`입니다. 기본값은 비어 있습니다.
-- 파일 수와 UTF-8 경로 길이(Web에서는 파일 이름)에 TrussC의 제한은 없습니다. 실제 드롭에 맞춰 메모리를 할당합니다. 메모리 할당과 플랫폼 제약은 적용됩니다.
+- 파일 수나 UTF-8 경로 길이(웹에서는 파일 이름 길이)에 TrussC의 제한은 없습니다. 드롭 내용에 맞춰 메모리를 할당하며, 제약이 되는 것은 사용할 수 있는 메모리와 플랫폼 쪽 제한뿐입니다.
 '''
 
 ["DragDropEventArgs::x"]
@@ -9129,7 +9133,7 @@ description.en = "Provides TrueType font rendering and text layout."
 description.ja = "TrueType フォントによる文字描画とテキストの配置を行う。"
 description.ko = "트루타입 폰트로 텍스트를 렌더링하고 배치한다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading.
+- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Use `load(nameOrPath, size, faceIndex = 0)` to load a font file or system font name, and check the returned `LoadResult` for success; see `Font::load` for path resolution, collection faces, and Web URL loading.
 - `drawString` draws UTF-8 text using the current drawing color, and `getStringPath` returns its vector outlines; without a loaded font, drawing does nothing and the returned path is empty.
 - The requested font size and reported metrics use logical pixels; glyphs are rasterized using the DPI scale captured when loading.
@@ -9141,7 +9145,7 @@ details.en = '''
 - Destroying a Font does not evict its atlas from the shared cache; reloading with a different cache key releases the previous cached atlas if no other Font uses it.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。
+- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - `load(nameOrPath, size, faceIndex = 0)` でフォントファイルまたはシステムフォント名を読み込み、戻り値の `LoadResult` で成功を確認します。パスの解決、コレクション内の書体、Web の URL 読み込みについては `Font::load` を参照してください。
 - `drawString` は現在の描画色で UTF-8 テキストを描画し、`getStringPath` はそのベクター輪郭を返します。フォントが読み込まれていない場合、描画は何も行わず、返されるパスは空になります。
 - 指定するフォントサイズと取得するメトリクスの単位は論理ピクセルです。グリフは読み込み時に記録した DPI スケールでラスタライズされます。
@@ -9153,7 +9157,7 @@ details.ja = '''
 - Font を破棄しても、アトラスは共有キャッシュから削除されません。異なるキャッシュキーで読み直すと、ほかの Font が使用していない場合に以前のアトラスがキャッシュから解放されます。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다.
+- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - `load(nameOrPath, size, faceIndex = 0)`로 폰트 파일이나 시스템 폰트 이름을 로드하고 반환된 `LoadResult`로 성공 여부를 확인합니다. 경로 해석, 컬렉션 내 서체, Web URL 로드는 `Font::load`를 참조합니다.
 - `drawString`은 현재 그리기 색상으로 UTF-8 텍스트를 그리며, `getStringPath`는 텍스트의 벡터 윤곽선을 반환합니다. 로드된 폰트가 없으면 그리기는 아무 작업도 하지 않고 반환되는 경로는 비어 있습니다.
 - 지정하는 폰트 크기와 반환되는 메트릭의 단위는 논리 픽셀입니다. 글리프는 로드할 때 기록한 DPI 배율로 래스터화합니다.
@@ -11223,7 +11227,7 @@ description.en = "An image containing CPU pixels and a GPU texture."
 description.ja = "CPU ピクセルと GPU テクスチャを持つ画像を表す。"
 description.ko = "CPU 픽셀과 GPU 텍스처를 가진 이미지를 나타낸다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading.
+- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Pixel access and `save()` use the CPU `Pixels`; drawing uses the GPU `Texture`. Changes to the texture do not update the CPU pixels.
 - Loading uploads pixels into an Immutable texture. `allocate()` creates a Dynamic texture without uploading the zero-filled CPU pixels.
 - `setColor()` marks the image as dirty. After editing through `getPixels()` or `getPixelsData()`, call `setDirty()` yourself, then call `update()` to upload changes to a Dynamic texture. Drawing and `getTexture()` do not upload changes automatically.
@@ -11233,7 +11237,7 @@ details.en = '''
 - See `Texture` for GPU resource rules and upload costs, and `TextureFormat` for pixel and texture formats.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。
+- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - ピクセルの参照と `save()` は CPU の `Pixels` を使い、描画は GPU の `Texture` を使います。テクスチャを変更しても CPU ピクセルは更新されません。
 - 読み込みではピクセルを Immutable テクスチャに転送します。`allocate()` は Dynamic テクスチャを作成しますが、ゼロで初期化した CPU ピクセルは転送しません。
 - `setColor()` は画像を更新が必要な状態にします。`getPixels()` または `getPixelsData()` で編集した場合は、自分で `setDirty()` を呼び、その後 `update()` で Dynamic テクスチャに変更を転送してください。描画と `getTexture()` は変更を自動転送しません。
@@ -11243,7 +11247,7 @@ details.ja = '''
 - GPU リソースの扱いと転送コストは `Texture`、ピクセルとテクスチャの形式は `TextureFormat` を参照してください。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다.
+- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - 픽셀 접근과 `save()`는 CPU의 `Pixels`를 사용하고, 그리기는 GPU의 `Texture`를 사용합니다. 텍스처를 변경해도 CPU 픽셀은 갱신되지 않습니다.
 - 로드하면 픽셀을 Immutable 텍스처에 업로드합니다. `allocate()`는 Dynamic 텍스처를 생성하지만, 0으로 초기화한 CPU 픽셀은 업로드하지 않습니다.
 - `setColor()`는 이미지를 갱신이 필요한 상태로 표시합니다. `getPixels()` 또는 `getPixelsData()`로 편집한 경우 직접 `setDirty()`를 호출한 뒤 `update()`를 호출하여 Dynamic 텍스처에 변경 사항을 업로드합니다. 그리기와 `getTexture()`는 변경 사항을 자동으로 업로드하지 않습니다.
@@ -19618,7 +19622,7 @@ details.en = '''
 - Before `cleanup()` runs, the node is marked dead, its async timers are cancelled, and it is no longer treated as the hovered, grabbed or selected node.
 - When an App ends, `cleanup()` runs after `App::exit()`, on the child nodes first and then on the App. In a headless App, only the App's own `cleanup()` runs. Audio is disconnected before this, so you can release audio state here. For the whole order, see `App::exit`.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (in a headless App, child nodes get no `cleanup()` at app exit).
-- If a session end (logout, restart or shutdown) interrupts running code, `App::exit` is still called, but `cleanup()` is skipped; see `App::exit`.
+- At a session end (logout, restart or shutdown), if no App code is running on the main thread, `cleanup()` runs as in a normal ending. If App code is running at that moment, the OS ends the process and neither `App::exit` nor `cleanup()` is called; see `App::exit`.
 - If one child's `cleanup()` throws, the other children and the App are still cleaned up.
 '''
 details.ja = '''
@@ -19629,7 +19633,7 @@ details.ja = '''
 - `cleanup()` の前に、ノードは dead として扱われ、非同期タイマーはキャンセルされ、hover・grab・選択中のノードとしても扱われなくなります。
 - App が終わるときは、`App::exit()` のあとに、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App では App 自身の `cleanup()` だけが呼ばれます。その前にオーディオは切り離されているため、オーディオ関係の後片付けをここで行えます。全体の順番は `App::exit` を参照してください。
 - 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレス App では、終了時に子ノードの `cleanup()` が呼ばれません）。
-- セッション終了（ログアウト、再起動、シャットダウン）が実行中の処理を中断した場合、`App::exit` は呼ばれますが、`cleanup()` はスキップされます。`App::exit` を参照してください。
+- セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、通常の終了と同じように `cleanup()` が呼ばれます。実行中だった場合は OS がプロセスを終了させ、`App::exit` も `cleanup()` も呼ばれません。`App::exit` を参照してください。
 - ある子ノードの `cleanup()` が例外を投げても、ほかの子ノードと App の後片付けは行われます。
 '''
 details.ko = '''
@@ -19640,7 +19644,7 @@ details.ko = '''
 - `cleanup()` 전에 노드는 dead로 표시되고, 비동기 타이머가 취소되며, hover·grab·선택 중인 노드로도 더 이상 다뤄지지 않습니다.
 - App이 끝날 때는 `App::exit()` 다음에 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서는 App 자신의 `cleanup()`만 호출됩니다. 그전에 오디오가 분리되므로, 여기서 오디오 관련 정리를 할 수 있습니다. 전체 순서는 `App::exit`를 참조하세요.
 - 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 App에서는 종료 시 자식 노드의 `cleanup()`이 호출되지 않습니다).
-- 세션 종료(로그아웃, 재시작, 시스템 종료)가 실행 중인 처리를 중단하면 `App::exit`는 호출되지만 `cleanup()`은 건너뜁니다. `App::exit`를 참조하세요.
+- 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드에서 App 코드가 실행 중이 아니면 일반 종료와 같이 `cleanup()`이 호출됩니다. 실행 중이었다면 OS가 프로세스를 종료하며 `App::exit`도 `cleanup()`도 호출되지 않습니다. `App::exit`를 참조하세요.
 - 어떤 자식 노드의 `cleanup()`이 예외를 던져도 다른 자식 노드와 App의 정리는 진행됩니다.
 '''
 related = ["Node::destroy", "Node::removeChild", "App::exit", "Node::setup", "Node::cancelAllAsyncTimers"]
@@ -28645,7 +28649,7 @@ description.en = "Stores fully decoded audio samples in memory."
 description.ja = "デコード済みの音声サンプル全体をメモリに保持する。"
 description.ko = "디코딩한 전체 오디오 샘플을 메모리에 보관한다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading.
+- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - File loading decodes the complete audio into interleaved float PCM in `samples`. `numSamples` counts frames, or samples per channel; the interleaved sample count is `numSamples * channels`.
 - This `SoundSource` subclass inherits `channels`, `sampleRate`, and `kind()`; its kind is `SoundSource::Eager`, and `getDuration()` returns `numSamples / sampleRate` in seconds, or 0 when the sample rate is 0.
 - It suits short sound effects and repeated or overlapping playback: after loading, playback and seeking read PCM from RAM without file decoding.
@@ -28653,7 +28657,7 @@ details.en = '''
 - Finish direct edits to a shared buffer before the mixer reads it; direct sample access and generation or mixing helpers do not lock the mixer. Audio-listener restrictions are described in `AudioEngine`.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。
+- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - ファイルの読み込み時に音声全体をデコードし、インターリーブ形式の float PCM として `samples` に保持します。`numSamples` はフレーム数、つまりチャンネルあたりのサンプル数です。全チャンネル分のサンプル数は `numSamples * channels` です。
 - `SoundSource` を継承し、`channels`、`sampleRate`、`kind()` を受け継ぎます。種別は `SoundSource::Eager` です。`getDuration()` は `numSamples / sampleRate` を秒単位で返し、サンプルレートが 0 の場合は 0 を返します。
 - 短い効果音や、繰り返し・重ね合わせの再生に適しています。読み込み後の再生とシークは、ファイルをデコードせず RAM 上の PCM を読みます。
@@ -28661,7 +28665,7 @@ details.ja = '''
 - 共有バッファを直接編集する場合は、ミキサーが読む前に編集を終えてください。サンプルへの直接アクセスや生成・ミキシングの補助関数は、ミキサーをロックしません。オーディオのリスナー内での制約は `AudioEngine` を参照してください。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다.
+- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - 파일을 불러올 때 전체 오디오를 디코딩하여 인터리브 float PCM으로 `samples`에 보관합니다. `numSamples`는 프레임 수, 즉 채널당 샘플 수입니다. 전체 채널의 샘플 수는 `numSamples * channels`입니다.
 - `SoundSource`를 상속하여 `channels`, `sampleRate`, `kind()`를 제공합니다. 종류는 `SoundSource::Eager`입니다. `getDuration()`은 `numSamples / sampleRate`를 초 단위로 반환하며 샘플레이트가 0이면 0을 반환합니다.
 - 짧은 효과음과 반복 재생 또는 겹쳐 재생하기에 적합합니다. 로딩 후 재생과 탐색은 파일을 디코딩하지 않고 RAM의 PCM을 읽습니다.
@@ -33013,6 +33017,7 @@ details.en = '''
 - Subclass this ofThread-compatible class, override the protected pure virtual `threadedFunction()`, and launch it with `startThread()`. A repeating worker should check `isThreadRunning()` in its loop.
 - Create, upload, draw and capture GPU objects (textures, `Fbo`, meshes) only on the main thread, never in `threadedFunction()`. Pass the worker's results to the main thread with `runOnMainThread`.
 - `stopThread()` only clears the running flag; it does not wait for the worker to finish. `waitForThread()` requests stop and joins by default; `waitForThread(false)` waits without requesting stop.
+- With hot reload, stop the thread in `hotReloadUnload`, for example with `waitForThread()`. Hot reload does not stop threads for you, and it supports a single window only (see `RuntimeEvents::hotReloadUnload`).
 - A subclass must call `waitForThread()` in its own destructor before its members are destroyed. The base destructor also stops and joins, but runs too late to protect subclass members and warns if the worker has not finished.
 ```cpp
 class Worker : public Thread { public: ~Worker() override { waitForThread(); }
@@ -33029,6 +33034,7 @@ details.ja = '''
 - ofThread 互換のこのクラスを継承し、protected の純粋仮想関数 `threadedFunction()` をオーバーライドして、`startThread()` で開始します。繰り返し処理では、ループ内で `isThreadRunning()` を確認してください。
 - GPU オブジェクト（テクスチャ、`Fbo`、メッシュ）の作成、アップロード、描画、キャプチャはメインスレッドだけで行い、`threadedFunction()` の中では行わないでください。ワーカーの結果は `runOnMainThread` でメインスレッドに渡します。
 - `stopThread()` は動作中のフラグを解除するだけで、ワーカーの終了を待ちません。`waitForThread()` は既定で停止を要求して join します。`waitForThread(false)` は停止を要求せずに待ちます。
+- ホットリロードを使う場合は、`hotReloadUnload` でスレッドを止めてください（`waitForThread()` など）。ホットリロードはスレッドを自動では止めません。また、ホットリロードが対応するのは 1 ウィンドウだけです（`RuntimeEvents::hotReloadUnload` を参照）。
 - 派生クラスは、メンバを破棄する前に自分のデストラクタで `waitForThread()` を呼ぶ必要があります。基底クラスのデストラクタも停止して join しますが、派生クラスのメンバを保護するには遅すぎます。ワーカーが終了していなければ警告します。
 ```cpp
 class Worker : public Thread { public: ~Worker() override { waitForThread(); }
@@ -33045,6 +33051,7 @@ details.ko = '''
 - ofThread 호환 클래스인 이 클래스를 상속하고 protected 순수 가상 함수 `threadedFunction()`을 재정의한 뒤 `startThread()`로 시작합니다. 반복 작업에서는 루프 안에서 `isThreadRunning()`을 확인하세요.
 - GPU 객체(텍스처, `Fbo`, 메시)의 생성, 업로드, 그리기, 캡처는 메인 스레드에서만 하고, `threadedFunction()` 안에서는 하지 마세요. 워커의 결과는 `runOnMainThread`로 메인 스레드에 넘깁니다.
 - `stopThread()`는 실행 플래그만 해제하며 워커 종료를 기다리지 않습니다. `waitForThread()`는 기본적으로 중지를 요청하고 join합니다. `waitForThread(false)`는 중지를 요청하지 않고 기다립니다.
+- 핫 리로드를 사용한다면 `hotReloadUnload`에서 스레드를 멈추세요(`waitForThread()` 등). 핫 리로드는 스레드를 자동으로 멈추지 않으며, 창 하나만 지원합니다(`RuntimeEvents::hotReloadUnload` 참조).
 - 파생 클래스는 멤버가 파괴되기 전에 자신의 소멸자에서 `waitForThread()`를 호출해야 합니다. 기반 소멸자도 중지하고 join하지만 파생 클래스 멤버를 보호하기에는 늦습니다. 워커가 끝나지 않았으면 경고합니다.
 ```cpp
 class Worker : public Thread { public: ~Worker() override { waitForThread(); }
@@ -40502,25 +40509,25 @@ description.ja = "このウィンドウを閉じるよう要求する。"
 description.ko = "이 창을 닫도록 요청한다."
 details.en = '''
 - It does not wait for the window to close. Calling it again, or on a closed window, does nothing. You can call it from the window's own App.
-- If this is the last open window, or a window with `setQuitOnClose(true)`, it first asks `exitRequested`, before anything closes. If a listener cancels, nothing closes and every window stays open. If nobody cancels, the process ends normally and all windows close.
+- If this is the last open window, or a window with `setQuitOnClose(true)`, it first asks `exitRequested` once, before anything closes. If a listener cancels, the call does nothing and every window stays open. If nobody cancels, the process ends normally and all windows close.
 - In other cases only this window closes, after its current callbacks have finished. Until then, `isOpen()` stays `true` and `getApp()` still returns the App.
-- When it closes, a pending `setApp` is cancelled. Window `events().exit` listeners run around `App::exit()` in priority order, then audio detaches and `cleanup()` runs before the native window disappears. Other windows keep running.
+- When it closes, a pending `setApp` is cancelled and the App ends. The window's `events().exit` listeners run before or after `App::exit()` according to their priority, then audio is detached and `cleanup()` runs, and only then does the window disappear from the screen. Other windows keep running.
 - It does not send `closeRequested`. If you want to confirm first, do it in your own code before calling `close()`.
 - Call it on the main thread.
 '''
 details.ja = '''
 - ウィンドウが閉じるのを待たずに戻ります。もう一度呼んだり、閉じたウィンドウに対して呼んだりしても何もしません。そのウィンドウ自身の App から呼んでもかまいません。
-- これが最後に開いているウィンドウか `setQuitOnClose(true)` のウィンドウなら、何かを閉じる前にまず `exitRequested` を問い合わせます。リスナーが取り消すと何も閉じず、すべてのウィンドウが開いたままになります。誰も取り消さなければ、プロセスが通常どおり終了し、すべてのウィンドウが閉じます。
+- これが最後に開いているウィンドウか `setQuitOnClose(true)` のウィンドウなら、何かを閉じる前にまず `exitRequested` を 1 回問い合わせます。リスナーが取り消すと呼び出しは何もせず、すべてのウィンドウが開いたままになります。誰も取り消さなければ、プロセスが通常どおり終了し、すべてのウィンドウが閉じます。
 - それ以外の場合は、このウィンドウだけが、実行中のコールバックが終わったあとに閉じます。閉じるまでは、`isOpen()` は `true` のままで、`getApp()` も App を返します。
-- 閉じるときは、待っている `setApp` を取り消します。Window の `events().exit` リスナーは優先度順に `App::exit()` の前後で実行され、その後オーディオを切り離して `cleanup()` を行ってからネイティブウィンドウが消えます。ほかのウィンドウは動き続けます。
+- 閉じるときは、待っている `setApp` が取り消され、App が終わります。ウィンドウの `events().exit` のリスナーは優先度に応じて `App::exit()` の前かあとに呼ばれ、続いてオーディオが切り離されて `cleanup()` が呼ばれ、そのあとでウィンドウが画面から消えます。ほかのウィンドウは動き続けます。
 - `closeRequested` は送りません。先に確認したい場合は、`close()` を呼ぶ前に自分のコードで確認してください。
 - メインスレッドで呼んでください。
 '''
 details.ko = '''
 - 창이 닫히기를 기다리지 않고 반환됩니다. 다시 호출하거나 닫힌 창에서 호출해도 아무 동작도 하지 않습니다. 그 창 자신의 App에서 호출해도 됩니다.
-- 이 창이 마지막으로 열린 창이거나 `setQuitOnClose(true)`인 창이면, 무엇이든 닫기 전에 먼저 `exitRequested`를 묻습니다. 리스너가 취소하면 아무것도 닫히지 않고 모든 창이 열린 채로 유지됩니다. 아무도 취소하지 않으면 프로세스가 정상적으로 종료되고 모든 창이 닫힙니다.
+- 이 창이 마지막으로 열린 창이거나 `setQuitOnClose(true)`인 창이면, 무엇이든 닫기 전에 먼저 `exitRequested`를 한 번 묻습니다. 리스너가 취소하면 호출은 아무 동작도 하지 않고 모든 창이 열린 채로 유지됩니다. 아무도 취소하지 않으면 프로세스가 정상적으로 종료되고 모든 창이 닫힙니다.
 - 그 밖의 경우에는 이 창만, 실행 중인 콜백이 끝난 뒤에 닫힙니다. 닫히기 전까지 `isOpen()`은 `true`이고, `getApp()`도 App을 반환합니다.
-- 닫힐 때는 대기 중인 `setApp`을 취소합니다. Window의 `events().exit` 리스너가 우선순위에 따라 `App::exit()` 전후에 실행되고, 그 뒤 오디오를 분리하고 `cleanup()`을 실행한 다음 네이티브 창이 사라집니다. 다른 창은 계속 실행됩니다.
+- 닫힐 때는 대기 중인 `setApp`이 취소되고 App이 끝납니다. 창의 `events().exit` 리스너는 우선순위에 따라 `App::exit()` 전이나 후에 호출되고, 이어서 오디오가 분리되고 `cleanup()`이 호출된 뒤에야 창이 화면에서 사라집니다. 다른 창은 계속 실행됩니다.
 - `closeRequested`는 보내지 않습니다. 먼저 확인하고 싶다면 `close()`를 호출하기 전에 직접 코드에서 확인하세요.
 - 메인 스레드에서 호출하세요.
 '''
@@ -40912,25 +40919,25 @@ description.en = "Configures the application window at startup."
 description.ja = "起動時のアプリケーションウィンドウを設定する。"
 description.ko = "시작 시 애플리케이션 윈도우를 설정한다."
 details.en = '''
-- Pass a `WindowSettings` value to `runApp<AppClass>()`. Its setters return the same settings object for chaining; the default size is 1280 × 720 and the title is `"TrussC App"`.
-- `highDpi` defaults to `true`, and `pixelPerfect` defaults to `false`. Normally sizes and drawing coordinates use logical pixels; pixel-perfect mode treats the requested size as framebuffer pixels and uses framebuffer-sized drawing coordinates.
-- `sampleCount` requests MSAA and defaults to `4`. `fullscreen` defaults to `false`, and `decorated` defaults to `true`; disabling decorations requests a borderless window on desktop platforms.
-- `swapInterval` defaults to `1` for display synchronization; `0` disables it. Use `setSwapInterval()` to configure presentation separately from the update and draw rates.
-- In v0.8.0 this is process-wide: the launch Window's setting applies to every Window; a secondary Window's setting does not select its own coordinate mode.
+- Pass a `WindowSettings` value to `runApp<tcApp>()` for the first window, or to `createWindow()` for another one. Each setter returns the same settings object, so calls can be chained.
+- Defaults: size 1280 × 720, title `"TrussC App"`, `highDpi` on, `pixelPerfect` off, `sampleCount` 4 (MSAA), `fullscreen` off, `decorated` on.
+- Normally sizes and drawing coordinates use logical pixels. With `pixelPerfect`, the requested size is treated as framebuffer pixels and drawing coordinates match the framebuffer. In v0.8.0 this setting applies to the whole app: the launch window's setting is used for every window, and a secondary window's own setting does not change its coordinate mode.
+- Turning `decorated` off requests a borderless window on desktop platforms.
+- `swapInterval` defaults to `1`, which syncs presentation to the display; `0` turns that off. `setSwapInterval()` sets presentation separately from the update and draw rates.
 '''
 details.ja = '''
-- `WindowSettings` を `runApp<AppClass>()` に渡します。セッターは同じ設定オブジェクトを返すためチェインできます。デフォルトのサイズは 1280 × 720、タイトルは `"TrussC App"` です。
-- `highDpi` のデフォルトは `true`、`pixelPerfect` は `false` です。通常、サイズと描画座標は論理ピクセルを使います。ピクセルパーフェクトモードでは指定サイズをフレームバッファーのピクセル数として扱い、描画座標もフレームバッファーのサイズに合わせます。
-- `sampleCount` は MSAA の指定で、デフォルトは `4` です。`fullscreen` は `false`、`decorated` は `true` がデフォルトです。装飾を無効にすると、デスクトップでは枠なしウィンドウを要求します。
-- `swapInterval` のデフォルトはディスプレイに同期する `1` で、`0` は同期を無効にします。`setSwapInterval()` で更新や描画のレートとは別に表示間隔を設定します。
-- v0.8.0 ではプロセス全体で共通です。起動時の Window の設定がすべての Window に適用され、副ウィンドウの設定では独自の座標モードを選べません。
+- 最初のウィンドウなら `runApp<tcApp>()` に、ほかのウィンドウなら `createWindow()` に `WindowSettings` を渡します。各セッターは同じ設定オブジェクトを返すため、続けて呼べます。
+- 既定値は、サイズ 1280 × 720、タイトル `"TrussC App"`、`highDpi` オン、`pixelPerfect` オフ、`sampleCount` 4（MSAA）、`fullscreen` オフ、`decorated` オンです。
+- 通常、サイズと描画の座標は論理ピクセルです。`pixelPerfect` にすると、指定したサイズをフレームバッファのピクセルとして扱い、描画の座標もフレームバッファに合わせます。v0.8.0 ではこの設定はアプリ全体に効きます。起動時のウィンドウの設定がすべてのウィンドウに使われ、2 つ目以降のウィンドウの設定で座標の扱いは変わりません。
+- `decorated` をオフにすると、デスクトップでは枠のないウィンドウを要求します。
+- `swapInterval` の既定値は `1` で、画面の更新に表示を合わせます。`0` にするとこの同期をやめます。`setSwapInterval()` は、update や draw のレートとは別に表示のタイミングを設定します。
 '''
 details.ko = '''
-- `WindowSettings`를 `runApp<AppClass>()`에 전달합니다. setter는 같은 설정 객체를 반환하므로 체이닝할 수 있습니다. 기본 크기는 1280 × 720이고 제목은 `"TrussC App"`입니다.
-- `highDpi`의 기본값은 `true`, `pixelPerfect`는 `false`입니다. 보통 크기와 그리기 좌표는 논리 픽셀을 사용합니다. 픽셀 퍼펙트 모드에서는 요청한 크기를 프레임버퍼 픽셀 수로 해석하고 그리기 좌표도 프레임버퍼 크기에 맞춥니다.
-- `sampleCount`는 MSAA 요청이며 기본값은 `4`입니다. `fullscreen`의 기본값은 `false`, `decorated`는 `true`입니다. 장식을 끄면 데스크톱에서 테두리 없는 윈도우를 요청합니다.
-- `swapInterval`의 기본값은 디스플레이에 동기화하는 `1`이며, `0`은 동기화를 끕니다. `setSwapInterval()`로 갱신 및 그리기 실행률과 별도로 표시 간격을 설정합니다.
-- v0.8.0에서는 프로세스 전체에 공통입니다. 시작 Window의 설정이 모든 Window에 적용되며 보조 Window의 설정으로 별도의 좌표 모드를 선택할 수 없습니다.
+- 첫 창이라면 `runApp<tcApp>()`에, 다른 창이라면 `createWindow()`에 `WindowSettings`를 넘깁니다. 각 setter는 같은 설정 객체를 반환하므로 이어서 호출할 수 있습니다.
+- 기본값은 크기 1280 × 720, 제목 `"TrussC App"`, `highDpi` 켜짐, `pixelPerfect` 꺼짐, `sampleCount` 4(MSAA), `fullscreen` 꺼짐, `decorated` 켜짐입니다.
+- 보통 크기와 그리기 좌표는 논리 픽셀입니다. `pixelPerfect`를 켜면 지정한 크기를 프레임버퍼 픽셀로 다루고, 그리기 좌표도 프레임버퍼에 맞춥니다. v0.8.0에서는 이 설정이 앱 전체에 적용됩니다. 시작 시 창의 설정이 모든 창에 쓰이며, 두 번째 이후 창의 설정으로는 좌표 방식이 바뀌지 않습니다.
+- `decorated`를 끄면 데스크톱에서 테두리 없는 창을 요청합니다.
+- `swapInterval`의 기본값은 `1`이며 화면 갱신에 표시를 맞춥니다. `0`이면 이 동기화를 끕니다. `setSwapInterval()`은 update나 draw 빈도와 별개로 표시 타이밍을 설정합니다.
 '''
 related = ["RuntimeSettings", "runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize", "WindowSettings::setPipelinePoolSize"]
 snippet = '''
@@ -41012,16 +41019,22 @@ description.en = "Specifies whether window coordinates use framebuffer pixels."
 description.ja = "ウィンドウ座標にフレームバッファのピクセルを使うか指定する。"
 description.ko = "윈도우 좌표에 프레임버퍼 픽셀을 사용할지 지정한다."
 details.en = '''
-- Startup size conversion is described in `WindowSettings::setSize`; high-DPI framebuffer allocation is controlled separately by `WindowSettings::highDpi`.
-- In v0.8.0 this is process-wide: the launch Window's setting applies to every Window; a secondary Window's setting does not select its own coordinate mode.
+- `false` (the default): sizes and drawing coordinates use logical pixels. `true`: the requested window size is treated as framebuffer pixels, and drawing coordinates match the framebuffer.
+- How the startup size is converted is described in `WindowSettings::setSize`. Whether the framebuffer uses the full high-DPI resolution is a separate setting, `WindowSettings::highDpi`.
+- In v0.8.0 it applies to the whole app: the launch window's setting is used for every window, and a secondary window's own setting does not change its coordinate mode.
+- `Window::getWidth()`, `getHeight()` and `setSize()` always use logical points, whatever this setting is.
 '''
 details.ja = '''
-- 起動時のサイズ変換は `WindowSettings::setSize` を参照してください。高 DPI のフレームバッファを確保するかどうかは `WindowSettings::highDpi` で別に指定します。
-- v0.8.0 ではプロセス全体で共通です。起動時の Window の設定がすべての Window に適用され、副ウィンドウの設定では独自の座標モードを選べません。
+- `false`（既定値）では、サイズと描画の座標は論理ピクセルです。`true` では、指定したウィンドウサイズをフレームバッファのピクセルとして扱い、描画の座標もフレームバッファに合わせます。
+- 起動時のサイズの変換方法は `WindowSettings::setSize` を参照してください。フレームバッファを高 DPI の解像度で確保するかどうかは、別の設定 `WindowSettings::highDpi` で決まります。
+- v0.8.0 ではアプリ全体に効きます。起動時のウィンドウの設定がすべてのウィンドウに使われ、2 つ目以降のウィンドウの設定で座標の扱いは変わりません。
+- `Window::getWidth()`・`getHeight()`・`setSize()` は、この設定に関係なく常に論理ポイントを使います。
 '''
 details.ko = '''
-- 시작 시 크기 변환은 `WindowSettings::setSize`에 설명되어 있습니다. 고 DPI 프레임버퍼 할당 여부는 `WindowSettings::highDpi`에서 별도로 지정합니다.
-- v0.8.0에서는 프로세스 전체에 공통입니다. 시작 Window의 설정이 모든 Window에 적용되며 보조 Window의 설정으로 별도의 좌표 모드를 선택할 수 없습니다.
+- `false`(기본값)에서는 크기와 그리기 좌표가 논리 픽셀입니다. `true`에서는 지정한 창 크기를 프레임버퍼 픽셀로 다루고, 그리기 좌표도 프레임버퍼에 맞춥니다.
+- 시작 시 크기 변환 방식은 `WindowSettings::setSize`를 참조하세요. 프레임버퍼를 고 DPI 해상도로 확보할지는 별도의 설정 `WindowSettings::highDpi`가 정합니다.
+- v0.8.0에서는 앱 전체에 적용됩니다. 시작 시 창의 설정이 모든 창에 쓰이며, 두 번째 이후 창의 설정으로는 좌표 방식이 바뀌지 않습니다.
+- `Window::getWidth()`, `getHeight()`, `setSize()`는 이 설정과 관계없이 항상 논리 포인트를 사용합니다.
 '''
 
 
@@ -41096,16 +41109,25 @@ description.en = "Sets whether window coordinates use framebuffer pixels."
 description.ja = "ウィンドウ座標にフレームバッファのピクセルを使うか設定する。"
 description.ko = "윈도우 좌표에 프레임버퍼 픽셀을 사용할지 설정한다."
 details.en = '''
-- Returns `WindowSettings&`; see `WindowSettings::setSize` for the shared setter rules.
-- In v0.8.0 this is process-wide: the launch Window's setting applies to every Window; a secondary Window's setting does not select its own coordinate mode.
+- Sets `pixelPerfect` and returns the same `WindowSettings&`, so calls can be chained (see `WindowSettings::setSize` for the shared setter rules).
+- `false` (the default): sizes and drawing coordinates use logical pixels. `true`: the requested window size is treated as framebuffer pixels, and drawing coordinates match the framebuffer.
+- How the startup size is converted is described in `WindowSettings::setSize`. Whether the framebuffer uses the full high-DPI resolution is a separate setting, `WindowSettings::highDpi`.
+- In v0.8.0 it applies to the whole app: the launch window's setting is used for every window, and a secondary window's own setting does not change its coordinate mode.
+- `Window::getWidth()`, `getHeight()` and `setSize()` always use logical points, whatever this setting is.
 '''
 details.ja = '''
-- `WindowSettings&` を返します。セッター共通の扱いは `WindowSettings::setSize` を参照してください。
-- v0.8.0 ではプロセス全体で共通です。起動時の Window の設定がすべての Window に適用され、副ウィンドウの設定では独自の座標モードを選べません。
+- `pixelPerfect` を設定し、同じ `WindowSettings&` を返すため、続けて呼べます（セッター共通の決まりは `WindowSettings::setSize` を参照）。
+- `false`（既定値）では、サイズと描画の座標は論理ピクセルです。`true` では、指定したウィンドウサイズをフレームバッファのピクセルとして扱い、描画の座標もフレームバッファに合わせます。
+- 起動時のサイズの変換方法は `WindowSettings::setSize` を参照してください。フレームバッファを高 DPI の解像度で確保するかどうかは、別の設定 `WindowSettings::highDpi` で決まります。
+- v0.8.0 ではアプリ全体に効きます。起動時のウィンドウの設定がすべてのウィンドウに使われ、2 つ目以降のウィンドウの設定で座標の扱いは変わりません。
+- `Window::getWidth()`・`getHeight()`・`setSize()` は、この設定に関係なく常に論理ポイントを使います。
 '''
 details.ko = '''
-- `WindowSettings&`를 반환합니다. 설정 함수의 공통 동작은 `WindowSettings::setSize`에 설명되어 있습니다.
-- v0.8.0에서는 프로세스 전체에 공통입니다. 시작 Window의 설정이 모든 Window에 적용되며 보조 Window의 설정으로 별도의 좌표 모드를 선택할 수 없습니다.
+- `pixelPerfect`를 설정하고 같은 `WindowSettings&`를 반환하므로 이어서 호출할 수 있습니다(setter 공통 규칙은 `WindowSettings::setSize` 참조).
+- `false`(기본값)에서는 크기와 그리기 좌표가 논리 픽셀입니다. `true`에서는 지정한 창 크기를 프레임버퍼 픽셀로 다루고, 그리기 좌표도 프레임버퍼에 맞춥니다.
+- 시작 시 크기 변환 방식은 `WindowSettings::setSize`를 참조하세요. 프레임버퍼를 고 DPI 해상도로 확보할지는 별도의 설정 `WindowSettings::highDpi`가 정합니다.
+- v0.8.0에서는 앱 전체에 적용됩니다. 시작 시 창의 설정이 모든 창에 쓰이며, 두 번째 이후 창의 설정으로는 좌표 방식이 바뀌지 않습니다.
+- `Window::getWidth()`, `getHeight()`, `setSize()`는 이 설정과 관계없이 항상 논리 포인트를 사용합니다.
 '''
 
 ["WindowSettings::setSampleCount"]
@@ -42446,24 +42468,42 @@ description.en = "Assigns an image to a mouse cursor slot."
 description.ja = "マウスカーソルのスロットに画像を割り当てる。"
 description.ko = "마우스 커서 슬롯에 이미지를 할당한다."
 details.en = '''
-- Pass `cursor, width, height, pixels` with tightly packed RGBA8 data containing `width * height * 4` bytes, or pass `cursor, image`; the `Image` overload forwards its CPU pixels without converting the channel count or format.
-- `hotspotX` and `hotspotY` specify the click point in image pixels from the top-left corner and both default to zero.
-- Bind a slot such as `Cursor::Custom0` through `Cursor::Custom15`, then select it with `setCursor`; binding replaces the slot's previous image and immediately updates it if selected. `unbindCursorImage` releases the binding.
-- Does nothing before native app startup or after native app cleanup, including in a headless app.
+- Assigns an image to a custom slot, `Cursor::Custom0` to `Cursor::Custom15`, so that `setCursor` can select it.
+- Pass either `cursor, width, height, pixels`, where `pixels` is tightly packed RGBA8 data of `width * height * 4` bytes, or `cursor, image`. The `Image` overload passes the image's CPU pixels as they are, without converting the channel count or format, so give it an RGBA8 image.
+- `hotspotX` and `hotspotY` are the click point, in image pixels from the top-left corner. Both default to `0`.
+- Binding replaces the slot's previous image. If the slot is selected, the cursor changes at once. `unbindCursorImage` removes the image.
+- The cursor is shared by the whole app, not set per window: it appears in whichever window the pointer is over.
+- It does nothing while the app is not running: before the native app has started, after it has been cleaned up, and in a headless app.
 '''
 details.ja = '''
-- `cursor, width, height, pixels` に、`width * height * 4` バイトの隙間なく並んだ RGBA8 データを渡すか、`cursor, image` を渡します。`Image` 版は CPU 側のピクセルをそのまま渡し、チャンネル数や形式を変換しません。
-- `hotspotX` と `hotspotY` は画像の左上を基準とするクリック位置をピクセル単位で指定します。どちらも既定値はゼロです。
-- `Cursor::Custom0` から `Cursor::Custom15` などのスロットに割り当ててから、`setCursor` で選択します。以前の画像は置き換えられ、選択中なら表示も直ちに更新されます。`unbindCursorImage` で割り当てを解除します。
-- ネイティブアプリの起動前や cleanup 後、およびヘッドレスアプリでは何もしません。
+- カスタムスロット（`Cursor::Custom0`〜`Cursor::Custom15`）に画像を割り当て、`setCursor` で選べるようにします。
+- 引数は `cursor, width, height, pixels` か `cursor, image` です。`pixels` は `width * height * 4` バイトの、隙間なく並んだ RGBA8 のデータです。`Image` 版は画像の CPU 側のピクセルをそのまま渡し、チャンネル数や形式は変換しないため、RGBA8 の画像を渡してください。
+- `hotspotX` と `hotspotY` はクリック位置で、画像の左上からのピクセル数です。どちらも既定値は `0` です。
+- 割り当てると、そのスロットの前の画像は置き換えられます。そのスロットを選択中なら、カーソルはすぐに変わります。画像を外すには `unbindCursorImage` を使います。
+- カーソルはウィンドウごとではなく、アプリ全体で 1 つです。マウスポインターが乗っているウィンドウに表示されます。
+- アプリが動いていない間は何もしません。ネイティブのアプリが起動する前、後片付けが終わったあと、ヘッドレスアプリの中がこれに当たります。
 '''
 details.ko = '''
-- `cursor, width, height, pixels`에 `width * height * 4`바이트의 빈틈없이 나열된 RGBA8 데이터를 전달하거나 `cursor, image`를 전달합니다. `Image` 버전은 채널 수나 형식을 변환하지 않고 CPU 픽셀을 그대로 전달합니다.
-- `hotspotX`와 `hotspotY`는 이미지 왼쪽 위를 기준으로 클릭 지점을 픽셀 단위로 지정하며, 둘 다 기본값은 0입니다.
-- `Cursor::Custom0`부터 `Cursor::Custom15` 등의 슬롯에 이미지를 할당한 다음 `setCursor`로 선택합니다. 기존 이미지는 교체되며, 선택된 슬롯이면 표시도 즉시 갱신됩니다. `unbindCursorImage`로 할당을 해제합니다.
-- 네이티브 앱 시작 전이나 cleanup 후, 그리고 헤드리스 앱에서는 아무 동작도 하지 않습니다.
+- 사용자 지정 슬롯(`Cursor::Custom0`~`Cursor::Custom15`)에 이미지를 할당하여 `setCursor`로 선택할 수 있게 합니다.
+- 인수는 `cursor, width, height, pixels` 또는 `cursor, image`입니다. `pixels`는 `width * height * 4`바이트의 빈틈없이 채워진 RGBA8 데이터입니다. `Image` 버전은 이미지의 CPU 쪽 픽셀을 그대로 넘기며 채널 수나 형식을 변환하지 않으므로 RGBA8 이미지를 넘기세요.
+- `hotspotX`와 `hotspotY`는 클릭 위치로, 이미지 왼쪽 위에서부터의 픽셀 수입니다. 둘 다 기본값은 `0`입니다.
+- 할당하면 그 슬롯의 이전 이미지는 교체됩니다. 그 슬롯이 선택되어 있으면 커서가 바로 바뀝니다. 이미지를 해제하려면 `unbindCursorImage`를 사용합니다.
+- 커서는 창마다가 아니라 앱 전체에서 하나입니다. 마우스 포인터가 올라가 있는 창에 표시됩니다.
+- 앱이 실행 중이 아닐 때는 아무 동작도 하지 않습니다. 네이티브 앱이 시작되기 전, 정리가 끝난 뒤, 헤드리스 앱 안이 이에 해당합니다.
 '''
 related = ["Cursor", "Image", "unbindCursorImage", "setCursor"]
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+Image cursorImage;   // an RGBA8 image, e.g. a PNG with alpha
+
+// tcApp.cpp
+void tcApp::setup() {
+    cursorImage.load("cursor.png");
+    bindCursorImage(Cursor::Custom0, cursorImage, 4, 4);   // click point 4 px from the top-left
+    setCursor(Cursor::Custom0);
+}
+'''
+
 
 ["bringWindowToFront"]
 category = "window_system"
@@ -44598,7 +44638,7 @@ description.en = "Asks the process to quit, with an exit code."
 description.ja = "終了コードを指定して、プロセスの終了を要求する。"
 description.ko = "종료 코드를 지정해 프로세스 종료를 요청한다."
 details.en = '''
-- `exitApp(code)` sets the exit code (default `0`) and returns at once. Use a nonzero code to report failure. On Windows and Linux, `runApp()` returns this code to `main()`. On macOS, normal quit ends the process after cleanup without returning; see `runApp`.
+- `exitApp(code)` sets the exit code (default `0`) and returns at once. Use a nonzero code to report failure. On Windows and Linux, `runApp()` returns this code to `main()`. On macOS, a normal quit does not return from `runApp()`: the process ends after cleanup with this code (see `runApp`).
 - **The quit can be cancelled.** At the next safe point, TrussC sends `exitRequested`; if no listener cancels it, every App ends normally (`exit()` and `cleanup()`) and the process ends. See `RuntimeEvents::exitRequested`.
 - `requestExitApp()` does the same without changing the exit code.
 - It does not close a particular window and does not send `closeRequested`.
@@ -44607,20 +44647,20 @@ details.en = '''
 - On iOS and Android this does nothing: the OS decides when the app ends.
 '''
 details.ja = '''
-- `exitApp(code)` は終了コード（既定値 `0`）を設定して、すぐに戻ります。失敗を伝えたいときは 0 以外のコードを使ってください。Windows と Linux では `runApp()` がこのコードを `main()` に返します。macOS の通常終了は cleanup 後にプロセスを終了し、戻りません。`runApp` を参照してください。
-- **この終了は取り消せます。** 次の安全なタイミングで TrussC が `exitRequested` を送り、どのリスナーも取り消さなければ、すべての App が通常どおり終わり（`exit()` と `cleanup()`）、プロセスが終了します。詳しくは `RuntimeEvents::exitRequested` を参照してください。
+- `exitApp(code)` は終了コード（既定値 `0`）を設定して、すぐに戻ります。失敗を伝えたいときは 0 以外のコードを使ってください。Windows と Linux では、`runApp()` がこのコードを `main()` に返します。macOS の通常の終了では `runApp()` は戻らず、cleanup のあとにこのコードでプロセスが終了します（`runApp` を参照）。
+- **終了は取り消せます。** 次の安全なタイミングで TrussC が `exitRequested` を送り、どのリスナーも取り消さなければ、すべての App が通常どおり終わり（`exit()` と `cleanup()`）、プロセスが終了します。`RuntimeEvents::exitRequested` を参照してください。
 - `requestExitApp()` は、終了コードを変えずに同じことをします。
-- 特定のウィンドウを閉じるわけではなく、`closeRequested` も送りません。
-- ほかのスレッドから呼ぶこともでき、その場合はメインスレッドに要求が渡されます。
+- 特定のウィンドウは閉じず、`closeRequested` も送りません。
+- ほかのスレッドからも呼べます。要求はメインスレッドに渡されます。
 - `App::exit()` や `cleanup()` の中、およびプロセスがすでに終了処理に入っている間は何もせず、終了コードも変わりません。
-- iOS と Android では何もしません。アプリをいつ終わらせるかは OS が決めます。
+- iOS と Android では何もしません。アプリをいつ終了させるかは OS が決めます。
 '''
 details.ko = '''
-- `exitApp(code)`는 종료 코드(기본값 `0`)를 설정하고 바로 반환합니다. 실패를 알리려면 0이 아닌 코드를 사용하세요. Windows와 Linux에서는 `runApp()`이 이 코드를 `main()`에 반환합니다. macOS의 정상 종료는 cleanup 후 프로세스를 끝내며 반환하지 않습니다. `runApp`을 참조하세요.
-- **이 종료는 취소될 수 있습니다.** 다음 안전한 시점에 TrussC가 `exitRequested`를 보내고, 어떤 리스너도 취소하지 않으면 모든 App이 정상적으로 끝나고(`exit()`와 `cleanup()`) 프로세스가 종료됩니다. 자세한 내용은 `RuntimeEvents::exitRequested`를 참조하세요.
-- `requestExitApp()`은 종료 코드를 바꾸지 않고 같은 동작을 합니다.
-- 특정 창을 닫는 것이 아니며, `closeRequested`도 보내지 않습니다.
-- 다른 스레드에서도 호출할 수 있으며, 그 경우 요청이 메인 스레드로 전달됩니다.
+- `exitApp(code)`는 종료 코드(기본값 `0`)를 설정하고 바로 반환합니다. 실패를 알리려면 0이 아닌 코드를 사용하세요. Windows와 Linux에서는 `runApp()`이 이 코드를 `main()`에 반환합니다. macOS의 정상 종료에서는 `runApp()`이 반환되지 않고, cleanup 뒤에 이 코드로 프로세스가 끝납니다(`runApp` 참조).
+- **종료는 취소할 수 있습니다.** 다음 안전한 시점에 TrussC가 `exitRequested`를 보내고, 어떤 리스너도 취소하지 않으면 모든 App이 정상적으로 끝나며(`exit()`와 `cleanup()`) 프로세스가 종료됩니다. `RuntimeEvents::exitRequested`를 참조하세요.
+- `requestExitApp()`은 종료 코드를 바꾸지 않고 같은 일을 합니다.
+- 특정 창을 닫지 않으며 `closeRequested`도 보내지 않습니다.
+- 다른 스레드에서도 호출할 수 있습니다. 요청은 메인 스레드로 전달됩니다.
 - `App::exit()`나 `cleanup()` 안, 그리고 프로세스가 이미 종료 처리 중일 때는 아무 동작도 하지 않으며 종료 코드도 바뀌지 않습니다.
 - iOS와 Android에서는 아무 동작도 하지 않습니다. 앱을 언제 끝낼지는 OS가 정합니다.
 '''
@@ -45371,22 +45411,19 @@ description.en = "Returns clipboard text."
 description.ja = "クリップボードのテキストを返す。"
 description.ko = "클립보드의 텍스트를 반환한다."
 details.en = '''
-- Returns a `string` copy of the clipboard text; desktop implementations query the system clipboard, and disabled clipboard support returns an empty string.
-- Web returns the buffer populated by browser paste events rather than querying the clipboard synchronously; iOS and Android return the internal buffer without reading the system clipboard.
-- TrussC imposes no clipboard text size limit and does not truncate text; storage grows with the actual content. Allocation and platform limits still apply.
-- If the underlying clipboard read returns a null pointer, returns an empty string.
+- Returns a copy of the clipboard text as a `string`. On desktop it reads the system clipboard. If clipboard support is disabled, or the read returns nothing, it returns an empty string.
+- On the web it returns the text from the browser's paste events, instead of reading the clipboard at that moment. On iOS and Android it returns TrussC's internal buffer and does not read the system clipboard.
+- TrussC sets no size limit and does not cut the text; memory is allocated to fit it. Only the limits of available memory and of the platform apply.
 '''
 details.ja = '''
-- クリップボードのテキストを `string` にコピーして返します。デスクトップ実装はシステムのクリップボードを読み取り、クリップボード機能が無効な場合は空文字列を返します。
-- Web では同期的にクリップボードを読み取らず、ブラウザの貼り付けイベントで更新されたバッファを返します。iOS と Android ではシステムのクリップボードを読み取らず、内部バッファを返します。
-- クリップボードのテキストサイズに TrussC の上限はなく、切り詰めません。実際の内容に合わせてメモリを確保します。メモリ確保とプラットフォームの制約は適用されます。
-- 内部のクリップボード読み取りがヌルポインターを返した場合は、空文字列を返します。
+- クリップボードのテキストを `string` のコピーで返します。デスクトップではシステムのクリップボードを読みます。クリップボードの機能が無効な場合や、読み取りで何も得られなかった場合は、空の文字列を返します。
+- Web では、その場でクリップボードを読むのではなく、ブラウザの貼り付けイベントで受け取ったテキストを返します。iOS と Android では TrussC 内部のバッファーを返し、システムのクリップボードは読みません。
+- サイズについて、TrussC は上限を設けず、テキストを切り詰めません。内容に合わせてメモリを確保し、制約になるのは使えるメモリとプラットフォーム側の制限だけです。
 '''
 details.ko = '''
-- 클립보드 텍스트를 `string`으로 복사해 반환합니다. 데스크톱 구현은 시스템 클립보드를 읽으며, 클립보드 기능이 비활성화되어 있으면 빈 문자열을 반환합니다.
-- Web에서는 클립보드를 동기식으로 읽지 않고 브라우저 붙여넣기 이벤트로 갱신된 버퍼를 반환합니다. iOS와 Android에서는 시스템 클립보드를 읽지 않고 내부 버퍼를 반환합니다.
-- TrussC는 클립보드 텍스트 크기를 제한하거나 자르지 않습니다. 실제 내용에 맞춰 메모리를 할당합니다. 메모리 할당과 플랫폼 제약은 적용됩니다.
-- 내부 클립보드 읽기가 널 포인터를 반환하면 빈 문자열을 반환합니다.
+- 클립보드의 텍스트를 `string` 복사본으로 반환합니다. 데스크톱에서는 시스템 클립보드를 읽습니다. 클립보드 기능이 비활성화되어 있거나 읽기에서 아무것도 얻지 못하면 빈 문자열을 반환합니다.
+- 웹에서는 그 자리에서 클립보드를 읽지 않고, 브라우저의 붙여넣기 이벤트로 받은 텍스트를 반환합니다. iOS와 Android에서는 TrussC 내부 버퍼를 반환하며 시스템 클립보드는 읽지 않습니다.
+- 크기에 대해 TrussC는 상한을 두지 않으며 텍스트를 자르지 않습니다. 내용에 맞춰 메모리를 할당하며, 제약이 되는 것은 사용할 수 있는 메모리와 플랫폼 쪽 제한뿐입니다.
 '''
 related = ["setClipboardString"]
 
@@ -45474,13 +45511,16 @@ description.en = "Returns the selected mouse cursor shape."
 description.ja = "選択中のマウスカーソル形状を返す。"
 description.ko = "선택된 마우스 커서 모양을 반환한다."
 details.en = '''
-- Returns the process-wide native cursor shape, including custom slots; visibility is separate.
+- Returns the selected `Cursor` shape, including custom slots. Whether the cursor is shown is a separate setting (`showCursor()` / `hideCursor()`).
+- The cursor is shared by the whole app, not set per window: it appears in whichever window the pointer is over.
 '''
 details.ja = '''
-- custom slot を含むプロセス共通の native cursor 形状を返します。表示状態とは別です。
+- 選択中の `Cursor` の形を返します。カスタムスロットも含みます。カーソルを表示しているかどうかは別の設定です（`showCursor()` / `hideCursor()`）。
+- カーソルはウィンドウごとではなく、アプリ全体で 1 つです。マウスポインターが乗っているウィンドウに表示されます。
 '''
 details.ko = '''
-- custom slot을 포함한 프로세스 공통 native cursor 모양을 반환합니다. 표시 상태와는 별개입니다.
+- 선택된 `Cursor` 모양을 반환합니다. 사용자 지정 슬롯도 포함합니다. 커서가 표시되어 있는지는 별도의 설정입니다(`showCursor()` / `hideCursor()`).
+- 커서는 창마다가 아니라 앱 전체에서 하나입니다. 마우스 포인터가 올라가 있는 창에 표시됩니다.
 '''
 related = ["Cursor", "setCursor"]
 
@@ -46756,15 +46796,15 @@ description.ja = "固定レート更新のステップ数の上限を返す。"
 description.ko = "고정 레이트 업데이트 스텝 수의 상한을 반환한다."
 details.en = '''
 - Returns the shared `int` set by `setMaxUpdateSteps()`, initially `10`; it limits fixed-rate updates per window tick and per `runHeadlessApp` loop pass.
-- Zero or a negative value removes the configured cap; when capped, pending whole steps beyond the limit are dropped with one warning per stall rather than replayed.
+- Zero or a negative value removes the configured cap; when capped, pending whole steps beyond the limit are dropped rather than replayed, with one warning per stall in each loop (one per Window, or the headless loop).
 '''
 details.ja = '''
 - `setMaxUpdateSteps()` で設定した共通の `int` 値を返し、初期値は `10` です。メインループの1フレーム、または `runHeadlessApp` のループ1周で行う固定レート更新の回数を制限します。
-- ゼロ以下では設定による上限がなくなります。上限がある場合、超過した保留中の整数ステップ分の時間は再実行されずに破棄され、停滞ごとに警告が1回出ます。
+- ゼロ以下では設定による上限がなくなります。上限がある場合、超過した保留中の整数ステップ分の時間は再実行されずに破棄されます。警告は各ループ（Window ごと、またはヘッドレスのループ）で停滞ごとに 1 回出ます。
 '''
 details.ko = '''
 - `setMaxUpdateSteps()`로 설정한 공통 `int` 값을 반환하며 초기값은 `10`입니다. 메인 루프의 프레임당 또는 `runHeadlessApp`의 루프 1회당 고정 레이트 업데이트 횟수를 제한합니다.
-- 0 이하이면 설정에 의한 상한이 없어집니다. 상한이 있으면 이를 초과하는 대기 중인 정수 스텝의 시간은 재실행되지 않고 버려지며 정체 구간마다 경고가 한 번 기록됩니다.
+- 0 이하이면 설정에 의한 상한이 없어집니다. 상한이 있으면 이를 초과하는 대기 중인 정수 스텝의 시간은 재실행되지 않고 버려지며, 경고는 각 루프(창마다, 또는 헤드리스 루프)에서 정체 구간마다 한 번 기록됩니다.
 '''
 related = ["setMaxUpdateSteps", "setIndependentFps"]
 
@@ -47979,19 +48019,19 @@ description.en = "Hides the mouse cursor."
 description.ja = "マウスカーソルを非表示にする。"
 description.ko = "마우스 커서를 숨긴다."
 details.en = '''
-- Hides the process-wide native cursor. Cursor visibility is shared between Windows.
-- Hides the cursor until `showCursor()` is called; repeated calls do not require matching show calls.
-- Does nothing before native app startup or after native app cleanup, including in a headless app.
+- Hides the mouse cursor until `showCursor()` is called. Calling it several times does not need the same number of `showCursor()` calls.
+- The cursor is shared by the whole app, not set per window: it appears in whichever window the pointer is over.
+- It does nothing while the app is not running: before the native app has started, after it has been cleaned up, and in a headless app.
 '''
 details.ja = '''
-- プロセス共通の native cursor を隠します。表示状態は Window 間で共通です。
-- `showCursor()` が呼ばれるまでカーソルを非表示にします。繰り返し呼び出しても、同じ回数だけ表示操作を行う必要はありません。
-- ネイティブアプリの起動前や cleanup 後、およびヘッドレスアプリでは何もしません。
+- `showCursor()` を呼ぶまでマウスカーソルを隠します。何回呼んでも、`showCursor()` を同じ回数呼ぶ必要はありません。
+- カーソルはウィンドウごとではなく、アプリ全体で 1 つです。マウスポインターが乗っているウィンドウに表示されます。
+- アプリが動いていない間は何もしません。ネイティブのアプリが起動する前、後片付けが終わったあと、ヘッドレスアプリの中がこれに当たります。
 '''
 details.ko = '''
-- 프로세스 공통 native cursor를 숨깁니다. 표시 상태는 Window 사이에서 공유합니다.
-- `showCursor()`가 호출될 때까지 커서를 숨깁니다. 여러 번 호출해도 같은 횟수만큼 표시 함수를 호출할 필요는 없습니다.
-- 네이티브 앱 시작 전이나 cleanup 후, 그리고 헤드리스 앱에서는 아무 동작도 하지 않습니다.
+- `showCursor()`를 호출할 때까지 마우스 커서를 숨깁니다. 여러 번 호출해도 `showCursor()`를 같은 횟수만큼 호출할 필요는 없습니다.
+- 커서는 창마다가 아니라 앱 전체에서 하나입니다. 마우스 포인터가 올라가 있는 창에 표시됩니다.
+- 앱이 실행 중이 아닐 때는 아무 동작도 하지 않습니다. 네이티브 앱이 시작되기 전, 정리가 끝난 뒤, 헤드리스 앱 안이 이에 해당합니다.
 '''
 related = ["showCursor", "setCursor"]
 snippet = '''
@@ -50581,28 +50621,52 @@ description.en = "Starts the application loop for an App subclass."
 description.ja = "App サブクラスのアプリケーションループを開始する。"
 description.ko = "App 서브클래스의 애플리케이션 루프를 시작한다."
 details.en = '''
-- Call `runApp<tcApp>(settings)` from `main()`, or return `TC_RUN_APP(tcApp, settings)` to support hot reload builds. `runApp` accepts an optional `WindowSettings` argument with default settings.
-- For process-wide startup options, pass `RuntimeSettings` as the second argument: `runApp<tcApp>(settings, runtimeSettings)`. The one-argument overload uses default runtime settings.
-- The framework creates and owns the App after graphics initialization. See `App` for setup, update, draw, shutdown, and callback thread rules.
-- On Windows and Linux, returns `1` if setup never began; otherwise returns the application exit code, normally `0` or the value passed to `exitApp(code)`. Returning `TC_RUN_APP(...)` from `main()` passes this status to the process. On macOS, normal quit ends the process through AppKit after cleanup with that exit code; `runApp` does not return. It returns only on startup failure.
-- On Linux, failure to open an X display aborts the process instead of returning a status.
-- Android stores the application descriptor and returns `0`; Web starts the browser-owned asynchronous loop and returns `0`. These return values do not report eventual shutdown.
+- Call it from `main()` with your App class: `return runApp<tcApp>(settings);`. To support hot reload builds, return `TC_RUN_APP(tcApp, settings)` instead (see `TC_RUN_APP`). The `WindowSettings` argument is optional; without it the default settings are used.
+- To set app-wide startup options, pass `RuntimeSettings` as the second argument. The one-argument form uses the default `RuntimeSettings`.
+
+```cpp
+RuntimeSettings runtime;
+runtime.reserveUniformBuffer(8 * 1024 * 1024);
+return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
+```
+
+- TrussC creates and owns the App after graphics are ready. For setup, update, draw, the ending, and which thread runs each callback, see `App`.
+- On Windows and Linux it returns `1` if `setup()` never began, and otherwise the exit code: normally `0`, or the value passed to `exitApp(code)`. Returning it from `main()`, as `TC_RUN_APP(...)` does, passes it to the process.
+- **On macOS, a normal quit does not return.** After cleanup, AppKit ends the process with the same exit code. `runApp` returns only when startup fails, so put work that must run at quit in `App::exit` or `cleanup()`, not after `runApp`.
+- On Linux, if no X display can be opened, the process aborts instead of returning.
+- On Android it stores the app description and returns `0`. On the web it starts the browser's asynchronous loop and returns `0`. On these platforms the return value says nothing about how the app ends.
 '''
 details.ja = '''
-- `main()` から `runApp<tcApp>(settings)` を呼ぶか、ホットリロードビルドにも対応するために `TC_RUN_APP(tcApp, settings)` を返してください。`runApp` の `WindowSettings` 引数は省略でき、その場合は既定の設定を使います。
-- プロセス全体の起動時設定には、第2引数に `RuntimeSettings` を渡します: `runApp<tcApp>(settings, runtimeSettings)`。1引数の形式は既定のランタイム設定を使います。
-- フレームワークはグラフィックスの初期化後に App を作成して所有します。setup、update、draw、終了処理、コールバックのスレッドの扱いは `App` を参照してください。
-- Windows と Linux では、setup が始まらなかった場合は `1` を返します。それ以外はアプリの終了コード（通常は `0` または `exitApp(code)` に渡した値）を返します。`main()` から `TC_RUN_APP(...)` を返すと、この値がプロセスの終了ステータスになります。macOS の通常終了は cleanup 後に AppKit がその終了コードでプロセスを終了し、`runApp` は戻りません。戻るのは起動に失敗した場合だけです。
-- Linux で X ディスプレイを開けない場合は、終了ステータスを返さずにプロセスを abort します。
-- Android ではアプリの設定情報を保存して `0` を返します。Web ではブラウザが管理する非同期ループを開始して `0` を返します。これらの戻り値は、その後の終了を報告するものではありません。
+- `main()` から App のクラスを指定して呼びます（`return runApp<tcApp>(settings);`）。ホットリロードのビルドにも対応させたい場合は、代わりに `TC_RUN_APP(tcApp, settings)` を return してください（`TC_RUN_APP` を参照）。`WindowSettings` の引数は省略でき、その場合は既定の設定が使われます。
+- アプリ全体の起動時の設定は、2 つ目の引数に `RuntimeSettings` を渡して指定します。引数が 1 つの形では、既定の `RuntimeSettings` が使われます。
+
+```cpp
+RuntimeSettings runtime;
+runtime.reserveUniformBuffer(8 * 1024 * 1024);
+return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
+```
+
+- App は、グラフィックスの準備ができたあとに TrussC が作成し、所有します。setup・update・draw・終了の流れや、各コールバックがどのスレッドで呼ばれるかは `App` を参照してください。
+- Windows と Linux では、`setup()` が一度も始まらなかった場合は `1` を、それ以外は終了コードを返します。終了コードは通常 `0` か、`exitApp(code)` に渡した値です。`TC_RUN_APP(...)` のように `main()` からこれを return すると、プロセスの終了コードになります。
+- **macOS では、通常の終了で runApp は戻りません。** cleanup のあと、AppKit が同じ終了コードでプロセスを終了させます。`runApp` が戻るのは起動に失敗したときだけなので、終了時に必ず行いたい処理は `runApp` のあとではなく、`App::exit` や `cleanup()` に書いてください。
+- Linux で X ディスプレイを開けなかった場合は、戻らずにプロセスが abort します。
+- Android ではアプリの記述情報を保存して `0` を返します。Web ではブラウザが管理する非同期ループを開始して `0` を返します。これらのプラットフォームの戻り値は、アプリがどう終わったかを表しません。
 '''
 details.ko = '''
-- `main()`에서 `runApp<tcApp>(settings)`를 호출하거나 핫 리로드 빌드도 지원하도록 `TC_RUN_APP(tcApp, settings)`를 반환하세요. `runApp`의 `WindowSettings` 인자는 생략할 수 있으며 이때 기본 설정을 사용합니다.
-- 프로세스 전체의 시작 설정은 두 번째 인수에 `RuntimeSettings`를 전달합니다: `runApp<tcApp>(settings, runtimeSettings)`. 인수가 하나인 형식은 기본 런타임 설정을 사용합니다.
-- 프레임워크는 그래픽 초기화 후 App을 생성하고 소유합니다. setup, update, draw, 종료 처리, 콜백 스레드 규칙은 `App`을 참조하세요.
-- Windows와 Linux에서는 setup이 시작되지 않았으면 `1`을 반환합니다. 그 외에는 앱 종료 코드(보통 `0` 또는 `exitApp(code)`에 전달한 값)를 반환합니다. `main()`에서 `TC_RUN_APP(...)`를 반환하면 이 값이 프로세스 종료 상태가 됩니다. macOS의 정상 종료는 cleanup 후 AppKit이 해당 종료 코드로 프로세스를 끝내므로 `runApp`은 반환하지 않습니다. 시작에 실패했을 때만 반환합니다.
-- Linux에서 X 디스플레이를 열지 못하면 상태를 반환하는 대신 프로세스를 abort합니다.
-- Android에서는 앱 설정 정보를 저장하고 `0`을 반환합니다. Web에서는 브라우저가 관리하는 비동기 루프를 시작하고 `0`을 반환합니다. 이 반환값은 이후의 종료를 보고하지 않습니다.
+- `main()`에서 App 클래스를 지정해 호출합니다(`return runApp<tcApp>(settings);`). 핫 리로드 빌드도 지원하려면 대신 `TC_RUN_APP(tcApp, settings)`를 return하세요(`TC_RUN_APP` 참조). `WindowSettings` 인수는 생략할 수 있으며, 그 경우 기본 설정이 사용됩니다.
+- 앱 전체의 시작 설정은 두 번째 인수로 `RuntimeSettings`를 넘겨 지정합니다. 인수가 하나인 형태에서는 기본 `RuntimeSettings`가 사용됩니다.
+
+```cpp
+RuntimeSettings runtime;
+runtime.reserveUniformBuffer(8 * 1024 * 1024);
+return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
+```
+
+- App은 그래픽 준비가 끝난 뒤 TrussC가 만들고 소유합니다. setup, update, draw, 종료의 흐름과 각 콜백이 어느 스레드에서 호출되는지는 `App`을 참조하세요.
+- Windows와 Linux에서는 `setup()`이 한 번도 시작되지 않았으면 `1`을, 그렇지 않으면 종료 코드를 반환합니다. 종료 코드는 보통 `0`이거나 `exitApp(code)`에 넘긴 값입니다. `TC_RUN_APP(...)`처럼 `main()`에서 이를 return하면 프로세스의 종료 코드가 됩니다.
+- **macOS에서는 정상 종료 시 runApp이 반환되지 않습니다.** cleanup 뒤에 AppKit이 같은 종료 코드로 프로세스를 끝냅니다. `runApp`이 반환되는 것은 시작에 실패했을 때뿐이므로, 종료 시 반드시 해야 할 처리는 `runApp` 뒤가 아니라 `App::exit`나 `cleanup()`에 작성하세요.
+- Linux에서 X 디스플레이를 열 수 없으면 반환하지 않고 프로세스가 abort됩니다.
+- Android에서는 앱 설명 정보를 저장하고 `0`을 반환합니다. 웹에서는 브라우저가 관리하는 비동기 루프를 시작하고 `0`을 반환합니다. 이 플랫폼들의 반환값은 앱이 어떻게 끝났는지를 나타내지 않습니다.
 '''
 related = ["WindowSettings", "runHeadlessApp", "events", "App", "exitApp"]
 snippet = '''
@@ -50622,6 +50686,7 @@ description.ko = "윈도우나 그래픽스 컨텍스트 없이 앱을 실행한
 details.en = '''
 - Pass the app class as the template argument, as in `runHeadlessApp<tcApp>()`. Optional `HeadlessSettings` sets the target update rate, which defaults to 60 updates per second; the function returns the process exit code.
 - It creates your App (this is the only way to make a headless App) and calls `setup()` once. Each step then calls `update()`. There is no window, GPU or `draw()`, and child nodes, mods and node timers are not updated (see the known issue below).
+- If `setup()` asks to quit and the quit is accepted, the App ends right after `setup()` returns, before audio callbacks, console commands and the first `update()`.
 - Updates use a fixed step, so `getDeltaTime()` is `1 / settings.targetFps`. Each loop pass runs at most `setMaxUpdateSteps()` steps, with a default limit of 10; a nonpositive limit removes the cap.
 - Excess whole steps after a stall or slow update are discarded with one warning per stall. Between passes, the loop sleeps until the next step is due, requesting at most 1 ms of sleep.
 - The runner's thread is used as the main thread, and queued `runOnMainThread` callbacks are processed between update passes.
@@ -50633,6 +50698,7 @@ details.en = '''
 details.ja = '''
 - `runHeadlessApp<tcApp>()` のように、アプリのクラスをテンプレート引数に指定します。省略可能な `HeadlessSettings` で目標更新レートを指定でき、既定値は毎秒 60 回です。プロセスの終了コードを返します。
 - App を作り（ヘッドレス App を作る方法はこれだけです）、`setup()` を 1 回呼びます。そのあとは各ステップで `update()` を呼びます。ウィンドウ、GPU、`draw()` はなく、子ノード、Mod、ノードのタイマーは更新されません（下の既知の問題を参照）。
+- `setup()` の中で終了を求め、それが受け入れられた場合、App は `setup()` から戻った直後に終わります。オーディオのコールバック、コンソールのコマンド、最初の `update()` より前です。
 - 更新は固定ステップで、`getDeltaTime()` は `1 / settings.targetFps` です。ループ 1 周の更新回数は `setMaxUpdateSteps()` の設定が上限で、既定値は 10 回です。0 以下を指定すると上限をなくします。
 - 停止や遅い更新処理によって上限を超えた分は、整数ステップ単位で捨て、停滞ごとに一度だけ警告します。ループの周回間では次のステップが必要になるまで待機し、スリープに指定する時間は最大 1 ms です。
 - 実行するスレッドをメインスレッドとして扱い、更新処理の周回間にキュー内の `runOnMainThread` コールバックを処理します。
@@ -50644,6 +50710,7 @@ details.ja = '''
 details.ko = '''
 - `runHeadlessApp<tcApp>()`처럼 앱 클래스를 템플릿 인자로 지정합니다. 선택적인 `HeadlessSettings`로 목표 갱신 속도를 지정하며 기본값은 초당 60회입니다. 프로세스 종료 코드를 반환합니다.
 - App을 만들고(헤드리스 App을 만드는 방법은 이것뿐입니다) `setup()`을 한 번 호출합니다. 그 뒤에는 각 단계마다 `update()`를 호출합니다. 창, GPU, `draw()`는 없으며, 자식 노드, Mod, 노드 타이머는 업데이트되지 않습니다(아래 알려진 문제 참조).
+- `setup()` 안에서 종료를 요청하고 그 요청이 받아들여지면, App은 `setup()`에서 돌아온 직후에 끝납니다. 오디오 콜백, 콘솔 명령, 첫 `update()`보다 먼저입니다.
 - 갱신은 고정 스텝을 사용하므로 `getDeltaTime()`은 `1 / settings.targetFps`입니다. 루프 한 회의 갱신 횟수는 `setMaxUpdateSteps()` 설정이 상한이며 기본값은 10회입니다. 0 이하이면 상한을 없앱니다.
 - 정지나 느린 갱신으로 상한을 초과한 시간은 정수 스텝 단위로 버리고 정체 구간마다 경고를 한 번 출력합니다. 루프 회차 사이에는 다음 스텝이 필요할 때까지 기다리며 슬립에 지정하는 시간은 최대 1ms입니다.
 - 실행하는 스레드를 메인 스레드로 취급하며 갱신 루프 회차 사이에 큐의 `runOnMainThread` 콜백을 처리합니다.
@@ -51239,19 +51306,19 @@ description.en = "Copies text to the clipboard."
 description.ja = "テキストをクリップボードにコピーする。"
 description.ko = "텍스트를 클립보드에 복사한다."
 details.en = '''
-- Pass a UTF-8 string; the function returns `void` and provides no success status.
-- TrussC imposes no clipboard text size limit and does not truncate text; storage grows with the actual content. Allocation and platform limits still apply.
-- On Web, call from a user input event handler to request a browser copy. On iOS and Android, only the internal clipboard buffer is updated; the system clipboard is not written.
+- Pass UTF-8 text. It returns nothing, so you cannot tell whether the copy succeeded.
+- TrussC sets no size limit and does not cut the text; memory is allocated to fit it. Only the limits of available memory and of the platform apply.
+- On the web, call it from a user input event handler (a key or click handler) to ask the browser to copy. On iOS and Android only TrussC's internal buffer is updated; the system clipboard is not written.
 '''
 details.ja = '''
-- UTF-8 の文字列を渡します。戻り値は `void` で、成功したかどうかは返しません。
-- クリップボードのテキストサイズに TrussC の上限はなく、切り詰めません。実際の内容に合わせてメモリを確保します。メモリ確保とプラットフォームの制約は適用されます。
-- Web では、ユーザー入力のイベントハンドラー内から呼び出してブラウザにコピーを要求してください。iOS と Android では内部クリップボードバッファーだけを更新し、システムのクリップボードには書き込みません。
+- UTF-8 のテキストを渡します。戻り値はないため、コピーに成功したかどうかはわかりません。
+- サイズについて、TrussC は上限を設けず、テキストを切り詰めません。内容に合わせてメモリを確保し、制約になるのは使えるメモリとプラットフォーム側の制限だけです。
+- Web では、ブラウザにコピーを求めるため、ユーザー入力のイベントハンドラー（キーやクリックの処理）の中で呼んでください。iOS と Android では TrussC 内部のバッファーだけが更新され、システムのクリップボードには書き込まれません。
 '''
 details.ko = '''
-- UTF-8 문자열을 전달합니다. 반환형은 `void`이며 성공 여부를 반환하지 않습니다.
-- TrussC는 클립보드 텍스트 크기를 제한하거나 자르지 않습니다. 실제 내용에 맞춰 메모리를 할당합니다. 메모리 할당과 플랫폼 제약은 적용됩니다.
-- Web에서는 사용자 입력 이벤트 핸들러에서 호출하여 브라우저에 복사를 요청하세요. iOS와 Android에서는 내부 클립보드 버퍼만 갱신하며 시스템 클립보드에는 쓰지 않습니다.
+- UTF-8 텍스트를 넘깁니다. 반환값이 없으므로 복사에 성공했는지 알 수 없습니다.
+- 크기에 대해 TrussC는 상한을 두지 않으며 텍스트를 자르지 않습니다. 내용에 맞춰 메모리를 할당하며, 제약이 되는 것은 사용할 수 있는 메모리와 플랫폼 쪽 제한뿐입니다.
+- 웹에서는 브라우저에 복사를 요청하기 위해 사용자 입력 이벤트 핸들러(키나 클릭 처리) 안에서 호출하세요. iOS와 Android에서는 TrussC 내부 버퍼만 갱신되며 시스템 클립보드에는 쓰이지 않습니다.
 '''
 related = ["getClipboardString"]
 snippet = '''
@@ -51406,19 +51473,25 @@ description.en = "Sets the mouse cursor shape."
 description.ja = "マウスカーソルの形状を設定する。"
 description.ko = "마우스 커서 모양을 설정한다."
 details.en = '''
-- Sets the process-wide native cursor shape. The same capability is available from every Window.
-- Pass a `Cursor` value such as `Cursor::Hand`; custom slots require an image bound with `bindCursorImage` first. Changing the shape preserves cursor visibility.
-- Does nothing before native app startup or after native app cleanup, including in a headless app.
+- Pass a `Cursor` value such as `Cursor::Hand` or `Cursor::Crosshair`.
+- To use your own image, bind it to a slot from `Cursor::Custom0` to `Cursor::Custom15` with `bindCursorImage` first, then pass that slot.
+- Changing the shape does not change whether the cursor is shown or hidden.
+- The cursor is shared by the whole app, not set per window: it appears in whichever window the pointer is over.
+- It does nothing while the app is not running: before the native app has started, after it has been cleaned up, and in a headless app.
 '''
 details.ja = '''
-- プロセス共通の native cursor 形状を設定します。すべての Window から同じ機能を使えます。
-- `Cursor::Hand` などの `Cursor` 値を渡します。カスタムスロットには、先に `bindCursorImage` で画像を登録してください。形状を変更しても表示状態は維持します。
-- ネイティブアプリの起動前や cleanup 後、およびヘッドレスアプリでは何もしません。
+- `Cursor::Hand` や `Cursor::Crosshair` のような `Cursor` の値を渡します。
+- 自分の画像を使う場合は、先に `bindCursorImage` で `Cursor::Custom0`〜`Cursor::Custom15` のスロットに画像を割り当て、そのスロットを渡します。
+- 形を変えても、カーソルの表示・非表示は変わりません。
+- カーソルはウィンドウごとではなく、アプリ全体で 1 つです。マウスポインターが乗っているウィンドウに表示されます。
+- アプリが動いていない間は何もしません。ネイティブのアプリが起動する前、後片付けが終わったあと、ヘッドレスアプリの中がこれに当たります。
 '''
 details.ko = '''
-- 프로세스 공통 native cursor 모양을 설정합니다. 모든 Window에서 같은 기능을 사용할 수 있습니다.
-- `Cursor::Hand` 같은 `Cursor` 값을 전달합니다. 커스텀 슬롯은 먼저 `bindCursorImage`로 이미지를 등록해야 합니다. 모양을 변경해도 표시 상태는 유지합니다.
-- 네이티브 앱 시작 전이나 cleanup 후, 그리고 헤드리스 앱에서는 아무 동작도 하지 않습니다.
+- `Cursor::Hand`나 `Cursor::Crosshair` 같은 `Cursor` 값을 넘깁니다.
+- 직접 만든 이미지를 쓰려면 먼저 `bindCursorImage`로 `Cursor::Custom0`~`Cursor::Custom15` 슬롯에 이미지를 할당한 뒤 그 슬롯을 넘깁니다.
+- 모양을 바꿔도 커서의 표시·숨김 상태는 바뀌지 않습니다.
+- 커서는 창마다가 아니라 앱 전체에서 하나입니다. 마우스 포인터가 올라가 있는 창에 표시됩니다.
+- 앱이 실행 중이 아닐 때는 아무 동작도 하지 않습니다. 네이티브 앱이 시작되기 전, 정리가 끝난 뒤, 헤드리스 앱 안이 이에 해당합니다.
 '''
 related = ["Cursor", "getCursor", "bindCursorImage", "showCursor"]
 snippet = '''
@@ -51833,7 +51906,7 @@ details.en = '''
 - `updateFps` and `drawFps` independently accept a positive rate in frames per second or `VSYNC`; `VSYNC` updates or draws once per display tick.
 - `EVENT_DRIVEN` disables independent updates when used for `updateFps`; for `drawFps`, it draws when `redraw()` is requested or a pending screenshot or deferred capture request forces a draw.
 - A positive update rate runs fixed steps with `getDeltaTime() = 1 / updateFps`; drawing skips display ticks as needed and runs at most once per tick.
-- Fixed updates are limited by `setMaxUpdateSteps()` to 10 steps per frame by default; excess time after a stall, slow updates, or an update rate above that multiple of the display rate is discarded with one warning per stall.
+- Fixed updates are limited by `setMaxUpdateSteps()` to 10 steps per frame by default; excess time after a stall, slow updates, or an update rate above that multiple of the display rate is discarded, and each Window's loop logs one warning per stall.
 - Changing the update mode starts its timing again without catching up the previous mode. A fixed rate runs one step on the next frame; its duration can exceed or fall short of the actual time since the last update, such as about 9.7 ms extra when switching from 144 Hz updates to fixed 60 Hz updates.
 - Entering `VSYNC` discards the time since the previous update, usually less than a frame but potentially longer after `EVENT_DRIVEN` idle. Its next measured delta starts at the call, or at the current update's start if called inside an update; changing the update mode inside a fixed step also cancels the remaining old steps in that frame.
 - Reapplying the same independent rates does nothing. Changing only `drawFps` preserves update timing; a changed positive draw rate draws on the next frame.
@@ -51844,7 +51917,7 @@ details.ja = '''
 - `updateFps` と `drawFps` には、それぞれ正の毎秒フレーム数または `VSYNC` を指定します。`VSYNC` はディスプレイの更新ごとに 1 回更新または描画します。
 - `updateFps` に `EVENT_DRIVEN` を指定すると独立更新を行いません。`drawFps` に指定すると、`redraw()` が要求されたとき、または保留中のスクリーンショットや遅延キャプチャの要求により描画が必要になったときに描画します。
 - 正の更新レートでは、`getDeltaTime() = 1 / updateFps` の固定ステップで更新します。描画は必要に応じてディスプレイの更新を間引き、1 回のディスプレイ更新につき最大 1 回行います。
-- 固定更新は `setMaxUpdateSteps()` により、既定では 1 フレームにつき 10 ステップに制限されます。停止後、更新処理が遅い場合、更新レートがディスプレイのレートのこの倍数を超える場合などの余分な時間は破棄され、停滞ごとに一度だけ警告されます。
+- 固定更新は `setMaxUpdateSteps()` により、既定では 1 フレームにつき 10 ステップに制限されます。停止後、更新処理が遅い場合、更新レートがディスプレイのレートのこの倍数を超える場合などの余分な時間は破棄され、Window ごとのループで、停滞ごとに一度だけ警告されます。
 - 更新モードを変えると、以前のモードの時間を取り戻さずに計時を再開します。固定レートでは次のフレームで 1 ステップ実行するため、その長さは前回の更新からの実時間より長くも短くもなります。たとえば 144 Hz の更新から固定 60 Hz に切り替えると、約 9.7 ms 長くなります。
 - `VSYNC` に切り替えると前回の更新からの時間を破棄します。通常は 1 フレーム未満ですが、`EVENT_DRIVEN` の待機後は長くなる場合があります。次の実測差分は呼び出し時点から数え、更新内で呼んだ場合はその更新の開始から数えます。固定ステップ内で更新モードを変えると、そのフレームに残っている以前のステップも中止します。
 - 同じ独立レートを再指定しても何もしません。`drawFps` だけの変更では更新の計時を保ち、正の描画レートに変更した場合は次のフレームで描画します。
@@ -51855,7 +51928,7 @@ details.ko = '''
 - `updateFps`와 `drawFps`에는 각각 양수인 초당 프레임 수 또는 `VSYNC`를 지정합니다. `VSYNC`는 디스플레이 갱신마다 한 번 업데이트하거나 그립니다.
 - `updateFps`에 `EVENT_DRIVEN`을 지정하면 독립 업데이트를 실행하지 않습니다. `drawFps`에 지정하면 `redraw()`가 요청되거나 대기 중인 스크린샷 또는 지연 캡처 요청으로 그리기가 필요할 때 그립니다.
 - 양수 업데이트 빈도에서는 `getDeltaTime() = 1 / updateFps`인 고정 스텝으로 업데이트합니다. 그리기는 필요에 따라 디스플레이 갱신을 건너뛰며 갱신당 최대 한 번 실행합니다.
-- 고정 업데이트는 `setMaxUpdateSteps()`에 따라 기본적으로 프레임당 10스텝으로 제한합니다. 정지 후, 업데이트 처리가 느릴 때, 업데이트 빈도가 디스플레이 빈도의 해당 배수를 초과할 때 등의 초과 시간은 버리고 정체 구간마다 한 번씩 경고합니다.
+- 고정 업데이트는 `setMaxUpdateSteps()`에 따라 기본적으로 프레임당 10스텝으로 제한합니다. 정지 후, 업데이트 처리가 느릴 때, 업데이트 빈도가 디스플레이 빈도의 해당 배수를 초과할 때 등의 초과 시간은 버리고, 각 창의 루프에서 정체 구간마다 한 번씩 경고합니다.
 - 업데이트 모드를 변경하면 이전 모드의 시간을 따라잡지 않고 시간을 다시 측정합니다. 고정 빈도에서는 다음 프레임에 한 스텝을 실행하므로 그 길이가 이전 업데이트 이후의 실제 시간보다 길거나 짧을 수 있습니다. 예를 들어 144 Hz 업데이트에서 고정 60 Hz로 전환하면 약 9.7 ms 길어집니다.
 - `VSYNC`로 전환하면 이전 업데이트 이후의 시간을 버립니다. 보통 한 프레임 미만이지만 `EVENT_DRIVEN` 대기 후에는 길어질 수 있습니다. 다음 실측 시간 차이는 호출 시점부터 계산하며, 업데이트 안에서 호출했다면 해당 업데이트 시작부터 계산합니다. 고정 스텝 안에서 업데이트 모드를 변경하면 해당 프레임에 남은 이전 스텝도 취소합니다.
 - 같은 독립 빈도를 다시 지정하면 아무 작업도 하지 않습니다. `drawFps`만 변경하면 업데이트 시간 측정을 유지하며, 양수 그리기 빈도로 변경하면 다음 프레임에 그립니다.
@@ -52006,19 +52079,19 @@ description.ja = "ループの 1 回の処理で実行する固定更新ステ�
 description.ko = "루프의 한 번의 처리에서 실행할 고정 업데이트 스텝 수의 상한을 설정한다."
 details.en = '''
 - Sets the fixed-update limit per frame for `setIndependentFps()` and per loop pass for `runHeadlessApp()`; the default is `10`.
-- Time beyond the limit is discarded with one warning per stall when steps accumulate after a stall, when updates are too slow, or when the update rate exceeds this multiple of the display rate.
+- Time beyond the limit is discarded when steps accumulate after a stall, when updates are too slow, or when the update rate exceeds this multiple of the display rate. Each loop (one per Window, or the headless loop) logs one warning per stall; after a pass that drops no steps, the next stall warns again.
 - A value of `0` or less removes the limit and runs every pending step, which can support deterministic simulations but can freeze processing while a long stall is replayed or make passes grow while updates remain too slow.
 - The setting is stored atomically and is shared by the hot-reload host and guest.
 '''
 details.ja = '''
 - `setIndependentFps()` の 1 フレーム、および `runHeadlessApp()` のループ 1 周あたりの固定更新上限を設定します。既定値は `10` です。
-- 停止後、更新処理が遅い場合、更新レートがディスプレイのレートのこの倍数を超える場合などでステップが溜まると、上限を超える時間を破棄し、停滞ごとに一度だけ警告します。
+- 停止後、更新処理が遅い場合、更新レートがディスプレイのレートのこの倍数を超える場合などでステップが溜まると、上限を超える時間を破棄します。警告は各ループ（Window ごと、またはヘッドレスのループ）で停滞ごとに一度だけで、ステップを捨てずに済んだ周回が 1 回あると、次の停滞でまた警告します。
 - `0` 以下では上限をなくし、溜まったステップをすべて実行します。決定的なシミュレーションなどに使えますが、長い停止後の再実行中に処理が止まったり、更新処理が遅い間はループ 1 周が長くなり続けたりする場合があります。
 - 設定値はアトミックに保存され、ホットリロードのホストとゲストで共有されます。
 '''
 details.ko = '''
 - `setIndependentFps()`의 프레임당 고정 업데이트 상한과 `runHeadlessApp()`의 루프 1회당 상한을 설정합니다. 기본값은 `10`입니다.
-- 정지 후, 업데이트 처리가 느릴 때, 업데이트 빈도가 디스플레이 빈도의 해당 배수를 초과할 때 등으로 스텝이 쌓이면 상한을 초과한 시간을 버리고 정체 구간마다 한 번씩 경고합니다.
+- 정지 후, 업데이트 처리가 느릴 때, 업데이트 빈도가 디스플레이 빈도의 해당 배수를 초과할 때 등으로 스텝이 쌓이면 상한을 초과한 시간을 버립니다. 경고는 각 루프(창마다, 또는 헤드리스 루프)에서 정체 구간마다 한 번이며, 스텝을 버리지 않은 회차가 한 번 있으면 다음 정체 때 다시 경고합니다.
 - `0` 이하이면 상한을 없애고 대기 중인 모든 스텝을 실행합니다. 결정적 시뮬레이션 등에 사용할 수 있지만, 긴 정지 후의 재실행 중에 처리가 멈추거나 업데이트가 계속 느리면 루프 1회가 점점 길어질 수 있습니다.
 - 설정값은 원자적으로 저장하며 핫 리로드 호스트와 게스트가 공유합니다.
 '''
@@ -53022,19 +53095,19 @@ description.en = "Shows the mouse cursor."
 description.ja = "マウスカーソルを表示する。"
 description.ko = "마우스 커서를 표시한다."
 details.en = '''
-- Shows the process-wide native cursor. Cursor visibility is shared between Windows.
-- Makes the cursor visible; it is visible by default.
-- Does nothing before native app startup or after native app cleanup, including in a headless app.
+- Shows the mouse cursor again after `hideCursor()`. The cursor is visible by default.
+- The cursor is shared by the whole app, not set per window: it appears in whichever window the pointer is over.
+- It does nothing while the app is not running: before the native app has started, after it has been cleaned up, and in a headless app.
 '''
 details.ja = '''
-- プロセス共通の native cursor を表示します。表示状態は Window 間で共通です。
-- カーソルを表示します。既定では表示されています。
-- ネイティブアプリの起動前や cleanup 後、およびヘッドレスアプリでは何もしません。
+- `hideCursor()` で隠したマウスカーソルを、もう一度表示します。カーソルは最初から表示されています。
+- カーソルはウィンドウごとではなく、アプリ全体で 1 つです。マウスポインターが乗っているウィンドウに表示されます。
+- アプリが動いていない間は何もしません。ネイティブのアプリが起動する前、後片付けが終わったあと、ヘッドレスアプリの中がこれに当たります。
 '''
 details.ko = '''
-- 프로세스 공통 native cursor를 표시합니다. 표시 상태는 Window 사이에서 공유합니다.
-- 커서를 표시합니다. 기본적으로 표시되어 있습니다.
-- 네이티브 앱 시작 전이나 cleanup 후, 그리고 헤드리스 앱에서는 아무 동작도 하지 않습니다.
+- `hideCursor()`로 숨긴 마우스 커서를 다시 표시합니다. 커서는 처음부터 표시되어 있습니다.
+- 커서는 창마다가 아니라 앱 전체에서 하나입니다. 마우스 포인터가 올라가 있는 창에 표시됩니다.
+- 앱이 실행 중이 아닐 때는 아무 동작도 하지 않습니다. 네이티브 앱이 시작되기 전, 정리가 끝난 뒤, 헤드리스 앱 안이 이에 해당합니다.
 '''
 related = ["hideCursor", "setCursor"]
 snippet = '''
@@ -53053,19 +53126,19 @@ details.en = '''
 - Closes the audio device, releases its device context, clears the audio meters, and marks the global `AudioEngine` as uninitialized.
 - Normally, the windowed app loop calls it automatically during shutdown after application cleanup, so an explicit call is unnecessary; repeated calls are safe when the device is already closed.
 - `runHeadlessApp()` leaves the audio device running when it returns; call this function explicitly when audio is no longer needed. See `AudioEngine` for threading rules.
-- If a session end (logout, restart or shutdown) interrupts running code, `App::exit` is called without stopping audio or waiting for callbacks; the device ends with the process. Do not wait for audio in `exit()`; see `App::exit`.
+- At a session end (logout, restart or shutdown), if no App code is running on the main thread, the normal audio and service shutdown runs. If App code is running at that moment, the OS ends the process without calling any App code, and the device stops with the process. See `App::exit`.
 '''
 details.ja = '''
 - オーディオデバイスを閉じ、そのデバイスコンテキストを解放し、オーディオメーターをクリアして、グローバルな `AudioEngine` を未初期化状態にします。
 - 通常は、ウィンドウ付きアプリのループがアプリケーションのクリーンアップ後に自動的に呼ぶため、明示的に呼ぶ必要はありません。デバイスがすでに閉じていても繰り返し呼べます。
 - `runHeadlessApp()` は戻るときにオーディオデバイスを停止しません。オーディオが不要になったら、この関数を明示的に呼んでください。スレッドの扱いは `AudioEngine` を参照してください。
-- セッション終了（ログアウト、再起動、シャットダウン）が実行中の処理を中断した場合、オーディオを止めず、コールバックも待たずに `App::exit` が呼ばれます。デバイスはプロセスの終了とともに止まります。`exit()` でオーディオを待たないでください。`App::exit` を参照してください。
+- セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、通常どおりオーディオとサービスの終了処理が行われます。実行中だった場合は OS が App のコードを何も呼ばずにプロセスを終了させ、デバイスもプロセスとともに止まります。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 오디오 장치를 닫고 해당 장치 컨텍스트를 해제하며 오디오 미터를 지운 뒤 전역 `AudioEngine`을 미초기화 상태로 설정합니다.
 - 일반적으로 윈도우 앱 루프가 애플리케이션 정리 후 종료 과정에서 자동 호출하므로 명시적으로 호출할 필요가 없습니다. 장치가 이미 닫혀 있어도 반복 호출할 수 있습니다.
 - `runHeadlessApp()`은 반환할 때 오디오 장치를 중지하지 않습니다. 오디오가 더 이상 필요하지 않으면 이 함수를 명시적으로 호출하세요. 스레드 규칙은 `AudioEngine`을 참조하세요.
-- 세션 종료(로그아웃, 재시작, 시스템 종료)가 실행 중인 처리를 중단하면 오디오를 멈추거나 콜백을 기다리지 않고 `App::exit`가 호출됩니다. 장치는 프로세스 종료와 함께 멈춥니다. `exit()`에서 오디오를 기다리지 마세요. `App::exit`를 참조하세요.
+- 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드에서 App 코드가 실행 중이 아니면 평소처럼 오디오와 서비스 종료 처리가 진행됩니다. 실행 중이었다면 OS가 App 코드를 전혀 호출하지 않고 프로세스를 종료하며, 장치도 프로세스와 함께 멈춥니다. `App::exit`를 참조하세요.
 '''
 related = ["initAudio", "AudioEngine", "runHeadlessApp", "App::exit"]
 
@@ -54153,21 +54226,36 @@ description.en = "Removes a custom cursor image."
 description.ja = "カスタムカーソル画像を解除する。"
 description.ko = "사용자 지정 커서 이미지를 해제한다."
 details.en = '''
-- Removes the image bound to the specified `Cursor` slot and releases its native cursor resources; a slot without a bound image is unchanged.
-- If that slot is currently selected, the displayed cursor immediately returns to its system fallback; the selected `Cursor` value itself does not change.
-- Does nothing before native app startup or after native app cleanup, including in a headless app.
+- Removes the image bound to a `Cursor` slot and frees its native cursor resources. A slot with no image is left as it is.
+- If that slot is selected, the cursor shown falls back to the system cursor at once. The selected `Cursor` value itself (`getCursor()`) does not change.
+- The cursor is shared by the whole app, not set per window: it appears in whichever window the pointer is over.
+- It does nothing while the app is not running: before the native app has started, after it has been cleaned up, and in a headless app.
 '''
 details.ja = '''
-- 指定した `Cursor` スロットに割り当てた画像を解除し、ネイティブのカーソルリソースを解放します。画像が割り当てられていないスロットは変わりません。
-- そのスロットが選択中の場合、表示中のカーソルはすぐにシステムの代替表示に戻ります。選択されている `Cursor` の値自体は変わりません。
-- ネイティブアプリの起動前や cleanup 後、およびヘッドレスアプリでは何もしません。
+- `Cursor` のスロットに割り当てた画像を外し、ネイティブのカーソルのリソースを解放します。画像のないスロットはそのままです。
+- そのスロットを選択中なら、表示されるカーソルはすぐにシステムのカーソルに戻ります。選択中の `Cursor` の値（`getCursor()`）自体は変わりません。
+- カーソルはウィンドウごとではなく、アプリ全体で 1 つです。マウスポインターが乗っているウィンドウに表示されます。
+- アプリが動いていない間は何もしません。ネイティブのアプリが起動する前、後片付けが終わったあと、ヘッドレスアプリの中がこれに当たります。
 '''
 details.ko = '''
-- 지정한 `Cursor` 슬롯에 연결된 이미지를 해제하고 네이티브 커서 리소스를 반환합니다. 연결된 이미지가 없는 슬롯은 변경하지 않습니다.
-- 해당 슬롯이 선택된 상태이면 표시 중인 커서는 즉시 시스템 대체 커서로 돌아갑니다. 선택된 `Cursor` 값 자체는 변경하지 않습니다.
-- 네이티브 앱 시작 전이나 cleanup 후, 그리고 헤드리스 앱에서는 아무 동작도 하지 않습니다.
+- `Cursor` 슬롯에 할당한 이미지를 해제하고 네이티브 커서 리소스를 해제합니다. 이미지가 없는 슬롯은 그대로입니다.
+- 그 슬롯이 선택되어 있으면 표시되는 커서가 바로 시스템 커서로 돌아갑니다. 선택된 `Cursor` 값(`getCursor()`) 자체는 바뀌지 않습니다.
+- 커서는 창마다가 아니라 앱 전체에서 하나입니다. 마우스 포인터가 올라가 있는 창에 표시됩니다.
+- 앱이 실행 중이 아닐 때는 아무 동작도 하지 않습니다. 네이티브 앱이 시작되기 전, 정리가 끝난 뒤, 헤드리스 앱 안이 이에 해당합니다.
 '''
 related = ["Cursor", "bindCursorImage", "setCursor"]
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+Image cursorImage;   // an RGBA8 image, e.g. a PNG with alpha
+
+// tcApp.cpp
+void tcApp::setup() {
+    cursorImage.load("cursor.png");
+    bindCursorImage(Cursor::Custom0, cursorImage, 4, 4);   // click point 4 px from the top-left
+    setCursor(Cursor::Custom0);
+}
+'''
+
 
 ["utf8ToPath"]
 category = "file"
@@ -60745,7 +60833,8 @@ details.en = '''
 - Both LF and CRLF line endings work, and so does a last line without a line ending.
 - To protect the process from huge input, a line longer than 1 MiB is dropped whole, and at most 1024 commands (16 MiB of text) wait at a time; further commands are dropped. TrussC logs one warning per overflow: once the waiting commands have all been delivered (or after `stop()` and `start()`), the next overflow logs a warning again.
 - On the web, it logs a notice and does nothing.
-- If a session end (logout, restart or shutdown) interrupts running code, the console is not stopped and TrussC does not wait for it; see `App::exit`.
+- If a window's App (or a headless App) asks to quit in `setup()` and the quit is accepted, the App ends before any command is delivered.
+- At a session end (logout, restart or shutdown), if no App code is running on the main thread, the console stops with the normal ending. If App code is running at that moment, the OS ends the process and the console is not stopped. See `App::exit`.
 '''
 details.ja = '''
 - 標準入力の読み取りを始め、コマンドが `runtime().events().console` に届くようにします。ウィンドウのある App でもヘッドレス App でも、`setup()` で呼んでください。TrussC が自動で始めることはありません。
@@ -60755,7 +60844,8 @@ details.ja = '''
 - 改行は LF でも CRLF でも使えます。最後の行に改行がなくても届きます。
 - 巨大な入力からプロセスを守るため、1 MiB を超える行はまるごと捨てられ、待機できるコマンドは最大 1024 件（合計 16 MiB）までです。それを超えたコマンドは捨てられます。そのときは TrussC が警告を記録します。警告は溢れるたびに 1 回で、待っているコマンドがすべて配信されると（`stop()` と `start()` のあとも）、次に溢れたときにまた警告します。
 - Web では通知を記録するだけで、何もしません。
-- セッション終了（ログアウト、再起動、シャットダウン）が実行中の処理を中断した場合、コンソールは止められず、TrussC もその終了を待ちません。`App::exit` を参照してください。
+- ウィンドウの App（またはヘッドレス App）が `setup()` の中で終了を求め、それが受け入れられた場合、コマンドが 1 つも届かないうちに App は終わります。
+- セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、通常の終了処理の中でコンソールも止まります。実行中だった場合は OS がプロセスを終了させ、コンソールは止められません。`App::exit` を参照してください。
 '''
 details.ko = '''
 - 표준 입력 읽기를 시작하여 명령이 `runtime().events().console`로 전달되게 합니다. 창이 있는 App이든 헤드리스 App이든 `setup()`에서 호출하세요. TrussC가 자동으로 시작하지는 않습니다.
@@ -60765,7 +60855,8 @@ details.ko = '''
 - 줄바꿈은 LF와 CRLF 모두 사용할 수 있습니다. 마지막 줄에 줄바꿈이 없어도 전달됩니다.
 - 거대한 입력으로부터 프로세스를 보호하기 위해 1 MiB를 넘는 줄은 통째로 버려지며, 대기할 수 있는 명령은 최대 1024개(합계 16 MiB)까지입니다. 이를 넘는 명령은 버려집니다. 이때 TrussC가 경고를 기록합니다. 경고는 넘칠 때마다 한 번이며, 대기 중인 명령이 모두 전달되고 나면(`stop()`과 `start()` 뒤에도) 다음에 넘칠 때 다시 경고합니다.
 - 웹에서는 알림을 기록할 뿐 아무 동작도 하지 않습니다.
-- 세션 종료(로그아웃, 재시작, 시스템 종료)가 실행 중인 처리를 중단하면 콘솔은 멈추지 않으며 TrussC도 그 종료를 기다리지 않습니다. `App::exit`를 참조하세요.
+- 창의 App(또는 헤드리스 App)이 `setup()` 안에서 종료를 요청하고 그 요청이 받아들여지면, 명령이 하나도 전달되기 전에 App이 끝납니다.
+- 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드에서 App 코드가 실행 중이 아니면 일반 종료 처리 중에 콘솔도 멈춥니다. 실행 중이었다면 OS가 프로세스를 종료하며 콘솔은 멈추지 않습니다. `App::exit`를 참조하세요.
 '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
@@ -62236,7 +62327,7 @@ description.en = "Loads an image asynchronously."
 description.ja = "画像を非同期に読み込む。"
 description.ko = "이미지를 비동기로 로드한다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading.
+- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice may be omitted when its run or completion batch is discarded). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - Local files have no 64 MiB size cap. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers. Encoded memory inputs keep the 64 MiB cap; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
 - Local image input is limited to what stb_image can address (about 2 GiB).
@@ -62252,7 +62343,7 @@ details.en = '''
 - If the App that started the load ends first, the completion callback is not called.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。
+- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（実行や完了バッチの破棄時に未配信なら省略する場合があります）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - ローカルファイルには 64 MiB のサイズ上限はありません。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。符号化済みメモリ入力の 64 MiB 上限、および GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
 - ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
@@ -62268,7 +62359,7 @@ details.ja = '''
 - 読み込みを始めた App が先に終わった場合、完了時のコールバックは呼ばれません。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다.
+- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(실행 또는 완료 묶음을 버릴 때 미전달 Notice는 생략될 수 있습니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - 로컬 파일에는 64 MiB 크기 한도가 없습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. 인코딩된 메모리 입력은 64 MiB 한도를 유지하고 GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
 - 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
@@ -62338,7 +62429,7 @@ description.en = "Starts asynchronous loading of decoded audio data."
 description.ja = "デコード済み音声データの非同期読み込みを開始する。"
 description.ko = "디코딩된 오디오 데이터의 비동기 로드를 시작한다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading.
+- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice may be omitted when its run or completion batch is discarded). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - `loadAsync(path)` returns no result directly and uses the same path resolution, format selection, errors, and decoder logs as `SoundBuffer::load`. Native builds prepare private PCM and metadata on a worker; existing committed data remains readable until the result is applied.
 - Results are applied on the main thread in a later frame, never during this call. Each frame or headless loop pass takes one batch of pending completions; work queued during that pass waits for another pass. After application, `isLoading()` becomes `false` before one `onLoad` event delivers the `LoadResult`.
@@ -62351,7 +62442,7 @@ details.en = '''
 - If the App that started the load ends first, the completion callback is not called.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。
+- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（実行や完了バッチの破棄時に未配信なら省略する場合があります）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - `loadAsync(path)` は結果を直接返さず、パスの解決、形式の選択、エラー、デコーダーのログは `SoundBuffer::load` と同じです。ネイティブではワーカーが専用の PCM とメタデータを準備し、結果が反映されるまでは確定済みのデータを参照できます。
 - 結果は後のフレームのメインスレッドで反映され、この呼び出し中には反映されません。各フレームまたはヘッドレスのループ処理では、保留中の完了処理を一括で取り出し、その処理中に追加された分は次回に回します。反映後に `isLoading()` が `false` になり、続いて `onLoad` が `LoadResult` を一度通知します。
@@ -62364,7 +62455,7 @@ details.ja = '''
 - 読み込みを始めた App が先に終わった場合、完了時のコールバックは呼ばれません。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다.
+- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(실행 또는 완료 묶음을 버릴 때 미전달 Notice는 생략될 수 있습니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - `loadAsync(path)`는 결과를 직접 반환하지 않으며 경로 해석, 형식 선택, 오류, 디코더 로그는 `SoundBuffer::load`와 같습니다. 네이티브 빌드에서는 워커가 별도의 PCM과 메타데이터를 준비하며, 결과가 반영될 때까지 기존에 확정된 데이터를 읽을 수 있습니다.
 - 결과는 이후 프레임의 메인 스레드에서 반영되며 이 호출 중에는 반영되지 않습니다. 각 프레임 또는 헤드리스 루프 실행은 대기 중인 완료 처리를 한 번에 가져오며, 처리 중 추가된 작업은 다음 실행까지 기다립니다. 반영 후 `isLoading()`이 `false`가 되고 이어서 `onLoad`가 `LoadResult`를 한 번 전달합니다.
@@ -62429,7 +62520,7 @@ description.en = "Load a font asynchronously and report completion through an ev
 description.ja = "フォントを非同期で読み込み、イベントで完了を通知する。"
 description.ko = "폰트를 비동기로 로드하고 이벤트로 완료를 알린다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading.
+- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice may be omitted when its run or completion batch is discarded). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - Call `loadAsync(nameOrPath, size, faceIndex = 0)` with a file path, system font name, or Web URL. Size is in logical pixels; path precedence and collection-face selection follow `Font::load`.
 - Returns no result directly. Success, failure, and cache hits are applied on the main thread in a later frame, never during this call; `isLoading()` becomes `false` before the single `onLoad` notification.
@@ -62443,7 +62534,7 @@ details.en = '''
 - If the App that started the load ends first, the completion callback is not called.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。
+- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（実行や完了バッチの破棄時に未配信なら省略する場合があります）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - `loadAsync(nameOrPath, size, faceIndex = 0)` にファイルパス、システムフォント名、または Web の URL を渡します。サイズの単位は論理ピクセルです。パスの優先順位とコレクション内の書体選択は `Font::load` と同じです。
 - 結果を直接返しません。成功、失敗、キャッシュへの一致はいずれも後のフレームでメインスレッドに反映し、この呼び出し中には通知しません。`isLoading()` が `false` になってから `onLoad` を一度通知します。
@@ -62457,7 +62548,7 @@ details.ja = '''
 - 読み込みを始めた App が先に終わった場合、完了時のコールバックは呼ばれません。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다.
+- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(실행 또는 완료 묶음을 버릴 때 미전달 Notice는 생략될 수 있습니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - `loadAsync(nameOrPath, size, faceIndex = 0)`에 파일 경로, 시스템 폰트 이름 또는 Web URL을 전달합니다. 크기의 단위는 논리 픽셀입니다. 경로 우선순위와 컬렉션 내 서체 선택은 `Font::load`와 같습니다.
 - 결과를 직접 반환하지 않습니다. 성공, 실패, 캐시 적중 모두 이후 프레임의 메인 스레드에서 반영하며, 이 호출 중에는 알리지 않습니다. `isLoading()`이 `false`가 된 뒤 `onLoad`를 한 번 알립니다.
@@ -63270,37 +63361,37 @@ related = ["RuntimeEvents::exitRequested", "RuntimeEvents::console"]
 ["Runtime::setLogoutTimeout"]
 category = "events"
 keywords = ["logout", "shutdown", "restart", "session", "watchdog", "timeout", "seconds"]
-description.en = "Sets how long TrussC waits for exit() when the OS logs out, restarts or shuts down."
-description.ja = "OS のログアウト、再起動、シャットダウンのときに、exit() を待つ時間を設定する。"
-description.ko = "OS 로그아웃, 재시작, 시스템 종료 때 exit()를 기다리는 시간을 설정한다."
+description.en = "Sets the time limit for the normal ending when the OS logs out, restarts or shuts down."
+description.ja = "OS のログアウト、再起動、シャットダウンのときに、通常の終了処理にかけられる時間を設定する。"
+description.ko = "OS 로그아웃, 재시작, 시스템 종료 때 일반 종료 처리에 허용하는 시간을 설정한다."
 details.en = '''
 - Most apps never need this. It matters only at a session end: when the user logs out, restarts or shuts down the computer while the app is running. Normal quitting (Cmd+Q, `exitApp()`, `requestExitApp()`, closing the last window) has no time limit and always runs the full cleanup.
-- `seconds` is in seconds, and the default is 3. When the time runs out, the process ends even if some `exit()` functions have not finished. `0` ends the process at once, without calling `exit()`. Positive infinity removes the limit, but then a slow `exit()` can hold up the logout indefinitely. A negative value or NaN logs an error and keeps the previous value.
-- The limit covers all Apps together, not each App separately. The time starts before the first `exit()` is called.
-- The session end is received on the main thread. If App or host code is on the main stack at commit, no App callbacks, cleanup or watchdog runs. A blocked main that cannot receive the callback is subject to OS termination rules. This setting bounds the whole idle ending, including service and device cleanup.
-- The OS may have its own limit too: Windows can end the process earlier, and macOS does not publish a fixed time. On Linux, it works only when the desktop tells the process about the session end. iOS, Android and the web have no such logout notification.
-- Call it on the main thread, for example in `setup()`. Each new run starts again from 3 seconds, and hot reload keeps the value. In `exit()`, save briefly, and do not use the GPU or wait for other threads (see `App::exit`).
+- `seconds` is in seconds, and the default is 3. The limit covers the whole ending: `exit()` for every App, audio detach, `cleanup()` and the shutdown of TrussC's services. When the time runs out, the process ends even if that work has not finished. `0` ends the process at once, without calling `exit()`. Positive infinity removes the limit, but then a slow ending can hold up the logout indefinitely. A negative value or NaN logs an error and keeps the previous value.
+- All Apps share one limit, and the time starts before the first `exit()` is called.
+- **It applies only when no App code is running on the main thread at the session end.** If App code is running (for example inside `update()`, or in a modal dialog opened from App code), the OS ends the process without calling `exit()` or `cleanup()`, and this setting is not used. Work on other threads does not count as running App code. If the main thread is so blocked that it cannot receive the session end at all, the OS ends the process by its own rules.
+- The OS may have its own limit too: Windows can end the process earlier, and macOS does not publish a fixed time. TrussC receives the session end only on Windows and macOS. Linux has no receiver for it, so this setting does not apply there, and iOS, Android and the web have no such logout notification either.
+- Call it on the main thread, for example in `setup()`. Each new run starts again from 3 seconds, and hot reload keeps the value. Keep the save in `exit()` short (see `App::exit`).
 '''
 details.ja = '''
 - ほとんどのアプリでは必要ありません。アプリの実行中に、ユーザーがログアウト、再起動、シャットダウンしたとき（セッション終了）だけ関係します。通常の終了（Cmd+Q、`exitApp()`、`requestExitApp()`、最後のウィンドウを閉じる）には制限時間がなく、後片付けも最後まで行われます。
-- `seconds` の単位は秒で、既定値は 3 です。時間が切れると、終わっていない `exit()` があってもプロセスは終了します。`0` にすると、`exit()` を呼ばずにすぐ終了します。正の無限大にすると制限がなくなりますが、遅い `exit()` がログアウトをいつまでも止めてしまうことがあります。負の値や NaN はエラーを記録し、前の値を保ちます。
-- 制限時間は App ごとではなく、すべての App で共通です。最初の `exit()` が呼ばれる前に計測が始まります。
-- セッション終了はメインスレッドで受け取ります。終了確定時に App やホストの処理がメインスタック上にあれば、App のコールバック、cleanup、watchdog は実行しません。メインスレッドが止まってコールバックを受け取れない場合は OS の終了規則に従います。この設定はサービスやデバイスの cleanup を含む、アイドル時の終了処理全体を制限します。
-- OS にも独自の制限があることがあります。Windows はもっと早く終了させることがあり、macOS は決まった時間を公開していません。Linux では、デスクトップがセッションの終了をプロセスに知らせる場合だけ働きます。iOS、Android、Web にはこのようなログアウトの通知はありません。
-- メインスレッドで、たとえば `setup()` で呼んでください。新しく実行するたびに 3 秒に戻り、ホットリロードでは値が引き継がれます。`exit()` では短く保存するだけにして、GPU は使わず、ほかのスレッドも待たないでください（`App::exit` を参照）。
+- `seconds` の単位は秒で、既定値は 3 です。制限時間は終了処理全体にかかります。すべての App の `exit()`、オーディオの切り離し、`cleanup()`、TrussC のサービスの終了までが含まれます。時間が切れると、処理が終わっていなくてもプロセスは終了します。`0` にすると、`exit()` を呼ばずにすぐ終了します。正の無限大にすると制限がなくなりますが、遅い終了処理がログアウトをいつまでも止めてしまうことがあります。負の値や NaN はエラーを記録し、前の値を保ちます。
+- 制限時間はすべての App で 1 つを共有し、最初の `exit()` が呼ばれる前に計測が始まります。
+- **この設定が使われるのは、セッション終了の時点でメインスレッドで App のコードが実行中でない場合だけです。** 実行中（`update()` の途中や、App のコードから開いたモーダルダイアログの最中など）なら、OS が `exit()` も `cleanup()` も呼ばずにプロセスを終了させ、この設定は使われません。ほかのスレッドの処理は、App のコードの実行中には数えません。メインスレッドが止まっていてセッション終了をまったく受け取れない場合は、OS が独自のルールでプロセスを終了させます。
+- OS にも独自の制限があることがあります。Windows はもっと早く終了させることがあり、macOS は決まった時間を公開していません。TrussC がセッション終了を受け取るのは Windows と macOS だけです。Linux にはそれを受け取る仕組みがないため、この設定は効きません。iOS、Android、Web にもこのようなログアウトの通知はありません。
+- メインスレッドで、たとえば `setup()` で呼んでください。新しく実行するたびに 3 秒に戻り、ホットリロードでは値が引き継がれます。`exit()` での保存は短く済ませてください（`App::exit` を参照）。
 '''
 details.ko = '''
 - 대부분의 앱에서는 필요하지 않습니다. 앱 실행 중에 사용자가 로그아웃, 재시작, 시스템 종료를 할 때(세션 종료)만 관계합니다. 일반 종료(Cmd+Q, `exitApp()`, `requestExitApp()`, 마지막 창 닫기)에는 제한 시간이 없으며 정리도 끝까지 진행됩니다.
-- `seconds`의 단위는 초이며 기본값은 3입니다. 시간이 다 되면 끝나지 않은 `exit()`가 있어도 프로세스가 종료됩니다. `0`으로 설정하면 `exit()`를 호출하지 않고 바로 종료합니다. 양의 무한대로 설정하면 제한이 없어지지만, 느린 `exit()`가 로그아웃을 끝없이 막을 수 있습니다. 음수나 NaN은 오류를 기록하고 이전 값을 유지합니다.
-- 제한 시간은 App마다가 아니라 모든 App에 공통입니다. 첫 `exit()`가 호출되기 전에 측정이 시작됩니다.
-- 세션 종료는 메인 스레드에서 받습니다. 종료 확정 시 App이나 호스트 코드가 메인 스택에 있으면 App 콜백, cleanup, watchdog을 실행하지 않습니다. 메인 스레드가 멈춰 콜백을 받지 못하면 OS의 종료 규칙을 따릅니다. 이 설정은 서비스와 장치 cleanup을 포함한 유휴 상태의 전체 종료 처리를 제한합니다.
-- OS에도 자체 제한이 있을 수 있습니다. Windows는 더 일찍 종료시킬 수 있고, macOS는 정해진 시간을 공개하지 않습니다. Linux에서는 데스크톱이 세션 종료를 프로세스에 알려 줄 때만 동작합니다. iOS, Android, 웹에는 이런 로그아웃 알림이 없습니다.
-- 메인 스레드에서, 예를 들어 `setup()`에서 호출하세요. 새로 실행할 때마다 3초로 돌아가며, 핫 리로드에서는 값이 유지됩니다. `exit()`에서는 짧게 저장만 하고, GPU를 사용하거나 다른 스레드를 기다리지 마세요(`App::exit` 참조).
+- `seconds`의 단위는 초이며 기본값은 3입니다. 제한 시간은 종료 처리 전체에 걸립니다. 모든 App의 `exit()`, 오디오 분리, `cleanup()`, TrussC 서비스 종료까지 포함됩니다. 시간이 다 되면 처리가 끝나지 않았어도 프로세스가 종료됩니다. `0`으로 설정하면 `exit()`를 호출하지 않고 바로 종료합니다. 양의 무한대로 설정하면 제한이 없어지지만, 느린 종료 처리가 로그아웃을 끝없이 막을 수 있습니다. 음수나 NaN은 오류를 기록하고 이전 값을 유지합니다.
+- 모든 App이 하나의 제한 시간을 공유하며, 첫 `exit()`가 호출되기 전에 측정이 시작됩니다.
+- **이 설정은 세션 종료 시점에 메인 스레드에서 App 코드가 실행 중이 아닐 때만 사용됩니다.** 실행 중이면(`update()` 도중이나 App 코드에서 연 모달 대화상자가 떠 있는 동안 등) OS가 `exit()`도 `cleanup()`도 호출하지 않고 프로세스를 종료하며, 이 설정은 사용되지 않습니다. 다른 스레드의 처리는 App 코드 실행 중으로 치지 않습니다. 메인 스레드가 멈춰 세션 종료를 전혀 받지 못하면 OS가 자체 규칙으로 프로세스를 종료합니다.
+- OS에도 자체 제한이 있을 수 있습니다. Windows는 더 일찍 종료시킬 수 있고, macOS는 정해진 시간을 공개하지 않습니다. TrussC가 세션 종료를 받는 것은 Windows와 macOS뿐입니다. Linux에는 이를 받는 수신 경로가 없으므로 이 설정이 적용되지 않으며, iOS, Android, 웹에도 이런 로그아웃 알림이 없습니다.
+- 메인 스레드에서, 예를 들어 `setup()`에서 호출하세요. 새로 실행할 때마다 3초로 돌아가며, 핫 리로드에서는 값이 유지됩니다. `exit()`에서의 저장은 짧게 끝내세요(`App::exit` 참조).
 '''
 snippet = '''
 // tcApp.cpp
 void tcApp::setup() {
-    runtime().setLogoutTimeout(5.0f);   // allow 5 seconds for exit() at logout (default 3)
+    runtime().setLogoutTimeout(5.0f);   // allow 5 seconds for the ending at logout (default 3)
 }
 void tcApp::exit() {
     saveJson(settings, "settings.json");   // keep this short: it may run during a logout
@@ -63396,6 +63487,7 @@ description.ko = "프로세스 종료가 요청되었을 때 호출되며, 종�
 details.en = '''
 - App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
 - It is sent when `exitApp()` or `requestExitApp()` is called, when the OS asks the process to quit (for example Cmd+Q, logout or shutdown), and when the last open window or a window with `setQuitOnClose(true)` is about to close. In that last case it is asked before anything closes, and a cancel keeps every window open (see `CoreEvents::closeRequested` and `Window::close`).
+- On Windows and macOS, a logout, restart or shutdown asks it only when no App code is running on the main thread. Otherwise the OS ends the process without asking (see `App::exit`).
 - Set `e.cancel = true` to keep the process running. Every listener starts with `cancel = false`. If any listener sets it to `true`, the quit is cancelled, and a later listener cannot undo that. A listener that throws an exception also counts as a cancel.
 - The listeners here run first, then each App's `events().exitRequested`, starting with the App that was attached last. All of them are called on the main thread, even when one has already cancelled.
 - If nobody cancels, every App ends normally (`exit()` and `cleanup()`), and then the process ends.
@@ -63405,6 +63497,7 @@ details.en = '''
 details.ja = '''
 - App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
 - `exitApp()` や `requestExitApp()` を呼んだとき、OS がプロセスの終了を求めたとき（Cmd+Q、ログアウト、シャットダウンなど）、最後に開いているウィンドウか `setQuitOnClose(true)` のウィンドウを閉じようとしたときに届きます。最後の場合は何かを閉じる前に問い合わされ、取り消すとすべてのウィンドウが開いたままになります（`CoreEvents::closeRequested` と `Window::close` を参照）。
+- Windows と macOS のログアウト、再起動、シャットダウンでは、メインスレッドで App のコードが実行中でないときだけ問い合わされます。実行中なら、OS は問い合わせずにプロセスを終了させます（`App::exit` を参照）。
 - `e.cancel = true` にすると、プロセスは終了せずに動き続けます。各リスナーは `cancel = false` の状態から始まります。どれか 1 つでも `true` にすると終了は取り消され、あとのリスナーが元に戻すことはできません。例外を投げたリスナーも、取り消したものとして扱います。
 - ここに登録したリスナーが先に呼ばれ、そのあと各 App の `events().exitRequested` が、最後に追加された App から順に呼ばれます。すでに誰かが取り消していても、すべてのリスナーがメインスレッドで呼ばれます。
 - 誰も取り消さなければ、すべての App が通常どおり終わり（`exit()` と `cleanup()`）、プロセスが終了します。
@@ -63414,6 +63507,7 @@ details.ja = '''
 details.ko = '''
 - App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다.
 - `exitApp()`이나 `requestExitApp()`을 호출했을 때, OS가 프로세스 종료를 요청했을 때(Cmd+Q, 로그아웃, 시스템 종료 등), 마지막으로 열린 창이나 `setQuitOnClose(true)`인 창을 닫으려 할 때 전달됩니다. 마지막 경우에는 무엇이든 닫기 전에 질문되며, 취소하면 모든 창이 열린 채로 유지됩니다(`CoreEvents::closeRequested`와 `Window::close` 참조).
+- Windows와 macOS의 로그아웃, 재시작, 시스템 종료에서는 메인 스레드에서 App 코드가 실행 중이 아닐 때만 질문됩니다. 실행 중이면 OS가 질문 없이 프로세스를 종료합니다(`App::exit` 참조).
 - `e.cancel = true`로 설정하면 프로세스가 종료되지 않고 계속 실행됩니다. 각 리스너는 `cancel = false` 상태에서 시작합니다. 하나라도 `true`로 설정하면 종료가 취소되며, 이후 리스너가 이를 되돌릴 수 없습니다. 예외를 던진 리스너도 취소한 것으로 처리합니다.
 - 여기에 등록한 리스너가 먼저 호출되고, 그다음 각 App의 `events().exitRequested`가 마지막에 추가된 App부터 순서대로 호출됩니다. 이미 누군가 취소했더라도 모든 리스너가 메인 스레드에서 호출됩니다.
 - 아무도 취소하지 않으면 모든 App이 정상적으로 끝나고(`exit()`와 `cleanup()`), 프로세스가 종료됩니다.
@@ -63592,7 +63686,9 @@ details.en = '''
 - The listeners here run first, then the old App's `events().hotReloadUnload`. When the process ends, it is sent once more, only to the listeners here, after every App has ended.
 - Stop threads, async timers (`callAfterAsync` / `callEveryAsync`) and other background work that the App started; hot reload does not stop or guard them. Also release what would outlive the App, such as listeners held by singletons or function-local statics. `tcxImGui` and `tcxNodeInspector` already do this for themselves.
 - **Hot reload supports a single window only.** While it is active, TrussC logs a warning each time a second or later window is opened, and the behaviour is not guaranteed.
-- Reload happens on the main thread, at a safe point of the main loop outside any callback. Hot reload works on macOS, Windows and Linux. On iOS, Android and the web, the app is built without it and this event is not sent.
+- Reload runs on the main thread, between turns of the main loop, outside every callback. It does not start once the process has begun ending, for example after an accepted quit.
+- Old builds are never unloaded: every build that loaded successfully stays in memory until the process ends, so many reloads can make the process use more memory. This keeps leftover code addresses valid, but it does not make leftover threads or timers safe, so stop them as described above.
+- Hot reload works on macOS, Windows and Linux. On iOS, Android and the web, the app is built without it and this event is not sent.
 '''
 details.ja = '''
 - App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。App に属するアドオンは、その App の `events()` で listen してください。
@@ -63600,7 +63696,9 @@ details.ja = '''
 - ここに登録したリスナーが先に呼ばれ、そのあと古い App の `events().hotReloadUnload` が呼ばれます。プロセスの終了時にも、すべての App が終わったあとで、ここに登録したリスナーにだけもう一度届きます。
 - App が始めたスレッド、非同期タイマー（`callAfterAsync` / `callEveryAsync`）などのバックグラウンド処理は、ここで止めてください。ホットリロードはそれらを止めず、保護もしません。シングルトンや関数内の static 変数が持つリスナーなど、App より長く残るものもここで解放してください。`tcxImGui` と `tcxNodeInspector` は、これを自分で行っています。
 - **ホットリロードが対応しているのは 1 ウィンドウだけです。** 有効な間は、2 つ目以降のウィンドウを開くたびに TrussC が警告を記録し、動作は保証されません。
-- リロードはメインスレッドで、メインループのどのコールバックの中でもない安全なタイミングで行われます。ホットリロードは macOS、Windows、Linux で使えます。iOS、Android、Web ではホットリロードなしでビルドされ、このイベントは届きません。
+- リロードはメインスレッドで、メインループの周回の合間、どのコールバックの中でもないタイミングで行われます。プロセスの終了処理が始まったあと（終了が受け入れられたあとなど）は始まりません。
+- 古いビルドはアンロードされません。読み込みに成功したビルドは、プロセスが終わるまですべてメモリに残るため、リロードを繰り返すとプロセスのメモリ使用量が増えていきます。古いコードのアドレスは有効なままですが、残ったスレッドやタイマーが安全になるわけではありません。上に書いたとおり止めてください。
+- ホットリロードは macOS、Windows、Linux で使えます。iOS、Android、Web ではホットリロードなしでビルドされ、このイベントは届きません。
 '''
 details.ko = '''
 - App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다. App에 속하는 애드온은 그 App의 `events()`에서 listen하세요.
@@ -63608,7 +63706,9 @@ details.ko = '''
 - 여기에 등록한 리스너가 먼저 호출되고, 그다음 이전 App의 `events().hotReloadUnload`가 호출됩니다. 프로세스가 종료될 때도 모든 App이 끝난 뒤, 여기에 등록한 리스너에게만 한 번 더 전달됩니다.
 - App이 시작한 스레드, 비동기 타이머(`callAfterAsync` / `callEveryAsync`) 등의 백그라운드 작업은 여기서 멈추세요. 핫 리로드는 이를 멈추지도, 보호하지도 않습니다. 싱글턴이나 함수 안의 static 변수가 가진 리스너처럼 App보다 오래 남는 것도 여기서 해제하세요. `tcxImGui`와 `tcxNodeInspector`는 이를 스스로 처리합니다.
 - **핫 리로드는 창 하나만 지원합니다.** 활성화된 동안에는 두 번째 이후의 창을 열 때마다 TrussC가 경고를 기록하며, 동작은 보장되지 않습니다.
-- 리로드는 메인 스레드에서, 메인 루프의 어떤 콜백 안도 아닌 안전한 시점에 이루어집니다. 핫 리로드는 macOS, Windows, Linux에서 사용할 수 있습니다. iOS, Android, 웹에서는 핫 리로드 없이 빌드되며 이 이벤트는 전달되지 않습니다.
+- 리로드는 메인 스레드에서, 메인 루프 회차 사이의 어떤 콜백 안도 아닌 시점에 이루어집니다. 프로세스 종료 처리가 시작된 뒤(종료가 받아들여진 뒤 등)에는 시작되지 않습니다.
+- 이전 빌드는 언로드되지 않습니다. 로드에 성공한 빌드는 프로세스가 끝날 때까지 모두 메모리에 남으므로, 리로드를 반복하면 프로세스의 메모리 사용량이 늘어납니다. 이전 코드의 주소는 유효하게 유지되지만, 남은 스레드나 타이머가 안전해지는 것은 아니므로 위에서 설명한 대로 멈추세요.
+- 핫 리로드는 macOS, Windows, Linux에서 사용할 수 있습니다. iOS, Android, 웹에서는 핫 리로드 없이 빌드되며 이 이벤트는 전달되지 않습니다.
 '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
@@ -63824,19 +63924,31 @@ description.en = "Configures app-wide runtime values at startup."
 description.ja = "起動時のアプリケーション全体の実行設定を指定する。"
 description.ko = "시작 시 앱 전체의 런타임 값을 설정한다."
 details.en = '''
-- Pass this as the second argument of `runApp`. Currently `uniformBufferReserve` is app-wide; more app-wide values may be added later. The one-argument overload uses defaults.
+- Holds settings that apply to the whole app rather than to one window. Pass it as the second argument of `runApp<tcApp>(settings, runtime)`; the one-argument `runApp` uses the defaults.
+- At present it has one value, `uniformBufferReserve` (set it with `reserveUniformBuffer()`). More app-wide values may be added later.
+- It is read once at startup, so set everything before calling `runApp`.
+- Under hot reload (`TC_HOT_RELOAD`), `RuntimeSettings` is not applied and the default reservation is used. `TC_RUN_APP` takes no `RuntimeSettings`.
 '''
 details.ja = '''
-- `runApp` の第2引数に渡します。現在は `uniformBufferReserve` がアプリケーション全体に適用されます。今後、同じ範囲の設定が追加される場合があります。1引数の形式は既定値を使います。
+- 1 つのウィンドウではなく、アプリ全体に効く設定をまとめた型です。`runApp<tcApp>(settings, runtime)` の 2 つ目の引数に渡します。引数が 1 つの `runApp` では既定値が使われます。
+- 今ある値は `uniformBufferReserve` の 1 つだけです（`reserveUniformBuffer()` で設定します）。アプリ全体の設定は今後増えることがあります。
+- 起動時に 1 回だけ読まれるため、すべて `runApp` を呼ぶ前に設定してください。
+- ホットリロード（`TC_HOT_RELOAD`）では `RuntimeSettings` は適用されず、既定の予約量が使われます。`TC_RUN_APP` は `RuntimeSettings` を受け取りません。
 '''
 details.ko = '''
-- `runApp`의 두 번째 인자로 전달합니다. 현재 `uniformBufferReserve`가 앱 전체에 적용되며, 이후 앱 전체 설정이 추가될 수 있습니다. 인자가 하나인 형식은 기본값을 사용합니다.
+- 창 하나가 아니라 앱 전체에 적용되는 설정을 모은 타입입니다. `runApp<tcApp>(settings, runtime)`의 두 번째 인수로 넘깁니다. 인수가 하나인 `runApp`에서는 기본값이 사용됩니다.
+- 지금 있는 값은 `uniformBufferReserve` 하나뿐입니다(`reserveUniformBuffer()`로 설정합니다). 앱 전체 설정은 앞으로 늘어날 수 있습니다.
+- 시작할 때 한 번만 읽히므로 모두 `runApp`을 호출하기 전에 설정하세요.
+- 핫 리로드(`TC_HOT_RELOAD`)에서는 `RuntimeSettings`가 적용되지 않고 기본 예약량이 사용됩니다. `TC_RUN_APP`은 `RuntimeSettings`를 받지 않습니다.
 '''
 related = ["runApp", "RuntimeSettings::uniformBufferReserve", "RuntimeSettings::reserveUniformBuffer"]
 snippet = '''
-RuntimeSettings runtime;
-runtime.reserveUniformBuffer(8 * 1024 * 1024);
-return runApp<tcApp>(WindowSettings{}, runtime);
+// main.cpp
+int main() {
+    RuntimeSettings runtime;
+    runtime.reserveUniformBuffer(8 * 1024 * 1024);   // 8 MiB per frame
+    return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
+}
 '''
 
 ["RuntimeSettings::uniformBufferReserve"]
@@ -63844,19 +63956,37 @@ description.en = "Specifies the app-wide GPU uniform buffer reservation in bytes
 description.ja = "アプリケーション全体の GPU ユニフォームバッファー予約量をバイトで指定する。"
 description.ko = "앱 전체의 GPU 유니폼 버퍼 예약량을 바이트로 지정한다."
 details.en = '''
-- The default is `0`, which uses the backend default. Graphics startup reads this value once; GL and D3D11 ignore it.
+- The field behind `reserveUniformBuffer()`; the default is `0`.
+- It is the size, in bytes, of the GPU buffer that holds each frame's shader uniforms. Every draw call takes a 256-byte-aligned slice of it, so scenes with many draw calls per frame need more (about 4 MiB per 8,000 draw calls).
+- `0` or less selects the backend default: 1 MiB on Metal and WebGPU, 4 MiB on Vulkan. GL and D3D11 ignore it, because they have no such limit.
+- On Metal and WebGPU the buffer grows, with a warning in the log, when a frame overflows it; a large enough reservation only avoids that one-time growth. **Vulkan does not grow it**: an overflowing frame is an error there, so reserve generously for scenes with very many draw calls.
+- Metal, WebGPU and Vulkan allocate it twice (for frames in flight), so a larger value costs twice its size in memory.
+- Graphics startup reads it once. Under hot reload it is not applied and the default is used (see `RuntimeSettings`).
 '''
 details.ja = '''
-- 既定値の `0` はバックエンドの既定量を使います。描画系の起動時に一度読み取ります。GL と D3D11 では使いません。
+- `reserveUniformBuffer()` が設定するフィールドです。既定値は `0` です。
+- 毎フレームのシェーダーのユニフォームを入れる GPU バッファーのサイズを、バイト単位で指定します。描画呼び出しのたびに 256 バイト単位で切り出して使うため、1 フレームの描画呼び出しが多いシーンほど多く必要です（描画呼び出し 8,000 回でおよそ 4 MiB）。
+- `0` 以下では、バックエンドの既定値（Metal と WebGPU は 1 MiB、Vulkan は 4 MiB）になります。GL と D3D11 にはこの上限がないため、無視されます。
+- Metal と WebGPU では、1 フレームで足りなくなるとログに警告を出してバッファーが大きくなります。十分に予約しておけば、その 1 回の拡張が起きないだけです。**Vulkan では大きくなりません。** 足りなくなったフレームはエラーになるため、描画呼び出しがとても多いシーンでは多めに予約してください。
+- Metal、WebGPU、Vulkan では、処理中のフレームの分も含めて 2 つ確保するため、メモリはこの値の 2 倍使います。
+- グラフィックスの起動時に 1 回だけ読まれます。ホットリロードでは適用されず、既定値が使われます（`RuntimeSettings` を参照）。
 '''
 details.ko = '''
-- 기본값 `0`은 백엔드 기본 용량을 사용합니다. 그래픽 시작 시 한 번 읽으며 GL과 D3D11은 무시합니다.
+- `reserveUniformBuffer()`가 설정하는 필드입니다. 기본값은 `0`입니다.
+- 매 프레임의 셰이더 유니폼을 담는 GPU 버퍼의 크기를 바이트 단위로 지정합니다. 그리기 호출마다 256바이트 단위로 잘라 쓰므로, 한 프레임의 그리기 호출이 많은 장면일수록 더 많이 필요합니다(그리기 호출 8,000번에 약 4 MiB).
+- `0` 이하이면 백엔드 기본값(Metal과 WebGPU는 1 MiB, Vulkan은 4 MiB)이 됩니다. GL과 D3D11에는 이런 상한이 없으므로 무시됩니다.
+- Metal과 WebGPU에서는 한 프레임에서 부족해지면 로그에 경고를 남기고 버퍼가 커집니다. 충분히 예약해 두면 그 한 번의 확장이 일어나지 않을 뿐입니다. **Vulkan에서는 커지지 않습니다.** 부족해진 프레임은 오류가 되므로 그리기 호출이 매우 많은 장면에서는 넉넉하게 예약하세요.
+- Metal, WebGPU, Vulkan에서는 처리 중인 프레임 몫까지 2개를 확보하므로 메모리를 이 값의 2배 사용합니다.
+- 그래픽 시작 시 한 번만 읽힙니다. 핫 리로드에서는 적용되지 않고 기본값이 사용됩니다(`RuntimeSettings` 참조).
 '''
 related = ["RuntimeSettings", "RuntimeSettings::reserveUniformBuffer"]
 snippet = '''
-RuntimeSettings runtime;
-runtime.uniformBufferReserve = 8 * 1024 * 1024;
-return runApp<tcApp>(WindowSettings{}, runtime);
+// main.cpp
+int main() {
+    RuntimeSettings runtime;
+    runtime.reserveUniformBuffer(8 * 1024 * 1024);   // many draw calls per frame
+    return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
+}
 '''
 
 ["RuntimeSettings::reserveUniformBuffer"]
@@ -63864,19 +63994,37 @@ description.en = "Sets the app-wide GPU uniform buffer reservation."
 description.ja = "アプリケーション全体の GPU ユニフォームバッファー予約量を設定する。"
 description.ko = "앱 전체의 GPU 유니폼 버퍼 예약량을 설정한다."
 details.en = '''
-- Sets `uniformBufferReserve` in bytes and returns the same `RuntimeSettings&` for chaining. Call before `runApp`; `0` selects the backend default.
+- Sets `uniformBufferReserve` and returns the same `RuntimeSettings&`, so calls can be chained. Call it before `runApp`.
+- It is the size, in bytes, of the GPU buffer that holds each frame's shader uniforms. Every draw call takes a 256-byte-aligned slice of it, so scenes with many draw calls per frame need more (about 4 MiB per 8,000 draw calls).
+- `0` or less selects the backend default: 1 MiB on Metal and WebGPU, 4 MiB on Vulkan. GL and D3D11 ignore it, because they have no such limit.
+- On Metal and WebGPU the buffer grows, with a warning in the log, when a frame overflows it; a large enough reservation only avoids that one-time growth. **Vulkan does not grow it**: an overflowing frame is an error there, so reserve generously for scenes with very many draw calls.
+- Metal, WebGPU and Vulkan allocate it twice (for frames in flight), so a larger value costs twice its size in memory.
+- Graphics startup reads it once. Under hot reload it is not applied and the default is used (see `RuntimeSettings`).
 '''
 details.ja = '''
-- `uniformBufferReserve` をバイト単位で設定し、チェイン用に同じ `RuntimeSettings&` を返します。`runApp` の前に呼びます。`0` はバックエンドの既定量を選びます。
+- `uniformBufferReserve` を設定し、同じ `RuntimeSettings&` を返すため、続けて呼べます。`runApp` の前に呼んでください。
+- 毎フレームのシェーダーのユニフォームを入れる GPU バッファーのサイズを、バイト単位で指定します。描画呼び出しのたびに 256 バイト単位で切り出して使うため、1 フレームの描画呼び出しが多いシーンほど多く必要です（描画呼び出し 8,000 回でおよそ 4 MiB）。
+- `0` 以下では、バックエンドの既定値（Metal と WebGPU は 1 MiB、Vulkan は 4 MiB）になります。GL と D3D11 にはこの上限がないため、無視されます。
+- Metal と WebGPU では、1 フレームで足りなくなるとログに警告を出してバッファーが大きくなります。十分に予約しておけば、その 1 回の拡張が起きないだけです。**Vulkan では大きくなりません。** 足りなくなったフレームはエラーになるため、描画呼び出しがとても多いシーンでは多めに予約してください。
+- Metal、WebGPU、Vulkan では、処理中のフレームの分も含めて 2 つ確保するため、メモリはこの値の 2 倍使います。
+- グラフィックスの起動時に 1 回だけ読まれます。ホットリロードでは適用されず、既定値が使われます（`RuntimeSettings` を参照）。
 '''
 details.ko = '''
-- `uniformBufferReserve`를 바이트 단위로 설정하고 연결 호출을 위해 같은 `RuntimeSettings&`를 반환합니다. `runApp` 전에 호출하며 `0`은 백엔드 기본 용량을 선택합니다.
+- `uniformBufferReserve`를 설정하고 같은 `RuntimeSettings&`를 반환하므로 이어서 호출할 수 있습니다. `runApp` 전에 호출하세요.
+- 매 프레임의 셰이더 유니폼을 담는 GPU 버퍼의 크기를 바이트 단위로 지정합니다. 그리기 호출마다 256바이트 단위로 잘라 쓰므로, 한 프레임의 그리기 호출이 많은 장면일수록 더 많이 필요합니다(그리기 호출 8,000번에 약 4 MiB).
+- `0` 이하이면 백엔드 기본값(Metal과 WebGPU는 1 MiB, Vulkan은 4 MiB)이 됩니다. GL과 D3D11에는 이런 상한이 없으므로 무시됩니다.
+- Metal과 WebGPU에서는 한 프레임에서 부족해지면 로그에 경고를 남기고 버퍼가 커집니다. 충분히 예약해 두면 그 한 번의 확장이 일어나지 않을 뿐입니다. **Vulkan에서는 커지지 않습니다.** 부족해진 프레임은 오류가 되므로 그리기 호출이 매우 많은 장면에서는 넉넉하게 예약하세요.
+- Metal, WebGPU, Vulkan에서는 처리 중인 프레임 몫까지 2개를 확보하므로 메모리를 이 값의 2배 사용합니다.
+- 그래픽 시작 시 한 번만 읽힙니다. 핫 리로드에서는 적용되지 않고 기본값이 사용됩니다(`RuntimeSettings` 참조).
 '''
 related = ["RuntimeSettings", "RuntimeSettings::uniformBufferReserve"]
 snippet = '''
-RuntimeSettings runtime;
-runtime.reserveUniformBuffer(8 * 1024 * 1024);
-return runApp<tcApp>(WindowSettings{}, runtime);
+// main.cpp
+int main() {
+    RuntimeSettings runtime;
+    runtime.reserveUniformBuffer(8 * 1024 * 1024);   // many draw calls per frame
+    return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
+}
 '''
 
 ["getWindowTitle"]
@@ -63884,18 +64032,21 @@ description.en = "Returns the current Window title."
 description.ja = "現在の Window のタイトルを返す。"
 description.ko = "현재 Window의 제목을 반환한다."
 details.en = '''
-- Inside an App, uses its Window; outside an App, requires exactly one open Window or logs an Error and returns an empty string. Returns `Window::getTitle()`.
+- Returns the window's title, the same as `Window::getTitle()`.
+- Which window: inside an App, that App's window. Outside an App, exactly one window must be open; otherwise TrussC logs an Error and returns an empty string.
 '''
 details.ja = '''
-- App 内ではその App の Window を使います。App の外では開いた Window がちょうど1つ必要で、それ以外は Error を記録して空文字列を返します。`Window::getTitle()` の値です。
+- ウィンドウのタイトルを返します。`Window::getTitle()` と同じです。
+- 対象のウィンドウは、App の中ならその App のウィンドウです。App の外では開いているウィンドウがちょうど 1 つである必要があり、そうでなければ TrussC がエラーを記録して 空の文字列 を返します。
 '''
 details.ko = '''
-- App 안에서는 해당 App의 Window를 사용합니다. App 밖에서는 열린 Window가 정확히 하나여야 하며, 그렇지 않으면 Error를 기록하고 빈 문자열을 반환합니다. `Window::getTitle()`의 값입니다.
+- 창의 제목을 반환합니다. `Window::getTitle()`과 같습니다.
+- 대상 창은 App 안이라면 그 App의 창입니다. App 밖에서는 열린 창이 정확히 하나여야 하며, 그렇지 않으면 TrussC가 오류를 기록하고 빈 문자열을 반환합니다.
 '''
 related = ["Window::getTitle", "setWindowTitle"]
 snippet = '''
 void tcApp::update() {
-    std::string title = getWindowTitle();
+    string title = getWindowTitle();
 }
 '''
 
@@ -63904,13 +64055,16 @@ description.en = "Reports whether the current Window is hidden by native visibil
 description.ja = "現在の Window がネイティブの可視性情報で非表示かを返す。"
 description.ko = "현재 Window가 네이티브 가시성 정보에서 숨겨졌는지 반환한다."
 details.en = '''
-- Inside an App, uses its Window; outside an App, requires exactly one open Window or logs an Error and returns `false`. Returns `Window::isOccluded()`.
+- Returns whether the OS reports the window as hidden from view, the same as `Window::isOccluded()`; see that entry for details.
+- Which window: inside an App, that App's window. Outside an App, exactly one window must be open; otherwise TrussC logs an Error and returns `false`.
 '''
 details.ja = '''
-- App 内ではその App の Window を使います。App の外では開いた Window がちょうど1つ必要で、それ以外は Error を記録して`false` を返します。`Window::isOccluded()` の値です。
+- OS がウィンドウを見えない状態と報告しているかどうかを返します。`Window::isOccluded()` と同じで、詳しくはそちらを参照してください。
+- 対象のウィンドウは、App の中ならその App のウィンドウです。App の外では開いているウィンドウがちょうど 1 つである必要があり、そうでなければ TrussC がエラーを記録して `false` を返します。
 '''
 details.ko = '''
-- App 안에서는 해당 App의 Window를 사용합니다. App 밖에서는 열린 Window가 정확히 하나여야 하며, 그렇지 않으면 Error를 기록하고 `false`를 반환합니다. `Window::isOccluded()`의 값입니다.
+- OS가 창을 보이지 않는 상태로 알리고 있는지 반환합니다. `Window::isOccluded()`와 같으며, 자세한 내용은 그 항목을 참조하세요.
+- 대상 창은 App 안이라면 그 App의 창입니다. App 밖에서는 열린 창이 정확히 하나여야 하며, 그렇지 않으면 TrussC가 오류를 기록하고 `false`을 반환합니다.
 '''
 related = ["Window::isOccluded", "Window"]
 snippet = '''
