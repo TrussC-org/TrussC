@@ -36,6 +36,17 @@ sg_shader sglPremultShader();
 // alpha. Bound by pipeDescCoverage2D() for the R8 TrueType glyph atlas.
 sg_shader sglCoverageShader();
 
+// The custom sgl shaders read pos/uv/float color at offsets 0/12/20. Retain
+// the full 40-byte sgl vertex stride, including the unused point-size slot.
+inline sg_vertex_layout_state sglColorVertexLayout() {
+    sg_vertex_layout_state layout = {};
+    layout.buffers[0].stride = 40;
+    layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
+    layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
+    layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4;
+    return layout;
+}
+
 // --- Role blend/depth specs (the blend tables formerly duplicated in tcGlobal.cpp).
 // Pixel format / sample count / depth format are left at defaults on purpose: sgl
 // fills them from the target's context, so the same desc is correct for swapchain
@@ -64,6 +75,7 @@ inline sg_pipeline_desc pipeDesc2D(BlendMode mode, bool depthTest = false) {
             // can't express the exact Multiply for arbitrary backdrop alpha).
             b.enabled = true;
             d.shader = sglPremultShader();
+            d.layout = sglColorVertexLayout();
             b.src_factor_rgb   = SG_BLENDFACTOR_DST_COLOR; b.dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             b.src_factor_alpha = SG_BLENDFACTOR_ONE;       b.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             break;
@@ -74,6 +86,7 @@ inline sg_pipeline_desc pipeDesc2D(BlendMode mode, bool depthTest = false) {
             // group formula to this fixed-function form). Alpha composites as over.
             b.enabled = true;
             d.shader = sglPremultShader();
+            d.layout = sglColorVertexLayout();
             b.src_factor_rgb   = SG_BLENDFACTOR_ONE;       b.dst_factor_rgb   = SG_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
             b.src_factor_alpha = SG_BLENDFACTOR_ONE;       b.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             break;
@@ -132,6 +145,7 @@ inline sg_pipeline_desc pipeDescPremult(bool depthTest = false) {
 inline sg_pipeline_desc pipeDescCoverage2D(bool depthTest = false) {
     sg_pipeline_desc d = pipeDesc2D(BlendMode::Alpha, depthTest);
     d.shader = sglCoverageShader();
+    d.layout = sglColorVertexLayout();
     return d;
 }
 

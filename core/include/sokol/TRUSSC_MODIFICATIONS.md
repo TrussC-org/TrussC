@@ -498,6 +498,23 @@ context pool grows like the buffers in 11.
 
 Regression test: `core/tests/sglPoolLimits` (dummy backend).
 
+### 15. Explicit custom-shader vertex layouts
+
+**Purpose:** Custom sgl shaders can declare only the attributes they read,
+avoiding GL warnings for the unused point-size input in premult/coverage draws.
+
+**Changes:** `_sgl_init_pipeline()` preserves `sg_pipeline_desc.layout` when
+the caller supplies a shader and `layout.attrs[0].format` is non-invalid. No
+struct or API gains a field. The built-in shader, context defaults, and custom
+shaders without an explicit layout keep the standard pos/uv/float color/psize
+layout. Explicit layouts must describe the existing sgl vertex buffer; TrussC's
+premult and coverage pipelines use attributes 0–2 at stride 40. Their shader
+sources omit the unused point-size declaration on every generated backend.
+
+Regression test: `core/tests/sglVertexLayout` (dummy backend, both constructors,
+context defaults, all primitive variants, explicit offsets and legacy layouts).
+GLCORE/GLES3 warning and pixel probes plus render-regression cover rendering.
+
 ---
 
 ## sokol_gfx.h
