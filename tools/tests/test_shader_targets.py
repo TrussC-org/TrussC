@@ -44,8 +44,9 @@ class ShaderTargetTests(unittest.TestCase):
                    '??_GOther@@QEAAPEAXI@Z', '??_EOther@@QEAAPEAXI@Z',
                    '??1Widget@@UEAA@XZ', '??_7Widget@@6B@', '?update@Widget@@QEAAXXZ',
                    'core_function', 'core_function', '??_FWidget@@QEAAXXZ',
-                   '?_Ghelper@@YAXXZ', 'prefix??_EWidget', '__imp_core_function']
-        expected = symbols[4:8] + symbols[9:12]
+                   '?_Ghelper@@YAXXZ', 'prefix??_EWidget', '__imp_core_function', 'public']
+        # An extern "C" function may be named public; only the count line is dropped.
+        expected = symbols[4:8] + symbols[9:12] + ['public']
         with tempfile.TemporaryDirectory(prefix='tc exports ') as temporary:
             fixture = Path(temporary)
             # dumpbin doesn't zero-pad offsets: objects early in the lib have

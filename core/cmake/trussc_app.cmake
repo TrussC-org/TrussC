@@ -435,6 +435,8 @@ execute_process(
 # A symbol line is \"  <hex offset> symbol-name\" at the start of a line.
 # dumpbin doesn't zero-pad the offset, so it can be any number of digits.
 set(SYMBOLS \"\")
+# Drop the '     8E9 public symbols' count line; it has the same layout.
+string(REGEX REPLACE \"\\n *[0-9A-Fa-f]+ public symbols\" \"\" DUMP_OUT \"\${DUMP_OUT}\")
 string(REGEX MATCHALL \"\\n *[0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
 foreach(ENTRY \${ENTRIES})
     string(REGEX MATCH \"^\\n *[0-9A-Fa-f]+ (.+)\" _ \"\${ENTRY}\")
@@ -459,9 +461,8 @@ foreach(ENTRY \${ENTRIES})
             # NULL thunk data
         elseif(SYM MATCHES \"^_RTC_\")
             # Internal symbol for runtime checks
-        elseif(SYM MATCHES \"^(size|mode|uid|gid|public)$\")
-            # Archive member header metadata ('    2A4B8 size', '       0 mode')
-            # and the '     8E9 public symbols' count line, not symbols.
+        elseif(SYM MATCHES \"^(size|mode|uid|gid)$\")
+            # Archive member header metadata ('    2A4B8 size', '       0 mode'), not symbols.
         else()
             list(APPEND SYMBOLS \"\${SYM}\")
         endif()
