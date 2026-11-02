@@ -13,8 +13,18 @@ void tcApp::startMidi() {
         logNotice("midi") << "out [" << d.getPortNumber() << "] " << d.getName();
 
     // Open the first available input and output ports.
-    midiIn_.openPort(0);
-    midiOut_.openPort(0);
+    hadIn_ = midiIn_.openPort(0);
+    hadOut_ = midiOut_.openPort(0);
+
+    // onDisconnect fires once, on the main thread, when the OS reports the
+    // port removed (device unplugged). The port is already closed then;
+    // reconnect() below reopens it.
+    inLost_ = midiIn_.onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logNotice("midi") << "input lost: " << e.reason;
+    });
+    outLost_ = midiOut_.onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logNotice("midi") << "output lost: " << e.reason;
+    });
 
     // You can also open a port by (partial) name instead of index:
     //   midiIn_.openPort("Launchpad");
@@ -25,9 +35,27 @@ void tcApp::startMidi() {
     //   midiIn_.openPort("LPMiniMK3 MIDI");
 }
 
+// isConnected() turns false when the device is unplugged (or was never found).
+// Reconnecting is app code: poll with a timer. setup() reopens the same port,
+// found again by its name, so it works however the port numbers shifted.
+void tcApp::reconnect() {
+    float now = getElapsedTime();
+    if (now - lastTry_ < 2.0f) return;
+    lastTry_ = now;
+    if (!midiIn_.isConnected()) {
+        if (hadIn_) midiIn_.setup();                  // same port as before
+        else hadIn_ = midiIn_.openPort(0);            // nothing opened yet: look again
+    }
+    if (!midiOut_.isConnected()) {
+        if (hadOut_) midiOut_.setup();
+        else hadOut_ = midiOut_.openPort(0);
+    }
+}
+
 void tcApp::update() {
     // Open ports once the backend is ready (immediate on native, async on web).
     if (!started_ && midiReady()) { started_ = true; startMidi(); }
+    if (started_) reconnect();
 
     // Drain incoming messages (polling API - runs on the main thread).
     MidiMessage m;
@@ -43,8 +71,8 @@ void tcApp::draw() {
     setColor(1.0f);
 
     drawBitmapString("tcxMidi - basic   [SPACE] send NoteOn ch1 note60", 20, 28);
-    drawBitmapString("in  : " + (midiIn_.isOpen()  ? midiIn_.getName()  : string("(none)")), 20, 52);
-    drawBitmapString("out : " + (midiOut_.isOpen() ? midiOut_.getName() : string("(none)")), 20, 70);
+    drawBitmapString("in  : " + (midiIn_.isConnected()  ? midiIn_.getName()  : string("(none)")), 20, 52);
+    drawBitmapString("out : " + (midiOut_.isConnected() ? midiOut_.getName() : string("(none)")), 20, 70);
 
     // Scrolling history of received messages (newest at the bottom).
     setColor(0.55f);

@@ -76,7 +76,8 @@ exposes; on Windows use a virtual MIDI driver such as loopMIDI. WebMIDI still
 requires browser permission and `midiReady()`.
 
 **`MidiIn`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
-`closePort()`, `isOpen()`, `getName()` (open port), `getPort()` (open port
+`setup()`, `close()` (`closePort()`), `isConnected()` (`isOpen()`), `onDisconnect`,
+`getName()` (open port), `getPort()` (open port
 number, -1 if virtual), `isVirtual()`, `ignoreTypes(sysex, timing, sensing)`,
 `onMessage` event, and the polling API `hasNewMessage()` / `getNextMessage()` /
 `setBufferSize()` / `getDroppedMessageCount()`. The polling queue holds up to 1024
@@ -129,6 +130,7 @@ reception, as on the other backends. Other output backends are unchanged.
 See [the local libremidi patch ledger](LIBREMIDI_TRUSSC_MODIFICATIONS.md).
 
 **`MidiOut`** — `listDevices()`, `openPort(index|name)`, `openVirtualPort(name)`,
+`setup()`, `close()` (`closePort()`), `isConnected()` (`isOpen()`), `onDisconnect`,
 `getName()` / `getPort()` / `isVirtual()`, `sendNoteOn/Off`,
 `sendControlChange`, `sendProgramChange`, `sendAftertouch`,
 `sendPolyAftertouch`, `sendPitchBend` (14-bit, or raw `lsb,msb`), `sendSysex`,
@@ -170,6 +172,54 @@ single lumped Sysex.
 true on native, async on the web — see the Web note below).
 
 Channel numbers are **1-16** throughout.
+
+## Device lifecycle
+
+`MidiIn` and `MidiOut` follow TrussC's device lifecycle
+([docs/DEVICE_LIFECYCLE.md](../../docs/DEVICE_LIFECYCLE.md)):
+`isConnected()`, `close()`, `setup()` and `onDisconnect`. `isOpen()` and
+`closePort()` stay as aliases.
+
+- `isConnected()` is true only while the port is open.
+- `setup()` with no arguments reopens the last port that opened successfully.
+  It finds the port again **by name** (the port whose name equals the earlier
+  one exactly, or the same virtual port), because indices shift when ports
+  appear or disappear. It logs an error and returns `false` when there is no
+  previous port or it is not listed now.
+- `close()` closes the port and never fires `onDisconnect`; neither does
+  opening another port, or the destructor.
+- `onDisconnect` (`Event<DeviceDisconnectEventArgs>`, `e.reason`) fires once,
+  on the main thread, when the OS reports the opened port removed. The port is
+  already closed and `isConnected()` is false, and one warning is logged. A
+  listener may call `setup()`. Reconnecting is app code:
+
+```cpp
+// tcApp.h:  MidiIn midiIn;  float lastTry = 0.0f;
+void tcApp::update() {
+    if (!midiIn.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+        lastTry = getElapsedTime();
+        midiIn.setup();     // same port, found again by name
+    }
+}
+```
+
+Where the loss is reported. An opened physical port holds a libremidi
+observer that hears the port-removal notification, then looks at the port list
+again on the main thread; if the port's name is gone, that is the loss:
+
+| Backend | Reported by | Delay |
+|---|---|---|
+| CoreMIDI (macOS, iOS) | `kMIDIMsgObjectRemoved` | one host turn |
+| ALSA sequencer (Linux) | port-exit announcement | about 100 ms |
+| WinMM (Windows) | libremidi polls the device list | up to 100 ms |
+| WebMIDI | not reported (libremidi does not expose `statechange`) | - |
+| Android (AMidi) | not verified | - |
+
+A virtual port you created with `openVirtualPort()` is never reported lost.
+Two ports with the same name are not told apart: losing one of them is not
+reported while the other is still listed, and `setup()` opens the first. A
+device that goes away and comes back before the notification is handled is
+not reported. `MidiOut` does not treat a failed send as a loss.
 
 ## Threading note
 

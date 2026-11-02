@@ -31,7 +31,7 @@ void tcApp::draw() {
     clear(0.12f);
     setColor(1.0f);
     drawBitmapString("tcxMidi - async (callback on MIDI thread, mutex-guarded)", 16, 28);
-    drawBitmapString("in: " + (midiIn_.isOpen() ? midiIn_.getName() : string("(none)")), 16, 52);
+    drawBitmapString("in: " + (midiIn_.isConnected() ? midiIn_.getName() : string("(none)")), 16, 52);
     drawBitmapString("received: " + to_string(received_.load()), 16, 70);
 
     setColor(0.55f);
@@ -50,5 +50,5 @@ void tcApp::draw() {
 void tcApp::cleanup() {
     // Stop the input thread before teardown so the callback can't fire late.
     listener_.disconnect();
-    midiIn_.closePort();
+    midiIn_.close();
 }

@@ -26,7 +26,7 @@ void tcApp::draw() {
 
     setColor(0.85f);
     drawBitmapString("tcxMidi - controller   in: " +
-                     (midiIn_.isOpen() ? midiIn_.getName() : string("(none)")), 16, 24);
+                     (midiIn_.isConnected() ? midiIn_.getName() : string("(none)")), 16, 24);
     setColor(0.5f);
     drawBitmapString("move a knob/fader - a meter appears per CC number", 16, 44);
 
