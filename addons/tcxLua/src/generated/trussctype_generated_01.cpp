@@ -165,38 +165,34 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["timestamp"] = &trussc::LogEventArgs::timestamp;
     }
     {
-        sol::usertype<trussc::SerialDisconnectEventArgs> t = lua->new_usertype<trussc::SerialDisconnectEventArgs>("SerialDisconnectEventArgs");
-        t["baudRate"] = &trussc::SerialDisconnectEventArgs::baudRate;
-        t["portName"] = &trussc::SerialDisconnectEventArgs::portName;
-        t["reason"] = &trussc::SerialDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::SerialDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
     }
     {
-        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
-        t["distance"] = &trussc::Node::HitResult::distance;
-        t["localPoint"] = &trussc::Node::HitResult::localPoint;
-        t["node"] = &trussc::Node::HitResult::node;
-        t["hit"] = &trussc::Node::HitResult::hit;
+        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
+        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
+        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
+        t["message"] = &trussc::TcpServerErrorEventArgs::message;
+    }
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
+    {
+        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
+        t["height"] = &trussc::ResizeEventArgs::height;
+        t["width"] = &trussc::ResizeEventArgs::width;
     }
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-    }
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
-    {
-        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
-        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
-        t["reason"] = &trussc::DeviceLostEventArgs::reason;
-    }
-    {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
     }
 }
 #ifdef _MSC_VER

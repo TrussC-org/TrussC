@@ -213,29 +213,28 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
         "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
     {
-        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
-        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
-        t["host"] = &trussc::TcpClientConnectEventArgs::host;
-        t["port"] = &trussc::TcpClientConnectEventArgs::port;
+        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
+        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
+        t["drawFps"] = &trussc::FpsSettings::drawFps;
+        t["synced"] = &trussc::FpsSettings::synced;
+        t["updateFps"] = &trussc::FpsSettings::updateFps;
     }
-    lua->new_usertype<trussc::SoundBuffer::Kind>("SoundBufferKind",
-        sol::meta_function::equal_to, [](trussc::SoundBuffer::Kind a, trussc::SoundBuffer::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundBuffer::Kind::Eager),
-        "Stream", sol::var(trussc::SoundBuffer::Kind::Stream));
+    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
+        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
+        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
     {
-        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
-        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
-        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
+        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
+        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
+        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
     }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
     {
-        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
-        t["message"] = &trussc::MicStartResult::message;
-        t["success"] = &trussc::MicStartResult::success;
-    }
-    {
-        sol::usertype<trussc::Runtime> t = lua->new_usertype<trussc::Runtime>("Runtime");
-        t["events"] = &trussc::Runtime::events;
-        t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
+        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
+        t["occluded"] = &trussc::OccludedEventArgs::occluded;
     }
 }
 #ifdef _MSC_VER

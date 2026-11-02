@@ -216,25 +216,22 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         "Ctrl", sol::var(trussc::EasyCam::Modifier::Ctrl),
         "Alt", sol::var(trussc::EasyCam::Modifier::Alt),
         "Super", sol::var(trussc::EasyCam::Modifier::Super));
-    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
-        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
-        "H264", sol::var(trussc::VideoCodec::H264),
-        "HEVC", sol::var(trussc::VideoCodec::HEVC),
-        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
-        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
+    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
+        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
+        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
+        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
     {
-        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
-        t["changed"] = &trussc::TouchPoint::changed;
-        t["id"] = &trussc::TouchPoint::id;
-        t["pressure"] = &trussc::TouchPoint::pressure;
-        t["x"] = &trussc::TouchPoint::x;
-        t["y"] = &trussc::TouchPoint::y;
+        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
+        t["getHost"] = &trussc::TcpServerClient::getHost;
+        t["getId"] = &trussc::TcpServerClient::getId;
+        t["getPort"] = &trussc::TcpServerClient::getPort;
     }
-    lua->new_usertype<trussc::AxisMode>("AxisMode",
-        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
-        "None", sol::var(trussc::AxisMode::None),
-        "Fill", sol::var(trussc::AxisMode::Fill),
-        "Content", sol::var(trussc::AxisMode::Content));
     {
         sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
         t["cancel"] = &trussc::ExitRequestEventArgs::cancel;

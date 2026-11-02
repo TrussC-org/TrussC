@@ -690,14 +690,15 @@ Fitting requests run every check strictly, without SKIPs.
   behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
   `writeBytes()` each notice it on their own, close the port, log one warning,
   and `isConnected()` turns false so `setup()` can reconnect; a quiet but
-  present device is not a loss. `onDisconnect` fires once per open connection:
-  for the loss (`wasClean` false, the port, the rate and the warning's text as
-  `reason`) and for `close()` of an open port, but not from the destructor or
-  a move assignment. A listener may call `setup()` from inside the
+  present device is not a loss. `onDisconnect` (#415) fires once per open connection, only for the loss (the
+  warning's text as `reason`, `isConnected()` already false), never from
+  `close()`, `setup()` on an open port, the destructor or a move assignment;
+  `setup()` with no arguments reopens the last port at the last baud rate, and
+  a loss found on a worker thread reaches a `Deliver::Main` listener once, on
+  the main thread. A listener may call `setup()` from inside the
   notification, and the call that found the loss must leave that new
   connection alone. Only the I/O calls find a loss: `close()` or `setup()`
-  after an unplug nobody noticed fire once as a clean close and leak no
-  descriptor. Several threads may share one `Serial` (it has its own
+  after an unplug nobody noticed close silently and leak no descriptor. Several threads may share one `Serial` (it has its own
   reader-writer lock): when they race an unplug, the loss is reported once,
   the fd is closed once, and the descriptors the kernel hands out right after
   (recognized by inode) are neither closed nor written to. The I/O calls never

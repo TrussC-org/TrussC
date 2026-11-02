@@ -294,4 +294,11 @@ struct DeviceLostEventArgs {
     bool cancel = false;           // Set true to keep running without GPU recovery
 };
 
+// A peripheral (serial port, camera, MIDI port, ...) the OS reported lost, for
+// the onDisconnect event of the device classes. Not the graphics device:
+// that is DeviceLostEventArgs above. See docs/DEVICE_LIFECYCLE.md.
+struct DeviceDisconnectEventArgs {
+    std::string reason;            // Human-readable, e.g. "read: Input/output error"
+};
+
 } // namespace trussc

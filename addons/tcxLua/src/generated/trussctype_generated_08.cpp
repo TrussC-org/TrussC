@@ -134,31 +134,35 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
         t["success"] = &trussc::LoadResult::success;
     }
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
+        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
+        "Immutable", sol::var(trussc::TextureUsage::Immutable),
+        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
+        "Stream", sol::var(trussc::TextureUsage::Stream),
+        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
     {
-        auto constructors = tcxLuaConstructors<trussc::LogStream
-            , trussc::LogStream(trussc::LogLevel)
-            , trussc::LogStream(trussc::LogLevel, const std::string &)
-        >();
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
-    }
-    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
-        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
-        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
-        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
-    {
-        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
-        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
-        t["format"] = &trussc::AudioRecordSettings::format;
+        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
+        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
+        t["host"] = &trussc::TcpClientConnectEventArgs::host;
+        t["port"] = &trussc::TcpClientConnectEventArgs::port;
     }
     {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-        t["success"] = &trussc::TcpConnectEventArgs::success;
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["accuracy"] = &trussc::Location::accuracy;
+        t["altitude"] = &trussc::Location::altitude;
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
+    }
+    {
+        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
+        t["mode"] = &trussc::CurveStyle::mode;
+        t["resolution"] = &trussc::CurveStyle::resolution;
+        t["tolerance"] = &trussc::CurveStyle::tolerance;
+    }
+    {
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+        t["message"] = &trussc::UdpErrorEventArgs::message;
     }
 }
 #ifdef _MSC_VER

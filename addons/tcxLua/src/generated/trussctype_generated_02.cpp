@@ -175,25 +175,30 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         "Top", sol::var(trussc::Direction::Top),
         "Bottom", sol::var(trussc::Direction::Bottom),
         "Baseline", sol::var(trussc::Direction::Baseline));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
-    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
-        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
-        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
-        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
+    {
+        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
+        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
+        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
+        t["id"] = &trussc::TouchEventArgs::id;
+        t["x"] = &trussc::TouchEventArgs::x;
+        t["y"] = &trussc::TouchEventArgs::y;
+    }
+    {
+        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
+        t["data"] = &trussc::UdpReceiveEventArgs::data;
+        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
+        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
+    }
     lua->new_usertype<trussc::EaseMode>("EaseMode",
         sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
         "In", sol::var(trussc::EaseMode::In),
         "Out", sol::var(trussc::EaseMode::Out),
         "InOut", sol::var(trussc::EaseMode::InOut));
-    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
-        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
-        "U8", sol::var(trussc::PixelFormat::U8),
-        "F32", sol::var(trussc::PixelFormat::F32));
+    {
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+    }
     lua->new_usertype<trussc::Codec>("Codec",
         sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
         "None", sol::var(trussc::Codec::None),

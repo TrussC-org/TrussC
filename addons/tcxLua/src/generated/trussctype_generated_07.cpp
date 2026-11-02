@@ -211,12 +211,10 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["y"] = &trussc::ShaderVertex::y;
         t["z"] = &trussc::ShaderVertex::z;
     }
-    lua->new_usertype<trussc::ThermalState>("ThermalState",
-        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
-        "Nominal", sol::var(trussc::ThermalState::Nominal),
-        "Fair", sol::var(trussc::ThermalState::Fair),
-        "Serious", sol::var(trussc::ThermalState::Serious),
-        "Critical", sol::var(trussc::ThermalState::Critical));
+    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
+        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
+        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
+        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
     {
         sol::usertype<trussc::RuntimeEvents> t = lua->new_usertype<trussc::RuntimeEvents>("RuntimeEvents");
         t["console"] = &trussc::RuntimeEvents::console;
@@ -233,10 +231,11 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
         t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
+    {
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
+    }
     {
         sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
         t["data"] = &trussc::TcpReceiveEventArgs::data;

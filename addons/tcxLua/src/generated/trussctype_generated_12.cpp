@@ -192,35 +192,42 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         "Triangles", sol::var(trussc::PrimitiveType::Triangles),
         "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
         "Quads", sol::var(trussc::PrimitiveType::Quads));
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
-    lua->new_usertype<trussc::MouseButton>("MouseButton",
-        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
-        "Left", sol::var(trussc::MouseButton::Left),
-        "Right", sol::var(trussc::MouseButton::Right),
-        "Middle", sol::var(trussc::MouseButton::Middle),
-        "None", sol::var(trussc::MouseButton::None));
-    lua->new_usertype<trussc::LightType>("LightType",
-        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
-        "Directional", sol::var(trussc::LightType::Directional),
-        "Point", sol::var(trussc::LightType::Point),
-        "Spot", sol::var(trussc::LightType::Spot));
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
-    lua->new_usertype<trussc::MixMode>("MixMode",
-        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
-        "Auto", sol::var(trussc::MixMode::Auto),
-        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
     {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
+        t["alt"] = &trussc::KeyEventArgs::alt;
+        t["consumed"] = &trussc::KeyEventArgs::consumed;
+        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
+        t["key"] = &trussc::KeyEventArgs::key;
+        t["shift"] = &trussc::KeyEventArgs::shift;
+        t["super"] = &trussc::KeyEventArgs::super;
+    }
+    {
+        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
+        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
+        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
+    }
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
+    {
+        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
+        t["files"] = &trussc::DragDropEventArgs::files;
+        t["x"] = &trussc::DragDropEventArgs::x;
+        t["y"] = &trussc::DragDropEventArgs::y;
+    }
+    {
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
+    }
+    {
+        sol::usertype<trussc::Runtime> t = lua->new_usertype<trussc::Runtime>("Runtime");
+        t["events"] = &trussc::Runtime::events;
+        t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
     }
 }
 #ifdef _MSC_VER
