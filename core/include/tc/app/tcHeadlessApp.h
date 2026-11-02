@@ -182,7 +182,8 @@ struct HeadlessUpdateState {
 };
 
 // One pass, with elapsed time supplied by the runner (or a deterministic
-// test). A cancellable request is dispatched only after all owed steps.
+// test). A quit request is dispatched after the requesting step; remaining
+// owed steps are dropped even if the request is vetoed.
 inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
                                   HeadlessUpdateState& state, double elapsed,
                                   double targetDelta) {
@@ -194,7 +195,7 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
     int ran = 0;
     for (; ran < adv.steps; ++ran) {
         headless::pollExitSignal();
-        if (!headless::running || app.isExitRequested()) break;
+        if (!headless::running || app.isExitRequested() || headless::quitRequested.load()) break;
         ctx.updateDeltaTime = targetDelta;
         EntryStackGuard guard(AppEntry::Update);
         // Services such as Box2d guard against stepping twice in one update.

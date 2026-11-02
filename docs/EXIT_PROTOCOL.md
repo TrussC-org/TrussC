@@ -78,6 +78,10 @@ A child App leaves quit pending until the current tree traversal unwinds; the
 outer turn handles it before the next services. The current traversal may
 continue; no App callbacks run after cleanup.
 
+In headless mode, a quit requested during an update step is dispatched after
+that step, before any further owed step. Remaining steps in that pass are
+dropped even if exitRequested vetoes the quit; the next pass runs normally.
+
 The first SIGTERM/SIGINT only records a flag in the signal handler. The next
 frame requests exit on the main thread, even in event-driven rendering. A
 second signal while that request is still pending, including during cleanup,
