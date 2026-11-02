@@ -213,7 +213,9 @@ struct LogCapture {
     EventListener sub;
     LogCapture()
         : sub(getLogger().onLog.listen([this](LogEventArgs& e) {
-              if (e.level >= LogLevel::Warning) lines.push_back(e.message);
+              // The base's own "setup failed" line follows the backend's reason; not under test here
+              if (e.level >= LogLevel::Warning && e.message.rfind("[tcxDepthCamera] setup failed", 0) != 0)
+                  lines.push_back(e.message);
           })) {}
 };
 

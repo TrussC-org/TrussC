@@ -57,9 +57,20 @@ EventListener listener = serial.onDisconnect.listen([](DeviceDisconnectEventArgs
 
 `DeviceDisconnectEventArgs` is not `DeviceLostEventArgs`, which belongs to the graphics device.
 
+## Backend authors (DepthCamera)
+
+`DepthCamera` (the `tcxDepthCamera` addon) provides the whole surface in its base class, over the existing `openDevice()` hook: `setup()` reopens through `openDevice()` with the settings the backend remembers, `isConnected()`, `close()` and `onDisconnect` are there already, and a backend written for the v0.8 interface compiles unchanged. The base fires `onDisconnect` only when a backend reports a loss, so a backend that does nothing never fires it. Where a backend already detects the loss (an SDK callback, a capture that says "device removed"), it adds one line, on any thread:
+
+```cpp
+reportLost("Orbbec: device removed");   // protected; fires onDisconnect once, then isConnected() is false
+```
+
+After a loss the session keeps its resources until the app calls `close()` or `setup()`, so the backend's `captureInto()` should return an empty frame once the device is gone. Where the SDK does not report a loss, the backend's documentation says so.
+
 ## Status
 
 | Class | State |
 |---|---|
 | `Serial` | Follows the convention (v0.8.0) |
-| `VideoGrabber`, `tcxMidi` (`MidiIn`, `MidiOut`), `DepthCamera`, `AudioEngine` | Planned (#415) |
+| `DepthCamera` (`tcxDepthCamera`) | The base follows the convention (v0.8.0); each backend adds its `reportLost()` line where its SDK reports a loss |
+| `VideoGrabber`, `tcxMidi` (`MidiIn`, `MidiOut`), `AudioEngine` | Planned (#415) |

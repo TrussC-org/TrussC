@@ -171,6 +171,13 @@ This rule also applies to subclasses of `PlaybackDepthCamera` and
 Return an empty `StreamFreshness` for a timeout or end of playback: it keeps
 the published frame unchanged in both threaded and inline modes.
 
+**Device loss (optional, one line):** the base provides `isConnected()` and
+`onDisconnect` (see `docs/DEVICE_LIFECYCLE.md`). Where your SDK already tells
+you the device is gone (a callback, a "device removed" status from capture),
+call the protected `reportLost("why")` there, from any thread. The base marks
+the camera disconnected and fires `onDisconnect` once. A backend that never
+calls it never fires the event. Apps reconnect by calling `setup()` again.
+
 Add capability interfaces for device-specific extras:
 
 ```cpp

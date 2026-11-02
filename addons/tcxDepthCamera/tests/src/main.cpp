@@ -1,4 +1,7 @@
 // Headless depth-camera lifecycle and frame-publication regressions.
+// Also the device lifecycle rules of docs/DEVICE_LIFECYCLE.md (#415): setup()
+// reopens, isConnected(), close() / the destructor never fire onDisconnect, and
+// a backend's reportLost() fires it once, on the main thread for Deliver::Main.
 // Built by examples/build_all.py --addon-tests-only.
 #include <tcxDepthCamera.h>
 #include <tcxDepthRecord.h>
@@ -11,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 
 namespace {
@@ -344,6 +348,147 @@ void playback() {
         check("threaded SyntheticDepthCamera teardown without close", camera.setup() && waitForFrame(camera));
     }
 }
+
+// A backend that reports a loss: the test calls lose() where a real backend
+// calls reportLost() from its SDK callback or from captureInto().
+class LossCamera : public SyntheticDepthCamera {
+public:
+    LossCamera() : SyntheticDepthCamera(4, 4) { enableDepth(); }
+    ~LossCamera() override { close(); }  // the worker calls lose(): join it while this still exists
+    void lose(const std::string& reason) { reportLost(reason); }
+    // Report the loss from inside captureInto(), on the capture thread
+    void loseOnCapture(const std::string& reason) {
+        reasonOnCapture_ = reason;
+        loseOnCapture_ = true;
+    }
+    int opens = 0;
+    std::atomic<int> captures{0};
+protected:
+    struct LossDevice : SyntheticDevice {
+        LossCamera& owner;
+        LossDevice(LossCamera& o, bool threaded)
+            : SyntheticDevice(4, 4, true, false, threaded), owner(o) {}
+        StreamFreshness captureInto(DepthFrame& dst) override {
+            ++owner.captures;
+            if (owner.loseOnCapture_.exchange(false)) owner.reportLost(owner.reasonOnCapture_);
+            return SyntheticDevice::captureInto(dst);
+        }
+    };
+    std::shared_ptr<Device> openDevice() override {
+        if (!canOpen) return {};
+        ++opens;
+        return std::make_shared<LossDevice>(*this, isThreaded());
+    }
+public:
+    bool canOpen = true;
+private:
+    std::atomic<bool> loseOnCapture_{false};
+    std::string reasonOnCapture_;
+};
+
+// Records onDisconnect notifications of one camera
+struct LossRecorder {
+    int count = 0;
+    std::string reason;
+    bool connectedInside = true;
+    bool onMain = false;
+    EventListener sub;
+    void attach(DepthCamera& cam, Deliver deliver = Deliver::Inline) {
+        sub = cam.onDisconnect.listen([this, &cam](DeviceDisconnectEventArgs& e) {
+            ++count;
+            reason = e.reason;
+            connectedInside = cam.isConnected();
+            onMain = isMainThread();
+        }, deliver);
+    }
+};
+
+int g_setupErrors = 0;
+
+void deviceLifecycle() {
+    EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
+        if (e.level == LogLevel::Error && e.message.find("setup failed") != std::string::npos) ++g_setupErrors;
+    });
+    {
+        LossCamera cam;
+        LossRecorder rec;
+        rec.attach(cam);
+        check("lifecycle 1. not connected before setup()", !cam.isConnected());
+        cam.canOpen = false;
+        const int errors = g_setupErrors;
+        check("lifecycle 2. a failed setup() returns false, stays disconnected, logs an error",
+              !cam.setup() && !cam.isConnected() && g_setupErrors == errors + 1);
+        cam.canOpen = true;
+        check("lifecycle 3. setup() connects", cam.setup() && cam.isConnected());
+        cam.close();
+        check("lifecycle 4. close() disconnects", !cam.isConnected());
+        check("lifecycle 5. setup() with no arguments reopens", cam.setup() && cam.isConnected() && cam.opens == 2);
+        check("lifecycle 6. setup() on an open camera reopens it", cam.setup() && cam.isConnected() && cam.opens == 3);
+        cam.close();
+        cam.lose("not open");
+        check("lifecycle 7. nothing fired from setup(), close() or a report on a closed camera", rec.count == 0);
+    }
+    {
+        // A reported loss: once, with isConnected() already false
+        LossCamera cam;
+        LossRecorder rec;
+        rec.attach(cam);
+        cam.setup();
+        cam.lose("usb removed");
+        check("lifecycle 8. reportLost() fires onDisconnect once with the reason",
+              rec.count == 1 && rec.reason == "usb removed");
+        check("lifecycle 9. isConnected() is already false in the listener",
+              !rec.connectedInside && !cam.isConnected());
+        cam.lose("again");
+        cam.close();
+        check("lifecycle 10. a second report and close() add nothing", rec.count == 1);
+        check("lifecycle 11. setup() reconnects after a loss", cam.setup() && cam.isConnected());
+        cam.lose("second loss");
+        check("lifecycle 12. the next session reports its own loss", rec.count == 2 && rec.reason == "second loss");
+    }
+    {
+        // Inline mode does not capture from a device reported lost
+        LossCamera cam;
+        cam.setup();
+        cam.update();
+        const int before = cam.captures;
+        cam.lose("gone");
+        cam.update();
+        cam.update();
+        check("lifecycle 13. update() leaves a lost device alone", before == 1 && cam.captures == before);
+    }
+    {
+        // The destructor of an open camera
+        LossRecorder rec;
+        // A camera class with no destructor of its own, so only the base can fire
+        auto cam = std::make_unique<SyntheticDepthCamera>(4, 4);
+        rec.attach(*cam);
+        cam->enableDepth();
+        cam->setThreaded(true);
+        cam->setup();
+        cam.reset();
+        check("lifecycle 14. the destructor fires nothing", rec.count == 0);
+    }
+    {
+        // A loss found on the capture thread reaches a Deliver::Main listener once, on the main thread
+        LossCamera cam;
+        LossRecorder rec;
+        rec.attach(cam, Deliver::Main);
+        cam.setThreaded(true);
+        cam.loseOnCapture("capture thread");
+        cam.setup();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (cam.isConnected() && std::chrono::steady_clock::now() < deadline) std::this_thread::yield();
+        cam.close();  // joins the worker, so reportLost() has returned
+        check("lifecycle 15. the worker reported the loss; the Main listener has not run yet",
+              !cam.isConnected() && rec.count == 0);
+        internal::drainMainThreadQueue();
+        check("lifecycle 16. it runs once on the main thread, with the camera disconnected",
+              rec.count == 1 && rec.onMain && !rec.connectedInside && rec.reason == "capture thread");
+        internal::drainMainThreadQueue();
+        check("lifecycle 17. and not again", rec.count == 1);
+    }
+}
 } // namespace
 
 int main() {
@@ -353,5 +498,6 @@ int main() {
     rollback(true);
     pendingFrame();
     playback();
+    deviceLifecycle();
     return failures == 0 ? 0 : 1;
 }
