@@ -568,10 +568,23 @@ inline void intersectRect(float x1, float y1, float w1, float h1,
     oh = std::max(0.0f, bottom - top);
 }
 
-// Set scissor rectangle (screen coordinates)
+// Scissor rectangles are given in the current render target's logical
+// coordinates, the same units as drawRect(): window targets use the window's
+// pixel scale (1 in pixelPerfect mode), Fbo targets are attachment pixels
+// already. The transform matrix and camera are not applied. The target keeps
+// the rectangle in framebuffer pixels (currentScissor / scissorStack); the
+// conversion happens once, where a rectangle enters.
+namespace internal {
+    inline void setScissorPixels(float x, float y, float w, float h) {
+        currentWindowContext().currentTarget->currentScissor = {x, y, w, h, true};
+        sgl_scissor_rectf(x, y, w, h, true);  // origin_top_left = true
+    }
+}
+
+// Set scissor rectangle (logical coordinates of the current render target)
 inline void setScissor(float x, float y, float w, float h) {
-    internal::currentWindowContext().currentTarget->currentScissor = {x, y, w, h, true};
-    sgl_scissor_rectf(x, y, w, h, true);  // origin_top_left = true
+    const float scale = internal::targetPixelScale();
+    internal::setScissorPixels(x * scale, y * scale, w * scale, h * scale);
 }
 
 // Set scissor rectangle (int version)
@@ -585,21 +598,26 @@ inline void resetScissor() {
     sgl_scissor_rect(0, 0, internal::currentTarget().width, internal::currentTarget().height, true);
 }
 
-// Save scissor to stack and set new range (intersection with current range)
+// Save scissor to stack and set new range (intersection with current range).
+// The rectangle is in logical coordinates, like setScissor().
 inline void pushScissor(float x, float y, float w, float h) {
-    // Save current state to stack
-    internal::currentWindowContext().currentTarget->scissorStack.push_back(internal::currentWindowContext().currentTarget->currentScissor);
+    auto& target = *internal::currentWindowContext().currentTarget;
 
-    // Calculate new range (intersection with current range)
-    if (internal::currentWindowContext().currentTarget->currentScissor.active) {
+    // Save current state to stack
+    target.scissorStack.push_back(target.currentScissor);
+
+    // The stack holds framebuffer pixels, so intersect in pixels.
+    const float scale = internal::targetPixelScale();
+    x *= scale; y *= scale; w *= scale; h *= scale;
+    if (target.currentScissor.active) {
         float nx, ny, nw, nh;
-        intersectRect(internal::currentWindowContext().currentTarget->currentScissor.x, internal::currentWindowContext().currentTarget->currentScissor.y,
-                      internal::currentWindowContext().currentTarget->currentScissor.w, internal::currentWindowContext().currentTarget->currentScissor.h,
+        intersectRect(target.currentScissor.x, target.currentScissor.y,
+                      target.currentScissor.w, target.currentScissor.h,
                       x, y, w, h,
                       nx, ny, nw, nh);
-        setScissor(nx, ny, nw, nh);
+        internal::setScissorPixels(nx, ny, nw, nh);
     } else {
-        setScissor(x, y, w, h);
+        internal::setScissorPixels(x, y, w, h);
     }
 }
 
