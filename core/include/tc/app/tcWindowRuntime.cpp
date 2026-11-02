@@ -409,7 +409,10 @@ void shutdownRuntime() noexcept {
     while (!attachments.empty()) { auto retired = attachments.extract(attachments.first()); }
     if (!state.sessionCommitted) cancelLogoutWatchdog();
 #ifdef _WIN32
-    destroySessionAuthority(std::exchange(state.sessionAuthority, nullptr));
+    if (state.sessionCommitted) {
+        // Windows can end a logging-off process at the last top-level window's
+        // destruction; process exit reclaims the receiver.
+    } else destroySessionAuthority(std::exchange(state.sessionAuthority, nullptr));
 #endif
 }
 bool sessionEndCommitted() noexcept { return runtime().sessionCommitted; }

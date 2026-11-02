@@ -21,6 +21,10 @@ assertions. Busy children run neither process-exit handler.
 
 Native seams retain Windows hidden-HWND
 session authority, macOS reasons and main-queue workspace notification delivery.
+The shared teardown seam checks that committed ending skips both Window native
+disposal routes and session-authority destruction while still releasing Window
+GPU resources and unbinding; ordinary close/shutdown disposes both. Removing
+either gate must fail.
 `test.py --tsan` instruments Runtime and the deadline implementation.
 
 `--mac-device` runs only idle and busy-no-exit Apple-event children on a real
