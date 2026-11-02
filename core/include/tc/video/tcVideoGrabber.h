@@ -7,6 +7,15 @@
 
 // This file is included from TrussC.h
 // Texture, HasTexture must be included first
+//
+// Device lifecycle (docs/DEVICE_LIFECYCLE.md): setup(), isConnected(), close(),
+// onDisconnect. A camera the OS reports lost (unplugged) is noticed by the
+// backend and reported from update(): the grabber closes itself, then fires
+// onDisconnect once. close() and the destructor never fire it. The backends
+// that report a loss: macOS / iOS (AVCaptureDeviceWasDisconnectedNotification),
+// Windows (MF_SOURCE_READERF_ERROR, MF_E_VIDEO_RECORDING_DEVICE_INVALIDATED),
+// Linux (ENODEV from select / VIDIOC_DQBUF / VIDIOC_QBUF), web (the camera
+// track ends). Android has no capture yet.
 
 #include <vector>
 #include <string>
@@ -18,6 +27,8 @@
 #include <cstring>
 #include "tc/utils/tcKeptThreads.h"
 #include "tc/utils/tcMainThread.h"
+#include "tc/events/tcEvent.h"
+#include "tc/events/tcEventArgs.h"
 
 namespace trussc {
 
@@ -92,6 +103,21 @@ struct GrabberSharedState {
     std::thread captureThread;
     KeptThreads keptThreads;
 
+    // The OS reported the camera lost. Set once, by the backend, from any
+    // thread (the capture thread, a notification); VideoGrabber::update()
+    // reports it on the main thread. close() replaces the State, so a loss
+    // recorded for a run the app already closed is never seen.
+    std::atomic<bool> lost{false};
+    std::string lostReason;  // guarded by mtx, valid once lost is true
+
+    void reportLost(std::string reason) {
+        if (stopped.load()) return;  // close() came first: nothing to report
+        std::lock_guard<std::mutex> lock(mtx);
+        if (lost.load()) return;
+        lostReason = std::move(reason);
+        lost.store(true);
+    }
+
     ~GrabberSharedState() { keptThreads.release(captureThread); }
 };
 
@@ -159,15 +185,31 @@ public:
     }
 
     // =========================================================================
+    // Events
+    // =========================================================================
+
+    // The OS reported the camera lost (unplugged): fires once, from update()
+    // on the main thread, after the grabber has closed itself, so
+    // isConnected() is already false. e.reason says why. It does not fire
+    // from close(), setup() or the destructor. A listener may call setup() to
+    // reconnect, or the app polls isConnected(). Listeners stay with the
+    // grabber they were added to: a move does not carry them over.
+    Event<DeviceDisconnectEventArgs> onDisconnect;
+
+    // =========================================================================
     // Setup / Close
     // =========================================================================
 
-    // Start camera (default 640x480)
+    // Start the camera chosen by setDeviceID() (device 0 by default) at the
+    // requested size. An open camera is closed first, without onDisconnect.
     // If permission is not granted, requests it and returns false.
     // Call update() every frame - it will automatically initialize once permission is granted.
-    bool setup(int width = 640, int height = 480) {
+    // The size is remembered for setup().
+    bool setup(int width, int height) {
         close(); // A new State owns this run; queue capacity is preserved.
 
+        lastWidth_ = width;
+        lastHeight_ = height;
         state_->requestedWidth = width;
         state_->requestedHeight = height;
 
@@ -182,7 +224,18 @@ public:
         return completeSetup();
     }
 
-    // Stop camera
+    // Start the camera again: the device ID set by setDeviceID() and the size
+    // of the last setup(width, height) (device 0 at 640x480 if there was
+    // none). This is the reconnect call:
+    //   if (!grabber.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); grabber.setup(); }
+    // Returns false and logs an error when the camera cannot be opened (false
+    // without an error while the camera permission is pending).
+    bool setup() {
+        return setup(lastWidth_, lastHeight_);
+    }
+
+    // Stop camera. Never fires onDisconnect (that is for a camera the OS
+    // reported lost).
     void close() {
         auto queueSize = getFrameQueueSize();
         pendingSetup_ = false;
@@ -229,6 +282,12 @@ public:
         // Platform-specific update processing
         updatePlatform();
 
+        // The OS reported the camera lost: close, then tell the app
+        if (state_->lost.load()) {
+            handleLost();
+            return;
+        }
+
         // Check for size change notification from camera
         if (checkResizeNeeded()) {
             int newW = 0, newH = 0;
@@ -257,7 +316,11 @@ public:
     // Status getters
     // =========================================================================
 
-    bool isInitialized() const { return initialized_; }
+    // True only while the camera is open: after a successful setup() and
+    // until close() or a loss. False while permission is pending.
+    bool isConnected() const { return initialized_ && !state_->lost.load(); }
+    // Older name of isConnected()
+    bool isInitialized() const { return isConnected(); }
     bool isPendingPermission() const { return pendingSetup_; }
     int getWidth() const { return state_->width; }
     int getHeight() const { return state_->height; }
@@ -345,6 +408,8 @@ private:
 
     int deviceId_ = 0;
     int desiredFrameRate_ = -1;  // -1 = unspecified (camera default)
+    int lastWidth_ = 640;        // size of the last setup(), for setup()
+    int lastHeight_ = 480;
 
     // State
     bool initialized_ = false;
@@ -366,6 +431,8 @@ private:
     void moveFrom(VideoGrabber&& other) {
         deviceId_ = other.deviceId_;
         desiredFrameRate_ = other.desiredFrameRate_;
+        lastWidth_ = other.lastWidth_;
+        lastHeight_ = other.lastHeight_;
         initialized_ = other.initialized_;
         frameNew_ = other.frameNew_;
         verbose_ = other.verbose_;
@@ -378,6 +445,20 @@ private:
         // Invalidate source object
         other.initialized_ = false;
         other.pendingSetup_ = false;
+    }
+
+    // The backend reported the camera lost (state_->lost). Close, then fire
+    // onDisconnect with the grabber already closed, so a listener may call
+    // setup(). Main thread only (update()).
+    void handleLost() {
+        DeviceDisconnectEventArgs args;
+        {
+            std::lock_guard<std::mutex> lock(state_->mtx);
+            args.reason = state_->lostReason;
+        }
+        logWarning("VideoGrabber") << "lost connection to " << deviceName_ << " (" << args.reason << ")";
+        close();
+        internal::ExternalEventDelivery<DeviceDisconnectEventArgs>::notify(onDisconnect, args);
     }
 
     // Complete setup after permission is granted

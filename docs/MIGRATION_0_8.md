@@ -366,3 +366,23 @@ yet; the synthetic-input design remains open.
 - **New, for backend authors:** the protected `reportLost(std::string reason)`. Call it from any thread where the backend already detects a loss. A backend that never calls it never fires `onDisconnect` (as before: it had none). Adding the one line is optional and goes in each backend repository (`tcxOrbbec`, `tcxAzureKinect`, `tcxRealSense`, ...), only where the SDK reports the loss.
 - **Changed:** `setup()` (it already took no arguments and reopened through `openDevice()`) now logs an error when `openDevice()` returns no device, on top of whatever the backend logged. After a reported loss, an inline (non-threaded) `update()` no longer calls `captureInto()` on the lost device.
 - Reconnecting is app code: `if (!camera->isConnected() && elapsed > 2.0f) camera->setup();`, as in `addons/tcxDepthCamera/example-synthetic`.
+
+## VideoGrabber follows the device lifecycle (#415, #276)
+
+`VideoGrabber` is the second device class on the common surface described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup(...)`, `setup()`, `isConnected()`, `close()` and `onDisconnect`.
+
+- **New:** `grabber.setup()` with no arguments reopens the last camera: the current `setDeviceID()` and the size of the last `setup(width, height)` (device 0 at 640 × 480 if there was none). On failure it logs an error and returns `false`. Reconnecting is app code:
+
+  ```cpp
+  if (!grabber.isConnected() && !grabber.isPendingPermission() && getElapsedTime() - lastTry > 2.0f) {
+      lastTry = getElapsedTime();
+      grabber.setup();
+  }
+  ```
+
+- **New: an unplugged camera is reported (#276).** When the OS says the camera is lost, `update()` closes the grabber and fires `grabber.onDisconnect` once (`Event<DeviceDisconnectEventArgs>`, `e.reason` says why). `isConnected()` is already false when it fires. Before, an unplugged camera left `isInitialized()` true and the last frame on screen. `close()`, `setup()` on an open grabber, the destructor and a move never fire it. The OS signals used: `AVCaptureDeviceWasDisconnectedNotification` (macOS, iOS), a Media Foundation reader error or an invalidated device (Windows), `ENODEV` from V4L2 (Linux) and the end of the camera track (web). A camera that only stops sending frames is not reported. You must keep calling `update()`: it is what reports the loss.
+- **Breaking: `setup(int width = 640, int height = 480)` lost its default arguments.** `setup()` is now the reopen call above. For a grabber that has never been set up it behaves as before (device 0 at 640 × 480, or the device from `setDeviceID()`), so `grabber.setup();` keeps working. `grabber.setup(1280);` (width only) no longer compiles: write `grabber.setup(1280, 480)`.
+- **Behavior change:** after an unplug the grabber closes itself, so `isConnected()` / `isInitialized()` turn false on their own and the texture and pixels are released. Code that assumed they stay true until `close()` should check `isConnected()`.
+- `isInitialized()` stays as an alias of `isConnected()`. `isConnected()` is also false while a macOS / iOS permission request is pending (as `isInitialized()` was).
+- Not part of this change: the Windows `uniqueId` (still the enumeration index), `setDeviceUniqueID()` and the Windows native-mode selection from #276 were dropped from the plan in the #415 simplification.
+

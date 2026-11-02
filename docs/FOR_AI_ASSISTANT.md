@@ -4599,8 +4599,9 @@ unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  //
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Move queued camera frames into a vector.
 Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture used to display the camera frame.
 int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the current capture frame width.
+bool VideoGrabber::isConnected() const [macos,windows,linux,ios,web]  // Return whether the camera is open.
 bool VideoGrabber::isFrameNew() const [macos,windows,linux,ios,web]  // Return the new-frame flag from the latest update.
-bool VideoGrabber::isInitialized() const [macos,windows,linux,ios,web]  // Return whether camera setup has completed.
+bool VideoGrabber::isInitialized() const [macos,windows,linux,ios,web]  // Returns the same state as `isConnected()`.
 bool VideoGrabber::isPendingPermission() const [macos,windows,linux,ios,web]  // Return whether setup is waiting for camera permission.
 bool VideoGrabber::isVerbose() const [macos,windows,linux,ios,web]  // Return whether verbose camera logging is enabled.
 std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,ios,web]  // Return the available camera device list.
@@ -4608,7 +4609,7 @@ void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // R
 void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Set the requested capture frame rate.
 void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select the camera device for setup.
 void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Set the capacity of the timestamped camera frame queue.
-bool VideoGrabber::setup(int width = 640, int height = 480) [macos,windows,linux,ios,web]  // Initialize camera capture at a requested size.
+bool VideoGrabber::setup(int width, int height) [+1] [macos,windows,linux,ios,web]  // Open the camera at a requested size, or reopen the last one.
 void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose camera logging.
 void VideoGrabber::update() [macos,windows,linux,ios,web]  // Process camera updates and upload the latest frame.
 ```

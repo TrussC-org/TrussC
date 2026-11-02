@@ -32,6 +32,8 @@ struct VideoGrabberPlatformData {
     AVCaptureVideoDataOutput* output = nil;
     id<AVCaptureVideoDataOutputSampleBufferDelegate> delegate = nil;
     dispatch_queue_t captureQueue = nil;
+    // AVCaptureDeviceWasDisconnectedNotification observer token
+    id<NSObject> disconnectObserver = nil;
 
     ~VideoGrabberPlatformData() { delete[] backBuffer; }
 
@@ -484,6 +486,18 @@ bool VideoGrabber::setupPlatform() {
         data->backBuffer = new unsigned char[state_->width * state_->height * 4];
         std::memset(data->backBuffer, 0, state_->width * state_->height * 4);
 
+        // The OS reports an unplugged camera with this notification. The
+        // observer only records the loss; VideoGrabber::update() reports it.
+        std::weak_ptr<internal::GrabberSharedState> observerState = state_;
+        data->disconnectObserver = [[NSNotificationCenter defaultCenter]
+            addObserverForName:AVCaptureDeviceWasDisconnectedNotification
+                        object:data->device
+                         queue:nil
+                    usingBlock:^(NSNotification* note) {
+            auto state = observerState.lock();
+            if (state) state->reportLost("AVCaptureDeviceWasDisconnectedNotification");
+        }];
+
         // キャプチャ開始
         [data->session startRunning];
 
@@ -500,6 +514,10 @@ bool VideoGrabber::setupPlatform() {
 static void stopCapture(const std::shared_ptr<internal::GrabberSharedState>& state) {
     @autoreleasepool {
         auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
+        if (data->disconnectObserver) {
+            [[NSNotificationCenter defaultCenter] removeObserver:data->disconnectObserver];
+            data->disconnectObserver = nil;
+        }
         if (data->session) {
             [data->session stopRunning];
         }

@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <cerrno>
 #include <cstring>
 #include <thread>
 #include <atomic>
@@ -140,6 +141,14 @@ static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
 // =============================================================================
 // Capture thread function
 // =============================================================================
+
+// Only what the kernel says outright is a loss: ENODEV after the camera is
+// unplugged. Other errors just end the capture thread, as before.
+static void reportIfGone(const std::shared_ptr<internal::GrabberSharedState>& state, const char* call) {
+    if (errno != ENODEV) return;
+    state->reportLost(std::string(call) + ": " + std::strerror(ENODEV));
+}
+
 static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> state) {
     auto* data = static_cast<VideoGrabberPlatformData*>(state->platformData.get());
     while (!state->stopped.load()) {
@@ -155,6 +164,7 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
 
         if (r == -1) {
             if (errno == EINTR) continue;
+            reportIfGone(state, "select");
             break;
         }
 
@@ -170,6 +180,7 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
 
         if (xioctl(data->fd, VIDIOC_DQBUF, &buf) == -1) {
             if (errno == EAGAIN) continue;
+            reportIfGone(state, "VIDIOC_DQBUF");
             break;
         }
 
@@ -205,6 +216,7 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
 
         // Re-queue buffer
         if (xioctl(data->fd, VIDIOC_QBUF, &buf) == -1) {
+            reportIfGone(state, "VIDIOC_QBUF");
             break;
         }
     }

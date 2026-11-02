@@ -1,6 +1,6 @@
 # Device lifecycle
 
-Classes that open a device (a serial port, a camera, a MIDI port, a depth camera, an audio device) follow one small convention. `Serial` is the first; the others follow (#415).
+Classes that open a device (a serial port, a camera, a MIDI port, a depth camera, an audio device) follow one small convention. `Serial` is the first, `VideoGrabber` the second; the others follow (#415).
 
 ## The common surface
 
@@ -73,4 +73,5 @@ After a loss the session keeps its resources until the app calls `close()` or `s
 |---|---|
 | `Serial` | Follows the convention (v0.8.0) |
 | `DepthCamera` (`tcxDepthCamera`) | The base follows the convention (v0.8.0); each backend adds its `reportLost()` line where its SDK reports a loss |
-| `VideoGrabber`, `tcxMidi` (`MidiIn`, `MidiOut`), `AudioEngine` | Planned (#415) |
+| `VideoGrabber` | Follows the convention (v0.8.0). `update()` reports the loss; see the class notes for what each OS tells us |
+| `tcxMidi` (`MidiIn`, `MidiOut`), `AudioEngine` | Planned (#415) |
