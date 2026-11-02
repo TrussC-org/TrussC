@@ -156,7 +156,7 @@ void tcApp::keyPressed(int key) {
         removeAllChildren();
         balls_.clear();
 
-        // Re-setup (setup() is called automatically on first update)
+        // Re-setup (each node's setup() runs inside addChild())
         countdownNode_ = make_shared<CountdownNode>();
         addChild(countdownNode_);
 
