@@ -16,8 +16,11 @@
 //   - traffic for a group NOBODY joined is not received (multicast is join-gated)
 //
 // It also checks bundle parsing and dispatch:
-//   - bundle nesting is limited to OscBundle::MAX_NESTING_DEPTH levels; past
-//     that, or when a nested bundle fails, the whole packet is one parse error
+//   - bundles nest without a depth limit: 17 and 100 levels (past the former
+//     cap of 16) parse, and so does a bundle as deep as fits in 65,536 bytes,
+//     parsed, dispatched, copied, serialized and freed on a thread with a
+//     64 KiB stack; a nested bundle that fails still fails the whole packet
+//     as one parse error
 //   - dispatch hands listeners the parsed bundles themselves, not copies
 //
 // And size checks in the parser:
@@ -61,10 +64,39 @@
 #include <thread>
 #include <vector>
 #include <cstdint>
+#include <functional>
+#ifdef _WIN32
+#  include <windows.h>
+#else
+#  include <pthread.h>
+#endif
 
 using namespace tcx;
 
 static void sleepMs(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+
+// Run `fn` on a new thread whose stack is `bytes` large, and wait for it.
+// Anything that recursed once per bundle level would not fit.
+static void runOnSmallStack(size_t bytes, const std::function<void()>& fn) {
+#ifdef _WIN32
+    HANDLE thread = CreateThread(nullptr, bytes,
+        [](LPVOID arg) -> DWORD { (*static_cast<const std::function<void()>*>(arg))(); return 0; },
+        const_cast<std::function<void()>*>(&fn), STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    if (thread) { WaitForSingleObject(thread, INFINITE); CloseHandle(thread); }
+#else
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, bytes);
+    pthread_t thread;
+    if (pthread_create(&thread, &attr, [](void* arg) -> void* {
+            (*static_cast<const std::function<void()>*>(arg))();
+            return nullptr;
+        }, const_cast<std::function<void()>*>(&fn)) == 0) {
+        pthread_join(thread, nullptr);
+    }
+    pthread_attr_destroy(&attr);
+#endif
+}
 
 static int g_pass = 0, g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -151,11 +183,17 @@ static OscBundle makeNestedBundle(int levels) {
 }
 
 // Messages in a parsed bundle tree, walked through bundleAt() (no copies).
-static int countMessages(const OscBundle& b) {
+// Iterative, so it also serves the deepest trees.
+static int countMessages(const OscBundle& root) {
     int n = 0;
-    for (size_t i = 0; i < b.getElementCount(); ++i) {
-        if (b.isMessage(i)) ++n;
-        else if (const OscBundle* child = b.bundleAt(i)) n += countMessages(*child);
+    std::vector<const OscBundle*> pending{&root};
+    while (!pending.empty()) {
+        const OscBundle* b = pending.back();
+        pending.pop_back();
+        for (size_t i = 0; i < b->getElementCount(); ++i) {
+            if (b->isMessage(i)) ++n;
+            else if (const OscBundle* child = b->bundleAt(i)) pending.push_back(child);
+        }
     }
     return n;
 }
@@ -305,6 +343,34 @@ static std::vector<uint8_t> rawBundle(const std::vector<std::vector<uint8_t>>& e
         bytes.insert(bytes.end(), e.begin(), e.end());
     }
     return bytes;
+}
+
+// A bundle `levels` deep as wire bytes: empty bundles, the innermost holding
+// one "/deep" message. Built from the inside out; each level costs 20 bytes
+// (16 for "#bundle" and the timetag, 4 for the size field).
+static std::vector<uint8_t> deepBundleBytes(int levels) {
+    std::vector<uint8_t> bytes = rawBundle({ rawMessage("/deep", "", {}) });
+    for (int n = 1; n < levels; ++n) {
+        std::vector<uint8_t> prefix = OscBundle().toBytes();
+        appendBe32(prefix, uint32_t(bytes.size()));
+        bytes.insert(bytes.begin(), prefix.begin(), prefix.end());
+    }
+    return bytes;
+}
+
+// The deepest bundle that fits in the 65,536-byte datagram bound.
+static int maxDeepLevels() {
+    int levels = 1;
+    while (deepBundleBytes(1).size() + 20 * size_t(levels) <= 65536) ++levels;
+    return levels;
+}
+
+// Levels of a parsed deepBundleBytes() tree, by walking the first child.
+static int bundleDepth(const OscBundle& root) {
+    int depth = 1;
+    const OscBundle* b = &root;
+    while (const OscBundle* child = b->getElementCount() ? b->bundleAt(0) : nullptr) { b = child; ++depth; }
+    return depth;
 }
 
 // One argument of each OSC 1.0 tag: how to add it, its wire bytes, and a
@@ -535,7 +601,6 @@ int main() {
     static const int POLL_PORTS[4] = { 17114, 18114, 19114, 27114 };  // getNextMessage() only
     static const int QUEUE_PORTS[4] = { 17115, 18115, 19115, 27115 }; // queue overflow
     static const int TYPE_PORTS[4] = { 17116, 18116, 19116, 27116 };  // OSC 1.0 type tags
-    const int LIMIT = OscBundle::MAX_NESTING_DEPTH;
 
     // Keep POSIX multicast tests on loopback: default NIC routes may be absent
     // or filter local multicast, even when sendTo() succeeds. Linux supports
@@ -747,23 +812,61 @@ int main() {
         rx.close();
     }
 
-    // ----- 4. bundle nesting limit (parser) ----------------------------------
-    // fromBytes accepts LIMIT levels (the outermost is level 1). Past that, or
-    // when a nested bundle fails, it rejects the whole bundle.
+    // ----- 4. bundle nesting (parser) ----------------------------------------
+    // Nesting has no depth limit of its own. 16 was the old cap, so 17 and
+    // beyond must parse with every level kept; a nested bundle that fails
+    // still rejects the whole bundle.
     {
         bool ok = false;
-        std::vector<uint8_t> atLimit = makeNestedBundle(LIMIT).toBytes();
-        OscBundle parsed = OscBundle::fromBytes(atLimit.data(), atLimit.size(), ok);
-        check("nesting: MAX_NESTING_DEPTH levels parse", ok);
-        check("nesting: every level is kept", ok && countMessages(parsed) == LIMIT);
-
-        std::vector<uint8_t> past = makeNestedBundle(LIMIT + 1).toBytes();
-        OscBundle::fromBytes(past.data(), past.size(), ok);
-        check("nesting: one level past the limit fails", !ok);
+        bool allKept = true;
+        for (int levels : { 16, 17, 100 }) {
+            std::vector<uint8_t> bytes = makeNestedBundle(levels).toBytes();
+            OscBundle parsed = OscBundle::fromBytes(bytes.data(), bytes.size(), ok);
+            allKept = allKept && ok && countMessages(parsed) == levels;
+        }
+        check("nesting: 16, 17 and 100 levels parse, every level kept", allKept);
 
         std::vector<uint8_t> shortChild = bundleWithShortChild();
         OscBundle::fromBytes(shortChild.data(), shortChild.size(), ok);
         check("nesting: a failing nested bundle fails the whole", !ok);
+
+        // As deep as fits in the 65,536-byte bound, on a 64 KiB stack: parse
+        // (preflight too), dispatch through an OscReceiver, copy, serialize,
+        // copy-assign and free. Any step that recursed per level would
+        // overflow the stack.
+        const int deepest = maxDeepLevels();
+        const std::vector<uint8_t> deepBytes = deepBundleBytes(deepest);
+        check("nesting: deepest test packet is the datagram bound or just under",
+              deepest > 3000 && deepBytes.size() <= 65536 && deepBytes.size() + 20 > 65536);
+        bool parsedOk = false, depthKept = false, copyOk = false, bytesRoundTrip = false;
+        bool assignOk = false, movedOk = false;
+        int dispatchedBundles = 0, dispatchedMessages = 0, dispatchedErrors = 0;
+        runOnSmallStack(64 * 1024, [&] {
+            bool parseOk = false;
+            OscBundle parsed = OscBundle::fromBytes(deepBytes.data(), deepBytes.size(), parseOk);
+            parsedOk = parseOk;
+            depthKept = parseOk && bundleDepth(parsed) == deepest && countMessages(parsed) == 1;
+            OscBundle copy(parsed);
+            copyOk = bundleDepth(copy) == deepest && countMessages(copy) == 1;
+            bytesRoundTrip = parsed.toBytes() == deepBytes && copy.toBytes() == deepBytes;
+            OscBundle assigned;
+            assigned = copy;
+            assignOk = bundleDepth(assigned) == deepest;
+            OscBundle moved(std::move(assigned));
+            movedOk = bundleDepth(moved) == deepest;
+
+            OscReceiver rx;
+            tc::EventListener bundleSub = rx.onBundleReceived.listen([&](OscBundle&) { ++dispatchedBundles; });
+            tc::EventListener messageSub = rx.onMessageReceived.listen([&](OscMessage&) { ++dispatchedMessages; });
+            tc::EventListener errorSub = rx.onParseError.listen([&](std::string&) { ++dispatchedErrors; });
+            tcx::osc::OscReceiverTestAccess::parse(rx, deepBytes);
+        });   // parsed, copy, moved and the receiver are freed here, on the small stack
+        check("nesting: deepest packet parses on a 64 KiB stack", parsedOk);
+        check("nesting: deepest packet keeps every level", depthKept);
+        check("nesting: deepest bundle copies (copy and assign) and moves", copyOk && assignOk && movedOk);
+        check("nesting: deepest bundle serializes back to the same bytes", bytesRoundTrip);
+        check("nesting: deepest packet dispatches every level once, no error",
+              dispatchedBundles == deepest && dispatchedMessages == 1 && dispatchedErrors == 0);
     }
 
     // ----- 5. bundle nesting through OscReceiver -----------------------------
@@ -844,20 +947,27 @@ int main() {
                 check("dispatch: nested bundles passed by reference", got && bundles == 10 && sameObjects);
             }
 
-            // Exactly at the limit
-            got = deliver(makeNestedBundle(LIMIT).toBytes());
+            // Past the former cap of 16 levels
+            got = deliver(makeNestedBundle(17).toBytes());
             {
                 std::lock_guard<std::mutex> lock(mtx);
-                check("nesting: MAX_NESTING_DEPTH levels delivered",
-                      got && messages == LIMIT && bundles == LIMIT && errors == 0);
+                check("nesting: 17 levels delivered",
+                      got && messages == 17 && bundles == 17 && errors == 0 && sameObjects);
             }
 
-            // One level past the limit
-            got = deliver(makeNestedBundle(LIMIT + 1).toBytes());
+            // Hundreds of levels in one datagram of a size every OS delivers over
+            // loopback (8,012 bytes): macOS refuses to send a UDP datagram over
+            // net.inet.udp.maxdgram (9,216 by default), which is a property of
+            // the transport, not of the parser. The deepest packet that fits
+            // the 65,536-byte bound goes through OscReceiver's own dispatch
+            // without a socket in section 4.
+            const std::vector<uint8_t> hundreds = deepBundleBytes(400);
+            check("nesting: the 400-level packet fits a portable datagram", hundreds.size() < 9000);
+            got = deliver(hundreds);
             {
                 std::lock_guard<std::mutex> lock(mtx);
-                check("nesting: past the limit: onParseError once", got && errors == 1);
-                check("nesting: past the limit: nothing delivered", got && messages == 0 && bundles == 0);
+                check("nesting: 400 levels delivered",
+                      got && messages == 1 && bundles == 400 && errors == 0 && sameObjects);
             }
 
             // A nested bundle that fails to parse

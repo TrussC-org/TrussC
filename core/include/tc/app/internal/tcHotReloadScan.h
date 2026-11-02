@@ -25,7 +25,8 @@ inline std::vector<std::filesystem::path> hotReloadSources(const std::filesystem
                 auto ext = cursor->path().extension().native();
                 for (auto& c : ext) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
                 if (ext == fs::path(".cpp").native() || ext == fs::path(".h").native() ||
-                    ext == fs::path(".hpp").native() || ext == fs::path(".mm").native())
+                    ext == fs::path(".hpp").native() || ext == fs::path(".mm").native() ||
+                    ext == fs::path(".glsl").native())
                     paths.push_back(cursor->path());
             }
             if (error) {

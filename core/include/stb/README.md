@@ -23,8 +23,9 @@ The implementations are compiled in `core/include/impl/stb_impl.cpp`
 `core/include/tc/sound/tcSound_impl.cpp` (`stb_vorbis`, inside `extern "C"`).
 Pixels and MCP file decoding observe allocation failures through the ordinary
 image-load scope, without an MCP working-memory budget or custom allocation
-layout. MCP local files use Pixels loading. The existing 64 MiB encoded-size
-limit for URL/memory image input remains; local files follow normal file loading.
+layout. MCP local files use Pixels loading. Encoded image size has no cap, for
+files, URLs and memory input alike; decoded axes stay bounded by the GPU texture
+limit and the stb 32-bit input count.
 
 PNG uses stb_image_write's own zlib compressor and default allocators. Under real
 memory exhaustion, the encoder can abort internally; a null return is handled by

@@ -34,7 +34,8 @@ Bundles (with NTP timetags) can nest messages and other bundles.
   tag, argument data that runs past the end of the packet, a `[` or `]` without its
   pair, and a bundle element whose size runs past the end of the data. A bundle with
   a nested message or bundle that fails to parse is rejected as a whole. Bundles
-  nest up to `OscBundle::MAX_NESTING_DEPTH` (16) levels.
+  nest as deep as the packet holds (no depth limit; parsing, dispatching and freeing
+  walk the nesting iteratively, and copies share nested bundles).
 - **Missing padding** — a message that ends before the zero padding of its last
   item (to a 4-byte boundary) is accepted, and each `OscReceiver` logs one warning
   the first time it gets one.
@@ -140,20 +141,22 @@ Overflow evicts oldest whole messages and increments the counter.
 초과하거나 한도를 줄이면 오래된 메시지 전체를 버리고 카운터에 더합니다.
 
 Incoming packets (including the public `fromBytes()` parsers) are preflighted
-without allocation before decoding: at most **65,536 bytes** and **16 bundle
-levels**. There is no argument or work-unit limit; a 5000-float message fits.
-Over-limit packets are rejected whole; the next valid packet can proceed.
+before decoding: at most **65,536 bytes** (the UDP datagram size). There is no
+argument, work-unit or bundle-depth limit; a 5000-float message fits, and a
+bundle nested a few thousand levels deep (as many as fit in 65,536 bytes) parses.
+Over-size packets are rejected whole; the next valid packet can proceed.
+If you need a depth limit, check it in your `onBundleReceived` handler.
 The receiver reports the first limit loss with a separate lifetime Warning.
 Rejected datagrams are not queue-message losses. Main-thread event delivery
 uses a separate store from the polling queue and is unlimited by default.
 
-日本語: 受信パケットの 65536 バイトと入れ子 16 段の上限は維持します。
-引数数の上限はなく、5000 個の float を持つメッセージも受信できます。
+日本語: 受信パケットの 65536 バイト（UDP データグラムの大きさ）の上限は維持します。
+入れ子の深さと引数数に上限はなく、5000 個の float を持つメッセージも受信できます。
 Main 配送は既定で無制限で、イベントの `setMainThreadDeliveryLimit(count)`
 で任意の件数上限を設定できます。0 は無制限です。超過コピーは破棄して内部で数えます。
 
-한국어: 수신 패킷의 65536바이트 및 중첩 16단계 한도는 유지합니다.
-인자 수 한도는 없으며 float 5000개를 담은 메시지도 수신합니다.
+한국어: 수신 패킷의 65536바이트(UDP 데이터그램 크기) 한도는 유지합니다.
+중첩 깊이와 인자 수에는 한도가 없으며 float 5000개를 담은 메시지도 수신합니다.
 Main 전달은 기본 무제한이며 이벤트의 `setMainThreadDeliveryLimit(count)`로
 선택적 개수 한도를 설정합니다. 0은 무제한입니다. 초과 복사본은 버리고 내부에서 집계합니다.
 
@@ -220,8 +223,6 @@ size_t count = bundle.getElementCount();
 if (bundle.isMessage(i)) OscMessage m = bundle.getMessageAt(i);
 if (bundle.isBundle(i))  OscBundle  b = bundle.getBundleAt(i);   // copy
 const OscBundle* child = bundle.bundleAt(i);  // no copy; nullptr if not a bundle
-
-OscBundle::MAX_NESTING_DEPTH       // 16: deepest nesting the parser accepts
 ```
 
 ### OscSender

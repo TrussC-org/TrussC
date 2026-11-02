@@ -74,7 +74,7 @@ public:
         clear(0.0f);
         if (screenErrorPending_) {
             screenErrorPending_ = false;
-            // Exhaust sokol_gl's 64-level stacks regardless of entry depth.
+            // Pop beyond the balanced screen entry depth to induce underflow.
             for (int i = 0; i < 65; ++i) sgl_pop_matrix();
             check("screen underflow was induced", sgl_error().stack_underflow);
             warningsBeforeScreen_ = stackWarnings;
@@ -121,6 +121,21 @@ public:
         check("cross-pass push/pop leaves screen sokol_gl healthy", !sgl_error().any);
         check("cross-pass push/pop emits no stack error", stackWarnings == warningsBefore);
 
+        // #331: TrussC pushes beyond the old sokol_gl limit, including in FBOs.
+        first_.begin(0, 0, 0, 1);
+        for (int i = 0; i < 200; ++i) {
+            pushMatrix();
+            translate(0.125f, 0);
+        }
+        setColor(1.0f);
+        drawRect(0, 0, 8, 8);
+        for (int i = 0; i < 200; ++i) popMatrix();
+        drawRect(16, 16, 16, 16);
+        check("200 nested TrussC pushes leave FBO context healthy", !sgl_error().any);
+        first_.end();
+        check("deep FBO transform renders", pixelIsWhite(first_, 28, 4));
+        check("draw after deep TrussC recursion renders", pixelIsWhite(first_, 20, 20));
+
         // Draw the result later into the second FBO and verify its pixels.
         second_.begin(0, 0, 0, 1);
         first_.draw(0, 0);
@@ -164,7 +179,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
           &fboGate == &internal::sglStackErrorReportGate(true) &&
           &screenGate == &internal::sglStackErrorReportGate(false));
     auto listener = getLogger().onLog.listen([](LogEventArgs& e) {
-        if (e.level == LogLevel::Warning && e.message.find("matrix stack") != string::npos) {
+        if (e.level == LogLevel::Warning && e.message.find("stack underflow") != string::npos) {
             ++stackWarnings;
             if (e.message.find("in an Fbo pass") != string::npos) ++fboWarnings;
             if (e.message.find("on screen") != string::npos) ++screenWarnings;

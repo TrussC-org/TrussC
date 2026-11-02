@@ -44,7 +44,15 @@ out vec4 frag_color;
 
 // Approximate sRGB <-> linear with gamma 2.2 (cheap, matches the convention
 // the rest of the pipeline uses for non-sRGB-aware RGBA8 textures).
-vec3 srgb_to_linear(vec3 c) { return pow(c, vec3(2.2)); }
+vec3 srgb_to_linear(vec3 c) {
+    #if defined(SOKOL_HLSL)
+        // Float FBOs can contain negative RGB; don't abs/clamp those inputs.
+        // Spell out pow's log/exp lowering to avoid fxc X3571.
+        return exp2(log2(c) * vec3(2.2));
+    #else
+        return pow(c, vec3(2.2));
+    #endif
+}
 vec3 linear_to_srgb(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
 
 void main() {

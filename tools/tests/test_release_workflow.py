@@ -204,6 +204,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     '_TC_HR_PLATFORM_SUPPORTED': 'TRUE',
                     '_TC_HR_EXPLICIT_SOURCES': str(source) if explicit else '',
                     'TRUSSC_DIR': native(ROOT / 'core'),
+                    '_TC_HR_TRUSSC_DIR': native(ROOT / 'core'),
                 }
                 generator.write_text('cmake_minimum_required(VERSION 3.20)\n' + ''.join(
                     f'set({key} [==[{value}]==])\n' for key, value in values.items()) + writer, encoding="utf-8")
@@ -225,6 +226,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         shutil.copy2(ROOT / 'core/cmake/tc_hot_reload_scan.cmake', scanner)
         values.update(_TC_HR_PLATFORM_SUPPORTED='FALSE',
                       TRUSSC_DIR=r'D:\a\TrussC\TrussC/TrussC/core',
+                      _TC_HR_TRUSSC_DIR=r'D:\a\TrussC\TrussC/TrussC/core',
                       _TC_HR_SRC_DIR=r'D:\a\TrussC\TrussC\src',
                       _TC_HR_CMAKELISTS=r'D:\a\TrussC\TrussC\CMakeLists.txt',
                       _TC_HR_EXPLICIT_SOURCES=r'D:\a\app with spaces\one.cpp;D:\a\app\two.cpp')

@@ -1194,6 +1194,7 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
         }
 
         // Ask for uncompressed RGB32 (BGRA in memory).
+        // Media Foundation yields no H.264 frames at coded width 32; width 34 (coded 48) works.
         if (SUCCEEDED(hr)) {
             ComPtr<IMFMediaType> rgbType;
             hr = MFCreateMediaType(&rgbType);

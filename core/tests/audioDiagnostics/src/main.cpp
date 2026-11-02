@@ -917,7 +917,7 @@ int main() {
     check("polyphony-limit drop is counted", st.droppedPolyphonyLimit == 1 && st.droppedPlays == 1,
           to_string(st.droppedPolyphonyLimit) + "/" + to_string(st.droppedPlays));
     check("drop is logged as a warning right away",
-          countLogs(LogLevel::Warning, "playback slots are busy") == 1, lastLog(LogLevel::Warning));
+          countLogs(LogLevel::Warning, "voices are already playing") == 1, lastLog(LogLevel::Warning));
 
     // --- rate limit: repeats are summed into one later line ---------------------
     for (int i = 0; i < 5; ++i) c.play();

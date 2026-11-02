@@ -8,6 +8,8 @@ namespace trussc::internal {
 int& appExitCode();  // defined in tcGlobal.cpp; shared by host, guests and backends
 bool& appSetupCalled();  // defined in tcGlobal.cpp; whether setup ran in this launch
 void shutdownRuntime() noexcept;
+// macOS only: finish async sheets before their App owners end.
+void cancelMacDialogSheets() noexcept;
 bool sessionEndCommitted() noexcept;
 bool querySessionEnd() noexcept;
 void cancelSessionEnd() noexcept;
