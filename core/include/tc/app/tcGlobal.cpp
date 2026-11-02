@@ -1517,11 +1517,10 @@ uint64_t deviceFrameCount() {
     return sg_isvalid() ? sg_query_stats().prev_frame.frame_index : 0;
 }
 
-// Single occlusion policy for all windows. Desktop secondary native sources
-// deliver gated callbacks here before drawable admission. Main keeps
-// updating on every supplied tick, independently of its visibility snapshot.
-static bool occlusionPausesUpdate(const WindowContext& ctx) { return ctx.pauseUpdatesWhenHidden; }
-
+// One hidden-window rule for every window (#997): a hidden window keeps
+// updating on every supplied tick and only its draw stops. Desktop native
+// sources keep ticking hidden windows and deliver them here as draw-gated
+// ticks. Only native mobile lifecycle suspension pauses updates.
 static bool nativeSuspensionPausesUpdate() {
 #if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
     return true;
@@ -1532,7 +1531,7 @@ static bool nativeSuspensionPausesUpdate() {
 
 void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
     // Observe lifecycle state before raw listeners can throw. Only native
-    // mobile suspension or secondary admission pauses updates.
+    // mobile suspension pauses updates.
 #if defined(__ANDROID__)
     if (type == SAPP_EVENTTYPE_UNFOCUSED) ctx.visibilityPaused = true;
 #endif
@@ -1541,10 +1540,6 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
             refreshWindowMetadata(*w);
             const auto& m = WindowRequestAccess::binding(*w).metadata;
             ctx.suspended = m.trust_hidden_signals && (m.iconified || m.occluded);
-            if (ctx.suspended && occlusionPausesUpdate(ctx)) {
-                ctx.visibilityPaused = true;
-                ctx.mainUpdateCallTimeInitialized = false;
-            }
             return;
         }
     }
@@ -1552,7 +1547,7 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
     // this call and remains authoritative for raw listeners and the typed event.
     if (type == SAPP_EVENTTYPE_SUSPENDED) {
         ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();
-        if (ctx.lifecycleSuspended || (ctx.suspended && occlusionPausesUpdate(ctx))) {
+        if (ctx.lifecycleSuspended) {
             ctx.visibilityPaused = true;
             ctx.mainUpdateCallTimeInitialized = false;
         }
@@ -1577,7 +1572,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     auto* window = ctx.hostWindow;
     if (window) ctx.suspended = window->isOccluded();
     const bool hidden = nativeDrawGated || ctx.suspended || ctx.lifecycleSuspended;
-    // Preserve the existing capture override even while main is hidden.
+    // Preserve the existing capture override even while a window is hidden.
     const bool capturePending = forceDraw || !ctx.pendingScreenshotPaths.empty()
         || !ctx.asyncScreenshots.pending.empty();
     const auto nonPresentingExit = [&] {
@@ -1596,7 +1591,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
 #endif
         return false;
     };
-    const bool updateHidden = hidden && (occlusionPausesUpdate(ctx) || nativeSuspensionPausesUpdate());
+    const bool updateHidden = hidden && nativeSuspensionPausesUpdate();
     const bool paused = updateHidden && (nativeDrawGated || !capturePending);
     if (paused || (!hidden && ctx.visibilityPaused)
         || (updateHidden && (!ctx.visibilityPaused || !ctx.mainUpdateCallTimeInitialized))) {
@@ -1618,13 +1613,14 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     if (currentWindowCloseRecorded()) return nonPresentingExit();
     if (nativeDrawGated) {
         // The native gate forbids all rendering, including forced captures.
-        // A future secondary policy change can run updates on delivered ticks.
+        // Updates still run on delivered hidden ticks (#997).
         if (ctx.loop.updateSyncedToDraw) runSyncedUpdate();
         return nonPresentingExit();
     }
     const bool shouldDraw = mainLoopShouldDraw(now) || capturePending;
-    // Hidden main retains HEAD's drawing at its native paced tick source;
-    // EVENT_DRIVEN / fixed-rate skips still take the upload-only boundary.
+    // Production hidden ticks arrive draw-gated above; ungated ticks follow
+    // the configured rate. EVENT_DRIVEN / fixed-rate skips still take the
+    // upload-only boundary.
     if (!shouldDraw) return nonPresentingExit();
     // Base increment point for synchronized ticks: after throttle, before
     // beginFrame/update, including a later failed render admission.

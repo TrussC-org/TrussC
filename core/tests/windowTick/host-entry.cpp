@@ -120,7 +120,6 @@ void bootstrap() {
         bootstrapCallbacks = dropGetterCalls = 0; bootstrapReady = false;
         trussc::internal::WindowRequestAccess::context(window).drawCount = 0;
         // Exercise hidden startup updates explicitly for every Window fixture.
-        trussc::internal::WindowRequestAccess::context(window).pauseUpdatesWhenHidden = false;
         trussc::internal::WindowRequestAccess::context(window).drawWhileHidden = true;
         std::vector<sapp_event_type> delivered;
         std::vector<std::vector<std::string>> drops;
@@ -496,13 +495,14 @@ void roots() {
         window.setIndependentFps(VSYNC, EVENT_DRIVEN); trussc::internal::WindowRequestAccess::context(window).loop.redrawCount = 0;
         const auto hiddenBefore = next->updates;
         tick(window);
-        check("existing hidden policy survives common entry", next->updates == hiddenBefore + (trussc::internal::WindowRequestAccess::context(window).pauseUpdatesWhenHidden ? 0 : 1));
+        check("hidden window keeps updating through common entry", next->updates == hiddenBefore + 1);
         check("hidden entry acquires no drawable", native.acquisitions == 0);
         trussc::internal::WindowRequestAccess::context(window).drawWhileHidden = false;
-        trussc::internal::WindowRequestAccess::context(window).pauseUpdatesWhenHidden = false;
         window.setFps(VSYNC);
         const auto noDrawCount = trussc::internal::WindowRequestAccess::context(window).drawCount;
+        const auto gatedUpdates = next->updates;
         check("hidden draw gate runs before fake presentation", !tick(window) && trussc::internal::WindowRequestAccess::context(window).drawCount == noDrawCount);
+        check("draw-gated hidden window still updates (#997)", next->updates == gatedUpdates + 1 && native.acquisitions == 0);
         window.closeRequested_ = true;
         { internal::WindowEntryScope closedEntry(window, true); check("pending close rejects tick entry itself", !closedEntry); }
         auto refused = internal::makeConstructedApp<Probe>(); window.pendingApp_ = refused; window.appRequested_ = true;
@@ -517,7 +517,6 @@ void roots() {
         check("pending close still delivers the existing quit-veto endpoint", vetoes == 1 && !window.closeRequested_);
         veto.disconnect();
         trussc::internal::WindowRequestAccess::context(window).drawWhileHidden = runner;
-        trussc::internal::WindowRequestAccess::context(window).pauseUpdatesWhenHidden = !runner;
         internal::currentWindowCtx() = previous;
         internal::WindowRequestAccess::unbind(window); internal::WindowRequestAccess::endApp(window);
         internal::WindowRequestAccess::unbind(peer); internal::WindowRequestAccess::endApp(peer);

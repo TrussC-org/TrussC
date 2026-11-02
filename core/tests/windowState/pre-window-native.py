@@ -52,7 +52,7 @@ class Window;
 struct WindowSettings { int width=1280,height=720; bool pixelPerfect=false; std::string title; };
 namespace internal {
 struct WindowContext {
-    Window* hostWindow=nullptr; bool isMain=true,pauseUpdatesWhenHidden=false,drawWhileHidden=false,suspended=false;
+    Window* hostWindow=nullptr; bool isMain=true,drawWhileHidden=false,suspended=false;
     void *deferredResponseTarget=nullptr,*acquireSwapchain=nullptr,*acquireSwapchainUser=nullptr,*activateNative=nullptr;
     float dpiScale=1; int fbWidth=0,fbHeight=0;
 };
