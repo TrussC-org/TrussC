@@ -10871,8 +10871,10 @@ static void _sapp_tc_x11_serve_selection_request(XEvent* event) {
                 (const unsigned char*)&bytes, 1);
         }
     } else if (req->target == _sapp_tc.TARGETS) {
+        // ICCCM: the TARGETS list includes TARGETS itself (#1023).
+        const Atom targets[2] = { _sapp_tc.TARGETS, _sapp_tc.UTF8_STRING };
         XChangeProperty(_sapp_tc.display, req->requestor, reply.property,
-            XA_ATOM, 32, PropModeReplace, (const unsigned char*)&_sapp_tc.UTF8_STRING, 1);
+            XA_ATOM, 32, PropModeReplace, (const unsigned char*)targets, 2);
     } else {
         reply.property = None;
     }
