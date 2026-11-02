@@ -55,11 +55,11 @@ inline libremidi::observer_configuration baseObserverConfiguration() {
 inline void keepMidiClientAlive() {
 #if defined(__APPLE__)
     static const libremidi::observer* keeper = [] {
+        // One callback is enough for libremidi to create the client; CoreMIDI's
+        // notify checks each callback, so the others stay empty (and the
+        // keeper is never mistaken for a PortWatch).
         auto config = baseObserverConfiguration();
         config.input_added = [](const libremidi::input_port&) {};
-        config.input_removed = [](const libremidi::input_port&) {};
-        config.output_added = [](const libremidi::output_port&) {};
-        config.output_removed = [](const libremidi::output_port&) {};
         return new libremidi::observer(
             std::move(config), libremidi::observer_configuration_for(platformMidiApi()));
     }();
