@@ -41141,18 +41141,21 @@ details.en = '''
 - On macOS, Windows and Linux X11, size/position requests are ignored while fullscreen, including invalid arguments, with exactly one Notice per call. Nothing is queued; exit restores the entry geometry. Call size/position once `isFullscreen()` returns false. macOS also ignores requests while entering or exiting; Windows/X11 accept them immediately after `setFullscreen(false)`.
 - Notice: `Window::setSize() ignored while fullscreen; call it once isFullscreen() returns false`. On macOS the phase text is `ignored: the window is entering fullscreen` or `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false`. Secondary targets include `on "Preview"` after the call name.
 - `width` and `height` specify the content area in logical points, excluding window decorations. These units match `Window::getWidth()` and `Window::getHeight()`. Input coordinates use framebuffer pixels when pixelPerfect is enabled and logical points otherwise.
+- On Linux, the window manager can replace a size requested early, for example in `setup()`, with its own initial placement. If that happens, adjust it on the window-manager side, in its settings or window rules.
 - Does nothing after the native window closes. For main-thread requirements, see `Window::setApp`.
 '''
 details.ja = '''
 - macOS・Windows・Linux X11 では fullscreen 中のサイズ・位置要求は無効な引数も含め無視し、呼び出しごとに Notice を 1 回出します。予約・再実行はせず、終了時には開始前の位置とサイズに戻ります。サイズ・位置は `isFullscreen()` が false を返してから指定してください。macOS は移行開始・終了のアニメーション中も無視し、Windows/X11 は `setFullscreen(false)` の直後から受け付けます。
 - Notice は `Window::setSize() ignored while fullscreen; call it once isFullscreen() returns false` です。macOS の移行中は `ignored: the window is entering fullscreen` または `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false` になります。副窓では呼び出し名の後に `on "Preview"` のようにタイトルを付けます。
 - `width` と `height` は、ウィンドウの装飾を除いたコンテンツ領域のサイズを論理ポイントで指定します。単位は `Window::getWidth()`、`Window::getHeight()` と同じです。入力座標は pixelPerfect が有効ならフレームバッファのピクセル、無効なら論理ポイントです。
+- Linux では、`setup()` の中など早い時点で指定したサイズが、ウィンドウマネージャーの初期配置で上書きされることがあります。そうなった場合は、ウィンドウマネージャー側の設定やウィンドウルールで調整してください。
 - ネイティブウィンドウを閉じたあとは何もしません。メインスレッドでの使用については `Window::setApp` を参照してください。
 '''
 details.ko = '''
 - macOS, Windows, Linux X11에서는 fullscreen 중 크기·위치 요청을 잘못된 인수도 포함해 무시하고 호출마다 Notice를 한 번 출력합니다. 예약하거나 재실행하지 않으며 종료 시 진입 전 위치와 크기를 복원합니다. `isFullscreen()`이 false를 반환한 뒤 크기·위치를 지정하세요. macOS는 진입·종료 애니메이션 중에도 무시하고 Windows/X11은 `setFullscreen(false)` 직후부터 허용합니다.
 - Notice는 `Window::setSize() ignored while fullscreen; call it once isFullscreen() returns false`입니다.
 - `width`와 `height`는 윈도우 장식을 제외한 콘텐츠 영역 크기를 논리 포인트로 지정합니다. 단위는 `Window::getWidth()`, `Window::getHeight()`와 같습니다. 입력 좌표는 pixelPerfect가 활성화되면 프레임버퍼 픽셀, 아니면 논리 포인트입니다.
+- Linux에서는 `setup()` 안처럼 이른 시점에 지정한 크기가 윈도우 매니저의 초기 배치로 덮어써질 수 있습니다. 그런 경우에는 윈도우 매니저 쪽 설정이나 창 규칙에서 조정하세요.
 - 네이티브 윈도우를 닫은 뒤에는 아무 작업도 하지 않습니다. 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
 snippet = '''
@@ -41186,14 +41189,17 @@ related = ["Window::getPosition", "Window::setFullscreen", "Window::setSize"]
 details.en = '''
 - On macOS, Windows and Linux X11, size/position requests are ignored while fullscreen, including invalid arguments, with exactly one Notice per call. Nothing is queued; exit restores the entry geometry. Call size/position once `isFullscreen()` returns false. macOS also ignores requests while entering or exiting; Windows/X11 accept them immediately after `setFullscreen(false)`.
 - Notice: `Window::setPosition() ignored while fullscreen; call it once isFullscreen() returns false`. On macOS the phase text is `ignored: the window is entering fullscreen` or `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false`. Secondary targets include `on "Preview"` after the call name.
+- On Linux, the window manager can replace a position requested early, for example in `setup()`, with its own initial placement. If that happens, adjust it on the window-manager side, in its settings or window rules.
 '''
 details.ja = '''
 - macOS・Windows・Linux X11 では fullscreen 中のサイズ・位置要求は無効な引数も含め無視し、呼び出しごとに Notice を 1 回出します。予約・再実行はせず、終了時には開始前の位置とサイズに戻ります。サイズ・位置は `isFullscreen()` が false を返してから指定してください。macOS は移行開始・終了のアニメーション中も無視し、Windows/X11 は `setFullscreen(false)` の直後から受け付けます。
 - Notice は `Window::setPosition() ignored while fullscreen; call it once isFullscreen() returns false` です。macOS の移行中は `ignored: the window is entering fullscreen` または `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false` になります。副窓では呼び出し名の後に `on "Preview"` のようにタイトルを付けます。
+- Linux では、`setup()` の中など早い時点で指定した位置が、ウィンドウマネージャーの初期配置で上書きされることがあります。そうなった場合は、ウィンドウマネージャー側の設定やウィンドウルールで調整してください。
 '''
 details.ko = '''
 - macOS, Windows, Linux X11에서는 fullscreen 중 크기·위치 요청을 잘못된 인수도 포함해 무시하고 호출마다 Notice를 한 번 출력합니다. 예약하거나 재실행하지 않으며 종료 시 진입 전 위치와 크기를 복원합니다. `isFullscreen()`이 false를 반환한 뒤 크기·위치를 지정하세요. macOS는 진입·종료 애니메이션 중에도 무시하고 Windows/X11은 `setFullscreen(false)` 직후부터 허용합니다.
 - Notice는 `Window::setPosition() ignored while fullscreen; call it once isFullscreen() returns false`입니다. macOS 전환 중에는 `ignored: the window is entering fullscreen` 또는 `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false`를 사용합니다. 보조 윈도우는 호출 이름 뒤에 `on "Preview"`처럼 제목을 붙입니다.
+- Linux에서는 `setup()` 안처럼 이른 시점에 지정한 위치가 윈도우 매니저의 초기 배치로 덮어써질 수 있습니다. 그런 경우에는 윈도우 매니저 쪽 설정이나 창 규칙에서 조정하세요.
 '''
 
 ["Window::getPosition"]
@@ -41612,16 +41618,19 @@ description.ja = "ウィンドウの初期サイズを設定する。"
 description.ko = "윈도우의 초기 크기를 설정한다."
 details.en = '''
 - Stores `w` and `h` in `width` and `height`. On desktop, main and secondary creation use framebuffer pixels when the app's `pixelPerfect` mode is enabled, and logical pixels otherwise. Pixel requests use the target window's rendering DPI and retain fractional logical sizes, as `setWindowSize()` does. macOS rounds content sizes to whole points; odd pixel sizes may be unreachable. Mobile and Web startup conversion is unchanged.
+- On Linux, the window manager can replace this size with its own initial placement when the window opens. If that happens, adjust it on the window-manager side, in its settings or window rules.
 - All `WindowSettings` setters assign values without validation and return a reference to the same settings object, so calls can be chained.
 - Setters only change the settings object. Pass it to the launcher or window creation before the window is created; changing it afterward does not reconfigure that window. Use `setWindowSize()` to resize a running window.
 '''
 details.ja = '''
 - `w` と `h` を `width` と `height` に設定します。デスクトップでは、主副窓の作成サイズはアプリの `pixelPerfect` モードが有効ならフレームバッファのピクセル、無効なら論理ピクセルです。ピクセル指定は `setWindowSize()` と同様に、対象ウィンドウの描画用 DPI で割り、論理サイズの小数を保持します。macOS の内容サイズは整数ポイントになるため、奇数ピクセルのサイズにはできない場合があります。モバイルと Web の起動時の変換は従来どおりです。
+- Linux では、ここで指定したサイズが、ウィンドウを開くときにウィンドウマネージャーの初期配置で上書きされることがあります。そうなった場合は、ウィンドウマネージャー側の設定やウィンドウルールで調整してください。
 - `WindowSettings` のすべてのセッターは、値を検証せずに代入し、同じ設定オブジェクトへの参照を返すため、呼び出しをチェインできます。
 - セッターは設定オブジェクトだけを変更します。ウィンドウの作成前に、ランチャーまたはウィンドウ作成処理に渡してください。作成後に変更しても、そのウィンドウには反映しません。実行中のウィンドウのサイズ変更には `setWindowSize()` を使ってください。
 '''
 details.ko = '''
 - `w`와 `h`를 `width`와 `height`에 저장합니다. 데스크톱의 메인 및 보조 윈도우 생성 크기는 앱의 `pixelPerfect` 모드가 활성화되면 프레임버퍼 픽셀, 아니면 논리 픽셀입니다. 픽셀 요청은 `setWindowSize()`처럼 대상 윈도우의 렌더링 DPI로 나누고 논리 크기의 소수를 유지합니다. macOS 콘텐츠 크기는 정수 포인트이므로 홀수 픽셀 크기는 불가능할 수 있습니다. 모바일과 Web의 시작 시 변환은 기존과 같습니다.
+- Linux에서는 여기서 지정한 크기가 창을 열 때 윈도우 매니저의 초기 배치로 덮어써질 수 있습니다. 그런 경우에는 윈도우 매니저 쪽 설정이나 창 규칙에서 조정하세요.
 - 모든 `WindowSettings` 설정 함수는 검증 없이 값을 대입하고 같은 설정 객체의 참조를 반환하므로 호출을 연결할 수 있습니다.
 - 설정 함수는 설정 객체만 변경합니다. 윈도우를 만들기 전에 실행기 또는 윈도우 생성 함수에 전달해야 합니다. 생성 후 변경해도 해당 윈도우에 반영하지 않습니다. 실행 중인 윈도우의 크기를 바꾸려면 `setWindowSize()`를 사용합니다.
 '''
@@ -53128,6 +53137,7 @@ details.en = '''
 - Notice: `setWindowPosition() ignored while fullscreen; call it once isFullscreen() returns false`. On macOS the phase text is `ignored: the window is entering fullscreen` or `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false`. Secondary targets include `on "Preview"` after the call name.
 - Position is the decorated frame top-left in OS screen coordinates relative to the primary screen top-left; negative coordinates are allowed. macOS uses screen points, Windows native screen coordinates, and X11 device coordinates. These are separate from logical content sizes and framebuffer pixels.
 - Move first, then enter fullscreen on that screen. The getter reports the real WM position, including clamping.
+- On Linux, the window manager can replace a position requested early, for example in `setup()`, with its own initial placement. If that happens, adjust it on the window-manager side, in its settings or window rules.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
@@ -53135,6 +53145,7 @@ details.ja = '''
 - Notice は `setWindowPosition() ignored while fullscreen; call it once isFullscreen() returns false` です。macOS の移行中は `ignored: the window is entering fullscreen` または `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false` になります。副窓では呼び出し名の後に `on "Preview"` のようにタイトルを付けます。
 - 位置はプライマリ画面左上を原点とする OS 画面座標で、装飾込み外枠の左上です。負座標も指定できます。macOS は画面のポイント、Windows はネイティブ画面座標、X11 はデバイス座標です。内容の論理サイズやフレームバッファのピクセルとは別です。
 - 移動してから fullscreen にすると移動先の画面を使います。取得値は WM の丸めも含む実位置です。
+- Linux では、`setup()` の中など早い時点で指定した位置が、ウィンドウマネージャーの初期配置で上書きされることがあります。そうなった場合は、ウィンドウマネージャー側の設定やウィンドウルールで調整してください。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
@@ -53142,6 +53153,7 @@ details.ko = '''
 - Notice는 `setWindowPosition() ignored while fullscreen; call it once isFullscreen() returns false`입니다.
 - 위치는 기본 화면 왼쪽 위를 원점으로 하는 OS 화면 좌표이며 장식을 포함한 외곽 프레임의 왼쪽 위입니다. 음수 좌표도 허용합니다. macOS는 화면 포인트, Windows는 네이티브 화면 좌표, X11은 장치 좌표를 사용합니다. 논리 콘텐츠 크기 및 프레임버퍼 픽셀과 별개입니다.
 - 먼저 이동한 뒤 fullscreen을 켜면 이동한 화면을 사용합니다. 조회는 WM의 위치 제한을 포함한 실제 위치를 반환합니다.
+- Linux에서는 `setup()` 안처럼 이른 시점에 지정한 위치가 윈도우 매니저의 초기 배치로 덮어써질 수 있습니다. 그런 경우에는 윈도우 매니저 쪽 설정이나 창 규칙에서 조정하세요.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
 '''
 related = ["getWindowPosition", "bringWindowToFront"]
@@ -53171,18 +53183,21 @@ details.en = '''
 - On macOS, Windows and Linux X11, size/position requests are ignored while fullscreen, including invalid arguments, with exactly one Notice per call. Nothing is queued; exit restores the entry geometry. Call size/position once `isFullscreen()` returns false. macOS also ignores requests while entering or exiting; Windows/X11 accept them immediately after `setFullscreen(false)`.
 - Notice: `setWindowSize() ignored while fullscreen; call it once isFullscreen() returns false`. On macOS the phase text is `ignored: the window is entering fullscreen` or `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false`. Secondary targets include `on "Preview"` after the call name.
 - `width` and `height` specify the content size in logical pixels, or framebuffer pixels when `pixelPerfect` is enabled.
+- On Linux, the window manager can replace a size requested early, for example in `setup()`, with its own initial placement. If that happens, adjust it on the window-manager side, in its settings or window rules.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
 - macOS・Windows・Linux X11 では fullscreen 中のサイズ・位置要求は無効な引数も含め無視し、呼び出しごとに Notice を 1 回出します。予約・再実行はせず、終了時には開始前の位置とサイズに戻ります。サイズ・位置は `isFullscreen()` が false を返してから指定してください。macOS は移行開始・終了のアニメーション中も無視し、Windows/X11 は `setFullscreen(false)` の直後から受け付けます。
 - Notice は `setWindowSize() ignored while fullscreen; call it once isFullscreen() returns false` です。macOS の移行中は `ignored: the window is entering fullscreen` または `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false` になります。副窓では呼び出し名の後に `on "Preview"` のようにタイトルを付けます。
 - `width` と `height` は内容領域のサイズです。単位は論理ピクセルですが、`pixelPerfect` が有効な場合はフレームバッファのピクセルです。
+- Linux では、`setup()` の中など早い時点で指定したサイズが、ウィンドウマネージャーの初期配置で上書きされることがあります。そうなった場合は、ウィンドウマネージャー側の設定やウィンドウルールで調整してください。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
 - macOS, Windows, Linux X11에서는 fullscreen 중 크기·위치 요청을 잘못된 인수도 포함해 무시하고 호출마다 Notice를 한 번 출력합니다. 예약하거나 재실행하지 않으며 종료 시 진입 전 위치와 크기를 복원합니다. `isFullscreen()`이 false를 반환한 뒤 크기·위치를 지정하세요. macOS는 진입·종료 애니메이션 중에도 무시하고 Windows/X11은 `setFullscreen(false)` 직후부터 허용합니다.
 - Notice는 `setWindowSize() ignored while fullscreen; call it once isFullscreen() returns false`입니다.
 - `width`와 `height`는 콘텐츠 영역의 크기입니다. 단위는 논리 픽셀이며, `pixelPerfect`가 활성화된 경우에는 프레임버퍼 픽셀입니다.
+- Linux에서는 `setup()` 안처럼 이른 시점에 지정한 크기가 윈도우 매니저의 초기 배치로 덮어써질 수 있습니다. 그런 경우에는 윈도우 매니저 쪽 설정이나 창 규칙에서 조정하세요.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
 '''
 related = ["getWindowSize", "setWindowSizeLogical", "setWindowPosition"]
@@ -53214,18 +53229,21 @@ details.en = '''
 - On macOS, Windows and Linux X11, size/position requests are ignored while fullscreen, including invalid arguments, with exactly one Notice per call. Nothing is queued; exit restores the entry geometry. Call size/position once `isFullscreen()` returns false. macOS also ignores requests while entering or exiting; Windows/X11 accept them immediately after `setFullscreen(false)`.
 - Notice: `setWindowSizeLogical() ignored while fullscreen; call it once isFullscreen() returns false`. On macOS the phase text is `ignored: the window is entering fullscreen` or `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false`. Secondary targets include `on "Preview"` after the call name.
 - `width` and `height` specify the content size in logical pixels without the `pixelPerfect` conversion performed by `setWindowSize()`.
+- On Linux, the window manager can replace a size requested early, for example in `setup()`, with its own initial placement. If that happens, adjust it on the window-manager side, in its settings or window rules.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
 '''
 details.ja = '''
 - macOS・Windows・Linux X11 では fullscreen 中のサイズ・位置要求は無効な引数も含め無視し、呼び出しごとに Notice を 1 回出します。予約・再実行はせず、終了時には開始前の位置とサイズに戻ります。サイズ・位置は `isFullscreen()` が false を返してから指定してください。macOS は移行開始・終了のアニメーション中も無視し、Windows/X11 は `setFullscreen(false)` の直後から受け付けます。
 - Notice は `setWindowSizeLogical() ignored while fullscreen; call it once isFullscreen() returns false` です。macOS の移行中は `ignored: the window is entering fullscreen` または `ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false` になります。副窓では呼び出し名の後に `on "Preview"` のようにタイトルを付けます。
 - `width` と `height` は論理ピクセルでの内容領域のサイズです。`setWindowSize()` が行う `pixelPerfect` による変換は行いません。
+- Linux では、`setup()` の中など早い時点で指定したサイズが、ウィンドウマネージャーの初期配置で上書きされることがあります。そうなった場合は、ウィンドウマネージャー側の設定やウィンドウルールで調整してください。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
 '''
 details.ko = '''
 - macOS, Windows, Linux X11에서는 fullscreen 중 크기·위치 요청을 잘못된 인수도 포함해 무시하고 호출마다 Notice를 한 번 출력합니다. 예약하거나 재실행하지 않으며 종료 시 진입 전 위치와 크기를 복원합니다. `isFullscreen()`이 false를 반환한 뒤 크기·위치를 지정하세요. macOS는 진입·종료 애니메이션 중에도 무시하고 Windows/X11은 `setFullscreen(false)` 직후부터 허용합니다.
 - Notice는 `setWindowSizeLogical() ignored while fullscreen; call it once isFullscreen() returns false`입니다.
 - `width`와 `height`는 논리 픽셀 단위의 콘텐츠 영역 크기입니다. `setWindowSize()`가 수행하는 `pixelPerfect` 변환은 하지 않습니다.
+- Linux에서는 `setup()` 안처럼 이른 시점에 지정한 크기가 윈도우 매니저의 초기 배치로 덮어써질 수 있습니다. 그런 경우에는 윈도우 매니저 쪽 설정이나 창 규칙에서 조정하세요.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
 '''
 related = ["setWindowSize", "getDpiScale"]
