@@ -229,7 +229,7 @@ Fitting requests run every check strictly, without SKIPs.
 - `mcpAdmissionConstruction/` — large screenshot save/image analysis and allocation-error reply checks, including numeric/string request IDs, PNG roundtrips, deferred payload lifetime and bounded HTTP framing reads. The GPU-free framebuffer seam uses an addressed Window.
 - `asyncLoads/` — small resource-load smoke test and worker-to-main exit request.
 - `captureSubmission/` — five asynchronous screenshots of a presented frame, writer queue and shutdown disposition.
-- `asyncScreenshotMic/` — microphone startup, permission and owning-worker teardown checks; Web screenshot smoke coverage lives in `asyncScreenshotMicWeb/`.
+- `asyncScreenshotMic/` — microphone startup, permission and owning-worker teardown checks, and the `MicInput` device lifecycle (#415: a stop the backend reports clears `isConnected()` and fires `onDisconnect` once on the main thread; `close()`, `setup()`, the destructor and a loss that was reopened first do not); Web screenshot smoke coverage lives in `asyncScreenshotMicWeb/`.
 
 - `webDropSize/` — Web dropped-file size and reader limits. The Web build
   exercises the complete application header with mock FileReaders under Node;
@@ -386,6 +386,7 @@ Fitting requests run every check strictly, without SKIPs.
   separately from dropped plays. Checks MCP fields, main-thread underrun/stall
   warnings, and immediate per-voice migration warnings with no pump/exit duplicates.
   Uses callback gates and condition-based waits.
+- `audioDefaultDevice/` — default-device reporting (#303), the init failure state (#476), and the `AudioEngine` device lifecycle (#415) on the Null backend: a device stopped behind the engine's back (the backend's own stop notification, from another thread) clears `isConnected()` at once and fires `onDisconnect` once, on the main thread; `setup()` is `init()` (default device, last rate and channels) and `setup(settings)` is `init(settings)`; `close()`, `shutdown()`, a live re-init and a failed `setup()` fire nothing; a loss reopened or closed before its delivery is dropped.
 - `micInput/` — Sound playback advances across repeated MicInput start/stop
   cycles on the Null backend (#696). Capture works without initializing
   playback and its callbacks continue through engine sample-rate re-init,

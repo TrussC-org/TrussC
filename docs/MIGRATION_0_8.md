@@ -404,6 +404,18 @@ yet; the synthetic-input design remains open.
 - **Behavior change:** before, an unplugged port stayed "open" with no message and `isOpen()` stayed `true`. Now, on CoreMIDI, the ALSA sequencer and WinMM, the port is closed, one warning is logged and `isConnected()` turns `false` shortly after the removal (a host turn, plus up to 100 ms on WinMM). An app that never looked at `isOpen()` sees only the warning. WebMIDI does not report removals, and neither does a virtual port you opened with `openVirtualPort()`, so nothing changes there.
 - Each open physical port now keeps a small libremidi observer alive (a backend thread on ALSA and WinMM) to hear about removals; it is released by `close()` and the destructor.
 
+## AudioEngine and MicInput follow the device lifecycle (#415)
+
+`AudioEngine` (the playback device) and `MicInput` (the capture device) join `Serial`, `DepthCamera`, `VideoGrabber` and `tcxMidi` on the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup()`, `isConnected()`, `close()` and `onDisconnect`. Everything that compiled before still compiles; the changes are additions plus one behavior change.
+
+- **New: `engine.setup()` and `engine.setup(settings)`** are `engine.init()` and `engine.init(settings)`. `setup()` and `init()` open the system default device (keeping the last rate, channel count, buffer size and polyphony); to use a specific device, pass `AudioSettings` with `deviceName`. This holds for any reopen of a closed engine: after `close()`, after the OS stopped the device, or from `Sound::load*()`, which calls `init()` while the engine is not connected.
+- **New: `engine.isConnected()` and `engine.close()`.** `isInitialized()` stays as an alias of `isConnected()`, and `shutdown()` as an alias of `close()`.
+- **New: `engine.onDisconnect`** (`Event<DeviceDisconnectEventArgs>`, field `reason`). It fires once, on the main thread at the Runtime's next host turn, when the OS or the audio library reports that the running output device stopped by itself (a USB audio interface unplugged, a Bluetooth headset switched off). `isConnected()` is already false when it fires. `close()`, `shutdown()`, a re-initialization and a reroute to a new OS default device never fire it. Which backends report a stop depends on the OS; where the backend says nothing, the audio stops and `isConnected()` stays true. To open the device again, call `setup()` / `setup(settings)` again.
+- **Behavior change: `isInitialized()` / `isConnected()` turns false when the OS stops the device**, and `play()` is refused (counted as "no output device running") until the device is opened again. Before, the engine kept reporting true and playing into a dead device. Nothing is rerouted or retried by the engine.
+- **New: `MicInput` has `setup()`, `isConnected()`, `close()` and `onDisconnect`.** `setup()` is `start()` at the sample rate of the last start (the microphone is always the system default capture device); `isConnected()` is `isRunning()` and `close()` is `stop()`. `isRunning()` also turns false when the OS stops the capture device. Web reports no loss.
+
+See [audioDeviceExample](../examples/sound/audioDeviceExample/src/tcApp.cpp) for choosing a device by name with `AudioEngine::listDevices()` and `setup(settings)`.
+
 ## No caps on image size, sound polyphony or OSC nesting
 
 These limits are gone; if your app needs a cap, set it yourself.

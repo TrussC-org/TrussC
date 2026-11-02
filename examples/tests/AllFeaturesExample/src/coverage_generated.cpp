@@ -967,6 +967,7 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().audioDeviceChanged;
         (void)af::val<AudioEngine>().audioIn;
         (void)af::val<AudioEngine>().audioOut;
+        (void)af::val<AudioEngine>().close();
         (void)af::val<AudioEngine>().getAnalysisBuffer(af::val<float *>(), af::val<size_t>());
         (void)af::val<const AudioEngine>().getBufferSize();
         (void)af::val<const AudioEngine>().getChannels();
@@ -977,11 +978,15 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<const AudioEngine>().getStats();
         (void)af::val<AudioEngine>().init();
         (void)af::val<AudioEngine>().init(af::val<const AudioSettings>());
+        (void)af::val<const AudioEngine>().isConnected();
         (void)af::val<const AudioEngine>().isInitialized();
         (void)af::val<AudioEngine>().listDevices();
         (void)af::val<AudioEngine>().mixAudio(af::val<float *>(), af::val<int>(), af::val<int>());
+        (void)af::val<AudioEngine>().onDisconnect;
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundSource>>());
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundBuffer>>());
+        (void)af::val<AudioEngine>().setup();
+        (void)af::val<AudioEngine>().setup(af::val<const AudioSettings>());
         (void)af::val<AudioEngine>().shutdown();
         (void)af::val<AudioEngine>().waitForAudioCallbacks();
     }
@@ -2208,13 +2213,17 @@ struct Cover_MicInput : af::Scope<MicInput> {
     ~Cover_MicInput(); // Never instantiated.
     static void run() {
         (void)MicInput();
+        (void)af::val<MicInput>().close();
         (void)af::val<MicInput>().getBuffer(af::val<float *>(), af::val<size_t>());
         (void)af::val<const MicInput>().getDeviceName();
         (void)af::val<const MicInput>().getSampleRate();
+        (void)af::val<const MicInput>().isConnected();
         (void)af::val<const MicInput>().isRunning();
         (void)af::val<const MicInput>().isStarting();
         (void)af::val<MicInput>().onAudioData(af::val<const float *>(), af::val<size_t>());
+        (void)af::val<MicInput>().onDisconnect;
         (void)af::val<MicInput>().onStart;
+        (void)af::val<MicInput>().setup();
         (void)af::val<MicInput>().start(af::val<int>());
         (void)af::val<MicInput>().startAsync(af::val<int>());
         (void)af::val<MicInput>().stop();

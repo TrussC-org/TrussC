@@ -1565,6 +1565,26 @@ details.ko = '''
 - 리스너가 사용하는 상태를 파괴하기 전에 `AudioEngine::waitForAudioCallbacks`의 절차를 따르세요.
 '''
 
+["AudioEngine::close"]
+category = "audioengine"
+keywords = ["close", "stop", "disconnect", "release", "device lifecycle"]
+description.en = "Stops and closes the audio output device (alias of shutdown)."
+description.ja = "音声出力デバイスを停止して閉じる（shutdown の別名）。"
+description.ko = "오디오 출력 장치를 정지하고 닫는다(shutdown의 별칭)."
+related = ["AudioEngine::shutdown", "AudioEngine::setup", "AudioEngine::isConnected", "AudioEngine::onDisconnect"]
+details.en = '''
+- The device lifecycle name of `shutdown()`; it does the same. `isConnected()` is false afterwards, and `setup()` opens the device again (the system default device, or the one named in `setup(settings)`).
+- `close()` never fires `onDisconnect`; that event is only for a device the OS reports lost. A loss that was reported but not delivered yet is dropped.
+'''
+details.ja = '''
+- `shutdown()` のデバイスライフサイクルでの名前で、動作は同じです。呼んだ後 `isConnected()` は false になり、`setup()` でデバイスを開き直せます（システム既定のデバイス、または `setup(settings)` で指定したデバイス）。
+- `close()` は `onDisconnect` を発火しません。そのイベントは、OS がデバイスの喪失を報告したときだけのものです。報告済みでまだ通知していない喪失は破棄します。
+'''
+details.ko = '''
+- `shutdown()`의 장치 수명 주기 이름이며 동작은 같습니다. 호출 후 `isConnected()`는 false가 되고 `setup()`으로 장치를 다시 열 수 있습니다(시스템 기본 장치 또는 `setup(settings)`로 지정한 장치).
+- `close()`는 `onDisconnect`를 발생시키지 않습니다. 이 이벤트는 OS가 장치 손실을 보고했을 때만 발생합니다. 보고되었지만 아직 전달되지 않은 손실은 버립니다.
+'''
+
 ["AudioEngine::getAnalysisBuffer"]
 description.en = "Copies recent audio output into a mono analysis buffer."
 description.ja = "直近の音声出力をモノラルの解析バッファにコピーする。"
@@ -1758,6 +1778,7 @@ details.en = '''
 - `getStats()` retains the last initialization failure until initialization succeeds. Retry later on a timer, such as once per second, or on user action; each failed attempt opens the device and logs again.
 - `Sound::load*()` calls argument-free `init()` when the engine is uninitialized, whereas `play()` does not. After failed `init(settings)`, retry with those settings before loading sounds if the requested device is required.
 - Audio listener threading restrictions are described in `AudioEngine::audioOut`.
+- `setup(settings)` and `setup()` are the same calls under the device lifecycle name; see `AudioEngine::setup`. `init()` and `setup()` open the system default device; to use a specific device, pass `AudioSettings` with `deviceName`. The same applies to any reopen of a closed engine: after `close()`, after the OS stopped the device, or from `Sound::load*()`.
 '''
 details.ja = '''
 - `init(settings)` は `AudioSettings` に従って出力を開きます。デバイス名が空ならシステム既定を選びます。名前に一致するデバイスがなければ警告を出し、システム既定を使います。
@@ -1770,6 +1791,7 @@ details.ja = '''
 - `getStats()` は次の初期化成功まで最後の初期化失敗を保持します。失敗するたびにデバイスを開き直してログを出すため、1 秒に 1 回程度のタイマーやユーザー操作で再試行してください。
 - エンジンが未初期化の場合、`Sound::load*()` は引数なしの `init()` を呼びますが、`play()` は呼びません。`init(settings)` に失敗した後、指定したデバイスが必要なら、サウンドの読み込み前に同じ設定で再試行してください。
 - 音声リスナーのスレッドに関する制約は、`AudioEngine::audioOut` を参照してください。
+- `setup(settings)` と `setup()` は、デバイスライフサイクルでの名前で呼ぶ同じ処理です。`AudioEngine::setup` を参照してください。`init()` と `setup()` はシステム既定のデバイスを開きます。特定のデバイスを使うには、`deviceName` を指定した `AudioSettings` を渡します。閉じたエンジンを開き直すときも同じで、`close()` の後、OS がデバイスを止めた後、`Sound::load*()` からの場合も該当します。
 '''
 details.ko = '''
 - `init(settings)`는 `AudioSettings`에 따라 출력을 엽니다. 장치 이름이 비어 있으면 시스템 기본 장치를 선택합니다. 일치하는 이름이 없으면 경고를 기록하고 시스템 기본 장치를 사용합니다.
@@ -1782,8 +1804,9 @@ details.ko = '''
 - `getStats()`는 다음 초기화 성공까지 마지막 초기화 실패를 유지합니다. 실패할 때마다 장치를 다시 열고 로그를 기록하므로 약 1초 간격의 타이머나 사용자 조작으로 재시도하세요.
 - 엔진이 초기화되지 않았으면 `Sound::load*()`는 인수 없는 `init()`을 호출하지만 `play()`는 호출하지 않습니다. `init(settings)` 실패 후 지정 장치가 필요하면 사운드를 로드하기 전에 같은 설정으로 재시도하세요.
 - 오디오 리스너의 스레드 제약은 `AudioEngine::audioOut`을 참조하세요.
+- `setup(settings)`와 `setup()`은 장치 수명 주기 이름으로 부르는 같은 호출입니다. `AudioEngine::setup`을 참조하세요. `init()`과 `setup()`은 시스템 기본 장치를 엽니다. 특정 장치를 사용하려면 `deviceName`을 지정한 `AudioSettings`를 전달하세요. 닫힌 엔진을 다시 열 때도 같아서 `close()` 후, OS가 장치를 정지시킨 후, `Sound::load*()`에서도 해당합니다.
 '''
-related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
+related = ["AudioSettings", "AudioEngine::audioDeviceChanged", "AudioEngine::setup"]
 snippet = '''
 void tcApp::setup() {
     AudioSettings settings;
@@ -1793,6 +1816,29 @@ void tcApp::setup() {
 }
 '''
 
+["AudioEngine::isConnected"]
+category = "audioengine"
+keywords = ["connected", "running", "unplug", "device lost", "device lifecycle"]
+description.en = "Returns whether the audio output device is open and running."
+description.ja = "音声出力デバイスが開いて動作中かを返す。"
+description.ko = "오디오 출력 장치가 열려 실행 중인지 반환한다."
+related = ["AudioEngine::setup", "AudioEngine::close", "AudioEngine::onDisconnect", "AudioEngine::isInitialized"]
+details.en = '''
+- Returns `true` only while the device is open: after a successful `setup()` or `init()`, until `close()`, `shutdown()`, a failed re-initialization, or a device the OS reported stopped. It is already `false` when `onDisconnect` fires.
+- It reads an atomic, so any thread may call it. `isInitialized()` is the older name for the same state.
+- A backend that does not report the stop of a device that went away leaves this `true` while the audio is silent. See `AudioEngine::onDisconnect`.
+'''
+details.ja = '''
+- デバイスが開いている間だけ `true` を返します。`setup()` または `init()` の成功後から、`close()`、`shutdown()`、再初期化の失敗、OS が停止を報告したデバイスのいずれかまでです。`onDisconnect` が発火する時点で、すでに `false` です。
+- アトミック変数を読むだけなので、どのスレッドからでも呼べます。`isInitialized()` は同じ状態を指す古い名前です。
+- なくなったデバイスの停止をバックエンドが報告しない場合は、音が無音になっても `true` のままです。`AudioEngine::onDisconnect` を参照してください。
+'''
+details.ko = '''
+- 장치가 열려 있는 동안에만 `true`를 반환합니다. `setup()` 또는 `init()` 성공 후부터 `close()`, `shutdown()`, 재초기화 실패, OS가 정지를 보고한 장치 중 하나가 발생할 때까지입니다. `onDisconnect`가 발생하는 시점에는 이미 `false`입니다.
+- 원자 변수를 읽을 뿐이므로 어느 스레드에서든 호출할 수 있습니다. `isInitialized()`는 같은 상태를 가리키는 이전 이름입니다.
+- 사라진 장치의 정지를 백엔드가 보고하지 않으면 소리가 무음이 되어도 `true`로 남습니다. `AudioEngine::onDisconnect`를 참조하세요.
+'''
+
 ["AudioEngine::isInitialized"]
 category = "audioengine"
 keywords = ["ready", "running", "status"]
@@ -1800,16 +1846,19 @@ description.en = "Returns whether audio output is initialized."
 description.ja = "音声出力が初期化済みかを返す。"
 description.ko = "오디오 출력이 초기화되었는지 반환한다."
 details.en = '''
-- Returns `true` after successful `init()` and `false` before initialization, after failed initialization or reinitialization, and after `shutdown()`.
+- Returns `true` after successful `init()` and `false` before initialization, after failed initialization or reinitialization, after `shutdown()`, and after the OS reported the device stopped.
 - Successful initialization with the silent Null backend also returns `true`.
+- This is the older name of `isConnected()`; both return the same state.
 '''
 details.ja = '''
-- `init()` が成功すると `true` を返します。初期化前、初期化や再初期化の失敗後、`shutdown()` の後は `false` を返します。
+- `init()` が成功すると `true` を返します。初期化前、初期化や再初期化の失敗後、`shutdown()` の後、OS がデバイスの停止を報告した後は `false` を返します。
 - 無音の Null バックエンドで初期化に成功した場合も `true` を返します。
+- `isConnected()` の古い名前で、どちらも同じ状態を返します。
 '''
 details.ko = '''
-- `init()`이 성공하면 `true`를 반환합니다. 초기화 전, 초기화나 재초기화 실패 후, `shutdown()` 후에는 `false`를 반환합니다.
+- `init()`이 성공하면 `true`를 반환합니다. 초기화 전, 초기화나 재초기화 실패 후, `shutdown()` 후, OS가 장치 정지를 보고한 후에는 `false`를 반환합니다.
 - 무음인 Null 백엔드로 초기화에 성공한 경우에도 `true`를 반환합니다.
+- `isConnected()`의 이전 이름이며 둘 다 같은 상태를 반환합니다.
 '''
 
 ["AudioEngine::listDevices"]
@@ -1833,6 +1882,46 @@ details.ko = '''
 - iOS에서는 열거 시 오디오 세션을 변경하지 않습니다. SoloAmbient에서 세션을 활성화하기 전에는 현재 경로에 입력이 없을 수 있습니다.
 '''
 related = ["AudioDeviceInfo"]
+
+["AudioEngine::onDisconnect"]
+category = "audioengine"
+keywords = ["unplug", "disconnect", "device lost", "usb audio", "bluetooth", "headset"]
+description.en = "Reports when the OS says the audio output device stopped."
+description.ja = "OS が音声出力デバイスの停止を報告したことを通知する。"
+description.ko = "OS가 오디오 출력 장치 정지를 보고했음을 알린다."
+related = ["DeviceDisconnectEventArgs", "AudioEngine::isConnected", "AudioEngine::setup", "AudioEngine::close", "AudioEngine::audioDeviceChanged"]
+details.en = '''
+- This `Event<DeviceDisconnectEventArgs>` fires once per open device, and only when the OS or the audio library reports that the running output device stopped by itself, for example a USB audio interface that was unplugged or a Bluetooth headset that was switched off while it was the chosen device. `reason` says what happened. `isConnected()` is already false when it fires.
+- It fires on the main thread at the Runtime's next host turn, never on the audio thread; the audio thread only records the stop. It does not fire without a running app loop (`runApp()` or `runHeadlessApp()`).
+- `close()`, `shutdown()`, a re-initialization with `setup()` or `init()`, and a reroute to a new OS default device never fire it. Following the default device is not a loss. If the app reopens the device before the event is delivered, the pending loss is dropped.
+- Which backends report a stop depends on the OS and driver. Where the backend says nothing about a device that went away, the audio just stops and `isConnected()` stays `true`; the engine does not poll. PulseAudio also reports a suspended sink as a stop and then resumes by itself.
+- To open the device again, call `setup()` / `setup(settings)` again. Nothing is rerouted or retried by the engine.
+'''
+details.ja = '''
+- この `Event<DeviceDisconnectEventArgs>` は、開いているデバイスごとに 1 回、OS またはオーディオライブラリが「動作中の出力デバイスが自ら停止した」と報告したときだけ発火します。たとえば、選択中の USB オーディオインターフェースを抜いた場合や、Bluetooth ヘッドセットの電源を切った場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- Runtime の次のホストターンでメインスレッドで発火し、オーディオスレッドでは発火しません。オーディオスレッドは停止を記録するだけです。アプリのループ（`runApp()` または `runHeadlessApp()`）が動いていないときは発火しません。
+- `close()`、`shutdown()`、`setup()` や `init()` による再初期化、新しい OS 既定デバイスへの再ルーティングでは発火しません。既定デバイスに追従することは喪失ではありません。通知が届く前にアプリがデバイスを開き直した場合、保留中の喪失は破棄します。
+- どのバックエンドが停止を報告するかは OS とドライバーによります。なくなったデバイスについてバックエンドが何も報告しない場合は、音が止まるだけで `isConnected()` は `true` のままです。エンジンはポーリングしません。PulseAudio は、サスペンドされたシンクも停止として報告し、その後自動で復帰します。
+- デバイスを開き直すには、`setup()` / `setup(settings)` をもう一度呼びます。エンジンは再ルーティングも再試行もしません。
+'''
+details.ko = '''
+- 이 `Event<DeviceDisconnectEventArgs>`는 열린 장치마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 출력 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 선택한 USB 오디오 인터페이스를 뽑았거나 Bluetooth 헤드셋의 전원을 껐을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- Runtime의 다음 호스트 턴에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 오디오 스레드는 정지를 기록만 합니다. 앱 루프(`runApp()` 또는 `runHeadlessApp()`)가 실행 중이 아니면 발생하지 않습니다.
+- `close()`, `shutdown()`, `setup()`이나 `init()`에 의한 재초기화, 새로운 OS 기본 장치로의 경로 변경에서는 발생하지 않습니다. 기본 장치를 따라가는 것은 손실이 아닙니다. 이벤트가 전달되기 전에 앱이 장치를 다시 열면 대기 중인 손실은 버립니다.
+- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 사라진 장치에 대해 백엔드가 아무것도 보고하지 않으면 소리만 멈추고 `isConnected()`는 `true`로 남습니다. 엔진은 폴링하지 않습니다. PulseAudio는 일시 중단된 싱크도 정지로 보고한 뒤 스스로 복귀합니다.
+- 장치를 다시 열려면 `setup()` / `setup(settings)`를 다시 호출하세요. 엔진은 경로 변경도 재시도도 하지 않습니다.
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+EventListener lostListener;
+
+// tcApp.cpp
+void tcApp::setup() {
+    lostListener = AudioEngine::getInstance().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning() << "audio lost: " << e.reason;
+    });
+}
+'''
 
 ["AudioEngine::play"]
 description.en = "Starts a mixer voice for an audio source."
@@ -1872,6 +1961,43 @@ void tcApp::setup() {
 }
 '''
 
+["AudioEngine::setup"]
+category = "audioengine"
+keywords = ["setup", "open", "reopen", "device lifecycle", "default device", "select device"]
+description.en = "Opens the audio output device (the same as init)."
+description.ja = "音声出力デバイスを開く（init と同じ）。"
+description.ko = "오디오 출력 장치를 연다(init과 같다)."
+related = ["AudioEngine::init", "AudioEngine::isConnected", "AudioEngine::close", "AudioEngine::onDisconnect", "AudioEngine::listDevices", "AudioSettings"]
+details.en = '''
+- `setup(settings)` is `init(settings)` and `setup()` is `init()`, under the device lifecycle name. `setup()` and `init()` open the system default device; to use a specific device, pass `AudioSettings` with `deviceName` (names come from `AudioEngine::listDevices()`). See `AudioEngine::init` for the rules of each setting and for failure handling.
+- This holds for any reopen of a closed engine: after `close()`, after the OS stopped the device, or from `Sound::load*()`, which calls `init()` while the engine is not connected. `setup()` keeps the last sample rate, channel count, buffer size and polyphony.
+- Returns `true` when the device is open. On failure it returns `false` and logs an error through `logError("AudioEngine")`; the device that was open is closed first, so the engine stays stopped. On a running engine it re-initializes live, with a short gap in the sound, and does not fire `onDisconnect`.
+- To open the device again after a loss, call `setup()` / `setup(settings)` again. See `AudioEngine::onDisconnect`.
+'''
+details.ja = '''
+- `setup(settings)` は `init(settings)`、`setup()` は `init()` で、デバイスライフサイクルでの名前です。`setup()` と `init()` はシステム既定のデバイスを開きます。特定のデバイスを使うには、`deviceName` を指定した `AudioSettings` を渡します（名前は `AudioEngine::listDevices()` で取得します）。各設定の扱いと失敗時の処理は `AudioEngine::init` を参照してください。
+- 閉じたエンジンを開き直すときは、いつでもこの動作です。`close()` の後、OS がデバイスを止めた後、エンジンが未接続のときに `init()` を呼ぶ `Sound::load*()` からの場合です。`setup()` は直前のサンプルレート、チャンネル数、バッファサイズ、同時再生数を引き継ぎます。
+- デバイスが開いたら `true` を返します。失敗すると `false` を返し、`logError("AudioEngine")` でエラーを出します。開いていたデバイスは先に閉じるので、エンジンは停止したままになります。動作中のエンジンでは、音が一瞬途切れる形で再初期化し、`onDisconnect` は発火しません。
+- 喪失の後にデバイスを開き直すには、`setup()` / `setup(settings)` をもう一度呼びます。`AudioEngine::onDisconnect` を参照してください。
+'''
+details.ko = '''
+- `setup(settings)`는 `init(settings)`, `setup()`은 `init()`이며 장치 수명 주기 이름입니다. `setup()`과 `init()`은 시스템 기본 장치를 엽니다. 특정 장치를 사용하려면 `deviceName`을 지정한 `AudioSettings`를 전달하세요(이름은 `AudioEngine::listDevices()`로 얻습니다). 각 설정의 처리와 실패 처리는 `AudioEngine::init`을 참조하세요.
+- 닫힌 엔진을 다시 열 때는 언제나 이 동작입니다. `close()` 후, OS가 장치를 정지시킨 후, 엔진이 연결되지 않았을 때 `init()`을 호출하는 `Sound::load*()`에서 모두 같습니다. `setup()`은 마지막 샘플 레이트, 채널 수, 버퍼 크기, 동시 재생 수를 유지합니다.
+- 장치가 열리면 `true`를 반환합니다. 실패하면 `false`를 반환하고 `logError("AudioEngine")`로 오류를 기록합니다. 열려 있던 장치는 먼저 닫으므로 엔진은 정지한 상태로 남습니다. 실행 중인 엔진에서는 소리가 잠시 끊기는 방식으로 재초기화하며 `onDisconnect`는 발생하지 않습니다.
+- 손실 후 장치를 다시 열려면 `setup()` / `setup(settings)`를 다시 호출하세요. `AudioEngine::onDisconnect`를 참조하세요.
+'''
+snippet = '''
+void tcApp::setup() {
+    // Pick a playback device by name before loading sounds
+    AudioSettings s;
+    s.channels = 2;
+    for (auto& d : AudioEngine::listDevices()) {
+        if (d.name.find("USB") != string::npos) s.deviceName = d.name;
+    }
+    AudioEngine::getInstance().setup(s);
+}
+'''
+
 ["AudioEngine::shutdown"]
 category = "audioengine"
 keywords = ["close", "stop", "release", "device", "deinit"]
@@ -1882,16 +2008,19 @@ details.en = '''
 - Stops output, releases the device and backend context, clears output meters, and makes `isInitialized()` return `false`; calling it when already stopped is allowed.
 - Retains settings, listeners, playback slots, and cumulative diagnostic counters; it does not mark retained voices as stopped.
 - The global wrapper is `shutdownAudio()`. Audio listener restrictions are described in `AudioEngine::audioOut`.
+- `close()` is the device lifecycle name for the same call. It never fires `onDisconnect`.
 '''
 details.ja = '''
 - 出力を停止し、デバイスとバックエンドのコンテキストを解放して出力メーターを消去し、`isInitialized()` が `false` を返す状態にします。すでに停止していても呼べます。
 - 設定、リスナー、再生スロット、累積の診断カウンターは保持します。保持したボイスを停止済みにはしません。
 - グローバル関数のラッパーは `shutdownAudio()` です。音声リスナー内の制約は `AudioEngine::audioOut` を参照してください。
+- `close()` は同じ処理のデバイスライフサイクルでの名前です。`onDisconnect` は発火しません。
 '''
 details.ko = '''
 - 출력을 정지하고 장치와 백엔드 컨텍스트를 해제하며 출력 미터를 지워 `isInitialized()`가 `false`를 반환하게 합니다. 이미 정지한 상태에서도 호출할 수 있습니다.
 - 설정, 리스너, 재생 슬롯, 누적 진단 카운터는 유지합니다. 유지된 보이스를 정지 상태로 표시하지 않습니다.
 - 전역 래퍼는 `shutdownAudio()`입니다. 오디오 리스너 안의 제약은 `AudioEngine::audioOut`을 참조하세요.
+- `close()`는 같은 호출의 장치 수명 주기 이름입니다. `onDisconnect`는 발생하지 않습니다.
 '''
 related = ["shutdownAudio"]
 
@@ -17819,6 +17948,25 @@ details.ko = '''
 '''
 related = ["getMicInput", "AudioEngine", "getMicAnalysisBuffer"]
 
+["MicInput::close"]
+keywords = ["close", "stop", "disconnect", "device lifecycle"]
+description.en = "Stops microphone capture (alias of stop)."
+description.ja = "マイク入力を停止する（stop の別名）。"
+description.ko = "마이크 캡처를 중지한다(stop의 별칭)."
+related = ["MicInput::stop", "MicInput::setup", "MicInput::isConnected", "MicInput::onDisconnect"]
+details.en = '''
+- The device lifecycle name of `stop()`; it does the same. `isConnected()` is false afterwards, and `setup()` starts capture again.
+- `close()` never fires `onDisconnect`; that event is only for a capture device the OS reports lost.
+'''
+details.ja = '''
+- `stop()` のデバイスライフサイクルでの名前で、動作は同じです。呼んだ後 `isConnected()` は false になり、`setup()` で入力を再開できます。
+- `close()` は `onDisconnect` を発火しません。そのイベントは、OS が入力デバイスの喪失を報告したときだけのものです。
+'''
+details.ko = '''
+- `stop()`의 장치 수명 주기 이름이며 동작은 같습니다. 호출 후 `isConnected()`는 false가 되고 `setup()`으로 캡처를 다시 시작할 수 있습니다.
+- `close()`는 `onDisconnect`를 발생시키지 않습니다. 이 이벤트는 OS가 캡처 장치 손실을 보고했을 때만 발생합니다.
+'''
+
 ["MicInput::getBuffer"]
 description.en = "Copies the latest microphone samples."
 description.ja = "最新のマイク入力サンプルをコピーする。"
@@ -17879,21 +18027,105 @@ details.ko = '''
 - 스레드 규칙은 `MicInput::startAsync`를 참조하세요.
 '''
 
+["MicInput::isConnected"]
+keywords = ["connected", "running", "unplug", "device lost", "device lifecycle"]
+description.en = "Returns whether the microphone is open and capturing (alias of isRunning)."
+description.ja = "マイクが開いて入力中かを返す（isRunning の別名）。"
+description.ko = "마이크가 열려 캡처 중인지 반환한다(isRunning의 별칭)."
+related = ["MicInput::isRunning", "MicInput::setup", "MicInput::close", "MicInput::onDisconnect"]
+details.en = '''
+- The device lifecycle name of `isRunning()`. It is true only while the capture device is open and delivering, and already false when `onDisconnect` fires.
+- A backend that does not report the stop of a microphone that went away leaves it true; `getBuffer()` then just stops getting new samples.
+'''
+details.ja = '''
+- `isRunning()` のデバイスライフサイクルでの名前です。入力デバイスが開いて動作している間だけ true で、`onDisconnect` が発火する時点ですでに false です。
+- なくなったマイクの停止をバックエンドが報告しない場合は true のままで、`getBuffer()` に新しいサンプルが入らなくなるだけです。
+'''
+details.ko = '''
+- `isRunning()`의 장치 수명 주기 이름입니다. 캡처 장치가 열려 동작하는 동안에만 true이며, `onDisconnect`가 발생하는 시점에는 이미 false입니다.
+- 사라진 마이크의 정지를 백엔드가 보고하지 않으면 true로 남으며, 이때 `getBuffer()`에는 새 샘플이 들어오지 않을 뿐입니다.
+'''
+
 ["MicInput::isRunning"]
 description.en = "Reports whether microphone capture is running."
 description.ja = "マイク入力が動作中かどうかを返す。"
 description.ko = "마이크 캡처가 실행 중인지 반환한다."
 details.en = '''
 - Returns `true` after successful startup has been applied to the handle. Asynchronous startup publishes this state before `onStart`; device readiness alone does not immediately change it.
-- Returns `false` initially, after cancellation, or when the app run associated with the capture ends. See `MicInput::startAsync` for threading rules.
+- Returns `false` initially, after cancellation, after the OS reported the capture device stopped (see `MicInput::onDisconnect`), or when the app run associated with the capture ends. See `MicInput::startAsync` for threading rules.
+- `isConnected()` is the device lifecycle name of the same state.
 '''
 details.ja = '''
 - 起動成功をハンドルに反映した後に `true` を返します。非同期起動では `onStart` より前にこの状態を反映するため、デバイスの準備が整っただけでは直ちに変わりません。
-- 初期状態、取り消し後、または入力に関連付けられたアプリ実行が終了した場合は `false` を返します。スレッドの扱いは `MicInput::startAsync` を参照してください。
+- 初期状態、取り消し後、OS が入力デバイスの停止を報告した後（`MicInput::onDisconnect` を参照）、または入力に関連付けられたアプリ実行が終了した場合は `false` を返します。スレッドの扱いは `MicInput::startAsync` を参照してください。
+- `isConnected()` は同じ状態のデバイスライフサイクルでの名前です。
 '''
 details.ko = '''
 - 시작 성공을 핸들에 반영한 뒤 `true`를 반환합니다. 비동기 시작에서는 `onStart` 전에 이 상태를 반영하므로 장치 준비가 끝난 것만으로 즉시 바뀌지는 않습니다.
-- 초기 상태, 취소 후 또는 캡처와 연결된 앱 실행이 끝나면 `false`를 반환합니다. 스레드 규칙은 `MicInput::startAsync`를 참조하세요.
+- 초기 상태, 취소 후, OS가 캡처 장치 정지를 보고한 후(`MicInput::onDisconnect` 참조) 또는 캡처와 연결된 앱 실행이 끝나면 `false`를 반환합니다. 스레드 규칙은 `MicInput::startAsync`를 참조하세요.
+- `isConnected()`는 같은 상태의 장치 수명 주기 이름입니다.
+'''
+
+["MicInput::onDisconnect"]
+keywords = ["unplug", "disconnect", "reconnect", "device lost", "usb microphone", "bluetooth"]
+description.en = "Reports when the OS says the capture device stopped."
+description.ja = "OS が入力デバイスの停止を報告したことを通知する。"
+description.ko = "OS가 캡처 장치 정지를 보고했음을 알린다."
+related = ["DeviceDisconnectEventArgs", "MicInput::isConnected", "MicInput::setup", "MicInput::close"]
+details.en = '''
+- This `Event<DeviceDisconnectEventArgs>` fires once per started capture, and only when the OS or the audio library reports that the running capture device stopped by itself, for example a USB microphone that was unplugged. `reason` says what happened. `isConnected()` is already false when it fires.
+- It fires on the main thread during `runApp()` or `runHeadlessApp()`, like `onStart`, never on the audio thread; in a bare `main()` without an app run it does not fire. Web does not report a loss.
+- `close()`, `stop()`, `start()` again and destroying the `MicInput` never fire it.
+- Which backends report a stop depends on the OS and driver. Where the backend says nothing, `isConnected()` stays true and `getBuffer()` stops getting new samples.
+- To open the microphone again, call `setup()`; it reopens the system default capture device at the last sample rate.
+'''
+details.ja = '''
+- この `Event<DeviceDisconnectEventArgs>` は、開始した入力ごとに 1 回、OS またはオーディオライブラリが「動作中の入力デバイスが自ら停止した」と報告したときだけ発火します。たとえば USB マイクを抜いた場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- `onStart` と同じく `runApp()` または `runHeadlessApp()` の間にメインスレッドで発火し、オーディオスレッドでは発火しません。アプリの実行がない素の `main()` では発火しません。Web は喪失を報告しません。
+- `close()`、`stop()`、もう一度の `start()`、`MicInput` の破棄では発火しません。
+- どのバックエンドが停止を報告するかは OS とドライバーによります。バックエンドが何も報告しない場合は、`isConnected()` は true のままで、`getBuffer()` に新しいサンプルが入らなくなります。
+- マイクを開き直すには `setup()` を呼びます。システム既定の入力デバイスを直前のサンプルレートで開き直します。
+'''
+details.ko = '''
+- 이 `Event<DeviceDisconnectEventArgs>`는 시작한 캡처마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 캡처 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 USB 마이크를 뽑았을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- `onStart`와 마찬가지로 `runApp()` 또는 `runHeadlessApp()` 중에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 앱 실행이 없는 맨 `main()`에서는 발생하지 않습니다. Web은 손실을 보고하지 않습니다.
+- `close()`, `stop()`, 다시 `start()`, `MicInput` 파괴에서는 발생하지 않습니다.
+- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 백엔드가 아무것도 보고하지 않으면 `isConnected()`는 true로 남고 `getBuffer()`에는 새 샘플이 들어오지 않습니다.
+- 마이크를 다시 열려면 `setup()`을 호출하세요. 시스템 기본 캡처 장치를 마지막 샘플 레이트로 다시 엽니다.
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+EventListener lostListener;
+
+// tcApp.cpp
+void tcApp::setup() {
+    lostListener = getMicInput().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning() << "microphone lost: " << e.reason;
+    });
+    getMicInput().start(48000);
+}
+'''
+
+["MicInput::setup"]
+keywords = ["setup", "reopen", "reconnect", "device lifecycle"]
+description.en = "Reopens the microphone at the last sample rate."
+description.ja = "マイクを直前のサンプルレートで開き直す。"
+description.ko = "마이크를 마지막 샘플 레이트로 다시 연다."
+related = ["MicInput::start", "MicInput::isConnected", "MicInput::close", "MicInput::onDisconnect"]
+details.en = '''
+- `setup()` with no arguments is `start(sampleRate)` with the sample rate of the last `start()` or `startAsync()` (`48000` Hz before any). The microphone is always the system default capture device, so the sample rate is all there is to remember.
+- Returns `true` when capture started. On failure it returns `false` and logs an error, as `start()` does; see `MicInput::start` for the macOS and iOS permission behavior.
+- To open the microphone again after a loss, call `setup()`. See `MicInput::onDisconnect`.
+'''
+details.ja = '''
+- 引数なしの `setup()` は、直前の `start()` または `startAsync()` のサンプルレート（それまでに呼んでいなければ `48000` Hz）で呼ぶ `start(sampleRate)` です。マイクは常にシステム既定の入力デバイスなので、覚えておくのはサンプルレートだけです。
+- 入力を開始できたら `true` を返します。失敗すると `false` を返し、`start()` と同じくエラーを出します。macOS と iOS の権限の扱いは `MicInput::start` を参照してください。
+- 喪失の後にマイクを開き直すには `setup()` を呼びます。`MicInput::onDisconnect` を参照してください。
+'''
+details.ko = '''
+- 인수 없는 `setup()`은 마지막 `start()` 또는 `startAsync()`의 샘플 레이트(호출한 적이 없으면 `48000` Hz)로 호출하는 `start(sampleRate)`입니다. 마이크는 항상 시스템 기본 캡처 장치이므로 기억할 것은 샘플 레이트뿐입니다.
+- 캡처가 시작되면 `true`를 반환합니다. 실패하면 `false`를 반환하고 `start()`와 마찬가지로 오류를 기록합니다. macOS와 iOS의 권한 처리는 `MicInput::start`를 참조하세요.
+- 손실 후 마이크를 다시 열려면 `setup()`을 호출하세요. `MicInput::onDisconnect`를 참조하세요.
 '''
 
 ["MicInput::start"]
@@ -17934,14 +18166,17 @@ description.ko = "마이크 캡처를 중지하거나 시작을 취소한다."
 details.en = '''
 - Immediately clears the running and starting states and device name, cancels the current attempt, and requests cleanup without waiting. Cancellation emits no event and suppresses any pending startup result.
 - See `MicInput::startAsync` for threading, native cleanup, and application exit behavior.
+- `close()` is the device lifecycle name for the same call. It never fires `onDisconnect`.
 '''
 details.ja = '''
 - 動作中と起動待ちの状態、およびデバイス名を直ちにクリアし、現在の試行を取り消して、待機せずに後始末を依頼します。取り消しのイベントは通知せず、保留中の起動結果も通知しません。
 - スレッド、ネイティブでの後始末、アプリ終了時の動作は `MicInput::startAsync` を参照してください。
+- `close()` は同じ処理のデバイスライフサイクルでの名前です。`onDisconnect` は発火しません。
 '''
 details.ko = '''
 - 실행 중 및 시작 대기 상태와 장치 이름을 즉시 지우고 현재 시도를 취소하며 기다리지 않고 정리를 요청합니다. 취소 이벤트는 알리지 않으며 대기 중인 시작 결과도 알리지 않습니다.
 - 스레드, 네이티브 정리, 앱 종료 시 동작은 `MicInput::startAsync`를 참조하세요.
+- `close()`는 같은 호출의 장치 수명 주기 이름입니다. `onDisconnect`는 발생하지 않습니다.
 '''
 snippet = '''
 void tcApp::keyPressed(int key) {

@@ -2710,6 +2710,7 @@ void App::windowResized(int width, int height)  // Called when the window size c
 ### AudioEngine — Manages the output device and mixes sound playback using miniaudio.
 
 ```cpp
+void AudioEngine::close()  // Stops and closes the audio output device (alias of shutdown).
 size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copies recent audio output into a mono analysis buffer.
 int AudioEngine::getBufferSize() const  // Returns the requested audio buffer size.
 int AudioEngine::getChannels() const  // Returns the engine output channel count.
@@ -2719,10 +2720,12 @@ std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Returns 
 int AudioEngine::getSampleRate() const  // Returns the engine output sample rate.
 AudioStats AudioEngine::getStats() const  // Returns a snapshot of audio engine diagnostics.
 bool AudioEngine::init() [+1]  // Initializes or reinitializes the audio output engine.
+bool AudioEngine::isConnected() const  // Returns whether the audio output device is open and running.
 bool AudioEngine::isInitialized() const  // Returns whether audio output is initialized.
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Lists available audio playback devices.
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Mixes audio voices and listeners into an output buffer.
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Starts a mixer voice for an audio source.
+bool AudioEngine::setup() [+1]  // Opens the audio output device (the same as init).
 void AudioEngine::shutdown()  // Stops and closes the audio output device.
 bool AudioEngine::waitForAudioCallbacks()  // Waits for audio listeners to finish during teardown.
 ```
@@ -3549,12 +3552,15 @@ void Mesh::uploadToGpu() const  // Uploads mesh data to the GPU vertex and index
 ### MicInput — Captures microphone samples into a ring buffer.
 
 ```cpp
+void MicInput::close()  // Stops microphone capture (alias of stop).
 size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copies the latest microphone samples.
 std::string MicInput::getDeviceName() const  // Returns the capture device name.
 int MicInput::getSampleRate() const  // Returns the stored microphone sample rate.
+bool MicInput::isConnected() const  // Returns whether the microphone is open and capturing (alias of isRunning).
 bool MicInput::isRunning() const  // Reports whether microphone capture is running.
 bool MicInput::isStarting() const  // Reports whether microphone startup is pending.
 void MicInput::onAudioData(const float * input, size_t frameCount)  // Writes input samples into the microphone ring buffer.
+bool MicInput::setup()  // Reopens the microphone at the last sample rate.
 bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts microphone capture.
 void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts a microphone capture attempt asynchronously.
 void MicInput::stop()  // Stops microphone capture or cancels startup.

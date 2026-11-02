@@ -3,11 +3,11 @@
 //
 // A sine wave runs continuously through App::audioOut(). The ImGui panel
 // lets the user pick a playback device and sample rate; each change calls
-// AudioEngine::init({...}), which tears down the device and restarts at
+// AudioEngine::setup(settings), which tears down the device and restarts at
 // the new settings. Active voices preserve their playback position across
 // the swap (the sine just keeps phasing on).
 //
-// The audioDeviceChanged event fires after each successful init() — the
+// The audioDeviceChanged event fires after each successful setup() — the
 // panel shows the latest event payload so you can see the resolved
 // device name (which may differ from the requested one if a fallback
 // happened) and whether it's the system default.
@@ -21,7 +21,7 @@ constexpr int tcApp::kSampleRates[3];
 void tcApp::setup() {
     setFps(VSYNC);
 
-    // Hook the engine's device-changed event BEFORE init() so we also
+    // Hook the engine's device-changed event BEFORE setup() so we also
     // observe the initial init's fire (not just subsequent re-inits).
     audioDeviceListener = AudioEngine::getInstance().audioDeviceChanged.listen(
         [this](AudioDeviceChangedArgs& a) {
@@ -32,8 +32,25 @@ void tcApp::setup() {
             logNotice("audioDeviceChanged") << lastDeviceEventMessage;
         });
 
-    // Start with system defaults — known-good initial state.
-    AudioEngine::getInstance().init();
+    lostListener = AudioEngine::getInstance().onDisconnect.listen(
+        [this](DeviceDisconnectEventArgs& e) {
+            lastInitOk = false;
+            lastInitMessage = "LOST: " + e.reason;
+            logWarning("tcApp") << lastInitMessage;
+        });
+
+    // Pick a playback device by name: list the names, find the wanted one,
+    // fill AudioSettings and call setup() before loading sounds. Here the
+    // first device whose name contains "USB" is used; with none, deviceName
+    // stays empty and setup() opens the system default device. The panel
+    // below switches to any other name.
+    AudioSettings initial;
+    initial.channels = 2;
+    for (auto& d : AudioEngine::listDevices()) {
+        logNotice("tcApp") << "playback device: " << d.name << (d.isDefault ? " (default)" : "");
+        if (initial.deviceName.empty() && d.name.find("USB") != string::npos) initial.deviceName = d.name;
+    }
+    AudioEngine::getInstance().setup(initial);
 
     imguiSetup();
     refreshDevices();
@@ -107,7 +124,7 @@ void tcApp::applyCurrentSelection() {
     AudioSettings as;
     as.sampleRate = kSampleRates[selectedSampleRateIdx];
     as.deviceName = devices[selectedDeviceIdx].name;
-    bool ok = AudioEngine::getInstance().init(as);
+    bool ok = AudioEngine::getInstance().setup(as);
     lastInitOk = ok;
     lastInitMessage = ok
         ? (std::string("OK: ") + as.deviceName + " @ " + std::to_string(as.sampleRate) + " Hz")
