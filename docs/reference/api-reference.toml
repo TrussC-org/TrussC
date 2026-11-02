@@ -25416,7 +25416,7 @@ details.en = '''
 - Dimensions use local drawing units: ordinary window drawing uses logical pixels, while Fbo drawing and pixelPerfect mode use framebuffer pixels before Node transforms are applied.
 - Hit testing includes the rectangle's edges and requires `enableEvents()`; events are disabled by default. See `Node::hitTest` and `Node::onMousePress` for the shared input rules.
 - Clipping is disabled by default. When enabled, a GPU scissor restricts this node's drawing, its Mods, and its descendants on the current drawing target; nested clip regions are intersected and the previous scissor is restored afterward.
-- The scissor uses the global positions of only `(0, 0, 0)` and `(width, height, 0)`, multiplied by the target's pixel scale; that scale is 1 for Fbo drawing and pixelPerfect mode, and the window DPI scale otherwise. It remains screen-aligned, does not follow rotated edges, and does not apply camera projection.
+- The scissor uses the global positions of only `(0, 0, 0)` and `(width, height, 0)`, in the same logical units that `pushScissor` takes. It remains screen-aligned, does not follow rotated edges, and does not apply camera projection.
 - Clipping also rejects the entire subtree during picking when the ray misses this rectangle, even if this node's own events are disabled; this check uses the local rectangle rather than the screen-aligned scissor.
 - The default `draw()` draws nothing. See `Node` for creation and ownership, `Node::setup` for setup timing, and `Node::draw` for the drawing lifecycle.
 '''
@@ -25425,7 +25425,7 @@ details.ja = '''
 - 寸法はローカルの描画単位です。Node の変換を適用する前の単位は、通常のウィンドウ描画では論理ピクセル、Fbo 描画と pixelPerfect モードではフレームバッファのピクセルです。
 - ヒットテストは矩形の辺を含み、`enableEvents()` が必要です。イベントは初期状態では無効です。共通の入力規則は `Node::hitTest` と `Node::onMousePress` を参照してください。
 - クリッピングは初期状態では無効です。有効にすると、現在の描画先で、このノード自身、Mod、子孫の描画を GPU のシザーで制限します。入れ子のクリップ領域は交差部分になり、描画後は元のシザーに戻ります。
-- シザーは `(0, 0, 0)` と `(width, height, 0)` の 2 点だけをグローバル座標に変換し、描画先のピクセル倍率を掛けて求めます。倍率は Fbo 描画と pixelPerfect モードでは 1、それ以外ではウィンドウの DPI 倍率です。領域は画面の軸に平行で、回転した辺には沿わず、カメラの投影も適用しません。
+- シザーは `(0, 0, 0)` と `(width, height, 0)` の 2 点だけをグローバル座標に変換し、`pushScissor` が受け取るのと同じ論理座標のまま使います。領域は画面の軸に平行で、回転した辺には沿わず、カメラの投影も適用しません。
 - クリッピングが有効な場合、レイがこの矩形に当たらなければ、このノード自身のイベントが無効でも、ヒット候補の検索で子孫全体を除外します。この判定には画面の軸に平行なシザーではなく、ローカルの矩形を使います。
 - 標準の `draw()` は何も描画しません。生成と所有関係は `Node`、初期化のタイミングは `Node::setup`、描画の流れは `Node::draw` を参照してください。
 '''
@@ -25434,7 +25434,7 @@ details.ko = '''
 - 크기는 로컬 그리기 단위를 사용합니다. Node 변환을 적용하기 전의 단위는 일반 창 그리기에서는 논리 픽셀이고, Fbo 그리기와 pixelPerfect 모드에서는 프레임버퍼 픽셀입니다.
 - 히트 테스트는 사각형의 경계를 포함하며 `enableEvents()`가 필요합니다. 이벤트는 기본적으로 비활성화되어 있습니다. 공통 입력 규칙은 `Node::hitTest`와 `Node::onMousePress`를 참조하세요.
 - 클리핑은 기본적으로 비활성화되어 있습니다. 활성화하면 현재 그리기 대상에서 이 노드, Mod, 자손의 그리기를 GPU 시저로 제한합니다. 중첩된 클립 영역은 교집합으로 제한되며 그리기가 끝나면 이전 시저가 복원됩니다.
-- 시저는 `(0, 0, 0)`과 `(width, height, 0)` 두 점만 전역 좌표로 변환하고 대상의 픽셀 배율을 곱하여 계산합니다. 배율은 Fbo 그리기와 pixelPerfect 모드에서는 1이고, 그 외에는 창의 DPI 배율입니다. 영역은 화면 축에 평행하며 회전한 변을 따르지 않고 카메라 투영도 적용하지 않습니다.
+- 시저는 `(0, 0, 0)`과 `(width, height, 0)` 두 점만 전역 좌표로 변환하며, `pushScissor`가 받는 것과 같은 논리 좌표를 그대로 씁니다. 영역은 화면 축에 평행하며 회전한 변을 따르지 않고 카메라 투영도 적용하지 않습니다.
 - 클리핑이 활성화된 경우 레이가 이 사각형을 벗어나면 노드 자체의 이벤트가 비활성화되어 있어도 히트 후보 검색에서 전체 하위 트리를 제외합니다. 이 검사는 화면 축에 평행한 시저가 아니라 로컬 사각형을 사용합니다.
 - 기본 `draw()`는 아무것도 그리지 않습니다. 생성과 소유 관계는 `Node`, 초기화 시점은 `Node::setup`, 그리기 과정은 `Node::draw`를 참조하세요.
 '''
@@ -50321,42 +50321,38 @@ description.ja = "現在のクリッピング矩形を保存し、描画をそ�
 description.ko = "현재 클리핑 사각형을 저장하고 그리기를 그 안쪽의 새 사각형으로 제한한다."
 details.en = '''
 - After this call, only the pixels inside the rectangle are drawn; everything outside is left unchanged. Always pair it with `popScissor()` in the same `draw()`.
-- `x`, `y` are the top-left corner and `w`, `h` the size. **The values are pixels of the render target, not logical coordinates.** On the window they are framebuffer pixels, so multiply logical values by `getDpiScale()` (2 on Retina screens). In pixelPerfect mode and inside an `Fbo`, use the values as they are (inside an `Fbo` they are pixels of the `Fbo`).
-- The rectangle is not affected by `translate()`, `rotate()`, `scale()` or a camera. It is always measured from the top-left corner of the window or `Fbo`. To clip an area that moves with a node, use `RectNode::setClipping(true)`, which converts the position and the DPI scale for you.
+- `x`, `y` are the top-left corner and `w`, `h` the size, in the logical coordinates of the current render target: the same units as `drawRect()`. `pushScissor(10, 10, 200, 100)` clips to the rectangle that `drawRect(10, 10, 200, 100)` fills. TrussC converts to framebuffer pixels for you, so do not multiply by `getDpiScale()`. In pixelPerfect mode and inside an `Fbo`, logical coordinates are pixels already.
+- The rectangle is not affected by `translate()`, `rotate()`, `scale()` or a camera. It is always measured from the top-left corner of the window or `Fbo`. To clip an area that moves with a node, use `RectNode::setClipping(true)`, which converts the node's position for you.
 - Nested calls are intersected with the current rectangle, so an inner rectangle never extends beyond the outer one. When they do not overlap, nothing is drawn until the matching `popScissor()`.
-- Values are cut down to whole pixels.
+- After conversion to framebuffer pixels, values are cut down to whole pixels.
 - The clipping state is not reset at the start of each frame or before each Node's `draw()`. A push without a pop stays active in later frames.
 - `fbo.begin()` starts with no clipping and an empty stack, and the window's clipping returns after `fbo.end()`. Pushes left unpopped inside an `Fbo` are discarded at `end()` with a warning.
 - A `RectNode` with clipping enabled uses this same stack, so a `pushScissor()` inside such a node is intersected with the node's area.
-- Known issue: [#914](https://github.com/TrussC-org/TrussC/issues/914) (the rectangle is given in render-target pixels, unlike other drawing functions).
 '''
 details.ja = '''
 - 呼んだあとは、矩形の内側のピクセルだけが描かれ、外側は変わりません。必ず同じ `draw()` の中で `popScissor()` と組にしてください。
-- `x`、`y` は左上の角、`w`、`h` は大きさです。**値は論理座標ではなく、描画先のピクセルです。** ウィンドウではフレームバッファのピクセルなので、論理座標の値に `getDpiScale()`（Retina では 2）を掛けてください。pixelPerfect モードと `Fbo` の中では値をそのまま使います（`Fbo` の中では `Fbo` のピクセルです）。
-- 矩形は `translate()`、`rotate()`、`scale()` やカメラの影響を受けません。常にウィンドウまたは `Fbo` の左上から測ります。ノードと一緒に動く範囲を切り抜きたい場合は、位置と DPI の変換を代わりに行ってくれる `RectNode::setClipping(true)` を使ってください。
+- `x`、`y` は左上の角、`w`、`h` は大きさで、現在の描画先の論理座標で指定します。`drawRect()` と同じ単位です。`pushScissor(10, 10, 200, 100)` は、`drawRect(10, 10, 200, 100)` が塗る矩形に切り抜きます。フレームバッファのピクセルへの変換は TrussC が行うので、`getDpiScale()` を掛ける必要はありません。pixelPerfect モードと `Fbo` の中では、論理座標がそのままピクセルです。
+- 矩形は `translate()`、`rotate()`、`scale()` やカメラの影響を受けません。常にウィンドウまたは `Fbo` の左上から測ります。ノードと一緒に動く範囲を切り抜きたい場合は、ノードの位置の変換を代わりに行ってくれる `RectNode::setClipping(true)` を使ってください。
 - 入れ子にすると現在の矩形との重なり部分になるため、内側の矩形が外側からはみ出すことはありません。重なりがない場合は、対応する `popScissor()` まで何も描かれません。
-- 値は整数のピクセルに切り捨てられます。
+- フレームバッファのピクセルに変換したあと、値は整数のピクセルに切り捨てられます。
 - クリッピングの状態は、フレームの始めにも各 Node の `draw()` の前にもリセットされません。pop し忘れた push は次のフレーム以降も有効のままです。
 - `fbo.begin()` はクリッピングなし、スタックが空の状態から始まり、`fbo.end()` のあとはウィンドウのクリッピングに戻ります。`Fbo` の中で pop されなかった push は、`end()` で警告とともに破棄されます。
 - クリッピングを有効にした `RectNode` も同じスタックを使うため、そのノードの中での `pushScissor()` はノードの範囲との重なり部分になります。
-- 既知の問題: [#914](https://github.com/TrussC-org/TrussC/issues/914)（他の描画関数と違い、矩形はレンダーターゲットのピクセル単位で指定する）。
 '''
 details.ko = '''
 - 호출한 뒤에는 사각형 안쪽의 픽셀만 그려지고 바깥쪽은 바뀌지 않습니다. 반드시 같은 `draw()` 안에서 `popScissor()`와 짝을 맞추세요.
-- `x`, `y`는 왼쪽 위 모서리, `w`, `h`는 크기입니다. **값은 논리 좌표가 아니라 그리기 대상의 픽셀입니다.** 창에서는 프레임버퍼 픽셀이므로 논리 좌표 값에 `getDpiScale()`(Retina에서는 2)을 곱하세요. pixelPerfect 모드와 `Fbo` 안에서는 값을 그대로 씁니다(`Fbo` 안에서는 `Fbo`의 픽셀입니다).
-- 사각형은 `translate()`, `rotate()`, `scale()`이나 카메라의 영향을 받지 않습니다. 항상 창 또는 `Fbo`의 왼쪽 위에서 측정합니다. 노드와 함께 움직이는 영역을 잘라내려면 위치와 DPI 변환을 대신 해 주는 `RectNode::setClipping(true)`를 사용하세요.
+- `x`, `y`는 왼쪽 위 모서리, `w`, `h`는 크기이며, 현재 그리기 대상의 논리 좌표로 지정합니다. `drawRect()`와 같은 단위입니다. `pushScissor(10, 10, 200, 100)`은 `drawRect(10, 10, 200, 100)`이 채우는 사각형으로 잘라냅니다. 프레임버퍼 픽셀로의 변환은 TrussC가 하므로 `getDpiScale()`을 곱할 필요가 없습니다. pixelPerfect 모드와 `Fbo` 안에서는 논리 좌표가 곧 픽셀입니다.
+- 사각형은 `translate()`, `rotate()`, `scale()`이나 카메라의 영향을 받지 않습니다. 항상 창 또는 `Fbo`의 왼쪽 위에서 측정합니다. 노드와 함께 움직이는 영역을 잘라내려면 노드의 위치 변환을 대신 해 주는 `RectNode::setClipping(true)`를 사용하세요.
 - 중첩하면 현재 사각형과 겹치는 부분이 되므로 안쪽 사각형이 바깥쪽을 벗어나지 않습니다. 겹치지 않으면 대응하는 `popScissor()`까지 아무것도 그려지지 않습니다.
-- 값은 정수 픽셀로 잘려 내려갑니다.
+- 프레임버퍼 픽셀로 변환한 뒤 값은 정수 픽셀로 잘려 내려갑니다.
 - 클리핑 상태는 프레임 시작이나 각 Node의 `draw()` 전에 초기화되지 않습니다. pop하지 않은 push는 다음 프레임 이후에도 유지됩니다.
 - `fbo.begin()`은 클리핑 없음, 빈 스택 상태에서 시작하며 `fbo.end()` 이후에는 창의 클리핑으로 돌아갑니다. `Fbo` 안에서 pop되지 않은 push는 `end()`에서 경고와 함께 버려집니다.
 - 클리핑을 켠 `RectNode`도 같은 스택을 쓰므로, 그런 노드 안에서의 `pushScissor()`는 노드 영역과 겹치는 부분이 됩니다.
-- 알려진 문제: [#914](https://github.com/TrussC-org/TrussC/issues/914)(다른 그리기 함수와 달리 사각형을 렌더 타깃의 픽셀 단위로 지정함).
 '''
-related = ["popScissor", "setScissor", "resetScissor", "RectNode::setClipping", "getDpiScale"]
+related = ["popScissor", "setScissor", "resetScissor", "RectNode::setClipping", "drawRect"]
 snippet = '''
 void tcApp::draw() {
-    float s = getDpiScale();                   // logical -> window pixels (use 1 inside an Fbo)
-    pushScissor(50 * s, 50 * s, 200 * s, 100 * s);
+    pushScissor(50, 50, 200, 100);             // same units as drawRect()
     setColor(0.2f, 0.6f, 1.0f);
     drawCircle(150, 100, 120);                // only the part inside the rectangle appears
     popScissor();
@@ -52689,31 +52685,27 @@ description.en = "Sets the clipping rectangle directly, replacing the current on
 description.ja = "クリッピング矩形を直接設定し、現在の矩形を置き換える。"
 description.ko = "클리핑 사각형을 직접 설정해 현재 사각형을 바꾼다."
 details.en = '''
-- Only the pixels inside the rectangle are drawn. It uses the same pixel coordinates as `pushScissor`; see `pushScissor` for units and DPI.
+- Only the pixels inside the rectangle are drawn. It uses the same logical coordinates as `pushScissor`, the units of `drawRect()`; see `pushScissor` for DPI and `Fbo` details.
 - Unlike `pushScissor()`, it saves nothing and is not intersected with the current rectangle. A later `popScissor()` replaces it with the saved rectangle.
 - There are `int` and `float` versions. Pass all four values as the same type.
 - For nested areas, or inside nodes, use `pushScissor()` / `popScissor()`. For a node's own area, `RectNode::setClipping(true)` is simpler.
-- Known issue: [#914](https://github.com/TrussC-org/TrussC/issues/914) (the rectangle is given in render-target pixels, unlike other drawing functions).
 '''
 details.ja = '''
-- 矩形の内側のピクセルだけが描かれます。座標は `pushScissor` と同じピクセル単位です。単位と DPI については `pushScissor` を参照してください。
+- 矩形の内側のピクセルだけが描かれます。座標は `pushScissor` と同じ論理座標（`drawRect()` と同じ単位）です。DPI と `Fbo` については `pushScissor` を参照してください。
 - `pushScissor()` と違い、何も保存せず、現在の矩形との重なりも取りません。あとで `popScissor()` を呼ぶと、保存されていた矩形に置き換わります。
 - `int` 版と `float` 版があります。4 つの値は同じ型で渡してください。
 - 入れ子にする場合やノードの中では `pushScissor()` / `popScissor()` を使ってください。ノード自身の範囲で切り抜くなら `RectNode::setClipping(true)` のほうが簡単です。
-- 既知の問題: [#914](https://github.com/TrussC-org/TrussC/issues/914)（他の描画関数と違い、矩形はレンダーターゲットのピクセル単位で指定する）。
 '''
 details.ko = '''
-- 사각형 안쪽의 픽셀만 그려집니다. 좌표는 `pushScissor`와 같은 픽셀 단위입니다. 단위와 DPI는 `pushScissor`를 참고하세요.
+- 사각형 안쪽의 픽셀만 그려집니다. 좌표는 `pushScissor`와 같은 논리 좌표(`drawRect()`와 같은 단위)입니다. DPI와 `Fbo`는 `pushScissor`를 참고하세요.
 - `pushScissor()`와 달리 아무것도 저장하지 않고 현재 사각형과 겹치는 부분도 계산하지 않습니다. 나중에 `popScissor()`를 호출하면 저장되어 있던 사각형으로 바뀝니다.
 - `int` 버전과 `float` 버전이 있습니다. 네 값은 같은 타입으로 전달하세요.
 - 중첩하거나 노드 안에서 쓸 때는 `pushScissor()` / `popScissor()`를 사용하세요. 노드 자신의 영역으로 자를 때는 `RectNode::setClipping(true)`가 더 간단합니다.
-- 알려진 문제: [#914](https://github.com/TrussC-org/TrussC/issues/914)(다른 그리기 함수와 달리 사각형을 렌더 타깃의 픽셀 단위로 지정함).
 '''
 related = ["RectNode::setClipping", "pushScissor"]
 snippet = '''
 void tcApp::draw() {
-    float s = getDpiScale();
-    setScissor(0.0f, 0.0f, getWidth() / 2 * s, getHeight() * s);   // left half only
+    setScissor(0.0f, 0.0f, getWidth() / 2, getHeight());   // left half only
     drawCircle(getWidth() / 2, getHeight() / 2, 200);
     resetScissor();
 }

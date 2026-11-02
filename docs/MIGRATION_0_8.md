@@ -437,3 +437,22 @@ exitApp(3);     // with an exit code
 - `requestExitApp()` used to keep the current exit code; as an alias of `exitApp()` it sets the code to `0`.
 - `App::isExitRequested()` is deprecated. It still returns `true` after `requestExit()` was called on that App, but the framework no longer reads it. Use `exit()` or `events().exitRequested` to react to a quit.
 - The exit reason `request-exit-app` no longer exists; `exitApp()` reports `exit-app`.
+
+## Scissor rectangles match `drawRect()` (fix, #914)
+
+`setScissor()`, `pushScissor()` and `popScissor()` took framebuffer pixels while every other drawing function takes logical coordinates, so a scissor was misplaced or mis-sized wherever logical pixels are scaled (Retina and other HiDPI displays). They now take the logical coordinates of the current render target, the same units as `drawRect()`.
+
+If you compensated by multiplying by the pixel scale, remove that:
+
+```cpp
+// before
+float s = getDpiScale();
+pushScissor(10 * s, 10 * s, 200 * s, 100 * s);
+
+// now: the rectangle that drawRect(10, 10, 200, 100) draws
+pushScissor(10, 10, 200, 100);
+```
+
+- Inside an `Fbo` and in pixelPerfect mode, logical coordinates are pixels already, so code there does not change.
+- The transform matrix and camera are still not applied: a scissor is an axis-aligned rectangle of the target, measured from its top-left corner.
+- `RectNode::setClipping(true)` needs no change. Nested `pushScissor()` calls still intersect, and `popScissor()` restores the previous rectangle.
