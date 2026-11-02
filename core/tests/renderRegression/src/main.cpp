@@ -205,12 +205,13 @@ class RegressionApp : public App {
         } else if (is("easyCamFbo")) {
             camera_.begin(); pbr(0, 0); camera_.end();
         } else if (is("scissorFbo")) {
-            // pushScissor takes attachment pixels; Fbo coordinates already are
-            // pixels, while logical swapchain coordinates need conversion.
+            // pushScissor takes the target's logical coordinates (like drawRect);
+            // the target stores attachment pixels, so the clip scales with the
+            // swapchain's pixel scale and equals the logical values in an Fbo.
             const float scale = internal::targetPixelScale();
             auto& target = internal::currentTarget();
             const bool fresh = !target.currentScissor.active && target.scissorStack.empty();
-            pushScissor(16*scale, 16*scale, 32*scale, 32*scale);
+            pushScissor(16, 16, 32, 32);
             const auto clip = target.currentScissor;
             const bool pushed = clip.active && clip.x == 16*scale && clip.y == 16*scale &&
                 clip.w == 32*scale && clip.h == 32*scale && target.scissorStack.size() == 1;

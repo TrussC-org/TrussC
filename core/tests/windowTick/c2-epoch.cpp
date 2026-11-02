@@ -4,7 +4,7 @@
 using namespace tc;
 int secondRequests = 0;
 struct First : App {
-    void setup() override { requestExitApp(); }
+    void setup() override { exitApp(); }
     void exit() override {
         std::thread worker([] { exitApp(7); });
         worker.join();

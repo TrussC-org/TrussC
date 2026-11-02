@@ -66,7 +66,7 @@ void CALLBACK testSession(HWND, UINT, UINT_PTR timer, DWORD) {
                 DWORD count = 256;
                 check(ShutdownBlockReasonQuery(hwnd, reason, &count) == FALSE,
                       "cancelled session removes shutdown block");
-                requestExitApp();
+                exitApp();
             } else {
                 SendMessageW(hwnd, WM_ENDSESSION, TRUE,
                              mode == "forced" ? ENDSESSION_CLOSEAPP : ENDSESSION_LOGOFF);
@@ -110,10 +110,10 @@ struct ExitApp : App {
         // The native timer below drives an idle query outside update().
 #elif (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
         if (updates == 1) std::raise(mode == "sigint" ? SIGINT : SIGTERM);
-        if (requests == 1 && (mode == "cancel" || mode == "cancel-empty")) requestExitApp();
+        if (requests == 1 && (mode == "cancel" || mode == "cancel-empty")) exitApp();
         if (requests == 1 && (mode == "escalate" || mode == "escalate-term")) std::raise(SIGTERM);
 #else
-        requestExitApp();
+        exitApp();
 #endif
     }
     void exit() override {

@@ -95,9 +95,9 @@ void nativeGatedTicks(Window& window) {
     window.setFps(VSYNC);
     internal::runWindowTick(at(0), .25, false, &fakePresentation, true);
     internal::runWindowTick(at(1), .25, true, &fakePresentation, true);
-    check("native gated callback retains secondary pause including capture",
-        !ctx.pauseUpdatesWhenHidden || ctx.updateCount == updates);
-    check("native gate keeps main decision B", !!ctx.pauseUpdatesWhenHidden || ctx.updateCount == updates + 2);
+    // #997: a hidden (native-gated) window keeps updating on every tick, also
+    // with a capture pending; only draw stops. Same rule for every window.
+    check("native gated hidden tick keeps updating", ctx.updateCount == updates + 2);
     check("native gate never completes a draw", ctx.drawCount == draws);
     // Leave the regular fixture's counters and phase untouched.
     ctx.updateCount = updates; ctx.drawCount = draws;
@@ -165,7 +165,7 @@ void resourceKeyPlacement(Window& main) {
         setIndependentFps(EVENT_DRIVEN, EVENT_DRIVEN);
         publishHidden(*window, true);
         attempt("resource key: hidden capture admitted tick", true, false, false);
-        attempt("resource key: paused secondary tick", false, false, false, ctx.pauseUpdatesWhenHidden);
+        attempt("resource key: hidden ungated tick", false, false, false);
         attempt("resource key: native gate including capture never advances secondary", true, false, true);
         publishHidden(*window, false);
         setIndependentFps(4, EVENT_DRIVEN); ctx.loop.redrawCount = 0;
@@ -239,17 +239,10 @@ void exercise(Window& window) {
     tick(window, 5);
     publishHidden(window, true);
     auto count = getUpdateCount();
-    if (!ctx.pauseUpdatesWhenHidden) {
-        tick(window, 5.25);
-        check("hidden main keeps updating", getUpdateCount() == count + 1);
-        publishHidden(window, false);
-        setFps(VSYNC); setIndependentFps(4, EVENT_DRIVEN); tick(window, 7205);
-    } else {
-        tick(window, 3605);
-        check("hidden secondary retains native pause policy", getUpdateCount() == count);
-        publishHidden(window, false); tick(window, 7205);
-        check("resume does not replay hidden time", getUpdateCount() == count + 1);
-    }
+    tick(window, 5.25);
+    check("hidden window keeps updating", getUpdateCount() == count + 1);
+    publishHidden(window, false);
+    setFps(VSYNC); setIndependentFps(4, EVENT_DRIVEN); tick(window, 7205);
     setFps(VSYNC); setIndependentFps(4, EVENT_DRIVEN);
     publishHidden(window, true); internal::observeWindowVisibility(ctx, SAPP_EVENTTYPE_SUSPENDED);
     const auto captureDraws = getDrawCount(), captureUpdates = getUpdateCount();
@@ -340,7 +333,6 @@ void setMainHidden(bool hidden) {
 }
 void hiddenInterval(Window& main) {
     Secondary visible;
-    trussc::internal::WindowRequestAccess::context(main).pauseUpdatesWhenHidden = false;
     setUnitApp(main, internal::makeConstructedApp<Probe>());
     setUnitApp(visible, internal::makeConstructedApp<Probe>());
     internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(main);
@@ -545,7 +537,6 @@ struct MainDisplayApp : App {
     }
     void setup() override {
         initialFixture = getWindow();
-        trussc::internal::WindowRequestAccess::context(*getWindow()).pauseUpdatesWhenHidden = false;
         setIndependentFps(VSYNC, EVENT_DRIVEN);
         getWindow()->setClearColor(Color(1, 0, 0, 1));
         pixels.allocate(4, 4, 4);
@@ -634,7 +625,7 @@ struct HeadlessProbe : App {
     void update() override {
         check("headless draw count zero", getDrawCount() == 0);
         check("headless frame equals update", getFrameCount() == getUpdateCount());
-        requestExit();
+        exitApp();
     }
 };
 }

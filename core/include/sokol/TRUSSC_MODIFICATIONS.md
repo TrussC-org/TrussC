@@ -74,6 +74,16 @@ surface switches every frame. Window teardown and runtime shutdown still force
 idle activation at disposal boundaries. Other backends keep the
 internal ensure-context seam as a no-op, like idle activation.
 
+### X11 refresh estimate ignores presents after a skipped tick (#998)
+
+`_sapp_tc.refresh_period` (the EMA of present intervals, GLX and EGL) is fed
+only by a present whose previous tick also presented (`last_tick_presented`
+in the window record). After a skipped tick (`skip_present`, as setFps below
+the display rate produces) the interval spans the app's own frame rate, not the
+display; under a compositor whose swap does not block it used to teach the
+estimate a 30 Hz display and slow the interval-zero secondaries to ~30 fps.
+Tested by the throttled-main case of `core/tests/windowTick/x11-pacing-test`.
+
 ### macOS failed-startup termination notification (#239)
 
 The failed-startup cleanup call supplies an NSApplicationWillTerminateNotification
@@ -796,3 +806,11 @@ own window receiver. Drop capacities and rejection behavior are unchanged.
   the JS bridge raises an Error identifying out of memory after C++ unwinds.
   Heap text is still freed in `finally`. No recovery or retry is added.
 - Windows clipboard `GlobalAlloc` failure now logs an out-of-memory Error and returns instead of explicitly throwing from the C API.
+
+
+## X11 clipboard TARGETS reply (#1023)
+
+- The selection owner's reply to a `TARGETS` request now lists `{TARGETS, UTF8_STRING}`
+  instead of `UTF8_STRING` alone, as ICCCM expects. `TIMESTAMP` is not advertised
+  (it would need the acquisition time to be tracked). One change covers the GLX and
+  GLES3/EGL backends because the code is shared.

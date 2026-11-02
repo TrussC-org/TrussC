@@ -32,7 +32,7 @@ struct DeviceApp : App {
         std::fprintf(stderr, "serialRxDevice detail: %s; sent=%zu backlog=%d loss=%d dropped=%zu stage=%d\n",
                      reason, sent.load(), backlog, loss, serial.getDroppedByteCount(), stage);
         passed = false;
-        requestExit();
+        exitApp();
     }
     void setup() override {
         appThread = std::this_thread::get_id();
@@ -110,7 +110,7 @@ struct DeviceApp : App {
         } else if (stage == 1 && sent == total + resumed && serial.available() == static_cast<int>(resumed)) {
             passed = verify(total, resumed) && serial.available() == 0 &&
                 serial.getDroppedByteCount() == excess && backlog == 1 && loss == 1 && onMain;
-            requestExit();
+            exitApp();
         }
     }
     void exit() override {

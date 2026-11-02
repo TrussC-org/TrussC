@@ -46,13 +46,13 @@ struct Probe : App {
         if (frames == 60) {
             if (action == "exit") exitApp();
             else if (action == "sigterm") std::raise(SIGTERM);
-            else if (action == "request" || action == "veto") requestExitApp();
+            else if (action == "request" || action == "veto") exitApp();
             // manual: send SIGTERM externally, Cmd+Q, or perform supervised logout.
         }
         if (action == "veto" && frames == 120) {
             if (dialog == "alert") check(callbacks == 1 && requests == 1, "veto after alert auto-dismiss");
             else check(callbacks == 0 && requests == 1, "veto kept callback pending");
-            requestExitApp();
+            exitApp();
         }
     }
     void exit() override {

@@ -56,7 +56,7 @@ void readers(const char* phase) {
     std::printf("concurrent-readers: %s: 304000 checks finished\n", phase);
 }
 struct HeadlessReaders : App {
-    void setup() override { readers("headless setup"); requestExit(); }
+    void setup() override { readers("headless setup"); exitApp(); }
 };
 }
 int main(int argc, char**) {

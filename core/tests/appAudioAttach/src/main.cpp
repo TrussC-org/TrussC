@@ -118,8 +118,8 @@ struct SetupAllocApp : App {
         auto& engine = AudioEngine::getInstance();
         probe->outHooksInUpdate = (long)engine.audioOut.listenerCount();
         probe->inHooksInUpdate = (long)engine.audioIn.listenerCount();
-        if (probe->audioOutCalls.load() >= 20) requestExit();
-        if (frames >= 600) { probe->timedOut = true; requestExit(); }
+        if (probe->audioOutCalls.load() >= 20) exitApp();
+        if (frames >= 600) { probe->timedOut = true; exitApp(); }
     }
 
     void audioOut(AudioOutBuffer& b) override {

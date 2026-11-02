@@ -33,10 +33,31 @@ struct AppProbe : App {
         ++state.exits[id];
         const auto code = internal::appExitCode();
         const auto reason = internal::exitReason();
-        exitApp(99); requestExitApp();
+        exitApp(99); exitApp();
         check("exitApp from App exit is inert", code == internal::appExitCode() && reason == internal::exitReason());
     }
 };
+// Compatibility coverage for the deprecated aliases.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+void callDeprecatedExit(App& app, bool freeFunction) {
+    if (freeFunction) requestExitApp(); else app.requestExit();
+}
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 std::shared_ptr<Window> make(State& state, int id) {
     auto w = std::make_shared<Window>();
     internal::WindowRequestAccess::bindForTests(*w, 801 + id);
@@ -205,6 +226,25 @@ void run() {
     internal::clearExitReason();
     check("owned Window exit listener can request normal quit", osClose(manualWindow) && sibling->isOpen() && internal::exitReason() == "exit-app");
     internal::shutdownRuntime(); internal::endFrameworkLifetime();
+    // #906: the deprecated App::requestExit() and requestExitApp() forward to
+    // exitApp(), so they quit a windowed App too (before, requestExit() did nothing).
+    for (bool freeFunction : {false, true}) {
+        internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+        State aliasState;
+        auto aliasWindow = make(aliasState, 0);
+        auto aliasApp = aliasWindow->getApp();
+        internal::clearExitReason();
+        callDeprecatedExit(*aliasApp, freeFunction);
+        check("windowed deprecated alias requests a normal quit", internal::exitReason() == "exit-app");
+        aliasState.unsaved[0] = true;
+        check("windowed deprecated alias quit can be vetoed",
+              !internal::processPendingQuit() && aliasState.exits[0] == 0 && aliasWindow->isOpen());
+        aliasState.unsaved[0] = false;
+        callDeprecatedExit(*aliasApp, freeFunction);
+        check("windowed deprecated alias quit is accepted and ends the App once",
+              internal::processPendingQuit() && aliasState.exits[0] == 1);
+        internal::endFrameworkLifetime();
+    }
     internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
     State surfaceState;
     auto surface = std::make_shared<Window>();

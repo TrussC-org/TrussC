@@ -36,6 +36,7 @@
 #include <cstdint>
 #include <typeindex>
 #include <unordered_map>
+#include <optional>
 
 // ---------------------------------------------------------------------------
 // Main-thread guard (debug only)
@@ -107,11 +108,11 @@ namespace internal {
     // every timer with that id.
     uint64_t nextNodeTimerId();
 
-    // Runs the node's setup() once and then the framework's post-setup hook,
-    // as the node's first updateTree() / drawTree() does (Node::setupOnce()),
-    // as the setup() entry point (#349): the stacks go back to their depth
-    // before it. For a window's root (the App): runHeadlessApp(), and
-    // App / Window before their tree walk. Defined below the Node class.
+    // Makes the node a live tree root (a window's root: the App, or a test's
+    // plain Node) and, the first time, sets up its whole tree (Node::
+    // setupTree()) as the setup() entry point (#349): the stacks go back to
+    // their depth before it. Called by runHeadlessApp(), and by App / Window
+    // before each tree walk. Defined below the Node class.
     inline void setupNodeOnce(Node& node);
 }
 
@@ -198,6 +199,9 @@ public:
 
         // Notify callback
         onChildAdded(child);
+
+        // Joining a live tree sets the child's subtree up now (#949).
+        setupJoined(*child);
     }
 
     // Insert child node at specific index
@@ -237,6 +241,9 @@ public:
         }
 
         onChildAdded(child);
+
+        // Joining a live tree sets the child's subtree up now (#949).
+        setupJoined(*child);
     }
 
     // Remove child node
@@ -697,11 +704,15 @@ public:
         T* ptr = mod.get();
         mod->owner_ = this;
         mods_[std::type_index(typeid(T))] = std::move(mod);
-        // setup() runs after owner_ is set and the mod is in mods_, so it can
-        // safely call getMod / addChild / etc. on its owner. Call through the
-        // base pointer: Node is a friend of Mod, but friendship isn't
-        // inherited, so a subclass's protected setup() isn't accessible via T*.
-        static_cast<Mod*>(ptr)->setup();
+        // On a node that is set up in a live tree, the mod's setup() runs now
+        // (#949); otherwise when the node joins one, right after the node's
+        // own setup(). Either way owner_ is set and the mod is in mods_, so
+        // setup() can call getMod / addChild / etc. on its owner.
+        if (setupCalled_) {
+            if (Node* root = liveRoot()) {
+                withRootContext(*root, [&] { setupMod(*ptr); });
+            }
+        }
         return ptr;
     }
 
@@ -839,14 +850,70 @@ private:
     // Recursive update/draw (called by App via friend access)
     // -------------------------------------------------------------------------
 
-    // The node's first updateTree() / drawTree() runs setup() here, once,
-    // and then onSetupDone() (both paths share this, so they can't drift).
+    // Runs setup() once, between the framework's two setup hooks.
     void setupOnce() {
         if (setupCalled_) return;
         setupCalled_ = true;
         onSetupStart();
         setup();
         onSetupDone();
+    }
+
+    // A mod's setup(), once. Called through the base pointer: Node is a
+    // friend of Mod, but friendship isn't inherited, so a subclass's
+    // protected setup() isn't reachable through T*.
+    static void setupMod(Mod& m) {
+        if (m.setupCalled_) return;
+        m.setupCalled_ = true;
+        m.setup();
+    }
+
+    // Sets up this node, then its mods, then its children in order, each
+    // with its own subtree (pre-order: parents before children). Nodes and
+    // mods already set up are skipped, so a subtree is never set up twice.
+    void setupTree() {
+        setupOnce();
+        forEachMod([](Mod* m) { setupMod(*m); });
+        auto childrenSnapshot = children_;
+        for (auto& child : childrenSnapshot) {
+            if (child->isChildOf(this)) child->setupTree();
+        }
+    }
+
+    // The live root above this node (a window's root that has started), or
+    // null when the node is not in a live tree.
+    Node* liveRoot() {
+        Node* n = this;
+        std::shared_ptr<Node> p;
+        while ((p = n->parent_.lock())) n = p.get();
+        return (n->liveRoot_ && !n->isDead()) ? n : nullptr;
+    }
+
+    // Runs f with the root's window context current (the window whose tree
+    // it is), as the setup() entry point (#349).
+    template<typename F>
+    static void withRootContext(Node& root, F&& f) {
+        std::optional<internal::WindowContextScope> windowScope;
+        if (root.liveContext_ && root.liveContext_ != &internal::currentWindowContext()) {
+            windowScope.emplace(root.liveContext_);
+        }
+        internal::EntryStackGuard guard(internal::AppEntry::Setup);
+        f();
+    }
+
+    // A child that joins a set-up node in a live tree is set up now, with
+    // its subtree (#949).
+    void setupJoined(Node& child) {
+        if (!setupCalled_) return;   // set up later with this node
+        if (Node* root = liveRoot()) {
+            withRootContext(*root, [&] { child.setupTree(); });
+        }
+    }
+
+    // Whether this node is still a child of `parent` (a traversal snapshot
+    // may hold a child that has since been removed or moved).
+    bool isChildOf(const Node* parent) const {
+        return !isDead() && parent_.lock().get() == parent;
     }
 
     // Framework hook, not an app callback: runs once, right before the
@@ -872,9 +939,6 @@ private:
         // Remove dead children before processing
         sweepDeadChildren();
 
-        // Call setup() once on first update/draw
-        setupOnce();
-
         // Mod early update (before Node::update). forEachMod snapshots types
         // and defers self-removal, so a mod may add/remove mods safely here.
         forEachMod([](Mod* m) { m->earlyUpdate(); });
@@ -889,10 +953,11 @@ private:
         // reorder siblings (via addChild / removeChild / moveToFront / etc.),
         // and we want those edits to take effect on the *next* frame rather
         // than corrupt the in-flight iteration. The snapshot is a shallow
-        // shared_ptr copy so it's cheap and keeps the targets alive.
+        // shared_ptr copy so it's cheap and keeps the targets alive. A child
+        // removed or moved away since the copy is skipped here.
         auto childrenSnapshot = children_;
         for (auto& child : childrenSnapshot) {
-            if (!child->isDead()) child->updateTree();
+            if (child->isChildOf(this)) child->updateTree();
         }
     }
 
@@ -960,9 +1025,6 @@ private:
     // Recursively draw self and child nodes
     void drawTree() {
         if (!isActive_) return;
-
-        // Call setup() once on first update/draw
-        setupOnce();
 
         // Stamp the camera scope this node is being drawn under (pointer
         // compare first — steady state is one assignment skip per frame).
@@ -1347,7 +1409,7 @@ protected:
         // Snapshot — see updateTree() for rationale.
         auto childrenSnapshot = children_;
         for (auto& child : childrenSnapshot) {
-            if (!child->isDead()) child->drawTree();
+            if (child->isChildOf(this)) child->drawTree();
         }
     }
 
@@ -1517,6 +1579,10 @@ private:
     }
 
     bool setupCalled_ = false;    // Ensures setup() is called only once
+    // Set on a window's root by internal::setupNodeOnce(): nodes joining its
+    // tree are set up at once, with this context current.
+    bool liveRoot_ = false;
+    internal::WindowContext* liveContext_ = nullptr;
     std::atomic<bool> dead_{false};  // Marked for removal by destroy() (atomic: destroy() is thread-safe)
     std::string name_;            // Optional instance name (see getName())
     const uint64_t instanceId_;   // Per-process unique id, fixed at construction
@@ -1763,9 +1829,11 @@ protected:
 
 namespace internal {
 inline void setupNodeOnce(Node& node) {
+    node.liveRoot_ = true;
+    node.liveContext_ = &currentWindowContext();
     if (node.setupCalled_) return;
     EntryStackGuard guard(AppEntry::Setup);
-    node.setupOnce();
+    node.setupTree();
 }
 }
 

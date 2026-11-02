@@ -11,7 +11,7 @@ void tcApp::setup() {
     tcxLua::runFile(*lua, getDataPath("bindcheck.lua"));
 
     // No need to keep a window open; exit as soon as the check has run.
-    requestExitApp();
+    exitApp();
 }
 
 void tcApp::update() {}

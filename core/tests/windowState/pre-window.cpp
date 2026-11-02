@@ -119,7 +119,7 @@ struct HeadlessApp : App {
         setenv("TC_PREWINDOW_NATIVE_HEIGHT", "1551", 1);
         getters("headless setup after another native change", sapp_dpi_scale(), sapp_width(), sapp_height());
         changingGetters("headless setup live readers");
-        requestExit();
+        exitApp();
     }
 };
 }

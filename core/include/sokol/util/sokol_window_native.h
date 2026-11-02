@@ -21,6 +21,7 @@ struct _sapp_tc_native_window_t {
     bool close_recorded; // physical close observation, separate from a queued request
     uint64_t close_recorded_frame;
     bool skip_present, draw_while_hidden;
+    bool last_tick_presented; // X11: the previous tick presented (refresh estimate sampling)
     bool trust_hidden_signals;
     bool iconified, occluded;
     int fb_width, fb_height, win_width, win_height;

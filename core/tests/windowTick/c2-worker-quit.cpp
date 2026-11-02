@@ -21,7 +21,7 @@ int main() {
         while (!start.load()) {}
         workerStarted=true;
         while (!done.load()) {
-            if (posted.load() < 20000) { requestExitApp(); ++posted; }
+            if (posted.load() < 20000) { exitApp(); ++posted; }
             else std::this_thread::yield();
         }
     });

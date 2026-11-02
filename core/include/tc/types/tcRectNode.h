@@ -190,12 +190,12 @@ protected:
             Vec3 g2 = localToGlobal(Vec3(width_, height_, 0));
             float gx1 = g1.x, gy1 = g1.y, gx2 = g2.x, gy2 = g2.y;
 
-            // Calculate rectangle in screen coordinates (considering DPI scale)
-            float dpi = internal::targetPixelScale();
-            float sx = std::min(gx1, gx2) * dpi;
-            float sy = std::min(gy1, gy2) * dpi;
-            float sw = std::abs(gx2 - gx1) * dpi;
-            float sh = std::abs(gy2 - gy1) * dpi;
+            // Scissor rectangles are in the target's logical coordinates, the
+            // same units as the global positions above.
+            float sx = std::min(gx1, gx2);
+            float sy = std::min(gy1, gy2);
+            float sw = std::abs(gx2 - gx1);
+            float sh = std::abs(gy2 - gy1);
 
             pushScissor(sx, sy, sw, sh);
         }

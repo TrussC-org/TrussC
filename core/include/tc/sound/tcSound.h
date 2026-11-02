@@ -1128,10 +1128,11 @@ public:
 
     // Real-time audio listeners. audioOut fires once per audio device
     // callback AFTER all Sound voices have been mixed into the output
-    // buffer; listeners should ADD their contribution. audioIn fires
-    // when microphone input is available (only when a capture device is
-    // actually running — currently provided by tc::MicInput, but the
-    // event channel is here so both paths can use the same wiring).
+    // buffer; listeners should ADD their contribution. audioIn is
+    // declared for microphone input, but nothing fires it today (no
+    // engine-side source, and MicInput does not route into it either), so
+    // a listener on it is never called (#907). Use MicInput to read the
+    // microphone.
     //
     // Listeners run on the audio thread with NO engine lock held. Do
     // not call AudioEngine::play() / Sound::load() / etc. from inside
@@ -1264,8 +1265,8 @@ private:
     // Mark an audioOut / audioIn notify in flight for waitForAudioCallbacks()
     // (tcAudio_impl.cpp). Audio thread; a thread_local depth and one atomic
     // add each, no lock. beginCallback() returns the slot to pass to
-    // endCallback(). audioIn has no engine-side source yet: whatever fires it
-    // from the engine must enclose that notify the same way.
+    // endCallback(). audioIn is never fired today (#907): whatever starts
+    // firing it must enclose that notify the same way.
     int  beginCallback();
     void endCallback(int slot);
 

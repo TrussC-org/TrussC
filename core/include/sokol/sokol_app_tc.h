@@ -10871,8 +10871,10 @@ static void _sapp_tc_x11_serve_selection_request(XEvent* event) {
                 (const unsigned char*)&bytes, 1);
         }
     } else if (req->target == _sapp_tc.TARGETS) {
+        // ICCCM: the TARGETS list includes TARGETS itself (#1023).
+        const Atom targets[2] = { _sapp_tc.TARGETS, _sapp_tc.UTF8_STRING };
         XChangeProperty(_sapp_tc.display, req->requestor, reply.property,
-            XA_ATOM, 32, PropModeReplace, (const unsigned char*)&_sapp_tc.UTF8_STRING, 1);
+            XA_ATOM, 32, PropModeReplace, (const unsigned char*)targets, 2);
     } else {
         reply.property = None;
     }
@@ -12113,6 +12115,11 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     } guard{handle};
     _sapp_tc_x11_surface_scope restore_surface;
     const double frame_start = _sapp_tc_now();
+    // [TrussC #998] A present interval teaches the refresh estimate only when the
+    // previous tick also presented: after a skipped tick it spans the app's own
+    // frame rate (setFps below the display), not the display.
+    const bool after_present = w->last_tick_presented;
+    w->last_tick_presented = false;
     _sapp_tc_timing_update(&w->timing);
     w->frame_duration = w->timing.smooth_dt;
     const bool resized = _sapp_tc_x11_update_dimensions(w);
@@ -12154,6 +12161,7 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         presented = true;
     }
     w->skip_present = false;
+    w->last_tick_presented = presented;
     if (w->swap_interval == 0) {
         _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
         return;
@@ -12166,7 +12174,7 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         const double swap_dt = now - w->last_present;
         w->last_present = now;
         const double per_frame = swap_dt / (double)w->swap_interval;
-        if (per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0)
+        if (after_present && per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0)
             _sapp_tc.refresh_period += 0.1 * (per_frame - _sapp_tc.refresh_period);
         w->earliest_next = 0.0;
     }
@@ -12179,7 +12187,7 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         w->last_present = now;
         if (swap_dt > 0.002) {
             const double per_frame = swap_dt / (double)w->swap_interval;
-            if (per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0)
+            if (after_present && per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0)
                 _sapp_tc.refresh_period += 0.1 * (per_frame - _sapp_tc.refresh_period);
             w->earliest_next = 0.0;
         } else {

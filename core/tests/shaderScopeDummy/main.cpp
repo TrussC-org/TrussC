@@ -709,6 +709,40 @@ bool shadowReplayDrawingStateProbe() {
     return ok;
 }
 
+// #942: a retired image that a recording still references survives cleanup()'s
+// drain. It must not outlive sg_shutdown(): after a graphics restart a new image
+// can get the same id, and the next drain would destroy it.
+bool retirementRestartProbe() {
+    internal::restoreWindowContext(&(*renderFixture));
+    sg_image_desc imageDesc = {}; imageDesc.width = imageDesc.height = 2;
+    imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    imageDesc.usage.dynamic_update = true;
+    const auto image = sg_make_image(imageDesc);
+    sg_view_desc viewDesc = {}; viewDesc.texture.image = image;
+    const auto view = sg_make_view(viewDesc);
+    const auto sampler = sg_make_sampler(sg_sampler_desc{});
+    sgl_enable_texture(); sgl_texture(view, sampler); recordTriangle(); sgl_disable_texture();
+    internal::deferGpuDestroy(view); internal::deferGpuDestroy(image); internal::deferGpuDestroy(sampler);
+    internal::drainPendingGpuDestroys();
+    bool ok = sg_query_image_state(image) == SG_RESOURCESTATE_VALID; // pinned by the recording
+    cleanup();
+    internal::beginFrameworkLifetime();
+    sg_desc desc = {}; sg_setup(&desc); sgl_desc_t sd = {}; sgl_setup(&sd);
+    // Pools start over; counting a slot's generation up finds the old image's id.
+    sg_image fresh = {};
+    for (int i = 0; i < 4096 && !fresh.id; ++i) {
+        const auto candidate = sg_make_image(imageDesc);
+        if (candidate.id == image.id) fresh = candidate;
+        else if ((candidate.id & 0xffff) == (image.id & 0xffff)) sg_destroy_image(candidate);
+    }
+    ok &= fresh.id == image.id && sg_query_image_state(fresh) == SG_RESOURCESTATE_VALID;
+    internal::drainPendingGpuDestroys();
+    const bool survived = sg_query_image_state(fresh) == SG_RESOURCESTATE_VALID;
+    ok &= survived;
+    std::printf("RETIREMENT RESTART pinned_before=1 new_image_survives_drain=%d ok=%d\n", survived, ok);
+    return ok;
+}
+
 // Run after all drawing tests; deliberately start two fresh devices so native
 // IDs recycle exactly, then exercise the real cleanup and retirement collector.
 bool shadowDeviceRestartProbe() {
@@ -1201,6 +1235,80 @@ bool resizeBeforeDrawProbe(float dpi, bool pixelPerfect, float fov) {
     std::printf("RESIZE BEFORE DRAW dpi=%.0f pixelPerfect=%d fov=%.3f first_frame=%d\n", dpi, pixelPerfect, fov, ok);
     return ok;
 }
+
+// #914: setScissor/pushScissor/popScissor take the current target's logical
+// coordinates (the units of drawRect). The target stores framebuffer pixels:
+// logical * pixel scale on a window (1 in pixelPerfect mode), unchanged in an Fbo.
+struct ClipRectNode : RectNode {
+    using RectNode::beginDraw;
+    using RectNode::endDraw;
+};
+bool scissorLogicalProbe(float dpi, bool pixelPerfect) {
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 128; window.fbHeight = 96; window.dpiScale = dpi;
+    window.acquireSwapchain = dummySwapchain;
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    const bool previousPixelPerfect = internal::pixelPerfectMode();
+    internal::pixelPerfectMode() = pixelPerfect;
+    beginFrame();
+    auto& target = window.swapchainTarget;
+    const float s = pixelPerfect ? 1.0f : dpi;
+    auto is = [](const internal::ScissorRect& r, float x, float y, float w, float h) {
+        return r.active && std::abs(r.x - x) < 1e-4f && std::abs(r.y - y) < 1e-4f &&
+               std::abs(r.w - w) < 1e-4f && std::abs(r.h - h) < 1e-4f;
+    };
+    bool ok = !target.currentScissor.active;
+    // The transform matrix does not move or scale a scissor.
+    pushMatrix(); translate(50, 50); scale(3, 3);
+    setScissor(10, 20, 30, 40);
+    ok &= is(target.currentScissor, 10 * s, 20 * s, 30 * s, 40 * s);
+    setScissor(1, 2, 3, 4);                       // int overload, same units
+    ok &= is(target.currentScissor, 1 * s, 2 * s, 3 * s, 4 * s);
+    popMatrix();
+    resetScissor();
+    ok &= !target.currentScissor.active;
+    // Nested push intersects in logical space; pop restores each level.
+    pushScissor(10, 10, 40, 40);
+    ok &= is(target.currentScissor, 10 * s, 10 * s, 40 * s, 40 * s);
+    pushScissor(30, 20, 40, 10);                  // overlaps x 30..50, y 20..30
+    ok &= is(target.currentScissor, 30 * s, 20 * s, 20 * s, 10 * s) && target.scissorStack.size() == 2;
+    pushScissor(100, 100, 5, 5);                  // no overlap: empty, not negative
+    ok &= target.currentScissor.active && target.currentScissor.w == 0 && target.currentScissor.h == 0;
+    popScissor();
+    ok &= is(target.currentScissor, 30 * s, 20 * s, 20 * s, 10 * s);
+    popScissor();
+    ok &= is(target.currentScissor, 10 * s, 10 * s, 40 * s, 40 * s);
+    popScissor();
+    ok &= !target.currentScissor.active && target.scissorStack.empty();
+    // A clipping RectNode passes its global rectangle in logical units.
+    {
+        ClipRectNode node; node.setPos(5, 7); node.setSize(30, 40); node.setClipping(true);
+        node.beginDraw();
+        ok &= is(target.currentScissor, 5 * s, 7 * s, 30 * s, 40 * s);
+        node.endDraw();
+        ok &= !target.currentScissor.active && target.scissorStack.empty();
+    }
+    // An Fbo target is attachment pixels already: no scale at any host DPI.
+    internal::RenderTarget fbo;
+    fbo.isFbo = true; fbo.width = 64; fbo.height = 48;
+    window.currentTarget = &fbo;
+    pushScissor(4, 6, 20, 10);
+    ok &= is(fbo.currentScissor, 4, 6, 20, 10);
+    pushScissor(10, 8, 30, 30);
+    ok &= is(fbo.currentScissor, 10, 8, 14, 8) && fbo.scissorStack.size() == 2;
+    popScissor(); popScissor();
+    ok &= !fbo.currentScissor.active && fbo.scissorStack.empty() && !target.currentScissor.active;
+    window.currentTarget = &window.swapchainTarget;
+    present();
+    window.teardownTargets();
+    target.resources().release();
+    internal::pixelPerfectMode() = previousPixelPerfect;
+    internal::currentWindowCtx() = previous;
+    std::printf("SCISSOR LOGICAL dpi=%.1f pixelPerfect=%d ok=%d\n", dpi, pixelPerfect, ok);
+    return ok;
+}
+
 
 
 // Exercise the GPU fixture's unmatched-Fbo and review stack sequences through
@@ -1997,6 +2105,9 @@ int main(int argc, char** argv) {
         resizeBeforeDraw &= resizeAppDispatchProbe(resize, camera);
     for (bool resize : {false, true}) for (bool selected : {false, true})
         resizeBeforeDraw &= resizeOpenShaderProbe(resize, selected);
+    bool scissorLogical = true;
+    for (float dpi : {1.0f, 2.0f, 1.5f}) for (bool pixelPerfect : {false, true})
+        scissorLogical &= scissorLogicalProbe(dpi, pixelPerfect);
     const bool destruction = activeDestructionProbe();
     for (float fov : {0.0f, TAU / 6}) for (bool pending : {false, true}) for (bool resize : {false, true})
         resizeBeforeDraw &= resizeBoundTextureProbe(fov, pending, resize);
@@ -2004,8 +2115,9 @@ int main(int argc, char** argv) {
         resizeBeforeDraw &= resizeEarlyAcquireProbe(mode, resize, selection);
     // Last: it shuts the device down and re-creates it.
     const bool curveRollback = curveRollbackProbe();
+    const bool retirementRestart = retirementRestartProbe();
     const bool shadowRestart = shadowDeviceRestartProbe();
-    const int result=curveRollback && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && destruction ? 0 : 1;
+    const int result=curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
     return result;
 }
 #else

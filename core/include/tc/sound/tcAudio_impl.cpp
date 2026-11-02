@@ -2058,12 +2058,14 @@ bool AudioEngine::init(const AudioSettings& settings) {
         playingSounds_.resize(maxPolyphony_);
     }
 
-    // Re-init only: migrate active voices so they continue from the same
-    // playback position at the new engine rate. The device is currently
-    // stopped, so the audio thread can't observe partial migration state.
-    if (reinit) {
-        migrateVoicesToNewRate(oldRate, sampleRate_);
-    }
+    // Migrate active voices so they continue from the same playback position
+    // at the new engine rate. Done on every init, not only a live re-init
+    // (#441): sampleRate_ is the rate the voices were last converted to, also
+    // when the previous init failed after committing its rate, and after
+    // shutdown(). The call returns at once when the rates are equal. The
+    // device is currently stopped, so the audio thread can't observe partial
+    // migration state.
+    migrateVoicesToNewRate(oldRate, sampleRate_);
 
     // Lazily create a persistent ma_context. Sharing one context across
     // every device init/uninit cycle keeps CoreAudio's internal state

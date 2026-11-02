@@ -69,7 +69,7 @@ struct SetupQuit : App {
         });
         console::internal::isRunning().store(true);
         send("queued-before-setup-returns");
-        requestExitApp();
+        exitApp();
     }
     void update() override { ++setupUpdates; }
     void exit() override {
@@ -110,11 +110,11 @@ struct ChildQuit : App {
         treeCallback();
         addMod<ChildMod>();
         callAfter(0, [] { treeCallback(); ++childTimers; });
-        requestExitApp();
+        exitApp();
     }
     void update() override {
         treeCallback(); ++childUpdates;
-        if (childVeto && childQueries == 1) requestExitApp();
+        if (childVeto && childQueries == 1) exitApp();
     }
     void cleanup() override { ++childCleanups; treeCleaned = true; }
 };

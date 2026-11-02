@@ -16,7 +16,9 @@ class Node;
 // Mod - Attachable behavior for Node
 //
 // Lifecycle:
-//   1. addMod<T>() creates Mod and calls setup()
+//   1. addMod<T>() creates the Mod; setup() runs once the owner is set up in
+//      the App's tree (at once if it already is, else right after the
+//      owner's own setup() when it joins)
 //   2. Each frame: earlyUpdate() -> Node::update() -> update() -> draw()
 //   3. When Node is destroyed or Mod removed: onDestroy()
 //
@@ -57,7 +59,7 @@ protected:
     // Lifecycle (override in derived classes)
     // -------------------------------------------------------------------------
 
-    // Called once when Mod is attached to Node
+    // Called once, when the owner node is set up in the App's tree
     virtual void setup() {}
 
     // Called every frame BEFORE Node::update()
@@ -122,6 +124,7 @@ protected:
 
 private:
     Node* owner_ = nullptr;
+    bool setupCalled_ = false;   // set by Node: setup() runs once
 };
 
 } // namespace trussc

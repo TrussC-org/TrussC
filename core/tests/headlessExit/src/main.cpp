@@ -25,8 +25,10 @@ void check(bool ok, const char* name) {
     if (!ok) ++failures;
 }
 
+// Direct and DirectApp call the deprecated aliases App::requestExit() and
+// requestExitApp(), which now forward to exitApp() (#906).
 enum class Mode { Forced, Request, CancelOnce, SetupRequest, WorkerRequest,
-                  Direct, SignalInt, SignalTerm, SetupSignal, ListenerForced, ListenerVetoRequest, ListenerVetoCode,
+                  Direct, DirectApp, SignalInt, SignalTerm, SetupSignal, ListenerForced, ListenerVetoRequest, ListenerVetoCode,
                   ListenerSignal };
 struct Probe {
     Mode mode = Mode::Forced;
@@ -51,9 +53,31 @@ void sendSignal(int value) {
 #endif
 }
 
+// Compatibility coverage for the deprecated aliases.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+void callRequestExit(App& app) { app.requestExit(); }
+bool readIsExitRequested(const App& app) { return app.isExitRequested(); }
+void callRequestExitApp() { requestExitApp(); }
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 struct RequestWorker : Thread {
     ~RequestWorker() override { waitForThread(); }
-    void threadedFunction() override { requestExitApp(); }
+    void threadedFunction() override { exitApp(); }
 };
 
 struct ExitProbeApp : App {
@@ -106,7 +130,7 @@ struct ExitProbeApp : App {
             check(!e.cancel && e.reason.empty(), "headless later listener receives fresh false");
             e.cancel = false;
         }, 200);
-        if (probe->mode == Mode::SetupRequest) requestExitApp();
+        if (probe->mode == Mode::SetupRequest) exitApp();
         if (probe->mode == Mode::SetupSignal) sendSignal(SIGTERM);
         probe->setupReturned = true;
     }
@@ -115,7 +139,7 @@ struct ExitProbeApp : App {
         ++probe->updates;
         if (probe->updates > 200) {
             check(false, "exit completed before safety step cap");
-            requestExit();
+            exitApp();
         } else if (probe->updates == 1) {
             switch (probe->mode) {
                 case Mode::Forced: exitApp(probe->code); break;
@@ -124,14 +148,19 @@ struct ExitProbeApp : App {
                 case Mode::ListenerForced:
                 case Mode::ListenerVetoRequest:
                 case Mode::ListenerVetoCode:
-                case Mode::ListenerSignal: requestExitApp(); break;
+                case Mode::ListenerSignal: exitApp(); break;
                 case Mode::WorkerRequest: {
                     RequestWorker worker;
                     worker.startThread();
                     worker.waitForThread(false);
                     break;
                 }
-                case Mode::Direct: requestExit(); break;
+                case Mode::Direct:
+                    check(!readIsExitRequested(*this), "isExitRequested starts false");
+                    callRequestExit(*this);
+                    check(readIsExitRequested(*this), "isExitRequested follows requestExit");
+                    break;
+                case Mode::DirectApp: callRequestExitApp(); break;
                 case Mode::SignalInt: sendSignal(SIGINT); break;
                 case Mode::SignalTerm: sendSignal(SIGTERM); break;
                 case Mode::SetupRequest:
@@ -143,7 +172,7 @@ struct ExitProbeApp : App {
                   "veto clears request and reason");
             probe->reRequested = true;
             if (probe->mode == Mode::ListenerVetoCode) exitApp(probe->code);
-            else requestExitApp();
+            else exitApp();
         }
         probe->inUpdate = false;
     }
@@ -172,11 +201,13 @@ void testRunner(Mode mode, int code, const char* reason) {
     check(result.exits == 1 && result.cleanups == 1, "exit and cleanup run once");
     check(result.reason == reason, "runner records expected exit reason");
     check(!headless::isActive(), "runner leaves headless mode");
-    if (mode == Mode::Direct
-            || mode == Mode::SignalInt || mode == Mode::SignalTerm) {
+    if (mode == Mode::SignalInt || mode == Mode::SignalTerm) {
         check(result.updates == 1 && result.requests == 0,
               "uncancellable exit stops after one update without an event");
     }
+    if (mode == Mode::Direct || mode == Mode::DirectApp)
+        check(result.updates == 1 && result.requests == 1,
+              "deprecated alias is a cancellable exitApp() request");
     if (mode == Mode::Forced) check(result.requests == 1, "exitApp requests cancellable quit once");
     if (mode == Mode::SetupSignal)
         check(result.updates == 0 && result.requests == 0, "setup signal survives until loop poll");
@@ -224,10 +255,14 @@ void testCatchUp(Mode mode, int expectedSteps) {
               "cancellable request dispatches after requesting step");
         check(headless::running && !headless::quitRequested && internal::exitReason().empty(),
               "veto leaves loop running with cleared reason/flag");
+    } else if (mode == Mode::Direct) {
+        check(result.requests == 1 && result.updatesAtRequest == 1 && !headless::running
+              && internal::exitReason() == "exit-app",
+              "deprecated alias dispatches after requesting step");
     } else {
         check(result.requests == 0, "catch-up pass did not notify an installed listener");
         if (mode == Mode::Request)
-            check(!headless::running && internal::exitReason() == "request-exit-app",
+            check(!headless::running && internal::exitReason() == "exit-app",
                   "request without listener stops after requesting step");
     }
     internal::shutdownRuntime();
@@ -340,15 +375,16 @@ TC_CORE_TEST_MAIN() {
     headless::pendingSignal = SIGTERM;
     headless::deliveredSignal = SIGTERM;
     internal::setExitBlockReason("stale veto");
-    testRunner(Mode::Request, 0, "request-exit-app");
-    testRunner(Mode::CancelOnce, 0, "request-exit-app");
-    testRunner(Mode::SetupRequest, 0, "request-exit-app");
-    testRunner(Mode::WorkerRequest, 0, "request-exit-app");
-    testRunner(Mode::ListenerForced, 0, "request-exit-app");
-    testRunner(Mode::ListenerVetoRequest, 0, "request-exit-app");
+    testRunner(Mode::Request, 0, "exit-app");
+    testRunner(Mode::CancelOnce, 0, "exit-app");
+    testRunner(Mode::SetupRequest, 0, "exit-app");
+    testRunner(Mode::WorkerRequest, 0, "exit-app");
+    testRunner(Mode::ListenerForced, 0, "exit-app");
+    testRunner(Mode::ListenerVetoRequest, 0, "exit-app");
     testRunner(Mode::ListenerVetoCode, 4, "exit-app");
     testRunner(Mode::ListenerSignal, 0, "sigterm");
-    testRunner(Mode::Direct, 0, "");
+    testRunner(Mode::Direct, 0, "exit-app");
+    testRunner(Mode::DirectApp, 0, "exit-app");
     testRunner(Mode::SignalInt, 0, "sigint");
     testRunner(Mode::SignalTerm, 0, "sigterm");
     testRunner(Mode::SetupSignal, 0, "sigterm");

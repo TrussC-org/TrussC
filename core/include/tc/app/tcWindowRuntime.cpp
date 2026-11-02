@@ -9,7 +9,6 @@ Window::Window()
     : owned_(std::make_unique<OwnedState>()), ctx_(owned_->context),
       events_(owned_->events), render_(owned_->render), title_(owned_->title) {
     ctx_.hostWindow = this;
-    ctx_.pauseUpdatesWhenHidden = true;
     ctx_.drawWhileHidden = false;
     ctx_.deferredResponseTarget = &ctx_;
     clearColorSet_ = true;
@@ -517,7 +516,7 @@ CoreEvents& unavailableWindowEvents() {
         CoreEvents events;
         UnavailableEvents() {
             auto disable = [](auto&... event) { (FrameworkEventAccess::disableSubscriptions(event), ...); };
-            disable(events.setup, events.update, events.draw, events.onRender, events.afterFrame,
+            disable(events.update, events.draw, events.onRender, events.afterFrame,
                 events.exit, events.hotReloadUnload, events.exitRequested, events.deviceLost,
                 events.keyPressed, events.keyReleased, events.mousePressed, events.mouseReleased,
                 events.mouseMoved, events.mouseDragged, events.mouseScrolled, events.windowResized,

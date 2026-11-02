@@ -17,7 +17,6 @@ namespace trussc {
 class CoreEvents {
 public:
     // App lifecycle
-    Event<void> setup;            // After setup completes
     Event<void> update{EventPriority::BeforeApp};           // Before update each frame
     Event<void> draw{EventPriority::BeforeApp};             // Before draw each frame
     Event<void> onRender;          // After sokol_gl flush, render pass still active

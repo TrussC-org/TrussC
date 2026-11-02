@@ -115,7 +115,7 @@ struct VirtualProbe : App {
         void cleanup() override { ++childCleanups; }
     };
     void setup() override { addChild(std::make_shared<Child>()); }
-    void update() override { requestExit(); }
+    void update() override { exitApp(); }
     void exit() override { ++exits; check("headless ending has no Window or root", !getWindow() && !getRootNode()); }
     void cleanup() override { ++cleanups; }
 };

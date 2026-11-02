@@ -47,6 +47,6 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     if (key == 'Q' || key == KEY_ESCAPE) {
-        requestExitApp();  // Request exit - triggers exitRequested event
+        exitApp();  // Request exit - triggers exitRequested event
     }
 }

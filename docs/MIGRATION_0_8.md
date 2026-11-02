@@ -21,6 +21,34 @@ Register borrowed destruction delegates through `World::setDestructionListener()
 to preserve the internal observer. `clear()` keeps the physics world and settings
 and is immediately reusable; a second `setup()` replaces the physics world.
 
+## Node and Mod setup() runs when they join the App's tree (#949)
+
+`Node::setup()` and `Mod::setup()` now follow one rule (breaking change): they run once, when the node or mod joins the running App's tree.
+
+- `addChild()` / `insertChild()` under a parent that is already set up in the App's tree runs the child's `setup()` before it returns, with its subtree. Before, it ran just before the child's first update or draw.
+- A subtree built while detached is set up as a whole when it is attached: parents before children, in child order, each node's mods right after the node.
+- `addMod()` on a set-up node in the App's tree runs the mod's `setup()` at once, as before. On a node that is not in the tree yet, it now waits and runs right after the node's own `setup()`. Before, it always ran inside `addMod()`, even before the owner's `setup()`.
+- The App itself is still set up on its first update or draw after it becomes a window's root; children added to it earlier are set up right after it.
+- Inactive nodes (`setActive(false)`) are set up when they join, not when they first become active.
+- A traversal now skips a child that was removed or moved to another parent after its parent copied the child list.
+- `CoreEvents::setup` (`events().setup`) is removed. It was never fired; put code that should run after setup at the end of `setup()`.
+
+Configure a node before `addChild()`, or in its constructor. Values set after `addChild()` returns are not there yet when `setup()` runs:
+
+```cpp
+// Before
+auto ball = make_shared<Ball>();
+addChild(ball);
+ball->radius = 30;   // Ball::setup() ran later, on the first update
+
+// After
+auto ball = make_shared<Ball>();
+ball->radius = 30;   // configure first
+addChild(ball);      // Ball::setup() runs here
+```
+
+Pass what a mod's `setup()` needs as `addMod<T>(args...)` constructor arguments. For a `RigidBody2D` added to a detached node, the body now appears when the node joins the tree; if its `World` was destroyed by then, no body is created and a warning is logged.
+
 ## Stdin commands need `console::start()`
 
 Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. `CoreEvents::console` / `events().console` has been removed. Subscribe once to
@@ -371,7 +399,7 @@ yet; the synthetic-input design remains open.
 
 `VideoGrabber` is the second device class on the common surface described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup(...)`, `setup()`, `isConnected()`, `close()` and `onDisconnect`.
 
-- **New:** `grabber.setup()` with no arguments reopens the last camera: the current `setDeviceID()` and the size of the last `setup(width, height)` (device 0 at 640 × 480 if there was none). On failure it logs an error and returns `false`. Reconnecting is app code:
+- **New:** `grabber.setup()` with no arguments reopens the last camera: the camera with the same name as the last one that opened (looked up in a fresh `listDevices()`) and the size of the last `setup(width, height)`. Before any successful open it uses the `setDeviceID()` index (device 0 at 640 × 480 if there was none). On failure it logs an error and returns `false`. Reconnecting is app code:
 
   ```cpp
   if (!grabber.isConnected() && !grabber.isPendingPermission() && getElapsedTime() - lastTry > 2.0f) {
@@ -382,6 +410,7 @@ yet; the synthetic-input design remains open.
 
 - **New: an unplugged camera is reported (#276).** When the OS says the camera is lost, `update()` closes the grabber and fires `grabber.onDisconnect` once (`Event<DeviceDisconnectEventArgs>`, `e.reason` says why). `isConnected()` is already false when it fires. Before, an unplugged camera left `isInitialized()` true and the last frame on screen. `close()`, `setup()` on an open grabber, the destructor and a move never fire it. The OS signals used: `AVCaptureDeviceWasDisconnectedNotification` (macOS, iOS), a Media Foundation reader error or an invalidated device (Windows), `ENODEV` from V4L2 (Linux) and the end of the camera track (web). A camera that only stops sending frames is not reported. You must keep calling `update()`: it is what reports the loss.
 - **Breaking: `setup(int width = 640, int height = 480)` lost its default arguments.** `setup()` is now the reopen call above. For a grabber that has never been set up it behaves as before (device 0 at 640 × 480, or the device from `setDeviceID()`), so `grabber.setup();` keeps working. `grabber.setup(1280);` (width only) no longer compiles: write `grabber.setup(1280, 480)`.
+- **Fix: reopening the wrong camera.** The reopen used to go by index, and the order of cameras can differ for a moment when one is unplugged and replugged, so `setup()` could open the built-in camera instead of the USB one. Now every successful `setup(...)` remembers the camera's name, and `setup()` opens the camera with that name; if none is present it fails with an error (it never falls back to another camera). `setDeviceID()` forgets the name, so the next `setup()` uses that index. Two cameras with the same name can't be told apart: the first one opens.
 - **Behavior change:** after an unplug the grabber closes itself, so `isConnected()` / `isInitialized()` turn false on their own and the texture and pixels are released. Code that assumed they stay true until `close()` should check `isConnected()`.
 - `isInitialized()` stays as an alias of `isConnected()`. `isConnected()` is also false while a macOS / iOS permission request is pending (as `isInitialized()` was).
 - Not part of this change: the Windows `uniqueId` (still the enumeration index), `setDeviceUniqueID()` and the Windows native-mode selection from #276 were dropped from the plan in the #415 simplification.
@@ -423,3 +452,36 @@ These limits are gone; if your app needs a cap, set it yourself.
 - **Image:** the 64 MiB limit on encoded image input from memory (`Pixels::loadFromMemory`, `Image::loadFromMemory`, URL and network-buffer loads) is removed, as it never applied to local files. `LoadError::TooLarge` stays for its other reasons (GPU texture size, URL/network admission, platform size). Nothing to change.
 - **Sound:** `AudioSettings::maxPolyphony` now defaults to `0`, which means no cap (it was `32`), and `AudioEngine::DEFAULT_MAX_PLAYING_SOUNDS` is `0`. The 33rd simultaneous `Sound::play()` used to return `false` and was counted in `droppedPolyphonyLimit`; it now plays. `AudioEngine::getMaxPolyphony()`, `AudioDeviceChangedArgs::maxPolyphony` and the `tc_get_audio_state` field report the cap, so they read `0` when none is set, not the number of slots. A positive value still works as a cap; negative values mean no cap, as `0` does. `PlayingSoundInfo::slot` is no longer bounded by a fixed range. A `SoundStream`'s own `loadStream(path, maxPolyphony)` default of `1` is unchanged.
 - **OSC:** `OscBundle::MAX_NESTING_DEPTH` is removed, and bundles nest as deep as the 65,536-byte packet allows (the datagram bound stays). If you used the constant, delete the check or replace it with a limit of your own in an `onBundleReceived` handler. `OscBundle` copies are now shallow: nested bundles are shared between a bundle and its copies (they are never modified once added), so a copy costs one level, and the destructor walks the nesting without recursion. `OscBundle::Element` is now `std::variant<OscMessage, std::shared_ptr<OscBundle>>`.
+
+## `exitApp()` is the one way to quit (#906)
+
+`exitApp(int code = 0)` is now the single way to quit, in windowed and headless apps alike. `App::requestExit()` and `requestExitApp()` are deprecated aliases that call `exitApp()`, so old code still compiles (with a deprecation warning) and now also works in a windowed app. Before, `App::requestExit()` only set a flag that `runHeadlessApp()` read, so it did nothing in a windowed app.
+
+```cpp
+exitApp();      // was requestExit() or requestExitApp()
+exitApp(3);     // with an exit code
+```
+
+- Both aliases now go through `exitRequested`, so a listener can veto them. In a headless app, `requestExit()` used to stop the loop without sending `exitRequested`.
+- `requestExitApp()` used to keep the current exit code; as an alias of `exitApp()` it sets the code to `0`.
+- `App::isExitRequested()` is deprecated. It still returns `true` after `requestExit()` was called on that App, but the framework no longer reads it. Use `exit()` or `events().exitRequested` to react to a quit.
+- The exit reason `request-exit-app` no longer exists; `exitApp()` reports `exit-app`.
+
+## Scissor rectangles match `drawRect()` (fix, #914)
+
+`setScissor()`, `pushScissor()` and `popScissor()` took framebuffer pixels while every other drawing function takes logical coordinates, so a scissor was misplaced or mis-sized wherever logical pixels are scaled (Retina and other HiDPI displays). They now take the logical coordinates of the current render target, the same units as `drawRect()`.
+
+If you compensated by multiplying by the pixel scale, remove that:
+
+```cpp
+// before
+float s = getDpiScale();
+pushScissor(10 * s, 10 * s, 200 * s, 100 * s);
+
+// now: the rectangle that drawRect(10, 10, 200, 100) draws
+pushScissor(10, 10, 200, 100);
+```
+
+- Inside an `Fbo` and in pixelPerfect mode, logical coordinates are pixels already, so code there does not change.
+- The transform matrix and camera are still not applied: a scissor is an axis-aligned rectangle of the target, measured from its top-left corner.
+- `RectNode::setClipping(true)` needs no change. Nested `pushScissor()` calls still intersect, and `popScissor()` restores the previous rectangle.

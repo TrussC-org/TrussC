@@ -35,10 +35,43 @@ inline libremidi::API platformMidiApi() {
 }
 
 namespace internal {
-inline libremidi::observer_configuration midiObserverConfiguration() {
+inline libremidi::observer_configuration baseObserverConfiguration() {
     libremidi::observer_configuration config;
     config.track_virtual = true;
     return config;
+}
+
+// macOS / iOS: keeps one CoreMIDI client alive for the whole process (#415).
+// MidiIn / MidiOut / PortWatch each create a CoreMIDI client only while they
+// are open. Once the last one is closed (for example after an unplug) the
+// process has no client, and CoreMIDI then stops refreshing this process's
+// endpoint list: a replugged port is never listed again. One observer with
+// no-op callbacks (the CoreMIDI observer creates its client in finish_init(),
+// see LIBREMIDI_TRUSSC_MODIFICATIONS.md) keeps a client, so the list stays
+// live. It is created on first use, on the calling thread (MidiIn / MidiOut
+// are used on the main thread, whose run loop then gets the notifications),
+// and is deliberately never destroyed: destroying it at exit would race the
+// CoreMIDI notification thread. No other platform needs this.
+inline void keepMidiClientAlive() {
+#if defined(__APPLE__)
+    static const libremidi::observer* keeper = [] {
+        // One callback is enough for libremidi to create the client; CoreMIDI's
+        // notify checks each callback, so the others stay empty (and the
+        // keeper is never mistaken for a PortWatch).
+        auto config = baseObserverConfiguration();
+        config.input_added = [](const libremidi::input_port&) {};
+        return new libremidi::observer(
+            std::move(config), libremidi::observer_configuration_for(platformMidiApi()));
+    }();
+    (void)keeper;
+#endif
+}
+
+// Every enumeration builds its observer from this, so every listing,
+// MidiIn / MidiOut open-by-index/name and PortWatch keeps the client alive.
+inline libremidi::observer_configuration midiObserverConfiguration() {
+    keepMidiClientAlive();
+    return baseObserverConfiguration();
 }
 
 // Tells MidiIn / MidiOut that some port of one direction was removed. It does

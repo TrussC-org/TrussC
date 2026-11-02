@@ -72,7 +72,7 @@ cursor setters do nothing outside the running native app.
 `RuntimeSettings` holds process-wide startup options, passed to
 `runApp<T>(windowSettings, runtimeSettings)`. In v0.8.0, the launch Window's
 `pixelPerfect` setting applies to every Window. `Window::context()` and tree
-driving methods are internal. Both `exitApp(code)` and `requestExitApp()` ask
+driving methods are internal. `exitApp(code)` asks
 `exitRequested`, allowing listeners to veto process quit.
 
 ### **D. Time and Async: Safe Timers**

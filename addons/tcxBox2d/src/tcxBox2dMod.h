@@ -10,6 +10,8 @@
 //   n->addMod<box2d::ColliderRenderer2D>()->setColor(Color(1, 0.4f, 0.1f));
 //   // → the node now falls under 2D physics AND draws its shape; no custom Node.
 //   // The world auto-steps each frame (box2d::defaultWorld() / setup()).
+//   // The body is created in RigidBody2D::setup(), which runs once the node
+//   // is set up in the App's tree (here inside addMod, as n was added first).
 //
 // This mirrors the tcxPhysics (3D / Jolt) Mod design, in 2D:
 //   - RigidBody2D borrows ONE b2Body (shape + type + material) from World.
@@ -175,11 +177,11 @@ class RigidBody2D : public tc::Mod, public detail::BodyOwner {
 public:
     RigidBody2D(World& world, const Shape2D& shape,
                 BodyType type = BodyType::Dynamic, float density = 1.0f)
-        : world_(&world), shape_(shape), type_(type), density_(density) {}
+        : world_(&world), worldLife_(world.aliveToken()), shape_(shape), type_(type), density_(density) {}
 
     RigidBody2D(const Shape2D& shape,
                 BodyType type = BodyType::Dynamic, float density = 1.0f)
-        : world_(&defaultWorld()), shape_(shape), type_(type), density_(density) {}
+        : RigidBody2D(defaultWorld(), shape, type, density) {}
 
     // Replacing an exclusive Mod destroys it without calling onDestroy().
     // Both paths release the owner back-link without running user listeners
@@ -279,6 +281,12 @@ public:
 protected:
     void setup() override {
         tc::Node* n = getOwner();
+        // setup() runs when the owner joins the App's tree, which may be
+        // after the World this mod was added with is gone (#949).
+        if (worldLife_.expired()) {
+            tc::logWarning() << "tcxBox2d: RigidBody2D's World was destroyed before its node joined the tree — body not created.";
+            return;
+        }
         b2World* w = world_->getWorld();
         if (!w) {
             tc::logWarning() << "tcxBox2d: RigidBody2D attached before world.setup() — body not created.";
@@ -509,6 +517,7 @@ private:
     static float globalRotZ(tc::Node* n) { return n->getRot() + parentGlobalRotZ(n); }
 
     World* world_ = nullptr;
+    std::weak_ptr<int> worldLife_;   // World::aliveToken(), taken at addMod
     bool syncing_ = false;
     Shape2D shape_;
     BodyType type_ = BodyType::Dynamic;

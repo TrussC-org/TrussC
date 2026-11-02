@@ -13,5 +13,5 @@ APP="$HERE/bin/bindcheck.app/Contents/MacOS/bindcheck"
 [[ -x "$APP" ]] || APP="$HERE/bin/bindcheck"
 [[ -x "$APP" ]] || { echo "bindcheck binary not found under $HERE/bin" >&2; exit 1; }
 cd "$HERE/bin"
-# The app runs the check in setup() then calls requestExitApp(), so it self-exits.
+# The app runs the check in setup() then calls exitApp(), so it self-exits.
 "$APP" 2>/dev/null | sed -n '/##BINDCHECK_BEGIN##/,/##BINDCHECK_END##/p'

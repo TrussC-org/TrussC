@@ -62,5 +62,10 @@ void deferGpuDestroy(sg_shader shd) noexcept;
 // sg_shutdown itself).
 void drainPendingGpuDestroys();
 
+// What the static cleanup object runs at process exit (#999). With sokol_gfx
+// still valid it does nothing: retired nodes are left to the driver/OS, and a
+// static destructor never issues GPU calls. Public only so a test can run it.
+void discardRetiredAtExit() noexcept;
+
 } // namespace internal
 } // namespace trussc
