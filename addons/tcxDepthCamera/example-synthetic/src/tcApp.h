@@ -23,5 +23,6 @@ private:
     Mesh cloud;
     bool colored = false;   // uniform color by default (clearer shape); C toggles depth-keyed
     int step = 1;
+    float lastTry = 0.0f;   // last reconnect attempt (seconds)
     bool repeatDepth = false;   // R toggles the depth preview's repeating band
 };

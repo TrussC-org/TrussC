@@ -30,6 +30,15 @@
 // pointer swaps, never during device I/O or per-pixel reads. setThreaded(false)
 // captures inline.
 //
+// Device lifecycle (docs/DEVICE_LIFECYCLE.md, #415): setup() (no arguments,
+// reopens through openDevice() with the settings the backend remembers),
+// isConnected(), close() and onDisconnect. onDisconnect fires only when a
+// backend calls the protected reportLost(); a backend that never does simply
+// never fires it. A backend that already detects a loss (an SDK callback, a
+// capture that reports "device removed") adds one line there:
+//
+//   reportLost("Orbbec: device removed");   // any thread
+//
 // Units: getDistanceAt() / getWorldCoordinateAt() return meters. Internally
 // depth is uint16 * depthScale (see DepthFrame).
 //
@@ -41,6 +50,7 @@
 #include <memory>
 #include <atomic>
 #include "tc/utils/tcKeptThreads.h"
+#include <string>
 #include <utility>
 
 namespace tcx::depthcamera {
@@ -67,13 +77,20 @@ public:
     // -------------------------------------------------------------------------
 
     // Open the device and (if threaded) start the grabber. Returns false on
-    // failure. Call setThreaded() beforehand to choose the mode.
+    // failure and logs an error. Call setThreaded() beforehand to choose the
+    // mode. With no arguments this is also the reconnect call: it closes any
+    // open session, then opens the device again through openDevice(), with the
+    // settings the backend remembers. It never fires onDisconnect.
     bool setup() {
         close();
         auto run = std::make_shared<State>();
         state_ = run;
         run->device = openDevice();
-        if (!run->device) return false;
+        if (!run->device) {
+            logError("tcxDepthCamera") << "setup failed: the device could not be opened";
+            return false;
+        }
+        connected_ = true;
         if (threaded_) {
             run->running = true;
             run->threads.start(run->thread, [run] { captureLoop(run); });
@@ -81,8 +98,14 @@ public:
         return true;
     }
 
-    // Stop the grabber and release the device.
+    // True only while the device is open: from a successful setup() until
+    // close() or a loss the backend reported with reportLost(). After a loss
+    // the session still holds its resources until close() or the next setup().
+    bool isConnected() const { return connected_; }
+
+    // Stop the grabber and release the device. Never fires onDisconnect.
     void close() {
+        connected_ = false;
         auto run = state_;
         run->running = false;
         const bool fromCapture = run->thread.joinable() &&
@@ -97,6 +120,19 @@ public:
         }
     }
 
+    // Fires once per open session, only when the backend reported the device
+    // lost (see reportLost()). e.reason is the text it gave, and
+    // isConnected() is already false. close(), setup() and the destructor
+    // never fire it. It fires on the thread that called reportLost(); a
+    // listener that must run on the main thread registers with Deliver::Main
+    // (delivered like network events, in the owning App's context):
+    //
+    //   listener = cam->onDisconnect.listen(fn, Deliver::Main);
+    //
+    // Reconnecting is app code, e.g. in update():
+    //   if (!cam->isConnected() && retryTimer) cam->setup();
+    Event<DeviceDisconnectEventArgs> onDisconnect;
+
     // Publish the latest frame. Call once per app frame.
     void update() {
         if (state_->running) {
@@ -110,7 +146,7 @@ public:
                 state_->freshness.clear();  // nothing new this tick
             }
         } else {
-            StreamFreshness f = state_->device ? state_->device->captureInto(*state_->back) : StreamFreshness{};
+            StreamFreshness f = (state_->device && connected_) ? state_->device->captureInto(*state_->back) : StreamFreshness{};
             if (f.any()) std::swap(state_->back, state_->front);
             state_->freshness = f;
         }
@@ -358,6 +394,21 @@ protected:
     // failure. The worker holds only this Device and its run, never the backend.
     virtual std::shared_ptr<Device> openDevice() = 0;
 
+    // Report that the SDK / OS lost the device. Call it from any thread, where
+    // the backend already detects the loss (an SDK callback, a capture that
+    // says "device removed"). It marks the camera disconnected and fires
+    // onDisconnect once for the open session; calling it again, or when the
+    // camera is not open, does nothing. It does not release the session: the
+    // app calls close() or setup() (which reopens). A backend that never calls
+    // it never fires onDisconnect.
+    void reportLost(std::string reason) {
+        if (!connected_.exchange(false)) return;
+        logWarning("tcxDepthCamera") << "device lost: " << reason;
+        DeviceDisconnectEventArgs lost;
+        lost.reason = std::move(reason);
+        tc::internal::ExternalEventDelivery<DeviceDisconnectEventArgs>::notify(onDisconnect, lost);
+    }
+
 private:
     struct State {
         DepthFrame buffers[3];
@@ -396,6 +447,7 @@ private:
 
     std::shared_ptr<State> state_ = std::make_shared<State>();
     bool threaded_ = false;
+    std::atomic<bool> connected_{false};
 
     // Stream enables (all off by default; enable what you use before setup()).
     bool depthEnabled_ = false;

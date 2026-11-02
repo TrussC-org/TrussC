@@ -356,3 +356,13 @@ yet; the synthetic-input design remains open.
 - **The event type changed.** `Event<SerialDisconnectEventArgs>` is now `Event<DeviceDisconnectEventArgs>`, which has one field, `reason`. `SerialDisconnectEventArgs`, `portName`, `baudRate` and `wasClean` are removed. Change `[](SerialDisconnectEventArgs& e)` to `[](DeviceDisconnectEventArgs& e)`. To reconnect from a listener, replace `serial.setup(e.portName, e.baudRate)` with `serial.setup()`. Keep your own copy of the port name or baud rate if the listener needs to show them; `getDevicePath()` still returns the path.
 - A device that went away before an I/O call noticed is now closed silently by `close()` or `setup()` (before it fired `"closed by close()"`).
 - `isConnected()` and `close()` are unchanged. `isInitialized()` stays as an alias of `isConnected()`. `DeviceLostEventArgs` (the graphics device's `deviceLost` event) is not related and is unchanged.
+
+## DepthCamera follows the device lifecycle (#415)
+
+`tcx::depthcamera::DepthCamera` (addon `tcxDepthCamera`) gets the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md) in its base class. Nothing is removed or renamed, and a backend that already uses the v0.8 `std::shared_ptr<Device> openDevice()` hook compiles unchanged.
+
+- **New:** `camera.isConnected()` is true only while the device is open (from a successful `setup()` until `close()` or a reported loss).
+- **New:** `camera.onDisconnect` (`Event<DeviceDisconnectEventArgs>`, field `reason`) fires once per session, only when a backend reports the device lost, with `isConnected()` already false. `close()`, `setup()` and the destructor never fire it. Register with `Deliver::Main` to run on the main thread whichever thread the backend reports from.
+- **New, for backend authors:** the protected `reportLost(std::string reason)`. Call it from any thread where the backend already detects a loss. A backend that never calls it never fires `onDisconnect` (as before: it had none). Adding the one line is optional and goes in each backend repository (`tcxOrbbec`, `tcxAzureKinect`, `tcxRealSense`, ...), only where the SDK reports the loss.
+- **Changed:** `setup()` (it already took no arguments and reopened through `openDevice()`) now logs an error when `openDevice()` returns no device, on top of whatever the backend logged. After a reported loss, an inline (non-threaded) `update()` no longer calls `captureInto()` on the lost device.
+- Reconnecting is app code: `if (!camera->isConnected() && elapsed > 2.0f) camera->setup();`, as in `addons/tcxDepthCamera/example-synthetic`.

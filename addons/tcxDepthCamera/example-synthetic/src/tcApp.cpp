@@ -14,6 +14,13 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
+    // Reconnecting is app code. A real backend (tcxOrbbec, ...) turns
+    // isConnected() false and fires camera->onDisconnect when the SDK reports
+    // the device lost; the synthetic camera never does, so this stays idle.
+    if (!camera->isConnected() && getElapsedTime() - lastTry > 2.0f) {
+        lastTry = getElapsedTime();
+        camera->setup();   // same device, same streams as before
+    }
     camera->update();
     if (camera->isFrameNew()) rebuild();
 }
@@ -69,6 +76,7 @@ void tcApp::draw() {
     string hud = "SyntheticDepthCamera (no hardware)\n";
     hud += to_string(cloud.getNumVertices()) + " points";
     hud += colored ? "  [colored]" : "  [plain]";
+    if (!camera->isConnected()) hud += "  [disconnected, retrying]";
     hud += "\nC: toggle color    R: depth repeat    1-4: decimation    drag: orbit";
     drawBitmapString(hud, 20, 20);
 }
