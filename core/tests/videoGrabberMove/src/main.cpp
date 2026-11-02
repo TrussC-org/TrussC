@@ -3,6 +3,7 @@
 #include <mutex>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
+#include "../../common/tcVideoGrabberTestAccess.h"
 
 #include <cstdio>
 #include <future>
@@ -11,24 +12,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-// Keep the accessor in the test; VideoGrabber exposes no new public methods.
-namespace trussc::internal {
-struct VideoGrabberTestAccess {
-    static GrabberSharedState* sharedState(const VideoGrabber& grabber) {
-        return grabber.state_.get();
-    }
-    static std::shared_ptr<GrabberSharedState> captureState(VideoGrabber& grabber) {
-        return grabber.state_;
-    }
-    static void prepare(VideoGrabber& grabber) {
-        grabber.initialized_ = true;
-        grabber.state_->width = 1;
-        grabber.state_->height = 1;
-        grabber.state_->pixels = std::make_unique<unsigned char[]>(4);
-    }
-};
-} // namespace trussc::internal
 
 namespace {
 using namespace tc;

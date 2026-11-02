@@ -686,6 +686,18 @@ Fitting requests run every check strictly, without SKIPs.
   `internal::publishWindowMetadata()`; the native flags (macOS
   occlusionState, Win32 `WM_SIZE` / `DXGI_STATUS_OCCLUDED`, X11 `WM_STATE` /
   `VisibilityNotify`) are checked by hand.
+- `videoGrabberDisconnect/` — `VideoGrabber` follows the device lifecycle
+  (#415, #276), headless and without a camera: the test plays the backend
+  through `VideoGrabberTestAccess::reportLost()` (the call a capture thread or
+  an OS notification makes). `isConnected()` turns false as soon as the loss is
+  recorded; `update()` reports it once, on the main thread, with the grabber
+  already closed (a `Deliver::Main` listener too, for a loss recorded on
+  another thread) and a listener may call `setup()`; `close()`, `setup()` on
+  an open grabber, the destructor and a move never fire `onDisconnect`; a loss
+  reported for a run that was already closed is ignored. `setup()` with no
+  arguments tries the same device again at the last size (device 99, which no
+  platform has, plays the missing camera). The physical unplug of each
+  backend stays on the device checklist.
 - `serialHangup/` — a lost serial device is reported (#260): when the device
   behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
   `writeBytes()` each notice it on their own, close the port, log one warning,

@@ -26,6 +26,7 @@
 #include <mutex>
 #include <thread>
 
+#include <cstdio>
 #include <cstring>
 
 #pragma comment(lib, "mf.lib")
@@ -112,6 +113,19 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
         // Stays accurate even when the app's main loop stalls.
         uint64_t arrivalUs = (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
+
+        // The OS says the camera is gone (unplugged): report it and stop.
+        // MF_SOURCE_READERF_ERROR means no further call on the reader is
+        // valid. Any other failure is not a loss: sleep and read again.
+        if (hr == MF_E_VIDEO_RECORDING_DEVICE_INVALIDATED || (flags & MF_SOURCE_READERF_ERROR)) {
+            if (sample) sample->Release();
+            char text[64];
+            std::snprintf(text, sizeof(text), "ReadSample: %s (hr=0x%08lX)",
+                          (flags & MF_SOURCE_READERF_ERROR) ? "source reader error" : "device invalidated",
+                          static_cast<unsigned long>(hr));
+            state->reportLost(text);
+            break;
+        }
 
         if (FAILED(hr) || !sample) {
             if (flags & MF_SOURCE_READERF_STREAMTICK) {
