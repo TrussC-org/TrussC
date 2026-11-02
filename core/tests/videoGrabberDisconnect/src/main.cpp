@@ -45,12 +45,13 @@ struct Recorder {
 };
 
 int errorLogs = 0;
+std::string lastError;  // text of the latest error log
 } // namespace
 
 TC_CORE_TEST_MAIN() {
     getMainThreadId();
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
-        if (e.level == LogLevel::Error) ++errorLogs;
+        if (e.level == LogLevel::Error) { ++errorLogs; lastError = e.message; }
     });
 
     // --- Rule 1: isConnected() is true only while the device is open -------
@@ -256,6 +257,74 @@ TC_CORE_TEST_MAIN() {
 
         VideoGrabber moved(std::move(g));
         check("2. a move carries the last size", Access::lastWidth(moved) == 320 && Access::lastHeight(moved) == 240);
+    }
+
+    // --- Rule 2b: setup() reopens the camera by name, not by index (#415) --
+    {
+        using Pick = internal::GrabberDevicePick;
+        auto cam = [](int id, const char* name) { VideoDeviceInfo d; d.deviceId = id; d.deviceName = name; return d; };
+        const std::vector<VideoDeviceInfo> before = {cam(0, "FaceTime HD"), cam(1, "C525")};
+        // The C525 was replugged: for a moment the order is the other way round
+        const std::vector<VideoDeviceInfo> shifted = {cam(0, "C525"), cam(1, "FaceTime HD")};
+
+        // Before any open: the setDeviceID() index; the pick reports that entry's name
+        Pick p = internal::pickGrabberDevice(before, "", 1);
+        check("2b. no remembered name: the index is used and its name is recorded",
+              p.ok && p.index == 1 && p.name == "C525");
+        p = internal::pickGrabberDevice(before, "", 0);
+        check("2b. ... device 0 is the default", p.ok && p.index == 0 && p.name == "FaceTime HD");
+        p = internal::pickGrabberDevice(before, "", 99);
+        check("2b. ... an index the list lacks is passed on as it is (the backend decides), no name",
+              p.ok && p.index == 99 && p.name.empty());
+
+        // The remembered name follows the camera when the order changes
+        p = internal::pickGrabberDevice(shifted, "C525", 1);
+        check("2b. the order changed between open and reopen: the camera with the name opens",
+              p.ok && p.index == 0 && p.name == "C525");
+        p = internal::pickGrabberDevice(before, "C525", 0);
+        check("2b. ... the index is ignored once a name is remembered", p.ok && p.index == 1);
+
+        // The named camera is gone: fail, never another camera
+        p = internal::pickGrabberDevice({cam(0, "FaceTime HD")}, "C525", 0);
+        check("2b. the named camera is absent: no pick, even though index 0 exists", !p.ok);
+        p = internal::pickGrabberDevice({}, "C525", 0);
+        check("2b. ... and with an empty list", !p.ok);
+
+        // Two cameras with one name: the first match opens
+        p = internal::pickGrabberDevice({cam(0, "USB Cam"), cam(1, "USB Cam")}, "USB Cam", 1);
+        check("2b. two cameras with the same name: the first match opens", p.ok && p.index == 0);
+
+        // The whole setup() flow, without a camera: the name wins over the index and
+        // a missing name fails with an error instead of opening any other camera
+        VideoGrabber g;
+        check("2b. a new grabber remembers no name", Access::reopenName(g).empty());
+        Access::setReopenName(g, "No Such Camera 7f3a");
+        g.setDeviceID(0);
+        check("2b. setDeviceID() forgets the remembered name", Access::reopenName(g).empty());
+        Access::setReopenName(g, "No Such Camera 7f3a");
+        const int errsBefore = errorLogs;
+        bool ok = g.setup();
+        check("2b. setup() with an absent name returns false and opens nothing", !ok && !g.isConnected());
+#if defined(__linux__) || defined(_WIN32)
+        check("2b. ... and logs that error: no camera has the name (not an index failure)",
+              errorLogs > errsBefore && lastError.find("No camera named") != std::string::npos);
+#else
+        (void)errsBefore;  // macOS: the check waits for the camera permission first
+#endif
+        check("2b. ... the name stays remembered for the next try",
+              Access::reopenName(g) == "No Such Camera 7f3a");
+        ok = g.setup(320, 240);
+        check("2b. setup(w, h) takes the same path (no fallback to the index)",
+              !ok && !g.isConnected() && g.getDeviceID() == 0);
+        g.close();  // also cancels a pending permission request (macOS)
+        g.setDeviceID(99);
+        ok = g.setup();
+        check("2b. setDeviceID() then setup() uses the new index again", !ok && g.getDeviceID() == 99);
+        check("2b. ... and a failed open records no name", Access::reopenName(g).empty());
+        VideoGrabber moved(std::move(g));
+        Access::setReopenName(moved, "C525");
+        VideoGrabber moved2(std::move(moved));
+        check("2b. a move carries the remembered name", Access::reopenName(moved2) == "C525");
     }
 #endif
 

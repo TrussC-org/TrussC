@@ -34,6 +34,8 @@ struct VideoGrabberTestAccess {
     static void reportLost(VideoGrabber& grabber, const std::string& reason) {
         grabber.state_->reportLost(reason);
     }
+    static const std::string& reopenName(const VideoGrabber& grabber) { return grabber.reopenName_; }
+    static void setReopenName(VideoGrabber& grabber, const std::string& name) { grabber.reopenName_ = name; }
     static int lastWidth(const VideoGrabber& grabber) { return grabber.lastWidth_; }
     static int lastHeight(const VideoGrabber& grabber) { return grabber.lastHeight_; }
 };
