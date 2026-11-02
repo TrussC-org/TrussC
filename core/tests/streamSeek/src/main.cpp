@@ -69,6 +69,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "tc/sound/tcAudioDeviceInternal.h"
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcStreamSeekDiagnostics.h"
 
@@ -1097,6 +1098,48 @@ TC_CORE_TEST_MAIN() {
         const PlayedFrom pf = playedFrom(r, 1.5f, t0);
         check("re-init: getPosition() follows from the target", pf.ok(1.5f), pf.detail());
         r.stop();
+    }
+
+    // --- a failed re-init, then a successful init at a third rate (#441) --------------
+    {
+        // The failed init commits its rate and migrates the voices before the
+        // device fails to open. The next init must migrate them again from
+        // that rate, or the voice is left converted to the rate that failed.
+        Sound r;
+        check("failed re-init: a stream plays", (bool)r.loadStream(dcWav) && r.play());
+        waitFor([&] { return r.getPosition() > 0.25f; }, 2000);
+        r.pause();
+        const float before = r.getPosition();
+        // The decoder outputs frames at the engine rate, so frames / rate is
+        // the duration; it must stay the same across the rates below.
+        const auto framesBefore = internal::streamSeekStateForTests(r).totalFrames;
+        AudioSettings failing = settings;
+        failing.sampleRate = 44100;
+        internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::OpenFails);
+        check("failed re-init: the device does not open", !engine.init(failing));
+        internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::None);
+        AudioSettings third = settings;
+        third.sampleRate = 32000;
+        check("failed re-init: init at a third rate succeeds", engine.init(third));
+        const float after = r.getPosition();
+        const auto framesAfter = internal::streamSeekStateForTests(r).totalFrames;
+        check("failed re-init: the decoder outputs at the third rate",
+              framesBefore > 0 && approx((float)framesAfter / 32000.0f, (float)framesBefore / 96000.0f, 0.01f),
+              to_string(framesBefore) + " frames at 96 kHz -> " + to_string(framesAfter) + " frames at 32 kHz");
+        check("failed re-init: getPosition() carries over", before > 0.2f && approx(after, before, 0.001f),
+              to_string(before) + " -> " + to_string(after));
+        r.resume();
+        const auto t0 = chrono::steady_clock::now();
+        r.setPosition(1.5f);
+        check("failed re-init: setPosition() lands at the target (level 0.5)", waitLevel(0.5f),
+              to_string(g_level.load()));
+        const PlayedFrom pf = playedFrom(r, 1.5f, t0);
+        check("failed re-init: getPosition() follows from the target", pf.ok(1.5f), pf.detail());
+        r.stop();
+        // Back to the rate the next block expects.
+        AudioSettings back = settings;
+        back.sampleRate = 96000;
+        check("failed re-init: the engine returns to 96 kHz", engine.init(back));
     }
 
     // --- re-init with an MP3 voice: the migrated decoder gets a seek table ----------------
