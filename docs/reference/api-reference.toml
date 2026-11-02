@@ -191,7 +191,7 @@ details.en = '''
 - `App` is a `RectNode` and the root of the scene graph, so you can call `addChild()` on it directly. Its size uses logical points, or framebuffer pixels with global `pixelPerfect` enabled, for every Window.
 - Keep the constructor to plain member setup, and do tree building, `setSize()` and file loading in `setup()`. In the constructor no `shared_ptr` owns the App yet, so `addChild()` asserts, `setSize()` does not resize the window, and `getRootNode()` is not this App. The same rule for nodes is described in `Node::setup`.
 - Startup order: the App is created after graphics are ready, `windowResized(w, h)` is then called once, and `setup()` runs once on the first update or draw. Therefore `getWidth()`/`getHeight()` already return the window size inside `setup()`.
-- If `setup()` asks to quit (`exitApp()` or `requestExitApp()`) and the quit is accepted, a window's App or a headless App ends right after `setup()` returns: the ending runs before audio, the console and `update()` start. `exitRequested` can still cancel the quit, and then the App runs normally. For an App added as a child node, the quit waits until the current pass over the node tree has finished, and the next turn of the main loop handles it.
+- If `setup()` asks to quit with `exitApp()` and the quit is accepted, a window's App or a headless App ends right after `setup()` returns: the ending runs before audio, the console and `update()` start. `exitRequested` can still cancel the quit, and then the App runs normally. For an App added as a child node, the quit waits until the current pass over the node tree has finished, and the next turn of the main loop handles it.
 - Each frame calls `update()` and then `draw()`. `events().update`/`events().draw` listeners registered without a priority run before the App; those registered with `EventPriority::AfterApp` run after the App and its child nodes. `update()` also updates child nodes, mods and timers.
 - When a frame is skipped (for example while idle in EVENT_DRIVEN mode), neither update nor draw runs.
 - `audioOut()`/`audioIn()` run on the audio thread (see `App::audioOut`). Every other callback runs on the main thread.
@@ -205,7 +205,7 @@ details.ja = '''
 - `App` は `RectNode` であり、シーングラフのルートです。そのため `addChild()` をそのまま使えます。サイズは主副窓とも論理ポイントを使い、グローバルな `pixelPerfect` が有効ならフレームバッファのピクセルを使います。
 - コンストラクタではメンバーの初期化だけを行い、ツリーの組み立て、`setSize()`、ファイルの読み込みは `setup()` に書いてください。コンストラクタの時点ではまだ `shared_ptr` が App を保持していないため、`addChild()` は assert になり、`setSize()` はウィンドウをリサイズせず、`getRootNode()` もこの App になりません。ノード側の同じルールは `Node::setup` で説明しています。
 - 起動の順番は次のとおりです。グラフィックスの準備ができてから App が作られ、続いて `windowResized(w, h)` が 1 回呼ばれ、最初の update または draw のときに `setup()` が 1 回呼ばれます。そのため、`setup()` の中ではすでに `getWidth()`/`getHeight()` がウィンドウサイズを返します。
-- `setup()` の中で終了を求め（`exitApp()` や `requestExitApp()`）、それが受け入れられた場合、ウィンドウの App やヘッドレス App は `setup()` から戻った直後に終わります。終了処理は、オーディオ、コンソール、`update()` が始まる前に行われます。`exitRequested` で終了を取り消すこともでき、その場合 App は通常どおり動きます。子ノードとして追加した App の場合は、いま進んでいるノードツリーの処理が終わるまで待ち、メインループの次の周回で終了が処理されます。
+- `setup()` の中で終了を求め（`exitApp()`）、それが受け入れられた場合、ウィンドウの App やヘッドレス App は `setup()` から戻った直後に終わります。終了処理は、オーディオ、コンソール、`update()` が始まる前に行われます。`exitRequested` で終了を取り消すこともでき、その場合 App は通常どおり動きます。子ノードとして追加した App の場合は、いま進んでいるノードツリーの処理が終わるまで待ち、メインループの次の周回で終了が処理されます。
 - 毎フレーム `update()`、`draw()` の順に呼ばれます。優先度を指定せずに登録した `events().update`/`events().draw` のリスナーは App より前に、`EventPriority::AfterApp` で登録したリスナーは App と子ノードのあとに呼ばれます。`update()` では子ノード、Mod、タイマーも更新されます。
 - フレームがスキップされたとき（EVENT_DRIVEN で待機しているときなど）は、update も draw も呼ばれません。
 - `audioOut()`/`audioIn()` はオーディオスレッドで呼ばれます（`App::audioOut` を参照してください）。それ以外のコールバックはメインスレッドで呼ばれます。
@@ -219,7 +219,7 @@ details.ko = '''
 - `App`은 `RectNode`이며 씬 그래프의 루트입니다. 그래서 `addChild()`를 그대로 사용할 수 있습니다. 크기는 모든 창에서 논리 포인트이며, 전역 `pixelPerfect`가 활성화되면 프레임버퍼 픽셀입니다.
 - 생성자에서는 멤버 초기화만 하고, 트리 구성, `setSize()`, 파일 로드는 `setup()`에 작성하세요. 생성자 시점에는 아직 `shared_ptr`가 App을 보유하지 않으므로 `addChild()`는 assert가 되고, `setSize()`는 윈도우를 리사이즈하지 않으며, `getRootNode()`도 이 App이 아닙니다. 노드 쪽의 같은 규칙은 `Node::setup`에서 설명합니다.
 - 시작 순서는 다음과 같습니다. 그래픽 준비가 끝난 뒤 App이 만들어지고, 이어서 `windowResized(w, h)`가 한 번 호출되며, 첫 update 또는 draw 때 `setup()`이 한 번 호출됩니다. 따라서 `setup()` 안에서는 이미 `getWidth()`/`getHeight()`가 윈도우 크기를 반환합니다.
-- `setup()` 안에서 종료를 요청하고(`exitApp()`이나 `requestExitApp()`) 그 요청이 받아들여지면, 창의 App이나 헤드리스 App은 `setup()`에서 돌아온 직후에 끝납니다. 종료 처리는 오디오, 콘솔, `update()`가 시작되기 전에 진행됩니다. `exitRequested`로 종료를 취소할 수도 있으며, 그 경우 App은 평소대로 동작합니다. 자식 노드로 추가한 App이라면 지금 진행 중인 노드 트리 처리가 끝날 때까지 기다렸다가 메인 루프의 다음 회차에서 종료가 처리됩니다.
+- `setup()` 안에서 종료를 요청하고(`exitApp()`) 그 요청이 받아들여지면, 창의 App이나 헤드리스 App은 `setup()`에서 돌아온 직후에 끝납니다. 종료 처리는 오디오, 콘솔, `update()`가 시작되기 전에 진행됩니다. `exitRequested`로 종료를 취소할 수도 있으며, 그 경우 App은 평소대로 동작합니다. 자식 노드로 추가한 App이라면 지금 진행 중인 노드 트리 처리가 끝날 때까지 기다렸다가 메인 루프의 다음 회차에서 종료가 처리됩니다.
 - 매 프레임 `update()`, `draw()` 순서로 호출됩니다. 우선순위를 지정하지 않고 등록한 `events().update`/`events().draw` 리스너는 App보다 먼저, `EventPriority::AfterApp`으로 등록한 리스너는 App과 자식 노드 다음에 호출됩니다. `update()`에서는 자식 노드, Mod, 타이머도 업데이트됩니다.
 - 프레임이 건너뛰어질 때(EVENT_DRIVEN에서 대기 중일 때 등)는 update도 draw도 호출되지 않습니다.
 - `audioOut()`/`audioIn()`은 오디오 스레드에서 호출됩니다(`App::audioOut` 참조). 그 밖의 콜백은 메인 스레드에서 호출됩니다.
@@ -413,7 +413,7 @@ details.ko = '''
 - 세션 종료(로그아웃, 재시작, 시스템 종료) 때의 동작은 그 순간 메인 스레드에서 App 코드가 실행 중인지에 따라 달라집니다. 실행 중이 아니면 일반 종료 처리가 진행되어, 마지막으로 연결된 App부터 차례로 모든 App에서 `exit()`가 호출되고 오디오 분리와 `cleanup()`이 이어집니다. 전체가 하나의 제한 시간(기본값 3초, `Runtime::setLogoutTimeout` 참조)을 공유하므로 `exit()`에서는 필요한 것만 저장하고 짧게 끝내세요. App 코드나 그것을 호출하는 TrussC 코드가 메인 스레드에서 실행 중이면(`update()` 도중이나 App 코드에서 연 모달 대화상자가 떠 있는 동안 등) OS가 프로세스를 종료하며, `exit()`, `cleanup()`, 종료 이벤트는 모두 호출되지 않습니다. 다른 스레드의 처리는 App 코드 실행 중으로 치지 않습니다.
 - 이는 Windows와 macOS에서의 동작입니다. Linux에는 세션 종료를 받는 수신 경로가 없습니다. OS가 프로세스에 알리지 않고 종료시키면 `exit()`는 호출되지 않습니다.
 '''
-related = ["Runtime::setLogoutTimeout", "Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "requestExitApp", "exitApp", "App::requestExit", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App", "App::audioIn", "App::isExitRequested", "App::setSize", "AudioRecorder::stop", "ExitRequestEventArgs::cancel", "TcpClient::disconnect", "Texture::clear", "shutdownAudio", "stopRecording", "console::start"]
+related = ["Runtime::setLogoutTimeout", "Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "exitApp", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App", "App::audioIn", "App::setSize", "AudioRecorder::stop", "ExitRequestEventArgs::cancel", "TcpClient::disconnect", "Texture::clear", "shutdownAudio", "stopRecording", "console::start"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 void exit() override;
@@ -523,36 +523,36 @@ void SubApp::setup() {
 
 ["App::isExitRequested"]
 category = "events"
-keywords = ["quit", "close", "headless", "flag"]
-description.en = "Returns whether requestExit() has been called on this App."
-description.ja = "この App で requestExit() が呼ばれたかどうかを返す。"
-description.ko = "이 App에서 requestExit()가 호출되었는지를 반환한다."
+keywords = ["deprecated", "quit", "flag"]
+description.en = "Returns whether the deprecated requestExit() has been called on this App."
+description.ja = "非推奨の requestExit() がこの App で呼ばれたかどうかを返す。"
+description.ko = "사용이 권장되지 않는 requestExit()가 이 App에서 호출되었는지를 반환한다."
 details.en = '''
-- It is false at first and becomes true after `requestExit()` is called. It never goes back to false.
-- Only `runHeadlessApp()` acts on it. In a windowed app it simply returns the value, and the app keeps running. For the full behaviour, see `App::requestExit`.
-- It is still true inside `exit()`/`cleanup()` of a headless run that it stopped.
+- It is false at first and becomes true after `requestExit()` is called. It never goes back to false, even if a listener cancels the quit.
+- Nothing in TrussC reads it any more. It does not tell you whether a quit is under way, so do not use it in new code. This function is scheduled for removal in v1.0.0.
 - It is a plain (non-atomic) bool, so read it on the main thread.
+- To react when the app quits, listen to `events().exitRequested` or override `exit()`.
 '''
 details.ja = '''
-- 最初は false で、`requestExit()` を呼ぶと true になります。false に戻ることはありません。
-- この値を見て動作するのは `runHeadlessApp()` だけです。ウィンドウのあるアプリでは値を返すだけで、アプリは動き続けます。詳しい動作は `App::requestExit` を参照してください。
-- これによって停止したヘッドレス実行の `exit()`/`cleanup()` の中でも、true のままです。
+- 最初は false で、`requestExit()` を呼ぶと true になります。リスナーが終了を取り消しても、false に戻ることはありません。
+- TrussC のどこもこの値を読まなくなりました。終了が進行中かどうかは分からないので、新しいコードでは使わないでください。この関数は v1.0.0 で削除予定です。
 - 通常の（atomic でない）bool のため、メインスレッドで読んでください。
+- アプリの終了に反応したい場合は、`events().exitRequested` を購読するか、`exit()` をオーバーライドしてください。
 '''
 details.ko = '''
-- 처음에는 false이며 `requestExit()`를 호출하면 true가 됩니다. false로 돌아가지 않습니다.
-- 이 값을 보고 동작하는 것은 `runHeadlessApp()`뿐입니다. 윈도우가 있는 앱에서는 값을 반환할 뿐이며 앱은 계속 실행됩니다. 자세한 동작은 `App::requestExit`를 참조하세요.
-- 이것으로 멈춘 헤드리스 실행의 `exit()`/`cleanup()` 안에서도 true로 남아 있습니다.
+- 처음에는 false이며 `requestExit()`를 호출하면 true가 됩니다. 리스너가 종료를 취소해도 false로 돌아가지 않습니다.
+- 이제 TrussC의 어디에서도 이 값을 읽지 않습니다. 종료가 진행 중인지는 알 수 없으므로 새 코드에서는 사용하지 마세요. 이 함수는 v1.0.0에서 제거될 예정입니다.
 - 일반(atomic이 아닌) bool이므로 메인 스레드에서 읽으세요.
+- 앱이 종료될 때 반응하려면 `events().exitRequested`를 구독하거나 `exit()`를 오버라이드하세요.
 '''
-related = ["App::requestExit", "runHeadlessApp", "requestExitApp", "exitApp", "App::exit"]
+related = ["App::requestExit", "exitApp", "App::exit"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 void exit() override;
 
 // tcApp.cpp
 void tcApp::exit() {
-    if (isExitRequested()) logNotice() << "stopped by requestExit()";
+    logNotice() << "quitting";   // use exit() instead of isExitRequested()
 }
 '''
 
@@ -621,7 +621,7 @@ void keyPressed(int key) override;
 // tcApp.cpp
 void tcApp::keyPressed(int key) {
     switch (key) {
-        case KEY_ESCAPE: requestExitApp(); break;
+        case KEY_ESCAPE: exitApp(); break;
         case 'F': toggleFullscreen(); break;   // letters are uppercase, no Shift needed
     }
 }
@@ -950,49 +950,33 @@ void tcApp::mouseScrolled(const ScrollEventArgs& e) {
 
 ["App::requestExit"]
 category = "events"
-keywords = ["quit", "close", "shutdown", "headless", "stop loop", "programmatic exit"]
-description.en = "Stops a headless app (runHeadlessApp); a windowed app ignores it."
-description.ja = "ヘッドレスアプリ（runHeadlessApp）を止めるもので、ウィンドウのあるアプリでは何も起きない。"
-description.ko = "헤드리스 앱(runHeadlessApp)을 멈추는 것으로, 윈도우가 있는 앱에서는 아무 일도 일어나지 않는다."
+keywords = ["deprecated", "alias", "quit", "close", "headless"]
+description.en = "Asks the process to quit, through a deprecated alias of exitApp()."
+description.ja = "非推奨の別名で、プロセスの終了を要求する（exitApp() と同じ）。"
+description.ko = "사용이 권장되지 않는 별칭으로 프로세스 종료를 요청한다(exitApp()과 같음)."
 details.en = '''
-- **In a windowed app (`runApp`, hot reload, sub windows) nothing reads this flag, so the app keeps running.** To quit there, use `requestExitApp()` (which can be cancelled) or `exitApp(code)`.
-- In a headless app the flag is checked before every update step. Once it is set, `update()` is no longer called: `exit()` runs, audio is detached, `cleanup()` runs, and `runHeadlessApp` returns.
-- You may call it in `setup()`. In that case `update()` never runs at all.
-- The exit code stays 0. Use `exitApp(code)` if you need a non-zero code.
-- It cannot be cancelled, because `events().exitRequested` is not fired for it.
-- It only sets a flag. It fires no event, sets no exit code or reason, and the flag is never reset.
-- The flag is a plain (non-atomic) bool, so call it on the main thread, for example in `update()`. From a worker thread, use `requestExitApp()`.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (windowed apps ignore it).
+- It calls `exitApp()`, in windowed and headless apps alike. Use `exitApp()` in new code; this alias is scheduled for removal in v1.0.0.
+- Because it calls `exitApp()`, the exit code is set to `0`, and the quit goes through `exitRequested` so a listener can cancel it. See `exitApp` for the details.
+- Before v0.8.0 it only set a flag that `runHeadlessApp()` read, and a windowed app ignored it. It no longer skips `exitRequested` in a headless app.
+- It also sets the flag that `App::isExitRequested` returns. The flag is a plain (non-atomic) bool.
 '''
 details.ja = '''
-- **ウィンドウのあるアプリ（`runApp`、ホットリロード、サブウィンドウ）ではこのフラグを確認する処理がないため、アプリは動き続けます。** その場合に終了するには、`requestExitApp()`（キャンセル可能）または `exitApp(code)` を使用してください。
-- ヘッドレスアプリでは、毎回の update の前にフラグが確認されます。フラグが立っていると `update()` はそれ以上呼ばれず、`exit()`、オーディオの切り離し、`cleanup()` の順に進み、`runHeadlessApp` から戻ります。
-- `setup()` の中で呼ぶこともできます。その場合、`update()` は一度も呼ばれません。
-- 終了コードは 0 のままです。0 以外を返したい場合は `exitApp(code)` を使用してください。
-- `events().exitRequested` が発行されないため、キャンセルはできません。
-- 行うのはフラグを立てることだけです。イベントは送らず、終了コードも理由も設定しません。立てたフラグが元に戻ることもありません。
-- フラグは通常の（atomic でない）bool のため、`update()` の中などメインスレッドから呼んでください。ワーカースレッドからは `requestExitApp()` を使用してください。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ウィンドウアプリでは効かない）。
+- ウィンドウのあるアプリでもヘッドレスアプリでも、`exitApp()` を呼びます。新しいコードでは `exitApp()` を使用してください。この別名は v1.0.0 で削除予定です。
+- `exitApp()` を呼ぶため、終了コードは `0` に設定され、終了は `exitRequested` を通ります。リスナーが取り消すこともできます。詳しくは `exitApp` を参照してください。
+- v0.8.0 より前は、`runHeadlessApp()` が読むフラグを立てるだけで、ウィンドウのあるアプリでは無視されていました。ヘッドレスアプリでも `exitRequested` を飛ばさなくなりました。
+- `App::isExitRequested` が返すフラグも立てます。このフラグは通常の（atomic でない）bool です。
 '''
 details.ko = '''
-- **윈도우가 있는 앱(`runApp`, 핫 리로드, 서브 윈도우)에서는 이 플래그를 확인하는 곳이 없으므로 앱은 계속 실행됩니다.** 그런 경우 종료하려면 `requestExitApp()`(취소 가능) 또는 `exitApp(code)`를 사용하세요.
-- 헤드리스 앱에서는 매번 update 직전에 플래그를 확인합니다. 플래그가 세워져 있으면 `update()`는 더 이상 호출되지 않고 `exit()`, 오디오 분리, `cleanup()` 순으로 진행된 뒤 `runHeadlessApp`에서 반환됩니다.
-- `setup()` 안에서 호출해도 됩니다. 그 경우 `update()`는 한 번도 호출되지 않습니다.
-- 종료 코드는 0 그대로입니다. 0이 아닌 값이 필요하면 `exitApp(code)`를 사용하세요.
-- `events().exitRequested`가 발생하지 않으므로 취소할 수 없습니다.
-- 하는 일은 플래그를 세우는 것뿐입니다. 이벤트를 보내지 않고, 종료 코드나 이유도 설정하지 않습니다. 세운 플래그가 다시 내려가는 일도 없습니다.
-- 플래그는 일반(atomic이 아닌) bool이므로 `update()` 안 등 메인 스레드에서 호출하세요. 워커 스레드에서는 `requestExitApp()`을 사용하세요.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(윈도우 앱에서는 동작하지 않음).
+- 윈도우가 있는 앱과 헤드리스 앱 모두에서 `exitApp()`을 호출합니다. 새 코드에서는 `exitApp()`을 사용하세요. 이 별칭은 v1.0.0에서 제거될 예정입니다.
+- `exitApp()`을 호출하므로 종료 코드는 `0`으로 설정되고, 종료는 `exitRequested`를 거칩니다. 리스너가 취소할 수도 있습니다. 자세한 내용은 `exitApp`을 참조하세요.
+- v0.8.0 이전에는 `runHeadlessApp()`이 읽는 플래그를 세울 뿐이었고, 윈도우가 있는 앱에서는 무시되었습니다. 이제 헤드리스 앱에서도 `exitRequested`를 건너뛰지 않습니다.
+- `App::isExitRequested`가 반환하는 플래그도 세웁니다. 이 플래그는 일반(atomic이 아닌) bool입니다.
 '''
-related = ["App::isExitRequested", "requestExitApp", "exitApp", "runHeadlessApp", "App::exit", "CoreEvents::exitRequested", "HeadlessSettings"]
+related = ["exitApp", "requestExitApp", "App::isExitRequested", "CoreEvents::exitRequested"]
 snippet = '''
-// tcApp.h (inside class tcApp : public App, started with runHeadlessApp)
-void update() override;
-int frameCount = 0;
-
-// tcApp.cpp
+// tcApp.cpp (a headless or windowed App)
 void tcApp::update() {
-    if (++frameCount >= 150) requestExit();   // stop after 150 steps
+    if (getUpdateCount() >= 150) exitApp();   // use this instead of requestExit()
 }
 '''
 
@@ -43179,7 +43163,7 @@ details.ko = '''
 - 일반 애플리케이션 루프가 앱의 종료 및 정리 콜백과 오디오 종료 이후에 자동으로 호출하므로, 일반 앱에서 직접 호출할 필요는 없습니다.
 - 이 자유 함수는 오버라이드할 수 있는 `Node::cleanup()` 콜백과 별개입니다. 앱과 노드의 종료 처리는 `App`과 `Node`를 참조하세요.
 '''
-related = ["setup", "requestExitApp", "App", "Node"]
+related = ["setup", "exitApp", "App", "Node"]
 
 ["clear"]
 category = "graphics_color"
@@ -45099,7 +45083,7 @@ description.ko = "종료 코드를 지정해 프로세스 종료를 요청한다
 details.en = '''
 - `exitApp(code)` sets the exit code (default `0`) and returns at once. Use a nonzero code to report failure. On Windows and Linux, `runApp()` returns this code to `main()`. On macOS, a normal quit does not return from `runApp()`: the process ends after cleanup with this code (see `runApp`).
 - **The quit can be cancelled.** At the next safe point, TrussC sends `exitRequested`; if no listener cancels it, every App ends normally (`exit()` and `cleanup()`) and the process ends. See `RuntimeEvents::exitRequested`.
-- `requestExitApp()` does the same without changing the exit code.
+- This is the one way to quit, in windowed and headless apps alike. `requestExitApp()` and `App::requestExit()` are deprecated aliases that call `exitApp()`.
 - It does not close a particular window and does not send `closeRequested`.
 - You can call it from another thread; the request is passed to the main thread.
 - Inside `App::exit()` or `cleanup()`, and while the process is already shutting down, it does nothing, and the exit code is not changed either.
@@ -45108,7 +45092,7 @@ details.en = '''
 details.ja = '''
 - `exitApp(code)` は終了コード（既定値 `0`）を設定して、すぐに戻ります。失敗を伝えたいときは 0 以外のコードを使ってください。Windows と Linux では、`runApp()` がこのコードを `main()` に返します。macOS の通常の終了では `runApp()` は戻らず、cleanup のあとにこのコードでプロセスが終了します（`runApp` を参照）。
 - **終了は取り消せます。** 次の安全なタイミングで TrussC が `exitRequested` を送り、どのリスナーも取り消さなければ、すべての App が通常どおり終わり（`exit()` と `cleanup()`）、プロセスが終了します。`RuntimeEvents::exitRequested` を参照してください。
-- `requestExitApp()` は、終了コードを変えずに同じことをします。
+- 終了する方法はこれ一つで、ウィンドウのあるアプリでもヘッドレスアプリでも同じです。`requestExitApp()` と `App::requestExit()` は、`exitApp()` を呼ぶだけの非推奨の別名です。
 - 特定のウィンドウは閉じず、`closeRequested` も送りません。
 - ほかのスレッドからも呼べます。要求はメインスレッドに渡されます。
 - `App::exit()` や `cleanup()` の中、およびプロセスがすでに終了処理に入っている間は何もせず、終了コードも変わりません。
@@ -45117,7 +45101,7 @@ details.ja = '''
 details.ko = '''
 - `exitApp(code)`는 종료 코드(기본값 `0`)를 설정하고 바로 반환합니다. 실패를 알리려면 0이 아닌 코드를 사용하세요. Windows와 Linux에서는 `runApp()`이 이 코드를 `main()`에 반환합니다. macOS의 정상 종료에서는 `runApp()`이 반환되지 않고, cleanup 뒤에 이 코드로 프로세스가 끝납니다(`runApp` 참조).
 - **종료는 취소할 수 있습니다.** 다음 안전한 시점에 TrussC가 `exitRequested`를 보내고, 어떤 리스너도 취소하지 않으면 모든 App이 정상적으로 끝나며(`exit()`와 `cleanup()`) 프로세스가 종료됩니다. `RuntimeEvents::exitRequested`를 참조하세요.
-- `requestExitApp()`은 종료 코드를 바꾸지 않고 같은 일을 합니다.
+- 종료하는 방법은 이것 하나이며, 윈도우가 있는 앱과 헤드리스 앱에서 똑같습니다. `requestExitApp()`과 `App::requestExit()`는 `exitApp()`을 호출할 뿐인 사용이 권장되지 않는 별칭입니다.
 - 특정 창을 닫지 않으며 `closeRequested`도 보내지 않습니다.
 - 다른 스레드에서도 호출할 수 있습니다. 요청은 메인 스레드로 전달됩니다.
 - `App::exit()`나 `cleanup()` 안, 그리고 프로세스가 이미 종료 처리 중일 때는 아무 동작도 하지 않으며 종료 코드도 바뀌지 않습니다.
@@ -48774,7 +48758,7 @@ details.ko = '''
 related = ["isMousePressed", "isShiftPressed", "isControlPressed"]
 snippet = '''
 void tcApp::update() {
-    if (isKeyPressed(KEY_ESCAPE)) requestExitApp();
+    if (isKeyPressed(KEY_ESCAPE)) exitApp();
 }
 '''
 
@@ -50800,27 +50784,28 @@ details.ko = '''
 related = ["Light", "addLight", "clearLights", "getNumLights"]
 
 ["requestExitApp"]
-description.en = "Asks the process to quit, keeping the current exit code."
-description.ja = "終了コードを変えずに、プロセスの終了を要求する。"
-description.ko = "종료 코드를 바꾸지 않고 프로세스 종료를 요청한다."
+keywords = ["deprecated", "alias", "quit"]
+description.en = "Asks the process to quit, through a deprecated alias of exitApp()."
+description.ja = "非推奨の別名で、プロセスの終了を要求する（exitApp() と同じ）。"
+description.ko = "사용이 권장되지 않는 별칭으로 프로세스 종료를 요청한다(exitApp()과 같음)."
 details.en = '''
-- It works like `exitApp()`, but does not change the exit code. The quit goes through `exitRequested`, so a listener can cancel it. See `exitApp` for the details.
-- On iOS and Android this does nothing: the OS decides when the app ends.
+- It calls `exitApp()`. Use `exitApp()` in new code; this alias is scheduled for removal in v1.0.0.
+- Because it calls `exitApp()`, the exit code is set to `0`, and the quit goes through `exitRequested` so a listener can cancel it. See `exitApp` for the details.
 '''
 details.ja = '''
-- `exitApp()` と同じように動きますが、終了コードは変えません。終了は `exitRequested` を通るため、リスナーが取り消すこともできます。詳しくは `exitApp` を参照してください。
-- iOS と Android では何もしません。アプリをいつ終わらせるかは OS が決めます。
+- `exitApp()` を呼びます。新しいコードでは `exitApp()` を使用してください。この別名は v1.0.0 で削除予定です。
+- `exitApp()` を呼ぶため、終了コードは `0` に設定され、終了は `exitRequested` を通ります。リスナーが取り消すこともできます。詳しくは `exitApp` を参照してください。
 '''
 details.ko = '''
-- `exitApp()`과 같이 동작하지만 종료 코드는 바꾸지 않습니다. 종료는 `exitRequested`를 거치므로 리스너가 취소할 수도 있습니다. 자세한 내용은 `exitApp`을 참조하세요.
-- iOS와 Android에서는 아무 동작도 하지 않습니다. 앱을 언제 끝낼지는 OS가 정합니다.
+- `exitApp()`을 호출합니다. 새 코드에서는 `exitApp()`을 사용하세요. 이 별칭은 v1.0.0에서 제거될 예정입니다.
+- `exitApp()`을 호출하므로 종료 코드는 `0`으로 설정되고, 종료는 `exitRequested`를 거칩니다. 리스너가 취소할 수도 있습니다. 자세한 내용은 `exitApp`을 참조하세요.
 '''
+related = ["exitApp", "App::requestExit", "RuntimeEvents::exitRequested", "CoreEvents::exitRequested"]
 snippet = '''
 void tcApp::update() {
-    if (isKeyPressed(KEY_ESCAPE)) requestExitApp();
+    if (isKeyPressed(KEY_ESCAPE)) exitApp();   // use this instead of requestExitApp()
 }
 '''
-related = ["RuntimeEvents::exitRequested", "CoreEvents::exitRequested"]
 ["resetBlendMode"]
 category = "graphics_style"
 keywords = ["default", "alpha"]
@@ -63824,7 +63809,7 @@ description.en = "Sets the time limit for the normal ending when the OS logs out
 description.ja = "OS のログアウト、再起動、シャットダウンのときに、通常の終了処理にかけられる時間を設定する。"
 description.ko = "OS 로그아웃, 재시작, 시스템 종료 때 일반 종료 처리에 허용하는 시간을 설정한다."
 details.en = '''
-- Most apps never need this. It matters only at a session end: when the user logs out, restarts or shuts down the computer while the app is running. Normal quitting (Cmd+Q, `exitApp()`, `requestExitApp()`, closing the last window) has no time limit and always runs the full cleanup.
+- Most apps never need this. It matters only at a session end: when the user logs out, restarts or shuts down the computer while the app is running. Normal quitting (Cmd+Q, `exitApp()`, closing the last window) has no time limit and always runs the full cleanup.
 - `seconds` is in seconds, and the default is 3. The limit covers the whole ending: `exit()` for every App, audio detach, `cleanup()` and the shutdown of TrussC's services. When the time runs out, the process ends even if that work has not finished. `0` ends the process at once, without calling `exit()`. Positive infinity removes the limit, but then a slow ending can hold up the logout indefinitely. A negative value or NaN logs an error and keeps the previous value.
 - All Apps share one limit, and the time starts before the first `exit()` is called.
 - **It applies only when no App code is running on the main thread at the session end.** If App code is running (for example inside `update()`, or in a modal dialog opened from App code), the OS ends the process without calling `exit()` or `cleanup()`, and this setting is not used. Work on other threads does not count as running App code. If the main thread is so blocked that it cannot receive the session end at all, the OS ends the process by its own rules.
@@ -63832,7 +63817,7 @@ details.en = '''
 - Call it on the main thread, for example in `setup()`. Each new run starts again from 3 seconds, and hot reload keeps the value. Keep the save in `exit()` short (see `App::exit`).
 '''
 details.ja = '''
-- ほとんどのアプリでは必要ありません。アプリの実行中に、ユーザーがログアウト、再起動、シャットダウンしたとき（セッション終了）だけ関係します。通常の終了（Cmd+Q、`exitApp()`、`requestExitApp()`、最後のウィンドウを閉じる）には制限時間がなく、後片付けも最後まで行われます。
+- ほとんどのアプリでは必要ありません。アプリの実行中に、ユーザーがログアウト、再起動、シャットダウンしたとき（セッション終了）だけ関係します。通常の終了（Cmd+Q、`exitApp()`、最後のウィンドウを閉じる）には制限時間がなく、後片付けも最後まで行われます。
 - `seconds` の単位は秒で、既定値は 3 です。制限時間は終了処理全体にかかります。すべての App の `exit()`、オーディオの切り離し、`cleanup()`、TrussC のサービスの終了までが含まれます。時間が切れると、処理が終わっていなくてもプロセスは終了します。`0` にすると、`exit()` を呼ばずにすぐ終了します。正の無限大にすると制限がなくなりますが、遅い終了処理がログアウトをいつまでも止めてしまうことがあります。負の値や NaN はエラーを記録し、前の値を保ちます。
 - 制限時間はすべての App で 1 つを共有し、最初の `exit()` が呼ばれる前に計測が始まります。
 - **この設定が使われるのは、セッション終了の時点でメインスレッドで App のコードが実行中でない場合だけです。** 実行中（`update()` の途中や、App のコードから開いたモーダルダイアログの最中など）なら、OS が `exit()` も `cleanup()` も呼ばずにプロセスを終了させ、この設定は使われません。ほかのスレッドの処理は、App のコードの実行中には数えません。メインスレッドが止まっていてセッション終了をまったく受け取れない場合は、OS が独自のルールでプロセスを終了させます。
@@ -63840,7 +63825,7 @@ details.ja = '''
 - メインスレッドで、たとえば `setup()` で呼んでください。新しく実行するたびに 3 秒に戻り、ホットリロードでは値が引き継がれます。`exit()` での保存は短く済ませてください（`App::exit` を参照）。
 '''
 details.ko = '''
-- 대부분의 앱에서는 필요하지 않습니다. 앱 실행 중에 사용자가 로그아웃, 재시작, 시스템 종료를 할 때(세션 종료)만 관계합니다. 일반 종료(Cmd+Q, `exitApp()`, `requestExitApp()`, 마지막 창 닫기)에는 제한 시간이 없으며 정리도 끝까지 진행됩니다.
+- 대부분의 앱에서는 필요하지 않습니다. 앱 실행 중에 사용자가 로그아웃, 재시작, 시스템 종료를 할 때(세션 종료)만 관계합니다. 일반 종료(Cmd+Q, `exitApp()`, 마지막 창 닫기)에는 제한 시간이 없으며 정리도 끝까지 진행됩니다.
 - `seconds`의 단위는 초이며 기본값은 3입니다. 제한 시간은 종료 처리 전체에 걸립니다. 모든 App의 `exit()`, 오디오 분리, `cleanup()`, TrussC 서비스 종료까지 포함됩니다. 시간이 다 되면 처리가 끝나지 않았어도 프로세스가 종료됩니다. `0`으로 설정하면 `exit()`를 호출하지 않고 바로 종료합니다. 양의 무한대로 설정하면 제한이 없어지지만, 느린 종료 처리가 로그아웃을 끝없이 막을 수 있습니다. 음수나 NaN은 오류를 기록하고 이전 값을 유지합니다.
 - 모든 App이 하나의 제한 시간을 공유하며, 첫 `exit()`가 호출되기 전에 측정이 시작됩니다.
 - **이 설정은 세션 종료 시점에 메인 스레드에서 App 코드가 실행 중이 아닐 때만 사용됩니다.** 실행 중이면(`update()` 도중이나 App 코드에서 연 모달 대화상자가 떠 있는 동안 등) OS가 `exit()`도 `cleanup()`도 호출하지 않고 프로세스를 종료하며, 이 설정은 사용되지 않습니다. 다른 스레드의 처리는 App 코드 실행 중으로 치지 않습니다. 메인 스레드가 멈춰 세션 종료를 전혀 받지 못하면 OS가 자체 규칙으로 프로세스를 종료합니다.
@@ -63856,7 +63841,7 @@ void tcApp::exit() {
     saveJson(settings, "settings.json");   // keep this short: it may run during a logout
 }
 '''
-related = ["App::exit", "Runtime", "Runtime::events", "exitApp", "requestExitApp"]
+related = ["App::exit", "Runtime", "Runtime::events", "exitApp"]
 
 ["Runtime::events"]
 description.en = "Returns the events that belong to the whole process."
@@ -63945,7 +63930,7 @@ description.ja = "プロセスの終了が要求されたときに呼ばれ、�
 description.ko = "프로세스 종료가 요청되었을 때 호출되며, 종료를 취소할 수 있다."
 details.en = '''
 - App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
-- It is sent when `exitApp()` or `requestExitApp()` is called, when the OS asks the process to quit (for example Cmd+Q, logout or shutdown), and when the last open window or a window with `setQuitOnClose(true)` is about to close. In that last case it is asked before anything closes, and a cancel keeps every window open (see `CoreEvents::closeRequested` and `Window::close`).
+- It is sent when `exitApp()` is called, when the OS asks the process to quit (for example Cmd+Q, logout or shutdown), and when the last open window or a window with `setQuitOnClose(true)` is about to close. In that last case it is asked before anything closes, and a cancel keeps every window open (see `CoreEvents::closeRequested` and `Window::close`).
 - On Windows and macOS, a logout, restart or shutdown asks it only when no App code is running on the main thread. Otherwise the OS ends the process without asking (see `App::exit`).
 - Set `e.cancel = true` to keep the process running. Every listener starts with `cancel = false`. If any listener sets it to `true`, the quit is cancelled, and a later listener cannot undo that. A listener that throws an exception also counts as a cancel.
 - The listeners here run first, then each App's `events().exitRequested`, starting with the App that was attached last. All of them are called on the main thread, even when one has already cancelled.
@@ -63955,7 +63940,7 @@ details.en = '''
 '''
 details.ja = '''
 - App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
-- `exitApp()` や `requestExitApp()` を呼んだとき、OS がプロセスの終了を求めたとき（Cmd+Q、ログアウト、シャットダウンなど）、最後に開いているウィンドウか `setQuitOnClose(true)` のウィンドウを閉じようとしたときに届きます。最後の場合は何かを閉じる前に問い合わされ、取り消すとすべてのウィンドウが開いたままになります（`CoreEvents::closeRequested` と `Window::close` を参照）。
+- `exitApp()` を呼んだとき、OS がプロセスの終了を求めたとき（Cmd+Q、ログアウト、シャットダウンなど）、最後に開いているウィンドウか `setQuitOnClose(true)` のウィンドウを閉じようとしたときに届きます。最後の場合は何かを閉じる前に問い合わされ、取り消すとすべてのウィンドウが開いたままになります（`CoreEvents::closeRequested` と `Window::close` を参照）。
 - Windows と macOS のログアウト、再起動、シャットダウンでは、メインスレッドで App のコードが実行中でないときだけ問い合わされます。実行中なら、OS は問い合わせずにプロセスを終了させます（`App::exit` を参照）。
 - `e.cancel = true` にすると、プロセスは終了せずに動き続けます。各リスナーは `cancel = false` の状態から始まります。どれか 1 つでも `true` にすると終了は取り消され、あとのリスナーが元に戻すことはできません。例外を投げたリスナーも、取り消したものとして扱います。
 - ここに登録したリスナーが先に呼ばれ、そのあと各 App の `events().exitRequested` が、最後に追加された App から順に呼ばれます。すでに誰かが取り消していても、すべてのリスナーがメインスレッドで呼ばれます。
@@ -63965,7 +63950,7 @@ details.ja = '''
 '''
 details.ko = '''
 - App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다.
-- `exitApp()`이나 `requestExitApp()`을 호출했을 때, OS가 프로세스 종료를 요청했을 때(Cmd+Q, 로그아웃, 시스템 종료 등), 마지막으로 열린 창이나 `setQuitOnClose(true)`인 창을 닫으려 할 때 전달됩니다. 마지막 경우에는 무엇이든 닫기 전에 질문되며, 취소하면 모든 창이 열린 채로 유지됩니다(`CoreEvents::closeRequested`와 `Window::close` 참조).
+- `exitApp()`을 호출했을 때, OS가 프로세스 종료를 요청했을 때(Cmd+Q, 로그아웃, 시스템 종료 등), 마지막으로 열린 창이나 `setQuitOnClose(true)`인 창을 닫으려 할 때 전달됩니다. 마지막 경우에는 무엇이든 닫기 전에 질문되며, 취소하면 모든 창이 열린 채로 유지됩니다(`CoreEvents::closeRequested`와 `Window::close` 참조).
 - Windows와 macOS의 로그아웃, 재시작, 시스템 종료에서는 메인 스레드에서 App 코드가 실행 중이 아닐 때만 질문됩니다. 실행 중이면 OS가 질문 없이 프로세스를 종료합니다(`App::exit` 참조).
 - `e.cancel = true`로 설정하면 프로세스가 종료되지 않고 계속 실행됩니다. 각 리스너는 `cancel = false` 상태에서 시작합니다. 하나라도 `true`로 설정하면 종료가 취소되며, 이후 리스너가 이를 되돌릴 수 없습니다. 예외를 던진 리스너도 취소한 것으로 처리합니다.
 - 여기에 등록한 리스너가 먼저 호출되고, 그다음 각 App의 `events().exitRequested`가 마지막에 추가된 App부터 순서대로 호출됩니다. 이미 누군가 취소했더라도 모든 리스너가 메인 스레드에서 호출됩니다.

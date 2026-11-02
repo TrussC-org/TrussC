@@ -2003,15 +2003,16 @@ inline void redraw(int count = 1) {
     }
 }
 
-// Request application exit (can be cancelled via exitRequested event)
-// If events().exitRequested is listened and args.cancel is set to true, exit is cancelled
-inline void requestExitApp() {
-    internal::requestNormalQuit("request-exit-app");
-}
-
-// Request process exit with an exit code. Every Runtime/App listener may veto.
+// Request process exit with an exit code. Every Runtime/App listener may veto
+// it (events().exitRequested). The single exit entry point, windowed or headless.
 inline void exitApp(int code = 0) {
     internal::requestNormalQuit("exit-app", code);
+}
+
+// Deprecated alias of exitApp().
+[[deprecated("Use exitApp() instead. Will be removed in v1.0.0")]]
+inline void requestExitApp() {
+    exitApp();
 }
 
 // ---------------------------------------------------------------------------

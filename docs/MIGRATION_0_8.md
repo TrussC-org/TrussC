@@ -423,3 +423,17 @@ These limits are gone; if your app needs a cap, set it yourself.
 - **Image:** the 64 MiB limit on encoded image input from memory (`Pixels::loadFromMemory`, `Image::loadFromMemory`, URL and network-buffer loads) is removed, as it never applied to local files. `LoadError::TooLarge` stays for its other reasons (GPU texture size, URL/network admission, platform size). Nothing to change.
 - **Sound:** `AudioSettings::maxPolyphony` now defaults to `0`, which means no cap (it was `32`), and `AudioEngine::DEFAULT_MAX_PLAYING_SOUNDS` is `0`. The 33rd simultaneous `Sound::play()` used to return `false` and was counted in `droppedPolyphonyLimit`; it now plays. `AudioEngine::getMaxPolyphony()`, `AudioDeviceChangedArgs::maxPolyphony` and the `tc_get_audio_state` field report the cap, so they read `0` when none is set, not the number of slots. A positive value still works as a cap; negative values mean no cap, as `0` does. `PlayingSoundInfo::slot` is no longer bounded by a fixed range. A `SoundStream`'s own `loadStream(path, maxPolyphony)` default of `1` is unchanged.
 - **OSC:** `OscBundle::MAX_NESTING_DEPTH` is removed, and bundles nest as deep as the 65,536-byte packet allows (the datagram bound stays). If you used the constant, delete the check or replace it with a limit of your own in an `onBundleReceived` handler. `OscBundle` copies are now shallow: nested bundles are shared between a bundle and its copies (they are never modified once added), so a copy costs one level, and the destructor walks the nesting without recursion. `OscBundle::Element` is now `std::variant<OscMessage, std::shared_ptr<OscBundle>>`.
+
+## `exitApp()` is the one way to quit (#906)
+
+`exitApp(int code = 0)` is now the single way to quit, in windowed and headless apps alike. `App::requestExit()` and `requestExitApp()` are deprecated aliases that call `exitApp()`, so old code still compiles (with a deprecation warning) and now also works in a windowed app. Before, `App::requestExit()` only set a flag that `runHeadlessApp()` read, so it did nothing in a windowed app.
+
+```cpp
+exitApp();      // was requestExit() or requestExitApp()
+exitApp(3);     // with an exit code
+```
+
+- Both aliases now go through `exitRequested`, so a listener can veto them. In a headless app, `requestExit()` used to stop the loop without sending `exitRequested`.
+- `requestExitApp()` used to keep the current exit code; as an alias of `exitApp()` it sets the code to `0`.
+- `App::isExitRequested()` is deprecated. It still returns `true` after `requestExit()` was called on that App, but the framework no longer reads it. Use `exit()` or `events().exitRequested` to react to a quit.
+- The exit reason `request-exit-app` no longer exists; `exitApp()` reports `exit-app`.

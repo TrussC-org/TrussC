@@ -300,7 +300,7 @@ public:
     void update() override {
         g_hUpdateDepthMax = std::max(g_hUpdateDepthMax, matrixDepth());
         pushMatrix();
-        if (++g_hUpdates >= 5) requestExit();
+        if (++g_hUpdates >= 5) exitApp();
     }
     void exit() override { pushMatrix(); }
 };

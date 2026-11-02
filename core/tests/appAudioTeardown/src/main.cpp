@@ -115,7 +115,7 @@ struct HeadlessApp : BufferApp {
     HeadlessApp() : BufferApp(*headlessProbe) {}
     void update() override {
         armCallback(probe);
-        requestExit();
+        exitApp();
     }
 };
 

@@ -10,7 +10,7 @@ int failures = 0;
 struct TokenApp : App {
     std::weak_ptr<std::atomic<bool>> token;
     void setup() override { token = internal::appRunToken(); }
-    void update() override { requestExitApp(); }
+    void update() override { exitApp(); }
     void cleanup() override { cleanupInvalidated = !internal::appRunIsAlive(token); }
 };
 }

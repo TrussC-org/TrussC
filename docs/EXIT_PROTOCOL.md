@@ -69,7 +69,7 @@ only the OS deadline bounds them. Busy termination does not flush sinks.
 Neither path returns to frames. Linux has no session receiver and cannot
 promise logout delivery.
 
-A quit requested during setup (exitApp/requestExitApp) is handled before the
+A quit requested during setup (exitApp) is handled before the
 first service prelude, and exitRequested still gets its veto. For a Window's root
 App (including headless), the rule is:
 **accepted exit requested in root setup → normal ending, then no console, update or draw**.
@@ -111,7 +111,7 @@ including Warning or Silent. Console and system outputs retain their normal
 level filtering. `onLog` listeners receive both records normally. Ordinary
 log records still obey the file level; the bypass is internal to the runtime.
 
-Known reason tokens include `last-window-close` (last-window or quit-on-close), `request-exit-app`, `exit-app`,
+Known reason tokens include `last-window-close` (last-window or quit-on-close), `exit-app`,
 `tc-quit`, `os-session-end` (idle desktop session commit), `app-quit` (macOS: a quit Apple
 event without one of those reasons, i.e. Cmd+Q, the Dock's Quit or an
 AppleScript `quit`), `sigterm`, `sigint`, and `device-lost` where the backend

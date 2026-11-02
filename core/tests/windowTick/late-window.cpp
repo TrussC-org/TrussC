@@ -102,7 +102,7 @@ struct RestartFirst : App {
             populate(trussc::internal::WindowRequestAccess::context(*retained));
             for (auto& batch : concurrentObjects) for (auto& objects : batch) populate(trussc::internal::WindowRequestAccess::context(*objects.window));
         }
-        requestExitApp();
+        exitApp();
     }
 };
 struct RestartSecond : App {
@@ -114,7 +114,7 @@ struct RestartSecond : App {
         restartCheck(internal::openWindows().size() == initialWindows, "window registry empty after restart");
         checkLighting(internal::nonWindowContext());
         checkLighting(trussc::internal::WindowRequestAccess::context(*internal::resolveWindow()));
-        requestExitApp();
+        exitApp();
     }
 };
 int secondaryDraws = 0;
@@ -146,7 +146,7 @@ struct Main : App {
         if (!retained) std::abort();
         retained->setApp<Secondary>();
     }
-    void update() override { if (++turns == 12) requestExitApp(); }
+    void update() override { if (++turns == 12) exitApp(); }
     void exit() override { ++mainExits; }
 };
 struct Headless : App {
@@ -154,7 +154,7 @@ struct Headless : App {
         // Headless has no secondary native windows. Retain an unbound Window
         // to exercise the same destructor and non-window shutdown boundary.
         retained = makeRetainedWindow();
-        requestExitApp();
+        exitApp();
     }
 };
 void release() {

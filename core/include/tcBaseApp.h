@@ -27,6 +27,9 @@ namespace trussc {
 class Window;
 class App;
 
+// Defined in TrussC.h; the deprecated App::requestExit() forwards to it.
+inline void exitApp(int code);
+
 namespace internal {
 // Subscribes the App's audioOut() / audioIn() hooks, right after its first
 // setup() has returned (App::onSetupDone(), #426). Defined below the App
@@ -98,10 +101,14 @@ public:
     // Exit request (for programmatic termination)
     // -------------------------------------------------------------------------
 
-    /// Request application exit (works in both windowed and headless mode)
-    void requestExit() { exitRequested_ = true; }
+    /// Deprecated alias of exitApp(): works in windowed and headless apps, and
+    /// every Runtime/App listener may veto it.
+    [[deprecated("Use exitApp() instead. Will be removed in v1.0.0")]]
+    void requestExit() { exitRequested_ = true; exitApp(0); }
 
-    /// Check if exit has been requested
+    /// Deprecated. True once requestExit() has been called on this App (it is
+    /// not cleared by a veto). The framework no longer reads it.
+    [[deprecated("Use exitApp() instead. Will be removed in v1.0.0")]]
     bool isExitRequested() const { return exitRequested_; }
 
     // -------------------------------------------------------------------------

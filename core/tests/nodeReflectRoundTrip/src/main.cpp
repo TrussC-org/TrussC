@@ -294,7 +294,7 @@ public:
               failedSet.value("status", "") == "ok" &&
               failedSet["applied"] == Json::array({"pos"}) &&
               failedSet["skipped"] == Json::array({"visible"}) && exact(child->getPos(), Vec3(9, 8, 7)));
-        requestExit();
+        exitApp();
     }
 };
 

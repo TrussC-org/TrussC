@@ -8,7 +8,7 @@
 //
 // Usage:
 //   - Press Ctrl+C to exit
-//   - Or call requestExit() programmatically
+//   - Or call exitApp() programmatically
 //
 // Available features in headless mode:
 //   - Serial communication (tc::Serial)

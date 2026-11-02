@@ -164,8 +164,8 @@ struct SynthApp : App {
 
     void update() override {
         ++frames;
-        if (g_longCallRunning) requestExit();   // tear down during the long call
-        if (frames >= 2000) { g_timedOut = true; requestExit(); }
+        if (g_longCallRunning) exitApp();   // tear down during the long call
+        if (frames >= 2000) { g_timedOut = true; exitApp(); }
     }
     // The App hooks are detached before cleanup(); the engine keeps running.
     void cleanup() override {
@@ -207,8 +207,8 @@ struct StuckApp : App {
     ~StuckApp() override { g_stuckDestroyed = true; }
     void update() override {
         ++frames;
-        if (g_stuckInside) requestExit();
-        if (frames >= 2000) { g_stuckTimedOut = true; g_stuckRelease = true; requestExit(); }
+        if (g_stuckInside) exitApp();
+        if (frames >= 2000) { g_stuckTimedOut = true; g_stuckRelease = true; exitApp(); }
     }
     void audioOut(AudioOutBuffer&) override {
         if (!g_stuckArmed.exchange(false)) return;

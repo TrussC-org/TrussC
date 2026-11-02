@@ -15,7 +15,7 @@ struct SizeProbe : App {
         if (other->getWidth() != 123 || other->getHeight() != 45) ++failures;
         std::printf("appSetSize S6: %s\n", failures ? "FAIL" : "PASS");
         other.reset();
-        requestExit();
+        exitApp();
     }
 };
 } // namespace

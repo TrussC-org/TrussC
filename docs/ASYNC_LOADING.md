@@ -18,6 +18,6 @@ Local-file results may exceed the retained-result budget. One best-effort Notice
 per run is posted to main; it can be omitted if its run or batch is discarded.
 URL and network-buffer admission limits remain in effect; see the API cards.
 
-Background code requests orderly shutdown with `exitApp()` or `requestExitApp()`;
+Background code requests orderly shutdown with `exitApp()`;
 the request is posted to main, whose shutdown drains resource workers. Calling
 `std::exit` directly from a resource worker is unsupported.

@@ -161,12 +161,12 @@ struct GeometryDisplayApp : App {
         if (observable) {
             if (phase) observation.print();
             check("X11 main geometry round trip", true);
-            if (phase++) { displayCompleted = true; requestExitApp(); }
+            if (phase++) { displayCompleted = true; exitApp(); }
             else setWindowSizeLogical(480, 300);
         }
         // Bound (test hang guard): stop a broken backend; success depends on
         // observed geometry, never on completing within a measured duration.
-        if (++frames == 600) { observation.print(); check("main geometry became observable", false); requestExitApp(); }
+        if (++frames == 600) { observation.print(); check("main geometry became observable", false); exitApp(); }
     }
     void cleanup() override {
         // Covers early close as well, before the final completion assertion.

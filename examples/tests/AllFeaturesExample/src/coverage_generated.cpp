@@ -487,7 +487,6 @@ static void cover_other() {
     (void)operator*(af::val<int>(), af::val<const IVec2>());
     (void)operator*(af::val<int>(), af::val<const IVec3>());
     (void)operator*(af::val<float>(), af::val<const Vec4>());
-    (void)requestExitApp();
     (void)runtime();
     (void)saveScreenshotAsync(af::val<const fs::path>());
     (void)setResourceLoadConcurrency(af::val<int>());
@@ -878,7 +877,6 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<const App>().isClipping();
         (void)af::val<const App>().isDead();
         (void)af::val<const App>().isEventsEnabled();
-        (void)af::val<const App>().isExitRequested();
         (void)af::val<const App>().isMouseOver();
         (void)af::val<const App>().isVisible();
         (void)af::val<App>().keyPressed(af::val<const KeyEventArgs>());
@@ -903,7 +901,6 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<App>().onChildRemoved(af::val<Ptr>());
         (void)af::val<App>().removeAllChildren();
         (void)af::val<App>().removeChild(af::val<Ptr>());
-        (void)af::val<App>().requestExit();
         (void)af::val<App>().setActive(af::val<bool>());
         (void)af::val<App>().setCameraContext(af::val<std::shared_ptr<const CameraContext>>());
         (void)af::val<App>().setClipping(af::val<bool>());
