@@ -13,6 +13,9 @@ namespace tc = trussc;
 #if defined(LIBREMIDI_ALSA)
 #include <alsa/asoundlib.h>
 #endif
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 
 namespace {
 using namespace tcx::midi;
@@ -97,15 +100,25 @@ bool virtualPorts() {
            check(receiveNote(sink), "virtual destination received 90 3c 64");
 }
 
-// Run the main-thread queue (the Runtime does this once per host turn) until
-// `done()` or five seconds pass. The 5 s bound only ends a hang.
+// One host turn: CoreMIDI delivers port removals on the run loop of the thread
+// that created the observer (the main thread; NSApp runs it in a real app),
+// then the main-thread queue runs (the Runtime does this once per host turn).
+void hostTurn(int ms) {
+#if defined(__APPLE__)
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, ms / 1000.0, true);
+#else
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+#endif
+    tc::internal::drainMainThreadQueue();
+}
+
+// Run host turns until `done()` or five seconds pass. The 5 s bound only ends a hang.
 template <class Done>
 bool pumpUntil(Done done) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!done()) {
         if (std::chrono::steady_clock::now() >= deadline) return false;
-        tc::internal::drainMainThreadQueue();
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        hostTurn(5);
     }
     return true;
 }
@@ -142,10 +155,7 @@ bool lifecycle() {
     // An unrelated port going away is not our loss.
     other.close();
     const auto quiet = std::chrono::steady_clock::now() + std::chrono::milliseconds(600);
-    while (std::chrono::steady_clock::now() < quiet) {
-        tc::internal::drainMainThreadQueue();
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
+    while (std::chrono::steady_clock::now() < quiet) hostTurn(10);
     if (!check(input.isConnected() && output.isConnected() && inputLost == 0 && outputLost == 0,
                "lifecycle: removing another port keeps both open")) return false;
 
@@ -155,7 +165,7 @@ bool lifecycle() {
     if (!check(pumpUntil([&] { return inputLost > 0 && outputLost > 0; }), "lifecycle: both losses delivered")) return false;
     if (!check(inputLost == 1 && outputLost == 1 && !input.isConnected() && !output.isConnected() &&
                inputClosedWhenFired, "lifecycle: each fired once, with the port closed")) return false;
-    tc::internal::drainMainThreadQueue();
+    hostTurn(100);
     if (!check(inputLost == 1 && outputLost == 1, "lifecycle: no repeat")) return false;
     if (!check(!input.setup() && !output.setup(), "lifecycle: setup() fails while the port is gone")) return false;
 
@@ -167,7 +177,7 @@ bool lifecycle() {
         !check(peerSource.sendNoteOn(1, 60, 100) && receiveNote(input), "lifecycle: reconnected input receives")) return false;
     input.close();
     output.close();
-    tc::internal::drainMainThreadQueue();
+    hostTurn(100);
     return check(inputLost == 1 && outputLost == 1, "lifecycle: close() does not fire");
 }
 } // namespace
