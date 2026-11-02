@@ -40,6 +40,7 @@ struct _sapp_tc_window_t {
     int drawable=1, frame_count=0, swap_interval=0, win_id=1;
     bool draw_while_hidden=true, skip_present=false;
     double earliest_next=0, frame_duration=0, last_present=0;
+    bool last_tick_presented=false;
     struct { double smooth_dt=1.0/62.0, last=0; } timing;
     struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; } desc;
 };
@@ -55,6 +56,9 @@ static bool queued=false, nonblocking=false, hideMain=false, iconMain=false, hid
 static double mainPeriod=0, nextMain=0, previousSecondary=0, minSecondaryGap=100;
 static int secondaryDraws=0, mainWaits=0;
 static double drawAccumulator=0, previousDrawTick=0, callbackWork=0;
+static double throttledRefresh=0, switchTime=0;
+static int switchSecondary=0;
+static bool seeded_run=false;
 FRAME_SKIP
 void lowerFps(sapp_window, void*) noexcept {
     const double elapsed=clockValue-previousDrawTick;
@@ -176,6 +180,34 @@ int main() {
         // its estimator may change R. EGL leaves main due and tests a truly
         // unpaced main. Both must avoid promoting every fast pass to a tick.
         std::printf("unpaced main retains timer main=%d secondary=%d elapsed_ms=%.3f R_ms=%.3f min_gap_ms=%.3f: %s\n",main.frame_count,secondary.frame_count,(clockValue-10)*1000,_sapp_tc.refresh_period*1000,minSecondaryGap*1000,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
+    // #998: a main window throttled to half the display rate (setFps(30) on a
+    // 60 Hz display: every other tick skips its present, the skipped ticks stay
+    // timer-paced) presents every ~2R with a non-blocking swap. That interval
+    // must not teach the estimate a 30 Hz display, and after the main returns to
+    // VSYNC the secondary must keep the display rate. A poisoned estimate
+    // (seeded at 30 Hz) must also converge back once the main presents at VSYNC.
+    for (bool seeded : {false,true}) {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; main.last_present=10;
+        _sapp_tc.refresh_period=seeded ? 1.0/30 : period;
+        clockValue=nextMain=10; mainPeriod=period; tail=0; nonblocking=true; queued=false;
+        seeded_run=seeded; previousSecondary=0; minSecondaryGap=100; throttledRefresh=0; switchTime=0; switchSecondary=0;
+        main.desc.tick_cb=[](sapp_window,void*) noexcept {
+            auto* m=_sapp_tc.windows[0];
+            if (m->frame_count==300) {
+                throttledRefresh=_sapp_tc.refresh_period; switchTime=clockValue; switchSecondary=_sapp_tc.windows[1]->frame_count;
+            }
+            if (!seeded_run && m->frame_count<300 && m->frame_count%2) m->skip_present=true;
+        };
+        _sapp_tc_x11_run_loop();
+        const double rate=(secondary.frame_count-switchSecondary)/(clockValue-switchTime);
+        bool ok=std::abs(throttledRefresh-period)<period*.02 && std::abs(_sapp_tc.refresh_period-period)<period*.02
+            && std::abs(rate*period-1)<.03;
+        std::printf("throttled main keeps display estimate seeded=%d throttled_R_ms=%.3f R_ms=%.3f secondary_hz=%.2f (display %.2f): %s\n",
+            seeded,throttledRefresh*1000,_sapp_tc.refresh_period*1000,rate,1/period,ok?"PASS":"FAIL");
         failures+=!ok;
     }
     // On the main-to-timer handoff, the obsolete phase could otherwise
