@@ -92,6 +92,36 @@ void testDelivery(Mode requested) {
           fixtureEvents().update.listenerCount() == updateCount && fixtureEvents().exit.listenerCount() == exitCount);
 }
 
+struct CatchUpApp : App {
+    int steps = 0;
+    void update() override { if (++steps == 3) exitApp(7); }
+};
+void testCatchUp() {
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+    headless::active = headless::running = true;
+    headless::quitRequested = false;
+    headless::pendingSignal = headless::deliveredSignal = 0;
+    headless::frameCount = 0;
+    internal::appExitCode() = 0;
+    internal::clearExitReason();
+    auto app = internal::makeConstructedApp<CatchUpApp>();
+    auto listeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
+    auto& ctx = internal::nonWindowContext();
+    internal::recordHeadlessAttachment(app, ctx);
+    internal::HeadlessUpdateState state;
+    // Binary-exact elapsed and interval: ten steps owed, regardless of load.
+    const int savedSteps = getMaxUpdateSteps();
+    setMaxUpdateSteps(10);
+    internal::runHeadlessUpdatePass(*app, ctx, state, 10.0 / 128.0, 1.0 / 128.0);
+    setMaxUpdateSteps(savedSteps);
+    check("catch-up exitApp in step 3 prevents further update events",
+          app->steps == 3 && headless::frameCount == 3 && !headless::running
+          && internal::appExitCode() == 7);
+    internal::shutdownRuntime();
+    headless::active = false;
+    internal::endFrameworkLifetime();
+}
+
 // A worker paused before the App slot holds the notification snapshot while
 // the runner finishes. It must neither retain the App nor destroy it off-main.
 struct SnapshotProbe {
@@ -209,12 +239,7 @@ struct UdpBurstApp : App {
 void testUdpBurst(bool requestExit) {
     exitDuringUdpReceive = requestExit;
     udpBurstExits = 0;
-    // One update per pass: a late wake would otherwise owe catch-up steps, and
-    // the runner applies a cancellable exit request only after all of them.
-    const int savedSteps = getMaxUpdateSteps();
-    setMaxUpdateSteps(1);
     check("UDP burst runner exits successfully", runHeadlessApp<UdpBurstApp>(HeadlessSettings().setFps(1024)) == 0);
-    setMaxUpdateSteps(savedSteps);
     check("UDP burst App exit runs exactly once", udpBurstExits == 1);
 }
 
@@ -266,6 +291,8 @@ struct NetworkApp : App {
 
 TC_CORE_TEST_MAIN() {
     mainThread = std::this_thread::get_id();
+    getMainThreadId();
+    testCatchUp();
     testDelivery(Mode::Order);
     testDelivery(Mode::ClearBeforeApp);
     testDelivery(Mode::ClearInApp);

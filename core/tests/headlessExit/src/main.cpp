@@ -138,8 +138,7 @@ struct ExitProbeApp : App {
                 case Mode::SetupSignal: break;
             }
         } else if ((probe->mode == Mode::CancelOnce || probe->mode == Mode::ListenerVetoRequest || probe->mode == Mode::ListenerVetoCode) && probe->requests == 1 && !probe->reRequested) {
-            // Only once: a loaded runner can run several catch-up steps in one
-            // pass, and the request below stays pending until the pass ends.
+            // Only once: the second request is dispatched after this step.
             check(internal::exitReason().empty() && !headless::quitRequested,
                   "veto clears request and reason");
             probe->reRequested = true;
@@ -219,17 +218,17 @@ void testCatchUp(Mode mode, int expectedSteps) {
           "100 due steps: actual update count matches stop kind");
     check(ctx.rateSteps[rateIndex] == expectedSteps, "measured rate counts only completed steps");
     if (mode == Mode::Forced) {
-        check(result.requests == 1, "exitApp catch-up dispatches after owed updates");
+        check(result.requests == 1, "exitApp catch-up dispatches after requesting step");
     } else if (mode == Mode::CancelOnce) {
-        check(result.requests == 1 && result.updatesAtRequest == 100,
-              "cancellable request waits until all 100 steps finish");
+        check(result.requests == 1 && result.updatesAtRequest == 1,
+              "cancellable request dispatches after requesting step");
         check(headless::running && !headless::quitRequested && internal::exitReason().empty(),
               "veto leaves loop running with cleared reason/flag");
     } else {
         check(result.requests == 0, "catch-up pass did not notify an installed listener");
         if (mode == Mode::Request)
             check(!headless::running && internal::exitReason() == "request-exit-app",
-                  "request without listener stops after all 100 steps");
+                  "request without listener stops after requesting step");
     }
     internal::shutdownRuntime();
     headless::active = false;
@@ -357,11 +356,11 @@ TC_CORE_TEST_MAIN() {
     const int previousCap = getMaxUpdateSteps();
     setMaxUpdateSteps(100);
     testCatchUp(Mode::Direct, 1);
-    testCatchUp(Mode::Forced, 100);
+    testCatchUp(Mode::Forced, 1);
     testCatchUp(Mode::SignalInt, 1);
     testCatchUp(Mode::SignalTerm, 1);
-    testCatchUp(Mode::Request, 100);
-    testCatchUp(Mode::CancelOnce, 100);
+    testCatchUp(Mode::Request, 1);
+    testCatchUp(Mode::CancelOnce, 1);
     testSetupFirstPass();
     setMaxUpdateSteps(previousCap);
     std::printf("headlessExit: %d failure(s)\n", failures);
