@@ -68,6 +68,17 @@ int main() {
 }
 ```
 
+### Docs search for your AI (MCP, beta)
+
+Connect your AI tool (Claude Code, claude.ai, or any MCP client that supports Streamable HTTP) to the TrussC docs search server at `https://api.trussc.org/mcp`.
+Your AI can then find the right docs from a rough question, even when you don't know the API name.
+
+```bash
+claude mcp add --transport http --scope user trussc-docs https://api.trussc.org/mcp
+```
+
+See [GET_STARTED.md](docs/GET_STARTED.md#docs-search-for-your-own-ai-mcp-beta) for details, including what is logged.
+
 ## Examples
 
 TrussC comes with over 30 examples covering graphics, 3D, sound, video, and more.
@@ -140,6 +151,7 @@ src/                  # Platform-specific implementations
 
 - [GET_STARTED.md](docs/GET_STARTED.md) - Getting started guide
 - [API Reference](https://trussc.org/reference/) - Full API reference (web)
+- [Docs search MCP (beta)](docs/GET_STARTED.md#docs-search-for-your-own-ai-mcp-beta) - Let your AI search the TrussC docs at `https://api.trussc.org/mcp`
 - [TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - API mapping for oF users
 - [ADDONS.md](docs/ADDONS.md) - How to use addons
 - [AI_AUTOMATION.md](docs/AI_AUTOMATION.md) - MCP Integration & Automation
