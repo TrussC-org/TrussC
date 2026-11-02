@@ -776,9 +776,9 @@ struct PumpApp : App {
         if (!g_pumpSeen && countLogs(LogLevel::Warning, g_offMainLine) == g_linesBefore + 1) {
             g_pumpSeen = true;
             playCopyOffMain();   // held back by the rate limit: only the exit flush logs it
-            requestExit();
+            exitApp();
         }
-        if (frames >= 400) requestExit();   // ~2 s: the pump never reported
+        if (frames >= 400) exitApp();   // ~2 s: the pump never reported
     }
 };
 

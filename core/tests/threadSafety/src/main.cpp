@@ -75,7 +75,7 @@ struct StressApp : App {
         volatile uint64_t acc = 0;
         for (auto& c : snap) acc += c->getInstanceId();
         (void)acc;
-        if (++frames >= 150) requestExit();
+        if (++frames >= 150) exitApp();
     }
 
     void exit() override {
@@ -135,7 +135,7 @@ struct FloodApp : App {
     void update() override {
         g_floodMaxPending = std::max(g_floodMaxPending, internal::getMainThreadQueuePending());
         if (g_floodWorkerActive.load()) ++g_floodFramesWhileActive;
-        if (++frames >= kFloodFrames) requestExit();
+        if (++frames >= kFloodFrames) exitApp();
     }
 
     void exit() override {

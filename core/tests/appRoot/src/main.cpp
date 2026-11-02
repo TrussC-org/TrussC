@@ -13,7 +13,7 @@ struct Root : App {
     void exit() override { ++exits; check("root and Window detached before exit", !getRootNode() && !getWindow()); }
     void cleanup() override { ++cleanups; check("root stays detached through cleanup", !getRootNode() && !getWindow()); }
 };
-struct HeadlessRoot : Root { void update() override { requestExit(); } };
+struct HeadlessRoot : Root { void update() override { exitApp(); } };
 struct Child : Node { void cleanup() override { ++childCleanups; } };
 }
 TC_CORE_TEST_MAIN() {

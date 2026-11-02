@@ -63,7 +63,7 @@ Runtime also owns OS session query/commit. Win32 uses a hidden top-level control
 
 The OS-only watchdog bounds one idle ending across all Apps, including atexit handlers and static destructors; it remains armed until process exit. On Windows, loaded DLLs' destructors run after the OS stops the watchdog thread and are bounded only by the OS deadline. Its worker/storage are prepared at run admission and armed only for an idle commit. Runtime::setLogoutTimeout(float seconds) defaults to 3 seconds per run: negative/NaN log Error and keep the old value, zero ends immediately, and positive infinity disables the deadline. Ordinary Cmd+Q/exitApp/last-window close never arms it. Windows may enforce an earlier deadline; no fixed macOS logout allowance is asserted. App::exit should save briefly. On accepted ordinary macOS termination, Runtime retires every Window before returning NSTerminateNow, so AppKit cannot later release GPU targets after sg/sgl shutdown. Linux hosts without a session callback and mobile/Web host-stop events carry no desktop logout promise.
 
-When a Window's root App, or the headless root App, calls `exitApp()` or `requestExitApp()` in `setup()`, Runtime asks `exitRequested` as setup returns, before audio subscription or the next process services. If accepted, normal ending runs and no later console, update or draw callback runs. A veto continues normal operation. A child App leaves the request pending until the current tree traversal unwinds; Runtime handles it before the next process services. The current traversal may continue, but no App callbacks run after cleanup.
+When a Window's root App, or the headless root App, calls `exitApp()` in `setup()`, Runtime asks `exitRequested` as setup returns, before audio subscription or the next process services. If accepted, normal ending runs and no later console, update or draw callback runs. A veto continues normal operation. A child App leaves the request pending until the current tree traversal unwinds; Runtime handles it before the next process services. The current traversal may continue, but no App callbacks run after cleanup.
 
 Argument-free Window APIs in App callbacks, owned listeners and async completions resolve the App token. Unowned code must have exactly one open Window to omit its target; zero or multiple Windows produce an error. MCP uses positive Window IDs and returns the available IDs for an ambiguous or invalid target. Every development Window title carries [MCP].
 
@@ -1609,18 +1609,17 @@ This also works on the **default screen** (no camera scope): `z = 0` is pixel-id
 
 `fill()` / `noFill()` **apply to `beginShape`** (and its shapes) but **not to `beginStroke`.** A stroke is a line (StrokeMesh) with no notion of fill, so `fill` / `noFill` are ignored there. Use `beginShape` or `Path::drawFill()` for filled shapes, and `beginStroke` / `drawStroke()` for thick lines — split by role.
 
-### How do I quit the app? (exitApp vs requestExitApp)
+### How do I quit the app? (exitApp)
 
-Both calls request quit in windowed and headless apps. At the next safe point,
-Runtime asks `exitRequested`; a veto keeps the app running. A request from a
-root App's `setup()` is queried as setup returns. In headless mode, requests
-from `update()` are queried after the current update pass.
-
-- **`requestExitApp()`** requests exit without changing the exit code.
-- **`exitApp(code = 0)`** requests exit and sets the exit code.
+`exitApp(code = 0)` is the one way to quit, in windowed and headless apps. It
+requests exit and sets the exit code. At the next safe point, Runtime asks
+`exitRequested`; a veto keeps the app running. A request from a root App's
+`setup()` is queried as setup returns. In headless mode, requests from
+`update()` are queried after the current update pass. `requestExitApp()` and
+`App::requestExit()` are deprecated aliases that call `exitApp()`.
 
 Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set
-`args.cancel = true` to cancel either request, for example for a save prompt:
+`args.cancel = true` to cancel the request, for example for a save prompt:
 ```cpp
 listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
     if (hasUnsavedChanges) e.cancel = true;   // stops the exit
@@ -1839,7 +1838,7 @@ int main(int argc, char** argv) {
     return 1;                                                            // exit code
 }
 ```
-If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp(code)` or `requestExitApp()` (both vetoable through `exitRequested`). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
+If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp(code)` (vetoable through `exitRequested`). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
 
 ### Windows: my console tool detaches from cmd / keeps running after I close the console — how do I make it a real console app?
 
@@ -1889,7 +1888,7 @@ For the other direction, path → string (display, `Font`, JSON, a string compar
 ### "Window / media / basics" → which API?
 
 - Window: `setWindowTitle()` / `setWindowSize()` / `setFullscreen(bool)` / `toggleFullscreen()`
-- Quit: `requestExitApp()` / `exitApp(code)` (both vetoable through `exitRequested`)
+- Quit: `exitApp(code)` (vetoable through `exitRequested`)
 - Play a sound: `Sound` (a quick blip: `beep()`) / mic input: `MicInput`
 - Play video: `VideoPlayer` / webcam: `VideoGrabber` (both unsupported on Android)
 - Draw text: `Font` (TTF / system fonts) / `drawBitmapString` (built-in bitmap)
@@ -2656,7 +2655,7 @@ Vec2 operator*(float s, const Vec2 & v) [+4]  // Multiplies values according to 
 PI ⚠️deprecated  // Represents the ratio of a circle's circumference to its diameter.
 QUARTER_TAU  // Defines a quarter turn in radians.
 float remainder(float x, float y) [std]  // Returns the IEEE floating-point remainder.
-void requestExitApp()  // Asks the process to quit, keeping the current exit code.
+void requestExitApp() ⚠️deprecated  // Asks the process to quit, through a deprecated alias of exitApp().
 Right  // Provides shorthand for `Direction::Right`.
 Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
@@ -2678,7 +2677,7 @@ void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per
 void App::exit()  // Called once when the App ends, right before cleanup().
 void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto this Window, with their paths.
 Window * App::getWindow() const  // Returns the window this App is attached to, or nullptr.
-bool App::isExitRequested() const  // Returns whether requestExit() has been called on this App.
+bool App::isExitRequested() const ⚠️deprecated  // Returns whether the deprecated requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
 void App::keyReleased(const KeyEventArgs & e) [+1]  // Called when a key is released.
 void App::mouseDragged(const MouseDragEventArgs & e) [+1]  // Called when the pointer moves while a mouse button is held.
@@ -2689,7 +2688,7 @@ void App::mouseScrolled(const ScrollEventArgs & e) [+1]  // Called when the mous
 bool App::onMouseDrag(const MouseDragEventArgs & e)  // Handles App-root mouse input without default consumption.
 bool App::onMousePress(const MouseEventArgs & e)  // Handles App-root mouse input without default consumption.
 bool App::onMouseRelease(const MouseEventArgs & e)  // Handles App-root mouse input without default consumption.
-void App::requestExit()  // Stops a headless app (runHeadlessApp); a windowed app ignores it.
+void App::requestExit() ⚠️deprecated  // Asks the process to quit, through a deprecated alias of exitApp().
 void App::setSize(float w, float h)  // Changes the size of the window this App runs in.
 void App::touchMoved(const TouchEventArgs & touch)  // Called when fingers move on the screen.
 void App::touchPressed(const TouchEventArgs & touch)  // Called when one or more fingers touch the screen.
@@ -5131,11 +5130,10 @@ bindCursorImage(Cursor::Custom1, fboImg, 16, 16);
 ```
 
 ### Exit App
-Both calls request process quit through `exitRequested`; listeners can veto.
+`exitApp()` requests process quit through `exitRequested`; listeners can veto.
 ```cpp
 exitApp();           // Request quit with exit code 0
 exitApp(1);          // Request quit with exit code 1
-requestExitApp();    // Request quit without changing the exit code
 ```
 
 Remember confirmation before requesting quit again, because `exitApp()` sends

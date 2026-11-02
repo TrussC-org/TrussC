@@ -184,7 +184,7 @@ struct HeadlessUpdateState {
 // One pass, with elapsed time supplied by the runner (or a deterministic
 // test). A quit request is dispatched after the requesting step; remaining
 // owed steps are dropped even if the request is vetoed.
-inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
+inline void runHeadlessUpdatePass(App&, WindowContext& ctx,
                                   HeadlessUpdateState& state, double elapsed,
                                   double targetDelta) {
     RuntimeActivityScope activity;
@@ -195,7 +195,7 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
     int ran = 0;
     for (; ran < adv.steps; ++ran) {
         headless::pollExitSignal();
-        if (!headless::running || app.isExitRequested() || headless::quitRequested.load()) break;
+        if (!headless::running || headless::quitRequested.load()) break;
         ctx.updateDeltaTime = targetDelta;
         EntryStackGuard guard(AppEntry::Update);
         // Services such as Box2d guard against stepping twice in one update.
@@ -209,8 +209,7 @@ inline void runHeadlessUpdatePass(App& app, WindowContext& ctx,
         (elapsed - adv.droppedTime) / targetDelta - (adv.steps - ran));
 
     headless::pollExitSignal();
-    if (headless::running && !app.isExitRequested()
-            && headless::quitRequested.exchange(false)) {
+    if (headless::running && headless::quitRequested.exchange(false)) {
         if (dispatchExitRequested()) headless::running = false;
         headless::pollExitSignal();
     }
@@ -338,7 +337,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     auto lastTime = std::chrono::steady_clock::now();
     internal::HeadlessSleeper sleeper;
 
-    while (headless::running && !app->isExitRequested()) {
+    while (headless::running) {
         headless::pollExitSignal();
         if (!headless::running) break;
         auto now = std::chrono::steady_clock::now();
@@ -350,7 +349,7 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
             internal::HostTurnScope turn;
             internal::runHeadlessUpdatePass(*app, ctx, updateState, elapsed, targetDelta);
         }
-        if (!headless::running || app->isExitRequested()) break;
+        if (!headless::running) break;
 
         // Sleep until the next step is due (at most 1 ms), counted from the
         // pass start: the steps above already took part of that time.

@@ -634,7 +634,7 @@ struct HeadlessProbe : App {
     void update() override {
         check("headless draw count zero", getDrawCount() == 0);
         check("headless frame equals update", getFrameCount() == getUpdateCount());
-        requestExit();
+        exitApp();
     }
 };
 }

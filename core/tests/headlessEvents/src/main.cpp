@@ -210,7 +210,7 @@ struct UdpBurstApp : App {
         receive = receiver.onReceive.listen([this](UdpReceiveEventArgs& e) {
             ordered = ordered && std::string(e.data.begin(), e.data.end()) == std::to_string(received);
             onMain = onMain && std::this_thread::get_id() == mainThread;
-            if (++received == 1 && exitDuringUdpReceive) requestExitApp();
+            if (++received == 1 && exitDuringUdpReceive) exitApp();
         });
         bool sent = true;
         for (int i = 0; i < udpBurstSize; ++i) {

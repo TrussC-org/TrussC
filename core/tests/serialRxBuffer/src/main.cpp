@@ -74,7 +74,7 @@ struct WarningDeliveryApp : App {
     void setup() override { deadline = chrono::steady_clock::now() + chrono::seconds(10); }
     void update() override {
         if ((*waitingBacklog == 1 && *waitingLoss == 1) || chrono::steady_clock::now() > deadline)
-            requestExit();
+            exitApp();
     }
 };
 int appUpdates = 0;

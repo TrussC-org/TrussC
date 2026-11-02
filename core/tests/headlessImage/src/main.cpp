@@ -134,7 +134,7 @@ public:
         roundTrip(true);
     }
 
-    void update() override { requestExit(); }
+    void update() override { exitApp(); }
 };
 
 } // namespace

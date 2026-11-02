@@ -1444,7 +1444,7 @@ struct SlowHeadlessApp : App {
         // 20 ms of work per 16.7 ms step: the loop can never catch up.
         auto until = chrono::steady_clock::now() + chrono::milliseconds(20);
         while (chrono::steady_clock::now() < until) {}
-        if (n >= 80) requestExit();
+        if (n >= 80) exitApp();
     }
 
     void exit() override {
@@ -1471,7 +1471,7 @@ struct LightHeadlessApp : App {
         }
         previousUpdate = now;
         if (++n > 15) g_lightRates.push_back(getFrameRate());
-        if (n >= 75) requestExit();
+        if (n >= 75) exitApp();
     }
 };
 
@@ -1488,7 +1488,7 @@ struct LongPassHeadlessApp : App {
         if (pass != passTime) {
             passTime = pass;
             inPass = 0;
-            if (++passes >= 8) requestExit();
+            if (++passes >= 8) exitApp();
             else sleepMs(15);
         }
         g_lpMaxPerPass = max(g_lpMaxPerPass, ++inPass);
@@ -1519,7 +1519,7 @@ struct FastHeadlessApp : App {
                 const double s = chrono::duration<double>(now - timeA).count();
                 if (s >= 0.5) {
                     g_fRate = (updates - countA) / s;
-                    requestExit();
+                    exitApp();
                 }
             }
         }
@@ -1540,7 +1540,7 @@ struct StallHeadlessApp : App {
         if (pass != passTime) { passTime = pass; inPass = 0; }
         g_sMaxPerPass = max(g_sMaxPerPass, ++inPass);
         if (++updates == 5) sleepMs(150);
-        if (updates >= 40) requestExit();
+        if (updates >= 40) exitApp();
     }
 };
 
