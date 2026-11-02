@@ -967,6 +967,7 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().audioDeviceChanged;
         (void)af::val<AudioEngine>().audioIn;
         (void)af::val<AudioEngine>().audioOut;
+        (void)af::val<AudioEngine>().close();
         (void)af::val<AudioEngine>().getAnalysisBuffer(af::val<float *>(), af::val<size_t>());
         (void)af::val<const AudioEngine>().getBufferSize();
         (void)af::val<const AudioEngine>().getChannels();
@@ -977,11 +978,15 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<const AudioEngine>().getStats();
         (void)af::val<AudioEngine>().init();
         (void)af::val<AudioEngine>().init(af::val<const AudioSettings>());
+        (void)af::val<const AudioEngine>().isConnected();
         (void)af::val<const AudioEngine>().isInitialized();
         (void)af::val<AudioEngine>().listDevices();
         (void)af::val<AudioEngine>().mixAudio(af::val<float *>(), af::val<int>(), af::val<int>());
+        (void)af::val<AudioEngine>().onDisconnect;
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundSource>>());
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundBuffer>>());
+        (void)af::val<AudioEngine>().setup();
+        (void)af::val<AudioEngine>().setup(af::val<const AudioSettings>());
         (void)af::val<AudioEngine>().shutdown();
         (void)af::val<AudioEngine>().waitForAudioCallbacks();
     }
@@ -1310,6 +1315,13 @@ struct Cover_CurveStyle : af::Scope<CurveStyle> {
         (void)af::val<CurveStyle>().mode;
         (void)af::val<CurveStyle>().resolution;
         (void)af::val<CurveStyle>().tolerance;
+    }
+};
+
+struct Cover_DeviceDisconnectEventArgs : af::Scope<DeviceDisconnectEventArgs> {
+    ~Cover_DeviceDisconnectEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<DeviceDisconnectEventArgs>().reason;
     }
 };
 
@@ -2201,13 +2213,17 @@ struct Cover_MicInput : af::Scope<MicInput> {
     ~Cover_MicInput(); // Never instantiated.
     static void run() {
         (void)MicInput();
+        (void)af::val<MicInput>().close();
         (void)af::val<MicInput>().getBuffer(af::val<float *>(), af::val<size_t>());
         (void)af::val<const MicInput>().getDeviceName();
         (void)af::val<const MicInput>().getSampleRate();
+        (void)af::val<const MicInput>().isConnected();
         (void)af::val<const MicInput>().isRunning();
         (void)af::val<const MicInput>().isStarting();
         (void)af::val<MicInput>().onAudioData(af::val<const float *>(), af::val<size_t>());
+        (void)af::val<MicInput>().onDisconnect;
         (void)af::val<MicInput>().onStart;
+        (void)af::val<MicInput>().setup();
         (void)af::val<MicInput>().start(af::val<int>());
         (void)af::val<MicInput>().startAsync(af::val<int>());
         (void)af::val<MicInput>().stop();
@@ -3411,6 +3427,7 @@ struct Cover_Serial : af::Scope<Serial> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
         (void)af::val<Serial>().setup(af::val<const std::string>(), af::val<int>());
+        (void)af::val<Serial>().setup();
         (void)af::val<Serial>().setup(af::val<int>(), af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
@@ -3432,16 +3449,6 @@ struct Cover_SerialDeviceInfo : af::Scope<SerialDeviceInfo> {
         (void)af::val<const SerialDeviceInfo>().getDeviceID();
         (void)af::val<const SerialDeviceInfo>().getDeviceName();
         (void)af::val<const SerialDeviceInfo>().getDevicePath();
-    }
-};
-
-struct Cover_SerialDisconnectEventArgs : af::Scope<SerialDisconnectEventArgs> {
-    ~Cover_SerialDisconnectEventArgs(); // Never instantiated.
-    static void run() {
-        (void)af::val<SerialDisconnectEventArgs>().baudRate;
-        (void)af::val<SerialDisconnectEventArgs>().portName;
-        (void)af::val<SerialDisconnectEventArgs>().reason;
-        (void)af::val<SerialDisconnectEventArgs>().wasClean;
     }
 };
 
@@ -4382,6 +4389,9 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
         (void)af::val<const VideoGrabber>().hasTexture();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoGrabber>().isConnected();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<const VideoGrabber>().isFrameNew();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -4395,6 +4405,9 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().listDevices();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().onDisconnect;
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().requestCameraPermission();
@@ -4434,6 +4447,7 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().setup(af::val<int>(), af::val<int>());
+        (void)af::val<VideoGrabber>().setup();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().update();
@@ -5042,6 +5056,7 @@ void af::coverGenerated() {
     af_generated::Cover_ConsoleEventArgs::run();
     af_generated::Cover_CoreEvents::run();
     af_generated::Cover_CurveStyle::run();
+    af_generated::Cover_DeviceDisconnectEventArgs::run();
     af_generated::Cover_DeviceLostEventArgs::run();
     af_generated::Cover_DragDropEventArgs::run();
     af_generated::Cover_EasyCam::run();
@@ -5115,7 +5130,6 @@ void af::coverGenerated() {
     af_generated::Cover_SendResult::run();
     af_generated::Cover_Serial::run();
     af_generated::Cover_SerialDeviceInfo::run();
-    af_generated::Cover_SerialDisconnectEventArgs::run();
     af_generated::Cover_Shader::run();
     af_generated::Cover_ShaderVertex::run();
     af_generated::Cover_Sound::run();

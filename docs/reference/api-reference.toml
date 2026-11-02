@@ -1565,6 +1565,26 @@ details.ko = '''
 - 리스너가 사용하는 상태를 파괴하기 전에 `AudioEngine::waitForAudioCallbacks`의 절차를 따르세요.
 '''
 
+["AudioEngine::close"]
+category = "audioengine"
+keywords = ["close", "stop", "disconnect", "release", "device lifecycle"]
+description.en = "Stops and closes the audio output device (alias of shutdown)."
+description.ja = "音声出力デバイスを停止して閉じる（shutdown の別名）。"
+description.ko = "오디오 출력 장치를 정지하고 닫는다(shutdown의 별칭)."
+related = ["AudioEngine::shutdown", "AudioEngine::setup", "AudioEngine::isConnected", "AudioEngine::onDisconnect"]
+details.en = '''
+- The device lifecycle name of `shutdown()`; it does the same. `isConnected()` is false afterwards, and `setup()` opens the device again (the system default device, or the one named in `setup(settings)`).
+- `close()` never fires `onDisconnect`; that event is only for a device the OS reports lost. A loss that was reported but not delivered yet is dropped.
+'''
+details.ja = '''
+- `shutdown()` のデバイスライフサイクルでの名前で、動作は同じです。呼んだ後 `isConnected()` は false になり、`setup()` でデバイスを開き直せます（システム既定のデバイス、または `setup(settings)` で指定したデバイス）。
+- `close()` は `onDisconnect` を発火しません。そのイベントは、OS がデバイスの喪失を報告したときだけのものです。報告済みでまだ通知していない喪失は破棄します。
+'''
+details.ko = '''
+- `shutdown()`의 장치 수명 주기 이름이며 동작은 같습니다. 호출 후 `isConnected()`는 false가 되고 `setup()`으로 장치를 다시 열 수 있습니다(시스템 기본 장치 또는 `setup(settings)`로 지정한 장치).
+- `close()`는 `onDisconnect`를 발생시키지 않습니다. 이 이벤트는 OS가 장치 손실을 보고했을 때만 발생합니다. 보고되었지만 아직 전달되지 않은 손실은 버립니다.
+'''
+
 ["AudioEngine::getAnalysisBuffer"]
 description.en = "Copies recent audio output into a mono analysis buffer."
 description.ja = "直近の音声出力をモノラルの解析バッファにコピーする。"
@@ -1758,6 +1778,7 @@ details.en = '''
 - `getStats()` retains the last initialization failure until initialization succeeds. Retry later on a timer, such as once per second, or on user action; each failed attempt opens the device and logs again.
 - `Sound::load*()` calls argument-free `init()` when the engine is uninitialized, whereas `play()` does not. After failed `init(settings)`, retry with those settings before loading sounds if the requested device is required.
 - Audio listener threading restrictions are described in `AudioEngine::audioOut`.
+- `setup(settings)` and `setup()` are the same calls under the device lifecycle name; see `AudioEngine::setup`. `init()` and `setup()` open the system default device; to use a specific device, pass `AudioSettings` with `deviceName`. The same applies to any reopen of a closed engine: after `close()`, after the OS stopped the device, or from `Sound::load*()`.
 '''
 details.ja = '''
 - `init(settings)` は `AudioSettings` に従って出力を開きます。デバイス名が空ならシステム既定を選びます。名前に一致するデバイスがなければ警告を出し、システム既定を使います。
@@ -1770,6 +1791,7 @@ details.ja = '''
 - `getStats()` は次の初期化成功まで最後の初期化失敗を保持します。失敗するたびにデバイスを開き直してログを出すため、1 秒に 1 回程度のタイマーやユーザー操作で再試行してください。
 - エンジンが未初期化の場合、`Sound::load*()` は引数なしの `init()` を呼びますが、`play()` は呼びません。`init(settings)` に失敗した後、指定したデバイスが必要なら、サウンドの読み込み前に同じ設定で再試行してください。
 - 音声リスナーのスレッドに関する制約は、`AudioEngine::audioOut` を参照してください。
+- `setup(settings)` と `setup()` は、デバイスライフサイクルでの名前で呼ぶ同じ処理です。`AudioEngine::setup` を参照してください。`init()` と `setup()` はシステム既定のデバイスを開きます。特定のデバイスを使うには、`deviceName` を指定した `AudioSettings` を渡します。閉じたエンジンを開き直すときも同じで、`close()` の後、OS がデバイスを止めた後、`Sound::load*()` からの場合も該当します。
 '''
 details.ko = '''
 - `init(settings)`는 `AudioSettings`에 따라 출력을 엽니다. 장치 이름이 비어 있으면 시스템 기본 장치를 선택합니다. 일치하는 이름이 없으면 경고를 기록하고 시스템 기본 장치를 사용합니다.
@@ -1782,8 +1804,9 @@ details.ko = '''
 - `getStats()`는 다음 초기화 성공까지 마지막 초기화 실패를 유지합니다. 실패할 때마다 장치를 다시 열고 로그를 기록하므로 약 1초 간격의 타이머나 사용자 조작으로 재시도하세요.
 - 엔진이 초기화되지 않았으면 `Sound::load*()`는 인수 없는 `init()`을 호출하지만 `play()`는 호출하지 않습니다. `init(settings)` 실패 후 지정 장치가 필요하면 사운드를 로드하기 전에 같은 설정으로 재시도하세요.
 - 오디오 리스너의 스레드 제약은 `AudioEngine::audioOut`을 참조하세요.
+- `setup(settings)`와 `setup()`은 장치 수명 주기 이름으로 부르는 같은 호출입니다. `AudioEngine::setup`을 참조하세요. `init()`과 `setup()`은 시스템 기본 장치를 엽니다. 특정 장치를 사용하려면 `deviceName`을 지정한 `AudioSettings`를 전달하세요. 닫힌 엔진을 다시 열 때도 같아서 `close()` 후, OS가 장치를 정지시킨 후, `Sound::load*()`에서도 해당합니다.
 '''
-related = ["AudioSettings", "AudioEngine::audioDeviceChanged"]
+related = ["AudioSettings", "AudioEngine::audioDeviceChanged", "AudioEngine::setup"]
 snippet = '''
 void tcApp::setup() {
     AudioSettings settings;
@@ -1793,6 +1816,29 @@ void tcApp::setup() {
 }
 '''
 
+["AudioEngine::isConnected"]
+category = "audioengine"
+keywords = ["connected", "running", "unplug", "device lost", "device lifecycle"]
+description.en = "Returns whether the audio output device is open and running."
+description.ja = "音声出力デバイスが開いて動作中かを返す。"
+description.ko = "오디오 출력 장치가 열려 실행 중인지 반환한다."
+related = ["AudioEngine::setup", "AudioEngine::close", "AudioEngine::onDisconnect", "AudioEngine::isInitialized"]
+details.en = '''
+- Returns `true` only while the device is open: after a successful `setup()` or `init()`, until `close()`, `shutdown()`, a failed re-initialization, or a device the OS reported stopped. It is already `false` when `onDisconnect` fires.
+- It reads an atomic, so any thread may call it. `isInitialized()` is the older name for the same state.
+- A backend that does not report the stop of a device that went away leaves this `true` while the audio is silent. See `AudioEngine::onDisconnect`.
+'''
+details.ja = '''
+- デバイスが開いている間だけ `true` を返します。`setup()` または `init()` の成功後から、`close()`、`shutdown()`、再初期化の失敗、OS が停止を報告したデバイスのいずれかまでです。`onDisconnect` が発火する時点で、すでに `false` です。
+- アトミック変数を読むだけなので、どのスレッドからでも呼べます。`isInitialized()` は同じ状態を指す古い名前です。
+- なくなったデバイスの停止をバックエンドが報告しない場合は、音が無音になっても `true` のままです。`AudioEngine::onDisconnect` を参照してください。
+'''
+details.ko = '''
+- 장치가 열려 있는 동안에만 `true`를 반환합니다. `setup()` 또는 `init()` 성공 후부터 `close()`, `shutdown()`, 재초기화 실패, OS가 정지를 보고한 장치 중 하나가 발생할 때까지입니다. `onDisconnect`가 발생하는 시점에는 이미 `false`입니다.
+- 원자 변수를 읽을 뿐이므로 어느 스레드에서든 호출할 수 있습니다. `isInitialized()`는 같은 상태를 가리키는 이전 이름입니다.
+- 사라진 장치의 정지를 백엔드가 보고하지 않으면 소리가 무음이 되어도 `true`로 남습니다. `AudioEngine::onDisconnect`를 참조하세요.
+'''
+
 ["AudioEngine::isInitialized"]
 category = "audioengine"
 keywords = ["ready", "running", "status"]
@@ -1800,16 +1846,19 @@ description.en = "Returns whether audio output is initialized."
 description.ja = "音声出力が初期化済みかを返す。"
 description.ko = "오디오 출력이 초기화되었는지 반환한다."
 details.en = '''
-- Returns `true` after successful `init()` and `false` before initialization, after failed initialization or reinitialization, and after `shutdown()`.
+- Returns `true` after successful `init()` and `false` before initialization, after failed initialization or reinitialization, after `shutdown()`, and after the OS reported the device stopped.
 - Successful initialization with the silent Null backend also returns `true`.
+- This is the older name of `isConnected()`; both return the same state.
 '''
 details.ja = '''
-- `init()` が成功すると `true` を返します。初期化前、初期化や再初期化の失敗後、`shutdown()` の後は `false` を返します。
+- `init()` が成功すると `true` を返します。初期化前、初期化や再初期化の失敗後、`shutdown()` の後、OS がデバイスの停止を報告した後は `false` を返します。
 - 無音の Null バックエンドで初期化に成功した場合も `true` を返します。
+- `isConnected()` の古い名前で、どちらも同じ状態を返します。
 '''
 details.ko = '''
-- `init()`이 성공하면 `true`를 반환합니다. 초기화 전, 초기화나 재초기화 실패 후, `shutdown()` 후에는 `false`를 반환합니다.
+- `init()`이 성공하면 `true`를 반환합니다. 초기화 전, 초기화나 재초기화 실패 후, `shutdown()` 후, OS가 장치 정지를 보고한 후에는 `false`를 반환합니다.
 - 무음인 Null 백엔드로 초기화에 성공한 경우에도 `true`를 반환합니다.
+- `isConnected()`의 이전 이름이며 둘 다 같은 상태를 반환합니다.
 '''
 
 ["AudioEngine::listDevices"]
@@ -1833,6 +1882,46 @@ details.ko = '''
 - iOS에서는 열거 시 오디오 세션을 변경하지 않습니다. SoloAmbient에서 세션을 활성화하기 전에는 현재 경로에 입력이 없을 수 있습니다.
 '''
 related = ["AudioDeviceInfo"]
+
+["AudioEngine::onDisconnect"]
+category = "audioengine"
+keywords = ["unplug", "disconnect", "device lost", "usb audio", "bluetooth", "headset"]
+description.en = "Reports when the OS says the audio output device stopped."
+description.ja = "OS が音声出力デバイスの停止を報告したことを通知する。"
+description.ko = "OS가 오디오 출력 장치 정지를 보고했음을 알린다."
+related = ["DeviceDisconnectEventArgs", "AudioEngine::isConnected", "AudioEngine::setup", "AudioEngine::close", "AudioEngine::audioDeviceChanged"]
+details.en = '''
+- This `Event<DeviceDisconnectEventArgs>` fires once per open device, and only when the OS or the audio library reports that the running output device stopped by itself, for example a USB audio interface that was unplugged or a Bluetooth headset that was switched off while it was the chosen device. `reason` says what happened. `isConnected()` is already false when it fires.
+- It fires on the main thread at the Runtime's next host turn, never on the audio thread; the audio thread only records the stop. It does not fire without a running app loop (`runApp()` or `runHeadlessApp()`).
+- `close()`, `shutdown()`, a re-initialization with `setup()` or `init()`, and a reroute to a new OS default device never fire it. Following the default device is not a loss. If the app reopens the device before the event is delivered, the pending loss is dropped.
+- Which backends report a stop depends on the OS and driver. Where the backend says nothing about a device that went away, the audio just stops and `isConnected()` stays `true`; the engine does not poll. PulseAudio also reports a suspended sink as a stop and then resumes by itself.
+- To open the device again, call `setup()` / `setup(settings)` again. Nothing is rerouted or retried by the engine.
+'''
+details.ja = '''
+- この `Event<DeviceDisconnectEventArgs>` は、開いているデバイスごとに 1 回、OS またはオーディオライブラリが「動作中の出力デバイスが自ら停止した」と報告したときだけ発火します。たとえば、選択中の USB オーディオインターフェースを抜いた場合や、Bluetooth ヘッドセットの電源を切った場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- Runtime の次のホストターンでメインスレッドで発火し、オーディオスレッドでは発火しません。オーディオスレッドは停止を記録するだけです。アプリのループ（`runApp()` または `runHeadlessApp()`）が動いていないときは発火しません。
+- `close()`、`shutdown()`、`setup()` や `init()` による再初期化、新しい OS 既定デバイスへの再ルーティングでは発火しません。既定デバイスに追従することは喪失ではありません。通知が届く前にアプリがデバイスを開き直した場合、保留中の喪失は破棄します。
+- どのバックエンドが停止を報告するかは OS とドライバーによります。なくなったデバイスについてバックエンドが何も報告しない場合は、音が止まるだけで `isConnected()` は `true` のままです。エンジンはポーリングしません。PulseAudio は、サスペンドされたシンクも停止として報告し、その後自動で復帰します。
+- デバイスを開き直すには、`setup()` / `setup(settings)` をもう一度呼びます。エンジンは再ルーティングも再試行もしません。
+'''
+details.ko = '''
+- 이 `Event<DeviceDisconnectEventArgs>`는 열린 장치마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 출력 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 선택한 USB 오디오 인터페이스를 뽑았거나 Bluetooth 헤드셋의 전원을 껐을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- Runtime의 다음 호스트 턴에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 오디오 스레드는 정지를 기록만 합니다. 앱 루프(`runApp()` 또는 `runHeadlessApp()`)가 실행 중이 아니면 발생하지 않습니다.
+- `close()`, `shutdown()`, `setup()`이나 `init()`에 의한 재초기화, 새로운 OS 기본 장치로의 경로 변경에서는 발생하지 않습니다. 기본 장치를 따라가는 것은 손실이 아닙니다. 이벤트가 전달되기 전에 앱이 장치를 다시 열면 대기 중인 손실은 버립니다.
+- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 사라진 장치에 대해 백엔드가 아무것도 보고하지 않으면 소리만 멈추고 `isConnected()`는 `true`로 남습니다. 엔진은 폴링하지 않습니다. PulseAudio는 일시 중단된 싱크도 정지로 보고한 뒤 스스로 복귀합니다.
+- 장치를 다시 열려면 `setup()` / `setup(settings)`를 다시 호출하세요. 엔진은 경로 변경도 재시도도 하지 않습니다.
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+EventListener lostListener;
+
+// tcApp.cpp
+void tcApp::setup() {
+    lostListener = AudioEngine::getInstance().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning() << "audio lost: " << e.reason;
+    });
+}
+'''
 
 ["AudioEngine::play"]
 description.en = "Starts a mixer voice for an audio source."
@@ -1872,6 +1961,43 @@ void tcApp::setup() {
 }
 '''
 
+["AudioEngine::setup"]
+category = "audioengine"
+keywords = ["setup", "open", "reopen", "device lifecycle", "default device", "select device"]
+description.en = "Opens the audio output device (the same as init)."
+description.ja = "音声出力デバイスを開く（init と同じ）。"
+description.ko = "오디오 출력 장치를 연다(init과 같다)."
+related = ["AudioEngine::init", "AudioEngine::isConnected", "AudioEngine::close", "AudioEngine::onDisconnect", "AudioEngine::listDevices", "AudioSettings"]
+details.en = '''
+- `setup(settings)` is `init(settings)` and `setup()` is `init()`, under the device lifecycle name. `setup()` and `init()` open the system default device; to use a specific device, pass `AudioSettings` with `deviceName` (names come from `AudioEngine::listDevices()`). See `AudioEngine::init` for the rules of each setting and for failure handling.
+- This holds for any reopen of a closed engine: after `close()`, after the OS stopped the device, or from `Sound::load*()`, which calls `init()` while the engine is not connected. `setup()` keeps the last sample rate, channel count, buffer size and polyphony.
+- Returns `true` when the device is open. On failure it returns `false` and logs an error through `logError("AudioEngine")`; the device that was open is closed first, so the engine stays stopped. On a running engine it re-initializes live, with a short gap in the sound, and does not fire `onDisconnect`.
+- To open the device again after a loss, call `setup()` / `setup(settings)` again. See `AudioEngine::onDisconnect`.
+'''
+details.ja = '''
+- `setup(settings)` は `init(settings)`、`setup()` は `init()` で、デバイスライフサイクルでの名前です。`setup()` と `init()` はシステム既定のデバイスを開きます。特定のデバイスを使うには、`deviceName` を指定した `AudioSettings` を渡します（名前は `AudioEngine::listDevices()` で取得します）。各設定の扱いと失敗時の処理は `AudioEngine::init` を参照してください。
+- 閉じたエンジンを開き直すときは、いつでもこの動作です。`close()` の後、OS がデバイスを止めた後、エンジンが未接続のときに `init()` を呼ぶ `Sound::load*()` からの場合です。`setup()` は直前のサンプルレート、チャンネル数、バッファサイズ、同時再生数を引き継ぎます。
+- デバイスが開いたら `true` を返します。失敗すると `false` を返し、`logError("AudioEngine")` でエラーを出します。開いていたデバイスは先に閉じるので、エンジンは停止したままになります。動作中のエンジンでは、音が一瞬途切れる形で再初期化し、`onDisconnect` は発火しません。
+- 喪失の後にデバイスを開き直すには、`setup()` / `setup(settings)` をもう一度呼びます。`AudioEngine::onDisconnect` を参照してください。
+'''
+details.ko = '''
+- `setup(settings)`는 `init(settings)`, `setup()`은 `init()`이며 장치 수명 주기 이름입니다. `setup()`과 `init()`은 시스템 기본 장치를 엽니다. 특정 장치를 사용하려면 `deviceName`을 지정한 `AudioSettings`를 전달하세요(이름은 `AudioEngine::listDevices()`로 얻습니다). 각 설정의 처리와 실패 처리는 `AudioEngine::init`을 참조하세요.
+- 닫힌 엔진을 다시 열 때는 언제나 이 동작입니다. `close()` 후, OS가 장치를 정지시킨 후, 엔진이 연결되지 않았을 때 `init()`을 호출하는 `Sound::load*()`에서 모두 같습니다. `setup()`은 마지막 샘플 레이트, 채널 수, 버퍼 크기, 동시 재생 수를 유지합니다.
+- 장치가 열리면 `true`를 반환합니다. 실패하면 `false`를 반환하고 `logError("AudioEngine")`로 오류를 기록합니다. 열려 있던 장치는 먼저 닫으므로 엔진은 정지한 상태로 남습니다. 실행 중인 엔진에서는 소리가 잠시 끊기는 방식으로 재초기화하며 `onDisconnect`는 발생하지 않습니다.
+- 손실 후 장치를 다시 열려면 `setup()` / `setup(settings)`를 다시 호출하세요. `AudioEngine::onDisconnect`를 참조하세요.
+'''
+snippet = '''
+void tcApp::setup() {
+    // Pick a playback device by name before loading sounds
+    AudioSettings s;
+    s.channels = 2;
+    for (auto& d : AudioEngine::listDevices()) {
+        if (d.name.find("USB") != string::npos) s.deviceName = d.name;
+    }
+    AudioEngine::getInstance().setup(s);
+}
+'''
+
 ["AudioEngine::shutdown"]
 category = "audioengine"
 keywords = ["close", "stop", "release", "device", "deinit"]
@@ -1882,16 +2008,19 @@ details.en = '''
 - Stops output, releases the device and backend context, clears output meters, and makes `isInitialized()` return `false`; calling it when already stopped is allowed.
 - Retains settings, listeners, playback slots, and cumulative diagnostic counters; it does not mark retained voices as stopped.
 - The global wrapper is `shutdownAudio()`. Audio listener restrictions are described in `AudioEngine::audioOut`.
+- `close()` is the device lifecycle name for the same call. It never fires `onDisconnect`.
 '''
 details.ja = '''
 - 出力を停止し、デバイスとバックエンドのコンテキストを解放して出力メーターを消去し、`isInitialized()` が `false` を返す状態にします。すでに停止していても呼べます。
 - 設定、リスナー、再生スロット、累積の診断カウンターは保持します。保持したボイスを停止済みにはしません。
 - グローバル関数のラッパーは `shutdownAudio()` です。音声リスナー内の制約は `AudioEngine::audioOut` を参照してください。
+- `close()` は同じ処理のデバイスライフサイクルでの名前です。`onDisconnect` は発火しません。
 '''
 details.ko = '''
 - 출력을 정지하고 장치와 백엔드 컨텍스트를 해제하며 출력 미터를 지워 `isInitialized()`가 `false`를 반환하게 합니다. 이미 정지한 상태에서도 호출할 수 있습니다.
 - 설정, 리스너, 재생 슬롯, 누적 진단 카운터는 유지합니다. 유지된 보이스를 정지 상태로 표시하지 않습니다.
 - 전역 래퍼는 `shutdownAudio()`입니다. 오디오 리스너 안의 제약은 `AudioEngine::audioOut`을 참조하세요.
+- `close()`는 같은 호출의 장치 수명 주기 이름입니다. `onDisconnect`는 발생하지 않습니다.
 '''
 related = ["shutdownAudio"]
 
@@ -5421,6 +5550,46 @@ void tcApp::setup() {
 }
 '''
 related = ["Runtime::events", "EventListener"]
+["DeviceDisconnectEventArgs"]
+keywords = ["disconnect event", "unplug", "device lost", "on disconnect args", "peripheral"]
+of = ["-"]
+description.en = "Carries the reason a device was reported lost."
+description.ja = "デバイス喪失が報告された理由を保持する。"
+description.ko = "장치 손실이 보고된 이유를 담는다."
+details.en = '''
+- The argument of a device class's `onDisconnect` event, such as `Serial::onDisconnect` or `VideoGrabber::onDisconnect`. It has one field, `reason`.
+- It is not `DeviceLostEventArgs`, which belongs to the graphics device (`deviceLost`).
+- `onDisconnect` fires only when the OS or driver reports the device lost. Closing the device yourself never fires it. See the device lifecycle note (`docs/DEVICE_LIFECYCLE.md`).
+'''
+details.ja = '''
+- `Serial::onDisconnect` や `VideoGrabber::onDisconnect` など、デバイスクラスの `onDisconnect` イベントの引数です。項目は `reason` だけです。
+- グラフィックスデバイスの `deviceLost` が渡す `DeviceLostEventArgs` とは別の型です。
+- `onDisconnect` が発火するのは、OS やドライバがデバイスの喪失を報告したときだけです。自分で閉じたときは発火しません。詳しくはデバイスのライフサイクルの説明（`docs/DEVICE_LIFECYCLE.md`）を参照してください。
+'''
+details.ko = '''
+- `Serial::onDisconnect`나 `VideoGrabber::onDisconnect`와 같은 장치 클래스의 `onDisconnect` 이벤트의 인수입니다. 항목은 `reason` 하나뿐입니다.
+- 그래픽 장치의 `deviceLost`가 전달하는 `DeviceLostEventArgs`와는 다른 타입입니다.
+- `onDisconnect`는 OS나 드라이버가 장치 손실을 보고했을 때만 발생합니다. 직접 닫았을 때는 발생하지 않습니다. 자세한 내용은 장치 수명 주기 설명(`docs/DEVICE_LIFECYCLE.md`)을 참조하세요.
+'''
+related = ["Serial::onDisconnect", "VideoGrabber::onDisconnect", "DeviceLostEventArgs"]
+of_category = "serial-types"
+
+["DeviceDisconnectEventArgs::reason"]
+description.en = "Describes why the device was reported lost."
+description.ja = "デバイスが失われたと報告された理由を保持する。"
+description.ko = "장치가 손실되었다고 보고된 이유를 담는다."
+details.en = '''
+- A short human-readable text, such as `"read: Input/output error"` or `"hangup"` for `Serial`. It is the same text the class logs in its loss warning. The default is an empty string.
+'''
+details.ja = '''
+- 人が読める短い説明です。`Serial` では `"read: Input/output error"` や `"hangup"` などになります。クラスが消失の警告ログに出す文字列と同じです。既定値は空文字列です。
+'''
+details.ko = '''
+- 사람이 읽을 수 있는 짧은 설명입니다. `Serial`에서는 `"read: Input/output error"`나 `"hangup"` 등이 됩니다. 클래스가 손실 경고 로그에 남기는 문자열과 같습니다. 기본값은 빈 문자열입니다.
+'''
+related = ["DeviceDisconnectEventArgs", "Serial::onDisconnect"]
+of_category = "serial-types"
+
 ["DeviceLostEventArgs"]
 description.en = "Carries information about a lost graphics device."
 description.ja = "グラフィックスデバイス喪失の情報を保持する。"
@@ -17779,6 +17948,25 @@ details.ko = '''
 '''
 related = ["getMicInput", "AudioEngine", "getMicAnalysisBuffer"]
 
+["MicInput::close"]
+keywords = ["close", "stop", "disconnect", "device lifecycle"]
+description.en = "Stops microphone capture (alias of stop)."
+description.ja = "マイク入力を停止する（stop の別名）。"
+description.ko = "마이크 캡처를 중지한다(stop의 별칭)."
+related = ["MicInput::stop", "MicInput::setup", "MicInput::isConnected", "MicInput::onDisconnect"]
+details.en = '''
+- The device lifecycle name of `stop()`; it does the same. `isConnected()` is false afterwards, and `setup()` starts capture again.
+- `close()` never fires `onDisconnect`; that event is only for a capture device the OS reports lost.
+'''
+details.ja = '''
+- `stop()` のデバイスライフサイクルでの名前で、動作は同じです。呼んだ後 `isConnected()` は false になり、`setup()` で入力を再開できます。
+- `close()` は `onDisconnect` を発火しません。そのイベントは、OS が入力デバイスの喪失を報告したときだけのものです。
+'''
+details.ko = '''
+- `stop()`의 장치 수명 주기 이름이며 동작은 같습니다. 호출 후 `isConnected()`는 false가 되고 `setup()`으로 캡처를 다시 시작할 수 있습니다.
+- `close()`는 `onDisconnect`를 발생시키지 않습니다. 이 이벤트는 OS가 캡처 장치 손실을 보고했을 때만 발생합니다.
+'''
+
 ["MicInput::getBuffer"]
 description.en = "Copies the latest microphone samples."
 description.ja = "最新のマイク入力サンプルをコピーする。"
@@ -17839,21 +18027,105 @@ details.ko = '''
 - 스레드 규칙은 `MicInput::startAsync`를 참조하세요.
 '''
 
+["MicInput::isConnected"]
+keywords = ["connected", "running", "unplug", "device lost", "device lifecycle"]
+description.en = "Returns whether the microphone is open and capturing (alias of isRunning)."
+description.ja = "マイクが開いて入力中かを返す（isRunning の別名）。"
+description.ko = "마이크가 열려 캡처 중인지 반환한다(isRunning의 별칭)."
+related = ["MicInput::isRunning", "MicInput::setup", "MicInput::close", "MicInput::onDisconnect"]
+details.en = '''
+- The device lifecycle name of `isRunning()`. It is true only while the capture device is open and delivering, and already false when `onDisconnect` fires.
+- A backend that does not report the stop of a microphone that went away leaves it true; `getBuffer()` then just stops getting new samples.
+'''
+details.ja = '''
+- `isRunning()` のデバイスライフサイクルでの名前です。入力デバイスが開いて動作している間だけ true で、`onDisconnect` が発火する時点ですでに false です。
+- なくなったマイクの停止をバックエンドが報告しない場合は true のままで、`getBuffer()` に新しいサンプルが入らなくなるだけです。
+'''
+details.ko = '''
+- `isRunning()`의 장치 수명 주기 이름입니다. 캡처 장치가 열려 동작하는 동안에만 true이며, `onDisconnect`가 발생하는 시점에는 이미 false입니다.
+- 사라진 마이크의 정지를 백엔드가 보고하지 않으면 true로 남으며, 이때 `getBuffer()`에는 새 샘플이 들어오지 않을 뿐입니다.
+'''
+
 ["MicInput::isRunning"]
 description.en = "Reports whether microphone capture is running."
 description.ja = "マイク入力が動作中かどうかを返す。"
 description.ko = "마이크 캡처가 실행 중인지 반환한다."
 details.en = '''
 - Returns `true` after successful startup has been applied to the handle. Asynchronous startup publishes this state before `onStart`; device readiness alone does not immediately change it.
-- Returns `false` initially, after cancellation, or when the app run associated with the capture ends. See `MicInput::startAsync` for threading rules.
+- Returns `false` initially, after cancellation, after the OS reported the capture device stopped (see `MicInput::onDisconnect`), or when the app run associated with the capture ends. See `MicInput::startAsync` for threading rules.
+- `isConnected()` is the device lifecycle name of the same state.
 '''
 details.ja = '''
 - 起動成功をハンドルに反映した後に `true` を返します。非同期起動では `onStart` より前にこの状態を反映するため、デバイスの準備が整っただけでは直ちに変わりません。
-- 初期状態、取り消し後、または入力に関連付けられたアプリ実行が終了した場合は `false` を返します。スレッドの扱いは `MicInput::startAsync` を参照してください。
+- 初期状態、取り消し後、OS が入力デバイスの停止を報告した後（`MicInput::onDisconnect` を参照）、または入力に関連付けられたアプリ実行が終了した場合は `false` を返します。スレッドの扱いは `MicInput::startAsync` を参照してください。
+- `isConnected()` は同じ状態のデバイスライフサイクルでの名前です。
 '''
 details.ko = '''
 - 시작 성공을 핸들에 반영한 뒤 `true`를 반환합니다. 비동기 시작에서는 `onStart` 전에 이 상태를 반영하므로 장치 준비가 끝난 것만으로 즉시 바뀌지는 않습니다.
-- 초기 상태, 취소 후 또는 캡처와 연결된 앱 실행이 끝나면 `false`를 반환합니다. 스레드 규칙은 `MicInput::startAsync`를 참조하세요.
+- 초기 상태, 취소 후, OS가 캡처 장치 정지를 보고한 후(`MicInput::onDisconnect` 참조) 또는 캡처와 연결된 앱 실행이 끝나면 `false`를 반환합니다. 스레드 규칙은 `MicInput::startAsync`를 참조하세요.
+- `isConnected()`는 같은 상태의 장치 수명 주기 이름입니다.
+'''
+
+["MicInput::onDisconnect"]
+keywords = ["unplug", "disconnect", "reconnect", "device lost", "usb microphone", "bluetooth"]
+description.en = "Reports when the OS says the capture device stopped."
+description.ja = "OS が入力デバイスの停止を報告したことを通知する。"
+description.ko = "OS가 캡처 장치 정지를 보고했음을 알린다."
+related = ["DeviceDisconnectEventArgs", "MicInput::isConnected", "MicInput::setup", "MicInput::close"]
+details.en = '''
+- This `Event<DeviceDisconnectEventArgs>` fires once per started capture, and only when the OS or the audio library reports that the running capture device stopped by itself, for example a USB microphone that was unplugged. `reason` says what happened. `isConnected()` is already false when it fires.
+- It fires on the main thread during `runApp()` or `runHeadlessApp()`, like `onStart`, never on the audio thread; in a bare `main()` without an app run it does not fire. Web does not report a loss.
+- `close()`, `stop()`, `start()` again and destroying the `MicInput` never fire it.
+- Which backends report a stop depends on the OS and driver. Where the backend says nothing, `isConnected()` stays true and `getBuffer()` stops getting new samples.
+- To open the microphone again, call `setup()`; it reopens the system default capture device at the last sample rate.
+'''
+details.ja = '''
+- この `Event<DeviceDisconnectEventArgs>` は、開始した入力ごとに 1 回、OS またはオーディオライブラリが「動作中の入力デバイスが自ら停止した」と報告したときだけ発火します。たとえば USB マイクを抜いた場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- `onStart` と同じく `runApp()` または `runHeadlessApp()` の間にメインスレッドで発火し、オーディオスレッドでは発火しません。アプリの実行がない素の `main()` では発火しません。Web は喪失を報告しません。
+- `close()`、`stop()`、もう一度の `start()`、`MicInput` の破棄では発火しません。
+- どのバックエンドが停止を報告するかは OS とドライバーによります。バックエンドが何も報告しない場合は、`isConnected()` は true のままで、`getBuffer()` に新しいサンプルが入らなくなります。
+- マイクを開き直すには `setup()` を呼びます。システム既定の入力デバイスを直前のサンプルレートで開き直します。
+'''
+details.ko = '''
+- 이 `Event<DeviceDisconnectEventArgs>`는 시작한 캡처마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 캡처 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 USB 마이크를 뽑았을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- `onStart`와 마찬가지로 `runApp()` 또는 `runHeadlessApp()` 중에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 앱 실행이 없는 맨 `main()`에서는 발생하지 않습니다. Web은 손실을 보고하지 않습니다.
+- `close()`, `stop()`, 다시 `start()`, `MicInput` 파괴에서는 발생하지 않습니다.
+- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 백엔드가 아무것도 보고하지 않으면 `isConnected()`는 true로 남고 `getBuffer()`에는 새 샘플이 들어오지 않습니다.
+- 마이크를 다시 열려면 `setup()`을 호출하세요. 시스템 기본 캡처 장치를 마지막 샘플 레이트로 다시 엽니다.
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+EventListener lostListener;
+
+// tcApp.cpp
+void tcApp::setup() {
+    lostListener = getMicInput().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning() << "microphone lost: " << e.reason;
+    });
+    getMicInput().start(48000);
+}
+'''
+
+["MicInput::setup"]
+keywords = ["setup", "reopen", "reconnect", "device lifecycle"]
+description.en = "Reopens the microphone at the last sample rate."
+description.ja = "マイクを直前のサンプルレートで開き直す。"
+description.ko = "마이크를 마지막 샘플 레이트로 다시 연다."
+related = ["MicInput::start", "MicInput::isConnected", "MicInput::close", "MicInput::onDisconnect"]
+details.en = '''
+- `setup()` with no arguments is `start(sampleRate)` with the sample rate of the last `start()` or `startAsync()` (`48000` Hz before any). The microphone is always the system default capture device, so the sample rate is all there is to remember.
+- Returns `true` when capture started. On failure it returns `false` and logs an error, as `start()` does; see `MicInput::start` for the macOS and iOS permission behavior.
+- To open the microphone again after a loss, call `setup()`. See `MicInput::onDisconnect`.
+'''
+details.ja = '''
+- 引数なしの `setup()` は、直前の `start()` または `startAsync()` のサンプルレート（それまでに呼んでいなければ `48000` Hz）で呼ぶ `start(sampleRate)` です。マイクは常にシステム既定の入力デバイスなので、覚えておくのはサンプルレートだけです。
+- 入力を開始できたら `true` を返します。失敗すると `false` を返し、`start()` と同じくエラーを出します。macOS と iOS の権限の扱いは `MicInput::start` を参照してください。
+- 喪失の後にマイクを開き直すには `setup()` を呼びます。`MicInput::onDisconnect` を参照してください。
+'''
+details.ko = '''
+- 인수 없는 `setup()`은 마지막 `start()` 또는 `startAsync()`의 샘플 레이트(호출한 적이 없으면 `48000` Hz)로 호출하는 `start(sampleRate)`입니다. 마이크는 항상 시스템 기본 캡처 장치이므로 기억할 것은 샘플 레이트뿐입니다.
+- 캡처가 시작되면 `true`를 반환합니다. 실패하면 `false`를 반환하고 `start()`와 마찬가지로 오류를 기록합니다. macOS와 iOS의 권한 처리는 `MicInput::start`를 참조하세요.
+- 손실 후 마이크를 다시 열려면 `setup()`을 호출하세요. `MicInput::onDisconnect`를 참조하세요.
 '''
 
 ["MicInput::start"]
@@ -17894,14 +18166,17 @@ description.ko = "마이크 캡처를 중지하거나 시작을 취소한다."
 details.en = '''
 - Immediately clears the running and starting states and device name, cancels the current attempt, and requests cleanup without waiting. Cancellation emits no event and suppresses any pending startup result.
 - See `MicInput::startAsync` for threading, native cleanup, and application exit behavior.
+- `close()` is the device lifecycle name for the same call. It never fires `onDisconnect`.
 '''
 details.ja = '''
 - 動作中と起動待ちの状態、およびデバイス名を直ちにクリアし、現在の試行を取り消して、待機せずに後始末を依頼します。取り消しのイベントは通知せず、保留中の起動結果も通知しません。
 - スレッド、ネイティブでの後始末、アプリ終了時の動作は `MicInput::startAsync` を参照してください。
+- `close()` は同じ処理のデバイスライフサイクルでの名前です。`onDisconnect` は発火しません。
 '''
 details.ko = '''
 - 실행 중 및 시작 대기 상태와 장치 이름을 즉시 지우고 현재 시도를 취소하며 기다리지 않고 정리를 요청합니다. 취소 이벤트는 알리지 않으며 대기 중인 시작 결과도 알리지 않습니다.
 - 스레드, 네이티브 정리, 앱 종료 시 동작은 `MicInput::startAsync`를 참조하세요.
+- `close()`는 같은 호출의 장치 수명 주기 이름입니다. `onDisconnect`는 발생하지 않습니다.
 '''
 snippet = '''
 void tcApp::keyPressed(int key) {
@@ -26959,7 +27234,7 @@ description.en = "Connects to serial ports and reads or writes bytes."
 description.ja = "シリアルポートに接続してバイトを読み書きする。"
 description.ko = "시리얼 포트에 연결하여 바이트를 읽고 쓴다."
 of_category = "serial-types"
-related = ["SerialDeviceInfo", "SerialDisconnectEventArgs", "TcpClient", "Serial::setup", "Serial::readBytes", "Serial::writeBytes", "Serial::onDisconnect"]
+related = ["SerialDeviceInfo", "DeviceDisconnectEventArgs", "TcpClient", "Serial::setup", "Serial::readBytes", "Serial::writeBytes", "Serial::onDisconnect"]
 platform_note.en = '''
 - Windows uses Win32 COM ports; macOS and Linux use POSIX termios. Android uses USB Host CDC-ACM through JNI and usbfs and supports CDC-ACM devices only.
 - On Android, setup returns `false` while USB permission is pending, and connection completes asynchronously after permission is granted. Poll `isConnected()` or `isInitialized()`; repeating setup for the same pending device preserves the request.
@@ -27042,17 +27317,17 @@ description.ja = "シリアル接続を閉じる。"
 description.ko = "시리얼 연결을 닫는다."
 details.en = '''
 - Stops the receive worker, closes the port, and clears buffered input; on Android it also cancels a pending USB permission connection.
-- Closing an open connection fires `onDisconnect` with `wasClean = true`; closing an already closed port does not fire it. See `Serial::onDisconnect` for notification details.
+- `close()` never fires `onDisconnect`; that event is only for a device the OS reports lost. Closing a port that is not open does nothing. `isConnected()` is false afterwards, and `setup()` with no arguments reopens the same port.
 - Preserves the device path and dropped-byte count. Closing can wait for active I/O and the receive worker; see `Serial::setup` for threading rules and Android worker restrictions.
 '''
 details.ja = '''
 - 受信ワーカーを停止し、ポートを閉じて受信バッファを消去します。Android では USB 許可待ちの接続も取り消します。
-- 開いている接続を閉じると、`wasClean = true` で `onDisconnect` が発火します。すでに閉じているポートでは発火しません。通知の詳細は `Serial::onDisconnect` を参照してください。
+- `close()` は `onDisconnect` を発火しません。このイベントは OS が消失を報告したデバイス専用です。開いていないポートに呼んでも何も起こりません。閉じたあとは `isConnected()` が false になり、引数なしの `setup()` で同じポートを開き直せます。
 - デバイスパスと破棄バイト数は保持します。実行中の I/O や受信ワーカーの終了を待つ場合があります。スレッドの扱いと Android ワーカーでの制限は `Serial::setup` を参照してください。
 '''
 details.ko = '''
 - 수신 워커를 중지하고 포트를 닫으며 수신 버퍼를 비웁니다. Android에서는 USB 권한을 기다리는 연결도 취소합니다.
-- 열린 연결을 닫으면 `wasClean = true`로 `onDisconnect`가 발생합니다. 이미 닫힌 포트에서는 발생하지 않습니다. 알림의 자세한 내용은 `Serial::onDisconnect`를 참조하세요.
+- `close()`는 `onDisconnect`를 발생시키지 않습니다. 이 이벤트는 OS가 손실을 보고한 장치 전용입니다. 열려 있지 않은 포트에서는 아무 일도 일어나지 않습니다. 닫은 뒤에는 `isConnected()`가 false가 되며, 인수 없는 `setup()`으로 같은 포트를 다시 열 수 있습니다.
 - 장치 경로와 폐기 바이트 수는 유지합니다. 진행 중인 I/O나 수신 워커의 종료를 기다릴 수 있습니다. 스레드 규칙과 Android 워커 제한은 `Serial::setup`을 참조하세요.
 '''
 related = ["Serial::onDisconnect"]
@@ -27207,18 +27482,18 @@ description.ko = "현재 시리얼 연결 상태를 반환한다."
 related = ["Serial::setup", "Serial::listDevices", "Serial::available", "Serial::readBytes", "Serial::writeBytes", "Serial::onDisconnect", "TcpClient::isConnected"]
 details.en = '''
 - Returns the recorded connection state without probing the device or waiting for `setup()`, `close()`, or I/O. Device loss is reported by `available()`, `readBytes()`, `readByte()`, or `writeBytes()`, which then closes the connection and fires `onDisconnect`; an idle device sending no data is not treated as lost. On desktop, device-loss cleanup logs one warning per ended connection; on Android, the USB worker logs the loss.
-- On Android, this can become true after `setup()` returned false when USB permission is granted and opening succeeds. A worker-recorded loss leaves it true until a subsequent reporting call handles the loss; `close()` and `setup()` can also collect that Android state.
-- To reconnect, retry `setup()` after this returns false; see `Serial::setup` for DTR behavior and shared threading rules, and `Serial::onDisconnect` for notification and reconnection details.
+- On Android, this can become true after `setup()` returned false when USB permission is granted and opening succeeds. A worker-recorded loss leaves it true until a subsequent reporting call handles the loss; `close()` and `setup()` just close the port then, without firing `onDisconnect`.
+- To reconnect, call `setup()` with no arguments after this returns false; see `Serial::setup` for DTR behavior and shared threading rules, and `Serial::onDisconnect` for notification and reconnection details.
 '''
 details.ja = '''
 - デバイスを調べ直さず、記録されている接続状態を返します。`setup()`、`close()`、I/O の完了は待ちません。デバイスの消失は `available()`、`readBytes()`、`readByte()`、`writeBytes()` が報告し、その呼び出しが接続を閉じて `onDisconnect` を発火します。何も送信していないだけのデバイスは消失とみなしません。デスクトップでは、消失時の後処理で終了した接続ごとに 1 回警告をログに出します。Android では USB ワーカーが消失をログに出します。
-- Android では、`setup()` が false を返した後でも、USB 許可が与えられてオープンに成功すると true になる場合があります。ワーカーが消失を記録しても、後続の報告する呼び出しが処理するまでは true のままです。Android のこの状態は `close()` や `setup()` でも回収します。
-- 再接続する場合は、false になった後に `setup()` を再試行します。DTR の動作と共通のスレッドの扱いは `Serial::setup`、通知と再接続の詳細は `Serial::onDisconnect` を参照してください。
+- Android では、`setup()` が false を返した後でも、USB 許可が与えられてオープンに成功すると true になる場合があります。ワーカーが消失を記録しても、後続の報告する呼び出しが処理するまでは true のままです。その間に `close()` や `setup()` を呼ぶと、`onDisconnect` を発火せずにポートを閉じるだけです。
+- 再接続する場合は、false になった後に引数なしの `setup()` を呼びます。DTR の動作と共通のスレッドの扱いは `Serial::setup`、通知と再接続の詳細は `Serial::onDisconnect` を参照してください。
 '''
 details.ko = '''
 - 장치를 다시 조사하지 않고 기록된 연결 상태를 반환하며 `setup()`, `close()`, I/O 완료를 기다리지 않습니다. 장치 소실은 `available()`, `readBytes()`, `readByte()`, `writeBytes()`가 보고하며, 해당 호출이 연결을 닫고 `onDisconnect`를 발생시킵니다. 데이터를 보내지 않고 대기하는 장치는 소실로 취급하지 않습니다. 데스크톱에서는 소실 정리 시 끝난 연결마다 한 번 경고를 로그에 남깁니다. Android에서는 USB 워커가 소실을 로그에 남깁니다.
-- Android에서는 `setup()`이 false를 반환한 뒤에도 USB 권한이 부여되고 열기에 성공하면 true가 될 수 있습니다. 워커가 소실을 기록해도 이후 보고하는 호출이 처리할 때까지 true로 유지됩니다. Android의 이 상태는 `close()`나 `setup()`에서도 수집합니다.
-- 다시 연결하려면 false가 된 뒤 `setup()`을 재시도합니다. DTR 동작과 공통 스레드 규칙은 `Serial::setup`, 알림과 재연결의 자세한 내용은 `Serial::onDisconnect`를 참조하세요.
+- Android에서는 `setup()`이 false를 반환한 뒤에도 USB 권한이 부여되고 열기에 성공하면 true가 될 수 있습니다. 워커가 소실을 기록해도 이후 보고하는 호출이 처리할 때까지 true로 유지됩니다. 그 사이에 `close()`나 `setup()`을 호출하면 `onDisconnect` 없이 포트만 닫습니다.
+- 다시 연결하려면 false가 된 뒤 인수 없는 `setup()`을 호출합니다. DTR 동작과 공통 스레드 규칙은 `Serial::setup`, 알림과 재연결의 자세한 내용은 `Serial::onDisconnect`를 참조하세요.
 '''
 
 ["Serial::isInitialized"]
@@ -27272,47 +27547,54 @@ void tcApp::setup() {
 
 ["Serial::onDisconnect"]
 keywords = ["unplug", "disconnect", "reconnect", "device lost", "disconnect event"]
-description.en = "Reports when a serial connection ends."
-description.ja = "シリアル接続の終了を通知する。"
-description.ko = "시리얼 연결이 끝났음을 알린다."
-related = ["SerialDisconnectEventArgs", "Serial::isConnected", "Serial::close", "Serial::setup", "TcpClient::onDisconnect", "Deliver"]
+description.en = "Reports when the OS says the serial device was lost."
+description.ja = "OS がシリアルデバイスの喪失を報告したことを通知する。"
+description.ko = "OS가 시리얼 장치 손실을 보고했음을 알린다."
+related = ["DeviceDisconnectEventArgs", "Serial::isConnected", "Serial::close", "Serial::setup", "TcpClient::onDisconnect", "Deliver"]
 details.en = '''
-- This `Event<SerialDisconnectEventArgs>` fires once per open connection when device loss is reported or the app closes it. The arguments contain `portName`, `baudRate`, `reason`, and `wasClean`.
-- Loss reported by `available()`, `readBytes()`, `readByte()`, or `writeBytes()` sets `wasClean = false`; `reason` describes the loss, such as `"read: Input/output error"` or `"hangup"`. Closing an open port with `close()`, including through `setup()`, sets `wasClean = true` and `reason = "closed by close()"`.
-- Closing an already closed port, destroying a `Serial`, or moving another `Serial` over it does not fire this event. If `setup()` closes a replacement connection opened by a listener or another thread while the previous connection was being closed, it logs a warning without another event.
-- Closing an unplugged device before an I/O call reports the loss still counts as an app close. On Android, if the USB worker already recorded the loss, `reason` adds `(the device had already been lost: <reason>)`, while `wasClean` remains true.
-- Delivery is inline on the calling thread after the ended connection has been closed and the port lock released. Receive workers record loss for a subsequent reporting I/O call; Android also collects it through `close()` or `setup()`. Use `Deliver::Main` for a listener that must run on the main thread, and see `Serial::setup` for Android worker restrictions.
-- A listener may reconnect with `setup(e.portName, e.baudRate)`; first check `!e.wasClean` so an intentional close does not reopen the port. The I/O call that reported the loss still returns its error value, or 0 for `available()`, and leaves a replacement connection alone.
-- If other threads also open connections, check `isConnected()` and `getDevicePath()` in the listener before reconnecting, because another thread may already have opened a connection.
+- This `Event<DeviceDisconnectEventArgs>` fires once per open connection, and only when the device is lost: `available()`, `readBytes()`, `readByte()`, or `writeBytes()` found it gone. `reason` describes the loss, such as `"read: Input/output error"` or `"hangup"`, the same text the warning log shows. `isConnected()` is already false when it fires.
+- `close()`, `setup()` (which closes the previous port first), destroying the `Serial`, and moving another `Serial` over it never fire it. A device that went away before one of the four I/O calls noticed is closed silently.
+- Delivery is inline on the thread that made the I/O call, normally the main thread, after the port is closed and its lock released. Receive workers only record the loss; the next I/O call on the app's thread reports it. Register with `Deliver::Main` for a listener that must run on the main thread whichever thread uses the `Serial`; it is delivered like network events, in the owning App's context. See `Serial::setup` for Android worker restrictions.
+- Reconnecting is app code. Either poll with `if (!serial.isConnected() && timer) serial.setup();`, or call `setup()` from the listener. The I/O call that reported the loss still returns its error value, or 0 for `available()`, and leaves a replacement connection alone.
+- If other threads also open connections, check `isConnected()` in the listener before reconnecting, because another thread may already have opened a connection.
 - Retain the returned `EventListener` for as long as the subscription is needed. Listeners remain attached to the original `Serial` object and are not transferred by a move.
 '''
 details.ja = '''
-- この `Event<SerialDisconnectEventArgs>` は、デバイス消失の報告時やアプリによるクローズ時に、開いた接続ごとに 1 回発火します。引数には `portName`、`baudRate`、`reason`、`wasClean` が入ります。
-- `available()`、`readBytes()`、`readByte()`、`writeBytes()` が消失を報告した場合は `wasClean = false` になり、`reason` は `"read: Input/output error"` や `"hangup"` などの理由を示します。`setup()` 経由も含め、開いているポートを `close()` で閉じた場合は `wasClean = true`、`reason = "closed by close()"` になります。
-- すでに閉じているポートのクローズ、`Serial` の破棄、別の `Serial` のムーブ代入では発火しません。前の接続を閉じている間にリスナーや別スレッドが開いた接続を `setup()` が閉じる場合は、再度発火せず警告をログに出します。
-- I/O 呼び出しが消失を報告する前に、抜けたデバイスを閉じた場合もアプリによるクローズとして扱います。Android で USB ワーカーがすでに消失を記録していた場合は、`reason` に `(the device had already been lost: <reason>)` を追加しますが、`wasClean` は true のままです。
-- 終了した接続を閉じ、ポートのロックを解除した後に、呼び出したスレッドでインラインに通知します。受信ワーカーが記録した消失は後続の報告する I/O 呼び出しが処理し、Android では `close()` や `setup()` でも回収します。メインスレッドで実行する必要があるリスナーには `Deliver::Main` を使ってください。Android ワーカーでの制限は `Serial::setup` を参照してください。
-- リスナーから `setup(e.portName, e.baudRate)` で再接続できます。明示的なクローズで再度開かないよう、先に `!e.wasClean` を確認してください。消失を報告した I/O 呼び出しは、その後もエラー値、または `available()` の場合は 0 を返し、新しい接続には手を加えません。
-- 別スレッドからも接続する場合は、すでに別の接続が開かれている可能性があるため、リスナー内で `isConnected()` と `getDevicePath()` を確認してから再接続してください。
+- この `Event<DeviceDisconnectEventArgs>` は、開いた接続ごとに 1 回、デバイスが失われたときだけ発火します。`available()`、`readBytes()`、`readByte()`、`writeBytes()` が消失を見つけた場合です。`reason` は `"read: Input/output error"` や `"hangup"` など消失の理由で、警告ログと同じ文字列です。発火した時点で `isConnected()` はすでに false です。
+- `close()`、`setup()`（前のポートを先に閉じます）、`Serial` の破棄、別の `Serial` のムーブ代入では発火しません。4 つの I/O 呼び出しが気づく前にデバイスが抜けていた場合は、黙って閉じます。
+- ポートを閉じてロックを解放した後、I/O 呼び出しをしたスレッド（通常はメインスレッド）でインラインに通知します。受信ワーカーは消失を記録するだけで、次にアプリのスレッドで行う I/O 呼び出しが報告します。どのスレッドから使っていてもメインスレッドで実行したいリスナーは `Deliver::Main` で登録してください。ネットワークのイベントと同じく、所有する App の文脈で配送されます。Android ワーカーでの制限は `Serial::setup` を参照してください。
+- 再接続はアプリ側のコードです。`if (!serial.isConnected() && timer) serial.setup();` のように定期的に確認するか、リスナーから `setup()` を呼びます。消失を報告した I/O 呼び出しは、その後もエラー値（`available()` では 0）を返し、新しい接続には手を加えません。
+- 別スレッドからも接続する場合は、すでに別の接続が開かれている可能性があるため、リスナー内で `isConnected()` を確認してから再接続してください。
 - 購読が必要な間は、返された `EventListener` を保持してください。リスナーは登録先の `Serial` オブジェクトに残り、ムーブでは移りません。
 '''
 details.ko = '''
-- 이 `Event<SerialDisconnectEventArgs>`는 장치 소실이 보고되거나 앱이 연결을 닫을 때 열린 연결마다 한 번 발생합니다. 인수에는 `portName`, `baudRate`, `reason`, `wasClean`이 들어 있습니다.
-- `available()`, `readBytes()`, `readByte()`, `writeBytes()`가 소실을 보고하면 `wasClean = false`가 되며 `reason`은 `"read: Input/output error"`나 `"hangup"` 등의 이유를 나타냅니다. `setup()`을 통한 경우를 포함해 열린 포트를 `close()`로 닫으면 `wasClean = true`, `reason = "closed by close()"`가 됩니다.
-- 이미 닫힌 포트의 닫기, `Serial` 파괴, 다른 `Serial`의 이동 대입에서는 발생하지 않습니다. 이전 연결을 닫는 동안 리스너나 다른 스레드가 연 대체 연결을 `setup()`이 닫는 경우에는 다시 발생시키지 않고 경고를 로그에 남깁니다.
-- I/O 호출이 소실을 보고하기 전에 분리된 장치를 닫아도 앱이 닫은 것으로 취급합니다. Android에서 USB 워커가 이미 소실을 기록했다면 `reason`에 `(the device had already been lost: <reason>)`를 추가하지만 `wasClean`은 true로 유지합니다.
-- 끝난 연결을 닫고 포트 락을 해제한 뒤 호출한 스레드에서 인라인으로 알립니다. 수신 워커가 기록한 소실은 이후 보고하는 I/O 호출이 처리하며 Android에서는 `close()`나 `setup()`에서도 수집합니다. 메인 스레드에서 실행해야 하는 리스너에는 `Deliver::Main`을 사용하세요. Android 워커 제한은 `Serial::setup`을 참조하세요.
-- 리스너에서 `setup(e.portName, e.baudRate)`로 다시 연결할 수 있습니다. 의도적으로 닫은 연결이 다시 열리지 않도록 먼저 `!e.wasClean`을 확인하세요. 소실을 보고한 I/O 호출은 여전히 오류 값, 또는 `available()`의 경우 0을 반환하며 대체 연결은 건드리지 않습니다.
-- 다른 스레드에서도 연결을 연다면 이미 다른 연결이 열렸을 수 있으므로 리스너 안에서 `isConnected()`와 `getDevicePath()`를 확인한 뒤 다시 연결하세요.
+- 이 `Event<DeviceDisconnectEventArgs>`는 열린 연결마다 한 번, 장치가 손실되었을 때만 발생합니다. `available()`, `readBytes()`, `readByte()`, `writeBytes()`가 손실을 발견한 경우입니다. `reason`은 `"read: Input/output error"`나 `"hangup"` 같은 손실 이유이며 경고 로그와 같은 문자열입니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- `close()`, `setup()`(이전 포트를 먼저 닫습니다), `Serial` 파괴, 다른 `Serial`의 이동 대입에서는 발생하지 않습니다. 네 가지 I/O 호출이 알아채기 전에 장치가 분리되었다면 조용히 닫습니다.
+- 포트를 닫고 락을 해제한 뒤 I/O 호출을 한 스레드(보통 메인 스레드)에서 인라인으로 알립니다. 수신 워커는 손실을 기록만 하고, 앱 스레드의 다음 I/O 호출이 보고합니다. 어느 스레드에서 사용하든 메인 스레드에서 실행해야 하는 리스너는 `Deliver::Main`으로 등록하세요. 네트워크 이벤트와 마찬가지로 소유한 App의 컨텍스트에서 전달됩니다. Android 워커 제한은 `Serial::setup`을 참조하세요.
+- 재연결은 앱 코드의 몫입니다. `if (!serial.isConnected() && timer) serial.setup();`처럼 주기적으로 확인하거나 리스너에서 `setup()`을 호출하세요. 손실을 보고한 I/O 호출은 여전히 오류 값(`available()`은 0)을 반환하며 대체 연결은 건드리지 않습니다.
+- 다른 스레드에서도 연결을 연다면 이미 다른 연결이 열렸을 수 있으므로 리스너 안에서 `isConnected()`를 확인한 뒤 다시 연결하세요.
 - 구독이 필요한 동안 반환된 `EventListener`를 유지하세요. 리스너는 등록한 `Serial` 객체에 남으며 이동으로 전달되지 않습니다.
 '''
 snippet = '''
+// tcApp.h (inside class tcApp : public App)
+Serial serial;
+EventListener lostListener;
+float lastTry = 0.0f;
+
+// tcApp.cpp
 void tcApp::setup() {
-    static Serial serial;
-    static EventListener listener = serial.onDisconnect.listen([](SerialDisconnectEventArgs& e) {
-        if (!e.wasClean) serial.setup(e.portName, e.baudRate);
+    lostListener = serial.onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning() << "serial lost: " << e.reason;
     }, Deliver::Main);
     serial.setup(0, 115200);
+}
+
+void tcApp::update() {
+    // Reconnect every 2 seconds while the port is closed
+    if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+        lastTry = getElapsedTime();
+        serial.setup();   // same port, same baud rate as before
+    }
 }
 '''
 
@@ -27400,7 +27682,8 @@ related = ["Serial::isConnected", "Serial::listDevices", "Serial::onDisconnect"]
 details.en = '''
 - Call `setup(const string& portName, int baudRate)` with a device path, or `setup(int deviceIndex, int baudRate)` with a zero-based index from `listDevices()`. The baud rate is in bits per second, and neither argument has a default.
 - Requests 8 data bits, no parity, 1 stop bit, and no flow control. Returns true when connected and false when opening or configuration fails, with an error log; Android USB permission waiting is a separate false-return case described below.
-- The index overload enumerates devices again. An out-of-range index returns false without closing the existing connection; the path overload closes the previous connection first and fires `onDisconnect` with `wasClean = true` if it was open.
+- The index overload enumerates devices again. An out-of-range index returns false without closing the existing connection; the path overload closes the previous connection first, without firing `onDisconnect`.
+- `setup()` with no arguments reopens the last port with the last baud rate, those of the last successful `setup(portName, baudRate)`. If there is none yet, or it cannot be opened, it logs an error and returns false. Use it to reconnect, for example `if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); serial.setup(); }`.
 - Opening reasserts DTR, which resets auto-reset boards such as most Arduinos. Repeated successful setup calls therefore reopen the port rather than simply checking it.
 - macOS and Linux accept positive driver-supported rates, including rates without a termios B-constant, such as 250000, 74880, or 921600 on macOS. Custom rates use `IOSSIOSPEED` on macOS and `termios2` on Linux; Windows passes the rate directly to the driver. A rejected desktop rate fails instead of silently selecting another speed.
 - Linux reads back the applied rate when available, for standard and custom rates. A difference greater than 2% fails; a different rate within that tolerance succeeds with a warning naming the applied rate. If the driver retains its old rate even after an additional standard-rate probe, setup succeeds with a warning that baud rates have no effect, as with `/dev/ttyGS*`, `usb_serial_generic`, or xHCI DbC drivers.
@@ -27418,7 +27701,8 @@ details.en = '''
 details.ja = '''
 - `setup(const string& portName, int baudRate)` にデバイスパスを渡すか、`setup(int deviceIndex, int baudRate)` に `listDevices()` の 0 始まりのインデックスを渡します。ボーレートの単位はビット毎秒で、どちらの引数にも既定値はありません。
 - データ 8 ビット、パリティなし、ストップビット 1、フロー制御なしを要求します。接続すると true、オープンや設定に失敗するとエラーログを出して false を返します。Android の USB 許可待ちでも false を返す点は後述します。
-- インデックス版はデバイスを再度列挙します。範囲外のインデックスは既存の接続を閉じずに false を返します。パス版は先に前の接続を閉じ、開いていた場合は `wasClean = true` で `onDisconnect` を発火します。
+- インデックス版はデバイスを再度列挙します。範囲外のインデックスは既存の接続を閉じずに false を返します。パス版は先に前の接続を、`onDisconnect` を発火せずに閉じます。
+- 引数なしの `setup()` は、最後に成功した `setup(portName, baudRate)` のポートとボーレートで開き直します。まだ成功したことがない場合や開けない場合は、エラーログを出して false を返します。再接続に使います。例: `if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); serial.setup(); }`
 - オープン時は DTR を再度アサートするため、多くの Arduino のような自動リセット付きボードはリセットされます。成功する setup を繰り返すと、状態確認だけでなくポートを開き直します。
 - macOS と Linux では、250000、74880、macOS の 921600 など、termios の B 定数がないものも含めて、ドライバが対応する正のレートを使えます。カスタムレートには macOS で `IOSSIOSPEED`、Linux で `termios2` を使い、Windows ではレートをそのままドライバへ渡します。デスクトップでレートが拒否された場合は、別の速度を黙って選ばず失敗します。
 - Linux では取得できる場合、標準レートとカスタムレートの両方で適用後の値を読み戻します。差が 2% を超えると失敗し、その範囲内の別レートなら適用値を示す警告を出して成功します。別の標準レートを追加で試してもドライバが元のレートを保持する場合は、ボーレートが効かないという警告を出して成功します。`/dev/ttyGS*`、`usb_serial_generic`、xHCI DbC のドライバなどが該当します。
@@ -27436,7 +27720,8 @@ details.ja = '''
 details.ko = '''
 - `setup(const string& portName, int baudRate)`에 장치 경로를 전달하거나 `setup(int deviceIndex, int baudRate)`에 `listDevices()`의 0부터 시작하는 인덱스를 전달합니다. 보드레이트 단위는 초당 비트이며 두 인수 모두 기본값이 없습니다.
 - 데이터 8비트, 패리티 없음, 정지 비트 1개, 흐름 제어 없음을 요청합니다. 연결되면 true를 반환하고 열기나 설정에 실패하면 오류 로그와 함께 false를 반환합니다. Android의 USB 권한 대기에서도 false를 반환하는 경우는 아래에서 설명합니다.
-- 인덱스 버전은 장치를 다시 열거합니다. 범위를 벗어난 인덱스는 기존 연결을 닫지 않고 false를 반환합니다. 경로 버전은 먼저 이전 연결을 닫으며 열려 있었다면 `wasClean = true`로 `onDisconnect`를 발생시킵니다.
+- 인덱스 버전은 장치를 다시 열거합니다. 범위를 벗어난 인덱스는 기존 연결을 닫지 않고 false를 반환합니다. 경로 버전은 먼저 이전 연결을 `onDisconnect` 없이 닫습니다.
+- 인수 없는 `setup()`은 마지막으로 성공한 `setup(portName, baudRate)`의 포트와 보율로 다시 엽니다. 아직 성공한 적이 없거나 열 수 없으면 오류 로그를 남기고 false를 반환합니다. 다시 연결할 때 사용합니다. 예: `if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); serial.setup(); }`
 - 열 때 DTR을 다시 어서트하므로 대부분의 Arduino 같은 자동 리셋 보드가 리셋됩니다. 따라서 성공하는 setup을 반복하면 상태만 확인하는 것이 아니라 포트를 다시 엽니다.
 - macOS와 Linux에서는 250000, 74880, macOS의 921600처럼 termios B 상수가 없는 값도 포함해 드라이버가 지원하는 양수 속도를 사용할 수 있습니다. 사용자 지정 속도에는 macOS에서 `IOSSIOSPEED`, Linux에서 `termios2`를 사용하며 Windows에서는 속도를 그대로 드라이버에 전달합니다. 데스크톱에서 속도가 거부되면 다른 속도를 조용히 선택하지 않고 실패합니다.
 - Linux에서는 값을 얻을 수 있으면 표준 속도와 사용자 지정 속도 모두 적용된 값을 다시 읽습니다. 차이가 2%를 넘으면 실패하며, 그 범위 안의 다른 속도라면 적용된 속도를 알리는 경고와 함께 성공합니다. 다른 표준 속도를 추가로 시험해도 드라이버가 이전 속도를 유지한다면 보드레이트가 효과가 없다는 경고와 함께 성공합니다. `/dev/ttyGS*`, `usb_serial_generic`, xHCI DbC 드라이버 등이 해당합니다.
@@ -27654,109 +27939,6 @@ details.ko = '''
 - 참조 수명은 `SerialDeviceInfo::getDeviceName`과 같은 규칙을 따릅니다.
 '''
 related = ["SerialDeviceInfo::devicePath", "SerialDeviceInfo::getDeviceName", "Serial::setup"]
-
-["SerialDisconnectEventArgs"]
-keywords = ["disconnect event", "serial unplug", "on disconnect args"]
-of = ["-"]
-description.en = "Describes a serial connection that ended."
-description.ja = "終了したシリアル接続の情報を表す。"
-description.ko = "종료된 시리얼 연결의 정보를 나타낸다."
-details.en = '''
-- `Serial::onDisconnect` supplies `portName`, the port passed to `setup()`, `baudRate`, the rate used by the connection, and `reason`, a human-readable explanation.
-- `wasClean` is `true` when `close()` or a replacement `setup()` closes the connection, and `false` when an I/O call reports device loss or an error; it describes how the connection ended, so an unnoticed unplug can still be reported as a clean close.
-- Notification occurs after the port is closed and its lock is released, inline on the calling thread by default; register with `Deliver::Main` when the listener must run on the main thread.
-- See `Serial::onDisconnect` for notification conditions and reconnection behavior.
-'''
-details.ja = '''
-- `Serial::onDisconnect` は、`setup()` に渡したポート名 `portName`、接続で使用した速度 `baudRate`、人が読める説明 `reason` を渡します。
-- `wasClean` は `close()` や接続を置き換える `setup()` で閉じた場合に `true`、I/O 呼び出しがデバイスの消失やエラーを検出した場合に `false` です。接続を終了した方法を示すため、未検出の抜線後でも正常なクローズとして通知される場合があります。
-- 通知はポートを閉じてロックを解放した後、既定では呼び出し元のスレッド上で同期的に行います。リスナーをメインスレッドで実行する必要がある場合は `Deliver::Main` で登録してください。
-- 通知の条件と再接続の動作は `Serial::onDisconnect` を参照してください。
-'''
-details.ko = '''
-- `Serial::onDisconnect`는 `setup()`에 전달한 포트 이름인 `portName`, 연결에 사용한 속도인 `baudRate`, 사람이 읽을 수 있는 설명인 `reason`을 전달합니다.
-- `wasClean`은 `close()` 또는 연결을 교체하는 `setup()`으로 닫으면 `true`이고 I/O 호출이 장치 소실이나 오류를 보고하면 `false`입니다. 연결을 종료한 방식을 나타내므로 감지되지 않은 장치 분리 후에도 정상 닫기로 보고될 수 있습니다.
-- 알림은 포트를 닫고 잠금을 해제한 뒤 기본적으로 호출한 스레드에서 동기적으로 전달합니다. 리스너를 메인 스레드에서 실행해야 하면 `Deliver::Main`으로 등록하세요.
-- 알림 조건과 재연결 동작은 `Serial::onDisconnect`를 참조하세요.
-'''
-of_category = "serial-types"
-
-["SerialDisconnectEventArgs::baudRate"]
-description.en = "Stores the baud rate of the connection that ended."
-description.ja = "切断された接続のボーレートを保持する。"
-description.ko = "종료된 연결의 보드레이트를 저장한다."
-details.en = '''
-- This `int` contains the baud rate recorded for the connection, matching the rate in the connection log.
-- Pass it with `portName` to `Serial::setup` to attempt reconnection: `serial.setup(e.portName, e.baudRate)`. Check `wasClean` first; see `Serial::onDisconnect` for reconnection precautions.
-- The default value is `0`.
-'''
-details.ja = '''
-- 接続時に記録されたボーレートを保持する `int` で、接続ログに表示される値と同じです。
-- `serial.setup(e.portName, e.baudRate)` のように `portName` とともに `Serial::setup` に渡すと、再接続を試みることができます。先に `wasClean` を確認してください。再接続時の注意点は `Serial::onDisconnect` を参照してください。
-- 初期値は `0` です。
-'''
-details.ko = '''
-- 연결 시 기록된 보드레이트를 담는 `int`이며, 연결 로그에 표시되는 값과 같습니다.
-- `serial.setup(e.portName, e.baudRate)`처럼 `portName`과 함께 `Serial::setup`에 전달하여 재연결을 시도할 수 있습니다. 먼저 `wasClean`을 확인해야 합니다. 재연결 시 주의 사항은 `Serial::onDisconnect`를 참조하세요.
-- 기본값은 `0`입니다.
-'''
-
-["SerialDisconnectEventArgs::portName"]
-description.en = "Stores the port name of the connection that ended."
-description.ja = "切断された接続のポート名を保持する。"
-description.ko = "종료된 연결의 포트 이름을 저장한다."
-details.en = '''
-- This string contains the port name passed to `Serial::setup`. When connecting by device index, it contains the device path selected by that index.
-- The default value is an empty string.
-'''
-details.ja = '''
-- `Serial::setup` に渡したポート名を保持する文字列です。デバイスのインデックスで接続した場合は、そのインデックスで選ばれたデバイスパスが入ります。
-- 初期値は空文字列です。
-'''
-details.ko = '''
-- `Serial::setup`에 전달한 포트 이름을 담는 문자열입니다. 장치 인덱스로 연결한 경우 해당 인덱스로 선택된 장치 경로가 들어갑니다.
-- 기본값은 빈 문자열입니다.
-'''
-
-["SerialDisconnectEventArgs::reason"]
-description.en = "Stores a human-readable reason for the disconnection."
-description.ja = "人が読める切断理由を保持する。"
-description.ko = "사람이 읽을 수 있는 연결 종료 사유를 저장한다."
-details.en = '''
-- Use this string for display or logging, and use `wasClean` to distinguish an application-requested close from a detected device loss. The default value is an empty string.
-- For an application-requested close, the value is `"closed by close()"`. On Android, if the device loss was already recorded, `" (the device had already been lost: <reason>)"` is appended, while `wasClean` remains `true`.
-- For a detected device loss, the value is the reason used in the loss warning, such as `"read: Input/output error"`.
-'''
-details.ja = '''
-- 表示やログに使う文字列です。アプリによるクローズと検出されたデバイスの消失を区別するには、`wasClean` を使ってください。初期値は空文字列です。
-- アプリによるクローズでは `"closed by close()"` になります。Android では、デバイスの消失がすでに記録されていた場合、末尾に `" (the device had already been lost: <reason>)"` が追加されますが、`wasClean` は `true` のままです。
-- デバイスの消失が検出された場合は、`"read: Input/output error"` など、消失の警告で使われる理由の文字列が入ります。
-'''
-details.ko = '''
-- 표시나 로그에 사용하는 문자열입니다. 앱의 닫기 요청과 감지된 장치 소실을 구분하려면 `wasClean`을 사용해야 합니다. 기본값은 빈 문자열입니다.
-- 앱의 닫기 요청으로 종료된 경우 값은 `"closed by close()"`입니다. Android에서는 장치 소실이 이미 기록되어 있으면 뒤에 `" (the device had already been lost: <reason>)"`가 추가되지만, `wasClean`은 `true`로 유지됩니다.
-- 장치 소실이 감지된 경우 `"read: Input/output error"`처럼 소실 경고에 사용된 사유 문자열이 들어갑니다.
-'''
-
-["SerialDisconnectEventArgs::wasClean"]
-description.en = "Indicates whether the application requested the connection to close."
-description.ja = "アプリの要求による切断かどうかを示す。"
-description.ko = "앱의 요청으로 연결이 종료되었는지 나타낸다."
-details.en = '''
-- `true` means that `Serial::close` closed the connection, including when `Serial::setup` calls it to close the previous connection.
-- `false` means that `available()`, `readBytes()`, `readByte()`, or `writeBytes()` detected a device loss or I/O error that ended the connection. The default value is `false`.
-- If none of those I/O calls reports the loss before `close()` or `setup()`, the value is `true` even if the device has disappeared. On Android, `reason` may include an already recorded loss; see `SerialDisconnectEventArgs::reason`.
-'''
-details.ja = '''
-- `true` は、`Serial::close` によって接続を閉じたことを示します。`Serial::setup` が前の接続を閉じるために呼び出した場合も含みます。
-- `false` は、`available()`、`readBytes()`、`readByte()`、`writeBytes()` のいずれかがデバイスの消失や I/O エラーを検出し、接続が終了したことを示します。初期値は `false` です。
-- これらの I/O 呼び出しが消失を報告する前に `close()` や `setup()` を呼ぶと、デバイスが消失していても `true` になります。Android では、すでに記録された消失が `reason` に含まれる場合があります。`SerialDisconnectEventArgs::reason` を参照してください。
-'''
-details.ko = '''
-- `true`는 `Serial::close`가 연결을 닫았음을 나타냅니다. `Serial::setup`이 이전 연결을 닫기 위해 호출한 경우도 포함합니다.
-- `false`는 `available()`, `readBytes()`, `readByte()`, `writeBytes()` 중 하나가 장치 소실이나 I/O 오류를 감지하여 연결이 종료되었음을 나타냅니다. 기본값은 `false`입니다.
-- 이러한 I/O 호출이 소실을 보고하기 전에 `close()`나 `setup()`을 호출하면 장치가 사라졌더라도 값은 `true`가 됩니다. Android에서는 이미 기록된 소실이 `reason`에 포함될 수 있습니다. `SerialDisconnectEventArgs::reason`을 참조하세요.
-'''
 
 ["Shader"]
 category = "graphics_shader"
@@ -37914,49 +38096,62 @@ description.en = "Captures live camera frames as pixels and a texture."
 description.ja = "カメラのライブ映像をピクセルとテクスチャとして取得する。"
 description.ko = "카메라의 실시간 영상을 픽셀과 텍스처로 가져온다."
 details.en = '''
-- Call `setup()` once, then `update()` each frame to upload the latest pixels to the texture. Use `getTexture()` or the inherited `draw()` methods to display it.
+- Call `setup(width, height)` once, then `update()` each frame to upload the latest pixels to the texture. Use `getTexture()` or the inherited `draw()` methods to display it.
 - Select a device and desired frame rate before setup. Defaults are device 0, 640 × 480 pixels, and the camera's default frame rate; the actual capture size may differ.
+- `isConnected()` is true only while the camera is open. When the OS reports the camera lost (unplugged), `update()` closes the grabber and fires `onDisconnect` once; `close()` never fires it. To reconnect, call `setup()` with no arguments, which reopens the same device at the last size. See the device lifecycle note (`docs/DEVICE_LIFECYCLE.md`).
 - On macOS and iOS, setup requests missing camera permission and returns `false` while permission is pending. Continue calling `update()` so initialization can finish after permission is granted.
 - Run setup, update, and drawing on the main thread because they create or update GPU resources. Native capture callbacks publish pixels in the background; `getPixels()` exposes a borrowed buffer without locking, so concurrent reads can race with capture writes.
 - The latest-frame path can skip intermediate camera frames. An optional frame queue stores owned `GrabberFrame` values with capture timestamps; it is disabled by default and drops the oldest frame when full. The web backend does not populate this queue.
-- The grabber can be moved but cannot be copied. `close()` and destruction stop capture; closing clears the texture and pixels while preserving the configured queue capacity. Borrowed pixel pointers must not be retained across resizing, closing, or setup.
+- The grabber can be moved but cannot be copied. `close()` and destruction stop capture (neither fires `onDisconnect`); closing clears the texture and pixels while preserving the configured queue capacity. Borrowed pixel pointers must not be retained across resizing, closing, or setup.
 '''
 details.ja = '''
-- `setup()` を一度呼び、各フレームで `update()` を呼んで最新のピクセルをテクスチャへ転送します。表示には `getTexture()` または継承した `draw()` を使ってください。
+- `setup(width, height)` を一度呼び、各フレームで `update()` を呼んで最新のピクセルをテクスチャへ転送します。表示には `getTexture()` または継承した `draw()` を使ってください。
 - デバイスと希望フレームレートはセットアップ前に指定します。既定値はデバイス 0、640 × 480 ピクセル、カメラの既定フレームレートです。実際のキャプチャサイズは異なる場合があります。
+- `isConnected()` は、カメラを開いている間だけ true です。OS がカメラの喪失（抜かれたこと）を報告すると、`update()` がグラバーを閉じて `onDisconnect` を 1 回発火します。`close()` では発火しません。再接続するには引数なしの `setup()` を呼びます。同じデバイスを、最後に使ったサイズで開き直します。デバイスのライフサイクルの説明（`docs/DEVICE_LIFECYCLE.md`）も参照してください。
 - macOS と iOS では、カメラ権限がなければセットアップ時に要求し、許可待ちの間は `false` を返します。許可後に初期化を完了できるよう、`update()` を呼び続けてください。
 - セットアップ、更新、描画は GPU リソースを作成または更新するため、メインスレッドで実行してください。ネイティブのキャプチャコールバックはバックグラウンドでピクセルを更新します。`getPixels()` はロックせずに借用バッファを公開するため、読み取りとキャプチャの書き込みが競合する場合があります。
 - 最新フレームだけを取得する方法では、途中のカメラフレームを取りこぼす場合があります。任意のフレームキューを使うと、キャプチャ時刻付きの `GrabberFrame` を所有バッファとして保持します。既定では無効で、満杯になると最も古いフレームを破棄します。web バックエンドは、このキューにフレームを追加しません。
-- グラバーはムーブできますが、コピーはできません。`close()` と破棄時にキャプチャを停止します。閉じるとテクスチャとピクセルを解放し、設定済みのキュー容量は保持します。借用したピクセルポインターは、サイズ変更、クローズ、セットアップをまたいで保持しないでください。
+- グラバーはムーブできますが、コピーはできません。`close()` と破棄時にキャプチャを停止します（どちらも `onDisconnect` は発火しません）。閉じるとテクスチャとピクセルを解放し、設定済みのキュー容量は保持します。借用したピクセルポインターは、サイズ変更、クローズ、セットアップをまたいで保持しないでください。
 '''
 details.ko = '''
-- `setup()`을 한 번 호출한 다음 매 프레임 `update()`를 호출하여 최신 픽셀을 텍스처에 업로드합니다. 표시에는 `getTexture()` 또는 상속받은 `draw()`를 사용합니다.
+- `setup(width, height)`를 한 번 호출한 다음 매 프레임 `update()`를 호출하여 최신 픽셀을 텍스처에 업로드합니다. 표시에는 `getTexture()` 또는 상속받은 `draw()`를 사용합니다.
 - 장치와 원하는 프레임 레이트는 설정 전에 지정합니다. 기본값은 장치 0, 640 × 480 픽셀, 카메라의 기본 프레임 레이트입니다. 실제 캡처 크기는 다를 수 있습니다.
+- `isConnected()`는 카메라가 열려 있는 동안만 true입니다. OS가 카메라 손실(뽑힘)을 보고하면 `update()`가 그래버를 닫고 `onDisconnect`를 한 번 발생시킵니다. `close()`는 발생시키지 않습니다. 다시 연결하려면 인수 없는 `setup()`을 호출합니다. 같은 장치를 마지막으로 사용한 크기로 다시 엽니다. 장치 수명 주기 설명(`docs/DEVICE_LIFECYCLE.md`)도 참조하세요.
 - macOS와 iOS에서는 카메라 권한이 없으면 설정 시 요청하고, 권한을 기다리는 동안 `false`를 반환합니다. 허용 후 초기화를 완료할 수 있도록 `update()`를 계속 호출합니다.
 - 설정, 업데이트, 그리기는 GPU 리소스를 생성하거나 갱신하므로 메인 스레드에서 실행합니다. 네이티브 캡처 콜백은 백그라운드에서 픽셀을 갱신합니다. `getPixels()`는 잠금 없이 빌린 버퍼를 노출하므로 읽기와 캡처 쓰기가 경쟁할 수 있습니다.
 - 최신 프레임만 가져오는 경로는 중간 카메라 프레임을 놓칠 수 있습니다. 선택적인 프레임 큐는 캡처 타임스탬프가 있는 `GrabberFrame`을 자체 버퍼로 보관합니다. 기본적으로 비활성화되어 있으며 가득 차면 가장 오래된 프레임을 버립니다. web 백엔드는 이 큐에 프레임을 추가하지 않습니다.
-- 그래버는 이동할 수 있지만 복사할 수 없습니다. `close()`와 소멸 시 캡처를 중지합니다. 닫으면 텍스처와 픽셀을 해제하지만 설정된 큐 용량은 유지합니다. 빌린 픽셀 포인터는 크기 변경, 닫기 또는 설정 이후까지 보관하지 않아야 합니다.
+- 그래버는 이동할 수 있지만 복사할 수 없습니다. `close()`와 소멸 시 캡처를 중지합니다(둘 다 `onDisconnect`를 발생시키지 않습니다). 닫으면 텍스처와 픽셀을 해제하지만 설정된 큐 용량은 유지합니다. 빌린 픽셀 포인터는 크기 변경, 닫기 또는 설정 이후까지 보관하지 않아야 합니다.
 '''
-related = ["VideoDeviceInfo", "Texture"]
+related = ["VideoDeviceInfo", "Texture", "VideoGrabber::isConnected", "VideoGrabber::onDisconnect", "VideoGrabber::setup", "DeviceDisconnectEventArgs"]
 platform_note.en = '''
 - Camera backends use AVFoundation on macOS/iOS, Media Foundation on Windows, V4L2 on Linux, and getUserMedia on web.
 - Web setup starts an asynchronous browser request and can return success before camera access succeeds; failures are logged to the browser console. Device selection and desired frame rate are not passed to that request.
 - Android capture and permission requests are unimplemented. `setup()` warns and returns `false`, and permission remains pending because the permission check always returns `false`.
+- The OS tells us about a lost camera on macOS and iOS (`AVCaptureDeviceWasDisconnectedNotification`), Windows (a Media Foundation reader error or an invalidated device), Linux (`ENODEV` from V4L2), and web (the camera track ends). Without such a signal a camera that merely stops sending frames is not treated as lost.
 '''
 platform_note.ja = '''
 - カメラのバックエンドは、macOS/iOS で AVFoundation、Windows で Media Foundation、Linux で V4L2、web で getUserMedia を使います。
 - web のセットアップはブラウザーへの非同期要求を開始するため、カメラへのアクセス成功前に成功を返す場合があります。失敗はブラウザーのコンソールに記録します。この要求にはデバイス選択と希望フレームレートを渡しません。
 - Android のキャプチャと権限要求は未実装です。`setup()` は警告を記録して `false` を返し、権限確認が常に `false` を返すため、許可待ちのままになります。
+- カメラの喪失を OS から知らせてもらえるのは、macOS と iOS（`AVCaptureDeviceWasDisconnectedNotification`）、Windows（Media Foundation のリーダーエラーまたはデバイスの無効化）、Linux（V4L2 の `ENODEV`）、web（カメラのトラックの終了）です。こうした通知がない場合、フレームが届かなくなっただけのカメラは喪失とみなしません。
 '''
 platform_note.ko = '''
 - 카메라 백엔드는 macOS/iOS에서 AVFoundation, Windows에서 Media Foundation, Linux에서 V4L2, web에서 getUserMedia를 사용합니다.
 - web 설정은 비동기 브라우저 요청을 시작하므로 카메라 접근이 성공하기 전에 성공을 반환할 수 있습니다. 실패는 브라우저 콘솔에 기록합니다. 이 요청에는 장치 선택과 원하는 프레임 레이트를 전달하지 않습니다.
 - Android의 캡처와 권한 요청은 구현되지 않았습니다. `setup()`은 경고를 기록하고 `false`를 반환하며, 권한 확인이 항상 `false`를 반환하므로 권한 대기 상태를 유지합니다.
+- OS가 카메라 손실을 알려 주는 곳은 macOS와 iOS(`AVCaptureDeviceWasDisconnectedNotification`), Windows(Media Foundation 리더 오류 또는 장치 무효화), Linux(V4L2의 `ENODEV`), web(카메라 트랙 종료)입니다. 이런 알림이 없으면 프레임이 오지 않을 뿐인 카메라는 손실로 취급하지 않습니다.
 '''
 snippet = '''
-VideoGrabber camera;
+// tcApp members: VideoGrabber camera; float lastTry = 0.0f;
 void tcApp::setup() { camera.setup(640, 480); }
-void tcApp::update() { camera.update(); }
+void tcApp::update() {
+    camera.update();
+    // Reconnect every 2 seconds while the camera is not open (for example after an unplug)
+    if (!camera.isConnected() && !camera.isPendingPermission() && getElapsedTime() - lastTry > 2.0f) {
+        lastTry = getElapsedTime();
+        camera.setup();   // same device, same size as before
+    }
+}
 void tcApp::draw() { camera.draw(0, 0); }
 '''
 
@@ -37984,19 +38179,23 @@ details.ko = '''
 description.en = "Stop camera capture and release its resources."
 description.ja = "カメラのキャプチャを停止してリソースを解放する。"
 description.ko = "카메라 캡처를 중지하고 리소스를 해제한다."
+related = ["VideoGrabber::isConnected", "VideoGrabber::setup", "VideoGrabber::onDisconnect"]
 details.en = '''
-- Stops capture, cancels pending permission setup, discards queued frames, and releases the current pixel buffer and texture; dimensions become zero and both `isInitialized()` and `isFrameNew()` become false.
-- Preserves the device ID, requested frame rate, verbose setting, queue capacity, and stored device name; the destructor also calls this function.
+- Stops capture, cancels pending permission setup, discards queued frames, and releases the current pixel buffer and texture; dimensions become zero and both `isConnected()` and `isFrameNew()` become false.
+- It never fires `onDisconnect`; that event is only for a camera the OS reports lost. The destructor also calls this function, so destroying a grabber fires nothing either.
+- Preserves the device ID, requested frame rate, verbose setting, queue capacity, stored device name, and the size of the last `setup(width, height)`, so `setup()` with no arguments can reopen the camera.
 - When called outside the main thread, destruction of an allocated texture is queued to the main thread.
 '''
 details.ja = '''
-- キャプチャと許可待ちのセットアップを中止し、キュー内のフレームを破棄して現在のピクセルバッファとテクスチャを解放します。寸法は 0 になり、`isInitialized()` と `isFrameNew()` は false になります。
-- デバイス ID、要求フレームレート、詳細ログ設定、キュー容量、保存済みのデバイス名は保持します。デストラクタもこの関数を呼びます。
+- キャプチャと許可待ちのセットアップを中止し、キュー内のフレームを破棄して現在のピクセルバッファとテクスチャを解放します。寸法は 0 になり、`isConnected()` と `isFrameNew()` は false になります。
+- `onDisconnect` は発火しません。このイベントは OS が喪失を報告したカメラ専用です。デストラクタもこの関数を呼ぶため、グラバーを破棄しても何も発火しません。
+- デバイス ID、要求フレームレート、詳細ログ設定、キュー容量、保存済みのデバイス名、最後の `setup(width, height)` のサイズは保持します。そのため、引数なしの `setup()` でカメラを開き直せます。
 - メインスレッド以外から呼んだ場合、確保済みテクスチャの破棄はメインスレッドに予約されます。
 '''
 details.ko = '''
-- 캡처와 권한 대기 중인 설정을 중단하고, 큐의 프레임을 버리며 현재 픽셀 버퍼와 텍스처를 해제합니다. 크기는 0이 되고 `isInitialized()`와 `isFrameNew()`는 false가 됩니다.
-- 디바이스 ID, 요청 프레임 레이트, 상세 로그 설정, 큐 용량, 저장된 디바이스 이름은 유지합니다. 소멸자도 이 함수를 호출합니다.
+- 캡처와 권한 대기 중인 설정을 중단하고, 큐의 프레임을 버리며 현재 픽셀 버퍼와 텍스처를 해제합니다. 크기는 0이 되고 `isConnected()`와 `isFrameNew()`는 false가 됩니다.
+- `onDisconnect`는 발생시키지 않습니다. 이 이벤트는 OS가 손실을 보고한 카메라 전용입니다. 소멸자도 이 함수를 호출하므로 그래버를 파괴해도 아무것도 발생하지 않습니다.
+- 디바이스 ID, 요청 프레임 레이트, 상세 로그 설정, 큐 용량, 저장된 디바이스 이름, 마지막 `setup(width, height)`의 크기는 유지합니다. 그래서 인수 없는 `setup()`으로 카메라를 다시 열 수 있습니다.
 - 메인 스레드 외부에서 호출하면 할당된 텍스처의 해제를 메인 스레드에 예약합니다.
 '''
 
@@ -38219,6 +38418,31 @@ details.ko = '''
 - 요청한 크기와 다를 수 있으며 `update()` 중에 바뀔 수도 있습니다.
 '''
 
+["VideoGrabber::isConnected"]
+keywords = ["unplug", "disconnect", "reconnect", "device lost", "connected", "camera open"]
+description.en = "Return whether the camera is open."
+description.ja = "カメラが開いているかを返す。"
+description.ko = "카메라가 열려 있는지 반환한다."
+related = ["VideoGrabber::setup", "VideoGrabber::close", "VideoGrabber::onDisconnect", "VideoGrabber::isPendingPermission"]
+details.en = '''
+- True only while the camera is open: after a successful `setup()` and until `close()` or a loss. It is false initially, after `close()`, while a permission request is pending, and after the OS reported the camera lost.
+- The loss is recorded as soon as the backend learns of it, so this is already false in the frames before `update()` reports it through `onDisconnect`.
+- It does not indicate that a frame has arrived; on Web it can be true while the browser is still requesting access or starting the camera.
+- To reconnect, call `setup()` with no arguments after this returns false; see `VideoGrabber::onDisconnect`. `isInitialized()` is the older name of this function.
+'''
+details.ja = '''
+- カメラが開いている間だけ true です。`setup()` が成功してから、`close()` するか喪失するまでが対象です。初期状態、`close()` の後、許可要求の待機中、OS がカメラの喪失を報告した後は false です。
+- 喪失はバックエンドが知った時点で記録されるため、`update()` が `onDisconnect` で報告するより前のフレームでも、すでに false になります。
+- フレームの到着は示しません。Web ではブラウザがアクセス許可を要求中、またはカメラを起動中でも true になる場合があります。
+- 再接続する場合は、false になった後に引数なしの `setup()` を呼びます。`VideoGrabber::onDisconnect` も参照してください。`isInitialized()` はこの関数の旧名です。
+'''
+details.ko = '''
+- 카메라가 열려 있는 동안만 true입니다. `setup()`이 성공한 뒤부터 `close()`하거나 손실될 때까지입니다. 초기 상태, `close()` 이후, 권한 요청 대기 중, OS가 카메라 손실을 보고한 뒤에는 false입니다.
+- 손실은 백엔드가 알게 된 시점에 기록되므로, `update()`가 `onDisconnect`로 보고하기 전의 프레임에서도 이미 false입니다.
+- 프레임 도착 여부는 나타내지 않습니다. Web에서는 브라우저가 접근 권한을 요청하거나 카메라를 시작하는 중에도 true가 될 수 있습니다.
+- 다시 연결하려면 false가 된 뒤 인수 없는 `setup()`을 호출합니다. `VideoGrabber::onDisconnect`도 참조하세요. `isInitialized()`는 이 함수의 이전 이름입니다.
+'''
+
 ["VideoGrabber::isFrameNew"]
 category = "video"
 keywords = ["new frame", "fresh", "updated", "changed"]
@@ -38242,20 +38466,18 @@ details.ko = '''
 '''
 
 ["VideoGrabber::isInitialized"]
-description.en = "Return whether camera setup has completed."
-description.ja = "カメラのセットアップが完了しているかを返す。"
-description.ko = "카메라 설정이 완료되었는지 반환한다."
+description.en = "Returns the same state as `isConnected()`."
+description.ja = "`isConnected()` と同じ状態を返す。"
+description.ko = "`isConnected()`와 같은 상태를 반환한다."
+related = ["VideoGrabber::isConnected"]
 details.en = '''
-- Returns the initialization flag set after platform setup and buffer allocation; it is false initially and after `close()`.
-- It does not indicate that a frame has arrived; on Web it can become true while the browser is still requesting access or starting the camera.
+- This older name is retained for existing code and directly returns `isConnected()`. See `VideoGrabber::isConnected` for what it reports.
 '''
 details.ja = '''
-- プラットフォームのセットアップとバッファ確保後に設定される初期化フラグを返します。初期状態と `close()` 後は false です。
-- フレームの到着は示しません。Web ではブラウザがアクセス許可を要求中、またはカメラを起動中でも true になる場合があります。
+- 既存コード向けに残されている旧名で、`isConnected()` の戻り値をそのまま返します。何を表すかは `VideoGrabber::isConnected` を参照してください。
 '''
 details.ko = '''
-- 플랫폼 설정과 버퍼 할당 후 설정되는 초기화 플래그를 반환합니다. 초기 상태와 `close()` 이후에는 false입니다.
-- 프레임 도착 여부는 나타내지 않습니다. Web에서는 브라우저가 접근 권한을 요청하거나 카메라를 시작하는 중에도 true가 될 수 있습니다.
+- 기존 코드를 위해 유지하는 이전 이름으로, `isConnected()`의 반환값을 그대로 반환합니다. 무엇을 나타내는지는 `VideoGrabber::isConnected`를 참조하세요.
 '''
 
 ["VideoGrabber::isPendingPermission"]
@@ -38321,6 +38543,53 @@ void tcApp::setup() {
     if (devices.empty()) return;
     camera.setDeviceID(devices.front().getDeviceID());
     camera.setup();
+}
+'''
+
+["VideoGrabber::onDisconnect"]
+keywords = ["unplug", "disconnect", "reconnect", "device lost", "disconnect event", "camera lost"]
+description.en = "Reports when the OS says the camera was lost."
+description.ja = "OS がカメラの喪失を報告したことを通知する。"
+description.ko = "OS가 카메라 손실을 보고했음을 알린다."
+related = ["DeviceDisconnectEventArgs", "VideoGrabber::isConnected", "VideoGrabber::close", "VideoGrabber::setup", "VideoGrabber::update", "Deliver"]
+details.en = '''
+- This `Event<DeviceDisconnectEventArgs>` fires once per open camera, and only when the OS reports the camera lost (unplugged). `reason` says what was reported, such as `"AVCaptureDeviceWasDisconnectedNotification"` or `"VIDIOC_DQBUF: No such device"`, the same text as the warning log. `isConnected()` is already false when it fires, and the grabber has closed itself.
+- `close()`, `setup()` (which closes the open camera first), destroying the grabber, and moving a grabber never fire it.
+- The backend only records the loss, on its capture thread or from an OS notification. `update()` reports it on the main thread, so call `update()` every frame as usual; a grabber nobody updates reports nothing, although `isConnected()` is already false. Listeners run in the context of the App that registered them.
+- A listener may call `setup()` to reopen the same camera, or the app polls `if (!camera.isConnected() && timer) camera.setup();`. Reconnecting is app code; the grabber never retries on its own.
+- Detection depends on the platform: macOS and iOS use `AVCaptureDeviceWasDisconnectedNotification`; Windows uses a Media Foundation source reader error or an invalidated device; Linux uses `ENODEV` from V4L2; web uses the end of the camera track. Android has no capture. A camera that only stops sending frames, with no such signal, is not reported.
+- Retain the returned `EventListener` for as long as the subscription is needed. Listeners remain attached to the original `VideoGrabber` object and are not transferred by a move.
+'''
+details.ja = '''
+- この `Event<DeviceDisconnectEventArgs>` は、開いたカメラごとに 1 回、OS がカメラの喪失（抜かれたこと）を報告したときだけ発火します。`reason` は報告された内容で、`"AVCaptureDeviceWasDisconnectedNotification"` や `"VIDIOC_DQBUF: No such device"` などです。警告ログと同じ文字列です。発火した時点で `isConnected()` はすでに false で、グラバーは自分で閉じています。
+- `close()`、`setup()`（開いているカメラを先に閉じます）、グラバーの破棄、グラバーのムーブでは発火しません。
+- バックエンドは、キャプチャスレッドまたは OS の通知の中で喪失を記録するだけです。`update()` がメインスレッドでそれを報告するため、いつも通り毎フレーム `update()` を呼んでください。`update()` を呼ばないグラバーは何も報告しませんが、`isConnected()` はすでに false になっています。リスナーは、登録した App のコンテキストで動きます。
+- リスナーから `setup()` を呼んで同じカメラを開き直すか、アプリが `if (!camera.isConnected() && timer) camera.setup();` のようにポーリングします。再接続はアプリのコードで行います。グラバー自身は再試行しません。
+- 検出方法はプラットフォームごとに異なります。macOS と iOS は `AVCaptureDeviceWasDisconnectedNotification`、Windows は Media Foundation のソースリーダーのエラーまたはデバイスの無効化、Linux は V4L2 の `ENODEV`、web はカメラのトラックの終了を使います。Android にはキャプチャがありません。こうした通知がなく、ただフレームが届かなくなっただけの場合は報告しません。
+- 返された `EventListener` は、購読が必要な間は保持してください。リスナーは元の `VideoGrabber` オブジェクトに付いたままで、ムーブでは移りません。
+'''
+details.ko = '''
+- 이 `Event<DeviceDisconnectEventArgs>`는 열린 카메라마다 한 번, OS가 카메라 손실(뽑힘)을 보고했을 때만 발생합니다. `reason`은 보고된 내용으로 `"AVCaptureDeviceWasDisconnectedNotification"`이나 `"VIDIOC_DQBUF: No such device"` 등이며 경고 로그와 같은 문자열입니다. 발생한 시점에 `isConnected()`는 이미 false이고 그래버는 스스로 닫혀 있습니다.
+- `close()`, `setup()`(열린 카메라를 먼저 닫습니다), 그래버의 소멸, 그래버의 이동에서는 발생하지 않습니다.
+- 백엔드는 캡처 스레드나 OS 알림 안에서 손실을 기록만 합니다. `update()`가 메인 스레드에서 이를 보고하므로 평소처럼 매 프레임 `update()`를 호출합니다. `update()`를 호출하지 않는 그래버는 아무것도 보고하지 않지만 `isConnected()`는 이미 false입니다. 리스너는 등록한 App의 컨텍스트에서 실행됩니다.
+- 리스너에서 `setup()`을 호출해 같은 카메라를 다시 열거나, 앱이 `if (!camera.isConnected() && timer) camera.setup();`처럼 폴링합니다. 재연결은 앱 코드의 몫이며 그래버가 스스로 재시도하지 않습니다.
+- 감지 방법은 플랫폼마다 다릅니다. macOS와 iOS는 `AVCaptureDeviceWasDisconnectedNotification`, Windows는 Media Foundation 소스 리더 오류 또는 장치 무효화, Linux는 V4L2의 `ENODEV`, web은 카메라 트랙 종료를 사용합니다. Android에는 캡처가 없습니다. 이런 알림 없이 프레임만 오지 않게 된 경우는 보고하지 않습니다.
+- 반환된 `EventListener`는 구독이 필요한 동안 보관합니다. 리스너는 원래의 `VideoGrabber` 객체에 남으며 이동으로 옮겨지지 않습니다.
+'''
+snippet = '''
+// tcApp members: VideoGrabber camera; EventListener lostListener;
+void tcApp::setup() {
+    lostListener = camera.onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning() << "camera lost: " << e.reason;
+    });
+    camera.setup(1280, 720);
+}
+void tcApp::update() {
+    camera.update();   // reports the loss
+    if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+        lastTry = getElapsedTime();
+        camera.setup();   // same device, same size as before
+    }
 }
 '''
 
@@ -38448,34 +38717,38 @@ details.ko = '''
 '''
 
 ["VideoGrabber::setup"]
-description.en = "Initialize camera capture at a requested size."
-description.ja = "指定した寸法でカメラのキャプチャを初期化する。"
-description.ko = "요청한 크기로 카메라 캡처를 초기화한다."
+description.en = "Open the camera at a requested size, or reopen the last one."
+description.ja = "指定した寸法でカメラを開く、または最後のカメラを開き直す。"
+description.ko = "요청한 크기로 카메라를 열거나 마지막 카메라를 다시 연다."
+related = ["VideoGrabber::isConnected", "VideoGrabber::close", "VideoGrabber::onDisconnect", "VideoGrabber::setDeviceID"]
 details.en = '''
-- `setup(int width = 640, int height = 480)` requests dimensions in pixels and first closes any previous capture; actual dimensions can differ, so read `getWidth()` and `getHeight()`.
+- `setup(int width, int height)` requests dimensions in pixels, with no defaults, and first closes any previous capture without firing `onDisconnect`; actual dimensions can differ, so read `getWidth()` and `getHeight()`. It opens the device chosen by `setDeviceID()` and remembers the requested size.
+- `setup()` with no arguments reopens the camera with the last settings: the current device ID and the size of the last `setup(width, height)` (device 0 at 640 × 480 if there was none). On failure it logs an error and returns false. Use it to reconnect, for example `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`.
 - Returns true after platform setup and allocation of a zero-filled RGBA8 CPU buffer and a streaming texture; a captured frame need not be available yet.
 - If camera permission is unavailable, requests it asynchronously, marks setup as pending, and returns false; keep calling `update()` to attempt setup once permission is granted.
 - Platform setup failure also returns false, but does not schedule automatic retries; use `isPendingPermission()` to distinguish a pending permission setup.
 - Call `setup()`, `update()`, `copyToImage()`, and drawing on the main thread because they create or use GPU resources; serialize lifecycle changes with other access to the grabber.
-- On Web, browser permission and camera startup continue asynchronously after setup returns true; later browser failure is logged and does not clear `isInitialized()`.
+- On Web, browser permission and camera startup continue asynchronously after setup returns true; later browser failure is logged and does not clear `isConnected()`.
 - Android capture is unimplemented: permission checks return false and permission requests only log a warning, so setup remains pending.
 '''
 details.ja = '''
-- `setup(int width = 640, int height = 480)` はピクセル単位で寸法を要求し、最初に以前のキャプチャを閉じます。実際の寸法は異なる場合があるため、`getWidth()` と `getHeight()` で確認してください。
+- `setup(int width, int height)` はピクセル単位で寸法を要求します。既定値はありません。最初に以前のキャプチャを、`onDisconnect` を発火せずに閉じます。実際の寸法は異なる場合があるため、`getWidth()` と `getHeight()` で確認してください。`setDeviceID()` で選んだデバイスを開き、要求したサイズを覚えます。
+- 引数なしの `setup()` は、最後の設定でカメラを開き直します。現在のデバイス ID と、最後の `setup(width, height)` のサイズです（まだ呼んでいなければ、デバイス 0 の 640 × 480）。失敗するとエラーログを出して false を返します。再接続に使います。例: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
 - プラットフォームのセットアップと、0 で埋めた RGBA8 の CPU バッファおよびストリーミングテクスチャの確保後に true を返します。この時点でキャプチャ済みフレームがあるとは限りません。
 - カメラの許可がない場合は非同期に要求し、セットアップを待機状態にして false を返します。許可後にセットアップを試みられるよう、`update()` を呼び続けてください。
 - プラットフォームのセットアップ失敗でも false を返しますが、自動再試行は予約しません。許可待ちかどうかは `isPendingPermission()` で区別してください。
 - GPU リソースを作成または使用するため、`setup()`、`update()`、`copyToImage()`、描画はメインスレッドで呼んでください。初期化や終了などの状態変更は、グラバーへの他のアクセスと同時に行わないでください。
-- Web では true を返した後もブラウザの許可要求とカメラ起動が非同期に進みます。その後ブラウザ側で失敗しても、ログを出力するだけで `isInitialized()` は false になりません。
+- Web では true を返した後もブラウザの許可要求とカメラ起動が非同期に進みます。その後ブラウザ側で失敗しても、ログを出力するだけで `isConnected()` は false になりません。
 - Android のキャプチャは未実装です。許可確認は false を返し、許可要求は警告を出すだけなので、セットアップは待機状態のままです。
 '''
 details.ko = '''
-- `setup(int width = 640, int height = 480)`은 픽셀 단위로 크기를 요청하며 먼저 이전 캡처를 닫습니다. 실제 크기는 다를 수 있으므로 `getWidth()`와 `getHeight()`로 확인합니다.
+- `setup(int width, int height)`는 픽셀 단위로 크기를 요청하며 기본값이 없습니다. 먼저 이전 캡처를 `onDisconnect` 없이 닫습니다. 실제 크기는 다를 수 있으므로 `getWidth()`와 `getHeight()`로 확인합니다. `setDeviceID()`로 고른 장치를 열고 요청한 크기를 기억합니다.
+- 인수 없는 `setup()`은 마지막 설정으로 카메라를 다시 엽니다. 현재 디바이스 ID와 마지막 `setup(width, height)`의 크기입니다(아직 호출하지 않았다면 장치 0의 640 × 480). 실패하면 오류 로그를 남기고 false를 반환합니다. 재연결에 사용합니다. 예: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
 - 플랫폼 설정과 0으로 채운 RGBA8 CPU 버퍼 및 스트리밍 텍스처 할당 후 true를 반환합니다. 이 시점에 캡처된 프레임이 있다는 뜻은 아닙니다.
 - 카메라 권한이 없으면 비동기로 요청하고 설정을 대기 상태로 지정한 뒤 false를 반환합니다. 권한 허용 후 설정을 시도할 수 있도록 `update()`를 계속 호출합니다.
 - 플랫폼 설정 실패 시에도 false를 반환하지만 자동 재시도는 예약하지 않습니다. 권한 대기 상태인지는 `isPendingPermission()`으로 구분합니다.
 - GPU 리소스를 만들거나 사용하므로 `setup()`, `update()`, `copyToImage()`, 그리기는 메인 스레드에서 호출합니다. 초기화나 종료 등의 상태 변경은 그래버에 대한 다른 접근과 동시에 수행하지 않아야 합니다.
-- Web에서는 true 반환 후에도 브라우저의 권한 요청과 카메라 시작이 비동기로 진행됩니다. 이후 브라우저에서 실패해도 로그만 출력하며 `isInitialized()`는 false로 바뀌지 않습니다.
+- Web에서는 true 반환 후에도 브라우저의 권한 요청과 카메라 시작이 비동기로 진행됩니다. 이후 브라우저에서 실패해도 로그만 출력하며 `isConnected()`는 false로 바뀌지 않습니다.
 - Android 캡처는 미구현입니다. 권한 확인은 false를 반환하고 권한 요청은 경고만 출력하므로 설정은 대기 상태로 유지됩니다.
 '''
 snippet = '''
@@ -38490,21 +38763,24 @@ description.en = "Process camera updates and upload the latest frame."
 description.ja = "カメラの更新を処理して最新フレームをアップロードする。"
 description.ko = "카메라 업데이트를 처리하고 최신 프레임을 업로드한다."
 details.en = '''
-- Call once per app frame; when initialized, resets the new-frame flag, processes platform updates and size changes, and uploads the latest dirty RGBA8 buffer to the texture.
+- Call once per app frame; when connected, resets the new-frame flag, processes platform updates and size changes, and uploads the latest dirty RGBA8 buffer to the texture.
+- If the OS reported the camera lost, this call closes the grabber and fires `onDisconnect` once (the grabber needs `update()` to report a loss), then returns without processing a frame.
 - During pending permission setup, checks permission and attempts initialization once granted, then returns without processing a frame in that call; otherwise an uninitialized grabber does nothing.
 - Intermediate camera frames can be overwritten between updates; use the optional queue to retain frames up to its capacity.
 - On Web, copies an available video image through a canvas on each update, even if the camera image has not changed.
 - For threading requirements, see `VideoGrabber::setup`; repeated texture uploads within one app frame are subject to `Texture::loadData` limits.
 '''
 details.ja = '''
-- アプリの各フレームで 1 回呼んでください。初期化済みの場合は新規フレームのフラグをリセットし、プラットフォームの更新とサイズ変更を処理して、変更済みの最新 RGBA8 バッファをテクスチャへアップロードします。
+- アプリの各フレームで 1 回呼んでください。接続中の場合は新規フレームのフラグをリセットし、プラットフォームの更新とサイズ変更を処理して、変更済みの最新 RGBA8 バッファをテクスチャへアップロードします。
+- OS がカメラの喪失を報告していた場合、この呼び出しがグラバーを閉じて `onDisconnect` を 1 回発火し、フレームを処理せずに戻ります（喪失の報告には `update()` が必要です）。
 - 許可待ちの場合は許可を確認し、許可されると初期化を試み、その呼び出しではフレームを処理せずに戻ります。それ以外の未初期化状態では何もしません。
 - 更新の間に届く途中のカメラフレームは上書きされる場合があります。容量の範囲で保持するには任意のフレームキューを使用してください。
 - Web ではカメラ画像が変化していなくても、利用可能な動画画像を更新のたびに canvas 経由でコピーします。
 - スレッドの扱いは `VideoGrabber::setup` を参照してください。同じアプリフレーム内でアップロードを繰り返す場合は `Texture::loadData` の制限を受けます。
 '''
 details.ko = '''
-- 앱 프레임마다 한 번 호출합니다. 초기화된 경우 새 프레임 플래그를 초기화하고 플랫폼 업데이트와 크기 변경을 처리한 뒤, 변경된 최신 RGBA8 버퍼를 텍스처에 업로드합니다.
+- 앱 프레임마다 한 번 호출합니다. 연결된 경우 새 프레임 플래그를 초기화하고 플랫폼 업데이트와 크기 변경을 처리한 뒤, 변경된 최신 RGBA8 버퍼를 텍스처에 업로드합니다.
+- OS가 카메라 손실을 보고했다면 이 호출이 그래버를 닫고 `onDisconnect`를 한 번 발생시킨 뒤 프레임을 처리하지 않고 반환합니다(손실을 보고하려면 `update()`가 필요합니다).
 - 권한 대기 중에는 권한을 확인하고 허용되면 초기화를 시도한 다음, 해당 호출에서는 프레임을 처리하지 않고 반환합니다. 그 외의 미초기화 상태에서는 아무 작업도 하지 않습니다.
 - 업데이트 사이에 도착한 중간 카메라 프레임은 덮어써질 수 있습니다. 용량 범위 내에서 보관하려면 선택적으로 프레임 큐를 사용합니다.
 - Web에서는 카메라 이미지가 바뀌지 않아도 사용할 수 있는 영상 이미지를 업데이트마다 canvas를 통해 복사합니다.

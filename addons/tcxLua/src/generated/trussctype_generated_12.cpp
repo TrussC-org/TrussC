@@ -184,21 +184,24 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["streaming"] = &trussc::PlayingSoundInfo::streaming;
         t["volume"] = &trussc::PlayingSoundInfo::volume;
     }
-    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
-        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
-        "Points", sol::var(trussc::PrimitiveType::Points),
-        "Lines", sol::var(trussc::PrimitiveType::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
-        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
-        "Quads", sol::var(trussc::PrimitiveType::Quads));
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
+    {
+        sol::usertype<trussc::Font::PlacedGlyph> t = lua->new_usertype<trussc::Font::PlacedGlyph>("FontPlacedGlyph");
+        t["baselineY"] = &trussc::Font::PlacedGlyph::baselineY;
+        t["codepoint"] = &trussc::Font::PlacedGlyph::codepoint;
+        t["drawX"] = &trussc::Font::PlacedGlyph::drawX;
+        t["pivotX"] = &trussc::Font::PlacedGlyph::pivotX;
+        t["pivotY"] = &trussc::Font::PlacedGlyph::pivotY;
+        t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
+        t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
+    }
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
     lua->new_usertype<trussc::MouseButton>("MouseButton",
         sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
         "Left", sol::var(trussc::MouseButton::Left),
@@ -210,17 +213,19 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         "Directional", sol::var(trussc::LightType::Directional),
         "Point", sol::var(trussc::LightType::Point),
         "Spot", sol::var(trussc::LightType::Spot));
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
-    lua->new_usertype<trussc::MixMode>("MixMode",
-        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
-        "Auto", sol::var(trussc::MixMode::Auto),
-        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
     {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::RuntimeSettings> t = lua->new_usertype<trussc::RuntimeSettings>("RuntimeSettings");
+        t["uniformBufferReserve"] = &trussc::RuntimeSettings::uniformBufferReserve;
+        t["reserveUniformBuffer"] = &trussc::RuntimeSettings::reserveUniformBuffer;
+    }
+    {
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
+    }
+    {
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifdef _MSC_VER

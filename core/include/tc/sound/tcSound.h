@@ -37,6 +37,7 @@
 #include <cmath>
 #include "../../tcMath.h"
 #include "../events/tcEvent.h"
+#include "../events/tcEventArgs.h"
 #include "../utils/tcAtomicSharedPtr.h"
 #include "../utils/tcLog.h"
 #include "tcAudioAnalysis.h"
@@ -891,6 +892,18 @@ namespace internal {
     // Main thread.
     void flushAudioDiagnostics();
 
+    // The engine's device-loss path (tcAudio_impl.cpp). stopped() runs on the
+    // device's notification thread: it only sets atomics and posts a
+    // preallocated main-thread slot, and never blocks the audio thread.
+    // deliver() is that slot, on the main thread. injectStopForTests() stops
+    // the open device behind the engine's back, so the backend posts the
+    // "stopped" notification as it does when the device stops by itself.
+    struct AudioDeviceLoss {
+        static void stopped();
+        static void deliver();
+        static bool injectStopForTests();
+    };
+
     // Device details for tc_get_audio_state that need miniaudio types.
     struct AudioDeviceReport {
         std::string initFailureDevice; // requested device name of the last failed init
@@ -1071,6 +1084,18 @@ public:
     bool init(const AudioSettings& settings);
     void shutdown();
 
+    // Device lifecycle (docs/DEVICE_LIFECYCLE.md). setup() is init() and
+    // setup(settings) is init(settings); close() is shutdown(). setup() and
+    // init() open the system default device; to use a specific device, pass
+    // AudioSettings with deviceName. This holds for any reopen of a closed
+    // engine: after close(), after the OS stopped the device, or from
+    // Sound::load*(). Both return false and log an error when the device
+    // cannot be opened, and re-initialize live on a running engine. To open
+    // the device again after a loss, call setup() / setup(settings) again.
+    bool setup() { return init(); }
+    bool setup(const AudioSettings& settings) { return init(settings); }
+    void close() { shutdown(); }
+
     // Enumerate available playback devices. Names from this list are
     // suitable for AudioSettings::deviceName. Returns an empty vector if
     // device enumeration is unsupported on the current platform.
@@ -1088,7 +1113,11 @@ public:
     int getChannels()     const { return channels_; }
     int getMaxPolyphony() const { return maxPolyphony_; }  // 0 = unlimited
     int getBufferSize()   const { return bufferSize_; }
-    bool isInitialized()  const { return initialized_; }
+    // True only while the device runs: false before setup() / init(), after
+    // close() / shutdown(), and from the moment the OS reports the device
+    // stopped (see onDisconnect). isInitialized() is the older name.
+    bool isConnected()    const { return initialized_.load(std::memory_order_acquire); }
+    bool isInitialized()  const { return isConnected(); }
 
     // Diagnostics (the tc_get_audio_state MCP tool reports both).
     // getStats() only reads atomics: cheap, callable from any thread.
@@ -1157,6 +1186,19 @@ public:
     // from inside.
     Event<AudioDeviceChangedArgs> audioDeviceChanged;
 
+    // Fired once when the OS or the audio library reports that the running
+    // output device stopped by itself (for example a USB audio interface or
+    // a Bluetooth headset that was switched off while it was the chosen
+    // device). isConnected() is already false, e.reason says why, and the
+    // event fires on the main thread at the next host turn, never on the
+    // audio thread. It never fires for close() / shutdown(), for a re-init,
+    // or for a reroute to the new OS default device (following the default
+    // is not a loss). Which backends report a stop depends on the OS; where
+    // the backend says nothing, the audio just stops and the engine still
+    // reports isConnected() == true. To open the device again, call setup() /
+    // setup(settings).
+    Event<DeviceDisconnectEventArgs> onDisconnect;
+
     // FFT analysis: Get latest audio samples (mono, left+right average)
     // numSamples: Number of samples to get (max ANALYSIS_BUFFER_SIZE)
     // Safe from any thread. Returns the requested count (capped), or 0 when
@@ -1206,6 +1248,7 @@ private:
     friend void internal::flushAudioDiagnostics();
     friend void internal::waitForAudioCallbacksNoTimeout();
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
+    friend struct internal::AudioDeviceLoss;
     friend class MicInput;
     friend class SoundBuffer;
     friend void internal::seekVoice(PlayingSound&, double);
@@ -1447,7 +1490,10 @@ private:
     void* context_ = nullptr;  // ma_context* — persistent across re-inits so
                                // CoreAudio internal state stays consistent
                                // when devices are torn down + recreated.
-    bool initialized_ = false;
+    // Atomic: the device's notification thread clears it when the device
+    // stops by itself (AudioDeviceLoss::stopped()). device_ stays allocated
+    // until the next init() / shutdown() releases it.
+    std::atomic<bool> initialized_{false};
     // Voice slots. Grown by play() (under mutex_) when every slot is in use,
     // never shrunk except by a re-init with a smaller cap. maxPolyphony_ is
     // the opt-in cap on slots (0 = unlimited); it is only written by init()
@@ -1996,6 +2042,24 @@ public:
     // Stop
     void stop();
 
+    // Device lifecycle (docs/DEVICE_LIFECYCLE.md). The microphone is always
+    // the system default capture device, so the "last settings" are the last
+    // sample rate: setup() is start() with it, isConnected() is isRunning(),
+    // close() is stop().
+    bool setup() { return start(sampleRate_); }
+    bool isConnected() const { return isRunning(); }
+    void close() { stop(); }
+
+    // Fired once when the OS or the audio library reports that the capture
+    // device stopped by itself (a USB microphone unplugged, a Bluetooth
+    // headset switched off). isConnected() is already false and the event
+    // fires on the main thread during runApp / runHeadlessApp, never on the
+    // audio thread. close() / stop(), start() again and the destructor never
+    // fire it. Not every backend reports a stop (and Web never does); where
+    // the backend says nothing, getBuffer() just stops getting new samples.
+    // To open the microphone again, call setup().
+    Event<DeviceDisconnectEventArgs> onDisconnect;
+
     // Get latest samples
     // numSamples: Number of samples to get (max BUFFER_SIZE)
     // Returns: Actual number of samples retrieved
@@ -2016,6 +2080,7 @@ private:
     std::shared_ptr<internal::MicState> state_;
     std::shared_ptr<internal::MicState> predecessor_;
     std::shared_ptr<std::function<void(internal::MicState&)>> apply_;
+    std::shared_ptr<std::function<void(internal::MicState&)>> lostApply_;
     std::shared_ptr<internal::NetworkDelivery> gate_ = std::make_shared<internal::NetworkDelivery>();
     bool running_ = false;
     bool starting_ = false;

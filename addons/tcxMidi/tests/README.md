@@ -40,10 +40,24 @@ CoreMIDI integration test is in `../tests-virtual`.
 
 The double does not verify native backend error generation or physical delivery.
 Compile the production header against the pinned libremidi as well, and check
-actual devices separately. Port removal/reconnection belongs to #415.
+actual devices separately. Removal of a real port is checked by `../tests-virtual`.
 
 Input storage tests also drive the production callback with the existing mock.
 They check copied port-name accounting, exact oldest-message eviction, shrink
 and zero-limit behavior, a whole over-budget message, 1024 64,000-byte messages,
 and one automatic main-thread Warning without polling. Counters and gates
 survive close/reopen; inline events remain independent of polling losses.
+
+Device lifecycle tests (`deviceLifecycle.cpp`, #415) run the same checks for
+`MidiIn` and `MidiOut`. The double's observer keeps the removal callbacks of
+every live watch; the test marks a port unplugged and calls them from a worker
+thread, as a backend would. They cover the five rules: `isConnected()` only
+while open; `setup()` reopening the last port by name (also when indices
+shifted, for a virtual port, after a failed open, and failing with one error
+when there is nothing to reopen or the port is gone); `close()`, reopening and
+`setup()` never firing; a removal firing once on the main thread, only at the
+next queue drain, with `isConnected()` already false and one warning, a
+removal storm being one event, another port's removal and virtual ports being
+ignored, and a listener reconnecting with `setup()`; and the destructor firing
+nothing, also with a delivery already queued. Every watch is released with its
+port.

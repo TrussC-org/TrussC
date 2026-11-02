@@ -47,8 +47,9 @@ endif()
 # its emscripten backend currently fails to compile, unrelated to our PR.)
 FetchContent_Declare(
     libremidi
-    # A new source location forces fresh extraction on upgrade: R4 cannot undo R1-R3.
-    SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/libremidi-v5.4.3-r4-src"
+    # A new source location forces fresh extraction on upgrade: R5 cannot undo R1-R4
+    # (r4 caches have the ALSA patch but not the CoreMIDI observer patch).
+    SOURCE_DIR "${FETCHCONTENT_BASE_DIR}/libremidi-v5.4.3-r5-src"
     URL      https://github.com/celtera/libremidi/archive/refs/tags/v5.4.3.tar.gz
     URL_HASH SHA256=a1c369c6aab01c80f1506345d1c099a167b330d1d59159aa7583f7b0b9f966b9
     PATCH_COMMAND ${CMAKE_COMMAND} -DLIBREMIDI_SOURCE_DIR=<SOURCE_DIR>

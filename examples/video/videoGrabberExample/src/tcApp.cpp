@@ -3,6 +3,8 @@
 // =============================================================================
 // Simple webcam capture demo.
 // Permission is handled automatically - just call setup() and update().
+// If the camera is unplugged, onDisconnect fires and update() reopens it with
+// setup() (same device, same size) every 2 seconds until it is back.
 // =============================================================================
 
 #include "tcApp.h"
@@ -19,13 +21,29 @@ void tcApp::setup() {
     // Select camera device (0 = default/first camera)
     grabber_.setDeviceID(0);
 
+    // The OS reported the camera lost (unplugged). The grabber has closed
+    // itself; update() below reconnects.
+    lostListener_ = grabber_.onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning("tcApp") << "Camera lost: " << e.reason;
+    });
+
     // Start camera (if permission not granted, it will be requested automatically)
     grabber_.setup(1280, 720);
 }
 
 void tcApp::update() {
     // This also handles pending permission - once granted, camera starts automatically
+    // This also reports a lost camera (onDisconnect)
     grabber_.update();
+
+    // Not connected (never was, or the camera was lost): try again every 2
+    // seconds. setup() with no arguments reopens the same device at the last
+    // size. Same as `if (!grabber_.isConnected() && timer) grabber_.setup();`
+    if (!grabber_.isConnected() && !grabber_.isPendingPermission() &&
+        getElapsedTime() - lastTry_ > 2.0f) {
+        lastTry_ = getElapsedTime();
+        grabber_.setup();
+    }
 }
 
 void tcApp::draw() {
@@ -39,9 +57,9 @@ void tcApp::draw() {
         return;
     }
 
-    if (!grabber_.isInitialized()) {
+    if (!grabber_.isConnected()) {
         setColor(1.0f);
-        drawBitmapString("Camera not available.", 20, 30);
+        drawBitmapString("Camera not available. Trying again every 2 seconds...", 20, 30);
         return;
     }
 

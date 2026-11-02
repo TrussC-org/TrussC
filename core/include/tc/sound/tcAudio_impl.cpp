@@ -257,6 +257,13 @@ struct AudioDiagnostics {
     bool wasStalled = false;
     uint64_t unreportedStalls = 0;
     bool     deviceIsDefault = false;   // set by init()
+
+    // --- device loss (see AudioDeviceLoss) ---
+    // A stop the notification thread saw, not yet delivered as onDisconnect.
+    // Cleared by deliver() (which fires) and by init() / shutdown() after they
+    // release the device, so the stop that releasing causes is dropped, and so
+    // is a loss the app has already reopened or closed.
+    std::atomic<bool> lossPending{false};
     std::string initFailureDevice;      // main thread only
 
     AudioDiagnostics() {
@@ -1449,7 +1456,7 @@ LoadResult internal::loadFFmpegAudioStream(const fs::path& path, Sound& sound) {
 // ---------------------------------------------------------------------------
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) {
     if (!source) return nullptr;
-    if (!initialized_) {
+    if (!isConnected()) {
         noteDroppedPlay(DropReason::NotRunning, source.get());
         return nullptr;
     }
@@ -1892,6 +1899,64 @@ void releaseVoice(PlayingSound& voice) {
 } // namespace internal
 
 // ---------------------------------------------------------------------------
+// Device loss
+//
+// miniaudio calls the notification callback on the device's own thread when
+// the device stops. The notification thread must neither block nor run app
+// code, so it only clears initialized_ (isConnected() is false from then on),
+// marks the loss and posts a preallocated main-thread slot; the slot fires
+// onDisconnect. The stop that init() / shutdown() cause themselves also comes
+// through here, but those two clear the mark right after they have released
+// the device (they run on the main thread, so the slot cannot run in between),
+// and the slot then finds nothing to report. A rerouted notification (the OS
+// default changed and the backend followed it) is not a loss and is ignored.
+// ---------------------------------------------------------------------------
+namespace {
+void deviceNotificationCallback(const ma_device_notification* notification) {
+    if (notification->type == ma_device_notification_type_stopped) internal::AudioDeviceLoss::stopped();
+}
+
+// Leaked with the engine: the slot is queued only while the engine lives.
+internal::MainThreadSlot& deviceLossSlot() {
+    static auto* slot = new internal::MainThreadSlot([](internal::MainThreadSlot&) { internal::AudioDeviceLoss::deliver(); });
+    return *slot;
+}
+} // namespace
+
+void internal::AudioDeviceLoss::stopped() {
+    AudioEngine& engine = AudioEngine::getInstance();
+    AudioDiagnostics& d = *engine.diag_;
+    // Once per device: a second stop notification finds it cleared already
+    if (!engine.initialized_.exchange(false, std::memory_order_acq_rel)) return;
+    d.running.store(false, std::memory_order_release);  // not a stall, a stop
+    d.lossPending.store(true, std::memory_order_release);
+    // The slot is static and the engine is never destroyed: nothing to keep alive
+    deviceLossSlot().post(std::shared_ptr<void>(std::shared_ptr<void>(), &deviceLossSlot()));
+}
+
+void internal::AudioDeviceLoss::deliver() {
+    AudioEngine& engine = AudioEngine::getInstance();
+    // A setup() / init() / shutdown() since the notification has dropped the
+    // loss: the device was reopened or closed on purpose, nothing to report.
+    if (!engine.diag_->lossPending.exchange(false, std::memory_order_acq_rel)) return;
+    DeviceDisconnectEventArgs args;
+    const ma_context* ctx = static_cast<const ma_context*>(engine.context_);
+    args.reason = std::string("the audio output device stopped")
+        + (ctx ? std::string(" (") + ma_get_backend_name(ctx->backend) + ")" : std::string());
+    logWarning("AudioEngine") << args.reason << "; call setup() to reopen it";
+    // Main thread already: inline, in the context of the listeners' Apps
+    internal::ExternalEventDelivery<DeviceDisconnectEventArgs>::notify(engine.onDisconnect, args);
+}
+
+bool internal::AudioDeviceLoss::injectStopForTests() {
+    AudioEngine& engine = AudioEngine::getInstance();
+    auto* device = static_cast<ma_device*>(engine.device_);
+    // The backend's "stopped" notification takes the same path as a device
+    // the OS took away
+    return device && ma_device_stop(device) == MA_SUCCESS;
+}
+
+// ---------------------------------------------------------------------------
 // AudioEngine miniaudio callback
 // ---------------------------------------------------------------------------
 static void playbackDataCallback(ma_device* pDevice, void* pOutput, const void* pInput, ma_uint32 frameCount) {
@@ -1933,7 +1998,9 @@ bool AudioEngine::init() {
 }
 
 bool AudioEngine::init(const AudioSettings& settings) {
-    const bool reinit = initialized_;
+    // A device that stopped by itself is still allocated: re-init releases it
+    // like a running one (voices move over the same way).
+    const bool reinit = initialized_ || device_;
     const int  oldRate = sampleRate_;
 
     if (reinit) {
@@ -1961,6 +2028,10 @@ bool AudioEngine::init(const AudioSettings& settings) {
         }
         initialized_ = false;
     }
+    // A loss not delivered yet belongs to the device released above (this
+    // includes the stop its release just caused)
+    diag_->lossPending.store(false, std::memory_order_release);
+    deviceLossSlot();  // created here, not on the notification thread
 
     // No device runs here: drop the previous device's meters (also when the
     // init below fails, so a dead engine never reports old output).
@@ -2063,6 +2134,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
     config.playback.pDeviceID  = deviceIDPtr;
     config.sampleRate          = sampleRate_;
     config.dataCallback        = playbackDataCallback;
+    config.notificationCallback = deviceNotificationCallback;
     config.pUserData           = this;
     if (bufferSize_ > 0) {
         config.periodSizeInFrames = bufferSize_;
@@ -2301,12 +2373,16 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
 }
 
 void AudioEngine::shutdown() {
+    // Read before the device is released: the stop that releasing causes
+    // reaches AudioDeviceLoss::stopped(), which clears initialized_.
+    const bool wasRunning = initialized_;
     if (device_) {
         ma_device* device = static_cast<ma_device*>(device_);
         ma_device_uninit(device);
         delete device;
         device_ = nullptr;
     }
+    diag_->lossPending.store(false, std::memory_order_release);
     if (context_) {
         ma_context* ctx = static_cast<ma_context*>(context_);
         ma_context_uninit(ctx);
@@ -2323,7 +2399,7 @@ void AudioEngine::shutdown() {
 
     // Only a running engine announces its shutdown: the app's exit path
     // calls this unconditionally, also when audio was never used.
-    if (initialized_) logNotice("AudioEngine") << "shutdown";
+    if (wasRunning) logNotice("AudioEngine") << "shutdown";
     initialized_ = false;
 }
 
@@ -2480,6 +2556,10 @@ MicTestBackend& micTestBackend() {
     static auto* backend = new MicTestBackend;
     return *backend;
 }
+void micNotificationCallback(const ma_device_notification* notification) {
+    if (notification->type == ma_device_notification_type_stopped)
+        micStopped(*static_cast<MicState*>(notification->pDevice->pUserData));
+}
 void micDataCallback(ma_device* device, void*, const void* input, ma_uint32 frames) {
     if (input) static_cast<MicState*>(device->pUserData)->audio(static_cast<const float*>(input), frames);
 }
@@ -2490,6 +2570,7 @@ MicStartResult openMic(MicState& state) {
     config.capture.channels = 1;
     config.sampleRate = state.sampleRate;
     config.dataCallback = micDataCallback;
+    config.notificationCallback = micNotificationCallback;
     config.pUserData = &state;
     ma_context_config contextConfig = ma_context_config_init();
     contextConfig.coreaudio.noAudioSessionDeactivate = MA_TRUE;

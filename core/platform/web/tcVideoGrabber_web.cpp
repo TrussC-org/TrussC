@@ -9,7 +9,7 @@
 EM_JS(void, tc_video_setup, (unsigned id, int width, int height), {
     Module.tcVideoGrabbers = Module.tcVideoGrabbers || new Map();
     const state = {stopped: false, ready: false, needsResize: false,
-                   width: width, height: height, actualWidth: 0, actualHeight: 0,
+                   lost: false, width: width, height: height, actualWidth: 0, actualHeight: 0,
                    buffer: 0, stream: null, video: null, canvas: null, ctx: null};
     Module.tcVideoGrabbers.set(id, state);
     navigator.mediaDevices.getUserMedia({video: {
@@ -20,6 +20,11 @@ EM_JS(void, tc_video_setup, (unsigned id, int width, int height), {
             return;
         }
         state.stream = stream;
+        // The browser ends a track when the camera is unplugged (or access is
+        // revoked). stop() from close() fires nothing.
+        stream.getVideoTracks().forEach(function(track) {
+            track.addEventListener('ended', function() { if (!state.stopped) state.lost = true; });
+        });
         const video = document.createElement('video');
         state.video = video;
         video.setAttribute("playsinline", "");
@@ -87,6 +92,7 @@ EM_JS(int, tc_video_size, (unsigned id, int field), {
     if (!state || state.stopped) return 0;
     if (field === 0) return state.needsResize ? 1 : 0;
     if (field === 1) return state.actualWidth;
+    if (field === 3) return state.lost ? 1 : 0;
     return state.actualHeight;
 });
 
@@ -120,6 +126,7 @@ void VideoGrabber::closePlatform() {
 }
 
 void VideoGrabber::updatePlatform() {
+    if (tc_video_size(state_->webId, 3)) state_->reportLost("the camera track ended");
     if (tc_video_update(state_->webId)) state_->dirty.store(true);
 }
 

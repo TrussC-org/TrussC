@@ -229,7 +229,7 @@ Fitting requests run every check strictly, without SKIPs.
 - `mcpAdmissionConstruction/` — large screenshot save/image analysis and allocation-error reply checks, including numeric/string request IDs, PNG roundtrips, deferred payload lifetime and bounded HTTP framing reads. The GPU-free framebuffer seam uses an addressed Window.
 - `asyncLoads/` — small resource-load smoke test and worker-to-main exit request.
 - `captureSubmission/` — five asynchronous screenshots of a presented frame, writer queue and shutdown disposition.
-- `asyncScreenshotMic/` — microphone startup, permission and owning-worker teardown checks; Web screenshot smoke coverage lives in `asyncScreenshotMicWeb/`.
+- `asyncScreenshotMic/` — microphone startup, permission and owning-worker teardown checks, and the `MicInput` device lifecycle (#415: a stop the backend reports clears `isConnected()` and fires `onDisconnect` once on the main thread; `close()`, `setup()`, the destructor and a loss that was reopened first do not); Web screenshot smoke coverage lives in `asyncScreenshotMicWeb/`.
 
 - `webDropSize/` — Web dropped-file size and reader limits. The Web build
   exercises the complete application header with mock FileReaders under Node;
@@ -386,6 +386,7 @@ Fitting requests run every check strictly, without SKIPs.
   separately from dropped plays. Checks MCP fields, main-thread underrun/stall
   warnings, and immediate per-voice migration warnings with no pump/exit duplicates.
   Uses callback gates and condition-based waits.
+- `audioDefaultDevice/` — default-device reporting (#303), the init failure state (#476), and the `AudioEngine` device lifecycle (#415) on the Null backend: a device stopped behind the engine's back (the backend's own stop notification, from another thread) clears `isConnected()` at once and fires `onDisconnect` once, on the main thread; `setup()` is `init()` (default device, last rate and channels) and `setup(settings)` is `init(settings)`; `close()`, `shutdown()`, a live re-init and a failed `setup()` fire nothing; a loss reopened or closed before its delivery is dropped.
 - `micInput/` — Sound playback advances across repeated MicInput start/stop
   cycles on the Null backend (#696). Capture works without initializing
   playback and its callbacks continue through engine sample-rate re-init,
@@ -689,18 +690,31 @@ Fitting requests run every check strictly, without SKIPs.
   `internal::publishWindowMetadata()`; the native flags (macOS
   occlusionState, Win32 `WM_SIZE` / `DXGI_STATUS_OCCLUDED`, X11 `WM_STATE` /
   `VisibilityNotify`) are checked by hand.
+- `videoGrabberDisconnect/` — `VideoGrabber` follows the device lifecycle
+  (#415, #276), headless and without a camera: the test plays the backend
+  through `VideoGrabberTestAccess::reportLost()` (the call a capture thread or
+  an OS notification makes). `isConnected()` turns false as soon as the loss is
+  recorded; `update()` reports it once, on the main thread, with the grabber
+  already closed (a `Deliver::Main` listener too, for a loss recorded on
+  another thread) and a listener may call `setup()`; `close()`, `setup()` on
+  an open grabber, the destructor and a move never fire `onDisconnect`; a loss
+  reported for a run that was already closed is ignored. `setup()` with no
+  arguments tries the same device again at the last size (device 99, which no
+  platform has, plays the missing camera). The physical unplug of each
+  backend stays on the device checklist.
 - `serialHangup/` — a lost serial device is reported (#260): when the device
   behind a `Serial` goes away, `available()` / `readBytes()` / `readByte()` /
   `writeBytes()` each notice it on their own, close the port, log one warning,
   and `isConnected()` turns false so `setup()` can reconnect; a quiet but
-  present device is not a loss. `onDisconnect` fires once per open connection:
-  for the loss (`wasClean` false, the port, the rate and the warning's text as
-  `reason`) and for `close()` of an open port, but not from the destructor or
-  a move assignment. A listener may call `setup()` from inside the
+  present device is not a loss. `onDisconnect` (#415) fires once per open connection, only for the loss (the
+  warning's text as `reason`, `isConnected()` already false), never from
+  `close()`, `setup()` on an open port, the destructor or a move assignment;
+  `setup()` with no arguments reopens the last port at the last baud rate, and
+  a loss found on a worker thread reaches a `Deliver::Main` listener once, on
+  the main thread. A listener may call `setup()` from inside the
   notification, and the call that found the loss must leave that new
   connection alone. Only the I/O calls find a loss: `close()` or `setup()`
-  after an unplug nobody noticed fire once as a clean close and leak no
-  descriptor. Several threads may share one `Serial` (it has its own
+  after an unplug nobody noticed close silently and leak no descriptor. Several threads may share one `Serial` (it has its own
   reader-writer lock): when they race an unplug, the loss is reported once,
   the fd is closed once, and the descriptors the kernel hands out right after
   (recognized by inode) are neither closed nor written to. The I/O calls never

@@ -182,9 +182,107 @@ void checkBackendFailure() {
     engine.shutdown();
 }
 
+template<class Predicate> bool waitFor(Predicate predicate) {
+    const auto deadline = chrono::steady_clock::now() + chrono::seconds(5);
+    while (!predicate()) {
+        if (chrono::steady_clock::now() >= deadline) return false;
+        this_thread::sleep_for(chrono::milliseconds(2));
+    }
+    return true;
+}
+
+// Stops the open device behind the engine's back, from another thread, as the
+// backend's own thread does when the OS takes the device away.
+bool loseDevice(AudioEngine& engine) {
+    bool stopped = false;
+    thread([&] { stopped = internal::AudioDeviceLoss::injectStopForTests(); }).join();
+    return stopped && waitFor([&] { return !engine.isConnected(); });
+}
+
+// #415: device lifecycle (docs/DEVICE_LIFECYCLE.md) of the engine.
+void checkLifecycle() {
+    auto& engine = AudioEngine::getInstance();
+    engine.shutdown();
+    int lost = 0;
+    bool firedOnMain = false;
+    bool connectedInListener = true;
+    string reason;
+    EventListener listener = engine.onDisconnect.listen([&](DeviceDisconnectEventArgs& e) {
+        ++lost;
+        reason = e.reason;
+        firedOnMain = isMainThread();
+        connectedInListener = engine.isConnected();
+    });
+
+    // Rule 1: isConnected() is true only while the device is open
+    check("lifecycle: stopped engine is not connected", !engine.isConnected() && !engine.isInitialized());
+    AudioSettings settings;
+    settings.backend = AudioBackend::Null;
+    settings.sampleRate = 44100;
+    settings.channels = 1;
+    check("lifecycle: setup(settings) opens the device", engine.setup(settings) && engine.isConnected());
+    check("lifecycle: isInitialized() is the same state", engine.isInitialized());
+
+    // Rule 4: the device stops by itself
+    check("lifecycle: a device stop clears isConnected()", loseDevice(engine));
+    check("lifecycle: nothing fires before the main thread's turn", lost == 0);
+    internal::drainMainThreadQueue();
+    check("lifecycle: onDisconnect fires once, on the main thread", lost == 1 && firedOnMain);
+    check("lifecycle: isConnected() is already false in the listener", !connectedInListener);
+    check("lifecycle: the reason says what happened", reason.find("stopped") != string::npos);
+    internal::drainMainThreadQueue();
+    check("lifecycle: it does not fire again", lost == 1 && !engine.isConnected());
+
+    // Rule 2: setup() is init(): the system default device (the backend and
+    // device name of setup(settings) are not kept) with the last rate and
+    // channels. The fault keeps the test off real hardware.
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::OpenFails);
+    check("lifecycle: setup() requests the default device (fault injected)", !engine.setup());
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::None);
+    check("lifecycle: setup() keeps rate and channels",
+          engine.getSampleRate() == 44100 && engine.getChannels() == 1);
+    check("lifecycle: setup(settings) reopens", engine.setup(settings) && engine.isConnected());
+    internal::drainMainThreadQueue();
+    check("lifecycle: reopening does not fire", lost == 1);
+
+    // Rule 3: close() closes and never fires
+    engine.close();
+    internal::drainMainThreadQueue();
+    check("lifecycle: close() disconnects without onDisconnect", !engine.isConnected() && lost == 1);
+    check("lifecycle: setup(settings) reopens after close()", engine.setup(settings) && engine.isConnected());
+    check("lifecycle: a live re-init does not fire", engine.setup(settings) && engine.isConnected());
+    engine.shutdown();
+    internal::drainMainThreadQueue();
+    check("lifecycle: shutdown() does not fire either", lost == 1);
+
+    // A loss that was not delivered yet is dropped when the app has already
+    // reopened or closed the device: isConnected() is true again, so an event
+    // would break rule 4.
+    check("lifecycle: reopen for the pending-loss cases", engine.setup(settings));
+    check("lifecycle: second loss", loseDevice(engine));
+    check("lifecycle: setup(settings) before delivery reconnects", engine.setup(settings) && engine.isConnected());
+    internal::drainMainThreadQueue();
+    check("lifecycle: the dropped loss does not fire", lost == 1 && engine.isConnected());
+    check("lifecycle: third loss", loseDevice(engine));
+    engine.close();
+    internal::drainMainThreadQueue();
+    check("lifecycle: close() before delivery drops the loss", lost == 1);
+
+    // Rule 2 failure: false, and the failure is logged by init()
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::OpenFails);
+    check("lifecycle: setup() returns false when the device cannot open",
+          !engine.setup() && !engine.isConnected());
+    internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::None);
+    internal::drainMainThreadQueue();
+    check("lifecycle: a failed setup() does not fire", lost == 1);
+    listener.disconnect();
+    engine.shutdown();
+}
+
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    getMainThreadId();
     checkSelection();
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     checkBackendFailure();
@@ -201,6 +299,7 @@ TC_CORE_TEST_MAIN() {
     check("null backend enumerates a named default", !defaultName.empty());
     if (!defaultName.empty()) checkInit("named default", defaultName);
     AudioEngine::getInstance().shutdown();
+    checkLifecycle();
     printf("\n%s (%d failures)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail);
     return g_fail ? 1 : 0;
 }

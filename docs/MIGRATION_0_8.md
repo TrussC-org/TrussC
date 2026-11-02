@@ -339,6 +339,83 @@ yet; the synthetic-input design remains open.
 - `tc_list_windows` returns each window's positive native identity as `id` instead of `index`. Pass that `id` as other tools' `window` argument; resource list indices are unchanged.
 - `exitApp()` now goes through `exitRequested`, whose listeners can veto it; before 0.8 it could not be cancelled. A “show a confirm dialog, then call `exitApp()`” pattern receives `exitRequested` again on that call, so remember acceptance in a flag, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
 
+## Serial follows the device lifecycle (#415)
+
+`Serial` is the first device class on the common surface described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup(...)`, `setup()`, `isConnected()`, `close()` and `onDisconnect`.
+
+- **New:** `serial.setup()` with no arguments reopens the last port with the last baud rate. On failure it logs an error and returns `false`. Reconnecting is app code:
+
+  ```cpp
+  if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+      lastTry = getElapsedTime();
+      serial.setup();
+  }
+  ```
+
+- **`onDisconnect` fires only when the OS reports the device lost.** `close()`, `setup()` on an open port (it closes the previous port first), the destructor and a move assignment no longer fire it. Before, `close()` and `setup()` fired it with `wasClean = true`. A listener that used `wasClean` to tell a lost device from your own `close()` can drop that check: it is only called for a loss now.
+- **The event type changed.** `Event<SerialDisconnectEventArgs>` is now `Event<DeviceDisconnectEventArgs>`, which has one field, `reason`. `SerialDisconnectEventArgs`, `portName`, `baudRate` and `wasClean` are removed. Change `[](SerialDisconnectEventArgs& e)` to `[](DeviceDisconnectEventArgs& e)`. To reconnect from a listener, replace `serial.setup(e.portName, e.baudRate)` with `serial.setup()`. Keep your own copy of the port name or baud rate if the listener needs to show them; `getDevicePath()` still returns the path.
+- A device that went away before an I/O call noticed is now closed silently by `close()` or `setup()` (before it fired `"closed by close()"`).
+- `isConnected()` and `close()` are unchanged. `isInitialized()` stays as an alias of `isConnected()`. `DeviceLostEventArgs` (the graphics device's `deviceLost` event) is not related and is unchanged.
+
+## DepthCamera follows the device lifecycle (#415)
+
+`tcx::depthcamera::DepthCamera` (addon `tcxDepthCamera`) gets the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md) in its base class. Nothing is removed or renamed, and a backend that already uses the v0.8 `std::shared_ptr<Device> openDevice()` hook compiles unchanged.
+
+- **New:** `camera.isConnected()` is true only while the device is open (from a successful `setup()` until `close()` or a reported loss).
+- **New:** `camera.onDisconnect` (`Event<DeviceDisconnectEventArgs>`, field `reason`) fires once per session, only when a backend reports the device lost, with `isConnected()` already false. `close()`, `setup()` and the destructor never fire it. Register with `Deliver::Main` to run on the main thread whichever thread the backend reports from.
+- **New, for backend authors:** the protected `reportLost(std::string reason)`. Call it from any thread where the backend already detects a loss. A backend that never calls it never fires `onDisconnect` (as before: it had none). Adding the one line is optional and goes in each backend repository (`tcxOrbbec`, `tcxAzureKinect`, `tcxRealSense`, ...), only where the SDK reports the loss.
+- **Changed:** `setup()` (it already took no arguments and reopened through `openDevice()`) now logs an error when `openDevice()` returns no device, on top of whatever the backend logged. After a reported loss, an inline (non-threaded) `update()` no longer calls `captureInto()` on the lost device.
+- Reconnecting is app code: `if (!camera->isConnected() && elapsed > 2.0f) camera->setup();`, as in `addons/tcxDepthCamera/example-synthetic`.
+
+## VideoGrabber follows the device lifecycle (#415, #276)
+
+`VideoGrabber` is the second device class on the common surface described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup(...)`, `setup()`, `isConnected()`, `close()` and `onDisconnect`.
+
+- **New:** `grabber.setup()` with no arguments reopens the last camera: the current `setDeviceID()` and the size of the last `setup(width, height)` (device 0 at 640 × 480 if there was none). On failure it logs an error and returns `false`. Reconnecting is app code:
+
+  ```cpp
+  if (!grabber.isConnected() && !grabber.isPendingPermission() && getElapsedTime() - lastTry > 2.0f) {
+      lastTry = getElapsedTime();
+      grabber.setup();
+  }
+  ```
+
+- **New: an unplugged camera is reported (#276).** When the OS says the camera is lost, `update()` closes the grabber and fires `grabber.onDisconnect` once (`Event<DeviceDisconnectEventArgs>`, `e.reason` says why). `isConnected()` is already false when it fires. Before, an unplugged camera left `isInitialized()` true and the last frame on screen. `close()`, `setup()` on an open grabber, the destructor and a move never fire it. The OS signals used: `AVCaptureDeviceWasDisconnectedNotification` (macOS, iOS), a Media Foundation reader error or an invalidated device (Windows), `ENODEV` from V4L2 (Linux) and the end of the camera track (web). A camera that only stops sending frames is not reported. You must keep calling `update()`: it is what reports the loss.
+- **Breaking: `setup(int width = 640, int height = 480)` lost its default arguments.** `setup()` is now the reopen call above. For a grabber that has never been set up it behaves as before (device 0 at 640 × 480, or the device from `setDeviceID()`), so `grabber.setup();` keeps working. `grabber.setup(1280);` (width only) no longer compiles: write `grabber.setup(1280, 480)`.
+- **Behavior change:** after an unplug the grabber closes itself, so `isConnected()` / `isInitialized()` turn false on their own and the texture and pixels are released. Code that assumed they stay true until `close()` should check `isConnected()`.
+- `isInitialized()` stays as an alias of `isConnected()`. `isConnected()` is also false while a macOS / iOS permission request is pending (as `isInitialized()` was).
+- Not part of this change: the Windows `uniqueId` (still the enumeration index), `setDeviceUniqueID()` and the Windows native-mode selection from #276 were dropped from the plan in the #415 simplification.
+
+## tcxMidi follows the device lifecycle (#415)
+
+`MidiIn` and `MidiOut` (addon tcxMidi) are on the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md). Nothing is removed; your existing code compiles and behaves as before until the OS reports an opened port removed.
+
+- **New:** `midiIn.setup()` / `midiOut.setup()` with no arguments reopen the last port that opened successfully (the same virtual port, or the port whose name equals the earlier one, found again by name because indices shift). On failure they log an error and return `false`. Reconnecting is app code:
+
+  ```cpp
+  if (!midiIn.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+      lastTry = getElapsedTime();
+      midiIn.setup();
+  }
+  ```
+
+- **New:** `isConnected()` and `close()`. `isOpen()` and `closePort()` stay as aliases.
+- **New:** `onDisconnect` (`Event<DeviceDisconnectEventArgs>`, one field, `reason`). It fires once, on the main thread, when the OS reports the opened port removed; the port is then already closed and `isConnected()` is `false`. `close()`, opening another port and the destructor never fire it.
+- **Behavior change:** before, an unplugged port stayed "open" with no message and `isOpen()` stayed `true`. Now, on CoreMIDI, the ALSA sequencer and WinMM, the port is closed, one warning is logged and `isConnected()` turns `false` shortly after the removal (a host turn, plus up to 100 ms on WinMM). An app that never looked at `isOpen()` sees only the warning. WebMIDI does not report removals, and neither does a virtual port you opened with `openVirtualPort()`, so nothing changes there.
+- Each open physical port now keeps a small libremidi observer alive (a backend thread on ALSA and WinMM) to hear about removals; it is released by `close()` and the destructor.
+
+## AudioEngine and MicInput follow the device lifecycle (#415)
+
+`AudioEngine` (the playback device) and `MicInput` (the capture device) join `Serial`, `DepthCamera`, `VideoGrabber` and `tcxMidi` on the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup()`, `isConnected()`, `close()` and `onDisconnect`. Everything that compiled before still compiles; the changes are additions plus one behavior change.
+
+- **New: `engine.setup()` and `engine.setup(settings)`** are `engine.init()` and `engine.init(settings)`. `setup()` and `init()` open the system default device (keeping the last rate, channel count, buffer size and polyphony); to use a specific device, pass `AudioSettings` with `deviceName`. This holds for any reopen of a closed engine: after `close()`, after the OS stopped the device, or from `Sound::load*()`, which calls `init()` while the engine is not connected.
+- **New: `engine.isConnected()` and `engine.close()`.** `isInitialized()` stays as an alias of `isConnected()`, and `shutdown()` as an alias of `close()`.
+- **New: `engine.onDisconnect`** (`Event<DeviceDisconnectEventArgs>`, field `reason`). It fires once, on the main thread at the Runtime's next host turn, when the OS or the audio library reports that the running output device stopped by itself (a USB audio interface unplugged, a Bluetooth headset switched off). `isConnected()` is already false when it fires. `close()`, `shutdown()`, a re-initialization and a reroute to a new OS default device never fire it. Which backends report a stop depends on the OS; where the backend says nothing, the audio stops and `isConnected()` stays true. To open the device again, call `setup()` / `setup(settings)` again.
+- **Behavior change: `isInitialized()` / `isConnected()` turns false when the OS stops the device**, and `play()` is refused (counted as "no output device running") until the device is opened again. Before, the engine kept reporting true and playing into a dead device. Nothing is rerouted or retried by the engine.
+- **New: `MicInput` has `setup()`, `isConnected()`, `close()` and `onDisconnect`.** `setup()` is `start()` at the sample rate of the last start (the microphone is always the system default capture device); `isConnected()` is `isRunning()` and `close()` is `stop()`. `isRunning()` also turns false when the OS stops the capture device. Web reports no loss.
+
+See [audioDeviceExample](../examples/sound/audioDeviceExample/src/tcApp.cpp) for choosing a device by name with `AudioEngine::listDevices()` and `setup(settings)`.
+
 ## No caps on image size, sound polyphony or OSC nesting
 
 These limits are gone; if your app needs a cap, set it yourself.

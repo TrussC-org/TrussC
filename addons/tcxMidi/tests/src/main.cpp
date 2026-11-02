@@ -124,10 +124,12 @@ void inputLifecycle() {
 }
 
 void testInputStorage();
+int testDeviceLifecycle();
 
 int main() {
     virtualPortEnumeration();
     testInputStorage();
+    failures += testDeviceLifecycle();   // before any port stays open in this file
     const std::vector<SendCase> cases = {
         {"note on", [](MidiOut& o) { return o.sendNoteOn(1, 60, 100); }, {0x90, 60, 100}},
         {"note off", [](MidiOut& o) { return o.sendNoteOff(2, 61); }, {0x81, 61, 0}},

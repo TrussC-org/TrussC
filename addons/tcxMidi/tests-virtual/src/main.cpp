@@ -13,6 +13,9 @@ namespace tc = trussc;
 #if defined(LIBREMIDI_ALSA)
 #include <alsa/asoundlib.h>
 #endif
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 
 namespace {
 using namespace tcx::midi;
@@ -96,6 +99,87 @@ bool virtualPorts() {
     return check(output.sendNoteOn(1, 60, 100), "named output note sent") &&
            check(receiveNote(sink), "virtual destination received 90 3c 64");
 }
+
+// One host turn: CoreMIDI delivers port removals on the run loop of the thread
+// that created the observer (the main thread; NSApp runs it in a real app),
+// then the main-thread queue runs (the Runtime does this once per host turn).
+void hostTurn(int ms) {
+#if defined(__APPLE__)
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, ms / 1000.0, true);
+#else
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+#endif
+    tc::internal::drainMainThreadQueue();
+}
+
+// Run host turns until `done()` or five seconds pass. The 5 s bound only ends a hang.
+template <class Done>
+bool pumpUntil(Done done) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!done()) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        hostTurn(5);
+    }
+    return true;
+}
+
+// Device lifecycle (#415) on a real backend: another client removes the port we
+// have open, which is what an unplug looks like to ALSA / CoreMIDI.
+bool lifecycle() {
+    tc::getMainThreadId();
+    const std::string suffix = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    const std::string sourceName = "tc415-src-" + suffix;
+    const std::string sinkName = "tc415-dst-" + suffix;
+    const std::string otherName = "tc415-other-" + suffix;
+
+    MidiOut peerSource;   // another client's virtual source, which our input opens
+    MidiIn peerSink;      // another client's virtual destination, which our output opens
+    MidiOut other;        // a third port: removing it must not matter
+    peerSink.hasNewMessage();
+    if (!check(peerSource.openVirtualPort(sourceName) && peerSink.openVirtualPort(sinkName) &&
+               other.openVirtualPort(otherName), "lifecycle: peers created")) return false;
+
+    MidiIn input;
+    MidiOut output;
+    input.hasNewMessage();
+    int inputLost = 0, outputLost = 0;
+    bool inputClosedWhenFired = false;
+    auto inputListener = input.onDisconnect.listen([&](tc::DeviceDisconnectEventArgs&) {
+        ++inputLost;
+        inputClosedWhenFired = !input.isConnected();
+    });
+    auto outputListener = output.onDisconnect.listen([&](tc::DeviceDisconnectEventArgs&) { ++outputLost; });
+    if (!check(input.openPort(sourceName) && input.isConnected(), "lifecycle: input opened") ||
+        !check(output.openPort(sinkName) && output.isConnected(), "lifecycle: output opened")) return false;
+
+    // An unrelated port going away is not our loss.
+    other.close();
+    const auto quiet = std::chrono::steady_clock::now() + std::chrono::milliseconds(600);
+    while (std::chrono::steady_clock::now() < quiet) hostTurn(10);
+    if (!check(input.isConnected() && output.isConnected() && inputLost == 0 && outputLost == 0,
+               "lifecycle: removing another port keeps both open")) return false;
+
+    // The peers go away.
+    peerSource.close();
+    peerSink.close();
+    if (!check(pumpUntil([&] { return inputLost > 0 && outputLost > 0; }), "lifecycle: both losses delivered")) return false;
+    if (!check(inputLost == 1 && outputLost == 1 && !input.isConnected() && !output.isConnected() &&
+               inputClosedWhenFired, "lifecycle: each fired once, with the port closed")) return false;
+    hostTurn(100);
+    if (!check(inputLost == 1 && outputLost == 1, "lifecycle: no repeat")) return false;
+    if (!check(!input.setup() && !output.setup(), "lifecycle: setup() fails while the port is gone")) return false;
+
+    // They come back: setup() finds the same names again.
+    if (!check(peerSource.openVirtualPort(sourceName) && peerSink.openVirtualPort(sinkName), "lifecycle: peers back")) return false;
+    if (!check(input.setup() && output.setup() && input.isConnected() && output.isConnected(),
+               "lifecycle: setup() reconnects both by name")) return false;
+    if (!check(output.sendNoteOn(1, 60, 100) && receiveNote(peerSink), "lifecycle: reconnected output delivers") ||
+        !check(peerSource.sendNoteOn(1, 60, 100) && receiveNote(input), "lifecycle: reconnected input receives")) return false;
+    input.close();
+    output.close();
+    hostTurn(100);
+    return check(inputLost == 1 && outputLost == 1, "lifecycle: close() does not fire");
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -134,5 +218,5 @@ int main(int argc, char** argv) {
     if (platformMidiApi() != libremidi::API::ALSA_SEQ &&
         platformMidiApi() != libremidi::API::COREMIDI)
         return skip("automatic virtual ports require ALSA/CoreMIDI; use --loopback NAME with loopMIDI on Windows.");
-    return virtualPorts() ? 0 : 1;
+    return virtualPorts() && lifecycle() ? 0 : 1;
 }

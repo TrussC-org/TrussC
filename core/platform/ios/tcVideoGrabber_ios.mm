@@ -57,6 +57,8 @@ struct VideoGrabberPlatformData {
     // Background observer tokens
     id<NSObject> bgObserver = nil;
     id<NSObject> fgObserver = nil;
+    // AVCaptureDeviceWasDisconnectedNotification observer token (an external camera)
+    id<NSObject> disconnectObserver = nil;
 
     // Orientation tracking
     UIInterfaceOrientation lastOrientation = UIInterfaceOrientationUnknown;
@@ -419,6 +421,17 @@ bool VideoGrabber::setupPlatform() {
             }
         }];
 
+        // An external camera that is unplugged: only record the loss;
+        // VideoGrabber::update() reports it.
+        data->disconnectObserver = [[NSNotificationCenter defaultCenter]
+            addObserverForName:AVCaptureDeviceWasDisconnectedNotification
+                        object:data->device
+                         queue:nil
+                    usingBlock:^(NSNotification* note) {
+            auto state = observerState.lock();
+            if (state) state->reportLost("AVCaptureDeviceWasDisconnectedNotification");
+        }];
+
         // Start capture
         [data->session startRunning];
 
@@ -443,6 +456,10 @@ static void stopCapture(const std::shared_ptr<internal::GrabberSharedState>& sta
         if (data->fgObserver) {
             [[NSNotificationCenter defaultCenter] removeObserver:data->fgObserver];
             data->fgObserver = nil;
+        }
+        if (data->disconnectObserver) {
+            [[NSNotificationCenter defaultCenter] removeObserver:data->disconnectObserver];
+            data->disconnectObserver = nil;
         }
 
         // Serialize in-flight notification callbacks with session release.

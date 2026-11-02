@@ -15,4 +15,8 @@ private:
     static constexpr int FFT_SIZE = 1024;
     vector<float> fftInput;
     vector<float> spectrum;
+
+    // onDisconnect fires once when the OS reports the microphone lost;
+    // SPACE starts it again with setup().
+    EventListener lostListener;
 };

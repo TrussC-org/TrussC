@@ -71,6 +71,8 @@ Argument-free Window APIs in App callbacks, owned listeners and async completion
 
 App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. Runtime owns exitRequested, deviceLost, hotReloadUnload and console. Lifecycle events notify Runtime first, then one reverse-attachment App snapshot (reload targets replacing Apps only). Quit gives every listener fresh cancel=false, ORs all vetoes, keeps the first nonempty veto reason and treats a throw as a veto while continuing. Device loss keeps its mutable cancellation behavior. Console is Runtime-only, once per subscribed slot, with subscriber ownership restored. See MIGRATION_0_8.md for `console::start()` usage.
 
+Device classes (serial ports, cameras, MIDI, depth cameras, audio devices) share one small lifecycle convention: `setup()` / `isConnected()` / `close()` / `onDisconnect`, where `onDisconnect` fires only when the OS reports the device lost. See [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md).
+
 OS close asks the addressed Window's closeRequested with the same per-listener OR/throw-veto policy. On acceptance, quitOnClose/last-window process quit asks exitRequested before any closure. Either veto keeps all Windows open; both accepted use common ending. Window::close and process shutdown bypass closeRequested. App swap/destroy/reload call App::exit without a Window exit. exitApp inside App::exit or Runtime shutdown is inert; an owned Window exit listener can request normal quit while the process is still running. ImGui deadlines run in Runtime maintenance before MCP expiry, including no-draw turns.
 
 Runtime queue and maintenance work selects process context and progresses at safe outer host turns, including turns with no Window draws. Swapchain drawing requires a Window callback; explicit offscreen Fbo drawing remains available. Nested entries restore the caller's drawing and native state. Native creation establishes identity, resources, dimensions and binding readiness before App construction. Each resized frame reconciles its Window framebuffer, swapchain and automatic viewport before beginning a pass.
@@ -2708,6 +2710,7 @@ void App::windowResized(int width, int height)  // Called when the window size c
 ### AudioEngine — Manages the output device and mixes sound playback using miniaudio.
 
 ```cpp
+void AudioEngine::close()  // Stops and closes the audio output device (alias of shutdown).
 size_t AudioEngine::getAnalysisBuffer(float * outBuffer, size_t numSamples)  // Copies recent audio output into a mono analysis buffer.
 int AudioEngine::getBufferSize() const  // Returns the requested audio buffer size.
 int AudioEngine::getChannels() const  // Returns the engine output channel count.
@@ -2717,10 +2720,12 @@ std::vector<PlayingSoundInfo> AudioEngine::getPlayingSounds() const  // Returns 
 int AudioEngine::getSampleRate() const  // Returns the engine output sample rate.
 AudioStats AudioEngine::getStats() const  // Returns a snapshot of audio engine diagnostics.
 bool AudioEngine::init() [+1]  // Initializes or reinitializes the audio output engine.
+bool AudioEngine::isConnected() const  // Returns whether the audio output device is open and running.
 bool AudioEngine::isInitialized() const  // Returns whether audio output is initialized.
 std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Lists available audio playback devices.
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Mixes audio voices and listeners into an output buffer.
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Starts a mixer voice for an audio source.
+bool AudioEngine::setup() [+1]  // Opens the audio output device (the same as init).
 void AudioEngine::shutdown()  // Stops and closes the audio output device.
 bool AudioEngine::waitForAudioCallbacks()  // Waits for audio listeners to finish during teardown.
 ```
@@ -2887,6 +2892,11 @@ Color ColorOKLab::toRGB() const  // Converts the color to an sRGB Color.
 ```
 
 ### CurveStyle — Controls how curves are approximated by line segments.
+
+```cpp
+```
+
+### DeviceDisconnectEventArgs — Carries the reason a device was reported lost.
 
 ```cpp
 ```
@@ -3542,12 +3552,15 @@ void Mesh::uploadToGpu() const  // Uploads mesh data to the GPU vertex and index
 ### MicInput — Captures microphone samples into a ring buffer.
 
 ```cpp
+void MicInput::close()  // Stops microphone capture (alias of stop).
 size_t MicInput::getBuffer(float * outBuffer, size_t numSamples)  // Copies the latest microphone samples.
 std::string MicInput::getDeviceName() const  // Returns the capture device name.
 int MicInput::getSampleRate() const  // Returns the stored microphone sample rate.
+bool MicInput::isConnected() const  // Returns whether the microphone is open and capturing (alias of isRunning).
 bool MicInput::isRunning() const  // Reports whether microphone capture is running.
 bool MicInput::isStarting() const  // Reports whether microphone startup is pending.
 void MicInput::onAudioData(const float * input, size_t frameCount)  // Writes input samples into the microphone ring buffer.
+bool MicInput::setup()  // Reopens the microphone at the last sample rate.
 bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts microphone capture.
 void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts a microphone capture attempt asynchronously.
 void MicInput::stop()  // Stops microphone capture or cancels startup.
@@ -4066,7 +4079,7 @@ std::vector<SerialDeviceInfo> Serial::listDevices() [macos,windows,linux,android
 void Serial::printDevices() [macos,windows,linux,android]  // Logs the serial device list.
 int Serial::readByte() [macos,windows,linux,android]  // Reads one received byte.
 int Serial::readBytes(void * buffer, int length) [+1] [macos,windows,linux,android]  // Reads received bytes into a buffer or string.
-bool Serial::setup(const std::string & portName, int baudRate) [+1] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
+bool Serial::setup(const std::string & portName, int baudRate) [+2] [macos,windows,linux,android]  // Opens a serial connection by device path or list index.
 bool Serial::writeByte(unsigned char byte) [macos,windows,linux,android]  // Writes one byte to the serial connection.
 int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linux,android]  // Writes bytes from a buffer or string to the serial connection.
 ```
@@ -4077,11 +4090,6 @@ int Serial::writeBytes(const void * buffer, int length) [+1] [macos,windows,linu
 int SerialDeviceInfo::getDeviceID() const  // Returns the device's list index.
 const std::string & SerialDeviceInfo::getDeviceName() const  // Returns the device's display name.
 const std::string & SerialDeviceInfo::getDevicePath() const  // Returns the device path.
-```
-
-### SerialDisconnectEventArgs — Describes a serial connection that ended.
-
-```cpp
 ```
 
 ### Shader — Provides a GPU shader program integrated with TrussC drawing.
@@ -4598,8 +4606,9 @@ unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  //
 size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Move queued camera frames into a vector.
 Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture used to display the camera frame.
 int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the current capture frame width.
+bool VideoGrabber::isConnected() const [macos,windows,linux,ios,web]  // Return whether the camera is open.
 bool VideoGrabber::isFrameNew() const [macos,windows,linux,ios,web]  // Return the new-frame flag from the latest update.
-bool VideoGrabber::isInitialized() const [macos,windows,linux,ios,web]  // Return whether camera setup has completed.
+bool VideoGrabber::isInitialized() const [macos,windows,linux,ios,web]  // Returns the same state as `isConnected()`.
 bool VideoGrabber::isPendingPermission() const [macos,windows,linux,ios,web]  // Return whether setup is waiting for camera permission.
 bool VideoGrabber::isVerbose() const [macos,windows,linux,ios,web]  // Return whether verbose camera logging is enabled.
 std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,ios,web]  // Return the available camera device list.
@@ -4607,7 +4616,7 @@ void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // R
 void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Set the requested capture frame rate.
 void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select the camera device for setup.
 void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Set the capacity of the timestamped camera frame queue.
-bool VideoGrabber::setup(int width = 640, int height = 480) [macos,windows,linux,ios,web]  // Initialize camera capture at a requested size.
+bool VideoGrabber::setup(int width, int height) [+1] [macos,windows,linux,ios,web]  // Open the camera at a requested size, or reopen the last one.
 void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose camera logging.
 void VideoGrabber::update() [macos,windows,linux,ios,web]  // Process camera updates and upload the latest frame.
 ```
