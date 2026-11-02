@@ -82,6 +82,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../../../core/tests/common/tcWindowTest.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -1730,6 +1731,7 @@ int main(int argc, char** argv) {
     std::thread([] {}).join();
     const int threadsAtStart = countEntries("/proc/self/task");
 #endif
+    tcCoreTest::WindowFixture loopWindow;
     g_phase = "the scenario";
     // Keep these fixtures through the thread-count assertion, then destroy
     // them normally so LeakSanitizer can verify their owned resources too.

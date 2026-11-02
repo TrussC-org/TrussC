@@ -1,0 +1,567 @@
+// Linux dummy SG/SGL fixture modeling the synchronous RESIZED events
+// produced by AppKit setFrame / Win32 SetWindowPos.
+#if defined(__linux__) && !defined(__ANDROID__)
+#if defined(SOKOL_GLES3)
+#define TC_REENTRY_GLES3
+#endif
+#undef SOKOL_GLCORE
+#undef SOKOL_GLES3
+#define SOKOL_DUMMY_BACKEND
+#define SOKOL_GFX_IMPL
+#include "sokol/sokol_gfx.h"
+#undef SOKOL_GFX_IMPL
+#define SOKOL_GL_IMPL
+#include "sokol/util/sokol_gl_tc.h"
+#undef SOKOL_GL_IMPL
+// Keep real desktop Window dispatch while SG/SGL above use the dummy backend.
+#if defined(TC_REENTRY_GLES3)
+#define SOKOL_GLES3
+#else
+#define SOKOL_GLCORE
+#endif
+#include <TrussC.h>
+#include "../common/tcWindowTest.h"
+#include <cstdio>
+using namespace tc;
+namespace {
+int failures = 0;
+Window* primaryFixture = nullptr;
+template<class F> decltype(auto) fixtureCall(F&& fn) {
+    auto* target = internal::currentWindowContext().hostWindow;
+    auto app = target ? target->getApp() : nullptr;
+    internal::AppOwnerScope owner(app ? internal::appOwner(*app) : nullptr);
+    return fn();
+}
+void fixtureSetWindowSize(int w, int h) { fixtureCall([&] { tc::setWindowSize(w, h); }); }
+void fixtureSetWindowSizeLogical(int w, int h) { fixtureCall([&] { tc::setWindowSizeLogical(w, h); }); }
+void fixtureSetWindowPosition(int x, int y) { fixtureCall([&] { tc::setWindowPosition(x, y); }); }
+void fixtureToggleFullscreen() { fixtureCall([] { tc::toggleFullscreen(); }); }
+bool fixtureIsFullscreen() { return fixtureCall([] { return tc::isFullscreen(); }); }
+double nativeWidth = 0, nativeHeight = 0;
+int nativeSizes = 0;
+float nativeDpi = 1;
+void recordNativeSize(Window&, double width, double height, bool) {
+    nativeWidth = width; nativeHeight = height; ++nativeSizes;
+}
+uint32_t recordNativePhase(const Window& window);
+const internal::WindowNativeOperations recordingOperations{nullptr, nullptr, nullptr, nullptr, recordNativeSize, nullptr, nullptr, nullptr, recordNativePhase};
+int framebufferWidth = 320, framebufferHeight = 240;
+void publishSize(Window& window, int width, int height, float dpi) {
+    sapp_tc_window_metadata metadata{};
+    metadata.fb_width = width; metadata.fb_height = height; metadata.dpi_scale = dpi;
+    metadata.sample_count = 1; metadata.color_format = SAPP_PIXELFORMAT_RGBA8;
+    metadata.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL; metadata.trust_hidden_signals = true;
+    internal::publishWindowMetadata(window, metadata);
+}
+void check(const char* label, bool ok) {
+    std::printf("windowControlReentry: %s: %s\n", label, ok ? "PASS" : "FAIL");
+    if (!ok) ++failures;
+}
+internal::WindowFullscreenState mainFullscreen, secondaryFullscreen;
+internal::WindowFullscreenPhase recordedPhase(const Window& window) {
+    return (&window == primaryFixture ? mainFullscreen : secondaryFullscreen).phase;
+}
+uint32_t recordNativePhase(const Window& window) { return static_cast<uint32_t>(recordedPhase(window)); }
+int appliedControls = 0;
+bool recordControl(Window&, internal::WindowControl, int, int, const std::string*, IVec2&) {
+    ++appliedControls;
+    return true;
+}
+int mainNativeToggles = 0, secondaryNativeToggles = 0;
+bool recordFullscreenControl(Window& window, internal::WindowControl op, int full, int,
+                             const std::string*, IVec2&) {
+    auto& state = &window == primaryFixture ? mainFullscreen : secondaryFullscreen;
+    auto& toggles = &window == primaryFixture ? mainNativeToggles : secondaryNativeToggles;
+    // Stand in only for the native endpoint. Invoke the real public wrapper,
+    // context routing and control adapter, including explicit set requests.
+    if (op == internal::WindowControl::ToggleFullscreen) toggles += state.request(!state.desired);
+    else if (op == internal::WindowControl::Fullscreen) toggles += state.request(bool(full));
+    else return false;
+    return true;
+}
+void testPublicFullscreenToggles(Window& main, Window& secondary) {
+    using Phase = internal::WindowFullscreenPhase;
+    internal::windowFullscreenHookForTests() = recordedPhase;
+    internal::windowControlHookForTests() = recordFullscreenControl;
+    for (Window* target : {&main, &secondary}) {
+        auto& state = target == &main ? mainFullscreen : secondaryFullscreen;
+        auto& other = target == &main ? secondaryFullscreen : mainFullscreen;
+        auto& toggles = target == &main ? mainNativeToggles : secondaryNativeToggles;
+        auto& otherToggles = target == &main ? secondaryNativeToggles : mainNativeToggles;
+        for (bool global : {false, true}) {
+            auto toggle = [&] {
+                if (global) {
+                    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*target);
+                    fixtureToggleFullscreen();
+                } else {
+                    // A handle must act on its target even in another context.
+                    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context((target == &main ? secondary : main));
+                    target->toggleFullscreen();
+                }
+            };
+            for (bool initial : {false, true}) {
+                for (int presses : {0, 1, 2}) {
+                    state = {}; other = {};
+                    state.phase = initial ? Phase::Fullscreen : Phase::Windowed;
+                    state.desired = initial;
+                    toggles = otherToggles = 0;
+                    // Start through the production explicit-set path, then
+                    // press during Entering or Exiting (including cancellation).
+                    target->setFullscreen(!initial);
+                    state.will(!initial);
+                    for (int i = 0; i < presses; ++i) toggle();
+                    check("public toggles defer native work during either animation",
+                        toggles == 1 && state.transitioning() && target->isFullscreen());
+                    const bool reverse = presses == 1;
+                    check("public toggle flips or cancels the last requested state",
+                        state.desired == (reverse ? initial : !initial));
+                    state.terminal(!initial); // DidEnter / DidExit
+                    check("public reversal queues exactly the required reconciliation",
+                        state.reconcilePending == reverse);
+                    toggles += state.reconcile();
+                    check("terminal tick reconciles once with no second mid-animation toggle",
+                        toggles == (reverse ? 2 : 1) && !state.reconcile());
+                    if (reverse) state.terminal(initial);
+                    check("public toggles finish in the last requested state",
+                        !state.transitioning() && target->isFullscreen() == (reverse ? initial : !initial));
+                    // Settled toggles continue to issue exactly one native call.
+                    const int before = toggles;
+                    toggle();
+                    check("settled public toggle issues one native toggle", toggles == before + 1);
+                    check("public toggle never changes the other target",
+                        other.phase == Phase::Windowed && !other.desired && otherToggles == 0);
+                }
+            }
+        }
+    }
+    mainFullscreen = {}; secondaryFullscreen = {};
+    internal::windowFullscreenHookForTests() = nullptr;
+    internal::windowControlHookForTests() = nullptr;
+    internal::currentWindowCtx() = nullptr;
+}
+void testFullscreenTransitions() {
+    using Phase = internal::WindowFullscreenPhase;
+    // Every public request direction, notification origin (program/menu),
+    // terminal result (Did or observed DidFail), and reversal direction.
+    for (bool initial : {false, true}) {
+        for (bool menu : {false, true}) {
+            for (bool reverse : {false, true}) {
+                for (bool observed : {false, true}) {
+                  for (int willCount : {0, 1, 2}) {
+                    internal::WindowFullscreenState state;
+                    state.phase = initial ? Phase::Fullscreen : Phase::Windowed;
+                    state.desired = initial;
+                    const bool destination = !initial;
+                    if (!menu) check("pre-toggle phase blocks geometry", state.request(destination) && state.blocksGeometry());
+                    for (int i = 0; i < willCount; ++i) state.will(destination);
+                    if (!menu || willCount) check("Will blocks geometry for menu and program transitions", state.blocksGeometry() && state.transitioning());
+                    if (reverse && (!menu || willCount)) {
+                        check("reversal never issues a second toggle mid-animation", !state.request(initial));
+                        // A repeated Will must not erase the reversal.
+                        state.will(destination);
+                    }
+                    state.terminal(observed);
+                    check("Did/DidFail settles to observed state without a stuck guard",
+                        state.phase == (observed ? Phase::Fullscreen : Phase::Windowed) &&
+                        state.blocksGeometry() == observed && !state.transitioning());
+                    const bool reconcile = reverse && (!menu || willCount) && initial != observed;
+                    check("only a reversal reconciles after terminal notification", state.reconcilePending == reconcile);
+                    check("next tick reconciles exactly once", state.reconcile() == reconcile && !state.reconcile());
+                    if (reconcile) {
+                        state.will(initial);
+                        state.terminal(initial);
+                        check("reversal completes in requested state", state.blocksGeometry() == initial && !state.reconcile());
+                    }
+                  }
+                }
+            }
+        }
+    }
+    for (bool initial : {false, true}) {
+        internal::WindowFullscreenState repeated;
+        repeated.phase = initial ? Phase::Fullscreen : Phase::Windowed;
+        repeated.desired = initial;
+        check("initial reversal sequence issues one toggle", repeated.request(!initial));
+        check("first reversal is deferred", !repeated.request(initial));
+        check("reversing back remains deferred", !repeated.request(!initial));
+        repeated.terminal(!initial);
+        check("last desired state cancels an obsolete reversal", !repeated.reconcile());
+        check("begin opposite transition", repeated.request(initial));
+        check("reverse opposite transition", !repeated.request(!initial));
+        repeated.terminal(initial);
+        check("terminal records reconciliation", repeated.reconcilePending);
+        check("new settled-state request cancels pending reconciliation", !repeated.request(initial) && !repeated.reconcile());
+    }
+    internal::WindowFullscreenState state;
+    check("windowed accepts geometry", !state.blocksGeometry());
+    check("entry changes phase before native toggle", state.request(true) && state.phase == Phase::Entering);
+    state.will(true); state.terminal(true);
+    check("fullscreen blocks geometry", state.blocksGeometry());
+    check("exit changes phase before native toggle", state.request(false) && state.phase == Phase::Exiting);
+    state.will(false);
+    check("exit keeps isFullscreen guard until DidExit", state.blocksGeometry());
+    state.terminal(false);
+    check("DidExit accepts geometry again", !state.blocksGeometry());
+}
+void testFullscreenCalls(Window& main, Window& secondary) {
+    using Phase = internal::WindowFullscreenPhase;
+    internal::windowFullscreenHookForTests() = recordedPhase;
+    internal::windowControlHookForTests() = recordControl;
+    int messages = 0;
+    std::string message;
+    LogLevel level = LogLevel::Silent;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+        ++messages; message = e.message; level = e.level;
+    });
+    const char* names[] = {"setWindowSize()", "setWindowSizeLogical()", "setWindowPosition()",
+        "Window::setSize()", "Window::setPosition()", "App::setSize()"};
+    const char* reasons[] = {"", " ignored: the window is entering fullscreen",
+        " ignored while fullscreen; call it once isFullscreen() returns false",
+        " ignored: the window is still leaving fullscreen; call it once isFullscreen() returns false"};
+    secondary.title_ = "Preview";
+    for (Window* target : {&main, &secondary}) {
+        auto& state = target == primaryFixture ? mainFullscreen : secondaryFullscreen;
+        auto& other = target == primaryFixture ? secondaryFullscreen : mainFullscreen;
+        for (Phase phase : {Phase::Windowed, Phase::Entering, Phase::Fullscreen, Phase::Exiting}) {
+            state.phase = phase;
+            other.phase = phase == Phase::Windowed ? Phase::Fullscreen : Phase::Windowed;
+            check("handle isFullscreen follows target guard even mid-exit", target->isFullscreen() == (phase != Phase::Windowed));
+            for (bool pixels : {false, true}) {
+                internal::pixelPerfectMode() = pixels;
+                for (int value : {320, -1}) {
+                    for (int call = 0; call != 6; ++call) {
+                        internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*target);
+                        check("global isFullscreen follows target guard", fixtureIsFullscreen() == (phase != Phase::Windowed));
+                        const int beforeMessages = messages, beforeApplied = appliedControls;
+                        switch (call) {
+                            case 0: fixtureSetWindowSize(value, 240); break;
+                            case 1: fixtureSetWindowSizeLogical(value, 240); break;
+                            case 2: fixtureSetWindowPosition(value < 0 ? (std::numeric_limits<int>::max)() : value, 20); break;
+                            case 3: internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(((target == &main) ? secondary : main));
+                                target->setSize(value, 240); break;
+                            case 4: internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(((target == &main) ? secondary : main));
+                                target->setPosition(value < 0 ? (std::numeric_limits<int>::max)() : value, 20); break;
+                            case 5: internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(((target == &main) ? secondary : main));
+                                target->getApp()->setSize(value > 0 ? float(value) : NAN, 240); break;
+                        }
+                        if (phase != Phase::Windowed) {
+                            const std::string expected = std::string("[Window] ") + names[call] +
+                                (" on \"" + target->getTitle() + "\"") + reasons[int(phase)];
+                            check("ignored public call logs exactly one exact Notice before validation",
+                                messages == beforeMessages + 1 && level == LogLevel::Notice && message == expected);
+                            check("ignored public call never reaches native control", appliedControls == beforeApplied);
+                        } else if (value > 0 || call != 5) {
+                            check("windowed public call has no fullscreen Notice", messages == beforeMessages);
+                            check("windowed public call reaches adapter", appliedControls == beforeApplied + 1);
+                        } else {
+                            check("invalid windowed App keeps its validation Warning and no Notice",
+                                messages == beforeMessages + 1 && level == LogLevel::Warning);
+                            check("invalid windowed App never reaches native control", appliedControls == beforeApplied);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // The binding query reads native fullscreen intent, even when another
+    // window is current. The recording binding operation supplies it.
+    internal::windowFullscreenHookForTests() = nullptr;
+    internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(main);
+    secondaryFullscreen.phase = Phase::Fullscreen;
+    const int beforeMessages = messages, beforeApplied = appliedControls;
+    secondary.setSize(320, 240);
+    check("secondary backend intent blocks a cross-window request",
+        secondary.isFullscreen() && messages == beforeMessages + 1 && appliedControls == beforeApplied);
+    secondaryFullscreen.phase = Phase::Windowed;
+    secondary.setSize(320, 240);
+    check("cleared backend intent immediately accepts a request",
+        !secondary.isFullscreen() && messages == beforeMessages + 1 && appliedControls == beforeApplied + 1);
+    mainFullscreen = {}; secondaryFullscreen = {};
+    internal::windowFullscreenHookForTests() = nullptr;
+    internal::windowControlHookForTests() = nullptr;
+    internal::currentWindowCtx() = nullptr;
+    internal::pixelPerfectMode() = false;
+}
+struct DrawApp : App {
+    Window* target = nullptr;
+    int resized = 0, resizedWidth = 0, resizedHeight = 0;
+    Vec2 pointer{}, delta{}, scroll{};
+    int moves = 0, drags = 0, scrolls = 0;
+    void mouseMoved(const MouseMoveEventArgs& e) override { pointer = e.pos; delta = e.delta; ++moves; }
+    void mouseDragged(const MouseDragEventArgs& e) override { pointer = e.pos; delta = e.delta; ++drags; }
+    void mouseScrolled(const ScrollEventArgs& e) override { pointer = e.pos; scroll = e.scroll; ++scrolls; }
+    void windowResized(int w, int h) override { ++resized; resizedWidth = w; resizedHeight = h; }
+    void draw() override {
+        auto* caller = internal::currentWindowCtx();
+        const auto context = sgl_get_context();
+        target->setSize(320, 240);
+        check("draw caller pointer survives synchronous control", internal::currentWindowCtx() == caller);
+        check("draw SGL context survives synchronous control", sgl_get_context().id == context.id);
+        sgl_begin_triangles();
+        sgl_v2f(0, 0); sgl_v2f(1, 0); sgl_v2f(0, 1);
+        sgl_end();
+    }
+};
+bool reenter(Window& target, internal::WindowControl op, int, int, const std::string*, IVec2&) {
+    check("size reached native control hook", op == internal::WindowControl::Size);
+    if (&target != primaryFixture) {
+        // The production secondary callback boundary and resize delivery. Its
+        // platform-specific event decoder only supplies the dimensions here.
+        tcCoreTest::nativeBoundary([&] {
+            publishSize(target, 320, 240, trussc::internal::WindowRequestAccess::context(target).dpiScale);
+            internal::WindowEntryScope dispatch(target);
+            internal::syncWindowAppSize(target);
+        });
+    }
+    // Always exercise the real main dispatcher too: native controls can pump
+    // events for other windows. In the main-target case this is precisely the
+    // windowDidResize -> RESIZED path from the reviewer's nested-dummy probe.
+    publishSize(*primaryFixture, ++framebufferWidth, framebufferHeight, nativeDpi);
+    sapp_event ev{};
+    ev.type = SAPP_EVENTTYPE_RESIZED;
+    internal::dispatchWindowEventForTests(&ev, *primaryFixture);
+    return true;
+}
+int vertices(Window& window) {
+    sgl_set_context(trussc::internal::WindowRequestAccess::context(window).swapchainTarget.resources().context);
+    return sgl_num_vertices();
+}
+}
+// Record native size operations through the same binding for both roots.
+// Public dispatch, App ownership and PixelSize conversion remain production code.
+namespace trussc {
+namespace internal { void dispatchWindowEventForTests(const sapp_event*, Window&); }
+}
+extern "C" bool sapp_mouse_locked() { return false; }
+extern "C" int sapp_width() { return framebufferWidth; }
+extern "C" int sapp_height() { return framebufferHeight; }
+extern "C" float sapp_dpi_scale() { return nativeDpi; }
+extern "C" float sapp_window_dpi_scale(sapp_window) { return nativeDpi; }
+extern "C" bool sapp_isvalid() { return true; }
+int main() {
+    getMainThreadId();
+    testFullscreenTransitions();
+    sg_desc gd{}; sg_setup(&gd);
+    sgl_desc_t sd{}; sgl_setup(&sd);
+    {
+        internal::beginRuntimeRun();
+        auto launch = internal::prepareLaunchWindow(WindowSettings{});
+        Window* main = primaryFixture = launch.get();
+        internal::WindowRequestAccess::bindForTests(*main, 101);
+        Window secondary;
+        secondary.native_ = &secondary; internal::WindowRequestAccess::bindForTests(secondary, 202);
+        internal::WindowRequestAccess::binding(*main).operations = &recordingOperations;
+        internal::WindowRequestAccess::binding(secondary).operations = &recordingOperations;
+        auto mainApp = internal::makeConstructedApp<DrawApp>();
+        auto secondaryApp = internal::makeConstructedApp<DrawApp>();
+        check("main App attached", internal::attachCandidate(*main, mainApp));
+        internal::WindowRequestAccess::attachCandidate(secondary, secondaryApp);
+        internal::WindowRequestAccess::applyPendingApp(secondary);
+        check("secondary App attached", secondary.getApp() == secondaryApp);
+        testFullscreenCalls(*main, secondary);
+        testPublicFullscreenToggles(*main, secondary);
+        sgl_context_desc_t cd{};
+        trussc::internal::WindowRequestAccess::context(*main).swapchainTarget.resources().context = sgl_make_context(&cd);
+        trussc::internal::WindowRequestAccess::context(secondary).swapchainTarget.resources().context = sgl_make_context(&cd);
+        internal::windowControlHookForTests() = reenter;
+
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
+        const int mainResizes = mainApp->resized;
+        secondaryApp->target = main;
+        secondaryApp->draw();
+        check("main App received nested windowResized", mainApp->resized > mainResizes);
+        check("secondary subsequent vertices stay secondary", vertices(secondary) == 3);
+        check("main received no secondary vertices", vertices(*main) == 0);
+        // Reset CPU recordings between the two independent directions.
+        sgl_tc_context_reset(trussc::internal::WindowRequestAccess::context(*main).swapchainTarget.resources().context);
+        sgl_tc_context_reset(trussc::internal::WindowRequestAccess::context(secondary).swapchainTarget.resources().context);
+
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*main));
+        const int secondaryResizes = secondaryApp->resized;
+        const int reverseMainResizes = mainApp->resized;
+        mainApp->target = &secondary;
+        mainApp->draw();
+        check("secondary App received nested windowResized", secondaryApp->resized > secondaryResizes);
+        check("main dispatcher ran inside secondary control", mainApp->resized > reverseMainResizes);
+        check("main subsequent vertices stay main", vertices(*main) == 3);
+        check("secondary received no main vertices", vertices(secondary) == 0);
+
+        internal::windowControlHookForTests() = nullptr;
+        // Production secondary size delivery, compared with main's real RESIZED
+        // dispatcher and App-swap seed, at deterministic non-1 DPI.
+        framebufferWidth = 1001; framebufferHeight = 667;
+        for (bool enabled : {false, true}) {
+            internal::pixelPerfectMode() = enabled;
+            for (float dpi : {1.5f, 2.0f}) {
+                nativeDpi = dpi;
+                publishSize(*main, framebufferWidth, framebufferHeight, dpi);
+                publishSize(secondary, framebufferWidth, framebufferHeight, dpi);
+                const int expectedWidth = enabled ? 1001 : int(1001 / dpi);
+                const int expectedHeight = enabled ? 667 : int(667 / dpi);
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
+                internal::syncWindowAppSize(secondary);
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*main));
+                sapp_event resize{}; resize.type = SAPP_EVENTTYPE_RESIZED;
+                tcCoreTest::dispatchMainEvent(&resize);
+                check("secondary App size and resize arguments match main at non-1 DPI",
+                    secondaryApp->getWidth() == expectedWidth && secondaryApp->getHeight() == expectedHeight &&
+                    secondaryApp->resizedWidth == expectedWidth && secondaryApp->resizedHeight == expectedHeight &&
+                    mainApp->getWidth() == expectedWidth && mainApp->getHeight() == expectedHeight &&
+                    mainApp->resizedWidth == expectedWidth && mainApp->resizedHeight == expectedHeight);
+                check("main Window getters stay logical", main->getWidth() == int(1001 / dpi) && main->getHeight() == int(667 / dpi));
+                auto replacement = internal::makeConstructedApp<DrawApp>();
+                internal::WindowRequestAccess::attachCandidate(secondary, replacement);
+                internal::WindowRequestAccess::applyPendingApp(secondary);
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
+                internal::syncWindowAppSize(secondary);
+                check("secondary replacement seeded before first setup",
+                    replacement->getWidth() == expectedWidth && replacement->getHeight() == expectedHeight &&
+                    replacement->resizedWidth == expectedWidth && replacement->resizedHeight == expectedHeight);
+                secondaryApp = replacement;
+                auto mainReplacement = internal::makeConstructedApp<DrawApp>();
+                internal::WindowRequestAccess::attachCandidate(*main, mainReplacement);
+                internal::WindowRequestAccess::applyPendingApp(*main);
+                internal::syncWindowAppSize(*main, true);
+                check("main replacement seed matches secondary",
+                    mainReplacement->getWidth() == replacement->getWidth() && mainReplacement->getHeight() == replacement->getHeight() &&
+                    mainReplacement->resizedWidth == replacement->resizedWidth && mainReplacement->resizedHeight == replacement->resizedHeight);
+                mainApp = mainReplacement;
+            }
+        }
+        // Real Linux secondary decoder with a recording native DPI endpoint;
+        // replay identical native events through main and secondary at each DPI.
+        for (bool enabled : {false, true}) {
+            for (float dpi : {1.0f, 1.5f, 2.0f}) {
+                nativeDpi = trussc::internal::WindowRequestAccess::context(*main).dpiScale = trussc::internal::WindowRequestAccess::context(secondary).dpiScale = dpi;
+                auto appPoint = [&](float x, float y) {
+                    return Vec2(enabled ? double(x) : double(x) / dpi,
+                                enabled ? double(y) : double(y) / dpi);
+                };
+                internal::pixelPerfectMode() = enabled;
+                auto deliver = [&](Window& window, const sapp_event& event) {
+                    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(window));
+                    internal::dispatchWindowEventForTests(&event, window);
+                };
+                sapp_event ev{};
+                ev.type = SAPP_EVENTTYPE_MOUSE_MOVE;
+                ev.mouse_x = 200; ev.mouse_y = 100;
+                // Initial native deltas can be cleared independently of position.
+                ev.mouse_dx = 0; ev.mouse_dy = 0;
+                trussc::internal::WindowRequestAccess::context(*main).mouseX = trussc::internal::WindowRequestAccess::context(*main).mouseY = 0;
+                trussc::internal::WindowRequestAccess::context(secondary).mouseX = trussc::internal::WindowRequestAccess::context(secondary).mouseY = 0;
+                trussc::internal::WindowRequestAccess::context(*main).pointerValid = trussc::internal::WindowRequestAccess::context(secondary).pointerValid = false;
+                deliver(*main, ev); deliver(secondary, ev);
+                const Vec2 expected = appPoint(200, 100);
+                const Vec2 moved = appPoint(220, 110);
+                auto same = [](Vec2 a, Vec2 b) { return a.x == b.x && a.y == b.y; };
+                check("pointer positions match main at valid DPI in both modes",
+                    mainApp->moves > 0 && secondaryApp->moves > 0 &&
+                    same(mainApp->pointer, expected) && same(secondaryApp->pointer, expected) &&
+                    same(mainApp->delta, Vec2(0, 0)) && same(secondaryApp->delta, Vec2(0, 0)));
+                check("secondary cursor getters use App pointer units", same(fixtureCall([] { return getMousePos(); }), expected) &&
+                    same(fixtureCall([&] { return Vec2(secondaryApp->getMouseX(), secondaryApp->getMouseY()); }), expected));
+                ev.type = SAPP_EVENTTYPE_MOUSE_DOWN; ev.mouse_button = SAPP_MOUSEBUTTON_LEFT;
+                deliver(*main, ev); deliver(secondary, ev);
+                ev.type = SAPP_EVENTTYPE_MOUSE_MOVE; ev.modifiers = SAPP_MODIFIER_LMB;
+                ev.mouse_x = 220; ev.mouse_y = 110; ev.mouse_dx = 12; ev.mouse_dy = 6;
+                deliver(*main, ev); deliver(secondary, ev);
+                check("drag positions match and deltas use the same unit scale",
+                    mainApp->drags > 0 && secondaryApp->drags > 0 &&
+                    same(mainApp->pointer, moved) && same(secondaryApp->pointer, mainApp->pointer) &&
+                    same(mainApp->delta, moved - expected) &&
+                    same(secondaryApp->delta, mainApp->delta));
+                ev.type = SAPP_EVENTTYPE_MOUSE_SCROLL; ev.scroll_x = 3; ev.scroll_y = -4;
+                // Main uses the last pointer position, not the scroll event's x/y.
+                ev.mouse_x = 999; ev.mouse_y = 999;
+                deliver(*main, ev); deliver(secondary, ev);
+                check("scroll position after equivalent moves matches and wheel amounts stay unscaled",
+                    mainApp->scrolls > 0 && secondaryApp->scrolls > 0 &&
+                    same(mainApp->pointer, moved) && same(secondaryApp->pointer, mainApp->pointer) &&
+                    same(mainApp->scroll, Vec2(3, -4)) && same(secondaryApp->scroll, mainApp->scroll));
+                ev.type = SAPP_EVENTTYPE_MOUSE_UP; ev.mouse_x = 220; ev.mouse_y = 110;
+                deliver(*main, ev); deliver(secondary, ev);
+                ev.type = SAPP_EVENTTYPE_MOUSE_ENTER; ev.mouse_x = 200; ev.mouse_y = 100;
+                deliver(secondary, ev);
+                check("secondary entry updates hover coordinates in App units", same(fixtureCall([] { return getMousePos(); }), expected));
+                ev.type = SAPP_EVENTTYPE_MOUSE_LEAVE; deliver(secondary, ev);
+                check("secondary leave retains offscreen hover sentinel", same(fixtureCall([] { return getMousePos(); }), Vec2(-1, -1)));
+                for (auto* target : {main, &secondary}) {
+                    trussc::internal::WindowRequestAccess::context(*target).dpiScale = dpi;
+                    auto rawDpiChange = target->events().rawEvent.listen([&](const sapp_event&) {
+                        trussc::internal::WindowRequestAccess::context(*target).dpiScale = dpi * 2;
+                    });
+                    ev.type = SAPP_EVENTTYPE_MOUSE_MOVE; ev.modifiers = 0;
+                    ev.mouse_x = 200; ev.mouse_y = 100;
+                    deliver(*target, ev);
+                    const auto probe = target == main ? mainApp : secondaryApp;
+                    check("raw reentry cannot change the current event DPI basis", same(probe->pointer, expected));
+                    trussc::internal::WindowRequestAccess::context(*target).dpiScale = dpi;
+                }
+            }
+        }
+        for (bool enabled : {false, true}) {
+            internal::pixelPerfectMode() = enabled;
+            for (float invalid : {0.0f, -1.0f, std::numeric_limits<float>::infinity(),
+                                  std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::denorm_min()})
+                check(invalid == 0.0f ? "zero native pointer DPI has unit fallback" :
+                      "invalid native pointer DPI has finite unit fallback", internal::appPointerScale(invalid) == 1.0f);
+        }
+        nativeDpi = 1;
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
+        internal::pixelPerfectMode() = true;
+        trussc::internal::WindowRequestAccess::context(secondary).dpiScale = 1.1f;
+        int calls = nativeSizes;
+        fixtureSetWindowSize(550, 330);
+        check("public fractional DPI size reaches native fractional logical size",
+              nativeSizes == ++calls && nativeWidth == double(550) / 1.1f && nativeHeight == double(330) / 1.1f);
+        // An attached App targets its own secondary even from the main caller.
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*main));
+        secondaryApp->setSize(550, 330);
+        check("attached App fractional DPI size reaches native fractional logical size",
+              nativeSizes == ++calls && nativeWidth == double(550) / 1.1f && nativeHeight == double(330) / 1.1f);
+        bool publicSweep = true, appSweep = true;
+        for (float scale : {1.0f, 1.1f, 1.25f, 1.5f, 1.75f, 2.0f, 2.25f, 3.0f}) {
+            trussc::internal::WindowRequestAccess::context(secondary).dpiScale = scale;
+            for (int pixels = 1; pixels <= 4096; ++pixels) {
+                // Pixel requests keep the exact double quotient, including
+                // sub-point extents, until native pixel conversion.
+                const double expected = double(pixels) / scale;
+                const int expectedCalls = 1;
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
+                calls = nativeSizes;
+                fixtureSetWindowSize(pixels, pixels);
+                publicSweep &= nativeSizes == calls + expectedCalls &&
+                    (!expectedCalls || (nativeWidth == expected && nativeHeight == expected));
+                internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(*main));
+                calls = nativeSizes;
+                // The base App first casts its float extents to int, then
+                // keeps the fractional pixel-to-logical double division.
+                secondaryApp->setSize(float(pixels) + 0.5f, float(pixels) + 0.5f);
+                appSweep &= nativeSizes == calls + expectedCalls &&
+                    (!expectedCalls || (nativeWidth == expected && nativeHeight == expected));
+            }
+        }
+        check("public size sweep keeps fractional logical size", publicSweep);
+        check("attached App size sweep keeps integer pixel casts and fractional logical size", appSweep);
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(secondary));
+        calls = nativeSizes;
+        trussc::internal::WindowRequestAccess::context(secondary).dpiScale = 0.5f;
+        fixtureSetWindowSize((std::numeric_limits<int>::max)(), 330); // logical quotient exceeds int range
+        trussc::internal::WindowRequestAccess::context(secondary).dpiScale = std::numeric_limits<float>::min();
+        fixtureSetWindowSize(550, 330); // logical quotient exceeds int range
+        check("out-of-range logical quotients never reach native size", nativeSizes == calls);
+        internal::pixelPerfectMode() = false;
+        internal::restoreWindowContext(nullptr);
+        secondary.native_ = nullptr; internal::WindowRequestAccess::unbind(secondary);
+        internal::WindowRequestAccess::endApp(secondary);
+        internal::shutdownRuntime();
+    }
+    sgl_shutdown(); sg_shutdown();
+    return failures ? 1 : 0;
+}
+#elif defined(_WIN32)
+#include "../nativeWindow/win32.cpp"
+#else
+#include <cstdio>
+int main() { std::puts("SKIP: Linux dummy SG/SGL reentry fixture; macOS/Windows are covered by the device probe"); }
+#endif

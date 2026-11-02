@@ -1,5 +1,7 @@
 # sokol_app.h Win32 (D3D11) Backend — Behavioral Specification
 
+> v0.8.0 update (#239): the fixed clipboard and drop buffers described below are superseded. Clipboard text, dropped file counts and UTF-8 path lengths now use growable storage with no TrussC size limit. `sapp_desc::clipboard_size`, `max_dropped_files` and `max_dropped_file_path_length` are removed.
+
 Implementation contract for replacing sokol_app.h's Win32 main-window / app-lifecycle
 with `sokol_app_tc.h`. All line references are into
 `core/include/sokol/sokol_app.h` (14602 lines, this worktree). Focus: `_SAPP_WIN32`
@@ -103,8 +105,8 @@ Cross-platform `_sapp` fields the win32 path reads/writes are the same set as ma
 main struct.
 
 `_sapp_init_state(desc)` runs first inside `_sapp_win32_run` (same as mac): applies
-`_sapp_desc_defaults` (sample_count→1, swap_interval→1, clipboard_size→8192,
-max_dropped_files→1, path_length→2048, window_title→"sokol"), sets `first_frame=true`,
+`_sapp_desc_defaults` (sample_count→1, swap_interval→1, window_title→"sokol";
+clipboard/drop size defaults are removed in v0.8.0), sets `first_frame=true`,
 `dpi_scale=1.0`, `mouse.shown=true`, `fullscreen=desc.fullscreen`, copies width/height
 verbatim (**may be 0** — the win32 backend resolves 0 via `CW_USEDEFAULT`, §2).
 

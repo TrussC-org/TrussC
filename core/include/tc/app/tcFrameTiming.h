@@ -4,24 +4,46 @@
 // tcFrameTiming.h - fixed-step and frame-skip decisions for the loops (internal)
 // =============================================================================
 //
-// Pure helpers shared by the main loop (_frame_cb in TrussC.h), runHeadlessApp
-// (tcHeadlessApp.h) and the per-window throttle (windowThrottleShouldTick in
-// tcWindowContext.h). They only transform the numbers they are given, so their
+// Scheduler state and pure helpers shared by every window tick and the
+// headless loop. The helpers only transform the numbers given, so their
 // timing behaviour is testable headless (core/tests/frameTiming). The one
 // exception is HeadlessSleeper, the headless loop's OS sleep.
 //
-// Defined in tcGlobal.cpp (non-inline): the one-time warning keeps its flags
-// there, and the hot-reload Host and Guest share them.
+// Helpers are defined in tcGlobal.cpp (non-inline); warning episode state
+// belongs to each Window loop and the headless runner.
 // =============================================================================
 
 namespace trussc {
 namespace internal {
 
+// Special FPS values
+constexpr float VSYNC = -1.0f;        // Sync to monitor refresh rate
+constexpr float EVENT_DRIVEN = 0.0f;  // Only on redraw() call
+
+struct MainLoopState {
+    // FPS settings
+    float updateTargetFps = VSYNC;   // VSYNC, EVENT_DRIVEN, or fixed fps
+    float drawTargetFps = VSYNC;     // VSYNC, EVENT_DRIVEN, or fixed fps
+    bool updateSyncedToDraw = true;  // true = update/draw in sync (1:1)
+    int redrawCount = 1;             // redraw() counter (remaining draw count)
+
+    // Update timing (steady clock: a wall-clock step must not skew the loop)
+    std::chrono::steady_clock::time_point lastUpdateTime;
+    bool lastUpdateTimeInitialized = false;
+    double updateAccumulator = 0.0;  // Accumulated time for independent Update
+    bool updateStepsDropWarned = false; // Main-thread-only warning episode
+
+    // Draw timing (frame skip)
+    std::chrono::steady_clock::time_point lastDrawTime;
+    bool lastDrawTimeInitialized = false;
+    double drawAccumulator = 0.0;
+};
+
 // The fixed-step loops run at most getMaxUpdateSteps() update steps per frame
 // or pass (setMaxUpdateSteps, TrussC.h; default 10, <= 0: no limit, #228).
 // When more are pending (after a stall, when update() is slower than its own
 // rate, or when the update rate is more than that many times the frame rate)
-// the excess time is dropped instead of replayed, and a one-time warning is
+// the excess time is dropped instead of replayed, and one warning per stall is
 // logged.
 
 struct FixedStepAdvance {
@@ -76,7 +98,7 @@ private:
 };
 
 // Frame-skip decision for a target rate driven by a faster (or equal) tick:
-// the fixed-fps draw in _frame_cb and the Window::setFps throttle. Ticks when
+// every window's fixed-fps draw scheduler. Ticks when
 // the accumulated time is within half a tick of the interval, so a target
 // equal to or just above the display rate runs on every tick (a tick arriving
 // a little early no longer fails the test and gets skipped), while integer
@@ -89,10 +111,12 @@ bool frameSkipShouldTick(double& accumulator, double elapsed, double interval);
 // The fixed-step loops that can drop time.
 enum class FixedStepLoop { Main, Headless };
 
-// Log, once per loop and process, that a loop dropped fixed-step time (#228)
-// after running `stepsRun` steps (its cap, getMaxUpdateSteps()) in one frame
-// or pass.
-void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double interval,
+// Call on every fixed-step frame or pass, including those that drop no time.
+// Log the first drop in each episode, per Window loop and the headless loop,
+// after running `stepsRun` steps (its cap, getMaxUpdateSteps()). A pass with
+// no dropped time re-arms the warning for the next stall (#1151).
+void warnUpdateStepsDropped(FixedStepLoop loop, bool& warned,
+                            double droppedTime, double interval,
                             int stepsRun);
 
 } // namespace internal

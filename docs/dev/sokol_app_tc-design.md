@@ -206,9 +206,9 @@ can feed events manually, so imgui does not chain us to sokol_app.
     win scancode / linux XKB name tables — sokol upstream semantics);
     layout-dependent characters ride the CHAR event.**
     Implementation contract: docs/dev/sapp-x11-impl-spec.md
-    (opus-extracted). Desktop Linux only — platform/linux/sokol_impl.cpp
-    switches on SOKOL_GLCORE; Raspberry Pi (SOKOL_GLES3/EGL) stays on
-    upstream sokol_app.h. TrussC adapter: platform/linux/tcWindowLinux.cpp
+    (opus-extracted). The shared X11 runtime now also serves Raspberry Pi
+    (SOKOL_GLES3/EGL), with one context and an EGLSurface per window (#1019).
+    TrussC adapter: platform/linux/tcWindowLinux.cpp
     (mirror of tcWindowWin.cpp; GL swapchain = default framebuffer, RGBA8).
     Two original design assumptions were WRONG; as-built model:
     1. Upstream has NO timer/RandR pacing to lift — it paces purely by
@@ -383,8 +383,9 @@ can feed events manually, so imgui does not chain us to sokol_app.
     sokol_main exported in the final .so dynamic table, zero rename
     leftovers; mac + iOS-sim regression rebuilds green.
 - **P5.5 — GLES3/EGL Linux driver (Raspberry Pi).** DONE — implemented +
-  DEVICE PASS on a Raspberry Pi 5 (2026-07-15). The linux section now
-  selects `#if SOKOL_GLCORE` (the P2 multi-window X11+GLX driver) /
+  DEVICE PASS on a Raspberry Pi 5 (2026-07-15). Historical implementation
+  (superseded by #1019's shared X11 GLX/EGL window runtime): the linux section
+  selected `#if SOKOL_GLCORE` (the P2 multi-window X11+GLX driver) /
   `#elif SOKOL_GLES3` (verbatim lift of upstream's single-window X11
   backend on the EGL context path — TrussC's RasPi configuration, the
   LAST consumer of the upstream implementation). linux/sokol_impl.cpp

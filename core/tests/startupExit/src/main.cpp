@@ -108,11 +108,15 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     check(!setupRan && !exitRan, "failed startup never enters App lifecycle");
     check(sawStartupError, "startup error reaches Logger before setup");
     if (argc > 1 && std::strcmp(argv[1], "--glx-failure") == 0) {
+#if defined(__linux__) && defined(SOKOL_GLES3)
+        std::puts("SKIP: GLX extension failure mode does not apply to EGL");
+#else
         openWindow = true;
         // runapp-verdict: returning-startup-failure -- GLX fails before App setup.
         check(tc::runApp<StartupApp>(settings) == 1, "real GLX startup failure returns 1");
         check(!setupRan && !exitRan, "real GLX failure skips App setup and exit");
         check(sawGlxError, "real GLX startup diagnostic reaches Logger");
+#endif
     }
     if (argc > 1 && std::strcmp(argv[1], "--window") == 0) {
 #ifndef __EMSCRIPTEN__

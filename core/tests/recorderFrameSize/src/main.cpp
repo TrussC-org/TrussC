@@ -318,6 +318,9 @@ class DeviceRecorderApp : public App {
                 check(warningCount == 1, "screen take emits exactly one layout Warning");
                 for (const auto& step : skippedSteps) std::printf("SKIP: %s\n", step.c_str());
             } else {
+#if defined(__linux__) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+                check(!sapp_x11_get_display(), "X11 resize must change framebuffer (#889)");
+#endif
                 std::printf("SKIP: resize part: platform made no framebuffer changes within limits (taller, wider, return)\n");
                 check(warningCount == 0, "unchanged screen take emits no layout Warning");
             }

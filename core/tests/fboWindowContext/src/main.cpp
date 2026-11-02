@@ -136,8 +136,9 @@ public:
         settings.setHighDpi(false);
         settings.sampleCount = 1;
         secondary_ = createWindow(settings);
+        if (secondary_) secondary_->setPosition(32, 32);
         check("secondary window created", bool(secondary_));
-        if (secondary_) secondary_->setApp(std::make_shared<SecondaryApp>());
+        if (secondary_) secondary_->setApp<SecondaryApp>();
     }
 
     void draw() override {

@@ -62,6 +62,47 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### X11 idle drawable and context during non-window GPU work (#239)
+
+`sapp_tc_gl_activate_idle()` reuses the drawable created with the hidden X11
+window; creating a second EGL surface for that window fails with EGL_BAD_ALLOC.
+`_sapp_tc_x11_make_current(nullptr)` selects this idle drawable. Native close
+selects the closing window before callbacks. Host-turn and cleanup entry, plus
+shared queue and maintenance work, ensure a context is current before GL work,
+selecting idle only when EGL/GLX reports no current context. This avoids idle
+surface switches every frame. Window teardown and runtime shutdown still force
+idle activation at disposal boundaries. Other backends keep the
+internal ensure-context seam as a no-op, like idle activation.
+
+### macOS failed-startup termination notification (#239)
+
+The failed-startup cleanup call supplies an NSApplicationWillTerminateNotification
+with NSApp as its object, matching AppKit's nonnull delegate contract and avoiding
+clang 21's `-Wnonnull` diagnostic. Normal termination and cleanup order are unchanged.
+
+### macOS launch host-turn observer depth (#239)
+
+The host-turn observer seeds its existing nesting depth from
+CFRunLoopCopyCurrentMode at installation. `applicationDidFinishLaunching:` may
+run before the first run-loop entry; assuming depth one then misclassified every
+outer iteration as nested and prevented reload polling and process queues (MCP
+included) from running. Installation inside a running loop still starts at one.
+The returned mode is released after sampling. Native tick/init admission and
+nested-loop arbitration are unchanged.
+
+### Creation sizes in pixelPerfect mode (#1018)
+
+The internal `_tc_pixel_width` / `_tc_pixel_height` descriptor fields preserve
+positive framebuffer requests until the native target's render DPI is known.
+Zero keeps the existing logical/default path. Win32 folds conversion into its
+existing single DPI resize; X11 GLX and GLES3/EGL convert before XCreateWindow;
+macOS uses one setContentSize before showing the window. The pure C/C++ helper
+in `util/sokol_window_size.h` is also used by TrussC's resize dispatcher, so
+macOS main and secondary retain the same double point sizes. Normal and
+hot-reload launchers share descriptor construction; creation keeps the existing
+handling of invalid sizes. Native pixel conversion checks the same logical-size
+representability limit as the resize dispatcher before applying the request.
+
 ### Windows console UTF-8 input and output (#754)
 
 `console_utf8` saves `orig_output_codepage` and `orig_input_codepage`, then
@@ -554,22 +595,22 @@ These were previously in sokol_app.h but have been moved to TrussC platform code
 
 All modifications by tettou771
 
-## OS-initiated exit requests (#266)
+## OS-initiated exit requests (#266, #239 C3)
 
-- Windows `WM_QUERYENDSESSION` shares the main-window quit request, including
-  `ENDSESSION_CLOSEAPP`. Vetoes supply a UTF-8 shutdown-block reason. Accepted
-  queries wait for `WM_ENDSESSION`; cancellation resets the request and block.
-  `WM_ENDSESSION(TRUE)`, including `ENDSESSION_CLOSEAPP`, performs synchronous
-  cleanup even after a veto, then calls `TerminateProcess(GetCurrentProcess(), 0)`.
-  Interrupted user code, DLL detach and guest static destructors do not resume.
-- macOS `applicationShouldTerminate:` uses the same cancellable request as
-  window close. Known quit Apple event reasons identify logoff/restart/shutdown;
-  a quit without one (Cmd+Q, Dock, AppleScript) records `app-quit` if no origin
-  is recorded yet.
-- Backends identify native exit origins through internal `tcExit` state. Window
-  close preserves an already recorded origin on Windows, macOS, X11 and EGL.
-  `_cleanup_cb` guards cleanup once and freezes its reason; `sapp_run` retains
-  its backend cleanup check. Frame/tree/event paths need no teardown guards.
+- Runtime owns session query/commit and the retained reverse-attachment ending.
+  Win32 user windows acknowledge session messages but do not end the process;
+  a Runtime-owned hidden top-level HWND in tcPlatform_win.cpp receives broadcasts.
+- macOS applicationShouldTerminate forwards logout/restart/shutdown query/commit;
+  NSWorkspaceWillPowerOff commits directly. Busy ordinary termination is deferred.
+  Accepted ordinary termination runs Runtime shutdown before NSTerminateNow so
+  AppKit's remaining closes cannot release targets after sg/sgl shutdown.
+- Busy main-stack commits call no App exit and arm no watchdog: Windows
+  returns to WM_ENDSESSION; macOS calls _exit(0) before NSTerminateNow.
+  Idle commits run synchronous normal ending and process termination under one
+  OS-only deadline (default 3 seconds). No session freeze is needed. Backends
+  contain no second session state machine or App-notification runner.
+  After idle cleanup, Runtime closes the Logger file sink and flushes stdout /
+  stderr before terminal process exit. Busy termination does not flush sinks.
 - Shared runtime signal handling, Logger markers and MCP drain semantics are
   documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).
 
@@ -719,3 +760,39 @@ This patch does not change Metal or Vulkan, or TrussC's API. In this sokol fork
 it adds two `sg_log_item` entries (`WGPU_UNIFORM_BUFFER_GROWN`,
 `WGPU_UNIFORM_UPLOAD_FAILED`). The earlier note that WebGPU is untouched
 applies only to the historical Metal-only patch.
+
+## macOS multi-window file-drop registration (#239 D-min)
+
+`_sapp_tc_mac_create_window_ex` registers file URLs on each content view,
+including secondary views. The existing view handler sends the drop to its
+own window receiver. Drop capacities and rejection behavior are unchanged.
+
+
+## #239 — Growable drop paths and clipboard text (v0.8.0)
+
+- `sokol_app_tc.h` removes `sapp_desc::max_dropped_files`,
+  `max_dropped_file_path_length` and `clipboard_size`; no replacement caps.
+- macOS, Windows, X11 and Web retain all drop paths in growable strings.
+  Windows queries each UTF-16 path length with `DragQueryFileW` before allocation,
+  then queries the UTF-8 conversion size. X11 reads the URI property in chunks
+  and grows each decoded path from the actual input, including INCR drop transfers.
+- Clipboard text grows with actual content on desktop, Web paste/copy and the
+  iOS/Android internal clipboard. Web bridges allocate UTF-8 on the heap instead
+  of the fixed WASM stack. Windows queries conversion lengths; X11
+  supports full properties and INCR transfers in both directions.
+- Allocation failure follows normal C++ allocation failure behavior; no OOM
+  recovery machinery or preallocated slots are added.
+- Verification: `tools/tests/test_drop_clipboard_unbounded.py` exercises the
+  real X11 backend on Xvfb, Windows/Web production-source seams and old-cap
+  mutants. Native macOS/Windows, browser and Raspberry Pi checks follow separately.
+
+### Follow-up 1
+
+- The Windows window-procedure boundary reports `bad_alloc` through
+  `sapp_desc.logger` at Error level, identifying out-of-memory drop or
+  event/clipboard handling failures. Direct clipboard API calls still propagate
+  `bad_alloc` to their caller.
+- Web paste/drop callbacks catch allocation failures and return their status;
+  the JS bridge raises an Error identifying out of memory after C++ unwinds.
+  Heap text is still freed in `finally`. No recovery or retry is added.
+- Windows clipboard `GlobalAlloc` failure now logs an out-of-memory Error and returns instead of explicitly throwing from the C API.

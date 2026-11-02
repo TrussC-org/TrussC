@@ -2,8 +2,9 @@
 #
 # A test is combined when core/tests/<name>/src/main.cpp exists and the dir
 # has no `own-binary` marker (examples/build_all.py uses the same rule).
+# Desktop-only fixtures are excluded below on unsupported platforms.
 # `daily-only` affects RUN selection in build_all.py, not compilation here:
-# every test stays registered, and the runner checks the full --list against
+# every selected test stays registered, and the runner checks the full --list against
 # the inventory (including daily-only tests) before selecting PR/daily runs.
 # Every .cpp/.c under its src/ is added, and each gets
 # TC_CORE_TEST_NAME="<name>", which turns its TC_CORE_TEST_MAIN into a
@@ -31,6 +32,10 @@ foreach(_TC_DIR IN LISTS _TC_CORE_TEST_DIRS)
     if(_TC_NAME STREQUAL "allCoreTests"
             OR NOT EXISTS "${_TC_DIR}/src/main.cpp"
             OR EXISTS "${_TC_DIR}/own-binary")
+        continue()
+    endif()
+    # The desktop CLI fixture also compiles tools/src (system is unavailable on iOS).
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS" AND _TC_NAME STREQUAL "trusscliPresets")
         continue()
     endif()
     if(TC_CORE_TEST_SELECT AND NOT _TC_NAME IN_LIST TC_CORE_TEST_SELECT)

@@ -8,6 +8,7 @@ struct MicState {
     ~MicState();
     std::atomic<bool> cancelled{false};
     std::weak_ptr<std::atomic<bool>> run = appRunToken();
+    std::weak_ptr<AppOwner> appOwner = currentAppOwner();
     bool runBound = bool(appRunToken());
     std::weak_ptr<std::function<void(MicState&)>> apply;
     std::shared_ptr<std::function<void()>> registration;

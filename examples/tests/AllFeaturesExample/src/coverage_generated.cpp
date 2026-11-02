@@ -477,13 +477,18 @@ static void cover_other() {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)createWindow(af::val<const WindowSettings>());
 #endif
+    (void)exitApp(af::val<int>());
     (void)getResourceLoadConcurrency();
+    (void)getWindowTitle();
+    (void)isWindowOccluded();
     (void)onScreenshotSave();
     (void)operator*(af::val<float>(), af::val<const Vec2>());
     (void)operator*(af::val<float>(), af::val<const Vec3>());
     (void)operator*(af::val<int>(), af::val<const IVec2>());
     (void)operator*(af::val<int>(), af::val<const IVec3>());
     (void)operator*(af::val<float>(), af::val<const Vec4>());
+    (void)requestExitApp();
+    (void)runtime();
     (void)saveScreenshotAsync(af::val<const fs::path>());
     (void)setResourceLoadConcurrency(af::val<int>());
 }
@@ -698,7 +703,6 @@ static void cover_window_input() {
 #endif
     (void)confirmDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<std::function<void (bool)>>());
     (void)events();
-    (void)exitApp(af::val<int>());
     (void)getCursor();
     (void)getGlobalMousePos();
     (void)getGlobalMouseX();
@@ -726,7 +730,6 @@ static void cover_window_input() {
     (void)loadDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>());
 #endif
     (void)loadDialogAsync(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<bool>(), af::val<std::function<void (const FileDialogResult &)>>());
-    (void)requestExitApp();
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID)
     (void)saveDialog(af::val<const std::string>(), af::val<const std::string>(), af::val<const fs::path>(), af::val<const fs::path>());
 #endif
@@ -750,7 +753,7 @@ static void cover_window_system() {
     (void)getKeepScreenOn();
 #endif
     (void)getMaxUpdateSteps();
-#if defined(AF_MACOS) || defined(AF_WINDOWS)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)getWindowPosition();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
@@ -773,7 +776,7 @@ static void cover_window_system() {
     (void)setOrientation(af::val<Orientation>());
 #endif
     (void)setWindowDecorated(af::val<bool>());
-#if defined(AF_MACOS) || defined(AF_WINDOWS)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)setWindowPosition(af::val<int>(), af::val<int>());
 #endif
     (void)setWindowSize(af::val<int>(), af::val<int>());
@@ -1137,6 +1140,13 @@ struct Cover_ClipboardPastedEventArgs : af::Scope<ClipboardPastedEventArgs> {
     }
 };
 
+struct Cover_CloseRequestEventArgs : af::Scope<CloseRequestEventArgs> {
+    ~Cover_CloseRequestEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<CloseRequestEventArgs>().cancel;
+    }
+};
+
 struct Cover_Color : af::Scope<Color> {
     ~Cover_Color(); // Never instantiated.
     static void run() {
@@ -1268,7 +1278,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
     static void run() {
         (void)af::val<CoreEvents>().afterFrame;
         (void)af::val<CoreEvents>().clipboardPasted;
-        (void)af::val<CoreEvents>().console;
+        (void)af::val<CoreEvents>().closeRequested;
         (void)af::val<CoreEvents>().deviceLost;
         (void)af::val<CoreEvents>().draw;
         (void)af::val<CoreEvents>().exit;
@@ -1282,6 +1292,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().mousePressed;
         (void)af::val<CoreEvents>().mouseReleased;
         (void)af::val<CoreEvents>().mouseScrolled;
+        (void)af::val<CoreEvents>().occludedChanged;
         (void)af::val<CoreEvents>().onRender;
         (void)af::val<CoreEvents>().rawEvent;
         (void)af::val<CoreEvents>().setup;
@@ -2415,6 +2426,13 @@ struct Cover_Node__HitResult : af::Scope<Node::HitResult> {
     }
 };
 
+struct Cover_OccludedEventArgs : af::Scope<OccludedEventArgs> {
+    ~Cover_OccludedEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<OccludedEventArgs>().occluded;
+    }
+};
+
 struct Cover_OnceGate : af::Scope<OnceGate> {
     ~Cover_OnceGate(); // Never instantiated.
     static void run() {
@@ -2947,6 +2965,32 @@ struct Cover_ResizeEventArgs : af::Scope<ResizeEventArgs> {
     static void run() {
         (void)af::val<ResizeEventArgs>().height;
         (void)af::val<ResizeEventArgs>().width;
+    }
+};
+
+struct Cover_Runtime : af::Scope<Runtime> {
+    ~Cover_Runtime(); // Never instantiated.
+    static void run() {
+        (void)af::val<Runtime>().events();
+        (void)af::val<Runtime>().setLogoutTimeout(af::val<float>());
+    }
+};
+
+struct Cover_RuntimeEvents : af::Scope<RuntimeEvents> {
+    ~Cover_RuntimeEvents(); // Never instantiated.
+    static void run() {
+        (void)af::val<RuntimeEvents>().console;
+        (void)af::val<RuntimeEvents>().deviceLost;
+        (void)af::val<RuntimeEvents>().exitRequested;
+        (void)af::val<RuntimeEvents>().hotReloadUnload;
+    }
+};
+
+struct Cover_RuntimeSettings : af::Scope<RuntimeSettings> {
+    ~Cover_RuntimeSettings(); // Never instantiated.
+    static void run() {
+        (void)af::val<RuntimeSettings>().reserveUniformBuffer(af::val<int>());
+        (void)af::val<RuntimeSettings>().uniformBufferReserve;
     }
 };
 
@@ -4786,88 +4830,53 @@ struct Cover_VideoWriter : af::Scope<VideoWriter> {
 struct Cover_Window : af::Scope<Window> {
     ~Cover_Window(); // Never instantiated.
     static void run() {
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)Window();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().close();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Window>().destroyApp();
         (void)af::val<Window>().events();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getApp();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getFps();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getHeight();
-#endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getPosition();
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getTitle();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().getWidth();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().isFullscreen();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().isOccluded();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Window>().isOpen();
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
-        (void)af::val<Window>().setApp(af::val<std::shared_ptr<App>>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setClearColor(af::val<const Color>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setFps(af::val<float>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setFullscreen(af::val<bool>());
-#endif
+        (void)af::val<Window>().setIndependentFps(af::val<float>(), af::val<float>());
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setPosition(af::val<int>(), af::val<int>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Window>().setQuitOnClose(af::val<bool>());
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().setTitle(af::val<const std::string>());
-#endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Window>().toggleFullscreen();
-#endif
     }
 };
 
 struct Cover_WindowSettings : af::Scope<WindowSettings> {
     ~Cover_WindowSettings(); // Never instantiated.
     static void run() {
-        (void)af::val<WindowSettings>().clipboardSize;
         (void)af::val<WindowSettings>().decorated;
         (void)af::val<WindowSettings>().fullscreen;
         (void)af::val<WindowSettings>().height;
         (void)af::val<WindowSettings>().highDpi;
         (void)af::val<WindowSettings>().pipelinePoolSize;
         (void)af::val<WindowSettings>().pixelPerfect;
-        (void)af::val<WindowSettings>().reserveUniformBuffer(af::val<int>());
+        (void)af::val<WindowSettings>().quitOnClose;
         (void)af::val<WindowSettings>().resourcePoolSize;
         (void)af::val<WindowSettings>().sampleCount;
-        (void)af::val<WindowSettings>().setClipboardSize(af::val<int>());
         (void)af::val<WindowSettings>().setDecorated(af::val<bool>());
         (void)af::val<WindowSettings>().setFullscreen(af::val<bool>());
         (void)af::val<WindowSettings>().setHighDpi(af::val<bool>());
         (void)af::val<WindowSettings>().setPipelinePoolSize(af::val<int>());
         (void)af::val<WindowSettings>().setPixelPerfect(af::val<bool>());
+        (void)af::val<WindowSettings>().setQuitOnClose(af::val<bool>());
         (void)af::val<WindowSettings>().setResourcePoolSize(af::val<int>());
         (void)af::val<WindowSettings>().setSampleCount(af::val<int>());
         (void)af::val<WindowSettings>().setShaderPoolSize(af::val<int>());
@@ -4877,7 +4886,6 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().shaderPoolSize;
         (void)af::val<WindowSettings>().swapInterval;
         (void)af::val<WindowSettings>().title;
-        (void)af::val<WindowSettings>().uniformBufferReserve;
         (void)af::val<WindowSettings>().width;
     }
 };
@@ -5025,6 +5033,7 @@ void af::coverGenerated() {
     af_generated::Cover_ChipSoundBundle__Entry::run();
     af_generated::Cover_ChipSoundNote::run();
     af_generated::Cover_ClipboardPastedEventArgs::run();
+    af_generated::Cover_CloseRequestEventArgs::run();
     af_generated::Cover_Color::run();
     af_generated::Cover_ColorHSB::run();
     af_generated::Cover_ColorLinear::run();
@@ -5079,6 +5088,7 @@ void af::coverGenerated() {
     af_generated::Cover_NetworkInterface::run();
     af_generated::Cover_Node::run();
     af_generated::Cover_Node__HitResult::run();
+    af_generated::Cover_OccludedEventArgs::run();
     af_generated::Cover_OnceGate::run();
     af_generated::Cover_Path::run();
     af_generated::Cover_Pixels::run();
@@ -5093,6 +5103,9 @@ void af::coverGenerated() {
     af_generated::Cover_RectNodeButton::run();
     af_generated::Cover_Reflector::run();
     af_generated::Cover_ResizeEventArgs::run();
+    af_generated::Cover_Runtime::run();
+    af_generated::Cover_RuntimeEvents::run();
+    af_generated::Cover_RuntimeSettings::run();
     af_generated::Cover_SaveResult::run();
     af_generated::Cover_ScreenRecorder::run();
     af_generated::Cover_ScreenshotSaveEventArgs::run();

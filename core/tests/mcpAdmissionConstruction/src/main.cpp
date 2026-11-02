@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 #include <TrussC.h>
 #include "../../../include/impl/httplib.h"
 #include "../../common/tcCoreTest.h"
@@ -98,7 +99,7 @@ json dispatch(const std::string& body, bool deferred = false) {
     auto future = promise->get_future();
     getHttpChannel().send(mcp::McpRequest{body, promise});
     mcp::processHttpQueue();
-    if (deferred) drainDeferredResponses();
+    if (deferred) drainDeferredResponses(&internal::currentWindowContext());
     return json::parse(future.get()());
 }
 json content(const json& reply) {
@@ -106,6 +107,10 @@ json content(const json& reply) {
 }
 } // namespace
 TC_CORE_TEST_MAIN() {
+    getMainThreadId();
+    tcCoreTest::WindowFixture receiver;
+    trussc::internal::WindowRequestAccess::context(*receiver.window).fbWidth = 3840;
+    trussc::internal::WindowRequestAccess::context(*receiver.window).fbHeight = 2160;
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::stopHttpServer();
     mcp::internal::resetHttpChannel();
@@ -365,7 +370,7 @@ TC_CORE_TEST_MAIN() {
         while (mcp::internal::getHttpChannel().size() == 0 && std::chrono::steady_clock::now() < deadline)
             std::this_thread::yield();
         mcp::processHttpQueue();
-        mcp::internal::drainDeferredResponses();
+        mcp::internal::drainDeferredResponses(&internal::currentWindowContext());
         check("HTTP allocation failure returns an MCP error", pending.get());
         httplib::Client health("127.0.0.1", mcp::getHttpPort());
         auto response = health.Get("/");

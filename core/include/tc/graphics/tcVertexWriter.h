@@ -44,6 +44,7 @@ public:
 class SglWriter : public VertexWriter {
 public:
     void begin(PrimitiveType type) override {
+        if (currentTarget().passKind == TargetPassKind::Swapchain && !admitRootSwapchainPass()) return;
         switch (type) {
             case PrimitiveType::Points:        sgl_begin_points(); break;
             case PrimitiveType::Lines:         sgl_begin_lines(); break;

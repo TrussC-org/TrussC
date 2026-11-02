@@ -1,6 +1,9 @@
 #include <TrussC.h>
 #include "tc/sound/tcMicInputInternal.h"
 #include "../../common/tcCoreTest.h"
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 #include "../../common/tcDisplayTest.h"
 #include <condition_variable>
 #include <cstdio>
@@ -458,6 +461,7 @@ void headlessTests() {
     internal::setMicBackendForTests({}, {});
 }
 
+#if !defined(__APPLE__) || !TARGET_OS_IPHONE
 string shellQuote(const string& value) {
 #ifdef _WIN32
     return "\"" + value + "\"";
@@ -467,6 +471,7 @@ string shellQuote(const string& value) {
     return result + "'";
 #endif
 }
+#endif
 int exitChild() {
     internal::setMicAuthorizationForTests([] { return internal::MicAuthorization::Authorized; }, {});
     // Register proof before the resource host, so it runs after retirement.
@@ -500,6 +505,10 @@ int exitChild() {
     std::exit(0);
 }
 void exitTests(const char* executable) {
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    (void)executable;
+    printf("SKIP process exit waits for gated mic retirement: system() unavailable on iOS\n");
+#else
     string command = shellQuote(fs::absolute(executable).string());
 #ifdef TC_CORE_TEST_NAME
     command += " " TC_CORE_TEST_NAME;
@@ -512,6 +521,7 @@ void exitTests(const char* executable) {
 #endif
         check("process exit waits for gated mic retirement", code == 0);
     }
+#endif
 }
 
 #endif

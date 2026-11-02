@@ -1004,6 +1004,11 @@ void NodeInspector::ensureExitGuard() {
     exitListener_ = tc::internal::FrameworkEventAccess::listen(events().exit,
         [this] { releaseListeners(); }, EventPriority::AfterApp);
     hotReloadUnloadListener_ = events().hotReloadUnload.listen([this] { releaseListeners(); }, EventPriority::App);
+    // An App removed before its generation unloads receives no unload event.
+    // The singleton may be destroyed before Runtime's atexit retirement.
+    tc::internal::ownAppCancellation([this, lifetime = std::weak_ptr<int>(retirementLifetime_)] {
+        if (!lifetime.expired()) releaseListeners();
+    });
 }
 
 void NodeInspector::releaseListeners() {

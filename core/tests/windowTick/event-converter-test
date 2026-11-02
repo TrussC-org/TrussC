@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Production-linked checkpoint 3 baseline and semantic mutations; run with tcbuild.sh."""
+from pathlib import Path
+import json,os,shlex,subprocess,shutil
+ROOT=Path(__file__).resolve().parents[3]
+BUILD=Path(os.environ.get('TC_EVENT_CONVERTER_BUILD',ROOT/'core/tests/allCoreTests/build-linux'))
+OUT=Path(os.environ.get('TC_EVENT_CONVERTER_OUTPUT',ROOT/'.verification/cp3-events'))
+OUT.mkdir(parents=True,exist_ok=True)
+entries=json.loads((BUILD/'compile_commands.json').read_text(encoding='utf-8'))
+entry=next(e for e in entries if e['file'].endswith('tcWindowRuntime.cpp'))
+args=shlex.split(entry['command']);compiler=args.pop(0);flags=[];skip=False
+for a in args:
+    if skip:skip=False;continue
+    if a=='-o':skip=True;continue
+    if a=='-c' or a.endswith('tcWindowRuntime.cpp') or a.startswith(('-O','-g')):continue
+    flags.append(a)
+flags=['-I'+str(ROOT/'core/include'),'-I'+str(ROOT/'core/include/tc/app'),'-I'+str(ROOT/'core/include/tc/utils'),*flags,'-O0','-g0']
+link=shlex.split((BUILD/'CMakeFiles/allCoreTests.dir/link.txt').read_text(encoding='utf-8'))
+libs=link[next(i for i,a in enumerate(link) if a.endswith('libTrussC.a')):]
+if archive:=os.environ.get('TC_PROBE_ARCHIVE'): libs[0]=archive
+pch=None
+if os.environ.get('TC_EVENT_CONVERTER_PCH'):
+    pch=OUT/'shared-pch.h';pch.write_text('#include <TrussC.h>\n',encoding='utf-8')
+    subprocess.run([compiler,*flags,'-x','c++-header',str(pch),'-o',str(pch)+'.gch'],check=True)
+def compile(path,out,include=None):
+    precompiled=['-include',str(pch)] if pch and include is None else []
+    subprocess.run([compiler,*(['-I'+str(include)] if include else []),*flags,*precompiled,'-c',str(path),'-o',str(out)],check=True)
+paths={'runtime':ROOT/'core/include/tc/app/tcWindowRuntime.cpp','global':ROOT/'core/include/tc/app/tcGlobal.cpp','mcp':ROOT/'core/include/tc/utils/tcStandardTools.cpp'}
+sources={k:p.read_text(encoding='utf-8') for k,p in paths.items()}
+objects={k:OUT/(k+'.o') for k in paths}
+import runpy
+fixture=runpy.run_path(str(ROOT/'core/tests/windowTick/native-event-fixture.py'))['generate']
+native=(ROOT/'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+(OUT/'native-event-fixture.h').write_text(fixture(native),encoding='utf-8')
+flags.insert(0,'-I'+str(OUT))
+probe=OUT/'probe.o';compile(ROOT/'core/tests/windowTick/event-converter.cpp',probe)
+for k,p in paths.items():compile(p,objects[k])
+variants=[('baseline',None,None)]
+if os.environ.get('TC_EVENT_CONVERTER_MUTATIONS'):
+    edits=[
+      ('touch_guard_uses_legacy_drag_button','runtime','if (dragButton != -1) motionButtons_ = 0;','/* retain the unrelated legacy drag button */'),
+      ('node_guard_uses_legacy_drag_button','runtime','for (int button : {dragButton, ctx_.grabbedNode.expired() ? -1 : ctx_.grabbedButton}) {','for (int button : {dragButton >= 0 ? dragButton : ctx_.mouseButton, ctx_.grabbedNode.expired() ? -1 : ctx_.grabbedButton}) {'),
+      ('recovery_replaces_motion_epoch','runtime','if (!(motionButtons_ & (1u << button))) epochs_[button] = ctx_.mousePressGenerations[button];','epochs_[button] = ctx_.mousePressGenerations[button];'),
+      ('unrelated_button_recovery_epoch','runtime','if (!(recoveryButtonsAtEntry & mouseButtonBit(button))) dispatch.beginRecovery(button);','/* retain an epoch from before this recovery existed */'),
+      ('visibility_revision_after_raw','runtime','if (visibilityChanged && currentVisibility()) {','if (visibilityChanged) {'),
+      ('visibility_revision_typed_tail','runtime','GuardedEventDelivery<OccludedEventArgs>::notify(window.events().occludedChanged, args, currentVisibility);','window.events().occludedChanged.notify(args);'),
+      ('all_button_epoch_comparison','runtime','if ((motionButtons_ & (1u << b)) && epochs_[b] != ctx_.mousePressGenerations[b]) return false;','if (epochs_[b] != ctx_.mousePressGenerations[b]) return false;'),
+      ('all_button_position_comparison','runtime','if (!dispatch.current(button)) return Vec2(0, 0);','for (int b=0;b<SAPP_MAX_MOUSEBUTTONS;++b) if (!dispatch.current(b)) return Vec2(0, 0);'),
+
+      ('diagnostic_integer_range','runtime','if (double(value) >= std::numeric_limits<int>::max()) return std::numeric_limits<int>::max();','/* omit positive diagnostic range guard */'),
+      ('first_position','runtime','return valid ? Vec2(x, y) - previous : Vec2(0, 0);','return Vec2(x, y) - previous;'),
+      ('position_difference','runtime','return valid ? Vec2(x, y) - previous : Vec2(0, 0);','return Vec2(ev->mouse_dx * scale, ev->mouse_dy * scale);'),
+      ('locked_position','runtime','if (!locked || !valid) {','if (true) {'),
+      ('locked_scale','runtime','Vec2(ev->mouse_dx * scale, ev->mouse_dy * scale) : Vec2(0, 0)','Vec2(ev->mouse_dx, ev->mouse_dy) : Vec2(0, 0)'),
+      ('first_locked','runtime','return valid ? Vec2(ev->mouse_dx * scale, ev->mouse_dy * scale) : Vec2(0, 0);','return Vec2(ev->mouse_dx * scale, ev->mouse_dy * scale);'),
+      ('same_basis_precision','runtime','const Vec2 previous(ctx.lastPointerX, ctx.lastPointerY);','const Vec2 previous(float(ctx.pointerLogicalX) * basis, float(ctx.pointerLogicalY) * basis);'),
+      ('dpi_previous_basis','runtime','ctx.lastPointerX = ctx.pointerLogicalX * basis;','ctx.lastPointerX = ctx.pointerLogicalX;'),
+      ('leave_real_anchor','runtime','ctx.mouseX = ctx.mouseY = -1.0f;','ctx.mouseX = ctx.mouseY = ctx.lastPointerX = ctx.lastPointerY = -1.0f;'),
+      ('enter_jump','runtime','case SAPP_EVENTTYPE_MOUSE_ENTER:\n            case SAPP_EVENTTYPE_MOUSE_MOVE: {','case SAPP_EVENTTYPE_MOUSE_ENTER: break;\n            case SAPP_EVENTTYPE_MOUSE_MOVE: {'),
+      ('locked_recovery','runtime','ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && !ev->pointer_locked &&\n            (ev->button_snapshot || mouseMoveHasReliableButtonBits(ev))','ev->type == SAPP_EVENTTYPE_MOUSE_MOVE && (ev->button_snapshot || ev->reliable_button_bits)'),
+      ('release_real_position','runtime','Vec2(ctx.lastPointerX, ctx.lastPointerY);\n            args.button','Vec2(ctx.mouseX, ctx.mouseY);\n            args.button'),
+      ('snapshot_held','runtime','ctx.pressedMouseButtons |= bit;\n                            ctx.mouseButton','/* omit snapshot ledger */\n                            ctx.mouseButton'),
+      ('snapshot_fabricates_press','runtime','ctx.snapshotMouseButtons |= bit;','ctx.snapshotMouseButtons |= bit; MouseEventArgs press; window.events().mousePressed.notify(press);'),
+      ('touch_lock_position','runtime','internal::MouseEventRaw margs;\n                    margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);','internal::MouseEventRaw margs;\n                    margs.pos = margs.globalPos = Vec2(tx, ty);'),
+      ('touch_window_identity','runtime','auto& mapper = ctx.touchMapper;','auto& mapper = mainWindowContext().touchMapper;'),
+      ('touch_anchor_basis','runtime','samples[i] = {point.identifier, double(point.pos_x) * scale, double(point.pos_y) * scale','samples[i] = {point.identifier, double(point.pos_x) / dpi, double(point.pos_y) / dpi'),
+      ('poll_consumes_pending','runtime','if constexpr (supportsSecondaryWindows()) { if (b.visibilityReady) return; }','/* poll steals pending delivery */'),
+      ('aggregate_matches_snapshot','runtime','if ((type == SAPP_EVENTTYPE_SUSPENDED) != hidden)\n        return supportsSecondaryWindows() ? VisibilityDelivery::Drop : VisibilityDelivery::RawOnly;','/* accept stale aggregate name */'),
+      ('visibility_duplicate_raw','runtime','if (binding.lastDeliveredHidden == hidden)\n        return supportsSecondaryWindows() ? VisibilityDelivery::Drop : VisibilityDelivery::RawOnly;','/* allow duplicate raw */'),
+      ('visibility_attempt_before_raw','runtime','binding.lastDeliveredHidden = hidden;','/* do not commit notification attempt */'),
+      ('visibility_target','runtime','GuardedEventDelivery<OccludedEventArgs>::notify(window.events().occludedChanged, args, currentVisibility);','GuardedEventDelivery<OccludedEventArgs>::notify(mainCoreEvents().occludedChanged, args, currentVisibility);'),
+      ('pending_ready_visibility','runtime','if (pendingVisibility && !coordinator().bootstrapping) deliverPendingWindowVisibilityAtReadyEntry(window);','/* omit pending delivery at ready */'),
+      ('typed_before_raw','runtime','window.events().rawEvent.notify(*ev);','if (visibilityChanged) { OccludedEventArgs early; early.occluded = hidden; window.events().occludedChanged.notify(early); } window.events().rawEvent.notify(*ev);'),
+      ('closed_receiver_query','runtime','auto* window = currentWindowContext().hostWindow;','auto* window = currentWindow();'),
+      ('close_after_update','global','if (currentWindowCloseRecorded()) return nonPresentingExit();','/* omit close check after independent update */'),
+      ('close_after_synced_update','global','if (currentWindowCloseRecorded()) {\n        sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);','if (false) {\n        sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);'),
+      ('close_after_render','global','if (!admitted || currentWindowCloseRecorded()) return nonPresentingExit();','if (!admitted) return nonPresentingExit();'),
+      ('fresh_release_consumption','runtime','window.events().mouseReleased.notify(args);','args.consumed = true; window.events().mouseReleased.notify(args);'),
+      ('trust_opt_out','runtime','if (!binding.metadata.trust_hidden_signals) {','if (false) {'),
+      ('mcp_release_dpi','mcp','                release = target.pointer(SAPP_EVENTTYPE_MOUSE_UP, x, y, button);','                /* omit post-callback DPI rebuild */'),
+      ('mcp_preserve_other_keys','mcp','for (int code : codes) held.erase(code);','held.clear();'),
+      ('mcp_float_transform','mcp','if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())','if (false)'),
+      ('mcp_main_target','mcp','trussc::Window& window = *trussc::internal::mainWindow();','trussc::Window& window = *trussc::internal::currentWindow();'),
+      ('mcp_snapshot','mcp','event.button_snapshot = true;','event.button_snapshot = false;'),
+      ('mcp_click_modifier_restore','mcp','for (int code : codes) held.erase(code);','/* retain click modifiers */'),
+      ('mcp_click_attachment','mcp','target.send(press, false, &recovery);','target.send(press, false, &recovery); target.entry.reset();'),
+      ('derived_pointer_overflow','runtime','if (!finitePointer(double(ev->mouse_x) * scale, double(ev->mouse_y) * scale)) return;','/* omit derived pointer preflight */'),
+      ('reentrant_anchor_overflow','runtime','if (!finitePointer(ctx.pointerLogicalX * basis, ctx.pointerLogicalY * basis))','if (false)'),
+      ('click_exact_modifiers','mcp','for (int code : modifierKeys) target.ctx.keysPressed.erase(code);','/* keep prior modifier keys */'),
+      ('click_packet_flags','mcp','press.modifiers = (press.modifiers & ~keyboardModifiers) | clickModifiers;','press.modifiers |= clickModifiers;'),
+      ('click_release_overflow','mcp','float(std::clamp(double(x), -limit, limit))','x'),
+      ('click_press_ownership','mcp','if (ctx.mousePressOwners[button] != this) return;','/* erase a newer physical press */'),
+      ('click_raw_release_ownership','runtime','if (pressOwner && ctx.mousePressOwners[ev->mouse_button] != pressOwner) break;','/* release whichever press now exists */'),
+      ('touch_logical_precision','runtime','samples[i] = {point.identifier, double(point.pos_x) * scale, double(point.pos_y) * scale','samples[i] = {point.identifier, float(point.pos_x / dpi) * double(basis), float(point.pos_y / dpi) * double(basis)'),
+      ('click_press_generation','runtime','case SAPP_EVENTTYPE_MOUSE_DOWN: {\n                if (!dispatch.current(ev->mouse_button)) break;','case SAPP_EVENTTYPE_MOUSE_DOWN: { /* overwrite newer ledger */'),
+      ('touch_pixel_round_trip','runtime','samples[i] = {point.identifier, double(point.pos_x) * scale, double(point.pos_y) * scale','samples[i] = {point.identifier, double(point.pos_x) / dpi * basis, double(point.pos_y) / dpi * basis'),
+      ('touch_action_preflight','runtime','if (isTouch && !finiteTouchAction(touchAction)) return;','/* omit mapped action preflight */'),
+      ('pointer_scale_precision','runtime','const double scale = pixelPerfectMode() ? 1.0 : 1.0 / double(dpi);','const float scale = appPointerScale(dpi);'),
+      ('click_release_recovery','mcp','ctx.pressedMouseButtons &= ~(1u << button);','/* omit gesture ledger recovery */'),
+    ]
+    for name,k,old,new in edits:
+        assert sources[k].count(old)==1,(name,sources[k].count(old))
+        mutated=sources[k].replace(old,new)
+        if name=='click_press_ownership':
+            mutated=mutated.replace('if (ctx.mousePressGenerations[button] != epoch) return;', '/* omit recovery epoch guard */')
+        if name=='click_raw_release_ownership':
+            marker='case SAPP_EVENTTYPE_MOUSE_UP: {\n                if (!dispatch.current(ev->mouse_button)) break;'
+            mutated=mutated.replace(marker,'case SAPP_EVENTTYPE_MOUSE_UP: { /* omit UP epoch guard */')
+            mutated=mutated.replace('if (!dispatch.current(button) || (ctx.pressedMouseButtons & bit) == 0) return;', 'if ((ctx.pressedMouseButtons & bit) == 0) return;')
+        variants.append((name,k,mutated))
+if os.environ.get('TC_EVENT_CONVERTER_MUTATIONS'):
+    extra=[
+      ('epoch_not_advanced_by_touch','runtime',
+       'action.kind == internal::TouchMouseAction::Kind::Press ? SAPP_MOUSEBUTTON_LEFT : -1, true);',
+       'false ? SAPP_MOUSEBUTTON_LEFT : -1, true);'),
+      ('ledger_write_without_epoch_check','runtime',
+       'case SAPP_EVENTTYPE_MOUSE_DOWN: {\n                if (!dispatch.current(ev->mouse_button)) break;',
+       'case SAPP_EVENTTYPE_MOUSE_DOWN: { /* no ledger epoch check */'),
+    ]
+    for name,k,old,new in extra:
+        assert sources[k].count(old)==1,(name,sources[k].count(old))
+        mutated=sources[k].replace(old,new)
+        variants.append((name,k,mutated))
+    node=(ROOT/'core/include/tcNode.h').read_text(encoding='utf-8')
+    marker='const bool handled = current->fireMousePress(local);\n            if (!dispatch.current(e.button)) return nullptr;'
+    assert node.count(marker)==1
+    variants.append(('grab_write_without_epoch_check','node',node.replace(marker,'const bool handled = current->fireMousePress(local); /* unchecked grab continuation */')))
+    # Remove the UP and recovery barriers together, restoring the obsolete
+    # gesture's ability to release a press admitted from release-side listeners.
+    runtime=sources['runtime'].replace('if (!dispatch.current(ev->mouse_button)) break;\n                if (pressOwner && ctx.mousePressOwners[ev->mouse_button] != pressOwner) break;', '/* no UP epoch or owner check */')
+    runtime=runtime.replace('if (!dispatch.current(button) || (ctx.pressedMouseButtons & bit) == 0) return;', 'if ((ctx.pressedMouseButtons & bit) == 0) return;')
+    mcp=sources['mcp'].replace('if (ctx.mousePressGenerations[button] != epoch) return;', '/* no recovery epoch check */').replace('if (ctx.mousePressOwners[button] != this) return;', '/* no recovery owner check */').replace('if (target.ctx.mousePressGenerations[button] != recovery.epoch) return json{{"status", "ok"}};', '/* no UP epoch check */')
+    variants.append(('up_recovery_without_epoch_check','pair',(runtime,mcp)))
+    variants.append(('spurious_release_at_admission','runtime',sources['runtime'].replace(
+        '    ++mousePressGenerations[button];',
+        '    if (grabbedButton == button && !grabbedNode.expired()) { MouseEventArgs e; e.button=button; e.pos=e.globalPos=Vec2(mouseX,mouseY); e.syncLegacy(); hostWindow->events().mouseReleased.notify(e); }\n    ++mousePressGenerations[button];')))
+    variants.append(('saved_touch_mapper','runtime',sources['runtime'].replace(
+        'auto candidate = mapper;\n                const internal::TouchMouseAction action = mappedTouch(candidate);',
+        'auto candidate = touchCandidate;\n                const internal::TouchMouseAction action = touchAction;')))
+    variants.append(('cached_touch_setting','runtime',sources['runtime'].replace(
+        'auto candidate = mapper;\n                const internal::TouchMouseAction action = mappedTouch(candidate);',
+        'auto candidate = mapper;\n                const internal::TouchMouseAction action = candidate.update(phase, samples, touchCount);')))
+    app=(ROOT/'core/include/tcBaseApp.h').read_text(encoding='utf-8')
+    start=app.index('    bool handleMouseDragged(const MouseDragEventArgs& e)')
+    end=app.index('    bool handleMouseMoved(const internal::MouseEventRaw& e)',start)
+    variants.append(('drag_app_continuation','app',app[:start]+app[start:end].replace('if (!dispatch.current()) return false;', '').replace('return dispatch.current() && ', 'return ')+app[end:]))
+    start=node.index('    Ptr dispatchMouseMove(');end=node.index('    Ptr dispatchMouseScroll(',start)
+    motion=node[:start]+node[start:end].replace('if (!dispatch.current()) return nullptr;', '')+node[end:]
+    start=motion.index('    bool fireMouseMove(');end=motion.index('    bool fireMouseScroll(',start)
+    # The per-node fire barriers also reject stale motion. Remove that
+    # redundant protection with tree continuation to restore the stale path.
+    motion=motion[:start]+motion[start:end].replace('if (!dispatch.current()) return false;', '').replace('dispatch.current() && ', '')+motion[end:]
+    variants.append(('drag_tree_continuation','node',motion))
+    nativeEdits=[
+      ('mac_draw_policy_visibility','const bool suspended = _sapp_tc_native_hidden(w);','const bool suspended = !w->draw_while_hidden && _sapp_tc_native_hidden(w);'),
+      ('mac_detail_order','_sapp_tc_send_type(w, detail);','_sapp_tc_mac_update_suspension(w); _sapp_tc_send_type(w, detail);'),
+      ('xi2_native_relative','if (XIMaskIsSet(raw->valuators.mask, 0)) main->mouse_dx = (float)*values++;','if (XIMaskIsSet(raw->valuators.mask, 0)) { main->mouse_dx = 0; ++values; }'),
+      ('xi2_lock_stamp','ev->pointer_locked = _sapp_tc.mouse_locked && _sapp_tc.lock_owner == w;','ev->pointer_locked = false;'),
+    ]
+    for name,old,new in nativeEdits:
+        assert native.count(old)==1,(name,native.count(old))
+        variants.append((name,'native',native.replace(old,new)))
+if selection:=os.environ.get('TC_EVENT_MUTATION_FILTER'):
+    names=set(selection.split(','))
+    assert names <= {v[0] for v in variants},names
+    variants=[v for v in variants if v[0]=='baseline' or v[0] in names]
+def runVariant(variant):
+    name,kind,source=variant
+    work=OUT/'build-current';work.mkdir(exist_ok=True)
+    selected=dict(objects)
+    selectedProbe=probe
+    if kind=='native':
+        overlay=work/(name+'-include');overlay.mkdir(exist_ok=True)
+        (overlay/'native-event-fixture.h').write_text(fixture(source),encoding='utf-8')
+        selectedProbe=work/(name+'-probe.o');compile(ROOT/'core/tests/windowTick/event-converter.cpp',selectedProbe,overlay)
+    elif kind in ('node','app'):
+        overlay=work/(name+'-include');overlay.mkdir(exist_ok=True)
+        for header in ['TrussC.h','tcBaseApp.h','tcNode.h']:
+            (overlay/header).write_text((ROOT/'core/include'/header).read_text(encoding='utf-8'),encoding='utf-8')
+        (overlay/('tcNode.h' if kind=='node' else 'tcBaseApp.h')).write_text(source,encoding='utf-8')
+        selectedProbe=work/(name+'-probe.o');compile(ROOT/'core/tests/windowTick/event-converter.cpp',selectedProbe,overlay)
+        for k,p in paths.items():
+            selected[k]=work/(name+'-'+k+'.o');compile(p,selected[k],overlay)
+    elif kind=='pair':
+        for k,body in zip(['runtime','mcp'],source):
+            path=work/(name+'-'+k+'.cpp');path.write_text(body,encoding='utf-8')
+            selected[k]=work/(name+'-'+k+'.o');compile(path,selected[k])
+    elif kind:
+        path=work/(name+'.cpp');path.write_text(source,encoding='utf-8');obj=work/(name+'.o');compile(path,obj);selected[kind]=obj
+    binary=work/name
+    subprocess.run([compiler,str(selectedProbe),*[str(p) for p in selected.values()],*libs,'-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=sg_isvalid,--wrap=sg_query_stats,--wrap=sapp_cancel_quit,--wrap=sapp_get_num_dropped_files,--wrap=sapp_get_dropped_file_path','-o',str(binary)],cwd=BUILD,check=True)
+    with (OUT/(name+'.log')).open('w',encoding='utf-8') as log:r=subprocess.run([str(binary)],stdout=log,stderr=subprocess.STDOUT,timeout=30,env=dict(os.environ,TRUSSC_MCP='0'))
+    text=(OUT/(name+'.log')).read_text(encoding='utf-8');failed=text.count('host-entry: FAIL:')
+    valid=(r.returncode==0 and failed==0) if name=='baseline' else (r.returncode==1 and failed>0)
+    result=dict(name=name,returncode=r.returncode,failed_assertions=failed,valid=valid)
+    print(result,flush=True)
+    snapshots=OUT/'sources'/name;snapshots.mkdir(parents=True,exist_ok=True)
+    for path in work.rglob('*'):
+        if path.is_file() and path.suffix in ('.cpp','.h'):
+            target=snapshots/path.relative_to(work);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(path,target)
+    shutil.rmtree(work)
+    return result
+
+# One mutation at a time; all reuse the shared archive and baseline objects.
+results=[]
+for variant in variants:
+    result=runVariant(variant);results.append(result)
+    (OUT/'results.json').write_text(json.dumps(results,indent=2),encoding='utf-8')
+    if variant[0]=='baseline' and not result['valid']:break
+raise SystemExit(any(not r['valid'] for r in results))

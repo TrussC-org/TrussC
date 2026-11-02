@@ -27,6 +27,7 @@ public:
     Window* self = nullptr;
 
     void setup() override {
+        self = getWindow();
         autotest_ = (getenv("TC_WINCTRL_AUTOTEST") != nullptr);
         logNotice("SubApp") << "second window setup: "
             << getWindowWidth() << "x" << getWindowHeight()
@@ -48,7 +49,7 @@ public:
         setColor(1.0f, 0.85f, 0.2f);
         drawCircle(x, y, 34);
 
-        // getFps() returns 0 for "free-run at vsync" — show that as "vsync"
+        // getFps() returns VSYNC (negative) for "free-run at vsync" — show that as "vsync"
         // rather than a bare 0, which reads like a stall.
         float fpsTarget = self ? self->getFps() : 0.0f;
         string fpsLabel = (fpsTarget > 0.0f) ? toString(fpsTarget) : string("vsync");
@@ -87,7 +88,7 @@ public:
         } else if (key == '2' && self) {
             self->setFps(30.0f);
         } else if (key == '3' && self) {
-            self->setFps(0.0f);   // free-run at vsync
+            self->setFps(VSYNC);   // free-run at vsync
         }
     }
 
@@ -135,5 +136,4 @@ public:
 
 private:
     shared_ptr<Window> second_;
-    shared_ptr<SubApp> subApp_;
 };

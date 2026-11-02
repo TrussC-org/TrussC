@@ -29,6 +29,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #endif
+#include <algorithm>
 #if defined(SOKOL_GLCORE)
 #include <GL/gl.h>
 #elif defined(SOKOL_GLES3)
@@ -186,6 +187,7 @@ sgl_desc_t sglSetupDescriptor() {
 // Initialization (setup)
 // ---------------------------------------------------------------------------
 void setup() {
+    internal::beginFrameworkLifetime();
     // Initialize sokol_gfx (with memory tracking allocator)
     sg_desc sgdesc = {};
     sgdesc.environment = sglue_environment();
@@ -225,17 +227,15 @@ void setup() {
 
     // RenderTarget: the swapchain target uses the default sgl context (carries the
     // swapchain color/depth format + sample count). Pipelines build lazily on first use.
-    internal::currentWindowContext().swapchainTarget.resources().context = sgl_default_context();
+    internal::nonWindowContext().swapchainTarget.resources().context = sgl_default_context();
     sgl_tc_context_target_owned(sgl_default_context());
-#if defined(__linux__) && !defined(__ANDROID__) && defined(SOKOL_GLCORE)
-    internal::mainWindowContext().activateNative = [](void*) { sapp_tc_gl_make_current({0}); };
-#endif
     internal::currentWindowContext().swapchainTarget.isFbo = false;
     auto& target = internal::currentWindowContext().swapchainTarget;
     target.colorFormat = sgdesc.environment.defaults.color_format;
     target.sampleCount = sgdesc.environment.defaults.sample_count;
-    target.width = sapp_width();
-    target.height = sapp_height();
+    target.width = internal::currentWindowContext().fbWidth;
+    target.height = internal::currentWindowContext().fbHeight;
+    internal::prepareWindowTarget();
 
     // Initialize bitmap font sampler + pipeline. The atlas TEXTURE itself is
     // allocated lazily on first drawBitmapString call (see ensureFontAtlas in
@@ -277,13 +277,14 @@ void setup() {
 // Cleanup (shutdown)
 // ---------------------------------------------------------------------------
 void cleanup() {
-    internal::mainWindowContext().teardownTargets();
+    internal::shutdownRuntime();
     // Parked/cancelled frames can still own an enqueued renderer prefix.
     // Submit it without presentation before Metal waits for semaphore permits
     // during shutdown, and before destroying any referenced native resources.
     if (sg_isvalid()) sg_tc_submit_prefix();
     // Retired handles belong to this device. Dispose of them before shutdown
     // can recycle their IDs into another device's live resources.
+    internal::drainPendingGpuDestroys();
     internal::discardRetiredShadows();
     // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
     // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
@@ -304,6 +305,7 @@ void cleanup() {
         }
         fontAtlas.initialized = false;
     }
+    internal::endFrameworkLifetime();
     sgl_shutdown();
     internal::recordImageDecodeLimit(0);
     sg_shutdown();
@@ -413,6 +415,8 @@ void clear(float r, float g, float b, float a /* = 1.0f */) {
     if (headless::isActive()) return;
 
     auto& ctx = internal::currentWindowContext();
+    if (ctx.currentTarget->passKind == internal::TargetPassKind::Swapchain &&
+        !internal::admitRootSwapchainPass()) return;
     if (ctx.currentTarget->isFbo) {
         ctx.currentTarget->restartClear(r, g, b, a);
     } else if (ctx.swapchainTarget.inPass) {
@@ -483,13 +487,9 @@ WindowCaptureSource windowCaptureSource() {
     // A cleared frame source must fail rather than acquire another window's
     // or the next frame's drawable. Also scrub the copied swapchain alias.
     source.swapchain.metal.current_drawable = source.drawable;
-#elif defined(SOKOL_D3D11)
-    // A missing secondary source must fail capture, never read the main window.
-    if (window.isMain)
-        source.swapchain = sglue_swapchain();
 #endif
-    source.width = window.isMain ? sapp_width() : window.fbWidth;
-    source.height = window.isMain ? sapp_height() : window.fbHeight;
+    source.width = window.fbWidth;
+    source.height = window.fbHeight;
     return source;
 }
 bool finishWindowCaptureSource(RenderTarget&) {
@@ -512,12 +512,14 @@ void reportTeardownFailure(const char* step) noexcept {
 }
 
 WindowContext::~WindowContext() {
+    if (hostWindow || targetsClosed || frameworkShutdown()) return;
     targetsClosed = true;
     teardownTargets();
     if (currentWindowCtx() == this) currentWindowCtx() = nullptr;
 }
 
 void WindowContext::teardownTargets() noexcept {
+    if (frameworkShutdown()) return;
     // popTarget resolves through the current window. Destruction may be
     // dispatched while a different window is current.
     TeardownSteps steps;
@@ -595,6 +597,10 @@ void selectTarget(RenderTarget& target) {
         sgl_layer(target.sglLayerNext);
         if (target.windowDrawingSizeStale) refreshWindowDrawingSize();
         applyTargetDrawingState();
+    } else if (sg_isvalid()) {
+        // In particular, returning from a process Fbo must not leave its
+        // pooled recording selected as the targetless process root.
+        sgl_set_context({0});
     }
 }
 }
@@ -602,6 +608,7 @@ void selectTarget(RenderTarget& target) {
 void RenderTarget::beginPass(TargetPassStart reason) {
     auto& window = currentWindowContext();
     assert(window.currentTarget == this && !inPass);
+    if (passKind == TargetPassKind::Swapchain && !admitRootSwapchainPass()) return;
     if (frameEpoch != window.renderEpoch) {
         frameEpoch = window.renderEpoch;
         passStartedThisFrame = false;
@@ -618,6 +625,17 @@ void RenderTarget::beginPass(TargetPassStart reason) {
             // Acquire exactly once per window frame, including on Metal.
             binding.swapchain = window.acquireSwapchain
                 ? window.acquireSwapchain(window.acquireSwapchainUser) : sglue_swapchain();
+            // The acquired attachments define this frame on every host,
+            // including sole-surface ports without a WindowBinding adapter.
+            if (binding.swapchain.width > 0 && binding.swapchain.height > 0) {
+                if (window.hostWindow) {
+                    auto metadata = WindowRequestAccess::binding(*window.hostWindow).metadata;
+                    metadata.fb_width = binding.swapchain.width;
+                    metadata.fb_height = binding.swapchain.height;
+                    if constexpr (!supportsSecondaryWindows()) metadata.dpi_scale = sapp_dpi_scale();
+                    publishWindowMetadata(*window.hostWindow, metadata);
+                }
+            }
             window.lastSwapchain = binding.swapchain;
             window.lastSwapchainDrawable = binding.swapchain.metal.current_drawable;
             if (!sg_tc_mtl_register_drawable(&binding.swapchain, ownerId,
@@ -650,6 +668,9 @@ void RenderTarget::beginPass(TargetPassStart reason) {
         // Metal's swapchain adapter also uses depth STORE to retain MSAA samples.
         pass.action.depth.store_action = resumable ? SG_STOREACTION_STORE : SG_STOREACTION_DONTCARE;
     }
+    // Absorb the acquired extent before the backend begins its pass/clear.
+    // Existing parked frames still retain their original attachments.
+    if (passKind == TargetPassKind::Swapchain) refreshWindowDrawingSize();
     sg_begin_pass(&pass);
     if (hasFixedPipeline) {
         const auto selected = pipeline(fixedPipeline);
@@ -822,7 +843,17 @@ bool popTarget(RenderTarget& target, uint64_t token) {
     return true;
 }
 
-void ensureCurrentPass() {
+bool admitRootSwapchainPass() {
+    auto& context = currentWindowContext();
+    if (context.hostWindow) return true;
+    if (!context.processSwapchainWarned) {
+        context.processSwapchainWarned = true;
+        logWarning("RenderTarget") << "No Window selected: draw inside a window callback or into an Fbo";
+    }
+    return false;
+}
+
+bool ensureCurrentPass() {
     auto& window = currentWindowContext();
     ensureTargetStack(window);
     auto& target = *window.currentTarget;
@@ -831,6 +862,7 @@ void ensureCurrentPass() {
         target.beginPass(target.passStartedThisFrame ? TargetPassStart::Resume : TargetPassStart::Initial);
         selectTarget(target);
     }
+    return target.inPass;
 }
 
 bool hasPublicFboActivation() {
@@ -874,6 +906,7 @@ TargetPassScope::TargetPassScope(const sg_pass& pass, int width, int height,
     token_ = pushTarget(owned_);
 }
 TargetPassScope::~TargetPassScope() noexcept {
+    if (frameworkShutdown()) return;
     try {
         if (token_ && target_->activation == token_ && !popTarget(*target_, token_)) {
             // An owned scope cannot disappear while children still borrow it.
@@ -954,10 +987,10 @@ void present() {
     // Registered callbacks can push targets. Select stores before creating the
     // encoder; a proven uninterrupted final pass keeps resolve-only/depth discard.
     if (!window.swapchainTarget.inPass)
-        window.swapchainTarget.resumable = events().onRender.listenerCount() != 0;
-    internal::ensureCurrentPass();
+        window.swapchainTarget.resumable = internal::currentWindowContext().coreEvents->onRender.listenerCount() != 0;
+    if (!internal::ensureCurrentPass()) return;
     window.swapchainTarget.flushLayers();
-    events().onRender.notify();
+    internal::currentWindowContext().coreEvents->onRender.notify();
     if (window.targetStack.size() != 1) {
         logWarning("RenderTarget") << "onRender left unfinished target scopes";
         while (window.targetStack.size() > 1) {
@@ -965,9 +998,10 @@ void present() {
             internal::popTarget(*entry.target, entry.token);
         }
     }
+    const bool closing = internal::currentWindowCloseRecorded();
     window.swapchainTarget.flushLayers();
     window.swapchainTarget.endPass();
-    if (internal::finishWindowCaptureSource(window.swapchainTarget)) {
+    if (!closing && internal::finishWindowCaptureSource(window.swapchainTarget)) {
         if (!sg_tc_mtl_authorize_drawable(window.swapchainTarget.ownerId,
                 window.swapchainTarget.resources().generation, window.renderEpoch))
             sg_tc_mtl_cancel_drawables(window.swapchainTarget.ownerId);
@@ -999,33 +1033,41 @@ bool isInSwapchainPass() {
 
 namespace internal {
 namespace {
-// Main-thread-only lighting cleanup can outlive these function-local statics
+// Constant initialization and trivial destruction keep this readable after all
+// static destructors, without consulting a singleton. Atomic publication covers
+// a handle released by a worker after the framework run has ended.
+constinit std::atomic<bool> frameworkStopped{false};
+static_assert(std::is_trivially_destructible_v<decltype(frameworkStopped)>);
+
+// Lighting cleanup can outlive these function-local statics
 // (e.g. a sketch's global Material). Constant initialization and trivial
-// destruction keep the flag readable throughout static destruction.
-constinit bool windowStateDestroyed = false;
-constinit WindowContext* initializedMainWindowContext = nullptr;
+// destruction keep the pointers readable throughout static destruction.
 constinit std::vector<Window*>* initializedWindowRegistry = nullptr;
 
 struct WindowStateLifetimeMark {
-    explicit WindowStateLifetimeMark(WindowContext* ctx) { initializedMainWindowContext = ctx; }
     explicit WindowStateLifetimeMark(std::vector<Window*>* list) { initializedWindowRegistry = list; }
-    ~WindowStateLifetimeMark() { windowStateDestroyed = true; }
+    ~WindowStateLifetimeMark() {
+        initializedWindowRegistry = nullptr;
+        endFrameworkLifetime();
+    }
 };
 } // namespace
 
-// The main window's state container. Non-inline so a hot-reload guest binds
-// to the host's instance (same pattern as events()/getDefaultContext()).
-WindowContext& mainWindowContext() {
-    static WindowContext ctx;
-    // Destroyed before ctx, like LoggerLifetimeMark below.
-    static WindowStateLifetimeMark lifetimeMark(&ctx);
-    (void)lifetimeMark;
-    return ctx;
-}
+bool frameworkShutdown() noexcept { return frameworkStopped.load(std::memory_order_acquire); }
+void beginFrameworkLifetime() noexcept { frameworkStopped.store(false, std::memory_order_release); }
+void endFrameworkLifetime() noexcept { frameworkStopped.store(true, std::memory_order_release); }
 
 // Open-window registry (see tcWindow.h). Non-inline for the same host/guest
-// reason as mainWindowContext(). Main thread only.
+// reason as windowApiContext(). Running access remains main-thread-only;
+// stopped destructors share this lock with the CPU lighting scrubs.
+static std::mutex& windowRegistryMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
 static std::vector<Window*>& windowRegistryStorage() {
+    // Outlive the list and the Window/non-window contexts (their construction
+    // initializes this registry), including on MSVC where mutex has a destructor.
+    windowRegistryMutex();
     static std::vector<Window*> list;
     // Either storage may be initialized first; stop cleanup before either dies.
     static WindowStateLifetimeMark lifetimeMark(&list);
@@ -1033,17 +1075,82 @@ static std::vector<Window*>& windowRegistryStorage() {
     return list;
 }
 void registerWindow(Window* w) {
+    std::lock_guard lock(windowRegistryMutex());
     windowRegistryStorage().push_back(w);
 }
 void unregisterWindow(Window* w) {
-    auto& list = windowRegistryStorage();
+    // The existing marker clears this pointer only at static destruction.
+    // A stopped runner still owns live CPU storage that a later run will use.
+    if (!initializedWindowRegistry) return;
+    std::lock_guard lock(windowRegistryMutex());
+    auto& list = *initializedWindowRegistry;
     list.erase(std::remove(list.begin(), list.end(), w), list.end());
 }
-WindowOccludedHook& windowOccludedHookForTests() {
-    static WindowOccludedHook hook = nullptr;
+RenderTarget* drawingApiTarget() {
+    // An App constructor or late destructor can select an owner without changing
+    // the physical caller. Never borrow that caller's Fbo across owner scopes.
+    if (currentAppOwner()) {
+        auto* context = findWindowApiContext();
+        return context ? context->currentTarget : nullptr;
+    }
+    if (currentTarget().isFbo) return &currentTarget();
+    auto* context = findWindowApiContext();
+    return context ? context->currentTarget : nullptr;
+}
+CoreEvents& processCoreEvents() { return *nonWindowContext().coreEvents; }
+RenderContext& processRenderContext() { return *nonWindowContext().render; }
+void prepareRuntimeExit() {
+    // Register after every host dependency so std::exit follows the same
+    // App-before-backing ending while registries, services and logger are alive.
+    static const bool installed = [] {
+        getLogger();
+        windowRegistryStorage();
+        nonWindowContext();
+        mcp::internal::Server::instance();
+        mcp::internal::ownerCleanupHooks();
+        mcp::internal::statusRegistry();
+        mcp::internal::statusImageRegistry();
+        mcp::internal::deferredResponsesMutex();
+        mcp::internal::deferredResponses();
+#ifndef __EMSCRIPTEN__
+        (void)mcp::internal::getHttpThread(); // state/exit hook only; no thread or listener starts
+#endif
+        if (std::atexit([] {
+            shutdownRuntime();
+            endFrameworkLifetime();
+        }) != 0) throw std::runtime_error("Unable to register Runtime ending");
+        return true;
+    }();
+    (void)installed;
+}
+std::shared_ptr<Window> prepareLaunchWindow(const WindowSettings& settings) {
+    beginFrameworkLifetime();
+    auto window = std::make_shared<Window>();
+    window->setQuitOnClose(settings.quitOnClose);
+    window->title_ = mcp::internal::markedWindowTitle(settings.title);
+    WindowRequestAccess::binding(*window).geometry = {double(settings.width), double(settings.height), settings.pixelPerfect};
+    retainRuntimeWindow(window);
+    return window;
+}
+const char* launchWindowTitle(Window& window) { return window.title_.c_str(); }
+bool attachCandidate(Window& window, std::shared_ptr<App> app) {
+    WindowRequestAccess::attachCandidate(window, app);
+    WindowRequestAccess::applyPendingApp(window);
+    return window.getApp() == app;
+}
+
+WindowFullscreenHook& windowFullscreenHookForTests() {
+    static WindowFullscreenHook hook = nullptr;
     return hook;
 }
+WindowControlHook& windowControlHookForTests() {
+    static WindowControlHook hook = nullptr;
+    return hook;
+}
+
 std::vector<Window*> openWindows() {
+    if (frameworkShutdown()) return {};
+    std::lock_guard lock(windowRegistryMutex());
     std::vector<Window*> out;
     for (Window* w : windowRegistryStorage()) {
         if (w && w->isOpen()) out.push_back(w);
@@ -1051,18 +1158,21 @@ std::vector<Window*> openWindows() {
     return out;
 }
 
-// Main thread only. These scrubs perform only raw-pointer assignment/erasure:
-// context() is non-virtual and no user code, close, or registration is invoked.
-// Thus the registry cannot mutate during this walk. Include closed windows too:
+// These scrubs perform only raw-pointer assignment/erasure under the registry
+// lock: context() is non-virtual; no callbacks, GPU/native calls or other locks.
+// Unregistration precedes destruction of a Window's context. Include closed windows too:
 // their contexts can still retain lighting pointers until Window destruction.
 // Do not initialize either storage from a destructor under allocation failure.
 namespace {
 template<class Scrub> void scrubLightingContexts(Scrub scrub) noexcept {
-    if (windowStateDestroyed) return;
-    if (initializedMainWindowContext) scrub(*initializedMainWindowContext);
+    // All three storages can have died during static teardown. Do not touch
+    // the mutex then; the existing storage markers remain the lifetime guards.
+    if (!nonWindowContextIfInitialized() && !initializedWindowRegistry) return;
+    std::lock_guard lock(windowRegistryMutex());
+    if (auto* ctx = nonWindowContextIfInitialized()) scrub(*ctx);
     if (initializedWindowRegistry) {
         for (Window* w : *initializedWindowRegistry) {
-            if (w) scrub(w->context());
+            if (w) scrub(trussc::internal::WindowRequestAccess::context(*w));
         }
     }
 }
@@ -1088,35 +1198,86 @@ void clearEnvironmentFromAllContexts(Environment* environment) {
     });
 }
 
-// Declared in tcWindowContext.h. Every registered window, not only the open
-// ones: a closed Window the app still holds keeps its context, and with it
-// the hover / grab / selection it had when it closed.
-void resetNodeRefsForUnload() {
-    auto reset = [](WindowContext& ctx) {
-        ctx.hoveredNode.reset();
-        ctx.prevHoveredNode.reset();
-        ctx.grabbedNode.reset();
-        ctx.grabbedButton = -1;
-        ctx.selectedNode.reset();
+// Ending an attachment clears only references to that tree (and already
+// expired references), including closed or unbound Window storage. Copying a
+// weak pointer never allocates. Release control blocks outside the registry
+// mutex: their allocator/deleter storage can reenter the host.
+void resetAppNodeReferences(const App& app) noexcept {
+    auto field = [](WindowContext& ctx, int slot) -> std::weak_ptr<Node>& {
+        switch (slot) {
+            case 0: return ctx.rootNode;
+            case 1: return ctx.hoveredNode;
+            case 2: return ctx.prevHoveredNode;
+            case 3: return ctx.grabbedNode;
+            default: return ctx.selectedNode;
+        }
     };
-    reset(mainWindowContext());
-    mainWindowContext().rootNode.reset();
-    for (Window* w : windowRegistryStorage()) {
-        if (w) reset(w->context());
+    auto belongs = [&](const std::weak_ptr<Node>& ref) {
+        auto node = ref.lock();
+        if (!node) return true;
+        for (; node; node = node->getParent()) if (node.get() == &app) return true;
+        return false;
+    };
+    auto scrub = [&](Window* window) {
+        for (int slot = 0; slot < 5; ++slot) {
+            std::weak_ptr<Node> ref, retired;
+            auto context = [&]() -> WindowContext* {
+                if (!window) return nonWindowContextIfInitialized();
+                if (!initializedWindowRegistry ||
+                    std::find(initializedWindowRegistry->begin(), initializedWindowRegistry->end(), window) == initializedWindowRegistry->end()) return nullptr;
+                return &trussc::internal::WindowRequestAccess::context(*window);
+            };
+            {
+                std::lock_guard lock(windowRegistryMutex());
+                if (auto* ctx = context()) ref = field(*ctx, slot);
+            }
+            if (!belongs(ref)) continue;
+            {
+                std::lock_guard lock(windowRegistryMutex());
+                if (auto* ctx = context()) {
+                    auto& current = field(*ctx, slot);
+                    if (!ref.owner_before(current) && !current.owner_before(ref)) {
+                        retired = std::move(current);
+                        if (slot == 3) ctx->grabbedButton = -1;
+                    }
+                }
+            }
+        }
+    };
+    scrub(nullptr);
+    size_t index = 0;
+    for (;;) {
+        Window* window;
+        {
+            std::lock_guard lock(windowRegistryMutex());
+            if (!initializedWindowRegistry || index >= initializedWindowRegistry->size()) break;
+            window = (*initializedWindowRegistry)[index];
+        }
+        scrub(window);
+        {
+            std::lock_guard lock(windowRegistryMutex());
+            if (initializedWindowRegistry && index < initializedWindowRegistry->size() && (*initializedWindowRegistry)[index] == window) ++index;
+        }
     }
 }
+
 } // namespace internal
 
 CoreEvents& events() {
-    // The CoreEvents instance is owned per window context. The main window's
-    // is wired lazily here (preserving the pre-context construction timing);
-    // Phase 1 pre-wires the pointer when constructing secondary contexts.
-    auto& ctx = internal::currentWindowContext();
-    if (!ctx.coreEvents) {
-        static CoreEvents instance;   // main-window storage
-        ctx.coreEvents = &instance;
-    }
-    return *ctx.coreEvents;
+    if (auto* ctx = internal::findWindowApiContext()) return *ctx->coreEvents;
+    return internal::unavailableWindowEvents();
+}
+
+// App callbacks and unowned callers share the existing Window resolution rule.
+const std::string& getWindowTitle() {
+    if (auto* window = internal::currentWindow()) return window->getTitle();
+    static const std::string empty;
+    return empty;
+}
+
+bool isWindowOccluded() {
+    if (auto* window = internal::currentWindow()) return window->isOccluded();
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -1153,6 +1314,368 @@ std::chrono::steady_clock::duration getElapsedTimeOffset() {
 
 void setElapsedTimeOffset(std::chrono::steady_clock::duration offset) {
     elapsedTimeOffsetTicks.store(offset.count(), std::memory_order_relaxed);
+}
+
+// Set the current window's delta time and update time for one update call.
+// VSYNC and draw-synced updates report the measured wall time since the
+// previous update call (#15). Fixed-Hz steps pass their nominal interval
+// (fixedDelta > 0), so every step of a frame reports the same dt instead
+// of the first one taking the whole gap (#228), and their nominal time on
+// the loop's timeline (stepTime) as the update time Node timers count
+// from, and whether this update is such a step. mainUpdateCallTime is
+// kept current either way; a mode switch between updates moves it to the
+// switch (restartLoopTiming).
+void beginMainUpdateCall(double fixedDelta,
+                                std::chrono::steady_clock::time_point stepTime) {
+    auto& wctx = currentWindowContext();
+    auto callNow = wctx.tickActive ? wctx.tickTime : windowClockNow();
+    if (fixedDelta > 0.0) {
+        wctx.updateDeltaTime = fixedDelta;
+    } else if (!wctx.mainUpdateCallTimeInitialized) {
+        wctx.updateDeltaTime = wctx.tickDuration > 0.0 ? wctx.tickDuration : sapp_frame_duration(); // first frame: sokol's estimate
+    } else {
+        wctx.updateDeltaTime = std::chrono::duration<double>(callNow - wctx.mainUpdateCallTime).count();
+    }
+    wctx.mainUpdateCallTimeInitialized = true;
+    wctx.mainUpdateCallTime = callNow;
+    wctx.updateTime = (fixedDelta > 0.0) ? stepTime : callNow;
+    wctx.fixedStepUpdate = (fixedDelta > 0.0);
+}
+
+// One current-window update: timing (beginMainUpdateCall), then the app's
+// update with the context marked as inside an update, so a Node timer
+// created during it starts counting with the next update (tcNode.h).
+// Each call is an entry point (#349): the stacks go back to their depth
+// before it, in both modes (synced: mid-frame; independent: every VSYNC
+// update and every fixed-Hz step, so an idle EVENT_DRIVEN draw can't let
+// leaks pile up until the next frame).
+void runMainUpdate(double fixedDelta,
+                   std::chrono::steady_clock::time_point stepTime) {
+    auto& wctx = currentWindowContext();
+    const bool previous = wctx.inUpdate;
+    const bool previousCallback = wctx.inCallbackClock;
+    const bool previousFixed = wctx.fixedStepUpdate;
+    const auto previousTime = wctx.updateTime;
+    beginMainUpdateCall(fixedDelta, stepTime);
+    wctx.inUpdate = true;
+    wctx.inCallbackClock = false;
+    struct RestoreUpdate {
+        WindowContext& ctx;
+        bool previous, previousCallback, previousFixed;
+        std::chrono::steady_clock::time_point previousTime;
+        ~RestoreUpdate() {
+            ctx.inUpdate = previous;
+            ctx.inCallbackClock = previousCallback;
+            if (previous) { ctx.fixedStepUpdate = previousFixed; ctx.updateTime = previousTime; }
+        }
+    } restore{wctx, previous, previousCallback, previousFixed, previousTime};
+    ++wctx.updateCount;
+    EntryStackGuard guard(AppEntry::Update);
+    internal::currentWindowContext().coreEvents->update.notify();
+}
+
+// Update processing of one window-loop frame when update is NOT synced to
+// draw (setIndependentFps). The common scheduler uses this stepping; it can be
+// driven headless (core/tests/frameTiming).
+//   VSYNC:        one update per frame, measured dt.
+//   fixed Hz:     accumulator steps at the nominal 1/updateFps, at most
+//                 getMaxUpdateSteps() per frame; time beyond the cap is
+//                 dropped with a one-time warning (#228).
+//   EVENT_DRIVEN: no update.
+void runIndependentUpdates(std::chrono::steady_clock::time_point now) {
+    auto& wctx = currentWindowContext();
+    auto& loop = mainLoop();
+    if (loop.updateTargetFps == VSYNC) {
+        runMainUpdate();
+        recordUpdateRateSample(wctx, wctx.updateDeltaTime, 1.0);
+    } else if (loop.updateTargetFps > 0) {
+        if (!loop.lastUpdateTimeInitialized) {   // first frame, or just after a mode switch
+            loop.lastUpdateTime = now;
+            loop.lastUpdateTimeInitialized = true;
+        }
+        double updateInterval = 1.0 / loop.updateTargetFps;
+        double elapsed = std::chrono::duration<double>(now - loop.lastUpdateTime).count();
+        loop.lastUpdateTime = now;
+
+        FixedStepAdvance adv = advanceFixedStep(loop.updateAccumulator, elapsed, updateInterval,
+                                                getMaxUpdateSteps());
+        warnUpdateStepsDropped(FixedStepLoop::Main, loop.updateStepsDropWarned,
+                               adv.droppedTime, updateInterval, adv.steps);
+        // The frame's steps are the latest adv.steps intervals on the
+        // loop's timeline, ending one leftover accumulator before `now`.
+        const double leftover = loop.updateAccumulator;
+        int ran = 0;
+        for (; ran < adv.steps; ++ran) {
+            // setFps()/setIndependentFps() from inside update(): the new
+            // mode starts next frame; don't finish this frame's old steps.
+            if (!loop.lastUpdateTimeInitialized) break;
+            double behind = leftover + (adv.steps - 1 - ran) * updateInterval;
+            auto stepTime = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                      std::chrono::duration<double>(behind));
+            runMainUpdate(updateInterval, stepTime);
+        }
+        // Measured rate (#228): the time the steps consumed, in steps
+        // (fractional: whole steps plus the accumulator's progress), over
+        // the wall time. Dropped time and steps cut short don't count.
+        double consumed = (elapsed - adv.droppedTime) / updateInterval - (adv.steps - ran);
+        recordUpdateRateSample(wctx, elapsed, consumed);
+    }
+}
+
+// Draw decision of one window-loop frame (before the capture override).
+// The common scheduler uses this decision; it can also be driven headless.
+//   VSYNC:        every frame.
+//   fixed fps:    frame skipping; at most one draw per tick, with a
+//                 half-tick tolerance so a target at or just above the
+//                 display rate (setFps(60) on a 59.94 Hz display) draws
+//                 every tick instead of skipping frames at irregular
+//                 intervals (#228).
+//   EVENT_DRIVEN: only on redraw().
+bool mainLoopShouldDraw(std::chrono::steady_clock::time_point now) {
+    auto& loop = mainLoop();
+    if (!loop.lastDrawTimeInitialized) {   // first frame, or just after a mode switch
+        loop.lastDrawTime = now;
+        loop.lastDrawTimeInitialized = true;
+    }
+    if (loop.drawTargetFps == VSYNC) return true;
+    if (loop.drawTargetFps > 0) {
+        double drawInterval = 1.0 / loop.drawTargetFps;
+        double elapsed = std::chrono::duration<double>(now - loop.lastDrawTime).count();
+        loop.lastDrawTime = now;
+        return frameSkipShouldTick(loop.drawAccumulator, elapsed, drawInterval);
+    }
+    return loop.redrawCount > 0;
+}
+
+
+// The update of a drawn frame when update is synced to draw (setFps:
+// VSYNC, a fixed rate or EVENT_DRIVEN): one update per drawn frame with
+// the measured dt, and its getFrameRate() sample. The scheduler runs it after
+// beginFrame(). Split out so it can be driven headless.
+void runSyncedUpdate() {
+    if (!mainLoop().updateSyncedToDraw) return;
+    runMainUpdate();
+    recordUpdateRateSample(currentWindowContext(), currentWindowContext().updateDeltaTime, 1.0);
+}
+
+WindowClock& windowClockForTests() { static WindowClock clock = nullptr; return clock; }
+std::chrono::steady_clock::time_point windowClockNow() {
+    if (auto clock = windowClockForTests()) return clock();
+    return std::chrono::steady_clock::now();
+}
+
+WindowCallbackTimeScope::WindowCallbackTimeScope()
+    : ctx_(currentWindowContext()), inUpdate_(ctx_.inUpdate),
+      fixed_(ctx_.fixedStepUpdate), callback_(ctx_.inCallbackClock), time_(ctx_.updateTime) {
+    ctx_.inUpdate = true;
+    ctx_.fixedStepUpdate = false;
+    ctx_.inCallbackClock = true;
+    ctx_.updateTime = ctx_.tickActive ? ctx_.tickTime : windowClockNow();
+}
+WindowCallbackTimeScope::~WindowCallbackTimeScope() {
+    ctx_.inUpdate = inUpdate_;
+    ctx_.fixedStepUpdate = fixed_;
+    ctx_.inCallbackClock = callback_;
+    ctx_.updateTime = time_;
+}
+
+int framebufferToLogical(int pixels, float dpi) {
+    return static_cast<int>(pixels / (dpi > 0.0f ? dpi : 1.0f));
+}
+
+float appSizeDpi(float dpi) { return pixelPerfectMode() ? 1.0f : dpi; }
+
+float appPointerScale(float dpi) {
+    // Native positions/deltas are framebuffer pixels. Invalid native DPI falls
+    // back to unit scale rather than introducing non-finite App coordinates.
+    if (pixelPerfectMode() || !std::isfinite(dpi) || dpi <= 0.0f) return 1.0f;
+    const float scale = 1.0f / dpi;
+    return std::isfinite(scale) ? scale : 1.0f;
+}
+
+ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi) {
+    ResizeEventArgs args;
+    args.width = framebufferToLogical(width, dpi);
+    args.height = framebufferToLogical(height, dpi);
+    return args;
+}
+
+uint64_t resourceFrameKey() {
+    const auto& ctx = currentWindowContext();
+    // The explicit non-window headless loop has updates, without native Window admissions.
+    if (&ctx == nonWindowContextIfInitialized()) return ctx.updateCount;
+    return ctx.resourceTickCount;
+}
+
+uint64_t deviceFrameCount() {
+    // Upload admission follows shared GPU commits, including no-window-draw turns.
+    return sg_isvalid() ? sg_query_stats().prev_frame.frame_index : 0;
+}
+
+// Single occlusion policy for all windows. Desktop secondary native sources
+// deliver gated callbacks here before drawable admission. Main keeps
+// updating on every supplied tick, independently of its visibility snapshot.
+static bool occlusionPausesUpdate(const WindowContext& ctx) { return ctx.pauseUpdatesWhenHidden; }
+
+static bool nativeSuspensionPausesUpdate() {
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+    return true;
+#else
+    return false;
+#endif
+}
+
+void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
+    // Observe lifecycle state before raw listeners can throw. Only native
+    // mobile suspension or secondary admission pauses updates.
+#if defined(__ANDROID__)
+    if (type == SAPP_EVENTTYPE_UNFOCUSED) ctx.visibilityPaused = true;
+#endif
+    if constexpr (supportsSecondaryWindows()) {
+        for (auto* w : openWindows()) if (&trussc::internal::WindowRequestAccess::context(*w) == &ctx) {
+            refreshWindowMetadata(*w);
+            const auto& m = WindowRequestAccess::binding(*w).metadata;
+            ctx.suspended = m.trust_hidden_signals && (m.iconified || m.occluded);
+            if (ctx.suspended && occlusionPausesUpdate(ctx)) {
+                ctx.visibilityPaused = true;
+                ctx.mainUpdateCallTimeInitialized = false;
+            }
+            return;
+        }
+    }
+    // Lifecycle suspension has a separate reason. Visibility was sampled before
+    // this call and remains authoritative for raw listeners and the typed event.
+    if (type == SAPP_EVENTTYPE_SUSPENDED) {
+        ctx.lifecycleSuspended = nativeSuspensionPausesUpdate();
+        if (ctx.lifecycleSuspended || (ctx.suspended && occlusionPausesUpdate(ctx))) {
+            ctx.visibilityPaused = true;
+            ctx.mainUpdateCallTimeInitialized = false;
+        }
+    } else if (type == SAPP_EVENTTYPE_RESUMED) {
+        ctx.lifecycleSuspended = false;
+#if defined(__EMSCRIPTEN__)
+        ctx.visibilityPaused = true;
+#endif
+    }
+}
+
+bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDuration,
+                   bool forceDraw, const WindowTickPresentation* presentation, bool nativeDrawGated) {
+    auto& ctx = currentWindowContext();
+    if (ctx.tickActive) return false; // modal/native callback reentry
+    ctx.tickActive = true;
+    struct RestoreTick { WindowContext& ctx; ~RestoreTick() { ctx.tickActive = false; ctx.clearFrameDrawable(); } } restore{ctx};
+    ctx.tickTime = now;
+    ctx.tickDuration = sourceDuration;
+    ctx.frameUptime = now - clockOrigin();
+    ctx.frameUptimeSampled = true;
+    auto* window = ctx.hostWindow;
+    if (window) ctx.suspended = window->isOccluded();
+    const bool hidden = nativeDrawGated || ctx.suspended || ctx.lifecycleSuspended;
+    // Preserve the existing capture override even while main is hidden.
+    const bool capturePending = forceDraw || !ctx.pendingScreenshotPaths.empty()
+        || !ctx.asyncScreenshots.pending.empty();
+    const auto nonPresentingExit = [&] {
+        if (currentWindowCloseRecorded()) sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
+        // Prelude callbacks can upload or render FBOs even without a draw.
+        // Native gates have not activated this window's GPU context. In
+        // particular, a nested gated callback must not commit foreign work.
+        if (!nativeDrawGated) {
+            if (!presentation && tc_internal_gpu_frame_has_work()) endGpuFrame();
+        }
+#ifndef __EMSCRIPTEN__
+        // Expiry does not require a frame. Keep producers queued for a safe
+        // readback after a later admitted frame, until their existing deadline.
+        // Admission itself may block, so expiry uses a fresh clock sample.
+        mcp::internal::drainDeferredResponses(ctx.deferredResponseTarget, false, windowClockNow(), false);
+#endif
+        return false;
+    };
+    const bool updateHidden = hidden && (occlusionPausesUpdate(ctx) || nativeSuspensionPausesUpdate());
+    const bool paused = updateHidden && (nativeDrawGated || !capturePending);
+    if (paused || (!hidden && ctx.visibilityPaused)
+        || (updateHidden && (!ctx.visibilityPaused || !ctx.mainUpdateCallTimeInitialized))) {
+        ctx.loop.lastUpdateTimeInitialized = false;
+        ctx.loop.lastDrawTimeInitialized = false;
+        ctx.loop.updateAccumulator = ctx.loop.updateTargetFps > 0.0f ? 1.0 / ctx.loop.updateTargetFps : 0.0;
+        ctx.loop.drawAccumulator = ctx.loop.drawTargetFps > 0.0f ? 1.0 / ctx.loop.drawTargetFps : 0.0;
+        ctx.mainUpdateCallTime = now;
+        ctx.mainUpdateCallTimeInitialized = !paused;
+    }
+    ctx.visibilityPaused = updateHidden;
+    if (paused) return nonPresentingExit();
+    // Independent callbacks pass the old free-running secondary admission
+    // point before updates. Synchronized ticks first pass the draw throttle.
+    const bool independentTick = !ctx.loop.updateSyncedToDraw;
+    if (!nativeDrawGated && independentTick) ++ctx.resourceTickCount;
+    const auto updatesBefore = ctx.updateCount;
+    if (!ctx.loop.updateSyncedToDraw) runIndependentUpdates(now);
+    if (currentWindowCloseRecorded()) return nonPresentingExit();
+    if (nativeDrawGated) {
+        // The native gate forbids all rendering, including forced captures.
+        // A future secondary policy change can run updates on delivered ticks.
+        if (ctx.loop.updateSyncedToDraw) runSyncedUpdate();
+        return nonPresentingExit();
+    }
+    const bool shouldDraw = mainLoopShouldDraw(now) || capturePending;
+    // Hidden main retains HEAD's drawing at its native paced tick source;
+    // EVENT_DRIVEN / fixed-rate skips still take the upload-only boundary.
+    if (!shouldDraw) return nonPresentingExit();
+    // Base increment point for synchronized ticks: after throttle, before
+    // beginFrame/update, including a later failed render admission.
+    if (!independentTick) ++ctx.resourceTickCount;
+    if (presentation) presentation->begin();
+    else {
+        beginFrame();
+    }
+    // A mode switch from an independent update applies on the next tick;
+    // never add a second, synchronized update to that same tick.
+    if (ctx.updateCount == updatesBefore) runSyncedUpdate();
+    if (currentWindowCloseRecorded()) {
+        sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
+        return nonPresentingExit();
+    }
+    // Reserve before notifying so redraw() from draw/afterFrame survives.
+    // A failed draw/present keeps the original request for a later tick.
+    struct RedrawReservation {
+        MainLoopState& loop;
+        int before;
+        bool completed = false;
+        ~RedrawReservation() {
+            if (!completed && loop.redrawCount < before) loop.redrawCount = before;
+        }
+    } reservation{ctx.loop, ctx.loop.redrawCount};
+    if (ctx.loop.redrawCount > 0) --ctx.loop.redrawCount;
+    bool admitted = false;
+    {
+        EntryStackGuard guard(AppEntry::Draw);
+        if (!presentation) {
+            refreshWindowDrawingSize();
+            if (window && window->clearColorSet_) { const auto& c = window->clearColor_; clear(c.r, c.g, c.b, c.a); }
+        }
+        WindowCallbackTimeScope callbackTime;
+        internal::currentWindowContext().coreEvents->draw.notify();
+        if (currentWindowCloseRecorded()) {
+            sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
+            return nonPresentingExit();
+        }
+        if (presentation) admitted = presentation->present();
+        else {
+            resetShaderStack(); present();
+            // The acquired swapchain is retained through present(). Invalid
+            // swapchains (including nil Metal drawables) skip the Sokol pass.
+            admitted = !ctx.swapchainTarget.binding.swapchain.invalid;
+        }
+    }
+    if (!admitted || currentWindowCloseRecorded()) return nonPresentingExit();
+    reservation.completed = true;
+    ++ctx.drawCount;
+    { EntryStackGuard guard(AppEntry::AfterFrame); internal::currentWindowContext().coreEvents->afterFrame.notify(); }
+    // Snapshot screenshot requests only after all listeners, including those
+    // installed by App::setup(), have queued captures of this finished frame.
+    if (presentation) presentation->finish();
+    else drainPendingScreenshots();
+    return true;
 }
 
 void sampleFrameTime(WindowContext& ctx) {
@@ -1263,12 +1786,16 @@ bool frameSkipShouldTick(double& accumulator, double elapsed, double interval) {
     return true;
 }
 
-void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double interval,
+void warnUpdateStepsDropped(FixedStepLoop loop, bool& warned,
+                            double droppedTime, double interval,
                             int stepsRun) {
-    // One flag per loop: each loop reports its own first drop.
-    static std::atomic<bool> warned[2] = {false, false};
+    // The owning loop supplies its main-thread-only episode flag.
+    // A pass without dropped time ends only that loop's episode.
     const bool headless = (loop == FixedStepLoop::Headless);
-    if (warned[headless ? 1 : 0].exchange(true)) return;
+    const bool dropped = droppedTime > 0.0;
+    const bool alreadyWarned = warned;
+    warned = dropped;
+    if (!dropped || alreadyWarned) return;
     const char* where = headless ? "Headless loop" : "Update loop";
     const char* frame = headless ? "loop pass" : "frame";
     // stepsRun is the cap (getMaxUpdateSteps()): time is only dropped once
@@ -1290,7 +1817,7 @@ void warnUpdateStepsDropped(FixedStepLoop loop, double droppedTime, double inter
         warning << ", or the update rate is more than " << stepsRun
             << "x the display's frame rate";
     }
-    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once.";
+    warning << ". setMaxUpdateSteps() sets the cap (0 = run every step). Logged once per stall.";
 }
 } // namespace internal
 
@@ -1315,46 +1842,30 @@ double getElapsedTime() {
 }
 
 double getFrameElapsedTime() {
-    auto& ctx = internal::currentWindowContext();
+    auto* resolved = internal::findWindowApiContext();
+    if (!resolved) return 0;
+    auto& ctx = *resolved;
     // Before this window's first frame (e.g. during a window's own setup),
-    // and in secondary windows, whose platform tick doesn't sample it yet
-    // (the multi-window work that follows #219), fall back to the live clock.
+    // fall back to the live clock.
     if (!ctx.frameUptimeSampled) return getElapsedTime();
     auto d = ctx.frameUptime - internal::getElapsedTimeOffset();
     if (d.count() < 0) return 0.0;
     return std::chrono::duration<double>(d).count();
 }
 
-// getFrameCount()/getUpdateCount() resolve through the CURRENT window context.
-// The main window keeps returning internal::updateFrameCount — bit-identical to
-// the old global, and the value the hot-reload host mirrors (tcHotReloadHost.h)
-// — while a secondary window returns its own per-tick counter (advanced in the
-// native windowTick before update()). Single-window apps are unaffected.
-uint64_t getUpdateCount() {
-    auto& ctx = internal::currentWindowContext();
-    return ctx.isMain ? internal::updateFrameCount : ctx.updateCount;
-}
-
-// Device/main-window frame count. Left on sapp_frame_count(): it is the
-// sokol_app frame index used for one-update-per-device-frame guards, not a
-// per-window update counter (secondary draws happen within main-thread ticks
-// and are not tracked separately).
-uint64_t getDrawCount() {
-    return sapp_frame_count();
-}
-
-uint64_t getFrameCount() {
-    auto& ctx = internal::currentWindowContext();
-    return ctx.isMain ? internal::updateFrameCount : ctx.updateCount;
-}
+uint64_t getUpdateCount() { auto* ctx = internal::findWindowApiContext(); return ctx ? ctx->updateCount : 0; }
+uint64_t getDrawCount() { auto* ctx = internal::findWindowApiContext(); return ctx ? ctx->drawCount : 0; }
+uint64_t getFrameCount() { return getUpdateCount(); }
 
 double getDeltaTime() {
     // Per-window: inside a secondary window's update/draw this is that
-    // window's own tick delta, not the main window's.
-    return internal::currentWindowContext().updateDeltaTime;
+    // window's own tick delta, rather than a process clock.
+    auto* ctx = internal::findWindowApiContext();
+    return ctx ? ctx->updateDeltaTime : 0;
 }
 
-double getFrameRate() {
+namespace internal {
+double measuredWindowRate(const WindowContext& ctx) {
     // Measured update rate over the last few frames: update steps divided by
     // the wall time they covered. Recorded by the main and headless loops
     // (recordUpdateRateSample), so reading it has no side effects. In fixed-Hz
@@ -1362,29 +1873,6 @@ double getFrameRate() {
     // the fixed-step loops count the time their steps consumed (fractional
     // steps), so a rate that isn't a multiple of the frame rate reads steady,
     // and dropped time lowers it.
-    auto& ctx = internal::currentWindowContext();
-    if (!ctx.isMain) {
-        // A secondary window's platform tick records no rate samples yet (the
-        // multi-window work that follows #219): average the last 10 deltas
-        // read here, as before.
-        double dt = ctx.updateDeltaTime;
-        if (dt <= 0.0) return 0.0;
-        ctx.frameTimeBuffer[ctx.frameTimeIndex] = dt;
-        ctx.frameTimeIndex = (ctx.frameTimeIndex + 1) % 10;
-        if (ctx.frameTimeIndex == 0) {
-            ctx.frameTimeBufferFilled = true;
-        }
-
-        int count = ctx.frameTimeBufferFilled ? 10 : ctx.frameTimeIndex;
-        if (count == 0) return 0.0;
-
-        double sum = 0.0;
-        for (int i = 0; i < count; i++) {
-            sum += ctx.frameTimeBuffer[i];
-        }
-        double avgDt = sum / count;
-        return avgDt > 0.0 ? 1.0 / avgDt : 0.0;
-    }
     double time = 0.0;
     double steps = 0.0;
     for (int i = 0; i < ctx.rateCount; i++) {
@@ -1393,6 +1881,8 @@ double getFrameRate() {
     }
     return time > 0.0 ? steps / time : 0.0;
 }
+}
+double getFrameRate() { auto* ctx = internal::findWindowApiContext(); return ctx ? internal::measuredWindowRate(*ctx) : 0; }
 
 namespace {
 // Set during static destruction, right before getLogger()'s Logger is
@@ -1603,7 +2093,9 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                 getLogger().log(LogLevel::Fatal,
                                 sokolLogMessage(tag, logItem, message, lineNr));
             } else {
-                getLogger().log(sokolLogLevel(logLevel),
+                const bool appNotice = logLevel == 3 && logItem == SAPP_LOGITEM_LINUX_X11_DROP_TYPES_TRUNCATED &&
+                    tag && std::strcmp(tag, "sapp") == 0;
+                getLogger().log(appNotice ? LogLevel::Notice : sokolLogLevel(logLevel),
                                 sokolLogMessage(tag, logItem, message, lineNr));
             }
         } catch (...) {
@@ -1748,29 +2240,13 @@ std::atomic<bool>& spawned() {
 
 namespace internal {
 
-std::shared_ptr<std::atomic<bool>>& appRunToken() {
-    static auto* token = new std::shared_ptr<std::atomic<bool>>;
-    return *token;
-}
-
-// Constant-initialized and trivially destructible: workers may post while
-// static destructors run, after the queue below has been destroyed.
+// Preserve the allocation-free CP3 mailbox even before Runtime's first use.
+// Workers can post while static destructors run; this atomic never dies.
 std::atomic<MainThreadSlot*>& mainThreadSlots() noexcept {
     static constinit std::atomic<MainThreadSlot*> head{nullptr};
     static_assert(std::is_trivially_destructible_v<std::atomic<MainThreadSlot*>>);
     return head;
 }
-
-#if !defined(__EMSCRIPTEN__)
-ThreadChannel<std::function<void()>>& mainThreadQueue() {
-    static ThreadChannel<std::function<void()>> q;
-    return q;
-}
-std::atomic<size_t>& mainThreadQueuePendingCount() {
-    static std::atomic<size_t> n{0};
-    return n;
-}
-#endif
 
 AsyncScheduler::AsyncScheduler() {
 #ifdef _WIN32
@@ -1860,6 +2336,7 @@ namespace {
 ShadowStorage* retiredShadows = nullptr;
 
 void retireShadowStorage(ShadowStorage* storage) noexcept {
+    if (frameworkShutdown()) { delete storage; return; }
     if (!sg_isvalid()) { delete storage; return; }
     storage->retiredNext = retiredShadows;
     retiredShadows = storage;
@@ -1908,6 +2385,7 @@ PendingGpuDestroys& pendingGpuDestroys() {
 } // anonymous namespace
 
 TextureRetirement::~TextureRetirement() noexcept {
+    if (frameworkShutdown()) return;
     if (!sg_isvalid()) return;
     for (auto handle : cubeViews) if (handle.id) sg_destroy_view(handle);
     for (auto handle : mipAttachments) if (handle.id) sg_destroy_view(handle);
@@ -1918,6 +2396,7 @@ TextureRetirement::~TextureRetirement() noexcept {
     if (sampler.id) sg_destroy_sampler(sampler);
 }
 void retireTexture(TextureRetirement* storage) noexcept {
+    if (frameworkShutdown()) { delete storage; return; }
     if (!sg_isvalid()) { delete storage; return; }
     storage->next = retiredTextures;
     retiredTextures = storage;
@@ -1926,6 +2405,7 @@ void retireTexture(TextureRetirement* storage) noexcept {
 namespace {
 template<class Handle, class Queue>
 void enqueueGpuRetirement(Handle handle, Queue&& queue) noexcept {
+    if (frameworkShutdown()) return;
     if (!handle.id) return;
     try { queue(pendingGpuDestroys()).push_back(handle); }
     catch (...) {
@@ -2011,8 +2491,8 @@ void drainPendingGpuDestroys() {
         return;
     }
     RecordingReferences refs;
-    std::unordered_set<WindowContext*> windows{&mainWindowContext(), &currentWindowContext()};
-    for (auto* window : openWindows()) windows.insert(&window->context());
+    std::unordered_set<WindowContext*> windows{&nonWindowContext(), &currentWindowContext()};
+    for (auto* window : openWindows()) windows.insert(&trussc::internal::WindowRequestAccess::context(*window));
     for (auto* window : windows) {
         refs.target(window->swapchainTarget);
         for (const auto& entry : window->targetStack)
@@ -2064,6 +2544,7 @@ ScreenRecorder& globalScreenRecorder() {
 }
 
 ShadowStorage::~ShadowStorage() noexcept {
+    if (frameworkShutdown()) return;
     if (!sg_isvalid()) return;
     for (auto view : colorAttachments) if (view.id) sg_destroy_view(view);
     if (colorTexture.id) sg_destroy_view(colorTexture);
@@ -2334,6 +2815,7 @@ PipelineKey PipelineKey::immediate(ImmediateSelection selection) {
     return key;
 }
 PipelineGeneration::~PipelineGeneration() {
+    if (frameworkShutdown()) return;
     for (const auto& entry : cache) deferGpuDestroy(entry.second);
 }
 bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const char* what) {
@@ -2347,6 +2829,7 @@ bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const ch
     return !contextFailed;
 }
 void RenderTargetResources::release() {
+    if (frameworkShutdown() || !sg_isvalid()) return;
     for (const auto& entry : cache) {
         if (entry.second.id) sgl_destroy_pipeline(entry.second);
 #ifndef NDEBUG
@@ -2355,7 +2838,7 @@ void RenderTargetResources::release() {
     }
     cache.clear(); selections.clear(); rawCache.reset();
     // sokol_gl owns its mandatory default context until shutdown. A resized
-    // main window switches to a dedicated context without trying to destroy it.
+    // Window may switch to a dedicated context without destroying that default.
     if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
     context = {}; contextFailed = false;
 }
@@ -2421,6 +2904,7 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     return result;
 }
 void retirePipelineProgram(sg_shader shader) {
+    if (frameworkShutdown()) return;
     auto erase = [&](RenderTargetResources& bundle) {
         if (!bundle.rawCache) return;
         auto& cache = bundle.rawCache->cache;
@@ -2444,6 +2928,7 @@ void invalidateTargetBucket(sg_pixel_format format, int samples, sg_pixel_format
     for (auto& lease : bucket.leases) if (!lease->leased) lease->release();
 }
 void returnTargetResources(RenderTargetResources& lease) {
+    if (frameworkShutdown()) return;
     lease.leased = false;
     // An invalidated parked generation lives through its activation, then
     // retires immediately. Idle leases never pin obsolete raw caches.
@@ -2473,9 +2958,10 @@ void refreshWindowDrawingSize() {
     // records any geometry, without acquiring another swapchain. A begun
     // frame (including a parked foreign owner) keeps its acquired attachments.
     const bool retainedFrame = target.inPass || target.passStartedThisFrame;
-    const int width = retainedFrame ? target.width : getFramebufferWidth();
-    const int height = retainedFrame ? target.height : getFramebufferHeight();
-    const float scale = pixelPerfectMode() ? 1.0f : getDpiScale();
+    const auto dimensions = windowDimensions(currentWindowContext());
+    const int width = retainedFrame ? target.width : dimensions.fbWidth;
+    const int height = retainedFrame ? target.height : dimensions.fbHeight;
+    const float scale = pixelPerfectMode() ? 1.0f : dimensions.dpiScale;
     const bool extentChanged = target.width != width || target.height != height;
     const auto& vp = target.viewport;
     const bool automaticViewport = target.automaticViewport && vp.active && vp.x == 0 && vp.y == 0 &&
@@ -2516,13 +3002,10 @@ void prepareWindowTarget() {
     if (window.targetsClosed) return;
     auto& target = window.swapchainTarget;
     auto& resources = target.resources();
-    const auto native = window.isMain ? sglue_environment().defaults : sg_environment_defaults{};
-    const auto format = window.isMain
-        ? SwapchainTargetFormat{native.color_format, native.sample_count}
-        : swapchainTargetFormat(window);
-    const int width = window.isMain ? sapp_width() : window.fbWidth;
-    const int height = window.isMain ? sapp_height() : window.fbHeight;
-    const auto depth = window.isMain ? native.depth_format : target.depthFormat;
+    const auto format = swapchainTargetFormat(window);
+    const int width = window.fbWidth;
+    const int height = window.fbHeight;
+    const auto depth = target.depthFormat;
     const bool changed = resources.width && (resources.width != width || resources.height != height ||
         resources.color != format.colorFormat || resources.samples != format.sampleCount || resources.depth != depth);
     if (changed && hasRecordedWork(target)) {
@@ -2558,8 +3041,8 @@ void prepareWindowTarget() {
     }
 }
 bool rebuildTargetResources() {
-    std::vector<WindowContext*> windows{&mainWindowContext()};
-    for (auto* window : openWindows()) if (&window->context() != &mainWindowContext()) windows.push_back(&window->context());
+    std::vector<WindowContext*> windows{&nonWindowContext()};
+    for (auto* window : openWindows()) windows.push_back(&trussc::internal::WindowRequestAccess::context(*window));
     std::erase_if(windows, [](const WindowContext* window) { return window->targetsClosed; });
     // Foreign submissions preserve CPU recordings. Re-evaluate all immediate
     // and raw queues on every retry before destroying any context.
@@ -2681,8 +3164,7 @@ int& appExitCode() {
 }
 
 MainLoopState& mainLoop() {
-    static MainLoopState state;
-    return state;
+    return currentWindowContext().loop;
 }
 
 SglBudget& sglBudget() {
@@ -2718,11 +3200,6 @@ float& farClipOverride() {
 bool& touchAsMouse() {
     static bool enabled = true;
     return enabled;
-}
-
-TouchMouseMapper& touchMouseMapper() {
-    static TouchMouseMapper mapper;
-    return mapper;
 }
 
 // Whether the setup callback ran in the current launch (#394).
@@ -2951,16 +3428,8 @@ std::atomic<size_t>& fboCount() {
     return count;
 }
 
-namespace {
-WindowContext* currentWindowCtxStorage = nullptr;
-} // anonymous namespace
-
-WindowContext*& currentWindowCtx() {
-    return currentWindowCtxStorage;
-}
-
 WindowContext& currentWindowContext() {
-    return currentWindowCtxStorage ? *currentWindowCtxStorage : mainWindowContext();
+    return currentWindowCtx() ? *currentWindowCtx() : nonWindowContext();
 }
 
 void parkWindowPass() {
@@ -3004,13 +3473,14 @@ CapturePrefixScope::CapturePrefixScope(CaptureSource source)
     submitCapturePrefix();
 }
 CapturePrefixScope::~CapturePrefixScope() noexcept {
+    if (frameworkShutdown()) return;
     if (!resume_ || &currentWindowContext() != window_ || window_->currentTarget != target_ || target_->activation != token_) return;
     try { ensureCurrentPass(); }
     catch (...) { reportTeardownFailure("capture target resumption"); }
 }
 
 void restoreWindowContext(WindowContext* previous) {
-    auto* incoming = previous ? previous : &mainWindowContext();
+    auto* incoming = previous ? previous : &nonWindowContext();
     if (&currentWindowContext() != incoming && sg_isvalid()) parkWindowPass();
     currentWindowCtx() = previous;
     // A closed owner can remain selected during exit/cleanup. Restoring that
@@ -3026,16 +3496,14 @@ void restoreWindowContext(WindowContext* previous) {
     if (sg_isvalid() && context.id) {
         sgl_tc_context_target_owned(context);
         sgl_set_context(context);
+    } else if (sg_isvalid()) {
+        // Zero is an invalid SGL handle (the default has its own nonzero id).
+        // Immediate colour, transform, pipeline and vertex calls then no-op
+        // instead of mutating the previously selected Window's recording.
+        sgl_set_context({0});
     }
 }
 
-// Window::applyPendingApp() adds to it and the platform teardown (host code)
-// removes from it. Leaked like the ones above: ~Window() calls the teardown, and a
-// Window an app keeps in a global is destroyed at exit.
-std::unordered_set<const App*>& attachedApps() {
-    static auto* apps = new std::unordered_set<const App*>();
-    return *apps;
-}
 
 } // namespace internal
 
@@ -3185,9 +3653,9 @@ SaveResult ScreenRecorder::State::startSource(Source src, const Fbo* fbo, int w,
     //   reads the window's framebuffer at its own size (see the captureWindow
     //   backends). Fbo-source recording is per-window everywhere (it reads the
     //   passed Fbo, not the swapchain).
-    afterFrameListener_ = events().afterFrame.listen([state = shared_from_this()]() { state->onAfterFrame(); });
+    afterFrameListener_ = internal::currentWindowContext().coreEvents->afterFrame.listen([state = shared_from_this()]() { state->onAfterFrame(); });
     // App::exit() may clear application subscriptions during this notification.
-    exitListener_ = internal::FrameworkEventAccess::listen(events().exit,
+    exitListener_ = internal::FrameworkEventAccess::listen(internal::currentWindowContext().coreEvents->exit,
         [state = shared_from_this()]() { state->stop(); }, EventPriority::AfterApp);
     return SaveResult::success();
 }
@@ -3319,3 +3787,39 @@ void ScreenRecorder::State::onAfterFrame() {
 }
 
 } // namespace trussc
+
+namespace trussc {
+void setWindowPosition(int x, int y) {
+    if (auto* w = internal::currentWindow()) internal::WindowRequestAccess::setPosition(*w, x, y, internal::WindowGeometryCall::GlobalPosition);
+}
+IVec2 getWindowPosition() {
+    if (auto* w = internal::currentWindow()) return w->getPosition();
+    return {};
+}
+}
+
+namespace trussc {
+void setWindowSizeLogical(int width, int height) {
+    internal::routeSetWindowSizeToWindow(width, height, internal::WindowGeometryCall::GlobalLogicalSize);
+}
+}
+
+namespace trussc::internal {
+WindowFullscreenPhase singleWindowFullscreenPhase() {
+    if constexpr (supportsSecondaryWindows()) return WindowFullscreenPhase::Windowed;
+    else return sapp_is_fullscreen() ? WindowFullscreenPhase::Fullscreen : WindowFullscreenPhase::Windowed;
+}
+void setSingleWindowFullscreen(bool full) {
+    if constexpr (!supportsSecondaryWindows())
+        if (full != sapp_is_fullscreen()) sapp_toggle_fullscreen();
+}
+bool ignoreFullscreenGeometry(WindowFullscreenPhase phase, WindowGeometryCall call, const std::string* title) {
+    const char* reason = windowGeometryIgnoredReason(phase);
+    if (!reason) return false;
+    auto notice = logNotice("Window");
+    notice << windowGeometryCallName(call);
+    if (title) notice << " on \"" << *title << "\"";
+    notice << reason;
+    return true;
+}
+}

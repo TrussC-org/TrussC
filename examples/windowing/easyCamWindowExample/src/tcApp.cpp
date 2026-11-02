@@ -8,8 +8,7 @@ void tcApp::setup() {
     ws.setTitle("easyCamWindowExample - second");
     second_ = createWindow(ws);
     if (second_) {
-        orbitApp_ = make_shared<OrbitApp>();
-        second_->setApp(orbitApp_);
+        second_->setApp<OrbitApp>();
     }
 }
 

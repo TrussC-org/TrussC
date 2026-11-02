@@ -258,6 +258,7 @@ void tests(sg_pipeline pip, Trace& trace) {
 } // namespace
 
 namespace trussc::internal {
+// This dummy-backend unit has no Runtime; supply its process predicate.
 void deferGpuDestroy(sg_buffer buffer) noexcept {
     if (buffer.id) pendingDestroys.push_back(buffer);
 }

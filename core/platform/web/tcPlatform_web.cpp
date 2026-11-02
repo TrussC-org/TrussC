@@ -121,12 +121,12 @@ void shutdownKeepScreenOn() noexcept {
 } // namespace internal
 #endif
 
-IVec2 getWindowPosition() {
+IVec2 internal::singleWindowPosition() {
     logWarning("Platform") << "getWindowPosition() is not supported on Web";
     return IVec2(-1, -1);
 }
 
-void setWindowPosition(int x, int y) {
+void internal::setSingleWindowPosition(int x, int y) {
     logWarning("Platform") << "setWindowPosition() is not supported on Web";
     (void)x; (void)y;
 }
@@ -136,10 +136,11 @@ void setWindowDecorated(bool decorated) {
     (void)decorated;
 }
 
-void setWindowSizeLogical(int width, int height) {
-    // Emscripten では canvas サイズを変更
-    // sokol_app が使用する canvas ID を指定
-    emscripten_set_canvas_element_size("canvas", width, height);
+void internal::setSingleWindowSizeLogical(int width, int height) {
+    // CSS layout owns the canvas. Changing only its drawable bypasses sokol's
+    // WGPU attachment rebuild and stretches WebGL output at devicePixelRatio.
+    (void)width; (void)height;
+    logNotice("Platform") << "setWindowSize() is not supported on Web; canvas size follows page layout";
 }
 
 fs::path getExecutablePath() {
@@ -217,7 +218,8 @@ static void screenshotDownloadError(int reason) {
 }
 
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    const auto dimensions = windowDimensions(ctx);
+    return {size_t(std::max(0, dimensions.fbWidth)), size_t(std::max(0, dimensions.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {

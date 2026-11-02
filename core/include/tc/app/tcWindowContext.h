@@ -8,8 +8,8 @@
 // — input, hover/scene, render-target routing, per-window frame count,
 // lighting/material/environment, and mutable shadow maps and slots —
 // lives in one WindowContext instead of scattered process globals.
-// currentWindowContext() == mainWindowContext() while only the main window is
-// running; each secondary native window owns its own context and the native
+// App-facing APIs resolve the App token or the sole open Window; each native
+// Window owns its own context and the native
 // layer switches internal::currentWindowCtx() while dispatching that window's
 // events and draw (see tcWindow.h / platform/*/tcWindow*).
 //
@@ -18,14 +18,15 @@
 // is included BEFORE the 3D headers (tcLight/tcMaterial/tcEnvironment), so the
 // lighting members below are held by forward-declared pointer / pointer-vector.
 //
-// Hot-reload note: mainWindowContext() is NON-inline (defined in tcGlobal.cpp)
+// Hot-reload note: windowApiContext() is NON-inline (defined in tcGlobal.cpp)
 // so Host and Guest share one instance — same pattern as events() and
-// getDefaultContext(). The RenderContext / CoreEvents pointers below are wired
-// lazily by those accessors, preserving their existing construction timing.
+// getDefaultContext(). Each Window prewires the RenderContext / CoreEvents
+// pointers below to its owned state before exposing those references.
 
 namespace trussc {
 
 class Node;
+class Window;
 class CoreEvents;
 class Shader;          // shader stack holds Shader* (defined in tc/gpu/tcShader.h)
 // 3D types whose state lives per-window (defined later, in the tc/3d headers).
@@ -68,8 +69,8 @@ static_assert(std::extent_v<decltype(ShadowStorage::colorAttachments)> == maxSha
 // foreign tick can park the pass without changing this owner's slots or maps.
 // ---------------------------------------------------------------------------
 struct ShadowSlotState {
-    // Slot assignment: `frame` (the per-window updateCount at the last reset)
-    // resets the counter on the first beginShadowPass() of each window tick;
+    // Slot assignment: `frame` (the base-equivalent resource key at last reset)
+    // resets the counter on the first beginShadowPass() after the key changes;
     // each pass claims the next layer in call order. Slot data persists across
     // frames so draws submitted before the first shadow pass keep the previous
     // frame's shadow state.
@@ -95,6 +96,25 @@ struct ShadowSlotState {
     float refDot[maxShadowLights]{};
 };
 
+struct WindowContext;
+// One admitted input frame. Nested native delivery installs its own frame;
+// App/tree continuations reuse the admitting frame rather than recapturing it.
+class MouseDispatchScope {
+public:
+    MouseDispatchScope(WindowContext&, int pressButton = -1, bool force = false) noexcept;
+    ~MouseDispatchScope() noexcept;
+    bool current(int button = -1) const noexcept;
+    void trackMotionButtons(int dragButton = -1) noexcept;
+    void beginRecovery(int button) noexcept;
+    MouseDispatchScope(const MouseDispatchScope&) = delete;
+private:
+    WindowContext& ctx_;
+    MouseDispatchScope* previous_;
+    uint64_t epochs_[SAPP_MAX_MOUSEBUTTONS] = {};
+    bool installed_;
+    unsigned int motionButtons_ = 0;
+};
+
 struct WindowContext {
     WindowContext();
     ~WindowContext();
@@ -108,6 +128,9 @@ struct WindowContext {
     WindowContext(const WindowContext&) = delete;
     WindowContext& operator=(const WindowContext&) = delete;
 
+    Window* hostWindow = nullptr;
+    bool processSwapchainWarned = false;
+
     // --- input state (written by the framework event loop) ---
     float mouseX = 0.0f;
     float mouseY = 0.0f;
@@ -117,6 +140,17 @@ struct WindowContext {
     bool mousePressed = false;
     // Outstanding presses are independent of the legacy current drag button.
     unsigned int pressedMouseButtons = 0;
+    unsigned int snapshotMouseButtons = 0;
+    // Scoped click ownership is consumed at converter entry, before reentrant callbacks.
+    const void* pendingMousePressOwner = nullptr;
+    const void* mousePressOwners[SAPP_MAX_MOUSEBUTTONS] = {};
+    uint64_t mousePressGenerations[SAPP_MAX_MOUSEBUTTONS] = {};
+    MouseDispatchScope* mouseDispatch = nullptr;
+    void admitMousePress(int button) noexcept;
+    bool pointerValid = false;
+    float pointerBasis = 1;
+    double pointerLogicalX = 0, pointerLogicalY = 0;
+    TouchMouseMapper touchMapper;
     // MOUSE_LEAVE parks mouseX/Y offscreen for hover clearing.
     float lastPointerX = 0.0f;
     float lastPointerY = 0.0f;
@@ -129,7 +163,7 @@ struct WindowContext {
     // them through lock() and keep the resulting shared_ptr for as long as
     // the node is used (e.g. across a handler that may remove it). A hot
     // reload host resets them before it unloads a guest
-    // (resetNodeRefsForUnload): releasing the last weak reference to a
+    // during its common ending: releasing the last weak reference to a
     // make_shared node runs code of the module that created it.
     std::weak_ptr<Node> rootNode;         // The running App (set by the framework)
     std::weak_ptr<Node> hoveredNode;      // Currently hovered node
@@ -162,14 +196,13 @@ struct WindowContext {
         lastSwapchainDrawable = nullptr;
         lastSwapchain.metal.current_drawable = nullptr;
     }
-    // --- window identity / swapchain source (Phase 1 seam) ---
-    // Main window: isMain=true, swapchain comes from sglue_swapchain() and
-    // dimensions from sapp. Secondary windows: the native layer sets isMain
-    // false, keeps fbWidth/fbHeight/dpiScale up to date, and provides the
-    // frame's swapchain through acquireSwapchain (called by
-    // the target coordinator; must return the SAME drawable
-    // for the duration of one window frame).
-    bool isMain = true;
+    // Host metadata is initialized before callbacks for every bound Window.
+    // Headless uses a separate non-window context. Drawable acquisition is lazy.
+    // Existing hidden-update behavior is constructor configuration until #997.
+    bool pauseUpdatesWhenHidden = false;
+    bool drawWhileHidden = true;
+    const void* deferredResponseTarget = nullptr;
+    // Published dimensions for bound windows; unbound main/headless reads native.
     int fbWidth = 0;
     int fbHeight = 0;
     float dpiScale = 1.0f;
@@ -179,12 +212,19 @@ struct WindowContext {
     // adapter supplies this; other backends have a shared device context.
     void (*activateNative)(void*) = nullptr;
 
-    // --- per-window frame count ---
-    // getFrameCount()/getUpdateCount() resolve through the current context.
-    // The MAIN window keeps using internal::updateFrameCount (bit-identical to
-    // the old global, and the value the hot-reload host mirrors); secondary
-    // windows advance THIS counter once per tick. See tcGlobal.cpp.
+    // Scheduler and counters live with the host-owned window, across App swaps.
+    MainLoopState loop;
     uint64_t updateCount = 0;
+    uint64_t drawCount = 0;
+    // Base secondary adapters advanced once after native admission, before update.
+    // Independent callbacks retain that key separately from public update counts.
+    uint64_t resourceTickCount = 0;
+    double tickDuration = 0.0;
+    bool tickActive = false;
+    bool suspended = false;
+    bool lifecycleSuspended = false;
+    bool visibilityPaused = false;
+    std::chrono::steady_clock::time_point tickTime{};
 
     // --- lighting / material / environment (per window) ---
     // Moved out of the tcLightingState.h process globals so each window has its
@@ -204,17 +244,9 @@ struct WindowContext {
     // getDeltaTime()/getFrameRate()/getFrameElapsedTime() resolve through the
     // current context, so a window ticking at 60 Hz next to a 120 Hz main
     // window sees its own real per-tick delta (measured wall-clock between THIS
-    // window's update calls; the nominal 1/updateFps in the main window's
+    // window's update calls; the nominal 1/updateFps in its
     // fixed-Hz update mode).
     double updateDeltaTime = 0.0;
-    // Secondary windows: their platform tick (windowTick) measures the delta
-    // with these, and records none of the frame time, update time or rate
-    // samples below. Left as is until the multi-window work that follows #219.
-    std::chrono::high_resolution_clock::time_point lastUpdateCallTime;
-    bool lastUpdateCallTimeInitialized = false;
-    // Main window: the main loop (beginMainUpdateCall in TrussC.h) measures
-    // the delta on the steady clock instead, so a wall-clock step can't skew
-    // the dt that Node timers count down with.
     std::chrono::steady_clock::time_point mainUpdateCallTime;
     bool mainUpdateCallTimeInitialized = false;
     // Uptime sampled once at the start of this window's frame (getFrameElapsedTime).
@@ -229,6 +261,8 @@ struct WindowContext {
     std::chrono::steady_clock::time_point updateTime{};
     bool inUpdate = false;
     bool fixedStepUpdate = false;
+    // Draw/event timing scopes are measured callbacks, not update calls.
+    bool inCallbackClock = false;
     // Measured update rate (getFrameRate): per frame, the wall time it covered
     // and the update steps it ran. Recorded by the loops, read-only in the getter.
     // Fixed-step loops record fractional steps (the time they consumed divided
@@ -239,36 +273,11 @@ struct WindowContext {
     double rateSteps[rateSampleCount] = {};
     int rateIndex = 0;
     int rateCount = 0;
-    // Frame rate measurement of a secondary window, which records no rate
-    // samples: getFrameRate() averages the last 10 deltas it read (10-frame
-    // moving average), as before.
-    double frameTimeBuffer[10] = {};
-    int frameTimeIndex = 0;
-    bool frameTimeBufferFilled = false;
-
-    // --- per-window frame-rate throttle (Window::setFps / global setFps) ---
-    // A secondary window's native display link always fires at the display's
-    // vsync; we cannot portably retune it, so a lower target rate is realised
-    // by SKIPPING display ticks via a time accumulator (windowThrottleShouldTick
-    // in the native windowTick, before beginFrame). throttleFps <= 0 = free-run
-    // at vsync, the default and the pre-Phase-2 behavior; a target at or above
-    // the display rate also runs every tick (half-tick tolerance). The MAIN
-    // window ignores this field entirely (its loop is driven by
-    // updateTargetFps/drawTargetFps in _frame_cb).
-    float throttleFps = 0.0f;
-    double throttleAccumulator = 0.0;
-    std::chrono::steady_clock::time_point throttleLastTime;
-    bool throttleLastTimeInitialized = false;
-
     // --- misc per-window ---
-    // Bound (security): OS clipboard text needs finite storage in the window backend. Overflow truncates or rejects oversized text, depending on the backend.
-    int clipboardSize = 65536;   // Clipboard buffer size (for overflow check)
     // Resolved absolute paths (download names on web) queued by saveScreenshot()
-    // on THIS window, drained
-    // right after present() while this context is current (so the capture reads
-    // back this window's lastSwapchainDrawable, not the main window's). The main
-    // window drains from the afterFrame listener in _setup_cb; each secondary
-    // window drains in its own windowTick. See TrussC.h drainPendingScreenshots().
+    // on THIS window. The common host tick drains after the complete afterFrame
+    // notification while this context and lastSwapchainDrawable are current,
+    // identically for main and secondaries. See TrussC.h drainPendingScreenshots().
     std::vector<std::filesystem::path> pendingScreenshotPaths;
     ScreenshotQueue asyncScreenshots;
 
@@ -289,9 +298,8 @@ struct WindowContext {
     bool                      strokeStarted = false;
     StrokeCap                 strokeStartCap{};   // Butt; real enum in tcRenderContext.h
 
-    // Wired lazily by getDefaultContext() / events() for the main window
-    // (preserves their pre-context construction timing); Phase 1 pre-wires
-    // these when constructing secondary-window contexts.
+    // Prewired by Window construction; the non-window fallback wires them
+    // explicitly before exposing its context.
     RenderContext* render = nullptr;
     CoreEvents* coreEvents = nullptr;
 
@@ -299,7 +307,7 @@ struct WindowContext {
     std::vector<EventListener> appEventListeners;
 };
 
-// Pipeline target for swapchain draws. The main window keeps sokol's defaults.
+// Pipeline format for an addressed Window swapchain.
 struct SwapchainTargetFormat {
     sg_pixel_format colorFormat;
     int sampleCount;
@@ -309,34 +317,35 @@ inline SwapchainTargetFormat swapchainTargetFormat(const WindowContext& ctx) {
     return {ctx.swapchainTarget.colorFormat, ctx.swapchainTarget.sampleCount};
 }
 
-// Main window context. Non-inline (tcGlobal.cpp) — Host/Guest share one.
-WindowContext& mainWindowContext();
+// Resolved API context. Non-inline (tcGlobal.cpp) so Host/Guest share it.
+WindowContext& windowApiContext();
+WindowContext* findWindowApiContext();
+class WindowContextScope {
+public:
+    explicit WindowContextScope(WindowContext*);
+    ~WindowContextScope() noexcept;
+    WindowContextScope(const WindowContextScope&) = delete;
+private:
+    WindowContext* previous_;
+    void* display_ = nullptr;
+    void* context_ = nullptr;
+    uintptr_t draw_ = 0, read_ = 0;
+    uint32_t drawWindow_ = 0, readWindow_ = 0, sgl_ = 0;
+};
 
-// Active context while dispatching a window's events / draw. Null = main. The
-// native window layer points it at a secondary window's context around that
-// window's tick. Non-inline (tcGlobal.cpp) like mainWindowContext(): a Windows
-// hot reload guest DLL would get its own copy of an inline variable, which
-// would stay null there and send the guest's drawing during a secondary
-// window's tick to the main window.
+// Active context while dispatching a window's events / draw. Null = no Window. The
+// native layer selects the addressed Window around its tick. Non-inline
+// storage ensures hot-reload guests observe the same physical selection.
 WindowContext*& currentWindowCtx();
 
 // The context drawing and input calls act on. Also non-inline: it reads
 // currentWindowCtx(), and in a single-window app it costs the one out-of-line
-// call its inline version always made (to mainWindowContext()).
+// call its inline version always made (to windowApiContext()).
 WindowContext& currentWindowContext();
 
 // Restore both window dispatch and its current target's actual SGL context.
-// A resize can replace the main context; nullptr still denotes the main window.
+// nullptr restores process context, without selecting any Window or surface.
 void restoreWindowContext(WindowContext* previous);
-
-// Drop the node references of every window context: hover, grab and
-// selection in the main window's context and each secondary window's, and
-// the main window's root. The hot reload host calls it before it unloads a
-// guest (tcHotReloadHost.h), so no weak reference to a node the guest created
-// outlives the guest. A secondary window's root stays: it names the App the
-// window itself holds (Window::setApp). Non-inline (tcGlobal.cpp): it walks
-// the window registry.
-void resetNodeRefsForUnload();
 
 // ---------------------------------------------------------------------------
 // Per-window frame timing. Non-inline (tcGlobal.cpp).
@@ -349,29 +358,41 @@ void sampleFrameTime(WindowContext& ctx);
 // fractional).
 void recordUpdateRateSample(WindowContext& ctx, double duration, double steps);
 
-// ---------------------------------------------------------------------------
-// Per-window frame-rate throttle (T1). Shared by every platform's windowTick.
-// Called once per native display tick BEFORE beginFrame: returns true to run
-// this window's update/draw, false to skip it cheaply (the display link keeps
-// firing at vsync — this only decides whether we do the frame's work).
-// Free-run (throttleFps <= 0) always ticks. Otherwise accumulate real elapsed
-// time and let one tick through per 1/fps interval, with a half-tick
-// tolerance so a target at or above the display rate runs every tick. Same
-// decision as the main loop's fixed-FPS draw skip (frameSkipShouldTick,
-// tcFrameTiming.h).
-// ---------------------------------------------------------------------------
-inline bool windowThrottleShouldTick(WindowContext& ctx) {
-    if (ctx.throttleFps <= 0.0f) return true;
-    auto now = std::chrono::steady_clock::now();
-    if (!ctx.throttleLastTimeInitialized) {
-        ctx.throttleLastTimeInitialized = true;
-        ctx.throttleLastTime = now;
-        return true;  // always run the first tick
-    }
-    double elapsed = std::chrono::duration<double>(now - ctx.throttleLastTime).count();
-    ctx.throttleLastTime = now;
-    return frameSkipShouldTick(ctx.throttleAccumulator, elapsed, 1.0 / ctx.throttleFps);
-}
+// Timers created from event/draw listeners use this window's measured clock,
+// never a stale fixed-step mark. Nested dispatch restores its caller's scope.
+class WindowCallbackTimeScope {
+    WindowContext& ctx_;
+    bool inUpdate_;
+    bool fixed_;
+    bool callback_;
+    std::chrono::steady_clock::time_point time_;
+public:
+    WindowCallbackTimeScope();
+    ~WindowCallbackTimeScope();
+};
+
+// One conversion for resize notifications and getters, preserving main's truncation.
+using WindowClock = std::chrono::steady_clock::time_point (*)();
+WindowClock& windowClockForTests();
+std::chrono::steady_clock::time_point windowClockNow();
+int framebufferToLogical(int pixels, float dpi);
+ResizeEventArgs framebufferResizeArgs(int width, int height, float dpi);
+float appSizeDpi(float dpi);
+// Framebuffer pointer position/motion to App units, following the global mode.
+float appPointerScale(float dpi);
+uint64_t resourceFrameKey(); // Base getFrameCount key for internal resource consumers.
+uint64_t deviceFrameCount(); // GPU upload guard; independent of window draw counts.
+
+// A deterministic clock / GPU seam used by the shared tick tests. Production
+// callers omit it and use the real frame and presentation path.
+struct WindowTickPresentation {
+    std::function<void()> begin;
+    std::function<bool()> present; // false: rendering/presentation was not admitted
+    std::function<void()> finish;
+};
+void observeWindowVisibility(WindowContext& ctx, sapp_event_type type);
+bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDuration,
+                   bool forceDraw = false, const WindowTickPresentation* presentation = nullptr, bool nativeDrawGated = false);
 
 // ---------------------------------------------------------------------------
 // Active render-target pipeline helpers (moved from tcRenderTarget.h — they

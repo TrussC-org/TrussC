@@ -8,29 +8,29 @@
 // Secondary windows: macOS / Windows / Linux; elsewhere W logs an error.
 //
 // Arrow keys move the second window with Window::setPosition(); F sends it
-// fullscreen. Both act on THAT window — the global setWindowPosition() /
-// setFullscreen() target the main one. For a projector or a video wall on a
-// second display, move the window onto that display FIRST and then go
-// fullscreen: fullscreen covers the display the window is currently on.
+// fullscreen. Both act on THAT window. Inside an App, setWindowPosition()
+// and setFullscreen() target that App's own window. For a projector or
+// a video wall on a second display, move the window onto that display FIRST and
+// then go fullscreen: fullscreen covers the display the window is currently on.
 
 #include "tcApp.h"
 
 void tcApp::setup() {
     logNotice("tcApp") << "Press W to open/close the second window";
-    fbo.allocate(320, 240);
+    fbo->allocate(320, 240);
 }
 
 void tcApp::update() {
     t += getDeltaTime();
 
     // Animate something into the shared FBO every main-window frame
-    fbo.begin();
+    fbo->begin();
     clear(0.1f, 0.1f, 0.15f);
     setColor(Color::fromHSB(fmodf(t * 0.1f, 1.0f), 0.7f, 1.0f));
     float cx = 160 + cosf(t * TAU * 0.25f) * 100;
     float cy = 120 + sinf(t * TAU * 0.4f) * 60;
     drawCircle(cx, cy, 40);
-    fbo.end();
+    fbo->end();
 }
 
 void tcApp::draw() {
@@ -49,7 +49,7 @@ void tcApp::draw() {
 
     // The same FBO also drawn here
     setColor(1.0f);
-    fbo.draw(20, 80, 320, 240);
+    fbo->draw(20, 80, 320, 240);
 
     // Main window's own mouse
     setColor(0.2f, 1.0f, 0.5f);
@@ -58,8 +58,8 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     // Drive the SECOND window from the main one. These are Window methods, so
-    // they act on that window; the global equivalents would move/fullscreen the
-    // main window instead.
+    // they act on that window; the global equivalents called here in the main
+    // App would move/fullscreen the main window instead.
     if (second && second->isOpen()) {
         const int step = 50;
         if (key == KEY_LEFT)  { secondPos.x -= step; second->setPosition(secondPos.x, secondPos.y); return; }
@@ -87,9 +87,7 @@ void tcApp::keyPressed(int key) {
         second = createWindow(ws);
         logNotice("tcApp") << (second ? "second window created" : "createWindow failed");
         if (second) {
-            subApp = make_shared<SubApp>();
-            subApp->sharedFbo = &fbo;
-            second->setApp(subApp);
+            second->setApp<SubApp>(fbo);
             // Place it where this app thinks it is, so the arrow keys and the
             // window agree from the first press.
             second->setPosition(secondPos.x, secondPos.y);

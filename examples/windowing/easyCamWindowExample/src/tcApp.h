@@ -42,6 +42,5 @@ public:
 
 private:
     shared_ptr<Window> second_;
-    shared_ptr<OrbitApp> orbitApp_;
     EasyCam mainCam_;
 };

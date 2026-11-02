@@ -22,7 +22,22 @@ void check(const char* name, bool ok) {
 }
 } // namespace
 
-TC_CORE_TEST_MAIN() {
+struct DpiApp : App {
+void setup() override {
+    auto health = [](const json& arguments) {
+        const auto envelope = json::parse(mcp::internal::Server::instance().processMessage(
+            json{{"jsonrpc", "2.0"}, {"id", 1}, {"method", "tools/call"},
+                 {"params", {{"name", "tc_get_health"}, {"arguments", arguments}}}}.dump()));
+        return json::parse(envelope.at("result").at("content").at(0).at("text").get<std::string>());
+    };
+    check("headless health omission reads virtual counters", health(json::object()).value("status", "") == "ok");
+    for (int id : {0, 123}) {
+        const auto response = health({{"window", id}});
+        check("headless health refuses explicit Window IDs with the empty ID list",
+              response.value("status", "") == "error" && response.at("windows").empty());
+    }
+    check("headless health starts no Window, device or drawing", internal::openWindows().empty() &&
+          !sg_isvalid() && getDrawCount() == 0);
     const float dpi = getDpiScale();
     std::printf("headless getDpiScale() = %f\n", dpi);
 #if defined(__APPLE__) && TARGET_OS_OSX
@@ -47,5 +62,12 @@ TC_CORE_TEST_MAIN() {
           small.getAtlas(0) && large.getAtlas(0) && small.getAtlas(0) != large.getAtlas(0));
     check("the larger size has the larger line height", small.getLineHeight() < large.getLineHeight());
     fs::remove_all(dir);
+    exitApp();
+}
+};
+TC_CORE_TEST_MAIN() {
+    HeadlessSettings settings;
+    settings.targetFps = 0;
+    runHeadlessApp<DpiApp>(settings);
     return failures ? 1 : 0;
 }

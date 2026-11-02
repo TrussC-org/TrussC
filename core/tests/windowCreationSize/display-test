@@ -1,0 +1,6 @@
+{test} --display pixels 640 400
+{test} --display pixels 480 320
+{test} --display pixels 1001 667
+{test} --display logical 640 400
+{test} --display logical 480 320
+{test} --display logical 1001 667

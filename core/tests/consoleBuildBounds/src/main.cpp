@@ -115,6 +115,13 @@ void linesAndQueue() {
     // Accumulated counters are not reset by warning delivery or querying.
     check(channel.rejectedLines.load() == beforeLines + 1 && channel.droppedCommands.load() == beforeDrops + 4,
           "warning delivery preserves cumulative stdin totals");
+    channel.clear();
+    channel.rejectLine(); channel.sendRaw(std::string(Channel::lineBytes + 1, 'x'));
+    channel.sendRaw("dropped", +[](void*, size_t) -> void* { return nullptr; });
+    channel.reportLoss(); channel.reportLoss();
+    check(warnings == 4, "drained stdin stores re-arm once per new overflow episode");
+    channel.clear(); channel.reportLoss();
+    check(warnings == 4, "historical losses do not warn after drain");
 }
 
 void capture() {

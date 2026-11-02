@@ -305,6 +305,10 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/apt-deps
 
+      - name: Install xrdb for native DPI checks
+        if: runner.os == 'Linux' && matrix.shard == 1
+        run: sudo apt-get install -y x11-xserver-utils
+
       # Windows: Setup MSVC environment (provides cl.exe, ninja, etc. in PATH)
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
@@ -368,6 +372,13 @@ jobs:
         if: runner.os == 'Linux' && matrix.shard == 1
         shell: bash
         run: python3 -m unittest discover -s tools/tests -p test_upstream_check.py -v
+
+      # Window pixel-size dispatch probes compile against the X11 headers that
+      # the Linux dependencies above install (#1007).
+      - name: window pixel size regression checks
+        if: runner.os == 'Linux' && matrix.shard == 1
+        shell: bash
+        run: python3 tools/tests/test_window_pixel_size.py -v
 
       # Compile-and-link canary: every documented core API + the repo-contained
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every

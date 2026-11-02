@@ -56,6 +56,7 @@ struct ResourceLoadState : std::enable_shared_from_this<ResourceLoadState> {
     using Target = std::function<void(ResourceLoadState&)>;
     std::atomic<bool> cancelled{false};
     std::weak_ptr<std::atomic<bool>> run;
+    std::weak_ptr<AppOwner> appOwner;
     std::weak_ptr<Target> apply;
     EventSnapshotDelivery<LoadResult> event;
     LoadResult result;
@@ -116,9 +117,13 @@ public:
         cancel();
         auto state = std::make_shared<State>();
         state->run = appRunToken();
-        state->stop = registerResourceStop([weak = std::weak_ptr<State>(state)] {
+        state->appOwner = currentAppOwner();
+        auto cancel = [weak = std::weak_ptr<State>(state)] {
             if (auto live = weak.lock()) live->cancel();
-        });
+        };
+        state->stop = registerResourceStop(cancel);
+        // Completion checks the originating App run token; completed loads
+        // leave no cancellation registration on that App.
         event_ = EventSnapshotDelivery<LoadResult>::bind(event, gate_);
         state->event.target = event_;
         apply_ = std::make_shared<ResourceLoadState::Target>(

@@ -49,8 +49,8 @@ void tcApp::draw() {
 ImGui renders on top of all TrussC content automatically via the `onRender` event.
 Teardown is automatic too — the addon listens to the framework's exit event and
 shuts itself down when the app closes, so there is nothing to call in `cleanup()`.
-With hot reload, the same teardown runs on `events().hotReloadUnload` before
-each reload, and the new build sets ImGui up again in its `setup()`.
+With hot reload, the same teardown runs on its App’s `events().hotReloadUnload` before
+that generation reloads, and the new build sets ImGui up again in its `setup()`.
 
 ## Vertex and index buffers / 頂点・インデックスバッファ / 정점·인덱스 버퍼
 
@@ -148,7 +148,10 @@ A context may begin once per Sokol frame; rendering UI into another target
 before present requires a separate manager.
 
 Window `imguiBegin()` / `imguiEnd()` retain deferred `onRender` timing and use
-`getDpiScale()` independently of `pixelPerfect`. `imguiBegin()` returns `false`
+`getDpiScale()` independently of `pixelPerfect`. In v0.8.0, `pixelPerfect` is
+process-wide and comes from the launch Window settings. Cursor shape, visibility
+and custom images are also app-wide. A Window ImGui context changes the cursor
+only while the pointer is inside its own Window; an Fbo context leaves it alone. `imguiBegin()` returns `false`
 on refusal. Submit widgets only on success, and pair every attempt, including
 a refused one, with `imguiEnd()`:
 
@@ -222,8 +225,9 @@ void tcApp::setup() {
 | `tcx_imgui_checkbox` | `label`, `value`, `window`, `windowId` (optional) | Toggle or set a checkbox |
 
 `window` is the ImGui window (panel) name. `windowId` is the OS window as
-`tc_list_windows` numbers it (0 = main); you only need it when the same panel
-exists in two OS windows.
+the positive native ID returned by `tc_list_windows`. Actions may omit it only
+when exactly one Window is open; zero is not an alias. Widget listing may omit
+the filter to list every context. Closed Window IDs never select a new Window.
 
 These tools use ImGui's Test Engine hooks plus a small patch to the bundled
 Dear ImGui that hands each value widget's variable to tcxImGui. See
@@ -235,7 +239,7 @@ Each value widget in `tcx_imgui_get_widgets` carries `widget`, `valueType` and
 `value`, plus `touched` (changed by hand, see below):
 
 ```json
-{"label": "speed", "window": "Params", "windowId": 0, "type": "input",
+{"label": "speed", "window": "Params", "windowId": 101, "type": "input",
  "widget": "slider", "valueType": "float", "value": 0.35, "touched": true, "rect": {...}}
 ```
 
@@ -282,7 +286,7 @@ when the widget returns, and checked again when the widget runs in the next
 frame.
 
 ```json
-{"label": "position", "window": "Params", "windowId": 0, "status": "ok",
+{"label": "position", "window": "Params", "windowId": 101, "status": "ok",
  "widget": "drag", "valueType": "float", "value": [0.5, -1, 2.25]}
 ```
 
@@ -355,9 +359,9 @@ the code, and calls `tcx_imgui_reset_touched`.
 ```json
 {"status": "ok", "count": 2,
  "widgets": [
-   {"label": "speed", "window": "Params", "windowId": 0, "widget": "slider",
+   {"label": "speed", "window": "Params", "windowId": 101, "widget": "slider",
     "valueType": "float", "value": 0.35, "visible": true},
-   {"label": "tint", "window": "Params", "windowId": 0, "widget": "color",
+   {"label": "tint", "window": "Params", "windowId": 101, "widget": "color",
     "valueType": "color", "value": [1, 0.4, 0.2, 1], "colorSpace": "rgb", "visible": false}
  ],
  "inspector": []}
@@ -406,7 +410,7 @@ tcxImGui connects to TrussC via these core events:
 
 - **`events().rawEvent`** (priority: BeforeApp) — Routes input events to ImGui
 - **`events().onRender`** (priority: 1000) — Renders ImGui after all sokol_gl content is flushed
-- **the main window's `events().afterFrame`** (priority: BeforeApp) — Answers a
+- **Runtime maintenance** (before MCP expiry, independent of drawing) — Answers a
   `tcx_imgui_input` whose check frame did not come in time (see
   [Setting values](#setting-values)), before the MCP server's own timeout
 
@@ -425,6 +429,21 @@ C++ OOM recovery requires Release builds, or iterator debugging off (`_ITERATOR_
 ## License
 
 Dear ImGui is licensed under the MIT License. See [imgui/LICENSE.txt](https://github.com/ocornut/imgui/blob/master/LICENSE.txt).
+
+App-owned registrations
+-----------------------
+
+Registrations created in an App constructor, callback or owned completion follow that App's lifetime, including lazy addon initialization. Replacing or removing the App retires its listeners and tools while other Apps keep running. Window teardown detaches the App, sends Window exit notifications around `App::exit()`, disconnects audio and waits for active audio callbacks, then cleans up the App before disposing native/GPU resources. Create window content with `window->setApp<Scene>()`; use `destroyApp()` to leave it empty.
+
+App-tied code, including addon state owned by an App, uses `events()`;
+process-wide observers use `runtime().events()`. The manager keeps input/render hooks on its addressed Window, settles widget
+deadlines from Runtime maintenance before MCP reply expiry even without a
+frame, and subscribes to its App’s `events().hotReloadUnload` for generation
+teardown. Only Apps in the retiring generation receive that notification;
+other Apps keep their ImGui state. The App owner token retires registrations
+on swap or close.
+
+Runtime owns the process `hotReloadUnload` subscription and maintenance tick. Per-App hooks belong on that App’s `events().hotReloadUnload`; they retire with its token. Runtime notifies before App ending at the outer main-thread reload safe point. Hot reload supports one Window; opening a second or later Window logs a Warning and behaviour is not guaranteed. Stop App-owned threads, timers and async work in `hotReloadUnload`; reload does not wait for or exclude them. Ending App A does not retire same-generation App B; generation retirement removes generation registrations after its Apps. Old DLL/dylib/.so modules remain pinned for process lifetime, including retained callback/control-block storage. Maintenance runs without relying on a drawing Window.
 
 ## MCP edits
 

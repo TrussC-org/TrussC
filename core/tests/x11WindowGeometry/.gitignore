@@ -1,0 +1,4 @@
+# Standalone CMake test: keep CMakeLists.txt (it is committed, unlike trusscli
+# projects). Only ignore build output.
+build/
+build-*/

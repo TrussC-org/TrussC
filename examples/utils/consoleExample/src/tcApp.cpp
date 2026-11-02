@@ -16,7 +16,7 @@ bool parseNumber(const string& text, float& value) {
 
 void tcApp::setup() {
     // Listen to console events (retain the listener)
-    consoleListener_ = events().console.listen([this](ConsoleEventArgs& e) {
+    consoleListener_ = runtime().events().console.listen([this](ConsoleEventArgs& e) {
         // Add to log (keep latest 10 entries)
         commandLog_.push_back(e.raw);
         if (commandLog_.size() > 10) {

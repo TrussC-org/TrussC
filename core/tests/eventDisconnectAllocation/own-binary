@@ -1,1 +1,1 @@
-Replaces global operator new/delete to inject one Nth-allocation failure during listener removal, registration, secondary App swaps and exhaustive close-sequence sweeps.
+Replaces global operator new/delete to inject one Nth-allocation failure during listener removal, registration and secondary App swaps; ordinary close teardown has a small exception-isolation smoke test.

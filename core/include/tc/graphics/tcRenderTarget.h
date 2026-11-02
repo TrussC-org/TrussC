@@ -16,6 +16,12 @@
 
 namespace trussc { namespace internal {
 
+// Host-owned, atomic and readable through static destruction. Late Window
+// destruction stops before context, registry, logger or GPU access.
+bool frameworkShutdown() noexcept;
+void beginFrameworkLifetime() noexcept;
+void endFrameworkLifetime() noexcept;
+
 // Always exported: Debug consumers can link against a Release core.
 std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx();
 
@@ -364,7 +370,8 @@ struct TargetStackEntry {
 uint64_t pushTarget(RenderTarget& target, bool prepareOnly = false);
 bool startPreparedTarget(RenderTarget& target, uint64_t token);
 bool popTarget(RenderTarget& target, uint64_t token);
-void ensureCurrentPass();
+bool ensureCurrentPass();
+bool admitRootSwapchainPass();
 void parkWindowPass();
 void submitCapturePrefix();
 // Window: a capture of the current window's pixels; even a never-opened pass

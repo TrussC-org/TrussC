@@ -24,9 +24,7 @@ void tcApp::setup() {
         return;
     }
     second_->setClearColor(Color(0.10f, 0.20f, 0.72f));   // BLUE background
-    subApp_ = make_shared<SubApp>();
-    subApp_->self = second_.get();
-    second_->setApp(subApp_);
+    second_->setApp<SubApp>();
     logNotice("tcApp") << "secondary window created";
 }
 

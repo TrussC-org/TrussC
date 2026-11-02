@@ -190,12 +190,12 @@ void setOrientation(Orientation mask) {
     if (attached) activity->vm->DetachCurrentThread();
 }
 
-IVec2 getWindowPosition() {
+IVec2 internal::singleWindowPosition() {
     logWarning("Platform") << "getWindowPosition() is not supported on Android";
     return IVec2(-1, -1);
 }
 
-void setWindowPosition(int x, int y) {
+void internal::setSingleWindowPosition(int x, int y) {
     logWarning("Platform") << "setWindowPosition() is not supported on Android";
     (void)x; (void)y;
 }
@@ -205,10 +205,11 @@ void setWindowDecorated(bool decorated) {
     (void)decorated;
 }
 
-void setWindowSizeLogical(int width, int height) {
+void internal::setSingleWindowSizeLogical(int width, int height) {
     // Android apps are fullscreen — window size is determined by the device
     (void)width;
     (void)height;
+    logNotice("Platform") << "setWindowSize() is not supported on Android; the window fills the screen";
 }
 
 fs::path getExecutablePath() {
@@ -253,7 +254,8 @@ fs::path internal::platformAppBundlePath() {
 // ---------------------------------------------------------------------------
 
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    const auto dimensions = windowDimensions(ctx);
+    return {size_t(std::max(0, dimensions.fbWidth)), size_t(std::max(0, dimensions.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {

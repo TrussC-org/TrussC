@@ -58,38 +58,38 @@ public:
 };
 
 // Dispatch driver: a headless Window is the friend-access doorway into
-// Node's private dispatch functions (its ToTree helpers are public and the
-// platform glue uses the same path).
+// Node's private dispatch functions. The internal Window accessor and
+// platform glue use the same path.
 class Driver {
 public:
     Driver() {
         prev_ = tc::internal::currentWindowCtx();
-        tc::internal::currentWindowCtx() = &win_.context();   // grab state lands here
+        tc::internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(win_);   // grab state lands here
     }
     ~Driver() {
-        win_.context().rootNode.reset();
+        trussc::internal::WindowRequestAccess::context(win_).rootNode.reset();
         tc::internal::currentWindowCtx() = prev_;
     }
-    void setRoot(const Node::Ptr& root) { win_.context().rootNode = root; }
-    tc::internal::WindowContext& ctx() { return win_.context(); }
+    void setRoot(const Node::Ptr& root) { trussc::internal::WindowRequestAccess::context(win_).rootNode = root; }
+    tc::internal::WindowContext& ctx() { return trussc::internal::WindowRequestAccess::context(win_); }
 
     void press(float x, float y, int button = 0) {
         MouseEventArgs e;
         e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = button;
         e.syncLegacy();
-        win_.dispatchMousePressToTree(e);
+        trussc::internal::WindowRequestAccess::dispatchMousePressToTree(win_, e);
     }
     void release(float x, float y, int button = 0) {
         MouseEventArgs e;
         e.globalPos = Vec2(x, y); e.pos = e.globalPos; e.button = button;
         e.syncLegacy();
-        win_.dispatchMouseReleaseToTree(e);
+        trussc::internal::WindowRequestAccess::dispatchMouseReleaseToTree(win_, e);
     }
     void move(float x, float y) {
         internal::MouseEventRaw e;
         e.globalPos = Vec2(x, y); e.pos = e.globalPos;
         e.globalDelta = Vec2(1, 0); e.delta = e.globalDelta;
-        win_.dispatchMouseMoveToTree(e);
+        trussc::internal::WindowRequestAccess::dispatchMouseMoveToTree(win_, e);
     }
 private:
     Window win_;
@@ -103,11 +103,11 @@ TC_CORE_TEST_MAIN() {
 
     // Tree: root(0,0,800,600) > panel(100,100,400,300) > label(50,50,100,40)
     // (positions are parent-relative; Probe enables events in its ctor)
-    auto root = make_shared<Probe>(false);
+    auto root = std::make_shared<Probe>(false);
     root->setPos(0, 0); root->setSize(800, 600);
-    auto panel = make_shared<Probe>(true);    // consumes (a widget)
+    auto panel = std::make_shared<Probe>(true);    // consumes (a widget)
     panel->setPos(100, 100); panel->setSize(400, 300);
-    auto label = make_shared<Probe>(false);   // does NOT consume (decorative)
+    auto label = std::make_shared<Probe>(false);   // does NOT consume (decorative)
     label->setPos(50, 50); label->setSize(100, 40);
     root->addChild(panel);
     panel->addChild(label);

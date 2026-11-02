@@ -87,9 +87,17 @@ struct StatusEntry {
 template <class Entry>
 inline void hookOwnerCleanup(std::vector<Entry>& reg) {
     mcp::internal::ownerCleanupHooks().push_back([&reg](const void* owner) {
-        reg.erase(std::remove_if(reg.begin(), reg.end(),
-                                 [owner](const Entry& e) { return e.owner == owner; }),
-                  reg.end());
+        // One match at a time: move it out, close the gap, and only then let
+        // its getter die. A getter's capture can run reentrant retirement code,
+        // so no iterator is held across the destruction and the scan restarts.
+        // Allocation-free: nothing here can fail halfway.
+        for (;;) {
+            auto it = std::find_if(reg.begin(), reg.end(),
+                                   [owner](const Entry& e) { return e.owner == owner; });
+            if (it == reg.end()) break;
+            Entry retired = std::move(*it);
+            reg.erase(it);
+        }   // retired's captures destroyed here
     });
 }
 

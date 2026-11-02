@@ -47,6 +47,7 @@ void operator delete(void* ptr, const std::nothrow_t&) noexcept { std::free(ptr)
 void operator delete(void* ptr) noexcept { std::free(ptr); }
 void operator delete(void* ptr, std::size_t) noexcept { std::free(ptr); }
 namespace {
+internal::WindowContext* renderFixture = nullptr;
 struct LateShader : Shader {
     sg_pipeline selection() { return pipelineForCurrentTarget(); }
 };
@@ -81,9 +82,23 @@ void submit(Shader& shader) {
     ShaderVertex vertices[3] = {};
     shader.submitVertices(vertices, 3, PrimitiveType::Triangles);
 }
+// Swapchain probes select an explicit Window. Bare contexts are reserved for
+// explicit offscreen/teardown probes, matching the production process contract.
+static uint32_t nextDrawingWindowId = 600;
+struct DrawingWindowState {
+    Window owner;
+    internal::WindowContext& context = trussc::internal::WindowRequestAccess::context(owner);
+    std::shared_ptr<App> queryCandidate = internal::makeConstructedAppAt<App>(&context);
+    internal::AppOwnerScope queryScope{internal::appOwner(*queryCandidate)};
+    DrawingWindowState() { internal::WindowRequestAccess::bindForTests(owner, ++nextDrawingWindowId); }
+};
 sg_swapchain dummySwapchain(void*) {
     sg_swapchain result = {};
-    result.width = 256; result.height = 192;
+    const auto& context = internal::currentWindowContext();
+    if (context.hostWindow)
+        internal::WindowRequestAccess::binding(*context.hostWindow).metadata.dpi_scale = context.dpiScale;
+    result.width = context.fbWidth > 0 ? context.fbWidth : 256;
+    result.height = context.fbHeight > 0 ? context.fbHeight : 192;
     result.color_format = SG_PIXELFORMAT_RGBA8;
     result.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
     result.sample_count = 1;
@@ -91,7 +106,7 @@ sg_swapchain dummySwapchain(void*) {
 }
 bool probe(bool parentFlush) {
     submittedDraws = 0;
-    internal::WindowContext window;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
     window.swapchainTarget.resources().context = sgl_default_context();
@@ -120,7 +135,7 @@ bool probe(bool parentFlush) {
     return layers && reset && submittedDraws == 2;
 }
 bool leaseFailureProbe() {
-    internal::WindowContext window;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
     window.swapchainTarget.resources().context = sgl_default_context();
@@ -153,7 +168,7 @@ bool leaseFailureProbe() {
 }
 
 bool storePolicyProbe() {
-    internal::WindowContext window;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
     window.swapchainTarget.resources().context = sgl_default_context();
@@ -162,7 +177,7 @@ bool storePolicyProbe() {
     present();
     const bool finalTail = passes.size() == 1 && passes[0].action.depth.store_action == SG_STOREACTION_DONTCARE && commits == before+1;
     Fbo child; child.allocate(8,8,4);
-    auto callback = events().onRender.listen([&] { child.begin(0,0,0); child.end(); });
+    auto callback = window.coreEvents->onRender.listen([&] { child.begin(0,0,0); child.end(); });
     passes.clear();
     present();
     const bool resumable = passes.size() == 3 && passes[0].action.depth.store_action == SG_STOREACTION_STORE &&
@@ -175,7 +190,7 @@ bool storePolicyProbe() {
 }
 
 bool inheritedPipelineProbe() {
-    internal::WindowContext window;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
     window.swapchainTarget.resources().context = sgl_default_context();
@@ -205,7 +220,7 @@ bool inheritedPipelineProbe() {
 }
 
 bool replayFailureProbe(bool destructor) {
-    internal::WindowContext window;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
     window.swapchainTarget.resources().context = sgl_default_context();
@@ -251,12 +266,20 @@ bool replayFailureProbe(bool destructor) {
 
 bool teardownProbe(bool explicitTeardown, bool otherCurrent) {
     auto* previous = internal::currentWindowCtx();
-    internal::WindowContext other;
+    DrawingWindowState otherState; internal::WindowContext& other = otherState.context;
     auto* window = new internal::WindowContext;
     internal::currentWindowCtx() = window;
     window->swapchainTarget.resources().context = sgl_default_context();
     window->acquireSwapchain = dummySwapchain;
     Fbo fbo; fbo.allocate(16,16);
+    // This probe deletes a bare WindowContext directly. Give its root an
+    // explicit offscreen attachment rather than claiming a window swapchain.
+    auto& root = window->swapchainTarget;
+    root.passKind = internal::TargetPassKind::Fixed;
+    root.isFbo = true; root.width = root.height = 16;
+    root.sampleCount = 1; root.colorFormat = SG_PIXELFORMAT_RGBA8;
+    root.hasDepth = false; root.depthFormat = SG_PIXELFORMAT_NONE;
+    root.binding.attachments.colors[0] = fbo.getTexture().getAttachmentView();
     internal::ensureCurrentPass();
     Shader shader; shader.load(descriptor); shader.begin();
     auto& target = window->shadow.target;
@@ -291,7 +314,7 @@ bool teardownProbe(bool explicitTeardown, bool otherCurrent) {
 }
 
 bool pipelineGenerationProbe() {
-    auto& window = internal::mainWindowContext();
+    auto& window = (*renderFixture);
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
     auto& target = window.swapchainTarget;
@@ -344,12 +367,11 @@ bool pipelineGenerationProbe() {
 // Adversarial review: recording on a lazy bottom target must survive both
 // rebuild paths, and memory release must follow the rebuilt window context.
 bool lazyResizeProbe(bool dimensions) {
-    auto& window = internal::mainWindowContext();
+    auto& window = (*renderFixture);
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
     auto& target = window.swapchainTarget;
-    const bool wasMain = window.isMain;
-    window.isMain = false; window.fbWidth = 256; window.fbHeight = 192;
+    window.fbWidth = 256; window.fbHeight = 192;
     window.acquireSwapchain = dummySwapchain;
     internal::prepareWindowTarget();
     const auto before = target.resources().context.id;
@@ -390,7 +412,6 @@ bool lazyResizeProbe(bool dimensions) {
         dimensions,grew,initialVertices,grownVertices,actual->vertices.cap,actual->commands.cap,actual->uniforms.cap,actual->vbuf.id);
     ok &= grew && released;
     internal::resizeSgl(oldVertices,oldCommands);
-    window.isMain = wasMain;
     internal::currentWindowCtx() = previous;
     return ok;
 }
@@ -399,13 +420,11 @@ bool lazyResizeProbe(bool dimensions) {
 // global rebuild guard sees both windows, without creating a native window.
 struct DummyWindowPair {
     Window secondary;
-    internal::WindowContext& main = internal::mainWindowContext();
+    internal::WindowContext& main = (*renderFixture);
     internal::WindowContext* previous = internal::currentWindowCtx();
-    bool wasMain = main.isMain;
     DummyWindowPair() {
-        secondary.native_ = this; // isOpen() only; never passed to native APIs.
-        main.isMain = false;
-        for (auto* window : {&main, &secondary.context()}) {
+        secondary.native_ = this; internal::WindowRequestAccess::bindForTests(secondary, 202); // isOpen() only; never passed to native APIs.
+        for (auto* window : {&main, &trussc::internal::WindowRequestAccess::context(secondary)}) {
             window->fbWidth = 256; window->fbHeight = 192;
             window->acquireSwapchain = dummySwapchain;
             internal::currentWindowCtx() = window;
@@ -414,10 +433,9 @@ struct DummyWindowPair {
         internal::restoreWindowContext(previous);
     }
     ~DummyWindowPair() {
-        secondary.native_ = nullptr;
-        secondary.context().teardownTargets();
-        secondary.context().swapchainTarget.resources().release();
-        main.isMain = wasMain;
+        secondary.native_ = nullptr; internal::WindowRequestAccess::unbind(secondary);
+        trussc::internal::WindowRequestAccess::context(secondary).teardownTargets();
+        trussc::internal::WindowRequestAccess::context(secondary).swapchainTarget.resources().release();
         internal::restoreWindowContext(previous);
     }
 };
@@ -429,7 +447,7 @@ void recordTriangle() {
 
 bool windowTickRestoreProbe(bool dimensions) {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     if (dimensions) {
         windows.main.fbWidth = 320; windows.main.fbHeight = 240;
         internal::prepareWindowTarget();
@@ -439,7 +457,7 @@ bool windowTickRestoreProbe(bool dimensions) {
     // Mirror a secondary tick, including the exact helper used by all native
     // adapters. The main recording happens AFTER that tick's global commit.
     auto* previous = internal::currentWindowCtx();
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     sgl_defaults(); beginFrame(); present();
     internal::restoreWindowContext(previous);
     const bool restored = sgl_get_context().id == mainContext.id;
@@ -453,7 +471,7 @@ bool windowTickRestoreProbe(bool dimensions) {
     // A boundary may also return to a parked Fbo, rather than a bottom target.
     Fbo fbo; fbo.allocate(8,8); fbo.begin(0,0,0);
     const auto fboContext = internal::currentTarget().resources().context;
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     internal::restoreWindowContext(previous);
     ok &= sgl_get_context().id == fboContext.id;
     fbo.end(); present();
@@ -463,7 +481,7 @@ bool windowTickRestoreProbe(bool dimensions) {
 // Foreign commits preserve every unconsumed recording and defer exact resize requests.
 bool interleavedRewindProbe(bool resize, bool raw) {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     auto& target = windows.main.swapchainTarget;
     const auto before = target.resources().context;
     const auto generation = target.resources().generation;
@@ -475,7 +493,7 @@ bool interleavedRewindProbe(bool resize, bool raw) {
         shader.begin(); submit(shader); shader.end();
         ok &= !target.deferredShaderDraws.empty();
     }
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     if (resize) {
         internal::resizeSgl(2048,333);
         // A repeated request must retain the latest explicit capacities.
@@ -488,7 +506,7 @@ bool interleavedRewindProbe(bool resize, bool raw) {
     present(); // B completes only B.
     const bool rewound = !sgl_tc_context_has_pending_draws(before);
     ok &= !rewound;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     if (resize) {
         beginFrame(); // Rebuild now, unless A still owns a raw deferred draw.
         ok &= internal::sglBudget().pendingResize == 3072 && target.resources().context.id == before.id && target.resources().generation == generation;
@@ -511,7 +529,7 @@ bool interleavedRewindProbe(bool resize, bool raw) {
 // unrelated buffer update. No replacement scheduler/reset helper is involved.
 bool noDrawParityProbe(bool upload, bool raw) {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     present();
     Shader shader;
     bool ok = shader.load(descriptor);
@@ -543,7 +561,7 @@ bool noDrawParityProbe(bool upload, bool raw) {
 // valid dummy pipelines to their real captured-command replay paths instead.
 bool rawKindsLifetimeProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     present();
     auto& target = windows.main.swapchainTarget;
     sg_shader_desc pbrDesc = {}, pointDesc = {};
@@ -582,9 +600,9 @@ bool rawKindsLifetimeProbe() {
     pbr.generation.reset(); point.generation.reset(); generation.reset();
     internal::deferGpuDestroy(buffer);
     internal::endGpuFrame(); // an own upload/completion does not consume raw draws
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     for (int i = 0; i < 3; ++i) present();
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     ok &= !lifetime.expired() && target.deferredPbrDraws.size() == 1 && target.deferredPointDraws.size() == 1 &&
         sg_query_buffer_state(buffer) == SG_RESOURCESTATE_VALID;
     if (ok) {
@@ -607,7 +625,7 @@ bool rawKindsLifetimeProbe() {
 
 bool parkedWindowProbe(bool fboTop) {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     Fbo fbo;
     if (fboTop) { fbo.allocate(16,16,4); fbo.begin(0,0,0); }
     internal::ensureCurrentPass();
@@ -620,11 +638,11 @@ bool parkedWindowProbe(bool fboTop) {
     shader.begin(); submit(shader); recordTriangle();
     const auto stackSize = windows.main.targetStack.size();
     const auto startDraws = submittedDraws;
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     ok &= !target.inPass && target.activation == token && target.openShaderScopes == 1 &&
         windows.main.targetStack.size() == stackSize && submittedDraws == startDraws + 2;
     for (int i = 0; i < 3; ++i) present();
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     ok &= !target.inPass && sgl_get_context().id == context.id;
     const auto beforePrefix = commits;
     internal::submitCapturePrefix();
@@ -646,7 +664,7 @@ bool parkedWindowProbe(bool fboTop) {
 // match the parked target when shadow-slot replay begins.
 bool shadowReplayDrawingStateProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     auto& target = internal::currentTarget();
     bool ok = internal::ensureShadowStorage(windows.main,64);
     sg_shader_desc sd = {};
@@ -695,16 +713,25 @@ bool shadowReplayDrawingStateProbe() {
 // IDs recycle exactly, then exercise the real cleanup and retirement collector.
 bool shadowDeviceRestartProbe() {
     cleanup();
+    // This fixture bypasses setup(): begin the new framework lifetime before
+    // each manual device setup, just as setup() does in the real runner.
+    internal::beginFrameworkLifetime();
     sg_desc desc = {}; sg_setup(&desc); sgl_desc_t sd = {}; sgl_setup(&sd);
-    auto& owner = internal::mainWindowContext();
+    DrawingWindowState firstOwner;
+    auto& owner = firstOwner.context;
+    internal::restoreWindowContext(&owner);
     bool ok = internal::ensureShadowStorage(owner,64);
     if (!owner.shadow.storage) return false;
     const auto old = owner.shadow.storage->colorImage;
     cleanup();
+    internal::beginFrameworkLifetime();
     sg_setup(&desc); sgl_setup(&sd);
-    ok &= internal::ensureShadowStorage(owner,64);
-    if (!owner.shadow.storage) return false;
-    const auto fresh = owner.shadow.storage->colorImage;
+    DrawingWindowState nextOwner;
+    auto& freshOwner = nextOwner.context;
+    internal::restoreWindowContext(&freshOwner);
+    ok &= internal::ensureShadowStorage(freshOwner,64);
+    if (!freshOwner.shadow.storage) return false;
+    const auto fresh = freshOwner.shadow.storage->colorImage;
     internal::drainPendingGpuDestroys();
     ok &= old.id == fresh.id && sg_query_image_state(fresh) == SG_RESOURCESTATE_VALID;
     std::printf("SHADOW RESTART old=%x fresh=%x live=%d ok=%d\n",old.id,fresh.id,sg_query_image_state(fresh),ok);
@@ -716,7 +743,7 @@ bool shadowDeviceRestartProbe() {
 bool shadowOwnershipProbe() {
     DummyWindowPair windows;
     auto& a = windows.main;
-    auto& b = windows.secondary.context();
+    auto& b = trussc::internal::WindowRequestAccess::context(windows.secondary);
     internal::restoreWindowContext(&a);
     bool ok = !a.shadow.storage && !b.shadow.storage;
     ok &= internal::ensureShadowStorage(a,64) && internal::ensureShadowStorage(b,128);
@@ -773,7 +800,7 @@ bool shadowOwnershipProbe() {
 
 bool parkedShadowProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     auto& sh = windows.main.shadow;
     auto& target = sh.target;
     sg_image_desc im = {}; im.width = im.height = 16;
@@ -805,8 +832,8 @@ bool parkedShadowProbe() {
         const int start = submittedDraws;
         shadowDraw(mesh);
         prefix = submittedDraws - start;
-        internal::restoreWindowContext(&windows.secondary.context()); present();
-        internal::restoreWindowContext(nullptr);
+        internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary)); present();
+        internal::restoreWindowContext(&(*renderFixture));
         const int beforeSuffix = submittedDraws;
         shadowDraw(mesh);
         internal::getPbrPipeline().shadowDrawMesh(mesh);
@@ -826,7 +853,7 @@ bool parkedShadowProbe() {
 }
 bool foreignTeardownReplayFailureProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     Shader shader;
     bool ok = shader.load(descriptor);
     internal::ensureCurrentPass();
@@ -835,7 +862,7 @@ bool foreignTeardownReplayFailureProbe() {
     const auto token = target.activation;
     const auto before = submittedDraws;
     failAllocation = true;
-    windows.secondary.context().teardownTargets();
+    trussc::internal::WindowRequestAccess::context(windows.secondary).teardownTargets();
     ok &= !failAllocation && !target.inPass && !_sg.cur_pass.in_pass &&
         target.deferredShaderDraws.empty() && target.openShaderScopes == 1 &&
         !windows.main.shaderStack.empty() && windows.main.shaderStack.back() == &shader &&
@@ -858,8 +885,10 @@ bool foreignTeardownReplayFailureProbe() {
 // inside present() and a foreign tick. The dummy backend cannot test GPU waits.
 bool synchronousCapturePhaseProbe(bool secondary) {
     DummyWindowPair windows;
-    auto* owner = secondary ? &windows.secondary.context() : &windows.main;
-    auto* foreign = secondary ? &windows.main : &windows.secondary.context();
+    auto* owner = secondary ? &trussc::internal::WindowRequestAccess::context(windows.secondary) : &windows.main;
+    auto* foreign = secondary ? &windows.main : &trussc::internal::WindowRequestAccess::context(windows.secondary);
+    auto queryCandidate = internal::makeConstructedAppAt<App>(owner);
+    internal::AppOwnerScope queryOwner(internal::appOwner(*queryCandidate));
     internal::restoreWindowContext(owner);
     auto& target = internal::currentTarget();
     const auto token = target.activation;
@@ -910,7 +939,7 @@ bool synchronousCapturePhaseProbe(bool secondary) {
     ok &= !target.inPass && !_sg.cur_pass.in_pass && target.activation == token;
     recordTriangle();
     int renderCaptures = 0;
-    auto listener = events().onRender.listen([&] { ++renderCaptures; capture(); recordTriangle(); });
+    auto listener = internal::currentWindowContext().coreEvents->onRender.listen([&] { ++renderCaptures; capture(); recordTriangle(); });
     present();
     ok &= renderCaptures == 1 && commits == beforeCommits + 1 && submittedDraws == beforeDraws + 6 &&
         owner->renderEpoch == epoch + 1;
@@ -932,7 +961,7 @@ bool synchronousCapturePhaseProbe(bool secondary) {
 
 bool begunResizeProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     auto& target = internal::currentTarget();
     const auto context = target.resources().context;
     const auto generation = target.resources().generation;
@@ -947,7 +976,7 @@ bool begunResizeProbe() {
     submittedDraws = 0;
     internal::ensureCurrentPass(); recordTriangle(); target.flushLayers();
     bool ok = target.passStartedThisFrame && !sgl_tc_context_has_pending_draws(context);
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     // Model native resize replacing the attachment generation while A is
     // parked. Dummy pointers test descriptor identity, not Objective-C retain.
     acquired.metal.current_drawable = &newDrawable;
@@ -957,7 +986,7 @@ bool begunResizeProbe() {
     internal::resizeSgl(3072,377);
     for (int i = 0; i < SG_NUM_INFLIGHT_FRAMES + 3; ++i) { beginFrame(); present(); }
     ok &= internal::sglBudget().pendingResize == 3072 && target.resources().context.id == context.id;
-    internal::restoreWindowContext(nullptr); beginFrame();
+    internal::restoreWindowContext(&(*renderFixture)); beginFrame();
     ok &= target.resources().generation == generation;
     internal::ensureCurrentPass();
     ok &= passes.back().action.colors[0].load_action == SG_LOADACTION_LOAD;
@@ -983,7 +1012,7 @@ bool begunResizeProbe() {
 
 bool resourceRetirementProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     sg_image_desc imageDesc = {}; imageDesc.width = imageDesc.height = 2;
     imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
     imageDesc.usage.dynamic_update = true;
@@ -993,7 +1022,7 @@ bool resourceRetirementProbe() {
     const auto sampler = sg_make_sampler(sg_sampler_desc{});
     sgl_enable_texture(); sgl_texture(view, sampler); recordTriangle(); sgl_disable_texture();
     internal::deferGpuDestroy(view); internal::deferGpuDestroy(image); internal::deferGpuDestroy(sampler);
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     present(); // Warm B's caches; A's referenced resources remain pending.
     sg_buffer_desc bufferDesc = {}; bufferDesc.size = 16; bufferDesc.usage.vertex_buffer = true; bufferDesc.usage.dynamic_update = true;
     const auto unrelated = sg_make_buffer(bufferDesc);
@@ -1004,7 +1033,7 @@ bool resourceRetirementProbe() {
     ok &=  sg_query_view_state(view) == SG_RESOURCESTATE_VALID &&
         sg_query_image_state(image) == SG_RESOURCESTATE_VALID && sg_query_sampler_state(sampler) == SG_RESOURCESTATE_VALID &&
         sg_query_buffer_state(unrelated) != SG_RESOURCESTATE_VALID;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&(*renderFixture));
     present();
     ok &= sg_query_view_state(view) != SG_RESOURCESTATE_VALID &&
         sg_query_image_state(image) != SG_RESOURCESTATE_VALID && sg_query_sampler_state(sampler) != SG_RESOURCESTATE_VALID;
@@ -1035,7 +1064,7 @@ bool growthFailureProbe() {
 
 bool curveRollbackProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(nullptr);
+    internal::restoreWindowContext(&windows.main);
     auto& w = windows.main;
     const std::vector<Vec3> points{{0,0,0},{1,1,0},{2,2,0},{3,3,0}};
     getDefaultContext().setCurveResolution(5);
@@ -1075,9 +1104,9 @@ bool curveRollbackProbe() {
 
 bool rawFailureProbe() {
     DummyWindowPair windows;
-    internal::restoreWindowContext(&windows.secondary.context()); recordTriangle();
-    const auto foreign = windows.secondary.context().swapchainTarget.resources().context;
-    internal::restoreWindowContext(nullptr); recordTriangle();
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary)); recordTriangle();
+    const auto foreign = trussc::internal::WindowRequestAccess::context(windows.secondary).swapchainTarget.resources().context;
+    internal::restoreWindowContext(&(*renderFixture)); recordTriangle();
     auto& target = internal::currentTarget();
     bool ok = true;
     internal::DeferredShaderDraw draw;
@@ -1089,7 +1118,7 @@ bool rawFailureProbe() {
     submittedDraws = 0;
     present();
     ok &= submittedDraws == 1;
-    internal::restoreWindowContext(&windows.secondary.context());
+    internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     submittedDraws = 0; present(); ok &= submittedDraws == 1;
     // Curve allocation failure also logs and returns without escaping.
     const std::vector<Vec3> points(4, Vec3{});
@@ -1107,8 +1136,7 @@ bool rawFailureProbe() {
 // without a display. The real coordinator must refresh before CPU recording,
 // not merely change the native pass extent after geometry was recorded.
 bool resizeBeforeDrawProbe(float dpi, bool pixelPerfect, float fov) {
-    internal::WindowContext window;
-    window.isMain = false;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
     window.fbWidth = 64; window.fbHeight = 48; window.dpiScale = dpi;
     struct Acquisition { internal::WindowContext* window; int count = 0; } acquisition{&window};
     window.acquireSwapchainUser = &acquisition;
@@ -1179,8 +1207,8 @@ bool resizeBeforeDrawProbe(float dpi, bool pixelPerfect, float fov) {
 // real Node dispatch. An empty child pop is intentionally rejected only in the
 // negative variant: it never consumes the suspended window's live Node push.
 bool targetStackDispatchProbe(bool rejectedPop) {
-    internal::WindowContext window;
-    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 64; window.fbHeight = 48;
     window.acquireSwapchain = dummySwapchain;
     auto* previous = internal::currentWindowCtx();
     internal::currentWindowCtx() = &window;
@@ -1237,7 +1265,8 @@ bool targetStackDispatchProbe(bool rejectedPop) {
     };
     bool ok;
     {
-        StackApp app(rejectedPop, expectingUnmatched, expectingPop);
+        auto candidate = internal::makeConstructedApp<StackApp>(rejectedPop, expectingUnmatched, expectingPop);
+        auto& app = *candidate;
         beginFrame();
         { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); }
         auto& screen = window.swapchainTarget;
@@ -1273,8 +1302,8 @@ bool targetStackDispatchChecks() {
 // Node matrix push. Restore a child opened in update in events().draw,
 // before handleDraw pushes that matrix; camera.end can still run in draw().
 bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
-    internal::WindowContext window;
-    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 64; window.fbHeight = 48;
     int acquisitions = 0, warnings = 0;
     window.acquireSwapchainUser = &acquisitions;
     window.acquireSwapchain = [](void* user) {
@@ -1340,7 +1369,8 @@ bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
     };
     bool ok;
     {
-        ResizeApp app(resize, cameraScope);
+        auto candidate = internal::makeConstructedApp<ResizeApp>(resize, cameraScope);
+        auto& app = *candidate;
         beginFrame();
         { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
         auto* child = &internal::currentTarget();
@@ -1349,7 +1379,7 @@ bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
         ok = &internal::currentTarget() == child && sgl_get_context().id == context.id && acquisitions == 0;
         {
             internal::EntryStackGuard draw(internal::AppEntry::Draw);
-            events().draw.notify();
+            window.coreEvents->draw.notify();
             app.handleDraw();
             auto& target = window.swapchainTarget;
             ok &= app.ok && app.drew && target.matrixStack.empty() && target.cameraStack.empty() &&
@@ -1374,8 +1404,8 @@ bool resizeSelectedStateProbe(int scenario) {
                             "custom_viewport", "matrix_scope", "active_fbo", "active_fbo_camera",
                             "camera_closed_update", "camera_closed_draw", "camera_closed_after_fbo",
                             "nested_camera", "model_set_load"};
-    internal::WindowContext window;
-    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 64; window.fbHeight = 48;
     int acquisitions = 0;
     struct Provider { internal::WindowContext& window; int& count; } provider{window, acquisitions};
     window.acquireSwapchainUser = &provider;
@@ -1510,8 +1540,8 @@ bool resizeSelectedStateProbe(int scenario) {
 // keeps the recording context; immediate geometry must still follow
 // the deferred triangle, before ensureCurrentPass can reselect the target.
 bool resizeOpenShaderProbe(bool resize, bool selectedState) {
-    internal::WindowContext window;
-    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 64; window.fbHeight = 48;
     int acquisitions = 0;
     window.acquireSwapchainUser = &acquisitions;
     window.acquireSwapchain = [](void* user) {
@@ -1597,8 +1627,8 @@ bool resizeOpenShaderProbe(bool resize, bool selectedState) {
 // outside the target's CPU drawing state. Both empty and nonempty recordings
 // must retain that selection through ortho/perspective extent repair.
 bool resizeBoundTextureProbe(float fov, bool pending, bool resize) {
-    internal::WindowContext window;
-    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 64; window.fbHeight = 48;
     int acquisitions = 0;
     window.acquireSwapchainUser = &acquisitions;
     window.acquireSwapchain = [](void* user) {
@@ -1670,8 +1700,8 @@ bool resizeBoundTextureProbe(float fov, bool pending, bool resize) {
 bool resizeEarlyAcquireProbe(int mode, bool resize, int selection) {
     const char* modes[] = {"automatic", "explicit_ortho", "easycam"};
     const char* selections[] = {"automatic", "custom_viewport", "custom_scissor", "restored_viewport"};
-    internal::WindowContext window;
-    window.isMain = false; window.fbWidth = 64; window.fbHeight = 48;
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 64; window.fbHeight = 48;
     int acquisitions = 0;
     window.acquireSwapchainUser = &acquisitions;
     window.acquireSwapchain = [](void* user) {
@@ -1780,7 +1810,7 @@ bool activeDestructionProbe() {
     const pid_t child = fork();
     if (child == 0) {
         rlimit limit = {0,0}; setrlimit(RLIMIT_CORE,&limit);
-        internal::WindowContext window;
+        DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
         internal::currentWindowCtx() = &window;
         window.swapchainTarget.resources().context = sgl_default_context();
         window.acquireSwapchain = dummySwapchain;
@@ -1807,7 +1837,7 @@ int liveContexts() { return _sgl.context_pool.pool.size - 1 - _sgl.context_pool.
 struct ClosingWindow : Window {
     uint64_t& createdAfterClose;
     explicit ClosingWindow(uint64_t& count) : createdAfterClose(count) {
-        native_ = this; // Native stand-in; never passed to platform APIs.
+        native_ = this; internal::WindowRequestAccess::bindForTests(*this, 202); // Native stand-in; never passed to platform APIs.
         ctx_.fbWidth = ctx_.fbHeight = 100;
         ctx_.swapchainTarget.width = ctx_.swapchainTarget.height = 100;
         ctx_.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
@@ -1819,7 +1849,7 @@ struct ClosingWindow : Window {
     }
     void finish() {
         if (!native_) return;
-        native_ = nullptr;
+        native_ = nullptr; internal::WindowRequestAccess::unbind(*this);
         ctx_.targetsClosed = true;
         ctx_.teardownTargets();
         ctx_.acquireSwapchain = nullptr;
@@ -1855,15 +1885,15 @@ bool closedWindowContextProbe() {
         uint64_t createdAfterClose = 0;
         {
             ClosingWindow parent(createdAfterClose);
-            auto app = std::make_shared<ClosingParent>(phase);
+            auto app = internal::makeConstructedApp<ClosingParent>(phase);
             app->child = std::make_shared<ClosingWindow>(createdAfterClose);
-            app->child->setApp(std::make_shared<App>());
+            app->child->setApp<App>();
             internal::applyPendingAppForTests(*app->child);
-            parent.setApp(app); internal::applyPendingAppForTests(parent);
+            internal::WindowRequestAccess::attachCandidate(parent, app); internal::applyPendingAppForTests(parent);
             app.reset(); // Only the window owns the outgoing App.
             ok &= contextCreations() - before == 2 && liveContexts() == live + 2;
             parent.finish(); parent.finish();
-            ok &= !parent.context().swapchainTarget.resources().context.id;
+            ok &= !trussc::internal::WindowRequestAccess::context(parent).swapchainTarget.resources().context.id;
         }
         const auto creates = contextCreations() - before;
         const auto destroys = live + int(creates) - liveContexts();
@@ -1921,6 +1951,10 @@ int main(int argc, char** argv) {
     desc.environment.defaults.sample_count = 1;
     sg_setup(&desc);
     sgl_desc_t gl = {}; gl.pipeline_pool_size = 256; sgl_setup(&gl);
+    DrawingWindowState rootFixture;
+    auto& fixture = rootFixture.context;
+    renderFixture = &fixture;
+    internal::currentWindowCtx() = &fixture;
     const bool retirementFailure = retirementFailureProbe();
     if (!retirementFailure) return 1;
     if (!lateShader.load(descriptor)) return 1;

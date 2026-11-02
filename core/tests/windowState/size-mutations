@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Require runtime assertion failures for the size-delivery mutations.
+
+Run via tcbuild.sh after building allCoreTests (the review-test build/overlay
+environment variables also apply). Production files are never modified.
+"""
+from pathlib import Path
+from contextlib import nullcontext
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[3]
+RUNTIME = Path('core/include/tc/app/tcWindowRuntime.cpp')
+
+
+def main():
+    original = (ROOT / RUNTIME).read_text(encoding='utf-8')
+    commit = ('        window.appSizeWidth_ = size.width; window.appSizeHeight_ = size.height;\n'
+              '        window.appSizeSeeded_ = true;\n')
+    invalidate = '            if (window.getApp() == app) window.appSizeWidth_ = window.appSizeHeight_ = -1;'
+    reentry = 'window.appSizeDelivering_ || '
+    bound = 'for (int deliveryCount = 0; deliveryCount < 3; ++deliveryCount)'
+    assert original.count(commit) == original.count(invalidate) == original.count(reentry) == original.count(bound) == 1
+    # Restore consuming an extent before notification, including on failure.
+    premature = original.replace(commit, '').replace('        try {\n', commit + '        try {\n', 1)
+    premature = premature.replace(invalidate, '')
+    mutations = [('claim-before-delivery', premature),
+                 ('outer-overwrites-newer-claim', original.replace(reentry, '')),
+                 ('unbounded-size-drain', original.replace(bound, 'for (;;)'))]
+    output = os.environ.get('TC_WINDOW_SIZE_MUTATIONS_OUTPUT')
+    if output:
+        Path(output).mkdir(parents=True, exist_ok=True)
+    with (nullcontext(output) if output else tempfile.TemporaryDirectory(prefix='tc-size-mutations-')) as folder:
+        folder = Path(folder)
+        results = []
+        for name, source in mutations:
+            overlay = folder / name
+            path = overlay / RUNTIME
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(source, encoding='utf-8')
+            build = overlay / 'build'
+            binary = build / 'probe'
+            # A retained output directory must not let a stale executable
+            # disguise a compilation or link failure on a subsequent run.
+            if binary.exists():
+                binary.unlink()
+            env = dict(os.environ, TC_WINDOW_REVIEW_SOURCE=str(overlay), TC_WINDOW_REVIEW_OUTPUT=str(build))
+            with (overlay / 'build.log').open('w', encoding='utf-8') as log:
+                result = subprocess.run([sys.executable, str(ROOT / 'core/tests/windowState/review-test')],
+                                        env=env, stdout=log, stderr=subprocess.STDOUT, timeout=240)
+            # A linked binary is required; compilation/link failure is not a kill.
+            assert binary.is_file(), (name, 'compile/link failed; see build.log')
+            run = subprocess.run([str(binary)], capture_output=True, text=True, timeout=30)
+            (overlay / 'runtime.log').write_text(run.stdout + run.stderr, encoding='utf-8')
+            failures = sum('hidden-reentry: FAIL:' in line for line in run.stdout.splitlines())
+            assert result.returncode == run.returncode == 1 and failures > 0, (name, run.returncode, run.stdout)
+            if name == 'unbounded-size-drain':
+                assert 'FAIL: feedback returns within three deliveries' in run.stdout, run.stdout
+            results.append(dict(name=name, compile_link='PASS', returncode=run.returncode,
+                                failed_runtime_assertions=failures))
+            print(results[-1], flush=True)
+        (folder / 'results.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
+
+
+if __name__ == '__main__':
+    main()

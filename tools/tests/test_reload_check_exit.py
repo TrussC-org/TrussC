@@ -157,9 +157,11 @@ time.sleep(120)
 class ReloadCheckExit(unittest.TestCase):
     def test_returning_and_nonreturning_hosts(self):
         source = (ROOT / 'core/tests/hotReloadLifecycle/src/main.cpp').read_text(encoding='utf-8')
-        handler = source[source.index('static int g_reloadCheckResult ='):
-                         source.index('static int runReloadCheck()')]
-        with tempfile.TemporaryDirectory(dir=ROOT) as scratch:
+        handler_start = source.index('static int g_reloadCheckResult =')
+        function_start = source.index('static void reloadCheckExit()', handler_start)
+        handler_end = source.index('\n}', function_start) + 2
+        handler = source[handler_start:handler_end]
+        with tempfile.TemporaryDirectory() as scratch:
             fixture = Path(scratch) / 'exit.cpp'
             fixture.write_text('''#include <cstdio>
 #include <cstdlib>

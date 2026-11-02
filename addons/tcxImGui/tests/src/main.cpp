@@ -1,6 +1,7 @@
 #include "../../../../core/tests/common/tcTestFailure.h"
+#include "../../../../core/tests/common/tcWindowTest.h"
 // =============================================================================
-// tcxImGui tests - headless behavioral test (no window, no GPU).
+// tcxImGui tests - CPU behavioral test (addressed Window, no native window/GPU).
 //
 // Built and run by CI on every push/PR across macOS / Windows / Linux via
 // examples/build_all.py --addon-tests-only (exit 0 = pass, non-zero = fail).
@@ -1096,8 +1097,8 @@ static void testFramesWithoutImGui() {
           isError(r) && late == 0 && r.value("message", "").find("too late") != std::string::npos);
 
     // The window renders no frame after the write frame (very slow, or it
-    // stopped): the value is settled on its read-back at return from the main
-    // window's afterFrame, 4 s after the call (the clock is advanced before
+    // stopped): the value is settled on its read-back at return from the Runtime
+    // maintenance, 4 s after the call (the clock is advanced before
     // frame 3), not left to the core's 5 s timeout and its generic error.
     namespace d = tcx::imgui::detail;
     r = callTool(h, "tcx_imgui_input", {{"label", "slow"}, {"text", "4"}}, nullptr, &frames, 10, [&](int i) {
@@ -1455,6 +1456,7 @@ static void testPendingValueIndex() {
 }
 
 int main() {
+    tcCoreTest::WindowFixture receiver;
     testToolLevels();
     tc::mcp::setToolLevel(tc::mcp::ToolLevel::Control);
     testUtf8Capture();

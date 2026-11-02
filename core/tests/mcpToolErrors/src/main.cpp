@@ -4,6 +4,8 @@
 #include "../../common/tcCoreTest.h"
 
 #include <cstdio>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 using namespace tc;
@@ -50,6 +52,52 @@ json reply(std::future<mcp::internal::ReplyThunk>& future) {
 TC_CORE_TEST_MAIN() {
     try {
         auto& server = mcp::internal::Server::instance();
+        // Invalid ids must never reach a tool or the deferred-id store.
+        bool idToolCalled = false;
+        mcp::tool("id_probe", "").bind([&]() -> json {
+            idToolCalled = true;
+            mcp::deferToolResultUntilAfterFrame([]() -> json { return nullptr; });
+            return nullptr;
+        });
+        for (const json& id : {json(nullptr), json(1.5), json(1.0),
+                               json{{"nested", 1}}, json::array({1, 2}), json(true)}) {
+            const std::string label = id.dump() + " id is Invalid Request with null id";
+            mcp::internal::deferralState().id = "unchanged";
+            auto raw = request("id_probe", id);
+            auto invalid = json::parse(server.processMessage(raw), nullptr, false);
+            check(label.c_str(),
+                  invalid.contains("error") && invalid["error"]["code"] == -32600 &&
+                  invalid.contains("id") && invalid["id"].is_null());
+            check("invalid id never reaches handler or deferred storage",
+                  !idToolCalled && mcp::internal::deferralState().id == "unchanged");
+#ifndef __EMSCRIPTEN__
+            auto terminal = json::parse(mcp::internal::normalExitReply(raw));
+            check("shutdown rejects invalid id with null id",
+                  terminal["error"]["code"] == -32600 && terminal["id"].is_null());
+#endif
+        }
+        // Parsing keeps 1.0 floating-point; the protocol accepts only integer types.
+        check("1.0 parses as floating-point", json::parse("1.0").is_number_float());
+        for (const json& id : {json("request-id"), json(0), json(-239),
+                               json((std::numeric_limits<std::int64_t>::min)()),
+                               json((std::numeric_limits<std::int64_t>::max)()),
+                               json((std::numeric_limits<std::uint64_t>::max)())}) {
+            auto result = json::parse(server.processMessage(
+                json{{"jsonrpc", "2.0"}, {"method", "initialize"}, {"id", id}}.dump()), nullptr, false);
+            const auto label = "valid id is echoed exactly: " + id.dump();
+            check(label.c_str(),
+                  result.contains("result") && result.contains("id") && result["id"].dump() == id.dump());
+        }
+        check("notification has no reply", server.processMessage(
+            R"({"jsonrpc":"2.0","method":"notifications/initialized"})").empty());
+#ifndef __EMSCRIPTEN__
+        check("shutdown notification has no reply", mcp::internal::normalExitReply(
+            R"({"jsonrpc":"2.0","method":"notifications/initialized"})").empty());
+#endif
+        check("initialize notification has no reply", server.processMessage(
+            R"({"jsonrpc":"2.0","method":"initialize"})").empty());
+        check("list notification has no reply", server.processMessage(
+            R"({"jsonrpc":"2.0","method":"tools/list"})").empty());
         mcp::tool("throws_inline", "").bind([]() -> json {
             throw std::runtime_error("inline failed");
         });
@@ -74,6 +122,13 @@ TC_CORE_TEST_MAIN() {
                   {"result", {{"content", {{{"type", "text"}, {"text", ownError.dump()}}}}}}});
 
 #ifndef __EMSCRIPTEN__
+        auto window = internal::prepareLaunchWindow(WindowSettings{});
+        internal::WindowRequestAccess::bindForTests(*window, 683);
+        auto productionDrain = [&] {
+            mcp::internal::drainDeferredResponses(&trussc::internal::WindowRequestAccess::context(*window), true,
+                                                std::chrono::steady_clock::now(), false);
+            mcp::internal::drainDeferredResponses(nullptr, false);
+        };
         mcp::tool("throws_main", "").bind([]() -> json {
             mcp::deferToolResultUntilAfterFrame([]() -> json {
                 throw std::runtime_error("main failed");
@@ -82,7 +137,7 @@ TC_CORE_TEST_MAIN() {
         });
         {
             auto future = queue("throws_main", "main");
-            mcp::internal::drainDeferredResponses();
+            productionDrain();
             checkError("main exception", reply(future),
                        "main", "deferred response failed: main failed");
         }
@@ -95,7 +150,7 @@ TC_CORE_TEST_MAIN() {
                 return nullptr;
             });
             auto future = queue(mainThrows ? "two_main" : "two_worker", 685);
-            mcp::internal::drainDeferredResponses();
+            productionDrain();
             checkError(mainThrows ? "two-stage main exception" : "two-stage worker exception",
                        reply(future), 685, mainThrows ? "deferred response failed: two-stage main failed"
                                                     : "deferred worker stage failed: worker failed");
@@ -116,7 +171,7 @@ TC_CORE_TEST_MAIN() {
             auto& pending = mcp::internal::deferredResponses().back();
             // Exercise expiry without depending on how long the test waited.
             pending.deadline = std::chrono::steady_clock::time_point::min();
-            mcp::internal::drainDeferredResponses();
+            productionDrain();
             checkError("timeout", reply(timed), "timeout",
                        "the window rendered no frame within 5 s (minimized, hidden or closed?)");
 

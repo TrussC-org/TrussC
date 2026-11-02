@@ -412,7 +412,6 @@ print('200 MiB clean and middle-warning passes under 80 MiB RLIMIT_AS')
             'tools/tests/test_shader_targets.py', 'tools/tests/test_core_test_build_steps.py',
             'tools/tests/test_release_workflow.py', 'tools/tests/test_reload_check_exit.py',
             'core/tests/metalUniformGrowth/test_backend.py',
-            'core/tests/mouseReleaseLost/test_locked_replay.py',
             'core/tests/serialRxBuffer/probes/run.py', 'core/tests/webgpuUniformGrowth/run.py',
         }
         for filename in sorted(inventory):

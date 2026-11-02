@@ -307,7 +307,11 @@ TC_CORE_TEST_MAIN() {
 
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     mcp::setToolLevel(mcp::ToolLevel::Control);
-    runHeadlessApp<McpApp>(HeadlessSettings().setFps(1000));
+    Window receiver;
+    internal::WindowRequestAccess::bindForTests(receiver, 101);
+    receiver.setApp<McpApp>(); internal::applyPendingAppForTests(receiver);
+    receiver.events().update.notify();
+    internal::WindowRequestAccess::teardown(receiver);
 
     printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");
     return g_fail ? 1 : 0;

@@ -40,8 +40,8 @@ struct TimedNode : App {
 }
 TC_CORE_TEST_MAIN() {
     State state;
-    auto root = std::make_shared<App>();
-    auto node = std::make_shared<TimedNode>(state);
+    auto root = internal::makeConstructedApp<App>();
+    auto node = internal::makeConstructedApp<TimedNode>(state);
     root->addChild(node);
     bool ok = await(state, [&] { return state.calls > 0; });
     Node gate;

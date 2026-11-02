@@ -1,5 +1,8 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 #include "impl/httplib.h"
 #include <chrono>
 #include <cstdio>
@@ -22,7 +25,7 @@ struct ExitApp : App {
             mcp::tool("exit_worker", "test process exit from HTTP reply construction").bind([]() -> json {
                 mcp::deferToolResultTwoStage([] {
                     return []() -> json { std::exit(0); };
-                });
+                }, internal::currentAppOwner()->context); // explicit virtual presentation seam
                 return nullptr;
             });
             const int port = mcp::getHttpPort();
@@ -39,13 +42,16 @@ struct ExitApp : App {
     }
     void update() override {
         if (!workerExit) std::exit(0);
-        // Headless apps have no present; explicitly run the deferred main
-        // stage so the real HTTP request worker executes its reply thunk.
-        mcp::internal::drainDeferredResponses();
+        // Simulate an addressed frame on this virtual test context so the
+        // real HTTP worker executes its reply thunk; maintenance has no frame.
+        mcp::internal::drainDeferredResponses(internal::currentAppOwner()->context, true,
+                                            std::chrono::steady_clock::now(), false);
+        mcp::internal::drainDeferredResponses(nullptr, false);
     }
 };
 // The test re-launches its own executable per case (as mcpHttpGuard does), so
 // one harness covers every desktop OS and reads the child's exit code.
+#if !defined(__APPLE__) || !TARGET_OS_IPHONE
 std::string quoteArgument(const std::string& value) {
 #ifdef _WIN32
     return "\"" + value + "\"";  // Windows executable paths cannot contain a quote
@@ -55,9 +61,11 @@ std::string quoteArgument(const std::string& value) {
     return quoted + "'";
 #endif
 }
+#endif
 constexpr int kWatchdogExit = 5;
 // The child's exit code as the process reported it (std::system's raw status
 // is a wait status on POSIX).
+#if !defined(__APPLE__) || !TARGET_OS_IPHONE
 int exitCode(int status) {
 #ifdef _WIN32
     return status;
@@ -67,6 +75,7 @@ int exitCode(int status) {
     return status;
 #endif
 }
+#endif
 int child(bool fromWorker) {
     // Deadlock watchdog, not a success-time assertion.
     // Its own exit code, so a failure tells a hang from an abort (3 on Windows).
@@ -78,6 +87,10 @@ int child(bool fromWorker) {
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc == 3 && std::string(argv[1]) == "--child") return child(std::string(argv[2]) == "worker");
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    std::printf("SKIP MCP process exit checks: system() unavailable on iOS\n");
+    return 0;
+#else
     std::string command = quoteArgument(fs::absolute(argv[0]).string());
 #ifdef TC_CORE_TEST_NAME
     command += " " TC_CORE_TEST_NAME;
@@ -91,4 +104,5 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     std::printf("std::exit from HTTP request worker: %s (exit code %d%s)\n", handlerExit ? "PASS" : "FAIL",
                 handlerCode, handlerCode == kWatchdogExit ? ", watchdog: hung" : "");
     return appExit && handlerExit ? 0 : 1;
+#endif
 }

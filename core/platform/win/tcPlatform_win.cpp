@@ -27,8 +27,68 @@
 
 namespace trussc {
 
+namespace internal {
+namespace {
+LRESULT CALLBACK sessionAuthorityProc(HWND hwnd, UINT message, WPARAM value, LPARAM flags) {
+    if (message == WM_QUERYENDSESSION) {
+        if (querySessionEnd()) { ShutdownBlockReasonDestroy(hwnd); return TRUE; }
+        // Preserve C2's first nonempty veto explanation. Optional text failure
+        // cannot remove the veto and never escapes the native callback.
+        try {
+            const auto reason = exitBlockReason();
+            if (reason.empty()) ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
+            else {
+                const int count = MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, nullptr, 0);
+                if (count > 0) {
+                    std::wstring wide(static_cast<size_t>(count), L'\0');
+                    MultiByteToWideChar(CP_UTF8, 0, reason.c_str(), -1, wide.data(), count);
+                    ShutdownBlockReasonCreate(hwnd, wide.c_str());
+                } else ShutdownBlockReasonCreate(hwnd, L"The app is still busy.");
+            }
+        } catch (...) { ShutdownBlockReasonCreate(hwnd, L"The app is still busy."); }
+        return FALSE;
+    }
+    if (message == WM_ENDSESSION) {
+        ShutdownBlockReasonDestroy(hwnd);
+        if (value) commitSessionEnd();
+        cancelSessionEnd();
+        return 0;
+    }
+    return DefWindowProcW(hwnd, message, value, flags);
+}
+}
+void* createSessionAuthority() {
+    WNDCLASSW type{};
+    type.lpfnWndProc = sessionAuthorityProc;
+    type.hInstance = GetModuleHandleW(nullptr);
+    type.lpszClassName = L"TrussC.Runtime.Session";
+    if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        throw std::runtime_error("Unable to register Runtime session authority");
+    // HWND_MESSAGE does not receive WM_QUERYENDSESSION broadcasts. This is an
+    // unshown top-level control window, owned for the whole Runtime run.
+    HWND hwnd = CreateWindowExW(0, type.lpszClassName, L"TrussC", WS_OVERLAPPED,
+        0, 0, 0, 0, nullptr, nullptr, type.hInstance, nullptr);
+    if (!hwnd) throw std::runtime_error("Unable to create Runtime session authority");
+    return hwnd;
+}
+void pollSessionAuthority(void* authority) noexcept {
+    // Headless has no user-window pump. Sent session messages are dispatched
+    // by PeekMessage on the Runtime main thread as well.
+    MSG message;
+    while (authority && PeekMessageW(&message, static_cast<HWND>(authority), 0, 0, PM_REMOVE)) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+}
+void destroySessionAuthority(void* authority) noexcept {
+    if (authority) DestroyWindow(static_cast<HWND>(authority));
+}
+}
+
 void bringWindowToFront() {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
+    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(internal::WindowRequestAccess::binding(*target).handle);
     if (hwnd) {
         SetForegroundWindow(hwnd);
     }
@@ -49,23 +109,7 @@ float getDisplayScaleFactor() {
         // SetProcessDpiAwarenessContext は sokol_app が行うはずなので
         // ここでは単にDPIを取得する
 
-        // まずウィンドウハンドルを試す
-        HWND hwnd = (HWND)sapp_win32_get_hwnd();
-        if (hwnd) {
-            // GetDpiForWindow は Windows 10 1607 以降で利用可能
-            typedef UINT (WINAPI *GetDpiForWindowFunc)(HWND);
-            HMODULE user32 = GetModuleHandleW(L"user32.dll");
-            if (user32) {
-                auto getDpiForWindow = (GetDpiForWindowFunc)GetProcAddress(user32, "GetDpiForWindow");
-                if (getDpiForWindow) {
-                    UINT dpi = getDpiForWindow(hwnd);
-                    scaleFactor = dpi / 96.0f;
-                    return scaleFactor;
-                }
-            }
-        }
-
-        // フォールバック: GetDpiForSystem
+        // Display scale is process-wide; no Window is selected here.
         typedef UINT (WINAPI *GetDpiForSystemFunc)();
         HMODULE user32 = GetModuleHandleW(L"user32.dll");
         if (user32) {
@@ -109,8 +153,8 @@ void applyKeepScreenOn(bool enabled, bool headless) {
 // ---------------------------------------------------------------------------
 // setWindowSize - ウィンドウサイズを変更
 // ---------------------------------------------------------------------------
-IVec2 getWindowPosition() {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+IVec2 internal::windowPositionNative(const void* handle) {
+    HWND hwnd = (HWND)handle;
     if (!hwnd) return IVec2(-1, -1);
 
     RECT rect;
@@ -120,14 +164,19 @@ IVec2 getWindowPosition() {
     return IVec2(-1, -1);
 }
 
-void setWindowPosition(int x, int y) {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+void internal::setWindowPositionNative(const void* handle, int x, int y) {
+    HWND hwnd = (HWND)handle;
     if (!hwnd) return;
     SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
+IVec2 internal::singleWindowPosition() { return windowPositionNative(sapp_win32_get_hwnd()); }
+void internal::setSingleWindowPosition(int x, int y) { setWindowPositionNative(sapp_win32_get_hwnd(), x, y); }
+
 void setWindowDecorated(bool decorated) {
-    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    auto* target = internal::resolveWindow(true);
+    if (!target) return;
+    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(internal::WindowRequestAccess::binding(*target).handle);
     if (!hwnd) return;
 
     // Toggle the caption/border/system-menu bits. Keyboard focus and the quit
@@ -195,7 +244,7 @@ void internal::setWindowSizeWin32(const void* handle, double logicalWidth, doubl
                  SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
-void setWindowSizeLogical(int width, int height) {
+void internal::setSingleWindowSizeLogical(int width, int height) {
     internal::setWindowSizeWin32(sapp_win32_get_hwnd(), width, height);
 }
 
@@ -274,26 +323,8 @@ fs::path internal::platformAppBundlePath() {
 // captureWindow - 現在のウィンドウをキャプチャ
 // ---------------------------------------------------------------------------
 std::pair<size_t, size_t> internal::captureWindowSize(const internal::WindowContext& ctx) {
-    // Acquisition-free estimate, also before B's first pass or after resize.
-    // lastSwapchain may still refer to the previous native resource generation.
-    if (!ctx.isMain) return {size_t(std::max(0, ctx.fbWidth)), size_t(std::max(0, ctx.fbHeight))};
-    const void* view = sapp_get_swapchain().d3d11.render_view;
-    if (view) {
-        ID3D11Resource* resource = nullptr;
-        ((ID3D11RenderTargetView*)view)->GetResource(&resource);
-        if (resource) {
-            ID3D11Texture2D* texture = nullptr;
-            const HRESULT hr = resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&texture);
-            resource->Release();
-            if (SUCCEEDED(hr) && texture) {
-                D3D11_TEXTURE2D_DESC desc;
-                texture->GetDesc(&desc);
-                texture->Release();
-                return {size_t(desc.Width), size_t(desc.Height)};
-            }
-        }
-    }
-    return {size_t(std::max(0, sapp_width())), size_t(std::max(0, sapp_height()))};
+    const auto dimensions = windowDimensions(ctx);
+    return {size_t(std::max(0, dimensions.fbWidth)), size_t(std::max(0, dimensions.fbHeight))};
 }
 
 bool captureWindow(Pixels& outPixels) {

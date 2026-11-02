@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 // =============================================================================
 // core/tests/entryStacks — regression test for #349: every entry point where
 // TrussC calls app code puts the matrix and style stacks back to the depth
@@ -5,13 +6,13 @@
 //
 // Headless, console, exit code = pass/fail (build_all.py runs it in CI).
 // Drives the windowed main loop's pieces the way core/tests/frameTiming does
-// (beginMainLoopFrame, runIndependentUpdates, runSyncedUpdate), plus
+// (beginScheduledFrame, runIndependentUpdates, runSyncedUpdate), plus
 // runHeadlessApp.
 //
 // Guards:
 //   1. The prelude (runOnMainThread work): a push it leaves open is dropped
 //      before update, with "the main-thread queue (...) ended with ...".
-//   2. update(), synced (beginMainLoopFrame + runSyncedUpdate): dropped at the
+//   2. update(), synced (beginScheduledFrame + runSyncedUpdate): dropped at the
 //      end of update(), with "update() ended with ...".
 //   3. update(), independent: VSYNC update and every fixed-Hz step start at
 //      the depth the frame had (leaks don't pile up across steps).
@@ -49,6 +50,7 @@ using namespace std;
 using namespace tc;
 
 namespace {
+trussc::EventListener schedulerUpdate;
 
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
@@ -82,7 +84,7 @@ static bool isIdentity(const Mat4& m) {
 using Clk = chrono::steady_clock;
 static Clk::duration secs(double s) { return chrono::round<Clk::duration>(chrono::duration<double>(s)); }
 
-// appUpdateFunc is a plain function pointer: state lives at file scope.
+// The test update subscription uses fixture state at file scope.
 static function<void()> g_onUpdate;
 static vector<size_t> g_entryDepths;   // matrix depth at the start of each update
 static void leakyUpdate() {
@@ -100,7 +102,7 @@ static const string kLeftOpen = " ended with 1 pushMatrix() and 1 pushStyle() st
 // 1. The prelude (runOnMainThread / Deliver::Main / console / MCP)
 // ---------------------------------------------------------------------------
 static void testPrelude(Clk::time_point& t) {
-    internal::appUpdateFunc = nullptr;
+    schedulerUpdate.disconnect();
     setFps(VSYNC);
     g_warnings.clear();
     // Posted from a worker (on the main thread runOnMainThread runs inline),
@@ -115,7 +117,7 @@ static void testPrelude(Clk::time_point& t) {
     worker.join();
     checkn("prelude: nothing pushed before the frame", matrixDepth() == 0, (long long)matrixDepth());
     t += secs(1.0 / 60.0);
-    internal::beginMainLoopFrame(t);
+    tcCoreTest::beginScheduledFrame(t);
     checkn("prelude: matrix stack back to its depth at entry (0)", matrixDepth() == 0, (long long)matrixDepth());
     checkn("prelude: style stack back to its depth at entry (0)", styleDepth() == 0, (long long)styleDepth());
     check("prelude: getMatrix() is the matrix before the push (identity)", isIdentity(getMatrix()));
@@ -128,13 +130,13 @@ static void testPrelude(Clk::time_point& t) {
 // 2. update(), synced to draw (setFps)
 // ---------------------------------------------------------------------------
 static void testSyncedUpdate(Clk::time_point& t) {
-    internal::appUpdateFunc = leakyUpdate;
+    schedulerUpdate = events().update.listen(leakyUpdate);
     g_onUpdate = [] { pushMatrix(); translate(3, 0); pushStyle(); };
     setFps(VSYNC);
     g_warnings.clear();
     g_entryDepths.clear();
     t += secs(1.0 / 60.0);
-    if (internal::beginMainLoopFrame(t)) internal::runSyncedUpdate();
+    if (tcCoreTest::beginScheduledFrame(t)) internal::runSyncedUpdate();
     checkn("synced update: ran once", g_entryDepths.size() == 1, (long long)g_entryDepths.size());
     checkn("synced update: matrix stack back to 0 after update()", matrixDepth() == 0, (long long)matrixDepth());
     checkn("synced update: style stack back to 0 after update()", styleDepth() == 0, (long long)styleDepth());
@@ -148,7 +150,7 @@ static void testSyncedUpdate(Clk::time_point& t) {
 // 3. update(), independent (setIndependentFps): VSYNC and fixed-Hz steps
 // ---------------------------------------------------------------------------
 static void testIndependentUpdates(Clk::time_point& t) {
-    internal::appUpdateFunc = leakyUpdate;
+    schedulerUpdate = events().update.listen(leakyUpdate);
     g_onUpdate = [] { pushMatrix(); translate(1, 0); pushStyle(); };
 
     setIndependentFps(VSYNC, EVENT_DRIVEN);
@@ -182,7 +184,7 @@ static void testIndependentUpdates(Clk::time_point& t) {
 // 4. Restored to the depth at entry, not to 0
 // ---------------------------------------------------------------------------
 static void testDepthAtEntry() {
-    internal::appUpdateFunc = leakyUpdate;
+    schedulerUpdate = events().update.listen(leakyUpdate);
     g_onUpdate = [] { pushMatrix(); translate(7, 0); pushStyle(); };
     pushMatrix();
     translate(2, 0);
@@ -216,12 +218,12 @@ static shared_ptr<LeakySetupApp> g_setupApp;
 static void setupAppUpdate() { if (g_setupApp) g_setupApp->handleUpdate(0, 0); }
 
 static void testSetup(Clk::time_point& t) {
-    g_setupApp = make_shared<LeakySetupApp>();
-    internal::appUpdateFunc = setupAppUpdate;
+    g_setupApp = internal::makeConstructedApp<LeakySetupApp>();
+    schedulerUpdate = events().update.listen(setupAppUpdate);
     setFps(VSYNC);
     g_warnings.clear();
     t += secs(1.0 / 60.0);
-    if (internal::beginMainLoopFrame(t)) internal::runSyncedUpdate();   // first update runs setup()
+    if (tcCoreTest::beginScheduledFrame(t)) internal::runSyncedUpdate();   // first update runs setup()
     checkn("setup: the App's update() after it starts at depth 0", g_setupAppUpdateDepth == 0,
            (long long)g_setupAppUpdateDepth);
     checkn("setup: warns \"setup() ended with 1 pushMatrix() ...\"",
@@ -229,7 +231,7 @@ static void testSetup(Clk::time_point& t) {
     check("setup: no update() warning (the leak was setup()'s)", countWarnings("update() ended") == 0);
     checkn("setup: depth 0 afterwards", matrixDepth() == 0 && styleDepth() == 0,
            (long long)(matrixDepth() + styleDepth()));
-    internal::appUpdateFunc = nullptr;
+    schedulerUpdate.disconnect();
     g_setupApp.reset();
 }
 
@@ -237,7 +239,7 @@ static void testSetup(Clk::time_point& t) {
 // 6. Only push/pop pairs are contained
 // ---------------------------------------------------------------------------
 static void testValuesCarry() {
-    internal::appUpdateFunc = leakyUpdate;
+    schedulerUpdate = events().update.listen(leakyUpdate);
     // A color and a transform set outside a push carry on; one set inside the
     // leaked push goes with it.
     g_onUpdate = [] {
@@ -264,13 +266,13 @@ static void testValuesCarry() {
 // 7. Rate limit per entry point
 // ---------------------------------------------------------------------------
 static void testRateLimit(Clk::time_point& t) {
-    internal::appUpdateFunc = leakyUpdate;
+    schedulerUpdate = events().update.listen(leakyUpdate);
     g_onUpdate = [] { pushMatrix(); pushStyle(); };
     setFps(VSYNC);
     g_warnings.clear();
     for (int i = 0; i < 3; ++i) {
         t += secs(1.0 / 60.0);
-        if (internal::beginMainLoopFrame(t)) internal::runSyncedUpdate();
+        if (tcCoreTest::beginScheduledFrame(t)) internal::runSyncedUpdate();
     }
     checkn("rate limit: update() leaks within 5 s are counted, not logged",
            countWarnings("update() ended") == 0, countWarnings("update() ended"));
@@ -284,7 +286,7 @@ static void testRateLimit(Clk::time_point& t) {
     }
     checkn("rate limit: exit() logs on its own limiter",
            countWarnings("exit()" + kLeftOpen) == 1, countWarnings("exit()"));
-    internal::appUpdateFunc = nullptr;
+    schedulerUpdate.disconnect();
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +316,7 @@ static void testHeadless() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    auto fixture = std::make_unique<tcCoreTest::WindowFixture>();
 #ifndef NDEBUG
     std::printf("SKIP: needs a release build (sokol_gl asserts it is set up on pushMatrix())\n");
     return 0;
@@ -331,6 +334,7 @@ TC_CORE_TEST_MAIN() {
     testSetup(t);
     testValuesCarry();
     testRateLimit(t);
+    fixture.reset();
     testHeadless();
 
     std::printf("\n%s (%d failure%s)\n", g_fail ? "FAILED" : "ALL PASSED", g_fail, g_fail == 1 ? "" : "s");

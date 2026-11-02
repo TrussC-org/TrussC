@@ -16,6 +16,15 @@ from check_build_warnings import run_build
 # per entry: linking/compiling an interceptor affects every entry in that binary.
 # Keep exact operations here, not a blanket exemption for a test directory.
 REVIEWED_TARGET_OPTIONS = {
+    # HEAD's legacy define has no consumer in the merged production sources;
+    # it enables no interception. Preserve the existing per-test recipe.
+    ('eglWindowSurfaces', 'target_compile_definitions',
+     ('TrussC', 'PRIVATE', 'SOKOL_TC_TEST_HOOKS')),
+    # The GLES-only wrapper increments a private counter and unconditionally
+    # forwards all four original arguments to __real_eglMakeCurrent. It never
+    # changes the return value, binding or failure policy for another entry.
+    ('eglWindowSurfaces', 'target_link_options',
+     ('allCoreTests', 'PRIVATE', '-Wl,--wrap=eglMakeCurrent')),
     # mallocProbe.cpp starts unarmed (thread-local), observes/rejects only while
     # explicitly armed by audioDecodeBounds, and otherwise calls __real_malloc.
     ('audioDecodeBounds', 'target_link_options',

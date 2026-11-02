@@ -1,0 +1,1 @@
+Production-linked session tests need their own process; terminal scenarios are supervised by test.py. Explicit --mac-device retains native Apple-event probes.

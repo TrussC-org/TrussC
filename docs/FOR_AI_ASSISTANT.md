@@ -53,6 +53,51 @@ TrussC itself builds without compiler warnings on macOS, Windows and Linux, whic
 
 ## App Structure
 
+Runtime strongly owns every open Window. Releasing the last external shared handle does not close it. Explicit close and normal Runtime shutdown detach the App before disposing the native surface and GPU backing. A retained closed handle remains closed across later runs and owns no live backing. There is no default or main Window.
+
+Construct content with `window->setApp<Scene>(args...)`, or use `runApp<T>()` / `runHeadlessApp<T>()` to launch an App. Runtime owns the App attachments as well as the Windows. Each construction has its own owner token from before the derived constructor begins; nested construction restores the previous owner. Constructor-owned listeners, tools and completions belong to that candidate. A failed construction or a superseded unpublished candidate retires its registrations without calling setup, exit or cleanup. Direct construction and attaching an existing shared App are rejected. An App must not contain another App as a member or an additional base class. Factories bypass class-specific allocation overrides. `destroyApp()` leaves the Window empty; replacement preserves its event slots, settings and clock.
+
+Close, replacement, removal, headless shutdown and guest destruction use the same App ending: detach Window/root, deliver exit once, disconnect audio and wait, clean up the tree (only the App virtual in headless mode), then retire subscriptions, tools, completions and weak references. Normal Runtime shutdown retains one snapshot in reverse attachment order. Every Window backing is disposed before the graphics device and services stop.
+
+Runtime also owns OS session query/commit. Win32 uses a hidden top-level control HWND that outlives user windows; macOS forwards applicationShouldTerminate and NSWorkspaceWillPowerOff on the main queue. Busy means host/App code on the main stack, including native startup, constructor, callback and tick probes; workers alone do not count. Idle queries reuse Runtime-first exitRequested; busy queries accept without entering App callbacks. Commit is unvetoable and deduplicated. Busy commit invokes no App exit or cleanup and arms no watchdog. Windows returns from WM_ENDSESSION and lets the OS end the process; macOS calls _exit(0) before NSTerminateNow. Idle commit runs normal reverse ending and complete cleanup synchronously, closes the Logger file sink, flushes stdio, then calls std::exit with the application exit code on Windows and macOS. Like ordinary exit, it runs atexit handlers and C++ static destructors. Busy and OS-killed ends skip them; neither session path returns to frames.
+
+The OS-only watchdog bounds one idle ending across all Apps, including atexit handlers and static destructors; it remains armed until process exit. On Windows, loaded DLLs' destructors run after the OS stops the watchdog thread and are bounded only by the OS deadline. Its worker/storage are prepared at run admission and armed only for an idle commit. Runtime::setLogoutTimeout(float seconds) defaults to 3 seconds per run: negative/NaN log Error and keep the old value, zero ends immediately, and positive infinity disables the deadline. Ordinary Cmd+Q/exitApp/last-window close never arms it. Windows may enforce an earlier deadline; no fixed macOS logout allowance is asserted. App::exit should save briefly. On accepted ordinary macOS termination, Runtime retires every Window before returning NSTerminateNow, so AppKit cannot later release GPU targets after sg/sgl shutdown. Linux hosts without a session callback and mobile/Web host-stop events carry no desktop logout promise.
+
+When a Window's root App, or the headless root App, calls `exitApp()` or `requestExitApp()` in `setup()`, Runtime asks `exitRequested` as setup returns, before audio subscription or the next process services. If accepted, normal ending runs and no later console, update or draw callback runs. A veto continues normal operation. A child App leaves the request pending until the current tree traversal unwinds; Runtime handles it before the next process services. The current traversal may continue, but no App callbacks run after cleanup.
+
+Argument-free Window APIs in App callbacks, owned listeners and async completions resolve the App token. Unowned code must have exactly one open Window to omit its target; zero or multiple Windows produce an error. MCP uses positive Window IDs and returns the available IDs for an ambiguous or invalid target. Every development Window title carries [MCP].
+
+`quitOnClose` defaults to false for every Window. `setQuitOnClose(true)` requests normal application quit, allowing veto. An OS close of the last open Window or a quit-on-close Window queries process quit before closing anything. A veto keeps all Windows open. Code close skips closeRequested; last-window/quit-on-close asks exitRequested before any closure, and a veto keeps all Windows open. A non-last plain code close asks no request events; normal Window exit notification and App ending still run. App::exit also runs on replacement, destroyApp and hot reload, so it is unsuitable for expressing a window-close policy. A Window exit listener may request process quit after closure, but cannot provide the before-close veto guarantee of setQuitOnClose. Calling exitApp during Runtime shutdown does nothing.
+
+App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. Runtime owns exitRequested, deviceLost, hotReloadUnload and console. Lifecycle events notify Runtime first, then one reverse-attachment App snapshot (reload targets replacing Apps only). Quit gives every listener fresh cancel=false, ORs all vetoes, keeps the first nonempty veto reason and treats a throw as a veto while continuing. Device loss keeps its mutable cancellation behavior. Console is Runtime-only, once per subscribed slot, with subscriber ownership restored. See MIGRATION_0_8.md for `console::start()` usage.
+
+OS close asks the addressed Window's closeRequested with the same per-listener OR/throw-veto policy. On acceptance, quitOnClose/last-window process quit asks exitRequested before any closure. Either veto keeps all Windows open; both accepted use common ending. Window::close and process shutdown bypass closeRequested. App swap/destroy/reload call App::exit without a Window exit. exitApp inside App::exit or Runtime shutdown is inert; an owned Window exit listener can request normal quit while the process is still running. ImGui deadlines run in Runtime maintenance before MCP expiry, including no-draw turns.
+
+Runtime queue and maintenance work selects process context and progresses at safe outer host turns, including turns with no Window draws. Swapchain drawing requires a Window callback; explicit offscreen Fbo drawing remains available. Nested entries restore the caller's drawing and native state. Native creation establishes identity, resources, dimensions and binding readiness before App construction. Each resized frame reconciles its Window framebuffer, swapchain and automatic viewport before beginning a pass.
+
+`getWindowTitle()` returns the resolved Window's stored title (`Window::getTitle()`); `isWindowOccluded()` returns its native visibility snapshot (`Window::isOccluded()`). They use the same App-owner / sole-open-Window resolution as other Window helpers. Unowned callers with zero or multiple open Windows get an Error and an empty string or `false`, respectively. An App without a live Window gets those fallback values too.
+
+File drops on macOS, Windows and Linux go to the Window that received the drop, including secondary Windows. Its `events().filesDropped` listeners and `App::filesDropped(const vector<string>&)` callback receive the paths.
+
+`Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal, unavailable to public C++ and Lua callers. The framework drives the tree; App code overrides callbacks or listens through `events()`.
+
+Multiple Windows are supported on macOS, Windows and Linux X11. Create a Window with `createWindow(settings)`, then request content with `window->setApp<Scene>(args...)`. Unsupported platforms return nullptr with a diagnostic. Each Window owns its App, event stream, clock, input and drawing state. GPU resources such as Texture, Fbo, Mesh and Font can be shared across Windows. The Runtime retains every open Window until explicit close or shutdown; closing the first-created Window leaves the others running. `App::getWindow()` returns its attachment while it is live, and nullptr during ending or in a headless App.
+
+Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Headless executes only the App virtual update and ending, with no tree drawing.
+
+App audio callbacks attach after the first setup completes. Ending detaches the Window/root, delivers exit once, disconnects this App's audio callbacks and waits for callbacks already running, then calls cleanup and retires its owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
+
+Guest retirement cancels registered callbacks and releases their captures. Queued main-thread copies check owner liveness at execution and retain captures until the queue destroys them. Every successfully loaded module remains mapped for process lifetime. App, Event, resource and queue objects use ordinary shared storage.
+
+Under hot reload (TC_HOT_RELOAD), RuntimeSettings is not applied; the default uniform reservation is used.
+
+Hot reload supports a single window. While a hot-reload guest is loaded, creating a second or later open window emits a Warning each time; behaviour is not guaranteed. Reload happens at the main-thread outer-turn safe point and replaces the launch Window App if that Window is still open. Stop and join App-owned threads, cancel timers and finish async work in `events().hotReloadUnload` before the old App ends. Reload does not wait for or exclude that work; a worker already admitted before retirement can overlap it. Successfully loaded modules stay mapped for the process lifetime, and repeated reloads can grow process memory. iOS/Android/Web use the static fallback.
+
+
+On Windows and Linux, `runApp<T>(settings)` returns the App's exit code after the loop and Runtime cleanup, or 1 if setup never began. On macOS a normal quit ends the process inside AppKit's termination after the same cleanup, with the App's exit code as the process status, so `runApp` does not return and code after it does not run; it returns only when startup fails. On Android it stores the descriptor for `sokol_main()` and returns 0; the native host owns the loop and Runtime lifetime. On Web it returns 0 after handing the asynchronous loop to the browser; that return is not shutdown. `runHeadlessApp<T>(settings)` runs synchronously and returns the exit code. Android and Web retain their host-managed lifetimes rather than the desktop return contract.
+
+TrussC installs no built-in crash handler and writes no crash report. Use the platform debugger or external crash reporting when needed. Normal exit records describe cleanup only; their absence does not establish a crash.
+
 ### File Layout (3 files)
 ```cpp
 // src/tcApp.h
@@ -95,6 +140,10 @@ int main() {
     return TC_RUN_APP(tcApp, settings);
 }
 ```
+
+`RuntimeSettings::reserveUniformBuffer()` reserves the process-wide GPU uniform buffer; pass it as the second argument to `runApp<T>(windowSettings, runtimeSettings)`. Clipboard text, dropped file counts and UTF-8 drop path lengths have no TrussC size limit; storage grows with the actual content. `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
+
+Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. `showCursor()`, `hideCursor()`, `setCursor()`, `bindCursorImage()` and `unbindCursorImage()` do nothing before native app startup or after native app cleanup, including in a headless app.
 
 ### FPS Control
 ```cpp
@@ -916,9 +965,9 @@ photo.setDebugName("photo");
 {"source":{"fbo":"bloom"},"ops":[{"op":"stats"}]}
 ```
 
-`source` contains exactly one of `window` (index from `tc_list_windows`),
+`source` contains exactly one of `window` (id from `tc_list_windows`),
 `fbo` or `image` (debug name or index from `tc_list_fbos` / `tc_list_images`),
-or `path` (saved file). Lists contain index, name, width, height and format;
+or `path` (saved file). Image and FBO lists contain index, name, width, height and format;
 unnamed objects remain discoverable by index. Moves transfer names and indices;
 moved-from objects and destroyed objects disappear from the lists. Duplicate
 names require an index. `Texture` is not a source: draw it into a named Fbo.
@@ -1012,7 +1061,7 @@ Being header-only gives high portability (a nice side benefit for TrussC's gener
 
 ### Can TrussC open multiple windows?
 
-Yes — since v0.7.0 (macOS / Windows / desktop Linux). `createWindow(settings)` returns a `shared_ptr<Window>`, and `Window::setApp(make_shared<SubApp>())` gives it content: the SubApp runs the familiar `setup()/update()/draw()` + input-hook lifecycle, wired to *that* window. **Everything is per-window** — mouse/keyboard state, hover/drag, camera, delta time, ImGui context — so `getMouseX()`, `getDeltaTime()`, `imguiBegin()` etc. answer for the window whose App is running; there is no new API to learn beyond `createWindow` / `setApp`. **GPU resources (Texture / Fbo / Mesh / Font) are shared** across windows, so render once into an Fbo and draw it in both. Each window ticks on its own display's vsync, and a fully occluded window skips rendering without stalling the others. On single-window platforms (web / iOS / Android / Raspberry Pi) `createWindow()` logs an error and returns nullptr. See `examples/windowing/`. (For *cross-machine* or *cross-process* setups, texture sharing still applies: **tcxSyphon**, **tcxNDI**, **tcxNozzle**, **tcxVirtualCam**.)
+Multiple Windows are supported on macOS, Windows and Linux X11. Create a Window with `createWindow(settings)`, then request content with `window->setApp<Scene>(args...)`. Unsupported platforms return nullptr with a diagnostic. Each Window owns its App, event stream, clock, input and drawing state. GPU resources such as Texture, Fbo, Mesh and Font can be shared across Windows. The Runtime retains every open Window until explicit close or shutdown; closing the first-created Window leaves the others running. `App::getWindow()` returns its attachment while it is live, and nullptr during ending or in a headless App.
 
 ### How does one C++ codebase run on every platform?
 
@@ -1140,6 +1189,7 @@ Heavy compute lives in addons and leans on C++ speed. For example **tcxPhysics**
 
 TrussC keeps resource use small, so power draw is low — lightness helps battery, not just frame rate. Lowering draw frequency helps most:
 - `setFps(60)` for a fixed rate; `setFps(EVENT_DRIVEN)` for "draw only when `redraw()` is called."
+- `setFps()`, `setIndependentFps()` and `redraw()` target the current window (inside a window’s callbacks, that window). `win->setFps()` and `win->setIndependentFps()` target that window from anywhere on the main thread.
 - `setIndependentFps(updateFps, drawFps)` separates update and draw rates. e.g. `setIndependentFps(60, EVENT_DRIVEN)` runs logic/timers steadily at 60fps but draws only when the screen changes via `redraw()` — an idle UI barely touches the GPU.
 - Sentinels: `VSYNC` (-1, monitor sync = default) and `EVENT_DRIVEN` (0). `redraw(count = 1)` requests a draw; `getFpsSettings()` reads the current rate.
 A barely-redrawing UI can run for many hours on mobile.
@@ -1166,7 +1216,7 @@ The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers 
 
 App itself is the scene-graph root Node. The basic loop is `setup()` (once) → `update()` → `draw()` each frame. Nodes form a parent/child transform hierarchy; input is dispatched depth-first and stops propagating once `consumed` (children receive events in their parent's local coordinates). Drawing is sokol_gl-based — a procedural, "immediate-mode-style" API (`setColor()` → `drawRect()`), but internally deferred (vertices accumulate into buffers and are submitted later, so nothing is drawn the instant you call it). Each Node's `draw()` starts from a clean default style (white, fill, no stroke — parent style does not cascade, favoring predictability). Behavior can be added by subclassing or by attaching `Mod`s (`addMod<T>()`). The tree and GPU resources (Texture / Fbo) are main-thread-owned; hand work from other threads via `runOnMainThread()`.
 
-On the main window (also Android/iOS/Web), the hot-reload host and MCP input, App-facing events use one notify: BeforeApp (default 0) → App (100, virtual then tree where applicable) → AfterApp (200). **Consumed input skips App virtuals as well as the tree and later listeners.** The framework App binding survives clear(); explicit 100 follows registration order. Touch defaults run before App touch callbacks, and the host forwards touch to the current guest. An enabled App root no longer consumes background mouse input by default. EasyCam starts gestures after the tree, tracks moves/releases before it, and checks scroll's own position. Headless update/exit use the protected App slots described above; secondary-window activation remains separate work under #947. Startup/reload resize seeds and guest-swap exit remain direct App-only calls.
+Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Headless executes only the App virtual update and ending, with no tree drawing.
 
 
 ### Subclass a Node, or attach a Mod?
@@ -1249,7 +1299,7 @@ public:
 };
 ```
 
-The App's own `audioOut()` / `audioIn()` overrides are handled for you: the framework subscribes them right after the App's first `setup()` returns, not when the App is constructed (so what `setup()` prepares is ready in them, and an App that is never run gets no callbacks). After `exit()`, it detaches them and waits before calling `cleanup()`, so cleanup may free their audio state (on exit, on a hot reload, and when a secondary window closes, swaps its App, or removes it). That framework wait has no time limit: a listener that never returns is a bug in the app, and the teardown hangs on it (after one second an error in the log says so) rather than destroy the App under it. So **inside an audio listener, never wait on the main thread or on a lock the main thread may hold** (no `runOnMainThread` round-trip, no mutex that `update()` or `cleanup()` holds for long). **An App runs once:** `setup()` when first attached, `exit()` / `cleanup()` when it leaves its window (`close()`, `setApp(other)`, or `setApp(nullptr)`); leaving also detaches its `audioOut()` / `audioIn()` for good. To show it again, create a new App. `Window::setApp()` refuses an App whose `cleanup()` already ran, and any App on a window that is not open; both log an error and leave the window as it is.
+App audio callbacks attach after the first setup completes. Ending detaches the Window/root, delivers exit once, disconnects this App's audio callbacks and waits for callbacks already running, then calls cleanup and retires its owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
 
 ### Bubble events up, don't broadcast?
 
@@ -1559,13 +1609,16 @@ This also works on the **default screen** (no camera scope): `z = 0` is pixel-id
 
 ### How do I quit the app? (exitApp vs requestExitApp)
 
-Both calls work in windowed and headless apps. In headless mode, `exitApp()`
-stops after the current update step; `requestExitApp()` dispatches the event
-on the main thread after the current pass, including all catch-up steps.
+Both calls request quit in windowed and headless apps. At the next safe point,
+Runtime asks `exitRequested`; a veto keeps the app running. A request from a
+root App's `setup()` is queried as setup returns. In headless mode, requests
+from `update()` are queried after the current update pass.
 
-Two options:
-- **`requestExitApp()`**: *requests* exit. Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set `args.cancel = true` to **cancel** it (for a "save before quit?" prompt). Equivalent to oF's `ofExit`.
-- **`exitApp()`**: exits immediately (not cancellable).
+- **`requestExitApp()`** requests exit without changing the exit code.
+- **`exitApp(code = 0)`** requests exit and sets the exit code.
+
+Listen to `events().exitRequested` (`Event<ExitRequestEventArgs>`) and set
+`args.cancel = true` to cancel either request, for example for a save prompt:
 ```cpp
 listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
     if (hasUnsavedChanges) e.cancel = true;   // stops the exit
@@ -1754,7 +1807,7 @@ The listener runs on whichever thread logged (pass `Deliver::Main` to `listen` b
 Normally `setFullscreen(true)` (or `WindowSettings().setFullscreen(true)`) is all you need. To span several displays you make a **borderless window** and place + size it yourself:
 ```cpp
 setWindowDecorated(false);     // borderless (no title bar / frame)
-setWindowPosition(0, 0);       // top-left; macOS / Windows only (no-op elsewhere)
+setWindowPosition(0, 0);       // top-left; macOS / Windows / Linux X11
 setWindowSize(spanW, spanH);   // you supply the combined size — see caveats
 ```
 Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDisplays` / `Monitor` don't exist; `getFramebufferWidth/Height` is the window, not the whole desktop), so you must know `spanW/spanH` yourself (or combine displays via a GPU/OS utility). `(0,0)` depends on **which display is primary**. On **macOS** you must turn **off** Mission Control's *"Displays have separate Spaces"* or one window can't cover multiple displays.
@@ -1763,13 +1816,13 @@ Caveats: TrussC has **no display-enumeration API** (`getScreenSize` / `getDispla
 
 ### How do I receive stdin commands?
 
-Console input is opt-in in both windowed and headless apps. Call `console::start()` in `setup()` and retain an `events().console.listen(...)` listener. Both runners deliver queued `ConsoleEventArgs` on the main thread each loop and call `console::stop()` before app exit/cleanup.
+Console input is opt-in in both windowed and headless apps. Call `console::start()` in `setup()` and retain a `runtime().events().console.listen(...)` listener. Runtime delivers queued `ConsoleEventArgs` on the main thread each service turn and calls `console::stop()` after App ending.
 
 There is one detached stdin reader per process, created on the first `start()`. `stop()` disables delivery and discards queued commands; a later `start()` discards pending commands and enables delivery again. The reader keeps consuming stdin while stopped, dropping those lines, and ends at EOF. It uses raw OS reads, accepts LF/CRLF and a partial last line at EOF, and does not hold a stdio lock that could block process exit. Web has no stdin command support.
 
 External stdin control text is limited to 1 MiB per line (LF excluded, CR included), 1024 pending commands and 16 MiB of queued raw text. Oversized lines are drained and rejected whole; a full queue rejects new whole commands. Reading continues while delivery is stopped or the queue is full. First rejection emits one Warning per store; internal cumulative counters live for the process lifetime.
 
-**v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps that only subscribe to `events().console` must add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
+**v0.8.0 migration (breaking): stdin commands need `console::start()`.** Existing apps must move `events().console` subscriptions to `runtime().events().console` and add the call in `setup()`. See [the migration note](MIGRATION_0_8.md).
 
 ### How do I make a console / CLI app (and optionally open a GUI)?
 
@@ -1784,7 +1837,7 @@ int main(int argc, char** argv) {
     return 1;                                                            // exit code
 }
 ```
-If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp()` (immediate) / `requestExitApp()` (cancellable). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
+If you want an app that runs without a window (update loop only, no `draw()`), use `runHeadlessApp<App>()` (see *Can I make a console / headless app?*). Exit from `main` with a `return` code, or from inside an app via `exitApp(code)` or `requestExitApp()` (both vetoable through `exitRequested`). Use `exitApp(code)` for a non-zero result, and return `runHeadlessApp<App>()` from `main()` to pass it to the caller.
 
 ### Windows: my console tool detaches from cmd / keeps running after I close the console — how do I make it a real console app?
 
@@ -1834,7 +1887,7 @@ For the other direction, path → string (display, `Font`, JSON, a string compar
 ### "Window / media / basics" → which API?
 
 - Window: `setWindowTitle()` / `setWindowSize()` / `setFullscreen(bool)` / `toggleFullscreen()`
-- Quit: `requestExitApp()` (cancellable) / `exitApp()` (immediate)
+- Quit: `requestExitApp()` / `exitApp(code)` (both vetoable through `exitRequested`)
 - Play a sound: `Sound` (a quick blip: `beep()`) / mic input: `MicInput`
 - Play video: `VideoPlayer` / webcam: `VideoGrabber` (both unsupported on Android)
 - Draw text: `Font` (TTF / system fonts) / `drawBitmapString` (built-in bitmap)
@@ -1872,7 +1925,7 @@ _Auto-generated C++ API index from `reference-data.json` (structure from the C++
 ### Lifecycle
 
 ```cpp
-int runApp(const WindowSettings & settings = WindowSettings())  // Starts the application loop for an App subclass.
+int runApp(const WindowSettings & settings, const RuntimeSettings & runtime) [+1]  // Starts the application loop for an App subclass.
 ```
 
 ### Graphics - Color
@@ -2006,8 +2059,7 @@ void alertDialogAsync(const std::string & title, const std::string & message, st
 void bindCursorImage(Cursor cursor, int width, int height, const unsigned char * pixels, int hotspotX = 0, int hotspotY = 0) [+1]  // Assigns an image to a mouse cursor slot.
 bool confirmDialog(const std::string & title, const std::string & message) [macos,windows,linux,android,web]  // Shows a confirmation dialog.
 void confirmDialogAsync(const std::string & title, const std::string & message, std::function<void (bool)> callback)  // Shows a confirmation dialog with a result callback.
-CoreEvents & events()  // Returns the current window context's CoreEvents hub.
-void exitApp(int code = 0)  // Orders the application to exit with normal cleanup.
+CoreEvents & events()  // Returns the events of the window the current App is in.
 Cursor getCursor()  // Returns the selected mouse cursor shape.
 Vec2 getGlobalMousePos()  // Returns the mouse position in the current window.
 float getGlobalMouseX()  // Returns the current mouse X coordinate in the active window.
@@ -2033,7 +2085,6 @@ bool isShiftPressed()  // Returns whether either Shift key is recorded as presse
 bool isSuperPressed()  // Returns whether either Super, Command, or Windows key is recorded as pressed.
 FileDialogResult loadDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), bool folderSelection = false) [macos,windows,linux,android]  // Shows a file or folder selection dialog.
 void loadDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, bool folderSelection, std::function<void (const FileDialogResult &)> callback)  // Shows a file or folder picker with a result callback.
-void requestExitApp()  // Requests a cancellable application exit.
 FileDialogResult saveDialog(const std::string & title = std::string(""), const std::string & message = std::string(""), const fs::path & defaultPath = fs::path(), const fs::path & defaultName = fs::path()) [macos,windows,linux,android]  // Shows a file save dialog.
 void saveDialogAsync(const std::string & title, const std::string & message, const fs::path & defaultPath, const fs::path & defaultName, std::function<void (const FileDialogResult &)> callback)  // Shows a save destination picker with a result callback.
 void setCursor(Cursor cursor)  // Sets the mouse cursor shape.
@@ -2046,9 +2097,9 @@ void unbindCursorImage(Cursor cursor)  // Removes a custom cursor image.
 
 ```cpp
 double getDeltaTime()  // Returns the current update's time step in seconds.
-uint64_t getDrawCount()  // Returns the main window's frame counter.
+uint64_t getDrawCount()  // Returns the current window's real draw count.
 float getFps()  // Returns the measured update rate.
-FpsSettings getFpsSettings()  // Returns the main loop's frame-rate configuration.
+FpsSettings getFpsSettings()  // Returns the current window's frame-rate configuration.
 uint64_t getFrameCount()  // Returns the current window's update counter.
 double getFrameRate()  // Returns the measured number of updates per second.
 uint64_t getUpdateCount()  // Return the current window's update counter.
@@ -2218,9 +2269,9 @@ int getFramebufferHeight()  // Returns the current window framebuffer's height.
 int getFramebufferWidth()  // Returns the current window framebuffer's width.
 bool getKeepScreenOn() [macos,windows,linux,android,ios,web]  // Returns the keep-screen-on setting.
 int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
-IVec2 getWindowPosition() [macos,windows]  // Returns the window position on the screen.
+IVec2 getWindowPosition() [macos,windows,linux]  // Returns the window position on the screen.
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
-bool isFullscreen()  // Returns whether the current window is fullscreen.
+bool isFullscreen()  // Returns whether fullscreen currently blocks this window's size and position requests.
 bool isRecording()  // Returns whether the global screen recorder is capturing.
 int recordingFrameCount()  // Returns the global recording's accepted video frame count.
 fs::path recordingPath()  // Returns the global recording's output path.
@@ -2233,10 +2284,10 @@ void setIndependentFps(float updateFps, float drawFps)  // Sets separate update 
 void setKeepScreenOn(bool enabled) [macos,windows,linux,android,ios,web]  // Requests that the display stay on.
 void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
 void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
-void setWindowDecorated(bool decorated)  // Controls the main window's standard decorations.
-void setWindowPosition(int x, int y) [macos,windows]  // Moves the window to a screen position.
+void setWindowDecorated(bool decorated)  // Controls the resolved Window's standard decorations.
+void setWindowPosition(int x, int y) [macos,windows,linux]  // Moves the window to a screen position.
 void setWindowSize(int width, int height)  // Resizes the window in the current coordinate units.
-void setWindowSizeLogical(int width, int height)  // Resizes the main window using logical dimensions.
+void setWindowSizeLogical(int width, int height)  // Resizes the current window using logical dimensions.
 void setWindowTitle(const std::string & title)  // Sets the window title.
 SaveResult startRecording(const fs::path & path, const VideoRecordSettings & settings = {}) [+3] [macos,windows,linux,android,ios]  // Starts recording a window or Fbo to a video file.
 SaveResult stopRecording()  // Stops the global recording and finalizes its file.
@@ -2550,15 +2601,18 @@ float atanh(float x) [std]  // Returns the inverse hyperbolic tangent.
 Baseline  // Provides shorthand for text baseline alignment.
 Bottom  // Provides shorthand for bottom alignment.
 Center  // Provides shorthand for center alignment.
-std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Creates a secondary application window.
+std::shared_ptr<Window> createWindow(const WindowSettings & settings = {}) [macos,windows,linux]  // Opens a new, empty window.
 const char * enumLabel(E value)  // Returns the display string for an enum value.
 const std::array<std::string_view, internal::enumValidCount<E> enumNames()  // Returns the automatically discovered names of an enum's enumerators.
 EnumLabelSpan enumReflectedSpan()  // Returns an enum label table built from reflection.
 const std::array<E, internal::enumValidCount<E> enumValues()  // Returns the automatically discovered values of an enum's enumerators.
 EVENT_DRIVEN  // Selects rendering on demand.
+void exitApp(int code = 0)  // Asks the process to quit, with an exit code.
 float exp2(float x) [std]  // Returns two raised to the given power.
 int getResourceLoadConcurrency()  // Returns how many resource loads can prepare at once.
+const std::string & getWindowTitle()  // Returns the current Window title.
 HALF_TAU  // Represents half a turn in radians.
+bool isWindowOccluded()  // Reports whether the current Window is hidden by native visibility signals.
 KEY_BACKSPACE  // Identifies the Backspace key.
 KEY_DELETE  // Identifies the Delete key.
 KEY_DOWN  // Identifies the Down arrow key.
@@ -2600,7 +2654,9 @@ Vec2 operator*(float s, const Vec2 & v) [+4]  // Multiplies values according to 
 PI ⚠️deprecated  // Represents the ratio of a circle's circumference to its diameter.
 QUARTER_TAU  // Defines a quarter turn in radians.
 float remainder(float x, float y) [std]  // Returns the IEEE floating-point remainder.
+void requestExitApp()  // Asks the process to quit, keeping the current exit code.
 Right  // Provides shorthand for `Direction::Right`.
+Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
 void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
@@ -2618,8 +2674,8 @@ VSYNC  // Selects frame scheduling at the display refresh rate.
 void App::audioIn(const AudioInBuffer & buf)  // Meant for reading incoming audio on the audio thread, but currently never called.
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
 void App::exit()  // Called once when the App ends, right before cleanup().
-void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto the main window, with their paths.
-Window * App::getWindow() const  // Returns the Window this App was put into with Window::setApp(), or nullptr.
+void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto this Window, with their paths.
+Window * App::getWindow() const  // Returns the window this App is attached to, or nullptr.
 bool App::isExitRequested() const  // Returns whether requestExit() has been called on this App.
 void App::keyPressed(const KeyEventArgs & e) [+1]  // Called when a key is pressed, and again on each auto-repeat while it is held.
 void App::keyReleased(const KeyEventArgs & e) [+1]  // Called when a key is released.
@@ -2745,6 +2801,11 @@ float ChipSoundNote::getTotalDuration() const  // Returns the note duration.
 ```
 
 ### ClipboardPastedEventArgs — Carries text received by a clipboard paste event.
+
+```cpp
+```
+
+### CloseRequestEventArgs — The argument of closeRequested: whether to keep the window open.
 
 ```cpp
 ```
@@ -2928,7 +2989,7 @@ void EventListener::disconnect()  // Explicitly disconnects the listener.
 bool EventListener::isConnected() const  // Returns the token's recorded connection state.
 ```
 
-### ExitRequestEventArgs — Carries a cancellable application exit request.
+### ExitRequestEventArgs — The argument of exitRequested: whether to cancel the quit, and an optional reason.
 
 ```cpp
 ```
@@ -3065,7 +3126,7 @@ std::string Font::wrapTextIfEnabled(const std::string & text) const  // Apply wr
 std::string Font::wrapTextVertical(const std::string & text) const  // Insert newlines to wrap vertical text into columns.
 ```
 
-### FpsSettings — Reports the main loop’s frame-rate configuration.
+### FpsSettings — Reports the current window’s frame-rate configuration.
 
 ```cpp
 ```
@@ -3566,7 +3627,7 @@ void Node::cancelAllAsyncTimers() [macos,windows,linux,android,ios]  // Cancels 
 void Node::cancelAllTimers()  // Cancels all frame timers on this node.
 void Node::cancelAsyncTimer(uint64_t id) [macos,windows,linux,android,ios]  // Cancels a background scheduler timer by ID.
 void Node::cancelTimer(uint64_t id)  // Cancels a frame timer by ID.
-void Node::cleanup()  // Called when a node you destroy() is removed from the tree (children first), and for the App at shutdown.
+void Node::cleanup()  // Called when a node you destroy() is removed from the tree, and on every node of an App when the App ends (children first).
 void Node::destroy()  // Marks this node for deferred removal.
 void Node::disableEvents()  // Disables this node's event flag.
 void Node::draw()  // Called on each drawn frame to draw the node, in its own local coordinates and starting from the default style.
@@ -3674,6 +3735,11 @@ void Node::update()  // Called on every update step while the node is active, be
 
 ```cpp
 bool Node::HitResult::hit() const  // Returns whether the result contains a hit node.
+```
+
+### OccludedEventArgs — Describes a change in window visibility.
+
+```cpp
 ```
 
 ### OnceGate — Controls whether an action runs once or at a specified interval.
@@ -3878,6 +3944,24 @@ bool Reflector::visit(const char * name, float & v) [+7]  // Processes one refle
 ### ResizeEventArgs — Carries the new window dimensions.
 
 ```cpp
+```
+
+### Runtime — The object that represents the whole running process.
+
+```cpp
+RuntimeEvents & Runtime::events()  // Returns the events that belong to the whole process.
+void Runtime::setLogoutTimeout(float seconds)  // Sets the time limit for the normal ending when the OS logs out, restarts or shuts down.
+```
+
+### RuntimeEvents — Holds the events that belong to the whole process rather than to one window.
+
+```cpp
+```
+
+### RuntimeSettings — Configures app-wide runtime values at startup.
+
+```cpp
+RuntimeSettings & RuntimeSettings::reserveUniformBuffer(int bytes)  // Sets the app-wide GPU uniform buffer reservation.
 ```
 
 ### SaveResult — Represents the result of a save or recording operation.
@@ -4674,40 +4758,42 @@ SaveResult VideoWriter::submitFrame(double timeSec) [macos]  // Submits the prev
 SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double timeSec) [macos,windows,linux,android,ios]  // Appends audio samples at a specified presentation time.
 ```
 
-### Window — Represents a secondary application window.
+### Window — A window on the screen, with its own App, events and drawing state.
 
 ```cpp
-void Window::close() [macos,windows,linux]  // Requests closure of this window.
-CoreEvents & Window::events() [macos,windows,linux]  // Returns this window's event collection.
-std::shared_ptr<App> Window::getApp() const [macos,windows,linux]  // Returns the App currently attached to this window.
-float Window::getFps() const [macos,windows,linux]  // Returns this window's target frame rate.
-int Window::getHeight() const [macos,windows,linux]  // Returns this window's content height.
+void Window::close()  // Requests closure of this window.
+void Window::destroyApp()  // Removes the App from this window and leaves the window open and empty.
+CoreEvents & Window::events()  // Returns this window's event collection.
+std::shared_ptr<App> Window::getApp() const  // Returns the App currently attached to this window.
+float Window::getFps() const  // Returns this window's target frame rate.
+int Window::getHeight() const  // Returns this window's content height.
 IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
-const std::string & Window::getTitle() const [macos,windows,linux]  // Returns the title stored for this window.
-int Window::getWidth() const [macos,windows,linux]  // Returns this window's content width.
-bool Window::isFullscreen() const [macos,windows,linux]  // Returns this window's fullscreen state.
-bool Window::isOccluded() const [macos,windows,linux]  // Returns whether the operating system reports this window as not visible.
-bool Window::isOpen() const [macos,windows,linux]  // Returns whether this window's native window still exists.
-void Window::setApp(std::shared_ptr<App> app) [macos,windows,linux]  // Requests an App attachment or replacement for this window.
-void Window::setClearColor(const Color & c) [macos,windows,linux]  // Sets this window's background clear color.
-void Window::setFps(float fps) [macos,windows,linux]  // Sets this window's target frame rate.
-void Window::setFullscreen(bool full) [macos,windows,linux]  // Sets this window's fullscreen mode.
+const std::string & Window::getTitle() const  // Returns the title stored for this window.
+int Window::getWidth() const  // Returns this window's content width.
+bool Window::isFullscreen() const  // Returns whether fullscreen currently blocks this window's size and position requests.
+bool Window::isOccluded() const  // Returns whether this window is minimized or fully hidden according to trusted operating system observations.
+bool Window::isOpen() const  // Returns whether this window is open.
+void Window::setApp(Args &&... args)  // Creates a new App of the given class and puts it in this window.
+void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
+void Window::setFps(float fps)  // Sets this window's target frame rate.
+void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
+void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
 void Window::setPosition(int x, int y) [macos,windows,linux]  // Move this window on the desktop, in screen coordinates with the primary display's top-left at (0, 0); a display left of or above the primary one has negative coordinates. To fill a second display, move the window there first and then call setFullscreen — fullscreen covers the display the window is currently on
-void Window::setSize(int width, int height) [macos,windows,linux]  // Resizes this window's content area.
-void Window::setTitle(const std::string & title) [macos,windows,linux]  // Sets this window's title.
-void Window::toggleFullscreen() [macos,windows,linux]  // Toggles this window's fullscreen mode.
+void Window::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
+void Window::setSize(int width, int height)  // Resizes this window's content area.
+void Window::setTitle(const std::string & title)  // Sets this window's title.
+void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 ```
 
 ### WindowSettings — Configures the application window at startup.
 
 ```cpp
-WindowSettings & WindowSettings::reserveUniformBuffer(int bytes)  // Sets the initial capacity of the per-frame GPU uniform buffer.
-WindowSettings & WindowSettings::setClipboardSize(int size)  // Sets the clipboard buffer capacity.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
-WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the main window starts in fullscreen.
+WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
 WindowSettings & WindowSettings::setPipelinePoolSize(int count)  // Sets the startup pipeline pool slot count.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.
+WindowSettings & WindowSettings::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
 WindowSettings & WindowSettings::setResourcePoolSize(int count)  // Sets the startup slot count for each resource pool.
 WindowSettings & WindowSettings::setSampleCount(int count)  // Sets the window's MSAA sample count.
 WindowSettings & WindowSettings::setShaderPoolSize(int count)  // Sets the startup shader pool slot count.
@@ -4836,7 +4922,7 @@ using XmlParseResult  // Reports the outcome of parsing an XML document.
 ## Macros
 
 ```cpp
-TC_RUN_APP(AppClass, settings)  // Runs your App subclass with the given window settings; use it in main().
+TC_RUN_APP(AppClass, settings)  // Starts the App from your own main(), switching to hot reload when TC_HOT_RELOAD is used.
 TC_HOT_RELOAD(AppClass)  // Turns on hot reload, so saving your code rebuilds and reloads the running app without restarting it.
 TC_NO_HOT_RELOAD("reason");  // Declares that this code cannot be hot-reloaded, so a hot-reload build stops with your reason.
 TC_REFLECT(Self, ...Bases) { TC_VALUE(...) ... }  // Declare a class's reflected members — exposed to the inspector, serialization, and MCP — with no hand-written plumbing.
@@ -5008,6 +5094,7 @@ saveScreenshot("capture.png");   // Saves to bin/data/
 ```
 
 ### Cursor
+Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. Setters do nothing before native app startup or after native app cleanup; call them from `setup()` or later callbacks.
 ```cpp
 setCursor(Cursor::Hand);         // System cursors: Default, Arrow, IBeam, Crosshair,
                                  //   Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW,
@@ -5035,19 +5122,35 @@ bindCursorImage(Cursor::Custom1, fboImg, 16, 16);
 ```
 
 ### Exit App
+Both calls request process quit through `exitRequested`; listeners can veto.
 ```cpp
-exitApp();           // Immediate exit (no cancel)
-requestExitApp();    // Cancellable — fires exitRequested event
-
-// Confirm dialog pattern
-events().exitRequested.subscribe([](ExitRequestEventArgs& args) {
-    args.cancel = true;          // Prevent immediate exit
-    showConfirmDialog = true;    // Show your own UI
-});
-
-// When user clicks "Yes":
-exitApp();
+exitApp();           // Request quit with exit code 0
+exitApp(1);          // Request quit with exit code 1
+requestExitApp();    // Request quit without changing the exit code
 ```
+
+Remember confirmation before requesting quit again, because `exitApp()` sends
+`exitRequested` again. For example, inside your App class:
+```cpp
+EventListener quitListener;
+bool quitConfirmed = false;
+bool showConfirmDialog = false;
+
+void setup() override {
+    quitListener = events().exitRequested.listen([this](ExitRequestEventArgs& e) {
+        if (quitConfirmed) return;
+        e.cancel = true;
+        showConfirmDialog = true; // Draw your own confirmation UI
+    });
+}
+
+// Call when the user accepts your confirmation UI.
+void confirmQuit() {
+    quitConfirmed = true;
+    exitApp();
+}
+```
+See [exitExample](../examples/events/exitExample/src/tcApp.cpp) for a complete app.
 
 ## Sound
 

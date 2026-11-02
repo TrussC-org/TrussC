@@ -257,7 +257,12 @@ protected:
             }
             return;
         }
-        pendingUniforms[slot].assign((const uint8_t*)data, (const uint8_t*)data + size);
+        auto& bytes = pendingUniforms[slot];
+        if (size == 0) {
+            bytes.clear();
+            return;
+        }
+        bytes.assign((const uint8_t*)data, (const uint8_t*)data + size);
     }
 
     // Apply all stored uniforms
@@ -555,7 +560,7 @@ public:
         if (!loaded) return;
 
         // Ensure render pass is active (swapchain or FBO)
-        internal::ensureCurrentPass();
+        if (!internal::ensureCurrentPass()) return;
 
         // Submit all preceding layers, including deferred user shaders, meshes
         // and points. Advance the command base so end()/present() cannot blend

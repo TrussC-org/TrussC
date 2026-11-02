@@ -4,12 +4,52 @@
 
 #include "tc/utils/tcFileDialog.h"
 #include "tc/utils/tcMainThread.h"
+#include "tc/utils/tcTeardown.h"
 
 #if defined(__APPLE__)
 
 #import <Cocoa/Cocoa.h>
 
 namespace trussc {
+
+namespace {
+// Dialogs and their completions run on the main thread.
+struct DialogSheet {
+    NSWindow* sheet;
+    std::function<void(NSModalResponse)> completion;
+};
+std::vector<std::shared_ptr<DialogSheet>>& dialogSheets() {
+    // Process lifetime: Runtime's atexit shutdown can still cancel sheets.
+    static auto* sheets = new std::vector<std::shared_ptr<DialogSheet>>;
+    return *sheets;
+}
+void completeDialogSheet(const std::shared_ptr<DialogSheet>& sheet, NSModalResponse response) {
+    std::erase(dialogSheets(), sheet);
+    auto completion = std::exchange(sheet->completion, {});
+    if (completion) completion(response);
+}
+std::function<void(NSModalResponse)> trackDialogSheet(
+        NSWindow* sheet, std::function<void(NSModalResponse)> completion) {
+    auto pending = std::make_shared<DialogSheet>(DialogSheet{sheet, std::move(completion)});
+    dialogSheets().push_back(pending);
+    return [pending](NSModalResponse response) { completeDialogSheet(pending, response); };
+}
+} // namespace
+
+namespace internal {
+void cancelMacDialogSheets() noexcept {
+    auto sheets = std::exchange(dialogSheets(), {});
+    TeardownSteps steps;
+    for (const auto& pending : sheets) {
+        steps.run("dialog sheet dismissal", [&] {
+            [pending->sheet.sheetParent endSheet:pending->sheet returnCode:NSModalResponseCancel];
+        });
+        // AppKit may defer its completion until after App teardown. Deliver
+        // cancellation while the owner is alive; the later native reply is a no-op.
+        steps.run("dialog sheet cancellation", [&] { completeDialogSheet(pending, NSModalResponseCancel); });
+    }
+}
+} // namespace internal
 
 // -----------------------------------------------------------------------------
 // Alert dialog
@@ -28,6 +68,7 @@ void alertDialog(const std::string& title, const std::string& message) {
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
                       std::function<void()> callback) {
+    callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     @autoreleasepool {
         NSAlert* alert = [[NSAlert alloc] init];
@@ -38,11 +79,12 @@ void alertDialogAsync(const std::string& title,
 
         NSWindow* window = [[NSApplication sharedApplication] keyWindow];
         if (window) {
-            [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
+            auto completion = trackDialogSheet([alert window], [=](NSModalResponse response) {
                 (void)response;
                 if (!internal::appRunIsAlive(token)) return;
                 if (callback) callback();
-            }];
+            });
+            [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) { completion(response); }];
         } else {
             [alert runModal];
             if (internal::appRunIsAlive(token) && callback) callback();
@@ -68,6 +110,7 @@ bool confirmDialog(const std::string& title, const std::string& message) {
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
                         std::function<void(bool)> callback) {
+    callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     @autoreleasepool {
         NSAlert* alert = [[NSAlert alloc] init];
@@ -79,10 +122,11 @@ void confirmDialogAsync(const std::string& title,
 
         NSWindow* window = [[NSApplication sharedApplication] keyWindow];
         if (window) {
-            [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
+            auto completion = trackDialogSheet([alert window], [=](NSModalResponse response) {
                 if (!internal::appRunIsAlive(token)) return;
                 if (callback) callback(response == NSAlertFirstButtonReturn);
-            }];
+            });
+            [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) { completion(response); }];
         } else {
             NSModalResponse response = [alert runModal];
             if (internal::appRunIsAlive(token) && callback) callback(response == NSAlertFirstButtonReturn);
@@ -145,6 +189,7 @@ void loadDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
+    callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     @autoreleasepool {
         NSOpenPanel* panel = [NSOpenPanel openPanel];
@@ -176,7 +221,7 @@ void loadDialogAsync(const std::string& title,
 
         NSWindow* window = [[NSApplication sharedApplication] keyWindow];
         if (window) {
-            [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
+            auto completion = trackDialogSheet(panel, [=](NSModalResponse response) {
                 if (!internal::appRunIsAlive(token)) return;
                 FileDialogResult result;
                 if (response == NSModalResponseOK) {
@@ -188,7 +233,8 @@ void loadDialogAsync(const std::string& title,
                     }
                 }
                 if (callback) callback(result);
-            }];
+            });
+            [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) { completion(response); }];
         } else {
             FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection);
             if (internal::appRunIsAlive(token) && callback) callback(result);
@@ -243,6 +289,7 @@ void saveDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
+    callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     @autoreleasepool {
         NSSavePanel* panel = [NSSavePanel savePanel];
@@ -266,7 +313,7 @@ void saveDialogAsync(const std::string& title,
 
         NSWindow* window = [[NSApplication sharedApplication] keyWindow];
         if (window) {
-            [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) {
+            auto completion = trackDialogSheet(panel, [=](NSModalResponse response) {
                 if (!internal::appRunIsAlive(token)) return;
                 FileDialogResult result;
                 if (response == NSModalResponseOK) {
@@ -278,7 +325,8 @@ void saveDialogAsync(const std::string& title,
                     }
                 }
                 if (callback) callback(result);
-            }];
+            });
+            [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) { completion(response); }];
         } else {
             FileDialogResult result = saveDialog(title, message, defaultPath, defaultName);
             if (internal::appRunIsAlive(token) && callback) callback(result);

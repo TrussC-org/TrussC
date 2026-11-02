@@ -28,8 +28,8 @@ using namespace tc;
 namespace {
 // Stand-ins need only report isOpen(); cleanup never calls platform code.
 struct OpenWindow : Window {
-    OpenWindow() { native_ = this; }
-    ~OpenWindow() { native_ = nullptr; }
+    OpenWindow() { native_ = this; internal::WindowRequestAccess::bindForTests(*this, 202); }
+    ~OpenWindow() { native_ = nullptr; internal::WindowRequestAccess::unbind(*this); }
 };
 int failures = 0;
 void check(bool ok, const char* what) {
@@ -43,12 +43,12 @@ TC_CORE_TEST_MAIN() {
     {
         OpenWindow first, second;
         Window closed;
-        auto& main = internal::mainWindowContext();
+        auto& main = internal::windowApiContext();
         auto material = std::make_unique<Material>();
         auto environment = std::make_unique<Environment>();
         auto light = std::make_unique<Light>();
         Light survivor;
-        for (auto* context : {&main, &first.context(), &second.context(), &closed.context()}) {
+        for (auto* context : {&main, &trussc::internal::WindowRequestAccess::context(first), &trussc::internal::WindowRequestAccess::context(second), &trussc::internal::WindowRequestAccess::context(closed)}) {
             context->currentMaterial = material.get();
             context->currentEnvironment = environment.get();
             context->activeLights = {light.get(), &survivor, light.get()};
@@ -60,7 +60,7 @@ TC_CORE_TEST_MAIN() {
         light.reset();
         failAll = false;
         bool cleared = failedAllocations == 0;
-        for (auto* context : {&main, &first.context(), &second.context(), &closed.context()}) {
+        for (auto* context : {&main, &trussc::internal::WindowRequestAccess::context(first), &trussc::internal::WindowRequestAccess::context(second), &trussc::internal::WindowRequestAccess::context(closed)}) {
             cleared &= !context->currentMaterial && !context->currentEnvironment &&
                 context->activeLights.size() == 1 && context->activeLights.front() == &survivor;
             context->activeLights.clear();

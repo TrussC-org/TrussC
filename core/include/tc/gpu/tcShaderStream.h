@@ -11,6 +11,7 @@
 #include "../../sokol/sokol_gfx.h"
 #endif
 #include "tcGpuDestroyQueue.h"
+#include "../app/tcExit.h"
 
 namespace trussc {
 namespace internal { struct PipelineGeneration; }

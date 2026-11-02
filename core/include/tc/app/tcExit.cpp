@@ -2,6 +2,16 @@
 #include <mutex>
 #include <atomic>
 #include <csignal>
+#include <cmath>
+#include <thread>
+#include <memory>
+#include <utility>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 #if defined(_WIN32)
 #include <process.h>
 #else
@@ -12,6 +22,79 @@
 #endif
 
 namespace trussc::internal {
+void LogoutDeadline::reset() noexcept { state_.store(Idle, std::memory_order_release); }
+void LogoutDeadline::arm(float seconds, Clock::time_point now) noexcept {
+    auto expected = Idle;
+    if (!state_.compare_exchange_strong(expected, Preparing, std::memory_order_acq_rel)) return;
+    // A very large finite value still has its numeric duration. Saturate only
+    // the clock representation, avoiding an overflowing duration conversion.
+    const auto available = Clock::time_point::max() - now;
+    const auto deadline = double(seconds) >= std::chrono::duration<double>(available).count()
+        ? Clock::time_point::max() : now + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
+    deadline_.store(deadline.time_since_epoch().count(), std::memory_order_relaxed);
+    expected = Preparing;
+    state_.compare_exchange_strong(expected, std::isinf(seconds) ? Disabled : Armed, std::memory_order_release);
+}
+bool LogoutDeadline::expire(Clock::time_point now) noexcept {
+    if (state_.load(std::memory_order_acquire) != Armed || now.time_since_epoch().count() < deadline_.load(std::memory_order_relaxed)) return false;
+    auto expected = Armed;
+    return state_.compare_exchange_strong(expected, Expired, std::memory_order_acq_rel);
+}
+void LogoutDeadline::cancel() noexcept { state_.exchange(Cancelled, std::memory_order_acq_rel); }
+[[noreturn]] void terminateSessionProcess(int code) noexcept {
+#ifdef _WIN32
+    TerminateProcess(GetCurrentProcess(), static_cast<UINT>(code));
+    _exit(code);
+#else
+    _exit(code);
+#endif
+}
+#ifndef __EMSCRIPTEN__
+namespace {
+struct LogoutWorker {
+    LogoutDeadline deadline;
+    std::atomic<bool> stop{false};
+    std::thread thread;
+};
+// Prepared on main before native session receivers can run. The worker only
+// observes the atomic deadline and stop flag.
+LogoutWorker& logoutWorker() { static auto* worker = new LogoutWorker; return *worker; }
+}
+#endif
+void prepareLogoutWatchdog() {
+#ifndef __EMSCRIPTEN__
+    cancelLogoutWatchdog();
+    // Prepare storage and the worker at run admission, before constructors or
+    // native callbacks can arrive. An idle commit only arms atomics.
+    auto& worker = logoutWorker();
+    worker.deadline.reset();
+    worker.stop.store(false, std::memory_order_release);
+    worker.thread = std::thread([state = &worker] {
+        while (!state->stop.load(std::memory_order_acquire)) {
+            if (state->deadline.expire(LogoutDeadline::Clock::now())) terminateSessionProcess();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+#endif
+}
+void cancelLogoutWatchdog() noexcept {
+#ifndef __EMSCRIPTEN__
+    auto& worker = logoutWorker();
+    worker.deadline.cancel();
+    worker.stop.store(true, std::memory_order_release);
+    if (worker.thread.joinable()) worker.thread.join();
+#endif
+}
+void armLogoutWatchdog(float seconds) noexcept {
+#ifndef __EMSCRIPTEN__
+    auto& worker = logoutWorker();
+    const auto now = LogoutDeadline::Clock::now();
+    worker.deadline.arm(seconds, now);
+    if (worker.deadline.expire(now)) terminateSessionProcess();
+#else
+    if (seconds == 0) terminateSessionProcess();
+#endif
+}
 namespace {
 std::mutex exitMutex;
 std::string reason;

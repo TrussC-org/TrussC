@@ -28,7 +28,8 @@ struct DisplayTestApp : AppClass {
 // Return this call directly; startup failures retain runApp's non-zero result.
 template<class AppClass>
 int runDisplayTest(const tc::WindowSettings& settings, int& failures,
-                   std::function<void()> finalChecks = {}) {
+                   std::function<void()> finalChecks = {},
+                   const tc::RuntimeSettings& runtime = {}) {
     using TestApp = detail::DisplayTestApp<AppClass>;
     TestApp::finish = [&failures, finalChecks = std::move(finalChecks)] {
         if (finalChecks) finalChecks();
@@ -40,7 +41,7 @@ int runDisplayTest(const tc::WindowSettings& settings, int& failures,
         std::fflush(stdout);
         std::fflush(stderr);
     };
-    return tc::runApp<TestApp>(settings);
+    return tc::runApp<TestApp>(settings, runtime);
 }
 
 } // namespace tcCoreTest

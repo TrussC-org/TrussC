@@ -6,15 +6,18 @@
 #include <initializer_list>
 #include <limits>
 #include <type_traits>
+#include <string>
+#include <vector>
 
 #include WEB_DROP_APP_HEADER
 
 #ifndef __EMSCRIPTEN__
 // Only the browser boundary and state are substituted in the native build.
 static struct {
-    struct { bool enabled = true; int num_files = 1; } drop;
+    struct { bool enabled = true; } drop;
     sapp_desc desc = {};
 } _sapp_tc;
+static std::vector<std::string> _sapp_tc_dropped_paths(1);
 static double fileSize;
 static int readers;
 static sapp_html5_fetch_request pending;
@@ -67,6 +70,13 @@ EM_JS(void, installBrowser, (), {
             if (this.abortThrows) throw new Error('abort unavailable');
         }
     };
+});
+EM_JS(void, transferLargeLocalData, (), {
+    const text = 'D3b-日本語\n'.repeat(20000);
+    Module.sokol_paste({clipboardData: {getData() {return text;}}});
+    const files = Array.from({length: 20}, (_, index) => ({name: index + text, size: 4}));
+    Module.sokol_drop({stopPropagation() {}, preventDefault() {}, dataTransfer: {files}});
+    Module.sokol_dropped_files = [{size: 4}];
 });
 EM_JS(void, setFile, (double size), { Module.sokol_dropped_files = [{size: size}]; });
 EM_JS(int, readerCount, (), { return Module.testReaders.length; });
@@ -148,11 +158,22 @@ int main() {
 #ifdef __EMSCRIPTEN__
     sapp_desc desc = {};
     desc.enable_dragndrop = true;
+    desc.enable_clipboard = true;
     desc.logger.func = logMessage;
     _sapp_tc_init_state(&desc);
     installBrowser();
     _sapp_tc_js_add_dragndrop_listeners();
-    _sapp_tc.drop.num_files = 1;
+    _sapp_tc_js_add_clipboard_listener();
+    transferLargeLocalData();
+    std::string localText;
+    for (int i = 0; i < 20000; ++i) localText += "D3b-日本語\n";
+    check("Web paste over 64 KiB arrives whole through heap bridge", _sapp_tc_clipboard_text == localText);
+    bool completeDrop = sapp_get_num_dropped_files() == 20;
+    for (int i = 0; completeDrop && i < 20; ++i)
+        completeDrop = sapp_get_dropped_file_path(i) == std::to_string(i) + localText;
+    check("Web heap bridge retains 20 long filenames", completeDrop);
+
+    _sapp_tc_dropped_paths.resize(1);
 #endif
     _sapp_tc.desc.logger.func = logMessage;
     unsigned char buffer[8] = {};
@@ -286,7 +307,7 @@ int main() {
 
     _sapp_tc_init_state(&desc);
     _sapp_tc_js_add_dragndrop_listeners();
-    _sapp_tc.drop.num_files = 1;
+    _sapp_tc_dropped_paths.resize(1);
     setFile(4);
     request.callback = receive;
     before = readerCount();

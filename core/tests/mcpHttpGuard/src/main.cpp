@@ -39,6 +39,9 @@
 #include "impl/httplib.h"
 #endif
 #include "../../common/tcCoreTest.h"
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -561,8 +564,8 @@ int environmentCase(const string& mode) {
     check("initialization logs full exposure once", exposureNotices.size() == (listening && !healthOnly ? 1u : 0u));
     check("health-only Notice occurs exactly once", healthNotices == (healthOnly ? 1 : 0));
     check("dev warning follows build even when disabled", devWarnings == (dev ? 1 : 0));
-    check("main title marks dev builds", (mcp::internal::mainWindowTitle("Test") == (dev ? "Test [MCP]" : "Test")));
-    check("main title does not duplicate marker", mcp::internal::mainWindowTitle("Test [MCP]") == "Test [MCP]");
+    check("main title marks dev builds", (mcp::internal::markedWindowTitle("Test") == (dev ? "Test [MCP]" : "Test")));
+    check("main title does not duplicate marker", mcp::internal::markedWindowTitle("Test [MCP]") == "Test [MCP]");
     if (!listening) return g_fail ? 1 : 0;
     check("PORT selects the requested listener", !configuredPort || mcp::getHttpPort() == configuredPort);
     const bool devEnvironment = dev && !explicitStart && mode != "none";
@@ -671,6 +674,7 @@ int environmentCase(const string& mode) {
     return g_fail ? 1 : 0;
 }
 
+#if !defined(__APPLE__) || !TARGET_OS_IPHONE
 string quoteArgument(const string& value) {
 #ifdef _WIN32
     // Executable paths cannot contain a quote on Windows.
@@ -682,10 +686,14 @@ string quoteArgument(const string& value) {
 #endif
 }
 
+#endif
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc == 3 && string(argv[1]) == "--environment") return environmentCase(argv[2]);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    printf("SKIP environment subprocess cases: system() unavailable on iOS\n");
+#else
     string command = quoteArgument(fs::absolute(argv[0]).string());
 #ifdef TC_CORE_TEST_NAME
     command += " " TC_CORE_TEST_NAME;
@@ -702,6 +710,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         check("environment case: headless-dev",
               std::system((command + " --environment headless-dev").c_str()) == 0);
 
+#endif
     // Token comparison helper, no server needed.
     {
         using mcp::internal::constantTimeEquals;

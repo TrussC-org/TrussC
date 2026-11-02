@@ -20,6 +20,7 @@ std::FILE* openScreenshotTemporary(const fs::path& path, fs::path& temporary) {
 struct ScreenshotState {
     fs::path path;
     std::weak_ptr<std::atomic<bool>> run = appRunToken();
+    std::weak_ptr<AppOwner> owner = currentAppOwner();
     Pixels pixels;
 };
 namespace {
@@ -35,6 +36,7 @@ void complete(const std::shared_ptr<ScreenshotState>& state, SaveResult result) 
     state->pixels = Pixels{};
     enqueueResourceLoad([state, result = std::move(result)]() mutable {
         if (!appRunIsAlive(state->run)) return;
+        AppOwnerScope scope(state->owner.lock());
         ScreenshotSaveEventArgs args{state->path, std::move(result)};
         onScreenshotSave().notify(args); // snapshot survives a listener deleting itself
     });
@@ -70,6 +72,7 @@ void write(const std::shared_ptr<ScreenshotState>& state) {
 ScreenshotQueue::ScreenshotQueue() = default;
 ScreenshotQueue::~ScreenshotQueue() { registration.reset(); closeScreenshots(*this); }
 void closeScreenshots(ScreenshotQueue& window) noexcept {
+    if (frameworkShutdown()) return;
     TeardownSteps steps;
     while (!window.pending.empty()) {
         auto job = std::move(window.pending.front());
@@ -128,9 +131,10 @@ void captureScreenshots(ScreenshotQueue& window) {
 
 }
 void saveScreenshotAsync(const fs::path& path) {
-    auto* window = !headless::active && sapp_isvalid() ? &internal::currentWindowContext() : nullptr;
-    if (window && !window->isMain && !internal::currentWindow()) window = nullptr;
-    internal::submitScreenshot(window ? &window->asyncScreenshots : nullptr, path);
-    if (window && window->isMain) redraw();
+    if (headless::isActive()) { internal::submitScreenshot(nullptr, path); return; }
+    auto* window = internal::findWindowApiContext();
+    if (!window) return;
+    internal::submitScreenshot(&window->asyncScreenshots, path);
+    window->loop.redrawCount = std::max(window->loop.redrawCount, 1);
 }
 }

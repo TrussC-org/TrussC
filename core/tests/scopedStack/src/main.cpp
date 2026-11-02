@@ -3,7 +3,7 @@
 // scopedStyle() push when called and pop when the returned guard goes out of
 // scope, also on an early return.
 //
-// Headless, console, exit code = pass/fail (build_all.py runs it in CI).
+// GPU-free console fixture with an addressed Window; exit code = pass/fail.
 // Plain main(): drives the default RenderContext's matrix and style stacks
 // directly and reads their depth.
 //
@@ -23,6 +23,7 @@
 // =============================================================================
 
 #include <TrussC.h>
+#include "../../common/tcWindowTest.h"
 #include "../../common/tcCoreTest.h"
 
 #include <cstdio>
@@ -191,6 +192,7 @@ static void testException() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    tcCoreTest::WindowFixture fixture;
 #ifndef NDEBUG
     std::printf("SKIP: needs a release build (sokol_gl asserts it is set up on pushMatrix())\n");
     return 0;

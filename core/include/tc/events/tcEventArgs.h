@@ -207,6 +207,11 @@ inline MouseEventRaw toRaw(const T& a) {
 // ---------------------------------------------------------------------------
 // Window resize event arguments
 // ---------------------------------------------------------------------------
+/// Visibility of a window, including minimization.
+struct OccludedEventArgs {
+    bool occluded = false;
+};
+
 struct ResizeEventArgs {
     int width = 0;
     int height = 0;
@@ -276,6 +281,11 @@ struct ConsoleEventArgs {
 struct ExitRequestEventArgs {
     bool cancel = false;           // Set to true to cancel the exit
     std::string reason;            // Optional Windows shutdown-block explanation
+};
+
+// OS close request for one Window. Each listener gets a fresh payload.
+struct CloseRequestEventArgs {
+    bool cancel = false;
 };
 
 // D3D11 device loss. The reason contains GetDeviceRemovedReason HRESULT bits.

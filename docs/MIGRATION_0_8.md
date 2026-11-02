@@ -1,5 +1,7 @@
 # Migrating to v0.8.0
 
+After updating to v0.8.0, delete existing build folders (or run a clean build).
+
 ## Box2D ownership and contact delivery
 
 World, Body, CircleBody, RectBody and PolyShape cannot be moved; construct them in place and store/move smart pointers when needed.
@@ -21,18 +23,22 @@ and is immediately reusable; a second `setup()` replaces the physics world.
 
 ## Stdin commands need `console::start()`
 
-Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. If your app subscribes to `events().console`, add `console::start()` in `setup()`:
+Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. `CoreEvents::console` / `events().console` has been removed. Subscribe once to
+`runtime().events().console` and add `console::start()` in `setup()`:
 
 ```cpp
 void MyApp::setup() {
-    consoleListener_ = events().console.listen([this](ConsoleEventArgs& e) {
+    consoleListener_ = runtime().events().console.listen([this](ConsoleEventArgs& e) {
         handleCommand(e);
     });
     console::start();
 }
 ```
 
-Keep `consoleListener_` as an `EventListener` member. Both runners pump commands on the main thread and stop delivery before `exit()` / `cleanup()`; no manual pump is needed.
+Keep `consoleListener_` as an `EventListener` member. Runtime pumps commands once on the main thread, before the first draw, after
+the first Window closes, with zero Windows and headless. Console has no App
+fan-out; subscriptions still carry their App owner token and retire on App
+ending. The service stops after App ending; no manual pump is needed.
 
 `console::stop()` disables delivery and drains pending commands. `console::start()` drains pending commands before enabling delivery again. The first start creates the process's only detached stdin reader, which continues consuming and discarding lines while stopped and ends at EOF. Restarting delivery does not create a new reader or replay discarded lines. Apps that never opt in leave stdin untouched. Web support remains unavailable.
 
@@ -227,6 +233,111 @@ Logical blend/depth flags retain continuity, separately from scoped pipeline sel
 The existing screen blend-after-Fbo behavior, offscreen premult handling and GPU point
 transform/size corrections remain for PR 4. Repeating `setBlendMode` explicitly selects
 that blend pipeline, even when the logical value already matches.
+
+## Default listener priority on App events is now 0
+
+On the events an App also receives (update, draw, exit, key, mouse, touch,
+windowResized and so on), `listen()` without a priority now registers at
+`EventPriority::BeforeApp` (`0`) instead of `100`. Other events still default
+to `100`.
+
+- A default listener ties with an explicit `0` and runs in registration order.
+  A default `a` registered before an explicit-0 `b` now runs `a`, then `b`
+  (before: `b`, then `a`).
+- Default listeners now run before explicit `1`–`99` (before: after them) and
+  before explicit `100` (before: same priority, mixed by registration order).
+- So a default listener that sets `e.consumed = true` now stops even an
+  explicit-100 listener that was registered earlier.
+
+Check listeners whose order matters, and give them an explicit priority:
+
+```cpp
+overlayListener = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 50);
+pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ });
+// Before (v0.7): pickListener had priority 100, so it ran after overlayListener.
+// After (v0.8):  pickListener has priority 0, so it now runs first.
+
+// To keep it after overlayListener, give it a priority above 50:
+pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 60);
+```
+
+## Process events and closing a Window
+
+App code uses `events()`; non-App code (addons, app-wide handling) uses
+`runtime().events()`. `exitRequested`, `deviceLost`, and `hotReloadUnload` retain
+the same names on both hubs. Runtime receives them first, then attached Apps in
+reverse attachment order (hot reload targets only replacing Apps). Quit and OS
+close give every listener fresh `cancel=false`, OR all vetoes, and count a throwing listener as a veto. Only process quit retains the first nonempty veto reason. Device loss keeps
+its mutable cancellation behavior.
+
+`App::exit()` also runs on replacement, removal and hot reload. Use
+`Window::setQuitOnClose(true)` for a window-close policy; it requests process
+quit before closing anything. A Window exit listener runs during ending and
+cannot provide that before-close veto guarantee.
+
+Construct Apps with `Window::setApp<T>(args...)`, `runApp<T>()` or
+`runHeadlessApp<T>()`; replace direct construction or attachment of an existing
+shared App. Runtime retains open Windows and their App attachments. Dropping a
+Window handle does not close it; call `close()` explicitly.
+
+Root App setup-time quit is queried before audio subscription and the next
+process services. Acceptance runs normal ending and prevents later console,
+update and draw callbacks; a veto continues normally. A child App's request
+waits until the current tree traversal unwinds, before the next process services.
+
+At OS session end, an idle main thread allows the process veto query, then runs
+normal ending on commit with one shared logout timeout (3 seconds by default).
+On Windows and macOS, idle ending then calls `std::exit` with the application
+exit code, running atexit handlers and C++ static destructors like ordinary
+exit. The watchdog remains armed through those handlers and destructors
+(on Windows, not through loaded DLLs' destructors, which run after it stops).
+A busy main thread accepts the query and performs no App work on commit: no
+exit events, `App::exit()`, audio detach, cleanup or watchdog. Save promptly
+during normal ending; busy termination cannot save App state. Busy and OS-killed
+ends skip atexit handlers and static destructors.
+
+Hot reload supports one Window and replaces the launch Window's App at the
+main-thread outer-turn safe point. Opening a second or later Window while a
+guest is loaded logs a Warning each time; behaviour is not guaranteed. Stop
+threads, timers and async work in `events().hotReloadUnload`; reload does not
+wait for or exclude that work. Successfully loaded modules stay mapped until
+process exit, so repeated reloads can grow process memory.
+
+TrussC no longer installs a built-in crash handler or writes crash reports; use
+a platform debugger or external crash reporting if your application needs it.
+
+### OS close and process veto
+
+OS close first queries that Window's `closeRequested`. If accepted and the Window is the last open one or has `setQuitOnClose(true)`, Runtime queries `exitRequested` before closing anything. Either veto leaves every Window open. Both accepted use common process ending. Non-last ordinary OS close asks only `closeRequested`; `exitApp()` / Cmd+Q ask only `exitRequested`. Code `Window::close()` skips `closeRequested`; last-window/quit-on-close asks `exitRequested` before closing anything, and any veto keeps every Window open. A non-last plain code close asks no request events; normal Window exit notification and App ending still run. `CloseRequestEventArgs` contains only `cancel`; remove uses of its former `reason` field. `ExitRequestEventArgs::reason` remains the optional Windows shutdown-block text.
+
+```cpp
+class Document : public tc::App {
+    tc::EventListener quit;
+    bool unsaved = true;
+    void setup() override {
+        quit = events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
+            e.cancel = unsaved; // also keeps the last Window open on ×
+        });
+    }
+};
+```
+
+## Window tree-dispatch methods are internal (v0.8.0)
+
+`Window::context()`, `dispatchMousePressToTree`, `dispatchMouseReleaseToTree`,
+`dispatchMouseMoveToTree`, `dispatchMouseScrollToTree`, `dispatchKeyPressToTree`,
+`dispatchKeyReleaseToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal
+in v0.8.0 and are no longer public C++ or Lua API. There is no public replacement
+yet; the synthetic-input design remains open.
+
+## Window and runtime settings, cursor and MCP window ids (v0.8.0)
+
+- Move `WindowSettings::uniformBufferReserve` / `reserveUniformBuffer()` to `RuntimeSettings` and call `runApp<T>(windowSettings, runtimeSettings)`. The one-argument `runApp<T>(windowSettings)` uses default runtime settings.
+- `WindowSettings::clipboardSize` / `setClipboardSize()` are removed. Clipboard text is no longer truncated at 65,536 bytes. Dropped file counts and UTF-8 paths no longer have the 16-file / 2048-byte limits. Storage grows with the actual content; allocation and platform limits still apply. The low-level `sapp_desc::clipboard_size`, `max_dropped_files` and `max_dropped_file_path_length` fields are removed; remove assignments to these fields.
+- Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. ImGui contexts change it only while their own window is under the pointer.
+- `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
+- `tc_list_windows` returns each window's positive native identity as `id` instead of `index`. Pass that `id` as other tools' `window` argument; resource list indices are unchanged.
+- `exitApp()` now goes through `exitRequested`, whose listeners can veto it; before 0.8 it could not be cancelled. A “show a confirm dialog, then call `exitApp()`” pattern receives `exitRequested` again on that call, so remember acceptance in a flag, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
 
 ## No caps on image size, sound polyphony or OSC nesting
 

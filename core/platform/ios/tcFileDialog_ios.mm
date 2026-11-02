@@ -94,6 +94,7 @@ FileDialogResult saveDialog(const std::string& title,
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
                       std::function<void()> callback) {
+    callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
     NSString* nsTitle = [NSString stringWithUTF8String:title.c_str()];
@@ -131,6 +132,7 @@ void alertDialogAsync(const std::string& title,
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
                         std::function<void(bool)> callback) {
+    callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
     NSString* nsTitle = [NSString stringWithUTF8String:title.c_str()];
@@ -178,6 +180,7 @@ void loadDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
+    callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
     NSString* nsDefaultPath = defaultPath.empty() ? nil :
@@ -238,6 +241,7 @@ void saveDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
+    callback = internal::appOwnedCallback(std::move(callback));
     const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
     auto cb = callback;
 

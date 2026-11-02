@@ -1,6 +1,6 @@
 // =============================================================================
 // sokol backend implementation (Windows)
-// sokol_app_tc.h is the self-contained sapp_* implementation (main window,
+// sokol_app_tc.h is the self-contained sapp_* implementation (window bootstrap,
 // run loop, events, multi-window API).
 // =============================================================================
 

@@ -15,7 +15,7 @@ namespace {
 
 // The standalone ASan test reproduces a sketch's pre-main lighting objects.
 // Leave them registered on return from main so their destructors run AFTER
-// mainWindowContext()/the window registry have been destroyed.
+// windowApiContext()/the window registry have been destroyed.
 #ifndef TC_CORE_TEST_NAME
 Material staticMaterial;
 Environment staticEnvironment;
@@ -49,7 +49,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     // so ASan can detect a late scan even for Material/Environment alone.
     // Also allow reversing which of the two storages is destroyed first.
     if (registryFirst) internal::registerWindow(nullptr);
-    auto& ctx = internal::mainWindowContext();
+    auto& ctx = internal::windowApiContext();
+    internal::currentWindowCtx() = &ctx;
     clearMaterial();
     clearEnvironment();
     clearLights();

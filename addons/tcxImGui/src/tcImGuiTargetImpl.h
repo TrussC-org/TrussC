@@ -117,9 +117,11 @@ bool beginTargetFrame(simgui_tc_context context, const simgui_frame_desc_t& desc
     frame.activation = frame.target->activation;
     simgui_tc_set_context(context);
     // An Fbo frame has no native input surface, even when a window manager
-    // renders it. Keep the backend defaults for ordinary window frames.
+    // renders it. Only the window under the pointer may set the app cursor.
     const bool savedCursorControl = _simgui.desc.disable_set_mouse_cursor;
-    _simgui.desc.disable_set_mouse_cursor = savedCursorControl || frame.target->isFbo;
+    _simgui.desc.disable_set_mouse_cursor = savedCursorControl || frame.target->isFbo ||
+        !frame.window->pointerValid || frame.window->mouseX < 0 || frame.window->mouseY < 0 ||
+        frame.window->mouseX >= tc::getWindowWidth() || frame.window->mouseY >= tc::getWindowHeight();
     suppressNativeKeyboard = frame.target->isFbo;
     simgui_new_frame(&desc);
     suppressNativeKeyboard = false;

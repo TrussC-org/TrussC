@@ -87,7 +87,7 @@ print('diff --git a/generated.cpp b/generated.cpp')
                 else:
                     self.assertFalse((self.directory / 'regenerated.patch').exists())
         tracked = subprocess.check_output(['git', 'ls-files', '--', *OUTPUTS], cwd=ROOT, text=True, encoding="utf-8")
-        self.assertEqual(len(tracked.splitlines()), 21)
+        self.assertEqual(len(set(tracked.splitlines())), 21)
         self.assertNotIn('reference-data.json', tracked)
 
     def test_regenerate_order_and_fail_fast(self):

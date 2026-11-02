@@ -363,6 +363,7 @@ private:
 public:
 
     void cleanup() {
+        if (internal::frameworkShutdown()) return;
         // Only release GPU resources if sokol is still valid
         // (may have already shut down at program exit). Destruction is
         // deferred: cleanup() also runs mid-frame when a font is re-loaded
@@ -985,7 +986,7 @@ private:
     // Destroy old GPU resources that are safe to release (previous frame's sgl
     // commands have already been consumed by _sgl_draw)
     void flushPendingDestroys() {
-        uint64_t currentFrame = sapp_frame_count();
+        uint64_t currentFrame = internal::deviceFrameCount();
         if (lastDestroyFlushFrame_ == currentFrame) return;
         lastDestroyFlushFrame_ = currentFrame;
 
@@ -1356,12 +1357,14 @@ private:
         internal::SharedFontCache::getInstance().releaseIfUnused(previousKey);
     }
 
+    static float loadDpiScale();
+
 public:
     LoadResult load(const fs::path& nameOrPath, int size, int faceIndex = 0) {
         cancelAsync();
         // Render glyphs at physical pixel size for sharp text on HiDPI displays.
         // All metrics/drawing are scaled back to logical coordinates.
-        dpiScale_ = getDpiScale();
+        dpiScale_ = loadDpiScale();
         int physicalSize = (int)(size * dpiScale_ + 0.5f);
         logicalSize_ = size;
 

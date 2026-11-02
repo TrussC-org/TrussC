@@ -622,9 +622,10 @@ struct ScreenRecorderPacer {
 // ---------------------------------------------------------------------------
 // ScreenRecorder - live capture of the window (or an Fbo) at wall-clock speed.
 // ---------------------------------------------------------------------------
-namespace internal { struct ScreenRecorderTestAccess; }
+namespace internal { struct ScreenRecorderTestAccess; struct ScreenRecorderWindowAccess; }
 class TC_PLATFORMS("macos,windows,linux,android,ios") ScreenRecorder {
     friend struct internal::ScreenRecorderTestAccess;
+    friend struct internal::ScreenRecorderWindowAccess;
     struct State : std::enable_shared_from_this<State> {
         // Stack-owned delivery records avoid header-local thread state (which
         // would split across hot-reload modules). completionMutex_ guards the list.
@@ -943,14 +944,15 @@ public:
     // Record the window (swapchain), or an offscreen Fbo that stays alive.
     // Each take has its own state; late completions keep the old take alive.
     SaveResult start(const fs::path& path, const VideoRecordSettings& settings = {}) {
-        const auto stopped = stop();
-        if (state_->inFlight_.load(std::memory_order_acquire) != 0) return stopped;
-        state_ = makeState();
-        return state_->startSource(State::Source::Swapchain, nullptr,
-                                   getFramebufferWidth(), getFramebufferHeight(), path, settings);
+        auto* context = internal::findWindowApiContext();
+        if (!context) return SaveResult::fail(SaveError::WriteFailed, "Specify an open Window");
+        return startWindow(*context, path, settings);
     }
     SaveResult start(const Fbo& fbo, const fs::path& path,
                      const VideoRecordSettings& settings = {}) {
+        auto* context = internal::findWindowApiContext();
+        if (!context) return SaveResult::fail(SaveError::WriteFailed, "Specify an open Window");
+        internal::WindowContextScope selected(context);
         const auto stopped = stop();
         if (state_->inFlight_.load(std::memory_order_acquire) != 0) return stopped;
         state_ = makeState();
@@ -979,6 +981,15 @@ public:
     VideoWriter& writer() { return state_->writer_; }
 
 private:
+    SaveResult startWindow(internal::WindowContext& context, const fs::path& path,
+                           const VideoRecordSettings& settings) {
+        const auto stopped = stop();
+        if (state_->inFlight_.load(std::memory_order_acquire) != 0) return stopped;
+        internal::WindowContextScope selected(&context);
+        state_ = makeState();
+        const auto size = internal::windowDimensions(context);
+        return state_->startSource(State::Source::Swapchain, nullptr, size.fbWidth, size.fbHeight, path, settings);
+    }
     static std::shared_ptr<State> makeState();
     std::shared_ptr<State> state_ = makeState();
 };
@@ -990,6 +1001,11 @@ private:
 // ---------------------------------------------------------------------------
 namespace internal {
     ScreenRecorder& globalScreenRecorder();
+    struct ScreenRecorderWindowAccess {
+        static SaveResult start(WindowContext& context, const fs::path& path, const VideoRecordSettings& settings) {
+            return globalScreenRecorder().startWindow(context, path, settings);
+        }
+    };
 }
 
 // Start recording the whole window to a video file. `path` is required;

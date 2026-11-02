@@ -25,3 +25,12 @@
 #if defined(__GNUC__) || defined(__clang__)
 #  pragma GCC diagnostic pop
 #endif
+
+#if defined(SOKOL_TC_TEST_HOOKS) && defined(SOKOL_GLES3)
+// Invoke the actual native tick with a known caller surface in the EGL fixture.
+namespace trussc::internal {
+void tickX11WindowForTests(sapp_window window) {
+    if (auto* native = _sapp_tc_lookup(window)) _sapp_tc_x11_tick(native);
+}
+}
+#endif

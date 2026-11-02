@@ -304,6 +304,31 @@ int main(int argc, char** argv) {
         sol::protected_function_result r = L.safe_script(string("return ") + expr, sol::script_pass_on_error);
         return r.valid() && r.get_type() == sol::type::boolean && r.get<bool>();
     };
+    check("RuntimeSettings reservation defaults/setter/field", luaBool(R"(
+        (function()
+            local runtime = RuntimeSettings.new()
+            if runtime.uniformBufferReserve ~= 0 then return false end
+            runtime:reserveUniformBuffer(4096)
+            if runtime.uniformBufferReserve ~= 4096 then return false end
+            runtime.uniformBufferReserve = 8192
+            return runtime.uniformBufferReserve == 8192
+        end)()
+    )"));
+    check("WindowSettings has no runtime/clipboard controls", luaBool(R"(
+        WindowSettings.uniformBufferReserve == nil and
+        WindowSettings.reserveUniformBuffer == nil and
+        WindowSettings.clipboardSize == nil and WindowSettings.setClipboardSize == nil
+    )"));
+    check("window query globals bound", luaBool("type(getWindowTitle) == 'function' and type(isWindowOccluded) == 'function'"));
+    // #239 D6: Window internals must stay absent from the Lua type table.
+    for (const char* name : {"context", "dispatchMousePressToTree", "dispatchMouseReleaseToTree",
+            "dispatchMouseMoveToTree", "dispatchMouseScrollToTree", "dispatchKeyPressToTree",
+            "dispatchKeyReleaseToTree", "tickTree", "drawTreeNow", "syncRootSize"}) {
+        const string expression = string("Window.") + name + " == nil";
+        check(expression.c_str(), luaBool(expression.c_str()));
+    }
+    check("Window.setClearColor ~= nil", luaBool("Window.setClearColor ~= nil"));
+
     check("Node.callAfterAsync == nil", luaBool("Node.callAfterAsync == nil"));
     check("Node.callEveryAsync == nil", luaBool("Node.callEveryAsync == nil"));
     check("Node.cancelAsyncTimer == nil", luaBool("Node.cancelAsyncTimer == nil"));
@@ -313,8 +338,10 @@ int main(int argc, char** argv) {
     check("Node().cancelTimer ~= nil", luaBool("Node().cancelTimer ~= nil"));
 
 #if defined(__linux__) && !defined(__ANDROID__)
-    check("window position funcs absent on Linux",
-        luaBool("getWindowPosition == nil and setWindowPosition == nil"));
+    check("window position funcs available on Linux",
+        luaBool("type(getWindowPosition) == 'function' and type(setWindowPosition) == 'function'"));
+    check("Window position methods available on Linux",
+        luaBool("Window.getPosition ~= nil and Window.setPosition ~= nil"));
 #endif
 
     // A nested result uses its declaration's registration, including inherited returns.

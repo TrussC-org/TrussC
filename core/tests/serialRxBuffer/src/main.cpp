@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 // #364: receive data survives app stalls; overflow keeps the newest bytes.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
@@ -18,6 +19,7 @@ using namespace std;
 using namespace tc;
 
 namespace {
+trussc::EventListener schedulerUpdate;
 int failures = 0;
 void check(const char* name, bool ok) {
     printf("%s: %s\n", name, ok ? "PASS" : "FAIL");
@@ -89,6 +91,7 @@ void* limitedAllocate(size_t bytes) {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
+    auto fixture = std::make_unique<tcCoreTest::WindowFixture>();
     constexpr size_t cap = 64 * 1024 * 1024;
     const size_t total = cap + 131071;
     vector<uint8_t> input(total);
@@ -233,7 +236,9 @@ TC_CORE_TEST_MAIN() {
     serial = std::move(pendingMove);
     waitingBacklog = &backlogWarnings;
     waitingLoss = &overflowWarnings;
+    fixture.reset();
     runHeadlessApp<WarningDeliveryApp>(HeadlessSettings().setFps(1000));
+    fixture = std::make_unique<tcCoreTest::WindowFixture>();
     check("first-drop warning arrives in headless loop without another Serial poll",
           overflowWarnings == 1 && backlogWarnings == 1);
     check("headless delivery leaves nothing queued", internal::countQueuedMainThreadSlots() == 0);
@@ -275,15 +280,15 @@ TC_CORE_TEST_MAIN() {
               until([&] { return internal::countQueuedMainThreadSlots() == 1; }));
         int updateEvents = 0;
         EventListener updateCounter = events().update.listen([&] { ++updateEvents; });
-        auto* previousUpdate = internal::appUpdateFunc;
-        internal::appUpdateFunc = countAppUpdate;
+        auto previousUpdate = std::move(schedulerUpdate);
+        schedulerUpdate = events().update.listen(countAppUpdate);
         setFps(EVENT_DRIVEN);
         internal::mainLoop().redrawCount = 0;
-        const bool drew = internal::beginMainLoopFrame(chrono::steady_clock::now());
+        const bool drew = tcCoreTest::beginScheduledFrame(chrono::steady_clock::now());
         if (drew) internal::runSyncedUpdate();
         check("idle EVENT_DRIVEN frame delivers the warning without update",
               !drew && overflowWarnings == 2 && appUpdates == 0 && updateEvents == 0);
-        internal::appUpdateFunc = previousUpdate;
+        schedulerUpdate = std::move(previousUpdate);
         setFps(VSYNC);
     }
     // A connection closed and reopened before the drain: the old delivery

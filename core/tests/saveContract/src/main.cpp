@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 #include <TrussC.h>
 #include <thread>
 #include "../../common/tcCoreTest.h"
@@ -30,6 +31,7 @@ static_assert(std::is_same_v<decltype(saveTextFile("x", "")), SaveResult>);
 }
 
 TC_CORE_TEST_MAIN() {
+    tcCoreTest::WindowFixture fixture;
     auto dir = fs::temp_directory_path() / "tc_saveContract";
     std::error_code ec;
     fs::remove_all(dir, ec);

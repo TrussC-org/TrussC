@@ -1,3 +1,4 @@
+#include "../../common/tcWindowTest.h"
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
@@ -62,6 +63,8 @@ void productionPayloadReleaseOrder(bool throws) {
 }
 } // namespace
 TC_CORE_TEST_MAIN() {
+    getMainThreadId();
+    tcCoreTest::WindowFixture receiver;
     using namespace mcp::internal;
     std::vector<std::shared_ptr<void>> slots;
     for (int i = 0; i < 8; ++i) slots.push_back(acquireScreenshotCredit());

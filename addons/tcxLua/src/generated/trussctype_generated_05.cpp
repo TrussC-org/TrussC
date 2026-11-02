@@ -140,31 +140,32 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["update"] = &trussc::RectNodeButton::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::LayoutMod
-            , trussc::LayoutMod()
-            , trussc::LayoutMod(trussc::LayoutDirection)
-            , trussc::LayoutMod(trussc::LayoutDirection, float)
-        >();
-        sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod", constructors, sol::call_constructor, constructors);
-        t["getCrossAxis"] = &trussc::LayoutMod::getCrossAxis;
-        t["getDirection"] = &trussc::LayoutMod::getDirection;
-        t["getMainAxis"] = &trussc::LayoutMod::getMainAxis;
-        t["getOwner"] = [](trussc::LayoutMod& self) { return self.getOwner(); };
-        t["getPaddingBottom"] = &trussc::LayoutMod::getPaddingBottom;
-        t["getPaddingLeft"] = &trussc::LayoutMod::getPaddingLeft;
-        t["getPaddingRight"] = &trussc::LayoutMod::getPaddingRight;
-        t["getPaddingTop"] = &trussc::LayoutMod::getPaddingTop;
-        t["getSpacing"] = &trussc::LayoutMod::getSpacing;
-        t["setCrossAxis"] = &trussc::LayoutMod::setCrossAxis;
-        t["setDirection"] = &trussc::LayoutMod::setDirection;
-        t["setMainAxis"] = &trussc::LayoutMod::setMainAxis;
-        t["setPadding"] = sol::overload([](trussc::LayoutMod& self, float padding) -> decltype(auto) { return self.setPadding(padding); }, [](trussc::LayoutMod& self, float vertical, float horizontal) -> decltype(auto) { return self.setPadding(vertical, horizontal); }, [](trussc::LayoutMod& self, float top, float right, float bottom, float left) -> decltype(auto) { return self.setPadding(top, right, bottom, left); });
-        t["setPaddingBottom"] = &trussc::LayoutMod::setPaddingBottom;
-        t["setPaddingLeft"] = &trussc::LayoutMod::setPaddingLeft;
-        t["setPaddingRight"] = &trussc::LayoutMod::setPaddingRight;
-        t["setPaddingTop"] = &trussc::LayoutMod::setPaddingTop;
-        t["setSpacing"] = &trussc::LayoutMod::setSpacing;
-        t["updateLayout"] = &trussc::LayoutMod::updateLayout;
+        sol::usertype<trussc::WindowSettings> t = lua->new_usertype<trussc::WindowSettings>("WindowSettings");
+        t["decorated"] = &trussc::WindowSettings::decorated;
+        t["fullscreen"] = &trussc::WindowSettings::fullscreen;
+        t["height"] = &trussc::WindowSettings::height;
+        t["highDpi"] = &trussc::WindowSettings::highDpi;
+        t["pipelinePoolSize"] = &trussc::WindowSettings::pipelinePoolSize;
+        t["pixelPerfect"] = &trussc::WindowSettings::pixelPerfect;
+        t["quitOnClose"] = &trussc::WindowSettings::quitOnClose;
+        t["resourcePoolSize"] = &trussc::WindowSettings::resourcePoolSize;
+        t["sampleCount"] = &trussc::WindowSettings::sampleCount;
+        t["shaderPoolSize"] = &trussc::WindowSettings::shaderPoolSize;
+        t["swapInterval"] = &trussc::WindowSettings::swapInterval;
+        t["title"] = &trussc::WindowSettings::title;
+        t["width"] = &trussc::WindowSettings::width;
+        t["setDecorated"] = &trussc::WindowSettings::setDecorated;
+        t["setFullscreen"] = &trussc::WindowSettings::setFullscreen;
+        t["setHighDpi"] = &trussc::WindowSettings::setHighDpi;
+        t["setPipelinePoolSize"] = &trussc::WindowSettings::setPipelinePoolSize;
+        t["setPixelPerfect"] = &trussc::WindowSettings::setPixelPerfect;
+        t["setQuitOnClose"] = &trussc::WindowSettings::setQuitOnClose;
+        t["setResourcePoolSize"] = &trussc::WindowSettings::setResourcePoolSize;
+        t["setSampleCount"] = &trussc::WindowSettings::setSampleCount;
+        t["setShaderPoolSize"] = &trussc::WindowSettings::setShaderPoolSize;
+        t["setSize"] = &trussc::WindowSettings::setSize;
+        t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
+        t["setTitle"] = &trussc::WindowSettings::setTitle;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::ChipSoundNote
@@ -185,32 +186,28 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
         t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
     }
-    lua->new_usertype<trussc::EaseType>("EaseType",
-        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
-        "Linear", sol::var(trussc::EaseType::Linear),
-        "Quad", sol::var(trussc::EaseType::Quad),
-        "Cubic", sol::var(trussc::EaseType::Cubic),
-        "Quart", sol::var(trussc::EaseType::Quart),
-        "Quint", sol::var(trussc::EaseType::Quint),
-        "Sine", sol::var(trussc::EaseType::Sine),
-        "Expo", sol::var(trussc::EaseType::Expo),
-        "Circ", sol::var(trussc::EaseType::Circ),
-        "Back", sol::var(trussc::EaseType::Back),
-        "Elastic", sol::var(trussc::EaseType::Elastic),
-        "Bounce", sol::var(trussc::EaseType::Bounce),
-        "Custom", sol::var(trussc::EaseType::Custom));
     {
-        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
-        t["date"] = &trussc::BuildInfo::date;
-        t["dateTime"] = &trussc::BuildInfo::dateTime;
-        t["day"] = &trussc::BuildInfo::day;
-        t["hour"] = &trussc::BuildInfo::hour;
-        t["minute"] = &trussc::BuildInfo::minute;
-        t["month"] = &trussc::BuildInfo::month;
-        t["second"] = &trussc::BuildInfo::second;
-        t["time"] = &trussc::BuildInfo::time;
-        t["timestamp"] = &trussc::BuildInfo::timestamp;
-        t["year"] = &trussc::BuildInfo::year;
+        auto constructors = tcxLuaConstructors<trussc::IesProfile
+            , trussc::IesProfile()
+        >();
+        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile", constructors, sol::call_constructor, constructors);
+        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
+        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
+        t["getSampler"] = &trussc::IesProfile::getSampler;
+        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
+        t["getView"] = &trussc::IesProfile::getView;
+        t["isLoaded"] = &trussc::IesProfile::isLoaded;
+        t["load"] = &trussc::IesProfile::load;
+        t["loadFromString"] = &trussc::IesProfile::loadFromString;
+    }
+    {
+        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
+        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
+        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
+        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
+        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
+        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
     lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
         sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
@@ -225,15 +222,19 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         "HEVC", sol::var(trussc::VideoCodec::HEVC),
         "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
         "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
-    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
-        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
-        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
-        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
-    lua->new_usertype<trussc::EaseMode>("EaseMode",
-        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
-        "In", sol::var(trussc::EaseMode::In),
-        "Out", sol::var(trussc::EaseMode::Out),
-        "InOut", sol::var(trussc::EaseMode::InOut));
+    {
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["changed"] = &trussc::TouchPoint::changed;
+        t["id"] = &trussc::TouchPoint::id;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
+    }
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
     {
         sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
         t["cancel"] = &trussc::ExitRequestEventArgs::cancel;

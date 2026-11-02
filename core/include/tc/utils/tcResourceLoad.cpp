@@ -119,6 +119,7 @@ void deliver(ResourceLoadState& state) {
         }
     } retirement{state};
     if (alive) {
+        AppOwnerScope appScope(state.appOwner.lock());
         if (auto target = state.apply.lock()) (*target)(state);
     }
 }
@@ -222,12 +223,14 @@ ResourceLoadBatch& ResourceLoadBatch::operator=(ResourceLoadBatch&& other) {
     return *this;
 }
 ResourceLoadState::~ResourceLoadState() {
+    if (frameworkShutdown()) return;
     if (!credits && !requestCredit) return; // setup may have failed before the host existed
     auto& owner = host();
     std::lock_guard<std::mutex> lock(owner.mutex);
     releaseCredits(owner, *this);
 }
 void ResourceLoadState::cancel() {
+    if (frameworkShutdown()) return;
     cancelled.store(true);
     auto& owner = host();
     bool releasedActive = false;
