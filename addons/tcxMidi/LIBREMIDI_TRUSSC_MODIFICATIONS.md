@@ -5,7 +5,7 @@
 
 `cmake/PatchLibremidi.cmake` applies exact replacements with CMake alone (no git,
 patch utility or Python required). It checks the four upstream input SHA256
-hashes and the ALSA output original/patched hash before writing. Unknown input or output fails configuration. A second,
+hashes and the ALSA output and CoreMIDI observer original/patched hashes before writing. Unknown input or output fails configuration. A second,
 read-only check after FetchContent covers source overrides, previously populated
 sources and shared FetchContent caches. Output is explicitly LF on every host,
 including CRLF script checkouts, while CRLF source files remain unknown input
@@ -41,6 +41,15 @@ cmake -DLIBREMIDI_SOURCE_DIR=path/to/private/libremidi -P addons/tcxMidi/cmake/P
   own MidiOut never supplies a context.
   Other native/Web output backends use upstream behavior.
 
+- `backends/coremidi.hpp` (#415): `core_backend::midi_observer` is
+  `coremidi::observer_impl` instead of `observer_core`. Upstream points the
+  MIDI 1 CoreMIDI observer at the base class, whose constructor never calls
+  `finish_init()`, so no MIDI client is created and no add/remove
+  notification ever arrives (port listing still works, it needs no client).
+  `observer_impl` is upstream's own subclass that calls `finish_init()`, as the
+  CoreMIDI UMP backend already does. tcxMidi needs it to hear a removed port
+  (`onDisconnect`). Candidate for an upstream PR.
+
 Finding only (send side unchanged): WinMM `send_message` waits without a bound
 in `while (midiOutUnprepareHeader(...) == MIDIERR_STILLPLAYING) Sleep(1);` and
 returns on `midiOutLongMsg` failure without unpreparing the header.
@@ -52,9 +61,9 @@ ALSA input and WinMM input are byte-for-byte libremidi v5.4.3. Native input no
 longer has TrussC's 1 MiB assembly cap, overflow callback, assembly-loss Warning,
 or modified parsing/resynchronization and backend loss handling. Polling queue
 limits remain independent. WebMIDI still requests access without SysEx.
-Only R4 (ALSA chunked output, #992) is patched. FetchContent uses a new R4 source
+Only R4 (ALSA chunked output, #992) and the CoreMIDI observer alias (#415) are patched. FetchContent uses a new R5 source
 location so ordinary reconfiguration extracts fresh sources when upgrading from
-R1–R3. Stale input in private overrides or reused caches fails verification with
+R1–R4. Stale input in private overrides or reused caches fails verification with
 the differing file and instructions to use clean v5.4.3 sources; the output-only
 patch does not undo old input edits.
 The release archive SHA256 remains
@@ -63,9 +72,11 @@ The release archive SHA256 remains
 ## Updating or dropping the patch
 
 1. Check whether a new upstream release provides the retained chunked ALSA
-   output behavior, including draining, pacing and supplied-context handling.
-2. Rebase only the output replacement when needed and update its hashes;
-   unknown ALSA output content must still fail configuration.
+   output behavior, including draining, pacing and supplied-context handling,
+   and whether `core_backend::midi_observer` already calls `finish_init()`
+   (then drop the observer alias).
+2. Rebase only the remaining replacements when needed and update their hashes;
+   unknown ALSA output or CoreMIDI backend content must still fail configuration.
 3. Run `tests-sysex`, `tests`, `test_patch.py`, `test_output.py` and the core
    sweep. The patch tests also check that every other upstream file is unchanged.
    Use `tests-sysex/README.md` for the optional ALSA roundtrip check.

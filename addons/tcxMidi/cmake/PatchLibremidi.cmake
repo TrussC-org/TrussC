@@ -1,5 +1,5 @@
 # Local patch for the SHA-pinned libremidi 5.4.3. No git or patch executable needed.
-# Input and ALSA output hashes are checked before any write; VERIFY_ONLY never modifies sources.
+# Input, ALSA output and CoreMIDI observer hashes are checked before any write; VERIFY_ONLY never modifies sources.
 # file(WRITE) uses native text mode, producing CRLF on Windows. CONFIGURE with
 # NEWLINE_STYLE UNIX writes LF in binary mode (available since CMake 3.18).
 # @ONLY preserves ${...}; these hash-pinned sources contain no @VAR@ references
@@ -36,8 +36,26 @@ if(NOT hash0 STREQUAL patched0)
         message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 ALSA SysEx output patch: ${path0}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
     endif()
 endif()
+set(path1 "${LIBREMIDI_SOURCE_DIR}/include/libremidi/backends/coremidi.hpp")
+file(SHA256 "${path1}" hash1)
+set(original1 "0f6cf7308ce2c8ad8f35b67b343e12607593cbd0dcbd6e5df96aae9fb319880b")
+set(patched1 "35725620d09241ebf2e8097bf2ad79d88ee4277bcba96b45f6c9e42bdf7264bd")
+if(NOT hash1 STREQUAL patched1)
+    if(VERIFY_ONLY OR NOT hash1 STREQUAL original1)
+        message(FATAL_ERROR "tcxMidi requires its checked libremidi 5.4.3 CoreMIDI observer patch: ${path1}. Patch a private source copy with cmake -DLIBREMIDI_SOURCE_DIR=<copy> -P ${CMAKE_CURRENT_LIST_FILE}; do not use an unpatched source override/cache.")
+    endif()
+endif()
 if(VERIFY_ONLY)
     return()
+endif()
+if(hash1 STREQUAL original1)
+    file(READ "${path1}" contents)
+    string(REPLACE "  using midi_observer = observer_core;" "  using midi_observer = coremidi::observer_impl;" contents "${contents}")
+    string(SHA256 result "${contents}")
+    if(NOT result STREQUAL patched1)
+        message(FATAL_ERROR "libremidi patch result mismatch: ${path1}")
+    endif()
+    file(CONFIGURE OUTPUT "${path1}" CONTENT "${contents}" @ONLY NEWLINE_STYLE UNIX)
 endif()
 if(hash0 STREQUAL original0)
     file(READ "${path0}" contents)
