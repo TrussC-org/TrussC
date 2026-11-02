@@ -75,4 +75,4 @@ After a loss the session keeps its resources until the app calls `close()` or `s
 | `DepthCamera` (`tcxDepthCamera`) | The base follows the convention (v0.8.0); each backend adds its `reportLost()` line where its SDK reports a loss |
 | `VideoGrabber` | Follows the convention (v0.8.0). `update()` reports the loss; see the class notes for what each OS tells us |
 | `tcxMidi` (`MidiIn`, `MidiOut`) | Follows the convention; loss is reported on CoreMIDI, ALSA sequencer and WinMM, not on WebMIDI (see [addons/tcxMidi/README.md](../addons/tcxMidi/README.md)) |
-| `AudioEngine` | Planned (#415) |
+| `AudioEngine`, `MicInput` | Follow the convention (v0.8.0): `setup()` / `isConnected()` / `close()` / `onDisconnect`. `AudioEngine::setup()` and `init()` open the system default device (to use a specific device, pass `AudioSettings` with `deviceName`), and `MicInput::setup()` opens the default capture device at the last sample rate; any reopen of a closed engine, including `Sound::load*()`, does the same. The audio thread only records a stop; the event fires on the main thread. Which backends report a stop depends on the OS (see the `onDisconnect` cards). |

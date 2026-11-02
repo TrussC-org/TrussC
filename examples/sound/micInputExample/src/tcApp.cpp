@@ -7,11 +7,14 @@
 void tcApp::setup() {
     fftInput.resize(FFT_SIZE, 0.0f);
     spectrum.resize(FFT_SIZE / 2, 0.0f);
+    lostListener = getMicInput().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning("tcApp") << "microphone lost: " << e.reason;
+    });
     getMicInput().start();
 }
 
 void tcApp::update() {
-    if (!getMicInput().isRunning()) return;
+    if (!getMicInput().isConnected()) return;
 
     getMicAnalysisBuffer(fftInput.data(), FFT_SIZE);
     auto fftResult = fftReal(fftInput, WindowType::Hanning);
@@ -32,7 +35,7 @@ void tcApp::draw() {
     setColor(1.0f);
     drawBitmapString("Microphone Input", 20, 30);
     setColor(0.6f);
-    drawBitmapString(getMicInput().isRunning() ? "Recording" : "Stopped", 20, 50);
+    drawBitmapString(getMicInput().isConnected() ? "Recording" : "Stopped", 20, 50);
     drawBitmapString("SPACE: Start/Stop", 20, 70);
 
     // Waveform
@@ -66,10 +69,10 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     if (key == ' ') {
-        if (getMicInput().isRunning()) {
-            getMicInput().stop();
+        if (getMicInput().isConnected()) {
+            getMicInput().close();
         } else {
-            getMicInput().start();
+            getMicInput().setup();
         }
     }
 }
