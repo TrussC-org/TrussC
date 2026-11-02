@@ -74,6 +74,16 @@ surface switches every frame. Window teardown and runtime shutdown still force
 idle activation at disposal boundaries. Other backends keep the
 internal ensure-context seam as a no-op, like idle activation.
 
+### X11 refresh estimate ignores presents after a skipped tick (#998)
+
+`_sapp_tc.refresh_period` (the EMA of present intervals, GLX and EGL) is fed
+only by a present whose previous tick also presented (`last_tick_presented`
+in the window record). After a skipped tick (`skip_present`, as setFps below
+the display rate produces) the interval spans the app's own frame rate, not the
+display; under a compositor whose swap does not block it used to teach the
+estimate a 30 Hz display and slow the interval-zero secondaries to ~30 fps.
+Tested by the throttled-main case of `core/tests/windowTick/x11-pacing-test`.
+
 ### macOS failed-startup termination notification (#239)
 
 The failed-startup cleanup call supplies an NSApplicationWillTerminateNotification
