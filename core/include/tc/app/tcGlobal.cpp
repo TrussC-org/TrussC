@@ -2350,10 +2350,6 @@ void discardRetiredShadows() noexcept {
     }
 }
 
-struct ShadowRetirementCleanup {
-    ~ShadowRetirementCleanup() { discardRetiredShadows(); }
-} shadowRetirementCleanup;
-
 TextureRetirement* retiredTextures = nullptr;
 void discardRetiredTextures() noexcept {
     while (auto* storage = retiredTextures) {
@@ -2361,9 +2357,23 @@ void discardRetiredTextures() noexcept {
         delete storage;
     }
 }
-struct TextureRetirementCleanup {
-    ~TextureRetirementCleanup() { discardRetiredTextures(); }
-} textureRetirementCleanup;
+} // anonymous namespace
+
+// Static destructors must never issue GPU calls (#999): by process exit the
+// driver may already be unloaded (NVIDIA via glvnd), so a leftover valid sokol
+// context would crash in the unmapped GL entry points. Retired nodes are left
+// to the driver/OS then. With sokol shut down their destructors do nothing on
+// the GPU, so only the CPU-side storage is freed.
+void discardRetiredAtExit() noexcept {
+    if (sg_isvalid()) return;
+    discardRetiredShadows();
+    discardRetiredTextures();
+}
+
+namespace {
+struct RetirementExitCleanup {
+    ~RetirementExitCleanup() { discardRetiredAtExit(); }
+} retirementExitCleanup;
 
 struct PendingGpuDestroys {
     std::vector<sg_buffer>   buffers;
