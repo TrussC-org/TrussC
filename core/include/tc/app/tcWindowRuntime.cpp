@@ -9,7 +9,6 @@ Window::Window()
     : owned_(std::make_unique<OwnedState>()), ctx_(owned_->context),
       events_(owned_->events), render_(owned_->render), title_(owned_->title) {
     ctx_.hostWindow = this;
-    ctx_.pauseUpdatesWhenHidden = true;
     ctx_.drawWhileHidden = false;
     ctx_.deferredResponseTarget = &ctx_;
     clearColorSet_ = true;

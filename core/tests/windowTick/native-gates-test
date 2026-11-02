@@ -191,7 +191,6 @@ mac_visibility_transitions = ''.join(mac_extract('- (void)' + name + ':(NSNotifi
     ('- (void)' + name + ':(NSNotification*)n', 'void ' + name + '(View* self, void* n)'),
     *((('self.w', 'self->w'),) if name.startswith('window') else ()),
 )) for name in ('windowDidBecomeKey', 'windowDidResignKey', 'applicationDidBecomeActive'))
-policy = body(common, 'static bool occlusionPausesUpdate(', 'tcGlobal.cpp')
 helpers = '\n'.join(body(shared, 'static inline bool '+name+'(', 'sokol_window_native.h')
                   for name in ('_sapp_tc_native_iconified', '_sapp_tc_native_occluded', '_sapp_tc_native_hidden'))
 
@@ -214,8 +213,6 @@ code = r'''
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
-struct WindowContext { bool pauseUpdatesWhenHidden; };
-''' + policy + r'''
 struct sapp_window { unsigned id; };
 struct sapp_event {
     unsigned frame_count=0, window_id=0;
@@ -272,9 +269,8 @@ void shared_checks() {
         check("shared iconified query", _sapp_tc_native_iconified(&w)==(trust && iconic));
         check("shared occluded query", _sapp_tc_native_occluded(&w)==(trust && obscured));
         check("shared effective hidden query", _sapp_tc_native_hidden(&w)==(trust && (iconic || obscured)));
-        check("tcGlobal policy: main updates, secondary pauses", occlusionPausesUpdate({!role})==!role);
     }
-    summary("shared visibility helpers / tcGlobal policy", before, count);
+    summary("shared visibility helpers", before, count);
 }
 namespace mac {
 constexpr auto nil = nullptr;
@@ -635,7 +631,7 @@ void close_callback(sapp_window h,void* user) {
 void callback(sapp_window h,void* user) {
     auto* w=static_cast<Native*>(user); ++consulted;
     check("macOS callback target and reentry guard", h.id==w->win_id && w->in_tick);
-    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({!w->is_main}))) ++updates;
+    ++updates; // #997: every delivered tick updates, hidden or not
     if (reenter) {
         int prior=consulted; reenter=false; _sapp_tc_mac_tick(w,nil); reenter=true;
         check("macOS tick callback cannot reenter tick", consulted==prior);
@@ -728,7 +724,7 @@ void run() {
         w.iconified=iconic; w.occluded=obscured; reenter=true;
         const bool hidden=trust && (iconic || obscured), admitted=allow || !hidden;
         _sapp_tc_mac_tick(&w,&link);
-        check("macOS common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && dimensions==int(admitted) && acquired==int(admitted));
+        check("macOS common hidden admission / policy for either role", consulted==1 && updates==1 && dimensions==int(admitted) && acquired==int(admitted));
         check("macOS completed tick releases guard/admission and advances frame", !w.in_tick && !w.draw_admitted && w.frame_count==1 && w.frame_drawable==0);
         check("macOS per-window timing sampled even when hidden", timing==1 && w.timing.smooth_dt>.017 && w.last_tick_time==10 && w.frame_duration>.016 && w.frame_duration<.018);
         check("macOS fullscreen reconciliation", reconciled==1);
@@ -1344,7 +1340,7 @@ void callback(sapp_window h,void* user) {
     resizesAtCallback=resizes;
     firstDrawWidth=attachmentWidth;
     check("Win32 callback target and reentry guard", h.id==w->win_id && w->in_tick);
-    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({!w->is_main}))) ++updates;
+    ++updates; // #997: every delivered tick updates, hidden or not
     if (reenter) {
         int prior=consulted; reenter=false; _sapp_tc_win32_tick(w); reenter=true;
         check("Win32 tick callback cannot reenter tick", consulted==prior);
@@ -1382,7 +1378,7 @@ void run() {
         w.frame_wait=true; reenter=true;
         const bool hidden=trust && (iconic || obscured), admitted=allow || !hidden;
         _sapp_tc_win32_tick(&w);
-        check("Win32 common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && dimensions==1 && presents==int(admitted));
+        check("Win32 common hidden admission / policy for either role", consulted==1 && updates==1 && dimensions==1 && presents==int(admitted));
         check("Win32 trust gates occlusion probe", tests==int(trust && obscured));
         check("Win32 completed tick releases guard, consumes skip, advances frame", !w.in_tick && !w.skip_present && w.frame_count==1);
     }
@@ -1506,7 +1502,7 @@ void callback(sapp_window,void* user) {
     check("X11 callback runs inside native tick guard", w->in_tick);
     if (reenter) { reenter=false; _sapp_tc_x11_tick(w); }
     if (closeOnTick) live=nullptr;
-    if (!(_sapp_tc_native_hidden(w) && occlusionPausesUpdate({!w->is_main}))) ++updates;
+    ++updates; // #997: every delivered tick updates, hidden or not
 }
 ''' + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
 enum { PropertyNewValue=1, IconicState=1, NormalState=2,
@@ -1543,7 +1539,7 @@ void run() {
         present &= !(trust && iconic); // GLX keeps its minimized swap veto.
 #endif
         check("X11 hidden and visible ticks poll metadata once and release guard", polls==1 && !w.in_tick);
-        check("X11 common hidden admission / policy for either role", consulted==1 && updates==int(!hidden || role) && acquired==int(admitted) && presents==int(present) && w.frame_count==1);
+        check("X11 common hidden admission / policy for either role", consulted==1 && updates==1 && acquired==int(admitted) && presents==int(present) && w.frame_count==1);
     }
     for (bool role : {false,true}) for (bool hidden : {false,true}) {
         Native w; live=&w; w.is_main=role; w.occluded=hidden; w.desc={callback,&w};

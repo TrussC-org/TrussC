@@ -90,7 +90,7 @@ struct sapp_tc_window_metadata {
 struct Window;
 struct WindowContext {
     Window* hostWindow=nullptr;
-    bool isMain=true, pauseUpdatesWhenHidden=false, suspended=false, lifecycleSuspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
+    bool isMain=true, suspended=false, lifecycleSuspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
 };
 struct Window {
     struct { sapp_tc_window_metadata metadata; sapp_window handle{1}; bool lastDeliveredHidden=false,visibilityReady=false; } binding_;
@@ -128,7 +128,7 @@ void publishWindowMetadata(Window& w, const sapp_tc_window_metadata& m) {
     w.ctx.suspended=m.trust_hidden_signals && (m.iconified || m.occluded);
 }
 ''' + body(runtime, 'void refreshSelectedWindowMetadata()') + r'''
-''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool occlusionPausesUpdate(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()').replace('trussc::internal::WindowRequestAccess::', 'WindowRequestAccess::') + r'''
+''' + body(runtime, 'bool refreshWindowEntryMetadata(') + '\n' + body(global_source, 'static bool nativeSuspensionPausesUpdate(') + '\n' + body(global_source, 'void observeWindowVisibility(').replace('openWindows()', 'windows()').replace('trussc::internal::WindowRequestAccess::', 'WindowRequestAccess::') + r'''
 enum class VisibilityDelivery { Drop, RawOnly, RawThenTyped };
 struct sapp_event {
     sapp_event_type type{}; unsigned window_id=0; uint64_t frame_count=0;
