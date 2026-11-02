@@ -795,3 +795,4 @@ own window receiver. Drop capacities and rejection behavior are unchanged.
 - Web paste/drop callbacks catch allocation failures and return their status;
   the JS bridge raises an Error identifying out of memory after C++ unwinds.
   Heap text is still freed in `finally`. No recovery or retry is added.
+- Windows clipboard `GlobalAlloc` failure now logs an out-of-memory Error and returns instead of explicitly throwing from the C API.

@@ -5,6 +5,7 @@ TC_D3B_BUILD_DIR keeps binaries under an existing checkout build-cache link.
 """
 from pathlib import Path
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -29,6 +30,15 @@ def compile_run(source):
 
 
 class DropClipboardUnbounded(unittest.TestCase):
+    def test_no_cpp_throw(self):
+        native = HEADER.read_text(encoding='utf-8')
+        for signature in re.findall(r'^EM_JS\([^,]+,\s*\w+', native, re.MULTILINE):
+            native = native.replace(body(native, signature), '')
+        # Ignore comments and string/character literals as well as JavaScript.
+        native = re.sub(r"""/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'""",
+                        '', native, flags=re.DOTALL)
+        self.assertNotRegex(native, r'\bthrow\b')
+
     def test_removed_descriptor_fields(self):
         compile_run(r'''
 #include "sokol/sokol_app_tc.h"
@@ -154,7 +164,7 @@ constexpr int GMEM_MOVEABLE=1,CF_UNICODETEXT=1;
 struct POINT {int x=1,y=2;};
 struct _sapp_tc_window_t {int hwnd=1;float mouse_scale=1,mouse_x=0,mouse_y=0;};
 _sapp_tc_window_t window;
-struct {struct {bool drop_enabled=true,clipboard_enabled=true;_sapp_tc_window_t* main=&window;}app;}_sapp_tc;
+struct {struct {bool drop_enabled=true,clipboard_enabled=true;sapp_desc desc{};_sapp_tc_window_t* main=&window;}app;}_sapp_tc;
 std::string _sapp_tc_clipboard_text;
 std::vector<std::string> _sapp_tc_dropped_paths;
 std::vector<std::wstring> incoming;
@@ -179,7 +189,11 @@ int MultiByteToWideChar(int,int,const char* input,int,WCHAR* target,int size){
 bool _sapp_tc_win32_wide_to_utf8(const WCHAR* input,char* output,int size){return WideCharToMultiByte(0,0,input,-1,output,size,nullptr,nullptr)>0;}
 bool _sapp_tc_win32_utf8_to_wide(const char* input,WCHAR* output,int size){return MultiByteToWideChar(0,0,input,-1,output,size)>0;}
 HANDLE clipboard=nullptr;size_t allocation=0;
-HANDLE GlobalAlloc(int,size_t bytes){allocation=bytes;return std::calloc(1,bytes);}
+bool failAllocation=false;int oomErrors=0;
+void _sapp_tc_log(const sapp_logger*,unsigned level,unsigned item,unsigned,const char*,const char*,const char* text){
+    assert(level==1 && item==SAPP_LOGITEM_MALLOC_FAILED && std::strstr(text,"out of memory"));++oomErrors;
+}
+HANDLE GlobalAlloc(int,size_t bytes){allocation=bytes;return failAllocation ? nullptr : std::calloc(1,bytes);}
 void* GlobalLock(HANDLE object){return object;}
 void GlobalUnlock(HANDLE){}
 void GlobalFree(HANDLE object){std::free(object);}
@@ -202,6 +216,8 @@ int main(){
     _sapp_tc_clipboard_text="stale";
     assert(sapp_get_clipboard_string()==text);
     sapp_set_clipboard_string("");assert(std::string(sapp_get_clipboard_string()).empty());
+    failAllocation=true;sapp_set_clipboard_string("OOM");
+    assert(oomErrors==1 && std::string(sapp_get_clipboard_string()).empty());
     EmptyClipboard();
 }
 ''')
