@@ -63,6 +63,39 @@ namespace internal {
 
 struct VideoGrabberTestAccess;
 
+// Which camera setup() opens (#415). With a remembered name, the first camera
+// in the fresh list with that name; no match fails, never another camera.
+// Without one, the camera at the setDeviceID() index (name is that entry's
+// name, empty if the list does not show it).
+struct GrabberDevicePick {
+    bool ok = false;
+    int index = 0;
+    std::string name;
+};
+
+inline GrabberDevicePick pickGrabberDevice(const std::vector<VideoDeviceInfo>& devices,
+                                           const std::string& rememberedName, int index) {
+    GrabberDevicePick pick;
+    pick.ok = true;
+    pick.index = index;
+    if (!rememberedName.empty()) {
+        pick.ok = false;
+        for (const auto& d : devices) {
+            if (d.deviceName == rememberedName) {
+                pick.ok = true;
+                pick.index = d.deviceId;
+                pick.name = d.deviceName;
+                break;
+            }
+        }
+        return pick;
+    }
+    for (const auto& d : devices) {
+        if (d.deviceId == index) { pick.name = d.deviceName; break; }
+    }
+    return pick;
+}
+
 // Frame FIFO shared between the capture thread and the main thread.
 // Owned by the capture State; its address stays stable across handle moves.
 struct GrabberFrameQueue {
@@ -157,9 +190,12 @@ public:
         return listDevicesPlatform();
     }
 
-    // Specify camera to use (call before setup())
+    // Specify camera to use by index (call before setup()). It also forgets
+    // the camera name that setup() remembered, so the next setup() opens this
+    // index.
     void setDeviceID(int deviceId) {
         deviceId_ = deviceId;
+        reopenName_.clear();
     }
 
     int getDeviceID() const {
@@ -200,8 +236,10 @@ public:
     // Setup / Close
     // =========================================================================
 
-    // Start the camera chosen by setDeviceID() (device 0 by default) at the
-    // requested size. An open camera is closed first, without onDisconnect.
+    // Start the camera at the requested size: the camera with the name
+    // remembered from the last successful open, or, before any, the one chosen
+    // by setDeviceID() (device 0 by default). An open camera is closed first,
+    // without onDisconnect.
     // If permission is not granted, requests it and returns false.
     // Call update() every frame - it will automatically initialize once permission is granted.
     // The size is remembered for setup().
@@ -224,12 +262,17 @@ public:
         return completeSetup();
     }
 
-    // Start the camera again: the device ID set by setDeviceID() and the size
-    // of the last setup(width, height) (device 0 at 640x480 if there was
-    // none). This is the reconnect call:
+    // Start the camera again: the camera with the same name as the last one
+    // that opened (found again in a fresh device list, because indices shift
+    // when cameras come and go) and the size of the last setup(width, height).
+    // Before any successful open it uses the setDeviceID() index (device 0 at
+    // 640x480 by default). setDeviceID() forgets the remembered name. Two
+    // cameras with the same name can't be told apart: the first one opens.
+    // This is the reconnect call:
     //   if (!grabber.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); grabber.setup(); }
-    // Returns false and logs an error when the camera cannot be opened (false
-    // without an error while the camera permission is pending).
+    // Returns false and logs an error when the camera cannot be opened, also
+    // when no camera has the remembered name (it never opens another one;
+    // false without an error while the camera permission is pending).
     // Until the first isFrameNew() after setup, the texture can still show the
     // previous camera image (e.g. the last frame before an unplug).
     bool setup() {
@@ -419,6 +462,7 @@ private:
     bool verbose_ = false;
     bool pendingSetup_ = false;  // Waiting for permission
     std::string deviceName_;
+    std::string reopenName_;     // listDevices() name of the last opened camera; setDeviceID() clears it
 
     std::shared_ptr<internal::GrabberSharedState> state_ =
         std::make_shared<internal::GrabberSharedState>();
@@ -440,6 +484,7 @@ private:
         verbose_ = other.verbose_;
         pendingSetup_ = other.pendingSetup_;
         deviceName_ = std::move(other.deviceName_);
+        reopenName_ = std::move(other.reopenName_);
         state_ = std::move(other.state_);
         other.state_ = std::make_shared<internal::GrabberSharedState>();
         texture_ = std::move(other.texture_);
@@ -465,10 +510,20 @@ private:
 
     // Complete setup after permission is granted
     bool completeSetup() {
+        // Resolve the camera in a fresh device list: the remembered name wins
+        // over the index, which can point at another camera after a replug.
+        auto pick = internal::pickGrabberDevice(listDevices(), reopenName_, deviceId_);
+        if (!pick.ok) {
+            logError("VideoGrabber") << "No camera named \"" << reopenName_ << "\" is present";
+            return false;
+        }
+        deviceId_ = pick.index;
+
         // Platform-specific setup (sets state_->width, state_->height)
         if (!setupPlatform()) {
             return false;
         }
+        reopenName_ = pick.name;
 
         // Allocate pixel buffer
         size_t bufferSize = state_->width * state_->height * 4;

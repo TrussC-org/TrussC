@@ -38635,14 +38635,17 @@ description.ko = "설정에 사용할 카메라 디바이스를 선택한다."
 details.en = '''
 - Stores an integer device ID, initially `0`; use an ID returned by `listDevices()` and call this function before `setup()`.
 - The setter does not validate the ID or switch an active camera; Web ignores the selection.
+- It also makes the next `setup()` open this index, not the camera name remembered from an earlier open.
 '''
 details.ja = '''
 - 整数のデバイス ID を保存します。初期値は `0` です。`listDevices()` が返した ID を使い、`setup()` の前に呼んでください。
 - この設定処理は ID を検証せず、使用中のカメラも切り替えません。Web はこの選択を無視します。
+- 以前に開いたカメラの名前の記憶も消えるため、次の `setup()` はこの番号を開きます。
 '''
 details.ko = '''
 - 정수 디바이스 ID를 저장하며 초기값은 `0`입니다. `listDevices()`가 반환한 ID를 사용하고 `setup()` 전에 호출합니다.
 - 이 설정 함수는 ID를 검증하거나 사용 중인 카메라를 전환하지 않습니다. Web은 이 선택을 무시합니다.
+- 이전에 연 카메라 이름의 기억도 지워지므로, 다음 `setup()`은 이 번호를 엽니다.
 '''
 
 ["VideoGrabber::setFrameQueueSize"]
@@ -38714,8 +38717,8 @@ description.ja = "指定した寸法でカメラを開く、または最後の�
 description.ko = "요청한 크기로 카메라를 열거나 마지막 카메라를 다시 연다."
 related = ["VideoGrabber::isConnected", "VideoGrabber::close", "VideoGrabber::onDisconnect", "VideoGrabber::setDeviceID"]
 details.en = '''
-- `setup(int width, int height)` requests dimensions in pixels, with no defaults, and first closes any previous capture without firing `onDisconnect`; actual dimensions can differ, so read `getWidth()` and `getHeight()`. It opens the device chosen by `setDeviceID()` and remembers the requested size.
-- `setup()` with no arguments reopens the camera with the last settings: the current device ID and the size of the last `setup(width, height)` (device 0 at 640 × 480 if there was none). On failure it logs an error and returns false. Use it to reconnect, for example `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`.
+- `setup(int width, int height)` requests dimensions in pixels, with no defaults, and first closes any previous capture without firing `onDisconnect`; actual dimensions can differ, so read `getWidth()` and `getHeight()`. It opens the camera with the name it remembers from the last successful open, or, before any, the device chosen by `setDeviceID()`; it also remembers the requested size.
+- `setup()` with no arguments reopens the camera with the last settings: the camera with the same name as the last one that opened, and the size of the last `setup(width, height)` (before any open: the `setDeviceID()` device, 0 by default, at 640 × 480). The name is looked up in a fresh `listDevices()`, because the order of cameras can change while one is unplugged. If no camera has that name, it logs an error and returns false; it never opens another camera. Two cameras with the same name cannot be told apart, so the first one opens. Calling `setDeviceID()` makes the next `setup()` use that index again. On failure it logs an error and returns false. Use it to reconnect, for example `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`.
 - Returns true after platform setup and allocation of a zero-filled RGBA8 CPU buffer and a streaming texture; a captured frame need not be available yet.
 - Until the first `isFrameNew()` after setup, the texture can still show the previous camera image (for example the last frame before an unplug). To draw only live frames, start drawing after `isFrameNew()` has been true once.
 - If camera permission is unavailable, requests it asynchronously, marks setup as pending, and returns false; keep calling `update()` to attempt setup once permission is granted.
@@ -38725,8 +38728,8 @@ details.en = '''
 - Android capture is unimplemented: permission checks return false and permission requests only log a warning, so setup remains pending.
 '''
 details.ja = '''
-- `setup(int width, int height)` はピクセル単位で寸法を要求します。既定値はありません。最初に以前のキャプチャを、`onDisconnect` を発火せずに閉じます。実際の寸法は異なる場合があるため、`getWidth()` と `getHeight()` で確認してください。`setDeviceID()` で選んだデバイスを開き、要求したサイズを覚えます。
-- 引数なしの `setup()` は、最後の設定でカメラを開き直します。現在のデバイス ID と、最後の `setup(width, height)` のサイズです（まだ呼んでいなければ、デバイス 0 の 640 × 480）。失敗するとエラーログを出して false を返します。再接続に使います。例: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
+- `setup(int width, int height)` はピクセル単位で寸法を要求します。既定値はありません。最初に以前のキャプチャを、`onDisconnect` を発火せずに閉じます。実際の寸法は異なる場合があるため、`getWidth()` と `getHeight()` で確認してください。最後に開けたカメラの名前を覚えていればその名前のカメラを、まだ開けていなければ `setDeviceID()` で選んだデバイスを開き、要求したサイズも覚えます。
+- 引数なしの `setup()` は、最後の設定でカメラを開き直します。最後に開いたカメラと同じ名前のカメラと、最後の `setup(width, height)` のサイズです（一度も開いていなければ、`setDeviceID()` のデバイス（既定は 0）の 640 × 480）。カメラが抜き差しされるとデバイスの並び順が変わることがあるため、名前は新しい `listDevices()` から探します。その名前のカメラがなければ、エラーログを出して false を返し、別のカメラは開きません。同じ名前のカメラが 2 台あると区別できず、最初の 1 台が開きます。`setDeviceID()` を呼ぶと、次の `setup()` はその番号を使います。失敗するとエラーログを出して false を返します。再接続に使います。例: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
 - プラットフォームのセットアップと、0 で埋めた RGBA8 の CPU バッファおよびストリーミングテクスチャの確保後に true を返します。この時点でキャプチャ済みフレームがあるとは限りません。
 - セットアップ後、最初に `isFrameNew()` が true になるまでは、テクスチャに前のカメラ画像（抜く前の最後のフレームなど）が残っていることがあります。新しい映像だけを描きたいときは、`isFrameNew()` が一度 true になってから描き始めてください。
 - カメラの許可がない場合は非同期に要求し、セットアップを待機状態にして false を返します。許可後にセットアップを試みられるよう、`update()` を呼び続けてください。
@@ -38736,8 +38739,8 @@ details.ja = '''
 - Android のキャプチャは未実装です。許可確認は false を返し、許可要求は警告を出すだけなので、セットアップは待機状態のままです。
 '''
 details.ko = '''
-- `setup(int width, int height)`는 픽셀 단위로 크기를 요청하며 기본값이 없습니다. 먼저 이전 캡처를 `onDisconnect` 없이 닫습니다. 실제 크기는 다를 수 있으므로 `getWidth()`와 `getHeight()`로 확인합니다. `setDeviceID()`로 고른 장치를 열고 요청한 크기를 기억합니다.
-- 인수 없는 `setup()`은 마지막 설정으로 카메라를 다시 엽니다. 현재 디바이스 ID와 마지막 `setup(width, height)`의 크기입니다(아직 호출하지 않았다면 장치 0의 640 × 480). 실패하면 오류 로그를 남기고 false를 반환합니다. 재연결에 사용합니다. 예: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
+- `setup(int width, int height)`는 픽셀 단위로 크기를 요청하며 기본값이 없습니다. 먼저 이전 캡처를 `onDisconnect` 없이 닫습니다. 실제 크기는 다를 수 있으므로 `getWidth()`와 `getHeight()`로 확인합니다. 마지막으로 연 카메라의 이름을 기억하고 있으면 그 이름의 카메라를, 아직 연 적이 없으면 `setDeviceID()`로 고른 장치를 열고 요청한 크기도 기억합니다.
+- 인수 없는 `setup()`은 마지막 설정으로 카메라를 다시 엽니다. 마지막으로 연 카메라와 같은 이름의 카메라와 마지막 `setup(width, height)`의 크기입니다(한 번도 연 적이 없다면 `setDeviceID()`의 장치(기본값 0)의 640 × 480). 카메라를 뽑고 꽂으면 장치 순서가 바뀔 수 있으므로, 이름은 새 `listDevices()`에서 찾습니다. 그 이름의 카메라가 없으면 오류 로그를 남기고 false를 반환하며, 다른 카메라는 열지 않습니다. 이름이 같은 카메라가 2대 있으면 구분할 수 없어 첫 번째가 열립니다. `setDeviceID()`를 호출하면 다음 `setup()`은 그 번호를 사용합니다. 실패하면 오류 로그를 남기고 false를 반환합니다. 재연결에 사용합니다. 예: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
 - 플랫폼 설정과 0으로 채운 RGBA8 CPU 버퍼 및 스트리밍 텍스처 할당 후 true를 반환합니다. 이 시점에 캡처된 프레임이 있다는 뜻은 아닙니다.
 - 설정 후 처음으로 `isFrameNew()`가 true가 될 때까지 텍스처에 이전 카메라 이미지(뽑기 전 마지막 프레임 등)가 남아 있을 수 있습니다. 새 영상만 그리려면 `isFrameNew()`가 한 번 true가 된 뒤부터 그립니다.
 - 카메라 권한이 없으면 비동기로 요청하고 설정을 대기 상태로 지정한 뒤 false를 반환합니다. 권한 허용 후 설정을 시도할 수 있도록 `update()`를 계속 호출합니다.
