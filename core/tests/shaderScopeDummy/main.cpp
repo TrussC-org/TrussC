@@ -709,6 +709,40 @@ bool shadowReplayDrawingStateProbe() {
     return ok;
 }
 
+// #942: a retired image that a recording still references survives cleanup()'s
+// drain. It must not outlive sg_shutdown(): after a graphics restart a new image
+// can get the same id, and the next drain would destroy it.
+bool retirementRestartProbe() {
+    internal::restoreWindowContext(&(*renderFixture));
+    sg_image_desc imageDesc = {}; imageDesc.width = imageDesc.height = 2;
+    imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    imageDesc.usage.dynamic_update = true;
+    const auto image = sg_make_image(imageDesc);
+    sg_view_desc viewDesc = {}; viewDesc.texture.image = image;
+    const auto view = sg_make_view(viewDesc);
+    const auto sampler = sg_make_sampler(sg_sampler_desc{});
+    sgl_enable_texture(); sgl_texture(view, sampler); recordTriangle(); sgl_disable_texture();
+    internal::deferGpuDestroy(view); internal::deferGpuDestroy(image); internal::deferGpuDestroy(sampler);
+    internal::drainPendingGpuDestroys();
+    bool ok = sg_query_image_state(image) == SG_RESOURCESTATE_VALID; // pinned by the recording
+    cleanup();
+    internal::beginFrameworkLifetime();
+    sg_desc desc = {}; sg_setup(&desc); sgl_desc_t sd = {}; sgl_setup(&sd);
+    // Pools start over; counting a slot's generation up finds the old image's id.
+    sg_image fresh = {};
+    for (int i = 0; i < 4096 && !fresh.id; ++i) {
+        const auto candidate = sg_make_image(imageDesc);
+        if (candidate.id == image.id) fresh = candidate;
+        else if ((candidate.id & 0xffff) == (image.id & 0xffff)) sg_destroy_image(candidate);
+    }
+    ok &= fresh.id == image.id && sg_query_image_state(fresh) == SG_RESOURCESTATE_VALID;
+    internal::drainPendingGpuDestroys();
+    const bool survived = sg_query_image_state(fresh) == SG_RESOURCESTATE_VALID;
+    ok &= survived;
+    std::printf("RETIREMENT RESTART pinned_before=1 new_image_survives_drain=%d ok=%d\n", survived, ok);
+    return ok;
+}
+
 // Run after all drawing tests; deliberately start two fresh devices so native
 // IDs recycle exactly, then exercise the real cleanup and retirement collector.
 bool shadowDeviceRestartProbe() {
@@ -2081,8 +2115,9 @@ int main(int argc, char** argv) {
         resizeBeforeDraw &= resizeEarlyAcquireProbe(mode, resize, selection);
     // Last: it shuts the device down and re-creates it.
     const bool curveRollback = curveRollbackProbe();
+    const bool retirementRestart = retirementRestartProbe();
     const bool shadowRestart = shadowDeviceRestartProbe();
-    const int result=curveRollback && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
+    const int result=curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
     return result;
 }
 #else

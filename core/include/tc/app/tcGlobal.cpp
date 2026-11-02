@@ -309,6 +309,11 @@ void cleanup() {
     sgl_shutdown();
     internal::recordImageDecodeLimit(0);
     sg_shutdown();
+    // Whatever the drain above left (handles a recording still referenced) is
+    // dead with the device. With sokol invalid this drops the queue without
+    // destroying anything; a restart (sg_setup, e.g. hot reload) then starts
+    // empty instead of destroying new resources that reuse a queued id (#942).
+    internal::drainPendingGpuDestroys();
 }
 
 // ---------------------------------------------------------------------------
