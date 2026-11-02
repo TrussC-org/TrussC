@@ -386,3 +386,20 @@ yet; the synthetic-input design remains open.
 - `isInitialized()` stays as an alias of `isConnected()`. `isConnected()` is also false while a macOS / iOS permission request is pending (as `isInitialized()` was).
 - Not part of this change: the Windows `uniqueId` (still the enumeration index), `setDeviceUniqueID()` and the Windows native-mode selection from #276 were dropped from the plan in the #415 simplification.
 
+## tcxMidi follows the device lifecycle (#415)
+
+`MidiIn` and `MidiOut` (addon tcxMidi) are on the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md). Nothing is removed; your existing code compiles and behaves as before until the OS reports an opened port removed.
+
+- **New:** `midiIn.setup()` / `midiOut.setup()` with no arguments reopen the last port that opened successfully (the same virtual port, or the port whose name equals the earlier one, found again by name because indices shift). On failure they log an error and return `false`. Reconnecting is app code:
+
+  ```cpp
+  if (!midiIn.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+      lastTry = getElapsedTime();
+      midiIn.setup();
+  }
+  ```
+
+- **New:** `isConnected()` and `close()`. `isOpen()` and `closePort()` stay as aliases.
+- **New:** `onDisconnect` (`Event<DeviceDisconnectEventArgs>`, one field, `reason`). It fires once, on the main thread, when the OS reports the opened port removed; the port is then already closed and `isConnected()` is `false`. `close()`, opening another port and the destructor never fire it.
+- **Behavior change:** before, an unplugged port stayed "open" with no message and `isOpen()` stayed `true`. Now, on CoreMIDI, the ALSA sequencer and WinMM, the port is closed, one warning is logged and `isConnected()` turns `false` shortly after the removal (a host turn, plus up to 100 ms on WinMM). An app that never looked at `isOpen()` sees only the warning. WebMIDI does not report removals, and neither does a virtual port you opened with `openVirtualPort()`, so nothing changes there.
+- Each open physical port now keeps a small libremidi observer alive (a backend thread on ALSA and WinMM) to hear about removals; it is released by `close()` and the destructor.

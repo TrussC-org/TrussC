@@ -2,7 +2,9 @@
 
 // Minimal output backend double. Production tcxMidiOut.h and tcLog.h are used
 // unchanged; only libremidi is replaced so sends can fail deterministically.
+#include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -23,28 +25,64 @@ inline API observer_configuration_for(API api) { return api; }
 struct output_port { std::string display_name; };
 struct input_port { std::string display_name; };
 struct observer_configuration {
+    std::function<void(const input_port&)> input_added, input_removed;
+    std::function<void(const output_port&)> output_added, output_removed;
     bool track_hardware = true;
     bool track_virtual = false;
+    bool notify_in_constructor = true;
 };
 namespace test {
 inline bool virtualPorts = false;
+// Ports the "OS" has removed: they vanish from every listing.
+inline std::vector<std::string> unplugged;
+inline bool isUnplugged(const std::string& name) {
+    return std::find(unplugged.begin(), unplugged.end(), name) != unplugged.end();
+}
+// Live observers that have a removal callback, so a test can play the
+// backend's thread: unplug("test input") then removePorts() from any thread.
+inline std::vector<observer_configuration*> watchers;
+inline int observersCreated = 0, observersDestroyed = 0;
 }
 struct observer {
     observer_configuration config;
-    observer(observer_configuration cfg, API) : config(cfg) {}
+    observer(observer_configuration cfg, API) : config(std::move(cfg)) {
+        if (config.input_removed || config.output_removed) {
+            ++test::observersCreated;
+            test::watchers.push_back(&config);
+        }
+    }
+    observer(const observer&) = delete;
+    ~observer() {
+        auto it = std::find(test::watchers.begin(), test::watchers.end(), &config);
+        if (it != test::watchers.end()) {
+            test::watchers.erase(it);
+            ++test::observersDestroyed;
+        }
+    }
     std::vector<input_port> get_input_ports() const {
         std::vector<input_port> ports;
-        if (config.track_hardware) ports.push_back({"test input"});
-        if (test::virtualPorts && config.track_virtual) ports.push_back({"virtual source"});
+        if (config.track_hardware && !test::isUnplugged("test input")) ports.push_back({"test input"});
+        if (test::virtualPorts && config.track_virtual && !test::isUnplugged("virtual source")) ports.push_back({"virtual source"});
         return ports;
     }
     std::vector<output_port> get_output_ports() const {
         std::vector<output_port> ports;
-        if (config.track_hardware) ports.push_back({"test output"});
-        if (test::virtualPorts && config.track_virtual) ports.push_back({"virtual destination"});
+        if (config.track_hardware && !test::isUnplugged("test output")) ports.push_back({"test output"});
+        if (test::virtualPorts && config.track_virtual && !test::isUnplugged("virtual destination")) ports.push_back({"virtual destination"});
         return ports;
     }
 };
+namespace test {
+// What the backend does when a port goes away: the observer's removal callbacks.
+inline void removeInput(const std::string& name) {
+    for (auto* w : std::vector<observer_configuration*>(watchers))
+        if (w->input_removed) w->input_removed(input_port{name});
+}
+inline void removeOutput(const std::string& name) {
+    for (auto* w : std::vector<observer_configuration*>(watchers))
+        if (w->output_removed) w->output_removed(output_port{name});
+}
+}
 
 namespace test {
 inline bool failSend = false;

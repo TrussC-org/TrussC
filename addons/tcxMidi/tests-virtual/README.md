@@ -9,6 +9,14 @@ bytes. A default observer is a negative control: it must hide both virtual ports
 Removing `track_virtual = true` from the shared configuration must fail the test.
 The test also checks that the application's own virtual ports remain visible.
 
+A second part checks the device lifecycle (#415) against the real backend:
+`MidiIn` / `MidiOut` open another client's virtual source / destination, that
+client removes the port, and the test pumps the main-thread queue until
+`onDisconnect` fires once for each (with `isConnected()` already false). Removing
+an unrelated port must change nothing. `setup()` fails while the port is gone and
+reconnects by name once it is back, and the reconnected ports carry a Note On.
+On ALSA the notification takes about 200 ms; the pump gives it five seconds.
+
 From the repository root (use your environment's build resource wrapper):
 
 ```sh

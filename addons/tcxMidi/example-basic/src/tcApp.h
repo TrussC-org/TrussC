@@ -27,10 +27,15 @@ public:
 
 private:
     void startMidi();   // open ports once midiReady() (deferred for the web)
+    void reconnect();   // reopen a port that was lost, every 2 seconds
 
     MidiIn  midiIn_;
     MidiOut midiOut_;
     bool    started_ = false;
+    bool    hadIn_ = false;    // an input port has been opened once
+    bool    hadOut_ = false;
+    float   lastTry_ = 0.0f;
+    EventListener inLost_, outLost_;
 
     deque<string> history_;
     static constexpr size_t MAX_LINES = 20;

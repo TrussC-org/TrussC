@@ -23,11 +23,23 @@
 //
 // Native SysEx assembly uses upstream libremidi without an addon size cap.
 // WebMIDI access does not enable SysEx.
+//
+// Device lifecycle (docs/DEVICE_LIFECYCLE.md): isConnected(), setup(), close(),
+// onDisconnect. When the OS reports the opened port removed (CoreMIDI, ALSA
+// sequencer, WinMM; not WebMIDI), the port is closed, one warning is logged and
+// onDisconnect fires once on the main thread, so a listener may call setup().
+// close(), opening another port and the destructor never fire it.
+//
+//   if (!midiIn.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+//       lastTry = getElapsedTime();
+//       midiIn.setup();                 // same port, found again by name
+//   }
 // =============================================================================
 
 #include "tcxMidiMessage.h"
 
 #include "tc/events/tcEvent.h"
+#include "tc/events/tcEventArgs.h"
 #include "tc/network/tcNetworkState.h"
 #include "tc/utils/tcMainThread.h"
 #include "tc/events/tcEventListener.h"
@@ -53,10 +65,16 @@ public:
     // Fired for every received message (on the backend thread - see header note).
     trussc::Event<MidiMessage> onMessage;
 
+    // Fired once when the OS reports the opened port removed (the port is
+    // already closed, isConnected() is false). Never from close(), a new open
+    // or the destructor. Always on the main thread, in the next host turn after
+    // the backend noticed. Not reported by WebMIDI or for virtual ports.
+    trussc::Event<DeviceDisconnectEventArgs> onDisconnect;
+
     MidiIn() {
         messageTarget_ = tc::internal::EventSnapshotDelivery<MidiMessage>::bind(onMessage, delivery_);
     }
-    ~MidiIn() { delivery_->close(); closePort(); }
+    ~MidiIn() { delivery_->close(); close(); }
 
     // Non-copyable (owns a backend handle).
     MidiIn(const MidiIn&) = delete;
@@ -115,23 +133,51 @@ public:
 
     // Create a virtual input port (CoreMIDI / ALSA / JACK; not on Windows).
     bool openVirtualPort(const std::string& name = "TrussC Input") {
-        closePort();
+        close();
         prepareInput(name, -1);
         auto err = backend_->input->open_virtual_port(name);
         if (err != stdx::error{}) {
             trussc::logError("tcxMidiIn") << "openVirtualPort failed: " << name;
-            closePort();
+            close();
             return false;
         }
         name_ = name;
         portNumber_ = -1;
         virtual_ = true;
+        lastName_ = name;
+        lastVirtual_ = true;
         return true;
     }
 
-    // From an input callback, backend teardown is queued on the main thread.
-    // The callback only marks this run closed and never waits for that queue.
-    void closePort() {
+    // Reopen the last port that opened successfully, found again by its name
+    // (indices shift when ports appear or disappear): the same virtual port, or
+    // the input port whose name equals the earlier one exactly. Returns false
+    // and logs an error when there is no such port yet or it cannot be opened.
+    // This is the reconnect call:
+    //   if (!midiIn.isConnected() && timerElapsed) midiIn.setup();
+    bool setup() {
+        if (lastName_.empty()) {
+            trussc::logError("tcxMidiIn") << "setup() has no previous port to reopen; call openPort() first";
+            return false;
+        }
+        if (lastVirtual_) return openVirtualPort(lastName_);
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
+        auto ports = obs.get_input_ports();
+        for (int i = 0; i < static_cast<int>(ports.size()); ++i) {
+            if (ports[i].display_name == lastName_) return openInputPort(ports[i], i);
+        }
+        trussc::logError("tcxMidiIn") << "setup: no input named \"" << lastName_ << "\"";
+        return false;
+    }
+
+    // Close the port. Never fires onDisconnect. From an input callback, backend
+    // teardown is queued on the main thread. The callback only marks this run
+    // closed and never waits for that queue.
+    void close() {
+#if !defined(__EMSCRIPTEN__)
+        watch_.reset();
+#endif
         auto state = std::move(state_);
         auto backend = std::move(backend_);
         if (state) state->open = false;
@@ -150,7 +196,11 @@ public:
         }
     }
 
-    bool isOpen() const { return state_ && state_->open.load(); }
+    // True only while the port is open; false once the OS reported it removed.
+    bool isConnected() const { return state_ && state_->open.load(); }
+    // Older names of isConnected() / close().
+    bool isOpen() const { return isConnected(); }
+    void closePort() { close(); }
     const std::string& getName() const { return name_; }   // name of the open port
     int  getPort() const { return portNumber_; }           // open port number, -1 if virtual/closed
     bool isVirtual() const { return virtual_; }
@@ -255,19 +305,42 @@ private:
     }
 
     bool openInputPort(const libremidi::input_port& port, int index) {
-        closePort();
+        close();
         prepareInput(port.display_name, index);
         auto err = backend_->input->open_port(port);
         if (err != stdx::error{}) {
             trussc::logError("tcxMidiIn") << "open_port failed: " << port.display_name;
-            closePort();
+            close();
             return false;
         }
         name_ = port.display_name;
         portNumber_ = index;
         virtual_ = false;
+        lastName_ = name_;
+        lastVirtual_ = false;
+#if !defined(__EMSCRIPTEN__)
+        watch_ = std::make_unique<internal::PortWatch>(true, [this] { inputPortRemoved(); });
+#endif
         return true;
     }
+
+#if !defined(__EMSCRIPTEN__)
+    // Main thread, after the OS removed some input port: if ours is no longer
+    // listed, it was lost. The name is the identity, as for setup(); two ports
+    // with the same name are not told apart.
+    void inputPortRemoved() {
+        if (!isConnected() || virtual_) return;
+        libremidi::observer obs{internal::midiObserverConfiguration(),
+                               libremidi::observer_configuration_for(platformMidiApi())};
+        for (const auto& port : obs.get_input_ports())
+            if (port.display_name == name_) return;
+        const std::string lost = name_;
+        close();   // isConnected() is false before the listeners run
+        trussc::logWarning("tcxMidiIn") << "lost input port \"" << lost << "\"";
+        DeviceDisconnectEventArgs args{"input port \"" + lost + "\" was removed"};
+        onDisconnect.notify(args);
+    }
+#endif
 
     std::shared_ptr<Polling> polling_ = std::make_shared<Polling>();
     std::shared_ptr<State> state_;
@@ -277,6 +350,12 @@ private:
     std::string name_;
     int portNumber_ = -1;
     bool virtual_ = false;
+    // The last port that opened successfully, for setup(); kept by close()
+    std::string lastName_;
+    bool lastVirtual_ = false;
+#if !defined(__EMSCRIPTEN__)
+    std::unique_ptr<internal::PortWatch> watch_;
+#endif
     bool ignoreSysex_ = false;
     bool ignoreTiming_ = true;
     bool ignoreSensing_ = true;

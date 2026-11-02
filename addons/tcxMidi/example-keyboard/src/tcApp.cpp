@@ -27,7 +27,7 @@ void tcApp::draw() {
 
     setColor(0.85f);
     drawBitmapString("tcxMidi - keyboard   in: " +
-                     (midiIn_.isOpen() ? midiIn_.getName() : string("(none)")), 16, 24);
+                     (midiIn_.isConnected() ? midiIn_.getName() : string("(none)")), 16, 24);
 
     // Count white keys in range so they fill the window width.
     int whiteCount = 0;

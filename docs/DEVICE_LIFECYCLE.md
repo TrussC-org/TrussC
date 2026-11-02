@@ -74,4 +74,5 @@ After a loss the session keeps its resources until the app calls `close()` or `s
 | `Serial` | Follows the convention (v0.8.0) |
 | `DepthCamera` (`tcxDepthCamera`) | The base follows the convention (v0.8.0); each backend adds its `reportLost()` line where its SDK reports a loss |
 | `VideoGrabber` | Follows the convention (v0.8.0). `update()` reports the loss; see the class notes for what each OS tells us |
-| `tcxMidi` (`MidiIn`, `MidiOut`), `AudioEngine` | Planned (#415) |
+| `tcxMidi` (`MidiIn`, `MidiOut`) | Follows the convention; loss is reported on CoreMIDI, ALSA sequencer and WinMM, not on WebMIDI (see [addons/tcxMidi/README.md](../addons/tcxMidi/README.md)) |
+| `AudioEngine` | Planned (#415) |
