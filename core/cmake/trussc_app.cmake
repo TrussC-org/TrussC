@@ -151,7 +151,13 @@ macro(trussc_app)
 
     # Source files (auto-collect from src/ recursively if not specified)
     if(_TC_APP_SOURCES)
-        set(_TC_SOURCES ${_TC_APP_SOURCES})
+        set(_TC_SOURCES "")
+        foreach(_TC_SOURCE IN LISTS _TC_APP_SOURCES)
+            file(TO_CMAKE_PATH "${_TC_SOURCE}" _TC_SOURCE)
+            get_filename_component(_TC_SOURCE "${_TC_SOURCE}" ABSOLUTE
+                BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+            list(APPEND _TC_SOURCES "${_TC_SOURCE}")
+        endforeach()
     else()
         file(GLOB_RECURSE _TC_SOURCES
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
@@ -186,7 +192,11 @@ macro(trussc_app)
     # The decision (platform gate + scan rule) lives in
     # tc_hot_reload_scan.cmake, shared with the pre-build check below so the
     # two can never disagree (#234, #329).
-    include("${TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake")
+    # TRUSSC_DIR may be relative or use backslashes; the generated check below
+    # runs from the build directory, so give it an absolute path.
+    string(REPLACE "\\" "/" _TC_HR_TRUSSC_DIR "${TRUSSC_DIR}")
+    cmake_path(ABSOLUTE_PATH _TC_HR_TRUSSC_DIR BASE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" NORMALIZE)
+    include("${_TC_HR_TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake")
     # Hot reload is unavailable on Android / Emscripten / iOS: TC_HOT_RELOAD in
     # source is a no-op there. Computed once here and baked into the pre-build
     # check, which runs in cmake -P mode where these variables are undefined.
@@ -229,7 +239,7 @@ set(SRC_DIR    [==[${_TC_HR_SRC_DIR}]==])
 set(CMAKELISTS [==[${_TC_HR_CMAKELISTS}]==])
 set(PLATFORM_SUPPORTED ${_TC_HR_PLATFORM_SUPPORTED})
 set(EXPLICIT_SOURCES [==[${_TC_HR_EXPLICIT_SOURCES}]==])
-include([==[${TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake]==])
+include([==[${_TC_HR_TRUSSC_DIR}/cmake/tc_hot_reload_scan.cmake]==])
 
 set(PREV \"\")
 if(EXISTS \"\${STATE_FILE}\")
@@ -303,7 +313,7 @@ endif()
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
         )
         target_compile_features(guest PRIVATE cxx_std_20)
-        target_compile_definitions(guest PRIVATE TC_HOT_RELOAD_BUILD TRUSSC_SHOW_CONSOLE)
+        target_compile_definitions(guest PRIVATE TC_HOT_RELOAD_BUILD TC_HOT_RELOAD_GUEST TRUSSC_SHOW_CONSOLE)
         # Guest does NOT link to TrussC (symbols are resolved from the Host at
         # runtime), but it still needs TrussC's PUBLIC compile settings
         # (/utf-8, Windows SDK includes, SOKOL_D3D11, etc.).
@@ -432,16 +442,25 @@ execute_process(
 )
 
 # Extract symbol names from the public symbols section
-# An actual symbol line looks like \"  XXXXXX symbol-name\" (a hex address of 6+ digits)
+# A symbol line is \"  <hex offset> symbol-name\" at the start of a line.
+# dumpbin doesn't zero-pad the offset, so it can be any number of digits.
 set(SYMBOLS \"\")
-string(REGEX MATCHALL \"[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
+# Lines are matched after a newline, so give the first line one too.
+set(DUMP_OUT \"\\n\${DUMP_OUT}\")
+# Drop the '     8E9 public symbols' count line; it has the same layout.
+string(REGEX REPLACE \"\\n *[0-9A-Fa-f]+ public symbols\" \"\" DUMP_OUT \"\${DUMP_OUT}\")
+string(REGEX MATCHALL \"\\n *[0-9A-Fa-f]+ [?_@A-Za-z][^ \\n]*\" ENTRIES \"\${DUMP_OUT}\")
 foreach(ENTRY \${ENTRIES})
-    string(REGEX MATCH \"^[0-9A-Fa-f]+ (.+)\" _ \"\${ENTRY}\")
+    string(REGEX MATCH \"^\\n *[0-9A-Fa-f]+ (.+)\" _ \"\${ENTRY}\")
     if(CMAKE_MATCH_1)
         set(SYM \"\${CMAKE_MATCH_1}\")
         # Filter: skip symbols that cannot be exported
         if(SYM MATCHES \"^__imp_\")
             # Import thunk
+        elseif(SYM MATCHES \"^[?][?]_[GE]\")
+            # Scalar/vector deleting destructors cause LNK4102 when exported.
+            # Virtual deletion uses the vtable to reach the destructor body
+            # in the defining module, without a named guest import.
         elseif(SYM MATCHES \"^[.]\")
             # Section name (.CRT$XCU, .rdata, etc.)
         elseif(SYM MATCHES \"/\")
@@ -455,11 +474,7 @@ foreach(ENTRY \${ENTRIES})
         elseif(SYM MATCHES \"^_RTC_\")
             # Internal symbol for runtime checks
         elseif(SYM MATCHES \"^(size|mode|uid|gid)$\")
-            # Archive member header metadata, not a symbol. The header lines
-            # ('    2A4B8 size', '       0 mode', ...) only match the
-            # hex-address regex once a member grows to a 6-hex-digit size
-            # field (>= 1 MB object file), which is why small libs never hit
-            # this.
+            # Archive member header metadata ('    2A4B8 size', '       0 mode'), not symbols.
         else()
             list(APPEND SYMBOLS \"\${SYM}\")
         endif()
@@ -527,7 +542,7 @@ file(WRITE \"${_TC_HOST_IMPORT_DEF}\" \"NAME \\\"$<TARGET_FILE_NAME:${PROJECT_NA
                 OUTPUT "${_TC_HOST_IMPORT_LIB}"
                 BYPRODUCTS "${_TC_HOST_IMPORT_DEF}"
                 COMMAND ${CMAKE_COMMAND} -P "${_TC_HOST_IMPORT_SCRIPT}"
-                COMMAND ${CMAKE_AR} /NOLOGO /IGNORE:4102
+                COMMAND ${CMAKE_AR} /NOLOGO
                     /DEF:${_TC_HOST_IMPORT_DEF}
                     /OUT:${_TC_HOST_IMPORT_LIB}
                     /MACHINE:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID}

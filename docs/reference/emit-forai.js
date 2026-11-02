@@ -48,6 +48,8 @@ function line(e) {
         sig = `${s.ret ? s.ret + ' ' : ''}${e.id}(${stripU(s.params)})${s.const ? ' const' : ''}`;
     } else if (e.kind === 'type') {
         sig = `${e.tparams ? 'template<' + e.tparams.join(', ') + '> ' : ''}class ${e.id}`;
+    } else if (e.kind === 'macro') {
+        sig = e.signature || e.id;
     } else if (e.kind === 'typedef') {
         sig = `using ${e.id}`;
     } else {                                   // var / const-like
@@ -111,6 +113,14 @@ const typedefs = E.filter(e => e.kind === 'typedef' && documented(e)).sort((a, b
 if (typedefs.length) {
     out += '\n## Type aliases\n\n```cpp\n';
     for (const e of typedefs) out += line(e) + '\n';
+    out += '```\n';
+}
+
+// --- 5. public macros (curated signatures, never callable stubs) ---
+const macros = E.filter(e => e.kind === 'macro' && documented(e));
+if (macros.length) {
+    out += '\n## Macros\n\n```cpp\n';
+    for (const e of macros) out += line(e) + '\n';
     out += '```\n';
 }
 

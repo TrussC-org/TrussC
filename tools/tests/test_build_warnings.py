@@ -63,6 +63,29 @@ class WarningTests(unittest.TestCase):
                                     'old connection queues its warning: PASS',
                                     'callback rejection has first-loss Warning: PASS'], []))
 
+    def test_captured_vs_link_warnings_are_not_exempt(self):
+        # Representative successful Ninja/vs_link_exe output with VERBOSE=1.
+        warnings = [
+            'LINK : warning LNK4217: locally defined symbol imported in function main',
+            'foo.obj : warning LNK4099: PDB was not found; linking object as if no debug info',
+        ]
+        output = ('[1/1] Linking CXX executable app.exe\n'
+                  'cmake -E vs_link_exe --intdir=CMakeFiles/app.dir -- link.exe /out:app.exe foo.obj\n'
+                  + '\n'.join(warnings) + '\n')
+        entries = gate.load_allowlist(gate.ALLOWLIST)
+        self.assertEqual(entries, [])
+        with tempfile.TemporaryDirectory(dir=ROOT) as directory:
+            log = Path(directory) / 'vs_link.log'
+            captured = subprocess.run(
+                [sys.executable, str(SCRIPT), '--capture', str(log), '--',
+                 sys.executable, '-c', f'print({output!r}, end="")'], capture_output=True)
+            self.assertEqual(captured.returncode, 0, captured.stderr)
+            self.assertEqual(log.read_text(encoding='utf-8'), output)
+            checked = subprocess.run([sys.executable, str(SCRIPT), str(log)], capture_output=True)
+            self.assertEqual(checked.returncode, 1, checked.stderr)
+            for warning in warnings:
+                self.assertIn(warning.encode(), checked.stdout)
+
     def test_android_stubs_are_not_exempt(self):
         entries = gate.load_allowlist(gate.ALLOWLIST)
         self.assertEqual(entries, [])

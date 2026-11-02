@@ -72,7 +72,7 @@ void tcApp::draw() {
     drawBitmapString("TrussC Audio Synth Example", 40, y); y += 32;
 
     setColor(0.7f);
-    drawBitmapString(format("Engine: {} Hz, {} ch, {} voices",
+    drawBitmapString(format("Engine: {} Hz, {} ch, voice cap {} (0 = none)",
             AudioEngine::getInstance().getSampleRate(),
             AudioEngine::getInstance().getChannels(),
             AudioEngine::getInstance().getMaxPolyphony()), 40, y); y += 22;

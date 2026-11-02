@@ -2,6 +2,15 @@
 
 HAP video playback addon. Add `tcxHap` to your project's `addons.make`.
 
+## Hot reload on Windows
+
+Windows hot-reload guests do not link tcxHap's snappy dependency.
+`tcxHapDecoder.h` (also included by `tcxHapPlayer.h`) declares this limitation
+with `TC_NO_HOT_RELOAD`, so the guest
+fails to compile with the reason instead of failing at link time. Remove
+`TC_HOT_RELOAD` from your app to use tcxHap on Windows. Ordinary Windows builds
+and hot reload on Linux/macOS are unaffected by this declaration.
+
 ## GPU requirements
 
 HAP movies store BC-compressed textures, such as BC1 for Hap and BC3 for

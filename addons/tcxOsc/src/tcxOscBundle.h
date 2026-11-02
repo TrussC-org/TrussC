@@ -1,9 +1,12 @@
 #pragma once
 
 #include "tcxOscMessage.h"
+#include <memory>
 #include <variant>
 
 namespace tcx::osc {
+
+namespace osc_internal { struct BundleDispatchAccess; }
 
 // =============================================================================
 // OscBundle - OSC bundle class
@@ -12,18 +15,31 @@ namespace tcx::osc {
 class OscBundle {
 public:
     // Bundle element (message or bundle)
-    using Element = std::variant<OscMessage, OscBundle>;
+    // Child bundles are held by shared_ptr and are never modified once they
+    // are in a bundle, so copying a bundle copies its direct elements only
+    // and shares the nested bundles with the original: a copy costs the size
+    // of one level, not of the whole tree. (OscReceiver is the one exception
+    // to "never modified": it gives itself a private node before it hands a
+    // nested bundle to listeners for editing.)
+    using Element = std::variant<OscMessage, std::shared_ptr<OscBundle>>;
 
     // Timetag representing immediate execution
     static constexpr uint64_t TIMETAG_IMMEDIATELY = 1;
 
-    // Deepest bundle nesting fromBytes() accepts, counting the outermost
-    // bundle as level 1. Data nested deeper fails to parse as a whole.
-    // Bound (security): untrusted bundles can nest recursively; a depth cap bounds stack memory. Overflow rejects the whole packet; the receiver counts rejected datagrams.
-    static constexpr int MAX_NESTING_DEPTH = 16;
+    // Bundles nest to any depth that fits in the packet. Parsing, destroying
+    // and serializing a bundle walk the nesting with a heap stack, not
+    // recursion, so depth never costs call-stack space (a 64 KiB datagram can
+    // hold a bit over 3000 levels).
 
     OscBundle() : timetag_(TIMETAG_IMMEDIATELY) {}
     explicit OscBundle(uint64_t timetag) : timetag_(timetag) {}
+
+    // Copies are shallow (see Element); destruction is iterative (see above).
+    OscBundle(const OscBundle&) = default;
+    OscBundle& operator=(const OscBundle&) = default;
+    OscBundle(OscBundle&&) noexcept = default;
+    OscBundle& operator=(OscBundle&&) noexcept = default;
+    ~OscBundle();
 
     // -------------------------------------------------------------------------
     // Timetag (NTP format)
@@ -40,7 +56,7 @@ public:
     }
 
     OscBundle& addBundle(const OscBundle& bundle) {
-        elements_.emplace_back(bundle);
+        elements_.emplace_back(std::make_shared<OscBundle>(bundle));
         return *this;
     }
 
@@ -51,7 +67,7 @@ public:
 
     bool isBundle(size_t index) const {
         if (index >= elements_.size()) return false;
-        return std::holds_alternative<OscBundle>(elements_[index]);
+        return std::holds_alternative<std::shared_ptr<OscBundle>>(elements_[index]);
     }
 
     bool isMessage(size_t index) const {
@@ -69,8 +85,8 @@ public:
 
     OscBundle getBundleAt(size_t index) const {
         if (index >= elements_.size()) return OscBundle();
-        if (auto* bundle = std::get_if<OscBundle>(&elements_[index])) {
-            return *bundle;
+        if (auto* bundle = std::get_if<std::shared_ptr<OscBundle>>(&elements_[index])) {
+            return **bundle;
         }
         return OscBundle();
     }
@@ -79,19 +95,19 @@ public:
     // Valid while this bundle is alive and no element is added or removed.
     const OscBundle* bundleAt(size_t index) const {
         if (index >= elements_.size()) return nullptr;
-        return std::get_if<OscBundle>(&elements_[index]);
+        if (auto* bundle = std::get_if<std::shared_ptr<OscBundle>>(&elements_[index])) return bundle->get();
+        return nullptr;
     }
 
     // -------------------------------------------------------------------------
     // Serialize
     // -------------------------------------------------------------------------
     std::vector<uint8_t> toBytes() const;
-    // ok is false when nesting exceeds MAX_NESTING_DEPTH, any element is
-    // truncated (its size runs past the end of the data), or any nested
-    // message or bundle fails to parse (see OscMessage::fromBytes()): the
-    // whole bundle is rejected, not a part of it.
-    // Allocation-free preflight also limits the whole outer packet to
-    // 65,536 bytes and 4096 bundle elements/argument tags combined.
+    // ok is false when any element is truncated (its size runs past the end
+    // of the data), or any nested message or bundle fails to parse (see
+    // OscMessage::fromBytes()): the whole bundle is rejected, not a part of
+    // it. The preflight also limits the whole outer packet to 65,536 bytes
+    // (the UDP datagram size); nesting depth has no limit of its own.
     static OscBundle fromBytes(const uint8_t* data, size_t size, bool& ok);
     // Same, and paddingMissing tells whether any message in the bundle ends
     // before its zero padding to 4 bytes (it still parses, as in
@@ -117,9 +133,7 @@ public:
     }
 
 private:
-    // fromBytes() for a bundle at nesting level `depth` (1 = outermost)
-    static OscBundle fromBytesAtDepth(const uint8_t* data, size_t size, bool& ok,
-                                      bool& paddingMissing, int depth);
+    friend struct osc_internal::BundleDispatchAccess;
 
     uint64_t timetag_;
     std::vector<Element> elements_;

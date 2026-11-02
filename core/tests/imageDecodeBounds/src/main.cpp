@@ -370,10 +370,6 @@ void inputSizeChecks(const fs::path& root) {
     Pixels pixels;
     writeFile(root / "empty.png", {});
     check("empty file rejects without an output", pixels.load(root / "empty.png").error == LoadError::DecodeFailed && empty(pixels));
-    const unsigned char byte = 0;
-    internal::failImageDecodeAllocationAfterForTests(-1);
-    check("memory size rejected before reading", pixels.loadFromMemory(&byte, int(cap + 1)).error == LoadError::TooLarge && empty(pixels) &&
-        internal::imageDecodeAllocationAttemptsForTests() == 0);
     const auto path = root / "encoded.ppm";
     {
         ofstream file(path, ios::binary);
@@ -403,12 +399,28 @@ void inputSizeChecks(const fs::path& root) {
         check("async large local load completes once", events == 1 && !image.isLoading());
         internal::appRunToken()->store(false);
     }
+    {
+        // There is no encoded-size cap: the same 70 MB image loads from memory
+        // (the path URL and network-buffer loads take) with its pixels intact.
+        ifstream in(path, ios::binary);
+        Bytes big((istreambuf_iterator<char>(in)), istreambuf_iterator<char>());
+        check("encoded memory input above 64 MiB is read for the test", big.size() > cap);
+        const auto rejectionsBefore = internal::imageDecodeRejectionsForTests();
+        const auto result = pixels.loadFromMemory(big.data(), int(big.size()));
+        check("memory image above 64 MiB is not a rejection", internal::imageDecodeRejectionsForTests() == rejectionsBefore);
+        check("memory image above 64 MiB loads completely", bool(result) && pixels.getWidth() == 5000 &&
+              pixels.getHeight() == 4667 && pixels.getColor(4999, 4666) == Color(1, 1, 1, 1));
+        pixels.clear();
+    }
     fs::remove(path);
+    // The former cap's size, and one byte more, are ordinary sizes now.
     auto bytes = encoded("png", 1, 1);
     bytes.resize(cap, 0);
-    check("exact encoded input cap loads", pixels.loadFromMemory(bytes.data(), int(bytes.size())) && pixels.getWidth() == 1);
+    check("encoded input of 64 MiB loads", pixels.loadFromMemory(bytes.data(), int(bytes.size())) && pixels.getWidth() == 1);
+    bytes.push_back(0);
+    check("encoded input of 64 MiB + 1 loads", pixels.loadFromMemory(bytes.data(), int(bytes.size())) && pixels.getWidth() == 1);
     writeFile(path, bytes);
-    check("exact encoded file cap loads", pixels.load(path) && pixels.getWidth() == 1);
+    check("encoded file of 64 MiB + 1 loads", pixels.load(path) && pixels.getWidth() == 1);
 }
 #ifdef __APPLE__
 Bytes grayTiff(int width) {

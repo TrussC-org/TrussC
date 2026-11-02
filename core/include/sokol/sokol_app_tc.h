@@ -8815,7 +8815,11 @@ void sapp_set_clipboard_string(const char* str) {
     if (wchar_count <= 0) return;
     const SIZE_T wchar_buf_size = (SIZE_T)wchar_count * sizeof(wchar_t);
     HANDLE object = GlobalAlloc(GMEM_MOVEABLE, wchar_buf_size);
-    if (!object) throw std::bad_alloc();
+    if (!object) {
+        _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_MALLOC_FAILED,
+            __LINE__, "error: ", "%s", "Clipboard copy failed: out of memory");
+        return;
+    }
     wchar_t* wchar_buf = (wchar_t*)GlobalLock(object);
     if (!wchar_buf) {
         GlobalFree(object);

@@ -165,6 +165,8 @@ vec3 tonemapACES(vec3 x) {
 // first, then bilerp the four 0/1 results by the sub-texel fraction. Comparing
 // before filtering is essential — filtering the depths first would invent a
 // phantom averaged occluder along shadow edges.
+// Shadow storage has one mip. Explicit LOD avoids implicit derivatives inside
+// the per-light and PCF loops without changing the sampled texels.
 float shadowTapBilinear(vec2 uv, float layer, float compareDepth, float mapSize) {
     // NEAREST sampler: texel centers sit at (i+0.5)/mapSize. Shift by -0.5 so
     // floor() lands on the lower-left texel and `f` is measured from centers.
@@ -178,10 +180,10 @@ float shadowTapBilinear(vec2 uv, float layer, float compareDepth, float mapSize)
     vec2 uv01 = (base + vec2(0.5, 1.5)) * invSize;
     vec2 uv11 = (base + vec2(1.5, 1.5)) * invSize;
 
-    float d00 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv00, layer)).r;
-    float d10 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv10, layer)).r;
-    float d01 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv01, layer)).r;
-    float d11 = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv11, layer)).r;
+    float d00 = textureLod(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv00, layer), 0.0).r;
+    float d10 = textureLod(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv10, layer), 0.0).r;
+    float d01 = textureLod(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv01, layer), 0.0).r;
+    float d11 = textureLod(sampler2DArray(shadowMap, shadowMapSmp), vec3(uv11, layer), 0.0).r;
 
     float s00 = (compareDepth > d00) ? 0.0 : 1.0;
     float s10 = (compareDepth > d10) ? 0.0 : 1.0;
@@ -396,7 +398,7 @@ float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
     float blockerCount = 0.0;
     for (int i = 0; i < 16; i++) {
         vec2 o = (rot * poisson16[i]) * searchUV;
-        float d = texture(sampler2DArray(shadowMap, shadowMapSmp), vec3(shadowUV + o, float(slot))).r;
+        float d = textureLod(sampler2DArray(shadowMap, shadowMapSmp), vec3(shadowUV + o, float(slot)), 0.0).r;
         // Closer to the light than the (biased) receiver -> it's a blocker.
         if (d < compareDepth) {
             blockerSum += d;
