@@ -299,6 +299,7 @@ private:
         state_->name_ = name;
         state_->portNumber_ = port;
         state_->onMessage.target = messageTarget_;
+        internal::keepMidiClientAlive();
         backend_ = std::make_shared<Backend>();
         backend_->input = std::make_unique<libremidi::midi_in>(
             makeConfig(state_), libremidi::midi_in_configuration_for(platformMidiApi()));

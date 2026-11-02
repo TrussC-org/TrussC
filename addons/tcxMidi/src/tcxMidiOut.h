@@ -104,6 +104,7 @@ public:
 
     bool openVirtualPort(const std::string& name = "TrussC Output") {
         close();
+        internal::keepMidiClientAlive();
         midiOut_ = std::make_unique<libremidi::midi_out>(
             libremidi::output_configuration{}, libremidi::midi_out_configuration_for(platformMidiApi()));
         auto err = midiOut_->open_virtual_port(name);
@@ -270,6 +271,7 @@ private:
 
     bool openOutputPort(const libremidi::output_port& port, int index) {
         close();
+        internal::keepMidiClientAlive();
         midiOut_ = std::make_unique<libremidi::midi_out>(
             libremidi::output_configuration{}, libremidi::midi_out_configuration_for(platformMidiApi()));
         auto err = midiOut_->open_port(port);

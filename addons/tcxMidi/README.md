@@ -215,6 +215,11 @@ again on the main thread; if the port's name is gone, that is the loss:
 | WebMIDI | not reported (libremidi does not expose `statechange`) | - |
 | Android (AMidi) | not verified | - |
 
+On macOS and iOS tcxMidi keeps one CoreMIDI client alive for the whole process
+(created on first use, never destroyed). Without a client CoreMIDI stops
+refreshing this process's port list, so a replugged port would never be listed
+again after `close()` or a loss.
+
 A virtual port you created with `openVirtualPort()` is never reported lost.
 Two ports with the same name are not told apart: losing one of them is not
 reported while the other is still listed, and `setup()` opens the first. A
