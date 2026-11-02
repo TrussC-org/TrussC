@@ -28515,6 +28515,7 @@ description.ko = "오디오 파일을 메모리에 로드한다."
 details.en = '''
 - Decodes the entire file into a `SoundBuffer` before returning; use this for short sounds or when full PCM data in memory is appropriate.
 - Selects the decoder by extension: `.wav`, `.mp3`, `.ogg`, `.flac`, `.aac`, or `.m4a`. Extension matching ignores case without changing the file name; AAC/M4A decoding depends on the platform and is unsupported on Android.
+- An MP3 or FLAC file whose sample rate or channel count changes partway through, such as one spliced from different sources, is read as if the whole file had the format of its first part, so the later part does not play correctly. Ordinary files are not affected.
 - Resolves relative paths through `getDataPath()` and uses absolute paths as supplied.
 - Returns a `LoadResult` that is true on success and contains an error and message on failure. Failure clears the assigned source, so `isLoaded()` becomes `false`.
 - All `Sound` loading functions initialize the audio engine if needed and replace the source for future playback without stopping an existing voice or resetting playback settings. Loading success does not guarantee that an output device is running; check `play()` as well.
@@ -28523,6 +28524,7 @@ details.en = '''
 details.ja = '''
 - ファイル全体を `SoundBuffer` にデコードしてから戻ります。短い音声や、PCM データ全体をメモリに置く用途に使います。
 - 拡張子 `.wav`、`.mp3`、`.ogg`、`.flac`、`.aac`、`.m4a` でデコーダを選択します。拡張子の判定は大文字と小文字を区別せず、ファイル名自体は変更しません。AAC/M4A のデコードはプラットフォームに依存し、Android では非対応です。
+- 途中でサンプルレートやチャンネル数が変わる MP3・FLAC ファイル（別々の音源をつなげたものなど）は、全体が最初の部分の形式として読み込まれるため、後半が正しく再生されません。通常のファイルは影響を受けません。
 - 相対パスは `getDataPath()` で解決し、絶対パスは指定どおりに使います。
 - 成功時に真となる `LoadResult` を返し、失敗時にはエラーとメッセージを返します。失敗すると設定済みの音源を解除し、`isLoaded()` は `false` になります。
 - すべての `Sound` の読み込み関数は、必要に応じてオーディオエンジンを初期化し、既存のボイスを停止したり再生設定をリセットしたりせずに、次回の再生で使う音源を置き換えます。読み込みの成功は出力デバイスの動作を保証しないため、`play()` の結果も確認してください。
@@ -28531,6 +28533,7 @@ details.ja = '''
 details.ko = '''
 - 파일 전체를 `SoundBuffer`로 디코딩한 뒤 반환합니다. 짧은 소리나 전체 PCM 데이터를 메모리에 두는 용도에 사용합니다.
 - 확장자 `.wav`, `.mp3`, `.ogg`, `.flac`, `.aac`, `.m4a`로 디코더를 선택합니다. 확장자는 대소문자를 구분하지 않으며 파일 이름 자체는 변경하지 않습니다. AAC/M4A 디코딩은 플랫폼에 따라 다르며 Android에서는 지원하지 않습니다.
+- 중간에 샘플 레이트나 채널 수가 바뀌는 MP3·FLAC 파일(서로 다른 음원을 이어 붙인 파일 등)은 전체가 첫 부분의 형식으로 읽히므로 뒷부분이 올바르게 재생되지 않습니다. 일반 파일은 영향을 받지 않습니다.
 - 상대 경로는 `getDataPath()`로 해석하고 절대 경로는 지정한 그대로 사용합니다.
 - 성공 시 참으로 평가되는 `LoadResult`를 반환하며, 실패 시 오류와 메시지를 제공합니다. 실패하면 지정된 음원을 해제하므로 `isLoaded()`는 `false`가 됩니다.
 - 모든 `Sound` 로드 함수는 필요하면 오디오 엔진을 초기화하고, 기존 보이스를 정지하거나 재생 설정을 초기화하지 않고 다음 재생에 사용할 음원을 교체합니다. 로드 성공은 출력 장치의 동작을 보장하지 않으므로 `play()`의 결과도 확인해야 합니다.
@@ -32452,6 +32455,7 @@ details.en = '''
 - For `Pixels`, `mipmaps` defaults to `false`; Immutable generates the mip chain during allocation only for four-channel pixels, Dynamic regenerates it through `loadData(pixels)`, and Stream and RenderTarget ignore this option. Generated mip counts are limited to the GPU descriptor capacity.
 - Dimension-based overloads default `sampleCount` to 1; for RenderTarget usage, values above 1 currently fail validation. Use `Fbo::allocate` for multisampling. The format overload also accepts `mipLevels`, defaults it to 1, clamps values below 1 to 1, and allocates the requested chain for RenderTarget usage; it does not generate mip contents.
 - Returns no value; check `isAllocated` for success. Missing graphics initialization leaves it false; exceeding the device size limit or a recoverable GPU image creation failure logs an error and leaves it false. Validation errors terminate the process by default in validation-enabled builds. Requested dimensions and channel count remain stored.
+- On OpenGL backends, running out of GPU memory while the texture is created is not detected, so `isAllocated()` can still be true. This happens only when GPU memory is almost used up.
 - Filter, wrap, and premultiplied-alpha settings survive reallocation; see `Texture` for GPU resource rules.
 '''
 details.ja = '''
@@ -32463,6 +32467,7 @@ details.ja = '''
 - `Pixels` 版の `mipmaps` の既定値は `false` です。Immutable は 4 チャンネルの場合だけ確保時にミップチェーンを生成し、Dynamic は `loadData(pixels)` で再生成します。Stream と RenderTarget はこの指定を無視します。生成するミップ数は GPU 記述子の上限に制限されます。
 - 幅と高さを指定する版の `sampleCount` の既定値は 1 です。現在、RenderTarget で 1 を超える値を指定すると検証に失敗します。マルチサンプリングには `Fbo::allocate` を使用してください。形式を指定する版では `mipLevels` も指定でき、既定値は 1、1 未満は 1 になります。RenderTarget では指定したミップチェーンの領域を確保しますが、その内容は生成しません。
 - 戻り値はありません。成功は `isAllocated` で確認してください。グラフィックスが未初期化の場合は false のままです。デバイスのサイズ上限を超えた場合や、復帰可能な GPU 画像の作成失敗ではエラーを記録し、false のままになります。検証が有効なビルドでは、既定で検証エラーによりプロセスが終了します。指定した幅、高さ、チャンネル数は保持されます。
+- OpenGL のバックエンドでは、テクスチャの作成中に GPU メモリが足りなくなっても検出されず、`isAllocated()` が true のままになることがあります。GPU メモリをほぼ使い切っているときにだけ起こります。
 - フィルタ、ラップ、アルファ乗算済みの設定は再確保後も保持されます。GPU リソースの扱いは `Texture` を参照してください。
 '''
 details.ko = '''
@@ -32474,6 +32479,7 @@ details.ko = '''
 - `Pixels` 오버로드의 `mipmaps` 기본값은 `false`입니다. Immutable은 4채널일 때만 할당 시 밉 체인을 생성하고 Dynamic은 `loadData(pixels)`로 다시 생성합니다. Stream과 RenderTarget은 이 옵션을 무시합니다. 생성되는 밉 수는 GPU 기술자의 용량으로 제한됩니다.
 - 크기를 받는 오버로드의 `sampleCount` 기본값은 1입니다. 현재 RenderTarget 용도에서 1을 초과하는 값을 지정하면 검증에 실패합니다. 멀티샘플링에는 `Fbo::allocate`를 사용합니다. 형식 오버로드는 `mipLevels`도 받으며 기본값은 1이고 1 미만의 값은 1로 조정합니다. RenderTarget에서는 요청한 밉 체인의 공간을 할당하지만 내용을 생성하지 않습니다.
 - 반환값은 없습니다. 성공 여부는 `isAllocated`로 확인합니다. 그래픽이 초기화되지 않으면 false로 남습니다. 장치 크기 제한을 초과하거나 복구 가능한 GPU 이미지 생성 실패가 발생하면 오류를 기록하고 false로 남습니다. 검증이 활성화된 빌드에서는 기본적으로 검증 오류가 프로세스를 종료합니다. 요청한 크기와 채널 수는 저장됩니다.
+- OpenGL 백엔드에서는 텍스처를 만드는 중에 GPU 메모리가 부족해져도 감지되지 않아 `isAllocated()`가 계속 true일 수 있습니다. GPU 메모리를 거의 다 썼을 때만 발생합니다.
 - 필터, 래핑, 알파 사전 곱셈 설정은 재할당 후에도 유지됩니다. GPU 리소스 규칙은 `Texture`를 참조하세요.
 '''
 related = ["Texture", "TextureFormat", "TextureUsage", "Texture::loadData", "Fbo::begin"]
