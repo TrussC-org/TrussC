@@ -6,6 +6,7 @@ Window::control, Win32 forwarding, global sizing and X11 geometry use production
 """
 from pathlib import Path
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -394,6 +395,11 @@ class WindowPixelSizeTests(unittest.TestCase):
                 self.assertIn('missing source marker:', str(caught.exception))
 
     def test_native_invalid_sizes_match_base(self):
+        if not shutil.which('xrdb'):
+            reason = 'xrdb required for native DPI checks (install x11-xserver-utils)'
+            if 'CI' in os.environ:
+                self.fail(reason)
+            self.skipTest(reason)
         # Isolate expected assertion failures in child processes and compare real
         # native creation/default selection to the target branch, per dimension.
         header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
@@ -446,7 +452,7 @@ subprocess.run([glx,'tiny','640','400','1'], check=True)
             # Both shared-path backends reject before native creation.
             tiny_binaries = [binaries[0], binaries[2]]
             subprocess.run(['xvfb-run','-a','-s','-screen 0 1280x720x24 -noreset',
-                'bash','-c', 'ulimit -c 0; printf "Xft.dpi: 192\\n" | xrdb -merge; exec "$@"',
+                'bash','-eo','pipefail','-c', 'ulimit -c 0; printf "Xft.dpi: 192\\n" | xrdb -merge; exec "$@"',
                 'native-validation', 'python3','-c',runner,*binaries,','.join(tiny_binaries)], check=True,
                 env=dict(os.environ, LIBGL_ALWAYS_SOFTWARE='1',
                     __EGL_VENDOR_LIBRARY_FILENAMES='/usr/share/glvnd/egl_vendor.d/50_mesa.json',
