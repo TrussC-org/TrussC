@@ -2669,15 +2669,12 @@ description.ja = "エンジンの出力サンプルレートを指定する。"
 description.ko = "엔진의 출력 샘플 레이트를 지정한다."
 details.en = '''
 - The unit is Hz. The default value is `0`; zero or negative values select `AudioEngine::DEFAULT_SAMPLE_RATE`, which is `48000`.
-- Known issue: [#907](https://github.com/TrussC-org/TrussC/issues/907) (an example comment states a 96 kHz default, but the engine default is 48 kHz).
 '''
 details.ja = '''
 - 単位は Hz です。デフォルト値は `0` で、0 以下の場合は `AudioEngine::DEFAULT_SAMPLE_RATE` の `48000` を使います。
-- 既知の問題: [#907](https://github.com/TrussC-org/TrussC/issues/907)（サンプルのコメントに既定値を 96 kHz とする記載がありますが、エンジンの既定値は 48 kHz です）。
 '''
 details.ko = '''
 - 단위는 Hz입니다. 기본값은 `0`이며, 0 이하이면 `AudioEngine::DEFAULT_SAMPLE_RATE`인 `48000`을 사용합니다.
-- 알려진 문제: [#907](https://github.com/TrussC-org/TrussC/issues/907)(예제 주석에는 기본값이 96 kHz라고 되어 있지만 엔진 기본값은 48 kHz입니다).
 '''
 
 ["AudioStats"]

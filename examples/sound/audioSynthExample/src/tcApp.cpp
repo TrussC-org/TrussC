@@ -19,8 +19,8 @@ void tcApp::setup() {
     setFps(VSYNC);
 
     // Optional: configure the engine before any Sound::load() / play() /
-    // audioOut listener fires. init() defaults to 96 kHz; here we ask for
-    // 48 kHz with a tighter buffer for lower latency. Comment this out to
+    // audioOut listener fires. init() defaults to 48 kHz (spelled out
+    // here) and we ask for a tighter buffer for lower latency. Comment this out to
     // use defaults.
     AudioSettings as;
     as.sampleRate = 48000;
