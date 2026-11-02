@@ -230,6 +230,8 @@ public:
     //   if (!grabber.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); grabber.setup(); }
     // Returns false and logs an error when the camera cannot be opened (false
     // without an error while the camera permission is pending).
+    // Until the first isFrameNew() after setup, the texture can still show the
+    // previous camera image (e.g. the last frame before an unplug).
     bool setup() {
         return setup(lastWidth_, lastHeight_);
     }

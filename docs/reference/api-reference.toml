@@ -38725,6 +38725,7 @@ details.en = '''
 - `setup(int width, int height)` requests dimensions in pixels, with no defaults, and first closes any previous capture without firing `onDisconnect`; actual dimensions can differ, so read `getWidth()` and `getHeight()`. It opens the device chosen by `setDeviceID()` and remembers the requested size.
 - `setup()` with no arguments reopens the camera with the last settings: the current device ID and the size of the last `setup(width, height)` (device 0 at 640 × 480 if there was none). On failure it logs an error and returns false. Use it to reconnect, for example `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`.
 - Returns true after platform setup and allocation of a zero-filled RGBA8 CPU buffer and a streaming texture; a captured frame need not be available yet.
+- Until the first `isFrameNew()` after setup, the texture can still show the previous camera image (for example the last frame before an unplug). To draw only live frames, start drawing after `isFrameNew()` has been true once.
 - If camera permission is unavailable, requests it asynchronously, marks setup as pending, and returns false; keep calling `update()` to attempt setup once permission is granted.
 - Platform setup failure also returns false, but does not schedule automatic retries; use `isPendingPermission()` to distinguish a pending permission setup.
 - Call `setup()`, `update()`, `copyToImage()`, and drawing on the main thread because they create or use GPU resources; serialize lifecycle changes with other access to the grabber.
@@ -38735,6 +38736,7 @@ details.ja = '''
 - `setup(int width, int height)` はピクセル単位で寸法を要求します。既定値はありません。最初に以前のキャプチャを、`onDisconnect` を発火せずに閉じます。実際の寸法は異なる場合があるため、`getWidth()` と `getHeight()` で確認してください。`setDeviceID()` で選んだデバイスを開き、要求したサイズを覚えます。
 - 引数なしの `setup()` は、最後の設定でカメラを開き直します。現在のデバイス ID と、最後の `setup(width, height)` のサイズです（まだ呼んでいなければ、デバイス 0 の 640 × 480）。失敗するとエラーログを出して false を返します。再接続に使います。例: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
 - プラットフォームのセットアップと、0 で埋めた RGBA8 の CPU バッファおよびストリーミングテクスチャの確保後に true を返します。この時点でキャプチャ済みフレームがあるとは限りません。
+- セットアップ後、最初に `isFrameNew()` が true になるまでは、テクスチャに前のカメラ画像（抜く前の最後のフレームなど）が残っていることがあります。新しい映像だけを描きたいときは、`isFrameNew()` が一度 true になってから描き始めてください。
 - カメラの許可がない場合は非同期に要求し、セットアップを待機状態にして false を返します。許可後にセットアップを試みられるよう、`update()` を呼び続けてください。
 - プラットフォームのセットアップ失敗でも false を返しますが、自動再試行は予約しません。許可待ちかどうかは `isPendingPermission()` で区別してください。
 - GPU リソースを作成または使用するため、`setup()`、`update()`、`copyToImage()`、描画はメインスレッドで呼んでください。初期化や終了などの状態変更は、グラバーへの他のアクセスと同時に行わないでください。
@@ -38745,6 +38747,7 @@ details.ko = '''
 - `setup(int width, int height)`는 픽셀 단위로 크기를 요청하며 기본값이 없습니다. 먼저 이전 캡처를 `onDisconnect` 없이 닫습니다. 실제 크기는 다를 수 있으므로 `getWidth()`와 `getHeight()`로 확인합니다. `setDeviceID()`로 고른 장치를 열고 요청한 크기를 기억합니다.
 - 인수 없는 `setup()`은 마지막 설정으로 카메라를 다시 엽니다. 현재 디바이스 ID와 마지막 `setup(width, height)`의 크기입니다(아직 호출하지 않았다면 장치 0의 640 × 480). 실패하면 오류 로그를 남기고 false를 반환합니다. 재연결에 사용합니다. 예: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
 - 플랫폼 설정과 0으로 채운 RGBA8 CPU 버퍼 및 스트리밍 텍스처 할당 후 true를 반환합니다. 이 시점에 캡처된 프레임이 있다는 뜻은 아닙니다.
+- 설정 후 처음으로 `isFrameNew()`가 true가 될 때까지 텍스처에 이전 카메라 이미지(뽑기 전 마지막 프레임 등)가 남아 있을 수 있습니다. 새 영상만 그리려면 `isFrameNew()`가 한 번 true가 된 뒤부터 그립니다.
 - 카메라 권한이 없으면 비동기로 요청하고 설정을 대기 상태로 지정한 뒤 false를 반환합니다. 권한 허용 후 설정을 시도할 수 있도록 `update()`를 계속 호출합니다.
 - 플랫폼 설정 실패 시에도 false를 반환하지만 자동 재시도는 예약하지 않습니다. 권한 대기 상태인지는 `isPendingPermission()`으로 구분합니다.
 - GPU 리소스를 만들거나 사용하므로 `setup()`, `update()`, `copyToImage()`, 그리기는 메인 스레드에서 호출합니다. 초기화나 종료 등의 상태 변경은 그래버에 대한 다른 접근과 동시에 수행하지 않아야 합니다.
