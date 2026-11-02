@@ -17,6 +17,8 @@ import tarfile
 PATCHED_HASHES = {
     "include/libremidi/backends/alsa_seq/midi_out.hpp":
         "0590ffc031e6fbc2076af581542095c057bedbc6766d137bd14114eb4ec9525b",
+    "include/libremidi/backends/coremidi.hpp":
+        "35725620d09241ebf2e8097bf2ad79d88ee4277bcba96b45f6c9e42bdf7264bd",
 }
 INPUT_FILES = (
     "include/libremidi/detail/midi_stream_decoder.hpp",
@@ -66,7 +68,7 @@ def main():
         'cmake_minimum_required(VERSION 3.20)\nproject(patch_checks LANGUAGES C CXX)\n'
         'add_library(TrussC INTERFACE)\nadd_subdirectory(addon)\n', encoding="utf-8")
 
-    def run(label, command, succeeds=True, error="checked libremidi 5.4.3 ALSA SysEx output patch"):
+    def run(label, command, succeeds=True, error="checked libremidi 5.4.3 "):
         result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
         (work / (label + ".log")).write_text(result.stdout + result.stderr, encoding="utf-8")
         if (result.returncode == 0) != succeeds:
@@ -103,7 +105,7 @@ def main():
     for path in pristine.rglob("*"):
         if path.is_file() and path.relative_to(pristine).as_posix() not in PATCHED_HASHES:
             assert (override / path.relative_to(pristine)).read_bytes() == path.read_bytes(), path
-    print("PASS: all files except ALSA output remain byte-exact upstream", flush=True)
+    print("PASS: all files except the patched ones remain byte-exact upstream", flush=True)
     before = snapshot(override)
     run("idempotent_patch", ["cmake", f"-DLIBREMIDI_SOURCE_DIR={override}", "-P", str(script)])
     assert patched_bytes(override) == expected
@@ -118,7 +120,7 @@ def main():
     patch("crlf_script_idempotent", crlf_output, script_crlf)
     assert snapshot(crlf_output) == before, "idempotent patch wrote sources"
 
-    # R4 alone must never conceal stale R1-R3 or other input edits.
+    # The output/observer patches alone must never conceal stale R1-R3 or other input edits.
     for index, path in enumerate(INPUT_FILES):
         header = override / path
         upstream = header.read_bytes()
@@ -184,7 +186,7 @@ def main():
     if args.script_only:
         return
     configure("patched_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}")
-    # The ALSA output replacement is required for source overrides.
+    # Each replacement is required for source overrides.
     for index, path in enumerate(PATCHED_HASHES):
         header = override / path
         patched = header.read_bytes()
@@ -213,7 +215,7 @@ def main():
         output.write("\n// Unknown local edit.\n")
     configure("modified_override", f"-DFETCHCONTENT_SOURCE_DIR_LIBREMIDI={override}", succeeds=False)
     cache = work / "reused_cache"
-    cached_source = cache / "libremidi-v5.4.3-r4-src"
+    cached_source = cache / "libremidi-v5.4.3-r5-src"
     shutil.copytree(pristine, cached_source)
     configure("unpatched_reused_cache", f"-DFETCHCONTENT_BASE_DIR={cache}",
               "-DFETCHCONTENT_FULLY_DISCONNECTED=ON", succeeds=False)
