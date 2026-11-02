@@ -164,8 +164,51 @@ void copy_to_peer(const std::string& text) {
     reader.join();
 }
 
+// #1023: the TARGETS reply lists TARGETS itself next to UTF8_STRING (ICCCM).
+void targets_to_peer() {
+    sapp_set_clipboard_string("targets");
+    std::atomic<bool> finished{false};
+    std::thread reader([&] {
+        Display* peer = XOpenDisplay(nullptr); assert(peer);
+        Window window = XCreateSimpleWindow(peer, DefaultRootWindow(peer), 0, 0, 1, 1, 0, 0, 0);
+        const Atom property = XInternAtom(peer, "D3B_TARGETS", False);
+        XConvertSelection(peer, _sapp_tc.CLIPBOARD, _sapp_tc.TARGETS, property, window, CurrentTime);
+        XFlush(peer);
+        XEvent event;
+        do { event = next_event(peer); } while (event.type != SelectionNotify);
+        assert(event.xselection.property == property);
+        Atom type; int format; unsigned long count, after;
+        unsigned char* data = nullptr;
+        assert(XGetWindowProperty(peer, window, property, 0, 64, True,
+            AnyPropertyType, &type, &format, &count, &after, &data) == Success);
+        assert(type == XA_ATOM && format == 32);
+        bool has_targets = false, has_utf8 = false;
+        for (unsigned long i = 0; i < count; ++i) {
+            const Atom atom = ((const long*)data)[i];
+            has_targets |= atom == _sapp_tc.TARGETS;
+            has_utf8 |= atom == _sapp_tc.UTF8_STRING;
+        }
+        assert(has_targets && "TARGETS reply must list TARGETS");
+        assert(has_utf8 && "TARGETS reply must list UTF8_STRING");
+        XFree(data);
+        XDestroyWindow(peer, window); XCloseDisplay(peer);
+        finished = true;
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!finished) {
+        assert(std::chrono::steady_clock::now() < deadline && "TARGETS request did not complete");
+        while (XPending(_sapp_tc.display)) {
+            XEvent event; XNextEvent(_sapp_tc.display, &event);
+            _sapp_tc_x11_process_event(&event);
+        }
+        std::this_thread::yield();
+    }
+    reader.join();
+}
+
 void verify() {
     drops();
+    targets_to_peer();
     std::string text;
     while (text.size() < 200 * 1024) text += "D3b-0123456789-日本語\n";
     copy_to_peer(text);
@@ -178,7 +221,7 @@ void verify() {
     paste_from_peer(large, true);
     copy_to_peer("");
     paste_from_peer("", false);
-    std::puts("PASS: 20 exact drop paths, >2048-byte path, 200 KiB clipboard, INCR both ways, empty text");
+    std::puts("PASS: TARGETS lists itself, 20 exact drop paths, >2048-byte path, 200 KiB clipboard, INCR both ways, empty text");
     sapp_quit();
 }
 } // namespace
