@@ -1,99 +1,330 @@
 # Migrating to v0.8.0
 
-After updating to v0.8.0, delete existing build folders (or run a clean build).
+This guide is for apps and addons written for v0.7.7. It lists what you may need to change, by area.
 
-## Box2D ownership and contact delivery
+After updating, delete your build folders or do a clean build.
 
-World, Body, CircleBody, RectBody and PolyShape cannot be moved; construct them in place and store/move smart pointers when needed.
+Each section starts with the changes that can break your code: it no longer compiles, or it compiles but behaves differently. Each has an example of the old and the new code. After the breaking changes come the new features you can adopt when you want.
 
-b2Body user data is reserved by TrussC; put application data in your Body subclass. Fixture user data is reserved too.
+**Contents**
 
-Begin/End now run after each managed sub-step in Box2D order; Stay runs once per
-update. Raw `b2World::Step()` events wait for the next fresh-frame
-`World::update()`. Move destroyed-side Exit cleanup before release; surviving
-sides receive Exit with null counterparts. Listeners may destroy bodies or the
-World: recheck borrowed payload pointers after release. See the
-[addon event contract](../addons/tcxBox2d/README.md#collision-events).
+- [App, window and runtime](#app-window-and-runtime): [Create Apps through a window or a launcher](#create-apps-through-a-window-or-a-launcher) · [The launch window is window #1](#the-launch-window-is-window-1) · [Closing the launch window no longer always quits](#closing-the-launch-window-no-longer-always-quits) · [Quitting can be cancelled, and each window can refuse to close](#quitting-can-be-cancelled-and-each-window-can-refuse-to-close) · [App callbacks are listeners now, and default listeners run first](#app-callbacks-are-listeners-now-and-default-listeners-run-first) · [events() needs an App, and process events are on runtime()](#events-needs-an-app-and-process-events-are-on-runtime) · [Headless apps fire update and exit events](#headless-apps-fire-update-and-exit-events) · [A hidden window keeps updating but stops drawing](#a-hidden-window-keeps-updating-but-stops-drawing) · [Quitting during setup()](#quitting-during-setup) · [Logout, restart and shutdown](#logout-restart-and-shutdown) · [Hot reload supports one window](#hot-reload-supports-one-window) · [Stdin commands need console::start()](#stdin-commands-need-consolestart) · [Window and runtime settings](#window-and-runtime-settings) · [Internal Window functions are no longer public](#internal-window-functions-are-no-longer-public) · [No built-in crash handler](#no-built-in-crash-handler)
+- [Async work and threads](#async-work-and-threads): [runOnMainThread() runs between turns, and drops work for an ended App](#runonmainthread-runs-between-turns-and-drops-work-for-an-ended-app) · [Thread::waitForThread() on its own thread](#threadwaitforthread-on-its-own-thread)
+- [Rendering](#rendering): [Every angle is in radians; degrees use Deg names](#every-angle-is-in-radians-degrees-use-deg-names) · [Each Fbo has its own matrices, camera and clipping](#each-fbo-has-its-own-matrices-camera-and-clipping) · [grabScreen() reads the finished frame in afterFrame](#grabscreen-reads-the-finished-frame-in-afterframe) · [The swapchain pass functions are removed](#the-swapchain-pass-functions-are-removed) · [Cubemap textures are uploaded in one call](#cubemap-textures-are-uploaded-in-one-call) · [Shader subclasses use pipelineForCurrentTarget()](#shader-subclasses-use-pipelineforcurrenttarget) · [Fbo::readPixels() on float Fbos, and failed allocations](#fboreadpixels-on-float-fbos-and-failed-allocations)
+- [Loading and saving](#loading-and-saving): [Saving and recording return SaveResult](#saving-and-recording-return-saveresult) · [OBJ and glTF loading return LoadResult](#obj-and-gltf-loading-return-loadresult) · [OBJ export returns SaveResult](#obj-export-returns-saveresult) · [LoadError has two new values](#loaderror-has-two-new-values) · [Sound files are found through getDataPath()](#sound-files-are-found-through-getdatapath)
+- [Devices](#devices): [Serial](#serial) · [VideoGrabber](#videograbber) · [MidiIn and MidiOut (tcxMidi)](#midiin-and-midiout-tcxmidi) · [AudioEngine and MicInput](#audioengine-and-micinput) · [DepthCamera backends return an owned Device](#depthcamera-backends-return-an-owned-device) · [DepthCamera connection state](#depthcamera-connection-state)
+- [Networking and addons](#networking-and-addons): [OscReceiver::setup() owns its port](#oscreceiversetup-owns-its-port) · [OSC and MIDI receive queues](#osc-and-midi-receive-queues) · [TcpServer limits clients to 64 by default](#tcpserver-limits-clients-to-64-by-default) · [tcxCurl follows redirects and limits response size](#tcxcurl-follows-redirects-and-limits-response-size) · [tcxWebSocket limits message size](#tcxwebsocket-limits-message-size) · [Box2D ownership and contact events](#box2d-ownership-and-contact-events)
+- [Limits that are gone](#limits-that-are-gone)
+- [Tools, build and MCP](#tools-build-and-mcp): [TrussC.h no longer brings in the HTTP library's system headers](#trussch-no-longer-brings-in-the-http-librarys-system-headers) · [MCP tools need a dev build or a grant](#mcp-tools-need-a-dev-build-or-a-grant) · [MCP window ids](#mcp-window-ids) · [The MCP port line is only on the Logger](#the-mcp-port-line-is-only-on-the-logger) · [Shader targets in custom CMake](#shader-targets-in-custom-cmake)
+- [New in v0.8.0](#new-in-v080)
 
-Bodies owned by a TrussC Body or RigidBody2D are destroyed through TrussC (`Body::destroy()`, removing the Mod, `World::clear()`); don't call raw `b2World::DestroyBody`/`DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked when the body still has fixtures (the destruction listener); removing a body's last fixture and then the body without an `update()` in between is not tracked.
+## App, window and runtime
 
-Register borrowed destruction delegates through `World::setDestructionListener()`
-to preserve the internal observer. `clear()` keeps the physics world and settings
-and is immediately reusable; a second `setup()` replaces the physics world.
+v0.8.0 reorganizes how apps, windows and the runtime fit together. The **runtime** is the process-wide part of TrussC. It owns every window and every App. Each **window** shows one App. The launch window, the one `runApp()` opens, is now an ordinary window.
 
-## Node and Mod setup() runs when they join the App's tree (#949)
+### Create Apps through a window or a launcher
 
-`Node::setup()` and `Mod::setup()` now follow one rule (breaking change): they run once, when the node or mod joins the running App's tree.
+You can no longer make an App yourself and hand it to a window. Create it with `Window::setApp<T>(args...)`, `runApp<T>()` or `runHeadlessApp<T>()`. Constructing an App any other way, for example with `make_shared<MyApp>()`, compiles but throws `std::logic_error` when it runs.
 
-- `addChild()` / `insertChild()` under a parent that is already set up in the App's tree runs the child's `setup()` before it returns, with its subtree. Before, it ran just before the child's first update or draw.
-- A subtree built while detached is set up as a whole when it is attached: parents before children, in child order, each node's mods right after the node.
-- `addMod()` on a set-up node in the App's tree runs the mod's `setup()` at once, as before. On a node that is not in the tree yet, it now waits and runs right after the node's own `setup()`. Before, it always ran inside `addMod()`, even before the owner's `setup()`.
-- The App itself is still set up on its first update or draw after it becomes a window's root; children added to it earlier are set up right after it.
-- Inactive nodes (`setActive(false)`) are set up when they join, not when they first become active.
-- A traversal now skips a child that was removed or moved to another parent after its parent copied the child list.
-- `CoreEvents::setup` (`events().setup`) is removed. It was never fired; put code that should run after setup at the end of `setup()`.
-
-Configure a node before `addChild()`, or in its constructor. Values set after `addChild()` returns are not there yet when `setup()` runs:
+`Window::setApp(shared_ptr<App>)` is removed. To remove a window's App, call `destroyApp()` instead of `setApp(nullptr)`.
 
 ```cpp
 // Before
-auto ball = make_shared<Ball>();
-addChild(ball);
-ball->radius = 30;   // Ball::setup() ran later, on the first update
+win->setApp(make_shared<SubApp>(42));
+win->setApp(nullptr);
 
 // After
-auto ball = make_shared<Ball>();
-ball->radius = 30;   // configure first
-addChild(ball);      // Ball::setup() runs here
+win->setApp<SubApp>(42);
+win->destroyApp();
 ```
 
-Pass what a mod's `setup()` needs as `addMod<T>(args...)` constructor arguments. For a `RigidBody2D` added to a detached node, the body now appears when the node joins the tree; if its `World` was destroyed by then, no body is created and a warning is logged.
+The runtime keeps every open window and its App. Dropping your `Window` handle does not close the window; call `close()` to close it.
 
-## Stdin commands need `console::start()`
+### The launch window is window #1
 
-Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. `CoreEvents::console` / `events().console` has been removed. Subscribe once to
-`runtime().events().console` and add `console::start()` in `setup()`:
+The launch window is now a `Window` like any other. For the App in it, `getWindow()` returns that window. In v0.7.7 it returned `nullptr`, so code that used `nullptr` to recognize the main App no longer works.
 
 ```cpp
-void MyApp::setup() {
-    consoleListener_ = runtime().events().console.listen([this](ConsoleEventArgs& e) {
+// Before: only the main App had no window
+bool isMainApp = (getWindow() == nullptr);
+
+// After: keep your own flag, or compare with the window you launched
+```
+
+You can call `close()`, `setQuitOnClose()` and the other `Window` functions on the launch window too.
+
+### Closing the launch window no longer always quits
+
+`quitOnClose` is `false` by default, also on the launch window. Clicking × on the launch window while another window is open now closes only that window, and the app keeps running. The app quits when the last window closes. To quit whenever the launch window closes, as in v0.7.7, turn on `quitOnClose`:
+
+```cpp
+// main.cpp
+return runApp<tcApp>(WindowSettings().setSize(1280, 720).setQuitOnClose(true));
+```
+
+### Quitting can be cancelled, and each window can refuse to close
+
+- `exitApp()` now asks `exitRequested` first, so a listener can cancel it. In v0.7.7 it could not be cancelled. The exit code you pass is kept even if a listener cancels the quit.
+- A common pattern is "show a confirm dialog, then call `exitApp()`". That call asks `exitRequested` again, so remember that the user already said yes, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
+- Every listener now gets its own `cancel = false` and the answers are combined: if any listener cancels, the quit is cancelled. A listener can no longer undo an earlier listener's cancel by setting `cancel = false`. A listener that throws counts as a cancel. Only the quit request keeps the first non-empty `reason`.
+- New: each window has `closeRequested` (`CloseRequestEventArgs`, one field, `cancel`). It is asked when the user closes that window from the OS, for example with the × button.
+
+Which question is asked depends on how the window closes:
+
+- **The user closes a window that is not the last one.** Only that window's `closeRequested` is asked.
+- **The user closes the last window, or a window with `setQuitOnClose(true)`.** That window's `closeRequested` is asked first. If it is accepted, `exitRequested` is asked before anything closes. If either is cancelled, every window stays open.
+- **`exitApp()` or Cmd+Q.** Only `exitRequested` is asked.
+- **Your code calls `Window::close()`.** `closeRequested` is not asked. If it is the last window or has `setQuitOnClose(true)`, `exitRequested` is asked once before anything closes, and a cancel leaves every window open. Otherwise nothing is asked, and the window's exit events and the App's ending still run.
+
+To keep an unsaved document open, cancel in `exitRequested`. It also covers × on the last window:
+
+```cpp
+class Document : public App {
+    EventListener quitListener;
+    bool unsaved = true;
+    void setup() override {
+        quitListener = events().exitRequested.listen([this](ExitRequestEventArgs& e) {
+            e.cancel = unsaved;   // also keeps the last window open on ×
+        });
+    }
+};
+```
+
+`App::exit()` runs whenever an App ends: when its window closes, when it is replaced or removed, and on hot reload.
+
+A window's `exit` listener runs while the window is already ending, so it cannot stop the close. Use `closeRequested`, `exitRequested` or `setQuitOnClose(true)` for that.
+
+`ExitRequestEventArgs::reason` is still the optional text that Windows shows when it blocks a shutdown.
+
+### App callbacks are listeners now, and default listeners run first
+
+The App's own callbacks (`update`, `draw`, `exit`, key, mouse, touch, `windowResized`, `filesDropped` and so on) are now called as a listener on the same event, at priority `EventPriority::App` (`100`). Two things change.
+
+**1. `listen()` without a priority now means `EventPriority::BeforeApp` (`0`), not `100`, on these events.** Other events still default to `100`.
+
+- A default listener ties with an explicit `0` and runs in registration order. A default `a` registered before an explicit-0 `b` now runs `a`, then `b`. Before, it ran `b`, then `a`.
+- Default listeners now run before explicit `1`–`99`. Before, they ran after them.
+- Default listeners now run before explicit `100`. Before, they shared priority `100` and ran in registration order.
+- So a default listener that sets `e.consumed = true` now stops even an explicit-100 listener registered earlier.
+
+```cpp
+overlayListener = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 50);
+pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ });
+// v0.7: pickListener had priority 100, so it ran after overlayListener.
+// v0.8: pickListener has priority 0, so it now runs first.
+
+// To keep it after overlayListener, give it a priority above 50:
+pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 60);
+```
+
+**2. Listeners above 100 now run after the App.** In v0.7.7 every listener ran first, whatever its priority, and then the App's callback. Now the App runs at 100, together with its node tree:
+
+- A listener at `EventPriority::AfterApp` (`200`), or any priority above `100`, now runs after `App::update()`, `App::draw()`, `App::keyPressed()` and so on. A `draw` listener at 200 now paints over the App.
+- A listener that runs before the App and sets `e.consumed = true` now stops the App's callback too. In v0.7.7 the App's callback always ran.
+- When the App or its node tree consumes an event, listeners above 100 no longer see it.
+
+```cpp
+// v0.7: ran before App::draw(). v0.8: runs after it, so it draws on top.
+hudListener = events().draw.listen([] { /* ... */ }, EventPriority::AfterApp);
+
+// To draw underneath the App again, use a priority below 100:
+hudListener = events().draw.listen([] { /* ... */ }, 50);
+```
+
+Check every listener whose order matters, and give it an explicit priority.
+
+### events() needs an App, and process events are on runtime()
+
+`events()` now returns the event hub of the App that calls it. Called where there is no App, it logs an error and returns a hub that never fires; `listen()` on it registers nothing. This happens in static or global initializers before `runApp()`, and in non-App code (including worker threads) while two or more windows are open. In v0.7.7 `events()` always returned the main window's hub. The same applies to window getters such as `getDeltaTime()` and `getUpdateCount()`, which return `0` there.
+
+App code keeps using `events()`. Non-App code (addons, app-wide handling) uses `runtime().events()` for process events, or the `events()` of a `Window` it holds:
+
+```cpp
+// Before: an addon subscribed from anywhere
+listener = events().exitRequested.listen([](ExitRequestEventArgs& e) { /* ... */ });
+
+// After: process events are on the runtime
+listener = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) { /* ... */ });
+```
+
+`exitRequested`, `deviceLost` and `hotReloadUnload` have the same names on both hubs. The runtime receives them first, then each App, starting from the most recently attached one. (For `hotReloadUnload`, only the Apps being replaced receive it.) `deviceLost` still shares one mutable `cancel` among its listeners.
+
+### Headless apps fire update and exit events
+
+`runHeadlessApp()` now fires `events().update` on every step and `events().exit` when the app ends, with the App as the listener at priority `100`. In v0.7.7 headless apps called the App directly and these listeners never ran. Addon and app listeners that were silent in headless apps now run there.
+
+```cpp
+// This listener now runs in a headless app too.
+// If it must not, check whether the App has a window:
+updateListener = events().update.listen([this] {
+    if (!getWindow()) return;   // headless: no window
+    /* ... */
+});
+```
+
+### A hidden window keeps updating but stops drawing
+
+While the OS reports a window as hidden (minimized, fully covered by other windows, or on another Space), `update()` keeps running at its normal rate and only `draw()` stops. The rule is the same for every window on every desktop OS. On iOS and Android, the app's suspension by the OS still pauses updates. In v0.7.7 the main window kept updating and drawing while hidden, and other windows paused both. So:
+
+- A hidden main window no longer draws.
+- A hidden secondary window now keeps updating.
+
+Work such as sending OSC from `update()` keeps running while the window is hidden. An option to pause updates while hidden is planned for a later v0.8.x release.
+
+The new `occludedChanged` event tells you when a window becomes hidden or visible.
+
+On Linux (X11), a window now receives `SUSPENDED` when it is minimized or fully covered and `RESUMED` when it is visible again. Before, minimizing did not send `SUSPENDED`. On macOS, a new window no longer receives an initial `SUSPENDED`. This matters only if you listen to `rawEvent`.
+
+### Quitting during setup()
+
+If the App in the launch window asks to quit inside `setup()` and the quit is accepted, the App ends right after `setup()` returns. That is before audio starts and before any console command, `update()` or `draw()`. If the quit is cancelled, the app runs normally. A quit requested by an App deeper in the node tree waits until the current pass over the tree is finished, and is handled before the next runtime turn.
+
+```cpp
+void tcApp::setup() {
+    if (!config.load("settings.json")) {
+        exitApp(1);   // ends right after setup(); update() and draw() never run
+        return;
+    }
+}
+```
+
+### Logout, restart and shutdown
+
+When the OS logs out, restarts or shuts down, TrussC now ends the app in one of two ways. This works on Windows and macOS; Linux has no receiver for it.
+
+- **No App code is running on the main thread.** `exitRequested` is asked, and listeners can cancel. If the OS goes ahead, the normal ending runs: exit events, `App::exit()`, audio detach and `cleanup()`. All of it shares one time limit, 3 seconds by default; change it with `runtime().setLogoutTimeout(seconds)`. Then TrussC calls `std::exit` with the app's exit code, so `atexit` handlers and static destructors run as in an ordinary exit. The time limit still applies while they run (on Windows, not to the destructors of loaded DLLs, which run after it).
+- **App code, or TrussC code serving it, is running on the main thread** (for example inside `update()`, or in a modal dialog). TrussC accepts without asking and runs no App code: no exit events, no `App::exit()`, no audio detach, no `cleanup()`. The OS ends the process. `atexit` handlers and static destructors do not run, and neither do they when the OS kills the process.
+
+So save your app's state in `exit()`, and keep that save short.
+
+```cpp
+void tcApp::setup() {
+    runtime().setLogoutTimeout(10);   // allow up to 10 s for exit() and cleanup()
+}
+void tcApp::exit() {
+    saveJson(state, "state.json");
+}
+```
+
+### Hot reload supports one window
+
+- Hot reload works with one window. Each reload replaces the launch window's App between turns of the main loop. Opening a second window while hot reload is active logs a warning each time, and how it behaves is not guaranteed.
+- Stop your threads, timers and other async work in `events().hotReloadUnload`. The reload does not wait for that work and does not stop it.
+- Every build that loaded successfully stays in memory until the process ends, so many reloads can make the process use more memory.
+
+```cpp
+void tcApp::setup() {
+    unloadListener = events().hotReloadUnload.listen([this] {
+        worker.waitForThread();   // stop the thread before the old code goes away
+    });
+}
+```
+
+### Stdin commands need console::start()
+
+Console input is now opt-in. Neither `runApp()` nor `runHeadlessApp()` reads stdin by itself any more. `CoreEvents::console` (`events().console`) is removed. Listen once on `runtime().events().console`, and call `console::start()` in `setup()`:
+
+```cpp
+// Before
+consoleListener = events().console.listen([this](ConsoleEventArgs& e) { handleCommand(e); });
+
+// After
+void tcApp::setup() {
+    consoleListener = runtime().events().console.listen([this](ConsoleEventArgs& e) {
         handleCommand(e);
     });
     console::start();
 }
 ```
 
-Keep `consoleListener_` as an `EventListener` member. Runtime pumps commands once on the main thread, before the first draw, after
-the first Window closes, with zero Windows and headless. Console has no App
-fan-out; subscriptions still carry their App owner token and retire on App
-ending. The service stops after App ending; no manual pump is needed.
+- Keep `consoleListener` as an `EventListener` member. The subscription belongs to the App and is removed when the App ends.
+- Commands are delivered on the main thread, once per runtime turn: also before the first draw, after the first window closes, with no window open, and in headless apps. You never need to pump them yourself.
+- Commands go to the runtime's `console` event only, not to each App. Delivery stops when the App ends.
+- `console::stop()` stops delivery and discards the commands that are waiting. `console::start()` also discards waiting commands before it turns delivery on again.
+- The first `console::start()` creates the process's only stdin reader. While stopped, the reader keeps reading and discards the lines. It ends at EOF. Starting again does not create a new reader and does not replay discarded lines.
+- An app that never calls `console::start()` leaves stdin alone. The console is not available on the web.
 
-`console::stop()` disables delivery and drains pending commands. `console::start()` drains pending commands before enabling delivery again. The first start creates the process's only detached stdin reader, which continues consuming and discarding lines while stopped and ends at EOF. Restarting delivery does not create a new reader or replay discarded lines. Apps that never opt in leave stdin untouched. Web support remains unavailable.
+### Window and runtime settings
 
-## The MCP port line is only on the Logger
+- **The uniform buffer reservation moved to `RuntimeSettings`.** Pass it as the second argument of `runApp()`. The one-argument `runApp<T>(windowSettings)` uses the default runtime settings.
 
-The raw stderr copy of the MCP port line is gone (breaking change, #414). After the port is bound, the server logs `[MCP] HTTP server listening on http://HOST:PORT/mcp` as a Logger Notice only: on stdout, in the file set with `TRUSSC_LOG_FILE`, and to `onLog` listeners. Logger lines carry a timestamp and a `[NOTICE]` prefix.
+  ```cpp
+  // Before
+  WindowSettings settings;
+  settings.reserveUniformBuffer(8 * 1024 * 1024);
+  return runApp<tcApp>(settings);
 
-If a tool reads the port from stderr, change it to one of these:
+  // After
+  RuntimeSettings runtime;
+  runtime.reserveUniformBuffer(8 * 1024 * 1024);
+  return runApp<tcApp>(WindowSettings().setSize(1280, 720), runtime);
+  ```
 
-- Read the Logger line from stdout or the log file, and match `HTTP server listening on http://` anywhere in the line. A console level of Warning or higher hides the line on stdout; the log file still gets it as long as its own level allows Notice.
-- Set a fixed port with `TRUSSC_MCP_PORT=8080` and connect to `http://127.0.0.1:8080/mcp`. If that port is already in use, the server fails to start.
+- **`WindowSettings::clipboardSize` and `setClipboardSize()` are removed.** Clipboard text and dropped files have no TrussC size limit any more (see [Limits that are gone](#limits-that-are-gone)). If you set up sokol yourself, also remove assignments to `sapp_desc::clipboard_size`, `max_dropped_files` and `max_dropped_file_path_length`, which are removed.
 
-## OscReceiver::setup() owns its port
+  ```cpp
+  // Before
+  settings.setClipboardSize(1024 * 1024);
+  // After: delete the line
+  ```
 
-`OscReceiver::setup(port)` now binds the port exclusively (behavior change, #400). Before, it always turned on address and port reuse, so a second receiver on the same port, for example a second copy of the app, also bound without error, and unicast messages reached only one of them. Now the second `setup()` returns `false` and reports the error through `onParseError` and the log. The same goes for core `UdpSocket` on Windows: `bind()` on a socket that did not call `setReuseAddress(true)` or `setReusePort(true)` now sets `SO_EXCLUSIVEADDRUSE`, so it owns its port the way it already did on macOS and Linux.
+- **The order of the `WindowSettings` fields changed.** `quitOnClose` now sits between `sampleCount` and `fullscreen`, and `clipboardSize` and `uniformBufferReserve` are gone. If you fill `WindowSettings` by position, the values land in the wrong fields. Use the setters instead.
 
-If several receivers on one PC share a multicast port, replace `setup()` followed by `joinMulticast()` with one call:
+  ```cpp
+  // Before: positional
+  WindowSettings settings{1280, 720, "App", true, false, 4, true};
+  // After
+  auto settings = WindowSettings().setSize(1280, 720).setTitle("App").setFullscreen(true);
+  ```
+
+- **The cursor is shared by the whole app.** Its shape, visibility and custom images apply to every window, and it appears in whichever window the pointer is over. An ImGui context changes it only while the pointer is over its own window.
+- **`pixelPerfect` is set by the launch window.** In v0.8.0 the launch window's `pixelPerfect` applies to every window.
+
+### Internal Window functions are no longer public
+
+`Window::context()`, `dispatchMousePressToTree`, `dispatchMouseReleaseToTree`, `dispatchMouseMoveToTree`, `dispatchMouseScrollToTree`, `dispatchKeyPressToTree`, `dispatchKeyReleaseToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal now, in C++ and in Lua. There is no public replacement yet: how to send synthetic input is still being designed.
 
 ```cpp
-osc.setupMulticast(9000, "239.0.0.1");   // reuse, bind and join in one call
+// Before
+win->dispatchKeyPressToTree(key);
+// After: no replacement in v0.8.0; remove the call
 ```
 
-`joinMulticast()` / `leaveMulticast()` still work after `setup()`, but that port is not shared. Unicast apps need no change; check the return value of `setup()` to notice a port that is already in use.
+### No built-in crash handler
 
-## Every angle is in radians; degrees use `Deg` names
+TrussC no longer installs a crash handler and no longer writes crash reports. Its API was internal, so no code changes. If you need crash reports, use your platform's debugger or an external crash reporter.
 
-The last APIs that took degrees now take radians (breaking change, #236). The function names stay the same, so old code still compiles but passes degrees where radians are expected. Switch to the `Deg` name to keep degrees, or convert the value:
+## Async work and threads
+
+### runOnMainThread() runs between turns, and drops work for an ended App
+
+- `runOnMainThread()` now runs its work at the next safe point between turns of the main loop. Before, it ran at the start of the next frame. It now also runs when no window draws.
+- Work queued from an App is dropped if that App has ended or is ending when the work would run. Work queued with no App is never dropped.
+- For work you queue from your own worker thread that uses an object which may go away, pass a liveness token with the new overload `runOnMainThread(fn, weakToken)`. If the token has expired or is `false` when the work would run, the work is dropped.
+- For events from a worker thread, prefer `listen(..., Deliver::Main)`. It copies the event data and runs your listener on the main thread.
+
+```cpp
+// Before: copy the data, then queue it
+tcp.onReceive.listen([this](Msg& m) {
+    auto copy = m;
+    runOnMainThread([this, copy] { scene->addChild(make_shared<Enemy>(copy.pos)); });
+});
+
+// After: let the event deliver on the main thread
+receiveListener = tcp.onReceive.listen([this](Msg& copy) {
+    scene->addChild(make_shared<Enemy>(copy.pos));
+}, Deliver::Main);
+```
+
+### Thread::waitForThread() on its own thread
+
+Calling `waitForThread()` from inside the thread itself now asks the thread to stop (unless you pass `false`) and returns without waiting. In v0.7.7 it threw and the process ended. This is a fix; no change is needed.
+
+## Rendering
+
+### Every angle is in radians; degrees use Deg names
+
+The last functions that took degrees now take radians. The names stay the same, so old code still compiles but passes degrees where radians are expected. Switch to the `Deg` name to keep degrees, or convert the value:
 
 | Before (degrees) | Now (radians) | Keeps degrees |
 | --- | --- | --- |
@@ -103,304 +334,289 @@ The last APIs that took degrees now take radians (breaking change, #236). The fu
 | elliptical `path.arc(c, rx, ry, 0, 270)` | `path.arc(c, rx, ry, 0, TAU * 0.75f)` | `path.arcDeg(c, rx, ry, 0, 270)` |
 | Node reflected `rotation` (JSON, MCP, inspector) | `rotation` in radians | `rotationDeg` (derived, not saved) |
 
-`setupScreenFovWithSize()` / `setupScreenFovWithSizeDeg()` are new public functions (radians / degrees) for an explicit viewport size.
+- The screen FOV functions accept `0` (orthographic) or `0 < fov < TAU / 2` (`0 < fov < 180` for the `Deg` names). Any other value, such as `60` left over from the degree version, is ignored and the view stays as it was. The first ignored call logs a warning; later ones are silent.
+- `0` degrees also means orthographic. `setupScreenOrtho()` and `setDefaultScreenOrtho()` are clearer ways to write `setupScreenFov(0)` and `setDefaultScreenFov(0)`. After either default setter, `getDefaultScreenFov()` returns `0`.
+- **Saved JSON:** `rotation` is now read as radians, so a file saved before v0.8.0 (degrees under `rotation`) loads with wrong rotations. Convert those values with `deg2rad()`, or rename the key to `rotationDeg` in the file; that key is still read and converted. New files save only `rotation`, in radians.
+- Not angles, unchanged: hue (`ColorHSB::h`, `ColorOKLCH::H`, 0–1 of a turn) and `tcx::geo::LatLon` (geographic degrees).
 
-The screen FOV functions accept `0` (orthographic) or `0 < fov < TAU/2` (`0 < fov < 180` for the `Deg` names). Any other value, such as 60 left over from the degree version, logs one warning and is ignored, so the view stays as it was. Zero degrees also selects orthographic projection. `setupScreenOrtho()` and `setDefaultScreenOrtho()` are the readable spellings of `setupScreenFov(0)` and `setDefaultScreenFov(0)`; `getDefaultScreenFov()` returns `0` after either default setter.
+### Each Fbo has its own matrices, camera and clipping
 
-Saved JSON: `rotation` is now read as radians, so a file saved before v0.8.0 (degrees under `rotation`) loads with wrong rotations. Convert those values with `deg2rad()`, or rename the key to `rotationDeg` in the file, which is still read and converted. New files save only `rotation`, in radians.
+Each successful `Fbo::begin()` now starts from a clean state:
 
-Not angles, unchanged: hue (`ColorHSB::h`, `ColorOKLCH::H`, 0–1 of a turn) and `tcx::geo::LatLon` (geographic degrees).
+- the model matrix is identity, and the matrix, camera and scissor stacks are empty;
+- the viewport covers the whole Fbo;
+- the camera is a TAU/8 perspective in Fbo pixels.
 
-## Saving and recording return `SaveResult`
+Loading the previous contents (LOAD) keeps the pixels, not the drawing state. `end()` puts back the camera (including its `CameraContext`), model matrix, viewport, clipping and pipeline that were active before `begin()`.
 
-The save and record functions now report what went wrong instead of a plain `bool` or nothing (breaking change, #761 PR-B, #445, #440). `SaveResult` has `ok()`, an `error` (`AccessDenied`, `NoSpace`, `WriteFailed`, `Unknown`) and a `message`. It converts to `bool` explicitly, so `if (img.save("out.png"))` keeps working. Code that stores the result in a `bool`, passes it on as a `bool`, or returns it from a function that returns `bool` needs `.ok()`:
-
-```cpp
-bool saved = img.save("out.png").ok();
-auto result = saveJson(json, "settings.json");
-if (!result) logError() << result.message;
-```
-
-`bool` → `SaveResult`:
-- `Pixels::save`, `Image::save`, `Fbo::save`, and `HasTexture::save` (an override in your own class must return `SaveResult` too)
-- `saveJson`, `saveTextFile`, `appendToFile`, `FileWriter::open`, `Xml::save`
-- `setLogFile` (and `Logger::setLogFile`, deprecated `tcSetLogFile`)
-- `AudioRecorder::start`, `VideoWriter::open` / `addFrame` / `addFrameAt` / `writeAudio` / `submitFrame`, `ScreenRecorder::start`, `startRecording`
-
-`void` → `SaveResult`: `AudioRecorder::stop()`, `VideoWriter::close()`, `ScreenRecorder::stop()`, `stopRecording()`. Ignoring the result still compiles, but finalizing a recording can fail (disk full, encoder error), and only this result tells you.
-
-In Lua, test `result:ok()`: the result object itself is always truthy.
-
-What else changes:
-- `Pixels` / `Image` / `Fbo::save`, `saveJson`, `saveTextFile` and `Xml::save` write to `<file>.tmp` and then replace the file, so a failed save leaves the previous file as it was.
-- `appendToFile`, `FileWriter`, the log file and the recorders write in place, and check every write.
-- `saveScreenshot()` still returns `bool`, meaning "queued". A failed write later logs one Error. On Web it is still a browser download.
-- `AudioRecorder` ends the take at the first failed write; `getRecordedSeconds()` counts what was actually written.
-- `VideoWriter::getFrameCount()` counts frames the encoder accepted; a backend that stops accepting data ends the take, including macOS audio input that stays "not ready" for 5 s (previously that chunk was dropped while video recording continued). A wrong-size frame or other caller mistake fails that call only; the take goes on.
-
-## OBJ and glTF loading return `LoadResult`
-
-`tcx::obj::ObjLoader::load()` and `tcx::gltf::GltfModel::load()` now return `LoadResult` instead of `bool` (#761 PR-C). Missing model files return `FileNotFound` with the shared `file not found: <resolved path>` Error; rejected model data returns `DecodeFailed` with one Error. Relative paths resolve through `getDataPath()`. Neither loader gains `getPath()`.
-
-`if (model.load(path))` keeps working. Code that assigns, passes or returns the result as a `bool` needs `.ok()` or an explicit cast:
+So a transform outside the Fbo no longer affects drawing inside it. Put each transform, and its matching pop, inside the target it draws to:
 
 ```cpp
-bool loaded = model.load("model.gltf").ok();
-auto result = model.load("model.gltf");
-if (!result) { /* inspect result.error and result.message; already logged */ }
-```
-
-`GltfModel::load()` now takes `const fs::path&`; a `std::string` still converts. For UTF-8 text on Windows, pass `utf8ToPath(text)` so it becomes a native filesystem path. External buffer and image URIs now decode percent escapes, such as `a%20b.png` for `a b.png`. `ObjExporter` changes too; see the next section.
-
-## OBJ export returns `SaveResult`
-
-`tcx::obj::ObjExporter::save()` now returns `SaveResult` (breaking change, #777). `if (exporter.save("model.obj"))` still works. Use `.ok()` when storing or passing the result as a `bool`, or keep the result to inspect the failure:
-
-```cpp
-bool saved = exporter.save("model.obj").ok();
-auto result = exporter.save("model.obj");
-if (!result) {
-    // Inspect result.error and result.message; save() already logged one Error.
-}
-```
-
-An empty exporter or a failed texture save now fails the call with one Error. OBJ and MTL text use the shared atomic save helpers; a failed MTL write leaves both previous text files intact. Replacement is atomic per file, not across the entire export: a final OBJ close or rename failure can leave the updated MTL alongside the previous OBJ, and textures already saved are kept.
-
-## TrussC.h no longer brings in the HTTP library's system headers
-
-`TrussC.h` used to include the MCP server's HTTP library, and with it a number of system headers. It no longer does (#789), which makes every file that includes `TrussC.h` compile faster. If your code uses one of these without including it itself, add the include:
-
-- `<regex>` (`std::regex`, `std::regex_match`, ...)
-- `<sys/stat.h>` (`stat`, `chmod`, `mkdir`) on macOS / Linux
-
-Socket headers still come in through TrussC's network headers. The common standard headers (`<mutex>`, `<thread>`, `<map>`, `<fstream>`, `<sstream>`, `<atomic>`, `<functional>`, `<chrono>`, ...) also still come in through `TrussC.h`.
-
-## Depth camera backends return an owned Device
-
-The `tcx::depthcamera::DepthCamera` backend interface changes in v0.8 (#796,
-PR-F2). Replace the handle's `bool openDevice()`, `closeDevice()` and
-`captureInto()` overrides with `std::shared_ptr<Device> openDevice()`. Put the
-source's resources and capture implementation in a `DepthCamera::Device`
-subclass:
-
-```cpp
-struct SensorDevice : DepthCamera::Device {
-    // Own the SDK session and all data capture touches here.
-    StreamFreshness captureInto(DepthFrame& dst) override;
-    ~SensorDevice() override; // release the SDK session here
-};
-
-std::shared_ptr<DepthCamera::Device> MyCamera::openDevice() {
-    return std::make_shared<SensorDevice>(); // return nullptr if opening fails
-}
-```
-
-Copy configuration from the backend into the Device at open. A Device must not
-retain the backend's address or call its members. `captureInto()` still fills a
-complete frame and returns `StreamFreshness`; only its owner changes. The capture
-run holds the Device until capture ends. `close()` waits from another thread;
-when called from capture itself it requests stop and returns, and the worker
-releases the Device on exit. Backend destructors no longer need to call
-`close()` before their members are destroyed. `setup()` closes the previous run
-before opening a new Device.
-
-Playback extensions move `readExtraBlock()` / `decodesBlockType()` overrides into
-a `PlaybackDepthCamera::PlaybackDevice` subclass and override the protected
-`makePlaybackDevice()` factory to return it. Keep custom decoding data in that
-Device or in shared storage it owns. `setLoop()` updates the active Device's
-atomic flag, so it can still change looping during threaded playback.
-
-External backends (`tcxOrbbec`, `tcxAzureKinect`, `tcxRealSense`) need the same
-migration in their own repositories; the old capture-on-backend hooks are removed.
-
-## Fbo drawing has its own matrix and camera scopes (#821, PR 2)
-
-Each successful `Fbo::begin()` starts an identity model, empty matrix/camera/scissor stacks,
-full attachment viewport and a TAU/8 camera in attachment pixels. LOAD preserves pixels,
-not drawing state. `end()` restores the suspended camera (including its CameraContext),
-model, viewport, clipping and actual selected pipeline. Unmatched offscreen pushes are
-warned about and discarded. Nested Fbos remain unsupported until PR 3.
-
-Move transforms and their matching pops inside the target that draws them:
-
-```cpp
-// Before: relied on the outer transform leaking into offscreen PBR drawing.
+// Before: relied on the outer transform reaching the drawing inside the Fbo
 pushMatrix(); translate(20, 10);
 fbo.begin(); mesh.draw(); fbo.end();
 popMatrix();
 
-// After: keep each transform scope on its drawing target.
+// After: each transform stays on its own target
 fbo.begin();
 pushMatrix(); translate(20, 10); mesh.draw(); popMatrix();
 fbo.end();
 pushMatrix(); translate(100, 40); fbo.draw(0, 0); popMatrix();
 ```
 
-Balance matrix, scissor and EasyCam begin/end on the same target. Set an offscreen clip
-explicitly after begin. Screen pushes cannot clip or be popped inside an Fbo.
-`setMatrix(model)` now consistently replaces only M and uploads V*M; remove any view
-matrix previously baked into its argument. Copy screen matrices before begin if needed.
+- **Balance pushes and pops on the same target.** This covers matrices, scissor, and EasyCam `begin()`/`end()`. Pushes left open inside an Fbo are warned about and discarded at `end()`. A push made on the screen cannot be popped, and does not clip, inside an Fbo.
+- **Set clipping inside the Fbo.** Set an offscreen clip after `begin()`.
+- **`setMatrix(model)` replaces only the model matrix**, and the GPU gets view × model. Remove any view matrix you multiplied into its argument. Copy screen matrices before `begin()` if you need them inside.
+- **EasyCam** uses the aspect ratio of the current target and puts back its entry camera at `end()`. Remove any window-aspect correction you added for Fbo drawing.
+- **Screen defaults stay on the screen.** `setDefaultScreenFov` and `pixelPerfect` set up the screen only. For another camera inside an Fbo, call the screen setup functions after each `begin()`. A projection size you set explicitly stays independent of the Fbo size.
+- **Sizes inside an Fbo.** `tc::getWidth()`, `tc::getHeight()` and `tc::getSize()` return the Fbo size while it is active, so use them in drawing code. `App` and `RectNode` size getters still describe the object, and window and framebuffer getters still describe the window. `getViewMatrix()` and `getProjectionMatrix()` return the values of the active target.
+- **Text and `RectNode` clipping use the target's scale.** A font rasterized on a DPI-2 window keeps its requested size in an Fbo measured in pixels.
+- **`setCameraPosition`** applies to the current target and returns to its previous value when the camera or target ends. Its default (zero, set by hand) is unchanged, and so is how lights, materials and environments register with the window.
+- **Picking:** the default Fbo camera cannot be picked through; an explicit screen setup and EasyCam can. This is unchanged.
+- **Blending:** the logical blend and depth settings carry across targets. Calling `setBlendMode` with the current value now selects that blend pipeline again.
 
-EasyCam uses the active target aspect and restores its entry camera on end. Remove
-window-aspect compensation for Fbo drawing. `setDefaultScreenFov` and `pixelPerfect`
-only configure screen defaults; call explicit screen setup inside each Fbo activation
-for another camera. Explicit projection extents remain distinct from attachment size.
+Behaviour that changes the pixels:
 
-Use `tc::getWidth()`, `tc::getHeight()` and `tc::getSize()` in offscreen drawing code.
-`App`/`RectNode` size getters still describe object geometry; window-named and framebuffer
-getters still describe the host window. `getViewMatrix()` and `getProjectionMatrix()`
-return active-target values. Bitmap/loaded text and RectNode clipping use target scale;
-a font rasterized at host DPI 2 retains its requested unit size in a pixel-coordinate Fbo.
+- **Nested Fbos work.** Calling `begin()` on another Fbo inside an active one now works. v0.7.7 refused it with "Nested fbo.begin() is not supported". Beginning the same Fbo again inside itself, or from another window, is still refused.
+- **GPU points follow the model matrix.** Before, points ignored it. Remove any pre-transform you added to make up for that.
+- **Point size is in Fbo pixels.** On a DPI-2 window, `setPointSize(12)` inside an Fbo now draws 12 × 12 Fbo pixels; before, it drew 24 × 24. Points on the screen are unchanged. Remove DPI or aspect corrections for points in Fbos.
+- **Premultiplied sources blend correctly in Fbos.** Remove any brightening or un-premultiplying you added. Mark only sources that really are premultiplied.
+- **The blend mode after `Fbo::end()` applies right away.** Set the blend you want after `end()` if the following screen drawing needs a different one. Remove forced blend reloads that restored the style inside Fbos; push and pop the style normally.
+- **Linux NV12 video and LUT drawing use the normal transforms.** Remove CPU positioning, pre-transforms and viewport workarounds that made up for them.
 
-`setCameraPosition` is target-local and returns to its previous value on camera/target
-exit. Its zero/manual default and window light/material/environment registration remain.
-Pickability flags are unchanged: default Fbo cameras are non-pickable, explicit setup
-and EasyCam remain pickable. Offscreen picking policy is still an open question.
+### grabScreen() reads the finished frame in afterFrame
 
-Logical blend/depth flags retain continuity, separately from scoped pipeline selection.
-The existing screen blend-after-Fbo behavior, offscreen premult handling and GPU point
-transform/size corrections remain for PR 4. Repeating `setBlendMode` explicitly selects
-that blend pipeline, even when the logical value already matches.
+`grabScreen()` now depends on when you call it:
 
-## Default listener priority on App events is now 0
+- in `update()`, `setup()` or anywhere outside a frame: it returns `false` and logs one warning per window;
+- in `draw()`: it reads the frame so far, without ImGui, child nodes drawn later and later overlays. It is slow and meant for debugging;
+- in an `events().afterFrame` listener: it reads the finished frame, including ImGui.
 
-On the events an App also receives (update, draw, exit, key, mouse, touch,
-windowResized and so on), `listen()` without a priority now registers at
-`EventPriority::BeforeApp` (`0`) instead of `100`. Other events still default
-to `100`.
-
-- A default listener ties with an explicit `0` and runs in registration order.
-  A default `a` registered before an explicit-0 `b` now runs `a`, then `b`
-  (before: `b`, then `a`).
-- Default listeners now run before explicit `1`–`99` (before: after them) and
-  before explicit `100` (before: same priority, mixed by registration order).
-- So a default listener that sets `e.consumed = true` now stops even an
-  explicit-100 listener that was registered earlier.
-
-Check listeners whose order matters, and give them an explicit priority:
+v0.7.7 told you to call it outside `draw()`, for example at the end of `update()`. That call now returns `false`. Move it to `afterFrame`:
 
 ```cpp
-overlayListener = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 50);
-pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ });
-// Before (v0.7): pickListener had priority 100, so it ran after overlayListener.
-// After (v0.8):  pickListener has priority 0, so it now runs first.
+// Before
+void tcApp::update() {
+    if (captureRequested) { grabScreen(pixels); captureRequested = false; }
+}
 
-// To keep it after overlayListener, give it a priority above 50:
-pickListener    = events().mousePressed.listen([](MouseEventArgs& e) { /* ... */ }, 60);
+// After: captureListener is an EventListener member
+void tcApp::setup() {
+    captureListener = events().afterFrame.listen([this] {
+        if (captureRequested) { grabScreen(pixels); captureRequested = false; }
+    });
+}
 ```
 
-## Process events and closing a Window
+`grabScreen()` never reads an active Fbo; use `Fbo::readPixels()` for that, and `saveScreenshot()` for files.
 
-App code uses `events()`; non-App code (addons, app-wide handling) uses
-`runtime().events()`. `exitRequested`, `deviceLost`, and `hotReloadUnload` retain
-the same names on both hubs. Runtime receives them first, then attached Apps in
-reverse attachment order (hot reload targets only replacing Apps). Quit and OS
-close give every listener fresh `cancel=false`, OR all vetoes, and count a throwing listener as a veto. Only process quit retains the first nonempty veto reason. Device loss keeps
-its mutable cancellation behavior.
+### The swapchain pass functions are removed
 
-`App::exit()` also runs on replacement, removal and hot reload. Use
-`Window::setQuitOnClose(true)` for a window-close policy; it requests process
-quit before closing anything. A Window exit listener runs during ending and
-cannot provide that before-close veto guarantee.
-
-Construct Apps with `Window::setApp<T>(args...)`, `runApp<T>()` or
-`runHeadlessApp<T>()`; replace direct construction or attachment of an existing
-shared App. Runtime retains open Windows and their App attachments. Dropping a
-Window handle does not close it; call `close()` explicitly.
-
-Root App setup-time quit is queried before audio subscription and the next
-process services. Acceptance runs normal ending and prevents later console,
-update and draw callbacks; a veto continues normally. A child App's request
-waits until the current tree traversal unwinds, before the next process services.
-
-At OS session end, an idle main thread allows the process veto query, then runs
-normal ending on commit with one shared logout timeout (3 seconds by default).
-On Windows and macOS, idle ending then calls `std::exit` with the application
-exit code, running atexit handlers and C++ static destructors like ordinary
-exit. The watchdog remains armed through those handlers and destructors
-(on Windows, not through loaded DLLs' destructors, which run after it stops).
-A busy main thread accepts the query and performs no App work on commit: no
-exit events, `App::exit()`, audio detach, cleanup or watchdog. Save promptly
-during normal ending; busy termination cannot save App state. Busy and OS-killed
-ends skip atexit handlers and static destructors.
-
-Hot reload supports one Window and replaces the launch Window's App at the
-main-thread outer-turn safe point. Opening a second or later Window while a
-guest is loaded logs a Warning each time; behaviour is not guaranteed. Stop
-threads, timers and async work in `events().hotReloadUnload`; reload does not
-wait for or exclude that work. Successfully loaded modules stay mapped until
-process exit, so repeated reloads can grow process memory.
-
-TrussC no longer installs a built-in crash handler or writes crash reports; use
-a platform debugger or external crash reporting if your application needs it.
-
-### OS close and process veto
-
-OS close first queries that Window's `closeRequested`. If accepted and the Window is the last open one or has `setQuitOnClose(true)`, Runtime queries `exitRequested` before closing anything. Either veto leaves every Window open. Both accepted use common process ending. Non-last ordinary OS close asks only `closeRequested`; `exitApp()` / Cmd+Q ask only `exitRequested`. Code `Window::close()` skips `closeRequested`; last-window/quit-on-close asks `exitRequested` before closing anything, and any veto keeps every Window open. A non-last plain code close asks no request events; normal Window exit notification and App ending still run. `CloseRequestEventArgs` contains only `cancel`; remove uses of its former `reason` field. `ExitRequestEventArgs::reason` remains the optional Windows shutdown-block text.
+`ensureSwapchainPass()`, `suspendSwapchainPass()` and `resumeSwapchainPass()` are removed. TrussC now starts and resumes the screen pass by itself. `present()` and `isInSwapchainPass()` remain. To draw offscreen during `draw()`, use `fbo.begin()` and `fbo.end()`, which can now be nested.
 
 ```cpp
-class Document : public tc::App {
-    tc::EventListener quit;
-    bool unsaved = true;
-    void setup() override {
-        quit = events().exitRequested.listen([this](tc::ExitRequestEventArgs& e) {
-            e.cancel = unsaved; // also keeps the last Window open on ×
-        });
-    }
-};
+// Before
+suspendSwapchainPass();
+fbo.begin(); /* ... */ fbo.end();
+resumeSwapchainPass();
+
+// After
+fbo.begin(); /* ... */ fbo.end();
 ```
 
-## Window tree-dispatch methods are internal (v0.8.0)
+### Cubemap textures are uploaded in one call
 
-`Window::context()`, `dispatchMousePressToTree`, `dispatchMouseReleaseToTree`,
-`dispatchMouseMoveToTree`, `dispatchMouseScrollToTree`, `dispatchKeyPressToTree`,
-`dispatchKeyReleaseToTree`, `tickTree`, `drawTreeNow` and `syncRootSize` are internal
-in v0.8.0 and are no longer public C++ or Lua API. There is no public replacement
-yet; the synthetic-input design remains open.
+`Texture::uploadCubemapFace()` and `uploadCubemapMip()` are removed. Use `loadCubemapData(faces, faceSize)`, which takes all six faces at once. Dynamic and Stream cubemaps must have exactly one mip level, and `loadCubemapData()` can be called once per frame.
 
-## Window and runtime settings, cursor and MCP window ids (v0.8.0)
+```cpp
+// Before
+for (int i = 0; i < 6; i++) tex.uploadCubemapFace(i, 0, faceData[i], faceSize);
 
-- Move `WindowSettings::uniformBufferReserve` / `reserveUniformBuffer()` to `RuntimeSettings` and call `runApp<T>(windowSettings, runtimeSettings)`. The one-argument `runApp<T>(windowSettings)` uses default runtime settings.
-- `WindowSettings::clipboardSize` / `setClipboardSize()` are removed. Clipboard text is no longer truncated at 65,536 bytes. Dropped file counts and UTF-8 paths no longer have the 16-file / 2048-byte limits. Storage grows with the actual content; allocation and platform limits still apply. The low-level `sapp_desc::clipboard_size`, `max_dropped_files` and `max_dropped_file_path_length` fields are removed; remove assignments to these fields.
-- Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. ImGui contexts change it only while their own window is under the pointer.
-- `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
-- `tc_list_windows` returns each window's positive native identity as `id` instead of `index`. Pass that `id` as other tools' `window` argument; resource list indices are unchanged.
-- The deprecated `mcp::registerControlTools()` and `mcp::registerInspectionTools()` (and `registerDebuggerTools()`) keep the v0.7 rule until they are removed in v1.0.0: they set the tool level but do not open the MCP server. `TRUSSC_MCP=1` or `mcp::startHttpServer()` still opens it. `mcp::setToolLevel()` opens it by itself.
-- `exitApp()` now goes through `exitRequested`, whose listeners can veto it; before 0.8 it could not be cancelled. A “show a confirm dialog, then call `exitApp()`” pattern receives `exitRequested` again on that call, so remember acceptance in a flag, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
+// After
+const void* faces[6] = {faceData[0], faceData[1], faceData[2], faceData[3], faceData[4], faceData[5]};
+tex.loadCubemapData(faces, faceSize);
+```
 
-## Serial follows the device lifecycle (#415)
+### Shader subclasses use pipelineForCurrentTarget()
 
-`Serial` is the first device class on the common surface described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup(...)`, `setup()`, `isConnected()`, `close()` and `onDisconnect`.
+The protected member `Shader::pipeline` is removed, because each render target now has its own pipeline. A subclass calls the protected `pipelineForCurrentTarget()` instead. This matters only if you subclass `Shader`.
 
-- **New:** `serial.setup()` with no arguments reopens the last port with the last baud rate. On failure it logs an error and returns `false`. Reconnecting is app code:
+```cpp
+// Before
+sg_apply_pipeline(pipeline);
+// After
+sg_apply_pipeline(pipelineForCurrentTarget());
+```
+
+### Fbo::readPixels() on float Fbos, and failed allocations
+
+- `Fbo::readPixels()` on a float Fbo now always returns RGBA8 values clamped to 0–255, on every backend. Before, the result depended on the backend; Metal, for example, returned `false`. It now also works on the web with WebGL2 (not with WebGPU). Use `readPixelsFloat()` for full precision.
+- If the GPU refuses the size given to `Fbo::allocate()`, `isAllocated()` stays `false` and `begin()`, `draw()` and reading back do nothing. Check `isAllocated()` after allocating large Fbos.
+
+```cpp
+// Before: float values from readPixels() on some backends
+fbo.readPixels(bytes);
+// After: use the float version for float data
+vector<float> values(w * h * 4);
+fbo.readPixelsFloat(values.data());
+```
+
+## Loading and saving
+
+### Saving and recording return SaveResult
+
+The save and record functions now tell you what went wrong, instead of returning a plain `bool` or nothing. `SaveResult` has `ok()`, an `error` (`AccessDenied`, `NoSpace`, `WriteFailed`, `Unknown`) and a `message`. It converts to `bool` explicitly, so `if (img.save("out.png"))` keeps working. Code that stores the result in a `bool`, passes it on as a `bool`, or returns it from a function that returns `bool` needs `.ok()`:
+
+```cpp
+// Before
+bool saved = img.save("out.png");
+
+// After
+bool saved = img.save("out.png").ok();
+auto result = saveJson(json, "settings.json");
+if (!result) logError() << result.message;
+```
+
+`bool` → `SaveResult`:
+- `Pixels::save`, `Image::save`, `Fbo::save` and `HasTexture::save` (an override in your own class must return `SaveResult` too)
+- `saveJson`, `saveTextFile`, `appendToFile`, `FileWriter::open`, `Xml::save`
+- `setLogFile` (and `Logger::setLogFile`, deprecated `tcSetLogFile`)
+- `AudioRecorder::start`, `VideoWriter::open` / `addFrame` / `addFrameAt` / `writeAudio` / `submitFrame`, `ScreenRecorder::start`, `startRecording`
+
+`void` → `SaveResult`: `AudioRecorder::stop()`, `VideoWriter::close()`, `ScreenRecorder::stop()`, `stopRecording()`. Ignoring the result still compiles, but finishing a recording can fail (disk full, encoder error), and only this result tells you.
+
+In Lua, test `result:ok()`; the result object itself is always true.
+
+What else changes:
+- `Pixels` / `Image` / `Fbo::save`, `saveJson`, `saveTextFile` and `Xml::save` write to `<file>.tmp` and then replace the file, so a failed save leaves the previous file as it was.
+- `appendToFile`, `FileWriter`, the log file and the recorders write in place, and check every write.
+- `saveScreenshot()` still returns `bool`, meaning "queued". A failed write later logs one error. On the web it is still a browser download.
+- `AudioRecorder` ends the recording at the first failed write; `getRecordedSeconds()` counts what was actually written.
+- `VideoWriter::getFrameCount()` counts the frames the encoder accepted. A backend that stops accepting data ends the recording. This includes macOS audio input that stays "not ready" for 5 seconds; before, that chunk was dropped while the video kept recording. A frame of the wrong size, or another mistake in the call, fails only that call; the recording goes on.
+
+### OBJ and glTF loading return LoadResult
+
+`tcx::obj::ObjLoader::load()` and `tcx::gltf::GltfModel::load()` now return `LoadResult` instead of `bool`. `if (model.load(path))` keeps working. Code that assigns, passes or returns the result as a `bool` needs `.ok()` or an explicit cast:
+
+```cpp
+// Before
+bool loaded = model.load("model.gltf");
+
+// After
+bool loaded = model.load("model.gltf").ok();
+auto result = model.load("model.gltf");
+if (!result) { /* result.error and result.message; already logged */ }
+```
+
+- A missing file returns `FileNotFound` and logs `file not found: <resolved path>`. Data the loader rejects returns `DecodeFailed` with one error.
+- Relative paths are resolved through `getDataPath()`. Neither loader has `getPath()`.
+- `GltfModel::load()` now takes `const fs::path&`; a `std::string` still converts. For UTF-8 text on Windows, pass `utf8ToPath(text)` so it becomes a native path.
+- External buffer and image URIs in glTF now decode percent escapes, such as `a%20b.png` for `a b.png`.
+
+### OBJ export returns SaveResult
+
+`tcx::obj::ObjExporter::save()` now returns `SaveResult`. `if (exporter.save("model.obj"))` still works. Use `.ok()` when storing or passing the result as a `bool`, or keep the result to inspect the failure:
+
+```cpp
+// Before
+bool saved = exporter.save("model.obj");
+
+// After
+bool saved = exporter.save("model.obj").ok();
+auto result = exporter.save("model.obj");
+if (!result) {
+    // result.error and result.message; save() already logged one error
+}
+```
+
+- An empty exporter, or a texture that fails to save, now fails the call with one error.
+- The OBJ and MTL text files are each written to a temporary file and then replaced. If the MTL write fails, both previous text files stay as they were.
+- The replacement is per file, not for the whole export: if closing or replacing the OBJ file fails at the end, the new MTL can sit next to the previous OBJ, and textures already saved are kept.
+
+### LoadError has two new values
+
+`LoadError` gained `TooLarge` and `Cancelled`. A `switch` over `LoadError` without a `default` now warns about the missing cases.
+
+```cpp
+switch (result.error) {
+    // ... the cases you had
+    case LoadError::TooLarge:  /* GPU texture size, URL or network limits, platform size */ break;
+    case LoadError::Cancelled: /* a loadAsync() that was cancelled */ break;
+    default: break;
+}
+```
+
+### Sound files are found through getDataPath()
+
+`SoundBuffer::load()` and `loadWav()`, `loadMp3()`, `loadOgg()`, `loadFlac()` now resolve a relative path through `getDataPath()`, like images and fonts. In v0.7.7 they opened the path as given, relative to the working directory. `SoundBuffer::getPath()` now returns the resolved path, and is empty after a failed load. You see the same path in `getPlayingSounds()` and the `tc_get_audio_state` MCP tool.
+
+```cpp
+// Before: relative to the working directory
+buffer.load("data/click.wav");
+
+// After: relative to the data folder (or pass an absolute path)
+buffer.load("click.wav");
+```
+
+Some sounds whose format changes partway through now fail to load instead of playing wrong: an Ogg/Vorbis file whose channel count changes mid-file, and a frame format change in the FFmpeg and AAC decoders. MP3 and FLAC files are not checked; they still play with the format of their first part.
+
+## Devices
+
+`Serial`, `VideoGrabber`, `DepthCamera`, `MidiIn`/`MidiOut`, `AudioEngine` and `MicInput` now share one small surface, described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md):
+
+- `setup(...)` opens a device; `setup()` with no arguments opens it again;
+- `isConnected()` tells you whether it is open;
+- `close()` closes it;
+- `onDisconnect` (`Event<DeviceDisconnectEventArgs>`, one field, `reason`) fires once when the OS reports the device lost.
+
+`onDisconnect` never fires for your own `close()`, for `setup()` or for the destructor. TrussC does not reconnect by itself: reconnecting is up to your code, for example a retry every 2 seconds:
+
+```cpp
+if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+    lastTry = getElapsedTime();
+    serial.setup();
+}
+```
+
+`DeviceLostEventArgs`, used by the graphics device's `deviceLost` event, is not related and is unchanged.
+
+### Serial
+
+- **The event type changed.** `Event<SerialDisconnectEventArgs>` is now `Event<DeviceDisconnectEventArgs>`, which has one field, `reason`. `SerialDisconnectEventArgs` and its `portName`, `baudRate` and `wasClean` are removed. To reconnect from a listener, call `serial.setup()`, which reopens the last port at the last baud rate. If the listener needs to show the port name or baud rate, keep your own copy; `getDevicePath()` still returns the path.
 
   ```cpp
-  if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) {
-      lastTry = getElapsedTime();
-      serial.setup();
-  }
+  // Before
+  serial.onDisconnect.listen([this](SerialDisconnectEventArgs& e) {
+      if (!e.wasClean) serial.setup(e.portName, e.baudRate);
+  });
+
+  // After
+  disconnectListener = serial.onDisconnect.listen([this](DeviceDisconnectEventArgs& e) {
+      logWarning() << "serial lost: " << e.reason;
+      // reconnect later with serial.setup()
+  });
   ```
 
-- **`onDisconnect` fires only when the OS reports the device lost.** `close()`, `setup()` on an open port (it closes the previous port first), the destructor and a move assignment no longer fire it. Before, `close()` and `setup()` fired it with `wasClean = true`. A listener that used `wasClean` to tell a lost device from your own `close()` can drop that check: it is only called for a loss now.
-- **The event type changed.** `Event<SerialDisconnectEventArgs>` is now `Event<DeviceDisconnectEventArgs>`, which has one field, `reason`. `SerialDisconnectEventArgs`, `portName`, `baudRate` and `wasClean` are removed. Change `[](SerialDisconnectEventArgs& e)` to `[](DeviceDisconnectEventArgs& e)`. To reconnect from a listener, replace `serial.setup(e.portName, e.baudRate)` with `serial.setup()`. Keep your own copy of the port name or baud rate if the listener needs to show them; `getDevicePath()` still returns the path.
-- A device that went away before an I/O call noticed is now closed silently by `close()` or `setup()` (before it fired `"closed by close()"`).
-- `isConnected()` and `close()` are unchanged. `isInitialized()` stays as an alias of `isConnected()`. `DeviceLostEventArgs` (the graphics device's `deviceLost` event) is not related and is unchanged.
+- **`onDisconnect` fires only when the OS reports the device lost.** Before, `close()` and `setup()` on an open port (which closes the previous port first) also fired it, with `wasClean = true`. A listener that used `wasClean` to tell a lost device from your own `close()` can drop that check.
+- `onDisconnect` fires on the thread whose read or write found the loss.
+- A device that went away before any read or write noticed is now closed silently by `close()` or `setup()`. Before, that fired `"closed by close()"`.
+- **New:** `serial.setup()` with no arguments reopens the last port at the last baud rate. If it fails, it logs an error and returns `false`.
+- `isConnected()` and `close()` are unchanged. `isInitialized()` stays as another name for `isConnected()`.
 
-## DepthCamera follows the device lifecycle (#415)
+### VideoGrabber
 
-`tcx::depthcamera::DepthCamera` (addon `tcxDepthCamera`) gets the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md) in its base class. Nothing is removed or renamed, and a backend that already uses the v0.8 `std::shared_ptr<Device> openDevice()` hook compiles unchanged.
+- **`setup(int width = 640, int height = 480)` lost its default arguments.** `setup()` with no arguments is now the reopen call. For a grabber that was never set up it does what it did before (device 0 at 640 × 480, or the device from `setDeviceID()`), so `grabber.setup();` keeps working. Width only no longer compiles:
 
-- **New:** `camera.isConnected()` is true only while the device is open (from a successful `setup()` until `close()` or a reported loss).
-- **New:** `camera.onDisconnect` (`Event<DeviceDisconnectEventArgs>`, field `reason`) fires once per session, only when a backend reports the device lost, with `isConnected()` already false. `close()`, `setup()` and the destructor never fire it. Register with `Deliver::Main` to run on the main thread whichever thread the backend reports from.
-- **New, for backend authors:** the protected `reportLost(std::string reason)`. Call it from any thread where the backend already detects a loss. A backend that never calls it never fires `onDisconnect` (as before: it had none). Adding the one line is optional and goes in each backend repository (`tcxOrbbec`, `tcxAzureKinect`, `tcxRealSense`, ...), only where the SDK reports the loss.
-- **Changed:** `setup()` (it already took no arguments and reopened through `openDevice()`) now logs an error when `openDevice()` returns no device, on top of whatever the backend logged. After a reported loss, an inline (non-threaded) `update()` no longer calls `captureInto()` on the lost device.
-- Reconnecting is app code: `if (!camera->isConnected() && elapsed > 2.0f) camera->setup();`, as in `addons/tcxDepthCamera/example-synthetic`.
+  ```cpp
+  // Before
+  grabber.setup(1280);
+  // After
+  grabber.setup(1280, 480);
+  ```
 
-## VideoGrabber follows the device lifecycle (#415, #276)
-
-`VideoGrabber` is the second device class on the common surface described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup(...)`, `setup()`, `isConnected()`, `close()` and `onDisconnect`.
-
-- **New:** `grabber.setup()` with no arguments reopens the last camera: the camera with the same name as the last one that opened (looked up in a fresh `listDevices()`) and the size of the last `setup(width, height)`. Before any successful open it uses the `setDeviceID()` index (device 0 at 640 × 480 if there was none). On failure it logs an error and returns `false`. Reconnecting is app code:
+- **An unplugged camera is now reported.** When the OS says the camera is gone, `update()` closes the grabber and fires `onDisconnect` once, on the main thread. `isConnected()` is already `false` then, and the texture and pixels are released. Before, an unplugged camera left `isInitialized()` true and the last frame on screen. Code that assumed `isConnected()` / `isInitialized()` stay true until `close()` should check them. Keep calling `update()`: it is what reports the loss. Moving a grabber does not fire `onDisconnect` either.
+- The OS signals used: `AVCaptureDeviceWasDisconnectedNotification` (macOS, iOS), a Media Foundation reader error or an invalidated device (Windows), `ENODEV` from V4L2 (Linux) and the end of the camera track (web). A camera that only stops sending frames is not reported.
+- **New:** `grabber.setup()` reopens the last camera: the current `setDeviceID()` and the size of the last `setup(width, height)` (640 × 480 if there was none). If it fails, it logs an error and returns `false`. After a reopen, the texture can show the previous image until the first `isFrameNew()`. When you reconnect, also check `isPendingPermission()`:
 
   ```cpp
   if (!grabber.isConnected() && !grabber.isPendingPermission() && getElapsedTime() - lastTry > 2.0f) {
@@ -409,80 +625,287 @@ yet; the synthetic-input design remains open.
   }
   ```
 
-- **New: an unplugged camera is reported (#276).** When the OS says the camera is lost, `update()` closes the grabber and fires `grabber.onDisconnect` once (`Event<DeviceDisconnectEventArgs>`, `e.reason` says why). `isConnected()` is already false when it fires. Before, an unplugged camera left `isInitialized()` true and the last frame on screen. `close()`, `setup()` on an open grabber, the destructor and a move never fire it. The OS signals used: `AVCaptureDeviceWasDisconnectedNotification` (macOS, iOS), a Media Foundation reader error or an invalidated device (Windows), `ENODEV` from V4L2 (Linux) and the end of the camera track (web). A camera that only stops sending frames is not reported. You must keep calling `update()`: it is what reports the loss.
-- **Breaking: `setup(int width = 640, int height = 480)` lost its default arguments.** `setup()` is now the reopen call above. For a grabber that has never been set up it behaves as before (device 0 at 640 × 480, or the device from `setDeviceID()`), so `grabber.setup();` keeps working. `grabber.setup(1280);` (width only) no longer compiles: write `grabber.setup(1280, 480)`.
-- **Fix: reopening the wrong camera.** The reopen used to go by index, and the order of cameras can differ for a moment when one is unplugged and replugged, so `setup()` could open the built-in camera instead of the USB one. Now every successful `setup(...)` remembers the camera's name, and `setup()` opens the camera with that name; if none is present it fails with an error (it never falls back to another camera). `setDeviceID()` forgets the name, so the next `setup()` uses that index. Two cameras with the same name can't be told apart: the first one opens.
-- **Behavior change:** after an unplug the grabber closes itself, so `isConnected()` / `isInitialized()` turn false on their own and the texture and pixels are released. Code that assumed they stay true until `close()` should check `isConnected()`.
-- `isInitialized()` stays as an alias of `isConnected()`. `isConnected()` is also false while a macOS / iOS permission request is pending (as `isInitialized()` was).
-- Not part of this change: the Windows `uniqueId` (still the enumeration index), `setDeviceUniqueID()` and the Windows native-mode selection from #276 were dropped from the plan in the #415 simplification.
+- `isInitialized()` stays as another name for `isConnected()`. `isConnected()` is also `false` while a macOS or iOS camera permission request is pending, as `isInitialized()` was.
+- Not in v0.8.0: a stable Windows camera ID (`uniqueId` is still the enumeration index), `setDeviceUniqueID()` and choosing a Windows native mode.
 
-## tcxMidi follows the device lifecycle (#415)
+### MidiIn and MidiOut (tcxMidi)
 
-`MidiIn` and `MidiOut` (addon tcxMidi) are on the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md). Nothing is removed; your existing code compiles and behaves as before until the OS reports an opened port removed.
+Existing code compiles and behaves as before until the OS reports an opened port removed.
 
-- **New:** `midiIn.setup()` / `midiOut.setup()` with no arguments reopen the last port that opened successfully (the same virtual port, or the port whose name equals the earlier one, found again by name because indices shift). On failure they log an error and return `false`. Reconnecting is app code:
+- **An unplugged port now closes.** Before, an unplugged port stayed "open" without a message, and `isOpen()` stayed `true`. Now, on CoreMIDI, the ALSA sequencer and WinMM, the port is closed, one warning is logged, and `isConnected()` turns `false` shortly after the removal (on the next runtime turn, plus up to 100 ms on WinMM). An app that never looked at `isOpen()` sees only the warning. WebMIDI does not report removals, and neither does a virtual port opened with `openVirtualPort()`.
 
   ```cpp
-  if (!midiIn.isConnected() && getElapsedTime() - lastTry > 2.0f) {
+  // Before: isOpen() stayed true after an unplug
+  if (midiOut.isOpen()) midiOut.sendNoteOn(1, 60, 100);
+  // After: it turns false; reconnect with setup()
+  if (!midiOut.isConnected() && getElapsedTime() - lastTry > 2.0f) {
       lastTry = getElapsedTime();
-      midiIn.setup();
+      midiOut.setup();
   }
   ```
 
-- **New:** `isConnected()` and `close()`. `isOpen()` and `closePort()` stay as aliases.
-- **New:** `onDisconnect` (`Event<DeviceDisconnectEventArgs>`, one field, `reason`). It fires once, on the main thread, when the OS reports the opened port removed; the port is then already closed and `isConnected()` is `false`. `close()`, opening another port and the destructor never fire it.
-- **Behavior change:** before, an unplugged port stayed "open" with no message and `isOpen()` stayed `true`. Now, on CoreMIDI, the ALSA sequencer and WinMM, the port is closed, one warning is logged and `isConnected()` turns `false` shortly after the removal (a host turn, plus up to 100 ms on WinMM). An app that never looked at `isOpen()` sees only the warning. WebMIDI does not report removals, and neither does a virtual port you opened with `openVirtualPort()`, so nothing changes there.
-- Each open physical port now keeps a small libremidi observer alive (a backend thread on ALSA and WinMM) to hear about removals; it is released by `close()` and the destructor.
+- **New:** `onDisconnect` fires once, on the main thread, when the OS reports the opened port removed. The port is already closed and `isConnected()` is `false`. `close()`, opening another port and the destructor never fire it.
+- **New:** `midiIn.setup()` / `midiOut.setup()` with no arguments reopen the last port that opened successfully: the same virtual port, or the port with the same name (found again by name, because indexes shift). If it fails, it logs an error and returns `false`. You still open the first port with `openPort()` or `openVirtualPort()`.
+- **New:** `isConnected()` and `close()`. `isOpen()` and `closePort()` stay as other names for them.
+- Each open physical port keeps a small libremidi observer to hear about removals (a backend thread on ALSA and WinMM). `close()` and the destructor release it.
+- On Linux (ALSA), a large `sendSysex()` is now split into 256-byte events and paced on the calling thread, about 4 seconds per MB.
 
-## AudioEngine and MicInput follow the device lifecycle (#415)
+### AudioEngine and MicInput
 
-`AudioEngine` (the playback device) and `MicInput` (the capture device) join `Serial`, `DepthCamera`, `VideoGrabber` and `tcxMidi` on the common surface of [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md): `setup()`, `isConnected()`, `close()` and `onDisconnect`. Everything that compiled before still compiles; the changes are additions plus one behavior change.
+Everything that compiled before still compiles. The changes are new functions plus one behaviour change.
 
-- **New: `engine.setup()` and `engine.setup(settings)`** are `engine.init()` and `engine.init(settings)`. `setup()` and `init()` open the system default device (keeping the last rate, channel count, buffer size and polyphony); to use a specific device, pass `AudioSettings` with `deviceName`. This holds for any reopen of a closed engine: after `close()`, after the OS stopped the device, or from `Sound::load*()`, which calls `init()` while the engine is not connected.
-- **New: `engine.isConnected()` and `engine.close()`.** `isInitialized()` stays as an alias of `isConnected()`, and `shutdown()` as an alias of `close()`.
-- **New: `engine.onDisconnect`** (`Event<DeviceDisconnectEventArgs>`, field `reason`). It fires once, on the main thread at the Runtime's next host turn, when the OS or the audio library reports that the running output device stopped by itself (a USB audio interface unplugged, a Bluetooth headset switched off). `isConnected()` is already false when it fires. `close()`, `shutdown()`, a re-initialization and a reroute to a new OS default device never fire it. Which backends report a stop depends on the OS; where the backend says nothing, the audio stops and `isConnected()` stays true. To open the device again, call `setup()` / `setup(settings)` again.
-- **Behavior change: `isInitialized()` / `isConnected()` turns false when the OS stops the device**, and `play()` is refused (counted as "no output device running") until the device is opened again. Before, the engine kept reporting true and playing into a dead device. Nothing is rerouted or retried by the engine.
-- **New: `MicInput` has `setup()`, `isConnected()`, `close()` and `onDisconnect`.** `setup()` is `start()` at the sample rate of the last start (the microphone is always the system default capture device); `isConnected()` is `isRunning()` and `close()` is `stop()`. `isRunning()` also turns false when the OS stops the capture device. Web reports no loss.
+- **When the OS stops the output device, `isConnected()` / `isInitialized()` turn `false`**, and `play()` is refused (counted as "no output device running") until you open the device again. Before, the engine kept reporting `true` and played into a dead device. After a stop, the engine does not reopen or retry by itself.
 
-See [audioDeviceExample](../examples/sound/audioDeviceExample/src/tcApp.cpp) for choosing a device by name with `AudioEngine::listDevices()` and `setup(settings)`.
+  ```cpp
+  // Before: kept playing into a dead device
+  sound.play();
+  // After: open the device again, then play
+  auto& engine = AudioEngine::getInstance();
+  if (!engine.isConnected()) engine.setup();
+  sound.play();
+  ```
 
-## No caps on image size, sound polyphony or OSC nesting
+- **New: `engine.onDisconnect`.** It fires once, on the main thread on the runtime's next turn, when the OS or the audio library reports that the running output device stopped by itself, for example a USB audio interface unplugged or a Bluetooth headset switched off. `isConnected()` is already `false`. `close()`, `shutdown()`, setting the engine up again and following a new OS default device never fire it. Whether a stop is reported depends on the OS; where the backend says nothing, the audio stops and `isConnected()` stays `true`.
+- **New: `engine.setup()` and `engine.setup(settings)`** are other names for `init()` and `init(settings)`. They open the system default device, and keep the last sample rate, channel count, buffer size and polyphony. They do not keep `AudioSettings::deviceName` or `backend`. To use a specific device, pass `AudioSettings` with `deviceName` each time. This holds for every reopen: after `close()`, after the OS stopped the device, and from `Sound::load*()`, which calls `init()` while the engine is not connected. See [audioDeviceExample](../examples/sound/audioDeviceExample/src/tcApp.cpp) for choosing a device by name with `AudioEngine::listDevices()`.
+- **New: `engine.isConnected()` and `engine.close()`.** `isInitialized()` and `shutdown()` stay as other names for them.
+- **New: `MicInput` has `setup()`, `isConnected()`, `close()` and `onDisconnect`.** `setup()` is `start()` at the sample rate of the last start. The microphone is always the system default capture device. `isConnected()` is `isRunning()`, and `close()` is `stop()`. `isRunning()` also turns `false` when the OS stops the capture device. The web reports no loss.
 
-These limits are gone; if your app needs a cap, set it yourself.
+### DepthCamera backends return an owned Device
 
-- **Image:** the 64 MiB limit on encoded image input from memory (`Pixels::loadFromMemory`, `Image::loadFromMemory`, URL and network-buffer loads) is removed, as it never applied to local files. `LoadError::TooLarge` stays for its other reasons (GPU texture size, URL/network admission, platform size). Nothing to change.
-- **Sound:** `AudioSettings::maxPolyphony` now defaults to `0`, which means no cap (it was `32`), and `AudioEngine::DEFAULT_MAX_PLAYING_SOUNDS` is `0`. The 33rd simultaneous `Sound::play()` used to return `false` and was counted in `droppedPolyphonyLimit`; it now plays. `AudioEngine::getMaxPolyphony()`, `AudioDeviceChangedArgs::maxPolyphony` and the `tc_get_audio_state` field report the cap, so they read `0` when none is set, not the number of slots. A positive value still works as a cap; negative values mean no cap, as `0` does. `PlayingSoundInfo::slot` is no longer bounded by a fixed range. A `SoundStream`'s own `loadStream(path, maxPolyphony)` default of `1` is unchanged.
-- **OSC:** `OscBundle::MAX_NESTING_DEPTH` is removed, and bundles nest as deep as the 65,536-byte packet allows (the datagram bound stays). If you used the constant, delete the check or replace it with a limit of your own in an `onBundleReceived` handler. `OscBundle` copies are now shallow: nested bundles are shared between a bundle and its copies (they are never modified once added), so a copy costs one level, and the destructor walks the nesting without recursion. `OscBundle::Element` is now `std::variant<OscMessage, std::shared_ptr<OscBundle>>`.
-
-## `exitApp()` is the one way to quit (#906)
-
-`exitApp(int code = 0)` is now the single way to quit, in windowed and headless apps alike. `App::requestExit()` and `requestExitApp()` are deprecated aliases that call `exitApp()`, so old code still compiles (with a deprecation warning) and now also works in a windowed app. Before, `App::requestExit()` only set a flag that `runHeadlessApp()` read, so it did nothing in a windowed app.
-
-```cpp
-exitApp();      // was requestExit() or requestExitApp()
-exitApp(3);     // with an exit code
-```
-
-- Both aliases now go through `exitRequested`, so a listener can veto them. In a headless app, `requestExit()` used to stop the loop without sending `exitRequested`.
-- `requestExitApp()` used to keep the current exit code; as an alias of `exitApp()` it sets the code to `0`.
-- `App::isExitRequested()` is deprecated. It still returns `true` after `requestExit()` was called on that App, but the framework no longer reads it. Use `exit()` or `events().exitRequested` to react to a quit.
-- The exit reason `request-exit-app` no longer exists; `exitApp()` reports `exit-app`.
-
-## Scissor rectangles match `drawRect()` (fix, #914)
-
-`setScissor()`, `pushScissor()` and `popScissor()` took framebuffer pixels while every other drawing function takes logical coordinates, so a scissor was misplaced or mis-sized wherever logical pixels are scaled (Retina and other HiDPI displays). They now take the logical coordinates of the current render target, the same units as `drawRect()`.
-
-If you compensated by multiplying by the pixel scale, remove that:
+This is for authors of `tcx::depthcamera::DepthCamera` backends (addon `tcxDepthCamera`). Replace the backend's `bool openDevice()`, `closeDevice()` and `captureInto()` overrides with `std::shared_ptr<Device> openDevice()`. Put the source's resources and the capture code in a `DepthCamera::Device` subclass:
 
 ```cpp
-// before
-float s = getDpiScale();
-pushScissor(10 * s, 10 * s, 200 * s, 100 * s);
+// Before
+bool MyCamera::openDevice() override;    // opened the SDK session on the backend
+void MyCamera::closeDevice() override;
+StreamFreshness MyCamera::captureInto(DepthFrame& dst) override;
 
-// now: the rectangle that drawRect(10, 10, 200, 100) draws
-pushScissor(10, 10, 200, 100);
+// After
+struct SensorDevice : DepthCamera::Device {
+    // Own the SDK session and everything capture touches here.
+    StreamFreshness captureInto(DepthFrame& dst) override;
+    ~SensorDevice() override;   // release the SDK session here
+};
+
+shared_ptr<DepthCamera::Device> MyCamera::openDevice() {
+    return make_shared<SensorDevice>();   // return nullptr if opening fails
+}
 ```
 
-- Inside an `Fbo` and in pixelPerfect mode, logical coordinates are pixels already, so code there does not change.
-- The transform matrix and camera are still not applied: a scissor is an axis-aligned rectangle of the target, measured from its top-left corner.
-- `RectNode::setClipping(true)` needs no change. Nested `pushScissor()` calls still intersect, and `popScissor()` restores the previous rectangle.
+- Copy the configuration from the backend into the Device when it opens. A Device must not keep the backend's address or call its members.
+- `captureInto()` still fills a complete frame and returns `StreamFreshness`; only its owner changes.
+- The capture run holds the Device until capture ends. `close()` from another thread waits for it. `close()` from inside capture asks it to stop and returns, and the worker releases the Device when it exits.
+- Backend destructors no longer need to call `close()` before their members are destroyed. `setup()` closes the previous run before opening a new Device.
+- Playback extensions move their `readExtraBlock()` / `decodesBlockType()` overrides into a `PlaybackDepthCamera::PlaybackDevice` subclass, and override the protected `makePlaybackDevice()` factory to return it. Keep custom decoding data in that Device or in shared storage it owns. `setLoop()` updates the active Device's flag, so it can still change looping during threaded playback.
+- The external backends (`tcxOrbbec`, `tcxAzureKinect`, `tcxRealSense`) need the same change in their own repositories; the old capture hooks on the backend are removed.
+
+### DepthCamera connection state
+
+Nothing is removed or renamed for apps, and a backend that already uses `std::shared_ptr<Device> openDevice()` compiles unchanged.
+
+- **Changed:** `setup()` now logs an error when `openDevice()` returns no device, in addition to what the backend logged. After a reported loss, a non-threaded `update()` no longer calls `captureInto()` on the lost device.
+- **New:** `camera.isConnected()` is true from a successful `setup()` until `close()` or a reported loss.
+- **New:** `camera.onDisconnect` fires once per session, only when a backend reports the device lost, with `isConnected()` already `false`. It fires on the thread that reported the loss; register with `Deliver::Main` to run it on the main thread.
+- **New, for backend authors:** the protected `reportLost(std::string reason)`. Call it from any thread where the backend already detects a loss. A backend that never calls it never fires `onDisconnect`. Add it in each backend repository, only where the SDK reports the loss.
+- Reconnecting is app code, as in `addons/tcxDepthCamera/example-synthetic`:
+
+  ```cpp
+  if (!camera->isConnected() && elapsed > 2.0f) camera->setup();
+  ```
+
+## Networking and addons
+
+### OscReceiver::setup() owns its port
+
+`OscReceiver::setup(port)` now binds the port for itself alone. Before, it always turned on address and port reuse. So a second receiver on the same port, for example a second copy of the app, also bound without an error, and unicast messages reached only one of them. Now the second `setup()` returns `false` and reports the error through `onParseError` and the log. After a failed `setup()`, `getPort()` returns `0`.
+
+Core `UdpSocket` on Windows does the same: `bind()` on a socket that did not call `setReuseAddress(true)` or `setReusePort(true)` now sets `SO_EXCLUSIVEADDRUSE`, so it owns its port as it already did on macOS and Linux.
+
+If several receivers on one PC share a multicast port, replace `setup()` followed by `joinMulticast()` with one call:
+
+```cpp
+// Before
+osc.setup(9000);
+osc.joinMulticast("239.0.0.1");
+
+// After: reuse, bind and join in one call
+osc.setupMulticast(9000, "239.0.0.1");
+```
+
+`joinMulticast()` / `leaveMulticast()` still work after `setup()`, but that port is not shared. Unicast apps need no change; check the return value of `setup()` to notice a port that is already in use.
+
+### OSC and MIDI receive queues
+
+Messages that wait to be polled are now limited by size as well as by count: on top of the 1,024-message limit, the queue holds at most 64 MiB. When the queue is full, the oldest whole messages are dropped to make room, and a single message larger than the budget is rejected. `getDroppedMessageCount()` counts both, and the first loss logs a warning once. Messages handled by a listener are not affected. Listeners still run on the receive thread unless you register them with `Deliver::Main`.
+
+```cpp
+// If you poll and fall behind, handle messages as they arrive instead:
+oscListener = osc.onMessageReceived.listen([this](OscMessage& m) { handle(m); }, Deliver::Main);
+```
+
+### TcpServer limits clients to 64 by default
+
+`TcpServer::start(port, maxClients)` now defaults to 64 clients; before, the default `0` meant no limit. A client beyond the limit is closed when it connects, with one warning. Passing `0` now fails with "maxClients must be positive".
+
+```cpp
+// Before: 0 = no limit
+server.start(9000, 0);
+// After: give a number
+server.start(9000, 1000);
+```
+
+### tcxCurl follows redirects and limits response size
+
+- Redirects are now followed by default (before, they were not). At most 5 hops, http and https only, and never from https to http. Credential headers such as `Authorization`, `Cookie` and `X-Api-Key` are dropped when a redirect goes to another origin.
+- A response larger than 64 MiB now fails, with status code `0` and an empty body. Raise the limit with `setResponseLimit()`.
+
+```cpp
+// To get the v0.7.7 behavior back:
+http.setFollowRedirects(false);
+http.setResponseLimit(256 * 1024 * 1024);   // for downloads larger than 64 MiB
+```
+
+### tcxWebSocket limits message size
+
+An incoming message larger than 64 MiB now closes the connection (close code 1009; 4009 on the web). A handshake larger than 64 KiB is rejected. Change the limits with `setMaxMessageSize()` and `setMaxHandshakeSize()`.
+
+```cpp
+ws.setMaxMessageSize(256 * 1024 * 1024);   // if your server sends larger messages
+```
+
+### Box2D ownership and contact events
+
+- **`World`, `Body`, `CircleBody`, `RectBody` and `PolyShape` cannot be moved.** Create them in place, and store or move smart pointers when you need to.
+
+  ```cpp
+  // Before
+  bodies.push_back(move(body));   // moved a CircleBody
+  // After
+  bodies.push_back(make_unique<CircleBody>());
+  ```
+
+- **User data is reserved.** TrussC uses the `b2Body` user data and the fixture user data. Put your own data in your `Body` subclass.
+- **Contact events moved.** Begin and End now run after each sub-step that TrussC runs, in Box2D's order, instead of inside `Step`. Stay runs once per `update()`. Events from a raw `b2World::Step()` wait for the next `World::update()` of a new frame. See the [addon event contract](../addons/tcxBox2d/README.md#collision-events).
+- **Destroying inside a listener.** Listeners may destroy bodies or the World, so check borrowed pointers from the event again after releasing anything. Move the cleanup for the destroyed side of an Exit before you release it; the surviving side receives Exit with a null counterpart.
+- **Destroy TrussC bodies through TrussC.** Bodies owned by a TrussC `Body` or `RigidBody2D` are destroyed with `Body::destroy()`, by removing the Mod, or with `World::clear()`. Do not call `b2World::DestroyBody` or `DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked while the body still has fixtures (through the destruction listener). If you remove a body's last fixture and then the body, with no `update()` in between, that destroy is not tracked.
+- Register your own destruction listener through `World::setDestructionListener()`, so TrussC's internal one keeps working.
+- `clear()` keeps the physics world and its settings, and you can use it again right away. A second `setup()` replaces the physics world.
+
+## Limits that are gone
+
+These limits are removed. If your app needs a limit, set your own.
+
+- **Clipboard and file drops:** clipboard text is no longer cut at 65,536 bytes. A drop is no longer limited to 16 files, or to paths of 2,048 bytes. Memory grows with the content; only available memory and the platform limit it. (`WindowSettings::clipboardSize` is removed; see [Window and runtime settings](#window-and-runtime-settings).)
+- **Sound polyphony:** `AudioSettings::maxPolyphony` now defaults to `0`, which means no limit (it was `32`), and `AudioEngine::DEFAULT_MAX_PLAYING_SOUNDS` is `0`. The 33rd sound playing at once used to make `Sound::play()` return `false` and was counted in `droppedPolyphonyLimit`; it now plays.
+  - `AudioEngine::getMaxPolyphony()`, `AudioDeviceChangedArgs::maxPolyphony` and the `tc_get_audio_state` field report the limit, so they read `0` when none is set, not the number of slots.
+  - A positive value still works as a limit. A negative value means no limit, like `0`.
+  - `PlayingSoundInfo::slot` no longer stays within a fixed range.
+  - `SoundStream::loadStream(path, maxPolyphony)` still defaults to `1`.
+
+  ```cpp
+  // To keep the old limit:
+  AudioSettings settings;
+  settings.maxPolyphony = 32;
+  AudioEngine::getInstance().setup(settings);
+  ```
+
+- **OSC bundle nesting:** `OscBundle::MAX_NESTING_DEPTH` is removed. Bundles nest as deep as the 65,536-byte packet allows; the packet size limit stays. If you used the constant, delete the check or put your own limit in an `onBundleReceived` handler.
+  - `OscBundle` copies are now shallow: a bundle and its copies share their nested bundles, which are never changed once added. A copy costs one level, and the destructor walks the nesting without recursion.
+  - `OscBundle::Element` is now `std::variant<OscMessage, std::shared_ptr<OscBundle>>`.
+- **Curves:** `kAppendCurveMaxPoints` is removed, and `appendCurve()` no longer refuses more than 100,000 points. Delete code that uses the constant.
+
+  ```cpp
+  // Before
+  int n = min(count, kAppendCurveMaxPoints);
+  // After
+  int n = count;
+  ```
+
+## Tools, build and MCP
+
+### TrussC.h no longer brings in the HTTP library's system headers
+
+`TrussC.h` used to include the MCP server's HTTP library, and with it several system headers. It no longer does, so every file that includes `TrussC.h` compiles faster. If your code uses one of these without including it, add the include:
+
+- `<regex>` (`std::regex`, `std::regex_match`, ...)
+- `<sys/stat.h>` (`stat`, `chmod`, `mkdir`) on macOS and Linux
+
+```cpp
+#include <TrussC.h>
+#include <regex>   // add if you use regex
+```
+
+Socket headers still come in through TrussC's network headers. The common standard headers (`<mutex>`, `<thread>`, `<map>`, `<fstream>`, `<sstream>`, `<atomic>`, `<functional>`, `<chrono>`, ...) also still come in through `TrussC.h`.
+
+### MCP tools need a dev build or a grant
+
+In v0.7.7, `TRUSSC_MCP=1` started the full set of inspection tools. In an ordinary build it now starts only a health check (`ToolLevel::Public`), until your app grants a tool level in `setup()`. `TRUSSC_MCP_HOST` and `TRUSSC_MCP_TOKEN` are ignored outside dev builds, and `TRUSSC_MCP=0` turns the server off. Details are in [AI_AUTOMATION.md](AI_AUTOMATION.md).
+
+```cpp
+// Before
+// TRUSSC_MCP=1 ./myApp
+
+// After, while developing: a dev build grants Control
+// trusscli run --mcp
+
+// After, in a shipped app that should allow inspection:
+void tcApp::setup() {
+    mcp::setToolLevel(mcp::ToolLevel::ReadOnly);   // Control also allows input and scene changes
+}
+```
+
+`trusscli build --mcp` and `run --mcp` set the CMake option `TRUSSC_MCP_DEV=ON`; a build without `--mcp` sets it `OFF`.
+
+### MCP window ids
+
+- `tc_list_windows` returns each window's positive `id` instead of `index`, and the `main` field is gone. Pass that `id` as the `window` argument of other tools. Resource list indexes are unchanged.
+- `window: 0` for the main window is no longer valid.
+- Leaving out `window` while two or more windows are open now returns an error that lists the ids. Before, it meant the main window.
+
+```json
+// Before
+{"name": "tc_get_screenshot", "arguments": {"window": 0}}
+// After: use an id from tc_list_windows
+{"name": "tc_get_screenshot", "arguments": {"window": 1}}
+```
+
+### The MCP port line is only on the Logger
+
+The extra copy of the MCP port line on stderr is gone. After the port is bound, the server logs `[MCP] HTTP server listening on http://HOST:PORT/mcp` as a Logger notice only: on stdout, in the file set with `TRUSSC_LOG_FILE`, and to `onLog` listeners. Logger lines start with a timestamp and `[NOTICE]`.
+
+If a tool reads the port from stderr, change it to one of these:
+
+- Read the Logger line from stdout or the log file, and look for `HTTP server listening on http://` anywhere in the line. A console level of Warning or higher hides the line on stdout; the log file still gets it as long as its own level allows notices.
+- Set a fixed port with `TRUSSC_MCP_PORT=8080` and connect to `http://127.0.0.1:8080/mcp`. If that port is already in use, the server does not start.
+
+```sh
+# Before: read the port from stderr
+./myApp 2> >(grep -m1 'listening')
+# After: use a fixed port
+TRUSSC_MCP_PORT=8080 ./myApp
+```
+
+### Shader targets in custom CMake
+
+`<target>_shaders` is now an INTERFACE library instead of a custom target. The generator step is `<target>_shaders_gen`, and `trussc_shader_object_depends()` is new. Ordinary apps are not affected. If your own CMake adds dependencies on `<target>_shaders` as a custom target, depend on `<target>_shaders_gen` instead.
+
+```cmake
+# Before
+add_dependencies(myTool myApp_shaders)
+# After
+add_dependencies(myTool myApp_shaders_gen)
+```
+
+## New in v0.8.0
+
+You do not need these to upgrade.
+
+- **Loading in the background:** `Image::loadAsync()`, `SoundBuffer::loadAsync()` and `Font::loadAsync()`, with `onLoad` on a later frame. Cancelling never waits. `setResourceLoadConcurrency()` / `getResourceLoadConcurrency()` set how many loads prepare at once (4 by default). See [ASYNC_LOADING.md](ASYNC_LOADING.md).
+- **Screenshots and microphone without blocking:** `saveScreenshotAsync()` with `onScreenshotSave()`, and `MicInput::startAsync()` with `onStart` and `isStarting()`.
+- **Windows and quitting:** `closeRequested` and `occludedChanged` events, `WindowSettings::setQuitOnClose()` and `Window::setQuitOnClose()`, `Window::destroyApp()`, `runtime().setLogoutTimeout()`, `setIndependentFps()`.
+- **Runtime settings:** `RuntimeSettings` and `runApp<T>(windowSettings, runtimeSettings)`.
+- **Cameras:** `setupScreenFovWithSize()` / `setupScreenFovWithSizeDeg()` for an explicit viewport size; `setupScreenOrtho()` and `setDefaultScreenOrtho()`.
+- **Devices:** the reopen calls, `isConnected()`, `close()` and `onDisconnect` described in [Devices](#devices).
+- **Hot reload:** `TC_NO_HOT_RELOAD("reason");` declares that code cannot be hot-reloaded, so a hot-reload build stops with that reason. tcxHap declares it on Windows, so a hot-reload build that uses tcxHap on Windows now stops with this message; remove `TC_HOT_RELOAD` to build normally.
+- **trusscli:** `-j` / `--jobs`, `build --dry-run`, and `build` / `run --mcp`.
+- **tcxImGui:** `imguiBegin()` / `ImGuiManager::begin()` now return `bool`; submit widgets only when it returns `true`. Existing code still compiles. New `setup(initialVertices)`, `setupOffscreen()` and `scoped()`. ImGui can now draw into an Fbo.
