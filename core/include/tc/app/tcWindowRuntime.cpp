@@ -517,7 +517,7 @@ CoreEvents& unavailableWindowEvents() {
         CoreEvents events;
         UnavailableEvents() {
             auto disable = [](auto&... event) { (FrameworkEventAccess::disableSubscriptions(event), ...); };
-            disable(events.setup, events.update, events.draw, events.onRender, events.afterFrame,
+            disable(events.update, events.draw, events.onRender, events.afterFrame,
                 events.exit, events.hotReloadUnload, events.exitRequested, events.deviceLost,
                 events.keyPressed, events.keyReleased, events.mousePressed, events.mouseReleased,
                 events.mouseMoved, events.mouseDragged, events.mouseScrolled, events.windowResized,

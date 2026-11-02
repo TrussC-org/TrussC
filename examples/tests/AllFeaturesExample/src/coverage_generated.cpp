@@ -1297,7 +1297,6 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().occludedChanged;
         (void)af::val<CoreEvents>().onRender;
         (void)af::val<CoreEvents>().rawEvent;
-        (void)af::val<CoreEvents>().setup;
         (void)af::val<CoreEvents>().touchMoved;
         (void)af::val<CoreEvents>().touchPressed;
         (void)af::val<CoreEvents>().touchReleased;

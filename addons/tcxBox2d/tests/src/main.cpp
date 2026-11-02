@@ -90,6 +90,15 @@ static_assert(!std::is_move_assignable_v<box2d::PolyShape>);
 
 static int g_fail = 0;
 static int g_checks = 0;
+
+// A Mod's setup() runs once its node is set up in a live tree (#949). Each
+// test node is made its own live root, so addMod() creates the body at once
+// and dropping the last reference still destroys the node.
+static shared_ptr<Node> liveNode() {
+    auto node = make_shared<Node>();
+    tc::internal::setupNodeOnce(*node);
+    return node;
+}
 static int finishSelectedRun(const string& selected) {
     if (!g_checks) {
         fprintf(stderr, "unknown case: %s (0 checks)\n", selected.c_str());
@@ -505,7 +514,7 @@ static void testSetupSimplified(box2d::World& world) {
 // Mod API: RigidBody2D with Shape2D::polygon() / Shape2D::simplified()
 // ---------------------------------------------------------------------------
 static box2d::RigidBody2D* attach(box2d::World& world, shared_ptr<Node>& node, const box2d::Shape2D& shape) {
-    node = make_shared<Node>();
+    node = liveNode();
     node->setPos(400, 300);
     return node->addMod<box2d::RigidBody2D>(world, shape);
 }
@@ -1098,7 +1107,7 @@ static void testCompoundEvents() {
         shared_ptr<Node> barNode, boxNode;
         auto* bar = attach(world, barNode, box2d::Shape2D::compound(kNotchedBar));
         bar->setBodyType(box2d::BodyType::Static);
-        boxNode = make_shared<Node>();
+        boxNode = liveNode();
         boxNode->setPos(400, 300 - 20 - 10 + 5);
         auto* box = boxNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(220, 20));
 
@@ -1251,7 +1260,7 @@ static void testCompoundHandover() {
         Vec2 s1, s2;
         bool found = bar->getBody() && seamSpots(bar->getBody(), 4, 2, s1, s2);
 
-        boxNode = make_shared<Node>();
+        boxNode = liveNode();
         boxNode->setPos(s1.x, s1.y);
         auto* box = boxNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(2, 2));
         box->setTrigger(true);
@@ -1391,11 +1400,11 @@ static void testStayListenerDestroys() {
         shared_ptr<Node> barNode, node1, node2;
         auto* bar = attach(world, barNode, box2d::Shape2D::compound(kNotchedBar));
         bar->setBodyType(box2d::BodyType::Static);
-        node1 = make_shared<Node>();
+        node1 = liveNode();
         node1->setPos(330, 283);
         auto* rb1 = node1->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(10, 10));
         rb1->setTrigger(true);
-        node2 = make_shared<Node>();
+        node2 = liveNode();
         node2->setPos(470, 283);
         auto* rb2 = node2->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(10, 10));
         rb2->setTrigger(true);
@@ -1585,7 +1594,7 @@ static vector<EventListener> countEvents(box2d::RigidBody2D* rb, ModCounts& n,
 
 static box2d::RigidBody2D* addModBody(box2d::World& world, shared_ptr<Node>& node, float x, float y,
                                       const box2d::Shape2D& shape) {
-    node = make_shared<Node>();
+    node = liveNode();
     node->setPos(x, y);
     return node->addMod<box2d::RigidBody2D>(world, shape);
 }
@@ -2196,7 +2205,7 @@ static void testCompoundOffset(box2d::World& world) {
             }
             {
                 // RigidBody2D creates its fixtures its own way.
-                shared_ptr<Node> node = make_shared<Node>();
+                shared_ptr<Node> node = liveNode();
                 auto* rb = node->addMod<box2d::RigidBody2D>(
                     world, box2d::Shape2D::compound(shifted(o.pts, float(lo * 0.6), float(lo * 0.8))));
                 if (!inertiaPositive(rb->getBody(), densities)) ++bad;
@@ -2306,7 +2315,7 @@ static void testDensityAndType(box2d::World& world) {
         {"polygon hexagon near the offset limit", offsetBy(hex, hexLimit), false},
     };
     auto modBody = [&](const Kind& k, shared_ptr<Node>& node, box2d::BodyType type, float d) {
-        node = make_shared<Node>();
+        node = liveNode();
         node->setPos(400, 300);
         auto shape = k.compound ? box2d::Shape2D::compound(k.pts) : box2d::Shape2D::polygon(k.pts);
         return node->addMod<box2d::RigidBody2D>(world, shape, type, d);
@@ -2551,7 +2560,7 @@ static void testReducedConvexHull() {
 // (#496): the same Event objects, so a listener on either name sees the same
 // notifications.
 static void testDeprecatedEventAliases(box2d::World& world) {
-    auto node = make_shared<Node>();
+    auto node = liveNode();
     auto* rb = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::box(4, 4));
 #if defined(_MSC_VER)
 #pragma warning(push)
@@ -2695,7 +2704,7 @@ static void testReplacedModOwner() {
     box2d::World world;
     world.setup(0, 0);
     world.setAutoUpdate(false);
-    auto node = make_shared<Node>();
+    auto node = liveNode();
     node->setPos(100, 100);
     box2d::CircleBody partner;
     partner.setup(world, 110, 100, 10);
@@ -2708,7 +2717,7 @@ static void testReplacedModOwner() {
     check("replace-mod: clear invalidates replacement", !rb->getBody() && hasInvalidHandles(partner) && world.getBodyCount() == 0);
     node.reset();
     world.setup(0, 0);
-    node = make_shared<Node>();
+    node = liveNode();
     rb = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
     node->removeMod<box2d::RigidBody2D>();  // onDestroy plus destructor is idempotent
     check("replace-mod: explicit Mod removal releases exactly once", world.getBodyCount() == 0);
@@ -2753,10 +2762,10 @@ static void testReplacementListenerMutation(bool replaceAgain) {
         box2d::World world;
         world.setup(0, 0);
         world.setAutoUpdate(false);
-        auto node = make_shared<Node>();
+        auto node = liveNode();
         node->setPos(100, 100);
         box2d::CircleBody classic;
-        auto partner = make_shared<Node>();
+        auto partner = liveNode();
         partner->setPos(110, 100);
         box2d::RigidBody2D* partnerMod = nullptr;
         if (layer == 1) {
@@ -2810,7 +2819,7 @@ static void testSilentOwnerTeardown() {
         box2d::CircleBody survivor;
         survivor.setup(world, 110, 100, 10);
         survivor.setSensor(true);
-        auto node = make_shared<Node>();
+        auto node = liveNode();
         node->setPos(100, 100);
         auto classic = make_unique<box2d::CircleBody>();
         box2d::RigidBody2D* rb = nullptr;
@@ -2854,7 +2863,7 @@ static void testDeferredExitAcrossClear() {
         box2d::CircleBody survivor;
         survivor.setup(world, 110, 100, 10);
         survivor.setSensor(true);
-        auto node = make_shared<Node>();
+        auto node = liveNode();
         node->setPos(100, 100);
         auto classic = make_unique<box2d::CircleBody>();
         if (mode == "delete-classic") classic->setup(world, 100, 100, 10);
@@ -2939,7 +2948,7 @@ static void testClearReuse() {
         world.createGround(600, 800);
         box2d::CircleBody old;
         old.setup(world, 100, 100, 10);
-        auto oldNode = make_shared<Node>();
+        auto oldNode = liveNode();
         auto* oldMod = oldNode->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
         // Also cover unowned raw-access bodies in the owner walk.
         b2BodyDef unowned;
@@ -2961,7 +2970,7 @@ static void testClearReuse() {
         world.createBounds(0, 0, 800, 600);
         box2d::CircleBody fresh;
         fresh.setup(world, 100, 100, 10);
-        auto node = make_shared<Node>();
+        auto node = liveNode();
         node->setPos(300, 100);
         auto* mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
         old.update();
@@ -3043,7 +3052,7 @@ static void testOwnerLifetimes() {
         rect.setup(*world, 110, 100, 20, 20);
         poly.setupRegular(*world, 300, 100, 10, 5);
         circle.setSensor(true);
-        auto node = make_shared<Node>();
+        auto node = liveNode();
         node->setPos(100, 100);
         auto* rb = node->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
         rb->setTrigger();
@@ -3096,7 +3105,7 @@ static void testOwnerLifetimes() {
             world->getCollisionManager()->update();
             world->clear();
             circle.setup(*world, 400, 400, 10);
-            auto freshNode = make_shared<Node>();
+            auto freshNode = liveNode();
             freshNode->setPos(400, 400);
             auto* fresh = freshNode->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
             fresh->setTrigger();
@@ -3137,7 +3146,7 @@ static void testOwnerLifetimes() {
     circle.destroy();
     check("destroy twice: only the unowned anchor remains", hasInvalidHandles(circle) && world.getBodyCount() == 1);
 
-    auto node = make_shared<Node>();
+    auto node = liveNode();
     node->setPos(500, 500);
     node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
     check("point query skips Mod owners", world.getBodyAtPoint(500, 500) == nullptr);
@@ -3160,7 +3169,7 @@ static void testDeliveryCancellation(const string& mode) {
     box2d::RigidBody2D* ra = nullptr;
     box2d::RigidBody2D* rb = nullptr;
     if (mod) {
-        na = make_shared<Node>(); nb = make_shared<Node>();
+        na = liveNode(); nb = liveNode();
         na->setPos(100, 100); nb->setPos(110, 100);
         ra = na->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
         rb = nb->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
@@ -3377,7 +3386,7 @@ static void testClassicTriggers() {
     check("classic trigger: unchanged flag preserves per-fixture override", fixture->IsSensor());
     world.clear();
     box2d::CircleBody classic; classic.setup(world, 100, 100, 10);
-    auto node = make_shared<Node>(); node->setPos(110, 100);
+    auto node = liveNode(); node->setPos(110, 100);
     auto* mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
     int trigger = 0, solid = 0, stays = 0, exits = 0;
     auto t = mod->onTriggerEnter.listen([&](box2d::Contact2D& c) { ++trigger; check("classic trigger: non-Mod counterpart null", !c.other && !c.otherNode); });
@@ -3403,7 +3412,7 @@ static void testListenerReleases() {
         shared_ptr<Node> na, nb;
         box2d::RigidBody2D* ra = nullptr; box2d::RigidBody2D* rb = nullptr;
         if (layer == 2) {
-            na = make_shared<Node>(); nb = make_shared<Node>(); na->setPos(100, 100); nb->setPos(110, 100);
+            na = liveNode(); nb = liveNode(); na->setPos(100, 100); nb->setPos(110, 100);
             ra = na->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
             rb = nb->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10)); ra->setTrigger();
         } else {
@@ -3506,8 +3515,8 @@ static void testMemberRouter() {
         box2d::World second;
         first->setup(0, 0); second.setup(0, 0);
         first->setAutoUpdate(false); second.setAutoUpdate(false);
-        auto a = make_shared<Node>(), b = make_shared<Node>();
-        auto c = make_shared<Node>(), d = make_shared<Node>();
+        auto a = liveNode(), b = liveNode();
+        auto c = liveNode(), d = liveNode();
         a->setPos(100, 100); b->setPos(110, 100);
         c->setPos(100, 100); d->setPos(110, 100);
         auto* ra = a->addMod<box2d::RigidBody2D>(*first, box2d::Shape2D::circle(10));
@@ -3553,7 +3562,7 @@ static void testMemberRouter() {
     for (int cycle = 0; cycle < 3; ++cycle) {
         if (cycle == 1) world.clear();
         if (cycle == 2) world.setup(0, 0);
-        auto a = make_shared<Node>(), b = make_shared<Node>();
+        auto a = liveNode(), b = liveNode();
         a->setPos(100, 100); b->setPos(110, 100);
         auto* ra = a->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
         b->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10)); ra->setTrigger();
@@ -3580,7 +3589,7 @@ static void testRouterGates() {
         auto* world = std::construct_at(reinterpret_cast<box2d::World*>(storage));
         world->setup(0, 0); world->setAutoUpdate(false);
         auto oldToken = world->aliveToken();
-        auto na = make_shared<Node>(), nb = make_shared<Node>();
+        auto na = liveNode(), nb = liveNode();
         na->setPos(100, 100); nb->setPos(110, 100);
         auto* ra = na->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
         nb->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10)); ra->setTrigger();
@@ -3734,7 +3743,7 @@ static void testFixtureReleaseReuse(bool owned) {
         box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
         auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
         auto classic = make_unique<box2d::CircleBody>();
-        auto node = make_shared<Node>();
+        auto node = liveNode();
         box2d::RigidBody2D* mod = nullptr;
         b2Body* a = nullptr;
         if (kind == 1) { classic->setup(world, 0, 0, 30); classic->setSensor(true); a = classic->getBody(); }
@@ -3803,7 +3812,7 @@ static void testPartialFixtureRelease(int kind, const string& variant = "partial
         box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
         auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
         box2d::CircleBody classic, partner;
-        auto node = make_shared<Node>();
+        auto node = liveNode();
         box2d::RigidBody2D* mod = nullptr;
         b2Body* a;
         if (kind == 1) { classic.setup(world, 0, 0, 30); classic.setSensor(true); a = classic.getBody(); }
@@ -3926,7 +3935,7 @@ static void testMixedFixtureRelease(int kind) {
         box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
         auto* raw = world.getWorld(); auto* cm = world.getCollisionManager();
         box2d::CircleBody classic, partner;
-        auto node = make_shared<Node>();
+        auto node = liveNode();
         box2d::RigidBody2D* mod = nullptr;
         b2Body* a;
         if (kind == 1) { classic.setup(world, 0, 0, 30); classic.setSensor(true); a = classic.getBody(); }
@@ -4029,7 +4038,7 @@ static void testSensorJournalSnapshot(bool rawSteps) {
     b2CircleShape shape; shape.m_radius = 1;
     b2FixtureDef fixture; fixture.shape = &shape; compound->CreateFixture(&fixture);
     shape.m_p.Set(3, 0); fixture.isSensor = true; compound->CreateFixture(&fixture);
-    auto node = make_shared<Node>(); node->setPos(-15, 0);
+    auto node = liveNode(); node->setPos(-15, 0);
     auto* mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30));
     struct Proxy : b2ContactListener {
         b2ContactListener* target;
@@ -4062,7 +4071,7 @@ static void testSensorJournalSnapshot(bool rawSteps) {
         def = b2BodyDef(); compound = raw->CreateBody(&def);
         shape.m_p.Set(0, 0); fixture.isSensor = false; compound->CreateFixture(&fixture);
         shape.m_p.Set(3, 0); fixture.isSensor = true; compound->CreateFixture(&fixture);
-        auto fresh = make_shared<Node>(); fresh->setPos(45, 0);
+        auto fresh = liveNode(); fresh->setPos(45, 0);
         auto* freshMod = fresh->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30));
         int solidEnters = 0, triggerEnters = 0;
         auto c = freshMod->onCollisionEnter.listen([&](box2d::Contact2D&) { ++solidEnters; });
@@ -4135,6 +4144,38 @@ static void testHeadlessPhysics() {
     check("headless Box2d runner exits", runHeadlessApp<HeadlessPhysicsApp>(HeadlessSettings().setFps(1024)) == 0);
 }
 } // namespace
+
+
+// #949: a RigidBody2D added to a node outside the App's tree is set up when
+// the node joins it. The body appears then; if the World is gone by then, no
+// body is created (the alive token taken at addMod), with one warning.
+static void testDeferredModSetup() {
+    auto root = liveNode();
+    {
+        box2d::World world;
+        world.setup(0, 0);
+        world.setAutoUpdate(false);
+        auto node = make_shared<Node>();   // not in a live tree yet
+        node->setPos(40, 50);
+        auto* rb = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(10));
+        check("deferred setup: no body before the node joins", rb->getBody() == nullptr && world.getBodyCount() == 0);
+        root->addChild(node);
+        check("deferred setup: body created when the node joins", rb->getBody() != nullptr && world.getBodyCount() == 1);
+        root->removeChild(node);
+    }
+    {
+        auto world = make_unique<box2d::World>();
+        world->setup(0, 0);
+        auto node = make_shared<Node>();
+        auto* rb = node->addMod<box2d::RigidBody2D>(*world, box2d::Shape2D::circle(10));
+        world.reset();
+        WarningCapture w;
+        root->addChild(node);
+        check("deferred setup: World destroyed before the node joins: no body, one warning",
+              rb->getBody() == nullptr && w.count == 1 && w.lastContains("World was destroyed"));
+        root->removeChild(node);
+    }
+}
 
 int main(int argc, char** argv) {
     if (argc == 2 && string(argv[1]) == "--headless-events") {
@@ -4220,6 +4261,7 @@ int main(int argc, char** argv) {
     testClearKeepsContactListener();
     testAdversarialReview();
     testAdversarialReviewRound2();
+    testDeferredModSetup();
 
     if (g_fail) {
         printf("\n%d check(s) FAILED\n", g_fail);

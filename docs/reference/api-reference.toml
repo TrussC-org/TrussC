@@ -6111,28 +6111,6 @@ details.ko = '''
 '''
 related = ["Event<T>", "EventPriority::BeforeApp", "CoreEvents::keyPressed", "CoreEvents::mousePressed", "CoreEvents::occludedChanged", "Window::isOccluded"]
 
-["CoreEvents::setup"]
-keywords = ["never fired", "not wired", "after setup"]
-description.en = "Meant to fire after setup finishes, but nothing in TrussC ever fires it. Do not rely on it."
-description.ja = "setup が終わった後に発火するはずのイベントだが、TrussC のどこからも発火されない。頼らないこと。"
-description.ko = "setup이 끝난 뒤 발생해야 하는 이벤트지만 TrussC 어디에서도 발생시키지 않는다. 의존하지 말 것."
-details.en = '''
-- To run something after the App's setup, write it at the end of `App::setup()`.
-- The header comment says "After setup completes", but nothing in core, addons or examples fires this event, so its listeners are never called.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (never fired).
-'''
-details.ja = '''
-- App の setup の後に処理を行いたい場合は、`App::setup()` の最後に書いてください。
-- ヘッダのコメントには「After setup completes」とありますが、core・addons・examples のどこからも発火されないため、リスナーは呼ばれません。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（発火しない）。
-'''
-details.ko = '''
-- App의 setup 뒤에 처리를 하고 싶다면 `App::setup()`의 끝에 작성하세요.
-- 헤더 주석에는 "After setup completes"라고 되어 있지만 core, addons, examples 어디에서도 발생시키지 않으므로 리스너는 호출되지 않습니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(발생하지 않음).
-'''
-related = ["Node::setup", "CoreEvents::update", "CoreEvents::exit", "events"]
-
 ["CoreEvents::touchMoved"]
 description.en = "Fired when a touch moves."
 description.ja = "タッチが移動したときに発生する。"
@@ -6213,7 +6191,7 @@ details.ko = '''
 - 업데이트 단계마다 메인 스레드에서 한 번 전달됩니다. 우선순위를 지정하지 않고 등록한 리스너는 App의 `update()`보다 먼저, `EventPriority::AfterApp`으로 등록한 리스너는 App과 자식 노드 다음에 호출됩니다. 첫 단계에서는 우선순위를 지정하지 않은 리스너가 App의 `setup()`보다 먼저 호출될 수 있습니다.
 - 헤드리스 App에서도 고정 단계마다 전달됩니다. 이때는 App 자신의 `update()`만 호출되며 자식 노드는 업데이트되지 않습니다.
 '''
-related = ["Node::update", "CoreEvents::draw", "EventListener", "events", "CoreEvents::setup", "setIndependentFps"]
+related = ["Node::update", "CoreEvents::draw", "EventListener", "events", "setIndependentFps"]
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
 EventListener updateListener;
@@ -18670,31 +18648,46 @@ protected:
 '''
 
 ["Mod::setup"]
-description.en = "Initializes this Mod when it is attached to a node."
-description.ja = "ノードへのアタッチ時にこの Mod を初期化する。"
-description.ko = "노드에 부착할 때 이 Mod를 초기화한다."
+description.en = "Initializes this Mod once its owner node is set up in the running App's tree."
+description.ja = "所有ノードが実行中の App のツリーで setup された後に、この Mod を一度初期化する。"
+description.ko = "소유 노드가 실행 중인 App의 트리에서 setup된 뒤 이 Mod를 한 번 초기화한다."
 details.en = '''
-- Override the protected virtual `void setup()`; `Node::addMod` calls it once immediately after storing the Mod and setting its owner. The default does nothing.
-- `getOwner()` and the owner's `getMod()` are available here, even if the owner's own `Node::setup()` has not run.
+- Override the protected virtual `void setup()`. The default does nothing. It runs once.
+- If the owner is already set up in the running App's tree, `Node::addMod` calls it before returning. Otherwise it runs when the owner joins the tree, right after the owner's own `setup()`.
+- So the owner's `setup()` has always run first, and `getOwner()` and the owner's `getMod()` are available here. A Mod added inside its owner's `setup()` is set up at once.
+- Pass the settings that `setup()` needs as `addMod<T>(args...)` constructor arguments. Settings applied through the returned pointer can come after `setup()`.
 - See `Node::addMod` for shared Mod ownership, threading, replacement, and iteration rules.
 '''
 details.ja = '''
-- protected の仮想関数 `void setup()` をオーバーライドします。`Node::addMod` は Mod を保存して所有ノードを設定した直後に、一度呼びます。標準実装は何もしません。
-- 所有ノード自身の `Node::setup()` がまだ実行されていなくても、ここでは `getOwner()` と所有ノードの `getMod()` を利用できます。
+- protected の仮想関数 `void setup()` をオーバーライドします。標準実装は何もしません。一度だけ呼ばれます。
+- 所有ノードが実行中の App のツリーで setup 済みなら、`Node::addMod` が戻る前に呼びます。そうでなければ、所有ノードがツリーに加わったとき、所有ノード自身の `setup()` の直後に呼びます。
+- そのため、所有ノードの `setup()` は必ず先に実行されており、ここでは `getOwner()` と所有ノードの `getMod()` を利用できます。所有ノードの `setup()` の中で追加した Mod は、その場で setup します。
+- `setup()` で使う設定は、`addMod<T>(args...)` のコンストラクタ引数で渡してください。戻り値のポインタで行う設定は、`setup()` の後になる場合があります。
 - Mod 共通の所有関係、スレッド、置き換え、処理順の規則は `Node::addMod` を参照してください。
 '''
 details.ko = '''
-- protected 가상 함수 `void setup()`을 재정의합니다. `Node::addMod`는 Mod를 저장하고 소유 노드를 설정한 직후 한 번 호출합니다. 기본 구현은 아무 작업도 하지 않습니다.
-- 소유 노드 자체의 `Node::setup()`이 아직 실행되지 않았어도 여기서는 `getOwner()`와 소유 노드의 `getMod()`를 사용할 수 있습니다.
+- protected 가상 함수 `void setup()`을 재정의합니다. 기본 구현은 아무 작업도 하지 않습니다. 한 번만 호출합니다.
+- 소유 노드가 실행 중인 App의 트리에서 이미 setup되었다면 `Node::addMod`가 반환되기 전에 호출합니다. 그렇지 않으면 소유 노드가 트리에 들어갈 때 소유 노드 자체의 `setup()` 직후에 호출합니다.
+- 따라서 소유 노드의 `setup()`은 항상 먼저 실행되며, 여기서는 `getOwner()`와 소유 노드의 `getMod()`를 사용할 수 있습니다. 소유 노드의 `setup()` 안에서 추가한 Mod는 그 자리에서 setup합니다.
+- `setup()`에 필요한 설정은 `addMod<T>(args...)`의 생성자 인수로 전달하세요. 반환된 포인터로 하는 설정은 `setup()` 이후가 될 수 있습니다.
 - Mod 공통 소유 관계, 스레드, 교체, 순회 규칙은 `Node::addMod`를 참조하세요.
 '''
 snippet = '''
-class Ball : public Mod {
+class Spinner : public Mod {
+public:
+    explicit Spinner(float startAngle) : startAngle(startAngle) {}
+    float startAngle;
 protected:
     void setup() override {
-        getOwner()->enableEvents();
+        getOwner()->setRot(startAngle);   // the owner is already set up
     }
 };
+
+void tcApp::setup() {
+    auto box = make_shared<RectNode>();
+    addChild(box);                  // box is set up here
+    box->addMod<Spinner>(TAU / 8);  // Spinner::setup() runs here
+}
 '''
 
 ["Mod::update"]
@@ -19691,7 +19684,7 @@ details.en = '''
 - This C++ class provides a transform hierarchy, lifecycle callbacks, input handlers, and attachable Mods; see `Node::addMod` and `Node::onMousePress` for those features.
 - Create nodes with `make_shared<Node>()` or `make_shared<YourNode>()`. `NodePtr` and `Node::Ptr` are aliases for `shared_ptr<Node>`; parents own their children through shared pointers, while each child holds a weak pointer to its parent.
 - Add children from `setup()` or later, after the parent is owned by a shared pointer. Adding children from the parent's constructor fails an assertion in debug builds because shared ownership is not ready.
-- Adding a node does not call its `setup()` immediately. The framework calls it once when the node first reaches an active update or draw traversal; see `Node::setup`, `Node::update`, `Node::draw`, and `Node::cleanup` for lifecycle behavior.
+- Adding a node to the running App's tree calls its `setup()` once, right away, so configure the node before `addChild()`. A node in a subtree that is not in the tree yet is set up when the subtree is attached. See `Node::setup`, `Node::update`, `Node::draw`, and `Node::cleanup` for lifecycle behavior.
 - See `Node::addChild` for tree changes, `Node::setPos`, `Node::setRot`, and `Node::setScale` for local transforms, `Node::localToGlobal` for coordinate conversion, and `Node::setActive` for active and visible states.
 - Setting a parent's Z scale to zero for a flat UI prevents all its children from being clicked. Mouse picking requires an invertible local matrix at every node it traverses; a zero scale on any axis makes that matrix singular, so the node and its entire subtree are skipped.
 - The reflected `rotation` value is Euler X/Y/Z in radians; `rotationDeg` exposes the same rotation in degrees. Both can be read and edited through MCP and the inspector, and `rotation` takes precedence when both are written together.
@@ -19701,7 +19694,7 @@ details.ja = '''
 - この C++ クラスは、変換の親子階層、ライフサイクルのコールバック、入力ハンドラー、取り付け可能な Mod を提供します。Mod と入力処理については `Node::addMod` と `Node::onMousePress` を参照してください。
 - ノードは `make_shared<Node>()` または `make_shared<YourNode>()` で作成してください。`NodePtr` と `Node::Ptr` は `shared_ptr<Node>` の別名です。親は共有ポインタで子を所有し、各子は親への弱参照を保持します。
 - 子の追加は、親が共有ポインタで所有された後の `setup()` 以降に行ってください。親のコンストラクター内では共有所有権の準備ができていないため、子を追加するとデバッグビルドでアサーションに失敗します。
-- ノードを追加しても、その `setup()` は即座には呼ばれません。フレームワークは、そのノードが有効な update または draw の走査で初めて処理されるときに一度だけ呼びます。ライフサイクルの動作は `Node::setup`、`Node::update`、`Node::draw`、`Node::cleanup` を参照してください。
+- 実行中の App のツリーにノードを追加すると、その場で `setup()` を一度呼びます。そのため、ノードの設定は `addChild()` の前に行ってください。まだツリーに入っていないサブツリーのノードは、そのサブツリーを追加したときに setup します。ライフサイクルの動作は `Node::setup`、`Node::update`、`Node::draw`、`Node::cleanup` を参照してください。
 - ツリーの変更は `Node::addChild`、ローカル変換は `Node::setPos`、`Node::setRot`、`Node::setScale`、座標変換は `Node::localToGlobal`、有効・表示状態は `Node::setActive` を参照してください。
 - 平面的な UI にするために親の Z スケールをゼロにすると、その子はすべてクリックできなくなります。マウスでの選択判定には、走査する各ノードのローカル行列に逆行列が必要です。いずれかの軸のスケールがゼロだと逆行列を作れないため、そのノードとすべての子孫が判定から除外されます。
 - リフレクションの `rotation` 値は、ラジアン単位の X/Y/Z のオイラー角です。`rotationDeg` は同じ回転を度単位で表します。どちらも MCP とインスペクタで読み書きでき、両方を同時に書き込む場合は `rotation` が優先されます。
@@ -19711,7 +19704,7 @@ details.ko = '''
 - 이 C++ 클래스는 변환의 부모·자식 계층, 수명 주기 콜백, 입력 핸들러, 부착 가능한 Mod를 제공합니다. Mod와 입력 처리는 `Node::addMod`와 `Node::onMousePress`를 참조하세요.
 - 노드는 `make_shared<Node>()` 또는 `make_shared<YourNode>()`로 만드세요. `NodePtr`와 `Node::Ptr`는 `shared_ptr<Node>`의 별칭입니다. 부모는 공유 포인터로 자식을 소유하며 각 자식은 부모에 대한 약한 참조를 보관합니다.
 - 자식은 부모가 공유 포인터로 소유된 뒤인 `setup()` 이후에 추가하세요. 부모의 생성자에서는 공유 소유권이 아직 준비되지 않았으므로 자식을 추가하면 디버그 빌드에서 어설션에 실패합니다.
-- 노드를 추가해도 해당 노드의 `setup()`은 즉시 호출되지 않습니다. 프레임워크는 해당 노드가 활성 update 또는 draw 순회에서 처음 처리될 때 한 번만 호출합니다. 수명 주기 동작은 `Node::setup`, `Node::update`, `Node::draw`, `Node::cleanup`을 참조하세요.
+- 실행 중인 App의 트리에 노드를 추가하면 그 자리에서 `setup()`을 한 번 호출합니다. 따라서 노드 설정은 `addChild()` 전에 하세요. 아직 트리에 들어가지 않은 하위 트리의 노드는 그 하위 트리를 추가할 때 setup합니다. 수명 주기 동작은 `Node::setup`, `Node::update`, `Node::draw`, `Node::cleanup`을 참조하세요.
 - 트리 변경은 `Node::addChild`를, 로컬 변환은 `Node::setPos`, `Node::setRot`, `Node::setScale`을, 좌표 변환은 `Node::localToGlobal`을, 활성 및 표시 상태는 `Node::setActive`를 참조하세요.
 - 평면 UI를 만들려고 부모의 Z 배율을 0으로 설정하면 모든 자식을 클릭할 수 없게 됩니다. 마우스 선택 판정에는 순회하는 모든 노드의 로컬 행렬에 역행렬이 필요합니다. 어느 축이든 배율이 0이면 역행렬을 만들 수 없으므로 해당 노드와 모든 자손을 판정에서 제외합니다.
 - 리플렉션의 `rotation` 값은 라디안 단위의 X/Y/Z 오일러 각도입니다. `rotationDeg`는 같은 회전을 도 단위로 나타냅니다. 둘 다 MCP와 인스펙터에서 읽고 쓸 수 있으며 동시에 쓰면 `rotation`이 우선합니다.
@@ -19736,9 +19729,10 @@ details.en = '''
 - `addChild(Ptr child, bool keepGlobalPosition = false)` immediately appends the child to this node's list. The default traversal draws children in list order, so later children appear in front in ordinary 2D drawing.
 - An existing parent first removes the child and receives `onChildRemoved`; the new parent then receives `onChildAdded`. Adding an existing child to the same parent moves it to the end and calls both callbacks.
 - By default, the child's local position, rotation, and scale remain unchanged. With `keepGlobalPosition = true`, the previous global origin is converted to the new parent's local space, but only local X and Y are replaced; local Z, rotation, and scale remain unchanged, so the full global transform is not preserved.
-- A null child or this node itself is ignored, and no status is returned. Ancestor cycles are not checked; do not add an ancestor as a child. See `Node` for shared ownership and setup timing.
+- A null child or this node itself is ignored, and no status is returned. Ancestor cycles are not checked; do not add an ancestor as a child. See `Node` for shared ownership.
+- If this node is already set up in the running App's tree, the child and its subtree are set up before `addChild()` returns, after `onChildAdded`. Configure the child before calling `addChild()`; see `Node::setup`.
 - Each update traversal copies the child list after the parent's timers, `update()`, and Mod updates; the default draw traversal copies it after the parent's `draw()` and Mod drawing. Changes made before that copy affect the same traversal.
-- Changes made while visiting children immediately affect the live list but leave the existing copy unchanged. Added children wait for a later copy; removed or reparented children can still be visited through the earlier copy, while dead children are skipped.
+- Changes made while visiting children immediately affect the live list but leave the existing copy unchanged. Added children wait for a later copy; children that were removed, moved to another parent, or destroyed since the copy are skipped.
 - Update and draw take separate copies, so an update change can affect drawing in the same frame. Reparenting under a parent visited later can also cause another visit in the same update or draw traversal.
 - `removeChild()` and `removeAllChildren()` detach nodes without marking them dead or calling `cleanup()`. `destroy()` marks a node dead immediately; its parent removes it and cleans up its subtree when the parent's next active update traversal begins.
 - Perform structural changes on the main thread; debug builds assert this requirement. Use `runOnMainThread()` to request changes from another thread; `destroy()` alone can be called from any thread.
@@ -19747,9 +19741,10 @@ details.ja = '''
 - `addChild(Ptr child, bool keepGlobalPosition = false)` は、このノードの子リストの末尾に子を即座に追加します。標準の走査ではリスト順に描画するため、通常の 2D 描画では後ろの子ほど手前に表示されます。
 - 既存の親がある場合は、まずその親から子を外して `onChildRemoved` を呼び、その後、新しい親の `onChildAdded` を呼びます。同じ親に既存の子を追加すると末尾へ移動し、両方のコールバックを呼びます。
 - 既定では、子のローカル位置、回転、スケールは変わりません。`keepGlobalPosition = true` では、移動前のグローバル原点を新しい親のローカル座標に変換しますが、置き換えるのはローカル X、Y だけです。ローカル Z、回転、スケールは変わらないため、グローバル変換全体は保持されません。
-- 子が null またはこのノード自身なら何もせず、結果を示す値は返しません。祖先との循環は検査しないため、祖先を子として追加しないでください。共有所有権と setup のタイミングは `Node` を参照してください。
+- 子が null またはこのノード自身なら何もせず、結果を示す値は返しません。祖先との循環は検査しないため、祖先を子として追加しないでください。共有所有権は `Node` を参照してください。
+- このノードが実行中の App のツリーで setup 済みなら、`onChildAdded` の後、`addChild()` が戻る前に、子とそのサブツリーを setup します。子の設定は `addChild()` の前に行ってください。`Node::setup` を参照してください。
 - update の走査では、親のタイマー、`update()`、Mod の更新が終わった後に子リストをコピーします。標準の draw の走査では、親の `draw()` と Mod の描画が終わった後にコピーします。コピー前の変更は、その走査に反映されます。
-- 子を走査している間の変更は実際のリストには即座に反映されますが、既存のコピーは変わりません。追加した子は次のコピーを使う走査まで待ちます。外した子や親を変更した子も以前のコピーから処理される場合がありますが、削除予約済みの子はスキップします。
+- 子を走査している間の変更は実際のリストには即座に反映されますが、既存のコピーは変わりません。追加した子は次のコピーを使う走査まで待ちます。コピーの後に外した子、親を変更した子、削除予約した子はスキップします。
 - update と draw は別々にコピーするため、update 中の変更が同じフレームの描画に反映される場合があります。後で走査される親へ移すと、同じ update または draw の走査中に再び処理される場合もあります。
 - `removeChild()` と `removeAllChildren()` は、削除予約や `cleanup()` の呼び出しをせずにノードを外します。`destroy()` は即座に削除予約し、親の次の有効な update 走査の開始時に、親がそのノードを外してサブツリーをクリーンアップします。
 - ツリー構造の変更はメインスレッドで行ってください。デバッグビルドではこの条件をアサートします。別スレッドから変更を依頼する場合は `runOnMainThread()` を使ってください。`destroy()` だけは任意のスレッドから呼び出せます。
@@ -19758,9 +19753,10 @@ details.ko = '''
 - `addChild(Ptr child, bool keepGlobalPosition = false)`는 이 노드의 자식 목록 끝에 자식을 즉시 추가합니다. 기본 순회는 목록 순서대로 그리므로 일반적인 2D 그리기에서는 뒤쪽 자식이 앞에 표시됩니다.
 - 기존 부모가 있으면 먼저 그 부모에서 자식을 분리하고 `onChildRemoved`를 호출한 다음 새 부모의 `onChildAdded`를 호출합니다. 같은 부모에 기존 자식을 추가하면 끝으로 이동하며 두 콜백을 모두 호출합니다.
 - 기본적으로 자식의 로컬 위치, 회전, 크기 배율은 바뀌지 않습니다. `keepGlobalPosition = true`이면 이전 전역 원점을 새 부모의 로컬 좌표로 변환하지만 로컬 X와 Y만 바꿉니다. 로컬 Z, 회전, 크기 배율은 유지하므로 전역 변환 전체를 보존하지는 않습니다.
-- 자식이 null이거나 이 노드 자신이면 아무 작업도 하지 않으며 상태 값을 반환하지 않습니다. 조상과의 순환은 검사하지 않으므로 조상을 자식으로 추가하지 마세요. 공유 소유권과 setup 시점은 `Node`를 참조하세요.
+- 자식이 null이거나 이 노드 자신이면 아무 작업도 하지 않으며 상태 값을 반환하지 않습니다. 조상과의 순환은 검사하지 않으므로 조상을 자식으로 추가하지 마세요. 공유 소유권은 `Node`를 참조하세요.
+- 이 노드가 실행 중인 App의 트리에서 이미 setup되었다면 `onChildAdded` 다음, `addChild()`가 반환되기 전에 자식과 그 하위 트리를 setup합니다. 자식 설정은 `addChild()` 전에 하세요. `Node::setup`을 참조하세요.
 - update 순회는 부모의 타이머, `update()`, Mod 업데이트가 끝난 뒤 자식 목록을 복사합니다. 기본 draw 순회는 부모의 `draw()`와 Mod 그리기가 끝난 뒤 복사합니다. 복사 전에 한 변경은 같은 순회에 반영됩니다.
-- 자식을 순회하는 동안 한 변경은 실제 목록에 즉시 반영되지만 기존 복사본은 바뀌지 않습니다. 추가한 자식은 다음 복사본을 사용하는 순회까지 기다립니다. 분리하거나 부모를 바꾼 자식도 이전 복사본을 통해 처리될 수 있지만 제거 대상으로 표시된 자식은 건너뜁니다.
+- 자식을 순회하는 동안 한 변경은 실제 목록에 즉시 반영되지만 기존 복사본은 바뀌지 않습니다. 추가한 자식은 다음 복사본을 사용하는 순회까지 기다립니다. 복사 후에 분리하거나 부모를 바꾸거나 제거 대상으로 표시한 자식은 건너뜁니다.
 - update와 draw는 각각 복사하므로 update 중의 변경이 같은 프레임의 그리기에 반영될 수 있습니다. 나중에 순회하는 부모로 옮기면 같은 update 또는 draw 순회에서 다시 처리될 수도 있습니다.
 - `removeChild()`와 `removeAllChildren()`은 제거 대상으로 표시하거나 `cleanup()`을 호출하지 않고 노드를 분리합니다. `destroy()`는 노드를 즉시 제거 대상으로 표시하며, 부모의 다음 활성 update 순회가 시작될 때 부모가 해당 노드를 분리하고 하위 트리를 정리합니다.
 - 트리 구조는 메인 스레드에서 변경해야 하며 디버그 빌드에서는 이 조건을 검사합니다. 다른 스레드에서는 `runOnMainThread()`로 변경을 요청하세요. `destroy()`만은 어느 스레드에서나 호출할 수 있습니다.
@@ -20054,7 +20050,7 @@ details.en = '''
 - `destroy()` only marks the node. `cleanup()` runs when the parent is next updated and removes the node. If the parent is inactive or not being updated, it waits until the parent is updated again.
 - Children are cleaned up before their parent.
 - `removeChild()` / `removeAllChildren()` do not call `cleanup()`. They only detach the node.
-- It can run even if `setup()` never ran (the node was destroyed before it was first updated or drawn), so do not assume that what `setup()` creates is there.
+- It can run even if `setup()` never ran (for example, an App that ends before its first update), so do not assume that what `setup()` creates is there.
 - Before `cleanup()` runs, the node is marked dead, its async timers are cancelled, and it is no longer treated as the hovered, grabbed or selected node.
 - When an App ends, `cleanup()` runs after `App::exit()`, on the child nodes first and then on the App. In a headless App, only the App's own `cleanup()` runs. Audio is disconnected before this, so you can release audio state here. For the whole order, see `App::exit`.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (in a headless App, child nodes get no `cleanup()` at app exit).
@@ -20065,7 +20061,7 @@ details.ja = '''
 - `destroy()` は印を付けるだけです。`cleanup()` は、親が次に update されてそのノードを片付けるときに実行されます。親が非アクティブであったり update されていなかったりする場合は、親が再び update されるまで待ちます。
 - 子の cleanup が親より先に実行されます。
 - `removeChild()` / `removeAllChildren()` は `cleanup()` を呼びません。ノードを切り離すだけです。
-- `setup()` が一度も実行されていないノード（最初に update か draw される前に destroy されたもの）でも呼ばれることがあります。`setup()` で作ったものが存在するとは想定しないでください。
+- `setup()` が一度も実行されていないノード（例えば、最初の update の前に終わった App）でも呼ばれることがあります。`setup()` で作ったものが存在するとは想定しないでください。
 - `cleanup()` の前に、ノードは dead として扱われ、非同期タイマーはキャンセルされ、hover・grab・選択中のノードとしても扱われなくなります。
 - App が終わるときは、`App::exit()` のあとに、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App では App 自身の `cleanup()` だけが呼ばれます。その前にオーディオは切り離されているため、オーディオ関係の後片付けをここで行えます。全体の順番は `App::exit` を参照してください。
 - 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレス App では、終了時に子ノードの `cleanup()` が呼ばれません）。
@@ -20076,7 +20072,7 @@ details.ko = '''
 - `destroy()`는 표시만 합니다. `cleanup()`은 부모가 다음에 update되면서 그 노드를 정리할 때 실행됩니다. 부모가 비활성이거나 update되지 않고 있으면 부모가 다시 update될 때까지 기다립니다.
 - 자식의 cleanup이 부모보다 먼저 실행됩니다.
 - `removeChild()` / `removeAllChildren()`은 `cleanup()`을 호출하지 않습니다. 노드를 떼어내기만 합니다.
-- `setup()`이 한 번도 실행되지 않은 노드(처음 update 또는 draw되기 전에 destroy된 노드)에서도 호출될 수 있습니다. `setup()`에서 만든 것이 있다고 가정하지 마세요.
+- `setup()`이 한 번도 실행되지 않은 노드(예: 처음 update되기 전에 끝난 App)에서도 호출될 수 있습니다. `setup()`에서 만든 것이 있다고 가정하지 마세요.
 - `cleanup()` 전에 노드는 dead로 표시되고, 비동기 타이머가 취소되며, hover·grab·선택 중인 노드로도 더 이상 다뤄지지 않습니다.
 - App이 끝날 때는 `App::exit()` 다음에 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서는 App 자신의 `cleanup()`만 호출됩니다. 그전에 오디오가 분리되므로, 여기서 오디오 관련 정리를 할 수 있습니다. 전체 순서는 `App::exit`를 참조하세요.
 - 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 App에서는 종료 시 자식 노드의 `cleanup()`이 호출되지 않습니다).
@@ -20321,7 +20317,7 @@ description.ja = "型 T の Mod を生成して取り付ける。"
 description.ko = "타입 T의 Mod를 생성하여 부착한다."
 details.en = '''
 - Call `addMod<T>(args...)` with a Mod subclass; arguments are forwarded to its constructor. Returns `T*` for further configuration. The node owns the Mod; the returned pointer does not transfer ownership.
-- Sets the owner and stores the Mod before immediately calling its `setup()`, regardless of whether the node's own `setup()` has run. The Mod can therefore use its owner to call `getMod()` or `addChild()` from `setup()`.
+- Sets the owner and stores the Mod. If this node is already set up in the running App's tree, the Mod's `setup()` runs before `addMod` returns; otherwise it runs when the node joins the tree, right after the node's own `setup()`. Pass settings as constructor arguments so `setup()` sees them; see `Mod::setup`.
 - Only one Mod is stored per exact C++ type. Adding that type again destroys and replaces the previous instance without calling its `onDestroy()`; its old pointers become invalid. Attachment does not check `isExclusive()` or `canAttachTo()`.
 - During an active node's update, Mods run `earlyUpdate()` before frame timers and `Node::update()`, then `update()` afterward. During drawing, their `draw()` runs after the node's own `draw()` in the same local coordinates. Visibility and activity follow `Node::setActive`.
 - Mod iteration order is unspecified. Each update, draw, or event pass takes a snapshot of attached types; a newly added type is visited on a later pass.
@@ -20330,7 +20326,7 @@ details.en = '''
 '''
 details.ja = '''
 - Mod の派生クラスを指定して `addMod<T>(args...)` と呼びます。引数はコンストラクタへそのまま渡します。追加の設定に使える `T*` を返します。Mod はノードが所有し、戻り値のポインタに所有権は移りません。
-- 所有ノードを設定して Mod を保存したあと、ノード自身の `setup()` が実行済みかどうかにかかわらず、Mod の `setup()` を直ちに呼びます。そのため、Mod の `setup()` から所有ノードの `getMod()` や `addChild()` を呼べます。
+- 所有ノードを設定して Mod を保存します。このノードが実行中の App のツリーで setup 済みなら、`addMod` が戻る前に Mod の `setup()` を呼びます。そうでなければ、ノードがツリーに加わったとき、ノード自身の `setup()` の直後に呼びます。`setup()` で使う設定はコンストラクタの引数で渡してください。`Mod::setup` を参照してください。
 - 同じ C++ の型の Mod は 1 個だけ保持します。同じ型を再び追加すると、以前のインスタンスを `onDestroy()` を呼ばずに破棄して置き換え、以前のポインタは無効になります。取り付け時に `isExclusive()` や `canAttachTo()` は確認しません。
 - アクティブなノードの更新では、フレームタイマーと `Node::update()` より前に Mod の `earlyUpdate()`、そのあとに `update()` を呼びます。描画では、ノード自身の `draw()` のあとに、同じローカル座標で Mod の `draw()` を呼びます。表示状態とアクティブ状態の扱いは `Node::setActive` に従います。
 - Mod を処理する順番は未規定です。更新、描画、イベントの各処理は開始時の型の一覧を使うため、新しく追加した型は後の処理から対象になります。
@@ -20339,7 +20335,7 @@ details.ja = '''
 '''
 details.ko = '''
 - Mod 파생 클래스를 지정하여 `addMod<T>(args...)`로 호출합니다. 인자는 생성자로 그대로 전달합니다. 추가 설정에 사용할 수 있는 `T*`를 반환합니다. Mod는 노드가 소유하며 반환 포인터로 소유권이 이전되지 않습니다.
-- 소유 노드를 설정하고 Mod를 저장한 뒤, 노드 자체의 `setup()` 실행 여부와 관계없이 Mod의 `setup()`을 즉시 호출합니다. 따라서 Mod의 `setup()`에서 소유 노드의 `getMod()`이나 `addChild()`를 호출할 수 있습니다.
+- 소유 노드를 설정하고 Mod를 저장합니다. 이 노드가 실행 중인 App의 트리에서 이미 setup되었다면 `addMod`가 반환되기 전에 Mod의 `setup()`을 호출합니다. 그렇지 않으면 노드가 트리에 들어갈 때 노드 자체의 `setup()` 직후에 호출합니다. `setup()`에서 사용할 설정은 생성자 인수로 전달하세요. `Mod::setup`을 참조하세요.
 - 정확히 같은 C++ 타입의 Mod는 하나만 저장합니다. 같은 타입을 다시 추가하면 이전 인스턴스를 `onDestroy()` 호출 없이 소멸시키고 교체하며 이전 포인터는 무효가 됩니다. 부착 시 `isExclusive()`나 `canAttachTo()`는 확인하지 않습니다.
 - 활성 노드의 업데이트에서는 프레임 타이머와 `Node::update()` 전에 Mod의 `earlyUpdate()`를 호출하고 그 뒤에 `update()`를 호출합니다. 그리기에서는 노드 자체의 `draw()` 뒤에 같은 로컬 좌표에서 Mod의 `draw()`를 호출합니다. 표시 상태와 활성 상태는 `Node::setActive` 규칙을 따릅니다.
 - Mod 처리 순서는 정해져 있지 않습니다. 업데이트, 그리기, 이벤트의 각 처리에서는 시작 시점의 타입 목록을 사용하므로 새로 추가한 타입은 이후 처리부터 방문합니다.
@@ -22003,44 +21999,59 @@ related = ["Node::getZ", "Node::setPos"]
 
 ["Node::setup"]
 category = "lifecycle"
-keywords = ["init", "start", "load", "first frame", "constructor", "initialize", "once", "addChild", "weak_from_this"]
-description.en = "Called once, just before the node is first updated or drawn. Build child nodes and timers here."
-description.ja = "ノードが最初に update か draw される直前に、一度だけ呼ばれる。子ノードやタイマーはここで作る。"
-description.ko = "노드가 처음 update 또는 draw되기 직전에 한 번만 호출된다. 자식 노드와 타이머는 여기서 만든다."
+keywords = ["init", "start", "load", "first frame", "constructor", "initialize", "once", "addChild", "weak_from_this", "join tree"]
+description.en = "Called once, when the node joins the running App's tree. Build child nodes and timers here."
+description.ja = "ノードが実行中の App のツリーに加わったときに、一度だけ呼ばれる。子ノードやタイマーはここで作る。"
+description.ko = "노드가 실행 중인 App의 트리에 들어갈 때 한 번만 호출된다. 자식 노드와 타이머는 여기서 만든다."
 details.en = '''
-- It is not called when you construct the node or call `addChild()`. It runs the first time the node is updated or drawn, whichever comes first, and it never runs more than once per node.
+- It runs inside `addChild()` / `insertChild()` when the new parent is already set up in the running App's tree. A node never runs it more than once, even if it is removed and added again.
+- **Configure a node before `addChild()`, or in its constructor.** Values you set after `addChild()` returns are not there yet when `setup()` runs.
+- A subtree built while it is not in the tree is set up as a whole when it is attached: parents before children, in child order, and each node's Mods right after the node.
+- The App is set up on its first update or draw after it becomes a window's root (`runApp()`, `Window::setApp()`, `runHeadlessApp()`). Children added to it before that are set up right after its `setup()`; children it adds inside `setup()` are set up at once.
 - **Do not call `addChild()` in the constructor.** `weak_from_this()` is still empty at that point, so the call stops on an assert. Put `addChild`, `addMod` and `callEvery` in `setup()`, and limit the constructor to setting plain values.
-- On each update, the order is: remove destroyed children, `setup()` (first time only), the mods' `earlyUpdate`, timers, and then `update()`.
 - For an App, the data path root is already set before `setup()`, and `audioOut()` / `audioIn()` are connected only after `setup()` returns. For the whole App flow, see `App`.
-- An inactive node (`setActive(false)`) is not set up until it becomes active and the tree processing reaches it.
-- A child that you add inside a parent's `update()` is not updated in that frame, because the parent walks a copy of its child list. If that frame is drawn, the child's `setup()` runs when the child is first drawn.
+- An inactive node (`setActive(false)`) is also set up when it joins.
+- Every node that gets `update()` has been set up. A child added inside a parent's `update()` is set up inside `addChild()`, and is first updated in the next frame, because the parent walks a copy of its child list.
 '''
 details.ja = '''
-- ノードを作成したときや `addChild()` したときには呼ばれません。そのノードが最初に update または draw されるとき（どちらか早い方）に実行され、1 つのノードにつき一度しか呼ばれません。
+- 新しい親が実行中の App のツリーで setup 済みなら、`addChild()` / `insertChild()` の中で実行されます。ノードを外して再び追加しても、1 つのノードにつき一度しか呼ばれません。
+- **ノードの設定は `addChild()` の前か、コンストラクタで行ってください。** `addChild()` が戻った後に設定した値は、`setup()` の実行時にはまだ入っていません。
+- ツリーの外で組み立てたサブツリーは、追加したときにまとめて setup します。親が子より先、子は並び順で、各ノードの Mod はそのノードの直後です。
+- App は、ウィンドウのルートになった後（`runApp()`、`Window::setApp()`、`runHeadlessApp()`）の最初の update か draw で setup します。それより前に App に追加した子は、App の `setup()` の直後に setup します。App が `setup()` の中で追加した子は、その場で setup します。
 - **コンストラクタでは `addChild()` を呼ばないでください。** コンストラクタの時点では `weak_from_this()` がまだ空のため、assert で停止します。`addChild` / `addMod` / `callEvery` は `setup()` に書き、コンストラクタでは単純な値の初期化だけを行ってください。
-- update のたびの処理順は、destroy された子の片付け、`setup()`（初回のみ）、mod の `earlyUpdate`、タイマー、`update()` の順です。
 - App の場合、`setup()` の前に data path のルートは設定済みです。`audioOut()` / `audioIn()` が接続されるのは `setup()` が戻った後です。App 全体の流れについては `App` を参照してください。
-- 非アクティブなノード（`setActive(false)`）は、アクティブになり、ツリーの処理がそのノードに届くまで setup されません。
-- 親の `update()` の中で追加した子は、そのフレームでは update されません。親は子のリストのコピーを順に処理しているためです。そのフレームが描画される場合、子の `setup()` は最初に描画されるときに呼ばれます。
+- 非アクティブなノード（`setActive(false)`）も、ツリーに加わったときに setup します。
+- `update()` が呼ばれるノードは、すべて setup 済みです。親の `update()` の中で追加した子は `addChild()` の中で setup し、最初の update は次のフレームです。親は子のリストのコピーを順に処理しているためです。
 '''
 details.ko = '''
-- 노드를 만들 때나 `addChild()`할 때는 호출되지 않습니다. 그 노드가 처음 update 또는 draw될 때(먼저 오는 쪽) 실행되며, 노드마다 한 번만 호출됩니다.
+- 새 부모가 실행 중인 App의 트리에서 이미 setup되었다면 `addChild()` / `insertChild()` 안에서 실행됩니다. 노드를 분리했다가 다시 추가해도 노드마다 한 번만 호출됩니다.
+- **노드 설정은 `addChild()` 전이나 생성자에서 하세요.** `addChild()`가 반환된 뒤에 설정한 값은 `setup()`이 실행될 때 아직 들어 있지 않습니다.
+- 트리 밖에서 만든 하위 트리는 추가할 때 한꺼번에 setup합니다. 부모가 자식보다 먼저, 자식은 목록 순서대로, 각 노드의 Mod는 그 노드 바로 다음입니다.
+- App은 윈도우의 루트가 된 뒤(`runApp()`, `Window::setApp()`, `runHeadlessApp()`) 처음 update 또는 draw될 때 setup합니다. 그 전에 App에 추가한 자식은 App의 `setup()` 직후에 setup합니다. App이 `setup()` 안에서 추가한 자식은 그 자리에서 setup합니다.
 - **생성자에서는 `addChild()`를 호출하지 마세요.** 생성자 시점에는 `weak_from_this()`가 아직 비어 있으므로 assert로 멈춥니다. `addChild` / `addMod` / `callEvery`는 `setup()`에 작성하고, 생성자에서는 단순한 값 초기화만 하세요.
-- update마다의 처리 순서는 destroy된 자식 정리, `setup()`(처음만), mod의 `earlyUpdate`, 타이머, `update()` 순입니다.
 - App의 경우 `setup()` 전에 data path 루트가 이미 설정되어 있습니다. `audioOut()` / `audioIn()`이 연결되는 것은 `setup()`이 반환된 뒤입니다. App 전체 흐름은 `App`을 참고하세요.
-- 비활성 노드(`setActive(false)`)는 활성화되고 트리 처리가 그 노드에 닿을 때까지 setup되지 않습니다.
-- 부모의 `update()` 안에서 추가한 자식은 그 프레임에 update되지 않습니다. 부모가 자식 목록의 복사본을 순서대로 처리하기 때문입니다. 그 프레임이 그려지는 경우, 자식의 `setup()`은 처음 그려질 때 호출됩니다.
+- 비활성 노드(`setActive(false)`)도 트리에 들어갈 때 setup합니다.
+- `update()`가 호출되는 노드는 모두 setup된 상태입니다. 부모의 `update()` 안에서 추가한 자식은 `addChild()` 안에서 setup하며, 처음 update되는 것은 다음 프레임입니다. 부모가 자식 목록의 복사본을 순서대로 처리하기 때문입니다.
 '''
-related = ["Node::update", "Node::draw", "Node::cleanup", "Node::addChild", "Node::setActive", "App"]
+related = ["Node::update", "Node::draw", "Node::cleanup", "Node::addChild", "Node::addMod", "Mod::setup", "Node::setActive", "App"]
 snippet = '''
 // Ball.h (inside class Ball : public Node)
+float radius = 10;
 void setup() override;
 RectNode::Ptr label;
 
 // Ball.cpp
 void Ball::setup() {
     label = make_shared<RectNode>();
+    label->setSize(radius * 2, radius * 2);
     addChild(label);   // safe here; asserts in the constructor
+}
+
+// tcApp.cpp
+void tcApp::setup() {
+    auto ball = make_shared<Ball>();
+    ball->radius = 30;   // configure before addChild
+    addChild(ball);      // Ball::setup() runs here
 }
 '''
 

@@ -114,7 +114,7 @@ void coreFamilies() {
     APP_EVENT(windowResized); APP_EVENT(filesDropped);
 #undef APP_EVENT
 #define OTHER_EVENT(name) family(hub.name, 100, "CoreEvents::" #name " defaults to 100")
-    OTHER_EVENT(setup); OTHER_EVENT(onRender); OTHER_EVENT(afterFrame);
+    OTHER_EVENT(onRender); OTHER_EVENT(afterFrame);
     OTHER_EVENT(closeRequested); OTHER_EVENT(hotReloadUnload); OTHER_EVENT(exitRequested); OTHER_EVENT(deviceLost);
     OTHER_EVENT(clipboardPasted);  OTHER_EVENT(rawEvent);
 #undef OTHER_EVENT

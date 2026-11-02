@@ -408,9 +408,9 @@ public:
 namespace internal {
 // Subscribe the App's audioOut / audioIn hooks to the AudioEngine. Runs once,
 // from App::onSetupDone(), right after the App's first setup() has returned:
-// Node::setupOnce() runs both on the first updateTree() / drawTree() (the
-// main App, a secondary window's App, every hot reload generation), and
-// runHeadlessApp() through internal::setupNodeOnce(). So the audio thread
+// internal::setupNodeOnce() runs it on the App's first update or draw (the
+// main App, a secondary window's App, every hot reload generation) and in
+// runHeadlessApp(). So the audio thread
 // never runs them before or during setup(). They run at appAudioPriority,
 // ahead of the default-priority listeners setup() may have subscribed first,
 // as when the App constructor subscribed them. Idempotent (a hook already

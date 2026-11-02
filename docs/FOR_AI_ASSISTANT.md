@@ -1226,11 +1226,11 @@ Every Window keeps stable App event slots installed before construction. BeforeA
 TrussC's app structure is openFrameworks-like on the surface but **Unity-like** in intent — Node subclasses (≈ GameObjects, owning their own state/draw/input) with Mods (≈ Components, cross-cutting behavior) attached. The rule:
 - **"What it *is*" (identity) → subclass Node.** Buttons, enemies, panels.
 - **"What it *can also do*" (capability) → Mod.** Animation, layout, drag-to-move — especially if unrelated node types want it.
-If you start copy-pasting the same block into two nodes' `update()`, that block wants to be a Mod. `addMod<T>()` runs `setup()` synchronously and returns `T*` (chainable: `node->addMod<LayoutMod>()->setPadding(5)`). Look up with `getMod<T>()`, detach with `removeMod<T>()`.
+If you start copy-pasting the same block into two nodes' `update()`, that block wants to be a Mod. `addMod<T>(args...)` returns `T*` (chainable: `node->addMod<LayoutMod>()->setPadding(5)`); the Mod's `setup()` runs once its node is set up in the App's tree (inside `addMod` if it already is), so pass what `setup()` needs as constructor arguments. Look up with `getMod<T>()`, detach with `removeMod<T>()`.
 
 ### Constructor vs setup() in a Node? (common trap)
 
-Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it's auto-deferred to just before the node's first update/draw (safe even when added mid-frame). Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). The App is a Node too, with two App-specific points: in its constructor (before a `shared_ptr` owns it) `setSize()` doesn't resize the window (it changes only the App's own size and warns once) and `getRootNode()` doesn't return the App yet. Do both in `setup()`. Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
+Put **plain state only** in the constructor. Calling `addChild()` / `addMod()` / `callEvery()` in the constructor crashes (`weak_from_this()` isn't ready yet). Do tree work in `setup()` — it runs once when the node joins the App's tree: inside `addChild()` under a set-up parent, or for a subtree built while detached, when it is attached (parents first). So configure a node before `addChild()`, not after. Always create nodes with `make_shared<>()` (otherwise `addChild()` fails). The App is a Node too, with two App-specific points: in its constructor (before a `shared_ptr` owns it) `setSize()` doesn't resize the window (it changes only the App's own size and warns once) and `getRootNode()` doesn't return the App yet. Do both in `setup()`. Draw in **local coordinates** around (0,0) and move via `setPos / setRot / setScale` — never compute "where am I on screen"; children inherit the parent transform automatically.
 
 ### How do I structure a whole scene?
 
@@ -3590,7 +3590,7 @@ bool Mod::onMousePress(const MouseEventArgs & e)  // Handles a mouse button pres
 bool Mod::onMouseRelease(const MouseEventArgs & e)  // Handles a mouse button release delivered to the owner node.
 bool Mod::onMouseScroll(const ScrollEventArgs & e)  // Handles scrolling delivered to the owner node.
 void Mod::removeSelf()  // Removes this Mod from its owner.
-void Mod::setup()  // Initializes this Mod when it is attached to a node.
+void Mod::setup()  // Initializes this Mod once its owner node is set up in the running App's tree.
 void Mod::update()  // Updates this Mod after the owner node updates.
 ```
 
@@ -3735,7 +3735,7 @@ void Node::setScale(const Vec3 & s) [+2]  // Sets the local scale.
 void Node::setScaleX(float sx)  // Sets the local X scale.
 void Node::setScaleY(float sy)  // Sets the local Y scale.
 void Node::setScaleZ(float sz)  // Sets the local Z scale.
-void Node::setup()  // Called once, just before the node is first updated or drawn. Build child nodes and timers here.
+void Node::setup()  // Called once, when the node joins the running App's tree. Build child nodes and timers here.
 void Node::setVisible(bool visible)  // Sets the node's visible state.
 void Node::setX(float x)  // Sets the local X position.
 void Node::setY(float y)  // Sets the local Y position.

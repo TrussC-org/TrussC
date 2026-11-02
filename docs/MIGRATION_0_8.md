@@ -21,6 +21,34 @@ Register borrowed destruction delegates through `World::setDestructionListener()
 to preserve the internal observer. `clear()` keeps the physics world and settings
 and is immediately reusable; a second `setup()` replaces the physics world.
 
+## Node and Mod setup() runs when they join the App's tree (#949)
+
+`Node::setup()` and `Mod::setup()` now follow one rule (breaking change): they run once, when the node or mod joins the running App's tree.
+
+- `addChild()` / `insertChild()` under a parent that is already set up in the App's tree runs the child's `setup()` before it returns, with its subtree. Before, it ran just before the child's first update or draw.
+- A subtree built while detached is set up as a whole when it is attached: parents before children, in child order, each node's mods right after the node.
+- `addMod()` on a set-up node in the App's tree runs the mod's `setup()` at once, as before. On a node that is not in the tree yet, it now waits and runs right after the node's own `setup()`. Before, it always ran inside `addMod()`, even before the owner's `setup()`.
+- The App itself is still set up on its first update or draw after it becomes a window's root; children added to it earlier are set up right after it.
+- Inactive nodes (`setActive(false)`) are set up when they join, not when they first become active.
+- A traversal now skips a child that was removed or moved to another parent after its parent copied the child list.
+- `CoreEvents::setup` (`events().setup`) is removed. It was never fired; put code that should run after setup at the end of `setup()`.
+
+Configure a node before `addChild()`, or in its constructor. Values set after `addChild()` returns are not there yet when `setup()` runs:
+
+```cpp
+// Before
+auto ball = make_shared<Ball>();
+addChild(ball);
+ball->radius = 30;   // Ball::setup() ran later, on the first update
+
+// After
+auto ball = make_shared<Ball>();
+ball->radius = 30;   // configure first
+addChild(ball);      // Ball::setup() runs here
+```
+
+Pass what a mod's `setup()` needs as `addMod<T>(args...)` constructor arguments. For a `RigidBody2D` added to a detached node, the body now appears when the node joins the tree; if its `World` was destroyed by then, no body is created and a warning is logged.
+
 ## Stdin commands need `console::start()`
 
 Console input is now opt-in (breaking change, #689 and #756). Neither `runApp()` nor `runHeadlessApp()` starts a stdin reader automatically. `CoreEvents::console` / `events().console` has been removed. Subscribe once to
