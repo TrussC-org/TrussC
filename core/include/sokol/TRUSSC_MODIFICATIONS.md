@@ -807,6 +807,12 @@ own window receiver. Drop capacities and rejection behavior are unchanged.
   Heap text is still freed in `finally`. No recovery or retry is added.
 - Windows clipboard `GlobalAlloc` failure now logs an out-of-memory Error and returns instead of explicitly throwing from the C API.
 
+### Follow-up 2
+
+- The Web paste/drop bridges free their heap text through the exported
+  `_sapp_tc_emsc_free` instead of `_free`, so a link that does not export
+  `free` (no ASYNCIFY or FETCH, e.g. `core/tests/webDropSize`) no longer aborts.
+
 
 ## X11 clipboard TARGETS reply (#1023)
 
