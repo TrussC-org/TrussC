@@ -29,6 +29,8 @@ public:
     void arm(float seconds, Clock::time_point now) noexcept;
     bool expire(Clock::time_point now) noexcept;
     void cancel() noexcept;
+    // The armed deadline, or time_point::max() while nothing can expire.
+    Clock::time_point armedDeadline() const noexcept;
 private:
     enum State { Idle, Preparing, Armed, Disabled, Cancelled, Expired };
     std::atomic<State> state_{Idle};
