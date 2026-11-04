@@ -27,7 +27,7 @@ const vector<Preset>& presets() {
         {"borderless",                [](WindowSettings& s) { s.setDecorated(false); },  VSYNC},
         {"setFps(30)",                [](WindowSettings&) {},                           30.0f},
         {"setFps(10)",                [](WindowSettings&) {},                           10.0f},
-        {"swapInterval 0 (no vsync)", [](WindowSettings& s) { s.setSwapInterval(0); }, VSYNC},
+        {"swapInterval 0 (= 1 on desktop)", [](WindowSettings& s) { s.setSwapInterval(0); }, VSYNC},
         {"swapInterval 2",            [](WindowSettings& s) { s.setSwapInterval(2); }, VSYNC},
         {"large",                     [](WindowSettings& s) { s.setSize(560, 320); },   VSYNC},
         {"small borderless at 15fps", [](WindowSettings& s) { s.setSize(300, 150).setDecorated(false); }, 15.0f},
