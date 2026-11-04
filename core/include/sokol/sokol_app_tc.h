@@ -16169,6 +16169,11 @@ extern "C" {
 
 typedef void (*_sapp_tc_html5_fetch_callback) (const sapp_html5_fetch_response*);
 
+/* Frees strings from stringToNewUTF8 without relying on _free being exported. */
+EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_free(void* ptr) {
+    free(ptr);
+}
+
 /* Return allocation status so JS can report an OOM Error after C++ unwinds. */
 EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_onpaste(const char* str) {
     if (_sapp_tc.clipboard.enabled) {
@@ -16286,7 +16291,7 @@ EM_JS(void, _sapp_tc_js_add_clipboard_listener, (void), {
         try {
             if (!__sapp_tc_emsc_onpaste(cstr)) throw new Error('Out of memory copying clipboard text');
         }
-        finally { _free(cstr); }
+        finally { __sapp_tc_emsc_free(cstr); }
     };
     window.addEventListener('paste', Module.sokol_paste);
 })
@@ -16343,7 +16348,7 @@ EM_JS(void, _sapp_tc_js_add_dragndrop_listeners, (void), {
             try {
                 if (!__sapp_tc_emsc_drop(i, cstr)) throw new Error('Out of memory copying dropped filename');
             }
-            finally { _free(cstr); }
+            finally { __sapp_tc_emsc_free(cstr); }
         }
         let mods = 0;
         if (event.shiftKey) { mods |= 1; }

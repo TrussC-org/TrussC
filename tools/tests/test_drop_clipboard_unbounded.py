@@ -115,7 +115,7 @@ function stringToNewUTF8(value) {
     if(outOfMemory) return 0;
     pointers.set(allocations, value); return allocations;
 }
-function _free(pointer) { assert(pointers.delete(pointer)); ++frees; }
+function __sapp_tc_emsc_free(pointer) { assert(pointers.delete(pointer)); ++frees; }
 let received='', filenames=[];
 function __sapp_tc_emsc_onpaste(pointer) { received=pointers.get(pointer); return 1; }
 function __sapp_tc_emsc_begin_drop(count) { filenames=Array(count); return 1; }
