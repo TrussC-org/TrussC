@@ -15,6 +15,7 @@
 #include "imgui/imgui_tables.cpp"
 #include "imgui/imgui_widgets.cpp"
 #include "imgui/imgui_demo.cpp"
+#include "imgui/imgui_stdlib.cpp"
 
 // Keep ImGui's MSVC formatting aliases from renaming later std:: calls.
 #undef snprintf

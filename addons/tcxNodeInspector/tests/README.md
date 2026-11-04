@@ -24,6 +24,12 @@ Touched record (#326):
 Derived members (#287): an edit of `globalPos` (`TC_DERIVED`, left out of
 `reflectToJson()` saves) is reported with its current world position.
 
+Long strings (#341): a real ImGui frame (the headless harness of the tcxImGui
+tests, input fed through `ImGuiIO`) edits a string member and the node name. A
+value over the old 255 / 127 byte buffers, ASCII or Japanese, keeps its full
+original plus the typed character and is recorded as touched with the full
+value.
+
 CI (`examples/build_all.py --addon-tests-only`) builds and runs this on every
 push/PR; a non-zero exit fails the job. Run it locally with:
 

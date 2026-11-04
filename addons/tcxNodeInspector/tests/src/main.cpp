@@ -23,10 +23,17 @@
 // Derived members (#287):
 //   - an edit of globalPos (TC_DERIVED, not saved by reflectToJson) is
 //     reported with its current value, the world position
+//
+// Long strings (#341): a real ImGui frame (headless harness of the tcxImGui
+// tests, input fed through ImGuiIO) edits a string member and the node name;
+// a value over the old 255 / 127 byte buffers, ASCII or Japanese, keeps its
+// full original plus the typed character, and is recorded as touched.
 // =============================================================================
 
+#include "../../../../core/tests/common/tcWindowTest.h"
 #include <TrussC.h>
 #include <tcxNodeInspector.h>
+#include "../../../tcxImGui/tests/src/imguiHarness.h"
 
 #include <cstdio>
 
@@ -40,6 +47,8 @@ static void check(const char* name, bool ok) {
     std::fflush(stdout);
     ok ? ++g_pass : ++g_fail;
 }
+
+static void check(const string& name, bool ok) { check(name.c_str(), ok); }
 
 struct Ball : public Node {
     float radius = 10.0f;
@@ -290,6 +299,63 @@ static void testRotationUnits() {
     insp.resetTouched();
 }
 
+// ---------------------------------------------------------------------------
+// Long strings survive an edit (#341)
+// ---------------------------------------------------------------------------
+struct Label : public Node {
+    string text;
+    TC_REFLECT(Label, Node) {
+        TC_VALUE(text)
+    }
+};
+
+// Focus the field with a click, jump to the end, type one character.
+static void typeAtEnd(harness::ImGuiHarness& h, const char* label, const char* utf8) {
+    h.click(label, "Inspector");
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddKeyEvent(ImGuiKey_End, true);
+    h.frame();
+    io.AddKeyEvent(ImGuiKey_End, false);
+    h.frame();
+    io.AddInputCharactersUTF8(utf8);
+    h.frames(2);
+}
+
+static void testLongStrings() {
+    auto& insp = NodeInspector::instance();
+    for (bool japanese : {false, true}) {
+        const char* kind = japanese ? "japanese" : "ascii";
+        const string unit = japanese ? "日" : "a";
+        string longText, longName;
+        while (longText.size() < 600) longText += unit;    // well over 255 bytes
+        while (longName.size() < 300) longName += unit;    // well over 127 bytes
+        insp.resetTouched();
+
+        tcCoreTest::WindowFixture window;   // addressed Window the harness's context belongs to
+        harness::ImGuiHarness h;
+        auto node = make_shared<Label>();
+        node->text = longText;
+        node->setName(longName);
+        insp.select(node.get());
+        h.setUi([&] { insp.drawInspector(); });
+        h.frames(3);
+
+        typeAtEnd(h, "text", "!");
+        check(string("string member (") + kind + "): full value plus typed char", node->text == longText + "!");
+        auto te = entries(node->getInstanceId(), "", "text");
+        check(string("string member (") + kind + "): recorded as touched, full value",
+              te.size() == 1 && te[0].value("value", string()) == longText + "!");
+
+        typeAtEnd(h, "name", "!");
+        check(string("node name (") + kind + "): full value plus typed char", node->getName() == longName + "!");
+        auto ne = entries(node->getInstanceId(), "", "name");
+        check(string("node name (") + kind + "): recorded as touched, full value",
+              ne.size() == 1 && ne[0].value("value", string()) == longName + "!");
+        insp.clearSelection();
+    }
+    insp.resetTouched();
+}
+
 // #947 / PR 2 teardown lesson: real protected addon cleanup after App exit.
 namespace {
 int headlessExits = 0;
@@ -325,6 +391,7 @@ int main() {
     testMods();
     testDerived();
     testRotationUnits();
+    testLongStrings();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

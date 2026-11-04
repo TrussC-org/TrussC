@@ -23,6 +23,8 @@ addons/tcxImGui/src/
 │   ├── imgui_draw.cpp        # Untouched
 │   ├── imgui_tables.cpp      # Untouched
 │   ├── imgui_demo.cpp        # Untouched
+│   ├── imgui_stdlib.h        # Untouched (from misc/cpp/)
+│   ├── imgui_stdlib.cpp      # Untouched (from misc/cpp/)
 │   ├── imstb_*.h             # Untouched
 │   └── TRUSSC_MODIFICATIONS.md
 ├── sokol_imgui.h             # From sokol util/ + TrussC multi-context patch (see below)
@@ -369,6 +371,15 @@ there.)
 ```bash
 for f in imgui.cpp imgui_draw.cpp imgui_internal.h imgui_tables.cpp imgui.h imgui_demo.cpp imstb_rectpack.h imstb_textedit.h imstb_truetype.h; do
   git -C /tmp/imgui show $NEW:$f > addons/tcxImGui/src/imgui/$f
+done
+```
+
+`imgui_stdlib.h` / `imgui_stdlib.cpp` (the `std::string` overloads of
+`InputText`) live in `misc/cpp/` upstream, so they are outside that loop:
+
+```bash
+for f in imgui_stdlib.h imgui_stdlib.cpp; do
+  git -C /tmp/imgui show $NEW:misc/cpp/$f > addons/tcxImGui/src/imgui/$f
 done
 ```
 
