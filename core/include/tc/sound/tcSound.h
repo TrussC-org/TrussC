@@ -2059,12 +2059,13 @@ public:
 
     // Fired once when the OS or the audio library reports that the capture
     // device stopped by itself (a USB microphone unplugged, a Bluetooth
-    // headset switched off). isConnected() is already false and the event
+    // headset switched off; on Windows also a change of the default
+    // microphone). isConnected() is already false and the event
     // fires on the main thread during runApp / runHeadlessApp, never on the
     // audio thread. close() / stop(), start() again and the destructor never
     // fire it. Not every backend reports a stop (and Web never does); where
     // the backend says nothing, getBuffer() just stops getting new samples.
-    // To open the microphone again, call setup().
+    // Call setup() in the listener to reopen the default microphone.
     Event<DeviceDisconnectEventArgs> onDisconnect;
 
     // Get latest samples

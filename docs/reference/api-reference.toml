@@ -17928,15 +17928,15 @@ description.ko = "마이크 캡처를 중지한다(stop의 별칭)."
 related = ["MicInput::stop", "MicInput::setup", "MicInput::isConnected", "MicInput::onDisconnect"]
 details.en = '''
 - The device lifecycle name of `stop()`; it does the same. `isConnected()` is false afterwards, and `setup()` starts capture again.
-- `close()` never fires `onDisconnect`, which does not fire for `MicInput` today (see `MicInput::onDisconnect`).
+- `close()` never fires `onDisconnect`; that event is only for a capture device the OS reports lost.
 '''
 details.ja = '''
 - `stop()` のデバイスライフサイクルでの名前で、動作は同じです。呼んだ後 `isConnected()` は false になり、`setup()` で入力を再開できます。
-- `close()` は `onDisconnect` を発火しません。現在の `MicInput` では、そのイベント自体が発火しません（`MicInput::onDisconnect` を参照）。
+- `close()` は `onDisconnect` を発火しません。そのイベントは、OS が入力デバイスの喪失を報告したときだけのものです。
 '''
 details.ko = '''
 - `stop()`의 장치 수명 주기 이름이며 동작은 같습니다. 호출 후 `isConnected()`는 false가 되고 `setup()`으로 캡처를 다시 시작할 수 있습니다.
-- `close()`는 `onDisconnect`를 발생시키지 않습니다. 현재 `MicInput`에서는 이 이벤트 자체가 발생하지 않습니다(`MicInput::onDisconnect` 참조).
+- `close()`는 `onDisconnect`를 발생시키지 않습니다. 이 이벤트는 OS가 캡처 장치 손실을 보고했을 때만 발생합니다.
 '''
 
 ["MicInput::getBuffer"]
@@ -18006,16 +18006,16 @@ description.ja = "マイクが開いて入力中かを返す（isRunning の別�
 description.ko = "마이크가 열려 캡처 중인지 반환한다(isRunning의 별칭)."
 related = ["MicInput::isRunning", "MicInput::setup", "MicInput::close", "MicInput::onDisconnect"]
 details.en = '''
-- The device lifecycle name of `isRunning()`. It is true only while the capture device is open and delivering.
-- The microphone is always the system default capture device, which follows the OS default and never reports a loss. If every capture device disappears, this stays true and `getBuffer()` just stops getting new samples (until the OS has a default again).
+- The device lifecycle name of `isRunning()`. It is true only while the capture device is open and delivering, and already false when `onDisconnect` fires.
+- A backend that does not report the stop of a microphone that went away leaves it true; `getBuffer()` then just stops getting new samples.
 '''
 details.ja = '''
-- `isRunning()` のデバイスライフサイクルでの名前です。入力デバイスが開いて動作している間だけ true です。
-- マイクは常にシステム既定の入力デバイスで、OS の既定に追従し、喪失を報告しません。入力デバイスがすべてなくなった場合も true のままで、`getBuffer()` に新しいサンプルが入らなくなるだけです（OS に既定のデバイスが戻るまで）。
+- `isRunning()` のデバイスライフサイクルでの名前です。入力デバイスが開いて動作している間だけ true で、`onDisconnect` が発火する時点ですでに false です。
+- なくなったマイクの停止をバックエンドが報告しない場合は true のままで、`getBuffer()` に新しいサンプルが入らなくなるだけです。
 '''
 details.ko = '''
-- `isRunning()`의 장치 수명 주기 이름입니다. 캡처 장치가 열려 동작하는 동안에만 true입니다.
-- 마이크는 항상 시스템 기본 캡처 장치이며, OS 기본 장치를 따라가고 손실을 보고하지 않습니다. 캡처 장치가 모두 사라져도 true로 남고, `getBuffer()`에 새 샘플이 들어오지 않을 뿐입니다(OS에 기본 장치가 다시 생길 때까지).
+- `isRunning()`의 장치 수명 주기 이름입니다. 캡처 장치가 열려 동작하는 동안에만 true이며, `onDisconnect`가 발생하는 시점에는 이미 false입니다.
+- 사라진 마이크의 정지를 백엔드가 보고하지 않으면 true로 남으며, 이때 `getBuffer()`에는 새 샘플이 들어오지 않을 뿐입니다.
 '''
 
 ["MicInput::isRunning"]
@@ -18024,40 +18024,59 @@ description.ja = "マイク入力が動作中かどうかを返す。"
 description.ko = "마이크 캡처가 실행 중인지 반환한다."
 details.en = '''
 - Returns `true` after successful startup has been applied to the handle. Asynchronous startup publishes this state before `onStart`; device readiness alone does not immediately change it.
-- Returns `false` initially, after cancellation, or when the app run associated with the capture ends. See `MicInput::startAsync` for threading rules.
+- Returns `false` initially, after cancellation, after the OS reported the capture device stopped (see `MicInput::onDisconnect`), or when the app run associated with the capture ends. See `MicInput::startAsync` for threading rules.
 - `isConnected()` is the device lifecycle name of the same state.
 '''
 details.ja = '''
 - 起動成功をハンドルに反映した後に `true` を返します。非同期起動では `onStart` より前にこの状態を反映するため、デバイスの準備が整っただけでは直ちに変わりません。
-- 初期状態、取り消し後、または入力に関連付けられたアプリ実行が終了した場合は `false` を返します。スレッドの扱いは `MicInput::startAsync` を参照してください。
+- 初期状態、取り消し後、OS が入力デバイスの停止を報告した後（`MicInput::onDisconnect` を参照）、または入力に関連付けられたアプリ実行が終了した場合は `false` を返します。スレッドの扱いは `MicInput::startAsync` を参照してください。
 - `isConnected()` は同じ状態のデバイスライフサイクルでの名前です。
 '''
 details.ko = '''
 - 시작 성공을 핸들에 반영한 뒤 `true`를 반환합니다. 비동기 시작에서는 `onStart` 전에 이 상태를 반영하므로 장치 준비가 끝난 것만으로 즉시 바뀌지는 않습니다.
-- 초기 상태, 취소 후 또는 캡처와 연결된 앱 실행이 끝나면 `false`를 반환합니다. 스레드 규칙은 `MicInput::startAsync`를 참조하세요.
+- 초기 상태, 취소 후, OS가 캡처 장치 정지를 보고한 후(`MicInput::onDisconnect` 참조) 또는 캡처와 연결된 앱 실행이 끝나면 `false`를 반환합니다. 스레드 규칙은 `MicInput::startAsync`를 참조하세요.
 - `isConnected()`는 같은 상태의 장치 수명 주기 이름입니다.
 '''
 
 ["MicInput::onDisconnect"]
 keywords = ["unplug", "disconnect", "reconnect", "device lost", "usb microphone", "bluetooth"]
-description.en = "Device lifecycle event that never fires for the microphone, which follows the OS default."
-description.ja = "デバイスライフサイクルのイベント。マイクは OS の既定に追従するため発火しない。"
-description.ko = "장치 수명 주기 이벤트. 마이크는 OS 기본 장치를 따라가므로 발생하지 않는다."
+description.en = "Reports when the OS says the capture device stopped."
+description.ja = "OS が入力デバイスの停止を報告したことを通知する。"
+description.ko = "OS가 캡처 장치 정지를 보고했음을 알린다."
 related = ["DeviceDisconnectEventArgs", "MicInput::isConnected", "MicInput::setup", "MicInput::close"]
 details.en = '''
-- This `Event<DeviceDisconnectEventArgs>` belongs to the device lifecycle convention, but it does not fire for `MicInput` today: the microphone is always the system default capture device, which follows the OS default and never reports a loss.
-- If every capture device disappears, `isConnected()` stays true and `getBuffer()` just stops getting new samples (they come back when the OS has a default again).
-- `close()`, `stop()`, `start()` again and destroying the `MicInput` never fire it either.
+- This `Event<DeviceDisconnectEventArgs>` fires once per started capture, and only when the OS or the audio library reports that the running capture device stopped by itself, for example a USB microphone that was unplugged. On Windows this includes a change of the default microphone. `reason` says what happened. `isConnected()` is already false when it fires.
+- It fires on the main thread during `runApp()` or `runHeadlessApp()`, like `onStart`, never on the audio thread; in a bare `main()` without an app run it does not fire. Web does not report a loss.
+- `close()`, `stop()`, `start()` again and destroying the `MicInput` never fire it.
+- Which backends report a stop depends on the OS and driver. Where the backend says nothing, `isConnected()` stays true and `getBuffer()` stops getting new samples.
+- Call `setup()` in the listener to reopen the default microphone at the last sample rate.
 '''
 details.ja = '''
-- この `Event<DeviceDisconnectEventArgs>` はデバイスライフサイクルの決まりに含まれますが、現在の `MicInput` では発火しません。マイクは常にシステム既定の入力デバイスで、OS の既定に追従し、喪失を報告しないためです。
-- 入力デバイスがすべてなくなった場合、`isConnected()` は true のままで、`getBuffer()` に新しいサンプルが入らなくなるだけです（OS に既定のデバイスが戻ると、また入ります）。
-- `close()`、`stop()`、もう一度の `start()`、`MicInput` の破棄でも発火しません。
+- この `Event<DeviceDisconnectEventArgs>` は、開始した入力ごとに 1 回、OS またはオーディオライブラリが「動作中の入力デバイスが自ら停止した」と報告したときだけ発火します。たとえば USB マイクを抜いた場合です。Windows では、既定のマイクが変わった場合も含みます。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- `onStart` と同じく `runApp()` または `runHeadlessApp()` の間にメインスレッドで発火し、オーディオスレッドでは発火しません。アプリの実行がない素の `main()` では発火しません。Web は喪失を報告しません。
+- `close()`、`stop()`、もう一度の `start()`、`MicInput` の破棄では発火しません。
+- どのバックエンドが停止を報告するかは OS とドライバーによります。バックエンドが何も報告しない場合は、`isConnected()` は true のままで、`getBuffer()` に新しいサンプルが入らなくなります。
+- リスナーの中で `setup()` を呼ぶと、既定のマイクを直前のサンプルレートで開き直します。
 '''
 details.ko = '''
-- 이 `Event<DeviceDisconnectEventArgs>`는 장치 수명 주기 규칙에 포함되지만, 현재 `MicInput`에서는 발생하지 않습니다. 마이크는 항상 시스템 기본 캡처 장치이며, OS 기본 장치를 따라가고 손실을 보고하지 않기 때문입니다.
-- 캡처 장치가 모두 사라지면 `isConnected()`는 true로 남고 `getBuffer()`에 새 샘플이 들어오지 않을 뿐입니다(OS에 기본 장치가 다시 생기면 다시 들어옵니다).
-- `close()`, `stop()`, 다시 `start()`, `MicInput` 파괴에서도 발생하지 않습니다.
+- 이 `Event<DeviceDisconnectEventArgs>`는 시작한 캡처마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 캡처 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 USB 마이크를 뽑았을 때입니다. Windows에서는 기본 마이크가 바뀐 경우도 포함합니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- `onStart`와 마찬가지로 `runApp()` 또는 `runHeadlessApp()` 중에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 앱 실행이 없는 맨 `main()`에서는 발생하지 않습니다. Web은 손실을 보고하지 않습니다.
+- `close()`, `stop()`, 다시 `start()`, `MicInput` 파괴에서는 발생하지 않습니다.
+- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 백엔드가 아무것도 보고하지 않으면 `isConnected()`는 true로 남고 `getBuffer()`에는 새 샘플이 들어오지 않습니다.
+- 리스너 안에서 `setup()`을 호출하면 기본 마이크를 마지막 샘플 레이트로 다시 엽니다.
+'''
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+EventListener lostListener;
+
+// tcApp.cpp
+void tcApp::setup() {
+    lostListener = getMicInput().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning() << "microphone lost: " << e.reason;
+        getMicInput().setup();   // reopen the default microphone
+    });
+    getMicInput().start(48000);
+}
 '''
 
 ["MicInput::setup"]
@@ -18069,17 +18088,17 @@ related = ["MicInput::start", "MicInput::isConnected", "MicInput::close", "MicIn
 details.en = '''
 - `setup()` with no arguments is `start(sampleRate)` with the sample rate of the last `start()` or `startAsync()` (`48000` Hz before any). The microphone is always the system default capture device, so the sample rate is all there is to remember.
 - Returns `true` when capture started. On failure it returns `false` and logs an error, as `start()` does; see `MicInput::start` for the macOS and iOS permission behavior.
-- To start capture again after `close()` or `stop()`, call `setup()`.
+- To open the microphone again after a loss, call `setup()`. See `MicInput::onDisconnect`.
 '''
 details.ja = '''
 - 引数なしの `setup()` は、直前の `start()` または `startAsync()` のサンプルレート（それまでに呼んでいなければ `48000` Hz）で呼ぶ `start(sampleRate)` です。マイクは常にシステム既定の入力デバイスなので、覚えておくのはサンプルレートだけです。
 - 入力を開始できたら `true` を返します。失敗すると `false` を返し、`start()` と同じくエラーを出します。macOS と iOS の権限の扱いは `MicInput::start` を参照してください。
-- `close()` または `stop()` の後に入力を再開するには `setup()` を呼びます。
+- 喪失の後にマイクを開き直すには `setup()` を呼びます。`MicInput::onDisconnect` を参照してください。
 '''
 details.ko = '''
 - 인수 없는 `setup()`은 마지막 `start()` 또는 `startAsync()`의 샘플 레이트(호출한 적이 없으면 `48000` Hz)로 호출하는 `start(sampleRate)`입니다. 마이크는 항상 시스템 기본 캡처 장치이므로 기억할 것은 샘플 레이트뿐입니다.
 - 캡처가 시작되면 `true`를 반환합니다. 실패하면 `false`를 반환하고 `start()`와 마찬가지로 오류를 기록합니다. macOS와 iOS의 권한 처리는 `MicInput::start`를 참조하세요.
-- `close()` 또는 `stop()` 후 캡처를 다시 시작하려면 `setup()`을 호출하세요.
+- 손실 후 마이크를 다시 열려면 `setup()`을 호출하세요. `MicInput::onDisconnect`를 참조하세요.
 '''
 
 ["MicInput::start"]
