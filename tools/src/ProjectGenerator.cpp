@@ -344,7 +344,7 @@ void ProjectGenerator::cleanBuildDirectories(const string& path) {
         if (fs::exists(buildPath)) {
             log("Cleaning " + dir + "...");
             try {
-                fs::remove_all(buildPath);
+                removeBuildDirectory(buildPath);
                 log("Removed " + dir);
             } catch (const exception& e) {
                 log("Failed to remove " + dir + ": " + e.what());
@@ -1120,7 +1120,7 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
         string buildDir = path + "/" + buildDirForPreset(preset);
         if (fs::exists(buildDir)) {
             log("Cleaning " + buildDirForPreset(preset) + "...");
-            fs::remove_all(buildDir);
+            removeBuildDirectory(buildDir);
         }
 
         log("Running CMake configure (preset: " + preset + ")...");

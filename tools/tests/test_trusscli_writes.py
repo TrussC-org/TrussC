@@ -66,6 +66,27 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(before, self.snapshot())
         self.assert_lf(self.snapshot())
 
+    @unittest.skipIf(sys.platform == "win32", "symlinks need privileges on Windows")
+    def test_update_keeps_symlinked_build_dir(self):
+        # #1102: regenerating clears the linked folder, keeps the link, and
+        # never follows a symlink found inside it
+        native = {"linux": "linux", "darwin": "macos"}[sys.platform]
+        target = self.base / "elsewhere"
+        outside = self.base / "outside"
+        (target / "sub").mkdir(parents=True)
+        outside.mkdir()
+        (target / "stale.o").write_text("stale", encoding="utf-8")
+        (target / "sub/deep.o").write_text("stale", encoding="utf-8")
+        (outside / "canary.txt").write_text("keep", encoding="utf-8")
+        (target / "link").symlink_to(outside, target_is_directory=True)
+        link = self.project / ("build-" + native)
+        link.symlink_to(target, target_is_directory=True)
+        self.cli("update", "--ide", "cmake")
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(Path(os.readlink(link)), target)
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual((outside / "canary.txt").read_text(encoding="utf-8"), "keep")
+
     def test_new_normalizes_crlf_template(self):
         framework = self.base / "framework"
         template = framework / "examples/templates/emptyExample"
