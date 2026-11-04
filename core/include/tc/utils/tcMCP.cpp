@@ -217,7 +217,11 @@ void initializeMcp() {
     mcpInitialized = true;
     if (isDevBuild())
         logWarning("MCP") << "MCP development build: Control tools are enabled. Do not distribute this build.";
-    startConfiguredServer(environmentRequestsMcp() ? "the environment" : "the dev build");
+    // Startup opens only for the environment or a dev build. setToolLevel()
+    // already opened its own server; the deprecated register*Tools() aliases
+    // keep the v0.7 rule (no open) until they are removed in v1.0.0.
+    if (environmentRequestsMcp() || isDevBuild())
+        startConfiguredServer(environmentRequestsMcp() ? "the environment" : "the dev build");
     logExposure();
 #endif
 }
@@ -1072,7 +1076,10 @@ void stopHttpServer() {
 
 #endif
 
-void setToolLevel(ToolLevel level) {
+// setToolLevel() opens the server for a ReadOnly/Control grant. The deprecated
+// register*Tools() aliases keep the v0.7 rule instead (registering does not
+// open the server) until they are removed in v1.0.0, so they pass open=false.
+static void applyToolLevel(ToolLevel level, bool open) {
     const auto previousLevel = getToolLevel();
 #ifndef __EMSCRIPTEN__
     const bool wasFull = internal::getHttpServer() && !internal::healthOnly();
@@ -1080,10 +1087,11 @@ void setToolLevel(ToolLevel level) {
     // Dev builds stay Control, so the Public downgrade policy never applies.
     internal::grantedToolLevel().store(internal::isDevBuild() ? ToolLevel::Control : level);
     if (internal::environmentClosesMcp()) {
-        internal::startConfiguredServer("the grant");
+        if (open) internal::startConfiguredServer("the grant");
     } else if (getToolLevel() >= ToolLevel::ReadOnly) {
+        // A running health-only listener becomes a full endpoint either way.
         internal::healthOnlyEndpoint() = false;
-        internal::startConfiguredServer("the grant");
+        if (open) internal::startConfiguredServer("the grant");
     } else if (previousLevel > ToolLevel::Public && !internal::explicitlyOpened()) {
 #ifndef __EMSCRIPTEN__
         if (internal::getHttpServer()) {
@@ -1096,6 +1104,10 @@ void setToolLevel(ToolLevel level) {
     if (!wasFull || getToolLevel() > previousLevel) internal::logExposure();
 #endif
 }
+
+void setToolLevel(ToolLevel level) { applyToolLevel(level, true); }
+
+void internal::grantToolLevelWithoutOpening(ToolLevel level) { applyToolLevel(level, false); }
 
 ToolLevel getToolLevel() {
     return internal::grantedToolLevel().load();

@@ -410,6 +410,102 @@ int firstOpenerCase(const string& mode) {
     return g_fail ? 1 : 0;
 }
 
+// POST one JSON-RPC request while pumping the queue like the frame loop.
+json postMcp(const string& method, const json& params = json::object()) {
+    auto result = async(launch::async, [=] {
+        httplib::Client client("127.0.0.1", mcp::getHttpPort());
+        client.set_connection_timeout(5);
+        client.set_read_timeout(5);
+        client.set_bearer_token_auth(mcp::internal::mcpAuthToken());
+        return client.Post("/mcp", json{{"jsonrpc", "2.0"}, {"id", 1},
+            {"method", method}, {"params", params}}.dump(), "application/json");
+    });
+    const auto deadline = chrono::steady_clock::now() + chrono::seconds(10);
+    while (result.wait_for(chrono::milliseconds(0)) != future_status::ready &&
+           chrono::steady_clock::now() < deadline) {
+        mcp::processHttpQueue();
+        this_thread::yield();
+    }
+    auto reply = result.get();
+    check("native HTTP request succeeds", reply && reply->status == 200);
+    return reply ? json::parse(reply->body) : json::object();
+}
+
+// The deprecated register*Tools() aliases keep the v0.7 rule until v1.0.0:
+// they set the level but never open the server themselves. The environment,
+// startHttpServer(), a dev build or a later setToolLevel() still open it.
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#elif defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+int aliasCase(const string& mode) {
+    const bool dev = mcp::internal::isDevBuild();
+    const bool envAsk = mode == "alias-env" || mode == "alias-health";
+    if (envAsk) setEnv("TRUSSC_MCP", "1");
+    mcp::tool("public_probe", "").bind([]() -> json { return "public"; });
+    mcp::tool("control_probe", "").level(mcp::ToolLevel::Control).bind([]() -> json { return "control"; });
+    if (mode == "alias-health") {
+        mcp::internal::initializeMcp();
+        check("environment opens health only before the alias",
+              mcp::getHttpPort() > 0 && mcp::internal::healthOnly() == !dev);
+    }
+    const int portBefore = mcp::getHttpPort();
+    auto expected = mcp::ToolLevel::Control;
+    if (mode == "alias-inspection") {
+        mcp::registerInspectionTools();
+        expected = dev ? mcp::ToolLevel::Control : mcp::ToolLevel::ReadOnly;
+    } else if (mode == "alias-debugger") {
+        mcp::registerDebuggerTools();
+    } else {
+        mcp::registerControlTools();
+    }
+    check("alias grants its level", mcp::getToolLevel() == expected);
+    check("alias does not open or rebind the server", mcp::getHttpPort() == portBefore &&
+          bool(mcp::internal::getHttpServer()) == (portBefore > 0));
+    check("alias leaves no health-only restriction", !mcp::internal::healthOnly());
+    if (mode == "alias-explicit") mcp::startHttpServer();
+    mcp::internal::initializeMcp();
+    const bool listening = dev || envAsk || mode == "alias-explicit";
+    check("startup after alias follows environment/explicit/build", (mcp::getHttpPort() > 0) == listening);
+    check("alias keeps an environment listener on its port", mode != "alias-health" ||
+          mcp::getHttpPort() == portBefore);
+    if (listening) {
+        const auto tools = postMcp("tools/list")["result"]["tools"];
+        auto has = [&](const string& name) {
+            return any_of(tools.begin(), tools.end(), [&](const json& tool) { return tool["name"] == name; });
+        };
+        const bool control = expected == mcp::ToolLevel::Control;
+        check("endpoint after alias is full, not health only",
+              has("public_probe") && has("tc_get_status") && has("control_probe") == control);
+        auto call = [&](const string& name) {
+            return postMcp("tools/call", {{"name", name}, {"arguments", json::object()}});
+        };
+        check("endpoint after alias serves app tools", !call("public_probe")["result"].value("isError", false));
+        check("endpoint after alias follows the alias level",
+              call("control_probe")["result"].value("isError", false) == !control);
+        mcp::stopHttpServer();
+    } else {
+        // A real grant still opens the server with no environment request.
+        mcp::setToolLevel(mcp::ToolLevel::Control);
+        check("setToolLevel(Control) still opens without the environment", mcp::getHttpPort() > 0);
+        mcp::stopHttpServer();
+    }
+    return g_fail ? 1 : 0;
+}
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#elif defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
+
 bool headlessGrantInSetup = false;
 bool headlessSetupDone = false;
 struct HeadlessMcpApp : App {
@@ -482,6 +578,7 @@ int environmentCase(const string& mode) {
     for (const char* key : {"TRUSSC_MCP", "TRUSSC_MCP_PORT", "TRUSSC_MCP_HOST", "TRUSSC_MCP_TOKEN"})
         setEnv(key, nullptr);
     if (mode.rfind("first-", 0) == 0) return firstOpenerCase(mode);
+    if (mode.rfind("alias-", 0) == 0) return aliasCase(mode);
     if (mode.rfind("headless", 0) == 0) {
         const bool dev = mcp::internal::isDevBuild();
         const bool closed = mode == "headless-closed";
@@ -698,7 +795,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #ifdef TC_CORE_TEST_NAME
     command += " " TC_CORE_TEST_NAME;
 #endif
-    for (const char* mode : {"first-grant", "first-explicit", "first-environment", "headless", "headless-port", "headless-grant", "headless-closed", "none", "host-only", "env", "port", "grant", "grant-port", "exit-cleanup", "explicit", "upgrade", "upgrade-grant", "downgrade-explicit", "downgrade-env", "downgrade-port", "downgrade-none", "closed", "closed-grant", "closed-explicit"})
+    for (const char* mode : {"first-grant", "first-explicit", "first-environment", "headless", "headless-port", "headless-grant", "headless-closed", "none", "host-only", "env", "port", "grant", "grant-port", "exit-cleanup", "explicit", "upgrade", "upgrade-grant", "downgrade-explicit", "downgrade-env", "downgrade-port", "downgrade-none", "closed", "closed-grant", "closed-explicit", "alias-none", "alias-inspection", "alias-debugger", "alias-env", "alias-explicit", "alias-health"})
         check(string("environment case: ") + mode,
               std::system((command + " --environment " + mode).c_str()) == 0);
 

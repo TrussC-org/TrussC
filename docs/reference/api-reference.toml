@@ -62146,16 +62146,16 @@ description.en = "Sets inspection access through a deprecated compatibility alia
 description.ja = "非推奨の互換関数として検査用アクセスを設定する。"
 description.ko = "사용이 권장되지 않는 호환 함수로 검사 접근 수준을 설정한다."
 details.en = '''
-- Calls `mcp::setToolLevel(mcp::ToolLevel::ReadOnly)`; see `mcp::setToolLevel` for access and HTTP behavior.
-- Deprecated and scheduled for removal in v1.0.0; use `mcp::setToolLevel` directly.
+- Sets the tool level to `mcp::ToolLevel::ReadOnly` like `mcp::setToolLevel`, but does not open the MCP server. As in v0.7, the server opens with `TRUSSC_MCP=1`, `mcp::startHttpServer` or a dev build. If the server is already running, the new level applies to it.
+- Deprecated and scheduled for removal in v1.0.0; use `mcp::setToolLevel` directly. Note that `mcp::setToolLevel` also opens the server.
 '''
 details.ja = '''
-- `mcp::setToolLevel(mcp::ToolLevel::ReadOnly)` を呼び出します。アクセスと HTTP の動作は `mcp::setToolLevel` を参照してください。
-- 非推奨で、v1.0.0 で削除予定です。`mcp::setToolLevel` を直接使用してください。
+- `mcp::setToolLevel` と同じくツールレベルを `mcp::ToolLevel::ReadOnly` に設定しますが、MCP サーバーは開きません。v0.7 と同じく、サーバーは `TRUSSC_MCP=1`、`mcp::startHttpServer`、または開発ビルドで開きます。サーバーがすでに動いている場合は、新しいレベルがそのまま適用されます。
+- 非推奨で、v1.0.0 で削除予定です。`mcp::setToolLevel` を直接使用してください。`mcp::setToolLevel` はサーバーも開きます。
 '''
 details.ko = '''
-- `mcp::setToolLevel(mcp::ToolLevel::ReadOnly)`를 호출합니다. 접근 및 HTTP 동작은 `mcp::setToolLevel`을 참조하세요.
-- 사용이 권장되지 않으며 v1.0.0에서 제거될 예정입니다. `mcp::setToolLevel`을 직접 사용하세요.
+- `mcp::setToolLevel`과 같이 도구 수준을 `mcp::ToolLevel::ReadOnly`로 설정하지만, MCP 서버는 열지 않습니다. v0.7과 같이 서버는 `TRUSSC_MCP=1`, `mcp::startHttpServer` 또는 개발 빌드에서 열립니다. 서버가 이미 실행 중이면 새 수준이 바로 적용됩니다.
+- 사용이 권장되지 않으며 v1.0.0에서 제거될 예정입니다. `mcp::setToolLevel`을 직접 사용하세요. `mcp::setToolLevel`은 서버도 엽니다.
 '''
 
 ["mcp::registerControlTools"]
@@ -62164,16 +62164,16 @@ description.en = "Sets control access through a deprecated compatibility alias."
 description.ja = "非推奨の互換関数として操作用アクセスを設定する。"
 description.ko = "사용이 권장되지 않는 호환 함수로 제어 접근 수준을 설정한다."
 details.en = '''
-- Calls `mcp::setToolLevel(mcp::ToolLevel::Control)`; see `mcp::setToolLevel` for access and HTTP behavior.
-- Deprecated and scheduled for removal in v1.0.0; use `mcp::setToolLevel` directly.
+- Sets the tool level to `mcp::ToolLevel::Control` like `mcp::setToolLevel`, but does not open the MCP server. As in v0.7, the server opens with `TRUSSC_MCP=1`, `mcp::startHttpServer` or a dev build. If the server is already running, the new level applies to it.
+- Deprecated and scheduled for removal in v1.0.0; use `mcp::setToolLevel` directly. Note that `mcp::setToolLevel` also opens the server.
 '''
 details.ja = '''
-- `mcp::setToolLevel(mcp::ToolLevel::Control)` を呼び出します。アクセスと HTTP の動作は `mcp::setToolLevel` を参照してください。
-- 非推奨で、v1.0.0 で削除予定です。`mcp::setToolLevel` を直接使用してください。
+- `mcp::setToolLevel` と同じくツールレベルを `mcp::ToolLevel::Control` に設定しますが、MCP サーバーは開きません。v0.7 と同じく、サーバーは `TRUSSC_MCP=1`、`mcp::startHttpServer`、または開発ビルドで開きます。サーバーがすでに動いている場合は、新しいレベルがそのまま適用されます。
+- 非推奨で、v1.0.0 で削除予定です。`mcp::setToolLevel` を直接使用してください。`mcp::setToolLevel` はサーバーも開きます。
 '''
 details.ko = '''
-- `mcp::setToolLevel(mcp::ToolLevel::Control)`을 호출합니다. 접근 및 HTTP 동작은 `mcp::setToolLevel`을 참조하세요.
-- 사용이 권장되지 않으며 v1.0.0에서 제거될 예정입니다. `mcp::setToolLevel`을 직접 사용하세요.
+- `mcp::setToolLevel`과 같이 도구 수준을 `mcp::ToolLevel::Control`로 설정하지만, MCP 서버는 열지 않습니다. v0.7과 같이 서버는 `TRUSSC_MCP=1`, `mcp::startHttpServer` 또는 개발 빌드에서 열립니다. 서버가 이미 실행 중이면 새 수준이 바로 적용됩니다.
+- 사용이 권장되지 않으며 v1.0.0에서 제거될 예정입니다. `mcp::setToolLevel`을 직접 사용하세요. `mcp::setToolLevel`은 서버도 엽니다.
 '''
 
 ["mcp::registerDebuggerTools"]
@@ -62182,16 +62182,16 @@ description.en = "Sets control access through a deprecated debugger compatibilit
 description.ja = "非推奨のデバッガー互換関数として操作用アクセスを設定する。"
 description.ko = "사용이 권장되지 않는 디버거 호환 함수로 제어 접근 수준을 설정한다."
 details.en = '''
-- Calls `mcp::setToolLevel(mcp::ToolLevel::Control)`; see `mcp::setToolLevel` for access and HTTP behavior.
-- Deprecated and scheduled for removal in v1.0.0; use `mcp::setToolLevel` directly.
+- Sets the tool level to `mcp::ToolLevel::Control` like `mcp::setToolLevel`, but does not open the MCP server. As in v0.7, the server opens with `TRUSSC_MCP=1`, `mcp::startHttpServer` or a dev build. If the server is already running, the new level applies to it.
+- Deprecated and scheduled for removal in v1.0.0; use `mcp::setToolLevel` directly. Note that `mcp::setToolLevel` also opens the server.
 '''
 details.ja = '''
-- `mcp::setToolLevel(mcp::ToolLevel::Control)` を呼び出します。アクセスと HTTP の動作は `mcp::setToolLevel` を参照してください。
-- 非推奨で、v1.0.0 で削除予定です。`mcp::setToolLevel` を直接使用してください。
+- `mcp::setToolLevel` と同じくツールレベルを `mcp::ToolLevel::Control` に設定しますが、MCP サーバーは開きません。v0.7 と同じく、サーバーは `TRUSSC_MCP=1`、`mcp::startHttpServer`、または開発ビルドで開きます。サーバーがすでに動いている場合は、新しいレベルがそのまま適用されます。
+- 非推奨で、v1.0.0 で削除予定です。`mcp::setToolLevel` を直接使用してください。`mcp::setToolLevel` はサーバーも開きます。
 '''
 details.ko = '''
-- `mcp::setToolLevel(mcp::ToolLevel::Control)`을 호출합니다. 접근 및 HTTP 동작은 `mcp::setToolLevel`을 참조하세요.
-- 사용이 권장되지 않으며 v1.0.0에서 제거될 예정입니다. `mcp::setToolLevel`을 직접 사용하세요.
+- `mcp::setToolLevel`과 같이 도구 수준을 `mcp::ToolLevel::Control`로 설정하지만, MCP 서버는 열지 않습니다. v0.7과 같이 서버는 `TRUSSC_MCP=1`, `mcp::startHttpServer` 또는 개발 빌드에서 열립니다. 서버가 이미 실행 중이면 새 수준이 바로 적용됩니다.
+- 사용이 권장되지 않으며 v1.0.0에서 제거될 예정입니다. `mcp::setToolLevel`을 직접 사용하세요. `mcp::setToolLevel`은 서버도 엽니다.
 '''
 
 ["mcp::enableDebugger"]

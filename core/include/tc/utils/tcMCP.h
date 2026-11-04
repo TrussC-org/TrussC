@@ -121,6 +121,8 @@ bool& healthOnlyEndpoint();
 bool& explicitlyOpened();
 bool environmentClosesMcp();
 void startConfiguredServer(const char* opener);
+// Deprecated register*Tools() aliases: grant like setToolLevel(), never open.
+void grantToolLevelWithoutOpening(ToolLevel level);
 void initializeMcp();
 std::string markedWindowTitle(const std::string&);
 inline const char* toolLevelName(ToolLevel level) {
