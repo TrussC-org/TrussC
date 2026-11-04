@@ -30,8 +30,9 @@ public:
         setColor(1.0f, 0.9f, 0.4f);
         drawBitmapString("measured fps " + toString(getFrameRate(), 1), 12, 84);
         setColor(0.85f);
-        // Hidden (fully covered or minimized) windows keep updating but stop
-        // drawing: cover this window for a while and watch the two counts.
+        // A hidden window keeps updating but stops drawing. Hidden means
+        // minimised (and, where the OS reports it, fully covered): minimise
+        // this window for a while and watch the two counts.
         drawBitmapString("updates " + toString(getUpdateCount()) + "   draws " + toString(getDrawCount()), 12, 100);
         drawBitmapString("last key " + keyLabel(lastKey_), 12, 116);
         setColor(0.6f);

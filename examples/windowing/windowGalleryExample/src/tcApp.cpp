@@ -9,7 +9,7 @@
 //
 // C closes every gallery window; ESC in a gallery window closes that one.
 // Useful as a quick check on a new machine: borderless key input, fps per
-// window, and what a covered window does (updates keep counting, draws stop).
+// window, and what a minimised window does (updates keep counting, draws stop).
 // Secondary windows: macOS / Windows / Linux; elsewhere SPACE logs an error.
 
 #include "tcApp.h"
