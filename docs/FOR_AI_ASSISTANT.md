@@ -4769,6 +4769,7 @@ SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double
 ### Window — A window on the screen, with its own App, events and drawing state.
 
 ```cpp
+void Window::bringToFront()  // Brings this window to the front and gives it focus.
 void Window::close()  // Requests closure of this window.
 void Window::destroyApp()  // Removes the App from this window and leaves the window open and empty.
 CoreEvents & Window::events()  // Returns this window's event collection.

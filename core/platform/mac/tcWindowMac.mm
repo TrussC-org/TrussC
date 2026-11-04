@@ -66,6 +66,13 @@ void nativeWindowSetSize(Window& w, double width, double height, bool) {
 }
 void nativeWindowSetPosition(Window& w, int x, int y) { setWindowPositionNative(sapp_window_macos_get_window(handle(w)), x, y); }
 IVec2 nativeWindowPosition(const Window& w) { return windowPositionNative(sapp_window_macos_get_window(handle(w))); }
+void nativeWindowBringToFront(Window& w) {
+    NSWindow* window = (__bridge NSWindow*)sapp_window_macos_get_window(handle(w));
+    if (window) {
+        [NSApp activateIgnoringOtherApps:YES];
+        [window makeKeyAndOrderFront:nil];
+    }
+}
 }
 
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {

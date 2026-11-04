@@ -27,18 +27,7 @@
 namespace trussc {
 
 void bringWindowToFront() {
-    auto* target = internal::resolveWindow(true);
-    if (!target) return;
-    Display* display = XOpenDisplay(nullptr);
-    if (!display) return;
-    // ::Window = the X11 window id type (trussc::Window shadows it in this ns)
-    ::Window window = (::Window)(uintptr_t)sapp_window_x11_get_window(internal::WindowRequestAccess::binding(*target).handle);
-    if (window) {
-        XRaiseWindow(display, window);
-        XSetInputFocus(display, window, RevertToParent, CurrentTime);
-        XFlush(display);
-    }
-    XCloseDisplay(display);
+    if (auto* target = internal::resolveWindow(true)) target->bringToFront();
 }
 
 float getDisplayScaleFactor() {

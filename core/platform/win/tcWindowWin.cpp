@@ -66,6 +66,10 @@ void nativeWindowSetSize(Window& w, double width, double height, bool) {
 }
 void nativeWindowSetPosition(Window& w, int x, int y) { setWindowPositionNative(sapp_window_win32_get_hwnd(handle(w)), x, y); }
 IVec2 nativeWindowPosition(const Window& w) { return windowPositionNative(sapp_window_win32_get_hwnd(handle(w))); }
+void nativeWindowBringToFront(Window& w) {
+    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(handle(w));
+    if (hwnd) SetForegroundWindow(hwnd);
+}
 }
 
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {

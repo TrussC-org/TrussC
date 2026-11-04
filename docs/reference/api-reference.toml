@@ -41358,6 +41358,46 @@ details.ko = '''
 '''
 related = ["Window::setFullscreen", "Window::isFullscreen"]
 
+["Window::bringToFront"]
+keywords = ["focus", "raise", "activate", "foreground", "topmost", "dialog"]
+description.en = "Brings this window to the front and gives it focus."
+description.ja = "このウィンドウを前面に出してフォーカスを与える。"
+description.ko = "이 윈도우를 앞으로 올리고 포커스를 준다."
+details.en = '''
+- Raises this window, whichever window's code calls it. For example, the main window's `mousePressed()` can bring a dialog window back to the front.
+- The global `bringWindowToFront()` raises the window of the App that calls it. Use this method to raise a different window.
+- Whether focus moves away from another application is up to the OS and the window manager.
+- Returns no success status. Does nothing on a closed window. For main-thread requirements, see `Window::setApp`.
+'''
+details.ja = '''
+- どのウィンドウのコードから呼んでも、このウィンドウを前面に出します。たとえば、メインウィンドウの `mousePressed()` から、ダイアログのウィンドウを前面に戻せます。
+- グローバルの `bringWindowToFront()` は、呼び出した App のウィンドウを前面に出します。別のウィンドウを前面に出すときは、このメソッドを使ってください。
+- ほかのアプリケーションからフォーカスを移すかどうかは、OS とウィンドウマネージャーが決めます。
+- 成功状態は返しません。閉じたウィンドウに対しては何もしません。メインスレッドでの使用については `Window::setApp` を参照してください。
+'''
+details.ko = '''
+- 어느 창의 코드에서 호출하든 이 창을 앞으로 올립니다. 예를 들어 메인 창의 `mousePressed()`에서 대화 상자 창을 다시 앞으로 가져올 수 있습니다.
+- 전역 `bringWindowToFront()`는 호출한 App의 창을 앞으로 올립니다. 다른 창을 올릴 때는 이 메서드를 사용하세요.
+- 다른 애플리케이션에서 포커스를 옮길지는 OS와 윈도우 매니저가 정합니다.
+- 성공 여부를 반환하지 않습니다. 닫힌 창에서는 아무 동작도 하지 않습니다. 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
+'''
+platform_note.en = '''
+- Available on macOS, Windows and Linux X11; does nothing on iOS, Android, and Web.
+'''
+platform_note.ja = '''
+- macOS・Windows・Linux X11 で利用できます。iOS、Android、Web では何もしません。
+'''
+platform_note.ko = '''
+- macOS, Windows, Linux X11에서 사용할 수 있으며, iOS, Android, Web에서는 아무 작업도 하지 않습니다.
+'''
+snippet = '''
+// tcApp.h: shared_ptr<Window> dialog;   (opened with createWindow)
+void tcApp::mousePressed(Vec2 pos, int button) {
+    if (dialog && dialog->isOpen()) dialog->bringToFront();   // the dialog, not this window
+}
+'''
+related = ["bringWindowToFront", "createWindow", "Window::close"]
+
 ["createWindow"]
 keywords = ["multi window", "second window", "open window", "display"]
 description.en = "Opens a new, empty window."
@@ -42997,16 +43037,19 @@ description.ko = "애플리케이션 윈도우를 앞으로 올리고 포커스�
 details.en = '''
 - Returns no success status and does nothing if the required native window or Linux display connection is unavailable.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
+- To raise a different window, for example a dialog from the main window's code, call `Window::bringToFront()` on its handle.
 '''
 details.ja = '''
 - 成功状態は返しません。必要なネイティブウィンドウや Linux のディスプレイ接続が利用できない場合は何もしません。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
+- 別のウィンドウ（たとえばメインウィンドウのコードからダイアログ）を前面に出すときは、そのハンドルの `Window::bringToFront()` を呼んでください。
 '''
 details.ko = '''
 - 성공 여부를 반환하지 않으며, 필요한 네이티브 윈도우나 Linux 디스플레이 연결을 사용할 수 없으면 아무 작업도 하지 않습니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
+- 다른 창(예: 메인 창의 코드에서 대화 상자)을 앞으로 올릴 때는 그 핸들의 `Window::bringToFront()`를 호출하세요.
 '''
-related = ["setWindowPosition", "setFullscreen"]
+related = ["Window::bringToFront", "setWindowPosition", "setFullscreen"]
 platform_note.en = '''
 - Available on desktop platforms; does nothing on iOS, Android, and Web.
 '''

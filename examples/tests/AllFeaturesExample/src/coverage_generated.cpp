@@ -4841,6 +4841,7 @@ struct Cover_Window : af::Scope<Window> {
     ~Cover_Window(); // Never instantiated.
     static void run() {
         (void)Window();
+        (void)af::val<Window>().bringToFront();
         (void)af::val<Window>().close();
         (void)af::val<Window>().destroyApp();
         (void)af::val<Window>().events();

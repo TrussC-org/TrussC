@@ -86,12 +86,7 @@ void destroySessionAuthority(void* authority) noexcept {
 }
 
 void bringWindowToFront() {
-    auto* target = internal::resolveWindow(true);
-    if (!target) return;
-    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(internal::WindowRequestAccess::binding(*target).handle);
-    if (hwnd) {
-        SetForegroundWindow(hwnd);
-    }
+    if (auto* target = internal::resolveWindow(true)) target->bringToFront();
 }
 
 // ---------------------------------------------------------------------------

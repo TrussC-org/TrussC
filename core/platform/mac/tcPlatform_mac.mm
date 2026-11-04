@@ -25,13 +25,7 @@
 namespace trussc {
 
 void bringWindowToFront() {
-    auto* target = internal::resolveWindow(true);
-    if (!target) return;
-    NSWindow* window = (__bridge NSWindow*)sapp_window_macos_get_window(internal::WindowRequestAccess::binding(*target).handle);
-    if (window) {
-        [NSApp activateIgnoringOtherApps:YES];
-        [window makeKeyAndOrderFront:nil];
-    }
+    if (auto* target = internal::resolveWindow(true)) target->bringToFront();
 }
 
 float getDisplayScaleFactor() {

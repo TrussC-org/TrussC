@@ -970,13 +970,15 @@ IVec2 nativeWindowPosition(const Window&) { return {-1, -1}; }
 void nativeWindowSetFullscreen(Window&, bool) {}
 uint32_t nativeWindowFullscreenPhase(const Window&) { return 0; }
 void nativeWindowToggleFullscreen(Window&) {}
+void nativeWindowBringToFront(Window&) {}
 #endif
 WindowContext& nonWindowContext() { return nonWindowState().context; }
 WindowContext* nonWindowContextIfInitialized() noexcept { return initializedNonWindow; }
 const WindowNativeOperations& productionWindowOperations() {
     static const WindowNativeOperations operations{readMetadata, acquireSwapchain, activate,
         nativeWindowSetTitle, nativeWindowSetSize, nativeWindowSetPosition, nativeWindowPosition,
-        nativeWindowSetFullscreen, nativeWindowFullscreenPhase, nativeWindowToggleFullscreen, closeRecorded, injectEvent};
+        nativeWindowSetFullscreen, nativeWindowFullscreenPhase, nativeWindowToggleFullscreen, closeRecorded, injectEvent,
+        nativeWindowBringToFront};
     return operations;
 }
 void publishWindowMetadata(Window& window, const sapp_tc_window_metadata& metadata) {

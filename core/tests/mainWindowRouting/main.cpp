@@ -18,6 +18,9 @@ void setSize(Window&, double w, double h, bool) { ++sizes; width = w; height = h
 void setFullscreen(Window&, bool value) { ++fullscreenCalls; fullscreen = value; }
 uint32_t phase(const Window&) { return fullscreen ? 2 : 0; }
 void toggle(Window&) { ++fullscreenCalls; fullscreen = !fullscreen; }
+int fronts = 0;
+const Window* frontTarget = nullptr;
+void front(Window& w) { ++fronts; frontTarget = &w; }
 }
 int main() {
     getMainThreadId();
@@ -31,6 +34,7 @@ int main() {
     operations.readMetadata = read; operations.setTitle = setTitle;
     operations.setSize = setSize; operations.setFullscreen = setFullscreen;
     operations.fullscreenPhase = phase; operations.toggleFullscreen = toggle;
+    operations.bringToFront = front;
     internal::bindWindow(*handle, {101}, operations, nullptr);
     handle->setApp<App>(); internal::applyPendingAppForTests(*handle);
     setWindowTitle("Target"); setWindowSize(321, 123); handle->setSize(321, 123);
@@ -41,6 +45,9 @@ int main() {
     const bool ignored = sizes == before;
     toggleFullscreen();
     const bool left = !isFullscreen();
+    // The global raises the sole open window through its binding.
+    bringWindowToFront();
+    const bool soleFront = fronts == 1 && frontTarget == handle.get();
     internal::pixelPerfectMode() = true;
     Window other;
     auto* previous = internal::currentWindowCtx();
@@ -66,12 +73,22 @@ int main() {
     b.currentTarget->width = 300; b.currentTarget->height = 200;
     b.currentTarget->camera.currentViewW = 300; b.currentTarget->camera.currentViewH = 200;
     b.currentTarget->currentMatrix = Mat4::translate(7, 8, 9);
-    bool ownedQueries;
+    bool ownedQueries, explicitFront;
     internal::currentWindowCtx() = &a;
     {
         internal::AppOwnerScope owner(internal::appOwner(*peer.getApp()));
         ownedQueries = getFramebufferWidth() == 300 && getMatrix().m[3] == 7 &&
             worldToScreen({0, 0, 0}).x == 150 && worldToScreen({0, 0, 0}).y == 100;
+        // From the peer's callbacks: the global targets the peer (no native
+        // binding operations, so nothing is recorded), while the handle call
+        // raises the launch window. A window that is not open does nothing.
+        frontTarget = nullptr;
+        bringWindowToFront();
+        const bool globalIsPeer = fronts == 1 && frontTarget == nullptr;
+        handle->bringToFront();
+        const bool handleIsLaunch = fronts == 2 && frontTarget == handle.get();
+        other.bringToFront();
+        explicitFront = globalIsPeer && handleIsLaunch && fronts == 2;
     }
     const bool ambiguousQueries = getWidth() == 0 && getAspectRatio() == 0 &&
         worldToScreen({1, 2, 3}) == Vec3{} && screenToWorld({1, 2}) == Vec3{} && getScale() == 0;
@@ -98,10 +115,11 @@ int main() {
     }
     std::printf("mainWindowRouting: query receivers missing=%d sole=%d owned=%d ambiguous=%d Fbo=%d constructor=%d retired=%d\n",
         missingQueries, soleQueries, ownedQueries, ambiguousQueries, explicitFboQueries, constructorFboQuery, retiredQueries);
+    std::printf("mainWindowRouting: bringToFront sole=%d explicit=%d\n", soleFront, explicitFront);
     a.currentTarget = &a.swapchainTarget;
     internal::WindowRequestAccess::teardown(peer);
     internal::currentWindowCtx() = previous;
-    const bool okay = missingQueries && soleQueries && ownedQueries && ambiguousQueries && explicitFboQueries && constructorFboQuery && retiredQueries && titles == 1 && title == mcp::internal::markedWindowTitle("Target") && sizes == 6 && entered && left && ignored && fullscreenCalls == 2 && oddPixels;
+    const bool okay = soleFront && explicitFront && missingQueries && soleQueries && ownedQueries && ambiguousQueries && explicitFboQueries && constructorFboQuery && retiredQueries && titles == 1 && title == mcp::internal::markedWindowTitle("Target") && sizes == 6 && entered && left && ignored && fullscreenCalls == 2 && oddPixels;
     internal::shutdownRuntime(); internal::endFrameworkLifetime();
     std::printf("mainWindowRouting: explicit controls and omitted query resolution: %s\n", okay ? "PASS" : "FAIL");
     return okay ? 0 : 1;

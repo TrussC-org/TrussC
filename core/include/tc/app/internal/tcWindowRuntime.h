@@ -57,6 +57,7 @@ struct WindowNativeOperations {
     void (*toggleFullscreen)(Window&) = nullptr;
     bool (*closeRecorded)(sapp_window, void*) = nullptr;
     bool (*injectEvent)(sapp_window, void*, const sapp_event*) = nullptr;
+    void (*bringToFront)(Window&) = nullptr;
 };
 struct WindowBinding {
     sapp_window handle{};
@@ -150,6 +151,7 @@ IVec2 nativeWindowPosition(const Window&);
 void nativeWindowSetFullscreen(Window&, bool);
 uint32_t nativeWindowFullscreenPhase(const Window&);
 void nativeWindowToggleFullscreen(Window&);
+void nativeWindowBringToFront(Window&);
 const WindowNativeOperations& productionWindowOperations();
 bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations& operations, void* user);
 bool bindNativeWindow(uint32_t id, void* window) noexcept;

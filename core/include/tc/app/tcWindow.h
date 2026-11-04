@@ -27,7 +27,7 @@ namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
 inline constexpr bool supportsSecondaryWindows();
 // One control entry for explicit handles and context-aware globals.
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery };
+enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery, BringToFront };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 WindowControlHook& windowControlHookForTests();
 using WindowFullscreenHook = WindowFullscreenPhase (*)(const Window&);
@@ -134,6 +134,12 @@ public:
     bool isFullscreen() const;
     // Flip the most recently requested state, including during macOS animation.
     void toggleFullscreen() { control(internal::WindowControl::ToggleFullscreen); }
+
+    // Raise THIS window above the others and give it keyboard focus, whichever
+    // window's callback is running (the global bringWindowToFront() targets
+    // the current window). The OS may refuse to take focus from another
+    // application. No-op on a closed window, and on iOS / Android / Web.
+    void bringToFront() { control(internal::WindowControl::BringToFront); }
 
     void setClearColor(const Color& c) { clearColor_ = c; clearColorSet_ = true; }
 
@@ -714,6 +720,9 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
             case internal::WindowControl::ToggleFullscreen:
                 if (ops.toggleFullscreen) ops.toggleFullscreen(*this);
                 break;
+            case internal::WindowControl::BringToFront:
+                if (ops.bringToFront) ops.bringToFront(*this);
+                break;
         }
         return result;
     }
@@ -775,6 +784,8 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         case internal::WindowControl::ToggleFullscreen:
             if (!internal::supportsSecondaryWindows()) sapp_toggle_fullscreen();
             break;
+        case internal::WindowControl::BringToFront:
+            break;   // single-window platforms (iOS / Android / Web): always in front
     }
     return result;
 }

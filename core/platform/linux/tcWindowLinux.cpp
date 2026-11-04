@@ -74,6 +74,18 @@ void nativeWindowSetPosition(Window& w, int x, int y) {
 IVec2 nativeWindowPosition(const Window& w) {
     return x11FramePosition((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)));
 }
+void nativeWindowBringToFront(Window& w) {
+    Display* display = XOpenDisplay(nullptr);
+    if (!display) return;
+    // ::Window = the X11 window id type (trussc::Window shadows it in this ns)
+    ::Window window = (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w));
+    if (window) {
+        XRaiseWindow(display, window);
+        XSetInputFocus(display, window, RevertToParent, CurrentTime);
+        XFlush(display);
+    }
+    XCloseDisplay(display);
+}
 }
 
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
