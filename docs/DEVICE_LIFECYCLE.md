@@ -1,14 +1,14 @@
 # Device lifecycle
 
-Classes that open a device (a serial port, a camera, a MIDI port, a depth camera, an audio device) follow one small convention. `Serial` is the first, `VideoGrabber` the second; the others follow (#415).
+Classes that open a device (a serial port, a camera, a MIDI port, a depth camera, an audio device) follow one small convention. In v0.8.0, `Serial`, `DepthCamera`, `VideoGrabber`, `MidiIn` / `MidiOut`, `AudioEngine` and `MicInput` follow it.
 
 ## The common surface
 
 | Member | Meaning |
 |---|---|
 | `static listDevices()` | List the devices (each class keeps its own form) |
-| `setup(...)` | Open a device; the arguments are those of the class (path and baud, width and height, port, ...) |
-| `bool setup()` | Reopen the last device with the last settings |
+| `setup(...)` | Open a device; the arguments are those of the class (path and baud, width and height, ...). MIDI opens with `openPort()` / `openVirtualPort()`, `MicInput` with `start()`, and `DepthCamera` has only `setup()` |
+| `bool setup()` | Open again with the last settings (see rule 2 for which device) |
 | `bool isConnected() const` | True only while the device is open |
 | `void close()` | Close the device |
 | `Event<DeviceDisconnectEventArgs> onDisconnect` | The OS reported the device lost; `e.reason` says why |
@@ -18,9 +18,9 @@ Older per-class names (`isInitialized`, `isOpen`, `closePort`, ...) stay as alia
 ## The five rules
 
 1. `isConnected()` is true only while the device is open.
-2. `setup()` with no arguments reopens the last device with the last settings. On failure it returns `false` and logs an error.
+2. `setup()` with no arguments opens again with the last settings. `Serial`, `VideoGrabber`, MIDI and `DepthCamera` reopen the last device; `AudioEngine` and `MicInput` open the system default device. On failure it returns `false` and logs an error.
 3. `close()` closes the device and never fires `onDisconnect`.
-4. `onDisconnect` fires once, on the main thread (the usual off-thread delivery of the Runtime, in the owning App's context), and only when the OS, the SDK or the library reports the device lost. `isConnected()` is already false when it fires.
+4. `onDisconnect` fires once, and only when the OS, the SDK or the library reports the device lost. `isConnected()` is already false when it fires. Which thread it fires on depends on the class (see [Threads](#threads)).
 5. Nothing fires from the destructor.
 
 A device is an ordinary member object, closed by its destructor. Opening the same physical device twice is not refused. There is no waiting or retrying when no device is there at startup. Where a platform does not tell us about a loss, the class documentation says so.
@@ -47,7 +47,7 @@ Or call `setup()` from the `onDisconnect` listener. See `examples/communication/
 
 ## Threads
 
-The event fires on the thread that found the loss, which is normally the main thread. A listener that must run on the main thread whichever thread uses the device registers with `Deliver::Main`, as for network events:
+The event fires on the thread that found the loss. For `VideoGrabber`, MIDI, `AudioEngine` and `MicInput` that is always the main thread. For `Serial` it is the thread whose read or write found the loss, and for `DepthCamera` the thread that called `reportLost()`. A listener that must run on the main thread whichever thread uses the device registers with `Deliver::Main`, as for network events:
 
 ```cpp
 EventListener listener = serial.onDisconnect.listen([](DeviceDisconnectEventArgs& e) {

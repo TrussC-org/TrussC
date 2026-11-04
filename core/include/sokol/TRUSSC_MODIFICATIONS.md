@@ -299,8 +299,8 @@ content would be undefined.
 
 **Changes (both in `_sg_mtl_begin_pass`, swapchain branch, marked `[TrussC]`):**
 - MSAA color: when `action->depth.store_action == SG_STOREACTION_STORE` (the
-  "this pass may be suspended/resumed" hint set by
-  `trussc::ensureSwapchainPass()` / `resumeSwapchainPass()`), use
+  "this pass may be suspended/resumed" hint that `RenderTarget::beginPass()`
+  sets for a resumable pass, in `tc/app/tcGlobal.cpp`), use
   `MTLStoreActionStoreAndMultisampleResolve` instead of `MultisampleResolve`.
 - Depth: honor `action->depth.store_action` via `_sg_mtl_store_action()`
   instead of hardcoded `DontCare` (default `DONTCARE` keeps upstream behavior).
