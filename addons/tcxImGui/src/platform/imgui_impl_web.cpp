@@ -13,11 +13,14 @@
 #include "imgui/imgui_tables.cpp"
 #include "imgui/imgui_widgets.cpp"
 #include "imgui/imgui_demo.cpp"
-#include "imgui/imgui_stdlib.cpp"
 
 // Keep ImGui's MSVC formatting aliases from renaming later std:: calls.
 #undef snprintf
 #undef vsnprintf
+
+// After the #undefs: imgui_stdlib pulls in <string>, and std::snprintf must
+// not be declared while ImGui's MSVC snprintf alias is active.
+#include "imgui/imgui_stdlib.cpp"
 
 // sokol_imgui 実装
 #include "tcImGuiTargetImpl.h"
