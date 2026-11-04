@@ -1808,17 +1808,20 @@ description.ja = "音声出力デバイスが開いて動作中かを返す。"
 description.ko = "오디오 출력 장치가 열려 실행 중인지 반환한다."
 related = ["AudioEngine::setup", "AudioEngine::close", "AudioEngine::onDisconnect", "AudioEngine::isInitialized"]
 details.en = '''
-- Returns `true` only while the device is open: after a successful `setup()` or `init()`, until `close()`, `shutdown()`, a failed re-initialization, or a device the OS reported stopped. It is already `false` when `onDisconnect` fires.
+- Returns `true` only while the device is open: after a successful `setup()` or `init()`, until `close()`, `shutdown()`, a failed re-initialization, or the OS reporting that a device opened by name stopped. It is already `false` when `onDisconnect` fires.
+- A device opened as the system default follows the OS default and never reports a loss, so this stays `true` for it. If every output device disappears, the sound just stops (and resumes when the OS has a default again). Apps that need to know open the device by name.
 - It reads an atomic, so any thread may call it. `isInitialized()` is the older name for the same state.
 - A backend that does not report the stop of a device that went away leaves this `true` while the audio is silent. See `AudioEngine::onDisconnect`.
 '''
 details.ja = '''
-- デバイスが開いている間だけ `true` を返します。`setup()` または `init()` の成功後から、`close()`、`shutdown()`、再初期化の失敗、OS が停止を報告したデバイスのいずれかまでです。`onDisconnect` が発火する時点で、すでに `false` です。
+- デバイスが開いている間だけ `true` を返します。`setup()` または `init()` の成功後から、`close()`、`shutdown()`、再初期化の失敗、名前で開いたデバイスの停止を OS が報告したときのいずれかまでです。`onDisconnect` が発火する時点で、すでに `false` です。
+- システム既定として開いたデバイスは OS の既定に追従し、喪失を報告しないので、`true` のままです。出力デバイスがすべてなくなった場合は音が止まるだけです（OS に既定のデバイスが戻ると再開します）。喪失を知る必要があるアプリは、デバイスを名前で開きます。
 - アトミック変数を読むだけなので、どのスレッドからでも呼べます。`isInitialized()` は同じ状態を指す古い名前です。
 - なくなったデバイスの停止をバックエンドが報告しない場合は、音が無音になっても `true` のままです。`AudioEngine::onDisconnect` を参照してください。
 '''
 details.ko = '''
-- 장치가 열려 있는 동안에만 `true`를 반환합니다. `setup()` 또는 `init()` 성공 후부터 `close()`, `shutdown()`, 재초기화 실패, OS가 정지를 보고한 장치 중 하나가 발생할 때까지입니다. `onDisconnect`가 발생하는 시점에는 이미 `false`입니다.
+- 장치가 열려 있는 동안에만 `true`를 반환합니다. `setup()` 또는 `init()` 성공 후부터 `close()`, `shutdown()`, 재초기화 실패, 이름으로 연 장치의 정지를 OS가 보고한 때 중 하나가 발생할 때까지입니다. `onDisconnect`가 발생하는 시점에는 이미 `false`입니다.
+- 시스템 기본으로 연 장치는 OS 기본 장치를 따라가며 손실을 보고하지 않으므로 `true`로 남습니다. 출력 장치가 모두 사라지면 소리만 멈춥니다(OS에 기본 장치가 다시 생기면 재개합니다). 손실을 알아야 하는 앱은 장치를 이름으로 엽니다.
 - 원자 변수를 읽을 뿐이므로 어느 스레드에서든 호출할 수 있습니다. `isInitialized()`는 같은 상태를 가리키는 이전 이름입니다.
 - 사라진 장치의 정지를 백엔드가 보고하지 않으면 소리가 무음이 되어도 `true`로 남습니다. `AudioEngine::onDisconnect`를 참조하세요.
 '''
@@ -1870,29 +1873,35 @@ related = ["AudioDeviceInfo"]
 ["AudioEngine::onDisconnect"]
 category = "audioengine"
 keywords = ["unplug", "disconnect", "device lost", "usb audio", "bluetooth", "headset"]
-description.en = "Reports when the OS says the audio output device stopped."
-description.ja = "OS が音声出力デバイスの停止を報告したことを通知する。"
-description.ko = "OS가 오디오 출력 장치 정지를 보고했음을 알린다."
+description.en = "Reports when the OS says an audio output device opened by name stopped."
+description.ja = "名前で開いた音声出力デバイスの停止を OS が報告したことを通知する。"
+description.ko = "이름으로 연 오디오 출력 장치의 정지를 OS가 보고했음을 알린다."
 related = ["DeviceDisconnectEventArgs", "AudioEngine::isConnected", "AudioEngine::setup", "AudioEngine::close", "AudioEngine::audioDeviceChanged"]
 details.en = '''
-- This `Event<DeviceDisconnectEventArgs>` fires once per open device, and only when the OS or the audio library reports that the running output device stopped by itself, for example a USB audio interface that was unplugged or a Bluetooth headset that was switched off while it was the chosen device. `reason` says what happened. `isConnected()` is already false when it fires.
+- This `Event<DeviceDisconnectEventArgs>` fires once per open device, and only when the OS or the audio library reports that a running output device opened by name (`AudioSettings::deviceName`) stopped by itself, for example a USB audio interface that was unplugged or a Bluetooth headset that was switched off. `reason` says what happened. `isConnected()` is already false when it fires.
+- The device is closed before the event fires, so its sound never moves to another device. To keep playing on the system default after it is lost, call `setup()` inside the listener.
+- A device opened as the system default follows the OS default and never reports a loss. If every output device disappears, the sound just stops (and resumes when the OS has a default again). Apps that need to know open the device by name.
 - It fires on the main thread at the Runtime's next host turn, never on the audio thread; the audio thread only records the stop. It does not fire without a running app loop (`runApp()` or `runHeadlessApp()`).
-- `close()`, `shutdown()`, a re-initialization with `setup()` or `init()`, and a reroute to a new OS default device never fire it. Following the default device is not a loss. If the app reopens the device before the event is delivered, the pending loss is dropped.
-- Which backends report a stop depends on the OS and driver. Where the backend says nothing about a device that went away, the audio just stops and `isConnected()` stays `true`; the engine does not poll. PulseAudio also reports a suspended sink as a stop and then resumes by itself.
+- `close()`, `shutdown()` and a re-initialization with `setup()` or `init()` never fire it. If the app reopens the device before the event is delivered, the pending loss is dropped.
+- Which backends report a stop depends on the OS and driver. Where the backend says nothing about a device that went away, the audio just stops and `isConnected()` stays `true`; the engine does not poll. PulseAudio also reports a suspended sink as a stop, so a device opened by name reports a loss then.
 - To open the device again, call `setup()` / `setup(settings)` again. Nothing is rerouted or retried by the engine.
 '''
 details.ja = '''
-- この `Event<DeviceDisconnectEventArgs>` は、開いているデバイスごとに 1 回、OS またはオーディオライブラリが「動作中の出力デバイスが自ら停止した」と報告したときだけ発火します。たとえば、選択中の USB オーディオインターフェースを抜いた場合や、Bluetooth ヘッドセットの電源を切った場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- この `Event<DeviceDisconnectEventArgs>` は、開いているデバイスごとに 1 回、OS またはオーディオライブラリが「名前（`AudioSettings::deviceName`）で開いた動作中の出力デバイスが自ら停止した」と報告したときだけ発火します。たとえば、USB オーディオインターフェースを抜いた場合や、Bluetooth ヘッドセットの電源を切った場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- 発火する前にデバイスを閉じるので、音がほかのデバイスに移ることはありません。喪失後もシステム既定のデバイスで再生を続けるには、リスナーの中で `setup()` を呼びます。
+- システム既定として開いたデバイスは OS の既定に追従し、喪失を報告しません。出力デバイスがすべてなくなった場合は音が止まるだけです（OS に既定のデバイスが戻ると再開します）。喪失を知る必要があるアプリは、デバイスを名前で開きます。
 - Runtime の次のホストターンでメインスレッドで発火し、オーディオスレッドでは発火しません。オーディオスレッドは停止を記録するだけです。アプリのループ（`runApp()` または `runHeadlessApp()`）が動いていないときは発火しません。
-- `close()`、`shutdown()`、`setup()` や `init()` による再初期化、新しい OS 既定デバイスへの再ルーティングでは発火しません。既定デバイスに追従することは喪失ではありません。通知が届く前にアプリがデバイスを開き直した場合、保留中の喪失は破棄します。
-- どのバックエンドが停止を報告するかは OS とドライバーによります。なくなったデバイスについてバックエンドが何も報告しない場合は、音が止まるだけで `isConnected()` は `true` のままです。エンジンはポーリングしません。PulseAudio は、サスペンドされたシンクも停止として報告し、その後自動で復帰します。
+- `close()`、`shutdown()`、`setup()` や `init()` による再初期化では発火しません。通知が届く前にアプリがデバイスを開き直した場合、保留中の喪失は破棄します。
+- どのバックエンドが停止を報告するかは OS とドライバーによります。なくなったデバイスについてバックエンドが何も報告しない場合は、音が止まるだけで `isConnected()` は `true` のままです。エンジンはポーリングしません。PulseAudio は、サスペンドされたシンクも停止として報告するため、名前で開いたデバイスはそのとき喪失を報告します。
 - デバイスを開き直すには、`setup()` / `setup(settings)` をもう一度呼びます。エンジンは再ルーティングも再試行もしません。
 '''
 details.ko = '''
-- 이 `Event<DeviceDisconnectEventArgs>`는 열린 장치마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 출력 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 선택한 USB 오디오 인터페이스를 뽑았거나 Bluetooth 헤드셋의 전원을 껐을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- 이 `Event<DeviceDisconnectEventArgs>`는 열린 장치마다 한 번, OS 또는 오디오 라이브러리가 이름(`AudioSettings::deviceName`)으로 연 실행 중인 출력 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 USB 오디오 인터페이스를 뽑았거나 Bluetooth 헤드셋의 전원을 껐을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- 이벤트가 발생하기 전에 장치를 닫으므로 소리가 다른 장치로 옮겨 가지 않습니다. 손실 후에도 시스템 기본 장치에서 계속 재생하려면 리스너 안에서 `setup()`을 호출하세요.
+- 시스템 기본으로 연 장치는 OS 기본 장치를 따라가며 손실을 보고하지 않습니다. 출력 장치가 모두 사라지면 소리만 멈춥니다(OS에 기본 장치가 다시 생기면 재개합니다). 손실을 알아야 하는 앱은 장치를 이름으로 엽니다.
 - Runtime의 다음 호스트 턴에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 오디오 스레드는 정지를 기록만 합니다. 앱 루프(`runApp()` 또는 `runHeadlessApp()`)가 실행 중이 아니면 발생하지 않습니다.
-- `close()`, `shutdown()`, `setup()`이나 `init()`에 의한 재초기화, 새로운 OS 기본 장치로의 경로 변경에서는 발생하지 않습니다. 기본 장치를 따라가는 것은 손실이 아닙니다. 이벤트가 전달되기 전에 앱이 장치를 다시 열면 대기 중인 손실은 버립니다.
-- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 사라진 장치에 대해 백엔드가 아무것도 보고하지 않으면 소리만 멈추고 `isConnected()`는 `true`로 남습니다. 엔진은 폴링하지 않습니다. PulseAudio는 일시 중단된 싱크도 정지로 보고한 뒤 스스로 복귀합니다.
+- `close()`, `shutdown()`, `setup()`이나 `init()`에 의한 재초기화에서는 발생하지 않습니다. 이벤트가 전달되기 전에 앱이 장치를 다시 열면 대기 중인 손실은 버립니다.
+- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 사라진 장치에 대해 백엔드가 아무것도 보고하지 않으면 소리만 멈추고 `isConnected()`는 `true`로 남습니다. 엔진은 폴링하지 않습니다. PulseAudio는 일시 중단된 싱크도 정지로 보고하므로, 이름으로 연 장치는 이때 손실을 보고합니다.
 - 장치를 다시 열려면 `setup()` / `setup(settings)`를 다시 호출하세요. 엔진은 경로 변경도 재시도도 하지 않습니다.
 '''
 snippet = '''
@@ -1901,8 +1910,12 @@ EventListener lostListener;
 
 // tcApp.cpp
 void tcApp::setup() {
+    AudioSettings settings;
+    settings.deviceName = "External Headphones";   // a name from AudioEngine::listDevices()
+    AudioEngine::getInstance().setup(settings);
     lostListener = AudioEngine::getInstance().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
         logWarning() << "audio lost: " << e.reason;
+        AudioEngine::getInstance().setup();   // go on with the system default device
     });
 }
 '''
@@ -18032,25 +18045,25 @@ description.ja = "OS が入力デバイスの停止を報告したことを通�
 description.ko = "OS가 캡처 장치 정지를 보고했음을 알린다."
 related = ["DeviceDisconnectEventArgs", "MicInput::isConnected", "MicInput::setup", "MicInput::close"]
 details.en = '''
-- This `Event<DeviceDisconnectEventArgs>` fires once per started capture, and only when the OS or the audio library reports that the running capture device stopped by itself, for example a USB microphone that was unplugged. `reason` says what happened. `isConnected()` is already false when it fires.
+- This `Event<DeviceDisconnectEventArgs>` fires once per started capture, and only when the OS or the audio library reports that the running capture device stopped by itself, for example a USB microphone that was unplugged. On Windows this includes a change of the default microphone. `reason` says what happened. `isConnected()` is already false when it fires.
 - It fires on the main thread during `runApp()` or `runHeadlessApp()`, like `onStart`, never on the audio thread; in a bare `main()` without an app run it does not fire. Web does not report a loss.
 - `close()`, `stop()`, `start()` again and destroying the `MicInput` never fire it.
 - Which backends report a stop depends on the OS and driver. Where the backend says nothing, `isConnected()` stays true and `getBuffer()` stops getting new samples.
-- To open the microphone again, call `setup()`; it reopens the system default capture device at the last sample rate.
+- Call `setup()` in the listener to reopen the default microphone at the last sample rate.
 '''
 details.ja = '''
-- この `Event<DeviceDisconnectEventArgs>` は、開始した入力ごとに 1 回、OS またはオーディオライブラリが「動作中の入力デバイスが自ら停止した」と報告したときだけ発火します。たとえば USB マイクを抜いた場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- この `Event<DeviceDisconnectEventArgs>` は、開始した入力ごとに 1 回、OS またはオーディオライブラリが「動作中の入力デバイスが自ら停止した」と報告したときだけ発火します。たとえば USB マイクを抜いた場合です。Windows では、既定のマイクが変わった場合も含みます。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
 - `onStart` と同じく `runApp()` または `runHeadlessApp()` の間にメインスレッドで発火し、オーディオスレッドでは発火しません。アプリの実行がない素の `main()` では発火しません。Web は喪失を報告しません。
 - `close()`、`stop()`、もう一度の `start()`、`MicInput` の破棄では発火しません。
 - どのバックエンドが停止を報告するかは OS とドライバーによります。バックエンドが何も報告しない場合は、`isConnected()` は true のままで、`getBuffer()` に新しいサンプルが入らなくなります。
-- マイクを開き直すには `setup()` を呼びます。システム既定の入力デバイスを直前のサンプルレートで開き直します。
+- リスナーの中で `setup()` を呼ぶと、既定のマイクを直前のサンプルレートで開き直します。
 '''
 details.ko = '''
-- 이 `Event<DeviceDisconnectEventArgs>`는 시작한 캡처마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 캡처 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 USB 마이크를 뽑았을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- 이 `Event<DeviceDisconnectEventArgs>`는 시작한 캡처마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 캡처 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 USB 마이크를 뽑았을 때입니다. Windows에서는 기본 마이크가 바뀐 경우도 포함합니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
 - `onStart`와 마찬가지로 `runApp()` 또는 `runHeadlessApp()` 중에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 앱 실행이 없는 맨 `main()`에서는 발생하지 않습니다. Web은 손실을 보고하지 않습니다.
 - `close()`, `stop()`, 다시 `start()`, `MicInput` 파괴에서는 발생하지 않습니다.
 - 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 백엔드가 아무것도 보고하지 않으면 `isConnected()`는 true로 남고 `getBuffer()`에는 새 샘플이 들어오지 않습니다.
-- 마이크를 다시 열려면 `setup()`을 호출하세요. 시스템 기본 캡처 장치를 마지막 샘플 레이트로 다시 엽니다.
+- 리스너 안에서 `setup()`을 호출하면 기본 마이크를 마지막 샘플 레이트로 다시 엽니다.
 '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
@@ -18060,6 +18073,7 @@ EventListener lostListener;
 void tcApp::setup() {
     lostListener = getMicInput().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
         logWarning() << "microphone lost: " << e.reason;
+        getMicInput().setup();   // reopen the default microphone
     });
     getMicInput().start(48000);
 }

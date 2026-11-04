@@ -216,10 +216,13 @@ void checkLifecycle() {
 
     // Rule 1: isConnected() is true only while the device is open
     check("lifecycle: stopped engine is not connected", !engine.isConnected() && !engine.isInitialized());
+    // Opened by name: a loss releases the device (the default-opened case
+    // is checked at the end)
     AudioSettings settings;
     settings.backend = AudioBackend::Null;
     settings.sampleRate = 44100;
     settings.channels = 1;
+    settings.deviceName = "NULL Playback Device";
     check("lifecycle: setup(settings) opens the device", engine.setup(settings) && engine.isConnected());
     check("lifecycle: isInitialized() is the same state", engine.isInitialized());
 
@@ -232,6 +235,7 @@ void checkLifecycle() {
     check("lifecycle: the reason says what happened", reason.find("stopped") != string::npos);
     internal::drainMainThreadQueue();
     check("lifecycle: it does not fire again", lost == 1 && !engine.isConnected());
+    check("lifecycle: the delivered loss released the device", !internal::AudioDeviceLoss::injectStopForTests());
 
     // Rule 2: setup() is init(): the system default device (the backend and
     // device name of setup(settings) are not kept) with the last rate and
@@ -275,6 +279,57 @@ void checkLifecycle() {
     internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::None);
     internal::drainMainThreadQueue();
     check("lifecycle: a failed setup() does not fire", lost == 1);
+
+    // A stop notification while a device opened by name keeps running, as
+    // Core Audio sends it when it moves such an output unit to the default
+    // device: the delivered loss closes the device, nothing keeps playing.
+    atomic<int> callbacks{0};
+    EventListener counter = engine.audioOut.listen([&](AudioOutBuffer&) { ++callbacks; });
+    check("lifecycle: reopen for the still-running loss", engine.setup(settings) && engine.isConnected());
+    thread([] { internal::AudioDeviceLoss::stopped(); }).join();
+    const int notified = callbacks.load();
+    check("lifecycle: the stopped device still runs before delivery",
+          !engine.isConnected() && waitFor([&] { return callbacks.load() > notified + 2; }));
+    internal::drainMainThreadQueue();
+    check("lifecycle: the still-running loss fires", lost == 2 && !engine.isConnected());
+    const int released = callbacks.load();
+    this_thread::sleep_for(chrono::milliseconds(100));
+    check("lifecycle: no audio callback after the delivered loss", callbacks.load() == released);
+    // Last: on a device still held, the seam itself would stop it
+    check("lifecycle: the delivered loss holds no device", !internal::AudioDeviceLoss::injectStopForTests());
+    check("lifecycle: setup(settings) brings the device back", engine.setup(settings) && engine.isConnected() &&
+          waitFor([&] { return callbacks.load() > released; }));
+
+    // An app that wants to go on playing on the default device reopens it
+    // in the listener (setup() there; the Null backend here keeps the test
+    // off real hardware). The lost device was released before it ran.
+    AudioSettings defaults = settings;
+    defaults.deviceName.clear();
+    bool reopened = false;
+    EventListener reopener = engine.onDisconnect.listen([&](DeviceDisconnectEventArgs&) {
+        reopened = engine.setup(defaults);
+    });
+    check("lifecycle: loss for the reopening listener", loseDevice(engine));
+    internal::drainMainThreadQueue();
+    check("lifecycle: setup() inside onDisconnect reconnects", lost == 3 && reopened && engine.isConnected());
+    reopener.disconnect();
+
+    // Opened as the system default (as the listener above did): the device
+    // follows the OS default and ignores "stopped" (WASAPI posts stopped,
+    // rerouted, started on every unplug of the default device)
+    thread([] { internal::AudioDeviceLoss::stopped(); }).join();
+    check("lifecycle: a default-opened device stays connected on stopped", engine.isConnected());
+    internal::drainMainThreadQueue();
+    check("lifecycle: a default-opened device fires no onDisconnect", lost == 3 && engine.isConnected());
+    const int kept = callbacks.load();
+    check("lifecycle: a default-opened device keeps running after stopped",
+          waitFor([&] { return callbacks.load() > kept + 2; }));
+    check("lifecycle: a default-opened device is still held", internal::AudioDeviceLoss::injectStopForTests());
+    // The engine's own release of a default device does not fire either
+    engine.close();
+    internal::drainMainThreadQueue();
+    check("lifecycle: close() of a default-opened device does not fire", lost == 3 && !engine.isConnected());
+    counter.disconnect();
     listener.disconnect();
     engine.shutdown();
 }
