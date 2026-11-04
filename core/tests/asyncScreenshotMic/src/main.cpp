@@ -184,35 +184,56 @@ void micTests() {
     internal::setMicBackendForTests({}, {});
 }
 
-// #415: device lifecycle (docs/DEVICE_LIFECYCLE.md) of MicInput. The
-// microphone is always the system default capture device, which follows the
-// OS default and never reports a loss, so onDisconnect never fires.
+// #415: device lifecycle (docs/DEVICE_LIFECYCLE.md) of MicInput. The fake
+// backend stands in for miniaudio: micStopped() is what its stop notification
+// calls, and the fake close calls it too, as uninit of a real device does.
 void micLifecycleTests() {
     newRun();
     internal::setMicAuthorizationForTests([] { return internal::MicAuthorization::Authorized; }, {});
     vector<int> openedRates;
+    atomic<internal::MicState*> open{nullptr};
     internal::setMicBackendForTests([&](internal::MicState& state) {
-        openedRates.push_back(state.sampleRate); state.name = "Fake capture";
+        open = &state; openedRates.push_back(state.sampleRate); state.name = "Fake capture";
         return MicStartResult{true, {}};
-    }, [](internal::MicState&) {});
+    }, [&](internal::MicState& state) { internal::micStopped(state); open = nullptr; });
+    auto lose = [&] {
+        thread([&] { if (auto* state = open.load()) internal::micStopped(*state); }).join();
+    };
     {
         MicInput mic;
         int lost = 0;
-        auto listener = mic.onDisconnect.listen([&](DeviceDisconnectEventArgs&) { ++lost; });
+        bool onMain = false, connectedInListener = true;
+        string reason;
+        auto listener = mic.onDisconnect.listen([&](DeviceDisconnectEventArgs& e) {
+            ++lost; reason = e.reason; onMain = isMainThread(); connectedInListener = mic.isConnected();
+        });
         check("mic lifecycle: not connected before start", !mic.isConnected());
         check("mic lifecycle: start opens", mic.start(22050) && mic.isConnected());
-        mic.close(); finish();
-        check("mic lifecycle: close() never fires", !mic.isConnected() && lost == 0);
+        lose();
+        check("mic lifecycle: a device stop clears isConnected() at once", !mic.isConnected() && !mic.isRunning() && lost == 0);
+        drain();
+        check("mic lifecycle: onDisconnect fires once, on the main thread", lost == 1 && onMain);
+        check("mic lifecycle: not connected in the listener, reason set", !connectedInListener && !reason.empty());
+        lose(); drain();
+        check("mic lifecycle: a second stop does not fire again", lost == 1);
         check("mic lifecycle: setup() reopens with the last sample rate", mic.setup() && mic.isConnected() &&
               openedRates.size() == 2 && openedRates[1] == 22050);
         mic.close(); finish();
-        check("mic lifecycle: onDisconnect never fires", lost == 0);
+        check("mic lifecycle: close() never fires", !mic.isConnected() && lost == 1);
+        check("mic lifecycle: reopen for the pending-loss cases", mic.setup());
+        lose();
+        check("mic lifecycle: setup() before delivery reconnects", mic.setup() && mic.isConnected());
+        drain();  // not finish(): the running mic's lifecycle thread is a pending load
+        check("mic lifecycle: the dropped loss does not fire", lost == 1 && mic.isConnected());
+        lose(); mic.close(); finish();
+        check("mic lifecycle: close() before delivery drops the loss", lost == 1);
     }
     int scopedLost = 0;
     {
         MicInput scoped;
         auto listener = scoped.onDisconnect.listen([&](DeviceDisconnectEventArgs&) { ++scopedLost; });
         scoped.start();
+        lose();
     }
     finish();
     check("mic lifecycle: the destructor fires nothing", scopedLost == 0);

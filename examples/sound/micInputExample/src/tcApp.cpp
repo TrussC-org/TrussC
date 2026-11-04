@@ -7,6 +7,9 @@
 void tcApp::setup() {
     fftInput.resize(FFT_SIZE, 0.0f);
     spectrum.resize(FFT_SIZE / 2, 0.0f);
+    lostListener = getMicInput().onDisconnect.listen([](DeviceDisconnectEventArgs& e) {
+        logWarning("tcApp") << "microphone lost: " << e.reason;
+    });
     getMicInput().start();
 }
 
