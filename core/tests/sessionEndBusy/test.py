@@ -46,6 +46,9 @@ def run(name,args,expected=None,deadline=8,exitcode=0):
  if not good:raise SystemExit(log)
 run('deterministic',[])
 run('watchdog-runs',['watchdog-runs'])
+run('watchdog-sleep',['watchdog-sleep'])
+run('watchdog-fires',['watchdog-fires','0.3'])
+if not sanitized:assert 0.3<=records[-1]['seconds']<1.5,'armed watchdog missed its deadline'
 run('query',['query'])
 run('worker-query',['worker-query'])
 if not sanitized:

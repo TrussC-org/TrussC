@@ -1,5 +1,6 @@
 #include "tcExit.h"
 #include <mutex>
+#include <condition_variable>
 #include <atomic>
 #include <csignal>
 #include <cmath>
@@ -41,6 +42,10 @@ bool LogoutDeadline::expire(Clock::time_point now) noexcept {
     return state_.compare_exchange_strong(expected, Expired, std::memory_order_acq_rel);
 }
 void LogoutDeadline::cancel() noexcept { state_.exchange(Cancelled, std::memory_order_acq_rel); }
+LogoutDeadline::Clock::time_point LogoutDeadline::armedDeadline() const noexcept {
+    if (state_.load(std::memory_order_acquire) != Armed) return Clock::time_point::max();
+    return Clock::time_point(Clock::duration(deadline_.load(std::memory_order_relaxed)));
+}
 [[noreturn]] void terminateSessionProcess(int code) noexcept {
 #ifdef _WIN32
     TerminateProcess(GetCurrentProcess(), static_cast<UINT>(code));
@@ -53,11 +58,13 @@ void LogoutDeadline::cancel() noexcept { state_.exchange(Cancelled, std::memory_
 namespace {
 struct LogoutWorker {
     LogoutDeadline deadline;
-    std::atomic<bool> stop{false};
+    std::mutex mutex;
+    std::condition_variable wake;
+    bool stop = false; // guarded by mutex
     std::thread thread;
 };
-// Prepared on main before native session receivers can run. The worker only
-// observes the atomic deadline and stop flag.
+// Prepared on main before native session receivers can run. The worker sleeps
+// until arm or stop wakes it, then until the atomic deadline.
 LogoutWorker& logoutWorker() { static auto* worker = new LogoutWorker; return *worker; }
 }
 #endif
@@ -65,14 +72,17 @@ void prepareLogoutWatchdog() {
 #ifndef __EMSCRIPTEN__
     cancelLogoutWatchdog();
     // Prepare storage and the worker at run admission, before constructors or
-    // native callbacks can arrive. An idle commit only arms atomics.
+    // native callbacks can arrive. An idle commit arms atomics and wakes it.
     auto& worker = logoutWorker();
     worker.deadline.reset();
-    worker.stop.store(false, std::memory_order_release);
+    worker.stop = false;
     worker.thread = std::thread([state = &worker] {
-        while (!state->stop.load(std::memory_order_acquire)) {
-            if (state->deadline.expire(LogoutDeadline::Clock::now())) terminateSessionProcess();
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::unique_lock<std::mutex> lock(state->mutex);
+        while (!state->stop) {
+            const auto deadline = state->deadline.armedDeadline();
+            if (deadline == LogoutDeadline::Clock::time_point::max()) state->wake.wait(lock);
+            else if (state->deadline.expire(LogoutDeadline::Clock::now())) terminateSessionProcess();
+            else state->wake.wait_until(lock, deadline);
         }
     });
 #endif
@@ -81,7 +91,11 @@ void cancelLogoutWatchdog() noexcept {
 #ifndef __EMSCRIPTEN__
     auto& worker = logoutWorker();
     worker.deadline.cancel();
-    worker.stop.store(true, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(worker.mutex);
+        worker.stop = true;
+    }
+    worker.wake.notify_all();
     if (worker.thread.joinable()) worker.thread.join();
 #endif
 }
@@ -91,6 +105,10 @@ void armLogoutWatchdog(float seconds) noexcept {
     const auto now = LogoutDeadline::Clock::now();
     worker.deadline.arm(seconds, now);
     if (worker.deadline.expire(now)) terminateSessionProcess();
+    // Pass through the mutex so a worker between its check and its wait
+    // cannot miss this wakeup.
+    { std::lock_guard<std::mutex> lock(worker.mutex); }
+    worker.wake.notify_all();
 #else
     if (seconds == 0) terminateSessionProcess();
 #endif

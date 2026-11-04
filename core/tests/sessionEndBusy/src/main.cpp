@@ -4,6 +4,10 @@
 #include <cstdio>
 #include <cmath>
 #include <thread>
+#ifdef __linux__
+#include <filesystem>
+#include <fstream>
+#endif
 using namespace tc;
 namespace {
 int failures=0, exits=0, cleanups=0, queryCalls=0;
@@ -45,6 +49,26 @@ struct Probe : App {
     }
     void cleanup() override { ++cleanups; }
 };
+// Linux only: the process must not wake every millisecond while it sleeps.
+bool sleepsQuietly() {
+#ifdef __linux__
+    auto switches=[] {
+        long total=0;
+        for (auto& task:std::filesystem::directory_iterator("/proc/self/task")) {
+            std::ifstream status(task.path()/"status");std::string line;
+            while (std::getline(status,line)) if (line.rfind("voluntary_ctxt_switches:",0)==0) total+=std::stol(line.substr(24));
+        }
+        return total;
+    };
+    const auto before=switches();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const auto woken=switches()-before;
+    std::printf("sessionEndBusy: wakeups in 200 ms: %ld\n",woken);
+    return woken<20;
+#else
+    return true;
+#endif
+}
 void deterministic() {
     using D=internal::LogoutDeadline;using C=D::Clock;
     const auto t=C::time_point{};
@@ -54,8 +78,13 @@ void deterministic() {
     budget.arm(100,t+std::chrono::seconds(2)); // repeat cannot restart the budget
     check("deadline exact",budget.expire(t+std::chrono::seconds(3)));
     check("deadline once",!budget.expire(t+std::chrono::seconds(4)));
+    check("expired deadline no longer armed",budget.armedDeadline()==C::time_point::max());
+    D idle;check("idle deadline not armed",idle.armedDeadline()==C::time_point::max());
+    idle.arm(3,t);check("armed deadline exact",idle.armedDeadline()==t+std::chrono::seconds(3));
+    idle.cancel();check("cancelled deadline not armed",idle.armedDeadline()==C::time_point::max());
     D zero;zero.arm(0,t);check("zero immediate",zero.expire(t));
     D infinity;infinity.arm(INFINITY,t);check("infinite budget",!infinity.expire(C::time_point::max()));
+    check("infinite budget not armed",infinity.armedDeadline()==C::time_point::max());
     for(int n=0;n<100;++n) {
         D race;race.arm(0,t);std::thread a([&] { race.expire(t); });race.cancel();a.join();
         check("cancelled worker cannot expire a later run",!race.expire(C::time_point::max()));
@@ -84,6 +113,30 @@ TC_CORE_TEST_MAIN(int argc,char** argv) {
         internal::beginRuntimeRun();internal::beginFrameworkLifetime();
         std::this_thread::sleep_for(std::chrono::milliseconds(5));internal::shutdownRuntime();
         check("arm/disarm cannot kill a subsequent Runtime",true);return 0;
+    }
+    if (mode=="watchdog-sleep") {
+        internal::beginRuntimeRun();internal::beginFrameworkLifetime();
+        check("unarmed watchdog sleeps",sleepsQuietly());
+        internal::armLogoutWatchdog(3600);
+        check("armed watchdog sleeps until its deadline",sleepsQuietly());
+        internal::cancelLogoutWatchdog();internal::shutdownRuntime();
+        // Cancel must wake a worker that waits on a near deadline.
+        internal::beginRuntimeRun();internal::beginFrameworkLifetime();
+        internal::armLogoutWatchdog(0.1f);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        internal::cancelLogoutWatchdog();
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        internal::shutdownRuntime();
+        check("arm then cancel does not fire",true);
+        return failures?1:0;
+    }
+    if (mode=="watchdog-fires") {
+        // Arm a worker that already waits unarmed; only its exit(0) passes.
+        internal::beginRuntimeRun();internal::beginFrameworkLifetime();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        internal::armLogoutWatchdog(delay);
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        return 95;
     }
     internal::beginRuntimeRun();internal::beginFrameworkLifetime();
     headless::active=true;

@@ -12,7 +12,9 @@ Workers alone do not bypass an idle main's veto.
 
 Idle coverage retains veto/cancel/query dedupe, reverse exact-once exits,
 commit dedupe, complete cleanup, one shared deadline (default 3 seconds), numeric
-configuration and zero/infinity.
+configuration and zero/infinity. The production watchdog worker sleeps while
+unarmed or armed far ahead (Linux counts its wakeups), fires an armed deadline
+on time and stays quiet after arm-then-cancel.
 Idle commit also checks atexit, a C++ static destructor and the application exit
 code, logging safely after the file sink closes. The production watchdog ends a
 blocked atexit handler. The native policy smoke test compiles macOS and Windows
