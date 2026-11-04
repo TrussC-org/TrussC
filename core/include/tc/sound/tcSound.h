@@ -1493,7 +1493,8 @@ private:
                                // when devices are torn down + recreated.
     // Atomic: the device's notification thread clears it when the device
     // stops by itself (AudioDeviceLoss::stopped()). device_ stays allocated
-    // until the next init() / shutdown() releases it.
+    // until the next init() / shutdown() releases it; for a device opened by
+    // name, delivering the loss on the main thread calls shutdown().
     std::atomic<bool> initialized_{false};
     // Voice slots. Grown by play() (under mutex_) when every slot is in use,
     // never shrunk except by a re-init with a smaller cap. maxPolyphony_ is
