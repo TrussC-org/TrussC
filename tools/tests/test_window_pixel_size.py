@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from test_web_window_controls import body as source_body
+from window_control_source import with_window_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,6 +54,7 @@ def main():
 #include "core/include/sokol/util/sokol_window_size.h"
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include "tc/app/internal/tcWindowFullscreen.h"
@@ -60,14 +62,7 @@ def main():
 namespace trussc {
 struct IVec2 { int x, y; };
 struct Window;
-struct RecordingOperations {
-    void (*setTitle)(Window&, const char*) = nullptr;
-    void (*setSize)(Window&, double, double, bool) = nullptr;
-    void (*setPosition)(Window&, int, int) = nullptr;
-    IVec2 (*position)(const Window&) = nullptr;
-    void (*setFullscreen)(Window&, bool) = nullptr;
-    void (*toggleFullscreen)(Window&) = nullptr;
-};
+RECORDING_OPERATIONS
 extern const RecordingOperations recordingOperations;
 
 float dpi = 1;
@@ -82,7 +77,7 @@ bool sapp_is_fullscreen() { return false; }
 void sapp_toggle_fullscreen() {}
 void sapp_set_window_title(const char*) {}
 namespace internal {
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery, ToggleFullscreen };
+WINDOW_CONTROL_ENUM
 constexpr bool windowSizeIsScreenControlled() { return false; }
 constexpr bool supportsSecondaryWindows() { return true; }
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -112,7 +107,7 @@ struct Window {
 namespace internal { int handle(const Window& w) { return w.binding_.handle; }
 SECONDARY_BODY
 }
-const RecordingOperations recordingOperations{nullptr, internal::nativeWindowSetSize};
+const RecordingOperations recordingOperations{.setSize = internal::nativeWindowSetSize};
 CONTROL_BODY
 }
 int main() {
@@ -139,6 +134,7 @@ int main() {
     }
 }
 '''
+    source = with_window_declarations(source)
     source = source.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
     source = source.replace('SECONDARY_BODY', body(win, 'void nativeWindowSetSize('))
     source = source.replace('CLIENT_CONVERSION', body(platform, 'constexpr int windowClientExtentPixels('))
@@ -463,7 +459,8 @@ subprocess.run([glx,'tiny','640','400','1'], check=True)
         # Reuse the actual dispatcher with recording AppKit endpoints, including
         # a main build with secondary support disabled.
         template = (ROOT / 'tools/tests/window_mac_size.cpp').read_text(encoding='utf-8')
-        source = template.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
+        source = with_window_declarations(template)
+        source = source.replace('CONTROL_BODY', body(window, 'inline IVec2 Window::control('))
         for token, path, signature in (
                 ('MAC_MAIN_CALL', 'core/platform/mac/tcPlatform_mac.mm', 'void internal::setSingleWindowSizeFractionalMac('),
                 ('MAC_SECONDARY_CALL', 'core/platform/mac/tcWindowMac.mm', 'void nativeWindowSetSize(')):
@@ -483,7 +480,7 @@ subprocess.run([glx,'tiny','640','400','1'], check=True)
         main()
 
     def test_x11_main_independent_of_secondary_support(self):
-        source = (ROOT / 'tools/tests/window_pixel_size_x11.cpp').read_text(encoding='utf-8')
+        source = with_window_declarations((ROOT / 'tools/tests/window_pixel_size_x11.cpp').read_text(encoding='utf-8'))
         source = source.replace('CONTROL_BODY', body(
             (ROOT / 'core/include/tc/app/tcWindow.h').read_text(encoding='utf-8'),
             'inline IVec2 Window::control('))

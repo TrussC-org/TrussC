@@ -7,6 +7,7 @@
 #include <X11/Xutil.h>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
 #include <cstring>
 #include <map>
 #include <string>
@@ -71,14 +72,7 @@ int release(void* data) { std::free(data); return 1; }
 #include <cassert>
 namespace trussc {
 struct Window;
-struct RecordingOperations {
-    void (*setTitle)(Window&, const char*) = nullptr;
-    void (*setSize)(Window&, double, double, bool) = nullptr;
-    void (*setPosition)(Window&, int, int) = nullptr;
-    IVec2 (*position)(const Window&) = nullptr;
-    void (*setFullscreen)(Window&, bool) = nullptr;
-    void (*toggleFullscreen)(Window&) = nullptr;
-};
+RECORDING_OPERATIONS
 extern const RecordingOperations recordingOperations;
 
 float dpi=1;
@@ -88,7 +82,7 @@ bool sapp_is_fullscreen() { return false; }
 void sapp_toggle_fullscreen() {}
 void sapp_set_window_title(const char*) {}
 namespace internal {
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery, ToggleFullscreen };
+WINDOW_CONTROL_ENUM
 constexpr bool windowSizeIsScreenControlled() { return false; }
 constexpr bool supportsSecondaryWindows() { return TEST_SECONDARY; }
 using Hook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
@@ -119,8 +113,8 @@ struct Window {
     bool isOpen() const { return true; }
     IVec2 control(internal::WindowControl, int, int, const std::string* =nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
-const RecordingOperations recordingOperations{nullptr,
-    [](Window&, double width, double height, bool pixels) {
+const RecordingOperations recordingOperations{
+    .setSize = [](Window&, double width, double height, bool pixels) {
         internal::x11Geometry(internal::dpy, 2, internal::geometry, false, 0, 0,
                               width, height, dpi, false, pixels);
     }};
