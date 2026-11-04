@@ -365,6 +365,7 @@ yet; the synthetic-input design remains open.
 - Cursor shape, visibility and custom images are app-wide, shown in whichever window the pointer is over. ImGui contexts change it only while their own window is under the pointer.
 - `pixelPerfect` is process-wide in v0.8.0: the launch window's setting applies to every window.
 - `tc_list_windows` returns each window's positive native identity as `id` instead of `index`. Pass that `id` as other tools' `window` argument; resource list indices are unchanged.
+- The deprecated `mcp::registerControlTools()` and `mcp::registerInspectionTools()` (and `registerDebuggerTools()`) keep the v0.7 rule until they are removed in v1.0.0: they set the tool level but do not open the MCP server. `TRUSSC_MCP=1` or `mcp::startHttpServer()` still opens it. `mcp::setToolLevel()` opens it by itself.
 - `exitApp()` now goes through `exitRequested`, whose listeners can veto it; before 0.8 it could not be cancelled. A “show a confirm dialog, then call `exitApp()`” pattern receives `exitRequested` again on that call, so remember acceptance in a flag, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
 
 ## Serial follows the device lifecycle (#415)

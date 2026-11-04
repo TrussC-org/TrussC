@@ -316,7 +316,8 @@ void alert(const std::string& msg) {
     if (q.size() > 100) q.pop_front();
 }
 
-void registerInspectionTools() { setToolLevel(ToolLevel::ReadOnly); }
+// v0.7 rule kept until removal in v1.0.0: the alias grants but does not open the server.
+void registerInspectionTools() { internal::grantToolLevelWithoutOpening(ToolLevel::ReadOnly); }
 
 } // namespace trussc::mcp
 
@@ -437,9 +438,10 @@ json heldKeysJson() {
 
 namespace trussc::mcp {
 
-void registerControlTools() { setToolLevel(ToolLevel::Control); }
+// v0.7 rule kept until removal in v1.0.0: the aliases grant but do not open the server.
+void registerControlTools() { internal::grantToolLevelWithoutOpening(ToolLevel::Control); }
 
-void registerDebuggerTools() { setToolLevel(ToolLevel::Control); }
+void registerDebuggerTools() { internal::grantToolLevelWithoutOpening(ToolLevel::Control); }
 
 } // namespace trussc::mcp
 

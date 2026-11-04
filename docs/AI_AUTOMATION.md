@@ -86,7 +86,10 @@ The bound endpoint is logged as a Notice and reaches `TRUSSC_LOG_FILE` and
 `registerControlTools()` and `registerDebuggerTools()` are deprecated in favor
 of `setToolLevel(Control)`. `enableDebugger()` remains a deprecated no-op;
 replace it with the appropriate grant. All four aliases are scheduled for
-removal at v1.0.0. The environment change is breaking in v0.8.0.
+removal at v1.0.0. Until then the three `register*Tools()` aliases keep the
+v0.7 rule: they set the level but do not open the server (`TRUSSC_MCP=1`,
+`startHttpServer()` or a dev build does), while `setToolLevel()` opens it.
+The environment change is breaking in v0.8.0.
 
 ### Related: `TRUSSC_LOG_FILE`
 
