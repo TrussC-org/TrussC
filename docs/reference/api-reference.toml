@@ -41383,12 +41383,18 @@ details.ko = '''
 '''
 platform_note.en = '''
 - Available on macOS, Windows and Linux X11; does nothing on iOS, Android, and Web.
+- On Linux X11 with an EWMH window manager (GNOME, KDE and most others), the window manager is asked to activate the window and decides what happens. Without a window manager, the window is raised and focused directly.
+- On Windows, when another application has the user's input, Windows may only flash the taskbar button.
 '''
 platform_note.ja = '''
 - macOS・Windows・Linux X11 で利用できます。iOS、Android、Web では何もしません。
+- Linux X11 で EWMH 対応のウィンドウマネージャー（GNOME、KDE など多くのもの）が動いている場合は、ウィンドウマネージャーにアクティブ化を依頼し、どうなるかはウィンドウマネージャーが決めます。ウィンドウマネージャーがない場合は、直接前面に出してフォーカスを与えます。
+- Windows では、ほかのアプリケーションがユーザーの入力を受けているとき、タスクバーのボタンが点滅するだけのことがあります。
 '''
 platform_note.ko = '''
 - macOS, Windows, Linux X11에서 사용할 수 있으며, iOS, Android, Web에서는 아무 작업도 하지 않습니다.
+- Linux X11에서 EWMH를 지원하는 윈도우 매니저(GNOME, KDE 등 대부분)가 실행 중이면 윈도우 매니저에 활성화를 요청하며, 결과는 윈도우 매니저가 정합니다. 윈도우 매니저가 없으면 창을 직접 앞으로 올리고 포커스를 줍니다.
+- Windows에서는 다른 애플리케이션이 사용자 입력을 받고 있으면 작업 표시줄 버튼만 깜박일 수 있습니다.
 '''
 snippet = '''
 // tcApp.h: shared_ptr<Window> dialog;   (opened with createWindow)
