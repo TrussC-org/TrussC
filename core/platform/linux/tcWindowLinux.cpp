@@ -103,8 +103,9 @@ void nativeWindowBringToFront(Window& w) {
         e.xclient.data.l[1] = CurrentTime;
         XSendEvent(display, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &e);
     } else {
-        // No window manager (e.g. bare Xvfb): raise and focus directly.
-        XRaiseWindow(display, window);
+        // No window manager (e.g. bare Xvfb): map (un-minimise), raise and
+        // focus directly. With a WM, _NET_ACTIVE_WINDOW also un-minimises.
+        XMapRaised(display, window);
         XSetInputFocus(display, window, RevertToParent, CurrentTime);
     }
     XFlush(display);

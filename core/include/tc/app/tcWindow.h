@@ -137,8 +137,9 @@ public:
 
     // Raise THIS window above the others and give it keyboard focus, whichever
     // window's callback is running (the global bringWindowToFront() targets
-    // the current window). The OS may refuse to take focus from another
-    // application. No-op on a closed window, and on iOS / Android / Web.
+    // the current window). A minimised window is restored. The OS may refuse
+    // to take focus from another application. No-op on a closed window, and
+    // on iOS / Android / Web.
     void bringToFront() { control(internal::WindowControl::BringToFront); }
 
     void setClearColor(const Color& c) { clearColor_ = c; clearColorSet_ = true; }

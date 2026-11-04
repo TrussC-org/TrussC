@@ -70,6 +70,7 @@ void nativeWindowBringToFront(Window& w) {
     NSWindow* window = (__bridge NSWindow*)sapp_window_macos_get_window(handle(w));
     if (window) {
         [NSApp activateIgnoringOtherApps:YES];
+        if ([window isMiniaturized]) [window deminiaturize:nil];
         [window makeKeyAndOrderFront:nil];
     }
 }
