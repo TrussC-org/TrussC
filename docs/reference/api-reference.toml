@@ -9441,7 +9441,7 @@ description.en = "Provides TrueType font rendering and text layout."
 description.ja = "TrueType フォントによる文字描画とテキストの配置を行う。"
 description.ko = "트루타입 폰트로 텍스트를 렌더링하고 배치한다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
+- Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font, is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Use `load(nameOrPath, size, faceIndex = 0)` to load a font file or system font name, and check the returned `LoadResult` for success; see `Font::load` for path resolution, collection faces, and Web URL loading.
 - `drawString` draws UTF-8 text using the current drawing color, and `getStringPath` returns its vector outlines; without a loaded font, drawing does nothing and the returned path is empty.
 - The requested font size and reported metrics use logical pixels; glyphs are rasterized using the DPI scale captured when loading.
@@ -9453,7 +9453,7 @@ details.en = '''
 - Destroying a Font does not evict its atlas from the shared cache; reloading with a different cache key releases the previous cached atlas if no other Font uses it.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
+- 読み込み中の Image の移動や、読み込み中の SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー先・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - `load(nameOrPath, size, faceIndex = 0)` でフォントファイルまたはシステムフォント名を読み込み、戻り値の `LoadResult` で成功を確認します。パスの解決、コレクション内の書体、Web の URL 読み込みについては `Font::load` を参照してください。
 - `drawString` は現在の描画色で UTF-8 テキストを描画し、`getStringPath` はそのベクター輪郭を返します。フォントが読み込まれていない場合、描画は何も行わず、返されるパスは空になります。
 - 指定するフォントサイズと取得するメトリクスの単位は論理ピクセルです。グリフは読み込み時に記録した DPI スケールでラスタライズされます。
@@ -9465,7 +9465,7 @@ details.ja = '''
 - Font を破棄しても、アトラスは共有キャッシュから削除されません。異なるキャッシュキーで読み直すと、ほかの Font が使用していない場合に以前のアトラスがキャッシュから解放されます。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
+- 로드 중인 Image의 이동, 그리고 로드 중인 SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - `load(nameOrPath, size, faceIndex = 0)`로 폰트 파일이나 시스템 폰트 이름을 로드하고 반환된 `LoadResult`로 성공 여부를 확인합니다. 경로 해석, 컬렉션 내 서체, Web URL 로드는 `Font::load`를 참조합니다.
 - `drawString`은 현재 그리기 색상으로 UTF-8 텍스트를 그리며, `getStringPath`는 텍스트의 벡터 윤곽선을 반환합니다. 로드된 폰트가 없으면 그리기는 아무 작업도 하지 않고 반환되는 경로는 비어 있습니다.
 - 지정하는 폰트 크기와 반환되는 메트릭의 단위는 논리 픽셀입니다. 글리프는 로드할 때 기록한 DPI 배율로 래스터화합니다.
@@ -11535,7 +11535,7 @@ description.en = "An image containing CPU pixels and a GPU texture."
 description.ja = "CPU ピクセルと GPU テクスチャを持つ画像を表す。"
 description.ko = "CPU 픽셀과 GPU 텍스처를 가진 이미지를 나타낸다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
+- Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font, is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Pixel access and `save()` use the CPU `Pixels`; drawing uses the GPU `Texture`. Changes to the texture do not update the CPU pixels.
 - Loading uploads pixels into an Immutable texture. `allocate()` creates a Dynamic texture without uploading the zero-filled CPU pixels.
 - `setColor()` marks the image as dirty. After editing through `getPixels()` or `getPixelsData()`, call `setDirty()` yourself, then call `update()` to upload changes to a Dynamic texture. Drawing and `getTexture()` do not upload changes automatically.
@@ -11545,7 +11545,7 @@ details.en = '''
 - See `Texture` for GPU resource rules and upload costs, and `TextureFormat` for pixel and texture formats.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
+- 読み込み中の Image の移動や、読み込み中の SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー先・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - ピクセルの参照と `save()` は CPU の `Pixels` を使い、描画は GPU の `Texture` を使います。テクスチャを変更しても CPU ピクセルは更新されません。
 - 読み込みではピクセルを Immutable テクスチャに転送します。`allocate()` は Dynamic テクスチャを作成しますが、ゼロで初期化した CPU ピクセルは転送しません。
 - `setColor()` は画像を更新が必要な状態にします。`getPixels()` または `getPixelsData()` で編集した場合は、自分で `setDirty()` を呼び、その後 `update()` で Dynamic テクスチャに変更を転送してください。描画と `getTexture()` は変更を自動転送しません。
@@ -11555,7 +11555,7 @@ details.ja = '''
 - GPU リソースの扱いと転送コストは `Texture`、ピクセルとテクスチャの形式は `TextureFormat` を参照してください。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
+- 로드 중인 Image의 이동, 그리고 로드 중인 SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - 픽셀 접근과 `save()`는 CPU의 `Pixels`를 사용하고, 그리기는 GPU의 `Texture`를 사용합니다. 텍스처를 변경해도 CPU 픽셀은 갱신되지 않습니다.
 - 로드하면 픽셀을 Immutable 텍스처에 업로드합니다. `allocate()`는 Dynamic 텍스처를 생성하지만, 0으로 초기화한 CPU 픽셀은 업로드하지 않습니다.
 - `setColor()`는 이미지를 갱신이 필요한 상태로 표시합니다. `getPixels()` 또는 `getPixelsData()`로 편집한 경우 직접 `setDirty()`를 호출한 뒤 `update()`를 호출하여 Dynamic 텍스처에 변경 사항을 업로드합니다. 그리기와 `getTexture()`는 변경 사항을 자동으로 업로드하지 않습니다.
@@ -29006,7 +29006,7 @@ description.en = "Stores fully decoded audio samples in memory."
 description.ja = "デコード済みの音声サンプル全体をメモリに保持する。"
 description.ko = "디코딩한 전체 오디오 샘플을 메모리에 보관한다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
+- Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font, is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - File loading decodes the complete audio into interleaved float PCM in `samples`. `numSamples` counts frames, or samples per channel; the interleaved sample count is `numSamples * channels`.
 - This `SoundSource` subclass inherits `channels`, `sampleRate`, and `kind()`; its kind is `SoundSource::Eager`, and `getDuration()` returns `numSamples / sampleRate` in seconds, or 0 when the sample rate is 0.
 - It suits short sound effects and repeated or overlapping playback: after loading, playback and seeking read PCM from RAM without file decoding.
@@ -29014,7 +29014,7 @@ details.en = '''
 - Finish direct edits to a shared buffer before the mixer reads it; direct sample access and generation or mixing helpers do not lock the mixer. Audio-listener restrictions are described in `AudioEngine`.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
+- 読み込み中の Image の移動や、読み込み中の SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー先・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - ファイルの読み込み時に音声全体をデコードし、インターリーブ形式の float PCM として `samples` に保持します。`numSamples` はフレーム数、つまりチャンネルあたりのサンプル数です。全チャンネル分のサンプル数は `numSamples * channels` です。
 - `SoundSource` を継承し、`channels`、`sampleRate`、`kind()` を受け継ぎます。種別は `SoundSource::Eager` です。`getDuration()` は `numSamples / sampleRate` を秒単位で返し、サンプルレートが 0 の場合は 0 を返します。
 - 短い効果音や、繰り返し・重ね合わせの再生に適しています。読み込み後の再生とシークは、ファイルをデコードせず RAM 上の PCM を読みます。
@@ -29022,7 +29022,7 @@ details.ja = '''
 - 共有バッファを直接編集する場合は、ミキサーが読む前に編集を終えてください。サンプルへの直接アクセスや生成・ミキシングの補助関数は、ミキサーをロックしません。オーディオのリスナー内での制約は `AudioEngine` を参照してください。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
+- 로드 중인 Image의 이동, 그리고 로드 중인 SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - 파일을 불러올 때 전체 오디오를 디코딩하여 인터리브 float PCM으로 `samples`에 보관합니다. `numSamples`는 프레임 수, 즉 채널당 샘플 수입니다. 전체 채널의 샘플 수는 `numSamples * channels`입니다.
 - `SoundSource`를 상속하여 `channels`, `sampleRate`, `kind()`를 제공합니다. 종류는 `SoundSource::Eager`입니다. `getDuration()`은 `numSamples / sampleRate`를 초 단위로 반환하며 샘플레이트가 0이면 0을 반환합니다.
 - 짧은 효과음과 반복 재생 또는 겹쳐 재생하기에 적합합니다. 로딩 후 재생과 탐색은 파일을 디코딩하지 않고 RAM의 PCM을 읽습니다.
@@ -62798,7 +62798,7 @@ description.en = "Loads an image asynchronously."
 description.ja = "画像を非同期に読み込む。"
 description.ko = "이미지를 비동기로 로드한다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
+- Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font, is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice may be omitted when its run or completion batch is discarded). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - Encoded image size has no cap, for files and for memory inputs alike. CPU `Pixels` loading has no GPU axis cap and lets the decoder read headers; GPU uploads still check device dimensions. Allocation failure reports an error without publishing a partial image.
 - Local image input is limited to what stb_image can address (about 2 GiB).
@@ -62814,7 +62814,7 @@ details.en = '''
 - If the App that started the load ends first, the completion callback is not called.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
+- 読み込み中の Image の移動や、読み込み中の SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー先・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（実行や完了バッチの破棄時に未配信なら省略する場合があります）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - 符号化済み画像のサイズに上限はなく、ファイルでもメモリ入力でも同じです。CPU の `Pixels` 読み込みには GPU の軸上限を適用せず、ヘッダーの解釈はデコーダーに任せます。GPU 転送時のデバイス寸法の確認は残ります。メモリ確保に失敗するとエラーを報告し、部分的な画像は公開しません。
 - ローカル画像入力は stb_image が扱える範囲（約 2 GiB）に制限されます。
@@ -62830,7 +62830,7 @@ details.ja = '''
 - 読み込みを始めた App が先に終わった場合、完了時のコールバックは呼ばれません。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
+- 로드 중인 Image의 이동, 그리고 로드 중인 SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(실행 또는 완료 묶음을 버릴 때 미전달 Notice는 생략될 수 있습니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - 인코딩된 이미지 크기에는 한도가 없으며 파일과 메모리 입력 모두 같습니다. CPU `Pixels` 로드에는 GPU 축 한도를 적용하지 않으며 헤더 해석은 디코더에 맡깁니다. GPU 업로드는 장치 크기를 확인합니다. 메모리 할당에 실패하면 오류를 보고하며 부분 이미지를 공개하지 않습니다.
 - 로컬 이미지 입력은 stb_image가 처리할 수 있는 범위(약 2 GiB)로 제한됩니다.
@@ -62900,7 +62900,7 @@ description.en = "Starts asynchronous loading of decoded audio data."
 description.ja = "デコード済み音声データの非同期読み込みを開始する。"
 description.ko = "디코딩된 오디오 데이터의 비동기 로드를 시작한다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
+- Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font, is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice may be omitted when its run or completion batch is discarded). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - `loadAsync(path)` returns no result directly and uses the same path resolution, format selection, errors, and decoder logs as `SoundBuffer::load`. Native builds prepare private PCM and metadata on a worker; existing committed data remains readable until the result is applied.
 - Results are applied on the main thread in a later frame, never during this call. Each frame or headless loop pass takes one batch of pending completions; work queued during that pass waits for another pass. After application, `isLoading()` becomes `false` before one `onLoad` event delivers the `LoadResult`.
@@ -62913,7 +62913,7 @@ details.en = '''
 - If the App that started the load ends first, the completion callback is not called.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
+- 読み込み中の Image の移動や、読み込み中の SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー先・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（実行や完了バッチの破棄時に未配信なら省略する場合があります）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - `loadAsync(path)` は結果を直接返さず、パスの解決、形式の選択、エラー、デコーダーのログは `SoundBuffer::load` と同じです。ネイティブではワーカーが専用の PCM とメタデータを準備し、結果が反映されるまでは確定済みのデータを参照できます。
 - 結果は後のフレームのメインスレッドで反映され、この呼び出し中には反映されません。各フレームまたはヘッドレスのループ処理では、保留中の完了処理を一括で取り出し、その処理中に追加された分は次回に回します。反映後に `isLoading()` が `false` になり、続いて `onLoad` が `LoadResult` を一度通知します。
@@ -62926,7 +62926,7 @@ details.ja = '''
 - 読み込みを始めた App が先に終わった場合、完了時のコールバックは呼ばれません。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
+- 로드 중인 Image의 이동, 그리고 로드 중인 SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(실행 또는 완료 묶음을 버릴 때 미전달 Notice는 생략될 수 있습니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - `loadAsync(path)`는 결과를 직접 반환하지 않으며 경로 해석, 형식 선택, 오류, 디코더 로그는 `SoundBuffer::load`와 같습니다. 네이티브 빌드에서는 워커가 별도의 PCM과 메타데이터를 준비하며, 결과가 반영될 때까지 기존에 확정된 데이터를 읽을 수 있습니다.
 - 결과는 이후 프레임의 메인 스레드에서 반영되며 이 호출 중에는 반영되지 않습니다. 각 프레임 또는 헤드리스 루프 실행은 대기 중인 완료 처리를 한 번에 가져오며, 처리 중 추가된 작업은 다음 실행까지 기다립니다. 반영 후 `isLoading()`이 `false`가 되고 이어서 `onLoad`가 `LoadResult`를 한 번 전달합니다.
@@ -62991,7 +62991,7 @@ description.en = "Load a font asynchronously and report completion through an ev
 description.ja = "フォントを非同期で読み込み、イベントで完了を通知する。"
 description.ko = "폰트를 비동기로 로드하고 이벤트로 완료를 알린다."
 details.en = '''
-- Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
+- Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font, is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Asynchronous Image, SoundBuffer and Font loads share active preparation slots (default 4); `setResourceLoadConcurrency` changes their number. Local-file requests wait in a growable queue without pending/live-request admission caps; successful local results are kept even above the shared 1 GiB retained-byte budget, with at most one Notice per app run on the first overage (an undelivered Notice may be omitted when its run or completion batch is discarded). Local loads still fail for file, decode, representation or allocation errors. Anything passed as a file path is local, including UNC/network-share paths; URLs and buffers received from the network are network/external. Paths from untrusted sources (drops, clipboard, network messages) are treated as local; validate them in the app before loading. Bound (security): URL/network-buffer loads keep 64 pending requests, 68 live-request credits and 1 GiB of retained decoded results awaiting main-thread application. Whole external requests/results that cannot fit report `TooLarge` once through `onLoad`; the first admission loss logs a Warning and later losses are counted internally. Request and byte credits include local loads and remain held until application or cancellation; external admission can therefore reject while local loads exceed these budgets. Credits are returned on application, cancellation, destruction and app exit/hot reload. Generic app-authored jobs are unaffected. Decoder working memory is governed separately.
 - Call `loadAsync(nameOrPath, size, faceIndex = 0)` with a file path, system font name, or Web URL. Size is in logical pixels; path precedence and collection-face selection follow `Font::load`.
 - Returns no result directly. Success, failure, and cache hits are applied on the main thread in a later frame, never during this call; `isLoading()` becomes `false` before the single `onLoad` notification.
@@ -63005,7 +63005,7 @@ details.en = '''
 - If the App that started the load ends first, the completion callback is not called.
 '''
 details.ja = '''
-- 読み込み中の Image・SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー・代入・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
+- 読み込み中の Image の移動や、読み込み中の SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー先・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - Image・SoundBuffer・Font の非同期読み込みは、同時準備枠（既定 4 件）を共有します。件数は `setResourceLoadConcurrency` で変更できます。ローカルファイルの要求は、待機数・未反映要求数による受付制限のない拡張可能なキューで待ちます。成功したローカル結果は、共有の保持バイト予算 1 GiB を超えても保持し、アプリの実行ごとに最初の超過で Notice を最大一度記録します（実行や完了バッチの破棄時に未配信なら省略する場合があります）。ファイル・デコード・表現上の制約・メモリ確保の実際のエラーは通常どおり失敗します。ファイルパスとして渡されたものは UNC／ネットワーク共有パスも含めてすべてローカルとし、URL とネットワークから受信したバッファはネットワーク／外部入力として扱います。信頼できない送信元（ドロップ、クリップボード、ネットワークメッセージ）のパスもローカルとして扱うため、読み込む前にアプリ側で検証してください。Bound (security): URL／ネットワーク受信バッファの読み込みは、待機要求 64 件、未反映要求クレジット 68 件、メインスレッドでの反映待ちのデコード結果 1 GiB の上限を維持します。収まらない外部要求や結果は全体を拒否し、`onLoad` で `TooLarge` を一度通知します。最初の admission 拒否は Warning を記録し、その後の拒否は内部で累計します。要求・バイトクレジットにはローカル読み込みも含め、反映・取消しまで保持するため、ローカル読み込みが予算を超えている間は外部入力が拒否されることがあります。クレジットは反映・取消し・破棄・アプリ終了／ホットリロードで返却します。アプリが作る一般のジョブには適用しません。デコーダーの作業メモリは別に管理します。
 - `loadAsync(nameOrPath, size, faceIndex = 0)` にファイルパス、システムフォント名、または Web の URL を渡します。サイズの単位は論理ピクセルです。パスの優先順位とコレクション内の書体選択は `Font::load` と同じです。
 - 結果を直接返しません。成功、失敗、キャッシュへの一致はいずれも後のフレームでメインスレッドに反映し、この呼び出し中には通知しません。`isLoading()` が `false` になってから `onLoad` を一度通知します。
@@ -63019,7 +63019,7 @@ details.ja = '''
 - 読み込みを始めた App が先に終わった場合、完了時のコールバックは呼ばれません。
 '''
 details.ko = '''
-- 로드 중인 Image, SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
+- 로드 중인 Image의 이동, 그리고 로드 중인 SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - Image, SoundBuffer, Font의 비동기 로드는 동시 준비 슬롯(기본값 4개)을 공유합니다. 개수는 `setResourceLoadConcurrency`로 변경합니다. 로컬 파일 요청은 대기/미반영 요청 수에 따른 수락 제한 없이 확장 가능한 큐에서 기다립니다. 성공한 로컬 결과는 공유 보유 바이트 예산 1 GiB를 초과해도 유지하며, 앱 실행마다 첫 초과 시 Notice를 최대 한 번 기록합니다(실행 또는 완료 묶음을 버릴 때 미전달 Notice는 생략될 수 있습니다). 파일, 디코딩, 표현 제한, 메모리 할당의 실제 오류는 기존처럼 실패합니다. 파일 경로로 전달된 것은 UNC/네트워크 공유 경로를 포함해 모두 로컬이며, URL과 네트워크에서 받은 버퍼는 네트워크/외부 입력으로 취급합니다. 신뢰할 수 없는 출처(드롭, 클립보드, 네트워크 메시지)의 경로도 로컬로 취급하므로 로드 전에 앱에서 검증하세요. Bound (security): URL/네트워크 수신 버퍼 로드는 대기 요청 64건, 미반영 요청 크레딧 68건, 메인 스레드 반영을 기다리는 디코딩 결과 1 GiB의 한도를 유지합니다. 수용할 수 없는 외부 요청이나 결과는 전체를 거부하고 `onLoad`에서 `TooLarge`를 한 번 알립니다. 첫 admission 거부는 Warning을 기록하며 이후 거부는 내부에서 누적합니다. 요청/바이트 크레딧에는 로컬 로드도 포함되고 반영되거나 취소될 때까지 유지되므로 로컬 로드가 예산을 초과하는 동안 외부 입력은 거부될 수 있습니다. 크레딧은 반영, 취소, 소멸, 앱 종료/핫 리로드 시 반환됩니다. 앱이 작성한 일반 작업에는 적용하지 않습니다. 디코더 작업 메모리는 별도로 관리합니다.
 - `loadAsync(nameOrPath, size, faceIndex = 0)`에 파일 경로, 시스템 폰트 이름 또는 Web URL을 전달합니다. 크기의 단위는 논리 픽셀입니다. 경로 우선순위와 컬렉션 내 서체 선택은 `Font::load`와 같습니다.
 - 결과를 직접 반환하지 않습니다. 성공, 실패, 캐시 적중 모두 이후 프레임의 메인 스레드에서 반영하며, 이 호출 중에는 알리지 않습니다. `isLoading()`이 `false`가 된 뒤 `onLoad`를 한 번 알립니다.

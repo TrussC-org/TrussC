@@ -8,9 +8,9 @@ Each section starts with the changes that can break your code: it no longer comp
 
 **Contents**
 
-- [App, window and runtime](#app-window-and-runtime): [Create Apps through a window or a launcher](#create-apps-through-a-window-or-a-launcher) · [The launch window is window #1](#the-launch-window-is-window-1) · [Closing the launch window no longer always quits](#closing-the-launch-window-no-longer-always-quits) · [Quitting can be cancelled, and each window can refuse to close](#quitting-can-be-cancelled-and-each-window-can-refuse-to-close) · [App callbacks are listeners now, and default listeners run first](#app-callbacks-are-listeners-now-and-default-listeners-run-first) · [events() needs an App, and process events are on runtime()](#events-needs-an-app-and-process-events-are-on-runtime) · [Headless apps fire update and exit events](#headless-apps-fire-update-and-exit-events) · [A hidden window keeps updating but stops drawing](#a-hidden-window-keeps-updating-but-stops-drawing) · [Quitting during setup()](#quitting-during-setup) · [Logout, restart and shutdown](#logout-restart-and-shutdown) · [Hot reload supports one window](#hot-reload-supports-one-window) · [Stdin commands need console::start()](#stdin-commands-need-consolestart) · [Window and runtime settings](#window-and-runtime-settings) · [Internal Window functions are no longer public](#internal-window-functions-are-no-longer-public) · [No built-in crash handler](#no-built-in-crash-handler)
+- [App, window and runtime](#app-window-and-runtime): [Create Apps through a window or a launcher](#create-apps-through-a-window-or-a-launcher) · [The launch window is window #1](#the-launch-window-is-window-1) · [Closing the launch window no longer always quits](#closing-the-launch-window-no-longer-always-quits) · [exitApp() is the one way to quit](#exitapp-is-the-one-way-to-quit) · [Quitting can be cancelled, and each window can refuse to close](#quitting-can-be-cancelled-and-each-window-can-refuse-to-close) · [App callbacks are listeners now, and default listeners run first](#app-callbacks-are-listeners-now-and-default-listeners-run-first) · [Node and Mod setup() runs when they join the tree](#node-and-mod-setup-runs-when-they-join-the-tree) · [events() needs an App, and process events are on runtime()](#events-needs-an-app-and-process-events-are-on-runtime) · [Headless apps fire update and exit events](#headless-apps-fire-update-and-exit-events) · [A hidden window keeps updating but stops drawing](#a-hidden-window-keeps-updating-but-stops-drawing) · [Quitting during setup()](#quitting-during-setup) · [Logout, restart and shutdown](#logout-restart-and-shutdown) · [Hot reload supports one window](#hot-reload-supports-one-window) · [Stdin commands need console::start()](#stdin-commands-need-consolestart) · [Window and runtime settings](#window-and-runtime-settings) · [Internal Window functions are no longer public](#internal-window-functions-are-no-longer-public) · [No built-in crash handler](#no-built-in-crash-handler)
 - [Async work and threads](#async-work-and-threads): [runOnMainThread() runs between turns, and drops work for an ended App](#runonmainthread-runs-between-turns-and-drops-work-for-an-ended-app) · [Thread::waitForThread() on its own thread](#threadwaitforthread-on-its-own-thread)
-- [Rendering](#rendering): [Every angle is in radians; degrees use Deg names](#every-angle-is-in-radians-degrees-use-deg-names) · [Each Fbo has its own matrices, camera and clipping](#each-fbo-has-its-own-matrices-camera-and-clipping) · [grabScreen() reads the finished frame in afterFrame](#grabscreen-reads-the-finished-frame-in-afterframe) · [The swapchain pass functions are removed](#the-swapchain-pass-functions-are-removed) · [Cubemap textures are uploaded in one call](#cubemap-textures-are-uploaded-in-one-call) · [Shader subclasses use pipelineForCurrentTarget()](#shader-subclasses-use-pipelineforcurrenttarget) · [Fbo::readPixels() on float Fbos, and failed allocations](#fboreadpixels-on-float-fbos-and-failed-allocations)
+- [Rendering](#rendering): [Every angle is in radians; degrees use Deg names](#every-angle-is-in-radians-degrees-use-deg-names) · [Each Fbo has its own matrices, camera and clipping](#each-fbo-has-its-own-matrices-camera-and-clipping) · [Scissor rectangles use logical coordinates](#scissor-rectangles-use-logical-coordinates) · [grabScreen() reads the finished frame in afterFrame](#grabscreen-reads-the-finished-frame-in-afterframe) · [The swapchain pass functions are removed](#the-swapchain-pass-functions-are-removed) · [Cubemap textures are uploaded in one call](#cubemap-textures-are-uploaded-in-one-call) · [Shader subclasses use pipelineForCurrentTarget()](#shader-subclasses-use-pipelineforcurrenttarget) · [Fbo::readPixels() on float Fbos, and failed allocations](#fboreadpixels-on-float-fbos-and-failed-allocations)
 - [Loading and saving](#loading-and-saving): [Saving and recording return SaveResult](#saving-and-recording-return-saveresult) · [OBJ and glTF loading return LoadResult](#obj-and-gltf-loading-return-loadresult) · [OBJ export returns SaveResult](#obj-export-returns-saveresult) · [LoadError has two new values](#loaderror-has-two-new-values) · [Sound files are found through getDataPath()](#sound-files-are-found-through-getdatapath)
 - [Devices](#devices): [Serial](#serial) · [VideoGrabber](#videograbber) · [MidiIn and MidiOut (tcxMidi)](#midiin-and-midiout-tcxmidi) · [AudioEngine and MicInput](#audioengine-and-micinput) · [DepthCamera backends return an owned Device](#depthcamera-backends-return-an-owned-device) · [DepthCamera connection state](#depthcamera-connection-state)
 - [Networking and addons](#networking-and-addons): [OscReceiver::setup() owns its port](#oscreceiversetup-owns-its-port) · [OSC and MIDI receive queues](#osc-and-midi-receive-queues) · [TcpServer limits clients to 64 by default](#tcpserver-limits-clients-to-64-by-default) · [tcxCurl follows redirects and limits response size](#tcxcurl-follows-redirects-and-limits-response-size) · [tcxWebSocket limits message size](#tcxwebsocket-limits-message-size) · [Box2D ownership and contact events](#box2d-ownership-and-contact-events)
@@ -61,6 +61,24 @@ You can call `close()`, `setQuitOnClose()` and the other `Window` functions on t
 // main.cpp
 return runApp<tcApp>(WindowSettings().setSize(1280, 720).setQuitOnClose(true));
 ```
+
+### exitApp() is the one way to quit
+
+`exitApp(int code = 0)` is now the one way to quit, in windowed and headless apps alike. `App::requestExit()` and `requestExitApp()` still compile, with a deprecation warning, and now simply call `exitApp()`. In v0.7.7, `App::requestExit()` only set a flag that `runHeadlessApp()` read, so it did nothing in a windowed app.
+
+```cpp
+// Before
+requestExit();   // or requestExitApp()
+
+// After
+exitApp();
+exitApp(3);      // with an exit code
+```
+
+- `requestExit()` now asks `exitRequested`, so a listener can cancel it, as it already could for `requestExitApp()`. In a headless app, `requestExit()` used to stop the loop without asking.
+- `requestExitApp()` used to keep the current exit code. It now sets the code to `0`, as `exitApp()` does.
+- `App::isExitRequested()` is deprecated. It still returns `true` after `requestExit()` was called on that App, but TrussC no longer reads it. To react to a quit, use `exit()` or `events().exitRequested`.
+- The exit reason `request-exit-app` is gone. `exitApp()` reports `exit-app`.
 
 ### Quitting can be cancelled, and each window can refuse to close
 
@@ -132,6 +150,36 @@ hudListener = events().draw.listen([] { /* ... */ }, 50);
 ```
 
 Check every listener whose order matters, and give it an explicit priority.
+
+### Node and Mod setup() runs when they join the tree
+
+`Node::setup()` and `Mod::setup()` now follow one rule: each runs once, when the node or mod joins the running App's tree.
+
+- `addChild()` and `insertChild()` run the child's `setup()`, and its subtree's, before they return, if the parent is already set up and in the App's tree. Before, the child's `setup()` ran just before its first update or draw.
+- A subtree built while detached is set up as a whole when it is attached: parents before children, children in order, and each node's mods right after the node.
+- `addMod()` on a node that is set up and in the tree runs the mod's `setup()` at once, as before. On a node that is not in the tree yet, the mod's `setup()` now waits and runs right after the node's own `setup()`. Before, it always ran inside `addMod()`, even before the node's `setup()`.
+- The App itself is still set up on its first update or draw after it becomes a window's App. Children added to it before that are set up right after it.
+- Inactive nodes (`setActive(false)`) are set up when they join, not when they first become active.
+- A child added inside a node's `setup()` is set up at once, before that node's mods that were added earlier.
+- A child added during `update()` is set up inside `addChild()`, and its first `update()` comes on the next frame.
+- The update, draw and setup passes now skip a child that was removed or moved to another parent while the pass was running.
+- `CoreEvents::setup` (`events().setup`) is removed. It was never fired. Put code that should run after setup at the end of `setup()`.
+
+Set a node's values before `addChild()`, or in its constructor. Values set after `addChild()` returns come too late for `setup()`:
+
+```cpp
+// Before
+auto ball = make_shared<Ball>();
+addChild(ball);
+ball->radius = 30;   // Ball::setup() ran later, on the first update
+
+// After
+auto ball = make_shared<Ball>();
+ball->radius = 30;   // set values first
+addChild(ball);      // Ball::setup() runs here
+```
+
+Pass what a mod's `setup()` needs as constructor arguments of `addMod<T>(args...)`. A `LayoutMod` lays out its node once when the node is attached. A `RigidBody2D` added to a detached node gets its body when the node joins the tree, at the node's position then. If its `World` has been destroyed by then, no body is created and a warning is logged.
 
 ### events() needs an App, and process events are on runtime()
 
@@ -384,6 +432,25 @@ Behaviour that changes the pixels:
 - **The blend mode after `Fbo::end()` applies right away.** Set the blend you want after `end()` if the following screen drawing needs a different one. Remove forced blend reloads that restored the style inside Fbos; push and pop the style normally.
 - **Linux NV12 video and LUT drawing use the normal transforms.** Remove CPU positioning, pre-transforms and viewport workarounds that made up for them.
 
+### Scissor rectangles use logical coordinates
+
+This is a fix. `setScissor()` and `pushScissor()` took framebuffer pixels, while every other drawing function takes logical coordinates. So on Retina and other HiDPI displays, a scissor was in the wrong place or had the wrong size. They now take the logical coordinates of the current render target, the same units as `drawRect()`.
+
+If you multiplied by the pixel scale to work around this, remove it:
+
+```cpp
+// Before
+float s = getDpiScale();
+pushScissor(10 * s, 10 * s, 200 * s, 100 * s);
+
+// After: the same rectangle that drawRect(10, 10, 200, 100) draws
+pushScissor(10, 10, 200, 100);
+```
+
+- Inside an `Fbo` and in pixelPerfect mode, logical coordinates are already pixels, so code there does not change.
+- The transform matrix and the camera still do not apply. A scissor is an axis-aligned rectangle of the target, measured from its top-left corner.
+- `RectNode::setClipping(true)` needs no change. Nested `pushScissor()` calls still intersect, and `popScissor()` restores the previous rectangle.
+
 ### grabScreen() reads the finished frame in afterFrame
 
 `grabScreen()` now depends on when you call it:
@@ -616,7 +683,7 @@ if (!serial.isConnected() && getElapsedTime() - lastTry > 2.0f) {
 
 - **An unplugged camera is now reported.** When the OS says the camera is gone, `update()` closes the grabber and fires `onDisconnect` once, on the main thread. `isConnected()` is already `false` then, and the texture and pixels are released. Before, an unplugged camera left `isInitialized()` true and the last frame on screen. Code that assumed `isConnected()` / `isInitialized()` stay true until `close()` should check them. Keep calling `update()`: it is what reports the loss. Moving a grabber does not fire `onDisconnect` either.
 - The OS signals used: `AVCaptureDeviceWasDisconnectedNotification` (macOS, iOS), a Media Foundation reader error or an invalidated device (Windows), `ENODEV` from V4L2 (Linux) and the end of the camera track (web). A camera that only stops sending frames is not reported.
-- **New:** `grabber.setup()` reopens the last camera: the current `setDeviceID()` and the size of the last `setup(width, height)` (640 × 480 if there was none). If it fails, it logs an error and returns `false`. After a reopen, the texture can show the previous image until the first `isFrameNew()`. When you reconnect, also check `isPendingPermission()`:
+- **New:** `grabber.setup()` reopens the last camera at the size of the last `setup(width, height)`. It finds the camera by name in a fresh `listDevices()`, because the order of cameras can change for a moment when one is unplugged and plugged back in. If no camera has that name, it fails; it never opens another camera. Two cameras with the same name can't be told apart, and the first one opens. `setDeviceID()` forgets the name, so the next `setup()` uses that index. Before any camera has opened, it uses the `setDeviceID()` index (device 0 at 640 × 480 if there was none). If it fails, it logs an error and returns `false`. After a reopen, the texture can show the previous image until the first `isFrameNew()`. When you reconnect, also check `isPendingPermission()`:
 
   ```cpp
   if (!grabber.isConnected() && !grabber.isPendingPermission() && getElapsedTime() - lastTry > 2.0f) {
@@ -756,7 +823,7 @@ server.start(9000, 1000);
 
 ### tcxCurl follows redirects and limits response size
 
-- Redirects are now followed by default (before, they were not). At most 5 hops, http and https only, and never from https to http. Credential headers such as `Authorization`, `Cookie` and `X-Api-Key` are dropped when a redirect goes to another origin.
+- Redirects are now followed by default (before, they were not). An app that checked for a 3xx status now gets the final response instead. `setFollowRedirects(false)` brings back the old behavior. At most 5 hops, http and https only, and never from https to http. Credential headers such as `Authorization`, `Cookie` and `X-Api-Key` are dropped when a redirect goes to another origin.
 - A response larger than 64 MiB now fails, with status code `0` and an empty body. Raise the limit with `setResponseLimit()`.
 
 ```cpp

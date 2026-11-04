@@ -5,8 +5,8 @@ privately and apply it on main in a later frame. Keep an `onLoad` listener for
 the result. A handle may be destroyed while loading or inside its own completion
 listener; destroying it cancels further delivery without waiting for the decoder.
 
-Copying, assigning or moving a loading Image, SoundBuffer or Font is not supported; the destination is not loading.
-Images remain noncopyable. Copy and move operations transfer only committed data;
+Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font,
+is not supported; the destination is not loading. Images remain noncopyable. Copy and move operations transfer only committed data;
 listeners remain attached to their original handles. Serialize handle operations
 on main and wait for a load to finish before copying, assigning or moving it.
 
