@@ -101,9 +101,12 @@ macro(_tc_auto_addon ADDON_NAME ADDON_PATH)
     # Collect source files
     set(_ADDON_SOURCES "")
 
+    # CONFIGURE_DEPENDS: an existing build tree re-globs on each build, so a
+    # source added to the addon (e.g. by a git pull) is picked up without a
+    # manual reconfigure (#375).
     # Collect sources from src/
     if(EXISTS "${ADDON_PATH}/src")
-        file(GLOB_RECURSE _SRC_FILES
+        file(GLOB_RECURSE _SRC_FILES CONFIGURE_DEPENDS
             "${ADDON_PATH}/src/*.cpp"
             "${ADDON_PATH}/src/*.c"
             "${ADDON_PATH}/src/*.mm"
@@ -114,11 +117,11 @@ macro(_tc_auto_addon ADDON_NAME ADDON_PATH)
 
     # Collect sources from libs/
     if(EXISTS "${ADDON_PATH}/libs")
-        file(GLOB _LIB_DIRS LIST_DIRECTORIES true "${ADDON_PATH}/libs/*")
+        file(GLOB _LIB_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS "${ADDON_PATH}/libs/*")
         foreach(_LIB_DIR ${_LIB_DIRS})
             if(IS_DIRECTORY ${_LIB_DIR})
                 if(EXISTS "${_LIB_DIR}/src")
-                    file(GLOB_RECURSE _LIB_SRC_FILES
+                    file(GLOB_RECURSE _LIB_SRC_FILES CONFIGURE_DEPENDS
                         "${_LIB_DIR}/src/*.cpp"
                         "${_LIB_DIR}/src/*.c"
                         "${_LIB_DIR}/src/*.mm"
@@ -152,7 +155,7 @@ macro(_tc_auto_addon ADDON_NAME ADDON_PATH)
 
     # libs/*/include folders
     if(EXISTS "${ADDON_PATH}/libs")
-        file(GLOB _LIB_DIRS LIST_DIRECTORIES true "${ADDON_PATH}/libs/*")
+        file(GLOB _LIB_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS "${ADDON_PATH}/libs/*")
         foreach(_LIB_DIR ${_LIB_DIRS})
             if(IS_DIRECTORY ${_LIB_DIR})
                 if(EXISTS "${_LIB_DIR}/include")
