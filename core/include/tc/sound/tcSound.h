@@ -1114,8 +1114,9 @@ public:
     int getMaxPolyphony() const { return maxPolyphony_; }  // 0 = unlimited
     int getBufferSize()   const { return bufferSize_; }
     // True only while the device runs: false before setup() / init(), after
-    // close() / shutdown(), and from the moment the OS reports the device
-    // stopped (see onDisconnect). isInitialized() is the older name.
+    // close() / shutdown(), and from the moment the OS reports a device opened
+    // by name stopped (see onDisconnect). A device opened as the system
+    // default keeps it true. isInitialized() is the older name.
     bool isConnected()    const { return initialized_.load(std::memory_order_acquire); }
     bool isInitialized()  const { return isConnected(); }
 
@@ -1187,16 +1188,20 @@ public:
     // from inside.
     Event<AudioDeviceChangedArgs> audioDeviceChanged;
 
-    // Fired once when the OS or the audio library reports that the running
-    // output device stopped by itself (for example a USB audio interface or
-    // a Bluetooth headset that was switched off while it was the chosen
-    // device). isConnected() is already false, e.reason says why, and the
-    // event fires on the main thread at the next host turn, never on the
-    // audio thread. It never fires for close() / shutdown(), for a re-init,
-    // or for a reroute to the new OS default device (following the default
-    // is not a loss). Which backends report a stop depends on the OS; where
-    // the backend says nothing, the audio just stops and the engine still
-    // reports isConnected() == true. To open the device again, call setup() /
+    // Fired once when the OS or the audio library reports that a running
+    // output device opened by name (AudioSettings::deviceName) stopped by
+    // itself (for example a USB audio interface unplugged or a Bluetooth
+    // headset switched off). The device is closed first, so the sound never
+    // moves to another device; isConnected() is already false, e.reason says
+    // why, and the event fires on the main thread at the next host turn,
+    // never on the audio thread. It never fires for close() / shutdown() or
+    // for a re-init. A device opened as the system default follows the OS
+    // default and never reports a loss; if every output device disappears,
+    // the sound just stops (and resumes when the OS has a default again).
+    // Apps that need to know open the device by name. Which backends report
+    // a stop depends on the OS; where the backend says nothing, the audio
+    // just stops and the engine still reports isConnected() == true. To open
+    // the device again (or go on with the system default), call setup() /
     // setup(settings).
     Event<DeviceDisconnectEventArgs> onDisconnect;
 
@@ -1491,10 +1496,10 @@ private:
     void* context_ = nullptr;  // ma_context* — persistent across re-inits so
                                // CoreAudio internal state stays consistent
                                // when devices are torn down + recreated.
-    // Atomic: the device's notification thread clears it when the device
-    // stops by itself (AudioDeviceLoss::stopped()). device_ stays allocated
-    // until the next init() / shutdown() releases it; for a device opened by
-    // name, delivering the loss on the main thread calls shutdown().
+    // Atomic: the device's notification thread clears it when a device opened
+    // by name stops by itself (AudioDeviceLoss::stopped()). device_ stays
+    // allocated until delivering the loss on the main thread calls
+    // shutdown(), or an init() / shutdown() before that releases it.
     std::atomic<bool> initialized_{false};
     // Voice slots. Grown by play() (under mutex_) when every slot is in use,
     // never shrunk except by a re-init with a smaller cap. maxPolyphony_ is

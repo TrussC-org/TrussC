@@ -265,9 +265,9 @@ struct AudioDiagnostics {
     // is a loss the app has already reopened or closed.
     std::atomic<bool> lossPending{false};
     // The device was opened by name (AudioSettings::deviceName found), not as
-    // the system default. Only such a device is released on a loss. Main
-    // thread only, set by init().
-    bool openedByName = false;
+    // the system default. Only such a device reports a loss. init() sets it
+    // before the device exists; the notification thread reads it.
+    std::atomic<bool> openedByName{false};
     std::string initFailureDevice;      // main thread only
 
     AudioDiagnostics() {
@@ -1905,25 +1905,26 @@ void releaseVoice(PlayingSound& voice) {
 // ---------------------------------------------------------------------------
 // Device loss
 //
-// miniaudio calls the notification callback on the device's own thread when
-// the device stops. The notification thread must neither block nor run app
-// code (and miniaudio forbids uninit from it), so it only clears initialized_
-// (isConnected() is false from then on), marks the loss and posts a
-// preallocated main-thread slot, which fires onDisconnect.
-// A device opened by name stops on a loss: the slot first releases it through
-// shutdown(), as close() does, because a "stopped" device may still run (Core
-// Audio moves an output unit opened by name to the default device when that
-// device goes away) and must not keep playing on a device the app never
-// chose. There is no automatic fallback to the default; the app calls
-// setup() for that. A device opened as the system default follows the OS
-// default and is never released here: WASAPI posts "stopped" before it
-// reroutes such a device, and PulseAudio posts it when the sink is suspended
-// and resumes it later. The stop that init() / shutdown() cause
+// A device opened as the system default follows the OS default and never
+// reports a loss: its "stopped" notifications are ignored. WASAPI posts one
+// before every reroute (stopped, rerouted, started), PulseAudio one when the
+// sink is suspended, and when no output device is left the sound just stops
+// until the OS has a default again.
+//
+// A device opened by name stops on a loss. miniaudio calls the notification
+// callback on the device's own thread. That thread must neither block nor
+// run app code (and miniaudio forbids uninit from it), so it only clears
+// initialized_ (isConnected() is false from then on), marks the loss and
+// posts a preallocated main-thread slot. The slot releases the device through
+// shutdown(), as close() does, and then fires onDisconnect: a "stopped"
+// device may still run (Core Audio moves an output unit opened by name to the
+// default device when that device goes away) and must not keep playing on a
+// device the app never chose. There is no automatic fallback to the default;
+// the app calls setup() for that. The stop that init() / shutdown() cause
 // themselves also comes through here, but those two clear the mark right
 // after they have released the device (they run on the main thread, so the
 // slot cannot run in between), and the slot then finds nothing to report. A
-// rerouted notification (the OS default changed and the backend followed it)
-// is not a loss and is ignored.
+// rerouted notification is not a loss and is ignored.
 // ---------------------------------------------------------------------------
 namespace {
 void deviceNotificationCallback(const ma_device_notification* notification) {
@@ -1940,6 +1941,8 @@ internal::MainThreadSlot& deviceLossSlot() {
 void internal::AudioDeviceLoss::stopped() {
     AudioEngine& engine = AudioEngine::getInstance();
     AudioDiagnostics& d = *engine.diag_;
+    // A default device follows the OS default: nothing to report
+    if (!d.openedByName.load(std::memory_order_acquire)) return;
     // Once per device: a second stop notification finds it cleared already
     if (!engine.initialized_.exchange(false, std::memory_order_acq_rel)) return;
     d.running.store(false, std::memory_order_release);  // not a stall, a stop
@@ -1957,9 +1960,9 @@ void internal::AudioDeviceLoss::deliver() {
     const ma_context* ctx = static_cast<const ma_context*>(engine.context_);
     args.reason = std::string("the audio output device stopped")
         + (ctx ? std::string(" (") + ma_get_backend_name(ctx->backend) + ")" : std::string());
-    // A device opened by name: release it before anyone hears of the loss.
-    // isConnected() is false already, so shutdown() logs no "shutdown" line.
-    if (engine.diag_->openedByName) engine.shutdown();
+    // Release the device before anyone hears of the loss. isConnected() is
+    // false already, so shutdown() logs no "shutdown" line.
+    engine.shutdown();
     logWarning("AudioEngine") << args.reason << "; call setup() to reopen it";
     // Main thread already: inline, in the context of the listeners' Apps
     internal::ExternalEventDelivery<DeviceDisconnectEventArgs>::notify(engine.onDisconnect, args);
@@ -2015,9 +2018,9 @@ bool AudioEngine::init() {
 }
 
 bool AudioEngine::init(const AudioSettings& settings) {
-    // A device that stopped by itself may still be allocated (until its loss
-    // is delivered, or for good when it was opened as the default): re-init
-    // releases it like a running one (voices move over the same way).
+    // A device that stopped by itself is still allocated until its loss is
+    // delivered: re-init releases it like a running one (voices move over the
+    // same way).
     const bool reinit = initialized_ || device_;
     const int  oldRate = sampleRate_;
 
@@ -2147,6 +2150,8 @@ bool AudioEngine::init(const AudioSettings& settings) {
     }
 
     ma_device* device = new ma_device();
+    // Before the device exists, so its notifications see the right value
+    diag_->openedByName.store(deviceIDPtr != nullptr, std::memory_order_release);
 
     ma_device_config config = ma_device_config_init(ma_device_type_playback);
     config.playback.format     = ma_format_f32;
@@ -2191,7 +2196,6 @@ bool AudioEngine::init(const AudioSettings& settings) {
     }
 
     device_ = device;
-    diag_->openedByName = deviceIDPtr != nullptr;
     initialized_ = true;
     diag_->initFailureDevice.clear();
     diag_->initFailure.store(0, std::memory_order_relaxed);
@@ -2394,8 +2398,9 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
 }
 
 void AudioEngine::shutdown() {
-    // Read before the device is released: the stop that releasing causes
-    // reaches AudioDeviceLoss::stopped(), which clears initialized_.
+    // Read before the device is released: for a device opened by name, the
+    // stop that releasing causes reaches AudioDeviceLoss::stopped(), which
+    // clears initialized_ (cleared below for any device).
     const bool wasRunning = initialized_;
     if (device_) {
         ma_device* device = static_cast<ma_device*>(device_);

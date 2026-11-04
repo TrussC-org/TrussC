@@ -46,9 +46,10 @@ private:
     EventListener audioDeviceListener;
     std::string lastDeviceEventMessage;
 
-    // AudioEngine::onDisconnect fires once when the OS reports the output
-    // device stopped (USB interface unplugged, Bluetooth headset off).
-    // Picking a device again opens it with setup(settings).
+    // AudioEngine::onDisconnect fires once when the OS reports a device
+    // opened by name stopped (USB interface unplugged, Bluetooth headset
+    // off); the system default device never reports a loss. Picking a device
+    // again opens it with setup(settings).
     EventListener lostListener;
 
     // Refresh devices list and reset selected index based on current engine.

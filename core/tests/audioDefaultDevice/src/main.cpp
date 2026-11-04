@@ -315,14 +315,20 @@ void checkLifecycle() {
     reopener.disconnect();
 
     // Opened as the system default (as the listener above did): the device
-    // follows the OS default, so a stop notification (WASAPI posts one
-    // before it reroutes) never releases it
+    // follows the OS default and ignores "stopped" (WASAPI posts stopped,
+    // rerouted, started on every unplug of the default device)
     thread([] { internal::AudioDeviceLoss::stopped(); }).join();
+    check("lifecycle: a default-opened device stays connected on stopped", engine.isConnected());
     internal::drainMainThreadQueue();
+    check("lifecycle: a default-opened device fires no onDisconnect", lost == 3 && engine.isConnected());
     const int kept = callbacks.load();
-    check("lifecycle: a default-opened device keeps running after the loss",
+    check("lifecycle: a default-opened device keeps running after stopped",
           waitFor([&] { return callbacks.load() > kept + 2; }));
     check("lifecycle: a default-opened device is still held", internal::AudioDeviceLoss::injectStopForTests());
+    // The engine's own release of a default device does not fire either
+    engine.close();
+    internal::drainMainThreadQueue();
+    check("lifecycle: close() of a default-opened device does not fire", lost == 3 && !engine.isConnected());
     counter.disconnect();
     listener.disconnect();
     engine.shutdown();
