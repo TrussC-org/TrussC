@@ -6,8 +6,8 @@
 // one third of it - left, center, right - so placed side by side they read
 // as one picture: a multi-window video wall.
 //
-// R puts the windows side by side again after you move them. The gap between
-// them stands in for the bezels of a real video wall.
+// R (in any of the three windows) puts them side by side again after you
+// move them. The gap between them stands in for the bezels of a video wall.
 // Closing any window quits (setQuitOnClose on all three).
 // Secondary windows: macOS / Windows / Linux; elsewhere only the left third shows.
 
@@ -26,7 +26,9 @@ void tcApp::setup() {
             logError("tcApp") << "createWindow failed (single-window platform?)";
             break;
         }
-        win->setApp<PanelApp>(wall_, i);
+        // Every window closes the app (setQuitOnClose), so the panels never
+        // outlive this App and can call back into it.
+        win->setApp<PanelApp>(wall_, i, [this] { arrange(); });
         panels_.push_back(win);
     }
     arrange();
@@ -70,11 +72,12 @@ void tcApp::keyPressed(int key) {
 
 void tcApp::arrange() {
     // Window positions are the window frame's top-left, so leave a small gap
-    // for the frames. setWindowPosition() moves THIS window; the others are
-    // moved through their handles.
+    // for the frames. Every window is moved through its handle: arrange() also
+    // runs from the panels' keyPressed(), where the global setWindowPosition()
+    // would move the panel's window instead of this one.
     const int gap = 16;
     const IVec2 origin{80, 120};
-    setWindowPosition(origin.x, origin.y);
+    if (auto* self = getWindow()) self->setPosition(origin.x, origin.y);
     for (size_t i = 0; i < panels_.size(); i++) {
         if (!panels_[i]->isOpen()) continue;
         panels_[i]->setPosition(origin.x + (int)(i + 1) * (PANEL_W + gap), origin.y);

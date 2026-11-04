@@ -28,15 +28,22 @@ inline void drawWallPart(const Fbo& wall, int index) {
 // (one sokol_gfx context), so no copy is needed.
 class PanelApp : public App {
 public:
-    PanelApp(shared_ptr<Fbo> wall, int index) : wall_(std::move(wall)), index_(index) {}
+    // arrange: the main App's "put the windows side by side", so R works here too.
+    PanelApp(shared_ptr<Fbo> wall, int index, function<void()> arrange)
+        : wall_(std::move(wall)), index_(index), arrange_(std::move(arrange)) {}
 
     void draw() override {
         if (wall_->isAllocated()) drawWallPart(*wall_, index_);
     }
 
+    void keyPressed(int key) override {
+        if (key == 'R' && arrange_) arrange_();
+    }
+
 private:
     shared_ptr<Fbo> wall_;
     int index_;
+    function<void()> arrange_;
 };
 
 // The main window: renders the wall and shows its left third.
