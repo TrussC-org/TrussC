@@ -2057,14 +2057,11 @@ public:
     bool isConnected() const { return isRunning(); }
     void close() { stop(); }
 
-    // Fired once when the OS or the audio library reports that the capture
-    // device stopped by itself (a USB microphone unplugged, a Bluetooth
-    // headset switched off). isConnected() is already false and the event
-    // fires on the main thread during runApp / runHeadlessApp, never on the
-    // audio thread. close() / stop(), start() again and the destructor never
-    // fire it. Not every backend reports a stop (and Web never does); where
-    // the backend says nothing, getBuffer() just stops getting new samples.
-    // To open the microphone again, call setup().
+    // Never fires today: the microphone is always the system default capture
+    // device, which follows the OS default and never reports a loss. If
+    // every capture device disappears, getBuffer() just stops getting new
+    // samples (and resumes when the OS has a default again). Kept for the
+    // device lifecycle convention.
     Event<DeviceDisconnectEventArgs> onDisconnect;
 
     // Get latest samples
@@ -2087,7 +2084,6 @@ private:
     std::shared_ptr<internal::MicState> state_;
     std::shared_ptr<internal::MicState> predecessor_;
     std::shared_ptr<std::function<void(internal::MicState&)>> apply_;
-    std::shared_ptr<std::function<void(internal::MicState&)>> lostApply_;
     std::shared_ptr<internal::NetworkDelivery> gate_ = std::make_shared<internal::NetworkDelivery>();
     bool running_ = false;
     bool starting_ = false;

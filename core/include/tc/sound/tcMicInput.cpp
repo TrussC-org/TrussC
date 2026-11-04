@@ -16,22 +16,6 @@ void MicState::audio(const float* input, size_t frames) {
         writePos = (writePos + 1) % ring.size();
     }
 }
-void micStopped(MicState& state) {
-    // Once per device. The stop that closeMic() causes also gets here, after
-    // stop() / the destructor cancelled the state, and finds nobody to tell.
-    if (state.lost.exchange(true)) return;
-    // weak_from_this() / lock() do not allocate. The queue entry does; a
-    // failure there only means the event is not delivered.
-    auto self = state.weak_from_this().lock();
-    if (!self) return;
-    try {
-        enqueueResourceLoad([self] {
-            if (self->cancelled || !appRunIsAlive(self->run)) return;
-            AppOwnerScope appScope(self->appOwner.lock());
-            if (auto target = self->lostApply.lock()) (*target)(*self);
-        });
-    } catch (...) {}
-}
 void completeMic(const std::shared_ptr<MicState>& state) {
     enqueueResourceLoad([state] {
         if (state->cancelled || !appRunIsAlive(state->run)) return;
@@ -45,20 +29,18 @@ MicInput::~MicInput() {
     // Nothing fires onDisconnect from here (device lifecycle rule 5).
     gate_->close();
     apply_.reset();
-    lostApply_.reset();
     if (state_) internal::cancelMic(state_);
 }
 bool MicInput::isStarting() const {
     return starting_ && state_ && !state_->cancelled && (!state_->runBound || internal::appRunIsAlive(state_->run));
 }
 bool MicInput::isRunning() const {
-    return running_ && state_ && !state_->cancelled && !state_->lost &&
+    return running_ && state_ && !state_->cancelled &&
            (!state_->runBound || internal::appRunIsAlive(state_->run));
 }
 void MicInput::stop() {
     const bool wasRunning = isRunning();
     apply_.reset();
-    lostApply_.reset();
     if (state_) {
         internal::cancelMic(state_);
         predecessor_ = std::move(state_);
@@ -100,17 +82,6 @@ bool MicInput::beginStart(int sampleRate, bool asynchronous) {
             // A listener can delete or restart this object.
         });
     state->apply = apply_;
-    lostApply_ = std::make_shared<std::function<void(internal::MicState&)>>(
-        [this](internal::MicState& lostState) {
-            if (state_.get() != &lostState) return;
-            running_ = false; deviceName_.clear();
-            DeviceDisconnectEventArgs args;
-            args.reason = "the capture device stopped";
-            logWarning("MicInput") << args.reason << "; call setup() to reopen the microphone";
-            // Last: a listener can delete or restart this object.
-            internal::ExternalEventDelivery<DeviceDisconnectEventArgs>::notify(onDisconnect, args);
-        });
-    state->lostApply = lostApply_;
     auto cancel = [weak = std::weak_ptr(state)] {
         if (auto live = weak.lock()) internal::cancelMic(live);
     };

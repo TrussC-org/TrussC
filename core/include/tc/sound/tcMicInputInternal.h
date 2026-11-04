@@ -3,7 +3,7 @@
 #include <condition_variable>
 
 namespace trussc::internal {
-struct MicState : std::enable_shared_from_this<MicState> {
+struct MicState {
     MicState();
     ~MicState();
     std::atomic<bool> cancelled{false};
@@ -11,11 +11,6 @@ struct MicState : std::enable_shared_from_this<MicState> {
     std::weak_ptr<AppOwner> appOwner = currentAppOwner();
     bool runBound = bool(appRunToken());
     std::weak_ptr<std::function<void(MicState&)>> apply;
-    // Device loss: the capture device stopped (micStopped()). lostApply fires
-    // onDisconnect on the main thread; stop() and the destructor reset it and
-    // cancel the state, so closing the device ourselves reports nothing.
-    std::weak_ptr<std::function<void(MicState&)>> lostApply;
-    std::atomic<bool> lost{false};
     std::shared_ptr<std::function<void()>> registration;
     std::shared_ptr<MicState> predecessor;
     std::mutex lifecycle;
@@ -50,11 +45,4 @@ void requestMicPermissionPlatform(std::function<void(bool)> completion);
 void launchMic(const std::shared_ptr<MicState>& state, bool asynchronous);
 void cancelMic(const std::shared_ptr<MicState>& state);
 void completeMic(const std::shared_ptr<MicState>& state);
-// The notification thread of the open capture device calls this when the
-// device stopped (miniaudio "stopped" notification): state.lost is set
-// (isRunning() is false from then on) and onDisconnect is queued for the main
-// thread, where it is dropped if the app has stopped or restarted the mic by
-// then. Never blocks and never runs app code. The tests call it to stand in
-// for the backend.
-void micStopped(MicState& state);
 }

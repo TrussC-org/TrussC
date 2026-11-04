@@ -2582,10 +2582,6 @@ MicTestBackend& micTestBackend() {
     static auto* backend = new MicTestBackend;
     return *backend;
 }
-void micNotificationCallback(const ma_device_notification* notification) {
-    if (notification->type == ma_device_notification_type_stopped)
-        micStopped(*static_cast<MicState*>(notification->pDevice->pUserData));
-}
 void micDataCallback(ma_device* device, void*, const void* input, ma_uint32 frames) {
     if (input) static_cast<MicState*>(device->pUserData)->audio(static_cast<const float*>(input), frames);
 }
@@ -2596,7 +2592,6 @@ MicStartResult openMic(MicState& state) {
     config.capture.channels = 1;
     config.sampleRate = state.sampleRate;
     config.dataCallback = micDataCallback;
-    config.notificationCallback = micNotificationCallback;
     config.pUserData = &state;
     ma_context_config contextConfig = ma_context_config_init();
     contextConfig.coreaudio.noAudioSessionDeactivate = MA_TRUE;
