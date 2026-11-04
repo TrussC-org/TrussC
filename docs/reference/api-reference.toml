@@ -1878,21 +1878,24 @@ details.en = '''
 - This `Event<DeviceDisconnectEventArgs>` fires once per open device, and only when the OS or the audio library reports that the running output device stopped by itself, for example a USB audio interface that was unplugged or a Bluetooth headset that was switched off while it was the chosen device. `reason` says what happened. `isConnected()` is already false when it fires.
 - It fires on the main thread at the Runtime's next host turn, never on the audio thread; the audio thread only records the stop. It does not fire without a running app loop (`runApp()` or `runHeadlessApp()`).
 - `close()`, `shutdown()`, a re-initialization with `setup()` or `init()`, and a reroute to a new OS default device never fire it. Following the default device is not a loss. If the app reopens the device before the event is delivered, the pending loss is dropped.
-- Which backends report a stop depends on the OS and driver. Where the backend says nothing about a device that went away, the audio just stops and `isConnected()` stays `true`; the engine does not poll. PulseAudio also reports a suspended sink as a stop and then resumes by itself.
+- Which backends report a stop depends on the OS and driver. Where the backend says nothing about a device that went away, the audio just stops and `isConnected()` stays `true`; the engine does not poll. PulseAudio also reports a suspended sink as a stop; a device opened as the system default then resumes by itself.
+- A device opened by name (`AudioSettings::deviceName`) is closed before the event fires, so its sound never moves to another device. To keep playing on the system default after it is lost, call `setup()` inside the listener.
 - To open the device again, call `setup()` / `setup(settings)` again. Nothing is rerouted or retried by the engine.
 '''
 details.ja = '''
 - この `Event<DeviceDisconnectEventArgs>` は、開いているデバイスごとに 1 回、OS またはオーディオライブラリが「動作中の出力デバイスが自ら停止した」と報告したときだけ発火します。たとえば、選択中の USB オーディオインターフェースを抜いた場合や、Bluetooth ヘッドセットの電源を切った場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
 - Runtime の次のホストターンでメインスレッドで発火し、オーディオスレッドでは発火しません。オーディオスレッドは停止を記録するだけです。アプリのループ（`runApp()` または `runHeadlessApp()`）が動いていないときは発火しません。
 - `close()`、`shutdown()`、`setup()` や `init()` による再初期化、新しい OS 既定デバイスへの再ルーティングでは発火しません。既定デバイスに追従することは喪失ではありません。通知が届く前にアプリがデバイスを開き直した場合、保留中の喪失は破棄します。
-- どのバックエンドが停止を報告するかは OS とドライバーによります。なくなったデバイスについてバックエンドが何も報告しない場合は、音が止まるだけで `isConnected()` は `true` のままです。エンジンはポーリングしません。PulseAudio は、サスペンドされたシンクも停止として報告し、その後自動で復帰します。
+- どのバックエンドが停止を報告するかは OS とドライバーによります。なくなったデバイスについてバックエンドが何も報告しない場合は、音が止まるだけで `isConnected()` は `true` のままです。エンジンはポーリングしません。PulseAudio は、サスペンドされたシンクも停止として報告します。システム既定として開いたデバイスは、その後自動で復帰します。
+- 名前で開いたデバイス（`AudioSettings::deviceName`）は、発火する前に閉じます。そのため、音がほかのデバイスに移ることはありません。喪失後もシステム既定のデバイスで再生を続けるには、リスナーの中で `setup()` を呼びます。
 - デバイスを開き直すには、`setup()` / `setup(settings)` をもう一度呼びます。エンジンは再ルーティングも再試行もしません。
 '''
 details.ko = '''
 - 이 `Event<DeviceDisconnectEventArgs>`는 열린 장치마다 한 번, OS 또는 오디오 라이브러리가 실행 중인 출력 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 선택한 USB 오디오 인터페이스를 뽑았거나 Bluetooth 헤드셋의 전원을 껐을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
 - Runtime의 다음 호스트 턴에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 오디오 스레드는 정지를 기록만 합니다. 앱 루프(`runApp()` 또는 `runHeadlessApp()`)가 실행 중이 아니면 발생하지 않습니다.
 - `close()`, `shutdown()`, `setup()`이나 `init()`에 의한 재초기화, 새로운 OS 기본 장치로의 경로 변경에서는 발생하지 않습니다. 기본 장치를 따라가는 것은 손실이 아닙니다. 이벤트가 전달되기 전에 앱이 장치를 다시 열면 대기 중인 손실은 버립니다.
-- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 사라진 장치에 대해 백엔드가 아무것도 보고하지 않으면 소리만 멈추고 `isConnected()`는 `true`로 남습니다. 엔진은 폴링하지 않습니다. PulseAudio는 일시 중단된 싱크도 정지로 보고한 뒤 스스로 복귀합니다.
+- 어떤 백엔드가 정지를 보고하는지는 OS와 드라이버에 따라 다릅니다. 사라진 장치에 대해 백엔드가 아무것도 보고하지 않으면 소리만 멈추고 `isConnected()`는 `true`로 남습니다. 엔진은 폴링하지 않습니다. PulseAudio는 일시 중단된 싱크도 정지로 보고합니다. 시스템 기본으로 연 장치는 그 뒤 스스로 복귀합니다.
+- 이름으로 연 장치(`AudioSettings::deviceName`)는 이벤트가 발생하기 전에 닫힙니다. 그래서 소리가 다른 장치로 옮겨 가지 않습니다. 손실 후에도 시스템 기본 장치에서 계속 재생하려면 리스너 안에서 `setup()`을 호출하세요.
 - 장치를 다시 열려면 `setup()` / `setup(settings)`를 다시 호출하세요. 엔진은 경로 변경도 재시도도 하지 않습니다.
 '''
 snippet = '''
