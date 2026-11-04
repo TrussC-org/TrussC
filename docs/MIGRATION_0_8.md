@@ -385,7 +385,7 @@ The last functions that took degrees now take radians. The names stay the same, 
 - The screen FOV functions accept `0` (orthographic) or `0 < fov < TAU / 2` (`0 < fov < 180` for the `Deg` names). Any other value, such as `60` left over from the degree version, is ignored and the view stays as it was. The first ignored call logs a warning; later ones are silent.
 - `0` degrees also means orthographic. `setupScreenOrtho()` and `setDefaultScreenOrtho()` are clearer ways to write `setupScreenFov(0)` and `setDefaultScreenFov(0)`. After either default setter, `getDefaultScreenFov()` returns `0`.
 - **Saved JSON:** `rotation` is now read as radians, so a file saved before v0.8.0 (degrees under `rotation`) loads with wrong rotations. Convert those values with `deg2rad()`, or rename the key to `rotationDeg` in the file; that key is still read and converted. New files save only `rotation`, in radians.
-- Not angles, unchanged: hue (`ColorHSB::h`, `ColorOKLCH::H`, 0–1 of a turn) and `tcx::geo::LatLon` (geographic degrees).
+- Not an angle, unchanged: hue (`ColorHSB::h`, `ColorOKLCH::H`, 0–1 of a turn).
 
 ### Each Fbo has its own matrices, camera and clipping
 
@@ -475,7 +475,7 @@ void tcApp::setup() {
 }
 ```
 
-`grabScreen()` never reads an active Fbo; use `Fbo::readPixels()` for that, and `saveScreenshot()` for files.
+`grabScreen()` never reads an active Fbo; use `Fbo::readPixels()` for that, and `saveScreenshot()` for files. On the web, `grabScreen()` is not available: it returns `false` and logs a warning once.
 
 ### The swapchain pass functions are removed
 
@@ -825,6 +825,7 @@ server.start(9000, 1000);
 
 - Redirects are now followed by default (before, they were not). An app that checked for a 3xx status now gets the final response instead. `setFollowRedirects(false)` brings back the old behavior. At most 5 hops, http and https only, and never from https to http. Credential headers such as `Authorization`, `Cookie` and `X-Api-Key` are dropped when a redirect goes to another origin.
 - A response larger than 64 MiB now fails, with status code `0` and an empty body. Raise the limit with `setResponseLimit()`.
+- Both changes apply to macOS, Windows, Linux and Android. On the web, `HttpClient` is not implemented yet, so neither applies there.
 
 ```cpp
 // To get the v0.7.7 behavior back:
@@ -923,6 +924,8 @@ void tcApp::setup() {
 
 `trusscli build --mcp` and `run --mcp` set the CMake option `TRUSSC_MCP_DEV=ON`; a build without `--mcp` sets it `OFF`.
 
+`mcp::registerInspectionTools()`, `mcp::registerControlTools()` and `mcp::registerDebuggerTools()` are deprecated and will be removed in v1.0.0; use `mcp::setToolLevel()` instead. Until then they keep the v0.7.7 rule: they set the tool level but do not open the MCP server, which still needs `TRUSSC_MCP=1` or `mcp::startHttpServer()`. `mcp::setToolLevel()` opens the server by itself.
+
 ### MCP window ids
 
 - `tc_list_windows` returns each window's positive `id` instead of `index`, and the `main` field is gone. Pass that `id` as the `window` argument of other tools. Resource list indexes are unchanged.
@@ -969,9 +972,9 @@ You do not need these to upgrade.
 
 - **Loading in the background:** `Image::loadAsync()`, `SoundBuffer::loadAsync()` and `Font::loadAsync()`, with `onLoad` on a later frame. Cancelling never waits. `setResourceLoadConcurrency()` / `getResourceLoadConcurrency()` set how many loads prepare at once (4 by default). See [ASYNC_LOADING.md](ASYNC_LOADING.md).
 - **Screenshots and microphone without blocking:** `saveScreenshotAsync()` with `onScreenshotSave()`, and `MicInput::startAsync()` with `onStart` and `isStarting()`.
-- **Windows and quitting:** `closeRequested` and `occludedChanged` events, `WindowSettings::setQuitOnClose()` and `Window::setQuitOnClose()`, `Window::destroyApp()`, `runtime().setLogoutTimeout()`, `setIndependentFps()`.
+- **Windows and quitting:** `closeRequested` and `occludedChanged` events, `WindowSettings::setQuitOnClose()` and `Window::setQuitOnClose()`, `Window::destroyApp()`, `runtime().setLogoutTimeout()`, `Window::setIndependentFps()`.
 - **Runtime settings:** `RuntimeSettings` and `runApp<T>(windowSettings, runtimeSettings)`.
-- **Cameras:** `setupScreenFovWithSize()` / `setupScreenFovWithSizeDeg()` for an explicit viewport size; `setupScreenOrtho()` and `setDefaultScreenOrtho()`.
+- **Cameras:** `setupScreenFovWithSize()` / `setupScreenFovWithSizeDeg()` for an explicit viewport size; `setDefaultScreenOrtho()`.
 - **Devices:** the reopen calls, `isConnected()`, `close()` and `onDisconnect` described in [Devices](#devices).
 - **Hot reload:** `TC_NO_HOT_RELOAD("reason");` declares that code cannot be hot-reloaded, so a hot-reload build stops with that reason. tcxHap declares it on Windows, so a hot-reload build that uses tcxHap on Windows now stops with this message; remove `TC_HOT_RELOAD` to build normally.
 - **trusscli:** `-j` / `--jobs`, `build --dry-run`, and `build` / `run --mcp`.
