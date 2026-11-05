@@ -276,8 +276,8 @@ Not hooked, on purpose:
 Not a Dear ImGui file, but it is bundled here, in the addon, not with the core
 sokol headers (see `core/include/sokol/TRUSSC_MODIFICATIONS.md`).
 
-**Upstream base:** https://github.com/floooh/sokol `util/sokol_imgui.h` at commit
-`e7a48ed6` (2026-11-03), matching the core sokol headers (#713 Q3/Q4).
+**Upstream base:** https://github.com/floooh/sokol `util/sokol_imgui.h` at commit `e7a48ed6` (2026-11-03),
+matching the core sokol headers (#713 Q3/Q4).
 The three-way update used `082152c` as base; upstream already includes the
 `544c0ef` cherry-pick. The upstream flush/draw split, direct writes from ImGui
 lists, font staging/copies, gamma uniforms and allocator removal are retained.
