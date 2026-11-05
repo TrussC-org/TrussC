@@ -427,9 +427,8 @@ struct InputTarget {
     }
 };
 
-json heldKeysJson() {
-    std::vector<int> held(::trussc::internal::currentWindowContext().keysPressed.begin(),
-                          ::trussc::internal::currentWindowContext().keysPressed.end());
+json heldKeysJson(const ::trussc::internal::WindowContext& ctx) {
+    std::vector<int> held(ctx.keysPressed.begin(), ctx.keysPressed.end());
     std::sort(held.begin(), held.end());
     return json(held);
 }
@@ -1230,7 +1229,7 @@ void registerStandardTools(Server& server) {
 
             return json{{"status", "ok"},
                         {"modifiersPressed", pressedMods},
-                        {"heldKeys", internal::heldKeysJson()}};
+                        {"heldKeys", internal::heldKeysJson(target.ctx)}};
         });
 
     coreTool(server, "tc_key_release",
@@ -1268,7 +1267,7 @@ void registerStandardTools(Server& server) {
 
             return json{{"status", "ok"},
                         {"modifiersReleased", releasedMods},
-                        {"heldKeys", internal::heldKeysJson()}};
+                        {"heldKeys", internal::heldKeysJson(target.ctx)}};
         });
 
     // --- Node Tools ---
