@@ -156,32 +156,37 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["stop"] = &trussc::Sound::stop;
     }
     {
-        sol::usertype<trussc::WindowSettings> t = lua->new_usertype<trussc::WindowSettings>("WindowSettings");
-        t["decorated"] = &trussc::WindowSettings::decorated;
-        t["fullscreen"] = &trussc::WindowSettings::fullscreen;
-        t["height"] = &trussc::WindowSettings::height;
-        t["highDpi"] = &trussc::WindowSettings::highDpi;
-        t["pipelinePoolSize"] = &trussc::WindowSettings::pipelinePoolSize;
-        t["pixelPerfect"] = &trussc::WindowSettings::pixelPerfect;
-        t["quitOnClose"] = &trussc::WindowSettings::quitOnClose;
-        t["resourcePoolSize"] = &trussc::WindowSettings::resourcePoolSize;
-        t["sampleCount"] = &trussc::WindowSettings::sampleCount;
-        t["shaderPoolSize"] = &trussc::WindowSettings::shaderPoolSize;
-        t["swapInterval"] = &trussc::WindowSettings::swapInterval;
-        t["title"] = &trussc::WindowSettings::title;
-        t["width"] = &trussc::WindowSettings::width;
-        t["setDecorated"] = &trussc::WindowSettings::setDecorated;
-        t["setFullscreen"] = &trussc::WindowSettings::setFullscreen;
-        t["setHighDpi"] = &trussc::WindowSettings::setHighDpi;
-        t["setPipelinePoolSize"] = &trussc::WindowSettings::setPipelinePoolSize;
-        t["setPixelPerfect"] = &trussc::WindowSettings::setPixelPerfect;
-        t["setQuitOnClose"] = &trussc::WindowSettings::setQuitOnClose;
-        t["setResourcePoolSize"] = &trussc::WindowSettings::setResourcePoolSize;
-        t["setSampleCount"] = &trussc::WindowSettings::setSampleCount;
-        t["setShaderPoolSize"] = &trussc::WindowSettings::setShaderPoolSize;
-        t["setSize"] = &trussc::WindowSettings::setSize;
-        t["setSwapInterval"] = &trussc::WindowSettings::setSwapInterval;
-        t["setTitle"] = &trussc::WindowSettings::setTitle;
+        auto constructors = tcxLuaConstructors<trussc::Window
+            , trussc::Window()
+        >();
+        sol::usertype<trussc::Window> t = lua->new_usertype<trussc::Window>("Window", constructors, sol::call_constructor, constructors);
+        t["bringToFront"] = &trussc::Window::bringToFront;
+        t["close"] = &trussc::Window::close;
+        t["destroyApp"] = &trussc::Window::destroyApp;
+        t["events"] = &trussc::Window::events;
+        t["getApp"] = &trussc::Window::getApp;
+        t["getFps"] = &trussc::Window::getFps;
+        t["getHeight"] = &trussc::Window::getHeight;
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+        t["getPosition"] = &trussc::Window::getPosition;
+#endif
+        t["getTitle"] = &trussc::Window::getTitle;
+        t["getWidth"] = &trussc::Window::getWidth;
+        t["isFocused"] = &trussc::Window::isFocused;
+        t["isFullscreen"] = &trussc::Window::isFullscreen;
+        t["isOccluded"] = &trussc::Window::isOccluded;
+        t["isOpen"] = &trussc::Window::isOpen;
+        t["setClearColor"] = &trussc::Window::setClearColor;
+        t["setFps"] = &trussc::Window::setFps;
+        t["setFullscreen"] = &trussc::Window::setFullscreen;
+        t["setIndependentFps"] = &trussc::Window::setIndependentFps;
+#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
+        t["setPosition"] = &trussc::Window::setPosition;
+#endif
+        t["setQuitOnClose"] = &trussc::Window::setQuitOnClose;
+        t["setSize"] = &trussc::Window::setSize;
+        t["setTitle"] = &trussc::Window::setTitle;
+        t["toggleFullscreen"] = &trussc::Window::toggleFullscreen;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::Logger
@@ -226,28 +231,25 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
         t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
-    lua->new_usertype<trussc::Direction>("Direction",
-        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
-        "Left", sol::var(trussc::Direction::Left),
-        "Center", sol::var(trussc::Direction::Center),
-        "Right", sol::var(trussc::Direction::Right),
-        "Top", sol::var(trussc::Direction::Top),
-        "Bottom", sol::var(trussc::Direction::Bottom),
-        "Baseline", sol::var(trussc::Direction::Baseline));
-    {
-        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
-        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
-        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
-        t["id"] = &trussc::TouchEventArgs::id;
-        t["x"] = &trussc::TouchEventArgs::x;
-        t["y"] = &trussc::TouchEventArgs::y;
-    }
-    {
-        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
-        t["data"] = &trussc::UdpReceiveEventArgs::data;
-        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
-        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
-    }
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
     {
         sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
         t["getHost"] = &trussc::TcpServerClient::getHost;
@@ -260,8 +262,8 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
     {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
+        t["focused"] = &trussc::FocusEventArgs::focused;
     }
 }
 #ifdef _MSC_VER
