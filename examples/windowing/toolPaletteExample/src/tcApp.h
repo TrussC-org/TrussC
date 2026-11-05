@@ -23,7 +23,7 @@ inline const vector<float>& brushRadii() {
     return radii;
 }
 
-// The palette window: six colour swatches and three brush sizes. Click to
+// The palette window: six color swatches and three brush sizes. Click to
 // choose; the current choice has a white outline.
 class PaletteApp : public App {
 public:
@@ -32,8 +32,8 @@ public:
     void draw() override {
         clear(0.18f, 0.19f, 0.23f);
         setColor(0.7f);
-        drawBitmapString("colour", 14, 22);
-        drawBitmapString("size", 14, 146);
+        drawBitmapString("color", 14, 8);
+        drawBitmapString("size", 14, 142);
 
         const auto& colors = swatchColors();
         for (int i = 0; i < (int)colors.size(); i++) {
@@ -63,9 +63,10 @@ public:
     }
 
 private:
-    // 3 x 2 swatches, then one row of sizes.
-    static Rect swatchRect(int i) { return Rect(14 + (i % 3) * 56, 34 + (i / 3) * 56, 48, 48); }
-    static Rect sizeRect(int i) { return Rect(14 + i * 56, 156, 48, 48); }
+    // 3 x 2 swatches, then one row of sizes. Each label sits above its rows:
+    // text is top-aligned, so y is the top of the 16 px line.
+    static Rect swatchRect(int i) { return Rect(14 + (i % 3) * 56, 30 + (i / 3) * 56, 48, 48); }
+    static Rect sizeRect(int i) { return Rect(14 + i * 56, 164, 48, 48); }
 
     static void outline(float x, float y, float w, float h) {
         noFill();

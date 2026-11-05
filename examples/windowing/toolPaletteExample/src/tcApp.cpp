@@ -2,7 +2,7 @@
 // tcApp.cpp - Tool palette example
 // =============================================================================
 // The main window is a canvas: drag to paint. A small palette window, opened
-// with WindowSettings::setParentWindow(), offers colours and brush sizes; click
+// with WindowSettings::setParentWindow(), offers colors and brush sizes; click
 // to choose. The parent relation only keeps the palette above the canvas. It is
 // not modal: the canvas keeps taking input while the palette is open, and it
 // still works after the palette is closed.
