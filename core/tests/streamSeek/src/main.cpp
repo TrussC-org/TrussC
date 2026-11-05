@@ -1170,6 +1170,43 @@ TC_CORE_TEST_MAIN() {
     };
     check("back to 48 kHz", reinitAt(kRate));
 
+    // --- SoundStream::sampleRate follows the engine rate (#449) ------------------------
+    // The stream's rate is the rate its decoders output at (the engine's), so
+    // after a re-init it must not keep the rate of loadStream(). A stream
+    // nothing plays is refreshed by its next play().
+    {
+        auto playing = make_shared<SoundStream>();
+        auto idle = make_shared<SoundStream>();
+        check("stream rate: loadStream() reports the engine rate",
+              (bool)playing->loadStream(dcWav) && (bool)idle->loadStream(dcWav) &&
+              playing->sampleRate == kRate && idle->sampleRate == kRate);
+        const float duration = playing->getDuration();
+        auto voice = engine.play(playing);
+        check("stream rate: a voice plays", voice != nullptr && voice->playing);
+        check("stream rate: the engine restarts at 96 kHz", reinitAt(96000));
+        check("stream rate: a playing stream follows the re-init",
+              playing->sampleRate == 96000, to_string(playing->sampleRate));
+        check("stream rate: the duration in seconds is unchanged",
+              approx(playing->getDuration(), duration, 0.001f),
+              to_string(duration) + " -> " + to_string(playing->getDuration()));
+        auto voiceIdle = engine.play(idle);
+        check("stream rate: play() refreshes a stream that was idle during the re-init",
+              voiceIdle != nullptr && idle->sampleRate == 96000, to_string(idle->sampleRate));
+
+        // A Sound loaded at 48 kHz, played after the re-init: seconds in, seconds out.
+        Sound s;
+        check("stream rate: a Sound loaded before the re-init plays at 96 kHz",
+              reinitAt(kRate) && (bool)s.loadStream(dcWav) && reinitAt(96000) && s.play());
+        s.pause();
+        s.setPosition(2.0f);
+        check("stream rate: setPosition(2.0) / getPosition() agree after a re-init",
+              approx(s.getPosition(), 2.0f, 0.001f), to_string(s.getPosition()));
+        s.stop();
+        voice->playing = false;
+        voiceIdle->playing = false;
+        check("back to 48 kHz after the stream rate block", reinitAt(kRate));
+    }
+
     // --- a seek near the end plays the whole tail ------------------------------------
     // The mixer reads how far the ring is written at the top of its callback.
     // The file is shorter than the ring, so the worker has written all of it

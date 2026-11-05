@@ -1497,6 +1497,12 @@ std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> sou
             noteDroppedPlay(DropReason::DecoderError, s, (int)r);
             return nullptr;
         }
+        // The stream's sampleRate is the rate its decoders output at: the
+        // engine rate just used, which is a different one if a re-init
+        // happened since loadStream() (#449). Only the caller's thread
+        // reads it; the mixer and the worker never do. Written only when it
+        // changes, so voices of a shared stream do not rewrite it.
+        if (s->sampleRate != sampleRate_) s->sampleRate = sampleRate_;
 
         StreamWorker::getInstance().registerStream(stream);
     }
@@ -2294,6 +2300,9 @@ std::vector<AudioDeviceInfo> AudioEngine::listDevices() {
 // destructor uninits the old decoder. Worker's weak_ptr to it stops
 // locking and the entry self-evicts on the next iteration.
 //
+// A rebuilt stream voice also sets SoundStream::sampleRate to the new rate. A
+// stream without a rebuilt voice gets it from its next play().
+//
 // Called with the device stopped, so no audio callback can race.
 // ---------------------------------------------------------------------------
 void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
@@ -2388,6 +2397,11 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
             // ~StreamInstance kills the old decoder.
             slot->stream = newStream;
             StreamWorker::getInstance().registerStream(newStream);
+
+            // The decoder now outputs at the new rate, and so does the
+            // stream's sampleRate (#449). The device is stopped, so the
+            // mixer is not running; it never reads this field anyway.
+            src->sampleRate = newRate;
 
             // Re-express positionF in new engine-rate frames so the
             // existing loop-modulo logic in mixStreamVoice keeps working.
