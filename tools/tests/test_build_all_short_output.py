@@ -259,6 +259,13 @@ class BuildScreen(ShortOutputCase):
         # Everything that is not noise stays on the screen.
         self.assertEqual(self.screen().splitlines(), [l.rstrip() for l in lines])
 
+    def test_pass_lines_of_a_test_run_by_the_build_are_hidden(self):
+        self.feed(['GLCORE\n', 'late periodic phase: PASS\n',
+                   'a.cpp:3:1: warning: PASS is a word here\n', 'check x: FAIL: broken\n'])
+        self.assertEqual(self.screen(),
+                         'GLCORE\na.cpp:3:1: warning: PASS is a word here\ncheck x: FAIL: broken\n')
+        self.assertEqual(build_all.SHORT.warnings, ['a.cpp'])
+
     def test_update_chatter_is_hidden_and_the_note_shown_once(self):
         update = ['Note: TrussC has changed since trusscli was built.\n',
                   "      Run 'trusscli upgrade' to rebuild.\n",
