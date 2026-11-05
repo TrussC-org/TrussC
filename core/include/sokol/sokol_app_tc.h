@@ -2710,6 +2710,7 @@ static struct {
         CFRunLoopObserverRef host_turn_observer;
         unsigned host_loop_depth;
         bool host_turn_open;
+        NSTimeInterval activated_at;    /* systemUptime of the last app activation (first-mouse check) */
         id keyup_monitor;               /* Cmd+key-up workaround (Cocoa swallows those) */
         id<MTLDevice> device;
         /* mouse cursor */
@@ -3210,6 +3211,14 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)isFlipped { return YES; }   /* top-left origin */
+/* [TrussC] A click that moves focus between our own windows also reaches the
+   app (a palette click picks at once). A click that activates the app from
+   another app only activates, as AppKit does by default: AppKit activates
+   before asking, so compare the activation time with the click time. */
+- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+    if (_sapp_tc.app.activated_at >= event.timestamp - 0.001) return NO;
+    return NSApp.isActive;
+}
 
 - (void)updateTrackingAreas {
     for (NSTrackingArea* a in self.trackingAreas) [self removeTrackingArea:a];
@@ -4312,6 +4321,7 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 }
 - (void)applicationDidBecomeActive:(NSNotification*)n {
     (void)n;
+    _sapp_tc.app.activated_at = NSProcessInfo.processInfo.systemUptime;
     _sapp_tc_mac_process_visibility();
     _sapp_tc_mac_recheck_visibility();
 }
