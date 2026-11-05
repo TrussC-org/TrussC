@@ -98,7 +98,6 @@ static _sg_pipeline_t* _sg_pipeline_ref_ptr(_sg_pipeline_t** ref) { return *ref;
 static _sg_shader_t* _sg_shader_ref_ptr(_sg_shader_t* const* ref) { return *ref; }
 static int _sg_mtl_add_resource(id buffer) { retired.push_back(buffer); --_sg.mtl.idpool.free_queue_top; return 1; }
 static void _sg_mtl_release_resource(unsigned, int) { ++_sg.mtl.idpool.release_queue_front; }
-static int _sg_roundup(int value, int alignment) { return (value + alignment - 1) & ~(alignment - 1); }
 static void _sg_log(int, int, const char*, int) {}
 constexpr int SG_LOGITEM_METAL_UNIFORM_BUFFER_GROWN = 0;
 #define _SOKOL_PRIVATE static

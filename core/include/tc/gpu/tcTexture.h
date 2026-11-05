@@ -236,8 +236,7 @@ public:
 
     // Load all six faces (+X, -X, +Y, -Y, +Z, -Z) in one update.
     // Requires Dynamic / Stream usage and faceSize == sideSize * sideSize * bpp.
-    // As with loadData(), a second upload to the same image in the same device
-    // frame is skipped with a warning.
+    // Each call copies immediately, including repeated uploads in one frame.
     void loadCubemapData(const void* const faces[6], size_t faceSize) {
         if (!sg_isvalid()) return;
         if (!allocated_ || !isCubemap_) return;
@@ -253,13 +252,6 @@ public:
             return;
         }
 
-        const uint64_t currentFrame = internal::deviceFrameCount();
-        if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
-            logWarning() << "[Texture] loadCubemapData() called twice in same frame, skipped";
-            return;
-        }
-        lastUpload_ = {image_.id, currentFrame};
-
         // sokol expects every face of every mip in one call. Dynamic / Stream
         // cubemaps have one mip; its six face buffers are concatenated here.
         // The staging buffer is reused (a Stream cubemap may upload every
@@ -272,10 +264,8 @@ public:
         for (int face = 0; face < 6; ++face) {
             std::memcpy(cubemapStaging_.get() + face * faceSize, faces[face], faceSize);
         }
-        sg_image_data img_data = {};
-        img_data.mip_levels[0].ptr = cubemapStaging_.get();
-        img_data.mip_levels[0].size = total;
-        sg_update_image(image_, &img_data);
+        const sg_range data = {cubemapStaging_.get(), total};
+        internal::uploadImageData(image_, data);
     }
 
     // Get (and lazily create) an attachment view targeting one (face, mip) of
@@ -357,12 +347,12 @@ public:
 
 private:
     friend class Image;
-    // Only file/memory image loads use this non-throwing mip path. Fixed
-    // descriptors and owned levels unwind before a failed load is reported.
+    // Only file/memory image loads use this non-throwing mip path. The owned
+    // blob and temporary level unwind before a failed load is reported.
     bool allocateImageLoad(const Pixels& pixels, bool mipmaps);
 
     void allocatePixels(const Pixels& pixels, TextureUsage usage, bool mipmaps,
-                        const sg_image_data* imageLoadMips);
+                        const sg_range* imageLoadMips);
 
 public:
     // Release resources
@@ -382,92 +372,31 @@ public:
 
     void loadData(const Pixels& pixels) {
         if (!sg_isvalid()) return;
-        // Dynamic + mipmaps: D3D11 only allows a single mip level on
-        // DYNAMIC-usage textures, so we can't use sg_update_image with a
-        // full mip chain. Instead we destroy the current image and recreate
-        // it as immutable with all mip levels baked in from CPU data.
-        // The view and sampler are also rebuilt so handles stay consistent.
         if (mipmapped_ && allocated_ && usage_ != TextureUsage::Immutable) {
-            if (pixels.getWidth() != width_ ||
-                pixels.getHeight() != height_ ||
-                pixels.getChannels() != channels_) return;
-
-            // DEVICE frame counter (Fix 3): sokol's one-update-per-image-per-
-            // frame limit is a device constraint, so this must stay on
-            // internal::deviceFrameCount(), NOT the per-window getFrameCount().
-            uint64_t currentFrame = internal::deviceFrameCount();
-            if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
-                logWarning() << "[Texture] loadData() called twice in same frame, skipped";
-                return;
-            }
-            lastUpload_ = {image_.id, currentFrame};
-
-            const size_t bpp = computeBytesPerPixel();
-
-            sg_image_desc img_desc = {};
-            img_desc.width  = width_;
-            img_desc.height = height_;
-            img_desc.pixel_format = (pixelFormat_ != SG_PIXELFORMAT_NONE)
-                                  ? pixelFormat_
-                                  : ((channels_ == 4) ? SG_PIXELFORMAT_RGBA8 : SG_PIXELFORMAT_R8);
-            img_desc.num_mipmaps  = numMipLevels_;
-
-            img_desc.data.mip_levels[0].ptr  = pixels.getDataVoid();
-            img_desc.data.mip_levels[0].size = (size_t)width_ * height_ * bpp;
-
-            // Lower mip levels: chain Pixels::halve() starting from a clone of
-            // the source. halve() is gamma-correct for U8 buffers (matches the
-            // FBO mipmap convention); F32 buffers are averaged directly.
-            // mipChain entries keep the data alive for the sg_make_image call
-            // below — the pointers we hand to sg_image_data must remain valid
-            // until sg_make_image returns.
-            std::vector<Pixels> mipChain;
-            mipChain.reserve(numMipLevels_ > 1 ? numMipLevels_ - 1 : 0);
+            if (pixels.getWidth() != width_ || pixels.getHeight() != height_ || pixels.getChannels() != channels_) return;
+            // Suspend once for the chain, including a lazy CPU recording.
+            const bool resume = internal::suspendForImageUpload();
             Pixels current = pixels.clone();
-            for (int level = 1; level < numMipLevels_; level++) {
-                current.halve();
-                mipChain.emplace_back(current.clone());
-                img_desc.data.mip_levels[level].ptr  = mipChain.back().getDataVoid();
-                img_desc.data.mip_levels[level].size = mipChain.back().getTotalBytes();
+            for (int level = 0; level < numMipLevels_; ++level) {
+                if (level) current.halve();
+                const sg_range mip = {current.getDataVoid(), current.getTotalBytes()};
+                internal::uploadImageData(image_, mip, level);
             }
-
-            // Tear down old GPU resources (deferred — a draw recorded earlier
-            // this frame may still reference the old view) and rebuild.
-            internal::deferGpuDestroy(view_);
-            internal::deferGpuDestroy(image_);
-
-            image_ = sg_make_image(&img_desc);
-
-            sg_view_desc view_desc = {};
-            view_desc.texture.image = image_;
-            view_ = sg_make_view(&view_desc);
+            if (resume) internal::ensureCurrentPass();
             return;
         }
         loadData(pixels.getDataVoid(), pixels.getWidth(), pixels.getHeight(), pixels.getChannels());
     }
 
     // Upload pixel data to texture
-    // Note: Due to sokol limitations, can only update each image once per frame
-    // Updating the same image twice ignores the second call and logs a warning
     void loadData(const void* data, int width, int height, int channels) {
         if (!sg_isvalid()) return;
         if (!allocated_ || usage_ == TextureUsage::Immutable) return;
         if (width != width_ || height != height_ || channels != channels_) return;
 
-        // Can only update each image once per device frame (sokol limitation)
-        uint64_t currentFrame = internal::deviceFrameCount();
-        if (lastUpload_.image == image_.id && lastUpload_.frame == currentFrame) {
-            logWarning() << "[Texture] loadData() called twice in same frame, skipped";
-            return;
-        }
-        lastUpload_ = {image_.id, currentFrame};
-
-        size_t dataSize = (size_t)width * height * computeBytesPerPixel();
-
-        sg_image_data img_data = {};
-        img_data.mip_levels[0].ptr = data;
-        img_data.mip_levels[0].size = dataSize;
-        sg_update_image(image_, &img_data);
+        const size_t dataSize = (size_t)width * height * computeBytesPerPixel();
+        const sg_range pixels = {data, dataSize};
+        internal::uploadImageData(image_, pixels);
     }
 
     // Backward-compatible U8 overload
@@ -660,10 +589,6 @@ private:
     bool allocated_ = false;
     bool mipmapped_ = false;
     TextureUsage usage_ = TextureUsage::Immutable;
-    struct {
-        uint32_t image = SG_INVALID_ID;
-        uint64_t frame = UINT64_MAX;
-    } lastUpload_;
     // Staging for loadCubemapData(): six faces back to back, allocated on the
     // first upload of a Dynamic / Stream cubemap, released by clear().
     std::unique_ptr<uint8_t[]> cubemapStaging_;
@@ -737,8 +662,8 @@ private:
         img_desc.width = width_;
         img_desc.height = height_;
         img_desc.pixel_format = pixelFormat_;
-        img_desc.data.mip_levels[0].ptr = data;
-        img_desc.data.mip_levels[0].size = dataSize;
+        img_desc.data.ptr = data;
+        img_desc.data.size = dataSize;
 
         image_ = sg_make_image(&img_desc);
         if (sg_query_image_state(image_) != SG_RESOURCESTATE_VALID) {
@@ -758,7 +683,7 @@ private:
         finishResources_();
     }
 
-    void createResources(const void* initialData, const sg_image_data* imageLoadMips = nullptr);
+    void createResources(const void* initialData, const sg_range* imageLoadMips = nullptr);
 
     void createCubemapResources() {
         if (!sg_isvalid()) return;
@@ -776,10 +701,10 @@ private:
                 // initial data for all 6 faces and all mips.
                 return;
             case TextureUsage::Dynamic:
-                img_desc.usage.dynamic_update = true;
+                img_desc.usage.copy_dst = true;
                 break;
             case TextureUsage::Stream:
-                img_desc.usage.stream_update = true;
+                img_desc.usage.copy_dst = true;
                 break;
             case TextureUsage::RenderTarget:
                 img_desc.usage.color_attachment = true;
@@ -890,7 +815,6 @@ private:
         mipAttachmentViews_ = std::move(other.mipAttachmentViews_);
         mipSamplingViews_ = std::move(other.mipSamplingViews_);
         usage_ = other.usage_;
-        lastUpload_ = other.lastUpload_;
         cubemapStaging_ = std::move(other.cubemapStaging_);
         cubemapStagingSize_ = other.cubemapStagingSize_;
         other.cubemapStagingSize_ = 0;

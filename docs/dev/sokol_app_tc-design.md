@@ -138,7 +138,7 @@ can feed events manually, so imgui does not chain us to sokol_app.
     (the ~52 sapp_* call sites now resolve to the header's shims); the main
     window keeps upstream's occlusion model (display link + ~60Hz fallback
     NSTimer, frame_cb never stops) while secondary windows keep the
-    tick-gate model; drawable acquisition is lazy in sapp_get_swapchain()
+    tick-gate model; drawable acquisition is lazy in sapp_acquire_swapchain()
     with per-tick caching (repeated calls per frame are now safe, unlike
     upstream); quit = upstream's cancellable performClose dance, plus
     `[NSApp terminate:]` on main-window close so the app exits even with

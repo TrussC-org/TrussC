@@ -452,24 +452,25 @@ bool Texture::allocateImageLoad(const Pixels& pixels, bool mipmaps) {
         return !sg_isvalid() || bool(retirement_);
     }
     internal::ImageDecodeAllocationScope allocation;
-    std::array<Pixels, SG_MAX_MIPMAPS> chain;
-    sg_image_data data = {};
-    data.mip_levels[0].ptr = pixels.getDataVoid();
-    data.mip_levels[0].size = pixels.getTotalBytes();
+    std::vector<uint8_t> blob;
+    Pixels current;
     const Pixels* source = &pixels;
-    for (int level = 1; level < SG_MAX_MIPMAPS &&
-         (source->getWidth() > 1 || source->getHeight() > 1); ++level) {
-        if (!internal::ImageLoadAccess::mipLevel(chain[level], *source)) return false;
-        source = &chain[level];
-        data.mip_levels[level].ptr = source->getDataVoid();
-        data.mip_levels[level].size = source->getTotalBytes();
+    for (;;) {
+        const auto* bytes = static_cast<const uint8_t*>(source->getDataVoid());
+        blob.insert(blob.end(), bytes, bytes + source->getTotalBytes());
+        if (source->getWidth() == 1 && source->getHeight() == 1) break;
+        Pixels next;
+        if (!internal::ImageLoadAccess::mipLevel(next, *source)) return false;
+        current = std::move(next);
+        source = &current;
     }
+    const sg_range data = {blob.data(), blob.size()};
     allocatePixels(pixels, TextureUsage::Immutable, true, &data);
     return bool(retirement_);
 }
 
 void Texture::allocatePixels(const Pixels& pixels, TextureUsage usage, bool mipmaps,
-                    const sg_image_data* imageLoadMips) {
+                    const sg_range* imageLoadMips) {
     clear();
 
     width_ = pixels.getWidth();
@@ -481,8 +482,6 @@ void Texture::allocatePixels(const Pixels& pixels, TextureUsage usage, bool mipm
     mipmapped_ = mipmaps && mipmapSupported;
     if (mipmapped_) {
         numMipLevels_ = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
-        // Bound (gpu): image-derived mip counts must fit the GPU API descriptor array. Overflow clamps the mip count.
-        if (numMipLevels_ > SG_MAX_MIPMAPS) numMipLevels_ = SG_MAX_MIPMAPS;
         if (numMipLevels_ < 1) numMipLevels_ = 1;
     } else {
         numMipLevels_ = 1;
@@ -499,7 +498,7 @@ void Texture::allocatePixels(const Pixels& pixels, TextureUsage usage, bool mipm
     }
 }
 
-void Texture::createResources(const void* initialData, const sg_image_data* imageLoadMips) {
+void Texture::createResources(const void* initialData, const sg_range* imageLoadMips) {
     // CPU-only Images are valid in headless apps and before graphics setup.
     // Leave the texture unallocated so their updates and draws are no-ops.
     if (!sg_isvalid()) return;
@@ -528,15 +527,14 @@ void Texture::createResources(const void* initialData, const sg_image_data* imag
     bool isFloat = (pixelFormat_ == SG_PIXELFORMAT_RGBA32F);
     size_t dataSize = (size_t)width_ * height_ * bpp;
 
-    // Storage for mip chain Pixels (kept alive until sg_make_image
-    // copies them). Used by the Immutable + auto-mipmap path below.
-    std::vector<Pixels> mipChain;
+    // Contiguous mip-major storage, kept alive until sg_make_image copies it.
+    std::vector<uint8_t> mipBlob;
 
     switch (usage_) {
         case TextureUsage::Immutable:
             if (initialData) {
-                img_desc.data.mip_levels[0].ptr = initialData;
-                img_desc.data.mip_levels[0].size = dataSize;
+                img_desc.data.ptr = initialData;
+                img_desc.data.size = dataSize;
 
                 // Generate mip chain via chained Pixels::halve().
                 // Pixels::halve is gamma-correct for U8 (matches the FBO
@@ -549,8 +547,6 @@ void Texture::createResources(const void* initialData, const sg_image_data* imag
                     img_desc.num_mipmaps = numMipLevels_;
                 } else if (mipmapped_ && channels_ == 4) {
                     int numLevels = 1 + (int)std::floor(std::log2((float)std::max(width_, height_)));
-                    // Bound (gpu): image-derived mip counts must fit the GPU API descriptor array. Overflow clamps the mip count.
-                    if (numLevels > SG_MAX_MIPMAPS) numLevels = SG_MAX_MIPMAPS;
                     img_desc.num_mipmaps = numLevels;
 
                     Pixels current;
@@ -561,26 +557,21 @@ void Texture::createResources(const void* initialData, const sg_image_data* imag
                         current.setFromPixels(static_cast<const unsigned char*>(initialData),
                                               width_, height_, channels_);
                     }
-                    mipChain.reserve(numLevels - 1);
+                    const auto* baseBytes = static_cast<const uint8_t*>(initialData);
+                    mipBlob.assign(baseBytes, baseBytes + dataSize);
                     for (int level = 1; level < numLevels; level++) {
                         current.halve();
-                        mipChain.emplace_back(current.clone());
-                        img_desc.data.mip_levels[level].ptr  = mipChain.back().getDataVoid();
-                        img_desc.data.mip_levels[level].size = mipChain.back().getTotalBytes();
+                        const auto* bytes = static_cast<const uint8_t*>(current.getDataVoid());
+                        mipBlob.insert(mipBlob.end(), bytes, bytes + current.getTotalBytes());
                     }
+                    img_desc.data = {mipBlob.data(), mipBlob.size()};
                 }
             }
             break;
         case TextureUsage::Dynamic:
-            // D3D11's DYNAMIC usage only supports a single mip level.
-            // When mipmaps are requested we still allocate the base
-            // image as a plain dynamic texture (1 mip); the full mip
-            // chain is built on each loadData() call by recreating the
-            // image as immutable with all levels baked in.
-            img_desc.usage.dynamic_update = true;
-            break;
         case TextureUsage::Stream:
-            img_desc.usage.stream_update = true;
+            img_desc.usage.copy_dst = true;
+            img_desc.num_mipmaps = numMipLevels_;
             break;
         case TextureUsage::RenderTarget:
             img_desc.usage.color_attachment = true;

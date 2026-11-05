@@ -140,7 +140,8 @@ class WorkflowTests(unittest.TestCase):
         source = (ROOT/'core/tests/renderRegression/src/main.cpp').read_text(encoding="utf-8")
         for name in ('blendModes','text','premultImage','fboClearLoad','msaaResolve','transformPbr',
                      'easyCamFbo','scissorFbo','fullscreenShader','pbrShadowFbo','pointMeshTransform',
-                     'resizePixelPerfect','userShaderOtherFormat','readbackRoundTrip','midFrameFlush','midPassClear'):
+                     'resizePixelPerfect','userShaderOtherFormat','readbackRoundTrip','midFrameFlush','midPassClear',
+                     'sglFboInterrupt','textureImmediate','msaaInterrupted','depthStencil'):
             self.assertRegex(source,r'\{"'+name+r'", [02]\}')
 
 

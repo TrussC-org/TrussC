@@ -69,22 +69,22 @@ public:
             check("first upload to new image has no warning", warnings == 0);
             expectPixels("new image reads B in the same frame", texture_, b_);
             texture_.loadData(a_);
-            check("duplicate upload emits the existing warning", warnings == 1);
-            expectPixels("duplicate upload keeps B", texture_, b_);
+            check("same-frame upload is accepted", warnings == 0);
+            expectPixels("same-frame second upload reads A", texture_, a_);
         }
 
         warnings = 0;
         Texture moved(std::move(texture_));
         moved.loadData(a_);
-        check("move construction preserves upload guard", warnings == 1);
-        expectPixels("move construction keeps B", moved, b_);
+        check("move construction permits an immediate upload", warnings == 0);
+        expectPixels("move construction reads A", moved, a_);
         texture_ = std::move(moved);
         texture_.loadData(a_);
-        check("move assignment preserves upload guard", warnings == 2);
-        expectPixels("move assignment keeps B", texture_, b_);
+        check("move assignment permits an immediate upload", warnings == 0);
+        expectPixels("move assignment reads A", texture_, a_);
         moved.allocate(4, 4, 4, TextureUsage::Stream);
         moved.loadData(a_);
-        check("moved-from texture accepts a new image", warnings == 2);
+        check("moved-from texture accepts a new image", warnings == 0);
         expectPixels("moved-from new image reads A", moved, a_);
 
         warnings = 0;
@@ -93,9 +93,33 @@ public:
         mipmapped.loadData(a_);
         const uint32_t firstMipImage = mipmapped.getImage().id;
         mipmapped.loadData(b_);
-        check("mipmapped update recreates image again", mipmapped.getImage().id != firstMipImage);
+        check("mipmapped update preserves image identity", mipmapped.getImage().id == firstMipImage);
         check("mipmapped new image has no warning", warnings == 0);
         expectPixels("mipmapped second update reads B", mipmapped, b_);
+        Fbo nested;
+        nested.allocate(4, 4);
+        fbo_.begin(0, 0, 0, 0);
+        texture_.loadData(a_);
+        texture_.draw(0, 0, 2, 4);
+        // Force the CPU prefix into an active pass before the second upload.
+        internal::ensureCurrentPass();
+        texture_.loadData(b_);
+        texture_.draw(2, 0, 2, 4);
+        nested.begin(0, 0, 1, 1);
+        setColor(1, 0, 1, 1); drawRect(0, 0, 4, 4);
+        nested.end();
+        setColor(0, 0, 1, 1); drawRect(0, 0, 1, 4);
+        fbo_.end();
+        vector<unsigned char> result(64);
+        check("in-pass uploads and nested FBO readback", fbo_.readPixels(result.data()));
+        bool colors = true;
+        for (int y = 0; y < 4; ++y) for (int x = 0; x < 4; ++x) {
+            const size_t at = size_t(y * 4 + x) * 4;
+            colors &= result[at] == (x == 1 ? 255 : 0)
+                && result[at+1] == (x >= 2 ? 255 : 0)
+                && result[at+2] == (x == 0 ? 255 : 0) && result[at+3] == 255;
+        }
+        check("earlier pixels preserved; immediate draw sees each upload", colors);
         check("all uploads occurred in one device frame", sapp_frame_count() == firstFrame_);
         secondFrame_ = true;
     }
