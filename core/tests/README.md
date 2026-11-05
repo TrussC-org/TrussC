@@ -49,6 +49,21 @@ macOS rejected-binding interval and Android resume/focus frame-entry ordering.
    accounting. `build_all.py` tells the two apart by the committed `CMakeLists.txt`
    + absence of `src/`, and runs both under `--core-tests-only`.
 
+## Reading the output
+
+`build_all.py --core-tests-only` prints a short screen by default: a dot line
+while it builds and runs, `FAIL` lines with their details, and a count per set
+(`allCoreTests: 141/141 passed`). The last line starts with `Done:` or `Failed:`.
+`ERROR:`, `WARNING:` and `FAIL:` lines with counts follow it, only when they are
+not zero. `PASS` lines are not printed; tests print what they print, and
+`build_all.py` does the filtering.
+
+The full output of each test (and of each build) is in `build-logs/` at the
+repository root, one file per test (`build-logs/core/tests/<name>.log`),
+overwritten on each run. A test that crashes, times out or exits non-zero
+without a `FAIL` line prints the last lines of its output and the path of its
+log. `--verbose` prints every line on screen; CI uses it, so CI logs stay full.
+
 ## One app for all tests (`allCoreTests/`)
 
 Building every test as its own project took most of the CI time, so
