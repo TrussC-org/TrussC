@@ -918,4 +918,31 @@ private:
     }
 };
 
+namespace internal {
+
+// Short readable name of the texture's pixel format ("RGBA8", "RGBA16F", ...)
+// for inspectors and the MCP node view, or "none" when nothing is allocated. A
+// texture allocated by channel count (no explicit format) is named by the
+// format it gets: 4 channels RGBA8, otherwise R8.
+inline const char* textureFormatName(const Texture& tex) {
+    if (!tex.isAllocated()) return "none";
+    switch (tex.getPixelFormat()) {
+        case SG_PIXELFORMAT_NONE:    return tex.getChannels() == 4 ? "RGBA8" : "R8";
+        case SG_PIXELFORMAT_RGBA8:   return "RGBA8";
+        case SG_PIXELFORMAT_BGRA8:   return "BGRA8";
+        case SG_PIXELFORMAT_RGBA16:  return "RGBA16";
+        case SG_PIXELFORMAT_RGBA16F: return "RGBA16F";
+        case SG_PIXELFORMAT_RGBA32F: return "RGBA32F";
+        case SG_PIXELFORMAT_R8:      return "R8";
+        case SG_PIXELFORMAT_R16F:    return "R16F";
+        case SG_PIXELFORMAT_R32F:    return "R32F";
+        case SG_PIXELFORMAT_RG8:     return "RG8";
+        case SG_PIXELFORMAT_RG16F:   return "RG16F";
+        case SG_PIXELFORMAT_RG32F:   return "RG32F";
+        default:                     return tex.isCompressed() ? "compressed" : "other";
+    }
+}
+
+} // namespace internal
+
 } // namespace trussc

@@ -1,4 +1,5 @@
 #include "tcxNodeInspector.h"
+#include <cstring>
 
 using namespace std;
 using namespace tc;
@@ -74,7 +75,93 @@ Json memberValue(Node* node, Mod* mod, const string& member) {
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Image thumbnails (Reflector::visit(HasTexture&))
+//
+// The thumbnail is recorded as an ImGui draw command that holds the texture's
+// sokol handles; the renderer samples them at the end of the frame. The value
+// can be gone by then (a node destroyed or an Fbo reallocated after the
+// inspector drew), and sokol_imgui does not tolerate a dead handle: it asserts
+// in debug builds, and fails sg_apply_bindings with a validation error in
+// release builds. TrussC already defers GPU destruction until after
+// sg_commit(), which covers the ordinary same-frame case, but a commit can
+// land between ImGui's frame and its render (another window presenting), so
+// the handles are checked again when the renderer is about to use them.
+// ---------------------------------------------------------------------------
+constexpr float kThumbnailBox = 96.0f;   // longest side, in ImGui units
+
+struct ThumbnailHandles {
+    sg_view view;
+    sg_sampler sampler;
+};
+
+// Runs inside the ImGui renderer, as a draw callback placed right before the
+// thumbnail's own command. The handles are resolved here, by the generation
+// check sokol keeps on every id, never through the Fbo / Image object (which
+// may have been freed). If any is dead, the next command is turned into an
+// empty draw with the font atlas texture, which is always valid.
+void guardThumbnail(const ImDrawList* list, const ImDrawCmd* cmd) {
+    ThumbnailHandles h;
+    if (cmd->UserCallbackDataSize != (int)sizeof(h)) return;
+    memcpy(&h, cmd->UserCallbackData, sizeof(h));
+    const bool alive = sg_query_view_state(h.view) == SG_RESOURCESTATE_VALID
+        && sg_query_sampler_state(h.sampler) == SG_RESOURCESTATE_VALID
+        && sg_query_image_state(sg_query_view_image(h.view)) == SG_RESOURCESTATE_VALID;
+    if (alive) return;
+    ImDrawCmd* next = const_cast<ImDrawCmd*>(cmd) + 1;
+    if (next >= list->CmdBuffer.Data + list->CmdBuffer.Size) return;
+    next->TexRef = ImGui::GetIO().Fonts->TexRef;
+    next->ElemCount = 0;
+}
+
+// Whether ImGui's 2D pipeline can sample this texture: not a cubemap, not
+// multisampled, and a filterable format (the pipeline for the others needs a
+// nearest sampler of its own).
+bool canShowThumbnail(const Texture& tex) {
+    if (!tex.isAllocated() || tex.isCubemap() || tex.getSampleCount() > 1) return false;
+    if (tex.getWidth() <= 0 || tex.getHeight() <= 0) return false;
+    const sg_image img = tex.getImage();
+    return sg_query_image_state(img) == SG_RESOURCESTATE_VALID
+        && sg_query_view_state(tex.getView()) == SG_RESOURCESTATE_VALID
+        && sg_query_sampler_state(tex.getSampler()) == SG_RESOURCESTATE_VALID
+        && sg_query_pixelformat(sg_query_image_pixelformat(img)).filter;
+}
+
 } // namespace
+
+void ImGuiReflector::showImage(const char* name, HasTexture& image) {
+    const Texture& tex = image.getTexture();
+    ImGui::PushID(name);
+    ImGui::BeginGroup();
+    if (canShowThumbnail(tex)) {
+        const float w = (float)tex.getWidth(), h = (float)tex.getHeight();
+        const float scale = std::min(kThumbnailBox / w, kThumbnailBox / h);
+        const ImVec2 size(std::max(1.0f, w * scale), std::max(1.0f, h * scale));
+        // GL stores an Fbo's texture bottom-to-top (Fbo::draw flips it back).
+        const bool flipV = dynamic_cast<const Fbo*>(&image) != nullptr
+            && (sg_query_backend() == SG_BACKEND_GLCORE || sg_query_backend() == SG_BACKEND_GLES3);
+        const ThumbnailHandles handles{tex.getView(), tex.getSampler()};
+        ImGui::GetWindowDrawList()->AddCallback(guardThumbnail, (void*)&handles, sizeof(handles));
+        const ImVec2 pos = ImGui::GetCursorScreenPos();
+        ImGui::Image((ImTextureID)simgui_imtextureid_with_sampler(handles.view, handles.sampler), size,
+                     ImVec2(0, flipV ? 1.0f : 0.0f), ImVec2(1, flipV ? 0.0f : 1.0f));
+        ImGui::GetWindowDrawList()->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y),
+                                            ImGui::GetColorU32(ImGuiCol_Border));
+        ImGui::SameLine();
+    }
+    ImGui::BeginGroup();
+    ImGui::TextUnformatted(name);
+    if (tex.isAllocated()) {
+        ImGui::TextDisabled("%d\xC3\x97%d %s", tex.getWidth(), tex.getHeight(), ::trussc::internal::textureFormatName(tex));
+        if (!canShowThumbnail(tex)) ImGui::TextDisabled("no preview for this format");
+    } else {
+        ImGui::TextDisabled("not allocated");
+    }
+    ImGui::EndGroup();
+    ImGui::EndGroup();
+    ImGui::PopID();
+}
 
 NodeInspector::NodeInspector() {
     // Hand-made edits show up in tcx_imgui_get_touched (key "inspector") and

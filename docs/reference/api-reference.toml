@@ -137,9 +137,9 @@ signature = "TC_VALUE(member) | TC_VALUE(name, getter) | TC_VALUE(name, getter, 
 description.en = "Declare one reflected member; arity picks access (1=in-place, 2=read-only, 3=getter/setter)."
 description.ja = "反映メンバを1つ宣言。引数数でアクセスが決まる（1=直接, 2=読取専用, 3=getter/setter）。"
 description.ko = "리플렉트 멤버 하나를 선언. 인자 수로 접근이 정해진다(1=직접, 2=읽기 전용, 3=getter/setter)."
-details.en = "Declares one reflected member inside a `TC_REFLECT` body. The arity picks the access mode:\n\n- **1 arg** `TC_VALUE(x)` — reflect the field `x` in place (read/write).\n- **2 args** `TC_VALUE(\"name\", getter)` — read-only (a computed or derived value).\n- **3 args** `TC_VALUE(\"name\", getter, setter)` — a property exposed through a getter/setter pair.\n\nThe reflected name becomes the inspector label and the JSON key. Enums reflected this way render as a labelled dropdown (see `TC_ENUM_LABELS`)."
-details.ja = "`TC_REFLECT` 本体の中で反映メンバを 1 つ宣言する。引数の数でアクセスモードが決まる：\n\n- **1 引数** `TC_VALUE(x)` — フィールド `x` を直接反映（読み書き）。\n- **2 引数** `TC_VALUE(\"name\", getter)` — 読み取り専用（計算/派生値）。\n- **3 引数** `TC_VALUE(\"name\", getter, setter)` — getter/setter ペアで公開するプロパティ。\n\n反映名はインスペクタのラベルと JSON キーになる。こうして反映した enum はラベル付きドロップダウンで表示される（`TC_ENUM_LABELS` 参照）。"
-details.ko = "`TC_REFLECT` 본문 안에서 리플렉트 멤버 하나를 선언한다. 인자 수로 접근 모드가 정해진다:\n\n- **1 인자** `TC_VALUE(x)` — 필드 `x`를 직접 리플렉트(읽기/쓰기).\n- **2 인자** `TC_VALUE(\"name\", getter)` — 읽기 전용(계산/파생 값).\n- **3 인자** `TC_VALUE(\"name\", getter, setter)` — getter/setter 쌍으로 노출하는 속성.\n\n리플렉트 이름은 인스펙터 라벨과 JSON 키가 된다. 이렇게 리플렉트한 enum은 라벨 드롭다운으로 표시된다(`TC_ENUM_LABELS` 참고)."
+details.en = "Declares one reflected member inside a `TC_REFLECT` body. The arity picks the access mode:\n\n- **1 arg** `TC_VALUE(x)` — reflect the field `x` in place (read/write).\n- **2 args** `TC_VALUE(\"name\", getter)` — read-only (a computed or derived value).\n- **3 args** `TC_VALUE(\"name\", getter, setter)` — a property exposed through a getter/setter pair.\n\nThe reflected name becomes the inspector label and the JSON key. Enums reflected this way render as a labelled dropdown (see `TC_ENUM_LABELS`).\n\nImage-like members (an `Fbo`, `Image`, `VideoPlayer`, or anything that derives from `HasTexture`) use the 1-argument form too. They are read-only: the node inspector shows a thumbnail with the size and format, the MCP node view reports `{width, height, format, allocated}`, and the JSON writer leaves them out of saved data (pixels are not data), so save files do not change. Use the member form; the getter forms copy the value, and an image cannot be copied.\n\nExample:\n\n    struct Canvas : Node {\n        Fbo fbo;\n        TC_REFLECT(Canvas, Node) {\n            TC_VALUE(fbo);   // thumbnail in the inspector, not saved\n        }\n    };"
+details.ja = "`TC_REFLECT` 本体の中で反映メンバを 1 つ宣言する。引数の数でアクセスモードが決まる：\n\n- **1 引数** `TC_VALUE(x)` — フィールド `x` を直接反映（読み書き）。\n- **2 引数** `TC_VALUE(\"name\", getter)` — 読み取り専用（計算/派生値）。\n- **3 引数** `TC_VALUE(\"name\", getter, setter)` — getter/setter ペアで公開するプロパティ。\n\n反映名はインスペクタのラベルと JSON キーになる。こうして反映した enum はラベル付きドロップダウンで表示される（`TC_ENUM_LABELS` 参照）。\n\n画像のようなメンバ（`Fbo`、`Image`、`VideoPlayer` など、`HasTexture` を継承した型）も、1 引数の形で書きます。これらは読み取り専用です。ノードインスペクタはサイズとフォーマットを添えたサムネイルを表示し、MCP のノード表示は `{width, height, format, allocated}` を返します。JSON への書き出しでは保存データに含めないので（ピクセルはデータではありません）、保存ファイルは変わりません。メンバの形を使ってください。ゲッターの形は値をコピーしますが、画像はコピーできません。\n\n例:\n\n    struct Canvas : Node {\n        Fbo fbo;\n        TC_REFLECT(Canvas, Node) {\n            TC_VALUE(fbo);   // インスペクタにサムネイル、保存はされない\n        }\n    };"
+details.ko = "`TC_REFLECT` 본문 안에서 리플렉트 멤버 하나를 선언한다. 인자 수로 접근 모드가 정해진다:\n\n- **1 인자** `TC_VALUE(x)` — 필드 `x`를 직접 리플렉트(읽기/쓰기).\n- **2 인자** `TC_VALUE(\"name\", getter)` — 읽기 전용(계산/파생 값).\n- **3 인자** `TC_VALUE(\"name\", getter, setter)` — getter/setter 쌍으로 노출하는 속성.\n\n리플렉트 이름은 인스펙터 라벨과 JSON 키가 된다. 이렇게 리플렉트한 enum은 라벨 드롭다운으로 표시된다(`TC_ENUM_LABELS` 참고).\n\n이미지 같은 멤버(`Fbo`, `Image`, `VideoPlayer` 등 `HasTexture`를 상속한 타입)도 1 인자 형태로 씁니다. 이들은 읽기 전용입니다. 노드 인스펙터는 크기와 포맷을 곁들인 썸네일을 표시하고, MCP 노드 보기는 `{width, height, format, allocated}`를 반환합니다. JSON 쓰기는 저장 데이터에서 제외하므로(픽셀은 데이터가 아닙니다) 저장 파일은 바뀌지 않습니다. 멤버 형태를 사용하세요. getter 형태는 값을 복사하는데 이미지는 복사할 수 없습니다.\n\n예:\n\n    struct Canvas : Node {\n        Fbo fbo;\n        TC_REFLECT(Canvas, Node) {\n            TC_VALUE(fbo);   // 인스펙터에 썸네일, 저장되지 않음\n        }\n    };"
 
 [TC_ENUM_LABELS]
 category = "utility"
@@ -56522,18 +56522,21 @@ details.en = '''
 - Return `true` when the value should be treated as edited. Getter/setter reflection uses this result to decide whether to call the setter.
 - The enum overload also receives an `EnumLabelSpan`; its default implementation ignores the labels and calls the plain integer overload.
 - Backends that refuse read-only edits must check `isReadOnly()`; see `Reflector::isReadOnly` for the scope contract.
+- The `HasTexture&` overload receives image-like values (an `Fbo`, `Image`, `VideoPlayer` or any other `HasTexture`) declared with `TC_VALUE(member)`. It is not pure: the default does nothing and returns `false`, so existing `Reflector` subclasses keep compiling and simply ignore images. Images are read-only; do not change them. A backend can show the texture (the node inspector draws a thumbnail), report its size, or skip it.
 '''
 details.ja = '''
 - バックエンドは、メンバ名と `float`、`int`、`bool`、`string`、`Vec2`、`Vec3`、`Color` への変更可能な参照を受け取るオーバーロードを実装します。これらは純粋仮想関数です。
 - 値を編集済みとして扱う場合は `true` を返します。ゲッター・セッター形式のリフレクションでは、この結果でセッターを呼ぶかどうかを決めます。
 - 列挙型用のオーバーロードは `EnumLabelSpan` も受け取ります。既定の実装はラベルを無視し、通常の整数用オーバーロードを呼び出します。
 - 読み取り専用の編集を拒否するバックエンドは `isReadOnly()` を確認する必要があります。スコープの規則は `Reflector::isReadOnly` を参照してください。
+- `HasTexture&` を受け取るオーバーロードは、`TC_VALUE(member)` で宣言した画像のような値（`Fbo`、`Image`、`VideoPlayer` など `HasTexture` を継承した型）を受け取ります。純粋仮想関数ではなく、既定の実装は何もせず `false` を返します。そのため、既存の `Reflector` のサブクラスはそのままコンパイルでき、画像を無視します。画像は読み取り専用なので、変更しないでください。バックエンドは、テクスチャを表示したり（ノードインスペクタはサムネイルを描きます）、サイズを報告したり、スキップしたりできます。
 '''
 details.ko = '''
 - 백엔드는 멤버 이름과 `float`, `int`, `bool`, `string`, `Vec2`, `Vec3`, `Color`의 변경 가능한 참조를 받는 오버로드를 구현합니다. 이 오버로드들은 순수 가상 함수입니다.
 - 값을 편집된 것으로 처리하려면 `true`를 반환합니다. 게터·세터 형식의 리플렉션은 이 결과로 세터 호출 여부를 결정합니다.
 - 열거형용 오버로드는 `EnumLabelSpan`도 받습니다. 기본 구현은 레이블을 무시하고 일반 정수용 오버로드를 호출합니다.
 - 읽기 전용 편집을 거부하는 백엔드는 `isReadOnly()`를 확인해야 합니다. 범위 규칙은 `Reflector::isReadOnly`를 참조하세요.
+- `HasTexture&`를 받는 오버로드는 `TC_VALUE(member)`로 선언한 이미지 같은 값(`Fbo`, `Image`, `VideoPlayer` 등 `HasTexture`를 상속한 타입)을 받습니다. 순수 가상 함수가 아니며 기본 구현은 아무것도 하지 않고 `false`를 반환합니다. 따라서 기존 `Reflector` 하위 클래스는 그대로 컴파일되며 이미지를 무시합니다. 이미지는 읽기 전용이므로 변경하지 마세요. 백엔드는 텍스처를 표시하거나(노드 인스펙터는 썸네일을 그립니다), 크기를 보고하거나, 건너뛸 수 있습니다.
 '''
 
 ["Reflector::isReadOnly"]
@@ -56712,16 +56715,19 @@ details.en = '''
 - Looks up `name` in the current source object and writes an accepted value into the supplied reference. The reflection caller invokes a property setter when applicable; `visit()` itself does not call it.
 - Returns `true` and records the name in `applied` for accepted values, even if the value is unchanged. Returns `false` for absent, mismatched, or read-only values.
 - See `JsonReadReflector` for accepted types and result-list rules.
+- The `HasTexture&` overload (an image member) never applies a value. A key with that name counts as a known member and is recorded in `readOnly`, not in `unknownKeys()`; absent keys do nothing, so saved data without image keys loads unchanged.
 '''
 details.ja = '''
 - 現在の元データのオブジェクトから `name` を探し、受け付けた値を引数の参照先に書き込みます。必要なプロパティセッターはリフレクションの呼び出し側が実行し、`visit()` 自体は呼び出しません。
 - 受け付けた値は、元の値と同じでも `true` を返して名前を `applied` に記録します。値が存在しない場合、形式が不一致の場合、読み取り専用の場合は `false` を返します。
 - 受け付ける型と結果リストの規則は `JsonReadReflector` を参照してください。
+- `HasTexture&` を受け取るオーバーロード（画像のメンバ）は、値を適用しません。同じ名前のキーは既知のメンバとして扱い、`unknownKeys()` ではなく `readOnly` に記録します。キーがなければ何もしないので、画像のキーを含まない保存データはそのまま読み込めます。
 '''
 details.ko = '''
 - 현재 원본 객체에서 `name`을 찾아 허용되는 값을 인자로 받은 참조에 기록합니다. 필요한 프로퍼티 세터는 리플렉션 호출 측이 실행하며 `visit()` 자체는 호출하지 않습니다.
 - 허용되는 값이면 기존 값과 같아도 `true`를 반환하고 이름을 `applied`에 기록합니다. 값이 없거나 형식이 맞지 않거나 읽기 전용이면 `false`를 반환합니다.
 - 허용되는 타입과 결과 목록 규칙은 `JsonReadReflector`를 참조하세요.
+- `HasTexture&`를 받는 오버로드(이미지 멤버)는 값을 적용하지 않습니다. 같은 이름의 키는 알려진 멤버로 취급하여 `unknownKeys()`가 아닌 `readOnly`에 기록합니다. 키가 없으면 아무것도 하지 않으므로 이미지 키가 없는 저장 데이터는 그대로 읽힙니다.
 '''
 
 ["JsonReadReflector::beginGroup"]
@@ -56770,18 +56776,21 @@ details.en = '''
 - Overloads accept `float`, `int`, `bool`, `string`, `Vec2`, `Vec3`, and `Color`. Scalars remain scalars; vectors become `[x, y]` or `[x, y, z]`, and colors become `[r, g, b, a]` without changing their component values.
 - The enum overload accepts an integer and an `EnumLabelSpan`. It writes `labels.labels[v]` when the label array exists and `0 <= v < labels.count`; otherwise, it writes the integer.
 - The input value is unchanged, and every overload returns `false` to indicate that no edit was made. Derived-value filtering is described in `JsonWriteReflector::includeDerived`.
+- The `HasTexture&` overload (an `Fbo`, `Image` or `VideoPlayer` member) never writes pixels. It writes nothing by default, so saved data has no key for the image; with `includeDerived` set to `true` it writes an info object `{"width", "height", "format", "allocated"}` instead.
 '''
 details.ja = '''
 - `name` を現在のグループのキーにします。グループを開いていない場合は `members` のキーにし、同じキーの既存の値は置き換えます。
 - `float`、`int`、`bool`、`string`、`Vec2`、`Vec3`、`Color` を受け取るオーバーロードがあります。スカラーはそのまま、ベクトルは `[x, y]` または `[x, y, z]`、色は `[r, g, b, a]` として、成分の値を変えずに書き込みます。
 - enum 用のオーバーロードは整数と `EnumLabelSpan` を受け取ります。ラベル配列が存在し、`0 <= v < labels.count` の場合は `labels.labels[v]` を書き込み、それ以外は整数を書き込みます。
 - 入力値は変更せず、すべてのオーバーロードが編集しなかったことを示す `false` を返します。派生値の扱いは `JsonWriteReflector::includeDerived` を参照してください。
+- `HasTexture&` を受け取るオーバーロード（`Fbo`、`Image`、`VideoPlayer` のメンバ）は、ピクセルを書き込みません。既定では何も書き込まないので、保存データに画像のキーはできません。`includeDerived` が `true` の場合は、代わりに情報オブジェクト `{"width", "height", "format", "allocated"}` を書き込みます。
 '''
 details.ko = '''
 - `name`을 현재 그룹의 키로 사용합니다. 열린 그룹이 없으면 `members`의 키로 사용하며, 같은 키의 기존 값은 교체합니다.
 - `float`, `int`, `bool`, `string`, `Vec2`, `Vec3`, `Color`를 받는 오버로드가 있습니다. 스칼라는 그대로, 벡터는 `[x, y]` 또는 `[x, y, z]`, 색상은 `[r, g, b, a]`로 성분 값을 변경하지 않고 기록합니다.
 - enum용 오버로드는 정수와 `EnumLabelSpan`을 받습니다. 레이블 배열이 존재하고 `0 <= v < labels.count`이면 `labels.labels[v]`를 기록하고, 그 외에는 정수를 기록합니다.
 - 입력값은 변경하지 않으며, 모든 오버로드는 편집하지 않았음을 나타내는 `false`를 반환합니다. 파생 값의 처리는 `JsonWriteReflector::includeDerived`를 참조하세요.
+- `HasTexture&`를 받는 오버로드(`Fbo`, `Image`, `VideoPlayer` 멤버)는 픽셀을 기록하지 않습니다. 기본적으로 아무것도 기록하지 않으므로 저장 데이터에 이미지 키가 생기지 않습니다. `includeDerived`가 `true`이면 대신 정보 객체 `{"width", "height", "format", "allocated"}`를 기록합니다.
 '''
 
 ["JsonWriteReflector::beginGroup"]
@@ -57441,16 +57450,19 @@ details.en = '''
 - Defaults to `false`, which omits values marked with `TC_DERIVED`, such as Node's `globalPos`, from saved data. Set it to `true` to write these values too.
 - Applies to subsequent value visits; changing it does not remove values already written.
 - Derived member paths are recorded regardless of this setting; see `JsonWriteReflector::derived`.
+- The same switch decides how image members (`Fbo`, `Image`, `VideoPlayer`) are written: left out when `false`, and written as `{"width", "height", "format", "allocated"}` when `true`. Pixels are never written.
 '''
 details.ja = '''
 - 既定値は `false` で、Node の `globalPos` など、`TC_DERIVED` で指定した値を保存データから除外します。これらの値も書き込むには `true` に設定してください。
 - 以後の値の訪問に適用します。設定を変更しても、書き込み済みの値は削除しません。
 - この設定に関係なく派生メンバのパスを記録します。`JsonWriteReflector::derived` を参照してください。
+- 画像のメンバ（`Fbo`、`Image`、`VideoPlayer`）の書き方も、同じ設定で決まります。`false` なら書き込まず、`true` なら `{"width", "height", "format", "allocated"}` を書き込みます。ピクセルは書き込みません。
 '''
 details.ko = '''
 - 기본값은 `false`이며, Node의 `globalPos`처럼 `TC_DERIVED`로 지정한 값을 저장 데이터에서 제외합니다. 이 값도 기록하려면 `true`로 설정하세요.
 - 이후 값을 방문할 때 적용합니다. 설정을 변경해도 이미 기록한 값은 삭제하지 않습니다.
 - 이 설정과 관계없이 파생 멤버의 경로를 기록합니다. `JsonWriteReflector::derived`를 참조하세요.
+- 이미지 멤버(`Fbo`, `Image`, `VideoPlayer`)를 기록하는 방식도 같은 설정으로 정해집니다. `false`이면 기록하지 않고, `true`이면 `{"width", "height", "format", "allocated"}`를 기록합니다. 픽셀은 기록하지 않습니다.
 '''
 
 ["JsonWriteReflector::derived"]

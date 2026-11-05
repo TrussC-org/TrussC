@@ -21,6 +21,10 @@
 //     Vec2  -> [x, y]
 //     Vec3  -> [x, y, z]
 //     Color -> [r, g, b, a]   (floats 0-1; reading accepts 3 elems, alpha kept)
+//     image (Fbo, Image, VideoPlayer, ... any HasTexture)
+//           -> never saved (pixels are not data); the live view (includeDerived)
+//              reports {"width", "height", "format", "allocated"} instead, and
+//              the reader ignores the key
 //
 // The reader applies derived keys like any other writable key; they come
 // before their canonical key in the reflect block, so when both are present
@@ -52,7 +56,9 @@ struct JsonWriteReflector : Reflector {
 
     // Derived values (TC_DERIVED) are left out by default, so the output is
     // what a save should contain. Set true to include them (live views such
-    // as the MCP node tools).
+    // as the MCP node tools). The same switch decides how image values are
+    // written: left out of a save, and as an info object in the live view
+    // ({"width", "height", "format", "allocated"}, never the pixels).
     bool includeDerived = false;
 
     // Member paths of the derived values encountered (nested groups joined by
@@ -66,6 +72,10 @@ struct JsonWriteReflector : Reflector {
     bool visit(const char* name, Vec2& v) override { if (want(name)) cur()[name] = Json::array({v.x, v.y}); return false; }
     bool visit(const char* name, Vec3& v) override { if (want(name)) cur()[name] = Json::array({v.x, v.y, v.z}); return false; }
     bool visit(const char* name, Color& v) override { if (want(name)) cur()[name] = Json::array({v.r, v.g, v.b, v.a}); return false; }
+
+    // Image values: info object in the live view, nothing in a save. Defined
+    // in tcHasTexture.h, where HasTexture is complete.
+    bool visit(const char* name, HasTexture& v) override;
 
     // Enums encode as their label string (readable dumps); out-of-range values
     // fall back to the raw int.
@@ -220,6 +230,13 @@ public:
             if (iv >= 0 && iv < labels.count) { v = iv; return apply(name); }
         }
         return skip(name);
+    }
+
+    // Image values are not data: a key for one is never applied. It still
+    // counts as a known member and is reported as read-only.
+    bool visit(const char* name, HasTexture&) override {
+        if (find(name)) return ro(name);
+        return false;
     }
 
     // A composite member reads from its nested object. If the key is absent or

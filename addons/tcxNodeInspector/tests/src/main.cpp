@@ -356,6 +356,60 @@ static void testLongStrings() {
     insp.resetTouched();
 }
 
+// ---------------------------------------------------------------------------
+// Image members (Fbo / Image listed with TC_VALUE)
+// ---------------------------------------------------------------------------
+// Headless: no GPU, so the images are unallocated and the inspector shows the
+// "not allocated" row. The thumbnail path (and the destroyed-texture guard) is
+// covered by core/tests/inspectorTextureLifetime under a display.
+struct Picture : public Node {
+    Fbo fbo;
+    Image image;
+    float gain = 1.0f;
+    TC_REFLECT(Picture, Node) {
+        TC_VALUE(fbo)
+        TC_VALUE(image)
+        TC_VALUE(gain)
+    }
+};
+
+// Counts the images the inspector's reflector is shown.
+struct CountingReflector : tcx::nodeinspector::ImGuiReflector {
+    int images = 0;
+    bool visit(const char* n, HasTexture& v) override {
+        ++images;
+        return ImGuiReflector::visit(n, v);
+    }
+};
+
+static void testImageMembers() {
+    auto& insp = NodeInspector::instance();
+    insp.resetTouched();
+    tcCoreTest::WindowFixture window;
+    harness::ImGuiHarness h;
+    auto node = make_shared<Picture>();
+    insp.select(node.get());
+    h.setUi([&] { insp.drawInspector(); });
+    h.frames(3);
+    check("image members: members after the images still draw", h.find("gain", "Inspector") != nullptr);
+    check("image members: nothing is recorded as touched by drawing them",
+          entries(node->getInstanceId(), "", "fbo").empty() && entries(node->getInstanceId(), "", "image").empty());
+
+    // A reflector subclass sees the images through the overridden visit().
+    CountingReflector counting;
+    h.setUi([&] {
+        ImGui::Begin("probe");
+        node->reflectMembers(counting);
+        ImGui::End();
+    });
+    h.frames(2);
+    check("image members: a subclass override receives both images", counting.images >= 2 && counting.images % 2 == 0);
+    check("image members: showing images edits nothing", counting.edited.empty());
+    check("image members: the images stay unallocated", !node->fbo.isAllocated());
+    insp.clearSelection();
+    insp.resetTouched();
+}
+
 // #947 / PR 2 teardown lesson: real protected addon cleanup after App exit.
 namespace {
 int headlessExits = 0;
@@ -392,6 +446,7 @@ int main() {
     testDerived();
     testRotationUnits();
     testLongStrings();
+    testImageMembers();
     std::printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

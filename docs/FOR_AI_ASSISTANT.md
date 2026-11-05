@@ -3264,7 +3264,7 @@ void Image::update()  // Uploads pending CPU pixel changes to the texture.
 void JsonReadReflector::beginGroup(const char * name)  // Enters a nested source JSON object.
 void JsonReadReflector::endGroup()  // Returns to the parent source JSON object.
 std::vector<std::string> JsonReadReflector::unknownKeys() const  // Returns unrecognized keys from the source JSON object.
-bool JsonReadReflector::visit(const char * name, float & v) [+7]  // Reads the JSON value for one reflected member.
+bool JsonReadReflector::visit(const char * name, float & v) [+8]  // Reads the JSON value for one reflected member.
 ```
 
 ### JsonWriteReflector — Writes reflected values into a JSON object.
@@ -3272,7 +3272,7 @@ bool JsonReadReflector::visit(const char * name, float & v) [+7]  // Reads the J
 ```cpp
 void JsonWriteReflector::beginGroup(const char * name)  // Opens a nested JSON object for a composite member.
 void JsonWriteReflector::endGroup()  // Closes the current nested JSON object.
-bool JsonWriteReflector::visit(const char * name, float & v) [+7]  // Writes one reflected member into the output JSON object.
+bool JsonWriteReflector::visit(const char * name, float & v) [+8]  // Writes one reflected member into the output JSON object.
 ```
 
 ### KeyEventArgs — Carries keyboard event data.
@@ -3950,7 +3950,7 @@ void Reflector::popDerived()  // Leaves a derived-value reflection scope.
 void Reflector::popReadOnly()  // Leaves a read-only reflection scope.
 void Reflector::pushDerived()  // Enters a derived-value reflection scope.
 void Reflector::pushReadOnly()  // Enters a read-only reflection scope.
-bool Reflector::visit(const char * name, float & v) [+7]  // Processes one reflected member.
+bool Reflector::visit(const char * name, float & v) [+8]  // Processes one reflected member.
 ```
 
 ### ResizeEventArgs — Carries the new window dimensions.

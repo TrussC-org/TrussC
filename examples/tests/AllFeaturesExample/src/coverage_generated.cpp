@@ -1822,6 +1822,7 @@ struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
         (void)af::val<JsonReadReflector>().visit(af::val<const char *>(), af::val<Vec3>());
         (void)af::val<JsonReadReflector>().visit(af::val<const char *>(), af::val<Color>());
         (void)af::val<JsonReadReflector>().visit(af::val<const char *>(), af::val<int>(), af::val<const EnumLabelSpan>());
+        (void)af::val<JsonReadReflector>().visit(af::val<const char *>(), af::val<HasTexture>());
     }
 };
 
@@ -1846,6 +1847,7 @@ struct Cover_JsonWriteReflector : af::Scope<JsonWriteReflector> {
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<Vec2>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<Vec3>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<Color>());
+        (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<HasTexture>());
         (void)af::val<JsonWriteReflector>().visit(af::val<const char *>(), af::val<int>(), af::val<const EnumLabelSpan>());
     }
 };
@@ -2969,6 +2971,7 @@ struct Cover_Reflector : af::Scope<Reflector> {
         (void)af::val<Reflector>().visit(af::val<const char *>(), af::val<Vec3>());
         (void)af::val<Reflector>().visit(af::val<const char *>(), af::val<Color>());
         (void)af::val<Reflector>().visit(af::val<const char *>(), af::val<int>(), af::val<const EnumLabelSpan>());
+        (void)af::val<Reflector>().visit(af::val<const char *>(), af::val<HasTexture>());
     }
 };
 
