@@ -38,3 +38,13 @@ Run it through the build wrapper
 header path selects base source. The base fails both pending raster and compute
 binding checks; head must also pass failure/size/retirement checks. This is CPU
 state validation, not a substitute for Apple SDK compilation or Metal pixels.
+
+The same runner extracts the production blit-finish, flush, prefix-submit and
+capture command-buffer functions into `seam_mock.mm`. It checks that uploads
+finish their encoder before commit or native capture access, clear the stored
+encoder pointer, and propagate acquisition failure. The old base has no
+persistent encoder, so this seam fixture applies only to the updated header.
+
+The runner also extracts the swapchain depth/stencil adapter into `store_mock.mm`.
+It verifies LOAD/STORE for continued depth and stencil, the configured initial
+stencil clear/default discard, and the absence of stencil on depth-only targets.

@@ -45,7 +45,7 @@ void expectFaces(Texture& texture, const Faces& expected) {
     desc.pixel_format = SG_PIXELFORMAT_RGBA8;
     desc.sample_count = 1; // The injected cube texture is single-sampled.
     desc.usage.color_attachment = true;
-    desc.gl_textures[0] = info.tex[info.active_slot];
+    desc.gl_texture = info.tex[info.active_slot];
     const sg_image alias = sg_make_image(&desc);
     check("readback alias is valid", sg_query_image_state(alias) == SG_RESOURCESTATE_VALID);
     for (int face = 0; face < 6; ++face) {
@@ -128,11 +128,11 @@ public:
                   sg_query_image_state(texture.getImage()) == SG_RESOURCESTATE_VALID);
             loadFaces(texture, a_, sizeof(Face) - 1);
             loadFaces(texture, a_);
-            check("size mismatch does not consume the upload guard", duplicateWarnings == index);
+            check("size mismatch does not affect the next upload", duplicateWarnings == 0);
             expectFaces(texture, a_);
             loadFaces(texture, b_);
-            check("same frame duplicate warns", duplicateWarnings == index + 1);
-            expectFaces(texture, a_);
+            check("same-frame upload is accepted", duplicateWarnings == 0);
+            expectFaces(texture, b_);
         }
         check("both invalid mip allocations logged an error", mipErrors == 2);
         check("both size mismatches warned", sizeWarnings == 2);
@@ -142,7 +142,7 @@ public:
         textures_[0].allocateCubemap(sideSize, TextureFormat::RGBA8, TextureUsage::Dynamic);
         check("reallocation creates a different image", textures_[0].getImage().id != oldImage);
         loadFaces(textures_[0], a_);
-        check("new image accepts an upload in the same frame", duplicateWarnings == 2);
+        check("new image accepts an upload in the same frame", duplicateWarnings == 0);
         expectFaces(textures_[0], a_);
 
         Texture immutable;

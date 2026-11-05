@@ -194,13 +194,14 @@ public:
             player.play();
         }
         if (checkingRecoverySeek) {
+            const auto uploadsBefore = sg_query_stats().cur_frame.num_copy_buffer_to_image;
             player.update();
             check("seek after failure updates safely and keeps error state", player.isLoaded() &&
                   !player.isPlaying() && !player.isDone() && player.hasError() &&
                   player.getErrorMessage() == errorBeforeSeek);
             if (hadFrameBeforeError) {
                 check("seek after failure uploads before play", player.isReady() &&
-                      sg_query_image_info(player.getTexture().getImage()).upd_frame_index != seekUploadFrame);
+                      sg_query_stats().cur_frame.num_copy_buffer_to_image > uploadsBefore);
             }
             check("recovery seek does not repeat error", events == 1 && errorLogs == 1);
             finish();
@@ -269,15 +270,13 @@ public:
         if (player.hasError()) {
             errorBeforeSeek = player.getErrorMessage();
             // Two seeks in one app frame force the second poster upload to
-            // defer to update(), exercising the removed errorStopped_ guard.
+            // defer to update() under VideoPlayer's own upload budget, exercising
+            // the removed errorStopped_ guard. Texture itself has no frame limit.
             player.setPosition(0);
             player.setPosition(0);
             check("seek after failure returns safely and keeps error state", player.isLoaded() &&
                   !player.isPlaying() && !player.isDone() && player.hasError() &&
                   player.getErrorMessage() == errorBeforeSeek);
-            if (hadFrameBeforeError) {
-                seekUploadFrame = sg_query_image_info(player.getTexture().getImage()).upd_frame_index;
-            }
             checkingRecoverySeek = true;
             return;
         }
@@ -315,7 +314,6 @@ private:
     bool terminalWaitStarted = false;
     chrono::steady_clock::time_point terminalWaitDeadline;
     string errorBeforeSeek;
-    uint32_t seekUploadFrame = 0;
 };
 } // namespace
 

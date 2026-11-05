@@ -566,7 +566,7 @@
 
         sgl_draw() (and variants)
             - copy all recorded vertex data into the dynamic sokol-gfx buffer
-              via a call to sg_update_buffer()
+              via a call to sg_write_buffer_transient()
             - for each recorded command:
                 - if the layer number stored in the command doesn't match
                   the layer that's to be rendered, skip to the next
@@ -2596,7 +2596,7 @@ typedef struct {
     /* [TrussC fork] draw rewind offsets — sgl_draw() starts from these positions,
        and sgl_tc_draw_rewind() updates them after flushing to allow partial draws. */
     int draw_base_cmd;      /* command index: _sgl_draw starts iterating from here */
-    int draw_base_vertex;   /* vertex count: only vertices from here are appended to GPU */
+    int draw_base_vertex;   /* vertex count: vertices consumed by draw rewind */
 
     /* state tracking */
     int base_vertex;
@@ -2615,14 +2615,14 @@ typedef struct {
 
     /* sokol-gfx resources */
     sg_buffer vbuf;
-    sg_buffer retired_bufs[4];  /* [TrussC fork] retire list: old GPU buffers awaiting destruction */
-    int retired_count;
-    /* [TrussC fork] per-frame single-upload cache. All layer draws within one
-       frame share ONE GPU vertex upload: the first _sgl_draw() appends the full
-       vertex set and records (frame, count, base_offset, vbuf); subsequent layer
-       draws reuse that base_offset instead of re-appending every vertex. Without
-       this, flushing N layers re-uploads V vertices N times (O(N*V)), which grows
-       the GPU buffer until allocation fails (id:52 / METAL_CREATE_BUFFER_FAILED). */
+    /* [TrussC fork] One write-transient buffer per flush, reused next device frame.
+       Layer draws sharing an unchanged vertex set retain the upload cache. */
+    sg_buffer* flush_buffers;
+    int flush_count;
+    int flush_capacity;
+    int flush_next;
+    uint32_t flush_frame;
+    /* [TrussC fork] Cache the unchanged vertex set across layer draws. */
     uint32_t upload_frame_id;
     int      upload_vertex_count;
     int      upload_base_offset;
@@ -2948,6 +2948,7 @@ static void _sgl_init_pipeline(sgl_pipeline pip_id, const sg_pipeline_desc* in_d
     desc.depth.pixel_format = ctx_desc->depth_format;
     if (ctx_desc->depth_format == SG_PIXELFORMAT_NONE) {
         desc.depth.write_enabled = false;
+        desc.depth.compare = SG_COMPAREFUNC_ALWAYS; // [TrussC] Depth-NONE validation.
     }
     desc.colors[0].pixel_format = ctx_desc->color_format;
     if (desc.colors[0].write_mask == _SG_COLORMASK_DEFAULT) {
@@ -3178,6 +3179,10 @@ static sgl_context_desc_t _sgl_context_desc_defaults(const sgl_context_desc_t* d
     sgl_context_desc_t res = *desc;
     res.max_vertices = _sgl_def(desc->max_vertices, _SGL_DEFAULT_MAX_VERTICES);
     res.max_commands = _sgl_def(desc->max_commands, _SGL_DEFAULT_MAX_COMMANDS);
+    const sg_desc sgdesc = sg_query_desc();
+    res.color_format = _sgl_def(desc->color_format, sgdesc.environment.defaults.color_format);
+    res.depth_format = _sgl_def(desc->depth_format, sgdesc.environment.defaults.depth_format);
+    res.sample_count = _sgl_def(desc->sample_count, sgdesc.environment.defaults.sample_count);
     return res;
 }
 
@@ -3207,7 +3212,7 @@ static void _sgl_init_context(sgl_context ctx_id, const sgl_context_desc_t* in_d
     _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
     vbuf_desc.size = (size_t)ctx->vertices.cap * sizeof(_sgl_vertex_t);
     vbuf_desc.usage.vertex_buffer = true;
-    vbuf_desc.usage.stream_update = true;
+    vbuf_desc.usage.write_transient = true;
     vbuf_desc.label = "sgl-vertex-buffer";
     ctx->vbuf = sg_make_buffer(&vbuf_desc);
     SOKOL_ASSERT(SG_INVALID_ID != ctx->vbuf.id);
@@ -3245,6 +3250,21 @@ static sgl_context _sgl_make_context(const sgl_context_desc_t* desc) {
     return ctx_id;
 }
 
+/* [TrussC fork] Release every flush buffer, including an unused initial buffer. */
+static void _sgl_release_gpu_buffers(_sgl_context_t* ctx) {
+    if (ctx->flush_count) {
+        for (int i = 0; i < ctx->flush_count; ++i) sg_destroy_buffer(ctx->flush_buffers[i]);
+    } else {
+        sg_destroy_buffer(ctx->vbuf);
+    }
+    if (ctx->flush_buffers) _sgl_free(ctx->flush_buffers);
+    ctx->flush_buffers = 0;
+    ctx->flush_count = ctx->flush_capacity = ctx->flush_next = 0;
+    ctx->flush_frame = 0;
+    ctx->vbuf.id = ctx->upload_vbuf_id = SG_INVALID_ID;
+    ctx->bind.vertex_buffers[0].id = SG_INVALID_ID;
+}
+
 static void _sgl_destroy_context(sgl_context ctx_id) {
     _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
     if (ctx) {
@@ -3262,12 +3282,7 @@ static void _sgl_destroy_context(sgl_context ctx_id) {
         ctx->commands.ptr = 0;
 
         sg_push_debug_group("sokol-gl");
-        /* [TrussC fork] retire リスト内の旧バッファも破棄 */
-        for (int ri = 0; ri < ctx->retired_count; ri++) {
-            sg_destroy_buffer(ctx->retired_bufs[ri]);
-        }
-        ctx->retired_count = 0;
-        sg_destroy_buffer(ctx->vbuf);
+        _sgl_release_gpu_buffers(ctx);
         _sgl_destroy_pipeline(ctx->def_pip);
         sg_remove_commit_listener(_sgl_make_commit_listener(ctx));
         sg_pop_debug_group();
@@ -3338,7 +3353,7 @@ static sg_commit_listener _sgl_make_commit_listener(_sgl_context_t* ctx) {
     return listener;
 }
 
-// Bound (abi): counters and SG draw/append offsets must fit signed int and byte products must fit size_t. Overflow is reported by _sgl_checked_capacity returning zero and callers setting the owner error flags.
+// Bound (abi): counters and SG draw offsets must fit signed int and byte products must fit size_t. Overflow is reported by _sgl_checked_capacity returning zero and callers setting the owner error flags.
 static int _sgl_checked_capacity(int cap, int next, int initial, size_t element_size) {
     if (cap < 0 || next < 0 || next >= INT_MAX || cap > INT_MAX / 2) return 0;
     const int grown = cap ? cap * 2 : initial;
@@ -3685,7 +3700,7 @@ static void _sgl_setup_common(void) {
     img_desc.height = 8;
     img_desc.num_mipmaps = 1;
     img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    img_desc.data.mip_levels[0] = SG_RANGE(pixels);
+    img_desc.data = SG_RANGE(pixels);
     img_desc.label = "sgl-default-texture";
     _sgl.def_img = sg_make_image(&img_desc);
     SOKOL_ASSERT(SG_INVALID_ID != _sgl.def_img.id);
@@ -3808,65 +3823,60 @@ static bool _sgl_is_default_context(sgl_context ctx_id) {
     return ctx_id.id == SGL_DEFAULT_CONTEXT.id;
 }
 
-/* [TrussC fork] Grow the GPU vertex buffer to fit at least min_vertices.
-   Destroys the old buffer and creates a new one with 2x capacity (or min_vertices, whichever is larger).
-   Returns true if the buffer was successfully recreated. */
-static bool _sgl_grow_gpu_buffer(_sgl_context_t* ctx, int min_vertices) {
-    // Bound (abi): sg_append_buffer byte offsets must fit signed int. Overflow is reported by setting the owner vertices_full and any error flags and returning false.
-    const int max_vertices = INT_MAX / (int)sizeof(_sgl_vertex_t);
-    if (min_vertices <= 0 || min_vertices > max_vertices) {
-        ctx->error.any = ctx->error.vertices_full = true;
-        return false;
+/* [TrussC fork] Select a distinct buffer for every changed upload in a device
+   frame. Reuse the pool after sg_commit; sokol handles in-flight renaming. */
+static bool _sgl_prepare_flush_buffer(_sgl_context_t* ctx, size_t data_size) {
+    // Bound (abi): sokol buffer sizes must fit signed int, including doubled capacity.
+    const size_t max_vertices = INT_MAX / sizeof(_sgl_vertex_t);
+    if (data_size > max_vertices * sizeof(_sgl_vertex_t)) return false;
+    size_t capacity = (size_t)ctx->vertices.cap;
+    if (capacity > max_vertices) capacity = data_size / sizeof(_sgl_vertex_t);
+    const uint32_t frame = sg_query_stats().prev_frame.frame_index + 1;
+    if (ctx->flush_frame != frame) {
+        ctx->flush_frame = frame;
+        ctx->flush_next = 0;
     }
-    int new_cap = ctx->vertices.cap > 0 ? ctx->vertices.cap : _SGL_DEFAULT_MAX_VERTICES;
-    if (new_cap > max_vertices) new_cap = min_vertices;
-    while (new_cap < min_vertices) {
-        new_cap = new_cap <= max_vertices / 2 ? new_cap * 2 : min_vertices;
+    if (ctx->flush_next == ctx->flush_count) {
+        if (ctx->flush_count == ctx->flush_capacity) {
+            // Bound (representation): the pool count and allocation must fit int/size_t.
+            if (ctx->flush_capacity > INT_MAX / 2 ||
+                (size_t)(ctx->flush_capacity ? ctx->flush_capacity * 2 : 4) > SIZE_MAX / sizeof(sg_buffer)) return false;
+            const int capacity = ctx->flush_capacity ? ctx->flush_capacity * 2 : 4;
+            sg_buffer* buffers = (sg_buffer*)_sgl_try_malloc_clear((size_t)capacity * sizeof(sg_buffer));
+            if (!buffers) return false;
+            if (ctx->flush_count) memcpy(buffers, ctx->flush_buffers, (size_t)ctx->flush_count * sizeof(sg_buffer));
+            if (ctx->flush_buffers) _sgl_free(ctx->flush_buffers);
+            ctx->flush_buffers = buffers;
+            ctx->flush_capacity = capacity;
+        }
+        if (ctx->flush_count == 0) ctx->flush_buffers[0] = ctx->vbuf;
+        ctx->flush_count++;
     }
-    sg_push_debug_group("sokol-gl-grow-vbuf");
-    sg_buffer_desc vbuf_desc;
-    _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
-    vbuf_desc.size = (size_t)new_cap * sizeof(_sgl_vertex_t);
-    vbuf_desc.usage.vertex_buffer = true;
-    vbuf_desc.usage.stream_update = true;
-    vbuf_desc.label = "sgl-vertex-buffer";
-    const sg_buffer replacement = sg_make_buffer(&vbuf_desc);
-    if (sg_query_buffer_state(replacement) != SG_RESOURCESTATE_VALID) {
-        if (replacement.id) sg_destroy_buffer(replacement);
-        ctx->error.any = ctx->error.vertices_full = true;
-        sg_pop_debug_group();
-        return false;
+    sg_buffer* buffer = &ctx->flush_buffers[ctx->flush_next];
+    if (sg_query_buffer_size(*buffer) < data_size || sg_query_buffer_state(*buffer) != SG_RESOURCESTATE_VALID) {
+        sg_buffer_desc desc;
+        _sgl_clear(&desc, sizeof(desc));
+        desc.size = capacity * sizeof(_sgl_vertex_t);
+        desc.usage.vertex_buffer = true;
+        desc.usage.write_transient = true;
+        desc.label = "sgl-vertex-buffer";
+        const sg_buffer replacement = sg_make_buffer(&desc);
+        if (sg_query_buffer_state(replacement) != SG_RESOURCESTATE_VALID) {
+            if (replacement.id) sg_destroy_buffer(replacement);
+            return false;
+        }
+        // [TrussC fork] The selected slot has not been used this frame; sokol's
+        // deferred backend destruction retains any earlier in-flight storage.
+        sg_destroy_buffer(*buffer);
+        *buffer = replacement;
     }
-    /* [TrussC fork] retire old buffer instead of immediate destroy —
-       D3D11 may still reference it in the current frame's command list */
-    if (ctx->retired_count < 4) {
-        ctx->retired_bufs[ctx->retired_count++] = ctx->vbuf;
-    } else {
-        /* retire リストが満杯なら最古を破棄して詰める */
-        sg_destroy_buffer(ctx->retired_bufs[0]);
-        for (int i = 1; i < 4; i++) { ctx->retired_bufs[i-1] = ctx->retired_bufs[i]; }
-        ctx->retired_bufs[3] = ctx->vbuf;
-    }
-    ctx->vbuf = replacement;
-    ctx->bind.vertex_buffers[0] = replacement;
-    ctx->upload_vbuf_id = SG_INVALID_ID;
-    sg_pop_debug_group();
-    /* NOTE: do NOT update ctx->vertices.cap here.
-       CPU buffer cap is managed by _sgl_next_vertex auto-grow.
-       GPU buffer size is independent and tracked via sg_query_buffer_desc(). */
+    ctx->vbuf = *buffer;
+    ctx->bind.vertex_buffers[0] = *buffer;
+    ctx->flush_next++;
     return true;
 }
 
-static int _sgl_needed_gpu_vertices(size_t append_pos, size_t data_size) {
-    if (append_pos > INT_MAX || data_size > (size_t)INT_MAX - append_pos) return 0;
-    const size_t needed = (append_pos + data_size) / sizeof(_sgl_vertex_t) + 1;
-    if (needed > (size_t)INT_MAX / sizeof(_sgl_vertex_t)) return 0;
-    return (int)needed;
-}
-
-/* [TrussC fork] Use sg_append_buffer instead of sg_update_buffer so that
-   _sgl_draw can be called multiple times per frame (e.g. suspend/resume for FBO).
-   If the GPU buffer overflows, grow it and retry. */
+/* [TrussC fork] Multiple flushes keep their own transient storage (#713). */
 static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
     SOKOL_ASSERT(ctx);
     /* [TrussC fork] Only process commands from draw_base_cmd onwards.
@@ -3875,27 +3885,6 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
        Vertex data is always uploaded in full for correct base_vertex indexing. */
     const int cmd_start = ctx->draw_base_cmd;
     if ((ctx->vertices.next > 0) && (ctx->commands.next > cmd_start)) {
-        /* [TrussC fork] retire リスト内の旧バッファを破棄。
-           _sgl_draw はフレーム末尾で呼ばれるので、前フレームの GPU コマンドは完了済み */
-        for (int ri = 0; ri < ctx->retired_count; ri++) {
-            sg_destroy_buffer(ctx->retired_bufs[ri]);
-        }
-        ctx->retired_count = 0;
-
-        /* [TrussC fork] If GPU buffer was released, recreate it */
-        if (SG_INVALID_ID == ctx->vbuf.id) {
-            sg_buffer_desc vbuf_desc;
-            _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
-            vbuf_desc.size = (size_t)ctx->vertices.cap * sizeof(_sgl_vertex_t);
-            vbuf_desc.usage.vertex_buffer = true;
-            vbuf_desc.usage.stream_update = true;
-            vbuf_desc.label = "sgl-vertex-buffer";
-            ctx->vbuf = sg_make_buffer(&vbuf_desc);
-            ctx->bind.vertex_buffers[0] = ctx->vbuf;
-            if (SG_INVALID_ID == ctx->vbuf.id) {
-                return;
-            }
-        }
         sg_push_debug_group("sokol-gl");
 
         uint32_t cur_pip_id = SG_INVALID_ID;
@@ -3903,71 +3892,31 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
         uint32_t cur_smp_id = SG_INVALID_ID;
         int cur_uniform_index = -1;
 
-        /* [TrussC fork] Single upload per frame, shared across layer draws.
-           The vertex set is identical for every layer draw in a frame, so we
-           append it to the GPU buffer exactly once and reuse the returned base
-           offset. Re-appending per layer is what blew the buffer up to O(N*V).
-           The cache is keyed on (frame_id, vertex count, vbuf id): a new frame,
-           newly recorded vertices (suspend/resume), or a recreated/grown buffer
-           all force a fresh upload. */
-        int base_offset;
-        bool reuse_upload = (ctx->vbuf.id != SG_INVALID_ID)
-                         && (ctx->upload_vbuf_id == ctx->vbuf.id)
-                         && (ctx->upload_frame_id == ctx->frame_id)
-                         && (ctx->upload_vertex_count == ctx->vertices.next);
-        if (reuse_upload) {
-            base_offset = ctx->upload_base_offset;
-        } else {
-            /* [TrussC fork] append ALL vertex data (commands reference absolute base_vertex) */
+        /* [TrussC fork] Unchanged layer draws reuse their upload. A rewind or
+           newly recorded vertices require a separate write-transient buffer. */
+        const int base_offset = 0;
+        const bool reuse_upload = ctx->vbuf.id != SG_INVALID_ID
+            && ctx->upload_vbuf_id == ctx->vbuf.id
+            && ctx->upload_frame_id == ctx->frame_id
+            && ctx->upload_vertex_count == ctx->vertices.next;
+        if (!reuse_upload) {
             const size_t data_size = (size_t)ctx->vertices.next * sizeof(_sgl_vertex_t);
-            if (data_size > INT_MAX) {
+            if (data_size > INT_MAX || !_sgl_prepare_flush_buffer(ctx, data_size)) {
                 ctx->error.any = ctx->error.vertices_full = true;
                 sg_pop_debug_group();
                 return;
             }
-            const sg_range range = { ctx->vertices.ptr, data_size };
-
-            /* [TrussC fork] pre-check buffer capacity before append to avoid validation panic */
-            if (data_size > 0 && sg_query_buffer_state(ctx->vbuf) == SG_RESOURCESTATE_VALID) {
-                sg_buffer_desc buf_desc = sg_query_buffer_desc(ctx->vbuf);
-                size_t append_pos = (size_t)sg_query_buffer_info(ctx->vbuf).append_pos;
-                if (append_pos > SIZE_MAX - data_size || buf_desc.size < append_pos + data_size) {
-                    /* grow target is the actual cursor (append_pos), not the whole
-                       buffer size — buf_desc.size double-counts already-uploaded data. */
-                    int needed = _sgl_needed_gpu_vertices(append_pos, data_size);
-                    /* [TrussC fork] 旧バッファは retire リストに退避されるので
-                       D3D11 でも即座に grow + 再アップロードが可能 */
-                    if (!_sgl_grow_gpu_buffer(ctx, needed)) {
-                        sg_pop_debug_group();
-                        return;
-                    }
-                }
-            }
-
-            base_offset = sg_append_buffer(ctx->vbuf, &range);
-            if (sg_query_buffer_overflow(ctx->vbuf)) {
-                /* [TrussC fork] GPU buffer too small — grow and retry */
-                size_t append_pos = (size_t)sg_query_buffer_info(ctx->vbuf).append_pos;
-                int needed = _sgl_needed_gpu_vertices(append_pos, data_size);
-                if (!_sgl_grow_gpu_buffer(ctx, needed)) {
-                    sg_pop_debug_group();
-                    return;
-                }
-                base_offset = sg_append_buffer(ctx->vbuf, &range);
-                if (sg_query_buffer_overflow(ctx->vbuf)) {
-                    sg_pop_debug_group();
-                    return;
-                }
-            }
-
-            /* [TrussC fork] remember this upload so the remaining layer draws of
-               this frame reuse it instead of re-appending the same vertices. */
-            ctx->upload_frame_id     = ctx->frame_id;
+            sg_write_buffer_desc write_desc;
+            _sgl_clear(&write_desc, sizeof(write_desc));
+            write_desc.src.data.ptr = ctx->vertices.ptr;
+            write_desc.src.data.size = data_size;
+            write_desc.dst.buffer = ctx->vbuf;
+            sg_write_buffer_transient(&write_desc);
+            ctx->upload_frame_id = ctx->frame_id;
             ctx->upload_vertex_count = ctx->vertices.next;
-            ctx->upload_base_offset  = base_offset;
-            ctx->upload_vbuf_id      = ctx->vbuf.id;
+            ctx->upload_base_offset = base_offset;
+            ctx->upload_vbuf_id = ctx->vbuf.id;
         }
-
         /* Render commands from cmd_start onwards (skip already-drawn commands) */
         for (int i = cmd_start; i < ctx->commands.next; i++) {
             const _sgl_command_t* cmd = &ctx->commands.ptr[i];
@@ -4007,7 +3956,7 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
                         if ((cur_tex_id != args->view.id) || (cur_smp_id != args->smp.id)) {
                             ctx->bind.views[0] = args->view;
                             ctx->bind.samplers[0] = args->smp;
-                            /* [TrussC fork] set vertex buffer offset for appended data */
+                            /* [TrussC fork] set vertex buffer offset for this flush */
                             ctx->bind.vertex_buffer_offsets[0] = base_offset;
                             sg_apply_bindings(&ctx->bind);
                             cur_tex_id = args->view.id;
@@ -5061,9 +5010,7 @@ static void _sgl_release_buffers(_sgl_context_t* ctx) {
 
     /* Destroy GPU vertex buffer */
     sg_push_debug_group("sokol-gl");
-    sg_destroy_buffer(ctx->vbuf);
-    ctx->vbuf.id = SG_INVALID_ID;
-    ctx->bind.vertex_buffers[0].id = SG_INVALID_ID;
+    _sgl_release_gpu_buffers(ctx);
     sg_pop_debug_group();
 }
 
@@ -5098,7 +5045,7 @@ static void _sgl_ensure_buffers(_sgl_context_t* ctx) {
     _sgl_clear(&vbuf_desc, sizeof(vbuf_desc));
     vbuf_desc.size = (size_t)vert_cap * sizeof(_sgl_vertex_t);
     vbuf_desc.usage.vertex_buffer = true;
-    vbuf_desc.usage.stream_update = true;
+    vbuf_desc.usage.write_transient = true;
     vbuf_desc.label = "sgl-vertex-buffer";
     ctx->vbuf = sg_make_buffer(&vbuf_desc);
     ctx->bind.vertex_buffers[0] = ctx->vbuf;

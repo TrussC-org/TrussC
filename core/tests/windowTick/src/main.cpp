@@ -509,8 +509,7 @@ struct MainDisplayApp : App {
             const auto frame = sg_query_stats().prev_frame.frame_index;
             if (hiddenUploads) check("hidden upload closes GPU frame before next upload", frame != uploadFrame);
             uploadFrame = frame;
-            sg_image_data data{}; data.mip_levels[0] = {pixels.getData(), pixels.getTotalBytes()};
-            sg_update_image(texture.getImage(), &data);
+            texture.loadData(pixels);
             if (!hiddenUploads) {
                 // Two synthetic hidden ticks with no intervening secondary
                 // commit: a visible window must not mask the missing boundary.
@@ -527,7 +526,7 @@ struct MainDisplayApp : App {
                 const auto now = std::chrono::steady_clock::now();
                 check("hidden upload-only tick does not present", !internal::runWindowTick(now, 1.0 / 60));
                 check("hidden upload-only tick completes GPU work", sg_query_stats().prev_frame.frame_index != frame);
-                sg_update_image(texture.getImage(), &data);
+                texture.loadData(pixels);
                 internal::runWindowTick(now + std::chrono::milliseconds(17), 1.0 / 60);
                 ctx.loop = loop;
             }
@@ -570,7 +569,7 @@ struct MainDisplayApp : App {
             texture.loadData(pixels);
             check("next device frame accepts upload without a draw", warnings == 0);
             texture.loadData(pixels);
-            check("internal device guard rejects second upload", warnings == 1);
+            check("second upload in one device frame is accepted", warnings == 0);
             firstDevice = internal::deviceFrameCount();
             if (++idleUploads == 2) { phase = 1; redraw(); }
         } else if (phase == 1 && draws == 2) {
@@ -583,7 +582,7 @@ struct MainDisplayApp : App {
                 visibleDraws = trussc::internal::WindowRequestAccess::context(*displaySecondary).drawCount;
                 displaySecondary->setFps(VSYNC);
                 uploadLog = getLogger().onLog.listen([this](LogEventArgs& e) {
-                    if (e.message.find("sg_update_image: only one update allowed per image and frame") != std::string::npos) ++uploadRejections;
+                    if (e.message.find("sg_copy_buffer_to_image:") != std::string::npos) ++uploadRejections;
                 });
                 queueHiddenUpload();
             });

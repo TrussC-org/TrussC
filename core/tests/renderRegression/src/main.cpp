@@ -35,7 +35,8 @@ constexpr Scene scenes[] = {
     {"easyCamFbo", 2}, {"scissorFbo", 0}, {"fullscreenShader", 0},
     {"pbrShadowFbo", 2}, {"pointMeshTransform", 2},
     {"resizePixelPerfect", 0}, {"userShaderOtherFormat", 0},
-    {"readbackRoundTrip", 0}, {"midFrameFlush", 0}, {"midPassClear", 0}
+    {"readbackRoundTrip", 0}, {"midFrameFlush", 0}, {"midPassClear", 0},
+    {"sglFboInterrupt", 0}, {"textureImmediate", 0}, {"msaaInterrupted", 2}, {"depthStencil", 0}
 };
 int failures = 0;
 bool completed = false;
@@ -126,6 +127,7 @@ class RegressionApp : public App {
         pushMatrix(); translate(x, y); rotate(0.19f); scale(1.1f, 0.9f);
         triangle_.draw(); popMatrix(); clearMaterial();
     }
+    #include "followupScenes.h"
     void prepare() {
         phase_ = 0; settleFrames_ = 0;
         const bool resize = is("resizePixelPerfect");
@@ -154,7 +156,7 @@ class RegressionApp : public App {
         // renderTargetState --gpu-check (also registered for --msaa4).
         if (is("easyCamFbo")) { w = 160; h = 96; }
         if (is("scissorFbo")) { w = 320; h = 224; }
-        const int count = is("msaaResolve") ? 4 : 1;
+        const int count = (is("msaaResolve") || is("msaaInterrupted")) ? 4 : 1;
         const auto format = is("userShaderOtherFormat") ? TextureFormat::RGBA16F : TextureFormat::RGBA8;
         if (target_.getWidth() != w || target_.getHeight() != h ||
             target_.getSampleCount() != count || target_.getTextureFormat() != format)
@@ -166,6 +168,7 @@ class RegressionApp : public App {
         endShadowPass();
     }
     void drawScene(float w, float h, bool offscreen) {
+        if (drawFollowupScene(w, h)) return;
         if (is("blendModes")) {
             constexpr BlendMode blends[] = {BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply,
                 BlendMode::Screen, BlendMode::Subtract, BlendMode::Disabled};
@@ -292,6 +295,7 @@ class RegressionApp : public App {
         const std::string label = name() + (offscreen ? ".fbo" : ".screen");
         const float s = probeScale(offscreen);
         const float w = px.getWidth()/s, h = px.getHeight()/s;
+        assertFollowupScene(px, offscreen, label, s);
         if (is("resizePixelPerfect")) {
             check(label+" framebuffer size", px.getWidth() == int(logicalW_*getDpiScale()) &&
                 px.getHeight() == int(logicalH_*getDpiScale()));
@@ -394,7 +398,8 @@ class RegressionApp : public App {
                 sampled.push_back({{"xy", {int(xy[0]*s),int(xy[1]*s)}}, {"rgba", at(px,xy[0],xy[1],s)}});
         }
         samples_[key] = {{"size", {px.getWidth(), px.getHeight()}}, {"backend", GraphicsBackend::name()},
-            {"gpu", gpu_}, {"tolerance", scenes[scene_].tolerance}, {"pixels", sampled}};
+            {"gpu", gpu_}, {"tolerance", scenes[scene_].tolerance}, {"pixels", sampled},
+            {"sampleCount", offscreen ? target_.getSampleCount() : internal::currentWindowContext().swapchainTarget.sampleCount}};
         if (is("scissorFbo")) samples_[key]["scissor"] = scissorEvidence_.at(offscreen ? "fbo" : "screen");
         if (mode == "--self-check") return;
         check(key+" saved", px.save(output / (key+".png")).ok());
@@ -525,6 +530,7 @@ public:
         receiver_ = createPlane(160,112);
         light_.setShadowArea(Vec3(128,96,0),128);
         camera_.setDistance(180);
+        setupFollowupScenes();
         prepare();
         after_ = events().afterFrame.listen([this] { afterFrame(); });
     }
@@ -534,6 +540,8 @@ public:
         allocateTarget();
         setBlendMode(BlendMode::Alpha); fill(); resetScissor();
         clear(0,0,0,1);
+        // Run this window path before any Fbo can open its lazy recording.
+        if (is("textureImmediate")) drawScene(float(getWindowWidth()), float(getWindowHeight()), false);
         // Put an outer transform across begin() to verify FBO model
         // isolation, without changing the independent screen scene.
         const bool transform = is("transformPbr");
@@ -548,7 +556,7 @@ public:
             // Copy the loaded Fbo without blending; screen probes check RGB only.
             setBlendMode(BlendMode::Disabled); setColor(1,1,1);
             target_.draw(0,0,getWindowWidth(),getWindowHeight()); setBlendMode(BlendMode::Alpha);
-        } else {
+        } else if (!is("textureImmediate")) {
             // pixelPerfect is toggled internally between same-size captures;
             // App's RectNode size changes only on a native resize event. Query
             // the current coordinate size (framebuffer / screenScale) instead.
@@ -593,7 +601,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             fs::create_directories(output);
         }
         WindowSettings settings;
-        settings.setSize(256,192); settings.setSwapInterval(0); settings.sampleCount = 1;
+        settings.setSize(256,192); settings.setSwapInterval(0); settings.sampleCount = std::getenv("TC_RENDER_REGRESSION_MSAA") ? 4 : 1;
         // The verdict leaves through the app (macOS never returns from runApp);
         // a startup failure keeps runApp's non-zero result.
         return tcCoreTest::runDisplayTest<RegressionApp>(settings, failures);

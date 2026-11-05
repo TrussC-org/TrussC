@@ -335,9 +335,11 @@ private:
         bool correct = true;
         for (size_t i = 0; i < bytes.size(); i += 4) correct &= expected(bytes.data() + i);
         check("readPixels sees the current version at every pixel", correct);
+        check("byte readback restores swapchain pass state", isInSwapchainPass() == passOpen);
         vector<float> floats(16 * 16 * 4);
         check("RGBA8 float readback succeeds", fbo_.readPixelsFloat(floats.data()));
         check("RGBA8 float conversion is correct", floats[0] == bytes[0] / 255.0f && floats[2] == bytes[2] / 255.0f);
+        check("float readback restores swapchain pass state", isInSwapchainPass() == passOpen);
         Image copy;
         check("copyTo succeeds", fbo_.copyTo(copy));
         check("copyTo has correct pixels", copy.isAllocated() && expected(copy.getPixelsData()));
@@ -347,7 +349,9 @@ private:
         check("saved file has correct pixels", saved.isAllocated() && expected(saved.getPixelsData()));
         check("readbacks retain screen 2D vertices", vertices > 0 && sgl_num_vertices() == vertices);
         check("readbacks do not call commit listeners", commits == before);
-        check("readbacks restore swapchain pass state", isInSwapchainPass() == passOpen);
+        // copyTo()/save() upload an Image. Immediate copies consume a lazy
+        // screen prefix before the upload and resume the newly opened pass.
+        check("copy uploads leave the consumed screen pass resumed", isInSwapchainPass());
     }
     Fbo fbo_, half_;
     FullscreenShader fullscreen_;

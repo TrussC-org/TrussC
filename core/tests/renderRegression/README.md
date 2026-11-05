@@ -4,7 +4,7 @@
 lane runs `allCoreTests renderRegression --self-check` under Xvfb/Mesa. A standalone
 project generated with trusscli accepts the same arguments.
 
-- `--self-check`: assertions against known pixel values in all 16 scenes.
+- `--self-check`: assertions against known pixel values in all 20 scenes.
 - `--record <dir>`: assertions, PNGs and `samples.json` into an empty directory.
 - `--compare <dir>`: assertions, PNGs, `samples.json` and red difference overlays
   into `<dir>.compare`. A missing image, different size, missing scene, or pixel
@@ -33,14 +33,14 @@ Scenes wait until the framebuffer matches the requested size (at most 60
 frames on every platform), then render and capture, with fixed geometry and a
 fixed seed. There is one 256x192 logical window with vsync off. The resize scene
 captures 256x192 and 320x224 with pixelPerfect both off and on, so a run produces
-38 images. Captures and JSON sizes are framebuffer pixels. Screen assertions
+46 images. Captures and JSON sizes are framebuffer pixels. Screen assertions
 use DPI-scaled logical coordinates with pixelPerfect off and framebuffer coordinates with it on; FBO assertions use framebuffer pixels.
 The text scene uses the embedded default bitmap glyphs and an R8 coverage page.
 
 | Maximum RGBA8 channel difference | Scenes |
 | --- | --- |
-| 0 | blendModes, text, premultImage, fboClearLoad, scissorFbo, fullscreenShader, resizePixelPerfect, userShaderOtherFormat, readbackRoundTrip, midFrameFlush, midPassClear |
-| 2 | msaaResolve, transformPbr, easyCamFbo, pbrShadowFbo, pointMeshTransform |
+| 0 | blendModes, text, premultImage, fboClearLoad, scissorFbo, fullscreenShader, resizePixelPerfect, userShaderOtherFormat, readbackRoundTrip, midFrameFlush, midPassClear, sglFboInterrupt, textureImmediate, depthStencil |
+| 2 | msaaResolve, transformPbr, easyCamFbo, pbrShadowFbo, pointMeshTransform, msaaInterrupted |
 
 Tolerances live in the source table. A change to a tolerance needs an explanation
 in its PR. Intentionally changed scenes need before/after images and sampled
@@ -54,3 +54,17 @@ nesting and MSAA-interruption pixels live in `renderPassStack --gpu-check`,
 separate from this unchanged baseline manifest.
 Web is excluded. Windows/D3D11, macOS/Metal (including Retina) and Pi/GL comparisons
 must run on those machines; Linux software rendering cannot verify them.
+
+The #713 follow-up scenes cover four repeated sgl/Fbo interruptions per frame,
+immediate texture uploads on a lazy window and in an active Fbo (including
+mipmapped textures), interrupted 4x MSAA Fbo resolve, and depth/stencil on both
+swapchain and Fbo attachments. `depthStencil` checks near/far occlusion and a
+stencil masks written before a child Fbo pass and before a public texture upload,
+tested after each interruption. Each child Fbo interruption explicitly opens the
+parent pass and asserts its suspension/resumption using the target stack, on
+both the swapchain and Fbo. Set `TC_RENDER_REGRESSION_MSAA=1` before
+launch to request a 4x MSAA window for all scenes; the default request is single
+sample. `sampleCount` in `samples.json` records the actual count, including a
+platform fallback. Keep separate recording directories for each request.
+`textureImmediate` intentionally differs from the old once-per-frame upload
+behavior; record its old pixels as evidence even when its self-check fails.
