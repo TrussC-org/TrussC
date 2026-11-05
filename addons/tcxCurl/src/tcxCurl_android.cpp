@@ -122,7 +122,7 @@ tcx::HttpResponse callJavaRequest(const std::string& method,
 
     JniScope jni;
     if (!jni) {
-        out.error = "tcxCurl[android]: no JNIEnv (sokol native activity not initialised?)";
+        out.error = "tcxCurl[android]: no JNIEnv (sokol native activity not initialized?)";
         return out;
     }
     JNIEnv* env = jni.env;

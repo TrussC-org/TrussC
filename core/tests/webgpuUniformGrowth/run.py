@@ -83,7 +83,7 @@ class WebSocket:
         self.sequence = 0
 
     def chunk(self, size):
-        # Every read honours the absolute deadline; EOF fails immediately.
+        # Every read honors the absolute deadline; EOF fails immediately.
         self.socket.settimeout(remaining(self.deadline))
         data = self.socket.recv(size)
         if not data:
@@ -139,7 +139,7 @@ class WebSocket:
 
 
 def devtools_targets(port, deadline):
-    """GET /json from DevTools. Every read honours the absolute deadline."""
+    """GET /json from DevTools. Every read honors the absolute deadline."""
     with socket.create_connection(('127.0.0.1', port), timeout=remaining(deadline)) as connection:
         connection.settimeout(remaining(deadline))
         connection.sendall(f'GET /json HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n'.encode())

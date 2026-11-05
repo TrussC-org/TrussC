@@ -70,7 +70,7 @@ struct Sprite : Node {
     TC_REFLECT(Sprite, Node) {      // list the direct base: Node's pos/rotation/... chain in
         TC_VALUE(color)
         TC_VALUE(radius)
-        TC_VALUE(alive, isAlive)              // getter only = read-only (greyed out)
+        TC_VALUE(alive, isAlive)              // getter only = read-only (grayed out)
         TC_VALUE(speed, getSpeed, setSpeed)   // getter + setter = editable
     }
 };
@@ -80,7 +80,7 @@ The Inspector renders each reflected type with the matching ImGui widget
 (`float`/`int`/`bool`/`Vec2`/`Vec3`/`Color`/`string`). Enum values render as a
 combo of their labels when the enum declares them (`TC_ENUM_LABELS`, optional —
 without labels an enum edits as a plain int), and getter-only values render
-greyed out. The Inspector always uses the built-in `tcx::ImGuiReflector`, and
+grayed out. The Inspector always uses the built-in `tcx::ImGuiReflector`, and
 there is no way to plug in a subclass yet. A subclass that overrides a
 `visit()` only helps in an ImGui panel your app draws itself (call
 `node->reflectMembers(r)` there). It does not change the Inspector.

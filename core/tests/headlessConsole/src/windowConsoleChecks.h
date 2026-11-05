@@ -24,7 +24,7 @@ struct Later : App {
             check(internal::currentAppOwner() == internal::appOwner(*this), "native sibling console uses subscriber owner");
             ++secondConsole;
             if (e.raw == "after-close-veto") {
-                check(second->isOpen(), "native cancelled code close keeps last Window");
+                check(second->isOpen(), "native canceled code close keeps last Window");
                 return;
             }
             check(e.raw == "after-first-close" && !first->isOpen(), "native console after first closure");

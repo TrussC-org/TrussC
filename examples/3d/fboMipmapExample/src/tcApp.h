@@ -8,7 +8,7 @@ using namespace tc;
 //
 // Two cubes share the same 512×512 black/white striped texture pattern,
 // but each is mapped to a different Fbo:
-//   - LEFT  cube : Fbo allocated WITHOUT mipmaps (default behaviour)
+//   - LEFT  cube : Fbo allocated WITHOUT mipmaps (default behavior)
 //   - RIGHT cube : Fbo allocated WITH    mipmaps
 //
 // The camera distance oscillates so each cube periodically shrinks far into

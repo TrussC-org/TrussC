@@ -67,7 +67,7 @@ void bufferGrowRegression() {
     render(configured, 3);
     check("explicit initial capacity avoids the first allocation", notices == 2);
     render(configured, 9);
-    check("explicit initial capacity is honoured", notices == 3 && lastNotice.find("had 200000") != std::string::npos);
+    check("explicit initial capacity is honored", notices == 3 && lastNotice.find("had 200000") != std::string::npos);
     ImGuiManager negative; negative.setupOffscreen(-1);
     render(negative, 3);
     check("negative initial capacity uses the default", notices == 4 && lastNotice.find("had 65536") != std::string::npos);
@@ -75,7 +75,7 @@ void bufferGrowRegression() {
     render(ImGuiManager::instance(), 3);
     check("imguiSetup(int) configures the window manager", notices == 4);
     render(ImGuiManager::instance(), 9);
-    check("window setup honours the requested capacity", notices == 5 && lastNotice.find("had 200000") != std::string::npos);
+    check("window setup honors the requested capacity", notices == 5 && lastNotice.find("had 200000") != std::string::npos);
     imguiShutdown();
     imguiSetup(-1);
     render(ImGuiManager::instance(), 3);

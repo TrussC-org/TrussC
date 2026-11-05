@@ -842,7 +842,7 @@ static int runTests() {
         auto r = loadObjText("v 0 0 0\nv 1 0 0\nv 0 0 1\nf 1 2 3\nf 1 3 2\n");
         bool fallback = r.ok && r.mesh.getNumNormals() == 3 && r.mesh.getNumIndices() == 6;
         for (const auto& n : r.mesh.getNormals()) fallback = fallback && vecNear(n, 0, 0, 1);
-        check("opposite faces: cancelling sums keep fallback normal", fallback);
+        check("opposite faces: canceling sums keep fallback normal", fallback);
     }
 
 #ifdef TCX_OBJ_TEST_GPU

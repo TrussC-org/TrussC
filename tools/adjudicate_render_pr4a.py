@@ -52,8 +52,8 @@ def read_png(path):
             header = struct.unpack('>IIBBBBB', payload)
             width, height, depth, colour, compression, filtering, interlace = header
             if depth != 8 or colour != 6 or interlace != 0:
-                reject(f'unsupported PNG: bit depth {depth}, colour type {colour}, '
-                       f'interlace {interlace}; expected 8-bit RGBA (colour type 6), non-interlaced')
+                reject(f'unsupported PNG: bit depth {depth}, color type {colour}, '
+                       f'interlace {interlace}; expected 8-bit RGBA (color type 6), non-interlaced')
             if not width or not height or compression != 0 or filtering != 0:
                 reject('invalid dimensions or unsupported PNG compression/filter method')
         elif kind == b'IDAT':

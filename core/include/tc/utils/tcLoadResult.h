@@ -28,7 +28,7 @@ enum class LoadError {
     DecodeFailed,       // the decoder rejected the data (corrupt / truncated / wrong codec)
     Unknown,            // anything the loader could not classify
     TooLarge,           // exceeds a resource size or admission limit
-    Cancelled,          // loading was cancelled
+    Cancelled,          // loading was canceled
 };
 
 // Result of a load operation. Truthy on success.

@@ -3,7 +3,7 @@
 //
 // Lists the host's network interfaces (tc::listNetworkInterfaces) and shows the
 // "most likely" LAN address (tc::getLocalIp) — e.g. for telling the user which
-// address to point a phone / remote at. Addresses are colour-coded with the
+// address to point a phone / remote at. Addresses are color-coded with the
 // classification helpers (isLoopback / isPrivate / isLinkLocal).
 // =============================================================================
 
@@ -41,8 +41,8 @@ void tcApp::draw() {
     y += 22;
 
     for (const auto& ni : interfaces) {
-        // Colour by address class.
-        if (ni.isLoopback)              setColor(0.5f);              // grey
+        // Color by address class.
+        if (ni.isLoopback)              setColor(0.5f);              // gray
         else if (isPrivate(ni.address)) setColor(0.5f, 1.0f, 0.5f);  // green: LAN
         else if (isLinkLocal(ni.address)) setColor(1.0f, 0.85f, 0.3f); // yellow
         else                            setColor(1.0f);              // white: public / other

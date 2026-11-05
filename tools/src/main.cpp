@@ -5,7 +5,8 @@
 #include "ProjectState.h"
 #include "BuildSetup.h"
 #include "VsDetector.h"
-#include "tc/app/internal/tcWindowsBuildOutput.h"
+#include "BuildOutputFilter.h"
+#include "ProcessCapture.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -16,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
+#include <chrono>
 #ifndef _WIN32
 #include <spawn.h>
 #include <sys/stat.h>
@@ -165,20 +167,15 @@ static bool parseAddonValue(const string& value,
 // =============================================================================
 
 // Run a command with argv passed as an array (no shell involvement). Output
-// streams through; Windows builds can also retain it for failure diagnostics.
+// streams through to this process's stdout/stderr (builds that need filtered
+// output use runCaptured() instead).
 // Returns the child's exit code, or -1 on spawn failure.
-static int runProcess(const vector<string>& argv, string* buildOutput = nullptr) {
+static int runProcess(const vector<string>& argv) {
     if (argv.empty()) return -1;
+    // Text printed so far must come before the child's output, also through a pipe.
+    cout.flush();
+    cerr.flush();
 #ifdef _WIN32
-    if (buildOutput) {
-        string commandLine;
-        for (const auto& a : argv) {
-            if (!commandLine.empty()) commandLine += ' ';
-            commandLine += quoteWindowsArgument(a);
-        }
-        return trussc::internal::runWindowsBuildWithOutput(commandLine, *buildOutput,
-            GetConsoleCP() != 0 ? 0 : CREATE_NO_WINDOW);
-    }
     if (GetConsoleCP() != 0) {
         // CLI builds inherit the same console used by configure.
         vector<const char*> cargv;
@@ -208,7 +205,6 @@ static int runProcess(const vector<string>& argv, string* buildOutput = nullptr)
     CloseHandle(pi.hThread);
     return gotExitCode ? static_cast<int>(exitCode) : -1;
 #else
-    (void)buildOutput;
     // POSIX: posix_spawnp + waitpid
     vector<char*> cargv;
     for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
@@ -676,9 +672,31 @@ static int resolveProjectAndTcRoot(const string& explicitPath,
 
 // Rebuild a project from a populated ProjectSettings. Used by update / add /
 // remove to regenerate CMakeLists.txt / CMakePresets.json after any change.
-static int runProjectUpdate(ProjectSettings& settings, const string& projectPath) {
+static int runProjectUpdate(ProjectSettings& settings, const string& projectPath,
+                            bool shortConfigureOutput = false) {
     ProjectGenerator gen(settings);
     gen.setLogCallback([](const string& msg) { cout << msg << endl; });
+    if (shortConfigureOutput) {
+        // CMake configure output: the "-- ..." lines are hidden on screen, the
+        // whole output goes to <build folder>/build.log (#1240).
+        gen.setConfigureOutputCallback([projectPath](const string& buildDir, const string& output,
+                                                     int result) {
+            const string logDisplay = buildDir + "/build.log";
+            const fs::path logPath = fs::path(projectPath) / logDisplay;
+            // CMake creates the build folder; when it did not (or printed
+            // nothing), there is nothing to save.
+            ofstream logFile;
+            if (!output.empty() && fs::is_directory(logPath.parent_path())) {
+                logFile.open(logPath, ios::binary | ios::trunc);
+            }
+            BuildOutputFilter::Options options;
+            options.phase = BuildOutputFilter::Phase::Configure;
+            options.logDisplayPath = logFile.is_open() ? logDisplay : "";
+            BuildOutputFilter filter(cout, logFile.is_open() ? &logFile : nullptr, options);
+            filter.write(output.data(), output.size());
+            filter.end(result != 0 ? 1 : 0, -1);
+        });
+    }
     string err = gen.update(projectPath);
     // Kept targets whose configure failed: reported, the update stands
     for (const string& w : gen.getWarnings()) {
@@ -698,14 +716,15 @@ static int runProjectUpdate(ProjectSettings& settings, const string& projectPath
 static int regenerateProject(const string& projectPath, const string& tcRoot,
                              const vector<string>& availableAddons,
                              const vector<int>& addonSelected,
-                             const GenerationFlags& flags) {
+                             const GenerationFlags& flags,
+                             bool shortConfigureOutput = false) {
     RegenerationSetup setup = prepareRegeneration(projectPath, tcRoot, availableAddons,
                                                   addonSelected, flags);
     for (const string& w : setup.warnings) cerr << "Warning: " << w << "\n";
     if (!setup.summary.empty()) cout << setup.summary << "\n";
     if (!setup.leftoverNotice.empty()) cout << setup.leftoverNotice << "\n";
 
-    if (int rc = runProjectUpdate(setup.settings, projectPath)) return rc;
+    if (int rc = runProjectUpdate(setup.settings, projectPath, shortConfigureOutput)) return rc;
     cout << "Project updated: " << projectPath << "\n";
     return 0;
 }
@@ -1278,13 +1297,18 @@ static void printUpdateHelp() {
          << "      --no-ios               Disable iOS build\n"
          << "      --ide <type>           IDE: vscode, cursor, xcode, vs, cmake\n"
          << "      --tc-root <path>       Path to TrussC root directory\n"
-         << "  -h, --help                 Show this help\n";
+         << "      --verbose              Show the full CMake configure output\n"
+         << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "The CMake configure output is shortened on screen (its \"-- ...\" lines are\n"
+         << "hidden; errors still show) and saved to <build folder>/build.log.\n";
 }
 
 static int cmdUpdate(const vector<string>& args) {
     string projectPath;
     GenerationFlags flags;
     string tcRoot;
+    bool verbose = false;   // full configure output on screen
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
         if (i + 1 >= args.size()) {
@@ -1298,6 +1322,7 @@ static int cmdUpdate(const vector<string>& args) {
     for (size_t i = 0; i < args.size(); ++i) {
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printUpdateHelp(); return 0; }
+        else if (a == "--verbose") verbose = true;
         else if (a == "-p" || a == "--path") {
             if (!needValue(i, a, projectPath)) return 1;
         }
@@ -1341,7 +1366,8 @@ static int cmdUpdate(const vector<string>& args) {
 
     vector<int> addonSelected;
     parseAddonsMake(projectPath, availableAddons, addonSelected);
-    return regenerateProject(projectPath, tcRoot, availableAddons, addonSelected, flags);
+    return regenerateProject(projectPath, tcRoot, availableAddons, addonSelected, flags,
+                             /*shortConfigureOutput=*/!verbose);
 }
 
 // =============================================================================
@@ -3195,9 +3221,15 @@ static void printBuildHelp() {
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
+         << "      --verbose              Show the full build output on screen\n"
          << "      --dry-run              Print the cmake commands instead of running them\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
          << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "Output: the screen shows one progress line (a dot per 5 %), the warnings\n"
+         << "and errors, and a short summary. The full output is always saved to\n"
+         << "<build folder>/build.log (overwritten on each build). --verbose also shows\n"
+         << "it on screen.\n"
          << "\n"
          << "Without -j the build tool decides the job count (Linux limits it by\n"
          << "available RAM).\n"
@@ -3437,6 +3469,7 @@ static int cmdBuild(const vector<string>& args) {
     bool mcp = false;
     bool warnings = false;
     bool dryRun = false;
+    bool verbose = false;   // full build output on screen (the log file is written either way)
     int jobs = 0;           // 0 = not given
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3455,6 +3488,7 @@ static int cmdBuild(const vector<string>& args) {
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printBuildHelp(); return 0; }
         else if (a == "--dry-run") dryRun = true;
+        else if (a == "--verbose") verbose = true;
         else if (a == "--web")     targetPreset = "web";
         else if (a == "--android") targetPreset = "android";
         else if (a == "--ios")     targetPreset = "ios";
@@ -3513,6 +3547,7 @@ static int cmdBuild(const vector<string>& args) {
         if (targetPreset == string("web"))     updateArgs.push_back("--web");
         if (targetPreset == string("android")) updateArgs.push_back("--android");
         if (targetPreset == string("ios"))     updateArgs.push_back("--ios");
+        if (verbose) updateArgs.push_back("--verbose");
         updateArgs.push_back("-p");
         updateArgs.push_back(projectPath);
         if (int urc = cmdUpdate(updateArgs)) return urc;
@@ -3593,6 +3628,12 @@ static int cmdBuild(const vector<string>& args) {
     cmd.push_back("--config"); cmd.push_back(effectiveType);
     if (clean) cmd.push_back("--clean-first");
 
+    // Name shown in the progress line ("Building <project> ...")
+    error_code nameEc;
+    fs::path projectDir = fs::weakly_canonical(projectPath, nameEc);
+    string projectName = projectDir.filename().string();
+    if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
+
     // Run from the project directory
     string savedCwd = fs::current_path().string();
     fs::current_path(projectPath);
@@ -3658,10 +3699,39 @@ static int cmdBuild(const vector<string>& args) {
         return 0;
     }
 
+    // The full output of configure and build always goes to <build folder>/build.log
+    // (overwritten on each build). The screen gets the short form unless --verbose.
+    // Both streams of the child arrive as one ordered stream (runCaptured).
+    error_code logEc;
+    fs::create_directories(cfgIn.buildDir, logEc);
+    const string logDisplay = cfgIn.buildDir + "/build.log";
+    ofstream logFile(logDisplay, ios::binary | ios::trunc);
+    const bool haveLog = logFile.is_open();
+    if (!haveLog) cerr << "Warning: cannot write " << logDisplay << " (the full output is not saved).\n";
+    const auto startedAt = chrono::steady_clock::now();
+    auto elapsedSeconds = [&]() {
+        return chrono::duration<double>(chrono::steady_clock::now() - startedAt).count();
+    };
+    BuildOutputFilter::Options filterOptions;
+    filterOptions.verbose = verbose;
+    filterOptions.project = projectName;
+    filterOptions.logDisplayPath = haveLog ? logDisplay : "";
+    auto runFiltered = [&](const vector<string>& argv, BuildOutputFilter::Phase phase) {
+        filterOptions.phase = phase;
+        if (phase == BuildOutputFilter::Phase::Build) {
+            // Written by the configure above (or an earlier one)
+            filterOptions.totalFiles = countCompileCommands(cfgIn.buildDir + "/compile_commands.json");
+        }
+        BuildOutputFilter filter(cout, haveLog ? &logFile : nullptr, filterOptions);
+        filter.begin();
+        const int code = runCaptured(argv, [&](const char* data, size_t size) { filter.write(data, size); });
+        filter.end(code, elapsedSeconds());
+        return code;
+    };
+
     int rc = 0;
-    string buildOutput;
-    if (needConfigure) rc = runProcess(cfg);
-    if (rc == 0) rc = runProcess(cmd, &buildOutput);
+    if (needConfigure) rc = runFiltered(cfg, BuildOutputFilter::Phase::Configure);
+    if (rc == 0) rc = runFiltered(cmd, BuildOutputFilter::Phase::Build);
 #ifdef _WIN32
     // CMake owns this decision and may update it during an automatic reconfigure.
     string hotReloadState;
@@ -3670,7 +3740,8 @@ static int cmdBuild(const vector<string>& args) {
     fs::current_path(savedCwd);
 
     if (rc != 0) {
-        cerr << "Build failed (exit code " << rc << ").\n";
+        // The short summary already says Failed; --verbose keeps the old line.
+        if (verbose) cerr << "Build failed (exit code " << rc << ").\n";
 #ifdef _WIN32
         if (hotReloadState == "ON") {
             cerr << "Warning: the guest can use only TrussC and code linked into the guest; "
@@ -3704,8 +3775,12 @@ static void printRunHelp() {
          << "      --mcp                  Enable MCP development tools for this build\n"
          << "      --warnings             Enable -Wall -Wextra on your app's sources\n"
          << "  -j, --jobs <N>             Run at most N compile jobs at once\n"
+         << "      --verbose              Show the full build output on screen\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
-         << "  -h, --help                 Show this help\n";
+         << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "Only the build is shortened (see 'trusscli build --help'); the app's own\n"
+         << "output is not filtered.\n";
 }
 
 static int cmdRun(const vector<string>& args) {
@@ -3715,6 +3790,7 @@ static int cmdRun(const vector<string>& args) {
     string buildType;  // "" = default; else Debug/Release/RelWithDebInfo
     bool mcp = false;
     bool warnings = false;
+    bool verbose = false;   // full build output on screen
     int jobs = 0;           // 0 = not given
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -3732,6 +3808,7 @@ static int cmdRun(const vector<string>& args) {
         if (jobsFlag > 0) continue;
         const string& a = args[i];
         if (a == "-h" || a == "--help") { printRunHelp(); return 0; }
+        else if (a == "--verbose")  verbose = true;
         else if (a == "--web")      target = "web";
         else if (a == "--android")  target = "android";
         else if (a == "--ios")      target = "ios";
@@ -3797,6 +3874,7 @@ static int cmdRun(const vector<string>& args) {
     }
     if (mcp) buildArgs.push_back("--mcp");
     if (warnings) buildArgs.push_back("--warnings");
+    if (verbose) buildArgs.push_back("--verbose");
     if (jobs > 0) { buildArgs.push_back("-j"); buildArgs.push_back(to_string(jobs)); }
     if (!explicitPath.empty()) { buildArgs.push_back("-p"); buildArgs.push_back(explicitPath); }
 
@@ -3888,6 +3966,8 @@ static int cmdRun(const vector<string>& args) {
                 (char*)xinitrcPath.c_str(),
                 (char*)"--", (char*)":0", (char*)"vt7", nullptr
             };
+            cout.flush();
+            cerr.flush();
             pid_t xinitPid = 0;
             if (posix_spawnp(&xinitPid, "xinit", nullptr, nullptr,
                              xinitArgv.data(), environ) != 0) {

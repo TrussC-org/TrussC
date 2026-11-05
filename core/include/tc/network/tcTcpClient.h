@@ -348,7 +348,7 @@ protected:
     void stopConnectThread();
     bool prepareConnect();
     bool connectSocket(const std::string& host, int port);
-    // 1 connected, 0 pending, -1 failed, -2 cancelled. waitMs <= 100.
+    // 1 connected, 0 pending, -1 failed, -2 canceled. waitMs <= 100.
     int checkPendingConnect(int waitMs, int& error);
     void closeClientSocket();
     void waitClientSocket(bool forWrite, int ms);

@@ -380,7 +380,7 @@ int main() {
     reset(main, windows, display); skip = false; _sapp_tc_x11_run_loop();
     check("blocking presentation supplies pacing", swaps == 1 && polls == 0);
     reset(main, windows, display); cancelQuit = true; _sapp_tc_x11_run_loop();
-    check("quit request can be cancelled before a later ordered quit", quitEvents == 1 && frames == 2 && !_sapp_tc.app.quit_requested);
+    check("quit request can be canceled before a later ordered quit", quitEvents == 1 && frames == 2 && !_sapp_tc.app.quit_requested);
     reset(main, windows, display); pending = 1; _sapp_tc_x11_wait_until(now + .1);
     check("wait helper respects Xlib buffered input", polls == 0);
     pending = 0; badFd = true; _sapp_tc_x11_wait_until(now + .1);

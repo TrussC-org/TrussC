@@ -8,7 +8,7 @@ Each section starts with the changes that can break your code: it no longer comp
 
 **Contents**
 
-- [App, window and runtime](#app-window-and-runtime): [Create Apps through a window or a launcher](#create-apps-through-a-window-or-a-launcher) · [The launch window is window #1](#the-launch-window-is-window-1) · [Closing the launch window no longer always quits](#closing-the-launch-window-no-longer-always-quits) · [exitApp() is the one way to quit](#exitapp-is-the-one-way-to-quit) · [Quitting can be cancelled, and each window can refuse to close](#quitting-can-be-cancelled-and-each-window-can-refuse-to-close) · [App callbacks are listeners now, and default listeners run first](#app-callbacks-are-listeners-now-and-default-listeners-run-first) · [Node and Mod setup() runs when they join the tree](#node-and-mod-setup-runs-when-they-join-the-tree) · [events() needs an App, and process events are on runtime()](#events-needs-an-app-and-process-events-are-on-runtime) · [Headless apps fire update and exit events](#headless-apps-fire-update-and-exit-events) · [A hidden window keeps updating but stops drawing](#a-hidden-window-keeps-updating-but-stops-drawing) · [Quitting during setup()](#quitting-during-setup) · [Logout, restart and shutdown](#logout-restart-and-shutdown) · [Hot reload supports one window](#hot-reload-supports-one-window) · [Stdin commands need console::start()](#stdin-commands-need-consolestart) · [Window and runtime settings](#window-and-runtime-settings) · [Internal Window functions are no longer public](#internal-window-functions-are-no-longer-public) · [No built-in crash handler](#no-built-in-crash-handler)
+- [App, window and runtime](#app-window-and-runtime): [Create Apps through a window or a launcher](#create-apps-through-a-window-or-a-launcher) · [The launch window is window #1](#the-launch-window-is-window-1) · [Closing the launch window no longer always quits](#closing-the-launch-window-no-longer-always-quits) · [exitApp() is the one way to quit](#exitapp-is-the-one-way-to-quit) · [Quitting can be canceled, and each window can refuse to close](#quitting-can-be-canceled-and-each-window-can-refuse-to-close) · [App callbacks are listeners now, and default listeners run first](#app-callbacks-are-listeners-now-and-default-listeners-run-first) · [Node and Mod setup() runs when they join the tree](#node-and-mod-setup-runs-when-they-join-the-tree) · [events() needs an App, and process events are on runtime()](#events-needs-an-app-and-process-events-are-on-runtime) · [Headless apps fire update and exit events](#headless-apps-fire-update-and-exit-events) · [A hidden window keeps updating but stops drawing](#a-hidden-window-keeps-updating-but-stops-drawing) · [Quitting during setup()](#quitting-during-setup) · [Logout, restart and shutdown](#logout-restart-and-shutdown) · [Hot reload supports one window](#hot-reload-supports-one-window) · [Stdin commands need console::start()](#stdin-commands-need-consolestart) · [Window and runtime settings](#window-and-runtime-settings) · [Internal Window functions are no longer public](#internal-window-functions-are-no-longer-public) · [No built-in crash handler](#no-built-in-crash-handler)
 - [Async work and threads](#async-work-and-threads): [runOnMainThread() runs between turns, and drops work for an ended App](#runonmainthread-runs-between-turns-and-drops-work-for-an-ended-app) · [Thread::waitForThread() on its own thread](#threadwaitforthread-on-its-own-thread)
 - [Rendering](#rendering): [Every angle is in radians; degrees use Deg names](#every-angle-is-in-radians-degrees-use-deg-names) · [Each Fbo has its own matrices, camera and clipping](#each-fbo-has-its-own-matrices-camera-and-clipping) · [Scissor rectangles use logical coordinates](#scissor-rectangles-use-logical-coordinates) · [grabScreen() reads the finished frame in afterFrame](#grabscreen-reads-the-finished-frame-in-afterframe) · [The swapchain pass functions are removed](#the-swapchain-pass-functions-are-removed) · [Cubemap textures are uploaded in one call](#cubemap-textures-are-uploaded-in-one-call) · [Shader subclasses use pipelineForCurrentTarget()](#shader-subclasses-use-pipelineforcurrenttarget) · [Fbo::readPixels() on float Fbos, and failed allocations](#fboreadpixels-on-float-fbos-and-failed-allocations)
 - [Loading and saving](#loading-and-saving): [Saving and recording return SaveResult](#saving-and-recording-return-saveresult) · [OBJ and glTF loading return LoadResult](#obj-and-gltf-loading-return-loadresult) · [OBJ export returns SaveResult](#obj-export-returns-saveresult) · [LoadError has two new values](#loaderror-has-two-new-values) · [Sound files are found through getDataPath()](#sound-files-are-found-through-getdatapath)
@@ -80,17 +80,17 @@ exitApp(3);      // with an exit code
 - `App::isExitRequested()` is deprecated. It still returns `true` after `requestExit()` was called on that App, but TrussC no longer reads it. To react to a quit, use `exit()` or `events().exitRequested`.
 - The exit reason `request-exit-app` is gone. `exitApp()` reports `exit-app`.
 
-### Quitting can be cancelled, and each window can refuse to close
+### Quitting can be canceled, and each window can refuse to close
 
-- `exitApp()` now asks `exitRequested` first, so a listener can cancel it. In v0.7.7 it could not be cancelled. The exit code you pass is kept even if a listener cancels the quit.
+- `exitApp()` now asks `exitRequested` first, so a listener can cancel it. In v0.7.7 it could not be canceled. The exit code you pass is kept even if a listener cancels the quit.
 - A common pattern is "show a confirm dialog, then call `exitApp()`". That call asks `exitRequested` again, so remember that the user already said yes, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
-- Every listener now gets its own `cancel = false` and the answers are combined: if any listener cancels, the quit is cancelled. A listener can no longer undo an earlier listener's cancel by setting `cancel = false`. A listener that throws counts as a cancel. Only the quit request keeps the first non-empty `reason`.
+- Every listener now gets its own `cancel = false` and the answers are combined: if any listener cancels, the quit is canceled. A listener can no longer undo an earlier listener's cancel by setting `cancel = false`. A listener that throws counts as a cancel. Only the quit request keeps the first non-empty `reason`.
 - New: each window has `closeRequested` (`CloseRequestEventArgs`, one field, `cancel`). It is asked when the user closes that window from the OS, for example with the × button.
 
 Which question is asked depends on how the window closes:
 
 - **The user closes a window that is not the last one.** Only that window's `closeRequested` is asked.
-- **The user closes the last window, or a window with `setQuitOnClose(true)`.** That window's `closeRequested` is asked first. If it is accepted, `exitRequested` is asked before anything closes. If either is cancelled, every window stays open.
+- **The user closes the last window, or a window with `setQuitOnClose(true)`.** That window's `closeRequested` is asked first. If it is accepted, `exitRequested` is asked before anything closes. If either is canceled, every window stays open.
 - **`exitApp()` or Cmd+Q.** Only `exitRequested` is asked.
 - **Your code calls `Window::close()`.** `closeRequested` is not asked. If it is the last window or has `setQuitOnClose(true)`, `exitRequested` is asked once before anything closes, and a cancel leaves every window open. Otherwise nothing is asked, and the window's exit events and the App's ending still run.
 
@@ -225,7 +225,7 @@ On Linux (X11), a window now receives `SUSPENDED` when it is minimized or fully 
 
 ### Quitting during setup()
 
-If the App in the launch window asks to quit inside `setup()` and the quit is accepted, the App ends right after `setup()` returns. That is before audio starts and before any console command, `update()` or `draw()`. If the quit is cancelled, the app runs normally. A quit requested by an App deeper in the node tree waits until the current pass over the tree is finished, and is handled before the next runtime turn.
+If the App in the launch window asks to quit inside `setup()` and the quit is accepted, the App ends right after `setup()` returns. That is before audio starts and before any console command, `update()` or `draw()`. If the quit is canceled, the app runs normally. A quit requested by an App deeper in the node tree waits until the current pass over the tree is finished, and is handled before the next runtime turn.
 
 ```cpp
 void tcApp::setup() {
@@ -423,7 +423,7 @@ pushMatrix(); translate(100, 40); fbo.draw(0, 0); popMatrix();
 - **Picking:** the default Fbo camera cannot be picked through; an explicit screen setup and EasyCam can. This is unchanged.
 - **Blending:** the logical blend and depth settings carry across targets. Calling `setBlendMode` with the current value now selects that blend pipeline again.
 
-Behaviour that changes the pixels:
+Behavior that changes the pixels:
 
 - **Nested Fbos work.** Calling `begin()` on another Fbo inside an active one now works. v0.7.7 refused it with "Nested fbo.begin() is not supported". Beginning the same Fbo again inside itself, or from another window, is still refused.
 - **GPU points follow the model matrix.** Before, points ignored it. Remove any pre-transform you added to make up for that.
@@ -608,7 +608,7 @@ if (!result) {
 switch (result.error) {
     // ... the cases you had
     case LoadError::TooLarge:  /* GPU texture size, URL or network limits, platform size */ break;
-    case LoadError::Cancelled: /* a loadAsync() that was cancelled */ break;
+    case LoadError::Cancelled: /* a loadAsync() that was canceled */ break;
     default: break;
 }
 ```
@@ -719,7 +719,7 @@ Existing code compiles and behaves as before until the OS reports an opened port
 
 ### AudioEngine and MicInput
 
-Everything that compiled before still compiles. The changes are new functions plus one behaviour change.
+Everything that compiled before still compiles. The changes are new functions plus one behavior change.
 
 - **When the OS stops the output device, `isConnected()` / `isInitialized()` turn `false`**, and `play()` is refused (counted as "no output device running") until you open the device again. Before, the engine kept reporting `true` and played into a dead device. After a stop, the engine does not reopen or retry by itself.
 
@@ -970,7 +970,7 @@ add_dependencies(myTool myApp_shaders_gen)
 
 You do not need these to upgrade.
 
-- **Loading in the background:** `Image::loadAsync()`, `SoundBuffer::loadAsync()` and `Font::loadAsync()`, with `onLoad` on a later frame. Cancelling never waits. `setResourceLoadConcurrency()` / `getResourceLoadConcurrency()` set how many loads prepare at once (4 by default). See [ASYNC_LOADING.md](ASYNC_LOADING.md).
+- **Loading in the background:** `Image::loadAsync()`, `SoundBuffer::loadAsync()` and `Font::loadAsync()`, with `onLoad` on a later frame. Canceling never waits. `setResourceLoadConcurrency()` / `getResourceLoadConcurrency()` set how many loads prepare at once (4 by default). See [ASYNC_LOADING.md](ASYNC_LOADING.md).
 - **Screenshots and microphone without blocking:** `saveScreenshotAsync()` with `onScreenshotSave()`, and `MicInput::startAsync()` with `onStart` and `isStarting()`.
 - **Windows and quitting:** `closeRequested` and `occludedChanged` events, `WindowSettings::setQuitOnClose()` and `Window::setQuitOnClose()`, `Window::destroyApp()`, `runtime().setLogoutTimeout()`, `Window::setIndependentFps()`.
 - **Runtime settings:** `RuntimeSettings` and `runApp<T>(windowSettings, runtimeSettings)`.

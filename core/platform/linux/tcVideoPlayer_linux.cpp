@@ -1509,7 +1509,7 @@ static bool tcv_extract_frame_linux(const std::string& path, Pixels& outPixels,
     else if (videoStream->duration > 0)
         duration = videoStream->duration * av_q2d(videoStream->time_base);
 
-    // Clamp requested time to valid range (mirrors the macOS behaviour).
+    // Clamp requested time to valid range (mirrors the macOS behavior).
     if (duration > 0.0 && timeSec > duration) timeSec = (float)(duration * 0.1);
     if (timeSec < 0) timeSec = 0;
 
