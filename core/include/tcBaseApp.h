@@ -401,6 +401,7 @@ public:
 
     void handleDraw() {
         internal::setupNodeOnce(*this);
+        internal::warnFboOpenAtDraw();
         drawTree();
     }
 };

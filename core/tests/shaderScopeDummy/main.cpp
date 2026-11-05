@@ -1505,6 +1505,56 @@ bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
     return ok;
 }
 
+// #925: an Fbo begun in update() and still active when the tree draw starts is
+// reported once, with the cause and the fix. Begin and end in the same callback
+// (draw(), or update() with the end before draw) stays silent.
+bool openFboAtDrawProbe(int mode) {   // 0: begin in update, end in draw  1: all in draw  2: all in update
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 64; window.fbHeight = 48;
+    window.acquireSwapchain = dummySwapchain;
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    int openWarnings = 0;
+    auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Warning && e.message == "[Fbo] an Fbo is still active when draw() starts "
+            "(begin() was called earlier, e.g. in update()); call end() in the same callback that called begin()")
+            ++openWarnings;
+    });
+    struct OpenApp : App {
+        int mode;
+        Fbo fbo;
+        explicit OpenApp(int mode) : mode(mode) {}
+        void setup() override { fbo.allocate(16, 12); }
+        void update() override {
+            if (mode == 0) fbo.begin();
+            if (mode == 2) { fbo.begin(); fbo.end(); }
+        }
+        void draw() override {
+            if (mode == 0) fbo.end();
+            if (mode == 1) { fbo.begin(); fbo.end(); }
+        }
+    };
+    bool ok = true;
+    int perFrame[3] = {};
+    {
+        auto candidate = internal::makeConstructedApp<OpenApp>(mode);
+        auto& app = *candidate;
+        for (int frame = 0; frame < 3; ++frame) {
+            beginFrame();
+            { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
+            { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); present(); }
+            perFrame[frame] = openWarnings;
+        }
+    }
+    window.teardownTargets(); window.swapchainTarget.resources().release();
+    internal::currentWindowCtx() = previous;
+    // The streak repeats every frame, so it is reported on the first one only.
+    const int expected = mode == 0 ? 1 : 0;
+    ok &= perFrame[0] == expected && perFrame[1] == expected && perFrame[2] == expected;
+    std::printf("OPEN FBO AT DRAW mode=%d warnings=%d,%d,%d ok=%d\n", mode, perFrame[0], perFrame[1], perFrame[2], ok);
+    return ok;
+}
+
 // Public camera APIs opt out of automatic projection repair, independently
 // of the viewport. Exercise real callback guards and Fbo parent restoration.
 bool resizeSelectedStateProbe(int scenario) {
@@ -2105,6 +2155,7 @@ int main(int argc, char** argv) {
         resizeBeforeDraw &= resizeAppDispatchProbe(resize, camera);
     for (bool resize : {false, true}) for (bool selected : {false, true})
         resizeBeforeDraw &= resizeOpenShaderProbe(resize, selected);
+    for (int mode = 0; mode < 3; ++mode) resizeBeforeDraw &= openFboAtDrawProbe(mode);
     bool scissorLogical = true;
     for (float dpi : {1.0f, 2.0f, 1.5f}) for (bool pixelPerfect : {false, true})
         scissorLogical &= scissorLogicalProbe(dpi, pixelPerfect);

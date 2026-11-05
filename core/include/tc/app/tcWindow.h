@@ -184,6 +184,7 @@ private:
             internal::AppCallbackScope owner(app_ ? internal::appOwner(*app_) : nullptr);
             internal::setupNodeOnce(*root);   // the setup() entry point (#349)
             if (ctx_.rootNode.lock() != root) return;
+            internal::warnFboOpenAtDraw();
             root->drawTree();
         }
     }

@@ -8321,6 +8321,7 @@ details.en = '''
 - Close matrix, camera, scissor, and shader scopes on the target where they began. Unmatched scopes are discarded with warnings at `end()`.
 - Beginning an already active Fbo, including one paused beneath a child or active in another window, is rejected with a warning. End nested Fbos in reverse order in the originating window; out-of-order or wrong-window `end()` calls are rejected.
 - Sampling an active Fbo attachment is invalid; finish it with `end()` before drawing or sampling its texture. `getTexture()` and `draw()` warn once per object when used while active, but do not block the operation.
+- Call `end()` in the same callback that called `begin()`. If an Fbo begun in `update()` is still active when `draw()` starts, the framework's draw matrix lands on the Fbo instead of the window. TrussC warns once per Fbo about this and does not change the behavior; the stack warnings at `end()` that follow are a symptom of it.
 - Does nothing when unallocated or in headless mode.
 '''
 details.ja = '''
@@ -8331,6 +8332,7 @@ details.ja = '''
 - 行列・カメラ・シザー・シェーダーのスコープは、開始した描画先で閉じてください。閉じていないスコープは `end()` で警告を記録して破棄します。
 - すでにアクティブな Fbo の再開始は警告を記録して拒否します。子の下で一時停止している場合や、別ウィンドウでアクティブな場合も同様です。入れ子の Fbo は開始したウィンドウで逆順に終了してください。順序が違う場合や別ウィンドウからの `end()` は拒否します。
 - アクティブな Fbo の添付画像をサンプリングすることは無効です。Fbo の描画やテクスチャのサンプリングの前に `end()` で終了してください。アクティブな状態での `getTexture()` と `draw()` はオブジェクトごとに 1 回警告しますが、操作自体は止めません。
+- `end()` は `begin()` を呼んだのと同じコールバックの中で呼んでください。`update()` で開始した Fbo が `draw()` の開始時にまだアクティブだと、フレームワークの描画行列がウィンドウではなく Fbo に積まれます。TrussC はこの状態を Fbo ごとに 1 回警告しますが、動作は変えません。その後 `end()` で出る行列スタックの警告は、この状態が原因です。
 - 未確保の場合やヘッドレスモードでは何もしません。
 '''
 details.ko = '''
@@ -8341,6 +8343,7 @@ details.ko = '''
 - 행렬·카메라·시저·셰이더 스코프는 시작한 타깃에서 닫아야 합니다. 닫지 않은 스코프는 `end()`에서 경고를 기록하고 버립니다.
 - 자식 아래에서 일시 중지되었거나 다른 윈도우에서 활성 상태인 경우를 포함하여 이미 활성 상태인 Fbo를 다시 시작하면 경고를 기록하고 거부합니다. 중첩된 Fbo는 시작한 윈도우에서 역순으로 종료해야 하며 순서가 잘못되었거나 다른 윈도우에서 호출한 `end()`는 거부합니다.
 - 활성 Fbo의 첨부 이미지를 샘플링하는 것은 유효하지 않습니다. Fbo를 그리거나 텍스처를 샘플링하기 전에 `end()`로 종료해야 합니다. 활성 상태에서 `getTexture()`와 `draw()`를 사용하면 객체마다 한 번 경고하지만 작업 자체를 차단하지는 않습니다.
+- `end()`는 `begin()`을 호출한 것과 같은 콜백 안에서 호출하세요. `update()`에서 시작한 Fbo가 `draw()`가 시작될 때 아직 활성 상태이면 프레임워크의 그리기 행렬이 윈도우가 아니라 Fbo에 쌓입니다. TrussC는 이 상태를 Fbo마다 한 번 경고하며 동작은 바꾸지 않습니다. 이후 `end()`에서 나오는 행렬 스택 경고는 이 상태가 원인입니다.
 - 할당되지 않았거나 헤드리스 모드이면 아무 작업도 하지 않습니다.
 '''
 snippet = '''
