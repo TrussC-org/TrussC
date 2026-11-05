@@ -65,7 +65,7 @@ void CALLBACK testSession(HWND, UINT, UINT_PTR timer, DWORD) {
                 wchar_t reason[256]{};
                 DWORD count = 256;
                 check(ShutdownBlockReasonQuery(hwnd, reason, &count) == FALSE,
-                      "cancelled session removes shutdown block");
+                      "canceled session removes shutdown block");
                 exitApp();
             } else {
                 SendMessageW(hwnd, WM_ENDSESSION, TRUE,

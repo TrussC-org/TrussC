@@ -93,7 +93,7 @@ Guest retirement cancels registered callbacks and releases their captures. Queue
 
 Under hot reload (TC_HOT_RELOAD), RuntimeSettings is not applied; the default uniform reservation is used.
 
-Hot reload supports a single window. While a hot-reload guest is loaded, creating a second or later open window emits a Warning each time; behaviour is not guaranteed. Reload happens at the main-thread outer-turn safe point and replaces the launch Window App if that Window is still open. Stop and join App-owned threads, cancel timers and finish async work in `events().hotReloadUnload` before the old App ends. Reload does not wait for or exclude that work; a worker already admitted before retirement can overlap it. Successfully loaded modules stay mapped for the process lifetime, and repeated reloads can grow process memory. iOS/Android/Web use the static fallback.
+Hot reload supports a single window. While a hot-reload guest is loaded, creating a second or later open window emits a Warning each time; behavior is not guaranteed. Reload happens at the main-thread outer-turn safe point and replaces the launch Window App if that Window is still open. Stop and join App-owned threads, cancel timers and finish async work in `events().hotReloadUnload` before the old App ends. Reload does not wait for or exclude that work; a worker already admitted before retirement can overlap it. Successfully loaded modules stay mapped for the process lifetime, and repeated reloads can grow process memory. iOS/Android/Web use the static fallback.
 
 
 On Windows and Linux, `runApp<T>(settings)` returns the App's exit code after the loop and Runtime cleanup, or 1 if setup never began. On macOS a normal quit ends the process inside AppKit's termination after the same cleanup, with the App's exit code as the process status, so `runApp` does not return and code after it does not run; it returns only when startup fails. On Android it stores the descriptor for `sokol_main()` and returns 0; the native host owns the loop and Runtime lifetime. On Web it returns 0 after handing the asynchronous loop to the browser; that return is not shutdown. `runHeadlessApp<T>(settings)` runs synchronously and returns the exit code. Android and Web retain their host-managed lifetimes rather than the desktop return contract.
@@ -1155,7 +1155,7 @@ trusscli addon add|remove <a>  Add / remove addons (also clone / list / search /
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
 trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
-trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands). Prints a short progress line, warnings/errors and a Done:/Failed: summary; the full output is in <build folder>/build.log; --verbose shows it all on screen
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```

@@ -131,7 +131,7 @@ bool Fbo::readPixelsPlatform(unsigned char* pixels, bool reportError) const {
             });
     }
 #endif
-    // Desktop GL retains its native normalised conversion and channel expansion.
+    // Desktop GL retains its native normalized conversion and channel expansion.
     return readFromGLTexture(curColorTex_().getImage(), target_.width, target_.height,
                              GL_RGBA, GL_UNSIGNED_BYTE, pixels, rowBytes, reportError);
 }

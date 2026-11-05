@@ -113,7 +113,7 @@ void micTests() {
     check("stop returns before blocked startup is released", !mic.isStarting() && !mic.isRunning());
     stoppedOpen.open(); stoppedCleanup.wait(); finish();
     check("stop suppresses late successful startup", events == 2);
-    check("cancelled async startup emits no started log", startedLogs == 1);
+    check("canceled async startup emits no started log", startedLogs == 1);
     logListener.disconnect();
     // Cancellation at a blocked open keeps State alive without blocking main.
     Gate blockedOpen, lateCleanup;
@@ -338,7 +338,7 @@ void micAuthorizationTests() {
     check("sync retry after granting opens normally without onStart", mic.start() && mic.isRunning() && opens == 3 && events == before);
     mic.stop(); finish();
 
-    // A cancelled permission-only state must forward older pending cleanup.
+    // A canceled permission-only state must forward older pending cleanup.
     Gate cleanup, replacementOpened;
     atomic<int> serialOpens{0};
     internal::setMicBackendForTests([&](internal::MicState&) {

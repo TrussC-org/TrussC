@@ -1250,6 +1250,10 @@ jobs:
         if: always()
         run: python3 tools/tests/test_build_all_test_binary.py -v
 
+      - name: build_all short output regression checks
+        if: always()
+        run: python3 tools/tests/test_build_all_short_output.py -v
+
   # ---------------------------------------------------------------------------
   # Keep one compiler-cache save per platform (#776). Every ccache-action save
   # gets a new timestamped key, and the old ones stay until the repository's
@@ -1288,7 +1292,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
   # so matrix/job renames never break required checks. It fails on any failed,
-  # cancelled, or unexpectedly-skipped job; the four heavy build jobs may be
+  # canceled, or unexpectedly-skipped job; the four heavy build jobs may be
   # skipped only when the `changes` gate declared the diff docs-only.
   # ---------------------------------------------------------------------------
   ci-ok:

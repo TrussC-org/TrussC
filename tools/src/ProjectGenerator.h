@@ -63,6 +63,10 @@ std::string chooseToolchainFile(const std::string& detected,
 class ProjectGenerator {
 public:
     using LogCallback = std::function<void(const std::string&)>;
+    // Receives the CMake configure output (build folder name, output, non-zero
+    // result on failure). When set, it replaces log() for that output.
+    using ConfigureOutputCallback =
+        std::function<void(const std::string& buildDir, const std::string& output, int result)>;
 
     explicit ProjectGenerator(const ProjectSettings& settings);
 
@@ -72,6 +76,9 @@ public:
 
     // Set log callback for progress messages
     void setLogCallback(LogCallback callback) { logCallback_ = callback; }
+    void setConfigureOutputCallback(ConfigureOutputCallback callback) {
+        configureOutputCallback_ = callback;
+    }
 
     // Generate new project
     // Returns empty string on success, error message on failure
@@ -112,9 +119,12 @@ public:
 private:
     ProjectSettings settings_;
     LogCallback logCallback_;
+    ConfigureOutputCallback configureOutputCallback_;
     std::vector<std::string> warnings_;
 
     void log(const std::string& msg);
+    // CMake configure output: to the configure callback if set, else the log.
+    void logConfigureOutput(const std::string& buildDir, const std::string& output, int result);
 
     // Get TRUSSC_DIR value (relative or absolute path)
     std::string getTrusscDirValue(const std::string& projectPath);

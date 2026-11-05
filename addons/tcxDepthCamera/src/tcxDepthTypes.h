@@ -5,7 +5,7 @@
 // =============================================================================
 //
 // Plain data structs shared by the DepthCamera base and all implementations.
-// The centrepiece is DepthFrame: the canonical, device-independent
+// The centerpiece is DepthFrame: the canonical, device-independent
 // representation of one frame. The whole point of a depth camera is to get at
 // this frame; everything else (deprojection, meshing, recording) is built on
 // top of it by the base, so implementations only have to FILL a DepthFrame.

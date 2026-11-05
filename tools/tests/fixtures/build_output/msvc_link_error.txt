@@ -1,0 +1,4 @@
+[5/6] Linking CXX executable bin\app.exe
+FAILED: bin/app.exe
+main.cpp.obj : error LNK2019: unresolved external symbol "void __cdecl missing(void)" referenced in function main
+bin\app.exe : fatal error LNK1120: 1 unresolved externals

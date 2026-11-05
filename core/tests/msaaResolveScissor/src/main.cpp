@@ -81,7 +81,7 @@ private:
 
         fbo.begin(0, 1, 0, 1);
         setScissor(clipX, clipY, 1, 1);
-        // Draw the clear colour so the full-image expectation is exact even
+        // Draw the clear color so the full-image expectation is exact even
         // on drivers whose MSAA edge coverage reaches adjacent clip pixels.
         setColor(0, 1, 0, 1);
         drawRect(0, 0, width, height);
@@ -93,7 +93,7 @@ private:
         internal::ensureCurrentPass();
         sg_apply_scissor_rect(0, 0, 1, 1, true);
         check("clipped-pass read succeeds", fbo.readPixels(pixels.data()));
-        check("whole resolve has the green clear colour", matches(pixels.data(), false));
+        check("whole resolve has the green clear color", matches(pixels.data(), false));
         Image copy;
         check("copyTo under a parent scissor succeeds", fbo.copyTo(copy));
         check("copyTo reads the whole resolve", copy.isAllocated() && matches(copy.getPixelsData(), false));

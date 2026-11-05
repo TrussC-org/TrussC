@@ -16,7 +16,7 @@
 //
 // Inside a reflect block, TC_VALUE has three forms, picked by argument count:
 //   TC_VALUE(member)                 1-arg: read + write the member in place
-//   TC_VALUE(name, getter)           2-arg: read-only (no setter -> greyed out)
+//   TC_VALUE(name, getter)           2-arg: read-only (no setter -> grayed out)
 //   TC_VALUE(name, getter, setter)   3-arg: write through the setter (runs
 //                                           clamping / dirty flags / events)
 // =============================================================================

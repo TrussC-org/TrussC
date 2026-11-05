@@ -7,7 +7,7 @@ registers this mode in the daily display lane.
 Derived from the review's standalone EGL/GLES probe, this regression seeds
 the resolve texture red, clears a new pass green, draws green through a 1x1
 scissor and ends without resetting it. Every pixel must be exactly green.
-Using the clear colour avoids depending on MSAA edge coverage around the clip.
+Using the clear color avoids depending on MSAA edge coverage around the clip.
 It checks all 768 RGBA pixels,
 using samples 1 and 4, with and without mip generation. It also checks copyTo
 with an active parent scissor, a repeated clipped pass, and an empty CLEAR

@@ -207,7 +207,7 @@ private:
                 }
                 const size_t slots = held.size() + available;
                 probe.allocate(8, 8, samples);
-                check("partial colour/MSAA/depth failure leaves Fbo unallocated", !probe.isAllocated());
+                check("partial color/MSAA/depth failure leaves Fbo unallocated", !probe.isAllocated());
                 for (sg_image image : held) sg_dealloc_image(image);
                 held.clear();
                 for (;;) {
@@ -266,7 +266,7 @@ private:
                 held.push_back(view);
             }
             probe.allocate(8, 8, samples, TextureFormat::RGBA8, true);
-            check("view failure leaves Fbo and colour texture unallocated",
+            check("view failure leaves Fbo and color texture unallocated",
                   !probe.isAllocated() && !probe.getTexture().isAllocated());
             const size_t slots = held.size();
             for (sg_view view : held) sg_dealloc_view(view);
@@ -317,7 +317,7 @@ private:
     }
 
     void renderFbo(bool secondPass) {
-        // Change colour both between frames and between versions in one frame.
+        // Change color both between frames and between versions in one frame.
         // Reading the previous pool texture must not accidentally pass (#641).
         expectRed_ = (frames_ % 2 != 0) != secondPass;
         fbo_.begin(expectRed_ ? 1.0f : 0.0f, 0, expectRed_ ? 0.0f : 1.0f, 1);

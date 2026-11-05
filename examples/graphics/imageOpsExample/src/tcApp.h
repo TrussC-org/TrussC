@@ -15,7 +15,7 @@ using namespace tc;
 //   - mirror(h, v) / H() / V() : in-place flips
 //
 // One procedural source image is built in setup() and several derived
-// images apply each operation. Each derived image is drawn into a labelled
+// images apply each operation. Each derived image is drawn into a labeled
 // cell so the effect is visible at a glance.
 
 class tcApp : public App {

@@ -111,7 +111,7 @@ public:
     // Generate a simple procedural HDR environment (blue sky + sun + ground)
     // and bake IBL maps from it. Useful for examples that don't ship HDR
     // assets. The sun direction and intensity are intentionally hardcoded to
-    // produce a recognisable reflection on metallic spheres.
+    // produce a recognizable reflection on metallic spheres.
     bool loadProcedural() {
         const int W = 512;
         const int H = 256;

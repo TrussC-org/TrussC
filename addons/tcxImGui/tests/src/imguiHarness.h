@@ -135,7 +135,7 @@ public:
         frame();
     }
 
-    // Click the centre of a widget found by label. False if it is not drawn.
+    // Click the center of a widget found by label. False if it is not drawn.
     bool click(const std::string& label, const std::string& window = "") {
         const tcx::imgui::WidgetInfo* w = find(label, window);
         if (!w) {

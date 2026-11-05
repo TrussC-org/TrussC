@@ -19,7 +19,7 @@ computed normals and UTF-8 paths:
 - a normal index in a file with no normals is ignored, as before;
 - computed normals point in the same direction at scales of 0.001 and 100,
   have unit length and retain the 1:4 area weighting of two adjoining faces;
-  degenerate faces and cancelling face normals keep the `(0, 0, 1)` fallback;
+  degenerate faces and canceling face normals keep the `(0, 0, 1)` fallback;
 - mixed normals retain the file's exact values and compute only missing entries,
   including shared vertices with area weighting and degenerate faces;
 - mixed texcoords keep their vertex alignment and use `(0, 0)` for missing

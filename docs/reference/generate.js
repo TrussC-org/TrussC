@@ -77,7 +77,7 @@ for (const id of ids) {
         description: p.description,                          // {en,ja,ko}
         signature: p.signature,                            // curated macro display signature (not an AST callable)
         details: p.details, snippet: p.snippet,             // snippet = authorable example code
-        related: p.related, platform_note: p.platform_note, // related symbols, platform behaviour note
+        related: p.related, platform_note: p.platform_note, // related symbols, platform behavior note
         value_desc: p.value_desc,                           // enum: per-value descriptions {Member:{en,ja,ko}}
         documented: !!(p.description && p.description.en),
     };

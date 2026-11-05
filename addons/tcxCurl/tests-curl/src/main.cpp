@@ -1098,7 +1098,7 @@ static void testCaCertificate(const fs::path& dir, const string& python) {
         http.setFollowRedirects(false);
         http.setTimeout(1);
         res = http.get("/cancel");
-        check("cancelled response is not published", !res.ok() && res.body.empty() && !res.error.empty());
+        check("canceled response is not published", !res.ok() && res.body.empty() && !res.error.empty());
         http.setTimeout(10);
         res = http.get("/");
         check("retry after cancellation", res.ok() && res.body == "ok");

@@ -278,7 +278,7 @@ void setup() {
 // ---------------------------------------------------------------------------
 void cleanup() {
     internal::shutdownRuntime();
-    // Parked/cancelled frames can still own an enqueued renderer prefix.
+    // Parked/canceled frames can still own an enqueued renderer prefix.
     // Submit it without presentation before Metal waits for semaphore permits
     // during shutdown, and before destroying any referenced native resources.
     if (sg_isvalid()) sg_tc_submit_prefix();
@@ -3420,7 +3420,7 @@ uint64_t nextNodeInstanceId() {
 // Node::callAfter() / callEvery() ids. As an inline static member, host code
 // and a Windows hot reload guest each counted from 1 (and every reloaded guest
 // again), so one node could hold two timers with the same id, and
-// cancelTimer(id), which removes every timer with that id, cancelled both.
+// cancelTimer(id), which removes every timer with that id, canceled both.
 uint64_t nextNodeTimerId() {
     static std::atomic<uint64_t> next{1};
     return next.fetch_add(1, std::memory_order_relaxed);
@@ -3586,7 +3586,7 @@ void restoreWindowContext(WindowContext* previous) {
         sgl_set_context(context);
     } else if (sg_isvalid()) {
         // Zero is an invalid SGL handle (the default has its own nonzero id).
-        // Immediate colour, transform, pipeline and vertex calls then no-op
+        // Immediate color, transform, pipeline and vertex calls then no-op
         // instead of mutating the previously selected Window's recording.
         sgl_set_context({0});
     }

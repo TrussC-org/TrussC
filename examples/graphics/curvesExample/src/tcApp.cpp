@@ -62,7 +62,7 @@ void tcApp::draw() {
                Vec3{180, by + 20, 0},
                Vec3{280, by + 140, 0},
                Vec3{380, by + 60, 0});
-    // Visualise control polygon (faint)
+    // Visualize control polygon (faint)
     setColor(1.0f, 1.0f, 1.0f, 0.25f);
     drawLine(80,  by + 80,   180, by + 20);
     drawLine(180, by + 20,   280, by + 140);

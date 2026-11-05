@@ -1,6 +1,7 @@
 """Optional Windows checker skips absent SDKs and propagates compiler failures."""
 from pathlib import Path
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +13,39 @@ CHECK = ROOT / 'tools/check_windows_sokol_syntax.py'
 
 
 class WindowsSyntaxCheckTests(unittest.TestCase):
+    def test_dialog_worker_owns_native_inputs(self):
+        source = (ROOT / 'core/platform/win/tcFileDialog_win.cpp').read_text(encoding='utf-8')
+        native = source.split('struct NativeDialog {', 1)[1].split('\n};', 1)[0]
+        self.assertIn('HWND owner = nullptr;', native)
+        self.assertIn('std::wstring title, message, defaultPath, defaultName;', native)
+        self.assertIn('std::wstring filterName', native)
+        self.assertNotRegex(native, r'\b(?:Window|App|DialogInputs|weak_ptr)\b')
+        presenter = source.split('trussc::internal::DialogDismiss presentDialog(', 1)[1]
+        presenter = presenter.split('\n} // anonymous namespace', 1)[0]
+        preparation, worker = presenter.split('std::thread([native]', 1)
+        self.assertIn('inputs.requestingWindow.lock()', preparation)
+        self.assertIn('window->isOpen()', preparation)
+        self.assertIn('sapp_window_win32_get_hwnd(', preparation)
+        for field in ('title', 'message', 'defaultPath', 'defaultName', 'folderSelection'):
+            self.assertRegex(preparation, rf'native->{field} = [^;]*inputs\.{field}')
+        self.assertNotRegex(worker, r'\b(?:inputs|window|GetActiveWindow|currentAppOwner|currentWindowCtx)\b')
+        self.assertIn('runDialog(*native)', worker)
+        self.assertIn('native->complete(std::move(result))', worker)
+        self.assertIn('}).detach();', worker)
+        run_dialog = source.split('trussc::FileDialogResult runDialog(', 1)[1].split(
+            'trussc::internal::DialogDismiss presentDialog(', 1)[0]
+        self.assertNotRegex(run_dialog, r'\b(?:Window|App|GetActiveWindow|currentWindowCtx)\b')
+        self.assertIn('dialog->Show(native.owner)', run_dialog)
+        self.assertIn('MessageBoxW(native.owner,', run_dialog)
+
+    def test_all_async_dialogs_use_common_request(self):
+        source = (ROOT / 'core/platform/win/tcFileDialog_win.cpp').read_text(encoding='utf-8')
+        for kind in ('alert', 'confirm', 'load', 'save'):
+            match = re.search(r'void ' + kind + r'DialogAsync\([^\{]+\{(.*?)\n\}', source, re.S)
+            self.assertIsNotNone(match, kind)
+            self.assertIn('internal::requestAsyncDialog(', match[1])
+            self.assertNotRegex(match[1], r'\b' + kind + r'Dialog\(')
+
     def run_check(self, script=CHECK, *args, **env):
         environment = dict(os.environ, **env)
         environment.pop('TC_WINDOWS_SYNTAX_SDK', None)

@@ -141,12 +141,12 @@ class CoreTestRunnerTests(unittest.TestCase):
         regular = self.project("regular")
         self.project("daily", daily=True)
         self.assertEqual(self.combined([regular], ["regular"])[0], 1)
-        self.assertIn("daily (not registered", self.output.getvalue())
+        self.assertIn("core/tests/daily: FAILED (not registered in allCoreTests)", self.output.getvalue())
 
     def test_unknown_registration_fails(self):
         regular = self.project("regular")
         self.assertEqual(self.combined([regular], ["regular", "unknown"])[0], 1)
-        self.assertIn("unknown (registered, but no such combined test dir)", self.output.getvalue())
+        self.assertIn("core/tests/unknown: FAILED (registered, but no such combined test dir)", self.output.getvalue())
 
     def test_all_daily_inventory_is_still_checked_without_selected_runs(self):
         self.project("daily", daily=True)

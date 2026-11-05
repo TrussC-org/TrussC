@@ -68,7 +68,7 @@ void tcApp::draw() {
         }
     } else if (!lastResult.filePath.empty()) {
         setColor(1.0f, 0.4f, 0.4f);
-        drawBitmapString("Cancelled", 40, y);
+        drawBitmapString("Canceled", 40, y);
     }
 }
 
@@ -98,7 +98,7 @@ void tcApp::keyPressed(int key) {
                     }
                 }
             } else {
-                statusMessage = "File dialog cancelled";
+                statusMessage = "File dialog canceled";
             }
             break;
         }
@@ -113,7 +113,7 @@ void tcApp::keyPressed(int key) {
                 statusMessage = "Folder selected";
                 logNotice("tcApp") << "Selected folder: " << lastResult.filePath;
             } else {
-                statusMessage = "Folder dialog cancelled";
+                statusMessage = "Folder dialog canceled";
             }
             break;
         }
@@ -128,7 +128,7 @@ void tcApp::keyPressed(int key) {
                 statusMessage = "Save location selected";
                 logNotice("tcApp") << "Save to: " << lastResult.filePath;
             } else {
-                statusMessage = "Save dialog cancelled";
+                statusMessage = "Save dialog canceled";
             }
             break;
         }

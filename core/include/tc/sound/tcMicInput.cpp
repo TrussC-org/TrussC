@@ -18,7 +18,7 @@ void MicState::audio(const float* input, size_t frames) {
 }
 void micStopped(MicState& state) {
     // Once per device. The stop that closeMic() causes also gets here, after
-    // stop() / the destructor cancelled the state, and finds nobody to tell.
+    // stop() / the destructor canceled the state, and finds nobody to tell.
     if (state.lost.exchange(true)) return;
     // weak_from_this() / lock() do not allocate. The queue entry does; a
     // failure there only means the event is not delivered.

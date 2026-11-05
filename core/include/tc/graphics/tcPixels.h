@@ -294,7 +294,7 @@ public:
     //
     // All of these mutate the buffer in place. For U8 pixels the math is
     // done in linear light (sRGB-decoded → average / interpolate → sRGB
-    // re-encoded), which matches the physically-correct "mid-grey of black
+    // re-encoded), which matches the physically-correct "mid-gray of black
     // and white = ~0.73 sRGB" convention used elsewhere in the pipeline.
     // F32 pixels are assumed to already be linear and are processed
     // directly. Alpha and any non-RGB channels (1- or 2-channel buffers)
