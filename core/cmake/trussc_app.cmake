@@ -159,14 +159,23 @@ macro(trussc_app)
             list(APPEND _TC_SOURCES "${_TC_SOURCE}")
         endforeach()
     else()
-        file(GLOB_RECURSE _TC_SOURCES
+        # CONFIGURE_DEPENDS on the compiled files: an existing build tree
+        # re-globs on each build, so a newly added src/*.cpp is picked up
+        # without a manual reconfigure (#375). Headers stay a plain glob: they
+        # are only listed for the IDE, and compiler depfiles already track them.
+        # A CONFIGURE_DEPENDS glob over *.h would also reconfigure after every
+        # generated src/**/*.glsl.h.
+        file(GLOB_RECURSE _TC_SOURCES CONFIGURE_DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.mm"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/*.m"
         )
+        file(GLOB_RECURSE _TC_HEADERS
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
+        )
+        list(APPEND _TC_SOURCES ${_TC_HEADERS})
         # Exclude Objective-C/C++ files on non-Apple platforms
         if(NOT APPLE)
             list(FILTER _TC_SOURCES EXCLUDE REGEX ".*\\.mm$")

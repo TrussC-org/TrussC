@@ -63,16 +63,16 @@ set(HAP_HEADERS
 # -----------------------------------------------------------------------------
 # Addon source files
 # -----------------------------------------------------------------------------
-file(GLOB ADDON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
+file(GLOB ADDON_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 file(GLOB ADDON_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
 
 # Platform-specific sources
 if(APPLE)
-    file(GLOB PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*_mac.mm)
+    file(GLOB PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*_mac.mm)
 elseif(WIN32)
-    file(GLOB PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*_win.cpp)
+    file(GLOB PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*_win.cpp)
 else()
-    file(GLOB PLATFORM_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/*_linux.cpp)
+    file(GLOB PLATFORM_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*_linux.cpp)
 endif()
 
 # -----------------------------------------------------------------------------
