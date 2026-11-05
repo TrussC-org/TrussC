@@ -77,6 +77,20 @@
 // visited as a nested group. Member-reflected types (TC_REFLECT) nest the same
 // way automatically.
 //
+// Image-like values (an Fbo, an Image, a VideoPlayer — anything that is a
+// HasTexture) reflect the same way, read-only:
+//
+//     struct Scene : Node {
+//         Fbo canvas;
+//         TC_REFLECT(Scene, Node) { TC_VALUE(canvas) }   // shown, never saved
+//     };
+//
+// Pixels are not data: the JSON writer leaves them out of saved data and the
+// reader ignores them, so save files are unchanged. Inspectors can show a
+// thumbnail, and the MCP node view reports {width, height, format, allocated}.
+// Only the one-argument TC_VALUE(member) form takes an image: the getter forms
+// copy the value, and an image cannot be copied.
+//
 // Backends implement Reflector (one typed visit() per supported type) — e.g.
 // an ImGui inspector, a JSON writer, a binary codec. Nested values bracket
 // their members with beginGroup()/endGroup() (no-op by default, so flat
@@ -109,6 +123,10 @@ namespace trussc {
 struct Vec2;
 struct Vec3;
 struct Color;
+
+// Image-like values (tcHasTexture.h). Only a reference travels through the
+// Reflector, so the forward declaration is enough here.
+class HasTexture;
 
 // Label table for one enum type: labels[value] is the human-readable name.
 struct EnumLabelSpan {
@@ -329,6 +347,15 @@ struct Reflector {
         return visit(name, v);
     }
 
+    // Image channel: an Fbo, Image, VideoPlayer or any other HasTexture. Always
+    // read-only — backends must not change the image. The default shows and
+    // saves nothing, so backends that don't know about images (and Reflector
+    // subclasses written before this overload existed) keep working unchanged.
+    virtual bool visit(const char* name, HasTexture& v) {
+        (void)name; (void)v;
+        return false;
+    }
+
     // Read-only scope — the 2-arg TC_VALUE visits inside push/pop. Backends
     // check isReadOnly() to render disabled / refuse writes; edits are
     // discarded regardless (there is no setter to receive them).
@@ -372,8 +399,10 @@ inline void reflectBases(T* self, Reflector& r) {
 // Visit one value of any reflectable type — the single funnel TC_VALUE goes
 // through. Enums are detected here: they travel as an int, through the
 // labeled enum channel when the enum has a TC_ENUM_LABELS declaration (found
-// by ADL), as a plain int otherwise. Being a template matters: if constexpr
-// discards the non-matching branch without type-checking it.
+// by ADL), as a plain int otherwise. Types derived from HasTexture (Fbo, Image,
+// VideoPlayer, ...) go to the read-only image channel. Being a template
+// matters: if constexpr discards the non-matching branch without type-checking
+// it. There is no pointer handling: a smart pointer member is not reflectable.
 template <class T>
 inline bool reflectValue(Reflector& r, const char* name, T& v) {
     if constexpr (std::is_enum_v<T>) {
@@ -390,6 +419,10 @@ inline bool reflectValue(Reflector& r, const char* name, T& v) {
         }
         if (edited) v = static_cast<T>(i);
         return edited;
+    } else if constexpr (std::is_base_of_v<HasTexture, T>) {
+        // Image-like value: read-only, never edited.
+        r.visit(name, static_cast<HasTexture&>(v));
+        return false;
     } else if constexpr (requires { r.visit(name, v); }) {
         // A primitive the Reflector knows directly.
         return r.visit(name, v);
