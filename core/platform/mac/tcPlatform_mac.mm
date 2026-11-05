@@ -494,27 +494,33 @@ SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::file
     @autoreleasepool {
         const auto path = internal::resolveScreenshotPath(requestedPath);
 
-        // CGImage を作成
+        // PNG, JPEG, BMP and unknown extensions use the shared stb encoder, so
+        // the bytes match the other platforms and PNG keeps straight RGBA (#854).
+        // Only the macOS-specific TIFF and GIF go through the system encoders.
+        const std::string ext = toLower(getFileExtension(path));
+        const bool systemEncoded = ext == "tiff" || ext == "tif" || ext == "gif";
+        if (!systemEncoded) {
+            return internal::atomicWrite(path, [&](std::FILE* file) {
+                return internal::writePixelsEncoded(file, pixels, ext, path);
+            }, "Screenshot", true);
+        }
+
+        // CGImage from a data provider with straight alpha. A CGBitmapContext
+        // cannot hold non-premultiplied RGBA, so it is not used here.
         int width = pixels.getWidth();
         int height = pixels.getHeight();
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-
-        CGContextRef context = CGBitmapContextCreate(
-            const_cast<unsigned char*>(pixels.getData()),
+        CGDataProviderRef provider = CGDataProviderCreateWithData(
+            nullptr, pixels.getData(), pixels.getTotalBytes(), nullptr);
+        CGImageRef cgImage = provider ? CGImageCreate(
             width, height,
             8,                          // bitsPerComponent
+            32,                         // bitsPerPixel
             width * 4,                  // bytesPerRow
             colorSpace,
-            (CGBitmapInfo)kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big
-        );
-
-        if (!context) {
-            CGColorSpaceRelease(colorSpace);
-            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "CGContext の作成に失敗しました"), "Screenshot");
-        }
-
-        CGImageRef cgImage = CGBitmapContextCreateImage(context);
-        CGContextRelease(context);
+            (CGBitmapInfo)kCGImageAlphaLast | kCGBitmapByteOrder32Big,
+            provider, nullptr, false, kCGRenderingIntentDefault) : nullptr;
+        if (provider) CGDataProviderRelease(provider);
         CGColorSpaceRelease(colorSpace);
 
         if (!cgImage) {
@@ -529,19 +535,8 @@ SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::file
             return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "NSBitmapImageRep の作成に失敗しました"), "Screenshot");
         }
 
-        // ファイル拡張子から形式を判定
-        // Case-insensitive extension match on the resolved destination
-        std::string ext = toLower(getFileExtension(path));
-        NSBitmapImageFileType fileType = NSBitmapImageFileTypePNG;
-        if (ext == "jpg" || ext == "jpeg") {
-            fileType = NSBitmapImageFileTypeJPEG;
-        } else if (ext == "tiff" || ext == "tif") {
-            fileType = NSBitmapImageFileTypeTIFF;
-        } else if (ext == "bmp") {
-            fileType = NSBitmapImageFileTypeBMP;
-        } else if (ext == "gif") {
-            fileType = NSBitmapImageFileTypeGIF;
-        }
+        // Only TIFF and GIF reach here
+        NSBitmapImageFileType fileType = (ext == "gif") ? NSBitmapImageFileTypeGIF : NSBitmapImageFileTypeTIFF;
 
         // ファイルに保存
         NSData* data = [rep representationUsingType:fileType properties:@{}];
