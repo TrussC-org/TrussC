@@ -11,6 +11,9 @@
 //   the close: on Linux, writing to /dev/full returns false and logs an error.
 // - The successful paths still return true and write the expected bytes
 //   (Pixels::save writes PNG / BMP signatures; overwriting a file works).
+// - PNG output is straight (non-premultiplied) RGBA on every OS (#854): pixels
+//   with alpha 0 / 128 / 255 keep their exact RGBA through Pixels::save and the
+//   screenshot writer, and a screenshot JPEG is not darkened by alpha.
 // =============================================================================
 
 #include <TrussC.h>
@@ -18,6 +21,8 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -97,6 +102,63 @@ static void checkSuccessPaths(const fs::path& dir) {
     check("Pixels::save .bmp starts with BM", bmp.size() > 2 && bmp.compare(0, 2, "BM") == 0);
 }
 
+// RGBA must survive a PNG write and read unchanged, including the RGB of a
+// fully transparent pixel (#854: macOS used to premultiply it away).
+static void checkStraightAlphaPng(const fs::path& dir) {
+    const unsigned char expected[3][4] = {
+        {200, 100, 50, 0},     // alpha 0 keeps its color
+        {200, 100, 50, 128},   // low alpha keeps full precision
+        {200, 100, 50, 255},
+    };
+    Pixels px;
+    px.allocate(3, 1, 4);
+    memcpy(px.getData(), expected, sizeof(expected));
+
+    auto matches = [&](const fs::path& file, const string& label) {
+        Pixels back;
+        bool loaded = back.load(file).ok();
+        check(label + " loads back as 3x1 RGBA",
+              loaded && back.getWidth() == 3 && back.getHeight() == 1 && back.getChannels() == 4);
+        if (!loaded || back.getWidth() != 3 || back.getHeight() != 1 || back.getChannels() != 4) return;
+        for (int i = 0; i < 3; i++) {
+            const unsigned char* got = back.getData() + i * 4;
+            string detail = "got " + to_string(got[0]) + "," + to_string(got[1]) + "," +
+                            to_string(got[2]) + "," + to_string(got[3]);
+            check(label + " keeps pixel " + to_string(i) + " exactly (alpha " +
+                  to_string(expected[i][3]) + ")", memcmp(got, expected[i], 4) == 0, detail);
+        }
+    };
+
+    fs::path viaSave = dir / "straight_save.png";
+    check("Pixels::save straight-alpha PNG returns true", px.save(viaSave).ok());
+    matches(viaSave, "Pixels::save PNG");
+
+    fs::path viaShot = dir / "straight_shot.png";
+    check("screenshot writer straight-alpha PNG returns true",
+          internal::saveScreenshotPixels(px, viaShot));
+    matches(viaShot, "screenshot PNG");
+
+    // JPEG has no alpha: the RGB must not be scaled by the alpha value.
+    Pixels flat;
+    flat.allocate(16, 16, 4);
+    for (int i = 0; i < 16 * 16; i++) {
+        unsigned char* d = flat.getData() + i * 4;
+        d[0] = 200; d[1] = 100; d[2] = 50; d[3] = 128;
+    }
+    fs::path jpg = dir / "straight_shot.jpg";
+    check("screenshot writer JPEG returns true", internal::saveScreenshotPixels(flat, jpg));
+    Pixels jback;
+    bool jloaded = jback.load(jpg).ok();
+    check("screenshot JPEG loads back", jloaded);
+    if (jloaded) {
+        const unsigned char* d = jback.getData();
+        auto within8 = [](int a, int b) { return abs(a - b) <= 8; };
+        check("screenshot JPEG RGB is not darkened by alpha",
+              within8(d[0], 200) && within8(d[1], 100) && within8(d[2], 50),
+              "got " + to_string(d[0]) + "," + to_string(d[1]) + "," + to_string(d[2]));
+    }
+}
+
 static void checkDevFull() {
 #if defined(__linux__)
     std::error_code ec;
@@ -130,6 +192,7 @@ TC_CORE_TEST_MAIN() {
     fs::path dir = makeTestDir();
     checkJsonKeepsFileOnSerializeError(dir);
     checkSuccessPaths(dir);
+    checkStraightAlphaPng(dir);
     checkDevFull();
 
     std::error_code ec;
