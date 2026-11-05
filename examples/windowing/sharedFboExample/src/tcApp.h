@@ -8,6 +8,7 @@ using namespace tc;
 constexpr int PANEL_W = 400;
 constexpr int PANEL_H = 300;
 constexpr int PANEL_COUNT = 3;
+constexpr const char* PANEL_NAMES[PANEL_COUNT] = {"left", "center", "right"};
 
 // Draw part `index` (0 = left, 1 = center, 2 = right) of the wall into the
 // current window: the whole Fbo is drawn PANEL_COUNT windows wide and shifted
@@ -18,9 +19,8 @@ inline void drawWallPart(const Fbo& wall, int index) {
     setColor(1.0f);
     wall.draw(-index * w, 0, w * PANEL_COUNT, h);
 
-    static const char* names[PANEL_COUNT] = {"left", "center", "right"};
     setColor(1.0f, 0.8f);
-    drawBitmapString(names[index], 12, 20);
+    drawBitmapString(PANEL_NAMES[index], 12, 20);
 }
 
 // The center and right windows. They only draw the shared Fbo; the main
@@ -32,12 +32,10 @@ public:
     PanelApp(shared_ptr<Fbo> wall, int index, function<void()> arrange)
         : wall_(std::move(wall)), index_(index), arrange_(std::move(arrange)) {}
 
-    void draw() override {
-        if (wall_->isAllocated()) drawWallPart(*wall_, index_);
-    }
+    void draw() override { drawWallPart(*wall_, index_); }
 
     void keyPressed(int key) override {
-        if (key == 'R' && arrange_) arrange_();
+        if (key == 'R') arrange_();
     }
 
 private:
@@ -59,5 +57,4 @@ private:
 
     shared_ptr<Fbo> wall_ = make_shared<Fbo>();
     vector<shared_ptr<Window>> panels_;   // center, right
-    float t_ = 0.0f;
 };
