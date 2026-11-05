@@ -199,6 +199,9 @@ class ShortOutput:
         diag = diagnostic_of(text)
         if diag:
             (self.errors if diag[0] == "error" else self.warnings).append(diag[1])
+        elif is_pass_line(text):
+            # A build step that runs a test (x11Regression) prints PASS lines.
+            return False
         elif update:
             # The same Note: of every trusscli update is shown once.
             if text in self.shown_notes:
@@ -835,8 +838,8 @@ def run_combined_core_tests(tests, pg_bin, platform_info, args):
         Colors.print(f"Building: {runner_name}", Colors.YELLOW)
         build_progress = None
     else:
+        # The label shows with the first dot, after trusscli's own lines.
         build_progress = Progress(f"Building {runner_name}")
-        build_progress.begin()
     t0 = time.monotonic()
     with unit_log(runner_dir):
         binary, stage = build_test_project(runner_dir, pg_bin, platform_info, args,
