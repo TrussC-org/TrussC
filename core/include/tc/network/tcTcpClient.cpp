@@ -740,7 +740,11 @@ bool TcpClient::State::drainSendChannel(const std::shared_ptr<ClientSendChannel>
         if (!wait) return false;
         if (ch->open) waitClientSocket(forWrite, 100);
     }
-    if (!ch->open && outcome == SendError::None) outcome = SendError::Disconnected;
+    // Every byte reached the socket: a close after the last write (a peer that
+    // got the data and hung up) does not make the send fail. An empty payload
+    // has nothing written, so a closed channel still rejects it.
+    if (!ch->open && outcome == SendError::None && (ch->written < item.size || item.size == 0))
+        outcome = SendError::Disconnected;
     const bool failed = outcome != SendError::None && ch->open;
     const bool timedOut = outcome == SendError::Timeout;
     if (timedOut) outcome = SendError::Disconnected; // The stream is closed.
