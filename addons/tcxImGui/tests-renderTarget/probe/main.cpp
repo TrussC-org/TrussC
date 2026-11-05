@@ -153,17 +153,17 @@ void regressions() {
     draw();
     check("offscreen edit writes the checkbox and waits for verification", value && pending.size() == 1 && pending.front()->state == d::PendingValue::State::Verify && !ready(edit));
     auto applied = pending.front();
-    // No owning-window onRender or UI redraw. Only main afterFrame advances.
+    // No owning-window onRender or UI redraw. Only runtime maintenance advances.
     d::clockSkew += applied->checkDeadline - d::now() - std::chrono::seconds(1);
-    events().afterFrame.notify();
+    internal::runtimeMaintenanceEvent().notify();
     check("edit remains pending before its check deadline", !ready(edit));
     d::clockSkew += applied->checkDeadline - d::now();
-    events().afterFrame.notify();
+    internal::runtimeMaintenanceEvent().notify();
     check("idle applied edit completes at its check deadline", replyHas(edit, "ok") && pending.empty());
 
     auto expired = request(); auto queued = pending.back();
     d::clockSkew += queued->deadline - d::now();
-    events().afterFrame.notify();
+    internal::runtimeMaintenanceEvent().notify();
     check("idle unrendered edit expires at its write deadline", queued->state == d::PendingValue::State::Expired && replyHas(expired, "too late") && pending.empty());
 
     checkContextQueue(ctx, "idle value");
@@ -171,11 +171,11 @@ void regressions() {
     std::vector<std::future<md::ReplyThunk>> replies;
     for (int i=0; i<200; ++i) replies.push_back(request());
     auto last = pending.back();
-    events().afterFrame.notify();
+    internal::runtimeMaintenanceEvent().notify();
     int superseded = 0;
     for (int i=0; i<199; ++i) superseded += replyHas(replies[i], "Superseded");
     check("idle superseded edits are reclaimed without a redraw", superseded == 199 && pending.size() == 1);
-    d::clockSkew += last->deadline - d::now(); events().afterFrame.notify();
+    d::clockSkew += last->deadline - d::now(); internal::runtimeMaintenanceEvent().notify();
     check("200 queued tool requests leave no records past their deadlines", replyHas(replies.back(), "too late") && pending.empty() && md::deferredResponses().empty());
 
     // Distinct IDs still expire without relying on supersession.
@@ -184,9 +184,9 @@ void regressions() {
         d::queueValue(ctx, ImGuiID(i+1), queued->kind, queued->dataType, queued->components,
             queued->bytes, d::kPendingValueLifetime, d::kValueCheckDeadline, [&] { ++done; });
     check("more than 256 distinct edits are queued", pending.size() == 300);
-    d::clockSkew += pending.back()->deadline - d::now(); events().afterFrame.notify();
+    d::clockSkew += pending.back()->deadline - d::now(); internal::runtimeMaintenanceEvent().notify();
     check("distinct idle requests expire and each callback runs once", pending.empty() && done == 300);
-    events().afterFrame.notify(); check("deadline callbacks run only once", done == 300);
+    internal::runtimeMaintenanceEvent().notify(); check("deadline callbacks run only once", done == 300);
 
     std::vector<ImGuiContext*> extraContexts;
     for (int c = 0; c < 4; ++c) {
@@ -221,12 +221,12 @@ void regressions() {
     check("fixed-size edits can follow queued text", !ready(mixed) && pending.size() == 1);
     const auto deadline = cs.pendingText.back().deadline;
     d::clockSkew += deadline - d::now() - std::chrono::seconds(1);
-    events().afterFrame.notify();
+    internal::runtimeMaintenanceEvent().notify();
     check("idle text remains queued before its deadline", cs.pendingText.size() == acceptedText && ctx->InputEventsQueue.Size > 0);
     // Preserve a native event which does not belong to a tool injection.
     ImGui::SetCurrentContext(ctx); ImGui::GetIO().AddFocusEvent(false);
     const auto nativeId = ctx->InputEventsNextEventId - 1;
-    d::clockSkew += deadline - d::now(); events().afterFrame.notify();
+    d::clockSkew += deadline - d::now(); internal::runtimeMaintenanceEvent().notify();
     check("idle text is reclaimed at the deadline, preserving native input",
         cs.pendingText.empty() && pending.empty() && ready(mixed) &&
         ctx->InputEventsQueue.Size == 1 && ctx->InputEventsQueue[0].EventId == nativeId);
@@ -254,7 +254,7 @@ void regressions() {
                 events().onRender.notify(); events().onRender.notify();
             } else {
                 d::clockSkew += std::chrono::seconds(3);
-                events().afterFrame.notify();
+                internal::runtimeMaintenanceEvent().notify();
             }
             check(settleAll ? "settleAll retains only the consumed tool presses' releases" :
                                  "expiry retains only the consumed tool presses' releases",
@@ -275,7 +275,7 @@ void regressions() {
             if (settleAll) {
                 events().onRender.notify(); events().onRender.notify();
             } else {
-                d::clockSkew += std::chrono::seconds(3); events().afterFrame.notify();
+                d::clockSkew += std::chrono::seconds(3); internal::runtimeMaintenanceEvent().notify();
             }
             draw(); draw();
             check("cancellation preserves native-held Ctrl and mouse",
@@ -290,7 +290,7 @@ void regressions() {
     auto large = request("idle text", std::string(128 * 1024 + 1, 'x'));
     check("text above 128 KiB is accepted and queues all character events",
         replyHas(large, "ok") && ctx->InputEventsQueue.Size > 128 * 1024 && cs.pendingText.size() == 1);
-    d::clockSkew += std::chrono::seconds(3); events().afterFrame.notify();
+    d::clockSkew += std::chrono::seconds(3); internal::runtimeMaintenanceEvent().notify();
     check("large text expires without leaving events", cs.pendingText.empty() && ctx->InputEventsQueue.empty());
 
     auto shutdownText = request("idle text");
@@ -300,7 +300,7 @@ void regressions() {
     simgui_tc_set_context(windowBackend);
     auto beforeShutdown = request(); offscreen.shutdown();
     check("shutdown settles remaining edits", ready(beforeShutdown));
-    events().afterFrame.notify(); events().onRender.notify();
+    internal::runtimeMaintenanceEvent().notify(); events().onRender.notify();
     d::clockSkew = {};
     ImGuiContext* raiiContext = nullptr;
     {
@@ -333,7 +333,15 @@ int main(int argc, char** argv) {
     gd.environment.defaults.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL; gd.environment.defaults.sample_count = 1;
     gd.logger.func = internal::sokolLog; gd.pipeline_pool_size = 1024; gd.shader_pool_size = 1024; sg_setup(gd);
     sgl_desc_t ld = {}; ld.pipeline_pool_size = 256; ld.logger.func = internal::sokolLog; sgl_setup(ld);
-    auto& w = internal::currentWindowContext();
+    // Use the existing virtual-window fixture contract for the window APIs.
+    // No native window is needed by this surfaceless native-call recorder.
+    Window owner;
+    internal::WindowRequestAccess::bindForTests(owner,600);
+    auto& w = internal::WindowRequestAccess::context(owner);
+    auto queryApp = internal::makeConstructedAppAt<App>(&w);
+    internal::AppOwnerScope queryOwner{internal::appOwner(*queryApp)};
+    internal::currentWindowCtx() = &w;
+    w.pointerValid = true;
     // Keep framebuffer metrics independent of sapp (no native window exists).
     w.fbWidth = w.fbHeight = 256; w.dpiScale = 1; w.updateDeltaTime = 1.0/60.0;
     w.swapchainTarget.resources().context = sgl_default_context();
@@ -342,6 +350,9 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "--static-exit") staticExitRegression();
     bufferGrowRegression();
     if (argc != 2 || std::string(argv[1]) != "--buffer-grow") regressions();
+    w.teardownTargets();
+    internal::currentWindowCtx() = nullptr;
+    internal::WindowRequestAccess::unbind(owner);
     internal::drainPendingGpuDestroys(); sgl_shutdown(); sg_shutdown();
     eglMakeCurrent(display,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
     eglDestroyContext(display,context); eglTerminate(display);

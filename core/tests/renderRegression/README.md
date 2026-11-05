@@ -4,11 +4,18 @@
 lane runs `allCoreTests renderRegression --self-check` under Xvfb/Mesa. A standalone
 project generated with trusscli accepts the same arguments.
 
-- `--self-check`: assertions against known pixel values in all 20 scenes.
+- `--self-check`: assertions against known pixel values in all 21 scenes.
 - `--record <dir>`: assertions, PNGs and `samples.json` into an empty directory.
 - `--compare <dir>`: assertions, PNGs, `samples.json` and red difference overlays
-  into `<dir>.compare`. A missing image, different size, missing scene, or pixel
-  exceeding its tolerance fails. All four channels are compared.
+  into `<dir>.compare`. A missing image for an existing scene, different size,
+  removed scene, or pixel exceeding its tolerance fails. All four channels are compared.
+
+Against an older base, scenes absent from both the base recording's `samples.json`
+and its baseline PNGs (across all targets and variants, ignoring `.diff.png`)
+are reported as `NEW`: their self-check assertions still run and head images are
+saved, without a pixel comparison. Missing, empty or invalid base `samples.json`
+fails, as does a baseline PNG whose scene is absent from the manifest;
+missing, unreadable, or size-mismatched images for existing scenes still fail.
 
 Screen-capture self-checks assert RGB only because swapchain alpha varies across backends; alpha is asserted only for Fbo captures, while same-machine record/compare keeps full RGBA.
 
@@ -33,13 +40,13 @@ Scenes wait until the framebuffer matches the requested size (at most 60
 frames on every platform), then render and capture, with fixed geometry and a
 fixed seed. There is one 256x192 logical window with vsync off. The resize scene
 captures 256x192 and 320x224 with pixelPerfect both off and on, so a run produces
-46 images. Captures and JSON sizes are framebuffer pixels. Screen assertions
+48 images. Captures and JSON sizes are framebuffer pixels. Screen assertions
 use DPI-scaled logical coordinates with pixelPerfect off and framebuffer coordinates with it on; FBO assertions use framebuffer pixels.
 The text scene uses the embedded default bitmap glyphs and an R8 coverage page.
 
 | Maximum RGBA8 channel difference | Scenes |
 | --- | --- |
-| 0 | blendModes, text, premultImage, fboClearLoad, scissorFbo, fullscreenShader, resizePixelPerfect, userShaderOtherFormat, readbackRoundTrip, midFrameFlush, midPassClear, sglFboInterrupt, textureImmediate, depthStencil |
+| 0 | blendModes, text, premultImage, fboClearLoad, scissorFbo, fullscreenShader, resizePixelPerfect, userShaderOtherFormat, readbackRoundTrip, midFrameFlush, midPassClear, sglFboInterrupt, textureImmediate, depthStencil, imguiWindowFbo |
 | 2 | msaaResolve, transformPbr, easyCamFbo, pbrShadowFbo, pointMeshTransform, msaaInterrupted |
 
 Tolerances live in the source table. A change to a tolerance needs an explanation
@@ -68,3 +75,8 @@ sample. `sampleCount` in `samples.json` records the actual count, including a
 platform fallback. Keep separate recording directories for each request.
 `textureImmediate` intentionally differs from the old once-per-frame upload
 behavior; record its old pixels as evidence even when its self-check fails.
+
+`imguiWindowFbo` (#713 Q3) draws two independent ImGui contexts in the same GPU
+frame, one on the window and one inside an Fbo. Exact pixels check preceding
+blue geometry, distinct red/green UI, subsequent yellow geometry and black
+exteriors. The same scene uses the public addon API on the old and new backend.

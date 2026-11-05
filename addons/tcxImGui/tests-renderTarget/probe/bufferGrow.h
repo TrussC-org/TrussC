@@ -5,7 +5,8 @@ int bufferCallbacks = 0;
 void bufferMarker(const ImDrawList*, const ImDrawCmd*) { ++bufferCallbacks; }
 void bufferUi(int primitives, float thickness = 1.0f) {
     for (int window = 0; window < 2; ++window) {
-        ImGui::SetNextWindowPos({0,0}); ImGui::SetNextWindowSize({128,128});
+        // Keep both windows partly visible so ImGui does not cull the back list.
+        ImGui::SetNextWindowPos({float(window * 24),float(window * 24)}); ImGui::SetNextWindowSize({128,128});
         ImGui::Begin(window == 0 ? "buffer back" : "buffer heavy", nullptr,
             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDecoration);
         auto* list = ImGui::GetWindowDrawList();
@@ -67,7 +68,7 @@ void bufferGrowRegression() {
     render(configured, 3);
     check("explicit initial capacity avoids the first allocation", notices == 2);
     render(configured, 9);
-    check("explicit initial capacity is honoured", notices == 3 && lastNotice.find("had 200000") != std::string::npos);
+    check("explicit initial capacity is honored", notices == 3 && lastNotice.find("had 200000") != std::string::npos);
     ImGuiManager negative; negative.setupOffscreen(-1);
     render(negative, 3);
     check("negative initial capacity uses the default", notices == 4 && lastNotice.find("had 65536") != std::string::npos);
@@ -75,7 +76,7 @@ void bufferGrowRegression() {
     render(ImGuiManager::instance(), 3);
     check("imguiSetup(int) configures the window manager", notices == 4);
     render(ImGuiManager::instance(), 9);
-    check("window setup honours the requested capacity", notices == 5 && lastNotice.find("had 200000") != std::string::npos);
+    check("window setup honors the requested capacity", notices == 5 && lastNotice.find("had 200000") != std::string::npos);
     imguiShutdown();
     imguiSetup(-1);
     render(ImGuiManager::instance(), 3);
@@ -86,17 +87,10 @@ void bufferGrowRegression() {
     check("index demand alone grows buffers", notices == 7 && lastNotice.find("had 65536") != std::string::npos);
     check("large frames emit no errors", errors == 0);
 
-    // Inject staging allocation failures after setup, leaving the small back
-    // list drawable. Check recovery on the same context on the next frame.
-    struct AllocationState { int failAt = 0, calls = 0, errors = 0; std::vector<size_t> requests; } allocation;
+    // Leave one GPU slot for growth: replacing both buffers must fail
+    // transactionally and retain complete lists that fit the old capacity.
+    struct AllocationState { int errors = 0; } allocation;
     simgui_desc_t desc = {};
-    desc.allocator.user_data = &allocation;
-    desc.allocator.alloc_fn = [](size_t bytes, void* data) -> void* {
-        auto& state = *static_cast<AllocationState*>(data);
-        ++state.calls; state.requests.push_back(bytes);
-        return state.failAt > 0 && state.calls == state.failAt ? nullptr : std::malloc(bytes);
-    };
-    desc.allocator.free_fn = [](void* ptr, void*) { std::free(ptr); };
     desc.logger.user_data = &allocation;
     desc.logger.func = [](const char*, uint32_t level, uint32_t item, const char* message, uint32_t, const char*, void* data) {
         if (level == 1 && item == SIMGUI_LOGITEM_BUFFER_OVERFLOW && message &&
@@ -107,10 +101,16 @@ void bufferGrowRegression() {
     const auto backend = simgui_tc_make_context(&desc);
     simgui_tc_set_context(backend);
     ImGui::GetIO().IniFilename = nullptr;
-    for (int failAt : {1, 2, -1, 0}) {
+    // Upload the font before exhausting the vertex/index buffer pool.
+    target.begin(0,0,0,0);
+    simgui_frame_desc_t warm = {}; warm.width = warm.height = 128; warm.delta_time = 1.0/60.0; warm.dpi_scale = 1;
+    check("font warmup accepted", d::beginTargetFrame(backend,warm));
+    ImGui::GetForegroundDrawList()->AddRectFilled({1,1},{8,8},IM_COL32_WHITE);
+    d::renderTargetFrame(backend); target.end(); internal::endGpuFrame();
+    for (bool failGrowth : {true, false}) {
         // Leave only one GPU slot: vbuf succeeds but ibuf cannot be created.
         std::vector<sg_buffer> reserved;
-        if (failAt == -1) {
+        if (failGrowth) {
             while (true) {
                 auto buffer = sg_alloc_buffer();
                 if (!buffer.id) break;
@@ -119,20 +119,17 @@ void bufferGrowRegression() {
             check("GPU pool exhaustion fixture reserved slots", !reserved.empty());
             sg_destroy_buffer(reserved.back()); reserved.pop_back();
         }
-        allocation.failAt = failAt; allocation.calls = 0; allocation.requests.clear(); bufferCallbacks = 0;
+        bufferCallbacks = 0;
         target.begin(0,0,0,0);
         simgui_frame_desc_t frame = {}; frame.width = frame.height = 128; frame.delta_time = 1.0/60.0; frame.dpi_scale = 1;
         check("allocation failure frame accepted", d::beginTargetFrame(backend, frame));
         bufferUi(3); d::renderTargetFrame(backend);
         target.end(); internal::endGpuFrame();
-        check("failure preserves old buffers; next successful frame recovers", bufferCallbacks == (failAt ? 1 : 3));
-        if (failAt == 0) check("staging doubles to fit and preserves the 1:3 ratio",
-            allocation.requests.size() == 2 && allocation.requests[0] == 131072 * sizeof(ImDrawVert) &&
-            allocation.requests[1] == 131072 * 3 * sizeof(ImDrawIdx));
+        check("failure preserves old buffers; next successful frame recovers", bufferCallbacks == (failGrowth ? 1 : 3));
         for (auto buffer : reserved) sg_destroy_buffer(buffer);
     }
-    check("each failed frame emits exactly one useful Error", allocation.errors == 3);
-    allocation.calls = 0; bufferCallbacks = 0;
+    check("each failed frame emits exactly one useful Error", allocation.errors == 1);
+    bufferCallbacks = 0;
     target.begin(0,0,0,0);
     simgui_frame_desc_t oversized = {}; oversized.width = oversized.height = 128; oversized.delta_time = 1.0/60.0; oversized.dpi_scale = 1;
     check("unrepresentable-size frame accepted", d::beginTargetFrame(backend, oversized));
@@ -143,7 +140,7 @@ void bufferGrowRegression() {
     d::renderTargetFrame(backend);
     firstList->VtxBuffer.Size = savedSize;
     target.end(); internal::endGpuFrame();
-    check("unrepresentable byte offsets report one Error without copying", allocation.errors == 4 && allocation.calls == 0 && bufferCallbacks == 0);
+    check("unrepresentable byte offsets report one Error without copying", allocation.errors == 2 && bufferCallbacks == 0);
     d::destroyTargetContext(backend); simgui_tc_set_context(previous);
 }
 }
