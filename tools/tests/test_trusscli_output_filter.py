@@ -308,6 +308,26 @@ class FilterTests(unittest.TestCase):
         out = self.screen(text, "--configure")
         self.assertEqual(out, "real output\n")
 
+    def test_two_line_japanese_vswhere_probe_error_is_hidden(self):
+        out, log = self.run_filter(fixture("windows_configure_ja.txt"), "--configure")
+        self.assertEqual(out, "")
+        self.assertIn("vswhere", log)
+
+    def test_vswhere_probe_error_in_any_language_is_hidden(self):
+        # cmd.exe always starts it with the quoted program name; the wrapped
+        # second line follows a comma.
+        for first, second in (
+                ("'vswhere.exe' wird nicht als interner oder externer Befehl,",
+                 "ausfuehrbares Programm oder Batchdatei erkannt."),
+                ("'vswhere.exe' n'est pas reconnu en tant que commande interne", None)):
+            with self.subTest(first=first):
+                text = first + "\n" + (second + "\n" if second else "") + "real output\n"
+                self.assertEqual(self.screen(text, "--configure"), "real output\n")
+
+    def test_line_after_a_vswhere_message_without_comma_stays(self):
+        text = "'vswhere.exe' is not recognized as an internal or external command.\nreal output\n"
+        self.assertEqual(self.screen(text, "--configure"), "real output\n")
+
     def test_vcvars_banner_is_not_hidden_in_a_build(self):
         out = self.screen("** Visual Studio banner-like text\n", "--exit", "1")
         self.assertIn("** Visual Studio banner-like text\n", out)

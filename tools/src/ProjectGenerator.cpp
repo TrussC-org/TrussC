@@ -1180,7 +1180,12 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
     // Existing caches retain the build type selected by the user.
     string buildType = fs::exists(fs::path(path) / buildDirForPreset(preset) / "CMakeCache.txt")
         ? "" : " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
-    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
+    // vcvarsall.bat looks for vswhere.exe on PATH and cmd.exe prints a
+    // "not recognized" error when it is missing; the Installer folder fixes that.
+    const string vswhereDir = VsDetector::findVswhereDir();
+    const string pathPrefix = vswhereDir.empty() ? ""
+        : "set \"PATH=" + vswhereDir + ";%PATH%\" && ";
+    string cmd = "cmd /c \"" + pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
 
     auto [result, output] = executeCommand(cmd);
     logConfigureOutput(buildDirForPreset(preset), output, result);
