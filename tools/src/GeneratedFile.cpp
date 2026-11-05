@@ -37,3 +37,17 @@ void writeGeneratedFile(const std::filesystem::path& path, const std::string& te
     }
     if (!result) throw std::runtime_error(result.message);
 }
+
+void removeBuildDirectory(const std::filesystem::path& dir) {
+    namespace fs = std::filesystem;
+    if (!fs::is_symlink(dir)) {
+        fs::remove_all(dir);
+        return;
+    }
+    if (!fs::is_directory(dir)) return;  // dangling link, or a link to a file
+    // directory_iterator follows the link once; remove_all on each entry
+    // removes a nested symlink itself, not its target.
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        fs::remove_all(entry.path());
+    }
+}

@@ -3272,7 +3272,7 @@ static int cmdClean(const vector<string>& args) {
         string fullPath = projectPath + "/" + dir;
         if (fs::exists(fullPath)) {
             cout << "  Removing " << dir << "/\n";
-            fs::remove_all(fullPath);
+            removeBuildDirectory(fullPath);
             removed++;
         }
     }
@@ -3410,7 +3410,11 @@ static int refreshWindowsPresets(const string& projectPath, const ToolchainCheck
     // stale and the next build tries again.
     const string buildDir = ProjectGenerator::buildDirForPreset(kNativePreset);
     error_code ec;
-    fs::remove_all(fs::path(projectPath) / buildDir, ec);
+    try {
+        removeBuildDirectory(fs::path(projectPath) / buildDir);
+    } catch (const fs::filesystem_error& e) {
+        ec = e.code();
+    }
     if (ec) {
         cerr << "Error: " << changed << ", and " << buildDir << " could not be removed ("
              << ec.message() << ").\n"
