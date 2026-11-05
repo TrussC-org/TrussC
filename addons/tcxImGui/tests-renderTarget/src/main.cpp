@@ -167,9 +167,9 @@ void refusalAndContexts() {
     check("exactly one tc Error for refusal",errors==previousErrors+1);
     check("refusal happens before ImGui NewFrame",firstContext->FrameCount==firstFrameNumber);
     const auto after=sg_query_stats().cur_frame;
-    check("refusal makes zero upload/draw calls",before.num_update_buffer==after.num_update_buffer && before.num_draw==after.num_draw);
+    check("refusal makes zero upload/draw calls",before.num_write_buffer_transient==after.num_write_buffer_transient && before.num_draw==after.num_draw);
     manifest["checks"]["imguiSameContextTwice"]={{"tcErrors",errors-previousErrors},
-        {"bufferUploads",after.num_update_buffer-before.num_update_buffer},{"drawCalls",after.num_draw-before.num_draw},
+        {"bufferUploads",after.num_write_buffer_transient-before.num_write_buffer_transient},{"drawCalls",after.num_draw-before.num_draw},
         {"sokolValidationErrors",validationErrors}};
     auto firstPixels=read(first), secondPixels=read(second);
     pixel(firstPixels,20,20,{255,0,0,255},"first pixels preserved"); pixel(secondPixels,50,20,{0,255,0,255},"other context target");
@@ -195,7 +195,7 @@ void refusalAndContexts() {
     const auto resizeStats=sg_query_stats().cur_frame;
     {auto scope=a.scoped(); check("resize does not reset context reservation",!scope); if(scope) marker(IM_COL32(0,0,255,255));}
     const auto resizeAfter=sg_query_stats().cur_frame;
-    check("resize refusal has no uploads/draws",resizeStats.num_update_buffer==resizeAfter.num_update_buffer && resizeStats.num_draw==resizeAfter.num_draw);
+    check("resize refusal has no uploads/draws",resizeStats.num_write_buffer_transient==resizeAfter.num_write_buffer_transient && resizeStats.num_draw==resizeAfter.num_draw);
     first.end();
     check("resize refusal reports once",errors==resizeErrors+1);
     manifest["checks"]["resizeRefusal"]["tcErrors"]=errors-resizeErrors;

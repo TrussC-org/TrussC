@@ -1,5 +1,6 @@
 // #821, PR 0. Frame-indexed scenes: no elapsed-time inputs or external assets.
 #include <TrussC.h>
+#include <tcxImGui.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include "regression.glsl.h"
@@ -36,12 +37,41 @@ constexpr Scene scenes[] = {
     {"pbrShadowFbo", 2}, {"pointMeshTransform", 2},
     {"resizePixelPerfect", 0}, {"userShaderOtherFormat", 0},
     {"readbackRoundTrip", 0}, {"midFrameFlush", 0}, {"midPassClear", 0},
-    {"sglFboInterrupt", 0}, {"textureImmediate", 0}, {"msaaInterrupted", 2}, {"depthStencil", 0}
+    {"sglFboInterrupt", 0}, {"textureImmediate", 0}, {"msaaInterrupted", 2}, {"depthStencil", 0}, {"imguiWindowFbo", 0}
 };
 int failures = 0;
 bool completed = false;
 std::string mode;
 fs::path baseline, output;
+std::set<std::string> baselineScenes;
+
+std::set<std::string> loadBaselineScenes(const fs::path& directory) {
+    const auto path = directory / "samples.json";
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("Cannot read baseline samples.json: " + path.string());
+    const Json recording = Json::parse(file, nullptr, false);
+    if (!recording.is_object() || recording.empty())
+        throw std::runtime_error("Invalid baseline samples.json: " + path.string());
+    std::set<std::string> result;
+    for (const auto& entry : recording.items()) {
+        // Recorded keys are <scene>.<target> or <scene>.<variant>.<target>.
+        const auto dot = entry.key().find('.');
+        if (dot == std::string::npos || dot == 0 || dot + 1 == entry.key().size() || !entry.value().is_object())
+            throw std::runtime_error("Invalid capture in baseline samples.json: " + entry.key());
+        result.insert(entry.key().substr(0, dot));
+    }
+    for (const auto& image : fs::directory_iterator(directory)) {
+        const auto filename = image.path().filename().string();
+        if (!image.is_regular_file() || image.path().extension() != ".png" || filename.ends_with(".diff.png"))
+            continue;
+        const auto stem = image.path().stem().string();
+        const auto scene = stem.substr(0, stem.find('.'));
+        if (!result.contains(scene))
+            throw std::runtime_error("Baseline manifest and images disagree: " + filename +
+                " has no scene entry in baseline samples.json");
+    }
+    return result;
+}
 
 void check(const std::string& label, bool ok) {
     std::printf("%s %s\n", ok ? "PASS" : "FAIL", label.c_str());
@@ -89,6 +119,7 @@ Rgba pixel(const Pixels& pixels, int x, int y) {
 
 class RegressionApp : public App {
     Fbo target_;
+    tcx::imgui::ImGuiManager screenUi_, fboUi_;
     Texture premult_, coverage_;
     Mesh triangle_, points_, receiver_;
     Material emissive_;
@@ -96,7 +127,7 @@ class RegressionApp : public App {
     EasyCam camera_;
     Shader user_;
     FullscreenShader fullscreen_, discard_;
-    EventListener after_;
+    EventListener after_, afterUi_;
     Json samples_ = Json::object();
     Json scissorEvidence_ = Json::object();
     size_t scene_ = 0;
@@ -129,6 +160,12 @@ class RegressionApp : public App {
     }
     #include "followupScenes.h"
     void prepare() {
+        if (is("imguiWindowFbo")) {
+            screenUi_.setup(); fboUi_.setupOffscreen();
+            afterUi_ = events().onRender.listen([this] {
+                rect(64,64,48,48,Color(1,1,0));
+            },2000);
+        }
         phase_ = 0; settleFrames_ = 0;
         const bool resize = is("resizePixelPerfect");
         // Four captures in this scene: both sizes with both coordinate modes.
@@ -168,6 +205,24 @@ class RegressionApp : public App {
         endShadowPass();
     }
     void drawScene(float w, float h, bool offscreen) {
+        if (is("imguiWindowFbo")) {
+            // Both independent contexts render before the same sg_commit.
+            // Different colors expose any shared-buffer overwrite.
+            rect(16,16,64,64,Color(0,0,1));
+            auto& manager = offscreen ? fboUi_ : screenUi_;
+            {
+                auto ui = manager.scoped();
+                check(name()+" target UI accepted", bool(ui));
+                if (ui) {
+                    auto* list = ImGui::GetForegroundDrawList();
+                    list->AddRectFilled({32,32},{96,96},offscreen ? IM_COL32(0,255,0,255) : IM_COL32(255,0,0,255));
+                }
+            }
+            if (offscreen) rect(64,64,48,48,Color(1,1,0));
+            // The window manager submits onRender; its following marker is
+            // emitted by the later onRender listener installed in setup().
+            return;
+        }
         if (drawFollowupScene(w, h)) return;
         if (is("blendModes")) {
             constexpr BlendMode blends[] = {BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply,
@@ -296,6 +351,13 @@ class RegressionApp : public App {
         const float s = probeScale(offscreen);
         const float w = px.getWidth()/s, h = px.getHeight()/s;
         assertFollowupScene(px, offscreen, label, s);
+        if (is("imguiWindowFbo")) {
+            expect(px,offscreen,label+" before UI retained",24,24,{0,0,255,255},s,0);
+            expect(px,offscreen,label+" independent context",48,48,
+                offscreen ? Rgba{0,255,0,255} : Rgba{255,0,0,255},s,0);
+            expect(px,offscreen,label+" after UI stays above",72,72,{255,255,0,255},s,0);
+            expect(px,offscreen,label+" exterior",120,120,{0,0,0,255},s,0);
+        }
         if (is("resizePixelPerfect")) {
             check(label+" framebuffer size", px.getWidth() == int(logicalW_*getDpiScale()) &&
                 px.getHeight() == int(logicalH_*getDpiScale()));
@@ -404,6 +466,10 @@ class RegressionApp : public App {
         if (mode == "--self-check") return;
         check(key+" saved", px.save(output / (key+".png")).ok());
         if (mode != "--compare") return;
+        if (!baselineScenes.count(name())) {
+            std::printf("NEW %s: no baseline in base recording (self-check only)\n", key.c_str());
+            return;
+        }
         Pixels reference;
         const bool loaded = reference.load(baseline / (key+".png")).ok();
         const bool sameSize = loaded && reference.getWidth() == px.getWidth() && reference.getHeight() == px.getHeight();
@@ -479,7 +545,7 @@ class RegressionApp : public App {
         // Detect a scene removed from the head, too (not just a missing base).
         if (mode == "--compare") for (const auto& entry : fs::directory_iterator(baseline)) {
             const auto file = entry.path().filename();
-            if (file.extension() == ".png" && !captured_.count(file.stem().string())) {
+            if (file.extension() == ".png" && !file.string().ends_with(".diff.png") && !captured_.count(file.stem().string())) {
                 Pixels reference;
                 const bool loaded = reference.load(entry.path()).ok();
                 Pixels missing;
@@ -593,6 +659,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             if (mode == "--compare" && !fs::is_directory(baseline)) {
                 std::fprintf(stderr,"Baseline directory missing: %s\n",baseline.string().c_str()); return 1;
             }
+            if (mode == "--compare") baselineScenes = loadBaselineScenes(baseline);
             output = mode == "--record" ? baseline : fs::path(baseline.string()+".compare");
             // Refuse stale outputs: every successful recording is a full run.
             if (fs::exists(output) && !fs::is_empty(output)) {

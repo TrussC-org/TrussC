@@ -71,6 +71,7 @@ void applyBindings(const sg_bindings* bindings) {
         _simgui_vs_params_t params = {};
         params.disp_size.x = ImGui::GetIO().DisplaySize.x;
         params.disp_size.y = ImGui::GetIO().DisplaySize.y;
+        params.gamma = _simgui.gamma;
         sg_apply_uniforms(0, SG_RANGE_REF(params));
     }
     sg_apply_bindings(bindings);
@@ -164,8 +165,15 @@ void renderTargetFrame(simgui_tc_context context) {
     const auto unfilterable = select(_simgui.shd_unfilterable);
     _simgui.def_pip = filtered.raw;
     _simgui.pip_unfilterable = unfilterable.raw;
-    if (filtered.raw.id && unfilterable.raw.id) simgui_render();
-    else ImGui::EndFrame();
+    if (filtered.raw.id && unfilterable.raw.id) {
+        // Q3: consume preceding draws, upload outside the pass, then continue
+        // this same target with LOAD before drawing the UI at its original point.
+        // Each context owns its buffers and is reserved once per GPU frame.
+        tc::internal::parkWindowPass();
+        simgui_flush();
+        tc::internal::ensureCurrentPass();
+        simgui_draw();
+    } else ImGui::EndFrame();
     // Backend applies a full-target viewport/scissor. Restore target state for
     // subsequent raw and immediate drawing without changing its effective role.
     sg_reset_state_cache();

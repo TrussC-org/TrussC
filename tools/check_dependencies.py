@@ -113,6 +113,8 @@ def _table_commit(file_name):
 # Provenance files that record the upstream commit of a vendored copy.
 PROVENANCE_COMMITS = {
     "sokol": ("core/include/sokol/TRUSSC_MODIFICATIONS.md", _line(r"\*\*Upstream base:\*\*.*?commit `([0-9a-f]{7,40})`")),
+    "sokol_imgui.h": ("addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md",
+                      _line(r"\*\*Upstream base:\*\*.*?`util/sokol_imgui\.h` at commit `([0-9a-f]{7,40})`")),
     "stb_image": ("core/include/stb/README.md", _table_commit("stb_image.h")),
     "stb_image_write": ("core/include/stb/README.md", _table_commit("stb_image_write.h")),
     "stb_perlin": ("core/include/stb/README.md", _table_commit("stb_perlin.h")),
