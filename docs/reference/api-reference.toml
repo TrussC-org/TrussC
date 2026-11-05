@@ -45775,18 +45775,15 @@ description.ja = "ビットマップ文字列の幅と高さを出力引数で�
 description.ko = "비트맵 문자열의 너비와 높이를 출력 매개변수로 얻는다."
 details.en = '''
 - Writes the measured width and height of `text` into the `width`/`height` reference arguments (UTF-8 and full-width character aware), the same measurement `getBitmapStringWidth()` uses for width.
-- For multi-line text, its height is always `number of lines * getBitmapFontHeight()`; unlike `getBitmapStringHeight()`, it does not take a custom line height set with `setBitmapLineHeight()` into account.
-- Known issue: [#916](https://github.com/TrussC-org/TrussC/issues/916) (the height ignores setBitmapLineHeight()).
+- The height is the same as `getBitmapStringHeight()`: `getBitmapFontHeight()` for one line, plus `getBitmapLineHeight()` for each additional line, so it reflects a custom line height set with `setBitmapLineHeight()`.
 '''
 details.ja = '''
 - `text` の幅と高さを測定し、`width`/`height` の参照引数に書き込みます（UTF-8 と全角文字に対応しており、幅の測定方法は `getBitmapStringWidth()` と同じです）。
-- 複数行テキストの場合、高さは常に「行数 × `getBitmapFontHeight()`」になります。`getBitmapStringHeight()` と異なり、`setBitmapLineHeight()` で設定した行間は反映されません。
-- 既知の問題: [#916](https://github.com/TrussC-org/TrussC/issues/916)（高さが setBitmapLineHeight() の値を反映しない）。
+- 高さは `getBitmapStringHeight()` と同じ値です。1行目の高さは `getBitmapFontHeight()` で、2行目以降はその行数分だけ `getBitmapLineHeight()` が加算されます。そのため `setBitmapLineHeight()` で設定した行間が反映されます。
 '''
 details.ko = '''
 - `text`의 너비와 높이를 측정해 `width`/`height` 참조 인자에 기록합니다(UTF-8과 전각 문자를 인식하며, 너비 측정 방식은 `getBitmapStringWidth()`와 같습니다).
-- 여러 줄 텍스트의 경우 높이는 항상 "줄 수 × `getBitmapFontHeight()`"입니다. `getBitmapStringHeight()`와 달리 `setBitmapLineHeight()`로 설정한 줄 간격은 반영되지 않습니다.
-- 알려진 문제: [#916](https://github.com/TrussC-org/TrussC/issues/916)(높이에 setBitmapLineHeight() 값이 반영되지 않음).
+- 높이는 `getBitmapStringHeight()`와 같은 값입니다. 첫 줄의 높이는 `getBitmapFontHeight()`이고, 둘째 줄부터는 그 줄 수만큼 `getBitmapLineHeight()`가 더해집니다. 따라서 `setBitmapLineHeight()`로 설정한 줄 간격이 반영됩니다.
 '''
 related = ["getBitmapStringWidth", "getBitmapStringHeight", "getBitmapStringBBox"]
 
@@ -51689,15 +51686,15 @@ description.en = "Set the line spacing used for newlines in bitmap text."
 description.ja = "ビットマップテキストの改行で使う行間を設定する。"
 description.ko = "비트맵 텍스트의 줄바꿈에 사용할 줄 간격을 설정한다."
 details.en = '''
-- Changes the pixel distance between lines for every `\n` in `drawBitmapString` from then on, and for the height returned by `getBitmapStringHeight()`. It does not affect `getBitmapStringBounds()`, which always measures multi-line height using the font's fixed default height regardless of this setting.
+- Changes the pixel distance between lines for every `\n` in `drawBitmapString` from then on, and for the height returned by `getBitmapStringHeight()`. `getBitmapStringBounds()` and `getBitmapStringBBox()` follow it too, as does the `Center` and `Bottom` vertical alignment of `setTextAlign()`.
 - Takes effect immediately and stays in effect until changed again or restored by `popStyle()` (it is saved and restored together with color and other style state by `pushStyle()`/`popStyle()`).
 '''
 details.ja = '''
-- それ以降の `drawBitmapString` の `\n` による行間（ピクセル単位）と、`getBitmapStringHeight()` が返す高さを変更します。ただし `getBitmapStringBounds()` には影響しません。この関数は、この設定に関わらず常にフォントの既定の高さを使って複数行の高さを計算します。
+- それ以降の `drawBitmapString` の `\n` による行間（ピクセル単位）と、`getBitmapStringHeight()` が返す高さを変更します。`getBitmapStringBounds()` と `getBitmapStringBBox()` の高さ、`setTextAlign()` の垂直方向の `Center` と `Bottom` の基準にも反映されます。
 - 設定はすぐに反映され、再度変更するか `popStyle()` で復元されるまで有効です（色など他のスタイル状態と合わせて `pushStyle()` / `popStyle()` で保存・復元されます）。
 '''
 details.ko = '''
-- 이후의 `drawBitmapString`에서 `\n`에 의한 줄 간격(픽셀 단위)과 `getBitmapStringHeight()`가 반환하는 높이를 변경합니다. 다만 `getBitmapStringBounds()`에는 영향을 주지 않습니다. 이 함수는 이 설정과 관계없이 항상 폰트의 기본 높이를 사용해 여러 줄의 높이를 계산합니다.
+- 이후의 `drawBitmapString`에서 `\n`에 의한 줄 간격(픽셀 단위)과 `getBitmapStringHeight()`가 반환하는 높이를 변경합니다. `getBitmapStringBounds()`와 `getBitmapStringBBox()`의 높이, `setTextAlign()`의 수직 `Center`와 `Bottom` 기준에도 반영됩니다.
 - 설정은 즉시 적용되며, 다시 변경하거나 `popStyle()`로 복원될 때까지 유지됩니다(색상 등 다른 스타일 상태와 함께 `pushStyle()` / `popStyle()`로 저장·복원됩니다).
 '''
 related = ["getBitmapLineHeight"]
@@ -53051,22 +53048,22 @@ description.ko = "비트맵 텍스트를 그릴 때 사용할 기준점을 설�
 details.en = '''
 - Sets the horizontal anchor `h` (`Left`, `Center`, or `Right`) and vertical anchor `v` (`Top`, `Center`, `Bottom`, or `Baseline`) used by every `drawBitmapString` overload and by `drawBitmapStringHighlight` for the (x, y) position passed to them. The default is `(Left, Top)`.
 - The horizontal anchor is measured against each string's own width at draw time, so it follows the text as its content changes between calls; for multi-line text it aligns the whole block to its widest line (see `drawBitmapString`).
-- The vertical anchor of `drawBitmapString` does not grow with the number of lines: `Center` and `Bottom` always use a single line's height (16px), not the full height of a multi-line string. For example, with `Bottom` only the first line ends at y, and the remaining lines extend below it.
-- `Baseline` positions (x, y) at the character baseline (a fixed offset above the glyph's bottom, not affected by `setBitmapLineHeight()`), matching how most text editors and other font APIs place a baseline.
+- The vertical anchor uses the whole text height as returned by `getBitmapStringHeight()`, which includes every line and the current `setBitmapLineHeight()`. With `Center` the block is centered on y, and with `Bottom` the last line ends at y. `drawBitmapStringHighlight` uses the same offsets, so its background rectangle always matches the text.
+- `Baseline` positions (x, y) at the first line's baseline (the bottom of the 13-pixel glyph, with the 3 pixels of cell padding below it), whatever the number of lines or `setBitmapLineHeight()`, matching how most text editors and other font APIs place a baseline.
 - This value is part of the saved drawing style, so it is captured and restored by `pushStyle()`/`popStyle()`.
 '''
 details.ja = '''
 - `drawBitmapString` のすべてのオーバーロードと `drawBitmapStringHighlight` が、引数の (x, y) をどこに合わせるかを決める、水平方向の基準 `h`（`Left`、`Center`、`Right`）と垂直方向の基準 `v`（`Top`、`Center`、`Bottom`、`Baseline`）を設定します。既定値は `(Left, Top)` です。
 - 水平方向の基準点は描画のたびに、その文字列自身の幅を使って計算されます。そのため呼び出しごとにテキストの内容が変わっても追従します。複数行テキストの場合、水平方向の基準は最も長い行を基準にブロック全体に適用されます（詳しくは `drawBitmapString` を参照してください）。
-- `drawBitmapString` の垂直方向の基準は行数に応じて変わりません。`Center` と `Bottom` は、複数行の文字列全体の高さではなく、常に1行分の高さ（16px）を基準にします。たとえば `Bottom` の場合、y に下端が揃うのは1行目だけで、残りの行はその下にはみ出します。
-- `Baseline` を指定すると、(x, y) が文字のベースライン（グリフの下端から一定のオフセットだけ上の位置で、`setBitmapLineHeight()` の影響を受けません）に合わせられます。これは多くのテキストエディタや他のフォント API でのベースラインの考え方と同じです。
+- 垂直方向の基準には、`getBitmapStringHeight()` が返す文字列全体の高さを使います。この高さにはすべての行と、現在の `setBitmapLineHeight()` の値が含まれます。`Center` では文字列全体が y を中心に配置され、`Bottom` では最後の行の下端が y に揃います。`drawBitmapStringHighlight` も同じオフセットを使うため、背景の矩形は常にテキストと一致します。
+- `Baseline` を指定すると、(x, y) が1行目のベースライン（高さ13ピクセルのグリフの下端。その下に3ピクセルのセルのパディングが続きます）に合わせられます。行数や `setBitmapLineHeight()` には影響されません。これは多くのテキストエディタや他のフォント API でのベースラインの考え方と同じです。
 - この値は描画スタイルの一部として保存されるため、`pushStyle()` / `popStyle()` で保存・復元されます。
 '''
 details.ko = '''
 - `drawBitmapString`의 모든 오버로드와 `drawBitmapStringHighlight`가 전달받은 (x, y)를 어디에 맞출지 정하는, 수평 기준 `h`(`Left`, `Center`, `Right`)와 수직 기준 `v`(`Top`, `Center`, `Bottom`, `Baseline`)를 설정합니다. 기본값은 `(Left, Top)`입니다.
 - 수평 기준점은 그릴 때마다 해당 문자열 자신의 너비를 기준으로 다시 계산되므로, 호출마다 텍스트 내용이 바뀌어도 따라갑니다. 여러 줄 텍스트의 경우 수평 기준은 가장 긴 줄을 기준으로 블록 전체에 적용됩니다(자세한 내용은 `drawBitmapString` 참조).
-- `drawBitmapString`의 수직 기준은 줄 수에 따라 달라지지 않습니다. `Center`와 `Bottom`은 여러 줄 문자열 전체의 높이가 아니라 항상 한 줄의 높이(16px)를 기준으로 합니다. 예를 들어 `Bottom`이면 y에 하단이 맞춰지는 것은 첫 줄뿐이고, 나머지 줄은 그 아래로 이어집니다.
-- `Baseline`을 지정하면 (x, y)가 문자의 베이스라인(글리프 하단에서 일정 오프셋만큼 위의 위치로, `setBitmapLineHeight()`의 영향을 받지 않음)에 맞춰집니다. 이는 대부분의 텍스트 편집기나 다른 폰트 API의 베이스라인 개념과 같습니다.
+- 수직 기준에는 `getBitmapStringHeight()`가 반환하는 문자열 전체의 높이를 사용합니다. 이 높이에는 모든 줄과 현재 `setBitmapLineHeight()` 값이 포함됩니다. `Center`이면 문자열 전체가 y를 중심으로 배치되고, `Bottom`이면 마지막 줄의 하단이 y에 맞춰집니다. `drawBitmapStringHighlight`도 같은 오프셋을 사용하므로 배경 사각형은 항상 텍스트와 일치합니다.
+- `Baseline`을 지정하면 (x, y)가 첫 줄의 베이스라인(높이 13픽셀 글리프의 하단이며, 그 아래에 셀 여백 3픽셀이 이어짐)에 맞춰집니다. 줄 수나 `setBitmapLineHeight()`의 영향을 받지 않습니다. 이는 대부분의 텍스트 편집기나 다른 폰트 API의 베이스라인 개념과 같습니다.
 - 이 값은 드로잉 스타일의 일부로 저장되므로, `pushStyle()` / `popStyle()`로 저장·복원됩니다.
 '''
 related = ["drawBitmapString", "getBitmapStringBounds"]

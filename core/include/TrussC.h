@@ -1178,27 +1178,12 @@ inline bool isStrokeEnabled() {
 // Bitmap string drawing (delegated to RenderContext)
 // ---------------------------------------------------------------------------
 
-// Calculate text bounding box (UTF-8 + fullwidth aware)
+// Calculate text bounding box (UTF-8 + fullwidth aware). Same measurement as
+// getBitmapStringWidth / getBitmapStringHeight, so it follows setBitmapLineHeight.
 inline void getBitmapStringBounds(const std::string& text, float& width, float& height) {
-    float maxWidth = 0;
-    float cursorX = 0;
-    int lines = 1;
-
-    const char* p  = text.data();
-    const char* pe = p + text.size();
-    while (p < pe) {
-        unsigned char b0 = (unsigned char)*p;
-        if (b0 == '\n') { ++p; if (cursorX > maxWidth) maxWidth = cursorX; cursorX = 0; ++lines; continue; }
-        if (b0 == '\t') { ++p; cursorX += bitmapfont::CHAR_TEX_WIDTH * 8; continue; }
-        if (b0 < 32)    { ++p; continue; }
-        uint32_t cp = bitmapfont::utf8Decode(p, pe);
-        if (cp == 0) break;
-        cursorX += (float)bitmapfont::codepointPixelWidth(cp);
-    }
-    if (cursorX > maxWidth) maxWidth = cursorX;
-
-    width  = maxWidth;
-    height = lines * bitmapfont::CHAR_TEX_HEIGHT;
+    const auto& ctx = getDefaultContext();
+    width  = ctx.getBitmapStringWidth(text);
+    height = ctx.getBitmapStringHeight(text);
 }
 
 // ---------------------------------------------------------------------------
@@ -1412,32 +1397,15 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     float textWidth, textHeight;
     getBitmapStringBounds(text, textWidth, textHeight);
 
-    // Calculate exact height based on line count and lineHeight
-    int lineCount = 1;
-    for (char c : text) {
-        if (c == '\n') lineCount++;
-    }
-    float lineHeight = getBitmapLineHeight();
-    float exactHeight = bitmapfont::CHAR_TEX_HEIGHT + (lineCount - 1) * lineHeight;
+    const float lineHeight = getBitmapLineHeight();
+    const float exactHeight = textHeight;
 
     // Horizontal padding only (no vertical padding to prevent overlap with adjacent lines)
     const float paddingH = 4.0f;
 
-    // Calculate offset based on current alignment
-    float offsetX = 0, offsetY = 0;
-    switch (getTextAlignH()) {
-        case Direction::Left:   offsetX = 0; break;
-        case Direction::Center: offsetX = -textWidth / 2; break;
-        case Direction::Right:  offsetX = -textWidth; break;
-        default: break;
-    }
-    switch (getTextAlignV()) {
-        case Direction::Top:      offsetY = 0; break;
-        case Direction::Center:   offsetY = -textHeight / 2; break;
-        case Direction::Bottom:   offsetY = -textHeight; break;
-        case Direction::Baseline: offsetY = -textHeight + 3; break;  // Approximate value
-        default: break;
-    }
+    // Same offset as drawBitmapString (shared helper), so the box and the text agree
+    const Vec2 offset = internal::bitmapAlignOffset(textWidth, textHeight, getTextAlignH(), getTextAlignV());
+    const float offsetX = offset.x, offsetY = offset.y;
 
     // Convert local coordinates to world coordinates (including offset)
     Mat4 currentMat = getMatrix();

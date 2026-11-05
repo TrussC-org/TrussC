@@ -97,6 +97,34 @@ inline const char* appEntryLabel(AppEntry e) {
     return "?";
 }
 
+// Offset from the anchor point to the top-left of a bitmap string, for the given
+// alignment. `width` and `height` are the string's measured size
+// (getBitmapStringWidth / getBitmapStringHeight, so they follow the line height).
+// Shared by every bitmap string draw path and drawBitmapStringHighlight, so the
+// drawn position, the highlight box and the measured size always agree (#916).
+inline Vec2 bitmapAlignOffset(float width, float height, Direction h, Direction v) {
+    float offsetX = 0;
+    float offsetY = 0;
+
+    switch (h) {
+        case Direction::Left:   offsetX = 0; break;
+        case Direction::Center: offsetX = -width / 2; break;
+        case Direction::Right:  offsetX = -width; break;
+        default: break;
+    }
+
+    switch (v) {
+        case Direction::Top:      offsetY = 0; break;
+        // Baseline is the first line's baseline, so it does not depend on the line count.
+        case Direction::Baseline: offsetY = -(float)bitmapfont::CHAR_HEIGHT; break;
+        case Direction::Center:   offsetY = -height / 2; break;
+        case Direction::Bottom:   offsetY = -height; break;
+        default: break;
+    }
+
+    return Vec2(offsetX, offsetY);
+}
+
 class RenderContext {
 public:
     // -----------------------------------------------------------------------
@@ -1194,31 +1222,7 @@ private:
 
     // Calculate bitmap string alignment offset
     Vec2 calcBitmapAlignOffset(const std::string& text, Direction h, Direction v) const {
-        float offsetX = 0;
-        float offsetY = 0;
-
-        // Horizontal offset
-        float w = getBitmapStringWidth(text);
-        switch (h) {
-            case Direction::Left:   offsetX = 0; break;
-            case Direction::Center: offsetX = -w / 2; break;
-            case Direction::Right:  offsetX = -w; break;
-            default: break;
-        }
-
-        // Vertical offset
-        const float charH = bitmapfont::CHAR_HEIGHT;  // Actual character height
-        const float totalH = bitmapfont::CHAR_TEX_HEIGHT;  // Texture height
-
-        switch (v) {
-            case Direction::Top:      offsetY = 0; break;
-            case Direction::Baseline: offsetY = -charH; break;
-            case Direction::Center:   offsetY = -totalH / 2; break;
-            case Direction::Bottom:   offsetY = -totalH; break;
-            default: break;
-        }
-
-        return Vec2(offsetX, offsetY);
+        return bitmapAlignOffset(getBitmapStringWidth(text), getBitmapStringHeight(text), h, v);
     }
 };
 
