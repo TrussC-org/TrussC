@@ -152,9 +152,9 @@ static void checkStraightAlphaPng(const fs::path& dir) {
     check("screenshot JPEG loads back", jloaded);
     if (jloaded) {
         const unsigned char* d = jback.getData();
-        auto near = [](int a, int b) { return abs(a - b) <= 8; };
+        auto within8 = [](int a, int b) { return abs(a - b) <= 8; };
         check("screenshot JPEG RGB is not darkened by alpha",
-              near(d[0], 200) && near(d[1], 100) && near(d[2], 50),
+              within8(d[0], 200) && within8(d[1], 100) && within8(d[2], 50),
               "got " + to_string(d[0]) + "," + to_string(d[1]) + "," + to_string(d[2]));
     }
 }
