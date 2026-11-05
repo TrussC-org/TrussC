@@ -65,13 +65,13 @@ template<class T> void cancelledSlot(bool clear) {
     auto store = External<T>::diagnostics(source);
     if (clear) source.clear();
     else first.disconnect();
-    check("cancelled copy retains slot before next drain", store->pending == 1);
+    check("canceled copy retains slot before next drain", store->pending == 1);
     auto replacement = source.listen([&](auto&...) { ++calls; }, Deliver::Main);
-    std::thread beforeDrain([&] { check("replacement drops while cancelled copy awaits drain", !emit()); });
+    std::thread beforeDrain([&] { check("replacement drops while canceled copy awaits drain", !emit()); });
     beforeDrain.join();
     check("replacement starts overflow episode before drain", store->pending == 1 && store->overflowing);
     internal::drainMainThreadQueue();
-    check("drain discards cancelled copy and returns slot", calls == 0 && store->pending == 0);
+    check("drain discards canceled copy and returns slot", calls == 0 && store->pending == 0);
     std::thread afterDrain([&] { check("replacement accepted after drain", emit()); });
     afterDrain.join();
     internal::drainMainThreadQueue();

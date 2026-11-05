@@ -3,7 +3,7 @@
 Run `allCoreTests fboReadPixels --gpu-check` with a display on GLCORE, GLES3,
 D3D11 and Metal. Without the flag, only the CPU conversion checks run.
 
-The GPU checks render negative, HDR and mid-grey values into RGBA16F and
+The GPU checks render negative, HDR and mid-gray values into RGBA16F and
 RGBA32F, then check every RGBA8 byte against independent expected values.
 They also cover every other renderable TextureFormat, channel expansion,
 row order, an odd width, destination bounds and full-precision float reads.

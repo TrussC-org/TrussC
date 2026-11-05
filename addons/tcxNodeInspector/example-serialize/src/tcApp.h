@@ -71,7 +71,7 @@ public:
     TC_REFLECT(SpriteNode, Node) {              // pos / rotation / scale come from Node
         TC_VALUE(shape)                         // enum     -> combo / label
         TC_VALUE(radius, getRadius, setRadius)  // 3-arg    -> setter clamps
-        TC_VALUE(diameter, diameter)            // 2-arg    -> read-only (greyed)
+        TC_VALUE(diameter, diameter)            // 2-arg    -> read-only (grayed)
         TC_VALUE(style)                         // composite-> collapsible group
     }
 

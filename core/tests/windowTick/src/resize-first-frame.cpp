@@ -36,8 +36,8 @@ struct Secondary : tc::App {
                     solid &= matches;
                     red += matches;
                 }
-            std::printf("resize-first-frame: frame colour pixels %d/6000\n", red);
-            check("frame 1 colour covers every configured pixel", solid);
+            std::printf("resize-first-frame: frame color pixels %d/6000\n", red);
+            check("frame 1 color covers every configured pixel", solid);
             completed = true;
             tc::exitApp(failures ? 1 : 0);
         });

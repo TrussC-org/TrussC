@@ -6,7 +6,7 @@
 //
 // Scheduler state and pure helpers shared by every window tick and the
 // headless loop. The helpers only transform the numbers given, so their
-// timing behaviour is testable headless (core/tests/frameTiming). The one
+// timing behavior is testable headless (core/tests/frameTiming). The one
 // exception is HeadlessSleeper, the headless loop's OS sleep.
 //
 // Helpers are defined in tcGlobal.cpp (non-inline); warning episode state

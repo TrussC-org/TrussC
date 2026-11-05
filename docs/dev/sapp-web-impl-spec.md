@@ -748,7 +748,7 @@ dpi_scale → framebuffer space.
 - `sapp_request_quit()` (14225–14227) sets `quit_requested`; `sapp_cancel_quit()`
   clears it; `sapp_quit()` (14233–14235) sets `quit_ordered` directly.
 - The quit is processed inside the rAF frame callback (8037–8053): QUIT_REQUESTED
-  event → if not cancelled, `quit_ordered` → unregister all handlers → WGPU discard
+  event → if not canceled, `quit_ordered` → unregister all handlers → WGPU discard
   → `cleanup_cb` → `_sapp_discard_state()` → **return `EM_FALSE`** which tells
   `emscripten_request_animation_frame_loop` to STOP calling back. For the
   `set_main_loop` variant, the wrapper calls `emscripten_cancel_main_loop()`.

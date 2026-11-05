@@ -1136,7 +1136,7 @@ static WriteOutcome writePayload(internal::TcpSendChannel& ch, const void* data,
     // The timeout measures SILENCE, not the length of the send: a peer that
     // keeps draining is healthy however long the payload takes, and a peer that
     // has stopped reading is what the timeout is for. Measuring total elapsed
-    // time instead would drop a healthy client for the offence of being on a
+    // time instead would drop a healthy client for the offense of being on a
     // slow link with a big payload.
     auto lastProgress = std::chrono::steady_clock::now();
 

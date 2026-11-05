@@ -94,8 +94,8 @@ static constexpr size_t kTableSize = 1024;
 static constexpr float kTag = 1000.0f;   // far above anything mixed here
 
 struct SetupAllocApp : App {
-    // No user-provided constructor: make_shared value-initialises, so these
-    // read as null / empty before the members are initialised.
+    // No user-provided constructor: make_shared value-initializes, so these
+    // read as null / empty before the members are initialized.
     Probe* probe = g_nextProbe;
     vector<float> table;
     int frames = 0;

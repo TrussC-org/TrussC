@@ -70,7 +70,7 @@ void PulseNode::setup() {
         // Cancel timer after 10 pulses
         if (pulseCount_ >= 10) {
             cancelTimer(pulseTimerId_);
-            logNotice("Timer") << "Pulse timer cancelled after 10 pulses";
+            logNotice("Timer") << "Pulse timer canceled after 10 pulses";
         }
     });
 }

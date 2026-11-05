@@ -8,7 +8,7 @@ the same convention bundled addons use (`addons/*/tests/`).
 
 This is the *behavioral* tier — it complements, and does not replace, the
 **build canaries** in `examples/tests/` (e.g. `AllFeaturesExample`), which prove
-the API still compiles/links/instantiates but do not assert runtime behaviour.
+the API still compiles/links/instantiates but do not assert runtime behavior.
 
 ## What belongs here
 
@@ -996,11 +996,11 @@ Fitting requests run every check strictly, without SKIPs.
 - `fontAtlasR8/` — TrueType glyph atlas pages are R8, one byte of coverage
   per texel (#293): `getMemoryUsage()` is the sum of width × height over the
   pages, and after 300 glyphs grow a page through several doubling steps
-  every glyph still has full coverage at its UV centre and nothing lies
+  every glyph still has full coverage at its UV center and nothing lies
   outside the glyph rectangles. `fontAtlasR8 --gpu-check` (needs a display,
   not run in CI) draws 150 new glyphs into an Fbo in one frame, one
   `drawString()` each, and checks that the page texture is
-  `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` colour,
+  `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` color,
   and a minified draw builds and samples the R8 mip chain. The font is
   built at runtime.
 - `extensionCase/` — loaders and savers match the file extension
@@ -1052,7 +1052,7 @@ Fitting requests run every check strictly, without SKIPs.
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
 - `windowSetApp/` — constructor-only App ownership, nested constructor attribution,
-  cancelled candidates, stable event slots, per-App MCP and async retirement,
+  canceled candidates, stable event slots, per-App MCP and async retirement,
   retained handles across epochs and reverse shutdown despite callback throws.
   `appAudioTeardown/` separately exercises the real null AudioEngine barrier.
 - `nodeReflectRoundTrip/` — derived values in reflection (#287), with Node's

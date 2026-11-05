@@ -1288,7 +1288,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # Aggregate gate for branch protection. The ruleset requires ONLY this job,
   # so matrix/job renames never break required checks. It fails on any failed,
-  # cancelled, or unexpectedly-skipped job; the four heavy build jobs may be
+  # canceled, or unexpectedly-skipped job; the four heavy build jobs may be
   # skipped only when the `changes` gate declared the diff docs-only.
   # ---------------------------------------------------------------------------
   ci-ok:

@@ -55,7 +55,7 @@ int action(int operation) {
     case 14:
         first->startAsync(); first->stop(); check("Web stop cancels unanswered permission", !first->isStarting() && !first->isRunning()); break;
     case 15:
-        drain(); check("late cancelled Web permission emits nothing", firstEvents == 2); break;
+        drain(); check("late canceled Web permission emits nothing", firstEvents == 2); break;
     case 16:
         first->startAsync(); second->startAsync(); break;
     case 17:
@@ -171,10 +171,10 @@ EM_JS(void, runMocks, (Action actionFn, Finish finishFn), {
         action(12); contexts[1].resumed.resolve(); permissions[1].reject({name:'NotAllowedError', message:'permission denied'}); await turn(); action(13);
         assert('replacement stopped first tracks', first.track.stopped === 1);
         action(14); const late = stream(); permissions[2].resolve(late); contexts[2].resumed.resolve(); await turn(); action(15);
-        assert('late cancelled permission stops tracks without processor', late.track.stopped === 1 && processors === 1);
+        assert('late canceled permission stops tracks without processor', late.track.stopped === 1 && processors === 1);
         action(16); const other = stream(); contexts[4].resumed.resolve(); permissions[4].resolve(other); await turn(); action(17);
         const cancelled = stream(); permissions[3].resolve(cancelled); contexts[3].resumed.resolve(); await turn();
-        assert('cancelled instance does not affect another instance', cancelled.track.stopped === 1 && other.track.stopped === 1);
+        assert('canceled instance does not affect another instance', cancelled.track.stopped === 1 && other.track.stopped === 1);
         action(18); contexts[5].resumed.reject({name:'NotAllowedError', message:'gesture required'}); await turn(); action(19);
         const lateResume = stream(); permissions[5].resolve(lateResume); await turn();
         assert('late permission after resume rejection releases tracks', lateResume.track.stopped === 1);

@@ -375,7 +375,7 @@ destroy window + free colormap + flush.
 ### DPI (`_sapp_x11_query_system_dpi`, 12283–12317)
 - Reads **`Xft.dpi`** from the X resource-manager string: `XResourceManagerString`
   → `XrmGetStringDatabase` → `XrmGetResource(db, "Xft.dpi", "Xft.Dpi", ...)`,
-  `atof` the value. This matches Qt/GTK behaviour.
+  `atof` the value. This matches Qt/GTK behavior.
 - **Fallback: 96.0** (with `_SAPP_WARN(LINUX_X11_QUERY_SYSTEM_DPI_FAILED)`) if the
   resource is absent. The commented-out alternative (12289) shows the physical
   `DisplayWidthMM` formula sokol deliberately does *not* use.
@@ -410,7 +410,7 @@ destroy window + free colormap + flush.
 
 Dispatch is a `switch(event->type)`. **Complete list of handled X event types:**
 
-| X event | handler | behaviour |
+| X event | handler | behavior |
 |---|---|---|
 | `GenericEvent` | `_on_genericevent` 13329 | XInput2 `XI_RawMotion` — **only in mouse-lock**; reads raw dx/dy from valuators, fires MOUSE_MOVE. Uses `XGetEventData`/`XFreeEventData` cookie dance. |
 | `FocusIn` | `_on_focusin` 13353 | FOCUSED (ignores `NotifyGrab`/`NotifyUngrab` modes, like GLFW). |

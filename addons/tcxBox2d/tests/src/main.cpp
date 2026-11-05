@@ -2467,7 +2467,7 @@ static vector<Vec2> referenceReducedConvexHull(const vector<Vec2>& points, size_
 // Strictly convex outline of `n` (even) points with integer coordinates, exact
 // in float: n/2 shortest primitive edge vectors of the upper half-plane and
 // their negations, walked in angle order. No point is collinear with its
-// neighbours, so all of them are on the hull (a float circle this dense is
+// neighbors, so all of them are on the hull (a float circle this dense is
 // not: rounding flattens it).
 static vector<Vec2> denseConvexOutline(size_t n) {
     vector<pair<int, int>> dirs;
@@ -2794,7 +2794,7 @@ static void testReplacementListenerMutation(bool replaceAgain) {
         string label = string(replaceAgain ? "replace-replace" : "replace-remove") + " layer " + to_string(layer);
         check(label + ": replacement setup returns before any listener",
               calls == 0 && installed == node->getMod<box2d::RigidBody2D>() && installed->getBody() && world.getBodyCount() == 2);
-        // Flush without a new step cancelling the old pair's pending Exit.
+        // Flush without a new step canceling the old pair's pending Exit.
         frames.update(world, 0);
         check(label + ": deferred listener sees initialized replacement", calls == 1 && initialized);
         auto* current = node->getMod<box2d::RigidBody2D>();
@@ -3628,7 +3628,7 @@ static void testRouterGates() {
     auto stay = second.getCollisionManager()->contactStay.listen([&](box2d::WorldContact&) { ++secondStays; });
     auto outer = first.getCollisionManager()->contactBegan.listen([&](box2d::WorldContact& contact) {
         frames.update(second); first.clear();
-        check("two worlds: suspended first payload cancelled", !contact.a && !contact.b);
+        check("two worlds: suspended first payload canceled", !contact.a && !contact.b);
     }, EventPriority::BeforeApp);
     auto later = first.getCollisionManager()->contactBegan.listen([&](box2d::WorldContact&) { ++late; });
     frames.update(first);

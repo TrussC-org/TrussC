@@ -166,14 +166,14 @@ public:
     // -----------------------------------------------------------------------
     // bezierTo / quadBezierTo / curveTo
     //
-    // Default behaviour (no `resolution` arg, or resolution < 0): inherit
+    // Default behavior (no `resolution` arg, or resolution < 0): inherit
     // the current CurveStyle. In Tolerance mode the curve is adaptively
     // subdivided so the polyline stays within the configured pixel
     // tolerance (scale-aware). In Resolution mode it falls back to N
     // uniform t-samples.
     //
     // Pass an explicit positive `resolution` to force N uniform t-samples
-    // regardless of the CurveStyle (the original behaviour — kept so
+    // regardless of the CurveStyle (the original behavior — kept so
     // existing callers that asked for, say, resolution=64 still get
     // exactly 64 samples).
     //

@@ -435,7 +435,7 @@ void startResourceLoad(std::function<void()> preparation) {
 #ifdef _WIN32
             if (SUCCEEDED(com)) CoUninitialize();
 #endif
-            preparation = {}; // release CPU payload on the worker when cancelled
+            preparation = {}; // release CPU payload on the worker when canceled
             std::lock_guard<std::mutex> finished(owner.mutex);
             worker->done = true;
             owner.changed.notify_all();

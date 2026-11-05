@@ -24,7 +24,7 @@ namespace trussc {
 struct FileDialogResult {
     fs::path filePath;      // Full path
     fs::path fileName;      // Filename only
-    bool success = false;   // true if not cancelled
+    bool success = false;   // true if not canceled
 };
 
 // -----------------------------------------------------------------------------

@@ -1076,7 +1076,7 @@ private:
             tc::logNotice("HapPlayer") << "Loading YCoCg shader...";
             if (!ycocgShader_.load(ycocg_shader_desc)) {
                 ycocgShaderFailed_ = true;
-                tc::logError("HapPlayer") << "Failed to load YCoCg shader; HAP-Q is drawn without colour conversion until the next load()";
+                tc::logError("HapPlayer") << "Failed to load YCoCg shader; HAP-Q is drawn without color conversion until the next load()";
             } else {
                 tc::logNotice("HapPlayer") << "YCoCg shader loaded successfully";
             }
