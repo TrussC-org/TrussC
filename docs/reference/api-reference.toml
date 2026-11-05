@@ -29912,7 +29912,7 @@ details.en = '''
 - TrussC adds no channel-count or sample-rate ceiling and no decoder memory budget. Supported formats still depend on the decoder; Vorbis retains its fixed channel-array bound.
 - `loadStream(path, maxPolyphony = 1)` synchronously opens and probes WAV, MP3, or FLAC files, selecting the format from the extension without regard to case. OGG and AAC/M4A are unsupported by this entry point.
 - Relative paths resolve through `getDataPath`; absolute paths pass through unchanged. Returns a `LoadResult` that converts to `true` on success and `false` on failure.
-- On success, `channels` becomes `2`, `sampleRate` becomes the audio engine's current rate in Hz, and the duration is recorded in seconds. These fields describe the converted output at load time. This function does not initialize the audio engine.
+- On success, `channels` becomes `2`, `sampleRate` becomes the audio engine's current rate in Hz, and the duration is recorded in seconds. These fields describe the converted output at load time; after the engine re-initializes at another rate, `sampleRate` follows the new rate for a stream that is playing, and for any other stream at its next `play()`. This function does not initialize the audio engine.
 - `maxPolyphony` limits simultaneous voices sharing this source, defaults to `1`, and is raised to `1` if smaller. Additional playback is rejected when the limit is reached; per-voice decoders and ring buffers are created when playback starts.
 - Loading probes and closes the file; later playback reopens it and a worker decodes audio on demand. MP3 loading also scans frame headers to prepare a seek table shared by the voices.
 - Failure includes unreadable files, unsupported formats, decoder or MP3 seek-table preparation errors, and files with no audio frames (`LoadError::DecodeFailed`). Failure clears the recorded path but preserves previously stored channels, sample rate, duration, and polyphony limit.
@@ -29922,7 +29922,7 @@ details.ja = '''
 - TrussC独自のチャンネル数・サンプルレートの上限や、デコーダーのメモリ予算はありません。対応する形式はデコーダーによって異なり、Vorbisの固定チャンネル配列の制約は残ります。
 - `loadStream(path, maxPolyphony = 1)` は WAV、MP3、FLAC ファイルを同期的に開いて調べ、拡張子の大文字・小文字を区別せず形式を選びます。この入口では OGG と AAC/M4A に対応しません。
 - 相対パスは `getDataPath` で解決し、絶対パスはそのまま使用します。成功時に `true`、失敗時に `false` に変換される `LoadResult` を返します。
-- 成功すると `channels` は `2`、`sampleRate` はオーディオエンジンの現在の Hz 単位のレートになり、長さを秒単位で記録します。これらのフィールドは読み込み時の変換後の出力を表します。この関数はオーディオエンジンを初期化しません。
+- 成功すると `channels` は `2`、`sampleRate` はオーディオエンジンの現在の Hz 単位のレートになり、長さを秒単位で記録します。これらのフィールドは読み込み時の変換後の出力を表します。エンジンが別のレートで再初期化されると、再生中のストリームの `sampleRate` は新しいレートに更新され、それ以外のストリームでは次の `play()` で更新されます。この関数はオーディオエンジンを初期化しません。
 - `maxPolyphony` はこのソースを共有する同時再生数を制限し、既定値は `1` です。`1` 未満を指定すると `1` になります。上限に達すると追加の再生を拒否し、再生ごとのデコーダーとリングバッファーは再生開始時に作成します。
 - 読み込み時はファイルを調べて閉じ、再生時に開き直してワーカーが必要に応じてデコードします。MP3 では読み込み時にフレームヘッダーも走査し、各再生で共有するシークテーブルを準備します。
 - 読めないファイル、非対応形式、デコーダーや MP3 シークテーブルの準備エラー、音声フレームのないファイル（`LoadError::DecodeFailed`）では失敗します。失敗すると記録されたパスを消去しますが、以前のチャンネル数、サンプルレート、長さ、同時再生数の上限は保持します。
@@ -29932,7 +29932,7 @@ details.ko = '''
 - TrussC 자체의 채널 수·샘플레이트 상한이나 디코더 메모리 예산은 없습니다. 지원 형식은 디코더에 따라 다르며 Vorbis의 고정 채널 배열 한도는 유지됩니다.
 - `loadStream(path, maxPolyphony = 1)`은 WAV, MP3, FLAC 파일을 동기적으로 열어 조사하며 확장자의 대소문자를 구분하지 않고 형식을 선택합니다. 이 진입점은 OGG와 AAC/M4A를 지원하지 않습니다.
 - 상대 경로는 `getDataPath`로 해석하며 절대 경로는 그대로 사용합니다. 성공 시 `true`, 실패 시 `false`로 변환되는 `LoadResult`를 반환합니다.
-- 성공하면 `channels`는 `2`, `sampleRate`는 오디오 엔진의 현재 Hz 단위 레이트가 되며 길이를 초 단위로 기록합니다. 이 필드들은 로드 시 변환된 출력을 나타냅니다. 이 함수는 오디오 엔진을 초기화하지 않습니다.
+- 성공하면 `channels`는 `2`, `sampleRate`는 오디오 엔진의 현재 Hz 단위 레이트가 되며 길이를 초 단위로 기록합니다. 이 필드들은 로드 시 변환된 출력을 나타내며, 엔진이 다른 레이트로 재초기화되면 재생 중인 스트림의 `sampleRate`는 새 레이트로 갱신되고 그 외의 스트림은 다음 `play()`에서 갱신됩니다. 이 함수는 오디오 엔진을 초기화하지 않습니다.
 - `maxPolyphony`는 이 소스를 공유하는 동시 재생 수를 제한하며 기본값은 `1`입니다. `1` 미만을 지정하면 `1`로 올립니다. 제한에 도달하면 추가 재생을 거부하며, 재생별 디코더와 링 버퍼는 재생 시작 시 생성합니다.
 - 로드 시 파일을 조사한 뒤 닫으며, 이후 재생 시 다시 열어 워커가 필요에 따라 디코딩합니다. MP3 로드에서는 프레임 헤더도 검사하여 각 재생이 공유하는 탐색 테이블을 준비합니다.
 - 읽을 수 없는 파일, 지원하지 않는 형식, 디코더 또는 MP3 탐색 테이블 준비 오류, 오디오 프레임이 없는 파일(`LoadError::DecodeFailed`)은 실패합니다. 실패하면 기록된 경로를 지우지만 기존 채널 수, 샘플레이트, 길이, 동시 재생 수 제한은 유지합니다.

@@ -1968,7 +1968,8 @@ private:
     // (PlayingSound::positionRateHz_), the engine rate its decoder outputs
     // at. Not the engine's current rate (a voice the re-init migration did
     // not rebuild keeps the old one), nor the stream's sampleRate (the
-    // engine rate at loadStream(), stale after a re-init).
+    // engine rate its decoders were last opened at, which another voice
+    // of the stream may have changed).
     int positionRate() const {
         if (buffer_->kind() != SoundSource::Stream) return buffer_->sampleRate;
         return playing_->positionRateHz_.load(std::memory_order_relaxed);
