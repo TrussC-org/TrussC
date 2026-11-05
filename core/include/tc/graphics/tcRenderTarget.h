@@ -282,6 +282,7 @@ struct RenderTarget {
     bool passStartedThisFrame = false;
     uint64_t frameEpoch = UINT64_MAX;
     uint64_t activation = 0;
+    bool openAtDrawWarned = false; // #925: warned once that begin() outlived update()
     WindowContext* activeWindow = nullptr;
     TargetPassKind passKind = TargetPassKind::Swapchain;
     sg_pass binding = {};

@@ -114,6 +114,13 @@ namespace internal {
     // their depth before it. Called by runHeadlessApp(), and by App / Window
     // before each tree walk. Defined below the Node class.
     inline void setupNodeOnce(Node& node);
+
+    // Called where a window's root tree draw starts (#925). An Fbo that was
+    // begun earlier (typically in update()) and is still the active target
+    // takes the framework's draw matrix instead of the window. Reporting
+    // only: once per Fbo, since an app with this pattern hits it every frame.
+    // Defined below the Node class.
+    inline void warnFboOpenAtDraw();
 }
 
 // True when an overlay currently has the pointer over it (e.g. cursor is over a
@@ -1834,6 +1841,14 @@ inline void setupNodeOnce(Node& node) {
     if (node.setupCalled_) return;
     EntryStackGuard guard(AppEntry::Setup);
     node.setupTree();
+}
+
+inline void warnFboOpenAtDraw() {
+    auto& target = currentTarget();
+    if (!target.isFbo || !target.activation || target.openAtDrawWarned) return;
+    target.openAtDrawWarned = true;
+    logWarning("Fbo") << "an Fbo is still active when draw() starts (begin() was called "
+        "earlier, e.g. in update()); call end() in the same callback that called begin()";
 }
 }
 
