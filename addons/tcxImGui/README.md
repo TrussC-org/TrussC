@@ -199,6 +199,8 @@ void tcApp::mousePressed(int x, int y, int button) {
 
 After `imguiBegin()` succeeds, use the standard [Dear ImGui API](https://github.com/ocornut/imgui) directly (`ImGui::Begin()`, `ImGui::Button()`, etc). See the [Dear ImGui demo](https://github.com/ocornut/imgui/blob/master/imgui_demo.cpp) for a full showcase.
 
+The `std::string` overloads of `InputText` (upstream `misc/cpp/imgui_stdlib`) are bundled and compiled in; add `#include "imgui/imgui_stdlib.h"` to use `ImGui::InputText("label", &str)` with a string of any length.
+
 ## MCP Tools
 
 When using TrussC's MCP interface, tcxImGui provides tools for AI agents to inspect and interact with ImGui widgets.

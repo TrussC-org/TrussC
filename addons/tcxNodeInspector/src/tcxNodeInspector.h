@@ -24,6 +24,7 @@
 
 #include <TrussC.h>
 #include <tcxImGui.h>
+#include "imgui/imgui_stdlib.h"   // ImGui::InputText(label, std::string*)
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -58,14 +59,7 @@ struct ImGuiReflector : ::trussc::Reflector {
     bool visit(const char* n, ::tc::Vec2& v) override  { return edit(n, [&] { return ImGui::DragFloat2(n, &v.x, 0.5f); }); }
     bool visit(const char* n, ::tc::Vec3& v) override  { return edit(n, [&] { return ImGui::DragFloat3(n, &v.x, 0.5f); }); }
     bool visit(const char* n, ::tc::Color& v) override { return edit(n, [&] { return ImGui::ColorEdit4(n, &v.r); }); }
-    bool visit(const char* n, std::string& v) override {
-        return edit(n, [&] {
-            char buf[256];
-            std::snprintf(buf, sizeof(buf), "%s", v.c_str());
-            if (ImGui::InputText(n, buf, sizeof(buf))) { v = buf; return true; }
-            return false;
-        });
-    }
+    bool visit(const char* n, std::string& v) override { return edit(n, [&] { return ImGui::InputText(n, &v); }); }
     bool visit(const char* n, int& v, const ::trussc::EnumLabelSpan& labels) override {
         return edit(n, [&] {
             const char* preview = (v >= 0 && v < labels.count) ? labels.labels[v] : "(?)";
@@ -282,7 +276,7 @@ private:
     std::shared_ptr<int> retirementLifetime_ = std::make_shared<int>(0);
     Style    style_;
     bool     enabled_      = true;
-    char     nameBuf_[128] = "";
+    std::string nameBuf_;
     uint64_t nameBufFor_   = 0;
 
     // Singleton: no user-constructed instances (use instance() / the static API).

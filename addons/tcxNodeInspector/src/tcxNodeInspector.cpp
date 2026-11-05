@@ -146,7 +146,7 @@ void internal::recordTouchedForTests(NodeInspector& inspector, Node* node, Mod* 
 }
 
 void NodeInspector::syncNameBuf(Node* node) {
-    snprintf(nameBuf_, sizeof(nameBuf_), "%s", node->getName().c_str());
+    nameBuf_ = node->getName();
     nameBufFor_ = node->getInstanceId();
 }
 
@@ -290,7 +290,7 @@ void NodeInspector::drawInspector() {
                         static_cast<unsigned long long>(node->getInstanceId()));
 
     if (nameBufFor_ != node->getInstanceId()) syncNameBuf(node);
-    if (ImGui::InputText("name", nameBuf_, sizeof(nameBuf_))) {
+    if (ImGui::InputText("name", &nameBuf_)) {
         node->setName(nameBuf_);
         recordTouched(node, nullptr, "name");
     }
