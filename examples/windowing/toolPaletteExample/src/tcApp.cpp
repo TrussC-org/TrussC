@@ -53,7 +53,7 @@ void tcApp::mousePressed(Vec2 pos, int button) {
     mouseDragged(pos, button);
 }
 
-void tcApp::mouseDragged(Vec2 pos, int button) {
+void tcApp::mouseDragged(Vec2 pos, int) {
     // Dots every half radius since the last position, so a fast drag stays a line.
     const float radius = RADII[brush_->size];
     const int count = max(1, (int)((pos - last_).length() / (radius * 0.5f)));

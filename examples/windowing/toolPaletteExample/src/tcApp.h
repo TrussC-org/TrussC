@@ -39,7 +39,7 @@ public:
         fill();
     }
 
-    void mousePressed(Vec2 pos, int button) override {
+    void mousePressed(Vec2 pos, int) override {
         for (int i = 0; i < (int)COLORS.size(); i++)
             if (colorRect(i).contains(pos.x, pos.y)) brush_->color = i;
         for (int i = 0; i < (int)RADII.size(); i++)
