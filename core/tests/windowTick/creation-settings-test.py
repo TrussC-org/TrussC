@@ -35,7 +35,7 @@ def mac_api(source):
     replacements = [
         ('(__bridge id<MTLDevice>)', '(const void*)'), ('id<MTLDevice>', 'const void*'),
         ('NSScreen.mainScreen.frame', 'get_screen_rect()'),
-        ('[[NSWindow alloc] initWithContentRect:rect styleMask:style\n'
+        ('[[_sapp_tc_window alloc] initWithContentRect:rect styleMask:style\n'
          '                                  backing:NSBackingStoreBuffered defer:NO]', 'make_window(rect,style)'),
         ('[w->window setContentSize:NSMakeSize(', 'set_content_size(w->window,NSMakeSize('),
         ('scale))];', 'scale)));'),

@@ -3426,6 +3426,19 @@ static void _sapp_tc_apply_cursor(sapp_mouse_cursor cursor, bool shown) {
 
 @end
 
+/*-- window class -----------------------------------------------------------*/
+/* [TrussC] A borderless NSWindow answers NO to canBecomeKeyWindow, so it never
+   receives keyboard input and key events fall through to another window.
+   Every TrussC window may be borderless (desc.borderless), so all of them use
+   this class. Titled windows already answer YES, so nothing changes for them. */
+@interface _sapp_tc_window : NSWindow
+@end
+
+@implementation _sapp_tc_window
+- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)canBecomeMainWindow { return YES; }
+@end
+
 /*-- window delegate --------------------------------------------------------*/
 @interface _sapp_tc_win_delegate : NSObject <NSWindowDelegate>
 @property (assign) _sapp_tc_window_t* w;
@@ -4031,7 +4044,7 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                               NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
     if (w->desc.borderless) style = NSWindowStyleMaskBorderless;
-    w->window = [[NSWindow alloc] initWithContentRect:rect styleMask:style
+    w->window = [[_sapp_tc_window alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
     if (w->window == nil) return _sapp_tc_mac_fail(w, "NSWindow initWithContentRect returned nil (no NSError available)");
     w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
