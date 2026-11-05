@@ -560,7 +560,7 @@ bool TlsClient::TlsTransport::processNetworkStep(State& st, const AliveToken& al
     return true;
 }
 
-// Free and re-initialise the SSL context and config (for the next connection)
+// Free and re-initialize the SSL context and config (for the next connection)
 void TlsClient::TlsTransport::resetSslContext() {
     std::lock_guard<std::mutex> lock(tlsMutex_);
     if (ctx_) {

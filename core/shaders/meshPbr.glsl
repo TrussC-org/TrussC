@@ -381,7 +381,7 @@ float calcShadow(int slot, vec3 worldPos, vec3 N, vec3 L) {
     // fine dithered noise. Interleaved Gradient Noise (Jimenez 2014) on the
     // fragment coordinate gives a cheap, well-distributed hash. We build the 2x2
     // rotation once and reuse it for BOTH the blocker search and the PCF loop
-    // (sharing is fine and cheaper — the noise decorrelates neighbours anyway).
+    // (sharing is fine and cheaper — the noise decorrelates neighbors anyway).
     const float TAU = 6.28318530718;
     float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy,
                                             vec2(0.06711056, 0.00583715))));

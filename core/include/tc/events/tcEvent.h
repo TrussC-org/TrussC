@@ -92,7 +92,7 @@ namespace priority {
 // listener:
 //
 //   Inline (default) : run on whatever thread called notify() — the existing
-//                      behaviour. Hot path, no allocation.
+//                      behavior. Hot path, no allocation.
 //   Main             : run on the main thread. If notify() is already on the
 //                      main thread it runs immediately; otherwise the payload
 //                      is copied and the call is marshalled via runOnMainThread

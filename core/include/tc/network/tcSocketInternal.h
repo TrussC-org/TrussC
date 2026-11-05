@@ -3,7 +3,7 @@
 //
 // Included by the .cpp files of TcpClient, TcpServer, UdpSocket and the
 // tcxTls TlsClient only. Nothing here holds state: the process-wide Winsock
-// initialisation lives in tcSocketInternal.cpp and is reached through
+// initialization lives in tcSocketInternal.cpp and is reached through
 // ensureWinsock().
 // =============================================================================
 #pragma once

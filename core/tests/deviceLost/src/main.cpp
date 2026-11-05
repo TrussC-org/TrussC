@@ -134,7 +134,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     notifyLoss();
     check(lossCalls == 1 && internal::appExitCode() == 0 && errorLogs == 0,
           "cancellation leaves exit code unchanged");
-    check(internal::exitReason().empty(), "cancelled device loss leaves exit reason unchanged");
+    check(internal::exitReason().empty(), "canceled device loss leaves exit reason unchanged");
     cancel.disconnect();
     // An exitRequested listener cannot cancel the default device-loss exit.
     auto exitCancel = events().exitRequested.listen([](ExitRequestEventArgs& args) { args.cancel = true; });

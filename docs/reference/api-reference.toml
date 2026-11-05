@@ -137,7 +137,7 @@ signature = "TC_VALUE(member) | TC_VALUE(name, getter) | TC_VALUE(name, getter, 
 description.en = "Declare one reflected member; arity picks access (1=in-place, 2=read-only, 3=getter/setter)."
 description.ja = "反映メンバを1つ宣言。引数数でアクセスが決まる（1=直接, 2=読取専用, 3=getter/setter）。"
 description.ko = "리플렉트 멤버 하나를 선언. 인자 수로 접근이 정해진다(1=직접, 2=읽기 전용, 3=getter/setter)."
-details.en = "Declares one reflected member inside a `TC_REFLECT` body. The arity picks the access mode:\n\n- **1 arg** `TC_VALUE(x)` — reflect the field `x` in place (read/write).\n- **2 args** `TC_VALUE(\"name\", getter)` — read-only (a computed or derived value).\n- **3 args** `TC_VALUE(\"name\", getter, setter)` — a property exposed through a getter/setter pair.\n\nThe reflected name becomes the inspector label and the JSON key. Enums reflected this way render as a labelled dropdown (see `TC_ENUM_LABELS`).\n\nImage-like members (an `Fbo`, `Image`, `VideoPlayer`, or anything that derives from `HasTexture`) use the 1-argument form too. They are read-only: the node inspector shows a thumbnail with the size and format, the MCP node view reports `{width, height, format, allocated}`, and the JSON writer leaves them out of saved data (pixels are not data), so save files do not change. Use the member form; the getter forms copy the value, and an image cannot be copied.\n\nExample:\n\n    struct Canvas : Node {\n        Fbo fbo;\n        TC_REFLECT(Canvas, Node) {\n            TC_VALUE(fbo);   // thumbnail in the inspector, not saved\n        }\n    };"
+details.en = "Declares one reflected member inside a `TC_REFLECT` body. The arity picks the access mode:\n\n- **1 arg** `TC_VALUE(x)` — reflect the field `x` in place (read/write).\n- **2 args** `TC_VALUE(\"name\", getter)` — read-only (a computed or derived value).\n- **3 args** `TC_VALUE(\"name\", getter, setter)` — a property exposed through a getter/setter pair.\n\nThe reflected name becomes the inspector label and the JSON key. Enums reflected this way render as a labeled dropdown (see `TC_ENUM_LABELS`).\n\nImage-like members (an `Fbo`, `Image`, `VideoPlayer`, or anything that derives from `HasTexture`) use the 1-argument form too. They are read-only: the node inspector shows a thumbnail with the size and format, the MCP node view reports `{width, height, format, allocated}`, and the JSON writer leaves them out of saved data (pixels are not data), so save files do not change. Use the member form; the getter forms copy the value, and an image cannot be copied.\n\nExample:\n\n    struct Canvas : Node {\n        Fbo fbo;\n        TC_REFLECT(Canvas, Node) {\n            TC_VALUE(fbo);   // thumbnail in the inspector, not saved\n        }\n    };"
 details.ja = "`TC_REFLECT` 本体の中で反映メンバを 1 つ宣言する。引数の数でアクセスモードが決まる：\n\n- **1 引数** `TC_VALUE(x)` — フィールド `x` を直接反映（読み書き）。\n- **2 引数** `TC_VALUE(\"name\", getter)` — 読み取り専用（計算/派生値）。\n- **3 引数** `TC_VALUE(\"name\", getter, setter)` — getter/setter ペアで公開するプロパティ。\n\n反映名はインスペクタのラベルと JSON キーになる。こうして反映した enum はラベル付きドロップダウンで表示される（`TC_ENUM_LABELS` 参照）。\n\n画像のようなメンバ（`Fbo`、`Image`、`VideoPlayer` など、`HasTexture` を継承した型）も、1 引数の形で書きます。これらは読み取り専用です。ノードインスペクタはサイズとフォーマットを添えたサムネイルを表示し、MCP のノード表示は `{width, height, format, allocated}` を返します。JSON への書き出しでは保存データに含めないので（ピクセルはデータではありません）、保存ファイルは変わりません。メンバの形を使ってください。ゲッターの形は値をコピーしますが、画像はコピーできません。\n\n例:\n\n    struct Canvas : Node {\n        Fbo fbo;\n        TC_REFLECT(Canvas, Node) {\n            TC_VALUE(fbo);   // インスペクタにサムネイル、保存はされない\n        }\n    };"
 details.ko = "`TC_REFLECT` 본문 안에서 리플렉트 멤버 하나를 선언한다. 인자 수로 접근 모드가 정해진다:\n\n- **1 인자** `TC_VALUE(x)` — 필드 `x`를 직접 리플렉트(읽기/쓰기).\n- **2 인자** `TC_VALUE(\"name\", getter)` — 읽기 전용(계산/파생 값).\n- **3 인자** `TC_VALUE(\"name\", getter, setter)` — getter/setter 쌍으로 노출하는 속성.\n\n리플렉트 이름은 인스펙터 라벨과 JSON 키가 된다. 이렇게 리플렉트한 enum은 라벨 드롭다운으로 표시된다(`TC_ENUM_LABELS` 참고).\n\n이미지 같은 멤버(`Fbo`, `Image`, `VideoPlayer` 등 `HasTexture`를 상속한 타입)도 1 인자 형태로 씁니다. 이들은 읽기 전용입니다. 노드 인스펙터는 크기와 포맷을 곁들인 썸네일을 표시하고, MCP 노드 보기는 `{width, height, format, allocated}`를 반환합니다. JSON 쓰기는 저장 데이터에서 제외하므로(픽셀은 데이터가 아닙니다) 저장 파일은 바뀌지 않습니다. 멤버 형태를 사용하세요. getter 형태는 값을 복사하는데 이미지는 복사할 수 없습니다.\n\n예:\n\n    struct Canvas : Node {\n        Fbo fbo;\n        TC_REFLECT(Canvas, Node) {\n            TC_VALUE(fbo);   // 인스펙터에 썸네일, 저장되지 않음\n        }\n    };"
 
@@ -856,7 +856,7 @@ details.en = '''
 - If a listener sets `e.consumed = true`, this function, the nodes and the later listeners are all skipped. If a node handles the event (returns `true`), the later listeners are skipped too.
 - By default, the App's root node does not consume clicks on the empty background. To consume them, return `true` from the App's `onMousePress`.
 - Nodes: the release goes to the node that received the press with the same button. If there is no such node, it starts from the node under the pointer and is passed up to the parents in turn. After this, that node no longer holds the press.
-- On touch devices, lifting or cancelling the first finger sends a left-button release.
+- On touch devices, lifting or canceling the first finger sends a left-button release.
 '''
 details.ja = '''
 - tcApp に同じ名前の関数を書くと、ボタンが離されたときに TrussC が呼び出します。基本は `mouseReleased(const MouseEventArgs& e)` の形を使ってください。`e` から位置（`e.pos`）、ボタン（`e.button`）、修飾キー（`e.shift` など）を取り出せます。`mouseReleased(Vec2 pos, int button)` という短い形でも書けます。オーバーライドするのはどちらか片方にしてください。
@@ -1169,14 +1169,14 @@ description.ja = "指が画面から離れたとき、または OS がタッチ�
 description.ko = "손가락이 화면에서 떨어지거나 OS가 터치를 취소했을 때 호출된다."
 details.en = '''
 - Override `touchReleased(const TouchEventArgs& touch)` in your tcApp. This is the only form.
-- The fingers with `changed == true` are the ones that lifted or were cancelled in this event.
+- The fingers with `changed == true` are the ones that lifted or were canceled in this event.
 - The OS can cancel touches, for example on an incoming call or a system gesture. A cancel is also delivered here, with `touch.cancelled` set to true. There is no separate touchCancelled function, so check this flag when you need to tell the two cases apart.
 
 ```cpp
 if (touch.cancelled) fingers.clear();   // the OS took the touches
 ```
 
-- By default, the first finger also acts as the mouse: if it is among the changed fingers (lifted or cancelled), `mouseReleased` is called once right after this function with the left button at its position, and touch-as-mouse stops. A finger that is still touching does not take over; it starts again with the next new touch. The mouse event has no cancel flag.
+- By default, the first finger also acts as the mouse: if it is among the changed fingers (lifted or canceled), `mouseReleased` is called once right after this function with the left button at its position, and touch-as-mouse stops. A finger that is still touching does not take over; it starts again with the next new touch. The mouse event has no cancel flag.
 - If an end event is lost, the first finger's mouse state does not get stuck in the pressed state. The next touch starts fresh, and when the window loses focus TrussC resets it and releases any mouse button that is still held.
 '''
 details.ja = '''
@@ -5735,8 +5735,8 @@ description.ko = "이 창이 실제로 닫힐 때 한 번 호출된다."
 details.en = '''
 - It is sent once when the window closes, including when the process ends. It is not sent when the App is replaced (`setApp`), removed (`destroyApp`) or hot reloaded; those call only `App::exit()`.
 - A listener registered without a priority runs before `App::exit()`. Register it with `EventPriority::AfterApp` to run after `App::exit()`, for example to stop something the App was still using.
-- It has no argument and cannot be cancelled. To ask before the window closes, use `closeRequested`; to ask before the process quits, use `exitRequested`.
-- To quit the process when this window closes, use `Window::setQuitOnClose(true)`. Calling `exitApp()` here, as in the example, also quits, but the window has already closed by then, so a cancelled quit cannot bring it back. Keep the returned `EventListener` as a member. Called on the main thread.
+- It has no argument and cannot be canceled. To ask before the window closes, use `closeRequested`; to ask before the process quits, use `exitRequested`.
+- To quit the process when this window closes, use `Window::setQuitOnClose(true)`. Calling `exitApp()` here, as in the example, also quits, but the window has already closed by then, so a canceled quit cannot bring it back. Keep the returned `EventListener` as a member. Called on the main thread.
 - At a session end (logout, restart or shutdown), if no App code is running on the main thread, it is sent as in a normal ending. If App code is running at that moment, the OS ends the process and no App work runs, so this event is not sent either (see `App::exit`).
 '''
 details.ja = '''
@@ -5772,7 +5772,7 @@ description.ko = "프로세스 종료가 요청되었을 때 각 App에서 호�
 details.en = '''
 - App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
 - This is the App side of `RuntimeEvents::exitRequested`. Each App receives it after the `runtime().events()` listeners. Set `e.cancel = true` to keep the process running, for example while a document is unsaved.
-- When it is sent and how cancelling works are explained in `RuntimeEvents::exitRequested`. When it is asked because a window is closing, a cancel keeps every window open.
+- When it is sent and how canceling works are explained in `RuntimeEvents::exitRequested`. When it is asked because a window is closing, a cancel keeps every window open.
 '''
 details.ja = '''
 - App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
@@ -6167,7 +6167,7 @@ details.ko = '''
 related = ["TouchEventArgs", "MouseEventArgs::pos", "setTouchAsMouse", "Event<T>"]
 
 ["CoreEvents::touchReleased"]
-description.en = "Fired when a touch ends or is cancelled."
+description.en = "Fired when a touch ends or is canceled."
 description.ja = "タッチが終了またはキャンセルされたときに発生する。"
 description.ko = "터치가 끝나거나 취소되면 발생한다."
 details.en = '''
@@ -7934,7 +7934,7 @@ description.ko = "외부 입력의 메인 스레드 복사본 수에 선택적 �
 details.en = '''
 - Applies only to listeners using `Deliver::Main` when an external source queues a copy from another thread. Inline listeners are unaffected.
 - External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged when the backlog reaches the limit, and again only after the backlog has fully drained and fills up again. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
-- Lowering the limit keeps already accepted copies. Each Main listener uses one slot until its callback finishes; a cancelled copy frees its slot when discarded at the next main-thread drain. Allocation failure drops the copy silently. The setting also works for `Event<void>`.
+- Lowering the limit keeps already accepted copies. Each Main listener uses one slot until its callback finishes; a canceled copy frees its slot when discarded at the next main-thread drain. Allocation failure drops the copy silently. The setting also works for `Event<void>`.
 '''
 details.ja = '''
 - 外部入力を別スレッドからコピーして配送する `Deliver::Main` のリスナーだけが対象です。Inline リスナーには適用しません。
@@ -8183,11 +8183,11 @@ void tcApp::setup() {
 '''
 related = ["RuntimeEvents::exitRequested"]
 ["ExitRequestEventArgs::reason"]
-description.en = "A short text that explains why the quit was cancelled."
+description.en = "A short text that explains why the quit was canceled."
 description.ja = "終了を取り消した理由を説明する短い文字列。"
 description.ko = "종료를 취소한 이유를 설명하는 짧은 문자열이다."
 details.en = '''
-- Starts empty, and setting it alone does not cancel. On Windows, the first non-empty reason from a cancelling listener is shown when the process blocks a logout or shutdown. Other platforms do not show it. Use UTF-8 text.
+- Starts empty, and setting it alone does not cancel. On Windows, the first non-empty reason from a canceling listener is shown when the process blocks a logout or shutdown. Other platforms do not show it. Use UTF-8 text.
 '''
 details.ja = '''
 - 空から始まり、設定しただけでは取り消しになりません。Windows では、取り消したリスナーの最初の空でない理由が、ログアウトやシャットダウンを止めている理由として表示されます。ほかのプラットフォームでは表示されません。UTF-8 の文字列を使ってください。
@@ -8213,7 +8213,7 @@ description.en = "Set to true to keep the process running."
 description.ja = "true にするとプロセスは終了せずに動き続ける。"
 description.ko = "true로 설정하면 프로세스가 종료되지 않고 계속 실행된다."
 details.en = '''
-- Starts as `false` for every listener. If any listener sets it to `true`, the quit is cancelled; see `RuntimeEvents::exitRequested`.
+- Starts as `false` for every listener. If any listener sets it to `true`, the quit is canceled; see `RuntimeEvents::exitRequested`.
 '''
 details.ja = '''
 - どのリスナーでも `false` から始まります。どれか 1 つでも `true` にすると終了は取り消されます。詳しくは `RuntimeEvents::exitRequested` を参照してください。
@@ -8908,7 +8908,7 @@ value_desc.DecodeFailed.en = "The decoder rejected the data (corrupt, truncated,
 value_desc.TooLarge.en = "Image dimensions or encoded input exceed the load limit"
 value_desc.TooLarge.ja = "画像の寸法または符号化済み入力が読み込み上限を超える"
 value_desc.TooLarge.ko = "이미지 크기나 인코딩된 입력이 로드 한도를 초과함"
-value_desc.Cancelled.en = "Loading was cancelled"
+value_desc.Cancelled.en = "Loading was canceled"
 value_desc.Cancelled.ja = "読み込みがキャンセルされた"
 value_desc.Cancelled.ko = "로드가 취소됨"
 value_desc.Unknown.en = "Anything the loader could not classify"
@@ -11658,7 +11658,7 @@ description.ja = "画像を矩形領域の切り抜きに置き換える。"
 description.ko = "이미지를 직사각형 영역으로 잘라 대체한다."
 details.en = '''
 - `crop(x, y, w, h)` copies a region starting at the top-left-based pixel coordinate `(x, y)` into a new `w × h` buffer. Samples outside the source repeat the nearest edge pixel.
-- An unallocated image or nonpositive `w` or `h` leaves the pixels unchanged. Pending asynchronous loading is cancelled even for invalid or unchanged requests.
+- An unallocated image or nonpositive `w` or `h` leaves the pixels unchanged. Pending asynchronous loading is canceled even for invalid or unchanged requests.
 - Preserves the pixel format and channel count, then rebuilds the texture. See `Image` for when `update()` is required and `Texture` for GPU resource rules.
 '''
 details.ja = '''
@@ -11829,7 +11829,7 @@ description.ko = "2×2 평균으로 이미지를 축소한다."
 details.en = '''
 - Replaces the pixels with 2×2 box averages at `max(width / 2, 1) × max(height / 2, 1)`, using integer division. An unmatched final row or column of an odd dimension is omitted; a dimension of one repeats its only sample.
 - U8 RGB channels in three- or four-channel buffers use a gamma 2.2 conversion for averaging in linear light. Alpha, one- and two-channel buffers and F32 values are averaged directly.
-- An unallocated image is unchanged. Pending asynchronous loading is cancelled before this check, including for unchanged requests.
+- An unallocated image is unchanged. Pending asynchronous loading is canceled before this check, including for unchanged requests.
 - Preserves the pixel format and channel count, then rebuilds the texture. See `Image` for when `update()` is required and `Texture` for GPU resource rules.
 '''
 details.ja = '''
@@ -11957,7 +11957,7 @@ description.ja = "画像を左右または上下に反転する。"
 description.ko = "이미지를 좌우 또는 상하로 뒤집는다."
 details.en = '''
 - `mirror(horizontal, vertical)` flips left to right when `horizontal` is true and top to bottom when `vertical` is true. Both true produce a half-turn; dimensions, channels and pixel format are unchanged.
-- An unallocated image or two false arguments leaves the pixels unchanged. Pending asynchronous loading is cancelled even for unchanged requests.
+- An unallocated image or two false arguments leaves the pixels unchanged. Pending asynchronous loading is canceled even for unchanged requests.
 - Rebuilds the texture after a flip. See `Image` for when `update()` is required and `Texture` for GPU resource rules.
 '''
 details.ja = '''
@@ -12012,7 +12012,7 @@ description.ko = "이미지를 새 크기로 재샘플링한다."
 details.en = '''
 - `resize(newW, newH)` sets the target dimensions in pixels. Each axis uses BoxArea filtering when shrinking and Catmull-Rom bicubic filtering when enlarging, with a horizontal pass followed by a vertical pass.
 - U8 RGB channels in three- or four-channel buffers use gamma 2.2 conversion to process in linear light. Alpha, one- and two-channel buffers and F32 values are processed directly.
-- An unallocated image or nonpositive target dimension leaves pixels unchanged. The same dimensions also leave pixels unchanged, but still rebuild the texture. Pending asynchronous loading is cancelled for all requests, including invalid or unchanged ones.
+- An unallocated image or nonpositive target dimension leaves pixels unchanged. The same dimensions also leave pixels unchanged, but still rebuild the texture. Pending asynchronous loading is canceled for all requests, including invalid or unchanged ones.
 - Preserves the channel count and pixel format. See `Image` for texture synchronization and `Texture` for GPU resource rules.
 - This is CPU resampling. For resizing with the GPU sampler, draw the source into an `Fbo` at the target size, using mipmaps when needed.
 '''
@@ -12102,7 +12102,7 @@ description.en = "Marks the image as needing a texture update."
 description.ja = "画像をテクスチャの更新が必要な状態にする。"
 description.ko = "이미지를 텍스처 갱신이 필요한 상태로 표시한다."
 details.en = '''
-- Sets the dirty flag without uploading pixels, changing texture usage or cancelling asynchronous loading.
+- Sets the dirty flag without uploading pixels, changing texture usage or canceling asynchronous loading.
 - Call after direct CPU pixel edits, then call `update()` for a Dynamic texture. See `Image` for CPU and GPU synchronization.
 '''
 details.ja = '''
@@ -16816,7 +16816,7 @@ description.ja = "複数の頂点位置を追加する。"
 description.ko = "여러 정점 위치를 추가한다."
 details.en = '''
 - Copies the elements of `const vector<Vec3>&` to the end of the vertex array in order and returns this mesh as `Mesh&`.
-- Does not add attributes or indices; see `Mesh::addVertex` for vertex addition behaviour.
+- Does not add attributes or indices; see `Mesh::addVertex` for vertex addition behavior.
 '''
 details.ja = '''
 - `const vector<Vec3>&` の要素を順番に頂点配列の末尾へコピーし、自身を `Mesh&` で返します。
@@ -19945,7 +19945,7 @@ description.ko = "놓친 간격의 호출도 실행하는 반복 콜백을 예�
 details.en = '''
 - Use `callEveryCatchUp(interval, callback, maxCatchUp)`, with `interval` in seconds. Returns a `uint64_t` timer ID for `cancelTimer()`.
 - Calls once for each interval due, up to `maxCatchUp` times per update. This argument has no default; any value of zero or less, including `-1`, means no limit. A zero or negative interval instead calls once per timer processing pass.
-- Calls beyond the limit are dropped while the original schedule is preserved. Cancelling the timer inside its callback stops the remaining catch-up calls.
+- Calls beyond the limit are dropped while the original schedule is preserved. Canceling the timer inside its callback stops the remaining catch-up calls.
 - This can keep a counter or simulation in step after a late update. Without a limit, a long stall in a measured update loop, including an `EVENT_DRIVEN` idle, can cause many calls at once; fixed-Hz updates do not count time dropped by `setMaxUpdateSteps()`.
 - See `Node::callAfter` for the shared frame timer rules.
 '''
@@ -19996,7 +19996,7 @@ description.ja = "このノードのすべてのフレームタイマーをキ�
 description.ko = "이 노드의 모든 프레임 타이머를 취소한다."
 details.en = '''
 - Removes this node's `callAfter()`, `callEvery()`, and `callEveryCatchUp()` timers. Descendant timers and async timers are unaffected; no value is returned.
-- May be called inside a frame timer callback. The current callback finishes, but other cancelled callbacks and remaining catch-up calls do not run.
+- May be called inside a frame timer callback. The current callback finishes, but other canceled callbacks and remaining catch-up calls do not run.
 - See `Node::callAfter` for the shared frame timer rules.
 '''
 details.ja = '''
@@ -20019,7 +20019,7 @@ description.ja = "ID を指定してバックグラウンドのスケジュー�
 description.ko = "ID로 백그라운드 스케줄러 타이머를 취소한다."
 details.en = '''
 - Cancels the async timer with the given ID. The lookup is scheduler-wide rather than restricted to this node; an unknown ID does nothing, and no value is returned.
-- Waits for that timer's executing callback to finish unless called on the scheduler thread. Do not hold a mutex needed by the callback while cancelling.
+- Waits for that timer's executing callback to finish unless called on the scheduler thread. Do not hold a mutex needed by the callback while canceling.
 - See `Node::callAfterAsync` for the shared async timer rules.
 '''
 details.ja = '''
@@ -20068,7 +20068,7 @@ details.en = '''
 - Children are cleaned up before their parent.
 - `removeChild()` / `removeAllChildren()` do not call `cleanup()`. They only detach the node.
 - It can run even if `setup()` never ran (for example, an App that ends before its first update), so do not assume that what `setup()` creates is there.
-- Before `cleanup()` runs, the node is marked dead, its async timers are cancelled, and it is no longer treated as the hovered, grabbed or selected node.
+- Before `cleanup()` runs, the node is marked dead, its async timers are canceled, and it is no longer treated as the hovered, grabbed or selected node.
 - When an App ends, `cleanup()` runs after `App::exit()`, on the child nodes first and then on the App. In a headless App, only the App's own `cleanup()` runs. Audio is disconnected before this, so you can release audio state here. For the whole order, see `App::exit`.
 - Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (in a headless App, child nodes get no `cleanup()` at app exit).
 - At a session end (logout, restart or shutdown), if no App code is running on the main thread, `cleanup()` runs as in a normal ending. If App code is running at that moment, the OS ends the process and neither `App::exit` nor `cleanup()` is called; see `App::exit`.
@@ -30618,7 +30618,7 @@ description.ja = "接続を閉じ、保留中の通信処理をキャンセル�
 description.ko = "연결을 닫고 대기 중인 통신 작업을 취소한다."
 details.en = '''
 - Cancels a pending connection attempt, closes the socket, stops automatic update processing, and cancels unfinished sends.
-- If the client was connected, reports `onDisconnect` with `reason == "Disconnected by client"` and `wasClean == true`; cancelling an attempt that has not connected does not produce this notification.
+- If the client was connected, reports `onDisconnect` with `reason == "Disconnected by client"` and `wasClean == true`; canceling an attempt that has not connected does not produce this notification.
 - Pending sends complete with `SendError::Disconnected` while the client remains alive; destruction instead suppresses new events.
 - Worker lifetime and teardown rules are described in `TcpClient`; cancellation limits are described in `TcpClient::connectAsync`.
 '''
@@ -30832,7 +30832,7 @@ description.ko = "바이트를 전송하고 쓰기 완료를 기다린다."
 details.en = '''
 - Accepts a pointer and byte count, a `vector<char>`, or a `string`; sends the exact byte count without adding a terminator or newline.
 - Uses the same FIFO queue as `sendAsync()` and borrows the caller's bytes until this call returns; keep them valid and unchanged during the call.
-- Returns `true` when the entire payload has been written to the transport, without confirming receipt by the remote application; returns `false` if disconnected, cancelled, or a write fails.
+- Returns `true` when the entire payload has been written to the transport, without confirming receipt by the remote application; returns `false` if disconnected, canceled, or a write fails.
 - Waits for queue space when the configured high-water mark is reached; send timeout behavior is described in `TcpClient::setSendTimeout`, and a write failure or timeout closes the connection and reports `onError`.
 - With `TlsClient`, uses the same queue and timeout through TLS writes.
 - Use `sendAsync()` from frame callbacks and main-thread listeners to avoid waiting; `send()` returns `false` when called inline on its own writer thread or while a non-threaded send queue is already being drained.
@@ -30869,7 +30869,7 @@ description.ja = "ソケットのブロッキングモードを指定する。"
 description.ko = "소켓의 블로킹 모드를 지정한다."
 details.en = '''
 - `false` applies non-blocking mode to an existing socket; if no socket exists, the call does nothing and does not save a setting.
-- `true` is ignored with a warning when a socket exists, because owned sockets remain non-blocking so connection, receive, and send work can be cancelled.
+- `true` is ignored with a warning when a socket exists, because owned sockets remain non-blocking so connection, receive, and send work can be canceled.
 - This setting does not make `connect()` or `send()` return immediately; those functions can wait around non-blocking socket operations.
 '''
 details.ja = '''
@@ -31081,7 +31081,7 @@ description.ja = "TcpClient の接続試行の結果を保持する。"
 description.ko = "TcpClient 연결 시도의 결과를 담는다."
 details.en = '''
 - `TcpClient::onConnect` supplies `success` and a diagnostic `message`. Successful TCP connections report `true` and `"Connected"`; reported failures use `false` and `"Connection failed"`.
-- A failed blocking TCP `connect()` returns `false` without emitting `onConnect(false)`. Asynchronous or pending attempts can emit a failure event; cancelled or replaced attempts can finish without one.
+- A failed blocking TCP `connect()` returns `false` without emitting `onConnect(false)`. Asynchronous or pending attempts can emit a failure event; canceled or replaced attempts can finish without one.
 - Plain listeners run on the notifying thread: blocking connection results use the caller; `connectAsync()` attempts use the connect thread when threading is enabled and the caller otherwise. Pending connection completion is reported during receive processing, which runs on the receive thread with threading enabled or through the update event without it.
 - Use `listen(fn, Deliver::Main)` before accessing the Node tree, GPU resources, or app state shared with the main thread. Delivery from a worker copies the arguments and queues the listener for the main thread; retain the returned `EventListener` to keep it registered.
 - Event argument references are valid during the callback. Copy any fields that must remain available afterward.
@@ -31308,7 +31308,7 @@ details.en = '''
 - `None` means that a `SendResult` accepted the payload into the queue, or that a completion handed the entire payload to the kernel; it does not confirm receipt by the remote application.
 - `ClientNotFound` means that the server has no client registered under the requested ID; `NotRunning` means that the server is stopped or the client is not connected.
 - `QueueFull` means that pending bytes have already reached the configured queue high-water mark; this is not a per-message size limit.
-- `Disconnected` reports a cancelled or failed write, including queued sends cancelled by disconnection.
+- `Disconnected` reports a canceled or failed write, including queued sends canceled by disconnection.
 - `Timeout` is reported by `TcpServer` when the send timeout expires without writing any payload bytes, leaving the connection open; a server timeout after a partial write drops the client and reports `Disconnected`, and `TcpClient` send timeouts close the connection and report `Disconnected`.
 '''
 details.ja = '''
@@ -31330,7 +31330,7 @@ details.ko = '''
 related = ["SendResult", "sendErrorName", "TcpSendCompleteEventArgs", "TcpServer::sendAsync", "TcpClient::sendAsync"]
 value_desc.None.en = "Success: queued, or the whole payload reached the kernel"
 value_desc.ClientNotFound.en = "No client is registered under that ID"
-value_desc.Disconnected.en = "The write was cancelled or failed before the payload completed"
+value_desc.Disconnected.en = "The write was canceled or failed before the payload completed"
 value_desc.Timeout.en = "The server send timed out before writing any payload bytes; the connection remains open"
 value_desc.QueueFull.en = "Pending bytes have already reached the queue high-water mark"
 value_desc.NotRunning.en = "The server is not running, or the client is not connected"
@@ -31441,7 +31441,7 @@ description.ja = "キューに追加した TCP 送信の最終結果を通知す
 description.ko = "큐에 등록한 TCP 전송의 최종 결과를 알린다."
 details.en = '''
 - Match `sendId` with the `SendResult::id` returned when the payload was queued; `error` and `bytesSent` describe its final outcome.
-- While the sender exists, each accepted send completes exactly once, including queued sends cancelled by disconnection or server shutdown; cancelled sends that never started report `SendError::Disconnected` and zero bytes.
+- While the sender exists, each accepted send completes exactly once, including queued sends canceled by disconnection or server shutdown; canceled sends that never started report `SendError::Disconnected` and zero bytes.
 - Blocking `send()` calls also produce completion events because they use the same queue.
 - Success means that the entire payload reached the kernel; it does not confirm receipt by the remote application.
 - Server listeners run on that client's writer thread, and threaded client listeners run on the client's writer thread; without client threads, they run on the thread processing the send queue, including during update processing, blocking sends, or disconnection.
@@ -31522,7 +31522,7 @@ description.ja = "書き込んだペイロードのバイト数を保持する�
 description.ko = "기록한 페이로드의 바이트 수를 담는다."
 details.en = '''
 - Contains a `size_t` count of payload bytes accepted by the send operations, rather than bytes confirmed received by the remote application.
-- Equals the payload size on success and can be partial or zero on failure; sends cancelled before writing report `0`, which is also the default.
+- Equals the payload size on success and can be partial or zero on failure; sends canceled before writing report `0`, which is also the default.
 '''
 details.ja = '''
 - 送信処理が受け付けたペイロードのバイト数を `size_t` 型で保持します。相手のアプリケーションが受信したことを確認したバイト数ではありません。
@@ -33883,7 +33883,7 @@ description.ja = "マルチタッチイベントの情報を保持する。"
 description.ko = "멀티터치 이벤트 정보를 담는다."
 details.en = '''
 - Used by `events().touchPressed`, `events().touchMoved`, and `events().touchReleased` on Android, iOS, and touch-capable Web browsers.
-- Read the `numTouches` valid elements of `touches`; up to `MAX_TOUCHES == 32` points are delivered. Points released or cancelled by the current event can also be included.
+- Read the `numTouches` valid elements of `touches`; up to `MAX_TOUCHES == 32` points are delivered. Points released or canceled by the current event can also be included.
 - `x()`, `y()`, and `id()` read the first array element, which is not necessarily a point whose `changed` flag is `true`.
 - Touch events are delivered before mouse events generated from the primary touch. `setTouchAsMouse(false)` disables that mouse generation without disabling touch events.
 - See `Event<T>` for listener registration, lifetime, priority arguments, and delivery threads.
@@ -33962,7 +33962,7 @@ description.ja = "イベントのタッチ点を格納する。"
 description.ko = "이벤트의 터치 점을 저장한다."
 details.en = '''
 - A fixed array of `TouchPoint` with `MAX_TOUCHES == 32` elements; only the first `numTouches` elements are valid for the event.
-- The array can include both changed and unchanged points, including points released or cancelled by the event; check each point's `changed` flag.
+- The array can include both changed and unchanged points, including points released or canceled by the event; check each point's `changed` flag.
 - Use `TouchPoint::id` to identify a touch across events rather than its array index.
 '''
 details.ja = '''
@@ -40988,7 +40988,7 @@ details.en = '''
 - It does not wait for the window to close. Calling it again, or on a closed window, does nothing. You can call it from the window's own App.
 - If this is the last open window, or a window with `setQuitOnClose(true)`, it first asks `exitRequested` once, before anything closes. If a listener cancels, the call does nothing and every window stays open. If nobody cancels, the process ends normally and all windows close.
 - In other cases only this window closes, after its current callbacks have finished. Until then, `isOpen()` stays `true` and `getApp()` still returns the App.
-- When it closes, a pending `setApp` is cancelled and the App ends. The window's `events().exit` listeners run before or after `App::exit()` according to their priority, then audio is detached and `cleanup()` runs, and only then does the window disappear from the screen. Other windows keep running.
+- When it closes, a pending `setApp` is canceled and the App ends. The window's `events().exit` listeners run before or after `App::exit()` according to their priority, then audio is detached and `cleanup()` runs, and only then does the window disappear from the screen. Other windows keep running.
 - It does not send `closeRequested`. If you want to confirm first, do it in your own code before calling `close()`.
 - Call it on the main thread.
 '''
@@ -45125,7 +45125,7 @@ description.ja = "終了コードを指定して、プロセスの終了を要�
 description.ko = "종료 코드를 지정해 프로세스 종료를 요청한다."
 details.en = '''
 - `exitApp(code)` sets the exit code (default `0`) and returns at once. Use a nonzero code to report failure. On Windows and Linux, `runApp()` returns this code to `main()`. On macOS, a normal quit does not return from `runApp()`: the process ends after cleanup with this code (see `runApp`).
-- **The quit can be cancelled.** At the next safe point, TrussC sends `exitRequested`; if no listener cancels it, every App ends normally (`exit()` and `cleanup()`) and the process ends. See `RuntimeEvents::exitRequested`.
+- **The quit can be canceled.** At the next safe point, TrussC sends `exitRequested`; if no listener cancels it, every App ends normally (`exit()` and `cleanup()`) and the process ends. See `RuntimeEvents::exitRequested`.
 - This is the one way to quit, in windowed and headless apps alike. `requestExitApp()` and `App::requestExit()` are deprecated aliases that call `exitApp()`.
 - It does not close a particular window and does not send `closeRequested`.
 - You can call it from another thread; the request is passed to the main thread.
@@ -53082,7 +53082,7 @@ description.ja = "タッチ入力からマウスイベントも生成するか�
 description.ko = "터치 입력에서 마우스 이벤트도 생성할지 설정한다."
 details.en = '''
 - Enabled by default on all platforms; pass `false` to disable mouse events generated from touch input, including on Android and iOS.
-- Only the first finger drives the left mouse button: touch begin generates a press, movement generates a drag, and ending or cancelling that touch generates a release.
+- Only the first finger drives the left mouse button: touch begin generates a press, movement generates a drag, and ending or canceling that touch generates a release.
 - The finger used for mouse input is identified by its ID, so changing the order of `touches` does not switch it to `touches[0]`.
 - Touch events are delivered before the corresponding mouse events and remain enabled when this setting is `false`.
 '''
@@ -60743,7 +60743,7 @@ description.ko = "큐에 추가된 전송의 완료를 알린다."
 details.en = '''
 - Receives `TcpSendCompleteEventArgs`; `clientId` is `-1`, `sendId` identifies the queued payload, `error` gives its result, and `bytesSent` records how many bytes were written.
 - `SendError::None` means the entire payload was written, without confirming receipt by the remote application; a failed send can report a partial byte count.
-- Every accepted send, including `send()` and pending sends cancelled by `disconnect()`, reports completion once while the client remains alive; destruction stops workers and wakes waiting senders without emitting new events.
+- Every accepted send, including `send()` and pending sends canceled by `disconnect()`, reports completion once while the client remains alive; destruction stops workers and wakes waiting senders without emitting new events.
 - With threads enabled, notifications run on the writer; without threads, they run from `processNetwork()`, `send()`, or `disconnect()`. Main-thread delivery options are described in `TcpClient::setUseThread`.
 '''
 details.ja = '''
@@ -63258,7 +63258,7 @@ description.ko = "마이크 입력 시작 결과를 나타낸다."
 details.en = '''
 - `success` becomes true when a usable native capture device or Web Audio processor is ready; permission denial or an unavailable device produces failure. Its default is false.
 - `message` is empty on success and contains error details on failure. Explicit boolean conversion returns `success`, so `if (result)` checks the outcome.
-- `MicInput::onStart` delivers asynchronous results on the main thread in a later frame during `runApp` or `runHeadlessApp`; cancelled attempts and results from ended app runs are discarded.
+- `MicInput::onStart` delivers asynchronous results on the main thread in a later frame during `runApp` or `runHeadlessApp`; canceled attempts and results from ended app runs are discarded.
 '''
 details.ja = '''
 - 利用可能なネイティブの入力デバイス、または Web Audio のプロセッサーの準備ができると `success` が true になります。権限拒否や利用可能なデバイスがない場合は失敗します。初期値は false です。
@@ -63316,7 +63316,7 @@ details.en = '''
 - Perform public handle operations, including state queries and `getBuffer()`, on the main thread. Capture ingestion uses the audio path; the ring mutex does not make concurrent handle operations safe.
 - On native platforms, one lifecycle thread owns each attempt from initialization through teardown. A replacement opens only after predecessor cleanup. Application exit waits for native cleanup.
 - On macOS/iOS, permission is checked before capture initialization. Denied or restricted access fails; undecided access requests permission and keeps `isStarting()` true without a lifecycle worker until answered. Granting permission continues startup automatically. Stop, destruction, and exit do not wait for consent, and responses after cancellation are discarded.
-- Web requires a secure context and a user gesture; this call directly begins `getUserMedia` and AudioContext resume. If user activation is absent and the context remains suspended after permission is granted, startup fails with retry guidance. Otherwise, a suspended context or unanswered permission request can remain pending until cancelled.
+- Web requires a secure context and a user gesture; this call directly begins `getUserMedia` and AudioContext resume. If user activation is absent and the context remains suspended after permission is granted, startup fails with retry guidance. Otherwise, a suspended context or unanswered permission request can remain pending until canceled.
 '''
 details.ja = '''
 - `sampleRate` Hz のモノラル浮動小数点入力の起動を新たに開始し、待機しません。デフォルトは `48000` です。戻り値はなく、準備完了または失敗を `onStart` で通知します。
@@ -63705,7 +63705,7 @@ description.ja = "このウィンドウを閉じたときにプロセスも終�
 description.ko = "이 창을 닫을 때 프로세스도 종료할지 여부다."
 details.en = '''
 - The default is `false`: the process quits only when the last window closes. With `true`, closing this window quits the process even while other windows are open. `setQuitOnClose()` returns the settings, so you can chain it.
-- This is the starting value for the new window. To change it later, use `Window::setQuitOnClose()`, which also explains how the quit can be cancelled.
+- This is the starting value for the new window. To change it later, use `Window::setQuitOnClose()`, which also explains how the quit can be canceled.
 '''
 details.ja = '''
 - 既定値は `false` で、最後のウィンドウが閉じたときにだけプロセスが終了します。`true` にすると、ほかのウィンドウが開いていても、このウィンドウを閉じたときにプロセスが終了します。`setQuitOnClose()` は設定自身を返すので、続けて書けます。
@@ -63727,7 +63727,7 @@ description.ja = "このウィンドウを閉じたときにプロセスも終�
 description.ko = "이 창을 닫을 때 프로세스도 종료할지 설정한다."
 details.en = '''
 - The default is `false`: the process quits only when the last window closes. With `true`, closing this window quits the process even while other windows are open. `setQuitOnClose()` returns the settings, so you can chain it.
-- This is the starting value for the new window. To change it later, use `Window::setQuitOnClose()`, which also explains how the quit can be cancelled.
+- This is the starting value for the new window. To change it later, use `Window::setQuitOnClose()`, which also explains how the quit can be canceled.
 '''
 details.ja = '''
 - 既定値は `false` で、最後のウィンドウが閉じたときにだけプロセスが終了します。`true` にすると、ほかのウィンドウが開いていても、このウィンドウを閉じたときにプロセスが終了します。`setQuitOnClose()` は設定自身を返すので、続けて書けます。
@@ -63752,7 +63752,7 @@ details.en = '''
 - A typical use is an app with a main window and tool windows: call `getWindow()->setQuitOnClose(true)` in the main window's App, and closing the main window quits everything.
 - The quit goes through `exitRequested` before anything closes. If a listener cancels it, every window stays open, including this one. The full order is explained in `CoreEvents::closeRequested` (close button) and `Window::close` (from code).
 - You can set the starting value with `WindowSettings::setQuitOnClose()` when the window is created, and change it later with this function. Call it on the main thread. On a window that has already closed, it does nothing.
-- Use this setting rather than calling `exitApp()` yourself. `App::exit()` also runs when the App is replaced (`setApp`), removed (`destroyApp`) or hot reloaded, and `exitApp()` does nothing inside it. A listener on the window's `events().exit` runs after the window has closed, so a cancelled quit cannot keep the window open.
+- Use this setting rather than calling `exitApp()` yourself. `App::exit()` also runs when the App is replaced (`setApp`), removed (`destroyApp`) or hot reloaded, and `exitApp()` does nothing inside it. A listener on the window's `events().exit` runs after the window has closed, so a canceled quit cannot keep the window open.
 '''
 details.ja = '''
 - `true` にすると、ほかのウィンドウが開いていても、このウィンドウを閉じたときにプロセスも終了します。既定値は `false` で、その場合は最後のウィンドウが閉じたときにだけプロセスが終了します。
@@ -63985,11 +63985,11 @@ details.en = '''
 - App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
 - It is sent when `exitApp()` is called, when the OS asks the process to quit (for example Cmd+Q, logout or shutdown), and when the last open window or a window with `setQuitOnClose(true)` is about to close. In that last case it is asked before anything closes, and a cancel keeps every window open (see `CoreEvents::closeRequested` and `Window::close`).
 - On Windows and macOS, a logout, restart or shutdown asks it only when no App code is running on the main thread. Otherwise the OS ends the process without asking (see `App::exit`).
-- Set `e.cancel = true` to keep the process running. Every listener starts with `cancel = false`. If any listener sets it to `true`, the quit is cancelled, and a later listener cannot undo that. A listener that throws an exception also counts as a cancel.
-- The listeners here run first, then each App's `events().exitRequested`, starting with the App that was attached last. All of them are called on the main thread, even when one has already cancelled.
+- Set `e.cancel = true` to keep the process running. Every listener starts with `cancel = false`. If any listener sets it to `true`, the quit is canceled, and a later listener cannot undo that. A listener that throws an exception also counts as a cancel.
+- The listeners here run first, then each App's `events().exitRequested`, starting with the App that was attached last. All of them are called on the main thread, even when one has already canceled.
 - If nobody cancels, every App ends normally (`exit()` and `cleanup()`), and then the process ends.
-- On Windows, the first non-empty `e.reason` from a cancelling listener is shown as the reason when the process blocks a logout or shutdown.
-- In a headless App, Ctrl+C (SIGINT) and SIGTERM stop the process without this event. A forced kill or a crash cannot be cancelled either.
+- On Windows, the first non-empty `e.reason` from a canceling listener is shown as the reason when the process blocks a logout or shutdown.
+- In a headless App, Ctrl+C (SIGINT) and SIGTERM stop the process without this event. A forced kill or a crash cannot be canceled either.
 '''
 details.ja = '''
 - App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
@@ -64038,7 +64038,7 @@ description.ko = "사용자가 이 창을 닫으려 할 때 호출되며, 창을
 details.en = '''
 - It is sent when the user closes this window through the OS: the close button, Cmd+W on macOS or Alt+F4 on Windows. Set `e.cancel = true` to keep the window open, for example to ask about unsaved changes first.
 - Only the listeners of this window are asked. Every listener starts with `cancel = false`. If any listener sets it to `true`, the window stays open, and a later listener cannot undo that. A listener that throws an exception also counts as a cancel.
-- If nobody cancels and this is the last open window, or a window with `setQuitOnClose(true)`, `exitRequested` is asked next, before anything closes. If that is cancelled, every window stays open. If both accept, the process ends and all windows close. In other cases only this window closes.
+- If nobody cancels and this is the last open window, or a window with `setQuitOnClose(true)`, `exitRequested` is asked next, before anything closes. If that is canceled, every window stays open. If both accept, the process ends and all windows close. In other cases only this window closes.
 - `Window::close()` in your code does not send this event (see `Window::close`). Quitting the process (Cmd+Q, logout, shutdown) does not send it either; use `exitRequested` for that.
 - Called on the main thread. Use the argument only inside the callback. Phones, tablets and web browsers have no window close button, so it is not sent there.
 '''
@@ -64179,10 +64179,10 @@ description.ja = "ホットリロードで App が置き換わる直前に呼ば
 description.ko = "핫 리로드로 App이 교체되기 직전에 호출된다."
 details.en = '''
 - App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. An addon that belongs to an App listens on that App's `events()`.
-- It is sent only in a hot reload build (`TC_HOT_RELOAD`), after a successful rebuild and before the old App's `exit()` and `cleanup()`. The old App is still alive at that point. It has no argument and cannot be cancelled. If the rebuild fails, the running App is kept and this event is not sent.
+- It is sent only in a hot reload build (`TC_HOT_RELOAD`), after a successful rebuild and before the old App's `exit()` and `cleanup()`. The old App is still alive at that point. It has no argument and cannot be canceled. If the rebuild fails, the running App is kept and this event is not sent.
 - The listeners here run first, then the old App's `events().hotReloadUnload`. When the process ends, it is sent once more, only to the listeners here, after every App has ended.
 - Stop threads, async timers (`callAfterAsync` / `callEveryAsync`) and other background work that the App started; hot reload does not stop or guard them. Also release what would outlive the App, such as listeners held by singletons or function-local statics. `tcxImGui` and `tcxNodeInspector` already do this for themselves.
-- **Hot reload supports a single window only.** While it is active, TrussC logs a warning each time a second or later window is opened, and the behaviour is not guaranteed.
+- **Hot reload supports a single window only.** While it is active, TrussC logs a warning each time a second or later window is opened, and the behavior is not guaranteed.
 - Reload runs on the main thread, between turns of the main loop, outside every callback. It does not start once the process has begun ending, for example after an accepted quit.
 - Old builds are never unloaded: every build that loaded successfully stays in memory until the process ends, so many reloads can make the process use more memory. This keeps leftover code addresses valid, but it does not make leftover threads or timers safe, so stop them as described above.
 - Hot reload works on macOS, Windows and Linux. On iOS, Android and the web, the app is built without it and this event is not sent.

@@ -14,7 +14,7 @@ using namespace std;
 //
 // Knobs and faders send Control Change (CC) messages. The CC *number* assigned
 // to each physical control is device-specific, so we don't guess labels - we
-// just show a labelled meter for every CC number that appears, and animate it
+// just show a labeled meter for every CC number that appears, and animate it
 // to the latest value. Move a knob and its bar shows up automatically.
 //
 // Input only: opens the first input port.

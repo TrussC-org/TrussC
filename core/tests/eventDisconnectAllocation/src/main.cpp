@@ -315,7 +315,7 @@ bool attachment(int scenario, bool callback, int nth) {
     if (current != b && !internal::appOwner(*b)->token->load()) {
         TestWindow retry;
         internal::WindowRequestAccess::attachCandidate(retry, b); internal::applyPendingAppForTests(retry);
-        check("attachment: a cancelled candidate cannot attach elsewhere",
+        check("attachment: a canceled candidate cannot attach elsewhere",
               !retry.getApp() && !internal::appOwner(*b)->token->load() && countsMatch(retry, 0) &&
               trussc::internal::WindowRequestAccess::context(retry).appEventListeners.size() == 15, nth);
         retry.finish();

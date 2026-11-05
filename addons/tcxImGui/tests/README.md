@@ -15,7 +15,7 @@ checks what the MCP tools would report.
   settles the queued values as tcxImGui's render listener does; with
   `setRenderWhen(pred)`, a frame where `pred()` is false renders nothing (a
   window that stopped rendering);
-- `click(label)` clicks the centre of a widget found by label in the last
+- `click(label)` clicks the center of a widget found by label in the last
   frame's registry, feeding mouse events through `ImGuiIO` one per frame;
 - `touched(label)` / `touchedJson(label)` read the touched record, the latter
   in the JSON shape `tcx_imgui_get_touched` prints;
@@ -49,7 +49,7 @@ Cases (`src/main.cpp`):
   input replies carry `"unit": "rad"`; non-numeric, non-finite, overflow and
   trailing text return the error shape without changing the variable.
 - setting values (#321): `tcx_imgui_input` writes a `DragFloat2` (whose
-  centre is the gap between its fields), `DragFloat3`, `ColorEdit4`,
+  center is the gap between its fields), `DragFloat3`, `ColorEdit4`,
   `SliderAngle`, `Checkbox`, `Combo`, `InputInt`, `RadioButton`, `ListBox`,
   `MenuItem(bool*)` and `Selectable(bool*)` through the value hook, and each
   variable is checked; wrong shapes and types, a widget not drawn in the next

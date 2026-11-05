@@ -7,7 +7,7 @@
 //   exactly width * height bytes,
 // - 300 glyphs loaded one after another grow the page through several
 //   doubling steps, and every glyph is still in the page afterwards: the
-//   texel at the centre of each glyph's UV rectangle holds full coverage
+//   texel at the center of each glyph's UV rectangle holds full coverage
 //   (the test font's glyph is a filled square), and texels outside the
 //   glyph rectangles hold none.
 //
@@ -15,8 +15,8 @@
 // and, in one frame, draws 150 glyphs that were never drawn before into an
 // Fbo, one drawString() call each, so the page grows several times inside
 // the frame. It checks that the page texture is SG_PIXELFORMAT_R8 and that
-// every glyph is in the Fbo with the colour set by setColor() at full
-// coverage (straight alpha over a transparent Fbo: rgb = colour, a = 1).
+// every glyph is in the Fbo with the color set by setColor() at full
+// coverage (straight alpha over a transparent Fbo: rgb = color, a = 1).
 // Then it draws minified text, which gives the R8 page a mip chain, and
 // checks that the glyphs are in the Fbo.
 //
@@ -244,7 +244,7 @@ static void checkCpuPages() {
         for (int y = max(0, y0 - 1); y < min(h, y1 + 1); y++)
             for (int x = max(0, x0 - 1); x < min(w, x1 + 1); x++) mask[(size_t)y * w + x] = 1;
     }
-    check("every glyph's centre texel holds full coverage", missing == 0,
+    check("every glyph's center texel holds full coverage", missing == 0,
           to_string(missing) + " glyphs without coverage");
     size_t stray = 0;
     for (size_t p = 0; p < mgr.getAtlasCount(); p++) {
@@ -301,8 +301,8 @@ public:
         vector<unsigned char> px((size_t)W * H * 4);
         check("gpu: Fbo readPixels", fbo_.readPixels(px.data()));
 
-        // Fully covered texels must be exactly the colour (straight alpha over
-        // transparent black: rgb = colour, a = 1). Counted per cell, so the
+        // Fully covered texels must be exactly the color (straight alpha over
+        // transparent black: rgb = color, a = 1). Counted per cell, so the
         // readback's row order does not matter (the grid fills the Fbo).
         int cellsWithGlyph = 0, wrongColour = 0;
         for (int i = 0; i < kCols * kRows; i++) {
@@ -320,7 +320,7 @@ public:
         }
         check("gpu: all 150 glyphs drawn in the burst are in the Fbo",
               cellsWithGlyph == kCols * kRows, to_string(cellsWithGlyph) + " of 150");
-        check("gpu: fully covered texels have the setColor() colour", wrongColour == 0,
+        check("gpu: fully covered texels have the setColor() color", wrongColour == 0,
               to_string(wrongColour) + " texels");
 
         // Minified draws: the first one asks for the mip chain, the next one

@@ -115,7 +115,7 @@ Known reason tokens include `last-window-close` (last-window or quit-on-close), 
 `tc-quit`, `os-session-end` (idle desktop session commit), `app-quit` (macOS: a quit Apple
 event without one of those reasons, i.e. Cmd+Q, the Dock's Quit or an
 AppleScript `quit`), `sigterm`, `sigint`, and `device-lost` where the backend
-detects loss. A cancelled request clears its origin. Cleanup freezes it so
+detects loss. A canceled request clears its origin. Cleanup freezes it so
 callbacks cannot change the reason halfway through the pair.
 
 | Observed markers for a run | Meaning |

@@ -168,7 +168,7 @@ public:
     // on main in a later frame. Handle operations/direct sample access must be
     // serialized on main (direct sample access keeps its existing mixer rules).
     // Web without pthreads defers CPU decode to a frame, which may stall it.
-    // App exit waits for loads still decoding; cancelling never waits.
+    // App exit waits for loads still decoding; canceling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
     void loadAsync(const fs::path& path);
@@ -2038,7 +2038,7 @@ public:
     bool start(int sampleRate = DEFAULT_SAMPLE_RATE);
     // Main-thread operation. Web requires a secure context and user gesture.
     // macOS/iOS request undecided consent before capture init, without a worker;
-    // isStarting stays true until answered or cancelled. Exit never awaits consent.
+    // isStarting stays true until answered or canceled. Exit never awaits consent.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
     void startAsync(int sampleRate = DEFAULT_SAMPLE_RATE);

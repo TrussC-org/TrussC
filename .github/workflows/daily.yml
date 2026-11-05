@@ -413,7 +413,7 @@ jobs:
 
       # The web builds above only compile. Core tests carrying a `web-test`
       # marker (core/tests/*/web-test) are built for wasm and RUN under node, so
-      # web-only behaviour (#ifdef __EMSCRIPTEN__) is exercised once a day. They
+      # web-only behavior (#ifdef __EMSCRIPTEN__) is exercised once a day. They
       # must not touch the canvas / GPU; a non-zero exit fails the job.
       # An example failure must not hide web regressions; a skipped sweep means
       # its prerequisites did not complete, so the tests cannot run either.

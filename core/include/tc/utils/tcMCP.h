@@ -463,7 +463,7 @@ inline bool hasDeferredResponsesForTarget(const void* target) {
 // While an owner is set, every tool / resource / status entry registered is
 // tagged with it, and removeRegistrationsOwnedBy() takes them all out again.
 // Every App has an independent owner, including its complete constructor,
-// pending request, callbacks and lazy addon registrations. Ending or cancelling
+// pending request, callbacks and lazy addon registrations. Ending or canceling
 // it retires that owner without affecting sibling Apps. Runtime registrations
 // made without an App owner are permanent until their service removes them.
 // Both accessors are defined in tcMCP.cpp: the host sets the owner and a guest

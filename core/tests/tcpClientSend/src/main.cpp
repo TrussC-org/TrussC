@@ -71,7 +71,7 @@ void scenario() {
         client.setSendAsyncBufferSize(0);
         atomic<int> completions{0};
         auto complete = client.onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
-            check("cancelled send reports disconnection", e.error == SendError::Disconnected);
+            check("canceled send reports disconnection", e.error == SendError::Disconnected);
             ++completions;
         });
         check("queued cancellation connect", client.connect("127.0.0.1", listener.port));
@@ -94,7 +94,7 @@ void scenario() {
         client.stopConnectThread();
         check("queued borrowed sender returns failure", until([&] { return returned.load(); }) && failed);
         sender.join();
-        check("cancelled queue bytes removed before writer resumes", client.getSendAsyncPendingBytes() == activeBytes);
+        check("canceled queue bytes removed before writer resumes", client.getSendAsyncPendingBytes() == activeBytes);
         check("removed send completions wait for the writer", completions == 0);
         {
             int errors = 0;
@@ -275,7 +275,7 @@ void scenario() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
-    TcpClient winsock; // Initialise process-wide Winsock before raw fixtures.
+    TcpClient winsock; // Initialize process-wide Winsock before raw fixtures.
     Watchdog watchdog;
     scenario();
     return failures ? 1 : 0;

@@ -37,13 +37,13 @@ void tcApp::buildPattern(Image& img, int w, int h) {
     img.allocate(w, h, 4);
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
-            // Background checker (16x16 cells, black / light grey).
+            // Background checker (16x16 cells, black / light gray).
             int cx = x / 16;
             int cy = y / 16;
             bool checker = ((cx + cy) & 1) == 0;
             float base = checker ? 0.85f : 0.05f;
 
-            // Soft radial highlight from the centre. Sub-pixel maths so the
+            // Soft radial highlight from the center. Sub-pixel maths so the
             // gradient survives bicubic resamples without banding.
             float dx = (x - w * 0.5f) / (w * 0.5f);
             float dy = (y - h * 0.5f) / (h * 0.5f);

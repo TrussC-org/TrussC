@@ -118,7 +118,7 @@ private:
     }
 
     // Wait until no in-flight callback matches. No-op on the worker thread (a
-    // callback cancelling its own timer) so it can't deadlock on itself.
+    // callback canceling its own timer) so it can't deadlock on itself.
     template <typename Match>
     void waitInFlight(std::unique_lock<std::mutex>& lk, Match isExecuting) {
         if (std::this_thread::get_id() == workerId_) return;

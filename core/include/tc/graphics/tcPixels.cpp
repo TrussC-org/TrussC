@@ -334,7 +334,7 @@ namespace {
 // Catmull-Rom bicubic kernel weight at signed distance d. The result is
 // undefined outside [-2, 2]; callers are expected to only sample within
 // that window. Sum of weights over -1, 0, 1, 2 is exactly 1, so the
-// caller can skip normalisation.
+// caller can skip normalization.
 inline float catmullRomWeight(float d) {
     float a = std::abs(d);
     if (a <= 1.0f) return ((1.5f * a - 2.5f) * a) * a + 1.0f;
@@ -573,7 +573,7 @@ static void resample1D_X(const Pixels& src, Pixels& dst) {
                     }
                     v = (total > 0.0f) ? (sum / total) : fetchLinear(y, std::min(startI, sw - 1), c, linCh);
                 } else {
-                    // Catmull-Rom bicubic — 4 neighbours of the sub-pixel position
+                    // Catmull-Rom bicubic — 4 neighbors of the sub-pixel position
                     // in source space, clamped to source bounds.
                     float center = (x + 0.5f) * scale - 0.5f;
                     int cf = (int)std::floor(center);

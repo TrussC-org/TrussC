@@ -358,7 +358,7 @@ pass bounds and Metal validation aborts. **Replicate the set-then-readback exact
 ## 6. Touch input (`_sapp_ios_touch_event`, 6636–6655)
 
 Real multi-touch (no mouse emulation). Wired from `_sapp_ios_view` (6903–6914):
-`touchesBegan/Moved/Ended/Cancelled:withEvent:` → `_sapp_ios_touch_event(TYPE, touches,
+`touchesBegan/Moved/Ended/Canceled:withEvent:` → `_sapp_ios_touch_event(TYPE, touches,
 event)`.
 
 ```c
@@ -407,7 +407,7 @@ if (num_touches > 0) _sapp_call_event(&event);
 ### tvOS press events (6611–6634, 6892–6902) — DEAD-but-kept
 `_sapp_tvos_press_event` maps Apple-TV remote `UIPress` arrow/select/menu/playpause to
 `SAPP_KEYCODE_*` and fires KEY_DOWN/KEY_UP. The `_sapp_ios_view` wires
-`pressesBegan/Ended/Cancelled:`. TrussC never targets tvOS, but the code compiles on
+`pressesBegan/Ended/Canceled:`. TrussC never targets tvOS, but the code compiles on
 iOS (harmless) — lift as-is, mark not-exercised.
 
 ---
@@ -672,7 +672,7 @@ quit/skip_present/secondary-windows/GLES3); SUSPENDED/RESUMED fire but TrussC dr
 There is no CI coverage for iOS; the only gate is a real device. Before calling the port
 done, confirm on-device:
 - [ ] App launches, renders (RGB10A2 layer, correct colors, no banding), holds framerate.
-- [ ] **Touch**: multi-touch works; began/moved/ended/cancelled reach app; `identifier`
+- [ ] **Touch**: multi-touch works; began/moved/ended/canceled reach app; `identifier`
       stable across a drag; coordinates correct at Retina scale.
 - [ ] **Rotation**: rotate device → RESIZED fires, framebuffer + drawable resize, no
       scissor/validation abort; both portrait and landscape.

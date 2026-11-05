@@ -214,7 +214,7 @@ def is_combined_core_test(test_dir):
 
 def find_core_web_tests(root_dir, include_daily=False):
     # Core tests that ALSO run as a WebAssembly build under node: those
-    # carrying a `web-test` marker file. Web-only behaviour
+    # carrying a `web-test` marker file. Web-only behavior
     # (#ifdef __EMSCRIPTEN__) is otherwise only ever compiled in CI, never run.
     tests = (find_core_tests(root_dir, include_daily=include_daily)
              + find_core_unit_tests(root_dir, include_daily=include_daily))
