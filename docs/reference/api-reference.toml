@@ -41346,15 +41346,15 @@ void tcApp::draw() {
 ```
 '''
 platform_note.en = '''
-- macOS, Windows, Linux and Web. On the Web it follows the page's focus and blur, and stays false until the first focus event arrives.
+- macOS, Windows, Linux and Web. On the Web it follows the page's focus and blur, and starts from whether the page has focus when the window opens.
 - iOS and Android: always false.
 '''
 platform_note.ja = '''
-- macOS、Windows、Linux、Web で使えます。Web ではページのフォーカスとブラーに従い、最初のフォーカスのイベントが届くまでは false のままです。
+- macOS、Windows、Linux、Web で使えます。Web ではページのフォーカスとブラーに従い、ウィンドウを開いた時点でページにフォーカスがあるかどうかから始まります。
 - iOS と Android: 常に false です。
 '''
 platform_note.ko = '''
-- macOS, Windows, Linux, Web에서 사용할 수 있습니다. Web에서는 페이지의 포커스와 블러를 따르며, 첫 포커스 이벤트가 도착할 때까지 false입니다.
+- macOS, Windows, Linux, Web에서 사용할 수 있습니다. Web에서는 페이지의 포커스와 블러를 따르며, 윈도우를 열 때 페이지에 포커스가 있는지에서 시작합니다.
 - iOS와 Android: 항상 false입니다.
 '''
 related = ["CoreEvents::focusChanged", "App::windowFocusChanged", "Window::bringToFront", "Window::isOccluded", "Window::isOpen"]

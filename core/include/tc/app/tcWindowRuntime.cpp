@@ -1,4 +1,7 @@
 #include <TrussC.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 namespace trussc {
 Window::OwnedState::OwnedState() {
@@ -1884,7 +1887,13 @@ void bootstrapWindow(Window& target, void (*bootstrap)()) {
     auto& state = coordinator();
     state.bootstrapping = true;
     try {
-        if constexpr (!supportsSecondaryWindows()) WindowRequestAccess::binding(target).bound = sapp_isvalid();
+        if constexpr (!supportsSecondaryWindows()) {
+            WindowRequestAccess::binding(target).bound = sapp_isvalid();
+#ifdef __EMSCRIPTEN__
+            // The page reports focus/blur only when it changes, so start from its current focus.
+            WindowRequestAccess::binding(target).focused = emscripten_run_script_int("document.hasFocus() ? 1 : 0") != 0;
+#endif
+        }
         WindowEntryScope entry(target, false, true);
         if (entry) bootstrap();
     } catch (...) {

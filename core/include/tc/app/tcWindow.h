@@ -96,7 +96,8 @@ public:
     bool isOccluded() const;
 
     // Keyboard focus as last reported by the OS for this window. False until
-    // the first focus event arrives, and false once the window is closed.
+    // the first focus event arrives (on the Web it starts from the page's
+    // focus), and false once the window is closed.
     // Desktop and Web only; iOS / Android never report focus.
     bool isFocused() const;
 
