@@ -41772,6 +41772,24 @@ details.ko = '''
 - 비활성화하면 논리 해상도의 프레임버퍼를 요청합니다. 좌표 단위는 `WindowSettings::pixelPerfect`에서 별도로 지정합니다.
 '''
 
+["WindowSettings::parentWindow"]
+description.en = "Holds the parent window set by setParentWindow(), without owning it."
+description.ja = "setParentWindow() で指定した親ウィンドウを、所有せずに保持する。"
+description.ko = "setParentWindow()로 지정한 부모 윈도우를 소유하지 않고 보관한다."
+details.en = '''
+- This is the stored value behind `WindowSettings::setParentWindow`; set it through that function. It is a `weak_ptr<Window>`, so the settings never keep the parent alive. An empty value means no parent, which is the default.
+- It is read only when a window is created with `createWindow()`. The launch window of `runApp()` ignores it.
+'''
+details.ja = '''
+- `WindowSettings::setParentWindow` が設定する値を保持するフィールドです。設定はその関数を通して行ってください。`weak_ptr<Window>` なので、設定が親ウィンドウを生かし続けることはありません。空の値は親なしを表し、これがデフォルトです。
+- 読み取られるのは `createWindow()` でウィンドウを作るときだけです。`runApp()` の最初のウィンドウでは無視されます。
+'''
+details.ko = '''
+- `WindowSettings::setParentWindow`가 설정하는 값을 보관하는 필드이며, 설정은 그 함수로 하세요. `weak_ptr<Window>`이므로 설정이 부모 윈도우를 계속 살려 두지 않습니다. 빈 값은 부모 없음을 뜻하며 기본값입니다.
+- `createWindow()`로 윈도우를 만들 때만 읽습니다. `runApp()`의 첫 윈도우에서는 무시됩니다.
+'''
+related = ["WindowSettings::setParentWindow", "createWindow"]
+
 ["WindowSettings::pixelPerfect"]
 description.en = "Specifies whether window coordinates use framebuffer pixels."
 description.ja = "ウィンドウ座標にフレームバッファのピクセルを使うか指定する。"
@@ -41860,6 +41878,68 @@ details.ja = '''
 details.ko = '''
 - `enabled`를 `highDpi`에 설정합니다. 프레임버퍼 해상도의 동작은 `WindowSettings::highDpi`에 설명되어 있습니다.
 - `WindowSettings&`를 반환합니다. 설정 함수의 공통 동작은 `WindowSettings::setSize`에 설명되어 있습니다.
+'''
+
+["WindowSettings::setParentWindow"]
+keywords = ["parent", "owner", "palette", "tool window", "child window", "transient", "always on top", "z-order", "above"]
+description.en = "Keeps a new window above a parent window."
+description.ja = "新しいウィンドウを親ウィンドウの手前に保つ。"
+description.ko = "새 윈도우를 부모 윈도우 위에 유지한다."
+details.en = '''
+- Pass the parent when you set up the settings for `createWindow()`. The new window then stays in front of the parent, like a tool palette over a canvas. A window created without a parent is a normal window.
+- It only affects stacking order. It is not modal: the parent still takes clicks, keys and focus, and nothing is blocked. The parent does not wait for the child.
+- It is read once, when the window is created. There is no way to change or remove the parent of an open window.
+- The settings hold the parent weakly, so they do not keep it alive. If the parent is already closed or gone when `createWindow()` runs, a warning is logged and a normal window is created.
+- `setParentWindow(*getWindow())` takes a `Window&`, which is how you name the window your App is attached to. `setParentWindow(win)` takes the `shared_ptr<Window>` that `createWindow()` returned. An empty pointer clears the parent. Both return the same `WindowSettings&`.
+- If the parent closes first, a child that is still open stays open as a normal window on every OS. Closing the child never affects the parent.
+- The OS decides the details: the child moves together with the parent only on macOS. On Windows the child is hidden while the parent is minimised and has no taskbar button of its own. On Linux X11 the window manager decides how a transient window behaves, for example whether it follows a minimised parent.
+- Only the `createWindow()` form is affected. The launch window of `runApp()` ignores a parent.
+'''
+details.ja = '''
+- `createWindow()` に渡す設定を作るときに、親ウィンドウを渡します。新しいウィンドウは、キャンバスの上のツールパレットのように、親の手前に表示され続けます。親を指定しないで作ったウィンドウは、ふつうのウィンドウです。
+- 影響するのは重なり順だけです。モーダルではありません。親はクリックもキーもフォーカスもこれまでどおり受け取り、何もブロックされません。親が子を待つこともありません。
+- 読み取られるのは、ウィンドウを作るときの 1 回だけです。開いているウィンドウの親を、あとから変えたり外したりする方法はありません。
+- 設定は親を弱参照で持つので、親を生かし続けることはありません。`createWindow()` を呼んだ時点で親がすでに閉じている、または存在しない場合は、警告を出してふつうのウィンドウを作ります。
+- `setParentWindow(*getWindow())` は `Window&` を受け取ります。自分の App が付いているウィンドウを指定するときに使います。`setParentWindow(win)` は、`createWindow()` が返した `shared_ptr<Window>` を受け取ります。空のポインターを渡すと、親の指定が外れます。どちらも同じ `WindowSettings&` を返します。
+- 親のほうが先に閉じた場合、まだ開いている子は、どの OS でもふつうのウィンドウとして開いたままになります。子を閉じても親には影響しません。
+- 細かい動きは OS ごとに違います。子が親と一緒に動くのは macOS だけです。Windows では、親が最小化されると子も隠れ、子だけのタスクバーのボタンは出ません。Linux X11 では、transient ウィンドウの扱い（たとえば親の最小化に付いてくるか）はウィンドウマネージャーが決めます。
+- 対象は `createWindow()` で作るウィンドウだけです。`runApp()` の最初のウィンドウでは、親の指定は無視されます。
+'''
+details.ko = '''
+- `createWindow()`에 넘길 설정을 만들 때 부모 윈도우를 지정합니다. 그러면 새 윈도우는 캔버스 위의 도구 팔레트처럼 부모 앞에 계속 표시됩니다. 부모를 지정하지 않고 만든 윈도우는 일반 윈도우입니다.
+- 겹치는 순서에만 영향을 줍니다. 모달이 아닙니다. 부모는 클릭, 키, 포커스를 그대로 받으며 아무것도 막히지 않습니다. 부모가 자식을 기다리지도 않습니다.
+- 윈도우를 만들 때 한 번만 읽습니다. 열려 있는 윈도우의 부모를 나중에 바꾸거나 해제하는 방법은 없습니다.
+- 설정은 부모를 약한 참조로 가지므로 부모를 살려 두지 않습니다. `createWindow()`를 호출한 시점에 부모가 이미 닫혔거나 없으면 경고를 기록하고 일반 윈도우를 만듭니다.
+- `setParentWindow(*getWindow())`는 `Window&`를 받으며, 자신의 App이 연결된 윈도우를 지정할 때 사용합니다. `setParentWindow(win)`은 `createWindow()`가 반환한 `shared_ptr<Window>`를 받습니다. 빈 포인터를 넘기면 부모 지정이 해제됩니다. 둘 다 같은 `WindowSettings&`를 반환합니다.
+- 부모가 먼저 닫히면, 아직 열려 있는 자식은 어느 OS에서든 일반 윈도우로 열린 채 남습니다. 자식을 닫아도 부모에는 영향이 없습니다.
+- 세부 동작은 OS마다 다릅니다. 자식이 부모와 함께 움직이는 것은 macOS뿐입니다. Windows에서는 부모가 최소화되면 자식도 숨겨지고, 자식만의 작업 표시줄 버튼은 생기지 않습니다. Linux X11에서는 transient 윈도우의 동작(예: 부모의 최소화를 따라가는지)을 윈도우 매니저가 정합니다.
+- 대상은 `createWindow()`로 만드는 윈도우뿐입니다. `runApp()`의 첫 윈도우에서는 부모 지정이 무시됩니다.
+'''
+platform_note.en = '''
+- Available on macOS (child window above the parent), Windows (owned window) and Linux X11 (`WM_TRANSIENT_FOR`). iOS, Android and Web have no second window, so `createWindow()` does not create one there and this setting has no effect.
+- Only macOS moves the child along with the parent. Windows hides the child while the parent is minimised. On Linux the window manager decides, and with no window manager the hint has no effect.
+'''
+platform_note.ja = '''
+- macOS（親の上の子ウィンドウ）、Windows（オーナー付きウィンドウ）、Linux X11（`WM_TRANSIENT_FOR`）で使えます。iOS、Android、Web には 2 つ目のウィンドウがなく、`createWindow()` はウィンドウを作らないので、この設定は何の効果もありません。
+- 親と一緒に子が動くのは macOS だけです。Windows では、親が最小化されると子も隠れます。Linux ではウィンドウマネージャーが決め、ウィンドウマネージャーがない環境ではこのヒントは効きません。
+'''
+platform_note.ko = '''
+- macOS(부모 위의 자식 윈도우), Windows(소유된 윈도우), Linux X11(`WM_TRANSIENT_FOR`)에서 사용할 수 있습니다. iOS, Android, Web에는 두 번째 윈도우가 없고 `createWindow()`가 윈도우를 만들지 않으므로 이 설정은 아무 효과가 없습니다.
+- 자식이 부모와 함께 움직이는 것은 macOS뿐입니다. Windows에서는 부모가 최소화되면 자식도 숨겨집니다. Linux에서는 윈도우 매니저가 정하며, 윈도우 매니저가 없는 환경에서는 이 힌트가 효과가 없습니다.
+'''
+related = ["WindowSettings::parentWindow", "createWindow", "Window::bringToFront", "Window::close", "App::getWindow", "WindowSettings"]
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+shared_ptr<Window> palette;   // keep the handle: createWindow() returns it
+
+// tcApp.cpp
+void tcApp::setup() {
+    WindowSettings ws;
+    ws.setSize(200, 220).setTitle("Palette");
+    ws.setParentWindow(*getWindow());   // stays above this (the canvas) window
+    palette = createWindow(ws);
+    if (palette) palette->setApp<PaletteApp>();
+}
 '''
 
 ["WindowSettings::setPixelPerfect"]

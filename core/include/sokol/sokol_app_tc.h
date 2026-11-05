@@ -2447,6 +2447,9 @@ typedef struct sapp_window_desc {
     int swap_interval;          /* macOS/Win32: 0 = default (1), positive = display interval;
                                   X11 secondaries use nonblocking swaps and main presentation admission,
                                   with a refresh timer fallback */
+    sapp_window parent;         /* [TrussC] z-order-only parent (id 0 = none): the window stays above it.
+                                  macOS child window, Win32 owner HWND, X11 WM_TRANSIENT_FOR.
+                                  An unknown or closed id is ignored. */
 } sapp_window_desc;
 
 // Private host metadata boundary. Reading it never acquires a drawable.
@@ -3926,6 +3929,11 @@ static void _sapp_tc_mac_unwind(_sapp_tc_window_t* w) {
     w->delegate.w = 0;
     if (w->window) {
         w->window.delegate = nil;
+        /* [TrussC] Leave the parent/child relation first: ordering a parent out
+           would order its children out with it. A child of a closed parent stays
+           open as an ordinary window. */
+        if (w->window.parentWindow) [w->window.parentWindow removeChildWindow:w->window];
+        for (NSWindow* child in [w->window.childWindows copy]) [w->window removeChildWindow:child];
         [w->window orderOut:nil];
         w->window = nil;
     }
@@ -4104,6 +4112,12 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
         [window orderOut:nil];
         _sapp_tc.create_error = "Window was destroyed during creation";
         return 0;
+    }
+    /* [TrussC] Parent window: AppKit keeps a child above its parent and moves it
+       with the parent. Not modal: the parent still takes input. */
+    if (w->desc.parent.id) {
+        _sapp_tc_window_t* parent = _sapp_tc_lookup(w->desc.parent);
+        if (parent && parent->window && parent != w) [parent->window addChildWindow:window ordered:NSWindowAbove];
     }
     if (d->fullscreen) {
         _sapp_tc_request_fullscreen(w, true);
@@ -8196,7 +8210,7 @@ static bool _sapp_tc_win32_ensure_wndclass(void) {
    one client resize. Pixel overrides use render DPI for pixels -> points,
    just like setSize (render DPI can be 1 with high_dpi disabled). */
 static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wchar_t* title,
-        DWORD style, DWORD ex_style, int x, int y) {
+        DWORD style, DWORD ex_style, int x, int y, HWND owner) {
     if (!_sapp_tc_win32_ensure_wndclass()) return false;
     int outer_w = CW_USEDEFAULT;
     int outer_h = CW_USEDEFAULT;
@@ -8210,7 +8224,7 @@ static bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w, const wcha
         (x >= 0) ? x : CW_USEDEFAULT,
         (y >= 0) ? y : CW_USEDEFAULT,
         outer_w, outer_h,
-        NULL, NULL, GetModuleHandleW(NULL), w);
+        owner, NULL, GetModuleHandleW(NULL), w);   /* [TrussC] owner HWND (NULL = none) */
     if (!w->hwnd) {
         const DWORD error = GetLastError();
         _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_OK, __LINE__,
@@ -8267,7 +8281,17 @@ static void _sapp_tc_win32_unwind(_sapp_tc_window_t* w) {
     _sapp_tc_d3d11_destroy_render_targets(w);
     if (w->frame_wait) CloseHandle(w->frame_wait);
     _SAPP_TC_RELEASE(w->swap_chain);
-    if (w->hwnd) DestroyWindow(w->hwnd);
+    if (w->hwnd) {
+        /* [TrussC] DestroyWindow destroys the windows this one owns, which would
+           leave their records with a dead HWND and no close callback. Release them
+           first: a child of a closed parent stays open as an ordinary window. */
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
+            _sapp_tc_window_t* other = _sapp_tc.windows[i];
+            if (other && other != w && other->hwnd && GetWindow(other->hwnd, GW_OWNER) == w->hwnd)
+                SetWindowLongPtrW(other->hwnd, GWLP_HWNDPARENT, 0);
+        }
+        DestroyWindow(w->hwnd);
+    }
     free(w->title);
     delete w;
 }
@@ -8317,8 +8341,16 @@ static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_des
     const DWORD style = w->desc.borderless ? WS_POPUP | WS_SYSMENU :
         WS_CLIPSIBLINGS | WS_CLIPCHILDREN | WS_CAPTION | WS_SYSMENU |
         WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SIZEBOX;
-    const DWORD ex_style = WS_EX_APPWINDOW | WS_EX_WINDOWEDGE;
-    if (!_sapp_tc_win32_create_native_window(w, wide, style, ex_style, w->desc.x, w->desc.y)) {
+    /* [TrussC] Parent window: an owned window stays above its owner (z-order
+       only, the owner still takes input). It gets no taskbar button of its own,
+       so WS_EX_APPWINDOW is dropped; Windows hides it while the owner is minimised. */
+    HWND owner = NULL;
+    if (w->desc.parent.id) {
+        _sapp_tc_window_t* parent = _sapp_tc_lookup(w->desc.parent);
+        if (parent && parent->hwnd) owner = parent->hwnd;
+    }
+    const DWORD ex_style = (owner ? 0 : WS_EX_APPWINDOW) | WS_EX_WINDOWEDGE;
+    if (!_sapp_tc_win32_create_native_window(w, wide, style, ex_style, w->desc.x, w->desc.y, owner)) {
         _sapp_tc_win32_unwind(w);
         return 0;
     }
@@ -11763,6 +11795,12 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
 }
 
 static void _sapp_tc_x11_show_window(_sapp_tc_window_t* w) {
+    /* [TrussC] Parent window: WM_TRANSIENT_FOR asks the window manager to keep
+       this window above its parent. It has to be set before the window is mapped. */
+    if (w->desc.parent.id) {
+        _sapp_tc_window_t* parent = _sapp_tc_lookup(w->desc.parent);
+        if (parent && parent != w && parent->xwin) XSetTransientForHint(_sapp_tc.display, w->xwin, parent->xwin);
+    }
     XMapWindow(_sapp_tc.display, w->xwin);
     XEvent dummy;
     _sapp_tc_x11_wait_for_event(w->xwin, VisibilityNotify, 0.1, &dummy);

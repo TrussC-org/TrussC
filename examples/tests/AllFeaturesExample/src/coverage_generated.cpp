@@ -4887,6 +4887,7 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().fullscreen;
         (void)af::val<WindowSettings>().height;
         (void)af::val<WindowSettings>().highDpi;
+        (void)af::val<WindowSettings>().parentWindow;
         (void)af::val<WindowSettings>().pipelinePoolSize;
         (void)af::val<WindowSettings>().pixelPerfect;
         (void)af::val<WindowSettings>().quitOnClose;
@@ -4895,6 +4896,8 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().setDecorated(af::val<bool>());
         (void)af::val<WindowSettings>().setFullscreen(af::val<bool>());
         (void)af::val<WindowSettings>().setHighDpi(af::val<bool>());
+        (void)af::val<WindowSettings>().setParentWindow(af::val<const std::shared_ptr<Window>>());
+        (void)af::val<WindowSettings>().setParentWindow(af::val<Window>());
         (void)af::val<WindowSettings>().setPipelinePoolSize(af::val<int>());
         (void)af::val<WindowSettings>().setPixelPerfect(af::val<bool>());
         (void)af::val<WindowSettings>().setQuitOnClose(af::val<bool>());

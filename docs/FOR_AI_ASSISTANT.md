@@ -4807,6 +4807,7 @@ void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
+WindowSettings & WindowSettings::setParentWindow(const std::shared_ptr<Window> & parent) [+1]  // Keeps a new window above a parent window.
 WindowSettings & WindowSettings::setPipelinePoolSize(int count)  // Sets the startup pipeline pool slot count.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.
 WindowSettings & WindowSettings::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.

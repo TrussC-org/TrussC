@@ -130,7 +130,8 @@ void ShowWindow(NativeWindow* n,int) {
 }
 void DragAcceptFiles(NativeWindow*,int) {}
 bool _sapp_tc_win32_utf8_to_wide(const char*,WCHAR*,int) { return true; }
-bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w,const WCHAR*,DWORD style,DWORD ex,int x,int y) {
+using HWND=NativeWindow*;
+bool _sapp_tc_win32_create_native_window(_sapp_tc_window_t* w,const WCHAR*,DWORD style,DWORD ex,int x,int y,HWND) {
     w->hwnd=new NativeWindow; w->hwnd->rect={x,y,x+w->desc.width,y+w->desc.height};
     w->hwnd->style=style; w->hwnd->ex_style=ex; return true;
 }
@@ -151,6 +152,7 @@ void set_content_size(NativeWindow*,Size) {}
 NSRect content_rect(NativeWindow*) { return {}; }
 NSRect get_screen_rect() { return NSMakeRect(0,0,1920,1080); }
 void make_first_responder(NativeWindow*,View*) {}
+void add_child(NativeWindow*,NativeWindow*) {}
 void center(NativeWindow*) {}
 void add_link(_sapp_tc_window_t* w) { w->source=true; calls.push_back("source"); }
 void mac_show(_sapp_tc_window_t* w) {
@@ -198,6 +200,8 @@ void _sapp_tc_log(...) {}
 // PRODUCTION_NATIVE
 
 namespace trussc {
+struct Window;
+#define TC_LUA_SKIP
 // Keep the production WindowSettings declaration, including defaults/setters.
 // PRODUCTION_SETTINGS
 struct Window {
@@ -223,6 +227,7 @@ void windowTick(sapp_window,void*) {} void windowEvent(const sapp_event*,sapp_wi
 void windowClosed(sapp_window,void*) {}
 bool allowWindowClose(sapp_window,void*) { return true; }
 void retainRuntimeWindow(const std::shared_ptr<Window>&) {}
+sapp_window resolveParentWindow(const WindowSettings&) { return {0}; }
 void refreshWindowMetadata(Window&) {}
 bool bindNativeWindow(uint32_t id,void*) {
     auto* w=_sapp_tc_lookup({id}); check("binding after dimensions before ready",w&&w->initialized&&!w->ready);

@@ -142,6 +142,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.close_request_cb = &internal::allowWindowClose;
     d.user_data = win.get();
     d.bind_cb = bindAdapter;
+    d.parent = internal::resolveParentWindow(settings);
     win->native_ = st;
     {
         internal::WindowLifecycleScope construction(*win);

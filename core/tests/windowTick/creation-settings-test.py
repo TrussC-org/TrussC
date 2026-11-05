@@ -50,6 +50,7 @@ def mac_api(source):
         ('_sapp_tc_win_delegate* del = [_sapp_tc_win_delegate new]', 'Delegate* del = new Delegate'),
         ('[w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes]', 'add_link(w)'),
         ('[window makeKeyAndOrderFront:nil]', 'mac_show(w)'),
+        ('[parent->window addChildWindow:window ordered:NSWindowAbove]', 'add_child(parent->window, window)'),
         ('NSWindow* window = w->window;', 'NativeWindow* window = w->window;'),
     ]
     source = source.replace('[w->window makeKeyAndOrderFront:nil]', 'mac_show(w)')

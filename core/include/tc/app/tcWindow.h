@@ -852,6 +852,31 @@ inline bool Window::isOccluded() const {
 
 inline bool Window::isFocused() const { return isOpen() && binding_.focused; }
 
+inline WindowSettings& WindowSettings::setParentWindow(Window& parent) {
+    parentWindow = internal::WindowRequestAccess::retainHostOwner(parent);
+    return *this;
+}
+
+namespace internal {
+// The native parent handle for a new window: {0} when settings name no parent,
+// or when the named one is closed or gone (logs a warning, and the caller then
+// creates a normal window). Hands out an id only; the native side checks it again.
+inline sapp_window resolveParentWindow(const WindowSettings& settings) {
+    const std::weak_ptr<Window> none;
+    const auto& weak = settings.parentWindow;
+    // An empty weak_ptr (never set, or set from an empty pointer) is "no parent";
+    // an expired one is a parent that existed and is gone.
+    if (!weak.owner_before(none) && !none.owner_before(weak)) return {0};
+    auto parent = weak.lock();
+    if (!parent || !parent->isOpen() || WindowRequestAccess::closeRequested(*parent)
+            || !WindowRequestAccess::binding(*parent).handle.id) {
+        logWarning("Window") << "createWindow(): the parent window is closed or gone; creating a normal window";
+        return {0};
+    }
+    return WindowRequestAccess::binding(*parent).handle;
+}
+}
+
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
     if (internal::runtimeEnding()) return nullptr;
     if constexpr (!internal::supportsSecondaryWindows()) {
