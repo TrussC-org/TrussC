@@ -42,7 +42,8 @@ void recordTouchedForTests(NodeInspector& inspector, ::tc::Node* node, ::tc::Mod
 
 // Renders each reflected member as the matching ImGui widget. Read-only
 // values (getter-only TC_VALUE) render greyed out; enums render as a combo of
-// their labels. Public so an app can use it (or a subclass that overrides a
+// their labels; image-like values (an Fbo, Image or VideoPlayer member) render
+// as a thumbnail with their size and format, never editable. Public so an app can use it (or a subclass that overrides a
 // visit()) in its own ImGui panel via node->reflectMembers(r). The Inspector
 // always builds this base class itself, so a subclass does not change the
 // Inspector's widgets or its touched record.
@@ -74,6 +75,14 @@ struct ImGuiReflector : ::trussc::Reflector {
         });
     }
 
+    // An image-like member (Fbo, Image, VideoPlayer, ...): a thumbnail with the
+    // aspect ratio kept, and "W×H FORMAT" (or "not allocated") beside it.
+    // Read-only: nothing is edited or recorded as touched.
+    bool visit(const char* n, ::trussc::HasTexture& v) override {
+        if (suppressDepth_ == 0) showImage(n, v);
+        return false;
+    }
+
     // A composite member (nested type / TC_REFLECT_FREE) renders as a
     // collapsible, indented tree node. When a group is collapsed we suppress
     // its whole subtree so the reflected children draw nothing.
@@ -100,6 +109,9 @@ struct ImGuiReflector : ::trussc::Reflector {
     }
 
 protected:
+    // The image row of visit(HasTexture&); defined in tcxNodeInspector.cpp.
+    void showImage(const char* name, ::trussc::HasTexture& image);
+
     // Run a widget; suppress inside a collapsed group, grey out when read-only.
     // A change is recorded in `edited` under the member's path. A value the
     // MCP tools wrote (tcx_imgui_input) also makes the widget return true, so

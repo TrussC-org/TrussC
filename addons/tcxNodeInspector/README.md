@@ -85,6 +85,15 @@ there is no way to plug in a subclass yet. A subclass that overrides a
 `visit()` only helps in an ImGui panel your app draws itself (call
 `node->reflectMembers(r)` there). It does not change the Inspector.
 
+Image-like members (an `Fbo`, `Image` or `VideoPlayer` listed with
+`TC_VALUE(fbo)`) render as a read-only thumbnail with the aspect ratio kept,
+next to the size and format (`1920×1080 RGBA8`, or `not allocated`). The
+thumbnail is the texture as of the frame the Inspector drew it. A cubemap, a
+multisampled texture or a non-filterable format (for example `RGBA32F` on some
+GPUs) shows the text only. If the Fbo is destroyed or reallocated after the
+Inspector drew and before ImGui renders the frame, the thumbnail is skipped for
+that frame instead of drawing a dead texture. Images are not saved to JSON.
+
 ## Mods
 
 Mods reflect too (a `TC_REFLECT` block with `Mod` as the base) — the Inspector

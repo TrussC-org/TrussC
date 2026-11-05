@@ -203,6 +203,42 @@ struct ColorRect : public RectNode {
     }
 };
 
+// A node that owns an Fbo and redraws it every frame (a rotating rectangle).
+// The Fbo is reflected with TC_VALUE like any other member: the inspector shows
+// a live thumbnail with its size and format. Image values are read-only and
+// are never saved to JSON.
+struct CanvasNode : public Node {
+    Fbo fbo;
+    float speed = 1.0f;   // radians per second
+    float angle = 0.0f;   // radians
+
+    void setup() override { fbo.allocate(192, 120); }
+
+    void update() override {
+        angle = fmodf(angle + speed * (float)getDeltaTime(), TAU);
+        fbo.begin(0.10f, 0.12f, 0.16f, 1.0f);
+        pushMatrix();
+        translate(fbo.getWidth() * 0.5f, fbo.getHeight() * 0.5f);
+        rotate(angle);
+        setColor(0.95f, 0.55f, 0.25f);
+        fill();
+        drawRect(-50, -20, 100, 40);
+        popMatrix();
+        fbo.end();
+    }
+
+    void draw() override {
+        setColor(1.0f);
+        fbo.draw(0, 0);
+    }
+
+    TC_REFLECT(CanvasNode, Node) {
+        TC_VALUE(speed)
+        TC_VALUE(angle)
+        TC_VALUE(fbo)                      // image: thumbnail, read-only, not saved
+    }
+};
+
 // =============================================================================
 // One demo scene wired to show every feature at once:
 // - a 3D space (EasyCam, shift+drag to orbit) with cubes on a floor grid
@@ -276,6 +312,13 @@ inline void buildDemo(Node& parent) {
     title->radius   = 26;
     title->color    = Color(0.6f, 0.4f, 0.85f);
     ui->addChild(title);
+
+    // A node that owns an Fbo (top right): its thumbnail animates in the
+    // inspector while the node is selected.
+    auto canvas = make_shared<CanvasNode>();
+    canvas->setName("canvas");
+    canvas->setPos(760, 40);
+    ui->addChild(canvas);
 
     // Overlapping rectangles (bottom right): later children draw on top, and
     // clicking picks the frontmost one — so the inspector's "To front" /
