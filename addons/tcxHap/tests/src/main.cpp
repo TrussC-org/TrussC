@@ -1450,7 +1450,7 @@ public:
         check("HAP-Q: 64 draws attempt and report failure once",
               attempts == 1 && errors == 1 && warnings == 0);
         check("HAP-Q: error explains fallback and retry boundary",
-              error.find("without colour conversion until the next load()") != string::npos);
+              error.find("without color conversion until the next load()") != string::npos);
         unsigned char pixels[4 * 4 * 4] = {};
         const bool read = fbo.readPixels(pixels);
         bool red = read;

@@ -26,7 +26,7 @@
 // TC_VALUE arity is the access mode:
 //     TC_VALUE(member)                // a data member, edited in place
 //     TC_VALUE(name, getter)          // read-only: no setter exists, so it
-//                                     // can't be written — shown greyed out,
+//                                     // can't be written — shown grayed out,
 //                                     // write tools refuse it
 //     TC_VALUE(name, getter, setter)  // editable: read via getter, write via
 //                                     // setter so invariants (dirty flags,
@@ -140,7 +140,7 @@ struct EnumLabelSpan {
 // A plain `enum class` needs no extra declaration: the enumerator names are
 // recovered at compile time from the compiler's signature string over the
 // [TC_ENUM_AUTOLABEL_MIN, TC_ENUM_AUTOLABEL_MAX] window. enumLabel() also
-// honours a TC_ENUM_LABELS override when present (custom display strings, or
+// honors a TC_ENUM_LABELS override when present (custom display strings, or
 // enums whose values fall outside the window).
 // ---------------------------------------------------------------------------
 namespace internal {

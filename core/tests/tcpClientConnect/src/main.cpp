@@ -88,11 +88,11 @@ void destroyWithOlderDeliveryHeld() {
     check("queued send awaits cancellation", bool(client->sendAsync("c")));
     fixture->allowDestroy.set_value();
     check("destroy from send delivery returns", destroyed.wait_for(chrono::seconds(10)) == future_status::ready);
-    // The new run must drain its cancelled completion while the older run
+    // The new run must drain its canceled completion while the older run
     // still retains the shared delivery target. That target must not read a
     // destroyed Event even though its weak_ptr can still lock.
     check("new State finishes while older delivery is held", until([&] { return currentState.expired(); }));
-    check("destroyed event receives no cancelled completion", fixture->unexpected == 0);
+    check("destroyed event receives no canceled completion", fixture->unexpected == 0);
     fixture->firstRelease.set_value();
     check("older State finishes after delivery returns", until([&] { return oldState.expired(); }));
     if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
@@ -287,7 +287,7 @@ void scenario() {
 
 TC_CORE_TEST_MAIN() {
     internal::TcpClientTestAccess::pendingOverflow();
-    TcpClient winsock; // Initialise process-wide Winsock before raw fixtures.
+    TcpClient winsock; // Initialize process-wide Winsock before raw fixtures.
     Watchdog watchdog;
     destroyWithOlderDeliveryHeld();
     receiveReconnectWithWriterHeld();

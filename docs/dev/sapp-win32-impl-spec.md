@@ -305,13 +305,13 @@ through to `DefWindowProcW` (9794). Complete list of handled messages:
   if (!quit_ordered) {                 // sapp_quit() not already forced
       quit_requested = true;
       _sapp_win32_app_event(QUIT_REQUESTED);   // user may sapp_cancel_quit() here
-      if (quit_requested) quit_ordered = true; // not cancelled → commit
+      if (quit_requested) quit_ordered = true; // not canceled → commit
   }
   if (quit_ordered) PostQuitMessage(0);
   return 0;                            // never let DefWindowProc DestroyWindow us directly
   ```
   Returns 0 (does not forward to DefWindowProc, so the window is NOT auto-destroyed here;
-  teardown happens after the loop exits). If cancelled, `PostQuitMessage` is skipped and the
+  teardown happens after the loop exits). If canceled, `PostQuitMessage` is skipped and the
   app keeps running.
 - **WM_SYSCOMMAND (9590–9603):** `switch (wParam & 0xFFF0)`:
   - `SC_SCREENSAVE` / `SC_MONITORPOWER` → `return 0` **only if `_sapp.fullscreen`** (suppress

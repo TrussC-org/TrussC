@@ -286,11 +286,11 @@ TC_CORE_TEST_MAIN() {
     drain();
     check("Web application returns all completed payload credits once", events == 1 && internal::resourceLoadUsageForTests().retainedBytes == 0);
     resolveAudio(0); runTimers(); drain();
-    check("late cancelled browser promise cannot return stale credit/data", events == 1 && sounds[0]->samples.empty());
+    check("late canceled browser promise cannot return stale credit/data", events == 1 && sounds[0]->samples.empty());
     internal::waitForResourceLoadsAtAppExit();
     check("Web app exit cancels all outstanding backends and active slots", audioSlots() == 0 && internal::resourceLoadUsageForTests().active == 0 && internal::resourceLoadUsageForTests().pending == 0);
     runTimers(); drain();
-    check("cancelled backend timers do not dispatch application events", events == 1);
+    check("canceled backend timers do not dispatch application events", events == 1);
 
     Font font;
     int fontEvents = 0;

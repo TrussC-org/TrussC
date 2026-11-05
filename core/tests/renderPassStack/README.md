@@ -11,8 +11,8 @@ version-copy preparation, mip finalization, and public readback restrictions.
 The MSAA-interruption test checks that red drawn before the child survives beside
 green drawn after resume, after resolving the outer Fbo. LOAD passes also issue
 triangle counts 1 and 2 and require the persistent red image to survive; these
-incomplete primitives expose Mesa V3D trimming before colour bookkeeping (#858).
-A colour CLEAR with zero draws must update the resolve. Run these on every backend.
+incomplete primitives expose Mesa V3D trimming before color bookkeeping (#858).
+A color CLEAR with zero draws must update the resolve. Run these on every backend.
 
 Shader scopes remain open across repeated children and nested scopes. Their full
 RGBA output must equal a flattened reference, and half-alpha probes must

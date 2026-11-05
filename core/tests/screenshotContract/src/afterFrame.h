@@ -20,7 +20,7 @@ class AfterFrameScreenshotApp : public App {
     fs::path directory;
 
     static std::array<unsigned char, 3> colour(int frame, bool main) {
-        // Primary/complementary colours avoid transfer-function ambiguity.
+        // Primary/complementary colors avoid transfer-function ambiguity.
         std::array<unsigned char, 3> rgb{};
         rgb[(frame - 1) % 3] = 255;
         if (!main) for (auto& component : rgb) component = 255 - component;

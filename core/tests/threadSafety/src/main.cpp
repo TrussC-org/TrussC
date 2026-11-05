@@ -49,7 +49,7 @@ static shared_ptr<Node>      g_root;
 // A real headless app: a worker hammers the tree via runOnMainThread while the
 // app's update() reads it. Exercises the actual headless runtime (setup/update +
 // the per-frame drain). If marshalling were broken, addChild would assert (debug)
-// or the unsynchronised children_ access would crash.
+// or the unsynchronized children_ access would crash.
 struct StressApp : App {
     thread worker;
     int frames = 0;

@@ -8,7 +8,7 @@ the same convention bundled addons use (`addons/*/tests/`).
 
 This is the *behavioral* tier — it complements, and does not replace, the
 **build canaries** in `examples/tests/` (e.g. `AllFeaturesExample`), which prove
-the API still compiles/links/instantiates but do not assert runtime behaviour.
+the API still compiles/links/instantiates but do not assert runtime behavior.
 
 ## What belongs here
 
@@ -48,6 +48,21 @@ macOS rejected-binding interval and Android resume/focus frame-entry ordering.
    `sokol_gl` on `SOKOL_DUMMY_BACKEND` (no GPU) to assert GPU-resource
    accounting. `build_all.py` tells the two apart by the committed `CMakeLists.txt`
    + absence of `src/`, and runs both under `--core-tests-only`.
+
+## Reading the output
+
+`build_all.py --core-tests-only` prints a short screen by default: a dot line
+while it builds and runs, `FAIL` lines with their details, and a count per set
+(`allCoreTests: 141/141 passed`). The last line starts with `Done:` or `Failed:`.
+`ERROR:`, `WARNING:` and `FAIL:` lines with counts follow it, only when they are
+not zero. `PASS` lines are not printed; tests print what they print, and
+`build_all.py` does the filtering.
+
+The full output of each test (and of each build) is in `build-logs/` at the
+repository root, one file per test (`build-logs/core/tests/<name>.log`),
+overwritten on each run. A test that crashes, times out or exits non-zero
+without a `FAIL` line prints the last lines of its output and the path of its
+log. `--verbose` prints every line on screen; CI uses it, so CI logs stay full.
 
 ## One app for all tests (`allCoreTests/`)
 
@@ -996,11 +1011,11 @@ Fitting requests run every check strictly, without SKIPs.
 - `fontAtlasR8/` — TrueType glyph atlas pages are R8, one byte of coverage
   per texel (#293): `getMemoryUsage()` is the sum of width × height over the
   pages, and after 300 glyphs grow a page through several doubling steps
-  every glyph still has full coverage at its UV centre and nothing lies
+  every glyph still has full coverage at its UV center and nothing lies
   outside the glyph rectangles. `fontAtlasR8 --gpu-check` (needs a display,
   not run in CI) draws 150 new glyphs into an Fbo in one frame, one
   `drawString()` each, and checks that the page texture is
-  `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` colour,
+  `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` color,
   and a minified draw builds and samples the R8 mip chain. The font is
   built at runtime.
 - `extensionCase/` — loaders and savers match the file extension
@@ -1052,7 +1067,7 @@ Fitting requests run every check strictly, without SKIPs.
   helpers), the IDE files, the native CMake configure, and Visual Studio
   detection on a real toolchain change (manual Windows check).
 - `windowSetApp/` — constructor-only App ownership, nested constructor attribution,
-  cancelled candidates, stable event slots, per-App MCP and async retirement,
+  canceled candidates, stable event slots, per-App MCP and async retirement,
   retained handles across epochs and reverse shutdown despite callback throws.
   `appAudioTeardown/` separately exercises the real null AudioEngine barrier.
 - `nodeReflectRoundTrip/` — derived values in reflection (#287), with Node's

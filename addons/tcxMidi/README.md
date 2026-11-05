@@ -303,7 +303,7 @@ Generic examples (work with any MIDI device):
 - **example-keyboard** — a piano-keyboard visualizer. Note numbers are standard
   pitches, so held keys light up the same on any keyboard (velocity = brightness).
 - **example-controller** — knob/fader monitor: every CC number that arrives gets
-  a labelled meter that animates to its value. Move a control, a bar appears.
+  a labeled meter that animates to its value. Move a control, a bar appears.
 
 Device-specific demos live in their own repos (they only make sense with that
 hardware):

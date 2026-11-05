@@ -24,7 +24,7 @@
 // Setting values (#321): tcx_imgui_input on a value widget writes the value
 // through the value hook, called as the MCP server calls it (the reply waits
 // for the next frame).
-//   - DragFloat2 (its centre is the gap between the fields), DragFloat3,
+//   - DragFloat2 (its center is the gap between the fields), DragFloat3,
 //     ColorEdit4 (0-1 floats), SliderAngle (radians), Checkbox, Combo, InputInt,
 //     RadioButton, ListBox, MenuItem(bool*), Selectable(bool*): the variable
 //     holds the value, and the reply carries the value read back
@@ -608,12 +608,12 @@ static void testValueInput() {
     });
     h.frames(3);
 
-    // The DragFloat2 of the issue: its centre is the gap between the fields.
+    // The DragFloat2 of the issue: its center is the gap between the fields.
     const tcx::imgui::WidgetInfo* w = h.find("##v2");
     if (w) {
         const float mid = w->rect.GetCenter().x;
         const float fieldW = (200 - ImGui::GetStyle().ItemInnerSpacing.x) / 2;
-        check("setup: DragFloat2 centre is in the gap between its fields",
+        check("setup: DragFloat2 center is in the gap between its fields",
               mid > w->rect.Min.x + fieldW && mid < w->rect.Min.x + fieldW + ImGui::GetStyle().ItemInnerSpacing.x);
     } else {
         check("setup: DragFloat2 listed", false);

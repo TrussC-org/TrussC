@@ -25,7 +25,7 @@ public:
     // Runtime lifecycle fan-out to the attached App, before its replacement.
     Event<void> hotReloadUnload;
 
-    // Exit request (can be cancelled)
+    // Exit request (can be canceled)
     Event<ExitRequestEventArgs> exitRequested;  // Set args.cancel = true to cancel
 
     // Shared D3D11 device lost (once); cancel suppresses the default failure exit.

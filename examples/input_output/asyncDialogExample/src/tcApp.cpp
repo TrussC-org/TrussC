@@ -87,9 +87,9 @@ void tcApp::draw() {
             if (scale > 1.0f) scale = 1.0f;
             loadedImage.draw(40, infoY, imgW * scale, imgH * scale);
         }
-    } else if (!statusMessage.empty() && statusMessage.find("Cancelled") != string::npos) {
+    } else if (!statusMessage.empty() && statusMessage.find("Canceled") != string::npos) {
         setColor(1.0f, 0.4f, 0.4f);
-        drawBitmapString("Cancelled", 40, infoY);
+        drawBitmapString("Canceled", 40, infoY);
     }
 }
 
@@ -134,7 +134,7 @@ void tcApp::triggerAction(int index) {
                         }
                     }
                 } else {
-                    statusMessage = "Cancelled";
+                    statusMessage = "Canceled";
                 }
             });
             break;
@@ -149,7 +149,7 @@ void tcApp::triggerAction(int index) {
                 if (result.success) {
                     statusMessage = "Save location: " + result.fileName.string();
                 } else {
-                    statusMessage = "Cancelled";
+                    statusMessage = "Canceled";
                 }
             });
             break;

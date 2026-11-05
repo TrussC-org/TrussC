@@ -41,7 +41,7 @@ void recordTouchedForTests(NodeInspector& inspector, ::tc::Node* node, ::tc::Mod
 }
 
 // Renders each reflected member as the matching ImGui widget. Read-only
-// values (getter-only TC_VALUE) render greyed out; enums render as a combo of
+// values (getter-only TC_VALUE) render grayed out; enums render as a combo of
 // their labels; image-like values (an Fbo, Image or VideoPlayer member) render
 // as a thumbnail with their size and format, never editable. Public so an app can use it (or a subclass that overrides a
 // visit()) in its own ImGui panel via node->reflectMembers(r). The Inspector
@@ -112,7 +112,7 @@ protected:
     // The image row of visit(HasTexture&); defined in tcxNodeInspector.cpp.
     void showImage(const char* name, ::trussc::HasTexture& image);
 
-    // Run a widget; suppress inside a collapsed group, grey out when read-only.
+    // Run a widget; suppress inside a collapsed group, gray out when read-only.
     // A change is recorded in `edited` under the member's path. A value the
     // MCP tools wrote (tcx_imgui_input) also makes the widget return true, so
     // the change is applied, but it is not an edit by hand: not recorded.

@@ -27,7 +27,7 @@
 //   6. Node timers are countdowns: callAfter fires on schedule, callEvery keeps
 //      its phase and fires once when late (and takes std::bind results /
 //      generic lambdas), callEveryCatchUp fires once per due interval up to its
-//      limit (cancelling from the callback stops it; fixed-Hz dropped time is
+//      limit (canceling from the callback stops it; fixed-Hz dropped time is
 //      not counted), resets don't affect them, and a main-window timer is
 //      charged only the time since its creation: one created between updates
 //      (after an idle gap or a stall), and one created late in a long update
@@ -687,7 +687,7 @@ static void testNodeTimers() {
         check("timers: ...and keeps the phase (due again at 1.00)", calls == 4);
         node->cancelTimer(id);
     }
-    // Cancelling the timer from its callback stops the remaining calls, also
+    // Canceling the timer from its callback stops the remaining calls, also
     // when the callback adds timers (the timer vector reallocates).
     {
         int calls = 0;
@@ -700,9 +700,9 @@ static void testNodeTimers() {
         anchorSimClock();
         simUpdate(*node, 0.0);
         simUpdate(*node, 0.55);             // 5 due
-        checkf("timers: callEveryCatchUp cancelled by its callback stops (2 of 5)", calls == 2, calls);
+        checkf("timers: callEveryCatchUp canceled by its callback stops (2 of 5)", calls == 2, calls);
         simUpdate(*node, 0.1);
-        check("timers: ...and stays cancelled", calls == 2);
+        check("timers: ...and stays canceled", calls == 2);
         node->cancelAllTimers();
     }
     // callEvery takes any callable that can be called with no arguments,

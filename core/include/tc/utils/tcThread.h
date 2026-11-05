@@ -46,7 +46,7 @@ namespace trussc {
 //   makes that call:
 //   - while the subclass destructor is running: the real threadedFunction()
 //     runs and may use members that are already destroyed. This is undefined
-//     behaviour, and usually nothing aborts to point at it.
+//     behavior, and usually nothing aborts to point at it.
 //   - at about the moment ~Thread() starts: the call can still reach the
 //     pure virtual threadedFunction() ("pure virtual method called").
 //   - after ~Thread() has started: the worker skips threadedFunction(), and

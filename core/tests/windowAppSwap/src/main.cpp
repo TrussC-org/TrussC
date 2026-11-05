@@ -450,7 +450,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
               rec.isOpenAfter && rec.getAppSame && rec.getWindowSame);
         check("... the App and its child stay alive for the rest of the tick",
               rec.childRunsAfter == 1 && !rec.childSawGone && !rec.appGone);
-        check("... close() wins: the pending setApp() is cancelled before setup",
+        check("... close() wins: the pending setApp() is canceled before setup",
               nextWeak.expired() && nextC.setups == 0 &&
               count(warnings, "close() was requested") == dropWarnings);
         check("... setApp() after close() logs an error at the call",

@@ -77,7 +77,7 @@ public:
     CoreEvents& events() { return events_; }
 
     // Request closure at the next safe boundary. Pending replacement is
-    // cancelled. App ending and owner retirement precede native/GPU disposal.
+    // canceled. App ending and owner retirement precede native/GPU disposal.
     // Last-window/quitOnClose asks exitRequested first; any veto keeps all windows.
     // quitOnClose defaults to false. Closed handles stay closed across runs.
     void close();
@@ -225,7 +225,7 @@ public:
     internal::WindowContext& ctx_;
     CoreEvents& events_;
     internal::RenderContext& render_;
-    bool clearColorSet_ = false; // construction installs the Window clear colour
+    bool clearColorSet_ = false; // construction installs the Window clear color
     Color clearColor_ = Color(0.05f, 0.05f, 0.08f, 1.0f);
     std::string& title_;
     // Request state (setApp() / close()). The pending App is owned here until

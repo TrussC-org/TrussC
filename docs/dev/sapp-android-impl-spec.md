@@ -41,7 +41,7 @@ one). Android differs from iOS in FIVE structural ways, each load-bearing:
    (`ANativeActivity_setWindowFlags`, JNI `setRequestedOrientation`). So there is **no
    sokol-side orientation/immersive patch to preserve** on Android (§8/§10).
 
-**Port target.** `sokol_app_tc.h` (11876 lines) is organised as **N independent,
+**Port target.** `sokol_app_tc.h` (11876 lines) is organized as **N independent,
 self-contained per-platform copies** of the renamed (`_sapp` → `_sapp_tc`,
 `_sapp_*` → `_sapp_tc_*`) sokol_app implementation. The top-level chain is:
 
@@ -307,7 +307,7 @@ resumed+focused, i.e. after MSG_CREATE + MSG_SET_NATIVE_WINDOW + MSG_RESUME +
 MSG_FOCUS. Background/foreground cycles destroy+recreate the surface and pause+resume the
 frame loop, but `init_cb` fires **once** (guarded inside `_sapp_frame`); `cleanup_cb`
 fires from `_sapp_android_cleanup` only while a surface is still bound (10508). Typical
-minimise/restore = SET_NATIVE_WINDOW(NULL)+PAUSE+NO_FOCUS → surface destroyed, frames
+minimize/restore = SET_NATIVE_WINDOW(NULL)+PAUSE+NO_FOCUS → surface destroyed, frames
 stop → FOCUS+RESUME+SET_NATIVE_WINDOW(window) → surface recreated, frames resume, RESIZED
 fires (10500).
 
@@ -392,7 +392,7 @@ window_width = win_w; window_height = win_h;
 if (win_changed || force_update) {
     if (!desc.high_dpi) {                                     // 10457 — half-res buffer
         ANativeWindow_setBuffersGeometry(window, win_w/2, win_h/2, format);   // 10468
-        // NOTE (10463): setting geometry == window size causes display artefacts,
+        // NOTE (10463): setting geometry == window size causes display artifacts,
         // so only call it when buffer geometry differs from window size.
     }
 }
@@ -427,7 +427,7 @@ _sapp_android_app_event(SAPP_EVENTTYPE_RESIZED)`. Suppressed on `first_frame`; g
 
 Dispatched from `_sapp_android_input_cb` (10607–10627) on the app thread: for each event
 pulled from the `AInputQueue`, `AInputQueue_preDispatchEvent` (IME pre-dispatch) is
-honoured, then `_sapp_android_touch_event(e) || _sapp_android_key_event(e)` decides
+honored, then `_sapp_android_touch_event(e) || _sapp_android_key_event(e)` decides
 `handled`, and `AInputQueue_finishEvent(…, handled)` acks it.
 
 ```c
@@ -518,7 +518,7 @@ one consumer as iOS).
 > always returns `false` on Android, and tcxImGui's `if (WantTextInput &&
 > !sapp_keyboard_shown()) sapp_show_keyboard(true)` will re-issue `show` every frame while
 > a text field is focused. Harmless (the OS ignores redundant shows) but worth noting;
-> the port does not need to fix it but must not regress the flakier behaviour.
+> the port does not need to fix it but must not regress the flakier behavior.
 
 ### Orientation / immersive mode are NOT sokol's job on Android
 Unlike iOS (§8 of the iOS spec: `_sapp_ios_immersive_mode` extern +
@@ -643,7 +643,7 @@ existing `sokol_main` definition + `extern int main()` bridge in `sokol_impl.cpp
 ### CI
 `.github/workflows/build.yml` has a **`build-android` job (239)** — NDK **r29** (267),
 caches `core/build-android`. So the port is **compile-tested in CI** (unlike iOS). CI
-does not run on a device; runtime behaviour is verified on the user's Android hardware
+does not run on a device; runtime behavior is verified on the user's Android hardware
 (§12d).
 
 **Used and must be preserved on Android:** `ANativeActivity_onCreate` export → app-thread
@@ -675,7 +675,7 @@ no-valid-assert getter; `sapp_show_keyboard` → soft input; SUSPENDED/RESUMED f
    10404–10424 (keep `gl.framebuffer` read 10422), `cleanup_egl_surface` 10426–10435.
 6. **`app_event`** 10437–10442.
 7. **`update_dimensions`** 10444–10503 — keep the **AConfiguration DPI patch (10482–10497)**
-   and the `setBuffersGeometry` half-res / artefact note.
+   and the `setBuffersGeometry` half-res / artifact note.
 8. **`cleanup` / `shutdown`** 10505–10521.
 9. **`_sapp_android_frame`** 10523–10533 — keep the **`skip_present` early-return
    (10530–10531)**.
@@ -740,13 +740,13 @@ no-valid-assert getter; `sapp_show_keyboard` → soft input; SUSPENDED/RESUMED f
 CI's `build-android` only compiles. On a real Android device, before calling the port done:
 - [ ] App launches (NativeActivity → onCreate → app thread → EGL surface → `setup()`),
       renders, holds framerate; correct colors/orientation.
-- [ ] **Touch**: multi-touch works; began/moved/ended/cancelled reach app; `identifier`
+- [ ] **Touch**: multi-touch works; began/moved/ended/canceled reach app; `identifier`
       stable across a drag; coordinates correct at the device's density; `android_tooltype`
       distinguishes finger/stylus if available.
 - [ ] **BACK key**: pressing BACK does **not** kill or freeze the app (event consumed, EGL
       surface intact) — the whole point of §7.
 - [ ] **Rotation / config change**: rotate → RESIZED fires, framebuffer resizes, activity
-      is NOT recreated (manifest `configChanges`), no artefacts.
+      is NOT recreated (manifest `configChanges`), no artifacts.
 - [ ] **Home / recents / resume**: background then foreground → SET_NATIVE_WINDOW(NULL)+
       PAUSE stops frames and destroys the surface; resume recreates the surface and frames
       resume; no crash, no black frame, RESIZED fires on return.

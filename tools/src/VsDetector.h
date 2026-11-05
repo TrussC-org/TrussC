@@ -23,6 +23,11 @@ public:
     // Detect installed Visual Studio versions
     static std::vector<VsVersionInfo> detectInstalledVersions();
 
+    // Folder of the Visual Studio Installer's vswhere.exe, or "" when it is not at
+    // the standard place. Putting it on PATH keeps vcvarsall.bat from printing
+    // "'vswhere.exe' is not recognized" (Windows only).
+    static std::string findVswhereDir();
+
     // Get CMake version (major, minor, patch)
     static std::tuple<int, int, int> getCmakeVersion();
 

@@ -125,7 +125,7 @@ void stateAndPixels(int samples, bool differentFormat) {
     check("sequential activations reuse idle leases", leaseCount() == before);
     a.begin(); a.end();
     expect(read(a),8,8,Color(1,0,0),"fresh LOAD activation retains persistent color");
-    // #858: Mesa trims incomplete triangles before colour load/store bookkeeping.
+    // #858: Mesa trims incomplete triangles before color load/store bookkeeping.
     Shader incomplete;
     check("incomplete-primitive shader loads", incomplete.load(stack_mesh_shader_desc));
     const ShaderVertex vertices[] = {
@@ -138,9 +138,9 @@ void stateAndPixels(int samples, bool differentFormat) {
                "LOAD triangle count 1 preserves persistent red" :
                "LOAD triangle count 2 preserves persistent red");
     }
-    // #858: no geometry. Colour CLEAR must still update the MSAA resolve.
+    // #858: no geometry. Color CLEAR must still update the MSAA resolve.
     a.begin(0,1,0); a.end();
-    expect(read(a),8,8,Color(0,1,0),"CLEAR colour with zero draws updates resolve");
+    expect(read(a),8,8,Color(0,1,0),"CLEAR color with zero draws updates resolve");
     a.begin(); clear(0,0,1); a.end();
     expect(read(a),8,8,Color(0,0,1),"explicit restart clear erases previous color");
 }

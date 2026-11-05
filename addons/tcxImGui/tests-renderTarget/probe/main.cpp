@@ -260,11 +260,11 @@ void regressions() {
                                  "expiry retains only the consumed tool presses' releases",
                 cs.pendingText.empty() && ctx->InputEventsQueue.Size == 2);
             draw(); draw();
-            check("cancelled partial injection releases Ctrl and mouse and drains the queue",
+            check("canceled partial injection releases Ctrl and mouse and drains the queue",
                 !ctx->IO.KeyCtrl && !ctx->IO.MouseDown[0] && ctx->InputEventsQueue.empty());
 
             // A native-held Ctrl/button suppresses the tool's down events.
-            // Cancelling must never manufacture releases for those native holds.
+            // Canceling must never manufacture releases for those native holds.
             ImGui::SetCurrentContext(ctx);
             auto& io = ImGui::GetIO();
             const auto mod = mac ? ImGuiMod_Super : ImGuiMod_Ctrl;
