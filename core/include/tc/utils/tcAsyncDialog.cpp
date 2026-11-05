@@ -50,14 +50,20 @@ void requestAsyncDialog(DialogInputs inputs, DialogCompletion callback, DialogPr
     enqueueResourceLoad([request, inputs = std::move(inputs), presenter] {
         if (!request->alive()) return;
         request->dismiss = presenter(inputs, [request](FileDialogResult result) {
-            // Native handlers (including future worker presenters) only post.
-            enqueueResourceLoad([request, result = std::move(result)] {
+            // Native handlers normally post; macOS quit is the exception below.
+            auto deliver = [request, result = std::move(result)] {
                 if (!request->alive()) return;
                 request->finished = true;
                 request->dismiss = {};
                 auto callback = std::exchange(request->callback, {});
                 if (callback) callback(std::move(result));
-            });
+            };
+#if defined(__APPLE__) && TARGET_OS_OSX
+            // No later prelude exists during accepted macOS quit. Deliver the
+            // native cancel while its App is alive, preserving EXIT_PROTOCOL.
+            if (completingMacDialogsForQuit()) { deliver(); return; }
+#endif
+            enqueueResourceLoad(std::move(deliver));
         });
     });
 }
