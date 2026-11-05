@@ -74,7 +74,12 @@ code = r'''
 #define TARGET_OS_OSX 1
 using NSModalResponse = int;
 constexpr int NSModalResponseCancel = -1;
-struct NSWindow { bool attached = true; int ends = 0; std::function<void(int)> nativeReply; };
+struct NSWindow {
+    bool attached = true;
+    int ends = 0;
+    std::function<void(int)> nativeReply;
+    std::function<void()> duringClose;
+};
 std::vector<int> trace;
 int failures = 0, reports = 0;
 void check(const char* label, bool ok) {
@@ -84,6 +89,7 @@ void check(const char* label, bool ok) {
 void endSheet(NSWindow* sheet, int response) {
     check("native dismissal uses cancel", response == NSModalResponseCancel);
     sheet->attached = false; ++sheet->ends; trace.push_back(1);
+    if (sheet->duringClose) sheet->duringClose();
     if (sheet->nativeReply) sheet->nativeReply(response);
 }
 namespace trussc {
@@ -166,6 +172,9 @@ int delegateQuery() {
 void appKitTerminate(int) {
     ++appKitCalls;
     if (!session) {
+        check("AppKit process exit waits for outer cancellation and cleanup",
+              !trussc::internal::state.runToken->load());
+        trace.push_back(4);
         check("AppKit cannot touch tracked dialogs", trussc::dialogSheets().empty());
         delegateQuery(); // AppKit asks again after the preflight accepted.
     }
@@ -257,17 +266,37 @@ int main() {
     NSWindow routedAlert;
     int routedCalls = 0;
     auto routedReply = commonReply([&](FileDialogResult result) {
-        ++routedCalls;
+        ++routedCalls; trace.push_back(2);
         check("routed quit cancels before teardown", !result.success && state.runToken->load());
     });
     trackDialogSheet(&routedAlert, [routedReply](int response) { routedReply({response == 42}); });
+    state.windows.push_back(std::make_shared<Window>());
+    routedAlert.duringClose = [&] {
+        trace.push_back(5);
+        const int queries = native::queries, appKitCalls = native::appKitCalls;
+        // Model repeated source ticks and a direct native quit while AppKit
+        // spins the sheet-close loop, before the outer cancel is delivered.
+        native::terminate(0);
+        native::terminate(0);
+        native::session = true;
+        native::terminate(0);
+        native::session = false;
+        check("nested terminate never queries delegate or enters AppKit",
+              native::queries == queries && native::appKitCalls == appKitCalls);
+        check("nested terminate returns before outer cancel and cleanup",
+              routedCalls == 0 && state.runToken->load());
+        trace.push_back(6);
+    };
     native::terminate(0);
     check("native veto never enters AppKit termination", native::queries == 1 &&
           native::appKitCalls == 0 && routedCalls == 0 && routedAlert.attached);
     allow = true;
+    trace.clear();
     native::terminate(0);
     check("accepted native quit cancels once before AppKit", routedCalls == 1 &&
           routedAlert.ends == 1 && native::appKitCalls == 1 && native::queries == 3);
+    check("outer quit finishes cancel and cleanup before AppKit termination",
+          trace == std::vector<int>({1,5,6,2,3,4}));
     native::session = true;
     native::terminate(0);
     check("session termination retains its separate policy", native::appKitCalls == 2 && native::queries == 3);
@@ -283,7 +312,8 @@ with tempfile.TemporaryDirectory(prefix='tc-sheetquit-') as folder:
                 ('deferred-quit', code.replace('if (completingMacDialogsForQuit()) { deliver(); return; }', '')),
                 ('missing-preflight', code.replace('if (delegateQuery() != NSTerminateNow) return;', '')),
                 ('late-preflight', code.replace('if (delegateQuery() != NSTerminateNow) return;',
-                     'appKitTerminate(sender); if (delegateQuery() != NSTerminateNow) return;'))]
+                     'appKitTerminate(sender); if (delegateQuery() != NSTerminateNow) return;')),
+                ('missing-terminate-guard', code.replace('if (terminating) return;', ''))]
     for name, text in variants:
         source.write_text(text, encoding='utf-8')
         subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
@@ -291,11 +321,13 @@ with tempfile.TemporaryDirectory(prefix='tc-sheetquit-') as folder:
         result = subprocess.run([str(binary)], capture_output=True, text=True, encoding="utf-8", timeout=15)
         print(name, result.stdout, result.stderr, flush=True)
         expected = result.returncode == 0 if name == 'baseline' else result.returncode == 1 and ': FAIL' in result.stdout
+        if name == 'missing-terminate-guard':
+            expected = expected and 'AppKit process exit waits for outer cancellation and cleanup: FAIL' in result.stdout
         if not expected:
             raise SystemExit(f'{name}: unexpected exit {result.returncode}')
 
     if clang := shutil.which('clang++'):
-        # SDK-free syntax check of the unchanged Objective-C message syntax.
+        # SDK-free syntax check of the actual subclass, including its C++ guard.
         objc = r'''
 __attribute__((objc_root_class)) @interface NSObject @end
 using NSApplicationTerminateReply = unsigned long;
@@ -316,4 +348,4 @@ int _sapp_tc_mac_quit_reason();
         subprocess.run([clang, '-std=c++20', '-fsyntax-only', '-fobjc-arc',
                         '-fobjc-runtime=macosx-10.13', '-Werror', str(source)], check=True)
 
-print("mac async source/quit probe: PASS (five mutants rejected)")
+print("mac async source/quit probe: PASS (six mutants rejected)")

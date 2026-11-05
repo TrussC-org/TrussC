@@ -4233,6 +4233,14 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 @end
 @implementation _sapp_tc_application
 - (void)terminate:(id)sender {
+    // Closing a sheet can spin AppKit's run loop before cancellation returns.
+    static bool terminating = false;
+    if (terminating) return;
+    terminating = true;
+    struct Reset {
+        bool& flag;
+        ~Reset() { flag = false; }
+    } reset{terminating};
     if (!_sapp_tc_mac_is_session_end(_sapp_tc_mac_quit_reason())) {
         if ([self.delegate applicationShouldTerminate:self] != NSTerminateNow) return;
     }

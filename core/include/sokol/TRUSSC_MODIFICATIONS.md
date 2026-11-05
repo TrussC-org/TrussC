@@ -32,6 +32,11 @@ their existing query/commit policy. Last-window-close policy is unchanged.
 creates `NSApplication` before `runApp` keeps a plain `NSApplication` and loses
 this preflight. TrussC itself creates no application earlier; apps should not
 either.
+The override ignores nested `terminate:` calls while the outer call runs,
+including sheet-close animations; its guard resets on veto so a later quit works.
+A session-end request that arrives inside an exit handler's own event loop is
+also ignored; if that ordinary quit is then vetoed, the session end is lost
+(rare interleaving; documented, not guarded).
 
 ## Directory Structure
 
