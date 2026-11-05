@@ -634,6 +634,7 @@ inline void Window::teardown() noexcept {
     // The App loses its Window and root before any ending callback. The native
     // and GPU resources remain usable until all App and owner teardown finishes.
     binding_.bound = false;
+    steps.run("window dialog cancellation", [&] { internal::cancelWindowAsyncDialogs(*this); });
     closingApp_ = true;
     endApp();
     if (!windowExitNotified_) {
