@@ -13,6 +13,10 @@
 #include <shobjidl.h>
 #include <locale>
 #include <sstream>
+#include "TrussC.h"
+#include "tc/utils/internal/tcAsyncDialog.h"
+#include <memory>
+#include <thread>
 
 namespace {
 
@@ -25,13 +29,116 @@ std::wstring toWide(const std::string& str) {
     return result;
 }
 
-// Wide string to UTF-8 conversion
-std::string toUtf8(const wchar_t* wstr) {
-    if (!wstr || *wstr == L'\0') return std::string();
-    int size = WideCharToMultiByte(CP_UTF8, 0, wstr, -1, nullptr, 0, nullptr, nullptr);
-    std::string result(size - 1, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, wstr, -1, &result[0], size, nullptr, nullptr);
+// Only native values cross into the detached thread. Resolve Window on main.
+struct NativeDialog {
+    trussc::internal::DialogKind kind;
+    HWND owner = nullptr;
+    std::wstring title, message, defaultPath, defaultName;
+    std::wstring filterName = L"All Files", filterPattern = L"*.*";
+    bool folderSelection = false;
+    trussc::internal::DialogCompletion complete;
+};
+
+struct ComRelease {
+    template<class T> void operator()(T* value) const { value->Release(); }
+};
+struct ComApartment {
+    HRESULT status = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    ~ComApartment() { if (SUCCEEDED(status)) CoUninitialize(); }
+};
+
+trussc::FileDialogResult runDialog(const NativeDialog& native) {
+    using trussc::internal::DialogKind;
+    ComApartment apartment;
+    if (FAILED(apartment.status)) return {};
+    trussc::FileDialogResult result;
+    if (native.kind == DialogKind::Alert || native.kind == DialogKind::Confirm) {
+        const bool confirm = native.kind == DialogKind::Confirm;
+        const int response = MessageBoxW(native.owner, native.message.c_str(), native.title.c_str(),
+            confirm ? MB_YESNO | MB_ICONQUESTION : MB_OK | MB_ICONINFORMATION);
+        result.success = confirm && response == IDYES;
+        return result;
+    }
+
+    std::unique_ptr<IFileDialog, ComRelease> dialog;
+    HRESULT created;
+    if (native.kind == DialogKind::Save) {
+        IFileSaveDialog* save = nullptr;
+        created = CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_IFileSaveDialog, reinterpret_cast<void**>(&save));
+        dialog.reset(save);
+    } else {
+        IFileOpenDialog* openDialog = nullptr;
+        created = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+                                   IID_IFileOpenDialog, reinterpret_cast<void**>(&openDialog));
+        dialog.reset(openDialog);
+    }
+    if (FAILED(created)) return {};
+    DWORD options = 0;
+    if (FAILED(dialog->GetOptions(&options))) return {};
+    options |= FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST;
+    if (native.kind == DialogKind::Save) options |= FOS_OVERWRITEPROMPT;
+    else options |= native.folderSelection ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST;
+    if (FAILED(dialog->SetOptions(options))) return {};
+    if (!native.title.empty() && FAILED(dialog->SetTitle(native.title.c_str()))) return {};
+    if (!native.folderSelection) {
+        const COMDLG_FILTERSPEC filter{native.filterName.c_str(), native.filterPattern.c_str()};
+        if (FAILED(dialog->SetFileTypes(1, &filter))) return {};
+    }
+    if (!native.defaultPath.empty()) {
+        IShellItem* folder = nullptr;
+        if (SUCCEEDED(SHCreateItemFromParsingName(native.defaultPath.c_str(), nullptr,
+                      IID_IShellItem, reinterpret_cast<void**>(&folder)))) {
+            std::unique_ptr<IShellItem, ComRelease> ownedFolder(folder);
+            if (FAILED(dialog->SetFolder(folder))) return {};
+        }
+    }
+    if (!native.defaultName.empty() && FAILED(dialog->SetFileName(native.defaultName.c_str()))) return {};
+    if (FAILED(dialog->Show(native.owner))) return {};
+    IShellItem* selected = nullptr;
+    if (FAILED(dialog->GetResult(&selected))) return {};
+    std::unique_ptr<IShellItem, ComRelease> ownedSelection(selected);
+    PWSTR shellPath = nullptr;
+    const HRESULT named = selected->GetDisplayName(SIGDN_FILESYSPATH, &shellPath);
+    std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> ownedPath(shellPath, &CoTaskMemFree);
+    if (FAILED(named)) return {};
+    // Use the existing checked UTF-16/UTF-8 conversion, never the active code page.
+    const auto pathUtf8 = trussc::pathToUtf8(trussc::fs::path(shellPath));
+    result.filePath = trussc::utf8ToPath(pathUtf8);
+    result.fileName = result.filePath.filename();
+    result.success = true;
     return result;
+}
+
+trussc::internal::DialogDismiss presentDialog(const trussc::internal::DialogInputs& inputs,
+                                            trussc::internal::DialogCompletion complete) {
+    try {
+        auto native = std::make_shared<NativeDialog>();
+        native->kind = inputs.kind;
+        if (auto window = inputs.requestingWindow.lock(); window && window->isOpen()) {
+            native->owner = static_cast<HWND>(const_cast<void*>(sapp_window_win32_get_hwnd(
+                trussc::internal::WindowRequestAccess::binding(*window).handle)));
+        }
+        native->title = toWide(inputs.title);
+        if (native->title.empty()) {
+            if (inputs.kind == trussc::internal::DialogKind::Save) native->title = L"Save File";
+            else if (inputs.folderSelection) native->title = L"Select Folder";
+        }
+        native->message = toWide(inputs.message);
+        native->defaultPath = inputs.defaultPath.wstring();
+        native->defaultName = inputs.defaultName.wstring();
+        native->folderSelection = inputs.folderSelection;
+        native->complete = complete;
+        std::thread([native] {
+            trussc::FileDialogResult result;
+            try { result = runDialog(*native); }
+            catch (const std::exception&) { result = {}; }
+            native->complete(std::move(result)); // Posts to the process-lifetime mailbox only.
+        }).detach();
+    } catch (const std::exception&) {
+        complete({}); // Thread creation/input preparation failure is deferred cancellation too.
+    }
+    return {}; // Windows dialogs are not programmatically dismissed or joined.
 }
 
 } // anonymous namespace
@@ -50,8 +157,11 @@ void alertDialog(const std::string& title, const std::string& message) {
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
                       std::function<void()> callback) {
-    alertDialog(title, message);
-    if (callback) callback();
+    internal::DialogInputs inputs{};
+    inputs.kind = internal::DialogKind::Alert; inputs.title = title; inputs.message = message;
+    internal::requestAsyncDialog(std::move(inputs), [callback = std::move(callback)](FileDialogResult) {
+        if (callback) callback();
+    }, presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -68,8 +178,11 @@ bool confirmDialog(const std::string& title, const std::string& message) {
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
                         std::function<void(bool)> callback) {
-    bool result = confirmDialog(title, message);
-    if (callback) callback(result);
+    internal::DialogInputs inputs{};
+    inputs.kind = internal::DialogKind::Confirm; inputs.title = title; inputs.message = message;
+    internal::requestAsyncDialog(std::move(inputs), [callback = std::move(callback)](FileDialogResult result) {
+        if (callback) callback(result.success);
+    }, presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -170,8 +283,12 @@ void loadDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
-    FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection);
-    if (callback) callback(result);
+    internal::DialogInputs inputs{};
+    inputs.kind = internal::DialogKind::Load; inputs.title = title; inputs.message = message;
+    inputs.defaultPath = defaultPath; inputs.folderSelection = folderSelection;
+    internal::requestAsyncDialog(std::move(inputs), [callback = std::move(callback)](FileDialogResult result) {
+        if (callback) callback(result);
+    }, presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -233,8 +350,12 @@ void saveDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
-    FileDialogResult result = saveDialog(title, message, defaultPath, defaultName);
-    if (callback) callback(result);
+    internal::DialogInputs inputs{};
+    inputs.kind = internal::DialogKind::Save; inputs.title = title; inputs.message = message;
+    inputs.defaultPath = defaultPath; inputs.defaultName = defaultName;
+    internal::requestAsyncDialog(std::move(inputs), [callback = std::move(callback)](FileDialogResult result) {
+        if (callback) callback(result);
+    }, presentDialog);
 }
 
 } // namespace trussc

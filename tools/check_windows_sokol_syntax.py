@@ -47,13 +47,15 @@ def main():
     # Runtime owns the new control HWND and prestarted watchdog outside sokol.
     # Compile those real TUs too, including the host coordinator and public API.
     for relative in ('core/platform/win/tcPlatform_win.cpp',
+                     'core/platform/win/tcFileDialog_win.cpp',
                      'core/include/tc/app/tcExit.cpp',
                      'core/include/tc/app/tcWindowRuntime.cpp',
                      'core/tests/osExit/src/main.cpp',
                      'core/tests/nativeWindow/win32.cpp'):
         path = root / relative
         print('Checking Windows Runtime TU:', relative, flush=True)
-        subprocess.run([*flags, '-DNOMINMAX', '-I', str(root / 'core/include'),
+        # Match core's header switches; the native fixture defines them empty.
+        subprocess.run([*flags, '-DWIN32_LEAN_AND_MEAN=', '-DNOMINMAX=', '-I', str(root / 'core/include'),
                         '-I', str(include), '-I', str(root / 'core/include/tc/gpu/shaders'),
                         str(path)], check=True)
     print('Windows implementation syntax: PASS', flush=True)
