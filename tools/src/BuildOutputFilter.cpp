@@ -100,10 +100,20 @@ bool isVcvarsBanner(const string& s) {
 bool isVswhereProbeError(const string& s) {
     string lower = s;
     for (char& c : lower) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    // cmd.exe starts this message with the quoted program name in every
+    // language: 'vswhere.exe' <localized text>
+    if (startsWith(lower, "'vswhere")) return true;
     if (lower.find("vswhere") == string::npos) return false;
-    // English and Japanese cmd.exe
     return lower.find("not recognized") != string::npos ||
            s.find("認識されていません") != string::npos;
+}
+
+// cmd.exe wraps the message after a comma ("," or the Japanese "、").
+bool continuesOnNextLine(const string& s) {
+    string t = s;
+    while (!t.empty() && (t.back() == ' ' || t.back() == '\t')) t.pop_back();
+    return (!t.empty() && t.back() == ',') ||
+           (t.size() >= 3 && t.compare(t.size() - 3, 3, "、") == 0);
 }
 
 bool isXcodeCompileStep(const string& s) {
@@ -330,9 +340,10 @@ void BuildOutputFilter::handleLine(string line) {
         return;
     }
     if (options_.phase == Phase::Configure) {
-        if (afterVswhere && startsWith(plain, "operable program or batch file")) return;
+        // The second line of the vswhere message (any language)
+        if (afterVswhere) return;
         if (isVcvarsBanner(plain)) return;
-        if (isVswhereProbeError(plain)) { afterVswhere_ = true; return; }
+        if (isVswhereProbeError(plain)) { afterVswhere_ = continuesOnNextLine(plain); return; }
     }
     if (startsWith(plain, "FAILED: ")) afterFailed_ = true;
     if (afterFailed && isCompilerCommandLine(plain)) {
