@@ -11,8 +11,9 @@
 
 #import <Cocoa/Cocoa.h>
 
-// NSAlert's modal API registers alerts that AppKit dismisses before a quit
-// veto. Use its laid-out window and ordinary button actions instead.
+// Unattached alerts use their laid-out window and ordinary button actions.
+// The native application's quit preflight cancels tracked UI before calling
+// AppKit's terminate:, which could otherwise click an alert button itself.
 @interface TCAsyncDialogButtonTarget : NSObject
 @property(nonatomic, copy) void (^reply)(NSButton*);
 - (void)clicked:(NSButton*)sender;
@@ -87,7 +88,7 @@ NSWindow* visibleDialogOwner(const internal::DialogInputs& inputs) {
     if (auto requester = inputs.requestingWindow.lock()) {
         if (auto* native = nativeVisible(requester.get())) return native;
     }
-    for (auto* window : openWindows()) {
+    for (auto* window : internal::openWindows()) {
         if (auto* native = nativeVisible(window)) return native;
     }
     return nil;

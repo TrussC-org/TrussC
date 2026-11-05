@@ -4226,6 +4226,22 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
     trussc::internal::commitSessionEnd();
 }
 
+// [TrussC] AppKit may dismiss an alert or refuse a panel sheet before asking
+// applicationShouldTerminate:. Preflight ordinary quits through that same
+// Runtime veto/cancel/teardown path before AppKit can touch any of our sheets.
+@interface _sapp_tc_application : NSApplication
+@end
+@implementation _sapp_tc_application
+- (void)terminate:(id)sender {
+    if (!_sapp_tc_mac_is_session_end(_sapp_tc_mac_quit_reason())) {
+        if ([self.delegate applicationShouldTerminate:self] != NSTerminateNow) return;
+    }
+    // Accepted ordinary quit has already canceled dialogs and ordered quit.
+    // AppKit's second delegate query skips the veto and teardown is idempotent.
+    [super terminate:sender];
+}
+@end
+
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
 @property(nonatomic, strong) id sessionPowerOffObserver;
 @end
@@ -4524,7 +4540,9 @@ void sapp_run(const sapp_desc* desc) {
     _sapp_tc.app.current_cursor = SAPP_MOUSECURSOR_DEFAULT;
     _sapp_tc_init_keytable();
 
-    [NSApplication sharedApplication];
+    // An NSApplication created before sapp_run stays a plain NSApplication, and
+    // the terminate: preflight then does not apply (documented, not guarded).
+    [_sapp_tc_application sharedApplication];
     _sapp_tc.app.dlg = [[_sapp_tc_app_delegate alloc] init];
     NSApp.delegate = _sapp_tc.app.dlg;
     /* Cocoa swallows key-up events while Cmd is held; force-forward them

@@ -16,6 +16,23 @@ preserves the `metal_sim` and `wgsl` outputs required by TrussC.
 
 ---
 
+## macOS Async dialog quit preflight (#1117, PR #1254)
+
+`sapp_run` creates `_sapp_tc_application`, an `NSApplication` subclass whose
+`terminate:` calls the existing `applicationShouldTerminate:` gate before
+AppKit termination. Menu Quit/Cmd+Q and SIGTERM request quit through sokol's
+deferred path; Dock Quit/ordinary quit Apple Events enter the override directly.
+All use Runtime's existing exit veto and accepted-quit dialog cancellation
+before AppKit can dismiss an alert or refuse a confirm/save sheet. A veto
+returns without entering AppKit termination. After acceptance, AppKit's second
+delegate query sees ordered quit and idempotent Runtime shutdown, so it neither
+asks the veto twice nor repeats cancellation. Session-end Apple Events retain
+their existing query/commit policy. Last-window-close policy is unchanged.
+`sharedApplication` returns an existing application unchanged, so app code that
+creates `NSApplication` before `runApp` keeps a plain `NSApplication` and loses
+this preflight. TrussC itself creates no application earlier; apps should not
+either.
+
 ## Directory Structure
 
 ```

@@ -2,6 +2,7 @@
 """Check mac async sources and run real completion/quit code with native seams."""
 from pathlib import Path
 import os
+import shutil
 import subprocess
 import tempfile
 from test_web_window_controls import body
@@ -9,6 +10,26 @@ from test_web_window_controls import body
 ROOT = Path(__file__).resolve().parents[2]
 mac = (ROOT / 'core/platform/mac/tcFileDialog_mac.mm').read_text(encoding='utf-8')
 runtime = (ROOT / 'core/include/tc/app/tcWindowRuntime.cpp').read_text(encoding='utf-8')
+native = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+native = native[:native.index('bool sapp_isvalid(void) {')]
+platform = (ROOT / 'core/platform/mac/tcPlatform_mac.mm').read_text(encoding='utf-8')
+assert '[_sapp_tc_application sharedApplication]' in body(native, 'void sapp_run(const sapp_desc* desc)')
+assert '[NSApplication sharedApplication]' not in body(native, 'void sapp_run(const sapp_desc* desc)')
+assert '@interface _sapp_tc_application : NSApplication' in native
+terminate = body(native, '- (void)terminate:(id)sender')
+assert terminate.index('applicationShouldTerminate:self') < terminate.index('[super terminate:sender]')
+delegate = body(native, '- (NSApplicationTerminateReply)applicationShouldTerminate:')
+assert delegate.index('_sapp_tc_request_exit()') < delegate.index('trussc::internal::shutdownRuntime()')
+assert 'if (!_sapp_tc.app.quit_ordered)' in body(native, 'static BOOL _sapp_tc_request_exit(')
+assert '[NSApp terminate:nil]' in body(native, 'static void _sapp_tc_mac_process_deferred(')
+assert '_sapp_tc_mac_process_deferred()' in body(native, 'static void _sapp_tc_mac_source_tick(')
+assert 'sapp_request_quit()' in body(platform, '- (void)tcQuit:(id)sender')
+assert 'sapp_request_quit()' in body(runtime, 'void processMaintenance()')
+# Only Objective-C messaging is replaced. Execute the production preflight
+# against the existing real Runtime cancellation probe below.
+terminate = terminate.replace('- (void)terminate:(id)sender', 'void terminate(int sender)').replace(
+    '[self.delegate applicationShouldTerminate:self]', 'delegateQuery()').replace(
+    '[super terminate:sender]', 'appKitTerminate(sender)')
 helpers = mac[mac.index('namespace {'):mac.index('namespace {\nNSWindow* visibleDialogOwner')]
 # Replace only AppKit dismissal; all list/once-only/quit logic is production code.
 native_start = helpers.index('    if (pending->sheet.sheetParent)')
@@ -34,6 +55,7 @@ assert 'makeKeyAndOrderFront:nil' in presenter
 assert 'beginSheetModalForWindow' not in presenter.split('} else {\n            const bool save')[0]
 owner = body(mac, 'NSWindow* visibleDialogOwner(')
 assert owner.index('inputs.requestingWindow.lock()') < owner.index('openWindows()')
+assert 'internal::openWindows()' in owner
 assert 'window->isOpen()' in owner and 'native.isVisible && !native.isMiniaturized' in owner
 assert 'keyWindow' not in owner
 assert 'pending->completion = {};' in presenter
@@ -128,6 +150,28 @@ namespace headless {
 '''+body(runtime, 'void shutdownRuntime() noexcept {')+body(runtime, 'bool processPendingQuit() noexcept {')+r'''
 } // namespace internal
 } // namespace trussc
+namespace native {
+constexpr int NSTerminateNow = 1;
+bool session = false;
+int queries = 0, appKitCalls = 0;
+bool _sapp_tc_mac_is_session_end(int) { return session; }
+int _sapp_tc_mac_quit_reason() { return 0; }
+int delegateQuery() {
+    ++queries;
+    // The native delegate's acceptance/teardown boundary uses this same
+    // Runtime veto and shutdown; leave the native message itself as a seam.
+    trussc::internal::state.quitPending = true;
+    return trussc::internal::processPendingQuit() ? NSTerminateNow : 0;
+}
+void appKitTerminate(int) {
+    ++appKitCalls;
+    if (!session) {
+        check("AppKit cannot touch tracked dialogs", trussc::dialogSheets().empty());
+        delegateQuery(); // AppKit asks again after the preflight accepted.
+    }
+}
+'''+terminate+r'''
+} // namespace native
 int main() {
     using namespace trussc;
     using namespace trussc::internal;
@@ -208,6 +252,25 @@ int main() {
     auto survivorReply = trackDialogSheet(&survivor, [&](int) { ++survivorCalls; });
     cancelMacDialogSheets(); completeDialogSheet(throwingReply, 42); completeDialogSheet(survivorReply, 42);
     check("throwing callback cannot block other cancellations", reports == 1 && survivorCalls == 1);
+
+    state = Runtime{}; allow = false;
+    NSWindow routedAlert;
+    int routedCalls = 0;
+    auto routedReply = commonReply([&](FileDialogResult result) {
+        ++routedCalls;
+        check("routed quit cancels before teardown", !result.success && state.runToken->load());
+    });
+    trackDialogSheet(&routedAlert, [routedReply](int response) { routedReply({response == 42}); });
+    native::terminate(0);
+    check("native veto never enters AppKit termination", native::queries == 1 &&
+          native::appKitCalls == 0 && routedCalls == 0 && routedAlert.attached);
+    allow = true;
+    native::terminate(0);
+    check("accepted native quit cancels once before AppKit", routedCalls == 1 &&
+          routedAlert.ends == 1 && native::appKitCalls == 1 && native::queries == 3);
+    native::session = true;
+    native::terminate(0);
+    check("session termination retains its separate policy", native::appKitCalls == 2 && native::queries == 3);
     return failures ? 1 : 0;
 }
 '''
@@ -217,7 +280,10 @@ with tempfile.TemporaryDirectory(prefix='tc-sheetquit-') as folder:
                 ('missing-cancel', code.replace('    cancelMacDialogSheets();\n#endif', '\n#endif')),
                 ('duplicate-reply', code.replace('std::exchange(sheet->completion, {})', 'sheet->completion').replace(
                      'std::exchange(pending->completion, {})', 'pending->completion')),
-                ('deferred-quit', code.replace('if (completingMacDialogsForQuit()) { deliver(); return; }', ''))]
+                ('deferred-quit', code.replace('if (completingMacDialogsForQuit()) { deliver(); return; }', '')),
+                ('missing-preflight', code.replace('if (delegateQuery() != NSTerminateNow) return;', '')),
+                ('late-preflight', code.replace('if (delegateQuery() != NSTerminateNow) return;',
+                     'appKitTerminate(sender); if (delegateQuery() != NSTerminateNow) return;'))]
     for name, text in variants:
         source.write_text(text, encoding='utf-8')
         subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
@@ -228,4 +294,26 @@ with tempfile.TemporaryDirectory(prefix='tc-sheetquit-') as folder:
         if not expected:
             raise SystemExit(f'{name}: unexpected exit {result.returncode}')
 
-print("mac async source/quit probe: PASS (three mutants rejected)")
+    if clang := shutil.which('clang++'):
+        # SDK-free syntax check of the unchanged Objective-C message syntax.
+        objc = r'''
+__attribute__((objc_root_class)) @interface NSObject @end
+using NSApplicationTerminateReply = unsigned long;
+constexpr NSApplicationTerminateReply NSTerminateNow = 1;
+@class NSApplication;
+@protocol NSApplicationDelegate
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender;
+@end
+@interface NSApplication : NSObject
+@property id<NSApplicationDelegate> delegate;
+- (void)terminate:(id)sender;
+@end
+bool _sapp_tc_mac_is_session_end(int);
+int _sapp_tc_mac_quit_reason();
+'''+native[native.index('@interface _sapp_tc_application :'):native.index('@interface _sapp_tc_app_delegate :')]
+        source = Path(folder) / 'preflight.mm'
+        source.write_text(objc, encoding='utf-8')
+        subprocess.run([clang, '-std=c++20', '-fsyntax-only', '-fobjc-arc',
+                        '-fobjc-runtime=macosx-10.13', '-Werror', str(source)], check=True)
+
+print("mac async source/quit probe: PASS (five mutants rejected)")
