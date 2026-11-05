@@ -1155,7 +1155,7 @@ trusscli addon add|remove <a>  Add / remove addons (also clone / list / search /
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
 trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
-trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands). Prints a short progress line, warnings/errors and a Done:/Failed: summary; the full output is in <build folder>/build.log; --verbose shows it all on screen
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
