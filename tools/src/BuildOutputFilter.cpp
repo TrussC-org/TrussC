@@ -295,7 +295,7 @@ void BuildOutputFilter::write(const char* data, size_t size) {
         if (newline || tooLong) {
             string line;
             line.swap(partial_);
-            handleLine(move(line));
+            handleLine(std::move(line));
         }
     }
     screen_.flush();
@@ -475,7 +475,7 @@ void BuildOutputFilter::end(int exitCode, double seconds) {
     if (!partial_.empty()) {
         string line;
         line.swap(partial_);
-        handleLine(move(line));
+        handleLine(std::move(line));
     }
     if (options_.verbose) {
         screen_.flush();
