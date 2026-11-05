@@ -1278,6 +1278,55 @@ void tcApp::windowResized(int width, int height) {
 }
 '''
 
+["App::windowFocusChanged"]
+category = "events"
+keywords = ["focus", "blur", "activate", "deactivate", "foreground", "key window", "onFocus"]
+description.en = "Called when this App's window gains or loses keyboard focus."
+description.ja = "この App のウィンドウがキーボードフォーカスを得たとき、または失ったときに呼ばれる。"
+description.ko = "이 App의 윈도우가 키보드 포커스를 얻거나 잃을 때 호출된다."
+details.en = '''
+- Override `windowFocusChanged(bool focused)` in your tcApp. `focused` is true when the window gained focus and false when it lost it. Listeners that want an args struct can use `events().focusChanged`, which receives `FocusEventArgs`.
+- Event order: BeforeApp listeners, then this App callback, then AfterApp listeners. The arguments have no `consumed` field, and there is no node-tree stage.
+- When this function is called, `getWindow()->isFocused()` already returns the new value.
+- It is called only for the window this App is attached to, on the main thread. Nothing is called at startup, and a headless App never receives it.
+- It is called when the OS reports the change. Clicking another window of your app, switching to another application with Cmd-Tab / Alt-Tab and coming back, and `Window::bringToFront()` all lead to a call. On Windows, `Window::bringToFront()` can call it before `bringToFront()` returns. For the details of that case, see `CoreEvents::focusChanged`.
+'''
+details.ja = '''
+- tcApp で `windowFocusChanged(bool focused)` をオーバーライドします。`focused` はフォーカスを得たときに true、失ったときに false です。引数の構造体で受け取りたい場合は、`FocusEventArgs` を受け取る `events().focusChanged` を使えます。
+- イベントの順番は BeforeApp リスナー、この App コールバック、AfterApp リスナーです。引数に `consumed` はなく、ノードツリーの段階はありません。
+- この関数が呼ばれた時点で、`getWindow()->isFocused()` はすでに新しい値を返します。
+- この App がアタッチされているウィンドウの分だけ、メインスレッドで呼ばれます。起動時には呼ばれず、ヘッドレス App では呼ばれません。
+- OS が変化を知らせたときに呼ばれます。アプリの別のウィンドウをクリックしたとき、Cmd-Tab / Alt-Tab で別のアプリケーションに移ってから戻ったとき、`Window::bringToFront()` を呼んだときなどです。Windows では、`Window::bringToFront()` の中から、その呼び出しが戻る前に呼ばれることがあります。詳しくは `CoreEvents::focusChanged` を参照してください。
+'''
+details.ko = '''
+- tcApp에서 `windowFocusChanged(bool focused)`를 오버라이드합니다. `focused`는 포커스를 얻으면 true, 잃으면 false입니다. 인자 구조체로 받고 싶다면 `FocusEventArgs`를 받는 `events().focusChanged`를 사용할 수 있습니다.
+- 이벤트 순서는 BeforeApp 리스너, 이 App 콜백, AfterApp 리스너입니다. 인수에 `consumed`는 없고 노드 트리 단계도 없습니다.
+- 이 함수가 호출된 시점에 `getWindow()->isFocused()`는 이미 새 값을 반환합니다.
+- 이 App이 연결된 윈도우에 대해서만 메인 스레드에서 호출됩니다. 시작할 때는 호출되지 않으며, 헤드리스 App에서도 호출되지 않습니다.
+- OS가 변화를 알려 줄 때 호출됩니다. 앱의 다른 윈도우를 클릭했을 때, Cmd-Tab / Alt-Tab으로 다른 애플리케이션에 갔다가 돌아왔을 때, `Window::bringToFront()`를 호출했을 때 등입니다. Windows에서는 `Window::bringToFront()` 안에서, 그 호출이 돌아오기 전에 호출될 수 있습니다. 자세한 내용은 `CoreEvents::focusChanged`를 참조하세요.
+'''
+platform_note.en = '''
+- macOS, Windows, Linux and Web. iOS and Android send no focus events, so this is never called there.
+'''
+platform_note.ja = '''
+- macOS、Windows、Linux、Web で使えます。iOS と Android はフォーカスのイベントを送らないため、そこでは呼ばれません。
+'''
+platform_note.ko = '''
+- macOS, Windows, Linux, Web에서 사용할 수 있습니다. iOS와 Android는 포커스 이벤트를 보내지 않으므로 그곳에서는 호출되지 않습니다.
+'''
+related = ["App", "CoreEvents::focusChanged", "FocusEventArgs", "Window::isFocused", "Window::bringToFront", "App::windowResized"]
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+void windowFocusChanged(bool focused) override;
+shared_ptr<Window> dialog;   // opened with createWindow
+
+// tcApp.cpp
+void tcApp::windowFocusChanged(bool focused) {
+    // The main window got focus again: bring the dialog back in front of it
+    if (focused && dialog && dialog->isOpen()) dialog->bringToFront();
+}
+'''
+
 ["AudioDeviceChangedArgs"]
 keywords = ["switch", "reinit"]
 description.en = "Carries information about the audio device opened by the engine."
@@ -5495,21 +5544,21 @@ description.ko = "프레임워크의 수명 주기, 렌더링 및 입력 이벤�
 details.en = '''
 - App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
 - Lifecycle fan-out retains exitRequested/deviceLost/hotReloadUnload; console belongs only to RuntimeEvents. Window exit means actual closure, not App replacement.
-- On events the App receives, listen() defaults to BeforeApp; other events default to 100. This covers update, draw, exit, key, mouse, touch, windowResized, and filesDropped; setup is unchanged.
+- On events the App receives, listen() defaults to BeforeApp; other events default to 100. This covers update, draw, exit, key, mouse, touch, windowResized, focusChanged, and filesDropped; setup is unchanged.
 - Each member is an `Event<T>` or `Event<void>`; see `Event<T>` for `listen()`, listener lifetime, priorities, and delivery threads.
 - Framework notifications run on the main thread. Headless runs do not generate native window/input events or rendering events.
 '''
 details.ja = '''
 - App のコードは `events()`、App に属さないコード（アドオン、アプリ全体の処理）は `runtime().events()` を使います。
 - exitRequested/deviceLost/hotReloadUnload は App にも残り、console は RuntimeEvents だけです。Window exit は実際の閉鎖であり App 交換ではありません。
-- App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。 対象は update、draw、exit、キー、マウス、タッチ、windowResized、filesDropped で、setup は変更しません。
+- App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。 対象は update、draw、exit、キー、マウス、タッチ、windowResized、focusChanged、filesDropped で、setup は変更しません。
 - 各メンバーは `Event<T>` または `Event<void>` です。`listen()`、リスナーの寿命、優先度、呼び出すスレッドについては `Event<T>` を参照してください。
 - フレームワークからの通知はメインスレッドで行います。ヘッドレス実行では、ネイティブのウィンドウ・入力イベントと描画イベントは発生しません。
 '''
 details.ko = '''
 - App 코드는 `events()`, App 밖의 코드(애드온, 앱 전체 처리)는 `runtime().events()`를 사용합니다.
 - exitRequested/deviceLost/hotReloadUnload는 App에도 유지하고 console은 RuntimeEvents 전용입니다. Window exit은 실제 닫기이며 App 교체가 아닙니다.
-- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트에서는 100입니다. update, draw, exit, 키, 마우스, 터치, windowResized, filesDropped가 해당하며 setup은 변경하지 않습니다.
+- App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트에서는 100입니다. update, draw, exit, 키, 마우스, 터치, windowResized, focusChanged, filesDropped가 해당하며 setup은 변경하지 않습니다.
 - 각 멤버는 `Event<T>` 또는 `Event<void>`입니다. `listen()`, 리스너 수명, 우선순위 및 호출 스레드는 `Event<T>`를 참조하세요.
 - 프레임워크의 알림은 메인 스레드에서 전달합니다. 헤드리스 실행에서는 네이티브 윈도우 및 입력 이벤트와 렌더링 이벤트가 발생하지 않습니다.
 '''
@@ -5817,6 +5866,61 @@ details.ko = '''
 - 인수에 `cancel`과 `consumed`가 없으므로 리스너에서 드롭을 취소하거나 App 콜백을 막을 수 없습니다.
 '''
 related = ["DragDropEventArgs", "App::filesDropped", "CoreEvents::rawEvent"]
+
+["CoreEvents::focusChanged"]
+keywords = ["focus", "blur", "activate", "deactivate", "key window", "foreground", "listener"]
+description.en = "Fired when a window gains or loses keyboard focus."
+description.ja = "ウィンドウがキーボードフォーカスを得たとき、または失ったときに発生します。"
+description.ko = "윈도우가 키보드 포커스를 얻거나 잃으면 발생합니다."
+details.en = '''
+- Keep the returned `EventListener` as a tcApp member. Use `events().focusChanged` for the current window or `otherWin->events().focusChanged` for another window.
+```cpp
+EventListener focusListener, peerFocusListener; // tcApp members
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) { logNotice("Window") << e.focused; });
+    peerFocusListener = otherWin->events().focusChanged.listen([](FocusEventArgs& e) { logNotice("Peer") << e.focused; }); }
+```
+- `e.focused` is true when the window gained keyboard focus and false when it lost it. It matches `Window::isFocused()`, which already holds the new value when the listener runs. Only listeners of the window whose focus changed are called, on the main thread.
+- Order: BeforeApp listeners, then `App::windowFocusChanged`, then AfterApp listeners. The arguments have no `consumed` or `cancel` field. There is no node-tree stage.
+- Repeated reports of the same state are not delivered again, and a listener added later is not told the current state; read `Window::isFocused()` for that. Nothing is delivered at startup. When a window loses focus, its held mouse buttons are released first (`mouseReleased`), then this event is delivered.
+- When you call `Window::bringToFront()` from a focus listener or from `App::windowFocusChanged`, the focus change it causes is reported by the OS. On macOS and Linux this arrives later, after your callback has returned. On Windows it can arrive inside the `bringToFront()` call: the window that loses focus gets `false` and the raised window gets `true`, one after the other, before the call returns. It settles after one swap and does not bounce back and forth. Write the listener so it does not depend on whether the events come inside or after the call.
+'''
+details.ja = '''
+- 返された `EventListener` を tcApp のメンバーとして保持してください。現在のウィンドウには `events().focusChanged`、別のウィンドウには `otherWin->events().focusChanged` を使います。
+```cpp
+EventListener focusListener, peerFocusListener; // tcApp members
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) { logNotice("Window") << e.focused; });
+    peerFocusListener = otherWin->events().focusChanged.listen([](FocusEventArgs& e) { logNotice("Peer") << e.focused; }); }
+```
+- `e.focused` は、ウィンドウがキーボードフォーカスを得たときに true、失ったときに false です。`Window::isFocused()` と同じ値で、リスナーが呼ばれる時点ですでに新しい値になっています。フォーカスが変わったウィンドウのリスナーだけを、メインスレッドで呼びます。
+- 順番は BeforeApp リスナー、`App::windowFocusChanged`、AfterApp リスナーです。引数に `consumed` と `cancel` はありません。ノードツリーの段階もありません。
+- 同じ状態の繰り返しの報告は、もう一度は通知しません。あとからリスナーを登録しても現在の状態は通知されないので、それには `Window::isFocused()` を読んでください。起動時には何も通知しません。ウィンドウがフォーカスを失うときは、押されたままのマウスボタンを先に離し（`mouseReleased`）、そのあとでこのイベントを通知します。
+- フォーカスのリスナーや `App::windowFocusChanged` から `Window::bringToFront()` を呼ぶと、そのフォーカスの変化を OS が報告します。macOS と Linux では、コールバックが戻ったあとに届きます。Windows では `bringToFront()` の呼び出しの中で届くことがあります。その場合は、フォーカスを失うウィンドウに `false`、前面に出たウィンドウに `true` が続けて届き、呼び出しが戻る前に終わります。入れ替わりは 1 回で落ち着き、行ったり来たりはしません。呼び出しの中で届くか、あとで届くかに依存しないようにリスナーを書いてください。
+'''
+details.ko = '''
+- 반환된 `EventListener`를 tcApp의 멤버로 보관합니다. 현재 윈도우에는 `events().focusChanged`를, 다른 윈도우에는 `otherWin->events().focusChanged`를 사용합니다.
+```cpp
+EventListener focusListener, peerFocusListener; // tcApp members
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) { logNotice("Window") << e.focused; });
+    peerFocusListener = otherWin->events().focusChanged.listen([](FocusEventArgs& e) { logNotice("Peer") << e.focused; }); }
+```
+- `e.focused`는 윈도우가 키보드 포커스를 얻으면 true, 잃으면 false입니다. `Window::isFocused()`와 같은 값이며, 리스너가 호출될 때 이미 새 값이 들어 있습니다. 포커스가 바뀐 윈도우의 리스너만 메인 스레드에서 호출합니다.
+- 순서는 BeforeApp 리스너, `App::windowFocusChanged`, AfterApp 리스너입니다. 인수에 `consumed`와 `cancel`은 없습니다. 노드 트리 단계도 없습니다.
+- 같은 상태의 반복 보고는 다시 알리지 않으며, 나중에 등록한 리스너에게 현재 상태를 알려 주지도 않습니다. 현재 상태는 `Window::isFocused()`로 읽으세요. 시작할 때는 아무것도 알리지 않습니다. 윈도우가 포커스를 잃을 때는 눌려 있던 마우스 버튼을 먼저 놓고(`mouseReleased`) 그다음에 이 이벤트를 알립니다.
+- 포커스 리스너나 `App::windowFocusChanged`에서 `Window::bringToFront()`를 호출하면 그에 따른 포커스 변화를 OS가 보고합니다. macOS와 Linux에서는 콜백이 돌아온 뒤에 도착합니다. Windows에서는 `bringToFront()` 호출 안에서 도착할 수 있습니다. 이때는 포커스를 잃는 윈도우에 `false`, 앞으로 올라온 윈도우에 `true`가 연달아 도착하고, 호출이 돌아오기 전에 끝납니다. 교체는 한 번으로 안정되며 왔다 갔다 하지 않습니다. 호출 안에서 도착하든 나중에 도착하든 상관없도록 리스너를 작성하세요.
+'''
+platform_note.en = '''
+- macOS, Windows, Linux and Web. On the Web it follows the page's focus and blur.
+- iOS and Android send no focus events, so the event never fires there and `Window::isFocused()` stays false.
+'''
+platform_note.ja = '''
+- macOS、Windows、Linux、Web で使えます。Web ではページのフォーカスとブラーに従います。
+- iOS と Android はフォーカスのイベントを送らないため、そこではこのイベントは発生せず、`Window::isFocused()` は false のままです。
+'''
+platform_note.ko = '''
+- macOS, Windows, Linux, Web에서 사용할 수 있습니다. Web에서는 페이지의 포커스와 블러를 따릅니다.
+- iOS와 Android는 포커스 이벤트를 보내지 않으므로 그곳에서는 이 이벤트가 발생하지 않으며 `Window::isFocused()`는 계속 false입니다.
+'''
+related = ["FocusEventArgs", "FocusEventArgs::focused", "App::windowFocusChanged", "Window::isFocused", "Window::bringToFront", "CoreEvents::rawEvent", "Window::events", "Event<T>"]
 
 ["CoreEvents::hotReloadUnload"]
 description.en = "Called on an App just before hot reload replaces it."
@@ -9446,6 +9550,73 @@ void tcApp::setup() {
     }
 }
 '''
+
+["FocusEventArgs"]
+keywords = ["focus", "blur", "window"]
+description.en = "Describes a change in keyboard focus of a window."
+description.ja = "ウィンドウのキーボードフォーカスの変化を表します。"
+description.ko = "윈도우 키보드 포커스의 변화를 나타냅니다."
+details.en = '''
+- Read `focused` in a `focusChanged` listener. It is true when the window gained focus and false when it lost it. The value matches `Window::isFocused()`.
+- The delivery rules and the example for another window are described in `CoreEvents::focusChanged`.
+```cpp
+EventListener focusListener; // tcApp member
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) {
+    logNotice("Window") << e.focused; }); }
+```
+'''
+details.ja = '''
+- `focusChanged` のリスナーで `focused` を確認します。フォーカスを得たときは true、失ったときは false です。`Window::isFocused()` と同じ値です。
+- 通知の規則と別のウィンドウでの使用例は `CoreEvents::focusChanged` を参照してください。
+```cpp
+EventListener focusListener; // tcApp member
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) {
+    logNotice("Window") << e.focused; }); }
+```
+'''
+details.ko = '''
+- `focusChanged` 리스너에서 `focused`를 확인합니다. 포커스를 얻으면 true, 잃으면 false입니다. `Window::isFocused()`와 같은 값입니다.
+- 알림 규칙과 다른 윈도우의 사용 예는 `CoreEvents::focusChanged`를 참조합니다.
+```cpp
+EventListener focusListener; // tcApp member
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) {
+    logNotice("Window") << e.focused; }); }
+```
+'''
+related = ["CoreEvents::focusChanged", "Window::isFocused", "App::windowFocusChanged", "FocusEventArgs::focused"]
+
+["FocusEventArgs::focused"]
+description.en = "Reports whether the window gained or lost keyboard focus."
+description.ja = "ウィンドウがキーボードフォーカスを得たか失ったかを表します。"
+description.ko = "윈도우가 키보드 포커스를 얻었는지 잃었는지 나타냅니다."
+details.en = '''
+- This boolean is true when the window gained keyboard focus and false when it lost it. It is false by default. Reading it does not change the window.
+- The delivery rules and the example for another window are described in `CoreEvents::focusChanged`.
+```cpp
+EventListener focusListener; // tcApp member
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) {
+    logNotice("Window") << e.focused; }); }
+```
+'''
+details.ja = '''
+- ウィンドウがキーボードフォーカスを得たときは true、失ったときは false です。初期値は false です。読み取ってもウィンドウの状態は変わりません。
+- 通知の規則と別のウィンドウでの使用例は `CoreEvents::focusChanged` を参照してください。
+```cpp
+EventListener focusListener; // tcApp member
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) {
+    logNotice("Window") << e.focused; }); }
+```
+'''
+details.ko = '''
+- 윈도우가 키보드 포커스를 얻으면 true, 잃으면 false입니다. 기본값은 false입니다. 값을 읽어도 윈도우 상태는 바뀌지 않습니다.
+- 알림 규칙과 다른 윈도우의 사용 예는 `CoreEvents::focusChanged`를 참조합니다.
+```cpp
+EventListener focusListener; // tcApp member
+void tcApp::setup() { focusListener = events().focusChanged.listen([](FocusEventArgs& e) {
+    logNotice("Window") << e.focused; }); }
+```
+'''
+related = ["CoreEvents::focusChanged", "Window::isFocused", "App::windowFocusChanged", "FocusEventArgs"]
 
 ["Font"]
 keywords = ["typeface", "ttf", "of true type font"]
@@ -41133,6 +41304,61 @@ details.ko = '''
 '''
 related = ["Window::isOpen", "Window::setFps", "CoreEvents::rawEvent", "CoreEvents::occludedChanged"]
 
+["Window::isFocused"]
+keywords = ["focus", "focused", "active", "key window", "foreground", "keyboard"]
+description.en = "Returns whether this window has keyboard focus, as last reported by the operating system."
+description.ja = "OS が最後に報告したとおり、このウィンドウがキーボードフォーカスを持っているかを返します。"
+description.ko = "운영체제가 마지막으로 보고한 대로 이 윈도우가 키보드 포커스를 가지고 있는지 반환합니다."
+details.en = '''
+- The value follows the focus reports from the OS, the same ones that call `CoreEvents::focusChanged` and `App::windowFocusChanged`, and it is already updated when they are called.
+- A new window starts as not focused. It becomes true when the OS reports that the window has focus, which normally happens shortly after it appears, not inside the `createWindow()` call. To react to the change, listen to `focusChanged` instead of polling.
+- Returns false for a closed window, and while another window or another application has focus. At most one window of your app is focused at a time.
+- iOS and Android send no focus events, so it stays false there.
+```cpp
+// tcApp.h: shared_ptr<Window> dialog;   (opened with createWindow)
+void tcApp::draw() {
+    if (dialog && dialog->isFocused()) { /* the dialog has the keyboard */ }
+}
+```
+'''
+details.ja = '''
+- 値は OS からのフォーカスの報告に従います。`CoreEvents::focusChanged` や `App::windowFocusChanged` を呼ぶのと同じ報告で、それらが呼ばれる時点ですでに更新されています。
+- 新しいウィンドウは、最初はフォーカスなしです。OS がフォーカスを得たと報告した時点で true になります。通常はウィンドウが現れた少しあとで、`createWindow()` の呼び出しの中ではありません。変化に反応したいときは、繰り返し調べるのではなく `focusChanged` を使ってください。
+- 閉じたウィンドウ、そして別のウィンドウや別のアプリケーションがフォーカスを持っている間は false を返します。アプリの中でフォーカスを持つウィンドウは同時に 1 つまでです。
+- iOS と Android はフォーカスのイベントを送らないため、そこでは false のままです。
+```cpp
+// tcApp.h: shared_ptr<Window> dialog;   (opened with createWindow)
+void tcApp::draw() {
+    if (dialog && dialog->isFocused()) { /* the dialog has the keyboard */ }
+}
+```
+'''
+details.ko = '''
+- 값은 OS의 포커스 보고를 따릅니다. `CoreEvents::focusChanged`와 `App::windowFocusChanged`를 호출하는 것과 같은 보고이며, 그것들이 호출될 때 이미 갱신되어 있습니다.
+- 새 윈도우는 처음에 포커스가 없는 상태입니다. OS가 포커스를 얻었다고 보고하면 true가 됩니다. 보통은 윈도우가 나타난 직후이며 `createWindow()` 호출 안은 아닙니다. 변화에 반응하려면 반복해서 확인하지 말고 `focusChanged`를 사용하세요.
+- 닫힌 윈도우이거나 다른 윈도우 또는 다른 애플리케이션이 포커스를 가지고 있는 동안은 false를 반환합니다. 앱 안에서 포커스를 가지는 윈도우는 동시에 최대 하나입니다.
+- iOS와 Android는 포커스 이벤트를 보내지 않으므로 그곳에서는 계속 false입니다.
+```cpp
+// tcApp.h: shared_ptr<Window> dialog;   (opened with createWindow)
+void tcApp::draw() {
+    if (dialog && dialog->isFocused()) { /* the dialog has the keyboard */ }
+}
+```
+'''
+platform_note.en = '''
+- macOS, Windows, Linux and Web. On the Web it follows the page's focus and blur, and stays false until the first focus event arrives.
+- iOS and Android: always false.
+'''
+platform_note.ja = '''
+- macOS、Windows、Linux、Web で使えます。Web ではページのフォーカスとブラーに従い、最初のフォーカスのイベントが届くまでは false のままです。
+- iOS と Android: 常に false です。
+'''
+platform_note.ko = '''
+- macOS, Windows, Linux, Web에서 사용할 수 있습니다. Web에서는 페이지의 포커스와 블러를 따르며, 첫 포커스 이벤트가 도착할 때까지 false입니다.
+- iOS와 Android: 항상 false입니다.
+'''
+related = ["CoreEvents::focusChanged", "App::windowFocusChanged", "Window::bringToFront", "Window::isOccluded", "Window::isOpen"]
+
 ["Window::setClearColor"]
 description.en = "Sets this window's background clear color."
 description.ja = "このウィンドウの背景クリア色を設定する。"
@@ -41368,6 +41594,7 @@ details.en = '''
 - A minimised window is restored first, so the user sees it.
 - The global `bringWindowToFront()` raises the window of the App that calls it. Use this method to raise a different window.
 - Whether focus moves away from another application is up to the OS and the window manager.
+- The focus change it causes is reported through `focusChanged` and `App::windowFocusChanged`. On macOS and Linux X11 those events arrive later. On Windows they can arrive inside the `bringToFront()` call itself, before it returns: the window that loses focus gets `false` and this window gets `true`. It settles after one swap. See `CoreEvents::focusChanged`.
 - Returns no success status. Does nothing on a closed window. For main-thread requirements, see `Window::setApp`.
 '''
 details.ja = '''
@@ -41375,6 +41602,7 @@ details.ja = '''
 - 最小化されているウィンドウは、まず元に戻してから前面に出します。
 - グローバルの `bringWindowToFront()` は、呼び出した App のウィンドウを前面に出します。別のウィンドウを前面に出すときは、このメソッドを使ってください。
 - ほかのアプリケーションからフォーカスを移すかどうかは、OS とウィンドウマネージャーが決めます。
+- これによるフォーカスの変化は `focusChanged` と `App::windowFocusChanged` で通知されます。macOS と Linux X11 では、そのイベントはあとで届きます。Windows では `bringToFront()` の呼び出しの中、戻る前に届くことがあります。フォーカスを失うウィンドウに `false`、このウィンドウに `true` が届き、入れ替わりは 1 回で落ち着きます。`CoreEvents::focusChanged` を参照してください。
 - 成功状態は返しません。閉じたウィンドウに対しては何もしません。メインスレッドでの使用については `Window::setApp` を参照してください。
 '''
 details.ko = '''
@@ -41382,6 +41610,7 @@ details.ko = '''
 - 최소화된 창은 먼저 원래대로 복원한 뒤 앞으로 올립니다.
 - 전역 `bringWindowToFront()`는 호출한 App의 창을 앞으로 올립니다. 다른 창을 올릴 때는 이 메서드를 사용하세요.
 - 다른 애플리케이션에서 포커스를 옮길지는 OS와 윈도우 매니저가 정합니다.
+- 이로 인한 포커스 변화는 `focusChanged`와 `App::windowFocusChanged`로 알려 줍니다. macOS와 Linux X11에서는 그 이벤트가 나중에 도착합니다. Windows에서는 `bringToFront()` 호출 안에서, 돌아오기 전에 도착할 수 있습니다. 포커스를 잃는 창에 `false`, 이 창에 `true`가 도착하며 교체는 한 번으로 안정됩니다. `CoreEvents::focusChanged`를 참조하세요.
 - 성공 여부를 반환하지 않습니다. 닫힌 창에서는 아무 동작도 하지 않습니다. 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
 '''
 platform_note.en = '''
@@ -41405,7 +41634,7 @@ void tcApp::mousePressed(Vec2 pos, int button) {
     if (dialog && dialog->isOpen()) dialog->bringToFront();   // the dialog, not this window
 }
 '''
-related = ["bringWindowToFront", "createWindow", "Window::close"]
+related = ["bringWindowToFront", "createWindow", "Window::close", "CoreEvents::focusChanged", "Window::isFocused"]
 
 ["createWindow"]
 keywords = ["multi window", "second window", "open window", "display"]

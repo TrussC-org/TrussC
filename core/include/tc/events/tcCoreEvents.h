@@ -48,6 +48,7 @@ public:
     // Window
     Event<ResizeEventArgs> windowResized{EventPriority::BeforeApp};
     Event<OccludedEventArgs> occludedChanged; // Explicit listeners for effective-hidden changes
+    Event<FocusEventArgs> focusChanged{EventPriority::BeforeApp}; // Keyboard focus gained or lost
 
     // Drag & drop
     Event<DragDropEventArgs> filesDropped{EventPriority::BeforeApp};

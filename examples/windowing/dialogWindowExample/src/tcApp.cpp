@@ -6,6 +6,8 @@
 //
 // The dialog is app-side, not an OS modal: while it is open the main window
 // ignores clicks and keys, raises the dialog again and flashes its background.
+// Giving the main window focus (a click on it, Cmd-Tab / Alt-Tab back into the
+// app) raises the dialog the same way, through windowFocusChanged().
 // OK closes the dialog and the main App gets `true`; closing it with the OS
 // close button (x) counts as cancel (closeRequested) and the main App gets
 // `false`.
@@ -46,6 +48,13 @@ void tcApp::keyPressed(int key) {
 void tcApp::mousePressed(Vec2 pos, int button) {
     if (dialogOpen()) { blockedInput(); return; }
     if (button == MOUSE_BUTTON_LEFT) circles_.push_back(pos);
+}
+
+void tcApp::windowFocusChanged(bool focused) {
+    // On macOS the first click on a window that is not key only gives it focus
+    // and never reaches mousePressed(), so the focus event is what reliably
+    // raises the dialog. It also covers switching back to the app.
+    if (focused && dialogOpen()) blockedInput();
 }
 
 void tcApp::openDialog() {

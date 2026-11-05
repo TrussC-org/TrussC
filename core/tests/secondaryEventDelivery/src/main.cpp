@@ -304,7 +304,7 @@ struct Harness : App {
                 check("setApp does not notify window exit", closeEvents == 0);
                 phase = 2;
             } else if (phase == 2 && counts[2].updates) {
-                check("swaps retain exactly one App binding per cleared event", source().keyPressed.listenerCount() == 1 && source().update.listenerCount() == 1 && trussc::internal::WindowRequestAccess::context(*secondary).appEventListeners.size() == 15);
+                check("swaps retain exactly one App binding per cleared event", source().keyPressed.listenerCount() == 1 && source().update.listenerCount() == 1 && trussc::internal::WindowRequestAccess::context(*secondary).appEventListeners.size() == 16);
                 check("input swaps App exactly once after its full tick", counts[1].updates == 1 && counts[1].draws == 1 && counts[1].exits == 1 && counts[1].cleanups == 1);
                 // Cancellation and refusal do not disturb bindings.
                 auto current = secondary->getApp();

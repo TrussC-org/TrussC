@@ -69,6 +69,8 @@ struct WindowBinding {
     // never consumes its delivery.
     bool lastDeliveredHidden = false;
     bool visibilityReady = false;
+    // Last focus state reported by the OS for this window (see Window::isFocused()).
+    bool focused = false;
     uint64_t visibilityRevision = 0;
     WindowGeometryState geometry;
     bool geometryInitialized = false;

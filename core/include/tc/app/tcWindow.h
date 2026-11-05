@@ -95,6 +95,11 @@ public:
     // occlusion/minimization; unsupported visibility queries return false.
     bool isOccluded() const;
 
+    // Keyboard focus as last reported by the OS for this window. False until
+    // the first focus event arrives, and false once the window is closed.
+    // Desktop and Web only; iOS / Android never report focus.
+    bool isFocused() const;
+
     // Resize this window's content area to the given LOGICAL size (points),
     // matching getWidth()/getHeight() units. Desktop controls address this
     // Window's native binding (macOS NSWindow, Windows HWND or X11).
@@ -139,7 +144,8 @@ public:
     // window's callback is running (the global bringWindowToFront() targets
     // the current window). A minimised window is restored. The OS may refuse
     // to take focus from another application. No-op on a closed window, and
-    // on iOS / Android / Web.
+    // on iOS / Android / Web. The focus events it causes (focusChanged) can
+    // arrive inside this call on Windows; on macOS and X11 they arrive later.
     void bringToFront() { control(internal::WindowControl::BringToFront); }
 
     void setClearColor(const Color& c) { clearColor_ = c; clearColorSet_ = true; }
@@ -336,9 +342,9 @@ public:
     static uint64_t creationId(const Window& w) { return w.binding_.handle.id; }
     static WindowBinding& binding(Window& w) { return w.binding_; }
     static const WindowBinding& binding(const Window& w) { return w.binding_; }
-    static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.ctx_.suspended = false; }
+    static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.binding_.focused = false; w.ctx_.suspended = false; }
     static void resetForLaunch(Window& w) {
-        w.binding_.lastDeliveredHidden = false; w.binding_.visibilityReady = false;
+        w.binding_.lastDeliveredHidden = false; w.binding_.visibilityReady = false; w.binding_.focused = false;
         w.exitDelivered_ = false; w.closeRequested_ = false; w.ctx_.targetsClosed = false;
         w.ctx_.appEventListeners.clear(); w.appEventState_.reset(); w.appSizeSeeded_ = false;
         prepareInitialBindings(w); w.epoch_ = runtimeEpoch();
@@ -502,7 +508,7 @@ inline void Window::applyPendingApp() {
 
 inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                                      const std::shared_ptr<AppEventState>& state) {
-    listeners.reserve(15);
+    listeners.reserve(16);
     auto bind = [&](auto& event, auto callback, bool exiting = false) {
         listeners.push_back(internal::FrameworkEventAccess::listen(event,
             [this, callback, state, exiting](auto&&... args) {
@@ -537,6 +543,7 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
     bind(events_.touchMoved, [](App& app, auto& e) { app.touchMoved(e); });
     bind(events_.touchReleased, [](App& app, auto& e) { app.touchReleased(e); });
     bind(events_.windowResized, [](App& app, auto& e) { app.handleWindowResized(e.width, e.height); });
+    bind(events_.focusChanged, [](App& app, auto& e) { app.windowFocusChanged(e.focused); });
     bind(events_.filesDropped, [](App& app, auto& e) { app.filesDropped(e.files); });
 }
 
@@ -841,6 +848,8 @@ inline bool Window::isOccluded() const {
     const auto& m = binding_.metadata;
     return isOpen() && m.trust_hidden_signals && (m.iconified || m.occluded);
 }
+
+inline bool Window::isFocused() const { return isOpen() && binding_.focused; }
 
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {
     if (internal::runtimeEnding()) return nullptr;

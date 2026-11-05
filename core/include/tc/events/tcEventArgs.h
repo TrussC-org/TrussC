@@ -217,6 +217,11 @@ struct ResizeEventArgs {
     int height = 0;
 };
 
+/// Keyboard focus of a window: true when the window gained it, false when it lost it.
+struct FocusEventArgs {
+    bool focused = false;
+};
+
 // ---------------------------------------------------------------------------
 // Drag & drop event arguments (for future use)
 // ---------------------------------------------------------------------------

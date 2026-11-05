@@ -934,6 +934,7 @@ struct Cover_App : af::Scope<App> {
         (void)af::val<App>().touchPressed(af::val<const TouchEventArgs>());
         (void)af::val<App>().touchReleased(af::val<const TouchEventArgs>());
         (void)af::val<App>().update();
+        (void)af::val<App>().windowFocusChanged(af::val<bool>());
         (void)af::val<App>().windowResized(af::val<int>(), af::val<int>());
     }
 };
@@ -1286,6 +1287,7 @@ struct Cover_CoreEvents : af::Scope<CoreEvents> {
         (void)af::val<CoreEvents>().exit;
         (void)af::val<CoreEvents>().exitRequested;
         (void)af::val<CoreEvents>().filesDropped;
+        (void)af::val<CoreEvents>().focusChanged;
         (void)af::val<CoreEvents>().hotReloadUnload;
         (void)af::val<CoreEvents>().keyPressed;
         (void)af::val<CoreEvents>().keyReleased;
@@ -1518,6 +1520,13 @@ struct Cover_FileWriter : af::Scope<FileWriter> {
         (void)af::val<FileWriter>().write(af::val<char>());
         (void)af::val<FileWriter>().write(af::val<const void *>(), af::val<size_t>());
         (void)af::val<FileWriter>().writeLine(af::val<const std::string>());
+    }
+};
+
+struct Cover_FocusEventArgs : af::Scope<FocusEventArgs> {
+    ~Cover_FocusEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<FocusEventArgs>().focused;
     }
 };
 
@@ -4853,6 +4862,7 @@ struct Cover_Window : af::Scope<Window> {
 #endif
         (void)af::val<const Window>().getTitle();
         (void)af::val<const Window>().getWidth();
+        (void)af::val<const Window>().isFocused();
         (void)af::val<const Window>().isFullscreen();
         (void)af::val<const Window>().isOccluded();
         (void)af::val<const Window>().isOpen();
@@ -5065,6 +5075,7 @@ void af::coverGenerated() {
     af_generated::Cover_FileDialogResult::run();
     af_generated::Cover_FileReader::run();
     af_generated::Cover_FileWriter::run();
+    af_generated::Cover_FocusEventArgs::run();
     af_generated::Cover_Font::run();
     af_generated::Cover_Font__PlacedGlyph::run();
     af_generated::Cover_FpsSettings::run();

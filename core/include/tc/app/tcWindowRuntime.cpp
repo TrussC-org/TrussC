@@ -520,7 +520,7 @@ CoreEvents& unavailableWindowEvents() {
                 events.exit, events.hotReloadUnload, events.exitRequested, events.deviceLost,
                 events.keyPressed, events.keyReleased, events.mousePressed, events.mouseReleased,
                 events.mouseMoved, events.mouseDragged, events.mouseScrolled, events.windowResized,
-                events.occludedChanged, events.filesDropped, events.clipboardPasted, events.closeRequested,
+                events.occludedChanged, events.focusChanged, events.filesDropped, events.clipboardPasted, events.closeRequested,
                 events.touchPressed, events.touchMoved, events.touchReleased, events.rawEvent);
         }
     };
@@ -1313,6 +1313,8 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_TOUCHES_ENDED:
             case SAPP_EVENTTYPE_TOUCHES_CANCELLED: return "touchReleased()";
             case SAPP_EVENTTYPE_RESIZED:           return "windowResized()";
+            case SAPP_EVENTTYPE_FOCUSED:
+            case SAPP_EVENTTYPE_UNFOCUSED:         return "windowFocusChanged()";
             case SAPP_EVENTTYPE_FILES_DROPPED:     return "filesDropped()";
             case SAPP_EVENTTYPE_CLIPBOARD_PASTED:  return "the clipboardPasted event";
             case SAPP_EVENTTYPE_TC_DEVICE_LOST:    return "the deviceLost event";
@@ -1322,8 +1324,6 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_MOUSE_LEAVE:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
-            case SAPP_EVENTTYPE_FOCUSED:
-            case SAPP_EVENTTYPE_UNFOCUSED:
             case SAPP_EVENTTYPE_SUSPENDED:
             case SAPP_EVENTTYPE_RESUMED:
             case _SAPP_EVENTTYPE_NUM:
@@ -1531,11 +1531,26 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             }
         }
 
+        // Record the state before notifying, so a listener (or a nested focus
+        // event from bringToFront() on Windows) sees isFocused() up to date.
+        // Repeated reports of the same state are not delivered again.
+        auto deliverFocus = [&](bool focused) {
+            auto& binding = WindowRequestAccess::binding(window);
+            if (binding.focused == focused) return;
+            binding.focused = focused;
+            FocusEventArgs args; args.focused = focused;
+            window.events().focusChanged.notify(args);
+        };
+
         switch (ev->type) {
             case SAPP_EVENTTYPE_UNFOCUSED:
                 if (dispatch.current(SAPP_MOUSEBUTTON_LEFT)) ctx.touchMapper.reset();
                 for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button)
                     releaseMouse(button);
+                deliverFocus(false);
+                break;
+            case SAPP_EVENTTYPE_FOCUSED:
+                deliverFocus(true);
                 break;
             case SAPP_EVENTTYPE_KEY_DOWN: {
                 // Notify event system
@@ -1765,7 +1780,6 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             case SAPP_EVENTTYPE_CHAR:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
-            case SAPP_EVENTTYPE_FOCUSED:
             case SAPP_EVENTTYPE_SUSPENDED:
             case SAPP_EVENTTYPE_RESUMED:
             case _SAPP_EVENTTYPE_NUM:
