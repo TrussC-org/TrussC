@@ -76,6 +76,7 @@ void retireAppOwner(std::shared_ptr<Owner>) {}
 bool sg_isvalid() { return false; }
 void sapp_tc_gl_activate_idle() {}
 void cancelLogoutWatchdog() {}
+void cancelAsyncDialogs() {}
 int orders = 0, cancels = 0;
 void sapp_quit() { ++orders; }
 void sapp_cancel_quit() { ++cancels; }
