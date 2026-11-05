@@ -228,6 +228,11 @@ ProjectGenerator::ProjectGenerator(const ProjectSettings& settings)
 {
 }
 
+void ProjectGenerator::logConfigureOutput(const string& buildDir, const string& output, int result) {
+    if (configureOutputCallback_) configureOutputCallback_(buildDir, output, result);
+    else if (!output.empty()) log(output);
+}
+
 void ProjectGenerator::log(const string& msg) {
     if (logCallback_) {
         logCallback_(msg);
@@ -1126,7 +1131,7 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
         log("Running CMake configure (preset: " + preset + ")...");
         string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
         auto [result, output] = executeCommand(cmd);
-        if (!output.empty()) log(output);
+        logConfigureOutput(buildDirForPreset(preset), output, result);
         if (result != 0) {
             const bool kept = (preset == "web" && settings_.webKept) ||
                               (preset == "android" && settings_.androidKept) ||
@@ -1178,10 +1183,7 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
     string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
 
     auto [result, output] = executeCommand(cmd);
-
-    if (!output.empty()) {
-        log(output);
-    }
+    logConfigureOutput(buildDirForPreset(preset), output, result);
 
     if (result != 0) {
         throw runtime_error("CMake configure failed");
@@ -1201,10 +1203,7 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
     string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
 
     auto [result, output] = executeCommand(cmd);
-
-    if (!output.empty()) {
-        log(output);
-    }
+    logConfigureOutput(buildDirForPreset(preset), output, result);
 
     if (result != 0) {
         throw runtime_error("CMake configure failed");

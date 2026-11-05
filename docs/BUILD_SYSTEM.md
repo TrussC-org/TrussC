@@ -174,6 +174,24 @@ trusscli build -j 4
 trusscli build -j 4 --dry-run
 ```
 
+**Build output:**
+
+`trusscli build` and `trusscli run` print a short result, not every cmake line:
+
+```
+Building myApp (44 files) .........50%.........100%
+Done: 2 files, 42 up to date (0m30s). Full log: build-linux/build.log
+```
+
+- One progress line, with a dot per 5 %.
+- Only known noise is hidden: CMake `-- ...` configure lines, `[ NN%] Building` / `Linking` lines, `Scanning dependencies` and `Built target`. Everything else is shown as the tool printed it, so warnings, errors, compiler notes and linker messages are never lost.
+- The last lines are the result: `Done:` or `Failed:`, then `ERROR: N (files)` and `WARNING: N (files)` when there are any (`ERROR: link failed` for a link error without a source file).
+- The full output of the configure and build is always saved to `<build folder>/build.log` (for example `build-linux/build.log`), and overwritten by the next build.
+- `trusscli build --verbose` (also `run`, `update`) prints the full output on screen as well.
+- `trusscli run` shortens only the build. The app's own output is not filtered.
+
+Warnings and errors keep the compiler's own format, so tools that read them (`file:line: error:` or MSVC `file(line): error C…`) keep working. `trusscli build` no longer passes the child's terminal through, so compiler colors are off in both modes; the log has the plain text.
+
 **Web Build (WASM):**
 The Web preset uses Ninja on Windows and Unix Makefiles on macOS/Linux,
 matching the native presets. On Windows, trusscli automatically uses the
