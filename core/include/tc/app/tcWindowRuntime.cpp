@@ -376,8 +376,8 @@ void shutdownRuntime() noexcept {
 #if defined(__APPLE__) && TARGET_OS_OSX
     cancelMacDialogSheets();
 #endif
-#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
-    cancelAsyncDialogs(); // Linux quit drops pending callbacks before App teardown.
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+    cancelAsyncDialogs(); // Windows/Linux quit drops pending callbacks before App teardown.
 #endif
     // One retained snapshot of attachment order, including headless. Backings
     // are separately retained so user handle cycles cannot postpone disposal.

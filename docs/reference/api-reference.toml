@@ -42276,45 +42276,48 @@ description.ja = "完了コールバック付きのアラートダイアログ�
 description.ko = "완료 콜백이 있는 알림 대화상자를 표시한다."
 details.en = '''
 - `alertDialogAsync(title, message, callback)` displays a heading and body text; the optional `void()` callback defaults to `nullptr` and is called after dismissal or completion of the platform fallback.
-- Call the Async dialog family on the main thread; Linux, macOS, and iOS deliver callbacks on the main thread, while Windows, Android, and Web invoke them on the calling thread without starting a worker.
-- Async does not guarantee a deferred callback: Windows and Web block until their supported dialogs close, Android completes immediately, and macOS blocks when there is no key window; callbacks can run before the function returns.
+- Call the Async dialog family on the main thread; Windows, Linux, macOS, and iOS deliver callbacks on the main thread, while Android and Web invoke them on the calling thread without starting a worker.
+- Async does not guarantee a deferred callback: Web blocks until its supported dialogs close, Android completes immediately, and macOS blocks when there is no key window; callbacks can run before the function returns.
 - On macOS and iOS, callbacks are delivered only while the app run that requested them remains active; ending that run or replacing it during hot reload suppresses pending callbacks. On macOS, accepted process quit first cancels open sheets and invokes their live callbacks before App exit/cleanup (alert has no result, confirm receives `false`, load/save receive an empty unsuccessful result); a quit veto leaves confirm/load/save sheets pending. An open `alertDialogAsync` sheet is dismissed by AppKit as soon as quit starts, so its callback runs even if exitRequested then vetoes the quit.
 - On iOS, a missing root view controller logs an error and invokes the callback without showing a dialog.
 - On Linux, all four Async functions copy their inputs and return at once. They present at the start of the next host turn and deliver the result at the start of a later turn on the main thread, including GTK initialization failure. Other windows keep running while a dialog is open. GTK's internal overwrite confirmation pauses all windows while it is up.
 - On Linux, concurrent dialogs are not limited; the app must manage how many it requests. Closing the owning window or ending/replacing the requesting App dismisses the dialog and drops its callback, including a result already queued. Accepted process quit drops pending callbacks. Avoid calling a blocking short-name dialog while an Async dialog is open.
+- On Windows, all four Async functions copy their inputs and return at once. They start the dialog at the next host turn and deliver results at a later turn on the main thread. Other windows keep running. The requesting window owns the dialog and cannot be used until the dialog closes; requests outside a window have no owner. Closing the requesting window or ending/replacing its App drops the callback. Accepted process quit also drops pending callbacks without waiting for dialog threads. There is no limit on concurrent dialogs; the app manages its requests. Avoid calling a blocking short-name dialog while an Async dialog is open.
 '''
 details.ja = '''
 - `alertDialogAsync(title, message, callback)` は見出しと本文を表示します。省略可能な `void()` コールバックの既定値は `nullptr` で、ダイアログを閉じた後、またはプラットフォームの代替処理が完了した後に呼ばれます。
-- Async ダイアログ群はメインスレッドで呼んでください。Linux、macOS、iOS のコールバックはメインスレッドで呼ばれ、Windows、Android、Web ではワーカースレッドを作らず、呼び出したスレッドで呼ばれます。
-- Async という名前でもコールバックが後回しになるとは限りません。Windows、Web では対応するダイアログを閉じるまで処理が止まり、Android は即座に完了し、macOS もキーウィンドウがなければ処理が止まります。関数から戻る前にコールバックが呼ばれる場合があります。
+- Async ダイアログ群はメインスレッドで呼んでください。Windows、Linux、macOS、iOS のコールバックはメインスレッドで呼ばれ、Android、Web ではワーカースレッドを作らず、呼び出したスレッドで呼ばれます。
+- Async という名前でもコールバックが後回しになるとは限りません。Web では対応するダイアログを閉じるまで処理が止まり、Android は即座に完了し、macOS もキーウィンドウがなければ処理が止まります。関数から戻る前にコールバックが呼ばれる場合があります。
 - macOS と iOS では、要求したアプリの実行が有効な間だけコールバックを呼びます。その実行が終了した場合やホットリロードで置き換わった場合は、保留中のコールバックを呼びません。macOS では、プロセスの終了が承認されると、App の exit/cleanup 前に開いているシートをキャンセルし、有効なコールバックを呼びます（alert は戻り値なし、confirm は `false`、load/save は空の失敗結果）。終了が拒否された場合、confirm/load/save のシートは保持されます。`alertDialogAsync` のシートは終了が始まった時点で AppKit が閉じるため、その後 exitRequested で終了が拒否されてもコールバックは呼ばれます。
 - iOS でルートビューコントローラーがない場合は、エラーをログに出力し、ダイアログを表示せずにコールバックを呼びます。
 - Linux では、4 種類の Async 関数は入力をコピーしてすぐに戻ります。次の外側のホストターンの冒頭で表示し、後のターンの冒頭でメインスレッドに結果を届けます。GTK の初期化に失敗した場合も同じです。ダイアログが開いている間も他のウィンドウは動き続けます。ただし、GTK 内部の上書き確認が出ている間はすべてのウィンドウが停止します。
 - Linux では同時に開く数に制限はありません。要求数はアプリ側で管理してください。所有ウィンドウを閉じた場合や要求元の App が終了・置換された場合は、ダイアログを閉じ、配送待ちの結果も含めてコールバックを呼びません。プロセスの終了が承認された場合も保留中のコールバックを呼びません。Async ダイアログが開いている間は、待機する短い名前のダイアログ関数を呼ばないでください。
+- Windows では、4 種類の Async 関数は入力をコピーしてすぐに戻ります。次のホストターンでダイアログを開き、後のターンでメインスレッドに結果を届けます。他のウィンドウは動き続けます。要求元のウィンドウがダイアログの所有者となり、ダイアログが閉じるまで操作できません。ウィンドウ外からの要求には所有者がありません。要求元のウィンドウを閉じた場合や、その App が終了・置換された場合はコールバックを呼びません。プロセスの終了が承認された場合も、ダイアログのスレッドを待たず、保留中のコールバックを呼びません。同時に開く数に制限はなく、要求数はアプリ側で管理します。Async ダイアログが開いている間は、待機する短い名前のダイアログ関数を呼ばないでください。
 '''
 details.ko = '''
 - `alertDialogAsync(title, message, callback)`은 제목과 본문을 표시합니다. 선택적인 `void()` 콜백의 기본값은 `nullptr`이며 대화상자를 닫거나 플랫폼의 대체 처리가 끝나면 호출합니다.
-- Async 대화상자 계열은 메인 스레드에서 호출하세요. Linux, macOS, iOS는 메인 스레드에서 콜백을 호출하며, Windows, Android, Web은 작업 스레드를 만들지 않고 호출한 스레드에서 콜백을 호출합니다.
-- Async라는 이름이 콜백의 지연 실행을 보장하지는 않습니다. Windows, Web에서는 지원하는 대화상자가 닫힐 때까지 실행이 멈추고, Android는 즉시 완료하며, macOS도 키 윈도우가 없으면 실행이 멈춥니다. 함수가 반환하기 전에 콜백이 실행될 수 있습니다.
+- Async 대화상자 계열은 메인 스레드에서 호출해야 합니다. Windows, Linux, macOS, iOS는 메인 스레드에서 콜백을 호출하며, Android, Web은 작업 스레드를 만들지 않고 호출한 스레드에서 콜백을 호출합니다.
+- Async라는 이름이 콜백의 지연 실행을 보장하지는 않습니다. Web에서는 지원하는 대화상자가 닫힐 때까지 실행이 멈추고, Android는 즉시 완료하며, macOS도 키 윈도우가 없으면 실행이 멈춥니다. 함수가 반환하기 전에 콜백이 실행될 수 있습니다.
 - macOS와 iOS는 요청한 앱 실행이 활성 상태인 동안에만 콜백을 호출합니다. 해당 실행이 끝나거나 핫 리로드로 교체되면 대기 중인 콜백을 호출하지 않습니다. macOS에서 프로세스 종료가 승인되면 App의 exit/cleanup 전에 열린 시트를 취소하고 유효한 콜백을 호출합니다(alert는 결과 없음, confirm은 `false`, load/save는 빈 실패 결과). 종료가 거부되면 confirm/load/save 시트는 유지됩니다. `alertDialogAsync` 시트는 종료가 시작될 때 AppKit이 닫으므로, 이후 exitRequested가 종료를 거부해도 콜백이 호출됩니다.
 - iOS에서 루트 뷰 컨트롤러가 없으면 오류를 로그에 출력하고 대화상자를 표시하지 않은 채 콜백을 호출합니다.
 - Linux에서는 네 가지 Async 함수가 입력을 복사하고 즉시 반환합니다. 다음 바깥쪽 호스트 턴의 시작 부분에서 표시하고 이후 턴의 시작 부분에서 메인 스레드로 결과를 전달합니다. GTK 초기화 실패도 같은 방식으로 처리합니다. 대화상자가 열려 있는 동안 다른 윈도우는 계속 실행됩니다. 단, GTK 내부의 덮어쓰기 확인이 표시되는 동안에는 모든 윈도우가 멈춥니다.
-- Linux에서는 동시 대화상자 수를 제한하지 않으므로 앱에서 요청 수를 관리해야 합니다. 소유 윈도우가 닫히거나 요청한 App이 종료 또는 교체되면 대화상자를 닫고 이미 대기열에 들어간 결과를 포함하여 콜백을 버립니다. 프로세스 종료가 승인되어도 대기 중인 콜백을 버립니다. Async 대화상자가 열린 동안에는 대기하는 짧은 이름의 대화상자 함수를 호출하지 마세요.
+- Linux에서는 동시 대화상자 수를 제한하지 않으므로 앱에서 요청 수를 관리해야 합니다. 소유 윈도우가 닫히거나 요청한 App이 종료 또는 교체되면 대화상자를 닫고 이미 대기열에 들어간 결과를 포함하여 콜백을 버립니다. 프로세스 종료가 승인되어도 대기 중인 콜백을 버립니다. Async 대화상자가 열린 동안에는 대기하는 짧은 이름의 대화상자 함수를 호출하지 마십시오.
+- Windows에서는 네 가지 Async 함수가 입력을 복사하고 즉시 반환합니다. 다음 호스트 턴에서 대화상자를 열고 이후 턴에서 메인 스레드로 결과를 전달합니다. 다른 윈도우는 계속 실행됩니다. 요청한 윈도우가 대화상자의 소유자이며 대화상자를 닫을 때까지 조작할 수 없습니다. 윈도우 밖에서 요청하면 소유자가 없습니다. 요청한 윈도우를 닫거나 해당 App이 종료 또는 교체되면 콜백을 버립니다. 프로세스 종료가 승인되면 대화상자 스레드를 기다리지 않고 대기 중인 콜백을 버립니다. 동시 대화상자 수에는 제한이 없으며 앱에서 요청 수를 관리합니다. Async 대화상자가 열린 동안에는 대기하는 짧은 이름의 대화상자 함수를 호출하지 마십시오.
 '''
 related = ["confirmDialogAsync", "alertDialog"]
 platform_note.en = '''
 - iOS uses `UIAlertController`; macOS uses a sheet when there is a key window and a blocking modal dialog otherwise.
-- Windows uses native modal dialogs; Linux uses GTK dialogs without a blocking dialog loop. Web uses browser `alert()` and joins a nonempty title and the message with two newlines.
+- Windows uses native dialogs on a dedicated thread for each dialog; Linux uses GTK dialogs without a blocking dialog loop. Web uses browser `alert()` and joins a nonempty title and the message with two newlines.
 - Android only writes the title and message to logcat and then invokes the callback; it shows no dialog.
 '''
 platform_note.ja = '''
 - iOS は `UIAlertController` を使います。macOS はキーウィンドウがあればシートを使い、なければ処理を止めるモーダルダイアログを使います。
-- Windows はネイティブのモーダルダイアログを使います。Linux は処理を止めるダイアログループを使わずに GTK ダイアログを表示します。Web はブラウザーの `alert()` を使い、タイトルが空でなければタイトルと本文を改行 2 個でつなぎます。
+- Windows はダイアログごとの専用スレッドでネイティブダイアログを使います。Linux は処理を止めるダイアログループを使わずに GTK ダイアログを表示します。Web はブラウザーの `alert()` を使い、タイトルが空でなければタイトルと本文を改行 2 個でつなぎます。
 - Android はタイトルと本文を logcat に出力してからコールバックを呼ぶだけで、ダイアログを表示しません。
 '''
 platform_note.ko = '''
 - iOS는 `UIAlertController`를 사용합니다. macOS는 키 윈도우가 있으면 시트를 사용하고 없으면 실행을 멈추는 모달 대화상자를 사용합니다.
-- Windows는 네이티브 모달 대화상자를 사용합니다. Linux는 실행을 멈추는 대화상자 루프 없이 GTK 대화상자를 표시합니다. Web은 브라우저의 `alert()`를 사용하며 제목이 비어 있지 않으면 제목과 본문을 줄바꿈 두 개로 연결합니다.
+- Windows는 대화상자마다 전용 스레드에서 네이티브 대화상자를 사용합니다. Linux는 실행을 멈추는 대화상자 루프 없이 GTK 대화상자를 표시합니다. Web은 브라우저의 `alert()`를 사용하며 제목이 비어 있지 않으면 제목과 본문을 줄바꿈 두 개로 연결합니다.
 - Android는 제목과 본문을 logcat에 출력한 뒤 콜백을 호출하며 대화상자는 표시하지 않습니다.
 '''
 snippet = '''
@@ -49425,17 +49428,17 @@ details.ko = '''
 related = ["FileDialogResult", "saveDialogAsync", "loadDialog"]
 platform_note.en = '''
 - iOS uses `UIDocumentPickerViewController` for a single file or folder, ignores `title` and `message`, and ends security-scoped resource access before invoking the callback.
-- Windows and Linux ignore `message`; Windows file selection uses a `MAX_PATH` buffer and returns an unsuccessful result if the selected path does not fit.
+- Windows and Linux ignore `message`; Windows uses the native IFileDialog picker.
 - Android has no JNI Intent implementation and immediately supplies an empty result without a picker; Web/WASM logs a warning and supplies an empty result.
 '''
 platform_note.ja = '''
 - iOS は `UIDocumentPickerViewController` でファイルまたはフォルダーを 1 個選択し、`title` と `message` は使いません。セキュリティスコープ付きリソースへのアクセスは、コールバックを呼ぶ前に終了します。
-- Windows と Linux は `message` を使いません。Windows のファイル選択は `MAX_PATH` のバッファーを使い、選択したパスが収まらない場合は失敗した結果を返します。
+- Windows と Linux は `message` を使いません。Windows はネイティブの IFileDialog を使います。
 - Android は JNI Intent が未実装で、選択画面を表示せず即座に空の結果を渡します。Web/WASM は警告をログに出力して空の結果を渡します。
 '''
 platform_note.ko = '''
 - iOS는 `UIDocumentPickerViewController`로 파일 또는 폴더 하나를 선택하며 `title`과 `message`는 사용하지 않습니다. 보안 범위 리소스 접근은 콜백을 호출하기 전에 종료합니다.
-- Windows와 Linux는 `message`를 사용하지 않습니다. Windows 파일 선택은 `MAX_PATH` 버퍼를 사용하며 선택한 경로가 버퍼에 들어가지 않으면 실패 결과를 반환합니다.
+- Windows와 Linux는 `message`를 사용하지 않습니다. Windows는 네이티브 IFileDialog 선택 화면을 사용합니다.
 - Android는 JNI Intent가 구현되지 않아 선택 화면 없이 즉시 빈 결과를 전달합니다. Web/WASM은 경고를 로그에 출력하고 빈 결과를 전달합니다.
 '''
 snippet = '''
@@ -51370,17 +51373,17 @@ details.ko = '''
 related = ["FileDialogResult", "loadDialogAsync", "saveDialog"]
 platform_note.en = '''
 - iOS uses `UIDocumentPickerViewController` for export and ignores `title`, `message`, and `defaultPath`.
-- Windows and Linux ignore `message`; Windows uses a `MAX_PATH` buffer, truncates an initial filename that does not fit, and returns an unsuccessful result if the selected path does not fit.
+- Windows and Linux ignore `message`; Windows uses the native IFileDialog picker.
 - Android has no JNI Intent implementation and immediately supplies an empty result without a picker; Web/WASM logs a warning and supplies an empty result.
 '''
 platform_note.ja = '''
 - iOS は書き出し用の `UIDocumentPickerViewController` を使い、`title`、`message`、`defaultPath` は使いません。
-- Windows と Linux は `message` を使いません。Windows は `MAX_PATH` のバッファーを使い、収まらない初期ファイル名を切り詰め、選択したパスが収まらない場合は失敗した結果を返します。
+- Windows と Linux は `message` を使いません。Windows はネイティブの IFileDialog を使います。
 - Android は JNI Intent が未実装で、選択画面を表示せず即座に空の結果を渡します。Web/WASM は警告をログに出力して空の結果を渡します。
 '''
 platform_note.ko = '''
 - iOS는 내보내기용 `UIDocumentPickerViewController`를 사용하며 `title`, `message`, `defaultPath`는 사용하지 않습니다.
-- Windows와 Linux는 `message`를 사용하지 않습니다. Windows는 `MAX_PATH` 버퍼를 사용하며 들어가지 않는 초기 파일 이름을 잘라 내고, 선택한 경로가 버퍼에 들어가지 않으면 실패 결과를 반환합니다.
+- Windows와 Linux는 `message`를 사용하지 않습니다. Windows는 네이티브 IFileDialog 선택 화면을 사용합니다.
 - Android는 JNI Intent가 구현되지 않아 선택 화면 없이 즉시 빈 결과를 전달합니다. Web/WASM은 경고를 로그에 출력하고 빈 결과를 전달합니다.
 '''
 
