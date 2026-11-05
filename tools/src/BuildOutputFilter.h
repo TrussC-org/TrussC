@@ -14,7 +14,12 @@
 //   - CMake configure lines "-- ..."
 //   - "[ NN%] Building/Linking ..." (Make) and "[n/total] Building/Linking ..." (Ninja)
 //   - "Scanning dependencies ...", "Built target ..."
+//   - every Ninja status line "[n/total] <anything>" (also "Re-checking globbed
+//     directories" and custom command lines), counted as progress
 //   - "[ NN%] [<target>] Compiling shader: ..." (TrussC's own shader step)
+//   - CMake's "Preset CMake/environment variables:" block, the Visual Studio
+//     vcvars banner and the vswhere "not recognized" probe line (update)
+//   - the compiler command line right after Ninja's "FAILED: <target>"
 
 #include <cstddef>
 #include <cstdint>
@@ -73,6 +78,9 @@ private:
     std::string partial_;           // bytes of the current unterminated line
     bool open_ = false;             // the cursor is in the middle of the progress line
     int dotsPrinted_ = 0;           // progress steps printed (one per 5 %)
+    bool afterFailed_ = false;      // the previous line was Ninja's "FAILED: ..."
+    bool afterVswhere_ = false;     // the previous line was the vswhere probe error
+    int presetBlock_ = 0;           // CMake's "Preset ... variables:" block: 1 after the header, 2 in the body
     bool sawPercent_ = false;       // progress is read from the build tool, not counted
     long compiled_ = 0;
     Diagnostics diag_;

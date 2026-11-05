@@ -172,6 +172,9 @@ static bool parseAddonValue(const string& value,
 // Returns the child's exit code, or -1 on spawn failure.
 static int runProcess(const vector<string>& argv) {
     if (argv.empty()) return -1;
+    // Text printed so far must come before the child's output, also through a pipe.
+    cout.flush();
+    cerr.flush();
 #ifdef _WIN32
     if (GetConsoleCP() != 0) {
         // CLI builds inherit the same console used by configure.
@@ -3963,6 +3966,8 @@ static int cmdRun(const vector<string>& args) {
                 (char*)xinitrcPath.c_str(),
                 (char*)"--", (char*)":0", (char*)"vt7", nullptr
             };
+            cout.flush();
+            cerr.flush();
             pid_t xinitPid = 0;
             if (posix_spawnp(&xinitPid, "xinit", nullptr, nullptr,
                              xinitArgv.data(), environ) != 0) {

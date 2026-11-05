@@ -22,6 +22,9 @@ using namespace std;
 
 int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData) {
     if (argv.empty()) return -1;
+    // Text printed so far must come before the child's output, also through a pipe.
+    cout.flush();
+    cerr.flush();
     string commandLine;
     for (const auto& a : argv) {
         if (!commandLine.empty()) commandLine += ' ';
@@ -84,6 +87,9 @@ int runCaptured(const vector<string>& argv, const function<void(const char*, siz
 
 int runCaptured(const vector<string>& argv, const function<void(const char*, size_t)>& onData) {
     if (argv.empty()) return -1;
+    // Text printed so far must come before the child's output, also through a pipe.
+    cout.flush();
+    cerr.flush();
     vector<char*> cargv;
     for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
     cargv.push_back(nullptr);

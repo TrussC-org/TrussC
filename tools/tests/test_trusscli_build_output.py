@@ -141,6 +141,9 @@ class BuildOutputTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Done: 2 files", result.stdout)
         self.assertNotIn("Building CXX object", result.stdout)
+        # trusscli's own text comes before the app's output, also through a pipe
+        self.assertLess(result.stdout.index("Launching sampleApp"),
+                        result.stdout.index("-- app output stays"), result.stdout)
         # Everything the app prints is shown as it is
         self.assertIn("-- app output stays\n[ 50%] Building like a build line\n"
                       "Built target app\n", result.stdout)

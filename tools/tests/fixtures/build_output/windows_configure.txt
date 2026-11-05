@@ -1,0 +1,22 @@
+'vswhere.exe' is not recognized as an internal or external command,
+operable program or batch file.
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.13
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+Preset CMake variables:
+
+  CMAKE_BUILD_TYPE="RelWithDebInfo"
+  CMAKE_EXPORT_COMPILE_COMMANDS="ON"
+
+Preset environment variables:
+
+  INCLUDE="C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.50.35717\include;C:\Program Files (x86)\Windows Kits\10\include\10.0.26100.0\ucrt"
+  LIB="C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.50.35717\lib\x64"
+  PATH="C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.50.35717\bin\Hostx64\x64;C:\WINDOWS\system32"
+
+-- Building for: Ninja
+-- The C compiler identification is MSVC 19.50.35717.0
+-- Configuring done (1.9s)
+-- Generating done (0.1s)
