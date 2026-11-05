@@ -1,0 +1,6 @@
+[1/6] Building CXX object CMakeFiles\app.dir\src\main.cpp.obj
+[2/6] Building CXX object CMakeFiles\app.dir\src\scene.cpp.obj
+FAILED: CMakeFiles/app.dir/src/scene.cpp.obj
+"C:\PROGRA~1\MICROS~1\2022\COMMUN~1\VC\Tools\MSVC\14.50.35717\bin\Hostx64\x64\cl.exe"  /nologo /TP -DUNICODE -D_UNICODE /IC:\proj\core\include /O2 /MD /Fo CMakeFiles\app.dir\src\scene.cpp.obj /Fd CMakeFiles\app.dir\ -c C:\proj\src\scene.cpp
+C:\proj\src\scene.cpp(9): error C2143: syntax error: missing ';' before '}'
+ninja: build stopped: subcommand failed.

@@ -184,7 +184,7 @@ Done: 2 files, 42 up to date (0m30s). Full log: build-linux/build.log
 ```
 
 - One progress line, with a dot per 5 %.
-- Only known noise is hidden: CMake `-- ...` configure lines, `[ NN%] Building` / `Linking` lines, `Scanning dependencies` and `Built target`. Everything else is shown as the tool printed it, so warnings, errors, compiler notes and linker messages are never lost.
+- Only known noise is hidden: CMake `-- ...` configure lines, `[ NN%] Building` / `Linking` lines, every Ninja `[n/total] ...` status line, `Scanning dependencies`, `Built target`, CMake's `Preset ... variables:` block and, on Windows, the Visual Studio `vcvarsall` banner. After Ninja's `FAILED: <target>` line, the compiler command line is hidden too (the log has it). Everything else is shown as the tool printed it, so warnings, errors, compiler notes and linker messages are never lost.
 - The last lines are the result: `Done:` or `Failed:`, then `ERROR: N (files)` and `WARNING: N (files)` when there are any (`ERROR: link failed` for a link error without a source file).
 - The full output of the configure and build is always saved to `<build folder>/build.log` (for example `build-linux/build.log`), and overwritten by the next build.
 - `trusscli build --verbose` (also `run`, `update`) prints the full output on screen as well.

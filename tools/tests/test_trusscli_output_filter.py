@@ -206,6 +206,112 @@ class FilterTests(unittest.TestCase):
                           "--exit", "1")
         self.assertIn("ERROR: 2 (a.cpp, link failed)\n", out)
 
+    # --- Windows / Ninja (#1240 follow-up) ---------------------------------
+
+    def test_ninja_status_lines_are_progress_and_noise(self):
+        # "Re-checking globbed directories" and the custom command line are
+        # Ninja status lines: hidden, and they must not break the dot line.
+        out = self.screen(fixture("windows_ninja_partial.txt"), "--total", "56", "--seconds", "9")
+        self.assertNotIn("Re-checking", out)
+        self.assertNotIn("cmd.exe", out)
+        self.assertNotIn("_tc_check_hot_reload", out)
+        self.assertEqual(len(out.splitlines()), 2, out)
+
+    def test_ninja_line_that_is_not_a_status_line_is_kept(self):
+        out = self.screen("[1/6] Building CXX object a.obj\nninja: warning: manifest\n"
+                          "[note] [1/2] not a status line\n")
+        self.assertIn("ninja: warning: manifest\n", out)
+        self.assertIn("[note] [1/2] not a status line\n", out)
+
+    def test_successful_ninja_build_always_ends_at_100_percent(self):
+        # The last status line is [45/56]: 80 %, but the build succeeded.
+        out = self.screen(fixture("windows_ninja_partial.txt"), "--total", "56")
+        self.assertTrue(out.startswith("Building myApp (56 files) .........50%.........100%\n"), out)
+        self.assertIn("Done: 44 files, 12 up to date", out)
+
+    def test_failed_ninja_build_stays_where_it_is(self):
+        text = fixture("windows_ninja_partial.txt")
+        out = self.screen(text, "--total", "56", "--exit", "1")
+        first = out.splitlines()[0]
+        self.assertTrue(first.startswith("Building myApp (56 files) .........50%"), first)
+        self.assertFalse(first.endswith("100%"), first)
+
+    def test_make_still_reaches_100_percent_once(self):
+        out = self.screen(fixture("make_build.txt"), "--total", "44")
+        self.assertEqual(out.splitlines()[0], "Building myApp (44 files) .........50%.........100%")
+
+    def test_failed_step_command_line_is_hidden_but_failed_line_stays(self):
+        out = self.screen(fixture("ninja_failed.txt"), "--total", "6", "--exit", "1")
+        self.assertIn("FAILED: CMakeFiles/app.dir/src/scene.cpp.obj\n", out)
+        self.assertNotIn("cl.exe", out)
+        self.assertNotIn("/nologo", out)
+        self.assertIn("scene.cpp(9): error C2143", out)
+        self.assertIn("ninja: build stopped: subcommand failed.\n", out)
+        self.assertIn("ERROR: 1 (scene.cpp)\n", out)
+
+    def test_only_a_compiler_command_after_failed_is_hidden(self):
+        for name, line in (
+                ("custom step", 'cmd.exe /C "cd /D C:\\p && cmake.exe -P x.cmake"'),
+                ("plain text", "something went wrong in -c mode"),
+                ("linker", "link.exe /nologo a.obj /out:app.exe"),
+                ("gcc without compile flag", "/usr/bin/c++ --version")):
+            with self.subTest(name=name):
+                out = self.screen("FAILED: x\n" + line + "\n", "--exit", "1")
+                self.assertIn(line + "\n", out)
+        for line in ('/usr/bin/c++ -DX -c /s/a.cpp -o a.o',
+                     'ccache /usr/bin/c++ -DX -c /s/a.cpp -o a.o',
+                     '"C:\\Program Files\\VC\\bin\\cl.exe" /nologo /Fo a.obj -c a.cpp'):
+            with self.subTest(line=line):
+                out = self.screen("FAILED: x\n" + line + "\n", "--exit", "1")
+                self.assertNotIn(line, out)
+                self.assertIn("FAILED: x\n", out)
+
+    def test_command_line_is_hidden_only_right_after_failed(self):
+        line = "/usr/bin/c++ -DX -c /s/a.cpp -o a.o"
+        out = self.screen("FAILED: x\nsome text\n" + line + "\n", "--exit", "1")
+        self.assertIn(line + "\n", out)
+
+    def test_log_keeps_the_hidden_command_line(self):
+        _, log = self.run_filter(fixture("ninja_failed.txt"), "--exit", "1")
+        self.assertIn("cl.exe", log)
+
+    # --- configure output on Windows (vcvars, preset block) ---------------
+
+    def test_windows_configure_noise_is_hidden(self):
+        out, log = self.run_filter(fixture("windows_configure.txt"), "--configure")
+        self.assertEqual(out, "")
+        self.assertEqual(log, fixture("windows_configure.txt"))
+
+    def test_preset_block_is_hidden_on_every_os_up_to_its_blank_line(self):
+        text = ("Preset CMake variables:\n\n  CMAKE_EXPORT_COMPILE_COMMANDS=\"ON\"\n\n"
+                "-- The C compiler identification is GNU 13.3.0\n"
+                "CMake Error at CMakeLists.txt:3 (message):\n  bad\n")
+        out = self.screen(text, "--configure", "--exit", "1")
+        self.assertNotIn("Preset", out)
+        self.assertNotIn("CMAKE_EXPORT", out)
+        self.assertIn("CMake Error at CMakeLists.txt:3 (message):\n  bad\n", out)
+
+    def test_preset_block_does_not_swallow_a_following_error(self):
+        text = "Preset CMake variables:\n\n  A=\"1\"\nCMake Error: right after the block\n"
+        out = self.screen(text, "--configure", "--exit", "1")
+        self.assertIn("CMake Error: right after the block\n", out)
+
+    def test_other_not_recognized_lines_stay_visible(self):
+        text = ("'foo' is not recognized as an internal or external command,\n"
+                "operable program or batch file.\n")
+        out = self.screen(text, "--configure", "--exit", "1")
+        self.assertIn("'foo' is not recognized as an internal or external command,\n", out)
+        self.assertIn("operable program or batch file.\n", out)
+
+    def test_japanese_vswhere_probe_line_is_hidden(self):
+        text = "'vswhere.exe' \u306f\u3001\u5185\u90e8\u30b3\u30de\u30f3\u30c9\u307e\u305f\u306f\u5916\u90e8\u30b3\u30de\u30f3\u30c9\u3001\u64cd\u4f5c\u53ef\u80fd\u306a\u30d7\u30ed\u30b0\u30e9\u30e0\u307e\u305f\u306f\u30d0\u30c3\u30c1 \u30d5\u30a1\u30a4\u30eb\u3068\u3057\u3066\u8a8d\u8b58\u3055\u308c\u3066\u3044\u307e\u305b\u3093\u3002\nreal output\n"
+        out = self.screen(text, "--configure")
+        self.assertEqual(out, "real output\n")
+
+    def test_vcvars_banner_is_not_hidden_in_a_build(self):
+        out = self.screen("** Visual Studio banner-like text\n", "--exit", "1")
+        self.assertIn("** Visual Studio banner-like text\n", out)
+
     # --- Done / Failed ----------------------------------------------------
 
     def test_done_forms(self):

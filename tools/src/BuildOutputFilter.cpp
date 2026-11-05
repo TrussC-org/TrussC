@@ -40,8 +40,8 @@ string stripAnsi(const string& s) {
 }
 
 // "[ 42%] text" (Make) or "[12/44] text" (Ninja). On a match, percent is the
-// progress and rest is the text after the prefix.
-bool parseProgressPrefix(const string& s, int& percent, string& rest) {
+// progress, rest is the text after the prefix and ninja tells the two apart.
+bool parseProgressPrefix(const string& s, int& percent, string& rest, bool& ninja) {
     if (s.empty() || s[0] != '[') return false;
     size_t i = 1;
     while (i < s.size() && s[i] == ' ') ++i;
@@ -53,6 +53,7 @@ bool parseProgressPrefix(const string& s, int& percent, string& rest) {
     }
     if (i == digitsStart || i >= s.size()) return false;
     long value = 0;
+    ninja = false;
     if (s[i] == '%') {
         if (i + 1 >= s.size() || s[i + 1] != ']') return false;
         value = first;
@@ -67,6 +68,7 @@ bool parseProgressPrefix(const string& s, int& percent, string& rest) {
         }
         if (i == totalStart || total <= 0 || i >= s.size() || s[i] != ']') return false;
         value = first * 100 / total;
+        ninja = true;
         ++i;
     } else {
         return false;
@@ -85,6 +87,25 @@ bool isBuildingObject(const string& rest) {
 }
 
 // Xcode's per-file steps (no percent in this format).
+// Known configure output of `trusscli update` on Windows: Visual Studio's
+// vcvarsall.bat banner. Anything else stays visible.
+bool isVcvarsBanner(const string& s) {
+    if (s.empty()) return false;
+    if (s.size() >= 10 && s.find_first_not_of('*') == string::npos) return true;
+    return startsWith(s, "** ") || startsWith(s, "[vcvarsall.bat]");
+}
+
+// The probe vcvarsall.bat runs through vswhere when it is not on PATH, e.g.
+// "'vswhere.exe' is not recognized as an internal or external command,".
+bool isVswhereProbeError(const string& s) {
+    string lower = s;
+    for (char& c : lower) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    if (lower.find("vswhere") == string::npos) return false;
+    // English and Japanese cmd.exe
+    return lower.find("not recognized") != string::npos ||
+           s.find("認識されていません") != string::npos;
+}
+
 bool isXcodeCompileStep(const string& s) {
     return startsWith(s, "CompileC ") || startsWith(s, "SwiftCompile ") ||
            startsWith(s, "CompileSwift ") || startsWith(s, "CompileMetalFile ");
@@ -93,6 +114,43 @@ bool isXcodeCompileStep(const string& s) {
 string baseName(const string& path) {
     const size_t slash = path.find_last_of("/\\");
     return slash == string::npos ? path : path.substr(slash + 1);
+}
+
+// The line Ninja prints after "FAILED: <target>": the full command line of the
+// failed step. Only a compiler invocation is recognized (compiler first, with
+// its compile or output flag); custom steps (cmd.exe /C ...) stay visible.
+bool isCompilerCommandLine(const string& line) {
+    size_t pos = 0;
+    auto token = [&]() {
+        while (pos < line.size() && line[pos] == ' ') ++pos;
+        string t;
+        if (pos < line.size() && line[pos] == '"') {
+            const size_t close = line.find('"', pos + 1);
+            if (close == string::npos) return t;
+            t = line.substr(pos + 1, close - pos - 1);
+            pos = close + 1;
+        } else {
+            const size_t end = line.find(' ', pos);
+            t = line.substr(pos, end == string::npos ? string::npos : end - pos);
+            pos = end == string::npos ? line.size() : end;
+        }
+        return t;
+    };
+    auto name = [](const string& path) {
+        string n = baseName(path);
+        for (char& c : n) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+        if (n.size() > 4 && n.compare(n.size() - 4, 4, ".exe") == 0) n.erase(n.size() - 4);
+        return n;
+    };
+    static const char* kCompilers[] = {"cl", "clang-cl", "clang", "clang++", "gcc", "g++",
+                                       "cc", "c++", "em++", "emcc"};
+    string first = name(token());
+    if (first == "ccache") first = name(token());
+    bool compiler = false;
+    for (const char* c : kCompilers) compiler = compiler || first == c;
+    if (!compiler) return false;
+    return line.find(" -c ") != string::npos || line.find(" /c ") != string::npos ||
+           line.find(" -o ") != string::npos || line.find(" /Fo") != string::npos;
 }
 
 string trimRight(string s) {
@@ -243,10 +301,44 @@ void BuildOutputFilter::handleLine(string line) {
 
     int percent = 0;
     string rest;
-    const bool prefixed = parseProgressPrefix(plain, percent, rest);
+    bool ninja = false;
+    const bool prefixed = parseProgressPrefix(plain, percent, rest, ninja);
     if (!prefixed) rest = plain;
 
+    // Lines that follow a "FAILED:" line or sit inside a CMake preset block
+    const bool afterFailed = afterFailed_;
+    const bool afterVswhere = afterVswhere_;
+    afterFailed_ = false;
+    afterVswhere_ = false;
     bool hidden = false;
+    if (presetBlock_ != 0) {
+        // "Preset CMake variables:", a blank line, indented NAME="value" lines,
+        // a blank line. Anything else ends the block and is handled normally.
+        const bool indented = !plain.empty() && (plain[0] == ' ' || plain[0] == '\t');
+        if (plain.empty()) {
+            presetBlock_ = presetBlock_ == 1 ? 2 : 0;
+            return;
+        }
+        if (indented) {
+            presetBlock_ = 2;
+            return;
+        }
+        presetBlock_ = 0;
+    }
+    if (plain == "Preset CMake variables:" || plain == "Preset environment variables:") {
+        presetBlock_ = 1;
+        return;
+    }
+    if (options_.phase == Phase::Configure) {
+        if (afterVswhere && startsWith(plain, "operable program or batch file")) return;
+        if (isVcvarsBanner(plain)) return;
+        if (isVswhereProbeError(plain)) { afterVswhere_ = true; return; }
+    }
+    if (startsWith(plain, "FAILED: ")) afterFailed_ = true;
+    if (afterFailed && isCompilerCommandLine(plain)) {
+        // The full compiler command of the failed step; the log keeps it.
+        return;
+    }
     if (startsWith(plain, "-- ")) {
         hidden = true;
     } else if (options_.phase == Phase::Build) {
@@ -256,6 +348,10 @@ void BuildOutputFilter::handleLine(string line) {
         }
         if (prefixed && isBuildingObject(rest)) {
             ++compiled_;
+            hidden = true;
+        } else if (prefixed && ninja) {
+            // Every Ninja status line ("[3/56] <step>", "[0/2] Re-checking
+            // globbed directories...", custom command lines) is progress.
             hidden = true;
         } else if (prefixed && startsWith(rest, "Building ")) {
             hidden = true;
@@ -389,6 +485,9 @@ void BuildOutputFilter::end(int exitCode, double seconds) {
         return;
     }
 
+    // Ninja counts custom and link steps and may print its last status lines
+    // before the final steps: a successful build always ends at 100 %.
+    if (ok && sawPercent_) advanceProgressTo(100);
     closeProgressLine();
     string what;
     const long total = options_.totalFiles;
