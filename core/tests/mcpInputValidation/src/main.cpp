@@ -248,6 +248,29 @@ TC_CORE_TEST_MAIN() {
               held.value("heldKeys", json()) == json::array({SAPP_KEYCODE_A, KEY_RIGHT_SHIFT}));
         call("tc_key_release", {{"window", peerId}, {"key", SAPP_KEYCODE_A}});
         call("tc_key_release", {{"window", peerId}, {"key", KEY_RIGHT_SHIFT}});
+        // The reply helper reads the Window it is given, not the ambient one
+        // (the ambient Window here is the main one, holding a different key).
+        ctx.keysPressed = {SAPP_KEYCODE_B};
+        peerCtx.keysPressed = {SAPP_KEYCODE_C};
+        check("heldKeysJson reads the given window, not the ambient one",
+              mcp::internal::heldKeysJson(peerCtx) == json::array({SAPP_KEYCODE_C}) &&
+              mcp::internal::heldKeysJson(ctx) == json::array({SAPP_KEYCODE_B}));
+        ctx.keysPressed.clear();
+        peerCtx.keysPressed.clear();
+        // heldKeys in the reply describes the named target, not the ambient
+        // window, even while another window holds a different key set.
+        call("tc_key_press", {{"window", mainId}, {"key", SAPP_KEYCODE_B}});
+        auto peerPress = content(call("tc_key_press", {{"window", peerId}, {"key", SAPP_KEYCODE_C}}));
+        auto mainPress = content(call("tc_key_press", {{"window", mainId}, {"key", SAPP_KEYCODE_D}}));
+        auto peerRelease = content(call("tc_key_release", {{"window", peerId}, {"key", SAPP_KEYCODE_C}}));
+        auto mainRelease = content(call("tc_key_release", {{"window", mainId}, {"key", SAPP_KEYCODE_D}}));
+        check("tc_key_press heldKeys lists the named target's keys",
+              peerPress.value("heldKeys", json()) == json::array({SAPP_KEYCODE_C}) &&
+              mainPress.value("heldKeys", json()) == json::array({SAPP_KEYCODE_B, SAPP_KEYCODE_D}));
+        check("tc_key_release heldKeys lists the named target's keys",
+              peerRelease.value("heldKeys", json()) == json::array() &&
+              mainRelease.value("heldKeys", json()) == json::array({SAPP_KEYCODE_B}));
+        call("tc_key_release", {{"window", mainId}, {"key", SAPP_KEYCODE_B}});
         bool pointerOk = true;
         for (auto id : {mainId, peerId}) {
             pointerOk &= succeeded(call("tc_mouse_move", {{"window", id}, {"x", 3}, {"y", 4}}));
