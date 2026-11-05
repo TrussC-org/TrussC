@@ -290,6 +290,18 @@ cd examples
 ```
 This script automatically uses `trusscli` to update each example before building.
 
+`examples/build_all.py` is the Python version of it, and it also builds and runs the
+core and addon tests (`--core-tests-only`, `--addon-tests-only`). It prints a
+short screen by default: a dot line for progress, compiler warnings and errors,
+`FAILED` lines with their details, per-suite counts like
+`allCoreTests: 141/141 passed`, and a last line that starts with `Done:` or
+`Failed:` (then `ERROR:` / `WARNING:` / `FAIL:` lines with counts, only when
+they are not zero). The full output of each build and test goes to its own file
+in `build-logs/` at the repository root (for example
+`build-logs/core/tests/foo.log`), overwritten on each run. A test that crashes,
+times out or fails without a `FAIL` line prints the last lines of its output and
+the path of its log. Pass `--verbose` to print everything on screen; CI does.
+
 ---
 
 ## 3. Project Structure
