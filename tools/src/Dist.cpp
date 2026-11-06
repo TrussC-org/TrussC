@@ -1029,6 +1029,9 @@ std::string nsisScript(const NsisInput& in) {
     s += "RequestExecutionLevel admin\n";
     s += "!include \"MUI2.nsh\"\n\n";
     s += "Name " + q(in.name) + "\n";
+    // Bottom line of every installer page; " " because an empty text would
+    // bring back NSIS's own "Nullsoft Install System" line.
+    s += "BrandingText " + (in.author.empty() ? std::string("\" \"") : q(copyrightLine(in.author))) + "\n";
     s += "OutFile " + q(windowsPath(in.setupExe)) + "\n";
     s += std::string("InstallDir \"") + (in.arch == "x86" ? "$PROGRAMFILES" : "$PROGRAMFILES64") +
          "\\" + q(name).substr(1) + "\n";

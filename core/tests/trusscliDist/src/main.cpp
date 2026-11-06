@@ -149,6 +149,14 @@ void testNsis() {
           contains(s, "InstallDir \"$PROGRAMFILES64\\My App $$1\"") &&
               contains(s, "File /r \"C:\\out\\My-App-1.2-windows-x64\\*.*\"") &&
               contains(s, "\"Publisher\" \"My Studio\"") && contains(s, "WriteUninstaller"));
+    check("nsis: author's copyright at the bottom of the pages",
+          contains(s, "BrandingText \"\xC2\xA9 20") && contains(s, " My Studio\"\n"));
+    {
+        auto noAuthor = in;
+        noAuthor.author.clear();
+        check("nsis: no author leaves the bottom line blank",
+              contains(dist::nsisScript(noAuthor), "BrandingText \" \"\n"));
+    }
     check("nsis: EULA page only when given",
           contains(s, "MUI_PAGE_LICENSE \"C:\\out\\work\\EULA.txt\"") &&
               !contains(s, "Third-party notices"));
