@@ -92,14 +92,13 @@ Every window is now created as `_sapp_tc_window`, an NSWindow subclass that
 returns YES from `canBecomeKeyWindow` and `canBecomeMainWindow`. Titled windows
 already returned YES, so decorated windows behave as before.
 
-### macOS first click between our own windows
+### macOS first click
 
-`_sapp_tc_view` answers `acceptsFirstMouse:`, so a click that moves focus
-between two of the app's windows also reaches the app (a palette click picks a
-color at once), as on Windows and Linux. A click that activates the app from
-another app still only activates. AppKit activates the app before it asks, so
-`applicationDidBecomeActive:` stores the activation time and a click whose
-timestamp is not before it (1 ms margin) is treated as the activating click.
+`_sapp_tc_view` answers YES to `acceptsFirstMouse:`, so the click that activates
+a window also reaches the app, as on Windows and Linux (upstream sokol_app and
+GLFW do the same). This covers clicks between the app's own windows (a palette
+click picks a color at once) and the click that brings the app back from
+another app.
 
 ### macOS failed-startup termination notification (#239)
 
