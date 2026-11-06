@@ -1168,6 +1168,15 @@ Process and close coverage:
   headless stdin subprocess cases remain part of the own-binary suite.
 - `windowTick/event-converter-test` classifies quit/device loss as process events;
   they have no Window raw-event fan-out. Native input keeps raw-before-typed order.
+- `trusscliDist/` — the packaging logic of `trusscli dist` (#1272), compiled in
+  from `tools/src/Dist.cpp`: `dist.json` keys, warnings for unknown and
+  later-phase keys, version and file-name rules, `exclude` globs, the PE /
+  ELF / Mach-O header reader (on this test's own executable), license
+  collection with its gaps reported, and a package written from a fake
+  project whose executable is this test binary: `exclude`, `include`, `.pdb`
+  to the `-symbols` folder and only the imported VC++ runtime DLLs (Windows;
+  a debug CRT import is refused), `bin/data` into the bundle and its version
+  (macOS), the launcher (Linux), `licenses/` and `THIRD_PARTY_NOTICES.txt`.
 
 ### Session authority and OS-only exit deadline
 

@@ -1,0 +1,864 @@
+#include "Dist.h"
+
+#include "nlohmann/json.hpp"
+
+#include <algorithm>
+#include <cctype>
+#include <cstring>
+#include <fstream>
+#include <set>
+#include <sstream>
+
+namespace dist {
+
+namespace {
+
+using nlohmann::json;
+
+// fs::path <-> UTF-8, '/'-separated
+std::string toUtf8(const fs::path& path) {
+#if defined(__cpp_char8_t)
+    const auto text = path.generic_u8string();
+    return std::string(text.begin(), text.end());
+#else
+    return path.generic_u8string();
+#endif
+}
+
+fs::path fromUtf8(const std::string& text) {
+#if defined(__cpp_char8_t)
+    return fs::path(std::u8string(text.begin(), text.end()));
+#else
+    return fs::u8path(text);
+#endif
+}
+
+std::string lower(std::string text) {
+    for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return text;
+}
+
+bool startsWith(const std::string& text, const std::string& prefix) {
+    return text.compare(0, prefix.size(), prefix) == 0;
+}
+
+bool endsWith(const std::string& text, const std::string& suffix) {
+    return text.size() >= suffix.size() &&
+           text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+bool readFile(const fs::path& path, std::string& out) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return false;
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    out = buffer.str();
+    return static_cast<bool>(file) || file.eof();
+}
+
+bool writeFile(const fs::path& path, const std::string& text) {
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file) return false;
+    file << text;
+    return static_cast<bool>(file);
+}
+
+// A path inside the package: relative, no "..", '/'-separated, no trailing '/'.
+bool cleanPackagePath(std::string path, std::string& out) {
+    std::replace(path.begin(), path.end(), '\\', '/');
+    std::vector<std::string> parts;
+    std::string part;
+    std::istringstream stream(path);
+    while (std::getline(stream, part, '/')) {
+        if (part.empty() || part == ".") continue;
+        if (part == "..") return false;
+        parts.push_back(part);
+    }
+    if (parts.empty() || path.front() == '/' || (path.size() > 1 && path[1] == ':')) return false;
+    out.clear();
+    for (const auto& p : parts) {
+        if (!out.empty()) out += '/';
+        out += p;
+    }
+    return true;
+}
+
+// -----------------------------------------------------------------------------
+// Binary headers
+// -----------------------------------------------------------------------------
+
+uint16_t le16(const std::string& d, size_t o) {
+    return static_cast<uint16_t>(static_cast<unsigned char>(d[o]) |
+                                 (static_cast<unsigned char>(d[o + 1]) << 8));
+}
+uint32_t le32(const std::string& d, size_t o) {
+    return static_cast<uint32_t>(le16(d, o)) | (static_cast<uint32_t>(le16(d, o + 2)) << 16);
+}
+uint32_t be32(const std::string& d, size_t o) {
+    return (static_cast<uint32_t>(static_cast<unsigned char>(d[o])) << 24) |
+           (static_cast<uint32_t>(static_cast<unsigned char>(d[o + 1])) << 16) |
+           (static_cast<uint32_t>(static_cast<unsigned char>(d[o + 2])) << 8) |
+           static_cast<uint32_t>(static_cast<unsigned char>(d[o + 3]));
+}
+
+struct PeSection { uint32_t virtualAddress, virtualSize, rawOffset, rawSize; };
+
+void readPe(const std::string& d, BinaryInfo& info) {
+    if (d.size() < 0x40) return;
+    const uint32_t pe = le32(d, 0x3C);
+    if (pe > d.size() - 24 || d.compare(pe, 4, std::string("PE\0\0", 4)) != 0) return;
+    const uint16_t machine = le16(d, pe + 4);
+    const uint16_t sectionCount = le16(d, pe + 6);
+    const uint16_t optionalSize = le16(d, pe + 20);
+    const size_t optional = pe + 24;
+    if (optional + optionalSize > d.size() || optionalSize < 2) return;
+    info.valid = true;
+    info.format = "pe";
+    switch (machine) {
+        case 0x8664: info.arch = "x64"; break;
+        case 0xAA64: info.arch = "arm64"; break;
+        case 0x014C: info.arch = "x86"; break;
+        default: break;
+    }
+    const uint16_t magic = le16(d, optional);
+    const size_t countAt = magic == 0x20B ? 108 : 92;     // NumberOfRvaAndSizes
+    const size_t directories = magic == 0x20B ? 112 : 96;
+    if (optionalSize < directories) return;
+    const uint32_t directoryCount = le32(d, optional + countAt);
+
+    std::vector<PeSection> sections;
+    const size_t table = optional + optionalSize;
+    for (uint16_t i = 0; i < sectionCount; ++i) {
+        const size_t s = table + static_cast<size_t>(i) * 40;
+        if (s + 40 > d.size()) break;
+        sections.push_back({le32(d, s + 12), le32(d, s + 8), le32(d, s + 20), le32(d, s + 16)});
+    }
+    auto offsetOf = [&](uint32_t rva, size_t& out) {
+        for (const auto& s : sections) {
+            const uint32_t size = (std::max)(s.virtualSize, s.rawSize);
+            if (rva >= s.virtualAddress && rva - s.virtualAddress < size) {
+                out = static_cast<size_t>(s.rawOffset) + (rva - s.virtualAddress);
+                return out < d.size();
+            }
+        }
+        return false;
+    };
+    auto stringAt = [&](uint32_t rva) {
+        size_t at = 0;
+        if (!offsetOf(rva, at)) return std::string();
+        const size_t end = d.find('\0', at);
+        if (end == std::string::npos || end - at > 260) return std::string();
+        return lower(d.substr(at, end - at));
+    };
+    std::set<std::string> seen;
+    auto add = [&](const std::string& name) {
+        if (!name.empty() && seen.insert(name).second) info.imports.push_back(name);
+    };
+    // Directory 1: imports (20-byte descriptors, Name at +12, ends with zeros).
+    if (directoryCount > 1) {
+        size_t at = 0;
+        const uint32_t rva = le32(d, optional + directories + 8);
+        if (rva && offsetOf(rva, at)) {
+            for (; at + 20 <= d.size(); at += 20) {
+                const uint32_t nameRva = le32(d, at + 12);
+                if (!nameRva && !le32(d, at) && !le32(d, at + 16)) break;
+                add(stringAt(nameRva));
+            }
+        }
+    }
+    // Directory 13: delay-load imports (32-byte descriptors, RVA-based ones only).
+    if (directoryCount > 13) {
+        size_t at = 0;
+        const uint32_t rva = le32(d, optional + directories + 13 * 8);
+        if (rva && offsetOf(rva, at)) {
+            for (; at + 32 <= d.size(); at += 32) {
+                const uint32_t nameRva = le32(d, at + 4);
+                if (!nameRva) break;
+                if (le32(d, at) & 1) add(stringAt(nameRva));
+            }
+        }
+    }
+}
+
+void readElf(const std::string& d, BinaryInfo& info) {
+    if (d.size() < 20) return;
+    info.valid = true;
+    info.format = "elf";
+    const bool little = d[5] == 1;
+    const uint16_t machine = little ? le16(d, 18)
+        : static_cast<uint16_t>((static_cast<unsigned char>(d[18]) << 8) | static_cast<unsigned char>(d[19]));
+    switch (machine) {
+        case 62: info.arch = "x64"; break;
+        case 183: info.arch = "arm64"; break;
+        case 3: info.arch = "x86"; break;
+        case 40: info.arch = "arm"; break;
+        default: break;
+    }
+}
+
+void readMachO(const std::string& d, BinaryInfo& info) {
+    if (d.size() < 8) return;
+    info.valid = true;
+    info.format = "macho";
+    if (be32(d, 0) == 0xCAFEBABE) {
+        info.arch = "universal";
+        return;
+    }
+    const uint32_t cpu = le32(d, 4);
+    if (cpu == 0x01000007) info.arch = "x64";
+    else if (cpu == 0x0100000C) info.arch = "arm64";
+}
+
+bool isRuntimeImport(const std::string& dll) {
+    for (const char* prefix : {"msvcp140", "vcruntime140", "concrt140", "vccorlib140"})
+        if (startsWith(dll, prefix)) return true;
+    return false;
+}
+
+// Version folder names like "14.44.35112" -> comparable numbers; other names sort first.
+std::vector<int> versionKey(const std::string& name) {
+    std::vector<int> key;
+    std::istringstream stream(name);
+    std::string part;
+    while (std::getline(stream, part, '.')) {
+        if (part.empty() || !std::all_of(part.begin(), part.end(), [](unsigned char c) { return std::isdigit(c); }))
+            return {};
+        key.push_back(std::stoi(part));
+    }
+    return key;
+}
+
+bool isNoticeName(const std::string& name) {
+    const std::string l = lower(name);
+    for (const char* prefix : {"license", "licence", "licenses", "copying", "notice"})
+        if (startsWith(l, prefix)) return true;
+    return false;
+}
+
+std::string padRight(const std::string& text, size_t width) {
+    return text.size() >= width ? text + "  " : text + std::string(width - text.size(), ' ');
+}
+
+// Replaces the <string> value that follows <key>key</key> in an XML plist.
+bool setPlistString(std::string& plist, const std::string& key, const std::string& value) {
+    const std::string tag = "<key>" + key + "</key>";
+    const size_t at = plist.find(tag);
+    if (at == std::string::npos) return false;
+    const size_t open = plist.find("<string>", at + tag.size());
+    const size_t close = open == std::string::npos ? open : plist.find("</string>", open);
+    if (open == std::string::npos || close == std::string::npos) return false;
+    plist.replace(open + 8, close - open - 8, value);
+    return true;
+}
+
+} // namespace
+
+// -----------------------------------------------------------------------------
+// dist.json
+// -----------------------------------------------------------------------------
+
+bool parseConfig(const std::string& text, Config& out, std::vector<std::string>& warnings,
+                 std::string& error) {
+    out = Config{};
+    const json root = json::parse(text, nullptr, false);
+    if (root.is_discarded()) { error = "dist.json is not valid JSON"; return false; }
+    if (!root.is_object()) { error = "dist.json must be a JSON object"; return false; }
+
+    for (auto it = root.begin(); it != root.end(); ++it) {
+        const std::string& key = it.key();
+        const json& value = it.value();
+        auto expectString = [&](std::string& target) {
+            if (!value.is_string()) { error = "dist.json: \"" + key + "\" must be a string"; return false; }
+            target = value.get<std::string>();
+            return true;
+        };
+        if (key == "name") {
+            if (!expectString(out.name)) return false;
+        } else if (key == "version") {
+            if (!expectString(out.version)) return false;
+        } else if (key == "include") {
+            if (!value.is_array()) { error = "dist.json: \"include\" must be an array"; return false; }
+            for (const auto& entry : value) {
+                if (!entry.is_object() || !entry.contains("from") || !entry["from"].is_string() ||
+                    !entry.contains("to") || !entry["to"].is_string()) {
+                    error = "dist.json: each \"include\" entry needs \"from\" and \"to\" strings";
+                    return false;
+                }
+                out.include.push_back({entry["from"].get<std::string>(), entry["to"].get<std::string>()});
+            }
+        } else if (key == "exclude") {
+            if (!value.is_array()) { error = "dist.json: \"exclude\" must be an array"; return false; }
+            for (const auto& entry : value) {
+                if (!entry.is_string()) { error = "dist.json: \"exclude\" entries must be strings"; return false; }
+                out.exclude.push_back(entry.get<std::string>());
+            }
+        } else if (key == "licenses") {
+            if (!value.is_array()) { error = "dist.json: \"licenses\" must be an array"; return false; }
+            for (const auto& entry : value) {
+                if (!entry.is_object() || !entry.contains("name") || !entry["name"].is_string() ||
+                    !entry.contains("file") || !entry["file"].is_string()) {
+                    error = "dist.json: each \"licenses\" entry needs \"name\" and \"file\" strings";
+                    return false;
+                }
+                out.licenses.push_back({entry["name"].get<std::string>(), entry["file"].get<std::string>()});
+            }
+        } else if (key == "installer") {
+            warnings.push_back("dist.json: \"installer\" is not supported yet (installers come in a "
+                               "later version); ignored");
+        } else {
+            warnings.push_back("dist.json: unknown key \"" + key + "\" ignored");
+        }
+    }
+    return true;
+}
+
+std::string configTemplate(const std::string& name, const std::string& version) {
+    // Written by hand: nlohmann would sort the keys, not keep the documented order.
+    std::string text = "{\n";
+    text += "  \"name\": " + json(name).dump() + ",\n";
+    text += "  \"version\": " + json(version).dump() + ",\n";
+    text += "  \"include\": [],\n";
+    text += "  \"exclude\": [],\n";
+    text += "  \"licenses\": []\n";
+    text += "}\n";
+    return text;
+}
+
+bool normalizeVersion(const std::string& input, std::string& out) {
+    std::string v = input;
+    if (!v.empty() && (v[0] == 'v' || v[0] == 'V')) v.erase(0, 1);
+    const auto key = versionKey(v);
+    if (key.empty() || key.size() > 4) return false;
+    for (char c : v) if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '.')) return false;
+    for (int part : key) if (part > 65535) return false;  // Windows version fields are 16-bit
+    out = v;
+    return true;
+}
+
+std::string fileSafeName(const std::string& name) {
+    std::string out;
+    for (unsigned char c : name) {
+        if (c < 0x20 || std::strchr("<>:\"/\\|?*", c)) continue;
+        out += c == ' ' ? '-' : static_cast<char>(c);
+    }
+    while (!out.empty() && (out.back() == '.' || out.back() == '-')) out.pop_back();
+    while (!out.empty() && out.front() == '-') out.erase(0, 1);
+    return out.empty() ? "app" : out;
+}
+
+// -----------------------------------------------------------------------------
+// exclude patterns
+// -----------------------------------------------------------------------------
+
+namespace {
+
+std::vector<std::string> splitSegments(const std::string& path) {
+    std::vector<std::string> segments;
+    std::string segment;
+    std::istringstream stream(path);
+    while (std::getline(stream, segment, '/'))
+        if (!segment.empty()) segments.push_back(segment);
+    return segments;
+}
+
+// '*' and '?' within one segment.
+bool segmentMatch(const char* pattern, const char* text) {
+    if (*pattern == '\0') return *text == '\0';
+    if (*pattern == '*') {
+        for (const char* t = text;; ++t) {
+            if (segmentMatch(pattern + 1, t)) return true;
+            if (*t == '\0') return false;
+        }
+    }
+    if (*text == '\0') return false;
+    return (*pattern == '?' || *pattern == *text) && segmentMatch(pattern + 1, text + 1);
+}
+
+// '**' matches zero or more whole segments.
+bool segmentsMatch(const std::vector<std::string>& pattern, size_t p,
+                   const std::vector<std::string>& path, size_t s) {
+    if (p == pattern.size()) return s == path.size();
+    if (pattern[p] == "**") {
+        for (size_t skip = s; skip <= path.size(); ++skip)
+            if (segmentsMatch(pattern, p + 1, path, skip)) return true;
+        return false;
+    }
+    return s < path.size() && segmentMatch(pattern[p].c_str(), path[s].c_str()) &&
+           segmentsMatch(pattern, p + 1, path, s + 1);
+}
+
+} // namespace
+
+bool globMatch(const std::string& pattern, const std::string& path) {
+    return segmentsMatch(splitSegments(pattern), 0, splitSegments(path), 0);
+}
+
+bool isExcluded(const std::vector<std::string>& patterns, const std::string& path) {
+    // The path itself and each of its parent folders ("data/raw" excludes "data/raw/a.png").
+    std::vector<std::string> candidates{path};
+    for (size_t slash = path.find('/'); slash != std::string::npos; slash = path.find('/', slash + 1))
+        candidates.push_back(path.substr(0, slash));
+    for (std::string pattern : patterns) {
+        std::replace(pattern.begin(), pattern.end(), '\\', '/');
+        if (splitSegments(pattern).empty()) continue;
+        for (const auto& candidate : candidates)
+            if (globMatch(pattern, candidate)) return true;
+    }
+    return false;
+}
+
+// -----------------------------------------------------------------------------
+// Executables
+// -----------------------------------------------------------------------------
+
+BinaryInfo readBinaryInfo(const fs::path& file) {
+    BinaryInfo info;
+    std::error_code ec;
+    const auto size = fs::file_size(file, ec);
+    if (ec || size < 4 || size > (1ull << 31)) return info;
+    std::string data;
+    if (!readFile(file, data) || data.size() < 4) return info;
+    if (data[0] == 'M' && data[1] == 'Z') readPe(data, info);
+    else if (data.compare(0, 4, "\x7F" "ELF") == 0) readElf(data, info);
+    else {
+        const uint32_t magic = le32(data, 0);
+        if (magic == 0xFEEDFACF || magic == 0xFEEDFACE || be32(data, 0) == 0xCAFEBABE) readMachO(data, info);
+    }
+    return info;
+}
+
+bool isDebugCrt(const std::string& dll) {
+    for (const char* name : {"vcruntime140d.dll", "vcruntime140_1d.dll", "msvcp140d.dll",
+                             "msvcp140_1d.dll", "msvcp140_2d.dll", "msvcp140d_atomic_wait.dll",
+                             "msvcp140d_codecvt_ids.dll", "ucrtbased.dll", "concrt140d.dll",
+                             "vccorlib140d.dll"})
+        if (dll == name) return true;
+    return false;
+}
+
+bool isMediaFoundation(const std::string& dll) {
+    return dll == "mfplat.dll" || dll == "mfreadwrite.dll" || dll == "mf.dll" || dll == "mfuuid.dll";
+}
+
+fs::path findVcRuntimeDir(const fs::path& vsInstallPath, const std::string& arch) {
+    std::error_code ec;
+    const fs::path msvc = vsInstallPath / "VC" / "Redist" / "MSVC";
+    std::vector<std::pair<std::vector<int>, fs::path>> versions;
+    for (const auto& entry : fs::directory_iterator(msvc, ec)) {
+        if (!entry.is_directory(ec)) continue;
+        auto key = versionKey(entry.path().filename().string());
+        if (!key.empty()) versions.emplace_back(std::move(key), entry.path());
+    }
+    std::sort(versions.begin(), versions.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+    for (const auto& version : versions) {
+        for (const auto& entry : fs::directory_iterator(version.second / arch, ec)) {
+            const std::string name = entry.path().filename().string();
+            if (entry.is_directory(ec) && startsWith(name, "Microsoft.VC") && endsWith(name, ".CRT"))
+                return entry.path();
+        }
+    }
+    return {};
+}
+
+// -----------------------------------------------------------------------------
+// Licenses
+// -----------------------------------------------------------------------------
+
+std::vector<fs::path> findNoticeFiles(const fs::path& dir) {
+    std::vector<fs::path> files;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (entry.is_regular_file(ec) && isNoticeName(entry.path().filename().string()))
+            files.push_back(entry.path());
+    }
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
+std::vector<LicenseSource> collectLicenses(const fs::path& tcRoot,
+                                           const std::vector<std::pair<std::string, fs::path>>& addons,
+                                           const std::vector<LicenseEntry>& extra,
+                                           const fs::path& projectDir) {
+    std::vector<LicenseSource> sources;
+    std::error_code ec;
+
+    LicenseSource core;
+    core.component = "TrussC";
+    core.declared = "MIT + third-party";
+    const fs::path coreFile = tcRoot / "docs" / "LICENSE.md";
+    if (fs::is_regular_file(coreFile, ec)) core.files.push_back(coreFile);
+    else core.note = "docs/LICENSE.md not found in the TrussC folder";
+    sources.push_back(core);
+
+    for (const auto& [name, dir] : addons) {
+        LicenseSource source;
+        source.component = name;
+        std::string text;
+        if (readFile(dir / "addon.json", text)) {
+            const json meta = json::parse(text, nullptr, false);
+            if (meta.is_object() && meta.contains("license") && meta["license"].is_string())
+                source.declared = meta["license"].get<std::string>();
+        }
+        source.files = findNoticeFiles(dir);
+        if (source.files.empty()) source.note = "no notice file: check its dependencies yourself";
+        sources.push_back(source);
+    }
+
+    for (const auto& entry : extra) {
+        LicenseSource source;
+        source.component = entry.name;
+        fs::path file = fromUtf8(entry.file);
+        if (file.is_relative()) file = projectDir / file;
+        if (fs::is_regular_file(file, ec)) source.files.push_back(file);
+        else source.note = "file not found: " + entry.file;
+        sources.push_back(source);
+    }
+    return sources;
+}
+
+std::string formatLicenseReport(const std::vector<LicenseSource>& sources) {
+    size_t nameWidth = 12, declaredWidth = 8;
+    for (const auto& s : sources) {
+        nameWidth = (std::max)(nameWidth, s.component.size() + 2);
+        declaredWidth = (std::max)(declaredWidth, s.declared.size() + 2);
+    }
+    std::string out = "Licenses collected (trusscli collects what it finds; checking them is up to you):\n";
+    for (const auto& s : sources) {
+        const std::string head = "  " + padRight(s.component, nameWidth) +
+                                 padRight(s.declared.empty() ? "-" : s.declared, declaredWidth);
+        if (s.files.empty()) {
+            out += head + "(" + s.note + ")\n";
+            continue;
+        }
+        for (size_t i = 0; i < s.files.size(); ++i) {
+            out += (i == 0 ? head : std::string(head.size(), ' ')) + "licenses/" +
+                   fileSafeName(s.component) + "/" + toUtf8(s.files[i].filename()) + "\n";
+        }
+    }
+    return out;
+}
+
+// -----------------------------------------------------------------------------
+// Packaging
+// -----------------------------------------------------------------------------
+
+const char* platformName(Platform platform) {
+    switch (platform) {
+        case Platform::Windows: return "windows";
+        case Platform::MacOS: return "macos";
+        case Platform::Linux: return "linux";
+    }
+    return "unknown";
+}
+
+bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
+    plan = Plan{};
+    std::error_code ec;
+    const Config& config = in.config;
+    if (!fs::is_directory(in.binDir, ec)) {
+        error = "no bin/ folder; build the project first";
+        return false;
+    }
+
+    // --- The built executable / bundle ---
+    fs::path executable;
+    auto findSingle = [&](const std::string& extension, bool directory) {
+        fs::path found;
+        int count = 0;
+        for (const auto& entry : fs::directory_iterator(in.binDir, ec)) {
+            if (lower(entry.path().extension().string()) != extension) continue;
+            if (directory ? !entry.is_directory(ec) : !entry.is_regular_file(ec)) continue;
+            found = entry.path();
+            ++count;
+        }
+        return count == 1 ? found : fs::path();
+    };
+    if (in.platform == Platform::Windows) {
+        executable = in.binDir / (in.projectName + ".exe");
+        if (!fs::is_regular_file(executable, ec)) executable = findSingle(".exe", false);
+    } else if (in.platform == Platform::MacOS) {
+        plan.bundle = in.binDir / (in.projectName + ".app");
+        if (!fs::is_directory(plan.bundle, ec)) plan.bundle = findSingle(".app", true);
+        if (!plan.bundle.empty()) {
+            plan.bundleName = toUtf8(plan.bundle.filename());
+            executable = plan.bundle / "Contents" / "MacOS" / plan.bundle.stem();
+        }
+    } else {
+        executable = in.binDir / in.projectName;
+    }
+    if (executable.empty() || !fs::is_regular_file(executable, ec)) {
+        error = "no built " + std::string(in.platform == Platform::MacOS ? "app bundle" : "executable") +
+                " for \"" + in.projectName + "\" in bin/; build the project first";
+        return false;
+    }
+    const BinaryInfo exeInfo = readBinaryInfo(executable);
+    plan.arch = exeInfo.arch.empty() ? "unknown" : exeInfo.arch;
+
+    const std::string name = fileSafeName(config.name);
+    plan.folderName = name + "-" + config.version + "-" + platformName(in.platform) + "-" + plan.arch;
+    plan.packageDir = in.outputDir / fromUtf8(plan.folderName);
+
+    std::set<std::string> targets;
+    auto addFile = [&](const fs::path& source, const std::string& logical, const std::string& target) {
+        if (isExcluded(config.exclude, logical)) {
+            plan.excluded.push_back(logical);
+            return;
+        }
+        if (!targets.insert(lower(target)).second) {
+            plan.warnings.push_back(target + " comes from two places; kept the first");
+            return;
+        }
+        plan.files.push_back({source, target});
+    };
+    // Where a logical path ("data/a.png", an include "to") lands in the package.
+    const std::string resources = plan.bundleName + "/Contents/Resources/";
+    auto targetOf = [&](const std::string& logical) {
+        return in.platform == Platform::MacOS ? resources + logical : logical;
+    };
+
+    // --- bin/ ---
+    if (in.platform == Platform::MacOS) {
+        const fs::path data = in.binDir / "data";
+        if (fs::is_directory(data, ec)) {
+            for (auto it = fs::recursive_directory_iterator(data, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec) break;
+                if (!it->is_regular_file(ec)) continue;
+                const std::string name = it->path().filename().string();
+                if (name == ".DS_Store" || name == ".gitkeep") continue;
+                const std::string logical = "data/" + toUtf8(fs::relative(it->path(), data, ec));
+                addFile(it->path(), logical, targetOf(logical));
+            }
+        }
+    } else {
+        const std::string exeRel = toUtf8(fs::relative(executable, in.binDir, ec));
+        if (isExcluded(config.exclude, exeRel)) {
+            error = "exclude matches the executable " + exeRel;
+            return false;
+        }
+        for (auto it = fs::recursive_directory_iterator(in.binDir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+            if (ec) break;
+            if (!it->is_regular_file(ec)) continue;
+            const std::string rel = toUtf8(fs::relative(it->path(), in.binDir, ec));
+            const std::string fileName = lower(it->path().filename().string());
+            const std::string ext = lower(it->path().extension().string());
+            if (fileName == ".ds_store" || fileName == "thumbs.db" || fileName == ".gitkeep") continue;
+            if (in.platform == Platform::Windows && (ext == ".ilk" || ext == ".exp" || ext == ".lib")) continue;
+            if (in.platform == Platform::Windows && ext == ".pdb") {
+                plan.symbols.push_back({it->path(), rel});
+                continue;
+            }
+            addFile(it->path(), rel, rel);
+        }
+    }
+
+    // --- include ---
+    for (const auto& entry : config.include) {
+        fs::path from = fromUtf8(entry.from);
+        if (from.is_relative()) from = in.projectDir / from;
+        std::string to;
+        if (!cleanPackagePath(entry.to, to)) {
+            error = "include \"to\" must be a relative path inside the package: \"" + entry.to + "\"";
+            return false;
+        }
+        if (fs::is_directory(from, ec)) {
+            for (auto it = fs::recursive_directory_iterator(from, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+                if (ec) break;
+                if (!it->is_regular_file(ec)) continue;
+                const std::string logical = to + "/" + toUtf8(fs::relative(it->path(), from, ec));
+                addFile(it->path(), logical, targetOf(logical));
+            }
+        } else if (fs::is_regular_file(from, ec)) {
+            const std::string logical = endsWith(entry.to, "/") ? to + "/" + toUtf8(from.filename()) : to;
+            addFile(from, logical, targetOf(logical));
+        } else {
+            error = "include \"from\" not found: " + entry.from;
+            return false;
+        }
+    }
+
+    // --- Windows runtime ---
+    if (in.platform == Platform::Windows) {
+        std::set<std::string> imports;
+        std::vector<std::string> debugCrt, mediaFoundation;
+        auto scan = [&](const fs::path& file) {
+            const BinaryInfo info = readBinaryInfo(file);
+            for (const auto& dll : info.imports) {
+                imports.insert(dll);
+                if (isDebugCrt(dll)) debugCrt.push_back(toUtf8(file.filename()) + " -> " + dll);
+                if (isMediaFoundation(dll)) mediaFoundation.push_back(dll);
+            }
+        };
+        for (const auto& item : plan.files) {
+            const std::string ext = lower(item.source.extension().string());
+            if (ext == ".exe" || ext == ".dll") scan(item.source);
+        }
+        if (!debugCrt.empty()) {
+            error = "this is a Debug build (imports the debug C++ runtime, which may not be "
+                    "redistributed): " + debugCrt.front() + ". Package a RelWithDebInfo or Release build.";
+            return false;
+        }
+        if (!mediaFoundation.empty()) {
+            plan.warnings.push_back("imports Media Foundation (" + mediaFoundation.front() +
+                                    "), which Windows N / KN editions lack: the app will not start "
+                                    "there unless the Media Feature Pack is installed");
+        }
+        bool needsRuntime = false;
+        for (const auto& dll : imports) needsRuntime = needsRuntime || isRuntimeImport(dll);
+        if (needsRuntime && in.vcRuntimeDir.empty()) {
+            plan.warnings.push_back("Visual Studio's VC++ runtime folder was not found: the target "
+                                    "PC needs the Visual C++ Redistributable installed");
+        } else if (needsRuntime) {
+            // Copy the runtime DLLs imported by the package, then those they import.
+            for (bool added = true; added;) {
+                added = false;
+                for (const auto& entry : fs::directory_iterator(in.vcRuntimeDir, ec)) {
+                    const std::string dll = lower(entry.path().filename().string());
+                    if (!imports.count(dll) || targets.count(dll)) continue;
+                    targets.insert(dll);
+                    plan.files.push_back({entry.path(), toUtf8(entry.path().filename())});
+                    plan.runtimeDlls.push_back(toUtf8(entry.path().filename()));
+                    for (const auto& next : readBinaryInfo(entry.path()).imports) imports.insert(next);
+                    added = true;
+                }
+            }
+        }
+    }
+
+    if (!plan.symbols.empty())
+        plan.symbolsDir = in.outputDir / fromUtf8(plan.folderName + "-symbols");
+    if (in.platform == Platform::Linux) plan.launcherName = in.projectName + ".sh";
+    for (const auto& source : in.licenses)
+        if (source.files.empty() && startsWith(source.note, "file not found"))
+            plan.warnings.push_back("dist.json licenses \"" + source.component + "\": " + source.note);
+    return true;
+}
+
+bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
+    std::error_code ec;
+    // Only ever replace the two folders this plan names, inside the output folder.
+    for (const fs::path& dir : {plan.packageDir, plan.symbolsDir}) {
+        if (dir.empty()) continue;
+        if (dir.parent_path() != in.outputDir) {
+            error = "refusing to replace a folder outside the output folder: " + toUtf8(dir);
+            return false;
+        }
+        fs::remove_all(dir, ec);
+        if (ec) { error = "cannot remove " + toUtf8(dir) + ": " + ec.message(); return false; }
+    }
+    fs::create_directories(plan.packageDir, ec);
+    if (ec) { error = "cannot create " + toUtf8(plan.packageDir) + ": " + ec.message(); return false; }
+
+    if (!plan.bundle.empty()) {
+        const fs::path bundle = plan.packageDir / fromUtf8(plan.bundleName);
+        fs::copy(plan.bundle, bundle, fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
+        if (ec) { error = "cannot copy " + toUtf8(plan.bundle) + ": " + ec.message(); return false; }
+        fs::remove_all(bundle / "Contents" / "Resources" / "data", ec);  // replaced by bin/data below
+    }
+
+    auto copyItems = [&](const std::vector<CopyItem>& items, const fs::path& root) {
+        for (const auto& item : items) {
+            const fs::path target = root / fromUtf8(item.target);
+            fs::create_directories(target.parent_path(), ec);
+            fs::copy_file(item.source, target, fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                error = "cannot copy " + toUtf8(item.source) + ": " + ec.message();
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!copyItems(plan.files, plan.packageDir)) return false;
+    if (!plan.symbolsDir.empty()) {
+        fs::create_directories(plan.symbolsDir, ec);
+        if (!copyItems(plan.symbols, plan.symbolsDir)) return false;
+    }
+
+    // --- licenses/ and THIRD_PARTY_NOTICES.txt ---
+    std::string notices = "Third-party notices for " + in.config.name + " " + in.config.version + "\n"
+                          "Collected by trusscli dist from the files the components ship.\n";
+    const fs::path licenses = plan.packageDir / "licenses";
+    for (const auto& source : in.licenses) {
+        notices += "\n" + std::string(78, '=') + "\n" + source.component;
+        if (!source.declared.empty()) notices += " (" + source.declared + ")";
+        notices += "\n" + std::string(78, '=') + "\n";
+        if (source.files.empty()) notices += "(" + source.note + ")\n";
+        const fs::path dir = licenses / fromUtf8(fileSafeName(source.component));
+        for (const auto& file : source.files) {
+            fs::create_directories(dir, ec);
+            fs::copy_file(file, dir / file.filename(), fs::copy_options::overwrite_existing, ec);
+            std::string text;
+            if (readFile(file, text)) {
+                notices += "\n--- " + toUtf8(file.filename()) + " ---\n" + text;
+                if (!text.empty() && text.back() != '\n') notices += '\n';
+            }
+        }
+    }
+    if (!plan.runtimeDlls.empty()) {
+        std::string note = "Microsoft Visual C++ runtime\n\nThese files are the Microsoft Visual C++ "
+                           "runtime, copied next to the application (app-local deployment) from the "
+                           "Visual Studio installation that built it:\n\n";
+        for (const auto& dll : plan.runtimeDlls) note += "  " + dll + "\n";
+        note += "\nSource folder: " + toUtf8(in.vcRuntimeDir) + "\n"
+                "They are covered by the license terms of that Visual Studio installation.\n";
+        const fs::path dir = licenses / "Microsoft-VC-Runtime";
+        fs::create_directories(dir, ec);
+        writeFile(dir / "README.txt", note);
+        notices += "\n" + std::string(78, '=') + "\n" + note;
+    }
+    if (!writeFile(plan.packageDir / "THIRD_PARTY_NOTICES.txt", notices)) {
+        error = "cannot write THIRD_PARTY_NOTICES.txt";
+        return false;
+    }
+
+    // --- macOS bundle version ---
+    if (!plan.bundle.empty()) {
+        const fs::path plistPath = plan.packageDir / fromUtf8(plan.bundleName) / "Contents" / "Info.plist";
+        std::string plist;
+        if (readFile(plistPath, plist) && !startsWith(plist, "bplist")) {
+            setPlistString(plist, "CFBundleShortVersionString", in.config.version);
+            setPlistString(plist, "CFBundleVersion", in.config.version);
+            writeFile(plistPath, plist);
+        }
+    }
+
+    // --- Linux launcher ---
+    if (!plan.launcherName.empty()) {
+        const fs::path launcher = plan.packageDir / fromUtf8(plan.launcherName);
+        const std::string script =
+            "#!/bin/sh\n"
+            "# Starts " + in.projectName + " with the libraries next to it.\n"
+            "here=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n"
+            "LD_LIBRARY_PATH=\"$here${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\" exec \"$here/" +
+            in.projectName + "\" \"$@\"\n";
+        if (!writeFile(launcher, script)) {
+            error = "cannot write " + plan.launcherName;
+            return false;
+        }
+        fs::permissions(launcher,
+                        fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+                        fs::perm_options::add, ec);
+    }
+    return true;
+}
+
+std::string formatPlan(const Plan& plan) {
+    std::string out = plan.folderName + "/\n";
+    if (!plan.bundleName.empty()) out += "  " + plan.bundleName + "/  (the whole bundle)\n";
+    std::vector<std::string> files;
+    for (const auto& item : plan.files) files.push_back(item.target);
+    std::sort(files.begin(), files.end());
+    for (const auto& f : files) out += "  " + f + "\n";
+    out += "  licenses/, THIRD_PARTY_NOTICES.txt\n";
+    if (!plan.launcherName.empty()) out += "  " + plan.launcherName + "  (launcher)\n";
+    if (!plan.symbols.empty()) {
+        out += plan.folderName + "-symbols/\n";
+        for (const auto& item : plan.symbols) out += "  " + item.target + "\n";
+    }
+    if (!plan.excluded.empty()) {
+        out += "Left out by exclude:\n";
+        for (const auto& e : plan.excluded) out += "  " + e + "\n";
+    }
+    return out;
+}
+
+} // namespace dist

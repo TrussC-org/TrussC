@@ -8,6 +8,7 @@
 #include "VsDetector.h"
 #include "BuildOutputFilter.h"
 #include "ProcessCapture.h"
+#include "Dist.h"
 #include <iostream>
 #include <string>
 #include <vector>
@@ -2713,7 +2714,10 @@ static int cmdAddon(const vector<string>& args) {
 // =============================================================================
 
 enum class InfoFormat { Human, Plain, Json };
-enum class InfoSection { All, Project, Targets, Addons };
+enum class InfoSection { All, Project, Targets, Addons, Licenses };
+
+// Defined with `dist` below; `info licenses` reports the same sources.
+static vector<pair<string, fs::path>> projectAddonDirs(const string& projectPath, const string& tcRoot);
 
 static void printInfoHelp() {
     cout << "Usage: trusscli info [section] [options]\n"
@@ -2727,6 +2731,7 @@ static void printInfoHelp() {
          << "  project                    Project name, path, TrussC root\n"
          << "  targets                    Enabled build targets\n"
          << "  addons                     Addons listed in addons.make\n"
+         << "  licenses                   License files 'trusscli dist' would collect (not in 'all')\n"
          << "\n"
          << "Options:\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -2848,8 +2853,9 @@ static int cmdInfo(const vector<string>& args) {
             else if (a == "project") section = InfoSection::Project;
             else if (a == "targets") section = InfoSection::Targets;
             else if (a == "addons")  section = InfoSection::Addons;
+            else if (a == "licenses") section = InfoSection::Licenses;
             else {
-                cerr << "Error: unknown section '" << a << "'. Valid: project, targets, addons, all\n";
+                cerr << "Error: unknown section '" << a << "'. Valid: project, targets, addons, licenses, all\n";
                 return 1;
             }
             sectionSet = true;
@@ -2887,6 +2893,45 @@ static int cmdInfo(const vector<string>& args) {
     } else {
         // Framework mode: list available addons from tcRoot
         scanAddons(resolvedTcRoot, addons);
+    }
+
+    if (section == InfoSection::Licenses) {
+        if (!inProject) {
+            cerr << "Error: 'info licenses' needs a project (run it inside one, or use -p).\n";
+            return 1;
+        }
+        const fs::path projectDir = fs::absolute(projectPath);
+        dist::Config config;
+        if (ifstream file{projectDir / "dist.json", ios::binary}) {
+            stringstream text;
+            text << file.rdbuf();
+            vector<string> warnings;
+            string error;
+            if (!dist::parseConfig(text.str(), config, warnings, error)) {
+                cerr << "Error: " << error << "\n";
+                return 1;
+            }
+        }
+        const auto sources = dist::collectLicenses(
+            resolvedTcRoot, projectAddonDirs(projectPath, resolvedTcRoot), config.licenses, projectDir);
+        if (format == InfoFormat::Json) {
+            Json out = Json::array();
+            for (const auto& s : sources) {
+                Json files = Json::array();
+                for (const auto& f : s.files) files.push_back(f.string());
+                out.push_back({{"component", s.component}, {"declared", s.declared},
+                               {"files", files}, {"note", s.note}});
+            }
+            cout << out.dump(2) << "\n";
+        } else if (format == InfoFormat::Plain) {
+            for (const auto& s : sources) {
+                if (s.files.empty()) cout << s.component << "\t" << s.declared << "\t\n";
+                for (const auto& f : s.files) cout << s.component << "\t" << s.declared << "\t" << f.string() << "\n";
+            }
+        } else {
+            cout << dist::formatLicenseReport(sources);
+        }
+        return 0;
     }
 
     // JSON output
@@ -4039,6 +4084,342 @@ static int cmdRun(const vector<string>& args) {
 }
 
 // =============================================================================
+// Subcommand: dist
+// =============================================================================
+
+static void printDistHelp() {
+    cout << "Usage: trusscli dist [options]\n"
+         << "\n"
+         << "Package the TrussC project in the current directory so it runs on another\n"
+         << "machine: a self-contained folder in dist/, optionally archived.\n"
+         << "\n"
+         << "Options:\n"
+         << "      --release              Build as Release instead of RelWithDebInfo (no symbols)\n"
+         << "      --archive, --zip       Also write a zip (Windows/macOS) or tar.gz (Linux)\n"
+         << "      --no-build             Package the existing build (refuses a Debug build)\n"
+         << "      --dry-run              List what would go into the package, change nothing\n"
+         << "      --init                 Write a dist.json template (never overwrites) and stop\n"
+         << "  -o, --output <dir>         Output folder (default: dist/ in the project)\n"
+         << "      --app-name <name>      With --init: no question; otherwise overrides dist.json\n"
+         << "      --app-version <x.y.z>  Same, for the version (a leading 'v' is dropped)\n"
+         << "  -j, --jobs <N>             As in 'trusscli build'\n"
+         << "      --verbose              As in 'trusscli build'\n"
+         << "  -p, --path <path>          Operate on a specific project path\n"
+         << "  -h, --help                 Show this help\n"
+         << "\n"
+         << "The package is <name>-<version>-<platform>-<arch>/ with the executable, bin/data\n"
+         << "(minus dist.json \"exclude\"), dist.json \"include\" entries, the VC++ runtime\n"
+         << "DLLs the app imports (Windows), licenses/ and THIRD_PARTY_NOTICES.txt.\n"
+         << "Windows .pdb symbols go to <name>-<version>-<platform>-<arch>-symbols/, beside it.\n"
+         << "On macOS bin/data goes into the bundle's Contents/Resources/data and the bundle\n"
+         << "is signed ad hoc.\n"
+         << "\n"
+         << "Settings come from dist.json in the project folder (optional; see --init).\n"
+         << "trusscli collects the license files it finds; checking them is up to you.\n";
+}
+
+static bool stdinIsTty() {
+#ifdef _WIN32
+    return _isatty(_fileno(stdin)) != 0;
+#else
+    return isatty(STDIN_FILENO) != 0;
+#endif
+}
+
+// The project's addons (addons.make) with their dependencies, and their folders.
+static vector<pair<string, fs::path>> projectAddonDirs(const string& projectPath, const string& tcRoot) {
+    vector<string> names = readProjectAddons(projectPath);
+    set<string> seen(names.begin(), names.end());
+    const vector<string> direct = names;
+    for (const string& name : direct) collectAddonDependencies(tcRoot, name, seen, names);
+    vector<pair<string, fs::path>> out;
+    for (const string& name : names) out.emplace_back(name, fs::path(tcRoot) / "addons" / name);
+    return out;
+}
+
+static string readCacheValue(const fs::path& cache, const string& key) {
+    ifstream file(cache);
+    string line;
+    const string prefix = key + ":";
+    while (getline(file, line)) {
+        if (line.rfind(prefix, 0) != 0) continue;
+        const size_t eq = line.find('=');
+        if (eq != string::npos) return line.substr(eq + 1);
+    }
+    return "";
+}
+
+static int distInit(const string& projectPath, const string& projectName,
+                    string appName, string appVersion) {
+    const fs::path configPath = fs::path(projectPath) / "dist.json";
+    if (fs::exists(configPath)) {
+        cerr << "Error: " << configPath.string() << " already exists (not overwritten).\n";
+        return 1;
+    }
+    const bool ask = stdinIsTty() && stdoutIsTty();
+    if (appName.empty()) {
+        appName = projectName;
+        if (ask) {
+            string answer = promptString("Name [" + projectName + "]: ");
+            if (!answer.empty()) appName = answer;
+        }
+    }
+    string version;
+    if (!appVersion.empty()) {
+        if (!dist::normalizeVersion(appVersion, version)) {
+            cerr << "Error: --app-version must look like 1.2.0 (got '" << appVersion << "')\n";
+            return 1;
+        }
+    } else {
+        version = dist::kDefaultVersion;
+        while (ask) {
+            string answer = promptString(string("Version [") + dist::kDefaultVersion + "]: ");
+            if (answer.empty()) break;
+            if (dist::normalizeVersion(answer, version)) break;
+            cout << "  A version looks like 1.2.0 (up to four numbers).\n";
+            version = dist::kDefaultVersion;
+        }
+    }
+    ofstream file(configPath, ios::binary);
+    file << dist::configTemplate(appName, version);
+    if (!file) {
+        cerr << "Error: cannot write " << configPath.string() << "\n";
+        return 1;
+    }
+    cout << "Wrote dist.json. Edit it for include / exclude / licenses, then run 'trusscli dist'.\n"
+         << "  include   [{\"from\": \"../tools/node\", \"to\": \"data/tools/node\"}]  files from outside bin/data\n"
+         << "  exclude   [\"data/**/*.psd\"]                                    left out of the package\n"
+         << "  licenses  [{\"name\": \"Node.js\", \"file\": \"...\"}]                  your own third-party notices\n";
+    return 0;
+}
+
+static int cmdDist(const vector<string>& args) {
+    string explicitPath, outputDir, appName, appVersion;
+    bool release = false, archive = false, noBuild = false, dryRun = false, init = false, verbose = false;
+    int jobs = 0;
+
+    auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
+        if (i + 1 >= args.size()) {
+            cerr << "Error: " << opt << " requires a value\n";
+            return false;
+        }
+        out = args[++i];
+        return true;
+    };
+    for (size_t i = 0; i < args.size(); ++i) {
+        const int jobsFlag = parseJobsFlag(args, i, jobs);
+        if (jobsFlag < 0) return 1;
+        if (jobsFlag > 0) continue;
+        const string& a = args[i];
+        if (a == "-h" || a == "--help") { printDistHelp(); return 0; }
+        else if (a == "--release") release = true;
+        else if (a == "--archive" || a == "--zip") archive = true;
+        else if (a == "--no-build") noBuild = true;
+        else if (a == "--dry-run") dryRun = true;
+        else if (a == "--init") init = true;
+        else if (a == "--verbose") verbose = true;
+        else if (a == "--installer") {
+            cerr << "Error: --installer is not available yet (installers come in a later version).\n"
+                 << "Use --archive for a zip / tar.gz.\n";
+            return 1;
+        }
+        else if (a == "--web" || a == "--android" || a == "--ios") {
+            cerr << "Error: dist packages the native build only; " << a << " is not supported yet.\n";
+            return 1;
+        }
+        else if (a == "-o" || a == "--output") { if (!needValue(i, a, outputDir)) return 1; }
+        else if (a == "--app-name") { if (!needValue(i, a, appName)) return 1; }
+        else if (a == "--app-version") { if (!needValue(i, a, appVersion)) return 1; }
+        else if (a == "-p" || a == "--path") { if (!needValue(i, a, explicitPath)) return 1; }
+        else {
+            cerr << "Error: unknown option '" << a << "'\n"
+                 << "Run 'trusscli dist --help' for usage.\n";
+            return 1;
+        }
+    }
+
+    const string projectPath = explicitPath.empty() ? autoDetectProjectRoot("") : explicitPath;
+    if (projectPath.empty() || !fs::is_directory(projectPath)) {
+        cerr << "Error: not inside a TrussC project.\n"
+             << "Use 'trusscli dist -p <path>' or run from inside a project.\n";
+        return 1;
+    }
+    error_code ec;
+    const fs::path projectDir = fs::weakly_canonical(fs::absolute(projectPath), ec);
+    string projectName = projectDir.filename().string();
+    if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
+
+    if (init) return distInit(projectDir.string(), projectName, appName, appVersion);
+
+    if (!kNativePreset) {
+        cerr << "Error: cannot detect the native platform.\n";
+        return 1;
+    }
+    const string tcRoot = autoDetectTcRoot();
+    if (tcRoot.empty()) {
+        cerr << "Error: could not detect the TrussC root.\n";
+        return 1;
+    }
+
+    // --- Settings: dist.json, then the command line ---
+    dist::Config config;
+    const fs::path configPath = projectDir / "dist.json";
+    const bool haveConfig = fs::exists(configPath);
+    if (haveConfig) {
+        ifstream file(configPath, ios::binary);
+        stringstream text;
+        text << file.rdbuf();
+        vector<string> warnings;
+        string error;
+        if (!dist::parseConfig(text.str(), config, warnings, error)) {
+            cerr << "Error: " << error << "\n";
+            return 1;
+        }
+        for (const string& w : warnings) cerr << "Warning: " << w << "\n";
+    }
+    if (!appName.empty()) config.name = appName;
+    if (!appVersion.empty()) config.version = appVersion;
+    if (config.name.empty()) config.name = projectName;
+    if (config.version.empty()) config.version = dist::kDefaultVersion;
+    {
+        string version;
+        if (!dist::normalizeVersion(config.version, version)) {
+            cerr << "Error: version must look like 1.2.0 (got '" << config.version << "')\n";
+            return 1;
+        }
+        config.version = version;
+    }
+
+    // --- Build, or check the existing one ---
+    const fs::path buildDir = projectDir / (string("build-") + kNativePreset);
+    if (!noBuild && !dryRun) {
+        vector<string> buildArgs = {release ? "--release" : "--relwithdebinfo", "-p", projectDir.string()};
+        if (verbose) buildArgs.push_back("--verbose");
+        if (jobs > 0) { buildArgs.push_back("-j"); buildArgs.push_back(to_string(jobs)); }
+        if (int rc = cmdBuild(buildArgs)) return rc;
+        cout << "\n";
+    } else {
+        const string type = readCacheValue(buildDir / "CMakeCache.txt", "CMAKE_BUILD_TYPE");
+        if (type == "Debug") {
+            cerr << "Error: the existing build is a Debug build; it cannot be shipped.\n"
+                 << "Run 'trusscli dist' without --no-build, or build with --relwithdebinfo / --release.\n";
+            return 1;
+        }
+        if (release && !type.empty() && type != "Release") {
+            cerr << "Error: --release asks for a Release build, but the existing build is " << type << ".\n";
+            return 1;
+        }
+        if (noBuild) {
+            cout << "Packaging the existing build (--no-build): "
+                 << (type.empty() ? string("build type unknown") : type) << "\n";
+        }
+    }
+    {
+        string hotReload;
+        ifstream(buildDir / ".tc_hot_reload_state") >> hotReload;
+        if (hotReload == "ON") {
+            cerr << "Error: this build uses hot reload; its code lives in a library in "
+                 << buildDir.filename().string() << "/, which does not travel with the app.\n"
+                 << "Turn hot reload off and build again to package it.\n";
+            return 1;
+        }
+    }
+
+    // --- Plan ---
+    dist::PlanInput input;
+#ifdef _WIN32
+    input.platform = dist::Platform::Windows;
+#elif defined(__APPLE__)
+    input.platform = dist::Platform::MacOS;
+#else
+    input.platform = dist::Platform::Linux;
+#endif
+    input.projectDir = projectDir;
+    input.binDir = projectDir / "bin";
+    input.outputDir = fs::weakly_canonical(
+        fs::absolute(outputDir.empty() ? (projectDir / "dist") : fs::path(outputDir)), ec);
+    input.projectName = projectName;
+    input.config = config;
+    input.licenses = dist::collectLicenses(tcRoot, projectAddonDirs(projectDir.string(), tcRoot),
+                                           config.licenses, projectDir);
+#ifdef _WIN32
+    {
+        const auto installs = VsDetector::detectInstalledVersions();
+        const dist::BinaryInfo exe = dist::readBinaryInfo(input.binDir / (projectName + ".exe"));
+        const string arch = exe.arch.empty() ? "x64" : exe.arch;
+        for (const auto& vs : installs) {  // newest first
+            input.vcRuntimeDir = dist::findVcRuntimeDir(vs.installPath, arch);
+            if (!input.vcRuntimeDir.empty()) break;
+        }
+    }
+#endif
+
+    dist::Plan plan;
+    string error;
+    if (!dist::makePlan(input, plan, error)) {
+        cerr << "Error: " << error << "\n";
+        return 1;
+    }
+    for (const string& w : plan.warnings) cerr << "Warning: " << w << "\n";
+
+    if (dryRun) {
+        cout << "Would write to " << input.outputDir.string() << ":\n" << dist::formatPlan(plan) << "\n"
+             << dist::formatLicenseReport(input.licenses);
+        return 0;
+    }
+
+    fs::create_directories(input.outputDir, ec);
+    if (!dist::writePackage(input, plan, error)) {
+        cerr << "Error: " << error << "\n";
+        return 1;
+    }
+
+#ifdef __APPLE__
+    // Adding data to the bundle invalidates the linker's ad-hoc signature.
+    const string bundlePath = (plan.packageDir / plan.bundleName).string();
+    if (runInherited({"codesign", "--force", "--deep", "--sign", "-", bundlePath}) != 0)
+        cerr << "Warning: ad-hoc signing failed; macOS may refuse to start the app.\n";
+#endif
+
+    string archiveName;
+    if (archive) {
+        const string cmake = findCMake();
+        const bool tarball = input.platform == dist::Platform::Linux;
+        archiveName = plan.folderName + (tarball ? ".tar.gz" : ".zip");
+        fs::remove(input.outputDir / archiveName, ec);
+        vector<string> tarArgs = {cmake, "-E", "chdir", input.outputDir.string(), cmake, "-E", "tar",
+                                  tarball ? "czf" : "cf", archiveName};
+        if (!tarball) tarArgs.push_back("--format=zip");
+        tarArgs.push_back(plan.folderName);
+        if (runInherited(tarArgs) != 0) {
+            cerr << "Error: could not write " << archiveName << "\n";
+            return 1;
+        }
+    }
+
+    cout << dist::formatLicenseReport(input.licenses) << "\n"
+         << "Packaged " << config.name << " " << config.version << ":\n"
+         << "  " << plan.packageDir.string() << "\n";
+    if (!plan.runtimeDlls.empty()) {
+        cout << "  VC++ runtime:";
+        for (const string& dll : plan.runtimeDlls) cout << " " << dll;
+        cout << "\n";
+    }
+    if (!plan.symbolsDir.empty()) cout << "  symbols (keep, do not ship): " << plan.symbolsDir.string() << "\n";
+    if (!archiveName.empty()) cout << "  " << (input.outputDir / archiveName).string() << "\n";
+    if (!plan.excluded.empty()) cout << "  " << plan.excluded.size() << " file(s) left out by exclude\n";
+    if (!haveConfig) {
+        cout << "No dist.json: used name \"" << config.name << "\", version " << config.version
+             << ". Run 'trusscli dist --init' to set them.\n";
+    }
+#ifdef __APPLE__
+    cout << "Note: an app signed ad hoc is blocked by Gatekeeper when downloaded from the internet\n"
+         << "(open it with right-click > Open). Copying it by USB or network share is fine.\n";
+#endif
+    return 0;
+}
+
+// =============================================================================
 // Subcommand: completion
 // =============================================================================
 
@@ -4057,6 +4438,7 @@ _trusscli() {
         'clean:Delete build directories'
         'build:Build the project'
         'run:Build and launch the project'
+        'dist:Package the project to run on another machine'
         'version:Show version (trusscli + current TrussC)'
         'completion:Generate shell completion script'
     )
@@ -4111,9 +4493,10 @@ _trusscli() {
             _describe 'option' cp_opts
             _files -/
             ;;
-        update|build|run|clean)
+        update|build|run|clean|dist)
             local -a opts
             case "$words[2]" in
+                dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
                 build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--dry-run:Print cmake commands only' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
                 run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
@@ -4124,7 +4507,7 @@ _trusscli() {
         info)
             if (( CURRENT == 3 )); then
                 local -a sections
-                sections=('project' 'targets' 'addons' 'all')
+                sections=('project' 'targets' 'addons' 'licenses' 'all')
                 _describe 'section' sections
             fi
             ;;
@@ -4150,7 +4533,7 @@ _trusscli() {
     }
 
     if [[ $cword -eq 1 ]]; then
-        COMPREPLY=($(compgen -W "new cp update upgrade addon info doctor clean build run version completion" -- "$cur"))
+        COMPREPLY=($(compgen -W "new cp update upgrade addon info doctor clean build run dist version completion" -- "$cur"))
         return
     fi
 
@@ -4185,9 +4568,9 @@ _trusscli() {
                 COMPREPLY=($(compgen -d -- "$cur"))
             fi
             ;;
-        update|build|run|clean)
+        update|build|run|clean|dist)
             case "$prev" in
-                -p|--path|--tc-root)
+                -p|--path|--tc-root|-o|--output)
                     COMPREPLY=($(compgen -d -- "$cur"))
                     return
                     ;;
@@ -4205,11 +4588,12 @@ _trusscli() {
                 build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --dry-run --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
+                dist)   COMPREPLY=($(compgen -W "--release --archive --zip --no-build --dry-run --init -o --output --app-name --app-version -j --jobs --verbose -p --path" -- "$cur")) ;;
             esac
             ;;
         info)
             if [[ $cword -eq 2 ]]; then
-                COMPREPLY=($(compgen -W "project targets addons all --json --format" -- "$cur"))
+                COMPREPLY=($(compgen -W "project targets addons licenses all --json --format" -- "$cur"))
             fi
             ;;
         completion)
@@ -4270,7 +4654,8 @@ static void printTopHelp() {
          << "  clean                          Delete build directories\n"
          << "  build                          Build the project\n"
          << "  run                            Build and launch the project\n"
-         << "  version                        Show version (trusscli + current TrussC)\n"
+         << "  dist                           Package the project to run on another machine\n"
+         << "  version                       Show version (trusscli + current TrussC)\n"
          << "\n"
          << "Common options (per subcommand):\n"
          << "  -p, --path <path>              Operate on a specific project path\n"
@@ -4355,6 +4740,7 @@ int main(int argc, char* argv[]) try {
     if (first == "clean")  return cmdClean(subArgs);
     if (first == "build")      return cmdBuild(subArgs);
     if (first == "run")        return cmdRun(subArgs);
+    if (first == "dist")       return cmdDist(subArgs);
     if (first == "completion") return cmdCompletion(subArgs);
 
     cerr << "Error: unknown command '" << first << "'\n"
