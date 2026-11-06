@@ -58,6 +58,7 @@ struct WindowNativeOperations {
     void (*toggleFullscreen)(Window&) = nullptr;
     bool (*closeRecorded)(sapp_window, void*) = nullptr;
     bool (*injectEvent)(sapp_window, void*, const sapp_event*) = nullptr;
+    void (*bringToFront)(Window&) = nullptr;
 };
 struct WindowBinding {
     sapp_window handle{};
@@ -69,6 +70,8 @@ struct WindowBinding {
     // never consumes its delivery.
     bool lastDeliveredHidden = false;
     bool visibilityReady = false;
+    // Last focus state reported by the OS for this window (see Window::isFocused()).
+    bool focused = false;
     uint64_t visibilityRevision = 0;
     WindowGeometryState geometry;
     bool geometryInitialized = false;
@@ -151,6 +154,7 @@ IVec2 nativeWindowPosition(const Window&);
 void nativeWindowSetFullscreen(Window&, bool);
 uint32_t nativeWindowFullscreenPhase(const Window&);
 void nativeWindowToggleFullscreen(Window&);
+void nativeWindowBringToFront(Window&);
 const WindowNativeOperations& productionWindowOperations();
 bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations& operations, void* user);
 bool bindNativeWindow(uint32_t id, void* window) noexcept;

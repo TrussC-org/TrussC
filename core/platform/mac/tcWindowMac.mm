@@ -66,6 +66,14 @@ void nativeWindowSetSize(Window& w, double width, double height, bool) {
 }
 void nativeWindowSetPosition(Window& w, int x, int y) { setWindowPositionNative(sapp_window_macos_get_window(handle(w)), x, y); }
 IVec2 nativeWindowPosition(const Window& w) { return windowPositionNative(sapp_window_macos_get_window(handle(w))); }
+void nativeWindowBringToFront(Window& w) {
+    NSWindow* window = (__bridge NSWindow*)sapp_window_macos_get_window(handle(w));
+    if (window) {
+        [NSApp activateIgnoringOtherApps:YES];
+        if ([window isMiniaturized]) [window deminiaturize:nil];
+        [window makeKeyAndOrderFront:nil];
+    }
+}
 }
 
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
@@ -89,6 +97,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.close_request_cb = &internal::allowWindowClose;
     d.user_data = win.get();
     d.bind_cb = bindAdapter;
+    d.parent = internal::resolveParentWindow(settings);
     win->native_ = st;
     {
         internal::WindowLifecycleScope construction(*win);

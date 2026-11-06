@@ -2,6 +2,7 @@
 #include "core/include/sokol/util/sokol_window_size.h"
 #include "core/include/tc/app/internal/tcWindowFullscreen.h"
 #include <string>
+#include <cstdint>
 #include <limits>
 #include <cmath>
 #include <cassert>
@@ -11,14 +12,7 @@
 namespace trussc {
 struct IVec2 { int x,y; };
 struct Window;
-struct RecordingOperations {
-    void (*setTitle)(Window&, const char*) = nullptr;
-    void (*setSize)(Window&, double, double, bool) = nullptr;
-    void (*setPosition)(Window&, int, int) = nullptr;
-    IVec2 (*position)(const Window&) = nullptr;
-    void (*setFullscreen)(Window&, bool) = nullptr;
-    void (*toggleFullscreen)(Window&) = nullptr;
-};
+RECORDING_OPERATIONS
 extern const RecordingOperations recordingOperations;
 
 float dpi = 2;
@@ -31,7 +25,7 @@ using CGFloat = double;
 double pointWidth = 0, pointHeight = 0;
 void recordMac(double width, double height) { pointWidth=width; pointHeight=height; }
 namespace internal {
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, PositionQuery, ToggleFullscreen };
+WINDOW_CONTROL_ENUM
 struct WindowRequestAccess {
     static bool ignoreGeometry(Window&, WindowGeometryCall) { return false; }
 };
@@ -53,8 +47,8 @@ struct Window {
     struct { const RecordingOperations* operations = &recordingOperations; } binding_;
     IVec2 control(internal::WindowControl,int,int,const std::string* =nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
-const RecordingOperations recordingOperations{nullptr,
-    [](Window&, double width, double height, bool) { recordMac(MAC_SECONDARY_CALL); }};
+const RecordingOperations recordingOperations{
+    .setSize = [](Window&, double width, double height, bool) { recordMac(MAC_SECONDARY_CALL); }};
 CONTROL_BODY
 }
 int main() {

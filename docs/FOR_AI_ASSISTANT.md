@@ -2693,6 +2693,7 @@ void App::setSize(float w, float h)  // Changes the size of the window this App 
 void App::touchMoved(const TouchEventArgs & touch)  // Called when fingers move on the screen.
 void App::touchPressed(const TouchEventArgs & touch)  // Called when one or more fingers touch the screen.
 void App::touchReleased(const TouchEventArgs & touch)  // Called when fingers lift off the screen, or when the OS cancels the touches.
+void App::windowFocusChanged(bool focused)  // Called when this App's window gains or loses keyboard focus.
 void App::windowResized(int width, int height)  // Called when the window size changes, and once at startup before setup().
 ```
 
@@ -3060,6 +3061,11 @@ bool FileWriter::isOpen() const  // Returns whether the output file is open.
 SaveResult FileWriter::open(const fs::path & path, bool append = false)  // Opens a file for writing.
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Writes text, a character, or binary data to the file.
 FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Writes text followed by a newline.
+```
+
+### FocusEventArgs — Describes a change in keyboard focus of a window.
+
+```cpp
 ```
 
 ### Font — Provides TrueType font rendering and text layout.
@@ -4769,6 +4775,7 @@ SaveResult VideoWriter::writeAudio(const float * interleaved, int frames, double
 ### Window — A window on the screen, with its own App, events and drawing state.
 
 ```cpp
+void Window::bringToFront()  // Brings this window to the front and gives it focus.
 void Window::close()  // Requests closure of this window.
 void Window::destroyApp()  // Removes the App from this window and leaves the window open and empty.
 CoreEvents & Window::events()  // Returns this window's event collection.
@@ -4778,6 +4785,7 @@ int Window::getHeight() const  // Returns this window's content height.
 IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
+bool Window::isFocused() const  // Returns whether this window has keyboard focus, as last reported by the operating system.
 bool Window::isFullscreen() const  // Returns whether fullscreen currently blocks this window's size and position requests.
 bool Window::isOccluded() const  // Returns whether this window is minimized or fully hidden according to trusted operating system observations.
 bool Window::isOpen() const  // Returns whether this window is open.
@@ -4799,6 +4807,7 @@ void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
+WindowSettings & WindowSettings::setParentWindow(const std::shared_ptr<Window> & parent) [+1]  // Keeps a new window above a parent window.
 WindowSettings & WindowSettings::setPipelinePoolSize(int count)  // Sets the startup pipeline pool slot count.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.
 WindowSettings & WindowSettings::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.

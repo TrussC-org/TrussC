@@ -27,7 +27,7 @@ namespace internal {
 class WindowRequestAccess;   // friend of Window, defined after it
 inline constexpr bool supportsSecondaryWindows();
 // One control entry for explicit handles and context-aware globals.
-enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery };
+enum class WindowControl { Title, Size, PixelSize, Position, Fullscreen, ToggleFullscreen, PositionQuery, BringToFront };
 using WindowControlHook = bool (*)(Window&, WindowControl, int, int, const std::string*, IVec2&);
 WindowControlHook& windowControlHookForTests();
 using WindowFullscreenHook = WindowFullscreenPhase (*)(const Window&);
@@ -95,6 +95,12 @@ public:
     // occlusion/minimization; unsupported visibility queries return false.
     bool isOccluded() const;
 
+    // Keyboard focus as last reported by the OS for this window. False until
+    // the first focus event arrives (on the Web it starts from the page's
+    // focus), and false once the window is closed.
+    // Desktop and Web only; iOS / Android never report focus.
+    bool isFocused() const;
+
     // Resize this window's content area to the given LOGICAL size (points),
     // matching getWidth()/getHeight() units. Desktop controls address this
     // Window's native binding (macOS NSWindow, Windows HWND or X11).
@@ -134,6 +140,14 @@ public:
     bool isFullscreen() const;
     // Flip the most recently requested state, including during macOS animation.
     void toggleFullscreen() { control(internal::WindowControl::ToggleFullscreen); }
+
+    // Raise THIS window above the others and give it keyboard focus, whichever
+    // window's callback is running (the global bringWindowToFront() targets
+    // the current window). A minimised window is restored. The OS may refuse
+    // to take focus from another application. No-op on a closed window, and
+    // on iOS / Android / Web. The focus events it causes (focusChanged) can
+    // arrive inside this call on Windows; on macOS and X11 they arrive later.
+    void bringToFront() { control(internal::WindowControl::BringToFront); }
 
     void setClearColor(const Color& c) { clearColor_ = c; clearColorSet_ = true; }
 
@@ -330,9 +344,9 @@ public:
     static uint64_t creationId(const Window& w) { return w.binding_.handle.id; }
     static WindowBinding& binding(Window& w) { return w.binding_; }
     static const WindowBinding& binding(const Window& w) { return w.binding_; }
-    static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.ctx_.suspended = false; }
+    static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.binding_.focused = false; w.ctx_.suspended = false; }
     static void resetForLaunch(Window& w) {
-        w.binding_.lastDeliveredHidden = false; w.binding_.visibilityReady = false;
+        w.binding_.lastDeliveredHidden = false; w.binding_.visibilityReady = false; w.binding_.focused = false;
         w.exitDelivered_ = false; w.closeRequested_ = false; w.ctx_.targetsClosed = false;
         w.ctx_.appEventListeners.clear(); w.appEventState_.reset(); w.appSizeSeeded_ = false;
         prepareInitialBindings(w); w.epoch_ = runtimeEpoch();
@@ -496,7 +510,7 @@ inline void Window::applyPendingApp() {
 
 inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                                      const std::shared_ptr<AppEventState>& state) {
-    listeners.reserve(15);
+    listeners.reserve(16);
     auto bind = [&](auto& event, auto callback, bool exiting = false) {
         listeners.push_back(internal::FrameworkEventAccess::listen(event,
             [this, callback, state, exiting](auto&&... args) {
@@ -531,6 +545,7 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
     bind(events_.touchMoved, [](App& app, auto& e) { app.touchMoved(e); });
     bind(events_.touchReleased, [](App& app, auto& e) { app.touchReleased(e); });
     bind(events_.windowResized, [](App& app, auto& e) { app.handleWindowResized(e.width, e.height); });
+    bind(events_.focusChanged, [](App& app, auto& e) { app.windowFocusChanged(e.focused); });
     bind(events_.filesDropped, [](App& app, auto& e) { app.filesDropped(e.files); });
 }
 
@@ -716,6 +731,9 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
             case internal::WindowControl::ToggleFullscreen:
                 if (ops.toggleFullscreen) ops.toggleFullscreen(*this);
                 break;
+            case internal::WindowControl::BringToFront:
+                if (ops.bringToFront) ops.bringToFront(*this);
+                break;
         }
         return result;
     }
@@ -777,6 +795,8 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
         case internal::WindowControl::ToggleFullscreen:
             if (!internal::supportsSecondaryWindows()) sapp_toggle_fullscreen();
             break;
+        case internal::WindowControl::BringToFront:
+            break;   // single-window platforms (iOS / Android / Web): always in front
     }
     return result;
 }
@@ -830,6 +850,33 @@ inline void Window::setIndependentFps(float updateFps, float drawFps) {
 inline bool Window::isOccluded() const {
     const auto& m = binding_.metadata;
     return isOpen() && m.trust_hidden_signals && (m.iconified || m.occluded);
+}
+
+inline bool Window::isFocused() const { return isOpen() && binding_.focused; }
+
+inline WindowSettings& WindowSettings::setParentWindow(Window& parent) {
+    parentWindow = internal::WindowRequestAccess::retainHostOwner(parent);
+    return *this;
+}
+
+namespace internal {
+// The native parent handle for a new window: {0} when settings name no parent,
+// or when the named one is closed or gone (logs a warning, and the caller then
+// creates a normal window). Hands out an id only; the native side checks it again.
+inline sapp_window resolveParentWindow(const WindowSettings& settings) {
+    const std::weak_ptr<Window> none;
+    const auto& weak = settings.parentWindow;
+    // An empty weak_ptr (never set, or set from an empty pointer) is "no parent";
+    // an expired one is a parent that existed and is gone.
+    if (!weak.owner_before(none) && !none.owner_before(weak)) return {0};
+    auto parent = weak.lock();
+    if (!parent || !parent->isOpen() || WindowRequestAccess::closeRequested(*parent)
+            || !WindowRequestAccess::binding(*parent).handle.id) {
+        logWarning("Window") << "createWindow(): the parent window is closed or gone; creating a normal window";
+        return {0};
+    }
+    return WindowRequestAccess::binding(*parent).handle;
+}
 }
 
 inline std::shared_ptr<Window> createWindow(const WindowSettings& settings) {

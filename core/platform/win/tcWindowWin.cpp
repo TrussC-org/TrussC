@@ -66,6 +66,12 @@ void nativeWindowSetSize(Window& w, double width, double height, bool) {
 }
 void nativeWindowSetPosition(Window& w, int x, int y) { setWindowPositionNative(sapp_window_win32_get_hwnd(handle(w)), x, y); }
 IVec2 nativeWindowPosition(const Window& w) { return windowPositionNative(sapp_window_win32_get_hwnd(handle(w))); }
+void nativeWindowBringToFront(Window& w) {
+    HWND hwnd = (HWND)sapp_window_win32_get_hwnd(handle(w));
+    if (!hwnd) return;
+    if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);   // SetForegroundWindow keeps it minimised
+    SetForegroundWindow(hwnd);
+}
 }
 
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
@@ -88,6 +94,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.close_request_cb = &internal::allowWindowClose;
     d.user_data = win.get();
     d.bind_cb = bindAdapter;
+    d.parent = internal::resolveParentWindow(settings);
     win->native_ = st;
     {
         internal::WindowLifecycleScope construction(*win);

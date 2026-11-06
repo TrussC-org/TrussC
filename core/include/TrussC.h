@@ -2276,6 +2276,20 @@ struct WindowSettings {
         return *this;
     }
 
+    // Keep the window opened with these settings above `parent` (z-order only:
+    // the parent still takes input, and nothing is blocked). Read when the window
+    // is created with createWindow(); the launch window ignores it. The settings
+    // hold the parent weakly, so they never keep it alive. A parent that is
+    // closed or gone at creation logs a warning and gives a normal window.
+    // Passing an empty pointer clears it. macOS, Windows and Linux X11 only.
+    WindowSettings& setParentWindow(const std::shared_ptr<Window>& parent) {
+        parentWindow = parent;
+        return *this;
+    }
+    // The same, for a Window you only have by reference (App::getWindow() returns
+    // a pointer, e.g. `setParentWindow(*getWindow())`). Defined in tc/app/tcWindow.h.
+    TC_LUA_SKIP WindowSettings& setParentWindow(Window& parent);
+
     // Fixed startup capacities; 0 selects defaults, negatives log a Notice.
     // Headless apps do not initialize graphics, so these settings do not apply.
     WindowSettings& setResourcePoolSize(int count) {
@@ -2295,6 +2309,9 @@ struct WindowSettings {
     int resourcePoolSize = 0;
     int shaderPoolSize = 0;
     int pipelinePoolSize = 0;
+
+    // Set through setParentWindow(); empty = no parent.
+    TC_LUA_SKIP std::weak_ptr<Window> parentWindow = {};
 };
 
 // Process-wide startup settings, shared by all windows.

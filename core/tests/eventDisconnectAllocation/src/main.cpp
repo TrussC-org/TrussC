@@ -229,7 +229,7 @@ void swaps(bool callbackBoundary = false) {
         const bool bound = current != nullptr;
         check("swap: contained failure, complete binding set, at most one report",
               !threw && countsMatch(win, bound ? 1 : 0) &&
-              trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15u &&
+              trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 16u &&
               (errors - before <= 1 && (current == b || errors - before == 1)), nth);
         auto* prev = internal::currentWindowCtx();
         internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(win);
@@ -289,7 +289,7 @@ bool attachment(int scenario, bool callback, int nth) {
           !escaped && (committed || current == old) &&
           trussc::internal::WindowRequestAccess::context(win).rootNode.lock() == current &&
           countsMatch(win, current ? 1 : 0) &&
-          trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15u &&
+          trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 16u &&
           internal::attachedApps().size() == (current ? 1u : 0u) &&
           internal::attachedApps().count(a.get()) == (current == a ? 1u : 0u) &&
           internal::attachedApps().count(b.get()) == (current == b ? 1u : 0u) &&
@@ -317,7 +317,7 @@ bool attachment(int scenario, bool callback, int nth) {
         internal::WindowRequestAccess::attachCandidate(retry, b); internal::applyPendingAppForTests(retry);
         check("attachment: a canceled candidate cannot attach elsewhere",
               !retry.getApp() && !internal::appOwner(*b)->token->load() && countsMatch(retry, 0) &&
-              trussc::internal::WindowRequestAccess::context(retry).appEventListeners.size() == 15, nth);
+              trussc::internal::WindowRequestAccess::context(retry).appEventListeners.size() == 16, nth);
         retry.finish();
     }
     win.finish();
@@ -552,7 +552,7 @@ struct ClearExitApp : TestApp {
     }
     void cleanup() override {
         ++cleanups;
-        finished = trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15 && internal::appRanCleanup(*this);
+        finished = trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 16 && internal::appRanCleanup(*this);
     }
 };
 extern "C" void closeAtCallbackBoundary(TestWindow* win) noexcept { win->finish(); }
@@ -629,7 +629,7 @@ struct CloseSmokeApp : App {
         ++state.cleanups;
         state.detached = internal::appRanCleanup(*this) && !win.getApp() &&
                          trussc::internal::WindowRequestAccess::context(win).rootNode.expired() && internal::attachedApps().empty();
-        state.slotsStable = trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 15;
+        state.slotsStable = trussc::internal::WindowRequestAccess::context(win).appEventListeners.size() == 16;
         if (throwCleanup) throw 2;
     }
     ~CloseSmokeApp() override {

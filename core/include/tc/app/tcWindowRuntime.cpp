@@ -1,5 +1,8 @@
 #include <TrussC.h>
 #include "tc/utils/internal/tcAsyncDialog.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 namespace trussc {
 Window::OwnedState::OwnedState() {
@@ -524,7 +527,7 @@ CoreEvents& unavailableWindowEvents() {
                 events.exit, events.hotReloadUnload, events.exitRequested, events.deviceLost,
                 events.keyPressed, events.keyReleased, events.mousePressed, events.mouseReleased,
                 events.mouseMoved, events.mouseDragged, events.mouseScrolled, events.windowResized,
-                events.occludedChanged, events.filesDropped, events.clipboardPasted, events.closeRequested,
+                events.occludedChanged, events.focusChanged, events.filesDropped, events.clipboardPasted, events.closeRequested,
                 events.touchPressed, events.touchMoved, events.touchReleased, events.rawEvent);
         }
     };
@@ -974,13 +977,15 @@ IVec2 nativeWindowPosition(const Window&) { return {-1, -1}; }
 void nativeWindowSetFullscreen(Window&, bool) {}
 uint32_t nativeWindowFullscreenPhase(const Window&) { return 0; }
 void nativeWindowToggleFullscreen(Window&) {}
+void nativeWindowBringToFront(Window&) {}
 #endif
 WindowContext& nonWindowContext() { return nonWindowState().context; }
 WindowContext* nonWindowContextIfInitialized() noexcept { return initializedNonWindow; }
 const WindowNativeOperations& productionWindowOperations() {
     static const WindowNativeOperations operations{readMetadata, acquireSwapchain, activate,
         nativeWindowSetTitle, nativeWindowSetSize, nativeWindowSetPosition, nativeWindowPosition,
-        nativeWindowSetFullscreen, nativeWindowFullscreenPhase, nativeWindowToggleFullscreen, closeRecorded, injectEvent};
+        nativeWindowSetFullscreen, nativeWindowFullscreenPhase, nativeWindowToggleFullscreen, closeRecorded, injectEvent,
+        nativeWindowBringToFront};
     return operations;
 }
 void publishWindowMetadata(Window& window, const sapp_tc_window_metadata& metadata) {
@@ -1318,6 +1323,8 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_TOUCHES_ENDED:
             case SAPP_EVENTTYPE_TOUCHES_CANCELLED: return "touchReleased()";
             case SAPP_EVENTTYPE_RESIZED:           return "windowResized()";
+            case SAPP_EVENTTYPE_FOCUSED:
+            case SAPP_EVENTTYPE_UNFOCUSED:         return "windowFocusChanged()";
             case SAPP_EVENTTYPE_FILES_DROPPED:     return "filesDropped()";
             case SAPP_EVENTTYPE_CLIPBOARD_PASTED:  return "the clipboardPasted event";
             case SAPP_EVENTTYPE_TC_DEVICE_LOST:    return "the deviceLost event";
@@ -1327,8 +1334,6 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_MOUSE_LEAVE:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
-            case SAPP_EVENTTYPE_FOCUSED:
-            case SAPP_EVENTTYPE_UNFOCUSED:
             case SAPP_EVENTTYPE_SUSPENDED:
             case SAPP_EVENTTYPE_RESUMED:
             case _SAPP_EVENTTYPE_NUM:
@@ -1536,11 +1541,26 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             }
         }
 
+        // Record the state before notifying, so a listener (or a nested focus
+        // event from bringToFront() on Windows) sees isFocused() up to date.
+        // Repeated reports of the same state are not delivered again.
+        auto deliverFocus = [&](bool focused) {
+            auto& binding = WindowRequestAccess::binding(window);
+            if (binding.focused == focused) return;
+            binding.focused = focused;
+            FocusEventArgs args; args.focused = focused;
+            window.events().focusChanged.notify(args);
+        };
+
         switch (ev->type) {
             case SAPP_EVENTTYPE_UNFOCUSED:
                 if (dispatch.current(SAPP_MOUSEBUTTON_LEFT)) ctx.touchMapper.reset();
                 for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button)
                     releaseMouse(button);
+                deliverFocus(false);
+                break;
+            case SAPP_EVENTTYPE_FOCUSED:
+                deliverFocus(true);
                 break;
             case SAPP_EVENTTYPE_KEY_DOWN: {
                 // Notify event system
@@ -1770,7 +1790,6 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             case SAPP_EVENTTYPE_CHAR:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
-            case SAPP_EVENTTYPE_FOCUSED:
             case SAPP_EVENTTYPE_SUSPENDED:
             case SAPP_EVENTTYPE_RESUMED:
             case _SAPP_EVENTTYPE_NUM:
@@ -1875,7 +1894,13 @@ void bootstrapWindow(Window& target, void (*bootstrap)()) {
     auto& state = coordinator();
     state.bootstrapping = true;
     try {
-        if constexpr (!supportsSecondaryWindows()) WindowRequestAccess::binding(target).bound = sapp_isvalid();
+        if constexpr (!supportsSecondaryWindows()) {
+            WindowRequestAccess::binding(target).bound = sapp_isvalid();
+#ifdef __EMSCRIPTEN__
+            // The page reports focus/blur only when it changes, so start from its current focus.
+            WindowRequestAccess::binding(target).focused = emscripten_run_script_int("document.hasFocus() ? 1 : 0") != 0;
+#endif
+        }
         WindowEntryScope entry(target, false, true);
         if (entry) bootstrap();
     } catch (...) {

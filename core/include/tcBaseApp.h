@@ -196,6 +196,9 @@ public:
         (void)height;
     }
 
+    /// Called when this window gains (true) or loses (false) keyboard focus.
+    virtual void windowFocusChanged(bool focused) { (void)focused; }
+
     // -------------------------------------------------------------------------
     // Drag & drop events
     // -------------------------------------------------------------------------

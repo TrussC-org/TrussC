@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from window_control_source import with_window_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -58,6 +59,7 @@ def main():
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <cstdint>
 #include <string>
 #include "tc/app/internal/tcWindowFullscreen.h"
 #include "sokol/util/sokol_window_size.h"
@@ -95,7 +97,7 @@ bool ignoreFullscreenGeometry(WindowFullscreenPhase, WindowGeometryCall) { asser
 void setSingleWindowFullscreen(bool) {}
 void setSingleWindowSizeLogical(int, int);
 constexpr bool supportsSecondaryWindows() { return false; }
-enum class WindowControl { Title, PixelSize, Size, Position, PositionQuery, Fullscreen, ToggleFullscreen };
+WINDOW_CONTROL_ENUM
 bool& pixelPerfectMode() { return pixelPerfect; }
 void setSingleWindowPosition(int, int) {}
 IVec2 singleWindowPosition() { return {-1, -1}; }
@@ -103,14 +105,7 @@ IVec2 singleWindowPosition() { return {-1, -1}; }
 namespace mcp::internal { std::string markedWindowTitle(const std::string& title) { return title; } }
 struct RectNode { void setSize(float, float) { assert(false); } };
 struct Window;
-struct RecordingOperations {
-    void (*setTitle)(Window&, const char*) = nullptr;
-    void (*setSize)(Window&, double, double, bool) = nullptr;
-    void (*setPosition)(Window&, int, int) = nullptr;
-    IVec2 (*position)(const Window&) = nullptr;
-    void (*setFullscreen)(Window&, bool) = nullptr;
-    void (*toggleFullscreen)(Window&) = nullptr;
-};
+RECORDING_OPERATIONS
 struct Window {
     struct { const RecordingOperations* operations = nullptr; } binding_;
     struct { bool isMain = true; float dpiScale = 2; } ctx_;
@@ -194,6 +189,7 @@ int main() {
     return 0;
 }
 '''.replace('INITIAL_JS', initial_js).replace('TITLE_BODY', title).replace('SIZE_BODY', size).replace('INITIAL_CPP', initial).replace('PUBLIC_BODIES', wrappers)
+    source = with_window_declarations(source)
     with tempfile.TemporaryDirectory(prefix='web-window-controls-') as temp:
         path = Path(temp)
         for target in ('Web', 'iOS', 'Android'):

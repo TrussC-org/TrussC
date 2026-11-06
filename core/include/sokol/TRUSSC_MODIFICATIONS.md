@@ -94,6 +94,22 @@ display; under a compositor whose swap does not block it used to teach the
 estimate a 30 Hz display and slow the interval-zero secondaries to ~30 fps.
 Tested by the throttled-main case of `core/tests/windowTick/x11-pacing-test`.
 
+### macOS borderless windows can become key
+
+A borderless NSWindow answers NO to `canBecomeKeyWindow`, so it never got
+keyboard input (ESC in a clicked borderless window closed another window).
+Every window is now created as `_sapp_tc_window`, an NSWindow subclass that
+returns YES from `canBecomeKeyWindow` and `canBecomeMainWindow`. Titled windows
+already returned YES, so decorated windows behave as before.
+
+### macOS first click
+
+`_sapp_tc_view` answers YES to `acceptsFirstMouse:`, so the click that activates
+a window also reaches the app, as on Windows and Linux (upstream sokol_app and
+GLFW do the same). This covers clicks between the app's own windows (a palette
+click picks a color at once) and the click that brings the app back from
+another app.
+
 ### macOS failed-startup termination notification (#239)
 
 The failed-startup cleanup call supplies an NSApplicationWillTerminateNotification

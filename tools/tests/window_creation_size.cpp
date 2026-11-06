@@ -61,6 +61,7 @@ struct State {
 #ifdef TEST_WIN
 using _sapp_tc_window_t = State;
 using DWORD = unsigned long;
+using HWND = void*;
 struct RECT { LONG left, top, right, bottom; };
 constexpr int CW_USEDEFAULT = -1, FALSE = 0, MONITOR_DEFAULTTONEAREST = 0;
 constexpr int SWP_NOMOVE = 1, SWP_NOZORDER = 2, SWP_NOACTIVATE = 4, SAPP_LOGITEM_OK = 0;
@@ -168,7 +169,7 @@ Size create(Descriptor descriptor, bool mainWindow) {
     }
     State state;
     state.desc = commonTransfer(&native);
-    if (!_sapp_tc_win32_create_native_window(&state, L"probe", 0, 0, 0, 0)) return false;
+    if (!_sapp_tc_win32_create_native_window(&state, L"probe", 0, 0, 0, 0, nullptr)) return false;
     return state.client;
 #else
 #ifdef TEST_MAC

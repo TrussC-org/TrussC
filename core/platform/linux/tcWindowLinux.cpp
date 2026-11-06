@@ -74,6 +74,42 @@ void nativeWindowSetPosition(Window& w, int x, int y) {
 IVec2 nativeWindowPosition(const Window& w) {
     return x11FramePosition((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)));
 }
+// True when an EWMH window manager runs (it owns stacking and focus).
+static bool hasEwmhWindowManager(Display* display, ::Window root) {
+    const Atom check = XInternAtom(display, "_NET_SUPPORTING_WM_CHECK", True);
+    if (check == None) return false;
+    Atom type = None; int format = 0; unsigned long count = 0, after = 0; unsigned char* data = nullptr;
+    const bool found = XGetWindowProperty(display, root, check, 0, 1, False, XA_WINDOW, &type, &format,
+                                          &count, &after, &data) == Success && type == XA_WINDOW && count == 1;
+    if (data) XFree(data);
+    return found;
+}
+void nativeWindowBringToFront(Window& w) {
+    Display* display = (Display*)sapp_x11_get_display();
+    // ::Window = the X11 window id type (trussc::Window shadows it in this ns)
+    ::Window window = (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w));
+    if (!display || !window) return;
+    const ::Window root = DefaultRootWindow(display);
+    if (hasEwmhWindowManager(display, root)) {
+        // Ask the WM to activate the window (_NET_ACTIVE_WINDOW). Raising and
+        // focusing it directly leaves the WM's active window out of date.
+        // CurrentTime: raise now, like macOS activateIgnoringOtherApps.
+        XEvent e{};
+        e.xclient.type = ClientMessage;
+        e.xclient.window = window;
+        e.xclient.message_type = XInternAtom(display, "_NET_ACTIVE_WINDOW", False);
+        e.xclient.format = 32;
+        e.xclient.data.l[0] = 1;   // source: application
+        e.xclient.data.l[1] = CurrentTime;
+        XSendEvent(display, root, False, SubstructureRedirectMask | SubstructureNotifyMask, &e);
+    } else {
+        // No window manager (e.g. bare Xvfb): map (un-minimise), raise and
+        // focus directly. With a WM, _NET_ACTIVE_WINDOW also un-minimises.
+        XMapRaised(display, window);
+        XSetInputFocus(display, window, RevertToParent, CurrentTime);
+    }
+    XFlush(display);
+}
 }
 
 std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& settings) {
@@ -106,6 +142,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     d.close_request_cb = &internal::allowWindowClose;
     d.user_data = win.get();
     d.bind_cb = bindAdapter;
+    d.parent = internal::resolveParentWindow(settings);
     win->native_ = st;
     {
         internal::WindowLifecycleScope construction(*win);

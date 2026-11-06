@@ -111,7 +111,7 @@ void coreFamilies() {
     APP_EVENT(mousePressed); APP_EVENT(mouseReleased); APP_EVENT(mouseMoved);
     APP_EVENT(mouseDragged); APP_EVENT(mouseScrolled);
     APP_EVENT(touchPressed); APP_EVENT(touchMoved); APP_EVENT(touchReleased);
-    APP_EVENT(windowResized); APP_EVENT(filesDropped);
+    APP_EVENT(windowResized); APP_EVENT(focusChanged); APP_EVENT(filesDropped);
 #undef APP_EVENT
 #define OTHER_EVENT(name) family(hub.name, 100, "CoreEvents::" #name " defaults to 100")
     OTHER_EVENT(onRender); OTHER_EVENT(afterFrame);
