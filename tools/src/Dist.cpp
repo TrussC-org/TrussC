@@ -526,9 +526,24 @@ std::vector<LicenseSource> collectLicenses(const fs::path& tcRoot,
     core.component = "TrussC";
     core.declared = "MIT + third-party";
     const fs::path coreFile = tcRoot / "docs" / "LICENSE.md";
-    if (fs::is_regular_file(coreFile, ec)) core.files.push_back(coreFile);
-    else core.note = "docs/LICENSE.md not found in the TrussC folder";
+    std::string coreText;
+    if (fs::is_regular_file(coreFile, ec)) {
+        core.files.push_back(coreFile);
+        readFile(coreFile, coreText);
+    } else {
+        core.note = "docs/LICENSE.md not found in the TrussC folder";
+    }
     sources.push_back(core);
+    // Table rows ending in "| <addon> |" (the Addon column of "Addon Dependencies").
+    auto listedInCore = [&](const std::string& addon) {
+        std::istringstream lines(coreText);
+        std::string line;
+        while (std::getline(lines, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+            if (endsWith(line, "| " + addon + " |")) return true;
+        }
+        return false;
+    };
 
     for (const auto& [name, dir] : addons) {
         LicenseSource source;
@@ -540,7 +555,12 @@ std::vector<LicenseSource> collectLicenses(const fs::path& tcRoot,
                 source.declared = meta["license"].get<std::string>();
         }
         source.files = findNoticeFiles(dir);
-        if (source.files.empty()) source.note = "no notice file: check its dependencies yourself";
+        source.inCoreList = listedInCore(name);
+        if (source.files.empty()) {
+            source.note = source.inCoreList
+                ? "dependencies listed in licenses/TrussC/LICENSE.md"
+                : "no notice file: check its dependencies yourself";
+        }
         sources.push_back(source);
     }
 

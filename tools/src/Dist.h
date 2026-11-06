@@ -124,6 +124,8 @@ struct LicenseSource {
     std::string declared;           // addon.json "license" (the addon's own), may be ""
     std::vector<fs::path> files;    // notice files found
     std::string note;               // shown when files is empty
+    bool inCoreList = false;        // an addon whose dependencies TrussC's
+                                    // docs/LICENSE.md lists (Addon column)
 };
 
 // Top-level notice files of an addon: LICENSE*, LICENSES*, COPYING*, NOTICE*
@@ -132,6 +134,9 @@ std::vector<fs::path> findNoticeFiles(const fs::path& dir);
 
 // What `dist` and `info licenses` report: TrussC core, then the addons in
 // the order given, then dist.json "licenses" (relative to projectDir).
+// An addon named in the Addon column of TrussC's docs/LICENSE.md tables has
+// its dependencies' notices there (inCoreList), so no file of its own is a gap
+// only for the other addons.
 std::vector<LicenseSource> collectLicenses(const fs::path& tcRoot,
                                            const std::vector<std::pair<std::string, fs::path>>& addons,
                                            const std::vector<LicenseEntry>& extra,

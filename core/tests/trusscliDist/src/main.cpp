@@ -18,7 +18,8 @@
 //     the platform; on Windows its imports include kernel32.dll. A text file
 //     is not a binary.
 //   - Licenses: TrussC's docs/LICENSE.md, an addon's notice files and its
-//     addon.json license, an addon with none (reported), a dist.json entry
+//     addon.json license, an addon with none (reported) unless TrussC's
+//     LICENSE.md tables name it in their Addon column, a dist.json entry
 //     whose file is missing (reported).
 //   - makePlan() + writePackage() on a fake project whose executable is a
 //     copy of this test binary: bin/ minus build leftovers and exclude,
@@ -173,7 +174,9 @@ void testPackage(const fs::path& self, const fs::path& scratch) {
     const fs::path root = scratch / "pkg";
     const fs::path tc = root / "TrussC";
     const fs::path project = root / "myApp";
-    write(tc / "docs" / "LICENSE.md", "TrussC MIT\n");
+    write(tc / "docs" / "LICENSE.md",
+          "TrussC MIT\n\n| Library | License | Addon |\n|---|---|---|\n| **Foo** | MIT | tcxListed |\r\n");
+    write(tc / "addons" / "tcxListed" / "addon.json", R"({"license": "MIT"})");
     write(tc / "addons" / "tcxGood" / "addon.json", R"({"license": "MIT"})");
     write(tc / "addons" / "tcxGood" / "LICENSES.md", "good notices\n");
     write(tc / "addons" / "tcxBare" / "addon.json", R"({"license": "MIT"})");
@@ -212,14 +215,19 @@ void testPackage(const fs::path& self, const fs::path& scratch) {
     input.config.include = {{"extra/tool", "data/tool"}};
     input.config.exclude = {"data/raw"};
     input.licenses = dist::collectLicenses(
-        tc, {{"tcxGood", tc / "addons" / "tcxGood"}, {"tcxBare", tc / "addons" / "tcxBare"}},
+        tc, {{"tcxGood", tc / "addons" / "tcxGood"}, {"tcxBare", tc / "addons" / "tcxBare"},
+             {"tcxListed", tc / "addons" / "tcxListed"}},
         {{"Node.js", "LICENSE-node"}, {"Missing", "nope.txt"}}, project);
 
     check("licenses: core, addon notices, gaps reported",
-          input.licenses.size() == 5 && input.licenses[0].files.size() == 1 &&
+          input.licenses.size() == 6 && input.licenses[0].files.size() == 1 &&
               input.licenses[1].declared == "MIT" && input.licenses[1].files.size() == 1 &&
               input.licenses[2].files.empty() && contains(input.licenses[2].note, "no notice file") &&
-              input.licenses[3].files.size() == 1 && contains(input.licenses[4].note, "file not found"));
+              !input.licenses[2].inCoreList &&
+              input.licenses[4].files.size() == 1 && contains(input.licenses[5].note, "file not found"));
+    check("licenses: an addon in TrussC's LICENSE.md table is not a gap",
+          input.licenses[3].inCoreList && input.licenses[3].files.empty() &&
+              contains(input.licenses[3].note, "licenses/TrussC/LICENSE.md"));
     check("license report names the gaps",
           contains(dist::formatLicenseReport(input.licenses), "tcxBare") &&
               contains(dist::formatLicenseReport(input.licenses), "licenses/tcxGood/LICENSES.md"));
