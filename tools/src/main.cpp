@@ -4102,6 +4102,7 @@ static void printDistHelp() {
          << "  -o, --output <dir>         Output folder (default: dist/ in the project)\n"
          << "      --app-name <name>      With --init: no question; otherwise overrides dist.json\n"
          << "      --app-version <x.y.z>  Same, for the version (a leading 'v' is dropped)\n"
+         << "      --app-author <name>    Same, for the author\n"
          << "  -j, --jobs <N>             As in 'trusscli build'\n"
          << "      --verbose              As in 'trusscli build'\n"
          << "  -p, --path <path>          Operate on a specific project path\n"
@@ -4152,7 +4153,7 @@ static string readCacheValue(const fs::path& cache, const string& key) {
 }
 
 static int distInit(const string& projectPath, const string& projectName,
-                    string appName, string appVersion) {
+                    string appName, string appVersion, string author, bool authorGiven) {
     const fs::path configPath = fs::path(projectPath) / "dist.json";
     if (fs::exists(configPath)) {
         cerr << "Error: " << configPath.string() << " already exists (not overwritten).\n";
@@ -4182,8 +4183,7 @@ static int distInit(const string& projectPath, const string& projectName,
             version = dist::kDefaultVersion;
         }
     }
-    string author;
-    if (ask) author = promptString("Author (person, studio or company) []: ");
+    if (ask && !authorGiven) author = promptString("Author (person, studio or company) []: ");
     ofstream file(configPath, ios::binary);
     file << dist::configTemplate(appName, version, author);
     if (!file) {
@@ -4199,7 +4199,8 @@ static int distInit(const string& projectPath, const string& projectName,
 }
 
 static int cmdDist(const vector<string>& args) {
-    string explicitPath, outputDir, appName, appVersion;
+    string explicitPath, outputDir, appName, appVersion, appAuthor;
+    bool appAuthorGiven = false;  // --app-author "" is a valid (empty) author
     bool release = false, archive = false, noBuild = false, dryRun = false, init = false, verbose = false;
     int jobs = 0;
 
@@ -4235,6 +4236,10 @@ static int cmdDist(const vector<string>& args) {
         else if (a == "-o" || a == "--output") { if (!needValue(i, a, outputDir)) return 1; }
         else if (a == "--app-name") { if (!needValue(i, a, appName)) return 1; }
         else if (a == "--app-version") { if (!needValue(i, a, appVersion)) return 1; }
+        else if (a == "--app-author") {
+            if (!needValue(i, a, appAuthor)) return 1;
+            appAuthorGiven = true;
+        }
         else if (a == "-p" || a == "--path") { if (!needValue(i, a, explicitPath)) return 1; }
         else {
             cerr << "Error: unknown option '" << a << "'\n"
@@ -4254,7 +4259,7 @@ static int cmdDist(const vector<string>& args) {
     string projectName = projectDir.filename().string();
     if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
 
-    if (init) return distInit(projectDir.string(), projectName, appName, appVersion);
+    if (init) return distInit(projectDir.string(), projectName, appName, appVersion, appAuthor, appAuthorGiven);
 
     if (!kNativePreset) {
         cerr << "Error: cannot detect the native platform.\n";
@@ -4284,6 +4289,7 @@ static int cmdDist(const vector<string>& args) {
     }
     if (!appName.empty()) config.name = appName;
     if (!appVersion.empty()) config.version = appVersion;
+    if (appAuthorGiven) config.author = appAuthor;
     if (config.name.empty()) config.name = projectName;
     if (config.version.empty()) config.version = dist::kDefaultVersion;
     {
@@ -4503,7 +4509,7 @@ _trusscli() {
         update|build|run|clean|dist)
             local -a opts
             case "$words[2]" in
-                dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;
+                dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '--app-author:App author' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
                 build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--dry-run:Print cmake commands only' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
                 run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
@@ -4595,7 +4601,7 @@ _trusscli() {
                 build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --dry-run --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
-                dist)   COMPREPLY=($(compgen -W "--release --archive --zip --no-build --dry-run --init -o --output --app-name --app-version -j --jobs --verbose -p --path" -- "$cur")) ;;
+                dist)   COMPREPLY=($(compgen -W "--release --archive --zip --no-build --dry-run --init -o --output --app-name --app-version --app-author -j --jobs --verbose -p --path" -- "$cur")) ;;
             esac
             ;;
         info)
