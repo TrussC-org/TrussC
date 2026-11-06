@@ -29,7 +29,7 @@ struct Descriptor {
     int _tc_pixel_width = 0, _tc_pixel_height = 0;
     bool borderless=false, high_dpi = true, no_high_dpi = false;
     int swap_interval = 1, _tc_draw_while_hidden = 0;
-    bool fullscreen = false;
+    bool fullscreen = false, hidden = false, _tc_start_hidden = false;
     int event_cb = 0, tick_cb = 0;
     const void* mtl_device = nullptr;
     const char* title = nullptr;
@@ -37,7 +37,7 @@ struct Descriptor {
 };
 using sapp_desc = Descriptor;
 using sapp_window_desc = Descriptor;
-struct Settings { int width = 0, height = 0; bool pixelPerfect = false, highDpi = true, decorated=true, fullscreen=false; int swapInterval=1,sampleCount=1; std::string title="probe"; };
+struct Settings { int width = 0, height = 0; bool pixelPerfect = false, highDpi = true, decorated=true, fullscreen=false, visible=true; int swapInterval=1,sampleCount=1; std::string title="probe"; };
 struct Platform { static constexpr bool isDesktop() { return true; } };
 float displayScale = 1, renderScale = 1, preWindowScale = 1;
 bool enabled = false;

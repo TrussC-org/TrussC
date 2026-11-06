@@ -119,7 +119,8 @@ struct Target {
     auto& resources(){return resource;}void flushLayers(){}void endPass(){inPass=false;}
 };
 struct Events;
-struct Window {Events* coreEvents=nullptr;Target swapchainTarget;unsigned renderEpoch=1;bool framePending=true;
+struct HostWindow { bool isVisible() const { return true; } };
+struct Window {HostWindow* hostWindow=nullptr;bool drawWhileHidden=false;Events* coreEvents=nullptr;Target swapchainTarget;unsigned renderEpoch=1;bool framePending=true;
     struct Stack {size_t size(){return 1;}}targetStack;} window;
 struct Event {int listenerCount(){return 1;}void notify();};
 struct Events {Event onRender;} hub;

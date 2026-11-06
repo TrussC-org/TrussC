@@ -17,6 +17,7 @@
 namespace trussc {
 struct IVec2 { int x, y; };
 struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
+inline Log logNotice(const char*) { return {}; }
 int warnings = 0;
 inline Log logWarning(const char*) { ++warnings; return {}; }
 }
@@ -111,6 +112,7 @@ struct Window {
     std::string title_;
     struct { const RecordingOperations* operations = &recordingOperations; } binding_;
     bool isOpen() const { return true; }
+    bool isVisible() const { return true; }
     IVec2 control(internal::WindowControl, int, int, const std::string* =nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
 };
 const RecordingOperations recordingOperations{

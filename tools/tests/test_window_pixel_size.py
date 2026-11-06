@@ -60,6 +60,8 @@ def main():
 #include "tc/app/internal/tcWindowFullscreen.h"
 #define _WIN32
 namespace trussc {
+struct NoticeLog { template<class T> NoticeLog& operator<<(const T&) { return *this; } };
+NoticeLog logNotice(const char*) { return {}; }
 struct IVec2 { int x, y; };
 struct Window;
 RECORDING_OPERATIONS
@@ -100,6 +102,7 @@ struct Window {
     void* native_ = nullptr;
     std::string title_;
     bool isOpen() const { return true; }
+    bool isVisible() const { return true; }
     struct { const RecordingOperations* operations = &recordingOperations; int handle = 2; } binding_;
     auto& context() { return ctx_; }
     IVec2 control(internal::WindowControl, int, int, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);

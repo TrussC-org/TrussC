@@ -85,7 +85,7 @@ struct sapp_tc_window_metadata {
     int fb_width=0, fb_height=0, width=0, height=0, sample_count=0, color_format=0, depth_format=0;
     float dpi_scale=1;
     double source_interval=0;
-    bool trust_hidden_signals=false, iconified=false, occluded=false, drawable_available=false;
+    bool hidden=false, trust_hidden_signals=false, iconified=false, occluded=false, drawable_available=false;
 };
 struct Window;
 struct WindowContext {
@@ -93,7 +93,7 @@ struct WindowContext {
     bool isMain=true, suspended=false, lifecycleSuspended=false, visibilityPaused=false, mainUpdateCallTimeInitialized=true;
 };
 struct Window {
-    struct { sapp_tc_window_metadata metadata; sapp_window handle{1}; bool lastDeliveredHidden=false,visibilityReady=false; } binding_;
+    struct { sapp_tc_window_metadata metadata; sapp_window handle{1}; bool lastDeliveredHidden=false,visibilityReady=false,explicitHideSuspended=false; } binding_;
     WindowContext ctx;
     int dispatchDepth_=0;
     bool isOpen() const { return true; }
