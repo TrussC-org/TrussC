@@ -259,7 +259,8 @@ int main(){
         # Keep the actual runApp forwarding/return expression (the old overload).
         forward = body(header[header.index('#endif\n\ntemplate<typename AppClass>\nint runApp('):],
                        'int runApp(')
-        execute('#include <string>\n#include <cassert>\n#include <type_traits>\n' + settings + runtime + r'''
+        execute('#include <string>\n#include <memory>\n#include <cassert>\n#include <type_traits>\n'
+                '#define TC_LUA_SKIP\nclass Window;\n' + settings + runtime + r'''
 template<class T> concept HasWindowReserve = requires(T t) { t.uniformBufferReserve; t.reserveUniformBuffer(1); };
 static_assert(!HasWindowReserve<WindowSettings>);
 namespace internal { int gpuUniformBufferReserve=0; }
@@ -279,7 +280,8 @@ assert(runApp<int>()==23 && internal::gpuUniformBufferReserve==0); }
         header = read('core/include/TrussC.h')
         settings = body(header, 'struct WindowSettings {') + ';\n'
         self.assertNotIn('desc.clipboard_size', header)
-        execute('#include <string>\n#include <cassert>\n' + settings + r'''
+        execute('#include <string>\n#include <memory>\n#include <cassert>\n'
+                '#define TC_LUA_SKIP\nclass Window;\n' + settings + r'''
 template<class T> concept HasClipboardSize = requires(T t) { t.clipboardSize; };
 template<class T> concept HasClipboardSetter = requires(T t) { t.setClipboardSize(1); };
 static_assert(!HasClipboardSize<WindowSettings> && !HasClipboardSetter<WindowSettings>);
