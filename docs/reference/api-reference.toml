@@ -41628,9 +41628,9 @@ void tcApp::setup() {
 
 ["Window::isFullscreen"]
 keywords = ["fullscreen", "full screen", "state"]
-description.en = "Returns whether fullscreen currently blocks this window's size and position requests."
-description.ja = "フルスクリーンによってこのウィンドウのサイズ・位置要求を無視しているかを返す。"
-description.ko = "전체 화면으로 인해 이 윈도우의 크기·위치 요청을 무시하는지 반환한다."
+description.en = "Returns this window's observed fullscreen state."
+description.ja = "このウィンドウの実際のフルスクリーン状態を返す。"
+description.ko = "이 윈도우의 실제 전체화면 상태를 반환한다."
 details.en = '''
 - Web waits for the browser `fullscreenchange` event; iOS and Android always use fullscreen.
 - Reports the real fullscreen state, rather than the last request. On macOS it becomes true at DidEnter and false at DidExit; a refused entry stays false. Geometry requests are also ignored during the entering and exiting animations, even when this query returns false.
@@ -49272,9 +49272,9 @@ related = ["TextureFormat"]
 category = "window_system"
 keywords = ["maximized", "borderless", "status"]
 of = ["ofGetWindowMode"]
-description.en = "Returns whether fullscreen currently blocks this window's size and position requests."
-description.ja = "フルスクリーンによってこのウィンドウのサイズ・位置要求を無視しているかを返す。"
-description.ko = "전체 화면으로 인해 이 윈도우의 크기·위치 요청을 무시하는지 반환한다."
+description.en = "Returns this window's observed fullscreen state."
+description.ja = "このウィンドウの実際のフルスクリーン状態を返す。"
+description.ko = "이 윈도우의 실제 전체화면 상태를 반환한다."
 details.en = '''
 - Web waits for the browser `fullscreenchange` event; iOS and Android always use fullscreen.
 - Reports the real fullscreen state, rather than the last request. On macOS it becomes true at DidEnter and false at DidExit; a refused entry stays false. Geometry requests are also ignored during the entering and exiting animations, even when this query returns false.

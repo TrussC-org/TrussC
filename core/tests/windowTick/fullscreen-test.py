@@ -25,6 +25,11 @@ def source(native):
     start = native.index('        case PropertyNotify:', native.index('static void _sapp_tc_x11_process_event('))
     end = native.index('            _sapp_tc_x11_send_clipboard_chunk', start)
     dispatch = native[start:end]
+    start = native.index('        case MapNotify: {', native.index('static void _sapp_tc_x11_process_event('))
+    end = native.index('        case UnmapNotify:', start)
+    mapped = native[start:end]
+    toggle_x11 = body(native[native.index('static void _sapp_tc_x11_observe_fullscreen('):],
+                      'void sapp_tc_window_toggle_fullscreen(')
     mac = body(native, 'static void _sapp_tc_request_fullscreen(').replace('[w->window toggleFullScreen:nil]', 'toggle(w)')
     mac += body(native, 'static void _sapp_tc_reconcile_fullscreen(').replace('[w->window toggleFullScreen:nil]', 'toggle(w)')
     mac += body(native, 'static void _sapp_tc_mac_fullscreen_terminal(')
@@ -40,13 +45,14 @@ using LONG_PTR=long; using UINT=unsigned; using Atom=unsigned long;
 constexpr int WS_CAPTION=1, WS_THICKFRAME=2, WS_MINIMIZEBOX=4, WS_MAXIMIZEBOX=8,
  WS_SYSMENU=16, WS_POPUP=32, WS_VISIBLE=64, GWL_STYLE=0, GWL_EXSTYLE=1,
  SWP_NOMOVE=1, SWP_NOSIZE=2, SWP_NOZORDER=4, SWP_FRAMECHANGED=8,
- MONITOR_DEFAULTTONEAREST=0, HWND_TOP=0, PropertyNotify=28, XA_ATOM=4;
+ MONITOR_DEFAULTTONEAREST=0, HWND_TOP=0, PropertyNotify=28, MapNotify=19, XA_ATOM=4,
+ SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=1;
 struct RECT { int left=0,top=0,right=480,bottom=300; };
 struct MONITORINFO { unsigned cbSize; RECT rcMonitor{0,0,1920,1080},rcWork{0,0,1920,1040}; };
 struct sapp_window { unsigned id; };
 constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0, _SAPP_TC_X11_VISIBILITY_MAPPING=1;
 struct _sapp_tc_window_t {
- bool fullscreen=false, fullscreen_requested=false, fullscreen_on_map=false, restore_valid=false, decoration_pending=false;
+ bool native_visible=false, fullscreen=false, fullscreen_requested=false, fullscreen_on_map=false, restore_valid=false, decoration_pending=false;
  struct { bool hidden=false, borderless=false; } desc;
  int hwnd=1,xwin=1, visibility_op=0,window=1;
  LONG_PTR stored_style=0,stored_ex_style=0;
@@ -54,7 +60,8 @@ struct _sapp_tc_window_t {
  _sapp_tc_fullscreen_state_t fullscreen_state;
 };
 _sapp_tc_window_t record;
-struct { int display=1,constructing=0; Atom NET_WM_STATE=10,NET_WM_STATE_FULLSCREEN=11; } _sapp_tc;
+struct { struct { _sapp_tc_window_t* main=nullptr; } app;
+ int display=1,constructing=0; Atom NET_WM_STATE=10,NET_WM_STATE_FULLSCREEN=11; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window w) { return w.id==1 ? &record : nullptr; }
 LONG_PTR style=WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_VISIBLE,exstyle=7;
 RECT current; int positions=0,requests=0; bool requested=false;
@@ -76,12 +83,14 @@ unsigned long _sapp_tc_x11_get_window_property(int,Atom,Atom,unsigned char** dat
 void XFree(void*) {}
 void XFlush(int) {}
 void _sapp_tc_x11_send_event(int,Atom,long op,long,long,long,long) { ++requests; requested=op==1; }
-''' + request + observe + '\nnamespace web { struct { bool fullscreen=false; } _sapp_tc;\nvoid _sapp_tc_js_toggle_fullscreen() {}\n' + web + '\n}\n' + r'''
+''' + request + observe + toggle_x11 + '\nnamespace web { struct { bool fullscreen=false; } _sapp_tc;\nvoid _sapp_tc_js_toggle_fullscreen() {}\n' + web + '\n}\n' + r'''
 struct XEvent { int type=PropertyNotify; struct { Atom atom; int state=0; } xproperty; };
-void process(_sapp_tc_window_t* w,Atom atom,int state=0) {
- XEvent event; event.xproperty={atom,state}; auto* ev=&event;
+void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t*) {}
+void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
+void process(_sapp_tc_window_t* w,Atom atom,int state=0,int type=PropertyNotify) {
+ XEvent event; event.type=type; event.xproperty={atom,state}; auto* ev=&event;
  switch(ev->type) {
-''' + dispatch + r'''
+''' + mapped + dispatch + r'''
  break;
  }
 }
@@ -136,6 +145,32 @@ int main() {
  check(!record.fullscreen && record.fullscreen_requested);
  record.fullscreen_on_map=false; record.fullscreen=true; process(&record,_sapp_tc.NET_WM_STATE,1);
  check(!record.fullscreen && !record.fullscreen_requested); // deleted property means windowed
+ // The WM may choose fullscreen before the constructor's first MapNotify.
+ record={}; requests=0; record.visibility_op=_SAPP_TC_X11_VISIBILITY_MAPPING;
+ property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
+ check(record.fullscreen && record.fullscreen_requested);
+ process(&record,0,0,MapNotify);
+ process(&record,_sapp_tc.NET_WM_STATE); // unchanged observation cannot repair stale intent
+ check(record.native_visible && record.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE && requests==0);
+ const auto initial=record;
+ sapp_tc_window_toggle_fullscreen({1});
+ check(requests==1 && !requested); // toggle must send REMOVE
+ record=initial; record.desc.hidden=true; property.clear();
+ process(&record,_sapp_tc.NET_WM_STATE,1); // withdrawal deletes the WM property
+ record.desc.hidden=false; record.fullscreen_on_map=true;
+ record.visibility_op=_SAPP_TC_X11_VISIBILITY_MAPPING;
+ process(&record,0,0,MapNotify);
+ check(requests==2 && requested && !record.fullscreen_on_map); // explicit show replays ADD once
+ process(&record,0,0,MapNotify); check(requests==2);
+ // Explicit-show mapping must preserve either replay choice over WM changes.
+ for (bool desired : {false,true}) {
+  record={}; record.fullscreen=desired; record.fullscreen_requested=desired;
+  record.fullscreen_on_map=true; record.visibility_op=_SAPP_TC_X11_VISIBILITY_MAPPING;
+  property.clear(); if (!desired) property.push_back(_sapp_tc.NET_WM_STATE_FULLSCREEN);
+  process(&record,_sapp_tc.NET_WM_STATE);
+  check(record.fullscreen==!desired && record.fullscreen_requested==desired);
+  process(&record,0,0,MapNotify); check(requested==desired);
+ }
  record={}; _sapp_tc_request_fullscreen(&record,true);
  check(!record.fullscreen); // request alone cannot report real fullscreen
  _sapp_tc_mac_fullscreen_terminal(&record,false); check(!record.fullscreen && !record.fullscreen_state.desired);
@@ -167,7 +202,8 @@ def main():
             'x11-no-property': ('if (w && ev->xproperty.atom == _sapp_tc.NET_WM_STATE)', 'if (false && w && ev->xproperty.atom == _sapp_tc.NET_WM_STATE)'),
             'x11-unrelated-state-cancels-request': ('if (changed && !w->desc.hidden', 'if (!w->desc.hidden'),
             'x11-ignore-wm-choice': ('w->fullscreen_requested = full;', '(void)full;'),
-            'x11-lose-hidden-replay': ('if (changed && !w->desc.hidden && w->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE && !w->fullscreen_on_map)', 'if (true)'),
+            'x11-ignore-initial-map-choice': ('if (changed && !w->desc.hidden && !w->fullscreen_on_map)', 'if (changed && !w->desc.hidden && w->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE && !w->fullscreen_on_map)'),
+            'x11-lose-hidden-replay': ('if (changed && !w->desc.hidden && !w->fullscreen_on_map)', 'if (true)'),
             'x11-always-full': ('w->fullscreen = full;', 'w->fullscreen = true;'),
             'web-request-is-real': ('// fullscreenchange reports the real state after the browser confirms it.', '_sapp_tc.fullscreen = !_sapp_tc.fullscreen;'),
             'mac-request-is-real': ('[w->window toggleFullScreen:nil];', 'w->fullscreen = w->fullscreen_state.desired; [w->window toggleFullScreen:nil];'),

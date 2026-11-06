@@ -10979,11 +10979,11 @@ static void _sapp_tc_x11_set_fullscreen(_sapp_tc_window_t* w, bool enable) {
     XFlush(_sapp_tc.display);
 }
 
-// The WM owns the real state. Withdrawal may delete this property, so keep
-// the replay intent until the explicit show has finished mapping.
+// The WM owns the real state. Preserve replay intent while hidden or while
+// an explicit show is still mapping.
 static void _sapp_tc_x11_observe_fullscreen(_sapp_tc_window_t* w) {
     Atom* states = NULL;
-    // Bound: EWMH has a small set of state atoms; reject an oversized property.
+    // Bound (WM-controlled property): EWMH has few state atoms; reject an oversized list.
     const unsigned long count = _sapp_tc_x11_get_window_property(w->xwin,
         _sapp_tc.NET_WM_STATE, XA_ATOM, (unsigned char**)&states, 64);
     bool full = false;
@@ -10994,7 +10994,8 @@ static void _sapp_tc_x11_observe_fullscreen(_sapp_tc_window_t* w) {
     const bool changed = w->fullscreen != full;
     w->fullscreen = full;
     // Other WM state atoms can change while a fullscreen request is pending.
-    if (changed && !w->desc.hidden && w->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE && !w->fullscreen_on_map)
+    // Initial mapping accepts WM placement; explicit-show mapping preserves replay.
+    if (changed && !w->desc.hidden && !w->fullscreen_on_map)
         w->fullscreen_requested = full;
 }
 
