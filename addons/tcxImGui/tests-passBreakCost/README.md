@@ -17,7 +17,7 @@ median, p95, and pass count. It also reports `completed_ms_*`: the same interval
 through synchronous target readback, including GPU completion and readback cost.
 The paired arms use identical readbacks; these numbers expose GPU pass-break
 work that asynchronous submission can hide. These are measurements, with no
-timing assertions; vsync is disabled. Compare the two arms on the same
+timing assertions; the default VSync interval applies (`0` is treated as `1`). Compare the two arms on the same
 device/backend. The Fbo uses its default RGBA8 format; the window uses its
 platform default.
 The target pipeline adapter selects the actual attachment format.

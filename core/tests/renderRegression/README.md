@@ -38,7 +38,7 @@ source paths per worktree so base and head share entries.
 
 Scenes wait until the framebuffer matches the requested size (at most 60
 frames on every platform), then render and capture, with fixed geometry and a
-fixed seed. There is one 256x192 logical window with vsync off. The resize scene
+fixed seed. There is one 256x192 logical window with the default VSync interval (`0` is treated as `1`). The resize scene
 captures 256x192 and 320x224 with pixelPerfect both off and on, so a run produces
 48 images. Captures and JSON sizes are framebuffer pixels. Screen assertions
 use DPI-scaled logical coordinates with pixelPerfect off and framebuffer coordinates with it on; FBO assertions use framebuffer pixels.

@@ -14,6 +14,7 @@
 // - PNG output is straight (non-premultiplied) RGBA on every OS (#854): pixels
 //   with alpha 0 / 128 / 255 keep their exact RGBA through Pixels::save and the
 //   screenshot writer, and a screenshot JPEG is not darkened by alpha.
+// - macOS TIFF output also preserves exact straight RGBA (#854).
 // =============================================================================
 
 #include <TrussC.h>
@@ -25,6 +26,10 @@
 #include <cstring>
 #include <string>
 #include <vector>
+
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+#include <ImageIO/ImageIO.h>
+#endif
 
 using namespace std;
 using namespace tc;
@@ -102,6 +107,32 @@ static void checkSuccessPaths(const fs::path& dir) {
     check("Pixels::save .bmp starts with BM", bmp.size() > 2 && bmp.compare(0, 2, "BM") == 0);
 }
 
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+static void checkStraightAlphaTiff(const fs::path& file, const unsigned char* expected) {
+    // Read ImageIO's provider bytes directly. Pixels::load draws through a
+    // context that discards alpha; drawing or unpremultiplying here could hide
+    // the encoder bug. Requiring alphaLast rejects associated-alpha TIFFs.
+    const string bytes = loadTextFile(file);
+    CFDataRef data = CFDataCreate(kCFAllocatorDefault,
+        reinterpret_cast<const UInt8*>(bytes.data()), bytes.size());
+    CGImageSourceRef source = data ? CGImageSourceCreateWithData(data, nullptr) : nullptr;
+    if (data) CFRelease(data);
+    CGImageRef image = source ? CGImageSourceCreateImageAtIndex(source, 0, nullptr) : nullptr;
+    if (source) CFRelease(source);
+    const string label = "screenshot " + file.extension().string();
+    const bool layout = image && CGImageGetWidth(image) == 3 && CGImageGetHeight(image) == 1 &&
+        CGImageGetBitsPerComponent(image) == 8 && CGImageGetBitsPerPixel(image) == 32 &&
+        CGImageGetAlphaInfo(image) == kCGImageAlphaLast;
+    check(label + " decodes as 3x1 straight RGBA", layout);
+    CFDataRef decoded = layout ? CGDataProviderCopyData(CGImageGetDataProvider(image)) : nullptr;
+    if (image) CGImageRelease(image);
+    check(label + " keeps exact RGB at alpha 0 / 128 / 255",
+          decoded && CFDataGetLength(decoded) >= 12 &&
+          memcmp(CFDataGetBytePtr(decoded), expected, 12) == 0);
+    if (decoded) CFRelease(decoded);
+}
+#endif
+
 // RGBA must survive a PNG write and read unchanged, including the RGB of a
 // fully transparent pixel (#854: macOS used to premultiply it away).
 static void checkStraightAlphaPng(const fs::path& dir) {
@@ -137,6 +168,15 @@ static void checkStraightAlphaPng(const fs::path& dir) {
     check("screenshot writer straight-alpha PNG returns true",
           internal::saveScreenshotPixels(px, viaShot));
     matches(viaShot, "screenshot PNG");
+
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+    for (const char* name : {"straight_shot.tiff", "straight_shot.tif"}) {
+        fs::path tiff = dir / name;
+        check(string("screenshot writer ") + name + " returns true",
+              internal::saveScreenshotPixels(px, tiff));
+        checkStraightAlphaTiff(tiff, &expected[0][0]);
+    }
+#endif
 
     // JPEG has no alpha: the RGB must not be scaled by the alpha value.
     Pixels flat;

@@ -67,6 +67,40 @@ class DriverTests(unittest.TestCase):
         calls = self.exercise(fail_compare=True)
         self.assertEqual(sum(c[:3] == ['git','worktree','remove'] for c in calls),2)
 
+    def test_trusscli_platform_paths(self):
+        for platform, paths, expected in (
+                ('darwin', ['trusscli.app/Contents/MacOS/trusscli'], 'trusscli.app/Contents/MacOS/trusscli'),
+                ('darwin', ['trusscli', 'trusscli.app/Contents/MacOS/trusscli'], 'trusscli'),
+                ('linux', ['trusscli'], 'trusscli'),
+                ('win32', ['trusscli.exe'], 'trusscli.exe')):
+            with self.subTest(platform=platform, paths=paths), tempfile.TemporaryDirectory(dir=ROOT) as temp:
+                checkout = Path(temp)/'checkout'
+                for path in paths:
+                    binary = checkout/'tools/bin'/path
+                    binary.parent.mkdir(parents=True, exist_ok=True); binary.touch()
+                with patch.object(driver.sys, 'platform', platform), patch.object(driver, 'ROOT', checkout), \
+                     patch.object(driver, 'commit', return_value='sha'), patch.object(driver, 'run', return_value='sha'), \
+                     patch.object(driver, 'has_harness', return_value=False), \
+                     patch.object(driver, 'build', return_value=checkout/'binary') as build:
+                    driver.compare_refs('base', 'head', Path(temp)/'output')
+                    build.assert_called_once()
+                    self.assertEqual(build.call_args.args[1], checkout/'tools/bin'/expected)
+
+    def test_missing_trusscli_names_searched_paths(self):
+        for platform, paths in (
+                ('darwin', ['trusscli', 'trusscli.app/Contents/MacOS/trusscli']),
+                ('linux', ['trusscli']), ('win32', ['trusscli.exe'])):
+            with self.subTest(platform=platform), tempfile.TemporaryDirectory(dir=ROOT) as temp:
+                checkout = Path(temp)/'checkout'; checkout.mkdir()
+                with patch.object(driver.sys, 'platform', platform), patch.object(driver, 'ROOT', checkout), \
+                     patch.object(driver, 'commit', return_value='sha'), patch.object(driver, 'run', return_value='sha'), \
+                     patch.object(driver, 'build') as build:
+                    with self.assertRaises(RuntimeError) as error:
+                        driver.compare_refs('base', 'head', Path(temp)/'output')
+                    for path in paths:
+                        self.assertIn(str(checkout/'tools/bin'/path), str(error.exception))
+                    build.assert_not_called()
+
     def test_builds_share_cache_with_checkout_relative_paths(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
             tree = Path(temp); binary = tree/driver.HARNESS/'bin/renderRegression'

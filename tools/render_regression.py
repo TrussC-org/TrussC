@@ -64,8 +64,12 @@ def compare_refs(base_ref, head_ref, output):
     merge_base = run(['git', 'merge-base', base, head], capture=True)
     print(f'Record merge-base {merge_base}; compare head {head}', flush=True)
     trusscli = ROOT / 'tools/bin' / ('trusscli.exe' if sys.platform == 'win32' else 'trusscli')
+    searched = [trusscli]
+    if not trusscli.is_file() and sys.platform == 'darwin':
+        trusscli = ROOT / 'tools/bin/trusscli.app/Contents/MacOS/trusscli'
+        searched.append(trusscli)
     if not trusscli.is_file():
-        raise RuntimeError('Build tools/bin/trusscli first')
+        raise RuntimeError('Build trusscli first; searched: ' + ', '.join(map(str, searched)))
     if output.exists() and any(output.iterdir()):
         raise RuntimeError(f'Output must be empty: {output}')
     output.mkdir(parents=True, exist_ok=True)

@@ -35,7 +35,8 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
             '[w->link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes]': 'add_link()',
             '[window makeKeyAndOrderFront:nil]': 'show()',
             '[window orderOut:nil]': 'order_out()',
-            'NSWindow* window = w->window;': 'int window=0;',
+            'NSWindow* window = w->window;': 'void* window = w->window;',
+            '[parent->window addChildWindow:window ordered:NSWindowAbove]': 'add_child(parent->window, window)',
             '(__bridge const void*)_sapp_tc.app.device': '_sapp_tc.app.device',
         }
         for old, new in seams.items():
@@ -47,11 +48,11 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
     parts.append(f'namespace {platform} {{\n' + r'''
 using Client=void(*)(const sapp_event*,sapp_window,void*);
 using Tick=void(*)(sapp_window,void*);
-struct sapp_window_desc { Tick close_cb=nullptr; bool(*close_request_cb)(sapp_window,void*)=nullptr; Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; };
+struct sapp_window_desc { Tick close_cb=nullptr; bool(*close_request_cb)(sapp_window,void*)=nullptr; Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; sapp_window parent{}; };
 struct sapp_desc { Tick _tc_close_cb=nullptr; bool(*_tc_close_request_cb)(sapp_window,void*)=nullptr; int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
 struct _sapp_tc_native_desc { sapp_window_desc window; bool(*events_enabled)()=nullptr; int swap_interval=0; bool fullscreen=false,draw_while_hidden=false,center_on_create=false; int title_limit=0,color_format=0,depth_format=0; };
 struct _sapp_tc_mac_window_attrs { bool restorable=false,nearest_magnification=false,take_key_focus_on_create=false; };
-struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool constructing=false, ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; const char* title="test"; };
+struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool constructing=false, ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; void* window=nullptr; const char* title="test"; };
 struct { size_t window_slots=1; int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
 _sapp_tc_window_t record;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { auto* w=_sapp_tc.windows[0]; return w && w->win_id==h.id ? w : nullptr; }
@@ -79,6 +80,7 @@ _sapp_tc_window_t* _sapp_tc_mac_fail(_sapp_tc_window_t*,const char*) { return nu
 bool _sapp_tc_win32_trust_hidden_signals() { return true; }
 void DragAcceptFiles(void*,int) {}
 void add_link() {} void register_drop() {} void order_out() {}
+void add_child(void*,void*) {}
 void _sapp_tc_mac_contained(const char*) {}
 void _sapp_tc_mac_schedule_deferred() {}
 _sapp_tc_window_t* _sapp_tc_mac_live(unsigned id) { return _sapp_tc_lookup({id}); }

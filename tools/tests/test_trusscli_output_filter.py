@@ -119,6 +119,36 @@ class FilterTests(unittest.TestCase):
                       "gmake[2]: *** [x] Error 1", "In file included from a.cpp:1:"):
             self.assertIn(shown + "\n", out)
 
+    def test_macos_bundle_steps_keep_progress_together_and_stay_in_log(self):
+        for prefix in ("", "[ 95%] ", "[19/20] "):
+            with self.subTest(prefix=prefix):
+                text = ("[ 25%] Building CXX object a.o\n"
+                        "[ 50%] Building CXX object b.o\n"
+                        + prefix + "Copying OS X content /b/myApp.app/Contents/Resources/Assets.car\n"
+                        "[100%] Linking CXX executable myApp.app/Contents/MacOS/myApp\n"
+                        + prefix + "Adding CFBundleIconName to Info.plist for Tahoe icon\n"
+                        + prefix + "Removing quarantine attribute from myApp.app\n")
+                out, log = self.run_filter(text, "--total", "45", "--seconds", "8")
+                self.assertEqual(out,
+                    "Building myApp (45 files) .........50%.........100%\n"
+                    "Done: 2 files, 43 up to date (0m08s). Full log: build-linux/build.log\n")
+                self.assertEqual(log, text)
+                self.assertEqual(self.screen(text, "--verbose"), text)
+
+    def test_macos_bundle_steps_are_only_hidden_during_build(self):
+        text = ("Copying OS X content /b/myApp.app/Contents/Resources/Assets.car\n"
+                "Adding CFBundleIconName to Info.plist for Tahoe icon\n"
+                "Removing quarantine attribute from myApp.app\n")
+        self.assertEqual(self.screen(text, "--configure"), text)
+
+    def test_unknown_bundle_messages_stay_visible(self):
+        text = ("Copying other content /b/myApp.app\n"
+                "Adding another key to Info.plist\n"
+                "Removing another attribute from myApp.app\n"
+                "tool: Removing quarantine attribute from myApp.app failed\n")
+        out = self.screen(text)
+        self.assertIn(text, out)
+
     def test_diagnostic_mid_dots_starts_a_new_line_and_dots_continue(self):
         out = self.screen(fixture("gcc_diagnostics.txt"), "--total", "44",
                           "--exit", "2", "--seconds", "12")
