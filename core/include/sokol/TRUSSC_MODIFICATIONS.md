@@ -62,6 +62,18 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### X11 secondary swap interval pacing (#1263)
+
+GLX and EGL secondary windows keep native GL swap interval 0 because they
+share the main window's context. Store the requested interval separately
+(nonpositive requests mean 1) and admit a tick/present on every Nth main
+presentation credit or fallback refresh-timer tick. Interval 1 and the default
+retain their existing cadence; main-window pacing is unchanged. A partial count
+continues when the main is minimized/absent and the fallback timer takes over.
+No new thread or timer is added. The extracted `windowTick/x11-pacing-test`
+checks both backends; real gdm GLX and Raspberry Pi EGL verification uses the
+gallery's `swapInterval 2` preset at approximately 30 fps on a 60 Hz display.
+
 ### Upstream e7a48ed6 compatibility sync (#713, Q5/Q6/Q7)
 
 Rename `sapp_get_swapchain` to `sapp_acquire_swapchain` without an alias;

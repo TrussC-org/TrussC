@@ -9122,6 +9122,9 @@ sapp_swapchain sapp_acquire_swapchain(void) {
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
+    // [TrussC #1263] Secondary pacing is divided without blocking the shared GL context.
+    int requested_swap_interval;
+    int pacing_ticks;
     Colormap colormap;
 #if defined(SOKOL_GLES3)
     EGLSurface drawable;
@@ -12170,6 +12173,13 @@ static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
 
 static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (w->constructing || w->in_tick || !w->drawable) return;
+    // [TrussC #1263] Count both main presentation credits and fallback timer
+    // ticks. Keep a partial count when the main is minimized or absent.
+    if (!w->is_main && ++w->pacing_ticks < w->requested_swap_interval) {
+        _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
+        return;
+    }
+    w->pacing_ticks = 0;
     const sapp_window handle = {w->win_id};
     w->in_tick = true;
     struct TickGuard {
@@ -12548,10 +12558,12 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     native.fullscreen = desc->fullscreen;
     /* Allowed X11 pacing difference: the shared GL context must not block on
        every window. Main keeps blocking vsync; secondaries swap at interval 0
-       and follow main presentations, with refresh-timer fallback (GLX and EGL). */
+       and follow every Nth main presentation or refresh-timer tick, where N is
+       the requested interval (GLX and EGL). */
     native.swap_interval = 0;
     native.window.sample_count = _sapp_tc.app.desc.sample_count;
     _sapp_tc_window_t* w = _sapp_tc_x11_create_window(&native);
+    if (w) w->requested_swap_interval = desc->swap_interval > 0 ? desc->swap_interval : 1;
     return {w ? w->win_id : 0};
 }
 

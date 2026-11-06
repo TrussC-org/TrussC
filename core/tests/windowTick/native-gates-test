@@ -237,6 +237,7 @@ struct _sapp_tc_window_t {
     bool close_recorded=false; unsigned close_recorded_frame=0;
     unsigned win_id=1, frame_count=0;
     int drawable=1, swap_interval=1;
+    int requested_swap_interval=1, pacing_ticks=0;
     double earliest_next=0, last_present=0, frame_duration=0, refresh_period=.017;
     _sapp_tc_timing_t timing;
     SwapChain* swap_chain=nullptr;
