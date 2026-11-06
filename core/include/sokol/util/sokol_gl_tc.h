@@ -3841,13 +3841,13 @@ static bool _sgl_prepare_flush_buffer(_sgl_context_t* ctx, size_t data_size) {
             // Bound (representation): the pool count and allocation must fit int/size_t.
             if (ctx->flush_capacity > INT_MAX / 2 ||
                 (size_t)(ctx->flush_capacity ? ctx->flush_capacity * 2 : 4) > SIZE_MAX / sizeof(sg_buffer)) return false;
-            const int capacity = ctx->flush_capacity ? ctx->flush_capacity * 2 : 4;
-            sg_buffer* buffers = (sg_buffer*)_sgl_try_malloc_clear((size_t)capacity * sizeof(sg_buffer));
+            const int pool_capacity = ctx->flush_capacity ? ctx->flush_capacity * 2 : 4;
+            sg_buffer* buffers = (sg_buffer*)_sgl_try_malloc_clear((size_t)pool_capacity * sizeof(sg_buffer));
             if (!buffers) return false;
             if (ctx->flush_count) memcpy(buffers, ctx->flush_buffers, (size_t)ctx->flush_count * sizeof(sg_buffer));
             if (ctx->flush_buffers) _sgl_free(ctx->flush_buffers);
             ctx->flush_buffers = buffers;
-            ctx->flush_capacity = capacity;
+            ctx->flush_capacity = pool_capacity;
         }
         if (ctx->flush_count == 0) ctx->flush_buffers[0] = ctx->vbuf;
         ctx->flush_count++;
