@@ -331,9 +331,7 @@ bool parseConfig(const std::string& text, Config& out, std::vector<std::string>&
             if (!value.is_object()) { error = "dist.json: \"installer\" must be an object"; return false; }
             for (auto option = value.begin(); option != value.end(); ++option) {
                 bool* target = nullptr;
-                if (option.key() == "shortcut") target = &out.installer.shortcut;
-                else if (option.key() == "startAtLogin") target = &out.installer.startAtLogin;
-                else if (option.key() == "showEula") target = &out.installer.showEula;
+                if (option.key() == "showEula") target = &out.installer.showEula;
                 else if (option.key() == "showNotices") target = &out.installer.showNotices;
                 if (!target) {
                     warnings.push_back("dist.json: unknown key \"installer." + option.key() + "\" ignored");
@@ -376,8 +374,6 @@ std::string configTemplate(const std::string& name, const std::string& version,
     text += "  \"exclude\": [],\n";
     text += "  \"licenses\": [],\n";
     text += "  \"installer\": {\n";
-    text += "    \"shortcut\": true,\n";
-    text += "    \"startAtLogin\": false,\n";
     text += "    \"showEula\": false,\n";
     text += "    \"showNotices\": false\n";
     text += "  }\n";
@@ -1086,16 +1082,14 @@ std::string nsisScript(const NsisInput& in) {
     s += "  WriteRegDWORD HKLM " + q(uninstallKey) + " \"NoRepair\" 1\n";
     s += "SectionEnd\n\n";
 
-    s += std::string("Section ") + (in.options.shortcut ? "" : "/o ") +
-         "\"Start menu and desktop shortcuts\"\n";
+    s += "Section \"Start menu and desktop shortcuts\"\n";
     s += "  SetShellVarContext all\n";
     s += "  CreateDirectory " + under("$SMPROGRAMS", name) + "\n";
     s += "  CreateShortcut " + under("$SMPROGRAMS", name + "\\" + shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
     s += "  CreateShortcut " + under("$DESKTOP", shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
     s += "SectionEnd\n\n";
 
-    s += std::string("Section ") + (in.options.startAtLogin ? "" : "/o ") +
-         q("Start " + in.name + " when Windows starts") + "\n";
+    s += "Section /o " + q("Start " + in.name + " when Windows starts") + "\n";
     s += "  SetShellVarContext all\n";
     s += "  CreateShortcut " + under("$SMSTARTUP", shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
     s += "SectionEnd\n\n";

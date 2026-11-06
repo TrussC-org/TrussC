@@ -40,12 +40,9 @@ struct LicenseEntry {
     std::string file;   // relative to the project folder, or absolute
 };
 
-// dist.json "installer" (used with --installer). shortcut and startAtLogin
-// are the initial state of the installer's checkboxes; the person installing
-// can change them (a silent install, setup.exe /S, takes them as they are).
+// dist.json "installer" (used with --installer). Shortcuts and start at
+// login are not here: the installer asks the person installing.
 struct InstallerOptions {
-    bool shortcut = true;       // Start menu and desktop shortcuts
-    bool startAtLogin = false;  // shortcut in the (all users) Startup folder
     bool showEula = false;      // EULA.txt as an acceptance page (needs an EULA)
     bool showNotices = false;   // THIRD_PARTY_NOTICES.txt as a read-only page
 };
@@ -234,7 +231,8 @@ struct NsisInput {
 
 // An NSIS script (Unicode; give makensis /INPUTCHARSET UTF8). Installs for
 // all users under Program Files, registers in Apps & features, offers the
-// shortcuts and start-at-login as checkboxes, and the uninstaller deletes
+// shortcuts (checked) and start at login (unchecked) as checkboxes; a silent
+// install (setup.exe /S) takes those defaults. The uninstaller deletes
 // exactly the installed files (and any of the shortcuts), then the folders
 // left empty. zlib compression keeps the whole installer under the zlib/libpng
 // license (LZMA's decompressor would be CPL code).

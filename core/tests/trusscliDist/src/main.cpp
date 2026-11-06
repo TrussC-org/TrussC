@@ -11,8 +11,8 @@
 //     The copyright line is "© <year> <author>".
 //   - NSIS script: zlib compression (no LZMA), a four-part version, names
 //     escaped for NSIS ("$" and '"'), Program Files by arch, the EULA and
-//     notices pages only when asked for, shortcuts and start at login as
-//     checkboxes whose initial state the options set, and an uninstaller
+//     notices pages only when asked for, shortcuts (checked) and start at
+//     login (unchecked) as checkboxes, and an uninstaller
 //     that deletes the listed files and any of the shortcuts, then the
 //     folders deepest first, never recursively.
 //   - Versions: "v1.2.0" -> "1.2.0", one to four numbers of at most 65535,
@@ -90,7 +90,7 @@ void testConfig() {
         "include": [{"from": "../tools", "to": "data/tools"}],
         "exclude": ["data/**/*.psd"],
         "licenses": [{"name": "Node.js", "file": "LICENSE-node"}],
-        "installer": {"shortcut": true},
+        "installer": {"showNotices": true},
         "exlcude": []
     })", config, warnings, error);
     check("dist.json: all phase-1 keys read",
@@ -103,14 +103,13 @@ void testConfig() {
     check("dist.json: unknown keys warn", typoWarned && warnings.size() == 1);
 
     warnings.clear();
-    check("dist.json: installer options",
-          dist::parseConfig(R"({"installer": {"shortcut": false, "startAtLogin": true,
-                                              "showEula": true, "showNotices": true, "icon": 1}})",
+    check("dist.json: installer options; shortcut choices are not among them",
+          dist::parseConfig(R"({"installer": {"showEula": true, "showNotices": true, "shortcut": false}})",
                             config, warnings, error) &&
-              !config.installer.shortcut && config.installer.startAtLogin && config.installer.showEula &&
-              config.installer.showNotices && warnings.size() == 1 && contains(warnings[0], "installer.icon"));
+              config.installer.showEula && config.installer.showNotices && warnings.size() == 1 &&
+              contains(warnings[0], "installer.shortcut"));
     check("dist.json: installer options must be booleans",
-          !dist::parseConfig(R"({"installer": {"shortcut": "yes"}})", config, warnings, error) &&
+          !dist::parseConfig(R"({"installer": {"showEula": "yes"}})", config, warnings, error) &&
               !dist::parseConfig(R"({"installer": []})", config, warnings, error));
 
     check("dist.json: wrong type is an error",
@@ -142,7 +141,6 @@ void testNsis() {
     in.files = {"EULA.txt", "data/a b.txt", "data/sub/c.txt", "myApp.exe"};
     in.setupExe = "C:/out/My-App-1.2-windows-x64-setup.exe";
     in.eulaPage = "C:/out/work/EULA.txt";
-    in.options.startAtLogin = true;
     const std::string s = dist::nsisScript(in);
     check("nsis: zlib compression, four-part version, escaped name",
           contains(s, "SetCompressor /SOLID zlib") && contains(s, "VIProductVersion \"1.2.0.0\"") &&
@@ -154,10 +152,10 @@ void testNsis() {
     check("nsis: EULA page only when given",
           contains(s, "MUI_PAGE_LICENSE \"C:\\out\\work\\EULA.txt\"") &&
               !contains(s, "Third-party notices"));
-    check("nsis: shortcuts and start at login as checked checkboxes",
+    check("nsis: shortcuts checked, start at login unchecked, both as checkboxes",
           contains(s, "MUI_PAGE_COMPONENTS") &&
               contains(s, "Section \"Start menu and desktop shortcuts\"") &&
-              contains(s, "Section \"Start My $\\\"App$\\\" $$1 when Windows starts\"") &&
+              contains(s, "Section /o \"Start My $\\\"App$\\\" $$1 when Windows starts\"") &&
               contains(s, "$SMPROGRAMS\\My App $$1") && contains(s, "$SMSTARTUP\\My App $$1.lnk") &&
               contains(s, "MUI_FINISHPAGE_RUN \"$INSTDIR\\myApp.exe\"") && !contains(s, "$$INSTDIR"));
     const size_t sub = s.find("RMDir \"$INSTDIR\\data\\sub\"");
@@ -175,12 +173,8 @@ void testNsis() {
     check("nsis: x86 Program Files, notices page with a Next button",
           contains(t, "InstallDir \"$PROGRAMFILES\\") && contains(t, "MUI_LICENSEPAGE_BUTTON") &&
               contains(t, "Third-party notices"));
-    check("nsis: startAtLogin false starts its checkbox unchecked; uninstall removes it anyway",
-          contains(t, "Section \"Start menu and desktop shortcuts\"") && contains(t, "Section /o \"Start ") &&
-              contains(t, "Delete \"$SMSTARTUP\\"));
-    in.options.shortcut = false;
-    check("nsis: shortcut false starts its checkbox unchecked",
-          contains(dist::nsisScript(in), "Section /o \"Start menu and desktop shortcuts\""));
+    check("nsis: uninstall removes every shortcut whatever was chosen",
+          contains(t, "Delete \"$SMSTARTUP\\") && contains(t, "Delete \"$DESKTOP\\"));
 }
 
 void testNames() {

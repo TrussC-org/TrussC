@@ -4119,8 +4119,9 @@ static void printDistHelp() {
          << "\n"
          << "Settings come from dist.json in the project folder (optional; see --init):\n"
          << "name, version, author, eulaFile, include, exclude, licenses, and installer\n"
-         << "(shortcut, startAtLogin, showEula, showNotices). Your license terms (eulaFile,\n"
-         << "or EULA.txt in the project folder) go into the package as EULA.txt.\n"
+         << "(showEula, showNotices). Your license terms (eulaFile, or EULA.txt in the\n"
+         << "project folder) go into the package as EULA.txt. The installer asks about\n"
+         << "shortcuts and starting at login.\n"
          << "trusscli collects the license files it finds; checking them is up to you.\n";
 }
 
