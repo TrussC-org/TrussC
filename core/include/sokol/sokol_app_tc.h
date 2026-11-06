@@ -10905,7 +10905,7 @@ static void _sapp_tc_x11_set_decorated(_sapp_tc_window_t* w, bool decorated) {
                     32, PropModeReplace, (unsigned char*)&hints, 5);
 }
 
-/*-- dimensions (polled per tick; ConfigureNotify is deliberately unused) -----*/
+/*-- dimensions (polled per tick; ConfigureNotify only invalidates drawing) -----*/
 static bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t* w) {
     XWindowAttributes attribs;
     memset(&attribs, 0, sizeof(attribs));
@@ -12166,6 +12166,14 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
                     SAPP_MOUSEBUTTON_INVALID, _sapp_tc_x11_mods(ev->xmotion.state));
             }
             break;
+        case ConfigureNotify: {
+            // Polling remains the size authority; even a transient size can stale a DRI3 buffer.
+            if (w && !w->desc.hidden &&
+                (ev->xconfigure.width != w->fb_width || ev->xconfigure.height != w->fb_height)) {
+                _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);
+            }
+            break;
+        }
         case MapNotify: {
             if (w) {
                 w->native_visible = true;

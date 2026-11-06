@@ -243,6 +243,7 @@ struct _sapp_tc_window_t {
     bool close_recorded=false; unsigned close_recorded_frame=0;
     unsigned win_id=1, frame_count=0;
     int drawable=1, swap_interval=1, xwin=7;
+    int fb_width=1600, fb_height=865;
     int requested_swap_interval=1, pacing_ticks=0;
     double earliest_next=0, last_present=0, frame_duration=0, refresh_period=.017;
     _sapp_tc_timing_t timing;
@@ -1576,6 +1577,12 @@ void callback(sapp_window,void* user) {
     ++updates; // #997: every delivered tick updates, hidden or not
 }
 ''' + extract('static void _sapp_tc_x11_sync_visibility(') + extract('extern "C" void sapp_tc_window_set_visible(') + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
+void configure_notify(Native* w, int width, int height) {
+    struct { struct { int width, height; } xconfigure; } event{{width, height}};
+    auto* ev=&event;
+''' + extract('case ConfigureNotify: {').replace('case ConfigureNotify:', '').replace('            break;', '') + r'''
+}
+
 void map_notify(Native* w) {
 ''' + extract('case MapNotify: {').replace('case MapNotify:', '').replace('            break;', '') + r'''
 }
@@ -1604,6 +1611,27 @@ void run() {
         check("X11 failed renewal closes Window and ends backend without drawing",
               !live && _sapp_tc.app.quit_ordered && consulted==0 && acquired==0 && presents==0);
         changed=false; renewalOk=true; _sapp_tc.app.quit_ordered=false;
+    }
+    for (bool hidden : {false,true}) {
+        Native w; live=&w; w.desc={callback,&w}; w.desc.hidden=hidden;
+        eventDriven=true; changed=false; redrawPending=0; presents=0; events.clear();
+        configure_notify(nullptr,100,80);
+        configure_notify(&w,w.fb_width,w.fb_height);
+        check("X11 same-size configure does not request redraw", redrawPending==0);
+        for (int i=0; i<5; ++i) {
+            configure_notify(&w,100,80);
+            configure_notify(&w,w.fb_width,w.fb_height);
+        }
+        check("X11 transient configure coalesces two frames for requested-visible only",
+              redrawPending==(hidden?0:2) && events.empty() && !w.surface_resize_pending);
+        for (int i=0; i<7; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 transient between polls presents twice without public RESIZED",
+              presents==(hidden?0:2) && redrawPending==0 && events.empty() &&
+              w.fb_width==1600 && w.fb_height==865);
+        presents=0;
+        configure_notify(&w,w.fb_width,80);
+        check("X11 height-only configure requests resize redraw", redrawPending==(hidden?0:2));
+        eventDriven=false;
     }
     for (bool role : {false,true}) for (bool trust : {false,true})
     for (bool hidden : {false,true}) for (bool pending : {false,true}) {
@@ -1883,6 +1911,10 @@ if '--mutations' in sys.argv[3:]:
             '_sapp_tc_x11_sync_visibility(w);', ''),
         'x11-no-visibility-timeout': change('static void _sapp_tc_x11_sync_visibility(',
             'if (_sapp_tc_now() - w->visibility_started < 0.5) return;', 'return;'),
+        'x11-no-transient-configure-redraw': change('case ConfigureNotify: {',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);', ''),
+        'x11-hidden-configure-redraw': change('case ConfigureNotify: {',
+            'w && !w->desc.hidden &&', 'w &&'),
         'x11-no-resize-redraw': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
             '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);', ''),
         'x11-resize-only-one-frame': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
