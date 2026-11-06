@@ -1522,7 +1522,7 @@ HRESULT SwapChain::Present(UINT,UINT flags) {
     ++win::presents; return win::present_result;
 }
 namespace x11 {
-constexpr int SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=99;
+constexpr int SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=99, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED=100;
 Native* live = nullptr;
 Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? live : nullptr; }
 struct { double refresh_period=.017; int WM_STATE=1, display=2, screen=0, NET_WM_STATE=3, NET_WM_STATE_FULLSCREEN=4; struct { bool quit_ordered=false; } app; } _sapp_tc;
@@ -1539,7 +1539,8 @@ void _sapp_tc_x11_send_event(int,int,long op,long,long,long,long) {
 int XWithdrawWindow(int,int,int) { ++withdrawals; mapped=false; return 1; }
 ''' + extract('static void _sapp_tc_x11_set_fullscreen(') + r'''
 bool changed=false, closeOnResize=false, closeOnTick=false, hideOnTick=false, reenter=false, renewalOk=true;
-bool eventDriven=false, redrawPending=false;
+bool eventDriven=false;
+int redrawPending=0;
 void _sapp_tc_x11_init_client() {} // admission covered by host-entry-test
 static void _sapp_tc_x11_tick(Native*);
 std::vector<int> events;
@@ -1555,7 +1556,9 @@ bool _sapp_tc_x11_update_dimensions(Native*) { ++polls; return changed; }
 bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
 void _sapp_tc_x11_swap(Native*) { ++presents; }
 void _sapp_tc_x11_app_event(Native*,int type) {
-    if (type==SAPP_EVENTTYPE_TC_REDRAW_REQUESTED) { redrawPending=true; return; }
+    if (type==SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || type==SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED) {
+        redrawPending=std::max(redrawPending, type==SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED ? 2 : 1); return;
+    }
     events.push_back(type); if (closeOnResize) live=nullptr;
 }
 int _sapp_tc_x11_get_window_state(Native*) { return state; }
@@ -1567,7 +1570,7 @@ void callback(sapp_window,void* user) {
     if (hideOnTick) w->desc.hidden=true;
     if (eventDriven) {
         const bool drawn = !w->desc.hidden && redrawPending;
-        if (drawn) redrawPending=false;
+        if (drawn) --redrawPending;
         if (!drawn) w->skip_present=true;
     }
     ++updates; // #997: every delivered tick updates, hidden or not
@@ -1611,9 +1614,17 @@ void run() {
         _sapp_tc_x11_tick(&w);
         changed=false;
         check("X11 EVENT_DRIVEN resize presents requested-visible content", presents==int(!hidden));
-        check("X11 resize keeps public event and consumes coalesced redraw", events==std::vector<int>{SAPP_EVENTTYPE_RESIZED} && !redrawPending);
+        check("X11 resize asks for two frames and keeps public event", events==std::vector<int>{SAPP_EVENTTYPE_RESIZED} && redrawPending==int(!hidden));
+        _sapp_tc_x11_tick(&w);
+        check("X11 resize follow-up presents on the next tick", presents==2*int(!hidden) && !redrawPending);
         for (int i=0; i<5; ++i) _sapp_tc_x11_tick(&w);
-        check("X11 unchanged size does not cause redraw storm", presents==int(!hidden));
+        check("X11 unchanged size does not cause redraw storm", presents==2*int(!hidden));
+        // Repeated interactive resizes replace the pending count rather than add.
+        presents=0; changed=true;
+        for (int i=0; i<5; ++i) _sapp_tc_x11_tick(&w);
+        changed=false;
+        for (int i=0; i<5; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 resize requests coalesce during interactive resize", presents==6*int(!hidden) && !redrawPending);
         eventDriven=false;
     }
     for (bool role : {false,true}) for (bool trust : {false,true}) {
@@ -1873,7 +1884,10 @@ if '--mutations' in sys.argv[3:]:
         'x11-no-visibility-timeout': change('static void _sapp_tc_x11_sync_visibility(',
             'if (_sapp_tc_now() - w->visibility_started < 0.5) return;', 'return;'),
         'x11-no-resize-redraw': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
-            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);', ''),
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);', ''),
+        'x11-resize-only-one-frame': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);'),
         'x11-hidden-resize-redraw': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
             'if (!w->desc.hidden) {', 'if (true) {'),
         'x11-no-map-redraw': change('case MapNotify: {',

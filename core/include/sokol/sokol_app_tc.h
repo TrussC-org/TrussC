@@ -1520,6 +1520,7 @@ typedef enum sapp_event_type {
     SAPP_EVENTTYPE_FILES_DROPPED,
     SAPP_EVENTTYPE_TC_DEVICE_LOST,      // TrussC: shared D3D11 device lost (once per run)
     SAPP_EVENTTYPE_TC_REDRAW_REQUESTED, // TrussC: native content invalidation
+    SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED, // TrussC: native resize needs a follow-up present
     _SAPP_EVENTTYPE_NUM,
     _SAPP_EVENTTYPE_FORCE_U32 = 0x7FFFFFFF
 } sapp_event_type;
@@ -12345,9 +12346,10 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
             _sapp_tc.app.quit_ordered = true;
             return;
         }
-        // Mapping and a later WM resize can land on separate EVENT_DRIVEN ticks.
+        // DRI3 may still acquire an old-sized buffer on the first resize present.
+        // Request a follow-up on the next tick, coalesced by the Runtime.
         if (!w->desc.hidden) {
-            _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);
+            _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);
             // The event callback may have destroyed this window.
             if (_sapp_tc_lookup(handle) != w) return;
         }

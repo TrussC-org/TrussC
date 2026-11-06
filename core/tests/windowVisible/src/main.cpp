@@ -319,7 +319,7 @@ struct Probe : App {
             check("EVENT_DRIVEN shown pixels contain new blue content", visibilityBluePixel(sapp_x11_get_display(), xwindow(*secondary)));
             const int resumedPresents = visibilitySwapCount(xwindow(*secondary)) - swapsBeforeHide;
             std::printf("windowVisible: EVENT_DRIVEN presentations after show: %d\n", resumedPresents);
-            // One pending redraw plus coalesced native map/size invalidations.
+            // One pending redraw plus one per map and two per size change.
             const int invalidations = visibilityInvalidationCount(xwindow(*secondary)) - invalidationsBeforeShow;
             check("EVENT_DRIVEN show presents without a redraw storm", resumedPresents >= 1 && resumedPresents <= 1 + invalidations &&
                 secondaryDraws == savedSecondaryDraws + resumedPresents &&

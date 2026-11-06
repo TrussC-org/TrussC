@@ -1190,8 +1190,11 @@ presentation, and checks that no map request occurs before first show or
 from hidden bringToFront. X11 map/unmap assertions poll for up to two seconds
 to allow WM processing. An EVENT_DRIVEN case requests one redraw before hiding,
 then checks that showing presents without another app redraw request. X11 also
-reads the shown window's new blue pixels and allows one post-map redraw after an
-early present. A same-update show/hide must converge to unmapped within 500 ms;
+reads the shown window's new blue pixels, allows one post-map redraw after an
+early present, and accounts for two coalesced frames per visible size change. Its
+final-size check requires a matching completed present after the last
+ConfigureNotify, including same-size notifications, so a pre-hide frame cannot
+satisfy it. A same-update show/hide must converge to unmapped within 500 ms;
 the map completes before the queued withdrawal. The X11 visSeq cases run
 `H SH S H S`, `H S/H S H S` (hide on the next update), and ten consecutive-update
 toggles ending both visible and hidden. Each sequence polls through normal updates

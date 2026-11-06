@@ -2,6 +2,7 @@
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <thread>
@@ -12,6 +13,7 @@
 namespace {
 auto& maps() { static std::unordered_map<unsigned long, int> counts; return counts; }
 auto& invalidations() { static std::unordered_map<unsigned long, int> counts; return counts; }
+auto& swapsAtLastConfigure() { static std::unordered_map<unsigned long, int> counts; return counts; }
 auto& configuredSizes() { static std::unordered_map<unsigned long, std::pair<int, int>> sizes; return sizes; }
 int nativeSwaps = 0;
 int frameWidth = 0, frameHeight = 0, presentedWidth = 0, presentedHeight = 0;
@@ -28,9 +30,10 @@ extern "C" int __wrap_XNextEvent(Display* display, XEvent* event) {
     const int result = __real_XNextEvent(display, event);
     if (event->type == MapNotify) ++invalidations()[event->xmap.window];
     if (event->type == ConfigureNotify) {
+        swapsAtLastConfigure()[event->xconfigure.window] = nativeSwaps;
         auto& previous = configuredSizes()[event->xconfigure.window];
         const auto size = std::make_pair(event->xconfigure.width, event->xconfigure.height);
-        if (previous != size) { previous = size; ++invalidations()[event->xconfigure.window]; }
+        if (previous != size) { previous = size; invalidations()[event->xconfigure.window] += 2; }
     }
     if (event->type == UnmapNotify) {
         std::printf("windowVisible: UnmapNotify client=0x%lx event=0x%lx synthetic=%d\n",
@@ -46,14 +49,15 @@ extern "C" int __wrap_XMapRaised(Display* display, ::Window window) {
 #if defined(SOKOL_GLES3)
 extern "C" EGLBoolean __real_eglSwapBuffers(EGLDisplay, EGLSurface);
 extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay display, EGLSurface surface) {
-    recordPresent();
-    return __real_eglSwapBuffers(display, surface);
+    const auto result = __real_eglSwapBuffers(display, surface);
+    if (result == EGL_TRUE) recordPresent();
+    return result;
 }
 #else
 extern "C" void __real_glXSwapBuffers(Display*, unsigned long);
 extern "C" void __wrap_glXSwapBuffers(Display* display, unsigned long window) {
-    recordPresent();
     __real_glXSwapBuffers(display, window);
+    recordPresent();
 }
 #endif
 // The main window stays hidden during every swap-count assertion. Count surfaces
@@ -70,7 +74,8 @@ bool visibilityFinalSizePresented(const void* rawDisplay, unsigned long window, 
     if (fullscreen && XInternAtom(display, "_NET_SUPPORTING_WM_CHECK", True) != None &&
         (attrs.width != DisplayWidth(display, DefaultScreen(display)) ||
          attrs.height != DisplayHeight(display, DefaultScreen(display)))) return false;
-    return nativeSwaps > since && presentedWidth == attrs.width && presentedHeight == attrs.height;
+    // A matching pre-hide present cannot satisfy a later ConfigureNotify.
+    return nativeSwaps > std::max(since, swapsAtLastConfigure()[window]) && presentedWidth == attrs.width && presentedHeight == attrs.height;
 }
 bool visibilityMapped(const void* display, unsigned long window) {
     XWindowAttributes attrs{};

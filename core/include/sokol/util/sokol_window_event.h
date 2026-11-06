@@ -17,6 +17,7 @@ static inline bool _sapp_tc_event_wakes(sapp_event_type type) {
         case SAPP_EVENTTYPE_SUSPENDED: case SAPP_EVENTTYPE_RESUMED:
         case SAPP_EVENTTYPE_QUIT_REQUESTED: case SAPP_EVENTTYPE_TC_DEVICE_LOST:
         case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
+        case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
         case _SAPP_EVENTTYPE_NUM: case _SAPP_EVENTTYPE_FORCE_U32: return false;
     }
     return false;
@@ -68,6 +69,7 @@ static inline bool _sapp_tc_valid_injected_event(const sapp_event& e) {
         case SAPP_EVENTTYPE_SUSPENDED: case SAPP_EVENTTYPE_RESUMED: case SAPP_EVENTTYPE_QUIT_REQUESTED:
         case SAPP_EVENTTYPE_CLIPBOARD_PASTED: case SAPP_EVENTTYPE_FILES_DROPPED: case SAPP_EVENTTYPE_TC_DEVICE_LOST:
         case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
+        case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
         case _SAPP_EVENTTYPE_NUM: case _SAPP_EVENTTYPE_FORCE_U32: return false;
     }
     return false;
