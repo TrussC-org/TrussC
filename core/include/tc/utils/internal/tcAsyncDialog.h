@@ -27,6 +27,11 @@ void cancelAsyncDialogs();
 // Host-owned seam; nullptr restores the platform presenter.
 void setDialogPresenterForTests(DialogPresenter);
 
+#if defined(__APPLE__) && TARGET_OS_OSX
+// EXIT_PROTOCOL is the only synchronous completion boundary.
+bool completingMacDialogsForQuit();
+#endif
+
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 void pumpLinuxDialogs();
 #endif

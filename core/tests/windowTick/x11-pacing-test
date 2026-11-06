@@ -38,6 +38,7 @@ QUIT_RESULT
 struct _sapp_tc_window_t {
     bool is_main=false, ready=true, constructing=false, surface_resize_pending=false, in_tick=false, close_requested=false, input_delivered=false;
     int drawable=1, frame_count=0, swap_interval=0, win_id=1, visibility_op=0;
+    int requested_swap_interval=1, pacing_ticks=0;
     bool draw_while_hidden=true, skip_present=false;
     double earliest_next=0, frame_duration=0, last_present=0;
     bool last_tick_presented=false;
@@ -54,7 +55,7 @@ static double clockValue=10, period=1.0/62.0, tail=0;
 static int limit=620;
 static bool queued=false, nonblocking=false, hideMain=false, iconMain=false, hideAfterSecondary=false;
 static double mainPeriod=0, nextMain=0, previousSecondary=0, minSecondaryGap=100;
-static int secondaryDraws=0, mainWaits=0;
+static int secondaryDraws=0, mainWaits=0, secondaryPresents=0, pacingOpportunities=0;
 static double drawAccumulator=0, previousDrawTick=0, callbackWork=0;
 static double throttledRefresh=0, switchTime=0;
 static int switchSecondary=0;
@@ -117,6 +118,7 @@ void _sapp_tc_x11_swap(_sapp_tc_window_t* w) {
         clockValue+=nonblocking ? .00005 : (queued ? (w->frame_count%2 ? 0 : 2*period) : period);
         if(w->frame_count==limit) _sapp_tc.app.quit_ordered=true;
     } else {
+        ++secondaryPresents;
         clockValue+=tail;
         if (hideAfterSecondary) hideMain=true;
     }
@@ -126,6 +128,47 @@ TICK
 LOOP
 int main() {
     int failures=0;
+    // Count exact admission opportunities through the production loop. The
+    // callback runs only on admitted ticks, so the gallery's measured fps agrees.
+    for (bool timer : {false,true}) for (int interval : {1,2,3}) {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=timer?nullptr:&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=timer?nullptr:&main; main.is_main=true; main.swap_interval=1;
+        secondary.win_id=2; secondary.requested_swap_interval=interval;
+        clockValue=10; tail=0; queued=false; secondaryPresents=0; pacingOpportunities=0;
+        _sapp_tc.app.desc._tc_after_turn=[]() {
+            // One main presentation or due refresh timer per simulated turn.
+            if (++pacingOpportunities==12) _sapp_tc.app.quit_ordered=true;
+        };
+        secondary.desc.tick_cb=[](sapp_window,void*) noexcept {
+            const auto* s=_sapp_tc.windows[1];
+            if (pacingOpportunities+1!=(s->frame_count+1)*s->requested_swap_interval)
+                secondaryPresents=-1000;
+        };
+        _sapp_tc_x11_run_loop();
+        const bool ok=secondary.frame_count==12/interval && secondaryPresents==12/interval
+            && (timer || main.frame_count==12);
+        std::printf("requested interval=%d timer=%d main=%d ticks=%d presents=%d: %s\n",
+            interval,timer,main.frame_count,secondary.frame_count,secondaryPresents,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
+    // A partial count survives losing the main source. First credit follows
+    // a main present, second credit is a timer deadline with the main absent.
+    {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=&main; main.is_main=true; main.swap_interval=1;
+        secondary.win_id=2; secondary.requested_swap_interval=2;
+        clockValue=10; secondaryPresents=0;
+        _sapp_tc.app.desc._tc_after_turn=[]() {
+            if (_sapp_tc.app.main) { _sapp_tc.app.main=nullptr; _sapp_tc.windows[0]=nullptr; }
+            else _sapp_tc.app.quit_ordered=true;
+        };
+        _sapp_tc_x11_run_loop();
+        const bool ok=main.frame_count==1 && secondary.frame_count==1 && secondaryPresents==1;
+        std::printf("interval count survives main-to-timer handoff: %s\n",ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
     for (bool burst : {false, true}) for (double work : {0.0, .0001, .001}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
