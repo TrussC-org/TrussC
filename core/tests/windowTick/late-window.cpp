@@ -9,17 +9,9 @@
 #include <barrier>
 #include <thread>
 using namespace tc;
-#if defined(TC_LATE_MAC_DELETER)
-#include "late-mac-deleter.h"
-#endif
 namespace {
 std::shared_ptr<Window> makeRetainedWindow() {
-    auto* window = new Window();
-#if defined(TC_LATE_MAC_DELETER)
-    return std::shared_ptr<Window>(window, internal::lateMacWindowDeleter);
-#else
-    return std::shared_ptr<Window>(window);
-#endif
+    return std::make_shared<Window>();
 }
 constinit std::atomic<bool> forbidLateCalls{false};
 bool allowLateCalls = false;
@@ -76,7 +68,9 @@ struct RestartFirst : App {
         retainedLight = std::make_unique<Light>();
         retainedMaterial = std::make_unique<Material>();
         retainedEnvironment = std::make_unique<Environment>();
-        for (auto* ctx : {&internal::nonWindowContext(), &trussc::internal::WindowRequestAccess::context(*internal::resolveWindow()), &trussc::internal::WindowRequestAccess::context(*retained)}) {
+        // Headless Apps have no Window; exercise the process context and the
+        // explicitly retained Window instead of resolving an implicit main.
+        for (auto* ctx : {&internal::nonWindowContext(), &trussc::internal::WindowRequestAccess::context(*retained)}) {
             ctx->activeLights.push_back(retainedLight.get());
             ctx->currentMaterial = retainedMaterial.get();
             ctx->currentEnvironment = retainedEnvironment.get();
@@ -98,7 +92,6 @@ struct RestartFirst : App {
                 ctx.currentEnvironment = concurrentObjects.front().front().environment.get();
             };
             populate(internal::nonWindowContext());
-            populate(trussc::internal::WindowRequestAccess::context(*internal::resolveWindow()));
             populate(trussc::internal::WindowRequestAccess::context(*retained));
             for (auto& batch : concurrentObjects) for (auto& objects : batch) populate(trussc::internal::WindowRequestAccess::context(*objects.window));
         }
@@ -113,7 +106,6 @@ struct RestartSecond : App {
                      "Image registry empty after restart");
         restartCheck(internal::openWindows().size() == initialWindows, "window registry empty after restart");
         checkLighting(internal::nonWindowContext());
-        checkLighting(trussc::internal::WindowRequestAccess::context(*internal::resolveWindow()));
         exitApp();
     }
 };
@@ -178,7 +170,13 @@ extern "C" internal::WindowContext& realCurrentWindowContext() asm("__real__ZN6t
 extern "C" internal::WindowContext& wrapCurrentWindowContext() asm("__wrap__ZN6trussc8internal20currentWindowContextEv");
 extern "C" internal::WindowContext& wrapCurrentWindowContext() { checkLateCall("currentWindowContext"); return realCurrentWindowContext(); }
 extern "C" bool __real_sg_isvalid(void);
-extern "C" bool __wrap_sg_isvalid(void) { checkLateCall("sg_isvalid"); return __real_sg_isvalid(); }
+extern "C" bool __wrap_sg_isvalid(void) {
+    // This is a CPU flag read, used by current resource destructors to avoid
+    // GPU work after shutdown. A live device after the runner is still wrong.
+    const bool valid = __real_sg_isvalid();
+    if (valid) checkLateCall("live graphics after runner");
+    return valid;
+}
 extern "C" sgl_context __real_sgl_default_context(void);
 extern "C" sgl_context __wrap_sgl_default_context(void) { checkLateCall("sgl_default_context"); return __real_sgl_default_context(); }
 extern "C" void __real_sg_destroy_buffer(sg_buffer);
@@ -254,7 +252,7 @@ int main(int argc, char** argv) {
     allowLateCalls = mutation && std::strcmp(mutation, "baseline") != 0;
     forbidLateCalls.store(true, std::memory_order_release);
     if (result || !retained || (std::strcmp(mode, "headless") != 0 &&
-        (secondaryDraws == 0 || mainExits != 1 || !retained->isOpen()))) return 1;
+        (secondaryDraws == 0 || mainExits != 1 || retained->isOpen()))) return 1;
     std::printf("late-window: stopped=%d\n", internal::frameworkShutdown());
     if (std::strcmp(mode, "static") == 0) return 0;
     if (std::strcmp(mode, "thread") == 0) { std::thread worker(release); worker.join(); }
