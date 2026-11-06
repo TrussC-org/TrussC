@@ -42,7 +42,7 @@ struct _sapp_tc_window_t {
     double earliest_next=0, frame_duration=0, last_present=0;
     bool last_tick_presented=false;
     struct { double smooth_dt=1.0/62.0, last=0; } timing;
-    struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; } desc;
+    struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; bool hidden=false; } desc;
 };
 struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; } desc; bool init_called=true, quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
 struct { App app; int display=0; size_t window_slots=2; double refresh_period=1.0/62.0;

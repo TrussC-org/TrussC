@@ -1,0 +1,1 @@
+# Native map interception must be isolated from other core tests.

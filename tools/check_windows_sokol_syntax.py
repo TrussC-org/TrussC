@@ -51,6 +51,7 @@ def main():
                      'core/include/tc/app/tcExit.cpp',
                      'core/include/tc/app/tcWindowRuntime.cpp',
                      'core/tests/osExit/src/main.cpp',
+                     'core/tests/windowVisible/src/main.cpp',
                      'core/tests/nativeWindow/win32.cpp'):
         path = root / relative
         print('Checking Windows Runtime TU:', relative, flush=True)

@@ -1172,3 +1172,29 @@ one shared deadline. Busy main-stack commits call no App exit and arm no watchdo
 workers alone retain idle veto behavior. `native-test.py` compiles the mac busy
 probe through `_exit` on Linux. The explicit `--mac-device` probe covers idle and
 busy-no-exit Apple events; real logout remains a supervised device pass.
+
+### Requested window visibility (#1262)
+
+`windowVisible` is an own-binary probe because it intercepts X11 map requests.
+Its console mode checks settings defaults/chaining, closed-handle visibility,
+and a Notice on every unsupported visibility call without X11.
+Run `windowVisible --display` on a desktop (Xvfb on Linux) to check hidden launch,
+hidden secondary creation, requested state, occlusion, continuing updates, stopped
+drawing, no quit when every window is hidden, and repeated show/hide. It starts
+borderless, changes decoration while hidden, and checks hidden bringToFront,
+including a Notice on every call directing the caller to setVisible(true).
+It hides from App::draw with synchronized updates, and from draw and onRender
+listeners with independent updates, checking that none of those frames completes. On X11 it also
+counts native swaps, including a hide from afterFrame immediately before native
+presentation, and checks that no map request occurs before first show or
+from hidden bringToFront. An EVENT_DRIVEN case requests one redraw before hiding,
+then checks that showing completes and presents it exactly once without another
+redraw request. `--start-visible`
+checks visible launch followed by hiding; `--fullscreen` checks hidden fullscreen
+creation and repeated showing. Each display mode prints `windowVisible verdict:
+PASS` or `FAIL`, including from macOS cleanup before process termination.
+
+Device checks: run these modes on macOS, Windows, GNOME/XWayland and Pi X11/EGL.
+On macOS also check the last window's close button with quitOnClose on and off,
+Cmd+Q / app-menu Quit, and supervised logout. Hiding during a native fullscreen
+transition or a modal loop is outside this probe's ordinary-use coverage.

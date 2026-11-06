@@ -4869,6 +4869,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<const Window>().isFullscreen();
         (void)af::val<const Window>().isOccluded();
         (void)af::val<const Window>().isOpen();
+        (void)af::val<const Window>().isVisible();
         (void)af::val<Window>().setClearColor(af::val<const Color>());
         (void)af::val<Window>().setFps(af::val<float>());
         (void)af::val<Window>().setFullscreen(af::val<bool>());
@@ -4879,6 +4880,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<Window>().setQuitOnClose(af::val<bool>());
         (void)af::val<Window>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<Window>().setTitle(af::val<const std::string>());
+        (void)af::val<Window>().setVisible(af::val<bool>());
         (void)af::val<Window>().toggleFullscreen();
     }
 };
@@ -4910,9 +4912,11 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().setSize(af::val<int>(), af::val<int>());
         (void)af::val<WindowSettings>().setSwapInterval(af::val<int>());
         (void)af::val<WindowSettings>().setTitle(af::val<const std::string>());
+        (void)af::val<WindowSettings>().setVisible(af::val<bool>());
         (void)af::val<WindowSettings>().shaderPoolSize;
         (void)af::val<WindowSettings>().swapInterval;
         (void)af::val<WindowSettings>().title;
+        (void)af::val<WindowSettings>().visible;
         (void)af::val<WindowSettings>().width;
     }
 };

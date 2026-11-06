@@ -69,6 +69,7 @@ struct WindowBinding {
     // Last attempted aggregate visibility, initially visible. Snapshot publication
     // never consumes its delivery.
     bool lastDeliveredHidden = false;
+    bool explicitHideSuspended = false; // only explicit hiding recovers after OS trust opt-out
     bool visibilityReady = false;
     // Last focus state reported by the OS for this window (see Window::isFocused()).
     bool focused = false;

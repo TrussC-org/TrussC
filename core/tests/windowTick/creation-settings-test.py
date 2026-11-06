@@ -87,17 +87,18 @@ def generate(backend, variant):
     elif variant == 'record_interval':
         constructor = replace_once(constructor, 'w->swap_interval = d->swap_interval;', 'w->swap_interval = 1;')
     elif variant == 'constructor_fullscreen':
-        constructor = replace_once(constructor, 'if (d->fullscreen)', 'if (false && d->fullscreen)')
+        condition = 'if (d->fullscreen && !w->desc.hidden)' if port == 'x11' else 'if (d->fullscreen)'
+        constructor = replace_once(constructor, condition, 'if (false && d->fullscreen)')
     elif variant == 'fullscreen_order':
         if backend == 'mac':
             request = body(constructor, '    if (d->fullscreen) {')
-            show = '    [window makeKeyAndOrderFront:nil];\n'
+            show = '    if (!w->desc.hidden) [window makeKeyAndOrderFront:nil];\n'
         elif backend == 'win':
             request = '    if (d->fullscreen) _sapp_tc_win32_set_fullscreen(w, true, SWP_HIDEWINDOW);\n'
-            show = '    ShowWindow(w->hwnd, SW_SHOW);\n'
+            show = '    if (!w->desc.hidden) ShowWindow(w->hwnd, SW_SHOW);\n'
         else:
-            request = '    _sapp_tc_x11_show_window(w);\n'
-            show = '    if (d->fullscreen) {'
+            request = '    if (!w->desc.hidden) _sapp_tc_x11_show_window(w);\n'
+            show = '    if (d->fullscreen && !w->desc.hidden) {'
         constructor = replace_once(constructor, request, '')
         constructor = replace_once(constructor, show, request + show if backend == 'mac' else show + request)
     elif variant == 'mac_show_before_init':
@@ -112,7 +113,7 @@ def generate(backend, variant):
     if port == 'x11' and variant == 'fullscreen_order':
         # In this mutant mapping happens inside the fullscreen block, after
         # the fullscreen request. Windowed windows still need to be shown.
-        constructor = replace_once(constructor, '    _sapp_tc_x11_show_window(w);\n', '')
+        constructor = replace_once(constructor, '    if (!w->desc.hidden) _sapp_tc_x11_show_window(w);\n', '')
         constructor = replace_once(constructor, '        _sapp_tc_x11_update_dimensions(w);',
                                    '        _sapp_tc_x11_show_window(w);\n        _sapp_tc_x11_update_dimensions(w);')
         constructor = replace_once(constructor, '    return w;', '    if (!d->fullscreen) _sapp_tc_x11_show_window(w);\n    return w;')
@@ -120,16 +121,16 @@ def generate(backend, variant):
         if variant == 'mac_pre_show_toggle':
             request_block = body(constructor, '    if (d->fullscreen) {')
             constructor = replace_once(constructor, request_block, '')
-            constructor = replace_once(constructor, '    [window makeKeyAndOrderFront:nil];',
-                                       request_block + '    [window makeKeyAndOrderFront:nil];')
+            constructor = replace_once(constructor, '    if (!w->desc.hidden) [window makeKeyAndOrderFront:nil];',
+                                       request_block + '    if (!w->desc.hidden) [window makeKeyAndOrderFront:nil];')
         constructor = mac_api(constructor)
         request = body(NATIVE, 'static void _sapp_tc_request_fullscreen(')
         request = replace_once(request, '[w->window toggleFullScreen:nil]', 'native_toggle(w)')
         if variant == 'mac_pre_show_toggle':
-            request = replace_once(request, 'request(full, _sapp_tc.constructing > 0)', 'request(full)')
+            request = replace_once(request, 'request(full, _sapp_tc.constructing > 0 || w->desc.hidden)', 'request(full)')
         elif variant == 'mac_desired':
-            request = replace_once(request, 'if (!w->fullscreen_state.request(full, _sapp_tc.constructing > 0)) return;',
-                'const bool start = w->fullscreen_state.request(full, _sapp_tc.constructing > 0);\n'
+            request = replace_once(request, 'if (!w->fullscreen_state.request(full, _sapp_tc.constructing > 0 || w->desc.hidden)) return;',
+                'const bool start = w->fullscreen_state.request(full, _sapp_tc.constructing > 0 || w->desc.hidden);\n'
                 '    w->fullscreen_state.desired = false;\n    if (!start) return;')
         reconcile = body(NATIVE, 'static void _sapp_tc_reconcile_fullscreen(')
         reconcile = replace_once(reconcile, '[w->window toggleFullScreen:nil]', 'native_toggle(w)')

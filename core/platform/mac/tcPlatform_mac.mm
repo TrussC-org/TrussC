@@ -137,7 +137,7 @@ void setWindowDecorated(bool decorated) {
     }
 
     // Re-assert key + first responder so mouse and keyboard keep flowing.
-    [window makeKeyAndOrderFront:nil];
+    if (target->isVisible()) [window makeKeyAndOrderFront:nil];
     [window makeFirstResponder:window.contentView];
 }
 

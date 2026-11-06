@@ -91,6 +91,13 @@ public:
     int getWidth() const;
     int getHeight() const;
 
+    // Hide/show without closing. Hidden windows keep updating and pause drawing
+    // by default. Desktop only; unsupported platforms log a Notice.
+    void setVisible(bool visible);
+    // Requested visibility, independent of minimization/occlusion and pending
+    // X11 mapping. False before native creation and after closing.
+    bool isVisible() const;
+
     // OS visibility snapshot used by the scheduler. Desktop backends expose
     // occlusion/minimization; unsupported visibility queries return false.
     bool isOccluded() const;
@@ -143,7 +150,8 @@ public:
 
     // Raise THIS window above the others and give it keyboard focus, whichever
     // window's callback is running (the global bringWindowToFront() targets
-    // the current window). A minimised window is restored. The OS may refuse
+    // the current window). A minimized window is restored. Explicitly hidden
+    // windows do nothing; call setVisible(true) first. The OS may refuse
     // to take focus from another application. No-op on a closed window, and
     // on iOS / Android / Web. The focus events it causes (focusChanged) can
     // arrive inside this call on Windows; on macOS and X11 they arrive later.
@@ -346,7 +354,8 @@ public:
     static const WindowBinding& binding(const Window& w) { return w.binding_; }
     static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.binding_.focused = false; w.ctx_.suspended = false; }
     static void resetForLaunch(Window& w) {
-        w.binding_.lastDeliveredHidden = false; w.binding_.visibilityReady = false; w.binding_.focused = false;
+        w.binding_.lastDeliveredHidden = false; w.binding_.explicitHideSuspended = false;
+        w.binding_.visibilityReady = false; w.binding_.focused = false;
         w.exitDelivered_ = false; w.closeRequested_ = false; w.ctx_.targetsClosed = false;
         w.ctx_.appEventListeners.clear(); w.appEventState_.reset(); w.appSizeSeeded_ = false;
         prepareInitialBindings(w); w.epoch_ = runtimeEpoch();
@@ -732,7 +741,9 @@ inline IVec2 Window::control(internal::WindowControl op, int x, int y, const std
                 if (ops.toggleFullscreen) ops.toggleFullscreen(*this);
                 break;
             case internal::WindowControl::BringToFront:
-                if (ops.bringToFront) ops.bringToFront(*this);
+                if (!isVisible()) {
+                    logNotice("Window") << "bringToFront() ignored: window is hidden; call setVisible(true) first";
+                } else if (ops.bringToFront) ops.bringToFront(*this);
                 break;
         }
         return result;
@@ -849,7 +860,7 @@ inline void Window::setIndependentFps(float updateFps, float drawFps) {
 }
 inline bool Window::isOccluded() const {
     const auto& m = binding_.metadata;
-    return isOpen() && m.trust_hidden_signals && (m.iconified || m.occluded);
+    return isOpen() && (m.hidden || (m.trust_hidden_signals && (m.iconified || m.occluded)));
 }
 
 inline bool Window::isFocused() const { return isOpen() && binding_.focused; }

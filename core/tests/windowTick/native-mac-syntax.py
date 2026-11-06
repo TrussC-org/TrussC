@@ -21,6 +21,7 @@ enum sapp_event_type { SAPP_EVENTTYPE_INVALID, SAPP_EVENTTYPE_ICONIFIED, SAPP_EV
 constexpr unsigned NSWindowOcclusionStateVisible = 1;
 struct Window { unsigned occlusionState; bool miniaturized; explicit operator bool() const { return true; } };
 struct _sapp_tc_window_t {
+    struct { bool hidden=false; } desc;
     Window window; bool link_suspended, trust_hidden_signals, occluded, iconified; uint32_t win_id;
 };
 static void _sapp_tc_mac_select_source(_sapp_tc_window_t*);
@@ -66,6 +67,7 @@ __attribute__((objc_root_class)) @interface NSObject @end
 @property bool miniaturized;
 @end
 struct _sapp_tc_window_t {
+    struct { bool hidden=false; } desc;
     NSWindow* window;
     bool link_suspended, trust_hidden_signals, occluded, iconified, fallback_active;
     uint32_t win_id;

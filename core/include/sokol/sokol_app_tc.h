@@ -2205,6 +2205,7 @@ typedef struct sapp_desc {
     // TrussC internal launch data: +1 draws while hidden, -1 pauses drawing.
     // Zero preserves legacy sapp launch behavior (draw while hidden).
     int _tc_draw_while_hidden;
+    bool _tc_start_hidden;           // [TrussC] never show the launch window before requested (#1262)
     // Host binding runs after native metadata initialization, before callback readiness.
     bool (*_tc_bind_cb)(uint32_t id, void* user);
     void* _tc_bind_user;
@@ -2445,6 +2446,7 @@ typedef struct sapp_window_desc {
     void (*close_cb)(sapp_window win, void* user);  /* user closed the window; call sapp_destroy_window() to accept */
     void* user_data;
     bool (*bind_cb)(uint32_t id, void* user);
+    bool hidden;                /* [TrussC] requested hide state, including during async X11 mapping (#1262) */
     bool fullscreen;            /* initial native fullscreen; preserves windowed restore geometry */
     int swap_interval;          /* macOS/Win32: 0 = default (1), positive = display interval;
                                   X11 secondaries use nonblocking swaps and main presentation admission,
@@ -2460,6 +2462,7 @@ typedef struct sapp_tc_window_metadata {
     float dpi_scale;
     sapp_pixel_format color_format, depth_format;
     bool trust_hidden_signals, iconified, occluded, drawable_available;
+    bool hidden;                /* [TrussC] explicit hide, independent of OS signal trust (#1262) */
     double source_interval;
     bool reliable_button_bits;
 } sapp_tc_window_metadata;
@@ -2495,6 +2498,9 @@ SOKOL_APP_API_DECL int sapp_window_sample_count(sapp_window win);
    Internal: zero queries the main window; unsupported queries return false. */
 SOKOL_APP_API_DECL bool sapp_window_occluded(sapp_window win);
 SOKOL_APP_API_DECL void sapp_window_set_title(sapp_window win, const char* title);
+// [TrussC] Requested visibility, separate from native occlusion (#1262).
+SOKOL_APP_API_DECL void sapp_tc_window_set_visible(sapp_window win, bool visible);
+SOKOL_APP_API_DECL bool sapp_tc_window_visible(sapp_window win);
 
 /* measured interval between this window's ticks in seconds (its display's
    refresh period; a best-effort estimate before the second tick) */
@@ -2670,6 +2676,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool draw_admitted;                 /* this tick may acquire a drawable */
     bool link_suspended;                /* AppKit stops the view's display link while not visible */
     bool suspended_sent;                /* last aggregate effective-hidden transition */
+    bool explicit_hide_suspended;        /* only explicit hiding recovers after OS trust opt-out */
     int callback_depth;                 /* client callbacks of this window on the stack */
     bool closed_pending;                /* closed natively while busy; close handling deferred */
     bool native_closed;                 /* the NSWindow closed; its close was handled (or is pending) */
@@ -2767,12 +2774,12 @@ static void _sapp_tc_request_fullscreen(_sapp_tc_window_t* w, bool full) {
     if (!w || !w->window) return;
     // Creation uses the runtime request entry, but lets a normal tick start
     // AppKit's animation after the constructor has shown and keyed the window.
-    if (!w->fullscreen_state.request(full, _sapp_tc.constructing > 0)) return;
+    if (!w->fullscreen_state.request(full, _sapp_tc.constructing > 0 || w->desc.hidden)) return;
     w->fullscreen = full;
     [w->window toggleFullScreen:nil];
 }
 static void _sapp_tc_reconcile_fullscreen(_sapp_tc_window_t* w) {
-    if (!w || !w->window || _sapp_tc.constructing > 0 || !w->fullscreen_state.reconcile()) return;
+    if (!w || !w->window || w->desc.hidden || _sapp_tc.constructing > 0 || !w->fullscreen_state.reconcile()) return;
     w->fullscreen = w->fullscreen_state.desired;
     [w->window toggleFullScreen:nil];
 }
@@ -3012,10 +3019,15 @@ static void _sapp_tc_mac_select_source(_sapp_tc_window_t* w) {
 /* Aggregate visibility belongs to the native record, independently of draw
    admission. Every window reports trusted effective-hidden transitions. */
 static void _sapp_tc_mac_update_suspension(_sapp_tc_window_t* w) {
-    if (!w->trust_hidden_signals) { w->suspended_sent = false; return; }
+    if (w->desc.hidden && w->suspended_sent) w->explicit_hide_suspended = true;
+    if (!w->trust_hidden_signals && !w->desc.hidden && !w->explicit_hide_suspended) {
+        w->suspended_sent = false;
+        return;
+    }
     const bool suspended = _sapp_tc_native_hidden(w);
     if (suspended == w->suspended_sent) return;
     w->suspended_sent = suspended;
+    w->explicit_hide_suspended = suspended && (w->desc.hidden || w->explicit_hide_suspended);
     _sapp_tc_send_type(w, suspended ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED);
 }
 
@@ -3030,7 +3042,7 @@ static void _sapp_tc_mac_observe(_sapp_tc_window_t* w, sapp_event_type detail, b
     // Activation/key rechecks must not latch the not-visible property while
     // makeKeyAndOrderFront is still publishing a new window.
     if (recovery_only && (occluded || iconified)) return;
-    w->link_suspended = occluded || iconified;
+    w->link_suspended = w->desc.hidden || occluded || iconified;
     if (w->trust_hidden_signals) {
         w->occluded = occluded;
         w->iconified = iconified;
@@ -4125,7 +4137,10 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
        close or quit runs until the constructor returns. */
     const uint32_t win_id = w->win_id;
     NSWindow* window = w->window;
-    [window makeKeyAndOrderFront:nil];
+    // [TrussC] Hidden startup must not order the window in, even for one frame (#1262).
+    w->link_suspended = w->desc.hidden;
+    _sapp_tc_mac_select_source(w);
+    if (!w->desc.hidden) [window makeKeyAndOrderFront:nil];
     if (!(w = _sapp_tc_mac_live(win_id))) {
         creation.removed();
         /* disposed from a notification inside the call, which then still
@@ -4138,7 +4153,7 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
        with the parent. Not modal: the parent still takes input. */
     if (w->desc.parent.id) {
         _sapp_tc_window_t* parent = _sapp_tc_lookup(w->desc.parent);
-        if (parent && parent->window && parent != w) [parent->window addChildWindow:window ordered:NSWindowAbove];
+        if (parent && parent->window && parent != w && !w->desc.hidden) [parent->window addChildWindow:window ordered:NSWindowAbove];
     }
     if (d->fullscreen) {
         _sapp_tc_request_fullscreen(w, true);
@@ -4297,19 +4312,22 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
     if (_sapp_tc.app.host_turn_observer)
         CFRunLoopAddObserver(CFRunLoopGetMain(), _sapp_tc.app.host_turn_observer, kCFRunLoopCommonModes);
     [NSEvent setMouseCoalescingEnabled:NO];
-    [NSApp activateIgnoringOtherApps:YES];
-    /* focus workaround (sokol #982): make sure the window has focus even if
-       the first tick's init callback blocks for a long time */
-    NSEvent* focusevent = [NSEvent otherEventWithType:NSEventTypeAppKitDefined
-        location:NSZeroPoint
-        modifierFlags:0
-        timestamp:0
-        windowNumber:0
-        context:nil
-        subtype:NSEventSubtypeApplicationActivated
-        data1:0
-        data2:0];
-    [NSApp postEvent:focusevent atStart:YES];
+    // [TrussC] A resident app must not activate or post focus on hidden launch (#1262).
+    if (!_sapp_tc.app.main->desc.hidden) {
+        [NSApp activateIgnoringOtherApps:YES];
+        /* focus workaround (sokol #982): make sure the window has focus even if
+           the first tick's init callback blocks for a long time */
+        NSEvent* focusevent = [NSEvent otherEventWithType:NSEventTypeAppKitDefined
+            location:NSZeroPoint
+            modifierFlags:0
+            timestamp:0
+            windowNumber:0
+            context:nil
+            subtype:NSEventSubtypeApplicationActivated
+            data1:0
+            data2:0];
+        [NSApp postEvent:focusevent atStart:YES];
+    }
 }
 - (void)applicationDidChangeScreenParameters:(NSNotification*)n {
     (void)n;
@@ -4325,7 +4343,8 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
     (void)sender;
-    return YES;
+    // [TrussC] Runtime owns close/quit policy; ordering out the last window must keep running (#1262).
+    return NO;
 }
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
     (void)sender;
@@ -7762,11 +7781,11 @@ static void _sapp_tc_win32_set_fullscreen(_sapp_tc_window_t* w, bool fullscreen,
         w->stored_ex_style = GetWindowLongPtrW(w->hwnd, GWL_EXSTYLE);
         w->restore_valid = true;
         rect = minfo.rcMonitor;
-        SetWindowLongPtrW(w->hwnd, GWL_STYLE, WS_POPUP | WS_SYSMENU | WS_VISIBLE);
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, WS_POPUP | WS_SYSMENU | (w->desc.hidden ? 0 : WS_VISIBLE));
     } else {
         if (!w->restore_valid) return;
         rect = w->stored_window_rect;
-        SetWindowLongPtrW(w->hwnd, GWL_STYLE, w->stored_style);
+        SetWindowLongPtrW(w->hwnd, GWL_STYLE, w->desc.hidden ? w->stored_style & ~WS_VISIBLE : w->stored_style);
         SetWindowLongPtrW(w->hwnd, GWL_EXSTYLE, w->stored_ex_style);
     }
     w->fullscreen = fullscreen;
@@ -7917,7 +7936,9 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     ++w->frame_count;
     const bool skip = w->skip_present;
     w->skip_present = false; // one-shot is consumed at the completed tick boundary, even on loss
-    if (admitted && !skip && !_sapp_tc.app.device_lost_notified) {
+    // Callbacks may explicitly hide a window after draw admission.
+    if (admitted && !skip && !_sapp_tc.app.device_lost_notified
+        && (w->draw_while_hidden || !w->desc.hidden)) {
         _sapp_tc_win32_swap(w);
         if (!(w = _sapp_tc_lookup(tick_handle)) || _sapp_tc.app.device_lost_notified) return;
     } else {
@@ -8395,7 +8416,7 @@ static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_des
     _sapp_tc.windows[slot] = w;
     if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) return nullptr;
     w->ready = true;
-    ShowWindow(w->hwnd, SW_SHOW);
+    if (!w->desc.hidden) ShowWindow(w->hwnd, SW_SHOW);
     // Showing may synchronously deliver a client event that destroys this creation.
     if (_sapp_tc_lookup(sapp_window{ id }) != w) { creation.removed(); return 0; }
     DragAcceptFiles(w->hwnd, TRUE);
@@ -8619,12 +8640,12 @@ uint32_t sapp_tc_window_fullscreen_phase(sapp_window win) {
 
 void sapp_tc_window_set_fullscreen(sapp_window win, bool full) {
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
-    _sapp_tc_win32_set_fullscreen(w, full, SWP_SHOWWINDOW);
+    _sapp_tc_win32_set_fullscreen(w, full, w && w->desc.hidden ? SWP_HIDEWINDOW : SWP_SHOWWINDOW);
 }
 
 void sapp_tc_window_toggle_fullscreen(sapp_window win) {
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
-    if (w) _sapp_tc_win32_set_fullscreen(w, !w->fullscreen, SWP_SHOWWINDOW);
+    if (w) _sapp_tc_win32_set_fullscreen(w, !w->fullscreen, w->desc.hidden ? SWP_HIDEWINDOW : SWP_SHOWWINDOW);
 }
 
 bool sapp_window_occluded(sapp_window win) {
@@ -11809,6 +11830,12 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
         XChangeProperty(_sapp_tc.display, w->xwin, _sapp_tc.xdnd.XdndAware, XA_ATOM,
                         32, PropModeReplace, (unsigned char*)&version, 1);
     }
+    /* [TrussC] Parent window: WM_TRANSIENT_FOR asks the window manager to keep
+       this window above its parent. It has to be set before the window is mapped. */
+    if (w->desc.parent.id) {
+        _sapp_tc_window_t* parent = _sapp_tc_lookup(w->desc.parent);
+        if (parent && parent != w && parent->xwin) XSetTransientForHint(_sapp_tc.display, w->xwin, parent->xwin);
+    }
     _sapp_tc_x11_update_window_title(w, title ? title : "TrussC");
     if (!_sapp_tc_x11_create_surface(w)) {
         _sapp_tc_log(&_sapp_tc.app.desc.logger, 1, (uint32_t)SAPP_LOGITEM_LINUX_GLX_CREATE_WINDOW_FAILED, __LINE__,
@@ -11820,12 +11847,6 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
 }
 
 static void _sapp_tc_x11_show_window(_sapp_tc_window_t* w) {
-    /* [TrussC] Parent window: WM_TRANSIENT_FOR asks the window manager to keep
-       this window above its parent. It has to be set before the window is mapped. */
-    if (w->desc.parent.id) {
-        _sapp_tc_window_t* parent = _sapp_tc_lookup(w->desc.parent);
-        if (parent && parent != w && parent->xwin) XSetTransientForHint(_sapp_tc.display, w->xwin, parent->xwin);
-    }
     XMapWindow(_sapp_tc.display, w->xwin);
     XEvent dummy;
     _sapp_tc_x11_wait_for_event(w->xwin, VisibilityNotify, 0.1, &dummy);
@@ -12050,9 +12071,13 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
                     SAPP_MOUSEBUTTON_INVALID, _sapp_tc_x11_mods(ev->xmotion.state));
             }
             break;
+        // [TrussC] Reapply fullscreen only after asynchronous mapping completes (#1262).
+        case MapNotify:
+            if (w && !w->desc.hidden) _sapp_tc_x11_set_fullscreen(w, w->fullscreen);
+            break;
         case PropertyNotify:
             _sapp_tc_x11_send_clipboard_chunk(ev->xproperty);
-            /* iconify/restore detection (there is no map/unmap handling) */
+            /* iconify/restore detection (explicit hiding uses desc.hidden) */
             if (w && w->trust_hidden_signals && (ev->xproperty.state == PropertyNewValue) &&
                 (ev->xproperty.atom == _sapp_tc.WM_STATE)) {
                 const bool was_hidden = _sapp_tc_native_hidden(w);
@@ -12202,6 +12227,7 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         if (w->desc.tick_cb) w->desc.tick_cb(handle, w->desc.user_data);
         if (_sapp_tc_lookup(handle) != w) return;
         ++w->frame_count;
+        w->skip_present = false; // Consume the one-shot at the completed hidden tick boundary.
         _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
         return;
     }
@@ -12215,7 +12241,8 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (_sapp_tc_lookup(handle) != w) return;
     ++w->frame_count;
     bool presented = false;
-    if (!w->skip_present
+    // Sample requested visibility after every client callback, just before swap.
+    if (!w->skip_present && (w->draw_while_hidden || !w->desc.hidden)
 #if defined(SOKOL_GLCORE)
         && !_sapp_tc_native_iconified(w)
 #endif
@@ -12476,9 +12503,10 @@ static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc*
     if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) return nullptr;
     w->ready = true;
     const sapp_window identity{w->win_id};
-    _sapp_tc_x11_show_window(w);
+    if (w->desc.hidden) w->fullscreen = d->fullscreen;
+    if (!w->desc.hidden) _sapp_tc_x11_show_window(w);
     if (_sapp_tc_lookup(identity) != w) { creation.removed(); return nullptr; }
-    if (d->fullscreen) {
+    if (d->fullscreen && !w->desc.hidden) {
         _sapp_tc_x11_set_fullscreen(w, true);
         if (_sapp_tc_lookup(identity) != w) { creation.removed(); return nullptr; }
         _sapp_tc_x11_update_dimensions(w);
@@ -18262,6 +18290,52 @@ extern "C" sapp_tc_gl_state sapp_tc_gl_save(void) { return {}; }
 extern "C" void sapp_tc_gl_restore(sapp_tc_gl_state) {}
 #endif
 
+// [TrussC] Hide/show preserves each native window and its tick sources (#1262).
+extern "C" void sapp_tc_window_set_visible(sapp_window win, bool visible) {
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+    auto* w = _sapp_tc_lookup(win);
+    if (!w || w->desc.hidden == !visible) return;
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX)
+    const sapp_window identity{w->win_id};
+#endif
+    w->desc.hidden = !visible;
+#if defined(__APPLE__) && TARGET_OS_OSX
+    if (visible) {
+        auto* parent = _sapp_tc_lookup(w->desc.parent);
+        if (parent && parent->window && parent != w)
+            [parent->window addChildWindow:w->window ordered:NSWindowAbove];
+        [w->window orderFront:nil];
+    } else {
+        // A hidden child must not be ordered in when its parent is shown.
+        NSWindow* parent = w->window.parentWindow;
+        if (parent) [parent removeChildWindow:w->window];
+        [w->window orderOut:nil];
+    }
+    if ((w = _sapp_tc_lookup(identity))) _sapp_tc_mac_observe(w);
+#elif defined(_WIN32)
+    ShowWindow(w->hwnd, visible ? SW_SHOWNA : SW_HIDE);
+    if ((w = _sapp_tc_lookup(identity)))
+        _sapp_tc_win32_app_event(w, visible ? SAPP_EVENTTYPE_RESUMED : SAPP_EVENTTYPE_SUSPENDED);
+#else
+    if (visible) XMapWindow(_sapp_tc.display, w->xwin);
+    else XUnmapWindow(_sapp_tc.display, w->xwin);
+    XFlush(_sapp_tc.display);
+    _sapp_tc_x11_app_event(w, visible ? SAPP_EVENTTYPE_RESUMED : SAPP_EVENTTYPE_SUSPENDED);
+#endif
+#else
+    (void)win; (void)visible;
+#endif
+}
+extern "C" bool sapp_tc_window_visible(sapp_window win) {
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+    const auto* w = _sapp_tc_lookup(win);
+    return w && !w->desc.hidden;
+#else
+    (void)win;
+    return sapp_isvalid();
+#endif
+}
+
 extern "C" bool sapp_tc_window_close_recorded(sapp_window win) {
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
     const auto* w = _sapp_tc_lookup(win);
@@ -18314,6 +18388,7 @@ extern "C" bool sapp_tc_window_read_metadata(sapp_window win, sapp_tc_window_met
     out->width = w->win_width; out->height = w->win_height;
     out->dpi_scale = w->dpi_scale; out->sample_count = w->desc.sample_count;
     out->color_format = w->color_format; out->depth_format = w->depth_format;
+    out->hidden = !sapp_tc_window_visible(win);
     out->trust_hidden_signals = w->trust_hidden_signals;
     out->iconified = w->iconified; out->occluded = w->occluded;
     out->drawable_available = w->fb_width > 0 && w->fb_height > 0 && !_sapp_tc_native_hidden(w);

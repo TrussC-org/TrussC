@@ -902,3 +902,34 @@ own window receiver. Drop capacities and rejection behavior are unchanged.
   instead of `UTF8_STRING` alone, as ICCCM expects. `TIMESTAMP` is not advertised
   (it would need the acquisition time to be tracked). One change covers the GLX and
   GLES3/EGL backends because the code is shared.
+
+## Window requested visibility (#1262)
+
+`sokol_app_tc.h` and `util/sokol_window_native.h` carry requested hide state
+separately from OS occlusion. Main and secondary constructors skip their native
+show operation for hidden creation. macOS selects its existing fallback tick
+source immediately for hidden startup, defers fullscreen until shown, and returns
+NO from `applicationShouldTerminateAfterLastWindowClosed:`; Runtime still owns
+last-window and quit-on-close termination. Explicitly hidden children attach to their parent only while shown, so parent
+ordering cannot expose them. The desktop visibility seam uses `orderOut:` / `orderFront:`,
+`ShowWindow(SW_HIDE/SW_SHOWNA)`, or `XUnmapWindow` / `XMapWindow`. X11 reapplies
+fullscreen on `MapNotify` and sets the parent hint before hidden creation can return. Windows fullscreen style changes retain explicit
+hidden state. Metadata and native drawable admission include explicit hiding even
+when OS hidden signals are disabled. Unsupported platform seams do nothing;
+TrussC's public API logs the Notice.
+
+Follow-up 1: macOS launch activation and its synthetic focus event are skipped
+when the launch window is requested hidden. Decoration changes preserve hiding;
+shared Window controls ignore bringToFront while explicitly hidden. Windows
+fullscreen entry and restore also clear WS_VISIBLE while requested hidden. Runtime
+rechecks requested visibility after draw callbacks and cancels hidden Metal
+drawables before taking the existing skip-present path. Unsupported visibility
+Notices use runtime-owned OnceGates.
+
+Follow-ups 2–4: unsupported visibility Notices are emitted on every call. X11
+and Windows recheck requested hiding at the native swap boundary, covering all
+client callbacks including afterFrame. Metal cancels hidden drawables immediately
+before authorization/commit in present(). Runtime keeps its frame-accounting
+check after present() and no longer checks visibility after draw callbacks.
+macOS preserves the base OS-only suspension reset on trust opt-out; explicit
+hides retain their matching recovery notification.

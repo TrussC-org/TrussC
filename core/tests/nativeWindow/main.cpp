@@ -11,7 +11,7 @@
 #include <thread>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
 namespace {
-int failures, callbacks, liveWindows, presents, resizeTicks;
+int failures, callbacks, liveWindows, presents, resizeTicks, mapRequests;
 bool failSurface, noHighDpi, didInitialize, coveredFirst;
 int launchHidden;
 Window firstXwin;
@@ -116,6 +116,27 @@ void initialized() {
             }
         }
         target->trust_hidden_signals = true;
+    }
+    // Exercise the same constructor and visibility seam with GLX and EGL.
+    auto hiddenDesc = desc;
+    hiddenDesc.hidden = true; hiddenDesc.fullscreen = true;
+    const int mapsBefore = mapRequests;
+    const sapp_window hidden = sapp_create_window(&hiddenDesc);
+    auto* hiddenNative = _sapp_tc_lookup(hidden);
+    check("start-hidden fullscreen window never maps", hiddenNative && mapRequests == mapsBefore &&
+        !sapp_tc_window_visible(hidden) && sapp_window_occluded(hidden));
+    if (hiddenNative) {
+        for (bool trust : {false, true}) {
+            hiddenNative->trust_hidden_signals = trust;
+            sapp_tc_window_set_visible(hidden, true);
+            check("show reports requested visibility", sapp_tc_window_visible(hidden));
+            sapp_tc_window_set_visible(hidden, false);
+            XWindowAttributes attrs{};
+            XGetWindowAttributes(_sapp_tc.display, hiddenNative->xwin, &attrs);
+            check("explicit hide unmaps regardless of OS signal trust", attrs.map_state == IsUnmapped &&
+                !sapp_tc_window_visible(hidden) && sapp_window_occluded(hidden));
+        }
+        sapp_destroy_window(hidden);
     }
     for (auto* target : {first, other}) {
         sapp_tc_window_set_fullscreen({target->win_id}, true);
@@ -245,6 +266,7 @@ extern "C" Window __wrap_XCreateWindow(Display* d, Window p, int x, int y, unsig
 }
 extern "C" int __real_XMapWindow(Display*, Window);
 extern "C" int __wrap_XMapWindow(Display* display, Window window) {
+    ++mapRequests;
     auto* native = _sapp_tc_lookup_xwin(window);
     check("published window has initial dimensions before mapping", native &&
         native->fb_width > 0 && native->fb_height > 0 && native->win_width > 0 && native->win_height > 0 &&

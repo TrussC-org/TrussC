@@ -2221,6 +2221,9 @@ struct WindowSettings {
     bool quitOnClose = false;
     WindowSettings& setQuitOnClose(bool enabled) { quitOnClose = enabled; return *this; }
     bool fullscreen = false;
+    bool visible = true;
+    // Desktop windows start hidden without being shown for even one frame.
+    WindowSettings& setVisible(bool enabled) { visible = enabled; return *this; }
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
     int swapInterval = 1;  // VSync: 1 = on (default), 0 = off
     // bool headless = false;  // For future use
@@ -2413,7 +2416,7 @@ namespace internal {
         }
 
         // Bring window to front on startup
-        bringWindowToFront();
+        if (!sapp_query_desc()._tc_start_hidden) bringWindowToFront();
 
         // App code (the App's constructor) runs here: an entry point (#349).
         if (appSetupFunc) {
@@ -2494,6 +2497,7 @@ inline sapp_window_desc buildNativeWindowDescriptor(const WindowSettings& settin
     d.borderless = !settings.decorated;
     d.no_high_dpi = !settings.highDpi;
     d.fullscreen = settings.fullscreen;
+    d.hidden = !settings.visible;
     d.swap_interval = settings.swapInterval;
     d.sample_count = settings.sampleCount;
     return d;
@@ -2531,6 +2535,8 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
     desc.high_dpi = !window.no_high_dpi;
     desc.sample_count = window.sample_count;
     desc.fullscreen = window.fullscreen;
+    if constexpr (Platform::isDesktop()) desc._tc_start_hidden = window.hidden;
+    else if (window.hidden) logNotice("Window") << "WindowSettings::setVisible(): unsupported on this platform";
     desc.swap_interval = window.swap_interval;
     // Admit setup and the first draw even when covered before the first tick.
     desc._tc_draw_while_hidden = 1;
