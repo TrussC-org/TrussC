@@ -1,4 +1,6 @@
 #define SOKOL_IMPL
+#define SOKOL_DEBUG
+#define SOKOL_VALIDATE_NON_FATAL
 #define SOKOL_DUMMY_BACKEND
 #define SOKOL_TRACE_HOOKS
 #include "sokol/sokol_gfx.h"
@@ -12,6 +14,14 @@ using namespace trussc::internal;
 namespace {
 int failures = 0;
 int allocationFailures = 0;
+int validationErrors = 0;
+void logger(const char*, uint32_t level, uint32_t item, const char* message,
+            uint32_t, const char*, void*) {
+    if (level <= 1 && item != SG_LOGITEM_BUFFER_POOL_EXHAUSTED) {
+        ++validationErrors;
+        std::printf("validation item %u: %s\n", item, message ? message : "");
+    }
+}
 std::vector<sg_buffer> pendingDestroys;
 
 void check(const char* name, bool ok) {
@@ -30,17 +40,15 @@ struct Trace {
     bool offsets = true;
 };
 
-void appended(sg_buffer buffer, const sg_range* data, int offset, void* user) {
+void written(const sg_write_buffer_desc* desc, void* user) {
     auto& t = *static_cast<Trace*>(user);
     ++t.appends;
-    if (sg_query_buffer_desc(buffer).usage.index_buffer) {
-        t.indexOffset = offset;
-        const auto* indices = static_cast<const uint32_t*>(data->ptr);
-        t.indices.assign(indices, indices + data->size / sizeof(uint32_t));
+    if (sg_query_buffer_desc(desc->dst.buffer).usage.index_buffer) {
+        t.indexOffset = static_cast<int>(desc->dst.offset);
+        const auto* data = static_cast<const uint32_t*>(desc->src.data.ptr);
+        t.indices.assign(data, data + desc->src.data.size / sizeof(uint32_t));
         t.relative &= t.indices.front() == 0;
-    } else {
-        t.vertexOffset = offset;
-    }
+    } else t.vertexOffset = static_cast<int>(desc->dst.offset);
 }
 
 void bound(const sg_bindings* bindings, void* user) {
@@ -51,7 +59,7 @@ void drawn(int base, int count, int instances, void* user) {
     auto& t = *static_cast<Trace*>(user);
     ++t.draws;
     t.offsets &= t.bindings.vertex_buffer_offsets[0] == t.vertexOffset
-        && base == t.indexOffset / static_cast<int>(sizeof(uint32_t))
+        && base == 0 && t.bindings.index_buffer_offset == t.indexOffset
         && count == static_cast<int>(t.indices.size()) && instances == 1;
 }
 
@@ -101,157 +109,90 @@ void tests(sg_pipeline pip, Trace& trace) {
         auto quad = stream.capture(4, PrimitiveType::Quads);
         beginPass();
         executeDeferredShaderDraw(quad);
+        const auto first = stream.state->vertices;
         check("exact capacity fits", trace.draws == 1 && trace.appends == 2);
-        check("quad winding preserved", trace.indices == std::vector<uint32_t>({0, 1, 2, 0, 2, 3}));
+        check("quad winding preserved", trace.indices == std::vector<uint32_t>({0,1,2,0,2,3}));
         executeDeferredShaderDraw(quad);
-        check("overflow grows and draws immediately", trace.draws == 2 && trace.appends == 4);
-        check("both buffers double in-frame", sg_query_buffer_size(stream.state->vertices) == 8 * sizeof(ShaderVertex)
-            && sg_query_buffer_size(stream.state->indices) == 12 * sizeof(uint32_t));
-        check("old buffers queued and still valid", pendingDestroys.size() == 2
-            && sg_query_buffer_state(stream.vertices) == SG_RESOURCESTATE_VALID
-            && sg_query_buffer_state(stream.indices) == SG_RESOURCESTATE_VALID);
-        check("replacement starts empty without re-upload", trace.vertexOffset == 0 && trace.indexOffset == 0);
-        // Separately flushed target in the same device frame uses the replacement.
+        check("second flush has distinct transient storage", trace.draws == 2 && stream.state->vertices.id != first.id);
+        check("previous flush remains valid", sg_query_buffer_state(first) == SG_RESOURCESTATE_VALID);
         sg_end_pass();
         beginPass();
         executeDeferredShaderDraw(quad);
-        check("captured handles use shared current stream across passes", trace.draws == 3
-            && trace.vertexOffset == 4 * static_cast<int>(sizeof(ShaderVertex)));
+        check("separate pass gets a third buffer pair", trace.draws == 3 && stream.state->flushBuffers.size() == 3);
         sg_end_pass();
-        sg_disable_stats();
-        commit();
-        check("old buffers destroyed after commit", sg_query_buffer_state(stream.vertices) == SG_RESOURCESTATE_INVALID
-            && sg_query_buffer_state(stream.indices) == SG_RESOURCESTATE_INVALID);
-        check("new-frame pre-check ignores stale cursor with stats disabled",
-            shaderStreamAppendFits(stream.state->vertices, 8 * sizeof(ShaderVertex)));
-        // Another window's commit must not invalidate an idle target's snapshot.
-        beginPass();
-        executeDeferredShaderDraw(quad);
-        check("captured draw still works after another window commits", trace.draws == 4 && trace.vertexOffset == 0);
-        sg_end_pass();
-        commit();
-        sg_enable_stats();
-    }
-    commit();
-    for (bool indexOnly : {false, true}) {
-        trace = {};
-        Stream stream(indexOnly ? 16 : 4, indexOnly ? 6 : 24, pip);
-        auto quad = stream.capture(4, PrimitiveType::Quads);
-        beginPass();
-        executeDeferredShaderDraw(quad);
-        executeDeferredShaderDraw(quad);
-        check("one-buffer growth preserves the other append cursor", trace.draws == 2
-            && (indexOnly ? trace.vertexOffset == 4 * static_cast<int>(sizeof(ShaderVertex))
-                          : trace.indexOffset == 6 * static_cast<int>(sizeof(uint32_t))));
-        sg_end_pass();
-        commit();
-    }
-    commit();
-    {
-        trace = {};
-        Stream stream(65536, 65536, pip);
-        auto quad = stream.capture(4, PrimitiveType::Quads);
-        beginPass();
-        for (int i = 0; i < 12000; ++i) executeDeferredShaderDraw(quad);
-        check("12000 rectangles fully draw in first frame", trace.draws == 12000
-            && trace.relative && trace.offsets);
-        sg_end_pass();
-        commit();
-    }
-    commit();
-    for (auto type : {PrimitiveType::Triangles, PrimitiveType::Quads, PrimitiveType::TriangleStrip}) {
-        trace = {};
-        Stream stream(65536, 65536, pip);
-        auto large = stream.capture(70000, type);
-        beginPass();
-        executeDeferredShaderDraw(large);
-        check("first draw past 65536 vertices retains uint32 indices",
-            trace.draws == 1 && trace.indices.back() == 69999);
-        if (type == PrimitiveType::TriangleStrip) {
-            check("triangle strip alternating winding preserved", trace.indices.size() >= 6 && trace.indices[0] == 0
-                && trace.indices[1] == 1 && trace.indices[2] == 2 && trace.indices[3] == 2
-                && trace.indices[4] == 1 && trace.indices[5] == 3);
-        }
-        executeDeferredShaderDraw(stream.capture(4, PrimitiveType::Quads));
-        check("frame total past 65536 uses draw-relative vertex offset",
-            trace.draws == 2 && trace.vertexOffset == 70000 * static_cast<int>(sizeof(ShaderVertex))
-            && trace.relative && trace.offsets && trace.indices.back() == 3);
-        sg_end_pass();
-        commit();
-        // A later sudden jump needs repeated doubling, without a warm-up frame.
-        beginPass();
-        executeDeferredShaderDraw(stream.capture(300000, type));
-        check("later sudden growth draws immediately", trace.draws == 3 && trace.indices.back() == 299999);
-        sg_end_pass();
-        commit();
-    }
-    commit();
-    {
-        trace = {};
-        DeferredShaderDraw captured;
-        {
-            Stream stream(3, 3, pip);
-            captured = stream.capture(3, PrimitiveType::Triangles);
-        }
-        beginPass();
-        executeDeferredShaderDraw(captured);
-        executeDeferredShaderDraw(captured);
-        check("captured stream grows after owner destruction", trace.draws == 2 && trace.appends == 4);
-        sg_end_pass();
-        commit();
+        sg_disable_stats(); commit();
+        beginPass(); executeDeferredShaderDraw(quad); sg_end_pass();
+        check("next device frame reuses first pair with stats disabled", stream.state->vertices.id == first.id);
+        commit(); sg_enable_stats();
     }
     commit();
     {
         trace = {};
         Stream stream(4, 6, pip);
-        // Exhaust actual sokol buffer slots, without requesting enormous memory.
-        std::vector<sg_buffer> held;
-        for (;;) {
-            const auto buffer = sg_alloc_buffer();
-            if (!buffer.id) break;
-            held.push_back(buffer);
-        }
-        auto quad = stream.capture(4, PrimitiveType::Quads);
+        std::vector<DeferredShaderDraw> draws;
+        for (int i = 0; i < 12000; ++i) draws.push_back(stream.capture(4, PrimitiveType::Quads));
         beginPass();
-        executeDeferredShaderDraw(quad);
-        // Permit exactly one allocation: vertex replacement succeeds, index
-        // replacement fails, and neither live stream may change.
-        sg_dealloc_buffer(held.back());
-        held.pop_back();
-        executeDeferredShaderDraw(quad);
-        executeDeferredShaderDraw(quad);
-        check("partial replacement allocation is retired", pendingDestroys.size() == 1
-            && sg_query_buffer_state(pendingDestroys.front()) == SG_RESOURCESTATE_VALID);
-        check("allocation failure skips without appending or poisoning", trace.draws == 1 && trace.appends == 2
-            && allocationFailures == 2 && !sg_query_buffer_overflow(stream.vertices)
-            && !sg_query_buffer_overflow(stream.indices));
-        check("failed replacement preserves live handles", stream.state->vertices.id == stream.vertices.id
-            && stream.state->indices.id == stream.indices.id);
-        for (auto buffer : held) sg_dealloc_buffer(buffer);
-        executeDeferredShaderDraw(quad);
-        check("stream recovers in same frame when allocation succeeds", trace.draws == 2 && trace.appends == 4);
-        sg_end_pass();
-        commit();
-        const size_t representable = static_cast<size_t>((std::numeric_limits<int>::max)()) & ~size_t(3);
-        check("oversized byte count rejected before narrowing", ShaderStreamState::capacityFor({}, representable + 1) == 0);
-        check("doubling at signed size boundary stays representable", ShaderStreamState::capacityFor({}, representable) == representable);
+        prepareDeferredShaderDraws(draws);
+        const auto buffers = stream.state->flushBuffers.size();
+        for (auto& draw : draws) executeDeferredShaderDraw(draw);
+        check("12000 rectangles share one flush buffer pair", trace.draws == 12000 && buffers == 1);
+        check("batch offsets cover all vertices and indices", draws.back().uploadedBindings.vertex_buffer_offsets[0] == 11999 * 4 * int(sizeof(ShaderVertex))
+            && draws.back().uploadedBindings.index_buffer_offset == 11999 * 6 * int(sizeof(uint32_t)));
+        sg_end_pass(); commit();
+        // Batch writes precede drawing, so trace.offsets is checked below only
+        // for one-draw flushes where the last write belongs to that draw.
+        trace = {};
     }
     commit();
     {
-        ShaderStreamState state;
+        trace = {};
+        Stream stream(4, 6, pip);
+        auto draw = stream.capture(4, PrimitiveType::Quads);
+        draw.stream.reset();
+        beginPass(); executeDeferredShaderDraw(draw); sg_end_pass();
+        check("custom-buffer replay gets transient storage", trace.draws == 1 && trace.relative && trace.offsets);
+        commit();
+    }
+    commit();
+    for (auto type : {PrimitiveType::Triangles, PrimitiveType::Quads, PrimitiveType::TriangleStrip}) {
+        trace = {};
+        Stream stream(4, 6, pip);
+        beginPass(); executeDeferredShaderDraw(stream.capture(70000, type));
+        check("first large draw keeps uint32 indices", trace.draws == 1 && trace.indices.back() == 69999);
+        if (type == PrimitiveType::TriangleStrip) check("strip winding preserved", trace.indices[3] == 2 && trace.indices[4] == 1 && trace.indices[5] == 3);
+        sg_end_pass(); commit();
+        beginPass(); executeDeferredShaderDraw(stream.capture(300000, type));
+        check("later growth draws immediately", trace.draws == 2 && trace.indices.back() == 299999);
+        sg_end_pass(); commit();
+    }
+    commit();
+    {
+        trace = {};
+        DeferredShaderDraw captured;
+        { Stream stream(3, 3, pip); captured = stream.capture(3, PrimitiveType::Triangles); }
+        beginPass(); executeDeferredShaderDraw(captured); executeDeferredShaderDraw(captured);
+        check("captured stream survives its owner", trace.draws == 2 && trace.appends == 4);
+        sg_end_pass(); commit();
+    }
+    commit();
+    {
+        trace = {};
+        Stream stream(4, 6, pip);
+        auto quad = stream.capture(4, PrimitiveType::Quads);
+        beginPass(); executeDeferredShaderDraw(quad);
+        std::vector<sg_buffer> held;
+        for (;;) { const auto buffer = sg_alloc_buffer(); if (!buffer.id) break; held.push_back(buffer); }
+        sg_dealloc_buffer(held.back()); held.pop_back();
+        const auto first = stream.state->vertices;
+        executeDeferredShaderDraw(quad);
+        check("partial failure skips draw and retains previous storage", trace.draws == 1 && allocationFailures == 1 && stream.state->vertices.id == first.id);
+        for (auto buffer : held) sg_dealloc_buffer(buffer);
+        executeDeferredShaderDraw(quad);
+        check("failed flush can recover in the same frame", trace.draws == 2);
+        sg_end_pass(); commit();
         const size_t representable = static_cast<size_t>((std::numeric_limits<int>::max)()) & ~size_t(3);
-        state.vertices = makeShaderStreamBuffer(representable, false);
-        state.indices = makeShaderStreamBuffer(16, true);
-        const auto previous = state.vertices;
-        // The dummy backend allocates no GPU storage. Put its cursor at the
-        // actual signed boundary to check cumulative accounting without a
-        // multi-gigabyte upload or a wall-time assertion.
-        auto* boundaryBuffer = _sg_buffer_at(previous.id);
-        boundaryBuffer->cmn.append_frame_index = shaderStreamFrame();
-        boundaryBuffer->cmn.append_pos = static_cast<int>(representable - 4);
-        check("cumulative signed boundary starts a fresh buffer", state.prepare(8, 4)
-            && state.vertices.id != previous.id && sg_query_buffer_info(state.vertices).append_pos == 0
-            && sg_query_buffer_size(state.vertices) == representable);
+        check("oversized byte count is rejected", ShaderStreamState::capacityFor({}, representable + 1) == 0);
+        check("doubling stays representable", ShaderStreamState::capacityFor({}, representable) == representable);
     }
     commit();
 }
@@ -272,6 +213,7 @@ void reportShaderStreamFailure(size_t) noexcept {
 
 int main() {
     sg_desc desc = {};
+    desc.logger.func = logger;
     sg_setup(&desc);
     sg_shader_desc shaderDesc = {};
     sg_shader shader = sg_make_shader(&shaderDesc);
@@ -284,12 +226,13 @@ int main() {
     Trace trace;
     sg_trace_hooks hooks = {};
     hooks.user_data = &trace;
-    hooks.append_buffer = appended;
+    hooks.write_buffer_transient = written;
     hooks.apply_bindings = bound;
     hooks.draw = drawn;
     sg_install_trace_hooks(&hooks);
     tests(pipeline, trace);
     check("all captured indices and offsets valid", trace.relative && trace.offsets);
+    check("no sokol validation errors", validationErrors == 0);
     sg_destroy_pipeline(pipeline);
     sg_destroy_shader(shader);
     sg_shutdown();

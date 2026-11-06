@@ -374,6 +374,8 @@ bool popTarget(RenderTarget& target, uint64_t token);
 bool ensureCurrentPass();
 bool admitRootSwapchainPass();
 void parkWindowPass();
+bool suspendForImageUpload();
+void uploadImageData(sg_image image, const sg_range& data, int mipLevel = 0);
 void submitCapturePrefix();
 // Window: a capture of the current window's pixels; even a never-opened pass
 // starts so its clear and recorded prefix reach the source.

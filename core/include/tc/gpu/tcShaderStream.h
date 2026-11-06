@@ -38,26 +38,21 @@ enum class PrimitiveType {
 namespace internal {
 
 // sokol publishes the completed frame index at commit, even with stats disabled.
-// Its current append frame starts at 1 and advances on each sg_commit(), including
+// Its current device frame starts at 1 and advances on each sg_commit(), including
 // commits by other windows; an app/window frame counter would not match it.
 inline uint32_t shaderStreamFrame() {
     return sg_query_stats().prev_frame.frame_index + 1;
 }
 
-inline bool shaderStreamAppendFits(sg_buffer buffer, size_t bytes) {
-    const auto info = sg_query_buffer_info(buffer);
-    const size_t pos = info.append_frame_index == shaderStreamFrame()
-        ? static_cast<size_t>(info.append_pos) : 0;
-    const size_t capacity = sg_query_buffer_size(buffer);
-    // Stream uploads here are multiples of four. Avoid addition overflow.
+inline bool shaderStreamFits(sg_buffer buffer, size_t bytes) {
     return sg_query_buffer_state(buffer) == SG_RESOURCESTATE_VALID
-        && pos <= capacity && bytes <= capacity - pos;
+        && bytes <= sg_query_buffer_size(buffer);
 }
 
 inline sg_buffer makeShaderStreamBuffer(size_t bytes, bool index) {
     sg_buffer_desc desc = {};
     desc.size = bytes;
-    desc.usage.stream_update = true;
+    desc.usage.write_transient = true;
     desc.usage.index_buffer = index;
     desc.label = index ? "tc_shader_indices" : "tc_shader_vertices";
     return sg_make_buffer(&desc);
@@ -68,57 +63,60 @@ inline sg_buffer makeShaderStreamBuffer(size_t bytes, bool index) {
 sg_buffer growShaderStreamBuffer(size_t bytes, bool index);
 void reportShaderStreamFailure(size_t vertices) noexcept;
 
-// Replay owns the live buffers, even after the Shader is moved or destroyed.
-// Each replacement starts an empty append stream. Previously issued draws keep
-// their old buffers until submission; they need neither copying nor re-upload.
+// Replay owns a pair of write-transient buffers per flush. All draws in a
+// flush upload before any bindings use them; later flushes get a distinct pair.
 struct ShaderStreamState {
     sg_buffer vertices = {};
     sg_buffer indices = {};
+    struct Buffers { sg_buffer vertices = {}; sg_buffer indices = {}; };
+    std::vector<Buffers> flushBuffers;
+    uint32_t frame = 0;
+    size_t next = 0;
 
     ~ShaderStreamState() {
-        deferGpuDestroy(vertices);
-        deferGpuDestroy(indices);
+        if (flushBuffers.empty()) {
+            deferGpuDestroy(vertices);
+            deferGpuDestroy(indices);
+        } else for (const auto& buffers : flushBuffers) {
+            deferGpuDestroy(buffers.vertices);
+            deferGpuDestroy(buffers.indices);
+        }
     }
-
     ShaderStreamState() = default;
     ShaderStreamState(const ShaderStreamState&) = delete;
     ShaderStreamState& operator=(const ShaderStreamState&) = delete;
 
     static size_t capacityFor(sg_buffer buffer, size_t bytes) {
-        // Bound (representation): buffer bytes are limited to INT_MAX rounded down to four-byte alignment for sokol signed sizes/cursors; oversized byte requests return 0, cumulative overflow starts a fresh buffer.
+        // Bound (abi): sokol buffer sizes and draw offsets must fit signed int.
         const size_t representable = static_cast<size_t>((std::numeric_limits<int>::max)()) & ~size_t(3);
         if (bytes > representable) return 0;
-        const auto info = sg_query_buffer_info(buffer);
-        const size_t pos = info.append_frame_index == shaderStreamFrame()
-            ? static_cast<size_t>(info.append_pos) : 0;
-        // If cumulative appends cannot be represented, start a fresh buffer
-        // fitting this draw instead; there is no per-frame geometry cap.
-        const size_t required = pos <= representable - bytes ? pos + bytes : bytes;
         size_t capacity = sg_query_buffer_size(buffer);
         if (!capacity) capacity = 4;
-        while (capacity < required) {
-            capacity = capacity > representable / 2 ? representable : capacity * 2;
-        }
+        while (capacity < bytes) capacity = capacity > representable / 2 ? representable : capacity * 2;
         return capacity;
     }
 
     bool prepare(size_t vertexBytes, size_t indexBytes) {
-        const bool growVertices = !shaderStreamAppendFits(vertices, vertexBytes);
-        const bool growIndices = !shaderStreamAppendFits(indices, indexBytes);
-        if (!growVertices && !growIndices) return true;
-        const size_t vsize = capacityFor(vertices, vertexBytes);
-        const size_t isize = capacityFor(indices, indexBytes);
+        if (frame != shaderStreamFrame()) { frame = shaderStreamFrame(); next = 0; }
+        if (flushBuffers.empty()) flushBuffers.push_back({vertices, indices});
+        if (next == flushBuffers.size()) flushBuffers.push_back({});
+        auto& buffers = flushBuffers[next];
+        const bool growVertices = !shaderStreamFits(buffers.vertices, vertexBytes);
+        const bool growIndices = !shaderStreamFits(buffers.indices, indexBytes);
+        const size_t vsize = capacityFor(buffers.vertices, vertexBytes);
+        const size_t isize = capacityFor(buffers.indices, indexBytes);
         if (!vsize || !isize) return false;
-        const sg_buffer vbuf = growVertices ? growShaderStreamBuffer(vsize, false) : vertices;
-        const sg_buffer ibuf = growIndices ? growShaderStreamBuffer(isize, true) : indices;
-        if (sg_query_buffer_state(vbuf) != SG_RESOURCESTATE_VALID
-                || sg_query_buffer_state(ibuf) != SG_RESOURCESTATE_VALID) {
+        const sg_buffer vbuf = growVertices ? growShaderStreamBuffer(vsize, false) : buffers.vertices;
+        const sg_buffer ibuf = growIndices ? growShaderStreamBuffer(isize, true) : buffers.indices;
+        if (sg_query_buffer_state(vbuf) != SG_RESOURCESTATE_VALID || sg_query_buffer_state(ibuf) != SG_RESOURCESTATE_VALID) {
             if (growVertices) deferGpuDestroy(vbuf);
             if (growIndices) deferGpuDestroy(ibuf);
             return false;
         }
-        if (growVertices) { deferGpuDestroy(vertices); vertices = vbuf; }
-        if (growIndices) { deferGpuDestroy(indices); indices = ibuf; }
+        if (growVertices) { deferGpuDestroy(buffers.vertices); buffers.vertices = vbuf; }
+        if (growIndices) { deferGpuDestroy(buffers.indices); buffers.indices = ibuf; }
+        vertices = vbuf; indices = ibuf;
+        ++next;
         return true;
     }
 };
@@ -134,7 +132,7 @@ struct ShaderStreamState {
 // replay needs is snapshotted here at submission time:
 //   - pipeline resolved for the render target that was current at submission
 //   - bindings (texture view/sampler pairs and non-stream buffer handles)
-//   - shared stream owner, which selects/grows append buffers at replay
+//   - shared stream owner, which selects/grows flush buffers at replay
 //   - raw uniform-block bytes per slot
 //   - vertex data
 // The captured sg handles stay valid until the flush because Shader routes
@@ -152,49 +150,13 @@ struct DeferredShaderDraw {
     std::vector<ShaderVertex> vertices; // vertex data
     PrimitiveType type = PrimitiveType::Triangles;
     std::shared_ptr<ShaderStreamState> stream;
+    sg_bindings uploadedBindings = {};
+    int uploadedIndexCount = 0;
+    bool uploadPrepared = false;
 };
 
-// Replay a captured shader draw on the GPU. Self-contained: uses captured
-// resources and accounting, never a live Shader. RenderTarget::flushLayers()
-// consumes these snapshots in the same order on every drawing target.
-inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
-    if (d.vertices.empty()) return;
-
+inline std::vector<uint32_t> shaderDrawIndices(const DeferredShaderDraw& d) {
     const size_t count = d.vertices.size();
-    try {
-    // Bound (representation): vertex/index bytes must fit four-byte-aligned INT_MAX for sokol signed sizes/cursors and draw counts; exceeding either skips this draw and reports the once-per-run Error.
-    const size_t representable = static_cast<size_t>((std::numeric_limits<int>::max)()) & ~size_t(3);
-    if (count > representable / sizeof(ShaderVertex)) {
-        reportShaderStreamFailure(count);
-        return;
-    }
-    size_t indexCount = 0;
-    if (d.type == PrimitiveType::Quads) indexCount = (count / 4) * 6;
-    else if (d.type == PrimitiveType::TriangleStrip && count >= 3) indexCount = (count - 2) * 3;
-    else if (d.type == PrimitiveType::Triangles) indexCount = count;
-    if (indexCount == 0) return;
-    if (indexCount > representable / sizeof(uint32_t)) {
-        reportShaderStreamFailure(count);
-        return;
-    }
-
-    const size_t vertexBytes = count * sizeof(ShaderVertex);
-    const size_t indexBytes = indexCount * sizeof(uint32_t);
-    sg_bindings bind = d.bindings;
-    if (d.stream) {
-        if (!d.stream->prepare(vertexBytes, indexBytes)) {
-            reportShaderStreamFailure(count);
-            return;
-        }
-        bind.vertex_buffers[0] = d.stream->vertices;
-        bind.index_buffer = d.stream->indices;
-    } else if (!shaderStreamAppendFits(bind.vertex_buffers[0], vertexBytes)
-            || !shaderStreamAppendFits(bind.index_buffer, indexBytes)) {
-        reportShaderStreamFailure(count);
-        return;
-    }
-
-    // Generate triangle indices
     std::vector<uint32_t> indices;
 
     if (d.type == PrimitiveType::Quads) {
@@ -232,25 +194,96 @@ inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
         }
     }
 
-    sg_apply_pipeline(d.pipeline);
-    for (const auto& [slot, data] : d.uniforms) {
-        sg_range range = { data.data(), data.size() };
-        sg_apply_uniforms(slot, &range);
-    }
+    return indices;
+}
 
-    sg_range range = { d.vertices.data(), vertexBytes };
-    bind.vertex_buffer_offsets[0] = sg_append_buffer(bind.vertex_buffers[0], &range);
-    sg_range idxRange = { indices.data(), indexBytes };
-    const int indexOffset = sg_append_buffer(bind.index_buffer, &idxRange);
-    // Indices stay relative to this draw, including when the frame has already
-    // appended more than 65536 vertices.
-    sg_apply_bindings(&bind);
-    const int baseElement = indexOffset / static_cast<int>(sizeof(uint32_t));
-    sg_draw(baseElement, static_cast<int>(indices.size()), 1);
+// Stage each stream's entire flush before its first draw binds the buffers.
+// Offsets are local to this flush; captured handles remain valid across FBOs.
+inline void prepareDeferredShaderDraws(std::vector<DeferredShaderDraw>& draws) {
+    try {
+        const size_t representable = static_cast<size_t>((std::numeric_limits<int>::max)()) & ~size_t(3);
+        for (size_t first = 0; first < draws.size(); ++first) {
+            auto& owner = draws[first];
+            if (owner.uploadPrepared || !owner.stream) continue;
+            size_t vertexBytes = 0, indexBytes = 0;
+            std::vector<std::pair<DeferredShaderDraw*, std::vector<uint32_t>>> batch;
+            auto uploadBatch = [&] {
+                if (batch.empty()) return;
+                if (!owner.stream->prepare(vertexBytes, indexBytes)) { reportShaderStreamFailure(owner.vertices.size()); return; }
+                size_t vertexOffset = 0, indexOffset = 0;
+                for (auto& entry : batch) {
+                    auto& d = *entry.first;
+                    const size_t vbytes = d.vertices.size() * sizeof(ShaderVertex);
+                    const size_t ibytes = entry.second.size() * sizeof(uint32_t);
+                    sg_write_buffer_desc write = {};
+                    write.src.data = {d.vertices.data(), vbytes};
+                    write.dst.buffer = owner.stream->vertices;
+                    write.dst.offset = vertexOffset;
+                    sg_write_buffer_transient(&write);
+                    write.src.data = {entry.second.data(), ibytes};
+                    write.dst.buffer = owner.stream->indices;
+                    write.dst.offset = indexOffset;
+                    sg_write_buffer_transient(&write);
+                    d.uploadedBindings = d.bindings;
+                    d.uploadedBindings.vertex_buffers[0] = owner.stream->vertices;
+                    d.uploadedBindings.vertex_buffer_offsets[0] = static_cast<int>(vertexOffset);
+                    d.uploadedBindings.index_buffer = owner.stream->indices;
+                    d.uploadedBindings.index_buffer_offset = static_cast<int>(indexOffset);
+                    d.uploadedIndexCount = static_cast<int>(entry.second.size());
+                    vertexOffset += vbytes; indexOffset += ibytes;
+                }
+            };
+            for (size_t i = first; i < draws.size(); ++i) {
+                auto& d = draws[i];
+                if (d.stream != owner.stream) continue;
+                d.uploadPrepared = true;
+                if (d.vertices.size() > representable / sizeof(ShaderVertex)) { reportShaderStreamFailure(d.vertices.size()); continue; }
+                auto indices = shaderDrawIndices(d);
+                if (indices.empty()) continue;
+                const size_t vbytes = d.vertices.size() * sizeof(ShaderVertex);
+                const size_t ibytes = indices.size() * sizeof(uint32_t);
+                if (vbytes > representable - vertexBytes || ibytes > representable - indexBytes) {
+                    uploadBatch();
+                    batch.clear(); vertexBytes = indexBytes = 0;
+                }
+                vertexBytes += vbytes; indexBytes += ibytes;
+                batch.emplace_back(&d, std::move(indices));
+            }
+            uploadBatch();
+        }
     } catch (const std::bad_alloc&) {
-        reportShaderStreamFailure(count);
+        for (auto& d : draws) { d.uploadPrepared = true; d.uploadedIndexCount = 0; }
+        reportShaderStreamFailure(draws.empty() ? 0 : draws.front().vertices.size());
     } catch (const std::length_error&) {
-        reportShaderStreamFailure(count);
+        for (auto& d : draws) { d.uploadPrepared = true; d.uploadedIndexCount = 0; }
+        reportShaderStreamFailure(draws.empty() ? 0 : draws.front().vertices.size());
+    }
+}
+
+inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
+    try {
+        if (!d.uploadPrepared) {
+            // Standalone replay (unit tests and internal callers) is a one-draw flush.
+            std::vector<DeferredShaderDraw> batch{d};
+            // A custom Shader may provide its own initial buffers. This replay
+            // still needs fresh transient storage once those buffers were used.
+            if (!batch.front().stream) batch.front().stream = std::make_shared<ShaderStreamState>();
+            prepareDeferredShaderDraws(batch);
+            if (batch.front().uploadPrepared) executeDeferredShaderDraw(batch.front());
+            return;
+        }
+        if (!d.uploadedIndexCount) return;
+        sg_apply_pipeline(d.pipeline);
+        for (const auto& [slot, data] : d.uniforms) {
+            const sg_range range = {data.data(), data.size()};
+            sg_apply_uniforms(slot, &range);
+        }
+        sg_apply_bindings(&d.uploadedBindings);
+        sg_draw(0, d.uploadedIndexCount, 1);
+    } catch (const std::bad_alloc&) {
+        reportShaderStreamFailure(d.vertices.size());
+    } catch (const std::length_error&) {
+        reportShaderStreamFailure(d.vertices.size());
     }
 }
 

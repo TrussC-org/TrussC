@@ -195,7 +195,6 @@ namespace internal {
         bool     atlasInitialized = false;
         int      rows = 0;                  // height of current atlas in cell rows
         uint64_t version = 0;               // last bitmapfont registryVersion() baked in
-        uint64_t uploadFrame = UINT64_MAX;  // frame of last sg_update_image
     };
     BitmapFontAtlas& bitmapFontAtlas();
 
@@ -1197,12 +1196,12 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 //     tcGpuDestroyQueue.h) so sokol_gl commands recorded earlier in the
 //     frame keep their handles valid until the end-of-frame flush.
 //   - Same size, contents changed (registerGlyph / updateGlyph):
-//     reuse the image via sg_update_image(). No destroy → no dangling
+//     reuse the image via staging copies. No destroy → no dangling
 //     references in sokol_gl's deferred command queue. This makes per-frame
 //     glyph updates (e.g. animated walker) practical.
 //
-// The image is created with `usage.dynamic_update = true` so sg_update_image
-// is allowed.
+// The image is created with `usage.copy_dst = true` so staging copies
+// are allowed.
 uint64_t getFrameCount(); // forward declaration; public update counter
 inline void ensureFontAtlas(int rows) {
     if (rows <= 0) return;
@@ -1212,7 +1211,7 @@ inline void ensureFontAtlas(int rows) {
     // The atlas texture is fixed-width with a hard row cap (512x512 =
     // CELLS_PER_COL rows). generateAtlasPixels() clamps its buffer to that
     // cap, so the row count used for the texture height / upload size below
-    // MUST be clamped identically — otherwise sg_update_image would read
+    // MUST be clamped identically — otherwise staging copies would read
     // past the end of the CPU pixel buffer (SIGBUS, issue #188). Glyphs
     // registered beyond capacity degrade gracefully: their cells are skipped
     // by generateAtlasPixels and they render as blanks.
@@ -1233,15 +1232,6 @@ inline void ensureFontAtlas(int rows) {
     if (sizeOk && versionOk) return;
     if (!sg_isvalid()) return;
 
-    // Same-frame upload guard. sokol allows at most one sg_update_image per
-    // image per frame (VALIDATE_UPDIMG_ONCE). If we already uploaded this
-    // frame and the atlas size hasn't changed, defer to next frame — the
-    // stale atlas.version makes us try again on the next call.
-    // (When size changes we destroy + create a brand-new image below, so the
-    // guard only applies to the same-dimensions in-place path.)
-    // Preserve base's per-window upload key: main updates, secondary admitted ticks.
-    if (sizeOk && atlas.uploadFrame == internal::resourceFrameKey()) return;
-
     // Regenerate pixel buffer. Use the LARGER of `rows` and the currently
     // allocated rows so a same-size in-place update stays the same size.
     int effRows = sizeOk ? atlas.rows : rows;
@@ -1250,14 +1240,11 @@ inline void ensureFontAtlas(int rows) {
     int dataBytes = bitmapfont::ATLAS_WIDTH * height * 4;
 
     if (sizeOk) {
-        // Same dimensions — upload via sg_update_image. The image identity
+        // Same dimensions — upload via staging copies. The image identity
         // (sg_image handle) and view stay the same, so any queued sokol_gl
         // commands referencing them keep working.
-        sg_image_data data = {};
-        data.mip_levels[0].ptr  = pixels;
-        data.mip_levels[0].size = dataBytes;
-        sg_update_image(atlas.texture, &data);
-        atlas.uploadFrame = internal::resourceFrameKey();
+        sg_range data = {pixels, static_cast<size_t>(dataBytes)};
+        internal::uploadImageData(atlas.texture, data);
     } else {
         // Size changed (or first allocation). Recreate the image. The old
         // image/view are destroyed deferred — sokol_gl commands recorded
@@ -1273,16 +1260,13 @@ inline void ensureFontAtlas(int rows) {
         img_desc.width  = bitmapfont::ATLAS_WIDTH;
         img_desc.height = height;
         img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        img_desc.usage.dynamic_update = true;   // enable sg_update_image()
+        img_desc.usage.copy_dst = true;   // persistent staging uploads
         // (intentionally no initial data — sg expects an update call instead
         //  for non-immutable images)
         atlas.texture = sg_make_image(&img_desc);
 
-        sg_image_data data = {};
-        data.mip_levels[0].ptr  = pixels;
-        data.mip_levels[0].size = dataBytes;
-        sg_update_image(atlas.texture, &data);
-        atlas.uploadFrame = internal::resourceFrameKey();
+        sg_range data = {pixels, static_cast<size_t>(dataBytes)};
+        internal::uploadImageData(atlas.texture, data);
 
         sg_view_desc view_desc = {};
         view_desc.texture.image = atlas.texture;

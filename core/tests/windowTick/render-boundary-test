@@ -48,7 +48,7 @@ renewal = '\n'.join(body(marker) + (';' if marker.startswith('struct ') else '')
     'static bool _sapp_tc_x11_resize_surface('))
 (scratch/'renewal.inc').write_text(renewal, encoding='utf-8')
 objects = [os.environ['TC_RENDER_TEST_CORE_OBJECT']] if os.environ.get('TC_RENDER_TEST_CORE_OBJECT') else []
-cmd = ['c++','-std=c++20','-O0','-g0','-DNDEBUG','-I'+inc,'-I'+str(scratch)]+flags+[str(root/'core/tests/windowTick/render-boundary.cpp'),'-o',str(scratch/'probe')]+objects+libs+['-lEGL','-Wl,--wrap=sapp_get_swapchain']
+cmd = ['c++','-std=c++20','-O0','-g0','-DNDEBUG','-I'+inc,'-I'+str(scratch)]+flags+[str(root/'core/tests/windowTick/render-boundary.cpp'),'-o',str(scratch/'probe')]+objects+libs+['-lEGL','-Wl,--wrap=sapp_acquire_swapchain']
 subprocess.run(cmd, cwd=root, check=True)
 result = subprocess.run([str(scratch/'probe')], cwd=root, env=dict(os.environ, EGL_PLATFORM='surfaceless', LIBGL_ALWAYS_SOFTWARE='1'), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 print(result.stdout, end='')

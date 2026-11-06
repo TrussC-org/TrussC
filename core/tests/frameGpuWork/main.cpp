@@ -15,7 +15,6 @@ extern "C" bool frame_gpu_work_from_c(void);
 namespace {
 int failures = 0;
 int validationErrors = 0;
-int repeatedUploads = 0;
 
 void check(const char* name, bool ok) {
     std::printf("%s: %s\n", name, ok ? "PASS" : "FAIL");
@@ -24,9 +23,6 @@ void check(const char* name, bool ok) {
 
 void logger(const char* tag, uint32_t level, uint32_t item, const char* message,
             uint32_t, const char*, void*) {
-    if (std::strcmp(tag, "sg") == 0 && item == SG_LOGITEM_VALIDATE_UPDIMG_ONCE) {
-        ++repeatedUploads;
-    }
     if (level <= 1) {
         ++validationErrors;
         std::printf("%s validation item %u: %s\n", tag, item, message ? message : "");
@@ -75,29 +71,52 @@ int main() {
     sg_image_desc imageDesc = {};
     imageDesc.width = imageDesc.height = 2;
     imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    imageDesc.usage.stream_update = true;
+    imageDesc.usage.write_transient = true;
     const sg_image texture = sg_make_image(&imageDesc);
     unsigned char pixels[16] = {};
-    sg_image_data data = {};
-    data.mip_levels[0] = {pixels, sizeof(pixels)};
-    sg_update_image(texture, &data);
+    sg_write_image_desc data = {};
+    data.src.data = {pixels, sizeof(pixels)};
+    data.dst.image = texture;
+    sg_write_image_transient(&data);
     check("image upload requests a commit", hasWork());
     endNonDrawingTick();
     check("image commit clears work stats", !hasWork());
 
     sg_buffer_desc bufferDesc = {};
     bufferDesc.size = 64;
-    bufferDesc.usage.stream_update = true;
+    bufferDesc.usage.write_transient = true;
     const sg_buffer buffer = sg_make_buffer(&bufferDesc);
-    const sg_range bytes = {pixels, sizeof(pixels)};
-    sg_update_buffer(buffer, &bytes);
+    sg_write_buffer_desc bytes = {};
+    bytes.src.data = {pixels, sizeof(pixels)};
+    bytes.dst.buffer = buffer;
+    sg_write_buffer_transient(&bytes);
     check("buffer update requests a commit", hasWork());
     endNonDrawingTick();
     check("buffer update commit clears work stats", !hasWork());
-    sg_append_buffer(buffer, &bytes);
-    check("buffer append requests a commit", hasWork());
+    sg_write_buffer_transient(&bytes);
+    check("second buffer write requests a commit", hasWork());
     endNonDrawingTick();
-    check("buffer append commit clears work stats", !hasWork());
+    check("second buffer write commit clears work stats", !hasWork());
+
+    // Persistent copies alone must also close a GPU frame.
+    sg_image_desc sourceDesc = {};
+    sourceDesc.width = sourceDesc.height = 2;
+    sourceDesc.usage.copy_src = true;
+    sourceDesc.data = {pixels, sizeof(pixels)};
+    const sg_image source = sg_make_image(&sourceDesc);
+    sourceDesc.usage = {};
+    sourceDesc.usage.copy_dst = true;
+    sourceDesc.data = {};
+    const sg_image destination = sg_make_image(&sourceDesc);
+    sg_copy_image_to_image_desc copy = {};
+    copy.src.image = source;
+    copy.dst.image = destination;
+    sg_copy_image_to_image(&copy);
+    check("image copy requests a commit without a pass or CPU write", hasWork());
+    endNonDrawingTick();
+    check("image copy commit clears work stats", !hasWork());
+    sg_destroy_image(source);
+    sg_destroy_image(destination);
 
     imageDesc.usage = {};
     imageDesc.usage.color_attachment = true;
@@ -133,15 +152,15 @@ int main() {
     check("1000 non-drawing ticks each end their GPU frame", ended);
     check("offscreen vertex buffer stays at its initial size", bounded);
 
-    const int errorsBefore = repeatedUploads;
+    const int errorsBefore = validationErrors;
     for (int tick = 0; tick < 2; ++tick) {
-        sg_update_image(texture, &data);
+        sg_write_image_transient(&data);
         if (tick == 1) drawOffscreen(context, pass);
         ended = endNonDrawingTick() && !hasWork() && ended;
     }
     check("consecutive uploads commit, including an upload-only tick", ended);
-    check("consecutive uploads do not raise VALIDATE_UPDIMG_ONCE",
-          repeatedUploads == errorsBefore);
+    check("consecutive uploads do not raise transient write errors",
+          validationErrors == errorsBefore);
 
     // TrussC contexts opt into owner completion; standalone contexts retain
     // their ordinary automatic commit rewind. Global upload epochs still move.

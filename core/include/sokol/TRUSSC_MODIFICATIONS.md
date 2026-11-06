@@ -5,7 +5,7 @@ When updating from upstream, these changes need to be re-applied.
 
 Search for `tettou771` or `Modified by` or `[TrussC` to find all modified sections.
 
-**Upstream base:** https://github.com/floooh/sokol commit `082152c` (2026-05-21)
+**Upstream base:** https://github.com/floooh/sokol commit `e7a48ed6` (2026-11-03); sokol_app_tc.h remains the permanent fork with only the compatibility sync below
 
 **Shader compiler:** sokol-tools-bin commit
 `11d0cf678105d614d675e6d9bd2aaf3eeff12f8c` (2026-08-29T14:15:01Z), the
@@ -38,7 +38,7 @@ miniaudio (see `tc/sound/tcAudio_impl.cpp` for the rationale).
 
 Matches upstream directory layout: core headers at root, utility headers in `util/`.
 
-**Note:** `sokol_imgui.h` has been moved to `addons/tcxImGui/src/sokol_imgui.h`. It carries TrussC patches (the `simgui_tc_*` multi-context API, marked `[TrussC]`) and one upstream cherry-pick, documented in [`addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md`](../../../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md) together with the Dear ImGui patches. When updating sokol, update that copy as well (see How to Update Sokol below).
+**Note:** `sokol_imgui.h` has been moved to `addons/tcxImGui/src/sokol_imgui.h`. It carries TrussC patches (the `simgui_tc_*` multi-context API, marked `[TrussC]`) on upstream `e7a48ed6` (#713 Q3/Q4), documented in [`addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md`](../../../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md) together with the Dear ImGui patches. When updating sokol, update that copy as well (see How to Update Sokol below).
 
 ---
 
@@ -61,6 +61,16 @@ upstream sokol_app changes are cherry-picked deliberately when wanted.
 The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
+
+### Upstream e7a48ed6 compatibility sync (#713, Q5/Q6/Q7)
+
+Rename `sapp_get_swapchain` to `sapp_acquire_swapchain` without an alias;
+add `sapp_swapchain.invalid`, `SAPP_PIXELFORMAT_RGBA16F`, and rename
+`SBGRA8` to `SBGR8A8` for the upstream glue. Unavailable native drawables
+propagate `invalid`. D3D11 main and secondary depth storage uses
+`D32_FLOAT_S8X24_UINT`, matching gfx's upstream depth format. RGB10A2,
+skip-present and multi-window behavior stay in the fork. No new swapchain
+options or Vulkan support are enabled. iOS already links CoreGraphics.
 
 ### X11 idle drawable and context during non-window GPU work (#239)
 
@@ -294,19 +304,25 @@ and passes with this patch on GLCORE and GLES3.
 **Purpose:** Support TrussC's swapchain pass suspend/resume (Fbo / shadow /
 reflection passes mid-frame, issue #191). A resumed swapchain pass uses
 `SG_LOADACTION_LOAD`, but upstream hardcodes the Metal swapchain store actions
-to `MultisampleResolve` (MSAA color) and `DontCare` (depth), so the loaded
+to `MultisampleResolve` (MSAA color) and `DontCare` (depth/stencil), so the loaded
 content would be undefined.
 
-**Changes (both in `_sg_mtl_begin_pass`, swapchain branch, marked `[TrussC]`):**
+**Changes (in `_sg_mtl_begin_render_pass`, swapchain branch, marked `[TrussC]`):**
 - MSAA color: when `action->depth.store_action == SG_STOREACTION_STORE` (the
   "this pass may be suspended/resumed" hint that `RenderTarget::beginPass()`
   sets for a resumable pass, in `tc/app/tcGlobal.cpp`), use
   `MTLStoreActionStoreAndMultisampleResolve` instead of `MultisampleResolve`.
 - Depth: honor `action->depth.store_action` via `_sg_mtl_store_action()`
   instead of hardcoded `DontCare` (default `DONTCARE` keeps upstream behavior).
+- Stencil (#713 follow-up r2): likewise honor `action->stencil.store_action`.
+  `RenderTarget::beginPass()` stores stencil on resumable depth/stencil targets
+  and loads it on continuation, for both Fbo and swapchain passes. Initial
+  passes retain their configured stencil clear action. This preserves masks
+  across nested Fbo drawing and immediate `Texture::loadData()` copies.
 
-Passes without the hint (including every pass begun by plain sokol users and
-TrussC's final per-frame pass) behave exactly as upstream.
+Passes without the hint (including passes begun by plain sokol users) behave
+exactly as upstream. GL and WebGPU already honor the stencil pass actions for
+swapchains and Fbos; D3D11 clears only for CLEAR and retains storage at pass end.
 
 ### Mid-frame Metal flush for Fbo readback (#270)
 
@@ -390,8 +406,7 @@ Objective-C mocks on Linux; it verifies binding bytes and transactional failure,
 not native Metal pixels or GPU lifetime. Air execution with `MTL_DEBUG_LAYER=1`
 and base/head render-regression comparisons remain required.
 
-WebGPU/Vulkan backends are untouched (their uniform buffers are baked into
-bind groups / descriptor sets; growing them is much more invasive).
+WebGPU uniform growth is recorded in G9 below. Vulkan uniform handling remains upstream.
 
 ### Upload-only frame synchronization (Metal, #599 / #332)
 
@@ -412,6 +427,53 @@ in-flight semaphore before rotating uniform slots or collecting resources.
   Garbage collection, uniform-ring rotation/reset, and frame advancement still
   belong only to the real commit; flush neither duplicates nor bypasses them.
 
+### G5b. Managed drawable authorization seam (#821 / #864)
+
+The existing `sg_tc_mtl_register_drawable`, `sg_tc_mtl_authorize_drawable`,
+`sg_tc_mtl_cancel_drawables`, and `sg_tc_mtl_command_buffer` seam retains
+attachment generations and allows presentation only after owner authorization.
+Unready records survive foreign commits; prefix submissions never present.
+Reapplied to e7a48ed6 together with G5/G5c. Mid-frame `sg_tc_mtl_flush` now
+finishes an open upstream blit encoder before submitting and waiting. Prefix
+submission and native capture command-buffer access finish that encoder too. G4's
+shared timed acquisition and unconditional final commit are retained; new
+upstream transfer paths use that same acquisition helper.
+
+### G9. WebGPU uniform growth (#859)
+
+Retain transactional uniform storage growth, generation-based uniform bind
+group rebuilding, `WGPU_UNIFORM_BUFFER_GROWN` and `WGPU_UNIFORM_UPLOAD_FAILED`.
+The e7a48ed6 merge also retains upstream d556445a's compact `bgl_index`
+dynamic-offset mapping for sparse shader slots. The TrussC binding-number
+snapshot continues to build each uniform bind group against its generation.
+
+### G10. WebGPU bind-group failure handling
+
+Retain the once-only `bindgroup_error_logged` diagnostic. Upstream 6a7d3ee7
+now supplies the matching valid-only cache insertion and FAILED-group discard;
+the duplicated local branches are dropped in favor of upstream's implementation.
+G1/G2/G3/G3b/G6/G8 and boundary annotations (G11) are reapplied. G7's duplicate
+scissor-disable/restore sequence is merged into upstream 37e21167; the marked
+`_sg_gl_begin_resolve` helper remains for G8 and G7b's explicit swapchain resolve.
+
+### Core integration with the new write/copy API (#713)
+
+ShaderStream uploads all draws in one flush before binding its dedicated
+transient buffer pair; later flushes select a separate pair. Persistent Texture
+and bitmap-atlas updates use staging plus `sg_copy_buffer_to_image`, parking
+and resuming target passes with the existing continuation policy. Lazy window
+recordings open and consume their CPU prefix before the copy as well. The
+once-per-device-frame image update guard is removed. WebGPU uses GPU upload
+buffers with 256-byte row padding so its copies stay ordered between encoded
+draws; upstream's CPU staging path uses QueueWriteTexture before submission.
+Sokol's signed buffer-size and row/slice representation bounds are checked
+before staging allocation. Immutable mip data is a contiguous mip-major blob.
+
+The addon copy of `sokol_imgui.h` is unchanged in this core slice. Its old
+update API calls require the approved Q3/Q4 migration in the following slice;
+ImGui-dependent targets do not compile until that integration lands.
+
+
 ---
 
 ## sokol_glue.h
@@ -428,23 +490,27 @@ in-flight semaphore before rotating uniform slots or collecting resources.
 
 TrussC-specific public functions use the `sgl_tc_` prefix to distinguish from upstream `sgl_` API.
 
-### 10. sg_append_buffer (multi-draw per frame)
+### 10. Write-transient buffers per flush (#713, Q1; replaces L10 append uploads)
 
-**Purpose:** Replace `sg_update_buffer` with `sg_append_buffer` so that `_sgl_draw` can be called multiple times per frame. This is required for the FBO suspend/resume pattern -- drawing to an FBO mid-frame without losing the main pass commands.
+**Purpose:** Preserve multiple flushes in one device frame (Fbo suspend/resume,
+layer drawing and draw rewind) with upstream's write-transient API.
 
-**Changes:**
-- `_sgl_draw()`: uses `sg_append_buffer` instead of `sg_update_buffer`
-- Vertex buffer offsets tracked per draw call via `base_vertex`
-- GPU buffer recreated on overflow if released
-- **Single upload per frame (shared across layer draws):** `_sgl_draw()` appends
-  the full vertex set to the GPU buffer only on the FIRST call of a frame and
-  reuses the returned base offset for the remaining layer draws (cache keyed on
-  `frame_id` / vertex count / `vbuf.id`, fields `upload_*`; invalidated by
-  `sgl_tc_context_reset`). Without this, flushing N layers (e.g. one per deferred
-  PBR/shader draw, see `flushDeferredShaderDraws`) re-appended V vertices N times,
-  so `append_pos` reached N×V and `_sgl_grow_gpu_buffer` doubled the GPU buffer
-  until allocation failed (Metal `id:52` / `METAL_CREATE_BUFFER_FAILED`), killing
-  all sgl rendering. Regression test: `core/tests/sglLayerUpload` (dummy backend).
+**Changes (marked `[TrussC fork]`):**
+- Each changed vertex set uses a separate write-transient buffer. The per-context
+  pool grows as flushes are needed and reuses its buffers after `sg_commit()`;
+  sokol handles in-flight storage renaming. Context reset does not reset the
+  device-frame cursor. Release and context destruction free the whole pool.
+- Unchanged layer draws share one upload using the existing `upload_*` cache,
+  avoiding the historical N-layers times V-vertices allocation blow-up.
+- Buffers grow to the CPU vertex capacity when needed; offsets start at zero.
+  Capacity is bounded by `INT_MAX / sizeof(_sgl_vertex_t)`; a doubled CPU
+  capacity beyond that uses the requested count if it remains representable.
+  Earlier flush buffers retain their contents until the device frame finishes.
+- Depth-NONE pipelines disable depth writes and use compare ALWAYS to satisfy
+  upstream validation. Core target pipelines already normalize the same way.
+
+Regression: `sglLayerUpload`, `shaderStreamOverflow`, and
+`textureUploadGuard --gpu-check` (nested Fbo suspend/resume and pixel checks).
 
 ### 11. Auto-grow Buffers
 
@@ -454,7 +520,7 @@ TrussC-specific public functions use the `sgl_tc_` prefix to distinguish from up
 - `_sgl_next_vertex()`: auto-realloc to 2x on overflow
 - `_sgl_next_uniform()`: same
 - `_sgl_next_command()`: same
-- `_sgl_grow_gpu_buffer()`: recreate the GPU buffer with larger capacity in-frame and retain the old buffer until retirement
+- `_sgl_prepare_flush_buffer()`: resize an unused flush-pool slot to the CPU vertex capacity when needed; sokol retains its old backend storage through in-flight work
 - Default initial capacities kept small (128 verts, 64 cmds) for low-memory targets
 
 ### 12. TrussC-specific Public API (`sgl_tc_` prefix)

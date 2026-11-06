@@ -1021,8 +1021,8 @@ private:
         img_desc.height = atlas.height_;
         img_desc.pixel_format = SG_PIXELFORMAT_R8;   // coverage, drawn by activeCoverage2D()
         // immutable (default) - can set initial data
-        img_desc.data.mip_levels[0].ptr = atlas.pixels_.data();
-        img_desc.data.mip_levels[0].size = atlas.pixels_.size();
+        img_desc.data.ptr = atlas.pixels_.data();
+        img_desc.data.size = atlas.pixels_.size();
 
         // Optional mip chain: without it, glyphs minified on screen (far/small
         // text, non-HiDPI displays) alias and shimmer under motion — MSAA can't
@@ -1033,6 +1033,7 @@ private:
         // edges, and minified glyphs stay clean. (GLYPH_PADDING=2 means very
         // coarse mips bleed slightly between neighbors, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
+        std::vector<uint8_t> mipBlob;
         std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
         // Oversampling and mipmapping compose: oversampling owns 1:1 and above,
         // the mip chain owns minification -- which is exactly where a denser
@@ -1042,6 +1043,7 @@ private:
         // atlas the chain also lands better than on a 1x one: drawing at 1/N
         // scale reads mip log2(N), whose resolution matches the target exactly.
         if (wantMipmaps_ && mipsBuilt_) {
+            mipBlob.assign(atlas.pixels_.begin(), atlas.pixels_.end());
             int numMips = 1;
             for (int mw = atlas.width_, mh = atlas.height_; mw > 1 || mh > 1; ) {
                 mw = std::max(1, mw / 2);
@@ -1066,12 +1068,12 @@ private:
                     }
                 }
                 lowerMips.push_back(std::move(dst));
-                img_desc.data.mip_levels[level].ptr  = lowerMips.back().data();
-                img_desc.data.mip_levels[level].size = lowerMips.back().size();
+                mipBlob.insert(mipBlob.end(), lowerMips.back().begin(), lowerMips.back().end());
                 prev = lowerMips.back().data();
                 pw = cw; ph = ch;
             }
         }
+        if (!mipBlob.empty()) img_desc.data = {mipBlob.data(), mipBlob.size()};
         atlas.texture_ = sg_make_image(&img_desc);
 
         sg_view_desc view_desc = {};

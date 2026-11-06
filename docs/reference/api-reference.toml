@@ -12122,24 +12122,24 @@ details.en = '''
 - Attempts an upload only when the image is dirty and its texture is allocated. Use `setColor()`, or call `setDirty()` after direct pixel edits; see `Image` for CPU and GPU synchronization.
 - Images created with `allocate()` use Dynamic textures. Loaded images use Immutable textures, whose uploads are ignored. A width, height or channel mismatch also prevents uploading.
 - Clears the dirty flag after the upload attempt, even if the texture rejects it. With no allocated texture, it leaves the dirty flag unchanged.
-- For ordinary Dynamic textures, a second upload to the same GPU image in the same device frame is skipped with a warning. `Image::update()` still clears the dirty flag, so a skipped change requires marking dirty again before a later frame.
-- With Dynamic mipmaps, rebuilds the mip chain on the CPU and recreates the GPU image with all levels. This replaces the underlying GPU image rather than updating its existing levels.
+- Copies immediately through staging storage, including repeated uploads in one device frame. During a render pass, flushes pending drawing, suspends the pass, copies, and resumes with its contents preserved; the next draw sees the new pixels.
+- With Dynamic mipmaps, `loadData(pixels)` rebuilds lower mip levels on the CPU and copies them into the existing GPU image. The image and view keep their identity. The pointer overload updates only the base level.
 - See `Texture` for GPU resource rules and upload costs.
 '''
 details.ja = '''
 - 画像が更新を必要とし、テクスチャが確保済みの場合だけ転送を試みます。`setColor()` を使うか、直接編集後に `setDirty()` を呼んでください。CPU と GPU の同期は `Image` を参照してください。
 - `allocate()` した画像は Dynamic テクスチャを使います。読み込んだ画像は Immutable テクスチャを使い、転送は無視されます。幅、高さ、チャンネル数が一致しない場合も転送しません。
 - テクスチャ側が転送を受け付けなかった場合も、転送を試みた後は更新が必要な状態を解除します。テクスチャが未確保の場合は、その状態を保持します。
-- 通常の Dynamic テクスチャでは、同じデバイスフレーム内で同じ GPU 画像への 2 回目の転送を警告付きで省略します。それでも `Image::update()` は更新が必要な状態を解除するため、省略された変更を後のフレームで転送するには、再び更新が必要な状態にしてください。
-- Dynamic のミップマップが有効な場合、CPU でミップマップ連鎖を作り直し、全レベルを持つ GPU 画像を再作成します。既存のレベルを更新するのではなく、内部の GPU 画像を置き換えます。
+- ステージング領域経由で直ちにコピーし、同じデバイスフレーム内でも繰り返し転送できます。描画パス中では記録済みの描画を実行してパスを中断し、コピー後に内容を保持して再開します。直後の描画には新しいピクセルが使われます。
+- Dynamic のミップマップ付きテクスチャでは、`loadData(pixels)` が CPU で下位ミップを生成し、既存の GPU 画像へコピーします。画像とビューのハンドルは維持されます。ポインタ版は基本レベルのみを更新します。
 - GPU リソースの扱いと転送コストは `Texture` を参照してください。
 '''
 details.ko = '''
 - 이미지가 갱신이 필요한 상태이고 텍스처가 할당되어 있을 때만 업로드를 시도합니다. `setColor()`를 사용하거나 직접 편집한 뒤 `setDirty()`를 호출합니다. CPU와 GPU의 동기화는 `Image`를 참조합니다.
 - `allocate()`로 만든 이미지는 Dynamic 텍스처를 사용합니다. 로드한 이미지는 Immutable 텍스처를 사용하며 업로드를 무시합니다. 너비, 높이 또는 채널 수가 일치하지 않아도 업로드하지 않습니다.
 - 텍스처가 업로드를 거부해도 업로드 시도 후에는 갱신 필요 상태를 해제합니다. 텍스처가 할당되지 않았으면 해당 상태를 유지합니다.
-- 일반 Dynamic 텍스처는 같은 디바이스 프레임에서 같은 GPU 이미지에 두 번째 업로드를 하면 경고와 함께 생략합니다. 그래도 `Image::update()`는 갱신 필요 상태를 해제하므로, 생략된 변경 사항을 이후 프레임에 업로드하려면 다시 갱신이 필요한 상태로 표시해야 합니다.
-- Dynamic 밉맵이 활성화되어 있으면 CPU에서 밉맵 체인을 다시 만들고 모든 레벨을 포함한 GPU 이미지를 재생성합니다. 기존 레벨을 갱신하는 대신 내부 GPU 이미지를 대체합니다.
+- 스테이징 저장소를 통해 즉시 복사하며 같은 디바이스 프레임에서도 반복 업로드할 수 있습니다. 렌더 패스 중에는 대기 중인 그리기를 실행하고 패스를 중단한 뒤 복사하고 내용을 보존하여 재개합니다. 바로 다음 그리기는 새 픽셀을 사용합니다.
+- Dynamic 밉맵 텍스처에서는 `loadData(pixels)`가 CPU에서 하위 밉을 생성하고 기존 GPU 이미지로 복사합니다. 이미지와 뷰의 핸들은 유지됩니다. 포인터 오버로드는 기본 레벨만 갱신합니다.
 - GPU 리소스 규칙과 업로드 비용은 `Texture`를 참조합니다.
 '''
 snippet = '''
@@ -32965,32 +32965,35 @@ description.en = "Uploads pixel data to an allocated texture."
 description.ja = "確保済みのテクスチャにピクセルデータを転送する。"
 description.ko = "할당된 텍스처에 픽셀 데이터를 업로드한다."
 details.en = '''
+- Staging sizes and row/slice pitches must fit sokol's signed integer representation; an unrepresentable transfer logs an error.
 - Use after allocating a Dynamic or Stream texture and whenever its CPU data changes; accepts `Pixels` or a data pointer with width, height, and channel count, and replaces the whole texture rather than a subsection.
 - Width, height, and channel count must match the allocation exactly; mismatches, an unallocated texture, Immutable usage, or missing graphics initialization return without uploading. The function returns no value and does not resize or convert the input.
 - Pointer data must be tightly packed in the allocated GPU format and remain valid during the call; the byte count is computed from the explicit format, or from the stored channel count for channel-count allocations, and the pointer overload does not receive a buffer length. `Pixels` uploads do not validate that the component type matches the texture.
-- With channel-count allocations of two or three channels, the GPU format is R8 but uploads supply two or three bytes per pixel and fail size validation. Use explicit `TextureFormat::R8` for single-channel data or `TextureFormat::RG8` for two-channel data.
-- Ordinary updates allow one upload to the same GPU image per device frame across all windows; another call in that frame logs a warning and is skipped.
-- For a mipmapped non-Immutable texture, `loadData(pixels)` generates lower mip levels on the CPU and replaces the GPU image and view. Each replacement changes the image handle, so another call in the same device frame can rebuild it again; the pointer overload does not regenerate mipmaps.
+- With channel-count allocations of two or three channels, the GPU format is R8 although the CPU byte count uses two or three bytes per pixel; this does not describe matching pixel data. Use explicit `TextureFormat::R8` for single-channel data or `TextureFormat::RG8` for two-channel data.
+- Copies immediately through staging storage, including repeated uploads in one device frame. During a render pass, flushes pending drawing, suspends the pass, copies, and resumes with its contents preserved; the next draw sees the new pixels.
+- With Dynamic mipmaps, `loadData(pixels)` rebuilds lower mip levels on the CPU and copies them into the existing GPU image. The image and view keep their identity. The pointer overload updates only the base level.
 - For RGBA16, the current upload byte count is four bytes per pixel rather than eight, so sokol validation rejects the incomplete data when enabled.
 - See `Texture` for GPU resource rules and upload costs.
 '''
 details.ja = '''
+- ステージング領域のサイズと行・スライスの間隔は sokol の符号付き整数で表せる必要があり、表せない転送はエラーを記録します。
 - Dynamic または Stream のテクスチャを確保した後や、CPU のデータを変更したときに呼び出します。`Pixels`、またはデータポインタと幅、高さ、チャンネル数を受け取り、一部分ではなくテクスチャ全体を置き換えます。
 - 幅、高さ、チャンネル数は確保時と完全に一致させてください。不一致、未確保、Immutable、グラフィックス未初期化の場合は転送せずに戻ります。戻り値はなく、入力のサイズ変更や形式変換も行いません。
 - ポインタのデータは確保した GPU 形式で隙間なく並べ、呼び出し中は有効に保ってください。バイト数は明示的に指定した形式から計算し、チャンネル数を指定して確保した場合は保持しているチャンネル数を使用します。ポインタ版はバッファ長を受け取りません。`Pixels` 版も成分の型がテクスチャと一致するかは検証しません。
-- チャンネル数を 2 または 3 として確保した場合、GPU 形式は R8 ですが、転送データは 1 ピクセルあたり 2 または 3 バイトになるため、サイズの検証に失敗します。1 チャンネルのデータには `TextureFormat::R8`、2 チャンネルのデータには `TextureFormat::RG8` を明示的に指定してください。
-- 通常の更新では、すべてのウィンドウを通じて同じ GPU 画像への転送はデバイスの 1 フレームにつき 1 回です。同じフレーム内の追加の呼び出しは警告を記録してスキップします。
-- ミップマップ付きで Immutable 以外のテクスチャでは、`loadData(pixels)` が CPU で下位ミップを生成し、GPU 画像とビューを置き換えます。置き換えるたびに画像ハンドルが変わるため、同じデバイスフレーム内の追加の呼び出しでも再作成できます。ポインタ版はミップマップを再生成しません。
+- チャンネル数を 2 または 3 として確保した場合、GPU 形式は R8 ですが、CPU のバイト数は 1 ピクセルあたり 2 または 3 バイトとして計算され、ピクセル形式が一致しません。1 チャンネルのデータには `TextureFormat::R8`、2 チャンネルのデータには `TextureFormat::RG8` を明示的に指定してください。
+- ステージング領域経由で直ちにコピーし、同じデバイスフレーム内でも繰り返し転送できます。描画パス中では記録済みの描画を実行してパスを中断し、コピー後に内容を保持して再開します。直後の描画には新しいピクセルが使われます。
+- Dynamic のミップマップ付きテクスチャでは、`loadData(pixels)` が CPU で下位ミップを生成し、既存の GPU 画像へコピーします。画像とビューのハンドルは維持されます。ポインタ版は基本レベルのみを更新します。
 - RGBA16 の現在の転送バイト数は、本来の 1 ピクセル 8 バイトではなく 4 バイトです。そのため、sokol の検証が有効な場合は不完全なデータとして拒否されます。
 - GPU リソースの扱いと転送コストは `Texture` を参照してください。
 '''
 details.ko = '''
+- 스테이징 크기와 행·슬라이스 간격은 sokol의 부호 있는 정수로 표현할 수 있어야 하며, 표현할 수 없는 전송은 오류를 기록합니다.
 - Dynamic 또는 Stream 텍스처를 할당한 뒤나 CPU 데이터를 변경했을 때 호출합니다. `Pixels` 또는 데이터 포인터와 너비, 높이, 채널 수를 받으며, 일부 영역이 아니라 텍스처 전체를 교체합니다.
 - 너비, 높이, 채널 수는 할당한 값과 정확히 일치해야 합니다. 값이 다르거나 텍스처가 할당되지 않았거나 Immutable이거나 그래픽이 초기화되지 않았으면 업로드 없이 반환합니다. 반환값은 없으며 입력의 크기나 형식을 변환하지 않습니다.
 - 포인터 데이터는 할당된 GPU 형식으로 빈틈없이 배치되어야 하며 호출 중 유효해야 합니다. 바이트 수는 명시적으로 지정한 형식으로 계산하며, 채널 수로 할당한 경우에는 저장된 채널 수를 사용합니다. 포인터 오버로드는 버퍼 길이를 받지 않습니다. `Pixels` 업로드도 성분 자료형이 텍스처와 일치하는지 검증하지 않습니다.
-- 채널 수를 2 또는 3으로 지정하여 할당하면 GPU 형식은 R8이지만 업로드는 픽셀당 2 또는 3바이트를 제공하므로 크기 검증에 실패합니다. 단일 채널 데이터에는 `TextureFormat::R8`, 2채널 데이터에는 `TextureFormat::RG8`을 명시적으로 지정합니다.
-- 일반 갱신에서는 모든 창을 통틀어 같은 GPU 이미지에 장치 프레임당 한 번만 업로드할 수 있습니다. 같은 프레임에서 다시 호출하면 경고를 기록하고 건너뜁니다.
-- 밉맵이 있고 Immutable이 아닌 텍스처에서는 `loadData(pixels)`가 CPU에서 하위 밉을 생성하고 GPU 이미지와 뷰를 교체합니다. 교체할 때마다 이미지 핸들이 바뀌므로 같은 장치 프레임에서 다시 호출해도 재생성할 수 있습니다. 포인터 오버로드는 밉맵을 다시 생성하지 않습니다.
+- 채널 수를 2 또는 3으로 지정하여 할당하면 GPU 형식은 R8이지만 CPU 바이트 수는 픽셀당 2 또는 3바이트로 계산되므로 픽셀 형식이 일치하지 않습니다. 단일 채널 데이터에는 `TextureFormat::R8`, 2채널 데이터에는 `TextureFormat::RG8`을 명시적으로 지정합니다.
+- 스테이징 저장소를 통해 즉시 복사하며 같은 디바이스 프레임에서도 반복 업로드할 수 있습니다. 렌더 패스 중에는 대기 중인 그리기를 실행하고 패스를 중단한 뒤 복사하고 내용을 보존하여 재개합니다. 바로 다음 그리기는 새 픽셀을 사용합니다.
+- Dynamic 밉맵 텍스처에서는 `loadData(pixels)`가 CPU에서 하위 밉을 생성하고 기존 GPU 이미지로 복사합니다. 이미지와 뷰의 핸들은 유지됩니다. 포인터 오버로드는 기본 레벨만 갱신합니다.
 - RGBA16의 현재 업로드 바이트 수는 픽셀당 8바이트가 아니라 4바이트입니다. 따라서 sokol 검증이 활성화되어 있으면 불완전한 데이터로 거부합니다.
 - GPU 리소스 규칙과 업로드 비용은 `Texture`를 참조하세요.
 '''
@@ -33211,7 +33214,7 @@ details.en = '''
 - `loadCubemapData(faces, faceSize)` takes six buffer pointers in the order `+X, -X, +Y, -Y, +Z, -Z`; `faceSize` is the number of bytes in each face.
 - Normally, `faceSize` must equal `sideSize * sideSize * bytesPerPixel(format)`. For `RGBA16`, the current size check instead uses `sideSize * sideSize * 4`, although that format uses 8 bytes per pixel.
 - Requires an allocated cubemap with `Dynamic` or `Stream` usage. Other usage modes or a size mismatch log a warning and skip the upload; unavailable graphics, an unallocated texture, or a non-cubemap returns silently.
-- A second upload to the same image in the same device frame logs a warning and is skipped, using the same upload tracking as `loadData()`.
+- Copies immediately through staging storage, including repeated uploads in one device frame. During a render pass, flushes pending drawing, suspends the pass, copies, and resumes with its contents preserved; the next draw sees the new pixels.
 - Each pointer must provide at least `faceSize` readable bytes; null pointers are not checked. The six buffers are copied into a reusable staging buffer before upload.
 - Replaces `uploadCubemapFace()` and `uploadCubemapMip()` in v0.8.
 - See `Texture` for GPU resource rules.
@@ -33220,7 +33223,7 @@ details.ja = '''
 - `loadCubemapData(faces, faceSize)` は、`+X, -X, +Y, -Y, +Z, -Z` の順に並べた 6 個のバッファポインターを受け取ります。`faceSize` は 1 面あたりのバイト数です。
 - 通常、`faceSize` は `sideSize * sideSize * bytesPerPixel(format)` と一致する必要があります。`RGBA16` は 1 ピクセル 8 バイトですが、現在のサイズ検査では `sideSize * sideSize * 4` を使います。
 - `Dynamic` または `Stream` で確保したキューブマップが必要です。それ以外の使用モードやサイズ不一致では警告を記録してアップロードしません。グラフィックスが利用できない場合、未確保の場合、キューブマップでない場合は、何も記録せず戻ります。
-- 同じデバイスフレームで同じ画像に 2 回アップロードすると、2 回目は警告を記録してスキップします。この記録は `loadData()` と共通です。
+- ステージング領域経由で直ちにコピーし、同じデバイスフレーム内でも繰り返し転送できます。描画パス中では記録済みの描画を実行してパスを中断し、コピー後に内容を保持して再開します。直後の描画には新しいピクセルが使われます。
 - 各ポインターには少なくとも `faceSize` バイトの読み取り可能なデータが必要で、null ポインターは検査しません。アップロード前に、6 面を再利用可能な一時バッファへコピーします。
 - v0.8 で `uploadCubemapFace()` と `uploadCubemapMip()` を置き換えます。
 - GPU リソースの扱いは `Texture` を参照してください。
@@ -33229,7 +33232,7 @@ details.ko = '''
 - `loadCubemapData(faces, faceSize)`는 `+X, -X, +Y, -Y, +Z, -Z` 순서로 배열한 버퍼 포인터 6개를 받습니다. `faceSize`는 면 하나의 바이트 수입니다.
 - 일반적으로 `faceSize`는 `sideSize * sideSize * bytesPerPixel(format)`과 같아야 합니다. `RGBA16`은 픽셀당 8바이트를 사용하지만 현재 크기 검사는 `sideSize * sideSize * 4`를 사용합니다.
 - `Dynamic` 또는 `Stream`으로 할당한 큐브맵이 필요합니다. 다른 사용 모드나 크기 불일치는 경고를 기록하고 업로드를 건너뜁니다. 그래픽을 사용할 수 없거나, 할당되지 않았거나, 큐브맵이 아니면 기록 없이 반환합니다.
-- 같은 장치 프레임에서 같은 이미지에 두 번 업로드하면 두 번째 호출은 경고를 기록하고 건너뜁니다. 이 기록은 `loadData()`와 공유합니다.
+- 스테이징 저장소를 통해 즉시 복사하며 같은 디바이스 프레임에서도 반복 업로드할 수 있습니다. 렌더 패스 중에는 대기 중인 그리기를 실행하고 패스를 중단한 뒤 복사하고 내용을 보존하여 재개합니다. 바로 다음 그리기는 새 픽셀을 사용합니다.
 - 각 포인터는 최소 `faceSize`바이트의 읽을 수 있는 데이터를 제공해야 하며 null 포인터는 검사하지 않습니다. 업로드 전에 6개 면을 재사용 가능한 임시 버퍼로 복사합니다.
 - v0.8에서 `uploadCubemapFace()`와 `uploadCubemapMip()`을 대체합니다.
 - GPU 리소스 처리 규칙은 `Texture`를 참조하세요.
@@ -38789,7 +38792,7 @@ details.en = '''
 - During pending permission setup, checks permission and attempts initialization once granted, then returns without processing a frame in that call; otherwise an uninitialized grabber does nothing.
 - Intermediate camera frames can be overwritten between updates; use the optional queue to retain frames up to its capacity.
 - On Web, copies an available video image through a canvas on each update, even if the camera image has not changed.
-- For threading requirements, see `VideoGrabber::setup`; repeated texture uploads within one app frame are subject to `Texture::loadData` limits.
+- For threading requirements, see `VideoGrabber::setup`; `Texture::loadData` copies each upload immediately.
 '''
 details.ja = '''
 - アプリの各フレームで 1 回呼んでください。接続中の場合は新規フレームのフラグをリセットし、プラットフォームの更新とサイズ変更を処理して、変更済みの最新 RGBA8 バッファをテクスチャへアップロードします。
@@ -38797,7 +38800,7 @@ details.ja = '''
 - 許可待ちの場合は許可を確認し、許可されると初期化を試み、その呼び出しではフレームを処理せずに戻ります。それ以外の未初期化状態では何もしません。
 - 更新の間に届く途中のカメラフレームは上書きされる場合があります。容量の範囲で保持するには任意のフレームキューを使用してください。
 - Web ではカメラ画像が変化していなくても、利用可能な動画画像を更新のたびに canvas 経由でコピーします。
-- スレッドの扱いは `VideoGrabber::setup` を参照してください。同じアプリフレーム内でアップロードを繰り返す場合は `Texture::loadData` の制限を受けます。
+- スレッドの扱いは `VideoGrabber::setup` を参照してください。`Texture::loadData` は転送ごとに直ちにコピーします。
 '''
 details.ko = '''
 - 앱 프레임마다 한 번 호출합니다. 연결된 경우 새 프레임 플래그를 초기화하고 플랫폼 업데이트와 크기 변경을 처리한 뒤, 변경된 최신 RGBA8 버퍼를 텍스처에 업로드합니다.
@@ -38805,7 +38808,7 @@ details.ko = '''
 - 권한 대기 중에는 권한을 확인하고 허용되면 초기화를 시도한 다음, 해당 호출에서는 프레임을 처리하지 않고 반환합니다. 그 외의 미초기화 상태에서는 아무 작업도 하지 않습니다.
 - 업데이트 사이에 도착한 중간 카메라 프레임은 덮어써질 수 있습니다. 용량 범위 내에서 보관하려면 선택적으로 프레임 큐를 사용합니다.
 - Web에서는 카메라 이미지가 바뀌지 않아도 사용할 수 있는 영상 이미지를 업데이트마다 canvas를 통해 복사합니다.
-- 스레드 처리 규칙은 `VideoGrabber::setup`을 참조합니다. 같은 앱 프레임 안에서 업로드를 반복하면 `Texture::loadData`의 제한을 받습니다.
+- 스레드 처리 규칙은 `VideoGrabber::setup`을 참조합니다. `Texture::loadData`는 업로드마다 즉시 복사합니다.
 '''
 snippet = '''
 // tcApp members: VideoGrabber camera; Image image;

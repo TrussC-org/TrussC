@@ -637,7 +637,7 @@ img.drawSubsection(dx, dy, dw, dh, sx, sy, sw, sh);  // Sprite sheet
 img.allocate(256, 256, 4);                  // RGBA, no mipmaps
 img.allocate(256, 256, 4, /*mipmaps=*/true); // Chain rebuilt each update()
 img.setColor(x, y, Color(1,0,0));
-img.update();                       // Upload to GPU (once per frame!)
+img.update();                       // Upload dirty pixels to GPU immediately
 img.save("output.png");
 
 // CPU-side transforms (operate on Pixels; cheap for U8, gamma-correct)
@@ -5329,7 +5329,7 @@ Sound sfx = bundle.build();
 4. **`enableEvents()` required** for Node to receive mouse events.
 5. **`drawLine()` is always 1px** (there is no `setLineWidth()`). Use `drawStroke()` or `beginStroke()/endStroke()` for thick lines.
 6. **Inside `Node::draw()`, coordinates are local.** Already translated to node position.
-7. **Texture update once per frame.** `loadData()`/`update()` on the same frame logs a warning and is skipped (sokol limitation).
+7. **Dynamic/Stream texture updates copy immediately.** Repeated valid `loadData()` calls or dirty `Image::update()` calls in one device frame are supported. An active render pass is flushed, suspended, and resumed with its contents preserved; the following draw sees the new pixels.
 8. **Letter keys are UPPERCASE.** `keyPressed(int key)` receives sokol keycodes: `key == 'A'`, never `'a'` (`'a'` = 97 never matches).
 9. **GPU classes are main-thread only.** `Image` / `Texture` / `Fbo` / `Font` call into sokol; using them on a background thread crashes (no framework assert catches it). Load `Pixels` on the background thread, create the `Image`/`Texture` on the main thread.
 10. **`Pixels` / `Image` / `Texture` are non-copyable** (deleted copy ctor). Use `std::move()`, or `Pixels::clone()` for a deep copy.
