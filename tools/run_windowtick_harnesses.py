@@ -21,8 +21,7 @@ TESTS = ROOT / 'core/tests/windowTick'
 WORK = ROOT / '.build/windowtick-runner'
 MESA = Path('/usr/share/glvnd/egl_vendor.d/50_mesa.json')
 IMGUI = ROOT / 'addons/tcxImGui/example-basic/build-linux/addons/tcxImGui/libtcxImGui.a'
-# Remove these two names once #1267 lands.
-DEFAULT_SKIP = ['native-gates-test', 'native-quit-test.py']
+DEFAULT_SKIP = []
 SCRIPTS = [
     'app-owner-review-test.py', 'c2-review-test.py', 'creation-settings-test.py',
     'egl-wait-test', 'event-converter-test', 'guest-storage-test.py',
@@ -199,7 +198,7 @@ def main():
         if code:
             print('\n'.join(output.splitlines()[-10:]), flush=True)
 
-    skips = dict.fromkeys(DEFAULT_SKIP, 'waiting for #1267')
+    skips = dict.fromkeys(DEFAULT_SKIP, 'default skip')
     if not args.include_late_window:
         skips['late-window-test.py'] = 'use --include-late-window'
     skips.update(dict.fromkeys(args.skip, 'requested by --skip'))
