@@ -1,1 +1,1 @@
-# Core input regression test (no addons).
+# TrussC addons - one addon per line
