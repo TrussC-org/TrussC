@@ -3,11 +3,14 @@
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
 #include <string>
+#include <chrono>
 using namespace tc;
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 int visibilityMapCount(unsigned long);
 int visibilitySwapCount(unsigned long);
 bool visibilityMapped(const void*, unsigned long);
+bool visibilityWaitMapped(const void*, unsigned long, bool);
+bool visibilityBluePixel(const void*, unsigned long);
 #define VISIBILITY_X11 1
 #endif
 namespace {
@@ -16,7 +19,8 @@ bool startVisible = false, fullscreen = false, finished = false;
 int mainDraws = 0, secondaryDraws = 0, secondaryUpdates = 0;
 bool hideInAppDraw = false, hideInDrawListener = false, hideInOnRender = false, hideInAfterFrame = false;
 int drawHides = 0, hiddenAtUpdate = 0;
-bool armEventDrivenHide = false;
+bool armEventDrivenHide = false, blueContent = false;
+std::chrono::steady_clock::time_point eventDrivenHiddenSince;
 uint64_t completedBeforeHide = 0;
 #ifdef VISIBILITY_X11
 int swapsBeforeHide = 0;
@@ -32,7 +36,7 @@ unsigned long xwindow(Window& window) {
     return (unsigned long)(uintptr_t)sapp_window_x11_get_window(internal::WindowRequestAccess::binding(window).handle);
 }
 void checkUnmapped(Window& window) {
-    check("X11 hidden window is unmapped", !visibilityMapped(sapp_x11_get_display(), xwindow(window)));
+    check("X11 hidden window is unmapped", visibilityWaitMapped(sapp_x11_get_display(), xwindow(window), false));
 }
 #endif
 bool fullscreenSettled() {
@@ -87,32 +91,53 @@ struct Secondary : App {
     EventListener drawListener, renderListener, afterFrameListener;
     void setup() override {
         drawListener = events().draw.listen([] {
+#ifdef VISIBILITY_X11
+            if (!visibilityMapped(sapp_x11_get_display(), xwindow(*secondary))) return;
+#endif
             if (hideInDrawListener) { hideInDrawListener = false; hideDuringDraw(); }
         });
         renderListener = events().onRender.listen([] {
+#ifdef VISIBILITY_X11
+            if (!visibilityMapped(sapp_x11_get_display(), xwindow(*secondary))) return;
+#endif
             if (hideInOnRender) { hideInOnRender = false; hideDuringDraw(); }
         });
         afterFrameListener = events().afterFrame.listen([] {
+#ifdef VISIBILITY_X11
+            if (!visibilityMapped(sapp_x11_get_display(), xwindow(*secondary))) return;
+#endif
             if (hideInAfterFrame) { hideInAfterFrame = false; hideDuringDraw(); }
         });
     }
     void update() override {
         ++secondaryUpdates;
         if (armEventDrivenHide) {
+#ifdef VISIBILITY_X11
+            if (!visibilityMapped(sapp_x11_get_display(), xwindow(*getWindow()))) return;
+#endif
             armEventDrivenHide = false;
             getWindow()->setFps(EVENT_DRIVEN);
+            blueContent = true;
             redraw(); // One request before hiding; showing must present it without another request.
             getWindow()->setVisible(false);
+            eventDrivenHiddenSince = std::chrono::steady_clock::now();
             hiddenAtUpdate = secondaryUpdates;
         }
     }
     void draw() override {
-        ++secondaryDraws; clear(0.2f);
+        ++secondaryDraws;
+        if (blueContent) clear(0.1f, 0.2f, 1.0f); else clear(0.2f);
+#ifdef VISIBILITY_X11
+        // Exercise hiding a shown frame only after the WM has mapped it.
+        if (!visibilityMapped(sapp_x11_get_display(), xwindow(*getWindow()))) return;
+#endif
         if (hideInAppDraw) { hideInAppDraw = false; hideDuringDraw(); }
     }
 };
 struct Probe : App {
     int phase = 0, updates = 0, phaseUpdates = 0;
+    std::chrono::steady_clock::time_point phaseTime;
+    bool stayedUnmapped = true;
     int savedMainDraws = 0, savedSecondaryDraws = 0, savedSecondaryUpdates = 0;
     void setup() override {
         auto* window = getWindow();
@@ -152,7 +177,7 @@ struct Probe : App {
         } else if (phase == 1 && fullscreenSettled() && secondaryDraws >= 3 && (fullscreen || mainDraws >= 3)) {
             check("shown windows resume drawing", secondaryDraws >= 3 && (fullscreen || mainDraws >= 3));
 #ifdef VISIBILITY_X11
-            check("X11 show maps both windows", visibilityMapped(sapp_x11_get_display(), xwindow(*getWindow())) && visibilityMapped(sapp_x11_get_display(), xwindow(*secondary)));
+            check("X11 show maps both windows", visibilityWaitMapped(sapp_x11_get_display(), xwindow(*getWindow()), true) && visibilityWaitMapped(sapp_x11_get_display(), xwindow(*secondary), true));
 #endif
             getWindow()->setVisible(false); secondary->setVisible(false);
             check("all windows hidden and occluded", !getWindow()->isVisible() && !secondary->isVisible() && getWindow()->isOccluded() && secondary->isOccluded());
@@ -193,21 +218,49 @@ struct Probe : App {
 #endif
             secondary->setVisible(true);
             armEventDrivenHide = true; phase = 8;
-        } else if (phase == 8 && !armEventDrivenHide && secondaryUpdates >= hiddenAtUpdate + 3) {
+        } else if (phase == 8 && !armEventDrivenHide && secondaryUpdates >= hiddenAtUpdate + 3 &&
+                   std::chrono::steady_clock::now() - eventDrivenHiddenSince >= std::chrono::milliseconds(500)) {
             savedSecondaryDraws = secondaryDraws;
 #ifdef VISIBILITY_X11
             swapsBeforeHide = visibilitySwapCount(xwindow(*secondary));
 #endif
             secondary->setVisible(true);
-            phaseUpdates = updates; phase = 9;
-        } else if (phase == 9 && updates >= phaseUpdates + 8) {
-            check("EVENT_DRIVEN show completes exactly one pending redraw",
-                secondaryDraws == savedSecondaryDraws + 1 &&
-                internal::WindowRequestAccess::context(*secondary).loop.redrawCount == 0);
+            phaseTime = std::chrono::steady_clock::now(); phase = 9;
+        } else if (phase == 9) {
 #ifdef VISIBILITY_X11
+            // Keep ticking while the WM maps, allowing the early-present regression.
+            const bool mapped = visibilityMapped(sapp_x11_get_display(), xwindow(*secondary));
+            if (!mapped && std::chrono::steady_clock::now() - phaseTime < std::chrono::seconds(2)) return;
+            check("EVENT_DRIVEN show is mapped", mapped);
+#endif
+            phaseTime = std::chrono::steady_clock::now(); phase = 10;
+        } else if (phase == 10 && std::chrono::steady_clock::now() - phaseTime >= std::chrono::milliseconds(500)) {
+#ifdef VISIBILITY_X11
+            check("EVENT_DRIVEN shown pixels contain new blue content", visibilityBluePixel(sapp_x11_get_display(), xwindow(*secondary)));
             const int resumedPresents = visibilitySwapCount(xwindow(*secondary)) - swapsBeforeHide;
             std::printf("windowVisible: EVENT_DRIVEN presentations after show: %d\n", resumedPresents);
-            check("EVENT_DRIVEN show presents exactly once without a new redraw request", resumedPresents == 1);
+            check("EVENT_DRIVEN show presents without a redraw storm", resumedPresents >= 1 && resumedPresents <= 2 &&
+                secondaryDraws == savedSecondaryDraws + resumedPresents &&
+                internal::WindowRequestAccess::context(*secondary).loop.redrawCount == 0);
+#else
+            check("EVENT_DRIVEN show completes exactly one pending redraw", secondaryDraws == savedSecondaryDraws + 1 &&
+                internal::WindowRequestAccess::context(*secondary).loop.redrawCount == 0);
+#endif
+            secondary->setVisible(false);
+#ifdef VISIBILITY_X11
+            checkUnmapped(*secondary);
+#endif
+            secondary->setVisible(true); secondary->setVisible(false);
+            check("same-update hide wins requested state", !secondary->isVisible());
+            phaseTime = std::chrono::steady_clock::now(); phase = 11;
+        } else if (phase == 11) {
+#ifdef VISIBILITY_X11
+            stayedUnmapped &= !visibilityMapped(sapp_x11_get_display(), xwindow(*secondary));
+#endif
+            if (std::chrono::steady_clock::now() - phaseTime < std::chrono::milliseconds(500)) return;
+#ifdef VISIBILITY_X11
+            checkUnmapped(*secondary);
+            check("same-update show/hide stays unmapped for 500 ms", stayedUnmapped);
 #endif
             finished = true;
             exitApp(failures ? 1 : 0);

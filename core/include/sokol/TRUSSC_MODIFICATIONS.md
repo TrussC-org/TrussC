@@ -914,8 +914,8 @@ source immediately for hidden startup, defers fullscreen until shown, and return
 NO from `applicationShouldTerminateAfterLastWindowClosed:`; Runtime still owns
 last-window and quit-on-close termination. Explicitly hidden children attach to their parent only while shown, so parent
 ordering cannot expose them. The desktop visibility seam uses `orderOut:` / `orderFront:`,
-`ShowWindow(SW_HIDE/SW_SHOWNA)`, or `XUnmapWindow` / `XMapWindow`. X11 reapplies
-fullscreen on `MapNotify` and sets the parent hint before hidden creation can return. Windows fullscreen style changes retain explicit
+`ShowWindow(SW_HIDE/SW_SHOWNA)`, or `XWithdrawWindow` / `XMapWindow`. X11 reapplies
+fullscreen once on the first visible `MapNotify` after explicit show and sets the parent hint before hidden creation can return. Windows fullscreen style changes retain explicit
 hidden state. Metadata and native drawable admission include explicit hiding even
 when OS hidden signals are disabled. Unsupported platform seams do nothing;
 TrussC's public API logs the Notice.
@@ -935,3 +935,14 @@ before authorization/commit in present(). Runtime keeps its frame-accounting
 check after present() and no longer checks visibility after draw callbacks.
 macOS preserves the base OS-only suspension reset on trust opt-out; explicit
 hides retain their matching recovery notification.
+
+Follow-up 7: X11 hide withdraws the window through the WM. A late MapNotify
+withdraws again if requested hidden; otherwise it requests one Runtime redraw
+after mapping, so EVENT_DRIVEN content survives asynchronous WM presentation.
+The internal redraw event coalesces into the existing counter without app events.
+
+Follow-up 8: a per-window flag set by explicit show limits MapNotify fullscreen
+replay to that show. Ordinary WM remaps retain the user's fullscreen choice and
+still request a redraw. Withdrawal can discard user-set WM state such as Always
+on Top or workspace placement; TrussC restores its requested fullscreen state,
+and the public reference documents this limitation.

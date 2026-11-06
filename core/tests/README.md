@@ -1187,9 +1187,12 @@ It hides from App::draw with synchronized updates, and from draw and onRender
 listeners with independent updates, checking that none of those frames completes. On X11 it also
 counts native swaps, including a hide from afterFrame immediately before native
 presentation, and checks that no map request occurs before first show or
-from hidden bringToFront. An EVENT_DRIVEN case requests one redraw before hiding,
-then checks that showing completes and presents it exactly once without another
-redraw request. `--start-visible`
+from hidden bringToFront. X11 map/unmap assertions poll for up to two seconds
+to allow WM processing. An EVENT_DRIVEN case requests one redraw before hiding,
+then checks that showing presents without another app redraw request. X11 also
+reads the shown window's new blue pixels and allows one post-map redraw after an
+early present. A same-update show/hide must stay unmapped for 500 ms.
+`--start-visible`
 checks visible launch followed by hiding; `--fullscreen` checks hidden fullscreen
 creation and repeated showing. Each display mode prints `windowVisible verdict:
 PASS` or `FAIL`, including from macOS cleanup before process termination.

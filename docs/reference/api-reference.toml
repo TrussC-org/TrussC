@@ -41311,7 +41311,7 @@ details.en = '''
 - Pass `false` to hide this window and `true` to show it again. The App and its resources stay alive. Does nothing after the window closes. Call from the main thread, like other Window operations.
 - Hiding every window keeps the app running. Use `exitApp()` to quit; closing windows still follows the existing `Window::close` and `setQuitOnClose` rules. On macOS, Cmd+Q and logout still request termination.
 - A hidden window keeps updating, pauses drawing by default, and reports `isOccluded() == true`, following the usual hidden-window frame settings. Explicit hiding works even if OS occlusion detection is disabled.
-- macOS uses `orderOut:` / `orderFront:`, Windows uses `ShowWindow`, and Linux X11 uses `XUnmapWindow` / `XMapWindow`. X11 mapping is asynchronous; fullscreen is reapplied after mapping. Showing does not promise keyboard focus; use `bringToFront()` after showing when needed.
+- macOS uses `orderOut:` / `orderFront:`, Windows uses `ShowWindow`, and Linux X11 uses `XWithdrawWindow` to hide and `XMapWindow` to show. X11 mapping is asynchronous; TrussC-requested fullscreen is restored after mapping on explicit show. Hiding withdraws the window from the WM, so user-set WM state (such as Always on Top or workspace placement) may not survive hide/show. Showing does not promise keyboard focus; use `bringToFront()` after showing when needed.
 - KMS, iOS, Android and Web leave the window unchanged and log a Notice on every call. Use `WindowSettings::setVisible(false)` to create a desktop window that never flashes on screen before its first show.
 '''
 details.ja = '''
@@ -41319,7 +41319,7 @@ details.ja = '''
 - `false` でこのウィンドウを隠し、`true` で再表示します。App とリソースは維持されます。閉じた後は何もしません。他の Window 操作と同じくメインスレッドから呼びます。
 - すべてのウィンドウを隠しても、アプリは動き続けます。終了には `exitApp()` を使います。閉じる操作は既存の `Window::close` と `setQuitOnClose` の規則に従います。macOS の Cmd+Q とログアウトも終了を要求します。
 - 隠したウィンドウは更新を続け、既定では描画を停止し、`isOccluded() == true` を返します。通常の非表示時のフレーム設定に従います。OS の遮蔽検出を無効にしても、この操作による非表示は有効です。
-- macOS は `orderOut:` / `orderFront:`、Windows は `ShowWindow`、Linux X11 は `XUnmapWindow` / `XMapWindow` を使います。X11 の表示は非同期で、マッピング後にフルスクリーンを再適用します。表示時のキーボードフォーカスは保証しません。必要なら表示後に `bringToFront()` を呼びます。
+- macOS は `orderOut:` / `orderFront:`、Windows は `ShowWindow`、Linux X11 は非表示に `XWithdrawWindow`、表示に `XMapWindow` を使います。X11 の表示は非同期で、明示的な再表示時にはマッピング後に TrussC が要求したフルスクリーンを復元します。非表示にすると WM の管理対象から外れるため、ユーザーが WM で設定した状態（「常に最前面」やワークスペースの配置など）は非表示・再表示の前後で維持されない場合があります。表示時のキーボードフォーカスは保証しません。必要なら表示後に `bringToFront()` を呼びます。
 - KMS、iOS、Android、Web ではウィンドウを変更せず Notice を呼び出しごとに記録します。最初の表示まで一瞬も画面に出さないデスクトップウィンドウには `WindowSettings::setVisible(false)` を使います。
 '''
 details.ko = '''
@@ -41327,7 +41327,7 @@ details.ko = '''
 - `false`로 이 윈도우를 숨기고 `true`로 다시 표시합니다. App과 리소스는 유지합니다. 닫힌 뒤에는 아무 작업도 하지 않습니다. 다른 Window 작업처럼 메인 스레드에서 호출합니다.
 - 모든 윈도우를 숨겨도 앱은 계속 실행합니다. 종료에는 `exitApp()`을 사용합니다. 닫기 작업은 기존 `Window::close` 및 `setQuitOnClose` 규칙을 따릅니다. macOS의 Cmd+Q와 로그아웃도 종료를 요청합니다.
 - 숨긴 윈도우는 업데이트를 계속하고 기본적으로 그리기를 중지하며 `isOccluded() == true`를 반환합니다. 일반적인 숨김 상태의 프레임 설정을 따릅니다. OS 가림 감지를 비활성화해도 명시적 숨김은 적용합니다.
-- macOS는 `orderOut:` / `orderFront:`, Windows는 `ShowWindow`, Linux X11은 `XUnmapWindow` / `XMapWindow`를 사용합니다. X11 매핑은 비동기이며 매핑 후 전체화면을 다시 적용합니다. 표시할 때 키보드 포커스를 보장하지 않습니다. 필요하면 표시 후 `bringToFront()`를 호출합니다.
+- macOS는 `orderOut:` / `orderFront:`, Windows는 `ShowWindow`, Linux X11은 숨길 때 `XWithdrawWindow`, 표시할 때 `XMapWindow`를 사용합니다. X11 매핑은 비동기이며 명시적으로 다시 표시하면 매핑 후 TrussC가 요청한 전체화면을 복원합니다. 숨기면 WM의 관리 대상에서 제외되므로 사용자가 WM에서 설정한 상태(항상 위에 표시 또는 작업 공간 배치 등)는 숨기고 다시 표시한 뒤 유지되지 않을 수 있습니다. 표시할 때 키보드 포커스를 보장하지 않습니다. 필요하면 표시 후 `bringToFront()`를 호출합니다.
 - KMS, iOS, Android, Web에서는 윈도우를 변경하지 않고 Notice를 호출할 때마다 기록합니다. 처음 표시하기 전까지 화면에 잠깐도 나타나지 않는 데스크톱 윈도우는 `WindowSettings::setVisible(false)`로 생성합니다.
 '''
 related = ["Window::isVisible", "Window::isOccluded", "WindowSettings::setVisible", "Window::bringToFront", "Window::close"]

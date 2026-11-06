@@ -1519,6 +1519,7 @@ typedef enum sapp_event_type {
     SAPP_EVENTTYPE_CLIPBOARD_PASTED,
     SAPP_EVENTTYPE_FILES_DROPPED,
     SAPP_EVENTTYPE_TC_DEVICE_LOST,      // TrussC: shared D3D11 device lost (once per run)
+    SAPP_EVENTTYPE_TC_REDRAW_REQUESTED, // TrussC: native content invalidation
     _SAPP_EVENTTYPE_NUM,
     _SAPP_EVENTTYPE_FORCE_U32 = 0x7FFFFFFF
 } sapp_event_type;
@@ -9143,6 +9144,7 @@ sapp_swapchain sapp_acquire_swapchain(void) {
 #include "util/sokol_window_native.h"
 
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
+    bool fullscreen_on_map;     /* replay requested fullscreen once after explicit show (#1262) */
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
     Colormap colormap;
@@ -12073,10 +12075,21 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
                     SAPP_MOUSEBUTTON_INVALID, _sapp_tc_x11_mods(ev->xmotion.state));
             }
             break;
-        // [TrussC] Reapply fullscreen only after asynchronous mapping completes (#1262).
-        case MapNotify:
-            if (w && !w->desc.hidden) _sapp_tc_x11_set_fullscreen(w, w->fullscreen);
+        // [TrussC] The WM can map after a subsequent hide request (#1262).
+        case MapNotify: {
+            if (w) {
+                if (w->desc.hidden) {
+                    XWithdrawWindow(_sapp_tc.display, w->xwin, _sapp_tc.screen);
+                } else {
+                    if (w->fullscreen_on_map) {
+                        w->fullscreen_on_map = false;
+                        _sapp_tc_x11_set_fullscreen(w, w->fullscreen);
+                    }
+                    _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);
+                }
+            }
             break;
+        }
         case PropertyNotify:
             _sapp_tc_x11_send_clipboard_chunk(ev->xproperty);
             /* iconify/restore detection (explicit hiding uses desc.hidden) */
@@ -18319,8 +18332,12 @@ extern "C" void sapp_tc_window_set_visible(sapp_window win, bool visible) {
     if ((w = _sapp_tc_lookup(identity)))
         _sapp_tc_win32_app_event(w, visible ? SAPP_EVENTTYPE_RESUMED : SAPP_EVENTTYPE_SUSPENDED);
 #else
-    if (visible) XMapWindow(_sapp_tc.display, w->xwin);
-    else XUnmapWindow(_sapp_tc.display, w->xwin);
+    if (visible) {
+        w->fullscreen_on_map = true;
+        XMapWindow(_sapp_tc.display, w->xwin);
+    } else {
+        XWithdrawWindow(_sapp_tc.display, w->xwin, _sapp_tc.screen);
+    }
     XFlush(_sapp_tc.display);
     _sapp_tc_x11_app_event(w, visible ? SAPP_EVENTTYPE_RESUMED : SAPP_EVENTTYPE_SUSPENDED);
 #endif

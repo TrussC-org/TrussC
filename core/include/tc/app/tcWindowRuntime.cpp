@@ -1353,6 +1353,7 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_QUIT_REQUESTED:    return "the exitRequested event";
             case SAPP_EVENTTYPE_INVALID:
             case SAPP_EVENTTYPE_CHAR:
+            case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_MOUSE_LEAVE:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
@@ -1412,6 +1413,11 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
 }
     void convertWindowEvent(const sapp_event* ev, Window& window) {
         auto& ctx = WindowRequestAccess::context(window);
+        // Native mapping invalidates content after an early show-time present.
+        if (ev->type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED) {
+            ctx.loop.redrawCount = std::max(ctx.loop.redrawCount, 1);
+            return;
+        }
         const void* pressOwner = (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN || ev->type == SAPP_EVENTTYPE_MOUSE_UP)
             ? std::exchange(ctx.pendingMousePressOwner, nullptr) : nullptr;
         const bool hidden = window.isOccluded();
@@ -1811,6 +1817,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             // These events have no typed TrussC input counterpart.
             case SAPP_EVENTTYPE_INVALID:
             case SAPP_EVENTTYPE_CHAR:
+            case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
             case SAPP_EVENTTYPE_SUSPENDED:

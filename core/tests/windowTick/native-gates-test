@@ -231,13 +231,14 @@ enum { SAPP_EVENTTYPE_INVALID=-1, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESUM
        SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESIZED, SAPP_EVENTTYPE_FOCUSED, SAPP_EVENTTYPE_UNFOCUSED };
 struct SwapChain { HRESULT Present(UINT, UINT); };
 struct _sapp_tc_window_t {
-    bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false;
+    bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false, fullscreen=false;
+    bool fullscreen_on_map=false;
     bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, skip_present=false, cancel_tick=false;
     bool from_modal=false, frame_wait=false, credit_held=false, waitable_ready=true;
     bool resize_pending=false, input_delivered=false, wake_on_input=false, last_tick_presented=false;
     bool close_recorded=false; unsigned close_recorded_frame=0;
     unsigned win_id=1, frame_count=0;
-    int drawable=1, swap_interval=1;
+    int drawable=1, swap_interval=1, xwin=7;
     double earliest_next=0, last_present=0, frame_duration=0, refresh_period=.017;
     _sapp_tc_timing_t timing;
     SwapChain* swap_chain=nullptr;
@@ -1516,10 +1517,19 @@ HRESULT SwapChain::Present(UINT,UINT flags) {
     ++win::presents; return win::present_result;
 }
 namespace x11 {
+constexpr int SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=99;
 Native* live = nullptr;
 Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? live : nullptr; }
-struct { double refresh_period=.017; int WM_STATE=1; struct { bool quit_ordered=false; } app; } _sapp_tc;
-int consulted, updates, acquired, presents, state, polls;
+struct { double refresh_period=.017; int WM_STATE=1, display=2, screen=0, NET_WM_STATE=3, NET_WM_STATE_FULLSCREEN=4; struct { bool quit_ordered=false; } app; } _sapp_tc;
+int consulted, updates, acquired, presents, state, polls, withdrawals, fullscreenCalls;
+bool mapped=false, actualFullscreen=false;
+void XMapWindow(int,int) { mapped=true; }
+void XFlush(int) {}
+void _sapp_tc_x11_send_event(int,int,long op,long,long,long,long) {
+    ++fullscreenCalls; actualFullscreen=op==1;
+}
+int XWithdrawWindow(int,int,int) { ++withdrawals; mapped=false; return 1; }
+''' + extract('static void _sapp_tc_x11_set_fullscreen(') + r'''
 bool changed=false, closeOnResize=false, closeOnTick=false, hideOnTick=false, reenter=false, renewalOk=true;
 bool eventDriven=false, redrawPending=false;
 void _sapp_tc_x11_init_client() {} // admission covered by host-entry-test
@@ -1535,7 +1545,10 @@ void sapp_destroy_window(sapp_window) { live=nullptr; }
 bool _sapp_tc_x11_update_dimensions(Native*) { ++polls; return changed; }
 bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
 void _sapp_tc_x11_swap(Native*) { ++presents; }
-void _sapp_tc_x11_app_event(Native*,int type) { events.push_back(type); if (closeOnResize) live=nullptr; }
+void _sapp_tc_x11_app_event(Native*,int type) {
+    if (type==SAPP_EVENTTYPE_TC_REDRAW_REQUESTED) { redrawPending=true; return; }
+    events.push_back(type); if (closeOnResize) live=nullptr;
+}
 int _sapp_tc_x11_get_window_state(Native*) { return state; }
 void callback(sapp_window,void* user) {
     ++consulted; auto* w=static_cast<Native*>(user);
@@ -1550,7 +1563,11 @@ void callback(sapp_window,void* user) {
     }
     ++updates; // #997: every delivered tick updates, hidden or not
 }
-''' + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
+''' + extract('extern "C" void sapp_tc_window_set_visible(') + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
+void map_notify(Native* w) {
+''' + extract('case MapNotify: {').replace('case MapNotify:', '').replace('            break;', '') + r'''
+}
+
 enum { PropertyNewValue=1, IconicState=1, NormalState=2,
        VisibilityUnobscured=0, VisibilityPartiallyObscured=1, VisibilityFullyObscured=2 };
 struct Event { struct { int state=PropertyNewValue, atom=1; } xproperty; struct { int state; } xvisibility; };
@@ -1571,6 +1588,45 @@ void run() {
         check("X11 failed renewal closes Window and ends backend without drawing",
               !live && _sapp_tc.app.quit_ordered && consulted==0 && acquired==0 && presents==0);
         changed=false; renewalOk=true; _sapp_tc.app.quit_ordered=false;
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) for (bool cached : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.fullscreen=cached; actualFullscreen=!cached; fullscreenCalls=0;
+        redrawPending=false; events.clear();
+        sapp_tc_window_set_visible({w.win_id},true);
+        map_notify(&w);
+        check("X11 never-hidden WM remap preserves user fullscreen", actualFullscreen==!cached && fullscreenCalls==0);
+        check("X11 never-hidden WM remap still requests redraw only", redrawPending && events.empty());
+        sapp_tc_window_set_visible({w.win_id},false);
+        sapp_tc_window_set_visible({w.win_id},true); events.clear();
+        map_notify(&w);
+        check("X11 hide/show restores cached ADD or REMOVE once", actualFullscreen==cached && fullscreenCalls==1 && !w.fullscreen_on_map);
+        actualFullscreen=!cached; redrawPending=false;
+        map_notify(&w);
+        check("X11 WM remap after hide/show preserves later user choice", actualFullscreen==!cached && fullscreenCalls==1 && redrawPending && events.empty());
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc={callback,&w}; w.desc.hidden=true;
+        mapped=true; withdrawals=fullscreenCalls=0; redrawPending=false; events.clear();
+        map_notify(&w);
+        check("X11 late MapNotify withdraws requested-hidden window", !mapped && withdrawals==1);
+        check("X11 late hidden map has no redraw/fullscreen/visibility events", !redrawPending && fullscreenCalls==0 && events.empty());
+        w.fullscreen=true;
+        sapp_tc_window_set_visible({w.win_id},true); events.clear();
+        check("X11 explicit show arms fullscreen replay", w.fullscreen_on_map && mapped && !w.desc.hidden);
+        eventDriven=true; redrawPending=true; presents=0;
+        _sapp_tc_x11_tick(&w);
+        check("X11 early show consumes the pending redraw", presents==1 && !redrawPending);
+        mapped=true; map_notify(&w);
+        check("X11 explicit show MapNotify adds fullscreen once", redrawPending && fullscreenCalls==1 && actualFullscreen && !w.fullscreen_on_map);
+        map_notify(&w);
+        check("X11 repeated map does not repeat explicit show fullscreen", fullscreenCalls==1);
+        for (int i=0; i<4; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 mapped EVENT_DRIVEN window presents fresh content once", presents==2 && !redrawPending && !w.skip_present);
+        eventDriven=false; presents=0; map_notify(&w);
+        for (int i=0; i<3; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 CONTINUOUS mapping keeps ordinary tick pacing", presents==3);
     }
     for (bool role : {false,true}) for (bool trust : {false,true}) {
         Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
@@ -1690,6 +1746,16 @@ if '--mutations' in sys.argv[3:]:
     admission = 'const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);'
     scope = '_sapp_tc_mac_callback_scope scope(w);'
     mutants = {
+        'x11-unconditional-map-fullscreen': change('case MapNotify: {',
+            'if (w->fullscreen_on_map)', 'if (true)'),
+        'x11-repeat-map-fullscreen': change('case MapNotify: {',
+            'w->fullscreen_on_map = false;', ''),
+        'x11-no-show-fullscreen': change('extern "C" void sapp_tc_window_set_visible(',
+            'w->fullscreen_on_map = true;', ''),
+        'x11-no-map-withdraw': change('case MapNotify: {',
+            'XWithdrawWindow(_sapp_tc.display, w->xwin, _sapp_tc.screen);', ''),
+        'x11-no-map-redraw': change('case MapNotify: {',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);', ''),
         'x11-retain-hidden-skip': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
             'w->skip_present = false; // Consume the one-shot at the completed hidden tick boundary.', ''),
         'win-no-late-hide-gate': change(win, '&& (w->draw_while_hidden || !w->desc.hidden)', ''),
