@@ -905,6 +905,8 @@ own window receiver. Drop capacities and rejection behavior are unchanged.
 
 ## Window requested visibility (#1262)
 
+The macOS section gains `sapp_query_desc()` (Win32 and X11 already had it), so launch code can read `_tc_start_hidden` on every desktop backend.
+
 `sokol_app_tc.h` and `util/sokol_window_native.h` carry requested hide state
 separately from OS occlusion. Main and secondary constructors skip their native
 show operation for hidden creation. macOS selects its existing fallback tick

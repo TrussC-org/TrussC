@@ -4608,6 +4608,8 @@ bool sapp_isvalid(void) {
     return _sapp_tc.app.valid;
 }
 
+sapp_desc sapp_query_desc(void) { return _sapp_tc.app.desc; }
+
 int sapp_width(void) {
     _sapp_tc_window_t* w = _sapp_tc.app.main;
     return (w && w->fb_width > 0) ? w->fb_width : 1;
