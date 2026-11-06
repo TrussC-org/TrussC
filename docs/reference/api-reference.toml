@@ -41700,21 +41700,21 @@ details.en = '''
 - Defaults: size 1280 × 720, title `"TrussC App"`, `highDpi` on, `pixelPerfect` off, `sampleCount` 4 (MSAA), `fullscreen` off, `decorated` on.
 - Normally sizes and drawing coordinates use logical pixels. With `pixelPerfect`, the requested size is treated as framebuffer pixels and drawing coordinates match the framebuffer. In v0.8.0 this setting applies to the whole app: the launch window's setting is used for every window, and a secondary window's own setting does not change its coordinate mode.
 - Turning `decorated` off requests a borderless window on desktop platforms.
-- `swapInterval` defaults to `1`, which syncs presentation to the display; `0` turns that off. `setSwapInterval()` sets presentation separately from the update and draw rates.
+- `swapInterval` defaults to `1`, which syncs presentation to the display. Zero is treated as `1` on desktop and iOS; Web and Android ignore this setting. `setSwapInterval()` sets presentation separately from the update and draw rates.
 '''
 details.ja = '''
 - 最初のウィンドウなら `runApp<tcApp>()` に、ほかのウィンドウなら `createWindow()` に `WindowSettings` を渡します。各セッターは同じ設定オブジェクトを返すため、続けて呼べます。
 - 既定値は、サイズ 1280 × 720、タイトル `"TrussC App"`、`highDpi` オン、`pixelPerfect` オフ、`sampleCount` 4（MSAA）、`fullscreen` オフ、`decorated` オンです。
 - 通常、サイズと描画の座標は論理ピクセルです。`pixelPerfect` にすると、指定したサイズをフレームバッファのピクセルとして扱い、描画の座標もフレームバッファに合わせます。v0.8.0 ではこの設定はアプリ全体に効きます。起動時のウィンドウの設定がすべてのウィンドウに使われ、2 つ目以降のウィンドウの設定で座標の扱いは変わりません。
 - `decorated` をオフにすると、デスクトップでは枠のないウィンドウを要求します。
-- `swapInterval` の既定値は `1` で、画面の更新に表示を合わせます。`0` にするとこの同期をやめます。`setSwapInterval()` は、update や draw のレートとは別に表示のタイミングを設定します。
+- `swapInterval` の既定値は `1` で、画面の更新に表示を合わせます。デスクトップと iOS では `0` を `1` として扱います。Web と Android はこの設定を無視します。`setSwapInterval()` は、update や draw のレートとは別に表示のタイミングを設定します。
 '''
 details.ko = '''
 - 첫 창이라면 `runApp<tcApp>()`에, 다른 창이라면 `createWindow()`에 `WindowSettings`를 넘깁니다. 각 setter는 같은 설정 객체를 반환하므로 이어서 호출할 수 있습니다.
 - 기본값은 크기 1280 × 720, 제목 `"TrussC App"`, `highDpi` 켜짐, `pixelPerfect` 꺼짐, `sampleCount` 4(MSAA), `fullscreen` 꺼짐, `decorated` 켜짐입니다.
 - 보통 크기와 그리기 좌표는 논리 픽셀입니다. `pixelPerfect`를 켜면 지정한 크기를 프레임버퍼 픽셀로 다루고, 그리기 좌표도 프레임버퍼에 맞춥니다. v0.8.0에서는 이 설정이 앱 전체에 적용됩니다. 시작 시 창의 설정이 모든 창에 쓰이며, 두 번째 이후 창의 설정으로는 좌표 방식이 바뀌지 않습니다.
 - `decorated`를 끄면 데스크톱에서 테두리 없는 창을 요청합니다.
-- `swapInterval`의 기본값은 `1`이며 화면 갱신에 표시를 맞춥니다. `0`이면 이 동기화를 끕니다. `setSwapInterval()`은 update나 draw 빈도와 별개로 표시 타이밍을 설정합니다.
+- `swapInterval`의 기본값은 `1`이며 화면 갱신에 표시를 맞춥니다. 데스크톱과 iOS에서는 `0`을 `1`로 처리합니다. Web과 Android는 이 설정을 무시합니다. `setSwapInterval()`은 update나 draw 빈도와 별개로 표시 타이밍을 설정합니다.
 '''
 related = ["RuntimeSettings", "runApp", "setWindowSize", "setWindowTitle", "HeadlessSettings", "WindowSettings::setResourcePoolSize", "WindowSettings::setShaderPoolSize", "WindowSettings::setPipelinePoolSize"]
 snippet = '''
