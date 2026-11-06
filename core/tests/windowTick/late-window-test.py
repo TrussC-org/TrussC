@@ -27,13 +27,12 @@ resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 rows = []
 with tempfile.TemporaryDirectory(prefix='tc-an2b-cp3fu11-late-', dir=os.environ.get('TMPDIR')) as directory:
     scratch = Path(directory)
-    # Execute the incoming macOS shared_ptr deleter on real retained Windows.
-    # Destruction still uses the production common CPU registry and mutex.
+    # macOS now uses make_shared, so exercise that ownership path with the
+    # common Window destructor and CPU registry on real retained Windows.
     mac = (ROOT/'core/platform/mac/tcWindowMac.mm').read_text(encoding='utf-8')
-    deleter = body(mac, '[](Window* w) {')
-    (scratch/'late-mac-deleter.h').write_text(
-        'namespace trussc::internal { const auto lateMacWindowDeleter = ' + deleter + '; }\n', encoding='utf-8')
-    flags = ['-DTC_LATE_MAC_DELETER', '-I'+str(scratch)]
+    factory = body(mac, 'std::shared_ptr<Window> internal::createSecondaryWindow(')
+    assert 'auto win = std::make_shared<Window>();' in factory
+    flags = []
     for line in (ROOT/'core/build-linux/CMakeFiles/TrussC.dir/flags.make').read_text(encoding='utf-8').splitlines():
         if line.startswith(('CXX_DEFINES =', 'CXX_INCLUDES =')):
             flags += shlex.split(line.split('=', 1)[1])
@@ -47,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='tc-an2b-cp3fu11-late-', dir=os.environ.
         subprocess.run(['c++', *flags, '-c', str(source), '-o', str(obj)], check=True)
         objects.append(str(obj))
     source = (ROOT/'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
-    release_guard = 'void RenderTargetResources::release() {\n    if (frameworkShutdown()) return;'
+    release_guard = 'void RenderTargetResources::release() {\n    if (frameworkShutdown() || !sg_isvalid()) return;'
     assert source.count(release_guard) == 1
     variants = [('baseline', source), ('no_shutdown_guard', source.replace(
         'return frameworkStopped.load(std::memory_order_acquire);', 'return false;')),
@@ -91,7 +90,8 @@ with tempfile.TemporaryDirectory(prefix='tc-an2b-cp3fu11-late-', dir=os.environ.
                  ['restart'] if name in ('window_skip_erase', 'debug_skip_erase', 'lighting_skip_scrub') else
                  ['after'] if name == 'release_guard_removed' else ['static', 'after'])
         for iteration, mode in enumerate(modes):
-            # Only ASan/runtime failure counts as mutation detection.
+            # Require an ASan failure or a completed observable invariant
+            # violation; compiler/startup failures never detect a mutation.
             # Avoid competing with the display sweep's default :99 range.
             server = 1000 + int.from_bytes(os.urandom(2), 'big') % 20000
             xvfb_log = OUT/(name+'-'+mode+'-xvfb.log')
@@ -105,11 +105,18 @@ with tempfile.TemporaryDirectory(prefix='tc-an2b-cp3fu11-late-', dir=os.environ.
                 frame in run.stdout for frame in ('Window::', 'RenderTargetResources::', 'currentWindowContext', 'debugObjects'))
             semantic = (run.returncode == 1 and 'late-window: restart FAIL:' in run.stdout and
                         'late-window: restart completed,' in run.stdout)
+            # The independent sg_isvalid() guard now keeps shutdown-flag
+            # removal safe for GPU resources. The stopped-state oracle still
+            # rejects it after the process completes normal destruction.
+            shutdown_flag_changed = (run.returncode == 0 and 'late-window: stopped=0' in run.stdout and
+                                     'late-window: static destruction completed' in run.stdout)
             rows.append(dict(variant=name, mode=mode, returncode=run.returncode, asan=detected,
-                             completed_assertion_failure=semantic))
+                             completed_assertion_failure=semantic, shutdown_flag_changed=shutdown_flag_changed))
             if name == 'baseline':
                 expected = 'late-window: restart completed, 0 failures' if mode in ('restart', 'concurrent', 'concurrent-scrubs') else 'late-window: stopped=1'
                 assert run.returncode == 0 and expected in run.stdout and 'late-window: static destruction completed' in run.stdout, run.stdout
+            elif name == 'no_shutdown_guard':
+                assert shutdown_flag_changed, run.stdout
             else:
                 assert semantic if name == 'lighting_skip_scrub' else detected, run.stdout
             print(name, mode, 'PASS', flush=True)
@@ -174,34 +181,20 @@ with tempfile.TemporaryDirectory(prefix='tc-an2b-cp3fu11-late-', dir=os.environ.
     # Every seam aborts if called. The native sentinel intentionally stays live.
     for platform, file in [('mac', 'mac/tcWindowMac.mm'), ('win', 'win/tcWindowWin.cpp'), ('linux', 'linux/tcWindowLinux.cpp')]:
         adapter = (ROOT/'core/platform'/file).read_text(encoding='utf-8')
-        functions = '\n'.join(body(adapter, marker) for marker in
-            ['void Window::teardownSecondary() noexcept', 'void Window::closeSecondary()'])
+        functions = body(adapter, 'void Window::disposeNativeBacking() noexcept')
         fixture = r'''
 #include <cstdlib>
-#include <optional>
 struct AdapterState { int win; };
 namespace internal {
 bool frameworkShutdown() noexcept { return true; }
 struct TeardownSteps { template<class F> void run(const char*, F) { std::abort(); } };
-struct EntryStackGuard { template<class T> EntryStackGuard(T) { std::abort(); } };
-enum class AppEntry { Exit };
-struct WindowRequestAccess { template<class T> static void unbind(T&) { std::abort(); } };
 }
 void sapp_destroy_window(int) { std::abort(); }
-void sapp_window_request_close(int) { std::abort(); }
-struct Resources { void release() { std::abort(); } };
-struct Target { Resources& resources() { std::abort(); } };
-struct Context {
- bool targetsClosed = false;
- void teardownTargets() { std::abort(); }
- void* acquireSwapchain = nullptr; void* acquireSwapchainUser = nullptr; void* activateNative = nullptr;
- Target swapchainTarget;
-};
 struct Window {
- void* native_; bool closeRequested_ = false; Context ctx_;
- void teardownSecondary() noexcept; void closeSecondary(); void endApp() { std::abort(); }
+ void* native_;
+ void disposeNativeBacking() noexcept;
 };
-''' + functions + '\nint main() { AdapterState state{7}; Window w{&state}; w.teardownSecondary(); w.closeSecondary(); return w.native_ != &state; }\n'
+''' + functions + '\nint main() { AdapterState state{7}; Window w{&state}; w.disposeNativeBacking(); return w.native_ != &state; }\n'
         cpp = scratch/(platform+'.cpp'); cpp.write_text(fixture, encoding='utf-8')
         (OUT/(platform+'.cpp')).write_text(fixture, encoding='utf-8')
         binary = scratch/platform
@@ -227,6 +220,7 @@ struct Window {
 #include <memory>
 namespace internal {
 bool frameworkShutdown() noexcept { return true; }
+bool sg_isvalid() { std::abort(); }
 struct Handle { unsigned id = 0; };
 Handle sgl_default_context() { std::abort(); }
 void sgl_destroy_context(Handle) { std::abort(); }
@@ -245,7 +239,7 @@ int main() { internal::RenderTargetResources resources; resources.cache[1] = {42
     (OUT/'release.cpp').write_text(fixture, encoding='utf-8')
     cpp = scratch/'release.cpp'; binary = scratch/'release'
     for variant in ['baseline', 'remove_guard']:
-        cpp.write_text(fixture if variant == 'baseline' else fixture.replace('if (frameworkShutdown()) return;', ''), encoding='utf-8')
+        cpp.write_text(fixture if variant == 'baseline' else fixture.replace('if (frameworkShutdown() || !sg_isvalid()) return;', ''), encoding='utf-8')
         subprocess.run(['c++', '-std=c++20', str(cpp), '-o', str(binary)], check=True)
         run = subprocess.run([str(binary)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         assert (run.returncode == 0) == (variant == 'baseline')
