@@ -11,9 +11,10 @@
 //     The copyright line is "© <year> <author>".
 //   - NSIS script: zlib compression (no LZMA), a four-part version, names
 //     escaped for NSIS ("$" and '"'), Program Files by arch, the EULA and
-//     notices pages only when asked for, shortcuts / start at login by the
-//     options, and an uninstaller that deletes the listed files and then
-//     the folders deepest first, never recursively.
+//     notices pages only when asked for, shortcuts and start at login as
+//     checkboxes whose initial state the options set, and an uninstaller
+//     that deletes the listed files and any of the shortcuts, then the
+//     folders deepest first, never recursively.
 //   - Versions: "v1.2.0" -> "1.2.0", one to four numbers of at most 65535,
 //     anything else rejected. File-safe names: spaces -> '-', characters not
 //     allowed in file names dropped, never empty.
@@ -153,8 +154,11 @@ void testNsis() {
     check("nsis: EULA page only when given",
           contains(s, "MUI_PAGE_LICENSE \"C:\\out\\work\\EULA.txt\"") &&
               !contains(s, "Third-party notices"));
-    check("nsis: shortcuts and start at login",
-          contains(s, "$SMPROGRAMS\\My App $$1") && contains(s, "$SMSTARTUP\\My App $$1.lnk") &&
+    check("nsis: shortcuts and start at login as checked checkboxes",
+          contains(s, "MUI_PAGE_COMPONENTS") &&
+              contains(s, "Section \"Start menu and desktop shortcuts\"") &&
+              contains(s, "Section \"Start My $\\\"App$\\\" $$1 when Windows starts\"") &&
+              contains(s, "$SMPROGRAMS\\My App $$1") && contains(s, "$SMSTARTUP\\My App $$1.lnk") &&
               contains(s, "MUI_FINISHPAGE_RUN \"$INSTDIR\\myApp.exe\"") && !contains(s, "$$INSTDIR"));
     const size_t sub = s.find("RMDir \"$INSTDIR\\data\\sub\"");
     const size_t data = s.find("RMDir \"$INSTDIR\\data\"");
@@ -168,11 +172,15 @@ void testNsis() {
     in.noticesPage = "C:/out/work/THIRD_PARTY_NOTICES.txt";
     in.options = {};
     const std::string t = dist::nsisScript(in);
-    check("nsis: x86 Program Files, notices page with a Next button, no shortcuts when off",
+    check("nsis: x86 Program Files, notices page with a Next button",
           contains(t, "InstallDir \"$PROGRAMFILES\\") && contains(t, "MUI_LICENSEPAGE_BUTTON") &&
-              contains(t, "Third-party notices") && contains(t, "$SMPROGRAMS") && !contains(t, "$SMSTARTUP"));
+              contains(t, "Third-party notices"));
+    check("nsis: startAtLogin false starts its checkbox unchecked; uninstall removes it anyway",
+          contains(t, "Section \"Start menu and desktop shortcuts\"") && contains(t, "Section /o \"Start ") &&
+              contains(t, "Delete \"$SMSTARTUP\\"));
     in.options.shortcut = false;
-    check("nsis: shortcut false makes none", !contains(dist::nsisScript(in), "$SMPROGRAMS"));
+    check("nsis: shortcut false starts its checkbox unchecked",
+          contains(dist::nsisScript(in), "Section /o \"Start menu and desktop shortcuts\""));
 }
 
 void testNames() {

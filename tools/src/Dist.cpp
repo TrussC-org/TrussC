@@ -1058,6 +1058,8 @@ std::string nsisScript(const NsisInput& in) {
         s += "!define MUI_LICENSEPAGE_BUTTON \"$(^NextBtn)\"\n";
         s += "!insertmacro MUI_PAGE_LICENSE " + q(windowsPath(in.noticesPage)) + "\n";
     }
+    s += "!define MUI_COMPONENTSPAGE_NODESC\n";
+    s += "!insertmacro MUI_PAGE_COMPONENTS\n";
     s += "!insertmacro MUI_PAGE_DIRECTORY\n";
     s += "!insertmacro MUI_PAGE_INSTFILES\n";
     s += "!define MUI_FINISHPAGE_RUN " + under("$INSTDIR", in.executable) + "\n";
@@ -1067,7 +1069,8 @@ std::string nsisScript(const NsisInput& in) {
     s += "!insertmacro MUI_LANGUAGE \"English\"\n\n";
     const std::string shortcutName = name + ".lnk";
 
-    s += "Section \"Install\"\n";
+    // "-" hides the required section; "/o" starts a checkbox unchecked.
+    s += "Section \"-Install\"\n";
     s += "  SetShellVarContext all\n";
     s += "  SetOutPath \"$INSTDIR\"\n";
     s += "  File /r " + q(windowsPath(in.packageDir) + "\\*.*") + "\n";
@@ -1081,13 +1084,20 @@ std::string nsisScript(const NsisInput& in) {
     s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"UninstallString\" \"$\\\"$INSTDIR\\Uninstall.exe$\\\"\"\n";
     s += "  WriteRegDWORD HKLM " + q(uninstallKey) + " \"NoModify\" 1\n";
     s += "  WriteRegDWORD HKLM " + q(uninstallKey) + " \"NoRepair\" 1\n";
-    if (in.options.shortcut) {
-        s += "  CreateDirectory " + under("$SMPROGRAMS", name) + "\n";
-        s += "  CreateShortcut " + under("$SMPROGRAMS", name + "\\" + shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
-        s += "  CreateShortcut " + under("$DESKTOP", shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
-    }
-    if (in.options.startAtLogin)
-        s += "  CreateShortcut " + under("$SMSTARTUP", shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
+    s += "SectionEnd\n\n";
+
+    s += std::string("Section ") + (in.options.shortcut ? "" : "/o ") +
+         "\"Start menu and desktop shortcuts\"\n";
+    s += "  SetShellVarContext all\n";
+    s += "  CreateDirectory " + under("$SMPROGRAMS", name) + "\n";
+    s += "  CreateShortcut " + under("$SMPROGRAMS", name + "\\" + shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
+    s += "  CreateShortcut " + under("$DESKTOP", shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
+    s += "SectionEnd\n\n";
+
+    s += std::string("Section ") + (in.options.startAtLogin ? "" : "/o ") +
+         q("Start " + in.name + " when Windows starts") + "\n";
+    s += "  SetShellVarContext all\n";
+    s += "  CreateShortcut " + under("$SMSTARTUP", shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
     s += "SectionEnd\n\n";
 
     // Uninstall exactly what was installed; folders only once empty.
@@ -1109,12 +1119,11 @@ std::string nsisScript(const NsisInput& in) {
     });
     for (const auto& folder : deepestFirst) s += "  RMDir " + under("$INSTDIR", folder) + "\n";
     s += "  RMDir \"$INSTDIR\"\n";
-    if (in.options.shortcut) {
-        s += "  Delete " + under("$SMPROGRAMS", name + "\\" + shortcutName) + "\n";
-        s += "  RMDir " + under("$SMPROGRAMS", name) + "\n";
-        s += "  Delete " + under("$DESKTOP", shortcutName) + "\n";
-    }
-    if (in.options.startAtLogin) s += "  Delete " + under("$SMSTARTUP", shortcutName) + "\n";
+    // Whatever was checked at install time: deleting a missing file is a no-op.
+    s += "  Delete " + under("$SMPROGRAMS", name + "\\" + shortcutName) + "\n";
+    s += "  RMDir " + under("$SMPROGRAMS", name) + "\n";
+    s += "  Delete " + under("$DESKTOP", shortcutName) + "\n";
+    s += "  Delete " + under("$SMSTARTUP", shortcutName) + "\n";
     s += "  DeleteRegKey HKLM " + q(uninstallKey) + "\n";
     s += "SectionEnd\n";
     return s;
