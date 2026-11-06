@@ -379,6 +379,10 @@ void BuildOutputFilter::handleLine(string line) {
         }
     }
     if (startsWith(rest, "Built target ") || startsWith(rest, "Scanning dependencies")) hidden = true;
+    if (options_.phase == Phase::Build &&
+        (startsWith(rest, "Copying OS X content ") ||
+         startsWith(rest, "Adding CFBundleIconName to Info.plist") ||
+         startsWith(rest, "Removing quarantine attribute from "))) hidden = true;
 
     if (options_.phase == Phase::Build) classifyDiagnostic(plain);
     if (!hidden) printLine(line);

@@ -28,6 +28,9 @@ case " $* " in
     echo "[ 50%] Building CXX object CMakeFiles/app.dir/tcApp.cpp.o"
     echo "tcApp.cpp:9:1: error: expected ';'" >&2
     echo "[100%] Linking CXX executable bin/app"
+    echo "Copying OS X content /b/app.app/Contents/Resources/Assets.car"
+    echo "Adding CFBundleIconName to Info.plist for Tahoe icon"
+    echo "Removing quarantine attribute from app.app"
     echo "Built target app"
     exit "${FAKE_BUILD_RC:-0}"
     ;;
@@ -84,7 +87,8 @@ class BuildOutputTests(unittest.TestCase):
                       "main.cpp:3:5: warning: unused variable 'a'\n", out)
         self.assertIn("tcApp.cpp:9:1: error: expected ';'\n", out)
         # Noise is hidden, the configure line too
-        for hidden in ("Building CXX object", "Linking CXX", "Built target", "-- Configuring"):
+        for hidden in ("Building CXX object", "Linking CXX", "Built target", "-- Configuring",
+                       "Copying OS X content", "Adding CFBundleIconName", "Removing quarantine"):
             self.assertNotIn(hidden, out)
         self.assertIn("Done: 2 files, 1 up to date (", out)
         self.assertIn("Full log: build-linux/build.log\n", out)
@@ -107,6 +111,9 @@ class BuildOutputTests(unittest.TestCase):
             "[ 50%] Building CXX object CMakeFiles/app.dir/tcApp.cpp.o\n"
             "tcApp.cpp:9:1: error: expected ';'\n"
             "[100%] Linking CXX executable bin/app\n"
+            "Copying OS X content /b/app.app/Contents/Resources/Assets.car\n"
+            "Adding CFBundleIconName to Info.plist for Tahoe icon\n"
+            "Removing quarantine attribute from app.app\n"
             "Built target app\n")
         self.cli("build", "-p", self.project)   # the cache exists now: no configure
         second = self.log.read_text(encoding="utf-8")
@@ -117,6 +124,9 @@ class BuildOutputTests(unittest.TestCase):
         result = self.cli("build", "-p", self.project, "--verbose")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         for shown in ("-- Configuring done\n", "[ 25%] Building CXX object", "Built target app\n",
+                      "Copying OS X content /b/app.app/Contents/Resources/Assets.car\n",
+                      "Adding CFBundleIconName to Info.plist for Tahoe icon\n",
+                      "Removing quarantine attribute from app.app\n",
                       "main.cpp:3:5: warning: unused variable 'a'\n"):
             self.assertIn(shown, result.stdout)
         self.assertNotIn("Done:", result.stdout)
