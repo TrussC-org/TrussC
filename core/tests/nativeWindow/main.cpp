@@ -15,6 +15,21 @@ int failures, callbacks, liveWindows, presents, resizeTicks, mapRequests;
 bool failSurface, noHighDpi, didInitialize, coveredFirst;
 int launchHidden;
 Window firstXwin;
+sapp_window visibilityWindow, secondaryWindow;
+bool visibilityTrust;
+std::chrono::steady_clock::time_point visibilityDeadline;
+void check(const char* name, bool passed);
+void finishChecks();
+void startVisibilityCheck() {
+    auto* native = _sapp_tc_lookup(visibilityWindow);
+    native->trust_hidden_signals = visibilityTrust;
+    sapp_tc_window_set_visible(visibilityWindow, true);
+    check("show reports requested visibility", sapp_tc_window_visible(visibilityWindow));
+    sapp_tc_window_set_visible(visibilityWindow, false);
+    check("hide reports requested state immediately regardless of OS signal trust",
+        !sapp_tc_window_visible(visibilityWindow) && sapp_window_occluded(visibilityWindow));
+    visibilityDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+}
 template<class P> concept FourPropertyArguments = requires(P value) {
     _sapp_tc_x11_get_window_property(Window{}, Atom{}, Atom{}, value);
 };
@@ -125,19 +140,37 @@ void initialized() {
     auto* hiddenNative = _sapp_tc_lookup(hidden);
     check("start-hidden fullscreen window never maps", hiddenNative && mapRequests == mapsBefore &&
         !sapp_tc_window_visible(hidden) && sapp_window_occluded(hidden));
+    secondaryWindow = second;
+    visibilityWindow = hidden;
     if (hiddenNative) {
-        for (bool trust : {false, true}) {
-            hiddenNative->trust_hidden_signals = trust;
-            sapp_tc_window_set_visible(hidden, true);
-            check("show reports requested visibility", sapp_tc_window_visible(hidden));
-            sapp_tc_window_set_visible(hidden, false);
-            XWindowAttributes attrs{};
-            XGetWindowAttributes(_sapp_tc.display, hiddenNative->xwin, &attrs);
-            check("explicit hide unmaps regardless of OS signal trust", attrs.map_state == IsUnmapped &&
-                !sapp_tc_window_visible(hidden) && sapp_window_occluded(hidden));
-        }
-        sapp_destroy_window(hidden);
+        startVisibilityCheck();
+    } else {
+        finishChecks();
     }
+}
+// Called by the normal frame callback, after native event dispatch.
+void visibilityFrame() {
+    auto* native = _sapp_tc_lookup(visibilityWindow);
+    if (!native) return;
+    XWindowAttributes attrs{};
+    const bool hidden = XGetWindowAttributes(_sapp_tc.display, native->xwin, &attrs) &&
+        attrs.map_state == IsUnmapped && native->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE;
+    if (!hidden && std::chrono::steady_clock::now() < visibilityDeadline) return;
+    check("explicit hide converges after native dispatch regardless of OS signal trust", hidden);
+    if (!visibilityTrust) {
+        visibilityTrust = true;
+        startVisibilityCheck();
+        return;
+    }
+    sapp_destroy_window(visibilityWindow);
+    visibilityWindow = {};
+    finishChecks();
+}
+void finishChecks() {
+    auto* first = _sapp_tc.app.main;
+    const sapp_window second = secondaryWindow;
+    auto* other = _sapp_tc_lookup(second);
+    const auto desc = first->desc;
     for (auto* target : {first, other}) {
         sapp_tc_window_set_fullscreen({target->win_id}, true);
         check("fullscreen intent belongs to the addressed native window",
@@ -316,7 +349,7 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[2], "--covered-pause")) launchHidden = -1;
     }
     sapp_desc desc{}; desc._tc_draw_while_hidden = launchHidden; desc.width = 101; desc.height = 77;
-    desc.high_dpi = !noHighDpi; desc.init_cb = initialized;
+    desc.high_dpi = !noHighDpi; desc.init_cb = initialized; desc.frame_cb = visibilityFrame;
     if (coveredFirst) desc.frame_cb = []() {
         check("covered first frame follows init", didInitialize && sapp_window_occluded({0}));
         ++callbacks; sapp_quit();

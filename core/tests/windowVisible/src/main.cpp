@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <string>
 #include <chrono>
+#include <sstream>
 using namespace tc;
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 int visibilityMapCount(unsigned long);
@@ -11,6 +12,7 @@ int visibilitySwapCount(unsigned long);
 bool visibilityMapped(const void*, unsigned long);
 bool visibilityWaitMapped(const void*, unsigned long, bool);
 bool visibilityBluePixel(const void*, unsigned long);
+bool visibilityIconic(const void*, unsigned long);
 #define VISIBILITY_X11 1
 #endif
 namespace {
@@ -84,7 +86,6 @@ void checkHiddenControls(Window& window) {
     check("hidden controls preserve requested visibility", !window.isVisible());
 #ifdef VISIBILITY_X11
     check("hidden bringToFront never maps", visibilityMapCount(xwindow(window)) == before);
-    checkUnmapped(window);
 #endif
 }
 struct Secondary : App {
@@ -137,7 +138,55 @@ struct Secondary : App {
 struct Probe : App {
     int phase = 0, updates = 0, phaseUpdates = 0;
     std::chrono::steady_clock::time_point phaseTime;
-    bool stayedUnmapped = true;
+#ifdef VISIBILITY_X11
+    const char* sequences[4] = {"H SH S H S", "H S/H S H S", "H R H S", "H R"};
+    int sequence = 0, rapid = 0;
+    bool hideNext = false, sequenceDone = false;
+    std::istringstream operations;
+    std::chrono::steady_clock::time_point operationTime, settledSince;
+    void beginSequence() {
+        std::printf("windowVisible: visSeq %s (R = 10 consecutive-update toggles)\n", sequences[sequence]);
+        operations.clear(); operations.str(sequences[sequence]);
+        operationTime = std::chrono::steady_clock::now() - std::chrono::seconds(1);
+        sequenceDone = false;
+    }
+    void runSequence() {
+        const auto now = std::chrono::steady_clock::now();
+        if (hideNext) {
+            secondary->setVisible(false); hideNext = false; operationTime = now;
+            return;
+        }
+        if (rapid) {
+            secondary->setVisible(!secondary->isVisible());
+            --rapid; operationTime = now;
+            return;
+        }
+        if (!sequenceDone && now - operationTime >= std::chrono::milliseconds(200)) {
+            std::string op;
+            if (operations >> op) {
+                if (op == "H") secondary->setVisible(false);
+                else if (op == "S") secondary->setVisible(true);
+                else if (op == "SH") { secondary->setVisible(true); secondary->setVisible(false); }
+                else if (op == "S/H") { secondary->setVisible(true); hideNext = true; }
+                else if (op == "R") rapid = 10;
+                operationTime = now;
+                return;
+            }
+            sequenceDone = true; phaseTime = settledSince = now;
+        }
+        if (!sequenceDone) return;
+        const bool matches = visibilityMapped(sapp_x11_get_display(), xwindow(*secondary)) == secondary->isVisible();
+        const bool iconic = visibilityIconic(sapp_x11_get_display(), xwindow(*secondary));
+        if (!matches || iconic) settledSince = now;
+        // Poll through normal updates so MapNotify/UnmapNotify can complete the
+        // queued operation. Require stability beyond Mutter's delayed iconify.
+        if (now - settledSince < std::chrono::milliseconds(150) && now - phaseTime < std::chrono::seconds(2)) return;
+        check("visSeq final native map state equals isVisible", matches);
+        check("visSeq final WM_STATE is not IconicState", !iconic);
+        if (++sequence < 4) beginSequence();
+        else { finished = true; exitApp(failures ? 1 : 0); }
+    }
+#endif
     int savedMainDraws = 0, savedSecondaryDraws = 0, savedSecondaryUpdates = 0;
     void setup() override {
         auto* window = getWindow();
@@ -169,6 +218,9 @@ struct Probe : App {
             check("all hidden windows keep updating", updates >= 3 && secondaryUpdates >= 3);
             check("start-hidden windows never draw", mainDraws == 0 && secondaryDraws == 0);
 #ifdef VISIBILITY_X11
+            // Startup hide can be queued behind its initial native map.
+            if (visibilityMapped(sapp_x11_get_display(), xwindow(*getWindow())) ||
+                visibilityMapped(sapp_x11_get_display(), xwindow(*secondary))) return;
             checkUnmapped(*getWindow()); checkUnmapped(*secondary);
 #endif
             getWindow()->setVisible(true); secondary->setVisible(true);
@@ -254,16 +306,19 @@ struct Probe : App {
             check("same-update hide wins requested state", !secondary->isVisible());
             phaseTime = std::chrono::steady_clock::now(); phase = 11;
         } else if (phase == 11) {
-#ifdef VISIBILITY_X11
-            stayedUnmapped &= !visibilityMapped(sapp_x11_get_display(), xwindow(*secondary));
-#endif
             if (std::chrono::steady_clock::now() - phaseTime < std::chrono::milliseconds(500)) return;
 #ifdef VISIBILITY_X11
             checkUnmapped(*secondary);
-            check("same-update show/hide stays unmapped for 500 ms", stayedUnmapped);
-#endif
+            secondary->setFps(VSYNC);
+            beginSequence(); phase = 12;
+#else
             finished = true;
             exitApp(failures ? 1 : 0);
+#endif
+#ifdef VISIBILITY_X11
+        } else if (phase == 12) {
+            runSequence();
+#endif
         }
     }
     void draw() override { ++mainDraws; clear(0.1f); }

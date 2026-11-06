@@ -1,6 +1,6 @@
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     include("${TRUSSC_DIR}/cmake/tc_platform.cmake")
-    target_link_options(${PROJECT_NAME} PRIVATE -Wl,--wrap=XMapWindow -Wl,--wrap=XMapRaised)
+    target_link_options(${PROJECT_NAME} PRIVATE -Wl,--wrap=XMapWindow -Wl,--wrap=XMapRaised -Wl,--wrap=XNextEvent)
     if(TC_GRAPHICS_BACKEND STREQUAL "GLES3")
         target_link_options(${PROJECT_NAME} PRIVATE -Wl,--wrap=eglSwapBuffers)
     else()

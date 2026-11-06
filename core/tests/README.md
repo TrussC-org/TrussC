@@ -1191,7 +1191,17 @@ from hidden bringToFront. X11 map/unmap assertions poll for up to two seconds
 to allow WM processing. An EVENT_DRIVEN case requests one redraw before hiding,
 then checks that showing presents without another app redraw request. X11 also
 reads the shown window's new blue pixels and allows one post-map redraw after an
-early present. A same-update show/hide must stay unmapped for 500 ms.
+early present. A same-update show/hide must converge to unmapped within 500 ms;
+the map completes before the queued withdrawal. The X11 visSeq cases run
+`H SH S H S`, `H S/H S H S` (hide on the next update), and ten consecutive-update
+toggles ending both visible and hidden. Each sequence polls through normal updates
+for up to two seconds and checks stable native map state against `isVisible()`
+and absence of IconicState in WM_STATE when present. UnmapNotify logging records
+whether withdrawal completion came from the real client event or a synthetic one.
+The native-gates seam also delivers MapNotify after the 500 ms operation timeout
+and requires convergence to hidden, including a repeated hide; its mutation
+removes late-map reconciliation. The nativeWindow probe checks requested hiding
+immediately, then allows two seconds of normal dispatch for native convergence.
 `--start-visible`
 checks visible launch followed by hiding; `--fullscreen` checks hidden fullscreen
 creation and repeated showing. Each display mode prints `windowVisible verdict:

@@ -3,6 +3,7 @@
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <chrono>
+#include <cstdio>
 #include <thread>
 #include <unordered_map>
 #if defined(SOKOL_GLES3)
@@ -18,6 +19,15 @@ extern "C" int __wrap_XMapWindow(Display* display, ::Window window) {
     return __real_XMapWindow(display, window);
 }
 int visibilityMapCount(unsigned long window) { return maps()[window]; }
+extern "C" int __real_XNextEvent(Display*, XEvent*);
+extern "C" int __wrap_XNextEvent(Display* display, XEvent* event) {
+    const int result = __real_XNextEvent(display, event);
+    if (event->type == UnmapNotify) {
+        std::printf("windowVisible: UnmapNotify client=0x%lx event=0x%lx synthetic=%d\n",
+            event->xunmap.window, event->xunmap.event, event->xunmap.send_event);
+    }
+    return result;
+}
 extern "C" int __real_XMapRaised(Display*, ::Window);
 extern "C" int __wrap_XMapRaised(Display* display, ::Window window) {
     ++maps()[window];
@@ -51,6 +61,18 @@ bool visibilityWaitMapped(const void* display, unsigned long window, bool mapped
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     } while (std::chrono::steady_clock::now() < deadline);
     return false;
+}
+bool visibilityIconic(const void* rawDisplay, unsigned long window) {
+    auto* display = static_cast<Display*>(const_cast<void*>(rawDisplay));
+    const Atom wmState = XInternAtom(display, "WM_STATE", True);
+    if (wmState == None) return false;
+    Atom type; int format; unsigned long count, remaining; unsigned char* data = nullptr;
+    const int result = XGetWindowProperty(display, window, wmState, 0, 2, False,
+        wmState, &type, &format, &count, &remaining, &data);
+    const bool iconic = result == Success && type == wmState && format == 32 && count >= 1 &&
+        reinterpret_cast<unsigned long*>(data)[0] == IconicState;
+    if (data) XFree(data);
+    return iconic;
 }
 bool visibilityBluePixel(const void* rawDisplay, unsigned long window) {
     auto* display = static_cast<Display*>(const_cast<void*>(rawDisplay));

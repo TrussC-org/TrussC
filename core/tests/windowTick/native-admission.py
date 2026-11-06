@@ -32,7 +32,7 @@ struct _sapp_tc_window_t {
     bool native_closed=false,closed_pending=false,draw_admitted=false; int callback_depth=0,frame_drawable=0;
     bool close_requested=false,input_delivered=false,wake_on_input=true,credit_held=false,waitable_ready=true;
     struct { double last=0; } timing;
-    int swap_interval=1; double last_present=0;
+    int swap_interval=1, visibility_op=0; double last_present=0;
     int drawable=1,swap_chain=1; void* frame_wait=nullptr; double earliest_next=0;
     float dpi_scale=2;
     uint64_t frame_count=0; int win_width=100,win_height=50,fb_width=200,fb_height=100;
@@ -81,6 +81,8 @@ struct XEvent {};
 void XNextEvent(int,XEvent*) { queued=false; }
 void _sapp_tc_x11_process_event(XEvent*) { ++drained; emit(SAPP_EVENTTYPE_KEY_DOWN); }
 void _sapp_tc_x11_wait_until(double) {}
+constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0;
+void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,sapp_event_type type) { emit(type); }
 ''' + body(native, 'static void _sapp_tc_x11_request_exit(') + r'''

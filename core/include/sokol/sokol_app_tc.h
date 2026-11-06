@@ -9143,7 +9143,16 @@ sapp_swapchain sapp_acquire_swapchain(void) {
 
 #include "util/sokol_window_native.h"
 
+enum _sapp_tc_x11_visibility_op {
+    _SAPP_TC_X11_VISIBILITY_NONE,
+    _SAPP_TC_X11_VISIBILITY_MAPPING,
+    _SAPP_TC_X11_VISIBILITY_WITHDRAWING,
+};
+
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
+    _sapp_tc_x11_visibility_op visibility_op;
+    double visibility_started;
+    bool native_visible;        /* last completed visibility operation; WM minimization is separate */
     bool fullscreen_on_map;     /* replay requested fullscreen once after explicit show (#1262) */
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
@@ -11850,7 +11859,34 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
     return true;
 }
 
+// [TrussC #1262] Serialize native operations; requests arriving in flight only
+// change desc.hidden. Completion applies the latest requested state.
+static void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t* w) {
+    if (w->visibility_op != _SAPP_TC_X11_VISIBILITY_NONE) {
+        // Bound (unresponsive WM): release a missing map/unmap acknowledgment
+        // after 500 ms, sampling the server before reconciling the latest request.
+        if (_sapp_tc_now() - w->visibility_started < 0.5) return;
+        XWindowAttributes attrs;
+        if (XGetWindowAttributes(_sapp_tc.display, w->xwin, &attrs)) {
+            w->native_visible = attrs.map_state != IsUnmapped;
+        }
+        w->visibility_op = _SAPP_TC_X11_VISIBILITY_NONE;
+    }
+    if (w->native_visible == !w->desc.hidden) return;
+    w->visibility_started = _sapp_tc_now();
+    if (w->desc.hidden) {
+        w->visibility_op = _SAPP_TC_X11_VISIBILITY_WITHDRAWING;
+        XWithdrawWindow(_sapp_tc.display, w->xwin, _sapp_tc.screen);
+    } else {
+        w->visibility_op = _SAPP_TC_X11_VISIBILITY_MAPPING;
+        XMapWindow(_sapp_tc.display, w->xwin);
+    }
+    XFlush(_sapp_tc.display);
+}
+
 static void _sapp_tc_x11_show_window(_sapp_tc_window_t* w) {
+    w->visibility_op = _SAPP_TC_X11_VISIBILITY_MAPPING;
+    w->visibility_started = _sapp_tc_now();
     XMapWindow(_sapp_tc.display, w->xwin);
     XEvent dummy;
     _sapp_tc_x11_wait_for_event(w->xwin, VisibilityNotify, 0.1, &dummy);
@@ -11972,7 +12008,9 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
         return;
     }
 #endif
-    _sapp_tc_window_t* w = _sapp_tc_lookup_xwin(ev->xany.window);
+    // ICCCM synthetic UnmapNotify names the client in window, root in event.
+    const Window event_window = ev->type == UnmapNotify ? ev->xunmap.window : ev->xany.window;
+    _sapp_tc_window_t* w = _sapp_tc_lookup_xwin(event_window);
     switch (ev->type) {
         case FocusIn:
             /* ignore grab-cycle and pointer-only focus notifications (GLFW parity) */
@@ -12075,17 +12113,32 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
                     SAPP_MOUSEBUTTON_INVALID, _sapp_tc_x11_mods(ev->xmotion.state));
             }
             break;
-        // [TrussC] The WM can map after a subsequent hide request (#1262).
         case MapNotify: {
             if (w) {
-                if (w->desc.hidden) {
-                    XWithdrawWindow(_sapp_tc.display, w->xwin, _sapp_tc.screen);
-                } else {
+                w->native_visible = true;
+                if (w->visibility_op == _SAPP_TC_X11_VISIBILITY_MAPPING) {
+                    w->visibility_op = _SAPP_TC_X11_VISIBILITY_NONE;
+                    _sapp_tc_x11_sync_visibility(w);
+                } else if (w->desc.hidden) {
+                    // A late map can arrive after its operation timed out.
+                    _sapp_tc_x11_sync_visibility(w);
+                }
+                if (!w->desc.hidden) {
                     if (w->fullscreen_on_map) {
                         w->fullscreen_on_map = false;
                         _sapp_tc_x11_set_fullscreen(w, w->fullscreen);
                     }
                     _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);
+                }
+            }
+            break;
+        }
+        case UnmapNotify: {
+            if (w) {
+                if (w->visibility_op == _SAPP_TC_X11_VISIBILITY_WITHDRAWING) {
+                    w->native_visible = false;
+                    w->visibility_op = _SAPP_TC_X11_VISIBILITY_NONE;
+                    _sapp_tc_x11_sync_visibility(w);
                 }
             }
             break;
@@ -12384,6 +12437,8 @@ static void _sapp_tc_x11_run_loop(void) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
             // An earlier window's native work may have crossed this deadline.
             const double tick_now = _sapp_tc_now();
+            if (w && w->visibility_op != _SAPP_TC_X11_VISIBILITY_NONE)
+                _sapp_tc_x11_sync_visibility(w);
             // The launch/main window occupies the first slot. At refresh rate
             // the main pass is the admission clock, independent of timer phase.
             // Lower setFps requests are frame-skipped by the window callback;
@@ -18334,11 +18389,8 @@ extern "C" void sapp_tc_window_set_visible(sapp_window win, bool visible) {
 #else
     if (visible) {
         w->fullscreen_on_map = true;
-        XMapWindow(_sapp_tc.display, w->xwin);
-    } else {
-        XWithdrawWindow(_sapp_tc.display, w->xwin, _sapp_tc.screen);
     }
-    XFlush(_sapp_tc.display);
+    _sapp_tc_x11_sync_visibility(w);
     _sapp_tc_x11_app_event(w, visible ? SAPP_EVENTTYPE_RESUMED : SAPP_EVENTTYPE_SUSPENDED);
 #endif
 #else

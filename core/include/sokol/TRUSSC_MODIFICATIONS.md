@@ -946,3 +946,17 @@ replay to that show. Ordinary WM remaps retain the user's fullscreen choice and
 still request a redraw. Withdrawal can discard user-set WM state such as Always
 on Top or workspace placement; TrussC restores its requested fullscreen state,
 and the public reference documents this limitation.
+
+Follow-up 9: X11 serializes map/withdraw with one per-window operation state.
+MapNotify and UnmapNotify complete only their matching operation and then apply
+the latest requested visibility. This replaces the late-map re-withdraw special
+case. Initial visible creation participates in the same gate. A 500 ms bound,
+checked on native loop turns even when no window tick is due, samples server map
+state and retries the latest request if a WM acknowledgment is missing. Ordinary
+WM minimization does not trigger a map. Explicit-show fullscreen replay and the
+visible-map redraw remain unchanged.
+
+Follow-up 10: MapNotify also reconciles a requested-hidden window after the map
+operation timed out. This withdraws late WM maps without changing unsolicited
+UnmapNotify handling for requested-visible windows. The native probe checks
+requested state immediately and native convergence after normal event dispatch.

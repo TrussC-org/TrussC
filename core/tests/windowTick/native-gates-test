@@ -230,7 +230,11 @@ using sapp_event_type = int;
 enum { SAPP_EVENTTYPE_INVALID=-1, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESUMED, SAPP_EVENTTYPE_ICONIFIED,
        SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESIZED, SAPP_EVENTTYPE_FOCUSED, SAPP_EVENTTYPE_UNFOCUSED };
 struct SwapChain { HRESULT Present(UINT, UINT); };
+''' + extract('enum _sapp_tc_x11_visibility_op {') + r''';
 struct _sapp_tc_window_t {
+    _sapp_tc_x11_visibility_op visibility_op=_SAPP_TC_X11_VISIBILITY_NONE;
+    double visibility_started=0;
+    bool native_visible=false;
     bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false, fullscreen=false;
     bool fullscreen_on_map=false;
     bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, skip_present=false, cancel_tick=false;
@@ -1521,9 +1525,12 @@ constexpr int SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=99;
 Native* live = nullptr;
 Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? live : nullptr; }
 struct { double refresh_period=.017; int WM_STATE=1, display=2, screen=0, NET_WM_STATE=3, NET_WM_STATE_FULLSCREEN=4; struct { bool quit_ordered=false; } app; } _sapp_tc;
-int consulted, updates, acquired, presents, state, polls, withdrawals, fullscreenCalls;
+int consulted, updates, acquired, presents, state, polls, withdrawals, fullscreenCalls, mapCalls;
 bool mapped=false, actualFullscreen=false;
-void XMapWindow(int,int) { mapped=true; }
+void XMapWindow(int,int) { ++mapCalls; mapped=true; }
+constexpr int IsUnmapped=0;
+struct XWindowAttributes { int map_state=0; };
+int XGetWindowAttributes(int,int,XWindowAttributes* attrs) { attrs->map_state=mapped?1:IsUnmapped; return 1; }
 void XFlush(int) {}
 void _sapp_tc_x11_send_event(int,int,long op,long,long,long,long) {
     ++fullscreenCalls; actualFullscreen=op==1;
@@ -1535,7 +1542,8 @@ bool eventDriven=false, redrawPending=false;
 void _sapp_tc_x11_init_client() {} // admission covered by host-entry-test
 static void _sapp_tc_x11_tick(Native*);
 std::vector<int> events;
-double _sapp_tc_now() { return 10; }
+double now=10;
+double _sapp_tc_now() { return now; }
 void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
 struct _sapp_tc_x11_surface_scope {};
 void _sapp_tc_x11_pace(Native* w,double seconds) { w->earliest_next=10+seconds; }
@@ -1563,9 +1571,13 @@ void callback(sapp_window,void* user) {
     }
     ++updates; // #997: every delivered tick updates, hidden or not
 }
-''' + extract('extern "C" void sapp_tc_window_set_visible(') + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
+''' + extract('static void _sapp_tc_x11_sync_visibility(') + extract('extern "C" void sapp_tc_window_set_visible(') + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
 void map_notify(Native* w) {
 ''' + extract('case MapNotify: {').replace('case MapNotify:', '').replace('            break;', '') + r'''
+}
+
+void unmap_notify(Native* w) {
+''' + extract('case UnmapNotify: {').replace('case UnmapNotify:', '').replace('            break;', '') + r'''
 }
 
 enum { PropertyNewValue=1, IconicState=1, NormalState=2,
@@ -1589,6 +1601,85 @@ void run() {
               !live && _sapp_tc.app.quit_ordered && consulted==0 && acquired==0 && presents==0);
         changed=false; renewalOk=true; _sapp_tc.app.quit_ordered=false;
     }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc.hidden=true; mapped=false; withdrawals=mapCalls=0; now=10;
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        check("X11 show/hide waits for map completion", mapCalls==1 && withdrawals==0 &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING && w.desc.hidden);
+        map_notify(&w);
+        check("X11 map completion issues latest hide once", withdrawals==1 &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_WITHDRAWING);
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        sapp_tc_window_set_visible({w.win_id},true);
+        check("X11 withdraw queues latest show without another native op", mapCalls==1 && withdrawals==1 && !w.desc.hidden);
+        unmap_notify(&w);
+        check("X11 unmap completion issues latest show once", mapCalls==2 &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
+        map_notify(&w);
+        check("X11 serialization converges visible", w.native_visible && !w.desc.hidden &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE);
+        // An ordinary WM minimize must not turn into an unrequested map.
+        mapped=false; unmap_notify(&w);
+        check("X11 unsolicited WM unmap stays unmapped", mapCalls==2 && !mapped && w.native_visible);
+        sapp_tc_window_set_visible({w.win_id},false);
+        check("X11 hide while minimized still withdraws from WM", withdrawals==2 &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_WITHDRAWING);
+        now=10.51; _sapp_tc_x11_sync_visibility(&w);
+        check("X11 already-unmapped withdrawal releases without an event", !w.native_visible &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE);
+        // Reset counters for independent missing-acknowledgment cases.
+        withdrawals=1; mapCalls=2; now=10;
+        w.desc.hidden=true;
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        mapped=false; now=10.49;
+        _sapp_tc_x11_sync_visibility(&w);
+        check("X11 missing map acknowledgment retains gate before bound", w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
+        now=10.51; _sapp_tc_x11_sync_visibility(&w);
+        check("X11 missing map acknowledgment releases at bound and samples server", w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE && !w.native_visible && withdrawals==1);
+        sapp_tc_window_set_visible({w.win_id},true);
+        mapped=false; now=11.02; _sapp_tc_x11_sync_visibility(&w);
+        check("X11 stuck map retries latest visible request", mapCalls==5 && w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
+        map_notify(&w);
+        sapp_tc_window_set_visible({w.win_id},false);
+        sapp_tc_window_set_visible({w.win_id},true);
+        now=11.53; _sapp_tc_x11_sync_visibility(&w);
+        check("X11 missing unmap acknowledgment releases and issues latest show", mapCalls==6 && withdrawals==2 && w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
+        map_notify(&w);
+        // The last request can also cancel a queued hide entirely.
+        sapp_tc_window_set_visible({w.win_id},false); unmap_notify(&w);
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        sapp_tc_window_set_visible({w.win_id},true);
+        const int beforeWithdrawals=withdrawals;
+        map_notify(&w);
+        check("X11 latest visible cancels queued hide", withdrawals==beforeWithdrawals && w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE);
+        now=10;
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc.hidden=true; mapped=false; withdrawals=mapCalls=0; now=10;
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        mapped=false; now=10.65;
+        _sapp_tc_x11_sync_visibility(&w);
+        check("X11 expired map samples unmapped server with latest hide", !w.native_visible &&
+              w.desc.hidden && w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE && withdrawals==0);
+        mapped=true; map_notify(&w);
+        for (int turn=0; turn<20; ++turn) {
+            now+=0.1;
+            if (w.visibility_op!=_SAPP_TC_X11_VISIBILITY_NONE)
+                _sapp_tc_x11_sync_visibility(&w);
+        }
+        check("X11 late map after timeout converges hidden", !mapped && !w.native_visible &&
+              w.desc.hidden && w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE && withdrawals==1);
+        sapp_tc_window_set_visible({w.win_id},false);
+        check("X11 repeated hide after late map stays hidden", !mapped && !w.native_visible && withdrawals==1);
+        now=10;
+    }
     for (bool role : {false,true}) for (bool trust : {false,true}) for (bool cached : {false,true}) {
         Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
         w.fullscreen=cached; actualFullscreen=!cached; fullscreenCalls=0;
@@ -1599,6 +1690,7 @@ void run() {
         check("X11 never-hidden WM remap still requests redraw only", redrawPending && events.empty());
         sapp_tc_window_set_visible({w.win_id},false);
         sapp_tc_window_set_visible({w.win_id},true); events.clear();
+        unmap_notify(&w);
         map_notify(&w);
         check("X11 hide/show restores cached ADD or REMOVE once", actualFullscreen==cached && fullscreenCalls==1 && !w.fullscreen_on_map);
         actualFullscreen=!cached; redrawPending=false;
@@ -1608,9 +1700,12 @@ void run() {
     for (bool role : {false,true}) for (bool trust : {false,true}) {
         Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
         w.desc={callback,&w}; w.desc.hidden=true;
+        w.visibility_op=_SAPP_TC_X11_VISIBILITY_MAPPING;
+        w.visibility_started=now;
         mapped=true; withdrawals=fullscreenCalls=0; redrawPending=false; events.clear();
         map_notify(&w);
-        check("X11 late MapNotify withdraws requested-hidden window", !mapped && withdrawals==1);
+        check("X11 completed map applies latest hidden request", !mapped && withdrawals==1);
+        unmap_notify(&w);
         check("X11 late hidden map has no redraw/fullscreen/visibility events", !redrawPending && fullscreenCalls==0 && events.empty());
         w.fullscreen=true;
         sapp_tc_window_set_visible({w.win_id},true); events.clear();
@@ -1752,8 +1847,16 @@ if '--mutations' in sys.argv[3:]:
             'w->fullscreen_on_map = false;', ''),
         'x11-no-show-fullscreen': change('extern "C" void sapp_tc_window_set_visible(',
             'w->fullscreen_on_map = true;', ''),
-        'x11-no-map-withdraw': change('case MapNotify: {',
-            'XWithdrawWindow(_sapp_tc.display, w->xwin, _sapp_tc.screen);', ''),
+        'x11-no-inflight-gate': change('static void _sapp_tc_x11_sync_visibility(',
+            'if (_sapp_tc_now() - w->visibility_started < 0.5) return;', ''),
+        'x11-no-map-completion-reissue': change('case MapNotify: {',
+            '_sapp_tc_x11_sync_visibility(w);', '', count=2),
+        'x11-no-late-hidden-map-reconcile': change('case MapNotify: {',
+            'else if (w->desc.hidden)', 'else if (false)'),
+        'x11-no-unmap-completion-reissue': change('case UnmapNotify: {',
+            '_sapp_tc_x11_sync_visibility(w);', ''),
+        'x11-no-visibility-timeout': change('static void _sapp_tc_x11_sync_visibility(',
+            'if (_sapp_tc_now() - w->visibility_started < 0.5) return;', 'return;'),
         'x11-no-map-redraw': change('case MapNotify: {',
             '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);', ''),
         'x11-retain-hidden-skip': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
