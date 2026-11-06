@@ -638,7 +638,7 @@ details.en = '''
 - Key codes work the same as in `App::keyPressed`: letters are uppercase, and other keys use the `KEY_*` constants.
 - `e.isRepeat` is always false. The modifier fields show the state at the moment the key was released.
 - Inside this function, `isKeyPressed(e.key)` is already false.
-- This function is called only when the OS reports that the key went up. TrussC does not send a release on your behalf when the window loses focus (it does so only for mouse buttons), so if the OS never reports the key-up, `isKeyPressed()` stays true.
+- When the window loses focus, TrussC releases all held keys and modifiers through this callback; a later OS key-up does not repeat the release.
 - The order of calls is: `events().keyReleased` listeners → this function → the nodes of the scene graph → listeners registered with `EventPriority::AfterApp`.
 - If a listener sets `e.consumed = true`, this function, the nodes and the later listeners are all skipped. If a node handles the event (returns `true`), the later listeners are skipped too.
 '''
@@ -647,7 +647,7 @@ details.ja = '''
 - キーコードの扱いは `App::keyPressed` と同じです。英字は大文字で届き、それ以外のキーには `KEY_*` 定数を使います。
 - `e.isRepeat` は常に false です。修飾キーの値は、キーを離した瞬間の状態になります。
 - この関数の中では、`isKeyPressed(e.key)` はすでに false になっています。
-- OS がキーを離したと知らせたときだけ呼ばれます。ウィンドウがフォーカスを失っても、TrussC はキーのリリースを代わりに送りません（代わりに送るのはマウスボタンだけです）。そのため OS がキーアップを送ってこない場合、`isKeyPressed()` は true のまま残ります。
+- ウィンドウがフォーカスを失うと、TrussC は押されているすべてのキーと修飾キーを解放し、このコールバックを呼びます。後から OS のキーアップが届いても解放は重複しません。
 - 呼ばれる順番は、`events().keyReleased` のリスナー → この関数 → シーングラフのノード → `EventPriority::AfterApp` で登録したリスナーです。
 - リスナーが `e.consumed = true` にすると、この関数、ノード、それ以降のリスナーはすべてスキップされます。ノードがイベントを処理した（`true` を返した）場合も、それ以降のリスナーはスキップされます。
 '''
@@ -656,7 +656,7 @@ details.ko = '''
 - 키 코드의 취급은 `App::keyPressed`와 같습니다. 영문자는 대문자로 전달되고, 그 밖의 키에는 `KEY_*` 상수를 사용합니다.
 - `e.isRepeat`는 항상 false입니다. 수식 키 값은 키를 뗀 순간의 상태입니다.
 - 이 함수 안에서는 `isKeyPressed(e.key)`가 이미 false입니다.
-- OS가 키를 뗐다고 알려 줄 때만 호출됩니다. 창이 포커스를 잃어도 TrussC는 키 릴리스를 대신 보내지 않습니다(대신 보내는 것은 마우스 버튼뿐입니다). 따라서 OS가 키 업을 보내지 않으면 `isKeyPressed()`는 true로 남습니다.
+- 창이 포커스를 잃으면 TrussC는 누르고 있는 모든 키와 보조 키를 해제하고 이 콜백을 호출합니다. 나중에 OS 키 업이 도착해도 해제 이벤트는 중복되지 않습니다.
 - 호출 순서는 `events().keyReleased` 리스너 → 이 함수 → 씬 그래프의 노드 → `EventPriority::AfterApp`으로 등록한 리스너입니다.
 - 리스너가 `e.consumed = true`로 설정하면 이 함수, 노드, 이후 리스너를 모두 건너뜁니다. 노드가 이벤트를 처리한 경우(`true`를 반환한 경우)에도 이후 리스너는 건너뜁니다.
 '''
@@ -49180,17 +49180,20 @@ description.ja = "指定したキーが押されているかを返す。"
 description.ko = "지정한 키가 눌린 상태인지 반환한다."
 details.en = '''
 - Pass a key code such as `KEY_SPACE` or uppercase `'A'`; returns `false` when that code is absent from the recorded set. Input-state getters read the current window's recorded events, rather than polling the keyboard or mouse, and should be called from main-thread callbacks.
-- Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908) (input-state timing differs between windows, and focus loss can leave recorded keys pressed).
+- Focus loss releases all held keys and modifiers in that window, so their pressed-state getters return `false`.
+- Known issue: [#908](https://github.com/TrussC-org/TrussC/issues/908) (input-state timing differs between windows).
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and returns 0 (see `events`).
 '''
 details.ja = '''
 - `KEY_SPACE` や大文字の `'A'` などのキーコードを渡します。そのコードが記録された集合になければ `false` を返します。入力状態の取得関数はキーボードやマウスを直接問い合わせず、現在のウィンドウで記録されたイベントを読み取るため、メインスレッドのコールバックから呼び出してください。
-- 既知の問題: [#908](https://github.com/TrussC-org/TrussC/issues/908)（入力状態の更新タイミングがウィンドウ間で異なり、フォーカスを失うとキーが押された記録が残る場合がある）。
+- フォーカスを失うと、そのウィンドウで押されているすべてのキーと修飾キーが解放され、押下状態の取得関数は `false` を返します。
+- 既知の問題: [#908](https://github.com/TrussC-org/TrussC/issues/908)（入力状態の更新タイミングがウィンドウ間で異なる）。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して 0 を返します（`events` を参照）。
 '''
 details.ko = '''
 - `KEY_SPACE`나 대문자 `'A'` 같은 키 코드를 전달합니다. 해당 코드가 기록된 집합에 없으면 `false`를 반환합니다. 입력 상태 조회 함수는 키보드나 마우스를 직접 조회하지 않고 현재 윈도우에 기록된 이벤트를 읽으므로 메인 스레드 콜백에서 호출하세요.
-- 알려진 문제: [#908](https://github.com/TrussC-org/TrussC/issues/908)(윈도우마다 입력 상태 갱신 시점이 다르며 포커스를 잃으면 키가 눌린 기록이 남을 수 있음).
+- 포커스를 잃으면 해당 창에서 누르고 있는 모든 키와 보조 키가 해제되어 눌림 상태 조회 함수가 `false`를 반환합니다.
+- 알려진 문제: [#908](https://github.com/TrussC-org/TrussC/issues/908)(윈도우마다 입력 상태 갱신 시점이 다름).
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 0을 반환합니다(`events` 참조).
 '''
 related = ["isMousePressed", "isShiftPressed", "isControlPressed"]
