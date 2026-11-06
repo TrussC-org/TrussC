@@ -513,7 +513,9 @@ SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::file
             32,                         // bitsPerPixel
             width * 4,                  // bytesPerRow
             colorSpace,
-            (CGBitmapInfo)kCGImageAlphaLast | kCGBitmapByteOrder32Big,
+            // Default byte order: with kCGBitmapByteOrder32Big, ImageIO writes
+            // TIFF as associated (premultiplied) alpha. Memory is RGBA either way.
+            (CGBitmapInfo)kCGImageAlphaLast,
             provider, nullptr, false, kCGRenderingIntentDefault) : nullptr;
         if (provider) CGDataProviderRelease(provider);
         CGColorSpaceRelease(colorSpace);
