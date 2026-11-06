@@ -9,6 +9,7 @@
 #if defined(__APPLE__)
 
 #import <Cocoa/Cocoa.h>
+#import <ImageIO/ImageIO.h>
 #import <Metal/Metal.h>
 #import <QuartzCore/CAMetalLayer.h>
 #include <CoreGraphics/CoreGraphics.h>
@@ -521,24 +522,30 @@ SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::file
             return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "CGImage の作成に失敗しました"), "Screenshot");
         }
 
-        // NSBitmapImageRep に変換
-        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:cgImage];
-        CGImageRelease(cgImage);
-
-        if (!rep) {
-            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "NSBitmapImageRep の作成に失敗しました"), "Screenshot");
+        // Encode the straight CGImage directly: NSBitmapImageRep premultiplies
+        // TIFF RGB, including discarding the color of fully transparent pixels.
+        CFMutableDataRef data = CFDataCreateMutable(kCFAllocatorDefault, 0);
+        // ImageIO accepts these standard type identifiers on all macOS targets.
+        CFStringRef type = (ext == "gif") ? CFSTR("com.compuserve.gif") : CFSTR("public.tiff");
+        CGImageDestinationRef destination = data ? CGImageDestinationCreateWithData(
+            data, type, 1, nullptr) : nullptr;
+        if (!destination) {
+            CGImageRelease(cgImage);
+            if (data) CFRelease(data);
+            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "画像データの作成に失敗しました"), "Screenshot");
         }
-
-        // Only TIFF and GIF reach here
-        NSBitmapImageFileType fileType = (ext == "gif") ? NSBitmapImageFileTypeGIF : NSBitmapImageFileTypeTIFF;
-
-        // ファイルに保存
-        NSData* data = [rep representationUsingType:fileType properties:@{}];
-        if (!data) {
+        CGImageDestinationAddImage(destination, cgImage, nullptr);
+        const bool encoded = CGImageDestinationFinalize(destination);
+        CFRelease(destination);
+        CGImageRelease(cgImage);
+        if (!encoded) {
+            CFRelease(data);
             return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "画像データの作成に失敗しました"), "Screenshot");
         }
 
-        return internal::atomicWrite(path, data.bytes, data.length, "Screenshot", true);
+        auto result = internal::atomicWrite(path, CFDataGetBytePtr(data), CFDataGetLength(data), "Screenshot", true);
+        CFRelease(data);
+        return result;
     }
 }
 
