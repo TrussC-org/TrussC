@@ -4114,7 +4114,9 @@ static void printDistHelp() {
          << "On macOS bin/data goes into the bundle's Contents/Resources/data and the bundle\n"
          << "is signed ad hoc.\n"
          << "\n"
-         << "Settings come from dist.json in the project folder (optional; see --init).\n"
+         << "Settings come from dist.json in the project folder (optional; see --init):\n"
+         << "name, version, author, eula, include, exclude, licenses. With \"eula\": true\n"
+         << "(or a file path) your license terms go into the package as EULA.txt.\n"
          << "trusscli collects the license files it finds; checking them is up to you.\n";
 }
 
@@ -4180,13 +4182,16 @@ static int distInit(const string& projectPath, const string& projectName,
             version = dist::kDefaultVersion;
         }
     }
+    string author;
+    if (ask) author = promptString("Author (person, studio or company) []: ");
     ofstream file(configPath, ios::binary);
-    file << dist::configTemplate(appName, version);
+    file << dist::configTemplate(appName, version, author);
     if (!file) {
         cerr << "Error: cannot write " << configPath.string() << "\n";
         return 1;
     }
-    cout << "Wrote dist.json. Edit it for include / exclude / licenses, then run 'trusscli dist'.\n"
+    cout << "Wrote dist.json. Edit it for eula / include / exclude / licenses, then run 'trusscli dist'.\n"
+         << "  eula      true: ship EULA.txt from the project folder (your license terms)\n"
          << "  include   [{\"from\": \"../tools/node\", \"to\": \"data/tools/node\"}]  files from outside bin/data\n"
          << "  exclude   [\"data/**/*.psd\"]                                    left out of the package\n"
          << "  licenses  [{\"name\": \"Node.js\", \"file\": \"...\"}]                  your own third-party notices\n";
@@ -4398,8 +4403,10 @@ static int cmdDist(const vector<string>& args) {
     }
 
     cout << dist::formatLicenseReport(input.licenses) << "\n"
-         << "Packaged " << config.name << " " << config.version << ":\n"
+         << "Packaged " << config.name << " " << config.version
+         << (config.author.empty() ? string() : " by " + config.author) << ":\n"
          << "  " << plan.packageDir.string() << "\n";
+    if (!config.eula.empty()) cout << "  EULA.txt from " << config.eula << "\n";
     if (!plan.runtimeDlls.empty()) {
         cout << "  VC++ runtime:";
         for (const string& dll : plan.runtimeDlls) cout << " " << dll;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <set>
 #include <sstream>
@@ -239,15 +240,35 @@ std::string padRight(const std::string& text, size_t width) {
     return text.size() >= width ? text + "  " : text + std::string(width - text.size(), ' ');
 }
 
-// Replaces the <string> value that follows <key>key</key> in an XML plist.
+std::string xmlEscape(const std::string& text) {
+    std::string out;
+    for (char c : text) {
+        switch (c) {
+            case '&': out += "&amp;"; break;
+            case '<': out += "&lt;"; break;
+            case '>': out += "&gt;"; break;
+            default: out += c;
+        }
+    }
+    return out;
+}
+
+// Sets the <string> value of <key>key</key> in an XML plist, adding the key
+// at the end of the top-level dict when it is missing.
 bool setPlistString(std::string& plist, const std::string& key, const std::string& value) {
     const std::string tag = "<key>" + key + "</key>";
+    const std::string escaped = xmlEscape(value);
     const size_t at = plist.find(tag);
-    if (at == std::string::npos) return false;
+    if (at == std::string::npos) {
+        const size_t end = plist.rfind("</dict>");
+        if (end == std::string::npos) return false;
+        plist.insert(end, "\t" + tag + "\n\t<string>" + escaped + "</string>\n");
+        return true;
+    }
     const size_t open = plist.find("<string>", at + tag.size());
     const size_t close = open == std::string::npos ? open : plist.find("</string>", open);
     if (open == std::string::npos || close == std::string::npos) return false;
-    plist.replace(open + 8, close - open - 8, value);
+    plist.replace(open + 8, close - open - 8, escaped);
     return true;
 }
 
@@ -276,6 +297,12 @@ bool parseConfig(const std::string& text, Config& out, std::vector<std::string>&
             if (!expectString(out.name)) return false;
         } else if (key == "version") {
             if (!expectString(out.version)) return false;
+        } else if (key == "author") {
+            if (!expectString(out.author)) return false;
+        } else if (key == "eula") {
+            if (value.is_boolean()) out.eula = value.get<bool>() ? kDefaultEula : "";
+            else if (value.is_string()) out.eula = value.get<std::string>();
+            else { error = "dist.json: \"eula\" must be true / false or a file path"; return false; }
         } else if (key == "include") {
             if (!value.is_array()) { error = "dist.json: \"include\" must be an array"; return false; }
             for (const auto& entry : value) {
@@ -312,11 +339,26 @@ bool parseConfig(const std::string& text, Config& out, std::vector<std::string>&
     return true;
 }
 
-std::string configTemplate(const std::string& name, const std::string& version) {
+std::string copyrightLine(const std::string& author) {
+    if (author.empty()) return "";
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    return "\xC2\xA9 " + std::to_string(local.tm_year + 1900) + " " + author;  // ©
+}
+
+std::string configTemplate(const std::string& name, const std::string& version,
+                           const std::string& author) {
     // Written by hand: nlohmann would sort the keys, not keep the documented order.
     std::string text = "{\n";
     text += "  \"name\": " + json(name).dump() + ",\n";
     text += "  \"version\": " + json(version).dump() + ",\n";
+    text += "  \"author\": " + json(author).dump() + ",\n";
+    text += "  \"eula\": false,\n";
     text += "  \"include\": [],\n";
     text += "  \"exclude\": [],\n";
     text += "  \"licenses\": []\n";
@@ -676,6 +718,24 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
         }
     }
 
+    // --- EULA: the package root, beside the bundle on macOS ---
+    if (!config.eula.empty()) {
+        fs::path eula = fromUtf8(config.eula);
+        if (eula.is_relative()) eula = in.projectDir / eula;
+        if (!fs::is_regular_file(eula, ec)) {
+            error = config.eula == kDefaultEula
+                ? "dist.json \"eula\": true needs EULA.txt in the project folder; "
+                  "create it with your license terms (or set \"eula\" to a file path)"
+                : "dist.json \"eula\" file not found: " + config.eula;
+            return false;
+        }
+        if (!targets.insert("eula.txt").second) {
+            error = "EULA.txt is also in bin/ or an include entry; keep one";
+            return false;
+        }
+        plan.files.push_back({eula, "EULA.txt"});
+    }
+
     // --- Windows runtime ---
     if (in.platform == Platform::Windows) {
         std::set<std::string> imports;
@@ -774,8 +834,9 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
     }
 
     // --- licenses/ and THIRD_PARTY_NOTICES.txt ---
-    std::string notices = "Third-party notices for " + in.config.name + " " + in.config.version + "\n"
-                          "Collected by trusscli dist from the files the components ship.\n";
+    std::string notices = "Third-party notices for " + in.config.name + " " + in.config.version + "\n";
+    if (!in.config.author.empty()) notices += copyrightLine(in.config.author) + "\n";
+    notices += "Collected by trusscli dist from the files the components ship.\n";
     const fs::path licenses = plan.packageDir / "licenses";
     for (const auto& source : in.licenses) {
         notices += "\n" + std::string(78, '=') + "\n" + source.component;
@@ -817,6 +878,8 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
         if (readFile(plistPath, plist) && !startsWith(plist, "bplist")) {
             setPlistString(plist, "CFBundleShortVersionString", in.config.version);
             setPlistString(plist, "CFBundleVersion", in.config.version);
+            if (!in.config.author.empty())
+                setPlistString(plist, "NSHumanReadableCopyright", copyrightLine(in.config.author));
             writeFile(plistPath, plist);
         }
     }
@@ -848,7 +911,7 @@ std::string formatPlan(const Plan& plan) {
     for (const auto& item : plan.files) files.push_back(item.target);
     std::sort(files.begin(), files.end());
     for (const auto& f : files) out += "  " + f + "\n";
-    out += "  licenses/, THIRD_PARTY_NOTICES.txt\n";
+    out += "  licenses/, THIRD_PARTY_NOTICES.txt  (always included)\n";
     if (!plan.launcherName.empty()) out += "  " + plan.launcherName + "  (launcher)\n";
     if (!plan.symbols.empty()) {
         out += plan.folderName + "-symbols/\n";

@@ -43,12 +43,19 @@ struct LicenseEntry {
 struct Config {
     std::string name;       // "" = project folder name
     std::string version;    // "" = 0.1.0
+    std::string author;     // person / studio / company; "" = not set
+    std::string eula;       // the app's own license terms: a file, "" = none
+                            // ("eula": true in dist.json means kDefaultEula)
     std::vector<IncludeEntry> include;
     std::vector<std::string> exclude;
     std::vector<LicenseEntry> licenses;
 };
 
 constexpr const char* kDefaultVersion = "0.1.0";
+constexpr const char* kDefaultEula = "EULA.txt";   // in the project folder
+
+// "© <year> <author>", or "" without an author.
+std::string copyrightLine(const std::string& author);
 
 // Parses dist.json. Unknown keys and keys of a later phase add a warning and
 // are otherwise ignored. Returns false with `error` for invalid JSON or a
@@ -57,7 +64,8 @@ bool parseConfig(const std::string& text, Config& out, std::vector<std::string>&
                  std::string& error);
 
 // The dist.json that `trusscli dist --init` writes.
-std::string configTemplate(const std::string& name, const std::string& version);
+std::string configTemplate(const std::string& name, const std::string& version,
+                           const std::string& author);
 
 // "v1.2.0" / "1.2.0" -> "1.2.0". One to four dot-separated numbers (the
 // Windows version resource has four). False for anything else.
@@ -172,7 +180,8 @@ struct Plan {
 
 // Works out what goes where, reading bin/ and the dist.json entries but
 // writing nothing. False with `error` when the build is missing or cannot be
-// shipped (a debug CRT, a missing include source, ...).
+// shipped (a debug CRT, a missing include source or EULA, ...).
+// The EULA goes to the package root as EULA.txt (beside the bundle on macOS).
 bool makePlan(const PlanInput& input, Plan& plan, std::string& error);
 
 // Writes the package: replaces plan.packageDir and plan.symbolsDir, copies,
