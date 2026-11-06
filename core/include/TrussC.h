@@ -2222,7 +2222,7 @@ struct WindowSettings {
     WindowSettings& setQuitOnClose(bool enabled) { quitOnClose = enabled; return *this; }
     bool fullscreen = false;
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
-    int swapInterval = 1;  // VSync: 1 = on (default), 0 = off
+    int swapInterval = 1;  // VSync: 1 = on (default); 0 is treated as 1 on desktop/iOS, ignored on Web/Android
     // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
@@ -2266,7 +2266,8 @@ struct WindowSettings {
         return *this;
     }
 
-    // VSync / present interval. 1 = sync to display refresh (default), 0 = off.
+    // VSync / present interval. 1 = sync to display refresh (default).
+    // 0 is treated as 1 on desktop/iOS; Web and Android ignore this setting.
     // N > 1 presents every Nth refresh: on a 120Hz display, 2 -> 60fps, 4 -> 30.
     // On Apple this also drives the display-link rate (true sub-refresh fps,
     // not just frame skipping). Only integer divisors of the refresh are
