@@ -4261,11 +4261,58 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
     trussc::internal::commitSessionEnd();
 }
 
+// [TrussC] AppKit may dismiss an alert or refuse a panel sheet before asking
+// applicationShouldTerminate:. Preflight ordinary quits through that same
+// Runtime veto/cancel/teardown path before AppKit can touch any of our sheets.
+// The delegate replaces the quit Apple-event handler at will-finish-launching
+// so Dock/AppleScript Quit reaches this override before AppKit's sheet handling.
+@interface _sapp_tc_application : NSApplication
+@end
+@implementation _sapp_tc_application
+- (void)terminate:(id)sender {
+    // Closing a sheet can spin AppKit's run loop before cancellation returns.
+    static bool terminating = false;
+    if (terminating) return;
+    terminating = true;
+    struct Reset {
+        bool& flag;
+        ~Reset() { flag = false; }
+    } reset{terminating};
+    if (!_sapp_tc_mac_is_session_end(_sapp_tc_mac_quit_reason())) {
+        if ([self.delegate applicationShouldTerminate:self] != NSTerminateNow) return;
+    }
+    // Accepted ordinary quit has already canceled dialogs and ordered quit.
+    // AppKit's second delegate query skips the veto and teardown is idempotent.
+    [super terminate:sender];
+}
+@end
+
 @interface _sapp_tc_app_delegate : NSObject <NSApplicationDelegate>
 @property(nonatomic, strong) id sessionPowerOffObserver;
 @end
 
 @implementation _sapp_tc_app_delegate
+- (void)applicationWillFinishLaunching:(NSNotification*)n {
+    (void)n;
+    // AppKit's default Apple-event handlers are installed by this point.
+    // A preexisting plain NSApplication has no terminate: preflight to route to.
+    if ([NSApp isKindOfClass:[_sapp_tc_application class]]) {
+        [[NSAppleEventManager sharedAppleEventManager] setEventHandler:self
+            andSelector:@selector(handleQuitAppleEvent:withReplyEvent:)
+            forEventClass:kCoreEventClass andEventID:kAEQuitApplication];
+    }
+}
+- (void)handleQuitAppleEvent:(NSAppleEventDescriptor*)event withReplyEvent:(NSAppleEventDescriptor*)reply {
+    (void)event;
+    // Keep this synchronous: currentAppleEvent still carries the session reason.
+    [NSApp terminate:nil];
+    // Successful termination does not return. Report a veto/deferral to the
+    // sender, including loginwindow; typeNull means no reply was requested.
+    if (reply.descriptorType != typeNull) {
+        [reply setParamDescriptor:[NSAppleEventDescriptor descriptorWithInt32:userCanceledErr]
+            forKeyword:keyErrorNumber];
+    }
+}
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
     (void)n;
     self.sessionPowerOffObserver = [[[NSWorkspace sharedWorkspace] notificationCenter]
@@ -4559,7 +4606,9 @@ void sapp_run(const sapp_desc* desc) {
     _sapp_tc.app.current_cursor = SAPP_MOUSECURSOR_DEFAULT;
     _sapp_tc_init_keytable();
 
-    [NSApplication sharedApplication];
+    // An NSApplication created before sapp_run stays a plain NSApplication, and
+    // the terminate: preflight then does not apply (documented, not guarded).
+    [_sapp_tc_application sharedApplication];
     _sapp_tc.app.dlg = [[_sapp_tc_app_delegate alloc] init];
     NSApp.delegate = _sapp_tc.app.dlg;
     /* Cocoa swallows key-up events while Cmd is held; force-forward them
@@ -9122,6 +9171,9 @@ sapp_swapchain sapp_acquire_swapchain(void) {
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
+    // [TrussC #1263] Secondary pacing is divided without blocking the shared GL context.
+    int requested_swap_interval;
+    int pacing_ticks;
     Colormap colormap;
 #if defined(SOKOL_GLES3)
     EGLSurface drawable;
@@ -12170,6 +12222,13 @@ static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
 
 static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (w->constructing || w->in_tick || !w->drawable) return;
+    // [TrussC #1263] Count both main presentation credits and fallback timer
+    // ticks. Keep a partial count when the main is minimized or absent.
+    if (!w->is_main && ++w->pacing_ticks < w->requested_swap_interval) {
+        _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
+        return;
+    }
+    w->pacing_ticks = 0;
     const sapp_window handle = {w->win_id};
     w->in_tick = true;
     struct TickGuard {
@@ -12548,10 +12607,12 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     native.fullscreen = desc->fullscreen;
     /* Allowed X11 pacing difference: the shared GL context must not block on
        every window. Main keeps blocking vsync; secondaries swap at interval 0
-       and follow main presentations, with refresh-timer fallback (GLX and EGL). */
+       and follow every Nth main presentation or refresh-timer tick, where N is
+       the requested interval (GLX and EGL). */
     native.swap_interval = 0;
     native.window.sample_count = _sapp_tc.app.desc.sample_count;
     _sapp_tc_window_t* w = _sapp_tc_x11_create_window(&native);
+    if (w) w->requested_swap_interval = desc->swap_interval > 0 ? desc->swap_interval : 1;
     return {w ? w->win_id : 0};
 }
 

@@ -51,6 +51,7 @@ struct SwapChain {
     HRESULT Present(unsigned value,unsigned) { interval=value; return 0; }
 };
 struct _sapp_tc_window_t : _sapp_tc_native_window_t {
+    int requested_swap_interval=1, pacing_ticks=0;
     int color_fmt=0,rtv=0,drawable=0,xwin=0;
     NativeWindow *hwnd=nullptr,*window=nullptr;
     Rect stored_window_rect; LONG stored_style=0,stored_ex_style=0;
@@ -312,6 +313,7 @@ int main() {
         }
 #else
         check("X11 deliberate nonblocking interval",w->swap_interval==0&&w->applied_interval==0&&!w->wake_on_input);
+        check("X11 requested interval retained",w->requested_swap_interval==(interval>0?interval:1)&&w->pacing_ticks==0);
         _sapp_tc_x11_pace_periodic(w,w->refresh_period);
         check("X11 refresh timer retained",w->earliest_next>10);
 #endif
@@ -325,6 +327,8 @@ int main() {
         check("peer fullscreen independent",p&&p!=w&&p->fullscreen!=w->fullscreen);
 #if defined(TEST_MAC) || defined(TEST_WIN)
         check("peer interval independent",p&&p->swap_interval==4&&w->swap_interval==(interval>0?interval:1));
+#else
+        check("X11 peer interval independent",p&&p->requested_swap_interval==4&&w->requested_swap_interval==(interval>0?interval:1));
 #endif
     }
     sapp_window_desc legacy{};
@@ -333,6 +337,12 @@ int main() {
     check("zero descriptor creates windowed",legacyWindow&&!legacyWindow->fullscreen);
 #if defined(TEST_MAC) || defined(TEST_WIN)
     check("zero descriptor keeps default interval",legacyWindow&&legacyWindow->swap_interval==1);
+#else
+    check("X11 zero descriptor keeps default interval",legacyWindow&&legacyWindow->requested_swap_interval==1);
+    if(legacyWindow) dispose(legacyWindow);
+    legacy.swap_interval=-2;
+    legacyWindow=_sapp_tc_lookup(sapp_create_window(&legacy));
+    check("X11 negative interval normalizes to one",legacyWindow&&legacyWindow->requested_swap_interval==1);
 #endif
     if(legacyWindow) dispose(legacyWindow);
     std::printf("creation-settings: %d checks, %d failures\n",checks,failures);
