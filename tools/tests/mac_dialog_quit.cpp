@@ -1,5 +1,6 @@
-// Manual macOS quit probe: <alert|confirm|load|folder|save> <manual|exit|veto>.
-// See REPORT.md for the full key/non-key/hidden-window device matrix.
+// Manual macOS quit probe: <alert|confirm|load|folder|save> <manual|manual-veto|exit|veto>.
+// manual/manual-veto: Dock Quit or Cmd+Q; manual-veto cancels the first request.
+// See REPORT-fu3.md and REPORT.md for the device matrix.
 #include <TrussC.h>
 #include <csignal>
 #include <cstdlib>
@@ -25,7 +26,7 @@ struct Probe : App {
         quit = events().exitRequested.listen([](ExitRequestEventArgs& args) {
             ++requests;
             check(callbacks == 0, "dialog pending during exitRequested");
-            if (action == "veto" && requests == 1) {
+            if ((action == "veto" || action == "manual-veto") && requests == 1) {
                 args.cancel = true;
                 logNotice("sheetquit") << "veto: sheet must remain visible";
             }
@@ -47,7 +48,7 @@ struct Probe : App {
             if (action == "exit") exitApp();
             else if (action == "sigterm") std::raise(SIGTERM);
             else if (action == "request" || action == "veto") exitApp();
-            // manual: send SIGTERM externally, Cmd+Q, or perform supervised logout.
+            // manual/manual-veto: Dock Quit, Cmd+Q, external TERM, or supervised logout.
         }
         if (action == "veto" && frames == 120) {
             check(callbacks == 0 && requests == 1, "veto kept callback pending");

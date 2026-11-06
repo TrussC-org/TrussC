@@ -16,6 +16,18 @@ platform = (ROOT / 'core/platform/mac/tcPlatform_mac.mm').read_text(encoding='ut
 assert '[_sapp_tc_application sharedApplication]' in body(native, 'void sapp_run(const sapp_desc* desc)')
 assert '[NSApplication sharedApplication]' not in body(native, 'void sapp_run(const sapp_desc* desc)')
 assert '@interface _sapp_tc_application : NSApplication' in native
+launch = body(native, '- (void)applicationWillFinishLaunching:')
+assert 'if ([NSApp isKindOfClass:[_sapp_tc_application class]])' in launch
+assert '[[NSAppleEventManager sharedAppleEventManager] setEventHandler:self' in launch
+assert 'andSelector:@selector(handleQuitAppleEvent:withReplyEvent:)' in launch
+assert 'forEventClass:kCoreEventClass andEventID:kAEQuitApplication' in launch
+quit_event = body(native, '- (void)handleQuitAppleEvent:')
+assert '[NSApp terminate:nil]' in quit_event
+assert quit_event.index('[NSApp terminate:nil]') < quit_event.index('setParamDescriptor:')
+assert 'if (reply.descriptorType != typeNull)' in quit_event
+assert 'descriptorWithInt32:userCanceledErr' in quit_event and 'forKeyword:keyErrorNumber' in quit_event
+assert 'dispatch_async' not in quit_event and 'super' not in quit_event
+assert 'currentAppleEvent' in body(native, 'static AEEventID _sapp_tc_mac_quit_reason(')
 terminate = body(native, '- (void)terminate:(id)sender')
 assert terminate.index('applicationShouldTerminate:self') < terminate.index('[super terminate:sender]')
 delegate = body(native, '- (NSApplicationTerminateReply)applicationShouldTerminate:')
@@ -327,9 +339,14 @@ with tempfile.TemporaryDirectory(prefix='tc-sheetquit-') as folder:
             raise SystemExit(f'{name}: unexpected exit {result.returncode}')
 
     if clang := shutil.which('clang++'):
-        # SDK-free syntax check of the actual subclass, including its C++ guard.
+        # SDK-free syntax of the subclass and quit-event wiring. These stand-ins
+        # check Objective-C++ syntax, not SDK availability or AppKit behavior.
         objc = r'''
-__attribute__((objc_root_class)) @interface NSObject @end
+#define nil ((id)0)
+__attribute__((objc_root_class)) @interface NSObject
++ (Class)class;
+- (bool)isKindOfClass:(Class)cls;
+@end
 using NSApplicationTerminateReply = unsigned long;
 constexpr NSApplicationTerminateReply NSTerminateNow = 1;
 @class NSApplication;
@@ -343,6 +360,32 @@ constexpr NSApplicationTerminateReply NSTerminateNow = 1;
 bool _sapp_tc_mac_is_session_end(int);
 int _sapp_tc_mac_quit_reason();
 '''+native[native.index('@interface _sapp_tc_application :'):native.index('@interface _sapp_tc_app_delegate :')]
+        objc += r'''
+using AEEventClass = unsigned int;
+using AEEventID = unsigned int;
+using AEKeyword = unsigned int;
+using DescType = unsigned int;
+using SInt32 = int;
+constexpr AEEventClass kCoreEventClass = 'aevt';
+constexpr AEEventID kAEQuitApplication = 'quit';
+constexpr AEKeyword keyErrorNumber = 'errn';
+constexpr DescType typeNull = 'null';
+constexpr int userCanceledErr = -128;
+@class NSNotification;
+extern NSApplication* NSApp;
+@interface NSAppleEventDescriptor : NSObject
+@property (readonly) DescType descriptorType;
++ (NSAppleEventDescriptor*)descriptorWithInt32:(SInt32)value;
+- (void)setParamDescriptor:(NSAppleEventDescriptor*)descriptor forKeyword:(AEKeyword)keyword;
+@end
+@interface NSAppleEventManager : NSObject
++ (NSAppleEventManager*)sharedAppleEventManager;
+- (void)setEventHandler:(id)handler andSelector:(SEL)selector
+    forEventClass:(AEEventClass)eventClass andEventID:(AEEventID)eventID;
+@end
+@interface _sapp_tc_app_delegate : NSObject @end
+@implementation _sapp_tc_app_delegate
+'''+launch+quit_event+'\n@end\n'
         source = Path(folder) / 'preflight.mm'
         source.write_text(objc, encoding='utf-8')
         subprocess.run([clang, '-std=c++20', '-fsyntax-only', '-fobjc-arc',

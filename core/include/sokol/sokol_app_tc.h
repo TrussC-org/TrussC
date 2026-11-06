@@ -4229,6 +4229,8 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 // [TrussC] AppKit may dismiss an alert or refuse a panel sheet before asking
 // applicationShouldTerminate:. Preflight ordinary quits through that same
 // Runtime veto/cancel/teardown path before AppKit can touch any of our sheets.
+// The delegate replaces the quit Apple-event handler at will-finish-launching
+// so Dock/AppleScript Quit reaches this override before AppKit's sheet handling.
 @interface _sapp_tc_application : NSApplication
 @end
 @implementation _sapp_tc_application
@@ -4255,6 +4257,27 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 @end
 
 @implementation _sapp_tc_app_delegate
+- (void)applicationWillFinishLaunching:(NSNotification*)n {
+    (void)n;
+    // AppKit's default Apple-event handlers are installed by this point.
+    // A preexisting plain NSApplication has no terminate: preflight to route to.
+    if ([NSApp isKindOfClass:[_sapp_tc_application class]]) {
+        [[NSAppleEventManager sharedAppleEventManager] setEventHandler:self
+            andSelector:@selector(handleQuitAppleEvent:withReplyEvent:)
+            forEventClass:kCoreEventClass andEventID:kAEQuitApplication];
+    }
+}
+- (void)handleQuitAppleEvent:(NSAppleEventDescriptor*)event withReplyEvent:(NSAppleEventDescriptor*)reply {
+    (void)event;
+    // Keep this synchronous: currentAppleEvent still carries the session reason.
+    [NSApp terminate:nil];
+    // Successful termination does not return. Report a veto/deferral to the
+    // sender, including loginwindow; typeNull means no reply was requested.
+    if (reply.descriptorType != typeNull) {
+        [reply setParamDescriptor:[NSAppleEventDescriptor descriptorWithInt32:userCanceledErr]
+            forKeyword:keyErrorNumber];
+    }
+}
 - (void)applicationDidFinishLaunching:(NSNotification*)n {
     (void)n;
     self.sessionPowerOffObserver = [[[NSWorkspace sharedWorkspace] notificationCenter]

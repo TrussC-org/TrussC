@@ -21,13 +21,22 @@ preserves the `metal_sim` and `wgsl` outputs required by TrussC.
 `sapp_run` creates `_sapp_tc_application`, an `NSApplication` subclass whose
 `terminate:` calls the existing `applicationShouldTerminate:` gate before
 AppKit termination. Menu Quit/Cmd+Q and SIGTERM request quit through sokol's
-deferred path; Dock Quit/ordinary quit Apple Events enter the override directly.
+deferred path. In `applicationWillFinishLaunching:`, after AppKit installs its
+default handlers, the delegate replaces the `kCoreEventClass` /
+`kAEQuitApplication` handler only when NSApp is `_sapp_tc_application`.
+Dock Quit/ordinary quit Apple events call `[NSApp terminate:nil]` through this
+handler, bypassing AppKit's earlier sheet dismissal/refusal in its default
+Apple-event handler.
 All use Runtime's existing exit veto and accepted-quit dialog cancellation
 before AppKit can dismiss an alert or refuse a confirm/save sheet. A veto
 returns without entering AppKit termination. After acceptance, AppKit's second
 delegate query sees ordered quit and idempotent Runtime shutdown, so it neither
 asks the veto twice nor repeats cancellation. Session-end Apple Events retain
-their existing query/commit policy. Last-window-close policy is unchanged.
+their existing query/commit policy: the synchronous handler leaves the event
+as `currentAppleEvent` while `terminate:` reads its quit reason. If termination
+returns (veto or deferral), the handler sets `keyErrorNumber` to `userCanceledErr`
+in a requested reply; a `typeNull` reply is left untouched. This also reports a
+canceled session end to loginwindow. Last-window-close policy is unchanged.
 `sharedApplication` returns an existing application unchanged, so app code that
 creates `NSApplication` before `runApp` keeps a plain `NSApplication` and loses
 this preflight. TrussC itself creates no application earlier; apps should not
