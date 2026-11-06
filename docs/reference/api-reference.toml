@@ -26350,8 +26350,10 @@ details.en = '''
 - With `audio = true`, the recorder taps the audio engine's master mix and uses the audio device clock for video timestamps. An uninitialized audio engine causes a Warning and video-only recording; missing sample rate and channel settings are filled from the engine.
 - Capture runs in the owning window's frame callback; macOS window readback completes on a background thread. See `ScreenRecorder::stop` for completion waits and `VideoWriter` for submission failures.
 - The recorder cannot be copied. Each take owns its recording state, and pending callbacks retain that state and its writer until completion.
+
+Window recording, including MCP `tc_start_recording`, reads window alpha with the precision described in `grabScreen`; use an Fbo source for exact alpha before encoding.
 '''
-related = ["VideoWriter", "startRecording", "Fbo"]
+related = ["VideoWriter", "startRecording", "Fbo", "Fbo::readPixels", "grabScreen"]
 platform_note.en = '''
 - Native video encoding is available on macOS, Windows, Linux, Android, and iOS; web recording fails when the writer opens.
 - macOS window capture uses asynchronous GPU readback directly into an encoder buffer without an intermediate Pixels copy. Other platforms use synchronous window readback; recording an Fbo also reads pixels synchronously.
@@ -26372,6 +26374,8 @@ details.ja = '''
 - `audio = true` では音声エンジンのマスターミックスを取り込み、映像のタイムスタンプに音声デバイスの時計を使います。音声エンジンが未初期化の場合は Warning を記録して映像のみを録画します。未指定のサンプルレートとチャンネル数には、エンジンの値を設定します。
 - キャプチャは所有ウィンドウのフレームコールバックで実行します。macOS のウィンドウ読み戻しはバックグラウンドスレッドで完了します。完了待ちは `ScreenRecorder::stop`、フレーム追加の失敗は `VideoWriter` を参照してください。
 - レコーダーはコピーできません。各録画は専用の状態を持ち、処理中のコールバックは完了までその状態とライターを保持します。
+
+MCP の `tc_start_recording` を含むウィンドウの録画では、`grabScreen` に記載した精度でアルファ値を読み戻します。エンコード前の正確なアルファ値には Fbo を入力に使います。
 '''
 details.ko = '''
 - 녹화를 시작할 때 현재 윈도우였던 윈도우의 각 프레임이 끝난 후, 내부 `VideoWriter`를 사용하여 자동으로 캡처합니다.
@@ -26381,6 +26385,8 @@ details.ko = '''
 - `audio = true`이면 오디오 엔진의 마스터 믹스를 녹음하고 비디오 타임스탬프에 오디오 장치 시계를 사용합니다. 오디오 엔진이 초기화되지 않았으면 Warning을 기록하고 비디오만 녹화합니다. 지정하지 않은 샘플 레이트와 채널 수는 엔진의 값으로 설정합니다.
 - 캡처는 소유 윈도우의 프레임 콜백에서 실행합니다. macOS 윈도우 읽기는 백그라운드 스레드에서 완료됩니다. 완료 대기는 `ScreenRecorder::stop`, 프레임 제출 실패는 `VideoWriter`를 참조하세요.
 - 레코더는 복사할 수 없습니다. 각 녹화는 자체 상태를 소유하며, 처리 중인 콜백은 완료될 때까지 해당 상태와 작성기를 유지합니다.
+
+MCP의 `tc_start_recording`을 포함한 윈도우 녹화는 `grabScreen`에 설명된 정밀도로 알파 값을 읽으며, 인코딩 전의 정확한 알파 값에는 Fbo 입력을 사용합니다.
 '''
 
 ["ScreenRecorder::getFrameCount"]
@@ -26476,6 +26482,8 @@ details.en = '''
 - Calling `start()` while a recording is running first stops and finalizes the previous one. If frames of the previous recording are still being processed after that wait, `start()` returns that failure and does not begin a new recording.
 - The recorder belongs to the window that is current when `start()` is called, and it stops automatically when that window closes. When you record an Fbo, keep the Fbo alive; if it is destroyed, the recording stops and the file is finalized.
 - On macOS the window is read back in the background, one frame at a time. If the previous frame is still being processed, that frame is skipped, and the video keeps real-time timing.
+
+For window readback alpha precision and the Fbo alternative for exact alpha, see `grabScreen`.
 '''
 details.ja = '''
 - `start(path)` でウィンドウを、`start(fbo, path)` で Fbo の内容を録画します（Fbo の場合、画面上の UI は映りません）。開始すると、`stop()` を呼ぶまで毎フレームの終わりに自動で録画されます。`ScreenRecorder` は tcApp のメンバーとして持っておいてください。同時に 1 本だけ録画できればよい場合は、共有のレコーダーを使う `startRecording()` でも同じことができます。
@@ -26485,6 +26493,8 @@ details.ja = '''
 - 録画中に `start()` を呼ぶと、まず前の録画を停止して確定します。その待ち時間のあとも前の録画のフレームが処理中の場合は、その失敗を返し、新しい録画は始めません。
 - レコーダーは `start()` を呼んだときのウィンドウに結び付き、そのウィンドウが閉じると自動的に停止します。Fbo を録画するときは、その Fbo を破棄しないでください。破棄された場合は録画が停止し、ファイルが確定されます。
 - macOS では、ウィンドウの読み戻しを 1 フレームずつバックグラウンドで行います。前のフレームがまだ処理中の場合はそのフレームをスキップし、動画の時間は実時間のまま保たれます。
+
+ウィンドウの読み戻しのアルファ精度と、正確なアルファ値に Fbo を使う方法は `grabScreen` を参照してください。
 '''
 details.ko = '''
 - `start(path)`는 윈도우를, `start(fbo, path)`는 Fbo의 내용을 녹화합니다(Fbo의 경우 화면의 UI는 찍히지 않습니다). 시작하면 `stop()`을 호출할 때까지 매 프레임이 끝날 때 자동으로 녹화됩니다. `ScreenRecorder`는 tcApp의 멤버로 가지고 있으세요. 한 번에 하나만 녹화하면 되는 경우에는 공유 레코더를 쓰는 `startRecording()`으로도 같은 일을 할 수 있습니다.
@@ -26494,6 +26504,8 @@ details.ko = '''
 - 녹화 중에 `start()`를 호출하면 먼저 이전 녹화를 멈추고 확정합니다. 그 대기 후에도 이전 녹화의 프레임이 처리 중이면 그 실패를 반환하고 새 녹화는 시작하지 않습니다.
 - 레코더는 `start()`를 호출한 시점의 윈도우에 묶이며, 그 윈도우가 닫히면 자동으로 멈춥니다. Fbo를 녹화하는 동안에는 그 Fbo가 살아 있어야 합니다. 파괴되면 녹화가 멈추고 파일이 확정됩니다.
 - macOS에서는 윈도우 읽기를 한 프레임씩 백그라운드에서 처리합니다. 이전 프레임이 아직 처리 중이면 그 프레임은 건너뛰며, 비디오의 시간은 실제 시간 그대로 유지됩니다.
+
+윈도우 읽기의 알파 정밀도와 정확한 알파 값을 위해 Fbo를 사용하는 방법은 `grabScreen`을 참조합니다.
 '''
 snippet = '''
 // tcApp.h (inside class tcApp : public App)
@@ -26509,6 +26521,7 @@ void tcApp::keyPressed(int key) {
     }
 }
 '''
+related = ["Fbo::readPixels", "grabScreen"]
 
 ["ScreenRecorder::stop"]
 category = "video"
@@ -43459,20 +43472,26 @@ details.en = '''
 - Captures the current window's rendered contents; call from `draw()` or an `events().afterFrame` listener with a valid graphics context. Native implementations return `false` while an `Fbo` begun with `begin()` has not yet been ended with `end()`.
 - Readback is synchronous and can stall rendering while GPU work completes; macOS returns `false` if completion takes longer than ten seconds.
 - Output contents are not guaranteed to remain unchanged on failure; use the pixels only after a successful return.
+
+Window capture, including MCP `tc_get_screenshot` and `tc_save_screenshot`, has the alpha precision described in `grabScreen`; use an Fbo for exact alpha.
 '''
 details.ja = '''
 - `captureWindow(outPixels)` は、取得元フレームバッファの実ピクセル寸法で、上の行から並ぶ RGBA8 データを `Pixels` に格納します。成功時は `true`、失敗時は `false` を返します。
 - 現在のウィンドウに描画された内容を取得します。有効なグラフィックスコンテキストがある状態で、`draw()` または `events().afterFrame` のリスナーから呼び出してください。ネイティブ実装では、`begin()` で描画を開始した `Fbo` を `end()` で終了していない間は `false` を返します。
 - 読み戻しは同期処理で、GPU の処理完了を待つ間に描画が停止することがあります。macOS では完了までに10秒を超えると `false` を返します。
 - 失敗時に出力内容が保持される保証はありません。成功した場合だけピクセルを使用してください。
+
+MCP の `tc_get_screenshot`・`tc_save_screenshot` を含むウィンドウの取得には、`grabScreen` に記載したアルファ精度の制約があります。正確なアルファ値には Fbo を使います。
 '''
 details.ko = '''
 - `captureWindow(outPixels)`는 원본 프레임버퍼의 실제 픽셀 크기로 위쪽 행부터 나열된 RGBA8 데이터를 `Pixels`에 저장합니다. 성공하면 `true`, 실패하면 `false`를 반환합니다.
 - 현재 윈도우에 렌더링된 내용을 캡처합니다. 유효한 그래픽스 컨텍스트가 있는 상태에서 `draw()` 또는 `events().afterFrame` 리스너에서 호출하세요. 네이티브 구현은 `begin()`으로 그리기를 시작한 `Fbo`를 `end()`로 종료하지 않은 동안 `false`를 반환합니다.
 - 읽어오기는 동기식이며 GPU 작업이 완료될 때까지 렌더링을 멈출 수 있습니다. macOS에서는 완료에 10초가 넘게 걸리면 `false`를 반환합니다.
 - 실패 시 출력 내용이 유지된다는 보장은 없으므로, 성공한 경우에만 픽셀을 사용하세요.
+
+MCP의 `tc_get_screenshot`과 `tc_save_screenshot`을 포함한 윈도우 캡처에는 `grabScreen`에 설명된 알파 정밀도 제한이 적용되며, 정확한 알파 값에는 Fbo를 사용합니다.
 '''
-related = ["Pixels", "grabScreen", "saveScreenshot"]
+related = ["Pixels", "grabScreen", "saveScreenshot", "Fbo::readPixels"]
 platform_note.en = '''
 - Native backends read back the framebuffer. Web does not implement canvas readback: it always returns `false` and logs a warning once; use the browser's screenshot tools there.
 '''
@@ -48764,6 +48783,8 @@ public:
 ```
 
 One call costs about 3–7 ms on desktop GPUs and about 15 ms on a Raspberry Pi at 720p, mostly waiting for the GPU, so reading less doesn't make it much cheaper; prefer calling on demand rather than every frame.
+
+On macOS, iOS and Windows, the main window uses RGB10A2, so its stored alpha has four levels (0, 85, 170, 255) and readback returns those values. On-screen appearance is unaffected: the view is opaque and rendering does not use destination alpha for color. For exact alpha, draw into an Fbo and use `Fbo::readPixels()` or `Fbo::save()`. Linux GLCORE windows and secondary desktop windows store 8-bit alpha; Linux EGL may omit the alpha channel.
 '''
 details.ja = '''
 - `update()`、`setup()`、フレーム内でも `events().afterFrame` リスナー内でもない他のフェーズ: `false` を返す。ウィンドウごとに Warning をちょうど1回出し、`events().afterFrame` または `saveScreenshot()` を案内する。
@@ -48793,6 +48814,8 @@ public:
 ```
 
 1回の呼び出しはデスクトップ GPU で約3〜7 ms、Raspberry Pi の720pで約15 msかかる。大半は GPU の待機時間なので、読み出し量を減らしてもあまり安くならない。毎フレームではなく、必要なときだけ呼ぶ。
+
+macOS・iOS・Windows のメインウィンドウは RGB10A2 を使うため、保存されるアルファ値は4段階（0, 85, 170, 255）で、読み戻しもこの値になります。ビューは不透明で、描画先のアルファ値を色の計算に使わないため、画面の見た目には影響しません。正確なアルファ値が必要な場合は Fbo に描画し、`Fbo::readPixels()` または `Fbo::save()` を使います。Linux GLCORE のウィンドウとデスクトップの副ウィンドウは8-bit アルファを保存しますが、Linux EGL ではアルファチャンネルがない場合があります。
 '''
 details.ko = '''
 - `update()`, `setup()`, 프레임 안이나 `events().afterFrame` 리스너 안이 아닌 다른 단계: `false`를 반환한다. 윈도우마다 Warning을 정확히 한 번 출력하며 `events().afterFrame` 또는 `saveScreenshot()`을 안내한다.
@@ -48822,6 +48845,8 @@ public:
 ```
 
 호출 한 번은 데스크톱 GPU에서 약 3–7 ms, Raspberry Pi의 720p에서 약 15 ms가 든다. 대부분 GPU를 기다리는 시간이므로 읽는 양을 줄여도 비용이 크게 줄지 않는다. 매 프레임보다 필요할 때만 호출하는 편이 좋다.
+
+macOS, iOS, Windows의 메인 윈도우는 RGB10A2를 사용하므로 저장되는 알파 값은 4단계(0, 85, 170, 255)이며 읽어올 때도 이 값을 반환합니다. 뷰가 불투명하고 색 계산에 대상 알파를 사용하지 않으므로 화면의 모습에는 영향이 없습니다. 정확한 알파 값이 필요하면 Fbo에 그린 뒤 `Fbo::readPixels()` 또는 `Fbo::save()`를 사용합니다. Linux GLCORE 윈도우와 데스크톱의 보조 윈도우는 8-bit 알파를 저장하지만 Linux EGL에서는 알파 채널이 없을 수 있습니다.
 '''
 platform_note.en = "Not implemented on web (no synchronous canvas readback): always returns false and logs a one-time warning. Use saveScreenshot() for a deferred canvas download or the browser's screenshot tools."
 platform_note.ja = "Web では未実装（同期 canvas 読み出しはない）: 常に false を返し、警告を1回だけ出す。遅延 canvas ダウンロードには saveScreenshot()、またはブラウザのスクリーンショット機能を使う。"
@@ -51801,6 +51826,8 @@ details.en = '''
 - Native relative paths resolve against the data folder. Paths inside an application bundle on macOS/iOS are refused with an Error directing you to `getUserDataPath()`.
 - Native capture and encoding run later during frame processing; the checked write uses a temporary file and replacement, and a write failure logs one Error.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
+
+For window readback alpha precision and the Fbo alternative for exact alpha, see `grabScreen`.
 '''
 details.ja = '''
 - 解決した Window に capture を予約し、EVENT_DRIVEN でもフレームを要求します。afterFrame の全通知後に capture します。
@@ -51810,6 +51837,8 @@ details.ja = '''
 - ネイティブ環境の相対パスはデータフォルダーを基準に解決します。macOS/iOS のアプリバンドル内への保存は拒否し、`getUserDataPath()` を案内する Error を記録します。
 - ネイティブ環境のキャプチャとエンコードは、その後のフレーム処理中に実行します。書き込み結果を確認しながら一時ファイルから置き換え、書き込みの失敗は Error を 1 件記録します。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
+
+ウィンドウの読み戻しのアルファ精度と、正確なアルファ値に Fbo を使う方法は `grabScreen` を参照してください。
 '''
 details.ko = '''
 - 해석한 Window에 capture를 예약하고 EVENT_DRIVEN에서도 프레임을 요청합니다. afterFrame 알림이 모두 끝난 후 capture합니다.
@@ -51819,8 +51848,10 @@ details.ko = '''
 - 네이티브 환경의 상대 경로는 데이터 폴더를 기준으로 해석합니다. macOS/iOS의 앱 번들 내부 경로는 거부하고 `getUserDataPath()`를 안내하는 Error를 기록합니다.
 - 네이티브 환경의 캡처와 인코딩은 이후 프레임 처리 중 실행합니다. 쓰기 결과를 확인하며 임시 파일에서 교체하고 쓰기에 실패하면 Error 한 건을 기록합니다.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
+
+윈도우 읽기의 알파 정밀도와 정확한 알파 값을 위해 Fbo를 사용하는 방법은 `grabScreen`을 참조합니다.
 '''
-related = ["grabScreen", "startRecording", "captureWindow"]
+related = ["grabScreen", "startRecording", "captureWindow", "Fbo::readPixels"]
 platform_note.en = '''
 - Extensions are case-insensitive. Linux, Android, and iOS support png/jpg/jpeg/bmp; macOS additionally supports tiff/tif/gif, and Windows additionally supports tga.
 - On native platforms, unsupported or missing extensions append `.png`, such as `shot.xyz.png` or `shot.png`. A warning names the actual destination and supported formats; reported paths use that destination.
@@ -54215,6 +54246,8 @@ details.en = '''
 - Calling again first stops the previous recording, then opens a new one; reusing its path overwrites the previous file. If GPU frames remain pending after the stop wait times out, it returns the failure without starting a new recording, and the old recording finalizes after its pending frames complete.
 - The global recorder is shared across the process and binds to the window whose callbacks are active when recording starts. It automatically stops on that window's exit. Keep a recorded Fbo alive; destroying it causes recording to stop and finalize on the next frame.
 - For shared capture behavior and costs, see `ScreenRecorder`.
+
+For window readback alpha precision and the Fbo alternative for exact alpha, see `grabScreen`.
 '''
 details.ja = '''
 - 現在のウィンドウは `startRecording(path, settings)`、Fbo は `startRecording(fbo, path, settings)` で録画します。フレーム後に自動でキャプチャし、開始時のソースの寸法が録画サイズになります。Fbo はウィンドウの UI を含めず、自身の内容を録画します。
@@ -54224,6 +54257,8 @@ details.ja = '''
 - 再度呼ぶと、前の録画を停止してから新しく開始します。同じパスを使うと前のファイルを上書きします。停止の待機時間を超えて GPU フレームが残っている場合は、新しい録画を開始せずに失敗を返します。前の録画は残りのフレーム処理が完了してから確定します。
 - グローバルの録画機能はプロセス全体で共有し、開始時にコールバックが実行されているウィンドウに関連付けます。そのウィンドウの終了時に自動停止します。録画する Fbo は生存させてください。破棄すると次のフレームで録画を停止してファイルを確定します。
 - 共通のキャプチャ動作と処理負荷については `ScreenRecorder` を参照してください。
+
+ウィンドウの読み戻しのアルファ精度と、正確なアルファ値に Fbo を使う方法は `grabScreen` を参照してください。
 '''
 details.ko = '''
 - 현재 윈도우는 `startRecording(path, settings)`, Fbo는 `startRecording(fbo, path, settings)`로 녹화합니다. 프레임 이후 자동으로 캡처하며 시작 시 소스 크기가 녹화 크기가 됩니다. Fbo는 윈도우 UI 없이 자신의 내용을 녹화합니다.
@@ -54233,8 +54268,10 @@ details.ko = '''
 - 다시 호출하면 이전 녹화를 중지한 뒤 새로 시작합니다. 같은 경로를 사용하면 이전 파일을 덮어씁니다. 중지 대기 시간이 지난 뒤에도 GPU 프레임이 남아 있으면 새 녹화를 시작하지 않고 실패를 반환합니다. 이전 녹화는 남은 프레임 처리가 완료된 뒤 마무리됩니다.
 - 전역 녹화 기능은 프로세스 전체에서 공유하며 시작 시 콜백이 실행 중인 윈도우에 연결됩니다. 해당 윈도우가 종료되면 자동으로 중지합니다. 녹화하는 Fbo는 유지해야 하며 파괴하면 다음 프레임에서 녹화를 중지하고 파일을 마무리합니다.
 - 공통 캡처 동작과 처리 비용은 `ScreenRecorder`를 참조하세요.
+
+윈도우 읽기의 알파 정밀도와 정확한 알파 값을 위해 Fbo를 사용하는 방법은 `grabScreen`을 참조합니다.
 '''
-related = ["VideoRecordSettings", "stopRecording", "isRecording", "saveScreenshot", "ScreenRecorder", "SaveResult", "getDataPath"]
+related = ["VideoRecordSettings", "stopRecording", "isRecording", "saveScreenshot", "ScreenRecorder", "SaveResult", "getDataPath", "Fbo::readPixels", "grabScreen"]
 platform_note.en = '''
 - Uses the global `ScreenRecorder`. Web recording is not implemented: opening the video encoder returns a failed `SaveResult`.
 '''
@@ -63562,6 +63599,8 @@ details.en = '''
 - On Web, the canvas is captured and submitted as a PNG or JPEG download. The meaning of success is described in `ScreenshotSaveEventArgs::result`.
 - Completion timing, application lifetime and listener retention are described in `onScreenshotSave`.
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and does nothing (see `events`).
+
+For window readback alpha precision and the Fbo alternative for exact alpha, see `grabScreen`.
 '''
 details.ja = '''
 - 解決した Window に非同期 capture を予約してフレームを要求します。各 Window は自分の capture queue だけを処理します。
@@ -63574,6 +63613,8 @@ details.ja = '''
 - Web ではキャンバスを撮影し、PNG または JPEG のダウンロードとして送信します。成功の意味は、`ScreenshotSaveEventArgs::result` を参照してください。
 - 完了通知のタイミング、アプリの実行期間、リスナーの保持については、`onScreenshotSave` を参照してください。
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して何もしません（`events` を参照）。
+
+ウィンドウの読み戻しのアルファ精度と、正確なアルファ値に Fbo を使う方法は `grabScreen` を参照してください。
 '''
 details.ko = '''
 - 해석한 Window에 비동기 capture를 예약하고 프레임을 요청합니다. 각 Window는 자신의 capture queue만 처리합니다.
@@ -63586,8 +63627,10 @@ details.ko = '''
 - Web에서는 캔버스를 캡처하여 PNG 또는 JPEG 다운로드로 제출합니다. 성공의 의미는 `ScreenshotSaveEventArgs::result`를 참조하세요.
 - 완료 통지 시점, 앱 실행 기간과 리스너 유지는 `onScreenshotSave`를 참조하세요.
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 아무 동작도 하지 않습니다(`events` 참조).
+
+윈도우 읽기의 알파 정밀도와 정확한 알파 값을 위해 Fbo를 사용하는 방법은 `grabScreen`을 참조합니다.
 '''
-related = ["onScreenshotSave", "ScreenshotSaveEventArgs", "saveScreenshot"]
+related = ["onScreenshotSave", "ScreenshotSaveEventArgs", "saveScreenshot", "Fbo::readPixels", "grabScreen"]
 snippet = '''
 void tcApp::setup() {
     saveScreenshotAsync("screenshot.png");
