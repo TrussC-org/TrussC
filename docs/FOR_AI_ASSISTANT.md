@@ -1857,6 +1857,7 @@ That is the whole procedure — no linker flags, no per-addon steps. In particul
 
 - Save an image: `Image::save(path)` / FBO contents: `Fbo::save(path)`
 - Save a screenshot: `saveScreenshot(path)` (raw pixels: `grabScreen(Pixels&)`)
+- Window readback (screenshots, MCP captures and window recording) has four alpha levels (0, 85, 170, 255) on the RGB10A2 main window on macOS/iOS/Windows, with no effect on the opaque on-screen view; Linux GLCORE and secondary desktop windows store 8-bit alpha (Linux EGL may omit alpha), and exact alpha requires drawing into an Fbo and using `Fbo::readPixels()` or `Fbo::save()`.
 - Record video: `startRecording(path)` / `stopRecording()`
 - JSON read/write: `loadJson(path)` / `saveJson(j, path)` / `parseJson(str)` / `toJsonString(j)` (the type `Json` = nlohmann/json)
 - XML read/write: `Xml` (pugixml wrapper)
