@@ -1601,6 +1601,20 @@ void run() {
               !live && _sapp_tc.app.quit_ordered && consulted==0 && acquired==0 && presents==0);
         changed=false; renewalOk=true; _sapp_tc.app.quit_ordered=false;
     }
+    for (bool role : {false,true}) for (bool trust : {false,true})
+    for (bool hidden : {false,true}) for (bool pending : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc={callback,&w}; w.desc.hidden=hidden;
+        eventDriven=true; redrawPending=false; presents=0; events.clear();
+        changed=!pending; w.surface_resize_pending=pending;
+        _sapp_tc_x11_tick(&w);
+        changed=false;
+        check("X11 EVENT_DRIVEN resize presents requested-visible content", presents==int(!hidden));
+        check("X11 resize keeps public event and consumes coalesced redraw", events==std::vector<int>{SAPP_EVENTTYPE_RESIZED} && !redrawPending);
+        for (int i=0; i<5; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 unchanged size does not cause redraw storm", presents==int(!hidden));
+        eventDriven=false;
+    }
     for (bool role : {false,true}) for (bool trust : {false,true}) {
         Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
         w.desc.hidden=true; mapped=false; withdrawals=mapCalls=0; now=10;
@@ -1857,6 +1871,11 @@ if '--mutations' in sys.argv[3:]:
             '_sapp_tc_x11_sync_visibility(w);', ''),
         'x11-no-visibility-timeout': change('static void _sapp_tc_x11_sync_visibility(',
             'if (_sapp_tc_now() - w->visibility_started < 0.5) return;', 'return;'),
+        'x11-no-resize-redraw': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
+            'if (!w->desc.hidden) _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);', ''),
+        'x11-hidden-resize-redraw': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
+            'if (!w->desc.hidden) _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);'),
         'x11-no-map-redraw': change('case MapNotify: {',
             '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);', ''),
         'x11-retain-hidden-skip': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
@@ -2121,3 +2140,4 @@ PY
 
 python3 "$root/core/tests/windowTick/native-quit-test.py"
 python3 "$root/core/tests/windowTick/creation-settings-test.py"
+python3 "$root/core/tests/windowTick/x11-position-test.py" "$@"

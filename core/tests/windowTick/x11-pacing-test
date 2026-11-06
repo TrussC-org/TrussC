@@ -49,7 +49,7 @@ struct { App app; int display=0; size_t window_slots=2; double refresh_period=1.
     _sapp_tc_window_t* windows[2]; } _sapp_tc;
 struct XEvent {};
 struct pollfd { int fd, events, revents; };
-constexpr int POLLIN=1, SAPP_EVENTTYPE_QUIT_REQUESTED=1, SAPP_EVENTTYPE_RESIZED=2;
+constexpr int POLLIN=1, SAPP_EVENTTYPE_QUIT_REQUESTED=1, SAPP_EVENTTYPE_RESIZED=2, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=3;
 static double clockValue=10, period=1.0/62.0, tail=0;
 static int limit=620;
 static bool queued=false, nonblocking=false, hideMain=false, iconMain=false, hideAfterSecondary=false;

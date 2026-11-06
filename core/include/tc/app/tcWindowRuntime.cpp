@@ -1413,7 +1413,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
 }
     void convertWindowEvent(const sapp_event* ev, Window& window) {
         auto& ctx = WindowRequestAccess::context(window);
-        // Native mapping invalidates content after an early show-time present.
+        // Native mapping or resizing invalidates previously presented content.
         if (ev->type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED) {
             ctx.loop.redrawCount = std::max(ctx.loop.redrawCount, 1);
             return;

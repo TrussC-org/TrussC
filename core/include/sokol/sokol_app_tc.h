@@ -11826,7 +11826,7 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
     }
     Atom protocols[] = { _sapp_tc.WM_DELETE_WINDOW };
     XSetWMProtocols(_sapp_tc.display, w->xwin, protocols, 1);
-    /* NOTE: PPosition and PSize are obsolete and ignored */
+    /* Explicit position hints are supplied by the shared X11 geometry helper. */
     XSizeHints* hints = XAllocSizeHints();
     if (hints) {
         hints->flags = PWinGravity;
@@ -12285,6 +12285,12 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
             sapp_destroy_window(handle);
             _sapp_tc.app.quit_ordered = true;
             return;
+        }
+        // Mapping and a later WM resize can land on separate EVENT_DRIVEN ticks.
+        if (!w->desc.hidden) {
+            _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);
+            // The event callback may have destroyed this window.
+            if (_sapp_tc_lookup(handle) != w) return;
         }
         _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESIZED);
     }

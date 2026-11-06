@@ -11,7 +11,11 @@
 #endif
 namespace {
 auto& maps() { static std::unordered_map<unsigned long, int> counts; return counts; }
+auto& invalidations() { static std::unordered_map<unsigned long, int> counts; return counts; }
+auto& configuredSizes() { static std::unordered_map<unsigned long, std::pair<int, int>> sizes; return sizes; }
 int nativeSwaps = 0;
+int frameWidth = 0, frameHeight = 0, presentedWidth = 0, presentedHeight = 0;
+void recordPresent() { ++nativeSwaps; presentedWidth = frameWidth; presentedHeight = frameHeight; }
 }
 extern "C" int __real_XMapWindow(Display*, ::Window);
 extern "C" int __wrap_XMapWindow(Display* display, ::Window window) {
@@ -22,6 +26,12 @@ int visibilityMapCount(unsigned long window) { return maps()[window]; }
 extern "C" int __real_XNextEvent(Display*, XEvent*);
 extern "C" int __wrap_XNextEvent(Display* display, XEvent* event) {
     const int result = __real_XNextEvent(display, event);
+    if (event->type == MapNotify) ++invalidations()[event->xmap.window];
+    if (event->type == ConfigureNotify) {
+        auto& previous = configuredSizes()[event->xconfigure.window];
+        const auto size = std::make_pair(event->xconfigure.width, event->xconfigure.height);
+        if (previous != size) { previous = size; ++invalidations()[event->xconfigure.window]; }
+    }
     if (event->type == UnmapNotify) {
         std::printf("windowVisible: UnmapNotify client=0x%lx event=0x%lx synthetic=%d\n",
             event->xunmap.window, event->xunmap.event, event->xunmap.send_event);
@@ -36,19 +46,32 @@ extern "C" int __wrap_XMapRaised(Display* display, ::Window window) {
 #if defined(SOKOL_GLES3)
 extern "C" EGLBoolean __real_eglSwapBuffers(EGLDisplay, EGLSurface);
 extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay display, EGLSurface surface) {
-    ++nativeSwaps;
+    recordPresent();
     return __real_eglSwapBuffers(display, surface);
 }
 #else
 extern "C" void __real_glXSwapBuffers(Display*, unsigned long);
 extern "C" void __wrap_glXSwapBuffers(Display* display, unsigned long window) {
-    ++nativeSwaps;
+    recordPresent();
     __real_glXSwapBuffers(display, window);
 }
 #endif
 // The main window stays hidden during every swap-count assertion. Count surfaces
 // together: GLXDrawable is a GLXWindow, not the X Window returned by the public API.
 int visibilitySwapCount(unsigned long) { return nativeSwaps; }
+int visibilityInvalidationCount(unsigned long window) { return invalidations()[window]; }
+void visibilityFrameSize(int width, int height) { frameWidth = width; frameHeight = height; }
+bool visibilityFinalSizePresented(const void* rawDisplay, unsigned long window, bool fullscreen, int since) {
+    auto* display = static_cast<Display*>(const_cast<void*>(rawDisplay));
+    XWindowAttributes attrs{};
+    if (!XGetWindowAttributes(display, window, &attrs) || attrs.map_state != IsViewable) return false;
+    // Without a WM fullscreen has no native effect. With our single-monitor WM,
+    // wait for the screen-sized client, then a completed present at that size.
+    if (fullscreen && XInternAtom(display, "_NET_SUPPORTING_WM_CHECK", True) != None &&
+        (attrs.width != DisplayWidth(display, DefaultScreen(display)) ||
+         attrs.height != DisplayHeight(display, DefaultScreen(display)))) return false;
+    return nativeSwaps > since && presentedWidth == attrs.width && presentedHeight == attrs.height;
+}
 bool visibilityMapped(const void* display, unsigned long window) {
     XWindowAttributes attrs{};
     return XGetWindowAttributes(static_cast<Display*>(const_cast<void*>(display)), window, &attrs) && attrs.map_state != IsUnmapped;
