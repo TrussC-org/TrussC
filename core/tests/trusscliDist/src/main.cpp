@@ -5,8 +5,7 @@
 // tools/src/Dist.cpp into this test.
 //
 // Guards:
-//   - dist.json: every phase-1 key is read ("eula": true means EULA.txt, a
-//     string is a path, false is none); unknown keys and "installer" (a
+//   - dist.json: every phase-1 key is read; unknown keys and "installer" (a
 //     later phase) are warned about, not fatal; a wrong type or invalid JSON
 //     is an error; the --init template parses back. The copyright line is
 //     "© <year> <author>".
@@ -27,9 +26,11 @@
 //     the executable imports (Windows; a debug CRT import is refused), the
 //     bin/data move into the bundle and the bundle version (macOS), the
 //     launcher (Linux), licenses/ and THIRD_PARTY_NOTICES.txt with the
-//     author, the EULA at the package root and the author as the bundle
-//     copyright (macOS). "eula": true without EULA.txt, a missing include
-//     source and an "include" target outside the package fail.
+//     author, and the author as the bundle copyright (macOS). The EULA:
+//     EULA.txt in the project folder ships without any setting, eulaFile
+//     ships under the name EULA.txt, neither ships none. A missing eulaFile,
+//     a missing include source and an "include" target outside the package
+//     fail.
 // =============================================================================
 
 #include <TrussC.h>
@@ -78,7 +79,7 @@ void testConfig() {
     std::vector<std::string> warnings;
     std::string error;
     const bool ok = dist::parseConfig(R"({
-        "name": "My App", "version": "1.2.0", "author": "My Studio", "eula": true,
+        "name": "My App", "version": "1.2.0", "author": "My Studio", "eulaFile": "EULA-ko.txt",
         "include": [{"from": "../tools", "to": "data/tools"}],
         "exclude": ["data/**/*.psd"],
         "licenses": [{"name": "Node.js", "file": "LICENSE-node"}],
@@ -87,7 +88,7 @@ void testConfig() {
     })", config, warnings, error);
     check("dist.json: all phase-1 keys read",
           ok && config.name == "My App" && config.version == "1.2.0" && config.author == "My Studio" &&
-              config.eula == "EULA.txt" && config.include.size() == 1 &&
+              config.eulaFile == "EULA-ko.txt" && config.include.size() == 1 &&
               config.include[0].to == "data/tools" && config.exclude.size() == 1 &&
               config.licenses.size() == 1 && config.licenses[0].file == "LICENSE-node");
     bool installerWarned = false, typoWarned = false;
@@ -102,17 +103,14 @@ void testConfig() {
               contains(error, "exclude"));
     check("dist.json: invalid JSON is an error",
           !dist::parseConfig("{ name: 1 ", config, warnings, error));
-    check("dist.json: eula takes false or a path, not a number",
-          dist::parseConfig(R"({"eula": false})", config, warnings, error) && config.eula.empty() &&
-              dist::parseConfig(R"({"eula": "legal/EULA-ko.txt"})", config, warnings, error) &&
-              config.eula == "legal/EULA-ko.txt" &&
-              !dist::parseConfig(R"({"eula": 1})", config, warnings, error));
+    check("dist.json: eulaFile must be a string",
+          !dist::parseConfig(R"({"eulaFile": true})", config, warnings, error));
 
     warnings.clear();
     check("--init template parses back",
           dist::parseConfig(dist::configTemplate("My \"App\"", "0.1.0", "Studio"), config, warnings, error) &&
               config.name == "My \"App\"" && config.version == "0.1.0" && config.author == "Studio" &&
-              config.eula.empty() && warnings.empty());
+              config.eulaFile == "EULA.txt" && warnings.empty());
     check("copyright line", dist::copyrightLine("").empty() &&
                                 contains(dist::copyrightLine("My Studio"), " My Studio") &&
                                 dist::copyrightLine("My Studio").rfind("\xC2\xA9 20", 0) == 0);
@@ -210,8 +208,7 @@ void testPackage(const fs::path& self, const fs::path& scratch) {
     input.config.name = "My App";
     input.config.version = "1.2.0";
     input.config.author = "My Studio";
-    input.config.eula = dist::kDefaultEula;
-    write(project / "EULA.txt", "my terms\n");
+    write(project / "EULA.txt", "my terms\n");  // picked up without eulaFile
     input.config.include = {{"extra/tool", "data/tool"}};
     input.config.exclude = {"data/raw"};
     input.licenses = dist::collectLicenses(
@@ -271,7 +268,7 @@ void testPackage(const fs::path& self, const fs::path& scratch) {
     check("notices merged", contains(notices, "TrussC MIT") && contains(notices, "good notices") &&
                                 contains(notices, "no notice file") && contains(notices, "node license"));
     check("notices name the author", contains(notices, "\xC2\xA9 ") && contains(notices, "My Studio"));
-    check("EULA at the package root", read(pkg / "EULA.txt") == "my terms\n");
+    check("EULA.txt in the project folder ships at the package root", read(pkg / "EULA.txt") == "my terms\n");
 
     if (platform == dist::Platform::Windows) {
         check("exe copied", fs::exists(pkg / "myApp.exe"));
@@ -301,11 +298,21 @@ void testPackage(const fs::path& self, const fs::path& scratch) {
           dist::makePlan(input, plan, error) && dist::writePackage(input, plan, error) &&
               !fs::exists(resources / "data" / "a.txt"));
 
-    auto failing = input;
+    // eulaFile: another name ships as EULA.txt; no file at all ships none.
+    auto other = input;
+    write(project / "EULA-ko.txt", "korean terms\n");
+    other.config.eulaFile = "EULA-ko.txt";
+    check("eulaFile ships as EULA.txt",
+          dist::makePlan(other, plan, error) && dist::writePackage(other, plan, error) &&
+              read(plan.packageDir / "EULA.txt") == "korean terms\n");
     fs::remove(project / "EULA.txt");
-    check("eula: true without EULA.txt says to create it",
-          !dist::makePlan(failing, plan, error) && contains(error, "create it"));
-    failing.config.eula.clear();
+    check("no EULA without eulaFile or EULA.txt",
+          dist::makePlan(input, plan, error) && plan.eulaSource.empty());
+
+    auto failing = input;
+    failing.config.eulaFile = "EULA-missing.txt";
+    check("a missing eulaFile fails", !dist::makePlan(failing, plan, error) && contains(error, "eulaFile"));
+    failing.config.eulaFile.clear();
     failing.config.include = {{"no/such/folder", "data/x"}};
     check("missing include source fails", !dist::makePlan(failing, plan, error) && contains(error, "not found"));
     failing.config.include = {{"extra/tool", "../outside"}};

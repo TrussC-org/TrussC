@@ -44,8 +44,8 @@ struct Config {
     std::string name;       // "" = project folder name
     std::string version;    // "" = 0.1.0
     std::string author;     // person / studio / company; "" = not set
-    std::string eula;       // the app's own license terms: a file, "" = none
-                            // ("eula": true in dist.json means kDefaultEula)
+    std::string eulaFile;   // the app's own license terms, shipped as EULA.txt;
+                            // "" = kDefaultEula in the project folder if it exists
     std::vector<IncludeEntry> include;
     std::vector<std::string> exclude;
     std::vector<LicenseEntry> licenses;
@@ -176,12 +176,14 @@ struct Plan {
     std::vector<std::string> runtimeDlls;   // Windows: VC++ runtime DLLs copied
     std::vector<std::string> warnings;
     std::string launcherName;               // Linux: launcher script in the package
+    fs::path eulaSource;                    // shipped as EULA.txt; empty = no EULA
 };
 
 // Works out what goes where, reading bin/ and the dist.json entries but
 // writing nothing. False with `error` when the build is missing or cannot be
-// shipped (a debug CRT, a missing include source or EULA, ...).
-// The EULA goes to the package root as EULA.txt (beside the bundle on macOS).
+// shipped (a debug CRT, a missing include source or eulaFile, ...).
+// The EULA (eulaFile, or EULA.txt in the project folder when present) goes to
+// the package root as EULA.txt (beside the bundle on macOS).
 bool makePlan(const PlanInput& input, Plan& plan, std::string& error);
 
 // Writes the package: replaces plan.packageDir and plan.symbolsDir, copies,

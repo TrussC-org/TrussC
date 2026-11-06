@@ -299,10 +299,8 @@ bool parseConfig(const std::string& text, Config& out, std::vector<std::string>&
             if (!expectString(out.version)) return false;
         } else if (key == "author") {
             if (!expectString(out.author)) return false;
-        } else if (key == "eula") {
-            if (value.is_boolean()) out.eula = value.get<bool>() ? kDefaultEula : "";
-            else if (value.is_string()) out.eula = value.get<std::string>();
-            else { error = "dist.json: \"eula\" must be true / false or a file path"; return false; }
+        } else if (key == "eulaFile") {
+            if (!expectString(out.eulaFile)) return false;
         } else if (key == "include") {
             if (!value.is_array()) { error = "dist.json: \"include\" must be an array"; return false; }
             for (const auto& entry : value) {
@@ -358,7 +356,7 @@ std::string configTemplate(const std::string& name, const std::string& version,
     text += "  \"name\": " + json(name).dump() + ",\n";
     text += "  \"version\": " + json(version).dump() + ",\n";
     text += "  \"author\": " + json(author).dump() + ",\n";
-    text += "  \"eula\": false,\n";
+    text += "  \"eulaFile\": " + json(std::string(kDefaultEula)).dump() + ",\n";
     text += "  \"include\": [],\n";
     text += "  \"exclude\": [],\n";
     text += "  \"licenses\": []\n";
@@ -719,21 +717,21 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
     }
 
     // --- EULA: the package root, beside the bundle on macOS ---
-    if (!config.eula.empty()) {
-        fs::path eula = fromUtf8(config.eula);
+    // eulaFile if set (must exist), else EULA.txt in the project folder if present.
+    {
+        fs::path eula = fromUtf8(config.eulaFile.empty() ? std::string(kDefaultEula) : config.eulaFile);
         if (eula.is_relative()) eula = in.projectDir / eula;
-        if (!fs::is_regular_file(eula, ec)) {
-            error = config.eula == kDefaultEula
-                ? "dist.json \"eula\": true needs EULA.txt in the project folder; "
-                  "create it with your license terms (or set \"eula\" to a file path)"
-                : "dist.json \"eula\" file not found: " + config.eula;
+        if (fs::is_regular_file(eula, ec)) {
+            if (!targets.insert("eula.txt").second) {
+                error = "EULA.txt is also in bin/ or an include entry; keep one";
+                return false;
+            }
+            plan.files.push_back({eula, "EULA.txt"});
+            plan.eulaSource = eula;
+        } else if (!config.eulaFile.empty()) {
+            error = "dist.json \"eulaFile\" not found: " + config.eulaFile;
             return false;
         }
-        if (!targets.insert("eula.txt").second) {
-            error = "EULA.txt is also in bin/ or an include entry; keep one";
-            return false;
-        }
-        plan.files.push_back({eula, "EULA.txt"});
     }
 
     // --- Windows runtime ---

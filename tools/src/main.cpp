@@ -4115,8 +4115,8 @@ static void printDistHelp() {
          << "is signed ad hoc.\n"
          << "\n"
          << "Settings come from dist.json in the project folder (optional; see --init):\n"
-         << "name, version, author, eula, include, exclude, licenses. With \"eula\": true\n"
-         << "(or a file path) your license terms go into the package as EULA.txt.\n"
+         << "name, version, author, eulaFile, include, exclude, licenses. Your license\n"
+         << "terms (eulaFile, or EULA.txt in the project folder) go into the package as EULA.txt.\n"
          << "trusscli collects the license files it finds; checking them is up to you.\n";
 }
 
@@ -4190,8 +4190,8 @@ static int distInit(const string& projectPath, const string& projectName,
         cerr << "Error: cannot write " << configPath.string() << "\n";
         return 1;
     }
-    cout << "Wrote dist.json. Edit it for eula / include / exclude / licenses, then run 'trusscli dist'.\n"
-         << "  eula      true: ship EULA.txt from the project folder (your license terms)\n"
+    cout << "Wrote dist.json. Edit it for include / exclude / licenses, then run 'trusscli dist'.\n"
+         << "  eulaFile  your license terms; shipped as EULA.txt when the file exists\n"
          << "  include   [{\"from\": \"../tools/node\", \"to\": \"data/tools/node\"}]  files from outside bin/data\n"
          << "  exclude   [\"data/**/*.psd\"]                                    left out of the package\n"
          << "  licenses  [{\"name\": \"Node.js\", \"file\": \"...\"}]                  your own third-party notices\n";
@@ -4406,7 +4406,7 @@ static int cmdDist(const vector<string>& args) {
          << "Packaged " << config.name << " " << config.version
          << (config.author.empty() ? string() : " by " + config.author) << ":\n"
          << "  " << plan.packageDir.string() << "\n";
-    if (!config.eula.empty()) cout << "  EULA.txt from " << config.eula << "\n";
+    if (!plan.eulaSource.empty()) cout << "  EULA.txt from " << plan.eulaSource.filename().string() << "\n";
     if (!plan.runtimeDlls.empty()) {
         cout << "  VC++ runtime:";
         for (const string& dll : plan.runtimeDlls) cout << " " << dll;
