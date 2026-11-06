@@ -5,10 +5,15 @@
 // tools/src/Dist.cpp into this test.
 //
 // Guards:
-//   - dist.json: every phase-1 key is read; unknown keys and "installer" (a
-//     later phase) are warned about, not fatal; a wrong type or invalid JSON
-//     is an error; the --init template parses back. The copyright line is
-//     "© <year> <author>".
+//   - dist.json: every key is read, "installer" options included; unknown
+//     keys (also inside "installer") are warned about, not fatal; a wrong
+//     type or invalid JSON is an error; the --init template parses back.
+//     The copyright line is "© <year> <author>".
+//   - NSIS script: zlib compression (no LZMA), a four-part version, names
+//     escaped for NSIS ("$" and '"'), Program Files by arch, the EULA and
+//     notices pages only when asked for, shortcuts / start at login by the
+//     options, and an uninstaller that deletes the listed files and then
+//     the folders deepest first, never recursively.
 //   - Versions: "v1.2.0" -> "1.2.0", one to four numbers of at most 65535,
 //     anything else rejected. File-safe names: spaces -> '-', characters not
 //     allowed in file names dropped, never empty.
@@ -92,12 +97,20 @@ void testConfig() {
               config.eulaFile == "EULA-ko.txt" && config.include.size() == 1 &&
               config.include[0].to == "data/tools" && config.exclude.size() == 1 &&
               config.licenses.size() == 1 && config.licenses[0].file == "LICENSE-node");
-    bool installerWarned = false, typoWarned = false;
-    for (const auto& w : warnings) {
-        installerWarned = installerWarned || contains(w, "\"installer\"");
-        typoWarned = typoWarned || contains(w, "\"exlcude\"");
-    }
-    check("dist.json: later-phase and unknown keys warn", installerWarned && typoWarned);
+    bool typoWarned = false;
+    for (const auto& w : warnings) typoWarned = typoWarned || contains(w, "\"exlcude\"");
+    check("dist.json: unknown keys warn", typoWarned && warnings.size() == 1);
+
+    warnings.clear();
+    check("dist.json: installer options",
+          dist::parseConfig(R"({"installer": {"shortcut": false, "startAtLogin": true,
+                                              "showEula": true, "showNotices": true, "icon": 1}})",
+                            config, warnings, error) &&
+              !config.installer.shortcut && config.installer.startAtLogin && config.installer.showEula &&
+              config.installer.showNotices && warnings.size() == 1 && contains(warnings[0], "installer.icon"));
+    check("dist.json: installer options must be booleans",
+          !dist::parseConfig(R"({"installer": {"shortcut": "yes"}})", config, warnings, error) &&
+              !dist::parseConfig(R"({"installer": []})", config, warnings, error));
 
     check("dist.json: wrong type is an error",
           !dist::parseConfig(R"({"exclude": "data/raw"})", config, warnings, error) &&
@@ -115,6 +128,51 @@ void testConfig() {
     check("copyright line", dist::copyrightLine("").empty() &&
                                 contains(dist::copyrightLine("My Studio"), " My Studio") &&
                                 dist::copyrightLine("My Studio").rfind("\xC2\xA9 20", 0) == 0);
+}
+
+void testNsis() {
+    dist::NsisInput in;
+    in.name = "My \"App\" $1";
+    in.version = "1.2";
+    in.author = "My Studio";
+    in.arch = "x64";
+    in.executable = "myApp.exe";
+    in.packageDir = "C:/out/My-App-1.2-windows-x64";
+    in.files = {"EULA.txt", "data/a b.txt", "data/sub/c.txt", "myApp.exe"};
+    in.setupExe = "C:/out/My-App-1.2-windows-x64-setup.exe";
+    in.eulaPage = "C:/out/work/EULA.txt";
+    in.options.startAtLogin = true;
+    const std::string s = dist::nsisScript(in);
+    check("nsis: zlib compression, four-part version, escaped name",
+          contains(s, "SetCompressor /SOLID zlib") && contains(s, "VIProductVersion \"1.2.0.0\"") &&
+              contains(s, "Name \"My $\\\"App$\\\" $$1\"") && !contains(s, "lzma"));
+    check("nsis: Program Files, files, uninstaller registered",
+          contains(s, "InstallDir \"$PROGRAMFILES64\\My App $$1\"") &&
+              contains(s, "File /r \"C:\\out\\My-App-1.2-windows-x64\\*.*\"") &&
+              contains(s, "\"Publisher\" \"My Studio\"") && contains(s, "WriteUninstaller"));
+    check("nsis: EULA page only when given",
+          contains(s, "MUI_PAGE_LICENSE \"C:\\out\\work\\EULA.txt\"") &&
+              !contains(s, "Third-party notices"));
+    check("nsis: shortcuts and start at login",
+          contains(s, "$SMPROGRAMS\\My App $$1") && contains(s, "$SMSTARTUP\\My App $$1.lnk") &&
+              contains(s, "MUI_FINISHPAGE_RUN \"$INSTDIR\\myApp.exe\"") && !contains(s, "$$INSTDIR"));
+    const size_t sub = s.find("RMDir \"$INSTDIR\\data\\sub\"");
+    const size_t data = s.find("RMDir \"$INSTDIR\\data\"");
+    check("nsis: uninstall deletes the listed files, folders deepest first, nothing recursive",
+          contains(s, "Delete \"$INSTDIR\\data\\a b.txt\"") && contains(s, "Delete \"$INSTDIR\\myApp.exe\"") &&
+              sub != std::string::npos && data != std::string::npos && sub < data &&
+              !contains(s, "RMDir /r"));
+
+    in.arch = "x86";
+    in.eulaPage.clear();
+    in.noticesPage = "C:/out/work/THIRD_PARTY_NOTICES.txt";
+    in.options = {};
+    const std::string t = dist::nsisScript(in);
+    check("nsis: x86 Program Files, notices page with a Next button, no shortcuts when off",
+          contains(t, "InstallDir \"$PROGRAMFILES\\") && contains(t, "MUI_LICENSEPAGE_BUTTON") &&
+              contains(t, "Third-party notices") && contains(t, "$SMPROGRAMS") && !contains(t, "$SMSTARTUP"));
+    in.options.shortcut = false;
+    check("nsis: shortcut false makes none", !contains(dist::nsisScript(in), "$SMPROGRAMS"));
 }
 
 void testNames() {
@@ -341,6 +399,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     testConfig();
     testNames();
     testGlobs();
+    testNsis();
 #if defined(_WIN32) || (defined(__APPLE__) && !TARGET_OS_IPHONE) || \
     (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
     fs::path exe = self;

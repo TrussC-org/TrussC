@@ -40,6 +40,14 @@ struct LicenseEntry {
     std::string file;   // relative to the project folder, or absolute
 };
 
+// dist.json "installer" (used with --installer).
+struct InstallerOptions {
+    bool shortcut = true;       // Start menu and desktop shortcuts
+    bool startAtLogin = false;  // shortcut in the (all users) Startup folder
+    bool showEula = false;      // EULA.txt as an acceptance page (needs an EULA)
+    bool showNotices = false;   // THIRD_PARTY_NOTICES.txt as a read-only page
+};
+
 struct Config {
     std::string name;       // "" = project folder name
     std::string version;    // "" = 0.1.0
@@ -49,6 +57,7 @@ struct Config {
     std::vector<IncludeEntry> include;
     std::vector<std::string> exclude;
     std::vector<LicenseEntry> licenses;
+    InstallerOptions installer;
 };
 
 constexpr const char* kDefaultVersion = "0.1.0";
@@ -182,6 +191,7 @@ struct Plan {
     std::vector<std::string> warnings;
     std::string launcherName;               // Linux: launcher script in the package
     fs::path eulaSource;                    // shipped as EULA.txt; empty = no EULA
+    std::string executableName;             // Windows / Linux: the executable in the package
 };
 
 // Works out what goes where, reading bin/ and the dist.json entries but
@@ -198,5 +208,37 @@ bool writePackage(const PlanInput& input, const Plan& plan, std::string& error);
 
 // One line per file for --dry-run.
 std::string formatPlan(const Plan& plan);
+
+// -----------------------------------------------------------------------------
+// Windows installer (NSIS)
+// -----------------------------------------------------------------------------
+
+// Every file in a written package, relative and '/'-separated, sorted.
+std::vector<std::string> listPackageFiles(const fs::path& packageDir);
+
+struct NsisInput {
+    std::string name;            // shown in the installer, Start menu, Programs list
+    std::string version;
+    std::string author;          // publisher; may be ""
+    std::string arch;            // "x64", "arm64", "x86"
+    std::string executable;      // file name inside the package
+    fs::path packageDir;         // what gets installed
+    std::vector<std::string> files;  // listPackageFiles(packageDir): what the uninstaller removes
+    fs::path setupExe;           // the installer to write
+    fs::path eulaPage;           // UTF-8 text for the EULA page, or empty
+    fs::path noticesPage;        // UTF-8 text for the notices page, or empty
+    InstallerOptions options;
+};
+
+// An NSIS script (Unicode; give makensis /INPUTCHARSET UTF8). Installs for
+// all users under Program Files, registers in Apps & features, and the
+// uninstaller deletes exactly the installed files, then the folders left
+// empty. zlib compression keeps the whole installer under the zlib/libpng
+// license (LZMA's decompressor would be CPL code).
+std::string nsisScript(const NsisInput& input);
+
+// A copy of a UTF-8 text file with a byte order mark, which NSIS needs to
+// read non-ASCII text on its license pages. False if it cannot be written.
+bool writeWithBom(const fs::path& source, const fs::path& target);
 
 } // namespace dist

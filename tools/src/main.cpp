@@ -4096,6 +4096,8 @@ static void printDistHelp() {
          << "Options:\n"
          << "      --release              Build as Release instead of RelWithDebInfo (no symbols)\n"
          << "      --archive, --zip       Also write a zip (Windows/macOS) or tar.gz (Linux)\n"
+         << "      --installer            Also build <package>-setup.exe with NSIS (Windows;\n"
+         << "                             install it with 'winget install NSIS.NSIS')\n"
          << "      --no-build             Package the existing build (refuses a Debug build)\n"
          << "      --dry-run              List what would go into the package, change nothing\n"
          << "      --init                 Write a dist.json template (never overwrites) and stop\n"
@@ -4116,8 +4118,9 @@ static void printDistHelp() {
          << "is signed ad hoc.\n"
          << "\n"
          << "Settings come from dist.json in the project folder (optional; see --init):\n"
-         << "name, version, author, eulaFile, include, exclude, licenses. Your license\n"
-         << "terms (eulaFile, or EULA.txt in the project folder) go into the package as EULA.txt.\n"
+         << "name, version, author, eulaFile, include, exclude, licenses, and installer\n"
+         << "(shortcut, startAtLogin, showEula, showNotices). Your license terms (eulaFile,\n"
+         << "or EULA.txt in the project folder) go into the package as EULA.txt.\n"
          << "trusscli collects the license files it finds; checking them is up to you.\n";
 }
 
@@ -4198,10 +4201,90 @@ static int distInit(const string& projectPath, const string& projectName,
     return 0;
 }
 
+// NSIS's compiler: on PATH, or where the NSIS installer puts it. Empty if none.
+static fs::path findMakensis() {
+#ifdef _WIN32
+    if (const char* path = std::getenv("PATH")) {
+        stringstream dirs(path);
+        string dir;
+        while (getline(dirs, dir, ';')) {
+            if (dir.empty()) continue;
+            const fs::path candidate = fs::path(dir) / "makensis.exe";
+            error_code ec;
+            if (fs::is_regular_file(candidate, ec)) return candidate;
+        }
+    }
+    for (const char* variable : {"ProgramFiles(x86)", "ProgramFiles"}) {
+        if (const char* root = std::getenv(variable)) {
+            const fs::path candidate = fs::path(root) / "NSIS" / "makensis.exe";
+            error_code ec;
+            if (fs::is_regular_file(candidate, ec)) return candidate;
+        }
+    }
+#endif
+    return {};
+}
+
+// Builds <folder>-setup.exe with NSIS next to the package. The script and the
+// page texts go to a <folder>-installer/ work folder, removed on success and
+// kept on failure. Returns the installer path, or empty with `error`.
+static fs::path buildWindowsInstaller(const fs::path& makensis, const dist::PlanInput& input,
+                                      const dist::Plan& plan, string& error) {
+    error_code ec;
+    const fs::path work = input.outputDir / (plan.folderName + "-installer");
+    const fs::path setup = input.outputDir / (plan.folderName + "-setup.exe");
+    fs::remove_all(work, ec);
+    fs::create_directories(work, ec);
+    fs::remove(setup, ec);
+
+    dist::NsisInput nsis;
+    nsis.name = input.config.name;
+    nsis.version = input.config.version;
+    nsis.author = input.config.author;
+    nsis.arch = plan.arch;
+    nsis.executable = plan.executableName;
+    nsis.packageDir = plan.packageDir;
+    nsis.files = dist::listPackageFiles(plan.packageDir);
+    nsis.setupExe = setup;
+    nsis.options = input.config.installer;
+    if (input.config.installer.showEula) {
+        nsis.eulaPage = work / "EULA.txt";
+        if (!dist::writeWithBom(plan.packageDir / "EULA.txt", nsis.eulaPage)) {
+            error = "cannot prepare the EULA page";
+            return {};
+        }
+    }
+    if (input.config.installer.showNotices) {
+        nsis.noticesPage = work / "THIRD_PARTY_NOTICES.txt";
+        if (!dist::writeWithBom(plan.packageDir / "THIRD_PARTY_NOTICES.txt", nsis.noticesPage)) {
+            error = "cannot prepare the notices page";
+            return {};
+        }
+    }
+    const fs::path script = work / "setup.nsi";
+    {
+        ofstream file(script, ios::binary);
+        file << "\xEF\xBB\xBF" << dist::nsisScript(nsis);
+        if (!file) {
+            error = "cannot write " + script.string();
+            return {};
+        }
+    }
+    cout << "Building the installer with NSIS ...\n";
+    if (runInherited({makensis.string(), "/V2", "/INPUTCHARSET", "UTF8", script.string()}) != 0 ||
+        !fs::is_regular_file(setup, ec)) {
+        error = "makensis failed; the script is kept in " + work.string();
+        return {};
+    }
+    fs::remove_all(work, ec);
+    return setup;
+}
+
 static int cmdDist(const vector<string>& args) {
     string explicitPath, outputDir, appName, appVersion, appAuthor;
     bool appAuthorGiven = false;  // --app-author "" is a valid (empty) author
     bool release = false, archive = false, noBuild = false, dryRun = false, init = false, verbose = false;
+    bool installer = false;
     int jobs = 0;
 
     auto needValue = [&](size_t& i, const string& opt, string& out) -> bool {
@@ -4225,9 +4308,13 @@ static int cmdDist(const vector<string>& args) {
         else if (a == "--init") init = true;
         else if (a == "--verbose") verbose = true;
         else if (a == "--installer") {
-            cerr << "Error: --installer is not available yet (installers come in a later version).\n"
-                 << "Use --archive for a zip / tar.gz.\n";
+#ifdef _WIN32
+            installer = true;
+#else
+            cerr << "Error: --installer is not available on this platform yet "
+                    "(macOS .dmg / .pkg come later). Use --archive.\n";
             return 1;
+#endif
         }
         else if (a == "--web" || a == "--android" || a == "--ios") {
             cerr << "Error: dist packages the native build only; " << a << " is not supported yet.\n";
@@ -4373,7 +4460,22 @@ static int cmdDist(const vector<string>& args) {
     }
     for (const string& w : plan.warnings) cerr << "Warning: " << w << "\n";
 
+    fs::path makensis;
+    if (installer) {
+        if (config.installer.showEula && plan.eulaSource.empty()) {
+            cerr << "Error: dist.json \"installer.showEula\" needs an EULA: create EULA.txt in the "
+                    "project folder with your license terms (or set \"eulaFile\").\n";
+            return 1;
+        }
+        makensis = findMakensis();
+    }
+
     if (dryRun) {
+        if (installer) {
+            cout << "Would also build " << plan.folderName << "-setup.exe"
+                 << (makensis.empty() ? " (NSIS not found: install it with 'winget install NSIS.NSIS')" : "")
+                 << "\n";
+        }
         cout << "Would write to " << input.outputDir.string() << ":\n" << dist::formatPlan(plan) << "\n"
              << dist::formatLicenseReport(input.licenses);
         return 0;
@@ -4408,6 +4510,17 @@ static int cmdDist(const vector<string>& args) {
         }
     }
 
+    fs::path setupPath;
+    string installerError;
+    if (installer) {
+        if (makensis.empty()) {
+            installerError = "NSIS (makensis.exe) was not found, so no installer was built. Install it "
+                             "with 'winget install NSIS.NSIS' (free, zlib/libpng license) and run again.";
+        } else {
+            setupPath = buildWindowsInstaller(makensis, input, plan, installerError);
+        }
+    }
+
     cout << dist::formatLicenseReport(input.licenses) << "\n"
          << "Packaged " << config.name << " " << config.version
          << (config.author.empty() ? string() : " by " + config.author) << ":\n"
@@ -4420,6 +4533,7 @@ static int cmdDist(const vector<string>& args) {
     }
     if (!plan.symbolsDir.empty()) cout << "  symbols (keep, do not ship): " << plan.symbolsDir.string() << "\n";
     if (!archiveName.empty()) cout << "  " << (input.outputDir / archiveName).string() << "\n";
+    if (!setupPath.empty()) cout << "  " << setupPath.string() << "\n";
     if (!plan.excluded.empty()) cout << "  " << plan.excluded.size() << " file(s) left out by exclude\n";
     if (!haveConfig) {
         cout << "No dist.json: used name \"" << config.name << "\", version " << config.version
@@ -4429,6 +4543,11 @@ static int cmdDist(const vector<string>& args) {
     cout << "Note: an app signed ad hoc is blocked by Gatekeeper when downloaded from the internet\n"
          << "(open it with right-click > Open). Copying it by USB or network share is fine.\n";
 #endif
+    if (!installerError.empty()) {
+        cerr << "Error: " << installerError << "\n"
+             << "The folder" << (archiveName.empty() ? "" : " and the archive") << " above were written.\n";
+        return 1;
+    }
     return 0;
 }
 
@@ -4509,7 +4628,7 @@ _trusscli() {
         update|build|run|clean|dist)
             local -a opts
             case "$words[2]" in
-                dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '--app-author:App author' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;
+                dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--installer:Also build a setup.exe (NSIS)' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '--app-author:App author' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
                 build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--dry-run:Print cmake commands only' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
                 run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
@@ -4601,7 +4720,7 @@ _trusscli() {
                 build)  COMPREPLY=($(compgen -W "--web --android --ios --debug --relwithdebinfo --release --clean --dry-run --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 run)    COMPREPLY=($(compgen -W "--web --android --ios --session --debug --relwithdebinfo --release --mcp --warnings -j --jobs -p --path" -- "$cur")) ;;
                 clean)  COMPREPLY=($(compgen -W "--all -p --path" -- "$cur")) ;;
-                dist)   COMPREPLY=($(compgen -W "--release --archive --zip --no-build --dry-run --init -o --output --app-name --app-version --app-author -j --jobs --verbose -p --path" -- "$cur")) ;;
+                dist)   COMPREPLY=($(compgen -W "--release --archive --zip --installer --no-build --dry-run --init -o --output --app-name --app-version --app-author -j --jobs --verbose -p --path" -- "$cur")) ;;
             esac
             ;;
         info)

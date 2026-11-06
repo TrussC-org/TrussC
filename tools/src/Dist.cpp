@@ -328,8 +328,23 @@ bool parseConfig(const std::string& text, Config& out, std::vector<std::string>&
                 out.licenses.push_back({entry["name"].get<std::string>(), entry["file"].get<std::string>()});
             }
         } else if (key == "installer") {
-            warnings.push_back("dist.json: \"installer\" is not supported yet (installers come in a "
-                               "later version); ignored");
+            if (!value.is_object()) { error = "dist.json: \"installer\" must be an object"; return false; }
+            for (auto option = value.begin(); option != value.end(); ++option) {
+                bool* target = nullptr;
+                if (option.key() == "shortcut") target = &out.installer.shortcut;
+                else if (option.key() == "startAtLogin") target = &out.installer.startAtLogin;
+                else if (option.key() == "showEula") target = &out.installer.showEula;
+                else if (option.key() == "showNotices") target = &out.installer.showNotices;
+                if (!target) {
+                    warnings.push_back("dist.json: unknown key \"installer." + option.key() + "\" ignored");
+                    continue;
+                }
+                if (!option.value().is_boolean()) {
+                    error = "dist.json: \"installer." + option.key() + "\" must be true or false";
+                    return false;
+                }
+                *target = option.value().get<bool>();
+            }
         } else {
             warnings.push_back("dist.json: unknown key \"" + key + "\" ignored");
         }
@@ -359,7 +374,13 @@ std::string configTemplate(const std::string& name, const std::string& version,
     text += "  \"eulaFile\": " + json(std::string(kDefaultEula)).dump() + ",\n";
     text += "  \"include\": [],\n";
     text += "  \"exclude\": [],\n";
-    text += "  \"licenses\": []\n";
+    text += "  \"licenses\": [],\n";
+    text += "  \"installer\": {\n";
+    text += "    \"shortcut\": true,\n";
+    text += "    \"startAtLogin\": false,\n";
+    text += "    \"showEula\": false,\n";
+    text += "    \"showNotices\": false\n";
+    text += "  }\n";
     text += "}\n";
     return text;
 }
@@ -653,6 +674,7 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
     }
     const BinaryInfo exeInfo = readBinaryInfo(executable);
     plan.arch = exeInfo.arch.empty() ? "unknown" : exeInfo.arch;
+    if (in.platform != Platform::MacOS) plan.executableName = toUtf8(executable.filename());
 
     const std::string name = fileSafeName(config.name);
     plan.folderName = name + "-" + config.version + "-" + platformName(in.platform) + "-" + plan.arch;
@@ -940,6 +962,169 @@ std::string formatPlan(const Plan& plan) {
         for (const auto& e : plan.excluded) out += "  " + e + "\n";
     }
     return out;
+}
+
+// -----------------------------------------------------------------------------
+// Windows installer (NSIS)
+// -----------------------------------------------------------------------------
+
+std::vector<std::string> listPackageFiles(const fs::path& packageDir) {
+    std::vector<std::string> files;
+    std::error_code ec;
+    for (auto it = fs::recursive_directory_iterator(packageDir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (ec) break;
+        if (it->is_regular_file(ec)) files.push_back(toUtf8(fs::relative(it->path(), packageDir, ec)));
+    }
+    std::sort(files.begin(), files.end());
+    return files;
+}
+
+namespace {
+
+// An NSIS string literal: "$" -> "$$", '"' -> '$\"'.
+std::string nsisQuote(const std::string& text) {
+    std::string out = "\"";
+    for (char c : text) {
+        if (c == '$') out += "$$";
+        else if (c == '"') out += "$\\\"";
+        else if (c == '\r' || c == '\n') out += ' ';
+        else out += c;
+    }
+    return out + "\"";
+}
+
+std::string windowsPath(const fs::path& path) {
+    std::string text = toUtf8(path);
+    std::replace(text.begin(), text.end(), '/', '\\');
+    return text;
+}
+
+// A folder / shortcut name: the display name without characters Windows rejects.
+std::string displaySafeName(const std::string& name) {
+    std::string out;
+    for (unsigned char c : name)
+        if (c >= 0x20 && !std::strchr("<>:\"/\\|?*", c)) out += static_cast<char>(c);
+    while (!out.empty() && (out.back() == ' ' || out.back() == '.')) out.pop_back();
+    while (!out.empty() && out.front() == ' ') out.erase(0, 1);
+    return out.empty() ? fileSafeName(name) : out;
+}
+
+} // namespace
+
+std::string nsisScript(const NsisInput& in) {
+    const std::string name = displaySafeName(in.name);
+    const std::string uninstallKey =
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + fileSafeName(in.name);
+    std::string version4 = in.version;  // VIProductVersion needs four numbers
+    for (size_t parts = std::count(version4.begin(), version4.end(), '.') + 1; parts < 4; ++parts)
+        version4 += ".0";
+    auto q = nsisQuote;
+    // A path under an NSIS variable ($INSTDIR, $SMPROGRAMS, ...): the variable
+    // stays a variable, the rest is escaped.
+    auto under = [&](const char* variable, const std::string& rest) {
+        return std::string("\"") + variable + "\\" + q(rest).substr(1);
+    };
+
+    std::string s;
+    s += "; Generated by trusscli dist. Build with: makensis /INPUTCHARSET UTF8 <this file>\n";
+    s += "Unicode true\n";
+    s += "ManifestDPIAware true\n";
+    s += "SetCompressor /SOLID zlib\n";  // zlib/libpng like the rest of NSIS
+    s += "RequestExecutionLevel admin\n";
+    s += "!include \"MUI2.nsh\"\n\n";
+    s += "Name " + q(in.name) + "\n";
+    s += "OutFile " + q(windowsPath(in.setupExe)) + "\n";
+    s += std::string("InstallDir \"") + (in.arch == "x86" ? "$PROGRAMFILES" : "$PROGRAMFILES64") +
+         "\\" + q(name).substr(1) + "\n";
+    s += "InstallDirRegKey HKLM " + q(uninstallKey) + " \"InstallLocation\"\n";
+    s += "VIProductVersion " + q(version4) + "\n";
+    s += "VIAddVersionKey \"ProductName\" " + q(in.name) + "\n";
+    s += "VIAddVersionKey \"ProductVersion\" " + q(in.version) + "\n";
+    s += "VIAddVersionKey \"FileVersion\" " + q(in.version) + "\n";
+    s += "VIAddVersionKey \"FileDescription\" " + q(in.name + " Setup") + "\n";
+    if (!in.author.empty()) {
+        s += "VIAddVersionKey \"CompanyName\" " + q(in.author) + "\n";
+        s += "VIAddVersionKey \"LegalCopyright\" " + q(copyrightLine(in.author)) + "\n";
+    }
+    s += "\n!define MUI_ABORTWARNING\n";
+    if (!in.eulaPage.empty())
+        s += "!insertmacro MUI_PAGE_LICENSE " + q(windowsPath(in.eulaPage)) + "\n";
+    if (!in.noticesPage.empty()) {
+        // A license page with a plain Next button: shown, not agreed to.
+        s += "!define MUI_PAGE_HEADER_TEXT \"Third-party notices\"\n";
+        s += "!define MUI_PAGE_HEADER_SUBTEXT \"Software included in this application\"\n";
+        s += "!define MUI_LICENSEPAGE_TEXT_TOP \"These components are part of the application.\"\n";
+        s += "!define MUI_LICENSEPAGE_TEXT_BOTTOM \"Click Next to continue.\"\n";
+        s += "!define MUI_LICENSEPAGE_BUTTON \"$(^NextBtn)\"\n";
+        s += "!insertmacro MUI_PAGE_LICENSE " + q(windowsPath(in.noticesPage)) + "\n";
+    }
+    s += "!insertmacro MUI_PAGE_DIRECTORY\n";
+    s += "!insertmacro MUI_PAGE_INSTFILES\n";
+    s += "!define MUI_FINISHPAGE_RUN " + under("$INSTDIR", in.executable) + "\n";
+    s += "!insertmacro MUI_PAGE_FINISH\n";
+    s += "!insertmacro MUI_UNPAGE_CONFIRM\n";
+    s += "!insertmacro MUI_UNPAGE_INSTFILES\n";
+    s += "!insertmacro MUI_LANGUAGE \"English\"\n\n";
+    const std::string shortcutName = name + ".lnk";
+
+    s += "Section \"Install\"\n";
+    s += "  SetShellVarContext all\n";
+    s += "  SetOutPath \"$INSTDIR\"\n";
+    s += "  File /r " + q(windowsPath(in.packageDir) + "\\*.*") + "\n";
+    s += "  WriteUninstaller \"$INSTDIR\\Uninstall.exe\"\n";
+    s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"DisplayName\" " + q(in.name) + "\n";
+    s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"DisplayVersion\" " + q(in.version) + "\n";
+    if (!in.author.empty())
+        s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"Publisher\" " + q(in.author) + "\n";
+    s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"InstallLocation\" \"$INSTDIR\"\n";
+    s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"DisplayIcon\" " + under("$INSTDIR", in.executable) + "\n";
+    s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"UninstallString\" \"$\\\"$INSTDIR\\Uninstall.exe$\\\"\"\n";
+    s += "  WriteRegDWORD HKLM " + q(uninstallKey) + " \"NoModify\" 1\n";
+    s += "  WriteRegDWORD HKLM " + q(uninstallKey) + " \"NoRepair\" 1\n";
+    if (in.options.shortcut) {
+        s += "  CreateDirectory " + under("$SMPROGRAMS", name) + "\n";
+        s += "  CreateShortcut " + under("$SMPROGRAMS", name + "\\" + shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
+        s += "  CreateShortcut " + under("$DESKTOP", shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
+    }
+    if (in.options.startAtLogin)
+        s += "  CreateShortcut " + under("$SMSTARTUP", shortcutName) + " " + under("$INSTDIR", in.executable) + "\n";
+    s += "SectionEnd\n\n";
+
+    // Uninstall exactly what was installed; folders only once empty.
+    std::set<std::string> folders;
+    s += "Section \"Uninstall\"\n";
+    s += "  SetShellVarContext all\n";
+    for (const auto& file : in.files) {
+        std::string path = file;
+        std::replace(path.begin(), path.end(), '/', '\\');
+        s += "  Delete " + under("$INSTDIR", path) + "\n";
+        for (size_t slash = path.find('\\'); slash != std::string::npos; slash = path.find('\\', slash + 1))
+            folders.insert(path.substr(0, slash));
+    }
+    s += "  Delete \"$INSTDIR\\Uninstall.exe\"\n";
+    std::vector<std::string> deepestFirst(folders.begin(), folders.end());
+    std::sort(deepestFirst.begin(), deepestFirst.end(), [](const std::string& a, const std::string& b) {
+        return std::count(a.begin(), a.end(), '\\') > std::count(b.begin(), b.end(), '\\') ||
+               (std::count(a.begin(), a.end(), '\\') == std::count(b.begin(), b.end(), '\\') && a > b);
+    });
+    for (const auto& folder : deepestFirst) s += "  RMDir " + under("$INSTDIR", folder) + "\n";
+    s += "  RMDir \"$INSTDIR\"\n";
+    if (in.options.shortcut) {
+        s += "  Delete " + under("$SMPROGRAMS", name + "\\" + shortcutName) + "\n";
+        s += "  RMDir " + under("$SMPROGRAMS", name) + "\n";
+        s += "  Delete " + under("$DESKTOP", shortcutName) + "\n";
+    }
+    if (in.options.startAtLogin) s += "  Delete " + under("$SMSTARTUP", shortcutName) + "\n";
+    s += "  DeleteRegKey HKLM " + q(uninstallKey) + "\n";
+    s += "SectionEnd\n";
+    return s;
+}
+
+bool writeWithBom(const fs::path& source, const fs::path& target) {
+    std::string text;
+    if (!readFile(source, text)) return false;
+    const bool hasBom = startsWith(text, "\xEF\xBB\xBF") || startsWith(text, "\xFF\xFE");
+    return writeFile(target, hasBom ? text : "\xEF\xBB\xBF" + text);
 }
 
 } // namespace dist
