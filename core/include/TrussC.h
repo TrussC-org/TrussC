@@ -1569,8 +1569,8 @@ inline std::string getClipboardString() {
 // Change window size (specify in size corresponding to coordinate system)
 // pixelPerfect=true: specify in framebuffer size
 // pixelPerfect=false: specify in logical size
-// Desktop geometry requests are ignored with one Notice until isFullscreen()
-// returns false, including macOS fullscreen transitions.
+// Desktop geometry requests are ignored with one Notice while fullscreen
+// or during macOS fullscreen transitions.
 inline void setWindowSize(int width, int height) {
     if (internal::pixelPerfectMode()) internal::routeSetWindowPixelSizeToWindow(width, height);
     else internal::routeSetWindowSizeToWindow(width, height, internal::WindowGeometryCall::GlobalSize);
@@ -1578,7 +1578,7 @@ inline void setWindowSize(int width, int height) {
 
 // Fullscreen follows the App token or sole open Window. Native binding
 // operations address that Window throughout entering/exiting animations.
-// isFullscreen() remains true while fullscreen blocks geometry controls.
+// isFullscreen() reports native state; geometry also waits for transitions.
 
 // Enter / leave fullscreen.
 inline void setFullscreen(bool full) {

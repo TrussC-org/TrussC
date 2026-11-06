@@ -112,8 +112,8 @@ public:
     // matching getWidth()/getHeight() units. Desktop controls address this
     // Window's native binding (macOS NSWindow, Windows HWND or X11).
     // No-op if the native window is gone.
-    // Ignored with one Notice until isFullscreen() returns false (including
-    // macOS entering/exiting). No geometry is queued; exit restores entry geometry.
+    // Ignored with one Notice while fullscreen or during macOS transitions.
+    // No geometry is queued; exit restores entry geometry.
     void setSize(int width, int height);
 
     // Move this window on the desktop. Coordinates are SCREEN coordinates with
@@ -132,7 +132,7 @@ public:
     // window's screen, Linux the WM's choice), so move the window onto the
     // target display FIRST, then go fullscreen. This is the same order
     // openFrameworks uses in its GLFW backend.
-    // Ignored with one Notice until isFullscreen() returns false.
+    // Ignored with one Notice while fullscreen or during macOS transitions.
     TC_PLATFORMS("macos,windows,linux") void setPosition(int x, int y);
 
     // Current position in the same screen-coordinate space as setPosition().
@@ -144,6 +144,7 @@ public:
     // Framebuffer changes follow the common size-publication path. No-op if
     // the native window is gone.
     void setFullscreen(bool full);
+    // Real native state: macOS confirms entry/exit; X11 follows WM state.
     bool isFullscreen() const;
     // Flip the most recently requested state, including during macOS animation.
     void toggleFullscreen() { control(internal::WindowControl::ToggleFullscreen); }
@@ -835,7 +836,8 @@ inline internal::WindowFullscreenPhase Window::fullscreenPhase() const {
     return internal::WindowFullscreenPhase::Windowed;
 }
 inline bool Window::isFullscreen() const {
-    return fullscreenPhase() != internal::WindowFullscreenPhase::Windowed;
+    const auto phase = fullscreenPhase();
+    return phase == internal::WindowFullscreenPhase::Fullscreen || phase == internal::WindowFullscreenPhase::Exiting;
 }
 namespace internal {
 inline bool usesNativeWindowDimensions(const WindowContext& ctx) noexcept {

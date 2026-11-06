@@ -101,45 +101,7 @@ void internal::setSingleWindowPosition(int x, int y) { setWindowPositionNative(s
 void setWindowDecorated(bool decorated) {
     auto* target = internal::resolveWindow(true);
     if (!target) return;
-    NSWindow* window = (__bridge NSWindow*)sapp_window_macos_get_window(internal::WindowRequestAccess::binding(*target).handle);
-    if (!window) return;
-
-    const NSWindowStyleMask base = NSWindowStyleMaskTitled |
-                                   NSWindowStyleMaskClosable |
-                                   NSWindowStyleMaskMiniaturizable |
-                                   NSWindowStyleMaskResizable;
-
-    if (decorated) {
-        window.styleMask = base;
-        window.titlebarAppearsTransparent = NO;
-        window.titleVisibility = NSWindowTitleVisible;
-        window.movableByWindowBackground = NO;
-        window.hasShadow = YES;
-        [[window standardWindowButton:NSWindowCloseButton]       setHidden:NO];
-        [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
-        [[window standardWindowButton:NSWindowZoomButton]        setHidden:NO];
-    } else {
-        // Keep the titled style for key input and native close handling while
-        // hiding the chrome with a transparent full-size content title bar.
-        window.styleMask = base | NSWindowStyleMaskFullSizeContentView;
-        window.titlebarAppearsTransparent = YES;
-        window.titleVisibility = NSWindowTitleHidden;
-        window.movableByWindowBackground = YES;
-        [[window standardWindowButton:NSWindowCloseButton]       setHidden:YES];
-        [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
-        [[window standardWindowButton:NSWindowZoomButton]        setHidden:YES];
-
-        // macOS (Tahoe+) auto-rounds window corners; the Metal layer is square,
-        // so paint the backdrop black and drop the shadow to avoid a glowing
-        // corner/edge highlight.
-        window.backgroundColor = [NSColor blackColor];
-        window.opaque = YES;
-        window.hasShadow = NO;
-    }
-
-    // Re-assert key + first responder so mouse and keyboard keep flowing.
-    if (target->isVisible()) [window makeKeyAndOrderFront:nil];
-    [window makeFirstResponder:window.contentView];
+    sapp_tc_window_set_decorated(internal::WindowRequestAccess::binding(*target).handle, decorated);
 }
 
 void internal::setSingleWindowSizeFractionalMac(double width, double height) {

@@ -2546,6 +2546,7 @@ SOKOL_APP_API_DECL void sapp_tc_window_skip_present(sapp_window win);
 #if (defined(__APPLE__) && TARGET_OS_OSX) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
 SOKOL_APP_API_DECL uint32_t sapp_tc_window_fullscreen_phase(sapp_window win);
 SOKOL_APP_API_DECL void sapp_tc_window_set_fullscreen(sapp_window win, bool full);
+SOKOL_APP_API_DECL void sapp_tc_window_set_decorated(sapp_window win, bool decorated);
 SOKOL_APP_API_DECL void sapp_tc_window_toggle_fullscreen(sapp_window win);
 #endif
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
@@ -2680,6 +2681,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool explicit_hide_suspended;        /* only explicit hiding recovers after OS trust opt-out */
     int callback_depth;                 /* client callbacks of this window on the stack */
     bool closed_pending;                /* closed natively while busy; close handling deferred */
+    bool decoration_pending;            /* apply explicit decoration request after fullscreen exit */
     bool native_closed;                 /* the NSWindow closed; its close was handled (or is pending) */
 };
 
@@ -2776,12 +2778,10 @@ static void _sapp_tc_request_fullscreen(_sapp_tc_window_t* w, bool full) {
     // Creation uses the runtime request entry, but lets a normal tick start
     // AppKit's animation after the constructor has shown and keyed the window.
     if (!w->fullscreen_state.request(full, _sapp_tc.constructing > 0 || w->desc.hidden)) return;
-    w->fullscreen = full;
     [w->window toggleFullScreen:nil];
 }
 static void _sapp_tc_reconcile_fullscreen(_sapp_tc_window_t* w) {
     if (!w || !w->window || w->desc.hidden || _sapp_tc.constructing > 0 || !w->fullscreen_state.reconcile()) return;
-    w->fullscreen = w->fullscreen_state.desired;
     [w->window toggleFullScreen:nil];
 }
 
@@ -3535,9 +3535,50 @@ static void _sapp_tc_mac_closed(_sapp_tc_window_t* w) {
     _sapp_tc_mac_closed_now(w);
 }
 
+static void _sapp_tc_mac_apply_decoration(_sapp_tc_window_t* w) {
+    NSWindow* window = w->window;
+    const bool decorated = !w->desc.borderless;
+    const NSWindowStyleMask base = NSWindowStyleMaskTitled |
+                                   NSWindowStyleMaskClosable |
+                                   NSWindowStyleMaskMiniaturizable |
+                                   NSWindowStyleMaskResizable;
+
+    if (decorated) {
+        window.styleMask = base;
+        window.titlebarAppearsTransparent = NO;
+        window.titleVisibility = NSWindowTitleVisible;
+        window.movableByWindowBackground = NO;
+        window.hasShadow = YES;
+        [[window standardWindowButton:NSWindowCloseButton]       setHidden:NO];
+        [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
+        [[window standardWindowButton:NSWindowZoomButton]        setHidden:NO];
+    } else {
+        // Keep the titled style for key input and native close handling while
+        // hiding the chrome with a transparent full-size content title bar.
+        window.styleMask = base | NSWindowStyleMaskFullSizeContentView;
+        window.titlebarAppearsTransparent = YES;
+        window.titleVisibility = NSWindowTitleHidden;
+        window.movableByWindowBackground = YES;
+        [[window standardWindowButton:NSWindowCloseButton]       setHidden:YES];
+        [[window standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
+        [[window standardWindowButton:NSWindowZoomButton]        setHidden:YES];
+
+        // macOS (Tahoe+) auto-rounds window corners; the Metal layer is square,
+        // so paint the backdrop black and drop the shadow to avoid a glowing
+        // corner/edge highlight.
+        window.backgroundColor = [NSColor blackColor];
+        window.opaque = YES;
+        window.hasShadow = NO;
+    }
+}
+
 static void _sapp_tc_mac_fullscreen_terminal(_sapp_tc_window_t* w, bool observed) {
     w->fullscreen_state.terminal(observed);
     w->fullscreen = observed;
+    if (!observed && w->decoration_pending) {
+        w->decoration_pending = false;
+        _sapp_tc_mac_apply_decoration(w);
+    }
 }
 
 /* An explicit range must follow the current display, including recovery from
@@ -4068,6 +4109,7 @@ static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(const _sapp_tc_native_de
     w->window = [[_sapp_tc_window alloc] initWithContentRect:rect styleMask:style
                                   backing:NSBackingStoreBuffered defer:NO];
     if (w->window == nil) return _sapp_tc_mac_fail(w, "NSWindow initWithContentRect returned nil (no NSError available)");
+    w->window.collectionBehavior |= NSWindowCollectionBehaviorFullScreenPrimary;
     w->window.releasedWhenClosed = NO;  /* the object must outlive performClose */
     if (w->desc._tc_pixel_width > 0 || w->desc._tc_pixel_height > 0) {
         const float scale = w->desc.no_high_dpi ? 1.0f : (float)w->window.backingScaleFactor;
@@ -5419,7 +5461,7 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
     _sapp_tc_strcpy(_sapp_tc.desc.window_title, _sapp_tc.window_title, sizeof(_sapp_tc.window_title));
     _sapp_tc.desc.window_title = _sapp_tc.window_title;
     _sapp_tc.dpi_scale = 1.0f;
-    _sapp_tc.fullscreen = _sapp_tc.desc.fullscreen;
+    _sapp_tc.fullscreen = true;  /* the native mobile view always fills the screen */
     _sapp_tc.mouse.shown = true;
     _sapp_tc_timing_init(&_sapp_tc.timing);
 }
@@ -9153,6 +9195,7 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     _sapp_tc_x11_visibility_op visibility_op;
     double visibility_started;
     bool native_visible;        /* last completed visibility operation; WM minimization is separate */
+    bool fullscreen_requested;  /* latest explicit request or mapped WM observation */
     bool fullscreen_on_map;     /* replay requested fullscreen once after explicit show (#1262) */
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
@@ -10874,13 +10917,32 @@ static bool _sapp_tc_x11_update_dimensions(_sapp_tc_window_t* w) {
 /*-- fullscreen (EWMH _NET_WM_STATE; must be called after XMapWindow) ---------*/
 static void _sapp_tc_x11_set_fullscreen(_sapp_tc_window_t* w, bool enable) {
     if (!w) return;
-    if (_sapp_tc.NET_WM_STATE && _sapp_tc.NET_WM_STATE_FULLSCREEN) {
+    if (!w->desc.hidden && _sapp_tc.NET_WM_STATE && _sapp_tc.NET_WM_STATE_FULLSCREEN) {
         const long op = enable ? 1 : 0;     /* _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE */
         _sapp_tc_x11_send_event(w->xwin, _sapp_tc.NET_WM_STATE,
                                 op, (long)_sapp_tc.NET_WM_STATE_FULLSCREEN, 0, 1, 0);
     }
-    w->fullscreen = enable;
+    w->fullscreen_requested = enable;
     XFlush(_sapp_tc.display);
+}
+
+// The WM owns the real state. Withdrawal may delete this property, so keep
+// the replay intent until the explicit show has finished mapping.
+static void _sapp_tc_x11_observe_fullscreen(_sapp_tc_window_t* w) {
+    Atom* states = NULL;
+    // Bound: EWMH has a small set of state atoms; reject an oversized property.
+    const unsigned long count = _sapp_tc_x11_get_window_property(w->xwin,
+        _sapp_tc.NET_WM_STATE, XA_ATOM, (unsigned char**)&states, 64);
+    bool full = false;
+    for (unsigned long i = 0; i < count; ++i) {
+        if (states[i] == _sapp_tc.NET_WM_STATE_FULLSCREEN) full = true;
+    }
+    if (states) XFree(states);
+    const bool changed = w->fullscreen != full;
+    w->fullscreen = full;
+    // Other WM state atoms can change while a fullscreen request is pending.
+    if (changed && !w->desc.hidden && w->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE && !w->fullscreen_on_map)
+        w->fullscreen_requested = full;
 }
 
 /*-- synchronous event wait (poll on the connection fd with a deadline) ------*/
@@ -12126,7 +12188,7 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
                 if (!w->desc.hidden) {
                     if (w->fullscreen_on_map) {
                         w->fullscreen_on_map = false;
-                        _sapp_tc_x11_set_fullscreen(w, w->fullscreen);
+                        _sapp_tc_x11_set_fullscreen(w, w->fullscreen_requested);
                     }
                     _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);
                 }
@@ -12144,6 +12206,9 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
             break;
         }
         case PropertyNotify:
+            if (w && ev->xproperty.atom == _sapp_tc.NET_WM_STATE) {
+                _sapp_tc_x11_observe_fullscreen(w);
+            }
             _sapp_tc_x11_send_clipboard_chunk(ev->xproperty);
             /* iconify/restore detection (explicit hiding uses desc.hidden) */
             if (w && w->trust_hidden_signals && (ev->xproperty.state == PropertyNewValue) &&
@@ -12579,7 +12644,7 @@ static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc*
     if (w->desc.bind_cb && !w->desc.bind_cb(w->win_id, w->desc.user_data)) return nullptr;
     w->ready = true;
     const sapp_window identity{w->win_id};
-    if (w->desc.hidden) w->fullscreen = d->fullscreen;
+    w->fullscreen_requested = d->fullscreen;
     if (!w->desc.hidden) _sapp_tc_x11_show_window(w);
     if (_sapp_tc_lookup(identity) != w) { creation.removed(); return nullptr; }
     if (d->fullscreen && !w->desc.hidden) {
@@ -12723,7 +12788,7 @@ void sapp_tc_window_set_fullscreen(sapp_window win, bool full) {
 
 void sapp_tc_window_toggle_fullscreen(sapp_window win) {
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
-    if (w) _sapp_tc_x11_set_fullscreen(w, !w->fullscreen);
+    if (w) _sapp_tc_x11_set_fullscreen(w, !w->fullscreen_requested);
 }
 
 void sapp_tc_window_draw_while_hidden(sapp_window win, bool allow) {
@@ -13103,7 +13168,7 @@ bool sapp_is_fullscreen(void) {
 
 void sapp_toggle_fullscreen(void) {
     if (!_sapp_tc.app.main) return;
-    _sapp_tc_x11_set_fullscreen(_sapp_tc.app.main, !_sapp_tc.app.main->fullscreen);
+    _sapp_tc_x11_set_fullscreen(_sapp_tc.app.main, !_sapp_tc.app.main->fullscreen_requested);
     _sapp_tc_x11_update_dimensions(_sapp_tc.app.main);
 }
 
@@ -13774,7 +13839,7 @@ _SOKOL_PRIVATE void _sapp_tc_init_state(const sapp_desc* desc) {
     _sapp_tc_strcpy(_sapp_tc.desc.window_title, _sapp_tc.window_title, sizeof(_sapp_tc.window_title));
     _sapp_tc.desc.window_title = _sapp_tc.window_title;
     _sapp_tc.dpi_scale = 1.0f;
-    _sapp_tc.fullscreen = _sapp_tc.desc.fullscreen;
+    _sapp_tc.fullscreen = true;  /* the native mobile view always fills the screen */
     _sapp_tc.mouse.shown = true;
     _sapp_tc_timing_init(&_sapp_tc.timing);
 }
@@ -16897,9 +16962,7 @@ EM_JS(void, _sapp_tc_js_toggle_fullscreen, (void), {
 })
 
 _SOKOL_PRIVATE void _sapp_tc_emsc_toggle_fullscreen(void) {
-    // toggle the fullscreen flag preliminary, this may be undone
-    // when requesting/exiting fullscreen mode actually fails
-    _sapp_tc.fullscreen = !_sapp_tc.fullscreen;
+    // fullscreenchange reports the real state after the browser confirms it.
     _sapp_tc_js_toggle_fullscreen();
 }
 
@@ -18365,6 +18428,40 @@ extern "C" bool sapp_tc_gl_ensure_context(void) { return true; }
 extern "C" sapp_tc_gl_state sapp_tc_gl_save(void) { return {}; }
 extern "C" void sapp_tc_gl_restore(sapp_tc_gl_state) {}
 #endif
+
+// Decoration requests made in fullscreen change only the windowed restore state.
+extern "C" void sapp_tc_window_set_decorated(sapp_window win, bool decorated) {
+#if defined(_WIN32)
+    auto* w = _sapp_tc_lookup(win);
+    if (!w) return;
+    const LONG_PTR chrome = WS_CAPTION | WS_THICKFRAME |
+                            WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU;
+    LONG_PTR style = w->fullscreen ? w->stored_style : GetWindowLongPtrW(w->hwnd, GWL_STYLE);
+    if (decorated) style |= chrome;
+    else style &= ~chrome;
+    w->desc.borderless = !decorated;
+    if (w->fullscreen) {
+        w->stored_style = style;
+        return;
+    }
+    SetWindowLongPtrW(w->hwnd, GWL_STYLE, style);
+    SetWindowPos(w->hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+#elif defined(__APPLE__) && TARGET_OS_OSX
+    auto* w = _sapp_tc_lookup(win);
+    if (!w) return;
+    w->desc.borderless = !decorated;
+    if (w->fullscreen_state.blocksGeometry()) {
+        w->decoration_pending = true;
+        return;
+    }
+    _sapp_tc_mac_apply_decoration(w);
+    if (!w->desc.hidden) [w->window makeKeyAndOrderFront:nil];
+    [w->window makeFirstResponder:w->window.contentView];
+#else
+    (void)win; (void)decorated;
+#endif
+}
 
 // [TrussC] Hide/show preserves each native window and its tick sources (#1262).
 extern "C" void sapp_tc_window_set_visible(sapp_window win, bool visible) {

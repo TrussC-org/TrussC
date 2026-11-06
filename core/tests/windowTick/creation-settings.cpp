@@ -29,7 +29,9 @@ constexpr int WS_POPUP=1,WS_SYSMENU=2,WS_VISIBLE=4,WS_CLIPSIBLINGS=8,WS_CLIPCHIL
     WS_EX_APPWINDOW=1,WS_EX_WINDOWEDGE=2,GWL_STYLE=1,GWL_EXSTYLE=2,
     MONITOR_DEFAULTTONEAREST=1,HWND_TOP=1,TRUE=1;
 constexpr int DXGI_FORMAT_R10G10B10A2_UNORM=1,DXGI_FORMAT_B8G8R8A8_UNORM=2;
+constexpr int NSWindowCollectionBehaviorFullScreenPrimary=1;
 struct NativeWindow {
+    unsigned collectionBehavior=0;
     Rect rect; LONG style=0,ex_style=0;
     bool releasedWhenClosed=false,acceptsMouseMovedEvents=false,restorable=false;
     float backingScaleFactor=1; const char* title=nullptr;
@@ -56,6 +58,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Rect stored_window_rect; LONG stored_style=0,stored_ex_style=0;
     float window_scale=1,mouse_scale=1;
     View* view=nullptr; Layer* layer=nullptr; Link* link=nullptr; Delegate* delegate=nullptr;
+    bool fullscreen_requested=false, fullscreen_sent=false, decoration_pending=false;
     bool initialized=false,bound=false,source=false,shown=false,key=false,nativeFullscreen=false,link_suspended=false;
     int applied_interval=-1;
     SwapChain chain; SwapChain* swap_chain=&chain;
@@ -191,6 +194,7 @@ void _sapp_tc_x11_show_window(_sapp_tc_window_t* w) { shown(w); }
 void _sapp_tc_x11_send_event(unsigned xwin,int,long,long,long,long,long) {
     auto* w=_sapp_tc_lookup({xwin});
     check("X11 fullscreen after map and bind",w->shown&&w->bound&&w->initialized);
+    w->fullscreen_sent=true;
     calls.push_back("fullscreen");
 }
 void XFlush(int) {}
@@ -263,12 +267,15 @@ int main() {
         auto* w=_sapp_tc_lookup(firstState->win);
         check("descriptor fullscreen forwarded",w->desc.fullscreen==full);
         check("descriptor interval forwarded",w->desc.swap_interval==interval);
-#if !defined(TEST_MAC)
+#if defined(TEST_WIN)
         check("native fullscreen applied",w->fullscreen==full);
+#elif !defined(TEST_MAC)
+        check("fullscreen request awaits WM",w->fullscreen_requested==full && w->fullscreen_sent==full && !w->fullscreen);
 #endif
         check("restore geometry retains request",w->desc.width==640&&w->desc.height==480);
 #if defined(TEST_MAC)
         int effective=interval>0?interval:1;
+        check("mac fullscreen primary collection behavior", w->window->collectionBehavior & NSWindowCollectionBehaviorFullScreenPrimary);
         check("mac per-window interval",w->swap_interval==effective);
         check("mac display link rate applied",w->link->preferredFrameRateRange.preferred==120.0f/effective);
         check("mac deferred desired matches creation", w->fullscreen_state.desired==full);
@@ -281,7 +288,7 @@ int main() {
         check("mac nested constructor tick keeps request deferred", !w->nativeFullscreen &&
               w->fullscreen_state.reconcilePending==full);
         _sapp_tc_reconcile_fullscreen(w);
-        check("mac deferred native fullscreen applied", w->nativeFullscreen==full && w->fullscreen==full);
+        check("mac deferred native fullscreen applied", w->nativeFullscreen==full && !w->fullscreen);
         if(full) {
             _sapp_tc_mac_fullscreen_terminal(w,true);
             check("mac terminal state and desired agree",w->fullscreen_state.phase==_sapp_tc_fullscreen_phase::Fullscreen &&
@@ -290,7 +297,7 @@ int main() {
             _sapp_tc_reconcile_fullscreen(w);
             check("mac successful entry does not retry or flicker", calls.size()==count && w->fullscreen);
             sapp_tc_window_set_fullscreen(firstState->win,false);
-            check("mac later runtime exit starts native transition", !w->nativeFullscreen && !w->fullscreen &&
+            check("mac later runtime exit starts native transition", !w->nativeFullscreen && w->fullscreen &&
                   !w->fullscreen_state.desired && w->fullscreen_state.phase==_sapp_tc_fullscreen_phase::Exiting);
             _sapp_tc_mac_fullscreen_terminal(w,false);
             _sapp_tc_reconcile_fullscreen(w);
@@ -323,7 +330,11 @@ int main() {
 #if defined(TEST_MAC)
         if(p) { _sapp_tc_reconcile_fullscreen(p); _sapp_tc_mac_fullscreen_terminal(p,!full); }
 #endif
+#if defined(TEST_MAC) || defined(TEST_WIN)
         check("peer fullscreen independent",p&&p!=w&&p->fullscreen!=w->fullscreen);
+#else
+        check("peer fullscreen independent",p&&p!=w&&p->fullscreen_requested!=w->fullscreen_requested);
+#endif
 #if defined(TEST_MAC) || defined(TEST_WIN)
         check("peer interval independent",p&&p->swap_interval==4&&w->swap_interval==(interval>0?interval:1));
 #endif
