@@ -13,6 +13,7 @@ Runtime& runtime();
 void setHotReloadSource(const char* type, const char* file);
 void retainRuntimeWindow(const std::shared_ptr<Window>&);
 void releaseRuntimeWindow(Window&) noexcept;
+void cancelWindowAsyncDialogs(Window&);
 void recordAppAttachment(const std::shared_ptr<App>&, Window&);
 void recordHeadlessAttachment(const std::shared_ptr<App>&, WindowContext&);
 #ifdef _WIN32

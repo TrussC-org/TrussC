@@ -142,7 +142,7 @@ void credits() {
     first.slot.cancel();
     check("cancel releases retained backing storage before snapshot drain", a->data.capacity() == 0 && internal::resourceLoadUsageForTests().retainedBytes == 32);
     internal::deliverResourceLoadBatch(std::move(snapshot));
-    check("cancelled owner receives no stale event; other owner settles", first.events == 0 && second.events == 1 && internal::resourceLoadUsageForTests().retainedBytes == 0);
+    check("canceled owner receives no stale event; other owner settles", first.events == 0 && second.events == 1 && internal::resourceLoadUsageForTests().retainedBytes == 0);
     drain(); check("no duplicate failure after another drain", overflow.events == 1);
 
     Load partial, tooBig;
@@ -205,7 +205,7 @@ void workersAndFailures() {
     gate.open(); settle();
     size_t delivered = 0;
     for (auto& load : loads) delivered += load->events;
-    check("all accepted requests settle except explicitly cancelled owner", delivered == 67 && internal::resourceLoadUsageForTests().active == 0 && internal::resourceLoadUsageForTests().pending == 0);
+    check("all accepted requests settle except explicitly canceled owner", delivered == 67 && internal::resourceLoadUsageForTests().active == 0 && internal::resourceLoadUsageForTests().pending == 0);
     check("resource saturation does not cap app-authored jobs", appJobs == 2);
 
     Load thrown;

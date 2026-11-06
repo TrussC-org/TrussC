@@ -185,7 +185,7 @@ TC_CORE_TEST_MAIN() {
         mcp::stopHttpServer();
         const std::string shutdown = "the MCP server shut down before the reply was produced";
         checkError("shutdown", reply(stopped), 686, shutdown);
-        check("cancelled producers never run", !produced);
+        check("canceled producers never run", !produced);
         check("all deferred responses completed", !mcp::internal::hasDeferredResponses());
 #endif
     } catch (const std::exception& e) {

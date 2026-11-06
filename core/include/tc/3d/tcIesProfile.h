@@ -111,8 +111,8 @@ private:
             desc.width = width;
             desc.height = 1;
             desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-            desc.data.mip_levels[0].ptr = pixels.data();
-            desc.data.mip_levels[0].size = pixels.size();
+            desc.data.ptr = pixels.data();
+            desc.data.size = pixels.size();
             desc.label = "tc_ies_profile";
             resources->image = sg_make_image(&desc);
             if (sg_query_image_state(resources->image) != SG_RESOURCESTATE_VALID) {

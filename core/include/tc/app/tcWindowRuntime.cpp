@@ -1,4 +1,5 @@
 #include <TrussC.h>
+#include "tc/utils/internal/tcAsyncDialog.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -377,6 +378,9 @@ void shutdownRuntime() noexcept {
     TeardownSteps steps;
 #if defined(__APPLE__) && TARGET_OS_OSX
     cancelMacDialogSheets();
+#endif
+#if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+    cancelAsyncDialogs(); // Windows/Linux quit drops pending callbacks before App teardown.
 #endif
     // One retained snapshot of attachment order, including headless. Backings
     // are separately retained so user handle cycles cannot postpone disposal.
@@ -1111,6 +1115,9 @@ void processQueues() {
     if (sg_isvalid()) sapp_tc_gl_ensure_context();
     auto loads = takeResourceLoadBatch();
     EntryStackGuard guard(AppEntry::Prelude);
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    pumpLinuxDialogs(); // Snapshot above: GTK replies wait for the next prelude.
+#endif
     deliverResourceLoadBatch(std::move(loads));
     drainMainThreadQueue();
     pumpAudioDiagnostics();

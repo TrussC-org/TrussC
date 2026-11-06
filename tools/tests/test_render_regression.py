@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Offline tests for #821 orchestration and the required CI gate."""
 import importlib.util
+import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
 import yaml
+from test_web_window_controls import body
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('render_regression', ROOT/'tools/render_regression.py')
@@ -89,6 +92,165 @@ class DriverTests(unittest.TestCase):
             self.assertEqual(keep.read_text(encoding="utf-8"),'existing')
 
 
+class CaptureTests(unittest.TestCase):
+    """Run the harness's loader and capture body with in-memory pixel I/O, no GPU."""
+    @classmethod
+    def setUpClass(cls):
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.temp.cleanup)
+        cls.folder = Path(cls.temp.name)
+        source = (ROOT/'core/tests/renderRegression/src/main.cpp').read_text(encoding='utf-8')
+        code = r'''#include <nlohmann/json.hpp>
+#include <array>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <set>
+#include <string>
+#include <vector>
+namespace fs = std::filesystem;
+using Json = nlohmann::json;
+using Rgba = std::array<int,4>;
+fs::path baseline, output;
+std::string mode = "--compare";
+std::set<std::string> baselineScenes;
+int failures = 0;
+''' + body(source, 'void check(') + body(source, 'std::set<std::string> loadBaselineScenes(') + r'''
+// Only the image I/O and app/GPU metadata are stand-ins. Comparison and JSON
+// loading below are the actual harness code, including assertions/save order.
+struct Status { bool value; bool ok() const { return value; } };
+struct Pixels {
+    int w = 1, h = 1;
+    std::vector<unsigned char> data = {0,0,0,255};
+    int getWidth() const { return w; }
+    int getHeight() const { return h; }
+    unsigned char* getData() { return data.data(); }
+    void allocate(int width, int height, int) { w=width; h=height; data.resize(w*h*4); }
+    Status save(const fs::path& path) { std::ofstream f(path); f << w << ' ' << h; return {f.good()}; }
+    Status load(const fs::path& path) { std::ifstream f(path); return {bool(f >> w >> h)}; }
+};
+Rgba pixel(const Pixels&, int, int) { return {0,0,0,255}; }
+struct GraphicsBackend { static std::string name() { return "test"; } };
+struct Target { int sampleCount = 1; int getSampleCount() const { return sampleCount; } };
+namespace internal {
+    bool pixelPerfectMode() { return false; }
+    struct Context { Target swapchainTarget; };
+    Context& currentWindowContext() { static Context c; return c; }
+}
+struct Scene { int tolerance = 0; } scenes[1];
+struct App {
+    std::string sceneName;
+    bool selfCheck = true;
+    Json samples_ = Json::object(), scissorEvidence_ = Json::object();
+    int logicalW_ = 1, logicalH_ = 1, scene_ = 0;
+    std::set<std::string> captured_;
+    std::string gpu_ = "test";
+    Target target_;
+    std::string name() const { return sceneName; }
+    bool is(const char* text) const { return name() == text; }
+    float probeScale(bool) const { return 1; }
+    Rgba at(const Pixels& p, int x, int y, float) { return pixel(p,x,y); }
+    void assertions(const Pixels&, bool) { check(name()+" self-check", selfCheck); }
+''' + body(source, 'void capture(') + r'''
+};
+int main(int argc, char** argv) {
+    baseline = argv[1]; output = argv[2];
+    try {
+        baselineScenes = loadBaselineScenes(baseline);
+        fs::create_directories(output);
+        App app; app.sceneName = argv[3]; app.selfCheck = argc == 4;
+        Pixels px; app.capture(px, "screen", false);
+    } catch (const std::exception& e) { check(e.what(), false); }
+    return failures ? 1 : 0;
+}
+'''
+        cpp = cls.folder/'capture.cpp'; cls.binary = cls.folder/'capture'
+        cpp.write_text(code, encoding='utf-8')
+        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
+                        '-I'+str(ROOT/'core/include'), str(cpp), '-o', str(cls.binary)], check=True)
+
+    def exercise(self, manifest, scene='newScene', images=None, self_check=True):
+        with tempfile.TemporaryDirectory(dir=self.folder) as temp:
+            baseline = Path(temp)/'base'; baseline.mkdir()
+            if manifest is not None:
+                (baseline/'samples.json').write_text(manifest, encoding='utf-8')
+            for key, contents in (images or {}).items():
+                (baseline/(key+'.png')).write_text(contents, encoding='utf-8')
+            output = Path(temp)/'head'
+            args = [str(self.binary), str(baseline), str(output), scene]
+            if not self_check:
+                args.append('fail-self-check')
+            proc = subprocess.run(args, capture_output=True, text=True, encoding='utf-8')
+            files = {p.name for p in output.iterdir()} if output.exists() else set()
+            return proc, files
+
+    def test_new_scene_self_checks_saves_and_passes(self):
+        # Difference overlays are not baseline captures; a shared prefix is
+        # also a different scene.
+        proc, files = self.exercise(json.dumps({'newSceneOther.screen': {}}), images={
+            'newSceneOther.screen': '1 1', 'newScene.screen.diff': 'overlay'})
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn('PASS newScene self-check', proc.stdout)
+        self.assertIn('NEW newScene.screen: no baseline in base recording (self-check only)', proc.stdout)
+        self.assertNotIn(' baseline\n', proc.stdout)
+        self.assertEqual(files, {'newScene.screen.png'})
+
+    def test_new_scene_still_fails_its_self_check(self):
+        proc, files = self.exercise(json.dumps({'oldScene.screen': {}}), self_check=False)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn('FAIL newScene self-check', proc.stdout)
+        self.assertIn('NEW newScene.screen:', proc.stdout)
+        self.assertIn('newScene.screen.png', files)
+
+    def test_empty_manifest_fails_before_capture(self):
+        proc, files = self.exercise('{}')
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn('Invalid baseline samples.json', proc.stdout)
+        self.assertNotIn('NEW ', proc.stdout)
+        self.assertEqual(files, set())
+
+    def test_manifest_omitting_scene_with_image_fails_before_capture(self):
+        manifest = json.dumps({'text.screen': {}})
+        for key in ('blendModes.screen', 'blendModes.fbo',
+                    'blendModes.256x192.logical.fbo', 'blendModes'):
+            for contents in ('corrupt', '1 1', '2 1'):
+                with self.subTest(key=key, contents=contents):
+                    proc, files = self.exercise(manifest, 'blendModes', {key: contents})
+                    self.assertEqual(proc.returncode, 1, proc.stdout)
+                    self.assertIn('Baseline manifest and images disagree', proc.stdout)
+                    self.assertIn(key+'.png', proc.stdout)
+                    self.assertIn('baseline samples.json', proc.stdout)
+                    self.assertNotIn('NEW ', proc.stdout)
+                    self.assertEqual(files, set())
+
+    def test_existing_scene_missing_unreadable_or_wrong_size_image_fails(self):
+        # A different target/variant in the manifest establishes scene presence.
+        manifest = json.dumps({'oldScene.256x192.logical.fbo': {}})
+        for contents in (None, 'corrupt', '2 1'):
+            with self.subTest(contents=contents):
+                images = {} if contents is None else {'oldScene.screen': contents}
+                proc, files = self.exercise(manifest, 'oldScene', images)
+                self.assertEqual(proc.returncode, 1, proc.stdout)
+                self.assertIn('FAIL oldScene.screen baseline', proc.stdout)
+                self.assertNotIn('NEW ', proc.stdout)
+                self.assertEqual(files, {'oldScene.screen.png', 'oldScene.screen.diff.png'})
+
+    def test_existing_scene_matching_image_passes(self):
+        proc, _ = self.exercise(json.dumps({'oldScene.fbo': {}}), 'oldScene', {'oldScene.screen': '1 1'})
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        self.assertIn('PASS oldScene.screen baseline', proc.stdout)
+        self.assertNotIn('NEW ', proc.stdout)
+
+    def test_missing_or_corrupt_manifest_fails_before_capture(self):
+        for manifest in (None, '{broken', '[]', 'null', '{"badKey": {}}', '{"oldScene.screen": null}'):
+            with self.subTest(manifest=manifest):
+                proc, files = self.exercise(manifest)
+                self.assertEqual(proc.returncode, 1, proc.stdout)
+                self.assertIn('baseline samples.json', proc.stdout)
+                self.assertNotIn('NEW ', proc.stdout)
+                self.assertEqual(files, set())
+
+
 class WorkflowTests(unittest.TestCase):
     def test_main_only_gate_includes_pr_and_merge_queue(self):
         workflow = yaml.load((ROOT/'.github/workflows/build.yml').read_text(encoding="utf-8"),Loader=yaml.BaseLoader)
@@ -140,7 +302,8 @@ class WorkflowTests(unittest.TestCase):
         source = (ROOT/'core/tests/renderRegression/src/main.cpp').read_text(encoding="utf-8")
         for name in ('blendModes','text','premultImage','fboClearLoad','msaaResolve','transformPbr',
                      'easyCamFbo','scissorFbo','fullscreenShader','pbrShadowFbo','pointMeshTransform',
-                     'resizePixelPerfect','userShaderOtherFormat','readbackRoundTrip','midFrameFlush','midPassClear'):
+                     'resizePixelPerfect','userShaderOtherFormat','readbackRoundTrip','midFrameFlush','midPassClear',
+                     'sglFboInterrupt','textureImmediate','msaaInterrupted','depthStencil','imguiWindowFbo'):
             self.assertRegex(source,r'\{"'+name+r'", [02]\}')
 
 

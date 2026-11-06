@@ -2,6 +2,7 @@
 // Keep these backend symbols local when linking the normal addon library.
 #define SOKOL_API_DECL static
 #define SOKOL_API_IMPL static
+#define SOKOL_TRACE_HOOKS
 #define SOKOL_IMPL
 #undef SOKOL_GLCORE
 #define SOKOL_DUMMY_BACKEND
@@ -17,6 +18,9 @@
 namespace {
 int failures = 0, checks = 0, callbacks = 0, errors = 0, panics = 0;
 std::vector<size_t> requests;
+void madeBuffer(const sg_buffer_desc* desc, sg_buffer, void*) {
+    if (desc->usage.vertex_buffer || desc->usage.index_buffer) requests.push_back(desc->size);
+}
 void check(const char* name, bool ok) {
     ++checks;
     std::printf("%s %s\n", ok ? "PASS" : "FAIL", name);
@@ -26,12 +30,6 @@ void marker(const ImDrawList*, const ImDrawCmd*) { ++callbacks; }
 simgui_desc_t description(int capacity = 65536) {
     simgui_desc_t desc = {};
     desc.max_vertices = capacity;
-    desc.allocator.alloc_fn = [](size_t bytes, void*) -> void* {
-        requests.push_back(bytes);
-        // Large blocks are only tested through setup/growth, never copied into.
-        return std::malloc(bytes > 8 * 1024 * 1024 ? 1 : bytes);
-    };
-    desc.allocator.free_fn = [](void* ptr, void*) { std::free(ptr); };
     desc.logger.func = [](const char*, uint32_t level, uint32_t item, const char* message,
                           uint32_t, const char*, void*) {
         if (level == 0) ++panics;
@@ -44,6 +42,7 @@ simgui_desc_t description(int capacity = 65536) {
 int main() {
     sg_desc gfx = {};
     sg_setup(&gfx);
+    sg_trace_hooks hooks = {}; hooks.make_buffer = madeBuffer; sg_install_trace_hooks(&hooks);
     const size_t limit = std::min(size_t(INT_MAX) / sizeof(ImDrawVert),
                                  size_t(INT_MAX) / (3 * sizeof(ImDrawIdx)));
     auto desc = description();
@@ -65,7 +64,7 @@ int main() {
         if (indexOnly) list->IdxBuffer.Size = int(3 * limit + 1);
         else list->VtxBuffer.Size = int(limit + 1);
         const auto oldVbuf = _simgui.vbuf, oldIbuf = _simgui.ibuf;
-        const auto oldVerticesPtr = _simgui.vertices.ptr, oldIndicesPtr = _simgui.indices.ptr;
+        const auto oldVertexSize = _simgui.vbuf_size, oldIndexSize = _simgui.ibuf_size;
         const int oldErrors = errors;
         requests.clear(); callbacks = 0;
         sg_pass pass = {};
@@ -73,16 +72,17 @@ int main() {
         pass.swapchain.color_format = SG_PIXELFORMAT_RGBA8;
         pass.swapchain.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
         pass.swapchain.sample_count = 1;
+        simgui_flush();
         sg_begin_pass(&pass);
-        simgui_render();
+        simgui_draw();
         sg_end_pass(); sg_commit();
         list->VtxBuffer.Size = oldVertices; list->IdxBuffer.Size = oldIndices;
         check(indexOnly ? "unrepresentable 1:3 capacity gives one Error before allocation" :
                           "unrepresentable vertex bytes give one Error before allocation",
               errors == oldErrors + 1 && requests.empty());
-        check("failed growth preserves CPU/GPU buffers and renders the small list",
+        check("failed growth preserves GPU buffers and renders the small list",
               _simgui.vbuf.id == oldVbuf.id && _simgui.ibuf.id == oldIbuf.id &&
-              _simgui.vertices.ptr == oldVerticesPtr && _simgui.indices.ptr == oldIndicesPtr && callbacks == 1);
+              _simgui.vbuf_size == oldVertexSize && _simgui.ibuf_size == oldIndexSize && callbacks == 1);
     }
     requests.clear();
     check("representable 70M-vertex request succeeds despite overflowing doubled size",
@@ -105,6 +105,6 @@ int main() {
     check("unrepresentable initial size is rejected before CPU/GPU allocation",
           requests.empty() && panics == 1 && !_simgui.imgui_ctx && !_simgui.vbuf.id && !_simgui.ibuf.id);
     sg_shutdown();
-    std::printf("buffer-size regression: %d checks, %d failures; large staging requests allocate only 1 byte\n", checks, failures);
+    std::printf("buffer-size regression: %d checks, %d failures; dummy backend allocates no GPU storage\n", checks, failures);
     return failures ? 1 : 0;
 }

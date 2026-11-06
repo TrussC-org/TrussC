@@ -443,8 +443,8 @@ private:
         cube_desc.width = 1;
         cube_desc.height = 1;
         cube_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        cube_desc.data.mip_levels[0].ptr = zero;
-        cube_desc.data.mip_levels[0].size = sizeof(zero);
+        cube_desc.data.ptr = zero;
+        cube_desc.data.size = sizeof(zero);
         cube_desc.label = "tc_pbr_fallback_cube";
         fallbackCube_ = sg_make_image(&cube_desc);
         sg_view_desc cube_view_desc = {};
@@ -458,8 +458,8 @@ private:
         tex_desc.width = 1;
         tex_desc.height = 1;
         tex_desc.pixel_format = SG_PIXELFORMAT_RG16F;
-        tex_desc.data.mip_levels[0].ptr = zero2d;
-        tex_desc.data.mip_levels[0].size = sizeof(zero2d);
+        tex_desc.data.ptr = zero2d;
+        tex_desc.data.size = sizeof(zero2d);
         tex_desc.label = "tc_pbr_fallback_2d";
         fallback2d_ = sg_make_image(&tex_desc);
         sg_view_desc tex_view_desc = {};
@@ -482,8 +482,8 @@ private:
         nm_desc.height = 1;
         nm_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
         uint8_t flat_normal[4] = { 128, 128, 255, 255 };
-        nm_desc.data.mip_levels[0].ptr = flat_normal;
-        nm_desc.data.mip_levels[0].size = sizeof(flat_normal);
+        nm_desc.data.ptr = flat_normal;
+        nm_desc.data.size = sizeof(flat_normal);
         nm_desc.label = "tc_pbr_fallback_normal";
         fallbackNormal_ = sg_make_image(&nm_desc);
         sg_view_desc nm_view_desc = {};
@@ -497,8 +497,8 @@ private:
         white_desc.height = 1;
         white_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
         uint8_t white_pixel[4] = { 255, 255, 255, 255 };
-        white_desc.data.mip_levels[0].ptr = white_pixel;
-        white_desc.data.mip_levels[0].size = sizeof(white_pixel);
+        white_desc.data.ptr = white_pixel;
+        white_desc.data.size = sizeof(white_pixel);
         white_desc.label = "tc_pbr_fallback_white";
         fallbackWhite_ = sg_make_image(&white_desc);
         sg_view_desc white_view_desc = {};
@@ -519,8 +519,8 @@ private:
         sa_desc.width = 1;
         sa_desc.height = 1;
         sa_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        sa_desc.data.mip_levels[0].ptr = white_pixel;
-        sa_desc.data.mip_levels[0].size = sizeof(white_pixel);
+        sa_desc.data.ptr = white_pixel;
+        sa_desc.data.size = sizeof(white_pixel);
         sa_desc.label = "tc_pbr_fallback_shadow_array";
         fallbackShadowArray_ = sg_make_image(&sa_desc);
         sg_view_desc sa_view_desc = {};

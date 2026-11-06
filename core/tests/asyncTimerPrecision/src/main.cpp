@@ -63,8 +63,8 @@ bool testWakeAndCancel() {
     }
     node.cancelAsyncTimer(later);
 
-    // Hold the worker in another owner's callback while cancelling tasks
-    // already due. The barrier then proves neither cancelled task ran.
+    // Hold the worker in another owner's callback while canceling tasks
+    // already due. The barrier then proves neither canceled task ran.
     Node gate;
     bool entered = false;
     bool released = false;

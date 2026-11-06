@@ -8,7 +8,7 @@ Kinect, Xtion, RealSense, LiDAR, and so on.
 > on it before then.
 
 The thing you actually use a depth camera for is its **depth frame**. So that is
-the centre of this addon: a canonical, device-independent `DepthFrame` that the
+the center of this addon: a canonical, device-independent `DepthFrame` that the
 `DepthCamera` base owns and hands you. Once you can touch that frame, everything
 else — deprojection, point clouds, color mapping, threading, (later) recording —
 is the part you wanted abstracted away, and the base does it for you.

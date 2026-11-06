@@ -261,7 +261,8 @@ int main(){
             'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_onpaste',
             'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_begin_drop',
             'EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_drop',
-            'EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_end_drop'))
+            'EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_end_drop',
+            'EMSCRIPTEN_KEEPALIVE void _sapp_tc_emsc_free'))
         bridges = '\n'.join(body(native, signature) + ')' for signature in (
             'EM_JS(void, _sapp_tc_js_add_clipboard_listener',
             'EM_JS(void, _sapp_tc_js_add_dragndrop_listeners'))

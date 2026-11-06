@@ -164,8 +164,8 @@ private:
         img_desc.height = size;
         img_desc.num_slices = size;  // depth for 3D textures
         img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        img_desc.data.mip_levels[0].ptr = rgba.data();
-        img_desc.data.mip_levels[0].size = rgba.size();
+        img_desc.data.ptr = rgba.data();
+        img_desc.data.size = rgba.size();
         img_desc.label = "lut3d_image";
 
         image_ = sg_make_image(&img_desc);

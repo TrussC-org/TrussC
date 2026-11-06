@@ -98,4 +98,19 @@ public:
     }
 };
 
+// The JSON writer's image channel (declared in tcJsonReflect.h, which comes
+// before Texture): nothing in a save, an info object in the live view.
+inline bool JsonWriteReflector::visit(const char* name, HasTexture& v) {
+    // A save never carries images: only the live view does.
+    if (!includeDerived) return false;
+    const Texture& tex = v.getTexture();
+    Json info = Json::object();
+    info["width"] = tex.getWidth();
+    info["height"] = tex.getHeight();
+    info["format"] = internal::textureFormatName(tex);
+    info["allocated"] = tex.isAllocated();
+    cur()[name] = std::move(info);
+    return false;
+}
+
 } // namespace trussc

@@ -279,59 +279,11 @@ SaveResult internal::writeScreenshotPixels(const Pixels& pixels, const std::file
     @autoreleasepool {
         const auto path = internal::resolveScreenshotPath(requestedPath);
 
-        int width = pixels.getWidth();
-        int height = pixels.getHeight();
-        const auto ext = toLower(getFileExtension(path));
-        if (ext == "bmp") {
-            // Pixels uses stbi_write_bmp, as on the other native platforms.
-            return internal::atomicWrite(path, [&](std::FILE* file) {
-                return internal::writePixelsEncoded(file, pixels, ext, path);
-            }, "Screenshot", true);
-        }
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-
-        CGContextRef context = CGBitmapContextCreate(
-            const_cast<unsigned char*>(pixels.getData()),
-            width, height,
-            8,
-            width * 4,
-            colorSpace,
-            kCGImageAlphaPremultipliedLast | (CGBitmapInfo)kCGBitmapByteOrder32Big
-        );
-
-        if (!context) {
-            CGColorSpaceRelease(colorSpace);
-            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create CGContext"), "Screenshot");
-        }
-
-        CGImageRef cgImage = CGBitmapContextCreateImage(context);
-        CGContextRelease(context);
-        CGColorSpaceRelease(colorSpace);
-
-        if (!cgImage) {
-            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create CGImage"), "Screenshot");
-        }
-
-        // Use UIImage + PNG/JPEG representation
-        UIImage* image = [UIImage imageWithCGImage:cgImage];
-        CGImageRelease(cgImage);
-
-        if (!image) {
-            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create UIImage"), "Screenshot");
-        }
-
-        NSData* data = nil;
-        if (ext == "jpg" || ext == "jpeg") {
-            data = UIImageJPEGRepresentation(image, 0.9);
-        } else {
-            data = UIImagePNGRepresentation(image);
-        }
-
-        if (!data) {
-            return internal::reportSaveFailure(SaveResult::fail(SaveError::WriteFailed, "Failed to create image data"), "Screenshot");
-        }
-
-        return internal::atomicWrite(path, data.bytes, data.length, "Screenshot", true);
+        // Same shared stb encoder as the other native platforms: PNG keeps
+        // straight RGBA, which UIImagePNGRepresentation would premultiply (#854).
+        return internal::atomicWrite(path, [&](std::FILE* file) {
+            return internal::writePixelsEncoded(file, pixels, toLower(getFileExtension(path)), path);
+        }, "Screenshot", true);
     }
 }
 

@@ -538,9 +538,9 @@ bool noDrawParityProbe(bool upload, bool raw) {
     auto& target = windows.main.swapchainTarget;
     sg_buffer buffer = {};
     if (upload) {
-        sg_buffer_desc desc = {}; desc.size = 16; desc.usage.vertex_buffer = true; desc.usage.dynamic_update = true;
+        sg_buffer_desc desc = {}; desc.size = 16; desc.usage.vertex_buffer = true; desc.usage.write_transient = true;
         buffer = sg_make_buffer(desc);
-        uint32_t bytes[4] = {}; sg_update_buffer(buffer, SG_RANGE(bytes));
+        uint32_t bytes[4] = {}; sg_write_buffer_desc write = {}; write.src.data = SG_RANGE(bytes); write.dst.buffer = buffer; sg_write_buffer_transient(&write);
     }
     const bool work = tc_internal_gpu_frame_has_work();
     ok &= work == upload;
@@ -716,7 +716,7 @@ bool retirementRestartProbe() {
     internal::restoreWindowContext(&(*renderFixture));
     sg_image_desc imageDesc = {}; imageDesc.width = imageDesc.height = 2;
     imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    imageDesc.usage.dynamic_update = true;
+    imageDesc.usage.copy_dst = true;
     const auto image = sg_make_image(imageDesc);
     sg_view_desc viewDesc = {}; viewDesc.texture.image = image;
     const auto view = sg_make_view(viewDesc);
@@ -1049,7 +1049,7 @@ bool resourceRetirementProbe() {
     internal::restoreWindowContext(&(*renderFixture));
     sg_image_desc imageDesc = {}; imageDesc.width = imageDesc.height = 2;
     imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
-    imageDesc.usage.dynamic_update = true;
+    imageDesc.usage.copy_dst = true;
     const auto image = sg_make_image(imageDesc);
     sg_view_desc viewDesc = {}; viewDesc.texture.image = image;
     const auto view = sg_make_view(viewDesc);
@@ -1058,7 +1058,7 @@ bool resourceRetirementProbe() {
     internal::deferGpuDestroy(view); internal::deferGpuDestroy(image); internal::deferGpuDestroy(sampler);
     internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(windows.secondary));
     present(); // Warm B's caches; A's referenced resources remain pending.
-    sg_buffer_desc bufferDesc = {}; bufferDesc.size = 16; bufferDesc.usage.vertex_buffer = true; bufferDesc.usage.dynamic_update = true;
+    sg_buffer_desc bufferDesc = {}; bufferDesc.size = 16; bufferDesc.usage.vertex_buffer = true; bufferDesc.usage.write_transient = true;
     const auto unrelated = sg_make_buffer(bufferDesc);
     internal::deferGpuDestroy(unrelated);
     internal::drainPendingGpuDestroys();
@@ -1075,12 +1075,63 @@ bool resourceRetirementProbe() {
     return ok;
 }
 
+// #713: exercise WebGPU's upload layout without a WebGPU device. The dummy
+// backend exposes the same feature flags; hooks inspect the actual core calls.
+bool textureUploadLayoutProbe() {
+    const auto savedFeatures = _sg.features;
+    _sg.features.copy_buffer_to_image_relaxed_buffer_type = true;
+    _sg.features.copy_buffer_to_image_relaxed_bytes_per_row = false;
+    struct Trace { bool ok = true; int writes = 0, copies = 0; uint32_t source = 0; } trace;
+    sg_trace_hooks hooks = {};
+    hooks.user_data = &trace;
+    hooks.write_buffer_transient = [](const sg_write_buffer_desc* desc, void* user) {
+        auto& t = *static_cast<Trace*>(user);
+        ++t.writes;
+        const auto usage = sg_query_buffer_desc(desc->dst.buffer).usage;
+        t.ok &= !usage.staging_buffer && usage.copy_src && usage.write_transient;
+        t.ok &= desc->src.data.size == 512;
+        if (desc->src.data.size == 512) {
+            const auto* bytes = static_cast<const uint8_t*>(desc->src.data.ptr);
+            for (int row = 0; row < 2; ++row) for (int col = 0; col < 256; ++col)
+                t.ok &= bytes[row * 256 + col] == (col < 12 ? row * 12 + col + 1 : 0);
+        }
+    };
+    hooks.copy_buffer_to_image = [](const sg_copy_buffer_to_image_desc* desc, void* user) {
+        auto& t = *static_cast<Trace*>(user);
+        ++t.copies;
+        t.ok &= desc->src.bytes_per_row == 256 && desc->src.bytes_per_slice == 512;
+        if (t.source) t.ok &= t.source != desc->src.buffer.id;
+        t.source = desc->src.buffer.id;
+    };
+    const auto savedHooks = sg_install_trace_hooks(&hooks);
+    {
+        Texture texture;
+        texture.allocate(3, 2, TextureFormat::RGBA8, TextureUsage::Dynamic);
+        uint8_t bytes[24];
+        for (int i = 0; i < 24; ++i) bytes[i] = static_cast<uint8_t>(i + 1);
+        texture.loadData(bytes, 3, 2, 4);
+        texture.loadData(bytes, 3, 2, 4);
+        // Metadata only: padded rows would exceed signed buffer size. No large allocation.
+        // Expected diagnostics must not bind the process logger to this temporary App.
+        {
+            internal::AppOwnerScope process({});
+            internal::uploadImageData(texture.getImage(), {bytes, size_t(INT_MAX / 256 + 1) * 12});
+            internal::uploadImageData(texture.getImage(), {bytes, size_t(INT_MAX)});
+        }
+    }
+    sg_install_trace_hooks(&savedHooks);
+    _sg.features = savedFeatures;
+    sg_commit(); internal::drainPendingGpuDestroys();
+    const bool ok = trace.ok && trace.writes == 2 && trace.copies == 2;
+    std::printf("TEXTURE GPU STAGING padded_rows=1 distinct_sources=1 ok=%d\n", ok);
+    return ok;
+}
+
 bool growthFailureProbe() {
     const auto context = sgl_make_context(sgl_context_desc_t{});
     auto* ctx = _sgl_lookup_context(context.id);
     bool ok = _sgl_checked_capacity(INT_MAX, INT_MAX, 1, sizeof(_sgl_vertex_t)) == 0 &&
-        _sgl_checked_capacity(4,4,1,SIZE_MAX) == 0 &&
-        _sgl_needed_gpu_vertices(SIZE_MAX, 40) == 0 && _sgl_needed_gpu_vertices(INT_MAX, 40) == 0;
+        _sgl_checked_capacity(4,4,1,SIZE_MAX) == 0;
     const int oldCap = ctx->vertices.cap, oldNext = ctx->vertices.next;
     ctx->vertices.cap = ctx->vertices.next = INT_MAX;
     ok &= !_sgl_next_vertex(ctx) && ctx->error.vertices_full;
@@ -1502,6 +1553,56 @@ bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
     internal::currentWindowCtx() = previous;
     std::printf("RESIZE APP DISPATCH resize=%d camera=%d warnings=%d acquisitions=%d ok=%d\n",
         resize, cameraScope, warnings, acquisitions, ok);
+    return ok;
+}
+
+// #925: an Fbo begun in update() and still active when the tree draw starts is
+// reported once, with the cause and the fix. Begin and end in the same callback
+// (draw(), or update() with the end before draw) stays silent.
+bool openFboAtDrawProbe(int mode) {   // 0: begin in update, end in draw  1: all in draw  2: all in update
+    DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
+    window.fbWidth = 64; window.fbHeight = 48;
+    window.acquireSwapchain = dummySwapchain;
+    auto* previous = internal::currentWindowCtx();
+    internal::currentWindowCtx() = &window;
+    int openWarnings = 0;
+    auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
+        if (e.level == LogLevel::Warning && e.message == "[Fbo] an Fbo is still active when draw() starts "
+            "(begin() was called earlier, e.g. in update()); call end() in the same callback that called begin()")
+            ++openWarnings;
+    });
+    struct OpenApp : App {
+        int mode;
+        Fbo fbo;
+        explicit OpenApp(int mode) : mode(mode) {}
+        void setup() override { fbo.allocate(16, 12); }
+        void update() override {
+            if (mode == 0) fbo.begin();
+            if (mode == 2) { fbo.begin(); fbo.end(); }
+        }
+        void draw() override {
+            if (mode == 0) fbo.end();
+            if (mode == 1) { fbo.begin(); fbo.end(); }
+        }
+    };
+    bool ok = true;
+    int perFrame[3] = {};
+    {
+        auto candidate = internal::makeConstructedApp<OpenApp>(mode);
+        auto& app = *candidate;
+        for (int frame = 0; frame < 3; ++frame) {
+            beginFrame();
+            { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
+            { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); present(); }
+            perFrame[frame] = openWarnings;
+        }
+    }
+    window.teardownTargets(); window.swapchainTarget.resources().release();
+    internal::currentWindowCtx() = previous;
+    // The streak repeats every frame, so it is reported on the first one only.
+    const int expected = mode == 0 ? 1 : 0;
+    ok &= perFrame[0] == expected && perFrame[1] == expected && perFrame[2] == expected;
+    std::printf("OPEN FBO AT DRAW mode=%d warnings=%d,%d,%d ok=%d\n", mode, perFrame[0], perFrame[1], perFrame[2], ok);
     return ok;
 }
 
@@ -2023,7 +2124,7 @@ bool retirementFailureProbe() {
     // queue initialization/Debug proxies and failure reporting. The device
     // must keep the handle valid for recordings until it can be reclaimed.
     sg_buffer_desc desc = {}; desc.size = 16;
-    desc.usage.vertex_buffer = true; desc.usage.dynamic_update = true;
+    desc.usage.vertex_buffer = true; desc.usage.write_transient = true;
     const auto handle = sg_make_buffer(&desc);
     const int before = rejectedAllocations;
     allocationsUntilFailure = 0;
@@ -2068,6 +2169,7 @@ int main(int argc, char** argv) {
     if (!lateShader.load(descriptor)) return 1;
     sg_trace_hooks hooks = {}; hooks.draw = drawn; hooks.begin_pass = began; hooks.commit = committed; hooks.apply_pipeline = applied;
     hooks.apply_viewport = viewportApplied; hooks.apply_scissor_rect = scissorApplied; sg_install_trace_hooks(&hooks);
+    const bool textureUploads = textureUploadLayoutProbe();
     const bool closedWindows = closedWindowContextProbe();
     if (argc > 1 && std::strcmp(argv[1],"--closed-window") == 0) return closedWindows ? 0 : 1;
     const bool targetStacks = targetStackDispatchChecks();
@@ -2105,6 +2207,7 @@ int main(int argc, char** argv) {
         resizeBeforeDraw &= resizeAppDispatchProbe(resize, camera);
     for (bool resize : {false, true}) for (bool selected : {false, true})
         resizeBeforeDraw &= resizeOpenShaderProbe(resize, selected);
+    for (int mode = 0; mode < 3; ++mode) resizeBeforeDraw &= openFboAtDrawProbe(mode);
     bool scissorLogical = true;
     for (float dpi : {1.0f, 2.0f, 1.5f}) for (bool pixelPerfect : {false, true})
         scissorLogical &= scissorLogicalProbe(dpi, pixelPerfect);
@@ -2117,7 +2220,7 @@ int main(int argc, char** argv) {
     const bool curveRollback = curveRollbackProbe();
     const bool retirementRestart = retirementRestartProbe();
     const bool shadowRestart = shadowDeviceRestartProbe();
-    const int result=curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
+    const int result=textureUploads && curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
     return result;
 }
 #else

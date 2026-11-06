@@ -114,6 +114,13 @@ namespace internal {
     // their depth before it. Called by runHeadlessApp(), and by App / Window
     // before each tree walk. Defined below the Node class.
     inline void setupNodeOnce(Node& node);
+
+    // Called where a window's root tree draw starts (#925). An Fbo that was
+    // begun earlier (typically in update()) and is still the active target
+    // takes the framework's draw matrix instead of the window. Reporting
+    // only: once per Fbo, since an app with this pattern hits it every frame.
+    // Defined below the Node class.
+    inline void warnFboOpenAtDraw();
 }
 
 // True when an overlay currently has the pointer over it (e.g. cursor is over a
@@ -1512,7 +1519,7 @@ public:
     // at most maxCatchUp times per update, so a
     // counter or a simulation driven by it catches up after a late update.
     // Past the limit the remaining due intervals are dropped; the phase is
-    // kept. Cancelling the timer from the callback stops the remaining calls.
+    // kept. Canceling the timer from the callback stops the remaining calls.
     // Without a limit, a long stall in a loop whose delta is measured (VSYNC or
     // setFps(), including an EVENT_DRIVEN idle stretch) makes it fire that
     // many times at once. In fixed-Hz update mode it counts step time, so time
@@ -1737,7 +1744,7 @@ protected:
     // callback and metadata so vector reallocation during the callback can't
     // dangle the in-flight reference. Timers added by a callback wait for the
     // next update. A catch-up timer looks itself up again before each further
-    // call, so cancelling it from its callback stops the remaining calls.
+    // call, so canceling it from its callback stops the remaining calls.
     void processTimers() {
         if (timers_.empty()) return;
         constexpr double dueEpsilon = 1e-9;
@@ -1784,7 +1791,7 @@ protected:
         for (uint64_t id : readyIds) {
             auto it = std::find_if(timers_.begin(), timers_.end(),
                 [id](const Timer& t) { return t.id == id; });
-            if (it == timers_.end()) continue;  // cancelled by an earlier callback in this batch
+            if (it == timers_.end()) continue;  // canceled by an earlier callback in this batch
 
             std::function<void()> callback = it->callback;
 
@@ -1813,7 +1820,7 @@ protected:
                 for (uint64_t n = 0; n < calls; ++n) {
                     if (n > 0 && std::none_of(timers_.begin(), timers_.end(),
                             [id](const Timer& t) { return t.id == id; })) {
-                        break;   // cancelled by the callback
+                        break;   // canceled by the callback
                     }
                     if (callback) callback();
                 }
@@ -1834,6 +1841,14 @@ inline void setupNodeOnce(Node& node) {
     if (node.setupCalled_) return;
     EntryStackGuard guard(AppEntry::Setup);
     node.setupTree();
+}
+
+inline void warnFboOpenAtDraw() {
+    auto& target = currentTarget();
+    if (!target.isFbo || !target.activation || target.openAtDrawWarned) return;
+    target.openAtDrawWarned = true;
+    logWarning("Fbo") << "an Fbo is still active when draw() starts (begin() was called "
+        "earlier, e.g. in update()); call end() in the same callback that called begin()";
 }
 }
 

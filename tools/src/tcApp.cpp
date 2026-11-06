@@ -845,7 +845,7 @@ void tcApp::importProject(const string& path) {
     }
 
     // Use the CLI's read-back, starting with the current GUI defaults so a
-    // project without saved settings keeps the previous import behaviour.
+    // project without saved settings keeps the previous import behavior.
     const PresetState state = readPresetState(path);
     auto settings = buildProjectSettings();
     applyGenerationOptions(settings, state, GenerationFlags());

@@ -13,6 +13,7 @@
 #include "imgui/imgui_tables.cpp"
 #include "imgui/imgui_widgets.cpp"
 #include "imgui/imgui_demo.cpp"
+#include "imgui/imgui_stdlib.cpp"
 
 // TrussC ImGui test engine hooks (must be before sokol_imgui)
 #include "tcImGuiHooksImpl.h"

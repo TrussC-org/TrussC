@@ -168,7 +168,7 @@ public:
     // on main in a later frame. Handle operations/direct sample access must be
     // serialized on main (direct sample access keeps its existing mixer rules).
     // Web without pthreads defers CPU decode to a frame, which may stall it.
-    // App exit waits for loads still decoding; cancelling never waits.
+    // App exit waits for loads still decoding; canceling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
     void loadAsync(const fs::path& path);
@@ -1968,7 +1968,8 @@ private:
     // (PlayingSound::positionRateHz_), the engine rate its decoder outputs
     // at. Not the engine's current rate (a voice the re-init migration did
     // not rebuild keeps the old one), nor the stream's sampleRate (the
-    // engine rate at loadStream(), stale after a re-init).
+    // engine rate its decoders were last opened at, which another voice
+    // of the stream may have changed).
     int positionRate() const {
         if (buffer_->kind() != SoundSource::Stream) return buffer_->sampleRate;
         return playing_->positionRateHz_.load(std::memory_order_relaxed);
@@ -2037,7 +2038,7 @@ public:
     bool start(int sampleRate = DEFAULT_SAMPLE_RATE);
     // Main-thread operation. Web requires a secure context and user gesture.
     // macOS/iOS request undecided consent before capture init, without a worker;
-    // isStarting stays true until answered or cancelled. Exit never awaits consent.
+    // isStarting stays true until answered or canceled. Exit never awaits consent.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
     void startAsync(int sampleRate = DEFAULT_SAMPLE_RATE);

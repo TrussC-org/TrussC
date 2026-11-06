@@ -13,6 +13,7 @@
 #include "imgui/imgui_tables.cpp"
 #include "imgui/imgui_widgets.cpp"
 #include "imgui/imgui_demo.cpp"
+#include "imgui/imgui_stdlib.cpp"
 
 // sokol_imgui 実装
 #include "tcImGuiTargetImpl.h"

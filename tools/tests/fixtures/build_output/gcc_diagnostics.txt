@@ -1,0 +1,14 @@
+[ 10%] Building CXX object CMakeFiles/app.dir/src/main.cpp.o
+[ 20%] Building CXX object CMakeFiles/app.dir/src/tcApp.cpp.o
+In file included from /src/app/src/tcApp.cpp:1:
+/src/app/src/tcApp.cpp: In member function 'void tcApp::draw()':
+/src/app/src/tcApp.cpp:12:9: warning: unused variable 'a' [-Wunused-variable]
+   12 |     int a = 1;
+      |         ^
+/src/app/src/tcApp.cpp:13:9: warning: unused variable 'b' [-Wunused-variable]
+/src/app/src/scene.h:30:5: warning: 'x' is deprecated [-Wdeprecated-declarations]
+/src/app/src/tcApp.cpp:40:3: note: declared here
+[ 30%] Building CXX object CMakeFiles/app.dir/src/scene.cpp.o
+/src/app/src/scene.cpp:7:10: fatal error: missing.h: No such file or directory
+/src/app/src/scene.cpp:9:1: error: expected ';' before '}' token
+gmake[2]: *** [CMakeFiles/app.dir/build.make:90: CMakeFiles/app.dir/src/scene.cpp.o] Error 1

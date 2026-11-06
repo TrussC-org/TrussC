@@ -290,7 +290,7 @@ inline Mesh createCapsule(float radius, float cylinderHeight, int resolution = 1
         mesh.addTriangle(i1, i2, i3);
     }
 
-    // --- top hemisphere (phi 0=pole .. PI/2=equator, centre at +halfCyl) ---
+    // --- top hemisphere (phi 0=pole .. PI/2=equator, center at +halfCyl) ---
     int topBase = mesh.getNumVertices();
     for (int r = 0; r <= hemiRings; r++) {
         float phi = (float)r / hemiRings * halfPi;
@@ -313,7 +313,7 @@ inline Mesh createCapsule(float radius, float cylinderHeight, int resolution = 1
         }
     }
 
-    // --- bottom hemisphere (phi PI/2=equator .. PI=pole, centre at -halfCyl) ---
+    // --- bottom hemisphere (phi PI/2=equator .. PI=pole, center at -halfCyl) ---
     int botBase = mesh.getNumVertices();
     for (int r = 0; r <= hemiRings; r++) {
         float phi = halfPi + (float)r / hemiRings * halfPi;

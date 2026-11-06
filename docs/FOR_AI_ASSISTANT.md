@@ -93,7 +93,7 @@ Guest retirement cancels registered callbacks and releases their captures. Queue
 
 Under hot reload (TC_HOT_RELOAD), RuntimeSettings is not applied; the default uniform reservation is used.
 
-Hot reload supports a single window. While a hot-reload guest is loaded, creating a second or later open window emits a Warning each time; behaviour is not guaranteed. Reload happens at the main-thread outer-turn safe point and replaces the launch Window App if that Window is still open. Stop and join App-owned threads, cancel timers and finish async work in `events().hotReloadUnload` before the old App ends. Reload does not wait for or exclude that work; a worker already admitted before retirement can overlap it. Successfully loaded modules stay mapped for the process lifetime, and repeated reloads can grow process memory. iOS/Android/Web use the static fallback.
+Hot reload supports a single window. While a hot-reload guest is loaded, creating a second or later open window emits a Warning each time; behavior is not guaranteed. Reload happens at the main-thread outer-turn safe point and replaces the launch Window App if that Window is still open. Stop and join App-owned threads, cancel timers and finish async work in `events().hotReloadUnload` before the old App ends. Reload does not wait for or exclude that work; a worker already admitted before retirement can overlap it. Successfully loaded modules stay mapped for the process lifetime, and repeated reloads can grow process memory. iOS/Android/Web use the static fallback.
 
 
 On Windows and Linux, `runApp<T>(settings)` returns the App's exit code after the loop and Runtime cleanup, or 1 if setup never began. On macOS a normal quit ends the process inside AppKit's termination after the same cleanup, with the App's exit code as the process status, so `runApp` does not return and code after it does not run; it returns only when startup fails. On Android it stores the descriptor for `sokol_main()` and returns 0; the native host owns the loop and Runtime lifetime. On Web it returns 0 after handing the asynchronous loop to the browser; that return is not shutdown. `runHeadlessApp<T>(settings)` runs synchronously and returns the exit code. Android and Web retain their host-managed lifetimes rather than the desktop return contract.
@@ -637,7 +637,7 @@ img.drawSubsection(dx, dy, dw, dh, sx, sy, sw, sh);  // Sprite sheet
 img.allocate(256, 256, 4);                  // RGBA, no mipmaps
 img.allocate(256, 256, 4, /*mipmaps=*/true); // Chain rebuilt each update()
 img.setColor(x, y, Color(1,0,0));
-img.update();                       // Upload to GPU (once per frame!)
+img.update();                       // Upload dirty pixels to GPU immediately
 img.save("output.png");
 
 // CPU-side transforms (operate on Pixels; cheap for U8, gamma-correct)
@@ -1155,7 +1155,7 @@ trusscli addon add|remove <a>  Add / remove addons (also clone / list / search /
 trusscli info [section]        Project / framework info
 trusscli doctor                Check the dev environment
 trusscli clean                 Delete build directories (--all: every target's, incl. xcode-ios, and the generated build-web.* scripts)
-trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands)
+trusscli build                 Build (auto-selects native; configures first when the build folder has no CMake cache; -j N caps parallel jobs; --dry-run prints the cmake commands). Prints a short progress line, warnings/errors and a Done:/Failed: summary; the full output is in <build folder>/build.log; --verbose shows it all on screen
 trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
@@ -3270,7 +3270,7 @@ void Image::update()  // Uploads pending CPU pixel changes to the texture.
 void JsonReadReflector::beginGroup(const char * name)  // Enters a nested source JSON object.
 void JsonReadReflector::endGroup()  // Returns to the parent source JSON object.
 std::vector<std::string> JsonReadReflector::unknownKeys() const  // Returns unrecognized keys from the source JSON object.
-bool JsonReadReflector::visit(const char * name, float & v) [+7]  // Reads the JSON value for one reflected member.
+bool JsonReadReflector::visit(const char * name, float & v) [+8]  // Reads the JSON value for one reflected member.
 ```
 
 ### JsonWriteReflector — Writes reflected values into a JSON object.
@@ -3278,7 +3278,7 @@ bool JsonReadReflector::visit(const char * name, float & v) [+7]  // Reads the J
 ```cpp
 void JsonWriteReflector::beginGroup(const char * name)  // Opens a nested JSON object for a composite member.
 void JsonWriteReflector::endGroup()  // Closes the current nested JSON object.
-bool JsonWriteReflector::visit(const char * name, float & v) [+7]  // Writes one reflected member into the output JSON object.
+bool JsonWriteReflector::visit(const char * name, float & v) [+8]  // Writes one reflected member into the output JSON object.
 ```
 
 ### KeyEventArgs — Carries keyboard event data.
@@ -3956,7 +3956,7 @@ void Reflector::popDerived()  // Leaves a derived-value reflection scope.
 void Reflector::popReadOnly()  // Leaves a read-only reflection scope.
 void Reflector::pushDerived()  // Enters a derived-value reflection scope.
 void Reflector::pushReadOnly()  // Enters a read-only reflection scope.
-bool Reflector::visit(const char * name, float & v) [+7]  // Processes one reflected member.
+bool Reflector::visit(const char * name, float & v) [+8]  // Processes one reflected member.
 ```
 
 ### ResizeEventArgs — Carries the new window dimensions.
@@ -5338,7 +5338,7 @@ Sound sfx = bundle.build();
 4. **`enableEvents()` required** for Node to receive mouse events.
 5. **`drawLine()` is always 1px** (there is no `setLineWidth()`). Use `drawStroke()` or `beginStroke()/endStroke()` for thick lines.
 6. **Inside `Node::draw()`, coordinates are local.** Already translated to node position.
-7. **Texture update once per frame.** `loadData()`/`update()` on the same frame logs a warning and is skipped (sokol limitation).
+7. **Dynamic/Stream texture updates copy immediately.** Repeated valid `loadData()` calls or dirty `Image::update()` calls in one device frame are supported. An active render pass is flushed, suspended, and resumed with its contents preserved; the following draw sees the new pixels.
 8. **Letter keys are UPPERCASE.** `keyPressed(int key)` receives sokol keycodes: `key == 'A'`, never `'a'` (`'a'` = 97 never matches).
 9. **GPU classes are main-thread only.** `Image` / `Texture` / `Fbo` / `Font` call into sokol; using them on a background thread crashes (no framework assert catches it). Load `Pixels` on the background thread, create the `Image`/`Texture` on the main thread.
 10. **`Pixels` / `Image` / `Texture` are non-copyable** (deleted copy ctor). Use `std::move()`, or `Pixels::clone()` for a deep copy.

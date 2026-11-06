@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -84,6 +85,44 @@ class CleanTests(unittest.TestCase):
         for script in SCRIPTS:
             self.assertTrue((self.project / script).exists())
         self.assertTrue((self.project / "notes.txt").exists())
+
+    def linked_build_dir(self, folder):
+        # The build folder is a symlink to a place outside the project, with a
+        # symlink inside it to a third place that must never be touched.
+        target = self.base / "elsewhere"
+        outside = self.base / "outside"
+        (target / "sub").mkdir(parents=True)
+        outside.mkdir()
+        (target / "stale.o").write_text("stale", encoding="utf-8")
+        (target / "sub/deep.o").write_text("stale", encoding="utf-8")
+        (outside / "canary.txt").write_text("keep", encoding="utf-8")
+        (target / "link").symlink_to(outside, target_is_directory=True)
+        shutil.rmtree(self.project / folder)
+        (self.project / folder).symlink_to(target, target_is_directory=True)
+        return target, outside
+
+    @unittest.skipIf(sys.platform == "win32", "symlinks need privileges on Windows")
+    def test_symlinked_build_dir_is_emptied_and_kept(self):
+        # #1102: the configured location survives, nothing behind a nested link is deleted
+        self.markers()
+        folder = "build-" + NATIVE
+        target, outside = self.linked_build_dir(folder)
+        result = self.cli("clean")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.project / folder).is_symlink())
+        self.assertEqual(Path(os.readlink(self.project / folder)), target)
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual((outside / "canary.txt").read_text(encoding="utf-8"), "keep")
+
+    @unittest.skipIf(sys.platform == "win32", "symlinks need privileges on Windows")
+    def test_dangling_symlink_build_dir_is_left_alone(self):
+        self.markers()
+        folder = "build-" + NATIVE
+        shutil.rmtree(self.project / folder)
+        (self.project / folder).symlink_to(self.base / "missing", target_is_directory=True)
+        result = self.cli("clean")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.project / folder).is_symlink())
 
     def test_valid_project_explicit_all_cleanup(self):
         self.markers()

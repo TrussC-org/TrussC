@@ -195,7 +195,6 @@ namespace internal {
         bool     atlasInitialized = false;
         int      rows = 0;                  // height of current atlas in cell rows
         uint64_t version = 0;               // last bitmapfont registryVersion() baked in
-        uint64_t uploadFrame = UINT64_MAX;  // frame of last sg_update_image
     };
     BitmapFontAtlas& bitmapFontAtlas();
 
@@ -1178,27 +1177,12 @@ inline bool isStrokeEnabled() {
 // Bitmap string drawing (delegated to RenderContext)
 // ---------------------------------------------------------------------------
 
-// Calculate text bounding box (UTF-8 + fullwidth aware)
+// Calculate text bounding box (UTF-8 + fullwidth aware). Same measurement as
+// getBitmapStringWidth / getBitmapStringHeight, so it follows setBitmapLineHeight.
 inline void getBitmapStringBounds(const std::string& text, float& width, float& height) {
-    float maxWidth = 0;
-    float cursorX = 0;
-    int lines = 1;
-
-    const char* p  = text.data();
-    const char* pe = p + text.size();
-    while (p < pe) {
-        unsigned char b0 = (unsigned char)*p;
-        if (b0 == '\n') { ++p; if (cursorX > maxWidth) maxWidth = cursorX; cursorX = 0; ++lines; continue; }
-        if (b0 == '\t') { ++p; cursorX += bitmapfont::CHAR_TEX_WIDTH * 8; continue; }
-        if (b0 < 32)    { ++p; continue; }
-        uint32_t cp = bitmapfont::utf8Decode(p, pe);
-        if (cp == 0) break;
-        cursorX += (float)bitmapfont::codepointPixelWidth(cp);
-    }
-    if (cursorX > maxWidth) maxWidth = cursorX;
-
-    width  = maxWidth;
-    height = lines * bitmapfont::CHAR_TEX_HEIGHT;
+    const auto& ctx = getDefaultContext();
+    width  = ctx.getBitmapStringWidth(text);
+    height = ctx.getBitmapStringHeight(text);
 }
 
 // ---------------------------------------------------------------------------
@@ -1212,12 +1196,12 @@ inline void getBitmapStringBounds(const std::string& text, float& width, float& 
 //     tcGpuDestroyQueue.h) so sokol_gl commands recorded earlier in the
 //     frame keep their handles valid until the end-of-frame flush.
 //   - Same size, contents changed (registerGlyph / updateGlyph):
-//     reuse the image via sg_update_image(). No destroy → no dangling
+//     reuse the image via staging copies. No destroy → no dangling
 //     references in sokol_gl's deferred command queue. This makes per-frame
 //     glyph updates (e.g. animated walker) practical.
 //
-// The image is created with `usage.dynamic_update = true` so sg_update_image
-// is allowed.
+// The image is created with `usage.copy_dst = true` so staging copies
+// are allowed.
 uint64_t getFrameCount(); // forward declaration; public update counter
 inline void ensureFontAtlas(int rows) {
     if (rows <= 0) return;
@@ -1227,7 +1211,7 @@ inline void ensureFontAtlas(int rows) {
     // The atlas texture is fixed-width with a hard row cap (512x512 =
     // CELLS_PER_COL rows). generateAtlasPixels() clamps its buffer to that
     // cap, so the row count used for the texture height / upload size below
-    // MUST be clamped identically — otherwise sg_update_image would read
+    // MUST be clamped identically — otherwise staging copies would read
     // past the end of the CPU pixel buffer (SIGBUS, issue #188). Glyphs
     // registered beyond capacity degrade gracefully: their cells are skipped
     // by generateAtlasPixels and they render as blanks.
@@ -1248,15 +1232,6 @@ inline void ensureFontAtlas(int rows) {
     if (sizeOk && versionOk) return;
     if (!sg_isvalid()) return;
 
-    // Same-frame upload guard. sokol allows at most one sg_update_image per
-    // image per frame (VALIDATE_UPDIMG_ONCE). If we already uploaded this
-    // frame and the atlas size hasn't changed, defer to next frame — the
-    // stale atlas.version makes us try again on the next call.
-    // (When size changes we destroy + create a brand-new image below, so the
-    // guard only applies to the same-dimensions in-place path.)
-    // Preserve base's per-window upload key: main updates, secondary admitted ticks.
-    if (sizeOk && atlas.uploadFrame == internal::resourceFrameKey()) return;
-
     // Regenerate pixel buffer. Use the LARGER of `rows` and the currently
     // allocated rows so a same-size in-place update stays the same size.
     int effRows = sizeOk ? atlas.rows : rows;
@@ -1265,14 +1240,11 @@ inline void ensureFontAtlas(int rows) {
     int dataBytes = bitmapfont::ATLAS_WIDTH * height * 4;
 
     if (sizeOk) {
-        // Same dimensions — upload via sg_update_image. The image identity
+        // Same dimensions — upload via staging copies. The image identity
         // (sg_image handle) and view stay the same, so any queued sokol_gl
         // commands referencing them keep working.
-        sg_image_data data = {};
-        data.mip_levels[0].ptr  = pixels;
-        data.mip_levels[0].size = dataBytes;
-        sg_update_image(atlas.texture, &data);
-        atlas.uploadFrame = internal::resourceFrameKey();
+        sg_range data = {pixels, static_cast<size_t>(dataBytes)};
+        internal::uploadImageData(atlas.texture, data);
     } else {
         // Size changed (or first allocation). Recreate the image. The old
         // image/view are destroyed deferred — sokol_gl commands recorded
@@ -1288,16 +1260,13 @@ inline void ensureFontAtlas(int rows) {
         img_desc.width  = bitmapfont::ATLAS_WIDTH;
         img_desc.height = height;
         img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        img_desc.usage.dynamic_update = true;   // enable sg_update_image()
+        img_desc.usage.copy_dst = true;   // persistent staging uploads
         // (intentionally no initial data — sg expects an update call instead
         //  for non-immutable images)
         atlas.texture = sg_make_image(&img_desc);
 
-        sg_image_data data = {};
-        data.mip_levels[0].ptr  = pixels;
-        data.mip_levels[0].size = dataBytes;
-        sg_update_image(atlas.texture, &data);
-        atlas.uploadFrame = internal::resourceFrameKey();
+        sg_range data = {pixels, static_cast<size_t>(dataBytes)};
+        internal::uploadImageData(atlas.texture, data);
 
         sg_view_desc view_desc = {};
         view_desc.texture.image = atlas.texture;
@@ -1412,32 +1381,15 @@ inline void drawBitmapStringHighlight(const std::string& text, float x, float y,
     float textWidth, textHeight;
     getBitmapStringBounds(text, textWidth, textHeight);
 
-    // Calculate exact height based on line count and lineHeight
-    int lineCount = 1;
-    for (char c : text) {
-        if (c == '\n') lineCount++;
-    }
-    float lineHeight = getBitmapLineHeight();
-    float exactHeight = bitmapfont::CHAR_TEX_HEIGHT + (lineCount - 1) * lineHeight;
+    const float lineHeight = getBitmapLineHeight();
+    const float exactHeight = textHeight;
 
     // Horizontal padding only (no vertical padding to prevent overlap with adjacent lines)
     const float paddingH = 4.0f;
 
-    // Calculate offset based on current alignment
-    float offsetX = 0, offsetY = 0;
-    switch (getTextAlignH()) {
-        case Direction::Left:   offsetX = 0; break;
-        case Direction::Center: offsetX = -textWidth / 2; break;
-        case Direction::Right:  offsetX = -textWidth; break;
-        default: break;
-    }
-    switch (getTextAlignV()) {
-        case Direction::Top:      offsetY = 0; break;
-        case Direction::Center:   offsetY = -textHeight / 2; break;
-        case Direction::Bottom:   offsetY = -textHeight; break;
-        case Direction::Baseline: offsetY = -textHeight + 3; break;  // Approximate value
-        default: break;
-    }
+    // Same offset as drawBitmapString (shared helper), so the box and the text agree
+    const Vec2 offset = internal::bitmapAlignOffset(textWidth, textHeight, getTextAlignH(), getTextAlignV());
+    const float offsetX = offset.x, offsetY = offset.y;
 
     // Convert local coordinates to world coordinates (including offset)
     Mat4 currentMat = getMatrix();

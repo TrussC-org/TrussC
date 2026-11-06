@@ -174,6 +174,24 @@ trusscli build -j 4
 trusscli build -j 4 --dry-run
 ```
 
+**Build output:**
+
+`trusscli build` and `trusscli run` print a short result, not every cmake line:
+
+```
+Building myApp (44 files) .........50%.........100%
+Done: 2 files, 42 up to date (0m30s). Full log: build-linux/build.log
+```
+
+- One progress line, with a dot per 5 %.
+- Only known noise is hidden: CMake `-- ...` configure lines, `[ NN%] Building` / `Linking` lines, every Ninja `[n/total] ...` status line, `Scanning dependencies`, `Built target`, CMake's `Preset ... variables:` block and, on Windows, the Visual Studio `vcvarsall` banner. After Ninja's `FAILED: <target>` line, the compiler command line is hidden too (the log has it). Everything else is shown as the tool printed it, so warnings, errors, compiler notes and linker messages are never lost.
+- The last lines are the result: `Done:` or `Failed:`, then `ERROR: N (files)` and `WARNING: N (files)` when there are any (`ERROR: link failed` for a link error without a source file).
+- The full output of the configure and build is always saved to `<build folder>/build.log` (for example `build-linux/build.log`), and overwritten by the next build.
+- `trusscli build --verbose` (also `run`, `update`) prints the full output on screen as well.
+- `trusscli run` shortens only the build. The app's own output is not filtered.
+
+Warnings and errors keep the compiler's own format, so tools that read them (`file:line: error:` or MSVC `file(line): error C…`) keep working. `trusscli build` no longer passes the child's terminal through, so compiler colors are off in both modes; the log has the plain text.
+
 **Web Build (WASM):**
 The Web preset uses Ninja on Windows and Unix Makefiles on macOS/Linux,
 matching the native presets. On Windows, trusscli automatically uses the
@@ -289,6 +307,18 @@ cd examples
 ./build_all.sh --clean  # Clean rebuild
 ```
 This script automatically uses `trusscli` to update each example before building.
+
+`examples/build_all.py` is the Python version of it, and it also builds and runs the
+core and addon tests (`--core-tests-only`, `--addon-tests-only`). It prints a
+short screen by default: a dot line for progress, compiler warnings and errors,
+`FAILED` lines with their details, per-suite counts like
+`allCoreTests: 141/141 passed`, and a last line that starts with `Done:` or
+`Failed:` (then `ERROR:` / `WARNING:` / `FAIL:` lines with counts, only when
+they are not zero). The full output of each build and test goes to its own file
+in `build-logs/` at the repository root (for example
+`build-logs/core/tests/foo.log`), overwritten on each run. A test that crashes,
+times out or fails without a `FAIL` line prints the last lines of its output and
+the path of its log. Pass `--verbose` to print everything on screen; CI does.
 
 ---
 

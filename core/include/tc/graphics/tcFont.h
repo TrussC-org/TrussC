@@ -371,7 +371,7 @@ public:
         // reference the old atlas views.
         const bool hasGpuResources = !pendingDestroys_.empty() ||
             std::any_of(atlases_.begin(), atlases_.end(), [](const AtlasState& atlas) { return atlas.textureValid_; });
-        // A cancelled worker owns CPU-only pages. Short-circuit before even
+        // A canceled worker owns CPU-only pages. Short-circuit before even
         // sg_isvalid(): sokol queries also belong to main, not the decoder.
         if (!hasGpuResources && !atlases_.empty() && !isMainThread()) {
             internal::probeResourceLoad("font.cpu-atlas-retired", {});
@@ -888,7 +888,7 @@ private:
         // That leaves the origin at a non-integer position -- 1/(2*os) of a
         // pixel, so a quarter pixel at os = 2 -- which means the atlas texel
         // grid never quite lands on the screen pixel grid, however carefully
-        // grid fit places the baseline. Cancelling it (rasterize with the
+        // grid fit places the baseline. Canceling it (rasterize with the
         // opposite shift, snap the box outward to whole pixels, render into the
         // interior of a larger bitmap so the margin does not move the glyph)
         // was built and measured: with the phase pinned and stepped 0.0..0.9 it
@@ -1021,18 +1021,19 @@ private:
         img_desc.height = atlas.height_;
         img_desc.pixel_format = SG_PIXELFORMAT_R8;   // coverage, drawn by activeCoverage2D()
         // immutable (default) - can set initial data
-        img_desc.data.mip_levels[0].ptr = atlas.pixels_.data();
-        img_desc.data.mip_levels[0].size = atlas.pixels_.size();
+        img_desc.data.ptr = atlas.pixels_.data();
+        img_desc.data.size = atlas.pixels_.size();
 
         // Optional mip chain: without it, glyphs minified on screen (far/small
         // text, non-HiDPI displays) alias and shimmer under motion — MSAA can't
         // fix in-texture minification. sokol never auto-generates mipmaps, so we
-        // build the chain on the CPU here. Texels hold coverage only (the colour
-        // comes from the vertex colour in the coverage shader), so each mip
-        // box-averages coverage; there is no colour channel to darken at glyph
+        // build the chain on the CPU here. Texels hold coverage only (the color
+        // comes from the vertex color in the coverage shader), so each mip
+        // box-averages coverage; there is no color channel to darken at glyph
         // edges, and minified glyphs stay clean. (GLYPH_PADDING=2 means very
-        // coarse mips bleed slightly between neighbours, but that range is
+        // coarse mips bleed slightly between neighbors, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
+        std::vector<uint8_t> mipBlob;
         std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
         // Oversampling and mipmapping compose: oversampling owns 1:1 and above,
         // the mip chain owns minification -- which is exactly where a denser
@@ -1042,6 +1043,7 @@ private:
         // atlas the chain also lands better than on a 1x one: drawing at 1/N
         // scale reads mip log2(N), whose resolution matches the target exactly.
         if (wantMipmaps_ && mipsBuilt_) {
+            mipBlob.assign(atlas.pixels_.begin(), atlas.pixels_.end());
             int numMips = 1;
             for (int mw = atlas.width_, mh = atlas.height_; mw > 1 || mh > 1; ) {
                 mw = std::max(1, mw / 2);
@@ -1066,12 +1068,12 @@ private:
                     }
                 }
                 lowerMips.push_back(std::move(dst));
-                img_desc.data.mip_levels[level].ptr  = lowerMips.back().data();
-                img_desc.data.mip_levels[level].size = lowerMips.back().size();
+                mipBlob.insert(mipBlob.end(), lowerMips.back().begin(), lowerMips.back().end());
                 prev = lowerMips.back().data();
                 pw = cw; ph = ch;
             }
         }
+        if (!mipBlob.empty()) img_desc.data = {mipBlob.data(), mipBlob.size()};
         atlas.texture_ = sg_make_image(&img_desc);
 
         sg_view_desc view_desc = {};
@@ -1437,7 +1439,7 @@ public:
     // onLoad run on main in a later frame; glyphs are still loaded lazily.
     // Calls and resource access are serialized on main. Web without pthreads
     // decodes in a later frame, which may stall that preparation frame.
-    // App exit waits for loads still decoding; cancelling never waits.
+    // App exit waits for loads still decoding; canceling never waits.
     // Completions are delivered during runApp / runHeadlessApp; in a bare main()
     // without an app run, no completion event fires.
     void loadAsync(const fs::path& nameOrPath, int size, int faceIndex = 0);
@@ -1567,7 +1569,7 @@ private:
                 }
                 emscripten_sleep(10);
             }
-            // Abort before the stack context goes away; cancelled JS callbacks
+            // Abort before the stack context goes away; canceled JS callbacks
             // cannot enter C++ after closeBoundedFontFetch returns.
             internal::closeBoundedFontFetch(fetch);
         }
@@ -2797,7 +2799,7 @@ private:
     // agree (e.g. a screen font drawn on its original display).
     //
     // The threshold is 2, not 1, because a bilinear fetch reads a 2x2
-    // neighbourhood and copes with 2:1 on its own. Measured on 16px text
+    // neighborhood and copes with 2:1 on its own. Measured on 16px text
     // (phase-sweep shimmer, un-oversampled atlas): at 2 texels/px mip 0 is
     // actually BETTER (1.05% vs 1.16% — the mip chain only adds blur where
     // nothing was broken), while at 4 it is not close (9.79% vs 2.95%) and it

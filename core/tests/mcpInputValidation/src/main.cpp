@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <limits>
 #include <set>
+#include <tuple>
 
 using namespace tc;
 
@@ -210,6 +211,79 @@ TC_CORE_TEST_MAIN() {
         scrollInvalid &= rejectedUnchanged("tc_mouse_scroll", args);
     }
     check("invalid scroll input leaves callbacks and state unchanged", scrollInvalid);
+
+    // #1226: with two open windows, input that names its Window reads that
+    // Window's held keys, not the ambient lookup (an MCP call has no App owner).
+    {
+        Window peer;
+        tcCoreTest::InjectedWindow peerNative(peer, 702);
+        auto& peerCtx = internal::WindowRequestAccess::context(peer);
+        ctx.keysPressed.clear();
+        peerCtx.keysPressed.clear();
+        int errors = 0;
+        auto logs = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Error) ++errors;
+        });
+        check("two windows are open", internal::openWindows().size() == 2);
+        const auto mainId = internal::WindowRequestAccess::creationId(window);
+        const auto peerId = internal::WindowRequestAccess::creationId(peer);
+        bool keysOk = true;
+        for (auto [id, target, other] : {std::tuple{mainId, &ctx, &peerCtx}, {peerId, &peerCtx, &ctx}}) {
+            auto pressed = content(call("tc_key_press", {{"window", id}, {"key", SAPP_KEYCODE_A}, {"shift", true}}));
+            keysOk &= pressed.is_object() &&
+                pressed.value("modifiersPressed", json()) == json::array({KEY_LEFT_SHIFT}) &&
+                pressed.value("heldKeys", json()) == json::array({SAPP_KEYCODE_A, KEY_LEFT_SHIFT}) &&
+                other->keysPressed.empty();
+            auto released = content(call("tc_key_release", {{"window", id}, {"key", SAPP_KEYCODE_A}, {"shift", true}}));
+            keysOk &= released.is_object() &&
+                released.value("modifiersReleased", json()) == json::array({KEY_LEFT_SHIFT}) &&
+                released.value("heldKeys", json()) == json::array() && target->keysPressed.empty();
+        }
+        check("named-window key press and release use that window's held keys", keysOk);
+        // A modifier already held on the target is not pressed a second time.
+        call("tc_key_press", {{"window", peerId}, {"key", KEY_RIGHT_SHIFT}});
+        auto held = content(call("tc_key_press", {{"window", peerId}, {"key", SAPP_KEYCODE_A}, {"shift", true}}));
+        check("named-window press sees a modifier held on that window",
+              held.is_object() && held.value("modifiersPressed", json()) == json::array() &&
+              held.value("heldKeys", json()) == json::array({SAPP_KEYCODE_A, KEY_RIGHT_SHIFT}));
+        call("tc_key_release", {{"window", peerId}, {"key", SAPP_KEYCODE_A}});
+        call("tc_key_release", {{"window", peerId}, {"key", KEY_RIGHT_SHIFT}});
+        // The reply helper reads the Window it is given, not the ambient one
+        // (the ambient Window here is the main one, holding a different key).
+        ctx.keysPressed = {SAPP_KEYCODE_B};
+        peerCtx.keysPressed = {SAPP_KEYCODE_C};
+        check("heldKeysJson reads the given window, not the ambient one",
+              mcp::internal::heldKeysJson(peerCtx) == json::array({SAPP_KEYCODE_C}) &&
+              mcp::internal::heldKeysJson(ctx) == json::array({SAPP_KEYCODE_B}));
+        ctx.keysPressed.clear();
+        peerCtx.keysPressed.clear();
+        // heldKeys in the reply describes the named target, not the ambient
+        // window, even while another window holds a different key set.
+        call("tc_key_press", {{"window", mainId}, {"key", SAPP_KEYCODE_B}});
+        auto peerPress = content(call("tc_key_press", {{"window", peerId}, {"key", SAPP_KEYCODE_C}}));
+        auto mainPress = content(call("tc_key_press", {{"window", mainId}, {"key", SAPP_KEYCODE_D}}));
+        auto peerRelease = content(call("tc_key_release", {{"window", peerId}, {"key", SAPP_KEYCODE_C}}));
+        auto mainRelease = content(call("tc_key_release", {{"window", mainId}, {"key", SAPP_KEYCODE_D}}));
+        check("tc_key_press heldKeys lists the named target's keys",
+              peerPress.value("heldKeys", json()) == json::array({SAPP_KEYCODE_C}) &&
+              mainPress.value("heldKeys", json()) == json::array({SAPP_KEYCODE_B, SAPP_KEYCODE_D}));
+        check("tc_key_release heldKeys lists the named target's keys",
+              peerRelease.value("heldKeys", json()) == json::array() &&
+              mainRelease.value("heldKeys", json()) == json::array({SAPP_KEYCODE_B}));
+        call("tc_key_release", {{"window", mainId}, {"key", SAPP_KEYCODE_B}});
+        bool pointerOk = true;
+        for (auto id : {mainId, peerId}) {
+            pointerOk &= succeeded(call("tc_mouse_move", {{"window", id}, {"x", 3}, {"y", 4}}));
+            pointerOk &= succeeded(call("tc_mouse_press", {{"window", id}, {"x", 3}, {"y", 4}, {"button", 0}}));
+            pointerOk &= succeeded(call("tc_mouse_release", {{"window", id}, {"x", 3}, {"y", 4}, {"button", 0}}));
+            pointerOk &= succeeded(call("tc_mouse_click", {{"window", id}, {"x", 3}, {"y", 4}, {"shift", true}}));
+            pointerOk &= succeeded(call("tc_mouse_scroll", {{"window", id}, {"dx", 0}, {"dy", 1}}));
+        }
+        check("named-window mouse and scroll input succeed", pointerOk);
+        check("named-window input logs no window-resolution error", errors == 0);
+        std::printf("two-window input errors=%d\n", errors);
+        ctx.keysPressed.clear();
+    }
     std::printf("checks=%d failures=%d\n", checks, failures);
     internal::windowApiContext().appEventListeners.clear();
     return failures ? 1 : 0;

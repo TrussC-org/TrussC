@@ -6,7 +6,7 @@
 //   - require('./scan-examples').buildReverseIndex({funcs, types})  (generator)
 //
 // Ranking signals: title match (example dir contains the symbol) = top hit,
-// then prominence (uses / distinct-APIs-in-example) favours focused demos.
+// then prominence (uses / distinct-APIs-in-example) favors focused demos.
 // IDF: symbols used by > threshold of examples are suppressed (setup/clear/...).
 // Lifecycle/Events callbacks are excluded (defined, not demonstrated).
 

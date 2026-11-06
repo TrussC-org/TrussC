@@ -427,9 +427,8 @@ struct InputTarget {
     }
 };
 
-json heldKeysJson() {
-    std::vector<int> held(::trussc::internal::currentWindowContext().keysPressed.begin(),
-                          ::trussc::internal::currentWindowContext().keysPressed.end());
+json heldKeysJson(const ::trussc::internal::WindowContext& ctx) {
+    std::vector<int> held(ctx.keysPressed.begin(), ctx.keysPressed.end());
     std::sort(held.begin(), held.end());
     return json(held);
 }
@@ -1211,23 +1210,26 @@ void registerStandardTools(Server& server) {
 
             // Press the requested modifiers first (skip any already held —
             // whichever side, so an explicit RIGHT_SHIFT hold is respected).
+            // Held keys are read from the target Window: the ambient
+            // isShiftPressed() family cannot pick a Window here (#1226).
             json pressedMods = json::array();
-            auto holdMod = [&](const char* flag, bool alreadyHeld, int code) {
-                if (a.value(flag, false) && !alreadyHeld) {
-                    target.key(code, true);
-                    pressedMods.push_back(code);
+            auto holdMod = [&](const char* flag, int left, int right) {
+                if (a.value(flag, false) && !target.ctx.keysPressed.contains(left) &&
+                    !target.ctx.keysPressed.contains(right)) {
+                    target.key(left, true);
+                    pressedMods.push_back(left);
                 }
             };
-            holdMod("shift", isShiftPressed(),   SAPP_KEYCODE_LEFT_SHIFT);
-            holdMod("ctrl",  isControlPressed(), SAPP_KEYCODE_LEFT_CONTROL);
-            holdMod("alt",   isAltPressed(),     SAPP_KEYCODE_LEFT_ALT);
-            holdMod("super", isSuperPressed(),   SAPP_KEYCODE_LEFT_SUPER);
+            holdMod("shift", SAPP_KEYCODE_LEFT_SHIFT,   SAPP_KEYCODE_RIGHT_SHIFT);
+            holdMod("ctrl",  SAPP_KEYCODE_LEFT_CONTROL, SAPP_KEYCODE_RIGHT_CONTROL);
+            holdMod("alt",   SAPP_KEYCODE_LEFT_ALT,     SAPP_KEYCODE_RIGHT_ALT);
+            holdMod("super", SAPP_KEYCODE_LEFT_SUPER,   SAPP_KEYCODE_RIGHT_SUPER);
 
             target.key(key, true);
 
             return json{{"status", "ok"},
                         {"modifiersPressed", pressedMods},
-                        {"heldKeys", internal::heldKeysJson()}};
+                        {"heldKeys", internal::heldKeysJson(target.ctx)}};
         });
 
     coreTool(server, "tc_key_release",
@@ -1253,7 +1255,7 @@ void registerStandardTools(Server& server) {
 
             json releasedMods = json::array();
             auto dropMod = [&](const char* flag, int code) {
-                if (a.value(flag, false) && isKeyPressed(code)) {
+                if (a.value(flag, false) && target.ctx.keysPressed.contains(code)) {
                     target.key(code, false);
                     releasedMods.push_back(code);
                 }
@@ -1265,7 +1267,7 @@ void registerStandardTools(Server& server) {
 
             return json{{"status", "ok"},
                         {"modifiersReleased", releasedMods},
-                        {"heldKeys", internal::heldKeysJson()}};
+                        {"heldKeys", internal::heldKeysJson(target.ctx)}};
         });
 
     // --- Node Tools ---

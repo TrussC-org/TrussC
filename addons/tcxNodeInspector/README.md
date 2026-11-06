@@ -70,7 +70,7 @@ struct Sprite : Node {
     TC_REFLECT(Sprite, Node) {      // list the direct base: Node's pos/rotation/... chain in
         TC_VALUE(color)
         TC_VALUE(radius)
-        TC_VALUE(alive, isAlive)              // getter only = read-only (greyed out)
+        TC_VALUE(alive, isAlive)              // getter only = read-only (grayed out)
         TC_VALUE(speed, getSpeed, setSpeed)   // getter + setter = editable
     }
 };
@@ -80,10 +80,19 @@ The Inspector renders each reflected type with the matching ImGui widget
 (`float`/`int`/`bool`/`Vec2`/`Vec3`/`Color`/`string`). Enum values render as a
 combo of their labels when the enum declares them (`TC_ENUM_LABELS`, optional —
 without labels an enum edits as a plain int), and getter-only values render
-greyed out. The Inspector always uses the built-in `tcx::ImGuiReflector`, and
+grayed out. The Inspector always uses the built-in `tcx::ImGuiReflector`, and
 there is no way to plug in a subclass yet. A subclass that overrides a
 `visit()` only helps in an ImGui panel your app draws itself (call
 `node->reflectMembers(r)` there). It does not change the Inspector.
+
+Image-like members (an `Fbo`, `Image` or `VideoPlayer` listed with
+`TC_VALUE(fbo)`) render as a read-only thumbnail with the aspect ratio kept,
+next to the size and format (`1920×1080 RGBA8`, or `not allocated`). The
+thumbnail is the texture as of the frame the Inspector drew it. A cubemap, a
+multisampled texture or a non-filterable format (for example `RGBA32F` on some
+GPUs) shows the text only. If the Fbo is destroyed or reallocated after the
+Inspector drew and before ImGui renders the frame, the thumbnail is skipped for
+that frame instead of drawing a dead texture. Images are not saved to JSON.
 
 ## Mods
 

@@ -81,13 +81,13 @@ void deterministic() {
     check("expired deadline no longer armed",budget.armedDeadline()==C::time_point::max());
     D idle;check("idle deadline not armed",idle.armedDeadline()==C::time_point::max());
     idle.arm(3,t);check("armed deadline exact",idle.armedDeadline()==t+std::chrono::seconds(3));
-    idle.cancel();check("cancelled deadline not armed",idle.armedDeadline()==C::time_point::max());
+    idle.cancel();check("canceled deadline not armed",idle.armedDeadline()==C::time_point::max());
     D zero;zero.arm(0,t);check("zero immediate",zero.expire(t));
     D infinity;infinity.arm(INFINITY,t);check("infinite budget",!infinity.expire(C::time_point::max()));
     check("infinite budget not armed",infinity.armedDeadline()==C::time_point::max());
     for(int n=0;n<100;++n) {
         D race;race.arm(0,t);std::thread a([&] { race.expire(t); });race.cancel();a.join();
-        check("cancelled worker cannot expire a later run",!race.expire(C::time_point::max()));
+        check("canceled worker cannot expire a later run",!race.expire(C::time_point::max()));
     }
 }
 }

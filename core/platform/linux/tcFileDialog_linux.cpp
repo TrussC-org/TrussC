@@ -8,6 +8,8 @@
 
 #include <gtk/gtk.h>
 #include <cstring>
+#include "tc/utils/internal/tcAsyncDialog.h"
+#include <memory>
 
 namespace {
 
@@ -32,9 +34,93 @@ void processGtkEvents() {
     }
 }
 
+struct NativeDialog {
+    std::shared_ptr<GtkWidget*> handle;
+    trussc::internal::DialogKind kind;
+    trussc::internal::DialogCompletion complete;
+};
+size_t openDialogs = 0;
+bool cleanupPending = false;
+
+void dialogDestroyed(GtkWidget*, gpointer data) {
+    std::unique_ptr<NativeDialog> dialog(static_cast<NativeDialog*>(data));
+    *dialog->handle = nullptr;
+    --openDialogs;
+    cleanupPending = true;
+    // A window-manager close/destroy without a response is cancellation too.
+    if (dialog->complete) dialog->complete({});
+}
+void dialogResponse(GtkDialog* widget, gint response, gpointer data) {
+    auto* dialog = static_cast<NativeDialog*>(data);
+    trussc::FileDialogResult result;
+    if (dialog->kind == trussc::internal::DialogKind::Confirm) {
+        result.success = response == GTK_RESPONSE_YES;
+    } else if ((dialog->kind == trussc::internal::DialogKind::Load ||
+                dialog->kind == trussc::internal::DialogKind::Save) && response == GTK_RESPONSE_ACCEPT) {
+        if (char* filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(widget))) {
+            result.filePath = filename;
+            result.fileName = result.filePath.filename();
+            result.success = true;
+            g_free(filename);
+        }
+    }
+    auto complete = std::move(dialog->complete);
+    gtk_widget_destroy(GTK_WIDGET(widget));
+    if (complete) complete(std::move(result));
+}
+
+trussc::internal::DialogDismiss presentDialog(const trussc::internal::DialogInputs& inputs,
+                                            trussc::internal::DialogCompletion complete) {
+    using trussc::internal::DialogKind;
+    if (!initGtk()) { complete({}); return {}; }
+    GtkWidget* widget;
+    if (inputs.kind == DialogKind::Alert || inputs.kind == DialogKind::Confirm) {
+        const bool confirm = inputs.kind == DialogKind::Confirm;
+        widget = gtk_message_dialog_new(nullptr, GtkDialogFlags(0),
+            confirm ? GTK_MESSAGE_QUESTION : GTK_MESSAGE_INFO,
+            confirm ? GTK_BUTTONS_YES_NO : GTK_BUTTONS_OK, "%s", inputs.message.c_str());
+        if (!inputs.title.empty()) gtk_window_set_title(GTK_WINDOW(widget), inputs.title.c_str());
+    } else {
+        const bool save = inputs.kind == DialogKind::Save;
+        const auto action = save ? GTK_FILE_CHOOSER_ACTION_SAVE :
+            inputs.folderSelection ? GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER : GTK_FILE_CHOOSER_ACTION_OPEN;
+        const std::string title = inputs.title.empty() ?
+            (save ? "Save File" : inputs.folderSelection ? "Select Folder" : "Open File") : inputs.title;
+        widget = gtk_file_chooser_dialog_new(title.c_str(), nullptr, action,
+            "_Cancel", GTK_RESPONSE_CANCEL,
+            save ? "_Save" : inputs.folderSelection ? "_Select" : "_Open", GTK_RESPONSE_ACCEPT, nullptr);
+        if (!inputs.defaultPath.empty())
+            gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(widget), inputs.defaultPath.c_str());
+        if (save) {
+            // GTK's internal overwrite confirmation still blocks (owner-approved).
+            gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(widget), TRUE);
+            if (!inputs.defaultName.empty())
+                gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(widget), inputs.defaultName.c_str());
+        }
+    }
+    auto handle = std::make_shared<GtkWidget*>(widget);
+    auto* dialog = new NativeDialog{handle, inputs.kind, std::move(complete)};
+    g_signal_connect(widget, "response", G_CALLBACK(dialogResponse), dialog);
+    g_signal_connect(widget, "destroy", G_CALLBACK(dialogDestroyed), dialog);
+    ++openDialogs;
+    gtk_window_set_keep_above(GTK_WINDOW(widget), TRUE);
+    gtk_widget_show_all(widget);
+    return [handle] { if (*handle) gtk_widget_destroy(*handle); };
+}
+
 } // anonymous namespace
 
 namespace trussc {
+namespace internal {
+void pumpLinuxDialogs() {
+    if (!openDialogs && !cleanupPending) return;
+    // Bound (responsiveness): service at most 64 ready GTK iterations so the host turn can progress.
+    for (int iteration = 0; iteration < 64 && gtk_events_pending(); ++iteration)
+        gtk_main_iteration_do(FALSE);
+    cleanupPending = gtk_events_pending();
+}
+} // namespace internal
+
 
 // -----------------------------------------------------------------------------
 // Alert dialog
@@ -64,8 +150,8 @@ void alertDialog(const std::string& title, const std::string& message) {
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
                       std::function<void()> callback) {
-    alertDialog(title, message);
-    if (callback) callback();
+    internal::requestAsyncDialog({internal::DialogKind::Alert, title, message, {}, {}},
+        [callback = std::move(callback)](FileDialogResult) { if (callback) callback(); }, presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -98,8 +184,8 @@ bool confirmDialog(const std::string& title, const std::string& message) {
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
                         std::function<void(bool)> callback) {
-    bool result = confirmDialog(title, message);
-    if (callback) callback(result);
+    internal::requestAsyncDialog({internal::DialogKind::Confirm, title, message, {}, {}},
+        [callback = std::move(callback)](FileDialogResult result) { if (callback) callback(result.success); }, presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -160,8 +246,8 @@ void loadDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
-    FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection);
-    if (callback) callback(result);
+    internal::requestAsyncDialog({internal::DialogKind::Load, title, message, defaultPath, {}, folderSelection},
+        std::move(callback), presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -219,8 +305,8 @@ void saveDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
-    FileDialogResult result = saveDialog(title, message, defaultPath, defaultName);
-    if (callback) callback(result);
+    internal::requestAsyncDialog({internal::DialogKind::Save, title, message, defaultPath, defaultName},
+        std::move(callback), presentDialog);
 }
 
 } // namespace trussc

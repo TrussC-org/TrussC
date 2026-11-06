@@ -23,6 +23,8 @@ addons/tcxImGui/src/
 │   ├── imgui_draw.cpp        # Untouched
 │   ├── imgui_tables.cpp      # Untouched
 │   ├── imgui_demo.cpp        # Untouched
+│   ├── imgui_stdlib.h        # Untouched (from misc/cpp/)
+│   ├── imgui_stdlib.cpp      # Untouched (from misc/cpp/)
 │   ├── imstb_*.h             # Untouched
 │   └── TRUSSC_MODIFICATIONS.md
 ├── sokol_imgui.h             # From sokol util/ + TrussC multi-context patch (see below)
@@ -274,11 +276,11 @@ Not hooked, on purpose:
 Not a Dear ImGui file, but it is bundled here, in the addon, not with the core
 sokol headers (see `core/include/sokol/TRUSSC_MODIFICATIONS.md`).
 
-**Upstream base:** https://github.com/floooh/sokol `util/sokol_imgui.h` at commit
-`082152c` (2026-05-21) — the same commit as the core sokol headers — plus the
-cherry-pick below. It must stay in step with the core `sokol_gfx.h`: upstream
-`sokol_imgui.h` after `082152c` moves to `sg_write_buffer_transient()`, which
-the bundled `sokol_gfx.h` does not have yet.
+**Upstream base:** https://github.com/floooh/sokol `util/sokol_imgui.h` at commit `e7a48ed6` (2026-11-03),
+matching the core sokol headers (#713 Q3/Q4).
+The three-way update used `082152c` as base; upstream already includes the
+`544c0ef` cherry-pick. The upstream flush/draw split, direct writes from ImGui
+lists, font staging/copies, gamma uniforms and allocator removal are retained.
 
 ### I5. Multi-context API (`simgui_tc_*`)
 
@@ -299,27 +301,38 @@ atlas, buffers, pipeline) per window, for multi-window apps.
 
 ### I6. Upstream cherry-pick `544c0ef` (for Dear ImGui 1.92.9)
 
-`draw_data->CmdListsCount` → `draw_data->CmdLists.Size` (3 lines; 1.92.9
-marked `CmdListsCount` obsolete). Identical to upstream, so it carries no
-marker and merges cleanly on the next update.
+`draw_data->CmdListsCount` → `draw_data->CmdLists.Size` is now included in
+upstream `e7a48ed6`; no separate cherry-pick or local patch remains.
 
 ### 6. Automatic vertex/index buffer growth (#340)
 
-Before copying a frame, `simgui_render()` sums vertex/index bytes with checked
-arithmetic and doubles the active context's capacity until both fit (indices
-remain 3x vertices). Final byte sizes must fit Sokol's signed int storage
-before allocation; doubling caps at that representation limit, and setup
-checks the initial size too. CPU blocks and GPU buffers are replaced transactionally;
-detected allocation failure keeps the old buffers and draws complete lists that fit,
-with one useful Error per failed frame. Old GPU buffers use normal
-`sg_destroy_buffer()` before this frame's single upload per buffer.
-The first successful grow per context emits a sized message in Release too;
-`ImGuiManager` maps this backend info item to Notice. Initial capacity is
-configurable through `imguiSetup(int)`, `setup(int)`, and `setupOffscreen(int)`.
-No Dear ImGui core file changes are needed.
+Before writing a frame, `simgui_flush()` preflights all vertex/index bytes,
+including upstream's four-byte index-list alignment, and doubles the active
+context's GPU capacity until both fit (indices remain 3x vertices). Final byte
+sizes must fit Sokol's signed int storage; doubling caps at that representation
+limit, and setup checks the initial size too. Only GPU buffers are replaced,
+transactionally. ImGui owns the CPU draw lists; no scatter-gather CPU copy or
+allocator override remains. A failed replacement keeps both old GPU buffers
+and draws complete lists that fit, with one useful Error per failed frame.
+The first successful grow per context emits an actionable Notice even in
+Release. Initial capacity remains configurable through `imguiSetup(int)`,
+`setup(int)`, and `setupOffscreen(int)`.
 
-On the next sokol sync, move this logic to the `sg_write_buffer_transient()`
-path, which replaces CPU staging in upstream versions after `082152c`.
+### I7. Draw-point pass suspension (#713 Q3)
+
+The addon flushes preceding target layers, parks the current pass, calls
+`simgui_flush()` outside a pass, resumes the same target with its existing
+LOAD continuation policy, then calls `simgui_draw()`. This applies to windows
+and Fbos and preserves the original UI draw point and subsequent target state.
+The uniform reapplication for unfilterable textures includes upstream's gamma.
+
+Each `simgui_tc_context` owns independent transient vertex/index buffers and
+font staging buffer. The existing target-frame reservation admits one render
+per context per Sokol GPU frame; another render in that frame uses another
+context, including window/Fbo combinations. It cannot overwrite a buffer used
+by an earlier draw in the same frame. Across frames Sokol manages transient
+storage and native resource retirement, so GPU-only growth before a
+flush is compatible with upstream's write-before-use rule.
 
 ---
 
@@ -335,7 +348,7 @@ Expected counts (lines containing the marker; this file excluded):
 |---|---|
 | `imgui/imconfig.h` | 4 (the hooks-on line, `begin`, a comment, `end`) |
 | `imgui/imgui_widgets.cpp` | 43 (19 call sites + 24 wrapped returns) |
-| `sokol_imgui.h` | 11 |
+| `sokol_imgui.h` | 18 |
 
 ---
 
@@ -369,6 +382,15 @@ there.)
 ```bash
 for f in imgui.cpp imgui_draw.cpp imgui_internal.h imgui_tables.cpp imgui.h imgui_demo.cpp imstb_rectpack.h imstb_textedit.h imstb_truetype.h; do
   git -C /tmp/imgui show $NEW:$f > addons/tcxImGui/src/imgui/$f
+done
+```
+
+`imgui_stdlib.h` / `imgui_stdlib.cpp` (the `std::string` overloads of
+`InputText`) live in `misc/cpp/` upstream, so they are outside that loop:
+
+```bash
+for f in imgui_stdlib.h imgui_stdlib.cpp; do
+  git -C /tmp/imgui show $NEW:misc/cpp/$f > addons/tcxImGui/src/imgui/$f
 done
 ```
 

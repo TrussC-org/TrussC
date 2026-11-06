@@ -8,15 +8,15 @@
 // (i.e. raw 2x2 box):
 //
 //   1. **4x4 footprint**: four bilinear taps offset by ±0.5 source texels
-//      average the surrounding 4x4 source neighbourhood. A wider low-pass
+//      average the surrounding 4x4 source neighborhood. A wider low-pass
 //      removes more of the high-frequency content that would otherwise
 //      cascade into lower mips and resurface as moiré at small sizes.
 //
 //   2. **Gamma-correct average**: input pixels are treated as sRGB-encoded,
 //      converted to linear light, averaged, and re-encoded. Without this
 //      correction the average of a black/white pattern collapses to mid-
-//      grey at 0.5 in sRGB space (perceptually too dark), and edges
-//      between bright and dark colours read as too dark in lower mips —
+//      gray at 0.5 in sRGB space (perceptually too dark), and edges
+//      between bright and dark colors read as too dark in lower mips —
 //      both noticeably wrong on textures that include high-contrast areas.
 //
 // Native texture views rebase the source mip to LOD 0. GL without texture

@@ -12,7 +12,7 @@
 #include <array>
 using namespace tc;
 static int legacySwapchains;
-extern "C" sapp_swapchain __wrap_sapp_get_swapchain() { ++legacySwapchains; return {}; }
+extern "C" sapp_swapchain __wrap_sapp_acquire_swapchain() { ++legacySwapchains; return {}; }
 
 namespace renewal {
 using _sapp_tc_x11_surface_t = EGLSurface;
@@ -105,6 +105,73 @@ sg_swapchain swapchain(void*) {
     s.color_format = SG_PIXELFORMAT_RGBA8; s.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
     return s;
 }
+void stencilUploadProbe() {
+    WindowProbe owner;
+    auto& ctx = internal::WindowRequestAccess::context(owner);
+    internal::currentWindowCtx() = &ctx;
+    ctx.fbWidth = ctx.fbHeight = 64; ctx.dpiScale = 1;
+    ctx.swapchainTarget.width = ctx.swapchainTarget.height = 64;
+    ctx.swapchainTarget.sampleCount = 1; ctx.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
+    ctx.acquireSwapchain = swapchain;
+    Pixels pixels; pixels.allocate(2,2,4);
+    Texture texture; texture.allocate(2,2,TextureFormat::RGBA8,TextureUsage::Dynamic);
+    for (bool offscreen : {false,true}) for (bool upload : {false,true}) {
+        // This synthetic host commits directly, without present() advancing it.
+        ++ctx.renderEpoch;
+        ctx.swapchainTarget.passStartedThisFrame = false;
+        beginFrame();
+        Fbo fbo;
+        if (offscreen) { fbo.allocate(64,64); fbo.begin(0,0,0,1); }
+        else internal::ensureCurrentPass();
+        unsigned char initial = 99;
+        glReadPixels(32,32,1,1,GL_STENCIL_INDEX,GL_UNSIGNED_BYTE,&initial);
+        check("initial pass still clears stencil", initial == 0);
+        glStencilMask(0xFF); glClearStencil(1); glClear(GL_STENCIL_BUFFER_BIT);
+        unsigned char before = 99, after = 99;
+        glReadPixels(32,32,1,1,GL_STENCIL_INDEX,GL_UNSIGNED_BYTE,&before);
+        if (upload) texture.loadData(pixels);
+        glReadPixels(32,32,1,1,GL_STENCIL_INDEX,GL_UNSIGNED_BYTE,&after);
+        std::printf("STENCIL offscreen=%d upload=%d before=%u after=%u error=%u\n", offscreen,upload,before,after,glGetError());
+        check("texture upload retains stencil mask", before==1 && after==1);
+        if (offscreen) fbo.end();
+        internal::parkWindowPass(); sg_commit();
+    }
+    internal::restoreWindowContext(nullptr); sg_commit(); sg_reset_state_cache();
+}
+
+void lazyUploadOrdering() {
+    WindowProbe owner;
+    auto& ctx = trussc::internal::WindowRequestAccess::context(owner);
+    internal::currentWindowCtx() = &ctx;
+    ctx.fbWidth = ctx.fbHeight = 64; ctx.dpiScale = 1;
+    ctx.swapchainTarget.width = ctx.swapchainTarget.height = 64;
+    ctx.swapchainTarget.sampleCount = 1; ctx.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
+    ctx.acquireSwapchain = swapchain;
+    for (bool mipmapped : {false, true}) {
+        beginFrame();
+        Pixels red, green; red.allocate(2,2,4); green.allocate(2,2,4);
+        for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+            red.setColor(x,y,Color(1,0,0)); green.setColor(x,y,Color(0,1,0));
+        }
+        Texture texture; texture.allocate(red, TextureUsage::Dynamic, mipmapped);
+        texture.loadData(red);
+        setColor(1.0f); texture.draw(0,0,32,64);
+        check("upload fixture reaches lazy window recording", !ctx.swapchainTarget.inPass && sgl_num_vertices() > 0);
+        texture.loadData(green);
+        texture.draw(32,0,32,64);
+        internal::ensureCurrentPass(); ctx.swapchainTarget.flushLayers();
+        unsigned char left[4]{}, right[4]{};
+        glReadPixels(16,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,left);
+        glReadPixels(48,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,right);
+        std::printf("lazy upload mipmapped=%d left=%u,%u,%u right=%u,%u,%u\n",
+            mipmapped,left[0],left[1],left[2],right[0],right[1],right[2]);
+        check("lazy window upload preserves prior draw",left[0]==255 && left[1]==0 && right[0]==0 && right[1]==255);
+        ctx.swapchainTarget.endPass();
+        sg_commit();
+    }
+    internal::restoreWindowContext(nullptr); sg_commit(); sg_reset_state_cache();
+}
+
 void recordingIsolation() {
     WindowProbe owner;
     auto& ctx = trussc::internal::WindowRequestAccess::context(owner);
@@ -354,6 +421,8 @@ TC_CORE_TEST_MAIN() {
     failedCurrentRenewal(display, config, surface);
     processPasses();
     recordingIsolation();
+    stencilUploadProbe();
+    lazyUploadOrdering();
     uint8_t glyph[13] = {};
     bitmapfont::registerGlyph({65, glyph, bitmapfont::Width::Halfwidth});
     internal::bitmapFontAtlas().initialized = true;
@@ -366,12 +435,12 @@ TC_CORE_TEST_MAIN() {
         }
         check("two windows draw at different rates without updates", fast.draws == 24 && slow.draws == 8 &&
             trussc::internal::WindowRequestAccess::context(fast.window).updateCount == 0 && trussc::internal::WindowRequestAccess::context(slow.window).updateCount == 0);
-        // Base's atlas guard suppresses a repeat upload at the same resource key.
+        // Repeated glyph changes publish immediately at the same resource key.
         internal::restoreWindowContext(&trussc::internal::WindowRequestAccess::context(fast.window));
         bitmapfont::updateGlyph(65, glyph); ensureFontAtlasForText("A");
         const auto uploaded = internal::bitmapFontAtlas().version;
         bitmapfont::updateGlyph(65, glyph); ensureFontAtlasForText("A");
-        check("atlas defers repeated upload at the same base-equivalent key", internal::bitmapFontAtlas().version == uploaded);
+        check("atlas publishes repeated upload immediately", internal::bitmapFontAtlas().version > uploaded);
         const auto gpuFrame = internal::shaderStreamFrame();
         internal::runWindowTick(std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(425),
             1.0/60, false, nullptr, true);

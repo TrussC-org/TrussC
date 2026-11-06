@@ -1,10 +1,10 @@
 // =============================================================================
 // core/tests/sglLayerUpload — regression test for the sokol_gl "per-layer full
-// re-append" GPU vertex-buffer blow-up (fix/buffer-increase-bug).
+// re-upload" GPU vertex-buffer blow-up (fix/buffer-increase-bug).
 //
 // THE BUG: flushDeferredShaderDraws()/flushFboDeferredPbr() draw each sokol_gl
 // layer with sgl_(context_)draw_layer(). The TrussC fork's _sgl_draw() used
-// sg_append_buffer() and re-appended the ENTIRE vertex set on every call. With
+// the former append API and re-uploaded the ENTIRE vertex set on every call. With
 // N layers (one per deferred PBR/shader draw) and V vertices recorded, one frame
 // uploaded N*V vertices and grew the GPU buffer 2x at a time until the backend
 // refused the allocation (Metal: id:52 / METAL_CREATE_BUFFER_FAILED), killing
@@ -14,7 +14,7 @@
 // returned base offset for the remaining layer draws (O(V), not O(N*V)).
 //
 // WHY THIS IS HEADLESS / GPU-LESS: it drives sokol_gl on SOKOL_DUMMY_BACKEND,
-// which has no GPU but tracks the exact accounting that blows up — append_pos
+// which has no GPU but tracks the exact accounting that blows up — write trace
 // (bytes uploaded this frame) and the GPU buffer size. So the regression is
 // fully deterministic in CI. It is NOT a pixel/render-correctness test; that
 // still needs real Metal/D3D11/GL devices (see the project note).
@@ -27,6 +27,9 @@
 // =============================================================================
 
 #define SOKOL_IMPL
+#define SOKOL_DEBUG
+#define SOKOL_VALIDATE_NON_FATAL
+#define SOKOL_TRACE_HOOKS
 #define SOKOL_DUMMY_BACKEND
 #include "sokol_log.h"
 #include "sokol_gfx.h"
@@ -35,6 +38,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static int validationErrors = 0;
+static void logger(const char* tag, uint32_t level, uint32_t item, const char* message,
+                   uint32_t line, const char* file, void* user) {
+    if (level <= 1) ++validationErrors;
+    slog_func(tag, level, item, message, line, file, user);
+}
+static void begin_pass(void) {
+    sg_pass pass = {0};
+    pass.swapchain.width = pass.swapchain.height = 32;
+    pass.swapchain.sample_count = 1;
+    pass.swapchain.color_format = SG_PIXELFORMAT_RGBA8;
+    pass.swapchain.depth_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+    sg_begin_pass(&pass);
+}
+static size_t uploadedBytes = 0;
+static void written(const sg_write_buffer_desc* desc, void* user) {
+    (void)user;
+    uploadedBytes += desc->src.data.size;
+}
 static int g_fail = 0;
 static void check(const char* name, bool ok) {
     printf("%-60s %s\n", name, ok ? "PASS" : "FAIL");
@@ -56,9 +78,9 @@ static void push_tris(int n_tris) {
     sgl_end();
 }
 
-static size_t append_pos(sgl_context ctx_id) {
-    _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
-    return (size_t)sg_query_buffer_info(ctx->vbuf).append_pos;
+static size_t uploaded_bytes(sgl_context ctx_id) {
+    (void)ctx_id;
+    return uploadedBytes;
 }
 static size_t gpu_size(sgl_context ctx_id) {
     _sgl_context_t* ctx = _sgl_lookup_context(ctx_id.id);
@@ -73,11 +95,15 @@ static void flush_layers(sgl_context ctx, int maxLayer) {
 // =============================================================================
 
 int main(void) {
-    sg_setup(&(sg_desc){ .logger.func = slog_func });
-    sgl_setup(&(sgl_desc_t){ .logger.func = slog_func });
+    sg_setup(&(sg_desc){ .logger.func = logger });
+    sgl_setup(&(sgl_desc_t){ .logger.func = logger });
+    sg_trace_hooks hooks = {0};
+    hooks.write_buffer_transient = written;
+    sg_install_trace_hooks(&hooks);
     sgl_context ctx = sgl_make_context(&(sgl_context_desc_t){
         .max_vertices = 1<<16, .max_commands = 1<<14 });
     sgl_set_context(ctx);
+    begin_pass();
 
     // -------------------------------------------------------------------------
     // 1) The core regression: empty layers must NOT each re-upload all vertices.
@@ -97,16 +123,16 @@ int main(void) {
             push_tris(fogTris);
             for (int L = 1; L <= N; L++) sgl_layer(L);   // N empty layers
             flush_layers(ctx, N);
-            size_t pos = append_pos(ctx);
+            size_t pos = uploaded_bytes(ctx);
             size_t buf = gpu_size(ctx);
-            printf("  [empty]   N=%4d  append_pos=%9zu (want %zu)  gpu_buf=%zu\n",
+            printf("  [empty]   N=%4d  uploaded_bytes=%9zu (want %zu)  gpu_buf=%zu\n",
                    N, pos, V, buf);
             if (pos != V) oneUploadAllN = false;             // pre-fix: ~N*V
             // The GPU buffer must NOT grow as layer count increases. Pre-fix it
             // doubled every frame (2.5->5->10->...->GBs) until allocation failed.
             if (i == 0) bufAtSmallestN = buf;
             else if (buf > bufAtSmallestN) bufDoesNotGrowWithN = false;
-            sg_commit();                                     // frame boundary
+            sg_end_pass(); sg_commit(); uploadedBytes = 0; begin_pass();                                     // frame boundary
         }
         check("empty layers: exactly one upload per frame (no N*V)", oneUploadAllN);
         check("empty layers: GPU buffer does not grow with layer count", bufDoesNotGrowWithN);
@@ -123,10 +149,10 @@ int main(void) {
         push_tris(fogTris);
         for (int L = 1; L <= N; L++) { sgl_layer(L); push_tris(perLayerTris); }
         flush_layers(ctx, N);
-        size_t pos = append_pos(ctx);
-        printf("  [nonempty] N=%d  append_pos=%zu (want %zu)\n", N, pos, total);
+        size_t pos = uploaded_bytes(ctx);
+        printf("  [nonempty] N=%d  uploaded_bytes=%zu (want %zu)\n", N, pos, total);
         check("non-empty layers: one upload of the full vertex set", pos == total);
-        sg_commit();
+        sg_end_pass(); sg_commit(); uploadedBytes = 0; begin_pass();
     }
 
     // -------------------------------------------------------------------------
@@ -139,38 +165,57 @@ int main(void) {
         sgl_layer(0); push_tris(fogTris);
         for (int L = 1; L <= 50; L++) sgl_layer(L);
         flush_layers(ctx, 50);
-        sg_commit();
+        sg_end_pass(); sg_commit(); uploadedBytes = 0; begin_pass();
         // frame B
         sgl_layer(0); push_tris(fogTris);
         for (int L = 1; L <= 50; L++) sgl_layer(L);
         flush_layers(ctx, 50);
-        size_t pos = append_pos(ctx);
-        printf("  [frame2]   append_pos=%zu (want %zu)\n", pos, V);
+        size_t pos = uploaded_bytes(ctx);
+        printf("  [frame2]   uploaded_bytes=%zu (want %zu)\n", pos, V);
         check("new frame re-uploads its vertices (not stale)", pos == V);
-        sg_commit();
+        sg_end_pass(); sg_commit(); uploadedBytes = 0; begin_pass();
     }
 
     // -------------------------------------------------------------------------
     // 4) sgl_tc_context_reset() within a frame must invalidate the upload cache:
     //    a fresh vertex set whose count coincides with the previous one must NOT
-    //    reuse the stale base offset (it must append again at a new offset).
+    //    reuse the stale base offset (it must use a different buffer).
     // -------------------------------------------------------------------------
     {
         const int tris = 600;
         const size_t C = (size_t)tris * 3 * STRIDE;
         sgl_layer(0); push_tris(tris);
         flush_layers(ctx, 0);
-        size_t pos1 = append_pos(ctx);                 // == C
+        const sg_buffer firstBuffer = _sgl_lookup_context(ctx.id)->vbuf;
+        size_t pos1 = uploaded_bytes(ctx);                 // == C
         sgl_tc_context_reset(ctx);                     // reset counters, same frame
         sgl_layer(0); push_tris(tris);                 // SAME count as before
         flush_layers(ctx, 0);
-        size_t pos2 = append_pos(ctx);                 // must have appended again
+        size_t pos2 = uploaded_bytes(ctx);                 // must have uploaded again
         printf("  [reset]    pos1=%zu  pos2=%zu (want %zu)\n", pos1, pos2, 2 * C);
-        check("context reset invalidates cache (re-appends, no stale reuse)",
-              pos1 == C && pos2 == 2 * C);
-        sg_commit();
+        check("context reset invalidates cache (distinct transient buffer, no stale reuse)",
+              pos1 == C && pos2 == 2 * C && firstBuffer.id != _sgl_lookup_context(ctx.id)->vbuf.id);
+        sg_end_pass(); sg_commit(); uploadedBytes = 0; begin_pass();
     }
 
+    sg_end_pass();
+    // Capacity metadata exercises the signed backend size without large storage.
+    {
+        _sgl_context_t* state = _sgl_lookup_context(ctx.id);
+        const int saved = state->vertices.cap;
+        const size_t limit = INT_MAX / sizeof(_sgl_vertex_t);
+        const size_t requested = 33554433u * sizeof(_sgl_vertex_t);
+        state->vertices.cap = 67108864;
+        const bool ok = _sgl_prepare_flush_buffer(state, requested);
+        printf("  [capacity] requested=%zu backend=%zu\n", requested, sg_query_buffer_size(state->vbuf));
+        check("doubled CPU capacity keeps GPU size representable",
+            ok && sg_query_buffer_size(state->vbuf) >= requested &&
+            sg_query_buffer_size(state->vbuf) <= INT_MAX);
+        check("unrepresentable GPU request fails cleanly",
+            !_sgl_prepare_flush_buffer(state, (limit + 1) * sizeof(_sgl_vertex_t)));
+        state->vertices.cap = saved;
+    }
+    check("no sokol validation errors", validationErrors == 0);
     sgl_destroy_context(ctx);
     sgl_shutdown();
     sg_shutdown();

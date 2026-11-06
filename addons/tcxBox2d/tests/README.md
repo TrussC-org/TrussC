@@ -113,7 +113,7 @@ Outside-step Exits (#473) are queued until Box2D returns:
 ASan/UBSan cover wrapper-side lifetimes (`Body`, `RigidBody2D`,
 `CollisionManager`, World members). Pooled `b2Body` / `b2Fixture` / `b2Joint`
 reuse is invisible to ASan because Box2D returns them to its block allocator;
-the defence is destruction observation, endpoint retirement, owner generations
+the defense is destruction observation, endpoint retirement, owner generations
 and explicit handle-invalid assertions.
 
 CI builds this harness with Box2D's asserts compiled out (RelWithDebInfo, the

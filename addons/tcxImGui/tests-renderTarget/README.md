@@ -75,7 +75,7 @@ inside Dear ImGui behaves as it does for any ImGui frame.
 
 Cancellation also covers partially consumed text: one `NewFrame` consumes the
 tool's Ctrl and left-button presses, then either a 3-second clock advance and
-`afterFrame` or owning-window idle settlement cancels the request. Two more
+runtime maintenance or owning-window idle settlement cancels the request. Two more
 renders must release both inputs and drain the queue. Both modifier mappings
 are tested, as is preservation of Ctrl and mouse state held by native input.
 Cleanup retains only matching releases for tool presses already consumed;
@@ -97,16 +97,18 @@ On Linux, use Xvfb with the software Mesa environment used by the display suite.
 The surfaceless probe also covers #340 buffer growth: real frames above 65,536
 vertices must reach callbacks in every draw list, including the foreground.
 It checks per-context Notices, repeated growth, explicit/default initial sizes
-through both manager setup paths, two staging allocation failures, a partial
-GPU allocation failure, old-buffer fallback and next-frame recovery.
+through both manager setup paths, a partial GPU allocation failure, old-buffer fallback and next-frame recovery.
 Run `bin/imguiNativeProbe --buffer-grow` to isolate these checks. The fixture
-also verifies GPU readback of the last list, index-only growth, exact staging
-doubling and safe rejection of unrepresentable Sokol byte offsets.
+also verifies GPU readback of the last list, index-only growth, GPU-only growth and safe rejection of unrepresentable Sokol byte offsets.
 
 The same native-probe option builds `bin/imguiBufferSizeProbe`, which uses an
 isolated dummy backend. It checks the signed-int byte-size boundary, caps
 otherwise overflowing doubling, rejects unrepresentable initial sizes before
 allocation, and checks one Error plus old-buffer partial rendering for
-unrepresentable vertex and index demands. Large staging requests receive a
-1-byte stand-in and are never copied into; the test allocates no multi-GB
-CPU or GPU blocks. Run this probe separately from the real-GL modes.
+unrepresentable vertex and index demands. The dummy backend stores buffer descriptors without allocating GPU storage;
+the test allocates no multi-GB CPU or GPU blocks. Run this probe separately from the real-GL modes.
+
+The surfaceless probe supplies the existing virtual-window ownership fixture
+for global window metrics and dispatches runtime maintenance for idle deadlines.
+Its two growth-test windows remain partly visible to keep both draw lists active
+after the first frame.

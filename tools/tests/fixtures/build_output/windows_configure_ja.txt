@@ -1,0 +1,13 @@
+'vswhere.exe' は、内部コマンドまたは外部コマンド、
+操作可能なプログラムまたはバッチ ファイルとして認識されていません。
+**********************************************************************
+** Visual Studio 2022 Developer Command Prompt v17.14.13
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+Preset CMake variables:
+
+  CMAKE_BUILD_TYPE="RelWithDebInfo"
+
+-- Building for: Ninja
+-- Configuring done (1.9s)

@@ -158,10 +158,10 @@ TC_CORE_TEST_MAIN() {
         feed(m, c, TouchPhase::Began, {touch(kIdA, 10, 10, true)});
         feed(m, c, TouchPhase::Began, {touch(kIdA, 10, 10, false), touch(kIdB, 200, 200, true)});
         feed(m, c, TouchPhase::Cancelled, {touch(kIdA, 11, 11, true), touch(kIdB, 200, 200, true)});
-        check("cancelled: one release at the primary",
+        check("canceled: one release at the primary",
               c.release == 1 && at(c.actions.back(), 11, 11) && !m.hasPrimary());
         feed(m, c, TouchPhase::Began, {touch(kIdB, 5, 5, true)});
-        check("cancelled: the next finger down presses again", c.press == 2);
+        check("canceled: the next finger down presses again", c.press == 2);
     }
 
     // --- several touches began at once: the first changed one is the primary --

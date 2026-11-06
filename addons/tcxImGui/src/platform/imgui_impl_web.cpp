@@ -18,6 +18,10 @@
 #undef snprintf
 #undef vsnprintf
 
+// After the #undefs: imgui_stdlib pulls in <string>, and std::snprintf must
+// not be declared while ImGui's MSVC snprintf alias is active.
+#include "imgui/imgui_stdlib.cpp"
+
 // sokol_imgui 実装
 #include "tcImGuiTargetImpl.h"
 

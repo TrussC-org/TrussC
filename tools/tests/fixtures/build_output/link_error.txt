@@ -1,0 +1,6 @@
+[ 60%] Building CXX object CMakeFiles/app.dir/src/main.cpp.o
+[ 80%] Linking CXX executable /src/app/bin/app
+/usr/bin/ld: CMakeFiles/app.dir/src/main.cpp.o: in function `main':
+main.cpp:(.text+0x10): undefined reference to `missingFunction()'
+collect2: error: ld returned 1 exit status
+gmake[2]: *** [CMakeFiles/app.dir/build.make:120: /src/app/bin/app] Error 1

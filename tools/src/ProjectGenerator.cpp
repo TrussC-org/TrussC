@@ -228,6 +228,11 @@ ProjectGenerator::ProjectGenerator(const ProjectSettings& settings)
 {
 }
 
+void ProjectGenerator::logConfigureOutput(const string& buildDir, const string& output, int result) {
+    if (configureOutputCallback_) configureOutputCallback_(buildDir, output, result);
+    else if (!output.empty()) log(output);
+}
+
 void ProjectGenerator::log(const string& msg) {
     if (logCallback_) {
         logCallback_(msg);
@@ -344,7 +349,7 @@ void ProjectGenerator::cleanBuildDirectories(const string& path) {
         if (fs::exists(buildPath)) {
             log("Cleaning " + dir + "...");
             try {
-                fs::remove_all(buildPath);
+                removeBuildDirectory(buildPath);
                 log("Removed " + dir);
             } catch (const exception& e) {
                 log("Failed to remove " + dir + ": " + e.what());
@@ -1120,13 +1125,13 @@ bool ProjectGenerator::runCrossCompilePresets(const string& path) {
         string buildDir = path + "/" + buildDirForPreset(preset);
         if (fs::exists(buildDir)) {
             log("Cleaning " + buildDirForPreset(preset) + "...");
-            fs::remove_all(buildDir);
+            removeBuildDirectory(buildDir);
         }
 
         log("Running CMake configure (preset: " + preset + ")...");
         string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
         auto [result, output] = executeCommand(cmd);
-        if (!output.empty()) log(output);
+        logConfigureOutput(buildDirForPreset(preset), output, result);
         if (result != 0) {
             const bool kept = (preset == "web" && settings_.webKept) ||
                               (preset == "android" && settings_.androidKept) ||
@@ -1175,13 +1180,15 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
     // Existing caches retain the build type selected by the user.
     string buildType = fs::exists(fs::path(path) / buildDirForPreset(preset) / "CMakeCache.txt")
         ? "" : " -DCMAKE_BUILD_TYPE=RelWithDebInfo";
-    string cmd = "cmd /c \"\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
+    // vcvarsall.bat looks for vswhere.exe on PATH and cmd.exe prints a
+    // "not recognized" error when it is missing; the Installer folder fixes that.
+    const string vswhereDir = VsDetector::findVswhereDir();
+    const string pathPrefix = vswhereDir.empty() ? ""
+        : "set \"PATH=" + vswhereDir + ";%PATH%\" && ";
+    string cmd = "cmd /c \"" + pathPrefix + "\"" + vcvarsallPath + "\" x64 && cd /d \"" + path + "\" && cmake --preset " + preset + buildType + "\"";
 
     auto [result, output] = executeCommand(cmd);
-
-    if (!output.empty()) {
-        log(output);
-    }
+    logConfigureOutput(buildDirForPreset(preset), output, result);
 
     if (result != 0) {
         throw runtime_error("CMake configure failed");
@@ -1201,10 +1208,7 @@ void ProjectGenerator::runCMakeConfigure(const string& path) {
     string cmd = "cd \"" + path + "\" && " + getCmakePath() + " --preset " + preset;
 
     auto [result, output] = executeCommand(cmd);
-
-    if (!output.empty()) {
-        log(output);
-    }
+    logConfigureOutput(buildDirForPreset(preset), output, result);
 
     if (result != 0) {
         throw runtime_error("CMake configure failed");

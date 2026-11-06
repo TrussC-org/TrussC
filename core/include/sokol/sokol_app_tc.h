@@ -37,7 +37,7 @@
     The single-window API behaves like sokol_app.h's native backends (the
     cancellable quit dance, RGB10A2 default color format, clipboard,
     drag&drop, cursor control, fullscreen; macOS: lazy drawable acquisition
-    in sapp_get_swapchain(); Windows: skip_present honored on Present,
+    in sapp_acquire_swapchain(); Windows: skip_present honored on Present,
     per-monitor-v2 DPI), with one deliberate deviation: calling
     sapp_dpi_scale() before sapp_run() returns the OS display scale
     instead of 0.
@@ -1996,7 +1996,8 @@ typedef enum sapp_pixel_format {
     SAPP_PIXELFORMAT_SRGB8A8,
     SAPP_PIXELFORMAT_BGRA8,
     SAPP_PIXELFORMAT_RGB10A2,    // Modified by tettou771 for TrussC: 10-bit color output support
-    SAPP_PIXELFORMAT_SBGRA8,
+    SAPP_PIXELFORMAT_SBGR8A8,
+    SAPP_PIXELFORMAT_RGBA16F,
     SAPP_PIXELFORMAT_DEPTH,
     SAPP_PIXELFORMAT_DEPTH_STENCIL,
     _SAPP_PIXELFORMAT_FORCE_U32 = 0x7FFFFFFF
@@ -2053,9 +2054,9 @@ typedef struct sapp_environment {
     sapp_swapchain
 
     Provides swapchain information for the current frame to the outside
-    world via a call to sapp_get_swapchain().
+    world via a call to sapp_acquire_swapchain().
 
-    NOTE: sapp_get_swapchain() must be called exactly once per frame since
+    NOTE: sapp_acquire_swapchain() must be called exactly once per frame since
     on some backends it will also acquire the next swapchain image.
 
     NOTE: when using sokol_gfx.h, don't assume that the sapp_swapchain struct
@@ -2097,6 +2098,7 @@ typedef struct sapp_gl_swapchain {
 } sapp_gl_swapchain;
 
 typedef struct sapp_swapchain {
+    bool invalid; /* [TrussC] Minimal upstream glue compatibility; no new swapchain options. */
     int width;
     int height;
     int sample_count;
@@ -2360,7 +2362,7 @@ SOKOL_APP_API_DECL void sapp_run(const sapp_desc* desc);
 /* get runtime environment information */
 SOKOL_APP_API_DECL sapp_environment sapp_get_environment(void);
 /* get current frame's swapchain information (call once per frame!) */
-SOKOL_APP_API_DECL sapp_swapchain sapp_get_swapchain(void);
+SOKOL_APP_API_DECL sapp_swapchain sapp_acquire_swapchain(void);
 
 /* EGL: get EGLDisplay object */
 SOKOL_APP_API_DECL const void* sapp_egl_get_display(void);
@@ -4833,17 +4835,18 @@ sapp_environment sapp_get_environment(void) {
     return env;
 }
 
-sapp_swapchain sapp_get_swapchain(void) {
+sapp_swapchain sapp_acquire_swapchain(void) {
     sapp_swapchain sc;
     memset(&sc, 0, sizeof(sc));
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w) return sc;
+    if (!w) { sc.invalid = true; return sc; }
     sc.width = sapp_width();
     sc.height = sapp_height();
     sc.sample_count = sapp_sample_count();
     sc.color_format = sapp_color_format();
     sc.depth_format = sapp_depth_format();
     sc.metal.current_drawable = (__bridge const void*)_sapp_tc_main_next_drawable();
+    sc.invalid = sc.metal.current_drawable == 0; // [TrussC] Upstream acquire contract.
     sc.metal.depth_stencil_texture = (__bridge const void*)w->depth_tex;
     sc.metal.msaa_color_texture = (w->desc.sample_count > 1)
         ? (__bridge const void*)w->msaa_tex : 0;
@@ -6557,7 +6560,7 @@ SOKOL_API_IMPL sapp_environment sapp_get_environment(void) {
     return res;
 }
 
-SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
+SOKOL_API_IMPL sapp_swapchain sapp_acquire_swapchain(void) {
     SOKOL_ASSERT(_sapp_tc.valid);
     _SAPP_STRUCT(sapp_swapchain, res);
     #if defined(SOKOL_METAL)
@@ -6585,8 +6588,8 @@ SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
     #if defined(SOKOL_WGPU)
         SOKOL_ASSERT(0 == _sapp_tc.wgpu.swapchain_view);
         _sapp_tc_wgpu_swapchain_next();
-        // FIXME: swapchain_view being null must be allowed and should skip the frame
-        SOKOL_ASSERT(_sapp_tc.wgpu.swapchain_view);
+        // [TrussC] Propagate an unavailable swapchain through upstream glue.
+        if (!_sapp_tc.wgpu.swapchain_view) { res.invalid = true; return res; }
         if (_sapp_tc.sample_count > 1) {
             SOKOL_ASSERT(_sapp_tc.wgpu.msaa_view);
             res.wgpu.render_view = (const void*) _sapp_tc.wgpu.msaa_view;
@@ -6619,6 +6622,9 @@ SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
     #endif
     #if defined(_SAPP_ANY_GL)
         res.gl.framebuffer = _sapp_tc.gl.framebuffer;
+    #endif
+    #if defined(SOKOL_METAL)
+        res.invalid = res.metal.current_drawable == 0;
     #endif
     res.width = sapp_width();
     res.height = sapp_height();
@@ -7481,7 +7487,7 @@ static bool _sapp_tc_d3d11_create_render_targets(_sapp_tc_window_t* w) {
         if (!_sapp_tc_d3d11_check(dev->CreateTexture2D(&td, NULL, &w->msaa_rt), "CreateTexture2D")) return false;
         if (!_sapp_tc_d3d11_check(dev->CreateRenderTargetView((ID3D11Resource*)w->msaa_rt, NULL, &w->msaa_rtv), "CreateRenderTargetView")) return false;
     }
-    td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    td.Format = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
     td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
     if (!_sapp_tc_d3d11_check(dev->CreateTexture2D(&td, NULL, &w->ds), "CreateTexture2D")) return false;
     if (!_sapp_tc_d3d11_check(dev->CreateDepthStencilView((ID3D11Resource*)w->ds, NULL, &w->dsv), "CreateDepthStencilView")) return false;
@@ -8988,14 +8994,14 @@ sapp_environment sapp_get_environment(void) {
     return env;
 }
 
-sapp_swapchain sapp_get_swapchain(void) {
+sapp_swapchain sapp_acquire_swapchain(void) {
     /* unlike Metal there is no per-frame acquire: the flip-model swapchain
        rotates internally, the views are created once and reused (resize
        recreates them) -- calling this any number of times per frame is safe */
     sapp_swapchain sc;
     memset(&sc, 0, sizeof(sc));
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w) return sc;
+    if (!w) { sc.invalid = true; return sc; }
     sc.width = sapp_width();
     sc.height = sapp_height();
     sc.sample_count = sapp_sample_count();
@@ -13044,14 +13050,14 @@ sapp_environment sapp_get_environment(void) {
     return env;
 }
 
-sapp_swapchain sapp_get_swapchain(void) {
+sapp_swapchain sapp_acquire_swapchain(void) {
     /* the GL swapchain contract is just the default-framebuffer id: rendering
        targets whatever drawable is current (the main window's during its
        frame_cb) -- calling this any number of times per frame is safe */
     sapp_swapchain sc;
     memset(&sc, 0, sizeof(sc));
     _sapp_tc_window_t* w = _sapp_tc.app.main;
-    if (!w) return sc;
+    if (!w) { sc.invalid = true; return sc; }
     sc.width = sapp_width();
     sc.height = sapp_height();
     sc.sample_count = sapp_sample_count();
@@ -14975,7 +14981,7 @@ SOKOL_API_IMPL sapp_environment sapp_get_environment(void) {
     return res;
 }
 
-SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
+SOKOL_API_IMPL sapp_swapchain sapp_acquire_swapchain(void) {
     SOKOL_ASSERT(_sapp_tc.valid);
     _SAPP_STRUCT(sapp_swapchain, res);
     #if defined(SOKOL_METAL)
@@ -15003,8 +15009,8 @@ SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
     #if defined(SOKOL_WGPU)
         SOKOL_ASSERT(0 == _sapp_tc.wgpu.swapchain_view);
         _sapp_tc_wgpu_swapchain_next();
-        // FIXME: swapchain_view being null must be allowed and should skip the frame
-        SOKOL_ASSERT(_sapp_tc.wgpu.swapchain_view);
+        // [TrussC] Propagate an unavailable swapchain through upstream glue.
+        if (!_sapp_tc.wgpu.swapchain_view) { res.invalid = true; return res; }
         if (_sapp_tc.sample_count > 1) {
             SOKOL_ASSERT(_sapp_tc.wgpu.msaa_view);
             res.wgpu.render_view = (const void*) _sapp_tc.wgpu.msaa_view;
@@ -15037,6 +15043,9 @@ SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
     #endif
     #if defined(_SAPP_ANY_GL)
         res.gl.framebuffer = _sapp_tc.gl.framebuffer;
+    #endif
+    #if defined(SOKOL_METAL)
+        res.invalid = res.metal.current_drawable == 0;
     #endif
     res.width = sapp_width();
     res.height = sapp_height();
@@ -17980,7 +17989,7 @@ SOKOL_API_IMPL sapp_environment sapp_get_environment(void) {
     return res;
 }
 
-SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
+SOKOL_API_IMPL sapp_swapchain sapp_acquire_swapchain(void) {
     SOKOL_ASSERT(_sapp_tc.valid);
     _SAPP_STRUCT(sapp_swapchain, res);
     #if defined(SOKOL_METAL)
@@ -18008,8 +18017,8 @@ SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
     #if defined(SOKOL_WGPU)
         SOKOL_ASSERT(0 == _sapp_tc.wgpu.swapchain_view);
         _sapp_tc_wgpu_swapchain_next();
-        // FIXME: swapchain_view being null must be allowed and should skip the frame
-        SOKOL_ASSERT(_sapp_tc.wgpu.swapchain_view);
+        // [TrussC] Propagate an unavailable swapchain through upstream glue.
+        if (!_sapp_tc.wgpu.swapchain_view) { res.invalid = true; return res; }
         if (_sapp_tc.sample_count > 1) {
             SOKOL_ASSERT(_sapp_tc.wgpu.msaa_view);
             res.wgpu.render_view = (const void*) _sapp_tc.wgpu.msaa_view;
@@ -18042,6 +18051,9 @@ SOKOL_API_IMPL sapp_swapchain sapp_get_swapchain(void) {
     #endif
     #if defined(_SAPP_ANY_GL)
         res.gl.framebuffer = _sapp_tc.gl.framebuffer;
+    #endif
+    #if defined(SOKOL_METAL)
+        res.invalid = res.metal.current_drawable == 0;
     #endif
     res.width = sapp_width();
     res.height = sapp_height();

@@ -206,7 +206,7 @@ functions_map = {}
 
 def visitNode(node, ns="", clazz=""):
     # libclang 18 + clang 21 system headers occasionally yields CursorKind
-    # ids it doesn't recognise (e.g. 437 inside C++20 stdlib templates).
+    # ids it doesn't recognize (e.g. 437 inside C++20 stdlib templates).
     # Skip the offending subtree instead of crashing the whole run.
     try:
         node_kind_name = node.kind.name

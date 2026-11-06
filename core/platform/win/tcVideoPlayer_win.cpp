@@ -1220,7 +1220,7 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
         }
         if (outDuration) *outDuration = duration;
 
-        // Clamp requested time to valid range (mirrors the macOS behaviour).
+        // Clamp requested time to valid range (mirrors the macOS behavior).
         if (duration > 0.0f && timeSec > duration) timeSec = duration * 0.1f;
         if (timeSec < 0) timeSec = 0;
 

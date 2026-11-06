@@ -433,7 +433,7 @@ TC_CORE_TEST_MAIN() {
     // A peer that drains a little at a time keeps the send progressing, so a
     // payload that takes far longer than the timeout to deliver must still go
     // through. Measuring total elapsed time instead would drop a healthy client
-    // for the offence of being on a slow link with a big payload.
+    // for the offense of being on a slow link with a big payload.
     {
         TcpServer s3;
         s3.setBindAddress("127.0.0.1");
@@ -485,7 +485,7 @@ TC_CORE_TEST_MAIN() {
         //
         // Leaving it at SKIP is sound: what this case guards is that our own
         // deadline restarts on progress, which is arithmetic in send(), not
-        // platform behaviour. macOS and Linux both reach the state and check it.
+        // platform behavior. macOS and Linux both reach the state and check it.
         printf("  (the send took %.2fs against a 1.00s idle timeout)\n", sendSecs);
         if (sendSecs <= 1.0) {
             printf("%-56s %s\n", "a slow but draining peer does not trip the idle timeout",

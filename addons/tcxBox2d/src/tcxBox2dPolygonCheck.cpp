@@ -238,10 +238,10 @@ std::vector<tc::Vec2> reducedConvexHull(const std::vector<tc::Vec2>& points, siz
     }
     hull.resize(k - 1);  // the last point repeats the first
 
-    // Drop the vertex whose triangle with its neighbours is smallest (the
+    // Drop the vertex whose triangle with its neighbors is smallest (the
     // area its removal loses) until maxPoints remain; on equal area the lowest
     // index goes first. Visvalingam-style, O(h log h): each vertex's area sits
-    // in a min-heap, and a removal recomputes only its two neighbours (their
+    // in a min-heap, and a removal recomputes only its two neighbors (their
     // version goes up, so their old heap entries are skipped when popped).
     const size_t n = hull.size();
     if (n <= maxPoints) return hull;

@@ -278,7 +278,7 @@ void setup() {
 // ---------------------------------------------------------------------------
 void cleanup() {
     internal::shutdownRuntime();
-    // Parked/cancelled frames can still own an enqueued renderer prefix.
+    // Parked/canceled frames can still own an enqueued renderer prefix.
     // Submit it without presentation before Metal waits for semaphore permits
     // during shutdown, and before destroying any referenced native resources.
     if (sg_isvalid()) sg_tc_submit_prefix();
@@ -667,11 +667,15 @@ void RenderTarget::beginPass(TargetPassStart reason) {
         (passKind == TargetPassKind::Swapchain && passStartedThisFrame)) {
         pass.action.colors[0].load_action = SG_LOADACTION_LOAD;
         if (hasDepth) pass.action.depth.load_action = SG_LOADACTION_LOAD;
+        if (depthFormat == SG_PIXELFORMAT_DEPTH_STENCIL) pass.action.stencil.load_action = SG_LOADACTION_LOAD;
     }
     pass.action.colors[0].store_action = SG_STOREACTION_STORE;
     if (hasDepth) {
         // Metal's swapchain adapter also uses depth STORE to retain MSAA samples.
         pass.action.depth.store_action = resumable ? SG_STOREACTION_STORE : SG_STOREACTION_DONTCARE;
+    }
+    if (depthFormat == SG_PIXELFORMAT_DEPTH_STENCIL) {
+        pass.action.stencil.store_action = resumable ? SG_STOREACTION_STORE : SG_STOREACTION_DONTCARE;
     }
     // Absorb the acquired extent before the backend begins its pass/clear.
     // Existing parked frames still retain their original attachments.
@@ -711,6 +715,7 @@ void RenderTarget::flushLayers() {
     if (!inPass || !resources().context.id) return;
     const auto err = sgl_context_error(resources().context);
     const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
+    prepareDeferredShaderDraws(deferredShaderDraws);
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
         for (auto& draw : deferredShaderDraws)
@@ -3415,7 +3420,7 @@ uint64_t nextNodeInstanceId() {
 // Node::callAfter() / callEvery() ids. As an inline static member, host code
 // and a Windows hot reload guest each counted from 1 (and every reloaded guest
 // again), so one node could hold two timers with the same id, and
-// cancelTimer(id), which removes every timer with that id, cancelled both.
+// cancelTimer(id), which removes every timer with that id, canceled both.
 uint64_t nextNodeTimerId() {
     static std::atomic<uint64_t> next{1};
     return next.fetch_add(1, std::memory_order_relaxed);
@@ -3457,6 +3462,78 @@ void parkWindowPass() {
         // Release the encoder before a foreign window renders or tears down.
         outgoing.currentTarget->endPass();
     }
+}
+
+bool suspendForImageUpload() {
+    auto& target = currentTarget();
+    // Basic window draws may still be CPU recordings in a lazy pass. Consume
+    // that prefix before overwriting any image it could sample.
+    if (!target.inPass && hasPendingRecording(target)) ensureCurrentPass();
+    const bool resume = target.inPass;
+    if (resume) parkWindowPass();
+    return resume;
+}
+
+// Persistent image upload through a transient staging buffer. Copies must run
+// outside a pass; parkWindowPass flushes the recorded prefix and the existing
+// continuation policy reloads its color/depth contents on resumption.
+void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
+    // Bound (representation): sokol stores buffer sizes and image row/slice
+    // pitches in signed int. Reject an unrepresentable staging allocation.
+    if (data.size > static_cast<size_t>(INT_MAX - 3)) {
+        logError("Texture") << "upload exceeds sokol buffer size representation";
+        return;
+    }
+    const auto features = sg_query_features();
+    // WebGPU's CPU staging path uses QueueWriteTexture, which precedes all
+    // unsubmitted draws. A GPU upload buffer keeps the copy in command order.
+    const bool gpuStaging = features.copy_buffer_to_image_relaxed_buffer_type
+        && !features.copy_buffer_to_image_relaxed_bytes_per_row;
+    std::vector<uint8_t> padded;
+    sg_range upload = data;
+    int rowPitch = 0, slicePitch = 0;
+    if (gpuStaging) {
+        const auto imageDesc = sg_query_image_desc(image);
+        const int width = std::max(1, imageDesc.width >> mipLevel);
+        const int height = std::max(1, imageDesc.height >> mipLevel);
+        const int rowBytes = sg_query_row_pitch(imageDesc.pixel_format, width, 1);
+        rowPitch = sg_query_row_pitch(imageDesc.pixel_format, width, 256);
+        const size_t rows = data.size / static_cast<size_t>(rowBytes);
+        if (height > INT_MAX / rowPitch || rows > static_cast<size_t>((INT_MAX - 3) / rowPitch)) {
+            logError("Texture") << "padded upload exceeds sokol row/slice representation";
+            return;
+        }
+        slicePitch = rowPitch * height;
+        padded.resize(rows * static_cast<size_t>(rowPitch));
+        for (size_t row = 0; row < rows; ++row)
+            std::memcpy(padded.data() + row * rowPitch,
+                static_cast<const uint8_t*>(data.ptr) + row * rowBytes, rowBytes);
+        upload = {padded.data(), padded.size()};
+    }
+    const bool resume = suspendForImageUpload();
+    sg_buffer_desc desc = {};
+    desc.size = (upload.size + 3) & ~size_t(3);
+    desc.usage.staging_buffer = !gpuStaging;
+    desc.usage.copy_src = true;
+    desc.usage.write_transient = true;
+    desc.label = "tc-texture-upload";
+    const sg_buffer staging = sg_make_buffer(&desc);
+    if (sg_query_buffer_state(staging) == SG_RESOURCESTATE_VALID) {
+        sg_write_buffer_desc write = {};
+        write.src.data = upload;
+        write.dst.buffer = staging;
+        sg_write_buffer_transient(&write);
+        sg_copy_buffer_to_image_desc copy = {};
+        copy.src.buffer = staging;
+        copy.src.bytes_per_row = rowPitch;
+        copy.src.bytes_per_slice = slicePitch;
+        copy.dst.image = image;
+        copy.dst.mip_level = mipLevel;
+        sg_copy_buffer_to_image(&copy);
+    }
+    // Sokol/native command encoders retain storage through GPU submission.
+    sg_destroy_buffer(staging);
+    if (resume) ensureCurrentPass();
 }
 
 void submitCapturePrefix() {
@@ -3509,7 +3586,7 @@ void restoreWindowContext(WindowContext* previous) {
         sgl_set_context(context);
     } else if (sg_isvalid()) {
         // Zero is an invalid SGL handle (the default has its own nonzero id).
-        // Immediate colour, transform, pipeline and vertex calls then no-op
+        // Immediate color, transform, pipeline and vertex calls then no-op
         // instead of mutating the previously selected Window's recording.
         sgl_set_context({0});
     }

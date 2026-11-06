@@ -10,6 +10,19 @@
 using namespace std;
 namespace fs = std::filesystem;
 
+string VsDetector::findVswhereDir() {
+#ifdef _WIN32
+    const char* locations[] = {
+        R"(C:\Program Files (x86)\Microsoft Visual Studio\Installer)",
+        R"(C:\Program Files\Microsoft Visual Studio\Installer)",
+    };
+    for (const char* dir : locations) {
+        if (fs::exists(fs::path(dir) / "vswhere.exe")) return dir;
+    }
+#endif
+    return "";
+}
+
 vector<VsVersionInfo> VsDetector::detectInstalledVersions() {
     vector<VsVersionInfo> versions;
 

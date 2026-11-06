@@ -12,8 +12,11 @@
 
 static inline bool tc_internal_gpu_frame_has_work(void) {
     const sg_frame_stats frame = sg_query_stats().cur_frame;
-    return frame.num_passes > 0 || frame.num_update_image > 0
-        || frame.num_update_buffer > 0 || frame.num_append_buffer > 0;
+    return frame.num_passes > 0 || frame.num_write_buffer_transient > 0
+        || frame.num_write_image_transient > 0 || frame.num_write_buffer_unsealed > 0
+        || frame.num_write_image_unsealed > 0 || frame.num_copy_buffer_to_buffer > 0
+        || frame.num_copy_buffer_to_image > 0 || frame.num_copy_image_to_image > 0
+        || frame.num_seal_buffer > 0 || frame.num_seal_image > 0;
 }
 
 #endif

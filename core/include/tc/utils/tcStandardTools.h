@@ -19,7 +19,7 @@ namespace trussc {
 
 class Node;
 class Pixels;
-struct KeyEventArgs;
+namespace internal { struct WindowContext; }
 
 // ---------------------------------------------------------------------------
 // Node -> JSON (serialize-only; the reverse needs a type factory and is out
@@ -181,30 +181,13 @@ void alert(const std::string& msg);
 void registerInspectionTools();
 
 // ---------------------------------------------------------------------------
-// Key injection helpers (shared by tc_key_press / tc_key_release)
-//
-// These mirror the real SAPP_EVENTTYPE_KEY_DOWN / KEY_UP path in TrussC.h
-// step for step, including the ordering: notify listeners, update the
-// held-key set, then call the app/Node-tree callback. Modifier flags are
-// DERIVED from the held-key set, the way sokol gets ev->modifiers from the
-// keys the OS reports as down — so an injected modifier hold (tc_key_press
-// with the modifier keycode) shows up on every event that follows it, and
-// e.shift agrees with what isShiftPressed() reports.
+// Key injection helper (shared by tc_key_press / tc_key_release)
 // ---------------------------------------------------------------------------
 namespace internal {
 
-// Modifier flags for the event carrying `key`, as of AFTER this event's own
-// state change — which is what the OS reports: a Shift key-down already has
-// the Shift flag set, its key-up already has it cleared. Every other key is
-// read straight from the held-key set.
-void fillKeyModifiers(KeyEventArgs& args, int key, bool down);
-
-void injectKeyDown(int key);
-
-void injectKeyUp(int key);
-
-// Currently held keycodes, for the tool reply (handy when scripting chords).
-json heldKeysJson();
+// Held keycodes of the given Window, for the tool reply (handy when scripting
+// chords). Pass the Window the key was injected into, not the ambient one.
+json heldKeysJson(const ::trussc::internal::WindowContext& ctx);
 
 } // namespace internal
 

@@ -34,6 +34,20 @@ struct PausedWriterClient : ProbeClient {
     }
 };
 
+// The connection closes right after the last payload byte reached the socket,
+// as when a peer stops reading and hangs up: the receive thread retires the
+// channel before the writer finishes the send. The write itself succeeded.
+struct ClosingAfterWriteClient : ProbeClient {
+    struct ClosingTransport : ProbeTransport {
+        int writeSendStep(State& st, const void* data, size_t size, bool& forWrite, int& error) override {
+            const int sent = Transport::writeSendStep(st, data, size, forWrite, error);
+            if (sent > 0 && static_cast<size_t>(sent) == size) st.closeClientSocket();
+            return sent;
+        }
+    };
+    ClosingAfterWriteClient() { probe = make_shared<ClosingTransport>(); setTransport(probe); }
+};
+
 void scenario() {
     for (bool threads : {true, false}) {
         TcpClient client;
@@ -57,7 +71,7 @@ void scenario() {
         client.setSendAsyncBufferSize(0);
         atomic<int> completions{0};
         auto complete = client.onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
-            check("cancelled send reports disconnection", e.error == SendError::Disconnected);
+            check("canceled send reports disconnection", e.error == SendError::Disconnected);
             ++completions;
         });
         check("queued cancellation connect", client.connect("127.0.0.1", listener.port));
@@ -80,7 +94,7 @@ void scenario() {
         client.stopConnectThread();
         check("queued borrowed sender returns failure", until([&] { return returned.load(); }) && failed);
         sender.join();
-        check("cancelled queue bytes removed before writer resumes", client.getSendAsyncPendingBytes() == activeBytes);
+        check("canceled queue bytes removed before writer resumes", client.getSendAsyncPendingBytes() == activeBytes);
         check("removed send completions wait for the writer", completions == 0);
         {
             int errors = 0;
@@ -200,6 +214,32 @@ void scenario() {
         check("send listener destroyed the client", until([&] { return destroyed.load(); }));
         if (peer != INVALID_SOCKET) CLOSE_SOCKET(peer);
     }
+    // A send whose bytes were all written succeeds, even when the connection
+    // closes before the writer reports the result.
+    for (bool threads : {true, false}) {
+        RawListener listener;
+        ClosingAfterWriteClient client;
+        client.setUseThread(threads);
+        atomic<int> completions{0};
+        atomic<SendError> outcome{SendError::Disconnected};
+        auto complete = client.onSendComplete.listen([&](TcpSendCompleteEventArgs& e) {
+            outcome = e.error;
+            ++completions;
+        });
+        check("closing-after-write connect", client.connect("127.0.0.1", listener.port));
+        check("closing-after-write connected", until([&] { if (!threads) client.processNetwork(); return client.isConnected(); }));
+        TestSocket peer = listener.acceptPeer();
+        check("closing-after-write send reports success", client.send(string("x")));
+        check("closing-after-write completion reports success", until([&] {
+            if (!threads) client.processNetwork();
+            return completions == 1;
+        }) && outcome == SendError::None);
+        char byte = 0;
+        check("closing-after-write bytes reached the peer",
+              recv(peer, &byte, 1, 0) == 1 && byte == 'x');
+        client.disconnect();
+        CLOSE_SOCKET(peer);
+    }
     for (bool threads : {true, false}) {
         RawListener listener;
         TcpClient client;
@@ -235,7 +275,7 @@ void scenario() {
 } // namespace
 
 TC_CORE_TEST_MAIN() {
-    TcpClient winsock; // Initialise process-wide Winsock before raw fixtures.
+    TcpClient winsock; // Initialize process-wide Winsock before raw fixtures.
     Watchdog watchdog;
     scenario();
     return failures ? 1 : 0;

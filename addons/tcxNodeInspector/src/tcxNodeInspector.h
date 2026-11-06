@@ -24,6 +24,7 @@
 
 #include <TrussC.h>
 #include <tcxImGui.h>
+#include "imgui/imgui_stdlib.h"   // ImGui::InputText(label, std::string*)
 #include <cstdio>
 #include <memory>
 #include <vector>
@@ -40,8 +41,9 @@ void recordTouchedForTests(NodeInspector& inspector, ::tc::Node* node, ::tc::Mod
 }
 
 // Renders each reflected member as the matching ImGui widget. Read-only
-// values (getter-only TC_VALUE) render greyed out; enums render as a combo of
-// their labels. Public so an app can use it (or a subclass that overrides a
+// values (getter-only TC_VALUE) render grayed out; enums render as a combo of
+// their labels; image-like values (an Fbo, Image or VideoPlayer member) render
+// as a thumbnail with their size and format, never editable. Public so an app can use it (or a subclass that overrides a
 // visit()) in its own ImGui panel via node->reflectMembers(r). The Inspector
 // always builds this base class itself, so a subclass does not change the
 // Inspector's widgets or its touched record.
@@ -58,14 +60,7 @@ struct ImGuiReflector : ::trussc::Reflector {
     bool visit(const char* n, ::tc::Vec2& v) override  { return edit(n, [&] { return ImGui::DragFloat2(n, &v.x, 0.5f); }); }
     bool visit(const char* n, ::tc::Vec3& v) override  { return edit(n, [&] { return ImGui::DragFloat3(n, &v.x, 0.5f); }); }
     bool visit(const char* n, ::tc::Color& v) override { return edit(n, [&] { return ImGui::ColorEdit4(n, &v.r); }); }
-    bool visit(const char* n, std::string& v) override {
-        return edit(n, [&] {
-            char buf[256];
-            std::snprintf(buf, sizeof(buf), "%s", v.c_str());
-            if (ImGui::InputText(n, buf, sizeof(buf))) { v = buf; return true; }
-            return false;
-        });
-    }
+    bool visit(const char* n, std::string& v) override { return edit(n, [&] { return ImGui::InputText(n, &v); }); }
     bool visit(const char* n, int& v, const ::trussc::EnumLabelSpan& labels) override {
         return edit(n, [&] {
             const char* preview = (v >= 0 && v < labels.count) ? labels.labels[v] : "(?)";
@@ -78,6 +73,14 @@ struct ImGuiReflector : ::trussc::Reflector {
             }
             return changed;
         });
+    }
+
+    // An image-like member (Fbo, Image, VideoPlayer, ...): a thumbnail with the
+    // aspect ratio kept, and "W×H FORMAT" (or "not allocated") beside it.
+    // Read-only: nothing is edited or recorded as touched.
+    bool visit(const char* n, ::trussc::HasTexture& v) override {
+        if (suppressDepth_ == 0) showImage(n, v);
+        return false;
     }
 
     // A composite member (nested type / TC_REFLECT_FREE) renders as a
@@ -106,7 +109,10 @@ struct ImGuiReflector : ::trussc::Reflector {
     }
 
 protected:
-    // Run a widget; suppress inside a collapsed group, grey out when read-only.
+    // The image row of visit(HasTexture&); defined in tcxNodeInspector.cpp.
+    void showImage(const char* name, ::trussc::HasTexture& image);
+
+    // Run a widget; suppress inside a collapsed group, gray out when read-only.
     // A change is recorded in `edited` under the member's path. A value the
     // MCP tools wrote (tcx_imgui_input) also makes the widget return true, so
     // the change is applied, but it is not an edit by hand: not recorded.
@@ -282,7 +288,7 @@ private:
     std::shared_ptr<int> retirementLifetime_ = std::make_shared<int>(0);
     Style    style_;
     bool     enabled_      = true;
-    char     nameBuf_[128] = "";
+    std::string nameBuf_;
     uint64_t nameBufFor_   = 0;
 
     // Singleton: no user-constructed instances (use instance() / the static API).
