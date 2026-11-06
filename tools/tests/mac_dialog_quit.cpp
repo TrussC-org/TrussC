@@ -1,4 +1,6 @@
-// Manual macOS sheet-quit probe; see .verification/sheetquit/AIR.md.
+// Manual macOS quit probe: <alert|confirm|load|folder|save> <manual|manual-veto|exit|veto>.
+// manual/manual-veto: Dock Quit or Cmd+Q; manual-veto cancels the first request.
+// See REPORT-fu3.md and REPORT.md for the device matrix.
 #include <TrussC.h>
 #include <csignal>
 #include <cstdlib>
@@ -23,9 +25,8 @@ struct Probe : App {
     void setup() override {
         quit = events().exitRequested.listen([](ExitRequestEventArgs& args) {
             ++requests;
-            // AppKit dismisses a one-button alert inside terminate:, before this query.
-            if (dialog != "alert") check(callbacks == 0, "sheet pending during exitRequested");
-            if (action == "veto" && requests == 1) {
+            check(callbacks == 0, "dialog pending during exitRequested");
+            if ((action == "veto" || action == "manual-veto") && requests == 1) {
                 args.cancel = true;
                 logNotice("sheetquit") << "veto: sheet must remain visible";
             }
@@ -36,7 +37,7 @@ struct Probe : App {
         if (frames == 1) {
             if (dialog == "alert") alertDialogAsync("sheetquit", "Leave this sheet open", [] { completed(); });
             else if (dialog == "confirm") confirmDialogAsync("sheetquit", "Leave this sheet open", [](bool yes) { completed(!yes); });
-            else if (dialog == "load") loadDialogAsync("sheetquit", "Leave this sheet open", {}, false,
+            else if (dialog == "load" || dialog == "folder") loadDialogAsync("sheetquit", "Leave this sheet open", {}, dialog == "folder",
                 [](const FileDialogResult& result) { completed(!result.success && result.filePath.empty() && result.fileName.empty()); });
             else if (dialog == "save") saveDialogAsync("sheetquit", "Leave this sheet open", {}, "sheetquit.txt",
                 [](const FileDialogResult& result) { completed(!result.success && result.filePath.empty() && result.fileName.empty()); });
@@ -47,11 +48,10 @@ struct Probe : App {
             if (action == "exit") exitApp();
             else if (action == "sigterm") std::raise(SIGTERM);
             else if (action == "request" || action == "veto") exitApp();
-            // manual: send SIGTERM externally, Cmd+Q, or perform supervised logout.
+            // manual/manual-veto: Dock Quit, Cmd+Q, external TERM, or supervised logout.
         }
         if (action == "veto" && frames == 120) {
-            if (dialog == "alert") check(callbacks == 1 && requests == 1, "veto after alert auto-dismiss");
-            else check(callbacks == 0 && requests == 1, "veto kept callback pending");
+            check(callbacks == 0 && requests == 1, "veto kept callback pending");
             exitApp();
         }
     }

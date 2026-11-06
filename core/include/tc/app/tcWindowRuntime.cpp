@@ -1354,6 +1354,7 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_INVALID:
             case SAPP_EVENTTYPE_CHAR:
             case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
+            case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_MOUSE_LEAVE:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
@@ -1414,8 +1415,9 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
     void convertWindowEvent(const sapp_event* ev, Window& window) {
         auto& ctx = WindowRequestAccess::context(window);
         // Native mapping or resizing invalidates previously presented content.
-        if (ev->type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED) {
-            ctx.loop.redrawCount = std::max(ctx.loop.redrawCount, 1);
+        if (ev->type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || ev->type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED) {
+            const int count = ev->type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED ? 2 : 1;
+            ctx.loop.redrawCount = std::max(ctx.loop.redrawCount, count);
             return;
         }
         const void* pressOwner = (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN || ev->type == SAPP_EVENTTYPE_MOUSE_UP)
@@ -1818,6 +1820,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             case SAPP_EVENTTYPE_INVALID:
             case SAPP_EVENTTYPE_CHAR:
             case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
+            case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
             case SAPP_EVENTTYPE_SUSPENDED:

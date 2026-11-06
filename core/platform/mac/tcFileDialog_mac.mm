@@ -2,24 +2,39 @@
 // macOS file dialog implementation
 // =============================================================================
 
-#include "tc/utils/tcFileDialog.h"
-#include "tc/utils/tcMainThread.h"
+#include "TrussC.h"
+#include "tc/utils/internal/tcAsyncDialog.h"
+#include "sokol_app_tc.h"
 #include "tc/utils/tcTeardown.h"
 
 #if defined(__APPLE__)
 
 #import <Cocoa/Cocoa.h>
 
+// Unattached alerts use their laid-out window and ordinary button actions.
+// The native application's quit preflight cancels tracked UI before calling
+// AppKit's terminate:, which could otherwise click an alert button itself.
+@interface TCAsyncDialogButtonTarget : NSObject
+@property(nonatomic, copy) void (^reply)(NSButton*);
+- (void)clicked:(NSButton*)sender;
+@end
+@implementation TCAsyncDialogButtonTarget
+- (void)clicked:(NSButton*)sender { self.reply(sender); }
+@end
+
 namespace trussc {
 
 namespace {
-// Dialogs and their completions run on the main thread.
+// Sheets, unattached panels and alert windows share the existing pending list.
 struct DialogSheet {
     NSWindow* sheet;
     std::function<void(NSModalResponse)> completion;
+    NSAlert* alert = nil;
+    TCAsyncDialogButtonTarget* buttonTarget = nil;
 };
+bool cancellingForQuit = false;
 std::vector<std::shared_ptr<DialogSheet>>& dialogSheets() {
-    // Process lifetime: Runtime's atexit shutdown can still cancel sheets.
+    // Process lifetime: Runtime's atexit shutdown can still cancel dialogs.
     static auto* sheets = new std::vector<std::shared_ptr<DialogSheet>>;
     return *sheets;
 }
@@ -28,28 +43,135 @@ void completeDialogSheet(const std::shared_ptr<DialogSheet>& sheet, NSModalRespo
     auto completion = std::exchange(sheet->completion, {});
     if (completion) completion(response);
 }
-std::function<void(NSModalResponse)> trackDialogSheet(
+std::shared_ptr<DialogSheet> trackDialogSheet(
         NSWindow* sheet, std::function<void(NSModalResponse)> completion) {
     auto pending = std::make_shared<DialogSheet>(DialogSheet{sheet, std::move(completion)});
     dialogSheets().push_back(pending);
-    return [pending](NSModalResponse response) { completeDialogSheet(pending, response); };
+    return pending;
+}
+void closeDialogSheet(const std::shared_ptr<DialogSheet>& pending, NSModalResponse response) {
+    // Take the reply first: endSheet/cancel may call the native handler inline.
+    auto completion = std::exchange(pending->completion, {});
+    std::erase(dialogSheets(), pending);
+    if (pending->sheet.sheetParent) {
+        [pending->sheet.sheetParent endSheet:pending->sheet returnCode:response];
+    } else if ([pending->sheet isKindOfClass:[NSSavePanel class]]) {
+        [(NSSavePanel*)pending->sheet cancel:nil];
+    }
+    [pending->sheet orderOut:nil];
+    if (completion) completion(response);
 }
 } // namespace
 
 namespace internal {
+bool completingMacDialogsForQuit() { return cancellingForQuit; }
 void cancelMacDialogSheets() noexcept {
+    const bool previous = std::exchange(cancellingForQuit, true);
     auto sheets = std::exchange(dialogSheets(), {});
     TeardownSteps steps;
     for (const auto& pending : sheets) {
-        steps.run("dialog sheet dismissal", [&] {
-            [pending->sheet.sheetParent endSheet:pending->sheet returnCode:NSModalResponseCancel];
-        });
-        // AppKit may defer its completion until after App teardown. Deliver
-        // cancellation while the owner is alive; the later native reply is a no-op.
-        steps.run("dialog sheet cancellation", [&] { completeDialogSheet(pending, NSModalResponseCancel); });
+        // EXIT_PROTOCOL: cancel once while the App is still alive, before exit.
+        steps.run("dialog cancellation", [&] { closeDialogSheet(pending, NSModalResponseCancel); });
     }
+    cancellingForQuit = previous;
 }
 } // namespace internal
+
+namespace {
+NSWindow* visibleDialogOwner(const internal::DialogInputs& inputs) {
+    auto nativeVisible = [](Window* window) -> NSWindow* {
+        if (!window || !window->isOpen()) return nil;
+        auto handle = internal::WindowRequestAccess::binding(*window).handle;
+        NSWindow* native = (__bridge NSWindow*)(void*)sapp_window_macos_get_window(handle);
+        return native.isVisible && !native.isMiniaturized ? native : nil;
+    };
+    if (auto requester = inputs.requestingWindow.lock()) {
+        if (auto* native = nativeVisible(requester.get())) return native;
+    }
+    for (auto* window : internal::openWindows()) {
+        if (auto* native = nativeVisible(window)) return native;
+    }
+    return nil;
+}
+
+internal::DialogDismiss presentDialog(const internal::DialogInputs& inputs,
+                                     internal::DialogCompletion complete) {
+    using internal::DialogKind;
+    @autoreleasepool {
+        NSWindow* owner = visibleDialogOwner(inputs);
+        std::shared_ptr<DialogSheet> pending;
+        if (inputs.kind == DialogKind::Alert || inputs.kind == DialogKind::Confirm) {
+            const bool confirm = inputs.kind == DialogKind::Confirm;
+            NSAlert* alert = [[NSAlert alloc] init];
+            alert.messageText = [NSString stringWithUTF8String:inputs.title.c_str()];
+            alert.informativeText = [NSString stringWithUTF8String:inputs.message.c_str()];
+            [alert addButtonWithTitle:confirm ? @"Yes" : @"OK"];
+            if (confirm) [alert addButtonWithTitle:@"No"];
+            alert.alertStyle = confirm ? NSAlertStyleWarning : NSAlertStyleInformational;
+            [alert layout];
+            pending = trackDialogSheet(alert.window, [complete, confirm](NSModalResponse response) {
+                FileDialogResult result;
+                result.success = confirm && response == NSAlertFirstButtonReturn;
+                complete(std::move(result));
+            });
+            pending->alert = alert;
+            pending->buttonTarget = [[TCAsyncDialogButtonTarget alloc] init];
+            const auto weak = std::weak_ptr(pending);
+            pending->buttonTarget.reply = ^(NSButton* button) {
+                if (auto live = weak.lock()) closeDialogSheet(live, button.tag);
+            };
+            NSInteger index = 0;
+            for (NSButton* button in alert.buttons) {
+                button.tag = NSAlertFirstButtonReturn + index++;
+                button.target = pending->buttonTarget;
+                button.action = @selector(clicked:);
+            }
+            if (owner) {
+                [owner beginSheet:alert.window completionHandler:^(NSModalResponse response) {
+                    completeDialogSheet(pending, response);
+                }];
+            } else {
+                [alert.window center];
+                [alert.window makeKeyAndOrderFront:nil];
+            }
+        } else {
+            const bool save = inputs.kind == DialogKind::Save;
+            NSSavePanel* panel = save ? [NSSavePanel savePanel] : [NSOpenPanel openPanel];
+            if (!inputs.title.empty()) panel.title = [NSString stringWithUTF8String:inputs.title.c_str()];
+            if (!inputs.message.empty()) panel.message = [NSString stringWithUTF8String:inputs.message.c_str()];
+            if (!inputs.defaultPath.empty()) {
+                panel.directoryURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:inputs.defaultPath.c_str()]];
+            }
+            panel.canCreateDirectories = YES;
+            if (save) {
+                if (!inputs.defaultName.empty()) panel.nameFieldStringValue = [NSString stringWithUTF8String:inputs.defaultName.c_str()];
+            } else {
+                NSOpenPanel* open = (NSOpenPanel*)panel;
+                open.canChooseFiles = !inputs.folderSelection;
+                open.canChooseDirectories = inputs.folderSelection;
+                open.allowsMultipleSelection = NO;
+                open.resolvesAliases = YES;
+            }
+            pending = trackDialogSheet(panel, [complete, panel](NSModalResponse response) {
+                FileDialogResult result;
+                if (response == NSModalResponseOK && panel.URL) {
+                    result.success = true;
+                    result.filePath = panel.URL.path.UTF8String;
+                    result.fileName = panel.URL.lastPathComponent.UTF8String;
+                }
+                complete(std::move(result));
+            });
+            auto handler = ^(NSModalResponse response) { completeDialogSheet(pending, response); };
+            if (owner) [panel beginSheetModalForWindow:owner completionHandler:handler];
+            else [panel beginWithCompletionHandler:handler];
+        }
+        return [pending] {
+            pending->completion = {}; // Owner cancellation never calls user code.
+            closeDialogSheet(pending, NSModalResponseCancel);
+        };
+    }
+}
+} // namespace
 
 // -----------------------------------------------------------------------------
 // Alert dialog
@@ -68,28 +190,8 @@ void alertDialog(const std::string& title, const std::string& message) {
 void alertDialogAsync(const std::string& title,
                       const std::string& message,
                       std::function<void()> callback) {
-    callback = internal::appOwnedCallback(std::move(callback));
-    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
-    @autoreleasepool {
-        NSAlert* alert = [[NSAlert alloc] init];
-        [alert setMessageText:[NSString stringWithUTF8String:title.c_str()]];
-        [alert setInformativeText:[NSString stringWithUTF8String:message.c_str()]];
-        [alert addButtonWithTitle:@"OK"];
-        [alert setAlertStyle:NSAlertStyleInformational];
-
-        NSWindow* window = [[NSApplication sharedApplication] keyWindow];
-        if (window) {
-            auto completion = trackDialogSheet([alert window], [=](NSModalResponse response) {
-                (void)response;
-                if (!internal::appRunIsAlive(token)) return;
-                if (callback) callback();
-            });
-            [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) { completion(response); }];
-        } else {
-            [alert runModal];
-            if (internal::appRunIsAlive(token) && callback) callback();
-        }
-    }
+    internal::requestAsyncDialog({internal::DialogKind::Alert, title, message, {}, {}},
+        [callback = std::move(callback)](FileDialogResult) { if (callback) callback(); }, presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -110,28 +212,8 @@ bool confirmDialog(const std::string& title, const std::string& message) {
 void confirmDialogAsync(const std::string& title,
                         const std::string& message,
                         std::function<void(bool)> callback) {
-    callback = internal::appOwnedCallback(std::move(callback));
-    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
-    @autoreleasepool {
-        NSAlert* alert = [[NSAlert alloc] init];
-        [alert setMessageText:[NSString stringWithUTF8String:title.c_str()]];
-        [alert setInformativeText:[NSString stringWithUTF8String:message.c_str()]];
-        [alert addButtonWithTitle:@"Yes"];
-        [alert addButtonWithTitle:@"No"];
-        [alert setAlertStyle:NSAlertStyleWarning];
-
-        NSWindow* window = [[NSApplication sharedApplication] keyWindow];
-        if (window) {
-            auto completion = trackDialogSheet([alert window], [=](NSModalResponse response) {
-                if (!internal::appRunIsAlive(token)) return;
-                if (callback) callback(response == NSAlertFirstButtonReturn);
-            });
-            [alert beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) { completion(response); }];
-        } else {
-            NSModalResponse response = [alert runModal];
-            if (internal::appRunIsAlive(token) && callback) callback(response == NSAlertFirstButtonReturn);
-        }
-    }
+    internal::requestAsyncDialog({internal::DialogKind::Confirm, title, message, {}, {}},
+        [callback = std::move(callback)](FileDialogResult result) { if (callback) callback(result.success); }, presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -189,57 +271,8 @@ void loadDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      bool folderSelection,
                      std::function<void(const FileDialogResult&)> callback) {
-    callback = internal::appOwnedCallback(std::move(callback));
-    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
-    @autoreleasepool {
-        NSOpenPanel* panel = [NSOpenPanel openPanel];
-
-        if (!title.empty()) {
-            [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];
-        }
-        if (!message.empty()) {
-            [panel setMessage:[NSString stringWithUTF8String:message.c_str()]];
-        }
-
-        if (folderSelection) {
-            [panel setCanChooseFiles:NO];
-            [panel setCanChooseDirectories:YES];
-            [panel setCanCreateDirectories:YES];
-        } else {
-            [panel setCanChooseFiles:YES];
-            [panel setCanChooseDirectories:NO];
-        }
-
-        [panel setAllowsMultipleSelection:NO];
-        [panel setResolvesAliases:YES];
-
-        if (!defaultPath.empty()) {
-            NSString* path = [NSString stringWithUTF8String:defaultPath.c_str()];
-            NSURL* url = [NSURL fileURLWithPath:path];
-            [panel setDirectoryURL:url];
-        }
-
-        NSWindow* window = [[NSApplication sharedApplication] keyWindow];
-        if (window) {
-            auto completion = trackDialogSheet(panel, [=](NSModalResponse response) {
-                if (!internal::appRunIsAlive(token)) return;
-                FileDialogResult result;
-                if (response == NSModalResponseOK) {
-                    NSURL* url = [[panel URLs] firstObject];
-                    if (url) {
-                        result.success = true;
-                        result.filePath = [[url path] UTF8String];
-                        result.fileName = [[url lastPathComponent] UTF8String];
-                    }
-                }
-                if (callback) callback(result);
-            });
-            [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) { completion(response); }];
-        } else {
-            FileDialogResult result = loadDialog(title, message, defaultPath, folderSelection);
-            if (internal::appRunIsAlive(token) && callback) callback(result);
-        }
-    }
+    internal::requestAsyncDialog({internal::DialogKind::Load, title, message, defaultPath, {}, folderSelection},
+        std::move(callback), presentDialog);
 }
 
 // -----------------------------------------------------------------------------
@@ -289,49 +322,8 @@ void saveDialogAsync(const std::string& title,
                      const fs::path& defaultPath,
                      const fs::path& defaultName,
                      std::function<void(const FileDialogResult&)> callback) {
-    callback = internal::appOwnedCallback(std::move(callback));
-    const std::weak_ptr<std::atomic<bool>> token = internal::appRunToken();
-    @autoreleasepool {
-        NSSavePanel* panel = [NSSavePanel savePanel];
-
-        if (!title.empty()) {
-            [panel setTitle:[NSString stringWithUTF8String:title.c_str()]];
-        }
-        if (!message.empty()) {
-            [panel setMessage:[NSString stringWithUTF8String:message.c_str()]];
-        }
-        if (!defaultPath.empty()) {
-            NSString* path = [NSString stringWithUTF8String:defaultPath.c_str()];
-            NSURL* url = [NSURL fileURLWithPath:path];
-            [panel setDirectoryURL:url];
-        }
-        if (!defaultName.empty()) {
-            [panel setNameFieldStringValue:[NSString stringWithUTF8String:defaultName.c_str()]];
-        }
-
-        [panel setCanCreateDirectories:YES];
-
-        NSWindow* window = [[NSApplication sharedApplication] keyWindow];
-        if (window) {
-            auto completion = trackDialogSheet(panel, [=](NSModalResponse response) {
-                if (!internal::appRunIsAlive(token)) return;
-                FileDialogResult result;
-                if (response == NSModalResponseOK) {
-                    NSURL* url = [panel URL];
-                    if (url) {
-                        result.success = true;
-                        result.filePath = [[url path] UTF8String];
-                        result.fileName = [[url lastPathComponent] UTF8String];
-                    }
-                }
-                if (callback) callback(result);
-            });
-            [panel beginSheetModalForWindow:window completionHandler:^(NSModalResponse response) { completion(response); }];
-        } else {
-            FileDialogResult result = saveDialog(title, message, defaultPath, defaultName);
-            if (internal::appRunIsAlive(token) && callback) callback(result);
-        }
-    }
+    internal::requestAsyncDialog({internal::DialogKind::Save, title, message, defaultPath, defaultName},
+        std::move(callback), presentDialog);
 }
 
 } // namespace trussc
