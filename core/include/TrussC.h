@@ -2883,6 +2883,7 @@ inline void drawCone(float x, float y, float z, float radius, float height, int 
 // TrussC threading
 #include "tc/utils/tcThread.h"
 #include "tc/utils/tcThreadChannel.h"
+#include "tc/utils/tcProcess.h"
 
 // TrussC animation
 #include "tc/animation/tcEasing.h"
