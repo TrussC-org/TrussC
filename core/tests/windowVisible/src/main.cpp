@@ -11,6 +11,7 @@ int visibilityMapCount(unsigned long);
 int visibilitySwapCount(unsigned long);
 int visibilityInvalidationCount(unsigned long);
 bool visibilityMapped(const void*, unsigned long);
+bool visibilityFramePosition(const void*, unsigned long, int&, int&);
 bool visibilityWaitMapped(const void*, unsigned long, bool);
 bool visibilityBluePixel(const void*, unsigned long);
 bool visibilityIconic(const void*, unsigned long);
@@ -20,7 +21,7 @@ bool visibilityFinalSizePresented(const void*, unsigned long, bool, int);
 #endif
 namespace {
 int failures = 0;
-bool startVisible = false, fullscreen = false, finished = false;
+bool startVisible = false, fullscreen = false, finished = false, decoratedMain = false;
 int mainDraws = 0, secondaryDraws = 0, secondaryUpdates = 0;
 bool hideInAppDraw = false, hideInDrawListener = false, hideInOnRender = false, hideInAfterFrame = false;
 int drawHides = 0, hiddenAtUpdate = 0;
@@ -31,6 +32,10 @@ uint64_t completedBeforeHide = 0;
 int swapsBeforeHide = 0, invalidationsBeforeShow = 0;
 #endif
 std::shared_ptr<Window> secondary;
+#ifdef VISIBILITY_X11
+struct PendingPositionRead { Window* window; IVec2 expected; };
+std::vector<PendingPositionRead> pendingPositionReads;
+#endif
 void check(const char* label, bool okay) {
     std::printf("windowVisible: %s: %s\n", label, okay ? "PASS" : "FAIL");
     std::fflush(stdout);
@@ -43,7 +48,43 @@ unsigned long xwindow(Window& window) {
 void checkUnmapped(Window& window) {
     check("X11 hidden window is unmapped", visibilityWaitMapped(sapp_x11_get_display(), xwindow(window), false));
 }
+void checkFirstLivePositions() {
+    std::erase_if(pendingPositionReads, [](const PendingPositionRead& pending) {
+        auto* window = pending.window;
+        const auto& binding = internal::WindowRequestAccess::binding(*window);
+        if (binding.geometry.hiddenPosition) return false;
+        int x = 0, y = 0;
+        const auto position = window->getPosition();
+        const bool frame = visibilityFramePosition(sapp_x11_get_display(), xwindow(*window), x, y);
+        std::printf("windowVisible: first live position %d,%d; native frame %d,%d\n", position.x, position.y, x, y);
+        check("first live position follows completed map", sapp_tc_window_map_complete(binding.handle));
+        // Fullscreen is requested again at MapNotify and can move the frame
+        // between these two X11 samples. Check placement in the normal modes.
+        if (!fullscreen)
+            check("first live position matches native frame", frame && position.x == x && position.y == y);
+        if (!fullscreen && (window == secondary.get() || decoratedMain))
+            check("first live position equals requested placement", position.x == pending.expected.x && position.y == pending.expected.y);
+        return true;
+    });
+}
 #endif
+void show(Window& window) {
+#ifdef VISIBILITY_X11
+    const auto before = window.getPosition();
+    const bool snapshot = internal::WindowRequestAccess::binding(window).geometry.hiddenPosition;
+#endif
+    window.setVisible(true);
+#ifdef VISIBILITY_X11
+    if (snapshot) {
+        const auto after = window.getPosition();
+        check("show same-update position preserves snapshot", after.x == before.x && after.y == before.y);
+        auto found = std::find_if(pendingPositionReads.begin(), pendingPositionReads.end(),
+            [&](const auto& pending) { return pending.window == &window; });
+        if (found == pendingPositionReads.end()) pendingPositionReads.push_back({&window, before});
+        else found->expected = before;
+    }
+#endif
+}
 bool fullscreenSettled() {
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || defined(VISIBILITY_X11)
     return !fullscreen || sapp_tc_window_fullscreen_phase(internal::WindowRequestAccess::binding(*secondary).handle)
@@ -115,6 +156,9 @@ struct Secondary : App {
     }
     void update() override {
         ++secondaryUpdates;
+#ifdef VISIBILITY_X11
+        checkFirstLivePositions();
+#endif
         if (armEventDrivenHide) {
 #ifdef VISIBILITY_X11
             if (!visibilityMapped(sapp_x11_get_display(), xwindow(*getWindow()))) return;
@@ -166,7 +210,7 @@ struct Probe : App {
             return;
         }
         if (rapid) {
-            secondary->setVisible(!secondary->isVisible());
+            if (secondary->isVisible()) secondary->setVisible(false); else show(*secondary);
             --rapid; operationTime = now;
             return;
         }
@@ -174,9 +218,9 @@ struct Probe : App {
             std::string op;
             if (operations >> op) {
                 if (op == "H") secondary->setVisible(false);
-                else if (op == "S") secondary->setVisible(true);
-                else if (op == "SH") { secondary->setVisible(true); secondary->setVisible(false); }
-                else if (op == "S/H") { secondary->setVisible(true); hideNext = true; }
+                else if (op == "S") show(*secondary);
+                else if (op == "SH") { show(*secondary); secondary->setVisible(false); }
+                else if (op == "S/H") { show(*secondary); hideNext = true; }
                 else if (op == "R") rapid = 10;
                 operationTime = now;
                 return;
@@ -205,9 +249,9 @@ struct Probe : App {
 #endif
         window->setVisible(false);
         check("hide takes effect immediately", !window->isVisible() && window->isOccluded());
-        setWindowDecorated(true); setWindowDecorated(false);
+        if (!decoratedMain) { setWindowDecorated(true); setWindowDecorated(false); }
         checkHiddenControls(*window);
-        window->setPosition(10, 10);
+        window->setPosition(decoratedMain ? 200 : 10, decoratedMain ? 200 : 10);
         secondary = createWindow(WindowSettings().setSize(100, 80).setVisible(false).setFullscreen(fullscreen));
         check("hidden secondary created", secondary && secondary->isOpen());
         if (!secondary) { exitApp(1); return; }
@@ -216,11 +260,19 @@ struct Probe : App {
 #ifdef VISIBILITY_X11
         check("secondary never mapped at creation", visibilityMapCount(xwindow(*secondary)) == 0);
 #endif
-        if (!fullscreen) secondary->setPosition(300, 100);
+        if (!fullscreen) {
+            secondary->setPosition(300, 100);
+#ifdef VISIBILITY_X11
+            check("start-hidden move reads requested position in same update", secondary->getPosition().x == 300 && secondary->getPosition().y == 100);
+#endif
+        }
         secondary->setApp<Secondary>();
     }
     void update() override {
         ++updates;
+#ifdef VISIBILITY_X11
+        checkFirstLivePositions();
+#endif
         if (std::chrono::steady_clock::now() - started > std::chrono::seconds(30)) {
             check("probe completed within 30 seconds", false); exitApp(1); return;
         }
@@ -234,10 +286,16 @@ struct Probe : App {
                 visibilityMapped(sapp_x11_get_display(), xwindow(*secondary))) return;
             checkUnmapped(*getWindow()); checkUnmapped(*secondary);
 #endif
-            getWindow()->setVisible(true); secondary->setVisible(true);
+            show(*getWindow()); show(*secondary);
             check("show reports requested state immediately", getWindow()->isVisible() && secondary->isVisible());
             phaseTime = std::chrono::steady_clock::now(); phase = 1;
         } else if (phase == 1 && fullscreenSettled() && secondaryDraws >= 3 && (fullscreen || mainDraws >= 3)) {
+#ifdef VISIBILITY_X11
+            // Early drawable turns can precede MapNotify. Let both windows
+            // reach their first live read before hiding them again.
+            if (internal::WindowRequestAccess::binding(*getWindow()).geometry.hiddenPosition ||
+                internal::WindowRequestAccess::binding(*secondary).geometry.hiddenPosition) return;
+#endif
             check("shown windows resume drawing", secondaryDraws >= 3 && (fullscreen || mainDraws >= 3));
 #ifdef VISIBILITY_X11
             check("X11 show maps both windows", visibilityWaitMapped(sapp_x11_get_display(), xwindow(*getWindow()), true) && visibilityWaitMapped(sapp_x11_get_display(), xwindow(*secondary), true));
@@ -272,11 +330,14 @@ struct Probe : App {
                 check("hidden move reads requested frame position", secondary->getPosition().x == 400 && secondary->getPosition().y == 120);
 #endif
             }
-            secondary->setVisible(true);
+            show(*secondary);
             check("second show reports requested state", secondary->isVisible());
             phaseTime = std::chrono::steady_clock::now(); phase = 3;
         } else if (phase == 3 && fullscreenSettled() && secondaryDraws >= savedSecondaryDraws + 3) {
             check("secondary redraws after repeated hide/show", true);
+#ifdef VISIBILITY_X11
+            check("completed show releases position snapshot", !internal::WindowRequestAccess::binding(*secondary).geometry.hiddenPosition);
+#endif
             if (!fullscreen) {
                 const auto position = secondary->getPosition();
                 if ((std::abs(position.x - 400) > 4 || std::abs(position.y - 120) > 4) &&
@@ -289,15 +350,15 @@ struct Probe : App {
         } else if (phase == 4 && drawHides == 1 && secondaryUpdates >= hiddenAtUpdate + 3) {
             checkDrawHide();
             secondary->setIndependentFps(VSYNC, VSYNC);
-            secondary->setVisible(true);
+            show(*secondary);
             hideInDrawListener = true; phase = 5;
         } else if (phase == 5 && drawHides == 2 && secondaryUpdates >= hiddenAtUpdate + 3) {
             checkDrawHide();
-            secondary->setVisible(true);
+            show(*secondary);
             hideInOnRender = true; phase = 6;
         } else if (phase == 6 && drawHides == 3 && secondaryUpdates >= hiddenAtUpdate + 3) {
             checkDrawHide(true);
-            secondary->setVisible(true);
+            show(*secondary);
             hideInAfterFrame = true; phase = 7;
         } else if (phase == 7 && drawHides == 4 && secondaryUpdates >= hiddenAtUpdate + 3) {
             check("afterFrame hide takes effect immediately", !secondary->isVisible());
@@ -305,7 +366,7 @@ struct Probe : App {
             check("afterFrame hide skips native present", visibilitySwapCount(xwindow(*secondary)) == swapsBeforeHide);
             checkUnmapped(*secondary);
 #endif
-            secondary->setVisible(true);
+            show(*secondary);
             armEventDrivenHide = true; phase = 8;
         } else if (phase == 8 && !armEventDrivenHide && secondaryUpdates >= hiddenAtUpdate + 3 &&
                    std::chrono::steady_clock::now() - eventDrivenHiddenSince >= std::chrono::milliseconds(500)) {
@@ -314,7 +375,7 @@ struct Probe : App {
             swapsBeforeHide = visibilitySwapCount(xwindow(*secondary));
             invalidationsBeforeShow = visibilityInvalidationCount(xwindow(*secondary));
 #endif
-            secondary->setVisible(true);
+            show(*secondary);
             phaseTime = std::chrono::steady_clock::now(); phase = 9;
         } else if (phase == 9) {
 #ifdef VISIBILITY_X11
@@ -344,7 +405,7 @@ struct Probe : App {
 #ifdef VISIBILITY_X11
             checkUnmapped(*secondary);
 #endif
-            secondary->setVisible(true); secondary->setVisible(false);
+            show(*secondary); secondary->setVisible(false);
             check("same-update hide wins requested state", !secondary->isVisible());
             phaseTime = std::chrono::steady_clock::now(); phase = 11;
         } else if (phase == 11) {
@@ -374,6 +435,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         display |= arg == "--display";
         startVisible |= arg == "--start-visible";
         fullscreen |= arg == "--fullscreen";
+        decoratedMain |= arg == "--decorated-main";
     }
     WindowSettings settings;
     check("visible defaults to true", settings.visible);
@@ -397,7 +459,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return failures ? 1 : 0;
     }
     if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: windowVisible requires desktop windows"); return 0; }
-    return tcCoreTest::runDisplayTest<Probe>(WindowSettings().setSize(160, 120).setVisible(startVisible).setDecorated(false), failures, [] {
+    return tcCoreTest::runDisplayTest<Probe>(WindowSettings().setSize(160, 120).setVisible(startVisible).setDecorated(decoratedMain), failures, [] {
         check("probe reached final phase", finished);
         std::printf("windowVisible verdict: %s\n", failures ? "FAIL" : "PASS");
     });

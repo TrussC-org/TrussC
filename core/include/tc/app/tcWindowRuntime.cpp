@@ -35,7 +35,7 @@ void Window::setVisible(bool visible) {
         binding_.geometry.hiddenX = position.x;
         binding_.geometry.hiddenY = position.y;
     }
-    binding_.geometry.hiddenPosition = !visible;
+    if (!visible) binding_.geometry.hiddenPosition = true;
 #endif
     sapp_tc_window_set_visible(binding_.handle, visible);
     internal::refreshWindowMetadata(*this);
@@ -1040,6 +1040,10 @@ bool refreshWindowMetadata(Window& window) {
     if (!b.operations || !b.operations->readMetadata) return true;
     sapp_tc_window_metadata metadata{};
     if (!b.operations->readMetadata(b.handle, b.user, metadata)) return false;
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    // Requested visibility precedes the WM's map and frame placement.
+    if (sapp_tc_window_map_complete(b.handle)) b.geometry.hiddenPosition = false;
+#endif
     publishWindowMetadata(window, metadata);
     return true;
 }

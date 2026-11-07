@@ -27,6 +27,12 @@ platform = (root / 'core/platform/linux/tcPlatform_linux.cpp').read_text(encodin
 visibility = body(runtime, 'void Window::setVisible(bool visible)')
 position = body(adapter, 'IVec2 nativeWindowPosition(const Window& w)')
 main_position = body(platform, 'IVec2 internal::singleWindowPosition()')
+refresh = body(runtime, 'bool refreshWindowMetadata(Window& window)')
+global_source = (root / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
+def seed(source, marker):
+    return source.split(marker, 1)[1].split(';', 1)[0]
+seed_main = seed(global_source, 'binding(*window).geometry = ')
+seed_secondary = seed(adapter, 'binding(*win).geometry = ')
 source = r'''
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -43,7 +49,7 @@ Log logNotice(const char*) { return {}; }
 XSizeHints hints{};
 int moves=0, writes=0, reads=0;
 int liveX=155, liveY=66;
-bool nativeHidden=false;
+bool nativeHidden=false, mapComplete=true;
 int translate(Display*, Window, Window, int, int, int* x, int* y, Window*) {
     ++reads; *x=liveX; *y=liveY; return 1;
 }
@@ -80,10 +86,18 @@ int flush(Display*) { return 1; }
 #define XFree release
 #include "GEOMETRY_HEADER"
 namespace trussc {
+struct sapp_tc_window_metadata { bool hidden=false; };
+struct Operations {
+    bool (*readMetadata)(int, void*, sapp_tc_window_metadata&) =
+        +[](int, void*, sapp_tc_window_metadata& out) { out.hidden=nativeHidden; return true; };
+} operations;
 struct Window {
     struct Binding {
         int handle=7;
-        struct { bool hidden=false; } metadata;
+        sapp_tc_window_metadata metadata;
+        bool bound=true;
+        Operations* operations=&trussc::operations;
+        void* user=nullptr;
         internal::X11GeometryState geometry;
     } binding_;
     bool isOpen() const { return true; }
@@ -95,18 +109,21 @@ void* sapp_x11_get_display() { return reinterpret_cast<void*>(1); }
 const void* sapp_window_x11_get_window(int handle) { return reinterpret_cast<void*>(handle); }
 const void* sapp_x11_get_window() { return sapp_window_x11_get_window(7); }
 void sapp_tc_window_set_visible(int, bool visible) {
-    nativeHidden=!visible;
+    nativeHidden=!visible; mapComplete=false;
     // Withdrawal makes the raw position wrong; the snapshot must precede it.
     if (!visible) { liveX=1; liveY=2; }
 }
+bool sapp_tc_window_map_complete(int) { return !nativeHidden && mapComplete; }
 namespace internal {
 constexpr bool supportsSecondaryWindows() { return true; }
 struct WindowRequestAccess {
     static const auto& binding(const Window& w) { return w.binding_; }
+    static auto& binding(Window& w) { return w.binding_; }
 };
 int handle(const Window& w) { return w.binding_.handle; }
 Window* resolveWindow() { return selected; }
-void refreshWindowMetadata(Window& w) { w.binding_.metadata.hidden=nativeHidden; }
+void publishWindowMetadata(Window& w, const sapp_tc_window_metadata& m) { w.binding_.metadata=m; }
+REFRESH_BODY
 IVec2 windowPositionNative(const void* handle) {
     return x11FramePosition(static_cast<Display*>(sapp_x11_get_display()), (::Window)(uintptr_t)handle);
 }
@@ -144,6 +161,7 @@ int main() {
         };
         liveX=155; liveY=66;
         window.setVisible(true);
+        mapComplete=true; refreshWindowMetadata(window);
         assert(readPosition().x==150 && readPosition().y==40);
         // A WM/user move must be sampled, rather than the last requested move.
         liveX=355; liveY=166;
@@ -163,9 +181,34 @@ int main() {
         x11Geometry(display,7,geometry,true,900,600,0,0,1,true);
         assert(readPosition().x==1200 && readPosition().y==500);
         window.setVisible(true);
+        liveX=0; liveY=0; // Fresh frame: client placement is not ready yet.
+        refreshWindowMetadata(window);
+        assert(readPosition().x==1200 && readPosition().y==500);
+        assert(reads==readsAtHide);
+        x11Geometry(display,7,geometry,true,800,300,0,0,1);
+        assert(readPosition().x==800 && readPosition().y==300);
+        window.setVisible(false); // A hide during the pending show retains the snapshot.
+        mapComplete=true; refreshWindowMetadata(window);
+        assert(readPosition().x==800 && readPosition().y==300);
+        window.setVisible(true);
+        refreshWindowMetadata(window);
+        assert(readPosition().x==800 && readPosition().y==300);
         liveX=455; liveY=266;
+        mapComplete=true; refreshWindowMetadata(window);
         assert(readPosition().x==450 && readPosition().y==240);
         assert(reads>readsAtHide);
+    }
+    for (bool mainWindow : {false,true}) {
+        struct { int width=100, height=80; bool pixelPerfect=false, visible=false; } settings;
+        const auto pixelPerfectMode=[] { return false; };
+        auto& geometry=window.binding_.geometry;
+        if (mainWindow) geometry = SEED_MAIN; else geometry = SEED_SECONDARY;
+        nativeHidden=true; mapComplete=false;
+        liveX=5; liveY=26; // Initially 0,0, including without the snapshot.
+        const auto readPosition=[&] { return mainWindow ? singleWindowPosition() : window.getPosition(); };
+        assert(readPosition().x==0 && readPosition().y==0);
+        x11Geometry(display,7,geometry,true,400,300,0,0,1);
+        assert(readPosition().x==400 && readPosition().y==300);
     }
     puts("native-gates: X11 hidden snapshot, accepted hidden move, live read after show (main/secondary): PASS");
     puts("native-gates: X11 explicit position hints before show and after resize: PASS");
@@ -174,36 +217,39 @@ int main() {
 with tempfile.TemporaryDirectory(prefix='tc-x11-position-') as temp:
     scratch = Path(temp)
     native = header.read_text(encoding='utf-8')
-    variants = {'baseline': (native, visibility, main_position)}
+    baseline = dict(native=native, visibility=visibility, main_position=main_position,
+                    refresh=refresh, seed_main=seed_main, seed_secondary=seed_secondary)
+    variants = {'baseline': baseline}
     if '--mutations' in sys.argv[1:]:
-        for name, old, new in (
-            ('no-hidden-move-update', 'requested.hiddenX = x;', 'requested.hiddenX = 0;'),
-            ('no-hidden-read', 'if (requested && requested->hiddenPosition)', 'if (false)'),
-            ('no-position-flags', 'USPosition | PPosition', '0'),
-            ('no-position-x', 'hints.x = x;', 'hints.x = 0;'),
-            ('no-position-y', 'hints.y = y;', 'hints.y = 0;'),
-            ('no-position-update', 'if (!move && hints.win_gravity', 'if (hints.win_gravity'),
-            ('no-move-forwarding', 'x11PinMoveGravity(dpy, window, move, x, y);', 'x11PinMoveGravity(dpy, window, false, x, y);'),
+        for name, key, old, new in (
+            ('no-hidden-move-update', 'native', 'requested.hiddenX = x;', 'requested.hiddenX = 0;'),
+            ('no-hidden-read', 'native', 'if (requested && requested->hiddenPosition)', 'if (false)'),
+            ('no-position-flags', 'native', 'USPosition | PPosition', '0'),
+            ('no-position-x', 'native', 'hints.x = x;', 'hints.x = 0;'),
+            ('no-position-y', 'native', 'hints.y = y;', 'hints.y = 0;'),
+            ('no-position-update', 'native', 'if (!move && hints.win_gravity', 'if (hints.win_gravity'),
+            ('no-move-forwarding', 'native', 'x11PinMoveGravity(dpy, window, move, x, y);', 'x11PinMoveGravity(dpy, window, false, x, y);'),
+            ('no-pre-hide-snapshot', 'visibility', 'binding_.geometry.hiddenY = position.y;', 'binding_.geometry.hiddenY = 0;'),
+            ('clear-at-request', 'visibility', 'if (!visible) binding_.geometry.hiddenPosition = true;',
+             'binding_.geometry.hiddenPosition = !visible;'),
+            ('no-live-read-after-show', 'refresh', 'if (sapp_tc_window_map_complete(b.handle))', 'if (false)'),
+            ('no-main-hidden-read', 'main_position', 'if (geometry.hiddenPosition)', 'if (false)'),
+            ('no-start-hidden-main', 'seed_main', '!settings.visible', 'false'),
+            ('no-start-hidden-secondary', 'seed_secondary', '!settings.visible', 'false'),
         ):
-            if native.count(old) != 1:
-                raise SystemExit(f'{name}: missing/ambiguous mutation marker {old!r}')
-            variants[name] = (native.replace(old, new), visibility, main_position)
-        for name, old, new in (
-            ('no-pre-hide-snapshot', 'binding_.geometry.hiddenY = position.y;', 'binding_.geometry.hiddenY = 0;'),
-            ('no-live-read-after-show', 'binding_.geometry.hiddenPosition = !visible;',
-             'binding_.geometry.hiddenPosition = !visible || binding_.geometry.hiddenPosition;'),
-        ):
-            assert visibility.count(old) == 1
-            variants[name] = (native, visibility.replace(old, new), main_position)
-        old = 'if (geometry.hiddenPosition)'
-        assert main_position.count(old) == 1
-        variants['no-main-hidden-read'] = (native, visibility, main_position.replace(old, 'if (false)'))
-    for name, (contents, visible_body, main_body) in variants.items():
+            assert baseline[key].count(old) == 1, name
+            variants[name] = dict(baseline, **{key: baseline[key].replace(old, new)})
+    for name, variant in variants.items():
         private = scratch / (name + '.h')
-        private.write_text(contents.replace('"../../include/tc/app/internal/tcWindowGeometryState.h"',
+        private.write_text(variant['native'].replace('"../../include/tc/app/internal/tcWindowGeometryState.h"',
             '"' + str(root / 'core/include/tc/app/internal/tcWindowGeometryState.h') + '"'), encoding='utf-8')
         cpp = scratch / 'probe.cpp'
-        cpp.write_text(source.replace('GEOMETRY_HEADER', str(private)).replace('VISIBILITY_BODY', visible_body).replace('MAIN_POSITION_BODY', main_body).replace('POSITION_BODY', position), encoding='utf-8')
+        contents = source.replace('GEOMETRY_HEADER', str(private))
+        for marker, key in (('VISIBILITY_BODY', 'visibility'), ('MAIN_POSITION_BODY', 'main_position'),
+                            ('REFRESH_BODY', 'refresh'), ('SEED_MAIN', 'seed_main'), ('SEED_SECONDARY', 'seed_secondary')):
+            contents = contents.replace(marker, variant[key])
+        contents = contents.replace('POSITION_BODY', position)
+        cpp.write_text(contents, encoding='utf-8')
         binary = scratch / 'probe'
         subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-include', 'initializer_list', str(cpp), '-o', str(binary)], check=True)
         result = subprocess.run([str(binary)], capture_output=True, text=True, encoding='utf-8')
@@ -213,8 +259,11 @@ with tempfile.TemporaryDirectory(prefix='tc-x11-position-') as temp:
             'no-hidden-move-update': 'readPosition().x==1200 && readPosition().y==500',
             'no-hidden-read': 'readPosition().x==350 && readPosition().y==140',
             'no-pre-hide-snapshot': 'readPosition().x==350 && readPosition().y==140',
+            'clear-at-request': 'readPosition().x==1200 && readPosition().y==500',
             'no-live-read-after-show': 'readPosition().x==450 && readPosition().y==240',
             'no-main-hidden-read': 'readPosition().x==350 && readPosition().y==140',
+            'no-start-hidden-main': 'readPosition().x==400 && readPosition().y==300',
+            'no-start-hidden-secondary': 'readPosition().x==400 && readPosition().y==300',
         }.get(name)
         if expected_assertion and expected_assertion not in result.stderr:
             raise SystemExit(f'{name}: did not fail the intended assertion\n{result.stderr}')

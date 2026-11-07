@@ -132,7 +132,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     internal::WindowRequestAccess::setHostOwner(*win, win);
     win->title_ = mcp::internal::markedWindowTitle(settings.title);
     win->setQuitOnClose(settings.quitOnClose);
-    internal::WindowRequestAccess::binding(*win).geometry = {double(settings.width), double(settings.height), pixelPerfectMode()};
+    internal::WindowRequestAccess::binding(*win).geometry = {double(settings.width), double(settings.height), pixelPerfectMode(), !settings.visible};
     auto* st = new AdapterState();
 
     sapp_window_desc d = internal::buildNativeWindowDescriptor(settings, pixelPerfectMode());
