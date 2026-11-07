@@ -334,6 +334,7 @@ void parity(Window& w, Native& n, std::vector<int>& counts) {
         listeners.push_back(runtime().events().deviceLost.listen([&](DeviceLostEventArgs& e){notify(e);e.cancel=true;}));
         listeners.push_back(runtime().events().exitRequested.listen([&](ExitRequestEventArgs& e){notify(e);e.cancel=true;}));
         auto e=event(static_cast<sapp_event_type>(type));n.input_delivered=false;
+        if(type==SAPP_EVENTTYPE_KEY_UP)trussc::internal::WindowRequestAccess::context(w).keysPressed.insert(e.key_code);
         if(type==SAPP_EVENTTYPE_MOUSE_UP)trussc::internal::WindowRequestAccess::context(w).pressedMouseButtons=1;
         if(type==SAPP_EVENTTYPE_SUSPENDED)n.metadata.occluded=true;
         if(type==SAPP_EVENTTYPE_RESUMED)b.lastDeliveredHidden=true;
