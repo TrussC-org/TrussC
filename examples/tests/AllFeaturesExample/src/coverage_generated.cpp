@@ -478,6 +478,7 @@ static void cover_other() {
     (void)createWindow(af::val<const WindowSettings>());
 #endif
     (void)exitApp(af::val<int>());
+    (void)getCommandLineArgs();
     (void)getResourceLoadConcurrency();
     (void)getWindowTitle();
     (void)isWindowOccluded();
@@ -1520,6 +1521,13 @@ struct Cover_FileWriter : af::Scope<FileWriter> {
         (void)af::val<FileWriter>().write(af::val<char>());
         (void)af::val<FileWriter>().write(af::val<const void *>(), af::val<size_t>());
         (void)af::val<FileWriter>().writeLine(af::val<const std::string>());
+    }
+};
+
+struct Cover_FilesOpenedEventArgs : af::Scope<FilesOpenedEventArgs> {
+    ~Cover_FilesOpenedEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<FilesOpenedEventArgs>().files;
     }
 };
 
@@ -3006,6 +3014,7 @@ struct Cover_RuntimeEvents : af::Scope<RuntimeEvents> {
         (void)af::val<RuntimeEvents>().console;
         (void)af::val<RuntimeEvents>().deviceLost;
         (void)af::val<RuntimeEvents>().exitRequested;
+        (void)af::val<RuntimeEvents>().filesOpened;
         (void)af::val<RuntimeEvents>().hotReloadUnload;
     }
 };
@@ -5085,6 +5094,7 @@ void af::coverGenerated() {
     af_generated::Cover_FileDialogResult::run();
     af_generated::Cover_FileReader::run();
     af_generated::Cover_FileWriter::run();
+    af_generated::Cover_FilesOpenedEventArgs::run();
     af_generated::Cover_FocusEventArgs::run();
     af_generated::Cover_Font::run();
     af_generated::Cover_Font__PlacedGlyph::run();

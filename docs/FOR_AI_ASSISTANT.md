@@ -2611,6 +2611,7 @@ const std::array<E, internal::enumValidCount<E> enumValues()  // Returns the aut
 EVENT_DRIVEN  // Selects rendering on demand.
 void exitApp(int code = 0)  // Asks the process to quit, with an exit code.
 float exp2(float x) [std]  // Returns two raised to the given power.
+std::vector<std::string> getCommandLineArgs()  // Returns the process command-line arguments as UTF-8 strings, including the executable.
 int getResourceLoadConcurrency()  // Returns how many resource loads can prepare at once.
 const std::string & getWindowTitle()  // Returns the current Window title.
 HALF_TAU  // Represents half a turn in radians.
@@ -3062,6 +3063,11 @@ bool FileWriter::isOpen() const  // Returns whether the output file is open.
 SaveResult FileWriter::open(const fs::path & path, bool append = false)  // Opens a file for writing.
 FileWriter & FileWriter::write(const std::string & text) [+2]  // Writes text, a character, or binary data to the file.
 FileWriter & FileWriter::writeLine(const std::string & text = std::string(""))  // Writes text followed by a newline.
+```
+
+### FilesOpenedEventArgs — Carries a process-level file-open request with no window or position.
+
+```cpp
 ```
 
 ### FocusEventArgs — Describes a change in keyboard focus of a window.

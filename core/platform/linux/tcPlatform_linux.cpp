@@ -3,6 +3,7 @@
 // =============================================================================
 
 #include "TrussC.h"
+#include "tc/app/internal/tcCommandLine.h"
 
 #if defined(__linux__)
 
@@ -25,6 +26,11 @@
 #include "../gl/tcGLReadbackState.h"
 
 namespace trussc {
+
+std::vector<std::string> getCommandLineArgs() {
+    std::ifstream input("/proc/self/cmdline", std::ios::binary);
+    return internal::parseProcCommandLine(input);
+}
 
 void bringWindowToFront() {
     if (auto* target = internal::resolveWindow(true)) target->bringToFront();

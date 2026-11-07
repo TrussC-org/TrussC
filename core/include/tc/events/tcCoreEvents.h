@@ -73,6 +73,7 @@ public:
     Event<DeviceLostEventArgs> deviceLost;
     Event<void> hotReloadUnload;
     Event<ConsoleEventArgs> console;
+    Event<FilesOpenedEventArgs> filesOpened;
 };
 
 class Runtime {

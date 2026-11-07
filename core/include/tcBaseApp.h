@@ -270,6 +270,7 @@ private:
         // and hot reload guests must not repeat process startup.
         internal::AppOwnerScope process({});
         mcp::internal::initializeMcp();
+        internal::finishFilesOpenedSetup(*this);
     }
 
     // Node's pre-cleanup hook: an App added as a child ends with its

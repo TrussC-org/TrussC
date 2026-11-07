@@ -3,6 +3,7 @@
 #include "tc/app/tcScreenshot.h"
 
 #include <string>
+#include <vector>
 #include <utility>
 #include <filesystem>
 #include <cstdint>
@@ -18,6 +19,10 @@
 // =============================================================================
 
 namespace trussc {
+
+// OS arguments, including the executable at index 0, as UTF-8. No main(argc,
+// argv) plumbing is needed. Empty on iOS, Android and Web.
+std::vector<std::string> getCommandLineArgs();
 
 // Forward declaration
 class Pixels;

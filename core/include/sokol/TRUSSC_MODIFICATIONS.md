@@ -1008,3 +1008,12 @@ requested state immediately and native convergence after normal event dispatch.
 (`native_visible`, with no pending visibility operation and no requested hide).
 TrussC retains the hidden frame-position snapshot until this completes. Other
 platforms share the definition and return their existing requested visibility.
+
+## File-open requests (#1061)
+
+[TrussC #1061] The macOS application delegate forwards `application:openURLs:`
+and the legacy `application:openFiles:` to Runtime's process-level filesOpened
+delivery. Only file URLs are accepted. Runtime queues launch requests until
+the launch App completes setup, and delivers later requests to all listeners.
+Paths use the same OS/available-memory and container representation bounds as
+file drops; no shell invocation or file-content reading occurs in the bridge.

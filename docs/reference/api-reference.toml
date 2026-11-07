@@ -45598,21 +45598,21 @@ description.en = "Returns the events of the window the current App is in."
 description.ja = "現在の App がアタッチされているウィンドウのイベントを返す。"
 description.ko = "현재 App이 연결된 창의 이벤트를 반환한다."
 details.en = '''
-- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Use `events()` for App events and `runtime().events()` for process events. For `console` and `filesOpened`, App code also uses `runtime().events()`.
 - Returns `CoreEvents&`: `update`, `draw`, input events such as `mousePressed`, window events, and the App side of `exitRequested`, `deviceLost` and `hotReloadUnload`. Subscribe with `events().mousePressed.listen(...)`; see `Event<T>` for keeping the listener.
 - In App code (the constructor, callbacks, listeners and async completions), it returns the events of that App's window; a headless App gets its own events. A listener registered in the constructor belongs to that App and is removed if construction fails.
 - Outside App code, it works only while exactly one window is open; with no window or several windows, it logs an error and listening has no effect. Use `window->events()` to choose a window yourself.
 - Functions that act on a window without taking one, such as `getWindowWidth()`, `setWindowTitle()` and `getMouseX()`, choose the window the same way.
 '''
 details.ja = '''
-- App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
+- App のイベントには `events()` を、プロセスのイベントには `runtime().events()` を使います。`console` と `filesOpened` は App のコードでも `runtime().events()` で受け取ります。
 - `CoreEvents&` を返します。`update`、`draw`、`mousePressed` などの入力イベント、ウィンドウのイベント、そして `exitRequested`、`deviceLost`、`hotReloadUnload` の App 側が入っています。`events().mousePressed.listen(...)` のように登録します。リスナーの保持については `Event<T>` を参照してください。
 - App のコード（コンストラクター、コールバック、リスナー、非同期処理の完了時）では、その App のウィンドウのイベントを返します。ヘッドレス App では、その App 自身のイベントです。コンストラクターで登録したリスナーはその App に属し、構築に失敗した場合は外されます。
 - App のコードの外では、開いているウィンドウがちょうど 1 つのときだけ使えます。ウィンドウがないときや複数あるときは、エラーを記録し、listen しても何も起きません。ウィンドウを自分で選ぶには `window->events()` を使ってください。
 - `getWindowWidth()`、`setWindowTitle()`、`getMouseX()` のように、ウィンドウを引数に取らずにウィンドウを操作する関数も、同じ方法で対象のウィンドウを決めます。
 '''
 details.ko = '''
-- App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다.
+- App 이벤트에는 `events()`를, 프로세스 이벤트에는 `runtime().events()`를 사용합니다. `console`과 `filesOpened`는 App 코드에서도 `runtime().events()`로 받습니다.
 - `CoreEvents&`를 반환합니다. `update`, `draw`, `mousePressed` 같은 입력 이벤트, 창 이벤트, 그리고 `exitRequested`, `deviceLost`, `hotReloadUnload`의 App 쪽 이벤트가 들어 있습니다. `events().mousePressed.listen(...)`처럼 등록합니다. 리스너 보관은 `Event<T>`를 참조하세요.
 - App 코드(생성자, 콜백, 리스너, 비동기 처리 완료 시)에서는 그 App이 연결된 창의 이벤트를 반환합니다. 헤드리스 App에서는 그 App 자신의 이벤트입니다. 생성자에서 등록한 리스너는 그 App에 속하며, 생성에 실패하면 해제됩니다.
 - App 코드 밖에서는 열린 창이 정확히 하나일 때만 사용할 수 있습니다. 창이 없거나 여러 개일 때는 오류를 기록하며, listen해도 아무 일도 일어나지 않습니다. 창을 직접 고르려면 `window->events()`를 사용하세요.
@@ -64334,15 +64334,15 @@ description.en = "The object that represents the whole running process."
 description.ja = "実行中のプロセス全体を表すオブジェクト。"
 description.ko = "실행 중인 프로세스 전체를 나타내는 객체다."
 details.en = '''
-- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Use `events()` for App events and `runtime().events()` for process events. For `console` and `filesOpened`, App code also uses `runtime().events()`.
 - Get it with `runtime()`; you cannot create one yourself. Its only member is `events()`, which returns the process-wide events (`RuntimeEvents`). It lives as long as the process.
 '''
 details.ja = '''
-- App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
+- App のイベントには `events()` を、プロセスのイベントには `runtime().events()` を使います。`console` と `filesOpened` は App のコードでも `runtime().events()` で受け取ります。
 - `runtime()` で取得します。自分で作ることはできません。メンバーは `events()` だけで、プロセス全体のイベント（`RuntimeEvents`）を返します。プロセスが終わるまで有効です。
 '''
 details.ko = '''
-- App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다.
+- App 이벤트에는 `events()`를, 프로세스 이벤트에는 `runtime().events()`를 사용합니다. `console`과 `filesOpened`는 App 코드에서도 `runtime().events()`로 받습니다.
 - `runtime()`으로 가져옵니다. 직접 만들 수는 없습니다. 멤버는 `events()`뿐이며, 프로세스 전체의 이벤트(`RuntimeEvents`)를 반환합니다. 프로세스가 끝날 때까지 유효합니다.
 '''
 snippet = '''
@@ -64370,17 +64370,17 @@ description.en = "Returns the object that represents the whole running process."
 description.ja = "実行中のプロセス全体を表すオブジェクトを返す。"
 description.ko = "실행 중인 프로세스 전체를 나타내는 객체를 반환한다."
 details.en = '''
-- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Use `events()` for App events and `runtime().events()` for process events. For `console` and `filesOpened`, App code also uses `runtime().events()`.
 - Returns `Runtime&`. Call it on the main thread. Its only member is `events()`, which returns the process-wide events (`RuntimeEvents`). It lives as long as the process.
 - Standard input commands (`console`) are not available on the web.
 '''
 details.ja = '''
-- App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
+- App のイベントには `events()` を、プロセスのイベントには `runtime().events()` を使います。`console` と `filesOpened` は App のコードでも `runtime().events()` で受け取ります。
 - `Runtime&` を返します。メインスレッドで呼んでください。メンバーは `events()` だけで、プロセス全体のイベント（`RuntimeEvents`）を返します。プロセスが終わるまで有効です。
 - Web では標準入力のコマンド（`console`）は使えません。
 '''
 details.ko = '''
-- App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다.
+- App 이벤트에는 `events()`를, 프로세스 이벤트에는 `runtime().events()`를 사용합니다. `console`과 `filesOpened`는 App 코드에서도 `runtime().events()`로 받습니다.
 - `Runtime&`를 반환합니다. 메인 스레드에서 호출하세요. 멤버는 `events()`뿐이며, 프로세스 전체의 이벤트(`RuntimeEvents`)를 반환합니다. 프로세스가 끝날 때까지 유효합니다.
 - 웹에서는 표준 입력 명령(`console`)을 사용할 수 없습니다.
 '''
@@ -64450,15 +64450,15 @@ description.en = "Returns the events that belong to the whole process."
 description.ja = "プロセス全体に属するイベントを返す。"
 description.ko = "프로세스 전체에 속하는 이벤트를 반환한다."
 details.en = '''
-- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
+- Use `events()` for App events and `runtime().events()` for process events. For `console` and `filesOpened`, App code also uses `runtime().events()`.
 - Returns `RuntimeEvents&`; see `RuntimeEvents` for the list of events and the order in which listeners are called.
 '''
 details.ja = '''
-- App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
+- App のイベントには `events()` を、プロセスのイベントには `runtime().events()` を使います。`console` と `filesOpened` は App のコードでも `runtime().events()` で受け取ります。
 - `RuntimeEvents&` を返します。イベントの一覧と呼ばれる順番は `RuntimeEvents` を参照してください。
 '''
 details.ko = '''
-- App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다.
+- App 이벤트에는 `events()`를, 프로세스 이벤트에는 `runtime().events()`를 사용합니다. `console`과 `filesOpened`는 App 코드에서도 `runtime().events()`로 받습니다.
 - `RuntimeEvents&`를 반환합니다. 이벤트 목록과 호출 순서는 `RuntimeEvents`를 참조하세요.
 '''
 snippet = '''
@@ -64486,24 +64486,24 @@ description.en = "Holds the events that belong to the whole process rather than 
 description.ja = "ウィンドウ単位ではなく、プロセス全体に属するイベントをまとめたもの。"
 description.ko = "창 단위가 아닌 프로세스 전체에 속하는 이벤트를 모아 둔 것이다."
 details.en = '''
-- App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`.
-- `runtime().events()` returns this object. It has four events: `exitRequested` (a request to quit the process), `deviceLost` (the graphics device was lost), `hotReloadUnload` (hot reload is about to replace the App) and `console` (a command line from standard input).
-- The first three are also delivered to every App, through each App's own `events()`. The listeners here run first, then each App's listeners, starting with the App that was attached last. `console` is delivered only here.
-- These events do not depend on any window. They also arrive before the first window opens, after every window has closed, and in a headless App (`runHeadlessApp`).
+- Use `events()` for App events and `runtime().events()` for process events. For `console` and `filesOpened`, App code also uses `runtime().events()`.
+- `runtime().events()` returns this object. It has five events: `exitRequested` (a request to quit the process), `deviceLost` (the graphics device was lost), `hotReloadUnload` (hot reload is about to replace the App), `console` (a command line from standard input), and `filesOpened` (OS file-open requests).
+- The first three are also delivered to every App, through each App's own `events()`. The listeners here run first, then each App's listeners, starting with the App that was attached last. `console` and `filesOpened` are delivered only here.
+- These events do not depend on any window. Lifecycle events also arrive before the first window opens, after every window has closed, and in a headless App (`runHeadlessApp`). See `filesOpened` for its launch timing and supported platforms.
 - Register and keep listeners on the main thread. Keep the returned `EventListener` as a member; when it is destroyed, the listener is removed. A listener registered from inside App code is removed automatically when that App ends.
 '''
 details.ja = '''
-- App のコードでは `events()` を、App に属さないコード（アドオンやアプリ全体の処理）では `runtime().events()` を使います。
-- `runtime().events()` はこのオブジェクトを返します。イベントは 4 つあります。プロセスの終了要求 `exitRequested`、デバイスロスト（GPU デバイスの消失）の `deviceLost`、ホットリロードで App が置き換わる直前の `hotReloadUnload`、標準入力から届くコマンド `console` です。
-- 最初の 3 つは、各 App の `events()` にも届きます。ここに登録したリスナーが先に呼ばれ、そのあと各 App のリスナーが、最後に追加された App から順に呼ばれます。`console` はここにだけ届きます。
-- これらのイベントはウィンドウに依存しません。最初のウィンドウが開く前や、すべてのウィンドウが閉じたあと、ヘッドレス App（`runHeadlessApp`）でも届きます。
+- App のイベントには `events()` を、プロセスのイベントには `runtime().events()` を使います。`console` と `filesOpened` は App のコードでも `runtime().events()` で受け取ります。
+- `runtime().events()` はこのオブジェクトを返します。イベントは 5 つあります。プロセスの終了要求 `exitRequested`、デバイスロスト（GPU デバイスの消失）の `deviceLost`、ホットリロードで App が置き換わる直前の `hotReloadUnload`、標準入力から届くコマンド `console`、OS からファイルを開くように要求されたときの `filesOpened` です。
+- 最初の 3 つは、各 App の `events()` にも届きます。ここに登録したリスナーが先に呼ばれ、そのあと各 App のリスナーが、最後に追加された App から順に呼ばれます。`console` と `filesOpened` はここにだけ届きます。
+- これらのイベントはウィンドウに依存しません。ライフサイクルイベントは最初のウィンドウが開く前や、すべてのウィンドウが閉じたあと、ヘッドレス App（`runHeadlessApp`）でも届きます。`filesOpened` のタイミングと対応環境はその項目を参照してください。
 - リスナーの登録と保持はメインスレッドで行ってください。戻り値の `EventListener` はメンバー変数に保持します。破棄されるとリスナーは外れます。App のコードの中で登録したリスナーは、その App が終わるときに自動で外れます。
 '''
 details.ko = '''
-- App 코드에서는 `events()`를, App에 속하지 않는 코드(애드온, 앱 전체 처리)에서는 `runtime().events()`를 사용합니다.
-- `runtime().events()`는 이 객체를 반환합니다. 이벤트는 4개입니다. 프로세스 종료 요청 `exitRequested`, 디바이스 로스트(GPU 장치 손실) `deviceLost`, 핫 리로드로 App이 교체되기 직전의 `hotReloadUnload`, 표준 입력으로 들어온 명령 `console`입니다.
-- 앞의 3개는 각 App의 `events()`에도 전달됩니다. 여기에 등록한 리스너가 먼저 호출되고, 그다음 각 App의 리스너가 마지막에 추가된 App부터 순서대로 호출됩니다. `console`은 여기에만 전달됩니다.
-- 이 이벤트들은 창에 의존하지 않습니다. 첫 창이 열리기 전, 모든 창이 닫힌 뒤, 헤드리스 App(`runHeadlessApp`)에서도 전달됩니다.
+- App 이벤트에는 `events()`를, 프로세스 이벤트에는 `runtime().events()`를 사용합니다. `console`과 `filesOpened`는 App 코드에서도 `runtime().events()`로 받습니다.
+- `runtime().events()`는 이 객체를 반환합니다. 이벤트는 5개입니다. 프로세스 종료 요청 `exitRequested`, 디바이스 로스트(GPU 장치 손실) `deviceLost`, 핫 리로드로 App이 교체되기 직전의 `hotReloadUnload`, 표준 입력으로 들어온 명령 `console`, OS 파일 열기 요청 `filesOpened`입니다.
+- 앞의 3개는 각 App의 `events()`에도 전달됩니다. 여기에 등록한 리스너가 먼저 호출되고, 그다음 각 App의 리스너가 마지막에 추가된 App부터 순서대로 호출됩니다. `console`과 `filesOpened`는 여기에만 전달합니다.
+- 이 이벤트들은 창에 의존하지 않습니다. 수명 주기 이벤트는 첫 창이 열리기 전, 모든 창이 닫힌 뒤, 헤드리스 App(`runHeadlessApp`)에서도 전달합니다. `filesOpened`의 시점과 지원 플랫폼은 해당 항목을 참조합니다.
 - 리스너 등록과 보관은 메인 스레드에서 하세요. 반환된 `EventListener`는 멤버 변수로 보관합니다. 파기되면 리스너가 해제됩니다. App 코드 안에서 등록한 리스너는 그 App이 끝날 때 자동으로 해제됩니다.
 '''
 snippet = '''
@@ -65118,3 +65118,96 @@ void tcApp::update() {
     bool hidden = isWindowOccluded();
 }
 '''
+
+
+["getCommandLineArgs"]
+keywords = ["argv", "arguments", "launch", "flags", "command line"]
+description.en = "Returns the process command-line arguments as UTF-8 strings, including the executable."
+description.ja = "実行ファイル名を含むプロセスの起動引数を UTF-8 文字列で返します。"
+description.ko = "실행 파일 이름을 포함한 프로세스 시작 인수를 UTF-8 문자열로 반환합니다."
+details.en = '''
+- Returns a `vector<string>` by value. Index 0 is the executable; remaining entries retain their order, empty values, spaces and flags. No changes to the template's `int main()` are needed. This API does not parse flags or read files.
+- Windows uses `GetCommandLineW` and `CommandLineToArgvW`, then converts UTF-16 to UTF-8; invalid surrogate code units become U+FFFD. Linux reads NUL-separated `/proc/self/cmdline` (an unavailable proc file returns an empty list). macOS uses `NSProcessInfo.arguments`.
+- iOS, Android and Web return an empty list. Mobile share/open requests and browser URLs are outside this API.
+- Only OS, available-memory and string/vector representation limits apply, as for file drops. Windows limits the command line to 32767 UTF-16 units including its terminator.
+- For OS file-opening requests, subscribe to `runtime().events().filesOpened`; do not interpret arguments as shell commands.
+'''
+details.ja = '''
+- `vector<string>` を値で返します。要素 0 は実行ファイルで、残りの引数は順序・空文字列・空白・フラグを保持します。テンプレートの `int main()` を変更する必要はありません。フラグの解析やファイルの読み込みは行いません。
+- Windows は `GetCommandLineW` と `CommandLineToArgvW` を使い、UTF-16 を UTF-8 に変換します。不正なサロゲートは U+FFFD に置き換えます。Linux は `/proc/self/cmdline` を NUL 区切りで読みます（利用できない場合は空のリストです）。macOS は `NSProcessInfo.arguments` を使います。
+- iOS・Android・Web では空のリストを返します。モバイルの共有・開く要求やブラウザの URL は対象外です。
+- ファイルドロップと同様に、OS・利用可能なメモリ・文字列と vector の表現上限だけが適用されます。Windows のコマンドラインは終端を含めて UTF-16 の 32767 単位までです。
+- OS から開くように要求されたファイルは `runtime().events().filesOpened` で受け取ります。引数をシェルコマンドとして実行しないでください。
+'''
+details.ko = '''
+- `vector<string>`을 값으로 반환합니다. 요소 0은 실행 파일이며 나머지 인수는 순서, 빈 문자열, 공백과 플래그를 유지합니다. 템플릿의 `int main()`을 변경할 필요가 없습니다. 플래그를 해석하거나 파일을 읽지 않습니다.
+- Windows는 `GetCommandLineW`와 `CommandLineToArgvW`로 얻은 UTF-16을 UTF-8로 변환하며 잘못된 서로게이트는 U+FFFD로 대체합니다. Linux는 NUL로 구분된 `/proc/self/cmdline`을 읽습니다(사용할 수 없으면 빈 목록입니다). macOS는 `NSProcessInfo.arguments`를 사용합니다.
+- iOS, Android와 Web에서는 빈 목록을 반환합니다. 모바일 공유 및 열기 요청과 브라우저 URL은 이 API의 범위에 포함하지 않습니다.
+- 파일 드롭과 마찬가지로 OS, 사용 가능한 메모리와 문자열/vector의 표현 한계만 적용합니다. Windows 명령줄은 종료 문자를 포함하여 UTF-16 32767단위로 제한합니다.
+- OS가 열도록 요청한 파일은 `runtime().events().filesOpened`로 받습니다. 인수를 셸 명령으로 실행하지 않습니다.
+'''
+snippet = '''
+void tcApp::setup() {
+    for (const auto& arg : getCommandLineArgs()) {
+        if (arg == "--preview") previewMode = true; // member: bool previewMode = false;
+    }
+}
+'''
+related = ["RuntimeEvents::filesOpened", "FilesOpenedEventArgs", "utf8ToPath"]
+
+["RuntimeEvents::filesOpened"]
+keywords = ["open with", "Dock", "Finder", "launch", "files"]
+description.en = "Delivers the files the OS asks this process to open, after the launch App's setup."
+description.ja = "OS がこのプロセスに開くように要求したファイルを、起動 App の setup 完了後に通知します。"
+description.ko = "OS가 이 프로세스에 열도록 요청한 파일을 시작 App의 setup 완료 후 전달합니다."
+details.en = '''
+- Listen through `runtime().events().filesOpened`, including inside App code. It is a process event with no window or position, separate from `filesDropped`. There is no App virtual or `events().filesOpened`. Every registered listener receives `FilesOpenedEventArgs&` on the main thread; there is no consumption flag. Keep the returned `EventListener` as a member; App-owned listeners end with that App.
+- Launch requests are combined and delivered once after the launch App's `setup()` returns, before its first update/draw. Listeners installed in setup receive them. Empty requests do not emit an event; later subscribers do not replay the launch request.
+- macOS receives file URLs from `application:openURLs:` (or legacy open-documents). Further requests reach the running process. Finder Open With and Dock acceptance also require the app bundle to declare supported document types; the template currently does not declare them. An app's raw arguments remain separately available.
+- Windows and Linux each process their own launch arguments, excluding argv[0]. TrussC adds no single-instance forwarding: another OS open action starts another process. Only existing files and directories are delivered. Empty arguments, paths with status errors, nonexistent paths and arguments starting with `-` (including `--foo`) are skipped. To open a name starting with `-`, use `./-name` or an absolute path. `--` does not change this rule. Other flag styles have no special meaning.
+- Accepted Windows/Linux paths become absolute against the working directory before setup; order and duplicates are preserved. They are not resolved against the data folder. macOS passes the paths from file-open requests. Paths are data: TrussC only checks metadata on Windows/Linux, never runs a shell or reads file contents automatically. Your listener chooses whether to load them.
+- As for file drops, count and length are bounded by OS limits, available memory and vector/string representation; no arbitrary fixed cap or truncation is added. iOS, Android and Web do not emit this event; their share/open mechanisms are outside this API.
+'''
+details.ja = '''
+- App のコードでも `runtime().events().filesOpened` に登録します。ウィンドウや座標を持たないプロセスのイベントで、`filesDropped` とは別です。App の仮想関数や `events().filesOpened` はありません。登録済みの全リスナーにメインスレッドで `FilesOpenedEventArgs&` を渡し、消費フラグはありません。戻り値の `EventListener` はメンバーで保持します。App に属するリスナーはその App の終了時に外れます。
+- 起動時の要求をまとめ、起動 App の `setup()` が戻ったあと、最初の更新・描画の前に一度だけ通知します。setup で登録したリスナーも受け取ります。空の要求は通知せず、あとから登録したリスナーへの再通知も行いません。
+- macOS は `application:openURLs:`（または従来の open-documents）からファイル URL を受け取り、実行中のプロセスにも追加の要求が届きます。Finder の「このアプリケーションで開く」や Dock へのドロップの受け付けには、バンドルで対応する書類タイプの宣言も必要です。現在のテンプレートは宣言しません。起動引数は別の API で取得できます。
+- Windows・Linux では各プロセスが argv[0] を除く自身の起動引数を処理します。単一プロセスへの転送は追加せず、OS で再び開く操作をすると別プロセスが起動します。存在するファイルとディレクトリだけを通知します。空文字列・状態取得エラー・存在しないパス・`-` で始まる引数（`--foo` など）は除外します。`-` で始まる名前には `./-name` または絶対パスを指定します。`--` でも規則は変わりません。それ以外のフラグ形式は特別扱いしません。
+- Windows・Linux では setup 前の作業ディレクトリを基準に絶対パスへ変換し、順序と重複を保持します。data フォルダは基準にしません。macOS では開く要求のパスを渡します。パスはデータとして扱い、Windows・Linux でのメタデータ確認以外に、シェルの実行やファイル内容の自動読み込みは行いません。読み込むかどうかはリスナーが決めます。
+- ファイルドロップと同様に、数と長さは OS・利用可能なメモリ・vector と文字列の表現上限に従います。任意の固定上限や切り詰めは追加しません。iOS・Android・Web では通知しません。それぞれの共有・開く仕組みは対象外です。
+'''
+details.ko = '''
+- App 코드에서도 `runtime().events().filesOpened`에 등록합니다. 창이나 좌표가 없는 프로세스 이벤트이며 `filesDropped`와 별개입니다. App 가상 함수나 `events().filesOpened`는 없습니다. 등록된 모든 리스너에 메인 스레드에서 `FilesOpenedEventArgs&`를 전달하며 소비 플래그는 없습니다. 반환된 `EventListener`를 멤버로 보관합니다. App 소유 리스너는 해당 App이 끝날 때 해제합니다.
+- 시작 요청을 합쳐 시작 App의 `setup()`이 반환한 뒤 첫 업데이트/그리기 전에 한 번 전달합니다. setup에서 등록한 리스너도 받습니다. 빈 요청은 알리지 않으며 나중에 등록한 리스너에게 시작 요청을 다시 전달하지 않습니다.
+- macOS는 `application:openURLs:`(또는 기존 open-documents)에서 파일 URL을 받으며 실행 중인 프로세스에도 추가 요청을 전달합니다. Finder의 다른 앱으로 열기와 Dock 드롭 수락에는 번들의 지원 문서 유형 선언도 필요합니다. 현재 템플릿은 이를 선언하지 않습니다. 시작 인수는 별도 API로 얻습니다.
+- Windows와 Linux에서는 각 프로세스가 argv[0]을 제외한 자신의 시작 인수를 처리합니다. 단일 인스턴스 전달 기능을 추가하지 않으므로 OS에서 다시 열면 다른 프로세스를 시작합니다. 존재하는 파일과 디렉터리만 전달합니다. 빈 인수, 상태 확인 오류, 존재하지 않는 경로와 `-`로 시작하는 인수(`--foo` 등)는 제외합니다. `-`로 시작하는 이름에는 `./-name`이나 절대 경로를 사용합니다. `--`도 이 규칙을 바꾸지 않습니다. 다른 플래그 형식은 특별히 취급하지 않습니다.
+- Windows와 Linux의 경로는 setup 이전 작업 디렉터리를 기준으로 절대 경로로 변환하며 순서와 중복을 유지합니다. data 폴더를 기준으로 삼지 않습니다. macOS에서는 파일 열기 요청의 경로를 전달합니다. 경로는 데이터로 취급합니다. Windows/Linux의 메타데이터 확인 외에 셸 실행이나 파일 내용 자동 읽기를 하지 않습니다. 로드 여부는 리스너가 결정합니다.
+- 파일 드롭과 마찬가지로 수와 길이는 OS, 사용 가능한 메모리와 vector/문자열의 표현 한계를 따릅니다. 임의의 고정 상한이나 잘라내기를 추가하지 않습니다. iOS, Android와 Web에서는 이 이벤트를 보내지 않습니다. 각 플랫폼의 공유/열기 방식은 범위에 포함하지 않습니다.
+'''
+snippet = '''
+// tcApp members: Image image; EventListener opened;
+void tcApp::setup() {
+    opened = runtime().events().filesOpened.listen([this](FilesOpenedEventArgs& e) {
+        if (!e.files.empty()) image.load(e.files.front());
+    });
+}
+'''
+related = ["FilesOpenedEventArgs", "FilesOpenedEventArgs::files", "getCommandLineArgs", "CoreEvents::filesDropped", "Event<T>"]
+
+["FilesOpenedEventArgs"]
+description.en = "Carries a process-level file-open request with no window or position."
+description.ja = "ウィンドウや座標を持たない、プロセス単位のファイルを開く要求を保持します。"
+description.ko = "창이나 좌표가 없는 프로세스 단위 파일 열기 요청을 담습니다."
+details.en = "Passed as a mutable reference to every runtime().events().filesOpened listener on the main thread. The only field is files; there is no consumed or cancel flag. Listeners share the payload, as with other mutable events, so edits to files are visible to later listeners. Copy paths you need after the callback returns. See RuntimeEvents::filesOpened for launch timing, filtering and platform behavior."
+details.ja = "メインスレッドで runtime().events().filesOpened の全リスナーに変更可能な参照として渡します。フィールドは files だけで、consumed や cancel はありません。他の変更可能なイベントと同様に内容を共有するため、files の変更は後続のリスナーにも見えます。コールバック終了後も必要なパスはコピーしてください。起動時のタイミング・選別・プラットフォームごとの動作は RuntimeEvents::filesOpened を参照してください。"
+details.ko = "메인 스레드에서 runtime().events().filesOpened의 모든 리스너에 수정 가능한 참조로 전달합니다. 필드는 files뿐이며 consumed나 cancel은 없습니다. 다른 수정 가능한 이벤트처럼 내용을 공유하므로 files 수정은 뒤의 리스너에도 반영합니다. 콜백 반환 후 필요한 경로는 복사합니다. 시작 시점, 필터링과 플랫폼 동작은 RuntimeEvents::filesOpened를 참조합니다."
+related = ["RuntimeEvents::filesOpened", "FilesOpenedEventArgs::files"]
+
+["FilesOpenedEventArgs::files"]
+description.en = "The files and directories requested by the OS, stored as filesystem paths."
+description.ja = "OS が開くように要求したファイルとディレクトリを filesystem パスで保持します。"
+description.ko = "OS가 열도록 요청한 파일과 디렉터리를 filesystem 경로로 보관합니다."
+details.en = "An initially empty vector<fs::path>. Windows/Linux launch delivery contains absolute existing file/directory paths; macOS delivery contains paths from file-open requests. No contents are read automatically. Count and path length use OS, available-memory and container representation limits, matching filesDropped. See RuntimeEvents::filesOpened for filtering rules and a usage snippet."
+details.ja = "初期値は空の vector<fs::path> です。Windows・Linux の起動通知は存在するファイル・ディレクトリの絶対パスを、macOS は開く要求のパスを保持します。内容を自動では読み込みません。数とパスの長さには filesDropped と同じ OS・利用可能なメモリ・コンテナーの表現上限が適用されます。選別の規則と使用例は RuntimeEvents::filesOpened を参照してください。"
+details.ko = "초기값은 빈 vector<fs::path>입니다. Windows/Linux 시작 알림에는 존재하는 파일/디렉터리의 절대 경로를, macOS에는 열기 요청 경로를 담습니다. 내용을 자동으로 읽지 않습니다. 수와 경로 길이에는 filesDropped와 동일한 OS, 사용 가능한 메모리와 컨테이너 표현 한계를 적용합니다. 필터 규칙과 사용 예는 RuntimeEvents::filesOpened를 참조합니다."
+related = ["FilesOpenedEventArgs", "RuntimeEvents::filesOpened", "Image::load"]

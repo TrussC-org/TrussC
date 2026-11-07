@@ -7,9 +7,15 @@
 #include <cstdint>
 #include <vector>
 #include <string>
+#include <filesystem>
 #include "tcMath.h"   // Vec2
 
 namespace trussc {
+
+// Process-level open request: no window, position, or consumption flag.
+struct FilesOpenedEventArgs {
+    std::vector<std::filesystem::path> files;
+};
 
 // ---------------------------------------------------------------------------
 // Mouse button identifier (values match SAPP_MOUSEBUTTON_*)
