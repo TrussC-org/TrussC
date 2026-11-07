@@ -174,6 +174,18 @@ struct WindowContext {
 
     // --- render target routing (one swapchain target per window) ---
     RenderTarget swapchainTarget;
+    void resetScissorAtFrameStart() {
+        auto& target = swapchainTarget;
+        // Only a forgotten pop leaks; a plain setScissor() has no pair to forget.
+        if (!target.scissorStack.empty()) {
+            static OnceGate leaked{1.0};
+            if (leaked.isFirstTime())
+                logWarning("Scissor") << "frame start discarded scissor state (leaked depth "
+                    << target.scissorStack.size() << ")";
+        }
+        target.scissorStack.clear();
+        target.currentScissor = {};
+    }
     // Compatibility view: only the host stack coordinator changes this pointer.
     RenderTarget* currentTarget = &swapchainTarget;
     std::vector<TargetStackEntry> targetStack;

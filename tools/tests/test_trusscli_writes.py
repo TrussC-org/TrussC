@@ -42,7 +42,7 @@ class WriteTests(unittest.TestCase):
 
     def snapshot(self, project=None):
         project = project or self.project
-        return {str(p.relative_to(project)): p.read_bytes()
+        return {p.relative_to(project).as_posix(): p.read_bytes()
                 for p in project.rglob("*") if p.is_file()}
 
     def assert_lf(self, files):
@@ -96,7 +96,7 @@ class WriteTests(unittest.TestCase):
         for path in template.rglob("*"):
             if path.is_file():
                 data = path.read_bytes().replace(b"\r\n", b"\n")
-                expected[str(path.relative_to(template))] = data
+                expected[path.relative_to(template).as_posix()] = data
                 path.write_bytes(data.replace(b"\n", b"\r\n"))
         # An opaque icon must not be normalized along with template text.
         icon = b"\x00\x01\r\n\xff"

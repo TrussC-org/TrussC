@@ -63,6 +63,15 @@ Once a week, and on manual dispatch (`.github/workflows/upstream-check.yml`), `t
 |---|---|---|
 | `Upstream check` (weekly / manual) | `python3 tools/check_upstream_versions.py`: reports newer upstream releases or changes to pinned files on one tracking issue. | Read upstream release notes and decide whether to update. This workflow does not gate pull requests. |
 
+### Running the tool tests locally
+
+The tool tests in `tools/tests` need Python 3 and PyYAML, which reads the workflow files. On any OS, install PyYAML into the Python that runs the tests, then run them from the repository root:
+
+```sh
+python -m pip install PyYAML
+python -m unittest discover -s tools/tests
+```
+
 ## Security
 
 Don't open a public issue for a security problem. Report it privately, as described in [SECURITY.md](SECURITY.md#reporting).

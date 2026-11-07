@@ -90,6 +90,14 @@ class DailyWebWorkflowTests(unittest.TestCase):
 
 
 class DailyDisplayWorkflowTests(unittest.TestCase):
+    def test_help_exits_without_running_display_modes(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/run_core_display_tests.py'), '--help'],
+                                capture_output=True, text=True, encoding='utf-8', errors='replace')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('usage:', result.stdout)
+        self.assertIn('--help', result.stdout)
+        self.assertNotIn('RUN ', result.stdout)
+
     def test_example_checks_use_same_xvfb_wrapper_and_mesa_environment(self):
         daily = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         steps = daily['jobs']['sweep']['steps']

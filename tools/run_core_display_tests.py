@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run already-built core display modes from core/tests/*/display-test (Linux)."""
 from pathlib import Path
+import argparse
 import os
 import shlex
 import signal
@@ -96,6 +97,8 @@ def run_modes(root):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args()
     try:
         sys.exit(run_modes(ROOT))
     except ValueError as error:

@@ -1,6 +1,7 @@
 #pragma once
 #include "tc/utils/tcOnceGate.h"
 #include "tc/sound/internal/tcAudioDecode.h"
+#include "tc/sound/internal/tcFFmpegAudioLength.h"
 
 // Linux-only miniaudio backend for audio inside video containers. Included by
 // tcAudio_impl.cpp after miniaudio; never decoded on the audio callback thread.
@@ -78,9 +79,9 @@ struct FFmpegAudio {
                 &codec->ch_layout, codec->sample_fmt, rate, 0, nullptr) < 0 ||
             swr_init(resampler) < 0) return MA_OUT_OF_MEMORY;
         // Query metadata only: no scan of the audio track to determine length.
-        int64_t duration = st->duration;
-        if (duration != AV_NOPTS_VALUE && duration > 0) {
-            length = av_rescale_q(duration, st->time_base, AVRational{1, rate});
+        const int64_t streamLength = ffmpegAudioStreamLength(st, rate);
+        if (streamLength != AV_NOPTS_VALUE) {
+            length = streamLength;
             exactLength = true;
         } else if (format->duration != AV_NOPTS_VALUE && format->duration > 0) {
             length = av_rescale_q(format->duration, AV_TIME_BASE_Q, AVRational{1, rate});

@@ -60,6 +60,9 @@ static double drawAccumulator=0, previousDrawTick=0, callbackWork=0;
 static double throttledRefresh=0, switchTime=0;
 static int switchSecondary=0;
 static bool seeded_run=false;
+static bool injectWait=false, eventQueued=false, eventProcessed=false, inputEvent=false, batchCleared=false;
+static int eventTarget=0;
+static double savedDeadline=0;
 FRAME_SKIP
 void lowerFps(sapp_window, void*) noexcept {
     const double elapsed=clockValue-previousDrawTick;
@@ -76,13 +79,26 @@ _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
 void sapp_destroy_window(sapp_window h) { for (auto*& w : _sapp_tc.windows) if (w && w->win_id==h.id) w=nullptr; }
 void _sapp_tc_x11_init_client() {}
 double _sapp_tc_now() { return clockValue; }
-int XPending(int) { return 0; }
+int XPending(int) { return eventQueued ? 1 : 0; }
 void XFlush(int) {}
-void XNextEvent(int, XEvent*) {}
+void XNextEvent(int, XEvent*) { eventQueued=false; }
 int ConnectionNumber(int) { return 0; }
-int poll(pollfd*, int, int ms) { clockValue+=ms*.001; return 0; }
-void _sapp_tc_x11_wait_until(double deadline) { clockValue=deadline; }
-void _sapp_tc_x11_process_event(XEvent*) {}
+bool inputDuringWait() {
+    if (!injectWait) return false;
+    injectWait=false; eventQueued=true; clockValue+=.010;
+    return true;
+}
+int poll(pollfd*, int, int ms) { if (inputDuringWait()) return 1; clockValue+=ms*.001; return 0; }
+void _sapp_tc_x11_wait_until(double deadline) { if (!inputDuringWait()) clockValue=deadline; }
+void _sapp_tc_x11_process_event(XEvent*) {
+    // Model the shared delivery helper's flag; event conversion is covered by
+    // event-converter-test. Exercise the real loop's clearing/reset and due-check.
+    auto* w=_sapp_tc.windows[eventTarget];
+    batchCleared=!w->input_delivered;
+    savedDeadline=w->earliest_next;
+    if (inputEvent) w->input_delivered=true;
+    eventProcessed=true;
+}
 constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0;
 void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
@@ -128,6 +144,35 @@ TICK
 LOOP
 int main() {
     int failures=0;
+    // #1012: one skipped present arms an interval-4 deadline. Input arrives
+    // during the native wait. Inspect admission in that very turn, without
+    // measuring elapsed real time or waiting for the old deadline to expire.
+    for (int target : {0,1}) for (bool input : {false,true}) {
+        _sapp_tc_window_t main{}, secondary{};
+        _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2;
+        main.swap_interval=4; // Secondaries keep their native interval-zero timer.
+        clockValue=10; eventTarget=target; inputEvent=input;
+        injectWait=eventQueued=eventProcessed=batchCleared=false;
+        main.desc.tick_cb=secondary.desc.tick_cb=[](sapp_window h,void*) noexcept {
+            _sapp_tc_lookup(h)->skip_present=true;
+        };
+        _sapp_tc.app.desc._tc_after_turn=[]() {
+            if (eventProcessed) _sapp_tc.app.quit_ordered=true;
+            else {
+                injectWait=true;
+                // A previous batch's marker must not wake a new non-input batch.
+                for (auto* w : _sapp_tc.windows) w->input_delivered=true;
+            }
+        };
+        _sapp_tc_x11_run_loop();
+        const auto* affected=_sapp_tc.windows[target];
+        const auto* other=_sapp_tc.windows[1-target];
+        const bool ok=batchCleared && savedDeadline>clockValue &&
+            affected->frame_count==(input ? 2 : 1) && other->frame_count==1;
+        std::printf("skipped-present input admission target=%d input=%d: %s\n",target,input,ok?"PASS":"FAIL");
+        failures+=!ok;
+    }
     // Count exact admission opportunities through the production loop. The
     // callback runs only on admitted ticks, so the gallery's measured fps agrees.
     for (bool timer : {false,true}) for (int interval : {1,2,3}) {
@@ -338,4 +383,14 @@ with tempfile.TemporaryDirectory(prefix='tc-an2a-pacing2-', dir=os.environ.get('
                         str(scratch/'probe.cpp'), '-o', str(scratch/'probe')], check=True)
         print(backend, flush=True)
         failed |= subprocess.run([str(scratch/'probe')], timeout=20).returncode != 0
+    reset = 'if (w && w->input_delivered) w->earliest_next = 0.0;'
+    assert probe.count(reset) == 1, 'input reset mutation anchor missing'
+    mutant = probe.replace(reset, '#if defined(SOKOL_GLES3)\n' + reset + '\n#endif')
+    (scratch / 'mutant.cpp').write_text(mutant, encoding='utf-8')
+    subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-O1', '-DSOKOL_GLCORE',
+                    str(scratch/'mutant.cpp'), '-o', str(scratch/'mutant')], check=True)
+    result = subprocess.run([str(scratch/'mutant')], capture_output=True, text=True, timeout=20)
+    detected = result.returncode == 1 and 'skipped-present input admission target=0 input=1: FAIL' in result.stdout
+    print('GLX missing deadline reset mutation: ' + ('detected' if detected else 'NOT DETECTED'), flush=True)
+    failed |= not detected
     raise SystemExit(int(failed))
