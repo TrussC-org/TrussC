@@ -21,6 +21,7 @@ extern "C" {
 }
 
 #include "tcVideoDecodeFFmpeg.h"
+#include "tc/sound/internal/tcFFmpegAudioLength.h"
 
 #include <thread>
 #include <atomic>
@@ -133,7 +134,6 @@ private:
     void decodeError(const char* operation, int code) {
         char message[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(code, message, sizeof(message));
-        isPlaying_ = false;
         if (code == AVERROR(ENOMEM)) playbackErrors_.report("out of memory", code);
         else playbackErrors_.report(std::string(operation) + ": " + message, code);
     }
@@ -546,8 +546,12 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
 void TCVideoPlayerImpl::update(VideoPlayer* player) {
     hasNewFrame_ = false;
 
+    // Consume errors and completion under the same lock. The decoder queues
+    // its error before publishing isFinished_; only this thread stops playback.
+    std::lock_guard<std::mutex> lock(mutex_);
     auto error = playbackErrors_.take();
     if (!error.message.empty()) {
+        isPlaying_ = false;
         if (player) internal::VideoPlayerPlatformAccess::reportError(*player, error);
         return;
     }
@@ -589,8 +593,6 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     }
 
     // Get frame from queue if available and PTS is right
-    std::lock_guard<std::mutex> lock(mutex_);
-
     while (!frameQueue_.empty()) {
         FrameData& front = frameQueue_.front();
 
@@ -696,6 +698,7 @@ void TCVideoPlayerImpl::decodeThread() {
         try { decoded = decodeNextFrame(); }
         catch (const std::exception&) { decodeError("video frame allocation", AVERROR(ENOMEM)); }
         if (!decoded) {
+            std::lock_guard<std::mutex> lock(mutex_);
             isFinished_ = true;
         }
     }
@@ -1050,6 +1053,11 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
 
     // Flush resampler
     if (!outOfMemory) appendConverted(0);
+
+    const int64_t audioLength = internal::ffmpegAudioStreamLength(
+        fmtCtx->streams[audioIdx], engineSampleRate);
+    if (audioLength != AV_NOPTS_VALUE && static_cast<uint64_t>(audioLength) < samples.size() / 2)
+        samples.resize(static_cast<size_t>(audioLength) * 2);
 
     av_frame_free(&frame);
     av_packet_free(&pkt);

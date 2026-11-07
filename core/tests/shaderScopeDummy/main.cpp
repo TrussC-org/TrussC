@@ -1314,7 +1314,7 @@ bool scissorLogicalProbe(float dpi, bool pixelPerfect) {
     pushMatrix(); translate(50, 50); scale(3, 3);
     setScissor(10, 20, 30, 40);
     ok &= is(target.currentScissor, 10 * s, 20 * s, 30 * s, 40 * s);
-    setScissor(1, 2, 3, 4);                       // int overload, same units
+    setScissor(1, 2, 3, 4);                       // ints convert to float, same units
     ok &= is(target.currentScissor, 1 * s, 2 * s, 3 * s, 4 * s);
     popMatrix();
     resetScissor();
@@ -1352,6 +1352,22 @@ bool scissorLogicalProbe(float dpi, bool pixelPerfect) {
     ok &= !fbo.currentScissor.active && fbo.scissorStack.empty() && !target.currentScissor.active;
     window.currentTarget = &window.swapchainTarget;
     present();
+    // A leaked scissor must be gone before another target selection or pass
+    // can repair the sgl recording state on the next frame.
+    pushScissor(1, 2, 3, 4);
+    beginFrame();
+    auto* context = _sgl_lookup_context(target.resources().context.id);
+    _sgl_scissor_rect_args_t frameClip = {};
+    for (int i = 0; i < context->commands.next; ++i) {
+        const auto& command = context->commands.ptr[i];
+        if (command.cmd == SGL_COMMAND_SCISSOR_RECT) frameClip = command.args.scissor_rect;
+    }
+    const bool frameReset = !target.currentScissor.active && target.scissorStack.empty() &&
+        frameClip.x == 0 && frameClip.y == 0 && frameClip.w == target.width &&
+        frameClip.h == target.height && frameClip.origin_top_left;
+    std::printf("SCISSOR FRAME RESET dpi=%.2f pixel=%d ok=%d\n", dpi, pixelPerfect, frameReset);
+    ok &= frameReset;
+    present();
     window.teardownTargets();
     target.resources().release();
     internal::pixelPerfectMode() = previousPixelPerfect;
@@ -1363,9 +1379,9 @@ bool scissorLogicalProbe(float dpi, bool pixelPerfect) {
 
 
 // Exercise the GPU fixture's unmatched-Fbo and review stack sequences through
-// real Node dispatch. An empty child pop is intentionally rejected only in the
-// negative variant: it never consumes the suspended window's live Node push.
-bool targetStackDispatchProbe(bool rejectedPop) {
+// real Node dispatch. Invalid matrix pops name the active Fbo or window and
+// never consume the window's live Node push; style pops have no target label.
+bool targetStackDispatchProbe(bool rejectedPop, bool popOnFbo, bool stylePop = false) {
     DrawingWindowState windowState; internal::WindowContext& window = windowState.context;
     window.fbWidth = 64; window.fbHeight = 48;
     window.acquireSwapchain = dummySwapchain;
@@ -1373,20 +1389,24 @@ bool targetStackDispatchProbe(bool rejectedPop) {
     internal::currentWindowCtx() = &window;
     int unmatchedWarnings = 0, popWarnings = 0, unexpectedWarnings = 0;
     bool expectingUnmatched = false, expectingPop = false;
+    const std::string expectedPop = stylePop
+        ? "[RenderContext] popStyle() without a matching pushStyle() (inside trussc::App::draw())"
+        : std::string("[RenderContext] popMatrix() without a matching pushMatrix() on ") +
+            (popOnFbo ? "Fbo 16x12" : "window") + " (inside trussc::App::draw())";
     auto log = getLogger().onLog.listen([&](LogEventArgs& e) {
         if (e.level != LogLevel::Warning) return;
         if (expectingUnmatched && e.message == "[Fbo] end() discarded unmatched matrix, camera or scissor pushes")
             ++unmatchedWarnings;
-        else if (expectingPop && e.message == "[RenderContext] trussc::App::draw() called popMatrix() without a matching pushMatrix() (ignored)")
+        else if (expectingPop && e.message == expectedPop)
             ++popWarnings;
         else ++unexpectedWarnings;
     });
     struct StackApp : App {
-        bool rejectedPop, ok = true;
+        bool rejectedPop, popOnFbo, stylePop, ok = true;
         bool& expectingUnmatched;
         bool& expectingPop;
-        StackApp(bool rejectedPop, bool& unmatched, bool& pop)
-            : rejectedPop(rejectedPop), expectingUnmatched(unmatched), expectingPop(pop) { setPos(2, 3); }
+        StackApp(bool rejectedPop, bool popOnFbo, bool stylePop, bool& unmatched, bool& pop)
+            : rejectedPop(rejectedPop), popOnFbo(popOnFbo), stylePop(stylePop), expectingUnmatched(unmatched), expectingPop(pop) { setPos(2, 3); }
         void draw() override {
             auto& screen = internal::currentTarget();
             const auto depth = screen.matrixStack.size();
@@ -1409,8 +1429,14 @@ bool targetStackDispatchProbe(bool rejectedPop) {
             const auto screenModel = getMatrix();
             auto& rc = internal::getDefaultContext();
             const auto floor = rc.setStackFloor(depth + 1, rc.getStyleStackDepth(), &typeid(App));
+            if (rejectedPop && !popOnFbo) { expectingPop = true; popMatrix(); expectingPop = false; }
             fbo.begin();
-            if (rejectedPop) { expectingPop = true; popMatrix(); expectingPop = false; }
+            if (rejectedPop && popOnFbo) {
+                expectingPop = true;
+                if (stylePop) popStyle(); else popMatrix();
+                expectingPop = false;
+                ok &= rc.getStyleStackDepth() == 0;
+            }
             ok &= internal::currentTarget().matrixStack.empty() && screen.matrixStack.size() == depth + 1;
             pushMatrix(); translate(2, 3); popMatrix();
             ok &= internal::currentTarget().matrixStack.empty() && !sgl_error().stack_underflow;
@@ -1424,7 +1450,7 @@ bool targetStackDispatchProbe(bool rejectedPop) {
     };
     bool ok;
     {
-        auto candidate = internal::makeConstructedApp<StackApp>(rejectedPop, expectingUnmatched, expectingPop);
+        auto candidate = internal::makeConstructedApp<StackApp>(rejectedPop, popOnFbo, stylePop, expectingUnmatched, expectingPop);
         auto& app = *candidate;
         internal::currentWindowContext().rootNode = candidate;
         beginFrame();
@@ -1438,18 +1464,21 @@ bool targetStackDispatchProbe(bool rejectedPop) {
     window.teardownTargets(); window.swapchainTarget.resources().release();
     internal::currentWindowCtx() = previous;
     ok &= unmatchedWarnings == int(!rejectedPop) && popWarnings == int(rejectedPop) && unexpectedWarnings == 0;
-    std::printf("TARGET STACK DISPATCH rejectedPop=%d unmatched=%d pop=%d unexpected=%d ok=%d\n",
-        rejectedPop, unmatchedWarnings, popWarnings, unexpectedWarnings, ok);
+    std::printf("TARGET STACK DISPATCH rejectedPop=%d popOnFbo=%d stylePop=%d unmatched=%d pop=%d unexpected=%d ok=%d\n",
+        rejectedPop, popOnFbo, stylePop, unmatchedWarnings, popWarnings, unexpectedWarnings, ok);
     return ok;
 }
 
 // Keep deliberate diagnostics and their OnceGate/rate-limit state local to
 // this probe; the remaining suite also tests device teardown and ID reuse.
+// Each call creates a fresh DrawingWindowState and RenderContext, resetting
+// the shared node-draw warning rate limit between matrix and style cases.
 bool targetStackDispatchChecks() {
     std::fflush(stdout);
     const pid_t child = fork();
     if (child == 0) {
-        const bool ok = targetStackDispatchProbe(false) && targetStackDispatchProbe(true);
+        const bool ok = targetStackDispatchProbe(false, true) && targetStackDispatchProbe(true, true) &&
+            targetStackDispatchProbe(true, false) && targetStackDispatchProbe(true, true, true);
         std::fflush(stdout);
         _exit(ok ? 0 : 1);
     }

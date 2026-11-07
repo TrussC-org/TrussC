@@ -39,6 +39,20 @@ struct Later : App {
 };
 struct Earlier : App {
     void setup() override {
+        // Restoring a leaked matrix/style stack applies SGL state, so this
+        // check needs the normal graphics lifetime, unlike the C2 fixtures.
+        auto* render = internal::WindowRequestAccess::context(*getWindow()).render;
+        const auto matrixDepth = render->getMatrixStackDepth(), styleDepth = render->getStyleStackDepth();
+        EventListener ownedRuntime;
+        {
+            internal::AppOwnerScope owner(internal::appOwner(*this));
+            ownedRuntime = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) {
+                pushMatrix(); pushStyle(); e.cancel = true;
+            });
+        }
+        internal::dispatchExitRequested();
+        check("Runtime subscriber guard restores its own App stacks", render->getMatrixStackDepth() == matrixDepth && render->getStyleStackDepth() == styleDepth);
+        ownedRuntime.disconnect();
         earlier = internal::WindowRequestAccess::retainHostOwner(*getWindow());
         later = createWindow(WindowSettings{}.setSize(120, 90).setTitle("Later"));
         check("later created", bool(later));

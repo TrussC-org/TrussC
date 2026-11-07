@@ -1425,8 +1425,8 @@ private:
     // their per-voice decoder rebuilt at the new rate + seeked to the
     // current playback position; the ring is cleared so the worker
     // refills it with samples at the new rate. Implementation lives in
-    // tcAudio_impl.cpp (miniaudio types). Called with mutex_ NOT held —
-    // the device is already stopped, so no audio callback can race.
+    // tcAudio_impl.cpp (miniaudio types). Called with mutex_ held and the
+    // device stopped, excluding diagnostics and other voice users too.
     void migrateVoicesToNewRate(int oldRate, int newRate);
 
     void mixAudioInternal(float* buffer, int num_frames, int num_channels) {

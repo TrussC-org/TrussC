@@ -112,6 +112,18 @@ static int openHandles(const fs::path& path) {
     closedir(d);
     return n;
 }
+
+static void checkFileClosed(const string& name, const fs::path& path) {
+    // The stream worker may still hold the decoder while finishing a refill.
+    const auto deadline = chrono::steady_clock::now() + chrono::seconds(3);
+    int handles = openHandles(path);
+    while (handles > 0 && chrono::steady_clock::now() < deadline) {
+        this_thread::sleep_for(chrono::milliseconds(10));
+        handles = openHandles(path);
+    }
+    check(name, handles == 0, handles < 0 ? "could not inspect file handles"
+          : "file still open at the 3-second deadline: " + to_string(handles) + " handle(s)");
+}
 #endif
 
 } // namespace
@@ -249,12 +261,10 @@ TC_CORE_TEST_MAIN() {
             check("stream: a playing voice holds its file", openHandles(wav) == 1,
                   to_string(openHandles(wav)));
         }
-        check("stream: the file closes when the last handle goes away", openHandles(wav) == 0,
-              to_string(openHandles(wav)));
+        checkFileClosed("stream: the file closes when the last handle goes away", wav);
         stream.play();
         stream.stop();
-        check("stream: the file closes on stop()", openHandles(wav) == 0,
-              to_string(openHandles(wav)));
+        checkFileClosed("stream: the file closes on stop()", wav);
 #endif
         check("stream: plays again after stop()", stream.play() && stream.isPlaying());
         stream.stop();
