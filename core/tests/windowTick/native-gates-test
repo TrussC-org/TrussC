@@ -237,6 +237,7 @@ struct _sapp_tc_window_t {
     bool native_visible=false;
     bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false, fullscreen=false;
     bool fullscreen_on_map=false, fullscreen_requested=false;
+    double fullscreen_sent=0;
     bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, skip_present=false, cancel_tick=false;
     bool from_modal=false, frame_wait=false, credit_held=false, waitable_ready=true;
     bool resize_pending=false, input_delivered=false, wake_on_input=false, last_tick_presented=false;
@@ -1539,6 +1540,7 @@ void _sapp_tc_x11_send_event(int,int,long op,long,long,long,long) {
     ++fullscreenCalls; actualFullscreen=op==1;
 }
 int XWithdrawWindow(int,int,int) { ++withdrawals; mapped=false; return 1; }
+double _sapp_tc_now();
 ''' + extract('static void _sapp_tc_x11_set_fullscreen(') + r'''
 bool changed=false, closeOnResize=false, closeOnTick=false, hideOnTick=false, reenter=false, renewalOk=true;
 bool eventDriven=false;

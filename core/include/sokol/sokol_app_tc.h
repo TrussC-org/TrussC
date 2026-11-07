@@ -7885,8 +7885,9 @@ static void _sapp_tc_win32_set_fullscreen(_sapp_tc_window_t* w, bool fullscreen,
     }
     w->fullscreen = fullscreen;
     w->fullscreen_state.terminal(fullscreen);
-    SetWindowPos(w->hwnd, HWND_TOP, rect.left, rect.top,
-                 rect.right - rect.left, rect.bottom - rect.top, swp_flags | SWP_FRAMECHANGED);
+    // A hidden window must not become the foreground window.
+    SetWindowPos(w->hwnd, HWND_TOP, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top,
+                 swp_flags | SWP_FRAMECHANGED | (w->desc.hidden ? SWP_NOACTIVATE : 0));
 }
 
 static bool _sapp_tc_win32_any_fullscreen(void) {
@@ -9247,6 +9248,8 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool native_visible;        /* last completed visibility operation; WM minimization is separate */
     bool fullscreen_requested;  /* latest explicit request or mapped WM observation */
     bool fullscreen_on_map;     /* replay requested fullscreen once after explicit show (#1262) */
+    double fullscreen_sent;     /* when the last fullscreen request was sent */
+    bool decoration_pending;    /* decoration changed while fullscreen; write it again on exit */
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
     // [TrussC #1263] Secondary pacing is divided without blocking the shared GL context.
@@ -10974,6 +10977,7 @@ static void _sapp_tc_x11_set_fullscreen(_sapp_tc_window_t* w, bool enable) {
         const long op = enable ? 1 : 0;     /* _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE */
         _sapp_tc_x11_send_event(w->xwin, _sapp_tc.NET_WM_STATE,
                                 op, (long)_sapp_tc.NET_WM_STATE_FULLSCREEN, 0, 1, 0);
+        w->fullscreen_sent = _sapp_tc_now();
     }
     w->fullscreen_requested = enable;
     XFlush(_sapp_tc.display);
@@ -10993,10 +10997,24 @@ static void _sapp_tc_x11_observe_fullscreen(_sapp_tc_window_t* w) {
     if (states) XFree(states);
     const bool changed = w->fullscreen != full;
     w->fullscreen = full;
+    // The WM's echo of an older request must not overwrite a newer one (rapid
+    // toggles), and an echo cannot tell which request it confirms. So WM
+    // changes become the intent only 0.5 s after the last request; a WM-side
+    // change inside that window is not adopted (rare; the next toggle may flip
+    // the wrong way once).
+    const bool waiting = _sapp_tc_now() - w->fullscreen_sent < 0.5;
     // Other WM state atoms can change while a fullscreen request is pending.
     // Initial mapping accepts WM placement; explicit-show mapping preserves replay.
-    if (changed && !w->desc.hidden && !w->fullscreen_on_map)
+    if (changed && !waiting && !w->desc.hidden && !w->fullscreen_on_map)
         w->fullscreen_requested = full;
+    // Some WMs (labwc) ignore a Motif change made while fullscreen: write it
+    // again once windowed - on an observed exit, or once the intent is windowed
+    // (entry and exit can both finish before either is observed) - but not on
+    // a windowed update before a requested entry.
+    if (!full && w->decoration_pending && (changed || !w->fullscreen_requested)) {
+        w->decoration_pending = false;
+        _sapp_tc_x11_set_decorated(w, !w->desc.borderless);
+    }
 }
 
 /*-- synchronous event wait (poll on the connection fd with a deadline) ------*/
@@ -18530,6 +18548,13 @@ extern "C" void sapp_tc_window_set_decorated(sapp_window win, bool decorated) {
     _sapp_tc_mac_apply_decoration(w);
     if (!w->desc.hidden) [w->window makeKeyAndOrderFront:nil];
     [w->window makeFirstResponder:w->window.contentView];
+#elif defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    auto* w = _sapp_tc_lookup(win);
+    if (!w || !_sapp_tc.display || !w->xwin) return;
+    w->desc.borderless = !decorated;
+    _sapp_tc_x11_set_decorated(w, decorated);
+    w->decoration_pending = w->fullscreen || w->fullscreen_requested;
+    XFlush(_sapp_tc.display);
 #else
     (void)win; (void)decorated;
 #endif
