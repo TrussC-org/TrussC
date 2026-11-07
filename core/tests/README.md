@@ -1214,3 +1214,15 @@ Device checks: run these modes on macOS, Windows, GNOME/XWayland and Pi X11/EGL.
 On macOS also check the last window's close button with quitOnClose on and off,
 Cmd+Q / app-menu Quit, and supervised logout. Hiding during a native fullscreen
 transition or a modal loop is outside this probe's ordinary-use coverage.
+
+
+`nativeWindow --display --fullscreen` exercises #1268 on X11 with an EWMH
+window manager: borderless secondary creation with hidden fullscreen intent,
+app-requested entry/exit, external EWMH entry/exit for main and secondary windows,
+and hide/show replay of the latest WM state. It checks native query, mapped
+geometry, and replay intent after normal property dispatch. Run both GLX and
+`-DTC_NATIVE_EGL=ON` builds. Bare Xvfb cannot fullscreen; this mode needs a WM
+and is deliberately omitted from the default display-test modes. Use a private
+Xvfb for any local WM, with the display specified explicitly; never replace the
+owner's desktop WM. macOS/Windows fullscreen and decoration appearance remain
+device-round checks.

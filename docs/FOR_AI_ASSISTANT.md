@@ -2273,7 +2273,7 @@ bool getKeepScreenOn() [macos,windows,linux,android,ios,web]  // Returns the kee
 int getMaxUpdateSteps()  // Returns the limit on fixed-rate update steps.
 IVec2 getWindowPosition() [macos,windows,linux]  // Returns the window position on the screen.
 bool grabScreen(Pixels & outPixels) [macos,windows,linux,ios,android]  // Read this window's screen into Pixels. What is captured depends on when you call it
-bool isFullscreen()  // Returns whether fullscreen currently blocks this window's size and position requests.
+bool isFullscreen()  // Returns this window's observed fullscreen state.
 bool isRecording()  // Returns whether the global screen recorder is capturing.
 int recordingFrameCount()  // Returns the global recording's accepted video frame count.
 fs::path recordingPath()  // Returns the global recording's output path.
@@ -4787,7 +4787,7 @@ IVec2 Window::getPosition() const [macos,windows,linux]  // This window's curren
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
 bool Window::isFocused() const  // Returns whether this window has keyboard focus, as last reported by the operating system.
-bool Window::isFullscreen() const  // Returns whether fullscreen currently blocks this window's size and position requests.
+bool Window::isFullscreen() const  // Returns this window's observed fullscreen state.
 bool Window::isOccluded() const  // Returns whether this window is explicitly hidden, minimized or fully occluded.
 bool Window::isOpen() const  // Returns whether this window is open.
 bool Window::isVisible() const  // Returns this open window's requested visibility.
