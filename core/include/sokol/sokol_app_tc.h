@@ -2503,6 +2503,8 @@ SOKOL_APP_API_DECL void sapp_window_set_title(sapp_window win, const char* title
 // [TrussC] Requested visibility, separate from native occlusion (#1262).
 SOKOL_APP_API_DECL void sapp_tc_window_set_visible(sapp_window win, bool visible);
 SOKOL_APP_API_DECL bool sapp_tc_window_visible(sapp_window win);
+// [TrussC #1273] X11 show acknowledgment, separate from requested visibility.
+SOKOL_APP_API_DECL bool sapp_tc_window_map_complete(sapp_window win);
 
 /* measured interval between this window's ticks in seconds (its display's
    refresh period; a best-effort estimate before the second tick) */
@@ -18604,6 +18606,16 @@ extern "C" bool sapp_tc_window_visible(sapp_window win) {
 #else
     (void)win;
     return sapp_isvalid();
+#endif
+}
+
+extern "C" bool sapp_tc_window_map_complete(sapp_window win) {
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    const auto* w = _sapp_tc_lookup(win);
+    return w && !w->desc.hidden && w->native_visible &&
+        w->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE;
+#else
+    return sapp_tc_window_visible(win);
 #endif
 }
 

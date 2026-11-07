@@ -492,7 +492,9 @@ subprocess.run([glx,'tiny','640','400','1'], check=True)
             'inline void setWindowSize('))
         seed = body((ROOT / 'core/platform/linux/tcPlatform_linux.cpp').read_text(encoding='utf-8'),
                     'internal::X11GeometryState& mainGeometryState(')
-        seed = 'geometry =' + between(seed, 'binding.geometry =', ';') + ';'
+        seed = '\n'.join('geometry.' + field + ' =' +
+                         between(seed, 'binding.geometry.' + field + ' =', ';') + ';'
+                         for field in ('requestedWidth', 'requestedHeight', 'pixelSize'))
         source = source.replace('CREATION_GEOMETRY_SEED', seed)
         with tempfile.TemporaryDirectory(prefix='window-pixel-x11-') as scratch:
             cpp = Path(scratch) / 'probe.cpp'

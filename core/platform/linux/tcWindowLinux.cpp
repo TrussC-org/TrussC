@@ -72,7 +72,8 @@ void nativeWindowSetPosition(Window& w, int x, int y) {
         true, x, y, 0, 0, trussc::internal::WindowRequestAccess::context(w).dpiScale, w.isFullscreen());
 }
 IVec2 nativeWindowPosition(const Window& w) {
-    return x11FramePosition((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)));
+    return x11FramePosition((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_window_x11_get_window(handle(w)),
+        &WindowRequestAccess::binding(w).geometry);
 }
 // True when an EWMH window manager runs (it owns stacking and focus).
 static bool hasEwmhWindowManager(Display* display, ::Window root) {
@@ -131,7 +132,7 @@ std::shared_ptr<Window> internal::createSecondaryWindow(const WindowSettings& se
     internal::WindowRequestAccess::setHostOwner(*win, win);
     win->title_ = mcp::internal::markedWindowTitle(settings.title);
     win->setQuitOnClose(settings.quitOnClose);
-    internal::WindowRequestAccess::binding(*win).geometry = {double(settings.width), double(settings.height), pixelPerfectMode()};
+    internal::WindowRequestAccess::binding(*win).geometry = {double(settings.width), double(settings.height), pixelPerfectMode(), !settings.visible};
     auto* st = new AdapterState();
 
     sapp_window_desc d = internal::buildNativeWindowDescriptor(settings, pixelPerfectMode());

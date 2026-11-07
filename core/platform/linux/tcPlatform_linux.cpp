@@ -80,16 +80,19 @@ internal::X11GeometryState& mainGeometryState() {
     if (!binding.geometryInitialized) {
         const auto desc = sapp_query_desc();
         const float dpi = internal::windowApiContext().dpiScale;
-        binding.geometry = {
-            _sapp_tc_window_points(desc.width, desc._tc_pixel_width, dpi),
-            _sapp_tc_window_points(desc.height, desc._tc_pixel_height, dpi),
-            desc._tc_pixel_width > 0 || desc._tc_pixel_height > 0};
+        binding.geometry.requestedWidth = _sapp_tc_window_points(desc.width, desc._tc_pixel_width, dpi);
+        binding.geometry.requestedHeight = _sapp_tc_window_points(desc.height, desc._tc_pixel_height, dpi);
+        binding.geometry.pixelSize = desc._tc_pixel_width > 0 || desc._tc_pixel_height > 0;
         binding.geometryInitialized = true;
     }
     return binding.geometry;
 }
 }
-IVec2 internal::singleWindowPosition() { return windowPositionNative(sapp_x11_get_window()); }
+IVec2 internal::singleWindowPosition() {
+    const auto& geometry = WindowRequestAccess::binding(*resolveWindow()).geometry;
+    if (geometry.hiddenPosition) return {geometry.hiddenX, geometry.hiddenY};
+    return windowPositionNative(sapp_x11_get_window());
+}
 void internal::setSingleWindowPosition(int x, int y) {
     x11Geometry((Display*)sapp_x11_get_display(), (::Window)(uintptr_t)sapp_x11_get_window(),
         mainGeometryState(), true, x, y, 0, 0, internal::windowApiContext().dpiScale, sapp_is_fullscreen());

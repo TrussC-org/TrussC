@@ -1,6 +1,7 @@
 // Count actual map requests, including requests made before App::setup().
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <algorithm>
 #include <chrono>
@@ -80,6 +81,22 @@ bool visibilityFinalSizePresented(const void* rawDisplay, unsigned long window, 
 bool visibilityMapped(const void* display, unsigned long window) {
     XWindowAttributes attrs{};
     return XGetWindowAttributes(static_cast<Display*>(const_cast<void*>(display)), window, &attrs) && attrs.map_state != IsUnmapped;
+}
+// EWMH frame coordinates exclude Mutter's invisible resize borders.
+bool visibilityFramePosition(const void* rawDisplay, unsigned long window, int& x, int& y) {
+    auto* display = static_cast<Display*>(const_cast<void*>(rawDisplay));
+    ::Window child;
+    if (!XTranslateCoordinates(display, window, DefaultRootWindow(display), 0, 0, &x, &y, &child)) return false;
+    Atom type; int format; unsigned long count, remaining; unsigned char* data = nullptr;
+    const int result = XGetWindowProperty(display, window, XInternAtom(display, "_NET_FRAME_EXTENTS", False),
+        0, 4, False, XA_CARDINAL, &type, &format, &count, &remaining, &data);
+    const bool valid = result == Success && type == XA_CARDINAL && format == 32 && count == 4 && data;
+    if (valid) {
+        const auto* extents = reinterpret_cast<unsigned long*>(data);
+        x -= int(extents[0]); y -= int(extents[2]);
+    }
+    if (data) XFree(data);
+    return true; // Undecorated windows may have no extents property.
 }
 // Poll the server, not update counts: a WM handles MapRequest asynchronously.
 bool visibilityWaitMapped(const void* display, unsigned long window, bool mapped) {

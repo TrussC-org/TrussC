@@ -212,7 +212,7 @@ struct Window;
 // PRODUCTION_SETTINGS
 struct Window {
     void* native_=nullptr; std::string title_;
-    struct { double width=0,height=0; bool pixel=false; } geometry;
+    struct { double width=0,height=0; bool pixel=false, hiddenPosition=false; } geometry;
     void setQuitOnClose(bool) {}
     ~Window();
 };

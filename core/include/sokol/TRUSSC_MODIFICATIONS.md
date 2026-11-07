@@ -1003,3 +1003,8 @@ Follow-up 10: MapNotify also reconciles a requested-hidden window after the map
 operation timed out. This withdraws late WM maps without changing unsolicited
 UnmapNotify handling for requested-visible windows. The native probe checks
 requested state immediately and native convergence after normal event dispatch.
+
+[TrussC #1273] `sapp_tc_window_map_complete()` reports the X11 native map acknowledgment
+(`native_visible`, with no pending visibility operation and no requested hide).
+TrussC retains the hidden frame-position snapshot until this completes. Other
+platforms share the definition and return their existing requested visibility.

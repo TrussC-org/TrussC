@@ -1139,7 +1139,7 @@ std::shared_ptr<Window> prepareLaunchWindow(const WindowSettings& settings) {
     auto window = std::make_shared<Window>();
     window->setQuitOnClose(settings.quitOnClose);
     window->title_ = mcp::internal::markedWindowTitle(settings.title);
-    WindowRequestAccess::binding(*window).geometry = {double(settings.width), double(settings.height), settings.pixelPerfect};
+    WindowRequestAccess::binding(*window).geometry = {double(settings.width), double(settings.height), settings.pixelPerfect, !settings.visible};
     retainRuntimeWindow(window);
     return window;
 }

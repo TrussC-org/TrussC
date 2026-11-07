@@ -1579,7 +1579,7 @@ void callback(sapp_window,void* user) {
     }
     ++updates; // #997: every delivered tick updates, hidden or not
 }
-''' + extract('static void _sapp_tc_x11_sync_visibility(') + extract('extern "C" void sapp_tc_window_set_visible(') + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
+''' + extract('static void _sapp_tc_x11_sync_visibility(') + extract('extern "C" void sapp_tc_window_set_visible(') + extract('extern "C" bool sapp_tc_window_map_complete(') + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
 void configure_notify(Native* w, int width, int height) {
     struct { struct { int width, height; } xconfigure; } event{{width, height}};
     auto* ev=&event;
@@ -1662,6 +1662,7 @@ void run() {
         Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
         w.desc.hidden=true; mapped=false; withdrawals=mapCalls=0; now=10;
         sapp_tc_window_set_visible({w.win_id},true);
+        check("X11 requested show is not a completed map", !sapp_tc_window_map_complete({w.win_id}));
         sapp_tc_window_set_visible({w.win_id},false);
         check("X11 show/hide waits for map completion", mapCalls==1 && withdrawals==0 &&
               w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING && w.desc.hidden);
@@ -1669,6 +1670,7 @@ void run() {
         check("X11 map completion issues latest hide once", withdrawals==1 &&
               w.visibility_op==_SAPP_TC_X11_VISIBILITY_WITHDRAWING);
         sapp_tc_window_set_visible({w.win_id},true);
+        check("X11 show behind withdrawal is not complete", !sapp_tc_window_map_complete({w.win_id}));
         sapp_tc_window_set_visible({w.win_id},false);
         sapp_tc_window_set_visible({w.win_id},true);
         check("X11 withdraw queues latest show without another native op", mapCalls==1 && withdrawals==1 && !w.desc.hidden);
@@ -1676,6 +1678,7 @@ void run() {
         check("X11 unmap completion issues latest show once", mapCalls==2 &&
               w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
         map_notify(&w);
+        check("X11 matching MapNotify completes show", sapp_tc_window_map_complete({w.win_id}));
         check("X11 serialization converges visible", w.native_visible && !w.desc.hidden &&
               w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE);
         // An ordinary WM minimize must not turn into an unrequested map.
@@ -1898,6 +1901,8 @@ if '--mutations' in sys.argv[3:]:
     admission = 'const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);'
     scope = '_sapp_tc_mac_callback_scope scope(w);'
     mutants = {
+        'x11-map-complete-ignores-operation': change('extern "C" bool sapp_tc_window_map_complete(',
+            'w->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE', 'true'),
         'x11-unconditional-map-fullscreen': change('case MapNotify: {',
             'if (w->fullscreen_on_map)', 'if (true)'),
         'x11-repeat-map-fullscreen': change('case MapNotify: {',
