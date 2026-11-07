@@ -21,6 +21,7 @@ extern "C" {
 }
 
 #include "tcVideoDecodeFFmpeg.h"
+#include "tc/sound/internal/tcFFmpegAudioLength.h"
 
 #include <thread>
 #include <atomic>
@@ -1052,6 +1053,11 @@ bool TCVideoPlayerImpl::loadAudioForPlayback() {
 
     // Flush resampler
     if (!outOfMemory) appendConverted(0);
+
+    const int64_t audioLength = internal::ffmpegAudioStreamLength(
+        fmtCtx->streams[audioIdx], engineSampleRate);
+    if (audioLength != AV_NOPTS_VALUE && static_cast<uint64_t>(audioLength) < samples.size() / 2)
+        samples.resize(static_cast<size_t>(audioLength) * 2);
 
     av_frame_free(&frame);
     av_packet_free(&pkt);
