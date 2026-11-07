@@ -82,6 +82,14 @@ int main() {
         return r.kind == "state" && r.event.xclient.data.l[0] == 0 &&
             r.event.xclient.data.l[1] == long(vert) && r.event.xclient.data.l[2] == long(horz);
     };
+    // A move records its position in WM_NORMAL_HINTS so a withdrawn window
+    // is placed there again on its next map, then sends one unmaximize.
+    auto pinnedMove = [&](::Window window, const char* kind, int x, int y) {
+        return requests.size() == 3 && requests[0].kind == "gravity" && requests[0].window == window &&
+            unmaximize(requests[1]) && requests[2].kind == kind && requests[2].window == window &&
+            (normalHints.flags & (USPosition | PPosition)) == (USPosition | PPosition) &&
+            normalHints.x == x && normalHints.y == y && normalHints.win_gravity == NorthWestGravity;
+    };
     for (float scale : {1.f, 1.5f, 2.f}) {
         requests.clear();
         normalHints = {}; normalHints.flags = PWinGravity | PMinSize;
@@ -98,12 +106,17 @@ int main() {
     }
     requests.clear();
     x11Geometry(display, 2, main, true, -1920, 0, 0, 0, 2);
-    check("one unconditional combined unmaximize (#219)", requests.size() == 2 && unmaximize(requests[0]));
+    check("one unconditional combined unmaximize (#219)", pinnedMove(2, "moveResize", -1920, 0));
     check("windowed move retains requested content size", requests.back().kind == "moveResize" && requests.back().x == -1920 && requests.back().width == 1554 && requests.back().height == 666);
     requests.clear();
     x11Geometry(display, 3, secondary, true, -100, 20, 0, 0, 1.5f);
-    check("secondary requested size is independent, fractional DPI truncates", requests.size() == 2 && requests[1].kind == "moveResize" && requests[1].window == 3 && requests[1].width == 481 && requests[1].height == 361);
-    check("gravity already pinned does not overwrite other hints", normalHints.flags == (PWinGravity | PMinSize) && normalHints.min_width == 123);
+    check("secondary requested size is independent, fractional DPI truncates", pinnedMove(3, "moveResize", -100, 20) && requests[2].width == 481 && requests[2].height == 361);
+    check("move position hints preserve other hints", normalHints.flags == (PWinGravity | PMinSize | USPosition | PPosition) && normalHints.min_width == 123);
+    requests.clear();
+    x11Geometry(display, 3, secondary, false, 0, 0, 321, 241, 1.5f);
+    check("resize with gravity already pinned leaves hints alone",
+        requests.size() == 2 && unmaximize(requests[0]) && requests[1].kind == "resize" &&
+        normalHints.flags == (PWinGravity | PMinSize | USPosition | PPosition) && normalHints.x == -100);
     const auto actual = x11FramePosition(display, 2);
     check("query returns WM-clamped decorated frame", actual.x == 150 && actual.y == 40);
     malformedExtents = true;
@@ -118,7 +131,7 @@ int main() {
     X11GeometryState unknown;
     requests.clear();
     x11Geometry(display, 4, unknown, true, -500, 30, 0, 0, 1);
-    check("unknown requested size uses move alone (#219)", requests.size() == 2 && requests.back().kind == "move" && requests.back().x == -500);
+    check("unknown requested size uses move alone (#219)", pinnedMove(4, "move", -500, 30) && requests.back().x == -500);
     // Fullscreen leaves the WM's saved entry geometry and requested size
     // untouched. Exercise both main and secondary native handles.
     for (::Window window : {2UL, 3UL}) {
@@ -137,7 +150,7 @@ int main() {
         requests.clear();
         x11Geometry(display, window, restored, true, 200, 150, 0, 0, 1);
         check("ignored geometry never leaks into a later unrelated move",
-            requests.size() == 2 && requests.back().kind == "moveResize" &&
+            pinnedMove(window, "moveResize", 200, 150) &&
             requests.back().x == 200 && requests.back().y == 150 &&
             requests.back().width == 800 && requests.back().height == 600);
     }
