@@ -197,10 +197,43 @@ bool aacFixture(const tc::fs::path& path) {
     AVStream* st = avformat_new_stream(f, nullptr);
     st->time_base = c->time_base;
     ok = ok && avcodec_parameters_from_context(st->codecpar, c) >= 0;
+    // One MPEG-4 frame lets the same AAC fixture exercise VideoPlayer preload.
+    // Video lasts longer than audio: trimming must use the audio stream length.
+    const AVCodec* videoEncoder = avcodec_find_encoder(AV_CODEC_ID_MPEG4);
+    AVCodecContext* video = videoEncoder ? avcodec_alloc_context3(videoEncoder) : nullptr;
+    if (!video) { avcodec_free_context(&c); avformat_free_context(f); return false; }
+    video->width = video->height = 16;
+    video->pix_fmt = AV_PIX_FMT_YUV420P;
+    video->time_base = AVRational{1, 5};
+    video->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    ok = ok && avcodec_open2(video, videoEncoder, nullptr) >= 0;
+    AVStream* videoStream = avformat_new_stream(f, nullptr);
+    videoStream->time_base = video->time_base;
+    videoStream->avg_frame_rate = AVRational{5, 1};
+    ok = ok && avcodec_parameters_from_context(videoStream->codecpar, video) >= 0;
     ok = ok && avio_open(&f->pb, path.c_str(), AVIO_FLAG_WRITE) >= 0;
     ok = ok && avformat_write_header(f, nullptr) >= 0;
     AVFrame* frame = av_frame_alloc();
     AVPacket* packet = av_packet_alloc();
+    frame->format = video->pix_fmt;
+    frame->width = frame->height = 16;
+    ok = ok && av_frame_get_buffer(frame, 0) >= 0;
+    for (int plane = 0; plane < 3 && ok; ++plane)
+        for (int y = 0; y < (plane ? 8 : 16); ++y)
+            std::memset(frame->data[plane] + y * frame->linesize[plane],
+                        plane ? 128 : 32, plane ? 8 : 16);
+    frame->pts = 0;
+    ok = ok && avcodec_send_frame(video, frame) >= 0;
+    if (ok) avcodec_send_frame(video, nullptr);
+    while (ok && avcodec_receive_packet(video, packet) == 0) {
+        av_packet_rescale_ts(packet, video->time_base, videoStream->time_base);
+        packet->stream_index = videoStream->index;
+        packet->duration = av_rescale_q(1, video->time_base, videoStream->time_base);
+        ok = av_interleaved_write_frame(f, packet) >= 0;
+        av_packet_unref(packet);
+    }
+    avcodec_free_context(&video);
+    av_frame_unref(frame);
     frame->format = c->sample_fmt;
     frame->sample_rate = kRate;
     av_channel_layout_copy(&frame->ch_layout, &c->ch_layout);
@@ -335,9 +368,9 @@ TC_CORE_TEST_MAIN() {
     // including encoder delay and padding, independently of callback timing.
     settings.sampleRate = kRate;
     check("restore 48 kHz", engine.init(settings));
-    check("AAC fixture", aacFixture(dir / "ramp.m4a"));
+    check("AAC fixture", aacFixture(dir / "ramp.mp4"));
     Sound aac;
-    check("AAC stream opens", (bool)internal::loadFFmpegAudioStream(dir / "ramp.m4a", aac));
+    check("AAC stream opens", (bool)internal::loadFFmpegAudioStream(dir / "ramp.mp4", aac));
     check("AAC duration excludes encoder padding", std::abs(aac.getDuration() - 0.1f) < 0.00001f);
     {
         std::lock_guard<std::mutex> lock(mutex);
@@ -359,6 +392,23 @@ TC_CORE_TEST_MAIN() {
     }
     aac.stop();
     engine.waitForAudioCallbacks();
+
+    for (int preloadRate : {kRate, 96000}) {
+        using Access = internal::VideoPlayerPlatformAccess;
+        settings.sampleRate = preloadRate;
+        check("AAC preload engine rate", engine.init(settings));
+        VideoPlayer preload;
+        preload.setAudioStreaming(false);
+        check("AAC preload video opens", Access::loadHeadlessForTests(preload, dir / "ramp.mp4"));
+        preload.setLoop(true);
+        Access::playHeadlessForTests(preload);
+        const auto voices = engine.getPlayingSounds();
+        check("AAC preload duration equals streaming length without padding",
+            voices.size() == 1 && !voices[0].streaming && voices[0].duration == aac.getDuration());
+        preload.close();
+    }
+    settings.sampleRate = kRate;
+    check("restore 48 kHz after AAC preload", engine.init(settings));
 
     check("corrupt PCM fixture", fixture(dir / "corrupt.mkv", true, true));
     Sound corrupt;

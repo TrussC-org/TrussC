@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Compile the production Win32 loop/due logic with deterministic message stubs.
+
+Run through tcbuild.sh. No Windows SDK, display, or wall-clock waits are used.
+The deadline-reset deletion mutant must compile and fail the input assertion.
+"""
+from pathlib import Path
+import os
+import runpy
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[3]
+SOURCE = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+body = runpy.run_path(str(Path(__file__).with_name('native-event-fixture.py')))['body']
+constructor = body(SOURCE, 'static _sapp_tc_window_t* _sapp_tc_win32_create_window(')
+initialization = constructor[constructor.index('    w->win_id = id;'):
+                             constructor.index('    const char* title =')]
+win32 = SOURCE[SOURCE.index('static _sapp_tc_event_result _sapp_tc_send('):]
+loop = body(SOURCE, 'static void _sapp_tc_win32_run_loop(')
+reset = 'if (w && w->input_delivered) w->earliest_next = 0.0;'
+assert loop.count(reset) == 1
+
+probe = r'''
+#include "sokol_app_tc.h"
+#include "util/sokol_window_native.h"
+#include "util/sokol_window_event.h"
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <initializer_list>
+using HANDLE = void*;
+using DWORD = unsigned long;
+using LONGLONG = long long;
+struct LARGE_INTEGER { LONGLONG QuadPart; };
+constexpr int CREATE_WAITABLE_TIMER_HIGH_RESOLUTION=2, TIMER_MODIFY_STATE=2,
+    SYNCHRONIZE=4, FALSE=0, QS_ALLINPUT=1, MWMO_INPUTAVAILABLE=4,
+    PM_REMOVE=1, WM_QUIT=18, WM_CLOSE=16, WAIT_OBJECT_0=0,
+    DXGI_FORMAT_R10G10B10A2_UNORM=24,
+    DXGI_FORMAT_B8G8R8A8_UNORM=87, _SAPP_TC_MAX_WINDOWS=3;
+struct _sapp_tc_window_t : _sapp_tc_native_window_t {
+    HANDLE frame_wait=nullptr;
+    bool swap_chain=true, credit_held=false, waitable_ready=false;
+    int hwnd=1, color_fmt=0, ticks=0;
+    float window_scale=1, mouse_scale=1;
+    float mouse_x=0, mouse_y=0, mouse_dx=0, mouse_dy=0;
+};
+struct {
+    _sapp_tc_window_t* windows[_SAPP_TC_MAX_WINDOWS]{};
+    struct {
+        sapp_desc desc{};
+        bool quit_ordered=false, quit_requested=false;
+        _sapp_tc_window_t* main=nullptr;
+    } app;
+} _sapp_tc;
+double clockValue=10, oldDeadline=10+4.0/60.0;
+int turns=0, checks=0, failures=0, receiver=0, deliveries=0;
+bool pending=false, timerAvailable=false;
+sapp_event_type eventType=SAPP_EVENTTYPE_MOUSE_MOVE;
+struct MSG { unsigned message=1; };
+double _sapp_tc_now() { return clockValue; }
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_window handle) {
+    for (auto* w : _sapp_tc.windows) if (w && w->win_id==handle.id) return w;
+    return nullptr;
+}
+void check(const char* label, bool ok) {
+    ++checks;
+    if (!ok) { ++failures; std::printf("FAIL: %s\n",label); }
+}
+HANDLE CreateWaitableTimerExW(void*,void*,int,int) {
+    return timerAvailable ? reinterpret_cast<HANDLE>(2) : nullptr;
+}
+bool SetWaitableTimer(HANDLE,LARGE_INTEGER* due,int,void*,void*,int) {
+    check("wait is armed for a future deadline",due->QuadPart<0);
+    return true;
+}
+void CloseHandle(HANDLE) {}
+DWORD MsgWaitForMultipleObjectsEx(DWORD count,HANDLE*,DWORD,int,int) {
+    ++turns;
+    // First wake is input during the skipped-present delay. Second wake has
+    // no input and must retain the deadline re-armed by the admitted tick.
+    clockValue+=.01;
+    check("message wake precedes old deadline",clockValue<oldDeadline);
+    pending=turns==1;
+    return WAIT_OBJECT_0+count;
+}
+bool PeekMessageW(MSG*,void*,int,int,int) { bool result=pending; pending=false; return result; }
+void TranslateMessage(MSG*) {}
+void PostMessageW(int,int,int,int) {}
+void PostQuitMessage(int) {}
+bool _sapp_tc_win32_request_exit(_sapp_tc_window_t*) { return false; }
+unsigned _sapp_tc_win32_mods() { return 0; }
+SEND
+MOUSE_EVENT
+void DispatchMessageW(MSG*) {
+    _sapp_tc_win32_mouse_event(_sapp_tc.windows[receiver],eventType,SAPP_MOUSEBUTTON_INVALID);
+}
+PACE
+DUE
+void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
+    ++w->ticks;
+    check("input admits next tick before old deadline",clockValue<oldDeadline);
+    // Model another skipped present using the production deadline helper.
+    _sapp_tc_win32_pace(w,w->refresh_period*w->swap_interval);
+}
+LOOP
+TRUST_HIDDEN
+void initialize(_sapp_tc_window_t* w,const _sapp_tc_native_desc* d,uint32_t id) {
+INITIALIZATION
+}
+int main() {
+    // Both registry positions use the same path. Cover timer fallback and a
+    // waitable with the credit retained by a skipped present. Also retain the
+    // GPU credit gate when no credit was acquired.
+    for (bool timer : {false,true}) for (int slot : {0,1})
+    for (int creditMode : {0,1,2}) for (bool wake : {false,true})
+    for (auto type : {SAPP_EVENTTYPE_MOUSE_MOVE,SAPP_EVENTTYPE_RESIZED}) {
+        _sapp_tc={}; turns=deliveries=0; clockValue=10; receiver=slot;
+        timerAvailable=timer; eventType=type;
+        _sapp_tc_native_desc desc{};
+        desc.swap_interval=4;
+        desc.window.event_cb=[](const sapp_event*,sapp_window,void*) { ++deliveries; };
+        _sapp_tc_window_t target{}, peer{};
+        initialize(&target,&desc,1); initialize(&peer,&desc,2);
+        check("constructor enables input wake",target.wake_on_input);
+        target.wake_on_input=wake;
+        target.ready=peer.ready=true;
+        target.earliest_next=peer.earliest_next=oldDeadline;
+        // A stale flag on the peer must not release its unrelated deadline.
+        peer.input_delivered=true;
+        target.frame_wait=creditMode ? reinterpret_cast<HANDLE>(1) : nullptr;
+        target.credit_held=creditMode==1;
+        _sapp_tc.windows[slot]=&target; _sapp_tc.windows[1-slot]=&peer;
+        _sapp_tc.app.main=&target;
+        _sapp_tc.app.desc._tc_after_turn=[]() { if (turns==2) _sapp_tc.app.quit_ordered=true; };
+        _sapp_tc_win32_run_loop();
+        const bool inputWake=wake && type==SAPP_EVENTTYPE_MOUSE_MOVE;
+        const bool tickExpected=inputWake && creditMode!=2;
+        check("input admits next tick before old deadline",target.ticks==int(tickExpected));
+        check("shared event delivery was exercised",deliveries==1);
+        check("unrelated window retains its deadline",peer.ticks==0 && peer.earliest_next==oldDeadline);
+        check("next turn clears input flag",!target.input_delivered && !peer.input_delivered);
+        check("input preserves GPU credit state",target.credit_held==(creditMode==1) && !target.waitable_ready);
+        if (!inputWake) check("non-waking event retains deadline",target.earliest_next==oldDeadline);
+    }
+    std::printf("Win32 skipped-present input: %d checks, %d failures\n",checks,failures);
+    return failures ? 1 : 0;
+}
+'''
+for token, code in (
+    ('SEND', body(win32, 'static _sapp_tc_event_result _sapp_tc_send(')),
+    ('MOUSE_EVENT', body(SOURCE, 'static void _sapp_tc_win32_mouse_event(')),
+    ('PACE', body(SOURCE, 'static void _sapp_tc_win32_pace(')),
+    ('DUE', body(SOURCE, 'static bool _sapp_tc_win32_window_due(')),
+    ('TRUST_HIDDEN', body(SOURCE, 'static bool _sapp_tc_win32_trust_hidden_signals(')),
+    ('LOOP', loop), ('INITIALIZATION', initialization),
+):
+    probe = probe.replace(token, code)
+
+with tempfile.TemporaryDirectory(prefix='tc-win32-pacing-', dir=os.environ.get('TMPDIR')) as temporary:
+    scratch = Path(temporary)
+    for variant in ('production', 'no-reset'):
+        code = probe if variant == 'production' else probe.replace(reset, '(void)w;')
+        path = scratch / (variant + '.cpp')
+        binary = scratch / variant
+        path.write_text(code, encoding='utf-8')
+        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-O1',
+                        '-I', str(ROOT / 'core/include/sokol'), str(path), '-o', str(binary)], check=True)
+        result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+        if variant == 'production':
+            print(result.stdout, end='', flush=True)
+            assert result.returncode == 0, result.stdout + result.stderr
+        else:
+            assert result.returncode == 1, result.stdout + result.stderr
+            assert 'FAIL: input admits next tick before old deadline' in result.stdout
+            print('Compiled deadline-reset deletion mutant: detected', flush=True)

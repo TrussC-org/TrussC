@@ -121,6 +121,37 @@ void checkState() {
     check("listener may reload and play", player.isLoaded() && player.isPlaying() && !player.hasError());
 }
 
+#if defined(__linux__) && !defined(__ANDROID__)
+void checkHeadlessVideo(const fs::path& path, bool expectError) {
+    using Access = tc::internal::VideoPlayerPlatformAccess;
+    VideoPlayer player;
+    player.setResyncThreshold(0);
+    const auto mainThread = this_thread::get_id();
+    int events = 0;
+    auto listener = player.onError.listen([&](VideoErrorEventArgs& error) {
+        ++events;
+        check("headless error arrives on main thread before done", this_thread::get_id() == mainThread &&
+              player.hasError() && !player.isDone() && !error.message.empty() && error.errorCode != 0);
+    });
+    const bool loaded = Access::loadHeadlessForTests(player, path);
+    check("headless real video loads", loaded);
+    if (!loaded) return;
+    Access::playHeadlessForTests(player);
+    const auto deadline = chrono::steady_clock::now() + chrono::seconds(30);
+    do {
+        Access::updateHeadlessForTests(player);
+        if (player.hasError() || player.isDone()) break;
+        this_thread::yield();
+    } while (chrono::steady_clock::now() < deadline);
+    check("headless real video reaches a terminal state", player.hasError() || player.isDone());
+    check("headless first terminal state distinguishes failure from EOF", player.hasError() == expectError);
+    check("headless error notification precedes completion", events == (expectError ? 1 : 0));
+    for (int i = 0; i < 3; ++i) Access::updateHeadlessForTests(player);
+    check("headless terminal error is reported once", events == (expectError ? 1 : 0));
+    player.close();
+}
+#endif
+
 class FrameCheckApp : public App {
 public:
     void draw() override {
@@ -218,17 +249,6 @@ public:
         }
         player.update();
         if (!player.hasError() && !player.isDone()) return;
-        // The decoder publishes its terminal error asynchronously. A transient
-        // done flag can precede that publication; classify after notification,
-        // with a hang guard that still reaches the existing failure assertions.
-        if (expectVideoError && !player.hasError() && events == 0) {
-            const auto now = chrono::steady_clock::now();
-            if (!terminalWaitStarted) {
-                terminalWaitStarted = true;
-                terminalWaitDeadline = now + chrono::seconds(10);
-            }
-            if (now < terminalWaitDeadline) return;
-        }
         if (player.hasError() && hadFrameBeforeError) {
             check("real failure keeps last pixels and texture", !before.empty() &&
                   player.getPixels() &&
@@ -311,13 +331,17 @@ private:
     int events = 0;
     bool hadFrameBeforeError = false;
     bool checkingRecoverySeek = false;
-    bool terminalWaitStarted = false;
-    chrono::steady_clock::time_point terminalWaitDeadline;
     string errorBeforeSeek;
 };
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (argc > 2 && strcmp(argv[1], "--headless-video-check") == 0) {
+        checkHeadlessVideo(fs::absolute(argv[2]), argc > 3 && strcmp(argv[3], "error") == 0);
+        return failures ? 1 : 0;
+    }
+#endif
     if (argc > 2 && strcmp(argv[1], "--video-check") == 0) {
         videoPath = fs::absolute(argv[2]);
         expectVideoError = argc > 3 && strcmp(argv[3], "error") == 0;

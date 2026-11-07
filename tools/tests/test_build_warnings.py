@@ -30,6 +30,7 @@ class WarningTests(unittest.TestCase):
         for line in [
             'file.cpp:12:3: warning: unused result [-Wunused-result]',
             'file.cpp(42): warning C4244: conversion loses data',
+            'Microsoft.CppBuild.targets(548,5): warning MSB8028: The intermediate directory contains files shared from another project (TrussC_shaders_gen.vcxproj).',
             'CMake Warning (dev) at CMakeLists.txt:3 (FetchContent):',
             'CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):',
             "libtool: warning: 'tcKeepScreenOn.o' has no symbols",

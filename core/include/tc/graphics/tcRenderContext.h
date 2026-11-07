@@ -315,7 +315,7 @@ public:
     // pop that would reach its parent's entries is refused the same way.
     void popMatrix() {
         if (matrixTarget().matrixStack.size() <= (stackFloor_.target == &matrixTarget() ? stackFloor_.matrix : 0)) {
-            warnPopAtFloor(popMatrixWarning_, "popMatrix()", "pushMatrix()");
+            warnPopAtFloor(popMatrixWarning_, "popMatrix()", "pushMatrix()", true);
             return;
         }
         matrixTarget().currentMatrix = matrixTarget().matrixStack.back();
@@ -339,7 +339,7 @@ public:
 
     void popStyle() {
         if (styleStack_.size() <= stackFloor_.style) {
-            warnPopAtFloor(popStyleWarning_, "popStyle()", "pushStyle()");
+            warnPopAtFloor(popStyleWarning_, "popStyle()", "pushStyle()", false);
             return;
         }
         style_ = styleStack_.back();
@@ -1189,16 +1189,23 @@ private:
 
     StackFloor stackFloor_;
 
-    // A pop refused at the floor (#348): name the node that set it, or use the
-    // generic message outside any node's draw(). The name is resolved only
+    // A pop refused at the floor (#348): only matrix stacks are per target.
+    // Keep the node that set the floor as draw() context. Resolve names only
     // here, never per node per frame.
-    void warnPopAtFloor(RateLimitedWarning& generic, const char* pop, const char* push) {
+    void warnPopAtFloor(RateLimitedWarning& generic, const char* pop, const char* push, bool includeTarget) {
+        std::string what = std::string(pop) + " without a matching " + push;
+        if (includeTarget) {
+            const auto& target = matrixTarget();
+            const std::string targetName = target.isFbo
+                ? "Fbo " + std::to_string(target.width) + "x" + std::to_string(target.height)
+                : "window";
+            what += " on " + targetName;
+        }
         if (stackFloor_.owner) {
             warnUnbalanced(nodeDrawWarning_,
-                typeName(*stackFloor_.owner) + "::draw() called " + pop +
-                " without a matching " + push + " (ignored)");
+                what + " (inside " + typeName(*stackFloor_.owner) + "::draw())");
         } else {
-            warnUnbalanced(generic, std::string(pop) + " without a matching " + push);
+            warnUnbalanced(generic, what);
         }
     }
 

@@ -93,6 +93,13 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### Win32 skipped-present input deadlines (#1012)
+
+Positive-interval Win32 windows enable the shared input wake flag. The run loop
+clears each window's delivery flag before draining messages, then resets only
+the receiving windows' skipped-present deadlines before checking tick admission.
+The existing frame latency credit checks still apply.
+
 ### X11 secondary swap interval pacing (#1263)
 
 GLX and EGL secondary windows keep native GL swap interval 0 because they
@@ -1008,3 +1015,13 @@ requested state immediately and native convergence after normal event dispatch.
 (`native_visible`, with no pending visibility operation and no requested hide).
 TrussC retains the hidden frame-position snapshot until this completes. Other
 platforms share the definition and return their existing requested visibility.
+
+## GLX input deadline reset (#1012)
+
+- The shared X11 run loop clears input-delivery flags and resets the affected
+  window's `earliest_next` after event delivery for GLX as well as EGL. Input
+  during a skipped-present wait can therefore admit a tick in the same turn.
+  The shared due-check already reads that deadline; EGL behavior is unchanged.
+- `core/tests/windowTick/x11-pacing-test` compiles the production loop, tick and
+  due-check for both backends with deterministic input during the wait, and
+  requires a compiled GLX mutant without the deadline reset to fail.
