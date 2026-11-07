@@ -117,7 +117,8 @@ enum class TextureUsage {
     Immutable,      // Set once, cannot update (for Image::load)
     Dynamic,        // Update periodically from CPU (for Image::allocate)
     Stream,         // Update every frame (for VideoGrabber)
-    RenderTarget    // For FBO color attachment
+    RenderTarget,   // For FBO color attachment
+    Storage         // Single-sample 2D compute output, also sampled for drawing
 };
 
 // ---------------------------------------------------------------------------
@@ -207,6 +208,10 @@ public:
                          int mipLevels = 1) {
         clear();
 
+        if (usage == TextureUsage::Storage) {
+            logWarning("Texture") << "Storage textures require single-sample 2D, mip 0";
+            return;
+        }
         if (usage == TextureUsage::Immutable) {
             logError() << "[Texture] allocateCubemap: Immutable cubemap needs initial data, which "
                           "allocateCubemap cannot take; use Dynamic / Stream with loadCubemapData, "
@@ -368,7 +373,7 @@ public:
     int getSampleCount() const { return sampleCount_; }
     sg_pixel_format getPixelFormat() const { return pixelFormat_; }
 
-    // === Data update (except Immutable) ===
+    // === Data update (except Immutable and Storage) ===
 
     void loadData(const Pixels& pixels) {
         if (!sg_isvalid()) return;
@@ -391,7 +396,7 @@ public:
     // Upload pixel data to texture
     void loadData(const void* data, int width, int height, int channels) {
         if (!sg_isvalid()) return;
-        if (!allocated_ || usage_ == TextureUsage::Immutable) return;
+        if (!allocated_ || usage_ == TextureUsage::Immutable || usage_ == TextureUsage::Storage) return;
         if (width != width_ || height != height_ || channels != channels_) return;
 
         const size_t dataSize = (size_t)width * height * computeBytesPerPixel();
@@ -513,6 +518,7 @@ public:
 
     sg_image getImage() const { return image_; }
     sg_view getView() const { return view_; }
+    TC_LUA_SKIP sg_view getStorageView() const { return storageView_; }
     sg_sampler getSampler() const { return sampler_; }
 
     // For RenderTarget: attachment view (used as render target in FBO)
@@ -549,6 +555,7 @@ private:
             retirement_->sampler = sampler_;
             retirement_->view = view_;
             retirement_->attachment = attachmentView_;
+            retirement_->storage = storageView_;
             retirement_->image = image_;
             retirement_->cubeViews = std::move(cubeFaceAttachmentViews_);
             retirement_->mipAttachments = std::move(mipAttachmentViews_);
@@ -568,6 +575,7 @@ private:
         image_ = {};
         view_ = {};
         attachmentView_ = {};
+        storageView_ = {};
         sampler_ = {};
     }
 
@@ -580,6 +588,7 @@ private:
     sg_image image_ = {};
     sg_view view_ = {};              // Texture view (for sampling)
     sg_view attachmentView_ = {};    // Attachment view (for RenderTarget)
+    sg_view storageView_ = {};       // Storage image view (mip 0)
     sg_sampler sampler_ = {};
 
     int width_ = 0;
@@ -642,6 +651,7 @@ private:
         allocated_ = sg_query_image_state(image_) == SG_RESOURCESTATE_VALID && validView(view_)
             && sg_query_sampler_state(sampler_) == SG_RESOURCESTATE_VALID
             && (usage_ != TextureUsage::RenderTarget || validView(attachmentView_))
+            && (usage_ != TextureUsage::Storage || validView(storageView_))
             && std::all_of(mipAttachmentViews_.begin(), mipAttachmentViews_.end(), validView)
             && std::all_of(mipSamplingViews_.begin(), mipSamplingViews_.end(), validView);
         if (!allocated_) {
@@ -696,6 +706,8 @@ private:
         img_desc.pixel_format = pixelFormat_;
 
         switch (usage_) {
+            case TextureUsage::Storage:
+                return; // Only 2D storage images are supported.
             case TextureUsage::Immutable:
                 // Refused in allocateCubemap(): an Immutable cubemap would need
                 // initial data for all 6 faces and all mips.
@@ -804,6 +816,7 @@ private:
         image_ = other.image_;
         view_ = other.view_;
         attachmentView_ = other.attachmentView_;
+        storageView_ = other.storageView_;
         sampler_ = other.sampler_;
         width_ = other.width_;
         height_ = other.height_;
@@ -828,6 +841,7 @@ private:
         other.image_ = {};
         other.view_ = {};
         other.attachmentView_ = {};
+        other.storageView_ = {};
         other.sampler_ = {};
         other.width_ = 0;
         other.height_ = 0;
