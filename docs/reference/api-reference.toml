@@ -50708,21 +50708,18 @@ description.ja = "対応する pushScissor() で保存したクリッピング�
 description.ko = "대응하는 pushScissor()로 저장한 클리핑 사각형으로 되돌린다."
 details.en = '''
 - If no clipping was active at the matching `pushScissor()`, clipping is turned off again.
-- When the stack is empty, it does the same as `resetScissor()`, without a warning.
+- When the stack is empty, it does the same as `resetScissor()` and logs a warning, at most once per second.
 - Coordinates and nesting are explained in `pushScissor`.
-- Known issue: [#914](https://github.com/TrussC-org/TrussC/issues/914) (popping an empty stack silently resets the scissor without a warning).
 '''
 details.ja = '''
 - 対応する `pushScissor()` の時点でクリッピングがなかった場合は、クリッピングなしに戻ります。
-- スタックが空のときは `resetScissor()` と同じ動作になり、警告は出ません。
+- スタックが空のときは `resetScissor()` と同じ動作になり、警告を出します（最大で毎秒 1 回）。
 - 座標と入れ子の考え方は `pushScissor` を参照してください。
-- 既知の問題: [#914](https://github.com/TrussC-org/TrussC/issues/914)（空のスタックで pop すると、警告なしでシザーがリセットされる）。
 '''
 details.ko = '''
 - 대응하는 `pushScissor()` 시점에 클리핑이 없었다면 클리핑 없음으로 돌아갑니다.
-- 스택이 비어 있으면 `resetScissor()`와 같이 동작하며 경고는 나오지 않습니다.
+- 스택이 비어 있으면 `resetScissor()`와 같이 동작하며 경고를 출력합니다(최대 초당 한 번).
 - 좌표와 중첩 방식은 `pushScissor`를 참고하세요.
-- 알려진 문제: [#914](https://github.com/TrussC-org/TrussC/issues/914)(빈 스택에서 pop하면 경고 없이 시저가 초기화됨).
 '''
 related = ["pushScissor"]
 
@@ -50890,7 +50887,7 @@ details.en = '''
 - The rectangle is not affected by `translate()`, `rotate()`, `scale()` or a camera. It is always measured from the top-left corner of the window or `Fbo`. To clip an area that moves with a node, use `RectNode::setClipping(true)`, which converts the node's position for you.
 - Nested calls are intersected with the current rectangle, so an inner rectangle never extends beyond the outer one. When they do not overlap, nothing is drawn until the matching `popScissor()`.
 - After conversion to framebuffer pixels, values are cut down to whole pixels.
-- The clipping state is not reset at the start of each frame or before each Node's `draw()`. A push without a pop stays active in later frames.
+- Each window starts a frame with clipping off and an empty stack. Leftover scissor state is discarded. A push left without its pop also logs a warning that names the depth, at most once per second while it continues; a plain `setScissor()` left on is reset without a warning. Clipping is not reset before each Node's `draw()`.
 - `fbo.begin()` starts with no clipping and an empty stack, and the window's clipping returns after `fbo.end()`. Pushes left unpopped inside an `Fbo` are discarded at `end()` with a warning.
 - A `RectNode` with clipping enabled uses this same stack, so a `pushScissor()` inside such a node is intersected with the node's area.
 '''
@@ -50900,7 +50897,7 @@ details.ja = '''
 - 矩形は `translate()`、`rotate()`、`scale()` やカメラの影響を受けません。常にウィンドウまたは `Fbo` の左上から測ります。ノードと一緒に動く範囲を切り抜きたい場合は、ノードの位置の変換を代わりに行ってくれる `RectNode::setClipping(true)` を使ってください。
 - 入れ子にすると現在の矩形との重なり部分になるため、内側の矩形が外側からはみ出すことはありません。重なりがない場合は、対応する `popScissor()` まで何も描かれません。
 - フレームバッファのピクセルに変換したあと、値は整数のピクセルに切り捨てられます。
-- クリッピングの状態は、フレームの始めにも各 Node の `draw()` の前にもリセットされません。pop し忘れた push は次のフレーム以降も有効のままです。
+- 各ウィンドウはフレームの始めにクリッピングなし、スタックが空の状態に戻ります。残ったシザーの状態は破棄されます。pop し忘れた push があるときは、深さを示す警告も、続く間は最大で毎秒 1 回出ます。`setScissor()` をかけたままにした場合は、警告なしでリセットされます。各 Node の `draw()` の前にはリセットされません。
 - `fbo.begin()` はクリッピングなし、スタックが空の状態から始まり、`fbo.end()` のあとはウィンドウのクリッピングに戻ります。`Fbo` の中で pop されなかった push は、`end()` で警告とともに破棄されます。
 - クリッピングを有効にした `RectNode` も同じスタックを使うため、そのノードの中での `pushScissor()` はノードの範囲との重なり部分になります。
 '''
@@ -50910,7 +50907,7 @@ details.ko = '''
 - 사각형은 `translate()`, `rotate()`, `scale()`이나 카메라의 영향을 받지 않습니다. 항상 창 또는 `Fbo`의 왼쪽 위에서 측정합니다. 노드와 함께 움직이는 영역을 잘라내려면 노드의 위치 변환을 대신 해 주는 `RectNode::setClipping(true)`를 사용하세요.
 - 중첩하면 현재 사각형과 겹치는 부분이 되므로 안쪽 사각형이 바깥쪽을 벗어나지 않습니다. 겹치지 않으면 대응하는 `popScissor()`까지 아무것도 그려지지 않습니다.
 - 프레임버퍼 픽셀로 변환한 뒤 값은 정수 픽셀로 잘려 내려갑니다.
-- 클리핑 상태는 프레임 시작이나 각 Node의 `draw()` 전에 초기화되지 않습니다. pop하지 않은 push는 다음 프레임 이후에도 유지됩니다.
+- 각 창은 프레임 시작 시 클리핑 없음, 빈 스택 상태로 돌아갑니다. 남은 시저 상태는 버립니다. pop하지 않은 push가 있으면 깊이를 나타내는 경고도 출력하며, 계속되면 최대 초당 한 번 출력합니다. `setScissor()`만 켜 둔 경우에는 경고 없이 초기화합니다. 각 Node의 `draw()` 전에는 초기화하지 않습니다.
 - `fbo.begin()`은 클리핑 없음, 빈 스택 상태에서 시작하며 `fbo.end()` 이후에는 창의 클리핑으로 돌아갑니다. `Fbo` 안에서 pop되지 않은 push는 `end()`에서 경고와 함께 버려집니다.
 - 클리핑을 켠 `RectNode`도 같은 스택을 쓰므로, 그런 노드 안에서의 `pushScissor()`는 노드 영역과 겹치는 부분이 됩니다.
 '''
@@ -51445,15 +51442,15 @@ description.ja = "クリッピングを解除し、ウィンドウまたは Fbo 
 description.ko = "클리핑을 해제해 창 또는 Fbo 전체에 다시 그릴 수 있게 한다."
 details.en = '''
 - It does not empty the `pushScissor()` stack. A later `popScissor()` still restores the saved rectangle.
-- It is useful at the start of `draw()` to recover when a `pushScissor()` was left without its `popScissor()`, because clipping is not reset between frames.
+- Each window automatically resets clipping and empties the stack at frame start; this call only disables clipping in the current frame.
 '''
 details.ja = '''
 - `pushScissor()` のスタックは空にしません。あとで `popScissor()` を呼ぶと、保存されていた矩形に戻ります。
-- クリッピングはフレーム間でリセットされないため、`popScissor()` を忘れた `pushScissor()` から立て直したいときに `draw()` の先頭で呼ぶと便利です。
+- 各ウィンドウはフレームの始めに自動でクリッピングとスタックをリセットします。この関数は現在のフレームのクリッピングだけを解除します。
 '''
 details.ko = '''
 - `pushScissor()` 스택은 비우지 않습니다. 나중에 `popScissor()`를 호출하면 저장된 사각형으로 돌아갑니다.
-- 클리핑은 프레임 사이에 초기화되지 않으므로, `popScissor()`를 빠뜨린 `pushScissor()`에서 복구하려면 `draw()` 앞부분에서 호출하면 편리합니다.
+- 각 창은 프레임 시작 시 클리핑과 스택을 자동으로 초기화합니다. 이 함수는 현재 프레임의 클리핑만 해제합니다.
 '''
 
 ["resetStyle"]
@@ -53261,19 +53258,19 @@ description.ko = "클리핑 사각형을 직접 설정해 현재 사각형을 �
 details.en = '''
 - Only the pixels inside the rectangle are drawn. It uses the same logical coordinates as `pushScissor`, the units of `drawRect()`; see `pushScissor` for DPI and `Fbo` details.
 - Unlike `pushScissor()`, it saves nothing and is not intersected with the current rectangle. A later `popScissor()` replaces it with the saved rectangle.
-- There are `int` and `float` versions. Pass all four values as the same type.
+- The parameters are `float`. Integer arguments convert implicitly, and integer and float arguments can be mixed.
 - For nested areas, or inside nodes, use `pushScissor()` / `popScissor()`. For a node's own area, `RectNode::setClipping(true)` is simpler.
 '''
 details.ja = '''
 - 矩形の内側のピクセルだけが描かれます。座標は `pushScissor` と同じ論理座標（`drawRect()` と同じ単位）です。DPI と `Fbo` については `pushScissor` を参照してください。
 - `pushScissor()` と違い、何も保存せず、現在の矩形との重なりも取りません。あとで `popScissor()` を呼ぶと、保存されていた矩形に置き換わります。
-- `int` 版と `float` 版があります。4 つの値は同じ型で渡してください。
+- 引数は `float` です。整数は暗黙に変換されるため、整数と浮動小数点数を混ぜて渡せます。
 - 入れ子にする場合やノードの中では `pushScissor()` / `popScissor()` を使ってください。ノード自身の範囲で切り抜くなら `RectNode::setClipping(true)` のほうが簡単です。
 '''
 details.ko = '''
 - 사각형 안쪽의 픽셀만 그려집니다. 좌표는 `pushScissor`와 같은 논리 좌표(`drawRect()`와 같은 단위)입니다. DPI와 `Fbo`는 `pushScissor`를 참고하세요.
 - `pushScissor()`와 달리 아무것도 저장하지 않고 현재 사각형과 겹치는 부분도 계산하지 않습니다. 나중에 `popScissor()`를 호출하면 저장되어 있던 사각형으로 바뀝니다.
-- `int` 버전과 `float` 버전이 있습니다. 네 값은 같은 타입으로 전달하세요.
+- 인자는 `float`입니다. 정수는 암시적으로 변환되므로 정수와 부동 소수점 인자를 섞어 전달할 수 있습니다.
 - 중첩하거나 노드 안에서 쓸 때는 `pushScissor()` / `popScissor()`를 사용하세요. 노드 자신의 영역으로 자를 때는 `RectNode::setClipping(true)`가 더 간단합니다.
 '''
 related = ["RectNode::setClipping", "pushScissor"]

@@ -1314,7 +1314,7 @@ bool scissorLogicalProbe(float dpi, bool pixelPerfect) {
     pushMatrix(); translate(50, 50); scale(3, 3);
     setScissor(10, 20, 30, 40);
     ok &= is(target.currentScissor, 10 * s, 20 * s, 30 * s, 40 * s);
-    setScissor(1, 2, 3, 4);                       // int overload, same units
+    setScissor(1, 2, 3, 4);                       // ints convert to float, same units
     ok &= is(target.currentScissor, 1 * s, 2 * s, 3 * s, 4 * s);
     popMatrix();
     resetScissor();
@@ -1351,6 +1351,22 @@ bool scissorLogicalProbe(float dpi, bool pixelPerfect) {
     popScissor(); popScissor();
     ok &= !fbo.currentScissor.active && fbo.scissorStack.empty() && !target.currentScissor.active;
     window.currentTarget = &window.swapchainTarget;
+    present();
+    // A leaked scissor must be gone before another target selection or pass
+    // can repair the sgl recording state on the next frame.
+    pushScissor(1, 2, 3, 4);
+    beginFrame();
+    auto* context = _sgl_lookup_context(target.resources().context.id);
+    _sgl_scissor_rect_args_t frameClip = {};
+    for (int i = 0; i < context->commands.next; ++i) {
+        const auto& command = context->commands.ptr[i];
+        if (command.cmd == SGL_COMMAND_SCISSOR_RECT) frameClip = command.args.scissor_rect;
+    }
+    const bool frameReset = !target.currentScissor.active && target.scissorStack.empty() &&
+        frameClip.x == 0 && frameClip.y == 0 && frameClip.w == target.width &&
+        frameClip.h == target.height && frameClip.origin_top_left;
+    std::printf("SCISSOR FRAME RESET dpi=%.2f pixel=%d ok=%d\n", dpi, pixelPerfect, frameReset);
+    ok &= frameReset;
     present();
     window.teardownTargets();
     target.resources().release();
