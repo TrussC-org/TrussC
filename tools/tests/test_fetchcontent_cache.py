@@ -91,14 +91,14 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
         # Later examples in the same cold job share the download too.
         self.configure('second-cold')
         self.assertEqual(self.calls(), initial)
-        self.command(['cmake', '--build', str(first)])
-        self.command(['ctest', '--test-dir', str(first), '--output-on-failure'])
+        self.command(['cmake', '--build', str(first), '--config', 'Debug'])
+        self.command(['ctest', '--test-dir', str(first), '-C', 'Debug', '--output-on-failure'])
         self.env['TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED'] = 'ON'
         second, settings = self.configure('second')
         self.assertEqual(settings, [shared.as_posix(), 'ON', (shared / 'fixture-src').as_posix()])
         self.assertEqual(self.calls(), initial)
-        self.command(['cmake', '--build', str(second)])
-        self.command(['ctest', '--test-dir', str(second), '--output-on-failure'])
+        self.command(['cmake', '--build', str(second), '--config', 'Debug'])
+        self.command(['ctest', '--test-dir', str(second), '-C', 'Debug', '--output-on-failure'])
         # Cached sources also remain usable on another configure of that app.
         self.configure('second')
         self.assertEqual(self.calls(), initial)
