@@ -178,10 +178,14 @@ static int runProcess(const vector<string>& argv) {
 #ifdef _WIN32
     if (GetConsoleCP() != 0) {
         // CLI builds inherit the same console used by configure.
+        // _spawnvp joins argv into one command line without quoting, so an
+        // argument with a space ("C:\Program Files\...") would be split.
+        vector<string> quoted;
+        for (const auto& a : argv) quoted.push_back(quoteWindowsArgument(a));
         vector<const char*> cargv;
-        for (const auto& a : argv) cargv.push_back(a.c_str());
+        for (const auto& a : quoted) cargv.push_back(a.c_str());
         cargv.push_back(nullptr);
-        return (int)_spawnvp(_P_WAIT, cargv[0], cargv.data());
+        return (int)_spawnvp(_P_WAIT, argv[0].c_str(), cargv.data());
     }
     // Without a console, keep children hidden just as configure does.
     string commandLine;
