@@ -236,7 +236,8 @@ struct _sapp_tc_window_t {
     double visibility_started=0;
     bool native_visible=false;
     bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false, fullscreen=false;
-    bool fullscreen_on_map=false;
+    bool fullscreen_on_map=false, fullscreen_requested=false;
+    double fullscreen_sent=0;
     bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, skip_present=false, cancel_tick=false;
     bool from_modal=false, frame_wait=false, credit_held=false, waitable_ready=true;
     bool resize_pending=false, input_delivered=false, wake_on_input=false, last_tick_presented=false;
@@ -321,7 +322,8 @@ void commitSessionEnd() { ++session_commits; }
 void shutdownRuntime() {}
 }
 constexpr unsigned NSWindowOcclusionStateVisible=1;
-struct NSWindow { unsigned occlusionState=1; bool miniaturized=false, inLiveResize=false; double backingScaleFactor=1; float screenRate=60; NSWindow* parent=nullptr; };
+constexpr int NSWindowCollectionBehaviorFullScreenPrimary=1;
+struct NSWindow { unsigned collectionBehavior=0; unsigned occlusionState=1; bool miniaturized=false, inLiveResize=false; double backingScaleFactor=1; float screenRate=60; NSWindow* parent=nullptr; };
 void add_child(NSWindow* parent, NSWindow* child) { child->parent=parent; }
 struct CAFrameRateRange { float minimum,maximum,preferred; };
 CAFrameRateRange CAFrameRateRangeMake(float a,float b,float c) { return {a,b,c}; }
@@ -1538,6 +1540,7 @@ void _sapp_tc_x11_send_event(int,int,long op,long,long,long,long) {
     ++fullscreenCalls; actualFullscreen=op==1;
 }
 int XWithdrawWindow(int,int,int) { ++withdrawals; mapped=false; return 1; }
+double _sapp_tc_now();
 ''' + extract('static void _sapp_tc_x11_set_fullscreen(') + r'''
 bool changed=false, closeOnResize=false, closeOnTick=false, hideOnTick=false, reenter=false, renewalOk=true;
 bool eventDriven=false;
@@ -1736,7 +1739,7 @@ void run() {
     }
     for (bool role : {false,true}) for (bool trust : {false,true}) for (bool cached : {false,true}) {
         Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
-        w.fullscreen=cached; actualFullscreen=!cached; fullscreenCalls=0;
+        w.fullscreen=w.fullscreen_requested=cached; actualFullscreen=!cached; fullscreenCalls=0;
         redrawPending=false; events.clear();
         sapp_tc_window_set_visible({w.win_id},true);
         map_notify(&w);
@@ -1761,7 +1764,7 @@ void run() {
         check("X11 completed map applies latest hidden request", !mapped && withdrawals==1);
         unmap_notify(&w);
         check("X11 late hidden map has no redraw/fullscreen/visibility events", !redrawPending && fullscreenCalls==0 && events.empty());
-        w.fullscreen=true;
+        w.fullscreen_requested=true;
         sapp_tc_window_set_visible({w.win_id},true); events.clear();
         check("X11 explicit show arms fullscreen replay", w.fullscreen_on_map && mapped && !w.desc.hidden);
         eventDriven=true; redrawPending=true; presents=0;
@@ -2186,4 +2189,5 @@ PY
 
 python3 "$root/core/tests/windowTick/native-quit-test.py"
 python3 "$root/core/tests/windowTick/creation-settings-test.py"
-python3 "$root/core/tests/windowTick/x11-position-test.py" "$@"
+
+python3 "$root/core/tests/windowTick/fullscreen-test.py" "$@"

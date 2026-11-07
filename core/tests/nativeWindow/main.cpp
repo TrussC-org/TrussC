@@ -12,7 +12,7 @@
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
 namespace {
 int failures, callbacks, liveWindows, presents, resizeTicks, mapRequests;
-bool failSurface, noHighDpi, didInitialize, coveredFirst;
+bool failSurface, noHighDpi, didInitialize, coveredFirst, fullscreenProbe;
 int launchHidden;
 Window firstXwin;
 sapp_window visibilityWindow, secondaryWindow;
@@ -53,9 +53,76 @@ bool waitForClientSize(Window window, int width, int height) {
         width, height, actual.width, actual.height);
     return false;
 }
+// Run only with an EWMH window manager; bare Xvfb cannot confirm fullscreen.
+void fullscreenChecks() {
+    auto* first = _sapp_tc.app.main;
+    auto desc = first->desc;
+    desc.borderless = true; desc.width = 240; desc.height = 160;
+    desc.fullscreen = true; desc.hidden = true;
+    const auto second = sapp_create_window(&desc);
+    auto* other = _sapp_tc_lookup(second);
+    check("borderless hidden fullscreen starts with real state false", other && !other->fullscreen);
+    if (!other) { sapp_quit(); return; }
+    auto wait = [&](auto* w, bool full) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        do {
+            while (XPending(_sapp_tc.display)) {
+                XEvent event; XNextEvent(_sapp_tc.display, &event);
+                _sapp_tc_x11_process_event(&event);
+            }
+            XWindowAttributes attrs{};
+            XGetWindowAttributes(_sapp_tc.display, w->xwin, &attrs);
+            const bool covers = attrs.width == DisplayWidth(_sapp_tc.display, _sapp_tc.screen) &&
+                                attrs.height == DisplayHeight(_sapp_tc.display, _sapp_tc.screen);
+            const bool query = w == first ? sapp_is_fullscreen() : sapp_tc_window_fullscreen_phase({w->win_id}) != 0;
+            if (attrs.map_state == IsViewable && w->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE &&
+                !w->fullscreen_on_map && query == full && covers == full && w->fullscreen == full) return true;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        } while (std::chrono::steady_clock::now() < deadline);
+        return false;
+    };
+    sapp_tc_window_set_visible(second, true);
+    check("borderless hidden fullscreen enters after explicit show", wait(other, true));
+    sapp_tc_window_set_fullscreen(second, false);
+    check("borderless fullscreen exits to windowed geometry", wait(other, false));
+    for (auto* w : {first, other}) {
+        _sapp_tc_x11_set_decorated(w, false);
+        for (bool full : {true, false}) {
+            sapp_tc_window_set_fullscreen({w->win_id}, full);
+            check("app borderless fullscreen matches real property and geometry", wait(w, full));
+            if (full) for (bool decorated : {true, false}) {
+                _sapp_tc_x11_set_decorated(w, decorated);
+                check("decoration changes retain real fullscreen and monitor coverage", wait(w, true));
+            }
+        }
+        // Send the same EWMH messages a WM shortcut/external client uses,
+        // bypassing the TrussC request path to exercise external state changes.
+        for (bool full : {true, false}) {
+            _sapp_tc_x11_send_event(w->xwin, _sapp_tc.NET_WM_STATE, full ? 1 : 0,
+                (long)_sapp_tc.NET_WM_STATE_FULLSCREEN, 0, 2, 0);
+            XFlush(_sapp_tc.display);
+            check("WM-initiated fullscreen query matches real geometry", wait(w, full));
+            check("WM choice becomes next show intent", w->fullscreen_requested == full);
+            sapp_tc_window_set_visible({w->win_id}, false);
+            // Let withdrawal complete before showing, through normal dispatch.
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+            while (w->visibility_op != _SAPP_TC_X11_VISIBILITY_NONE && std::chrono::steady_clock::now() < deadline) {
+                while (XPending(_sapp_tc.display)) {
+                    XEvent event; XNextEvent(_sapp_tc.display, &event); _sapp_tc_x11_process_event(&event);
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            sapp_tc_window_set_visible({w->win_id}, true);
+            check("hide/show replays latest WM state", wait(w, full));
+        }
+    }
+    sapp_destroy_window(second);
+    sapp_quit();
+}
 void initialized() {
     didInitialize = true;
     auto* first = _sapp_tc.app.main;
+    if (fullscreenProbe) { fullscreenChecks(); return; }
     if (coveredFirst) {
         check("covered launch initializes before first frame", sapp_frame_count() == 0 && first->occluded);
         check("initial hidden admission is descriptor data", first->draw_while_hidden == (launchHidden >= 0));
@@ -174,10 +241,10 @@ void finishChecks() {
     for (auto* target : {first, other}) {
         sapp_tc_window_set_fullscreen({target->win_id}, true);
         check("fullscreen intent belongs to the addressed native window",
-            sapp_tc_window_fullscreen_phase({target->win_id}) != 0 &&
-            sapp_tc_window_fullscreen_phase({target == first ? other->win_id : first->win_id}) == 0);
+            target->fullscreen_requested &&
+            !(target == first ? other : first)->fullscreen_requested);
         sapp_tc_window_toggle_fullscreen({target->win_id});
-        check("native toggle reverses intent", sapp_tc_window_fullscreen_phase({target->win_id}) == 0);
+        check("native toggle reverses intent", !target->fullscreen_requested);
     }
     first->in_tick = false; // exercise native admission directly, outside the legacy client
     for (auto* target : {first, other}) {
@@ -342,6 +409,7 @@ int main(int argc, char** argv) {
     if (argc < 2 || std::strcmp(argv[1], "--display")) {
         std::puts("SKIP: nativeWindow --display [--no-high-dpi] requires X11"); return 0;
     }
+    fullscreenProbe = argc > 2 && !std::strcmp(argv[2], "--fullscreen");
     noHighDpi = argc > 2 && !std::strcmp(argv[2], "--no-high-dpi");
     coveredFirst = argc > 2 && !std::strncmp(argv[2], "--covered-", 10);
     if (coveredFirst) {

@@ -275,7 +275,7 @@ struct Probe : App {
             secondary->setVisible(true);
             check("second show reports requested state", secondary->isVisible());
             phaseTime = std::chrono::steady_clock::now(); phase = 3;
-        } else if (phase == 3 && secondaryDraws >= savedSecondaryDraws + 3) {
+        } else if (phase == 3 && fullscreenSettled() && secondaryDraws >= savedSecondaryDraws + 3) {
             check("secondary redraws after repeated hide/show", true);
             if (!fullscreen) {
                 const auto position = secondary->getPosition();

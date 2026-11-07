@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+"""Compile production fullscreen bodies against recording native seams.
+
+No SDK/display needed. --mutations requires every behavioral mutant to compile
+and fail an assertion, rather than accepting a compiler failure as coverage.
+"""
+from pathlib import Path
+import argparse
+import os
+import runpy
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[3]
+body = runpy.run_path(str(Path(__file__).with_name('native-event-fixture.py')))['body']
+NATIVE = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+WINDOW = (ROOT / 'core/include/tc/app/tcWindow.h').read_text(encoding='utf-8')
+
+
+def source(native):
+    decoration = body(native, 'extern "C" void sapp_tc_window_set_decorated(')
+    win = body(native, 'static void _sapp_tc_win32_set_fullscreen(')
+    observe = body(native, 'static void _sapp_tc_x11_observe_fullscreen(')
+    request = body(native, 'static void _sapp_tc_x11_set_fullscreen(')
+    start = native.index('        case PropertyNotify:', native.index('static void _sapp_tc_x11_process_event('))
+    end = native.index('            _sapp_tc_x11_send_clipboard_chunk', start)
+    dispatch = native[start:end]
+    start = native.index('        case MapNotify: {', native.index('static void _sapp_tc_x11_process_event('))
+    end = native.index('        case UnmapNotify:', start)
+    mapped = native[start:end]
+    toggle_x11 = body(native[native.index('static void _sapp_tc_x11_observe_fullscreen('):],
+                      'void sapp_tc_window_toggle_fullscreen(')
+    mac = body(native, 'static void _sapp_tc_request_fullscreen(').replace('[w->window toggleFullScreen:nil]', 'toggle(w)')
+    mac += body(native, 'static void _sapp_tc_reconcile_fullscreen(').replace('[w->window toggleFullScreen:nil]', 'toggle(w)')
+    mac += body(native, 'static void _sapp_tc_mac_fullscreen_terminal(')
+    web = body(native, '_SOKOL_PRIVATE void _sapp_tc_emsc_toggle_fullscreen(').replace('_SOKOL_PRIVATE ', '')
+    decoration_x11 = decoration.replace('extern "C" void sapp_tc_window_set_decorated(', 'void x11_set_decorated(')
+    return r'''
+#include <cstdio>
+#include <vector>
+#include <cstdlib>
+#include "util/sokol_window_fullscreen.h"
+int failures=0;
+void check(bool ok) { if (!ok) ++failures; }
+using LONG_PTR=long; using UINT=unsigned; using Atom=unsigned long;
+constexpr int WS_CAPTION=1, WS_THICKFRAME=2, WS_MINIMIZEBOX=4, WS_MAXIMIZEBOX=8,
+ WS_SYSMENU=16, WS_POPUP=32, WS_VISIBLE=64, GWL_STYLE=0, GWL_EXSTYLE=1,
+ SWP_NOMOVE=1, SWP_NOSIZE=2, SWP_NOZORDER=4, SWP_FRAMECHANGED=8, SWP_NOACTIVATE=16,
+ MONITOR_DEFAULTTONEAREST=0, HWND_TOP=0, PropertyNotify=28, MapNotify=19, XA_ATOM=4,
+ SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=1;
+struct RECT { int left=0,top=0,right=480,bottom=300; };
+struct MONITORINFO { unsigned cbSize; RECT rcMonitor{0,0,1920,1080},rcWork{0,0,1920,1040}; };
+struct sapp_window { unsigned id; };
+constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0, _SAPP_TC_X11_VISIBILITY_MAPPING=1;
+struct _sapp_tc_window_t {
+ bool native_visible=false, fullscreen=false, fullscreen_requested=false, fullscreen_on_map=false, restore_valid=false, decoration_pending=false;
+ double fullscreen_sent=0;
+ struct { bool hidden=false, borderless=false; } desc;
+ int hwnd=1,xwin=1, visibility_op=0,window=1;
+ LONG_PTR stored_style=0,stored_ex_style=0;
+ RECT stored_window_rect;
+ _sapp_tc_fullscreen_state_t fullscreen_state;
+};
+_sapp_tc_window_t record;
+struct { struct { _sapp_tc_window_t* main=nullptr; } app;
+ int display=1,constructing=0; Atom NET_WM_STATE=10,NET_WM_STATE_FULLSCREEN=11; } _sapp_tc;
+_sapp_tc_window_t* _sapp_tc_lookup(sapp_window w) { return w.id==1 ? &record : nullptr; }
+LONG_PTR style=WS_CAPTION|WS_THICKFRAME|WS_SYSMENU|WS_VISIBLE,exstyle=7;
+RECT current; int positions=0,requests=0,swpFlags=0; bool requested=false;
+LONG_PTR GetWindowLongPtrW(int,int index) { return index==GWL_STYLE ? style : exstyle; }
+void SetWindowLongPtrW(int,int index,LONG_PTR value) { (index==GWL_STYLE ? style : exstyle)=value; }
+int MonitorFromWindow(int,int) { return 1; }
+bool GetMonitorInfoW(int,MONITORINFO*) { return true; }
+void GetWindowRect(int,RECT* rect) { *rect=current; }
+void SetWindowPos(int,std::nullptr_t,int,int,int,int,int) { ++positions; }
+void SetWindowPos(int,int,int x,int y,int width,int height,int flags) { current={x,y,x+width,y+height}; ++positions; swpFlags=flags; }
+#define _WIN32
+''' + decoration + '\n#undef _WIN32\n' + win + r'''
+std::vector<Atom> property;
+unsigned long _sapp_tc_x11_get_window_property(int,Atom,Atom,unsigned char** data,long length) {
+ check(length==64); *data=nullptr;
+ if (property.empty()) return 0;
+ *data=(unsigned char*)property.data(); return property.size();
+}
+void XFree(void*) {}
+void XFlush(int) {}
+void _sapp_tc_x11_send_event(int,Atom,long op,long,long,long,long) { ++requests; requested=op==1; }
+double now=100; double _sapp_tc_now() { return now; }
+int decorWrites=0; bool decorValue=true;
+void _sapp_tc_x11_set_decorated(_sapp_tc_window_t*,bool decorated) { ++decorWrites; decorValue=decorated; }
+''' + request + observe + toggle_x11 + decoration_x11 + '\nnamespace web { struct { bool fullscreen=false; } _sapp_tc;\nvoid _sapp_tc_js_toggle_fullscreen() {}\n' + web + '\n}\n' + r'''
+struct XEvent { int type=PropertyNotify; struct { Atom atom; int state=0; } xproperty; };
+void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t*) {}
+void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
+void process(_sapp_tc_window_t* w,Atom atom,int state=0,int type=PropertyNotify) {
+ XEvent event; event.type=type; event.xproperty={atom,state}; auto* ev=&event;
+ switch(ev->type) {
+''' + mapped + dispatch + r'''
+ break;
+ }
+}
+void toggle(_sapp_tc_window_t*) {}
+int decorations=0;
+void _sapp_tc_mac_apply_decoration(_sapp_tc_window_t*) { ++decorations; }
+''' + mac + r'''
+namespace internal { using WindowFullscreenPhase=_sapp_tc_fullscreen_phase; }
+struct Window {
+ _sapp_tc_fullscreen_phase phase;
+ _sapp_tc_fullscreen_phase fullscreenPhase() const { return phase; }
+ bool isFullscreen() const;
+};
+''' + body(WINDOW, 'inline bool Window::isFullscreen() const {') + r'''
+int main() {
+ web::_sapp_tc_emsc_toggle_fullscreen(); check(!web::_sapp_tc.fullscreen);
+ web::_sapp_tc.fullscreen=true; web::_sapp_tc_emsc_toggle_fullscreen(); check(web::_sapp_tc.fullscreen);
+ const LONG_PTR chrome=WS_CAPTION|WS_THICKFRAME|WS_MINIMIZEBOX|WS_MAXIMIZEBOX|WS_SYSMENU;
+ for (bool initial : {false,true}) for (bool decorated : {false,true}) for (bool hidden : {false,true}) {
+  record={}; record.desc.hidden=hidden;
+  style=WS_VISIBLE|(initial?chrome:0); exstyle=7; current={20,30,500,330}; positions=0;
+  _sapp_tc_win32_set_fullscreen(&record,true,0);
+  check(!(swpFlags&SWP_NOACTIVATE)==!hidden); // a hidden window must not take the foreground
+  const auto fullStyle=style; const auto fullPositions=positions;
+  sapp_tc_window_set_decorated({1},decorated);
+  check(style==fullStyle && !(style&(WS_CAPTION|WS_THICKFRAME)) && positions==fullPositions);
+  check(current.right==1920 && current.bottom==1080 && record.fullscreen);
+  _sapp_tc_win32_set_fullscreen(&record,false,0);
+  check(!record.fullscreen && !(style&WS_POPUP) && (style&chrome)==(decorated?chrome:0));
+  check(current.left==20 && current.top==30 && current.right==500 && current.bottom==330 && exstyle==7);
+  sapp_tc_window_set_decorated({1},!decorated);
+  check((style&chrome)==(!decorated?chrome:0));
+ }
+ record={}; requests=0;
+ _sapp_tc_x11_set_fullscreen(&record,true);
+ check(!record.fullscreen && record.fullscreen_requested && requests==1 && requested);
+ now=101; property={99}; process(&record,_sapp_tc.NET_WM_STATE); // slow WM: past the echo wait
+ check(!record.fullscreen && record.fullscreen_requested); // unrelated state change cannot cancel pending entry
+ property={99,_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
+ check(record.fullscreen && record.fullscreen_requested);
+ property={99}; process(&record,999);
+ check(record.fullscreen && record.fullscreen_requested); // unrelated properties ignored
+ process(&record,_sapp_tc.NET_WM_STATE);
+ check(!record.fullscreen && !record.fullscreen_requested); // WM-initiated exit wins
+ property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
+ check(record.fullscreen && record.fullscreen_requested); // WM-initiated entry wins
+ record.desc.hidden=true; property.clear(); process(&record,_sapp_tc.NET_WM_STATE,1);
+ check(!record.fullscreen && record.fullscreen_requested); // withdrawal deletes real state, preserves replay
+ _sapp_tc_x11_set_fullscreen(&record,false);
+ check(!record.fullscreen_requested && requests==1); // hidden request waits for map
+ record.fullscreen_requested=true; record.desc.hidden=false; record.fullscreen_on_map=true;
+ process(&record,_sapp_tc.NET_WM_STATE,1);
+ check(!record.fullscreen && record.fullscreen_requested);
+ record.fullscreen_on_map=false; record.fullscreen=true; process(&record,_sapp_tc.NET_WM_STATE,1);
+ check(!record.fullscreen && !record.fullscreen_requested); // deleted property means windowed
+ // The WM may choose fullscreen before the constructor's first MapNotify.
+ record={}; requests=0; record.visibility_op=_SAPP_TC_X11_VISIBILITY_MAPPING;
+ property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
+ check(record.fullscreen && record.fullscreen_requested);
+ process(&record,0,0,MapNotify);
+ process(&record,_sapp_tc.NET_WM_STATE); // unchanged observation cannot repair stale intent
+ check(record.native_visible && record.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE && requests==0);
+ const auto initial=record;
+ sapp_tc_window_toggle_fullscreen({1});
+ check(requests==1 && !requested); // toggle must send REMOVE
+ record=initial; record.desc.hidden=true; property.clear();
+ process(&record,_sapp_tc.NET_WM_STATE,1); // withdrawal deletes the WM property
+ record.desc.hidden=false; record.fullscreen_on_map=true;
+ record.visibility_op=_SAPP_TC_X11_VISIBILITY_MAPPING;
+ process(&record,0,0,MapNotify);
+ check(requests==2 && requested && !record.fullscreen_on_map); // explicit show replays ADD once
+ process(&record,0,0,MapNotify); check(requests==2);
+ // Explicit-show mapping must preserve either replay choice over WM changes.
+ for (bool desired : {false,true}) {
+  record={}; record.fullscreen=desired; record.fullscreen_requested=desired;
+  record.fullscreen_on_map=true; record.visibility_op=_SAPP_TC_X11_VISIBILITY_MAPPING;
+  property.clear(); if (!desired) property.push_back(_sapp_tc.NET_WM_STATE_FULLSCREEN);
+  process(&record,_sapp_tc.NET_WM_STATE);
+  check(record.fullscreen==!desired && record.fullscreen_requested==desired);
+  process(&record,0,0,MapNotify); check(requested==desired);
+ }
+ // The WM's echo of an older request must not overwrite a newer one.
+ record={}; requests=0; property.clear(); now=100;
+ sapp_tc_window_toggle_fullscreen({1}); sapp_tc_window_toggle_fullscreen({1}); // ADD, REMOVE
+ check(requests==2 && !requested && !record.fullscreen_requested);
+ property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE); // ADD echo
+ check(record.fullscreen && !record.fullscreen_requested);
+ sapp_tc_window_toggle_fullscreen({1});
+ check(requests==3 && requested); // third toggle must ADD
+ property.clear(); process(&record,_sapp_tc.NET_WM_STATE); // REMOVE echo
+ check(!record.fullscreen && record.fullscreen_requested);
+ property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE); // ADD echo
+ check(record.fullscreen && record.fullscreen_requested);
+ now=100.6; property.clear(); process(&record,_sapp_tc.NET_WM_STATE);
+ check(!record.fullscreen && !record.fullscreen_requested); // after the wait: WM-initiated exit wins
+ // An older echo that matches the latest request must not end the wait.
+ record={}; requests=0; property.clear(); now=150;
+ for (int i=0;i<3;++i) sapp_tc_window_toggle_fullscreen({1}); // ADD, REMOVE, ADD
+ property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE); // first ADD
+ property.clear(); process(&record,_sapp_tc.NET_WM_STATE); // older REMOVE
+ check(record.fullscreen_requested);
+ sapp_tc_window_toggle_fullscreen({1});
+ check(requests==4 && !requested); // fourth toggle must REMOVE
+ // A request the WM never confirms stops blocking WM-initiated changes.
+ record={}; requests=0; now=200;
+ sapp_tc_window_toggle_fullscreen({1}); sapp_tc_window_toggle_fullscreen({1}); // refused ADD, no-op REMOVE
+ now=200.6; property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
+ check(record.fullscreen && record.fullscreen_requested);
+ // A decoration change right after a fullscreen request, before the entry
+ // is observed, is also written again on exit.
+ record={}; record.fullscreen_requested=true; decorWrites=0; now=300;
+ x11_set_decorated({1},false);
+ check(decorWrites==1 && record.decoration_pending);
+ property={99}; process(&record,_sapp_tc.NET_WM_STATE); // unrelated update before entry
+ check(decorWrites==1 && record.decoration_pending);
+ property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
+ property.clear(); process(&record,_sapp_tc.NET_WM_STATE);
+ check(decorWrites==2 && !decorValue && !record.decoration_pending);
+ // Entry and exit can both complete before either notification is read.
+ record={}; decorWrites=0; now=400; property.clear();
+ sapp_tc_window_toggle_fullscreen({1}); x11_set_decorated({1},false); sapp_tc_window_toggle_fullscreen({1});
+ process(&record,_sapp_tc.NET_WM_STATE); process(&record,_sapp_tc.NET_WM_STATE);
+ check(decorWrites==2 && !decorValue && !record.decoration_pending);
+ // A decoration change made while fullscreen is written again on exit (labwc).
+ for (bool decorated : {false,true}) {
+  record={}; record.fullscreen=record.fullscreen_requested=true; record.desc.borderless=decorated;
+  decorWrites=0; x11_set_decorated({1},decorated);
+  check(decorWrites==1 && decorValue==decorated && record.desc.borderless==!decorated && record.decoration_pending);
+  property={_sapp_tc.NET_WM_STATE_FULLSCREEN}; process(&record,_sapp_tc.NET_WM_STATE);
+  check(decorWrites==1); // still fullscreen
+  property.clear(); process(&record,_sapp_tc.NET_WM_STATE);
+  check(decorWrites==2 && decorValue==decorated && !record.decoration_pending); // exit replays once
+  process(&record,_sapp_tc.NET_WM_STATE); check(decorWrites==2);
+  x11_set_decorated({1},!decorated);
+  check(decorWrites==3 && decorValue==!decorated && !record.decoration_pending); // windowed applies now
+ }
+ record={}; _sapp_tc_request_fullscreen(&record,true);
+ check(!record.fullscreen); // request alone cannot report real fullscreen
+ _sapp_tc_mac_fullscreen_terminal(&record,false); check(!record.fullscreen && !record.fullscreen_state.desired);
+ _sapp_tc_request_fullscreen(&record,true); _sapp_tc_mac_fullscreen_terminal(&record,true);
+ check(record.fullscreen);
+ _sapp_tc_request_fullscreen(&record,false); check(record.fullscreen);
+ record.decoration_pending=true;
+ _sapp_tc_mac_fullscreen_terminal(&record,false); check(!record.fullscreen && !record.decoration_pending && decorations==1);
+ using Phase=_sapp_tc_fullscreen_phase;
+ check(!Window{Phase::Windowed}.isFullscreen() && !Window{Phase::Entering}.isFullscreen());
+ check(Window{Phase::Fullscreen}.isFullscreen() && Window{Phase::Exiting}.isFullscreen());
+ std::printf("fullscreen: %d failures\n",failures); return failures?1:0;
+}
+'''
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--mutations', action='store_true')
+    args = parser.parse_args()
+    variants = {'baseline': NATIVE}
+    if args.mutations:
+        changes = {
+            'win-live-style': ('LONG_PTR style = w->fullscreen ? w->stored_style : GetWindowLongPtrW(w->hwnd, GWL_STYLE);', 'LONG_PTR style = GetWindowLongPtrW(w->hwnd, GWL_STYLE);'),
+            'win-no-defer': ('if (w->fullscreen) {\n        w->stored_style = style;', 'if (false) {\n        w->stored_style = style;'),
+            'win-no-restore': ('w->stored_style = style;', '(void)style;'),
+            'win-hidden-activates': ('swp_flags | SWP_FRAMECHANGED | (w->desc.hidden ? SWP_NOACTIVATE : 0)', 'swp_flags | SWP_FRAMECHANGED'),
+            'win-work-area': ('rect = minfo.rcMonitor;', 'rect = minfo.rcWork;'),
+            'x11-request-is-real': ('w->fullscreen_requested = enable;', 'w->fullscreen_requested = enable; w->fullscreen = enable;'),
+            'x11-no-property': ('if (w && ev->xproperty.atom == _sapp_tc.NET_WM_STATE)', 'if (false && w && ev->xproperty.atom == _sapp_tc.NET_WM_STATE)'),
+            'x11-unrelated-state-cancels-request': ('if (changed && !waiting && !w->desc.hidden', 'if (!waiting && !w->desc.hidden'),
+            'x11-ignore-wm-choice': ('w->fullscreen_requested = full;', '(void)full;'),
+            'x11-ignore-initial-map-choice': ('if (changed && !waiting && !w->desc.hidden && !w->fullscreen_on_map)', 'if (changed && !waiting && !w->desc.hidden && w->visibility_op == _SAPP_TC_X11_VISIBILITY_NONE && !w->fullscreen_on_map)'),
+            'x11-lose-hidden-replay': ('if (changed && !waiting && !w->desc.hidden && !w->fullscreen_on_map)', 'if (true)'),
+            'x11-echo-overwrites-request': ('if (changed && !waiting && !w->desc.hidden', 'if (changed && !w->desc.hidden'),
+            'x11-wait-forever': ('_sapp_tc_now() - w->fullscreen_sent < 0.5', 'true'),
+            'x11-no-decoration-replay': ('if (!full && w->decoration_pending && (changed || !w->fullscreen_requested))', 'if (false)'),
+            'x11-decoration-replay-before-entry': ('(changed || !w->fullscreen_requested)', '(true)'),
+            'x11-decoration-replay-needs-observed-exit': ('(changed || !w->fullscreen_requested)', '(changed)'),
+            'x11-decoration-replay-inverted': ('_sapp_tc_x11_set_decorated(w, !w->desc.borderless);', '_sapp_tc_x11_set_decorated(w, w->desc.borderless);'),
+            'x11-decoration-not-pending': ('w->decoration_pending = w->fullscreen || w->fullscreen_requested;', 'w->decoration_pending = false;'),
+            'x11-decoration-pending-observed-only': ('w->decoration_pending = w->fullscreen || w->fullscreen_requested;', 'w->decoration_pending = w->fullscreen;'),
+            'x11-always-full': ('w->fullscreen = full;', 'w->fullscreen = true;'),
+            'web-request-is-real': ('// fullscreenchange reports the real state after the browser confirms it.', '_sapp_tc.fullscreen = !_sapp_tc.fullscreen;'),
+            'mac-request-is-real': ('[w->window toggleFullScreen:nil];', 'w->fullscreen = w->fullscreen_state.desired; [w->window toggleFullScreen:nil];'),
+        }
+        for name, (old, new) in changes.items():
+            assert old in NATIVE, (name, old)
+            variants[name] = NATIVE.replace(old, new)
+    with tempfile.TemporaryDirectory(prefix='tc-fullscreen-') as temporary:
+        scratch = Path(temporary)
+        for name, native in variants.items():
+            cpp = scratch / (name+'.cpp'); binary = scratch / name
+            cpp.write_text(source(native), encoding='utf-8')
+            subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-I', str(ROOT/'core/include/sokol'), str(cpp), '-o', str(binary)], check=True)
+            result = subprocess.run([str(binary)], capture_output=True, text=True, encoding='utf-8', check=False)
+            assert result.returncode == (0 if name=='baseline' else 1), (name, result.returncode, result.stdout)
+            print(name+': PASS', flush=True)
+
+
+if __name__ == '__main__':
+    main()

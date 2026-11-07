@@ -104,6 +104,8 @@ def generate(backend, variant):
     elif variant == 'mac_show_before_init':
         constructor = replace_once(constructor, '    if (!_sapp_tc_mac_initialize_dimensions(w))',
                                    '    [w->window makeKeyAndOrderFront:nil];\n    if (!_sapp_tc_mac_initialize_dimensions(w))')
+    elif variant == 'mac_primary':
+        constructor = replace_once(constructor, '    w->window.collectionBehavior |= NSWindowCollectionBehaviorFullScreenPrimary;\n', '')
     elif variant == 'mac_rate':
         rate_helper = replace_once(rate_helper,
             'w->link.preferredFrameRateRange = CAFrameRateRangeMake(p, p, p);',
@@ -134,7 +136,7 @@ def generate(backend, variant):
                 '    w->fullscreen_state.desired = false;\n    if (!start) return;')
         reconcile = body(NATIVE, 'static void _sapp_tc_reconcile_fullscreen(')
         reconcile = replace_once(reconcile, '[w->window toggleFullScreen:nil]', 'native_toggle(w)')
-        terminal = body(NATIVE, 'static void _sapp_tc_mac_fullscreen_terminal(')
+        terminal = 'void _sapp_tc_mac_apply_decoration(_sapp_tc_window_t*) {}\n' + body(NATIVE, 'static void _sapp_tc_mac_fullscreen_terminal(')
         runtime = body(NATIVE, 'extern "C" void sapp_tc_window_set_fullscreen(')
         prefix = body(NATIVE, 'struct _sapp_tc_mac_window_attrs') + ';\n'
         wrapper = body(NATIVE, 'static _sapp_tc_window_t* _sapp_tc_mac_create_window(')
@@ -170,7 +172,7 @@ def main():
             variants = ['baseline', 'adapter_fullscreen', 'adapter_interval', 'entry_fullscreen',
                         'entry_interval', 'record_interval', 'constructor_fullscreen', 'fullscreen_order']
             if backend == 'mac':
-                variants.extend(('mac_rate', 'mac_show_before_init', 'mac_pre_show_toggle', 'mac_desired'))
+                variants.extend(('mac_primary', 'mac_rate', 'mac_show_before_init', 'mac_pre_show_toggle', 'mac_desired'))
             if backend == 'win':
                 variants.append('win_present')
             for variant in variants:

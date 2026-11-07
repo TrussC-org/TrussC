@@ -110,8 +110,9 @@ void testPublicFullscreenToggles(Window& main, Window& secondary) {
                     target->setFullscreen(!initial);
                     state.will(!initial);
                     for (int i = 0; i < presses; ++i) toggle();
+                    // Mid-animation the real state is still the starting one (#1268).
                     check("public toggles defer native work during either animation",
-                        toggles == 1 && state.transitioning() && target->isFullscreen());
+                        toggles == 1 && state.transitioning() && target->isFullscreen() == initial);
                     const bool reverse = presses == 1;
                     check("public toggle flips or cancels the last requested state",
                         state.desired == (reverse ? initial : !initial));
@@ -225,13 +226,16 @@ void testFullscreenCalls(Window& main, Window& secondary) {
         for (Phase phase : {Phase::Windowed, Phase::Entering, Phase::Fullscreen, Phase::Exiting}) {
             state.phase = phase;
             other.phase = phase == Phase::Windowed ? Phase::Fullscreen : Phase::Windowed;
-            check("handle isFullscreen follows target guard even mid-exit", target->isFullscreen() == (phase != Phase::Windowed));
+            // isFullscreen() reports the window's real state (#1268): false
+            // while still entering, true until an exit completes.
+            const bool fullscreen = phase == Phase::Fullscreen || phase == Phase::Exiting;
+            check("handle isFullscreen follows real state even mid-exit", target->isFullscreen() == fullscreen);
             for (bool pixels : {false, true}) {
                 internal::pixelPerfectMode() = pixels;
                 for (int value : {320, -1}) {
                     for (int call = 0; call != 6; ++call) {
                         internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*target);
-                        check("global isFullscreen follows target guard", fixtureIsFullscreen() == (phase != Phase::Windowed));
+                        check("global isFullscreen follows real state", fixtureIsFullscreen() == fullscreen);
                         const int beforeMessages = messages, beforeApplied = appliedControls;
                         switch (call) {
                             case 0: fixtureSetWindowSize(value, 240); break;
