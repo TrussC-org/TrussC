@@ -1008,3 +1008,13 @@ requested state immediately and native convergence after normal event dispatch.
 (`native_visible`, with no pending visibility operation and no requested hide).
 TrussC retains the hidden frame-position snapshot until this completes. Other
 platforms share the definition and return their existing requested visibility.
+
+## GLX input deadline reset (#1012)
+
+- The shared X11 run loop clears input-delivery flags and resets the affected
+  window's `earliest_next` after event delivery for GLX as well as EGL. Input
+  during a skipped-present wait can therefore admit a tick in the same turn.
+  The shared due-check already reads that deadline; EGL behavior is unchanged.
+- `core/tests/windowTick/x11-pacing-test` compiles the production loop, tick and
+  due-check for both backends with deterministic input during the wait, and
+  requires a compiled GLX mutant without the deadline reset to fail.

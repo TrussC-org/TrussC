@@ -12576,21 +12576,18 @@ static void _sapp_tc_x11_run_loop(void) {
         }
         /* drain exactly the already-queued events (can't block: count bounded) */
         int count = XPending(_sapp_tc.display);
-#if defined(SOKOL_GLES3)
+        // [TrussC #1012] GLX and EGL both admit input before the saved deadline.
         for (size_t i = 0; i < _sapp_tc.window_slots; ++i)
             if (_sapp_tc.windows[i]) _sapp_tc.windows[i]->input_delivered = false;
-#endif
         while (count--) {
             XEvent event;
             XNextEvent(_sapp_tc.display, &event);
             _sapp_tc_x11_process_event(&event);
         }
-#if defined(SOKOL_GLES3)
         for (size_t i = 0; i < _sapp_tc.window_slots; ++i) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
             if (w && w->input_delivered) w->earliest_next = 0.0;
         }
-#endif
         /* tick every due window (re-fetch each slot: a tick or a processed
            event may have destroyed windows) */
         bool main_drives_secondaries = false;
