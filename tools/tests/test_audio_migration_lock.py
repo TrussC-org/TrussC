@@ -9,6 +9,7 @@ is added to the engine. Run through tcbuild.sh; --mutations checks the oracles.
 
 from pathlib import Path
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,10 @@ def before(text, anchor, where):
 
 
 def main():
+    compiler = os.environ.get("CXX") or shutil.which("c++")
+    if not compiler:
+        print("SKIP: test_audio_migration_lock requires a C++ compiler (c++ on PATH, or set CXX)")
+        return
     source = (ROOT / "core/include/tc/sound/tcAudio_impl.cpp").read_text(encoding="utf-8")
     init = body(source, "bool AudioEngine::init(const AudioSettings& settings)")
     # Exercise all control flow through migration. Native context/device opening
@@ -251,7 +256,7 @@ int main() {
         for name, selected_prefix, selected_reader in variants:
             cpp.write_text(code.replace("INIT_PREFIX", selected_prefix).replace(
                 "READER", selected_reader).replace("MIGRATION", migration), encoding="utf-8")
-            subprocess.run([os.environ.get("CXX", "c++"), "-std=c++20", "-pthread",
+            subprocess.run([compiler, "-std=c++20", "-pthread",
                             "-Wall", "-Wextra", "-Werror", str(cpp), "-o", str(binary)], check=True)
             result = subprocess.run([str(binary)], capture_output=True, text=True,
                                     encoding="utf-8", timeout=15)
