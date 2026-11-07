@@ -8465,6 +8465,7 @@ static _sapp_tc_window_t* _sapp_tc_win32_create_window(const _sapp_tc_native_des
     w->draw_while_hidden = d->draw_while_hidden;
     w->trust_hidden_signals = _sapp_tc_win32_trust_hidden_signals();
     w->swap_interval = d->swap_interval;
+    w->wake_on_input = d->swap_interval > 0; // [TrussC #1012] Track input during skipped-present waits.
     w->title_limit = d->title_limit;
     w->color_format = d->color_format;
     w->depth_format = d->depth_format;
@@ -8616,6 +8617,9 @@ static void _sapp_tc_win32_run_loop(void) {
            left signaled (the wait ended on a message or waitable first) is only
            waited on again after SetWaitableTimer re-arms it, which resets it. */
         if (_sapp_tc.app.desc._tc_before_turn) _sapp_tc.app.desc._tc_before_turn();
+        // [TrussC #1012] Input cancels the receiving window's skipped-present deadline.
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i)
+            if (_sapp_tc.windows[i]) _sapp_tc.windows[i]->input_delivered = false;
         MSG msg;
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
             if (WM_QUIT == msg.message) {
@@ -8624,6 +8628,10 @@ static void _sapp_tc_win32_run_loop(void) {
             }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
+        }
+        for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
+            _sapp_tc_window_t* w = _sapp_tc.windows[i];
+            if (w && w->input_delivered) w->earliest_next = 0.0;
         }
         if (done) {
             if (_sapp_tc.app.desc._tc_after_turn) _sapp_tc.app.desc._tc_after_turn();

@@ -93,6 +93,13 @@ The former sokol_app.h patches below are **native behavior** of
 sokol_app_tc.h now (kept here as historical record of what differs from
 upstream semantics):
 
+### Win32 skipped-present input deadlines (#1012)
+
+Positive-interval Win32 windows enable the shared input wake flag. The run loop
+clears each window's delivery flag before draining messages, then resets only
+the receiving windows' skipped-present deadlines before checking tick admission.
+The existing frame latency credit checks still apply.
+
 ### X11 secondary swap interval pacing (#1263)
 
 GLX and EGL secondary windows keep native GL swap interval 0 because they
