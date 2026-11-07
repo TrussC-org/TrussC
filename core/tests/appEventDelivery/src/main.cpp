@@ -20,6 +20,7 @@ std::vector<EventListener> listeners;
 bool treeConsumes = false, releaseConsumes = false, rootConsumes = false, dragConsumes = true;
 int updates = 0, draws = 0, exits = 0, touches = 0;
 bool tested = false;
+bool displayMode = false;
 int postClearFrames = 0;
 int resizeExtent = 100;
 
@@ -110,10 +111,12 @@ struct DeliveryApp : App {
         listeners.push_back(events().afterFrame.listen([] {
             if (exitOrderMode) { exitApp(); return; }
             if (!tested) {
-                expect("update", "cdpatblz"); expect("draw", "cdpatblz");
+                expect("update", "cdpatblz");
+                if (displayMode) expect("draw", "cdpatblz");
                 inputChecks(); cameraChecks(); clearChecks(); tested = true;
             } else {
-                expect("update", "at"); expect("draw", "at");
+                expect("update", "at");
+                if (displayMode) expect("draw", "at");
                 if (++postClearFrames == 2) exitApp();
             }
         }));
@@ -336,7 +339,8 @@ void finalChecks() {
     check("test driver ran", tested);
     check("App exit survives clear during notify exactly once", exits == 1);
     expect("exit", "a");
-    check("App keeps updating and drawing after clear", updates >= 3 && draws >= 3);
+    check("App keeps updating after clear", updates >= 3);
+    if (displayMode) check("App keeps drawing after clear", draws >= 3);
 }
 } // namespace
 
@@ -346,15 +350,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     WindowSettings settings; settings.width = settings.height = 128; settings.pixelPerfect = true;
     bool exitOrder = argc > 1 && std::string(argv[1]) == "--exit-order";
     exitOrderMode = exitOrder;
-    bool display = exitOrder || (argc > 1 && std::string(argv[1]) == "--display");
+    displayMode = exitOrder || (argc > 1 && std::string(argv[1]) == "--display");
     if (exitOrder) {
         return tcCoreTest::runDisplayTest<DeliveryApp>(settings, failures, [] {
             check("exit listener calls App exactly once", exits == 1);
             expect("exit", "cdpablz");
         });
     }
-    if (display) return tcCoreTest::runDisplayTest<DeliveryApp>(settings, failures, finalChecks);
-    // Core sweep also covers delivery without requiring an OS window.
+    if (displayMode) return tcCoreTest::runDisplayTest<DeliveryApp>(settings, failures, finalChecks);
+    // Core sweep covers non-drawing delivery without an OS window.
+    // --display checks draw delivery: the Node tree applies SGL matrices
+    // and needs the normal graphics setup/shutdown window.
     // Android creates its descriptor on the Activity thread, then runs App
     // callbacks on the native loop thread. Registration must not claim the
     // descriptor thread as the App thread; _setup_cb records that identity.
@@ -375,10 +381,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 128;
     internal::appSetupFunc();
     internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 128; internal::syncWindowAppSize(*internal::resolveWindow());
-    events().update.notify(); events().draw.notify();
+    events().update.notify();
     events().afterFrame.notify();
     for (int pass = 0; pass < 2; ++pass) {
-        events().update.notify(); events().draw.notify();
+        events().update.notify();
         events().afterFrame.notify();
     }
     internal::shutdownRuntime(); finalChecks();
