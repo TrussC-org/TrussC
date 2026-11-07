@@ -147,6 +147,7 @@ struct Probe : App {
     const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point phaseTime;
 #ifdef VISIBILITY_X11
+    IVec2 preHideMainPosition{}, preHideSecondaryPosition{};
     const char* sequences[4] = {"H SH S H S", "H S/H S H S", "H R H S", "H R"};
     int sequence = 0, rapid = 0;
     bool hideNext = false, sequenceDone = false;
@@ -248,6 +249,10 @@ struct Probe : App {
                 std::printf("windowVisible: pre-first-show position after show: %d,%d\n", position.x, position.y);
                 check("pre-first-show position honored on first show", std::abs(position.x - 300) <= 4 && std::abs(position.y - 100) <= 4);
             }
+#ifdef VISIBILITY_X11
+            preHideMainPosition = getWindow()->getPosition();
+            preHideSecondaryPosition = secondary->getPosition();
+#endif
             getWindow()->setVisible(false); secondary->setVisible(false);
             check("all windows hidden and occluded", !getWindow()->isVisible() && !secondary->isVisible() && getWindow()->isOccluded() && secondary->isOccluded());
             savedMainDraws = mainDraws; savedSecondaryDraws = secondaryDraws;
@@ -255,11 +260,18 @@ struct Probe : App {
         } else if (phase == 2 && updates >= phaseUpdates + 4 && secondaryUpdates >= savedSecondaryUpdates + 4) {
             check("hiding every window does not quit", getWindow()->isOpen() && secondary->isOpen());
             check("hidden drawing stops while both Apps update", mainDraws == savedMainDraws && secondaryDraws == savedSecondaryDraws);
-            checkHiddenControls(*getWindow()); checkHiddenControls(*secondary);
 #ifdef VISIBILITY_X11
             checkUnmapped(*getWindow()); checkUnmapped(*secondary);
+            check("main hidden position preserves pre-hide frame", getWindow()->getPosition().x == preHideMainPosition.x && getWindow()->getPosition().y == preHideMainPosition.y);
+            check("secondary hidden position preserves pre-hide frame", secondary->getPosition().x == preHideSecondaryPosition.x && secondary->getPosition().y == preHideSecondaryPosition.y);
 #endif
-            if (!fullscreen) secondary->setPosition(400, 120);
+            checkHiddenControls(*getWindow()); checkHiddenControls(*secondary);
+            if (!fullscreen) {
+                secondary->setPosition(400, 120);
+#ifdef VISIBILITY_X11
+                check("hidden move reads requested frame position", secondary->getPosition().x == 400 && secondary->getPosition().y == 120);
+#endif
+            }
             secondary->setVisible(true);
             check("second show reports requested state", secondary->isVisible());
             phaseTime = std::chrono::steady_clock::now(); phase = 3;

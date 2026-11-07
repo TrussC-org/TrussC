@@ -31,8 +31,9 @@ inline void x11State(Display* dpy, ::Window window, bool add,
         SubstructureRedirectMask | SubstructureNotifyMask, &event);
 }
 
-inline IVec2 x11FramePosition(Display* dpy, ::Window window) {
+inline IVec2 x11FramePosition(Display* dpy, ::Window window, const X11GeometryState* requested = nullptr) {
     if (!dpy || !window) return {-1, -1};
+    if (requested && requested->hiddenPosition) return {requested->hiddenX, requested->hiddenY};
     int x = 0, y = 0;
     ::Window child = 0;
     if (!XTranslateCoordinates(dpy, window, DefaultRootWindow(dpy), 0, 0, &x, &y, &child)) return {-1, -1};
@@ -109,8 +110,14 @@ inline void x11Geometry(Display* dpy, ::Window window, X11GeometryState& request
         x11State(dpy, window, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
         XResizeWindow(dpy, window, unsigned(pixelWidth), unsigned(pixelHeight));
         XFlush(dpy);
-        requested = {width, height, pixelSize};
+        requested.requestedWidth = width;
+        requested.requestedHeight = height;
+        requested.pixelSize = pixelSize;
         return;
+    }
+    if (requested.hiddenPosition) {
+        requested.hiddenX = x;
+        requested.hiddenY = y;
     }
     // #219: CenterGravity causes KWin/Mutter round-trip offsets. Pin the
     // decorated frame's top-left. Send unmaximize even before the WM has

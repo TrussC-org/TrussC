@@ -30,6 +30,12 @@ void Window::setVisible(bool visible) {
         logNotice("Window") << "setVisible(): unsupported without X11";
         return;
     }
+    if (!visible && !binding_.geometry.hiddenPosition) {
+        const auto position = getPosition();
+        binding_.geometry.hiddenX = position.x;
+        binding_.geometry.hiddenY = position.y;
+    }
+    binding_.geometry.hiddenPosition = !visible;
 #endif
     sapp_tc_window_set_visible(binding_.handle, visible);
     internal::refreshWindowMetadata(*this);
