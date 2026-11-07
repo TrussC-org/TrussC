@@ -210,6 +210,12 @@ updateListener = events().update.listen([this] {
 });
 ```
 
+### Headless Apps run their node tree
+
+`runHeadlessApp()` now updates the App's node tree: children, Mods, node timers and removal of destroyed children run as they do in windowed Apps. Setup already visited the tree. At normal ending, `cleanup()` runs on children before the App, after `App::exit()` and audio detach.
+
+Remove any manual child/Mod updates or timer processing that duplicated the framework's tree traversal. Cleanup code must allow for children being cleaned up first. Headless still uses a fixed update rate with bounded catch-up and quit checks between steps; it does not draw or update hover.
+
 ### A hidden window keeps updating but stops drawing
 
 While the OS reports a window as hidden (minimized, fully covered by other windows, or on another Space), `update()` keeps running at its normal rate and only `draw()` stops. The rule is the same for every window on every desktop OS. On iOS and Android, the app's suspension by the OS still pauses updates. In v0.7.7 the main window kept updating and drawing while hidden, and other windows paused both. So:

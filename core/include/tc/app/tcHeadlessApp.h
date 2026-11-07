@@ -147,8 +147,7 @@ namespace headless {
 }
 
 namespace internal {
-// Headless deliberately dispatches only the App virtuals, not the node tree
-// (children, mods and timers have a separate lifecycle decision).
+// Use the same App tree entry as the Window update listener.
 inline std::vector<EventListener> registerHeadlessAppEventListeners(
         const std::shared_ptr<std::weak_ptr<App>>& target) {
     std::vector<EventListener> listeners;
@@ -171,7 +170,7 @@ inline std::vector<EventListener> registerHeadlessAppEventListeners(
                 }
             }, EventPriority::App));
     };
-    bind(nonWindowContext().coreEvents->update, [](App& target) { target.update(); });
+    bind(nonWindowContext().coreEvents->update, [](App& target) { target.handleUpdate(); });
     bind(nonWindowContext().coreEvents->exit, [](App& target) { deliverAppExit(target); }, true);
     return listeners;
 }
@@ -192,16 +191,17 @@ inline void runHeadlessUpdatePass(App&, WindowContext& ctx,
         state.accumulator, elapsed, targetDelta, getMaxUpdateSteps());
     warnUpdateStepsDropped(FixedStepLoop::Headless, state.updateStepsDropWarned,
                            adv.droppedTime, targetDelta, adv.steps);
+    const auto now = windowClockNow();
     int ran = 0;
     for (; ran < adv.steps; ++ran) {
         headless::pollExitSignal();
         if (!headless::running || headless::quitRequested.load()) break;
-        ctx.updateDeltaTime = targetDelta;
-        EntryStackGuard guard(AppEntry::Update);
-        // Services such as Box2d guard against stepping twice in one update.
-        // Match the windowed loop's counter before delivering this step.
-        ++ctx.updateCount;
-        ctx.coreEvents->update.notify();
+        // As in the windowed fixed-step loop, the latest step ends one
+        // leftover accumulator before now; dropped time is not replayed.
+        const double behind = state.accumulator + (adv.steps - 1 - ran) * targetDelta;
+        const auto stepTime = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(behind));
+        runMainUpdate(targetDelta, stepTime);
         headless::frameCount++;
     }
     // As in the windowed loop, steps cut short do not count toward the rate.
@@ -300,8 +300,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::sampleFrameTime(ctx);
 
     // Construct the virtual attachment with the same owner token as a Window
-    // attachment. Its shared ownership initializes weak_from_this(); headless
-    // execution still skips scene-tree update, draw and cleanup.
+    // attachment. Its shared ownership initializes weak_from_this(); update
+    // and cleanup run the node tree, while draw and hover remain window-only.
     auto appSlot = std::make_shared<std::weak_ptr<App>>();
     auto appListeners = internal::registerHeadlessAppEventListeners(appSlot);
     std::shared_ptr<AppClass> app;

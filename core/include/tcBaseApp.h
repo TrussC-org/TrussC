@@ -104,12 +104,12 @@ public:
     /// Deprecated alias of exitApp(): works in windowed and headless apps, and
     /// every Runtime/App listener may veto it.
     [[deprecated("Use exitApp() instead. Will be removed in v1.0.0")]]
-    void requestExit() { exitRequested_ = true; exitApp(0); }
+    void requestExit() { exitRequested_.store(true, std::memory_order_relaxed); exitApp(0); }
 
     /// Deprecated. True once requestExit() has been called on this App (it is
     /// not cleared by a veto). The framework no longer reads it.
     [[deprecated("Use exitApp() instead. Will be removed in v1.0.0")]]
-    bool isExitRequested() const { return exitRequested_; }
+    bool isExitRequested() const { return exitRequested_.load(std::memory_order_relaxed); }
 
     // -------------------------------------------------------------------------
     // Window
@@ -129,7 +129,7 @@ public:
     Window* getWindow() const;
 
 private:
-    bool exitRequested_ = false;
+    std::atomic<bool> exitRequested_{false}; // Legacy observation only; requestExit routes through exitApp().
     bool unownedSetSizeWarned_ = false;   // setSize() warned once: no shared_ptr owns this App
 
 public:
@@ -254,7 +254,7 @@ private:
     friend void internal::completeAppConstruction(App&) noexcept;
     friend void internal::deliverAppExit(App&);
     friend std::shared_ptr<internal::AppOwner> internal::appOwner(const App&) noexcept;
-    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&, bool) noexcept;
+    friend void internal::endAppAttachment(const std::shared_ptr<App>&, internal::WindowContext&) noexcept;
     EventListener audioOutListener_;
     EventListener audioInListener_;
 
@@ -396,11 +396,15 @@ public:
 
     // The App's setup() runs on its first update or draw, as its own entry
     // point (#349), before the tree walk.
-    void handleUpdate(int mouseX, int mouseY) {
+    void handleUpdate() {
         internal::setupNodeOnce(*this);
+        // setup() may have ended or replaced this root.
+        if (internal::currentWindowContext().rootNode.lock().get() != this) return;
         updateTree();
-        updateHoverState((float)mouseX, (float)mouseY);
     }
+
+    // Compatibility adapter; hover is driven only by the owning Window.
+    void handleUpdate(int, int) { handleUpdate(); }
 
     void handleDraw() {
         internal::setupNodeOnce(*this);

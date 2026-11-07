@@ -1426,6 +1426,7 @@ bool targetStackDispatchProbe(bool rejectedPop) {
     {
         auto candidate = internal::makeConstructedApp<StackApp>(rejectedPop, expectingUnmatched, expectingPop);
         auto& app = *candidate;
+        internal::currentWindowContext().rootNode = candidate;
         beginFrame();
         { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); }
         auto& screen = window.swapchainTarget;
@@ -1530,6 +1531,7 @@ bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
     {
         auto candidate = internal::makeConstructedApp<ResizeApp>(resize, cameraScope);
         auto& app = *candidate;
+        internal::currentWindowContext().rootNode = candidate;
         beginFrame();
         { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
         auto* child = &internal::currentTarget();
@@ -1590,6 +1592,7 @@ bool openFboAtDrawProbe(int mode) {   // 0: begin in update, end in draw  1: all
     {
         auto candidate = internal::makeConstructedApp<OpenApp>(mode);
         auto& app = *candidate;
+        internal::currentWindowContext().rootNode = candidate;
         for (int frame = 0; frame < 3; ++frame) {
             beginFrame();
             { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
