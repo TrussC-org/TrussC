@@ -21,6 +21,16 @@ allCoreTests videoPlayerError --video-check path/to/two-bad-packets.mov bad-pack
 The optional GPU check compares FBO pixels before and after an injected error.
 The real-player check waits for explicit failure or normal EOF. Run graphical
 checks under Xvfb on Linux and apply an external process timeout for hangs.
+The first terminal update must distinguish an error from EOF; the error check
+does not wait for a later notification after observing completion (#913).
+Linux can also exercise the real decoder without a display or GPU uploads:
+
+```sh
+allCoreTests videoPlayerError --headless-video-check path/to/working.mov
+allCoreTests videoPlayerError --headless-video-check path/to/truncated.mov error
+```
+
+Repeat the error check 200 times when checking terminal error publication.
 A truncated file that the backend treats as normal EOF is intentionally not
 classified as an error; choose one that produces an explicit read failure.
 The `bad-packet` mode requires one invalid-packet/frame warning (except on

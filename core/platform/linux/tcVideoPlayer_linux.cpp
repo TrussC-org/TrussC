@@ -133,7 +133,6 @@ private:
     void decodeError(const char* operation, int code) {
         char message[AV_ERROR_MAX_STRING_SIZE];
         av_strerror(code, message, sizeof(message));
-        isPlaying_ = false;
         if (code == AVERROR(ENOMEM)) playbackErrors_.report("out of memory", code);
         else playbackErrors_.report(std::string(operation) + ": " + message, code);
     }
@@ -546,8 +545,12 @@ void TCVideoPlayerImpl::setPaused(bool paused) {
 void TCVideoPlayerImpl::update(VideoPlayer* player) {
     hasNewFrame_ = false;
 
+    // Consume errors and completion under the same lock. The decoder queues
+    // its error before publishing isFinished_; only this thread stops playback.
+    std::lock_guard<std::mutex> lock(mutex_);
     auto error = playbackErrors_.take();
     if (!error.message.empty()) {
+        isPlaying_ = false;
         if (player) internal::VideoPlayerPlatformAccess::reportError(*player, error);
         return;
     }
@@ -589,8 +592,6 @@ void TCVideoPlayerImpl::update(VideoPlayer* player) {
     }
 
     // Get frame from queue if available and PTS is right
-    std::lock_guard<std::mutex> lock(mutex_);
-
     while (!frameQueue_.empty()) {
         FrameData& front = frameQueue_.front();
 
@@ -696,6 +697,7 @@ void TCVideoPlayerImpl::decodeThread() {
         try { decoded = decodeNextFrame(); }
         catch (const std::exception&) { decodeError("video frame allocation", AVERROR(ENOMEM)); }
         if (!decoded) {
+            std::lock_guard<std::mutex> lock(mutex_);
             isFinished_ = true;
         }
     }
