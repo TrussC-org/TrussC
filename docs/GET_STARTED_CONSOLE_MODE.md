@@ -65,7 +65,7 @@ You can adjust the update rate:
 tc::HeadlessSettings().setFps(10)    // 10 Hz — saves CPU
 ```
 
-Use a finite positive rate. `HeadlessSettings::setFps()` stores the value without validation; `EVENT_DRIVEN` (0), `VSYNC` and other invalid rates do not schedule updates. `redraw()` does not schedule headless work.
+Use a finite positive rate; other values warn at startup and run no updates. `redraw()` does not schedule headless work.
 
 Every step runs the node tree, including children, Mods, node timers and removal of destroyed children. Timers advance through these updates; they do not wake a separate event-driven loop. A timer created during a fixed step starts counting with the next step. Catch-up is bounded by `getMaxUpdateSteps()` (default 10), with excess time dropped. Quit requests are checked between steps. Drawing and hover updates are window-only.
 

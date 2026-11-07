@@ -10980,15 +10980,15 @@ description.ja = "ヘッドレスアプリの実行を設定する。"
 description.ko = "헤드리스 앱 실행을 설정한다."
 details.en = '''
 - Pass this type to `runHeadlessApp` to run without a window or graphics context. Its only setting is `targetFps`, the target update rate in updates per second, which defaults to 60.
-- `setFps(fps)` assigns `targetFps` and returns the settings by reference for chaining. Use a positive rate; the runner computes its fixed timestep as `1.0 / targetFps` and does not interpret `VSYNC` or `EVENT_DRIVEN`.
+- `setFps(fps)` assigns `targetFps` and returns the settings by reference for chaining. Use a finite positive rate; other values warn at startup and run no updates.
 '''
 details.ja = '''
 - `runHeadlessApp` に渡すと、ウィンドウやグラフィックスコンテキストなしで実行します。設定項目は目標更新頻度（毎秒の更新回数）の `targetFps` だけで、既定値は 60 です。
-- `setFps(fps)` は `targetFps` に代入し、連続して設定できるように自身の参照を返します。正の値を指定してください。実行ループは固定時間刻みを `1.0 / targetFps` として計算し、`VSYNC` や `EVENT_DRIVEN` を特別な値として扱いません。
+- `setFps(fps)` は `targetFps` に代入し、連続して設定できるように自身の参照を返します。有限の正のレートを指定してください。それ以外の値では起動時に警告し、更新を実行しません。
 '''
 details.ko = '''
 - `runHeadlessApp`에 전달하면 윈도우나 그래픽 컨텍스트 없이 실행합니다. 유일한 설정은 초당 목표 업데이트 횟수인 `targetFps`이며 기본값은 60입니다.
-- `setFps(fps)`는 `targetFps`에 값을 대입하고 연속 설정을 위해 자신의 참조를 반환합니다. 양수를 지정하세요. 실행 루프는 고정 시간 간격을 `1.0 / targetFps`로 계산하며 `VSYNC`나 `EVENT_DRIVEN`을 특수 값으로 해석하지 않습니다.
+- `setFps(fps)`는 `targetFps`에 값을 대입하고 연속 설정을 위해 자신의 참조를 반환합니다. 유한한 양수 레이트를 지정합니다. 그 외의 값은 시작 시 경고하고 업데이트를 실행하지 않습니다.
 '''
 related = ["runHeadlessApp", "WindowSettings"]
 
@@ -11021,17 +11021,17 @@ description.ko = "헤드리스 앱의 목표 업데이트 레이트를 보관한
 details.en = '''
 - This `float` is measured in updates per second and defaults to `60.0f`. `runHeadlessApp()` uses fixed update steps of `1 / targetFps` seconds, which is also the value reported by `getDeltaTime()` during updates.
 - Set it before calling `runHeadlessApp()`. The runner copies the value at startup, so later changes to this settings object do not change the running update rate.
-- Use a finite positive value. Values are not validated or clamped; zero, negative, or non-finite values result in no update steps, and `VSYNC` and `EVENT_DRIVEN` have no special meaning here.
+- Use a finite positive rate; other values warn at startup and run no updates.
 '''
 details.ja = '''
 - この `float` の単位は 1 秒あたりの更新回数で、既定値は `60.0f` です。`runHeadlessApp()` は `1 / targetFps` 秒の固定ステップで更新し、更新中の `getDeltaTime()` もこの値を返します。
 - `runHeadlessApp()` を呼ぶ前に設定してください。実行開始時に値がコピーされるため、そのあとにこの設定オブジェクトを変更しても実行中の更新レートは変わりません。
-- 有限の正の値を使ってください。値の検証や範囲への補正は行われません。0、負の値、非有限値では更新ステップが実行されず、`VSYNC` と `EVENT_DRIVEN` に特別な意味はありません。
+- 有限の正のレートを指定してください。それ以外の値では起動時に警告し、更新を実行しません。
 '''
 details.ko = '''
 - 이 `float`의 단위는 초당 업데이트 횟수이며 기본값은 `60.0f`입니다. `runHeadlessApp()`은 `1 / targetFps`초의 고정 스텝으로 업데이트하고, 업데이트 중 `getDeltaTime()`도 이 값을 반환합니다.
 - `runHeadlessApp()`을 호출하기 전에 설정하세요. 실행 시작 시 값을 복사하므로 이후 이 설정 객체를 변경해도 실행 중인 업데이트 레이트는 바뀌지 않습니다.
-- 유한한 양수를 사용하세요. 값을 검증하거나 범위에 맞게 보정하지 않습니다. 0, 음수 또는 비유한 값이면 업데이트 스텝을 실행하지 않으며 `VSYNC`와 `EVENT_DRIVEN`에는 특별한 의미가 없습니다.
+- 유한한 양수 레이트를 지정합니다. 그 외의 값은 시작 시 경고하고 업데이트를 실행하지 않습니다.
 '''
 related = ["HeadlessSettings::setFps", "runHeadlessApp", "getDeltaTime"]
 

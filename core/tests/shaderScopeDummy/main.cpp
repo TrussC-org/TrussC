@@ -1533,7 +1533,7 @@ bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
         auto& app = *candidate;
         internal::currentWindowContext().rootNode = candidate;
         beginFrame();
-        { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
+        { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(); }
         auto* child = &internal::currentTarget();
         const auto context = sgl_get_context();
         internal::refreshWindowDrawingSize();
@@ -1595,7 +1595,7 @@ bool openFboAtDrawProbe(int mode) {   // 0: begin in update, end in draw  1: all
         internal::currentWindowContext().rootNode = candidate;
         for (int frame = 0; frame < 3; ++frame) {
             beginFrame();
-            { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
+            { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(); }
             { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); present(); }
             perFrame[frame] = openWarnings;
         }

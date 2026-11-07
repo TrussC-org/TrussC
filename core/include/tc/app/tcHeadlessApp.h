@@ -206,7 +206,7 @@ inline void runHeadlessUpdatePass(App&, WindowContext& ctx,
     }
     // As in the windowed loop, steps cut short do not count toward the rate.
     recordUpdateRateSample(ctx, elapsed,
-        (elapsed - adv.droppedTime) / targetDelta - (adv.steps - ran));
+        targetDelta > 0 ? (elapsed - adv.droppedTime) / targetDelta - (adv.steps - ran) : 0);
 
     headless::pollExitSignal();
     if (headless::running && headless::quitRequested.exchange(false)) {
@@ -245,6 +245,11 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 
     // Set target FPS
     headless::targetFps = settings.targetFps;
+    const bool validFps = headless::targetFps > 0 && std::isfinite(headless::targetFps);
+    if (!validFps) {
+        logWarning("Headless") << "fps must be a finite positive rate (got "
+            << headless::targetFps << "); update() will not run";
+    }
 
     // Reset before installing handlers: keep any signal received during
     // installation, and start consecutive runs with no stale exit state.
@@ -332,7 +337,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // passes the loop sleeps until the next step is due, at most 1 ms, on a
     // precise timer (HeadlessSleeper), so a fast rate stays well under the
     // cap per pass.
-    const double targetDelta = 1.0 / headless::targetFps;
+    // Zero disables steps and keeps the idle loop responsive without dividing by an invalid rate.
+    const double targetDelta = validFps ? 1.0 / headless::targetFps : 0.0;
     internal::HeadlessUpdateState updateState;
     auto lastTime = std::chrono::steady_clock::now();
     internal::HeadlessSleeper sleeper;

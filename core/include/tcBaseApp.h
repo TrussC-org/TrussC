@@ -403,9 +403,6 @@ public:
         updateTree();
     }
 
-    // Compatibility adapter; hover is driven only by the owning Window.
-    void handleUpdate(int, int) { handleUpdate(); }
-
     void handleDraw() {
         internal::setupNodeOnce(*this);
         internal::warnFboOpenAtDraw();

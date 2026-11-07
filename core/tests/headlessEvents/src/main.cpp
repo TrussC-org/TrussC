@@ -4,6 +4,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <limits>
 #include <cstdio>
 #include <string>
 #include <thread>
@@ -90,6 +91,37 @@ void testDelivery(Mode requested) {
     defaultExit.disconnect(); beforeExit.disconnect();
     check("runner disconnects App bindings after returning",
           fixtureEvents().update.listenerCount() == updateCount && fixtureEvents().exit.listenerCount() == exitCount);
+}
+
+// Repost a slot to advance several idle passes without relying on a timer.
+int idlePasses = 0, idleUpdates = 0;
+struct IdleApp : App, internal::MainThreadSlot {
+    IdleApp() : MainThreadSlot([](MainThreadSlot& slot) {
+        auto& app = static_cast<IdleApp&>(slot);
+        if (++idlePasses == 3) exitApp();
+        else app.post(app.shared_from_this());
+    }) {}
+    void setup() override { post(shared_from_this()); }
+    void update() override { ++idleUpdates; }
+};
+void testInvalidFps() {
+    for (float fps : {0.0f, -1.0f, std::numeric_limits<float>::quiet_NaN(),
+                      std::numeric_limits<float>::infinity()}) {
+        idlePasses = idleUpdates = 0;
+        int warnings = 0;
+        bool startupOnly = true;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.level == LogLevel::Warning
+                    && event.message.find("fps must be a finite positive rate (got ") != std::string::npos
+                    && event.message.find("); update() will not run") != std::string::npos) {
+                ++warnings;
+                startupOnly = startupOnly && idlePasses == 0;
+            }
+        });
+        check("invalid fps runner exits", runHeadlessApp<IdleApp>(HeadlessSettings().setFps(fps)) == 0);
+        check("invalid fps warns exactly once at startup", warnings == 1 && startupOnly);
+        check("invalid fps runs idle passes without updates", idlePasses == 3 && idleUpdates == 0);
+    }
 }
 
 struct CatchUpApp : App {
@@ -383,6 +415,7 @@ struct NetworkApp : App {
 TC_CORE_TEST_MAIN() {
     mainThread = std::this_thread::get_id();
     getMainThreadId();
+    testInvalidFps();
     testCatchUp();
     testTreeLifecycle();
     testDelivery(Mode::Order);
