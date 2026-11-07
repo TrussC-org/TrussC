@@ -1588,6 +1588,18 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 if (dispatch.current(SAPP_MOUSEBUTTON_LEFT)) ctx.touchMapper.reset();
                 for (int button = SAPP_MOUSEBUTTON_LEFT; button <= SAPP_MOUSEBUTTON_MIDDLE; ++button)
                     releaseMouse(button);
+                // Like mouse recovery, use ordinary releases (no synthetic flag).
+                // Clear all keys first so every callback sees modifiers released.
+                {
+                    std::vector<int> heldKeys(ctx.keysPressed.begin(), ctx.keysPressed.end());
+                    std::sort(heldKeys.begin(), heldKeys.end());
+                    ctx.keysPressed.clear();
+                    for (int key : heldKeys) {
+                        KeyEventArgs args;
+                        args.key = key;
+                        window.events().keyReleased.notify(args);
+                    }
+                }
                 deliverFocus(false);
                 break;
             case SAPP_EVENTTYPE_FOCUSED:
@@ -1602,16 +1614,17 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
-                // Track key state (only on first press, not auto-repeat)
-                if (!ev->key_repeat) {
-                    ctx.keysPressed.insert(ev->key_code);
-                }
+                // Record every delivered press, including repeats after refocus,
+                // so its key-up receives a matching release.
+                ctx.keysPressed.insert(ev->key_code);
 
                 window.events().keyPressed.notify(args); // auto-repeat is delivered too
 
                 break;
             }
             case SAPP_EVENTTYPE_KEY_UP: {
+                // A late OS key-up must not repeat a focus-loss release.
+                if (ctx.keysPressed.erase(ev->key_code) == 0) break;
                 KeyEventArgs args;
                 args.key = ev->key_code;
                 args.isRepeat = false;
@@ -1619,8 +1632,6 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 args.ctrl = hasModCtrl;
                 args.alt = hasModAlt;
                 args.super = hasModSuper;
-                // Track key state
-                ctx.keysPressed.erase(ev->key_code);
                 window.events().keyReleased.notify(args);
                 break;
             }
