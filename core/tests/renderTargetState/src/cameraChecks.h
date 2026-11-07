@@ -189,6 +189,8 @@ int runCameraChecks(int samples = 1) {
     return tcCoreTest::runDisplayTest<CameraChecksApp>(settings, failures, [] {
         check("GPU checks emit no unexpected stack or target warnings", gpuWarnings.unexpected == 0);
         check("GPU checks emit exactly one intended unmatched-Fbo warning", gpuWarnings.expected == 1);
+        check("GPU checks emit one intended open-at-draw warning per Fbo drawn through App::handleDraw (#925)",
+              gpuWarnings.openAtDrawWarnings == 3);
         check("all six camera scenarios completed", cameraChecksFinished);
         check("review behavior probes and screen readback completed", reviewDrawn && reviewCaptured);
         check("all three overlapping-depth variants captured", depthCaptures == 3);

@@ -34,11 +34,16 @@ bool isStackTargetWarning(const LogEventArgs& e) {
 
 struct GpuWarningChecks {
     static constexpr const char* unmatched = "[Fbo] end() discarded unmatched matrix, camera or scissor pushes";
+    // #925: the camera and RectNode checks call App::handleDraw (the root-draw
+    // entry) inside fbo.begin()/end() on purpose. Each of those Fbos warns once.
+    static constexpr const char* openAtDraw = "[Fbo] an Fbo is still active when draw() starts "
+        "(begin() was called earlier, e.g. in update()); call end() in the same callback that called begin()";
     bool expectingUnmatched = false;
-    int expected = 0, unexpected = 0;
+    int expected = 0, unexpected = 0, openAtDrawWarnings = 0;
     void observe(const LogEventArgs& e) {
         if (!isStackTargetWarning(e)) return;
         if (expectingUnmatched && e.message == unmatched) ++expected;
+        else if (e.message == openAtDraw) ++openAtDrawWarnings;
         else {
             ++unexpected;
             internal::appExitCode() = 1;
