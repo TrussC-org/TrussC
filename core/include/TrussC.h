@@ -421,6 +421,8 @@ inline void beginFrame() {
     }
 
     internal::prepareWindowTarget();
+    // Screen setup below reapplies the cleared scissor to this window's sgl context.
+    internal::currentWindowContext().resetScissorAtFrameStart();
     internal::currentWindowContext().framePending = true;
 
     // Setup screen with default FOV (60 = perspective, 0 = ortho)
@@ -586,11 +588,6 @@ inline void setScissor(float x, float y, float w, float h) {
     internal::setScissorPixels(x * scale, y * scale, w * scale, h * scale);
 }
 
-// Set scissor rectangle (int version)
-inline void setScissor(int x, int y, int w, int h) {
-    setScissor((float)x, (float)y, (float)w, (float)h);
-}
-
 // Reset scissor to the active target attachment
 inline void resetScissor() {
     internal::currentWindowContext().currentTarget->currentScissor.active = false;
@@ -624,6 +621,10 @@ inline void pushScissor(float x, float y, float w, float h) {
 inline void popScissor() {
     if (internal::currentWindowContext().currentTarget->scissorStack.empty()) {
         resetScissor();
+        // A stray pop in draw() repeats every frame.
+        static OnceGate emptyPop{1.0};
+        if (emptyPop.isFirstTime())
+            logWarning("Scissor") << "popScissor() called with an empty stack; clipping reset";
         return;
     }
 

@@ -2075,24 +2075,29 @@ bool AudioEngine::init(const AudioSettings& settings) {
         std::fill_n(analysisCopy_, ANALYSIS_BUFFER_SIZE, 0.0f);
     }
 
-    // 0 (or less) = no cap; slots are added by play() as voices need them.
-    maxPolyphony_ = settings.maxPolyphony > 0 ? settings.maxPolyphony : 0;
-    if (maxPolyphony_ > 0 && (int)playingSounds_.size() > maxPolyphony_) {
-        // A cap below the slots in use: keep existing slots up to the cap.
-        // Truncating drops the extra voices (the same policy as play()
-        // reusing dead slots — unavoidable if the user lowers the cap while
-        // voices are active). The device is stopped here.
-        playingSounds_.resize(maxPolyphony_);
-    }
+    {
+        // The device is stopped, but diagnostics and other voice users can
+        // still run. Keep container changes and migration under their lock.
+        // Device stop/start must stay outside: the callback takes mutex_.
+        std::lock_guard<std::mutex> lock(mutex_);
 
-    // Migrate active voices so they continue from the same playback position
-    // at the new engine rate. Done on every init, not only a live re-init
-    // (#441): sampleRate_ is the rate the voices were last converted to, also
-    // when the previous init failed after committing its rate, and after
-    // shutdown(). The call returns at once when the rates are equal. The
-    // device is currently stopped, so the audio thread can't observe partial
-    // migration state.
-    migrateVoicesToNewRate(oldRate, sampleRate_);
+        // 0 (or less) = no cap; slots are added by play() as voices need them.
+        maxPolyphony_ = settings.maxPolyphony > 0 ? settings.maxPolyphony : 0;
+        if (maxPolyphony_ > 0 && (int)playingSounds_.size() > maxPolyphony_) {
+            // A cap below the slots in use: keep existing slots up to the cap.
+            // Truncating drops the extra voices (the same policy as play()
+            // reusing dead slots — unavoidable if the user lowers the cap while
+            // voices are active). The device is stopped here.
+            playingSounds_.resize(maxPolyphony_);
+        }
+
+        // Migrate active voices so they continue from the same playback position
+        // at the new engine rate. Done on every init, not only a live re-init
+        // (#441): sampleRate_ is the rate the voices were last converted to, also
+        // when the previous init failed after committing its rate, and after
+        // shutdown(). The call returns at once when the rates are equal.
+        migrateVoicesToNewRate(oldRate, sampleRate_);
+    }
 
     // Lazily create a persistent ma_context. Sharing one context across
     // every device init/uninit cycle keeps CoreAudio's internal state
@@ -2303,7 +2308,8 @@ std::vector<AudioDeviceInfo> AudioEngine::listDevices() {
 // A rebuilt stream voice also sets SoundStream::sampleRate to the new rate. A
 // stream without a rebuilt voice gets it from its next play().
 //
-// Called with the device stopped, so no audio callback can race.
+// Called with the device stopped and mutex_ held, excluding diagnostic
+// readers and other voice users as well as the audio callback.
 // ---------------------------------------------------------------------------
 void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
     if (oldRate == newRate || oldRate <= 0 || newRate <= 0) return;

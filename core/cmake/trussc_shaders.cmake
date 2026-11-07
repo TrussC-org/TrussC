@@ -152,6 +152,11 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     endforeach()
 
     add_custom_target(${_TC_TARGET}_shaders_gen DEPENDS ${_TC_SHADER_OUTPUTS})
+    # MSBuild hashes long default tlog names using the solution path (#1224).
+    # A short, fixed name lets solutions sharing this build tree use one tlog.
+    # Other generators ignore VS_GLOBAL_* properties.
+    set_property(TARGET ${_TC_TARGET}_shaders_gen PROPERTY VS_GLOBAL_TLogLocation
+        "${CMAKE_CURRENT_BINARY_DIR}/tc_shaders/${_TC_TARGET}/$(Platform)/$(Configuration)/tc.tlog/")
     add_dependencies(${_TC_TARGET}_shaders ${_TC_TARGET}_shaders_gen)
     set_property(TARGET ${_TC_TARGET}_shaders PROPERTY TC_SHADER_HEADERS ${_TC_SHADER_OUTPUTS})
     message(STATUS "[${_TC_TARGET}] Shader compilation enabled for ${_TC_SHADER_SOURCES}")
