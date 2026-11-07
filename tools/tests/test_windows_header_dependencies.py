@@ -21,13 +21,16 @@ CLI = Path(os.environ.get("TRUSSCLI", ROOT / "tools/bin/trusscli.exe")).resolve(
 class WindowsHeaderDependencies(unittest.TestCase):
     def test_configure_build_and_doctor(self):
         # Some runners launch cmd without a console. Give this test a shared
-        # console before applying chcp, so configure and build can inherit it.
-        if ctypes.windll.kernel32.GetConsoleCP() == 0:
-            self.assertTrue(ctypes.windll.kernel32.AllocConsole())
-            self.addCleanup(ctypes.windll.kernel32.FreeConsole)
-            subprocess.run(["cmd", "/c", "chcp 65001"], check=True,
-                           stdout=subprocess.PIPE)
-        self.assertEqual(ctypes.windll.kernel32.GetConsoleOutputCP(), 65001)
+        # console before setting UTF-8, so configure and build can inherit it.
+        console = ctypes.windll.kernel32
+        if console.GetConsoleCP() == 0:
+            self.assertTrue(console.AllocConsole())
+            self.addCleanup(console.FreeConsole)
+        self.addCleanup(console.SetConsoleCP, console.GetConsoleCP())
+        self.addCleanup(console.SetConsoleOutputCP, console.GetConsoleOutputCP())
+        self.assertTrue(console.SetConsoleCP(65001))
+        self.assertTrue(console.SetConsoleOutputCP(65001))
+        self.assertEqual(console.GetConsoleOutputCP(), 65001)
         with tempfile.TemporaryDirectory(prefix="trusscli-deps-") as scratch:
             project = Path(scratch) / "fboExample"
             shutil.copytree(ROOT / "examples/graphics/fboExample/src", project / "src")

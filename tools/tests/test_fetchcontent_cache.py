@@ -77,15 +77,15 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
     def test_unset_uses_independent_default_directories(self):
         for name in ('first', 'second'):
             build, settings = self.configure(name)
-            self.assertEqual(settings, [str(build / '_deps'), 'OFF',
-                                        str(build / '_deps/fixture-src')])
+            self.assertEqual(settings, [(build / '_deps').as_posix(), 'OFF',
+                                        (build / '_deps/fixture-src').as_posix()])
         self.assertEqual(self.calls().count('download'), 2)
 
     def test_shared_directory_reuses_download_with_disconnected_hit(self):
         shared = self.directory / 'shared deps'
         self.env['TRUSSC_FETCHCONTENT_DIR'] = str(shared)
         first, settings = self.configure('first')
-        self.assertEqual(settings, [str(shared), 'OFF', str(shared / 'fixture-src')])
+        self.assertEqual(settings, [shared.as_posix(), 'OFF', (shared / 'fixture-src').as_posix()])
         initial = self.calls()
         self.assertEqual(initial.count('download'), 1)
         # Later examples in the same cold job share the download too.
@@ -95,7 +95,7 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
         self.command(['ctest', '--test-dir', str(first), '--output-on-failure'])
         self.env['TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED'] = 'ON'
         second, settings = self.configure('second')
-        self.assertEqual(settings, [str(shared), 'ON', str(shared / 'fixture-src')])
+        self.assertEqual(settings, [shared.as_posix(), 'ON', (shared / 'fixture-src').as_posix()])
         self.assertEqual(self.calls(), initial)
         self.command(['cmake', '--build', str(second)])
         self.command(['ctest', '--test-dir', str(second), '--output-on-failure'])
@@ -116,9 +116,9 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
         self.env['TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED'] = 'ON'
         _, settings = self.configure('explicit', f'-DFETCHCONTENT_BASE_DIR={explicit}',
                                      '-DFETCHCONTENT_UPDATES_DISCONNECTED=OFF')
-        self.assertEqual(settings[:2], [str(explicit), 'OFF'])
+        self.assertEqual(settings[:2], [explicit.as_posix(), 'OFF'])
         _, settings = self.configure('explicit')
-        self.assertEqual(settings[:2], [str(explicit), 'OFF'])
+        self.assertEqual(settings[:2], [explicit.as_posix(), 'OFF'])
         self.assertFalse((self.directory / 'env deps').exists())
 
     def test_normal_cmake_variables_override_environment(self):
@@ -130,7 +130,7 @@ file(WRITE "${{CMAKE_BINARY_DIR}}/settings"
             'set(FETCHCONTENT_UPDATES_DISCONNECTED OFF)\ninclude("', 1), encoding="utf-8")
         build, _ = self.configure('normal')
         self.assertEqual((build / 'hook-settings').read_text(encoding="utf-8").splitlines(),
-                         [str(explicit), 'OFF'])
+                         [explicit.as_posix(), 'OFF'])
         self.assertFalse((self.directory / 'env deps').exists())
 
 
