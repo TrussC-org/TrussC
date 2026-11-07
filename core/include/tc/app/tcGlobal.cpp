@@ -1009,9 +1009,10 @@ void present() {
         }
     }
     const bool closing = internal::currentWindowCloseRecorded();
+    const bool hidden = window.hostWindow && !window.hostWindow->isVisible() && !window.drawWhileHidden;
     window.swapchainTarget.flushLayers();
     window.swapchainTarget.endPass();
-    if (!closing && internal::finishWindowCaptureSource(window.swapchainTarget)) {
+    if (!closing && !hidden && internal::finishWindowCaptureSource(window.swapchainTarget)) {
         if (!sg_tc_mtl_authorize_drawable(window.swapchainTarget.ownerId,
                 window.swapchainTarget.resources().generation, window.renderEpoch))
             sg_tc_mtl_cancel_drawables(window.swapchainTarget.ownerId);
@@ -1544,7 +1545,7 @@ void observeWindowVisibility(WindowContext& ctx, sapp_event_type type) {
         for (auto* w : openWindows()) if (&trussc::internal::WindowRequestAccess::context(*w) == &ctx) {
             refreshWindowMetadata(*w);
             const auto& m = WindowRequestAccess::binding(*w).metadata;
-            ctx.suspended = m.trust_hidden_signals && (m.iconified || m.occluded);
+            ctx.suspended = m.hidden || (m.trust_hidden_signals && (m.iconified || m.occluded));
             return;
         }
     }
@@ -1581,7 +1582,8 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
     const bool capturePending = forceDraw || !ctx.pendingScreenshotPaths.empty()
         || !ctx.asyncScreenshots.pending.empty();
     const auto nonPresentingExit = [&] {
-        if (currentWindowCloseRecorded()) sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
+        if (currentWindowCloseRecorded() || (window && !window->isVisible() && !ctx.drawWhileHidden))
+            sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
         // Prelude callbacks can upload or render FBOs even without a draw.
         // Native gates have not activated this window's GPU context. In
         // particular, a nested gated callback must not commit foreign work.
@@ -1641,6 +1643,8 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
         sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
         return nonPresentingExit();
     }
+    // An ordinary update can hide its own window after tick admission.
+    if (window && !window->isVisible() && !ctx.drawWhileHidden) return nonPresentingExit();
     // Reserve before notifying so redraw() from draw/afterFrame survives.
     // A failed draw/present keeps the original request for a later tick.
     struct RedrawReservation {
@@ -1662,7 +1666,6 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
         WindowCallbackTimeScope callbackTime;
         internal::currentWindowContext().coreEvents->draw.notify();
         if (currentWindowCloseRecorded()) {
-            sg_tc_mtl_cancel_drawables(ctx.swapchainTarget.ownerId);
             return nonPresentingExit();
         }
         if (presentation) admitted = presentation->present();
@@ -1673,6 +1676,9 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
             admitted = !ctx.swapchainTarget.binding.swapchain.invalid;
         }
     }
+    // Native presentation gates enforce hiding. Keep this check for frame
+    // accounting: draw/onRender hides preserve redraw demand and drawCount.
+    if (window && !window->isVisible() && !ctx.drawWhileHidden) return nonPresentingExit();
     if (!admitted || currentWindowCloseRecorded()) return nonPresentingExit();
     reservation.completed = true;
     ++ctx.drawCount;

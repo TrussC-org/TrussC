@@ -8,7 +8,7 @@
 #include <cstring>
 #include <string>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
-struct Settings { int width, height; bool pixelPerfect; bool highDpi = true, decorated=true, fullscreen=false; int swapInterval=1,sampleCount=1; std::string title="probe"; };
+struct Settings { int width, height; bool pixelPerfect; bool highDpi = true, decorated=true, fullscreen=false, visible=true; int swapInterval=1,sampleCount=1; std::string title="probe"; };
 struct Platform { static constexpr bool isDesktop() { return true; } };
 float getDisplayScaleFactor() { return 2; }
 namespace internal {

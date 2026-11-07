@@ -111,6 +111,7 @@ struct Window {
     struct { bool isMain = true; float dpiScale = 2; } ctx_;
     std::string title_;
     bool isOpen() const { return valid; }
+    bool isVisible() const { return isOpen(); }
     IVec2 control(internal::WindowControl, int = 0, int = 0, const std::string* = nullptr, internal::WindowGeometryCall = internal::WindowGeometryCall::WindowSize);
     void setSize(int, int);
 };

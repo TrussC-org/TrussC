@@ -54,7 +54,7 @@ static inline bool _sapp_tc_native_occluded(const _sapp_tc_native_window_t* w) {
 }
 
 static inline bool _sapp_tc_native_hidden(const _sapp_tc_native_window_t* w) {
-    return _sapp_tc_native_iconified(w) || _sapp_tc_native_occluded(w);
+    return w->desc.hidden || _sapp_tc_native_iconified(w) || _sapp_tc_native_occluded(w);
 }
 
 struct _sapp_tc_native_desc {
@@ -84,6 +84,7 @@ static inline sapp_window_desc _sapp_tc_normalize_main_window(const sapp_desc* d
     window._tc_pixel_height = d->_tc_pixel_height;
     window.sample_count = d->sample_count > 0 ? d->sample_count : 1;
     window.no_high_dpi = !d->high_dpi;
+    window.hidden = d->_tc_start_hidden;
     window.title = d->window_title ? d->window_title : "sokol";
     return window;
 }

@@ -24,7 +24,8 @@ assert send
 send_start = start + send.start()
 app_event = re.search(r'static (?:void|_sapp_tc_event_result) _sapp_tc_win32_app_event\(', native)
 assert app_event
-parts = [body(native[send_start:], send.group()), body(native[app_event.start():], app_event.group())]
+parts = [body(native, 'static inline void _sapp_tc_log('),
+         body(native[send_start:], send.group()), body(native[app_event.start():], app_event.group())]
 win = native[send_start:]
 parts += [body(win[:win.index('/*-- mouse cursor')], marker) for marker in (
     'static bool _sapp_tc_app_events_enabled(', 'static void _sapp_tc_main_event_tramp(')]
@@ -41,6 +42,7 @@ branches = proc[proc.index('        case WM_QUERYENDSESSION:'):proc.index('     
 code = r'''
 #include "sokol_app_tc.h"
 #include <cstdio>
+#include <cstdarg>
 #include <cstring>
 #include <string>
 #include <stdexcept>
@@ -50,7 +52,7 @@ using HWND=int; using UINT=unsigned; using WPARAM=unsigned long; using LPARAM=lo
 using LRESULT=long;
 #define CALLBACK
 constexpr int TRUE=1,FALSE=0,CP_UTF8=65001;
-enum { WM_QUERYENDSESSION=1,WM_ENDSESSION,WM_CLOSE,WM_OTHER };
+enum { WM_QUERYENDSESSION=1,WM_ENDSESSION,WM_CLOSE,WM_OTHER,WM_DROPFILES };
 struct _sapp_tc_window_t {
     unsigned win_id=17; bool constructing=false,ready=true,in_tick=false,is_main=true,close_requested=false;
     bool wake_on_input=false,input_delivered=false; bool (*events_enabled)()=nullptr;

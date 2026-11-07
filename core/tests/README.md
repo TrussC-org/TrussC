@@ -1172,3 +1172,45 @@ one shared deadline. Busy main-stack commits call no App exit and arm no watchdo
 workers alone retain idle veto behavior. `native-test.py` compiles the mac busy
 probe through `_exit` on Linux. The explicit `--mac-device` probe covers idle and
 busy-no-exit Apple events; real logout remains a supervised device pass.
+
+### Requested window visibility (#1262)
+
+`windowVisible` is an own-binary probe because it intercepts X11 map requests.
+Its console mode checks settings defaults/chaining, closed-handle visibility,
+and a Notice on every unsupported visibility call without X11.
+Run `windowVisible --display` on a desktop (Xvfb on Linux) to check hidden launch,
+hidden secondary creation, requested state, occlusion, continuing updates, stopped
+drawing, no quit when every window is hidden, and repeated show/hide. It starts
+borderless, changes decoration while hidden, and checks hidden bringToFront,
+including a Notice on every call directing the caller to setVisible(true).
+It hides from App::draw with synchronized updates, and from draw and onRender
+listeners with independent updates, checking that none of those frames completes. On X11 it also
+counts native swaps, including a hide from afterFrame immediately before native
+presentation, and checks that no map request occurs before first show or
+from hidden bringToFront. X11 map/unmap assertions poll for up to two seconds
+to allow WM processing. An EVENT_DRIVEN case requests one redraw before hiding,
+then checks that showing presents without another app redraw request. X11 also
+reads the shown window's new blue pixels, allows one post-map redraw after an
+early present, and accounts for two coalesced frames per visible size change. Its
+final-size check requires a matching completed present after the last
+ConfigureNotify, including same-size notifications, so a pre-hide frame cannot
+satisfy it. A same-update show/hide must converge to unmapped within 500 ms;
+the map completes before the queued withdrawal. The X11 visSeq cases run
+`H SH S H S`, `H S/H S H S` (hide on the next update), and ten consecutive-update
+toggles ending both visible and hidden. Each sequence polls through normal updates
+for up to two seconds and checks stable native map state against `isVisible()`
+and absence of IconicState in WM_STATE when present. UnmapNotify logging records
+whether withdrawal completion came from the real client event or a synthetic one.
+The native-gates seam also delivers MapNotify after the 500 ms operation timeout
+and requires convergence to hidden, including a repeated hide; its mutation
+removes late-map reconciliation. The nativeWindow probe checks requested hiding
+immediately, then allows two seconds of normal dispatch for native convergence.
+`--start-visible`
+checks visible launch followed by hiding; `--fullscreen` checks hidden fullscreen
+creation and repeated showing. Each display mode prints `windowVisible verdict:
+PASS` or `FAIL`, including from macOS cleanup before process termination.
+
+Device checks: run these modes on macOS, Windows, GNOME/XWayland and Pi X11/EGL.
+On macOS also check the last window's close button with quitOnClose on and off,
+Cmd+Q / app-menu Quit, and supervised logout. Hiding during a native fullscreen
+transition or a modal loop is outside this probe's ordinary-use coverage.

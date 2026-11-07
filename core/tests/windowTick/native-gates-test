@@ -166,7 +166,8 @@ mac_creation_admission = prefix(native, 'static _sapp_tc_window_t* _sapp_tc_mac_
     '    struct constructing_scope {', 'sokol_app_tc.h', extraction_markers)
 mac_constructor = mac_extract('static _sapp_tc_window_t* _sapp_tc_mac_create_window_ex(', (
     ('[window orderOut:nil]', 'order_out(window)'),
-    ('[window makeKeyAndOrderFront:nil]', 'show_window(window)'),))
+    ('[window makeKeyAndOrderFront:nil]', 'show_window(window)'),
+    ('[parent->window addChildWindow:window ordered:NSWindowAbove]', 'add_child(parent->window, window)'),))
 constructor_marker = '    struct constructing_scope {'
 extraction_markers.append(constructor_marker)
 mac_constructing_scope = body(mac_constructor, constructor_marker, 'sokol_app_tc.h') + ' constructing;\n'
@@ -229,14 +230,20 @@ using sapp_event_type = int;
 enum { SAPP_EVENTTYPE_INVALID=-1, SAPP_EVENTTYPE_SUSPENDED, SAPP_EVENTTYPE_RESUMED, SAPP_EVENTTYPE_ICONIFIED,
        SAPP_EVENTTYPE_RESTORED, SAPP_EVENTTYPE_RESIZED, SAPP_EVENTTYPE_FOCUSED, SAPP_EVENTTYPE_UNFOCUSED };
 struct SwapChain { HRESULT Present(UINT, UINT); };
+''' + extract('enum _sapp_tc_x11_visibility_op {') + r''';
 struct _sapp_tc_window_t {
-    bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false;
+    _sapp_tc_x11_visibility_op visibility_op=_SAPP_TC_X11_VISIBILITY_NONE;
+    double visibility_started=0;
+    bool native_visible=false;
+    bool iconified=false, occluded=false, draw_while_hidden=false, trust_hidden_signals=true, is_main=false, fullscreen=false;
+    bool fullscreen_on_map=false;
     bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, skip_present=false, cancel_tick=false;
     bool from_modal=false, frame_wait=false, credit_held=false, waitable_ready=true;
-    bool resize_pending=false, input_delivered=false, wake_on_input=false;
+    bool resize_pending=false, input_delivered=false, wake_on_input=false, last_tick_presented=false;
     bool close_recorded=false; unsigned close_recorded_frame=0;
     unsigned win_id=1, frame_count=0;
-    int drawable=1, swap_interval=1;
+    int drawable=1, swap_interval=1, xwin=7;
+    int fb_width=1600, fb_height=865;
     int requested_swap_interval=1, pacing_ticks=0;
     double earliest_next=0, last_present=0, frame_duration=0, refresh_period=.017;
     _sapp_tc_timing_t timing;
@@ -246,7 +253,8 @@ struct _sapp_tc_window_t {
         void* user_data=nullptr;
         void (*event_cb)(const sapp_event*,sapp_window,void*)=nullptr;
         void (*close_cb)(sapp_window,void*)=nullptr;
-        bool fullscreen=false; int swap_interval=0;
+        bool fullscreen=false,hidden=false; int swap_interval=0;
+        sapp_window parent{};
     } desc;
 };
 using Native = _sapp_tc_window_t;
@@ -313,7 +321,8 @@ void commitSessionEnd() { ++session_commits; }
 void shutdownRuntime() {}
 }
 constexpr unsigned NSWindowOcclusionStateVisible=1;
-struct NSWindow { unsigned occlusionState=1; bool miniaturized=false, inLiveResize=false; double backingScaleFactor=1; float screenRate=60; };
+struct NSWindow { unsigned occlusionState=1; bool miniaturized=false, inLiveResize=false; double backingScaleFactor=1; float screenRate=60; NSWindow* parent=nullptr; };
+void add_child(NSWindow* parent, NSWindow* child) { child->parent=parent; }
 struct CAFrameRateRange { float minimum,maximum,preferred; };
 CAFrameRateRange CAFrameRateRangeMake(float a,float b,float c) { return {a,b,c}; }
 struct CADisplayLink { double timestamp=10, targetTimestamp=10.017; CAFrameRateRange preferredFrameRateRange{}; };
@@ -343,6 +352,7 @@ struct Native : ::Native {
     CADisplayLink* link=nullptr;
     int frame_drawable=0;
     bool fallback_active=false, link_suspended=false, suspended_sent=false, draw_admitted=false;
+    bool explicit_hide_suspended=false;
     double last_tick_time=0;
     int callback_depth=0, win_width=640, win_height=480, fb_width=640, fb_height=480;
     bool close_requested=false, closed_pending=false, native_closed=false;
@@ -847,6 +857,33 @@ void run() {
             check("macOS untrusted input leaves stored observations alone", w.iconified && w.occluded);
             int old=acquired; _sapp_tc_mac_tick(&w,nil);
             check("macOS stale untrusted flags still admit drawable", acquired==old+1 && events.empty());
+            check("macOS OS-only opt-out clears native suspension bookkeeping", !w.suspended_sent);
+            // Continue the original stale-state case instead of resetting it.
+            w.desc.hidden=true; _sapp_tc_mac_observe(&w);
+            w.desc.hidden=false; _sapp_tc_mac_observe(&w);
+            check("macOS stale state then explicit hide/show has matching notifications",
+                  !w.suspended_sent && !w.explicit_hide_suspended &&
+                  events==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED,SAPP_EVENTTYPE_RESUMED});
+            reset(w,window,view,role);
+            window.occlusionState=0; _sapp_tc_mac_observe(&w);
+            w.trust_hidden_signals=false; _sapp_tc_mac_observe(&w);
+            check("macOS OS suspension then trust off clears without a resume",
+                  !w.suspended_sent && events==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED});
+            w.trust_hidden_signals=true; _sapp_tc_mac_observe(&w);
+            check("macOS re-enabling trust while occluded sends suspension again",
+                  w.suspended_sent && events==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED,SAPP_EVENTTYPE_SUSPENDED});
+            // A separate explicit hide must still deliver a matching recovery.
+            reset(w,window,view,role);
+            w.desc.hidden=true; _sapp_tc_mac_observe(&w);
+            w.trust_hidden_signals=false;
+            check("macOS explicit hide records suspension recovery",
+                  w.explicit_hide_suspended && events==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED});
+            w.desc.hidden=false; _sapp_tc_mac_observe(&w);
+            check("macOS explicit hide resumes exactly once after trust opt-out",
+                  !w.suspended_sent && !w.explicit_hide_suspended && events==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED,SAPP_EVENTTYPE_RESUMED});
+            _sapp_tc_mac_observe(&w);
+            check("macOS untrusted resume does not repeat",
+                  events==std::vector<int>{SAPP_EVENTTYPE_SUSPENDED,SAPP_EVENTTYPE_RESUMED});
         }
     }
     summary("macOS common tick / admission / visibility / sources", before, count);
@@ -1306,7 +1343,7 @@ struct { struct { bool quit_ordered=false, device_lost_notified=false;
 } app; } _sapp_tc;
 int consulted, updates, dimensions, tests, presents, resizes, resizesAtCallback;
 int probe_result, present_result;
-bool changed, resize_ok, skip_in_callback, cancel_in_callback, loss_in_callback, reenter;
+bool changed, resize_ok, skip_in_callback, cancel_in_callback, loss_in_callback, hide_in_callback, reenter;
 bool foreignActive, foreignBound;
 int deferredGeometry, preservedGeometry, nativeWidth, attachmentWidth, firstDrawWidth;
 bool callbacksActive() { return foreignActive; }
@@ -1349,6 +1386,7 @@ void callback(sapp_window h,void* user) {
     if (skip_in_callback) w->skip_present=true;
     if (cancel_in_callback) w->cancel_tick=true;
     if (loss_in_callback) _sapp_tc.app.device_lost_notified=true;
+    if (hide_in_callback) w->desc.hidden=true;
 }
 ''' + extract('static bool _sapp_tc_win32_window_due(') + extract('static void _sapp_tc_win32_observe_occlusion(') + extract('static void _sapp_tc_win32_swap(') + extract('static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {') + extract('static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {') + r'''
 constexpr int WM_SIZE=1, SIZE_MINIMIZED=1;
@@ -1364,7 +1402,7 @@ void reset(Native& w) {
     w=Native{}; target=&w; w.swap_chain=&swap; w.desc={callback,&w};
     _sapp_tc.app={}; consulted=updates=dimensions=tests=presents=resizes=0;
     probe_result=present_result=0; changed=false; resize_ok=true;
-    skip_in_callback=cancel_in_callback=loss_in_callback=reenter=false; events.clear(); callback_events.clear();
+    skip_in_callback=cancel_in_callback=loss_in_callback=hide_in_callback=reenter=false; events.clear(); callback_events.clear();
     foreignActive=foreignBound=false; deferredGeometry=preservedGeometry=0;
     nativeWidth=attachmentWidth=firstDrawWidth=40;
     _sapp_tc.app.desc._tc_callbacks_active=callbacksActive;
@@ -1372,6 +1410,13 @@ void reset(Native& w) {
 void run() {
     int before=failures, count=checks;
     Native w;
+    for (bool role : {false,true}) for (bool trust : {false,true}) for (bool allow : {false,true}) {
+        reset(w); w.is_main=role; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
+        hide_in_callback=true;
+        _sapp_tc_win32_tick(&w);
+        check("Win32 late explicit hide gates native present with drawWhileHidden override",
+              consulted==1 && w.desc.hidden && presents==int(allow));
+    }
     for (bool role : {false,true}) for (bool trust : {false,true})
     for (bool allow : {false,true}) for (bool iconic : {false,true}) for (bool obscured : {false,true}) {
         reset(w); w.is_main=role; w.win_id=role?1:2; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
@@ -1478,15 +1523,30 @@ HRESULT SwapChain::Present(UINT,UINT flags) {
     ++win::presents; return win::present_result;
 }
 namespace x11 {
+constexpr int SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=99, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED=100;
 Native* live = nullptr;
 Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? live : nullptr; }
-struct { double refresh_period=.017; int WM_STATE=1; struct { bool quit_ordered=false; } app; } _sapp_tc;
-int consulted, updates, acquired, presents, state, polls;
-bool changed=false, closeOnResize=false, closeOnTick=false, reenter=false, renewalOk=true;
+struct { double refresh_period=.017; int WM_STATE=1, display=2, screen=0, NET_WM_STATE=3, NET_WM_STATE_FULLSCREEN=4; struct { bool quit_ordered=false; } app; } _sapp_tc;
+int consulted, updates, acquired, presents, state, polls, withdrawals, fullscreenCalls, mapCalls;
+bool mapped=false, actualFullscreen=false;
+void XMapWindow(int,int) { ++mapCalls; mapped=true; }
+constexpr int IsUnmapped=0;
+struct XWindowAttributes { int map_state=0; };
+int XGetWindowAttributes(int,int,XWindowAttributes* attrs) { attrs->map_state=mapped?1:IsUnmapped; return 1; }
+void XFlush(int) {}
+void _sapp_tc_x11_send_event(int,int,long op,long,long,long,long) {
+    ++fullscreenCalls; actualFullscreen=op==1;
+}
+int XWithdrawWindow(int,int,int) { ++withdrawals; mapped=false; return 1; }
+''' + extract('static void _sapp_tc_x11_set_fullscreen(') + r'''
+bool changed=false, closeOnResize=false, closeOnTick=false, hideOnTick=false, reenter=false, renewalOk=true;
+bool eventDriven=false;
+int redrawPending=0;
 void _sapp_tc_x11_init_client() {} // admission covered by host-entry-test
 static void _sapp_tc_x11_tick(Native*);
 std::vector<int> events;
-double _sapp_tc_now() { return 10; }
+double now=10;
+double _sapp_tc_now() { return now; }
 void _sapp_tc_timing_update(_sapp_tc_timing_t*) {}
 struct _sapp_tc_x11_surface_scope {};
 void _sapp_tc_x11_pace(Native* w,double seconds) { w->earliest_next=10+seconds; }
@@ -1496,16 +1556,41 @@ void sapp_destroy_window(sapp_window) { live=nullptr; }
 bool _sapp_tc_x11_update_dimensions(Native*) { ++polls; return changed; }
 bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
 void _sapp_tc_x11_swap(Native*) { ++presents; }
-void _sapp_tc_x11_app_event(Native*,int type) { events.push_back(type); if (closeOnResize) live=nullptr; }
+void _sapp_tc_x11_app_event(Native*,int type) {
+    if (type==SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || type==SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED) {
+        redrawPending=std::max(redrawPending, type==SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED ? 2 : 1); return;
+    }
+    events.push_back(type); if (closeOnResize) live=nullptr;
+}
 int _sapp_tc_x11_get_window_state(Native*) { return state; }
 void callback(sapp_window,void* user) {
     ++consulted; auto* w=static_cast<Native*>(user);
     check("X11 callback runs inside native tick guard", w->in_tick);
     if (reenter) { reenter=false; _sapp_tc_x11_tick(w); }
     if (closeOnTick) live=nullptr;
+    if (hideOnTick) w->desc.hidden=true;
+    if (eventDriven) {
+        const bool drawn = !w->desc.hidden && redrawPending;
+        if (drawn) --redrawPending;
+        if (!drawn) w->skip_present=true;
+    }
     ++updates; // #997: every delivered tick updates, hidden or not
 }
-''' + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
+''' + extract('static void _sapp_tc_x11_sync_visibility(') + extract('extern "C" void sapp_tc_window_set_visible(') + extract('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {') + r'''
+void configure_notify(Native* w, int width, int height) {
+    struct { struct { int width, height; } xconfigure; } event{{width, height}};
+    auto* ev=&event;
+''' + extract('case ConfigureNotify: {').replace('case ConfigureNotify:', '').replace('            break;', '') + r'''
+}
+
+void map_notify(Native* w) {
+''' + extract('case MapNotify: {').replace('case MapNotify:', '').replace('            break;', '') + r'''
+}
+
+void unmap_notify(Native* w) {
+''' + extract('case UnmapNotify: {').replace('case UnmapNotify:', '').replace('            break;', '') + r'''
+}
+
 enum { PropertyNewValue=1, IconicState=1, NormalState=2,
        VisibilityUnobscured=0, VisibilityPartiallyObscured=1, VisibilityFullyObscured=2 };
 struct Event { struct { int state=PropertyNewValue, atom=1; } xproperty; struct { int state; } xvisibility; };
@@ -1526,6 +1611,192 @@ void run() {
         check("X11 failed renewal closes Window and ends backend without drawing",
               !live && _sapp_tc.app.quit_ordered && consulted==0 && acquired==0 && presents==0);
         changed=false; renewalOk=true; _sapp_tc.app.quit_ordered=false;
+    }
+    for (bool hidden : {false,true}) {
+        Native w; live=&w; w.desc={callback,&w}; w.desc.hidden=hidden;
+        eventDriven=true; changed=false; redrawPending=0; presents=0; events.clear();
+        configure_notify(nullptr,100,80);
+        configure_notify(&w,w.fb_width,w.fb_height);
+        check("X11 same-size configure does not request redraw", redrawPending==0);
+        for (int i=0; i<5; ++i) {
+            configure_notify(&w,100,80);
+            configure_notify(&w,w.fb_width,w.fb_height);
+        }
+        check("X11 transient configure coalesces two frames for requested-visible only",
+              redrawPending==(hidden?0:2) && events.empty() && !w.surface_resize_pending);
+        for (int i=0; i<7; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 transient between polls presents twice without public RESIZED",
+              presents==(hidden?0:2) && redrawPending==0 && events.empty() &&
+              w.fb_width==1600 && w.fb_height==865);
+        presents=0;
+        configure_notify(&w,w.fb_width,80);
+        check("X11 height-only configure requests resize redraw", redrawPending==(hidden?0:2));
+        eventDriven=false;
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true})
+    for (bool hidden : {false,true}) for (bool pending : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc={callback,&w}; w.desc.hidden=hidden;
+        eventDriven=true; redrawPending=false; presents=0; events.clear();
+        changed=!pending; w.surface_resize_pending=pending;
+        _sapp_tc_x11_tick(&w);
+        changed=false;
+        check("X11 EVENT_DRIVEN resize presents requested-visible content", presents==int(!hidden));
+        check("X11 resize asks for two frames and keeps public event", events==std::vector<int>{SAPP_EVENTTYPE_RESIZED} && redrawPending==int(!hidden));
+        _sapp_tc_x11_tick(&w);
+        check("X11 resize follow-up presents on the next tick", presents==2*int(!hidden) && !redrawPending);
+        for (int i=0; i<5; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 unchanged size does not cause redraw storm", presents==2*int(!hidden));
+        // Repeated interactive resizes replace the pending count rather than add.
+        presents=0; changed=true;
+        for (int i=0; i<5; ++i) _sapp_tc_x11_tick(&w);
+        changed=false;
+        for (int i=0; i<5; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 resize requests coalesce during interactive resize", presents==6*int(!hidden) && !redrawPending);
+        eventDriven=false;
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc.hidden=true; mapped=false; withdrawals=mapCalls=0; now=10;
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        check("X11 show/hide waits for map completion", mapCalls==1 && withdrawals==0 &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING && w.desc.hidden);
+        map_notify(&w);
+        check("X11 map completion issues latest hide once", withdrawals==1 &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_WITHDRAWING);
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        sapp_tc_window_set_visible({w.win_id},true);
+        check("X11 withdraw queues latest show without another native op", mapCalls==1 && withdrawals==1 && !w.desc.hidden);
+        unmap_notify(&w);
+        check("X11 unmap completion issues latest show once", mapCalls==2 &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
+        map_notify(&w);
+        check("X11 serialization converges visible", w.native_visible && !w.desc.hidden &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE);
+        // An ordinary WM minimize must not turn into an unrequested map.
+        mapped=false; unmap_notify(&w);
+        check("X11 unsolicited WM unmap stays unmapped", mapCalls==2 && !mapped && w.native_visible);
+        sapp_tc_window_set_visible({w.win_id},false);
+        check("X11 hide while minimized still withdraws from WM", withdrawals==2 &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_WITHDRAWING);
+        now=10.51; _sapp_tc_x11_sync_visibility(&w);
+        check("X11 already-unmapped withdrawal releases without an event", !w.native_visible &&
+              w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE);
+        // Reset counters for independent missing-acknowledgment cases.
+        withdrawals=1; mapCalls=2; now=10;
+        w.desc.hidden=true;
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        mapped=false; now=10.49;
+        _sapp_tc_x11_sync_visibility(&w);
+        check("X11 missing map acknowledgment retains gate before bound", w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
+        now=10.51; _sapp_tc_x11_sync_visibility(&w);
+        check("X11 missing map acknowledgment releases at bound and samples server", w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE && !w.native_visible && withdrawals==1);
+        sapp_tc_window_set_visible({w.win_id},true);
+        mapped=false; now=11.02; _sapp_tc_x11_sync_visibility(&w);
+        check("X11 stuck map retries latest visible request", mapCalls==5 && w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
+        map_notify(&w);
+        sapp_tc_window_set_visible({w.win_id},false);
+        sapp_tc_window_set_visible({w.win_id},true);
+        now=11.53; _sapp_tc_x11_sync_visibility(&w);
+        check("X11 missing unmap acknowledgment releases and issues latest show", mapCalls==6 && withdrawals==2 && w.visibility_op==_SAPP_TC_X11_VISIBILITY_MAPPING);
+        map_notify(&w);
+        // The last request can also cancel a queued hide entirely.
+        sapp_tc_window_set_visible({w.win_id},false); unmap_notify(&w);
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        sapp_tc_window_set_visible({w.win_id},true);
+        const int beforeWithdrawals=withdrawals;
+        map_notify(&w);
+        check("X11 latest visible cancels queued hide", withdrawals==beforeWithdrawals && w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE);
+        now=10;
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc.hidden=true; mapped=false; withdrawals=mapCalls=0; now=10;
+        sapp_tc_window_set_visible({w.win_id},true);
+        sapp_tc_window_set_visible({w.win_id},false);
+        mapped=false; now=10.65;
+        _sapp_tc_x11_sync_visibility(&w);
+        check("X11 expired map samples unmapped server with latest hide", !w.native_visible &&
+              w.desc.hidden && w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE && withdrawals==0);
+        mapped=true; map_notify(&w);
+        for (int turn=0; turn<20; ++turn) {
+            now+=0.1;
+            if (w.visibility_op!=_SAPP_TC_X11_VISIBILITY_NONE)
+                _sapp_tc_x11_sync_visibility(&w);
+        }
+        check("X11 late map after timeout converges hidden", !mapped && !w.native_visible &&
+              w.desc.hidden && w.visibility_op==_SAPP_TC_X11_VISIBILITY_NONE && withdrawals==1);
+        sapp_tc_window_set_visible({w.win_id},false);
+        check("X11 repeated hide after late map stays hidden", !mapped && !w.native_visible && withdrawals==1);
+        now=10;
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) for (bool cached : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.fullscreen=cached; actualFullscreen=!cached; fullscreenCalls=0;
+        redrawPending=false; events.clear();
+        sapp_tc_window_set_visible({w.win_id},true);
+        map_notify(&w);
+        check("X11 never-hidden WM remap preserves user fullscreen", actualFullscreen==!cached && fullscreenCalls==0);
+        check("X11 never-hidden WM remap still requests redraw only", redrawPending && events.empty());
+        sapp_tc_window_set_visible({w.win_id},false);
+        sapp_tc_window_set_visible({w.win_id},true); events.clear();
+        unmap_notify(&w);
+        map_notify(&w);
+        check("X11 hide/show restores cached ADD or REMOVE once", actualFullscreen==cached && fullscreenCalls==1 && !w.fullscreen_on_map);
+        actualFullscreen=!cached; redrawPending=false;
+        map_notify(&w);
+        check("X11 WM remap after hide/show preserves later user choice", actualFullscreen==!cached && fullscreenCalls==1 && redrawPending && events.empty());
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc={callback,&w}; w.desc.hidden=true;
+        w.visibility_op=_SAPP_TC_X11_VISIBILITY_MAPPING;
+        w.visibility_started=now;
+        mapped=true; withdrawals=fullscreenCalls=0; redrawPending=false; events.clear();
+        map_notify(&w);
+        check("X11 completed map applies latest hidden request", !mapped && withdrawals==1);
+        unmap_notify(&w);
+        check("X11 late hidden map has no redraw/fullscreen/visibility events", !redrawPending && fullscreenCalls==0 && events.empty());
+        w.fullscreen=true;
+        sapp_tc_window_set_visible({w.win_id},true); events.clear();
+        check("X11 explicit show arms fullscreen replay", w.fullscreen_on_map && mapped && !w.desc.hidden);
+        eventDriven=true; redrawPending=true; presents=0;
+        _sapp_tc_x11_tick(&w);
+        check("X11 early show consumes the pending redraw", presents==1 && !redrawPending);
+        mapped=true; map_notify(&w);
+        check("X11 explicit show MapNotify adds fullscreen once", redrawPending && fullscreenCalls==1 && actualFullscreen && !w.fullscreen_on_map);
+        map_notify(&w);
+        check("X11 repeated map does not repeat explicit show fullscreen", fullscreenCalls==1);
+        for (int i=0; i<4; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 mapped EVENT_DRIVEN window presents fresh content once", presents==2 && !redrawPending && !w.skip_present);
+        eventDriven=false; presents=0; map_notify(&w);
+        for (int i=0; i<3; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 CONTINUOUS mapping keeps ordinary tick pacing", presents==3);
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust;
+        w.desc={callback,&w}; w.desc.hidden=true;
+        eventDriven=redrawPending=true; presents=0;
+        _sapp_tc_x11_tick(&w);
+        check("X11 completed hidden tick consumes skip and preserves pending redraw",
+              !w.skip_present && redrawPending && presents==0 && w.frame_count==1);
+        w.desc.hidden=false;
+        for (int i=0; i<3; ++i) _sapp_tc_x11_tick(&w);
+        check("X11 EVENT_DRIVEN show presents pending redraw exactly once",
+              !redrawPending && presents==1 && w.frame_count==4);
+        eventDriven=false;
+    }
+    for (bool role : {false,true}) for (bool trust : {false,true}) for (bool allow : {false,true}) {
+        Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
+        w.desc={callback,&w}; consulted=presents=0; hideOnTick=true;
+        _sapp_tc_x11_tick(&w);
+        check("X11 late explicit hide gates native present with drawWhileHidden override",
+              consulted==1 && w.desc.hidden && presents==int(allow));
+        hideOnTick=false;
     }
 
     for (bool role : {false,true}) for (bool trust : {false,true})
@@ -1624,6 +1895,42 @@ if '--mutations' in sys.argv[3:]:
     admission = 'const bool admitted = w->draw_while_hidden || !_sapp_tc_native_hidden(w);'
     scope = '_sapp_tc_mac_callback_scope scope(w);'
     mutants = {
+        'x11-unconditional-map-fullscreen': change('case MapNotify: {',
+            'if (w->fullscreen_on_map)', 'if (true)'),
+        'x11-repeat-map-fullscreen': change('case MapNotify: {',
+            'w->fullscreen_on_map = false;', ''),
+        'x11-no-show-fullscreen': change('extern "C" void sapp_tc_window_set_visible(',
+            'w->fullscreen_on_map = true;', ''),
+        'x11-no-inflight-gate': change('static void _sapp_tc_x11_sync_visibility(',
+            'if (_sapp_tc_now() - w->visibility_started < 0.5) return;', ''),
+        'x11-no-map-completion-reissue': change('case MapNotify: {',
+            '_sapp_tc_x11_sync_visibility(w);', '', count=2),
+        'x11-no-late-hidden-map-reconcile': change('case MapNotify: {',
+            'else if (w->desc.hidden)', 'else if (false)'),
+        'x11-no-unmap-completion-reissue': change('case UnmapNotify: {',
+            '_sapp_tc_x11_sync_visibility(w);', ''),
+        'x11-no-visibility-timeout': change('static void _sapp_tc_x11_sync_visibility(',
+            'if (_sapp_tc_now() - w->visibility_started < 0.5) return;', 'return;'),
+        'x11-no-transient-configure-redraw': change('case ConfigureNotify: {',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);', ''),
+        'x11-hidden-configure-redraw': change('case ConfigureNotify: {',
+            'w && !w->desc.hidden &&', 'w &&'),
+        'x11-no-resize-redraw': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);', ''),
+        'x11-resize-only-one-frame': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED);',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);'),
+        'x11-hidden-resize-redraw': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
+            'if (!w->desc.hidden) {', 'if (true) {'),
+        'x11-no-map-redraw': change('case MapNotify: {',
+            '_sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED);', ''),
+        'x11-retain-hidden-skip': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
+            'w->skip_present = false; // Consume the one-shot at the completed hidden tick boundary.', ''),
+        'win-no-late-hide-gate': change(win, '&& (w->draw_while_hidden || !w->desc.hidden)', ''),
+        'x11-no-late-hide-gate': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
+            '&& (w->draw_while_hidden || !w->desc.hidden)', ''),
+        'mac-retain-os-only-suspension': change('static void _sapp_tc_mac_update_suspension(',
+            'w->suspended_sent = false;', ''),
         'win-modal-foreign-pass': change('static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {',
             'if (_sapp_tc.app.desc._tc_callbacks_active && _sapp_tc.app.desc._tc_callbacks_active()) return;', ''),
         'mac-ignore-global-callback': change(blocked, '_sapp_tc.callbacks_active > 0 || ', ''),
@@ -1879,3 +2186,4 @@ PY
 
 python3 "$root/core/tests/windowTick/native-quit-test.py"
 python3 "$root/core/tests/windowTick/creation-settings-test.py"
+python3 "$root/core/tests/windowTick/x11-position-test.py" "$@"

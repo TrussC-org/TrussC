@@ -57,12 +57,13 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Rect stored_window_rect; LONG stored_style=0,stored_ex_style=0;
     float window_scale=1,mouse_scale=1;
     View* view=nullptr; Layer* layer=nullptr; Link* link=nullptr; Delegate* delegate=nullptr;
-    bool initialized=false,bound=false,source=false,shown=false,key=false,nativeFullscreen=false;
+    bool initialized=false,bound=false,source=false,shown=false,key=false,nativeFullscreen=false,link_suspended=false;
     int applied_interval=-1;
     SwapChain chain; SwapChain* swap_chain=&chain;
     bool from_modal=false,credit_held=false;
     int frame_wait=1;
 };
+void _sapp_tc_mac_select_source(_sapp_tc_window_t*) {}
 DeviceContext deviceContext;
 struct {
     unsigned next_id=0; _sapp_tc_window_t* windows[32]{};
@@ -343,6 +344,17 @@ int main() {
     legacy.swap_interval=-2;
     legacyWindow=_sapp_tc_lookup(sapp_create_window(&legacy));
     check("X11 negative interval normalizes to one",legacyWindow&&legacyWindow->requested_swap_interval==1);
+#endif
+#if defined(TEST_WIN)
+    if (legacyWindow) {
+        legacyWindow->desc.hidden = true;
+        _sapp_tc_win32_set_fullscreen(legacyWindow,true,SWP_HIDEWINDOW);
+        check("Win32 hidden fullscreen style stays hidden", !(legacyWindow->hwnd->style & WS_VISIBLE));
+        // A window can be hidden after its visible windowed style was saved.
+        legacyWindow->stored_style |= WS_VISIBLE;
+        _sapp_tc_win32_set_fullscreen(legacyWindow,false,SWP_HIDEWINDOW);
+        check("Win32 hidden restored style stays hidden", !(legacyWindow->hwnd->style & WS_VISIBLE));
+    }
 #endif
     if(legacyWindow) dispose(legacyWindow);
     std::printf("creation-settings: %d checks, %d failures\n",checks,failures);

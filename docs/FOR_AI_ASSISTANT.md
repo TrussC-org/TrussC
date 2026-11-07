@@ -4788,8 +4788,9 @@ const std::string & Window::getTitle() const  // Returns the title stored for th
 int Window::getWidth() const  // Returns this window's content width.
 bool Window::isFocused() const  // Returns whether this window has keyboard focus, as last reported by the operating system.
 bool Window::isFullscreen() const  // Returns whether fullscreen currently blocks this window's size and position requests.
-bool Window::isOccluded() const  // Returns whether this window is minimized or fully hidden according to trusted operating system observations.
+bool Window::isOccluded() const  // Returns whether this window is explicitly hidden, minimized or fully occluded.
 bool Window::isOpen() const  // Returns whether this window is open.
+bool Window::isVisible() const  // Returns this open window's requested visibility.
 void Window::setApp(Args &&... args)  // Creates a new App of the given class and puts it in this window.
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
 void Window::setFps(float fps)  // Sets this window's target frame rate.
@@ -4799,6 +4800,7 @@ void Window::setPosition(int x, int y) [macos,windows,linux]  // Move this windo
 void Window::setQuitOnClose(bool enabled)  // Sets whether closing this window also quits the process.
 void Window::setSize(int width, int height)  // Resizes this window's content area.
 void Window::setTitle(const std::string & title)  // Sets this window's title.
+void Window::setVisible(bool visible)  // Hides or shows this window without closing it.
 void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 ```
 
@@ -4818,6 +4820,7 @@ WindowSettings & WindowSettings::setShaderPoolSize(int count)  // Sets the start
 WindowSettings & WindowSettings::setSize(int w, int h)  // Sets the initial window dimensions.
 WindowSettings & WindowSettings::setSwapInterval(int interval)  // Sets the requested VSync presentation interval.
 WindowSettings & WindowSettings::setTitle(const std::string & t)  // Sets the initial window title.
+WindowSettings & WindowSettings::setVisible(bool enabled)  // Sets whether a window starts visible.
 ```
 
 ### Xml — Wraps a pugixml document for loading, saving, and querying XML.

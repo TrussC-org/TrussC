@@ -102,7 +102,7 @@ void run() {
 x11=r'''
 namespace x11 {
 struct sapp_window { unsigned id; };
-struct _sapp_tc_window_t { uint32_t win_id=27; bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, close_requested=false,input_delivered=false; int drawable=1,swap_interval=1; double earliest_next=100,last_present=0; struct {double last=0;}timing; };
+struct _sapp_tc_window_t { int visibility_op=1; uint32_t win_id=27; bool constructing=false,surface_resize_pending=false,ready=true, in_tick=false, close_requested=false,input_delivered=false; int drawable=1,swap_interval=1; double earliest_next=100,last_present=0; struct {double last=0;}timing; };
 struct Descriptor { void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=nullptr; void* user_data=nullptr;
     void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr;
     void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; };
@@ -110,7 +110,9 @@ _sapp_tc_window_t window;
 struct { int display=0; double refresh_period=1.0/60.0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&window};
     struct { bool init_called=false,quit_ordered=false,quit_requested=false; Descriptor desc; _sapp_tc_window_t* main=&window; } app; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==window.win_id ? &window : nullptr; }
-int before=0,after=0,init=0,ticks=0,clockCalls=0;
+int before=0,after=0,init=0,ticks=0,clockCalls=0,visibilitySync=0;
+constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0;
+void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t* w) { ++visibilitySync; w->visibility_op=_SAPP_TC_X11_VISIBILITY_NONE; }
 enum { noContext, idleContext, windowContext };
 int currentContext=noContext, switches=0;
 void* eglGetCurrentContext() { return reinterpret_cast<void*>(uintptr_t(currentContext)); }
@@ -146,6 +148,7 @@ void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
 void run() {
     _sapp_tc.app.desc={initialize,nullptr,nullptr,begin,end};
     _sapp_tc_x11_run_loop();
+    check("X11 idle turns service pending visibility without a due tick",visibilitySync==1);
     check("X11 idle turns do not initialize before the first due tick",init==0);
     check("X11 services once per native turn with no due window",before==3 && after==3 && ticks==0);
 }

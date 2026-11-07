@@ -29,6 +29,7 @@ def generate(source):
     code = r'''
 namespace nativeFixture {
 struct NativeRecord {
+    sapp_window_desc desc{};
     tcCoreTest::InjectedWindow& producer;
     unsigned win_id;
     bool iconified=false,occluded=false,trust_hidden_signals=true,draw_while_hidden=false,is_main=false;
@@ -47,7 +48,7 @@ constexpr unsigned NSWindowOcclusionStateVisible=1;
 struct NSWindow {unsigned occlusionState=1;bool miniaturized=false;};
 struct Record:NativeRecord {
     using NativeRecord::NativeRecord;
-    NSWindow* window=nullptr;bool link_suspended=false,suspended_sent=false;
+    NSWindow* window=nullptr;bool link_suspended=false,suspended_sent=false,explicit_hide_suspended=false;
 };
 using _sapp_tc_window_t=Record;
 Record* live=nullptr;

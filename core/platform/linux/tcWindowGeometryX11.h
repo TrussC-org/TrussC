@@ -55,11 +55,17 @@ inline IVec2 x11FramePosition(Display* dpy, ::Window window) {
     return {x, y};
 }
 
-inline void x11PinMoveGravity(Display* dpy, ::Window window) {
+inline void x11PinMoveGravity(Display* dpy, ::Window window, bool move, int x, int y) {
     XSizeHints hints{};
     long supplied = 0;
     if (!XGetWMNormalHints(dpy, window, &hints, &supplied)) hints = XSizeHints{};
-    if (hints.win_gravity == NorthWestGravity && (hints.flags & PWinGravity)) return;
+    if (!move && hints.win_gravity == NorthWestGravity && (hints.flags & PWinGravity)) return;
+    if (move) {
+        // A withdrawn window is placed again by the WM on its next map.
+        hints.flags |= USPosition | PPosition;
+        hints.x = x;
+        hints.y = y;
+    }
     hints.flags |= PWinGravity;
     hints.win_gravity = NorthWestGravity;
     XSetWMNormalHints(dpy, window, &hints);
@@ -97,7 +103,7 @@ inline void x11Geometry(Display* dpy, ::Window window, X11GeometryState& request
     }
     // Pin the top-left on the first resize too: CenterGravity rounds odd
     // deltas and can leave Mutter's content size one pixel off indefinitely.
-    x11PinMoveGravity(dpy, window);
+    x11PinMoveGravity(dpy, window, move, x, y);
     if (!move) {
         // Clear auto-maximize even before the WM publishes its state.
         x11State(dpy, window, false, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");

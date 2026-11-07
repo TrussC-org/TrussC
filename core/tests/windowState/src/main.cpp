@@ -88,6 +88,16 @@ void exercise(Window& w, uint32_t id) {
         (void)w.isOccluded(); (void)w.isOccluded();
         check("getter has no native side effects", n.queries == queries);
     }
+    for (bool trust : {false, true}) {
+        n.metadata.trust_hidden_signals = trust;
+        n.metadata.iconified = n.metadata.occluded = false;
+        n.metadata.hidden = true;
+        internal::refreshWindowMetadata(w);
+        check("explicit hiding overrides OS signal trust", !w.isVisible() && w.isOccluded() && trussc::internal::WindowRequestAccess::context(w).suspended);
+        n.metadata.hidden = false;
+        internal::refreshWindowMetadata(w);
+        check("requested show is independent of OS occlusion", w.isVisible() && !w.isOccluded());
+    }
     n.metadata.fb_width = n.metadata.fb_height = 0; n.metadata.drawable_available = false;
     internal::refreshWindowMetadata(w); internal::syncWindowAppSize(w);
     check("minimized zeros retain last valid size", trussc::internal::WindowRequestAccess::context(w).fbWidth == 1503 && trussc::internal::WindowRequestAccess::context(w).fbHeight == 999 && app->sizes == 1);

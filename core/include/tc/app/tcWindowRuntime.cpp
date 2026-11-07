@@ -19,6 +19,25 @@ Window::Window()
     internal::WindowRequestAccess::prepareInitialBindings(*this);
 }
 
+void Window::setVisible(bool visible) {
+    if (!isOpen()) return;
+    if constexpr (!internal::supportsSecondaryWindows()) {
+        logNotice("Window") << "setVisible(): unsupported on this platform";
+        return;
+    }
+#if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+    if (!sapp_x11_get_display()) {
+        logNotice("Window") << "setVisible(): unsupported without X11";
+        return;
+    }
+#endif
+    sapp_tc_window_set_visible(binding_.handle, visible);
+    internal::refreshWindowMetadata(*this);
+}
+bool Window::isVisible() const {
+    return isOpen() && !binding_.metadata.hidden;
+}
+
 namespace internal {
 namespace {
 void processQueues();
@@ -992,6 +1011,7 @@ void publishWindowMetadata(Window& window, const sapp_tc_window_metadata& metada
     auto& b = WindowRequestAccess::binding(window);
     auto& ctx = WindowRequestAccess::context(window);
     b.metadata = metadata;
+    if (metadata.hidden && b.lastDeliveredHidden) b.explicitHideSuspended = true;
     // Minimized zero extents describe availability, not a new App coordinate size.
     if (metadata.fb_width > 0 && metadata.fb_height > 0 &&
         std::isfinite(metadata.dpi_scale) && metadata.dpi_scale > 0) {
@@ -1004,7 +1024,7 @@ void publishWindowMetadata(Window& window, const sapp_tc_window_metadata& metada
         ctx.swapchainTarget.depthFormat = pixelFormat(metadata.depth_format);
         ctx.swapchainTarget.sampleCount = metadata.sample_count;
     }
-    const bool hidden = b.bound && metadata.trust_hidden_signals && (metadata.iconified || metadata.occluded);
+    const bool hidden = b.bound && (metadata.hidden || (metadata.trust_hidden_signals && (metadata.iconified || metadata.occluded)));
     if (ctx.suspended != hidden) ++b.visibilityRevision;
     ctx.suspended = hidden;
 }
@@ -1024,7 +1044,7 @@ bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations
         !std::isfinite(metadata.dpi_scale) || metadata.dpi_scale <= 0) return false;
     auto& b = WindowRequestAccess::binding(window);
     if (b.handle.id != handle.id) {
-        b.lastDeliveredHidden = false; b.visibilityReady = false;
+        b.lastDeliveredHidden = false; b.explicitHideSuspended = false; b.visibilityReady = false;
         WindowRequestAccess::context(window).pointerValid = false; WindowRequestAccess::context(window).touchMapper.reset();
     }
     b.handle = handle; b.operations = &operations; b.user = user; b.bound = true;
@@ -1252,7 +1272,9 @@ void deliverPendingWindowVisibilityAtReadyEntry(Window& window) {
     auto& b = WindowRequestAccess::binding(window);
     if constexpr (supportsSecondaryWindows()) { if (b.visibilityReady) return; }
     b.visibilityReady = true;
-    if (!b.metadata.trust_hidden_signals) { b.lastDeliveredHidden = false; return; }
+    if (!b.metadata.trust_hidden_signals && !b.metadata.hidden && !b.explicitHideSuspended) {
+        b.lastDeliveredHidden = false; return;
+    }
     if (b.lastDeliveredHidden == window.isOccluded()) return;
     sapp_event event{};
     event.type = window.isOccluded() ? SAPP_EVENTTYPE_SUSPENDED : SAPP_EVENTTYPE_RESUMED;
@@ -1331,6 +1353,8 @@ WindowEntryScope::~WindowEntryScope() noexcept { leave(); }
             case SAPP_EVENTTYPE_QUIT_REQUESTED:    return "the exitRequested event";
             case SAPP_EVENTTYPE_INVALID:
             case SAPP_EVENTTYPE_CHAR:
+            case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
+            case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_MOUSE_LEAVE:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
@@ -1371,7 +1395,7 @@ enum class VisibilityDelivery { Drop, RawOnly, RawThenTyped };
 VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_type type) {
     if (type != SAPP_EVENTTYPE_SUSPENDED && type != SAPP_EVENTTYPE_RESUMED) return VisibilityDelivery::RawOnly;
     auto& binding = WindowRequestAccess::binding(window);
-    if (!binding.metadata.trust_hidden_signals) {
+    if (!binding.metadata.trust_hidden_signals && !binding.metadata.hidden && !binding.explicitHideSuspended) {
         binding.lastDeliveredHidden = false; binding.visibilityReady = true;
         return supportsSecondaryWindows() ? VisibilityDelivery::Drop : VisibilityDelivery::RawOnly;
     }
@@ -1385,10 +1409,17 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
         return supportsSecondaryWindows() ? VisibilityDelivery::Drop : VisibilityDelivery::RawOnly;
     // Commit the notification attempt before raw listeners can reenter or throw.
     binding.lastDeliveredHidden = hidden;
+    binding.explicitHideSuspended = hidden && (binding.metadata.hidden || binding.explicitHideSuspended);
     return VisibilityDelivery::RawThenTyped;
 }
     void convertWindowEvent(const sapp_event* ev, Window& window) {
         auto& ctx = WindowRequestAccess::context(window);
+        // Native mapping or resizing invalidates previously presented content.
+        if (ev->type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || ev->type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED) {
+            const int count = ev->type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED ? 2 : 1;
+            ctx.loop.redrawCount = std::max(ctx.loop.redrawCount, count);
+            return;
+        }
         const void* pressOwner = (ev->type == SAPP_EVENTTYPE_MOUSE_DOWN || ev->type == SAPP_EVENTTYPE_MOUSE_UP)
             ? std::exchange(ctx.pendingMousePressOwner, nullptr) : nullptr;
         const bool hidden = window.isOccluded();
@@ -1799,6 +1830,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             // These events have no typed TrussC input counterpart.
             case SAPP_EVENTTYPE_INVALID:
             case SAPP_EVENTTYPE_CHAR:
+            case SAPP_EVENTTYPE_TC_REDRAW_REQUESTED:
+            case SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED:
             case SAPP_EVENTTYPE_ICONIFIED:
             case SAPP_EVENTTYPE_RESTORED:
             case SAPP_EVENTTYPE_SUSPENDED:

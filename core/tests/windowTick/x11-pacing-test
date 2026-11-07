@@ -37,20 +37,20 @@ struct sapp_event { int type=0; };
 QUIT_RESULT
 struct _sapp_tc_window_t {
     bool is_main=false, ready=true, constructing=false, surface_resize_pending=false, in_tick=false, close_requested=false, input_delivered=false;
-    int drawable=1, frame_count=0, swap_interval=0, win_id=1;
+    int drawable=1, frame_count=0, swap_interval=0, win_id=1, visibility_op=0;
     int requested_swap_interval=1, pacing_ticks=0;
     bool draw_while_hidden=true, skip_present=false;
     double earliest_next=0, frame_duration=0, last_present=0;
     bool last_tick_presented=false;
     struct { double smooth_dt=1.0/62.0, last=0; } timing;
-    struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; } desc;
+    struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; bool hidden=false; } desc;
 };
 struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; } desc; bool init_called=true, quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
 struct { App app; int display=0; size_t window_slots=2; double refresh_period=1.0/62.0;
     _sapp_tc_window_t* windows[2]; } _sapp_tc;
 struct XEvent {};
 struct pollfd { int fd, events, revents; };
-constexpr int POLLIN=1, SAPP_EVENTTYPE_QUIT_REQUESTED=1, SAPP_EVENTTYPE_RESIZED=2;
+constexpr int POLLIN=1, SAPP_EVENTTYPE_QUIT_REQUESTED=1, SAPP_EVENTTYPE_RESIZED=2, SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=3, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED=4;
 static double clockValue=10, period=1.0/62.0, tail=0;
 static int limit=620;
 static bool queued=false, nonblocking=false, hideMain=false, iconMain=false, hideAfterSecondary=false;
@@ -83,6 +83,8 @@ int ConnectionNumber(int) { return 0; }
 int poll(pollfd*, int, int ms) { clockValue+=ms*.001; return 0; }
 void _sapp_tc_x11_wait_until(double deadline) { clockValue=deadline; }
 void _sapp_tc_x11_process_event(XEvent*) {}
+constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0;
+void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,int) {}
 RUNTIME_QUIT_HELPER
