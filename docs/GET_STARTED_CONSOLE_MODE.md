@@ -33,7 +33,7 @@ This installs compilers, CMake, and the development libraries needed to build Tr
 
 ## 2. Building and Running Headless Apps
 
-Headless apps run without any display server — no window, no GPU context. The `draw()` callback is **never called**; only `setup()` and `update()` run.
+Headless apps run without any display server — no window, no GPU context. The `draw()` callback is **never called**; `setup()` and the update tree run, followed by `exit()` and child-first `cleanup()` when the App ends.
 
 ```bash
 # Build a headless example
@@ -63,12 +63,11 @@ You can adjust the update rate:
 ```cpp
 // Lower rate for a network server that doesn't need 60 Hz
 tc::HeadlessSettings().setFps(10)    // 10 Hz — saves CPU
-
-// Event-driven: update only when explicitly triggered
-tc::HeadlessSettings().setFps(tc::EVENT_DRIVEN)
 ```
 
-With `EVENT_DRIVEN` (0 Hz), `update()` is not called automatically — use timers, network callbacks, or `redraw()` to trigger processing manually.
+Use a finite positive rate; other values warn at startup and run no updates. `redraw()` does not schedule headless work.
+
+Every step runs the node tree, including children, Mods, node timers and removal of destroyed children. Timers advance through these updates; they do not wake a separate event-driven loop. A timer created during a fixed step starts counting with the next step. Catch-up is bounded by `getMaxUpdateSteps()` (default 10), with excess time dropped. Quit requests are checked between steps. Drawing and hover updates are window-only.
 
 ### Use cases
 

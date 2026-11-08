@@ -105,7 +105,7 @@ void completeAppConstruction(App&) noexcept;
 std::shared_ptr<App> adoptConstructedApp(App*, void (*destroy)(App*) = nullptr);
 std::shared_ptr<AppOwner> appOwner(const App&) noexcept;
 void deliverAppExit(App&);
-void endAppAttachment(const std::shared_ptr<App>&, WindowContext&, bool virtualOnly = false) noexcept;
+void endAppAttachment(const std::shared_ptr<App>&, WindowContext&) noexcept;
 
 // Retain attribution for callbacks held outside Event (tools, dialogs, providers).
 template<class R, class... Args>

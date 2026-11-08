@@ -198,7 +198,6 @@ details.en = '''
 - You never create an App yourself with `new` or `make_shared`. TrussC creates it through `runApp<T>()`, `runHeadlessApp<T>()` or `Window::setApp<T>(args...)`, and each call creates a new App. How an App ends is described in `App::exit`.
 - Do not put another App inside an App, as a member variable or as an extra base class; `setApp<T>` refuses such a class and logs an error.
 - Hot reload (`TC_HOT_RELOAD`) creates a fresh App on every reload, so the App's state is reset.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (runHeadlessApp runs only App::update(), not the node tree).
 '''
 details.ja = '''
 - 自分の tcApp を `App` から継承して作り、必要な関数をオーバーライドします。`main()` は `TC_RUN_APP(tcApp, settings)` を返します（`runApp` を参照してください）。
@@ -212,7 +211,6 @@ details.ja = '''
 - App を `new` や `make_shared` で自分で作ることはありません。`runApp<T>()`、`runHeadlessApp<T>()`、`Window::setApp<T>(args...)` を通じて TrussC が作り、呼ぶたびに新しい App が作られます。App の終わり方は `App::exit` で説明しています。
 - App の中に別の App を、メンバー変数や追加の基底クラスとして入れないでください。そのようなクラスは `setApp<T>` が受け付けず、エラーを記録します。
 - ホットリロード（`TC_HOT_RELOAD`）では、リロードのたびに新しい App が作られるため、App の状態はリセットされます。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（runHeadlessApp は App::update() だけを呼び、ノードツリーは更新しない）。
 '''
 details.ko = '''
 - 자신의 tcApp을 `App`에서 상속해 만들고 필요한 함수를 오버라이드합니다. `main()`은 `TC_RUN_APP(tcApp, settings)`를 반환합니다(`runApp` 참조).
@@ -226,7 +224,6 @@ details.ko = '''
 - App을 `new`나 `make_shared`로 직접 만들지 않습니다. `runApp<T>()`, `runHeadlessApp<T>()`, `Window::setApp<T>(args...)`를 통해 TrussC가 만들며, 호출할 때마다 새 App이 만들어집니다. App이 끝나는 방식은 `App::exit`에서 설명합니다.
 - App 안에 다른 App을 멤버 변수나 추가 기본 클래스로 넣지 마세요. 그런 클래스는 `setApp<T>`가 받아들이지 않고 오류를 기록합니다.
 - 핫 리로드(`TC_HOT_RELOAD`)에서는 리로드할 때마다 새 App이 만들어지므로 App 상태가 초기화됩니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(runHeadlessApp은 App::update()만 호출하고 노드 트리는 갱신하지 않음).
 '''
 related = ["runApp", "runHeadlessApp", "Node::setup", "App::exit", "App::mousePressed", "App::audioOut", "App::windowResized", "App::setSize", "App::getWindow", "Window::setApp", "RectNode", "events", "getRootNode", "WindowSettings"]
 snippet = '''
@@ -384,7 +381,7 @@ details.en = '''
 - Inside `exit()` and `cleanup()`, `getWindow()` returns `nullptr`, because the App has already been taken off its window.
 - It cannot cancel anything. To ask before the process quits, use `events().exitRequested`; to ask before the window closes, use `events().closeRequested`.
 - **Do not call `exitApp()` here to quit when the window closes.** This function also runs on replacement, removal and hot reload, and `exitApp()` does nothing inside it. Call `getWindow()->setQuitOnClose(true)` in `setup()` instead.
-- After `exit()`, `cleanup()` runs on the child nodes first and then on the App. In a headless App only the App's `cleanup()` runs.
+- After `exit()`, `cleanup()` runs on the child nodes first and then on the App. This order also applies to headless Apps.
 - If `exit()` or `cleanup()` throws, the rest of the shutdown and the other Apps still finish. A forced kill or a crash skips these functions.
 - At a session end (the user logs out, restarts or shuts down), what happens depends on whether App code is running on the main thread at that moment. If none is running, the normal ending runs: `exit()` for every App, starting from the most recently attached one, then audio detach and `cleanup()`. All of it shares one time limit, 3 seconds by default (see `Runtime::setLogoutTimeout`), so keep `exit()` short and save only what you need. If App code, or TrussC code serving it, is on the main thread's stack (for example inside `update()`, or in a modal dialog opened from App code), the OS ends the process, and neither `exit()`, `cleanup()` nor any exit event is called. Work on other threads does not count as running App code.
 - This applies on Windows and macOS. Linux has no receiver for the session end. If the OS ends the process without telling it, `exit()` is not called.
@@ -396,7 +393,7 @@ details.ja = '''
 - `exit()` と `cleanup()` の中では、App はすでにウィンドウから外されているため、`getWindow()` は `nullptr` を返します。
 - ここで終了を取り消すことはできません。プロセスの終了前に確認するには `events().exitRequested` を、ウィンドウを閉じる前に確認するには `events().closeRequested` を使ってください。
 - **ウィンドウを閉じたら終了させる目的で、ここに `exitApp()` を書かないでください。** この関数は置き換えや取り外し、ホットリロードでも呼ばれますし、この中では `exitApp()` は何もしません。代わりに `setup()` で `getWindow()->setQuitOnClose(true)` を呼んでください。
-- `exit()` のあと、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App では App の `cleanup()` だけが呼ばれます。
+- `exit()` のあと、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App でも同じ順番です。
 - `exit()` や `cleanup()` が例外を投げても、残りの終了処理とほかの App の終了は最後まで行われます。強制終了やクラッシュのときは呼ばれません。
 - セッション終了（ログアウト、再起動、シャットダウン）のときの動作は、その瞬間にメインスレッドで App のコードが実行中かどうかで変わります。実行中でなければ通常の終了処理が行われ、最後にアタッチされた App から順に、すべての App で `exit()` が呼ばれ、オーディオの切り離しと `cleanup()` が続きます。全体で 1 つの制限時間（既定値 3 秒。`Runtime::setLogoutTimeout` を参照）を共有するため、`exit()` は必要なものを保存するだけにして短く済ませてください。App のコードや、それを呼んでいる TrussC のコードがメインスレッドで実行中（`update()` の途中や、App のコードから開いたモーダルダイアログの最中など）なら、OS がプロセスを終了させ、`exit()`・`cleanup()`・終了のイベントはどれも呼ばれません。ほかのスレッドの処理は、App のコードの実行中には数えません。
 - これは Windows と macOS での動作です。Linux にはセッション終了を受け取る仕組みがありません。OS がプロセスに知らせずに終了させた場合、`exit()` は呼ばれません。
@@ -408,7 +405,7 @@ details.ko = '''
 - `exit()`와 `cleanup()` 안에서는 App이 이미 창에서 분리되었으므로 `getWindow()`가 `nullptr`를 반환합니다.
 - 여기서 종료를 취소할 수는 없습니다. 프로세스 종료 전에 확인하려면 `events().exitRequested`를, 창을 닫기 전에 확인하려면 `events().closeRequested`를 사용하세요.
 - **창을 닫으면 종료되게 하려는 목적으로 여기에 `exitApp()`을 쓰지 마세요.** 이 함수는 교체, 제거, 핫 리로드 때도 호출되며, 이 안에서는 `exitApp()`이 아무 동작도 하지 않습니다. 대신 `setup()`에서 `getWindow()->setQuitOnClose(true)`를 호출하세요.
-- `exit()` 다음에는 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서는 App의 `cleanup()`만 호출됩니다.
+- `exit()` 다음에는 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서도 같은 순서로 실행합니다.
 - `exit()`나 `cleanup()`이 예외를 던져도 나머지 종료 처리와 다른 App의 종료는 끝까지 진행됩니다. 강제 종료나 크래시 때는 호출되지 않습니다.
 - 세션 종료(로그아웃, 재시작, 시스템 종료) 때의 동작은 그 순간 메인 스레드에서 App 코드가 실행 중인지에 따라 달라집니다. 실행 중이 아니면 일반 종료 처리가 진행되어, 마지막으로 연결된 App부터 차례로 모든 App에서 `exit()`가 호출되고 오디오 분리와 `cleanup()`이 이어집니다. 전체가 하나의 제한 시간(기본값 3초, `Runtime::setLogoutTimeout` 참조)을 공유하므로 `exit()`에서는 필요한 것만 저장하고 짧게 끝내세요. App 코드나 그것을 호출하는 TrussC 코드가 메인 스레드에서 실행 중이면(`update()` 도중이나 App 코드에서 연 모달 대화상자가 떠 있는 동안 등) OS가 프로세스를 종료하며, `exit()`, `cleanup()`, 종료 이벤트는 모두 호출되지 않습니다. 다른 스레드의 처리는 App 코드 실행 중으로 치지 않습니다.
 - 이는 Windows와 macOS에서의 동작입니다. Linux에는 세션 종료를 받는 수신 경로가 없습니다. OS가 프로세스에 알리지 않고 종료시키면 `exit()`는 호출되지 않습니다.
@@ -530,19 +527,19 @@ description.ko = "사용이 권장되지 않는 requestExit()가 이 App에서 �
 details.en = '''
 - It is false at first and becomes true after `requestExit()` is called. It never goes back to false, even if a listener cancels the quit.
 - Nothing in TrussC reads it any more. It does not tell you whether a quit is under way, so do not use it in new code. This function is scheduled for removal in v1.0.0.
-- It is a plain (non-atomic) bool, so read it on the main thread.
+- The compatibility flag is atomic; quit requests still go through `exitApp()`.
 - To react when the app quits, listen to `events().exitRequested` or override `exit()`.
 '''
 details.ja = '''
 - 最初は false で、`requestExit()` を呼ぶと true になります。リスナーが終了を取り消しても、false に戻ることはありません。
 - TrussC のどこもこの値を読まなくなりました。終了が進行中かどうかは分からないので、新しいコードでは使わないでください。この関数は v1.0.0 で削除予定です。
-- 通常の（atomic でない）bool のため、メインスレッドで読んでください。
+- 互換性のためのフラグは atomic です。終了要求は `exitApp()` を通ります。
 - アプリの終了に反応したい場合は、`events().exitRequested` を購読するか、`exit()` をオーバーライドしてください。
 '''
 details.ko = '''
 - 처음에는 false이며 `requestExit()`를 호출하면 true가 됩니다. 리스너가 종료를 취소해도 false로 돌아가지 않습니다.
 - 이제 TrussC의 어디에서도 이 값을 읽지 않습니다. 종료가 진행 중인지는 알 수 없으므로 새 코드에서는 사용하지 마세요. 이 함수는 v1.0.0에서 제거될 예정입니다.
-- 일반(atomic이 아닌) bool이므로 메인 스레드에서 읽으세요.
+- 호환성을 위한 플래그는 atomic입니다. 종료 요청은 `exitApp()`을 거칩니다.
 - 앱이 종료될 때 반응하려면 `events().exitRequested`를 구독하거나 `exit()`를 오버라이드하세요.
 '''
 related = ["App::requestExit", "exitApp", "App::exit"]
@@ -958,19 +955,19 @@ details.en = '''
 - It calls `exitApp()`, in windowed and headless apps alike. Use `exitApp()` in new code; this alias is scheduled for removal in v1.0.0.
 - Because it calls `exitApp()`, the exit code is set to `0`, and the quit goes through `exitRequested` so a listener can cancel it. See `exitApp` for the details.
 - Before v0.8.0 it only set a flag that `runHeadlessApp()` read, and a windowed app ignored it. It no longer skips `exitRequested` in a headless app.
-- It also sets the flag that `App::isExitRequested` returns. The flag is a plain (non-atomic) bool.
+- It also sets the flag that `App::isExitRequested` returns. The compatibility flag is atomic and does not drive the runner.
 '''
 details.ja = '''
 - ウィンドウのあるアプリでもヘッドレスアプリでも、`exitApp()` を呼びます。新しいコードでは `exitApp()` を使用してください。この別名は v1.0.0 で削除予定です。
 - `exitApp()` を呼ぶため、終了コードは `0` に設定され、終了は `exitRequested` を通ります。リスナーが取り消すこともできます。詳しくは `exitApp` を参照してください。
 - v0.8.0 より前は、`runHeadlessApp()` が読むフラグを立てるだけで、ウィンドウのあるアプリでは無視されていました。ヘッドレスアプリでも `exitRequested` を飛ばさなくなりました。
-- `App::isExitRequested` が返すフラグも立てます。このフラグは通常の（atomic でない）bool です。
+- `App::isExitRequested` が返すフラグも立てます。この互換フラグは atomic で、ランナーの制御には使いません。
 '''
 details.ko = '''
 - 윈도우가 있는 앱과 헤드리스 앱 모두에서 `exitApp()`을 호출합니다. 새 코드에서는 `exitApp()`을 사용하세요. 이 별칭은 v1.0.0에서 제거될 예정입니다.
 - `exitApp()`을 호출하므로 종료 코드는 `0`으로 설정되고, 종료는 `exitRequested`를 거칩니다. 리스너가 취소할 수도 있습니다. 자세한 내용은 `exitApp`을 참조하세요.
 - v0.8.0 이전에는 `runHeadlessApp()`이 읽는 플래그를 세울 뿐이었고, 윈도우가 있는 앱에서는 무시되었습니다. 이제 헤드리스 앱에서도 `exitRequested`를 건너뛰지 않습니다.
-- `App::isExitRequested`가 반환하는 플래그도 세웁니다. 이 플래그는 일반(atomic이 아닌) bool입니다.
+- `App::isExitRequested`가 반환하는 플래그도 세웁니다. 이 호환 플래그는 atomic이며 실행기를 제어하지 않습니다.
 '''
 related = ["exitApp", "requestExitApp", "App::isExitRequested", "CoreEvents::exitRequested"]
 snippet = '''
@@ -6298,15 +6295,15 @@ description.ja = "更新のステップごとに 1 回呼ばれる。"
 description.ko = "업데이트 단계마다 한 번 호출된다."
 details.en = '''
 - Sent once for each update step, on the main thread. Listeners registered without a priority run before the App's `update()`; those registered with `EventPriority::AfterApp` run after the App and its child nodes. On the very first step, a listener without a priority can run before the App's `setup()`.
-- A headless App also sends it for each fixed step; there only the App's own `update()` runs, not its child nodes.
+- A headless App also sends it for each fixed step; the App runs its node tree, including children, Mods and timers.
 '''
 details.ja = '''
 - 更新のステップごとに、メインスレッドで 1 回届きます。優先度を指定せずに登録したリスナーは App の `update()` より前に、`EventPriority::AfterApp` で登録したリスナーは App と子ノードのあとに呼ばれます。最初のステップでは、優先度を指定しないリスナーが App の `setup()` より前に呼ばれることがあります。
-- ヘッドレス App でも固定ステップごとに届きます。その場合、呼ばれるのは App 自身の `update()` だけで、子ノードは更新されません。
+- ヘッドレス App でも固定ステップごとに届きます。App は子ノード、Mod、タイマーを含むノードツリーを更新します。
 '''
 details.ko = '''
 - 업데이트 단계마다 메인 스레드에서 한 번 전달됩니다. 우선순위를 지정하지 않고 등록한 리스너는 App의 `update()`보다 먼저, `EventPriority::AfterApp`으로 등록한 리스너는 App과 자식 노드 다음에 호출됩니다. 첫 단계에서는 우선순위를 지정하지 않은 리스너가 App의 `setup()`보다 먼저 호출될 수 있습니다.
-- 헤드리스 App에서도 고정 단계마다 전달됩니다. 이때는 App 자신의 `update()`만 호출되며 자식 노드는 업데이트되지 않습니다.
+- 헤드리스 App에서도 고정 단계마다 전달됩니다. App은 자식 노드, Mod, 타이머를 포함한 노드 트리를 갱신합니다.
 '''
 related = ["Node::update", "CoreEvents::draw", "EventListener", "events", "setIndependentFps"]
 snippet = '''
@@ -10983,18 +10980,15 @@ description.ja = "ヘッドレスアプリの実行を設定する。"
 description.ko = "헤드리스 앱 실행을 설정한다."
 details.en = '''
 - Pass this type to `runHeadlessApp` to run without a window or graphics context. Its only setting is `targetFps`, the target update rate in updates per second, which defaults to 60.
-- `setFps(fps)` assigns `targetFps` and returns the settings by reference for chaining. Use a positive rate; the runner computes its fixed timestep as `1.0 / targetFps` and does not interpret `VSYNC` or `EVENT_DRIVEN`.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (the headless loop calls only `App::update()` and does not update the scene graph).
+- `setFps(fps)` assigns `targetFps` and returns the settings by reference for chaining. Use a finite positive rate; other values warn at startup and run no updates.
 '''
 details.ja = '''
 - `runHeadlessApp` に渡すと、ウィンドウやグラフィックスコンテキストなしで実行します。設定項目は目標更新頻度（毎秒の更新回数）の `targetFps` だけで、既定値は 60 です。
-- `setFps(fps)` は `targetFps` に代入し、連続して設定できるように自身の参照を返します。正の値を指定してください。実行ループは固定時間刻みを `1.0 / targetFps` として計算し、`VSYNC` や `EVENT_DRIVEN` を特別な値として扱いません。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレスループは `App::update()` だけを呼び、シーングラフを更新しません）。
+- `setFps(fps)` は `targetFps` に代入し、連続して設定できるように自身の参照を返します。有限の正のレートを指定してください。それ以外の値では起動時に警告し、更新を実行しません。
 '''
 details.ko = '''
 - `runHeadlessApp`에 전달하면 윈도우나 그래픽 컨텍스트 없이 실행합니다. 유일한 설정은 초당 목표 업데이트 횟수인 `targetFps`이며 기본값은 60입니다.
-- `setFps(fps)`는 `targetFps`에 값을 대입하고 연속 설정을 위해 자신의 참조를 반환합니다. 양수를 지정하세요. 실행 루프는 고정 시간 간격을 `1.0 / targetFps`로 계산하며 `VSYNC`나 `EVENT_DRIVEN`을 특수 값으로 해석하지 않습니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 루프는 `App::update()`만 호출하며 장면 그래프를 업데이트하지 않습니다).
+- `setFps(fps)`는 `targetFps`에 값을 대입하고 연속 설정을 위해 자신의 참조를 반환합니다. 유한한 양수 레이트를 지정합니다. 그 외의 값은 시작 시 경고하고 업데이트를 실행하지 않습니다.
 '''
 related = ["runHeadlessApp", "WindowSettings"]
 
@@ -11027,17 +11021,17 @@ description.ko = "헤드리스 앱의 목표 업데이트 레이트를 보관한
 details.en = '''
 - This `float` is measured in updates per second and defaults to `60.0f`. `runHeadlessApp()` uses fixed update steps of `1 / targetFps` seconds, which is also the value reported by `getDeltaTime()` during updates.
 - Set it before calling `runHeadlessApp()`. The runner copies the value at startup, so later changes to this settings object do not change the running update rate.
-- Use a finite positive value. Values are not validated or clamped; zero, negative, or non-finite values result in no update steps, and `VSYNC` and `EVENT_DRIVEN` have no special meaning here.
+- Use a finite positive rate; other values warn at startup and run no updates.
 '''
 details.ja = '''
 - この `float` の単位は 1 秒あたりの更新回数で、既定値は `60.0f` です。`runHeadlessApp()` は `1 / targetFps` 秒の固定ステップで更新し、更新中の `getDeltaTime()` もこの値を返します。
 - `runHeadlessApp()` を呼ぶ前に設定してください。実行開始時に値がコピーされるため、そのあとにこの設定オブジェクトを変更しても実行中の更新レートは変わりません。
-- 有限の正の値を使ってください。値の検証や範囲への補正は行われません。0、負の値、非有限値では更新ステップが実行されず、`VSYNC` と `EVENT_DRIVEN` に特別な意味はありません。
+- 有限の正のレートを指定してください。それ以外の値では起動時に警告し、更新を実行しません。
 '''
 details.ko = '''
 - 이 `float`의 단위는 초당 업데이트 횟수이며 기본값은 `60.0f`입니다. `runHeadlessApp()`은 `1 / targetFps`초의 고정 스텝으로 업데이트하고, 업데이트 중 `getDeltaTime()`도 이 값을 반환합니다.
 - `runHeadlessApp()`을 호출하기 전에 설정하세요. 실행 시작 시 값을 복사하므로 이후 이 설정 객체를 변경해도 실행 중인 업데이트 레이트는 바뀌지 않습니다.
-- 유한한 양수를 사용하세요. 값을 검증하거나 범위에 맞게 보정하지 않습니다. 0, 음수 또는 비유한 값이면 업데이트 스텝을 실행하지 않으며 `VSYNC`와 `EVENT_DRIVEN`에는 특별한 의미가 없습니다.
+- 유한한 양수 레이트를 지정합니다. 그 외의 값은 시작 시 경고하고 업데이트를 실행하지 않습니다.
 '''
 related = ["HeadlessSettings::setFps", "runHeadlessApp", "getDeltaTime"]
 
@@ -20240,8 +20234,7 @@ details.en = '''
 - `removeChild()` / `removeAllChildren()` do not call `cleanup()`. They only detach the node.
 - It can run even if `setup()` never ran (for example, an App that ends before its first update), so do not assume that what `setup()` creates is there.
 - Before `cleanup()` runs, the node is marked dead, its async timers are canceled, and it is no longer treated as the hovered, grabbed or selected node.
-- When an App ends, `cleanup()` runs after `App::exit()`, on the child nodes first and then on the App. In a headless App, only the App's own `cleanup()` runs. Audio is disconnected before this, so you can release audio state here. For the whole order, see `App::exit`.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (in a headless App, child nodes get no `cleanup()` at app exit).
+- When an App ends, `cleanup()` runs after `App::exit()`, on the child nodes first and then on the App. This order also applies to headless Apps. Audio is disconnected before this, so you can release audio state here. For the whole order, see `App::exit`.
 - At a session end (logout, restart or shutdown), if no App code is running on the main thread, `cleanup()` runs as in a normal ending. If App code is running at that moment, the OS ends the process and neither `App::exit` nor `cleanup()` is called; see `App::exit`.
 - If one child's `cleanup()` throws, the other children and the App are still cleaned up.
 '''
@@ -20251,8 +20244,7 @@ details.ja = '''
 - `removeChild()` / `removeAllChildren()` は `cleanup()` を呼びません。ノードを切り離すだけです。
 - `setup()` が一度も実行されていないノード（例えば、最初の update の前に終わった App）でも呼ばれることがあります。`setup()` で作ったものが存在するとは想定しないでください。
 - `cleanup()` の前に、ノードは dead として扱われ、非同期タイマーはキャンセルされ、hover・grab・選択中のノードとしても扱われなくなります。
-- App が終わるときは、`App::exit()` のあとに、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App では App 自身の `cleanup()` だけが呼ばれます。その前にオーディオは切り離されているため、オーディオ関係の後片付けをここで行えます。全体の順番は `App::exit` を参照してください。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレス App では、終了時に子ノードの `cleanup()` が呼ばれません）。
+- App が終わるときは、`App::exit()` のあとに、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App でも同じ順番です。その前にオーディオは切り離されているため、オーディオ関係の後片付けをここで行えます。全体の順番は `App::exit` を参照してください。
 - セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、通常の終了と同じように `cleanup()` が呼ばれます。実行中だった場合は OS がプロセスを終了させ、`App::exit` も `cleanup()` も呼ばれません。`App::exit` を参照してください。
 - ある子ノードの `cleanup()` が例外を投げても、ほかの子ノードと App の後片付けは行われます。
 '''
@@ -20262,8 +20254,7 @@ details.ko = '''
 - `removeChild()` / `removeAllChildren()`은 `cleanup()`을 호출하지 않습니다. 노드를 떼어내기만 합니다.
 - `setup()`이 한 번도 실행되지 않은 노드(예: 처음 update되기 전에 끝난 App)에서도 호출될 수 있습니다. `setup()`에서 만든 것이 있다고 가정하지 마세요.
 - `cleanup()` 전에 노드는 dead로 표시되고, 비동기 타이머가 취소되며, hover·grab·선택 중인 노드로도 더 이상 다뤄지지 않습니다.
-- App이 끝날 때는 `App::exit()` 다음에 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서는 App 자신의 `cleanup()`만 호출됩니다. 그전에 오디오가 분리되므로, 여기서 오디오 관련 정리를 할 수 있습니다. 전체 순서는 `App::exit`를 참조하세요.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 App에서는 종료 시 자식 노드의 `cleanup()`이 호출되지 않습니다).
+- App이 끝날 때는 `App::exit()` 다음에 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서도 같은 순서로 실행합니다. 그전에 오디오가 분리되므로, 여기서 오디오 관련 정리를 할 수 있습니다. 전체 순서는 `App::exit`를 참조하세요.
 - 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드에서 App 코드가 실행 중이 아니면 일반 종료와 같이 `cleanup()`이 호출됩니다. 실행 중이었다면 OS가 프로세스를 종료하며 `App::exit`도 `cleanup()`도 호출되지 않습니다. `App::exit`를 참조하세요.
 - 어떤 자식 노드의 `cleanup()`이 예외를 던져도 다른 자식 노드와 App의 정리는 진행됩니다.
 '''
@@ -22261,7 +22252,7 @@ ball->setActive(false);    // update() stops for ball and all its children
 - Updates and draws are not 1:1. With independent or fixed-Hz update (see `setIndependentFps`), there can be zero or several updates per drawn frame.
 - Changes to the tree made inside `update()` take effect from the next frame, because children are walked from a copy of the list.
 - In a windowed app, `BeforeApp` `events().update` listeners run before the App's update tree. After each main update, the matrix and style stack depth is restored.
-- `runHeadlessApp` calls only the App's own `update()`, not the tree, so child nodes' `update()`, timers and the removal of destroyed children do not run there (Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906)).
+- `runHeadlessApp` uses the same update tree and timing scope as windowed Apps: children, Mods, node timers and removal of destroyed children run on each fixed step. Drawing and hover updates are window-only.
 '''
 details.ja = '''
 - 親が子より先に実行されます。ノードごとの処理順は、非アクティブならスキップ、destroy された子の片付け、`setup()`（初回のみ）、mod の `earlyUpdate()`、タイマー（`callAfter` / `callEvery`）、`update()`、mod の `update()`、最後に各子をリスト順に、という流れです。
@@ -22275,7 +22266,7 @@ ball->setActive(false);    // update() stops for ball and all its children
 - update と draw は 1:1 ではありません。独立 fps や固定 Hz の update（`setIndependentFps` を参照）では、描画 1 フレームの間に update が 0 回のことも、複数回のこともあります。
 - `update()` の中でツリーを変更しても、反映されるのは次のフレームからです。子はリストのコピーを使って順に処理されるためです。
 - ウィンドウのあるアプリでは、`BeforeApp` の `events().update` リスナーが App の update ツリーより先に呼ばれます。メインの update が終わるたびに、matrix と style のスタックの深さは元に戻されます。
-- `runHeadlessApp` は App 自身の `update()` だけを呼び、ツリーは処理しません。そのため、子ノードの `update()`、タイマー、destroy された子の片付けは実行されません（既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)）。
+- `runHeadlessApp` はウィンドウのある App と同じ update ツリーと時間スコープを使います。固定ステップごとに子ノード、Mod、ノードタイマー、destroy された子の片付けを処理します。描画と hover の更新はウィンドウのある App だけで行います。
 '''
 details.ko = '''
 - 부모가 자식보다 먼저 실행됩니다. 노드별 처리 순서는 비활성이면 건너뛰기, destroy된 자식 정리, `setup()`(처음만), mod의 `earlyUpdate()`, 타이머(`callAfter` / `callEvery`), `update()`, mod의 `update()`, 마지막으로 각 자식을 목록 순서대로 처리하는 흐름입니다.
@@ -22289,7 +22280,7 @@ ball->setActive(false);    // update() stops for ball and all its children
 - update와 draw는 1:1이 아닙니다. 독립 fps나 고정 Hz update(`setIndependentFps` 참고)에서는 그리는 1 프레임 동안 update가 0번일 수도, 여러 번일 수도 있습니다.
 - `update()` 안에서 트리를 바꿔도 반영되는 것은 다음 프레임부터입니다. 자식은 목록의 복사본으로 순서대로 처리되기 때문입니다.
 - 윈도우가 있는 앱에서는 `BeforeApp`의 `events().update` 리스너가 App의 update 트리보다 먼저 호출됩니다. 메인 update가 끝날 때마다 matrix와 style 스택 깊이는 원래대로 돌아갑니다.
-- `runHeadlessApp`은 App 자신의 `update()`만 호출하고 트리는 처리하지 않습니다. 따라서 자식 노드의 `update()`, 타이머, destroy된 자식 정리는 실행되지 않습니다(알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)).
+- `runHeadlessApp`은 창이 있는 App과 같은 update 트리와 시간 범위를 사용합니다. 고정 단계마다 자식 노드, Mod, 노드 타이머와 destroy된 자식 정리를 실행합니다. 그리기와 hover 갱신은 창이 있는 App에서만 실행합니다.
 '''
 related = ["Node::setup", "Node::draw", "Node::setActive", "Node::setVisible", "CoreEvents::update", "getDeltaTime", "getFrameCount", "setIndependentFps"]
 snippet = '''
@@ -34866,7 +34857,6 @@ details.en = '''
 - `pause()` preserves progress, `resume()` enables playback unless complete, and `reset()` stops playback and clears elapsed time and completion without restoring node transforms. `start()` captures starting values again and reapplies the delay.
 - The argument-free `complete` event fires after the final transforms are applied and playback becomes complete; subscribe with `mod->complete.listen([]() { ... });` and retain the returned `EventListener`. Completion does not remove the modifier.
 - The node owns the modifier. Adding another `TweenMod` to the same node replaces the existing one; removal, replacement, or node destruction invalidates the returned pointer.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (`runHeadlessApp` does not update the scene graph, so this modifier does not advance automatically).
 '''
 details.ja = '''
 - `node->addMod<TweenMod>()` で追加し、`moveTo()`、`scaleTo()`、`rotateTo()` などのチェイン可能なメソッドで設定してから `start()` を呼びます。有効にしたすべてのプロパティで時間設定とイージングを共有します。
@@ -34877,7 +34867,6 @@ details.ja = '''
 - `pause()` は進行状況を保持し、`resume()` は未完了なら再生を有効にします。`reset()` は再生を止めて経過時間と完了状態を解除しますが、ノードの変換は元に戻しません。`start()` は開始値を取得し直し、待ち時間も再適用します。
 - 引数のない `complete` イベントは、最後の変換を適用して完了状態になったあとで通知します。`mod->complete.listen([]() { ... });` で購読し、返された `EventListener` を保持してください。完了しても Mod は削除されません。
 - Mod はノードが所有します。同じノードに別の `TweenMod` を追加すると既存のものを置き換えます。削除、置き換え、ノードの破棄で返されたポインターは無効になります。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（`runHeadlessApp` はシーングラフを更新しないため、この Mod は自動では進みません）。
 '''
 details.ko = '''
 - `node->addMod<TweenMod>()`로 추가하고 `moveTo()`, `scaleTo()`, `rotateTo()` 등의 체이닝 가능한 메서드로 설정한 뒤 `start()`를 호출합니다. 활성화된 모든 속성은 시간 설정과 이징을 공유합니다.
@@ -34888,7 +34877,6 @@ details.ko = '''
 - `pause()`는 진행 상태를 유지하고 `resume()`은 아직 완료되지 않았으면 재생을 활성화합니다. `reset()`은 재생을 정지하고 경과 시간과 완료 상태를 초기화하지만 노드의 변환을 복원하지는 않습니다. `start()`는 시작 값을 다시 가져오고 대기 시간도 다시 적용합니다.
 - 인수가 없는 `complete` 이벤트는 마지막 변환을 적용하고 완료 상태가 된 뒤 알립니다. `mod->complete.listen([]() { ... });`으로 구독하고 반환된 `EventListener`를 보관합니다. 완료되어도 Mod는 제거되지 않습니다.
 - 노드가 Mod를 소유합니다. 같은 노드에 다른 `TweenMod`를 추가하면 기존 항목을 교체합니다. 제거, 교체, 노드 소멸 시 반환된 포인터는 무효화됩니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(`runHeadlessApp`은 장면 그래프를 갱신하지 않으므로 이 Mod는 자동으로 진행되지 않습니다).
 '''
 related = ["ease", "EaseType", "Node", "Node::addMod", "Mod", "TweenMod::start", "TweenMod::complete"]
 snippet = '''
@@ -49097,19 +49085,16 @@ details.en = '''
 - Calls `AudioEngine::getInstance().init()` only while the engine is uninitialized. It returns no value and leaves an already initialized engine unchanged.
 - `Sound::load()`, `loadStream()`, `loadTestTone()`, and both `loadFromBuffer()` overloads attempt initialization automatically while the engine is uninitialized; `play()` does not. Call this helper to start output before using synthesis through `audioOut`.
 - Initialization reuses the numeric configuration from the last `AudioEngine::init(AudioSettings)` call, or the initial defaults described in `AudioEngine`, and selects the system default device with the default backend selection. Use `AudioEngine::init(settings)` for custom configuration and its boolean result, or check `isInitialized()` after this helper; startup failures are logged.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (`setup()` does not automatically call `initAudio()`).
 '''
 details.ja = '''
 - エンジンが未初期化のときだけ `AudioEngine::getInstance().init()` を呼びます。戻り値はなく、初期化済みの場合は変更しません。
 - `Sound::load()`、`loadStream()`、`loadTestTone()`、両方の `loadFromBuffer()` は、エンジンが未初期化なら自動的に初期化を試みます。`play()` は初期化しません。`audioOut` による音声合成などで先に出力を開始するには、この関数を呼んでください。
 - 最後の `AudioEngine::init(AudioSettings)` の数値設定を再利用し、まだ呼んでいない場合は `AudioEngine` に記載した初期の既定値を使います。デバイスはシステム既定、バックエンドは既定の選択方法になります。独自の設定と成否の戻り値が必要な場合は `AudioEngine::init(settings)` を使うか、この関数のあとで `isInitialized()` を確認してください。開始に失敗した場合はログに出力されます。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（`setup()` から `initAudio()` は自動的には呼ばれません）。
 '''
 details.ko = '''
 - 엔진이 초기화되지 않았을 때만 `AudioEngine::getInstance().init()`를 호출합니다. 반환값은 없으며 이미 초기화된 엔진은 변경하지 않습니다.
 - `Sound::load()`, `loadStream()`, `loadTestTone()`, 두 `loadFromBuffer()` 오버로드는 엔진이 초기화되지 않았으면 자동으로 초기화를 시도합니다. `play()`는 초기화하지 않습니다. `audioOut`을 통한 음성 합성 등에서 출력을 먼저 시작하려면 이 함수를 호출합니다.
 - 마지막 `AudioEngine::init(AudioSettings)`의 숫자 설정을 재사용하며 아직 호출하지 않았다면 `AudioEngine`에 설명된 초기 기본값을 사용합니다. 장치는 시스템 기본 장치를 선택하고 백엔드는 기본 선택 방식을 사용합니다. 사용자 설정과 성공 여부 반환값이 필요하면 `AudioEngine::init(settings)`를 사용하거나 이 함수 뒤에 `isInitialized()`를 확인합니다. 시작 실패는 로그에 기록합니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(`setup()`에서 `initAudio()`를 자동으로 호출하지 않습니다).
 '''
 related = ["AudioEngine::getInstance", "shutdownAudio", "AudioEngine::init"]
 snippet = '''
@@ -51700,38 +51685,35 @@ description.ja = "ウィンドウやグラフィックスコンテキストな�
 description.ko = "윈도우나 그래픽스 컨텍스트 없이 앱을 실행한다."
 details.en = '''
 - Pass the app class as the template argument, as in `runHeadlessApp<tcApp>()`. Optional `HeadlessSettings` sets the target update rate, which defaults to 60 updates per second; the function returns the process exit code.
-- It creates your App (this is the only way to make a headless App) and calls `setup()` once. Each step then calls `update()`. There is no window, GPU or `draw()`, and child nodes, mods and node timers are not updated (see the known issue below).
+- It creates your App (this is the only way to make a headless App) and calls `setup()` once. Each fixed step runs the same App update entry as a windowed App, including children, Mods, node timers and removal of destroyed children. There is no window, GPU, `draw()` or hover update.
 - If `setup()` asks to quit and the quit is accepted, the App ends right after `setup()` returns, before audio callbacks, console commands and the first `update()`.
 - Updates use a fixed step, so `getDeltaTime()` is `1 / settings.targetFps`. Each loop pass runs at most `setMaxUpdateSteps()` steps, with a default limit of 10; a nonpositive limit removes the cap.
 - Excess whole steps after a stall or slow update are discarded with one warning per stall. Between passes, the loop sleeps until the next step is due, requesting at most 1 ms of sleep.
 - The runner's thread is used as the main thread, and queued `runOnMainThread` callbacks are processed between update passes.
-- When it ends, `events().exit` and `exit()` run, the App's audio callbacks are disconnected, and then the App's own `cleanup()` runs (child nodes get none). The audio device keeps running.
+- When it ends, `events().exit` and `exit()` run, the App's audio callbacks are disconnected, and then `cleanup()` runs on children before the App. The audio device keeps running.
 - Update-event services now work headless: Tween, update-mode TcpClient/UdpSocket receive, tcxBox2d auto stepping, and WebSocket timeouts.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (headless updates call only the app's `update()`, leaving child, mod, and timer updates unprocessed).
 - A process uses either windows (`runApp`) or headless mode, not both at once. If the App's constructor throws, nothing else runs: no `setup()`, `exit()` or `cleanup()`.
 '''
 details.ja = '''
 - `runHeadlessApp<tcApp>()` のように、アプリのクラスをテンプレート引数に指定します。省略可能な `HeadlessSettings` で目標更新レートを指定でき、既定値は毎秒 60 回です。プロセスの終了コードを返します。
-- App を作り（ヘッドレス App を作る方法はこれだけです）、`setup()` を 1 回呼びます。そのあとは各ステップで `update()` を呼びます。ウィンドウ、GPU、`draw()` はなく、子ノード、Mod、ノードのタイマーは更新されません（下の既知の問題を参照）。
+- App を作り（ヘッドレス App を作る方法はこれだけです）、`setup()` を 1 回呼びます。そのあとは固定ステップごとに、ウィンドウのある App と同じ更新入口を通り、子ノード、Mod、ノードタイマー、destroy された子の片付けを処理します。ウィンドウ、GPU、`draw()`、hover の更新はありません。
 - `setup()` の中で終了を求め、それが受け入れられた場合、App は `setup()` から戻った直後に終わります。オーディオのコールバック、コンソールのコマンド、最初の `update()` より前です。
 - 更新は固定ステップで、`getDeltaTime()` は `1 / settings.targetFps` です。ループ 1 周の更新回数は `setMaxUpdateSteps()` の設定が上限で、既定値は 10 回です。0 以下を指定すると上限をなくします。
 - 停止や遅い更新処理によって上限を超えた分は、整数ステップ単位で捨て、停滞ごとに一度だけ警告します。ループの周回間では次のステップが必要になるまで待機し、スリープに指定する時間は最大 1 ms です。
 - 実行するスレッドをメインスレッドとして扱い、更新処理の周回間にキュー内の `runOnMainThread` コールバックを処理します。
-- 終わるときは `events().exit` と `exit()` が呼ばれ、App のオーディオのコールバックが切り離されてから、App 自身の `cleanup()` が呼ばれます（子ノードには呼ばれません）。オーディオデバイスは動き続けます。
+- 終わるときは `events().exit` と `exit()` が呼ばれ、App のオーディオのコールバックが切り離されてから、子ノード、App の順に `cleanup()` が呼ばれます。オーディオデバイスは動き続けます。
 - Tween、更新モードの TcpClient/UdpSocket 受信、tcxBox2d の自動ステップ、WebSocket のタイムアウトなど、update イベントに依存する処理がヘッドレスでも動作します。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレス実行ではアプリ自身の `update()` だけを呼び出し、子ノード・Mod・タイマーを更新しません）。
 - 1 つのプロセスで使えるのは、ウィンドウ（`runApp`）かヘッドレスのどちらか一方です。App のコンストラクターが例外を投げると、`setup()`、`exit()`、`cleanup()` のどれも呼ばれません。
 '''
 details.ko = '''
 - `runHeadlessApp<tcApp>()`처럼 앱 클래스를 템플릿 인자로 지정합니다. 선택적인 `HeadlessSettings`로 목표 갱신 속도를 지정하며 기본값은 초당 60회입니다. 프로세스 종료 코드를 반환합니다.
-- App을 만들고(헤드리스 App을 만드는 방법은 이것뿐입니다) `setup()`을 한 번 호출합니다. 그 뒤에는 각 단계마다 `update()`를 호출합니다. 창, GPU, `draw()`는 없으며, 자식 노드, Mod, 노드 타이머는 업데이트되지 않습니다(아래 알려진 문제 참조).
+- App을 만들고(헤드리스 App을 만드는 방법은 이것뿐입니다) `setup()`을 한 번 호출합니다. 그 뒤에는 고정 단계마다 창이 있는 App과 같은 갱신 진입점을 거쳐 자식 노드, Mod, 노드 타이머와 destroy된 자식 정리를 실행합니다. 창, GPU, `draw()`, hover 갱신은 없습니다.
 - `setup()` 안에서 종료를 요청하고 그 요청이 받아들여지면, App은 `setup()`에서 돌아온 직후에 끝납니다. 오디오 콜백, 콘솔 명령, 첫 `update()`보다 먼저입니다.
 - 갱신은 고정 스텝을 사용하므로 `getDeltaTime()`은 `1 / settings.targetFps`입니다. 루프 한 회의 갱신 횟수는 `setMaxUpdateSteps()` 설정이 상한이며 기본값은 10회입니다. 0 이하이면 상한을 없앱니다.
 - 정지나 느린 갱신으로 상한을 초과한 시간은 정수 스텝 단위로 버리고 정체 구간마다 경고를 한 번 출력합니다. 루프 회차 사이에는 다음 스텝이 필요할 때까지 기다리며 슬립에 지정하는 시간은 최대 1ms입니다.
 - 실행하는 스레드를 메인 스레드로 취급하며 갱신 루프 회차 사이에 큐의 `runOnMainThread` 콜백을 처리합니다.
-- 끝날 때는 `events().exit`와 `exit()`가 호출되고, App의 오디오 콜백이 분리된 뒤 App 자신의 `cleanup()`이 호출됩니다(자식 노드에는 호출되지 않습니다). 오디오 장치는 계속 실행됩니다.
+- 끝날 때는 `events().exit`와 `exit()`가 호출되고, App의 오디오 콜백이 분리된 뒤 자식 노드, App 순서로 `cleanup()`을 호출합니다. 오디오 장치는 계속 실행됩니다.
 - Tween, 업데이트 모드 TcpClient/UdpSocket 수신, tcxBox2d 자동 스텝, WebSocket 타임아웃 등 update 이벤트에 의존하는 처리가 헤드리스에서도 동작합니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 실행은 앱 자체의 `update()`만 호출하며 자식 노드·Mod·타이머를 갱신하지 않습니다).
 - 한 프로세스에서는 창(`runApp`)과 헤드리스 중 하나만 사용할 수 있습니다. App의 생성자가 예외를 던지면 `setup()`, `exit()`, `cleanup()` 모두 호출되지 않습니다.
 '''
 related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps", "App::exit"]
@@ -60905,21 +60887,18 @@ details.en = '''
 - While playing and not completed, it adds `getDeltaTime()` to elapsed time; without an owner it does nothing, and while elapsed time is negative it waits without changing properties.
 - It applies easing to normalized progress and updates enabled properties. Position and scale use linear interpolation, rotation uses angle interpolation, and quaternion rotation uses spherical interpolation.
 - Once normalized progress reaches `1.0f`, it stops playback, marks completion, and notifies `complete` after applying the property values.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (`runHeadlessApp` calls only `App::update()`, so this callback is not run automatically).
 '''
 details.ja = '''
 - この protected コールバックはノードツリーの更新時に、所有ノードのタイマーと `update()` より前に呼ばれます。ノード自身または祖先が非アクティブの場合、この更新は行われません。
 - 再生中で未完了の場合、経過時間に `getDeltaTime()` を加えます。所有ノードがなければ何もせず、経過時間が負の間はプロパティを変更せずに待ちます。
 - 正規化した進捗にイージングを適用し、有効なプロパティを更新します。位置とスケールは線形補間、回転は角度の補間、クォータニオンの回転は球面補間を使用します。
 - 正規化した進捗が `1.0f` に達すると、プロパティの値を適用した後に再生を停止し、完了状態にして `complete` に通知します。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（`runHeadlessApp` は `App::update()` だけを呼ぶため、このコールバックは自動では呼ばれません）。
 '''
 details.ko = '''
 - 이 protected 콜백은 노드 트리 업데이트 중 소유 노드의 타이머와 `update()`보다 먼저 호출됩니다. 노드 자체나 조상이 비활성 상태이면 이 업데이트를 수행하지 않습니다.
 - 재생 중이며 완료되지 않았으면 경과 시간에 `getDeltaTime()`을 더합니다. 소유 노드가 없으면 아무 작업도 하지 않으며, 경과 시간이 음수인 동안에는 속성을 변경하지 않고 기다립니다.
 - 정규화한 진행률에 이징을 적용하고 활성화된 속성을 갱신합니다. 위치와 스케일에는 선형 보간, 회전에는 각도 보간, 쿼터니언 회전에는 구면 보간을 사용합니다.
 - 정규화한 진행률이 `1.0f`에 도달하면 속성값을 적용한 뒤 재생을 멈추고 완료 상태로 설정하며 `complete`에 알립니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(`runHeadlessApp`은 `App::update()`만 호출하므로 이 콜백은 자동으로 호출되지 않습니다).
 '''
 
 ["ChipSoundBundle::Entry"]

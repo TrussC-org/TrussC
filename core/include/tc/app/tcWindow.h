@@ -197,10 +197,16 @@ private:
         auto root = ctx_.rootNode.lock();
         if (!root) return;
         internal::AppCallbackScope owner(app_ ? internal::appOwner(*app_) : nullptr);
-        internal::setupNodeOnce(*root);   // the setup() entry point (#349)
-        if (ctx_.rootNode.lock() != root) return;
-        root->updateTree();
-        root->updateHoverState(ctx_.mouseX, ctx_.mouseY);
+        if (auto app = std::dynamic_pointer_cast<App>(root)) {
+            app->handleUpdate();
+        } else {
+            // Plain Node roots exist only in GPU-free tree fixtures.
+            internal::setupNodeOnce(*root);
+            if (ctx_.rootNode.lock() != root) return;
+            root->updateTree();
+        }
+        if (ctx_.rootNode.lock() == root)
+            root->updateHoverState(ctx_.mouseX, ctx_.mouseY);
     }
     TC_LUA_SKIP void drawTreeNow() {
         if (auto root = ctx_.rootNode.lock()) {
@@ -539,8 +545,11 @@ inline void Window::prepareAppEvents(std::vector<EventListener>& listeners,
                 }
             }, EventPriority::App));
     };
-    // Keep the float hover coordinates: App::handleUpdate takes integers.
-    bind(events_.update, [this](App&) { tickTree(); });
+    bind(events_.update, [this](App& app) {
+        app.handleUpdate();
+        if (ctx_.rootNode.lock().get() == &app)
+            app.updateHoverState(ctx_.mouseX, ctx_.mouseY);
+    });
     bind(events_.draw, [this](App&) { drawTreeNow(); });
     bind(events_.exit, [](App& app) { internal::deliverAppExit(app); }, true);
 
