@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Link real host/runtime with each desktop tick and the Linux native event bridge.
+"""Link real host/runtime with the common tick and native event bridge.
 
 Run through tcbuild.sh after building allCoreTests. TC_WINDOW_REVIEW_SOURCE may
 select a private source overlay for pre-fix/mutation runs. No SDK/device claim
@@ -28,7 +28,7 @@ def source(name):
 
 
 def main():
-    commands = json.loads((BUILD / 'compile_commands.json').read_text())
+    commands = json.loads((BUILD / 'compile_commands.json').read_text(encoding='utf-8'))
     entry = next(x for x in commands if x['file'].endswith('tcWindowRuntime.cpp'))
     flags = shlex.split(entry['command'])
     compiler, flags = flags[0], flags[1:]
@@ -64,9 +64,9 @@ struct Probe : App {
         ++sizes;
         if (!nested) return;
         resizing=true;
-        owner->setApp(std::make_shared<App>());
+        owner->setApp<App>();
         sapp_event event{}; event.type=SAPP_EVENTTYPE_FOCUSED;
-        internal::mainWindowEvent(&event,{700},owner);
+        internal::windowEvent(&event,{700},owner);
         check("replacement remains queued until resize returns", owner->getApp().get()==this && cleanups==0 && exits==0);
         resizing=false;
     }
@@ -80,15 +80,15 @@ void exercise(void (*tick)(sapp_window,void*), const char* name) {
     m.color_format=SAPP_PIXELFORMAT_RGBA8; m.depth_format=SAPP_PIXELFORMAT_DEPTH_STENCIL;
     m.trust_hidden_signals=true;
     check("bind real host state", internal::bindWindow(window,{700},operations,&native));
-    auto app=std::make_shared<Probe>(); app->owner=&window;
-    window.setApp(app); internal::applyPendingAppForTests(window);
+    window.setApp<Probe>(); internal::applyPendingAppForTests(window);
+    auto app=std::static_pointer_cast<Probe>(window.getApp()); app->owner=&window;
     const int initialSizes=app->sizes;
     auto raw=window.events().rawEvent.listen([](const sapp_event& event) {
         if (event.type==SAPP_EVENTTYPE_RESIZED) throw std::runtime_error("review resize interruption");
     });
     m.fb_width=m.fb_height=150;
     sapp_event event{}; event.type=SAPP_EVENTTYPE_RESIZED;
-    internal::mainWindowEvent(&event,{700},&window);
+    internal::windowEvent(&event,{700},&window);
     check("raw exception leaves native/App size out of sync", trussc::internal::WindowRequestAccess::context(window).fbWidth==150 && app->getWidth()==100 && app->sizes==initialSizes);
     raw.disconnect();
     m.occluded=true; app->nested=true;
@@ -100,26 +100,25 @@ void exercise(void (*tick)(sapp_window,void*), const char* name) {
     internal::WindowRequestAccess::unbind(window); internal::WindowRequestAccess::endApp(window);
     printf("hidden-reentry: %s completed\n",name);
 }
-void resizeDelivery(bool main, bool pixels) {
+void resizeDelivery(bool first, bool pixels) {
     internal::pixelPerfectMode()=pixels;
-    Window secondary;
-    Window& window=main ? *internal::mainWindow() : secondary;
+    // Runtime has no special main Window; exercise two addressed receivers.
+    Window window;
     internal::WindowRequestAccess::resetForLaunch(window);
     Native native;
     auto& m=native.metadata;
     m.fb_width=m.fb_height=100; m.dpi_scale=2; m.sample_count=1;
     m.color_format=SAPP_PIXELFORMAT_RGBA8; m.depth_format=SAPP_PIXELFORMAT_DEPTH_STENCIL;
     m.trust_hidden_signals=true; m.occluded=true;
-    const sapp_window handle{main ? 801u : 802u};
-    check("resize probe binds both ownership roots", internal::bindWindow(window,handle,operations,&native));
-    auto app=std::make_shared<Probe>(); app->owner=&window;
-    window.setApp(app); internal::applyPendingAppForTests(window);
+    const sapp_window handle{first ? 801u : 802u};
+    check("resize probe binds each addressed receiver", internal::bindWindow(window,handle,operations,&native));
+    window.setApp<Probe>(); internal::applyPendingAppForTests(window);
+    auto app=std::static_pointer_cast<Probe>(window.getApp()); app->owner=&window;
     // Prevent GPU work in the main frame body; size admission still executes.
     window.setIndependentFps(4,EVENT_DRIVEN); trussc::internal::WindowRequestAccess::context(window).loop.redrawCount=0;
     auto event=[&] {
         sapp_event e{}; e.type=SAPP_EVENTTYPE_RESIZED;
-        if (main) internal::mainWindowEvent(&e,handle,&window);
-        else internal::mainWindowEvent(&e,handle,&window);
+        internal::windowEvent(&e,handle,&window);
     };
     auto tick=[&] {
         internal::windowTick(handle, &window);
@@ -127,7 +126,7 @@ void resizeDelivery(bool main, bool pixels) {
     checkResizeDelivery(window,m,app,event,tick,check);
     check("resize probe does not acquire a drawable", native.acquisitions==0);
     internal::WindowRequestAccess::unbind(window); internal::WindowRequestAccess::endApp(window);
-    printf("resize-delivery: %s %s completed\n",main?"main":"secondary",pixels?"pixels":"logical");
+    printf("resize-delivery: %s %s completed\n",first?"first":"second",pixels?"pixels":"logical");
 }
 int main() {
     getMainThreadId();
@@ -145,7 +144,7 @@ int main() {
     with (nullcontext(output) if output else tempfile.TemporaryDirectory(prefix='tc-hidden-reentry-')) as folder:
         folder = Path(folder)
         generated = folder / 'probe.cpp'
-        generated.write_text(probe)
+        generated.write_text(probe, encoding='utf-8')
         objects = []
         compile_commands = []
         for label, path in [('probe', generated), ('global', source('core/include/tc/app/tcGlobal.cpp')),
@@ -155,11 +154,11 @@ int main() {
             compile_commands.append(command)
             subprocess.run(command, check=True)
             objects.append(str(obj))
-        link = shlex.split((BUILD / 'CMakeFiles/allCoreTests.dir/link.txt').read_text())
+        link = shlex.split((BUILD / 'CMakeFiles/allCoreTests.dir/link.txt').read_text(encoding='utf-8'))
         libraries = link[next(i for i, x in enumerate(link) if x.endswith('libTrussC.a')):]
         binary = folder / 'probe'
         command = [link[0], *objects, *libraries, '-o', str(binary)]
-        (folder / 'commands.json').write_text(json.dumps({'compile': compile_commands, 'link': command, 'cwd': str(BUILD)}, indent=2))
+        (folder / 'commands.json').write_text(json.dumps({'compile': compile_commands, 'link': command, 'cwd': str(BUILD)}, indent=2), encoding='utf-8')
         subprocess.run(command, cwd=BUILD, check=True)
         subprocess.run([str(binary)], check=True)
 

@@ -1,6 +1,7 @@
 // Linux link-time injection: a failing RX malloc also forbids operator new
 // persistently on that same worker. The main thread can still format logs.
 #include "tc/comm/tcSerial.h"
+#include "tc/utils/tcUtils.h" // complete the inline getDataPath definition
 #include <new>
 #include <cstdio>
 using namespace trussc;

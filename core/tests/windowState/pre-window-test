@@ -67,12 +67,12 @@ extern "C" int __wrap_sapp_height() {
 async_probe = OUT / 'async-native-change.cpp'
 async_probe.write_text('#include <TrussC.h>\n#define main prewindowAsyncMain\n#include "' +
                        str(ROOT / 'core/tests/asyncLoads/src/main.cpp') +
-                       '"\n#undef main\nint main(int argc, char** argv) {\n'
+                       '"\n#undef main\nint main() {\n'
                        '    (void)trussc::getDpiScale();\n'
                        '    setenv("TC_PREWINDOW_NATIVE_DPI", "1", 1);\n'
                        '    setenv("TC_PREWINDOW_NATIVE_WIDTH", "701", 1);\n'
                        '    setenv("TC_PREWINDOW_NATIVE_HEIGHT", "401", 1);\n'
-                       '    return prewindowAsyncMain(argc, argv);\n}\n', encoding='utf-8')
+                       '    return prewindowAsyncMain();\n}\n', encoding='utf-8')
 paths = {'runtime': ROOT / 'core/include/tc/app/tcWindowRuntime.cpp',
          'global': ROOT / 'core/include/tc/app/tcGlobal.cpp',
          'platform': ROOT / 'core/platform/linux/tcPlatform_linux.cpp',
@@ -112,7 +112,7 @@ if os.environ.get('TC_PREWINDOW_MUTATIONS'):
     # overlay keeps unchanged pragma-once headers identical to the shared tree.
     header = ROOT / 'core/include/TrussC.h'
     window = ROOT / 'core/include/tc/app/tcWindow.h'
-    for name in ['snapshot-restored', 'dpi-read', 'width-read', 'height-read']:
+    for name in ['snapshot-restored', 'dpi-read', 'width-read', 'height-read', 'prelaunch-native']:
         scratch = OUT / 'mutant'
         include = scratch / 'include'
         include.mkdir(parents=True)
@@ -142,6 +142,18 @@ if os.environ.get('TC_PREWINDOW_MUTATIONS'):
             for native, field in [('sapp_dpi_scale()', 'dpiScale'), ('sapp_width()', 'fbWidth'), ('sapp_height()', 'fbHeight')]:
                 public = public.replace('? ' + native + ' : ctx.' + field,
                                         '? internal::snapshotDimensions(ctx).' + field + ' : ctx.' + field)
+        elif name == 'prelaunch-native':
+            # An unavailable public receiver must not silently read native
+            # process dimensions, even while those dimensions are nonzero.
+            for marker, native in [('inline float getDpiScale()', 'sapp_dpi_scale()'),
+                                   ('inline int getFramebufferWidth()', 'sapp_width()'),
+                                   ('inline int getFramebufferHeight()', 'sapp_height()')]:
+                first = public.index(marker)
+                last = public.index('\n}', first)
+                body = public[first:last]
+                assert body.count('if (!context) return 0;') == 1
+                public = public[:first] + body.replace('if (!context) return 0;',
+                    'if (!context) return ' + native + ';') + public[last:]
         else:
             native, default = {'dpi-read': ('sapp_dpi_scale()', '1.f'),
                                'width-read': ('sapp_width()', '0'),
@@ -156,12 +168,10 @@ if os.environ.get('TC_PREWINDOW_MUTATIONS'):
         (include / 'TrussC.h').write_text(public, encoding='utf-8')
         (include / 'tc/app/tcWindow.h').write_text(private, encoding='utf-8')
         selected = {}
-        for kind in ['runtime', 'global', 'platform', 'probe', 'async']:
+        for kind in ['runtime', 'global', 'platform', 'probe']:
             selected[kind] = scratch / (kind + '.o')
             compile(paths[kind], selected[kind], include)
         run(name, selected)
-        if name == 'snapshot-restored':
-            run('snapshot-async-loads', selected, 'async')
         shutil.rmtree(scratch)
 
 for obj in objects.values():

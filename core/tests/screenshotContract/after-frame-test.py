@@ -31,7 +31,7 @@ def main():
     libs = link[next(i for i, arg in enumerate(link) if arg.endswith('libTrussC.a')):]
     libs[0] = str(build / 'libTrussC.a')
     source = (ROOT / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='utf-8')
-    notify = '{ EntryStackGuard guard(AppEntry::AfterFrame); events().afterFrame.notify(); }'
+    notify = '{ EntryStackGuard guard(AppEntry::AfterFrame); internal::currentWindowContext().coreEvents->afterFrame.notify(); }'
     drain = 'else drainPendingScreenshots();'
     assert source.count(notify) == source.count(drain) == 1
     # Move the actual drain call, leaving notification and presentation intact.
@@ -40,14 +40,33 @@ def main():
     rows = []
     with tempfile.TemporaryDirectory(prefix='tc-after-frame-') as directory:
         scratch = Path(directory)
+        # The aggregate entry became a headless smoke test (54a8c0d5).
+        # Launch the retained display fixture directly, with its assertions intact.
+        fixture = scratch / 'after-frame.cpp'
+        fixture.write_text('''#include <TrussC.h>
+#include <cstdio>
+using namespace tc;
+namespace {
+int failures = 0;
+void check(const char* name, bool ok) {
+    std::printf("%-64s %s\\n", name, ok ? "PASS" : "FAIL");
+    std::fflush(stdout);
+    if (!ok) ++failures;
+}
+}
+#include "''' + str(ROOT / 'core/tests/screenshotContract/src/afterFrame.h') + '''"
+int main() {
+    WindowSettings settings;
+    settings.setSize(40, 30).setHighDpi(false).setTitle("afterFrame screenshot main");
+    return tcCoreTest::runDisplayTest<AfterFrameScreenshotApp>(settings, failures);
+}
+''', encoding='utf-8')
         probe = scratch / 'probe.o'
-        subprocess.run(['c++', *flags, '-c', str(ROOT / 'core/tests/screenshotContract/src/main.cpp'), '-o', str(probe)], check=True)
+        subprocess.run(['c++', *flags, '-c', str(fixture), '-o', str(probe)], check=True)
         for variant, content in [('baseline', source), ('drain_before_afterFrame', mutant)]:
-            # Compile the entire production host TU, preserving relative includes.
-            for relative, target in [('impl/', 'core/include/impl/'),
-                                     ('internal/', 'core/include/tc/app/internal/'),
-                                     ('../../../platform/', 'core/platform/')]:
-                content = content.replace('#include "' + relative, '#include "' + str(ROOT / target) + '/')
+            # Relocate app-local includes through the configured core include
+            # root, preserving its system-header classification and warnings.
+            content = content.replace('#include "internal/', '#include "tc/app/internal/')
             cpp = scratch / (variant + '.cpp')
             cpp.write_text(content, encoding='utf-8')
             obj = scratch / (variant + '.o')
@@ -55,7 +74,7 @@ def main():
             binary = scratch / variant
             subprocess.run(['c++', str(probe), str(obj), *libs, '-o', str(binary)], check=True)
             # Bound (test termination): a hung display process fails after 60 seconds; it never detects a mutation.
-            run = subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1280x720x24', str(binary), '--after-frame'],
+            run = subprocess.run(['xvfb-run', '-a', '-s', '-screen 0 1280x720x24', str(binary)],
                                  cwd=scratch, env=dict(os.environ, LIBGL_ALWAYS_SOFTWARE='1',
                                      __EGL_VENDOR_LIBRARY_FILENAMES='/usr/share/glvnd/egl_vendor.d/50_mesa.json',
                                      __GLX_VENDOR_LIBRARY_NAME='mesa', GALLIUM_DRIVER='llvmpipe'),
