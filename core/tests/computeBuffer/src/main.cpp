@@ -608,6 +608,15 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         asyncOwnerChecks(false);
         return failures ? 1 : 0;
     }
+#if !defined(SOKOL_WGPU)
+    // Only WebGPU maps asynchronously after the frame commit. Native backends
+    // deliver on the tick the frame advances, before exitApp(), so "map still
+    // pending at shutdown" can't be staged there.
+    if (argc > 1 && std::strcmp(argv[1], "--async-map-exit-check") == 0) {
+        std::puts("SKIP: computeBuffer --async-map-exit-check is WebGPU-only (native backends complete before the exit update)");
+        return 77;
+    }
+#endif
     if (argc > 1 && (std::strcmp(argv[1], "--async-check") == 0 || std::strcmp(argv[1], "--async-exit-check") == 0 ||
                     std::strcmp(argv[1], "--async-map-exit-check") == 0)) {
         asyncMapExitMode = std::strcmp(argv[1], "--async-map-exit-check") == 0;
