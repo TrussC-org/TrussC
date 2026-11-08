@@ -4240,6 +4240,7 @@ sg_buffer StorageBuffer::getBuffer() const  // Returns the borrowed sokol storag
 size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
+bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and waits for GPU completion.
 bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 

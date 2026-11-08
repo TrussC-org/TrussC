@@ -65462,21 +65462,21 @@ description.ko = "바이트 크기로 지정하는 영구 GPU 버퍼와 view를 
 details.en = '''
 - A thin wrapper over sokol storage buffers, with no typed element or packing layer. Match the shader's std430 layout yourself (for example, one Vec4 per 16 bytes). Contents persist between frames. Pass an element count in a uniform for portable kernel bounds: the pinned Metal output for SSBO .length() requires a size binding that sokol does not supply. Allocate empty storage or supply exactly the allocation's number of initial bytes; empty storage has unspecified contents until written.
 - All operations and destruction belong on the main thread after GPU initialization. Copying is disabled; move construction/assignment transfers the buffer, view, staging buffer and CPU upload limit, leaving the source empty. clear() and destruction use the existing deferred GPU destruction queue, preserving already recorded draws.
-- Requires sg_query_features().compute. Headless apps and unsupported backends, including WebGL2, warn and refuse allocation/update/binding. Device verification follows ComputeShader's support table. There is no CPU readback API; the feasibility note is in docs/dev/COMPUTE_READBACK.md.
+- Requires sg_query_features().compute. Headless apps and unsupported backends, including WebGL2, warn and refuse allocation/update/binding. Device verification follows ComputeShader's support table. read() copies contents back to the CPU on native platforms; it is not available on Web.
 - ComputeShader::setStorageBuffer permits shader-declared reads or read/write access; Shader::setStorageBuffer only permits readonly graphics declarations. The same buffer may be reused across dispatch and later drawVertices() calls without dummy vertices. Keep it allocated through dispatch/draw submission. Use *.compute.glsl for graphics programs that read storage: it selects GLSL310ES; ordinary *.glsl keeps GLSL300ES.
 - Reading a storage buffer in a vertex shader needs GPU support; Raspberry Pi 5 (GLES 3.1, V3D) has none, but fragment and compute reads work.
 '''
 details.ja = '''
 - sokol の storage buffer を薄く包みます。型付き要素やパッキングの補助はありません。シェーダーの std430 レイアウトに合わせてください（例: Vec4 1 個につき 16 バイト）。内容はデバイスフレームをまたいで保持します。移植性のあるカーネルの範囲検査には、要素数を uniform で渡してください。同梱コンパイラーの SSBO .length() の Metal 出力は、sokol が供給しないサイズ用バインドを必要とします。空の領域、または確保サイズと同じバイト数の初期データを指定します。空の領域は書き込むまで内容が未定義です。
 - GPU 初期化後のメインスレッドで、破棄を含むすべての操作を行ってください。コピーはできません。ムーブ構築・代入はバッファ、view、ステージング、CPU 更新制限を移し、移動元を空にします。clear() とデストラクターは既存の GPU 遅延破棄キューを使い、記録済みの描画を保持します。
-- sg_query_features().compute が必要です。ヘッドレス、WebGL2 などの非対応環境では警告を出し、確保・更新・割り当てを拒否します。実機検証の範囲は ComputeShader の対応表に従います。CPU 読み戻し API はありません。実現性のメモは docs/dev/COMPUTE_READBACK.md にあります。
+- sg_query_features().compute が必要です。ヘッドレス、WebGL2 などの非対応環境では警告を出し、確保・更新・割り当てを拒否します。実機検証の範囲は ComputeShader の対応表に従います。ネイティブ環境では read() で CPU に読み戻せます。Web では使えません。
 - ComputeShader::setStorageBuffer はシェーダーが宣言する読み取りと読み書きに対応します。Shader::setStorageBuffer は描画用の readonly 宣言だけに対応します。同じバッファを dispatch とその後の drawVertices() に、ダミー頂点なしで使えます。dispatch・描画の記録まで確保を維持してください。storage を読む描画用ソースは *.compute.glsl にして GLSL310ES を選びます。通常の *.glsl は GLSL300ES を維持します。
 - 頂点シェーダーで storage buffer を読むには GPU の対応が必要です。Raspberry Pi 5（GLES 3.1、V3D）は非対応ですが、fragment と compute では読み取れます。
 '''
 details.ko = '''
 - sokol storage buffer를 얇게 감싸며 타입별 요소나 패킹 계층을 제공하지 않습니다. 셰이더의 std430 레이아웃에 맞춥니다(예: Vec4 하나당 16바이트). 내용은 디바이스 프레임 사이에 유지합니다. 이식 가능한 커널 범위 검사에는 요소 수를 uniform으로 전달합니다. 고정 컴파일러의 SSBO .length() Metal 출력은 sokol이 제공하지 않는 크기 바인딩을 요구합니다. 빈 저장소 또는 할당 크기와 같은 바이트 수의 초기 데이터를 지정합니다. 빈 저장소의 내용은 쓰기 전까지 정의하지 않습니다.
 - GPU 초기화 후 메인 스레드에서 소멸을 포함한 모든 작업을 수행합니다. 복사는 지원하지 않습니다. 이동 생성/대입은 버퍼, view, 스테이징 및 CPU 업데이트 제한을 이전하고 원본을 비웁니다. clear()와 소멸자는 기존 GPU 지연 소멸 큐를 사용하여 기록된 그리기를 유지합니다.
-- sg_query_features().compute가 필요합니다. 헤드리스 및 WebGL2 같은 미지원 환경에서는 경고 후 할당, 업데이트, 바인딩을 거부합니다. 기기 검증 범위는 ComputeShader의 지원 표를 따릅니다. CPU 읽기 API는 제공하지 않습니다. 실현 가능성 메모는 docs/dev/COMPUTE_READBACK.md에 있습니다.
+- sg_query_features().compute가 필요합니다. 헤드리스 및 WebGL2 같은 미지원 환경에서는 경고 후 할당, 업데이트, 바인딩을 거부합니다. 기기 검증 범위는 ComputeShader의 지원 표를 따릅니다. 네이티브 환경에서는 read()로 CPU에 읽어 올 수 있습니다. Web에서는 사용할 수 없습니다.
 - ComputeShader::setStorageBuffer는 셰이더가 선언한 읽기 또는 읽기/쓰기 접근을 허용합니다. Shader::setStorageBuffer는 그래픽의 readonly 선언만 허용합니다. 같은 버퍼를 dispatch와 이후 drawVertices()에서 더미 정점 없이 사용합니다. dispatch와 그리기 기록까지 할당을 유지합니다. storage를 읽는 그래픽 소스는 *.compute.glsl로 지정하여 GLSL310ES를 선택합니다. 일반 *.glsl은 GLSL300ES를 유지합니다.
 - 정점 셰이더에서 storage buffer를 읽으려면 GPU 지원이 필요합니다. Raspberry Pi 5(GLES 3.1, V3D)는 지원하지 않지만 fragment와 compute에서는 읽을 수 있습니다.
 '''
@@ -65485,7 +65485,7 @@ StorageBuffer particles;
 std::vector<Vec4> initial(2048, Vec4(0, 0, 0.1f, 0.2f));
 particles.allocate(initial.size() * sizeof(Vec4), initial.data());
 '''
-related = ["StorageBuffer::allocate", "StorageBuffer::update", "ComputeShader::setStorageBuffer", "Shader::setStorageBuffer"]
+related = ["StorageBuffer::allocate", "StorageBuffer::update", "StorageBuffer::read", "ComputeShader::setStorageBuffer", "Shader::setStorageBuffer"]
 
 ["StorageBuffer::allocate"]
 description.en = "Allocates storage in bytes, optionally initialized from CPU memory."
@@ -65531,6 +65531,32 @@ details.ko = '''
 snippet = '''
 std::array<Vec4, 4> values = {};
 bool uploaded = buffer.update(values.data(), sizeof(values));
+'''
+related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
+
+["StorageBuffer::read"]
+description.en = "Reads bytes from the start of storage and waits for GPU completion."
+description.ja = "領域の先頭からバイト列を読み取り、GPU の完了を待ちます。"
+description.ko = "저장소의 시작부터 바이트를 읽고 GPU 완료를 기다립니다."
+details.en = '''
+- read(destination, bytes) immediately submits preceding recorded draws and dispatches in order and blocks until completion. The frame stalls while it waits; calling it every frame can lower fps. No frame commit occurs, and later drawing continues normally. Available on Metal, D3D11, GL 4.3 and GLES 3.1, including Raspberry Pi 5. It is not available on Web: calling it there is a compile error.
+- Copies bytes from offset zero without conversion. Partial reads, including byte counts not divisible by four, are allowed. A zero-byte read succeeds without allocated storage or a destination and submits no work. A nonzero read requires allocated storage, a non-null destination with room for bytes, and bytes <= getSize(). Invalid input or native readback failure returns false with a warning (at most once every 5 seconds per buffer), and leaves the destination untouched. A successful result is a CPU snapshot that later GPU writes cannot change.
+- Every StorageBuffer allocation includes copy-source usage automatically. Call on the main thread with an initialized windowed GPU; this API does not enable headless compute.
+'''
+details.ja = '''
+- read(destination, bytes) は先行する記録済みの描画と dispatch を順番どおり直ちに送信し、完了までブロックします。待機中はフレームが停止し、毎フレーム呼ぶと fps が低下する場合があります。フレームの commit は行わず、その後も描画を続けられます。Metal、D3D11、GL 4.3、GLES 3.1（Raspberry Pi 5 を含みます）に対応します。Web では利用できず、呼ぶとコンパイルエラーになります。
+- オフセット 0 から bytes バイトを変換せずコピーします。4 の倍数でないバイト数を含め、部分読み取りができます。0 バイトなら確保済み領域や出力先は不要で、GPU へ送信せず true を返します。0 より大きい場合は、確保済み領域、bytes バイト以上の null でない出力先、bytes <= getSize() が必要です。不正な入力やネイティブ読み取り失敗では、警告を出して false を返し、出力先を変更しません。警告はバッファごとに 5 秒に 1 回までです。成功時の CPU スナップショットは、その後の GPU 書き込みでは変わりません。
+- すべての StorageBuffer は自動的にコピー元として確保します。ウィンドウの GPU が初期化された状態で、メインスレッドから呼びます。ヘッドレス compute を有効にする API ではありません。
+'''
+details.ko = '''
+- read(destination, bytes)는 앞서 기록된 그리기와 dispatch를 순서대로 즉시 제출하고 완료까지 차단합니다. 기다리는 동안 프레임이 멈추며 매 프레임 호출하면 fps가 낮아질 수 있습니다. 프레임 commit은 수행하지 않으며 이후 그리기를 계속합니다. Metal, D3D11, GL 4.3, GLES 3.1(Raspberry Pi 5 포함)을 지원합니다. Web에서는 사용할 수 없으며 호출하면 컴파일 오류가 발생합니다.
+- 오프셋 0부터 bytes바이트를 변환 없이 복사합니다. 4의 배수가 아닌 바이트 수를 포함하여 부분 읽기를 허용합니다. 0바이트 읽기는 할당된 저장소나 출력 대상 없이 성공하며 GPU 작업을 제출하지 않습니다. 0보다 큰 읽기는 할당된 저장소, bytes바이트 이상을 담는 null이 아닌 출력 대상, bytes <= getSize()를 요구합니다. 잘못된 입력이나 네이티브 읽기 실패 시 경고하고 false를 반환하며 출력 대상을 변경하지 않습니다. 경고는 버퍼마다 5초에 한 번까지 출력합니다. 성공한 CPU 스냅샷은 이후 GPU 쓰기로 변경되지 않습니다.
+- 모든 StorageBuffer는 자동으로 복사 원본 용도를 포함하여 할당합니다. 창의 GPU를 초기화한 상태에서 메인 스레드에서 호출합니다. 이 API는 헤드리스 compute를 활성화하지 않습니다.
+'''
+snippet = '''
+compute.dispatch(groups);
+std::vector<float> values(count);
+if (buffer.read(values.data(), values.size() * sizeof(float))) logNotice() << values[0];
 '''
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 

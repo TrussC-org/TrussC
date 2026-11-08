@@ -3658,6 +3658,9 @@ struct Cover_StorageBuffer : af::Scope<StorageBuffer> {
         (void)af::val<const StorageBuffer>().getSize();
         (void)af::val<const StorageBuffer>().getView();
         (void)af::val<const StorageBuffer>().isAllocated();
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
+        (void)af::val<StorageBuffer>().read(af::val<void *>(), af::val<size_t>());
+#endif
         (void)af::val<StorageBuffer>().update(af::val<const void *>(), af::val<size_t>());
     }
 };
