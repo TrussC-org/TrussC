@@ -21768,14 +21768,17 @@ description.en = "Sets the local rotation from Euler angles in radians."
 description.ja = "ラジアンのオイラー角からローカル回転を設定する。"
 description.ko = "라디안 단위의 오일러 각으로 로컬 회전을 설정한다."
 details.en = '''
+- Uses `Y * X * Z` (yaw → pitch → roll), the same Euler convention as Unity and `Quaternion::fromEuler`. Euler gimbal lock occurs only when looking straight up or down (pitch = ±`TAU / 4`). This differs from the `X * Y * Z` composition of the three-angle and `Vec3` `rotate()` overloads.
 - Accepts `setEuler(const Vec3& euler)` or `setEuler(float pitch, float yaw, float roll)`, with pitch in X, yaw in Y, and roll in Z. Converts the angles to a quaternion and replaces the current orientation.
 - See `Node::setRot` for the Euler convention, matrix invalidation, and change notifications.
 '''
 details.ja = '''
+- Unity および `Quaternion::fromEuler` と同じ `Y * X * Z`（yaw → pitch → roll）のオイラー角規約を使います。オイラー角のジンバルロックは、真上または真下を向く場合（pitch = ±`TAU / 4`）だけで生じます。3 つの角度または `Vec3` を渡す `rotate()` の `X * Y * Z` の合成とは異なります。
 - `setEuler(const Vec3& euler)` または `setEuler(float pitch, float yaw, float roll)` を使います。X が pitch、Y が yaw、Z が roll です。角度をクォータニオンに変換して現在の姿勢を置き換えます。
 - オイラー角の規約、行列キャッシュの無効化、変更通知は `Node::setRot` を参照してください。
 '''
 details.ko = '''
+- Unity 및 `Quaternion::fromEuler`와 같은 `Y * X * Z`(yaw → pitch → roll) 오일러 각 규약을 사용합니다. 오일러 각의 짐벌 락은 바로 위나 아래를 바라볼 때(pitch = ±`TAU / 4`)만 발생합니다. 각도 3개 또는 `Vec3`를 전달하는 `rotate()`의 `X * Y * Z` 합성과 다릅니다.
 - `setEuler(const Vec3& euler)` 또는 `setEuler(float pitch, float yaw, float roll)`를 사용합니다. X는 pitch, Y는 yaw, Z는 roll입니다. 각도를 쿼터니언으로 변환하여 현재 방향을 교체합니다.
 - 오일러 각 규약, 행렬 캐시 무효화, 변경 알림은 `Node::setRot`를 참조하세요.
 '''
@@ -24756,16 +24759,19 @@ description.en = "Creates a quaternion from Euler angles."
 description.ja = "オイラー角からクォータニオンを作成する。"
 description.ko = "오일러 각도로 쿼터니언을 생성한다."
 details.en = '''
+- Uses `Y * X * Z` (yaw → pitch → roll), the same Euler convention as Unity and `Node::setEuler`. Euler gimbal lock occurs only when looking straight up or down (pitch = ±`TAU / 4`). This differs from the `X * Y * Z` composition of the three-angle and `Vec3` `rotate()` overloads.
 - Call `Quaternion::fromEuler(pitch, yaw, roll)` with angles in radians, or pass a `Vec3` whose `x`, `y`, and `z` contain pitch, yaw, and roll respectively.
 - Pitch rotates around X, yaw around Y, and roll around Z; the composition is `Ry(yaw) * Rx(pitch) * Rz(roll)`, so a vector is rotated around Z first, then X, then Y.
 - Returns a new unit quaternion. See `Quaternion::toEuler` for conversion back to Euler angles and its behavior near gimbal lock.
 '''
 details.ja = '''
+- Unity および `Node::setEuler` と同じ `Y * X * Z`（yaw → pitch → roll）のオイラー角規約を使います。オイラー角のジンバルロックは、真上または真下を向く場合（pitch = ±`TAU / 4`）だけで生じます。3 つの角度または `Vec3` を渡す `rotate()` の `X * Y * Z` の合成とは異なります。
 - `Quaternion::fromEuler(pitch, yaw, roll)` にラジアン単位の角度を渡すか、`x`、`y`、`z` にそれぞれ pitch、yaw、roll を格納した `Vec3` を渡します。
 - pitch は X 軸、yaw は Y 軸、roll は Z 軸の回転です。合成は `Ry(yaw) * Rx(pitch) * Rz(roll)` となり、ベクトルには Z 軸、X 軸、Y 軸の順で回転が適用されます。
 - 新しい単位クォータニオンを返します。オイラー角への変換とジンバルロック付近の動作は `Quaternion::toEuler` を参照してください。
 '''
 details.ko = '''
+- Unity 및 `Node::setEuler`와 같은 `Y * X * Z`(yaw → pitch → roll) 오일러 각 규약을 사용합니다. 오일러 각의 짐벌 락은 바로 위나 아래를 바라볼 때(pitch = ±`TAU / 4`)만 발생합니다. 각도 3개 또는 `Vec3`를 전달하는 `rotate()`의 `X * Y * Z` 합성과 다릅니다.
 - `Quaternion::fromEuler(pitch, yaw, roll)`에 라디안 단위의 각도를 전달하거나 `x`, `y`, `z`에 각각 pitch, yaw, roll을 저장한 `Vec3`를 전달합니다.
 - pitch는 X축, yaw는 Y축, roll은 Z축 회전입니다. 합성은 `Ry(yaw) * Rx(pitch) * Rz(roll)`이며 벡터에는 Z축, X축, Y축 순서로 회전이 적용됩니다.
 - 새 단위 쿼터니언을 반환합니다. 오일러 각도로의 변환과 짐벌 락 부근의 동작은 `Quaternion::toEuler`를 참조하세요.
@@ -30229,6 +30235,7 @@ description.en = "Builds triangle geometry for variable-width polyline strokes."
 description.ja = "可変幅のポリラインを描く三角形メッシュを構築する。"
 description.ko = "가변 두께 폴리라인을 그리는 삼각형 메시를 만든다."
 details.en = '''
+- Direct `StrokeMesh` input uses the uniform `setColor()` value. `beginStroke()` / `endStroke()` use this builder internally with the colors captured by `vertex()`: joints and caps use their vertex's color throughout, and segment corners blend between the two endpoint colors, including last to first when closed.
 - Add points with `addVertex()` or `addVertexWithWidth()`, or copy a `Path` with `setShape()`. `setShape()` replaces the existing shape and clears per-vertex widths.
 - Call `update()` after changes to rebuild the triangle mesh on the CPU, then call `draw()`. `draw()` does not call `update()`, and an unchanged `update()` does no work.
 - Widths use the same coordinate units as the input points. Missing per-vertex widths use the default width, initially `2`; the initial color is opaque white.
@@ -30237,6 +30244,7 @@ details.en = '''
 - `getMesh()` exposes the generated `Mesh`; see `Mesh` for drawing and GPU resource behavior.
 '''
 details.ja = '''
+- `StrokeMesh` に直接渡した入力には `setColor()` の単色設定を使います。`beginStroke()` / `endStroke()` は内部でこのビルダーを使い、`vertex()` が記録した色を渡します。各接合部とキャップの全体にその頂点の色を使い、線分の四角形の各端にはその端の色を設定して補間します。閉じる線分も最後から最初へ補間します。
 - `addVertex()` または `addVertexWithWidth()` で点を追加するか、`setShape()` で `Path` をコピーします。`setShape()` は既存の形状を置き換え、頂点ごとの幅を消去します。
 - 変更後に `update()` を呼び、CPU で三角形メッシュを再構築してから `draw()` を呼んでください。`draw()` は `update()` を呼びません。変更がなければ `update()` は何もしません。
 - 幅は入力点と同じ座標単位です。頂点ごとの幅が不足している部分には既定の幅を使い、初期値は `2` です。初期色は不透明な白です。
@@ -30245,6 +30253,7 @@ details.ja = '''
 - `getMesh()` は生成済みの `Mesh` を返します。描画と GPU リソースの動作は `Mesh` を参照してください。
 '''
 details.ko = '''
+- `StrokeMesh`에 직접 전달한 입력에는 `setColor()`의 단색 설정을 사용합니다. `beginStroke()` / `endStroke()`는 내부에서 이 빌더를 사용하며 `vertex()`가 기록한 색상을 전달합니다. 각 조인과 캡 전체에는 해당 정점의 색상을 사용하고 선분 사각형의 각 끝에는 해당 끝의 색상을 설정하여 보간합니다. 닫는 선분도 마지막 색상에서 첫 색상으로 보간합니다.
 - `addVertex()` 또는 `addVertexWithWidth()`로 점을 추가하거나 `setShape()`로 `Path`를 복사합니다. `setShape()`는 기존 형상을 바꾸고 정점별 두께를 지웁니다.
 - 변경한 뒤 `update()`를 호출하여 CPU에서 삼각형 메시를 다시 만든 다음 `draw()`를 호출하세요. `draw()`는 `update()`를 호출하지 않으며 변경이 없으면 `update()`는 아무 작업도 하지 않습니다.
 - 두께는 입력 점과 같은 좌표 단위를 사용합니다. 정점별 두께가 부족한 부분에는 기본 두께를 사용하며 초기값은 `2`입니다. 초기 색상은 불투명한 흰색입니다.
@@ -43409,15 +43418,15 @@ setStrokeWeight(8);
 setStrokeCap(StrokeCap::Round);
 setStrokeJoin(StrokeJoin::Round);
 beginStroke();
-vertex(50, 50);
-vertex(150, 80);
-vertex(250, 50);
+setColor(1, 0, 0); vertex(40, 120);
+setColor(0, 1, 0); vertex(150, 40);
+setColor(0, 0, 1); vertex(260, 120);
 endStroke();        // open line; pass true to close it into a loop
 ```
 
 - Each `vertex()` stores the **current stroke weight**. Calling `setStrokeWeight` between points changes the width along the line.
 - The cap is the `setStrokeCap` value that is set when the **first** point is added. It is used at both ends, and changing it later has no effect on this stroke. The join is the `setStrokeJoin` value that is set when `endStroke()` is called.
-- The whole stroke is drawn in one color, the color of the **first** point. Calling `setColor()` between points does not make a gradient. Use `beginLines` for colors that change per segment.
+- Each `vertex()` also stores the current `setColor()` color. Each joint and cap uses its vertex's color throughout; each segment blends between its endpoints, with both quad corners at each end using that endpoint's color.
 - Internally it builds a `StrokeMesh`.
 '''
 details.ja = '''
@@ -43429,15 +43438,15 @@ setStrokeWeight(8);
 setStrokeCap(StrokeCap::Round);
 setStrokeJoin(StrokeJoin::Round);
 beginStroke();
-vertex(50, 50);
-vertex(150, 80);
-vertex(250, 50);
+setColor(1, 0, 0); vertex(40, 120);
+setColor(0, 1, 0); vertex(150, 40);
+setColor(0, 0, 1); vertex(260, 120);
 endStroke();        // open line; pass true to close it into a loop
 ```
 
 - 各 `vertex()` は**その時点の線の太さ**を記録します。点の間で `setStrokeWeight` を呼ぶと、線の途中で太さが変わります。
 - cap は、**最初**の点を追加した時点の `setStrokeCap` の値になり、両端に使われます。あとから変えても、そのストロークには反映されません。join は、`endStroke()` を呼んだ時点の `setStrokeJoin` の値になります。
-- ストローク全体が 1 色で、**最初**の点の色で描かれます。点の間で `setColor()` を呼んでもグラデーションにはなりません。線分ごとに色を変えたいときは `beginLines` を使ってください。
+- 各 `vertex()` は、その時点の `setColor()` の色も記録します。各接合部とキャップの全体に、その頂点の色を使います。線分では両端の色を補間し、四角形の各端にある 2 頂点には、その端の色を使います。
 - 内部では `StrokeMesh` を作って描画します。
 '''
 details.ko = '''
@@ -43449,15 +43458,15 @@ setStrokeWeight(8);
 setStrokeCap(StrokeCap::Round);
 setStrokeJoin(StrokeJoin::Round);
 beginStroke();
-vertex(50, 50);
-vertex(150, 80);
-vertex(250, 50);
+setColor(1, 0, 0); vertex(40, 120);
+setColor(0, 1, 0); vertex(150, 40);
+setColor(0, 0, 1); vertex(260, 120);
 endStroke();        // open line; pass true to close it into a loop
 ```
 
 - 각 `vertex()`는 **그 시점의 선 두께**를 기록합니다. 점 사이에서 `setStrokeWeight`를 호출하면 선 도중에 두께가 바뀝니다.
 - cap은 **첫** 점을 추가한 시점의 `setStrokeCap` 값이 되며 양쪽 끝에 사용됩니다. 나중에 바꿔도 그 stroke에는 반영되지 않습니다. join은 `endStroke()`를 호출한 시점의 `setStrokeJoin` 값이 됩니다.
-- stroke 전체가 한 가지 색, 즉 **첫** 점의 색으로 그려집니다. 점 사이에서 `setColor()`를 호출해도 그라데이션이 되지 않습니다. 선분마다 색을 바꾸려면 `beginLines`를 사용하세요.
+- 각 `vertex()`는 그 시점의 `setColor()` 색상도 기록합니다. 각 조인과 캡 전체에는 해당 정점의 색상을 사용합니다. 선분에서는 양 끝의 색상을 보간하며 사각형의 각 끝에 있는 두 정점에는 해당 끝의 색상을 사용합니다.
 - 내부적으로 `StrokeMesh`를 만들어 그립니다.
 '''
 
@@ -44983,21 +44992,21 @@ details.en = '''
 - **The line is always 1 pixel wide.** `fill()`, `noFill()` and `setStrokeWeight` have no effect on it.
 - For a thick line with a chosen cap and join style, use `drawStroke` instead.
 - To draw many separate line segments efficiently at once, use `beginLines()` and `endLines()`.
-- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (the line is always 1 pixel wide; setStrokeWeight() has no effect).
+- Thin lines are intentional: a quad per segment leaves ugly corners where lines meet, costs more than a line even at weight `1.0`, and switching from line to quad at a threshold such as `1.0` vs `1.01` creates a visible discontinuity.
 '''
 details.ja = '''
 - `(x1, y1)` から `(x2, y2)` まで直線を描画します。3D では `Vec3` を 2 つ、または float を 6 個渡します。座標の扱いは `drawRect` と同じで、ローカル座標・論理単位です。
 - **線の太さは常に 1 ピクセルです。** `fill()`、`noFill()`、`setStrokeWeight` はこの関数には効きません。
 - 太さや端・つなぎ目の形を指定できる線を描きたい場合は、代わりに `drawStroke` を使ってください。
 - 独立した線分をまとめて効率よく描きたい場合は、`beginLines()` と `endLines()` を使います。
-- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（線は常に 1 ピクセル幅で、setStrokeWeight() は効かない）。
+- 細い線は意図した設計です。線分ごとの四角形では接合部の角が不自然になり、太さ `1.0` でも線プリミティブより描画コストが高くなります。また、`1.0` と `1.01` のような境界で線と四角形を切り替えると、見た目が不連続に変わります。
 '''
 details.ko = '''
 - `(x1, y1)`에서 `(x2, y2)`까지 직선을 그립니다. 3D에서는 `Vec3` 두 개 또는 float 6개를 전달합니다. 좌표 처리는 `drawRect`와 같으며, 로컬 좌표와 논리 단위를 사용합니다.
 - **선의 두께는 항상 1픽셀입니다.** `fill()`, `noFill()`, `setStrokeWeight`는 이 함수에 영향을 주지 않습니다.
 - 두께와 끝·이음매 모양을 지정할 수 있는 선이 필요하면 대신 `drawStroke`를 사용하세요.
 - 서로 떨어진 여러 선분을 한 번에 효율적으로 그리려면 `beginLines()`와 `endLines()`를 사용합니다.
-- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(선은 항상 1픽셀 폭이며 setStrokeWeight()는 효과가 없음).
+- 가는 선은 의도한 설계입니다. 선분마다 사각형을 사용하면 연결 모서리가 부자연스럽고, 두께 `1.0`에서도 선 프리미티브보다 그리기 비용이 큽니다. 또한 `1.0`과 `1.01` 같은 경계에서 선과 사각형을 전환하면 모양이 눈에 띄게 불연속적으로 바뀝니다.
 '''
 related = ["drawStroke", "beginLines"]
 snippet = '''
@@ -45608,16 +45617,19 @@ description.ja = "現在のストローク描画を終了する。"
 description.ko = "현재 stroke 그리기를 종료한다."
 related = ["beginStroke"]
 details.en = '''
+- Joints and caps use their vertex's stored color; segments blend between endpoint colors. A closed stroke also blends from the last vertex's color back to the first vertex's color.
 - Draws the points added since `beginStroke()` as a thick line with the stroke width, caps and joins, and then empties the buffer. At least 2 points are needed. See `beginStroke` for the full pattern and a code example.
 - `endStroke(true)` closes the line into a loop by connecting the last point back to the first.
 - When you close the loop, a last point placed at the same position as the first point is removed automatically. This prevents a small spike at the closing corner.
 '''
 details.ja = '''
+- 接合部とキャップには、その頂点に記録した色を使い、線分では両端の色を補間します。閉じたストロークでは、最後の頂点から最初の頂点への線分でも色を補間します。
 - `beginStroke()` 以降に追加した点を、線の太さ・cap・join を使った太い線として描画し、バッファを空にします。最低 2 点が必要です。全体の書き方とコード例は `beginStroke` を参照してください。
 - `endStroke(true)` にすると、最後の点を最初の点につないでループとして閉じます。
 - ループを閉じるとき、最後の点が最初の点と同じ位置にあれば、その点は自動的に取り除かれます。これにより、閉じた角に小さなとげが出ることを防ぎます。
 '''
 details.ko = '''
+- 조인과 캡에는 해당 정점에 기록된 색상을 사용하고 선분에서는 양 끝의 색상을 보간합니다. 닫힌 스트로크에서는 마지막 정점에서 첫 정점으로 이어지는 선분의 색상도 보간합니다.
 - `beginStroke()` 이후에 추가한 점을 선 두께, cap, join을 적용한 굵은 선으로 그리고 버퍼를 비웁니다. 최소 2개의 점이 필요합니다. 전체 작성법과 코드 예시는 `beginStroke`를 참고하세요.
 - `endStroke(true)`로 하면 마지막 점을 첫 점에 이어 루프로 닫습니다.
 - 루프를 닫을 때 마지막 점이 첫 점과 같은 위치에 있으면 그 점은 자동으로 제거됩니다. 이렇게 해서 닫는 모서리에 작은 가시가 생기지 않도록 합니다.
@@ -51519,7 +51531,7 @@ related = ["Quaternion", "rotateDeg", "rotateX", "rotateY", "rotateZ", "rotateXD
 details.en = '''
 - All TrussC angles are radians; use `TAU` (`= 2 * PI`, a full turn) instead of degrees or `PI`. A quarter turn is `TAU / 4`.
 - The single-float overload rotates around the Z axis, which is the one used for ordinary 2D drawing.
-- Overloads: three floats or a `Vec3` rotate around X, Y, then Z in that order (Euler angles); a `Quaternion` rotates directly without going through Euler angles, avoiding gimbal-lock issues for compound 3D rotations.
+- Three floats or a `Vec3` compose `Rx(x) * Ry(y) * Rz(z)`, exactly like calling `rotateX(x)`, `rotateY(y)`, then `rotateZ(z)`. With column vectors, Z acts first, then Y, then X. This differs from the `Y * X * Z` convention of `Quaternion::fromEuler` and `Node::setEuler`. The `Quaternion` overload applies the supplied rotation directly.
 - Every function with a *Deg suffix (`rotateDeg`, `rotateXDeg`, ...) takes the same angle in degrees instead; see `rotateDeg`.
 - Rotation always happens around the current origin, which is `(0, 0, 0)` unless moved first with `translate()`. Call `translate()` before `rotate()` to rotate a shape around its own center or position.
 - Like `translate()` and `scale()`, this changes the current matrix until it is restored by `popMatrix()`, `resetMatrix()`, or another call that replaces it.
@@ -51527,7 +51539,7 @@ details.en = '''
 details.ja = '''
 - TrussC の角度はすべてラジアンです。度数や `PI` の代わりに `TAU`（`= 2 * PI`、1回転分）を使ってください。4分の1回転は `TAU / 4` です。
 - 引数が float 1つの形は Z 軸周りに回転します。これが通常の2D描画で使う回転です。
-- オーバーロード: float 3つまたは `Vec3` を渡すと、X → Y → Z の順に回転します（オイラー角）。`Quaternion` を渡すとオイラー角を経由せず直接回転するため、複合的な3D回転でジンバルロックの問題を避けられます。
+- float 3 つまたは `Vec3` を渡すと、`Rx(x) * Ry(y) * Rz(z)` を合成します。`rotateX(x)`、`rotateY(y)`、`rotateZ(z)` をこの順に呼ぶ場合と同じです。列ベクトルには Z、Y、X の順に作用します。`Quaternion::fromEuler` と `Node::setEuler` の `Y * X * Z` 規約とは異なります。`Quaternion` 版は指定した回転を直接適用します。
 - 名前の末尾に Deg が付く関数（`rotateDeg`、`rotateXDeg` など）は、同じ角度を度数で指定できます。詳しくは `rotateDeg` を参照してください。
 - 回転は常に現在の原点を中心に行われます。何も `translate()` していなければ `(0, 0, 0)` が原点です。図形を自分の中心や位置を軸に回転させたい場合は、`rotate()` の前に `translate()` を呼んでください。
 - `translate()` や `scale()` と同様、この呼び出しは現在の行列を変更し、`popMatrix()`、`resetMatrix()`、または行列を上書きする別の呼び出しで元に戻るまで効き続けます。
@@ -51535,7 +51547,7 @@ details.ja = '''
 details.ko = '''
 - TrussC의 모든 각도는 라디안입니다. 도(degree)나 `PI` 대신 `TAU`(`= 2 * PI`, 한 바퀴)를 사용하세요. 4분의 1 회전은 `TAU / 4`입니다.
 - float 하나를 받는 형태는 Z축을 중심으로 회전합니다. 일반적인 2D 그리기에서 사용하는 회전입니다.
-- 오버로드: float 3개 또는 `Vec3`를 넘기면 X → Y → Z 순서로 회전합니다(오일러 각). `Quaternion`을 넘기면 오일러 각을 거치지 않고 직접 회전하므로, 복합적인 3D 회전에서 짐벌락 문제를 피할 수 있습니다.
+- float 3개 또는 `Vec3`를 전달하면 `Rx(x) * Ry(y) * Rz(z)`를 합성합니다. `rotateX(x)`, `rotateY(y)`, `rotateZ(z)`를 이 순서로 호출하는 것과 같습니다. 열벡터에는 Z, Y, X 순서로 작용합니다. `Quaternion::fromEuler`와 `Node::setEuler`의 `Y * X * Z` 규약과 다릅니다. `Quaternion` 오버로드는 주어진 회전을 직접 적용합니다.
 - 이름 끝에 Deg가 붙은 함수(`rotateDeg`, `rotateXDeg` 등)는 같은 각도를 도 단위로 지정할 수 있습니다. 자세한 내용은 `rotateDeg`를 참조하세요.
 - 회전은 항상 현재 원점을 중심으로 이루어집니다. `translate()`를 하지 않았다면 원점은 `(0, 0, 0)`입니다. 도형을 자신의 중심이나 위치를 축으로 회전시키려면 `rotate()` 전에 `translate()`를 호출하세요.
 - `translate()`, `scale()`과 마찬가지로 이 호출은 현재 행렬을 바꾸며, `popMatrix()`, `resetMatrix()`, 또는 행렬을 덮어쓰는 다른 호출로 복원되기 전까지 유지됩니다.
@@ -51559,15 +51571,15 @@ description.ja = "度で以降の描画を回転する。"
 description.ko = "도(degree) 단위로 이후 그리기를 회전한다."
 related = ["rotate", "rotateXDeg", "rotateYDeg", "rotateZDeg"]
 details.en = '''
-- Same as `rotate()` (Z-axis rotation; three floats or `Vec3` rotate X, Y, then Z), except the angle is given in degrees instead of radians.
+- Same as `rotate()` (Z-axis rotation; three floats or `Vec3` compose `X * Y * Z` as successive `rotateXDeg`, `rotateYDeg`, `rotateZDeg` calls), except the angle is given in degrees instead of radians.
 - Prefer `rotate()` with `TAU`-based radians for new code; `rotateDeg()` exists mainly for porting code or math that is naturally expressed in degrees.
 '''
 details.ja = '''
-- `rotate()` と同じです（Z軸周りの回転。float 3つまたは `Vec3` の場合は X → Y → Z の順）。角度をラジアンではなく度数で指定できる点だけが異なります。
+- `rotate()` と同じです（Z 軸周りの回転。float 3 つまたは `Vec3` の場合は、`rotateXDeg`、`rotateYDeg`、`rotateZDeg` の順に呼ぶ場合と同じ `X * Y * Z` の合成）。角度をラジアンではなく度数で指定できる点だけが異なります。
 - 新しく書くコードでは `TAU` を使ったラジアンの `rotate()` を推奨します。`rotateDeg()` は主に、度数が自然な既存コードの移植や計算のために用意されています。
 '''
 details.ko = '''
-- `rotate()`와 동일합니다(Z축 회전. float 3개 또는 `Vec3`일 경우 X → Y → Z 순서). 각도를 라디안이 아닌 도 단위로 지정한다는 점만 다릅니다.
+- `rotate()`와 동일합니다(Z축 회전. float 3개 또는 `Vec3`는 `rotateXDeg`, `rotateYDeg`, `rotateZDeg`를 차례로 호출하는 것과 같은 `X * Y * Z` 합성). 각도를 라디안이 아닌 도 단위로 지정한다는 점만 다릅니다.
 - 새로 작성하는 코드에서는 `TAU` 기반 라디안을 사용하는 `rotate()`를 권장합니다. `rotateDeg()`는 주로 도 단위가 자연스러운 기존 코드를 옮기거나 계산할 때 사용합니다.
 '''
 
@@ -55338,21 +55350,21 @@ details.en = '''
 - You can pass 2D points (`vertex(x, y)`, `vertex(Vec2)`) or 3D points (`vertex(x, y, z)`, `vertex(Vec3)`). For a 2D point, z is 0.
 - Inside `beginShape()`, only the position is stored. `endShape()` uses the color that is set when it is called.
 - Inside `beginLines()`, each point also stores the **current color**. Changing the color between points gives each segment its own colors.
-- Inside `beginStroke()`, each point also stores the **current stroke weight**, so you can change the width along one line. The whole stroke uses the color of its first point.
+- Inside `beginStroke()`, each point stores the **current stroke weight and color**, so width and color can vary along the line. Joints and caps use their vertex's color; segments blend between endpoint colors. See `beginStroke`.
 '''
 details.ja = '''
 - 開いているバッファ（`beginShape`、`beginLines`、`beginStroke` のいずれか）に点を 1 つ追加します。どれも開いていないときは何もしません。
 - 2D の点（`vertex(x, y)`、`vertex(Vec2)`）と 3D の点（`vertex(x, y, z)`、`vertex(Vec3)`）を渡せます。2D の点では z は 0 になります。
 - `beginShape()` の中では位置だけを記録します。色は `endShape()` を呼んだ時点のものが使われます。
 - `beginLines()` の中では、点ごとに**その時点の色**も記録します。点の間で色を変えると、線分ごとに色を付けられます。
-- `beginStroke()` の中では、点ごとに**その時点の線の太さ**も記録するので、1 本の線の中で太さを変えられます。色はストローク全体で最初の点の色になります。
+- `beginStroke()` の中では、点ごとに**その時点の線の太さと色**を記録するので、1 本の線の中で太さと色を変えられます。接合部とキャップにはその頂点の色を使い、線分では両端の色を補間します。`beginStroke` を参照してください。
 '''
 details.ko = '''
 - 열려 있는 버퍼(`beginShape`, `beginLines`, `beginStroke` 중 하나)에 점을 하나 추가합니다. 어느 것도 열려 있지 않으면 아무 일도 하지 않습니다.
 - 2D 점(`vertex(x, y)`, `vertex(Vec2)`)과 3D 점(`vertex(x, y, z)`, `vertex(Vec3)`)을 전달할 수 있습니다. 2D 점의 z는 0이 됩니다.
 - `beginShape()` 안에서는 위치만 기록합니다. 색은 `endShape()`를 호출한 시점의 색이 사용됩니다.
 - `beginLines()` 안에서는 점마다 **그 시점의 색**도 기록합니다. 점 사이에서 색을 바꾸면 선분마다 색을 줄 수 있습니다.
-- `beginStroke()` 안에서는 점마다 **그 시점의 선 두께**도 기록하므로, 한 선 안에서 두께를 바꿀 수 있습니다. 색은 stroke 전체가 첫 점의 색이 됩니다.
+- `beginStroke()` 안에서는 점마다 **그 시점의 선 두께와 색상**을 기록하므로 한 선 안에서 두께와 색상을 바꿀 수 있습니다. 조인과 캡에는 해당 정점의 색상을 사용하며 선분에서는 양 끝의 색상을 보간합니다. `beginStroke`를 참조합니다.
 '''
 
 ["videoCodecName"]

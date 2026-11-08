@@ -130,6 +130,7 @@ public:
         polylines_.clear();
         polylines_.push_back(polyline);
         widths_.clear();
+        colors_.clear();
         bClosed_ = polyline.isClosed();
         bDirty_ = true;
         return *this;
@@ -147,6 +148,7 @@ public:
         polylines_.clear();
         polylines_.push_back(Path());
         widths_.clear();
+        colors_.clear();
         mesh_.clear();
         bDirty_ = true;
         return *this;
@@ -188,7 +190,7 @@ public:
 
             std::vector<float> plWidths(vertWidths.begin() + widthOffset,
                                         vertWidths.begin() + widthOffset + pl.size());
-            appendStrokeToMesh(pl, mesh_, plWidths);
+            appendStrokeToMesh(pl, mesh_, plWidths, widthOffset);
             widthOffset += pl.size();
         }
 
@@ -212,8 +214,12 @@ public:
     }
 
 private:
+    // endStroke supplies the colors captured by vertex(); direct input stays uniform.
+    friend void endStroke(bool close);
+
     std::vector<Path> polylines_;
     std::vector<float> widths_;
+    std::vector<Color> colors_;
     Mesh mesh_;
 
     float strokeWidth_;
@@ -252,16 +258,21 @@ private:
 
     // Add triangle
     void addTriangle(Mesh& mesh, const Vec3& a, const Vec3& b, const Vec3& c, const Color& color) {
+        addTriangle(mesh, a, b, c, color, color, color);
+    }
+
+    void addTriangle(Mesh& mesh, const Vec3& a, const Vec3& b, const Vec3& c,
+                     const Color& colorA, const Color& colorB, const Color& colorC) {
         mesh.addVertex(a);
-        mesh.addColor(color);
+        mesh.addColor(colorA);
         mesh.addVertex(b);
-        mesh.addColor(color);
+        mesh.addColor(colorB);
         mesh.addVertex(c);
-        mesh.addColor(color);
+        mesh.addColor(colorC);
     }
 
     // Main stroke generation logic
-    void appendStrokeToMesh(const Path& pl, Mesh& targetMesh, const std::vector<float>& vertWidths) {
+    void appendStrokeToMesh(const Path& pl, Mesh& targetMesh, const std::vector<float>& vertWidths, size_t colorOffset) {
         const auto& srcVerts = pl.getVertices();
         if (srcVerts.size() < 2) return;
 
@@ -269,14 +280,18 @@ private:
         // Minimum distance is proportional to stroke width to avoid self-intersection
         std::vector<Vec3> verts;
         std::vector<float> filteredWidths;
+        std::vector<Color> filteredColors;
         verts.reserve(srcVerts.size());
         filteredWidths.reserve(vertWidths.size());
+        filteredColors.reserve(srcVerts.size());
 
         for (size_t i = 0; i < srcVerts.size(); i++) {
             float w = (i < vertWidths.size()) ? vertWidths[i] : strokeWidth_;
+            const Color color = i + colorOffset < colors_.size() ? colors_[i + colorOffset] : strokeColor_;
             if (verts.empty()) {
                 verts.push_back(srcVerts[i]);
                 filteredWidths.push_back(w);
+                filteredColors.push_back(color);
             } else {
                 // Skip only if exactly same position (distance ~= 0)
                 Vec3 diff = srcVerts[i] - verts.back();
@@ -284,6 +299,7 @@ private:
                 if (distSq > 0.0001f) {  // epsilon for floating point comparison
                     verts.push_back(srcVerts[i]);
                     filteredWidths.push_back(w);
+                    filteredColors.push_back(color);
                 }
             }
         }
@@ -321,8 +337,8 @@ private:
                 Vec3 left1 = Vec3{p1.x + n.x * hw1, p1.y + n.y * hw1, p1.z};
                 Vec3 right1 = Vec3{p1.x - n.x * hw1, p1.y - n.y * hw1, p1.z};
 
-                addTriangle(targetMesh, left0, right0, left1, strokeColor_);
-                addTriangle(targetMesh, right0, right1, left1, strokeColor_);
+                addTriangle(targetMesh, left0, right0, left1, filteredColors[i0], filteredColors[i0], filteredColors[i1]);
+                addTriangle(targetMesh, right0, right1, left1, filteredColors[i0], filteredColors[i1], filteredColors[i1]);
             }
 
             // Corner processing
@@ -375,7 +391,7 @@ private:
                             float a2 = angleL1 + deltaL * t2;
                             Vec3 pt1 = Vec3{curr.x + std::cos(a1) * hw, curr.y + std::sin(a1) * hw, curr.z};
                             Vec3 pt2 = Vec3{curr.x + std::cos(a2) * hw, curr.y + std::sin(a2) * hw, curr.z};
-                            addTriangle(targetMesh, curr, pt1, pt2, strokeColor_);
+                            addTriangle(targetMesh, curr, pt1, pt2, filteredColors[i]);
                         }
 
                         float angleR1 = angleL1 + HALF_TAU;
@@ -391,12 +407,12 @@ private:
                             float a2 = angleR1 + deltaR * t2;
                             Vec3 pt1 = Vec3{curr.x + std::cos(a1) * hw, curr.y + std::sin(a1) * hw, curr.z};
                             Vec3 pt2 = Vec3{curr.x + std::cos(a2) * hw, curr.y + std::sin(a2) * hw, curr.z};
-                            addTriangle(targetMesh, curr, pt1, pt2, strokeColor_);
+                            addTriangle(targetMesh, curr, pt1, pt2, filteredColors[i]);
                         }
                     } else {
                         // BEVEL or MITER: just fill with triangles on both sides
-                        addTriangle(targetMesh, curr, leftP1, leftP2, strokeColor_);
-                        addTriangle(targetMesh, curr, rightP1, rightP2, strokeColor_);
+                        addTriangle(targetMesh, curr, leftP1, leftP2, filteredColors[i]);
+                        addTriangle(targetMesh, curr, rightP1, rightP2, filteredColors[i]);
                     }
                     continue;
                 }
@@ -409,7 +425,7 @@ private:
                     innerP1 = Vec3{curr.x + n1.x * hw, curr.y + n1.y * hw, curr.z};
                     innerP2 = Vec3{curr.x + n2.x * hw, curr.y + n2.y * hw, curr.z};
                 }
-                addTriangle(targetMesh, curr, innerP1, innerP2, strokeColor_);
+                addTriangle(targetMesh, curr, innerP1, innerP2, filteredColors[i]);
 
                 Vec3 outerP1 = turnsLeft ? Vec3{curr.x + n1.x * hw, curr.y + n1.y * hw, curr.z}
                                          : Vec3{curr.x - n1.x * hw, curr.y - n1.y * hw, curr.z};
@@ -417,7 +433,7 @@ private:
                                          : Vec3{curr.x - n2.x * hw, curr.y - n2.y * hw, curr.z};
 
                 if (joinType_ == JOIN_BEVEL) {
-                    addTriangle(targetMesh, curr, outerP1, outerP2, strokeColor_);
+                    addTriangle(targetMesh, curr, outerP1, outerP2, filteredColors[i]);
                 }
                 else if (joinType_ == JOIN_ROUND) {
                     int segments = std::max(8, (int)(hw * 2));
@@ -440,7 +456,7 @@ private:
                         Vec3 pt1 = Vec3{curr.x + std::cos(a1) * hw, curr.y + std::sin(a1) * hw, curr.z};
                         Vec3 pt2 = Vec3{curr.x + std::cos(a2) * hw, curr.y + std::sin(a2) * hw, curr.z};
 
-                        addTriangle(targetMesh, curr, pt1, pt2, strokeColor_);
+                        addTriangle(targetMesh, curr, pt1, pt2, filteredColors[i]);
                     }
                 }
             }
@@ -504,14 +520,14 @@ private:
             }
 
             for (int i = 0; i < numVerts - 1; i++) {
-                addTriangle(targetMesh, leftPoints[i], rightPoints[i], leftPoints[i + 1], strokeColor_);
-                addTriangle(targetMesh, rightPoints[i], rightPoints[i + 1], leftPoints[i + 1], strokeColor_);
+                addTriangle(targetMesh, leftPoints[i], rightPoints[i], leftPoints[i + 1], filteredColors[i], filteredColors[i], filteredColors[i + 1]);
+                addTriangle(targetMesh, rightPoints[i], rightPoints[i + 1], leftPoints[i + 1], filteredColors[i], filteredColors[i + 1], filteredColors[i + 1]);
             }
 
             if (isClosed && numVerts >= 2) {
                 int last = numVerts - 1;
-                addTriangle(targetMesh, leftPoints[last], rightPoints[last], leftPoints[0], strokeColor_);
-                addTriangle(targetMesh, rightPoints[last], rightPoints[0], leftPoints[0], strokeColor_);
+                addTriangle(targetMesh, leftPoints[last], rightPoints[last], leftPoints[0], filteredColors[last], filteredColors[last], filteredColors[0]);
+                addTriangle(targetMesh, rightPoints[last], rightPoints[0], leftPoints[0], filteredColors[last], filteredColors[0], filteredColors[0]);
             }
         }
 
@@ -526,8 +542,8 @@ private:
                 Vec3 right = Vec3{verts[0].x - startNormal.x * startHW, verts[0].y - startNormal.y * startHW, verts[0].z};
                 Vec3 extLeft = Vec3{left.x - startDir.x * startHW, left.y - startDir.y * startHW, left.z};
                 Vec3 extRight = Vec3{right.x - startDir.x * startHW, right.y - startDir.y * startHW, right.z};
-                addTriangle(targetMesh, left, extLeft, extRight, strokeColor_);
-                addTriangle(targetMesh, left, extRight, right, strokeColor_);
+                addTriangle(targetMesh, left, extLeft, extRight, filteredColors.front());
+                addTriangle(targetMesh, left, extRight, right, filteredColors.front());
             }
             else if (capType_ == CAP_ROUND) {
                 int segments = std::max(8, (int)(startHW * 4));
@@ -546,7 +562,7 @@ private:
                         verts[0].z
                     };
 
-                    addTriangle(targetMesh, verts[0], pt1, pt2, strokeColor_);
+                    addTriangle(targetMesh, verts[0], pt1, pt2, filteredColors.front());
                 }
             }
 
@@ -561,8 +577,8 @@ private:
                 Vec3 right = Vec3{verts[last].x - endNormal.x * endHW, verts[last].y - endNormal.y * endHW, verts[last].z};
                 Vec3 extLeft = Vec3{left.x + endDir.x * endHW, left.y + endDir.y * endHW, left.z};
                 Vec3 extRight = Vec3{right.x + endDir.x * endHW, right.y + endDir.y * endHW, right.z};
-                addTriangle(targetMesh, left, right, extRight, strokeColor_);
-                addTriangle(targetMesh, left, extRight, extLeft, strokeColor_);
+                addTriangle(targetMesh, left, right, extRight, filteredColors.back());
+                addTriangle(targetMesh, left, extRight, extLeft, filteredColors.back());
             }
             else if (capType_ == CAP_ROUND) {
                 int segments = std::max(8, (int)(endHW * 4));
@@ -581,7 +597,7 @@ private:
                         verts[last].z
                     };
 
-                    addTriangle(targetMesh, verts[last], pt1, pt2, strokeColor_);
+                    addTriangle(targetMesh, verts[last], pt1, pt2, filteredColors.back());
                 }
             }
         }
@@ -650,12 +666,11 @@ inline void endStroke(bool close) {
     stroke.setCapType(toMeshCap(wctx.strokeStartCap));  // Start cap from first vertex
     stroke.setJoinType(toMeshJoin(ctx.getStrokeJoin()));
 
-    // Add vertices with per-vertex width
-    // Note: StrokeMesh uses single color, so we use first vertex's color
-    stroke.setColor(verts[0].color);
-
+    // Keep each captured color paired with its source position and width.
+    stroke.colors_.reserve(verts.size());
     for (auto& v : verts) {
         stroke.addVertexWithWidth(v.pos, v.width);
+        stroke.colors_.push_back(v.color);
     }
 
     if (close) {
