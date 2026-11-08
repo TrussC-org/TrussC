@@ -51,6 +51,17 @@ MAX_ACTIVE_REQUESTS = 16
 REQUEST_DEADLINE_SECONDS = 30
 
 
+ADAPTER_INFO = """
+(async () => {
+    const adapter = navigator.gpu && await navigator.gpu.requestAdapter();
+    if (!adapter) return 'none';
+    const info = adapter.info || {};
+    const fallback = adapter.isFallbackAdapter ?? info.isFallbackAdapter;
+    return `vendor=${info.vendor || '?'} architecture=${info.architecture || '?'} fallback=${fallback ?? '?'}`;
+})()
+"""
+
+
 def remaining(deadline):
     # Bound (platform): a stalled browser must not hang the run. Overflow fails the run.
     left = deadline - time.monotonic()
@@ -261,6 +272,7 @@ def main():
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--url', help='Capture an already served example instead of the harness')
     parser.add_argument('--page', default='index.html', help='Page relative to --build-dir (may include a query string)')
+    parser.add_argument('--print-adapter', action='store_true', help="Print the browser's WebGPU adapter (vendor/architecture/fallback) before the verdict")
     parser.add_argument('--screenshot', type=Path)
     parser.add_argument('--frames', type=int, help='For examples: freeze clocks and capture this requestAnimationFrame count')
     parser.add_argument('--ready', default='document.querySelector("#verdict")?.textContent', help='JS expression returning a completed verdict; for examples use a frame-count condition')
@@ -325,6 +337,10 @@ def main():
                     result = connection.call('Runtime.evaluate', {'expression': 'window.tcCaptureVerdict' if args.frames else args.ready, 'returnByValue': True})
                     verdict = result.get('result', {}).get('value')
                     if verdict and verdict != 'RUNNING':
+                        if args.print_adapter:
+                            # Which GPU the browser picked, so a device-lane PASS names it.
+                            info = connection.call('Runtime.evaluate', {'expression': ADAPTER_INFO, 'awaitPromise': True, 'returnByValue': True})
+                            print('adapter: ' + str(info.get('result', {}).get('value')), flush=True)
                         print(verdict, flush=True)
                         if args.screenshot:
                             data = connection.call('Page.captureScreenshot', {'format': 'png'})['data']

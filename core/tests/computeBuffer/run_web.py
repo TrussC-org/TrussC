@@ -25,7 +25,7 @@ def main():
     spec.loader.exec_module(harness)
     sys.argv = [str(spec.origin), '--build-dir', str(args.build_dir),
                 '--page', f'computeBuffer.html?mode={args.mode}',
-                '--ready', 'window.tcComputeBufferVerdict', '--adapter', args.adapter,
+                '--ready', 'window.tcComputeBufferVerdict', '--adapter', args.adapter, '--print-adapter',
                 '--chrome', args.chrome, '--timeout', str(args.timeout)]
     return harness.main()
 
