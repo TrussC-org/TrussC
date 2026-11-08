@@ -783,6 +783,9 @@ int main() {
         check("12. each time, the new connection stays open", stayedOpen == rounds);
         check("12. each time, the new port carries data", carried == rounds);
     }
+#else
+    std::puts("SKIP: serialHangup section 11 (I/O calls do not wait for each other): needs the Linux write() interposer");
+    std::puts("SKIP: serialHangup section 12 (old connection loss leaves the new one alone): needs the Linux write() interposer");
 #endif
 
 #if defined(__linux__)
@@ -827,6 +830,8 @@ int main() {
             check("13. close() then closes it", !serial.isConnected());
         }
     }
+#else
+    std::puts("SKIP: serialHangup section 13 (connection queries do not wait for close()): needs the Linux write() interposer");
 #endif
 
     // --- 14. a Logger listener may call the Serial that is logging ---------
@@ -992,6 +997,8 @@ int main() {
                   rec.count == 0 && !serial.isConnected());
         }
     }
+#else
+    std::puts("SKIP: serialHangup section 17 (refusal before the lock): needs the Linux write() interposer");
 #endif
 
     // --- 18. Android setup() keeps the new port by the backend's result -----

@@ -130,6 +130,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -1638,6 +1639,9 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     // Deliberately invalid guest images must fail without a system dialog in tests.
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+#else
+    // A test-output consumer may close stdout before the checks finish.
+    std::signal(SIGPIPE, SIG_IGN);
 #endif
     if (argc > 1 && std::string(argv[1]) == "--c4-checks") return c4::run();
     if (argc > 2 && std::string(argv[1]) == "--build") {

@@ -65,8 +65,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
             internal::appExitCode() = 0;
             check(cleanedUp, "normal App cleanup runs");
             check(updates == (mode == "--window-cancel" ? 2 : 1), "cancel controls continued updates");
-            std::printf("deviceLost %s: app code=%d, updates=%d, cleanup=%d\n",
-                        mode.c_str(), code, updates, cleanedUp);
+            std::printf("deviceLost %s: %s (app code=%d, updates=%d, cleanup=%d)\n",
+                        mode.c_str(), failures ? "FAIL" : "PASS", code, updates, cleanedUp);
         });
     }
 
@@ -150,6 +150,6 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     exitApp();
     check(internal::appExitCode() == 0, "no-argument exit remains success");
     internal::shutdownRuntime();
-    std::printf("deviceLost headless: %d failures\n", failures);
+    std::printf("deviceLost headless: %s (%d failures)\n", failures ? "FAIL" : "PASS", failures);
     return failures ? 1 : 0;
 }
