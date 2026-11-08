@@ -94,6 +94,7 @@ void resetFixture() {
 vector<bool> dispatches;
 vector<thread::id> dispatchThreads;
 IdleX11* dispatchX11 = nullptr;
+IdleSession* dispatchSession = nullptr;
 Display* dispatchDisplay = fakeDisplay();
 bool throwDispatch = false;
 bool requestDuringRelease = false;
@@ -108,6 +109,7 @@ void probeDispatch(bool enabled, bool headless) {
         if (write(exitWriter, &value, 1) != 1) abort();
     }
     if (dispatchX11) dispatchX11->apply(enabled, headless ? nullptr : dispatchDisplay);
+    if (dispatchSession) dispatchSession->apply(enabled, headless);
     if (!enabled && requestDuringRelease) {
         thread worker([] { probeSet(true); });
         worker.join();
@@ -326,12 +328,94 @@ int realX11() {
     XCloseDisplay(observer);
     return failures ? 1 : 0;
 }
+int dbusLoadCount = 0;
+void* missingDBus(const char* name, int flags) {
+    check("optional libdbus loaded locally", !strcmp(name, "libdbus-1.so.3") &&
+          flags == (RTLD_NOW | RTLD_LOCAL));
+    ++dbusLoadCount;
+    return nullptr;
+}
+int sessionProbe(const char* mode) {
+    // Refuse to touch an inherited desktop bus. The Python runner sets both
+    // variables inside a new dbus-run-session, even for the missing-bus case.
+    const char* address = getenv("DBUS_SESSION_BUS_ADDRESS");
+    const char* expected = getenv("TC_KEEP_SCREEN_TEST_BUS");
+    if (!address || !expected || strcmp(address, expected)) return 2;
+    bool productionUnavailable = !strcmp(mode, "production-no-service");
+    if (!strcmp(mode, "production") || productionUnavailable) {
+        // Exercise the linked API/dispatcher/backend as well as the injected copy.
+        int warnings = 0;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.message.find("No screen-saver inhibit service") != string::npos) {
+                check("production unsupported session uses Warning", event.level == LogLevel::Warning);
+                ++warnings;
+            }
+        });
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            trussc::setKeepScreenOn(true);
+            for (int frame = 0; frame < 100; ++frame)
+                trussc::internal::updateKeepScreenOn(false);
+        }
+        check("production on/on warns once without frame retries", warnings == (productionUnavailable ? 1 : 0));
+        for (bool enabled : {false, true}) {
+            trussc::setKeepScreenOn(enabled);
+            trussc::internal::updateKeepScreenOn(false);
+        }
+        check("production off/on warns again", warnings == (productionUnavailable ? 2 : 0));
+        atexit([] { trussc::internal::shutdownKeepScreenOn(); });
+        return failures ? 1 : 0;
+    }
+    resetFixture();
+    // Static storage remains alive during the normal-exit cleanup callback.
+    static auto x = injectedX11();
+    dispatchX11 = &x;
+    static IdleSession session;
+    dispatchSession = &session;
+    bool headless = !strcmp(mode, "headless");
+    bool noLibrary = !strcmp(mode, "no-library");
+    bool supported = !strcmp(mode, "service") || !strcmp(mode, "exit");
+    if (noLibrary || headless) session.openLibrary = missingDBus;
+    int warnings = 0;
+    auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+        if (event.message.find("No screen-saver inhibit service") != string::npos) {
+            check("unsupported session uses Warning", event.level == LogLevel::Warning);
+            ++warnings;
+        }
+    });
+    probeSet(true); internal::probeUpdate(headless);
+    probeSet(true); internal::probeUpdate(headless);
+    for (int frame = 0; frame < 100; ++frame) {
+        internal::probeUpdate(headless);
+        session.apply(true, headless); // No retry after a failed enable either.
+    }
+    check("unavailable session on/on warns once without frame retries", warnings == (supported ? 0 : 1));
+    if (noLibrary) check("on/on attempts optional library only once", dbusLoadCount == 1);
+    check("session inhibition matches availability", session.inhibited == supported);
+    if (supported) check("returned cookie stored", session.cookie == 1041);
+    check("Xss still used alongside session backend", headless ? suspends.empty() : suspends == vector<bool>({true}));
+    if (!strcmp(mode, "exit")) {
+        // Use the production backend's normal shutdown path at process exit.
+        atexit([] { internal::probeShutdown(); });
+        return failures ? 1 : 0;
+    }
+    probeSet(false); internal::probeUpdate(headless);
+    check("false releases cookie and private connection", !session.inhibited && !session.connection && session.cookie == 0);
+    probeSet(true); internal::probeUpdate(headless);
+    internal::probeShutdown(); internal::probeShutdown();
+    check("unavailable session warns on each off/on transition", warnings == (supported ? 0 : 2));
+    if (noLibrary) check("off/on retries optional library once", dbusLoadCount == 2);
+    check("Xss release preserved", headless ? suspends.empty() : suspends == vector<bool>({true, false, true, false}));
+    if (headless) check("headless does not open libdbus or Xss", dbusLoadCount == 0 && loadCount == 0);
+    dispatchSession = nullptr; dispatchX11 = nullptr;
+    return failures ? 1 : 0;
+}
 #endif
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
 #if defined(__linux__) && !defined(__ANDROID__)
     if (argc == 2 && !strcmp(argv[1], "--x11-probe")) return realX11();
+    if (argc == 3 && !strcmp(argv[1], "--session-probe")) return sessionProbe(argv[2]);
 #ifdef TC_IDLE_CHECK_XSS_ABI
     check("private prototypes match optional public headers", true);
 #else
