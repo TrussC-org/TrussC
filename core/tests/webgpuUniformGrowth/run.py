@@ -260,6 +260,7 @@ def main():
                         help="WebGPU adapter: swiftshader (default), or Chrome's default selection for device checks")
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--url', help='Capture an already served example instead of the harness')
+    parser.add_argument('--page', default='index.html', help='Page relative to --build-dir (may include a query string)')
     parser.add_argument('--screenshot', type=Path)
     parser.add_argument('--frames', type=int, help='For examples: freeze clocks and capture this requestAnimationFrame count')
     parser.add_argument('--ready', default='document.querySelector("#verdict")?.textContent', help='JS expression returning a completed verdict; for examples use a frame-count condition')
@@ -269,7 +270,7 @@ def main():
     handler = partial(Handler, directory=str(args.build_dir.resolve()))
     server = AssetServer(('127.0.0.1', 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    url = args.url or f'http://127.0.0.1:{server.server_port}/index.html'
+    url = args.url or f'http://127.0.0.1:{server.server_port}/{args.page}'
     print('URL:', url, flush=True)
     try:
         with tempfile.TemporaryDirectory(prefix='webgpu-chrome-') as profile:
