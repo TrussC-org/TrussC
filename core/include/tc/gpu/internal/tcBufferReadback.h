@@ -1,7 +1,6 @@
 #pragma once
 #include "../tcReadbackResult.h"
 #include <deque>
-#include <vector>
 #include <functional>
 #include <memory>
 
@@ -27,11 +26,12 @@ public:
     }
     void cancelAppCallbacks(const std::shared_ptr<AppOwner>& owner) {
         // Keep backend requests until polling retires their native resources.
-        // Destroy the captures after the scan: their destructors may retire
-        // another App or enqueue, which must not touch the deque mid-loop.
-        std::vector<std::function<void(ReadbackResult)>> released;
-        for (auto& request : pending_) {
-            if (request && request->owner.lock() == owner) released.push_back(std::move(request->callback));
+        // Index, not iterators: a released capture's destructor may retire
+        // another App or enqueue. No allocation, so retirement always completes.
+        for (size_t i = 0; i < pending_.size(); ++i) {
+            if (!pending_[i] || pending_[i]->owner.lock() != owner) continue;
+            auto released = std::move(pending_[i]->callback);
+            pending_[i]->callback = {};
         }
     }
     void poll() {
@@ -50,11 +50,13 @@ public:
     }
     void shutdown() noexcept {
         accepting_ = false;
-        // Drop callbacks while the GPU context still exists. Move the requests
-        // out first, so capture destructors that retire an App scan an empty queue.
-        auto dropped = std::move(pending_);
-        pending_.clear();
-        dropped.clear();
+        // Drop callbacks while the GPU context still exists. Detach each request
+        // before destroying it, so a capture destructor that retires an App scans
+        // a consistent queue. pop_back never allocates.
+        while (!pending_.empty()) {
+            auto request = std::move(pending_.back());
+            pending_.pop_back();
+        }
     }
 private:
     bool accepting_ = true;
