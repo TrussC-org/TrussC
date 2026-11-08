@@ -210,6 +210,13 @@ class ShadowApp : public App {
             check("PBR without shadows has no shadow generation", !a_->shadow.storage &&
                 pending.size() == 1 && !pending.back().cmd.shadowGeneration);
         });
+        add(0, [this] {
+            start(0,1024); queue(true);
+            const auto& pending = internal::currentTarget().deferredPbrDraws;
+            check("main Fbo PBR without shadows has no shadow generation", !a_->shadow.storage &&
+                pending.size() == 1 && !pending.back().cmd.shadowGeneration);
+            fbo_.end();
+        });
         add(0, [this] { scene(0,1024); }, [this] {
             capture();
             check("main shadow default remains 1024", a_->shadow.storage && a_->shadow.storage->resolution == 1024);
@@ -238,7 +245,7 @@ class ShadowApp : public App {
         }
         add(0, {}, [this] { a_->shadow.storage.reset(); a_->shadow.count = 0; });
     }
-    void growthCases(bool foreign) {
+    void growthCases(bool foreign, bool fbo = false) {
         struct Growth {
             Pixels reference;
             std::weak_ptr<internal::ShadowStorage> old;
@@ -246,28 +253,49 @@ class ShadowApp : public App {
             sg_view view{};
         };
         auto growth = std::make_shared<Growth>();
-        add(0, [this] { scene(0,64); }, [=,this] { growth->reference = capture(); });
+        add(0, [=,this] {
+            // Storage never shrinks; each variant must actually grow from 64 to 256.
+            a_->shadow.storage.reset(); a_->shadow.count = 0;
+            scene(0,64,fbo);
+        }, [=,this] { growth->reference = capture(fbo); });
         add(0, {}, [=,this] {
-            start(0,64); shadow(0); queue();
-            auto& pending = a_->swapchainTarget.deferredPbrDraws;
+            start(0,64); shadow(0); queue(fbo);
+            auto& pending = internal::currentTarget().deferredPbrDraws;
             growth->old = a_->shadow.storage;
             growth->image = a_->shadow.storage->colorImage;
             growth->view = a_->shadow.storage->colorTexture;
+            check(fbo ? "main Fbo PBR is deferred and pins its owner generation/view" :
+                "main screen PBR is deferred and pins its owner generation/view", pending.size() == 1 &&
+                pending.back().cmd.shadowGeneration == growth->old.lock() &&
+                pending.back().cmd.bind.views[VIEW_tc_pbr_shadowMap].id == growth->view.id);
             check("growth publishes a complete new generation", internal::ensureShadowStorage(*a_,256) &&
-                a_->shadow.storage->resolution == 256 && a_->shadow.count == 0 &&
-                pending.size() == 1 && pending.back().cmd.shadowGeneration == growth->old.lock());
+                a_->shadow.storage != growth->old.lock() && a_->shadow.storage->resolution == 256 &&
+                a_->shadow.count == 0 &&
+                pending.size() == 1 && pending.back().cmd.shadowGeneration == growth->old.lock() &&
+                pending.back().cmd.bind.views[VIEW_tc_pbr_shadowMap].id == growth->view.id);
+            check("growth preserves older recording resources", !growth->old.expired() &&
+                sg_query_image_state(growth->image) == SG_RESOURCESTATE_VALID &&
+                sg_query_view_state(growth->view) == SG_RESOURCESTATE_VALID);
         });
         if (foreign) add(1, [this] { scene(1,128); }, [=,this] {
             check("old generation survives foreign retirement", !growth->old.expired() &&
                 sg_query_image_state(growth->image) == SG_RESOURCESTATE_VALID &&
                 sg_query_view_state(growth->view) == SG_RESOURCESTATE_VALID);
         });
-        add(0, {}, [=,this] {
-            matches("older recording renders after growth",capture(),growth->reference);
+        add(0, [=,this] { if (fbo) fbo_.end(); }, [=,this] {
+            matches(fbo ? "older Fbo recording renders after growth" : "older recording renders after growth",
+                capture(fbo),growth->reference);
             check("old generation retires after consumer commit", growth->old.expired() &&
                 sg_query_image_state(growth->image) == SG_RESOURCESTATE_INVALID &&
                 sg_query_view_state(growth->view) == SG_RESOURCESTATE_INVALID);
         });
+        if (fbo) {
+            auto reference = std::make_shared<Pixels>();
+            add(0, [this] { scene(0,256,true); }, [=,this] { *reference = capture(true); });
+            add(0, [this] { scene(0,256,true); }, [=,this] {
+                matches("grown Fbo PBR matches isolated reference",capture(true),*reference);
+            });
+        }
     }
     void crossWindowCases() {
         pair(0,1024,1024);
@@ -292,6 +320,7 @@ class ShadowApp : public App {
         });
 
         growthCases(true);
+        growthCases(false,true);
         pair(0,256,128);
         add(0, {}, [this] { reportBytes(); });
 
@@ -326,7 +355,7 @@ class ShadowApp : public App {
         });
     }
     void finishCases() {
-        check("all expected comparison pairs ran", capturePair_ == (crossWindowCases_ ? 16 : 4));
+        check("all expected comparison pairs ran", capturePair_ == (crossWindowCases_ ? 18 : 6));
         check("unused window PBR case ran", !crossWindowCases_ || unusedDrew_);
         check("unused window still allocates zero shadow bytes", !unused_ ||
             !trussc::internal::WindowRequestAccess::context(*unused_).shadow.storage);
@@ -341,10 +370,16 @@ class ShadowApp : public App {
         check("native target available in its own tick", ctx.tickActive && !sc.invalid &&
             sc.width == 128 && sc.height == 96 && sc.sample_count == 1 &&
             sc.color_format != SG_PIXELFORMAT_NONE && sc.depth_format != SG_PIXELFORMAT_NONE);
+#if defined(SOKOL_D3D11) && defined(_WIN32)
+        check("D3D11 native target views and BGRA8 format", sc.d3d11.render_view &&
+            sc.d3d11.depth_stencil_view && !sc.d3d11.resolve_view &&
+            sc.color_format == SG_PIXELFORMAT_BGRA8);
+#endif
     }
     void drawWindow(int n) {
         if (closingOwner_) {
             if (n) return;
+            // Bound (native close): allow 60 main frames for the requested teardown to reach its safe point.
             if (b_->isOpen() && ++closeWait_ < 60) return;
             check("requested owner closed at native safe point", !b_->isOpen());
             internal::endGpuFrame();
@@ -379,6 +414,7 @@ class ShadowApp : public App {
         if (n || step_ != steps_.size() || closingOwner_) return;
         if (crossWindowCases_) return;
         if (secondarySkipped_) { finishCases(); return; }
+        // Bound (presentation admission): wait at most 600 main frames for the secondary's first presentation.
         if (secondaryPresented_) {
             crossWindowCases_ = true;
             steps_.clear(); step_ = 0;
@@ -390,6 +426,7 @@ class ShadowApp : public App {
             secondarySkipped_ = true;
             steps_.clear(); step_ = 0;
             growthCases(false);
+            growthCases(false,true);
             auto reference = std::make_shared<Pixels>();
             add(0, [this] { scene(0,256); }, [=,this] { *reference = capture(); });
             add(0, [this] { scene(0,256); }, [=,this] {
