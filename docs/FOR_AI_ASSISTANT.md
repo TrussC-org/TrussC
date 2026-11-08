@@ -2283,7 +2283,7 @@ bool saveScreenshot(const std::filesystem::path & path)  // Queues a screenshot 
 void setClipboardString(const std::string & text)  // Copies text to the clipboard.
 void setFullscreen(bool full)  // Sets the window fullscreen state.
 void setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates.
-void setKeepScreenOn(bool enabled) [macos,windows,linux,android,ios,web]  // Requests that the display stay on.
+void setKeepScreenOn(bool enabled) [macos,windows,linux,android,ios,web]  // Requests that the display stay on and the screen saver stay inactive.
 void setMaxUpdateSteps(int steps)  // Sets the maximum number of fixed update steps per loop pass.
 void setOrientation(Orientation mask) [android,ios]  // Sets the allowed screen orientations.
 void setWindowDecorated(bool decorated)  // Controls the resolved Window's standard decorations.

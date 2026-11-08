@@ -26,6 +26,16 @@ BOOL WINAPI testCounter(LARGE_INTEGER* value) {
     value->QuadPart = fakeCounterValue;
     return TRUE;
 }
+int screenPowerDefaults;
+constexpr LRESULT screenPowerDefaultResult = 123;
+LRESULT WINAPI testDefWindowProc(HWND hwnd, UINT message, WPARAM command, LPARAM parameter) {
+    if (message == WM_SYSCOMMAND && ((command & 0xFFF0) == SC_SCREENSAVE ||
+                                   (command & 0xFFF0) == SC_MONITORPOWER)) {
+        ++screenPowerDefaults;
+        return screenPowerDefaultResult; // Record without starting a real saver or powering off.
+    }
+    return DefWindowProcW(hwnd, message, command, parameter);
+}
 void* testCalloc(size_t n, size_t size) { return failTitle ? nullptr : std::calloc(n, size); }
 BOOL WINAPI testClientRect(HWND hwnd, LPRECT rect) {
     ++clientCalls;
@@ -56,6 +66,7 @@ void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 #define DestroyWindow testDestroyWindow
 #define ShowWindow testShowWindow
 #define QueryPerformanceCounter testCounter
+#define DefWindowProcW testDefWindowProc
 #define SOKOL_NO_ENTRY
 #define SOKOL_APP_TC_IMPL
 #include "sokol_app_tc.h"
@@ -65,6 +76,7 @@ void operator delete(void* p, const std::nothrow_t&) noexcept { std::free(p); }
 #undef DestroyWindow
 #undef ShowWindow
 #undef QueryPerformanceCounter
+#undef DefWindowProcW
 
 namespace trussc::internal {
 void setSessionActivityProbe(bool (*)()) noexcept {}
@@ -685,8 +697,28 @@ void nativeChecks() {
     sapp_tc_window_skip_present(second); _sapp_tc_win32_tick(other);
     check("secondary skip is independent of first", !first->skip_present && !other->skip_present && b.presents == 1);
     first->desc.tick_cb = saved; first->swap_chain = a.real; other->swap_chain = b.real;
+    // Process-wide keep-screen-on suppression, with both windows windowed.
+    check("keep-screen-on defaults off", !_sapp_tc_win32_keep_screen_on && !_sapp_tc_win32_any_fullscreen());
+    const int defaultsBefore = screenPowerDefaults;
+    sapp_tc_win32_set_keep_screen_on(true);
+    sapp_tc_win32_set_keep_screen_on(true);
+    for (auto* entry : {first, other}) {
+        check("keep-screen-on refuses both power commands on every HWND",
+            SendMessageW(entry->hwnd, WM_SYSCOMMAND, SC_SCREENSAVE | 1, 0) == 0 &&
+            SendMessageW(entry->hwnd, WM_SYSCOMMAND, SC_MONITORPOWER, 0) == 0);
+    }
+    check("inhibited power commands never reach the default procedure", screenPowerDefaults == defaultsBefore);
+    sapp_tc_win32_set_keep_screen_on(false);
+    for (auto* entry : {first, other}) {
+        check("disabling keep-screen-on restores both default power commands",
+            SendMessageW(entry->hwnd, WM_SYSCOMMAND, SC_SCREENSAVE, 0) == screenPowerDefaultResult &&
+            SendMessageW(entry->hwnd, WM_SYSCOMMAND, SC_MONITORPOWER | 1, 0) == screenPowerDefaultResult);
+    }
+    check("released power commands reach the default procedure", screenPowerDefaults == defaultsBefore + 4);
     // Process-wide fullscreen suppression, regardless of the message recipient.
+    sapp_tc_win32_set_keep_screen_on(true);
     sapp_tc_window_set_fullscreen(second,true);
+    sapp_tc_win32_set_keep_screen_on(false);
     check("secondary-only fullscreen suppresses screensaver on every HWND", _sapp_tc_win32_any_fullscreen() &&
         SendMessageW(first->hwnd,WM_SYSCOMMAND,SC_SCREENSAVE,0) == 0 && SendMessageW(other->hwnd,WM_SYSCOMMAND,SC_MONITORPOWER,0) == 0);
     sapp_tc_window_set_fullscreen(second,false);

@@ -1,4 +1,4 @@
-"""Run the Windows native fixture's close client and launch routing without a GPU."""
+"""Run Windows power-command policy and native fixture contracts without a GPU."""
 from pathlib import Path
 import os
 import subprocess
@@ -11,6 +11,73 @@ SOURCE = Path(os.environ.get('TC_WIN32_FIXTURE_SOURCE', ROOT / 'core/tests/nativ
 
 
 class NativeFixtureTests(unittest.TestCase):
+    def test_keep_screen_on_power_commands(self):
+        header = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+        platform = (ROOT / 'core/platform/win/tcPlatform_win.cpp').read_text(encoding='utf-8')
+        state_start = header.index('static bool _sapp_tc_win32_keep_screen_on')
+        state = header[state_start:header.index('\n', state_start)]
+        setter = body(header, 'extern "C" void sapp_tc_win32_set_keep_screen_on(')
+        apply_request = body(platform, 'void applyKeepScreenOn(')
+        procedure_start = header.index('static LRESULT _sapp_tc_wndproc_impl(')
+        branch_start = header.index('        case WM_SYSCOMMAND:', procedure_start)
+        branch_end = header.index('        case WM_ERASEBKGND:', branch_start)
+        code = r'''
+#include <cassert>
+#include <initializer_list>
+constexpr unsigned WM_SYSCOMMAND = 0x112, SC_SCREENSAVE = 0xF140;
+constexpr unsigned SC_MONITORPOWER = 0xF170, SC_KEYMENU = 0xF100;
+constexpr unsigned ES_DISPLAY_REQUIRED = 1, ES_SYSTEM_REQUIRED = 2, ES_CONTINUOUS = 4;
+bool fullscreen = false;
+bool _sapp_tc_win32_any_fullscreen() { return fullscreen; }
+unsigned executionState = ES_CONTINUOUS;
+void SetThreadExecutionState(unsigned value) { executionState = value; }
+int defaultCalls = 0;
+int DefWindowProcW(int, unsigned, unsigned, int) { ++defaultCalls; return 123; }
+''' + state + '\n' + setter + '\n' + apply_request + r'''
+int powerCommand(int hwnd, unsigned msg, unsigned wParam, int lParam) {
+    switch (msg) {
+''' + header[branch_start:branch_end] + r'''
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+void expectPowerCommands(int expected) {
+    for (int hwnd : {1, 2}) {
+        for (unsigned command : {SC_SCREENSAVE, SC_MONITORPOWER}) {
+            assert(powerCommand(hwnd, WM_SYSCOMMAND, command, 0) == expected);
+            assert(powerCommand(hwnd, WM_SYSCOMMAND, command | 1, 0) == expected);
+        }
+    }
+}
+int main() {
+    expectPowerCommands(123);
+    assert(defaultCalls == 8);
+    applyKeepScreenOn(true, false);
+    assert(executionState == (ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED));
+    expectPowerCommands(0);
+    assert(defaultCalls == 8);
+    applyKeepScreenOn(true, false);
+    expectPowerCommands(0);
+    applyKeepScreenOn(false, false);
+    assert(executionState == ES_CONTINUOUS);
+    expectPowerCommands(123);
+    assert(defaultCalls == 16);
+    fullscreen = true;
+    expectPowerCommands(0);
+    applyKeepScreenOn(true, false);
+    applyKeepScreenOn(false, false);
+    expectPowerCommands(0); // Disabling the request preserves fullscreen suppression.
+    assert(defaultCalls == 16);
+    fullscreen = false;
+    expectPowerCommands(123);
+    assert(defaultCalls == 24);
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / 'power.cpp').write_text(code, encoding='utf-8')
+            subprocess.run(['c++', '-std=c++20', str(path / 'power.cpp'), '-o', str(path / 'power')], check=True)
+            subprocess.run([str(path / 'power')], check=True)
+
     def test_initial_dimensions_use_granted_client_area(self):
         source = SOURCE.read_text(encoding='utf-8')
         predicate = body(source, 'bool initialDimensionsMatchClient(')
