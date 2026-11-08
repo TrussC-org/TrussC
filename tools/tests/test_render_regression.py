@@ -51,17 +51,18 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(calls[0], ['git','merge-base','base-sha','head-sha'])
         adds = [c for c in calls if c[:3] == ['git','worktree','add']]
         self.assertEqual([c[-1] for c in adds], ['head-sha','merge-base-sha'])
-        modes = [c for c in calls if c[0].endswith('/binary')]
+        # The recorded path uses the platform's separators.
+        modes = [c for c in calls if Path(c[0]).name == 'binary']
         self.assertEqual([c[1] for c in modes], ['--self-check','--record','--compare'])
-        self.assertIn('/base/binary',modes[1][0])
-        self.assertIn('/head/binary',modes[2][0])
+        self.assertIn('/base/binary',Path(modes[1][0]).as_posix())
+        self.assertIn('/head/binary',Path(modes[2][0]).as_posix())
         self.assertEqual(modes[1][2], modes[2][2])
         removes = [c for c in calls if c[:3] == ['git','worktree','remove']]
         self.assertEqual([c[-1] for c in removes], [c[-2] for c in reversed(adds)])
 
     def test_first_batch_only_checks_head(self):
         calls = self.exercise(has_base=False)
-        self.assertEqual([c[1] for c in calls if c[0].endswith('/binary')], ['--self-check'])
+        self.assertEqual([c[1] for c in calls if Path(c[0]).name == 'binary'], ['--self-check'])
         self.assertEqual(sum(c[:3] == ['git','worktree','add'] for c in calls),1)
         self.assertEqual(sum(c[:3] == ['git','worktree','remove'] for c in calls),1)
 
@@ -105,7 +106,10 @@ class DriverTests(unittest.TestCase):
 
     def test_builds_share_cache_with_checkout_relative_paths(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
-            tree = Path(temp); binary = tree/driver.HARNESS/'bin/renderRegression'
+            # Same per-platform binary path as render_regression.build().
+            tree = Path(temp); binary = tree/driver.HARNESS/'bin'/('renderRegression.exe' if driver.sys.platform == 'win32' else 'renderRegression')
+            if driver.sys.platform == 'darwin':
+                binary = tree/driver.HARNESS/'bin/renderRegression.app/Contents/MacOS/renderRegression'
             binary.parent.mkdir(parents=True); binary.touch()
             with patch.dict(driver.os.environ, CMAKE_C_COMPILER_LAUNCHER='ccache',
                             CMAKE_CXX_COMPILER_LAUNCHER='ccache'), patch.object(driver, 'run') as run:
