@@ -11,6 +11,7 @@ int visibilityMapCount(unsigned long);
 int visibilitySwapCount(unsigned long);
 int visibilityInvalidationCount(unsigned long);
 bool visibilityMapped(const void*, unsigned long);
+bool visibilityHasWindowManager(const void*);
 bool visibilityFramePosition(const void*, unsigned long, int&, int&);
 bool visibilityWaitMapped(const void*, unsigned long, bool);
 bool visibilityBluePixel(const void*, unsigned long);
@@ -22,6 +23,7 @@ bool visibilityFinalSizePresented(const void*, unsigned long, bool, int);
 namespace {
 int failures = 0;
 bool startVisible = false, fullscreen = false, finished = false, decoratedMain = false;
+bool windowManager = true;
 int mainDraws = 0, secondaryDraws = 0, secondaryUpdates = 0;
 bool hideInAppDraw = false, hideInDrawListener = false, hideInOnRender = false, hideInAfterFrame = false;
 int drawHides = 0, hiddenAtUpdate = 0;
@@ -87,7 +89,7 @@ void show(Window& window) {
 }
 bool fullscreenSettled() {
 #if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || defined(VISIBILITY_X11)
-    return !fullscreen || sapp_tc_window_fullscreen_phase(internal::WindowRequestAccess::binding(*secondary).handle)
+    return !fullscreen || !windowManager || sapp_tc_window_fullscreen_phase(internal::WindowRequestAccess::binding(*secondary).handle)
         == static_cast<uint32_t>(internal::WindowFullscreenPhase::Fullscreen);
 #else
     return true;
@@ -245,6 +247,7 @@ struct Probe : App {
         auto* window = getWindow();
         check("launch requested visibility", window->isVisible() == startVisible);
 #ifdef VISIBILITY_X11
+        windowManager = visibilityHasWindowManager(sapp_x11_get_display());
         check("launch never mapped before first show", startVisible || visibilityMapCount(xwindow(*window)) == 0);
 #endif
         window->setVisible(false);
@@ -289,14 +292,15 @@ struct Probe : App {
             show(*getWindow()); show(*secondary);
             check("show reports requested state immediately", getWindow()->isVisible() && secondary->isVisible());
             phaseTime = std::chrono::steady_clock::now(); phase = 1;
-        } else if (phase == 1 && fullscreenSettled() && secondaryDraws >= 3 && (fullscreen || mainDraws >= 3)) {
+        } else if (phase == 1 && fullscreenSettled() && secondaryDraws >= 3 && ((fullscreen && windowManager) || mainDraws >= 3)) {
 #ifdef VISIBILITY_X11
             // Early drawable turns can precede MapNotify. Let both windows
             // reach their first live read before hiding them again.
             if (internal::WindowRequestAccess::binding(*getWindow()).geometry.hiddenPosition ||
                 internal::WindowRequestAccess::binding(*secondary).geometry.hiddenPosition) return;
 #endif
-            check("shown windows resume drawing", secondaryDraws >= 3 && (fullscreen || mainDraws >= 3));
+            check("shown fullscreen state follows native confirmation", secondary->isFullscreen() == (fullscreen && windowManager));
+            check("shown windows resume drawing", secondaryDraws >= 3 && ((fullscreen && windowManager) || mainDraws >= 3));
 #ifdef VISIBILITY_X11
             check("X11 show maps both windows", visibilityWaitMapped(sapp_x11_get_display(), xwindow(*getWindow()), true) && visibilityWaitMapped(sapp_x11_get_display(), xwindow(*secondary), true));
 #endif
@@ -345,7 +349,7 @@ struct Probe : App {
                 std::printf("windowVisible: hidden-set position after show: %d,%d\n", position.x, position.y);
                 check("hidden-set position honored on show", std::abs(position.x - 400) <= 4 && std::abs(position.y - 120) <= 4);
             }
-            check("fullscreen request survives hide/show", secondary->isFullscreen() == fullscreen);
+            check("fullscreen state after hide/show follows native confirmation", secondary->isFullscreen() == (fullscreen && windowManager));
             hideInAppDraw = true; phase = 4;
         } else if (phase == 4 && drawHides == 1 && secondaryUpdates >= hiddenAtUpdate + 3) {
             checkDrawHide();

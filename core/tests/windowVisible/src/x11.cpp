@@ -66,13 +66,19 @@ extern "C" void __wrap_glXSwapBuffers(Display* display, unsigned long window) {
 int visibilitySwapCount(unsigned long) { return nativeSwaps; }
 int visibilityInvalidationCount(unsigned long window) { return invalidations()[window]; }
 void visibilityFrameSize(int width, int height) { frameWidth = width; frameHeight = height; }
+bool visibilityHasWindowManager(const void* rawDisplay) {
+    auto* display = static_cast<Display*>(const_cast<void*>(rawDisplay));
+    XWindowAttributes root{};
+    return XGetWindowAttributes(display, DefaultRootWindow(display), &root) &&
+        (root.all_event_masks & SubstructureRedirectMask) != 0;
+}
 bool visibilityFinalSizePresented(const void* rawDisplay, unsigned long window, bool fullscreen, int since) {
     auto* display = static_cast<Display*>(const_cast<void*>(rawDisplay));
     XWindowAttributes attrs{};
     if (!XGetWindowAttributes(display, window, &attrs) || attrs.map_state != IsViewable) return false;
     // Without a WM fullscreen has no native effect. With our single-monitor WM,
     // wait for the screen-sized client, then a completed present at that size.
-    if (fullscreen && XInternAtom(display, "_NET_SUPPORTING_WM_CHECK", True) != None &&
+    if (fullscreen && visibilityHasWindowManager(display) &&
         (attrs.width != DisplayWidth(display, DefaultScreen(display)) ||
          attrs.height != DisplayHeight(display, DefaultScreen(display)))) return false;
     // A matching pre-hide present cannot satisfy a later ConfigureNotify.
