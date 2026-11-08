@@ -121,6 +121,65 @@ int main() {
                             '-Werror', '-I', str(ROOT / 'core/include'), str(code), '-o', str(binary)], check=True)
             subprocess.run([str(binary)], check=True)
 
+    def test_reentrant_capture_release(self):
+        # #1295 review: a capture destructor that retires an App (or enqueues)
+        # must not touch the deque that shutdown/cancellation is walking.
+        source = r'''
+#include "tc/gpu/internal/tcBufferReadback.h"
+#include <cassert>
+using namespace trussc;
+using namespace trussc::internal;
+struct trussc::internal::AppOwner {};
+struct Retire {
+    BufferReadbackQueue& queue;
+    std::shared_ptr<AppOwner> owner;
+    bool enqueue;
+    ~Retire() {
+        queue.cancelAppCallbacks(owner);
+        if (enqueue) queue.enqueue(std::make_unique<BufferReadbackRequest>());
+    }
+};
+int main() {
+    auto owner = std::make_shared<AppOwner>();
+    {
+        BufferReadbackQueue queue;
+        queue.enqueue(std::make_unique<BufferReadbackRequest>());
+        auto retire = std::make_shared<Retire>(Retire{queue, owner, true});
+        auto second = std::make_unique<BufferReadbackRequest>();
+        second->callback = [retire](ReadbackResult) {};
+        retire.reset();
+        queue.enqueue(std::move(second));
+        auto third = std::make_unique<BufferReadbackRequest>();
+        third->owner = owner;
+        queue.enqueue(std::move(third));
+        queue.shutdown(); // Destroying the second callback retires an App mid-shutdown.
+        assert(!queue.accepting());
+    }
+    {
+        BufferReadbackQueue queue;
+        auto retire = std::make_shared<Retire>(Retire{queue, std::make_shared<AppOwner>(), true});
+        auto owned = std::make_unique<BufferReadbackRequest>();
+        owned->owner = owner;
+        owned->callback = [retire](ReadbackResult) { assert(false); };
+        retire.reset();
+        queue.enqueue(std::move(owned));
+        queue.enqueue(std::make_unique<BufferReadbackRequest>());
+        queue.cancelAppCallbacks(owner); // The released capture re-enters cancellation and enqueues.
+        int delivered = 0;
+        queue.poll();
+        queue.poll();
+        (void)delivered;
+    }
+}
+'''
+        with tempfile.TemporaryDirectory(dir=ROOT / '.build') as directory:
+            code = Path(directory) / 'reentrant.cpp'
+            binary = Path(directory) / 'reentrant'
+            code.write_text(source, encoding='utf-8')
+            subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
+                            '-Werror', '-I', str(ROOT / 'core/include'), str(code), '-o', str(binary)], check=True)
+            subprocess.run([str(binary)], check=True)
+
     def test_deferred_failure_and_shared_warning_gate(self):
         source = r'''
 namespace trussc {

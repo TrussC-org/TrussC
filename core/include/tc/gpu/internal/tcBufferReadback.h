@@ -1,6 +1,7 @@
 #pragma once
 #include "../tcReadbackResult.h"
 #include <deque>
+#include <vector>
 #include <functional>
 #include <memory>
 
@@ -26,8 +27,11 @@ public:
     }
     void cancelAppCallbacks(const std::shared_ptr<AppOwner>& owner) {
         // Keep backend requests until polling retires their native resources.
+        // Destroy the captures after the scan: their destructors may retire
+        // another App or enqueue, which must not touch the deque mid-loop.
+        std::vector<std::function<void(ReadbackResult)>> released;
         for (auto& request : pending_) {
-            if (request->owner.lock() == owner) request->callback = {};
+            if (request && request->owner.lock() == owner) released.push_back(std::move(request->callback));
         }
     }
     void poll() {
@@ -46,7 +50,11 @@ public:
     }
     void shutdown() noexcept {
         accepting_ = false;
-        pending_.clear(); // Drop callbacks while the GPU context still exists.
+        // Drop callbacks while the GPU context still exists. Move the requests
+        // out first, so capture destructors that retire an App scan an empty queue.
+        auto dropped = std::move(pending_);
+        pending_.clear();
+        dropped.clear();
     }
 private:
     bool accepting_ = true;
