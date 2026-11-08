@@ -37,7 +37,9 @@ class CoreGuardTests(unittest.TestCase):
     def assert_guard(self):
         text = (self.project / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertIn('set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core")', text)
-        self.assertLess(text.index('if(NOT EXISTS "${TRUSSC_DIR}/cmake/trussc_app.cmake")'),
+        self.assertLess(text.index('get_filename_component(_TRUSSC_CORE_FILE'),
+                        text.index('if(NOT EXISTS "${_TRUSSC_CORE_FILE}")'))
+        self.assertLess(text.index('if(NOT EXISTS "${_TRUSSC_CORE_FILE}")'),
                         text.index('include("${TRUSSC_DIR}/cmake/trussc_app.cmake")'))
         self.assertNotIn(str(ROOT), text)
         self.assertFalse((self.project / "../../../core").exists())
@@ -61,9 +63,26 @@ class CoreGuardTests(unittest.TestCase):
                           "-DTRUSSC_DIR=" + str(ROOT / "core"), *offline])
         self.run_command(["cmake", "--preset", HOST_PRESET, *offline], cwd=self.project)
 
+    def test_source_relative_core_from_another_directory(self):
+        relative_core = os.path.relpath(ROOT / "core", self.project)
+        caller = self.base / "caller" / "nested"
+        caller.mkdir(parents=True)
+        self.assertTrue((self.project / relative_core / "cmake/trussc_app.cmake").is_file())
+        self.assertFalse((caller / relative_core / "cmake/trussc_app.cmake").exists())
+        for state in ("new", "updated"):
+            with self.subTest(state=state):
+                if state == "updated":
+                    self.run_command([CLI, "update", "-p", self.project,
+                                      "--tc-root", ROOT, "--ide", "cmake"])
+                self.run_command(["cmake", "-S", self.project,
+                                  "-B", self.project / ("build-relative-" + state),
+                                  "-DTRUSSC_DIR=" + relative_core,
+                                  "--no-warn-unused-cli", "-DFETCHCONTENT_FULLY_DISCONNECTED=ON"],
+                                 cwd=caller)
+
     def test_host_preset_names_in_cmake_guard(self):
         text = (self.project / "CMakeLists.txt").read_text(encoding="utf-8")
-        guard = text[text.index('if(NOT EXISTS'):text.index('include(')]
+        guard = text[text.index('get_filename_component(_TRUSSC_CORE_FILE'):text.index('include(')]
         for system, preset in (("Darwin", "macos"), ("Linux", "linux"), ("Windows", "windows")):
             with self.subTest(system=system):
                 script = self.base / "guard.cmake"

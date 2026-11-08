@@ -751,7 +751,9 @@ string ProjectGenerator::update(const string& projectPath_) {
             cmake << "if(NOT DEFINED TRUSSC_DIR)\n";
             cmake << "    set(TRUSSC_DIR \"${CMAKE_CURRENT_SOURCE_DIR}/../../../core\")\n";
             cmake << "endif()\n\n";
-            cmake << "if(NOT EXISTS \"${TRUSSC_DIR}/cmake/trussc_app.cmake\")\n";
+            cmake << "get_filename_component(_TRUSSC_CORE_FILE \"${TRUSSC_DIR}/cmake/trussc_app.cmake\"\n";
+            cmake << "    ABSOLUTE BASE_DIR \"${CMAKE_CURRENT_SOURCE_DIR}\")\n";
+            cmake << "if(NOT EXISTS \"${_TRUSSC_CORE_FILE}\")\n";
             cmake << "    string(TOLOWER \"${CMAKE_HOST_SYSTEM_NAME}\" _TRUSSC_HOST_PRESET)\n";
             cmake << "    if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Darwin\")\n";
             cmake << "        set(_TRUSSC_HOST_PRESET \"macos\")\n";
