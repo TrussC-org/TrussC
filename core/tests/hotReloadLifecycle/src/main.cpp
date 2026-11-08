@@ -382,8 +382,8 @@ static int runCycles(const std::string& guestPath, int port) {
             auto* cycleApp = static_cast<tcApp*>(app);
             cycleApp->cycleOnly = true;   // setup() skips the window / ImGui work
             cycleApp->unloadProbe = &unloadProbe;
-            app->handleUpdate(0, 0);
-            app->handleUpdate(0, 0);
+            app->handleUpdate();
+            app->handleUpdate();
             auto& engine = AudioEngine::getInstance();
             if (cycleApp->setupCalls != 1) return fail(40, "the guest App's setup() did not run exactly once");
             if (cycleApp->audioOutHooksInSetup < 0 ||
@@ -755,7 +755,7 @@ static int runCycles(const std::string& guestPath, int port) {
         auto* raw = static_cast<tcApp*>(lib.create(internal::WindowRequestAccess::retainHostOwner(*internal::resolveWindow())));
         if (!raw) return 71;
         raw->cycleOnly = true;
-        raw->handleUpdate(0, 0);
+        raw->handleUpdate();
         std::weak_ptr<App> outgoing = (internal::resolveWindow() ? internal::resolveWindow()->getApp() : nullptr);
         mainHandle->setApp<App>();
         internal::applyPendingAppForTests(*mainHandle);
@@ -1671,7 +1671,7 @@ int main(int argc, char** argv) {
         if (!app) return 72;
         app->cycleOnly = true;
         app->unloadProbe = &probe;
-        app->handleUpdate(0, 0);
+        app->handleUpdate();
         std::exit(0);
     }
 

@@ -55,7 +55,8 @@ TC_CORE_TEST_MAIN() {
     // cleanupTree() is framework-private. Removing a dead child through the
     // real update traversal runs it, including App's pre-cleanup hook chain.
     node->destroy();
-    root->handleUpdate(0, 0);
+    internal::currentWindowContext().rootNode = root;
+    root->handleUpdate();
     const int afterCleanup = state.calls;
     // Prove cancellation while the derived member still exists as well as
     // after its destruction. A different owner's barrier advances the worker

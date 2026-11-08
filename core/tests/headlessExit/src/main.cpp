@@ -238,8 +238,9 @@ void testCatchUp(Mode mode, int expectedSteps) {
     auto app = internal::makeConstructedApp<ExitProbeApp>();
     auto appListeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
     internal::recordHeadlessAttachment(app, internal::nonWindowContext());
-    app->setup();
     auto& ctx = internal::nonWindowContext();
+    ctx.rootNode = app;
+    internal::setupNodeOnce(*app);
     const int rateIndex = ctx.rateIndex;
     internal::HeadlessUpdateState updateState;
     // Binary-exact interval and elapsed time: exactly 100 owed steps,

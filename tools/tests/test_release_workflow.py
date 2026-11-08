@@ -91,7 +91,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
             else:
                 child.unlink()
 
-    def test_workflow_shell_syntax_and_contract(self):
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
+    def test_workflow_shell_syntax(self):
         for job_name, job in WORKFLOW['jobs'].items():
             for item in job['steps']:
                 if 'run' not in item or (job_name == 'windows' and item.get('shell') != 'bash'):
@@ -99,6 +100,8 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 script = re.sub(r'\$\{\{.*?\}\}', 'TEST_VALUE', item['run'])
                 result = subprocess.run(['bash', '-n'], input=script, text=True, capture_output=True, encoding="utf-8", errors="replace")
                 self.assertEqual(result.returncode, 0, f"{job_name}/{item.get('name')}: {result.stderr}")
+
+    def test_workflow_contract(self):
         self.assertEqual(WORKFLOW['on']['workflow_call']['inputs']['publish']['default'], 'true')
         self.assertIn('inputs.publish', WORKFLOW['jobs']['release']['if'])
         weekly = yaml.load((ROOT / '.github/workflows/release-check.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
@@ -116,6 +119,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         plist = (ROOT / 'core/resources/Info.plist.in').read_bytes()
         self.assertEqual(plistlib.loads(plist)['LSMinimumSystemVersion'], '${CMAKE_OSX_DEPLOYMENT_TARGET}')
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_version_precedence_and_latest_failure(self):
         self.mock('gh', "import os, sys\nfrom pathlib import Path\n"
                         "Path(os.environ['GH_CALL_LOG']).write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n"
@@ -141,6 +145,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         for override in [{'LATEST_TAG': 'null'}, {'GH_EXIT': '1'}]:
             self.assertNotEqual(self.run_step('version', 'Resolve TrussC version', **env, **override).returncode, 0)
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_revision_and_release_notes_with_single_platform(self):
         self.mock('git', "import sys\nprint('0123456789abcdef' if 'rev-parse' in sys.argv else 'v0.7.5')\n")
         self.ok(self.run_step('linux', 'Record TrussC revision', TRUSSC_REF='fix/release/check', RUNNER_OS='Linux'))
@@ -165,6 +170,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertFalse(any('*' in arg or 'revision.md' in arg for arg in args))
         self.assertEqual((self.project / 'release-notes.md').read_text(encoding="utf-8"), revision)
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_hot_reload_guard_on_off_crlf_and_missing(self):
         (self.project / 'build').mkdir()
         state = self.project / 'build/.tc_hot_reload_state'
@@ -220,13 +226,15 @@ class ReleaseWorkflowTest(unittest.TestCase):
                 state.write_text('OFF', encoding="utf-8")
                 self.ok(run_build(check_command, text=True, capture_output=True, encoding="utf-8", errors="replace"))
 
-        # Drive paths from the failing runner must also survive the CMake parser.
-        scanner = self.root / 'D:/a/TrussC/TrussC/TrussC/core/cmake/tc_hot_reload_scan.cmake'
+        # Keep the scanner under the fixture root; drive-letter inputs below
+        # exercise CMake parsing without creating a real drive-root directory.
+        scanner = self.root / 'runner-drive/a/TrussC/TrussC/TrussC/core/cmake/tc_hot_reload_scan.cmake'
+        self.assertTrue(scanner.resolve().is_relative_to(self.root.resolve()))
         scanner.parent.mkdir(parents=True)
         shutil.copy2(ROOT / 'core/cmake/tc_hot_reload_scan.cmake', scanner)
         values.update(_TC_HR_PLATFORM_SUPPORTED='FALSE',
-                      TRUSSC_DIR=r'D:\a\TrussC\TrussC/TrussC/core',
-                      _TC_HR_TRUSSC_DIR=r'D:\a\TrussC\TrussC/TrussC/core',
+                      TRUSSC_DIR=native(scanner.parents[1]),
+                      _TC_HR_TRUSSC_DIR=native(scanner.parents[1]),
                       _TC_HR_SRC_DIR=r'D:\a\TrussC\TrussC\src',
                       _TC_HR_CMAKELISTS=r'D:\a\TrussC\TrussC\CMakeLists.txt',
                       _TC_HR_EXPLICIT_SOURCES=r'D:\a\app with spaces\one.cpp;D:\a\app\two.cpp')
@@ -241,6 +249,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                           f'    message(FATAL_ERROR "{key} changed during parsing")\nendif()\n')
         self.ok(run_build(check_command, cwd=self.root, text=True, capture_output=True, encoding="utf-8", errors="replace"))
 
+    @unittest.skipIf(sys.platform == 'win32', 'requires POSIX executable mocks')
     def test_generated_windows_exports_uses_runtime_paths(self):
         # The other generated CMake script takes paths through -D at execution,
         # rather than baking them into quoted source. Guard that distinction.
@@ -260,6 +269,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.ok(result)
         self.assertEqual(exports.read_text(encoding="utf-8"), 'EXPORTS\n    ?fixture@@YAXXZ\n')
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_windows_archive_layout_and_separate_symbols(self):
         self.mock('7z', "import pathlib, sys, zipfile\n"
                         "args=sys.argv[1:]\n"
@@ -295,6 +305,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                     (dist / name).unlink()
                 self.clear_runner()
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_mac_staging_and_older_plist_minimum(self):
         app = self.project / 'bin/Fixture.app'
         (app / 'Contents/MacOS').mkdir(parents=True)
@@ -322,6 +333,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         with tarfile.open(self.runner / 'Fixture-dSYM.tar.gz') as archive:
             self.assertEqual(archive.extractfile('./Fixture.dSYM/Contents/Resources/DWARF/Fixture').read(), b'mock dSYM')
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_mac_signing_order_defaults_and_replacement(self):
         app = self.project / 'bin/Fixture.app'
         (app / 'Contents/MacOS').mkdir(parents=True)
@@ -362,6 +374,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
                         self.assertEqual(plistlib.loads(entitlements.read_bytes()), expected)
                 log.unlink()
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_mac_entitlements_xml_output_and_failures(self):
         self.mock('plutil', "print('14.0')\n")
         self.mock('xcrun', "print('    minos 14.0')\n")
@@ -399,6 +412,7 @@ class ReleaseWorkflowTest(unittest.TestCase):
         self.assertNotEqual(self.run_step('macos', 'Verify macOS bundle', **env, CODESIGN_EXIT='1').returncode, 0)
 
     @unittest.skipUnless(os.environ.get('RELEASE_TEST_EXECUTABLE'), 'set RELEASE_TEST_EXECUTABLE for real ELF packaging')
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_linux_real_elf_archive_and_symbols(self):
         exe = Path(os.environ['RELEASE_TEST_EXECUTABLE']).resolve()
         shutil.copy2(exe, self.project / 'bin/Fixture')

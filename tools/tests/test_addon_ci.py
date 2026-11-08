@@ -101,6 +101,7 @@ class AddonWorkflowTests(unittest.TestCase):
         self.assertEqual(gate['steps'][0]['env']['R_ADDONS'], '${{ needs.addon-tests.result }}')
         self.assertIn('check "addon-tests"     "$R_ADDONS"', gate['steps'][0]['run'])
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_addon_results_cannot_be_skipped_or_failed(self):
         script = self.workflow['jobs']['ci-ok']['steps'][0]['run']
         for event in ('pull_request', 'merge_group'):

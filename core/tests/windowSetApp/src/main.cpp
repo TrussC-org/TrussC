@@ -246,6 +246,6 @@ TC_CORE_TEST_MAIN() {
     check("late handle remains closed in a new run", !b->isOpen() && internal::WindowRequestAccess::creationId(*b) == oldId);
     internal::shutdownRuntime(); internal::endFrameworkLifetime();
     check("headless launcher uses the common ending", runHeadlessApp<VirtualProbe>() == 0 && VirtualProbe::exits == 1 && VirtualProbe::cleanups == 1);
-    check("headless remains virtual-only", VirtualProbe::childUpdates == 0 && VirtualProbe::childCleanups == 0);
+    check("headless updates and cleans up the child tree", VirtualProbe::childUpdates == 1 && VirtualProbe::childCleanups == 1);
     return failures ? 1 : 0;
 }

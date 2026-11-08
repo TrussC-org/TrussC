@@ -132,7 +132,7 @@ struct Context { struct { void reset() {} } rootNode; };
 struct Owner { Window* window = nullptr; bool ended = false; Context* context = nullptr; };
 std::shared_ptr<Owner> appOwner(App&) { return {}; }
 Context* nonWindowContextIfInitialized() { return nullptr; }
-void endAppAttachment(std::shared_ptr<App>, Context&, bool) {}
+void endAppAttachment(std::shared_ptr<App>, Context&) {}
 struct Ledger {
     struct Entry { std::shared_ptr<App> app; Entry* previous = nullptr; };
     void appendAll(Ledger&) {} Entry* last() { return nullptr; }

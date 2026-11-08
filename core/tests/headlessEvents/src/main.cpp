@@ -4,6 +4,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <limits>
 #include <cstdio>
 #include <string>
 #include <thread>
@@ -84,12 +85,43 @@ void testDelivery(Mode requested) {
         : mode == Mode::ClearBeforeApp ? "daaaDATK" : "dbaczdbaczdbaczDBATK";
     std::printf("order: %s\n", order.c_str());
     check("default, tied 100, App, tied 100, AfterApp order / clear during notify", order == expected);
-    check("headless still does not update children, mods or timers",
-          childUpdates == 0 && modUpdates == 0 && timerCalls == 0);
+    check("headless updates children, Mods and timers",
+          childUpdates == 3 && modUpdates == 3 && timerCalls == 1);
     defaultUpdate.disconnect(); beforeUpdate.disconnect();
     defaultExit.disconnect(); beforeExit.disconnect();
     check("runner disconnects App bindings after returning",
           fixtureEvents().update.listenerCount() == updateCount && fixtureEvents().exit.listenerCount() == exitCount);
+}
+
+// Repost a slot to advance several idle passes without relying on a timer.
+int idlePasses = 0, idleUpdates = 0;
+struct IdleApp : App, internal::MainThreadSlot {
+    IdleApp() : MainThreadSlot([](MainThreadSlot& slot) {
+        auto& app = static_cast<IdleApp&>(slot);
+        if (++idlePasses == 3) exitApp();
+        else app.post(app.shared_from_this());
+    }) {}
+    void setup() override { post(shared_from_this()); }
+    void update() override { ++idleUpdates; }
+};
+void testInvalidFps() {
+    for (float fps : {0.0f, -1.0f, std::numeric_limits<float>::quiet_NaN(),
+                      std::numeric_limits<float>::infinity()}) {
+        idlePasses = idleUpdates = 0;
+        int warnings = 0;
+        bool startupOnly = true;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.level == LogLevel::Warning
+                    && event.message.find("fps must be a finite positive rate (got ") != std::string::npos
+                    && event.message.find("); update() will not run") != std::string::npos) {
+                ++warnings;
+                startupOnly = startupOnly && idlePasses == 0;
+            }
+        });
+        check("invalid fps runner exits", runHeadlessApp<IdleApp>(HeadlessSettings().setFps(fps)) == 0);
+        check("invalid fps warns exactly once at startup", warnings == 1 && startupOnly);
+        check("invalid fps runs idle passes without updates", idlePasses == 3 && idleUpdates == 0);
+    }
 }
 
 struct CatchUpApp : App {
@@ -108,6 +140,7 @@ void testCatchUp() {
     auto listeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
     auto& ctx = internal::nonWindowContext();
     internal::recordHeadlessAttachment(app, ctx);
+    ctx.rootNode = app;
     internal::HeadlessUpdateState state;
     // Binary-exact elapsed and interval: ten steps owed, regardless of load.
     const int savedSteps = getMaxUpdateSteps();
@@ -118,6 +151,96 @@ void testCatchUp() {
           app->steps == 3 && headless::frameCount == 3 && !headless::running
           && internal::appExitCode() == 7);
     internal::shutdownRuntime();
+    headless::active = false;
+    internal::endFrameworkLifetime();
+}
+
+// #906: deterministic headless tree/timing behavior through the scheduled entry.
+constexpr double treeDelta = 1.0 / 128.0;
+std::chrono::steady_clock::time_point treePassTime;
+struct TreeState {
+    int steps = 0, childUpdates = 0, modUpdates = 0;
+    int childTimerStep = 0, appTimerStep = 0;
+    bool timingScope = true;
+    std::weak_ptr<Node> destroyed;
+    std::vector<std::string> cleanupOrder;
+};
+struct TreeChild : Node {
+    TreeState& state;
+    bool destroyOnUpdate;
+    TreeChild(TreeState& s, bool destroyOnUpdate) : state(s), destroyOnUpdate(destroyOnUpdate) {}
+    void update() override {
+        if (destroyOnUpdate) destroy();
+        else ++state.childUpdates;
+    }
+    void cleanup() override { state.cleanupOrder.push_back(destroyOnUpdate ? "destroyed" : "child"); }
+};
+struct TreeMod : Mod {
+    TreeState& state;
+    explicit TreeMod(TreeState& s) : state(s) {}
+    void update() override { ++state.modUpdates; }
+};
+struct TreeApp : App {
+    TreeState& state;
+    std::shared_ptr<TreeChild> child;
+    explicit TreeApp(TreeState& s) : state(s) {}
+    void setup() override {
+        child = std::make_shared<TreeChild>(state, false);
+        addChild(child);
+        auto doomed = std::make_shared<TreeChild>(state, true);
+        state.destroyed = doomed;
+        addChild(doomed);
+        addMod<TreeMod>(state);
+    }
+    void update() override {
+        ++state.steps;
+        auto& ctx = internal::currentWindowContext();
+        const auto expected = treePassTime - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>((3 - state.steps) * treeDelta));
+        state.timingScope = state.timingScope && ctx.inUpdate && ctx.fixedStepUpdate
+            && getDeltaTime() == treeDelta && ctx.updateTime == expected;
+        if (state.steps == 1) {
+            callAfter(2 * treeDelta, [this] { state.appTimerStep = state.steps + 1; });
+            child->callAfter(treeDelta, [this] { state.childTimerStep = state.steps; });
+        }
+    }
+    void cleanup() override { state.cleanupOrder.push_back("app"); }
+};
+void testTreeLifecycle() {
+    internal::beginRuntimeRun(); internal::beginFrameworkLifetime();
+    headless::active = headless::running = true;
+    headless::quitRequested = false;
+    headless::pendingSignal = headless::deliveredSignal = 0;
+    TreeState result;
+    auto& ctx = internal::nonWindowContext();
+    auto app = internal::makeConstructedApp<TreeApp>(result);
+    internal::recordHeadlessAttachment(app, ctx);
+    ctx.rootNode = app;
+    auto listeners = internal::registerHeadlessAppEventListeners(std::make_shared<std::weak_ptr<App>>(app));
+    {
+        internal::AppOwnerScope owner(internal::appOwner(*app));
+        internal::setupNodeOnce(*app);
+    }
+    // Supply the pass clock, just as window fixed-step fixtures do. No sleeps
+    // or elapsed-time thresholds determine these assertions.
+    treePassTime = std::chrono::steady_clock::now();
+    auto previousClock = internal::windowClockForTests();
+    internal::windowClockForTests() = [] { return treePassTime; };
+    internal::HeadlessUpdateState state;
+    const bool previousInUpdate = ctx.inUpdate;
+    internal::runHeadlessUpdatePass(*app, ctx, state, 3 * treeDelta, treeDelta);
+    internal::windowClockForTests() = previousClock;
+    check("headless scheduled steps share inUpdate, fixed-step and nominal updateTime",
+          result.steps == 3 && result.timingScope && ctx.inUpdate == previousInUpdate);
+    check("headless child and Mod each update once per scheduled step",
+          result.childUpdates == 3 && result.modUpdates == 3);
+    check("headless timers created inside a fixed step count from the next step",
+          result.appTimerStep == 3 && result.childTimerStep == 2);
+    check("headless destroyed child is swept and cleaned on the next step",
+          result.destroyed.expired() && result.cleanupOrder == std::vector<std::string>{"destroyed"});
+    internal::shutdownRuntime();
+    check("headless child cleanup runs before App cleanup, without cleaning swept children twice",
+          result.cleanupOrder == std::vector<std::string>{"destroyed", "child", "app"});
     headless::active = false;
     internal::endFrameworkLifetime();
 }
@@ -292,7 +415,9 @@ struct NetworkApp : App {
 TC_CORE_TEST_MAIN() {
     mainThread = std::this_thread::get_id();
     getMainThreadId();
+    testInvalidFps();
     testCatchUp();
+    testTreeLifecycle();
     testDelivery(Mode::Order);
     testDelivery(Mode::ClearBeforeApp);
     testDelivery(Mode::ClearInApp);
