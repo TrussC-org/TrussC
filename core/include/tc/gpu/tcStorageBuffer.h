@@ -124,7 +124,20 @@ public:
             }
         }
         if (!request) request = std::make_unique<internal::BufferReadbackRequest>();
-        request->callback = internal::appOwnedCallback(std::move(callback));
+        auto owner = internal::currentAppOwner();
+        request->owner = owner;
+        if (owner && (owner->ended || owner->retiring)) callback = {};
+        if (owner && callback) {
+            request->callback = [weak = request->owner, callback = std::move(callback)](ReadbackResult result) {
+                auto owner = weak.lock();
+                if (!owner || !owner->token->load() || owner->callbacksClosing) return;
+                internal::AppCallbackScope scope(owner);
+                if (scope.admitted() && owner->token->load() && !owner->callbacksClosing)
+                    callback(std::move(result));
+            };
+        } else {
+            request->callback = std::move(callback);
+        }
         request->warn = [gate = warnings_] {
             if (gate->isFirstTime()) logWarning("StorageBuffer") << "Failed to read storage buffer asynchronously";
         };

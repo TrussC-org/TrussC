@@ -82,11 +82,6 @@ namespace {
 thread_local bool shaderStreamBufferAllocation = false;
 }
 
-BufferReadbackQueue& bufferReadbacks() {
-    static BufferReadbackQueue queue;
-    return queue;
-}
-
 sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
     struct AllocationScope {
         bool previous = std::exchange(shaderStreamBufferAllocation, true);

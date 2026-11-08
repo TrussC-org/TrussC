@@ -31,6 +31,7 @@ class BufferReadbackQueueTests(unittest.TestCase):
 #include <thread>
 using namespace trussc;
 using namespace trussc::internal;
+struct trussc::internal::AppOwner {};
 struct Request : BufferReadbackRequest {
     bool& ready;
     int& destroyed;
@@ -88,6 +89,28 @@ int main() {
     queue.enqueue(std::move(restarted));
     queue.poll();
     assert(callbacks == 4);
+
+    auto owner = std::make_shared<AppOwner>();
+    auto otherOwner = std::make_shared<AppOwner>();
+    auto capture = std::make_shared<int>(42);
+    std::weak_ptr<int> released = capture;
+    bool ready = false;
+    auto canceled = std::make_unique<Request>(ready, destroyed);
+    canceled->owner = owner;
+    canceled->callback = [capture](ReadbackResult) { assert(false); };
+    capture.reset();
+    auto other = std::make_unique<BufferReadbackRequest>();
+    other->owner = otherOwner;
+    other->callback = [&](ReadbackResult) { ++callbacks; };
+    queue.enqueue(std::move(canceled));
+    queue.enqueue(std::move(other));
+    queue.cancelAppCallbacks(owner);
+    assert(released.expired() && destroyed == 4);
+    queue.poll();
+    assert(destroyed == 4 && callbacks == 4); // Cancellation does not bypass readiness/order.
+    ready = true;
+    queue.poll();
+    assert(destroyed == 5 && callbacks == 5); // Other Apps still deliver; native request retires.
 }
 '''
         with tempfile.TemporaryDirectory(dir=ROOT / '.build') as directory:

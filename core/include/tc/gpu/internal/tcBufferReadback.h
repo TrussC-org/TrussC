@@ -5,6 +5,7 @@
 #include <memory>
 
 namespace trussc::internal {
+struct AppOwner;
 // Backend requests own their staging resources; no StorageBuffer or App pointer.
 struct BufferReadbackRequest {
     virtual ~BufferReadbackRequest() = default;
@@ -12,6 +13,7 @@ struct BufferReadbackRequest {
     virtual bool poll() { return true; }
     ReadbackResult result;
     std::function<void(ReadbackResult)> callback;
+    std::weak_ptr<AppOwner> owner;
     std::function<void()> warn;
 };
 
@@ -21,6 +23,12 @@ public:
     void start() { accepting_ = true; }
     void enqueue(std::unique_ptr<BufferReadbackRequest> request) {
         if (accepting_) pending_.push_back(std::move(request));
+    }
+    void cancelAppCallbacks(const std::shared_ptr<AppOwner>& owner) {
+        // Keep backend requests until polling retires their native resources.
+        for (auto& request : pending_) {
+            if (request->owner.lock() == owner) request->callback = {};
+        }
     }
     void poll() {
         // Requests made by a callback wait for the next update too.

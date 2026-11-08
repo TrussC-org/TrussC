@@ -103,12 +103,10 @@ void asyncOwnerChecks(bool closeRequester) {
         ~RetirementProbe() override { ++retired; }
     };
     auto retirement = std::make_unique<RetirementProbe>(retired);
-    {
-        internal::AppCallbackScope owner(internal::appOwner(*b->getApp()));
-        retirement->callback = internal::appOwnedCallback(std::function<void(ReadbackResult)>([&](ReadbackResult) {
-            check("backend resources retire before live callback", !closeRequester && retired == 1);
-        }));
-    }
+    retirement->owner = internal::appOwner(*b->getApp());
+    retirement->callback = [&](ReadbackResult) {
+        check("backend resources retire before live callback", !closeRequester && retired == 1);
+    };
     internal::bufferReadbacks().enqueue(std::move(retirement));
     if (closeRequester) {
         internal::WindowRequestAccess::teardown(*b);
@@ -132,6 +130,27 @@ void asyncOwnerChecks(bool closeRequester) {
     check("ended request is dropped; live request is delivered once", ownerCallbacks == (closeRequester ? 0 : 1));
     check("delivered callback releases its captures", ownerCapture.expired());
     check("queue retires requests after requester teardown", retired == 1 && unownedCalled);
+    if (!closeRequester) {
+        auto owner = internal::appOwner(*b->getApp());
+        const auto before = owner->cancellations.size();
+        int finished = 0;
+        bool attributed = true;
+        internal::WindowEntryScope polling(*a, true);
+        for (int i = 0; i < 100000; ++i) {
+            {
+                internal::AppCallbackScope requester(owner);
+                empty.readAsync([&](ReadbackResult) {
+                    ++finished;
+                    attributed &= internal::currentAppOwner() == owner && getWindowWidth() == 222;
+                });
+            }
+            internal::bufferReadbacks().poll();
+        }
+        check("100000 completed readbacks keep App cancellation records constant",
+            finished == 100000 && owner->cancellations.size() == before);
+        check("repeated readbacks retain requester attribution and restore polling context",
+            attributed && internal::currentWindowCtx() == &internal::WindowRequestAccess::context(*a));
+    }
     internal::shutdownRuntime();
     internal::endFrameworkLifetime();
 }
