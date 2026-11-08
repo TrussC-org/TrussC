@@ -19,6 +19,16 @@ SwiftShader WebGPU, and captures the console and completion verdict:
 WEBGPU_UNIFORM_GROWTH: PASS (6 frames, 3 raster/compute passes, tiny/large pixels, growth/prefix, allocation failures)
 ```
 
+For a device check, omit the forced SwiftShader flags with `--adapter default`:
+
+```sh
+python3 core/tests/webgpuUniformGrowth/run.py --build --adapter default
+```
+
+This lets Chrome select its normal adapter. Confirm the selected adapter on the
+device; a PASS alone does not establish that a physical GPU was used. The same
+option applies to `--url` example captures. Without it, SwiftShader stays the default.
+
 The six frames compare every pixel against both analytic per-tile RGBA values
 and the same scene with a 4 MiB reserve. The 256-byte reserve forces several
 mid-frame growths. Each draw uploads distinct vertex and fragment blocks with
