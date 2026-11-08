@@ -100,6 +100,16 @@ clears each window's delivery flag before draining messages, then resets only
 the receiving windows' skipped-present deadlines before checking tick admission.
 The existing frame latency credit checks still apply.
 
+### Win32 keep-screen-on power-command refusal (#1041)
+
+The Windows-only `sapp_tc_win32_set_keep_screen_on` seam stores one process-wide
+flag, updated on the host main thread alongside `SetThreadExecutionState` and
+cleared by the existing disable/normal-cleanup path. The `WM_SYSCOMMAND` handler
+refuses `SC_SCREENSAVE` and `SC_MONITORPOWER` when that flag is set or any app
+window is fullscreen. This applies to every TrussC HWND. Windows does not ask
+TrussC when another app is in front, so screen-saver suppression has that limit.
+The existing fullscreen policy is unchanged.
+
 ### X11 secondary swap interval pacing (#1263)
 
 GLX and EGL secondary windows keep native GL swap interval 0 because they

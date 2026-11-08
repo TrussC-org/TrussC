@@ -157,6 +157,7 @@ void setOrientation(Orientation mask) { (void)mask; }
 namespace internal {
 void applyKeepScreenOn(bool enabled, bool headless) {
     (void)headless;
+    sapp_tc_win32_set_keep_screen_on(enabled);
     SetThreadExecutionState(enabled
         ? ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED | ES_CONTINUOUS
         : ES_CONTINUOUS);

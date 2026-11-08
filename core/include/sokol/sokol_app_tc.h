@@ -2393,6 +2393,10 @@ SOKOL_APP_API_DECL const void* sapp_d3d11_get_swap_chain(void);
 
 /* Win32: get the HWND window handle */
 SOKOL_APP_API_DECL const void* sapp_win32_get_hwnd(void);
+#if defined(_WIN32)
+/* [TrussC #1041] Host-main-thread seam; one power-command policy for all HWNDs. */
+SOKOL_APP_API_DECL void sapp_tc_win32_set_keep_screen_on(bool enabled);
+#endif
 
 /* GL: get major version */
 SOKOL_APP_API_DECL int sapp_gl_get_major_version(void);
@@ -7920,6 +7924,12 @@ static void _sapp_tc_win32_set_fullscreen(_sapp_tc_window_t* w, bool fullscreen,
                  swp_flags | SWP_FRAMECHANGED | (w->desc.hidden ? SWP_NOACTIVATE : 0));
 }
 
+// [TrussC #1041] Updated by the same host-main-thread path as execution state.
+static bool _sapp_tc_win32_keep_screen_on = false;
+extern "C" void sapp_tc_win32_set_keep_screen_on(bool enabled) {
+    _sapp_tc_win32_keep_screen_on = enabled;
+}
+
 static bool _sapp_tc_win32_any_fullscreen(void) {
     for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
         const _sapp_tc_window_t* w = _sapp_tc.windows[i];
@@ -8158,8 +8168,8 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             switch (wParam & 0xFFF0) {
                 case SC_SCREENSAVE:
                 case SC_MONITORPOWER:
-                    if (_sapp_tc_win32_any_fullscreen()) {
-                        return 0;   /* no screensaver/monitor-off in fullscreen */
+                    if (_sapp_tc_win32_keep_screen_on || _sapp_tc_win32_any_fullscreen()) {
+                        return 0;   /* [TrussC #1041] keep-screen-on or fullscreen */
                     }
                     break;
                 case SC_KEYMENU:
