@@ -7,6 +7,7 @@ import shutil
 import argparse
 import re
 import contextlib
+import multiprocessing
 from collections import deque
 from pathlib import Path
 import time
@@ -43,6 +44,16 @@ ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+def build_jobs():
+    try:
+        jobs = int(os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", ""))
+        if jobs >= 1:
+            return jobs
+    except ValueError:
+        pass
+    return multiprocessing.cpu_count()
+
 
 # =============================================================================
 # Short output (#1240)
@@ -793,8 +804,7 @@ def build_test_project(test_dir, pg_bin, platform_info, args, progress=None):
 
     cmd_build = ["cmake", "--build", build_dir_name, "--config", "Release"]
     if "Visual Studio" not in (platform_info["cmake_generator"] or ""):
-        import multiprocessing
-        cmd_build.extend(["-j", str(multiprocessing.cpu_count())])
+        cmd_build.extend(["-j", str(build_jobs())])
     if not run_command(cmd_build, cwd=test_dir, verbose=args.verbose, progress=progress):
         return None, "build"
 
@@ -971,8 +981,7 @@ def _build_and_run_unit_test(test_dir, platform_info, args):
 
     cmd_build = ["cmake", "--build", build_dir_name, "--config", "Release"]
     if "Visual Studio" not in (platform_info["cmake_generator"] or ""):
-        import multiprocessing
-        cmd_build.extend(["-j", str(multiprocessing.cpu_count())])
+        cmd_build.extend(["-j", str(build_jobs())])
     if not run_command(cmd_build, cwd=test_dir, verbose=args.verbose):
         return False, "build"
 
@@ -1024,8 +1033,7 @@ def _build_and_run_web_test(test_dir, pg_bin, platform_info, args):
     if not run_command(cmd_config, cwd=test_dir, verbose=args.verbose):
         return False, "web-configure"
 
-    import multiprocessing
-    cmd_build = ["cmake", "--build", "build-web", "-j", str(multiprocessing.cpu_count())]
+    cmd_build = ["cmake", "--build", "build-web", "-j", str(build_jobs())]
     if not run_command(cmd_build, cwd=test_dir, verbose=args.verbose):
         return False, "web-build"
 
@@ -1123,8 +1131,7 @@ def build_example(example_dir, example_name, pg_bin, platform_info, args):
         cmd_build = ["cmake", "--build", build_dir_name, "--config", "Release"]
 
         if "Visual Studio" not in (platform_info["cmake_generator"] or ""):
-            import multiprocessing
-            jobs = str(multiprocessing.cpu_count())
+            jobs = str(build_jobs())
             cmd_build.extend(["-j", jobs])
 
         if not run_command(cmd_build, cwd=example_dir, verbose=args.verbose):
@@ -1147,8 +1154,7 @@ def build_example(example_dir, example_name, pg_bin, platform_info, args):
             return "web-conf"
 
         cmd_build_web = ["cmake", "--build", "build-web"]
-        import multiprocessing
-        jobs = str(multiprocessing.cpu_count())
+        jobs = str(build_jobs())
         cmd_build_web.extend(["-j", jobs])
 
         if not run_command(cmd_build_web, cwd=example_dir, verbose=args.verbose):
