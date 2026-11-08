@@ -1025,3 +1025,12 @@ platforms share the definition and return their existing requested visibility.
 - `core/tests/windowTick/x11-pacing-test` compiles the production loop, tick and
   due-check for both backends with deterministic input during the wait, and
   requires a compiled GLX mutant without the deadline reset to fail.
+
+## File-open requests (#1061)
+
+[TrussC #1061] The macOS application delegate forwards `application:openURLs:`
+and the legacy `application:openFiles:` to Runtime's process-level filesOpened
+delivery. Only file URLs are accepted. Runtime queues launch requests until
+the launch App completes setup, and delivers later requests to all listeners.
+Paths use the same OS/available-memory and container representation bounds as
+file drops; no shell invocation or file-content reading occurs in the bridge.

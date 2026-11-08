@@ -79,6 +79,8 @@
     "MOUSE_BUTTON_MIDDLE": "2"
   },
   "examples_manual": {
+    "RuntimeEvents::filesOpened": ["filesOpenedExample"],
+    "FilesOpenedEventArgs": ["filesOpenedExample"],
     "mousePressed": [
       "mouseExample"
     ],

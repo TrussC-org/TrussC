@@ -2571,6 +2571,9 @@ SOKOL_APP_API_DECL const void* sapp_window_x11_get_window(sapp_window win);
 #define SOKOL_APP_TC_IMPL_DONE (1)
 
 #include "../tc/app/tcExit.h"
+#if defined(__APPLE__) && TARGET_OS_OSX
+#include "../tc/app/internal/tcFilesOpened.h" // [TrussC #1061] native open requests
+#endif
 #include "util/sokol_window_event.h"
 #include "util/sokol_window_creation.h"
 
@@ -4353,6 +4356,31 @@ static void _sapp_tc_mac_session_end(AEEventID reason) {
 @end
 
 @implementation _sapp_tc_app_delegate
+// [TrussC #1061] Open requests belong to the process, independently of drops
+// and of window callback readiness. Runtime holds launch requests until setup.
+// Bound (representation): as for drops, path strings and vectors check max_size
+// and available memory; failures reach native containment without truncation.
+- (void)application:(NSApplication*)sender openURLs:(NSArray<NSURL*>*)urls {
+    (void)sender;
+    try {
+        std::vector<std::filesystem::path> files;
+        for (NSURL* url in urls) {
+            if (url.isFileURL && url.path) files.emplace_back([url.path UTF8String]);
+        }
+        trussc::internal::receiveFilesOpened(std::move(files));
+    } catch (...) { _sapp_tc_mac_contained("application:openURLs:"); }
+}
+- (void)application:(NSApplication*)sender openFiles:(NSArray<NSString*>*)names {
+    try {
+        std::vector<std::filesystem::path> files;
+        for (NSString* name in names) files.emplace_back([name UTF8String]);
+        trussc::internal::receiveFilesOpened(std::move(files));
+        [sender replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
+    } catch (...) {
+        _sapp_tc_mac_contained("application:openFiles:");
+        [sender replyToOpenOrPrint:NSApplicationDelegateReplyFailure];
+    }
+}
 - (void)applicationWillFinishLaunching:(NSNotification*)n {
     (void)n;
     // AppKit's default Apple-event handlers are installed by this point.

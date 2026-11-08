@@ -2,6 +2,7 @@
 #include <optional>
 #include "tcWindowGeometryState.h"
 #include "tcAppConstruction.h"
+#include "tcFilesOpened.h"
 
 namespace trussc {
 class Window;
