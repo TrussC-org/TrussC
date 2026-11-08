@@ -10,6 +10,9 @@
 #include <cstdio>
 #include <cstring>
 #include <thread>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 #if defined(SOKOL_GLCORE)
 #include <GL/gl.h>
 #include <GL/glext.h>
@@ -441,13 +444,20 @@ public:
 };
 
 bool asyncExitMode = false;
+bool asyncMapExitMode = false;
 int asyncCallbacks = 0;
 class AsyncReadbackApp : public App {
     StorageBuffer buffer_;
     ComputeShader compute_;
     std::thread::id thread_;
     uint64_t requestUpdate_ = 0;
+    uint32_t requestFrame_ = 0;
     std::vector<ReadbackResult> results_;
+    EventListener errors_;
+#if defined(SOKOL_WGPU)
+    bool drew_ = false;
+    uint32_t drawFrame_ = 0;
+#endif
 #if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
     GLuint bindings_[2] = {};
     void checkCopyBindings() {
@@ -463,6 +473,8 @@ class AsyncReadbackApp : public App {
         check("readAsync callbacks preserve request order", asyncCallbacks++ == index);
 #if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
         checkCopyBindings();
+#endif
+#if defined(SOKOL_WGPU) || ((defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__))
         std::array<Vec4, 4> expected = {Vec4(red,green,0,1), Vec4(red,green,1,1),
                                        Vec4(red,green,0,1), Vec4(red,green,1,1)};
         check("readAsync owns exact snapshot bytes", result.ok() && result.size() == sizeof(expected) &&
@@ -474,9 +486,21 @@ class AsyncReadbackApp : public App {
         results_.push_back(std::move(result));
     }
 public:
+    AsyncReadbackApp() {
+#if defined(SOKOL_WGPU)
+        // Exercise compute and Fbo rendering without a presentation surface;
+        // SwiftShader's headless canvas sharing depends on the Chrome build.
+        setIndependentFps(VSYNC, EVENT_DRIVEN);
+        internal::currentWindowContext().loop.redrawCount = 0;
+#endif
+    }
     void setup() override {
+        errors_ = getLogger().onLog.listen([](LogEventArgs& event) {
+            if (event.level >= LogLevel::Error) { ++failures; std::printf("GPU ERROR %s\n", event.message.c_str()); }
+        });
         thread_ = std::this_thread::get_id();
         requestUpdate_ = internal::currentWindowContext().updateCount;
+        requestFrame_ = sg_query_stats().prev_frame.frame_index;
         check("async storage allocation succeeds", buffer_.allocate(sizeof(Vec4) * 4));
         check("async compute loads and binds", compute_.load(buffer_pattern_shader_desc) &&
             compute_.setStorageBuffer(VIEW_pattern_output, buffer_));
@@ -492,8 +516,8 @@ public:
         checkCopyBindings();
 #endif
         if (asyncExitMode) {
-            // Shutdown must drop the request even if its fence is already signaled.
-            exitApp();
+            // Test both an encoded copy and shutdown after polling starts a map.
+            if (!asyncMapExitMode) exitApp();
             return;
         }
         check("readAsync never calls back inside the request", asyncCallbacks == 0);
@@ -514,7 +538,24 @@ public:
         });
     }
     void update() override {
-        if (asyncExitMode) return;
+#if defined(SOKOL_WGPU)
+        // Native resize/bootstrap can request a first presentation after setup.
+        internal::currentWindowContext().loop.redrawCount = 0;
+#endif
+        if (asyncExitMode) {
+            if (asyncMapExitMode && requestFrame_ != sg_query_stats().prev_frame.frame_index) exitApp();
+            return;
+        }
+#if defined(SOKOL_WGPU)
+        if (drew_) {
+            // Let the normal frame submit the draw before reporting success.
+            if (drawFrame_ != sg_query_stats().prev_frame.frame_index) {
+                completed = true;
+                exitApp();
+            }
+            return;
+        }
+#endif
         if (asyncCallbacks == 4) {
             check("owned results survive callback return", results_.size() == 3);
             Fbo target;
@@ -523,6 +564,14 @@ public:
             setColor(1, 0, 0, 1);
             drawRect(0, 0, 4, 4);
             target.end();
+#if defined(SOKOL_WGPU)
+            // WebGPU has no synchronous Fbo readPixels. Replay the actual draw
+            // and check its submission for errors instead of calling that API.
+            internal::suspendForImageUpload();
+            check("drawing after async readback ends its GPU pass", sg_query_pass_state() == SG_PASSSTATE_NONE);
+            drew_ = true;
+            drawFrame_ = sg_query_stats().prev_frame.frame_index;
+#else
             std::array<unsigned char, 4 * 4 * 4> pixels = {};
             bool matches = target.readPixels(pixels.data());
             for (size_t i = 0; i < pixels.size(); i += 4)
@@ -530,6 +579,7 @@ public:
             check("drawing after async readback preserves GPU state", matches);
             completed = true;
             exitApp();
+#endif
         }
     }
     void cleanup() override {
@@ -543,17 +593,32 @@ public:
 };
 } // namespace
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+#if defined(__EMSCRIPTEN__)
+    char asyncMode[] = "--async-check", exitMode[] = "--async-exit-check", mapExitMode[] = "--async-map-exit-check";
+    const int mode = EM_ASM_INT({
+        const mode = new URLSearchParams(location.search).get('mode');
+        return mode === 'map-exit' ? 2 : mode === 'exit' ? 1 : 0;
+    });
+    char* webArgs[] = {argv[0], mode == 2 ? mapExitMode : mode == 1 ? exitMode : asyncMode};
+    argc = 2;
+    argv = webArgs;
+#endif
     if (argc > 1 && std::strcmp(argv[1], "--async-owner-check") == 0) {
         asyncOwnerChecks(true);
         asyncOwnerChecks(false);
         return failures ? 1 : 0;
     }
-    if (argc > 1 && (std::strcmp(argv[1], "--async-check") == 0 || std::strcmp(argv[1], "--async-exit-check") == 0)) {
-        asyncExitMode = std::strcmp(argv[1], "--async-exit-check") == 0;
+    if (argc > 1 && (std::strcmp(argv[1], "--async-check") == 0 || std::strcmp(argv[1], "--async-exit-check") == 0 ||
+                    std::strcmp(argv[1], "--async-map-exit-check") == 0)) {
+        asyncMapExitMode = std::strcmp(argv[1], "--async-map-exit-check") == 0;
+        asyncExitMode = asyncMapExitMode || std::strcmp(argv[1], "--async-exit-check") == 0;
         WindowSettings settings;
         settings.setSize(64, 64).setHighDpi(false).setSampleCount(1);
         return tcCoreTest::runDisplayTest<AsyncReadbackApp>(settings, failures, [] {
             check("async GPU checks completed", asyncExitMode ? asyncCallbacks == 0 : completed);
+#if defined(__EMSCRIPTEN__)
+            EM_ASM({ window.tcComputeBufferVerdict = $0 ? 'FAIL computeBuffer readAsync' : 'PASS computeBuffer readAsync'; }, failures);
+#endif
         });
     }
     if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) {
