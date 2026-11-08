@@ -227,6 +227,10 @@ shrink already present before App setup; secondary's pre-tick creation check sta
 strict. Growth fails. Later explicit-resize checks still run, with resize-back
 compared against the requested size rather than a constrained main snapshot.
 Fitting requests run every check strictly, without SKIPs.
+On X11 without a window manager, fullscreen requests remain unconfirmed. The
+probe requires `isFullscreen() == false`, no fullscreen Notices, and successful
+geometry changes on both windows. With a window manager, fullscreen geometry
+checks wait for confirmed entry, and size-restoration checks wait for exit.
 
 ## Keep it curated (avoid rot)
 
@@ -1207,7 +1211,9 @@ removes late-map reconciliation. The nativeWindow probe checks requested hiding
 immediately, then allows two seconds of normal dispatch for native convergence.
 `--start-visible`
 checks visible launch followed by hiding; `--fullscreen` checks hidden fullscreen
-creation and repeated showing. Each display mode prints `windowVisible verdict:
+creation and repeated showing. Without an X11 window manager, it requires the
+shown window to remain windowed and still complete every visibility phase.
+Each display mode prints `windowVisible verdict:
 PASS` or `FAIL`, including from macOS cleanup before process termination.
 
 Device checks: run these modes on macOS, Windows, GNOME/XWayland and Pi X11/EGL.

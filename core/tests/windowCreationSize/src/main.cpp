@@ -84,7 +84,8 @@ struct Secondary : SizeEvidence { bool ready = false; int updates = 0; void setu
 struct CreationApp : SizeEvidence {
     std::shared_ptr<tc::Window> secondary;
     int mainWidth = 0, mainHeight = 0, secondWidth = 0, secondHeight = 0;
-    int phase = 0, frames = 0, fullscreenUpdate = 0;
+    int phase = 0, frames = 0, fullscreenUpdate = 0, fullscreenTarget = 0;
+    bool windowManager = true;
     UsableArea area;
     int expectedWidth = 0, expectedHeight = 0;
     bool skipMain = false, skipSecondary = false;
@@ -106,6 +107,10 @@ struct CreationApp : SizeEvidence {
         check("secondary created", bool(secondary));
         if (!secondary) { exitApp(1); return; }
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
+        XWindowAttributes root{};
+        check("X11 root attributes available", XGetWindowAttributes((Display*)sapp_x11_get_display(),
+            DefaultRootWindow((Display*)sapp_x11_get_display()), &root));
+        windowManager = (root.all_event_masks & SubstructureRedirectMask) != 0;
         // Keep constructor dimensions before the secondary's first adapter tick.
         secondWidth = trussc::internal::WindowRequestAccess::context(*secondary).fbWidth; secondHeight = trussc::internal::WindowRequestAccess::context(*secondary).fbHeight;
 #endif
@@ -172,39 +177,56 @@ struct CreationApp : SizeEvidence {
                 check("secondary App receives creation size", app->getWidth() == int(secondWidth / scale) && app->getHeight() == int(secondHeight / scale));
             }
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
-            // Exercise real backend intent and public admission on both windows.
-            auto main = getWindow();
-            for (auto* target : {main, secondary.get()}) {
-                const auto* other = target == main ? secondary.get() : main;
-                target->toggleFullscreen();
-                check("target fullscreen intent is independent", target->isFullscreen() && !other->isFullscreen());
-                int notices = 0;
-                bool exact = true;
-                auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
-                    ++notices;
-                    const std::string suffix = " on \"" + target->getTitle() + "\"";
-                    const std::string prefix = "[Window] ";
-                    const std::string reason = " ignored while fullscreen; call it once isFullscreen() returns false";
-                    exact &= e.level == LogLevel::Notice &&
-                        (e.message == prefix + "Window::setSize()" + suffix + reason ||
-                         e.message == prefix + "Window::setPosition()" + suffix + reason ||
-                         e.message == prefix + "App::setSize()" + suffix + reason);
-                });
-                target->setSize(213, 157);
-                target->setPosition(27, 39);
-                target->getApp()->setSize(215, 159);
-                check("fullscreen geometry emits exact Notices", notices == 3 && exact && target->isFullscreen());
-                target->toggleFullscreen();
-                check("toggle reverses backend requested state", !target->isFullscreen());
-            }
-            fullscreenUpdate = app->updates;
-            phase = 1;
+            phase = 4;
 #else
             setSize(300, 200); app->setSize(300, 200); phase = 2;
 #endif
+        } else if (phase == 4) {
+            auto* target = fullscreenTarget == 0 ? getWindow() : secondary.get();
+            target->toggleFullscreen();
+            phase = 5;
+        } else if (phase == 5) {
+            auto* target = fullscreenTarget == 0 ? getWindow() : secondary.get();
+            const auto* other = fullscreenTarget == 0 ? secondary.get() : getWindow();
+            // X11 requests become fullscreen only after normal WM property dispatch.
+            if (windowManager && !target->isFullscreen()) return;
+            check("target fullscreen state follows native confirmation independently",
+                target->isFullscreen() == windowManager && !other->isFullscreen());
+            int notices = 0;
+            bool exact = true;
+            auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+                ++notices;
+                const std::string suffix = " on \"" + target->getTitle() + "\"";
+                const std::string prefix = "[Window] ";
+                const std::string reason = " ignored while fullscreen; call it once isFullscreen() returns false";
+                exact &= e.level == LogLevel::Notice &&
+                    (e.message == prefix + "Window::setSize()" + suffix + reason ||
+                     e.message == prefix + "Window::setPosition()" + suffix + reason ||
+                     e.message == prefix + "App::setSize()" + suffix + reason);
+            });
+            target->setSize(213, 157);
+            target->setPosition(27, 39);
+            target->getApp()->setSize(215, 159);
+            check(windowManager ? "confirmed fullscreen geometry emits exact Notices" : "unconfirmed fullscreen geometry is accepted without Notices",
+                windowManager ? notices == 3 && exact && target->isFullscreen() : notices == 0 && !target->isFullscreen());
+            target->toggleFullscreen();
+            phase = 6;
+        } else if (phase == 6) {
+            auto* target = fullscreenTarget == 0 ? getWindow() : secondary.get();
+            if (target->isFullscreen()) return;
+            check("fullscreen exit reports windowed state", !target->isFullscreen());
+            if (++fullscreenTarget < 2) { phase = 4; return; }
+            fullscreenUpdate = app->updates;
+            phase = 1;
         } else if (phase == 1) {
             if (app->updates == fullscreenUpdate) return;
-            if (skipMain || skipSecondary) {
+            if (!windowManager) {
+                const auto& ctx = internal::WindowRequestAccess::context(*secondary);
+                const float secondaryScale = pixels ? 1 : ctx.dpiScale;
+                check("unconfirmed fullscreen requests allow both native sizes to change",
+                    sapp_width() == int(215 * scale) && sapp_height() == int(159 * scale) &&
+                    ctx.fbWidth == int(215 * secondaryScale) && ctx.fbHeight == int(159 * secondaryScale));
+            } else if (skipMain || skipSecondary) {
                 check("fullscreen native sizes do not grow",
                     nonGrowing(sapp_width(), sapp_height()) && nonGrowing(trussc::internal::WindowRequestAccess::context(*secondary).fbWidth, trussc::internal::WindowRequestAccess::context(*secondary).fbHeight));
                 skip("ignored fullscreen requests preserve both native sizes", skipMain ? mainWidth : secondWidth, skipMain ? mainHeight : secondHeight);
