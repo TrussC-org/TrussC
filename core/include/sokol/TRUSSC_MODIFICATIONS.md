@@ -1044,3 +1044,10 @@ delivery. Only file URLs are accepted. Runtime queues launch requests until
 the launch App completes setup, and delivers later requests to all listeners.
 Paths use the same OS/available-memory and container representation bounds as
 file drops; no shell invocation or file-content reading occurs in the bridge.
+
+## iOS process exit (#1304)
+
+[TrussC #1304] After a frame returns with an accepted quit, run the existing
+cleanup callback before releasing iOS native state and shared backend state,
+matching `applicationWillTerminate`. Then call `exit` with the requested process
+code, so programmatic quitting completes instead of leaving the process alive.
