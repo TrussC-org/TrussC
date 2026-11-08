@@ -5992,6 +5992,14 @@ _SOKOL_PRIVATE void _sapp_tc_ios_frame(void) {
         _sapp_tc_ios_update_dimensions();
         _sapp_tc_frame();
     }
+    // [TrussC #1304] Finish the accepted quit after the frame callback returns,
+    // using the same cleanup order as applicationWillTerminate.
+    if (_sapp_tc.quit_ordered) {
+        _sapp_tc_call_cleanup();
+        _sapp_tc_ios_discard_state();
+        _sapp_tc_discard_state();
+        exit(trussc::internal::appExitCode());
+    }
 }
 
 _SOKOL_PRIVATE void _sapp_tc_ios_show_keyboard(bool shown) {

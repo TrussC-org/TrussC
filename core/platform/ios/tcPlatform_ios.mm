@@ -452,9 +452,14 @@ namespace trussc {
 void setImmersiveMode(bool enabled) {
     _sapp_ios_immersive_mode = enabled;
     // Tell UIKit to re-query prefersStatusBarHidden
-    UIWindow* window = UIApplication.sharedApplication.connectedScenes.allObjects.firstObject
-        ? ((UIWindowScene*)UIApplication.sharedApplication.connectedScenes.allObjects.firstObject).keyWindow
-        : nil;
+    UIWindow* window = nil;
+    for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+        for (UIWindow* candidate in ((UIWindowScene*)scene).windows) {
+            if (candidate.isKeyWindow) { window = candidate; break; }
+        }
+        if (window) break;
+    }
     if (window.rootViewController) {
         [window.rootViewController setNeedsStatusBarAppearanceUpdate];
         [window.rootViewController setNeedsUpdateOfHomeIndicatorAutoHidden];

@@ -28,11 +28,17 @@ void tcApp::draw() {
 
     if (thumbnail_.isAllocated()) {
         setColor(1);
-        drawBitmapString("last grab: " + to_string(thumbnail_.getWidth()) + " x " +
-                         to_string(thumbnail_.getHeight()) + " pixels", 440, 100);
-        float width = 300;
-        float height = width * thumbnail_.getHeight() / thumbnail_.getWidth();
-        thumbnail_.draw(440, 115, width, height);
+        // Landscape: right of the shapes. Portrait: below them.
+        bool beside = getWidth() > getHeight();
+        float x = beside ? 440 : 30;
+        float y = beside ? 115 : 300;
+        float aspect = float(thumbnail_.getWidth()) / thumbnail_.getHeight();
+        float width = min(300.0f, min(getWidth() - x - 30, (getHeight() - y - 30) * aspect));
+        if (width > 0) {
+            drawBitmapString("last grab: " + to_string(thumbnail_.getWidth()) + " x " +
+                             to_string(thumbnail_.getHeight()) + " pixels", x, y - 15);
+            thumbnail_.draw(x, y, width, width / aspect);
+        }
     }
 }
 

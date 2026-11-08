@@ -45685,7 +45685,8 @@ details.en = '''
 - It does not close a particular window and does not send `closeRequested`.
 - You can call it from another thread; the request is passed to the main thread.
 - Inside `App::exit()` or `cleanup()`, and while the process is already shutting down, it does nothing, and the exit code is not changed either.
-- On iOS and Android this does nothing: the OS decides when the app ends.
+- On iOS, the process ends with the requested code after normal App shutdown (`exit()` and `cleanup()`). Apple discourages apps from quitting themselves, so distributed apps usually should not call this on iOS. It is meant for tests, tools and kiosk-style installs.
+- On Android this does nothing: the OS decides when the app ends.
 '''
 details.ja = '''
 - `exitApp(code)` は終了コード（既定値 `0`）を設定して、すぐに戻ります。失敗を伝えたいときは 0 以外のコードを使ってください。Windows と Linux では、`runApp()` がこのコードを `main()` に返します。macOS の通常の終了では `runApp()` は戻らず、cleanup のあとにこのコードでプロセスが終了します（`runApp` を参照）。
@@ -45694,7 +45695,8 @@ details.ja = '''
 - 特定のウィンドウは閉じず、`closeRequested` も送りません。
 - ほかのスレッドからも呼べます。要求はメインスレッドに渡されます。
 - `App::exit()` や `cleanup()` の中、およびプロセスがすでに終了処理に入っている間は何もせず、終了コードも変わりません。
-- iOS と Android では何もしません。アプリをいつ終了させるかは OS が決めます。
+- iOS では、通常の App の終了処理（`exit()` と `cleanup()`）のあと、指定したコードでプロセスが終了します。Apple はアプリが自ら終了することを推奨していないため、配布するアプリでは通常 iOS で呼ばないでください。テスト、ツール、キオスク形式の設置向けです。
+- Android では何もしません。アプリをいつ終了させるかは OS が決めます。
 '''
 details.ko = '''
 - `exitApp(code)`는 종료 코드(기본값 `0`)를 설정하고 바로 반환합니다. 실패를 알리려면 0이 아닌 코드를 사용하세요. Windows와 Linux에서는 `runApp()`이 이 코드를 `main()`에 반환합니다. macOS의 정상 종료에서는 `runApp()`이 반환되지 않고, cleanup 뒤에 이 코드로 프로세스가 끝납니다(`runApp` 참조).
@@ -45703,7 +45705,8 @@ details.ko = '''
 - 특정 창을 닫지 않으며 `closeRequested`도 보내지 않습니다.
 - 다른 스레드에서도 호출할 수 있습니다. 요청은 메인 스레드로 전달됩니다.
 - `App::exit()`나 `cleanup()` 안, 그리고 프로세스가 이미 종료 처리 중일 때는 아무 동작도 하지 않으며 종료 코드도 바뀌지 않습니다.
-- iOS와 Android에서는 아무 동작도 하지 않습니다. 앱을 언제 끝낼지는 OS가 정합니다.
+- iOS에서는 정상적인 App 종료 처리(`exit()`와 `cleanup()`) 뒤에 지정한 코드로 프로세스가 종료됩니다. Apple은 앱이 스스로 종료하는 것을 권장하지 않으므로 배포하는 앱에서는 보통 iOS에서 호출하지 마세요. 테스트, 도구, 키오스크 형태의 설치용입니다.
+- Android에서는 아무 동작도 하지 않습니다. 앱을 언제 끝낼지는 OS가 정합니다.
 '''
 snippet = '''
 // tcApp.cpp

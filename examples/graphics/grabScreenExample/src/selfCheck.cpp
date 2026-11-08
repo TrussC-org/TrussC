@@ -40,6 +40,25 @@ public:
                   thumbnail_.getWidth() == pixels_.getWidth() &&
                   thumbnail_.getHeight() == pixels_.getHeight(),
                   "request consumed and pixels uploaded to thumbnail");
+            Pixels displayed;
+            bool visible = false;
+            if (grabScreen(displayed)) {
+                // Look for the captured red rectangle in the thumbnail area.
+                // This checks the rendered frame in both desktop and portrait layouts.
+                int startX = getWidth() > getHeight() ? 400 : 0;
+                int startY = getWidth() > getHeight() ? 110 : 300;
+                for (int y = startY * getFramebufferHeight() / getHeight();
+                     y < displayed.getHeight() && !visible; ++y) {
+                    for (int x = startX * getFramebufferWidth() / getWidth();
+                         x < displayed.getWidth(); ++x) {
+                        if (nearColor(displayed.getColor(x, y), Color(1, 0, 0))) {
+                            visible = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            check(visible, "thumbnail is visible inside the window");
             completed = true;
             exitApp(failures ? 1 : 0);
         });
