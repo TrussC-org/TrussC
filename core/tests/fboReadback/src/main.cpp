@@ -37,10 +37,20 @@ public:
         filesystem::remove(screenPath_);
     }
 
+    // A window that starts occluded (for example a closed MacBook lid with a
+    // dummy display) gets a first tick that commits setup work without a draw,
+    // and its first drawn frame may not be captured (#1288).
+    void update() override {
+        if (frames_ == 0 && isWindowOccluded()) startedOccluded_ = true;
+    }
+
     void draw() override {
         if (completed) return; // exitApp() is a no-op on iOS; draw keeps running
+        if (frames_ == 0) baseCommits_ = commits;
         if (frames_ > 0) {
-            check("exactly one commit since previous draw", commits == frames_);
+            check("exactly one commit since previous draw", commits - baseCommits_ == frames_);
+        }
+        if (frames_ > 1 || (frames_ == 1 && !startedOccluded_)) {
             Image screen;
             check("previous frame screenshot loads", static_cast<bool>(screen.load(screenPath_)));
             if (screen.isAllocated()) {
@@ -102,7 +112,7 @@ public:
               abs(int(bytes[0]) - 64) <= roundingAllowance && abs(int(bytes[1]) - 128) <= roundingAllowance &&
               bytes[2] == 255 && bytes[3] == 255);
         check("float/byte read preserves swapchain pass", isInSwapchainPass());
-        check("readbacks never commit the frame", commits == frames_);
+        check("readbacks never commit the frame", commits - baseCommits_ == frames_);
         setColor(0, 1, 0);
         drawCircle(160, 32, 20);
         check("screen capture queued for after present", saveScreenshot(screenPath_));
@@ -357,6 +367,8 @@ private:
     FullscreenShader fullscreen_;
     filesystem::path path_, screenPath_;
     int frames_ = 0;
+    int baseCommits_ = 0;
+    bool startedOccluded_ = false;
     bool expectRed_ = false;
 };
 } // namespace
