@@ -64,7 +64,11 @@ class CoreGuardTests(unittest.TestCase):
         self.run_command(["cmake", "--preset", HOST_PRESET, *offline], cwd=self.project)
 
     def test_source_relative_core_from_another_directory(self):
-        relative_core = os.path.relpath(ROOT / "core", self.project)
+        try:
+            relative_core = os.path.relpath(ROOT / "core", self.project)
+        except ValueError:
+            # Windows: checkout and temp directory on different drives.
+            self.skipTest("no relative path from the temp directory to the checkout")
         caller = self.base / "caller" / "nested"
         caller.mkdir(parents=True)
         self.assertTrue((self.project / relative_core / "cmake/trussc_app.cmake").is_file())
