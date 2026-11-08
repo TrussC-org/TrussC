@@ -61,6 +61,25 @@
 
 namespace trussc {
 
+// Get data path for a filename
+// - If filename is absolute, return as-is (like oF)
+// - Otherwise, resolved relative to executable directory + dataPathRoot
+// - Normalize only that base; preserve filename components (including symlink/..).
+// Safe to call from any thread (e.g. Pixels::load on a worker).
+fs::path getDataPath(const fs::path& filename) {
+    if (!filename.empty() && filename.is_absolute()) {
+        return filename;
+    }
+
+    const fs::path root = internal::currentDataPathRoot();
+    if (root.is_absolute()) {
+        return root.lexically_normal() / filename;
+    } else {
+        // Relative root: resolve relative to executable directory
+        return (getExecutableDir() / root).lexically_normal() / filename;
+    }
+}
+
 namespace internal {
 namespace {
 // Refreshed after each sg_setup; other backends have no extra stage bound here.
