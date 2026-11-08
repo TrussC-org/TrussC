@@ -83,7 +83,7 @@ int main() {
     for (int attempt = 0; attempt < 2; ++attempt) {
         warnings.str("");
         if (shader.load(descriptor) || shader.loaded || shader.shader.id || made) return 1;
-        if (warnings.str() != "vertex storage buffers requested: 1, supported: 0; use instance attributes or texture fetch") return 2;
+        if (warnings.str() != "this GPU can't read storage buffers in vertex shaders (requested: 1, supported: 0)") return 2;
     }
     // Fragment storage remains usable at vertex capacity 0.
     stage = SG_SHADERSTAGE_FRAGMENT;
@@ -96,7 +96,7 @@ int main() {
     if (!shader.load(descriptor) || made != 2 || !warnings.str().empty()) return 5;
     stageCount = 2;
     if (shader.load(descriptor) || made != 2) return 6;
-    if (warnings.str() != "vertex storage buffers requested: 2, supported: 1; use instance attributes or texture fetch") return 7;
+    if (warnings.str() != "this GPU can't read storage buffers in vertex shaders (requested: 2, supported: 1)") return 7;
     shader.clear();
     sg_shutdown();
 }

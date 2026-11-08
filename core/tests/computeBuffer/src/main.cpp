@@ -100,16 +100,17 @@ class ComputeBufferApp : public App {
         auto& target = internal::currentTarget();
         const auto queued = target.deferredShaderDraws.size();
         const auto layer = target.sglLayerNext;
-        int warnings = 0;
+        int warnings = 0, attributeWarnings = 0;
         auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
             if (event.level == LogLevel::Warning && event.message.find("drawVertices requires nonnegative") != std::string::npos) ++warnings;
+            if (event.level == LogLevel::Warning && event.message.find("drawVertices requires a shader without vertex attributes") != std::string::npos) ++attributeWarnings;
         });
         reader_.drawVertices(0); reader_.drawVertices(24, 0);
         check("zero counts do not record or advance a layer", target.deferredShaderDraws.size() == queued && target.sglLayerNext == layer && warnings == 0);
         reader_.drawVertices(-1); reader_.drawVertices(24, -1); reader_.drawVertices(-1);
-        check("negative counts are refused and warn every time", target.deferredShaderDraws.size() == queued && target.sglLayerNext == layer && warnings == 3);
-        ordinary_.drawVertices(3);
-        check("attribute-consuming shader is refused", target.deferredShaderDraws.size() == queued);
+        check("negative counts are refused and warn once per second", target.deferredShaderDraws.size() == queued && target.sglLayerNext == layer && warnings == 1);
+        ordinary_.drawVertices(3); ordinary_.drawVertices(3); ordinary_.drawVertices(3);
+        check("attribute-consuming shader is refused and warns once per second", target.deferredShaderDraws.size() == queued && target.sglLayerNext == layer && attributeWarnings == 1);
         ordinary_.begin();
         setColor(1, 0, 0, 1);
         drawRect(-1, -1, 2, 2);

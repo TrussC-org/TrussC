@@ -309,6 +309,43 @@ int main() {
 
 class StorageBufferTests(unittest.TestCase):
     compile_and_run = compute_tests.ComputeShaderTests.compile_and_run
+    def test_draw_vertices_warning_gates_and_compiling_mutants(self):
+        text = GRAPHICS.read_text(encoding='utf-8')
+        start = text.index('    void drawVertices(')
+        # Compile the production refusal path; count calls that reach drawing.
+        end = text.index('        auto& wctx =', start)
+        source = ("namespace trussc { struct DrawProbe {\n"
+                  "bool loaded = true, hasVertexAttributes_ = false; int accepted = 0;\n"
+                  + text[start:end] + "++accepted; } }; }\n")
+        preamble = PREAMBLE + '#include "tc/utils/tcOnceGate.h"\n'
+        main = r'''
+int main() {
+    using namespace trussc;
+    DrawProbe probe;
+    for (int i = 0; i < 3; ++i) {
+        probe.drawVertices(-1); probe.drawVertices(3, -1);
+    }
+    if (probe.accepted || warnings.str() != "drawVertices requires nonnegative vertex and instance counts") return 1;
+    warnings.str("");
+    probe.hasVertexAttributes_ = true;
+    for (int i = 0; i < 3; ++i) probe.drawVertices(3);
+    if (probe.accepted || warnings.str() != "drawVertices requires a shader without vertex attributes") return 2;
+    probe.hasVertexAttributes_ = false;
+    probe.drawVertices(0); probe.drawVertices(3, 0);
+    probe.loaded = false; probe.drawVertices(3);
+    if (probe.accepted) return 3;
+    probe.loaded = true; probe.drawVertices(3);
+    return probe.accepted == 1 ? 0 : 4;
+}
+'''
+        self.compile_and_run(source, True, main, preamble)
+        for gate in ('negativeCount', 'vertexAttributes'):
+            with self.subTest(gate=gate):
+                before = f'if ({gate}.isFirstTime())'
+                self.assertIn(before, source)
+                self.compile_and_run(source.replace(before, 'if (true)', 1),
+                                     False, main, preamble)
+
     def test_fullscreen_submission_parity_and_compiling_mutant(self):
         preamble = PREAMBLE.replace('#define SOKOL_IMPL',
                                     '#define SOKOL_DEBUG\n#define SOKOL_TRACE_HOOKS\n#define SOKOL_IMPL')

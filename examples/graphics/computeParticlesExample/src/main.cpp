@@ -1,3 +1,4 @@
+// Vertex storage reads need GPU support; Pi 5 (GLES 3.1, V3D) has none; fragment and compute reads work.
 #include <TrussC.h>
 #include "step.compute.glsl.h"
 #include "particles.compute.glsl.h"

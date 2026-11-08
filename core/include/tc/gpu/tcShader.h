@@ -80,8 +80,8 @@ public:
         }
         const int vertexStorageLimit = internal::vertexStorageBufferLimit();
         if (vertexStorageBuffers > vertexStorageLimit) {
-            logWarning("Shader") << "vertex storage buffers requested: " << vertexStorageBuffers
-                << ", supported: " << vertexStorageLimit << "; use instance attributes or texture fetch";
+            logWarning("Shader") << "this GPU can't read storage buffers in vertex shaders (requested: " << vertexStorageBuffers
+                << ", supported: " << vertexStorageLimit << ")";
             return false;
         }
 
@@ -358,12 +358,18 @@ public:
     // Matrices and color must be supplied explicitly through uniforms.
     void drawVertices(int vertexCount, int instanceCount = 1) {
         if (vertexCount < 0 || instanceCount < 0) {
-            logWarning("Shader") << "drawVertices requires nonnegative vertex and instance counts";
+            static OnceGate negativeCount{1.0};
+            if (negativeCount.isFirstTime()) {
+                logWarning("Shader") << "drawVertices requires nonnegative vertex and instance counts";
+            }
             return;
         }
         if (!vertexCount || !instanceCount || !loaded) return;
         if (hasVertexAttributes_) {
-            logWarning("Shader") << "drawVertices requires a shader without vertex attributes";
+            static OnceGate vertexAttributes{1.0};
+            if (vertexAttributes.isFirstTime()) {
+                logWarning("Shader") << "drawVertices requires a shader without vertex attributes";
+            }
             return;
         }
         auto& wctx = internal::currentWindowContext();
