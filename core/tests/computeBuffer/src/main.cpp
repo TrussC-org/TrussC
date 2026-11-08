@@ -156,6 +156,9 @@ public:
         check("compute descriptor loads", compute_.load(buffer_pattern_shader_desc));
         check("compute buffer binding succeeds", compute_.setStorageBuffer(VIEW_pattern_output, buffer_));
         check("graphics descriptor loads", reader_.load(buffer_reader_shader_desc));
+        check("graphics storage is fragment-stage readonly",
+            buffer_reader_shader_desc(sg_query_backend())->views[VIEW_pattern_input].storage_buffer.stage == SG_SHADERSTAGE_FRAGMENT &&
+            buffer_reader_shader_desc(sg_query_backend())->views[VIEW_pattern_input].storage_buffer.readonly);
         check("graphics buffer binding succeeds", reader_.setStorageBuffer(VIEW_pattern_input, buffer_));
         check("negative compute slot is refused", !compute_.setStorageBuffer(-1, buffer_));
         check("undeclared compute slot is refused", !compute_.setStorageBuffer(1, buffer_));

@@ -33,6 +33,10 @@
 
 namespace trussc {
 
+namespace internal {
+int vertexStorageBufferLimit();
+}
+
 // ---------------------------------------------------------------------------
 // Shader class
 // ---------------------------------------------------------------------------
@@ -67,6 +71,17 @@ public:
         const sg_shader_desc* desc = descFn(backend);
         if (!desc) {
             logError("Shader") << "Failed to get shader desc";
+            return false;
+        }
+
+        int vertexStorageBuffers = 0;
+        for (const auto& view : desc->views) {
+            if (view.storage_buffer.stage == SG_SHADERSTAGE_VERTEX) ++vertexStorageBuffers;
+        }
+        const int vertexStorageLimit = internal::vertexStorageBufferLimit();
+        if (vertexStorageBuffers > vertexStorageLimit) {
+            logWarning("Shader") << "vertex storage buffers requested: " << vertexStorageBuffers
+                << ", supported: " << vertexStorageLimit << "; use instance attributes or texture fetch";
             return false;
         }
 

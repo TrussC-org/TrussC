@@ -1,36 +1,34 @@
 @vs vs
-struct InputItem { vec4 color; };
-layout(binding=0) readonly buffer pattern_input { InputItem items[]; };
 layout(binding=0) uniform draw_params { vec4 placement; };
-layout(location=0) out vec4 vertex_color;
+layout(location=0) flat out int item_index;
 void main() {
     vec2 corners[6] = vec2[](vec2(0,0), vec2(1,0), vec2(1,1), vec2(0,0), vec2(1,1), vec2(0,1));
     uint v = uint(gl_VertexIndex);
     uint i = v / 6u;
     vec2 p = vec2(float(i), 0) + corners[v % 6u];
     gl_Position = vec4(p * vec2(0.25, 2.0) + vec2(placement.x - 1.0, -1.0), 0, 1);
-    vertex_color = items[i].color;
+    item_index = int(i);
 }
 @end
 @fs fs
-layout(location=0) in vec4 vertex_color;
+struct InputItem { vec4 color; };
+layout(binding=0) readonly buffer pattern_input { InputItem items[]; };
+layout(location=0) flat in int item_index;
 layout(location=0) out vec4 frag_color;
-void main() { frag_color = vertex_color; }
+void main() { frag_color = items[item_index].color; }
 @end
 @program buffer_reader vs fs
 
 @vs instanced_vs
-struct InputItem { vec4 color; };
-layout(binding=0) readonly buffer pattern_input { InputItem items[]; };
 layout(binding=0) uniform draw_params { vec4 placement; };
-layout(location=0) out vec4 vertex_color;
+layout(location=0) flat out int item_index;
 void main() {
     vec2 corners[6] = vec2[](vec2(0,0), vec2(1,0), vec2(1,1), vec2(0,0), vec2(1,1), vec2(0,1));
     uint v = (uint(gl_InstanceIndex) % 2u) * 3u + uint(gl_VertexIndex);
     uint i = uint(gl_InstanceIndex) / 2u;
     vec2 p = vec2(float(i), 0) + corners[v % 6u];
     gl_Position = vec4(p * vec2(0.25, 2.0) + vec2(placement.x - 1.0, -1.0), 0, 1);
-    vertex_color = items[i].color;
+    item_index = int(i);
 }
 @end
 @program buffer_instanced_reader instanced_vs fs
@@ -45,4 +43,9 @@ void main() {
     vertex_color = color0 + vec4(texcoord0, 0, 0) * 0.001;
 }
 @end
-@program buffer_ordinary ordinary_vs fs
+@fs ordinary_fs
+layout(location=0) in vec4 vertex_color;
+layout(location=0) out vec4 frag_color;
+void main() { frag_color = vertex_color; }
+@end
+@program buffer_ordinary ordinary_vs ordinary_fs

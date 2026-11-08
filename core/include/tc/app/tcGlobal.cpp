@@ -32,9 +32,12 @@
 #include <algorithm>
 #if defined(SOKOL_GLCORE)
 #include <GL/gl.h>
+#elif defined(SOKOL_GLES3) && !defined(__EMSCRIPTEN__)
+#include <GLES3/gl31.h>
 #elif defined(SOKOL_GLES3)
 #include <GLES3/gl3.h>
 #endif
+#include <limits>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -59,6 +62,22 @@
 namespace trussc {
 
 namespace internal {
+namespace {
+// Refreshed after each sg_setup; other backends have no extra stage bound here.
+int cachedVertexStorageBufferLimit = std::numeric_limits<int>::max();
+
+void initializeVertexStorageBufferLimit() {
+    cachedVertexStorageBufferLimit = std::numeric_limits<int>::max();
+#if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
+    if (sg_isvalid() && sg_query_features().compute) {
+        glGetIntegerv(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS, &cachedVertexStorageBufferLimit);
+    }
+#endif
+}
+}
+
+int vertexStorageBufferLimit() { return cachedVertexStorageBufferLimit; }
+
 namespace {
 thread_local bool shaderStreamBufferAllocation = false;
 }
@@ -219,6 +238,7 @@ void setup() {
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
+    internal::initializeVertexStorageBufferLimit();
     internal::recordImageDecodeLimit(sg_isvalid() ? sg_query_limits().max_image_size_2d : 0);
 
     // Initialize sokol_gl with the same descriptor used for later rebuilds.
