@@ -159,10 +159,10 @@ public:
     sg_view getView() const { return view_; }
 
 private:
-#if defined(SOKOL_D3D11) || defined(SOKOL_WGPU) || ((defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__))
+#if defined(SOKOL_METAL) || defined(SOKOL_D3D11) || defined(SOKOL_WGPU) || ((defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__))
     std::unique_ptr<internal::BufferReadbackRequest> readAsyncPlatform();
 #else
-    // Subsequent backend slices replace this deferred failure, never fake success.
+    // WebGL and other unsupported backends deliver deferred failure.
     std::unique_ptr<internal::BufferReadbackRequest> readAsyncPlatform() { return {}; }
 #endif
 #if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
