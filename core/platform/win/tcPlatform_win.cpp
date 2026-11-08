@@ -15,6 +15,7 @@
 
 #include <windows.h>
 #include <shellscalingapi.h>
+#include <shellapi.h>
 #include <d3d11.h>
 
 // sokol_app のウィンドウ取得
@@ -26,6 +27,23 @@
 #pragma comment(lib, "shcore.lib")
 
 namespace trussc {
+
+std::vector<std::string> getCommandLineArgs() {
+    int count = 0;
+    auto* argv = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (!argv) return {};
+    struct ReleaseArgs {
+        wchar_t** value;
+        ~ReleaseArgs() { LocalFree(value); }
+    } release{argv};
+    std::vector<std::string> args;
+    // Bound (platform): CommandLineToArgvW supplies an int count and Windows
+    // limits the command line to 32767 UTF-16 units including its terminator.
+    // The OS rejects oversized launch commands; conversion never truncates.
+    for (int i = 0; i < count; ++i)
+        args.push_back(internal::utf16ToUtf8Lossy(std::wstring_view(argv[i])));
+    return args;
+}
 
 namespace internal {
 namespace {

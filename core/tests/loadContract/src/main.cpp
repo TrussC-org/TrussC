@@ -219,6 +219,14 @@ void cpuChecks() {
     missing("FileReader", "missing.txt", [&](const auto& p) { return reader.open(p); });
     missing("Pixels HDR", "missing.hdr", [&](const auto& p) { return px.loadHDR(p).ok(); });
     missing("Image", "missing.png", [&](const auto& p) { return image.load(p).ok(); });
+    {
+        fs::create_directories(dataRoot / "folder.png");
+        ErrorCapture logs;
+        check("Image directory fails", !image.load("folder.png").ok());
+        const auto sentence = "is not a file: " + internal::pathToDisplayUtf8(dataRoot / "folder.png");
+        check("Image directory says it is not a file", logs.messages.size() == 1 &&
+              logs.messages[0].ends_with(sentence));
+    }
     missing("text", "missing.txt", [&](const auto& p) { return !loadTextFile(p).empty(); });
     missing("JSON", "missing.json", [&](const auto& p) { return !loadJson(p).is_null(); });
     missing("XML", "missing.xml", [&](const auto& p) { return xml.load(p); });

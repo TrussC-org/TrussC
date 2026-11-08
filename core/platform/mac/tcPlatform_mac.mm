@@ -25,6 +25,15 @@
 
 namespace trussc {
 
+std::vector<std::string> getCommandLineArgs() {
+    std::vector<std::string> args;
+    @autoreleasepool {
+        for (NSString* arg in [[NSProcessInfo processInfo] arguments])
+            args.emplace_back([arg UTF8String]);
+    }
+    return args;
+}
+
 void bringWindowToFront() {
     if (auto* target = internal::resolveWindow(true)) target->bringToFront();
 }

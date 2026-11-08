@@ -1,5 +1,6 @@
 #include <TrussC.h>
 #include "tc/utils/internal/tcAsyncDialog.h"
+#include "tc/app/internal/tcCommandLine.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -140,6 +141,8 @@ struct Runtime {
     std::vector<std::weak_ptr<AppOwner>> owners;
     bool stopping = false, notifyingQuit = false, quitPending = false;
     RuntimeEvents events;
+    std::vector<fs::path> pendingOpenedFiles;
+    bool filesOpenedReady = false;
     Event<void> maintenance;
     uintptr_t nextGeneration = 0;
 
@@ -194,6 +197,51 @@ void dispatchConsoleEvent(ConsoleEventArgs& args) {
             callback(args);
         });
     });
+}
+namespace {
+void dispatchFilesOpened(std::vector<fs::path> files) {
+    if (files.empty() || runtimeEnding()) return;
+    RuntimeActivityScope activity;
+    AppOwnerScope process({});
+    WindowContextScope context(nullptr);
+    FilesOpenedEventArgs args{std::move(files)};
+    auto saved = FrameworkEventAccess::snapshot(runtime().events.filesOpened);
+    TeardownSteps steps;
+    FrameworkEventAccess::forEachOwned(saved, [&](auto& callback, auto owner) {
+        steps.run("Runtime filesOpened listener", [&] {
+            AppCallbackScope subscriber(std::move(owner));
+            EntryStackGuard listener(AppEntry::Event, "filesOpened");
+            callback(args);
+        });
+    });
+}
+}
+void receiveFilesOpened(std::vector<fs::path> files) {
+    auto& state = runtime();
+    if (state.stopping) return;
+    if (state.filesOpenedReady) {
+        dispatchFilesOpened(std::move(files));
+    } else {
+        // Bound (representation): vector growth checks max_size and available
+        // memory. Overflow throws; paths are never truncated or interpreted.
+        state.pendingOpenedFiles.insert(state.pendingOpenedFiles.end(),
+            std::make_move_iterator(files.begin()), std::make_move_iterator(files.end()));
+    }
+}
+void finishFilesOpenedSetup(const App& app) {
+    auto& state = runtime();
+    // A secondary App may finish setup inside the launch App's setup(). Wait
+    // for the first attachment, so all listeners installed there are ready.
+    // Not handled: if the launch App's generation is retired before its own
+    // post-setup hook while an App in another window already finished setup,
+    // launch files stay queued. Hot reload never retires during a callback and
+    // supports one window, so normal use can't reach this.
+    if (state.filesOpenedReady || !state.attachments.first() ||
+            state.attachments.first()->app.get() != &app) return;
+    state.filesOpenedReady = true;
+    auto files = std::move(state.pendingOpenedFiles);
+    state.pendingOpenedFiles.clear();
+    dispatchFilesOpened(std::move(files));
 }
 namespace {
 // Capture all App event slots before any user code. A listener that replaces or
@@ -326,6 +374,10 @@ void beginRuntimeRun() {
     state.sessionAllowed = true;
     state.nativeSessionActivity = nullptr;
     state.logoutTimeout = 3.0f;
+    state.filesOpenedReady = false;
+    state.pendingOpenedFiles.clear();
+    if constexpr (Platform::isWindows() || Platform::isLinux())
+        state.pendingOpenedFiles = filesFromCommandLine(getCommandLineArgs());
 
     prepareRuntimeExit();
     prepareLogoutWatchdog();

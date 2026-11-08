@@ -351,6 +351,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getCircleResolution", []() { return trussc::getCircleResolution(); });
     lua->set_function("getClipboardString", []() { return trussc::getClipboardString(); });
     lua->set_function("getColor", []() { return trussc::getColor(); });
+    lua->set_function("getCommandLineArgs", []() { return trussc::getCommandLineArgs(); });
 #if defined(__ANDROID__) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("getCompassHeading", []() { return trussc::getCompassHeading(); });
 #endif

@@ -1965,7 +1965,10 @@ std::filesystem::path internal::resolveScreenshotPath(const std::filesystem::pat
 }
 
 LoadResult internal::reportMissingLoad(const fs::path& path, const char* module) {
-    const std::string message = "file not found: " + pathToDisplayUtf8(path);
+    // A directory or other non-regular path exists; say so instead of "not found".
+    std::error_code error;
+    const bool exists = fs::exists(path, error);
+    const std::string message = (exists ? "is not a file: " : "file not found: ") + pathToDisplayUtf8(path);
     logError(module) << message;
     return LoadResult::fail(LoadError::FileNotFound, message);
 }
