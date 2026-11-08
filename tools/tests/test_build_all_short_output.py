@@ -84,6 +84,34 @@ class ShortOutputCase(unittest.TestCase):
 
 
 class TestRunScreen(ShortOutputCase):
+    def test_exit_77_is_skipped_in_combined_and_final_summaries(self):
+        self.assertEqual(self.combined({'a': (0, 'PASS\n'), 'b': (77, 'SKIP unavailable\n')}), 0)
+        self.assertIn('allCoreTests: 1/2 passed, 1 skipped', self.screen())
+        self.assertIn('SKIP: core/tests/b (exit 77)', self.screen())
+        self.assertIn('1/2 passed, 1 skipped', build_all.SHORT.summary(0)[0])
+        self.assertEqual(build_all.SHORT.failures, [])
+        self.assertIsNone(self.options.core_test_timings[-1][2])
+        build_all.print_core_test_timings(self.options.core_test_timings, verbose=False)
+        timing_log = self.root / 'build-logs/core-test-times.log'
+        self.assertIn('core/tests/b (SKIP)', timing_log.read_text(encoding='utf-8'))
+
+    def test_skipped_unit_test_is_neither_passed_nor_failed(self):
+        directory = str(self.root / 'core/tests/unit')
+        with patch.object(build_all, 'run_command', return_value=True), \
+                patch.object(build_all, 'find_test_binary', return_value='fake'), \
+                patch.object(build_all.subprocess, 'run', return_value=completed(77, 'SKIP headers missing\n')):
+            rc = build_all.run_test_suite([directory], 'core unit', 'pg', PLATFORM, self.options,
+                                          builder=build_all.build_and_run_unit_test)
+        self.assertEqual(rc, 0)
+        self.assertIn('Core unit tests: 0/1 passed, 1 skipped', self.screen())
+        self.assertNotIn('FAILED', self.screen())
+        self.assertIn('0/1 passed, 1 skipped', build_all.SHORT.summary(0)[0])
+
+    def test_skip_does_not_hide_a_failure(self):
+        self.assertEqual(self.combined({'a': (77, 'SKIP\n'), 'b': (1, 'FAIL broken\n')}), 1)
+        self.assertIn('allCoreTests: 0/2 passed, 1 skipped', self.screen())
+        self.assertIn('0/2 passed, 1 failed, 1 skipped', build_all.SHORT.summary(1)[0])
+
     def test_all_pass_prints_dots_and_counts_but_no_pass_lines(self):
         passing = (0, ''.join(f'case{i}: PASS\n' for i in range(50)) + 'ALL PASSED\n')
         rc = self.combined({'a': passing, 'b': passing, 'c': passing})
@@ -356,6 +384,13 @@ class VerboseOutput(ShortOutputCase):
                          'Wall time:'):
             self.assertIn(expected, screen)
         self.assertNotIn('Done:', screen)
+
+    def test_verbose_summary_reports_exit_77_as_skipped(self):
+        self.assertEqual(self.combined({'a': (77, 'SKIP headers missing\n')}), 0)
+        self.assertIn('Passed: 0', self.screen())
+        self.assertIn('Skipped: 1', self.screen())
+        self.assertNotIn('Passed!', self.screen())
+        self.assertNotIn('All core tests passed!', self.screen())
 
     def test_verbose_build_echoes_and_hides_nothing(self):
         lines = ['-- configure\n', '[ 50%] Building CXX object a.o\n', 'a.cpp:1:1: warning: x\n']

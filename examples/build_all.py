@@ -61,6 +61,9 @@ LOG_DIR_NAME = "build-logs"
 # the full output.
 VERBOSE = True
 
+# Automake/Meson convention; CTest registrations use SKIP_RETURN_CODE 77.
+SKIP_RETURN_CODE = 77
+
 # Lines of a failed command or test that is shown on the screen.
 FAIL_CONTEXT_LINES = 5      # lines after a FAIL line that belong to it
 MAX_FAIL_LINES = 30         # screen lines for the FAIL lines of one test
@@ -173,6 +176,7 @@ class ShortOutput:
         self.errors = []        # file name (None: link error) per error
         self.warnings = []
         self.groups = []        # (label, passed, total)
+        self.skipped = 0
         self.failures = []      # names of failed tests / projects
         self.shown_notes = set()
         self.started = time.monotonic()
@@ -227,12 +231,13 @@ class ShortOutput:
         passed = sum(g[1] for g in self.groups)
         took = f"{elapsed // 60}m{elapsed % 60:02d}s"
         where = f"Logs: {display_path(log_dir())}"
+        skips = f", {self.skipped} skipped" if self.skipped else ""
         if rc == 0:
             what = f"{passed}/{total} passed" if self.groups else "nothing failed"
-            lines = [f"Done: {what} ({took}). {where}"]
+            lines = [f"Done: {what}{skips} ({took}). {where}"]
         else:
             what = f"{passed}/{total} passed, " if self.groups else ""
-            lines = [f"Failed: {what}{len(self.failures)} failed ({took}). {where}"]
+            lines = [f"Failed: {what}{len(self.failures)} failed{skips} ({took}). {where}"]
         if self.errors:
             lines.append(f"ERROR: {len(self.errors)} ({self.names(self.errors)})")
         if self.warnings:
@@ -617,6 +622,7 @@ def find_test_binary(test_dir, platform_info):
     return None
 
 def run_test_binary(binary, cwd, launcher=None, args=(), timings=None, timing_name=None, verbose=True):
+    # Return True for PASS, False for FAIL, None for SKIP (exit 77).
     # Run a test executable, CAPTURE its output and echo it through our own
     # (flushed) stdout. Inherited-handle child output gets lost or reordered
     # on the Windows CI runners, which made failing tests undiagnosable.
@@ -641,9 +647,10 @@ def run_test_binary(binary, cwd, launcher=None, args=(), timings=None, timing_na
     else:
         text = r.stdout.decode('utf-8', errors='replace') if r.stdout else ""
         notes = []
-    if r is not None and r.returncode != 0:
+    skipped = r is not None and r.returncode == SKIP_RETURN_CODE
+    if r is not None and r.returncode != 0 and not skipped:
         notes.append(f"  (exit code {r.returncode} / 0x{r.returncode & 0xFFFFFFFF:08X})")
-    ok = r is not None and r.returncode == 0
+    ok = None if skipped else r is not None and r.returncode == 0
     log = current_log()
     if log:
         log.command(cmd, cwd)
@@ -657,7 +664,7 @@ def run_test_binary(binary, cwd, launcher=None, args=(), timings=None, timing_na
     else:
         # A run that exited 0 passed, whatever its lines say (some tests print
         # expected failures); only a failed run shows its FAIL lines.
-        if not ok:
+        if ok is False:
             _, fail_lines = summarize_test_output(text)
             if fail_lines:
                 say_indented(fail_lines)
@@ -743,7 +750,7 @@ def print_core_test_timings(timings, verbose=True):
     if not timings:
         out("No core tests ran.")
     for name, elapsed, ok in sorted(timings, key=lambda t: (-t[1], t[0])):
-        out(f"  {elapsed:9.3f}s  {name}" + (" (FAILED)" if not ok else ""))
+        out(f"  {elapsed:9.3f}s  {name}" + (" (SKIP)" if ok is None else " (FAILED)" if not ok else ""))
     if sink:
         sink.close()
 
@@ -807,9 +814,8 @@ def build_and_run_test(test_dir, pg_bin, platform_info, args):
 
         if args.verbose:
             Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
-        if not run_timed_test_binary(binary, test_dir, args):
-            return False, "run"
-        return True, None
+        result = run_timed_test_binary(binary, test_dir, args)
+        return result, "run" if result is False else None
 
 def run_combined_core_tests(tests, pg_bin, platform_info, args):
     # Build core/tests/allCoreTests ONCE (every test in `tests` is compiled
@@ -898,6 +904,7 @@ def run_combined_core_tests(tests, pg_bin, platform_info, args):
 
     run_names = [n for n in names if n in by_name] if not stage else []
     passed = 0
+    skipped = 0
     run_progress = Progress(f"Running {len(run_names)} core tests")
     if run_names and not verbose:
         run_progress.begin()
@@ -909,7 +916,10 @@ def run_combined_core_tests(tests, pg_bin, platform_info, args):
                          f"({ALL_CORE_TESTS_NAME} {n})", Colors.YELLOW)
         with unit_log(tdir):
             ok = run_timed_test_binary(binary, tdir, args, args=[n])
-        if ok:
+        if ok is None:
+            skipped += 1
+            say(f"SKIP: {os.path.relpath(tdir, ROOT_DIR)} (exit {SKIP_RETURN_CODE})")
+        elif ok:
             if verbose:
                 Colors.print("  Passed!", Colors.GREEN)
             passed += 1
@@ -923,10 +933,12 @@ def run_combined_core_tests(tests, pg_bin, platform_info, args):
             run_progress.update((i + 1) / len(run_names))
     run_secs = time.monotonic() - t0
     close_dots()
+    SHORT.skipped += skipped
+    skips = f", {skipped} skipped" if skipped else ""
 
     if not verbose:
         SHORT.groups.append((ALL_CORE_TESTS_NAME, passed, len(tests)))
-        say(f"{ALL_CORE_TESTS_NAME}: {passed}/{len(tests)} passed "
+        say(f"{ALL_CORE_TESTS_NAME}: {passed}/{len(tests)} passed{skips} "
             f"(build {build_secs:.1f}s, runs {run_secs:.1f}s)")
         return 1 if failed else 0
 
@@ -935,12 +947,14 @@ def run_combined_core_tests(tests, pg_bin, platform_info, args):
     print(f"{ALL_CORE_TESTS_NAME} build: {build_secs:.1f}s, runs: {run_secs:.1f}s")
     print(f"Total:  {len(tests)}")
     Colors.print(f"Passed: {passed}", Colors.GREEN)
+    if skipped:
+        Colors.print(f"Skipped: {skipped}", Colors.YELLOW)
     if failed:
         Colors.print(f"Failed: {len(failed)}", Colors.RED)
         for f in failed:
             print(f"  - {f}")
         return 1
-    Colors.print("All core tests passed!", Colors.GREEN)
+    Colors.print("Core tests completed." if skipped else "All core tests passed!", Colors.GREEN)
     return 0
 
 def build_and_run_unit_test(test_dir, pg_bin, platform_info, args):
@@ -969,9 +983,8 @@ def _build_and_run_unit_test(test_dir, platform_info, args):
 
     if args.verbose:
         Colors.print(f"  Running {os.path.relpath(binary, test_dir)} ...", Colors.YELLOW)
-    if not run_timed_test_binary(binary, test_dir, args):
-        return False, "run"
-    return True, None
+    result = run_timed_test_binary(binary, test_dir, args)
+    return result, "run" if result is False else None
 
 def find_node():
     # emsdk_env exports EMSDK_NODE (the node emsdk ships and emcc targets);
@@ -1024,9 +1037,8 @@ def _build_and_run_web_test(test_dir, pg_bin, platform_info, args):
 
     if args.verbose:
         Colors.print(f"  Running node {os.path.relpath(js, test_dir)} ...", Colors.YELLOW)
-    if not run_timed_test_binary(js, test_dir, args, launcher=node):
-        return False, "web-run"
-    return True, None
+    result = run_timed_test_binary(js, test_dir, args, launcher=node)
+    return result, "web-run" if result is False else None
 
 def run_test_suite(tests, label, pg_bin, platform_info, args, builder=build_and_run_test):
     # Build AND run a set of console test projects (addon or core). Streams each
@@ -1040,12 +1052,16 @@ def run_test_suite(tests, label, pg_bin, platform_info, args, builder=build_and_
         progress = Progress(f"{label.capitalize()} tests ({len(tests)})")
         progress.begin()
     failed = []
+    skipped = 0
     for i, tdir in enumerate(tests):
         name = os.path.relpath(tdir, ROOT_DIR)
         if verbose:
             Colors.print(f"[{i+1}/{len(tests)}] Building & running: {name}", Colors.YELLOW)
         ok, stage = builder(tdir, pg_bin, platform_info, args)
-        if ok:
+        if ok is None:
+            skipped += 1
+            say(f"SKIP: {name} (exit {SKIP_RETURN_CODE})")
+        elif ok:
             if verbose:
                 Colors.print("  Passed!", Colors.GREEN)
         else:
@@ -1056,21 +1072,26 @@ def run_test_suite(tests, label, pg_bin, platform_info, args, builder=build_and_
             failed.append(f"{name} ({stage})")
         if not verbose:
             progress.update((i + 1) / len(tests))
+    SHORT.skipped += skipped
+    passed = len(tests) - len(failed) - skipped
+    skips = f", {skipped} skipped" if skipped else ""
     if not verbose:
         close_dots()
-        SHORT.groups.append((f"{label} tests", len(tests) - len(failed), len(tests)))
-        say(f"{label.capitalize()} tests: {len(tests) - len(failed)}/{len(tests)} passed")
+        SHORT.groups.append((f"{label} tests", passed, len(tests)))
+        say(f"{label.capitalize()} tests: {passed}/{len(tests)} passed{skips}")
         return 1 if failed else 0
     print("")
     Colors.print(f"=== {label.capitalize()} Test Summary ===", Colors.BLUE)
     print(f"Total:  {len(tests)}")
-    Colors.print(f"Passed: {len(tests) - len(failed)}", Colors.GREEN)
+    Colors.print(f"Passed: {passed}", Colors.GREEN)
+    if skipped:
+        Colors.print(f"Skipped: {skipped}", Colors.YELLOW)
     if failed:
         Colors.print(f"Failed: {len(failed)}", Colors.RED)
         for f in failed:
             print(f"  - {f}")
         return 1
-    Colors.print(f"All {label} tests passed!", Colors.GREEN)
+    Colors.print(f"{label.capitalize()} tests completed." if skipped else f"All {label} tests passed!", Colors.GREEN)
     return 0
 
 def build_example(example_dir, example_name, pg_bin, platform_info, args):

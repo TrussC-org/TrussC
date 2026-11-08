@@ -61,8 +61,7 @@ recorded block after submission, tests allocation/arithmetic rollback, keeps
 empty uniform groups across growth and exercises 4999 cache keys with quiet
 eviction. Build with ASan/UBSan to check CPU memory and temporary-resource cleanup.
 Without the headers (macOS, Windows, or no emsdk) the native executable only
-prints `SKIP ...` and exits 0, which the batch runner still counts as passed;
-treat that as "not run".
+prints `SKIP ...` and exits 77, which the batch runner reports as skipped.
 
 For a baseline comparison, set `SOKOL_INCLUDE_DIR` to the **base** tree's
 `core/include/sokol` and `TC_WEBGPU_BASELINE=ON`, in a separate build directory.
@@ -74,8 +73,9 @@ error or a skipped native executable as a passing browser test.
 # Existing example screenshots
 
 Use the same Chrome/adapter and viewport on base and head. Good static scenes
-are `examples/graphics/colorExample`, `examples/graphics/roundedRectExample`
-and `examples/3d/pbrSpheresExample`. Generate each example's CMake files with
+are `examples/graphics/roundedRectExample` and `examples/3d/pbrSpheresExample`.
+`colorExample` draws a live FPS readout, so it is excluded from these fixtures.
+Generate each example's CMake files with
 `tools/bin/trusscli update -p <example> --tc-root . --ide cmake`, then configure
 with `emcmake cmake -S <example> -B <example>/build-web -DCMAKE_BUILD_TYPE=Release
 -DTC_WEB_BACKEND=WGPU` and build it. Prefix all build commands with the build
@@ -85,8 +85,8 @@ guard on the shared builder. Serve each example's `bin` with
 For each tree and scene, use its HTML filename and capture a fixed frame:
 
 ```sh
-python3 core/tests/webgpuUniformGrowth/run.py --url http://localhost:8631/colorExample.html --frames 60 --screenshot base-color.png
-# Repeat against head, using --screenshot head-color.png.
+python3 core/tests/webgpuUniformGrowth/run.py --url http://localhost:8631/roundedRectExample.html --frames 60 --screenshot base-rounded.png
+# Repeat against head, using --screenshot head-rounded.png.
 ```
 
 `--frames` fixes the clock/random seed and stops requestAnimationFrame at the
@@ -95,15 +95,15 @@ differ). For example, with Pillow installed:
 
 ```python
 from PIL import Image, ImageChops
-base = Image.open('base-color.png').convert('RGBA')
-head = Image.open('head-color.png').convert('RGBA')
+base = Image.open('base-rounded.png').convert('RGBA')
+head = Image.open('head-rounded.png').convert('RGBA')
 assert base.size == head.size
 pixels = ImageChops.difference(base, head)
-pixels.save('diff-color.png')
+pixels.save('diff-rounded.png')
 assert all(channel.getextrema()[1] == 0 for channel in pixels.split())
 ```
 
-Repeat for roundedRectExample and pbrSpheresExample and retain all base, head
+Repeat for pbrSpheresExample and retain all base, head
 and diff images. Inspect the canvases as well: identical blank pages are not
 valid rendering evidence. `run.py` can run outside a sandbox if localhost or
 Chrome GPU processes are blocked inside one.

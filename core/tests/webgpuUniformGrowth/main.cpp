@@ -5,6 +5,7 @@
 int main() {
     // Only without emdawn headers (see CMakeLists.txt); nothing is tested here.
     std::puts("SKIP webgpuUniformGrowth: emdawn WebGPU headers not found, native mock not built; run run.py in Chrome");
+    return 77;
 }
 #else
 #include <webgpu/webgpu.h>
