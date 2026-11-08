@@ -31,6 +31,11 @@ void headlessChecks() {
     check("headless allocation is refused", !buffer.allocate(64) && !buffer.isAllocated());
     const Vec4 value(1, 0, 0, 1);
     check("headless update is refused", !buffer.update(&value, sizeof(value)));
+#if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
+    uint32_t sentinel = 0x12345678;
+    check("empty read leaves destination untouched", !buffer.read(&sentinel, sizeof(sentinel)) && sentinel == 0x12345678);
+    check("zero read needs no GPU or destination", buffer.read(nullptr, 0));
+#endif
     ComputeShader compute;
     Shader graphics;
     check("headless compute binding is refused", !compute.setStorageBuffer(0, buffer));
@@ -122,6 +127,68 @@ class ComputeBufferApp : public App {
         check("ordinary Shader draw pixels are unchanged", red);
     }
 
+#if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
+    void readbackChecks() {
+        struct Sample { std::array<uint32_t, 4> integers; std::array<float, 4> floats; };
+        std::array<Sample, 4> expected = {}, snapshot = {}, later = {};
+        for (uint32_t i = 0; i < expected.size(); ++i) {
+            expected[i].integers = {i, 0xffffffffu - i, 0x12345678u, i * 37u};
+            expected[i].floats = {float(i), -0.5f, 0.125f, 1024.0f};
+        }
+        StorageBuffer data;
+        ComputeShader writer;
+        check("readback storage allocates", data.allocate(sizeof(expected)));
+        check("readback shader loads", writer.load(buffer_readback_shader_desc));
+        check("readback shader binds", writer.setStorageBuffer(VIEW_readback_output, data));
+        writer.setUniform(UB_readback_params, Vec4(0, 0, 0, 0));
+        check("readback pattern dispatch", writer.dispatch(1));
+        const auto frame = sg_query_stats().prev_frame.frame_index;
+        check("integer and float compute patterns read exactly", data.read(snapshot.data(), sizeof(snapshot)) &&
+            std::memcmp(snapshot.data(), expected.data(), sizeof(expected)) == 0);
+        writer.setUniform(UB_readback_params, Vec4(16, 0, 0, 0));
+        check("later compute write dispatch", writer.dispatch(1));
+        check("second read succeeds in same frame", data.read(later.data(), sizeof(later)));
+        check("earlier read is an owned CPU snapshot", std::memcmp(snapshot.data(), expected.data(), sizeof(expected)) == 0);
+        for (auto& value : expected) { value.integers[0] += 16; value.floats[0] += 16; }
+        check("second read sees later compute", std::memcmp(later.data(), expected.data(), sizeof(expected)) == 0);
+        check("read does not commit a device frame", frame == sg_query_stats().prev_frame.frame_index);
+        std::array<unsigned char, sizeof(expected) + 4> sentinel;
+        sentinel.fill(0xa5);
+        const auto untouched = sentinel;
+        int warnings = 0;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.level == LogLevel::Warning && event.message.find("read requires") != std::string::npos) ++warnings;
+        });
+        check("oversized read is refused twice", !data.read(sentinel.data(), sentinel.size()) &&
+            !data.read(sentinel.data(), sentinel.size()));
+        check("oversized reads warn on every call", warnings == 2);
+        check("failed read leaves all destination bytes untouched", sentinel == untouched);
+        check("null destination is refused", !data.read(nullptr, 4));
+        check("zero read succeeds on allocated storage", data.read(nullptr, 0));
+        StorageBuffer empty;
+        check("empty storage is refused", !empty.read(sentinel.data(), 4) && sentinel == untouched);
+        check("zero read succeeds on empty storage", empty.read(nullptr, 0));
+        check("partial byte read succeeds without alignment restriction", data.read(sentinel.data(), 7) &&
+            std::memcmp(sentinel.data(), expected.data(), 7) == 0);
+        bool tailUntouched = true;
+        for (size_t i = 7; i < sentinel.size(); ++i) tailUntouched &= sentinel[i] == 0xa5;
+        check("partial read preserves destination suffix", tailUntouched);
+
+        compute_.setUniform(UB_buffer_params, Vec4(1, 0, 0, 0));
+        compute_.dispatch(1);
+        target_.begin(0, 0, 0, 1);
+        drawBuffer(0);
+        std::array<Vec4, 4> colors = {};
+        check("read between Fbo draws succeeds", buffer_.read(colors.data(), sizeof(colors)) && colors[0] == Vec4(1,0,0,1));
+        compute_.setUniform(UB_buffer_params, Vec4(0, 1, 0, 0));
+        compute_.dispatch(1);
+        drawBuffer(1);
+        check("read flushes later Fbo draw", buffer_.read(colors.data(), sizeof(colors)) && colors[0] == Vec4(0,1,0,1));
+        target_.end();
+        expect("Fbo draws preserve ordering across reads", false, true);
+    }
+#endif
+
     uint32_t setupFrame_ = 0;
     void expectBytes(const unsigned char* pixels, int width, int height, const char* label,
                      bool prefixGreen, bool suffixGreen, bool firstOnly, bool checkAlpha) {
@@ -152,7 +219,7 @@ public:
         check("storage allocation with initial data succeeds", buffer_.allocate(sizeof(initial), initial.data()));
         const auto desc = sg_query_buffer_desc(buffer_.getBuffer());
         check("storage has persistent byte size and view", buffer_.getSize() == sizeof(initial) &&
-            desc.size == sizeof(initial) && desc.usage.storage_buffer && !desc.usage.write_transient &&
+            desc.size == sizeof(initial) && desc.usage.copy_src && desc.usage.storage_buffer && !desc.usage.write_transient &&
             sg_query_view_buffer(buffer_.getView()).id == buffer_.getBuffer().id);
         check("compute descriptor loads", compute_.load(buffer_pattern_shader_desc));
         check("compute buffer binding succeeds", compute_.setStorageBuffer(VIEW_pattern_output, buffer_));
@@ -215,6 +282,10 @@ public:
         check("restore buffer before window prefix", compute_.dispatch(1));
         drawBuffer(0);
         check("window buffer prefix is lazy", !internal::currentTarget().inPass);
+#if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
+        std::array<Vec4, 4> windowRead = {};
+        check("read flushes window draw prefix", buffer_.read(windowRead.data(), sizeof(windowRead)) && windowRead[0] == Vec4(1,0,0,1));
+#endif
         compute_.setUniform(UB_buffer_params, Vec4(0, 1, 0, 0));
         check("dispatch flushes recorded window buffer drawing", compute_.dispatch(1));
         drawBuffer(1);
@@ -224,6 +295,10 @@ public:
         check("window buffer readback succeeds", grabScreen(screen));
         expectBytes(screen.getData(), screen.getWidth(), screen.getHeight(),
                     "window prefix sees old buffer and suffix sees compute output", false, true, false, false);
+
+#if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
+        readbackChecks();
+#endif
 
         // Deferred recordings keep handles alive when the owner is cleared.
         target_.begin();

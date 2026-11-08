@@ -4,6 +4,8 @@
 #include "../utils/tcOnceGate.h"
 #include <utility>
 #include <climits>
+#include <new>
+#include <stdexcept>
 
 namespace trussc {
 
@@ -29,6 +31,7 @@ public:
         desc.size = size;
         desc.usage.storage_buffer = true;
         desc.usage.copy_dst = true;
+        desc.usage.copy_src = true;
         if (data) desc.data = {data, size};
         buffer_ = sg_make_buffer(&desc);
         if (sg_query_buffer_state(buffer_) == SG_RESOURCESTATE_VALID) {
@@ -81,6 +84,28 @@ public:
         return true;
     }
 
+#if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
+    // Reads a prefix synchronously. Zero bytes succeeds without a GPU or destination.
+    // Failure leaves destination untouched; every failure emits a warning.
+    TC_PLATFORMS("macos,windows,linux,ios,android") bool read(void* destination, size_t bytes) {
+        if (!bytes) return true;
+        // Bound (copy range): the requested prefix must fit the allocation.
+        if (!isAllocated() || !destination || bytes > size_) {
+            logWarning("StorageBuffer") << "read requires allocated storage, a destination and bytes <= getSize()";
+            return false;
+        }
+        try {
+            internal::suspendForImageUpload();
+            if (readPlatform(destination, bytes)) return true;
+        } catch (const std::bad_alloc&) {
+            // Keep allocation failures inside the API, including native frame callbacks.
+        } catch (const std::length_error&) {
+        }
+        logWarning("StorageBuffer") << "Failed to read storage buffer";
+        return false;
+    }
+#endif
+
     void clear() noexcept {
         internal::deferGpuDestroy(view_);
         internal::deferGpuDestroy(buffer_);
@@ -96,6 +121,9 @@ public:
     sg_view getView() const { return view_; }
 
 private:
+#if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
+    bool readPlatform(void* destination, size_t bytes);
+#endif
     sg_buffer buffer_ = {}, staging_ = {};
     sg_view view_ = {};
     size_t size_ = 0;

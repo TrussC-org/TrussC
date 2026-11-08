@@ -65485,7 +65485,7 @@ StorageBuffer particles;
 std::vector<Vec4> initial(2048, Vec4(0, 0, 0.1f, 0.2f));
 particles.allocate(initial.size() * sizeof(Vec4), initial.data());
 '''
-related = ["StorageBuffer::allocate", "StorageBuffer::update", "ComputeShader::setStorageBuffer", "Shader::setStorageBuffer"]
+related = ["StorageBuffer::allocate", "StorageBuffer::update", "StorageBuffer::read", "ComputeShader::setStorageBuffer", "Shader::setStorageBuffer"]
 
 ["StorageBuffer::allocate"]
 description.en = "Allocates storage in bytes, optionally initialized from CPU memory."
@@ -65531,6 +65531,32 @@ details.ko = '''
 snippet = '''
 std::array<Vec4, 4> values = {};
 bool uploaded = buffer.update(values.data(), sizeof(values));
+'''
+related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
+
+["StorageBuffer::read"]
+description.en = "Reads bytes from the start of storage and waits for GPU completion."
+description.ja = "領域の先頭からバイト列を読み取り、GPU の完了を待ちます。"
+description.ko = "저장소의 시작부터 바이트를 읽고 GPU 완료를 기다립니다."
+details.en = '''
+- read(destination, bytes) immediately submits preceding recorded draws and dispatches in order and blocks until completion. The frame stalls while it waits; calling it every frame can lower fps. No frame commit occurs, and later drawing continues normally. Available on Metal, D3D11, GL 4.3 and GLES 3.1, including Raspberry Pi 5. It is not available on Web: calling it there is a compile error.
+- Copies bytes from offset zero without conversion. Partial reads, including byte counts not divisible by four, are allowed. A zero-byte read succeeds without allocated storage or a destination and submits no work. A nonzero read requires allocated storage, a non-null destination with room for bytes, and bytes <= getSize(). Invalid input or native readback failure returns false, warns on every call, and leaves the destination untouched. A successful result is a CPU snapshot that later GPU writes cannot change.
+- Every StorageBuffer allocation includes copy-source usage automatically. Call on the main thread with an initialized windowed GPU; this API does not enable headless compute.
+'''
+details.ja = '''
+- read(destination, bytes) は先行する記録済みの描画と dispatch を順番どおり直ちに送信し、完了までブロックします。待機中はフレームが停止し、毎フレーム呼ぶと fps が低下する場合があります。フレームの commit は行わず、その後も描画を続けられます。Metal、D3D11、GL 4.3、GLES 3.1（Raspberry Pi 5 を含みます）に対応します。Web では利用できず、呼ぶとコンパイルエラーになります。
+- オフセット 0 から bytes バイトを変換せずコピーします。4 の倍数でないバイト数を含め、部分読み取りができます。0 バイトなら確保済み領域や出力先は不要で、GPU へ送信せず true を返します。0 より大きい場合は、確保済み領域、bytes バイト以上の null でない出力先、bytes <= getSize() が必要です。不正な入力やネイティブ読み取り失敗では、毎回警告を出して false を返し、出力先を変更しません。成功時の CPU スナップショットは、その後の GPU 書き込みでは変わりません。
+- すべての StorageBuffer は自動的にコピー元として確保します。ウィンドウの GPU が初期化された状態で、メインスレッドから呼びます。ヘッドレス compute を有効にする API ではありません。
+'''
+details.ko = '''
+- read(destination, bytes)는 앞서 기록된 그리기와 dispatch를 순서대로 즉시 제출하고 완료까지 차단합니다. 기다리는 동안 프레임이 멈추며 매 프레임 호출하면 fps가 낮아질 수 있습니다. 프레임 commit은 수행하지 않으며 이후 그리기를 계속합니다. Metal, D3D11, GL 4.3, GLES 3.1(Raspberry Pi 5 포함)을 지원합니다. Web에서는 사용할 수 없으며 호출하면 컴파일 오류가 발생합니다.
+- 오프셋 0부터 bytes바이트를 변환 없이 복사합니다. 4의 배수가 아닌 바이트 수를 포함하여 부분 읽기를 허용합니다. 0바이트 읽기는 할당된 저장소나 출력 대상 없이 성공하며 GPU 작업을 제출하지 않습니다. 0보다 큰 읽기는 할당된 저장소, bytes바이트 이상을 담는 null이 아닌 출력 대상, bytes <= getSize()를 요구합니다. 잘못된 입력이나 네이티브 읽기 실패 시 매번 경고하고 false를 반환하며 출력 대상을 변경하지 않습니다. 성공한 CPU 스냅샷은 이후 GPU 쓰기로 변경되지 않습니다.
+- 모든 StorageBuffer는 자동으로 복사 원본 용도를 포함하여 할당합니다. 창의 GPU를 초기화한 상태에서 메인 스레드에서 호출합니다. 이 API는 헤드리스 compute를 활성화하지 않습니다.
+'''
+snippet = '''
+compute.dispatch(groups);
+std::vector<float> values(count);
+if (buffer.read(values.data(), values.size() * sizeof(float))) logNotice() << values[0];
 '''
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 

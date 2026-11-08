@@ -47,6 +47,7 @@ def main():
     # Runtime owns the new control HWND and prestarted watchdog outside sokol.
     # Compile those real TUs too, including the host coordinator and public API.
     for relative in ('core/platform/win/tcPlatform_win.cpp',
+                     'core/platform/win/tcStorageBuffer_win.cpp',
                      'core/platform/win/tcFileDialog_win.cpp',
                      'core/include/tc/app/tcExit.cpp',
                      'core/include/tc/app/tcWindowRuntime.cpp',
