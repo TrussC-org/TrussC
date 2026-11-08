@@ -45,8 +45,8 @@ public:
             if (grabScreen(displayed)) {
                 // Look for the captured red rectangle in the thumbnail area.
                 // This checks the rendered frame in both desktop and portrait layouts.
-                int startX = getWidth() >= 770 ? 400 : 0;
-                int startY = getWidth() >= 770 ? 110 : 300;
+                int startX = getWidth() > getHeight() ? 400 : 0;
+                int startY = getWidth() > getHeight() ? 110 : 300;
                 for (int y = startY * getFramebufferHeight() / getHeight();
                      y < displayed.getHeight() && !visible; ++y) {
                     for (int x = startX * getFramebufferWidth() / getWidth();
