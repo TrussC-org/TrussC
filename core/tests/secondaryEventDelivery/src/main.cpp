@@ -25,6 +25,9 @@ bool treeConsumes = false, releaseConsumes = false, rootConsumes = false, dragCo
 int exits = 0, framesAfterClear = 0, closeEvents = 0;
 bool inputsDone = false, completed = false;
 bool secondaryTicked = false, skippedNoTick = false;
+// An occluded first tick updates without drawing (hidden windows keep updating, #997).
+// Only the update of the tick that also draws is compared at the first afterFrame (#1256).
+bool updateWithoutDraw = false;
 EventListener firstUpdate, firstDraw;
 void expect(const char* name, const char* expected) {
     if (order[name] != expected) std::printf("  %s: got %s expected %s\n", name, order[name].c_str(), expected);
@@ -282,8 +285,12 @@ struct Harness : App {
         observerOwner = internal::makeConstructedAppAt<App>(&trussc::internal::WindowRequestAccess::context(*secondary));
         internal::AppOwnerScope observation(internal::appOwner(*observerOwner));
         // Observe the event stream independently of the App bindings under test.
-        firstUpdate = source().update.listen([] { secondaryTicked = true; }, -1000);
-        firstDraw = source().draw.listen([] { secondaryTicked = true; }, -1000);
+        firstUpdate = source().update.listen([] {
+            secondaryTicked = true;
+            if (!inputsDone && updateWithoutDraw) order["update"].clear();
+            updateWithoutDraw = true;
+        }, -1000);
+        firstDraw = source().draw.listen([] { secondaryTicked = true; updateWithoutDraw = false; }, -1000);
         stages(true); secondary->setApp<DeliveryApp>();
         internal::applyPendingAppForTests(*secondary); stages(false);
         after = source().afterFrame.listen([] {
