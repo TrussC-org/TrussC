@@ -1180,6 +1180,9 @@ jobs:
       - name: header-inline state check
         run: python3 tools/check_header_state.py
 
+      - name: standalone file I/O and serial headers
+        run: python3 tools/tests/test_standalone_headers.py -v
+
       - name: test generated-file guard and regression checks
         if: always()
         run: |
