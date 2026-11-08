@@ -135,6 +135,7 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
         self.assertIn('sweep', daily['jobs']['report']['needs'])
         self.assertIn("contains(needs.*.result, 'failure')", daily['jobs']['report']['if'])
 
+    @unittest.skipIf(sys.platform == 'win32', 'requires POSIX executable mocks')
     def test_marker_fixture_runs_combined_and_own_binary_and_continues_after_failure(self):
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch)
@@ -179,6 +180,7 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(display.run_modes(root), 1)
 
+    @unittest.skipIf(sys.platform == 'win32', 'requires os.killpg')
     def test_timeout_fails_and_reaps_process_group_without_timing_assertions(self):
         with patch.object(display.subprocess, 'Popen') as popen, \
                 patch.object(display.os, 'killpg') as killpg, redirect_stdout(io.StringIO()):

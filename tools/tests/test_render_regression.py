@@ -3,6 +3,8 @@
 import importlib.util
 import json
 import os
+import shutil
+import sys
 from pathlib import Path
 import subprocess
 import tempfile
@@ -130,6 +132,9 @@ class CaptureTests(unittest.TestCase):
     """Run the harness's loader and capture body with in-memory pixel I/O, no GPU."""
     @classmethod
     def setUpClass(cls):
+        compiler = os.environ.get('CXX') or shutil.which('c++')
+        if not compiler:
+            raise unittest.SkipTest('requires a C++ compiler (c++ on PATH, or set CXX)')
         cls.temp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.temp.cleanup)
         cls.folder = Path(cls.temp.name)
@@ -200,7 +205,7 @@ int main(int argc, char** argv) {
 '''
         cpp = cls.folder/'capture.cpp'; cls.binary = cls.folder/'capture'
         cpp.write_text(code, encoding='utf-8')
-        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
+        subprocess.run([compiler, '-std=c++20', '-Wall', '-Wextra',
                         '-I'+str(ROOT/'core/include'), str(cpp), '-o', str(cls.binary)], check=True)
 
     def exercise(self, manifest, scene='newScene', images=None, self_check=True):
@@ -316,6 +321,7 @@ class WorkflowTests(unittest.TestCase):
                        'run':'python3 tools/tests/test_render_regression.py -v'},
                       jobs['header-state-check']['steps'])
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_aggregate_gate_for_each_event_and_result(self):
         workflow = yaml.load((ROOT/'.github/workflows/build.yml').read_text(encoding="utf-8"),Loader=yaml.BaseLoader)
         script = workflow['jobs']['ci-ok']['steps'][0]['run']

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -160,20 +161,30 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                     self.assertEqual(setup['env']['FETCHCONTENT_CACHE_HIT'],
                                      "${{ steps.fetchcontent.outputs.cache-hit == 'true' || "
                                      "steps.fetchcontent-restore.outputs.cache-hit == 'true' }}")
-                    # Execute the actual shell on hit/miss, including a path
-                    # with spaces, without invoking a cache service.
-                    with tempfile.TemporaryDirectory(dir=ROOT) as scratch:
-                        env_file = Path(scratch) / 'github-env'
-                        workspace = str(Path(scratch) / 'workspace with spaces')
-                        for hit in ('true', 'false', ''):
-                            env_file.write_text('', encoding="utf-8")
-                            subprocess.run(['bash', '-eu', '-c', setup['run']], check=True,
-                                           env=dict(os.environ, GITHUB_ENV=str(env_file),
-                                                    GITHUB_WORKSPACE=workspace, FETCHCONTENT_CACHE_HIT=hit))
-                            expected_lines = [f'TRUSSC_FETCHCONTENT_DIR={workspace}/.fetchcontent']
-                            if hit == 'true':
-                                expected_lines.append('TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON')
-                            self.assertEqual(env_file.read_text(encoding="utf-8").splitlines(), expected_lines)
+
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
+    def test_fetchcontent_environment_shell(self):
+        for filename, jobs in [('build.yml', ('build', 'build-android', 'build-web', 'build-ios')),
+                               ('daily.yml', ('sweep', 'sweep-web'))]:
+            workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(encoding="utf-8"),
+                                 Loader=yaml.BaseLoader)
+            for job_name in jobs:
+                setup = next(s for s in workflow['jobs'][job_name]['steps']
+                             if s.get('name') == 'Configure shared FetchContent')
+                # Execute the actual shell on hit/miss, including a path
+                # with spaces, without invoking a cache service.
+                with tempfile.TemporaryDirectory(dir=ROOT) as scratch:
+                    env_file = Path(scratch) / 'github-env'
+                    workspace = str(Path(scratch) / 'workspace with spaces')
+                    for hit in ('true', 'false', ''):
+                        env_file.write_text('', encoding="utf-8")
+                        subprocess.run(['bash', '-eu', '-c', setup['run']], check=True,
+                                       env=dict(os.environ, GITHUB_ENV=str(env_file),
+                                                GITHUB_WORKSPACE=workspace, FETCHCONTENT_CACHE_HIT=hit))
+                        expected_lines = [f'TRUSSC_FETCHCONTENT_DIR={workspace}/.fetchcontent']
+                        if hit == 'true':
+                            expected_lines.append('TRUSSC_FETCHCONTENT_UPDATES_DISCONNECTED=ON')
+                        self.assertEqual(env_file.read_text(encoding="utf-8").splitlines(), expected_lines)
 
     def test_ccache_prune_runs_only_after_main_builds(self):
         # #776: one compiler-cache save per platform. The prune job deletes
