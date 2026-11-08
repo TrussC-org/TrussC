@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 import sys
 
@@ -133,6 +134,15 @@ set(_TC_LOADED_ADDONS tcxHap shaderlessAddon)
                 if generator:
                     command += ['-G', generator]
                 run_build(command, check=True)
+                # On VS, inspect the generated utility projects as well as
+                # building them: a shared core must not use a solution hash.
+                for name in ('TrussC', 'tcxHap', 'shader_probe'):
+                    vcxproj = build / f'{name}_shaders_gen.vcxproj'
+                    if vcxproj.exists():
+                        locations = ET.parse(vcxproj).findall('.//{*}TLogLocation')
+                        self.assertEqual([node.text.replace('\\', '/') for node in locations],
+                                         [f'{build.as_posix()}/tc_shaders/{name}/'
+                                          '$(Platform)/$(Configuration)/tc.tlog/'])
                 self.assertEqual(list(project.rglob('*.glsl.h')), [])
                 # Build guest alone: app-target dependencies cannot mask a missing guest edge.
                 run_build(['cmake', '--build', str(build), '--target', 'guest',

@@ -264,6 +264,7 @@ class PublishingTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "disagree"):
                     publish.main()
 
+    @unittest.skipIf(sys.platform == "win32", "fake gh requires POSIX shebang execution")
     def test_publisher_cli_with_fake_gh(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as directory:
             directory = Path(directory)

@@ -27,7 +27,7 @@ SCRIPTS = [
     'egl-wait-test', 'event-converter-test', 'guest-storage-test.py',
     'host-entry-test', 'late-window-test.py', 'native-admission.py',
     'native-gates-test', 'native-mac-syntax.py', 'native-quit-test.py',
-    'render-boundary-test', 'x11-pacing-test',
+    'render-boundary-test', 'win32-pacing-test', 'x11-pacing-test',
 ]
 LINKED = {'app-owner-review-test.py', 'c2-review-test.py', 'event-converter-test',
           'guest-storage-test.py', 'host-entry-test', 'late-window-test.py',

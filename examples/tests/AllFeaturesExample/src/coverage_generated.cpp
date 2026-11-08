@@ -280,7 +280,6 @@ static void cover_graphics_style() {
     (void)setPointSize(af::val<float>());
     (void)setPointStyle(af::val<PointStyle>());
     (void)setScissor(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
-    (void)setScissor(af::val<int>(), af::val<int>(), af::val<int>(), af::val<int>());
     (void)setStrokeCap(af::val<StrokeCap>());
     (void)setStrokeJoin(af::val<StrokeJoin>());
     (void)setStrokeWeight(af::val<float>());

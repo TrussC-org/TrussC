@@ -2021,7 +2021,7 @@ void setCurveResolution(int n)  // Use a fixed segment count for circles, arcs a
 void setCurveTolerance(float pixels)  // Set how closely curves must follow their ideal shape, in pixels.
 void setPointSize(float px)  // Set the point size, in logical pixels.
 void setPointStyle(PointStyle s)  // Set the point shape: Square, Round, or Pixel.
-void setScissor(float x, float y, float w, float h) [+1]  // Sets the clipping rectangle directly, replacing the current one.
+void setScissor(float x, float y, float w, float h)  // Sets the clipping rectangle directly, replacing the current one.
 void setStrokeCap(StrokeCap cap)  // Set the stroke cap style.
 void setStrokeJoin(StrokeJoin join)  // Set the stroke join style.
 void setStrokeWeight(float weight)  // Set the stroke width.

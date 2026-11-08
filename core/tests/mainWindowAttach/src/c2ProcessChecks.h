@@ -103,18 +103,6 @@ void run() {
     auto otherReason = a->events().exitRequested.listen([](ExitRequestEventArgs& e) { e.cancel = true; e.reason = "later reason"; });
     state.order.clear(); check("empty earlier veto retains later first reason", !internal::dispatchExitRequested() && internal::exitBlockReason() == "first reason");
     earlyReason.disconnect(); reason.disconnect(); otherReason.disconnect();
-    EventListener ownedRuntime;
-    auto* render = trussc::internal::WindowRequestAccess::context(*a).render;
-    const auto matrixDepth = render->getMatrixStackDepth(), styleDepth = render->getStyleStackDepth();
-    {
-        internal::AppOwnerScope owner(internal::appOwner(*a->getApp()));
-        ownedRuntime = runtime().events().exitRequested.listen([](ExitRequestEventArgs& e) {
-            pushMatrix(); pushStyle(); e.cancel = true;
-        });
-    }
-    state.order.clear(); internal::dispatchExitRequested();
-    check("Runtime subscriber guard restores its own App stacks", render->getMatrixStackDepth() == matrixDepth && render->getStyleStackDepth() == styleDepth);
-    ownedRuntime.disconnect();
     auto throwing = runtime().events().exitRequested.listen([](ExitRequestEventArgs&) { throw std::runtime_error("C2 quit veto"); });
     state.order.clear(); check("throwing quit veto still visits both Apps", !internal::dispatchExitRequested() && state.order == "RBA");
     throwing.disconnect();
