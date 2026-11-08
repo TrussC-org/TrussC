@@ -28140,8 +28140,8 @@ related = ["SerialDeviceInfo::devicePath", "SerialDeviceInfo::getDeviceName", "S
 category = "graphics_shader"
 keywords = ["glsl", "program", "material", "effect", "fragment"]
 description.en = "Provides a GPU shader program integrated with TrussC drawing."
-description.ja = "TrussC の描画に統合された GPU シェーダープログラムを提供する。"
-description.ko = "TrussC 그리기와 통합된 GPU 셰이더 프로그램을 제공한다."
+description.ja = "TrussC の描画に統合された GPU シェーダープログラムを提供します。"
+description.ko = "TrussC 그리기와 통합된 GPU 셰이더 프로그램을 제공합니다."
 details.en = '''
 - Holds vertex and fragment shader programs loaded through a sokol-shdc descriptor function; `load()` returns success or failure, and a new object starts unloaded.
 - Use `begin()` and `end()`, or `pushShader()` and `popShader()`, around drawing calls; configure uniform blocks with `setUniform()` and texture bindings with `setTexture()`.
@@ -28150,7 +28150,7 @@ details.en = '''
 - Each window has its own shader stack, and each scope belongs to the render-target activation where it began. End scopes in reverse order on that same activation; keep each active shader loaded, alive, and at the same address until its scope ends.
 - Ordinary shader draws record vertices, uniform bytes, and texture bindings for later replay. After ending its scope, the Shader object may be destroyed before replay; owned GPU resources are retained while recorded draws still reference them.
 - Loading, drawing, clearing, and destruction must run on the main thread because they access GPU resources and shared drawing state. Copying is disabled; moving is supported when the object is not in an active shader scope.
-- Bind read-only storage with `setStorageBuffer()`. Sources using storage buffers are `*.compute.glsl`, including vertex/fragment-only programs; they select GLES 310ES, while plain `.glsl` selects 300ES. Shader and FullscreenShader refuse missing, retired or writable storage bindings before drawing.
+- Use `drawVertices()` for procedural triangles or storage vertex pulling without a subclass or dummy vertices. Bind read-only storage with `setStorageBuffer()`. Sources using storage buffers are `*.compute.glsl`, including vertex/fragment-only programs; they select GLES 310ES, while plain `.glsl` selects 300ES. Shader and FullscreenShader refuse missing, retired or writable storage bindings before drawing.
 '''
 details.ja = '''
 - sokol-shdc の記述関数を通して読み込む頂点シェーダーとフラグメントシェーダーを保持します。`load()` は成功または失敗を返し、新しいオブジェクトは未読み込みの状態です。
@@ -28160,7 +28160,7 @@ details.ja = '''
 - シェーダースタックはウィンドウごとに独立し、各スコープは開始時の描画ターゲットの有効化に結び付きます。同じ有効化の範囲内で、開始と逆順に終了してください。スコープを終了するまでは、シェーダーを読み込み済みのまま存続させ、アドレスも変えないでください。
 - 通常のシェーダー描画は、頂点、uniform のバイト列、テクスチャの割り当てを記録して後で実行します。スコープを終了した後は、実行前に Shader オブジェクトを破棄できます。所有する GPU リソースは、記録済みの描画が参照している間は保持されます。
 - 読み込み、描画、消去、破棄は GPU リソースと共有描画状態にアクセスするため、メインスレッドで行ってください。コピーはできません。使用中のシェーダースコープに含まれていない場合はムーブできます。
-- 読み取り専用の storage は `setStorageBuffer()` で設定します。storage buffer を使うソースは、vertex・fragment だけの場合も `*.compute.glsl` と命名し、GLES 310ES を選びます。通常の `.glsl` は 300ES です。Shader と FullscreenShader は未割り当て・破棄済み・書き込み用の storage バインドでは描画を拒否します。
+- 手続き的な三角形や storage からの頂点取得には `drawVertices()` を使うと、派生クラスやダミー頂点が不要です。読み取り専用の storage は `setStorageBuffer()` で設定します。storage buffer を使うソースは、vertex・fragment だけの場合も `*.compute.glsl` と命名し、GLES 310ES を選びます。通常の `.glsl` は 300ES です。Shader と FullscreenShader は未割り当て・破棄済み・書き込み用の storage バインドでは描画を拒否します。
 '''
 details.ko = '''
 - sokol-shdc의 기술 함수로 로드하는 버텍스 및 프래그먼트 셰이더 프로그램을 보관합니다. `load()`는 성공 여부를 반환하며 새 객체는 로드되지 않은 상태로 시작합니다.
@@ -28170,9 +28170,31 @@ details.ko = '''
 - 창마다 별도의 셰이더 스택이 있으며 각 범위는 시작 당시의 렌더 타깃 활성화에 속합니다. 동일한 활성화 안에서 시작한 역순으로 범위를 종료해야 합니다. 범위가 끝날 때까지 셰이더를 로드된 상태로 유지하고 객체의 수명과 주소도 유지해야 합니다.
 - 일반 셰이더 그리기는 버텍스, uniform 바이트, 텍스처 바인딩을 기록하여 나중에 실행합니다. 범위를 종료한 뒤에는 실행 전에 Shader 객체를 소멸시킬 수 있습니다. 소유한 GPU 리소스는 기록된 그리기 명령이 참조하는 동안 유지됩니다.
 - 로드, 그리기, 지우기, 소멸은 GPU 리소스와 공유 그리기 상태에 접근하므로 메인 스레드에서 수행해야 합니다. 복사는 금지되며 활성 셰이더 범위에 포함되지 않은 객체는 이동할 수 있습니다.
-- 읽기 전용 storage는 `setStorageBuffer()`로 바인딩합니다. storage buffer를 사용하는 소스는 vertex/fragment만 있어도 `*.compute.glsl`로 지정하여 GLES 310ES를 선택합니다. 일반 `.glsl`은 300ES입니다. Shader와 FullscreenShader는 누락, 소멸 또는 쓰기 가능한 storage 바인딩이면 그리기를 거부합니다.
+- 절차적 삼각형이나 storage 정점 읽기는 `drawVertices()`를 사용하여 파생 클래스나 더미 정점 없이 수행합니다. 읽기 전용 storage는 `setStorageBuffer()`로 바인딩합니다. storage buffer를 사용하는 소스는 vertex/fragment만 있어도 `*.compute.glsl`로 지정하여 GLES 310ES를 선택합니다. 일반 `.glsl`은 300ES입니다. Shader와 FullscreenShader는 누락, 소멸 또는 쓰기 가능한 storage 바인딩이면 그리기를 거부합니다.
 '''
 related = ["FullscreenShader", "Shader::setUniform", "Shader::setTexture", "pushShader", "Fbo"]
+
+["Shader::drawVertices"]
+category = "graphics_shader"
+keywords = ["vertex pulling", "procedural", "instancing"]
+description.en = "Draws non-indexed triangles without uploading vertices or indices."
+description.ja = "頂点やインデックスを転送せず、非インデックス方式の三角形を描画します。"
+description.ko = "정점이나 인덱스를 업로드하지 않고 비인덱스 삼각형을 그립니다."
+details.en = '''- Call `drawVertices(vertexCount, instanceCount = 1)` after loading a shader without vertex attributes. Use `gl_VertexIndex` and optionally `gl_InstanceIndex` to generate or pull vertices. Known attribute-consuming shaders are refused with a warning. Zero counts or an unloaded shader do nothing; negative counts warn on every call and are refused.
+- Selects a cached empty-layout, non-indexed variant of the loaded pipeline recipe for the current target, preserving blend/depth state and attachment compatibility. `load()` and `submitVertices()` keep their existing layouts. No vertex or index data is uploaded.
+- Reuses this shader's current `begin()`/`end()` scope on the same target activation. Otherwise it brackets the call with `begin()`/`end()` automatically. Records uniform bytes and texture/sampler/storage bindings in the ordinary deferred target queue; preceding draws run before a compute dispatch and later draws see its results.
+- Supply transforms and color explicitly through `setUniform()`; the drawing matrix and color are not applied to generated vertices. Inherited calls on FullscreenShader also use `setUniform()`, rather than `setParams()`.'''
+details.ja = '''- 頂点属性のないシェーダーを読み込んだ後、`drawVertices(vertexCount, instanceCount = 1)` を呼びます。`gl_VertexIndex` と必要に応じて `gl_InstanceIndex` で頂点を生成・取得します。頂点属性を使うと判明しているシェーダーは警告を出して拒否します。個数が 0 または未読み込みなら何もしません。負の個数は毎回警告を出して拒否します。
+- 現在のターゲットに対応する、空の頂点レイアウトと非インデックス方式のパイプラインをキャッシュして選びます。読み込んだ設定のブレンド・深度状態とアタッチメントの互換性を保ちます。`load()` と `submitVertices()` のレイアウトは変えません。頂点・インデックスの転送はありません。
+- このシェーダーの `begin()`/`end()` スコープ内では、同じターゲットの有効化を確認してそのスコープを使います。それ以外では自動で `begin()`/`end()` で囲みます。uniform のバイト列と texture・sampler・storage の割り当てを通常の遅延描画キューに記録します。compute dispatch は先行する描画の後に実行し、後続の描画には結果が反映されます。
+- 変換と色は `setUniform()` で明示的に渡してください。描画用の行列と色は生成した頂点に適用しません。FullscreenShader で継承した呼び出しも `setParams()` ではなく `setUniform()` を使います。'''
+details.ko = '''- 정점 속성이 없는 셰이더를 로드한 후 `drawVertices(vertexCount, instanceCount = 1)`을 호출합니다. `gl_VertexIndex`와 필요에 따라 `gl_InstanceIndex`로 정점을 생성하거나 읽습니다. 정점 속성을 사용하는 것으로 확인된 셰이더는 경고 후 거부합니다. 개수가 0이거나 로드되지 않았으면 아무 작업도 하지 않습니다. 음수 개수는 매번 경고 후 거부합니다.
+- 현재 타깃에 맞는 빈 정점 레이아웃과 비인덱스 파이프라인 변형을 캐시하여 선택합니다. 로드한 설정의 블렌드/깊이 상태와 어태치먼트 호환성을 유지합니다. `load()`와 `submitVertices()`의 레이아웃은 유지합니다. 정점이나 인덱스 데이터를 업로드하지 않습니다.
+- 이 셰이더의 `begin()`/`end()` 범위 안에서는 같은 타깃 활성화인지 확인하고 범위를 재사용합니다. 그 밖에서는 호출을 자동으로 `begin()`/`end()`로 감쌉니다. uniform 바이트와 texture/sampler/storage 바인딩을 일반 지연 타깃 큐에 기록합니다. compute dispatch는 앞선 그리기 후 실행되며 이후 그리기에 결과를 반영합니다.
+- 변환과 색상은 `setUniform()`으로 명시적으로 전달합니다. 그리기 행렬과 색상은 생성한 정점에 적용하지 않습니다. FullscreenShader에서 상속한 호출도 `setParams()` 대신 `setUniform()`을 사용합니다.'''
+snippet = '''shader.setUniform(UB_draw_params, params);
+shader.drawVertices(3, particleCount);'''
+related = ["Shader::begin", "Shader::setUniform", "Shader::setStorageBuffer", "Shader::submitVertices"]
 
 ["Shader::begin"]
 category = "graphics_shader"
@@ -65366,19 +65388,19 @@ details.en = '''
 - A thin wrapper over sokol storage buffers, with no typed element or packing layer. Match the shader's std430 layout yourself (for example, one Vec4 per 16 bytes). Contents persist between frames. Pass an element count in a uniform for portable kernel bounds: the pinned Metal output for SSBO .length() requires a size binding that sokol does not supply. Allocate empty storage or supply exactly the allocation's number of initial bytes; empty storage has unspecified contents until written.
 - All operations and destruction belong on the main thread after GPU initialization. Copying is disabled; move construction/assignment transfers the buffer, view, staging buffer and CPU upload limit, leaving the source empty. clear() and destruction use the existing deferred GPU destruction queue, preserving already recorded draws.
 - Requires sg_query_features().compute. Headless apps and unsupported backends, including WebGL2, warn and refuse allocation/update/binding. Device verification follows ComputeShader's support table. There is no CPU readback API; the feasibility note is in docs/dev/COMPUTE_READBACK.md.
-- ComputeShader::setStorageBuffer permits shader-declared reads or read/write access; Shader::setStorageBuffer only permits readonly graphics declarations. The same buffer may be reused across dispatch and later draws. Keep it allocated through dispatch/draw submission. Use *.compute.glsl for graphics programs that read storage: it selects GLSL310ES; ordinary *.glsl keeps GLSL300ES.
+- ComputeShader::setStorageBuffer permits shader-declared reads or read/write access; Shader::setStorageBuffer only permits readonly graphics declarations. The same buffer may be reused across dispatch and later drawVertices() calls without dummy vertices. Keep it allocated through dispatch/draw submission. Use *.compute.glsl for graphics programs that read storage: it selects GLSL310ES; ordinary *.glsl keeps GLSL300ES.
 '''
 details.ja = '''
 - sokol の storage buffer を薄く包みます。型付き要素やパッキングの補助はありません。シェーダーの std430 レイアウトに合わせてください（例: Vec4 1 個につき 16 バイト）。内容はデバイスフレームをまたいで保持します。移植性のあるカーネルの範囲検査には、要素数を uniform で渡してください。同梱コンパイラーの SSBO .length() の Metal 出力は、sokol が供給しないサイズ用バインドを必要とします。空の領域、または確保サイズと同じバイト数の初期データを指定します。空の領域は書き込むまで内容が未定義です。
 - GPU 初期化後のメインスレッドで、破棄を含むすべての操作を行ってください。コピーはできません。ムーブ構築・代入はバッファ、view、ステージング、CPU 更新制限を移し、移動元を空にします。clear() とデストラクターは既存の GPU 遅延破棄キューを使い、記録済みの描画を保持します。
 - sg_query_features().compute が必要です。ヘッドレス、WebGL2 などの非対応環境では警告を出し、確保・更新・割り当てを拒否します。実機検証の範囲は ComputeShader の対応表に従います。CPU 読み戻し API はありません。実現性のメモは docs/dev/COMPUTE_READBACK.md にあります。
-- ComputeShader::setStorageBuffer はシェーダーが宣言する読み取りと読み書きに対応します。Shader::setStorageBuffer は描画用の readonly 宣言だけに対応します。同じバッファを dispatch とその後の描画に使えます。dispatch・描画の記録まで確保を維持してください。storage を読む描画用ソースは *.compute.glsl にして GLSL310ES を選びます。通常の *.glsl は GLSL300ES を維持します。
+- ComputeShader::setStorageBuffer はシェーダーが宣言する読み取りと読み書きに対応します。Shader::setStorageBuffer は描画用の readonly 宣言だけに対応します。同じバッファを dispatch とその後の drawVertices() に、ダミー頂点なしで使えます。dispatch・描画の記録まで確保を維持してください。storage を読む描画用ソースは *.compute.glsl にして GLSL310ES を選びます。通常の *.glsl は GLSL300ES を維持します。
 '''
 details.ko = '''
 - sokol storage buffer를 얇게 감싸며 타입별 요소나 패킹 계층을 제공하지 않습니다. 셰이더의 std430 레이아웃에 맞춥니다(예: Vec4 하나당 16바이트). 내용은 디바이스 프레임 사이에 유지합니다. 이식 가능한 커널 범위 검사에는 요소 수를 uniform으로 전달합니다. 고정 컴파일러의 SSBO .length() Metal 출력은 sokol이 제공하지 않는 크기 바인딩을 요구합니다. 빈 저장소 또는 할당 크기와 같은 바이트 수의 초기 데이터를 지정합니다. 빈 저장소의 내용은 쓰기 전까지 정의하지 않습니다.
 - GPU 초기화 후 메인 스레드에서 소멸을 포함한 모든 작업을 수행합니다. 복사는 지원하지 않습니다. 이동 생성/대입은 버퍼, view, 스테이징 및 CPU 업데이트 제한을 이전하고 원본을 비웁니다. clear()와 소멸자는 기존 GPU 지연 소멸 큐를 사용하여 기록된 그리기를 유지합니다.
 - sg_query_features().compute가 필요합니다. 헤드리스 및 WebGL2 같은 미지원 환경에서는 경고 후 할당, 업데이트, 바인딩을 거부합니다. 기기 검증 범위는 ComputeShader의 지원 표를 따릅니다. CPU 읽기 API는 제공하지 않습니다. 실현 가능성 메모는 docs/dev/COMPUTE_READBACK.md에 있습니다.
-- ComputeShader::setStorageBuffer는 셰이더가 선언한 읽기 또는 읽기/쓰기 접근을 허용합니다. Shader::setStorageBuffer는 그래픽의 readonly 선언만 허용합니다. 같은 버퍼를 dispatch와 이후 그리기에 사용할 수 있습니다. dispatch와 그리기 기록까지 할당을 유지합니다. storage를 읽는 그래픽 소스는 *.compute.glsl로 지정하여 GLSL310ES를 선택합니다. 일반 *.glsl은 GLSL300ES를 유지합니다.
+- ComputeShader::setStorageBuffer는 셰이더가 선언한 읽기 또는 읽기/쓰기 접근을 허용합니다. Shader::setStorageBuffer는 그래픽의 readonly 선언만 허용합니다. 같은 버퍼를 dispatch와 이후 drawVertices()에서 더미 정점 없이 사용합니다. dispatch와 그리기 기록까지 할당을 유지합니다. storage를 읽는 그래픽 소스는 *.compute.glsl로 지정하여 GLSL310ES를 선택합니다. 일반 *.glsl은 GLSL300ES를 유지합니다.
 '''
 snippet = '''
 StorageBuffer particles;
@@ -65549,13 +65571,13 @@ description.en = "Binds read-only storage for deferred graphics drawing (C++ onl
 description.ja = "遅延実行する描画に読み取り専用 storage を割り当てます（C++ 専用）。"
 description.ko = "지연 그래픽 그리기에 읽기 전용 storage를 바인딩합니다(C++ 전용)."
 details.en = '''
-- Call after load() with a generated VIEW_... slot and allocated StorageBuffer. Accepts only reflected readonly vertex/fragment storage declarations; graphics writes, texture slots, invalid slots, empty buffers and unavailable compute support warn and return false, preserving the previous binding. The view is captured with the existing Shader bindings at draw submission, so subsequent bindings cannot change an earlier draw. Shader and FullscreenShader check storage declarations again before drawing; missing, retired or wrong views refuse the draw with a warning. Keep the buffer allocated through submission. Use gl_VertexIndex or gl_InstanceIndex for vertex pulling, matching your drawing pipeline layout. Name graphics sources *.compute.glsl for GLES 3.1 storage support. CPU updates and compute dispatch flush earlier draws; later draws see their results without an extra user barrier.
+- Call after load() with a generated VIEW_... slot and allocated StorageBuffer. Accepts only reflected readonly vertex/fragment storage declarations; graphics writes, texture slots, invalid slots, empty buffers and unavailable compute support warn and return false, preserving the previous binding. The view is captured with the existing Shader bindings at draw submission, so subsequent bindings cannot change an earlier draw. Shader and FullscreenShader check storage declarations again before drawing; missing, retired or wrong views refuse the draw with a warning. Keep the buffer allocated through submission. Use drawVertices() with gl_VertexIndex or gl_InstanceIndex for vertex pulling without a subclass or dummy vertices. Name graphics sources *.compute.glsl for GLES 3.1 storage support. CPU updates and compute dispatch flush earlier draws; later draws see their results without an extra user barrier.
 '''
 details.ja = '''
-- load() の後に、生成された VIEW_... スロットと確保済みの StorageBuffer を渡します。vertex・fragment の反射情報の readonly 宣言だけを受け付けます。描画での書き込み、texture スロット、無効なスロット、空のバッファ、compute 非対応では警告を出して false を返し、以前の割り当てを保ちます。描画の記録時に既存の Shader バインド処理で view を保存するため、後からの変更は先行する描画に影響しません。Shader と FullscreenShader は描画の前にも storage 宣言を調べ、未割り当て・破棄済み・型違いの view では警告を出して描画を拒否します。記録まで確保を維持してください。パイプラインのレイアウトに合わせ、gl_VertexIndex や gl_InstanceIndex で頂点を読み出せます。GLES 3.1 の storage 対応には描画ソースを *.compute.glsl と命名します。CPU 更新と compute dispatch は先行する描画を送り出すため、利用者がバリアを追加しなくても後続の描画に結果が反映されます。
+- load() の後に、生成された VIEW_... スロットと確保済みの StorageBuffer を渡します。vertex・fragment の反射情報の readonly 宣言だけを受け付けます。描画での書き込み、texture スロット、無効なスロット、空のバッファ、compute 非対応では警告を出して false を返し、以前の割り当てを保ちます。描画の記録時に既存の Shader バインド処理で view を保存するため、後からの変更は先行する描画に影響しません。Shader と FullscreenShader は描画の前にも storage 宣言を調べ、未割り当て・破棄済み・型違いの view では警告を出して描画を拒否します。記録まで確保を維持してください。drawVertices() と gl_VertexIndex や gl_InstanceIndex を使うと、派生クラスやダミー頂点なしで頂点を読み出せます。GLES 3.1 の storage 対応には描画ソースを *.compute.glsl と命名します。CPU 更新と compute dispatch は先行する描画を送り出すため、利用者がバリアを追加しなくても後続の描画に結果が反映されます。
 '''
 details.ko = '''
-- load() 후 생성된 VIEW_... 슬롯과 할당된 StorageBuffer를 전달합니다. vertex/fragment 반사 정보의 readonly 선언만 허용합니다. 그래픽 쓰기, texture 슬롯, 잘못된 슬롯, 빈 버퍼 또는 compute 미지원은 경고 후 false를 반환하고 이전 바인딩을 유지합니다. 그리기 기록 시 기존 Shader 바인딩 경로에서 view를 저장하므로 이후 바인딩은 앞선 그리기를 변경하지 않습니다. Shader와 FullscreenShader는 그리기 전에도 storage 선언을 검사하며 누락, 소멸 또는 타입 불일치 view는 경고 후 그리기를 거부합니다. 기록까지 할당을 유지합니다. 파이프라인 레이아웃에 맞춰 gl_VertexIndex나 gl_InstanceIndex로 정점을 읽을 수 있습니다. GLES 3.1 storage 지원을 위해 그래픽 소스를 *.compute.glsl로 지정합니다. CPU 업데이트와 compute dispatch는 앞선 그리기를 전송하므로 사용자가 별도 배리어를 추가하지 않아도 이후 그리기에 결과를 반영합니다.
+- load() 후 생성된 VIEW_... 슬롯과 할당된 StorageBuffer를 전달합니다. vertex/fragment 반사 정보의 readonly 선언만 허용합니다. 그래픽 쓰기, texture 슬롯, 잘못된 슬롯, 빈 버퍼 또는 compute 미지원은 경고 후 false를 반환하고 이전 바인딩을 유지합니다. 그리기 기록 시 기존 Shader 바인딩 경로에서 view를 저장하므로 이후 바인딩은 앞선 그리기를 변경하지 않습니다. Shader와 FullscreenShader는 그리기 전에도 storage 선언을 검사하며 누락, 소멸 또는 타입 불일치 view는 경고 후 그리기를 거부합니다. 기록까지 할당을 유지합니다. drawVertices()와 gl_VertexIndex 또는 gl_InstanceIndex를 사용하여 파생 클래스나 더미 정점 없이 정점을 읽습니다. GLES 3.1 storage 지원을 위해 그래픽 소스를 *.compute.glsl로 지정합니다. CPU 업데이트와 compute dispatch는 앞선 그리기를 전송하므로 사용자가 별도 배리어를 추가하지 않아도 이후 그리기에 결과를 반영합니다.
 '''
 snippet = '''
 shader.load(draw_particles_shader_desc);

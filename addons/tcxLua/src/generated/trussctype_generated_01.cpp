@@ -189,6 +189,12 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
         t["reason"] = &trussc::ExitRequestEventArgs::reason;
     }
+    {
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

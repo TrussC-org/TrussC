@@ -142,6 +142,8 @@ struct ShaderStreamState {
 // NOTE: the per-draw heap snapshots (uniforms/vertices) churn the allocator
 // every frame; a pooled arena is a possible future optimization.
 struct DeferredShaderDraw {
+    int vertexCount = 0;                // non-indexed draw; zero selects the stream path
+    int instanceCount = 1;
     int layerId = 0;                    // sokol_gl layer this draw follows
     std::shared_ptr<PipelineGeneration> pipelineGeneration;
     sg_pipeline pipeline = {};          // resolved for the target at submission
@@ -262,6 +264,16 @@ inline void prepareDeferredShaderDraws(std::vector<DeferredShaderDraw>& draws) {
 
 inline void executeDeferredShaderDraw(const DeferredShaderDraw& d) {
     try {
+        if (d.vertexCount > 0) {
+            sg_apply_pipeline(d.pipeline);
+            for (const auto& [slot, data] : d.uniforms) {
+                const sg_range range = {data.data(), data.size()};
+                sg_apply_uniforms(slot, &range);
+            }
+            sg_apply_bindings(&d.bindings);
+            sg_draw(0, d.vertexCount, d.instanceCount);
+            return;
+        }
         if (!d.uploadPrepared) {
             // Standalone replay (unit tests and internal callers) is a one-draw flush.
             std::vector<DeferredShaderDraw> batch{d};

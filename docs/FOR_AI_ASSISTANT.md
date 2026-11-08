@@ -4119,6 +4119,7 @@ void Shader::begin()  // Starts a scope for drawing with this shader.
 void Shader::clear()  // Releases this shader's GPU resources and resets its loaded state.
 sg_pipeline_desc Shader::createPipelineDesc()  // Builds the pipeline settings used by this shader.
 void Shader::createVertexBuffer()  // Creates the vertex and index buffers for shader drawing.
+void Shader::drawVertices(int vertexCount, int instanceCount = 1)  // Draws non-indexed triangles without uploading vertices or indices.
 void Shader::end()  // Ends this shader's active drawing scope.
 void Shader::fillTextureBindings(sg_bindings & bind) const  // Copies stored texture bindings into a sokol bindings structure.
 bool Shader::isLoaded() const  // Returns whether shader loading succeeded.

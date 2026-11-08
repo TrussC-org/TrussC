@@ -33,11 +33,12 @@ def graphics_draw_paths():
         a = text.index(start)
         return text[a:text.index(end, a)]
     submit = section('    void submitVertices(', '\nprotected:')
+    helpers = section('    void snapshotUniforms_(', '\n    bool hasStorageBuffers_')
     guard = section('    bool validateStorageBindings(', '\n    // Slots')
     warn = section('    static void warnStorageBuffer(', '\n    static bool validateTextureSlot')
     fullscreen = text[text.index('class FullscreenShader'):]
     fullscreen = fullscreen[fullscreen.index('    void draw()'):fullscreen.index('\nprotected:')]
-    return DRAW_SEAM + submit + guard + warn + '\n};\nclass FullscreenProbe : public GraphicsDrawProbe {\npublic:\n' + fullscreen + '\n};\n}\n'
+    return DRAW_SEAM + submit + helpers + guard + warn + '\n};\nclass FullscreenProbe : public GraphicsDrawProbe {\npublic:\n' + fullscreen + '\n};\n}\n'
 
 
 DRAW_SEAM = r"""

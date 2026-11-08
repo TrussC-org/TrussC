@@ -2098,6 +2098,14 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                 if (!v3dResolveFlushNoticed.exchange(true)) {
                     logNotice("RenderTarget") << "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)";
                 }
+            } else if (logLevel == 3 && message && tag && std::strcmp(tag, "sg") == 0 &&
+                (logItem == SG_LOGITEM_D3D11_SHADER_COMPILATION_OUTPUT ||
+                 logItem == SG_LOGITEM_METAL_SHADER_COMPILATION_OUTPUT ||
+                 logItem == SG_LOGITEM_METAL_CREATE_CPS_OUTPUT ||
+                 logItem == SG_LOGITEM_METAL_CREATE_RPS_OUTPUT ||
+                 logItem == SG_LOGITEM_GL_SHADER_COMPILATION_FAILED ||
+                 logItem == SG_LOGITEM_GL_SHADER_LINKING_FAILED)) {
+                getLogger().log(LogLevel::Warning, sokolLogMessage(tag, logItem, message, lineNr));
             } else if (logPoolExhaustion(tag, logItem)) {
                 // Keep sokol's own line at debug verbosity, including repeats.
                 getLogger().log(LogLevel::Verbose, sokolLogMessage(tag, logItem, message, lineNr));

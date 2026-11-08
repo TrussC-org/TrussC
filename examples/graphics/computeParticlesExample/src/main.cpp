@@ -4,19 +4,11 @@
 using namespace std;
 using namespace tc;
 
-class ParticleShader : public Shader {
-    sg_pipeline_desc createPipelineDesc() override {
-        auto desc = Shader::createPipelineDesc();
-        desc.layout = {}; // Vertex pulling uses no vertex attributes.
-        return desc;
-    }
-};
 class tcApp : public App {
     static constexpr int count = 2048;
     StorageBuffer particles;
     ComputeShader step;
-    ParticleShader points;
-    vector<ShaderVertex> vertices = vector<ShaderVertex>(count * 3);
+    Shader points;
 public:
     void setup() override {
         vector<Vec4> initial(count);
@@ -33,9 +25,7 @@ public:
     }
     void draw() override {
         clear(0.02f, 0.02f, 0.04f);
-        points.begin();
-        points.submitVertices(vertices.data(), int(vertices.size()), PrimitiveType::Triangles);
-        points.end();
+        points.drawVertices(3, count);
     }
 };
 int main() { return runApp<tcApp>(WindowSettings().setSize(640, 480)); }

@@ -1651,6 +1651,7 @@ struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
         (void)af::val<FullscreenShader>().begin();
         (void)af::val<FullscreenShader>().clear();
         (void)af::val<FullscreenShader>().draw();
+        (void)af::val<FullscreenShader>().drawVertices(af::val<int>(), af::val<int>());
         (void)af::val<FullscreenShader>().end();
         (void)af::val<const FullscreenShader>().isLoaded();
         (void)af::val<FullscreenShader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
@@ -3491,6 +3492,7 @@ struct Cover_Shader : af::Scope<Shader> {
         (void)Shader();
         (void)af::val<Shader>().begin();
         (void)af::val<Shader>().clear();
+        (void)af::val<Shader>().drawVertices(af::val<int>(), af::val<int>());
         (void)af::val<Shader>().end();
         (void)af::val<const Shader>().isLoaded();
         (void)af::val<Shader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());

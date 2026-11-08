@@ -40,15 +40,87 @@ void headlessChecks() {
 class ComputeBufferApp : public App {
     StorageBuffer buffer_;
     ComputeShader compute_;
-    BufferReader reader_;
+    Shader reader_;
+    Shader instanced_;
+    BufferReader legacy_;
+    Shader ordinary_;
     Fbo target_;
     std::array<ShaderVertex, 24> vertices_ = {};
     void drawBuffer(float offset) {
         reader_.setUniform(UB_draw_params, Vec4(offset, 0, 0, 0));
-        reader_.begin();
-        reader_.submitVertices(vertices_.data(), int(vertices_.size()), PrimitiveType::Triangles);
-        reader_.end();
+        if (offset == 0) reader_.begin();
+        reader_.drawVertices(8 * 3);
+        if (offset == 0) reader_.end();
     }
+    void vertexlessChecks() {
+        target_.begin(0, 0, 0, 1);
+        drawBuffer(0); drawBuffer(1);
+        const auto& draws = internal::currentTarget().deferredShaderDraws;
+        check("drawVertices records no stream or vertex/index bindings", draws.size() == 2 &&
+            !draws[0].stream && draws[0].vertices.empty() &&
+            !draws[0].bindings.vertex_buffers[0].id && !draws[0].bindings.index_buffer.id);
+        check("scoped and standalone calls balance scopes", internal::currentWindowContext().shaderStack.empty());
+        target_.end();
+        expect("plain drawVertices storage pixels");
+        target_.begin(0, 0, 0, 1);
+        instanced_.setUniform(UB_draw_params, Vec4(0, 0, 0, 0));
+        instanced_.drawVertices(3, 8);
+        instanced_.setUniform(UB_draw_params, Vec4(1, 0, 0, 0));
+        instanced_.drawVertices(3, 8);
+        target_.end();
+        expect("instanced drawVertices storage pixels and frozen uniforms");
+        target_.begin(0, 0, 0, 1);
+        for (int offset = 0; offset < 2; ++offset) {
+            legacy_.setUniform(UB_draw_params, Vec4(float(offset), 0, 0, 0));
+            legacy_.begin();
+            legacy_.submitVertices(vertices_.data(), int(vertices_.size()), PrimitiveType::Triangles);
+            legacy_.end();
+        }
+        target_.end();
+        expect("submitVertices storage pixels are unchanged");
+        StorageBuffer alternate;
+        std::array<Vec4, 4> green = {Vec4(0,1,0,1), Vec4(0,1,1,1), Vec4(0,1,0,1), Vec4(0,1,1,1)};
+        alternate.allocate(sizeof(green), green.data());
+        target_.begin(0, 0, 0, 1);
+        drawBuffer(0);
+        reader_.setStorageBuffer(VIEW_pattern_input, alternate);
+        drawBuffer(1);
+        reader_.setStorageBuffer(VIEW_pattern_input, buffer_);
+        target_.end();
+        expect("storage bindings are frozen per drawVertices", false, true);
+        target_.begin(0, 0, 0, 1);
+        Shader missing;
+        missing.load(buffer_reader_shader_desc);
+        missing.drawVertices(24);
+        check("drawVertices shares the missing-storage guard", internal::currentTarget().deferredShaderDraws.empty());
+        target_.end();
+
+
+        target_.begin(0, 0, 0, 1);
+        auto& target = internal::currentTarget();
+        const auto queued = target.deferredShaderDraws.size();
+        const auto layer = target.sglLayerNext;
+        int warnings = 0;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
+            if (event.level == LogLevel::Warning && event.message.find("drawVertices requires nonnegative") != std::string::npos) ++warnings;
+        });
+        reader_.drawVertices(0); reader_.drawVertices(24, 0);
+        check("zero counts do not record or advance a layer", target.deferredShaderDraws.size() == queued && target.sglLayerNext == layer && warnings == 0);
+        reader_.drawVertices(-1); reader_.drawVertices(24, -1); reader_.drawVertices(-1);
+        check("negative counts are refused and warn every time", target.deferredShaderDraws.size() == queued && target.sglLayerNext == layer && warnings == 3);
+        ordinary_.drawVertices(3);
+        check("attribute-consuming shader is refused", target.deferredShaderDraws.size() == queued);
+        ordinary_.begin();
+        setColor(1, 0, 0, 1);
+        drawRect(-1, -1, 2, 2);
+        ordinary_.end();
+        target_.end();
+        std::array<unsigned char, 32 * 4 * 4> pixels = {};
+        bool red = target_.readPixels(pixels.data());
+        for (size_t i = 0; i < pixels.size(); i += 4) red &= pixels[i] == 255 && pixels[i+1] == 0 && pixels[i+2] == 0 && pixels[i+3] == 255;
+        check("ordinary Shader draw pixels are unchanged", red);
+    }
+
     uint32_t setupFrame_ = 0;
     void expectBytes(const unsigned char* pixels, int width, int height, const char* label,
                      bool prefixGreen, bool suffixGreen, bool firstOnly, bool checkAlpha) {
@@ -89,7 +161,13 @@ public:
         check("undeclared compute slot is refused", !compute_.setStorageBuffer(1, buffer_));
         check("graphics slot limit is refused", !reader_.setStorageBuffer(SG_MAX_VIEW_BINDSLOTS, buffer_));
         check("undeclared graphics slot is refused", !reader_.setStorageBuffer(1, buffer_));
+        check("instanced descriptor loads", instanced_.load(buffer_instanced_reader_shader_desc));
+        check("instanced storage binding succeeds", instanced_.setStorageBuffer(VIEW_pattern_input, buffer_));
+        check("legacy descriptor loads", legacy_.load(buffer_reader_shader_desc));
+        check("legacy storage binding succeeds", legacy_.setStorageBuffer(VIEW_pattern_input, buffer_));
+        check("ordinary descriptor loads", ordinary_.load(buffer_ordinary_shader_desc));
         target_.allocate(32, 4);
+        vertexlessChecks();
         target_.begin();
         drawBuffer(0); drawBuffer(1);
         target_.end();
@@ -112,6 +190,14 @@ public:
         });
         // setup() and the first draw may share a device frame.
         if (setupFrame_ == sg_query_stats().prev_frame.frame_index) return;
+
+        reader_.begin();
+        const int layer = internal::currentTarget().sglLayerNext;
+        reader_.setUniform(UB_draw_params, Vec4(0, 0, 0, 0));
+        reader_.drawVertices(24);
+        check("drawVertices reuses the active swapchain scope", internal::currentTarget().sglLayerNext == layer &&
+            internal::currentWindowContext().shaderStack.size() == 1);
+        reader_.end();
         std::array<Vec4, 4> initial = {Vec4(1,0,0,1), Vec4(1,0,1,1), Vec4(1,0,0,1), Vec4(1,0,1,1)};
         check("CPU upload in a later device frame succeeds", buffer_.update(initial.data(), sizeof(initial)));
         target_.begin();
