@@ -18,14 +18,16 @@ int main() {
     using namespace trussc;
     StorageBuffer buffer;
     int output = 42;
-    if (!buffer.read(nullptr, 0) || buffer.read(&output, 4) || output != 42 || nativeCalls) return 1;
     sg_desc setup{}; sg_setup(&setup); _sg.features.compute = true;
     if (!buffer.allocate(16) || !sg_query_buffer_usage(buffer.getBuffer()).copy_src) return 2;
     warnings.str("");
     if (buffer.read(&output, 17) || buffer.read(&output, 17) || nativeCalls) return 3;
+    // Rate-limited like the other StorageBuffer warnings (read() is often per frame).
     const auto messages = warnings.str();
     const auto first = messages.find("read requires");
-    if (first == std::string::npos || messages.find("read requires", first + 1) == std::string::npos) return 4;
+    if (first == std::string::npos || messages.find("read requires", first + 1) != std::string::npos) return 4;
+    StorageBuffer empty;
+    if (!empty.read(nullptr, 0) || empty.read(&output, 4) || output != 42 || nativeCalls) return 1;
     if (buffer.read(nullptr, 4) || nativeCalls || internal::suspensions) return 5;
     if (buffer.read(&output, 4) || output != 42 || nativeCalls != 1 || internal::suspensions != 1) return 6;
     buffer.clear(); sg_shutdown();

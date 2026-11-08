@@ -159,9 +159,11 @@ class ComputeBufferApp : public App {
         auto listener = getLogger().onLog.listen([&](LogEventArgs& event) {
             if (event.level == LogLevel::Warning && event.message.find("read requires") != std::string::npos) ++warnings;
         });
-        check("oversized read is refused twice", !data.read(sentinel.data(), sentinel.size()) &&
-            !data.read(sentinel.data(), sentinel.size()));
-        check("oversized reads warn on every call", warnings == 2);
+        StorageBuffer small;
+        small.allocate(sizeof(expected));
+        check("oversized read is refused twice", !small.read(sentinel.data(), sentinel.size()) &&
+            !small.read(sentinel.data(), sentinel.size()));
+        check("oversized reads warn once per 5 seconds", warnings == 1);
         check("failed read leaves all destination bytes untouched", sentinel == untouched);
         check("null destination is refused", !data.read(nullptr, 4));
         check("zero read succeeds on allocated storage", data.read(nullptr, 0));

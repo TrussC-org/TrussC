@@ -86,12 +86,12 @@ public:
 
 #if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
     // Reads a prefix synchronously. Zero bytes succeeds without a GPU or destination.
-    // Failure leaves destination untouched; every failure emits a warning.
+    // Failure leaves destination untouched and warns (rate-limited: often called per frame).
     TC_PLATFORMS("macos,windows,linux,ios,android") bool read(void* destination, size_t bytes) {
         if (!bytes) return true;
         // Bound (copy range): the requested prefix must fit the allocation.
         if (!isAllocated() || !destination || bytes > size_) {
-            logWarning("StorageBuffer") << "read requires allocated storage, a destination and bytes <= getSize()";
+            warn("read requires allocated storage, a destination and bytes <= getSize()");
             return false;
         }
         try {
@@ -101,7 +101,7 @@ public:
             // Keep allocation failures inside the API, including native frame callbacks.
         } catch (const std::length_error&) {
         }
-        logWarning("StorageBuffer") << "Failed to read storage buffer";
+        warn("Failed to read storage buffer");
         return false;
     }
 #endif
