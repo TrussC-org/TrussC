@@ -33,6 +33,7 @@ void layoutChecks() {
 class ShadowApp : public App {
     internal::WindowContext* a_ = nullptr;
     std::shared_ptr<Window> b_, unused_;
+    internal::WindowRequestAccess::HostState unusedState_;
     Light lights_[2];
     Mesh caster_, receiver_;
     Material material_;
@@ -205,6 +206,7 @@ class ShadowApp : public App {
     }
     void mainCases() {
         add(0, [this] {
+            check("unused window context allocates zero shadow bytes", !unusedState_.context.shadow.storage);
             start(0,1024); queue();
             const auto& pending = a_->swapchainTarget.deferredPbrDraws;
             check("PBR without shadows has no shadow generation", !a_->shadow.storage &&
@@ -220,6 +222,11 @@ class ShadowApp : public App {
         add(0, [this] { scene(0,1024); }, [this] {
             capture();
             check("main shadow default remains 1024", a_->shadow.storage && a_->shadow.storage->resolution == 1024);
+        });
+        auto defaultFbo = std::make_shared<Pixels>();
+        add(0, [this] { scene(0,1024,true); }, [=,this] { *defaultFbo = capture(true); });
+        add(0, [this] { scene(0,1024,true); }, [=,this] {
+            matches("single-owner Fbo PBR matches isolated reference",capture(true),*defaultFbo);
             a_->shadow.storage.reset(); a_->shadow.count = 0;
         });
         auto visible = std::make_shared<Pixels>();
@@ -227,6 +234,12 @@ class ShadowApp : public App {
         add(0, [this] { scene(0,64,false,false,false); }, [=,this] {
             const auto count = different(*visible,capture());
             check("reference contains a visible cast shadow", count > 40 && count != SIZE_MAX);
+        });
+        auto fboVisible = std::make_shared<Pixels>();
+        add(0, [this] { scene(0,64,true); }, [=,this] { *fboVisible = capture(true); });
+        add(0, [this] { scene(0,64,true,false,false); }, [=,this] {
+            const auto count = different(*fboVisible,capture(true));
+            check("Fbo reference contains a visible cast shadow", count > 40 && count != SIZE_MAX);
         });
         auto reference = std::make_shared<Pixels>();
         add(0, [this] { scene(0,256); }, [=,this] { *reference = capture(); });
@@ -355,10 +368,11 @@ class ShadowApp : public App {
         });
     }
     void finishCases() {
-        check("all expected comparison pairs ran", capturePair_ == (crossWindowCases_ ? 18 : 6));
+        check("all expected comparison pairs ran", capturePair_ == (crossWindowCases_ ? 19 : 7));
         check("unused window PBR case ran", !crossWindowCases_ || unusedDrew_);
         check("unused window still allocates zero shadow bytes", !unused_ ||
             !trussc::internal::WindowRequestAccess::context(*unused_).shadow.storage);
+        check("unused window context still allocates zero shadow bytes", !unusedState_.context.shadow.storage);
         check("no unexpected rendering errors", unexpectedErrors_ == 0);
         std::printf("perWindowShadows: %d comparison pairs completed\n",capturePair_);
         completed = true;
