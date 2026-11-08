@@ -2,6 +2,7 @@
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <thread>
 
@@ -26,6 +27,14 @@ int exits = 0, framesAfterClear = 0, closeEvents = 0;
 bool inputsDone = false, completed = false;
 bool secondaryTicked = false, skippedNoTick = false;
 EventListener firstUpdate, firstDraw;
+// [probe #1256] Trace notifications before recording, until the first afterFrame.
+void traceFirstFrame(const char* event) {
+    if (inputsDone || !std::getenv("TRUSSC_PROBE_1256")) return;
+    const auto& ctx = internal::WindowRequestAccess::context(*secondary);
+    const auto& binding = internal::WindowRequestAccess::binding(*secondary);
+    const auto update = order.find("update"), draw = order.find("draw");
+    std::fprintf(stderr, "[probe #1256] secondary %s id=%u updates=%llu draws=%llu resourceTicks=%llu occluded=%d updateOrder=%s drawOrder=%s\n", event, binding.handle.id, (unsigned long long)ctx.updateCount, (unsigned long long)ctx.drawCount, (unsigned long long)ctx.resourceTickCount, secondary->isOccluded(), update == order.end() ? "" : update->second.c_str(), draw == order.end() ? "" : draw->second.c_str());
+}
 void expect(const char* name, const char* expected) {
     if (order[name] != expected) std::printf("  %s: got %s expected %s\n", name, order[name].c_str(), expected);
     check(name, order[name] == expected); order[name].clear();
@@ -282,11 +291,14 @@ struct Harness : App {
         observerOwner = internal::makeConstructedAppAt<App>(&trussc::internal::WindowRequestAccess::context(*secondary));
         internal::AppOwnerScope observation(internal::appOwner(*observerOwner));
         // Observe the event stream independently of the App bindings under test.
-        firstUpdate = source().update.listen([] { secondaryTicked = true; }, -1000);
-        firstDraw = source().draw.listen([] { secondaryTicked = true; }, -1000);
+        // [probe #1256] Use existing observers; subscription counts stay the same.
+        firstUpdate = source().update.listen([] { traceFirstFrame("update"); secondaryTicked = true; }, -1000);
+        firstDraw = source().draw.listen([] { traceFirstFrame("draw"); secondaryTicked = true; }, -1000);
         stages(true); secondary->setApp<DeliveryApp>();
         internal::applyPendingAppForTests(*secondary); stages(false);
         after = source().afterFrame.listen([] {
+            // [probe #1256] Match accumulated strings to the first successful present.
+            traceFirstFrame("afterFrame");
             if (!inputsDone) {
                 expect("update", "cdpatblz"); expect("draw", "cdpatblz");
                 inputChecks(); inputsDone = true;

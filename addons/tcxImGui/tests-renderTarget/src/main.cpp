@@ -6,6 +6,7 @@
 #include "../../../../core/tests/common/tcDisplayTest.h"
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 using namespace tc;
 using namespace tcx::imgui;
@@ -250,6 +251,12 @@ void screenUi(bool pixelMode) {
     }
     internal::pixelPerfectMode()=pixelMode;
     imguiBegin();
+    // [probe #1256] Compare native metadata, Runtime metrics and the final ImGui frame.
+    if (std::getenv("TRUSSC_PROBE_1256")) {
+        const auto& binding=internal::WindowRequestAccess::binding(*window.hostWindow);
+        const auto& metadata=binding.metadata;
+        std::fprintf(stderr,"[probe #1256] imgui id=%u nativeDpi2=%d pixelMode=%d requested=%.0fx%.0f pixels=%d native=%dx%d fb=%dx%d dpi=%.2f runtimeFb=%dx%d runtimeDpi=%.2f target=%dx%d fbo=%d display=%.1fx%.1f scale=%.2fx%.2f\n",binding.handle.id,nativeDpi2,pixelMode,binding.geometry.requestedWidth,binding.geometry.requestedHeight,binding.geometry.pixelSize,metadata.width,metadata.height,metadata.fb_width,metadata.fb_height,metadata.dpi_scale,getFramebufferWidth(),getFramebufferHeight(),getDpiScale(),internal::currentTarget().width,internal::currentTarget().height,internal::currentTarget().isFbo,ImGui::GetIO().DisplaySize.x,ImGui::GetIO().DisplaySize.y,ImGui::GetIO().DisplayFramebufferScale.x,ImGui::GetIO().DisplayFramebufferScale.y);
+    }
     check("window DisplaySize 256x192",ImGui::GetIO().DisplaySize.x==256 && ImGui::GetIO().DisplaySize.y==192);
     check("window FramebufferScale stays 2",ImGui::GetIO().DisplayFramebufferScale.x==2 && getDpiScale()==2);
     marker(IM_COL32(255,0,0,255));

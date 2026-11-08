@@ -316,7 +316,11 @@ int resizeThrowSampleTicks;
 double resizeThrowTime;
 bool throwClosed, eventThrown, mainThrowOnce, mainThrew;
 sapp_window throwWindow;
-void throwTick(sapp_window, void*) { if (++throwTicks == 3) throw std::runtime_error("tick_cb test throw"); }
+void throwTick(sapp_window, void*) {
+    // [probe #1256] Record callback entry without acquiring or presenting a drawable.
+    if (std::getenv("TRUSSC_PROBE_1256")) std::fprintf(stderr, "[probe #1256] throwTick t=%.6f next=%d\n", now(), throwTicks + 1);
+    if (++throwTicks == 3) throw std::runtime_error("tick_cb test throw");
+}
 void countTick(sapp_window, void*) {
     ++throwEventTicks;
     if (eventThrown && now() - resizeThrowTime < 1.0) ++resizeThrowSampleTicks;
@@ -799,6 +803,8 @@ void step() {
     }
     case ThrowTickStart:
         throwTicks = 0; throwClosed = false;
+        // [probe #1256] Separate startup latency from time after the third callback.
+        if (std::getenv("TRUSSC_PROBE_1256")) std::fprintf(stderr, "[probe #1256] throwStart t=%.6f\n", now());
         throwWindow = makeProbe(throwTick, nullptr, throwClose, "throwing tick");
         enter(ThrowTickWait);
         break;
@@ -806,6 +812,11 @@ void step() {
         _sapp_tc_window_t* w = _sapp_tc_lookup(throwWindow);
         if (w && !waited(1.0)) break;
         if (w && !w->close_requested && !throwClosed) {
+            // [probe #1256] Timer-side snapshot still runs if the display link stops firing.
+            if (std::getenv("TRUSSC_PROBE_1256")) {
+                const CAFrameRateRange range = w->link.preferredFrameRateRange;
+                std::fprintf(stderr, "[probe #1256] throwSnapshot t=%.6f ticks=%d frames=%llu ready=%d in_tick=%d draw=%d depth=%d active=%d fallback=%d timer=%d suspended=%d occluded=%d iconified=%d hidden=%d closed=%d range=%.1f/%.1f/%.1f paused=%d\n", now(), throwTicks, (unsigned long long)w->frame_count, w->ready, w->in_tick, w->draw_admitted, w->callback_depth, _sapp_tc.callbacks_active, w->fallback_active, w->fallback_timer != nil, w->link_suspended, w->occluded, w->iconified, w->desc.hidden, w->closed_pending, range.minimum, range.maximum, range.preferred, w->link.paused);
+            }
             std::printf("nativeWindow: throwing tick_cb: %d ticks in 1s (threw on tick 3)\n", throwTicks);
             check("ticks continue after tick_cb throws", throwTicks >= 10 && !w->in_tick && !w->draw_admitted);
             sapp_window_request_close(throwWindow);

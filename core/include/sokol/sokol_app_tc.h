@@ -3974,6 +3974,9 @@ static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {
    re-resolve identity: a delivered event may dispose the firing window. The
    source's own observation runs under its tick guard; inactive ticks drop. */
 static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {
+    // [probe #1256] Source arrival before admission; only the throwing-tick fixture, opt-in.
+    if (w->title && !strcmp(w->title, "throwing tick") && getenv("TRUSSC_PROBE_1256"))
+        fprintf(stderr, "[probe #1256] source t=%.6f id=%u fallback=%d selected=%d ready=%d constructing=%d in_tick=%d depth=%d active=%d closed=%d frames=%llu\n", CACurrentMediaTime(), w->win_id, from_fallback, w->fallback_active, w->ready, w->constructing, w->in_tick, w->callback_depth, _sapp_tc.callbacks_active, w->closed_pending, (unsigned long long)w->frame_count);
     if (_sapp_tc_mac_tick_blocked(w)) return;
     const uint32_t source_id = w->win_id;
     _sapp_tc_mac_process_visibility();
