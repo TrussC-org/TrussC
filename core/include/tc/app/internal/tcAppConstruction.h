@@ -8,6 +8,7 @@
 #include <functional>
 #include <utility>
 #include <vector>
+#include <map>
 #include <type_traits>
 #include <string>
 #include "../../utils/tcAtomicSharedPtr.h"
@@ -29,9 +30,10 @@ struct AppOwner {
     WindowContext* context = nullptr;
     std::atomic<bool> retiring{false}, ended{false}, callbacksClosing{false};
     bool exitDelivered = false, notifyWindowExit = false;
-    // Serializes registration/extraction; invoke cancellations outside this lock.
+    // Serializes registration/removal/extraction; invoke cancellations outside this lock.
     std::mutex cancellationsMutex;
-    std::vector<std::function<void()>> cancellations;
+    std::map<uint64_t, std::function<void()>> cancellations;
+    uint64_t nextCancellationId = 0;
 };
 struct AppConstructionTicket {
     std::shared_ptr<std::atomic<bool>> runToken;
@@ -49,7 +51,16 @@ bool isAppExitEvent(const void*) noexcept;
 void retireAppGeneration(const void*) noexcept;
 const void* nextAppGeneration();
 void retireAppOwner(const std::shared_ptr<AppOwner>&) noexcept;
-void ownAppCancellation(std::function<void()>);
+// Callers retain this handle only while their operation needs App retirement.
+// Dropping the last handle unregisters without invoking the cancellation.
+struct AppCancellation {
+    std::weak_ptr<AppOwner> owner;
+    uint64_t id = 0;
+    ~AppCancellation();
+};
+// Events prepare the handle before publishing, then register after unlocking.
+[[nodiscard]] std::shared_ptr<AppCancellation> ownAppCancellation(
+    std::function<void()>, std::shared_ptr<AppCancellation> registration = {});
 // Restores nested ownership without changing the caller's rendering lease.
 class AppOwnerScope {
 public:
@@ -115,10 +126,10 @@ std::function<R(Args...)> appOwnedCallback(std::function<R(Args...)> callback, b
     if (owner->ended || owner->retiring) return {};
     using Callback = std::function<R(Args...)>;
     auto target = std::make_shared<AtomicSharedPtr<Callback>>(std::make_shared<Callback>(std::move(callback)));
-    ownAppCancellation([weak = std::weak_ptr(target)] {
+    auto cancellation = ownAppCancellation([weak = std::weak_ptr(target)] {
         if (auto live = weak.lock()) sharedStore(*live, std::shared_ptr<Callback>{});
     });
-    return [weak = std::weak_ptr(owner), target, exitEvent](Args... args) -> R {
+    return [weak = std::weak_ptr(owner), target, cancellation = std::move(cancellation), exitEvent](Args... args) -> R {
         auto live = weak.lock();
         auto call = sharedLoad(*target);
         if (!live || (!live->token->load() && !(exitEvent && live->ended)) || live->callbacksClosing || !call) {

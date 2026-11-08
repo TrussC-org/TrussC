@@ -251,6 +251,7 @@ private:
         // in-flight notify() on another thread (weak expiry alone would not).
         std::shared_ptr<std::atomic<bool>> alive;
         std::weak_ptr<internal::AppOwner> owner;
+        std::shared_ptr<internal::AppCancellation> cancellation;
     };
 
     using EntryList = std::vector<Entry>;
@@ -279,6 +280,9 @@ private:
         EventListener::DisconnectFunc disconnect;
         auto owner = frameworkOwned ? std::shared_ptr<internal::AppOwner>{} : internal::currentAppOwner();
         if (owner && (owner->retiring || owner->ended || !owner->token->load())) return;
+        // Share retirement ownership across snapshots, including clear() and
+        // Event destruction while the EventListener handle is still alive.
+        auto cancellation = owner ? std::make_shared<internal::AppCancellation>() : nullptr;
         if (owner && callback) callback = internal::appOwnedCallback(std::move(callback), internal::isAppExitEvent(this));
         else if (!frameworkOwned && callback) {
             callback = [callback = std::move(callback)](auto&&... args) {
@@ -298,7 +302,7 @@ private:
             });
             next->push_back({id, priority, deliver, frameworkOwned,
                              callback ? std::make_shared<Callback>(std::move(callback)) : nullptr,
-                             std::make_shared<std::atomic<bool>>(true), owner});
+                             std::make_shared<std::atomic<bool>>(true), owner, cancellation});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -318,7 +322,7 @@ private:
         // handle outside the mutex; release the old snapshot outside it too.
         // Retirement may synchronously disconnect. Publish first and never call
         // cancellation registration while holding this Event's mutex.
-        try { if (owner) internal::ownAppCancellation(disconnect); }
+        try { if (owner) (void)internal::ownAppCancellation(disconnect, cancellation); }
         catch (...) { disconnect(); throw; }
         listener = EventListener(std::move(disconnect));
     }
@@ -600,6 +604,7 @@ private:
         // Liveness token — see Event<T>::Entry::alive
         std::shared_ptr<std::atomic<bool>> alive;
         std::weak_ptr<internal::AppOwner> owner;
+        std::shared_ptr<internal::AppCancellation> cancellation;
     };
 
     using EntryList = std::vector<Entry>;
@@ -626,6 +631,9 @@ private:
         EventListener::DisconnectFunc disconnect;
         auto owner = frameworkOwned ? std::shared_ptr<internal::AppOwner>{} : internal::currentAppOwner();
         if (owner && (owner->retiring || owner->ended || !owner->token->load())) return;
+        // Share retirement ownership across snapshots, including clear() and
+        // Event destruction while the EventListener handle is still alive.
+        auto cancellation = owner ? std::make_shared<internal::AppCancellation>() : nullptr;
         if (owner && callback) callback = internal::appOwnedCallback(std::move(callback), internal::isAppExitEvent(this));
         else if (!frameworkOwned && callback) {
             callback = [callback = std::move(callback)](auto&&... args) {
@@ -645,7 +653,7 @@ private:
             });
             next->push_back({id, priority, deliver, frameworkOwned,
                              callback ? std::make_shared<Callback>(std::move(callback)) : nullptr,
-                             std::make_shared<std::atomic<bool>>(true), owner});
+                             std::make_shared<std::atomic<bool>>(true), owner, cancellation});
             std::stable_sort(next->begin(), next->end(),
                 [](const Entry& a, const Entry& b) {
                     return a.priority < b.priority;
@@ -665,7 +673,7 @@ private:
         // handle outside the mutex; release the old snapshot outside it too.
         // Retirement may synchronously disconnect. Publish first and never call
         // cancellation registration while holding this Event's mutex.
-        try { if (owner) internal::ownAppCancellation(disconnect); }
+        try { if (owner) (void)internal::ownAppCancellation(disconnect, cancellation); }
         catch (...) { disconnect(); throw; }
         listener = EventListener(std::move(disconnect));
     }
