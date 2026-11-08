@@ -1143,6 +1143,8 @@ In Xcode: pick a device/simulator → **set a Development Team under Signing & C
 
 Two layers. The core is built once as `libTrussC.a` and shared across all projects; apps only recompile their own delta (fast). `trusscli` (the project generator) handles create / update / IDE-file generation / per-platform enabling. `CMakeLists.txt` and `CMakePresets.json` are auto-generated, so **don't hand-edit them** — put addons in `addons.make` and project-specific CMake in `local.cmake`. Build with `trusscli build` (auto-selects native), or `cmake --preset <os>` + `cmake --build --preset <os>` (os = macos / windows / linux / web / android / ios).
 
+For a plain configure outside the repository, pass `-DTRUSSC_DIR=<TrussC-root>/core`. The generated CMakeLists retains the `../../../core` fallback and checks for `cmake/trussc_app.cmake` before including it. If missing, it stops with instructions to run `trusscli update`, configure with the host preset (`macos`, `linux`, or `windows`), or set `TRUSSC_DIR`.
+
 ### trusscli command reference
 
 `trusscli` with no args launches the GUI (TrussC Project Generator). Main commands:

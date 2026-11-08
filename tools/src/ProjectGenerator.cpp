@@ -751,7 +751,17 @@ string ProjectGenerator::update(const string& projectPath_) {
             cmake << "if(NOT DEFINED TRUSSC_DIR)\n";
             cmake << "    set(TRUSSC_DIR \"${CMAKE_CURRENT_SOURCE_DIR}/../../../core\")\n";
             cmake << "endif()\n\n";
-            cmake << "include(${TRUSSC_DIR}/cmake/trussc_app.cmake)\n\n";
+            cmake << "if(NOT EXISTS \"${TRUSSC_DIR}/cmake/trussc_app.cmake\")\n";
+            cmake << "    string(TOLOWER \"${CMAKE_HOST_SYSTEM_NAME}\" _TRUSSC_HOST_PRESET)\n";
+            cmake << "    if(CMAKE_HOST_SYSTEM_NAME STREQUAL \"Darwin\")\n";
+            cmake << "        set(_TRUSSC_HOST_PRESET \"macos\")\n";
+            cmake << "    endif()\n";
+            cmake << "    message(FATAL_ERROR\n";
+            cmake << "        \"TrussC core not found. Run `trusscli update` (or `cmake --preset ${_TRUSSC_HOST_PRESET}`), \"\n";
+            cmake << "        \"or configure with -DTRUSSC_DIR=<TrussC-root>/core.\")\n";
+            cmake << "endif()\n";
+            cmake << "\n";
+            cmake << "include(\"${TRUSSC_DIR}/cmake/trussc_app.cmake\")\n\n";
             cmake << "trussc_app()\n";
             writeGeneratedFile(cmakeListsPath, cmake.str());
         }

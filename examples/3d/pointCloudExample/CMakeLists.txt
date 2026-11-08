@@ -7,6 +7,16 @@ if(NOT DEFINED TRUSSC_DIR)
     set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core")
 endif()
 
-include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
+if(NOT EXISTS "${TRUSSC_DIR}/cmake/trussc_app.cmake")
+    string(TOLOWER "${CMAKE_HOST_SYSTEM_NAME}" _TRUSSC_HOST_PRESET)
+    if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+        set(_TRUSSC_HOST_PRESET "macos")
+    endif()
+    message(FATAL_ERROR
+        "TrussC core not found. Run `trusscli update` (or `cmake --preset ${_TRUSSC_HOST_PRESET}`), "
+        "or configure with -DTRUSSC_DIR=<TrussC-root>/core.")
+endif()
+
+include("${TRUSSC_DIR}/cmake/trussc_app.cmake")
 
 trussc_app()

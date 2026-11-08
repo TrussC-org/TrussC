@@ -83,7 +83,7 @@ The `trusscli` tool (TrussC Project Generator) creates new projects by:
 
 ### TRUSSC_DIR Strategy
 
-**Design Principle:** CMakeLists.txt is never modified. All project-specific configuration goes into CMakePresets.json.
+**Design Principle:** `trusscli update` regenerates CMakeLists.txt from the shared template. Paths and presets go into CMakePresets.json; custom build settings go into local.cmake.
 
 **Why relative vs absolute path:**
 
@@ -95,15 +95,17 @@ The `trusscli` tool (TrussC Project Generator) creates new projects by:
 **Template CMakeLists.txt fallback:**
 ```cmake
 if(NOT DEFINED TRUSSC_DIR)
-    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
+    set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../core")
 endif()
 ```
+
+Before including `trussc_app.cmake`, the generated CMakeLists checks that it exists. If the core is missing, configuration stops with instructions to run `trusscli update`, use the host preset (`macos`, `linux`, or `windows`), or pass `-DTRUSSC_DIR=<TrussC-root>/core`. The fallback stays relative; absolute paths belong in the presets.
 
 **Generated CMakePresets.json (user project):**
 ```json
 {
   "cacheVariables": {
-    "TRUSSC_DIR": "/absolute/path/to/trussc"
+    "TRUSSC_DIR": "/absolute/path/to/TrussC/core"
   }
 }
 ```

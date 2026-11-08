@@ -142,6 +142,18 @@ cmake --preset <os>   # e.g., macos, linux, windows
 cmake --build --preset <os> --parallel
 ```
 
+For a plain configure outside the TrussC repository, provide the core path:
+
+```bash
+cmake -S . -B build-manual -DTRUSSC_DIR="/path/to/TrussC/core"
+cmake --build build-manual --parallel
+```
+
+The generated CMakeLists keeps `../../../core` as its fallback. If that path is
+missing, configuration stops with an error naming `TRUSSC_DIR`, `trusscli update`,
+and the host preset (`macos`, `linux`, or `windows`). Run `trusscli update` to
+regenerate the project files and presets after moving your TrussC installation.
+
 **Compiler warnings (opt-in):**
 
 `trusscli build --warnings` (also `trusscli run --warnings`) enables `-Wall -Wextra`
