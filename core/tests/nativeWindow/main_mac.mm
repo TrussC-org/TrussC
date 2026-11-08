@@ -1275,6 +1275,7 @@ namespace trussc::internal {
 bool querySessionEnd() noexcept { return _sapp_tc_mac_busy() || _sapp_tc_request_exit(); }
 void cancelSessionEnd() noexcept {}
 void shutdownRuntime() noexcept {}
+void receiveFilesOpened(std::vector<std::filesystem::path>) {}
 void commitSessionEnd() noexcept {
     static bool committed = false;
     if (committed) return;
