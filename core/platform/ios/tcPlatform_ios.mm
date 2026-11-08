@@ -207,8 +207,32 @@ bool captureWindow(Pixels& outPixels) {
 
     id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)sg_mtl_command_queue();
     if (!queue || queue.device != device) return false;
-    id<MTLCommandBuffer> cmdBuf = [queue commandBuffer];
+    // The committed command buffer owns this handler until completion; its
+    // shared state pins both textures even after the synchronous caller leaves.
+    // Never capture the caller's Pixels or stack by reference. Keep readback
+    // on the caller after a successful wait, preserving destination reuse.
+    struct Result : mcp::internal::CaptureCompletionGate {
+        id<MTLTexture> source = nil, staging = nil;
+        bool ok = false;
+    };
+    auto result = std::make_shared<Result>();
+    result->source = srcTexture;
+    result->staging = stagingTexture;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+
+    // Mirror macOS: use the renderer's bounded capture-slot acquisition and
+    // submit this blit in its prefix, without presenting the drawable.
+    internal::parkWindowPass();
+    id<MTLCommandBuffer> cmdBuf = (__bridge id<MTLCommandBuffer>)sg_tc_mtl_command_buffer();
+    if (!cmdBuf) {
+        capturePhase.leaveParked();
+        return false;
+    }
     id<MTLBlitCommandEncoder> blitEnc = [cmdBuf blitCommandEncoder];
+    if (!blitEnc) {
+        capturePhase.leaveParked();
+        return false;
+    }
     [blitEnc copyFromTexture:srcTexture
                  sourceSlice:0 sourceLevel:0
                 sourceOrigin:MTLOriginMake(0, 0, 0)
@@ -217,9 +241,24 @@ bool captureWindow(Pixels& outPixels) {
             destinationSlice:0 destinationLevel:0
            destinationOrigin:MTLOriginMake(0, 0, 0)];
     [blitEnc endEncoding];
-    [cmdBuf commit];
-    [cmdBuf waitUntilCompleted];
-    if (cmdBuf.status != MTLCommandBufferStatusCompleted) return false;
+    [cmdBuf addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+        result->complete([&] { result->ok = cb.status == MTLCommandBufferStatusCompleted; });
+        dispatch_semaphore_signal(sem);
+    }];
+    sg_tc_submit_prefix();
+    // Bound (platform): like macOS, permit slow GPU work/recovery for ten
+    // seconds, then return without resuming a pass on the stalled GPU.
+    if (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) != 0) {
+        result->abandon();
+        capturePhase.leaveParked();
+        logError("Screenshot") << "Metal window capture completion timed out";
+        return false;
+    }
+    if (!result->ok) {
+        capturePhase.leaveParked();
+        logError("Screenshot") << "Metal window capture readback failed";
+        return false;
+    }
 
     MTLRegion region = MTLRegionMake2D(0, 0, width, height);
     NSUInteger bytesPerRow = layout.rowBytes;
