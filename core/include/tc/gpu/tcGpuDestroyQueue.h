@@ -39,7 +39,7 @@ namespace internal {
 // existing view arrays and links the node without allocating, including OOM.
 struct TextureRetirement {
     sg_image image{};
-    sg_view view{}, attachment{};
+    sg_view view{}, attachment{}, storage{};
     sg_sampler sampler{};
     std::vector<sg_view> cubeViews, mipAttachments, mipViews;
     TextureRetirement* next = nullptr;

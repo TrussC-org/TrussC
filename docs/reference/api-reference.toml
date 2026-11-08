@@ -32991,17 +32991,17 @@ description.en = "Returns the stored texture usage mode."
 description.ja = "保存されているテクスチャの使用モードを返す。"
 description.ko = "저장된 텍스처 사용 모드를 반환한다."
 details.en = '''
-- Returns a `TextureUsage` value: `Immutable`, `Dynamic`, `Stream`, or `RenderTarget`.
+- Returns a `TextureUsage` value: `Immutable`, `Dynamic`, `Stream`, `RenderTarget`, or `Storage`.
 - The initial value is `Immutable`; allocation methods record their selected usage, and `allocateCompressed()` selects `Immutable`.
 - This does not query the GPU or confirm allocation success. `clear()` does not reset the stored usage.
 '''
 details.ja = '''
-- `TextureUsage` の `Immutable`、`Dynamic`、`Stream`、`RenderTarget` のいずれかを返します。
+- `TextureUsage` の `Immutable`、`Dynamic`、`Stream`、`RenderTarget`、`Storage` のいずれかを返します。
 - 初期値は `Immutable` です。確保時に選択した使用モードが保存され、`allocateCompressed()` は `Immutable` を設定します。
 - GPU への問い合わせや確保成功の確認は行いません。`clear()` は保存済みの使用モードをリセットしません。
 '''
 details.ko = '''
-- `TextureUsage`의 `Immutable`, `Dynamic`, `Stream`, `RenderTarget` 중 하나를 반환합니다.
+- `TextureUsage`의 `Immutable`, `Dynamic`, `Stream`, `RenderTarget`, `Storage` 중 하나를 반환합니다.
 - 초기값은 `Immutable`입니다. 할당 시 선택한 사용 모드를 저장하며 `allocateCompressed()`는 `Immutable`을 설정합니다.
 - GPU를 조회하거나 할당 성공 여부를 확인하지 않습니다. `clear()`는 저장된 사용 모드를 초기화하지 않습니다.
 '''
@@ -33142,7 +33142,7 @@ description.ko = "할당된 텍스처에 픽셀 데이터를 업로드한다."
 details.en = '''
 - Staging sizes and row/slice pitches must fit sokol's signed integer representation; an unrepresentable transfer logs an error.
 - Use after allocating a Dynamic or Stream texture and whenever its CPU data changes; accepts `Pixels` or a data pointer with width, height, and channel count, and replaces the whole texture rather than a subsection.
-- Width, height, and channel count must match the allocation exactly; mismatches, an unallocated texture, Immutable usage, or missing graphics initialization return without uploading. The function returns no value and does not resize or convert the input.
+- Width, height, and channel count must match the allocation exactly; mismatches, an unallocated texture, Immutable or Storage usage, or missing graphics initialization return without uploading. The function returns no value and does not resize or convert the input.
 - Pointer data must be tightly packed in the allocated GPU format and remain valid during the call; the byte count is computed from the explicit format, or from the stored channel count for channel-count allocations, and the pointer overload does not receive a buffer length. `Pixels` uploads do not validate that the component type matches the texture.
 - With channel-count allocations of two or three channels, the GPU format is R8 although the CPU byte count uses two or three bytes per pixel; this does not describe matching pixel data. Use explicit `TextureFormat::R8` for single-channel data or `TextureFormat::RG8` for two-channel data.
 - Copies immediately through staging storage, including repeated uploads in one device frame. During a render pass, flushes pending drawing, suspends the pass, copies, and resumes with its contents preserved; the next draw sees the new pixels.
@@ -33153,7 +33153,7 @@ details.en = '''
 details.ja = '''
 - ステージング領域のサイズと行・スライスの間隔は sokol の符号付き整数で表せる必要があり、表せない転送はエラーを記録します。
 - Dynamic または Stream のテクスチャを確保した後や、CPU のデータを変更したときに呼び出します。`Pixels`、またはデータポインタと幅、高さ、チャンネル数を受け取り、一部分ではなくテクスチャ全体を置き換えます。
-- 幅、高さ、チャンネル数は確保時と完全に一致させてください。不一致、未確保、Immutable、グラフィックス未初期化の場合は転送せずに戻ります。戻り値はなく、入力のサイズ変更や形式変換も行いません。
+- 幅、高さ、チャンネル数は確保時と完全に一致させてください。不一致、未確保、Immutable・Storage、グラフィックス未初期化の場合は転送せずに戻ります。戻り値はなく、入力のサイズ変更や形式変換も行いません。
 - ポインタのデータは確保した GPU 形式で隙間なく並べ、呼び出し中は有効に保ってください。バイト数は明示的に指定した形式から計算し、チャンネル数を指定して確保した場合は保持しているチャンネル数を使用します。ポインタ版はバッファ長を受け取りません。`Pixels` 版も成分の型がテクスチャと一致するかは検証しません。
 - チャンネル数を 2 または 3 として確保した場合、GPU 形式は R8 ですが、CPU のバイト数は 1 ピクセルあたり 2 または 3 バイトとして計算され、ピクセル形式が一致しません。1 チャンネルのデータには `TextureFormat::R8`、2 チャンネルのデータには `TextureFormat::RG8` を明示的に指定してください。
 - ステージング領域経由で直ちにコピーし、同じデバイスフレーム内でも繰り返し転送できます。描画パス中では記録済みの描画を実行してパスを中断し、コピー後に内容を保持して再開します。直後の描画には新しいピクセルが使われます。
@@ -33164,7 +33164,7 @@ details.ja = '''
 details.ko = '''
 - 스테이징 크기와 행·슬라이스 간격은 sokol의 부호 있는 정수로 표현할 수 있어야 하며, 표현할 수 없는 전송은 오류를 기록합니다.
 - Dynamic 또는 Stream 텍스처를 할당한 뒤나 CPU 데이터를 변경했을 때 호출합니다. `Pixels` 또는 데이터 포인터와 너비, 높이, 채널 수를 받으며, 일부 영역이 아니라 텍스처 전체를 교체합니다.
-- 너비, 높이, 채널 수는 할당한 값과 정확히 일치해야 합니다. 값이 다르거나 텍스처가 할당되지 않았거나 Immutable이거나 그래픽이 초기화되지 않았으면 업로드 없이 반환합니다. 반환값은 없으며 입력의 크기나 형식을 변환하지 않습니다.
+- 너비, 높이, 채널 수는 할당한 값과 정확히 일치해야 합니다. 값이 다르거나 텍스처가 할당되지 않았거나 Immutable 또는 Storage이거나 그래픽이 초기화되지 않았으면 업로드 없이 반환합니다. 반환값은 없으며 입력의 크기나 형식을 변환하지 않습니다.
 - 포인터 데이터는 할당된 GPU 형식으로 빈틈없이 배치되어야 하며 호출 중 유효해야 합니다. 바이트 수는 명시적으로 지정한 형식으로 계산하며, 채널 수로 할당한 경우에는 저장된 채널 수를 사용합니다. 포인터 오버로드는 버퍼 길이를 받지 않습니다. `Pixels` 업로드도 성분 자료형이 텍스처와 일치하는지 검증하지 않습니다.
 - 채널 수를 2 또는 3으로 지정하여 할당하면 GPU 형식은 R8이지만 CPU 바이트 수는 픽셀당 2 또는 3바이트로 계산되므로 픽셀 형식이 일치하지 않습니다. 단일 채널 데이터에는 `TextureFormat::R8`, 2채널 데이터에는 `TextureFormat::RG8`을 명시적으로 지정합니다.
 - 스테이징 저장소를 통해 즉시 복사하며 같은 디바이스 프레임에서도 반복 업로드할 수 있습니다. 렌더 패스 중에는 대기 중인 그리기를 실행하고 패스를 중단한 뒤 복사하고 내용을 보존하여 재개합니다. 바로 다음 그리기는 새 픽셀을 사용합니다.
@@ -33449,14 +33449,15 @@ value_desc.Linear.en = "Bilinear interpolation (default)"
 
 ["TextureFormat"]
 description.en = "Specifies the channel layout and component precision of a GPU texture."
-description.ja = "GPU テクスチャのチャンネル構成と成分の精度を指定する。"
-description.ko = "GPU 텍스처의 채널 구성과 성분 정밀도를 지정한다."
+description.ja = "GPU テクスチャのチャンネル構成と成分の精度を指定します。"
+description.ko = "GPU 텍스처의 채널 구성과 성분 정밀도를 지정합니다."
 details.en = '''
 - The default format `RGBA8` has four normalized unsigned 8-bit components per pixel; `BGRA8` has the same precision with B-G-R-A byte order, used for swapchain, Syphon, and video interoperability.
 - `R8` and `RG8` have one and two normalized unsigned 8-bit components. `RGBA16` has four normalized unsigned 16-bit components for higher integer precision and texture-sharing interoperability; it is not a floating-point format.
 - `R16F`, `RG16F`, and `RGBA16F` have one, two, and four 16-bit floating-point components; `R32F`, `RG32F`, and `RGBA32F` use 32-bit floating-point components.
 - `channelCount()`, `bytesPerPixel()`, and `isFloatFormat()` report the component count, pixel size in bytes, and whether the components are floating point. `toSokolFormat()` converts to `sg_pixel_format`.
 - These are uncompressed GPU formats; `PixelFormat` specifies CPU component storage separately, and `allocateCompressed()` accepts sokol formats directly.
+- For `TextureUsage::Storage`, `RGBA16F` is the portable float choice. `RGBA32F`/`R32F` depend on the GPU and are refused when it cannot filter them.
 '''
 details.ja = '''
 - 既定の形式 `RGBA8` は、1 ピクセルに正規化された符号なし 8 ビット成分を 4 個持ちます。`BGRA8` は同じ精度でバイト順が B-G-R-A となり、スワップチェーン、Syphon、動画との連携に使います。
@@ -33464,6 +33465,7 @@ details.ja = '''
 - `R16F`、`RG16F`、`RGBA16F` は 16 ビット浮動小数点成分をそれぞれ 1 個、2 個、4 個持ちます。`R32F`、`RG32F`、`RGBA32F` は 32 ビット浮動小数点成分を使います。
 - `channelCount()`、`bytesPerPixel()`、`isFloatFormat()` で、成分数、1 ピクセルのバイト数、浮動小数点成分かどうかを取得できます。`toSokolFormat()` は `sg_pixel_format` に変換します。
 - これらは非圧縮の GPU 形式です。CPU の成分の格納型は `PixelFormat` で別に指定し、`allocateCompressed()` には sokol の形式を直接渡します。
+- `TextureUsage::Storage` の浮動小数点形式には、移植性の高い `RGBA16F` を使えます。`RGBA32F`/`R32F` は GPU に依存し、フィルタリング非対応の GPU では拒否します。
 '''
 details.ko = '''
 - 기본 형식인 `RGBA8`은 픽셀당 정규화된 부호 없는 8비트 성분 4개를 가집니다. `BGRA8`은 같은 정밀도에서 바이트 순서가 B-G-R-A이며 스왑체인, Syphon, 비디오 연동에 사용합니다.
@@ -33471,6 +33473,7 @@ details.ko = '''
 - `R16F`, `RG16F`, `RGBA16F`는 16비트 부동소수점 성분을 각각 1개, 2개, 4개 가집니다. `R32F`, `RG32F`, `RGBA32F`는 32비트 부동소수점 성분을 사용합니다.
 - `channelCount()`, `bytesPerPixel()`, `isFloatFormat()`으로 성분 수, 픽셀당 바이트 수, 부동소수점 성분 여부를 확인합니다. `toSokolFormat()`은 `sg_pixel_format`으로 변환합니다.
 - 이들은 비압축 GPU 형식입니다. CPU 성분 저장 형식은 `PixelFormat`으로 별도 지정하며 `allocateCompressed()`에는 sokol 형식을 직접 전달합니다.
+- `TextureUsage::Storage`의 부동소수점 형식으로 이식성이 높은 `RGBA16F`를 사용할 수 있습니다. `RGBA32F`/`R32F`는 GPU에 따라 지원 여부가 달라지며, GPU가 필터링을 지원하지 않으면 거부합니다.
 '''
 keywords = ["pixel", "rgba", "bit depth"]
 related = ["channelCount", "bytesPerPixel", "isFloatFormat", "Texture", "TextureUsage", "PixelFormat"]
@@ -33488,19 +33491,22 @@ value_desc.RGBA16.en = "4ch, 16-bit unorm/ch (high-precision integer; texture-sh
 
 ["TextureUsage"]
 description.en = "Selects how a GPU texture receives its contents."
-description.ja = "GPU テクスチャの内容の更新方法を指定する。"
-description.ko = "GPU 텍스처의 내용을 갱신하는 방식을 지정한다."
+description.ja = "GPU テクスチャの内容の更新方法を指定します。"
+description.ko = "GPU 텍스처의 내용을 갱신하는 방식을 지정합니다."
 details.en = '''
+- `Storage` allocates empty compute output and a sampled view. It supports single-sample 2D, mip 0, in RGBA8, RGBA16F, RGBA32F or R32F. Allocation requires compute plus format write, sample and filtering capability, so normal Texture drawing works. `RGBA16F` is the portable float choice: half float filtering is core in GLES 3.0, without `OES_texture_float_linear`. `RGBA32F`/`R32F` depend on the GPU and are refused when it cannot filter them. Unsupported configurations warn and remain unallocated. Check `isAllocated()` before binding. Use `ComputeShader::setStorageImage`, then draw the Texture normally. CPU `loadData()` is not supported for Storage.
 - `Immutable` supplies fixed contents at creation, `Dynamic` supports periodic CPU uploads, `Stream` supports frequent uploads such as camera frames, and `RenderTarget` supports rendering into the texture as an FBO attachment.
 - `Texture::allocate()` defaults to `Immutable`. `Texture::loadData()` ignores uploads to immutable textures; use `Dynamic` or `Stream` for CPU updates.
 - See `Texture` for GPU threading, lifetime, and upload restrictions.
 '''
 details.ja = '''
+- `Storage` は空の compute 出力と描画用 view を確保します。RGBA8、RGBA16F、RGBA32F、R32F の単一サンプル 2D、mip 0 に対応します。通常の Texture 描画のため、確保には compute と形式の書き込み・サンプリング・フィルタリング対応が必要です。`RGBA16F` は移植性の高い浮動小数点形式です。半精度のフィルタリングは GLES 3.0 の標準機能で、`OES_texture_float_linear` は不要です。`RGBA32F`/`R32F` は GPU に依存し、フィルタリング非対応の GPU では拒否します。非対応の構成では警告を出し、未確保のままにします。割り当て前に `isAllocated()` を確認してください。`ComputeShader::setStorageImage` で割り当て、その後は通常どおり Texture を描画します。Storage への CPU の `loadData()` はできません。
 - `Immutable` は作成時に固定の内容を渡し、`Dynamic` は CPU からの定期的な転送、`Stream` はカメラ映像のような頻繁な転送に使います。`RenderTarget` は FBO のアタッチメントとしてテクスチャへの描画に使います。
 - `Texture::allocate()` のデフォルトは `Immutable` です。`Texture::loadData()` は変更不可のテクスチャへの転送を無視します。CPU から更新する場合は `Dynamic` または `Stream` を使ってください。
 - GPU を扱うスレッド、寿命、転送の制約は `Texture` を参照してください。
 '''
 details.ko = '''
+- `Storage`는 빈 compute 출력과 샘플링 view를 할당합니다. RGBA8, RGBA16F, RGBA32F, R32F의 단일 샘플 2D, mip 0을 지원합니다. 일반 Texture 그리기를 위해 compute 및 형식의 쓰기, 샘플링, 필터링 지원이 필요합니다. `RGBA16F`는 이식성이 높은 부동소수점 형식입니다. 반정밀도 필터링은 GLES 3.0의 기본 기능이므로 `OES_texture_float_linear`가 필요하지 않습니다. `RGBA32F`/`R32F`는 GPU에 따라 지원 여부가 달라지며, GPU가 필터링을 지원하지 않으면 거부합니다. 지원하지 않는 구성은 경고 후 미할당 상태를 유지합니다. 바인딩 전에 `isAllocated()`를 확인합니다. `ComputeShader::setStorageImage`로 바인딩한 뒤 Texture를 일반적으로 그립니다. Storage의 CPU `loadData()`는 지원하지 않습니다.
 - `Immutable`은 생성 시 고정된 내용을 제공하고, `Dynamic`은 CPU의 주기적인 업로드, `Stream`은 카메라 프레임처럼 빈번한 업로드에 사용합니다. `RenderTarget`은 FBO 부착 대상으로 텍스처에 그릴 때 사용합니다.
 - `Texture::allocate()`의 기본값은 `Immutable`입니다. `Texture::loadData()`는 변경 불가능한 텍스처로의 업로드를 무시합니다. CPU에서 갱신하려면 `Dynamic` 또는 `Stream`을 사용합니다.
 - GPU를 다루는 스레드, 수명 및 업로드 제한은 `Texture`를 참조합니다.
@@ -33511,6 +33517,13 @@ value_desc.Immutable.en = "Set once, cannot update (for Image::load)"
 value_desc.Dynamic.en = "Update periodically from CPU (for Image::allocate)"
 value_desc.Stream.en = "Update every frame (for VideoGrabber)"
 value_desc.RenderTarget.en = "For FBO color attachment"
+value_desc.Storage.en = "Single-sample 2D compute output, also sampled for drawing"
+value_desc.Storage.ja = "描画でも読み取れる単一サンプル 2D の compute 出力です。"
+value_desc.Storage.ko = "그리기에서도 샘플링하는 단일 샘플 2D compute 출력입니다."
+snippet = '''
+Texture output;
+output.allocate(64, 64, TextureFormat::RGBA8, TextureUsage::Storage);
+'''
 
 ["TextureWrap"]
 description.en = "Specifies how texture coordinates wrap beyond the texture edges."
@@ -65094,3 +65107,225 @@ void tcApp::update() {
     bool hidden = isWindowOccluded();
 }
 '''
+
+["ComputeShader"]
+category = "graphics_shader"
+description.en = "Runs a sokol compute program between drawing passes (C++ only)."
+description.ja = "描画パスの間で sokol の compute プログラムを実行します（C++ 専用）。"
+description.ko = "그리기 패스 사이에서 sokol compute 프로그램을 실행합니다(C++ 전용)."
+details.en = '''
+- Owns a compute shader and pipeline, independently of `Shader`. Load a sokol-shdc descriptor, bind resources, then dispatch workgroups. All operations and destruction belong on the main thread; copying is disabled and moving transfers ownership.
+- Name compute sources `*.compute.glsl` anywhere under the project's `src/`. CMake generates `<name>.compute.glsl.h` with a separate target set: Metal, HLSL5, GLSL430, GLSL310ES and WGSL. Graphics sources keep GLSL300ES, including WebGL2. Rebuild the guest for hot reload, as with graphics shaders.
+- The first verification axis is macOS Metal, Windows D3D11 and Linux GL 4.3. `sg_query_features().compute` decides availability at runtime. GLES requires a 3.1 context; Linux EGL and Pi request 3.1. Device confirmation for Metal, D3D11 and Pi, and validation on WebGPU/iOS/Android, must precede claims of verified support.
+- Headless apps have no GPU. Loading and dispatch return false with a warning on headless or unsupported devices, including WebGL2. Warnings from operations that may repeat every frame are limited to one per five seconds per object.
+- Dispatch flushes earlier recorded draws, ends their render pass, runs a compute pass, and resumes rendering on the next draw. Results appear in anything drawn after dispatch in the same window. There is no CPU wait or readback API. Synchronization inside a kernel is the shader's responsibility.
+- Output is a single-sample 2D `Texture` with `TextureUsage::Storage`, mip 0. Draw the Texture into an Fbo when needed; Fbo attachments are not storage outputs. Sampled inputs and uniforms use the same binding numbers and byte layout as `Shader`. Resources must remain allocated through dispatch.
+- Storage buffers, particles, Lua bindings and new hot-reload behavior are outside this slice.
+'''
+details.ja = '''
+- `Shader` とは独立して compute シェーダーとパイプラインを所有します。sokol-shdc の記述関数を読み込み、リソースを割り当ててからワークグループを実行します。破棄を含むすべての操作はメインスレッドで行ってください。コピーはできず、ムーブで所有権を移せます。
+- プロジェクトの `src/` 以下で compute ソースを `*.compute.glsl` と命名します。CMake は Metal、HLSL5、GLSL430、GLSL310ES、WGSL の専用ターゲットから `<name>.compute.glsl.h` を生成します。描画用は WebGL2 を含め GLSL300ES のままです。ホットリロードは描画用と同じゲストの再ビルドを使います。
+- 最初の検証軸は macOS Metal、Windows D3D11、Linux GL 4.3 です。実行時には `sg_query_features().compute` で可否を判定します。GLES には 3.1 のコンテキストが必要で、Linux EGL と Pi は 3.1 を要求します。Metal、D3D11、Pi の実機確認、および WebGPU・iOS・Android の検証を行ってから動作確認済みとしてください。
+- ヘッドレスには GPU がありません。ヘッドレスまたは WebGL2 などの非対応環境では読み込みと実行が警告を出して false を返します。毎フレーム繰り返す可能性がある操作の警告は、オブジェクトごとに 5 秒に一度に制限します。
+- dispatch は先行する描画記録を送り出して描画パスを閉じ、compute パスを実行します。次の描画で描画パスを再開し、同じウィンドウで dispatch より後に描くものには結果が反映されます。CPU 待機や読み戻し API はありません。カーネル内部の同期はシェーダーで行ってください。
+- 出力は `TextureUsage::Storage` の単一サンプル 2D `Texture` の mip 0 です。Fbo に入れる場合は Texture を描画してください。Fbo のアタッチメントには storage 書き込みをしません。入力と uniform は `Shader` と同じバインディング番号とバイト配置を使います。リソースは dispatch まで確保した状態を保ってください。
+- storage buffer、粒子、Lua バインディング、ホットリロードの変更はこのスライスに含みません。
+'''
+details.ko = '''
+- `Shader`와 독립적으로 compute 셰이더와 파이프라인을 소유합니다. sokol-shdc 설명 함수를 로드하고 리소스를 바인딩한 뒤 워크그룹을 실행합니다. 소멸을 포함한 모든 작업은 메인 스레드에서 수행합니다. 복사는 불가능하며 이동으로 소유권을 이전합니다.
+- 프로젝트의 `src/` 아래에서 compute 소스 이름을 `*.compute.glsl`로 지정합니다. CMake는 Metal, HLSL5, GLSL430, GLSL310ES, WGSL 전용 대상으로 `<name>.compute.glsl.h`를 생성합니다. 그리기 소스는 WebGL2를 포함하여 GLSL300ES를 유지합니다. 핫 리로드는 그리기 셰이더와 같은 게스트 재빌드를 사용합니다.
+- 첫 검증 축은 macOS Metal, Windows D3D11, Linux GL 4.3입니다. 실행 시 `sg_query_features().compute`로 지원 여부를 판단합니다. GLES에는 3.1 컨텍스트가 필요하며 Linux EGL과 Pi는 3.1을 요청합니다. Metal, D3D11, Pi의 장치 확인 및 WebGPU/iOS/Android 검증 후에 검증된 지원으로 표시합니다.
+- 헤드리스에는 GPU가 없습니다. 헤드리스 또는 WebGL2 등 미지원 환경에서는 로드와 실행이 경고와 함께 false를 반환합니다. 프레임마다 반복할 수 있는 작업의 경고는 객체마다 5초에 한 번으로 제한합니다.
+- dispatch는 앞서 기록한 그리기를 전송하고 렌더 패스를 닫은 뒤 compute 패스를 실행합니다. 다음 그리기에서 렌더 패스를 재개하며 같은 창에서 dispatch 이후 그리는 내용에 결과가 반영됩니다. CPU 대기나 읽기 API는 없습니다. 커널 내부 동기화는 셰이더에서 처리합니다.
+- 출력은 `TextureUsage::Storage`를 사용하는 단일 샘플 2D `Texture`의 mip 0입니다. Fbo에 넣으려면 Texture를 그립니다. Fbo 부착 대상에는 storage 쓰기를 하지 않습니다. 입력과 uniform은 `Shader`와 같은 바인딩 번호와 바이트 배치를 사용합니다. 리소스는 dispatch가 끝날 때까지 할당 상태를 유지합니다.
+- storage buffer, 입자, Lua 바인딩 및 새 핫 리로드 동작은 이 슬라이스에 포함하지 않습니다.
+'''
+related = ["ComputeShader::load", "ComputeShader::dispatch", "TextureUsage", "Shader"]
+snippet = '''
+#include "texture.compute.glsl.h"
+class tcApp : public App {
+    Texture output;
+    ComputeShader compute;
+public:
+    void setup() override {
+        output.allocate(64, 64, TextureFormat::RGBA8, TextureUsage::Storage);
+        compute.load(generate_texture_shader_desc);
+        compute.setStorageImage(VIEW_output_image, output);
+    }
+    void update() override { compute.dispatch(8, 8, 1); } // local size: 8 x 8 x 1
+    void draw() override { output.draw(0, 0); }
+};
+'''
+
+["ComputeShader::load"]
+description.en = "Loads a generated compute descriptor and creates its pipeline."
+description.ja = "生成済みの compute 記述を読み込み、パイプラインを作成します。"
+description.ko = "생성된 compute 설명을 로드하고 파이프라인을 생성합니다."
+details.en = '''
+- Accepts the same descriptor-function signature as `Shader::load`. The function must contain a compute program for the active backend. Name its source `*.compute.glsl` to select compute generation targets.
+- Clears the previous program, bindings and uniforms first. Returns true only after both shader and pipeline creation succeed; null or graphics descriptors, unavailable GPUs and creation failures return false with a warning.
+'''
+details.ja = '''
+- `Shader::load` と同じ記述関数の型を受け取ります。現在のバックエンド用の compute プログラムが必要です。ソースを `*.compute.glsl` と命名して compute 専用の生成対象を選びます。
+- 先に以前のプログラム、割り当て、uniform を消去します。シェーダーとパイプラインの作成が両方成功したときに true を返します。null、描画用の記述、GPU が使えない場合、作成失敗では警告を出して false を返します。
+'''
+details.ko = '''
+- `Shader::load`와 같은 설명 함수 형식을 받습니다. 현재 백엔드의 compute 프로그램이 필요합니다. 소스 이름을 `*.compute.glsl`로 지정하여 compute 전용 생성 대상을 선택합니다.
+- 먼저 이전 프로그램, 바인딩 및 uniform을 지웁니다. 셰이더와 파이프라인 생성이 모두 성공하면 true를 반환합니다. null, 그리기 설명, GPU 사용 불가 및 생성 실패 시 경고와 함께 false를 반환합니다.
+'''
+snippet = '''
+bool ready = compute.load(generate_texture_shader_desc);
+'''
+related = ["ComputeShader", "Shader::load"]
+
+["ComputeShader::clear"]
+description.en = "Releases the compute program and clears bindings and uniform bytes."
+description.ja = "compute プログラムを解放し、割り当てと uniform のバイト列を消去します。"
+description.ko = "compute 프로그램을 해제하고 바인딩과 uniform 바이트를 지웁니다."
+details.en = '''
+- Safe on an unloaded object. GPU destruction uses the existing deferred destruction queue; call on the main thread. Previously submitted GPU work retains its resources.
+- `isLoaded()` becomes false. Texture resources are owned by the caller and are not cleared.
+'''
+details.ja = '''
+- 未読み込みでも呼べます。GPU の破棄には既存の遅延破棄キューを使います。メインスレッドで呼んでください。送信済みの GPU 処理に必要なリソースは保持されます。
+- `isLoaded()` が false になります。呼び出し側が所有する Texture は消去しません。
+'''
+details.ko = '''
+- 로드하지 않은 객체에서도 호출할 수 있습니다. GPU 소멸에는 기존 지연 소멸 큐를 사용합니다. 메인 스레드에서 호출합니다. 전송된 GPU 작업에 필요한 리소스는 유지합니다.
+- `isLoaded()`가 false가 됩니다. 호출자가 소유한 Texture는 지우지 않습니다.
+'''
+snippet = '''
+compute.clear();
+'''
+related = ["ComputeShader::isLoaded", "ComputeShader::load"]
+
+["ComputeShader::isLoaded"]
+description.en = "Returns whether the object has a valid compute pipeline."
+description.ja = "有効な compute パイプラインを持っているか返します。"
+description.ko = "유효한 compute 파이프라인을 보유하는지 반환합니다."
+details.en = '''
+- Initially false, true after a successful `load()`, and false after `clear()`, a failed load or a move from this object. Requires an initialized GPU to return true.
+'''
+details.ja = '''
+- 初期状態は false で、`load()` の成功後は true、`clear()`、読み込み失敗、所有権のムーブ後は false です。true を返すには GPU の初期化が必要です。
+'''
+details.ko = '''
+- 초기에는 false이고 `load()` 성공 후 true이며 `clear()`, 로드 실패 또는 소유권 이동 후 false입니다. true를 반환하려면 GPU가 초기화되어 있어야 합니다.
+'''
+snippet = '''
+if (compute.isLoaded()) compute.dispatch(8, 8, 1);
+'''
+related = ["ComputeShader::load", "ComputeShader::clear"]
+
+["ComputeShader::setStorageImage"]
+description.en = "Binds a storage Texture to a compute image view slot."
+description.ja = "storage Texture を compute の画像 view スロットに割り当てます。"
+description.ko = "storage Texture를 compute 이미지 view 슬롯에 바인딩합니다."
+details.en = '''
+- Pass a generated `VIEW_...` constant and an allocated `TextureUsage::Storage` Texture. Returns false with a warning for an invalid slot or a Texture without a storage view; the previous binding is retained.
+- Copies the view handle, not pixels or ownership. Keep the Texture allocated through dispatch. The shader's storage format must match the Texture; dispatch checks format write capability and read capability for read/write shaders.
+- Only single-sample 2D, mip 0 storage is accepted. Draw the output Texture into an Fbo instead of writing an Fbo attachment as storage.
+'''
+details.ja = '''
+- 生成された `VIEW_...` 定数と、確保済みの `TextureUsage::Storage` Texture を渡します。スロットが無効、または storage view がない場合は警告を出して false を返し、以前の割り当てを保持します。
+- ピクセルや所有権ではなく view ハンドルをコピーします。Texture は dispatch まで確保したままにしてください。シェーダーの storage 形式と Texture の形式を一致させます。dispatch は書き込み可否と、読み書きするシェーダーでは読み取り可否も調べます。
+- 単一サンプル 2D の mip 0 に対応します。Fbo のアタッチメントへ storage 書き込みをする代わりに、出力 Texture を Fbo に描画してください。
+'''
+details.ko = '''
+- 생성된 `VIEW_...` 상수와 할당된 `TextureUsage::Storage` Texture를 전달합니다. 슬롯이 유효하지 않거나 storage view가 없으면 경고와 함께 false를 반환하고 이전 바인딩을 유지합니다.
+- 픽셀이나 소유권이 아닌 view 핸들을 복사합니다. Texture는 dispatch까지 할당 상태를 유지합니다. 셰이더의 storage 형식은 Texture와 일치해야 합니다. dispatch는 쓰기 지원 여부와 읽기/쓰기 셰이더의 읽기 지원 여부를 검사합니다.
+- 단일 샘플 2D의 mip 0을 지원합니다. Fbo 부착 대상에 storage 쓰기를 하는 대신 출력 Texture를 Fbo에 그립니다.
+'''
+snippet = '''
+output.allocate(64, 64, TextureFormat::RGBA8, TextureUsage::Storage);
+compute.setStorageImage(VIEW_output_image, output);
+'''
+related = ["TextureUsage", "Texture::getStorageView", "ComputeShader::dispatch"]
+
+["ComputeShader::setTexture"]
+description.en = "Binds a sampled Texture or a texture view and sampler."
+description.ja = "読み取り用の Texture、または texture view と sampler を割り当てます。"
+description.ko = "샘플링할 Texture 또는 texture view와 sampler를 바인딩합니다."
+details.en = '''
+- Accepts `(slot, const Texture&)` or `(slot, sg_view, sg_sampler)`. Like `Shader::setTexture`, the view uses the given binding and the sampler uses that same number when below `SG_MAX_SAMPLER_BINDSLOTS`. Higher view slots ignore the sampler with a warning; bind its sampler using another call at a lower slot.
+- Returns false with a warning for slots outside `[0, SG_MAX_VIEW_BINDSLOTS)`. Copies handles; keep the input allocated until dispatch. Use a separate input and storage output to avoid reading and writing the same image in a kernel.
+'''
+details.ja = '''
+- `(slot, const Texture&)` または `(slot, sg_view, sg_sampler)` を受け取ります。`Shader::setTexture` と同じく指定番号に view を割り当て、`SG_MAX_SAMPLER_BINDSLOTS` 未満なら同じ番号に sampler も割り当てます。それ以上の view スロットでは警告を出して sampler を無視します。別の呼び出しで低い番号のスロットに sampler を設定してください。
+- `[0, SG_MAX_VIEW_BINDSLOTS)` の範囲外では警告を出して false を返します。ハンドルをコピーするため、入力は dispatch まで確保したままにしてください。カーネルで同じ画像を読み書きしないよう、入力と storage 出力を分けてください。
+'''
+details.ko = '''
+- `(slot, const Texture&)` 또는 `(slot, sg_view, sg_sampler)`를 받습니다. `Shader::setTexture`처럼 지정한 번호에 view를 바인딩하고 `SG_MAX_SAMPLER_BINDSLOTS` 미만이면 같은 번호에 sampler도 바인딩합니다. 더 높은 view 슬롯에서는 경고와 함께 sampler를 무시합니다. 다른 호출로 낮은 번호 슬롯에 sampler를 설정합니다.
+- `[0, SG_MAX_VIEW_BINDSLOTS)` 범위를 벗어나면 경고와 함께 false를 반환합니다. 핸들을 복사하므로 입력은 dispatch까지 할당 상태를 유지합니다. 커널에서 같은 이미지를 읽고 쓰지 않도록 입력과 storage 출력을 분리합니다.
+'''
+snippet = '''
+compute.setTexture(VIEW_source_image, input.getView(), input.getSampler());
+'''
+related = ["Shader::setTexture", "ComputeShader::setStorageImage"]
+
+["ComputeShader::setUniform"]
+description.en = "Copies an entire compute uniform block using Shader's packing rules."
+description.ja = "Shader と同じ配置規則で compute の uniform ブロック全体をコピーします。"
+description.ko = "Shader와 같은 배치 규칙으로 compute uniform 블록 전체를 복사합니다."
+details.en = '''
+- `slot` is the generated uniform-block binding, not a variable offset. Accepts float, Vec2/Vec3/Vec4, Color, vectors of float or Vec2/Vec3/Vec4, or `(const void*, size_t)` for exact block bytes. Single values occupy four floats with zero padding; Color stores RGBA. Vec3 arrays pad each element to Vec4; other arrays copy their bytes without extra padding.
+- Replaces the stored block, which is uploaded on every dispatch. Raw bytes and array layout must match the shader's uniform layout. Dispatch refuses missing blocks or a size mismatch. `clear()` and `load()` discard stored bytes.
+- Invalid slots or null data with a nonzero size warn and leave previous bytes unchanged. Pass a generated struct to the raw overload for mixed members, integers or matrices.
+'''
+details.ja = '''
+- `slot` は生成された uniform ブロックの番号であり、変数のオフセットではありません。float、Vec2/Vec3/Vec4、Color、それらの vector、または正確なブロックのバイト列を渡す `(const void*, size_t)` を受け取ります。単一値はゼロ埋めを含む 4 個の float、Color は RGBA を保存します。Vec3 の配列は各要素を Vec4 に拡張し、他の配列には追加のパディングを行いません。
+- 保存済みのブロック全体を置き換え、dispatch ごとに転送します。生のバイト列と配列の配置をシェーダーに合わせてください。ブロック不足やサイズ不一致では dispatch を拒否します。`clear()` と `load()` は保存したバイト列を消去します。
+- スロットが無効、またはサイズが非ゼロでデータが null の場合は警告を出して以前の値を保持します。メンバーの混在、整数、行列には生成された構造体を生データ版に渡してください。
+'''
+details.ko = '''
+- `slot`은 변수 오프셋이 아닌 생성된 uniform 블록 번호입니다. float, Vec2/Vec3/Vec4, Color, 해당 vector 또는 정확한 블록 바이트를 전달하는 `(const void*, size_t)`를 받습니다. 단일 값은 0 패딩을 포함한 float 4개를 저장하며 Color는 RGBA를 저장합니다. Vec3 배열은 각 요소를 Vec4로 확장하고 다른 배열은 추가 패딩 없이 복사합니다.
+- 저장된 블록 전체를 교체하고 dispatch마다 전송합니다. 원시 바이트와 배열 배치는 셰이더와 일치해야 합니다. 블록 누락이나 크기 불일치 시 dispatch를 거부합니다. `clear()`와 `load()`는 저장된 바이트를 지웁니다.
+- 슬롯이 유효하지 않거나 0이 아닌 크기에 null 데이터가 전달되면 경고 후 이전 값을 유지합니다. 혼합 멤버, 정수 또는 행렬에는 생성된 구조체를 원시 데이터 오버로드에 전달합니다.
+'''
+snippet = '''
+compute.setUniform(UB_params, Vec4(1, 0, 0, 1));
+'''
+related = ["Shader::setUniform", "ComputeShader::dispatch"]
+
+["ComputeShader::dispatch"]
+description.en = "Dispatches workgroups and makes their output visible to later drawing."
+description.ja = "ワークグループを実行し、後続の描画で出力を利用できるようにします。"
+description.ko = "워크그룹을 실행하고 이후 그리기에서 출력을 사용할 수 있게 합니다."
+details.en = '''
+- Arguments count workgroups on each axis; Y and Z default to 1. The shader declares local size. For a 65 x 65 image and local size 8 x 8, dispatch 9 x 9 groups and check the image bounds inside the kernel.
+- Sokol accepts each axis in `[0, 65535]`. A zero axis succeeds without GPU work. Invalid counts, missing/invalid resources, mismatched storage formats or uniform sizes, an unloaded program, headless apps and unsupported backends return false with a warning.
+- Earlier drawing is flushed before the compute pass. Later drawing in the same window sees the output, including draw → compute → draw in one frame. No CPU wait occurs; use separate dispatch calls for dependencies across all workgroups. The sample dispatches in `update()`.
+'''
+details.ja = '''
+- 引数は各軸のワークグループ数です。Y と Z の既定値は 1 です。local size はシェーダーに宣言します。65 x 65 の画像で local size が 8 x 8 の場合は 9 x 9 グループを実行し、カーネル内で画像の範囲を確認してください。
+- sokol の各軸の範囲は `[0, 65535]` です。軸がゼロなら GPU 処理をせず成功します。不正な個数、リソース不足や無効、storage 形式や uniform サイズの不一致、未読み込み、ヘッドレス、非対応環境では警告を出して false を返します。
+- compute パスの前に先行する描画を送り出します。同じウィンドウの後続の描画には出力が反映され、同一フレームの draw → compute → draw にも対応します。CPU は待機しません。すべてのワークグループにまたがる依存関係は dispatch を分けて処理してください。例では `update()` で実行します。
+'''
+details.ko = '''
+- 인자는 각 축의 워크그룹 수입니다. Y와 Z의 기본값은 1입니다. local size는 셰이더에 선언합니다. 65 x 65 이미지에 local size가 8 x 8이면 9 x 9 그룹을 실행하고 커널에서 이미지 범위를 확인합니다.
+- sokol의 각 축 범위는 `[0, 65535]`입니다. 축이 0이면 GPU 작업 없이 성공합니다. 잘못된 수, 리소스 누락이나 무효, storage 형식이나 uniform 크기 불일치, 미로드 상태, 헤드리스 및 미지원 환경에서는 경고와 함께 false를 반환합니다.
+- compute 패스 전에 앞선 그리기를 전송합니다. 같은 창에서 이후 그리기는 출력을 볼 수 있으며 한 프레임의 draw → compute → draw도 지원합니다. CPU는 기다리지 않습니다. 모든 워크그룹에 걸친 의존성은 dispatch 호출을 나누어 처리합니다. 예제는 `update()`에서 실행합니다.
+'''
+snippet = '''
+compute.dispatch((output.getWidth() + 7) / 8, (output.getHeight() + 7) / 8, 1);
+output.draw(0, 0);
+'''
+related = ["ComputeShader", "ComputeShader::setStorageImage", "Texture::draw"]
+
+["Texture::getStorageView"]
+description.en = "Returns the mip 0 storage view, or an empty handle for other usages."
+description.ja = "mip 0 の storage view を返します。他の用途では空のハンドルを返します。"
+description.ko = "mip 0 storage view를 반환합니다. 다른 용도에서는 빈 핸들을 반환합니다."
+details.en = '''
+- Created only for a successfully allocated `TextureUsage::Storage` Texture. The view belongs to the Texture and is retired with it. Use `ComputeShader::setStorageImage` for binding; `getView()` remains the sampled view for drawing.
+'''
+details.ja = '''
+- `TextureUsage::Storage` で確保が成功したときだけ作成されます。view は Texture が所有し、Texture とともに解放します。割り当てには `ComputeShader::setStorageImage` を使ってください。`getView()` は描画用の読み取り view のままです。
+'''
+details.ko = '''
+- `TextureUsage::Storage` 할당이 성공했을 때만 생성합니다. view는 Texture가 소유하며 Texture와 함께 해제합니다. 바인딩에는 `ComputeShader::setStorageImage`를 사용합니다. `getView()`는 그리기용 샘플링 view를 유지합니다.
+'''
+snippet = '''
+sg_view storage = output.getStorageView();
+'''
+related = ["TextureUsage", "ComputeShader::setStorageImage", "Texture::getView"]

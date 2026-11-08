@@ -2882,6 +2882,18 @@ ColorOKLCH ColorOKLab::toOKLCH() const  // Converts the color to OKLCH.
 Color ColorOKLab::toRGB() const  // Converts the color to an sRGB Color.
 ```
 
+### ComputeShader — Runs a sokol compute program between drawing passes (C++ only).
+
+```cpp
+void ComputeShader::clear()  // Releases the compute program and clears bindings and uniform bytes.
+bool ComputeShader::dispatch(int groupsX, int groupsY = 1, int groupsZ = 1)  // Dispatches workgroups and makes their output visible to later drawing.
+bool ComputeShader::isLoaded() const  // Returns whether the object has a valid compute pipeline.
+bool ComputeShader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Loads a generated compute descriptor and creates its pipeline.
+bool ComputeShader::setStorageImage(int slot, const Texture & texture)  // Binds a storage Texture to a compute image view slot.
+bool ComputeShader::setTexture(int slot, const Texture & texture) [+1]  // Binds a sampled Texture or a texture view and sampler.
+void ComputeShader::setUniform(int slot, float value) [+9]  // Copies an entire compute uniform block using Shader's packing rules.
+```
+
 ### ConsoleEventArgs — Carries a command line received from standard input.
 
 ```cpp
@@ -4358,6 +4370,7 @@ int Texture::getNumMipLevels() const  // Returns the stored number of mip levels
 sg_pixel_format Texture::getPixelFormat() const  // Returns the stored sokol pixel format.
 int Texture::getSampleCount() const  // Returns the stored sample count.
 sg_sampler Texture::getSampler() const  // Returns the underlying sokol sampler handle.
+sg_view Texture::getStorageView() const  // Returns the mip 0 storage view, or an empty handle for other usages.
 TextureUsage Texture::getUsage() const  // Returns the stored texture usage mode.
 sg_view Texture::getView() const  // Returns the sokol view used to sample the texture.
 sg_view Texture::getViewForMip(int level) const  // Returns a sampling view for a mip level.
@@ -4917,7 +4930,7 @@ enum StrokeMesh::JoinType { JOIN_MITER, JOIN_ROUND, JOIN_BEVEL }  // Defines the
 enum TcyMode { Rotate, Upright, Combine }  // Selects how ASCII letters and digits are arranged in vertical text.
 enum TextureFilter { Nearest, Linear }  // Specifies how texture samples are filtered.
 enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }  // Specifies the channel layout and component precision of a GPU texture.
-enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }  // Selects how a GPU texture receives its contents.
+enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget, Storage }  // Selects how a GPU texture receives its contents.
 enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }  // Specifies how texture coordinates wrap beyond the texture edges.
 enum ThermalState { Nominal, Fair, Serious, Critical }  // Represents the device's thermal severity level.
 enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }  // Selects the video compression format used for recording.

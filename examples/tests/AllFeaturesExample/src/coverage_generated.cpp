@@ -1267,6 +1267,30 @@ struct Cover_ColorOKLab : af::Scope<ColorOKLab> {
     }
 };
 
+struct Cover_ComputeShader : af::Scope<ComputeShader> {
+    ~Cover_ComputeShader(); // Never instantiated.
+    static void run() {
+        (void)ComputeShader();
+        (void)af::val<ComputeShader>().clear();
+        (void)af::val<ComputeShader>().dispatch(af::val<int>(), af::val<int>(), af::val<int>());
+        (void)af::val<const ComputeShader>().isLoaded();
+        (void)af::val<ComputeShader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<ComputeShader>().setStorageImage(af::val<int>(), af::val<const Texture>());
+        (void)af::val<ComputeShader>().setTexture(af::val<int>(), af::val<const Texture>());
+        (void)af::val<ComputeShader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<float>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const Vec2>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const Vec3>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const Vec4>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const Color>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const std::vector<float>>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const std::vector<Vec2>>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const std::vector<Vec3>>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const std::vector<Vec4>>());
+        (void)af::val<ComputeShader>().setUniform(af::val<int>(), af::val<const void *>(), af::val<size_t>());
+    }
+};
+
 struct Cover_ConsoleEventArgs : af::Scope<ConsoleEventArgs> {
     ~Cover_ConsoleEventArgs(); // Never instantiated.
     static void run() {
@@ -3922,6 +3946,7 @@ struct Cover_Texture : af::Scope<Texture> {
         (void)af::val<const Texture>().getPixelFormat();
         (void)af::val<const Texture>().getSampleCount();
         (void)af::val<const Texture>().getSampler();
+        (void)af::val<const Texture>().getStorageView();
         (void)af::val<const Texture>().getUsage();
         (void)af::val<const Texture>().getView();
         (void)af::val<const Texture>().getViewForMip(af::val<int>());
@@ -5069,6 +5094,7 @@ void af::coverGenerated() {
     af_generated::Cover_ColorLinear::run();
     af_generated::Cover_ColorOKLCH::run();
     af_generated::Cover_ColorOKLab::run();
+    af_generated::Cover_ComputeShader::run();
     af_generated::Cover_ConsoleEventArgs::run();
     af_generated::Cover_CoreEvents::run();
     af_generated::Cover_CurveStyle::run();
