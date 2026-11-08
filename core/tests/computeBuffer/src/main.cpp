@@ -1,3 +1,6 @@
+#if defined(__linux__) && !defined(__EMSCRIPTEN__)
+#define GL_GLEXT_PROTOTYPES
+#endif
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -6,8 +9,10 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 #if defined(SOKOL_GLCORE)
 #include <GL/gl.h>
+#include <GL/glext.h>
 #elif defined(SOKOL_GLES3)
 #include <GLES3/gl3.h>
 #endif
@@ -327,8 +332,118 @@ public:
         exitApp();
     }
 };
+
+bool asyncExitMode = false;
+int asyncCallbacks = 0;
+class AsyncReadbackApp : public App {
+    StorageBuffer buffer_;
+    ComputeShader compute_;
+    std::thread::id thread_;
+    uint64_t requestUpdate_ = 0;
+    std::vector<ReadbackResult> results_;
+#if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
+    GLuint bindings_[2] = {};
+    void checkCopyBindings() {
+        GLint readBinding = 0, writeBinding = 0;
+        glGetIntegerv(GL_COPY_READ_BUFFER_BINDING, &readBinding);
+        glGetIntegerv(GL_COPY_WRITE_BUFFER_BINDING, &writeBinding);
+        check("readAsync restores copy bindings", GLuint(readBinding) == bindings_[0] && GLuint(writeBinding) == bindings_[1]);
+    }
+#endif
+    void receive(int index, ReadbackResult result, float red, float green) {
+        check("readAsync callback uses main thread", std::this_thread::get_id() == thread_ && isMainThread());
+        check("readAsync callback uses a later update", internal::currentWindowContext().updateCount > requestUpdate_);
+        check("readAsync callbacks preserve request order", asyncCallbacks++ == index);
+#if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
+        checkCopyBindings();
+        std::array<Vec4, 4> expected = {Vec4(red,green,0,1), Vec4(red,green,1,1),
+                                       Vec4(red,green,0,1), Vec4(red,green,1,1)};
+        check("readAsync owns exact snapshot bytes", result.ok() && result.size() == sizeof(expected) &&
+            std::memcmp(result.getData(), expected.data(), sizeof(expected)) == 0);
+#else
+        (void)red; (void)green;
+        check("pending backend reports deferred failure", !result.ok() && result.size() == 0);
+#endif
+        results_.push_back(std::move(result));
+    }
+public:
+    void setup() override {
+        thread_ = std::this_thread::get_id();
+        requestUpdate_ = internal::currentWindowContext().updateCount;
+        check("async storage allocation succeeds", buffer_.allocate(sizeof(Vec4) * 4));
+        check("async compute loads and binds", compute_.load(buffer_pattern_shader_desc) &&
+            compute_.setStorageBuffer(VIEW_pattern_output, buffer_));
+        compute_.setUniform(UB_buffer_params, Vec4(1, 0, 0, 0));
+        check("async first pattern dispatch succeeds", compute_.dispatch(1));
+#if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
+        glGenBuffers(2, bindings_);
+        glBindBuffer(GL_COPY_READ_BUFFER, bindings_[0]);
+        glBindBuffer(GL_COPY_WRITE_BUFFER, bindings_[1]);
+#endif
+        buffer_.readAsync([this](ReadbackResult result) { receive(0, std::move(result), 1, 0); });
+#if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
+        checkCopyBindings();
+#endif
+        if (asyncExitMode) {
+            // Shutdown must drop the request even if its fence is already signaled.
+            exitApp();
+            return;
+        }
+        check("readAsync never calls back inside the request", asyncCallbacks == 0);
+        compute_.setUniform(UB_buffer_params, Vec4(0, 1, 0, 0));
+        check("async later compute write succeeds", compute_.dispatch(1));
+        buffer_.readAsync([this](ReadbackResult result) { receive(1, std::move(result), 0, 1); });
+        {
+            StorageBuffer temporary;
+            const std::array<Vec4, 4> data = {Vec4(1,1,0,1), Vec4(1,1,1,1), Vec4(1,1,0,1), Vec4(1,1,1,1)};
+            check("temporary storage allocation succeeds", temporary.allocate(sizeof(data), data.data()));
+            temporary.readAsync([this](ReadbackResult result) { receive(2, std::move(result), 1, 1); });
+        }
+        // Both the original source and the temporary source are gone before delivery.
+        buffer_.clear();
+        StorageBuffer empty;
+        empty.readAsync([this](ReadbackResult result) {
+            check("invalid async request is deferred and ordered", asyncCallbacks++ == 3 && !result.ok() && result.size() == 0);
+        });
+    }
+    void update() override {
+        if (asyncExitMode) return;
+        if (asyncCallbacks == 4) {
+            check("owned results survive callback return", results_.size() == 3);
+            Fbo target;
+            target.allocate(4, 4);
+            target.begin(0, 1, 0, 1);
+            setColor(1, 0, 0, 1);
+            drawRect(0, 0, 4, 4);
+            target.end();
+            std::array<unsigned char, 4 * 4 * 4> pixels = {};
+            bool matches = target.readPixels(pixels.data());
+            for (size_t i = 0; i < pixels.size(); i += 4)
+                matches &= pixels[i] == 255 && pixels[i+1] == 0 && pixels[i+2] == 0 && pixels[i+3] == 255;
+            check("drawing after async readback preserves GPU state", matches);
+            completed = true;
+            exitApp();
+        }
+    }
+    void cleanup() override {
+#if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
+        glBindBuffer(GL_COPY_READ_BUFFER, 0);
+        glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+        glDeleteBuffers(2, bindings_);
+        sg_reset_state_cache();
+#endif
+    }
+};
 } // namespace
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc > 1 && (std::strcmp(argv[1], "--async-check") == 0 || std::strcmp(argv[1], "--async-exit-check") == 0)) {
+        asyncExitMode = std::strcmp(argv[1], "--async-exit-check") == 0;
+        WindowSettings settings;
+        settings.setSize(64, 64).setHighDpi(false).setSampleCount(1);
+        return tcCoreTest::runDisplayTest<AsyncReadbackApp>(settings, failures, [] {
+            check("async GPU checks completed", asyncExitMode ? asyncCallbacks == 0 : completed);
+        });
+    }
     if (argc > 1 && std::strcmp(argv[1], "--gpu-check") == 0) {
         WindowSettings settings;
         settings.setSize(64, 64).setHighDpi(false).setSampleCount(1);

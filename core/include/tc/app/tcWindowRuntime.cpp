@@ -369,6 +369,7 @@ void beginRuntimeRun() {
     ++state.epoch;
     state.servicedTurn = false;
     state.stopping = false;
+    bufferReadbacks().start();
     state.sessionQueried = state.sessionCommitted = false;
     state.quitPending = false;
     state.sessionAllowed = true;
@@ -452,6 +453,7 @@ void shutdownRuntime() noexcept {
     if (state.stopping) return;
     if (!state.stopping) state.endingWindows.swap(state.windows);
     state.stopping = true;
+    bufferReadbacks().shutdown();
     TeardownSteps steps;
 #if defined(__APPLE__) && TARGET_OS_OSX
     cancelMacDialogSheets();

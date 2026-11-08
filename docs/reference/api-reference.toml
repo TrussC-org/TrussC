@@ -65497,7 +65497,7 @@ StorageBuffer particles;
 std::vector<Vec4> initial(2048, Vec4(0, 0, 0.1f, 0.2f));
 particles.allocate(initial.size() * sizeof(Vec4), initial.data());
 '''
-related = ["StorageBuffer::allocate", "StorageBuffer::update", "StorageBuffer::read", "ComputeShader::setStorageBuffer", "Shader::setStorageBuffer"]
+related = ["StorageBuffer::allocate", "StorageBuffer::update", "StorageBuffer::read", "StorageBuffer::readAsync", "ComputeShader::setStorageBuffer", "Shader::setStorageBuffer"]
 
 ["StorageBuffer::allocate"]
 description.en = "Allocates storage in bytes, optionally initialized from CPU memory."
@@ -65571,6 +65571,60 @@ std::vector<float> values(count);
 if (buffer.read(values.data(), values.size() * sizeof(float))) logNotice() << values[0];
 '''
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
+
+["StorageBuffer::readAsync"]
+description.en = "Requests an owned snapshot of the whole buffer in a later main-thread update (C++ only)."
+description.ja = "バッファ全体の所有権付きスナップショットを、後続のメインスレッド更新で受け取ります（C++ 専用）。"
+description.ko = "전체 버퍼의 소유 스냅샷을 이후 메인 스레드 업데이트에서 받습니다(C++ 전용)."
+details.en = '''
+- Call readAsync(callback) on the main thread. The callback receives ReadbackResult by value in request order, in an update later than the request. The result owns its bytes; clearing or destroying the StorageBuffer after requesting does not cancel delivery or change the snapshot. Keep the result to retain its bytes after the callback returns.
+- Requests still pending when app shutdown begins are dropped without calling their callbacks. Native staging resources retire safely. Warnings use the same per-buffer 5-second gate as read().
+- This branch implements GL 4.3 and GLES 3.1: a staging copy and fence are submitted immediately, and later updates poll without waiting. WebGPU, D3D11 and Metal are pending in this branch; their callbacks receive !ok() in a later update. Empty storage and readback failure also deliver !ok(), with size() == 0. This does not enable headless compute.
+'''
+details.ja = '''
+- メインスレッドから readAsync(callback) を呼びます。要求より後の更新で、要求順に ReadbackResult を値で受け取ります。結果はバイト列を所有するため、要求後に StorageBuffer を消去・破棄しても配送を取り消さず、スナップショットも変わりません。結果を保持するとコールバック終了後もバイト列を使えます。
+- アプリの shutdown 開始時に保留中の要求は、コールバックを呼ばず破棄します。ネイティブのステージング資源も安全に解放します。警告は read() と同じ、バッファごとに 5 秒に 1 回の制限を共有します。
+- このブランチでは GL 4.3 と GLES 3.1 に対応します。ステージングへのコピーと fence を即座に送信し、後続の更新で待機せず確認します。WebGPU、D3D11、Metal はこのブランチでは未実装で、後続の更新で !ok() を受け取ります。空の領域や読み取り失敗も !ok()、size() == 0 を返します。ヘッドレス compute は有効にしません。
+'''
+details.ko = '''
+- 메인 스레드에서 readAsync(callback)을 호출합니다. 요청 이후 업데이트에서 요청 순서대로 ReadbackResult를 값으로 받습니다. 결과가 바이트를 소유하므로 요청 후 StorageBuffer를 지우거나 소멸해도 전달을 취소하지 않으며 스냅샷도 바뀌지 않습니다. 결과를 보관하면 콜백 반환 후에도 바이트를 사용할 수 있습니다.
+- 앱 종료가 시작될 때 보류 중인 요청은 콜백을 호출하지 않고 폐기합니다. 네이티브 스테이징 리소스도 안전하게 해제합니다. 경고는 read()와 버퍼별 5초 제한을 공유합니다.
+- 이 브랜치는 GL 4.3과 GLES 3.1을 구현합니다. 스테이징 복사와 fence를 즉시 제출하고 이후 업데이트에서 기다리지 않고 확인합니다. WebGPU, D3D11, Metal은 이 브랜치에서 구현 예정이며 이후 업데이트에서 !ok()를 전달합니다. 빈 저장소와 읽기 실패도 !ok(), size() == 0을 전달합니다. 헤드리스 compute를 활성화하지 않습니다.
+'''
+snippet = '''
+buffer.readAsync([](ReadbackResult result) {
+    if (result.ok()) logNotice() << result.size() << " bytes";
+});
+'''
+related = ["ReadbackResult", "StorageBuffer::read"]
+
+["ReadbackResult"]
+category = "graphics_shader"
+description.en = "Owns a storage readback snapshot or an empty failure result (C++ only)."
+description.ja = "storage 読み取りのスナップショット、または空の失敗結果を所有します（C++ 専用）。"
+description.ko = "storage 읽기 스냅샷 또는 빈 실패 결과를 소유합니다(C++ 전용)."
+details.en = "ok() reports success, size() is the byte count, and getData() returns read-only bytes valid while this result owns them. The default result is failure. Copying copies the bytes; moving transfers them."
+details.ja = "ok() は成功、size() はバイト数を示します。getData() は結果が所有している間有効な読み取り専用バイト列を返します。既定の結果は失敗です。コピーはバイト列を複製し、移動は所有権を移します。"
+details.ko = "ok()는 성공 여부, size()는 바이트 수를 나타냅니다. getData()는 결과가 소유하는 동안 유효한 읽기 전용 바이트를 반환합니다. 기본 결과는 실패입니다. 복사는 바이트를 복제하고 이동은 소유권을 옮깁니다."
+related = ["StorageBuffer::readAsync", "ReadbackResult::ok", "ReadbackResult::size", "ReadbackResult::getData"]
+
+["ReadbackResult::ok"]
+description.en = "Returns whether the readback succeeded."
+description.ja = "読み取りが成功したか返します。"
+description.ko = "읽기 성공 여부를 반환합니다."
+related = ["StorageBuffer::readAsync"]
+
+["ReadbackResult::size"]
+description.en = "Returns the owned byte count, or zero on failure."
+description.ja = "所有するバイト数を返します。失敗時は 0 です。"
+description.ko = "소유한 바이트 수를 반환하며 실패 시 0입니다."
+related = ["ReadbackResult::getData"]
+
+["ReadbackResult::getData"]
+description.en = "Returns read-only bytes owned by this result; check ok() before reading."
+description.ja = "この結果が所有する読み取り専用バイト列を返します。読み取り前に ok() を確認してください。"
+description.ko = "이 결과가 소유한 읽기 전용 바이트를 반환합니다. 읽기 전에 ok()를 확인합니다."
+related = ["ReadbackResult::size", "ReadbackResult::ok"]
 
 ["StorageBuffer::clear"]
 description.en = "Releases owned storage and resets its handles and byte size."

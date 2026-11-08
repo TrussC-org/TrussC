@@ -82,6 +82,11 @@ namespace {
 thread_local bool shaderStreamBufferAllocation = false;
 }
 
+BufferReadbackQueue& bufferReadbacks() {
+    static BufferReadbackQueue queue;
+    return queue;
+}
+
 sg_buffer growShaderStreamBuffer(size_t bytes, bool index) {
     struct AllocationScope {
         bool previous = std::exchange(shaderStreamBufferAllocation, true);
@@ -1408,6 +1413,7 @@ void runMainUpdate(double fixedDelta,
     } restore{wctx, previous, previousCallback, previousFixed, previousTime};
     ++wctx.updateCount;
     EntryStackGuard guard(AppEntry::Update);
+    bufferReadbacks().poll();
     internal::currentWindowContext().coreEvents->update.notify();
 }
 

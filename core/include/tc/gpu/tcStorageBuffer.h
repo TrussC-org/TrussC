@@ -2,6 +2,7 @@
 
 #include "../utils/tcAnnotations.h"
 #include "../utils/tcOnceGate.h"
+#include "internal/tcBufferReadback.h"
 #include <utility>
 #include <climits>
 #include <new>
@@ -16,7 +17,7 @@ public:
     ~StorageBuffer() { clear(); }
     StorageBuffer(const StorageBuffer&) = delete;
     StorageBuffer& operator=(const StorageBuffer&) = delete;
-    StorageBuffer(StorageBuffer&& other) noexcept { moveFrom(std::move(other)); }
+    StorageBuffer(StorageBuffer&& other) noexcept : warnings_(other.warnings_) { moveFrom(std::move(other)); }
     StorageBuffer& operator=(StorageBuffer&& other) noexcept {
         if (this != &other) { clear(); moveFrom(std::move(other)); }
         return *this;
@@ -106,6 +107,28 @@ public:
     }
 #endif
 
+    // Whole-buffer snapshot, delivered in request order in a later main update.
+    // Shutdown drops pending callbacks. Neither request nor result borrows this object.
+    void readAsync(std::function<void(ReadbackResult)> callback) {
+        auto& queue = internal::bufferReadbacks();
+        if (!queue.accepting()) return;
+        std::unique_ptr<internal::BufferReadbackRequest> request;
+        if (isAllocated()) {
+            try {
+                internal::suspendForImageUpload();
+                request = readAsyncPlatform();
+            } catch (const std::bad_alloc&) {
+            } catch (const std::length_error&) {
+            }
+        }
+        if (!request) request = std::make_unique<internal::BufferReadbackRequest>();
+        request->callback = std::move(callback);
+        request->warn = [gate = warnings_] {
+            if (gate->isFirstTime()) logWarning("StorageBuffer") << "Failed to read storage buffer asynchronously";
+        };
+        queue.enqueue(std::move(request));
+    }
+
     void clear() noexcept {
         internal::deferGpuDestroy(view_);
         internal::deferGpuDestroy(buffer_);
@@ -121,6 +144,12 @@ public:
     sg_view getView() const { return view_; }
 
 private:
+#if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
+    std::unique_ptr<internal::BufferReadbackRequest> readAsyncPlatform();
+#else
+    // Subsequent backend slices replace this deferred failure, never fake success.
+    std::unique_ptr<internal::BufferReadbackRequest> readAsyncPlatform() { return {}; }
+#endif
 #if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
     bool readPlatform(void* destination, size_t bytes);
 #endif
@@ -129,9 +158,10 @@ private:
     size_t size_ = 0;
     uint32_t uploadFrame_ = 0;
     bool updated_ = false;
-    OnceGate warnings_{5.0};
+    // A request can warn after the StorageBuffer has been destroyed.
+    std::shared_ptr<OnceGate> warnings_ = std::make_shared<OnceGate>(5.0);
     void warn(const char* message) {
-        if (warnings_.isFirstTime()) logWarning("StorageBuffer") << message;
+        if (warnings_->isFirstTime()) logWarning("StorageBuffer") << message;
     }
     bool available() {
         if (!sg_isvalid()) { warn("Storage buffers are unavailable without an initialized GPU (including headless apps)"); return false; }
@@ -139,6 +169,7 @@ private:
         return true;
     }
     void moveFrom(StorageBuffer&& other) {
+        warnings_ = other.warnings_;
         buffer_ = std::exchange(other.buffer_, {});
         staging_ = std::exchange(other.staging_, {});
         view_ = std::exchange(other.view_, {});
