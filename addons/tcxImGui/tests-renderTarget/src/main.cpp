@@ -656,7 +656,11 @@ public:
         } else if(frame_==3) {
             WindowSettings secondarySettings; secondarySettings.setSize(nativeDpi2?256:512,nativeDpi2?192:384); secondarySettings.setHighDpi(nativeDpi2); secondarySettings.sampleCount=screenSamples;
             lastSecondaryFrame=Clock::now();
+            // Create in logical coordinates, the same scene as main: screenUi()
+            // left pixel-perfect mode on, which would read 256x192 as pixels at DPI 2 (#1256).
+            const bool savedPixelMode=internal::pixelPerfectMode(); internal::pixelPerfectMode()=false;
             secondary_=createWindow(secondarySettings); check("real secondary window created",bool(secondary_));
+            internal::pixelPerfectMode()=savedPixelMode;
             if(secondary_) { secondary_->setPosition(640, 0); secondary_->setApp<SecondaryFixture>(); }
             else secondaryComplete=true; // Creation already failed; do not wait for a tick.
         }
