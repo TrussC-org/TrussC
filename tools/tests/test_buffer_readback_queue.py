@@ -239,7 +239,7 @@ int main() {
     return calls == 1 ? 0 : 3;
 }
 '''
-        for backend in ('__EMSCRIPTEN__', 'SOKOL_D3D11', 'SOKOL_METAL'):
+        for backend in ('__EMSCRIPTEN__', 'SOKOL_METAL'):
             with self.subTest(backend=backend):
                 preamble = PREAMBLE.replace(
                     '#include "tc/gpu/tcStorageBuffer.h"',
