@@ -2889,6 +2889,7 @@ void ComputeShader::clear()  // Releases the compute program and clears bindings
 bool ComputeShader::dispatch(int groupsX, int groupsY = 1, int groupsZ = 1)  // Dispatches workgroups and makes their output visible to later drawing.
 bool ComputeShader::isLoaded() const  // Returns whether the object has a valid compute pipeline.
 bool ComputeShader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Loads a generated compute descriptor and creates its pipeline.
+bool ComputeShader::setStorageBuffer(int slot, const StorageBuffer & buffer)  // Binds persistent storage to a reflected compute buffer slot.
 bool ComputeShader::setStorageImage(int slot, const Texture & texture)  // Binds a storage Texture to a compute image view slot.
 bool ComputeShader::setTexture(int slot, const Texture & texture) [+1]  // Binds a sampled Texture or a texture view and sampler.
 void ComputeShader::setUniform(int slot, float value) [+9]  // Copies an entire compute uniform block using Shader's packing rules.
@@ -4125,6 +4126,7 @@ bool Shader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Loads a shad
 void Shader::onBegin()  // Runs when this shader's drawing scope begins.
 void Shader::onEnd()  // Runs when this shader's drawing scope ends.
 sg_pipeline Shader::pipelineForCurrentTarget()  // Returns a shader pipeline compatible with the current render target.
+bool Shader::setStorageBuffer(int slot, const StorageBuffer & buffer)  // Binds read-only storage for deferred graphics drawing (C++ only).
 void Shader::setTexture(int slot, sg_image image, sg_sampler sampler) [+1]  // Stores a texture binding for a shader slot.
 void Shader::setUniform(int slot, float value) [+9]  // Stores uniform-block data for a shader slot.
 void Shader::setupBindings(sg_bindings & bind)  // Customizes GPU resource bindings for a draw.
@@ -4220,6 +4222,18 @@ float SoundStream::getDuration() const  // Returns the stream's recorded audio d
 int SoundStream::getMaxPolyphony() const  // Returns the stream's concurrent playback limit.
 fs::path SoundStream::getPath() const  // Returns the stream's recorded file path.
 LoadResult SoundStream::loadStream(const fs::path & path, int maxPolyphony = 1)  // Prepares an audio file for streaming playback.
+```
+
+### StorageBuffer — Owns byte-sized persistent GPU storage and its view (C++ only).
+
+```cpp
+bool StorageBuffer::allocate(size_t size, const void * data = nullptr)  // Allocates storage in bytes, optionally initialized from CPU memory.
+void StorageBuffer::clear()  // Releases owned storage and resets its handles and byte size.
+sg_buffer StorageBuffer::getBuffer() const  // Returns the borrowed sokol storage buffer handle.
+size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
+sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
+bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
+bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 
 ### StrokeMesh — Builds triangle geometry for variable-width polyline strokes.

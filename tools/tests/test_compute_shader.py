@@ -38,6 +38,7 @@ bool suspendForImageUpload() { ++suspensions; return false; }
 bool computeEnabled = true;
 sg_features computeTestFeatures() { sg_features f = {}; f.compute = computeEnabled; return f; }
 #define sg_query_features computeTestFeatures
+#include "tc/gpu/tcStorageBuffer.h"
 '''
 MAIN = r'''
 #undef sg_query_features
@@ -192,14 +193,20 @@ class ComputeShaderTests(unittest.TestCase):
             shaders.mkdir()
             shutil.copyfile(ROOT / 'examples/graphics/computeTextureExample/src/texture.compute.glsl',
                             shaders / 'texture.compute.glsl')
-            (shaders / 'graphics.glsl').write_text('''@vs vs
+            shutil.copyfile(ROOT / 'examples/graphics/computeParticlesExample/src/particles.compute.glsl',
+                            shaders / 'particles.compute.glsl')
+            shutil.copyfile(ROOT / 'examples/graphics/computeParticlesExample/src/step.compute.glsl',
+                            shaders / 'step.compute.glsl')
+            shutil.copyfile(ROOT / 'core/tests/computeBuffer/src/pattern.compute.glsl',
+                            shaders / 'buffer.compute.glsl')
+            (shaders / 'graphics.glsl').write_text('''@vs graphics_vs
 void main() { gl_Position = vec4(0.0); }
 @end
-@fs fs
+@fs graphics_fs
 layout(location=0) out vec4 color;
 void main() { color = vec4(1.0); }
 @end
-@program graphics vs fs
+@program graphics graphics_vs graphics_fs
 ''', encoding='utf-8')
             (directory / 'CMakeLists.txt').write_text(f'''cmake_minimum_required(VERSION 3.20)
 project(computeTargets NONE)
@@ -211,23 +218,46 @@ trussc_compile_shaders(fixture "${{CMAKE_CURRENT_SOURCE_DIR}}/src")
                 result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8")
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             probe = directory / 'probe.cpp'
-            probe.write_text('''#define SOKOL_GLES3
-#include "sokol/sokol_gfx.h"
+            probe.write_text('''#include "sokol/sokol_gfx.h"
 #include <cstring>
 #include "graphics.glsl.h"
 #include "texture.compute.glsl.h"
-int main() { return graphics_shader_desc(SG_BACKEND_GLES3) &&
-    generate_texture_shader_desc(SG_BACKEND_GLES3) ? 0 : 1; }
+#include "particles.compute.glsl.h"
+int main() {
+    const auto graphics = graphics_shader_desc(TEST_BACKEND);
+    const auto compute = generate_texture_shader_desc(TEST_BACKEND);
+    const auto storage = draw_particles_shader_desc(TEST_BACKEND);
+    return !graphics || !compute || !storage ||
+        !storage->vertex_func.source || !storage->fragment_func.source ||
+        storage->compute_func.source ||
+        storage->views[0].storage_buffer.stage != SG_SHADERSTAGE_VERTEX ||
+        !storage->views[0].storage_buffer.readonly;
+}
 ''', encoding='utf-8')
             binary = directory / 'probe'
-            result = subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20',
-                                     '-I', str(ROOT / 'core/include'), '-I', str(shaders),
-                                     str(probe), '-o', str(binary)], capture_output=True, text=True, encoding="utf-8")
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            result = subprocess.run([str(binary)], capture_output=True, text=True, encoding="utf-8")
-            self.assertEqual(result.returncode, 0, 'generated descriptor probe failed')
+            for macro, backend in (('SOKOL_GLCORE', 'SG_BACKEND_GLCORE'),
+                                   ('SOKOL_GLES3', 'SG_BACKEND_GLES3'),
+                                   ('SOKOL_METAL', 'SG_BACKEND_METAL_MACOS'),
+                                   ('SOKOL_METAL', 'SG_BACKEND_METAL_IOS'),
+                                   ('SOKOL_METAL', 'SG_BACKEND_METAL_SIMULATOR'),
+                                   ('SOKOL_D3D11', 'SG_BACKEND_D3D11'),
+                                   ('SOKOL_WGPU', 'SG_BACKEND_WGPU')):
+                with self.subTest(backend=backend):
+                    result = subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20',
+                                             '-D' + macro, '-DTEST_BACKEND=' + backend,
+                                             '-I', str(ROOT / 'core/include'), '-I', str(shaders),
+                                             str(probe), '-o', str(binary)], capture_output=True,
+                                            text=True, encoding="utf-8")
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    result = subprocess.run([str(binary)], capture_output=True, text=True, encoding="utf-8")
+                    self.assertEqual(result.returncode, 0, 'generated descriptor probe failed')
             graphics = (shaders / 'graphics.glsl.h').read_text(encoding='utf-8')
             compute = (shaders / 'texture.compute.glsl.h').read_text(encoding='utf-8')
+            storage = (shaders / 'particles.compute.glsl.h').read_text(encoding='utf-8')
+            for kernel in ('step.compute.glsl.h', 'buffer.compute.glsl.h'):
+                self.assertNotIn('spvBufferSizeConstants', (shaders / kernel).read_text(encoding='utf-8'))
+            self.assertIn('#version 310 es', storage)
+            self.assertNotIn('#version 300 es', storage)
             self.assertIn('#version 300 es', graphics)
             self.assertNotIn('#version 310 es', graphics)
             self.assertIn('#version 310 es', compute)

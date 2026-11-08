@@ -77,6 +77,10 @@ public:
             return false;
         }
 
+        for (const auto& view : desc->views) {
+            if (view.storage_buffer.stage != SG_SHADERSTAGE_NONE) hasStorageBuffers_ = true;
+        }
+
         // Capture the subclass recipe; attachment compatibility is resolved at draw.
         sg_pipeline_desc pipDesc = createPipelineDesc();
         pipDesc.shader = shader;
@@ -125,6 +129,7 @@ public:
         indexBuffer = {};
         stream_.reset();
         loaded = false;
+        hasStorageBuffers_ = false;
     }
 
     bool isLoaded() const { return loaded; }
@@ -307,6 +312,20 @@ public:
         pendingViews[slot] = { view, sampler };
     }
 
+    TC_LUA_SKIP bool setStorageBuffer(int slot, const StorageBuffer& buffer) {
+        if (!sg_isvalid() || !sg_query_features().compute || !loaded ||
+            slot < 0 || slot >= SG_MAX_VIEW_BINDSLOTS || !buffer.isAllocated()) {
+            warnStorageBuffer("setStorageBuffer requires GPU support, a loaded shader, a valid slot and allocated storage");
+            return false;
+        }
+        const auto required = sg_query_shader_desc(shader).views[slot].storage_buffer;
+        if ((required.stage != SG_SHADERSTAGE_VERTEX && required.stage != SG_SHADERSTAGE_FRAGMENT) || !required.readonly) {
+            warnStorageBuffer("Graphics storage buffer slots must declare read-only access"); return false;
+        }
+        pendingViews[slot] = {buffer.getView(), {}};
+        return true;
+    }
+
     // -------------------------------------------------------------------------
     // Drawing (called by ShaderWriter) - defers draw to present()
     // -------------------------------------------------------------------------
@@ -355,6 +374,7 @@ public:
         bind.vertex_buffers[0] = vertexBuffer;
         fillTextureBindings(bind);
         setupBindings(bind);  // subclass hook (runs at submission, object is alive)
+        if (!validateStorageBindings(bind)) return;
         bind.index_buffer = indexBuffer;
         draw.bindings = bind;
 
@@ -380,6 +400,15 @@ public:
     }
 
 protected:
+    bool validateStorageBindings(const sg_bindings& bind) const {
+        if (hasStorageBuffers_) {
+            if (const auto* error = internal::storageBufferBindingsError(sg_query_shader_desc(shader), bind, false)) {
+                warnStorageBuffer(error); return false;
+            }
+        }
+        return true;
+    }
+
     // Slots have been checked by setTexture(); views and samplers have
     // different sokol limits, so high view slots must not write a sampler.
     void fillTextureBindings(sg_bindings& bind) const {
@@ -461,6 +490,11 @@ protected:
     sg_pipeline pipelineForCurrentTarget() { return selectPipelineForCurrentTarget_().raw; }
 
 private:
+    bool hasStorageBuffers_ = false;
+    static void warnStorageBuffer(const char* message) {
+        static OnceGate warned;
+        if (warned.isFirstTime()) logWarning("Shader") << message;
+    }
     static bool validateTextureSlot(int slot, sg_sampler sampler) {
         if (slot < 0 || slot >= SG_MAX_VIEW_BINDSLOTS) {
             static OnceGate warned;
@@ -489,6 +523,7 @@ private:
         vertexBuffer = other.vertexBuffer;
         indexBuffer = other.indexBuffer;
         loaded = other.loaded;
+        hasStorageBuffers_ = std::exchange(other.hasStorageBuffers_, false);
         stream_ = std::move(other.stream_);
         pendingViews = std::move(other.pendingViews);
         pendingUniforms = std::move(other.pendingUniforms);
@@ -570,7 +605,6 @@ public:
         // Match the pipeline to the current target (swapchain vs FBO format).
         const auto selected = selectPipelineForCurrentTarget_();
         if (!selected.raw.id) return;
-        sg_apply_pipeline(selected.raw);
 
         sg_bindings bind = {};
         bind.vertex_buffers[0] = vertexBuffer;
@@ -579,6 +613,8 @@ public:
         // FullscreenShader can sample a source without a setupBindings() override.
         fillTextureBindings(bind);
         setupBindings(bind);
+        if (!validateStorageBindings(bind)) return;
+        sg_apply_pipeline(selected.raw);
         sg_apply_bindings(&bind);
 
         // Apply uniform params

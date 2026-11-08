@@ -2766,6 +2766,7 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 #include "tc/gpu/tcFbo.h"
 
 // TrussC custom shader
+#include "tc/gpu/tcStorageBuffer.h"
 #include "tc/gpu/tcShader.h"
 #include "tc/gpu/tcComputeShader.h"
 

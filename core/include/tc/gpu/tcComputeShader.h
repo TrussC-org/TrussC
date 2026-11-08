@@ -72,6 +72,17 @@ public:
         return true;
     }
 
+    bool setStorageBuffer(int slot, const StorageBuffer& buffer) {
+        if (!available() || !validSlot(slot)) return false;
+        if (!isLoaded() || sg_query_shader_desc(shader_).views[slot].storage_buffer.stage != SG_SHADERSTAGE_COMPUTE) {
+            warn("Slot is not a compute storage buffer declaration"); return false;
+        }
+        if (!buffer.isAllocated()) { warn("setStorageBuffer requires allocated storage"); return false; }
+        // Alias checks run at dispatch, after callers finish replacing slots.
+        bindings_.views[slot] = buffer.getView();
+        return true;
+    }
+
     bool setTexture(int slot, const Texture& texture) {
         return setTexture(slot, texture.getView(), texture.getSampler());
     }
@@ -158,6 +169,9 @@ private:
     }
     bool validateBindings() {
         const auto desc = sg_query_shader_desc(shader_);
+        if (const auto* error = internal::storageBufferBindingsError(desc, bindings_, true)) {
+            warn(error); return false;
+        }
         for (int slot = 0; slot < SG_MAX_UNIFORMBLOCK_BINDSLOTS; ++slot) {
             const auto& block = desc.uniform_blocks[slot];
             const auto found = uniforms_.find(slot);

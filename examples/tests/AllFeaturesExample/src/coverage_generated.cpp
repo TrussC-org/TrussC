@@ -1276,6 +1276,7 @@ struct Cover_ComputeShader : af::Scope<ComputeShader> {
         (void)af::val<ComputeShader>().dispatch(af::val<int>(), af::val<int>(), af::val<int>());
         (void)af::val<const ComputeShader>().isLoaded();
         (void)af::val<ComputeShader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<ComputeShader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<ComputeShader>().setStorageImage(af::val<int>(), af::val<const Texture>());
         (void)af::val<ComputeShader>().setTexture(af::val<int>(), af::val<const Texture>());
         (void)af::val<ComputeShader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
@@ -1654,6 +1655,7 @@ struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
         (void)af::val<FullscreenShader>().end();
         (void)af::val<const FullscreenShader>().isLoaded();
         (void)af::val<FullscreenShader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<FullscreenShader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
         (void)af::val<FullscreenShader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
         (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<float>());
@@ -3493,6 +3495,7 @@ struct Cover_Shader : af::Scope<Shader> {
         (void)af::val<Shader>().end();
         (void)af::val<const Shader>().isLoaded();
         (void)af::val<Shader>().load(af::val<const sg_shader_desc *(*)(sg_backend)>());
+        (void)af::val<Shader>().setStorageBuffer(af::val<int>(), af::val<const StorageBuffer>());
         (void)af::val<Shader>().setTexture(af::val<int>(), af::val<sg_image>(), af::val<sg_sampler>());
         (void)af::val<Shader>().setTexture(af::val<int>(), af::val<sg_view>(), af::val<sg_sampler>());
         (void)af::val<Shader>().setUniform(af::val<int>(), af::val<float>());
@@ -3632,6 +3635,20 @@ struct Cover_SoundStream : af::Scope<SoundStream> {
         (void)af::val<const SoundStream>().kind();
         (void)af::val<SoundStream>().loadStream(af::val<const fs::path>(), af::val<int>());
         (void)af::val<SoundStream>().sampleRate;
+    }
+};
+
+struct Cover_StorageBuffer : af::Scope<StorageBuffer> {
+    ~Cover_StorageBuffer(); // Never instantiated.
+    static void run() {
+        (void)StorageBuffer();
+        (void)af::val<StorageBuffer>().allocate(af::val<size_t>(), af::val<const void *>());
+        (void)af::val<StorageBuffer>().clear();
+        (void)af::val<const StorageBuffer>().getBuffer();
+        (void)af::val<const StorageBuffer>().getSize();
+        (void)af::val<const StorageBuffer>().getView();
+        (void)af::val<const StorageBuffer>().isAllocated();
+        (void)af::val<StorageBuffer>().update(af::val<const void *>(), af::val<size_t>());
     }
 };
 
@@ -5180,6 +5197,7 @@ void af::coverGenerated() {
     af_generated::Cover_SoundBuffer::run();
     af_generated::Cover_SoundSource::run();
     af_generated::Cover_SoundStream::run();
+    af_generated::Cover_StorageBuffer::run();
     af_generated::Cover_StrokeMesh::run();
     af_generated::Cover_TcpClient::run();
     af_generated::Cover_TcpClientConnectEventArgs::run();
