@@ -43,6 +43,7 @@ inline void beginShape() {
     wctx.shapeVertices.clear();
     wctx.shapeStarted = true;
     wctx.strokeStarted = false;
+    wctx.linesStarted = false;
 }
 
 // End shape drawing
@@ -138,6 +139,7 @@ inline void beginStroke() {
     wctx.strokeVertices.clear();
     wctx.strokeStarted = true;
     wctx.shapeStarted = false;
+    wctx.linesStarted = false;
 }
 
 // End stroke drawing - renders using StrokeMesh
