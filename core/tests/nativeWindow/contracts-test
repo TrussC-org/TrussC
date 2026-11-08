@@ -40,6 +40,9 @@ code = r'''
 using std::isfinite;
 struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Window xwin;
+    bool fullscreen_requested;
+    int requested_swap_interval;
+    int pacing_ticks;
     bool surface_resize_pending=false;
     float mouse_x, mouse_y, mouse_dx, mouse_dy;
 #ifdef SOKOL_GLES3
