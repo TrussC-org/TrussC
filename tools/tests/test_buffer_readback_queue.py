@@ -216,7 +216,7 @@ int main() {
 '''
         compute_tests.ComputeShaderTests.compile_and_run(self, source, True, main='', preamble=PREAMBLE)
 
-    def test_pending_backend_deferred_failure(self):
+    def test_unsupported_backend_deferred_failure(self):
         source = r'''
 namespace trussc::internal {
 BufferReadbackQueue& bufferReadbacks() { static BufferReadbackQueue queue; return queue; }
@@ -239,7 +239,7 @@ int main() {
     return calls == 1 ? 0 : 3;
 }
 '''
-        for backend in ('__EMSCRIPTEN__', 'SOKOL_METAL'):
+        for backend in ('__EMSCRIPTEN__',):
             with self.subTest(backend=backend):
                 preamble = PREAMBLE.replace(
                     '#include "tc/gpu/tcStorageBuffer.h"',

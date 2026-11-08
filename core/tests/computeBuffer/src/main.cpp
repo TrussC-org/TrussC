@@ -474,7 +474,7 @@ class AsyncReadbackApp : public App {
 #if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
         checkCopyBindings();
 #endif
-#if defined(SOKOL_WGPU) || ((defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__))
+#if defined(SOKOL_WGPU) || defined(SOKOL_METAL) || defined(SOKOL_D3D11) || ((defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__))
         std::array<Vec4, 4> expected = {Vec4(red,green,0,1), Vec4(red,green,1,1),
                                        Vec4(red,green,0,1), Vec4(red,green,1,1)};
         check("readAsync owns exact snapshot bytes", result.ok() && result.size() == sizeof(expected) &&
