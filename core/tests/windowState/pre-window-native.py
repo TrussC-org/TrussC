@@ -1,4 +1,4 @@
-"""Extract native pre-window getters and live read-through wiring, without OS SDKs.
+"""Extract native headless getters and live read-through wiring, without OS SDKs.
 
 Run through tcbuild.sh. macOS substitutes only the NSScreen query with a scale
 provider; the native fallback/bound-window branches and dimension reads are exact.
@@ -20,15 +20,24 @@ global_source = (ROOT / 'core/include/tc/app/tcGlobal.cpp').read_text(encoding='
 headless = (ROOT / 'core/include/tc/app/tcHeadlessApp.h').read_text(encoding='utf-8')
 header = (ROOT / 'core/include/TrussC.h').read_text(encoding='utf-8')
 window_header = (ROOT / 'core/include/tc/app/tcWindow.h').read_text(encoding='utf-8')
-constructor = body(runtime, 'Window::Window(bool mainWindow)')
+constructor = body(runtime, 'Window::Window()')
 constructor = constructor[constructor.index('{'):]
 guard = body(window_header, 'inline bool usesNativeWindowDimensions(')
 read_dimensions = body(window_header, 'inline WindowDimensions windowDimensions(')
-launch = body(global_source, 'void createMainWindow(')
 assert 'seedNativeWindowDimensions' not in runtime + global_source + headless
-assert headless.index('internal::currentWindowCtx() = &ctx;') < headless.index('auto app = std::make_shared<AppClass>();')
-assert header.index('openMainWindow();', header.index('inline void _setup_cb_impl')) < header.index('appSetupFunc();', header.index('inline void _setup_cb_impl'))
-assert 'std::make_shared<AppClass>()' not in body(header, 'sapp_desc buildAppDescriptor(').split('internal::appSetupFunc = []()')[0]
+assert headless.index('headless::active = true;') < headless.index('internal::currentWindowCtx() = &ctx;') < headless.index('internal::makeConstructedAppAt<AppClass>(&ctx)')
+# Runtime enters the prepared Window before invoking the app-construction hook.
+assert 'bootstrapWindow(*static_cast<Window*>(target), _setup_cb_impl)' in body(header, 'inline void _setup_cb(')
+bootstrap = body(runtime, 'void bootstrapWindow(')
+assert bootstrap.index('WindowEntryScope entry(target, false, true);') < bootstrap.index('if (entry) bootstrap();')
+setup = body(header, 'inline void _setup_cb_impl(')
+assert setup.index('refreshSelectedWindowMetadata();') < setup.index('appSetupFunc();')
+descriptor = body(header, 'sapp_desc buildAppDescriptor(')
+before_setup, app_setup = descriptor.split('internal::appSetupFunc = []()', 1)
+assert 'internal::prepareLaunchWindow(settings)' in before_setup
+assert 'std::make_shared<AppClass>()' not in before_setup
+assert 'makeConstructedAppAt<AppClass>' not in before_setup
+assert 'internal::makeConstructedAppAt<AppClass>(&internal::currentWindowContext())' in app_setup
 getters = '\n'.join(body(header, marker) for marker in (
     'inline float getDpiScale()', 'inline int getFramebufferWidth()', 'inline int getFramebufferHeight()',
     'inline int getWidth()', 'inline int getHeight()', 'inline Vec2 getSize()',
@@ -49,43 +58,42 @@ struct { struct { _sapp_tc_window_t* main=nullptr; } app; int framebuffer_width=
 float screenScale=2;
 namespace trussc {
 class Window;
-struct WindowSettings { int width=1280,height=720; bool pixelPerfect=false; std::string title; };
+namespace headless { bool active=false; bool isActive() { return active; } }
 namespace internal {
 struct WindowContext {
-    Window* hostWindow=nullptr; bool isMain=true,drawWhileHidden=false,suspended=false;
+    Window* hostWindow=nullptr; bool drawWhileHidden=false;
     void *deferredResponseTarget=nullptr,*acquireSwapchain=nullptr,*acquireSwapchainUser=nullptr,*activateNative=nullptr;
     float dpiScale=1; int fbWidth=0,fbHeight=0;
 };
 struct WindowDimensions { float dpiScale; int fbWidth, fbHeight; };
-struct Geometry { double width,height; bool pixels; };
-struct Metadata { bool trust_hidden_signals=false, iconified=false, occluded=false; };
-struct Binding { Geometry geometry; Metadata metadata; } binding;
+struct Metadata { bool trust_hidden_signals=false, iconified=false, occluded=false, hidden=false; };
+struct Binding { Metadata metadata; };
 }
 class Window {
 public:
     internal::WindowContext ctx_; internal::Binding binding_; bool clearColorSet_=false, bound=false;
-    explicit Window(bool mainWindow);
+    Window();
     bool isOpen() const { return bound; }
     int getWidth() const;
     int getHeight() const;
     bool isOccluded() const;
 };
-namespace mcp::internal { void mainWindowTitle(const std::string&) {} }
 namespace internal {
 Window* selected=nullptr;
-Window* mainWindow() { return selected; }
-void destroyMainWindow() {}
 struct WindowRequestAccess {
-    static void resetForLaunch(Window&) {}
-    static Binding& binding(Window&) { return internal::binding; }
+    // App-event bindings are outside this dimension-reader probe.
+    static void prepareInitialBindings(Window&) {}
 };
 bool pixels=false;
 bool& pixelPerfectMode() { return pixels; }
 int framebufferToLogical(int pixels,float dpi);
 struct Target { bool isFbo=false; int width=1001,height=667; } target;
 Target& currentTarget() { return target; }
+// Select the fixture's context/target; dimension getters remain production bodies.
+Target* drawingApiTarget() { return &target; }
 WindowContext* overrideContext=nullptr;
 WindowContext& currentWindowContext() { return overrideContext ? *overrideContext : selected->ctx_; }
+WindowContext* findWindowApiContext() { return &currentWindowContext(); }
 }
 }
 '''
@@ -93,17 +101,17 @@ test = r'''
 using namespace trussc;
 int failures=0,checks=0;
 void check(bool ok) { ++checks; if (!ok) { ++failures; std::puts("native-read-through: FAIL"); } }
-void compare() {
-    check(getDpiScale()==sapp_dpi_scale());
-    check(getFramebufferWidth()==sapp_width()); check(getFramebufferHeight()==sapp_height());
-    check(internal::captureWindowSize(internal::currentWindowContext()) == std::pair<size_t,size_t>(sapp_width(),sapp_height()));
+void compareContext(float expectedDpi, int width, int height) {
+    check(getDpiScale()==expectedDpi);
+    check(getFramebufferWidth()==width); check(getFramebufferHeight()==height);
+    check(internal::captureWindowSize(internal::currentWindowContext()) == std::pair<size_t,size_t>(width,height));
     for (bool pixels : {false,true}) {
         internal::pixelPerfectMode()=pixels;
-        const float dpi=pixels?1.f:sapp_dpi_scale();
-        check(getWindowWidth()==int(sapp_width()/dpi)); check(getWindowHeight()==int(sapp_height()/dpi));
-        check(getWindowSize().x==int(sapp_width()/dpi)); check(getWindowSize().y==int(sapp_height()/dpi));
-        check(getAspectRatio()==float(sapp_width())/sapp_height());
-        check(internal::framebufferToLogical(sapp_width(),getDpiScale())==int(sapp_width()/sapp_dpi_scale()));
+        const float dpi=pixels?1.f:expectedDpi;
+        check(getWindowWidth()==int(width/dpi)); check(getWindowHeight()==int(height/dpi));
+        check(getWindowSize().x==int(width/dpi)); check(getWindowSize().y==int(height/dpi));
+        check(getAspectRatio()==(height>0?float(width)/height:0.f));
+        check(internal::framebufferToLogical(width,getDpiScale())==int(width/expectedDpi));
         check(internal::appSizeDpi(getDpiScale())==dpi);
         check(internal::appPointerScale(getDpiScale())==1.f/dpi);
         for (bool fbo : {false,true}) {
@@ -116,35 +124,67 @@ void compare() {
         }
     }
 }
+void compare() {
+    check(internal::usesNativeWindowDimensions(internal::currentWindowContext()));
+    compareContext(sapp_dpi_scale(), sapp_width(), sapp_height());
+}
+void compareStored(float dpi, int width, int height) {
+    check(!internal::usesNativeWindowDimensions(internal::currentWindowContext()));
+    compareContext(dpi, width, height);
+}
 int main() {
     for (float dpi : {1.f,1.5f,2.f}) {
         screenScale=dpi;
-        Window main(true); internal::selected=&main; compare();
+        Window main; internal::selected=&main;
+        check(main.ctx_.hostWindow==&main);
+        check(main.ctx_.dpiScale==1 && main.ctx_.fbWidth==0 && main.ctx_.fbHeight==0);
+        compareStored(1,0,0);
         main.binding_.metadata={true,true,true};
         check(main.getWidth()==0 && main.getHeight()==0 && !main.isOccluded());
-        Window secondary(false);
+        Window secondary;
+        check(secondary.ctx_.hostWindow==&secondary);
         check(secondary.ctx_.dpiScale==1 && secondary.ctx_.fbWidth==0 && secondary.ctx_.fbHeight==0);
+        // Headless contexts read native fallbacks before any native window exists.
+        internal::WindowContext nonWindow; internal::overrideContext=&nonWindow;
+        nonWindow.dpiScale=9; nonWindow.fbWidth=17; nonWindow.fbHeight=19;
+        headless::active=true;
+        compare();
         _sapp_tc_window_t nativeWindow; nativeWindow.dpi_scale=dpi; nativeWindow.fb_width=2561; nativeWindow.fb_height=1441;
         _sapp_tc.app.main=&nativeWindow;
         _sapp_tc.dpi_scale=dpi; _sapp_tc.framebuffer_width=2561; _sapp_tc.framebuffer_height=1441;
-        internal::createMainWindow(WindowSettings{}); compare();
+        compare();
+        // A hosted Window always uses its own context, even while headless is active.
+        internal::overrideContext=nullptr;
         main.ctx_.dpiScale=sapp_dpi_scale(); main.ctx_.fbWidth=sapp_width(); main.ctx_.fbHeight=sapp_height();
         main.bound=true;
         check(main.getWidth()==int(sapp_width()/sapp_dpi_scale()) && main.getHeight()==int(sapp_height()/sapp_dpi_scale()));
+        compareStored(dpi,2561,1441);
+        headless::active=false;
         nativeWindow.dpi_scale=3; nativeWindow.fb_width=3001; nativeWindow.fb_height=2001;
         _sapp_tc.dpi_scale=3; _sapp_tc.framebuffer_width=3001; _sapp_tc.framebuffer_height=2001;
         check(getDpiScale()==dpi && getFramebufferWidth()==2561 && getFramebufferHeight()==1441);
-        main.bound=false; compare();
+        compareStored(dpi,2561,1441);
+        main.bound=false;
+        compareStored(dpi,2561,1441);
+        check(main.getWidth()==0 && main.getHeight()==0 && !main.isOccluded());
         // A headless context reads the live native values throughout the run.
-        internal::WindowContext nonWindow; internal::overrideContext=&nonWindow;
+        internal::overrideContext=&nonWindow; headless::active=true;
         compare();
         nativeWindow.dpi_scale=1.25f; nativeWindow.fb_width=1701; nativeWindow.fb_height=951;
         _sapp_tc.dpi_scale=1.25f; _sapp_tc.framebuffer_width=1701; _sapp_tc.framebuffer_height=951;
         screenScale=1.25f; compare();
         check(nonWindow.hostWindow==nullptr);
-        internal::overrideContext=nullptr;
+        // Both parts of the guard matter; no headless or a host disables read-through.
+        headless::active=false; compareStored(9,17,19);
+        nonWindow.hostWindow=&main; compareStored(9,17,19);
+        headless::active=true; compareStored(9,17,19);
+        nonWindow.hostWindow=nullptr; compare();
         _sapp_tc.app.main=nullptr; _sapp_tc.dpi_scale=0; _sapp_tc.framebuffer_width=0; _sapp_tc.framebuffer_height=0;
-        internal::createMainWindow(WindowSettings{}); compare();
+        compare();
+        internal::overrideContext=nullptr;
+        internal::selected=&secondary;
+        compareStored(1,0,0);
+        headless::active=false;
     }
     std::printf("native-read-through: %d checks, %d failed\n",checks,failures);
     return failures?1:0;
@@ -163,12 +203,12 @@ for name, index in [('macOS', 0), ('iOS', 1), ('Win32', 2), ('Linux', 3), ('Andr
         assert exact.count('[NSScreen mainScreen].backingScaleFactor') == 1
         exact = exact.replace('[NSScreen mainScreen].backingScaleFactor', 'screenScale')
     code = '#define SOKOL_API_IMPL\n' + stubs + exact
-    code += '\nnamespace trussc {\nWindow::Window(bool mainWindow) ' + constructor
+    code += '\nnamespace trussc {\nWindow::Window() ' + constructor
     platform = dict(macOS=('mac', 'mm'), iOS=('ios', 'mm'), Win32=('win', 'cpp'),
                     Linux=('linux', 'cpp'), Android=('android', 'cpp'), Web=('web', 'cpp'))[name]
     adapter = (ROOT / f'core/platform/{platform[0]}/tcPlatform_{platform[0]}.{platform[1]}').read_text(encoding='utf-8')
     capture = body(adapter, 'std::pair<size_t, size_t> internal::captureWindowSize(')
-    code += '\nnamespace internal {\n' + guard + read_dimensions + launch + conversions + '\nstd::pair<size_t,size_t> captureWindowSize(const WindowContext&);\n}\n' + capture + getters
+    code += '\nnamespace internal {\n' + guard + read_dimensions + conversions + '\nstd::pair<size_t,size_t> captureWindowSize(const WindowContext&);\n}\n' + capture + getters
     code += '\nnamespace internal {\n' + target_helpers + '\n}\n' + window_getters + '\n}\n' + test
     source = OUT / (name + '.cpp')
     source.write_text(code, encoding='utf-8')
