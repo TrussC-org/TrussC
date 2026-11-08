@@ -1452,6 +1452,7 @@ bool targetStackDispatchProbe(bool rejectedPop, bool popOnFbo, bool stylePop = f
     {
         auto candidate = internal::makeConstructedApp<StackApp>(rejectedPop, popOnFbo, stylePop, expectingUnmatched, expectingPop);
         auto& app = *candidate;
+        internal::currentWindowContext().rootNode = candidate;
         beginFrame();
         { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); }
         auto& screen = window.swapchainTarget;
@@ -1559,8 +1560,9 @@ bool resizeAppDispatchProbe(bool resize, bool cameraScope) {
     {
         auto candidate = internal::makeConstructedApp<ResizeApp>(resize, cameraScope);
         auto& app = *candidate;
+        internal::currentWindowContext().rootNode = candidate;
         beginFrame();
-        { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
+        { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(); }
         auto* child = &internal::currentTarget();
         const auto context = sgl_get_context();
         internal::refreshWindowDrawingSize();
@@ -1619,9 +1621,10 @@ bool openFboAtDrawProbe(int mode) {   // 0: begin in update, end in draw  1: all
     {
         auto candidate = internal::makeConstructedApp<OpenApp>(mode);
         auto& app = *candidate;
+        internal::currentWindowContext().rootNode = candidate;
         for (int frame = 0; frame < 3; ++frame) {
             beginFrame();
-            { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(0, 0); }
+            { internal::EntryStackGuard update(internal::AppEntry::Update); app.handleUpdate(); }
             { internal::EntryStackGuard draw(internal::AppEntry::Draw); app.handleDraw(); present(); }
             perFrame[frame] = openWarnings;
         }
