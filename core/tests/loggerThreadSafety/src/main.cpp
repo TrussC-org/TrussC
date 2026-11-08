@@ -451,6 +451,22 @@ static void testSokolBridge() {
           contains(lines, "] [ERROR] [simgui] imgui error") &&
           contains(lines, "] [NOTICE] [sapp] 1024 4") &&
           !contains(lines, "info message") && !contains(lines, "ordinary info"));
+    seen.clear();
+    {
+        EventListener l = lg.onLog.listen([&](LogEventArgs& e) { seen.push_back({e.level, e.message}); });
+        const uint32_t items[] = {SG_LOGITEM_D3D11_SHADER_COMPILATION_OUTPUT,
+            SG_LOGITEM_METAL_SHADER_COMPILATION_OUTPUT, SG_LOGITEM_METAL_CREATE_CPS_OUTPUT,
+            SG_LOGITEM_METAL_CREATE_RPS_OUTPUT, SG_LOGITEM_GL_SHADER_COMPILATION_FAILED,
+            SG_LOGITEM_GL_SHADER_LINKING_FAILED};
+        for (const auto item : items) internal::sokolLog("sg", 3, item, "compiler text", 1, nullptr, nullptr);
+        internal::sokolLog("sapp", 3, SG_LOGITEM_D3D11_SHADER_COMPILATION_OUTPUT, "other tag", 1, nullptr, nullptr);
+    }
+    bool compilerWarnings = seen.size() == 7;
+    for (size_t i = 0; i < 6 && i < seen.size(); ++i) {
+        compilerWarnings &= seen[i].level == LogLevel::Warning && seen[i].message == "[sg] compiler text";
+    }
+    check("bridge: each compiler output is one Warning, with text", compilerWarnings);
+    check("bridge: compiler item with another tag stays Verbose", seen.size() == 7 && seen[6].level == LogLevel::Verbose);
     error_code ec;
     fs::remove(f, ec);
 }

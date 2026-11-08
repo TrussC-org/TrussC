@@ -32,9 +32,12 @@
 #include <algorithm>
 #if defined(SOKOL_GLCORE)
 #include <GL/gl.h>
+#elif defined(SOKOL_GLES3) && !defined(__EMSCRIPTEN__)
+#include <GLES3/gl31.h>
 #elif defined(SOKOL_GLES3)
 #include <GLES3/gl3.h>
 #endif
+#include <limits>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -59,6 +62,22 @@
 namespace trussc {
 
 namespace internal {
+namespace {
+// Refreshed after each sg_setup; other backends have no extra stage bound here.
+int cachedVertexStorageBufferLimit = std::numeric_limits<int>::max();
+
+void initializeVertexStorageBufferLimit() {
+    cachedVertexStorageBufferLimit = std::numeric_limits<int>::max();
+#if (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__)
+    if (sg_isvalid() && sg_query_features().compute) {
+        glGetIntegerv(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS, &cachedVertexStorageBufferLimit);
+    }
+#endif
+}
+}
+
+int vertexStorageBufferLimit() { return cachedVertexStorageBufferLimit; }
+
 namespace {
 thread_local bool shaderStreamBufferAllocation = false;
 }
@@ -219,6 +238,7 @@ void setup() {
     sgdesc.allocator.alloc_fn = smemtrack_alloc;
     sgdesc.allocator.free_fn = smemtrack_free;
     sg_setup(&sgdesc);
+    internal::initializeVertexStorageBufferLimit();
     internal::recordImageDecodeLimit(sg_isvalid() ? sg_query_limits().max_image_size_2d : 0);
 
     // Initialize sokol_gl with the same descriptor used for later rebuilds.
@@ -2101,6 +2121,14 @@ void sokolLog(const char* tag, uint32_t logLevel, uint32_t logItem,
                 if (!v3dResolveFlushNoticed.exchange(true)) {
                     logNotice("RenderTarget") << "Mesa V3D: flushing before MSAA resolve (Mesa bug fixed in 25.1.5)";
                 }
+            } else if (logLevel == 3 && message && tag && std::strcmp(tag, "sg") == 0 &&
+                (logItem == SG_LOGITEM_D3D11_SHADER_COMPILATION_OUTPUT ||
+                 logItem == SG_LOGITEM_METAL_SHADER_COMPILATION_OUTPUT ||
+                 logItem == SG_LOGITEM_METAL_CREATE_CPS_OUTPUT ||
+                 logItem == SG_LOGITEM_METAL_CREATE_RPS_OUTPUT ||
+                 logItem == SG_LOGITEM_GL_SHADER_COMPILATION_FAILED ||
+                 logItem == SG_LOGITEM_GL_SHADER_LINKING_FAILED)) {
+                getLogger().log(LogLevel::Warning, sokolLogMessage(tag, logItem, message, lineNr));
             } else if (logPoolExhaustion(tag, logItem)) {
                 // Keep sokol's own line at debug verbosity, including repeats.
                 getLogger().log(LogLevel::Verbose, sokolLogMessage(tag, logItem, message, lineNr));

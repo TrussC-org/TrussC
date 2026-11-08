@@ -5,8 +5,9 @@
 # Usage:
 #   trussc_compile_shaders(<target> <source dir> [OUTPUT_DIR <dir>])
 #
-# Name compute sources *.compute.glsl to select compute targets (GLES 310ES).
-# Graphics sources keep GLES 300ES, including WebGL2.
+# Name sources using dispatch or storage buffers *.compute.glsl to select
+# compute targets (GLES 310ES), including vertex/fragment-only programs.
+# Plain *.glsl graphics sources keep GLES 300ES, including WebGL2.
 # Compiles every *.glsl under <source dir> (recursively) with sokol-shdc into
 # <name>.glsl.h, next to the source, or in OUTPUT_DIR when given. The INTERFACE
 # library <target>_shaders carries the output include directory and a dependency
@@ -113,6 +114,14 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
         if(_shader_name MATCHES "\\.compute\\.glsl$")
             set(_TC_SOKOL_SLANG "${_TC_COMPUTE_SLANG}")
         else()
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_shader_src}")
+            file(READ "${_shader_src}" _TC_SHADER_CODE)
+            string(REGEX REPLACE "/\\*([^*]|\\*+[^*/])*\\*+/|//[^\n]*" " " _TC_SHADER_CODE "${_TC_SHADER_CODE}")
+            # After stripping comments, match the whole word buffer followed by a block name and {.
+            if(_TC_SHADER_CODE MATCHES "(^|[^A-Za-z0-9_])buffer[ \t\r\n]+[A-Za-z_][A-Za-z0-9_]*[ \t\r\n]*\\{")
+                string(REGEX REPLACE "\\.glsl$" ".compute.glsl" _TC_COMPUTE_NAME "${_shader_name}")
+                message(FATAL_ERROR "${_shader_src}: uses storage buffers; rename to ${_TC_COMPUTE_NAME}")
+            endif()
             set(_TC_SOKOL_SLANG "${_TC_GRAPHICS_SLANG}")
         endif()
         if(_TC_SHADERS_OUTPUT_DIR)

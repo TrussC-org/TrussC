@@ -24,6 +24,81 @@ def probe_directory(prefix):
 
 
 class ShaderTargetTests(unittest.TestCase):
+    def test_plain_glsl_storage_requires_compute_suffix(self):
+        module = ROOT / 'core/cmake/trussc_shaders.cmake'
+        storage = (ROOT / 'examples/graphics/computeParticlesExample/src/particles.compute.glsl').read_text(encoding='utf-8')
+        graphics = (ROOT / 'core/tests/hotReloadLifecycle/src/shaders/reloadProbe.glsl').read_text(encoding='utf-8')
+        graphics = graphics.replace('gl_Position = position;',
+                                    'vec4 vertexBuffer = position; gl_Position = vertexBuffer;')
+        graphics = ('// readonly buffer LineComment {\n'
+                    '/* buffer BlockComment {\nwriteonly buffer AlsoComment { */\n' + graphics)
+        graphics = graphics.replace('@fs reload_probe_fs',
+                                    '@fs reload_probe_fs\nlayout(binding=0) uniform sampler2D buffer_tex;')
+        with tempfile.TemporaryDirectory(prefix='tc storage guard ') as temporary:
+            project = Path(temporary)
+            shaders = project / 'src'
+            shaders.mkdir()
+            shader = shaders / 'probe.glsl'
+            (project / 'CMakeLists.txt').write_text(f'''
+cmake_minimum_required(VERSION 3.20)
+project(storage_guard NONE)
+include("${{SHADER_MODULE}}")
+trussc_compile_shaders(fixture "${{CMAKE_CURRENT_SOURCE_DIR}}/src")
+''', encoding='utf-8')
+
+            def configure(name, module_path=module):
+                return run_build(['cmake', '-S', str(project), '-B', str(project / name),
+                                  f'-DSHADER_MODULE={module_path}'],
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+            # Both generators must reject an edit after a successful build too.
+            for generator in ('Unix Makefiles', 'Ninja'):
+                if generator == 'Ninja' and not shutil.which('ninja'):
+                    continue
+                with self.subTest(generator=generator):
+                    shader.write_text(graphics, encoding='utf-8')
+                    build = project / generator
+                    result = run_build(['cmake', '-S', str(project), '-B', str(build),
+                                        '-G', generator, f'-DSHADER_MODULE={module}'],
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    command = ['cmake', '--build', str(build), '--target', 'fixture_shaders_gen']
+                    result = run_build(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    shader.write_text(storage, encoding='utf-8')
+                    result = run_build(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertIn('uses storage buffers; rename to probe.compute.glsl', ' '.join(result.stdout.split()))
+
+            for declaration in ('buffer Values {', 'readonly buffer Values {',
+                                'writeonly buffer Values {', 'buffer\nValues\n{'):
+                shader.write_text(declaration + '\n};\n', encoding='utf-8')
+                result = configure('declarations')
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn('uses storage buffers; rename to probe.compute.glsl', ' '.join(result.stdout.split()))
+
+            # Execute the CMake-level mutant: the same rejection oracle must fail.
+            mutant = project / 'mutant.cmake'
+            source = module.read_text(encoding='utf-8')
+            self.assertIn('if(_TC_SHADER_CODE MATCHES', source)
+            mutant.write_text(source.replace('if(_TC_SHADER_CODE MATCHES',
+                                             'if(FALSE AND _TC_SHADER_CODE MATCHES')
+                              .replace('${CMAKE_CURRENT_LIST_DIR}/tc_acquire_shdc.cmake',
+                                       str(module.parent / 'tc_acquire_shdc.cmake'))
+                              .replace('${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../tools/sokol-shdc',
+                                       str(ROOT / 'core/tools/sokol-shdc')), encoding='utf-8')
+            shader.write_text(storage, encoding='utf-8')
+            result = configure('mutant', mutant)
+            self.assertEqual(result.returncode, 0, result.stdout)
+            self.assertNotIn('uses storage buffers; rename to probe.compute.glsl', ' '.join(result.stdout.split()))
+            shader.rename(shaders / 'probe.compute.glsl')
+            result = configure('renamed')
+            self.assertEqual(result.returncode, 0, result.stdout)
+            result = run_build(['cmake', '--build', str(project / 'renamed'),
+                                '--target', 'fixture_shaders_gen'],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_fresh_guest_build_generates_app_and_addon_headers(self):
         source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding='utf-8')
         block = source[source.index('    # The shader interface exists'):
