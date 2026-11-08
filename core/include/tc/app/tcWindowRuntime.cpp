@@ -745,17 +745,34 @@ std::function<void()> attributeMainThreadWork(std::function<void()> callback) {
     };
     return Work{owner, std::move(callback)};
 }
-void ownAppCancellation(std::function<void()> cancel) {
-    if (auto owner = currentAppOwner()) {
-        {
-            std::lock_guard lock(owner->cancellationsMutex);
-            if (!owner->retiring && !owner->ended && owner->token->load()) {
-                owner->cancellations.push_back(std::move(cancel));
-                return;
-            }
+AppCancellation::~AppCancellation() {
+    std::function<void()> discarded;
+    if (auto live = owner.lock()) {
+        std::lock_guard lock(live->cancellationsMutex);
+        auto entry = live->cancellations.find(id);
+        if (entry != live->cancellations.end()) {
+            discarded = std::move(entry->second);
+            live->cancellations.erase(entry);
         }
-        cancel(); // Never invoke application/disconnect code under the owner lock.
     }
+    // Capture destruction may reenter registration; keep it outside the lock.
+}
+std::shared_ptr<AppCancellation> ownAppCancellation(
+    std::function<void()> cancel, std::shared_ptr<AppCancellation> registration) {
+    auto owner = currentAppOwner();
+    if (!owner) return {};
+    if (!registration) registration = std::make_shared<AppCancellation>();
+    {
+        std::lock_guard lock(owner->cancellationsMutex);
+        if (!owner->retiring && !owner->ended && owner->token->load()) {
+            registration->id = owner->nextCancellationId++;
+            owner->cancellations.emplace(registration->id, std::move(cancel));
+            registration->owner = owner;
+            return registration;
+        }
+    }
+    cancel(); // Never invoke application/disconnect code under the owner lock.
+    return {};
 }
 bool isAppExitEvent(const void* event) noexcept {
     auto owner = currentAppOwner();
@@ -779,15 +796,14 @@ void retireAppOwner(const std::shared_ptr<AppOwner>& owner) noexcept {
     steps.run("App MCP retirement", [&] { mcp::internal::removeRegistrationsOwnedBy(owner->token.get()); });
     // Admission and extraction share a lock; invocation and capture destruction
     // stay outside it. Extract in place so OOM teardown needs no container move.
-    for (size_t index = 0;; ++index) {
+    for (;;) {
         std::function<void()> cancel;
         {
             std::lock_guard lock(owner->cancellationsMutex);
-            if (index == owner->cancellations.size()) {
-                owner->cancellations.clear();
-                break;
-            }
-            cancel = std::move(owner->cancellations[index]);
+            if (owner->cancellations.empty()) break;
+            auto entry = owner->cancellations.begin();
+            cancel = std::move(entry->second);
+            owner->cancellations.erase(entry);
         }
         steps.run("App callback retirement", cancel);
     }

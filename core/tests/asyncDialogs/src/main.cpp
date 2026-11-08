@@ -75,6 +75,30 @@ void fakeTests() {
         prelude();
         check("later prelude delivers on main with App context", calls == 1 && contextOkay);
 
+        auto owner = internal::appOwner(*app);
+        auto recordCount = [&] {
+            std::lock_guard lock(owner->cancellationsMutex);
+            return owner->cancellations.size();
+        };
+        const auto initialRecords = recordCount();
+        int completions = 0;
+        bool stable = true;
+        for (int i = 0; i < 1000; ++i) {
+            {
+                internal::AppOwnerScope scope(owner);
+                alertDialogAsync("repeated", "", [&] { ++completions; });
+            }
+            prelude();
+            // Keep the native completion alive after delivery, as native UI may.
+            auto reply = std::move(replies.back());
+            replies.pop_back();
+            reply({});
+            prelude();
+            stable = stable && recordCount() == initialRecords;
+        }
+        check("1000 completed App dialogs leave cancellation count unchanged",
+              completions == 1000 && stable && recordCount() == initialRecords);
+
         // Each kind has its own outstanding request, including no callback.
         const size_t start = presented.size(), replyStart = replies.size();
         int alerts = 0, confirms = 0, files = 0;

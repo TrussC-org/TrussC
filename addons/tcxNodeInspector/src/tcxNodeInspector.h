@@ -286,6 +286,7 @@ private:
                                                 const std::string&);
 
     std::shared_ptr<int> retirementLifetime_ = std::make_shared<int>(0);
+    std::shared_ptr<tc::internal::AppCancellation> appCancellation_;
     Style    style_;
     bool     enabled_      = true;
     std::string nameBuf_;

@@ -2087,6 +2087,7 @@ public:
 
 private:
     std::shared_ptr<internal::MicState> state_;
+    std::shared_ptr<internal::AppCancellation> appCancellation_;
     std::shared_ptr<internal::MicState> predecessor_;
     std::shared_ptr<std::function<void(internal::MicState&)>> apply_;
     std::shared_ptr<std::function<void(internal::MicState&)>> lostApply_;

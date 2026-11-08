@@ -57,6 +57,7 @@ bool MicInput::isRunning() const {
 }
 void MicInput::stop() {
     const bool wasRunning = isRunning();
+    appCancellation_.reset();
     apply_.reset();
     lostApply_.reset();
     if (state_) {
@@ -115,7 +116,7 @@ bool MicInput::beginStart(int sampleRate, bool asynchronous) {
         if (auto live = weak.lock()) internal::cancelMic(live);
     };
     state->registration = internal::registerResourceStop(cancel);
-    internal::ownAppCancellation(cancel);
+    appCancellation_ = internal::ownAppCancellation(cancel);
     try {
         internal::launchMic(state, asynchronous);
     } catch (const std::exception& e) {
