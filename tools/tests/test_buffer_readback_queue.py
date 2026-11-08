@@ -7,6 +7,20 @@ import unittest
 import test_compute_shader as compute_tests
 
 ROOT = Path(__file__).resolve().parents[2]
+# These API-only fixtures have no App runtime. The window-binding regression in
+# computeBuffer exercises the real owner cancellation and scope restoration.
+PREAMBLE = compute_tests.PREAMBLE + r'''
+namespace trussc::internal {
+std::shared_ptr<AppOwner> currentAppOwner() noexcept { return {}; }
+void ownAppCancellation(std::function<void()>) { std::abort(); }
+AppOwnerScope::AppOwnerScope(std::shared_ptr<AppOwner>) noexcept {}
+AppOwnerScope::~AppOwnerScope() noexcept = default;
+WorkerAppAdmission::WorkerAppAdmission(const std::shared_ptr<AppOwner>&, bool) noexcept {}
+WorkerAppAdmission::~WorkerAppAdmission() noexcept = default;
+AppCallbackScope::AppCallbackScope(std::shared_ptr<AppOwner>) : worker_(nullptr), owner_(nullptr) { std::abort(); }
+AppCallbackScope::~AppCallbackScope() noexcept = default;
+}
+'''
 
 
 class BufferReadbackQueueTests(unittest.TestCase):
@@ -118,7 +132,7 @@ int main() {
     internal::bufferReadbacks().poll();
 }
 '''
-        compute_tests.ComputeShaderTests.compile_and_run(self, source, True, main='')
+        compute_tests.ComputeShaderTests.compile_and_run(self, source, True, main='', preamble=PREAMBLE)
 
     def test_web_deferred_failure(self):
         source = r'''
@@ -145,7 +159,7 @@ int main() {
 '''
         for backend in ('__EMSCRIPTEN__', 'SOKOL_WGPU'):
             with self.subTest(backend=backend):
-                preamble = compute_tests.PREAMBLE.replace(
+                preamble = PREAMBLE.replace(
                     '#include "tc/gpu/tcStorageBuffer.h"',
                     f'#define {backend}\n#include "tc/gpu/tcStorageBuffer.h"')
                 compute_tests.ComputeShaderTests.compile_and_run(self, source, True, main='', preamble=preamble)

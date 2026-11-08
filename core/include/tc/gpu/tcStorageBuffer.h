@@ -2,6 +2,7 @@
 
 #include "../utils/tcAnnotations.h"
 #include "../utils/tcOnceGate.h"
+#include "../app/internal/tcAppConstruction.h"
 #include "internal/tcBufferReadback.h"
 #include <utility>
 #include <climits>
@@ -108,6 +109,7 @@ public:
 #endif
 
     // Whole-buffer snapshot, delivered in request order in a later main update.
+    // App-owned callbacks restore its scope and are dropped when that App ends.
     // Shutdown drops pending callbacks. Neither request nor result borrows this object.
     void readAsync(std::function<void(ReadbackResult)> callback) {
         auto& queue = internal::bufferReadbacks();
@@ -122,7 +124,7 @@ public:
             }
         }
         if (!request) request = std::make_unique<internal::BufferReadbackRequest>();
-        request->callback = std::move(callback);
+        request->callback = internal::appOwnedCallback(std::move(callback));
         request->warn = [gate = warnings_] {
             if (gate->isFirstTime()) logWarning("StorageBuffer") << "Failed to read storage buffer asynchronously";
         };

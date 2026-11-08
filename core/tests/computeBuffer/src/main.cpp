@@ -47,6 +47,94 @@ void headlessChecks() {
     check("headless graphics binding is refused", !graphics.setStorageBuffer(0, buffer));
     check("headless checks leave GPU uninitialized", !sg_isvalid());
 }
+
+int ownerCallbacks = 0, ownerDestroyed = 0;
+std::weak_ptr<int> ownerCapture;
+class ReadbackRequester : public App {
+    StorageBuffer buffer_;
+    int marker_ = 7;
+public:
+    ~ReadbackRequester() override { ++ownerDestroyed; }
+    void setup() override {
+        auto capture = std::make_shared<int>(42);
+        ownerCapture = capture;
+        buffer_.readAsync([this, capture](ReadbackResult result) {
+            ++ownerCallbacks;
+            check("live requester callback retains its captures", marker_ == 7 && *capture == 42);
+            check("headless owner request delivers deferred failure", !result.ok());
+            check("callback restores requesting App owner", internal::currentAppOwner() == internal::appOwner(*this));
+            check("callback resolves requesting Window", internal::resolveWindow() == getWindow());
+            check("callback restores requesting Window context",
+                internal::currentWindowCtx() == &internal::WindowRequestAccess::context(*getWindow()));
+            check("callback sees requesting Window width", getWindowWidth() == 222);
+            check("callback sees requesting App events", &tc::events() == internal::WindowRequestAccess::context(*getWindow()).coreEvents);
+        });
+    }
+};
+class ReadbackSibling : public App {};
+
+void asyncOwnerChecks(bool closeRequester) {
+    ownerCallbacks = ownerDestroyed = 0;
+    getMainThreadId();
+    internal::beginRuntimeRun();
+    internal::beginFrameworkLifetime();
+    auto a = std::make_shared<Window>(), b = std::make_shared<Window>();
+    internal::WindowRequestAccess::bindForTests(*a, 401);
+    internal::WindowRequestAccess::bindForTests(*b, 402);
+    internal::retainRuntimeWindow(a);
+    internal::retainRuntimeWindow(b);
+    internal::WindowRequestAccess::context(*a).fbWidth = 111;
+    internal::WindowRequestAccess::context(*b).fbWidth = 222;
+    a->setApp<ReadbackSibling>();
+    b->setApp<ReadbackRequester>();
+    internal::applyPendingAppForTests(*a);
+    internal::applyPendingAppForTests(*b);
+    {
+        internal::WindowEntryScope scope(*b, true);
+        check("requester update is admitted", bool(scope));
+        internal::runMainUpdate(); // B's setup requests after the queue poll.
+    }
+    check("owner request waits for another update", ownerCallbacks == 0 && !ownerCapture.expired());
+    // A backend request must still retire when its App-owned callback is canceled.
+    int retired = 0;
+    struct RetirementProbe : internal::BufferReadbackRequest {
+        int& retired;
+        explicit RetirementProbe(int& count) : retired(count) {}
+        ~RetirementProbe() override { ++retired; }
+    };
+    auto retirement = std::make_unique<RetirementProbe>(retired);
+    {
+        internal::AppCallbackScope owner(internal::appOwner(*b->getApp()));
+        retirement->callback = internal::appOwnedCallback(std::function<void(ReadbackResult)>([&](ReadbackResult) {
+            check("backend resources retire before live callback", !closeRequester && retired == 1);
+        }));
+    }
+    internal::bufferReadbacks().enqueue(std::move(retirement));
+    if (closeRequester) {
+        internal::WindowRequestAccess::teardown(*b);
+        check("requesting App is destroyed before delivery", ownerDestroyed == 1);
+        check("App teardown releases pending callback captures", ownerCapture.expired());
+    }
+    bool unownedCalled = false;
+    StorageBuffer empty;
+    check("outside-App request has no owner", !internal::currentAppOwner());
+    empty.readAsync([&](ReadbackResult) {
+        unownedCalled = true;
+        check("outside-App callback uses polling Window context", !internal::currentAppOwner() &&
+            internal::currentWindowCtx() == &internal::WindowRequestAccess::context(*a));
+    });
+    {
+        internal::WindowEntryScope scope(*a, true);
+        check("sibling update is admitted", bool(scope));
+        internal::runMainUpdate();
+        check("delivery restores polling Window context", internal::currentWindowCtx() == &internal::WindowRequestAccess::context(*a));
+    }
+    check("ended request is dropped; live request is delivered once", ownerCallbacks == (closeRequester ? 0 : 1));
+    check("delivered callback releases its captures", ownerCapture.expired());
+    check("queue retires requests after requester teardown", retired == 1 && unownedCalled);
+    internal::shutdownRuntime();
+    internal::endFrameworkLifetime();
+}
 class ComputeBufferApp : public App {
     StorageBuffer buffer_;
     ComputeShader compute_;
@@ -436,6 +524,11 @@ public:
 };
 } // namespace
 TC_CORE_TEST_MAIN(int argc, char** argv) {
+    if (argc > 1 && std::strcmp(argv[1], "--async-owner-check") == 0) {
+        asyncOwnerChecks(true);
+        asyncOwnerChecks(false);
+        return failures ? 1 : 0;
+    }
     if (argc > 1 && (std::strcmp(argv[1], "--async-check") == 0 || std::strcmp(argv[1], "--async-exit-check") == 0)) {
         asyncExitMode = std::strcmp(argv[1], "--async-exit-check") == 0;
         WindowSettings settings;
@@ -450,5 +543,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return tcCoreTest::runDisplayTest<ComputeBufferApp>(settings, failures, [] { check("GPU checks completed", completed); });
     }
     headlessChecks();
+    asyncOwnerChecks(true);
+    asyncOwnerChecks(false);
     return failures ? 1 : 0;
 }
