@@ -184,25 +184,23 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::EventListener
-            , trussc::EventListener()
+        auto constructors = tcxLuaConstructors<trussc::OnceGate
+            , trussc::OnceGate()
+            , trussc::OnceGate(double)
         >();
-        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
-        t["disconnect"] = &trussc::EventListener::disconnect;
-        t["isConnected"] = &trussc::EventListener::isConnected;
+        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
+        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
+        t["reset"] = &trussc::OnceGate::reset;
     }
-    {
-        auto constructors = tcxLuaConstructors<trussc::LogStream
-            , trussc::LogStream(trussc::LogLevel)
-            , trussc::LogStream(trussc::LogLevel, const std::string &)
-        >();
-        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
-    }
-    lua->new_usertype<trussc::TcyMode>("TcyMode",
-        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
-        "Rotate", sol::var(trussc::TcyMode::Rotate),
-        "Upright", sol::var(trussc::TcyMode::Upright),
-        "Combine", sol::var(trussc::TcyMode::Combine));
+    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
+        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
+        "Repeat", sol::var(trussc::TextureWrap::Repeat),
+        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
+        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
     lua->new_usertype<trussc::TextureFilter>("TextureFilter",
         sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
         "Nearest", sol::var(trussc::TextureFilter::Nearest),
@@ -212,12 +210,10 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["message"] = &trussc::MicStartResult::message;
         t["success"] = &trussc::MicStartResult::success;
     }
-    {
-        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
-        t["hit"] = &trussc::Ray::Hit::hit;
-        t["point"] = &trussc::Ray::Hit::point;
-        t["t"] = &trussc::Ray::Hit::t;
-    }
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

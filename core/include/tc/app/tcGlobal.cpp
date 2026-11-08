@@ -710,9 +710,15 @@ void RenderTarget::advanceLayer() {
     sgl_layer(++sglLayerNext);
 }
 
+namespace { bool hasPendingRecording(RenderTarget& target); }
+
 void RenderTarget::flushLayers() {
     assert(currentWindowContext().currentTarget == this);
-    if (!inPass || !resources().context.id) return;
+    if (!resources().context.id) return;
+    // Compute leaves the target parked. Basic draws only record commands;
+    // reopen their pass when replay consumes the next recorded drawing.
+    if (!inPass && hasPendingRecording(*this)) ensureCurrentPass();
+    if (!inPass) return;
     const auto err = sgl_context_error(resources().context);
     const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
     prepareDeferredShaderDraws(deferredShaderDraws);
@@ -883,7 +889,7 @@ bool hasPublicFboActivation() {
 
 void RenderTarget::restartClear(float r, float g, float b, float a) {
     auto& window = currentWindowContext();
-    if (window.currentTarget != this || !activation || !inPass) return;
+    if (window.currentTarget != this || !activation || (!inPass && !ensureCurrentPass())) return;
     flushLayers();
     endPass();
     clearAction.colors[0].load_action = SG_LOADACTION_CLEAR;
@@ -2417,6 +2423,7 @@ TextureRetirement::~TextureRetirement() noexcept {
     for (auto handle : mipViews) if (handle.id) sg_destroy_view(handle);
     if (view.id) sg_destroy_view(view);
     if (attachment.id) sg_destroy_view(attachment);
+    if (storage.id) sg_destroy_view(storage);
     if (image.id) sg_destroy_image(image);
     if (sampler.id) sg_destroy_sampler(sampler);
 }
@@ -3474,17 +3481,34 @@ void parkWindowPass() {
 }
 
 bool suspendForImageUpload() {
-    auto& target = currentTarget();
-    // Basic window draws may still be CPU recordings in a lazy pass. Consume
-    // that prefix before overwriting any image it could sample.
-    if (!target.inPass && hasPendingRecording(target)) ensureCurrentPass();
-    const bool resume = target.inPass;
-    if (resume) parkWindowPass();
+    auto& window = currentWindowContext();
+    ensureTargetStack(window);
+    auto& top = *window.currentTarget;
+    bool resume = top.inPass;
+    // A lazy parent can still hold drawings that sample the image. End the
+    // current encoder, then consume recordings from parent to child before
+    // overwriting it. Keep activations and recording contexts intact.
+    if (top.inPass) top.endPass();
+    try {
+        for (const auto& entry : window.targetStack) {
+            auto& target = *entry.target;
+            if (!hasPendingRecording(target)) continue;
+            selectTarget(target);
+            target.flushLayers();
+            if (&target == &top) resume = target.inPass;
+            if (target.inPass) target.endPass();
+        }
+    } catch (...) {
+        if (currentTarget().inPass) currentTarget().endPass();
+        selectTarget(top);
+        throw;
+    }
+    selectTarget(top);
     return resume;
 }
 
 // Persistent image upload through a transient staging buffer. Copies must run
-// outside a pass; parkWindowPass flushes the recorded prefix and the existing
+// outside a pass; suspension flushes recorded prefixes and the existing
 // continuation policy reloads its color/depth contents on resumption.
 void uploadImageData(sg_image image, const sg_range& data, int mipLevel) {
     // Bound (representation): sokol stores buffer sizes and image row/slice

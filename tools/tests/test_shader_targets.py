@@ -14,6 +14,15 @@ sys.path.insert(0, str(ROOT / "tools"))
 from check_build_warnings import run_build
 
 
+def probe_directory(prefix):
+    base = None
+    if sys.platform == 'win32':
+        # MSBuild warns about intermediate/output directories under %TEMP% (MSB8029).
+        base = ROOT / 'build' / 'shader-target-tests'
+        base.mkdir(parents=True, exist_ok=True)
+    return tempfile.TemporaryDirectory(prefix=prefix, dir=base)
+
+
 class ShaderTargetTests(unittest.TestCase):
     def test_fresh_guest_build_generates_app_and_addon_headers(self):
         source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding='utf-8')
@@ -23,7 +32,7 @@ class ShaderTargetTests(unittest.TestCase):
         for generator in (None, 'Ninja'):
             if generator == 'Ninja' and not shutil.which('ninja'):
                 continue
-            with self.subTest(generator=generator), tempfile.TemporaryDirectory(prefix='tc guest ') as temporary:
+            with self.subTest(generator=generator), probe_directory('tc guest ') as temporary:
                 project = Path(temporary)
                 for directory, name in (('src/shaders', 'app'), ('core-shaders', 'core')):
                     folder = project / directory
@@ -43,6 +52,9 @@ int guest_probe() { return 42; }
                 (project / 'CMakeLists.txt').write_text(f'''
 cmake_minimum_required(VERSION 3.20)
 project(shader_probe CXX)
+if(MSVC)
+    add_compile_options(/utf-8)
+endif()
 include([==[{ROOT.as_posix()}/core/cmake/trussc_shaders.cmake]==])
 add_executable(shader_probe EXCLUDE_FROM_ALL main.cpp)
 add_library(guest SHARED guest.cpp)
@@ -109,7 +121,7 @@ set(_TC_LOADED_ADDONS tcxHap shaderlessAddon)
                    '?_Ghelper@@YAXXZ', 'prefix??_EWidget', '__imp_core_function', 'public']
         # An extern "C" function may be named public; only the count line is dropped.
         expected = symbols[4:8] + symbols[9:12] + ['public']
-        with tempfile.TemporaryDirectory(prefix='tc exports ') as temporary:
+        with probe_directory('tc exports ') as temporary:
             fixture = Path(temporary)
             # dumpbin doesn't zero-pad offsets: objects early in the lib have
             # short ones, and member headers/counts use the same layout.
@@ -139,13 +151,16 @@ set(DUMPBIN "${CMAKE_COMMAND};-P;${CMAKE_CURRENT_LIST_DIR}/dumpbin.cmake")
         source = (ROOT / 'core/cmake/trussc_app.cmake').read_text(encoding="utf-8")
         block = source[source.index('            set(_TC_HOST_IMPORT_LIB '):
                        source.index('            add_custom_target(_tc_host_import ')]
-        with tempfile.TemporaryDirectory(prefix='tc imports ') as temporary:
+        with probe_directory('tc imports ') as temporary:
             fixture = Path(temporary)
             build = fixture / 'build with spaces'
             (fixture / 'main.c').write_text('int main(void) { return 0; }\n', encoding="utf-8")
             (fixture / 'CMakeLists.txt').write_text('''
 cmake_minimum_required(VERSION 3.20)
 project(import_probe C)
+if(NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE "''' + config + '''")
+endif()
 add_executable(import_probe main.c)
 set_target_properties(import_probe PROPERTIES
     OUTPUT_NAME "renamed host" DEBUG_POSTFIX "_debug" SUFFIX ".exe")
@@ -160,8 +175,7 @@ set(CMAKE_CXX_COMPILER_ARCHITECTURE_ID x64)
                                       stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, encoding="utf-8", errors="replace").stdout
 
-            run('cmake', '-S', str(fixture), '-B', str(build),
-                f'-DCMAKE_BUILD_TYPE={config}')
+            run('cmake', '-S', str(fixture), '-B', str(build))
             run('cmake', '-P', str(build / f'_tc_host_import_{config}.cmake'))
             definition = build / f'trussc_host_import_{config}.def'
             module = 'renamed host' + ('_debug' if config == 'Debug' else '') + '.exe'

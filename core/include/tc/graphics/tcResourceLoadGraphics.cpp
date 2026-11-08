@@ -501,7 +501,11 @@ void Texture::allocatePixels(const Pixels& pixels, TextureUsage usage, bool mipm
 void Texture::createResources(const void* initialData, const sg_range* imageLoadMips) {
     // CPU-only Images are valid in headless apps and before graphics setup.
     // Leave the texture unallocated so their updates and draws are no-ops.
-    if (!sg_isvalid()) return;
+    if (!sg_isvalid()) {
+        if (usage_ == TextureUsage::Storage)
+            logWarning("Texture") << "Storage textures require an initialized GPU";
+        return;
+    }
     if (!prepareRetirement_()) return;
 
     auto sizeResult = internal::checkImageSize(width_, height_);
@@ -520,6 +524,26 @@ void Texture::createResources(const void* initialData, const sg_range* imageLoad
         img_desc.pixel_format = pixelFormat_;
     } else {
         img_desc.pixel_format = (channels_ == 4) ? SG_PIXELFORMAT_RGBA8 : SG_PIXELFORMAT_R8;
+    }
+
+    if (usage_ == TextureUsage::Storage) {
+        const auto format = img_desc.pixel_format;
+        const bool supportedFormat = format == SG_PIXELFORMAT_RGBA8 || format == SG_PIXELFORMAT_RGBA16F ||
+            format == SG_PIXELFORMAT_RGBA32F || format == SG_PIXELFORMAT_R32F;
+        const auto caps = sg_query_pixelformat(format);
+        if (supportedFormat && !caps.filter) {
+            const char* name = format == SG_PIXELFORMAT_RGBA8 ? "RGBA8" :
+                format == SG_PIXELFORMAT_RGBA16F ? "RGBA16F" :
+                format == SG_PIXELFORMAT_RGBA32F ? "RGBA32F" : "R32F";
+            logWarning("Texture") << "Storage format " << name
+                << " is not filterable on this GPU; normal Texture drawing requires filtering";
+            return;
+        }
+        if (!sg_query_features().compute || !supportedFormat || !caps.write || !caps.sample ||
+            sampleCount_ != 1 || numMipLevels_ != 1 || width_ <= 0 || height_ <= 0) {
+            logWarning("Texture") << "Unsupported storage texture: requires compute, a writable RGBA8/RGBA16F/RGBA32F/R32F format, single-sample 2D and mip 0";
+            return;
+        }
     }
 
     // Compute data size based on pixel format
@@ -573,6 +597,9 @@ void Texture::createResources(const void* initialData, const sg_range* imageLoad
             img_desc.usage.copy_dst = true;
             img_desc.num_mipmaps = numMipLevels_;
             break;
+        case TextureUsage::Storage:
+            img_desc.usage.storage_image = true;
+            break;
         case TextureUsage::RenderTarget:
             img_desc.usage.color_attachment = true;
             img_desc.usage.resolve_attachment = true;  // Can also be used as MSAA resolve target
@@ -595,6 +622,12 @@ void Texture::createResources(const void* initialData, const sg_range* imageLoad
     sg_view_desc view_desc = {};
     view_desc.texture.image = image_;
     view_ = sg_make_view(&view_desc);
+
+    if (usage_ == TextureUsage::Storage) {
+        sg_view_desc storage = {};
+        storage.storage_image.image = image_;
+        storageView_ = sg_make_view(&storage);
+    }
 
     // Create attachment view for RenderTarget. `attachmentView_` always
     // targets mip 0 (preserves the existing single-attachment API).

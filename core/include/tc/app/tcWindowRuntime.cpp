@@ -474,7 +474,7 @@ void shutdownRuntime() noexcept {
             if (auto* window = owner->window) WindowRequestAccess::endForShutdown(*window);
             else if (owner->context) {
                 owner->context->rootNode.reset();
-                endAppAttachment(app, *owner->context, true);
+                endAppAttachment(app, *owner->context);
             }
         }
     }
@@ -702,7 +702,7 @@ void retireAppGeneration(const void* generation) noexcept {
     for (auto* entry = snapshot.last(); entry; entry = entry->previous) {
         auto owner = appOwner(*entry->app);
         if (owner->window) WindowRequestAccess::endApp(*owner->window);
-        else if (owner->context) endAppAttachment(entry->app, *owner->context, true);
+        else if (owner->context) endAppAttachment(entry->app, *owner->context);
     }
     // Candidates were never published, so they retire without invented hooks.
     for (;;) {
@@ -866,7 +866,7 @@ void deliverAppExit(App& app) {
     app.exit();
 }
 void resetAppNodeReferences(const App&) noexcept;
-void endAppAttachment(const std::shared_ptr<App>& app, WindowContext& context, bool virtualOnly) noexcept {
+void endAppAttachment(const std::shared_ptr<App>& app, WindowContext& context) noexcept {
     if (!app) return;
     auto owner = appOwner(*app);
     if (!owner || owner->ended) return;
@@ -889,8 +889,7 @@ void endAppAttachment(const std::shared_ptr<App>& app, WindowContext& context, b
     owner->callbacksClosing = true;
     steps.run("App audio detach", [&] { detachAppAudio(*app); });
     resetAppNodeReferences(*app);
-    if (virtualOnly) steps.run("App virtual cleanup", [&] { app->cleanup(); });
-    else steps.run("App tree cleanup", [&] { app->cleanupTree(); });
+    steps.run("App tree cleanup", [&] { app->cleanupTree(); });
     resetAppNodeReferences(*app);
     context.hoveredNode.reset();
     context.prevHoveredNode.reset();

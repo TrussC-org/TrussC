@@ -220,38 +220,43 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         "Triangles", sol::var(trussc::PrimitiveType::Triangles),
         "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
         "Quads", sol::var(trussc::PrimitiveType::Quads));
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
-    lua->new_usertype<trussc::MouseButton>("MouseButton",
-        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
-        "Left", sol::var(trussc::MouseButton::Left),
-        "Right", sol::var(trussc::MouseButton::Right),
-        "Middle", sol::var(trussc::MouseButton::Middle),
-        "None", sol::var(trussc::MouseButton::None));
-    lua->new_usertype<trussc::PointStyle>("PointStyle",
-        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
-        "Square", sol::var(trussc::PointStyle::Square),
-        "Round", sol::var(trussc::PointStyle::Round),
-        "Pixel", sol::var(trussc::PointStyle::Pixel));
+    {
+        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
+        t["alt"] = &trussc::KeyEventArgs::alt;
+        t["consumed"] = &trussc::KeyEventArgs::consumed;
+        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
+        t["key"] = &trussc::KeyEventArgs::key;
+        t["shift"] = &trussc::KeyEventArgs::shift;
+        t["super"] = &trussc::KeyEventArgs::super;
+    }
+    {
+        sol::usertype<trussc::RuntimeEvents> t = lua->new_usertype<trussc::RuntimeEvents>("RuntimeEvents");
+        t["console"] = &trussc::RuntimeEvents::console;
+        t["deviceLost"] = &trussc::RuntimeEvents::deviceLost;
+        t["exitRequested"] = &trussc::RuntimeEvents::exitRequested;
+        t["hotReloadUnload"] = &trussc::RuntimeEvents::hotReloadUnload;
+    }
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
     {
         sol::usertype<trussc::RuntimeSettings> t = lua->new_usertype<trussc::RuntimeSettings>("RuntimeSettings");
         t["uniformBufferReserve"] = &trussc::RuntimeSettings::uniformBufferReserve;
         t["reserveUniformBuffer"] = &trussc::RuntimeSettings::reserveUniformBuffer;
     }
     {
-        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
-        t["error"] = &trussc::SendResult::error;
-        t["id"] = &trussc::SendResult::id;
-        t["ok"] = &trussc::SendResult::ok;
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
     }
     {
-        sol::usertype<trussc::DeviceDisconnectEventArgs> t = lua->new_usertype<trussc::DeviceDisconnectEventArgs>("DeviceDisconnectEventArgs");
-        t["reason"] = &trussc::DeviceDisconnectEventArgs::reason;
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
     }
 }
 #ifdef _MSC_VER

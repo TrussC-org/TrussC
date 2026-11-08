@@ -198,7 +198,6 @@ details.en = '''
 - You never create an App yourself with `new` or `make_shared`. TrussC creates it through `runApp<T>()`, `runHeadlessApp<T>()` or `Window::setApp<T>(args...)`, and each call creates a new App. How an App ends is described in `App::exit`.
 - Do not put another App inside an App, as a member variable or as an extra base class; `setApp<T>` refuses such a class and logs an error.
 - Hot reload (`TC_HOT_RELOAD`) creates a fresh App on every reload, so the App's state is reset.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (runHeadlessApp runs only App::update(), not the node tree).
 '''
 details.ja = '''
 - 自分の tcApp を `App` から継承して作り、必要な関数をオーバーライドします。`main()` は `TC_RUN_APP(tcApp, settings)` を返します（`runApp` を参照してください）。
@@ -212,7 +211,6 @@ details.ja = '''
 - App を `new` や `make_shared` で自分で作ることはありません。`runApp<T>()`、`runHeadlessApp<T>()`、`Window::setApp<T>(args...)` を通じて TrussC が作り、呼ぶたびに新しい App が作られます。App の終わり方は `App::exit` で説明しています。
 - App の中に別の App を、メンバー変数や追加の基底クラスとして入れないでください。そのようなクラスは `setApp<T>` が受け付けず、エラーを記録します。
 - ホットリロード（`TC_HOT_RELOAD`）では、リロードのたびに新しい App が作られるため、App の状態はリセットされます。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（runHeadlessApp は App::update() だけを呼び、ノードツリーは更新しない）。
 '''
 details.ko = '''
 - 자신의 tcApp을 `App`에서 상속해 만들고 필요한 함수를 오버라이드합니다. `main()`은 `TC_RUN_APP(tcApp, settings)`를 반환합니다(`runApp` 참조).
@@ -226,7 +224,6 @@ details.ko = '''
 - App을 `new`나 `make_shared`로 직접 만들지 않습니다. `runApp<T>()`, `runHeadlessApp<T>()`, `Window::setApp<T>(args...)`를 통해 TrussC가 만들며, 호출할 때마다 새 App이 만들어집니다. App이 끝나는 방식은 `App::exit`에서 설명합니다.
 - App 안에 다른 App을 멤버 변수나 추가 기본 클래스로 넣지 마세요. 그런 클래스는 `setApp<T>`가 받아들이지 않고 오류를 기록합니다.
 - 핫 리로드(`TC_HOT_RELOAD`)에서는 리로드할 때마다 새 App이 만들어지므로 App 상태가 초기화됩니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(runHeadlessApp은 App::update()만 호출하고 노드 트리는 갱신하지 않음).
 '''
 related = ["runApp", "runHeadlessApp", "Node::setup", "App::exit", "App::mousePressed", "App::audioOut", "App::windowResized", "App::setSize", "App::getWindow", "Window::setApp", "RectNode", "events", "getRootNode", "WindowSettings"]
 snippet = '''
@@ -384,7 +381,7 @@ details.en = '''
 - Inside `exit()` and `cleanup()`, `getWindow()` returns `nullptr`, because the App has already been taken off its window.
 - It cannot cancel anything. To ask before the process quits, use `events().exitRequested`; to ask before the window closes, use `events().closeRequested`.
 - **Do not call `exitApp()` here to quit when the window closes.** This function also runs on replacement, removal and hot reload, and `exitApp()` does nothing inside it. Call `getWindow()->setQuitOnClose(true)` in `setup()` instead.
-- After `exit()`, `cleanup()` runs on the child nodes first and then on the App. In a headless App only the App's `cleanup()` runs.
+- After `exit()`, `cleanup()` runs on the child nodes first and then on the App. This order also applies to headless Apps.
 - If `exit()` or `cleanup()` throws, the rest of the shutdown and the other Apps still finish. A forced kill or a crash skips these functions.
 - At a session end (the user logs out, restarts or shuts down), what happens depends on whether App code is running on the main thread at that moment. If none is running, the normal ending runs: `exit()` for every App, starting from the most recently attached one, then audio detach and `cleanup()`. All of it shares one time limit, 3 seconds by default (see `Runtime::setLogoutTimeout`), so keep `exit()` short and save only what you need. If App code, or TrussC code serving it, is on the main thread's stack (for example inside `update()`, or in a modal dialog opened from App code), the OS ends the process, and neither `exit()`, `cleanup()` nor any exit event is called. Work on other threads does not count as running App code.
 - This applies on Windows and macOS. Linux has no receiver for the session end. If the OS ends the process without telling it, `exit()` is not called.
@@ -396,7 +393,7 @@ details.ja = '''
 - `exit()` と `cleanup()` の中では、App はすでにウィンドウから外されているため、`getWindow()` は `nullptr` を返します。
 - ここで終了を取り消すことはできません。プロセスの終了前に確認するには `events().exitRequested` を、ウィンドウを閉じる前に確認するには `events().closeRequested` を使ってください。
 - **ウィンドウを閉じたら終了させる目的で、ここに `exitApp()` を書かないでください。** この関数は置き換えや取り外し、ホットリロードでも呼ばれますし、この中では `exitApp()` は何もしません。代わりに `setup()` で `getWindow()->setQuitOnClose(true)` を呼んでください。
-- `exit()` のあと、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App では App の `cleanup()` だけが呼ばれます。
+- `exit()` のあと、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App でも同じ順番です。
 - `exit()` や `cleanup()` が例外を投げても、残りの終了処理とほかの App の終了は最後まで行われます。強制終了やクラッシュのときは呼ばれません。
 - セッション終了（ログアウト、再起動、シャットダウン）のときの動作は、その瞬間にメインスレッドで App のコードが実行中かどうかで変わります。実行中でなければ通常の終了処理が行われ、最後にアタッチされた App から順に、すべての App で `exit()` が呼ばれ、オーディオの切り離しと `cleanup()` が続きます。全体で 1 つの制限時間（既定値 3 秒。`Runtime::setLogoutTimeout` を参照）を共有するため、`exit()` は必要なものを保存するだけにして短く済ませてください。App のコードや、それを呼んでいる TrussC のコードがメインスレッドで実行中（`update()` の途中や、App のコードから開いたモーダルダイアログの最中など）なら、OS がプロセスを終了させ、`exit()`・`cleanup()`・終了のイベントはどれも呼ばれません。ほかのスレッドの処理は、App のコードの実行中には数えません。
 - これは Windows と macOS での動作です。Linux にはセッション終了を受け取る仕組みがありません。OS がプロセスに知らせずに終了させた場合、`exit()` は呼ばれません。
@@ -408,7 +405,7 @@ details.ko = '''
 - `exit()`와 `cleanup()` 안에서는 App이 이미 창에서 분리되었으므로 `getWindow()`가 `nullptr`를 반환합니다.
 - 여기서 종료를 취소할 수는 없습니다. 프로세스 종료 전에 확인하려면 `events().exitRequested`를, 창을 닫기 전에 확인하려면 `events().closeRequested`를 사용하세요.
 - **창을 닫으면 종료되게 하려는 목적으로 여기에 `exitApp()`을 쓰지 마세요.** 이 함수는 교체, 제거, 핫 리로드 때도 호출되며, 이 안에서는 `exitApp()`이 아무 동작도 하지 않습니다. 대신 `setup()`에서 `getWindow()->setQuitOnClose(true)`를 호출하세요.
-- `exit()` 다음에는 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서는 App의 `cleanup()`만 호출됩니다.
+- `exit()` 다음에는 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서도 같은 순서로 실행합니다.
 - `exit()`나 `cleanup()`이 예외를 던져도 나머지 종료 처리와 다른 App의 종료는 끝까지 진행됩니다. 강제 종료나 크래시 때는 호출되지 않습니다.
 - 세션 종료(로그아웃, 재시작, 시스템 종료) 때의 동작은 그 순간 메인 스레드에서 App 코드가 실행 중인지에 따라 달라집니다. 실행 중이 아니면 일반 종료 처리가 진행되어, 마지막으로 연결된 App부터 차례로 모든 App에서 `exit()`가 호출되고 오디오 분리와 `cleanup()`이 이어집니다. 전체가 하나의 제한 시간(기본값 3초, `Runtime::setLogoutTimeout` 참조)을 공유하므로 `exit()`에서는 필요한 것만 저장하고 짧게 끝내세요. App 코드나 그것을 호출하는 TrussC 코드가 메인 스레드에서 실행 중이면(`update()` 도중이나 App 코드에서 연 모달 대화상자가 떠 있는 동안 등) OS가 프로세스를 종료하며, `exit()`, `cleanup()`, 종료 이벤트는 모두 호출되지 않습니다. 다른 스레드의 처리는 App 코드 실행 중으로 치지 않습니다.
 - 이는 Windows와 macOS에서의 동작입니다. Linux에는 세션 종료를 받는 수신 경로가 없습니다. OS가 프로세스에 알리지 않고 종료시키면 `exit()`는 호출되지 않습니다.
@@ -530,19 +527,19 @@ description.ko = "사용이 권장되지 않는 requestExit()가 이 App에서 �
 details.en = '''
 - It is false at first and becomes true after `requestExit()` is called. It never goes back to false, even if a listener cancels the quit.
 - Nothing in TrussC reads it any more. It does not tell you whether a quit is under way, so do not use it in new code. This function is scheduled for removal in v1.0.0.
-- It is a plain (non-atomic) bool, so read it on the main thread.
+- The compatibility flag is atomic; quit requests still go through `exitApp()`.
 - To react when the app quits, listen to `events().exitRequested` or override `exit()`.
 '''
 details.ja = '''
 - 最初は false で、`requestExit()` を呼ぶと true になります。リスナーが終了を取り消しても、false に戻ることはありません。
 - TrussC のどこもこの値を読まなくなりました。終了が進行中かどうかは分からないので、新しいコードでは使わないでください。この関数は v1.0.0 で削除予定です。
-- 通常の（atomic でない）bool のため、メインスレッドで読んでください。
+- 互換性のためのフラグは atomic です。終了要求は `exitApp()` を通ります。
 - アプリの終了に反応したい場合は、`events().exitRequested` を購読するか、`exit()` をオーバーライドしてください。
 '''
 details.ko = '''
 - 처음에는 false이며 `requestExit()`를 호출하면 true가 됩니다. 리스너가 종료를 취소해도 false로 돌아가지 않습니다.
 - 이제 TrussC의 어디에서도 이 값을 읽지 않습니다. 종료가 진행 중인지는 알 수 없으므로 새 코드에서는 사용하지 마세요. 이 함수는 v1.0.0에서 제거될 예정입니다.
-- 일반(atomic이 아닌) bool이므로 메인 스레드에서 읽으세요.
+- 호환성을 위한 플래그는 atomic입니다. 종료 요청은 `exitApp()`을 거칩니다.
 - 앱이 종료될 때 반응하려면 `events().exitRequested`를 구독하거나 `exit()`를 오버라이드하세요.
 '''
 related = ["App::requestExit", "exitApp", "App::exit"]
@@ -958,19 +955,19 @@ details.en = '''
 - It calls `exitApp()`, in windowed and headless apps alike. Use `exitApp()` in new code; this alias is scheduled for removal in v1.0.0.
 - Because it calls `exitApp()`, the exit code is set to `0`, and the quit goes through `exitRequested` so a listener can cancel it. See `exitApp` for the details.
 - Before v0.8.0 it only set a flag that `runHeadlessApp()` read, and a windowed app ignored it. It no longer skips `exitRequested` in a headless app.
-- It also sets the flag that `App::isExitRequested` returns. The flag is a plain (non-atomic) bool.
+- It also sets the flag that `App::isExitRequested` returns. The compatibility flag is atomic and does not drive the runner.
 '''
 details.ja = '''
 - ウィンドウのあるアプリでもヘッドレスアプリでも、`exitApp()` を呼びます。新しいコードでは `exitApp()` を使用してください。この別名は v1.0.0 で削除予定です。
 - `exitApp()` を呼ぶため、終了コードは `0` に設定され、終了は `exitRequested` を通ります。リスナーが取り消すこともできます。詳しくは `exitApp` を参照してください。
 - v0.8.0 より前は、`runHeadlessApp()` が読むフラグを立てるだけで、ウィンドウのあるアプリでは無視されていました。ヘッドレスアプリでも `exitRequested` を飛ばさなくなりました。
-- `App::isExitRequested` が返すフラグも立てます。このフラグは通常の（atomic でない）bool です。
+- `App::isExitRequested` が返すフラグも立てます。この互換フラグは atomic で、ランナーの制御には使いません。
 '''
 details.ko = '''
 - 윈도우가 있는 앱과 헤드리스 앱 모두에서 `exitApp()`을 호출합니다. 새 코드에서는 `exitApp()`을 사용하세요. 이 별칭은 v1.0.0에서 제거될 예정입니다.
 - `exitApp()`을 호출하므로 종료 코드는 `0`으로 설정되고, 종료는 `exitRequested`를 거칩니다. 리스너가 취소할 수도 있습니다. 자세한 내용은 `exitApp`을 참조하세요.
 - v0.8.0 이전에는 `runHeadlessApp()`이 읽는 플래그를 세울 뿐이었고, 윈도우가 있는 앱에서는 무시되었습니다. 이제 헤드리스 앱에서도 `exitRequested`를 건너뛰지 않습니다.
-- `App::isExitRequested`가 반환하는 플래그도 세웁니다. 이 플래그는 일반(atomic이 아닌) bool입니다.
+- `App::isExitRequested`가 반환하는 플래그도 세웁니다. 이 호환 플래그는 atomic이며 실행기를 제어하지 않습니다.
 '''
 related = ["exitApp", "requestExitApp", "App::isExitRequested", "CoreEvents::exitRequested"]
 snippet = '''
@@ -6298,15 +6295,15 @@ description.ja = "更新のステップごとに 1 回呼ばれる。"
 description.ko = "업데이트 단계마다 한 번 호출된다."
 details.en = '''
 - Sent once for each update step, on the main thread. Listeners registered without a priority run before the App's `update()`; those registered with `EventPriority::AfterApp` run after the App and its child nodes. On the very first step, a listener without a priority can run before the App's `setup()`.
-- A headless App also sends it for each fixed step; there only the App's own `update()` runs, not its child nodes.
+- A headless App also sends it for each fixed step; the App runs its node tree, including children, Mods and timers.
 '''
 details.ja = '''
 - 更新のステップごとに、メインスレッドで 1 回届きます。優先度を指定せずに登録したリスナーは App の `update()` より前に、`EventPriority::AfterApp` で登録したリスナーは App と子ノードのあとに呼ばれます。最初のステップでは、優先度を指定しないリスナーが App の `setup()` より前に呼ばれることがあります。
-- ヘッドレス App でも固定ステップごとに届きます。その場合、呼ばれるのは App 自身の `update()` だけで、子ノードは更新されません。
+- ヘッドレス App でも固定ステップごとに届きます。App は子ノード、Mod、タイマーを含むノードツリーを更新します。
 '''
 details.ko = '''
 - 업데이트 단계마다 메인 스레드에서 한 번 전달됩니다. 우선순위를 지정하지 않고 등록한 리스너는 App의 `update()`보다 먼저, `EventPriority::AfterApp`으로 등록한 리스너는 App과 자식 노드 다음에 호출됩니다. 첫 단계에서는 우선순위를 지정하지 않은 리스너가 App의 `setup()`보다 먼저 호출될 수 있습니다.
-- 헤드리스 App에서도 고정 단계마다 전달됩니다. 이때는 App 자신의 `update()`만 호출되며 자식 노드는 업데이트되지 않습니다.
+- 헤드리스 App에서도 고정 단계마다 전달됩니다. App은 자식 노드, Mod, 타이머를 포함한 노드 트리를 갱신합니다.
 '''
 related = ["Node::update", "CoreEvents::draw", "EventListener", "events", "setIndependentFps"]
 snippet = '''
@@ -10983,18 +10980,15 @@ description.ja = "ヘッドレスアプリの実行を設定する。"
 description.ko = "헤드리스 앱 실행을 설정한다."
 details.en = '''
 - Pass this type to `runHeadlessApp` to run without a window or graphics context. Its only setting is `targetFps`, the target update rate in updates per second, which defaults to 60.
-- `setFps(fps)` assigns `targetFps` and returns the settings by reference for chaining. Use a positive rate; the runner computes its fixed timestep as `1.0 / targetFps` and does not interpret `VSYNC` or `EVENT_DRIVEN`.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (the headless loop calls only `App::update()` and does not update the scene graph).
+- `setFps(fps)` assigns `targetFps` and returns the settings by reference for chaining. Use a finite positive rate; other values warn at startup and run no updates.
 '''
 details.ja = '''
 - `runHeadlessApp` に渡すと、ウィンドウやグラフィックスコンテキストなしで実行します。設定項目は目標更新頻度（毎秒の更新回数）の `targetFps` だけで、既定値は 60 です。
-- `setFps(fps)` は `targetFps` に代入し、連続して設定できるように自身の参照を返します。正の値を指定してください。実行ループは固定時間刻みを `1.0 / targetFps` として計算し、`VSYNC` や `EVENT_DRIVEN` を特別な値として扱いません。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレスループは `App::update()` だけを呼び、シーングラフを更新しません）。
+- `setFps(fps)` は `targetFps` に代入し、連続して設定できるように自身の参照を返します。有限の正のレートを指定してください。それ以外の値では起動時に警告し、更新を実行しません。
 '''
 details.ko = '''
 - `runHeadlessApp`에 전달하면 윈도우나 그래픽 컨텍스트 없이 실행합니다. 유일한 설정은 초당 목표 업데이트 횟수인 `targetFps`이며 기본값은 60입니다.
-- `setFps(fps)`는 `targetFps`에 값을 대입하고 연속 설정을 위해 자신의 참조를 반환합니다. 양수를 지정하세요. 실행 루프는 고정 시간 간격을 `1.0 / targetFps`로 계산하며 `VSYNC`나 `EVENT_DRIVEN`을 특수 값으로 해석하지 않습니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 루프는 `App::update()`만 호출하며 장면 그래프를 업데이트하지 않습니다).
+- `setFps(fps)`는 `targetFps`에 값을 대입하고 연속 설정을 위해 자신의 참조를 반환합니다. 유한한 양수 레이트를 지정합니다. 그 외의 값은 시작 시 경고하고 업데이트를 실행하지 않습니다.
 '''
 related = ["runHeadlessApp", "WindowSettings"]
 
@@ -11027,17 +11021,17 @@ description.ko = "헤드리스 앱의 목표 업데이트 레이트를 보관한
 details.en = '''
 - This `float` is measured in updates per second and defaults to `60.0f`. `runHeadlessApp()` uses fixed update steps of `1 / targetFps` seconds, which is also the value reported by `getDeltaTime()` during updates.
 - Set it before calling `runHeadlessApp()`. The runner copies the value at startup, so later changes to this settings object do not change the running update rate.
-- Use a finite positive value. Values are not validated or clamped; zero, negative, or non-finite values result in no update steps, and `VSYNC` and `EVENT_DRIVEN` have no special meaning here.
+- Use a finite positive rate; other values warn at startup and run no updates.
 '''
 details.ja = '''
 - この `float` の単位は 1 秒あたりの更新回数で、既定値は `60.0f` です。`runHeadlessApp()` は `1 / targetFps` 秒の固定ステップで更新し、更新中の `getDeltaTime()` もこの値を返します。
 - `runHeadlessApp()` を呼ぶ前に設定してください。実行開始時に値がコピーされるため、そのあとにこの設定オブジェクトを変更しても実行中の更新レートは変わりません。
-- 有限の正の値を使ってください。値の検証や範囲への補正は行われません。0、負の値、非有限値では更新ステップが実行されず、`VSYNC` と `EVENT_DRIVEN` に特別な意味はありません。
+- 有限の正のレートを指定してください。それ以外の値では起動時に警告し、更新を実行しません。
 '''
 details.ko = '''
 - 이 `float`의 단위는 초당 업데이트 횟수이며 기본값은 `60.0f`입니다. `runHeadlessApp()`은 `1 / targetFps`초의 고정 스텝으로 업데이트하고, 업데이트 중 `getDeltaTime()`도 이 값을 반환합니다.
 - `runHeadlessApp()`을 호출하기 전에 설정하세요. 실행 시작 시 값을 복사하므로 이후 이 설정 객체를 변경해도 실행 중인 업데이트 레이트는 바뀌지 않습니다.
-- 유한한 양수를 사용하세요. 값을 검증하거나 범위에 맞게 보정하지 않습니다. 0, 음수 또는 비유한 값이면 업데이트 스텝을 실행하지 않으며 `VSYNC`와 `EVENT_DRIVEN`에는 특별한 의미가 없습니다.
+- 유한한 양수 레이트를 지정합니다. 그 외의 값은 시작 시 경고하고 업데이트를 실행하지 않습니다.
 '''
 related = ["HeadlessSettings::setFps", "runHeadlessApp", "getDeltaTime"]
 
@@ -20240,8 +20234,7 @@ details.en = '''
 - `removeChild()` / `removeAllChildren()` do not call `cleanup()`. They only detach the node.
 - It can run even if `setup()` never ran (for example, an App that ends before its first update), so do not assume that what `setup()` creates is there.
 - Before `cleanup()` runs, the node is marked dead, its async timers are canceled, and it is no longer treated as the hovered, grabbed or selected node.
-- When an App ends, `cleanup()` runs after `App::exit()`, on the child nodes first and then on the App. In a headless App, only the App's own `cleanup()` runs. Audio is disconnected before this, so you can release audio state here. For the whole order, see `App::exit`.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (in a headless App, child nodes get no `cleanup()` at app exit).
+- When an App ends, `cleanup()` runs after `App::exit()`, on the child nodes first and then on the App. This order also applies to headless Apps. Audio is disconnected before this, so you can release audio state here. For the whole order, see `App::exit`.
 - At a session end (logout, restart or shutdown), if no App code is running on the main thread, `cleanup()` runs as in a normal ending. If App code is running at that moment, the OS ends the process and neither `App::exit` nor `cleanup()` is called; see `App::exit`.
 - If one child's `cleanup()` throws, the other children and the App are still cleaned up.
 '''
@@ -20251,8 +20244,7 @@ details.ja = '''
 - `removeChild()` / `removeAllChildren()` は `cleanup()` を呼びません。ノードを切り離すだけです。
 - `setup()` が一度も実行されていないノード（例えば、最初の update の前に終わった App）でも呼ばれることがあります。`setup()` で作ったものが存在するとは想定しないでください。
 - `cleanup()` の前に、ノードは dead として扱われ、非同期タイマーはキャンセルされ、hover・grab・選択中のノードとしても扱われなくなります。
-- App が終わるときは、`App::exit()` のあとに、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App では App 自身の `cleanup()` だけが呼ばれます。その前にオーディオは切り離されているため、オーディオ関係の後片付けをここで行えます。全体の順番は `App::exit` を参照してください。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレス App では、終了時に子ノードの `cleanup()` が呼ばれません）。
+- App が終わるときは、`App::exit()` のあとに、子ノード、App の順に `cleanup()` が呼ばれます。ヘッドレス App でも同じ順番です。その前にオーディオは切り離されているため、オーディオ関係の後片付けをここで行えます。全体の順番は `App::exit` を参照してください。
 - セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、通常の終了と同じように `cleanup()` が呼ばれます。実行中だった場合は OS がプロセスを終了させ、`App::exit` も `cleanup()` も呼ばれません。`App::exit` を参照してください。
 - ある子ノードの `cleanup()` が例外を投げても、ほかの子ノードと App の後片付けは行われます。
 '''
@@ -20262,8 +20254,7 @@ details.ko = '''
 - `removeChild()` / `removeAllChildren()`은 `cleanup()`을 호출하지 않습니다. 노드를 떼어내기만 합니다.
 - `setup()`이 한 번도 실행되지 않은 노드(예: 처음 update되기 전에 끝난 App)에서도 호출될 수 있습니다. `setup()`에서 만든 것이 있다고 가정하지 마세요.
 - `cleanup()` 전에 노드는 dead로 표시되고, 비동기 타이머가 취소되며, hover·grab·선택 중인 노드로도 더 이상 다뤄지지 않습니다.
-- App이 끝날 때는 `App::exit()` 다음에 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서는 App 자신의 `cleanup()`만 호출됩니다. 그전에 오디오가 분리되므로, 여기서 오디오 관련 정리를 할 수 있습니다. 전체 순서는 `App::exit`를 참조하세요.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 App에서는 종료 시 자식 노드의 `cleanup()`이 호출되지 않습니다).
+- App이 끝날 때는 `App::exit()` 다음에 자식 노드, App 순서로 `cleanup()`이 호출됩니다. 헤드리스 App에서도 같은 순서로 실행합니다. 그전에 오디오가 분리되므로, 여기서 오디오 관련 정리를 할 수 있습니다. 전체 순서는 `App::exit`를 참조하세요.
 - 세션 종료(로그아웃, 재시작, 시스템 종료) 때 메인 스레드에서 App 코드가 실행 중이 아니면 일반 종료와 같이 `cleanup()`이 호출됩니다. 실행 중이었다면 OS가 프로세스를 종료하며 `App::exit`도 `cleanup()`도 호출되지 않습니다. `App::exit`를 참조하세요.
 - 어떤 자식 노드의 `cleanup()`이 예외를 던져도 다른 자식 노드와 App의 정리는 진행됩니다.
 '''
@@ -22261,7 +22252,7 @@ ball->setActive(false);    // update() stops for ball and all its children
 - Updates and draws are not 1:1. With independent or fixed-Hz update (see `setIndependentFps`), there can be zero or several updates per drawn frame.
 - Changes to the tree made inside `update()` take effect from the next frame, because children are walked from a copy of the list.
 - In a windowed app, `BeforeApp` `events().update` listeners run before the App's update tree. After each main update, the matrix and style stack depth is restored.
-- `runHeadlessApp` calls only the App's own `update()`, not the tree, so child nodes' `update()`, timers and the removal of destroyed children do not run there (Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906)).
+- `runHeadlessApp` uses the same update tree and timing scope as windowed Apps: children, Mods, node timers and removal of destroyed children run on each fixed step. Drawing and hover updates are window-only.
 '''
 details.ja = '''
 - 親が子より先に実行されます。ノードごとの処理順は、非アクティブならスキップ、destroy された子の片付け、`setup()`（初回のみ）、mod の `earlyUpdate()`、タイマー（`callAfter` / `callEvery`）、`update()`、mod の `update()`、最後に各子をリスト順に、という流れです。
@@ -22275,7 +22266,7 @@ ball->setActive(false);    // update() stops for ball and all its children
 - update と draw は 1:1 ではありません。独立 fps や固定 Hz の update（`setIndependentFps` を参照）では、描画 1 フレームの間に update が 0 回のことも、複数回のこともあります。
 - `update()` の中でツリーを変更しても、反映されるのは次のフレームからです。子はリストのコピーを使って順に処理されるためです。
 - ウィンドウのあるアプリでは、`BeforeApp` の `events().update` リスナーが App の update ツリーより先に呼ばれます。メインの update が終わるたびに、matrix と style のスタックの深さは元に戻されます。
-- `runHeadlessApp` は App 自身の `update()` だけを呼び、ツリーは処理しません。そのため、子ノードの `update()`、タイマー、destroy された子の片付けは実行されません（既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)）。
+- `runHeadlessApp` はウィンドウのある App と同じ update ツリーと時間スコープを使います。固定ステップごとに子ノード、Mod、ノードタイマー、destroy された子の片付けを処理します。描画と hover の更新はウィンドウのある App だけで行います。
 '''
 details.ko = '''
 - 부모가 자식보다 먼저 실행됩니다. 노드별 처리 순서는 비활성이면 건너뛰기, destroy된 자식 정리, `setup()`(처음만), mod의 `earlyUpdate()`, 타이머(`callAfter` / `callEvery`), `update()`, mod의 `update()`, 마지막으로 각 자식을 목록 순서대로 처리하는 흐름입니다.
@@ -22289,7 +22280,7 @@ ball->setActive(false);    // update() stops for ball and all its children
 - update와 draw는 1:1이 아닙니다. 독립 fps나 고정 Hz update(`setIndependentFps` 참고)에서는 그리는 1 프레임 동안 update가 0번일 수도, 여러 번일 수도 있습니다.
 - `update()` 안에서 트리를 바꿔도 반영되는 것은 다음 프레임부터입니다. 자식은 목록의 복사본으로 순서대로 처리되기 때문입니다.
 - 윈도우가 있는 앱에서는 `BeforeApp`의 `events().update` 리스너가 App의 update 트리보다 먼저 호출됩니다. 메인 update가 끝날 때마다 matrix와 style 스택 깊이는 원래대로 돌아갑니다.
-- `runHeadlessApp`은 App 자신의 `update()`만 호출하고 트리는 처리하지 않습니다. 따라서 자식 노드의 `update()`, 타이머, destroy된 자식 정리는 실행되지 않습니다(알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)).
+- `runHeadlessApp`은 창이 있는 App과 같은 update 트리와 시간 범위를 사용합니다. 고정 단계마다 자식 노드, Mod, 노드 타이머와 destroy된 자식 정리를 실행합니다. 그리기와 hover 갱신은 창이 있는 App에서만 실행합니다.
 '''
 related = ["Node::setup", "Node::draw", "Node::setActive", "Node::setVisible", "CoreEvents::update", "getDeltaTime", "getFrameCount", "setIndependentFps"]
 snippet = '''
@@ -33000,17 +32991,17 @@ description.en = "Returns the stored texture usage mode."
 description.ja = "保存されているテクスチャの使用モードを返す。"
 description.ko = "저장된 텍스처 사용 모드를 반환한다."
 details.en = '''
-- Returns a `TextureUsage` value: `Immutable`, `Dynamic`, `Stream`, or `RenderTarget`.
+- Returns a `TextureUsage` value: `Immutable`, `Dynamic`, `Stream`, `RenderTarget`, or `Storage`.
 - The initial value is `Immutable`; allocation methods record their selected usage, and `allocateCompressed()` selects `Immutable`.
 - This does not query the GPU or confirm allocation success. `clear()` does not reset the stored usage.
 '''
 details.ja = '''
-- `TextureUsage` の `Immutable`、`Dynamic`、`Stream`、`RenderTarget` のいずれかを返します。
+- `TextureUsage` の `Immutable`、`Dynamic`、`Stream`、`RenderTarget`、`Storage` のいずれかを返します。
 - 初期値は `Immutable` です。確保時に選択した使用モードが保存され、`allocateCompressed()` は `Immutable` を設定します。
 - GPU への問い合わせや確保成功の確認は行いません。`clear()` は保存済みの使用モードをリセットしません。
 '''
 details.ko = '''
-- `TextureUsage`의 `Immutable`, `Dynamic`, `Stream`, `RenderTarget` 중 하나를 반환합니다.
+- `TextureUsage`의 `Immutable`, `Dynamic`, `Stream`, `RenderTarget`, `Storage` 중 하나를 반환합니다.
 - 초기값은 `Immutable`입니다. 할당 시 선택한 사용 모드를 저장하며 `allocateCompressed()`는 `Immutable`을 설정합니다.
 - GPU를 조회하거나 할당 성공 여부를 확인하지 않습니다. `clear()`는 저장된 사용 모드를 초기화하지 않습니다.
 '''
@@ -33151,7 +33142,7 @@ description.ko = "할당된 텍스처에 픽셀 데이터를 업로드한다."
 details.en = '''
 - Staging sizes and row/slice pitches must fit sokol's signed integer representation; an unrepresentable transfer logs an error.
 - Use after allocating a Dynamic or Stream texture and whenever its CPU data changes; accepts `Pixels` or a data pointer with width, height, and channel count, and replaces the whole texture rather than a subsection.
-- Width, height, and channel count must match the allocation exactly; mismatches, an unallocated texture, Immutable usage, or missing graphics initialization return without uploading. The function returns no value and does not resize or convert the input.
+- Width, height, and channel count must match the allocation exactly; mismatches, an unallocated texture, Immutable or Storage usage, or missing graphics initialization return without uploading. The function returns no value and does not resize or convert the input.
 - Pointer data must be tightly packed in the allocated GPU format and remain valid during the call; the byte count is computed from the explicit format, or from the stored channel count for channel-count allocations, and the pointer overload does not receive a buffer length. `Pixels` uploads do not validate that the component type matches the texture.
 - With channel-count allocations of two or three channels, the GPU format is R8 although the CPU byte count uses two or three bytes per pixel; this does not describe matching pixel data. Use explicit `TextureFormat::R8` for single-channel data or `TextureFormat::RG8` for two-channel data.
 - Copies immediately through staging storage, including repeated uploads in one device frame. During a render pass, flushes pending drawing, suspends the pass, copies, and resumes with its contents preserved; the next draw sees the new pixels.
@@ -33162,7 +33153,7 @@ details.en = '''
 details.ja = '''
 - ステージング領域のサイズと行・スライスの間隔は sokol の符号付き整数で表せる必要があり、表せない転送はエラーを記録します。
 - Dynamic または Stream のテクスチャを確保した後や、CPU のデータを変更したときに呼び出します。`Pixels`、またはデータポインタと幅、高さ、チャンネル数を受け取り、一部分ではなくテクスチャ全体を置き換えます。
-- 幅、高さ、チャンネル数は確保時と完全に一致させてください。不一致、未確保、Immutable、グラフィックス未初期化の場合は転送せずに戻ります。戻り値はなく、入力のサイズ変更や形式変換も行いません。
+- 幅、高さ、チャンネル数は確保時と完全に一致させてください。不一致、未確保、Immutable・Storage、グラフィックス未初期化の場合は転送せずに戻ります。戻り値はなく、入力のサイズ変更や形式変換も行いません。
 - ポインタのデータは確保した GPU 形式で隙間なく並べ、呼び出し中は有効に保ってください。バイト数は明示的に指定した形式から計算し、チャンネル数を指定して確保した場合は保持しているチャンネル数を使用します。ポインタ版はバッファ長を受け取りません。`Pixels` 版も成分の型がテクスチャと一致するかは検証しません。
 - チャンネル数を 2 または 3 として確保した場合、GPU 形式は R8 ですが、CPU のバイト数は 1 ピクセルあたり 2 または 3 バイトとして計算され、ピクセル形式が一致しません。1 チャンネルのデータには `TextureFormat::R8`、2 チャンネルのデータには `TextureFormat::RG8` を明示的に指定してください。
 - ステージング領域経由で直ちにコピーし、同じデバイスフレーム内でも繰り返し転送できます。描画パス中では記録済みの描画を実行してパスを中断し、コピー後に内容を保持して再開します。直後の描画には新しいピクセルが使われます。
@@ -33173,7 +33164,7 @@ details.ja = '''
 details.ko = '''
 - 스테이징 크기와 행·슬라이스 간격은 sokol의 부호 있는 정수로 표현할 수 있어야 하며, 표현할 수 없는 전송은 오류를 기록합니다.
 - Dynamic 또는 Stream 텍스처를 할당한 뒤나 CPU 데이터를 변경했을 때 호출합니다. `Pixels` 또는 데이터 포인터와 너비, 높이, 채널 수를 받으며, 일부 영역이 아니라 텍스처 전체를 교체합니다.
-- 너비, 높이, 채널 수는 할당한 값과 정확히 일치해야 합니다. 값이 다르거나 텍스처가 할당되지 않았거나 Immutable이거나 그래픽이 초기화되지 않았으면 업로드 없이 반환합니다. 반환값은 없으며 입력의 크기나 형식을 변환하지 않습니다.
+- 너비, 높이, 채널 수는 할당한 값과 정확히 일치해야 합니다. 값이 다르거나 텍스처가 할당되지 않았거나 Immutable 또는 Storage이거나 그래픽이 초기화되지 않았으면 업로드 없이 반환합니다. 반환값은 없으며 입력의 크기나 형식을 변환하지 않습니다.
 - 포인터 데이터는 할당된 GPU 형식으로 빈틈없이 배치되어야 하며 호출 중 유효해야 합니다. 바이트 수는 명시적으로 지정한 형식으로 계산하며, 채널 수로 할당한 경우에는 저장된 채널 수를 사용합니다. 포인터 오버로드는 버퍼 길이를 받지 않습니다. `Pixels` 업로드도 성분 자료형이 텍스처와 일치하는지 검증하지 않습니다.
 - 채널 수를 2 또는 3으로 지정하여 할당하면 GPU 형식은 R8이지만 CPU 바이트 수는 픽셀당 2 또는 3바이트로 계산되므로 픽셀 형식이 일치하지 않습니다. 단일 채널 데이터에는 `TextureFormat::R8`, 2채널 데이터에는 `TextureFormat::RG8`을 명시적으로 지정합니다.
 - 스테이징 저장소를 통해 즉시 복사하며 같은 디바이스 프레임에서도 반복 업로드할 수 있습니다. 렌더 패스 중에는 대기 중인 그리기를 실행하고 패스를 중단한 뒤 복사하고 내용을 보존하여 재개합니다. 바로 다음 그리기는 새 픽셀을 사용합니다.
@@ -33458,14 +33449,15 @@ value_desc.Linear.en = "Bilinear interpolation (default)"
 
 ["TextureFormat"]
 description.en = "Specifies the channel layout and component precision of a GPU texture."
-description.ja = "GPU テクスチャのチャンネル構成と成分の精度を指定する。"
-description.ko = "GPU 텍스처의 채널 구성과 성분 정밀도를 지정한다."
+description.ja = "GPU テクスチャのチャンネル構成と成分の精度を指定します。"
+description.ko = "GPU 텍스처의 채널 구성과 성분 정밀도를 지정합니다."
 details.en = '''
 - The default format `RGBA8` has four normalized unsigned 8-bit components per pixel; `BGRA8` has the same precision with B-G-R-A byte order, used for swapchain, Syphon, and video interoperability.
 - `R8` and `RG8` have one and two normalized unsigned 8-bit components. `RGBA16` has four normalized unsigned 16-bit components for higher integer precision and texture-sharing interoperability; it is not a floating-point format.
 - `R16F`, `RG16F`, and `RGBA16F` have one, two, and four 16-bit floating-point components; `R32F`, `RG32F`, and `RGBA32F` use 32-bit floating-point components.
 - `channelCount()`, `bytesPerPixel()`, and `isFloatFormat()` report the component count, pixel size in bytes, and whether the components are floating point. `toSokolFormat()` converts to `sg_pixel_format`.
 - These are uncompressed GPU formats; `PixelFormat` specifies CPU component storage separately, and `allocateCompressed()` accepts sokol formats directly.
+- For `TextureUsage::Storage`, `RGBA16F` is the portable float choice. `RGBA32F`/`R32F` depend on the GPU and are refused when it cannot filter them.
 '''
 details.ja = '''
 - 既定の形式 `RGBA8` は、1 ピクセルに正規化された符号なし 8 ビット成分を 4 個持ちます。`BGRA8` は同じ精度でバイト順が B-G-R-A となり、スワップチェーン、Syphon、動画との連携に使います。
@@ -33473,6 +33465,7 @@ details.ja = '''
 - `R16F`、`RG16F`、`RGBA16F` は 16 ビット浮動小数点成分をそれぞれ 1 個、2 個、4 個持ちます。`R32F`、`RG32F`、`RGBA32F` は 32 ビット浮動小数点成分を使います。
 - `channelCount()`、`bytesPerPixel()`、`isFloatFormat()` で、成分数、1 ピクセルのバイト数、浮動小数点成分かどうかを取得できます。`toSokolFormat()` は `sg_pixel_format` に変換します。
 - これらは非圧縮の GPU 形式です。CPU の成分の格納型は `PixelFormat` で別に指定し、`allocateCompressed()` には sokol の形式を直接渡します。
+- `TextureUsage::Storage` の浮動小数点形式には、移植性の高い `RGBA16F` を使えます。`RGBA32F`/`R32F` は GPU に依存し、フィルタリング非対応の GPU では拒否します。
 '''
 details.ko = '''
 - 기본 형식인 `RGBA8`은 픽셀당 정규화된 부호 없는 8비트 성분 4개를 가집니다. `BGRA8`은 같은 정밀도에서 바이트 순서가 B-G-R-A이며 스왑체인, Syphon, 비디오 연동에 사용합니다.
@@ -33480,6 +33473,7 @@ details.ko = '''
 - `R16F`, `RG16F`, `RGBA16F`는 16비트 부동소수점 성분을 각각 1개, 2개, 4개 가집니다. `R32F`, `RG32F`, `RGBA32F`는 32비트 부동소수점 성분을 사용합니다.
 - `channelCount()`, `bytesPerPixel()`, `isFloatFormat()`으로 성분 수, 픽셀당 바이트 수, 부동소수점 성분 여부를 확인합니다. `toSokolFormat()`은 `sg_pixel_format`으로 변환합니다.
 - 이들은 비압축 GPU 형식입니다. CPU 성분 저장 형식은 `PixelFormat`으로 별도 지정하며 `allocateCompressed()`에는 sokol 형식을 직접 전달합니다.
+- `TextureUsage::Storage`의 부동소수점 형식으로 이식성이 높은 `RGBA16F`를 사용할 수 있습니다. `RGBA32F`/`R32F`는 GPU에 따라 지원 여부가 달라지며, GPU가 필터링을 지원하지 않으면 거부합니다.
 '''
 keywords = ["pixel", "rgba", "bit depth"]
 related = ["channelCount", "bytesPerPixel", "isFloatFormat", "Texture", "TextureUsage", "PixelFormat"]
@@ -33497,19 +33491,22 @@ value_desc.RGBA16.en = "4ch, 16-bit unorm/ch (high-precision integer; texture-sh
 
 ["TextureUsage"]
 description.en = "Selects how a GPU texture receives its contents."
-description.ja = "GPU テクスチャの内容の更新方法を指定する。"
-description.ko = "GPU 텍스처의 내용을 갱신하는 방식을 지정한다."
+description.ja = "GPU テクスチャの内容の更新方法を指定します。"
+description.ko = "GPU 텍스처의 내용을 갱신하는 방식을 지정합니다."
 details.en = '''
+- `Storage` allocates empty compute output and a sampled view. It supports single-sample 2D, mip 0, in RGBA8, RGBA16F, RGBA32F or R32F. Allocation requires compute plus format write, sample and filtering capability, so normal Texture drawing works. `RGBA16F` is the portable float choice: half float filtering is core in GLES 3.0, without `OES_texture_float_linear`. `RGBA32F`/`R32F` depend on the GPU and are refused when it cannot filter them. Unsupported configurations warn and remain unallocated. Check `isAllocated()` before binding. Use `ComputeShader::setStorageImage`, then draw the Texture normally. CPU `loadData()` is not supported for Storage.
 - `Immutable` supplies fixed contents at creation, `Dynamic` supports periodic CPU uploads, `Stream` supports frequent uploads such as camera frames, and `RenderTarget` supports rendering into the texture as an FBO attachment.
 - `Texture::allocate()` defaults to `Immutable`. `Texture::loadData()` ignores uploads to immutable textures; use `Dynamic` or `Stream` for CPU updates.
 - See `Texture` for GPU threading, lifetime, and upload restrictions.
 '''
 details.ja = '''
+- `Storage` は空の compute 出力と描画用 view を確保します。RGBA8、RGBA16F、RGBA32F、R32F の単一サンプル 2D、mip 0 に対応します。通常の Texture 描画のため、確保には compute と形式の書き込み・サンプリング・フィルタリング対応が必要です。`RGBA16F` は移植性の高い浮動小数点形式です。半精度のフィルタリングは GLES 3.0 の標準機能で、`OES_texture_float_linear` は不要です。`RGBA32F`/`R32F` は GPU に依存し、フィルタリング非対応の GPU では拒否します。非対応の構成では警告を出し、未確保のままにします。割り当て前に `isAllocated()` を確認してください。`ComputeShader::setStorageImage` で割り当て、その後は通常どおり Texture を描画します。Storage への CPU の `loadData()` はできません。
 - `Immutable` は作成時に固定の内容を渡し、`Dynamic` は CPU からの定期的な転送、`Stream` はカメラ映像のような頻繁な転送に使います。`RenderTarget` は FBO のアタッチメントとしてテクスチャへの描画に使います。
 - `Texture::allocate()` のデフォルトは `Immutable` です。`Texture::loadData()` は変更不可のテクスチャへの転送を無視します。CPU から更新する場合は `Dynamic` または `Stream` を使ってください。
 - GPU を扱うスレッド、寿命、転送の制約は `Texture` を参照してください。
 '''
 details.ko = '''
+- `Storage`는 빈 compute 출력과 샘플링 view를 할당합니다. RGBA8, RGBA16F, RGBA32F, R32F의 단일 샘플 2D, mip 0을 지원합니다. 일반 Texture 그리기를 위해 compute 및 형식의 쓰기, 샘플링, 필터링 지원이 필요합니다. `RGBA16F`는 이식성이 높은 부동소수점 형식입니다. 반정밀도 필터링은 GLES 3.0의 기본 기능이므로 `OES_texture_float_linear`가 필요하지 않습니다. `RGBA32F`/`R32F`는 GPU에 따라 지원 여부가 달라지며, GPU가 필터링을 지원하지 않으면 거부합니다. 지원하지 않는 구성은 경고 후 미할당 상태를 유지합니다. 바인딩 전에 `isAllocated()`를 확인합니다. `ComputeShader::setStorageImage`로 바인딩한 뒤 Texture를 일반적으로 그립니다. Storage의 CPU `loadData()`는 지원하지 않습니다.
 - `Immutable`은 생성 시 고정된 내용을 제공하고, `Dynamic`은 CPU의 주기적인 업로드, `Stream`은 카메라 프레임처럼 빈번한 업로드에 사용합니다. `RenderTarget`은 FBO 부착 대상으로 텍스처에 그릴 때 사용합니다.
 - `Texture::allocate()`의 기본값은 `Immutable`입니다. `Texture::loadData()`는 변경 불가능한 텍스처로의 업로드를 무시합니다. CPU에서 갱신하려면 `Dynamic` 또는 `Stream`을 사용합니다.
 - GPU를 다루는 스레드, 수명 및 업로드 제한은 `Texture`를 참조합니다.
@@ -33520,6 +33517,13 @@ value_desc.Immutable.en = "Set once, cannot update (for Image::load)"
 value_desc.Dynamic.en = "Update periodically from CPU (for Image::allocate)"
 value_desc.Stream.en = "Update every frame (for VideoGrabber)"
 value_desc.RenderTarget.en = "For FBO color attachment"
+value_desc.Storage.en = "Single-sample 2D compute output, also sampled for drawing"
+value_desc.Storage.ja = "描画でも読み取れる単一サンプル 2D の compute 出力です。"
+value_desc.Storage.ko = "그리기에서도 샘플링하는 단일 샘플 2D compute 출력입니다."
+snippet = '''
+Texture output;
+output.allocate(64, 64, TextureFormat::RGBA8, TextureUsage::Storage);
+'''
 
 ["TextureWrap"]
 description.en = "Specifies how texture coordinates wrap beyond the texture edges."
@@ -34853,7 +34857,6 @@ details.en = '''
 - `pause()` preserves progress, `resume()` enables playback unless complete, and `reset()` stops playback and clears elapsed time and completion without restoring node transforms. `start()` captures starting values again and reapplies the delay.
 - The argument-free `complete` event fires after the final transforms are applied and playback becomes complete; subscribe with `mod->complete.listen([]() { ... });` and retain the returned `EventListener`. Completion does not remove the modifier.
 - The node owns the modifier. Adding another `TweenMod` to the same node replaces the existing one; removal, replacement, or node destruction invalidates the returned pointer.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (`runHeadlessApp` does not update the scene graph, so this modifier does not advance automatically).
 '''
 details.ja = '''
 - `node->addMod<TweenMod>()` で追加し、`moveTo()`、`scaleTo()`、`rotateTo()` などのチェイン可能なメソッドで設定してから `start()` を呼びます。有効にしたすべてのプロパティで時間設定とイージングを共有します。
@@ -34864,7 +34867,6 @@ details.ja = '''
 - `pause()` は進行状況を保持し、`resume()` は未完了なら再生を有効にします。`reset()` は再生を止めて経過時間と完了状態を解除しますが、ノードの変換は元に戻しません。`start()` は開始値を取得し直し、待ち時間も再適用します。
 - 引数のない `complete` イベントは、最後の変換を適用して完了状態になったあとで通知します。`mod->complete.listen([]() { ... });` で購読し、返された `EventListener` を保持してください。完了しても Mod は削除されません。
 - Mod はノードが所有します。同じノードに別の `TweenMod` を追加すると既存のものを置き換えます。削除、置き換え、ノードの破棄で返されたポインターは無効になります。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（`runHeadlessApp` はシーングラフを更新しないため、この Mod は自動では進みません）。
 '''
 details.ko = '''
 - `node->addMod<TweenMod>()`로 추가하고 `moveTo()`, `scaleTo()`, `rotateTo()` 등의 체이닝 가능한 메서드로 설정한 뒤 `start()`를 호출합니다. 활성화된 모든 속성은 시간 설정과 이징을 공유합니다.
@@ -34875,7 +34877,6 @@ details.ko = '''
 - `pause()`는 진행 상태를 유지하고 `resume()`은 아직 완료되지 않았으면 재생을 활성화합니다. `reset()`은 재생을 정지하고 경과 시간과 완료 상태를 초기화하지만 노드의 변환을 복원하지는 않습니다. `start()`는 시작 값을 다시 가져오고 대기 시간도 다시 적용합니다.
 - 인수가 없는 `complete` 이벤트는 마지막 변환을 적용하고 완료 상태가 된 뒤 알립니다. `mod->complete.listen([]() { ... });`으로 구독하고 반환된 `EventListener`를 보관합니다. 완료되어도 Mod는 제거되지 않습니다.
 - 노드가 Mod를 소유합니다. 같은 노드에 다른 `TweenMod`를 추가하면 기존 항목을 교체합니다. 제거, 교체, 노드 소멸 시 반환된 포인터는 무효화됩니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(`runHeadlessApp`은 장면 그래프를 갱신하지 않으므로 이 Mod는 자동으로 진행되지 않습니다).
 '''
 related = ["ease", "EaseType", "Node", "Node::addMod", "Mod", "TweenMod::start", "TweenMod::complete"]
 snippet = '''
@@ -49084,19 +49085,16 @@ details.en = '''
 - Calls `AudioEngine::getInstance().init()` only while the engine is uninitialized. It returns no value and leaves an already initialized engine unchanged.
 - `Sound::load()`, `loadStream()`, `loadTestTone()`, and both `loadFromBuffer()` overloads attempt initialization automatically while the engine is uninitialized; `play()` does not. Call this helper to start output before using synthesis through `audioOut`.
 - Initialization reuses the numeric configuration from the last `AudioEngine::init(AudioSettings)` call, or the initial defaults described in `AudioEngine`, and selects the system default device with the default backend selection. Use `AudioEngine::init(settings)` for custom configuration and its boolean result, or check `isInitialized()` after this helper; startup failures are logged.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (`setup()` does not automatically call `initAudio()`).
 '''
 details.ja = '''
 - エンジンが未初期化のときだけ `AudioEngine::getInstance().init()` を呼びます。戻り値はなく、初期化済みの場合は変更しません。
 - `Sound::load()`、`loadStream()`、`loadTestTone()`、両方の `loadFromBuffer()` は、エンジンが未初期化なら自動的に初期化を試みます。`play()` は初期化しません。`audioOut` による音声合成などで先に出力を開始するには、この関数を呼んでください。
 - 最後の `AudioEngine::init(AudioSettings)` の数値設定を再利用し、まだ呼んでいない場合は `AudioEngine` に記載した初期の既定値を使います。デバイスはシステム既定、バックエンドは既定の選択方法になります。独自の設定と成否の戻り値が必要な場合は `AudioEngine::init(settings)` を使うか、この関数のあとで `isInitialized()` を確認してください。開始に失敗した場合はログに出力されます。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（`setup()` から `initAudio()` は自動的には呼ばれません）。
 '''
 details.ko = '''
 - 엔진이 초기화되지 않았을 때만 `AudioEngine::getInstance().init()`를 호출합니다. 반환값은 없으며 이미 초기화된 엔진은 변경하지 않습니다.
 - `Sound::load()`, `loadStream()`, `loadTestTone()`, 두 `loadFromBuffer()` 오버로드는 엔진이 초기화되지 않았으면 자동으로 초기화를 시도합니다. `play()`는 초기화하지 않습니다. `audioOut`을 통한 음성 합성 등에서 출력을 먼저 시작하려면 이 함수를 호출합니다.
 - 마지막 `AudioEngine::init(AudioSettings)`의 숫자 설정을 재사용하며 아직 호출하지 않았다면 `AudioEngine`에 설명된 초기 기본값을 사용합니다. 장치는 시스템 기본 장치를 선택하고 백엔드는 기본 선택 방식을 사용합니다. 사용자 설정과 성공 여부 반환값이 필요하면 `AudioEngine::init(settings)`를 사용하거나 이 함수 뒤에 `isInitialized()`를 확인합니다. 시작 실패는 로그에 기록합니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(`setup()`에서 `initAudio()`를 자동으로 호출하지 않습니다).
 '''
 related = ["AudioEngine::getInstance", "shutdownAudio", "AudioEngine::init"]
 snippet = '''
@@ -51687,38 +51685,35 @@ description.ja = "ウィンドウやグラフィックスコンテキストな�
 description.ko = "윈도우나 그래픽스 컨텍스트 없이 앱을 실행한다."
 details.en = '''
 - Pass the app class as the template argument, as in `runHeadlessApp<tcApp>()`. Optional `HeadlessSettings` sets the target update rate, which defaults to 60 updates per second; the function returns the process exit code.
-- It creates your App (this is the only way to make a headless App) and calls `setup()` once. Each step then calls `update()`. There is no window, GPU or `draw()`, and child nodes, mods and node timers are not updated (see the known issue below).
+- It creates your App (this is the only way to make a headless App) and calls `setup()` once. Each fixed step runs the same App update entry as a windowed App, including children, Mods, node timers and removal of destroyed children. There is no window, GPU, `draw()` or hover update.
 - If `setup()` asks to quit and the quit is accepted, the App ends right after `setup()` returns, before audio callbacks, console commands and the first `update()`.
 - Updates use a fixed step, so `getDeltaTime()` is `1 / settings.targetFps`. Each loop pass runs at most `setMaxUpdateSteps()` steps, with a default limit of 10; a nonpositive limit removes the cap.
 - Excess whole steps after a stall or slow update are discarded with one warning per stall. Between passes, the loop sleeps until the next step is due, requesting at most 1 ms of sleep.
 - The runner's thread is used as the main thread, and queued `runOnMainThread` callbacks are processed between update passes.
-- When it ends, `events().exit` and `exit()` run, the App's audio callbacks are disconnected, and then the App's own `cleanup()` runs (child nodes get none). The audio device keeps running.
+- When it ends, `events().exit` and `exit()` run, the App's audio callbacks are disconnected, and then `cleanup()` runs on children before the App. The audio device keeps running.
 - Update-event services now work headless: Tween, update-mode TcpClient/UdpSocket receive, tcxBox2d auto stepping, and WebSocket timeouts.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (headless updates call only the app's `update()`, leaving child, mod, and timer updates unprocessed).
 - A process uses either windows (`runApp`) or headless mode, not both at once. If the App's constructor throws, nothing else runs: no `setup()`, `exit()` or `cleanup()`.
 '''
 details.ja = '''
 - `runHeadlessApp<tcApp>()` のように、アプリのクラスをテンプレート引数に指定します。省略可能な `HeadlessSettings` で目標更新レートを指定でき、既定値は毎秒 60 回です。プロセスの終了コードを返します。
-- App を作り（ヘッドレス App を作る方法はこれだけです）、`setup()` を 1 回呼びます。そのあとは各ステップで `update()` を呼びます。ウィンドウ、GPU、`draw()` はなく、子ノード、Mod、ノードのタイマーは更新されません（下の既知の問題を参照）。
+- App を作り（ヘッドレス App を作る方法はこれだけです）、`setup()` を 1 回呼びます。そのあとは固定ステップごとに、ウィンドウのある App と同じ更新入口を通り、子ノード、Mod、ノードタイマー、destroy された子の片付けを処理します。ウィンドウ、GPU、`draw()`、hover の更新はありません。
 - `setup()` の中で終了を求め、それが受け入れられた場合、App は `setup()` から戻った直後に終わります。オーディオのコールバック、コンソールのコマンド、最初の `update()` より前です。
 - 更新は固定ステップで、`getDeltaTime()` は `1 / settings.targetFps` です。ループ 1 周の更新回数は `setMaxUpdateSteps()` の設定が上限で、既定値は 10 回です。0 以下を指定すると上限をなくします。
 - 停止や遅い更新処理によって上限を超えた分は、整数ステップ単位で捨て、停滞ごとに一度だけ警告します。ループの周回間では次のステップが必要になるまで待機し、スリープに指定する時間は最大 1 ms です。
 - 実行するスレッドをメインスレッドとして扱い、更新処理の周回間にキュー内の `runOnMainThread` コールバックを処理します。
-- 終わるときは `events().exit` と `exit()` が呼ばれ、App のオーディオのコールバックが切り離されてから、App 自身の `cleanup()` が呼ばれます（子ノードには呼ばれません）。オーディオデバイスは動き続けます。
+- 終わるときは `events().exit` と `exit()` が呼ばれ、App のオーディオのコールバックが切り離されてから、子ノード、App の順に `cleanup()` が呼ばれます。オーディオデバイスは動き続けます。
 - Tween、更新モードの TcpClient/UdpSocket 受信、tcxBox2d の自動ステップ、WebSocket のタイムアウトなど、update イベントに依存する処理がヘッドレスでも動作します。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（ヘッドレス実行ではアプリ自身の `update()` だけを呼び出し、子ノード・Mod・タイマーを更新しません）。
 - 1 つのプロセスで使えるのは、ウィンドウ（`runApp`）かヘッドレスのどちらか一方です。App のコンストラクターが例外を投げると、`setup()`、`exit()`、`cleanup()` のどれも呼ばれません。
 '''
 details.ko = '''
 - `runHeadlessApp<tcApp>()`처럼 앱 클래스를 템플릿 인자로 지정합니다. 선택적인 `HeadlessSettings`로 목표 갱신 속도를 지정하며 기본값은 초당 60회입니다. 프로세스 종료 코드를 반환합니다.
-- App을 만들고(헤드리스 App을 만드는 방법은 이것뿐입니다) `setup()`을 한 번 호출합니다. 그 뒤에는 각 단계마다 `update()`를 호출합니다. 창, GPU, `draw()`는 없으며, 자식 노드, Mod, 노드 타이머는 업데이트되지 않습니다(아래 알려진 문제 참조).
+- App을 만들고(헤드리스 App을 만드는 방법은 이것뿐입니다) `setup()`을 한 번 호출합니다. 그 뒤에는 고정 단계마다 창이 있는 App과 같은 갱신 진입점을 거쳐 자식 노드, Mod, 노드 타이머와 destroy된 자식 정리를 실행합니다. 창, GPU, `draw()`, hover 갱신은 없습니다.
 - `setup()` 안에서 종료를 요청하고 그 요청이 받아들여지면, App은 `setup()`에서 돌아온 직후에 끝납니다. 오디오 콜백, 콘솔 명령, 첫 `update()`보다 먼저입니다.
 - 갱신은 고정 스텝을 사용하므로 `getDeltaTime()`은 `1 / settings.targetFps`입니다. 루프 한 회의 갱신 횟수는 `setMaxUpdateSteps()` 설정이 상한이며 기본값은 10회입니다. 0 이하이면 상한을 없앱니다.
 - 정지나 느린 갱신으로 상한을 초과한 시간은 정수 스텝 단위로 버리고 정체 구간마다 경고를 한 번 출력합니다. 루프 회차 사이에는 다음 스텝이 필요할 때까지 기다리며 슬립에 지정하는 시간은 최대 1ms입니다.
 - 실행하는 스레드를 메인 스레드로 취급하며 갱신 루프 회차 사이에 큐의 `runOnMainThread` 콜백을 처리합니다.
-- 끝날 때는 `events().exit`와 `exit()`가 호출되고, App의 오디오 콜백이 분리된 뒤 App 자신의 `cleanup()`이 호출됩니다(자식 노드에는 호출되지 않습니다). 오디오 장치는 계속 실행됩니다.
+- 끝날 때는 `events().exit`와 `exit()`가 호출되고, App의 오디오 콜백이 분리된 뒤 자식 노드, App 순서로 `cleanup()`을 호출합니다. 오디오 장치는 계속 실행됩니다.
 - Tween, 업데이트 모드 TcpClient/UdpSocket 수신, tcxBox2d 자동 스텝, WebSocket 타임아웃 등 update 이벤트에 의존하는 처리가 헤드리스에서도 동작합니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(헤드리스 실행은 앱 자체의 `update()`만 호출하며 자식 노드·Mod·타이머를 갱신하지 않습니다).
 - 한 프로세스에서는 창(`runApp`)과 헤드리스 중 하나만 사용할 수 있습니다. App의 생성자가 예외를 던지면 `setup()`, `exit()`, `cleanup()` 모두 호출되지 않습니다.
 '''
 related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps", "App::exit"]
@@ -60892,21 +60887,18 @@ details.en = '''
 - While playing and not completed, it adds `getDeltaTime()` to elapsed time; without an owner it does nothing, and while elapsed time is negative it waits without changing properties.
 - It applies easing to normalized progress and updates enabled properties. Position and scale use linear interpolation, rotation uses angle interpolation, and quaternion rotation uses spherical interpolation.
 - Once normalized progress reaches `1.0f`, it stops playback, marks completion, and notifies `complete` after applying the property values.
-- Known issue: [#906](https://github.com/TrussC-org/TrussC/issues/906) (`runHeadlessApp` calls only `App::update()`, so this callback is not run automatically).
 '''
 details.ja = '''
 - この protected コールバックはノードツリーの更新時に、所有ノードのタイマーと `update()` より前に呼ばれます。ノード自身または祖先が非アクティブの場合、この更新は行われません。
 - 再生中で未完了の場合、経過時間に `getDeltaTime()` を加えます。所有ノードがなければ何もせず、経過時間が負の間はプロパティを変更せずに待ちます。
 - 正規化した進捗にイージングを適用し、有効なプロパティを更新します。位置とスケールは線形補間、回転は角度の補間、クォータニオンの回転は球面補間を使用します。
 - 正規化した進捗が `1.0f` に達すると、プロパティの値を適用した後に再生を停止し、完了状態にして `complete` に通知します。
-- 既知の問題: [#906](https://github.com/TrussC-org/TrussC/issues/906)（`runHeadlessApp` は `App::update()` だけを呼ぶため、このコールバックは自動では呼ばれません）。
 '''
 details.ko = '''
 - 이 protected 콜백은 노드 트리 업데이트 중 소유 노드의 타이머와 `update()`보다 먼저 호출됩니다. 노드 자체나 조상이 비활성 상태이면 이 업데이트를 수행하지 않습니다.
 - 재생 중이며 완료되지 않았으면 경과 시간에 `getDeltaTime()`을 더합니다. 소유 노드가 없으면 아무 작업도 하지 않으며, 경과 시간이 음수인 동안에는 속성을 변경하지 않고 기다립니다.
 - 정규화한 진행률에 이징을 적용하고 활성화된 속성을 갱신합니다. 위치와 스케일에는 선형 보간, 회전에는 각도 보간, 쿼터니언 회전에는 구면 보간을 사용합니다.
 - 정규화한 진행률이 `1.0f`에 도달하면 속성값을 적용한 뒤 재생을 멈추고 완료 상태로 설정하며 `complete`에 알립니다.
-- 알려진 문제: [#906](https://github.com/TrussC-org/TrussC/issues/906)(`runHeadlessApp`은 `App::update()`만 호출하므로 이 콜백은 자동으로 호출되지 않습니다).
 '''
 
 ["ChipSoundBundle::Entry"]
@@ -65208,3 +65200,225 @@ details.en = "An initially empty vector<fs::path>. Windows/Linux launch delivery
 details.ja = "初期値は空の vector<fs::path> です。Windows・Linux の起動通知は存在するファイル・ディレクトリの絶対パスを、macOS は開く要求のパスを保持します。内容を自動では読み込みません。数とパスの長さには filesDropped と同じ OS・利用可能なメモリ・コンテナーの表現上限が適用されます。選別の規則と使用例は RuntimeEvents::filesOpened を参照してください。"
 details.ko = "초기값은 빈 vector<fs::path>입니다. Windows/Linux 시작 알림에는 존재하는 파일/디렉터리의 절대 경로를, macOS에는 열기 요청 경로를 담습니다. 내용을 자동으로 읽지 않습니다. 수와 경로 길이에는 filesDropped와 동일한 OS, 사용 가능한 메모리와 컨테이너 표현 한계를 적용합니다. 필터 규칙과 사용 예는 RuntimeEvents::filesOpened를 참조합니다."
 related = ["FilesOpenedEventArgs", "RuntimeEvents::filesOpened", "Image::load"]
+
+["ComputeShader"]
+category = "graphics_shader"
+description.en = "Runs a sokol compute program between drawing passes (C++ only)."
+description.ja = "描画パスの間で sokol の compute プログラムを実行します（C++ 専用）。"
+description.ko = "그리기 패스 사이에서 sokol compute 프로그램을 실행합니다(C++ 전용)."
+details.en = '''
+- Owns a compute shader and pipeline, independently of `Shader`. Load a sokol-shdc descriptor, bind resources, then dispatch workgroups. All operations and destruction belong on the main thread; copying is disabled and moving transfers ownership.
+- Name compute sources `*.compute.glsl` anywhere under the project's `src/`. CMake generates `<name>.compute.glsl.h` with a separate target set: Metal, HLSL5, GLSL430, GLSL310ES and WGSL. Graphics sources keep GLSL300ES, including WebGL2. Rebuild the guest for hot reload, as with graphics shaders.
+- The first verification axis is macOS Metal, Windows D3D11 and Linux GL 4.3. `sg_query_features().compute` decides availability at runtime. GLES requires a 3.1 context; Linux EGL and Pi request 3.1. Device confirmation for Metal, D3D11 and Pi, and validation on WebGPU/iOS/Android, must precede claims of verified support.
+- Headless apps have no GPU. Loading and dispatch return false with a warning on headless or unsupported devices, including WebGL2. Warnings from operations that may repeat every frame are limited to one per five seconds per object.
+- Dispatch flushes earlier recorded draws, ends their render pass, runs a compute pass, and resumes rendering on the next draw. Results appear in anything drawn after dispatch in the same window. There is no CPU wait or readback API. Synchronization inside a kernel is the shader's responsibility.
+- Output is a single-sample 2D `Texture` with `TextureUsage::Storage`, mip 0. Draw the Texture into an Fbo when needed; Fbo attachments are not storage outputs. Sampled inputs and uniforms use the same binding numbers and byte layout as `Shader`. Resources must remain allocated through dispatch.
+- Storage buffers, particles, Lua bindings and new hot-reload behavior are outside this slice.
+'''
+details.ja = '''
+- `Shader` とは独立して compute シェーダーとパイプラインを所有します。sokol-shdc の記述関数を読み込み、リソースを割り当ててからワークグループを実行します。破棄を含むすべての操作はメインスレッドで行ってください。コピーはできず、ムーブで所有権を移せます。
+- プロジェクトの `src/` 以下で compute ソースを `*.compute.glsl` と命名します。CMake は Metal、HLSL5、GLSL430、GLSL310ES、WGSL の専用ターゲットから `<name>.compute.glsl.h` を生成します。描画用は WebGL2 を含め GLSL300ES のままです。ホットリロードは描画用と同じゲストの再ビルドを使います。
+- 最初の検証軸は macOS Metal、Windows D3D11、Linux GL 4.3 です。実行時には `sg_query_features().compute` で可否を判定します。GLES には 3.1 のコンテキストが必要で、Linux EGL と Pi は 3.1 を要求します。Metal、D3D11、Pi の実機確認、および WebGPU・iOS・Android の検証を行ってから動作確認済みとしてください。
+- ヘッドレスには GPU がありません。ヘッドレスまたは WebGL2 などの非対応環境では読み込みと実行が警告を出して false を返します。毎フレーム繰り返す可能性がある操作の警告は、オブジェクトごとに 5 秒に一度に制限します。
+- dispatch は先行する描画記録を送り出して描画パスを閉じ、compute パスを実行します。次の描画で描画パスを再開し、同じウィンドウで dispatch より後に描くものには結果が反映されます。CPU 待機や読み戻し API はありません。カーネル内部の同期はシェーダーで行ってください。
+- 出力は `TextureUsage::Storage` の単一サンプル 2D `Texture` の mip 0 です。Fbo に入れる場合は Texture を描画してください。Fbo のアタッチメントには storage 書き込みをしません。入力と uniform は `Shader` と同じバインディング番号とバイト配置を使います。リソースは dispatch まで確保した状態を保ってください。
+- storage buffer、粒子、Lua バインディング、ホットリロードの変更はこのスライスに含みません。
+'''
+details.ko = '''
+- `Shader`와 독립적으로 compute 셰이더와 파이프라인을 소유합니다. sokol-shdc 설명 함수를 로드하고 리소스를 바인딩한 뒤 워크그룹을 실행합니다. 소멸을 포함한 모든 작업은 메인 스레드에서 수행합니다. 복사는 불가능하며 이동으로 소유권을 이전합니다.
+- 프로젝트의 `src/` 아래에서 compute 소스 이름을 `*.compute.glsl`로 지정합니다. CMake는 Metal, HLSL5, GLSL430, GLSL310ES, WGSL 전용 대상으로 `<name>.compute.glsl.h`를 생성합니다. 그리기 소스는 WebGL2를 포함하여 GLSL300ES를 유지합니다. 핫 리로드는 그리기 셰이더와 같은 게스트 재빌드를 사용합니다.
+- 첫 검증 축은 macOS Metal, Windows D3D11, Linux GL 4.3입니다. 실행 시 `sg_query_features().compute`로 지원 여부를 판단합니다. GLES에는 3.1 컨텍스트가 필요하며 Linux EGL과 Pi는 3.1을 요청합니다. Metal, D3D11, Pi의 장치 확인 및 WebGPU/iOS/Android 검증 후에 검증된 지원으로 표시합니다.
+- 헤드리스에는 GPU가 없습니다. 헤드리스 또는 WebGL2 등 미지원 환경에서는 로드와 실행이 경고와 함께 false를 반환합니다. 프레임마다 반복할 수 있는 작업의 경고는 객체마다 5초에 한 번으로 제한합니다.
+- dispatch는 앞서 기록한 그리기를 전송하고 렌더 패스를 닫은 뒤 compute 패스를 실행합니다. 다음 그리기에서 렌더 패스를 재개하며 같은 창에서 dispatch 이후 그리는 내용에 결과가 반영됩니다. CPU 대기나 읽기 API는 없습니다. 커널 내부 동기화는 셰이더에서 처리합니다.
+- 출력은 `TextureUsage::Storage`를 사용하는 단일 샘플 2D `Texture`의 mip 0입니다. Fbo에 넣으려면 Texture를 그립니다. Fbo 부착 대상에는 storage 쓰기를 하지 않습니다. 입력과 uniform은 `Shader`와 같은 바인딩 번호와 바이트 배치를 사용합니다. 리소스는 dispatch가 끝날 때까지 할당 상태를 유지합니다.
+- storage buffer, 입자, Lua 바인딩 및 새 핫 리로드 동작은 이 슬라이스에 포함하지 않습니다.
+'''
+related = ["ComputeShader::load", "ComputeShader::dispatch", "TextureUsage", "Shader"]
+snippet = '''
+#include "texture.compute.glsl.h"
+class tcApp : public App {
+    Texture output;
+    ComputeShader compute;
+public:
+    void setup() override {
+        output.allocate(64, 64, TextureFormat::RGBA8, TextureUsage::Storage);
+        compute.load(generate_texture_shader_desc);
+        compute.setStorageImage(VIEW_output_image, output);
+    }
+    void update() override { compute.dispatch(8, 8, 1); } // local size: 8 x 8 x 1
+    void draw() override { output.draw(0, 0); }
+};
+'''
+
+["ComputeShader::load"]
+description.en = "Loads a generated compute descriptor and creates its pipeline."
+description.ja = "生成済みの compute 記述を読み込み、パイプラインを作成します。"
+description.ko = "생성된 compute 설명을 로드하고 파이프라인을 생성합니다."
+details.en = '''
+- Accepts the same descriptor-function signature as `Shader::load`. The function must contain a compute program for the active backend. Name its source `*.compute.glsl` to select compute generation targets.
+- Clears the previous program, bindings and uniforms first. Returns true only after both shader and pipeline creation succeed; null or graphics descriptors, unavailable GPUs and creation failures return false with a warning.
+'''
+details.ja = '''
+- `Shader::load` と同じ記述関数の型を受け取ります。現在のバックエンド用の compute プログラムが必要です。ソースを `*.compute.glsl` と命名して compute 専用の生成対象を選びます。
+- 先に以前のプログラム、割り当て、uniform を消去します。シェーダーとパイプラインの作成が両方成功したときに true を返します。null、描画用の記述、GPU が使えない場合、作成失敗では警告を出して false を返します。
+'''
+details.ko = '''
+- `Shader::load`와 같은 설명 함수 형식을 받습니다. 현재 백엔드의 compute 프로그램이 필요합니다. 소스 이름을 `*.compute.glsl`로 지정하여 compute 전용 생성 대상을 선택합니다.
+- 먼저 이전 프로그램, 바인딩 및 uniform을 지웁니다. 셰이더와 파이프라인 생성이 모두 성공하면 true를 반환합니다. null, 그리기 설명, GPU 사용 불가 및 생성 실패 시 경고와 함께 false를 반환합니다.
+'''
+snippet = '''
+bool ready = compute.load(generate_texture_shader_desc);
+'''
+related = ["ComputeShader", "Shader::load"]
+
+["ComputeShader::clear"]
+description.en = "Releases the compute program and clears bindings and uniform bytes."
+description.ja = "compute プログラムを解放し、割り当てと uniform のバイト列を消去します。"
+description.ko = "compute 프로그램을 해제하고 바인딩과 uniform 바이트를 지웁니다."
+details.en = '''
+- Safe on an unloaded object. GPU destruction uses the existing deferred destruction queue; call on the main thread. Previously submitted GPU work retains its resources.
+- `isLoaded()` becomes false. Texture resources are owned by the caller and are not cleared.
+'''
+details.ja = '''
+- 未読み込みでも呼べます。GPU の破棄には既存の遅延破棄キューを使います。メインスレッドで呼んでください。送信済みの GPU 処理に必要なリソースは保持されます。
+- `isLoaded()` が false になります。呼び出し側が所有する Texture は消去しません。
+'''
+details.ko = '''
+- 로드하지 않은 객체에서도 호출할 수 있습니다. GPU 소멸에는 기존 지연 소멸 큐를 사용합니다. 메인 스레드에서 호출합니다. 전송된 GPU 작업에 필요한 리소스는 유지합니다.
+- `isLoaded()`가 false가 됩니다. 호출자가 소유한 Texture는 지우지 않습니다.
+'''
+snippet = '''
+compute.clear();
+'''
+related = ["ComputeShader::isLoaded", "ComputeShader::load"]
+
+["ComputeShader::isLoaded"]
+description.en = "Returns whether the object has a valid compute pipeline."
+description.ja = "有効な compute パイプラインを持っているか返します。"
+description.ko = "유효한 compute 파이프라인을 보유하는지 반환합니다."
+details.en = '''
+- Initially false, true after a successful `load()`, and false after `clear()`, a failed load or a move from this object. Requires an initialized GPU to return true.
+'''
+details.ja = '''
+- 初期状態は false で、`load()` の成功後は true、`clear()`、読み込み失敗、所有権のムーブ後は false です。true を返すには GPU の初期化が必要です。
+'''
+details.ko = '''
+- 초기에는 false이고 `load()` 성공 후 true이며 `clear()`, 로드 실패 또는 소유권 이동 후 false입니다. true를 반환하려면 GPU가 초기화되어 있어야 합니다.
+'''
+snippet = '''
+if (compute.isLoaded()) compute.dispatch(8, 8, 1);
+'''
+related = ["ComputeShader::load", "ComputeShader::clear"]
+
+["ComputeShader::setStorageImage"]
+description.en = "Binds a storage Texture to a compute image view slot."
+description.ja = "storage Texture を compute の画像 view スロットに割り当てます。"
+description.ko = "storage Texture를 compute 이미지 view 슬롯에 바인딩합니다."
+details.en = '''
+- Pass a generated `VIEW_...` constant and an allocated `TextureUsage::Storage` Texture. Returns false with a warning for an invalid slot or a Texture without a storage view; the previous binding is retained.
+- Copies the view handle, not pixels or ownership. Keep the Texture allocated through dispatch. The shader's storage format must match the Texture; dispatch checks format write capability and read capability for read/write shaders.
+- Only single-sample 2D, mip 0 storage is accepted. Draw the output Texture into an Fbo instead of writing an Fbo attachment as storage.
+'''
+details.ja = '''
+- 生成された `VIEW_...` 定数と、確保済みの `TextureUsage::Storage` Texture を渡します。スロットが無効、または storage view がない場合は警告を出して false を返し、以前の割り当てを保持します。
+- ピクセルや所有権ではなく view ハンドルをコピーします。Texture は dispatch まで確保したままにしてください。シェーダーの storage 形式と Texture の形式を一致させます。dispatch は書き込み可否と、読み書きするシェーダーでは読み取り可否も調べます。
+- 単一サンプル 2D の mip 0 に対応します。Fbo のアタッチメントへ storage 書き込みをする代わりに、出力 Texture を Fbo に描画してください。
+'''
+details.ko = '''
+- 생성된 `VIEW_...` 상수와 할당된 `TextureUsage::Storage` Texture를 전달합니다. 슬롯이 유효하지 않거나 storage view가 없으면 경고와 함께 false를 반환하고 이전 바인딩을 유지합니다.
+- 픽셀이나 소유권이 아닌 view 핸들을 복사합니다. Texture는 dispatch까지 할당 상태를 유지합니다. 셰이더의 storage 형식은 Texture와 일치해야 합니다. dispatch는 쓰기 지원 여부와 읽기/쓰기 셰이더의 읽기 지원 여부를 검사합니다.
+- 단일 샘플 2D의 mip 0을 지원합니다. Fbo 부착 대상에 storage 쓰기를 하는 대신 출력 Texture를 Fbo에 그립니다.
+'''
+snippet = '''
+output.allocate(64, 64, TextureFormat::RGBA8, TextureUsage::Storage);
+compute.setStorageImage(VIEW_output_image, output);
+'''
+related = ["TextureUsage", "Texture::getStorageView", "ComputeShader::dispatch"]
+
+["ComputeShader::setTexture"]
+description.en = "Binds a sampled Texture or a texture view and sampler."
+description.ja = "読み取り用の Texture、または texture view と sampler を割り当てます。"
+description.ko = "샘플링할 Texture 또는 texture view와 sampler를 바인딩합니다."
+details.en = '''
+- Accepts `(slot, const Texture&)` or `(slot, sg_view, sg_sampler)`. Like `Shader::setTexture`, the view uses the given binding and the sampler uses that same number when below `SG_MAX_SAMPLER_BINDSLOTS`. Higher view slots ignore the sampler with a warning; bind its sampler using another call at a lower slot.
+- Returns false with a warning for slots outside `[0, SG_MAX_VIEW_BINDSLOTS)`. Copies handles; keep the input allocated until dispatch. Use a separate input and storage output to avoid reading and writing the same image in a kernel.
+'''
+details.ja = '''
+- `(slot, const Texture&)` または `(slot, sg_view, sg_sampler)` を受け取ります。`Shader::setTexture` と同じく指定番号に view を割り当て、`SG_MAX_SAMPLER_BINDSLOTS` 未満なら同じ番号に sampler も割り当てます。それ以上の view スロットでは警告を出して sampler を無視します。別の呼び出しで低い番号のスロットに sampler を設定してください。
+- `[0, SG_MAX_VIEW_BINDSLOTS)` の範囲外では警告を出して false を返します。ハンドルをコピーするため、入力は dispatch まで確保したままにしてください。カーネルで同じ画像を読み書きしないよう、入力と storage 出力を分けてください。
+'''
+details.ko = '''
+- `(slot, const Texture&)` 또는 `(slot, sg_view, sg_sampler)`를 받습니다. `Shader::setTexture`처럼 지정한 번호에 view를 바인딩하고 `SG_MAX_SAMPLER_BINDSLOTS` 미만이면 같은 번호에 sampler도 바인딩합니다. 더 높은 view 슬롯에서는 경고와 함께 sampler를 무시합니다. 다른 호출로 낮은 번호 슬롯에 sampler를 설정합니다.
+- `[0, SG_MAX_VIEW_BINDSLOTS)` 범위를 벗어나면 경고와 함께 false를 반환합니다. 핸들을 복사하므로 입력은 dispatch까지 할당 상태를 유지합니다. 커널에서 같은 이미지를 읽고 쓰지 않도록 입력과 storage 출력을 분리합니다.
+'''
+snippet = '''
+compute.setTexture(VIEW_source_image, input.getView(), input.getSampler());
+'''
+related = ["Shader::setTexture", "ComputeShader::setStorageImage"]
+
+["ComputeShader::setUniform"]
+description.en = "Copies an entire compute uniform block using Shader's packing rules."
+description.ja = "Shader と同じ配置規則で compute の uniform ブロック全体をコピーします。"
+description.ko = "Shader와 같은 배치 규칙으로 compute uniform 블록 전체를 복사합니다."
+details.en = '''
+- `slot` is the generated uniform-block binding, not a variable offset. Accepts float, Vec2/Vec3/Vec4, Color, vectors of float or Vec2/Vec3/Vec4, or `(const void*, size_t)` for exact block bytes. Single values occupy four floats with zero padding; Color stores RGBA. Vec3 arrays pad each element to Vec4; other arrays copy their bytes without extra padding.
+- Replaces the stored block, which is uploaded on every dispatch. Raw bytes and array layout must match the shader's uniform layout. Dispatch refuses missing blocks or a size mismatch. `clear()` and `load()` discard stored bytes.
+- Invalid slots or null data with a nonzero size warn and leave previous bytes unchanged. Pass a generated struct to the raw overload for mixed members, integers or matrices.
+'''
+details.ja = '''
+- `slot` は生成された uniform ブロックの番号であり、変数のオフセットではありません。float、Vec2/Vec3/Vec4、Color、それらの vector、または正確なブロックのバイト列を渡す `(const void*, size_t)` を受け取ります。単一値はゼロ埋めを含む 4 個の float、Color は RGBA を保存します。Vec3 の配列は各要素を Vec4 に拡張し、他の配列には追加のパディングを行いません。
+- 保存済みのブロック全体を置き換え、dispatch ごとに転送します。生のバイト列と配列の配置をシェーダーに合わせてください。ブロック不足やサイズ不一致では dispatch を拒否します。`clear()` と `load()` は保存したバイト列を消去します。
+- スロットが無効、またはサイズが非ゼロでデータが null の場合は警告を出して以前の値を保持します。メンバーの混在、整数、行列には生成された構造体を生データ版に渡してください。
+'''
+details.ko = '''
+- `slot`은 변수 오프셋이 아닌 생성된 uniform 블록 번호입니다. float, Vec2/Vec3/Vec4, Color, 해당 vector 또는 정확한 블록 바이트를 전달하는 `(const void*, size_t)`를 받습니다. 단일 값은 0 패딩을 포함한 float 4개를 저장하며 Color는 RGBA를 저장합니다. Vec3 배열은 각 요소를 Vec4로 확장하고 다른 배열은 추가 패딩 없이 복사합니다.
+- 저장된 블록 전체를 교체하고 dispatch마다 전송합니다. 원시 바이트와 배열 배치는 셰이더와 일치해야 합니다. 블록 누락이나 크기 불일치 시 dispatch를 거부합니다. `clear()`와 `load()`는 저장된 바이트를 지웁니다.
+- 슬롯이 유효하지 않거나 0이 아닌 크기에 null 데이터가 전달되면 경고 후 이전 값을 유지합니다. 혼합 멤버, 정수 또는 행렬에는 생성된 구조체를 원시 데이터 오버로드에 전달합니다.
+'''
+snippet = '''
+compute.setUniform(UB_params, Vec4(1, 0, 0, 1));
+'''
+related = ["Shader::setUniform", "ComputeShader::dispatch"]
+
+["ComputeShader::dispatch"]
+description.en = "Dispatches workgroups and makes their output visible to later drawing."
+description.ja = "ワークグループを実行し、後続の描画で出力を利用できるようにします。"
+description.ko = "워크그룹을 실행하고 이후 그리기에서 출력을 사용할 수 있게 합니다."
+details.en = '''
+- Arguments count workgroups on each axis; Y and Z default to 1. The shader declares local size. For a 65 x 65 image and local size 8 x 8, dispatch 9 x 9 groups and check the image bounds inside the kernel.
+- Sokol accepts each axis in `[0, 65535]`. A zero axis succeeds without GPU work. Invalid counts, missing/invalid resources, mismatched storage formats or uniform sizes, an unloaded program, headless apps and unsupported backends return false with a warning.
+- Earlier drawing is flushed before the compute pass. Later drawing in the same window sees the output, including draw → compute → draw in one frame. No CPU wait occurs; use separate dispatch calls for dependencies across all workgroups. The sample dispatches in `update()`.
+'''
+details.ja = '''
+- 引数は各軸のワークグループ数です。Y と Z の既定値は 1 です。local size はシェーダーに宣言します。65 x 65 の画像で local size が 8 x 8 の場合は 9 x 9 グループを実行し、カーネル内で画像の範囲を確認してください。
+- sokol の各軸の範囲は `[0, 65535]` です。軸がゼロなら GPU 処理をせず成功します。不正な個数、リソース不足や無効、storage 形式や uniform サイズの不一致、未読み込み、ヘッドレス、非対応環境では警告を出して false を返します。
+- compute パスの前に先行する描画を送り出します。同じウィンドウの後続の描画には出力が反映され、同一フレームの draw → compute → draw にも対応します。CPU は待機しません。すべてのワークグループにまたがる依存関係は dispatch を分けて処理してください。例では `update()` で実行します。
+'''
+details.ko = '''
+- 인자는 각 축의 워크그룹 수입니다. Y와 Z의 기본값은 1입니다. local size는 셰이더에 선언합니다. 65 x 65 이미지에 local size가 8 x 8이면 9 x 9 그룹을 실행하고 커널에서 이미지 범위를 확인합니다.
+- sokol의 각 축 범위는 `[0, 65535]`입니다. 축이 0이면 GPU 작업 없이 성공합니다. 잘못된 수, 리소스 누락이나 무효, storage 형식이나 uniform 크기 불일치, 미로드 상태, 헤드리스 및 미지원 환경에서는 경고와 함께 false를 반환합니다.
+- compute 패스 전에 앞선 그리기를 전송합니다. 같은 창에서 이후 그리기는 출력을 볼 수 있으며 한 프레임의 draw → compute → draw도 지원합니다. CPU는 기다리지 않습니다. 모든 워크그룹에 걸친 의존성은 dispatch 호출을 나누어 처리합니다. 예제는 `update()`에서 실행합니다.
+'''
+snippet = '''
+compute.dispatch((output.getWidth() + 7) / 8, (output.getHeight() + 7) / 8, 1);
+output.draw(0, 0);
+'''
+related = ["ComputeShader", "ComputeShader::setStorageImage", "Texture::draw"]
+
+["Texture::getStorageView"]
+description.en = "Returns the mip 0 storage view, or an empty handle for other usages."
+description.ja = "mip 0 の storage view を返します。他の用途では空のハンドルを返します。"
+description.ko = "mip 0 storage view를 반환합니다. 다른 용도에서는 빈 핸들을 반환합니다."
+details.en = '''
+- Created only for a successfully allocated `TextureUsage::Storage` Texture. The view belongs to the Texture and is retired with it. Use `ComputeShader::setStorageImage` for binding; `getView()` remains the sampled view for drawing.
+'''
+details.ja = '''
+- `TextureUsage::Storage` で確保が成功したときだけ作成されます。view は Texture が所有し、Texture とともに解放します。割り当てには `ComputeShader::setStorageImage` を使ってください。`getView()` は描画用の読み取り view のままです。
+'''
+details.ko = '''
+- `TextureUsage::Storage` 할당이 성공했을 때만 생성합니다. view는 Texture가 소유하며 Texture와 함께 해제합니다. 바인딩에는 `ComputeShader::setStorageImage`를 사용합니다. `getView()`는 그리기용 샘플링 view를 유지합니다.
+'''
+snippet = '''
+sg_view storage = output.getStorageView();
+'''
+related = ["TextureUsage", "ComputeShader::setStorageImage", "Texture::getView"]

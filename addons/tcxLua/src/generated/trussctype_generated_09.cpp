@@ -227,28 +227,28 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["error"] = &trussc::TcpSendCompleteEventArgs::error;
         t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
     }
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
+    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
+        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
+        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
+        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
     {
-        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
-        t["files"] = &trussc::DragDropEventArgs::files;
-        t["x"] = &trussc::DragDropEventArgs::x;
-        t["y"] = &trussc::DragDropEventArgs::y;
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
     {
-        sol::usertype<trussc::CloseRequestEventArgs> t = lua->new_usertype<trussc::CloseRequestEventArgs>("CloseRequestEventArgs");
-        t["cancel"] = &trussc::CloseRequestEventArgs::cancel;
+        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
+        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
+        t["reason"] = &trussc::DeviceLostEventArgs::reason;
+    }
+    {
+        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
+        t["occluded"] = &trussc::OccludedEventArgs::occluded;
     }
 }
 #ifdef _MSC_VER

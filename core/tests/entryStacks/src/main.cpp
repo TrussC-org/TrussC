@@ -215,7 +215,12 @@ public:
     void update() override { g_setupAppUpdateDepth = matrixDepth(); }
 };
 static shared_ptr<LeakySetupApp> g_setupApp;
-static void setupAppUpdate() { if (g_setupApp) g_setupApp->handleUpdate(0, 0); }
+static void setupAppUpdate() {
+    if (g_setupApp) {
+        internal::currentWindowContext().rootNode = g_setupApp;
+        g_setupApp->handleUpdate();
+    }
+}
 
 static void testSetup(Clk::time_point& t) {
     g_setupApp = internal::makeConstructedApp<LeakySetupApp>();

@@ -1994,7 +1994,7 @@ private:
 // Global Functions
 // ---------------------------------------------------------------------------
 
-// Initialize audio engine (called automatically in setup())
+// Initialize the audio engine explicitly. Sound loading also initializes it on demand.
 inline void initAudio() {
     if (!AudioEngine::getInstance().isInitialized()) AudioEngine::getInstance().init();
 }

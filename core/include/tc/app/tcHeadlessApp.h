@@ -147,8 +147,7 @@ namespace headless {
 }
 
 namespace internal {
-// Headless deliberately dispatches only the App virtuals, not the node tree
-// (children, mods and timers have a separate lifecycle decision).
+// Use the same App tree entry as the Window update listener.
 inline std::vector<EventListener> registerHeadlessAppEventListeners(
         const std::shared_ptr<std::weak_ptr<App>>& target) {
     std::vector<EventListener> listeners;
@@ -171,7 +170,7 @@ inline std::vector<EventListener> registerHeadlessAppEventListeners(
                 }
             }, EventPriority::App));
     };
-    bind(nonWindowContext().coreEvents->update, [](App& target) { target.update(); });
+    bind(nonWindowContext().coreEvents->update, [](App& target) { target.handleUpdate(); });
     bind(nonWindowContext().coreEvents->exit, [](App& target) { deliverAppExit(target); }, true);
     return listeners;
 }
@@ -192,21 +191,22 @@ inline void runHeadlessUpdatePass(App&, WindowContext& ctx,
         state.accumulator, elapsed, targetDelta, getMaxUpdateSteps());
     warnUpdateStepsDropped(FixedStepLoop::Headless, state.updateStepsDropWarned,
                            adv.droppedTime, targetDelta, adv.steps);
+    const auto now = windowClockNow();
     int ran = 0;
     for (; ran < adv.steps; ++ran) {
         headless::pollExitSignal();
         if (!headless::running || headless::quitRequested.load()) break;
-        ctx.updateDeltaTime = targetDelta;
-        EntryStackGuard guard(AppEntry::Update);
-        // Services such as Box2d guard against stepping twice in one update.
-        // Match the windowed loop's counter before delivering this step.
-        ++ctx.updateCount;
-        ctx.coreEvents->update.notify();
+        // As in the windowed fixed-step loop, the latest step ends one
+        // leftover accumulator before now; dropped time is not replayed.
+        const double behind = state.accumulator + (adv.steps - 1 - ran) * targetDelta;
+        const auto stepTime = now - std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>(behind));
+        runMainUpdate(targetDelta, stepTime);
         headless::frameCount++;
     }
     // As in the windowed loop, steps cut short do not count toward the rate.
     recordUpdateRateSample(ctx, elapsed,
-        (elapsed - adv.droppedTime) / targetDelta - (adv.steps - ran));
+        targetDelta > 0 ? (elapsed - adv.droppedTime) / targetDelta - (adv.steps - ran) : 0);
 
     headless::pollExitSignal();
     if (headless::running && headless::quitRequested.exchange(false)) {
@@ -245,6 +245,11 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
 
     // Set target FPS
     headless::targetFps = settings.targetFps;
+    const bool validFps = headless::targetFps > 0 && std::isfinite(headless::targetFps);
+    if (!validFps) {
+        logWarning("Headless") << "fps must be a finite positive rate (got "
+            << headless::targetFps << "); update() will not run";
+    }
 
     // Reset before installing handlers: keep any signal received during
     // installation, and start consecutive runs with no stale exit state.
@@ -300,8 +305,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     internal::sampleFrameTime(ctx);
 
     // Construct the virtual attachment with the same owner token as a Window
-    // attachment. Its shared ownership initializes weak_from_this(); headless
-    // execution still skips scene-tree update, draw and cleanup.
+    // attachment. Its shared ownership initializes weak_from_this(); update
+    // and cleanup run the node tree, while draw and hover remain window-only.
     auto appSlot = std::make_shared<std::weak_ptr<App>>();
     auto appListeners = internal::registerHeadlessAppEventListeners(appSlot);
     std::shared_ptr<AppClass> app;
@@ -332,7 +337,8 @@ int runHeadlessApp(const HeadlessSettings& settings = HeadlessSettings()) {
     // passes the loop sleeps until the next step is due, at most 1 ms, on a
     // precise timer (HeadlessSleeper), so a fast rate stays well under the
     // cap per pass.
-    const double targetDelta = 1.0 / headless::targetFps;
+    // Zero disables steps and keeps the idle loop responsive without dividing by an invalid rate.
+    const double targetDelta = validFps ? 1.0 / headless::targetFps : 0.0;
     internal::HeadlessUpdateState updateState;
     auto lastTime = std::chrono::steady_clock::now();
     internal::HeadlessSleeper sleeper;

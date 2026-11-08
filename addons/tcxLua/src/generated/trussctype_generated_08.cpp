@@ -142,37 +142,40 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
         t["success"] = &trussc::LoadResult::success;
     }
-    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
-        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
-        "Immutable", sol::var(trussc::TextureUsage::Immutable),
-        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
-        "Stream", sol::var(trussc::TextureUsage::Stream),
-        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget));
+    {
+        auto constructors = tcxLuaConstructors<trussc::EventListener
+            , trussc::EventListener()
+        >();
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
+    }
     {
         sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
         t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
         t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
         t["message"] = &trussc::TcpServerErrorEventArgs::message;
     }
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
+    lua->new_usertype<trussc::PointStyle>("PointStyle",
+        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
+        "Square", sol::var(trussc::PointStyle::Square),
+        "Round", sol::var(trussc::PointStyle::Round),
+        "Pixel", sol::var(trussc::PointStyle::Pixel));
     {
-        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
-        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
-        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
+        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
+        t["mode"] = &trussc::CurveStyle::mode;
+        t["resolution"] = &trussc::CurveStyle::resolution;
+        t["tolerance"] = &trussc::CurveStyle::tolerance;
     }
     {
-        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
-        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
-        t["name"] = &trussc::AudioDeviceInfo::name;
+        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
+        t["message"] = &trussc::TcpConnectEventArgs::message;
+        t["success"] = &trussc::TcpConnectEventArgs::success;
     }
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
+    {
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

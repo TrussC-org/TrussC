@@ -190,14 +190,12 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
         t["success"] = &trussc::SaveResult::success;
     }
-    {
-        sol::usertype<trussc::RuntimeEvents> t = lua->new_usertype<trussc::RuntimeEvents>("RuntimeEvents");
-        t["console"] = &trussc::RuntimeEvents::console;
-        t["deviceLost"] = &trussc::RuntimeEvents::deviceLost;
-        t["exitRequested"] = &trussc::RuntimeEvents::exitRequested;
-        t["filesOpened"] = &trussc::RuntimeEvents::filesOpened;
-        t["hotReloadUnload"] = &trussc::RuntimeEvents::hotReloadUnload;
-    }
+    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
+        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
+        "None", sol::var(trussc::AudioInitFailure::None),
+        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
+        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
+        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
     {
         sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
         t["distance"] = &trussc::Node::HitResult::distance;
@@ -205,23 +203,22 @@ void tcxLuaGenShard_12(const std::shared_ptr<sol::state>& lua) {
         t["node"] = &trussc::Node::HitResult::node;
         t["hit"] = &trussc::Node::HitResult::hit;
     }
-    lua->new_usertype<trussc::SoundBuffer::Kind>("SoundBufferKind",
-        sol::meta_function::equal_to, [](trussc::SoundBuffer::Kind a, trussc::SoundBuffer::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundBuffer::Kind::Eager),
-        "Stream", sol::var(trussc::SoundBuffer::Kind::Stream));
-    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
-        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
-        "Default", sol::var(trussc::AudioBackend::Default),
-        "Null", sol::var(trussc::AudioBackend::Null));
+    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
+        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
+        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
+    lua->new_usertype<trussc::ImageType>("ImageType",
+        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
+        "Color", sol::var(trussc::ImageType::Color),
+        "Grayscale", sol::var(trussc::ImageType::Grayscale));
     {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+        t["message"] = &trussc::UdpErrorEventArgs::message;
     }
     {
-        sol::usertype<trussc::Runtime> t = lua->new_usertype<trussc::Runtime>("Runtime");
-        t["events"] = &trussc::Runtime::events;
-        t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
+        sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
+        t["focused"] = &trussc::FocusEventArgs::focused;
     }
 }
 #ifdef _MSC_VER

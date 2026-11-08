@@ -314,7 +314,7 @@ struct State {
 auto& runtime() { return state; }
 std::shared_ptr<Owner> appOwner(int&) { return {}; }
 Context* nonWindowContextIfInitialized() { return nullptr; }
-void endAppAttachment(std::shared_ptr<int>, Context&, bool) {}
+void endAppAttachment(std::shared_ptr<int>, Context&) {}
 void retireAppOwner(std::shared_ptr<Owner>) { state.owners.pop_back(); }
 void cancelLogoutWatchdog() {}
 void destroySessionAuthority(void* authority) { if (authority) ++authorityDisposals; }

@@ -57,7 +57,7 @@ Runtime strongly owns every open Window. Releasing the last external shared hand
 
 Construct content with `window->setApp<Scene>(args...)`, or use `runApp<T>()` / `runHeadlessApp<T>()` to launch an App. Runtime owns the App attachments as well as the Windows. Each construction has its own owner token from before the derived constructor begins; nested construction restores the previous owner. Constructor-owned listeners, tools and completions belong to that candidate. A failed construction or a superseded unpublished candidate retires its registrations without calling setup, exit or cleanup. Direct construction and attaching an existing shared App are rejected. An App must not contain another App as a member or an additional base class. Factories bypass class-specific allocation overrides. `destroyApp()` leaves the Window empty; replacement preserves its event slots, settings and clock.
 
-Close, replacement, removal, headless shutdown and guest destruction use the same App ending: detach Window/root, deliver exit once, disconnect audio and wait, clean up the tree (only the App virtual in headless mode), then retire subscriptions, tools, completions and weak references. Normal Runtime shutdown retains one snapshot in reverse attachment order. Every Window backing is disposed before the graphics device and services stop.
+Close, replacement, removal, headless shutdown and guest destruction use the same App ending: detach Window/root, deliver exit once, disconnect audio and wait, clean up the tree (children first, then the App), then retire subscriptions, tools, completions and weak references. Normal Runtime shutdown retains one snapshot in reverse attachment order. Every Window backing is disposed before the graphics device and services stop.
 
 Runtime also owns OS session query/commit. Win32 uses a hidden top-level control HWND that outlives user windows; macOS forwards applicationShouldTerminate and NSWorkspaceWillPowerOff on the main queue. Busy means host/App code on the main stack, including native startup, constructor, callback and tick probes; workers alone do not count. Idle queries reuse Runtime-first exitRequested; busy queries accept without entering App callbacks. Commit is unvetoable and deduplicated. Busy commit invokes no App exit or cleanup and arms no watchdog. Windows returns from WM_ENDSESSION and lets the OS end the process; macOS calls _exit(0) before NSTerminateNow. Idle commit runs normal reverse ending and complete cleanup synchronously, closes the Logger file sink, flushes stdio, then calls std::exit with the application exit code on Windows and macOS. Like ordinary exit, it runs atexit handlers and C++ static destructors. Busy and OS-killed ends skip them; neither session path returns to frames.
 
@@ -85,7 +85,7 @@ File drops on macOS, Windows and Linux go to the Window that received the drop, 
 
 Multiple Windows are supported on macOS, Windows and Linux X11. Create a Window with `createWindow(settings)`, then request content with `window->setApp<Scene>(args...)`. Unsupported platforms return nullptr with a diagnostic. Each Window owns its App, event stream, clock, input and drawing state. GPU resources such as Texture, Fbo, Mesh and Font can be shared across Windows. The Runtime retains every open Window until explicit close or shutdown; closing the first-created Window leaves the others running. `App::getWindow()` returns its attachment while it is live, and nullptr during ending or in a headless App.
 
-Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Headless executes only the App virtual update and ending, with no tree drawing.
+Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Windowed and headless Apps share the update and cleanup tree entries: children, Mods, timers and destroyed-child removal run in both. Each scheduled update uses the same fixed-step and update-time scope. Drawing and hover updates are window-only; headless keeps its fixed rate, bounded catch-up and quit checks between steps.
 
 App audio callbacks attach after the first setup completes. Ending detaches the Window/root, delivers exit once, disconnects this App's audio callbacks and waits for callbacks already running, then calls cleanup and retires its owned work. This order applies to close, replacement with `setApp<Scene>()`, removal with `destroyApp()`, shutdown, headless and guest destruction. A retired App cannot be attached again; construct a fresh instance through the destination Window. Audio callbacks must not wait for the main thread or a lock it needs during ending.
 
@@ -1177,7 +1177,7 @@ The foundation — a thin wrapper over each OS's native API + C++ — gives a **
 
 Yes. You can run `update()` only without ever calling `draw()`, or use the window-less `runHeadlessApp()`. Good for server-side, CI, and headless tests. It's similar to oF's nowindow mode, but **most graphics-focused frameworks lack such a mode** — TrussC manages update and draw independently, so this falls out naturally (see event-driven).
 
-`runHeadlessApp()` notifies `events().update` each fixed step and `events().exit` once on shutdown. The App's `update()` / `exit()` are protected listeners at priority 100, ordered between BeforeApp and AfterApp. The App and mandatory framework teardown bindings survive `clear()`. Tween, update-mode TCP/UDP receive, Box2d auto stepping and WebSocket timeouts therefore work headless. Children, mods and node timers are still not updated (#906).
+`runHeadlessApp()` notifies `events().update` each fixed step and `events().exit` once on shutdown. The App's `update()` / `exit()` are protected listeners at priority 100, ordered between BeforeApp and AfterApp. The App and mandatory framework teardown bindings survive `clear()`. Tween, update-mode TCP/UDP receive, Box2d auto stepping and WebSocket timeouts therefore work headless. The shared App entry updates children, Mods and node timers, sweeps destroyed children and cleans up children before the App at ending. Drawing and hover updates remain window-only.
 
 ### Do heavy features bloat build time / the core?
 
@@ -1218,7 +1218,7 @@ The floor target is the **Raspberry Pi Zero** (defaults like small draw buffers 
 
 App itself is the scene-graph root Node. The basic loop is `setup()` (once) → `update()` → `draw()` each frame. Nodes form a parent/child transform hierarchy; input is dispatched depth-first and stops propagating once `consumed` (children receive events in their parent's local coordinates). Drawing is sokol_gl-based — a procedural, "immediate-mode-style" API (`setColor()` → `drawRect()`), but internally deferred (vertices accumulate into buffers and are submitted later, so nothing is drawn the instant you call it). Each Node's `draw()` starts from a clean default style (white, fill, no stroke — parent style does not cascade, favoring predictability). Behavior can be added by subclassing or by attaching `Mod`s (`addMod<T>()`). The tree and GPU resources (Texture / Fbo) are main-thread-owned; hand work from other threads via `runOnMainThread()`.
 
-Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Headless executes only the App virtual update and ending, with no tree drawing.
+Every Window keeps stable App event slots installed before construction. BeforeApp listeners default to priority 0, the App slot uses 100, and AfterApp uses 200. The App virtual runs before its eligible scene tree. Later priority-100 listeners follow the stable App slot in registration order. Consumed input skips later App, tree and listener delivery. `clear()` removes ordinary listeners and preserves the framework slots; replacing or removing an App leaves those slots on the Window. The hot-reload host and MCP input use the same delivery path. Windowed and headless Apps share the update and cleanup tree entries: children, Mods, timers and destroyed-child removal run in both. Each scheduled update uses the same fixed-step and update-time scope. Drawing and hover updates are window-only; headless keeps its fixed rate, bounded catch-up and quit checks between steps.
 
 
 ### Subclass a Node, or attach a Mod?
@@ -2883,6 +2883,18 @@ ColorOKLCH ColorOKLab::toOKLCH() const  // Converts the color to OKLCH.
 Color ColorOKLab::toRGB() const  // Converts the color to an sRGB Color.
 ```
 
+### ComputeShader — Runs a sokol compute program between drawing passes (C++ only).
+
+```cpp
+void ComputeShader::clear()  // Releases the compute program and clears bindings and uniform bytes.
+bool ComputeShader::dispatch(int groupsX, int groupsY = 1, int groupsZ = 1)  // Dispatches workgroups and makes their output visible to later drawing.
+bool ComputeShader::isLoaded() const  // Returns whether the object has a valid compute pipeline.
+bool ComputeShader::load(const sg_shader_desc *(*)(sg_backend) descFn)  // Loads a generated compute descriptor and creates its pipeline.
+bool ComputeShader::setStorageImage(int slot, const Texture & texture)  // Binds a storage Texture to a compute image view slot.
+bool ComputeShader::setTexture(int slot, const Texture & texture) [+1]  // Binds a sampled Texture or a texture view and sampler.
+void ComputeShader::setUniform(int slot, float value) [+9]  // Copies an entire compute uniform block using Shader's packing rules.
+```
+
 ### ConsoleEventArgs — Carries a command line received from standard input.
 
 ```cpp
@@ -4364,6 +4376,7 @@ int Texture::getNumMipLevels() const  // Returns the stored number of mip levels
 sg_pixel_format Texture::getPixelFormat() const  // Returns the stored sokol pixel format.
 int Texture::getSampleCount() const  // Returns the stored sample count.
 sg_sampler Texture::getSampler() const  // Returns the underlying sokol sampler handle.
+sg_view Texture::getStorageView() const  // Returns the mip 0 storage view, or an empty handle for other usages.
 TextureUsage Texture::getUsage() const  // Returns the stored texture usage mode.
 sg_view Texture::getView() const  // Returns the sokol view used to sample the texture.
 sg_view Texture::getViewForMip(int level) const  // Returns a sampling view for a mip level.
@@ -4923,7 +4936,7 @@ enum StrokeMesh::JoinType { JOIN_MITER, JOIN_ROUND, JOIN_BEVEL }  // Defines the
 enum TcyMode { Rotate, Upright, Combine }  // Selects how ASCII letters and digits are arranged in vertical text.
 enum TextureFilter { Nearest, Linear }  // Specifies how texture samples are filtered.
 enum TextureFormat { RGBA8, RGBA16F, RGBA32F, R8, R16F, R32F, RG8, RG16F, RG32F, BGRA8, RGBA16 }  // Specifies the channel layout and component precision of a GPU texture.
-enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget }  // Selects how a GPU texture receives its contents.
+enum TextureUsage { Immutable, Dynamic, Stream, RenderTarget, Storage }  // Selects how a GPU texture receives its contents.
 enum TextureWrap { Repeat, ClampToEdge, MirroredRepeat }  // Specifies how texture coordinates wrap beyond the texture edges.
 enum ThermalState { Nominal, Fair, Serious, Critical }  // Represents the device's thermal severity level.
 enum VideoCodec { H264, HEVC, ProRes422, ProRes4444 }  // Selects the video compression format used for recording.

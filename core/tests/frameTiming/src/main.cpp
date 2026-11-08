@@ -868,7 +868,8 @@ static shared_ptr<App> g_treeRoot;
 static void treeUpdate() {
     internal::windowApiContext().updateCount++;           // as the app's update does
     ++g_updates;
-    g_treeRoot->handleUpdate(0, 0);
+    internal::currentWindowContext().rootNode = g_treeRoot;
+    g_treeRoot->handleUpdate();
 }
 
 struct LongSetupNode : Node {
@@ -1280,7 +1281,8 @@ static void testReparentChargesOnce() {
         ctx.updateTime = g_simNow;
         ctx.fixedStepUpdate = false;
         ctx.inUpdate = true;
-        root->handleUpdate(0, 0);
+        ctx.rootNode = root;
+        root->handleUpdate();
         ctx.inUpdate = false;
     };
     n->callAfter(3 * dt, [&] { ++n->fired; });

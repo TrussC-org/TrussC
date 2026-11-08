@@ -5,6 +5,8 @@
 # Usage:
 #   trussc_compile_shaders(<target> <source dir> [OUTPUT_DIR <dir>])
 #
+# Name compute sources *.compute.glsl to select compute targets (GLES 310ES).
+# Graphics sources keep GLES 300ES, including WebGL2.
 # Compiles every *.glsl under <source dir> (recursively) with sokol-shdc into
 # <name>.glsl.h, next to the source, or in OUTPUT_DIR when given. The INTERFACE
 # library <target>_shaders carries the output include directory and a dependency
@@ -88,7 +90,8 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     # sg_make_shader).
     # glsl430 is required for GLCORE — without it every custom shader on
     # Linux desktop fails with "Failed to get shader desc" (issue #193).
-    set(_TC_SOKOL_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl")
+    set(_TC_GRAPHICS_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl300es:wgsl")
+    set(_TC_COMPUTE_SLANG "metal_macos:metal_ios:metal_sim:hlsl5:glsl430:glsl310es:wgsl")
 
     if(_TC_SHADERS_OUTPUT_DIR)
         file(MAKE_DIRECTORY "${_TC_SHADERS_OUTPUT_DIR}")
@@ -107,6 +110,11 @@ function(trussc_compile_shaders _TC_TARGET _TC_SOURCE_DIR)
     set(_TC_SHADER_OUTPUTS "")
     foreach(_shader_src ${_TC_SHADER_SOURCES})
         get_filename_component(_shader_name ${_shader_src} NAME)
+        if(_shader_name MATCHES "\\.compute\\.glsl$")
+            set(_TC_SOKOL_SLANG "${_TC_COMPUTE_SLANG}")
+        else()
+            set(_TC_SOKOL_SLANG "${_TC_GRAPHICS_SLANG}")
+        endif()
         if(_TC_SHADERS_OUTPUT_DIR)
             set(_shader_out "${_TC_SHADERS_OUTPUT_DIR}/${_shader_name}.h")
         else()

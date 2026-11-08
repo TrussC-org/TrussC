@@ -167,15 +167,11 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["pushDerived"] = &trussc::Reflector::pushDerived;
         t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
     }
-    {
-        auto constructors = tcxLuaConstructors<trussc::OnceGate
-            , trussc::OnceGate()
-            , trussc::OnceGate(double)
-        >();
-        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
-        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
-        t["reset"] = &trussc::OnceGate::reset;
-    }
+    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
+        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
+        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
+        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
     {
         sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
         t["channels"] = &trussc::AudioInBuffer::channels;
@@ -183,24 +179,23 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["framePosition"] = &trussc::AudioInBuffer::framePosition;
         t["sampleRate"] = &trussc::AudioInBuffer::sampleRate;
     }
-    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
-        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
-        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
+    lua->new_usertype<trussc::SoundBuffer::Kind>("SoundBufferKind",
+        sol::meta_function::equal_to, [](trussc::SoundBuffer::Kind a, trussc::SoundBuffer::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundBuffer::Kind::Eager),
+        "Stream", sol::var(trussc::SoundBuffer::Kind::Stream));
     {
-        sol::usertype<trussc::CurveStyle> t = lua->new_usertype<trussc::CurveStyle>("CurveStyle");
-        t["mode"] = &trussc::CurveStyle::mode;
-        t["resolution"] = &trussc::CurveStyle::resolution;
-        t["tolerance"] = &trussc::CurveStyle::tolerance;
+        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
+        t["files"] = &trussc::DragDropEventArgs::files;
+        t["x"] = &trussc::DragDropEventArgs::x;
+        t["y"] = &trussc::DragDropEventArgs::y;
     }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
     {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-        t["success"] = &trussc::TcpConnectEventArgs::success;
-    }
-    {
-        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
-        t["count"] = &trussc::EnumLabelSpan::count;
+        sol::usertype<trussc::CloseRequestEventArgs> t = lua->new_usertype<trussc::CloseRequestEventArgs>("CloseRequestEventArgs");
+        t["cancel"] = &trussc::CloseRequestEventArgs::cancel;
     }
 }
 #ifdef _MSC_VER

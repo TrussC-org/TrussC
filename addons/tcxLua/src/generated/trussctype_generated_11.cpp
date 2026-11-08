@@ -220,22 +220,20 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
         t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
-    lua->new_usertype<trussc::LogLevel>("LogLevel",
-        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
-        "Verbose", sol::var(trussc::LogLevel::Verbose),
-        "Notice", sol::var(trussc::LogLevel::Notice),
-        "Warning", sol::var(trussc::LogLevel::Warning),
-        "Error", sol::var(trussc::LogLevel::Error),
-        "Fatal", sol::var(trussc::LogLevel::Fatal),
-        "Silent", sol::var(trussc::LogLevel::Silent));
-    {
-        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
-        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
-        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
-        t["id"] = &trussc::TouchEventArgs::id;
-        t["x"] = &trussc::TouchEventArgs::x;
-        t["y"] = &trussc::TouchEventArgs::y;
-    }
+    lua->new_usertype<trussc::Direction>("Direction",
+        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
+        "Left", sol::var(trussc::Direction::Left),
+        "Center", sol::var(trussc::Direction::Center),
+        "Right", sol::var(trussc::Direction::Right),
+        "Top", sol::var(trussc::Direction::Top),
+        "Bottom", sol::var(trussc::Direction::Bottom),
+        "Baseline", sol::var(trussc::Direction::Baseline));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
     lua->new_usertype<trussc::LightType>("LightType",
         sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
         "Directional", sol::var(trussc::LightType::Directional),
@@ -246,9 +244,9 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         "Horizontal", sol::var(trussc::WritingMode::Horizontal),
         "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
     {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-        t["message"] = &trussc::UdpErrorEventArgs::message;
+        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
+        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
+        t["message"] = &trussc::TcpErrorEventArgs::message;
     }
     {
         sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");

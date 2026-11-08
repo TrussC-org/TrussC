@@ -215,31 +215,30 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
         "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
         "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
+        auto constructors = tcxLuaConstructors<trussc::LogStream
+            , trussc::LogStream(trussc::LogLevel)
+            , trussc::LogStream(trussc::LogLevel, const std::string &)
+        >();
+        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
     }
+    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
+        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
+        "Miter", sol::var(trussc::StrokeJoin::Miter),
+        "Round", sol::var(trussc::StrokeJoin::Round),
+        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
     {
-        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
-        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
+        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
+        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
     }
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
     {
-        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
-        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
-        t["reason"] = &trussc::DeviceLostEventArgs::reason;
-    }
-    {
-        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
-        t["occluded"] = &trussc::OccludedEventArgs::occluded;
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
     }
 }
 #ifdef _MSC_VER

@@ -223,16 +223,14 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
         t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
     }
-    {
-        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
-        t["alt"] = &trussc::KeyEventArgs::alt;
-        t["consumed"] = &trussc::KeyEventArgs::consumed;
-        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
-        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
-        t["key"] = &trussc::KeyEventArgs::key;
-        t["shift"] = &trussc::KeyEventArgs::shift;
-        t["super"] = &trussc::KeyEventArgs::super;
-    }
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
     {
         sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
         t["channels"] = &trussc::AudioOutBuffer::channels;
@@ -240,22 +238,26 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
         t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
     }
-    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
-        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
-        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
-        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
+    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
+        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
+        "Butt", sol::var(trussc::StrokeCap::Butt),
+        "Round", sol::var(trussc::StrokeCap::Round),
+        "Square", sol::var(trussc::StrokeCap::Square));
     {
-        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
-        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
-        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
+        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
+        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
+        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
     }
-    lua->new_usertype<trussc::MixMode>("MixMode",
-        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
-        "Auto", sol::var(trussc::MixMode::Auto),
-        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
     {
-        sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
-        t["focused"] = &trussc::FocusEventArgs::focused;
+        sol::usertype<trussc::SendResult> t = lua->new_usertype<trussc::SendResult>("SendResult");
+        t["error"] = &trussc::SendResult::error;
+        t["id"] = &trussc::SendResult::id;
+        t["ok"] = &trussc::SendResult::ok;
+    }
+    {
+        sol::usertype<trussc::Runtime> t = lua->new_usertype<trussc::Runtime>("Runtime");
+        t["events"] = &trussc::Runtime::events;
+        t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
     }
 }
 #ifdef _MSC_VER

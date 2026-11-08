@@ -2768,6 +2768,7 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 
 // TrussC custom shader
 #include "tc/gpu/tcShader.h"
+#include "tc/gpu/tcComputeShader.h"
 
 // TrussC 3D LUT (color grading)
 // Note: tcLut.h is NOT included by default to avoid shader symbol collisions.

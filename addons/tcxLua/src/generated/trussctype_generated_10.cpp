@@ -205,35 +205,38 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
         t["name"] = &trussc::GraphicsBackend::name;
     }
-    lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
-        sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
-        "None", sol::var(trussc::AudioInitFailure::None),
-        "NoBackend", sol::var(trussc::AudioInitFailure::NoBackend),
-        "DeviceOpen", sol::var(trussc::AudioInitFailure::DeviceOpen),
-        "DeviceStart", sol::var(trussc::AudioInitFailure::DeviceStart));
+    lua->new_usertype<trussc::SaveError>("SaveError",
+        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
+        "None", sol::var(trussc::SaveError::None),
+        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
+        "NoSpace", sol::var(trussc::SaveError::NoSpace),
+        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
+        "Unknown", sol::var(trussc::SaveError::Unknown));
     {
         sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
         t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
         t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
         t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
     }
-    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
-        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
-        "Miter", sol::var(trussc::StrokeJoin::Miter),
-        "Round", sol::var(trussc::StrokeJoin::Round),
-        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
     {
-        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
-        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
-        t["reason"] = &trussc::ExitRequestEventArgs::reason;
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["accuracy"] = &trussc::Location::accuracy;
+        t["altitude"] = &trussc::Location::altitude;
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
+    }
+    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
+        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
+        "Default", sol::var(trussc::AudioBackend::Default),
+        "Null", sol::var(trussc::AudioBackend::Null));
+    {
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
     }
     {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifdef _MSC_VER
