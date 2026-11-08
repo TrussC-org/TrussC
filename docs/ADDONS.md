@@ -100,16 +100,13 @@ void setup() {
 
 ### CMakeLists.txt (Reference)
 
-CMakeLists.txt is shared across all projects. No editing required:
+CMakeLists.txt is shared across all projects. No editing required.
 
-```cmake
-cmake_minimum_required(VERSION 3.20)
-
-set(TRUSSC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../trussc")
-include(${TRUSSC_DIR}/cmake/trussc_app.cmake)
-
-trussc_app()
-```
+The generated file uses `../../../core` as a fallback and checks that
+`cmake/trussc_app.cmake` exists before including it. Configure with
+`cmake --preset <host>` (`macos`, `linux`, or `windows`). For a manual configure
+outside the repository, pass `-DTRUSSC_DIR=<TrussC-root>/core`. If the core cannot
+be found, the error also suggests `trusscli update` to regenerate the presets.
 
 `trussc_app()` automatically:
 
