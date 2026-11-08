@@ -1408,6 +1408,7 @@ void runMainUpdate(double fixedDelta,
     } restore{wctx, previous, previousCallback, previousFixed, previousTime};
     ++wctx.updateCount;
     EntryStackGuard guard(AppEntry::Update);
+    bufferReadbacks().poll();
     internal::currentWindowContext().coreEvents->update.notify();
 }
 

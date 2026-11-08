@@ -82,6 +82,7 @@ code = r'''
 #include <utility>
 #include <vector>
 #include "tc/utils/tcTeardown.h"
+#include "tc/gpu/internal/tcBufferReadback.h"
 #define __APPLE__ 1
 #define TARGET_OS_OSX 1
 using NSModalResponse = int;
@@ -107,6 +108,7 @@ void endSheet(NSWindow* sheet, int response) {
 namespace trussc {
 '''+helpers+r'''
 namespace internal {
+BufferReadbackQueue& bufferReadbacks() { static BufferReadbackQueue queue; return queue; }
 struct FileDialogResult { bool success = false; };
 struct Request {
     bool finished = false, valid = true;
