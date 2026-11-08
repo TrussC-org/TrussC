@@ -4,6 +4,8 @@
 python3 core/tests/webgpuUniformGrowth/run.py --build
 Use --build-dir to run a baseline build, or --url/--screenshot to capture an
 existing Web example served on localhost. --timeout is a hang guard, not a test.
+Use --adapter default for Chrome's normal adapter selection on a device host;
+the default is SwiftShader for reproducible software runs.
 """
 import argparse
 import base64
@@ -254,6 +256,8 @@ def main():
     parser.add_argument('--build', action='store_true')
     parser.add_argument('--build-dir', type=Path, default=TEST / 'build-web')
     parser.add_argument('--chrome', default='/usr/bin/google-chrome')
+    parser.add_argument('--adapter', choices=('swiftshader', 'default'), default='swiftshader',
+                        help="WebGPU adapter: swiftshader (default), or Chrome's default selection for device checks")
     parser.add_argument('--timeout', type=float, default=180)
     parser.add_argument('--url', help='Capture an already served example instead of the harness')
     parser.add_argument('--screenshot', type=Path)
@@ -270,12 +274,13 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix='webgpu-chrome-') as profile:
             command = [args.chrome, '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
-                       '--enable-unsafe-webgpu', '--use-angle=swiftshader',
-                       '--use-webgpu-adapter=swiftshader', '--remote-debugging-port=0',
+                       '--enable-unsafe-webgpu', '--remote-debugging-port=0',
                        '--disable-background-networking', '--disable-component-update', '--disable-sync',
                        '--no-proxy-server', '--disable-features=NetworkServiceSandbox', '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--disable-breakpad',
                        '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
                        '--window-size=1280,1024', f'--user-data-dir={profile}', 'about:blank']
+            if args.adapter == 'swiftshader':
+                command[1:1] = ['--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader']
             chrome_env = dict(os.environ, XDG_CONFIG_HOME=str(Path(profile) / "config"), XDG_CACHE_HOME=str(Path(profile) / "cache"))
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=chrome_env)
             drain = LogDrain(process.stdout, process.terminate)
