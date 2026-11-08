@@ -3,6 +3,8 @@
 import importlib.util
 import json
 import os
+import shutil
+import sys
 from pathlib import Path
 import subprocess
 import tempfile
@@ -49,17 +51,18 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(calls[0], ['git','merge-base','base-sha','head-sha'])
         adds = [c for c in calls if c[:3] == ['git','worktree','add']]
         self.assertEqual([c[-1] for c in adds], ['head-sha','merge-base-sha'])
-        modes = [c for c in calls if c[0].endswith('/binary')]
+        # The recorded path uses the platform's separators.
+        modes = [c for c in calls if Path(c[0]).name == 'binary']
         self.assertEqual([c[1] for c in modes], ['--self-check','--record','--compare'])
-        self.assertIn('/base/binary',modes[1][0])
-        self.assertIn('/head/binary',modes[2][0])
+        self.assertIn('/base/binary',Path(modes[1][0]).as_posix())
+        self.assertIn('/head/binary',Path(modes[2][0]).as_posix())
         self.assertEqual(modes[1][2], modes[2][2])
         removes = [c for c in calls if c[:3] == ['git','worktree','remove']]
         self.assertEqual([c[-1] for c in removes], [c[-2] for c in reversed(adds)])
 
     def test_first_batch_only_checks_head(self):
         calls = self.exercise(has_base=False)
-        self.assertEqual([c[1] for c in calls if c[0].endswith('/binary')], ['--self-check'])
+        self.assertEqual([c[1] for c in calls if Path(c[0]).name == 'binary'], ['--self-check'])
         self.assertEqual(sum(c[:3] == ['git','worktree','add'] for c in calls),1)
         self.assertEqual(sum(c[:3] == ['git','worktree','remove'] for c in calls),1)
 
@@ -103,7 +106,10 @@ class DriverTests(unittest.TestCase):
 
     def test_builds_share_cache_with_checkout_relative_paths(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as temp:
-            tree = Path(temp); binary = tree/driver.HARNESS/'bin/renderRegression'
+            # Same per-platform binary path as render_regression.build().
+            tree = Path(temp); binary = tree/driver.HARNESS/'bin'/('renderRegression.exe' if driver.sys.platform == 'win32' else 'renderRegression')
+            if driver.sys.platform == 'darwin':
+                binary = tree/driver.HARNESS/'bin/renderRegression.app/Contents/MacOS/renderRegression'
             binary.parent.mkdir(parents=True); binary.touch()
             with patch.dict(driver.os.environ, CMAKE_C_COMPILER_LAUNCHER='ccache',
                             CMAKE_CXX_COMPILER_LAUNCHER='ccache'), patch.object(driver, 'run') as run:
@@ -130,6 +136,9 @@ class CaptureTests(unittest.TestCase):
     """Run the harness's loader and capture body with in-memory pixel I/O, no GPU."""
     @classmethod
     def setUpClass(cls):
+        compiler = os.environ.get('CXX') or shutil.which('c++')
+        if not compiler:
+            raise unittest.SkipTest('requires a C++ compiler (c++ on PATH, or set CXX)')
         cls.temp = tempfile.TemporaryDirectory()
         cls.addClassCleanup(cls.temp.cleanup)
         cls.folder = Path(cls.temp.name)
@@ -200,7 +209,7 @@ int main(int argc, char** argv) {
 '''
         cpp = cls.folder/'capture.cpp'; cls.binary = cls.folder/'capture'
         cpp.write_text(code, encoding='utf-8')
-        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
+        subprocess.run([compiler, '-std=c++20', '-Wall', '-Wextra',
                         '-I'+str(ROOT/'core/include'), str(cpp), '-o', str(cls.binary)], check=True)
 
     def exercise(self, manifest, scene='newScene', images=None, self_check=True):
@@ -316,6 +325,7 @@ class WorkflowTests(unittest.TestCase):
                        'run':'python3 tools/tests/test_render_regression.py -v'},
                       jobs['header-state-check']['steps'])
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_aggregate_gate_for_each_event_and_result(self):
         workflow = yaml.load((ROOT/'.github/workflows/build.yml').read_text(encoding="utf-8"),Loader=yaml.BaseLoader)
         script = workflow['jobs']['ci-ok']['steps'][0]['run']

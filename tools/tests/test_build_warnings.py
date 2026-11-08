@@ -3,6 +3,7 @@ import importlib.util
 import os
 import ast
 import shutil
+import shlex
 import runpy
 from pathlib import Path
 import subprocess
@@ -246,7 +247,7 @@ class WarningTests(unittest.TestCase):
                         time.sleep(1.5)
                     return chunk
 
-                expected = (('x' * 1024 + '\n') * blocks + diagnostic + '\n').encode()
+                expected = ('x' * 1024 + '\n') * blocks + diagnostic + '\n'
                 command = [sys.executable, '-c',
                            f'import sys; sys.stdout.write(("x" * 1024 + "\\n") * {blocks} + '
                            f'{diagnostic!r} + "\\n"); sys.stdout.flush()']
@@ -256,7 +257,8 @@ class WarningTests(unittest.TestCase):
                                                                           SimpleNamespace(buffer=echo)):
                         self.assertEqual(gate.capture(log, command), 0)
                 self.assertTrue(delayed)
-                self.assertEqual(log.read_bytes(), expected)
+                # The Python fixture emits native text newlines on Windows.
+                self.assertEqual(log.read_text(encoding='utf-8'), expected)
                 checked = subprocess.run([sys.executable, str(SCRIPT), str(log)], capture_output=True)
                 self.assertEqual(checked.returncode, int('warning:' in diagnostic))
 
@@ -609,15 +611,27 @@ int main() {
                         log = step['run'].split(option + ' "', 1)[1].split('"', 1)[0]
                         self.assertIn(f'"{log}"', check['run'])
                         self.assertNotIn('continue-on-error', check)
-                        # The wrapper must preserve heredocs and shell syntax.
-                        shell = subprocess.run(['bash', '-n'], input=step['run'], text=True,
-                                               encoding='utf-8', capture_output=True)
-                        self.assertEqual(shell.returncode, 0, shell.stderr)
             self.assertEqual(count, expected, filename)
             if filename == 'daily.yml':
                 platforms = workflow['jobs']['sweep']['strategy']['matrix']['include']
                 self.assertEqual({p['preset'] for p in platforms}, {'linux', 'macos', 'windows'})
                 self.assertIn('sweep-web', workflow['jobs'])
+
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
+    def test_workflow_shell_syntax(self):
+        # Check all wrapped build scripts, including heredocs, on their host shell.
+        for filename in ('build.yml', 'daily.yml'):
+            workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(encoding='utf-8'),
+                                 Loader=yaml.BaseLoader)
+            for job in workflow['jobs'].values():
+                for step in job.get('steps', []):
+                    script = step.get('run', '')
+                    if 'check_build_warnings.py --capture' not in script:
+                        continue
+                    with self.subTest(workflow=filename, step=step.get('name')):
+                        shell = subprocess.run(['bash', '-n'], input=script, text=True,
+                                               encoding='utf-8', capture_output=True)
+                        self.assertEqual(shell.returncode, 0, shell.stderr)
 
     @unittest.skipUnless(sys.platform != 'win32' and shutil.which('c++'), 'requires POSIX and C++')
     def test_apple_system_sink_does_not_enter_inherited_libtrace_after_fork(self):
@@ -747,7 +761,6 @@ void registerSystemLogForkGuard() { pthread_atfork(nullptr, nullptr, systemLogFo
     def test_wrapped_workflow_steps_use_the_running_shell(self):
         # Python's Windows PATH search can choose the System32 WSL launcher
         # for bare bash, even though the step itself runs in Git Bash.
-        import shlex
         for filename, expected in [('build.yml', 13), ('daily.yml', 8)]:
             workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(encoding='utf-8'),
                                  Loader=yaml.BaseLoader)
@@ -763,33 +776,32 @@ void registerSystemLogForkGuard() { pthread_atfork(nullptr, nullptr, systemLogFo
                             tokens = shlex.split(line)
                             self.assertEqual(tokens[tokens.index('--') + 1], '$BASH')
                             self.assertIn('-- "$BASH" -eo pipefail', line)
-                            syntax = subprocess.run(['bash', '-n'], input=script, text=True,
-                                                    encoding='utf-8', capture_output=True)
-                            self.assertEqual(syntax.returncode, 0, syntax.stderr)
             self.assertEqual(wrapped, expected, filename)
-        if os.name != 'nt':
-            with tempfile.TemporaryDirectory() as temporary:
-                directory = Path(temporary)
-                wrong = directory / 'bash'
-                wrong.write_text('#!/bin/sh\nexit 73\n', encoding='utf-8')
-                wrong.chmod(0o755)
-                own_shell = directory / 'Git Bash' / 'bash'
-                own_shell.parent.mkdir()
-                shutil.copyfile(shutil.which('bash'), own_shell)
-                own_shell.chmod(0o755)
-                env = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ['PATH'])
-                for option in ('--capture', '--capture-builds'):
-                    log = directory / 'build.log'
-                    prefix = (f'{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))} '
-                              f'{option} {shlex.quote(str(log))} -- ')
-                    command = '-eo pipefail -c "echo shell-ok; exit 7"'
-                    good = subprocess.run([str(own_shell), '-c', prefix + '"$BASH" ' + command],
-                                          env=env, capture_output=True)
-                    self.assertEqual(good.returncode, 7, good.stderr)
-                    self.assertIn(b'shell-ok', good.stdout)
-                    bad = subprocess.run([str(own_shell), '-c', prefix + 'bash ' + command],
-                                         env=env, capture_output=True)
-                    self.assertEqual(bad.returncode, 73, bad.stderr)
+
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
+    def test_wrapped_workflow_shell_execution(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            wrong = directory / 'bash'
+            wrong.write_text('#!/bin/sh\nexit 73\n', encoding='utf-8')
+            wrong.chmod(0o755)
+            own_shell = directory / 'Git Bash' / 'bash'
+            own_shell.parent.mkdir()
+            shutil.copyfile(shutil.which('bash'), own_shell)
+            own_shell.chmod(0o755)
+            env = dict(os.environ, PATH=str(directory) + os.pathsep + os.environ['PATH'])
+            for option in ('--capture', '--capture-builds'):
+                log = directory / 'build.log'
+                prefix = (f'{shlex.quote(sys.executable)} {shlex.quote(str(SCRIPT))} '
+                          f'{option} {shlex.quote(str(log))} -- ')
+                command = '-eo pipefail -c "echo shell-ok; exit 7"'
+                good = subprocess.run([str(own_shell), '-c', prefix + '"$BASH" ' + command],
+                                      env=env, capture_output=True)
+                self.assertEqual(good.returncode, 7, good.stderr)
+                self.assertIn(b'shell-ok', good.stdout)
+                bad = subprocess.run([str(own_shell), '-c', prefix + 'bash ' + command],
+                                     env=env, capture_output=True)
+                self.assertEqual(bad.returncode, 73, bad.stderr)
 
     def test_merge_queue_uses_build_workflow_and_required_jobs(self):
         workflow = yaml.load((ROOT / '.github/workflows/build.yml').read_text(encoding='utf-8'),

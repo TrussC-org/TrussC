@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -32,7 +33,7 @@ class ReferenceWorkflowTests(unittest.TestCase):
         script.write_text('#!/usr/bin/env python3\n' + text, encoding="utf-8")
         script.chmod(0o755)
 
-    def test_ci_lanes_bootstrap_and_patch(self):
+    def test_ci_lanes_bootstrap(self):
         self.assertEqual(self.workflow['on']['pull_request']['branches'], ['main'])
         self.assertIn('merge_group', self.workflow['on'])
         self.assertEqual(self.job['runs-on'], 'macos-latest')
@@ -51,6 +52,13 @@ class ReferenceWorkflowTests(unittest.TestCase):
         self.assertEqual(upload['with']['path'], 'regenerated.patch')
         self.assertEqual(upload['with']['if-no-files-found'], 'error')
 
+        tracked = subprocess.check_output(['git', 'ls-files', '--', *OUTPUTS], cwd=ROOT, text=True, encoding="utf-8")
+        self.assertEqual(len(set(tracked.splitlines())), 21)
+        self.assertNotIn('reference-data.json', tracked)
+
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
+    def test_ci_drift_patch_shell(self):
+        freshness = next(s for s in self.job['steps'] if s.get('id') == 'freshness')
         # Exercise the actual workflow shell with clean and stale diff responses.
         # No git repository is written and no Actions service is needed.
         self.stub('git', '''import json, os, sys
@@ -86,10 +94,8 @@ print('diff --git a/generated.cpp b/generated.cpp')
                     self.assertIn('diff --git', (self.directory / 'regenerated.patch').read_text(encoding="utf-8"))
                 else:
                     self.assertFalse((self.directory / 'regenerated.patch').exists())
-        tracked = subprocess.check_output(['git', 'ls-files', '--', *OUTPUTS], cwd=ROOT, text=True, encoding="utf-8")
-        self.assertEqual(len(set(tracked.splitlines())), 21)
-        self.assertNotIn('reference-data.json', tracked)
 
+    @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_regenerate_order_and_fail_fast(self):
         reference = self.directory / 'docs/reference'
         reference.mkdir(parents=True)
@@ -166,6 +172,7 @@ for (const failure of [
 """
         subprocess.run(['node', '-e', runner, str(ROOT / 'docs/reference/structure.js')], check=True)
 
+    @unittest.skipUnless((ROOT / 'docs/node_modules').is_dir(), 'requires docs/node_modules')
     def test_join_sorts_input_ids(self):
         entries = {'zzFixture': {'kind': 'func', 'name': 'zzFixture', 'signatures': []},
                    'aaFixture': {'kind': 'func', 'name': 'aaFixture', 'signatures': []}}
@@ -174,18 +181,7 @@ for (const failure of [
             structure = self.directory / 'structure.json'
             structure.write_text(json.dumps(data), encoding="utf-8")
             output = self.directory / 'reference.json'
-            # The join uses no authored prose for these fixture ids. Mock the
-            # TOML parser so this workflow test needs no npm installation.
-            runner = """
-const fs = require('fs'), vm = require('vm');
-const file = process.argv[1], realRequire = require('module').createRequire(file);
-process.argv = ['node', file, ...process.argv.slice(2)];
-vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
-    require: name => name.endsWith('/node_modules/smol-toml') ? { parse: () => ({}) } : realRequire(name),
-    __dirname: require('path').dirname(file), process, console,
-}, { filename: file });
-"""
-            subprocess.run(['node', '-e', runner, str(ROOT / 'docs/reference/generate.js'), '--structure', str(structure),
+            subprocess.run(['node', str(ROOT / 'docs/reference/generate.js'), '--structure', str(structure),
                             '--out-json', str(output), '--out-md', str(self.directory / 'index.md')],
                            check=True, stdout=subprocess.PIPE)
             outputs.append(output.read_bytes())
@@ -194,7 +190,7 @@ vm.runInNewContext(fs.readFileSync(file, 'utf8'), {
         # Old partial caches cannot bypass the failure via the former override.
         structure.write_text(json.dumps({'__meta': {'partialAst': True}}), encoding="utf-8")
         output.unlink()
-        result = subprocess.run(['node', '-e', runner, str(ROOT / 'docs/reference/generate.js'),
+        result = subprocess.run(['node', str(ROOT / 'docs/reference/generate.js'),
                                  '--structure', str(structure), '--out-json', str(output),
                                  '--out-md', str(self.directory / 'index.md')],
                                 env=dict(os.environ, TC_ALLOW_PARTIAL_AST='1'),
@@ -250,7 +246,7 @@ class StructureAstTests(unittest.TestCase):
                             ('{}\n{"kind": invalid}', 'object starting at byte 3:')]:
             for args in [('--ids',), ('--json', str(self.output))]:
                 with self.subTest(data=data, args=args):
-                    self.ast.write_text(data, encoding='utf-8')
+                    self.ast.write_bytes(data.encode('utf-8'))
                     result = self.run_structure(*args)
                     self.assertEqual(result.returncode, 1, result.stderr)
                     self.assertIn('AST dump could not be read/parsed:', result.stderr)
@@ -264,7 +260,7 @@ class StructureAstTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn('AST dump could not be read/parsed:', result.stderr)
         self.assertIn('ENOENT', result.stderr)
-        self.assertIn(str(self.ast), result.stderr)
+        self.assertIn(self.ast.name, result.stderr)
         self.assertNotIn('compiler stderr', result.stderr)
 
 
