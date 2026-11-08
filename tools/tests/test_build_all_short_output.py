@@ -15,7 +15,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('build_all_short', ROOT / 'examples/build_all.py')
@@ -81,6 +81,57 @@ class ShortOutputCase(unittest.TestCase):
                 patch.object(build_all, 'run_command', return_value=True), \
                 patch.object(build_all.subprocess, 'run', side_effect=fake_run):
             return build_all.run_combined_core_tests(tests, 'pg', PLATFORM, self.options)
+
+
+class BuildParallelism(ShortOutputCase):
+    def test_cmake_job_count_in_every_build_mode(self):
+        def fake_process(*args, **kwargs):
+            process = MagicMock()
+            process.__enter__.return_value = process
+            process.stdout = io.StringIO()
+            process.stderr = io.StringIO()
+            process.wait.return_value = 0
+            process.returncode = 0
+            return process
+
+        self.options.web = True
+        self.options.web_only = False
+        self.options.clean = False
+        modes = [
+            ('native', 'core/tests/own', build_all.build_test_project, 1),
+            ('combined', 'core/tests/allCoreTests', build_all.build_test_project, 1),
+            ('addon', 'addons/demo/tests', build_all.build_test_project, 1),
+            ('standalone', 'core/tests/unit', build_all.build_and_run_unit_test, 1),
+            ('web', 'core/tests/web', build_all.build_and_run_web_test, 1),
+            ('example', 'examples/demo',
+             lambda directory, pg, info, args:
+                 build_all.build_example(directory, 'demo', pg, info, args), 2),
+        ]
+        for value in (None, '3', '1', '', 'invalid', '1.5', '0', '-2'):
+            expected = value if value in ('3', '1') else '8'
+            for mode, relative, builder, count in modes:
+                with self.subTest(value=value, mode=mode), \
+                        patch.dict(os.environ), \
+                        patch.object(build_all.multiprocessing, 'cpu_count', return_value=8), \
+                        patch.object(build_all, 'update_target_flags', return_value=[]), \
+                        patch.object(build_all, 'find_test_binary', return_value='fake-binary'), \
+                        patch.object(build_all, 'find_node', return_value='node'), \
+                        patch.object(build_all, 'run_timed_test_binary', return_value=True), \
+                        patch.object(build_all.subprocess, 'Popen', side_effect=fake_process) as popen:
+                    os.environ.pop('CMAKE_BUILD_PARALLEL_LEVEL', None)
+                    if value is not None:
+                        os.environ['CMAKE_BUILD_PARALLEL_LEVEL'] = value
+                    directory = self.root / relative
+                    directory.mkdir(parents=True, exist_ok=True)
+                    # Web tests locate the output before running the mocked binary.
+                    (directory / 'build-web').mkdir(exist_ok=True)
+                    (directory / 'build-web' / (directory.name + '.js')).touch()
+                    builder(str(directory), 'pg', PLATFORM, self.options)
+                    commands = [call.args[0] for call in popen.call_args_list
+                                if call.args[0][:2] == ['cmake', '--build']]
+                    self.assertEqual(len(commands), count)
+                    for command in commands:
+                        self.assertEqual(command[command.index('-j') + 1], expected)
 
 
 class TestRunScreen(ShortOutputCase):
