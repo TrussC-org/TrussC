@@ -380,12 +380,14 @@ jobs:
         shell: bash
         run: python3 tools/tests/test_window_pixel_size.py -v
 
-      # Compile production bodies against recording structs for both GLX and
-      # EGL. Uses the existing native headers/toolchain; no display is needed.
+      # Compile production bodies against recording structs for GLX/EGL and
+      # session ending. Uses the existing toolchain; no display is needed.
       - name: native window contracts regression checks
         if: runner.os == 'Linux' && matrix.shard == 1
         shell: bash
-        run: sh core/tests/nativeWindow/contracts-test
+        run: |
+          sh core/tests/nativeWindow/contracts-test
+          python3 core/tests/sessionEndBusy/native-test.py
 
       # Compile-and-link canary: every documented core API + the repo-contained
       # addons (see examples/tests/AllFeaturesExample/src/coverage.h). Every

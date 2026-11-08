@@ -174,6 +174,7 @@ def orderingRegression():
     struct AppOwnerScope{explicit AppOwnerScope(void*){}};
     int audioSubscriptions=0;
     template<class T>void attachAppAudio(T&){++audioSubscriptions;}
+    template<class T>void finishFilesOpenedSetup(T&){}
     namespace mcp::internal{void initializeMcp(){}}
     struct App {
     App* getRootNode(){return this;}
@@ -284,6 +285,9 @@ int runtimeEpoch() { return 1; }
 Context*& currentWindowCtx() { static Context* ctx = nullptr; return ctx; }
 void restoreWindowContext(Context* ctx) { currentWindowCtx() = ctx; }
 void closeScreenshots(int) {}
+// No dialogs are staged by this disposal probe.
+void cancelAsyncDialogs() {}
+void cancelWindowAsyncDialogs(Window&) {}
 void releaseRuntimeWindow(Window&) { ++retirements; }
 struct WindowRequestAccess {
     static void teardown(Window& w) { w.teardown(); }
