@@ -321,8 +321,10 @@ bool VideoGrabber::setupPlatform() {
     data->bufferHeight = state_->height;
     data->pixelFormat = fmt.fmt.pix.pixelformat;
 
+    char fourcc[5] = {};
+    std::memcpy(fourcc, &data->pixelFormat, 4);
     logNotice("VideoGrabber") << "Format: " << state_->width << "x" << state_->height
-                                << " (" << (char*)&data->pixelFormat << ")";
+                                << " (" << fourcc << ")";
 
     // Set frame rate if specified
     if (desiredFrameRate_ > 0) {
