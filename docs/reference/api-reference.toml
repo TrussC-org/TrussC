@@ -65547,9 +65547,9 @@ bool uploaded = buffer.update(values.data(), sizeof(values));
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 
 ["StorageBuffer::read"]
-description.en = "Reads bytes from the start of storage and waits for GPU completion."
-description.ja = "領域の先頭からバイト列を読み取り、GPU の完了を待ちます。"
-description.ko = "저장소의 시작부터 바이트를 읽고 GPU 완료를 기다립니다."
+description.en = "Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web)."
+description.ja = "領域の先頭からバイト列を読み取り、GPU の完了までブロックします（ネイティブ専用です。Web では readAsync() を使います）。"
+description.ko = "저장소의 시작부터 바이트를 읽고 GPU 완료까지 차단합니다(네이티브 전용이며 Web에서는 readAsync()를 사용합니다)."
 details.en = '''
 - read(destination, bytes) immediately submits preceding recorded draws and dispatches in order and blocks until completion. The frame stalls while it waits; calling it every frame can lower fps. No frame commit occurs, and later drawing continues normally. Available on Metal, D3D11, GL 4.3 and GLES 3.1, including Raspberry Pi 5. It is not available on Web: calling it there is a compile error.
 - Copies bytes from offset zero without conversion. Partial reads, including byte counts not divisible by four, are allowed. A zero-byte read succeeds without allocated storage or a destination and submits no work. A nonzero read requires allocated storage, a non-null destination with room for bytes, and bytes <= getSize(). Invalid input or native readback failure returns false with a warning (at most once every 5 seconds per buffer), and leaves the destination untouched. A successful result is a CPU snapshot that later GPU writes cannot change.
@@ -65573,9 +65573,9 @@ if (buffer.read(values.data(), values.size() * sizeof(float))) logNotice() << va
 related = ["StorageBuffer::allocate", "ComputeShader::dispatch"]
 
 ["StorageBuffer::readAsync"]
-description.en = "Requests an owned snapshot of the whole buffer in a later main-thread update (C++ only)."
-description.ja = "バッファ全体の所有権付きスナップショットを、後続のメインスレッド更新で受け取ります（C++ 専用）。"
-description.ko = "전체 버퍼의 소유 스냅샷을 이후 메인 스레드 업데이트에서 받습니다(C++ 전용)."
+description.en = "Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only)."
+description.ja = "WebGPU を含む全プラットフォームでバッファ全体を読み取り、後続のメインスレッド更新のコールバックで受け取ります（C++ 専用です）。"
+description.ko = "WebGPU를 포함한 모든 플랫폼에서 전체 버퍼를 읽고 이후 메인 스레드 업데이트의 콜백으로 받습니다(C++ 전용입니다)."
 details.en = '''
 - Call readAsync(callback) on the main thread. The callback receives ReadbackResult by value in request order, in an update later than the request. The result owns its bytes; clearing or destroying the StorageBuffer after requesting does not cancel delivery or change the snapshot. Keep the result to retain its bytes after the callback returns.
 - The callback runs in the requesting App's context and is dropped if that App ends first. Requests made outside any App have no App ownership and run in the polling update's current scope. Requests still pending when app shutdown begins are dropped without calling their callbacks. Native staging resources retire safely. Warnings use the same per-buffer 5-second gate as read().
