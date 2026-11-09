@@ -1,1 +1,3 @@
 {test} --gpu-check
+{test} --async-check
+{test} --async-exit-check

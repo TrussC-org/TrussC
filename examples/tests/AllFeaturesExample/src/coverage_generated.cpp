@@ -2707,6 +2707,17 @@ struct Cover_Ray__Hit : af::Scope<Ray::Hit> {
     }
 };
 
+struct Cover_ReadbackResult : af::Scope<ReadbackResult> {
+    ~Cover_ReadbackResult(); // Never instantiated.
+    static void run() {
+        (void)ReadbackResult();
+        (void)ReadbackResult(af::val<std::vector<unsigned char>>());
+        (void)af::val<const ReadbackResult>().getData();
+        (void)af::val<const ReadbackResult>().ok();
+        (void)af::val<const ReadbackResult>().size();
+    }
+};
+
 struct Cover_Rect : af::Scope<Rect> {
     ~Cover_Rect(); // Never instantiated.
     static void run() {
@@ -3661,6 +3672,7 @@ struct Cover_StorageBuffer : af::Scope<StorageBuffer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
         (void)af::val<StorageBuffer>().read(af::val<void *>(), af::val<size_t>());
 #endif
+        (void)af::val<StorageBuffer>().readAsync(af::val<std::function<void (ReadbackResult)>>());
         (void)af::val<StorageBuffer>().update(af::val<const void *>(), af::val<size_t>());
     }
 };
@@ -5188,6 +5200,7 @@ void af::coverGenerated() {
     af_generated::Cover_Quaternion::run();
     af_generated::Cover_Ray::run();
     af_generated::Cover_Ray__Hit::run();
+    af_generated::Cover_ReadbackResult::run();
     af_generated::Cover_Rect::run();
     af_generated::Cover_RectNode::run();
     af_generated::Cover_RectNodeButton::run();

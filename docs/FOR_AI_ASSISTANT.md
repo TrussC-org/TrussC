@@ -3916,6 +3916,15 @@ Hit Ray::intersectZPlane() const [+1]  // Tests the ray against the Z=0 plane.
 Ray Ray::transformed(const Mat4 & inverseMatrix) const  // Returns a ray transformed by a matrix.
 ```
 
+### ReadbackResult — Owns a storage readback snapshot or an empty failure result (C++ only).
+
+```cpp
+T ReadbackResult::get(size_t index) const  // Returns the index-th T in the owned snapshot (C++ only).
+const unsigned char * ReadbackResult::getData() const  // Returns read-only bytes owned by this result; check ok() before reading.
+bool ReadbackResult::ok() const  // Returns whether the readback succeeded.
+size_t ReadbackResult::size() const  // Returns the owned byte count, or zero on failure.
+```
+
 ### Rect — Represents a rectangle using position and size.
 
 ```cpp
@@ -4244,7 +4253,8 @@ sg_buffer StorageBuffer::getBuffer() const  // Returns the borrowed sokol storag
 size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
-bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and waits for GPU completion.
+bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
+void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only).
 bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 

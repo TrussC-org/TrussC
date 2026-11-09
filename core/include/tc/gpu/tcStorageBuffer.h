@@ -2,6 +2,8 @@
 
 #include "../utils/tcAnnotations.h"
 #include "../utils/tcOnceGate.h"
+#include "../app/internal/tcAppConstruction.h"
+#include "internal/tcBufferReadback.h"
 #include <utility>
 #include <climits>
 #include <new>
@@ -16,7 +18,7 @@ public:
     ~StorageBuffer() { clear(); }
     StorageBuffer(const StorageBuffer&) = delete;
     StorageBuffer& operator=(const StorageBuffer&) = delete;
-    StorageBuffer(StorageBuffer&& other) noexcept { moveFrom(std::move(other)); }
+    StorageBuffer(StorageBuffer&& other) noexcept : warnings_(other.warnings_) { moveFrom(std::move(other)); }
     StorageBuffer& operator=(StorageBuffer&& other) noexcept {
         if (this != &other) { clear(); moveFrom(std::move(other)); }
         return *this;
@@ -106,6 +108,42 @@ public:
     }
 #endif
 
+    // Whole-buffer snapshot, delivered in request order in a later main update.
+    // App-owned callbacks restore its scope and are dropped when that App ends.
+    // Shutdown drops pending callbacks. Neither request nor result borrows this object.
+    void readAsync(std::function<void(ReadbackResult)> callback) {
+        auto& queue = internal::bufferReadbacks();
+        if (!queue.accepting()) return;
+        std::unique_ptr<internal::BufferReadbackRequest> request;
+        if (isAllocated()) {
+            try {
+                internal::suspendForImageUpload();
+                request = readAsyncPlatform();
+            } catch (const std::bad_alloc&) {
+            } catch (const std::length_error&) {
+            }
+        }
+        if (!request) request = std::make_unique<internal::BufferReadbackRequest>();
+        auto owner = internal::currentAppOwner();
+        request->owner = owner;
+        if (owner && (owner->ended || owner->retiring)) callback = {};
+        if (owner && callback) {
+            request->callback = [weak = request->owner, callback = std::move(callback)](ReadbackResult result) {
+                auto owner = weak.lock();
+                if (!owner || !owner->token->load() || owner->callbacksClosing) return;
+                internal::AppCallbackScope scope(owner);
+                if (scope.admitted() && owner->token->load() && !owner->callbacksClosing)
+                    callback(std::move(result));
+            };
+        } else {
+            request->callback = std::move(callback);
+        }
+        request->warn = [gate = warnings_] {
+            if (gate->isFirstTime()) logWarning("StorageBuffer") << "Failed to read storage buffer asynchronously";
+        };
+        queue.enqueue(std::move(request));
+    }
+
     void clear() noexcept {
         internal::deferGpuDestroy(view_);
         internal::deferGpuDestroy(buffer_);
@@ -121,6 +159,12 @@ public:
     sg_view getView() const { return view_; }
 
 private:
+#if defined(SOKOL_METAL) || defined(SOKOL_D3D11) || defined(SOKOL_WGPU) || ((defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)) && !defined(__EMSCRIPTEN__))
+    std::unique_ptr<internal::BufferReadbackRequest> readAsyncPlatform();
+#else
+    // WebGL and other unsupported backends deliver deferred failure.
+    std::unique_ptr<internal::BufferReadbackRequest> readAsyncPlatform() { return {}; }
+#endif
 #if !defined(__EMSCRIPTEN__) && !defined(SOKOL_WGPU)
     bool readPlatform(void* destination, size_t bytes);
 #endif
@@ -129,9 +173,10 @@ private:
     size_t size_ = 0;
     uint32_t uploadFrame_ = 0;
     bool updated_ = false;
-    OnceGate warnings_{5.0};
+    // A request can warn after the StorageBuffer has been destroyed.
+    std::shared_ptr<OnceGate> warnings_ = std::make_shared<OnceGate>(5.0);
     void warn(const char* message) {
-        if (warnings_.isFirstTime()) logWarning("StorageBuffer") << message;
+        if (warnings_->isFirstTime()) logWarning("StorageBuffer") << message;
     }
     bool available() {
         if (!sg_isvalid()) { warn("Storage buffers are unavailable without an initialized GPU (including headless apps)"); return false; }
@@ -139,6 +184,7 @@ private:
         return true;
     }
     void moveFrom(StorageBuffer&& other) {
+        warnings_ = other.warnings_;
         buffer_ = std::exchange(other.buffer_, {});
         staging_ = std::exchange(other.staging_, {});
         view_ = std::exchange(other.view_, {});

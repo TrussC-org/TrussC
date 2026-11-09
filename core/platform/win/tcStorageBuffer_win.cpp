@@ -1,6 +1,7 @@
 #include "TrussC.h"
 #if defined(_WIN32)
 #include <d3d11.h>
+#include "tcStorageBufferReadback.h"
 
 namespace trussc {
 bool StorageBuffer::readPlatform(void* destination, size_t bytes) {

@@ -139,6 +139,7 @@ struct Runtime {
 #endif
     RetiringGeneration* retiringGenerations = nullptr;
     std::vector<std::weak_ptr<AppOwner>> owners;
+    BufferReadbackQueue readbacks;
     bool stopping = false, notifyingQuit = false, quitPending = false;
     RuntimeEvents events;
     std::vector<fs::path> pendingOpenedFiles;
@@ -156,6 +157,7 @@ Runtime& runtime() {
     static auto* state = new Runtime;
     return *state;
 }
+BufferReadbackQueue& bufferReadbacks() { return runtime().readbacks; }
 RuntimeActivityScope::RuntimeActivityScope() noexcept { ++runtime().entries; }
 RuntimeActivityScope::~RuntimeActivityScope() noexcept { --runtime().entries; }
 WindowContext*& currentWindowCtx() { return runtime().selected; }
@@ -369,6 +371,7 @@ void beginRuntimeRun() {
     ++state.epoch;
     state.servicedTurn = false;
     state.stopping = false;
+    bufferReadbacks().start();
     state.sessionQueried = state.sessionCommitted = false;
     state.quitPending = false;
     state.sessionAllowed = true;
@@ -452,6 +455,7 @@ void shutdownRuntime() noexcept {
     if (state.stopping) return;
     if (!state.stopping) state.endingWindows.swap(state.windows);
     state.stopping = true;
+    bufferReadbacks().shutdown();
     TeardownSteps steps;
 #if defined(__APPLE__) && TARGET_OS_OSX
     cancelMacDialogSheets();
@@ -793,6 +797,7 @@ void retireAppOwner(const std::shared_ptr<AppOwner>& owner) noexcept {
     }
     AppOwnerScope scope(owner);
     TeardownSteps steps;
+    steps.run("App readback retirement", [&] { bufferReadbacks().cancelAppCallbacks(owner); });
     steps.run("App MCP retirement", [&] { mcp::internal::removeRegistrationsOwnedBy(owner->token.get()); });
     // Admission and extraction share a lock; invocation and capture destruction
     // stay outside it. Extract in place so OOM teardown needs no container move.
