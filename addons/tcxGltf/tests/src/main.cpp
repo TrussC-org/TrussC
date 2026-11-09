@@ -1376,6 +1376,36 @@ int main() {
         check("mesh width failure preserves the cause",
               warning.find("Mesh index width") != string::npos && warning.find("not enough memory") == string::npos);
     }
+    // Non-uniform node transforms must bake inverse-transpose normal directions.
+    for (const Vec3& scaling : {Vec3(2, 1, 1), Vec3(2, 1, 0.5f), Vec3(-1, 1, 1),
+                                Vec3(0.01f, 0.005f, 0.0025f)}) {
+        for (bool rotated : {false, true}) {
+            GltfBuilder b = triangle();
+            const Vec3 source = Vec3(1, 2, 3).normalized();
+            const float normals[] = {source.x, source.y, source.z, source.x, source.y, source.z,
+                                     source.x, source.y, source.z};
+            int view = b.addView(normals, sizeof(normals));
+            b.accessors[2] = accessorJson(view, CT_FLOAT, "3", "VEC3");
+            const float angle = rotated ? 0.6f : 0.0f;
+            b.nodes = "[{\"mesh\":0,\"scale\":[" + to_string(scaling.x) + "," +
+                to_string(scaling.y) + "," + to_string(scaling.z) + "],\"rotation\":[0,0," +
+                to_string(std::sin(angle/2)) + "," + to_string(std::cos(angle/2)) + "]}]";
+            GltfModel model;
+            if (loadCase("normal node transform", b, true, model)) {
+                const Vec3 expected = (Mat4::rotateZ(angle) * (source / scaling)).normalized();
+                for (const Vec3& n : model.getNode(0).mesh.getNormals())
+                    check("baked normal matches analytic inverse transpose", (n - expected).length() < 1e-5f);
+            }
+        }
+    }
+    {
+        auto b = triangle();
+        b.nodes = R"([{"mesh":0,"scale":[0,0,0]}])";
+        GltfModel model;
+        if (loadCase("degenerate node transform", b, true, model))
+            check("zero baked normal keeps original", model.getNode(0).mesh.getNormal(0) == Vec3(0,0,1));
+    }
+
     // ----- scenes and node hierarchy ---------------------------------------------
     {
         // No scenes: every node without a parent is a root. Node 1 is a

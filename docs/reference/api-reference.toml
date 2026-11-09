@@ -17349,21 +17349,21 @@ description.ja = "CPU で計算したライティングでメッシュを描画�
 description.ko = "CPU에서 계산한 조명으로 메시를 그린다."
 details.en = '''
 - Calculates lighting on the CPU for each submitted vertex using the active lights and material; set a material with `setMaterial()` before calling for non-Points modes, as a missing material is not checked.
-- Transforms positions and normals with the current model matrix, normalizes the transformed normals, and calls `calculateLighting()`; normals are not transformed with an inverse transpose.
+- Transforms positions with the current model matrix and normals with its inverse transpose, then renormalizes and calls `calculateLighting()`. Non-uniform scale and shear keep normals perpendicular to the surface; mirrors keep them pointing outward. A degenerate transform that maps a normal to zero leaves it unchanged.
 - When every vertex has a color, that color replaces the material's base color for lighting and supplies the output alpha; otherwise the active material supplies the base color.
 - Expands strip, fan, and loop modes to triangle or line lists and skips an entire primitive if any referenced vertex or normal is missing; incomplete trailing primitives are ignored.
 - Points mode calls `drawNoLighting()` instead and does not calculate lighting.
 '''
 details.ja = '''
 - 設定中のライトとマテリアルを使い、送信する各頂点のライティングを CPU で計算します。Points 以外のモードで呼び出す前に `setMaterial()` でマテリアルを設定してください。未設定かどうかは確認しません。
-- 現在のモデル行列で位置と法線を変換し、変換後の法線を正規化して `calculateLighting()` を呼びます。法線の変換には逆転置行列を使いません。
+- 現在のモデル行列で位置を、その逆転置行列で法線を変換し、法線を再正規化して `calculateLighting()` を呼びます。非一様スケールやせん断でも法線は面に垂直で、鏡映でも外向きを保ちます。縮退した変換で法線がゼロになる場合は元の法線を保持します。
 - 全頂点に色がある場合は、その色をマテリアルのベースカラーの代わりに使ってライティングを計算し、出力のアルファにも使います。それ以外では設定中のマテリアルのベースカラーを使います。
 - ストリップ、ファン、ループのモードを三角形または線のリストに展開します。参照先の頂点または法線が 1 個でもない場合はプリミティブ全体を飛ばし、末尾の不完全なプリミティブは無視します。
 - Points モードでは代わりに `drawNoLighting()` を呼び、ライティングは計算しません。
 '''
 details.ko = '''
 - 설정된 조명과 머티리얼을 사용하여 제출하는 정점마다 CPU에서 조명을 계산합니다. Points 이외의 모드에서 호출하기 전에 `setMaterial()`로 머티리얼을 설정해야 합니다. 머티리얼이 없는지 확인하지 않습니다.
-- 현재 모델 행렬로 위치와 법선을 변환하고 변환된 법선을 정규화한 다음 `calculateLighting()`을 호출합니다. 법선 변환에 역전치 행렬을 사용하지 않습니다.
+- 현재 모델 행렬로 위치를, 그 역전치 행렬로 법선을 변환하고 법선을 다시 정규화한 다음 `calculateLighting()`을 호출합니다. 비균일 스케일과 전단에서도 법선은 표면에 수직이며, 반사 변환에서도 바깥 방향을 유지합니다. 퇴화한 변환이 법선을 0으로 만들면 원래 법선을 유지합니다.
 - 모든 정점에 색상이 있으면 해당 색상을 머티리얼의 기본 색상 대신 사용하여 조명을 계산하고 출력 알파에도 사용합니다. 그렇지 않으면 설정된 머티리얼의 기본 색상을 사용합니다.
 - 스트립, 팬, 루프 모드를 삼각형 또는 선 목록으로 펼칩니다. 참조하는 정점이나 법선이 하나라도 없으면 프리미티브 전체를 건너뛰고, 끝의 불완전한 프리미티브는 무시합니다.
 - Points 모드에서는 대신 `drawNoLighting()`을 호출하고 조명을 계산하지 않습니다.

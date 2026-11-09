@@ -189,6 +189,7 @@ public:
         clearMaterial();
         ctx.swapchainTarget.colorFormat = savedFormat;
         ctx.swapchainTarget.sampleCount = savedSamples;
+        normalChecks();
         check("main Shader reuses the target-owned pipeline", shader.targetPipeline().id == mainPipeline.id);
 
         {
@@ -274,6 +275,67 @@ public:
         clearMaterial();
     }
 private:
+    // Compare CPU and actual PBR shader output with analytically baked data.
+    void normalChecks() {
+        Material material;
+        material.setBaseColor(0.6f, 0.7f, 0.8f).setRoughness(0.8f);
+        Pixels texel; texel.allocate(1, 1, 4);
+        texel.setColor(0, 0, Color(0.8f, 0.6f, 0.9f));
+        Texture normalMap; normalMap.allocate(texel);
+        const Vec3 normal = Vec3(1, 1, 1).normalized();
+        const Vec3 tangent = Vec3(1, -1, 0).normalized();
+        const Mat4 rotation = Mat4::rotateY(0.3f) * Mat4::rotateZ(0.2f);
+        for (const Vec3& scaling : {Vec3(2, 1, 1), Vec3(2, 1, 0.5f), Vec3(-1, 1, 1), Vec3(1.5f)}) {
+            const Mat4 linear = rotation * Mat4::scale(scaling);
+            const Mat4 model = Mat4::translate(32, 32, 0) * linear;
+            const Vec3 expectedNormal = (rotation * (normal / scaling)).normalized();
+            const Vec3 expectedTangent = (linear * tangent).normalized();
+            Mesh mesh, baked;
+            for (const Vec3& v : {Vec3(-10, -10, 0), Vec3(10, -10, 0), Vec3(0, 10, 0)}) {
+                mesh.addVertex(v).addNormal(normal).addTexCoord(0, 0)
+                    .addTangent(tangent.x, tangent.y, tangent.z, 1);
+                baked.addVertex(model * v).addNormal(expectedNormal).addTexCoord(0, 0)
+                    .addTangent(expectedTangent.x, expectedTangent.y, expectedTangent.z, 1);
+            }
+            for (int path = 0; path < 3; ++path) {
+                material.setNormalMap(path == 2 ? &normalMap : nullptr);
+                setMaterial(material);
+                auto capture = [&](const Mesh& source, bool applyModel) {
+                    fbo.begin(0, 0, 0, 1);
+                    pushMatrix();
+                    if (applyModel) multMatrix(model);
+                    if (path == 0) source.drawWithLighting();
+                    else source.draw();
+                    if (path != 0 && applyModel) {
+                        const auto& vsp = internal::currentWindowContext().currentTarget->deferredPbrDraws.back().cmd.vsp;
+                        const Vec3 uploaded(vsp.normalMat[0]*normal.x + vsp.normalMat[4]*normal.y + vsp.normalMat[8]*normal.z,
+                                            vsp.normalMat[1]*normal.x + vsp.normalMat[5]*normal.y + vsp.normalMat[9]*normal.z,
+                                            vsp.normalMat[2]*normal.x + vsp.normalMat[6]*normal.y + vsp.normalMat[10]*normal.z);
+                        check("PBR uploads inverse-transpose in GLSL column storage",
+                              (uploaded.normalized() - expectedNormal).length() < 1e-5f);
+                    }
+                    popMatrix(); fbo.end();
+                    std::vector<unsigned char> pixels(64*64*4);
+                    check("normal fixture readback", fbo.readPixels(pixels.data()));
+                    return pixels;
+                };
+                const auto actual = capture(mesh, true);
+                const auto expected = capture(baked, false);
+                bool same = true;
+                int brightness = 0;
+                for (int channel = 0; channel < 3; ++channel) {
+                    const size_t index = (32*64 + 32)*4 + channel;
+                    same &= std::abs(int(actual[index]) - int(expected[index])) <= 1;
+                    brightness += actual[index];
+                }
+                check(path == 0 ? "CPU normal lighting matches analytic baked reference" :
+                      path == 1 ? "PBR normal lighting matches analytic baked reference" :
+                                  "PBR model-transformed tangent matches analytic baked reference",
+                      same && brightness > 0);
+            }
+        }
+        clearMaterial();
+    }
     std::vector<unsigned char> render(const Mesh& m) {
         fbo.begin(0, 0, 0, 0);
         m.draw();
