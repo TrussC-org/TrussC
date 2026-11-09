@@ -319,6 +319,7 @@ cd examples
 ./build_all.sh --clean  # Clean rebuild
 ```
 This script automatically uses `trusscli` to update each example before building.
+`build_all.py` uses `CMAKE_BUILD_PARALLEL_LEVEL` when it is a positive integer; otherwise, it uses the CPU count.
 
 `examples/build_all.py` is the Python version of it, and it also builds and runs the
 core and addon tests (`--core-tests-only`, `--addon-tests-only`). It prints a

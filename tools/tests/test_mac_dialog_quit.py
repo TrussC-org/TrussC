@@ -112,6 +112,7 @@ BufferReadbackQueue& bufferReadbacks() { static BufferReadbackQueue queue; retur
 struct FileDialogResult { bool success = false; };
 struct Request {
     bool finished = false, valid = true;
+    std::shared_ptr<void> cancellation;
     std::function<void(FileDialogResult)> callback;
     std::function<void()> dismiss;
     bool alive() const { return valid && !finished; }

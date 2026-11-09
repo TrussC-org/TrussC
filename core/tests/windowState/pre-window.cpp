@@ -17,6 +17,13 @@ struct Snapshot {
 };
 // Exercise the first host-state access before main(), as a static Font can do.
 const Snapshot initial;
+void unavailableGetters(const char* phase) {
+    check(phase, "no implicit Window", internal::resolveWindow() == nullptr);
+    check(phase, "unavailable DPI", getDpiScale() == 0);
+    check(phase, "unavailable framebuffer", getFramebufferWidth() == 0 && getFramebufferHeight() == 0);
+    check(phase, "unavailable window size", getWindowSize() == Vec2(0, 0) && getAspectRatio() == 0);
+    check(phase, "fallback capture extent", internal::captureWindowSize(internal::currentWindowContext()) == std::pair<size_t, size_t>(0, 0));
+}
 void getters(const char* phase, float dpi, int width, int height) {
     check(phase, "capture window size", internal::captureWindowSize(internal::currentWindowContext()) == std::pair<size_t, size_t>(width, height));
     check(phase, "DPI", getDpiScale() == dpi);
@@ -99,7 +106,7 @@ void changingGetters(const char* phase) {
 struct ConstructorApp : App {
     ConstructorApp() {
         ++constructors;
-        getters("App constructor", sapp_dpi_scale(), sapp_width(), sapp_height());
+        getters("App constructor sees selected metadata", 3, 1801, 1001);
     }
 };
 struct HeadlessApp : App {
@@ -125,40 +132,43 @@ struct HeadlessApp : App {
 }
 int main() {
     getMainThreadId();
-    check("static", "DPI", initial.dpi == sapp_dpi_scale());
-    check("static", "width", initial.width == sapp_width());
-    check("static", "height", initial.height == sapp_height());
-    getters("prelaunch", sapp_dpi_scale(), sapp_width(), sapp_height());
-    auto* main = internal::resolveWindow();
+    setLogLevel(LogLevel::Silent); // Expected unavailable-window queries below.
+    check("static", "DPI", initial.dpi == 0);
+    check("static", "width", initial.width == 0);
+    check("static", "height", initial.height == 0);
+    unavailableGetters("prelaunch");
+    auto main = std::make_shared<Window>();
     check("prelaunch", "unbound", !main->isOpen());
     check("prelaunch", "closed Window width", main->getWidth() == 0);
     check("prelaunch", "closed Window height", main->getHeight() == 0);
     check("prelaunch", "closed Window visibility", !main->isOccluded());
-    // Read-through must observe native changes after the very first access.
+    // Native changes cannot turn the non-window fallback into a live Window.
     setenv("TC_PREWINDOW_NATIVE_DPI", "1.5", 1);
     setenv("TC_PREWINDOW_NATIVE_WIDTH", "1501", 1);
     setenv("TC_PREWINDOW_NATIVE_HEIGHT", "901", 1);
-    getters("live native before launch", sapp_dpi_scale(), sapp_width(), sapp_height());
-    changingGetters("prelaunch live readers");
+    unavailableGetters("prelaunch after native changes");
     auto secondary = std::make_shared<Window>();
     check("secondary", "unbound defaults", trussc::internal::WindowRequestAccess::context(*secondary).dpiScale == 1 && trussc::internal::WindowRequestAccess::context(*secondary).fbWidth == 0 && trussc::internal::WindowRequestAccess::context(*secondary).fbHeight == 0);
     WindowSettings settings;
     const sapp_desc descriptor = buildAppDescriptor<ConstructorApp>(settings);
-    check("descriptor", "App factory is deferred until bootstrap", constructors == 0 && descriptor.init_cb != nullptr);
-    check("descriptor", "unbound", !main->isOpen());
-    getters("launch reset", sapp_dpi_scale(), sapp_width(), sapp_height());
-    { auto app = internal::makeConstructedApp<ConstructorApp>(); }
-    // Repeat the reset with different native values.
+    check("descriptor", "App factory is deferred until bootstrap", constructors == 0 && descriptor.init_userdata_cb != nullptr);
+    auto* prepared = static_cast<Window*>(descriptor.user_data);
+    check("descriptor", "unbound", prepared && !prepared->isOpen());
+    unavailableGetters("descriptor leaves fallback intact");
+    // Each launch prepares a fresh closed receiver, without native read-through.
     setenv("TC_PREWINDOW_NATIVE_DPI", "2", 1);
     setenv("TC_PREWINDOW_NATIVE_WIDTH", "2561", 1);
     setenv("TC_PREWINDOW_NATIVE_HEIGHT", "1441", 1);
-    internal::prepareLaunchWindow(settings);
-    getters("second launch reset", sapp_dpi_scale(), sapp_width(), sapp_height());
+    auto launch = internal::prepareLaunchWindow(settings);
+    check("second launch", "fresh closed receiver", launch.get() != prepared && !launch->isOpen());
+    unavailableGetters("second launch leaves fallback intact");
     // Once bound, metadata remains authoritative despite different native values.
     sapp_tc_window_metadata metadata{};
     metadata.fb_width = 1801; metadata.fb_height = 1001; metadata.dpi_scale = 3;
     internal::publishWindowMetadata(*main, metadata);
     internal::WindowRequestAccess::bindForTests(*main, 1000);
+    internal::currentWindowCtx() = &internal::WindowRequestAccess::context(*main);
+    { auto app = internal::makeConstructedAppAt<ConstructorApp>(internal::currentWindowCtx()); }
     const unsigned boundQueries = prewindowNativeQueries();
     getters("main metadata", 3, 1801, 1001);
     check("main metadata", "bound readers make no native dimension queries", prewindowNativeQueries() == boundQueries);
@@ -166,18 +176,29 @@ int main() {
     check("main metadata", "Window logical height", main->getHeight() == int(1001 / 3.f));
     metadata.fb_width = 701; metadata.fb_height = 501; metadata.dpi_scale = 1.25f;
     internal::publishWindowMetadata(*secondary, metadata);
+    internal::WindowRequestAccess::unbind(*main);
+    internal::WindowRequestAccess::bindForTests(*secondary, 1001);
     internal::currentWindowCtx() = &trussc::internal::WindowRequestAccess::context(*secondary);
     getters("secondary metadata", 1.25f, 701, 501);
-    internal::currentWindowCtx() = nullptr;
+    internal::WindowRequestAccess::unbind(*secondary);
+    internal::WindowRequestAccess::bindForTests(*main, 1000);
+    internal::currentWindowCtx() = &internal::WindowRequestAccess::context(*main);
     getters("main isolated", 3, 1801, 1001);
+    // A new Runtime run cannot start while launch windows are retained.
+    // Closed handles retain their own metadata across subsequent headless runs.
+    internal::WindowRequestAccess::unbind(*main);
+    internal::shutdownRuntime();
     runHeadlessApp<HeadlessApp>();
-    check("headless", "restores caller context", internal::currentWindowCtx() == nullptr);
-    getters("headless leaves main intact", 3, 1801, 1001);
+    check("headless", "restores caller context", internal::currentWindowCtx() == &internal::WindowRequestAccess::context(*main));
+    check("headless", "leaves closed receiver metadata intact", internal::windowDimensions(internal::WindowRequestAccess::context(*main)).fbWidth == 1801);
     // Headless reads through for its whole run without binding a native Window.
     setenv("TC_PREWINDOW_NATIVE_DPI", "1.5", 1);
     runHeadlessApp<HeadlessApp>();
     internal::WindowRequestAccess::unbind(*main);
-    getters("main live again after unbind", sapp_dpi_scale(), sapp_width(), sapp_height());
+    check("closed receiver", "retains cached metadata", internal::windowDimensions(internal::WindowRequestAccess::context(*main)).fbWidth == 1801);
+    check("closed receiver", "closed Window dimensions", main->getWidth() == 0 && main->getHeight() == 0);
+    internal::currentWindowCtx() = nullptr;
+    unavailableGetters("fallback remains isolated");
     std::printf("pre-window: %d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
 }

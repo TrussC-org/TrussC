@@ -11,6 +11,7 @@ struct Request {
     std::weak_ptr<Window> window;
     bool windowOwned = false;
     DialogCompletion callback;
+    std::shared_ptr<AppCancellation> cancellation;
     DialogDismiss dismiss;
     bool finished = false;
     bool alive() const {
@@ -21,6 +22,7 @@ struct Request {
     void cancel() {
         finished = true;
         callback = {};
+        cancellation.reset();
         if (auto close = std::exchange(dismiss, {})) close();
     }
 };
@@ -43,7 +45,7 @@ void requestAsyncDialog(DialogInputs inputs, DialogCompletion callback, DialogPr
     request->callback = appOwnedCallback(std::move(callback));
     std::erase_if(requests, [](const auto& weak) { return weak.expired(); });
     requests.push_back(request);
-    ownAppCancellation([weak = std::weak_ptr(request)] {
+    request->cancellation = ownAppCancellation([weak = std::weak_ptr(request)] {
         if (auto live = weak.lock()) live->cancel();
     });
     if (testPresenter) presenter = testPresenter;
@@ -54,6 +56,7 @@ void requestAsyncDialog(DialogInputs inputs, DialogCompletion callback, DialogPr
             auto deliver = [request, result = std::move(result)] {
                 if (!request->alive()) return;
                 request->finished = true;
+                request->cancellation.reset();
                 request->dismiss = {};
                 auto callback = std::exchange(request->callback, {});
                 if (callback) callback(std::move(result));

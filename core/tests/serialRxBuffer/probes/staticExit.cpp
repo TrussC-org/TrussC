@@ -1,5 +1,6 @@
 
 #include "tc/comm/tcSerial.h"
+#include "tc/utils/tcUtils.h" // complete the inline getDataPath definition
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
@@ -18,14 +19,14 @@ void sendBytes(size_t count) {
 }
 struct FeedAtExit {
     ~FeedAtExit() {
-        fprintf(stderr,"exit: queue has been destroyed, Serial is still alive; send one byte\n");
+        fprintf(stderr,"exit: main returned, Serial is still alive; send one byte\n");
         sendBytes(1);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
         while (serial.getDroppedByteCount() != 1) {
             if (std::chrono::steady_clock::now() > deadline) std::_Exit(4);
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        std::fprintf(stderr, "PASS: worker counted late input after queue/event teardown\n");
+        std::fprintf(stderr, "PASS: worker counted late input during static teardown\n");
     }
 } feed;
 int main() {

@@ -78,6 +78,7 @@ public:
     ~ImGuiManager();
 private:
     std::shared_ptr<int> retirementLifetime_ = std::make_shared<int>(0);
+    std::shared_ptr<tc::internal::AppCancellation> appCancellation_;
     void installDeadlineListeners_();
 
     void initializeContext_(int initialVertices);

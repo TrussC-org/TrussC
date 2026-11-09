@@ -95,7 +95,7 @@ void ImGuiManager::setup(int initialVertices) {
     exitListener_ = tc::internal::FrameworkEventAccess::listen(tc::events().exit,
         [this]() { shutdown(); }, tc::EventPriority::AfterApp);
 
-    tc::internal::ownAppCancellation([this, lifetime = std::weak_ptr<int>(retirementLifetime_)] {
+    appCancellation_ = tc::internal::ownAppCancellation([this, lifetime = std::weak_ptr<int>(retirementLifetime_)] {
         if (!lifetime.expired()) shutdown();
     });
     tc::logVerbose() << "ImGui initialized";
@@ -103,6 +103,7 @@ void ImGuiManager::setup(int initialVertices) {
 
 void ImGuiManager::shutdown() {
     if (!initialized_) return;
+    appCancellation_.reset();
     exitListener_ = {};
     hotReloadUnloadListener_ = {};
     renderListener_ = {};

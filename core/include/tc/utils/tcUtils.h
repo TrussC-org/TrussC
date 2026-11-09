@@ -129,25 +129,6 @@ inline fs::path getDataPathRoot() {
     return internal::currentDataPathRoot();
 }
 
-// Get data path for a filename
-// - If filename is absolute, return as-is (like oF)
-// - Otherwise, resolved relative to executable directory + dataPathRoot
-// - Normalize only that base; preserve filename components (including symlink/..).
-// Safe to call from any thread (e.g. Pixels::load on a worker).
-inline fs::path getDataPath(const fs::path& filename) {
-    if (!filename.empty() && filename.is_absolute()) {
-        return filename;
-    }
-
-    const fs::path root = internal::currentDataPathRoot();
-    if (root.is_absolute()) {
-        return root.lexically_normal() / filename;
-    } else {
-        // Relative root: resolve relative to executable directory
-        return (getExecutableDir() / root).lexically_normal() / filename;
-    }
-}
-
 // For macOS bundle distribution: Set data path to Resources folder
 // Will reference xxx.app/Contents/Resources/data/
 // No-op on non-macOS platforms
