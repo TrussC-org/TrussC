@@ -85,6 +85,9 @@ bool resourceLoadIsLocalPath(const std::filesystem::path& path,
                              const std::filesystem::path& resolvedPath = {});
 // startResourceLoad / enqueueResourceLoad remain growable for app-authored jobs.
 void startExternalResourceLoad(std::shared_ptr<ResourceLoadState> state, std::function<void()> preparation);
+// Reserve the same request credits for a backend scheduled by its caller.
+// Rejection queues its failure; an admitted caller must complete or cancel.
+bool admitExternalResourceLoad(const std::shared_ptr<ResourceLoadState>& state);
 // The guard is compiled in the host, including exception-enabled Web code.
 bool prepareResourceLoad(ResourceLoadState& state, const std::function<void()>& preparation);
 void completeResourceLoad(const std::shared_ptr<ResourceLoadState>& state);
@@ -134,6 +137,7 @@ public:
                 // deleting/moving/restarting its emitter. No handle access
                 // after notify (including access to this slot).
                 auto delivery = event_;
+                // Application must not yield: it borrows the slot's owner.
                 auto application = [&] { apply(ready); };
                 application();
                 ready.cancel(); // application consumed the external payload
