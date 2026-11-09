@@ -1,4 +1,5 @@
 #include "IdeHelper.h"
+#include "ProjectName.h"
 #include "GeneratedFile.h"
 #include <fstream>
 #include <sstream>
@@ -117,7 +118,7 @@ string IdeHelper::openInIde(IdeType ideType, const string& path) {
 
 void IdeHelper::generateXcodeSchemes(const string& path) {
     string xcodePath = path + "/xcode";
-    string projectName = fs::path(path).filename().string();
+    string projectName = sanitizeProjectName(fs::path(path).filename().string());
 
     // Find .xcodeproj
     string xcodeprojPath;

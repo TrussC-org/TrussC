@@ -152,6 +152,8 @@ Build the project creation tool (first time only).
 4. (Optional) Check **Web Build** to generate Emscripten build scripts
 5. Click **Generate Project**
 
+Project and binary names replace each byte outside ASCII letters, digits, `_ . + -` with `_` (including non-ASCII); reserved names get `app_`, and the folder keeps its name.
+
 ### Web Build (WebGPU)
 
 TrussC supports browser deployment via **WebGPU** (not WebGL). To build for web:

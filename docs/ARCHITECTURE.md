@@ -77,7 +77,7 @@ MyProject/
 ### How trusscli Works
 
 The `trusscli` tool (TrussC Project Generator) creates new projects by:
-1. Copying template files (CMakeLists.txt copied as-is, no modification)
+1. Copying template files (CMakeLists.txt stays byte-identical for valid names; unsupported name bytes become `_` in project/target names)
 2. Generating `CMakePresets.json` with OS-specific configuration
 3. Generating IDE-specific files (.vscode/, Xcode project, etc.)
 

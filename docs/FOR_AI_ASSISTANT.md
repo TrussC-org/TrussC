@@ -1162,6 +1162,8 @@ trusscli run                   Build and launch
 trusscli version               Show version (trusscli + current TrussC)
 ```
 Common options: `-p, --path <path>`, `--tc-root <path>`, `-h, --help` (per-command help).
+Project and binary names replace each byte outside ASCII letters, digits, `_ . + -` with `_` (including non-ASCII); reserved names get `app_`, and the folder keeps its name.
+
 Examples: `trusscli new myApp -a tcxOsc -a tcxIME` / `trusscli new ./apps/myApp --web` / `trusscli update -p ./apps/myApp`.
 `update`, `addon add` and `addon remove` keep the project's IDE (`--ide`) and its `--web` / `--android` / `--ios` targets, read back from its `CMakePresets.json`, so a plain `trusscli update -p ./apps/myApp` keeps the web target. Pass `--ide <type>` to switch the IDE, and `--no-web` / `--no-android` / `--no-ios` to drop a target (its build folder and `build-web.*` script stay; `trusscli clean --all` removes them). After a fresh clone (`CMakePresets.json` is gitignored) the defaults apply: `vscode`, native only.
 
