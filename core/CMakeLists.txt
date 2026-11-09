@@ -368,7 +368,8 @@ endif()
 # - Otherwise use the default icon
 #
 # Supported formats:
-#   macOS: .icns, .icon (macOS 26 Tahoe+, requires actool)
+#   iOS: .png (resized to 1024x1024 with sips)
+#   macOS: .icns, .icon (macOS 26 Tahoe+, requires actool), .png (sips + iconutil)
 #   Windows: .ico (or auto-converted from .png)
 # =============================================================================
 
@@ -389,29 +390,44 @@ endfunction()
 # iOS icon setup (AppIcon.xcassets with single 1024x1024 PNG)
 # -----------------------------------------------------------------------------
 function(_trussc_setup_icon_ios TARGET_NAME ICON_DIR DEFAULT_DIR)
-    # Find icon PNG: project icon/ dir first, then default
-    set(ICON_PNG "")
-    file(GLOB PROJECT_PNGS "${ICON_DIR}/*.png")
-    if(PROJECT_PNGS)
-        list(GET PROJECT_PNGS 0 ICON_PNG)
-        get_filename_component(ICON_PNG_NAME "${ICON_PNG}" NAME)
-        message(STATUS "[${TARGET_NAME}] Using iOS icon: ${ICON_PNG_NAME}")
-    elseif(EXISTS "${DEFAULT_DIR}/default.png")
-        set(ICON_PNG "${DEFAULT_DIR}/default.png")
-        message(STATUS "[${TARGET_NAME}] Using default iOS icon")
-    else()
-        message(STATUS "[${TARGET_NAME}] No iOS icon found, skipping")
-        return()
-    endif()
-
-    # Generate AppIcon.xcassets in build directory
+    # Generate AppIcon.xcassets in the build tree, never in the user's icon/.
     set(XCASSETS_DIR "${CMAKE_CURRENT_BINARY_DIR}/AppIcon.xcassets")
     set(APPICONSET_DIR "${XCASSETS_DIR}/AppIcon.appiconset")
     file(MAKE_DIRECTORY "${APPICONSET_DIR}")
-
-    # Copy PNG
-    file(COPY "${ICON_PNG}" DESTINATION "${APPICONSET_DIR}")
-    get_filename_component(ICON_FILENAME "${ICON_PNG}" NAME)
+    set(ICON_FILENAME "icon.png")
+    set(ICON_PNG "${APPICONSET_DIR}/${ICON_FILENAME}")
+    set(CONVERTED FALSE)
+    file(GLOB PROJECT_PNGS CONFIGURE_DEPENDS "${ICON_DIR}/*.png")
+    if(PROJECT_PNGS)
+        list(GET PROJECT_PNGS 0 PROJECT_PNG)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PROJECT_PNG}")
+        find_program(TRUSSC_SIPS_EXECUTABLE sips)
+        if(TRUSSC_SIPS_EXECUTABLE)
+            _trussc_check_png_conversion("${PROJECT_PNG}" "${ICON_PNG}" PNG_HASH CONVERTED)
+            if(NOT CONVERTED)
+                execute_process(
+                    COMMAND "${TRUSSC_SIPS_EXECUTABLE}" -z 1024 1024 "${PROJECT_PNG}" --out "${ICON_PNG}"
+                    RESULT_VARIABLE RESULT
+                    OUTPUT_QUIET ERROR_QUIET
+                )
+                if(RESULT EQUAL 0 AND EXISTS "${ICON_PNG}")
+                    file(WRITE "${ICON_PNG}.sha256" "${PNG_HASH}")
+                    set(CONVERTED TRUE)
+                else()
+                    message(WARNING "[${TARGET_NAME}] sips failed to resize PNG; using default TrussC icon")
+                endif()
+            endif()
+            if(CONVERTED)
+                message(STATUS "[${TARGET_NAME}] Using iOS icon: ${PROJECT_PNG}")
+            endif()
+        else()
+            message(WARNING "[${TARGET_NAME}] sips not found; using default TrussC icon")
+        endif()
+    endif()
+    if(NOT CONVERTED)
+        file(REMOVE "${ICON_PNG}.sha256")
+        configure_file("${DEFAULT_DIR}/default-ios.png" "${ICON_PNG}" COPYONLY)
+    endif()
 
     # Generate Contents.json (single size, Xcode 14+)
     file(WRITE "${APPICONSET_DIR}/Contents.json"
@@ -468,7 +484,21 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         endif()
     endif()
 
-    # 3. If nothing was found, use the default
+    # 3. Convert a project PNG only when neither existing format was applied.
+    if(NOT FOUND_ANY)
+        file(GLOB PNG_FILES CONFIGURE_DEPENDS "${ICON_DIR}/*.png")
+        if(PNG_FILES)
+            list(GET PNG_FILES 0 PNG_FILE)
+            set(OUTPUT_ICNS "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_icon.icns")
+            _trussc_convert_png_to_icns(${TARGET_NAME} "${PNG_FILE}" "${OUTPUT_ICNS}" SUCCESS)
+            if(SUCCESS)
+                _trussc_apply_macos_icns(${TARGET_NAME} "${OUTPUT_ICNS}")
+                set(FOUND_ANY TRUE)
+            endif()
+        endif()
+    endif()
+
+    # 4. If nothing was found, use the default
     if(NOT FOUND_ANY)
         message(STATUS "[${TARGET_NAME}] Using default TrussC icon")
         # Default .icns
@@ -489,6 +519,78 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         COMMAND xattr -cr "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
         COMMENT "Removing quarantine attribute from ${TARGET_NAME}.app"
     )
+endfunction()
+
+# Reuse a successful PNG conversion when its input is unchanged.
+function(_trussc_check_png_conversion PNG_FILE OUTPUT_FILE OUT_HASH OUT_REUSABLE)
+    file(SHA256 "${PNG_FILE}" PNG_HASH)
+    set(${OUT_HASH} "${PNG_HASH}" PARENT_SCOPE)
+    set(${OUT_REUSABLE} FALSE PARENT_SCOPE)
+    set(STAMP "${OUTPUT_FILE}.sha256")
+    if(EXISTS "${OUTPUT_FILE}" AND EXISTS "${STAMP}")
+        file(READ "${STAMP}" PREVIOUS_HASH)
+        if(PREVIOUS_HASH STREQUAL PNG_HASH)
+            set(${OUT_REUSABLE} TRUE PARENT_SCOPE)
+            return()
+        endif()
+    endif()
+    file(REMOVE "${STAMP}")
+endfunction()
+
+# PNG -> ICNS conversion with the macOS command-line tools (no full Xcode).
+function(_trussc_convert_png_to_icns TARGET_NAME PNG_FILE OUTPUT_ICNS OUT_SUCCESS)
+    set(${OUT_SUCCESS} FALSE PARENT_SCOPE)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PNG_FILE}")
+    find_program(TRUSSC_SIPS_EXECUTABLE sips)
+    find_program(TRUSSC_ICONUTIL_EXECUTABLE iconutil)
+    foreach(TOOL IN ITEMS SIPS ICONUTIL)
+        if(NOT TRUSSC_${TOOL}_EXECUTABLE)
+            string(TOLOWER "${TOOL}" TOOL_NAME)
+            message(WARNING "[${TARGET_NAME}] ${TOOL_NAME} not found; using default TrussC icon")
+            return()
+        endif()
+    endforeach()
+
+    # Reconfigure when the PNG changes, but reuse a successful unchanged result.
+    _trussc_check_png_conversion("${PNG_FILE}" "${OUTPUT_ICNS}" PNG_HASH REUSABLE)
+    set(STAMP "${OUTPUT_ICNS}.sha256")
+    if(REUSABLE)
+        set(${OUT_SUCCESS} TRUE PARENT_SCOPE)
+        return()
+    endif()
+    set(ICONSET "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}.iconset")
+    file(MAKE_DIRECTORY "${ICONSET}")
+    foreach(SIZE IN ITEMS 16 32 128 256 512)
+        foreach(SCALE IN ITEMS 1 2)
+            math(EXPR PIXELS "${SIZE} * ${SCALE}")
+            if(SCALE EQUAL 2)
+                set(SUFFIX "@2x")
+            else()
+                set(SUFFIX "")
+            endif()
+            set(OUTPUT_PNG "${ICONSET}/icon_${SIZE}x${SIZE}${SUFFIX}.png")
+            execute_process(
+                COMMAND "${TRUSSC_SIPS_EXECUTABLE}" -z ${PIXELS} ${PIXELS} "${PNG_FILE}" --out "${OUTPUT_PNG}"
+                RESULT_VARIABLE RESULT
+                OUTPUT_QUIET ERROR_QUIET
+            )
+            if(NOT RESULT EQUAL 0 OR NOT EXISTS "${OUTPUT_PNG}")
+                message(WARNING "[${TARGET_NAME}] sips failed to resize PNG; using default TrussC icon")
+                return()
+            endif()
+        endforeach()
+    endforeach()
+    execute_process(
+        COMMAND "${TRUSSC_ICONUTIL_EXECUTABLE}" -c icns "${ICONSET}" -o "${OUTPUT_ICNS}"
+        RESULT_VARIABLE RESULT
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    if(NOT RESULT EQUAL 0 OR NOT EXISTS "${OUTPUT_ICNS}")
+        message(WARNING "[${TARGET_NAME}] iconutil failed to convert PNG; using default TrussC icon")
+        return()
+    endif()
+    file(WRITE "${STAMP}" "${PNG_HASH}")
+    set(${OUT_SUCCESS} TRUE PARENT_SCOPE)
 endfunction()
 
 # Apply a macOS .icns icon
