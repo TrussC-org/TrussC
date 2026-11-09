@@ -194,7 +194,7 @@ details.en = '''
 - If `setup()` asks to quit with `exitApp()` and the quit is accepted, a window's App or a headless App ends right after `setup()` returns: the ending runs before audio, the console and `update()` start. `exitRequested` can still cancel the quit, and then the App runs normally. For an App added as a child node, the quit waits until the current pass over the node tree has finished, and the next turn of the main loop handles it.
 - Each frame calls `update()` and then `draw()`. `events().update`/`events().draw` listeners registered without a priority run before the App; those registered with `EventPriority::AfterApp` run after the App and its child nodes. `update()` also updates child nodes, mods and timers.
 - When a frame is skipped (for example while idle in EVENT_DRIVEN mode), neither update nor draw runs.
-- `audioOut()`/`audioIn()` run on the audio thread (see `App::audioOut`). Every other callback runs on the main thread.
+- `audioOut()`/`audioIn()` run on the audio thread (see `App::audioOut`). Every other App callback (`setup`/`update`/`draw`, input and window events) runs on the main thread, while I/O listeners (for example network or MIDI) may run on another thread.
 - You never create an App yourself with `new` or `make_shared`. TrussC creates it through `runApp<T>()`, `runHeadlessApp<T>()` or `Window::setApp<T>(args...)`, and each call creates a new App. How an App ends is described in `App::exit`.
 - Do not put another App inside an App, as a member variable or as an extra base class; `setApp<T>` refuses such a class and logs an error.
 - Hot reload (`TC_HOT_RELOAD`) creates a fresh App on every reload, so the App's state is reset.
@@ -207,7 +207,7 @@ details.ja = '''
 - `setup()` の中で終了を求め（`exitApp()`）、それが受け入れられた場合、ウィンドウの App やヘッドレス App は `setup()` から戻った直後に終わります。終了処理は、オーディオ、コンソール、`update()` が始まる前に行われます。`exitRequested` で終了を取り消すこともでき、その場合 App は通常どおり動きます。子ノードとして追加した App の場合は、いま進んでいるノードツリーの処理が終わるまで待ち、メインループの次の周回で終了が処理されます。
 - 毎フレーム `update()`、`draw()` の順に呼ばれます。優先度を指定せずに登録した `events().update`/`events().draw` のリスナーは App より前に、`EventPriority::AfterApp` で登録したリスナーは App と子ノードのあとに呼ばれます。`update()` では子ノード、Mod、タイマーも更新されます。
 - フレームがスキップされたとき（EVENT_DRIVEN で待機しているときなど）は、update も draw も呼ばれません。
-- `audioOut()`/`audioIn()` はオーディオスレッドで呼ばれます（`App::audioOut` を参照してください）。それ以外のコールバックはメインスレッドで呼ばれます。
+- `audioOut()`/`audioIn()` はオーディオスレッドで呼ばれます（`App::audioOut` を参照してください）。それ以外の App 自身のコールバック（`setup`/`update`/`draw`、入力・ウィンドウイベント）はメインスレッドで呼ばれますが、ネットワークや MIDI などの I/O リスナーは別のスレッドで呼ばれる場合があります。
 - App を `new` や `make_shared` で自分で作ることはありません。`runApp<T>()`、`runHeadlessApp<T>()`、`Window::setApp<T>(args...)` を通じて TrussC が作り、呼ぶたびに新しい App が作られます。App の終わり方は `App::exit` で説明しています。
 - App の中に別の App を、メンバー変数や追加の基底クラスとして入れないでください。そのようなクラスは `setApp<T>` が受け付けず、エラーを記録します。
 - ホットリロード（`TC_HOT_RELOAD`）では、リロードのたびに新しい App が作られるため、App の状態はリセットされます。
@@ -220,7 +220,7 @@ details.ko = '''
 - `setup()` 안에서 종료를 요청하고(`exitApp()`) 그 요청이 받아들여지면, 창의 App이나 헤드리스 App은 `setup()`에서 돌아온 직후에 끝납니다. 종료 처리는 오디오, 콘솔, `update()`가 시작되기 전에 진행됩니다. `exitRequested`로 종료를 취소할 수도 있으며, 그 경우 App은 평소대로 동작합니다. 자식 노드로 추가한 App이라면 지금 진행 중인 노드 트리 처리가 끝날 때까지 기다렸다가 메인 루프의 다음 회차에서 종료가 처리됩니다.
 - 매 프레임 `update()`, `draw()` 순서로 호출됩니다. 우선순위를 지정하지 않고 등록한 `events().update`/`events().draw` 리스너는 App보다 먼저, `EventPriority::AfterApp`으로 등록한 리스너는 App과 자식 노드 다음에 호출됩니다. `update()`에서는 자식 노드, Mod, 타이머도 업데이트됩니다.
 - 프레임이 건너뛰어질 때(EVENT_DRIVEN에서 대기 중일 때 등)는 update도 draw도 호출되지 않습니다.
-- `audioOut()`/`audioIn()`은 오디오 스레드에서 호출됩니다(`App::audioOut` 참조). 그 밖의 콜백은 메인 스레드에서 호출됩니다.
+- `audioOut()`/`audioIn()`은 오디오 스레드에서 호출됩니다(`App::audioOut` 참조). 그 밖의 App 자체 콜백(`setup`/`update`/`draw`, 입력 및 윈도우 이벤트)은 메인 스레드에서 호출되지만, 네트워크나 MIDI 같은 I/O 리스너는 다른 스레드에서 호출될 수 있습니다.
 - App을 `new`나 `make_shared`로 직접 만들지 않습니다. `runApp<T>()`, `runHeadlessApp<T>()`, `Window::setApp<T>(args...)`를 통해 TrussC가 만들며, 호출할 때마다 새 App이 만들어집니다. App이 끝나는 방식은 `App::exit`에서 설명합니다.
 - App 안에 다른 App을 멤버 변수나 추가 기본 클래스로 넣지 마세요. 그런 클래스는 `setApp<T>`가 받아들이지 않고 오류를 기록합니다.
 - 핫 리로드(`TC_HOT_RELOAD`)에서는 리로드할 때마다 새 App이 만들어지므로 App 상태가 초기화됩니다.
