@@ -385,6 +385,7 @@ details.en = '''
 - If `exit()` or `cleanup()` throws, the rest of the shutdown and the other Apps still finish. A forced kill or a crash skips these functions.
 - At a session end (the user logs out, restarts or shuts down), what happens depends on whether App code is running on the main thread at that moment. If none is running, the normal ending runs: `exit()` for every App, starting from the most recently attached one, then audio detach and `cleanup()`. All of it shares one time limit, 3 seconds by default (see `Runtime::setLogoutTimeout`), so keep `exit()` short and save only what you need. If App code, or TrussC code serving it, is on the main thread's stack (for example inside `update()`, or in a modal dialog opened from App code), the OS ends the process, and neither `exit()`, `cleanup()` nor any exit event is called. Work on other threads does not count as running App code.
 - This applies on Windows and macOS. Linux has no receiver for the session end. If the OS ends the process without telling it, `exit()` is not called.
+- On Linux and macOS, while a signal-triggered quit is pending, further SIGTERM signals are ignored so normal cleanup can finish. A further SIGINT (Ctrl+C) immediately exits with code `130`, skipping cleanup, even after SIGTERM. SIGTERM after SIGINT is ignored. A stuck app is left to the supervisor's SIGKILL.
 '''
 details.ja = '''
 - 既定では何もしません。設定の保存や、App が始めた処理の停止のためにオーバーライドします。App ごとに 1 回、メインスレッドで呼ばれ、そのあと必ず `cleanup()` が続きます。
@@ -397,6 +398,7 @@ details.ja = '''
 - `exit()` や `cleanup()` が例外を投げても、残りの終了処理とほかの App の終了は最後まで行われます。強制終了やクラッシュのときは呼ばれません。
 - セッション終了（ログアウト、再起動、シャットダウン）のときの動作は、その瞬間にメインスレッドで App のコードが実行中かどうかで変わります。実行中でなければ通常の終了処理が行われ、最後にアタッチされた App から順に、すべての App で `exit()` が呼ばれ、オーディオの切り離しと `cleanup()` が続きます。全体で 1 つの制限時間（既定値 3 秒。`Runtime::setLogoutTimeout` を参照）を共有するため、`exit()` は必要なものを保存するだけにして短く済ませてください。App のコードや、それを呼んでいる TrussC のコードがメインスレッドで実行中（`update()` の途中や、App のコードから開いたモーダルダイアログの最中など）なら、OS がプロセスを終了させ、`exit()`・`cleanup()`・終了のイベントはどれも呼ばれません。ほかのスレッドの処理は、App のコードの実行中には数えません。
 - これは Windows と macOS での動作です。Linux にはセッション終了を受け取る仕組みがありません。OS がプロセスに知らせずに終了させた場合、`exit()` は呼ばれません。
+- Linux と macOS では、シグナルによる終了が保留中の間、追加の SIGTERM を無視し、通常の終了処理を続けます。追加の SIGINT（Ctrl+C）は、最初のシグナルが SIGTERM でも、終了処理を省略してコード `130` で即時終了します。SIGINT のあとの SIGTERM は無視します。アプリが応答しない場合は、監視プロセスの SIGKILL に任せます。
 '''
 details.ko = '''
 - 기본적으로는 아무 동작도 하지 않습니다. 설정 저장이나 App이 시작한 처리를 멈추기 위해 오버라이드합니다. App마다 한 번 메인 스레드에서 호출되며, 그다음에는 반드시 `cleanup()`이 이어집니다.
@@ -409,6 +411,7 @@ details.ko = '''
 - `exit()`나 `cleanup()`이 예외를 던져도 나머지 종료 처리와 다른 App의 종료는 끝까지 진행됩니다. 강제 종료나 크래시 때는 호출되지 않습니다.
 - 세션 종료(로그아웃, 재시작, 시스템 종료) 때의 동작은 그 순간 메인 스레드에서 App 코드가 실행 중인지에 따라 달라집니다. 실행 중이 아니면 일반 종료 처리가 진행되어, 마지막으로 연결된 App부터 차례로 모든 App에서 `exit()`가 호출되고 오디오 분리와 `cleanup()`이 이어집니다. 전체가 하나의 제한 시간(기본값 3초, `Runtime::setLogoutTimeout` 참조)을 공유하므로 `exit()`에서는 필요한 것만 저장하고 짧게 끝내세요. App 코드나 그것을 호출하는 TrussC 코드가 메인 스레드에서 실행 중이면(`update()` 도중이나 App 코드에서 연 모달 대화상자가 떠 있는 동안 등) OS가 프로세스를 종료하며, `exit()`, `cleanup()`, 종료 이벤트는 모두 호출되지 않습니다. 다른 스레드의 처리는 App 코드 실행 중으로 치지 않습니다.
 - 이는 Windows와 macOS에서의 동작입니다. Linux에는 세션 종료를 받는 수신 경로가 없습니다. OS가 프로세스에 알리지 않고 종료시키면 `exit()`는 호출되지 않습니다.
+- Linux와 macOS에서는 시그널에 의한 종료가 대기 중인 동안 추가 SIGTERM을 무시하고 일반 종료 처리를 계속합니다. 추가 SIGINT(Ctrl+C)는 첫 시그널이 SIGTERM이어도 정리 처리를 생략하고 코드 `130`으로 즉시 종료합니다. SIGINT 뒤의 SIGTERM은 무시합니다. 앱이 멈춘 채로 있으면 감독 프로세스의 SIGKILL에 맡깁니다.
 '''
 related = ["Runtime::setLogoutTimeout", "Node::cleanup", "CoreEvents::exit", "CoreEvents::exitRequested", "ExitRequestEventArgs", "exitApp", "App::getWindow", "App::audioOut", "Window::setApp", "Window::close", "runHeadlessApp", "CoreEvents::hotReloadUnload", "App", "App::audioIn", "App::setSize", "AudioRecorder::stop", "ExitRequestEventArgs::cancel", "TcpClient::disconnect", "Texture::clear", "shutdownAudio", "stopRecording", "console::start"]
 snippet = '''
@@ -45997,6 +46000,7 @@ details.en = '''
 - Inside `App::exit()` or `cleanup()`, and while the process is already shutting down, it does nothing, and the exit code is not changed either.
 - On iOS, the process ends with the requested code after normal App shutdown (`exit()` and `cleanup()`). Apple discourages apps from quitting themselves, so distributed apps usually should not call this on iOS. It is meant for tests, tools and kiosk-style installs.
 - On Android this does nothing: the OS decides when the app ends.
+- On Linux and macOS, while a signal-triggered quit is pending, further SIGTERM signals are ignored so normal cleanup can finish. A further SIGINT (Ctrl+C) immediately exits with code `130`, skipping cleanup, even after SIGTERM. SIGTERM after SIGINT is ignored. A stuck app is left to the supervisor's SIGKILL.
 '''
 details.ja = '''
 - `exitApp(code)` は終了コード（既定値 `0`）を設定して、すぐに戻ります。失敗を伝えたいときは 0 以外のコードを使ってください。Windows と Linux では、`runApp()` がこのコードを `main()` に返します。macOS の通常の終了では `runApp()` は戻らず、cleanup のあとにこのコードでプロセスが終了します（`runApp` を参照）。
@@ -46007,6 +46011,7 @@ details.ja = '''
 - `App::exit()` や `cleanup()` の中、およびプロセスがすでに終了処理に入っている間は何もせず、終了コードも変わりません。
 - iOS では、通常の App の終了処理（`exit()` と `cleanup()`）のあと、指定したコードでプロセスが終了します。Apple はアプリが自ら終了することを推奨していないため、配布するアプリでは通常 iOS で呼ばないでください。テスト、ツール、キオスク形式の設置向けです。
 - Android では何もしません。アプリをいつ終了させるかは OS が決めます。
+- Linux と macOS では、シグナルによる終了が保留中の間、追加の SIGTERM を無視し、通常の終了処理を続けます。追加の SIGINT（Ctrl+C）は、最初のシグナルが SIGTERM でも、終了処理を省略してコード `130` で即時終了します。SIGINT のあとの SIGTERM は無視します。アプリが応答しない場合は、監視プロセスの SIGKILL に任せます。
 '''
 details.ko = '''
 - `exitApp(code)`는 종료 코드(기본값 `0`)를 설정하고 바로 반환합니다. 실패를 알리려면 0이 아닌 코드를 사용하세요. Windows와 Linux에서는 `runApp()`이 이 코드를 `main()`에 반환합니다. macOS의 정상 종료에서는 `runApp()`이 반환되지 않고, cleanup 뒤에 이 코드로 프로세스가 끝납니다(`runApp` 참조).
@@ -46017,6 +46022,7 @@ details.ko = '''
 - `App::exit()`나 `cleanup()` 안, 그리고 프로세스가 이미 종료 처리 중일 때는 아무 동작도 하지 않으며 종료 코드도 바뀌지 않습니다.
 - iOS에서는 정상적인 App 종료 처리(`exit()`와 `cleanup()`) 뒤에 지정한 코드로 프로세스가 종료됩니다. Apple은 앱이 스스로 종료하는 것을 권장하지 않으므로 배포하는 앱에서는 보통 iOS에서 호출하지 마세요. 테스트, 도구, 키오스크 형태의 설치용입니다.
 - Android에서는 아무 동작도 하지 않습니다. 앱을 언제 끝낼지는 OS가 정합니다.
+- Linux와 macOS에서는 시그널에 의한 종료가 대기 중인 동안 추가 SIGTERM을 무시하고 일반 종료 처리를 계속합니다. 추가 SIGINT(Ctrl+C)는 첫 시그널이 SIGTERM이어도 정리 처리를 생략하고 코드 `130`으로 즉시 종료합니다. SIGINT 뒤의 SIGTERM은 무시합니다. 앱이 멈춘 채로 있으면 감독 프로세스의 SIGKILL에 맡깁니다.
 '''
 snippet = '''
 // tcApp.cpp
@@ -52046,6 +52052,7 @@ details.en = '''
 - When it ends, `events().exit` and `exit()` run, the App's audio callbacks are disconnected, and then `cleanup()` runs on children before the App. The audio device keeps running.
 - Update-event services now work headless: Tween, update-mode TcpClient/UdpSocket receive, tcxBox2d auto stepping, and WebSocket timeouts.
 - A process uses either windows (`runApp`) or headless mode, not both at once. If the App's constructor throws, nothing else runs: no `setup()`, `exit()` or `cleanup()`.
+- On Linux and macOS, SIGTERM and SIGINT (Ctrl+C) end the headless run with normal cleanup, without a cancelable `exitRequested` event. While that quit is pending, further SIGTERM signals are ignored so normal cleanup can finish. A further SIGINT (Ctrl+C) immediately exits with code `130`, skipping cleanup, even after SIGTERM. SIGTERM after SIGINT is ignored. A stuck app is left to the supervisor's SIGKILL.
 '''
 details.ja = '''
 - `runHeadlessApp<tcApp>()` のように、アプリのクラスをテンプレート引数に指定します。省略可能な `HeadlessSettings` で目標更新レートを指定でき、既定値は毎秒 60 回です。プロセスの終了コードを返します。
@@ -52057,6 +52064,7 @@ details.ja = '''
 - 終わるときは `events().exit` と `exit()` が呼ばれ、App のオーディオのコールバックが切り離されてから、子ノード、App の順に `cleanup()` が呼ばれます。オーディオデバイスは動き続けます。
 - Tween、更新モードの TcpClient/UdpSocket 受信、tcxBox2d の自動ステップ、WebSocket のタイムアウトなど、update イベントに依存する処理がヘッドレスでも動作します。
 - 1 つのプロセスで使えるのは、ウィンドウ（`runApp`）かヘッドレスのどちらか一方です。App のコンストラクターが例外を投げると、`setup()`、`exit()`、`cleanup()` のどれも呼ばれません。
+- Linux と macOS では、SIGTERM と SIGINT（Ctrl+C）は、取り消し可能な `exitRequested` イベントを通さずに、通常の終了処理を行ってヘッドレス実行を終了します。その終了が保留中の間、追加の SIGTERM を無視し、通常の終了処理を続けます。追加の SIGINT（Ctrl+C）は、最初のシグナルが SIGTERM でも、終了処理を省略してコード `130` で即時終了します。SIGINT のあとの SIGTERM は無視します。アプリが応答しない場合は、監視プロセスの SIGKILL に任せます。
 '''
 details.ko = '''
 - `runHeadlessApp<tcApp>()`처럼 앱 클래스를 템플릿 인자로 지정합니다. 선택적인 `HeadlessSettings`로 목표 갱신 속도를 지정하며 기본값은 초당 60회입니다. 프로세스 종료 코드를 반환합니다.
@@ -52068,6 +52076,7 @@ details.ko = '''
 - 끝날 때는 `events().exit`와 `exit()`가 호출되고, App의 오디오 콜백이 분리된 뒤 자식 노드, App 순서로 `cleanup()`을 호출합니다. 오디오 장치는 계속 실행됩니다.
 - Tween, 업데이트 모드 TcpClient/UdpSocket 수신, tcxBox2d 자동 스텝, WebSocket 타임아웃 등 update 이벤트에 의존하는 처리가 헤드리스에서도 동작합니다.
 - 한 프로세스에서는 창(`runApp`)과 헤드리스 중 하나만 사용할 수 있습니다. App의 생성자가 예외를 던지면 `setup()`, `exit()`, `cleanup()` 모두 호출되지 않습니다.
+- Linux와 macOS에서는 SIGTERM과 SIGINT(Ctrl+C)가 취소 가능한 `exitRequested` 이벤트를 거치지 않고 일반 종료 처리를 수행하여 헤드리스 실행을 종료합니다. 그 종료가 대기 중인 동안 추가 SIGTERM을 무시하고 일반 종료 처리를 계속합니다. 추가 SIGINT(Ctrl+C)는 첫 시그널이 SIGTERM이어도 정리 처리를 생략하고 코드 `130`으로 즉시 종료합니다. SIGINT 뒤의 SIGTERM은 무시합니다. 앱이 멈춘 채로 있으면 감독 프로세스의 SIGKILL에 맡깁니다.
 '''
 related = ["HeadlessSettings", "runApp", "setMaxUpdateSteps", "App::exit"]
 snippet = '''

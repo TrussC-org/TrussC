@@ -82,14 +82,17 @@ In headless mode, a quit requested during an update step is dispatched after
 that step, before any further owed step. Remaining steps in that pass are
 dropped even if exitRequested vetoes the quit; the next pass runs normally.
 
-The first SIGTERM/SIGINT only records a flag in the signal handler. The next
-frame requests exit on the main thread, even in event-driven rendering. A
-second signal while that request is still pending, including during cleanup,
-terminates immediately without another event or cleanup. A veto clears the
-pending signal and its delivery state: the next signal starts a fresh,
-cancellable request, and only another signal while that request is pending
-forces immediate exit (status `128 + signal`, normally 130 or 143). SIGKILL
-cannot deliver a callback or cleanup.
+On Linux and macOS, the first SIGTERM/SIGINT only records a flag in the signal
+handler. The next frame requests exit on the main thread, even in event-driven rendering. While
+that request is pending, including during cleanup, further SIGTERM signals are
+ignored so normal cleanup can finish. A further SIGINT (Ctrl+C) terminates
+immediately with status 130, without another event or cleanup. This also applies
+to mixed signals: SIGINT after SIGTERM escapes, and SIGTERM after SIGINT is
+ignored, preserving the first signal's exit reason. A veto clears the pending
+signal and its delivery state, so the next signal starts a fresh, cancelable
+request. Headless mode uses the same repeated-signal rules, but its first signal
+stops the loop with normal cleanup without a cancelable event. A stuck app is
+left to the supervisor's SIGKILL; SIGKILL cannot deliver a callback or cleanup.
 
 The Logger emits these stable **message payloads**, with its usual timestamp,
 level and `[System]` prefix:
@@ -153,8 +156,10 @@ On macOS verify Cmd+Q and real logout/restart/shutdown with and without a veto,
 including the Apple event reason and a modal dialog. On Linux/macOS also run
 `osExit --window escalate`: the first signal is vetoed, the next signal delivers
 a fresh `exitRequested` event, and another signal inside that listener exits
-with status 130, without a cleanup pair. `--window escalate-term` checks the
-same sequence with status 143. `--window log-warning` and `--window log-silent`
+with status 130, without a cleanup pair. `--window escalate-term` runs the
+same sequence with SIGTERM: the repeated TERM inside that listener and in
+`App::exit()` is ignored, cleanup completes with one exit/cleanup log pair, and
+the status is 0. `--window log-warning` and `--window log-silent`
 check normal cleanup with all levels set to Warning and, respectively, the
 file level additionally set to Silent: both NOTICE records must reach the
 open file, but neither reaches the console. Linux screen runs require Xvfb in CI.
