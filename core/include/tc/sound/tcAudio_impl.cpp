@@ -2024,6 +2024,8 @@ bool AudioEngine::init() {
 }
 
 bool AudioEngine::init(const AudioSettings& settings) {
+    // Capture is independent of output, including when output init fails.
+    inputNotifyEnabled_.store(true); // seq_cst, paired with capture admission
     // A device that stopped by itself is still allocated until its loss is
     // delivered: re-init releases it like a running one (voices move over the
     // same way).
@@ -2418,6 +2420,7 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
 }
 
 void AudioEngine::shutdown() {
+    inputNotifyEnabled_.store(false); // close admission before draining #256
     // Read before the device is released: for a device opened by name, the
     // stop that releasing causes reaches AudioDeviceLoss::stopped(), which
     // clears initialized_ (cleared below for any device).
@@ -2428,6 +2431,7 @@ void AudioEngine::shutdown() {
         delete device;
         device_ = nullptr;
     }
+    waitForCallbacks(false);
     diag_->lossPending.store(false, std::memory_order_release);
     if (context_) {
         ma_context* ctx = static_cast<ma_context*>(context_);
@@ -2607,7 +2611,7 @@ void micNotificationCallback(const ma_device_notification* notification) {
         micStopped(*static_cast<MicState*>(notification->pDevice->pUserData));
 }
 void micDataCallback(ma_device* device, void*, const void* input, ma_uint32 frames) {
-    if (input) static_cast<MicState*>(device->pUserData)->audio(static_cast<const float*>(input), frames);
+    if (input) static_cast<MicState*>(device->pUserData)->capture(static_cast<const float*>(input), frames);
 }
 MicStartResult openMic(MicState& state) {
     auto* device = new ma_device();
@@ -2634,10 +2638,11 @@ MicStartResult openMic(MicState& state) {
             "); connect or enable a microphone and check input permissions"};
     }
     state.device = device;
+    // Publish the granted rate before capture callbacks can read it.
+    state.sampleRate = static_cast<int>(device->sampleRate);
     result = ma_device_start(device);
     if (result != MA_SUCCESS)
         return {false, "Capture device start failed (miniaudio result=" + std::to_string(result) + ")"};
-    state.sampleRate = static_cast<int>(device->sampleRate);
     state.name = device->capture.name;
     return {true, {}};
 }
@@ -2649,6 +2654,19 @@ void closeMic(MicState& state) {
         state.device = nullptr;
     }
 }
+}
+void MicState::capture(const float* input, size_t frames) {
+    audio(input, frames); // Keep MicInput's existing ring, releasing its lock first.
+    auto& engine = AudioEngine::getInstance();
+    AudioInBuffer buffer{input, static_cast<int>(frames), 1, sampleRate, framePosition};
+    // The borrowed block must stay inline, inside the existing #256 barrier.
+    const int slot = engine.beginCallback();
+    // Enter the slot FIRST, then read both seq_cst admission flags. A stop or
+    // shutdown either drains this notify or prevents it from starting.
+    if (!cancelled.load() && engine.inputNotifyEnabled_.load())
+        GuardedEventDelivery<AudioInBuffer>::notify(engine.audioIn, buffer, [] { return true; });
+    engine.endCallback(slot);
+    framePosition += frames;
 }
 void setMicBackendForTests(MicOpen open, MicClose close) {
     micTestBackend().open = std::move(open); micTestBackend().close = std::move(close);

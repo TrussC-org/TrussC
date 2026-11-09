@@ -1367,9 +1367,9 @@ A backend context that opens but cannot open its device leaves the engine stoppe
 
 ### Per-buffer synthesis / processing? (audioIn / audioOut)
 
-Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. `audioIn` (`AudioInBuffer`, read-only) is declared for mic input but nothing fires it today (#907), so read the microphone with `MicInput` instead. The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
+Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. On native platforms, an explicitly started `MicInput` delivers every captured block to `audioIn` (`AudioInBuffer`, read-only) inline on its capture thread, while preserving the ring read by `MicInput::getBuffer()`. Subscribing does not start capture. The input buffer carries its mono samples, frame count, capture sample rate, and a frame position counted from that MicInput start. Input and output samples are borrowed only for the callback; do not retain their pointers. Native input delivery stays inline even with `Deliver::Main`; output retains normal event dispatch, so use `Deliver::Inline` for output samples. Two running MicInputs both feed the one audioIn event, possibly concurrently from two capture threads, with separate framePosition counters starting at 0 and no source ID. MicInput stop/destruction and engine shutdown drain in-flight notifications; do not call these from an audio listener. Engine shutdown closes input notifications while ring capture continues; init reopens notifications, even if output init fails. Avoid allocation, blocking, heavy work, and engine-API calls, and return quickly. Web input continues to update only the MicInput ring; default Web output runs on the browser main thread.
 
-Overriding `App::audioOut()` (and `App::audioIn()`, which is never called today) needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework calls `exit()`, detaches them and waits for a callback in flight, as long as it takes, before calling `cleanup()`, which may free their audio state (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+The framework subscribes `App::audioOut()` and `App::audioIn()` right after the first `setup()` returns, so buffers or tables allocated in `setup()` are ready before callbacks run. Device startup is explicit: output needs a running AudioEngine, and native input needs a started MicInput. The framework calls `exit()`, detaches them and waits for a callback in flight, as long as it takes, before calling `cleanup()`, which may free their audio state (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
 
 ### How long does a Sound play? (Sound lifetime)
 
@@ -1659,7 +1659,7 @@ Most crashes come from a handful of patterns. Write it the safe way from the sta
 | Callback | Runs on |
 |---|---|
 | `setup()` / `update()` / `draw()`, input handlers, Node events, `callAfter` / `callEvery`, Tween, MCP tools | main thread |
-| `AudioEngine` `audioOut` / `audioIn` listeners | audio thread |
+| `AudioEngine` `audioOut` / `audioIn` listeners | native output / capture thread; default Web output: browser main thread; Web input event unavailable |
 | `callAfterAsync` / `callEveryAsync` | background scheduler thread |
 | `TcpClient` events (`onConnect`, `onReceive`, `onDisconnect`, `onError`, `onSendComplete`) | the receive, connect or writer thread; events fired directly by an API call run on the calling thread. `onSendComplete` runs on the writer thread, or from `processNetwork()` without threads |
 | `TcpServer` events (`onClientConnect`, `onReceive`, `onClientDisconnect`, `onError`, `onSendComplete`) | the server's threads; errors reported directly by calls such as `start()` or `send()` run on the calling thread |
@@ -2678,7 +2678,7 @@ VSYNC  // Selects frame scheduling at the display refresh rate.
 ### App — The base class your app inherits from; TrussC calls its setup(), update() and draw() for you.
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Meant for reading incoming audio on the audio thread, but currently never called.
+void App::audioIn(const AudioInBuffer & buf)  // Called inline on the native capture thread for every microphone block.
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
 void App::exit()  // Called once when the App ends, right before cleanup().
 void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto this Window, with their paths.
@@ -2736,7 +2736,7 @@ void AudioEngine::shutdown()  // Stops and closes the audio output device.
 bool AudioEngine::waitForAudioCallbacks()  // Waits for audio listeners to finish during teardown.
 ```
 
-### AudioInBuffer — Describes a read-only audio input buffer.
+### AudioInBuffer — Describes a borrowed native microphone block.
 
 ```cpp
 ```
