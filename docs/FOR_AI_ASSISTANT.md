@@ -1362,7 +1362,7 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 ### How do I list / select audio devices?
 
-`AudioEngine` handles devices. `AudioEngine::listDevices()` returns the available devices (`vector<AudioDeviceInfo>`). Select the output device by passing `AudioSettings` (with `deviceName`, sample rate, etc.) to `AudioEngine::getInstance().init(settings)`. An empty `deviceName` selects the system default playback device. For headless runs, set `settings.backend = AudioBackend::Null` and call `init(settings)` before loading sounds; this runs the real mixer and callbacks silently and logs a Notice. Zero-argument `init()` selects `Default`. Enumeration and native `MicInput` follow the engine backend; before init, enumeration probes real backends.
+`AudioEngine` handles output devices. `AudioEngine::listDevices(backend)` returns outputs and `MicInput::listDevices(backend)` returns inputs (`vector<AudioDeviceInfo>` with backend-native IDs and reported native channels/rates). Select output with `AudioSettings::device = entry`, or input with `mic.setDevice(entry)` before starting it. Object selection uses the entry's backend and `uniqueId`; output object selection takes precedence over `deviceName` and `backend`. A missing explicit ID or name fails with a warning without opening another device. Without an object, empty `deviceName` selects the system default playback device; an unselected MicInput uses the OS default input. For headless runs, set `settings.backend = AudioBackend::Null` and call `init(settings)` before loading sounds; this runs the real mixer and callbacks silently and logs a Notice. Zero-argument `init()` selects `Default`. Listing with `Default` uses the current engine context, or probes miniaudio's default backend order before init. An explicit backend is tried alone. Detailed enumeration can probe each device (especially ALSA); call it when needed, not every frame. Web lists are empty.
 
 A backend context that opens but cannot open its device leaves the engine stopped; it does not switch to Null. miniaudio reaches Null automatically only when no real backend context can be created. `getStats()` records the last init failure (`initFailure`, `initFailureResult`, `initFailureBackend`) until an init succeeds, using only atomic state. `tc_get_audio_state` includes an `initFailure` object with the reason, result, backend and requested device name while that failure is recorded.
 
@@ -2709,7 +2709,7 @@ void App::windowResized(int width, int height)  // Called when the window size c
 ```cpp
 ```
 
-### AudioDeviceInfo — Describes an available audio playback device.
+### AudioDeviceInfo — Describes a device in an input or output list.
 
 ```cpp
 ```
@@ -2729,7 +2729,7 @@ AudioStats AudioEngine::getStats() const  // Returns a snapshot of audio engine 
 bool AudioEngine::init() [+1]  // Initializes or reinitializes the audio output engine.
 bool AudioEngine::isConnected() const  // Returns whether the audio output device is open and running.
 bool AudioEngine::isInitialized() const  // Returns whether audio output is initialized.
-std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Lists available audio playback devices.
+std::vector<AudioDeviceInfo> AudioEngine::listDevices(AudioBackend backend = Default)  // Enumerates playback devices with native capabilities.
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Mixes audio voices and listeners into an output buffer.
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Starts a mixer voice for an audio source.
 bool AudioEngine::setup() [+1]  // Opens the audio output device (the same as init).
@@ -3589,7 +3589,9 @@ int MicInput::getSampleRate() const  // Returns the stored microphone sample rat
 bool MicInput::isConnected() const  // Returns whether the microphone is open and capturing (alias of isRunning).
 bool MicInput::isRunning() const  // Reports whether microphone capture is running.
 bool MicInput::isStarting() const  // Reports whether microphone startup is pending.
+std::vector<AudioDeviceInfo> MicInput::listDevices(AudioBackend backend = Default)  // Enumerates capture devices separately from outputs.
 void MicInput::onAudioData(const float * input, size_t frameCount)  // Writes input samples into the microphone ring buffer.
+void MicInput::setDevice(const AudioDeviceInfo & device)  // Selects a capture device for subsequent startup by its ID.
 bool MicInput::setup()  // Reopens the microphone at the last sample rate.
 bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts microphone capture.
 void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts a microphone capture attempt asynchronously.
@@ -4934,7 +4936,7 @@ ToolBuilder & mcp::ToolBuilder::level(ToolLevel value)  // Sets the access level
 ## Enums
 
 ```cpp
-enum AudioBackend { Default, Null }  // Selects the audio engine backend.
+enum AudioBackend { Default, Null, WASAPI, DirectSound, WinMM, CoreAudio, PulseAudio, ALSA, JACK, AAudio, OpenSLES, WebAudio }  // Selects the audio engine backend.
 enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Identifies the stage at which audio initialization failed.
 enum AudioRecordSettings::SampleFormat { S16, F32 }  // Selects the sample representation stored in the WAV file.
 enum AxisMode { None, Fill, Content }  // Selects how a layout axis determines sizes.

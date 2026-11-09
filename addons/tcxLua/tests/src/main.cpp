@@ -424,6 +424,32 @@ int main(int argc, char** argv) {
         return result.valid() && result.get<bool>();
     });
 
+#ifndef __EMSCRIPTEN__
+    checkNoThrow("Audio: device IDs, capabilities and object selection in Lua", true, [&] {
+        auto result = L.safe_script(R"lua(
+            local outputs = AudioEngine.listDevices(AudioBackend.Null)
+            local inputs = MicInput.listDevices(AudioBackend.Null)
+            assert(#outputs == 1 and #inputs == 1)
+            assert(outputs[1].name == "NULL Playback Device")
+            assert(inputs[1].name == "NULL Capture Device")
+            assert(outputs[1].uniqueId == "0" and outputs[1].isDefault)
+            assert(outputs[1].backend == AudioBackend.Null)
+            assert(outputs[1].channels == 0 and #outputs[1].sampleRates == 0)
+            local settings = AudioSettings.new()
+            assert(settings.device == nil)
+            settings.device = outputs[1]
+            assert(settings.device.uniqueId == "0")
+            settings.device = nil
+            assert(settings.device == nil)
+            local mic = MicInput.new()
+            mic:setDevice(inputs[1])
+            return true
+        )lua", sol::script_pass_on_error);
+        return result.valid() && result.get<bool>();
+    });
+
+#endif
+
     // Exercise the hand-written XML bindings against the vendored pugixml.
     checkNoThrow("Xml: serialization and parsing through Lua", true, [&] {
         auto result = L.safe_script(R"lua(

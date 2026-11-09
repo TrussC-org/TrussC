@@ -928,6 +928,10 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
 
     lua->new_usertype<AudioEngine>("AudioEngine",
         "getInstance", sol::var(&AudioEngine::getInstance),
+        "listDevices", sol::overload(
+            [] { return AudioEngine::listDevices(); },
+            [](AudioBackend backend) { return AudioEngine::listDevices(backend); }
+        ),
         // init() is overloaded — no-arg uses defaults, AudioSettings-arg
         // configures the engine. Resolve both for Lua.
         "init", sol::overload(
@@ -952,6 +956,11 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         sol::constructors<MicInput>(),
         sol::call_constructor, sol::constructors<MicInput>(),
             // MicInput(const MicInput&), MicInput(MicInput&&)>(),
+        "listDevices", sol::overload(
+            [] { return MicInput::listDevices(); },
+            [](AudioBackend backend) { return MicInput::listDevices(backend); }
+        ),
+        "setDevice", &MicInput::setDevice,
         "start", &MicInput::start,
         "stop", &MicInput::stop,
         "getBuffer", &MicInput::getBuffer,

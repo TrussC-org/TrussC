@@ -99,7 +99,7 @@ void checkBackendFailure() {
     AudioSettings settings;
     settings.backend = AudioBackend::Null;
     settings.bufferSize = 256;
-    settings.deviceName = "tc-audio-missing-device";
+    settings.deviceName = "NULL Playback Device";
     internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::OpenFails);
     check("injected device-open failure stops init", !engine.init(settings) && !engine.isInitialized());
     const auto failed = engine.getStats();
@@ -342,7 +342,6 @@ TC_CORE_TEST_MAIN() {
     mcp::setToolLevel(mcp::ToolLevel::ReadOnly);
     checkBackendFailure();
     checkInit("implicit default", "");
-    checkInit("unknown name falls back to default", "tc-audio-default-device-missing");
     const auto devices = AudioEngine::listDevices();
     string defaultName;
     for (const auto& device : devices) {

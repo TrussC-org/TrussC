@@ -88,6 +88,7 @@ bool MicInput::beginStart(int sampleRate, bool asynchronous) {
     stop();
     auto state = std::make_shared<internal::MicState>();
     state->sampleRate = sampleRate;
+    state->selectedDevice = selectedDevice_;
     state->backend = selectedBackend(); // engine is observed only on main
     state->predecessor = std::move(predecessor_);
     state_ = state;
@@ -134,7 +135,7 @@ bool MicInput::beginStart(int sampleRate, bool asynchronous) {
     }
 #ifdef __EMSCRIPTEN__
     // Legacy Web start() acknowledges a submitted request, not readiness.
-    return true;
+    return !state->selectedDevice;
 #else
     if (asynchronous) return true;
     {

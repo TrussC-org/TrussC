@@ -27,6 +27,8 @@ struct MicState : std::enable_shared_from_this<MicState> {
     int sampleRate = MicInput::DEFAULT_SAMPLE_RATE;
     int backend = -1;
     std::string name;
+    std::optional<AudioDeviceInfo> selectedDevice;
+    void* context = nullptr;
     void* device = nullptr;
     unsigned webKey = 0;
     std::mutex ringMutex;
