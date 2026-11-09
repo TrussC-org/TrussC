@@ -113,7 +113,6 @@ public:
 };
 }
 #include "core/platform/win/tcStorageBufferReadback.h"
-struct trussc::internal::AppOwner {};
 void reset() {
     assert(buffers == 0 && queries == 0);
     calls.clear(); pollsUntilReady = 2;

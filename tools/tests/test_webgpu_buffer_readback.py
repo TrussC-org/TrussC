@@ -83,7 +83,6 @@ public:
 };
 }
 #include "core/platform/web/tcStorageBufferReadback.h"
-struct trussc::internal::AppOwner {};
 int main() {
     using namespace trussc;
     using namespace trussc::internal;

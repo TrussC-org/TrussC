@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PREAMBLE = compute_tests.PREAMBLE + r'''
 namespace trussc::internal {
 std::shared_ptr<AppOwner> currentAppOwner() noexcept { return {}; }
-void ownAppCancellation(std::function<void()>) { std::abort(); }
+std::shared_ptr<AppCancellation> ownAppCancellation(
+    std::function<void()>, std::shared_ptr<AppCancellation>) { std::abort(); }
 AppOwnerScope::AppOwnerScope(std::shared_ptr<AppOwner>) noexcept {}
 AppOwnerScope::~AppOwnerScope() noexcept = default;
 WorkerAppAdmission::WorkerAppAdmission(const std::shared_ptr<AppOwner>&, bool) noexcept {}
@@ -24,6 +25,79 @@ AppCallbackScope::~AppCallbackScope() noexcept = default;
 
 
 class BufferReadbackQueueTests(unittest.TestCase):
+    def test_typed_snapshot(self):
+        source = r'''
+#include <sstream>
+namespace trussc {
+// Capture warnings without linking the App runtime. This const-char overload
+// coexists with tcLog.h; test_standalone_headers.py checks the public include alone.
+std::ostringstream warnings;
+std::ostream& logWarning(const char*) { return warnings; }
+}
+#include "tc/gpu/tcReadbackResult.h"
+#include <cassert>
+#include <cstdint>
+#include <string>
+#pragma pack(push, 1)
+struct PackedValue { uint8_t tag; uint32_t value; };
+#pragma pack(pop)
+int main() {
+    using namespace trussc;
+    const uint32_t values[] = {42, 123456};
+    std::vector<unsigned char> bytes(sizeof(values) + 1);
+    std::memcpy(bytes.data(), values, sizeof(values));
+    const ReadbackResult result(bytes);
+    assert(result.ok() && result.size() == bytes.size());
+    assert(result.get<uint32_t>(0) == values[0]);
+    assert(result.get<uint32_t>(1) == values[1]);
+    assert(result.get<uint8_t>(0) == bytes[0]);
+    assert(result.get<uint8_t>(sizeof(values)) == 0);
+    assert(warnings.str().empty());
+    auto expectWarning = [&](auto read) {
+        warnings.str("");
+        read();
+        assert(warnings.str().find("out of range") != std::string::npos);
+    };
+    expectWarning([&] { assert(result.get<uint32_t>(2) == 0); }); // Partial element.
+    expectWarning([&] { assert(result.get<uint8_t>(bytes.size()) == 0); });
+    expectWarning([&] { assert(result.get<uint32_t>(SIZE_MAX) == 0); });
+    // Multiplying this index first would wrap to byte offset zero.
+    expectWarning([&] { assert(result.get<uint32_t>(SIZE_MAX / sizeof(uint32_t) + 1) == 0); });
+    const ReadbackResult failure;
+    assert(!failure.ok() && failure.size() == 0);
+    expectWarning([&] { assert(failure.get<uint32_t>(0) == 0); });
+    const ReadbackResult empty(std::vector<unsigned char>{});
+    assert(empty.ok());
+    expectWarning([&] { assert(empty.get<uint8_t>(0) == 0); });
+    // Packed elements start at an odd byte offset; their uint32_t is unaligned.
+    static_assert(sizeof(PackedValue) == 5);
+    const PackedValue packed[] = {{1, 42}, {2, 123456}};
+    bytes.resize(sizeof(packed));
+    std::memcpy(bytes.data(), packed, sizeof(packed));
+    const ReadbackResult unaligned(bytes);
+    const auto value = unaligned.get<PackedValue>(1);
+    assert(value.tag == 2 && value.value == 123456);
+    expectWarning([&] {
+        const auto missing = unaligned.get<PackedValue>(2);
+        assert(missing.tag == 0 && missing.value == 0);
+    });
+}
+'''
+        with tempfile.TemporaryDirectory(dir=ROOT / '.build') as directory:
+            code = Path(directory) / 'typed.cpp'
+            binary = Path(directory) / 'typed'
+            code.write_text(source, encoding='utf-8')
+            command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-Wall', '-Wextra',
+                       '-Werror', '-fsanitize=undefined', '-fno-sanitize-recover=all',
+                       '-I', str(ROOT / 'core/include'), str(code), '-o', str(binary)]
+            subprocess.run(command, check=True)
+            subprocess.run([str(binary)], check=True)
+            code.write_text(source.replace('const auto value = unaligned.get<PackedValue>(1);',
+                                           'result.get<std::string>(0);\n    const auto value = unaligned.get<PackedValue>(1);'), encoding='utf-8')
+            rejected = subprocess.run(command, capture_output=True, text=True, encoding='utf-8')
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn('ReadbackResult::get requires a trivially copyable type', rejected.stderr)
+
     def test_pending_queue(self):
         source = r'''
 #include "tc/gpu/internal/tcBufferReadback.h"
@@ -31,7 +105,6 @@ class BufferReadbackQueueTests(unittest.TestCase):
 #include <thread>
 using namespace trussc;
 using namespace trussc::internal;
-struct trussc::internal::AppOwner {};
 struct Request : BufferReadbackRequest {
     bool& ready;
     int& destroyed;
@@ -129,7 +202,6 @@ int main() {
 #include <cassert>
 using namespace trussc;
 using namespace trussc::internal;
-struct trussc::internal::AppOwner {};
 struct Retire {
     BufferReadbackQueue& queue;
     std::shared_ptr<AppOwner> owner;

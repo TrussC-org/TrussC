@@ -1,4 +1,4 @@
-"""Compile the file I/O and serial headers without an umbrella header (#1328)."""
+"""Compile public headers without an umbrella header (#1328, #1295)."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -14,16 +14,20 @@ class StandaloneHeaders(unittest.TestCase):
         if not compilers:
             self.skipTest('requires Clang or GCC')
         for compiler in compilers:
-            for header in ('tc/comm/tcSerial.h', 'tc/utils/tcFileIO.h'):
+            for header in ('tc/comm/tcSerial.h', 'tc/utils/tcFileIO.h',
+                           'tc/gpu/tcReadbackResult.h'):
                 with self.subTest(compiler=compiler, header=header):
                     result = subprocess.run(
                         [compiler, '-std=c++20', '-Wall', '-Wextra',
                          # Clang diagnoses the missing inline definition; GCC's
                          # equivalent warning has no dedicated warning option.
-                         ('-Werror=undefined-inline' if 'clang' in Path(compiler).name
+                         ('-Werror=undefined-inline' if header != 'tc/gpu/tcReadbackResult.h'
+                          and 'clang' in Path(compiler).name
                           else '-Werror'),
                          '-fsyntax-only', '-x', 'c++', '-I', str(ROOT / 'core/include'), '-'],
-                        input=f'#include "{header}"\n', text=True, encoding='utf-8',
+                        input=(f'#include "{header}"\n' +
+                               ('int main() { trussc::ReadbackResult r; return r.ok(); }\n'
+                                if header == 'tc/gpu/tcReadbackResult.h' else '')), text=True, encoding='utf-8',
                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 

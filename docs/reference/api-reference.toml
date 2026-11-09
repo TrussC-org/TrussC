@@ -65596,17 +65596,17 @@ buffer.readAsync([](ReadbackResult result) {
     if (result.ok()) logNotice() << result.size() << " bytes";
 });
 '''
-related = ["ReadbackResult", "StorageBuffer::read"]
+related = ["ReadbackResult", "ReadbackResult::get", "StorageBuffer::read"]
 
 ["ReadbackResult"]
 category = "graphics_shader"
 description.en = "Owns a storage readback snapshot or an empty failure result (C++ only)."
 description.ja = "storage 読み取りのスナップショット、または空の失敗結果を所有します（C++ 専用）。"
 description.ko = "storage 읽기 스냅샷 또는 빈 실패 결과를 소유합니다(C++ 전용)."
-details.en = "ok() reports success, size() is the byte count, and getData() returns read-only bytes valid while this result owns them. The default result is failure. Copying copies the bytes; moving transfers them."
-details.ja = "ok() は成功、size() はバイト数を示します。getData() は結果が所有している間有効な読み取り専用バイト列を返します。既定の結果は失敗です。コピーはバイト列を複製し、移動は所有権を移します。"
-details.ko = "ok()는 성공 여부, size()는 바이트 수를 나타냅니다. getData()는 결과가 소유하는 동안 유효한 읽기 전용 바이트를 반환합니다. 기본 결과는 실패입니다. 복사는 바이트를 복제하고 이동은 소유권을 옮깁니다."
-related = ["StorageBuffer::readAsync", "ReadbackResult::ok", "ReadbackResult::size", "ReadbackResult::getData"]
+details.en = "ok() reports success, size() is the byte count, `get<T>(index)` copies a typed element, and getData() returns read-only bytes valid while this result owns them. The default result is failure. Copying copies the bytes; moving transfers them."
+details.ja = "ok() は成功、size() はバイト数を示します。`get<T>(index)` は型付き要素をコピーします。getData() は結果が所有している間有効な読み取り専用バイト列を返します。既定の結果は失敗です。コピーはバイト列を複製し、移動は所有権を移します。"
+details.ko = "ok()는 성공 여부, size()는 바이트 수를 나타냅니다. `get<T>(index)`는 형식이 지정된 요소를 복사합니다. getData()는 결과가 소유하는 동안 유효한 읽기 전용 바이트를 반환합니다. 기본 결과는 실패입니다. 복사는 바이트를 복제하고 이동은 소유권을 옮깁니다."
+related = ["StorageBuffer::readAsync", "ReadbackResult::ok", "ReadbackResult::size", "ReadbackResult::getData", "ReadbackResult::get"]
 
 ["ReadbackResult::ok"]
 description.en = "Returns whether the readback succeeded."
@@ -65618,7 +65618,17 @@ related = ["StorageBuffer::readAsync"]
 description.en = "Returns the owned byte count, or zero on failure."
 description.ja = "所有するバイト数を返します。失敗時は 0 です。"
 description.ko = "소유한 바이트 수를 반환하며 실패 시 0입니다."
-related = ["ReadbackResult::getData"]
+related = ["ReadbackResult::getData", "ReadbackResult::get"]
+
+["ReadbackResult::get"]
+description.en = "Returns the index-th T in the owned snapshot (C++ only)."
+description.ja = "所有するスナップショットの index 番目の T を返します（C++ 専用）。"
+description.ko = "소유한 스냅샷의 index번째 T를 반환합니다(C++ 전용)."
+details.en = "T must be trivially copyable. Copies sizeof(T) bytes at byte offset index * sizeof(T), without requiring alignment. If the entire element does not fit, including on failure, returns T{} and logs a warning on every call. getData() and size() remain available."
+details.ja = "T は trivially copyable な型である必要があります。バイトオフセット index * sizeof(T) から sizeof(T) バイトをコピーし、アラインメントは要求しません。要素全体が収まらない場合（失敗結果を含みます）は T{} を返し、呼び出しのたびに警告を記録します。getData() と size() も引き続き使えます。"
+details.ko = "T는 trivially copyable 형식이어야 합니다. 바이트 오프셋 index * sizeof(T)에서 sizeof(T) 바이트를 복사하며 정렬을 요구하지 않습니다. 실패 결과를 포함하여 요소 전체가 들어가지 않으면 T{}를 반환하고 호출할 때마다 경고를 기록합니다. getData()와 size()도 계속 사용할 수 있습니다."
+snippet = "if (result.ok()) count = result.get<uint32_t>(0);"
+related = ["ReadbackResult::getData", "ReadbackResult::size", "ReadbackResult::ok"]
 
 ["ReadbackResult::getData"]
 description.en = "Returns read-only bytes owned by this result; check ok() before reading."

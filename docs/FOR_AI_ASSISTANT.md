@@ -3917,6 +3917,7 @@ Ray Ray::transformed(const Mat4 & inverseMatrix) const  // Returns a ray transfo
 ### ReadbackResult — Owns a storage readback snapshot or an empty failure result (C++ only).
 
 ```cpp
+T ReadbackResult::get(size_t index) const  // Returns the index-th T in the owned snapshot (C++ only).
 const unsigned char * ReadbackResult::getData() const  // Returns read-only bytes owned by this result; check ok() before reading.
 bool ReadbackResult::ok() const  // Returns whether the readback succeeded.
 size_t ReadbackResult::size() const  // Returns the owned byte count, or zero on failure.
