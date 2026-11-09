@@ -56,7 +56,7 @@ trusscli update -p path/to/myProject --tc-root path/to/TrussC
 trusscli new path/to/myNewApp
 ```
 
-Project and binary names replace each byte outside ASCII letters, digits, `_ . + -` with `_` (including non-ASCII); reserved names get `app_`, and the folder keeps its name.
+Project and binary names replace each character outside ASCII letters, digits, `_ . + -` with one `_` (a non-ASCII character such as 日 counts as one); reserved names get `app_`, and the folder keeps its name.
 
 `trusscli build` configures the target's build folder itself when it has no
 CMake cache (after `trusscli clean`, or a deleted folder) or only the cache
