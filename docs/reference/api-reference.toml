@@ -23681,18 +23681,21 @@ details.en = '''
 - `resize(newW, newH)` replaces the buffer at the requested pixel dimensions while preserving format and channel count; each axis independently uses area-weighted box averaging for reduction or Catmull-Rom bicubic interpolation for enlargement.
 - U8 RGB channels in three- or four-channel buffers use gamma 2.2 conversion for filtering in linear light, followed by conversion back and rounding. Alpha, one- and two-channel data, and F32 values are filtered directly.
 - Does nothing if unallocated, either target dimension is nonpositive, or both target dimensions already match; use a source with positive dimensions.
+- The intermediate buffer stores linear floats, without U8 rounding between passes; U8 input retains its range clipping; only the final U8 result is encoded and rounded.
 - Runs two CPU passes with intermediate and replacement buffers; successful resizing invalidates previous data pointers.
 '''
 details.ja = '''
 - `resize(newW, newH)` は形式とチャンネル数を保持し、指定したピクセル寸法でバッファを置き換えます。各軸は独立に、縮小時は面積に応じた重み付きボックス平均、拡大時は Catmull-Rom バイキュービック補間を使います。
 - U8 の 3・4 チャンネルバッファの RGB は、ガンマ 2.2 の変換で線形光にして処理し、元に戻して丸めます。アルファ、1・2 チャンネルのデータ、F32 の値は直接処理します。
 - 未確保、いずれかの指定寸法が正でない場合、または両方の指定寸法が現在と同じ場合は何もしません。コピー元には正の寸法を使ってください。
+- 中間バッファは線形の float 値を保持し、途中で U8 への丸めを行いません。U8 入力の値域クリップは維持します。最後の U8 出力だけを変換して丸めます。
 - 中間バッファと置き換え用バッファを使い、CPU で 2 回処理します。寸法の変更に成功すると、以前のデータポインタは無効になります。
 '''
 details.ko = '''
 - `resize(newW, newH)`는 형식과 채널 수를 유지하며 요청한 픽셀 크기로 버퍼를 교체합니다. 각 축은 독립적으로 축소 시 면적 가중 박스 평균을, 확대 시 Catmull-Rom 바이큐빅 보간을 사용합니다.
 - U8의 3채널 및 4채널 버퍼에서 RGB는 감마 2.2 변환으로 선형광에서 필터링한 뒤 다시 변환하고 반올림합니다. 알파, 1채널과 2채널 데이터, F32 값은 직접 필터링합니다.
 - 할당되지 않았거나 대상 크기 중 하나가 양수가 아니거나 두 대상 크기가 현재와 같으면 아무 작업도 하지 않습니다. 원본에는 양수 크기를 사용해야 합니다.
+- 중간 버퍼는 선형 float 값을 유지하며 두 패스 사이에서 U8 반올림을 하지 않습니다. U8 입력의 값 범위 클리핑은 유지합니다. 최종 U8 결과만 변환하고 반올림합니다.
 - 중간 버퍼와 교체할 버퍼를 사용하여 CPU에서 두 번 처리합니다. 크기 변경에 성공하면 이전 데이터 포인터는 무효가 됩니다.
 '''
 

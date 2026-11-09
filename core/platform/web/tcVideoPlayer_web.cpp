@@ -390,9 +390,7 @@ void VideoPlayer::updatePlatform() {
 
             // Copy to WASM memory (RGBA)
             var outBuffer = %u;
-            for (var i = 0; i < data.length; i++) {
-                HEAPU8[outBuffer + i] = data[i];
-            }
+            HEAPU8.set(data, outBuffer);
 
             window._trussc_player_frameNew = true;
             return 1;
