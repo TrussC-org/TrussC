@@ -92,7 +92,6 @@ public:
 };
 }
 // PRODUCTION_REQUEST
-struct trussc::internal::AppOwner {};
 void reset() {
     for (auto& slot : slots) slot.reset();
     current.reset();
