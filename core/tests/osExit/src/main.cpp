@@ -25,12 +25,14 @@ void check(bool ok, const char* name) {
     std::printf("%s: %s\n", ok ? "PASS" : "FAIL", name);
     if (!ok) ++failures;
 }
-int requests = 0, exits = 0, begins = 0, cleans = 0;
+int requests = 0, exits = 0, cleanups = 0, begins = 0, cleans = 0;
 std::string mode;
 EventListener quitListener, logListener;
 void verifyWindowExit() {
-    check(exits == 1 && begins == 1 && cleans == 1, "one exit and one complete log pair");
-    check(requests == ((mode == "cancel" || mode == "cancel-empty") ? 2 : 1), "quit request count");
+    check(exits == 1 && cleanups == 1 && begins == 1 && cleans == 1,
+          "one exit, cleanup and complete log pair");
+    check(requests == ((mode == "cancel" || mode == "cancel-empty" || mode == "escalate-term") ? 2 : 1), "quit request count");
+    check(internal::appExitCode() == 0, "normal signal quit keeps exit code zero");
     if (failures) std::_Exit(1);
 }
 #ifdef _WIN32
@@ -96,10 +98,10 @@ struct ExitApp : App {
                 check(exits == 0 && begins == 0 && cleans == 0,
                       "first signal after veto delivers another cancellable request");
                 std::fflush(stdout);
-                // This request is still pending inside its listener. Only
-                // now does a further signal have permission to force exit.
+                // Deliver the duplicate while the request is still pending.
+                // TERM must return to normal cleanup; INT must force exit.
                 std::raise(mode == "escalate-term" ? SIGTERM : SIGINT);
-                std::_Exit(1);
+                if (mode == "escalate") std::_Exit(1);
             }
 #endif
         });
@@ -109,17 +111,22 @@ struct ExitApp : App {
 #ifdef _WIN32
         // The native timer below drives an idle query outside update().
 #elif (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
-        if (updates == 1) std::raise(mode == "sigint" ? SIGINT : SIGTERM);
+        if (updates == 1) std::raise(mode == "sigint" || mode == "escalate" ? SIGINT : SIGTERM);
         if (requests == 1 && (mode == "cancel" || mode == "cancel-empty")) exitApp();
-        if (requests == 1 && (mode == "escalate" || mode == "escalate-term")) std::raise(SIGTERM);
+        if (requests == 1 && (mode == "escalate" || mode == "escalate-term"))
+            std::raise(mode == "escalate" ? SIGINT : SIGTERM);
 #else
         exitApp();
 #endif
     }
     void exit() override {
         ++exits;
+#if (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
+        if (mode == "escalate-term") std::raise(SIGTERM);
+#endif
         if (mode == "cleanup-reentry") internal::_cleanup_cb();
     }
+    void cleanup() override { ++cleanups; }
 };
 
 #ifndef __EMSCRIPTEN__
@@ -175,24 +182,41 @@ void testShared() {
           "stable clean format");
 #if (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && TARGET_OS_OSX)
     internal::installWindowExitSignals();
+    // Same and mixed pairs, both before delivery and while quit is pending.
+    std::fflush(nullptr);
+    for (bool delivered : {false, true}) {
+        for (int first : {SIGINT, SIGTERM}) {
+            for (int second : {SIGINT, SIGTERM}) {
+                pid_t child = fork();
+                if (child == 0) {
+                    std::raise(first);
+                    if (delivered && internal::pendingWindowExitSignal() != first) std::_Exit(1);
+                    std::raise(second);
+                    if (second == SIGINT) std::_Exit(1); // Must not return.
+                    const bool preserved = internal::pendingWindowExitSignal() == (delivered ? 0 : first)
+                        && internal::pendingWindowExitSignal() == 0;
+                    std::_Exit(preserved ? 0 : 1);
+                }
+                int status = 0;
+                const int expectedCode = second == SIGINT ? 128 + SIGINT : 0;
+                check(child > 0 && waitpid(child, &status, 0) == child && WIFEXITED(status)
+                      && WEXITSTATUS(status) == expectedCode,
+                      second == SIGINT ? "pending SIGINT escapes" : "pending SIGTERM preserves first signal");
+            }
+        }
+    }
     std::raise(SIGTERM);
     check(internal::pendingWindowExitSignal() == SIGTERM, "SIGTERM flag consumed on main thread");
     check(internal::pendingWindowExitSignal() == 0, "signal requests quit only once");
-    // The inherited pending flag must escalate even after the request was consumed.
-    pid_t child = fork();
-    if (child == 0) { std::raise(SIGINT); std::_Exit(1); }
-    int status = 0;
-    check(child > 0 && waitpid(child, &status, 0) == child && WIFEXITED(status)
-              && WEXITSTATUS(status) == 128 + SIGINT, "second signal forces process exit");
+    std::raise(SIGTERM);
+    check(internal::pendingWindowExitSignal() == 0, "duplicate SIGTERM does not deliver another request");
     internal::cancelWindowExitSignal();
     check(internal::pendingWindowExitSignal() == 0, "veto clears pending signal");
     std::raise(SIGTERM);
     check(internal::pendingWindowExitSignal() == SIGTERM, "same signal after veto requests quit again");
     check(internal::pendingWindowExitSignal() == 0, "renewed signal delivered only once");
-    child = fork();
-    if (child == 0) { std::raise(SIGTERM); std::_Exit(1); }
-    check(child > 0 && waitpid(child, &status, 0) == child && WIFEXITED(status)
-              && WEXITSTATUS(status) == 128 + SIGTERM, "second pending signal after veto exits with 143");
+    std::raise(SIGTERM);
+    check(internal::pendingWindowExitSignal() == 0, "second pending SIGTERM after veto is ignored");
     internal::cancelWindowExitSignal();
     std::raise(SIGINT);
     check(internal::pendingWindowExitSignal() == SIGINT, "different signal after veto requests quit again");
