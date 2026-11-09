@@ -60,7 +60,8 @@ macro(trussc_app)
     cmake_parse_arguments(_TC_APP "${_options}" "${_oneValueArgs}" "${_multiValueArgs}" ${ARGN})
 
     # Project name (use folder name if not specified)
-    if(_TC_APP_NAME)
+    # Test for a non-empty string: a name such as "x-NOTFOUND" is false in if(VAR).
+    if(NOT "${_TC_APP_NAME}" STREQUAL "")
         set(_TC_PROJECT_NAME ${_TC_APP_NAME})
     else()
         get_filename_component(_TC_PROJECT_NAME ${CMAKE_CURRENT_SOURCE_DIR} NAME)

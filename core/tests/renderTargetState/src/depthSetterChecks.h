@@ -23,12 +23,13 @@ void drawDepthSetterOverlap(bool easycam, bool enabled) {
     setupScreenOrtho(); resetMatrix(); setBlendMode(BlendMode::Alpha);
     auto& target = internal::currentTarget();
     const auto entryRole = target.selectedPipeline;
+    const bool entryDepth = isDepthTestEnabled();
     const auto entryCamera = target.camera.currentCameraContext;
     EasyCam camera;
     camera.setDistance(100);
     if (easycam) camera.begin();
     // Begin with the opposite variant, then change it without another blend
-    // selection. In EasyCam this also replaces its always-depth-tested role.
+    // selection. In EasyCam this also replaces its depth-tested variant.
     if (enabled) { disableDepthTest(); enableDepthTest(); }
     else { enableDepthTest(); disableDepthTest(); }
     check("explicit depth setter records blend/depth variant immediately",
@@ -42,9 +43,9 @@ void drawDepthSetterOverlap(bool easycam, bool enabled) {
     drawTriangle(Vec3(cx - 20, cy - 20, -10), Vec3(cx + 20, cy - 20, -10), Vec3(cx, cy + 20, -10));
     if (easycam) {
         camera.end();
-        check("camera exit restores saved role while retaining explicit logical depth flag",
+        check("camera exit restores saved role and logical depth flag",
               target.selectedPipeline == entryRole && target.camera.currentCameraContext == entryCamera &&
-              isDepthTestEnabled() == enabled);
+              isDepthTestEnabled() == entryDepth);
     }
 }
 

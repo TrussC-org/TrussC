@@ -141,12 +141,15 @@ private:
     // Write addons.make
     void writeAddonsMake(const std::string& destPath);
 
+    // Regenerate the standard CMake file, naming changed targets explicitly.
+    void writeCMakeLists(const std::string& projectPath);
+
     // Clean build directories for current platform
     void cleanBuildDirectories(const std::string& path);
 
     // Write CMakePresets.json (OS-specific preset with TRUSSC_DIR)
     // DESIGN NOTE: All project-specific configuration goes into CMakePresets.json
-    // CMakeLists.txt is copied as-is from template (no modifications)
+    // Valid names keep the template CMakeLists.txt; changed names are explicit.
     // The IDE is stored there too, as "vendor": {"trussc": {"ide": "<id>"}},
     // so update / addon add / addon remove can keep it (see ProjectState.h).
     void writeCMakePresets(const std::string& destPath);

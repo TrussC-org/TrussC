@@ -257,6 +257,7 @@ struct TargetCameraScope {
     ImmediateSelection selectedPipeline;
     const void* owner;
     bool automaticScreenProjection = false;
+    bool depthTestEnabled = false;
 };
 
 uint64_t nextTargetOwnerId();
