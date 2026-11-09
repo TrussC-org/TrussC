@@ -162,7 +162,7 @@ struct ExitProbeApp : App {
                     break;
                 case Mode::DirectApp: callRequestExitApp(); break;
                 case Mode::SignalInt: sendSignal(SIGINT); break;
-                case Mode::SignalTerm: sendSignal(SIGTERM); break;
+                case Mode::SignalTerm: sendSignal(SIGTERM); sendSignal(SIGTERM); break;
                 case Mode::SetupRequest:
                 case Mode::SetupSignal: break;
             }
@@ -179,6 +179,9 @@ struct ExitProbeApp : App {
     void exit() override {
         ++probe->exits;
         probe->reason = internal::exitReason();
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+        if (probe->mode == Mode::SignalTerm) sendSignal(SIGTERM);
+#endif
     }
     void cleanup() override {
         ++probe->cleanups;
@@ -312,7 +315,7 @@ void testSignalHandler() {
 void testSignalEscalation() {
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
     // Run before any runner starts worker threads. Both same-signal and
-    // mixed-signal pairs must escalate, before and after main-thread delivery.
+    // mixed-signal pairs follow the incoming signal, before and after delivery.
     std::fflush(nullptr);
     for (bool delivered : {false, true}) {
         for (int first : {SIGINT, SIGTERM}) {
@@ -324,7 +327,11 @@ void testSignalEscalation() {
                     std::raise(first);
                     if (delivered) headless::pollExitSignal();
                     std::raise(second);
-                    _exit(1); // Reached only if escalation is broken.
+                    if (second == SIGINT) _exit(1); // Must not return.
+                    const bool preserved = headless::pendingSignal == first;
+                    headless::pollExitSignal();
+                    _exit(preserved && !headless::running
+                          && internal::exitReason() == (first == SIGTERM ? "sigterm" : "sigint") ? 0 : 1);
                 }
                 int status = 0;
                 pid_t waited = -1;
@@ -333,11 +340,12 @@ void testSignalEscalation() {
                     while (waited < 0 && errno == EINTR);
                 }
                 char name[128];
+                const int expectedCode = second == SIGINT ? 128 + SIGINT : 0;
                 std::snprintf(name, sizeof(name),
                     "signals %d then %d %s poll exit with %d", first, second,
-                    delivered ? "after" : "before", 128 + second);
+                    delivered ? "after" : "before", expectedCode);
                 check(child > 0 && waited == child && WIFEXITED(status)
-                      && WEXITSTATUS(status) == 128 + second, name);
+                      && WEXITSTATUS(status) == expectedCode, name);
             }
         }
     }
