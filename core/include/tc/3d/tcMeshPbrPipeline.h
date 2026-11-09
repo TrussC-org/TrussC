@@ -255,10 +255,7 @@ public:
         Mat4 modelT = getDefaultContext().getMatrix().transposed();
         Mat4 viewProj = wctx.currentTarget->camera.currentProjectionMatrix * wctx.currentTarget->camera.currentViewMatrix;
         Mat4 viewProjT = viewProj.transposed();
-        // For now, normal matrix is just the model matrix. This is correct for
-        // rotations and uniform scale; non-uniform scale would need
-        // transpose(inverse(model3x3)). Revisit if/when mesh scale distorts lighting.
-        Mat4 normalMatT = modelT;
+        Mat4 normalMatT = meshNormalMatrix(getDefaultContext().getMatrix()).transposed();
 
         std::memcpy(vsp.model,     modelT.m,     sizeof(vsp.model));
         std::memcpy(vsp.viewProj,  viewProjT.m,  sizeof(vsp.viewProj));
