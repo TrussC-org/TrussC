@@ -61,8 +61,8 @@
 //   setPosition() on an empty buffer lands on 0.
 // - AudioEngine::init() that can't open the output device returns false,
 //   leaves the engine uninitialized and logs one error through the logger,
-//   naming the requested device (also one that was not found and fell back
-//   to the default); a later init() succeeds (#279).
+//   naming the requested device; a later init() succeeds (#279). A missing
+//   selection fails with a warning and never opens a different device.
 // - An init() on the null backend the test requested logs no "no usable
 //   audio backend" warning (that warning is for a fallback to it).
 // - A missing file fails with FileNotFound and logs one Error naming the
@@ -1290,14 +1290,14 @@ int main() {
               && lastLog(LogLevel::Error).find("the output device '" + devName + "'") != string::npos,
               lastLog(LogLevel::Error));
 
-        // A requested device that is missing: the default it fell back to failed.
+        // Missing explicit selections fail before opening any default device.
         bad.deviceName = "tc-test-no-such-device";
-        before = countLogs(LogLevel::Error, failLine);
-        check("a failed init names a requested device that wasn't found",
-              !engine.init(bad) && countLogs(LogLevel::Error, failLine) == before + 1
-              && lastLog(LogLevel::Error).find("requested 'tc-test-no-such-device' was not found")
-                 != string::npos,
-              lastLog(LogLevel::Error));
+        before = countLogs(LogLevel::Warning, "[AudioEngine] output device '");
+        check("a missing requested device fails with a warning and no fallback",
+              !engine.init(bad) && !engine.isInitialized() &&
+              countLogs(LogLevel::Warning, "[AudioEngine] output device '") == before + 1 &&
+              lastLog(LogLevel::Warning).find("tc-test-no-such-device") != string::npos,
+              lastLog(LogLevel::Warning));
 
         check("init() called again later succeeds", engine.init(settings) && engine.isInitialized());
 

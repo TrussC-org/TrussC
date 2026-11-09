@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <optional>
 #include <algorithm>
 #include <new>
 #include <cstdint>
@@ -747,27 +748,34 @@ struct PlayingSound {
 // the device is reopened with the new settings and playing voices carry on
 // from their position (expect a short audible gap while the device is down).
 //
-// Empty `deviceName` selects the system default playback device.
+// With no device object, empty `deviceName` selects the system default.
 // Use AudioEngine::listDevices() to enumerate available device names.
 // ---------------------------------------------------------------------------
-enum class AudioBackend { Default, Null };
-
-struct AudioSettings {
-    int sampleRate   = 0;       // engine output sample rate (Hz);
-                                // 0 = AudioEngine::DEFAULT_SAMPLE_RATE (48 kHz)
-    int channels     = 2;       // engine output channel count (1 = mono, 2 = stereo)
-    int bufferSize   = 0;       // requested device buffer size in frames; 0 = let miniaudio choose
-    int maxPolyphony = 0;       // cap on simultaneously-playing Sound voices; 0 (or less) = unlimited
-    std::string deviceName;     // playback device name; empty = system default
-    AudioBackend backend = AudioBackend::Default; // Null = silent, device-less mixer clock
+enum class AudioBackend {
+    Default, Null, WASAPI, DirectSound, WinMM, CoreAudio,
+    PulseAudio, ALSA, JACK, AAudio, OpenSLES, WebAudio
 };
 
-// ---------------------------------------------------------------------------
-// AudioDeviceInfo — entry in the list returned by AudioEngine::listDevices().
-// ---------------------------------------------------------------------------
+// Entries describe one direction; IDs belong to the reported backend.
 struct AudioDeviceInfo {
-    std::string name;           // device name (pass to AudioSettings::deviceName)
-    bool isDefault = false;     // true if this is the system default playback device
+    std::string name;
+    bool isDefault = false;    // OS default for the listed direction
+    std::string uniqueId = {};      // backend-native ID; see the API reference
+    int channels = 0;          // largest reported native channel count; 0 = unspecified
+    std::vector<int> sampleRates = {}; // distinct native rates; empty = unspecified
+    AudioBackend backend = AudioBackend::Default;
+};
+
+struct AudioSettings {
+    int sampleRate   = 0;       // 0 = AudioEngine::DEFAULT_SAMPLE_RATE (48 kHz)
+    int channels     = 2;       // output channel count (1 = mono, 2 = stereo)
+    int bufferSize   = 0;       // requested frames; 0 = let miniaudio choose
+    int maxPolyphony = 0;       // voice cap; 0 (or less) = unlimited
+    std::string deviceName;     // exact playback name; empty = system default
+    AudioBackend backend = AudioBackend::Default;
+    // Object selection wins over deviceName and selects the object's backend.
+    // A missing ID or name fails initialization without opening another device.
+    std::optional<AudioDeviceInfo> device = std::nullopt;
 };
 
 // ---------------------------------------------------------------------------
@@ -1094,9 +1102,9 @@ public:
     // Device lifecycle (docs/DEVICE_LIFECYCLE.md). setup() is init() and
     // setup(settings) is init(settings); close() is shutdown(). setup() and
     // init() open the system default device; to use a specific device, pass
-    // AudioSettings with deviceName. This holds for any reopen of a closed
+    // AudioSettings with device or deviceName. This holds for any reopen of a closed
     // engine: after close(), after the OS stopped the device, or from
-    // Sound::load*(). Both return false and log an error when the device
+    // Sound::load*(). Both return false and log a failure when the device
     // cannot be opened, and re-initialize live on a running engine. To open
     // the device again after a loss, call setup() / setup(settings) again.
     bool setup() { return init(); }
@@ -1108,7 +1116,7 @@ public:
     // device enumeration is unsupported on the current platform.
     // iOS enumeration leaves the audio session untouched, so before session
     // activation (SoloAmbient), the current route may have no inputs.
-    static std::vector<AudioDeviceInfo> listDevices();
+    static std::vector<AudioDeviceInfo> listDevices(AudioBackend backend = AudioBackend::Default);
 
     // Runtime engine configuration accessors. These reflect the values
     // stored by the last init(AudioSettings) call, whether it succeeded or
@@ -1196,7 +1204,7 @@ public:
     Event<AudioDeviceChangedArgs> audioDeviceChanged;
 
     // Fired once when the OS or the audio library reports that a running
-    // output device opened by name (AudioSettings::deviceName) stopped by
+    // explicitly selected output device (device or deviceName) stopped by
     // itself (for example a USB audio interface unplugged or a Bluetooth
     // headset switched off). The device is closed first, so the sound never
     // moves to another device; isConnected() is already false, e.reason says
@@ -2041,6 +2049,12 @@ public:
     MicInput& operator=(MicInput&&) = delete;
     ~MicInput();
 
+    // Enumerate inputs only. Default uses the current engine backend, when set.
+    static std::vector<AudioDeviceInfo> listDevices(AudioBackend backend = AudioBackend::Default);
+    // Applies on the next start/setup; matches uniqueId on this device's backend.
+    // A missing ID fails startup with a warning, without opening another device.
+    void setDevice(const AudioDeviceInfo& device) { selectedDevice_ = device; }
+
     // Initialize (open microphone device). macOS/iOS: if consent is undecided,
     // request permission and return false; call start() again after granting.
     bool start(int sampleRate = DEFAULT_SAMPLE_RATE);
@@ -2060,10 +2074,8 @@ public:
     // the callback barrier cannot wait for the calling callback itself.
     void stop();
 
-    // Device lifecycle (docs/DEVICE_LIFECYCLE.md). The microphone is always
-    // the system default capture device, so the "last settings" are the last
-    // sample rate: setup() is start() with it, isConnected() is isRunning(),
-    // close() is stop().
+    // Device lifecycle (docs/DEVICE_LIFECYCLE.md): setup() reuses the last
+    // sample rate and selected device; isConnected() is isRunning(), close() is stop().
     bool setup() { return start(sampleRate_); }
     bool isConnected() const { return isRunning(); }
     void close() { stop(); }
@@ -2076,7 +2088,7 @@ public:
     // audio thread. close() / stop(), start() again and the destructor never
     // fire it. Not every backend reports a stop (and Web never does); where
     // the backend says nothing, getBuffer() just stops getting new samples.
-    // Call setup() in the listener to reopen the default microphone.
+    // Call setup() in the listener to reopen the selected microphone.
     Event<DeviceDisconnectEventArgs> onDisconnect;
 
     // Get latest samples
@@ -2106,6 +2118,7 @@ private:
     bool starting_ = false;
     int sampleRate_ = DEFAULT_SAMPLE_RATE;
     std::string deviceName_;
+    std::optional<AudioDeviceInfo> selectedDevice_;
     bool beginStart(int sampleRate, bool asynchronous);
     static int selectedBackend();
 };

@@ -1437,50 +1437,42 @@ details.ko = '''
 '''
 
 ["AudioDeviceInfo"]
-keywords = ["soundcard", "output", "playback"]
-description.en = "Describes an available audio playback device."
-description.ja = "利用可能なオーディオ再生デバイスを表す。"
-description.ko = "사용 가능한 오디오 재생 장치를 나타낸다."
-details.en = '''
-- `AudioEngine::listDevices()` returns a list of these entries.
-- `name` is the device name accepted by `AudioSettings::deviceName`; `isDefault` indicates whether it is the system default playback device.
-'''
-details.ja = '''
-- `AudioEngine::listDevices()` が、この型の要素を持つリストを返します。
-- `name` は `AudioSettings::deviceName` に指定できるデバイス名で、`isDefault` はシステム既定の再生デバイスかどうかを示します。
-'''
-details.ko = '''
-- `AudioEngine::listDevices()`가 이 타입의 항목으로 구성된 목록을 반환합니다.
-- `name`은 `AudioSettings::deviceName`에 지정할 수 있는 장치 이름이며, `isDefault`는 시스템 기본 재생 장치인지 나타냅니다.
-'''
-related = ["AudioEngine", "AudioSettings", "AudioEngine::listDevices"]
+category = "sound"
+keywords = ["soundcard", "input", "output", "capture", "playback"]
+related = ["AudioEngine", "MicInput", "AudioSettings", "AudioEngine::listDevices", "MicInput::listDevices"]
+description.en = "Describes a device in an input or output list."
+description.ja = "入力または出力の一覧にあるデバイスを表します。"
+description.ko = "입력 또는 출력 목록의 장치를 나타냅니다."
 
 ["AudioDeviceInfo::isDefault"]
-description.en = "Indicates whether a listed playback device is the system default."
-description.ja = "一覧の再生デバイスがシステム既定かを表す。"
-description.ko = "목록의 재생 장치가 시스템 기본 장치인지 나타낸다."
+category = "sound"
+description.en = "Indicates the OS default for the listed direction."
+description.ja = "一覧の方向でのOS既定デバイスかどうかを示します。"
+description.ko = "목록의 방향에서 OS 기본 장치인지 나타냅니다."
+
 details.en = '''
-- `AudioEngine::listDevices()` copies the system-default flag reported for each playback device when the list is obtained.
+- Copies the OS default flag for this direction when the list is obtained.
 '''
 details.ja = '''
-- `AudioEngine::listDevices()` が一覧を取得した時点で、各再生デバイスについて報告されたシステム既定フラグを保持します。
+- 一覧を取得した時点で、この方向のOS既定フラグをコピーします。
 '''
 details.ko = '''
-- `AudioEngine::listDevices()`가 목록을 가져온 시점에 각 재생 장치에 대해 보고된 시스템 기본 장치 플래그를 보관합니다.
+- 목록을 가져온 시점에 이 방향의 OS 기본 플래그를 복사합니다.
 '''
 
 ["AudioDeviceInfo::name"]
-description.en = "Stores a playback device name."
-description.ja = "再生デバイスの名前を保持する。"
-description.ko = "재생 장치의 이름을 보관한다."
+category = "sound"
+description.en = "Stores the device display name."
+description.ja = "デバイスの表示名を保持します。"
+description.ko = "장치의 표시 이름을 보관합니다."
 details.en = '''
-- Pass this name to `AudioSettings::deviceName` to select a playback device from `AudioEngine::listDevices()`; selection compares the name exactly.
+- Output name selection through `AudioSettings::deviceName` compares this name exactly. Object selection compares `uniqueId`, so a changed display name does not prevent a match.
 '''
 details.ja = '''
-- `AudioEngine::listDevices()` にある再生デバイスを選ぶには、この名前を `AudioSettings::deviceName` に渡します。名前は完全一致で比較されます。
+- `AudioSettings::deviceName` による出力選択では完全一致で比較します。オブジェクトによる選択は `uniqueId` を比較するため、表示名が変わっても一致します。
 '''
 details.ko = '''
-- `AudioEngine::listDevices()`에 있는 재생 장치를 선택하려면 이 이름을 `AudioSettings::deviceName`에 전달합니다. 이름은 정확히 일치하는지 비교합니다.
+- `AudioSettings::deviceName`을 통한 출력 선택은 이름을 정확히 비교합니다. 객체로 선택하면 `uniqueId`를 비교하므로 표시 이름이 바뀌어도 일치합니다.
 '''
 
 ["AudioEngine"]
@@ -1807,40 +1799,40 @@ description.en = "Initializes or reinitializes the audio output engine."
 description.ja = "音声出力エンジンを初期化または再初期化する。"
 description.ko = "오디오 출력 엔진을 초기화하거나 재초기화한다."
 details.en = '''
-- `init(settings)` opens output using `AudioSettings`; an empty device name selects the system default. An unmatched device name logs a warning and falls back to the system default.
+- `init(settings)` opens output using `AudioSettings`; without a device object, an empty device name selects the system default. The device object takes precedence over name and backend. An unmatched device name logs a warning and fails without opening another device.
 - Positive sample rate, channel count, buffer size, and polyphony values are used as supplied; nonpositive values select `48000` Hz, `2` channels, backend-selected buffer size (`0`), and no voice cap (`0`) respectively.
 - These four settings are stored even if initialization fails. `init()` without arguments reuses them, but always requests the system default device with `AudioBackend::Default`; device name and backend are not retained.
-- Returns `true` after opening and starting output, then notifying `audioDeviceChanged`; returns `false` on backend creation, device opening, or device start failure and logs an error through `logError("AudioEngine")`, identifying the requested device when supplied.
+- Returns `true` after opening and starting output, then notifying `audioDeviceChanged`; returns `false` on selection, backend creation, device opening, or device start failure. Missing selections and unavailable backends log a Warning; device open/start failures use `logError("AudioEngine")`, identifying the requested device when supplied.
 - Reinitialization closes the running device first, so it causes an output gap and a failed attempt leaves the engine stopped. Lowering a polyphony cap discards slots beyond the new cap.
 - During live reinitialization that changes the sample rate, active voices are migrated to the new rate while preserving playback time; streams of unknown length restart from the beginning, and streams whose decoder cannot reopen are stopped.
 - `AudioBackend::Default` reaches Null only if no real backend context can be created; a device failure after context creation does not trigger backend fallback. Use `AudioBackend::Null` for intentional silent operation, which logs one Notice per successful initialization.
-- `getStats()` retains the last initialization failure until initialization succeeds. Retry later on a timer, such as once per second, or on user action; each failed attempt opens the device and logs again.
+- `getStats()` retains the last initialization failure until initialization succeeds. Retry later on a timer, such as once per second, or on user action; each failed attempt rechecks or opens the device and logs again.
 - `Sound::load*()` calls argument-free `init()` when the engine is uninitialized, whereas `play()` does not. After failed `init(settings)`, retry with those settings before loading sounds if the requested device is required.
 - Audio listener threading restrictions are described in `AudioEngine::audioOut`.
 - `setup(settings)` and `setup()` are the same calls under the device lifecycle name; see `AudioEngine::setup`. `init()` and `setup()` open the system default device; to use a specific device, pass `AudioSettings` with `deviceName`. The same applies to any reopen of a closed engine: after `close()`, after the OS stopped the device, or from `Sound::load*()`.
 '''
 details.ja = '''
-- `init(settings)` は `AudioSettings` に従って出力を開きます。デバイス名が空ならシステム既定を選びます。名前に一致するデバイスがなければ警告を出し、システム既定を使います。
+- `init(settings)` は `AudioSettings` に従って出力を開きます。デバイスオブジェクトがなければ、空の名前でシステム既定を選びます。オブジェクトは名前とバックエンドの指定より優先します。名前に一致するデバイスがなければ警告を出し、別のデバイスを開かず失敗します。
 - サンプルレート、チャンネル数、バッファサイズ、同時再生数が正なら指定値を使います。0 以下なら、それぞれ `48000` Hz、`2` チャンネル、バックエンドが選ぶサイズ（`0`）、上限なし（`0`）を使います。
 - この 4 項目は初期化に失敗しても保存します。引数なしの `init()` はこれらを再利用しますが、常に `AudioBackend::Default` でシステム既定のデバイスを要求します。デバイス名とバックエンドは引き継ぎません。
-- 出力を開いて開始し、`audioDeviceChanged` を通知した後に `true` を返します。バックエンドの作成、デバイスのオープン、出力の開始に失敗すると `false` を返し、`logError("AudioEngine")` でエラーを出します。デバイス名を指定していた場合は、その名前も示します。
+- 出力を開いて開始し、`audioDeviceChanged` を通知した後に `true` を返します。デバイスの選択、バックエンドの作成、デバイスのオープン、出力の開始に失敗すると `false` を返します。選択したデバイスが見つからない場合やバックエンドを利用できない場合は Warning、デバイスのオープンや開始の失敗は `logError("AudioEngine")` で記録します。デバイス名を指定していた場合は、その名前も示します。
 - 再初期化では先に動作中のデバイスを閉じるため、出力が一時的に途切れ、失敗するとエンジンは停止したままになります。同時再生数の上限を下げると、新しい上限を超えるスロットを破棄します。
 - 動作中の再初期化でサンプルレートが変わる場合は、再生位置の時間を保ってアクティブな再生を新しいレートへ移行します。この場合、長さが不明なストリームは先頭から再開し、デコーダーを開き直せないストリームは停止します。
 - `AudioBackend::Default` で Null に到達するのは、実バックエンドのコンテキストを作れない場合だけです。コンテキスト作成後のデバイス失敗ではバックエンドを切り替えません。意図的に無音で動作させるには `AudioBackend::Null` を使います。この指定では初期化に成功するたびに Notice を 1 回出します。
-- `getStats()` は次の初期化成功まで最後の初期化失敗を保持します。失敗するたびにデバイスを開き直してログを出すため、1 秒に 1 回程度のタイマーやユーザー操作で再試行してください。
+- `getStats()` は次の初期化成功まで最後の初期化失敗を保持します。失敗するたびにデバイスを再確認または開き直してログを出すため、1 秒に 1 回程度のタイマーやユーザー操作で再試行してください。
 - エンジンが未初期化の場合、`Sound::load*()` は引数なしの `init()` を呼びますが、`play()` は呼びません。`init(settings)` に失敗した後、指定したデバイスが必要なら、サウンドの読み込み前に同じ設定で再試行してください。
 - 音声リスナーのスレッドに関する制約は、`AudioEngine::audioOut` を参照してください。
 - `setup(settings)` と `setup()` は、デバイスライフサイクルでの名前で呼ぶ同じ処理です。`AudioEngine::setup` を参照してください。`init()` と `setup()` はシステム既定のデバイスを開きます。特定のデバイスを使うには、`deviceName` を指定した `AudioSettings` を渡します。閉じたエンジンを開き直すときも同じで、`close()` の後、OS がデバイスを止めた後、`Sound::load*()` からの場合も該当します。
 '''
 details.ko = '''
-- `init(settings)`는 `AudioSettings`에 따라 출력을 엽니다. 장치 이름이 비어 있으면 시스템 기본 장치를 선택합니다. 일치하는 이름이 없으면 경고를 기록하고 시스템 기본 장치를 사용합니다.
+- `init(settings)`는 `AudioSettings`에 따라 출력을 엽니다. 장치 객체가 없고 이름이 비어 있으면 시스템 기본 장치를 선택합니다. 객체는 이름과 백엔드 지정보다 우선합니다. 일치하는 이름이 없으면 경고를 기록하고 다른 장치를 열지 않고 실패합니다.
 - 샘플 레이트, 채널 수, 버퍼 크기, 동시 재생 수가 양수이면 지정값을 사용합니다. 0 이하이면 각각 `48000` Hz, `2`채널, 백엔드가 선택하는 크기(`0`), 상한 없음(`0`)을 사용합니다.
 - 이 네 설정은 초기화에 실패해도 저장합니다. 인수 없는 `init()`은 이를 재사용하지만 항상 `AudioBackend::Default`로 시스템 기본 장치를 요청합니다. 장치 이름과 백엔드는 유지하지 않습니다.
-- 출력을 열고 시작한 뒤 `audioDeviceChanged`를 알리고 `true`를 반환합니다. 백엔드 생성, 장치 열기, 출력 시작에 실패하면 `false`를 반환하고 `logError("AudioEngine")`로 오류를 기록하며, 장치 이름을 지정했다면 그 이름도 표시합니다.
+- 출력을 열고 시작한 뒤 `audioDeviceChanged`를 알리고 `true`를 반환합니다. 장치 선택, 백엔드 생성, 장치 열기, 출력 시작에 실패하면 `false`를 반환합니다. 선택한 장치가 없거나 백엔드를 사용할 수 없으면 Warning을 기록하고, 장치 열기나 시작에 실패하면 `logError("AudioEngine")`로 기록하며, 장치 이름을 지정했다면 그 이름도 표시합니다.
 - 재초기화는 실행 중인 장치를 먼저 닫으므로 출력이 잠시 끊기며, 실패하면 엔진이 정지한 상태로 남습니다. 동시 재생 수 상한을 줄이면 새 상한을 넘는 슬롯을 버립니다.
 - 실행 중 재초기화로 샘플 레이트가 바뀌면 재생 시간을 유지하며 활성 재생을 새 레이트로 이전합니다. 이 경우 길이가 알려지지 않은 스트림은 처음부터 다시 시작하고, 디코더를 다시 열 수 없는 스트림은 정지합니다.
 - `AudioBackend::Default`는 실제 백엔드 컨텍스트를 만들 수 없을 때만 Null에 도달합니다. 컨텍스트 생성 후 장치가 실패해도 백엔드를 바꾸지 않습니다. 의도적인 무음 실행에는 `AudioBackend::Null`을 사용하며, 이 경우 초기화가 성공할 때마다 Notice를 한 번 기록합니다.
-- `getStats()`는 다음 초기화 성공까지 마지막 초기화 실패를 유지합니다. 실패할 때마다 장치를 다시 열고 로그를 기록하므로 약 1초 간격의 타이머나 사용자 조작으로 재시도하세요.
+- `getStats()`는 다음 초기화 성공까지 마지막 초기화 실패를 유지합니다. 실패할 때마다 장치를 다시 확인하거나 열고 로그를 기록하므로 약 1초 간격의 타이머나 사용자 조작으로 재시도하세요.
 - 엔진이 초기화되지 않았으면 `Sound::load*()`는 인수 없는 `init()`을 호출하지만 `play()`는 호출하지 않습니다. `init(settings)` 실패 후 지정 장치가 필요하면 사운드를 로드하기 전에 같은 설정으로 재시도하세요.
 - 오디오 리스너의 스레드 제약은 `AudioEngine::audioOut`을 참조하세요.
 - `setup(settings)`와 `setup()`은 장치 수명 주기 이름으로 부르는 같은 호출입니다. `AudioEngine::setup`을 참조하세요. `init()`과 `setup()`은 시스템 기본 장치를 엽니다. 특정 장치를 사용하려면 `deviceName`을 지정한 `AudioSettings`를 전달하세요. 닫힌 엔진을 다시 열 때도 같아서 `close()` 후, OS가 장치를 정지시킨 후, `Sound::load*()`에서도 해당합니다.
@@ -1904,26 +1896,27 @@ details.ko = '''
 '''
 
 ["AudioEngine::listDevices"]
+category = "sound"
 keywords = ["enumerate", "outputs", "playback", "available"]
-description.en = "Lists available audio playback devices."
-description.ja = "利用可能な音声再生デバイスを列挙する。"
-description.ko = "사용 가능한 오디오 재생 장치를 나열한다."
+related = ["AudioDeviceInfo", "MicInput::listDevices"]
+description.en = "Enumerates playback devices with native capabilities."
+description.ja = "ネイティブ対応形式を含む再生デバイス一覧を取得します。"
+description.ko = "네이티브 지원 형식을 포함한 재생 장치 목록을 조회합니다."
 details.en = '''
-- Returns a `vector<AudioDeviceInfo>` with each playback device's `name` and `isDefault`; pass a returned name to `AudioSettings::deviceName`.
-- Can enumerate before engine initialization without starting playback. Returns an empty vector if context creation or enumeration fails, enumeration is unsupported, or no devices are reported.
-- On iOS, enumeration leaves the audio session unchanged; before session activation under SoloAmbient, the current route may have no inputs.
+- Returns outputs only; `MicInput::listDevices(backend)` returns inputs only. Entries include name, backend-native ID, direction-specific OS default flag, and reported native channels/rates. Pass an entry to `AudioSettings::device`.
+- `backend` defaults to `Default`: use the existing engine context if present, otherwise probe miniaudio’s default backend order without starting playback. An explicit backend probes only that backend; unavailable backends return an empty list and log a Warning. Native iOS probing leaves the audio session untouched and lists current routes; output routing remains OS controlled.
+- Enumeration queries each device with `ma_context_get_device_info`; this can open/probe devices (especially ALSA) and may be slow. Call from the main thread when needed, not every frame. A failed detail query keeps the device entry with unspecified capabilities. Web returns an empty list because miniaudio exposes only default placeholders, not selectable device IDs.
 '''
 details.ja = '''
-- 各再生デバイスの `name` と `isDefault` を含む `vector<AudioDeviceInfo>` を返します。返された名前を `AudioSettings::deviceName` に指定できます。
-- エンジンの初期化前でも、再生を開始せずに列挙できます。コンテキストの作成や列挙に失敗した場合、列挙が非対応の場合、デバイスが報告されない場合は空の vector を返します。
-- iOS では、列挙時にオーディオセッションを変更しません。SoloAmbient でセッションを有効化する前は、現在のルートに入力がない場合があります。
+- 出力だけを返します。`MicInput::listDevices(backend)` は入力だけを返します。各要素には名前、バックエンド固有ID、この方向でのOS既定フラグ、報告されたネイティブチャンネル数とレートが入ります。出力の要素は `AudioSettings::device` に渡します。
+- `backend` の既定値は `Default` です。エンジンのコンテキストがあれば使い、なければ再生を開始せず miniaudio の既定順で調べます。明示したバックエンドだけを調べ、利用できなければ Warning と空リストを返します。iOSの調査ではオーディオセッションを変更せず、現在のルートを列挙します。出力ルートはOSが制御します。
+- 各デバイスに `ma_context_get_device_info` を呼びます。特にALSAではデバイスを開いて調べるため時間がかかる場合があります。毎フレームではなく必要なときにメインスレッドで呼んでください。詳細取得に失敗しても、対応形式が未指定の要素を残します。Webでは選択可能なIDを取得できず既定デバイスの仮の情報だけになるため、空リストを返します。
 '''
 details.ko = '''
-- 각 재생 장치의 `name`과 `isDefault`를 담은 `vector<AudioDeviceInfo>`를 반환합니다. 반환된 이름을 `AudioSettings::deviceName`에 지정할 수 있습니다.
-- 엔진 초기화 전에도 재생을 시작하지 않고 열거할 수 있습니다. 컨텍스트 생성이나 열거에 실패하거나, 열거를 지원하지 않거나, 보고된 장치가 없으면 빈 vector를 반환합니다.
-- iOS에서는 열거 시 오디오 세션을 변경하지 않습니다. SoloAmbient에서 세션을 활성화하기 전에는 현재 경로에 입력이 없을 수 있습니다.
+- 출력만 반환합니다. `MicInput::listDevices(backend)`는 입력만 반환합니다. 각 항목에는 이름, 백엔드 고유 ID, 해당 방향의 OS 기본 플래그, 보고된 네이티브 채널 수와 레이트가 들어 있습니다. 출력 항목은 `AudioSettings::device`에 전달합니다.
+- `backend` 기본값은 `Default`이며 엔진 컨텍스트가 있으면 사용하고, 없으면 재생을 시작하지 않고 miniaudio의 기본 순서로 조회합니다. 명시한 백엔드만 조회하며 사용할 수 없으면 Warning과 빈 목록을 반환합니다. iOS 조회는 오디오 세션을 변경하지 않고 현재 경로를 열거합니다. 출력 경로는 OS가 제어합니다.
+- 장치마다 `ma_context_get_device_info`를 호출합니다. 특히 ALSA는 장치를 열어 조회할 수 있어 느릴 수 있습니다. 매 프레임 대신 필요할 때 메인 스레드에서 호출합니다. 상세 조회에 실패해도 지원 형식이 미지정인 항목을 유지합니다. Web은 선택 가능한 ID 대신 기본 장치의 임시 정보만 제공하므로 빈 목록을 반환합니다.
 '''
-related = ["AudioDeviceInfo"]
 
 ["AudioEngine::onDisconnect"]
 category = "audioengine"
@@ -1933,7 +1926,7 @@ description.ja = "名前で開いた音声出力デバイスの停止を OS が�
 description.ko = "이름으로 연 오디오 출력 장치의 정지를 OS가 보고했음을 알린다."
 related = ["DeviceDisconnectEventArgs", "AudioEngine::isConnected", "AudioEngine::setup", "AudioEngine::close", "AudioEngine::audioDeviceChanged"]
 details.en = '''
-- This `Event<DeviceDisconnectEventArgs>` fires once per open device, and only when the OS or the audio library reports that a running output device opened by name (`AudioSettings::deviceName`) stopped by itself, for example a USB audio interface that was unplugged or a Bluetooth headset that was switched off. `reason` says what happened. `isConnected()` is already false when it fires.
+- This `Event<DeviceDisconnectEventArgs>` fires once per open device, and only when the OS or the audio library reports that a running output device explicitly selected by `AudioSettings::device` or `deviceName` stopped by itself, for example a USB audio interface that was unplugged or a Bluetooth headset that was switched off. `reason` says what happened. `isConnected()` is already false when it fires.
 - The device is closed before the event fires, so its sound never moves to another device. To keep playing on the system default after it is lost, call `setup()` inside the listener.
 - A device opened as the system default follows the OS default and never reports a loss. If every output device disappears, the sound just stops (and resumes when the OS has a default again). Apps that need to know open the device by name.
 - It fires on the main thread at the Runtime's next host turn, never on the audio thread; the audio thread only records the stop. It does not fire without a running app loop (`runApp()` or `runHeadlessApp()`).
@@ -1942,7 +1935,7 @@ details.en = '''
 - To open the device again, call `setup()` / `setup(settings)` again. Nothing is rerouted or retried by the engine.
 '''
 details.ja = '''
-- この `Event<DeviceDisconnectEventArgs>` は、開いているデバイスごとに 1 回、OS またはオーディオライブラリが「名前（`AudioSettings::deviceName`）で開いた動作中の出力デバイスが自ら停止した」と報告したときだけ発火します。たとえば、USB オーディオインターフェースを抜いた場合や、Bluetooth ヘッドセットの電源を切った場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
+- この `Event<DeviceDisconnectEventArgs>` は、開いているデバイスごとに 1 回、OS またはオーディオライブラリが「`AudioSettings::device` または `deviceName` で明示的に選択した動作中の出力デバイスが自ら停止した」と報告したときだけ発火します。たとえば、USB オーディオインターフェースを抜いた場合や、Bluetooth ヘッドセットの電源を切った場合です。`reason` に内容が入ります。発火した時点で `isConnected()` はすでに false です。
 - 発火する前にデバイスを閉じるので、音がほかのデバイスに移ることはありません。喪失後もシステム既定のデバイスで再生を続けるには、リスナーの中で `setup()` を呼びます。
 - システム既定として開いたデバイスは OS の既定に追従し、喪失を報告しません。出力デバイスがすべてなくなった場合は音が止まるだけです（OS に既定のデバイスが戻ると再開します）。喪失を知る必要があるアプリは、デバイスを名前で開きます。
 - Runtime の次のホストターンでメインスレッドで発火し、オーディオスレッドでは発火しません。オーディオスレッドは停止を記録するだけです。アプリのループ（`runApp()` または `runHeadlessApp()`）が動いていないときは発火しません。
@@ -1951,7 +1944,7 @@ details.ja = '''
 - デバイスを開き直すには、`setup()` / `setup(settings)` をもう一度呼びます。エンジンは再ルーティングも再試行もしません。
 '''
 details.ko = '''
-- 이 `Event<DeviceDisconnectEventArgs>`는 열린 장치마다 한 번, OS 또는 오디오 라이브러리가 이름(`AudioSettings::deviceName`)으로 연 실행 중인 출력 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 USB 오디오 인터페이스를 뽑았거나 Bluetooth 헤드셋의 전원을 껐을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
+- 이 `Event<DeviceDisconnectEventArgs>`는 열린 장치마다 한 번, OS 또는 오디오 라이브러리가 `AudioSettings::device` 또는 `deviceName`으로 명시적으로 선택한 실행 중인 출력 장치가 스스로 정지했다고 보고했을 때만 발생합니다. 예를 들어 USB 오디오 인터페이스를 뽑았거나 Bluetooth 헤드셋의 전원을 껐을 때입니다. `reason`에 내용이 담깁니다. 발생한 시점에 `isConnected()`는 이미 false입니다.
 - 이벤트가 발생하기 전에 장치를 닫으므로 소리가 다른 장치로 옮겨 가지 않습니다. 손실 후에도 시스템 기본 장치에서 계속 재생하려면 리스너 안에서 `setup()`을 호출하세요.
 - 시스템 기본으로 연 장치는 OS 기본 장치를 따라가며 손실을 보고하지 않습니다. 출력 장치가 모두 사라지면 소리만 멈춥니다(OS에 기본 장치가 다시 생기면 재개합니다). 손실을 알아야 하는 앱은 장치를 이름으로 엽니다.
 - Runtime의 다음 호스트 턴에 메인 스레드에서 발생하며 오디오 스레드에서는 발생하지 않습니다. 오디오 스레드는 정지를 기록만 합니다. 앱 루프(`runApp()` 또는 `runHeadlessApp()`)가 실행 중이 아니면 발생하지 않습니다.
@@ -2613,21 +2606,21 @@ description.ko = "오디오 엔진 초기화를 설정한다."
 details.en = '''
 - Pass this type to `AudioEngine::init(settings)` to choose the sample rate, output channels, device buffer size, maximum simultaneous voices, and playback device.
 - Defaults are `sampleRate = 0` for 48000 Hz, `channels = 2` for stereo, `bufferSize = 0` for automatic device selection of the period size, and `maxPolyphony = 0` for no cap on simultaneous voices. The buffer size is requested in frames; nonpositive `sampleRate`, `channels` and `bufferSize` select the corresponding engine defaults.
-- An empty `deviceName` selects the system default playback device. A nonempty name is matched against `AudioEngine::listDevices()`; if no match is found, the engine logs a warning and tries the system default.
+- An empty `deviceName` selects the system default playback device. A nonempty name is matched against `AudioEngine::listDevices()`; if no match is found, the engine logs a warning and fails without opening another device. `device`, when set, selects by ID and overrides both `deviceName` and `backend`.
 - `backend` defaults to `AudioBackend::Default`. Set it to `AudioBackend::Null` for a silent mixer that runs without a physical audio device.
 - Initialization failures and live reinitialization follow the rules of `AudioEngine::init`.
 '''
 details.ja = '''
 - `AudioEngine::init(settings)` に渡し、サンプルレート、出力チャンネル数、デバイスのバッファサイズ、最大同時再生数、再生デバイスを指定します。
 - 既定値は、48000 Hz を選ぶ `sampleRate = 0`、ステレオの `channels = 2`、デバイスに周期の選択を任せる `bufferSize = 0`、同時再生数に上限を設けない `maxPolyphony = 0` です。バッファサイズの要求値はフレーム数で指定します。`sampleRate`、`channels`、`bufferSize` が 0 以下の場合は、それぞれのエンジン既定値を使います。
-- `deviceName` が空ならシステム既定の再生デバイスを選びます。空でない場合は `AudioEngine::listDevices()` の名前と照合し、見つからなければ警告を記録してシステム既定のデバイスを試します。
+- `deviceName` が空ならシステム既定の再生デバイスを選びます。空でない場合は `AudioEngine::listDevices()` の名前と照合し、見つからなければ警告を記録して別のデバイスを開かず失敗します。`device` を設定するとIDで選び、`deviceName` と `backend` より優先します。
 - `backend` の既定値は `AudioBackend::Default` です。物理オーディオデバイスを使わず無音でミキサーを動かす場合は、`AudioBackend::Null` を指定します。
 - 初期化の失敗と実行中の再初期化については、`AudioEngine::init` の規則に従います。
 '''
 details.ko = '''
 - `AudioEngine::init(settings)`에 전달하여 샘플레이트, 출력 채널 수, 장치 버퍼 크기, 최대 동시 재생 수, 재생 장치를 지정합니다.
 - 기본값은 48000 Hz를 선택하는 `sampleRate = 0`, 스테레오인 `channels = 2`, 장치가 주기 크기를 선택하도록 하는 `bufferSize = 0`, 동시 재생 수에 상한을 두지 않는 `maxPolyphony = 0`입니다. 버퍼 크기는 프레임 수로 요청합니다. `sampleRate`, `channels`, `bufferSize`가 0 이하이면 각각의 엔진 기본값을 사용합니다.
-- `deviceName`이 비어 있으면 시스템 기본 재생 장치를 선택합니다. 비어 있지 않으면 `AudioEngine::listDevices()`의 이름과 비교하며, 일치하는 장치가 없으면 경고를 기록하고 시스템 기본 장치를 시도합니다.
+- `deviceName`이 비어 있으면 시스템 기본 재생 장치를 선택합니다. 비어 있지 않으면 `AudioEngine::listDevices()`의 이름과 비교하며, 일치하는 장치가 없으면 경고를 기록하고 다른 장치를 열지 않고 실패합니다. `device`를 설정하면 ID로 선택하며 `deviceName`과 `backend`보다 우선합니다.
 - `backend`의 기본값은 `AudioBackend::Default`입니다. 물리적 오디오 장치 없이 믹서를 무음으로 실행하려면 `AudioBackend::Null`을 지정합니다.
 - 초기화 실패와 실행 중 재초기화는 `AudioEngine::init`의 규칙을 따릅니다.
 '''
@@ -2681,17 +2674,17 @@ description.ja = "再生デバイスを名前で指定する。"
 description.ko = "재생 장치를 이름으로 지정한다."
 details.en = '''
 - The default is an empty string, which selects the system default output device. Use `AudioEngine::listDevices()` to obtain device names; matching uses the exact name.
-- If the name is not found, logs a Warning and tries the system default device. If a matching device is found but cannot open, initialization fails.
+- If the name is not found, logs a Warning and fails without opening another device. `device` takes precedence over this name. If a matching device is found but cannot open, initialization fails.
 - Zero-argument `AudioEngine::init()` always requests the system default device; it does not retain this name.
 '''
 details.ja = '''
 - デフォルトは空文字列で、システム既定の出力デバイスを選びます。デバイス名は `AudioEngine::listDevices()` で取得でき、名前は完全一致で比較します。
-- 指定した名前が見つからない場合は Warning を記録し、システム既定のデバイスを試します。一致するデバイスが見つかっても開けない場合は初期化に失敗します。
+- 指定した名前が見つからない場合は Warning を記録し、別のデバイスを開かず失敗します。`device` はこの名前より優先します。一致するデバイスが見つかっても開けない場合は初期化に失敗します。
 - 引数なしの `AudioEngine::init()` は常にシステム既定のデバイスを要求し、この名前を引き継ぎません。
 '''
 details.ko = '''
 - 기본값은 빈 문자열이며 시스템 기본 출력 장치를 선택합니다. 장치 이름은 `AudioEngine::listDevices()`로 확인할 수 있고, 이름은 정확히 일치해야 합니다.
-- 지정한 이름을 찾지 못하면 Warning을 기록하고 시스템 기본 장치를 시도합니다. 일치하는 장치를 찾았지만 열 수 없으면 초기화에 실패합니다.
+- 지정한 이름을 찾지 못하면 Warning을 기록하고 다른 장치를 열지 않고 실패합니다. `device`는 이 이름보다 우선합니다. 일치하는 장치를 찾았지만 열 수 없으면 초기화에 실패합니다.
 - 인수 없는 `AudioEngine::init()`은 항상 시스템 기본 장치를 요청하며 이 이름을 유지하지 않습니다.
 '''
 
@@ -18075,6 +18068,7 @@ description.en = "Captures microphone samples into a ring buffer."
 description.ja = "マイクのサンプルをリングバッファに取り込む。"
 description.ko = "마이크 샘플을 링 버퍼에 캡처한다."
 details.en = '''
+- Use `listDevices()` for inputs and `setDevice(entry)` for explicit ID selection. The selection applies on the next startup; a missing device fails with a Warning and never falls back. With no selection, capture still uses the OS default, which can be a monitor input on Linux.
 - Use `getMicInput()` for the shared instance, then call `start()` or `startAsync()` to open capture. Input is mono float audio, with a default sample rate of 48000 Hz, and does not require output-engine initialization.
 - `getBuffer()` copies the latest samples from a 4096-sample ring buffer; new input overwrites the oldest samples. `getMicAnalysisBuffer()` is its global convenience wrapper.
 - Serialize operations on each instance on the main thread. The capture callback and `getBuffer()` protect sample copying with a mutex. Instances cannot be copied or moved; destruction cancels capture, and `stop()` also cancels pending startup.
@@ -18084,6 +18078,7 @@ details.en = '''
 - Audio-listener restrictions are described in `AudioEngine`.
 '''
 details.ja = '''
+- `listDevices()` で入力を列挙し、`setDevice(entry)` でIDを指定して選択します。次の開始時に適用され、見つからなければ Warning を出して失敗し、別のデバイスには切り替えません。未選択では従来どおりOS既定を使い、Linuxではモニター入力になる場合があります。
 - 共有インスタンスは `getMicInput()` で取得し、`start()` または `startAsync()` で入力を開きます。入力はモノラルの float サンプルで、既定のサンプルレートは 48000 Hz です。出力エンジンの初期化は必要ありません。
 - `getBuffer()` は 4096 サンプルのリングバッファから最新のサンプルをコピーします。新しい入力は最も古いサンプルを上書きします。`getMicAnalysisBuffer()` はそのグローバルな簡易ラッパーです。
 - 各インスタンスの操作はメインスレッドで順に行ってください。入力コールバックと `getBuffer()` は、サンプルのコピーをミューテックスで保護します。インスタンスはコピーもムーブもできません。破棄すると入力をキャンセルし、`stop()` は開始待ちの処理もキャンセルします。
@@ -18093,6 +18088,7 @@ details.ja = '''
 - オーディオのリスナー内での制約は `AudioEngine` を参照してください。
 '''
 details.ko = '''
+- `listDevices()`로 입력을 열거하고 `setDevice(entry)`로 ID를 지정하여 선택합니다. 다음 시작에 적용하며 장치가 없으면 Warning과 함께 실패하고 다른 장치로 전환하지 않습니다. 선택하지 않으면 기존 OS 기본 장치를 사용하며 Linux에서는 모니터 입력일 수 있습니다.
 - 공유 인스턴스는 `getMicInput()`으로 가져오고 `start()` 또는 `startAsync()`로 입력을 엽니다. 입력은 모노 float 샘플이며 기본 샘플레이트는 48000 Hz입니다. 출력 엔진을 초기화할 필요는 없습니다.
 - `getBuffer()`는 4096샘플 링 버퍼에서 최신 샘플을 복사합니다. 새 입력은 가장 오래된 샘플을 덮어씁니다. `getMicAnalysisBuffer()`는 이 함수의 전역 편의 래퍼입니다.
 - 각 인스턴스의 작업은 메인 스레드에서 순서대로 수행해야 합니다. 입력 콜백과 `getBuffer()`는 뮤텍스로 샘플 복사를 보호합니다. 인스턴스는 복사하거나 이동할 수 없습니다. 파괴하면 입력을 취소하며 `stop()`은 대기 중인 시작 작업도 취소합니다.
@@ -18269,17 +18265,17 @@ description.ja = "マイクを直前のサンプルレートで開き直す。"
 description.ko = "마이크를 마지막 샘플 레이트로 다시 연다."
 related = ["MicInput::start", "MicInput::isConnected", "MicInput::close", "MicInput::onDisconnect"]
 details.en = '''
-- `setup()` with no arguments is `start(sampleRate)` with the sample rate of the last `start()` or `startAsync()` (`48000` Hz before any). The microphone is always the system default capture device, so the sample rate is all there is to remember.
+- `setup()` with no arguments is `start(sampleRate)` with the sample rate of the last `start()` or `startAsync()` (`48000` Hz before any). It also retains the device chosen by `setDevice`; with no selection, it uses the OS default capture device.
 - Returns `true` when capture started. On failure it returns `false` and logs an error, as `start()` does; see `MicInput::start` for the macOS and iOS permission behavior.
 - To open the microphone again after a loss, call `setup()`. See `MicInput::onDisconnect`.
 '''
 details.ja = '''
-- 引数なしの `setup()` は、直前の `start()` または `startAsync()` のサンプルレート（それまでに呼んでいなければ `48000` Hz）で呼ぶ `start(sampleRate)` です。マイクは常にシステム既定の入力デバイスなので、覚えておくのはサンプルレートだけです。
+- 引数なしの `setup()` は、直前の `start()` または `startAsync()` のサンプルレート（それまでに呼んでいなければ `48000` Hz）で呼ぶ `start(sampleRate)` です。`setDevice` の選択も保持します。未選択ならOS既定の入力デバイスを使います。
 - 入力を開始できたら `true` を返します。失敗すると `false` を返し、`start()` と同じくエラーを出します。macOS と iOS の権限の扱いは `MicInput::start` を参照してください。
 - 喪失の後にマイクを開き直すには `setup()` を呼びます。`MicInput::onDisconnect` を参照してください。
 '''
 details.ko = '''
-- 인수 없는 `setup()`은 마지막 `start()` 또는 `startAsync()`의 샘플 레이트(호출한 적이 없으면 `48000` Hz)로 호출하는 `start(sampleRate)`입니다. 마이크는 항상 시스템 기본 캡처 장치이므로 기억할 것은 샘플 레이트뿐입니다.
+- 인수 없는 `setup()`은 마지막 `start()` 또는 `startAsync()`의 샘플 레이트(호출한 적이 없으면 `48000` Hz)로 호출하는 `start(sampleRate)`입니다. `setDevice`의 선택도 유지합니다. 선택하지 않으면 OS 기본 캡처 장치를 사용합니다.
 - 캡처가 시작되면 `true`를 반환합니다. 실패하면 `false`를 반환하고 `start()`와 마찬가지로 오류를 기록합니다. macOS와 iOS의 권한 처리는 `MicInput::start`를 참조하세요.
 - 손실 후 마이크를 다시 열려면 `setup()`을 호출하세요. `MicInput::onDisconnect`를 참조하세요.
 '''
@@ -61930,16 +61926,19 @@ description.en = "Selects the audio engine backend."
 description.ja = "オーディオエンジンのバックエンドを選択する。"
 description.ko = "오디오 엔진의 백엔드를 선택한다."
 details.en = '''
+- Explicit choices are `WASAPI`, `DirectSound`, `WinMM`, `CoreAudio`, `PulseAudio`, `ALSA`, `JACK`, `AAudio`, `OpenSLES`, and `WebAudio`. An unavailable backend fails initialization with a Warning, without trying another backend. ASIO is not supported. Both device-listing APIs accept the same enum; selecting a device object uses its backend.
 - `Default` tries miniaudio's backend order for the platform; `Null` explicitly runs the mixer and audio callbacks silently without a physical output device.
 - With `Default`, failure to create any real backend context can fall back to Null and log a Warning. If a real backend context opens but its device cannot open or start, initialization fails without switching to Null.
 - Set the choice through `AudioSettings::backend`.
 '''
 details.ja = '''
+- 明示的な選択肢は `WASAPI`、`DirectSound`、`WinMM`、`CoreAudio`、`PulseAudio`、`ALSA`、`JACK`、`AAudio`、`OpenSLES`、`WebAudio` です。利用できない場合は別のバックエンドを試さず、Warning を出して初期化に失敗します。ASIOには対応しません。両方のデバイス列挙APIで同じenumを指定でき、デバイスオブジェクトを選ぶとそのバックエンドを使います。
 - `Default` はプラットフォームに応じた miniaudio の順序でバックエンドを試します。`Null` は物理的な出力デバイスを使わず、ミキサーとオーディオコールバックを明示的に無音で動かします。
 - `Default` で実デバイス用のバックエンドのコンテキストを作成できない場合は、Null に切り替わり Warning を記録することがあります。実デバイス用のコンテキストを作成できてもデバイスを開けない、または開始できない場合は、Null に切り替えず初期化に失敗します。
 - `AudioSettings::backend` で指定します。
 '''
 details.ko = '''
+- 명시적인 선택은 `WASAPI`, `DirectSound`, `WinMM`, `CoreAudio`, `PulseAudio`, `ALSA`, `JACK`, `AAudio`, `OpenSLES`, `WebAudio`입니다. 사용할 수 없으면 다른 백엔드를 시도하지 않고 Warning과 함께 초기화에 실패합니다. ASIO는 지원하지 않습니다. 두 장치 열거 API도 같은 enum을 받으며 장치 객체를 선택하면 해당 백엔드를 사용합니다.
 - `Default`는 플랫폼에 맞는 miniaudio의 순서로 백엔드를 시도합니다. `Null`은 물리적 출력 장치 없이 믹서와 오디오 콜백을 명시적으로 무음으로 실행합니다.
 - `Default`에서 실제 장치용 백엔드 컨텍스트를 만들 수 없으면 Null로 전환하고 Warning을 기록할 수 있습니다. 실제 장치용 컨텍스트를 만들었지만 장치를 열거나 시작하지 못하면 Null로 전환하지 않고 초기화에 실패합니다.
 - `AudioSettings::backend`로 지정합니다.
@@ -61951,18 +61950,21 @@ description.en = "Specifies the backend used to open the audio engine."
 description.ja = "オーディオエンジンを開くバックエンドを指定する。"
 description.ko = "오디오 엔진을 열 때 사용할 백엔드를 지정한다."
 details.en = '''
+- When `AudioSettings::device` is set, the device object’s backend takes precedence over this value.
 - The default is `AudioBackend::Default`. For silent headless operation, set `AudioBackend::Null` and successfully call `AudioEngine::getInstance().init(settings)` before loading sounds.
-- Playback device enumeration uses the engine's existing backend context; before a context exists, it probes the default backend order. Native `MicInput` follows a real engine backend or an explicitly requested Null backend; an automatic playback fallback to Null does not enable synthetic microphone capture.
+- Device enumeration with `Default` uses the engine's existing backend context; before a context exists, it probes the default backend order. An explicit listing backend overrides the current context for that query. Native `MicInput` follows a real engine backend or an explicitly requested Null backend; an automatic playback fallback to Null does not enable synthetic microphone capture.
 - Zero-argument `AudioEngine::init()` uses `AudioBackend::Default` rather than retaining this choice. See `AudioBackend` for fallback behavior.
 '''
 details.ja = '''
+- `AudioSettings::device` を設定した場合は、デバイスオブジェクトのバックエンドがこの値より優先します。
 - デフォルトは `AudioBackend::Default` です。ヘッドレス実行で無音のまま動かす場合は `AudioBackend::Null` を指定し、サウンドを読み込む前に `AudioEngine::getInstance().init(settings)` を成功させてください。
-- 再生デバイスの列挙はエンジンに既存のバックエンドのコンテキストを使い、コンテキストがない場合はデフォルトの順序で調べます。ネイティブの `MicInput` は実デバイス用のエンジンのバックエンド、または明示的に要求した Null に従います。再生が自動で Null に切り替わっただけでは、合成された無音のマイク入力を有効にしません。
+- `Default` での列挙はエンジンに既存のバックエンドのコンテキストを使い、コンテキストがない場合はデフォルトの順序で調べます。列挙のバックエンドを明示すると、その問い合わせでは明示した指定を使います。ネイティブの `MicInput` は実デバイス用のエンジンのバックエンド、または明示的に要求した Null に従います。再生が自動で Null に切り替わっただけでは、合成された無音のマイク入力を有効にしません。
 - 引数なしの `AudioEngine::init()` はこの選択を引き継がず、`AudioBackend::Default` を使います。フォールバックの扱いは `AudioBackend` を参照してください。
 '''
 details.ko = '''
+- `AudioSettings::device`를 설정하면 장치 객체의 백엔드가 이 값보다 우선합니다.
 - 기본값은 `AudioBackend::Default`입니다. 헤드리스 실행에서 무음으로 동작하려면 `AudioBackend::Null`을 지정하고 사운드를 로드하기 전에 `AudioEngine::getInstance().init(settings)`를 성공시켜야 합니다.
-- 재생 장치 열거는 엔진의 기존 백엔드 컨텍스트를 사용하며, 컨텍스트가 없으면 기본 백엔드 순서로 조사합니다. 네이티브 `MicInput`은 실제 장치용 엔진 백엔드 또는 명시적으로 요청한 Null을 따릅니다. 재생이 자동으로 Null로 전환된 경우에는 합성된 무음 마이크 입력을 활성화하지 않습니다.
+- `Default` 장치 열거는 엔진의 기존 백엔드 컨텍스트를 사용하며, 컨텍스트가 없으면 기본 백엔드 순서로 조사합니다. 열거 백엔드를 명시하면 해당 조회에서는 명시한 백엔드를 사용합니다. 네이티브 `MicInput`은 실제 장치용 엔진 백엔드 또는 명시적으로 요청한 Null을 따릅니다. 재생이 자동으로 Null로 전환된 경우에는 합성된 무음 마이크 입력을 활성화하지 않습니다.
 - 인수 없는 `AudioEngine::init()`은 이 선택을 유지하지 않고 `AudioBackend::Default`를 사용합니다. 대체 백엔드 선택 동작은 `AudioBackend`를 참조하세요.
 '''
 
@@ -65929,3 +65931,111 @@ hide = true
 
 ["VideoFrameEvent::listen"]
 hide = true
+
+["AudioDeviceInfo::uniqueId"]
+category = "sound"
+description.en = "Stores the backend-native device identity."
+description.ja = "バックエンド固有のデバイスIDを保持します。"
+description.ko = "백엔드 고유 장치 ID를 보관합니다."
+details.en = '''
+- WASAPI: UTF-8 endpoint ID; CoreAudio: UID; PulseAudio: source/sink name; ALSA: device string, usually `hw:...` (virtual devices can use other strings). DirectSound: 32 lowercase hex digits encoding GUID bytes; WinMM: decimal index; JACK: decimal default-device ID; AAudio/OpenSLES: decimal native ID; Null: `0`. These values come from miniaudio, not the display name. Stability depends on the backend: indexes can change after reconfiguration.
+- IDs are scoped to a backend and direction. Pass an input entry to `MicInput::setDevice`, or an output entry to `AudioSettings::device`; do not interchange the lists. Web enumeration is empty.
+'''
+details.ja = '''
+- WASAPI はUTF-8のエンドポイントID、CoreAudio はUID、PulseAudio はソースまたはシンク名、ALSA は通常 `hw:...` 形式のデバイス文字列です（仮想デバイスでは別の文字列も使います）。DirectSound はGUIDのバイト列を小文字の16進数32桁、WinMM はインデックス、JACK は既定デバイスのID、AAudio/OpenSLES はネイティブIDを10進数で表します。Null は `0` です。表示名ではなく miniaudio のIDを使います。安定性はバックエンドによって異なり、設定変更でインデックスが変わる場合があります。
+- IDはバックエンドと入出力の方向ごとに扱います。入力の要素は `MicInput::setDevice`、出力の要素は `AudioSettings::device` に渡してください。入出力の一覧を取り違えないでください。Webの列挙は空になります。
+'''
+details.ko = '''
+- WASAPI는 UTF-8 엔드포인트 ID, CoreAudio는 UID, PulseAudio는 소스 또는 싱크 이름, ALSA는 보통 `hw:...` 형식의 장치 문자열입니다(가상 장치는 다른 문자열도 사용합니다). DirectSound는 GUID 바이트를 소문자 16진수 32자리로 표현하며, WinMM은 인덱스, JACK은 기본 장치 ID, AAudio/OpenSLES는 네이티브 ID를 10진수로 표현합니다. Null은 `0`입니다. 표시 이름이 아닌 miniaudio의 ID를 사용합니다. 안정성은 백엔드에 따라 다르며 설정 변경으로 인덱스가 바뀔 수 있습니다.
+- ID는 백엔드와 입출력 방향별로 구분합니다. 입력 항목은 `MicInput::setDevice`, 출력 항목은 `AudioSettings::device`에 전달하며 두 목록을 바꾸어 사용하지 않습니다. Web 열거는 빈 목록입니다.
+'''
+
+["AudioDeviceInfo::channels"]
+category = "sound"
+description.en = "Reports the largest native channel count in this direction."
+description.ja = "この方向で報告された最大ネイティブチャンネル数を示します。"
+description.ko = "이 방향에서 보고된 최대 네이티브 채널 수를 나타냅니다."
+details.en = '''
+- Maximum across miniaudio native formats; `0` means unspecified or unrestricted, including when detailed queries fail. This is not the active stream channel count.
+'''
+details.ja = '''
+- miniaudio のネイティブ形式全体での最大値です。`0` は詳細取得に失敗した場合も含め、未指定または制限なしを表します。動作中のストリームのチャンネル数ではありません。
+'''
+details.ko = '''
+- miniaudio 네이티브 형식 전체의 최댓값입니다. `0`은 상세 조회 실패를 포함하여 미지정 또는 제한 없음을 나타냅니다. 실행 중인 스트림의 채널 수는 아닙니다.
+'''
+
+["AudioDeviceInfo::sampleRates"]
+category = "sound"
+description.en = "Lists distinct reported native sample rates in Hz."
+description.ja = "報告されたネイティブサンプルレートをHzで重複なく示します。"
+description.ko = "보고된 네이티브 샘플레이트를 Hz 단위로 중복 없이 나열합니다."
+details.en = '''
+- Sorted ascending without duplicates. An empty list means no specific rates were reported (unknown or unrestricted), including when detailed queries fail. A backend may report only its current native format; this list is not a promise of exhaustive hardware capabilities.
+'''
+details.ja = '''
+- 昇順で重複を除きます。空の場合は、詳細取得の失敗も含め、具体的なレートが報告されていません（不明または制限なし）。現在のネイティブ形式だけを報告するバックエンドもあるため、ハードウェアの全対応形式を保証する一覧ではありません。
+'''
+details.ko = '''
+- 오름차순으로 정렬하며 중복을 제거합니다. 빈 목록은 상세 조회 실패를 포함하여 구체적인 레이트가 보고되지 않았음(알 수 없음 또는 제한 없음)을 뜻합니다. 현재 네이티브 형식만 보고하는 백엔드도 있으므로 하드웨어의 모든 지원 형식을 보장하지 않습니다.
+'''
+
+["AudioDeviceInfo::backend"]
+category = "sound"
+description.en = "Identifies the backend that enumerated this device."
+description.ja = "このデバイスを列挙したバックエンドを示します。"
+description.ko = "이 장치를 열거한 백엔드를 나타냅니다."
+
+["MicInput::listDevices"]
+category = "sound"
+description.en = "Enumerates capture devices separately from outputs."
+description.ja = "出力とは別に入力デバイス一覧を取得します。"
+description.ko = "출력과 별도로 캡처 장치 목록을 조회합니다."
+details.en = '''
+- Returns input entries only, including monitor sources exposed by the OS. Use `setDevice(entry)` to select one. `backend` defaults to `Default` and follows the current engine context or probes miniaudio’s default order. An explicit backend is used alone.
+- The capability, cost, failure, iOS session and Web limitations are the same as `AudioEngine::listDevices`. Web returns an empty list. Enumeration does not request microphone permission.
+'''
+details.ja = '''
+- OSが公開するモニターソースも含め、入力の要素だけを返します。`setDevice(entry)` で選択します。`backend` は既定で `Default` となり、エンジンのコンテキスト、または miniaudio の既定順に従います。明示したバックエンドは単独で使います。
+- 対応形式、処理時間、失敗、iOSセッション、Webの制限は `AudioEngine::listDevices` と同じです。Webは空リストを返します。列挙ではマイク権限を要求しません。
+'''
+details.ko = '''
+- OS가 공개하는 모니터 소스를 포함하여 입력 항목만 반환합니다. `setDevice(entry)`로 선택합니다. `backend` 기본값은 `Default`이며 현재 엔진 컨텍스트 또는 miniaudio의 기본 순서를 따릅니다. 명시한 백엔드는 단독으로 사용합니다.
+- 지원 형식, 비용, 실패, iOS 세션 및 Web 제한은 `AudioEngine::listDevices`와 같습니다. Web은 빈 목록을 반환합니다. 열거는 마이크 권한을 요청하지 않습니다.
+'''
+
+["MicInput::setDevice"]
+category = "sound"
+description.en = "Selects a capture device for subsequent startup by its ID."
+description.ja = "以後の開始時に使う入力デバイスをIDで選択します。"
+description.ko = "이후 시작에 사용할 캡처 장치를 ID로 선택합니다."
+details.en = '''
+- Copies an input entry from `MicInput::listDevices`. On the next `start()`, `startAsync()` or `setup()`, its backend is used alone and `uniqueId` is matched in the input list; the display name is ignored. A missing or empty ID logs a Warning and fails (`start()` returns `false`; async startup reports an unsuccessful `MicStartResult`). No other device opens.
+- Does not change running capture. The selection survives stop/close and setup. Without a selection, the existing OS default behavior remains, including monitor inputs on Linux; a new `MicInput` has no selection. Web cannot select a device: an explicit selection fails with a Warning.
+'''
+details.ja = '''
+- `MicInput::listDevices` の入力要素をコピーします。次の `start()`、`startAsync()`、`setup()` でそのバックエンドだけを使い、入力一覧の `uniqueId` と照合します。表示名は使いません。IDが空、または見つからなければ Warning を出して失敗します（`start()` は `false`、非同期は失敗の `MicStartResult` を返します）。別のデバイスは開きません。
+- 動作中の入力は変更しません。選択は stop/close や setup の後も保持します。未選択では、Linuxのモニター入力を含め、従来どおりOS既定を使います。新しい `MicInput` は未選択です。Webはデバイス選択に対応せず、明示的な選択は Warning を出して失敗します。
+'''
+details.ko = '''
+- `MicInput::listDevices`의 입력 항목을 복사합니다. 다음 `start()`, `startAsync()`, `setup()`에서 해당 백엔드만 사용하고 입력 목록의 `uniqueId`와 비교하며 표시 이름은 무시합니다. ID가 비어 있거나 없으면 Warning을 기록하고 실패합니다(`start()`는 `false`, 비동기는 실패한 `MicStartResult`를 전달합니다). 다른 장치를 열지 않습니다.
+- 실행 중인 캡처는 바꾸지 않습니다. 선택은 stop/close와 setup 이후에도 유지됩니다. 선택하지 않으면 Linux 모니터 입력을 포함하여 기존 OS 기본 동작을 유지합니다. 새 `MicInput`은 선택이 없습니다. Web은 장치 선택을 지원하지 않으며 명시적인 선택은 Warning과 함께 실패합니다.
+'''
+
+["AudioSettings::device"]
+category = "sound"
+description.en = "Selects output by a device object, ahead of deviceName and backend."
+description.ja = "deviceNameとbackendより優先してデバイスオブジェクトで出力を選択します。"
+description.ko = "deviceName과 backend보다 우선하여 장치 객체로 출력을 선택합니다."
+details.en = '''
+- Optional `AudioDeviceInfo`, initially unset. Assign an output entry from `AudioEngine::listDevices()`. When set, its backend overrides `AudioSettings::backend` and its `uniqueId` overrides `deviceName`. Name changes do not affect matching.
+- A missing or empty ID fails init with a Warning without opening another device. Reset the optional to use name/default selection again. Zero-argument `AudioEngine::init()` does not retain this selection.
+'''
+details.ja = '''
+- 初期値は未設定の `optional<AudioDeviceInfo>` です。`AudioEngine::listDevices()` の出力要素を代入します。設定すると、そのバックエンドが `AudioSettings::backend` より優先され、`uniqueId` が `deviceName` より優先されます。名前の変更は照合に影響しません。
+- IDが空、または見つからなければ、別のデバイスを開かず Warning を出して初期化に失敗します。名前や既定での選択に戻すには optional をリセットしてください。引数なしの `AudioEngine::init()` はこの選択を引き継ぎません。
+'''
+details.ko = '''
+- 초기값이 미설정인 `optional<AudioDeviceInfo>`입니다. `AudioEngine::listDevices()`의 출력 항목을 대입합니다. 설정하면 해당 백엔드가 `AudioSettings::backend`보다 우선하며 `uniqueId`가 `deviceName`보다 우선합니다. 이름 변경은 비교에 영향을 주지 않습니다.
+- ID가 비어 있거나 없으면 다른 장치를 열지 않고 Warning과 함께 초기화에 실패합니다. 이름 또는 기본 장치 선택으로 돌아가려면 optional을 초기화합니다. 인수 없는 `AudioEngine::init()`은 이 선택을 유지하지 않습니다.
+'''
