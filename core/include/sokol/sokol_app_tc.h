@@ -12468,6 +12468,7 @@ static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {
     if (next) {
         next->swap_interval = next->requested_swap_interval;
         apply_interval(next, next->swap_interval);
+        next->wake_on_input = true; // [TrussC #1012] The role holder's skipped-present waits end on input.
         next->last_present = 0.0;
         next->last_tick_presented = false;
         next->earliest_next = 0.0;

@@ -147,8 +147,9 @@ int main(int argc,char** argv) {
     auto* first=create(2);auto* second=create();auto* third=create();
     intervalCalls.clear();
     check("steady role",_sapp_tc_x11_update_pacer()==first && intervalCalls.empty());
-    first->iconified=true;
+    first->iconified=true;second->wake_on_input=false; // As sapp_create_window creates secondaries.
     check("minimized handoff",_sapp_tc_x11_update_pacer()==second);
+    check("new pacer wakes on input",second->wake_on_input);
     check("demote then promote once",intervalCalls==std::vector<std::string>{"1:0","2:1"});
     _sapp_tc_x11_update_pacer();check("no interval reapply",intervalCalls.size()==2);
     // Close the second and reuse its slot: the older third must beat the fourth.
