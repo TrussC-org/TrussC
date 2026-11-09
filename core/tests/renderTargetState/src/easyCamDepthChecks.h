@@ -9,14 +9,14 @@ class CameraDepthChild : public Node {
 
 void runEasyCamDepthChecks() {
     const char* names[] = {"alpha", "popStyle", "resetStyle", "childNode", "disabled",
-                           "restoreOff", "restoreOn", "nested", "fboInside", "add"};
-    for (int variant = 0; variant < 10; ++variant) {
+                           "restoreOff", "restoreOn", "nested", "fboInside", "add", "addOcclusion"};
+    for (int variant = 0; variant < 11; ++variant) {
         Fbo target, innerTarget; target.allocate(96, 96);
         target.begin(0.125f, 0.125f, 0.125f);
         resetStyle(); resetMatrix(); disableDepthTest();
         const bool entryDepth = variant == 6;
         if (entryDepth) enableDepthTest();
-        if (variant == 9) setBlendMode(BlendMode::Add);
+        if (variant == 9 || variant == 10) setBlendMode(BlendMode::Add);
         EasyCam camera; camera.setDistance(100); camera.enableOrtho();
         camera.begin();
         check("camera begin enables logical depth", isDepthTestEnabled());
@@ -80,7 +80,8 @@ void runEasyCamDepthChecks() {
         if (variant == 4) expected = Color(0, 0, 1);
         if (variant == 5) expected = Color(0, 1, 0);
         if (variant == 6) expected = Color(0, 0, 1); // disabled inside, restored on at exit
-        if (variant == 9) expected = Color(1, 0.125f, 1);
+        if (variant == 9) expected = Color(1, 0.125f, 1); // equal depth: Add sums both
+        if (variant == 10) expected = Color(1, 0.125f, 0.125f); // farther blue occluded under Add
         std::printf("EASYCAM DEPTH %s\n", names[variant]);
         expectPixel(pixels, 48, 48, expected, names[variant]);
         if (const char* directory = std::getenv("TC_EASYCAM_IMAGES")) {
