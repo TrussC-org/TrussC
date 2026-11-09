@@ -11,7 +11,8 @@ public:
     void draw() override;
     void keyPressed(int key) override;
 
-    // Runs on the audio thread. Synthesize sine wave samples and ADD to
+    // Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring; visualize in update() via getAnalysisBuffer().
+    // Synthesize sine wave samples and ADD to
     // the buffer (other Sound voices, if any, have already been mixed in).
     void audioOut(AudioOutBuffer& buf) override;
 

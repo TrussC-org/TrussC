@@ -249,6 +249,7 @@ description.en = "Called inline on the native capture thread for every microphon
 description.ja = "ネイティブのキャプチャスレッドで、マイクの各ブロックを受け取ります。"
 description.ko = "네이티브 캡처 스레드에서 마이크의 각 블록을 인라인으로 받습니다."
 details.en = '''
+- Audio callbacks run inline on the audio/capture thread and are not thread-safe with the main thread. Do not touch Nodes or the GPU; share data through atomics, a lock, or a ring buffer. For main-thread reads, use `MicInput::getBuffer()` for input and `AudioEngine::getAnalysisBuffer()` for output in `update()`.
 - Called once per native device block while an explicitly started `MicInput` is capturing. Overriding this function or registering a listener does not start capture. Web capture continues to update only the `MicInput` ring.
 - `buf.data` contains `frameCount * channels` read-only interleaved float samples; native capture is mono. `sampleRate` is the capture rate in Hz, and `framePosition` counts captured frames from this MicInput start.
 - The buffer and sample pointer are borrowed only for the callback. Return quickly; avoid allocation, blocking, engine calls, and waiting on the main thread. Audio samples are delivered inline; do not use `Deliver::Main` to queue them.
@@ -257,6 +258,7 @@ details.en = '''
 - Two running `MicInput`s both feed the one `audioIn` event, possibly concurrently from two capture threads. Each has its own `framePosition` starting at 0; `AudioInBuffer` carries no source ID.
 '''
 details.ja = '''
+- 音声コールバックはオーディオ／キャプチャスレッドでインライン実行し、メインスレッドとの共有はスレッドセーフではありません。Node や GPU を操作せず、データは atomic、ロック、リングバッファで共有してください。メインスレッドでは `update()` で入力を `MicInput::getBuffer()`、出力を `AudioEngine::getAnalysisBuffer()` から読んでください。
 - 明示的に開始した `MicInput` が収録している間、ネイティブのデバイスブロックごとに 1 回呼ばれます。オーバーライドやリスナー登録だけでは収録は始まりません。Web では従来どおり `MicInput` のリングだけを更新します。
 - `buf.data` は `frameCount * channels` 個の読み取り専用インターリーブ float サンプルです。ネイティブ収録はモノラルです。`sampleRate` は収録レート（Hz）、`framePosition` は今回の MicInput 開始から数えた収録フレーム位置です。
 - バッファとサンプルへのポインタはコールバック中だけ有効です。速やかに戻り、メモリ確保、待機、エンジン API の呼び出し、メインスレッド待ちを避けてください。音声はインラインで配信します。`Deliver::Main` でキューに入れないでください。
@@ -265,6 +267,7 @@ details.ja = '''
 - 2 つの `MicInput` を同時に動かすと、両方が同じ `audioIn` イベントに通知し、2 つのキャプチャスレッドから並行して呼ばれる場合があります。それぞれの `framePosition` は 0 から始まり、`AudioInBuffer` にソース ID はありません。
 '''
 details.ko = '''
+- 오디오 콜백은 오디오/캡처 스레드에서 인라인으로 실행하며 메인 스레드와의 공유는 스레드 안전하지 않습니다. Node나 GPU를 조작하지 않고 atomic, 잠금 또는 링 버퍼로 데이터를 공유합니다. 메인 스레드에서는 `update()`에서 입력을 `MicInput::getBuffer()`, 출력을 `AudioEngine::getAnalysisBuffer()`로 읽습니다.
 - 명시적으로 시작한 `MicInput`이 캡처하는 동안 네이티브 장치 블록마다 한 번 호출됩니다. 오버라이드나 리스너 등록만으로 캡처를 시작하지 않습니다. Web에서는 기존처럼 `MicInput` 링만 갱신합니다.
 - `buf.data`는 `frameCount * channels`개의 읽기 전용 인터리브 float 샘플입니다. 네이티브 캡처는 모노입니다. `sampleRate`는 캡처 레이트(Hz)이며 `framePosition`은 이번 MicInput 시작부터 센 캡처 프레임 위치입니다.
 - 버퍼와 샘플 포인터는 콜백 중에만 유효합니다. 빠르게 반환하며 메모리 할당, 블로킹, 엔진 API 호출, 메인 스레드 대기를 피해야 합니다. 오디오는 인라인으로 전달합니다. `Deliver::Main`으로 큐에 넣지 않아야 합니다.
@@ -280,7 +283,7 @@ void audioIn(const AudioInBuffer& buf) override;
 // tcApp.cpp
 void tcApp::setup() { getMicInput().startAsync(); }
 void tcApp::audioIn(const AudioInBuffer& buf) {
-    // Process buf.data here; keep the callback real-time safe.
+    // Capture thread (Inline): no Nodes/GPU; share via atomics/lock/ring.
     (void)buf;
 }
 '''
@@ -292,6 +295,7 @@ description.en = "Called on the audio thread once per device buffer, so you can 
 description.ja = "オーディオスレッドでデバイスのバッファごとに 1 回呼ばれ、ここで自分の音を出力に足せる。"
 description.ko = "오디오 스레드에서 디바이스 버퍼마다 1 회 호출되며, 여기서 직접 만든 소리를 출력에 더할 수 있다."
 details.en = '''
+- Audio callbacks run inline on the audio/capture thread and are not thread-safe with the main thread. Do not touch Nodes or the GPU; share data through atomics, a lock, or a ring buffer. For main-thread reads, use `MicInput::getBuffer()` for input and `AudioEngine::getAnalysisBuffer()` for output in `update()`.
 - **Add** your samples to `buf.data` with `+=`. The buffer already holds the mixed `Sound` voices, so setting it to zero or overwriting it silences them. After every writer has finished, the final mix is clamped to [-1, 1].
 - `buf.data` holds `frameCount * channels` float samples, interleaved (for stereo: L, R, L, R, ...). The sample for frame `i` and channel `c` is `buf.data[i * buf.channels + c]`. Read `sampleRate` and `channels` from `buf` instead of assuming them (the default is 48 kHz, 2 channels). `framePosition` is the number of this buffer's first frame, counted from when the engine started.
 - Overriding this function alone does not start an audio device. It is called only while the audio engine runs, and the engine starts with `AudioEngine::init()` or with a `Sound::load()` that initializes it. With `AudioBackend::Null` the engine runs silently, which is useful for headless apps and CI.
@@ -308,6 +312,7 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 - At a session end (logout, restart or shutdown), if no App code is running on the main thread, audio is detached and waited for as usual before `cleanup()`. If App code is running at that moment, the OS ends the process and no App work runs. See `App::exit`.
 '''
 details.ja = '''
+- 音声コールバックはオーディオ／キャプチャスレッドでインライン実行し、メインスレッドとの共有はスレッドセーフではありません。Node や GPU を操作せず、データは atomic、ロック、リングバッファで共有してください。メインスレッドでは `update()` で入力を `MicInput::getBuffer()`、出力を `AudioEngine::getAnalysisBuffer()` から読んでください。
 - 自分の音は `buf.data` に `+=` で**足して**ください。ここにはミックス済みの `Sound` の音がすでに入っているため、0 にしたり上書きしたりするとその音が消えてしまいます。すべての書き込みが終わったあと、最終的な音は [-1, 1] の範囲に収められます（クランプ）。
 - `buf.data` には float のサンプルが `frameCount * channels` 個、チャンネル交互（ステレオなら L, R, L, R, …）に並んでいます。フレーム `i`、チャンネル `c` のサンプルは `buf.data[i * buf.channels + c]` です。`sampleRate` と `channels` は決め打ちせず、`buf` から読んでください（デフォルトは 48 kHz、2 チャンネルです）。`framePosition` は、エンジンが動き始めてから数えた、このバッファの先頭フレームの番号です。
 - オーバーライドしただけでは、オーディオデバイスは動きません。この関数が呼ばれるのはオーディオエンジンが動いている間だけで、エンジンは `AudioEngine::init()` か、エンジンを初期化する `Sound::load()` で動き出します。`AudioBackend::Null` にすると音を出さずに動くため、headless アプリや CI で利用できます。
@@ -324,6 +329,7 @@ void tcApp::setup() { AudioEngine::getInstance().init(); }
 - セッション終了（ログアウト、再起動、シャットダウン）のとき、メインスレッドで App のコードが実行中でなければ、いつもどおりオーディオが切り離され、実行中の呼び出しを待ってから `cleanup()` が呼ばれます。実行中だった場合は OS がプロセスを終了させ、App の処理は何も行われません。`App::exit` を参照してください。
 '''
 details.ko = '''
+- 오디오 콜백은 오디오/캡처 스레드에서 인라인으로 실행하며 메인 스레드와의 공유는 스레드 안전하지 않습니다. Node나 GPU를 조작하지 않고 atomic, 잠금 또는 링 버퍼로 데이터를 공유합니다. 메인 스레드에서는 `update()`에서 입력을 `MicInput::getBuffer()`, 출력을 `AudioEngine::getAnalysisBuffer()`로 읽습니다.
 - 직접 만든 샘플은 `buf.data` 에 `+=` 로 **더하세요**. 여기에는 믹스된 `Sound` 보이스가 이미 들어 있으므로, 0 으로 만들거나 덮어쓰면 그 소리가 사라집니다. 모든 쓰기가 끝난 뒤 최종 믹스는 [-1, 1] 범위로 잘립니다 (클램프).
 - `buf.data` 에는 float 샘플이 `frameCount * channels` 개, 채널이 번갈아 (스테레오라면 L, R, L, R, ...) 들어 있습니다. 프레임 `i`, 채널 `c` 의 샘플은 `buf.data[i * buf.channels + c]` 입니다. `sampleRate` 와 `channels` 는 가정하지 말고 `buf` 에서 읽으세요 (기본값은 48 kHz, 2 채널입니다). `framePosition` 은 엔진이 시작된 뒤부터 센, 이 버퍼 첫 프레임의 번호입니다.
 - 오버라이드만으로는 오디오 디바이스가 시작되지 않습니다. 이 함수는 오디오 엔진이 동작하는 동안에만 호출되며, 엔진은 `AudioEngine::init()` 또는 엔진을 초기화하는 `Sound::load()` 로 시작됩니다. `AudioBackend::Null` 이면 소리 없이 동작하므로 headless 앱이나 CI 에서 사용할 수 있습니다.
@@ -348,6 +354,7 @@ double phase = 0;             // used only on the audio thread
 
 // tcApp.cpp
 void tcApp::audioOut(AudioOutBuffer& buf) {
+    // Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring.
     double d = TAU * freq.load() / buf.sampleRate;
     for (int i = 0; i < buf.frameCount; i++, phase += d)
         for (int c = 0; c < buf.channels; c++)
@@ -1484,32 +1491,32 @@ description.ko = "miniaudio로 출력 장치를 관리하고 사운드 재생을
 details.en = '''
 - Access the process-wide singleton with `AudioEngine::getInstance()`. Most applications use it through `Sound`, `initAudio()`, and `shutdownAudio()`.
 - Initial defaults are 48000 Hz, two output channels, no cap on simultaneous voices, and a requested buffer size of 0, which lets miniaudio choose the device period. Use `init(AudioSettings)` to configure the engine.
-- With default delivery (`Deliver::Inline`), `audioOut` listeners run on the audio thread after all playing `Sound` voices have been mixed. Add samples to the existing interleaved float buffer; the combined output is then clipped to the range -1 to 1.
-- `audioOut` buffer processing must use `Deliver::Inline`. `Deliver::Main` queues delivery from another thread on the main thread and copies only the buffer pointer, not its samples, so deferred processing cannot safely contribute to the current mix. Inline audio listeners must process the supplied buffer and return promptly. Do not load sounds or call playback or device-control APIs from these listeners, and do not retain the supplied buffer pointer after the callback.
+- `audioOut.listen(callback)` runs inline on the audio thread after all playing `Sound` voices have been mixed. Add samples to the existing interleaved float buffer; the combined output is then clipped to the range -1 to 1.
+- Use the short form `audioOut.listen(callback)`. The callback runs on the audio thread (Inline), which is not thread-safe with the main thread: no Nodes or GPU operations; share data through atomics, a lock, or a ring buffer. Visualize output with `AudioEngine::getAnalysisBuffer()` in `update()`. Return promptly, avoid playback/device APIs, and do not retain buffer pointers.
 - Keep custom listeners alive with an `EventListener`. Before destroying state used by a listener, disconnect it and call `waitForAudioCallbacks()` outside the audio callback without holding locks the listener needs. The wait returns `false` after a one-second timeout; successful disconnection alone does not mean an in-flight callback has finished. Framework-managed App audio hooks are detached and awaited before cleanup.
 - `audioDeviceChanged` is notified after every successful `init()`, including initial startup and reinitialization. With default delivery (`Deliver::Inline`), it runs on the thread that called `init()`; `Deliver::Main` queues it on the main thread when notified from another thread. It receives the opened device name and current configuration; playback settings can be changed from this listener.
 - `getAudioAnalysisBuffer()` copies recent mixed output for FFT or visualization. Microphone capture is provided separately by `MicInput`.
-- An explicitly started native `MicInput` delivers `audioIn` inline on its capture thread, even with `Deliver::Main`. Web remains ring-only. `shutdown()` stops input notifications and drains callbacks; capture into the ring continues. `init()` reopens input notifications, even if output initialization fails.
+- An explicitly started native `MicInput` delivers `audioIn` inline on its capture thread. `Deliver::Main` and runtime delivery variables are compile errors for both audio events. Web remains ring-only. `shutdown()` stops input notifications and drains callbacks; capture into the ring continues. `init()` reopens input notifications, even if output initialization fails.
 '''
 details.ja = '''
 - プロセス共通のシングルトンは `AudioEngine::getInstance()` で取得します。通常は `Sound`、`initAudio()`、`shutdownAudio()` を通して利用します。
 - 初期の既定値は 48000 Hz、出力 2 チャンネル、同時再生数の上限なし、要求バッファサイズ 0 です。0 の場合は miniaudio がデバイスのピリオドを選びます。設定を変更するには `init(AudioSettings)` を使います。
-- 既定の呼び出し方法（`Deliver::Inline`）では、`audioOut` のリスナーは、再生中のすべての `Sound` ボイスをミックスしたあと、オーディオスレッドで呼ばれます。既存のインターリーブ形式の float バッファにサンプルを加算してください。合計した出力は、そのあと -1〜1 にクリップされます。
-- `audioOut` のバッファ処理には必ず `Deliver::Inline` を使ってください。`Deliver::Main` は別のスレッドからの通知をメインスレッドでの実行待ちにし、サンプル自体ではなくバッファのポインタだけをコピーするため、遅れて行う処理で現在のミックスに安全に加算することはできません。Inline のオーディオのリスナーでは渡されたバッファを処理し、速やかに戻ってください。サウンドの読み込みや再生・デバイス制御の API は呼ばず、コールバック終了後にバッファのポインタを保持しないでください。
+- `audioOut.listen(callback)` はインラインで、再生中のすべての `Sound` ボイスをミックスしたあと、オーディオスレッドで呼ばれます。既存のインターリーブ形式の float バッファにサンプルを加算してください。合計した出力は、そのあと -1〜1 にクリップされます。
+- 短い形式の `audioOut.listen(callback)` を使ってください。コールバックはオーディオスレッド（Inline）で動き、メインスレッドとの共有はスレッドセーフではありません。Node や GPU を操作せず、データは atomic、ロック、リングバッファで共有してください。出力の可視化には `update()` で `AudioEngine::getAnalysisBuffer()` を使ってください。速やかに戻り、再生・デバイス API の呼び出しやバッファポインタの保持は避けてください。
 - 独自のリスナーは `EventListener` を保持して有効にします。リスナーが使う状態を破棄する前に接続を解除し、オーディオコールバックの外で `waitForAudioCallbacks()` を呼んでください。その際、リスナーが必要とするロックを保持しないでください。待機は 1 秒でタイムアウトすると `false` を返します。接続の解除だけでは、実行中のコールバックの終了は保証されません。フレームワークが管理する App のオーディオフックは、cleanup の前に解除して終了を待ちます。
 - `audioDeviceChanged` は、初回と再初期化を含め、`init()` が成功するたびに通知されます。既定の呼び出し方法（`Deliver::Inline`）では `init()` を呼んだスレッドで呼ばれます。`Deliver::Main` では、別のスレッドからの通知はメインスレッドでの実行待ちになります。開いたデバイス名と現在の設定を受け取ります。このリスナーから再生設定を変更できます。
 - `getAudioAnalysisBuffer()` は FFT や可視化用に最近のミックス出力をコピーします。マイク入力は別の `MicInput` が担当します。
-- 明示的に開始したネイティブ `MicInput` は、`Deliver::Main` でもキャプチャスレッドで `audioIn` をインライン配信します。Web はリングのみです。`shutdown()` は入力通知を止めて実行中のコールバックを待ちますが、リングへの収録は続きます。`init()` は出力の初期化に失敗しても入力通知を再開します。
+- 明示的に開始したネイティブ `MicInput` は、キャプチャスレッドで `audioIn` をインライン配信します。両方の音声イベントで、`Deliver::Main` と実行時の配信変数はコンパイルエラーになります。Web はリングのみです。`shutdown()` は入力通知を止めて実行中のコールバックを待ちますが、リングへの収録は続きます。`init()` は出力の初期化に失敗しても入力通知を再開します。
 '''
 details.ko = '''
 - 프로세스 공통 싱글턴은 `AudioEngine::getInstance()`로 가져옵니다. 대부분의 애플리케이션은 `Sound`, `initAudio()`, `shutdownAudio()`를 통해 사용합니다.
 - 초기 기본값은 48000 Hz, 출력 2채널, 동시 재생 수 상한 없음, 요청 버퍼 크기 0입니다. 0이면 miniaudio가 장치 피리어드를 선택합니다. 설정을 변경하려면 `init(AudioSettings)`를 사용합니다.
-- 기본 전달 방식(`Deliver::Inline`)에서 `audioOut` 리스너는 재생 중인 모든 `Sound` 보이스를 믹싱한 뒤 오디오 스레드에서 호출됩니다. 기존 인터리브 float 버퍼에 샘플을 더해야 합니다. 합산한 출력은 이후 -1~1 범위로 클리핑합니다.
-- `audioOut` 버퍼 처리에는 반드시 `Deliver::Inline`을 사용해야 합니다. `Deliver::Main`은 다른 스레드에서 발생한 알림을 메인 스레드의 실행 대기열에 넣고 샘플 자체가 아닌 버퍼 포인터만 복사하므로, 지연된 처리로 현재 믹싱에 안전하게 더할 수 없습니다. Inline 오디오 리스너는 전달된 버퍼를 처리하고 신속히 반환해야 합니다. 사운드 로딩이나 재생 및 장치 제어 API를 호출하지 말고, 콜백이 끝난 뒤 버퍼 포인터를 보관하지 마세요.
+- `audioOut.listen(callback)`은 인라인으로 재생 중인 모든 `Sound` 보이스를 믹싱한 뒤 오디오 스레드에서 호출됩니다. 기존 인터리브 float 버퍼에 샘플을 더해야 합니다. 합산한 출력은 이후 -1~1 범위로 클리핑합니다.
+- 짧은 형식인 `audioOut.listen(callback)`을 사용합니다. 콜백은 오디오 스레드(Inline)에서 실행하며 메인 스레드와의 공유는 스레드 안전하지 않습니다. Node나 GPU를 조작하지 않고 atomic, 잠금 또는 링 버퍼로 데이터를 공유합니다. 출력 시각화에는 `update()`에서 `AudioEngine::getAnalysisBuffer()`를 사용합니다. 신속하게 반환하고 재생·장치 API 호출이나 버퍼 포인터 보관을 피해야 합니다.
 - 직접 등록한 리스너는 `EventListener`를 보관하여 유지합니다. 리스너가 사용하는 상태를 파괴하기 전에 연결을 해제하고 오디오 콜백 밖에서 `waitForAudioCallbacks()`를 호출해야 합니다. 이때 리스너가 필요로 하는 잠금을 보유하지 마세요. 대기는 1초 후 시간 초과 시 `false`를 반환합니다. 연결 해제만으로 실행 중인 콜백의 종료를 보장하지는 않습니다. 프레임워크가 관리하는 App 오디오 훅은 cleanup 전에 연결을 해제하고 종료를 기다립니다.
 - `audioDeviceChanged`는 최초 초기화와 재초기화를 포함하여 `init()`가 성공할 때마다 알립니다. 기본 전달 방식(`Deliver::Inline`)에서는 `init()`를 호출한 스레드에서 실행됩니다. `Deliver::Main`은 다른 스레드에서 발생한 알림을 메인 스레드의 실행 대기열에 넣습니다. 연 장치 이름과 현재 설정을 전달합니다. 이 리스너에서 재생 설정을 변경할 수 있습니다.
 - `getAudioAnalysisBuffer()`는 FFT나 시각화를 위해 최근 믹싱 출력을 복사합니다. 마이크 입력은 별도의 `MicInput`이 담당합니다.
-- 명시적으로 시작한 네이티브 `MicInput`은 `Deliver::Main`에서도 캡처 스레드에서 `audioIn`을 인라인으로 전달합니다. Web은 링만 갱신합니다. `shutdown()`은 입력 알림을 중지하고 실행 중인 콜백을 기다리지만 링 캡처는 계속됩니다. `init()`은 출력 초기화에 실패해도 입력 알림을 다시 시작합니다.
+- 명시적으로 시작한 네이티브 `MicInput`은 캡처 스레드에서 `audioIn`을 인라인으로 전달합니다. 두 오디오 이벤트에서 `Deliver::Main`과 런타임 전달 변수는 컴파일 오류가 됩니다. Web은 링만 갱신합니다. `shutdown()`은 입력 알림을 중지하고 실행 중인 콜백을 기다리지만 링 캡처는 계속됩니다. `init()`은 출력 초기화에 실패해도 입력 알림을 다시 시작합니다.
 '''
 related = ["AudioEngine::getInstance", "Sound", "MicInput", "AudioSettings", "initAudio"]
 
@@ -1538,22 +1545,25 @@ description.en = "Provides inline notifications for native microphone blocks."
 description.ja = "ネイティブのマイクブロックをインラインで通知します。"
 description.ko = "네이티브 마이크 블록을 인라인으로 알립니다."
 details.en = '''
+- Audio callbacks run inline on the audio/capture thread and are not thread-safe with the main thread. Do not touch Nodes or the GPU; share data through atomics, a lock, or a ring buffer. For main-thread reads, use `MicInput::getBuffer()` for input and `AudioEngine::getAnalysisBuffer()` for output in `update()`.
 - Every block from a running native `MicInput` is delivered once, in capture order, on that device's capture thread. Explicitly start `MicInput`; subscribing does not start capture or output. Web capture still updates only the ring.
-- Listeners take `AudioInBuffer&`. Samples are read-only and borrowed for the callback only; do not retain the pointer. Delivery is inline even if a listener specifies `Deliver::Main`.
+- Listeners take `AudioInBuffer&`. Samples are read-only and borrowed for the callback only; do not retain the pointer. Use `audioIn.listen(callback)`; explicit `Deliver::Inline` is also accepted. `Deliver::Main` and runtime delivery variables are compile errors. Read `MicInput::getBuffer()` in `update()` for main-thread input processing.
 - No engine or ring lock is held during notification. Keep callbacks real-time safe: avoid allocation, blocking, and engine/device APIs. Equal-priority listeners run in registration order.
 - `MicInput::getBuffer()` remains available. For listener teardown, disconnect and use `AudioEngine::waitForAudioCallbacks`; App hooks are detached and drained by the framework before cleanup.
 - Two running `MicInput`s both feed the one `audioIn` event, possibly concurrently from two capture threads. Each has its own `framePosition` starting at 0; `AudioInBuffer` carries no source ID.
 '''
 details.ja = '''
+- 音声コールバックはオーディオ／キャプチャスレッドでインライン実行し、メインスレッドとの共有はスレッドセーフではありません。Node や GPU を操作せず、データは atomic、ロック、リングバッファで共有してください。メインスレッドでは `update()` で入力を `MicInput::getBuffer()`、出力を `AudioEngine::getAnalysisBuffer()` から読んでください。
 - 実行中のネイティブ `MicInput` の全ブロックを、収録順に各 1 回、そのデバイスのキャプチャスレッドで配信します。`MicInput` を明示的に開始してください。登録だけでは収録も出力も始まりません。Web ではリングだけを更新します。
-- リスナーは `AudioInBuffer&` を受け取ります。サンプルは読み取り専用で、コールバック中だけ有効です。ポインタを保持しないでください。`Deliver::Main` を指定してもインラインで配信します。
+- リスナーは `AudioInBuffer&` を受け取ります。サンプルは読み取り専用で、コールバック中だけ有効です。ポインタを保持しないでください。`audioIn.listen(callback)` を使ってください。明示的な `Deliver::Inline` も指定できます。`Deliver::Main` と実行時の配信変数はコンパイルエラーになります。メインスレッドで入力を処理するには、`update()` で `MicInput::getBuffer()` を読んでください。
 - 通知中にエンジンやリングのロックは保持しません。リアルタイム処理のため、メモリ確保、待機、エンジンやデバイスの API 呼び出しを避けてください。同じ優先度では登録順に呼ばれます。
 - `MicInput::getBuffer()` も引き続き利用できます。終了時はリスナーを切断し、`AudioEngine::waitForAudioCallbacks` で待ってください。App のフックは cleanup の前にフレームワークが切断して待ちます。
 - 2 つの `MicInput` を同時に動かすと、両方が同じ `audioIn` イベントに通知し、2 つのキャプチャスレッドから並行して呼ばれる場合があります。それぞれの `framePosition` は 0 から始まり、`AudioInBuffer` にソース ID はありません。
 '''
 details.ko = '''
+- 오디오 콜백은 오디오/캡처 스레드에서 인라인으로 실행하며 메인 스레드와의 공유는 스레드 안전하지 않습니다. Node나 GPU를 조작하지 않고 atomic, 잠금 또는 링 버퍼로 데이터를 공유합니다. 메인 스레드에서는 `update()`에서 입력을 `MicInput::getBuffer()`, 출력을 `AudioEngine::getAnalysisBuffer()`로 읽습니다.
 - 실행 중인 네이티브 `MicInput`의 모든 블록을 캡처 순서대로 각각 한 번, 해당 장치의 캡처 스레드에서 전달합니다. `MicInput`을 명시적으로 시작해야 합니다. 등록만으로 캡처나 출력을 시작하지 않습니다. Web에서는 링만 갱신합니다.
-- 리스너는 `AudioInBuffer&`를 받습니다. 샘플은 읽기 전용이며 콜백 중에만 유효합니다. 포인터를 보관하지 않아야 합니다. `Deliver::Main`을 지정해도 인라인으로 전달합니다.
+- 리스너는 `AudioInBuffer&`를 받습니다. 샘플은 읽기 전용이며 콜백 중에만 유효합니다. 포인터를 보관하지 않아야 합니다. `audioIn.listen(callback)`을 사용합니다. 명시적인 `Deliver::Inline`도 허용합니다. `Deliver::Main`과 런타임 전달 변수는 컴파일 오류가 됩니다. 메인 스레드에서 입력을 처리하려면 `update()`에서 `MicInput::getBuffer()`를 읽습니다.
 - 알림 중에는 엔진이나 링 잠금을 유지하지 않습니다. 실시간 처리를 위해 메모리 할당, 블로킹, 엔진이나 장치 API 호출을 피해야 합니다. 같은 우선순위에서는 등록 순서대로 호출됩니다.
 - `MicInput::getBuffer()`도 계속 사용할 수 있습니다. 종료 시 리스너를 연결 해제하고 `AudioEngine::waitForAudioCallbacks`로 기다려야 합니다. App 훅은 cleanup 전에 프레임워크가 분리하고 기다립니다.
 - 두 `MicInput`을 동시에 실행하면 둘 다 하나의 `audioIn` 이벤트로 전달하며 두 캡처 스레드에서 동시에 호출될 수 있습니다. 각각의 `framePosition`은 0에서 시작하고 `AudioInBuffer`에는 소스 ID가 없습니다.
@@ -1564,30 +1574,33 @@ description.en = "Provides an event for generating or processing audio output."
 description.ja = "音声出力の生成や加工用のイベントを提供する。"
 description.ko = "오디오 출력을 생성하거나 처리하는 이벤트를 제공한다."
 details.en = '''
+- Audio callbacks run inline on the audio/capture thread and are not thread-safe with the main thread. Do not touch Nodes or the GPU; share data through atomics, a lock, or a ring buffer. For main-thread reads, use `MicInput::getBuffer()` for input and `AudioEngine::getAnalysisBuffer()` for output in `update()`.
 - Fires once per output callback after all playing `Sound` voices have been mixed; listeners receive `AudioOutBuffer&`.
 - Add generated samples to `data` to preserve existing voices; effects can process the existing samples. Output is metered and clamped to `[-1, 1]` after all listeners return.
 - Listeners run in ascending priority order, with registration order preserved for equal priorities; `audio::priority::Generator`, `audio::priority::Effect`, and `audio::priority::Monitor` provide the usual stages.
 - Keep the returned `EventListener` alive for as long as the listener is needed.
 - With the default delivery, listeners run on the audio thread without the engine lock held. Return quickly, avoid allocation and blocking, and do not call playback, loading, initialization, or shutdown APIs from the listener.
-- The buffer and its sample pointer are borrowed for the callback only; do not retain them or use `Deliver::Main`, which copies the pointer without copying its samples.
+- The buffer and its sample pointer are borrowed for the callback only; do not retain them. Use `audioOut.listen(callback)`; explicit `Deliver::Inline` is also accepted. `Deliver::Main` and runtime delivery variables are compile errors. Visualize output with `AudioEngine::getAnalysisBuffer()` in `update()`.
 - Before destroying state used by a listener, follow `AudioEngine::waitForAudioCallbacks`.
 '''
 details.ja = '''
+- 音声コールバックはオーディオ／キャプチャスレッドでインライン実行し、メインスレッドとの共有はスレッドセーフではありません。Node や GPU を操作せず、データは atomic、ロック、リングバッファで共有してください。メインスレッドでは `update()` で入力を `MicInput::getBuffer()`、出力を `AudioEngine::getAnalysisBuffer()` から読んでください。
 - 再生中のすべての `Sound` をミックスした後、出力コールバックごとに 1 回通知し、リスナーに `AudioOutBuffer&` を渡します。
 - 既存の音を残すには、生成したサンプルを `data` に加算してください。エフェクトでは既存のサンプルを加工できます。すべてのリスナーが戻った後、出力レベルを計測し、`[-1, 1]` に制限します。
 - 優先度の小さい順に呼び出し、同じ優先度では登録順を保ちます。通常の処理段階には `audio::priority::Generator`、`audio::priority::Effect`、`audio::priority::Monitor` を使えます。
 - リスナーが必要な間は、返された `EventListener` を保持してください。
 - 既定の呼び出し方法では、エンジンのロックを持たずにオーディオスレッドで実行します。速やかに処理を終え、メモリ確保や待機を避け、リスナー内で再生、読み込み、初期化、終了用の API を呼ばないでください。
-- バッファとサンプルへのポインタは、コールバック中だけ借りて使うものです。保持したり、サンプルをコピーせずポインタだけをコピーする `Deliver::Main` を使ったりしないでください。
+- バッファとサンプルへのポインタは、コールバック中だけ借りて使うものです。保持しないでください。`audioOut.listen(callback)` を使ってください。明示的な `Deliver::Inline` も指定できます。`Deliver::Main` と実行時の配信変数はコンパイルエラーになります。出力の可視化には `update()` で `AudioEngine::getAnalysisBuffer()` を使ってください。
 - リスナーが使う状態を破棄する前に、`AudioEngine::waitForAudioCallbacks` の手順に従ってください。
 '''
 details.ko = '''
+- 오디오 콜백은 오디오/캡처 스레드에서 인라인으로 실행하며 메인 스레드와의 공유는 스레드 안전하지 않습니다. Node나 GPU를 조작하지 않고 atomic, 잠금 또는 링 버퍼로 데이터를 공유합니다. 메인 스레드에서는 `update()`에서 입력을 `MicInput::getBuffer()`, 출력을 `AudioEngine::getAnalysisBuffer()`로 읽습니다.
 - 재생 중인 모든 `Sound`를 믹싱한 뒤 출력 콜백마다 한 번 발생하며, 리스너에 `AudioOutBuffer&`를 전달합니다.
 - 기존 소리를 유지하려면 생성한 샘플을 `data`에 더하세요. 이펙트는 기존 샘플을 처리할 수 있습니다. 모든 리스너가 반환한 뒤 출력 레벨을 측정하고 `[-1, 1]`로 제한합니다.
 - 우선순위가 작은 순서로 호출하며 같은 우선순위에서는 등록 순서를 유지합니다. 일반적인 처리 단계에는 `audio::priority::Generator`, `audio::priority::Effect`, `audio::priority::Monitor`를 사용할 수 있습니다.
 - 리스너가 필요한 동안 반환된 `EventListener`를 유지하세요.
 - 기본 전달 방식에서는 엔진 잠금 없이 오디오 스레드에서 실행합니다. 빠르게 반환하고 메모리 할당과 대기를 피하며, 리스너 안에서 재생, 로딩, 초기화, 종료 API를 호출하지 마세요.
-- 버퍼와 샘플 포인터는 콜백 중에만 빌려 사용합니다. 이를 보관하거나 샘플 복사 없이 포인터만 복사하는 `Deliver::Main`을 사용하지 마세요.
+- 버퍼와 샘플 포인터는 콜백 중에만 빌려 사용합니다. 이를 보관하지 않아야 합니다. `audioOut.listen(callback)`을 사용합니다. 명시적인 `Deliver::Inline`도 허용합니다. `Deliver::Main`과 런타임 전달 변수는 컴파일 오류가 됩니다. 출력 시각화에는 `update()`에서 `AudioEngine::getAnalysisBuffer()`를 사용합니다.
 - 리스너가 사용하는 상태를 파괴하기 전에 `AudioEngine::waitForAudioCallbacks`의 절차를 따르세요.
 '''
 
@@ -8084,6 +8097,7 @@ description.en = "Connects listeners to notifications with a shared argument typ
 description.ja = "共通の引数型を持つ通知にリスナーを登録する。"
 description.ko = "공통 인자 타입을 사용하는 알림에 리스너를 등록한다."
 details.en = '''
+- Borrowed audio events (`AudioEngine::audioOut` / `audioIn`) accept only omitted delivery or compile-time `Deliver::Inline`; `Deliver::Main` and runtime delivery variables fail to compile. `VideoGrabber::onFrame` has the same restriction. All other Events retain `listen(callback, Deliver)`.
 - External Main delivery is unlimited by default. Use `event.setMainThreadDeliveryLimit(count)` to limit queued and executing copies across that event’s listeners; 0 restores unlimited delivery. Each copy beyond an explicit limit is dropped; a Warning is logged when the backlog reaches the limit, and again only after the backlog has fully drained and fills up again. TCP stays connected, so an app that sets a limit must handle gaps in its received data. Application `notify()` calls are unaffected.
 - `Event()` defaults to `100`; `Event(defaultPriority)` sets an immutable per-instance integer default for all omitted-priority overloads. Every explicitly supplied integer stays explicit, including `0`, negative values and integer extremes.
 - On events the App receives, listen() defaults to BeforeApp; other events default to 100.
@@ -8102,6 +8116,7 @@ details.en = '''
 - A listener registered from App code, including the constructor, belongs to that App and is removed when the App ends, even if you still hold the `EventListener`. Other Apps are not affected. A listener registered outside App code stays until you remove it.
 '''
 details.ja = '''
+- 借用バッファを渡す音声イベント（`AudioEngine::audioOut` / `audioIn`）では、配信指定の省略かコンパイル時の `Deliver::Inline` だけを受け付けます。`Deliver::Main` と実行時の配信変数はコンパイルできません。`VideoGrabber::onFrame` も同じです。その他の Event では、従来どおり `listen(callback, Deliver)` を使えます。
 - 外部入力の Main 配送は既定で無制限です。`event.setMainThreadDeliveryLimit(count)` で、そのイベントの全リスナーの待機中・実行中コピーの合計件数を制限できます。0 で無制限に戻ります。設定した上限を越えるコピーは破棄し、バックログが上限に達したときに Warning をログに記録し、その後はバックログが完全に空になって再び上限に達した場合にのみ記録します。TCP 接続は維持するため、上限を設定したアプリは受信データの欠落を扱う必要があります。アプリの `notify()` 呼び出しには適用しません。
 - `Event()` の既定優先度は `100` です。`Event(defaultPriority)` は優先度を省略する全形式に使う、インスタンスごとの不変の整数値を設定します。明示した整数は `0`、負数、整数の両端値を含め、そのまま使います。
 - App が受け取るイベントでは listen() の既定値は BeforeApp、それ以外のイベントでは 100 です。
@@ -8120,6 +8135,7 @@ details.ja = '''
 - コンストラクターを含む App のコードで登録したリスナーはその App に属し、`EventListener` をまだ持っていても、App が終わるときに外れます。ほかの App には影響しません。App のコードの外で登録したリスナーは、自分で外すまで残ります。
 '''
 details.ko = '''
+- 빌린 버퍼를 전달하는 오디오 이벤트(`AudioEngine::audioOut` / `audioIn`)에서는 전달 지정 생략 또는 컴파일 시점의 `Deliver::Inline`만 허용합니다. `Deliver::Main`과 런타임 전달 변수는 컴파일되지 않습니다. `VideoGrabber::onFrame`도 같습니다. 다른 Event는 기존처럼 `listen(callback, Deliver)`를 지원합니다.
 - 외부 입력의 Main 전달은 기본적으로 무제한입니다. `event.setMainThreadDeliveryLimit(count)`로 해당 이벤트의 모든 리스너에 걸친 대기 및 실행 중 복사본 수를 제한합니다. 0은 무제한으로 되돌립니다. 설정한 한도를 넘는 복사본은 버리며, 백로그가 한도에 도달하면 Warning을 기록하고, 이후에는 백로그가 완전히 비워진 뒤 다시 한도에 도달할 때만 기록합니다. TCP 연결은 유지되므로 한도를 설정한 앱은 수신 데이터의 누락을 처리해야 합니다. 앱의 `notify()` 호출에는 적용하지 않습니다.
 - `Event()`의 기본 우선순위는 `100`입니다. `Event(defaultPriority)`는 우선순위를 생략하는 모든 형식에 사용할 인스턴스별 불변 정수 기본값을 설정합니다. `0`, 음수, 정수 극값을 포함한 명시적 정수는 그대로 사용합니다.
 - App이 받는 이벤트에서 listen()의 기본값은 BeforeApp이며, 다른 이벤트에서는 100입니다.
@@ -38403,7 +38419,7 @@ description.en = "Subscribe to borrowed RGBA8 frames directly on the capture thr
 description.ja = "キャプチャスレッドで借用 RGBA8 フレームを直接受け取ります。"
 description.ko = "캡처 스레드에서 빌린 RGBA8 프레임을 직접 수신합니다."
 details.en = '''
-- Keep the `EventListener` returned by `onFrame.listen(callback)` (optional integer priority). Multiple listeners use existing Event snapshot/removal rules. There is no `Deliver` overload: `Deliver::Main` fails to compile. Main-thread consumers can use `getQueuedFrames()`.
+- Keep the `EventListener` returned by `onFrame.listen(callback)` (optional integer priority). Multiple listeners use existing Event snapshot/removal rules. Omit delivery or pass `Deliver::Inline`; `Deliver::Main` and runtime delivery variables fail to compile. Main-thread consumers can use `getQueuedFrames()` or `isFrameNew()`/`getPixels()` in `update()`.
 - Register before `setup()`: capture can start before setup returns. Fires on macOS/iOS AVFoundation queues, the Windows MF worker, and the Linux V4L2 worker. On Web and Android it never fires; listening emits no warning.
 - Runs immediately after RGBA conversion, before latest-frame publication and FIFO push, outside their locks, with no extra pixel copy. FIFO capacity, copying, overflow and draining behavior are unchanged, including capacity zero. A slow callback delays capture and may cause driver drops.
 - CPU work only: no GPU/Node operations or waiting for the main thread. Return without throwing. Copy anything retained and synchronize callback-owned data shared with the app.
@@ -38411,7 +38427,7 @@ details.en = '''
 - Grabber lifecycle, update or resize calls from a callback, callback-triggered restart, and concurrent lifecycle calls are unsupported; no additional lifecycle guards are provided.
 '''
 details.ja = '''
-- `onFrame.listen(callback)` が返す `EventListener` を保持してください。整数の優先度も指定できます。複数リスナーは既存の Event のスナップショットと解除の規則に従います。`Deliver` を指定するオーバーロードはなく、`Deliver::Main` はコンパイルできません。メインスレッドでは `getQueuedFrames()` を使えます。
+- `onFrame.listen(callback)` が返す `EventListener` を保持してください。整数の優先度も指定できます。複数リスナーは既存の Event のスナップショットと解除の規則に従います。配信指定は省略するか `Deliver::Inline` を渡してください。`Deliver::Main` と実行時の配信変数はコンパイルできません。メインスレッドでは `getQueuedFrames()`、または `update()` 内で `isFrameNew()`/`getPixels()` を使えます。
 - `setup()` の前に登録してください。setup が戻る前にキャプチャが始まる場合があります。macOS/iOS の AVFoundation キュー、Windows の MF ワーカー、Linux の V4L2 ワーカーで発火します。Web と Android では発火せず、登録時の警告もありません。
 - RGBA 変換直後、最新フレームの公開と FIFO への追加の前に、それらのロックの外で実行します。追加のピクセルコピーはありません。容量 0 の場合も含め、FIFO の容量、コピー、あふれた場合の動作、取り出し方法は変わりません。遅いコールバックはキャプチャを遅らせ、ドライバー側でフレームを落とす場合があります。
 - CPU 処理専用です。GPU/Node の操作やメインスレッドの待機は行わず、例外を投げずに戻ってください。保持するデータはコピーし、アプリと共有するデータは同期してください。
@@ -38419,7 +38435,7 @@ details.ja = '''
 - コールバック内からのグラバーのライフサイクル・update・リサイズ操作や再起動、並行したライフサイクル操作はサポートしません。追加のライフサイクルガードはありません。
 '''
 details.ko = '''
-- `onFrame.listen(callback)`이 반환한 `EventListener`를 보관합니다. 정수 우선순위도 지정할 수 있습니다. 여러 리스너는 기존 Event의 스냅샷 및 제거 규칙을 따릅니다. `Deliver` 오버로드가 없으므로 `Deliver::Main`은 컴파일되지 않습니다. 메인 스레드에서는 `getQueuedFrames()`를 사용할 수 있습니다.
+- `onFrame.listen(callback)`이 반환한 `EventListener`를 보관합니다. 정수 우선순위도 지정할 수 있습니다. 여러 리스너는 기존 Event의 스냅샷 및 제거 규칙을 따릅니다. 전달 지정을 생략하거나 `Deliver::Inline`을 전달합니다. `Deliver::Main`과 런타임 전달 변수는 컴파일되지 않습니다. 메인 스레드에서는 `getQueuedFrames()` 또는 `update()` 안에서 `isFrameNew()`/`getPixels()`를 사용합니다.
 - `setup()` 전에 등록합니다. setup이 반환되기 전에 캡처가 시작될 수 있습니다. macOS/iOS의 AVFoundation 큐, Windows의 MF 작업자, Linux의 V4L2 작업자에서 발생합니다. Web과 Android에서는 발생하지 않으며 등록 시 경고도 없습니다.
 - RGBA 변환 직후, 최신 프레임 게시와 FIFO 추가 전에 해당 잠금 밖에서 실행합니다. 추가 픽셀 복사는 없습니다. 용량이 0인 경우를 포함하여 FIFO 용량, 복사, 넘침 처리 및 비우기 동작은 그대로입니다. 느린 콜백은 캡처를 지연시켜 드라이버의 프레임 손실을 일으킬 수 있습니다.
 - CPU 작업 전용입니다. GPU/Node 작업이나 메인 스레드 대기를 수행하지 않고 예외 없이 반환합니다. 보관할 데이터는 복사하고 앱과 공유하는 데이터는 동기화합니다.

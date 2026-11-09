@@ -1294,6 +1294,7 @@ class Synth : public Node {
     EventListener audioListener_;
 public:
     void setup() override {
+        // Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring; visualize in update() via getAnalysisBuffer().
         audioListener_ = AudioEngine::getInstance().audioOut.listen(
             [this](AudioOutBuffer& b) { render(b); });   // audio thread, reads table_
     }
@@ -1367,7 +1368,7 @@ A backend context that opens but cannot open its device leaves the engine stoppe
 
 ### Per-buffer synthesis / processing? (audioIn / audioOut)
 
-Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. On native platforms, an explicitly started `MicInput` delivers every captured block to `audioIn` (`AudioInBuffer`, read-only) inline on its capture thread, while preserving the ring read by `MicInput::getBuffer()`. Subscribing does not start capture. The input buffer carries its mono samples, frame count, capture sample rate, and a frame position counted from that MicInput start. Input and output samples are borrowed only for the callback; do not retain their pointers. Native input delivery stays inline even with `Deliver::Main`; output retains normal event dispatch, so use `Deliver::Inline` for output samples. Two running MicInputs both feed the one audioIn event, possibly concurrently from two capture threads, with separate framePosition counters starting at 0 and no source ID. MicInput stop/destruction and engine shutdown drain in-flight notifications; do not call these from an audio listener. Engine shutdown closes input notifications while ring capture continues; init reopens notifications, even if output init fails. Avoid allocation, blocking, heavy work, and engine-API calls, and return quickly. Web input continues to update only the MicInput ring; default Web output runs on the browser main thread.
+Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. On native platforms, an explicitly started `MicInput` delivers every captured block to `audioIn` (`AudioInBuffer`, read-only) inline on its capture thread, while preserving the ring read by `MicInput::getBuffer()`. Subscribing does not start capture. The input buffer carries its mono samples, frame count, capture sample rate, and a frame position counted from that MicInput start. Input and output samples are borrowed only for the callback; do not retain their pointers. Use the short form `audioOut.listen(callback)` / `audioIn.listen(callback)`: delivery is inline. Explicit `Deliver::Inline` also compiles; `Deliver::Main` and runtime delivery variables are compile errors for both audio events. The callbacks are not thread-safe with the main thread: no Nodes/GPU; share data through atomics, a lock or a ring buffer. Read `AudioEngine::getAnalysisBuffer()` for output visualization or `MicInput::getBuffer()` for input in `update()`. Two running MicInputs both feed the one audioIn event, possibly concurrently from two capture threads, with separate framePosition counters starting at 0 and no source ID. MicInput stop/destruction and engine shutdown drain in-flight notifications; do not call these from an audio listener. Engine shutdown closes input notifications while ring capture continues; init reopens notifications, even if output init fails. Avoid allocation, blocking, heavy work, and engine-API calls, and return quickly. Web input continues to update only the MicInput ring; default Web output runs on the browser main thread.
 
 The framework subscribes `App::audioOut()` and `App::audioIn()` right after the first `setup()` returns, so buffers or tables allocated in `setup()` are ready before callbacks run. Device startup is explicit: output needs a running AudioEngine, and native input needs a started MicInput. The framework calls `exit()`, detaches them and waits for a callback in flight, as long as it takes, before calling `cleanup()`, which may free their audio state (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
 
@@ -1389,7 +1390,7 @@ Use it for multichannel output (multi-speaker, installations). `clearChannelMap(
 Pass a **priority** to `audioOut.listen(...)` and listeners compose in a fixed order regardless of instantiation order. `audio::priority::Generator` (100, default) / `Effect` (500) / `Monitor` (900):
 - **Generator** (oscillators / synths) adds audio into the buffer,
 - **Effect** (reverb / filter / EQ) reads + writes to process it,
-- **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **ideal for visualization.**
+- **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **suitable for copying samples for later analysis.** Use `getAnalysisBuffer()` in `update()` for main-thread visualization.
 Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority. Within one priority, listeners run in the order they subscribed. The App's own `audioOut()` / `audioIn()` overrides run just before the Generator priority, so ahead of every default-priority listener, including one you subscribe in `setup()` (before the framework subscribes the App's hooks); a listener that must see what `App::audioOut()` wrote uses `Effect` or `Monitor`. A default-priority listener subscribed before the App was constructed (a static object, or in `main()` before `runApp()`) used to run before `App::audioOut()` and now runs after it.
 
 ### How do I record the audio the app is playing? (AudioRecorder)
@@ -3005,7 +3006,7 @@ void Environment::release()  // Releases the environment's texture resources.
 
 ```cpp
 void Event::clear()  // Removes user listeners, preserving framework-owned listeners.
-EventListener Event::listen(Callback callback) [+11]  // Registers an event listener and returns its connection token.
+EventListener Event::listen(Callback callback) [+15]  // Registers an event listener and returns its connection token.
 size_t Event::listenerCount() const  // Returns the number of registered listeners.
 void Event::notify(T & arg)  // Notifies the event's listeners.
 void Event::setMainThreadDeliveryLimit(size_t count)  // Sets an optional limit for external main-thread copies.
@@ -5327,6 +5328,7 @@ Two entry points. Use either or both.
 class tcApp : public App {
     double phase = 0;
     void audioOut(AudioOutBuffer& buf) override {
+        // Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring; visualize in update() via getAnalysisBuffer().
         for (int i = 0; i < buf.frameCount; i++) {
             float v = 0.3f * sinf(phase);
             for (int c = 0; c < buf.channels; c++)
@@ -5338,6 +5340,7 @@ class tcApp : public App {
 
 // 2. Event<AudioOutBuffer> for non-App-bound code, multiple listeners
 EventListener synthListener;
+// Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring; visualize in update() via getAnalysisBuffer().
 synthListener = AudioEngine::getInstance().audioOut.listen(
     [](AudioOutBuffer& buf) { /* ... */ });
 ```

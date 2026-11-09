@@ -1139,8 +1139,8 @@ public:
     // buffer; listeners should ADD their contribution. Native audioIn fires
     // once per captured mono block while an explicitly started MicInput is
     // capturing, on that device's capture thread. Web only updates the ring.
-    // Samples are borrowed for the callback only. Native input delivery is
-    // inline, including listeners registered with Deliver::Main.
+    // Samples are borrowed for the callback only. Delivery is inline;
+    // Deliver::Main and runtime delivery choices are compile errors.
     //
     // Listeners run on the audio thread with NO engine lock held. Do
     // not call AudioEngine::play() / Sound::load() / etc. from inside

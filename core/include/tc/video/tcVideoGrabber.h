@@ -92,6 +92,11 @@ public:
         }, priority);
     }
 
+    [[nodiscard]] EventListener listen(Callback callback, internal::VideoFrameDelivery,
+                                       int priority = EventPriority::App) {
+        return listen(std::move(callback), priority);
+    }
+
 private:
     friend class VideoGrabber;
     std::shared_ptr<Event<const VideoFrameView>> event_ =

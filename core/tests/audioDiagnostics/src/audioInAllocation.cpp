@@ -28,7 +28,7 @@ bool audioInDeliveryDoesNotAllocate() {
     float samples[256]{};
     int calls = 0;
     auto listener = engine.audioIn.listen([&](AudioInBuffer&) { ++calls; });
-    auto mainListener = engine.audioIn.listen([&](AudioInBuffer&) { ++calls; }, Deliver::Main);
+    auto inlineListener = engine.audioIn.listen([&](AudioInBuffer&) { ++calls; }, Deliver::Inline);
     size_t largest = 0;
     std::thread capture([&] {
         allocProbeArm();
