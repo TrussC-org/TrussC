@@ -61,18 +61,28 @@ inline float windowFunction(WindowType type, int i, int n) {
     }
 }
 
+namespace internal {
+// Per-thread caches retain the most recently used size. Storage lives in a
+// .cpp so hot reload does not create mutable header-inline state.
+// A null pointer after thread-local teardown selects the original calculation.
+const std::vector<float>* windowWeights(int n, WindowType type);
+const std::vector<std::complex<float>>* fftTwiddles(int n);
+} // namespace internal
+
 // Apply window function to signal
 inline void applyWindow(std::vector<float>& signal, WindowType type) {
     int n = static_cast<int>(signal.size());
+    const auto* weights = internal::windowWeights(n, type);
     for (int i = 0; i < n; i++) {
-        signal[i] *= windowFunction(type, i, n);
+        signal[i] *= weights ? (*weights)[i] : windowFunction(type, i, n);
     }
 }
 
 inline void applyWindow(std::vector<std::complex<float>>& signal, WindowType type) {
     int n = static_cast<int>(signal.size());
+    const auto* weights = internal::windowWeights(n, type);
     for (int i = 0; i < n; i++) {
-        signal[i] *= windowFunction(type, i, n);
+        signal[i] *= weights ? (*weights)[i] : windowFunction(type, i, n);
     }
 }
 
@@ -138,19 +148,36 @@ inline void fft(std::vector<std::complex<float>>& data) {
         }
     }
 
+    const auto* twiddles = internal::fftTwiddles(n);
+    if (!twiddles) {
+        // Exit callbacks can run after the thread-local cache is destroyed.
+        for (int len = 2; len <= n; len *= 2) {
+            float angle = -TAU / len;
+            std::complex<float> wn(std::cos(angle), std::sin(angle));
+
+            for (int i = 0; i < n; i += len) {
+                std::complex<float> w(1.0f, 0.0f);
+                for (int j = 0; j < len / 2; j++) {
+                    std::complex<float> u = data[i + j];
+                    std::complex<float> t = w * data[i + j + len / 2];
+                    data[i + j] = u + t;
+                    data[i + j + len / 2] = u - t;
+                    w *= wn;
+                }
+            }
+        }
+        return;
+    }
     // Butterfly operation
     for (int len = 2; len <= n; len *= 2) {
-        float angle = -TAU / len;
-        std::complex<float> wn(std::cos(angle), std::sin(angle));
+        const auto* stage = twiddles->data() + len / 2 - 1;
 
         for (int i = 0; i < n; i += len) {
-            std::complex<float> w(1.0f, 0.0f);
             for (int j = 0; j < len / 2; j++) {
                 std::complex<float> u = data[i + j];
-                std::complex<float> t = w * data[i + j + len / 2];
+                std::complex<float> t = stage[j] * data[i + j + len / 2];
                 data[i + j] = u + t;
                 data[i + j + len / 2] = u - t;
-                w *= wn;
             }
         }
     }
