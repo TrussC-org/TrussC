@@ -86,6 +86,7 @@ struct WindowRequestAccess {
 };
 bool pixels=false;
 bool& pixelPerfectMode() { return pixels; }
+bool& defaultDrawWhileHidden() { static bool allow=false; return allow; }
 int framebufferToLogical(int pixels,float dpi);
 struct Target { bool isFbo=false; int width=1001,height=667; } target;
 Target& currentTarget() { return target; }
