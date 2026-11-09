@@ -6,6 +6,7 @@ Use --build-dir to run a baseline build, or --url/--screenshot to capture an
 existing Web example served on localhost. --timeout is a hang guard, not a test.
 Use --adapter default for Chrome's normal adapter selection on a device host;
 the default is SwiftShader for reproducible software runs.
+Device loss or uncaptured WebGPU errors fail captures, even at the frame target.
 """
 import argparse
 import base64
@@ -60,6 +61,33 @@ ADAPTER_INFO = """
     return `vendor=${info.vendor || '?'} architecture=${info.architecture || '?'} fallback=${fallback ?? '?'}`;
 })()
 """
+
+# Install before page scripts so this observes the devices used by the app,
+# rather than requesting a separate probe device. Keep the first failure.
+GPU_HEALTH_SCRIPT = """
+(() => {
+    window.tcCaptureGpuFailure = null;
+    if (!window.GPUAdapter) return;
+    const requestDevice = GPUAdapter.prototype.requestDevice;
+    GPUAdapter.prototype.requestDevice = async function(...args) {
+        const device = await requestDevice.apply(this, args);
+        const fail = message => { window.tcCaptureGpuFailure ||= 'FAIL ' + message; };
+        device.lost.then(info => {
+            if (ALLOW_DEVICE_DESTRUCTION && info.reason === 'destroyed') return;
+            fail('GPU device lost: ' + info.reason + ': ' + info.message);
+        });
+        device.addEventListener('uncapturederror', event =>
+            fail('uncaptured GPU error: ' + event.error.message));
+        return device;
+    };
+})();
+"""
+
+
+def gpu_failure(connection):
+    result = connection.call('Runtime.evaluate', {
+        'expression': 'window.tcCaptureGpuFailure', 'returnByValue': True})
+    return result.get('result', {}).get('value')
 
 
 def remaining(deadline):
@@ -262,7 +290,7 @@ def build(directory):
     run_build(wrapper + ['cmake', '--build', str(directory), '--parallel', '4'], check=True)
 
 
-def main():
+def main(*, allow_device_destruction=False):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', action='store_true')
     parser.add_argument('--build-dir', type=Path, default=TEST / 'build-web')
@@ -286,14 +314,15 @@ def main():
     print('URL:', url, flush=True)
     try:
         with tempfile.TemporaryDirectory(prefix='webgpu-chrome-') as profile:
-            command = [args.chrome, '--headless=new', '--no-sandbox', '--disable-dev-shm-usage',
+            command = [args.chrome, '--headless=new', '--password-store=basic', '--no-sandbox', '--disable-dev-shm-usage',
                        '--enable-unsafe-webgpu', '--remote-debugging-port=0',
                        '--disable-background-networking', '--disable-component-update', '--disable-sync',
                        '--no-proxy-server', '--disable-features=NetworkServiceSandbox', '--disable-extensions', '--no-first-run', '--no-default-browser-check', '--disable-breakpad',
                        '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
                        '--window-size=1280,1024', f'--user-data-dir={profile}', 'about:blank']
             if args.adapter == 'swiftshader':
-                command[1:1] = ['--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader']
+                command[1:1] = ['--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader',
+                                '--enable-features=Vulkan', '--use-vulkan=swiftshader']
             chrome_env = dict(os.environ, XDG_CONFIG_HOME=str(Path(profile) / "config"), XDG_CACHE_HOME=str(Path(profile) / "cache"))
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=chrome_env)
             drain = LogDrain(process.stdout, process.terminate)
@@ -311,6 +340,9 @@ def main():
                 connection = WebSocket(page['webSocketDebuggerUrl'], deadline)
                 connection.call('Runtime.enable')
                 connection.call('Page.enable')
+                health_script = GPU_HEALTH_SCRIPT.replace(
+                    'ALLOW_DEVICE_DESTRUCTION', 'true' if allow_device_destruction else 'false')
+                connection.call('Page.addScriptToEvaluateOnNewDocument', {'source': health_script})
                 if args.frames:
                     script = """
                     (() => {
@@ -336,16 +368,20 @@ def main():
                         raise RuntimeError('Chrome log exceeded the byte budget')
                     result = connection.call('Runtime.evaluate', {'expression': 'window.tcCaptureVerdict' if args.frames else args.ready, 'returnByValue': True})
                     verdict = result.get('result', {}).get('value')
+                    failure = gpu_failure(connection)
+                    verdict = failure or verdict
                     if verdict and verdict != 'RUNNING':
                         if args.print_adapter:
                             # Which GPU the browser picked, so a device-lane PASS names it.
                             info = connection.call('Runtime.evaluate', {'expression': ADAPTER_INFO, 'awaitPromise': True, 'returnByValue': True})
                             print('adapter: ' + str(info.get('result', {}).get('value')), flush=True)
-                        print(verdict, flush=True)
                         if args.screenshot:
                             data = connection.call('Page.captureScreenshot', {'format': 'png'})['data']
                             args.screenshot.write_bytes(base64.b64decode(data))
-                        return 0 if 'PASS' in str(verdict) else 1
+                        failure = gpu_failure(connection) or failure
+                        verdict = failure or verdict
+                        print(verdict, flush=True)
+                        return 0 if not failure and 'PASS' in str(verdict) else 1
                     time.sleep(0.1)
                 raise RuntimeError('Timed out waiting for browser verdict')
             except (OSError, RuntimeError, StopIteration, ValueError) as error:
