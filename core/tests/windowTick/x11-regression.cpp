@@ -9,11 +9,16 @@
 #include <cstdlib>
 #include <algorithm>
 #include <initializer_list>
+#include <vector>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
 
 
 #if defined(SOKOL_GLES3)
-extern "C" EGLBoolean __wrap_eglSwapInterval(EGLDisplay, EGLint) { return EGL_TRUE; }
+static std::vector<std::string> nativeSequence;
+extern "C" EGLBoolean __wrap_eglSwapInterval(EGLDisplay, EGLint interval) {
+    nativeSequence.push_back("interval:" + std::to_string((uintptr_t)eglGetCurrentSurface(EGL_DRAW)) + ":" + std::to_string(interval));
+    return EGL_TRUE;
+}
 #endif
 
 static long observedState = NormalState;
@@ -177,12 +182,16 @@ extern "C" int __wrap_poll(pollfd*, nfds_t, int timeout) {
     now += timeout * .001; return 0;
 }
 extern "C" EGLBoolean __wrap_eglMakeCurrent(EGLDisplay, EGLSurface draw, EGLSurface read, EGLContext context) {
+    nativeSequence.push_back("current:" + std::to_string((uintptr_t)draw));
     currentDraw = draw; currentRead = read; currentContext = context; return EGL_TRUE;
 }
 extern "C" EGLContext __wrap_eglGetCurrentContext() { return currentContext; }
 extern "C" EGLSurface __wrap_eglGetCurrentSurface(EGLint which) { return which == EGL_DRAW ? currentDraw : currentRead; }
 extern "C" EGLDisplay __wrap_eglGetCurrentDisplay() { return currentContext ? (EGLDisplay)1 : EGL_NO_DISPLAY; }
-extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay, EGLSurface surface) { presentedSurface = surface; ++swaps; now += .0664; return EGL_TRUE; }
+extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay, EGLSurface surface) {
+    nativeSequence.push_back("swap:" + std::to_string((uintptr_t)surface));
+    presentedSurface = surface; ++swaps; now += .0664; return EGL_TRUE;
+}
 extern "C" int __wrap_XGrabPointer(Display*, Window, Bool, unsigned int, int, int, Window, Cursor, Time) { return GrabSuccess; }
 extern "C" int __wrap_XUngrabPointer(Display*, Time) { return 1; }
 extern "C" int __wrap_XWarpPointer(Display*, Window, Window, int, int, unsigned int, unsigned int, int x, int y) {
@@ -287,6 +296,7 @@ static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display*
     _sapp_tc.app.desc.event_cb = event; _sapp_tc.app.desc.frame_cb = frame;
     _sapp_tc.app.desc.swap_interval = 4; _sapp_tc.app.desc.logger.func = logger;
     _sapp_tc.refresh_period = .0166;
+    _sapp_tc.hidden_refresh_period = .0166;
     _sapp_tc.keycodes[24] = SAPP_KEYCODE_A;
     lookupKeysym = XK_a; callbacks = keyCallbacks = charCallbacks = dropCallbacks = 0;
     polls = pending = frames = swaps = 0;
@@ -295,6 +305,7 @@ static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display*
     injectedType = FocusIn; injectedWindow = 1; flood = false; eventsRead = floodEvents = 0;
     nextExpose = 10.001;
     currentContext = (EGLContext)1; currentDraw = currentRead = (EGLSurface)1;
+    nativeSequence.clear();
 }
 static bool parseDrop(const std::string& text) {
     property = text; propertyCalls = 0;
@@ -335,6 +346,29 @@ int main() {
     _sapp_tc_window_t* pair[] = { &main, &secondary };
     reset(main, pair, display); _sapp_tc.window_slots = 2;
     main.win_id = 1; secondary.win_id = 2;
+    // Real WM_STATE conversion + selector + native surface-scope restoration.
+    // D formerly activated the iconified surface and applied interval zero.
+    for (bool paired : {false, true}) for (bool draw : {false, true}) {
+        reset(main, paired ? pair : windows, display); _sapp_tc.window_slots = paired ? 2 : 1;
+        secondary.iconified = secondary.occluded = false;
+        secondary.swap_interval = 0; secondary.swap_interval_pending = false;
+        main.draw_while_hidden = draw; main.desc.tick_cb = [](sapp_window, void*) { ++frames; };
+        _sapp_tc.WM_STATE = 101; visibilityProbe = true; observedState = IconicState;
+        XEvent ev{}; ev.type = PropertyNotify; ev.xproperty.window = main.xwin;
+        ev.xproperty.atom = _sapp_tc.WM_STATE; ev.xproperty.state = PropertyNewValue;
+        _sapp_tc_x11_process_event(&ev); visibilityProbe = false;
+        check("WM_STATE marks pacer iconified", main.iconified);
+        nativeSequence.clear(); _sapp_tc_x11_update_pacer();
+        check("iconify selector avoids demoted EGL surface", nativeSequence == (paired ?
+            std::vector<std::string>{"current:2", "interval:2:1", "current:1"} : std::vector<std::string>{}));
+        check("iconified native demotion is pending", main.swap_interval == 0 && main.swap_interval_pending);
+        nativeSequence.clear(); _sapp_tc_x11_tick(&main);
+        check("iconified ON/OFF native tick sequence", nativeSequence == (draw ?
+            std::vector<std::string>{"current:1"} : std::vector<std::string>{}));
+    }
+    observedState = NormalState;
+    secondary.swap_interval = 0; secondary.swap_interval_pending = false;
+    reset(main, pair, display); _sapp_tc.window_slots = 2;
     main.desc.tick_cb = secondary.desc.tick_cb = [](sapp_window, void*) { ++frames; };
     for (auto* target : {&main, &secondary}) {
         for (bool trust : {false, true}) for (bool iconified : {false, true}) {

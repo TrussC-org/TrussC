@@ -26,6 +26,7 @@ struct _sapp_tc_window_t {
     bool ready=false,constructing=false,in_tick=false,is_main=false,skip_present=false,last_tick_presented=false;
     bool close_requested=false,input_delivered=false,surface_resize_pending=false,fullscreen_requested=false,wake_on_input=false;
     bool iconified=false,occluded=false;
+    bool swap_interval_pending=false;
     uint32_t win_id=0; int drawable=0,swap_interval=0,requested_swap_interval=1,pacing_ticks=0;
     int frame_count=0,visibility_op=0,color_format=0,depth_format=0,fb_width=64,fb_height=64;
     float dpi_scale=1; size_t title_limit=0; char* title=nullptr;
@@ -34,7 +35,7 @@ struct _sapp_tc_window_t {
 };
 struct {
     _sapp_tc_window_t* windows[4]{}; size_t window_slots=4; uint32_t next_id=0;
-    double refresh_period=1.0/60; float dpi=96; int display=1,egl_display=1,ctx=1;
+    double refresh_period=1.0/60,hidden_refresh_period=1.0/60; float dpi=96; int display=1,egl_display=1,ctx=1;
     sapp_window pacer;
     void (*SwapIntervalEXT)(int,int,int)=nullptr; int (*SwapIntervalMESA)(int)=nullptr;
     struct { bool quit_ordered=false,quit_requested=false;
@@ -45,10 +46,14 @@ struct {
 } _sapp_tc;
 static double clockValue=10,refresh=1.0/60,work=0;
 static int currentDrawable=0,turns=0,turnLimit=12,swaps[5]{},nativeIntervals[5]{};
-static bool trace=false,fast=false;
+static bool trace=false,fast=false,ignoreIntervalTwo=false;
 static std::vector<int> order;
 static std::vector<std::string> intervalCalls;
-void record(const char* op,int target,int value=0) { if(trace) std::printf("%s %d %d\n",op,target,value); }
+static std::vector<std::string> nativeCalls;
+void record(const char* op,int target,int value=0) {
+    nativeCalls.push_back(std::string(op)+":"+std::to_string(target)+":"+std::to_string(value));
+    if(trace) std::printf("%s %d %d\n",op,target,value);
+}
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
     for(auto* w:_sapp_tc.windows) if(w && w->win_id==h.id) return w;
     return nullptr;
@@ -66,7 +71,7 @@ int eglMakeCurrent(int,int drawable,int,int) { return glXMakeCurrent(1,drawable,
 int eglSwapInterval(int,int value) { nativeInterval(1,currentDrawable,value);return 1; }
 void nativeSwap(int drawable) {
     record("swap",drawable,nativeIntervals[drawable]); ++swaps[drawable];
-    clockValue+=fast?.00005:refresh*nativeIntervals[drawable];
+    clockValue+=fast?.00005:refresh*(ignoreIntervalTwo && nativeIntervals[drawable]>1 ? 1 : nativeIntervals[drawable]);
 }
 void glXSwapBuffers(int,int drawable) { nativeSwap(drawable); }
 int eglSwapBuffers(int,int drawable) { nativeSwap(drawable);return 1; }
@@ -123,7 +128,7 @@ static void reset() {
     _sapp_tc={};_sapp_tc.SwapIntervalEXT=nativeInterval;_sapp_tc.SwapIntervalMESA=mesaInterval;
     _sapp_tc.app.desc._tc_after_turn=afterTurn;clockValue=10;refresh=1.0/60;turns=0;work=0;currentDrawable=0;
     std::fill(std::begin(swaps),std::end(swaps),0);std::fill(std::begin(nativeIntervals),std::end(nativeIntervals),0);
-    intervalCalls.clear();order.clear();
+    intervalCalls.clear();order.clear();nativeCalls.clear();ignoreIntervalTwo=false;
 }
 static _sapp_tc_window_t* create(int interval=1,bool hidden=false) {
     _sapp_tc_native_desc d;d.swap_interval=interval;d.window.hidden=hidden;d.window.tick_cb=tick;
@@ -143,6 +148,29 @@ int main(int argc,char** argv) {
         };
         _sapp_tc_x11_run_loop();return 0;
     }
+    if(argc>1 && std::string(argv[1])=="iconify-single") {
+        auto* w=create();w->is_main=true;_sapp_tc.app.main=w;
+        w->iconified=true;w->draw_while_hidden=std::atoi(argv[2]);trace=true;
+#if CURRENT
+        _sapp_tc_x11_update_pacer();
+#endif
+        _sapp_tc_x11_tick(w);return 0;
+    }
+    if(argc>1 && std::string(argv[1])=="hidden-two") {
+        auto* w=create(2);w->is_main=true;_sapp_tc.app.main=w;ignoreIntervalTwo=true;
+        for(int i=0;i<240;++i) _sapp_tc_x11_tick(w);
+        w->iconified=true;w->draw_while_hidden=std::atoi(argv[2]);
+#if CURRENT
+        _sapp_tc_x11_update_pacer();
+#endif
+        const double start=clockValue;const int count=swaps[1];
+        for(int i=0;i<120;++i) {
+            _sapp_tc_x11_tick(w);
+            clockValue=std::max(clockValue,w->earliest_next);
+        }
+        std::printf("hidden-two hz=%.6f swaps=%d\n",120/(clockValue-start),swaps[1]-count);
+        return 0;
+    }
 #if CURRENT
     auto* first=create(2);auto* second=create();auto* third=create();
     intervalCalls.clear();
@@ -150,8 +178,8 @@ int main(int argc,char** argv) {
     first->iconified=true;second->wake_on_input=false; // As sapp_create_window creates secondaries.
     check("minimized handoff",_sapp_tc_x11_update_pacer()==second);
     check("new pacer wakes on input",second->wake_on_input);
-    check("demote then promote once",intervalCalls==std::vector<std::string>{"1:0","2:1"});
-    _sapp_tc_x11_update_pacer();check("no interval reapply",intervalCalls.size()==2);
+    check("hidden demotion deferred; promote once",intervalCalls==std::vector<std::string>{"2:1"} && first->swap_interval_pending);
+    _sapp_tc_x11_update_pacer();check("no interval reapply",intervalCalls.size()==1);
     // Close the second and reuse its slot: the older third must beat the fourth.
     sapp_destroy_window({second->win_id});intervalCalls.clear();auto* fourth=create();
     check("close and slot reuse",_sapp_tc_x11_update_pacer()==third);
@@ -195,8 +223,58 @@ int main(int argc,char** argv) {
     reset();_sapp_tc.SwapIntervalEXT=nullptr;first=create();second=create();
     check("MESA multiwindow uses interval zero",intervalCalls.back()=="2:0");
     first->desc.hidden=true;intervalCalls.clear();_sapp_tc_x11_update_pacer();
-    check("MESA handoff targets each drawable at zero",intervalCalls==std::vector<std::string>{"1:0","2:0"});
+    check("MESA hidden demotion deferred",intervalCalls==std::vector<std::string>{"2:0"});
 #endif
+    // Single-window iconify has no handoff target. Selector and hidden OFF
+    // ticks must add no activation/interval/swap on the iconified surface.
+    for(bool draw : {false,true}) {
+        reset();first=create();first->draw_while_hidden=draw;first->iconified=true;
+        nativeCalls.clear();_sapp_tc_x11_update_pacer();
+        check("single iconify selector has no native calls",nativeCalls.empty());
+        _sapp_tc_x11_tick(first);
+        check("single iconify native sequence",nativeCalls==(draw ?
+            std::vector<std::string>{"current:1:0","current:0:0"} : std::vector<std::string>{}));
+        first->iconified=false;nativeCalls.clear();_sapp_tc_x11_update_pacer();
+        check("restore applies requested N once",nativeIntervals[1]==1 && !first->swap_interval_pending);
+    }
+    // A demoted window can resume as a follower while an older window holds
+    // the role. Apply deferred zero exactly once before its first visible swap.
+    reset();first=create();second=create(2);first->iconified=true;_sapp_tc_x11_update_pacer();
+    second->iconified=true;_sapp_tc_x11_update_pacer();
+    first->iconified=false;_sapp_tc_x11_update_pacer();second->iconified=false;
+    second->requested_swap_interval=1;
+    nativeCalls.clear();_sapp_tc_x11_tick(second);
+    check("resumed follower interval before swap",nativeIntervals[2]==0 && !second->swap_interval_pending && swaps[2]==1);
+    auto zero=std::find(nativeCalls.begin(),nativeCalls.end(),"interval:2:0");
+    auto swap=std::find(nativeCalls.begin(),nativeCalls.end(),"swap:2:0");
+    check("deferred interval precedes visible swap",zero!=nativeCalls.end() && swap!=nativeCalls.end() && zero<swap);
+    intervalCalls.clear();_sapp_tc_x11_tick(second);
+    check("deferred interval is not repeated",intervalCalls.empty());
+    // Pi-like driver ignores N=2. Visible refresh/N sampling stays unchanged,
+    // but hidden ON/OFF timers must use the interval-1 base or startup fallback.
+    for(bool learned : {false,true}) for(bool draw : {false,true}) {
+        reset();first=create(learned ? 1 : 2);ignoreIntervalTwo=true;
+        if(learned) {
+            refresh=1.0/62;
+            for(int i=0;i<160;++i) _sapp_tc_x11_tick(first);
+            first->requested_swap_interval=first->swap_interval=2;
+            _sapp_tc_x11_set_swapinterval(first,2);
+        }
+        const double base=_sapp_tc.hidden_refresh_period;
+        for(int i=0;i<240;++i) _sapp_tc_x11_tick(first);
+        check("visible estimate retains baseline N normalization",std::abs(_sapp_tc.refresh_period-refresh/2)<1e-10);
+        check("hidden estimate ignores interval 2",_sapp_tc.hidden_refresh_period==base);
+        if(learned) check("hidden estimate learned interval 1",std::abs(base-refresh)<1e-9);
+        first->iconified=true;first->draw_while_hidden=draw;_sapp_tc_x11_update_pacer();
+        const int presents=swaps[1];
+        for(int i=0;i<120;++i) {
+            first->earliest_next=0;const double start=clockValue;_sapp_tc_x11_tick(first);
+            check("hidden timer uses undivided base",std::abs(first->earliest_next-start-base)<1e-12);
+            clockValue=first->earliest_next;
+        }
+        check("hidden N=2 never swaps",swaps[1]==presents);
+    }
+    std::puts("iconify native sequences and ignored-N=2 hidden timers: PASS");
 #endif
     return 0;
 }

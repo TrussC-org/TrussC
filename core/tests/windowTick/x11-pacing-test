@@ -39,6 +39,7 @@ struct _sapp_tc_window_t {
     bool is_main=false, ready=true, constructing=false, surface_resize_pending=false, in_tick=false, close_requested=false, input_delivered=false;
     int drawable=1, frame_count=0, swap_interval=0, win_id=1, visibility_op=0;
     int requested_swap_interval=1, pacing_ticks=0;
+    bool swap_interval_pending=false, wake_on_input=false;
     bool draw_while_hidden=true, skip_present=false;
     double earliest_next=0, frame_duration=0, last_present=0;
     bool last_tick_presented=false;
@@ -46,7 +47,7 @@ struct _sapp_tc_window_t {
     struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; bool hidden=false; } desc;
 };
 struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; } desc; bool init_called=true, quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
-struct { App app; int display=0; size_t window_slots=2; sapp_window pacer{}; bool SwapIntervalEXT=false, SwapIntervalMESA=false; double refresh_period=1.0/62.0;
+struct { App app; int display=0; size_t window_slots=2; sapp_window pacer{}; bool SwapIntervalEXT=false, SwapIntervalMESA=false; double refresh_period=1.0/62.0, hidden_refresh_period=1.0/62.0;
     _sapp_tc_window_t* windows[2]; } _sapp_tc;
 struct XEvent {};
 struct pollfd { int fd, events, revents; };

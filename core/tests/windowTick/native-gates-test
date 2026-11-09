@@ -246,6 +246,7 @@ struct _sapp_tc_window_t {
     int drawable=1, swap_interval=1, xwin=7;
     int fb_width=1600, fb_height=865;
     int requested_swap_interval=1, pacing_ticks=0;
+    bool swap_interval_pending=false;
     double earliest_next=0, last_present=0, frame_duration=0, refresh_period=.017;
     _sapp_tc_timing_t timing;
     SwapChain* swap_chain=nullptr;
@@ -1528,7 +1529,7 @@ namespace x11 {
 constexpr int SAPP_EVENTTYPE_TC_REDRAW_REQUESTED=99, SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED=100;
 Native* live = nullptr;
 Native* _sapp_tc_lookup(sapp_window h) { return live && live->win_id == h.id ? live : nullptr; }
-struct { double refresh_period=.017; int WM_STATE=1, display=2, screen=0, NET_WM_STATE=3, NET_WM_STATE_FULLSCREEN=4; struct { bool quit_ordered=false; } app; } _sapp_tc;
+struct { double refresh_period=.017, hidden_refresh_period=.017; int WM_STATE=1, display=2, screen=0, NET_WM_STATE=3, NET_WM_STATE_FULLSCREEN=4; struct { bool quit_ordered=false; } app; } _sapp_tc;
 int consulted, updates, acquired, presents, state, polls, withdrawals, fullscreenCalls, mapCalls;
 bool mapped=false, actualFullscreen=false;
 void XMapWindow(int,int) { ++mapCalls; mapped=true; }
@@ -1559,6 +1560,7 @@ bool _sapp_tc_x11_resize_surface(Native*) { return renewalOk; }
 void sapp_destroy_window(sapp_window) { live=nullptr; }
 bool _sapp_tc_x11_update_dimensions(Native*) { ++polls; return changed; }
 bool _sapp_tc_x11_make_current(Native*) { ++acquired; return true; }
+void _sapp_tc_x11_set_swapinterval(Native*,int) {}
 void _sapp_tc_x11_swap(Native*) { ++presents; }
 void _sapp_tc_x11_app_event(Native*,int type) {
     if (type==SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || type==SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED) {

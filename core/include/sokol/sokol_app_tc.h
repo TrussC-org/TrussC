@@ -9309,6 +9309,7 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     // [TrussC #1263] Follower pacing is divided without blocking the shared GL context.
     int requested_swap_interval;
     int pacing_ticks;
+    bool swap_interval_pending; // defer hidden-surface demotion until its next visible swap
     Colormap colormap;
 #if defined(SOKOL_GLES3)
     EGLSurface drawable;
@@ -9384,6 +9385,7 @@ static struct {
     _sapp_tc_window_t idle;
     uint32_t gl_framebuffer;    /* default FBO captured after make-current */
     double refresh_period;      /* estimate from the pacer's vsync'd presents */
+    double hidden_refresh_period; /* base timer: learn only from interval-1 presents */
     sapp_window pacer;          /* [TrussC #997] creation identity, independent of app.main */
 
     /* ---- app / main-window state (this header owns sapp_run on Linux) ---- */
@@ -12461,13 +12463,17 @@ static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {
     };
     if (auto* previous = _sapp_tc_lookup(_sapp_tc.pacer)) {
         previous->swap_interval = 0;
-        apply_interval(previous, 0);
+        // Hidden surfaces never swap. Avoid activating an iconified EGL drawable
+        // just to demote it; Xwayland may block while acquiring its back buffer.
+        previous->swap_interval_pending = _sapp_tc_native_hidden(previous);
+        if (!previous->swap_interval_pending) apply_interval(previous, 0);
         previous->earliest_next = 0.0;
     }
     _sapp_tc.pacer = {next ? next->win_id : 0};
     if (next) {
         next->swap_interval = next->requested_swap_interval;
         apply_interval(next, next->swap_interval);
+        next->swap_interval_pending = false;
         next->wake_on_input = true; // [TrussC #1012] The role holder's skipped-present waits end on input.
         next->last_present = 0.0;
         next->last_tick_presented = false;
@@ -12553,11 +12559,11 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         ++w->frame_count;
         w->skip_present = false; // Consume the one-shot at the completed hidden tick boundary.
         _sapp_tc_x11_update_pacer();
-        _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
+        _sapp_tc_x11_pace_periodic(w, _sapp_tc_native_hidden(w) ? _sapp_tc.hidden_refresh_period : _sapp_tc.refresh_period);
         return;
     }
     if (!_sapp_tc_x11_make_current(w)) {
-        _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
+        _sapp_tc_x11_pace(w, _sapp_tc_native_hidden(w) ? _sapp_tc.hidden_refresh_period : _sapp_tc.refresh_period);
         return;
     }
     if (w->is_main) _sapp_tc_x11_init_client();
@@ -12569,13 +12575,17 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     // [TrussC #997] Reconcile callback-driven hides before any native swap.
     _sapp_tc_x11_update_pacer();
     if (!w->skip_present && !_sapp_tc_native_hidden(w)) {
+        if (w->swap_interval_pending) {
+            _sapp_tc_x11_set_swapinterval(w, w->swap_interval);
+            w->swap_interval_pending = false;
+        }
         _sapp_tc_x11_swap(w);
         presented = true;
     }
     w->skip_present = false;
     w->last_tick_presented = presented;
     if (w->swap_interval == 0) {
-        _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
+        _sapp_tc_x11_pace_periodic(w, _sapp_tc_native_hidden(w) ? _sapp_tc.hidden_refresh_period : _sapp_tc.refresh_period);
         return;
     }
     const double now = _sapp_tc_now();
@@ -12586,8 +12596,11 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         const double swap_dt = now - w->last_present;
         w->last_present = now;
         const double per_frame = swap_dt / (double)w->swap_interval;
-        if (after_present && per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0)
+        if (after_present && per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0) {
             _sapp_tc.refresh_period += 0.1 * (per_frame - _sapp_tc.refresh_period);
+            if (w->swap_interval == 1)
+                _sapp_tc.hidden_refresh_period += 0.1 * (per_frame - _sapp_tc.hidden_refresh_period);
+        }
         w->earliest_next = 0.0;
     }
 #else
@@ -12599,8 +12612,11 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         w->last_present = now;
         if (swap_dt > 0.002) {
             const double per_frame = swap_dt / (double)w->swap_interval;
-            if (after_present && per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0)
+            if (after_present && per_frame > 1.0 / 240.0 && per_frame < 1.0 / 30.0) {
                 _sapp_tc.refresh_period += 0.1 * (per_frame - _sapp_tc.refresh_period);
+                if (w->swap_interval == 1)
+                    _sapp_tc.hidden_refresh_period += 0.1 * (per_frame - _sapp_tc.hidden_refresh_period);
+            }
             w->earliest_next = 0.0;
         } else {
             _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period * (double)w->swap_interval);
@@ -13051,6 +13067,7 @@ void sapp_run(const sapp_desc* desc) {
     _sapp_tc.app.mouse_shown = true;
     _sapp_tc.app.current_cursor = SAPP_MOUSECURSOR_DEFAULT;
     _sapp_tc.refresh_period = 1.0 / 60.0;
+    _sapp_tc.hidden_refresh_period = _sapp_tc.refresh_period;
 
     /* XInitThreads before ANY other Xlib call (TrussC runs off-thread work) */
     XInitThreads();
