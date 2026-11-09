@@ -171,6 +171,7 @@ bool sameMatrix(const Mat4&, const Mat4&);
 #include "reviewChecks.h"
 #include "matrixChecks.h"
 #include "depthSetterChecks.h"
+#include "easyCamDepthChecks.h"
 #include "cameraChecks.h"
 #include "resizeChecks.h"
 }

@@ -678,18 +678,13 @@ inline void restoreBlendPipeline() {
 // ---------------------------------------------------------------------------
 // Depth test (for 2D blend pipelines)
 // ---------------------------------------------------------------------------
-// Blend pipelines default to depth write/test OFF; the 3D pipeline (loaded by
-// screen setup / EasyCam::begin()) always writes depth. enableDepthTest()
-// selects depth (compare LESS_EQUAL + depth write, same
-// config as the 3D pipeline) for the CURRENT blend mode and every subsequent
-// setBlendMode() / textured draw, until disableDepthTest().
-//
-// Like the blend mode, the flag persists until changed: across frames and into
-// Fbo passes alike (active2D() resolves per render target). Screen setup and
-// EasyCam::begin() keep loading the always-depth-tested 3D pipeline regardless
-// of this flag. Either explicit depth setter selects and records the current
-// blend/depth variant immediately, including inside an EasyCam scope. Scope
-// exit restores the saved pipeline role independently of these logical flags.
+// Blend pipelines default to depth write/test OFF. enableDepthTest() selects
+// LESS_EQUAL + depth write for the current blend mode and subsequent blend,
+// style, and textured draws. The target's flag persists across frames; Fbo
+// entry/return inherits it. EasyCam::begin() saves this flag and enables it,
+// keeping the current blend mode; end() restores the saved flag and pipeline.
+// Explicit disableDepthTest() also takes effect inside a camera scope.
+// Screen setup still selects the always-depth-tested 3D pipeline separately.
 
 // Enable depth test/write on the current (and future) blend pipelines
 inline void enableDepthTest() {

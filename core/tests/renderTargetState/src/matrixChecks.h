@@ -108,7 +108,7 @@ void runSyntheticDrawChecks() {
             hap.setUniform(0, &data.uniforms, sizeof(data.uniforms));
             hap.submitVertices(data.vertices, 4, PrimitiveType::Quads);
         }
-        check("LUT/NV12/Hap retain target scoped state and active3D role", target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && !target.depthTestEnabled &&
+        check("LUT/NV12/Hap retain target scoped state and camera depth variant", target.selectedPipeline == internal::fillSelection(BlendMode::Alpha, true) && target.depthTestEnabled &&
               target.camera.currentCameraContext == context && sameMatrix(getViewMatrix(), view) && sameMatrix(getProjectionMatrix(), projection) &&
               sameMatrix(getMatrix(), model) && target.viewport.x == 4 && target.viewport.y == 6 && target.viewport.w == 120 && target.currentScissor.w == 145);
         camera.end(); setColor(0, 1, 0); drawRect(0, 0, 5, 5); popScissor(); fbo.end();
@@ -181,8 +181,9 @@ void runMatrixChecks() {
                 const auto edge = worldToScreen(Vec3(30, 0, 0));
                 check("EasyCam projected edge matches target focal length", std::abs(edge.x - 99.3137f) < 0.01f);
             }
+            const auto cameraSelection = target.selectedPipeline;
             camera.begin(); setBlendMode(BlendMode::Add); enableDepthTest(); camera.end();
-            check("nested camera restores active3D independently of logical flags", target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && target.depthTestEnabled && target.currentBlendMode == BlendMode::Add);
+            check("nested camera restores saved camera depth variant", target.selectedPipeline == cameraSelection && target.depthTestEnabled && target.currentBlendMode == BlendMode::Add);
             camera.end();
             check("camera restores immutable entry snapshot and actual selected variant", target.camera.currentCameraContext == context && target.selectedPipeline == pipeline &&
                   sameMatrix(getMatrix(), Mat4::identity()));
@@ -300,7 +301,7 @@ void runMatrixChecks() {
     const auto directContext = directTarget.camera.currentCameraContext;
     const auto directView = getViewMatrix(), directProjection = getProjectionMatrix(), directModel = getMatrix();
     FullscreenShader directShader; check("direct fixture shader loads", directShader.load(targetstate_discard_shader_desc)); directShader.draw();
-    check("direct shader restores full active3D target state", directTarget.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && !directTarget.depthTestEnabled &&
+    check("direct shader restores full camera target state", directTarget.selectedPipeline == internal::fillSelection(directTarget.currentBlendMode, true) && directTarget.depthTestEnabled &&
           directTarget.camera.currentCameraContext == directContext && sameMatrix(getViewMatrix(), directView) &&
           sameMatrix(getProjectionMatrix(), directProjection) && sameMatrix(getMatrix(), directModel) && directTarget.currentScissor.w == 140 && directTarget.viewport.x == 4 && directTarget.viewport.w == 120);
     directCamera.end(); setColor(0, 1, 0); drawRect(0, 0, 5, 5); popScissor(); first.end();
@@ -378,7 +379,7 @@ void drawDepthFixture(int variant, Fbo& fbo) {
         FullscreenShader shader; check("temporary shader loads", shader.load(targetstate_discard_shader_desc)); shader.draw();
     }
     if (variant == 2) { camera.begin(); setBlendMode(BlendMode::Add); camera.end(); }
-    check("scope restores active3D with depth flag false", target.selectedPipeline == internal::ImmediateSelection{internal::PipelineRole::Geometry3D, BlendMode::Alpha, true} && !target.depthTestEnabled);
+    check("scope restores camera depth variant and flag", target.selectedPipeline == internal::fillSelection(BlendMode::Alpha, true) && target.depthTestEnabled);
     setColor(0, 1, 0); drawTriangle(Vec3(-20, -20, -10), Vec3(20, -20, -10), Vec3(0, 20, -10));
     camera.end();
     check("EasyCam restores entry 2D pipeline and immutable context", target.selectedPipeline == selected && target.camera.currentCameraContext == context);
