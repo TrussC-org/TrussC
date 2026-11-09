@@ -168,8 +168,9 @@ public:
     void setIndependentFps(float updateFps, float drawFps);
     float getFps() const { return ctx_.loop.drawTargetFps; }
 
-    // Keep this window's update/draw pacing while minimized, covered or hidden.
-    // The last global or per-window call wins. Screen output is up to the OS.
+    // Keep drawing this window while minimized, covered or hidden (hidden frames
+    // come at about the display's base rate). The last global or per-window call
+    // wins. Screen output is up to the OS.
     void setDrawWhileHidden(bool allow);
 
 private:
