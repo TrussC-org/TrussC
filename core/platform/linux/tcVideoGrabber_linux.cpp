@@ -20,6 +20,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <limits>
 
 // For MJPEG decoding
 #define STB_IMAGE_IMPLEMENTATION_ALREADY_DONE
@@ -47,6 +48,7 @@ struct VideoGrabberPlatformData {
     unsigned char* backBuffer = nullptr;
     int bufferWidth = 0;
     int bufferHeight = 0;
+    size_t rgbaBytes = 0;
 
     // Resize notification
     std::atomic<bool> needsResize{false};
@@ -75,6 +77,16 @@ struct VideoGrabberPlatformData {
 // Helper functions
 // =============================================================================
 
+static bool checkedRgbaBytes(int64_t width, int64_t height, size_t& bytes) {
+    if (width <= 0 || height <= 0) return false;
+    if (uint64_t(width) > std::numeric_limits<size_t>::max() / 4 / uint64_t(height))
+        return false;
+    // Bound (gpu): 16384 per axis matches the image decoder's fallback texture limit; larger negotiated frames fail setup.
+    if (width > 16384 || height > 16384) return false;
+    bytes = size_t(width) * size_t(height) * 4;
+    return true;
+}
+
 static int xioctl(int fd, unsigned long request, void* arg) {
     int r;
     do {
@@ -84,8 +96,8 @@ static int xioctl(int fd, unsigned long request, void* arg) {
 }
 
 // Convert YUYV (YUV422) to RGBA
-static void convertYUYVtoRGBA(const unsigned char* src, unsigned char* dst, int width, int height) {
-    for (int i = 0; i < width * height; i += 2) {
+static void convertYUYVtoRGBA(const unsigned char* src, unsigned char* dst, size_t pixelCount) {
+    for (size_t i = 0; i < pixelCount; i += 2) {
         int y0 = src[0];
         int u  = src[1];
         int y1 = src[2];
@@ -122,7 +134,7 @@ static void convertYUYVtoRGBA(const unsigned char* src, unsigned char* dst, int 
 
 // Decode MJPEG to RGBA using stb_image
 static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
-                               unsigned char* dst, int width, int height) {
+                               unsigned char* dst, int width, int height, size_t rgbaBytes) {
     int w, h, channels;
     unsigned char* decoded = stbi_load_from_memory(src, srcSize, &w, &h, &channels, 4);
 
@@ -131,7 +143,7 @@ static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
     }
 
     if (w == width && h == height) {
-        memcpy(dst, decoded, width * height * 4);
+        memcpy(dst, decoded, rgbaBytes);
     }
 
     stbi_image_free(decoded);
@@ -195,30 +207,36 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
 
             bool converted = false;
             if (data->pixelFormat == V4L2_PIX_FMT_YUYV) {
-                convertYUYVtoRGBA(src, data->backBuffer, data->bufferWidth, data->bufferHeight);
+                // A YUYV frame holds 2 bytes per pixel; skip a short buffer.
+                if (buf.bytesused < data->rgbaBytes / 2) {
+                    xioctl(data->fd, VIDIOC_QBUF, &buf);
+                    continue;
+                }
+                convertYUYVtoRGBA(src, data->backBuffer, data->rgbaBytes / 4);
                 converted = true;
             } else if (data->pixelFormat == V4L2_PIX_FMT_MJPEG) {
                 converted = decodeMJPEGtoRGBA(src, buf.bytesused, data->backBuffer,
-                                              data->bufferWidth, data->bufferHeight);
+                                              data->bufferWidth, data->bufferHeight, data->rgbaBytes);
             }
 
+            // A frame that didn't convert (e.g. an MJPEG of another size) is not published.
             if (converted) {
                 state->notifyFrame(data->backBuffer, data->bufferWidth,
                                    data->bufferHeight, arrivalUs);
-            }
 
-            // Publish under the State lock, including pointer/size checks.
-            {
-                std::lock_guard<std::mutex> lock(state->mtx);
-                if (state->pixels && state->width == data->bufferWidth &&
-                    state->height == data->bufferHeight) {
-                    std::memcpy(state->pixels.get(), data->backBuffer,
-                                (size_t)data->bufferWidth * data->bufferHeight * 4);
-                    state->dirty.store(true);
+                // Publish under the State lock, including pointer/size checks.
+                {
+                    std::lock_guard<std::mutex> lock(state->mtx);
+                    if (state->pixels && state->width == data->bufferWidth &&
+                        state->height == data->bufferHeight) {
+                        std::memcpy(state->pixels.get(), data->backBuffer,
+                                    data->rgbaBytes);
+                        state->dirty.store(true);
+                    }
                 }
+                state->frameQueue.push(data->backBuffer, data->bufferWidth,
+                                       data->bufferHeight, arrivalUs);
             }
-            state->frameQueue.push(data->backBuffer, data->bufferWidth,
-                                   data->bufferHeight, arrivalUs);
         }
 
         // Re-queue buffer
@@ -282,6 +300,13 @@ bool VideoGrabber::setupPlatform() {
         }
     }
 
+    if (!checkedRgbaBytes(fmt.fmt.pix.width, fmt.fmt.pix.height, data->rgbaBytes) ||
+        (fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV && fmt.fmt.pix.width % 2 != 0)) {
+        logError("VideoGrabber") << "Invalid negotiated frame size";
+        state_->platformData.reset();
+        return false;
+    }
+
     state_->width = fmt.fmt.pix.width;
     state_->height = fmt.fmt.pix.height;
     data->bufferWidth = state_->width;
@@ -340,7 +365,7 @@ bool VideoGrabber::setupPlatform() {
     }
 
     // Allocate back buffer
-    data->backBuffer = new unsigned char[state_->width * state_->height * 4];
+    data->backBuffer = new unsigned char[data->rgbaBytes];
 
     // Queue buffers
     for (unsigned int i = 0; i < data->bufferCount; i++) {
