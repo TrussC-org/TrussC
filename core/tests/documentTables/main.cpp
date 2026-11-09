@@ -106,8 +106,8 @@ void testCubeRanges() {
         }
         rejects(std::string(keyword) + (inputRange ? " 0 1e" : " 0 0 1e"), invalid);
     }
-    rejects("LUT_1D_SIZE 2", "1D LUT not supported");
-    rejects("LUT_1D_INPUT_RANGE 0 1\nLUT_1D_SIZE 2", "1D LUT not supported");
+    rejects("LUT_1D_SIZE 2", "incomplete LUT table");
+    rejects("LUT_1D_INPUT_RANGE 0 1\nLUT_1D_SIZE 2", "incomplete LUT table");
     rejects("LUT_3D_SIZE", "invalid LUT dimensions");
     rejects("UNKNOWN_KEYWORD 0 1", "invalid LUT row");
     for (const auto& source : {table + "0 0 0\n", std::string("LUT_3D_SIZE 2\n0 0 0 extra\n"),

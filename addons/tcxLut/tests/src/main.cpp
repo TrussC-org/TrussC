@@ -17,7 +17,11 @@ void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, size_t) noexcept { std::free(p); }
 void operator delete[](void* p, size_t) noexcept { std::free(p); }
 
-int main() {
+#include "curveChecks.h"
+
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--gpu") return runCurveGpuChecks();
+    parserCurveChecks();
     int failures = 0;
     const auto check = [&](const char* label, bool ok) {
         std::printf("%-64s %s\n", label, ok ? "PASS" : "FAIL");
@@ -73,5 +77,5 @@ int main() {
     lut.allocate(std::numeric_limits<int>::max());
     check("invalid direct allocation leaves an empty LUT", !lut.isAllocated() && lut.getSize() == 0);
     std::filesystem::remove(path);
-    return failures ? 1 : 0;
+    return failures || curveFailures ? 1 : 0;
 }
