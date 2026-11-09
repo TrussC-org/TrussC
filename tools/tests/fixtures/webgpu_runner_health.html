@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebGPU runner health fixture</title>
+<canvas width="64" height="64"></canvas>
+<script>
+(async () => {
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+    const mode = new URLSearchParams(location.search).get('mode');
+    if (mode === 'loss') {
+        device.destroy();
+        await device.lost;
+    } else if (mode === 'error') {
+        const error = new Promise(resolve => device.addEventListener('uncapturederror', resolve, {once: true}));
+        device.createBuffer({size: 4, usage: 0}); // Deliberate validation error.
+        device.queue.submit([]); // Flush the validation result to the browser.
+        await error;
+    }
+    const context = document.querySelector('canvas').getContext('2d');
+    let frame = 0;
+    function draw() {
+        context.fillStyle = `rgb(${++frame}, 51, 0)`;
+        context.fillRect(0, 0, 64, 64);
+        if (frame === 60) window.rafVerdict = 'PASS RAF count 60';
+        else requestAnimationFrame(draw);
+    }
+    requestAnimationFrame(draw);
+})().catch(error => { window.rafVerdict = 'FAIL ' + error; });
+</script>

@@ -27,7 +27,9 @@ def main():
                 '--page', f'computeBuffer.html?mode={args.mode}',
                 '--ready', 'window.tcComputeBufferVerdict', '--adapter', args.adapter, '--print-adapter',
                 '--chrome', args.chrome, '--timeout', str(args.timeout)]
-    return harness.main()
+    # These tests exit the app (and destroy its device) before publishing the
+    # explicit completion verdict. Capture/RAF runs keep strict loss checks.
+    return harness.main(allow_device_destruction=True)
 
 
 if __name__ == '__main__':
