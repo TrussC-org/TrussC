@@ -288,70 +288,24 @@ bool VideoGrabber::setupPlatform() {
         [data->device lockForConfiguration:&configError];
 
         if (!configError) {
-            float smallestDist = 99999999.0f;
-            int bestW = 0, bestH = 0;
-            AVCaptureDeviceFormat* bestFormat = nil;
-            bool bestFpsOk = false;
-
-            if (verbose_) {
-                logVerbose("VideoGrabber") << "Searching for " << state_->requestedWidth << "x" << state_->requestedHeight
-                                            << " in device formats...";
-            }
-
+            std::vector<internal::GrabberFormat> modes;
+            std::vector<AVCaptureDeviceFormat*> nativeFormats;
             for (AVCaptureDeviceFormat* format in [data->device formats]) {
                 CMFormatDescriptionRef desc = format.formatDescription;
-
-                // ビデオフォーマットかチェック
-                CMMediaType mediaType = CMFormatDescriptionGetMediaType(desc);
-                if (mediaType != kCMMediaType_Video) continue;
-
+                if (CMFormatDescriptionGetMediaType(desc) != kCMMediaType_Video) continue;
                 CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(desc);
-                int tw = dimensions.width;
-                int th = dimensions.height;
-
-                // Does this format support the desired frame rate? Same
-                // resolution is often listed multiple times with different
-                // fps ranges (e.g. 720p@60 and 720p@90), so fps must be part
-                // of format selection, not just set afterwards.
-                bool fpsOk = true;
-                if (desiredFrameRate_ > 0) {
-                    fpsOk = false;
-                    for (AVFrameRateRange* range in format.videoSupportedFrameRateRanges) {
-                        if (std::floor(range.minFrameRate) <= desiredFrameRate_ &&
-                            std::ceil(range.maxFrameRate) >= desiredFrameRate_) {
-                            fpsOk = true;
-                            break;
-                        }
-                    }
+                internal::GrabberFormat mode{dimensions.width, dimensions.height, {}};
+                for (AVFrameRateRange* range in format.videoSupportedFrameRateRanges) {
+                    mode.frameRates.push_back({range.minFrameRate, range.maxFrameRate});
                 }
-
-                // 完全一致（解像度＋fps）なら即採用
-                if (tw == state_->requestedWidth && th == state_->requestedHeight && fpsOk) {
-                    bestW = tw;
-                    bestH = th;
-                    bestFormat = format;
-                    if (verbose_) {
-                        logVerbose("VideoGrabber") << "Found exact match: " << tw << "x" << th;
-                    }
-                    break;
-                }
-
-                // ユークリッド距離で最も近いフォーマットを探す。
-                // 解像度が主、fps対応はタイブレーク（解像度を勝手に落として
-                // まで fps を優先しない）
-                float dx = (float)(tw - state_->requestedWidth);
-                float dy = (float)(th - state_->requestedHeight);
-                float dist = sqrtf(dx * dx + dy * dy);
-
-                if (dist < smallestDist ||
-                    (dist == smallestDist && fpsOk && !bestFpsOk)) {
-                    smallestDist = dist;
-                    bestW = tw;
-                    bestH = th;
-                    bestFormat = format;
-                    bestFpsOk = fpsOk;
-                }
+                modes.push_back(std::move(mode));
+                nativeFormats.push_back(format);
             }
+            const int selected = internal::selectGrabberFormat(modes,
+                state_->requestedWidth, state_->requestedHeight, desiredFrameRate_);
+            AVCaptureDeviceFormat* bestFormat = selected < 0 ? nil : nativeFormats[selected];
+            const int bestW = selected < 0 ? 0 : modes[selected].width;
+            const int bestH = selected < 0 ? 0 : modes[selected].height;
 
             // 最適なフォーマットを設定
             if (bestFormat != nil && bestW > 0 && bestH > 0) {

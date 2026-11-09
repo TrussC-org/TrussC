@@ -4675,6 +4675,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,io
 void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access permission.
 void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Set the requested capture frame rate.
 void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select the camera device for setup.
+void VideoGrabber::setDeviceUniqueID(const std::string & uniqueId) [macos,windows,linux,ios,web]  // Selects a camera by its unique ID for the next setup.
 void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux,ios]  // Set the capacity of the timestamped camera frame queue.
 bool VideoGrabber::setup(int width, int height) [+1] [macos,windows,linux,ios,web]  // Open the camera at a requested size, or reopen the last one.
 void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose camera logging.

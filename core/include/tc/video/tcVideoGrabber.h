@@ -29,6 +29,7 @@
 #include "tc/utils/tcMainThread.h"
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventArgs.h"
+#include "tcGrabberSelection.h"
 
 namespace trussc {
 
@@ -251,6 +252,16 @@ public:
     // index.
     void setDeviceID(int deviceId) {
         deviceId_ = deviceId;
+        useDeviceUniqueId_ = false;
+        deviceUniqueId_.clear();
+        reopenName_.clear();
+    }
+
+    // Resolve this exact ID in a fresh listDevices() on every setup().
+    // The last of setDeviceID() / setDeviceUniqueID() wins. Missing IDs fail.
+    void setDeviceUniqueID(const std::string& uniqueId) {
+        deviceUniqueId_ = uniqueId;
+        useDeviceUniqueId_ = true;
         reopenName_.clear();
     }
 
@@ -308,7 +319,8 @@ public:
 
     // Start the camera at the requested size: the camera with the name
     // remembered from the last successful open, or, before any, the one chosen
-    // by setDeviceID() (device 0 by default). An open camera is closed first,
+    // by setDeviceID() (device 0 by default). setDeviceUniqueID() overrides
+    // this with an exact ID lookup on every setup(). An open camera is closed first,
     // without onDisconnect.
     // If permission is not granted, requests it and returns false.
     // Call update() every frame - it will automatically initialize once permission is granted.
@@ -338,6 +350,8 @@ public:
     // Before any successful open it uses the setDeviceID() index (device 0 at
     // 640x480 by default). setDeviceID() forgets the remembered name. Two
     // cameras with the same name can't be told apart: the first one opens.
+    // With setDeviceUniqueID(), setup() always resolves that exact ID instead
+    // of the remembered name, and fails if it is absent.
     // This is the reconnect call:
     //   if (!grabber.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); grabber.setup(); }
     // Returns false and logs an error when the camera cannot be opened, also
@@ -522,6 +536,8 @@ private:
     friend struct internal::VideoGrabberTestAccess;
 
     int deviceId_ = 0;
+    std::string deviceUniqueId_;
+    bool useDeviceUniqueId_ = false;
     int desiredFrameRate_ = -1;  // -1 = unspecified (camera default)
     int lastWidth_ = 640;        // size of the last setup(), for setup()
     int lastHeight_ = 480;
@@ -552,6 +568,8 @@ private:
 
     void moveFrom(VideoGrabber&& other) {
         deviceId_ = other.deviceId_;
+        deviceUniqueId_ = std::move(other.deviceUniqueId_);
+        useDeviceUniqueId_ = other.useDeviceUniqueId_;
         desiredFrameRate_ = other.desiredFrameRate_;
         lastWidth_ = other.lastWidth_;
         lastHeight_ = other.lastHeight_;
@@ -587,9 +605,20 @@ private:
 
     // Complete setup after permission is granted
     bool completeSetup() {
-        // Resolve the camera in a fresh device list: the remembered name wins
-        // over the index, which can point at another camera after a replug.
-        auto pick = internal::pickGrabberDevice(listDevices(), reopenName_, deviceId_);
+        // Resolve an explicit unique ID first. Otherwise preserve the existing
+        // remembered-name selection when indices change after a replug.
+        auto devices = listDevices();
+        internal::GrabberDevicePick pick;
+        if (useDeviceUniqueId_) {
+            pick.index = internal::resolveGrabberUniqueID(devices, deviceUniqueId_);
+            if (pick.index < 0) {
+                logError("VideoGrabber") << "No camera with unique ID \"" << deviceUniqueId_ << "\" is present";
+                return false;
+            }
+            pick = internal::pickGrabberDevice(devices, "", pick.index);
+        } else {
+            pick = internal::pickGrabberDevice(devices, reopenName_, deviceId_);
+        }
         if (!pick.ok) {
             logError("VideoGrabber") << "No camera named \"" << reopenName_ << "\" is present";
             return false;

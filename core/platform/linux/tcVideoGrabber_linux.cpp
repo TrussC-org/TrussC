@@ -8,6 +8,8 @@
 #ifdef __linux__
 
 #include "TrussC.h"
+#include <filesystem>
+#include <algorithm>
 
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
@@ -412,6 +414,14 @@ void VideoGrabber::updateDelegatePixels() {
 std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
     std::vector<VideoDeviceInfo> devices;
 
+    // by-path identifies a camera by its USB port, even for identical models.
+    std::vector<std::filesystem::path> byPathLinks;
+    std::error_code pathError;
+    for (const auto& entry : std::filesystem::directory_iterator("/dev/v4l/by-path", pathError)) {
+        byPathLinks.push_back(entry.path());
+    }
+    std::sort(byPathLinks.begin(), byPathLinks.end());
+
     // Scan /dev/video*
     for (int i = 0; i < 10; i++) {
         std::string path = "/dev/video" + std::to_string(i);
@@ -425,6 +435,13 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
                 info.deviceId = i;
                 info.deviceName = std::string((char*)cap.card);
                 info.uniqueId = path;
+                for (const auto& link : byPathLinks) {
+                    std::error_code linkError;
+                    if (std::filesystem::equivalent(link, path, linkError)) {
+                        info.uniqueId = link.string();
+                        break;
+                    }
+                }
                 devices.push_back(info);
             }
         }
