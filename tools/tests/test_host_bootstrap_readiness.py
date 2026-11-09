@@ -27,7 +27,8 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
     # Execute production descriptor transfer through swap interval, and the entire
     # publication/show suffix. OS allocation/drawable creation is the stubbed prefix.
     transfer_start = constructor.index('    w->desc = d->window;')
-    transfer_end = constructor.index('    w->swap_interval = d->swap_interval;', transfer_start) + len('    w->swap_interval = d->swap_interval;')
+    interval_assignment = constructor.index('    w->swap_interval = ', transfer_start)
+    transfer_end = constructor.index(';', interval_assignment) + 1
     transfer = constructor[transfer_start:transfer_end]
     suffix = constructor[constructor.index('    _sapp_tc_creation_transaction creation('):]
     if platform == 'mac':
@@ -48,12 +49,12 @@ for index, platform in enumerate(('mac', 'win32', 'x11')):
     parts.append(f'namespace {platform} {{\n' + r'''
 using Client=void(*)(const sapp_event*,sapp_window,void*);
 using Tick=void(*)(sapp_window,void*);
-struct sapp_window_desc { Tick close_cb=nullptr; bool(*close_request_cb)(sapp_window,void*)=nullptr; Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; sapp_window parent{}; bool hidden=false; };
+struct sapp_window_desc { Tick close_cb=nullptr; bool(*close_request_cb)(sapp_window,void*)=nullptr; Client event_cb=nullptr; Tick tick_cb=nullptr; void* user_data=nullptr; bool(*bind_cb)(uint32_t,void*)=nullptr; const void* mtl_device=nullptr; sapp_window parent{}; bool hidden=false; int swap_interval=0; };
 struct sapp_desc { Tick _tc_close_cb=nullptr; bool(*_tc_close_request_cb)(sapp_window,void*)=nullptr; int logger=0; Client _tc_event_cb=nullptr; Tick _tc_tick_cb=nullptr; void(*event_cb)(const sapp_event*)=nullptr; void(*event_userdata_cb)(const sapp_event*,void*)=nullptr; int swap_interval=1; bool fullscreen=false; int _tc_draw_while_hidden=1; const char* window_title=nullptr; };
 struct _sapp_tc_native_desc { sapp_window_desc window; bool(*events_enabled)()=nullptr; int swap_interval=0; bool fullscreen=false,draw_while_hidden=false,center_on_create=false; int title_limit=0,color_format=0,depth_format=0; };
 struct _sapp_tc_mac_window_attrs { bool restorable=false,nearest_magnification=false,take_key_focus_on_create=false; };
-struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool constructing=false, ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true,link_suspended=false,fullscreen=false,fullscreen_requested=false; int swap_interval=0; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; void* window=nullptr; const char* title="test"; };
-struct { size_t window_slots=1; int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
+struct _sapp_tc_window_t { unsigned win_id=23; float dpi_scale=2; bool input_delivered=false,wake_on_input=true; sapp_window_desc desc; bool constructing=false, ready=false,in_tick=false,is_main=false,native_closed=false; int callback_depth=0; bool draw_while_hidden=false,trust_hidden_signals=true,link_suspended=false,fullscreen=false,fullscreen_requested=false; int swap_interval=0,requested_swap_interval=1; bool(*events_enabled)()=nullptr; uint64_t frame_count=7; int win_width=80,win_height=40,fb_width=160,fb_height=80; void* hwnd=nullptr; void* window=nullptr; const char* title="test"; };
+struct { sapp_window pacer{}; size_t window_slots=1; int callbacks_active=0,constructing=0; bool deferred_blocked=false; _sapp_tc_window_t* windows[1]{}; uint32_t gl_framebuffer=0; struct { sapp_desc desc; bool init_called=false,valid=false; _sapp_tc_window_t* main=nullptr; void* device=nullptr; int logger=0; } app; const char* create_error=nullptr; } _sapp_tc;
 _sapp_tc_window_t record;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { auto* w=_sapp_tc.windows[0]; return w && w->win_id==h.id ? w : nullptr; }
 constexpr int SAPP_PIXELFORMAT_RGB10A2=1,SAPP_PIXELFORMAT_DEPTH_STENCIL=2,SAPP_PIXELFORMAT_RGBA8=3,SW_SHOW=1,TRUE=1,SAPP_LOGITEM_OK=0,GL_FRAMEBUFFER_BINDING=1;

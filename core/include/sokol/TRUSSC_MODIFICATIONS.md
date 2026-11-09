@@ -1051,3 +1051,20 @@ file drops; no shell invocation or file-content reading occurs in the bridge.
 cleanup callback before releasing iOS native state and shared backend state,
 matching `applicationWillTerminate`. Then call `exit` with the requested process
 code, so programmatic quitting completes instead of leaving the process alive.
+
+## Movable X11 pacing window (#997, Q31 option D)
+
+[TrussC #997] The earliest-created ready, drawable, effectively visible X11
+window owns native vsync at its requested interval N. The run loop processes
+that pacer before followers, independently of the launch window. On a role
+change, demote the surviving old drawable to interval 0 and promote the new
+pacer once; reset its presentation history and deadline. Creation records the
+initial role without reapplying its interval. GLX EXT remains per drawable;
+MESA makes the intended drawable current and keeps the multiwindow interval-0
+timer fallback. Surface renewal reapplies the existing role's interval.
+
+Hidden windows never swap, including draw-while-hidden ON. ON retains draw/GPU
+submission and OFF retains updates; both use the existing periodic base-refresh
+timer. `is_main` remains only for client init in the X11 tick. Single visible
+window N=1/N=2 native-call, sample and deadline traces are checked against frozen
+pre-change production seams. Win32/macOS and covered-window detection are unchanged.

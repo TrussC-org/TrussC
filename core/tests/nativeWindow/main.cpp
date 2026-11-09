@@ -256,10 +256,8 @@ void finishChecks() {
                 sapp_tc_window_draw_while_hidden({target->win_id}, allow);
                 callbacks = presents = 0;
                 _sapp_tc_x11_tick(target);
-                bool shouldPresent = !trust || allow;
-#if defined(SOKOL_GLCORE)
-                if (trust && iconified) shouldPresent = false;
-#endif
+                // Q31: hidden ON keeps the callback/submission but skips native swaps.
+                const bool shouldPresent = !trust;
                 check("hidden drawing and trust are independent for either window", callbacks == 1 &&
                     presents == int(shouldPresent) && (!presents || presentedDrawable == (uintptr_t)target->drawable));
                 check("all visibility readers use effective state", sapp_window_occluded({target->win_id}) == trust &&
@@ -423,8 +421,8 @@ int main(int argc, char** argv) {
         ++callbacks; sapp_quit();
     };
     sapp_run(&desc);
-    if (coveredFirst) check("covered first frame presents according to launch data",
-        callbacks == 1 && presents == int(launchHidden >= 0));
+    if (coveredFirst) check("covered first frame initializes and ticks without a hidden swap",
+        callbacks == 1 && presents == 0);
     check("initial client callback ran", didInitialize);
     check("process cleanup releases every window", liveWindows == 0);
     return failures ? 1 : 0;

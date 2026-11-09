@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Deterministic production X11 admission/deadline test (no display needed).
 
-Run through tcbuild.sh. TC_X11_PACING_HEADER selects a private pre-fix header.
+Run through tcbuild.sh. TC_X11_PACING_HEADER selects a private header overlay.
 Native swaps model steady or queued vsync; the loop, tick and periodic
 decision are extracted verbatim and compiled for both GLX and EGL.
 """
@@ -46,7 +46,7 @@ struct _sapp_tc_window_t {
     struct { void (*tick_cb)(struct sapp_window, void*)=nullptr; void* user_data=nullptr; bool hidden=false; } desc;
 };
 struct App { struct { void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr; void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; } desc; bool init_called=true, quit_ordered=false, quit_requested=false; _sapp_tc_window_t* main=nullptr; };
-struct { App app; int display=0; size_t window_slots=2; double refresh_period=1.0/62.0;
+struct { App app; int display=0; size_t window_slots=2; sapp_window pacer{}; bool SwapIntervalEXT=false, SwapIntervalMESA=false; double refresh_period=1.0/62.0;
     _sapp_tc_window_t* windows[2]; } _sapp_tc;
 struct XEvent {};
 struct pollfd { int fd, events, revents; };
@@ -78,6 +78,7 @@ _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) {
 }
 void sapp_destroy_window(sapp_window h) { for (auto*& w : _sapp_tc.windows) if (w && w->win_id==h.id) w=nullptr; }
 void _sapp_tc_x11_init_client() {}
+void _sapp_tc_x11_set_swapinterval(_sapp_tc_window_t*,int) {}
 double _sapp_tc_now() { return clockValue; }
 int XPending(int) { return eventQueued ? 1 : 0; }
 void XFlush(int) {}
@@ -127,7 +128,7 @@ bool _sapp_tc_x11_make_current(_sapp_tc_window_t* w) {
     return true;
 }
 bool sapp_tc_gl_ensure_context() { return true; }
-bool _sapp_tc_native_hidden(_sapp_tc_window_t* w) { return (hideMain || iconMain) && w==_sapp_tc.app.main; }
+bool _sapp_tc_native_hidden(_sapp_tc_window_t* w) { return w->desc.hidden || ((hideMain || iconMain) && w==_sapp_tc.app.main); }
 bool _sapp_tc_native_iconified(_sapp_tc_window_t* w) { return iconMain && w==_sapp_tc.app.main; }
 void _sapp_tc_x11_swap(_sapp_tc_window_t* w) {
     if (w==_sapp_tc.app.main) {
@@ -135,11 +136,12 @@ void _sapp_tc_x11_swap(_sapp_tc_window_t* w) {
         if(w->frame_count==limit) _sapp_tc.app.quit_ordered=true;
     } else {
         ++secondaryPresents;
-        clockValue+=tail;
+        clockValue+=tail + period*w->swap_interval;
         if (hideAfterSecondary) hideMain=true;
     }
 }
 PACE
+ROLESELECT
 TICK
 LOOP
 int main() {
@@ -151,7 +153,7 @@ int main() {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
         _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2;
-        main.swap_interval=4; // Secondaries keep their native interval-zero timer.
+        main.swap_interval=main.requested_swap_interval=4; _sapp_tc.pacer={main.win_id}; // Secondaries keep their native interval-zero timer.
         clockValue=10; eventTarget=target; inputEvent=input;
         injectWait=eventQueued=eventProcessed=batchCleared=false;
         main.desc.tick_cb=secondary.desc.tick_cb=[](sapp_window h,void*) noexcept {
@@ -178,7 +180,7 @@ int main() {
     for (bool timer : {false,true}) for (int interval : {1,2,3}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=timer?nullptr:&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=timer?nullptr:&main; main.is_main=true; main.swap_interval=1;
+        _sapp_tc.app.main=timer?nullptr:&main; main.is_main=true; main.swap_interval=1; _sapp_tc.pacer={main.win_id};
         secondary.win_id=2; secondary.requested_swap_interval=interval;
         clockValue=10; tail=0; queued=false; secondaryPresents=0; pacingOpportunities=0;
         _sapp_tc.app.desc._tc_after_turn=[]() {
@@ -187,22 +189,24 @@ int main() {
         };
         secondary.desc.tick_cb=[](sapp_window,void*) noexcept {
             const auto* s=_sapp_tc.windows[1];
-            if (pacingOpportunities+1!=(s->frame_count+1)*s->requested_swap_interval)
-                secondaryPresents=-1000;
+            const bool sole_pacer = !_sapp_tc.app.main;
+            const int expected = (s->frame_count+1)*(sole_pacer ? 1 : s->requested_swap_interval);
+            if (pacingOpportunities+1!=expected) secondaryPresents=-1000;
         };
         _sapp_tc_x11_run_loop();
-        const bool ok=secondary.frame_count==12/interval && secondaryPresents==12/interval
+        const int expected = timer ? 12 : 12/interval; // Sole visible window uses native N.
+        const bool ok=secondary.frame_count==expected && secondaryPresents==expected
             && (timer || main.frame_count==12);
         std::printf("requested interval=%d timer=%d main=%d ticks=%d presents=%d: %s\n",
             interval,timer,main.frame_count,secondary.frame_count,secondaryPresents,ok?"PASS":"FAIL");
         failures+=!ok;
     }
-    // A partial count survives losing the main source. First credit follows
-    // a main present, second credit is a timer deadline with the main absent.
+    // Losing the old pacer promotes the remaining visible follower at native N.
+    // The partially spent follower counter must not also divide that native N.
     {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.is_main=true; main.swap_interval=1;
+        _sapp_tc.app.main=&main; main.is_main=true; main.swap_interval=1; _sapp_tc.pacer={main.win_id};
         secondary.win_id=2; secondary.requested_swap_interval=2;
         clockValue=10; secondaryPresents=0;
         _sapp_tc.app.desc._tc_after_turn=[]() {
@@ -210,14 +214,15 @@ int main() {
             else _sapp_tc.app.quit_ordered=true;
         };
         _sapp_tc_x11_run_loop();
-        const bool ok=main.frame_count==1 && secondary.frame_count==1 && secondaryPresents==1;
-        std::printf("interval count survives main-to-timer handoff: %s\n",ok?"PASS":"FAIL");
+        const bool ok=main.frame_count==1 && secondary.frame_count==1 && secondaryPresents==1
+            && secondary.swap_interval==2 && _sapp_tc.pacer.id==2;
+        std::printf("interval count hands off to native N once: %s\n",ok?"PASS":"FAIL");
         failures+=!ok;
     }
     for (bool burst : {false, true}) for (double work : {0.0, .0001, .001}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; clockValue=10; tail=work; queued=burst;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; _sapp_tc.pacer={main.win_id}; clockValue=10; tail=work; queued=burst;
         _sapp_tc_x11_run_loop();
         // Steady swaps should admit almost every tick. Queued EGL swaps may
         // teach the existing estimator a doubled period, so allow half cadence.
@@ -236,7 +241,7 @@ int main() {
     for (bool heavy : {false,true}) for (bool lower : {false,true}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; _sapp_tc.pacer={main.win_id};
         clockValue=nextMain=10; mainPeriod=period-.0001;
         main.last_present=10; secondary.earliest_next=10+mainPeriod+.0001;
         nonblocking=true; queued=false; tail=heavy?.00005:.0002; callbackWork=heavy?period:0;
@@ -258,7 +263,7 @@ int main() {
     {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; main.last_present=10;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; _sapp_tc.pacer={main.win_id}; main.last_present=10;
         clockValue=nextMain=10; mainPeriod=.001; tail=0;
         previousSecondary=0; minSecondaryGap=100;
         _sapp_tc_x11_run_loop();
@@ -281,7 +286,7 @@ int main() {
     for (bool seeded : {false,true}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; main.last_present=10;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; _sapp_tc.pacer={main.win_id}; main.last_present=10;
         _sapp_tc.refresh_period=seeded ? 1.0/30 : period;
         clockValue=nextMain=10; mainPeriod=period; tail=0; nonblocking=true; queued=false;
         seeded_run=seeded; previousSecondary=0; minSecondaryGap=100; throttledRefresh=0; switchTime=0; switchSecondary=0;
@@ -300,12 +305,13 @@ int main() {
             seeded,throttledRefresh*1000,_sapp_tc.refresh_period*1000,rate,1/period,ok?"PASS":"FAIL");
         failures+=!ok;
     }
-    // On the main-to-timer handoff, the obsolete phase could otherwise
-    // leave a quarter-refresh deadline and replay a tick immediately.
+    // The former follower is promoted and immediately due after main hides.
+    // One transition callback can share the previous tick's timestamp; its
+    // native interval now paces the next present instead of the old timer.
     {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; main.last_present=10;
+        _sapp_tc.app.main=&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; _sapp_tc.pacer={main.win_id}; main.last_present=10;
         main.draw_while_hidden=false;
         clockValue=nextMain=10; mainPeriod=period; tail=0;
         secondary.earliest_next=10+.25*period+.00005;
@@ -314,8 +320,8 @@ int main() {
             if (_sapp_tc.windows[1]->frame_count==1) _sapp_tc.app.quit_ordered=true;
         };
         _sapp_tc_x11_run_loop();
-        bool ok=secondary.frame_count==2 && minSecondaryGap>=.5*period;
-        std::printf("main-to-timer handoff secondary=%d gap_ms=%.3f: %s\n",secondary.frame_count,minSecondaryGap*1000,ok?"PASS":"FAIL");
+        bool ok=secondary.frame_count==2 && _sapp_tc.pacer.id==secondary.win_id && secondary.swap_interval==1;
+        std::printf("main-to-visible-pacer handoff secondary=%d transition_gap_ms=%.3f: %s\n",secondary.frame_count,minSecondaryGap*1000,ok?"PASS":"FAIL");
         failures+=!ok;
     }
     hideAfterSecondary=hideMain=false;
@@ -324,7 +330,7 @@ int main() {
     for (bool absent : {false,true}) for (bool iconify : {false,true}) for (bool lower : {false,true}) {
         _sapp_tc_window_t main{}, secondary{};
         _sapp_tc={}; _sapp_tc.windows[0]=absent?nullptr:&main; _sapp_tc.windows[1]=&secondary;
-        _sapp_tc.app.main=absent?nullptr:&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; main.draw_while_hidden=false;
+        _sapp_tc.app.main=absent?nullptr:&main; main.is_main=true; secondary.win_id=2; main.swap_interval=1; _sapp_tc.pacer={main.win_id}; main.draw_while_hidden=false;
         clockValue=10; hideMain=!iconify; iconMain=iconify; tail=0;
         previousSecondary=0; minSecondaryGap=100;
         secondaryDraws=0; previousDrawTick=10; drawAccumulator=0;
@@ -370,6 +376,7 @@ for placeholder, marker in (
     ('PERIODIC', 'static void _sapp_tc_x11_pace_periodic('),
     ('DUE', 'static bool _sapp_tc_x11_window_due('),
     ('PACE', 'static void _sapp_tc_x11_pace('),
+    ('ROLESELECT', 'static _sapp_tc_window_t* _sapp_tc_x11_update_pacer('),
     ('TICK', 'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'),
     ('LOOP', 'static void _sapp_tc_x11_run_loop('),
 ):

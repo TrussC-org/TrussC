@@ -1546,6 +1546,7 @@ bool changed=false, closeOnResize=false, closeOnTick=false, hideOnTick=false, re
 bool eventDriven=false;
 int redrawPending=0;
 void _sapp_tc_x11_init_client() {} // admission covered by host-entry-test
+void _sapp_tc_x11_update_pacer() {} // role transitions covered by test_x11_movable_pacer.py
 static void _sapp_tc_x11_tick(Native*);
 std::vector<int> events;
 double now=10;
@@ -1800,8 +1801,8 @@ void run() {
         Native w; live=&w; w.is_main=role; w.trust_hidden_signals=trust; w.draw_while_hidden=allow;
         w.desc={callback,&w}; consulted=presents=0; hideOnTick=true;
         _sapp_tc_x11_tick(&w);
-        check("X11 late explicit hide gates native present with drawWhileHidden override",
-              consulted==1 && w.desc.hidden && presents==int(allow));
+        check("X11 late explicit hide skips native present even with drawWhileHidden",
+              consulted==1 && w.desc.hidden && presents==0);
         hideOnTick=false;
     }
 
@@ -1812,10 +1813,7 @@ void run() {
         consulted=updates=acquired=presents=polls=0;
         bool hidden=trust && (iconic || obscured), admitted=allow || !hidden;
         _sapp_tc_x11_tick(&w);
-        bool present=admitted;
-#if defined(SOKOL_GLCORE)
-        present &= !(trust && iconic); // GLX keeps its minimized swap veto.
-#endif
+        bool present=!hidden; // Hidden ON draws/submits but never swaps on X11.
         check("X11 hidden and visible ticks poll metadata once and release guard", polls==1 && !w.in_tick);
         check("X11 common hidden admission / policy for either role", consulted==1 && updates==1 && acquired==int(admitted) && presents==int(present) && w.frame_count==1);
     }
@@ -1936,7 +1934,7 @@ if '--mutations' in sys.argv[3:]:
             'w->skip_present = false; // Consume the one-shot at the completed hidden tick boundary.', ''),
         'win-no-late-hide-gate': change(win, '&& (w->draw_while_hidden || !w->desc.hidden)', ''),
         'x11-no-late-hide-gate': change('static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {',
-            '&& (w->draw_while_hidden || !w->desc.hidden)', ''),
+            'if (!w->skip_present && !_sapp_tc_native_hidden(w)) {', 'if (!w->skip_present) {'),
         'mac-retain-os-only-suspension': change('static void _sapp_tc_mac_update_suspension(',
             'w->suspended_sent = false;', ''),
         'win-modal-foreign-pass': change('static void _sapp_tc_win32_modal_tick(_sapp_tc_window_t* w) {',

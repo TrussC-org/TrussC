@@ -12,6 +12,10 @@
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
 
 
+#if defined(SOKOL_GLES3)
+extern "C" EGLBoolean __wrap_eglSwapInterval(EGLDisplay, EGLint) { return EGL_TRUE; }
+#endif
+
 static long observedState = NormalState;
 static bool visibilityProbe;
 static int visibilityFailures, visibilityChecks, visibilitySteps;
@@ -276,7 +280,7 @@ static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display*
     main.desc.event_cb = _sapp_tc_main_event_tramp;
     main.desc.tick_cb = _sapp_tc_main_tick_tramp;
     main.events_enabled = _sapp_tc_app_events_enabled;
-    main.swap_interval = 4; main.wake_on_input = true; main.draw_while_hidden = true;
+    main.swap_interval = main.requested_swap_interval = 4; _sapp_tc.pacer = {1}; main.wake_on_input = true; main.draw_while_hidden = true;
     _sapp_tc.display = display; _sapp_tc.windows = windows; _sapp_tc.window_slots = 1;
     _sapp_tc.ctx = (EGLContext)1; _sapp_tc.egl_display = (EGLDisplay)1;
     _sapp_tc.app.main = &main; _sapp_tc.app.init_called = true;
@@ -326,7 +330,7 @@ int main() {
         check("main key/button at 10ms re-admits", inputAt > 0 && nextFrame - inputAt < .002);
     }
     _sapp_tc_window_t secondary{}; secondary.ready = secondary.trust_hidden_signals = true; secondary.xwin = 2;
-    secondary.drawable = (EGLSurface)2; secondary.earliest_next = 20;
+    secondary.drawable = (EGLSurface)2; secondary.earliest_next = 20; secondary.requested_swap_interval = 1;
     secondary.fb_width = secondary.fb_height = 64; // initialized native metadata precedes readiness
     _sapp_tc_window_t* pair[] = { &main, &secondary };
     reset(main, pair, display); _sapp_tc.window_slots = 2;
@@ -340,7 +344,7 @@ int main() {
                 target->draw_while_hidden = allow; frames = swaps = 0;
                 _sapp_tc_x11_tick(target);
                 check("native hidden admission and trust follow data for either role",
-                    frames == 1 && swaps == int(!trust || allow));
+                    frames == 1 && swaps == int(!trust));
                 check("untrusted hidden flags report visible", sapp_window_occluded({target->win_id}) == trust &&
                     (target != &main || sapp_window_occluded({0}) == trust));
             }

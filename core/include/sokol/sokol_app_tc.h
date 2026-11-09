@@ -9205,17 +9205,15 @@ sapp_swapchain sapp_acquire_swapchain(void) {
     XLookupString + keysym table CHAR events, CLIPBOARD selection, XDND v5,
     EWMH fullscreen, Xcursor cursors, TrussC skip_present patch).
 
-    Frame pacing: ONE GL context is shared by all windows, each window has its
-    own GLXWindow drawable or EGLSurface. The MAIN window keeps upstream's model: the run
-    loop blocks inside its vsync'd glXSwapBuffers (swap interval 1 via
-    GLX_EXT_swap_control on its drawable) -- that blocking swap IS the pacing.
-    SECONDARY windows swap with interval 0 (never block; vsyncing two or more
-    drawables would serialize the loop to refresh/N) and are timer-paced to a
-    refresh-period estimate measured from the main window's presents. If the
-    main swap stops blocking (iconified, skip_present, no usable swap-control
-    extension), GLX self-heals to timer pacing. EGL keeps its main blocking
-    swap and its work-accounted 0.0166 * interval skipped-present deadline;
-    the shared X11 fd wait uses the earliest due window and wakes on input.
+    Frame pacing: ONE GL context is shared by all windows. The earliest-created
+    effectively visible, ready window holds the blocking native vsync interval
+    requested by that window. Followers swap at interval 0 and follow its
+    refresh-rate presents or periodic timers. When the pacer hides or closes,
+    its role moves to the next visible window. Hidden windows never swap and
+    use base-refresh timers, whether or not the client draws while hidden.
+    GLX self-heals to timers if swaps stop blocking; EGL retains its existing
+    visible-pacer skipped-present deadline. The shared X11 fd wait wakes for
+    the earliest deadline or input.
 
     Unlike upstream, GLX entry points are called directly (TrussC's Linux
     build always links libGL for sokol_gfx's GLCORE backend, so the dlopen
@@ -9308,7 +9306,7 @@ typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     bool decoration_pending;    /* decoration changed while fullscreen; write it again on exit */
     Window xwin;
     bool surface_resize_pending; // normal size observations pending the next tick
-    // [TrussC #1263] Secondary pacing is divided without blocking the shared GL context.
+    // [TrussC #1263] Follower pacing is divided without blocking the shared GL context.
     int requested_swap_interval;
     int pacing_ticks;
     Colormap colormap;
@@ -9385,7 +9383,8 @@ static struct {
 #endif
     _sapp_tc_window_t idle;
     uint32_t gl_framebuffer;    /* default FBO captured after make-current */
-    double refresh_period;      /* estimate from the main window's vsync'd presents */
+    double refresh_period;      /* estimate from the pacer's vsync'd presents */
+    sapp_window pacer;          /* [TrussC #997] creation identity, independent of app.main */
 
     /* ---- app / main-window state (this header owns sapp_run on Linux) ---- */
     struct {
@@ -11757,11 +11756,16 @@ static bool _sapp_tc_glx_create_context(void) {
 static void _sapp_tc_glx_set_swapinterval(_sapp_tc_window_t* w, int interval) {
     /* GLX_EXT_swap_control is per-drawable: each window gets its own interval.
        The MESA fallback is context-wide -- with more than one window it is set
-       to 0 (never block) and the main tick self-heals to timer pacing. */
+       to 0 (never block) and the pacer tick self-heals to timer pacing. */
     if (_sapp_tc.SwapIntervalEXT) {
         _sapp_tc.SwapIntervalEXT(_sapp_tc.display, w->drawable, interval);
     } else if (_sapp_tc.SwapIntervalMESA) {
-        _sapp_tc.SwapIntervalMESA(interval);
+        // [TrussC #997] MESA has no per-drawable interval. Keep the existing
+        // multiwindow timer fallback instead of vsyncing every follower.
+        size_t count = 0;
+        for (size_t i = 0; i < _sapp_tc.window_slots; ++i)
+            if (_sapp_tc.windows[i] && _sapp_tc.windows[i] != w) ++count;
+        _sapp_tc.SwapIntervalMESA(count ? 0 : interval);
     }
 }
 
@@ -12436,6 +12440,41 @@ static bool _sapp_tc_x11_window_due(_sapp_tc_window_t* w, double now) {
     return w->earliest_next <= now;
 }
 
+// [TrussC #997] Slots are reused; win_id retains creation order. This scan
+// changes native state only on a role change, preserving steady single-window
+// activation, interval N and refresh sampling exactly.
+static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {
+    _sapp_tc_window_t* next = nullptr;
+    for (size_t i = 0; i < _sapp_tc.window_slots; ++i) {
+        _sapp_tc_window_t* w = _sapp_tc.windows[i];
+        if (!w || !w->ready || w->constructing || !w->drawable || _sapp_tc_native_hidden(w)) continue;
+        if (!next || w->win_id < next->win_id) next = w;
+    }
+    if (_sapp_tc.pacer.id == (next ? next->win_id : 0)) return next;
+    _sapp_tc_x11_surface_scope restore_surface;
+    const auto apply_interval = [](_sapp_tc_window_t* w, int interval) {
+#if defined(SOKOL_GLCORE)
+        // MESA addresses the current shared context, rather than a drawable.
+        if (!_sapp_tc.SwapIntervalEXT && _sapp_tc.SwapIntervalMESA && !_sapp_tc_x11_make_current(w)) return;
+#endif
+        _sapp_tc_x11_set_swapinterval(w, interval);
+    };
+    if (auto* previous = _sapp_tc_lookup(_sapp_tc.pacer)) {
+        previous->swap_interval = 0;
+        apply_interval(previous, 0);
+        previous->earliest_next = 0.0;
+    }
+    _sapp_tc.pacer = {next ? next->win_id : 0};
+    if (next) {
+        next->swap_interval = next->requested_swap_interval;
+        apply_interval(next, next->swap_interval);
+        next->last_present = 0.0;
+        next->last_tick_presented = false;
+        next->earliest_next = 0.0;
+    }
+    return next;
+}
+
 // The legacy callbacks are just one client of the native callback contract.
 static void _sapp_tc_x11_init_client(void) {
     if (!_sapp_tc.app.init_called) {
@@ -12464,9 +12503,10 @@ static void _sapp_tc_main_tick_tramp(sapp_window, void*) {
 
 static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (w->constructing || w->in_tick || !w->drawable) return;
-    // [TrussC #1263] Count both main presentation credits and fallback timer
-    // ticks. Keep a partial count when the main is minimized or absent.
-    if (!w->is_main && ++w->pacing_ticks < w->requested_swap_interval) {
+    // [TrussC #1263] Count follower presentation credits and timer ticks.
+    // [TrussC #997] The pacer uses native interval N; hidden ticks use base refresh.
+    if (w->swap_interval == 0 && !_sapp_tc_native_hidden(w) &&
+        ++w->pacing_ticks < w->requested_swap_interval) {
         _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
         return;
     }
@@ -12511,7 +12551,8 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
         if (_sapp_tc_lookup(handle) != w) return;
         ++w->frame_count;
         w->skip_present = false; // Consume the one-shot at the completed hidden tick boundary.
-        _sapp_tc_x11_pace(w, _sapp_tc.refresh_period);
+        _sapp_tc_x11_update_pacer();
+        _sapp_tc_x11_pace_periodic(w, _sapp_tc.refresh_period);
         return;
     }
     if (!_sapp_tc_x11_make_current(w)) {
@@ -12524,12 +12565,9 @@ static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     if (_sapp_tc_lookup(handle) != w) return;
     ++w->frame_count;
     bool presented = false;
-    // Sample requested visibility after every client callback, just before swap.
-    if (!w->skip_present && (w->draw_while_hidden || !w->desc.hidden)
-#if defined(SOKOL_GLCORE)
-        && !_sapp_tc_native_iconified(w)
-#endif
-    ) {
+    // [TrussC #997] Reconcile callback-driven hides before any native swap.
+    _sapp_tc_x11_update_pacer();
+    if (!w->skip_present && !_sapp_tc_native_hidden(w)) {
         _sapp_tc_x11_swap(w);
         presented = true;
     }
@@ -12588,12 +12626,12 @@ static void _sapp_tc_x11_wait_until(double deadline) {
 #endif
 
 /*-- the run loop --------------------------------------------------------------------
-    Normal main presentation relies on vsync'd native work to pace the loop;
+    Normal pacer presentation relies on vsync'd native work to pace the loop;
     a driver can block in activation or rendering instead of the swap call.
     The XPending drain runs once per pass (upstream parity).
     When every window is timer-paced (minimized, skip_present), the loop
     sleeps in poll() on the X connection fd until the next deadline or an
-    incoming event. An interval-positive main that presents without any native
+    incoming event. An interval-positive pacer that presents without any native
     blocking remains immediately due; it must not accelerate the secondaries. */
 static void _sapp_tc_x11_run_loop(void) {
     XFlush(_sapp_tc.display);
@@ -12642,41 +12680,37 @@ static void _sapp_tc_x11_run_loop(void) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
             if (w && w->input_delivered) w->earliest_next = 0.0;
         }
-        /* tick every due window (re-fetch each slot: a tick or a processed
-           event may have destroyed windows) */
-        bool main_drives_secondaries = false;
-        for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
+        // Reconcile visibility before choosing the pacer, then process it first
+        // even when registry slots have been reused or an earlier window hid.
+        for (size_t i = 0; i < _sapp_tc.window_slots; ++i) {
             _sapp_tc_window_t* w = _sapp_tc.windows[i];
-            // An earlier window's native work may have crossed this deadline.
-            const double tick_now = _sapp_tc_now();
             if (w && w->visibility_op != _SAPP_TC_X11_VISIBILITY_NONE)
                 _sapp_tc_x11_sync_visibility(w);
-            // The launch/main window occupies the first slot. At refresh rate
-            // the main pass is the admission clock, independent of timer phase.
-            // Lower setFps requests are frame-skipped by the window callback;
-            // native interval-zero ticks still supply its refresh-rate source.
-            // A timer tick just before this main pass has already spent the
-            // secondary's refresh credit; don't tick it again on the handoff.
-            const bool follow_main = main_drives_secondaries && w && w != _sapp_tc.app.main &&
+        }
+        _sapp_tc_window_t* pacer = _sapp_tc_x11_update_pacer();
+        const sapp_window turn_pacer = {pacer ? pacer->win_id : 0};
+        bool pacer_drives_followers = false;
+        // Re-fetch identities after callbacks; the pacer gets one leading pass.
+        for (size_t pass = 0; pass <= _sapp_tc.window_slots; ++pass) {
+            _sapp_tc_window_t* w = pass == 0 ? _sapp_tc_lookup(turn_pacer) : _sapp_tc.windows[pass - 1];
+            if (pass && w && w->win_id == turn_pacer.id) continue;
+            const double tick_now = _sapp_tc_now();
+            const bool follow_pacer = pacer_drives_followers && w && w->win_id != turn_pacer.id &&
                 w->swap_interval == 0 && w->ready && w->drawable && !w->in_tick &&
                 tick_now - w->timing.last >= 0.5 * _sapp_tc.refresh_period;
-            if (follow_main || _sapp_tc_x11_window_due(w, tick_now)) {
-                const bool is_main = w == _sapp_tc.app.main;
+            if (follow_pacer || _sapp_tc_x11_window_due(w, tick_now)) {
+                const sapp_window handle = {w->win_id};
                 const double previous_present = w->last_present;
-                // This tick spends the main pass's refresh credit, not a
-                // periodic deadline. Re-arm the fallback timer from completion
-                // so losing the main source cannot immediately replay a tick.
-                if (follow_main) w->earliest_next = 0.0;
+                // Spend the presentation credit and rearm the fallback from
+                // completion, avoiding a second tick on the old timer phase.
+                if (follow_pacer) w->earliest_next = 0.0;
                 _sapp_tc_x11_tick(w);
-                // Re-fetch after callbacks. A visible interval-positive main
-                // must present near refresh cadence; EGL can block in activation
-                // or rendering instead of swap itself.
-                if (is_main && _sapp_tc.app.main == w) {
-                    const double main_period = w->last_present - previous_present;
-                    main_drives_secondaries = w->swap_interval > 0 &&
-                        !_sapp_tc_native_hidden(w) && !_sapp_tc_native_iconified(w) &&
+                if (pass == 0 && _sapp_tc_lookup(handle) == w && _sapp_tc.pacer.id == handle.id) {
+                    const double pacer_period = w->last_present - previous_present;
+                    pacer_drives_followers = w->swap_interval > 0 &&
+                        !_sapp_tc_native_hidden(w) &&
                         w->last_present > previous_present &&
-                        main_period >= 0.5 * _sapp_tc.refresh_period && main_period <= 1.5 * _sapp_tc.refresh_period;
+                        pacer_period >= 0.5 * _sapp_tc.refresh_period && pacer_period <= 1.5 * _sapp_tc.refresh_period;
                 }
             }
         }
@@ -12731,6 +12765,8 @@ static bool _sapp_tc_x11_trust_hidden_signals(void) {
 }
 
 static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc* d) {
+    // A close/show earlier in this callback may have changed the visible pacer.
+    _sapp_tc_x11_update_pacer();
     _sapp_tc_x11_surface_scope restore;
     const size_t slot = _sapp_tc_x11_reserve_slot();
     if (slot == SIZE_MAX || _sapp_tc.next_id == UINT32_MAX) return NULL;
@@ -12746,7 +12782,9 @@ static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc*
     }
     w->desc = d->window;
     w->events_enabled = d->events_enabled;
-    w->swap_interval = d->swap_interval;
+    w->requested_swap_interval = d->swap_interval > 0 ? d->swap_interval :
+        (d->window.swap_interval > 0 ? d->window.swap_interval : 1);
+    w->swap_interval = !_sapp_tc.pacer.id && !d->window.hidden ? w->requested_swap_interval : 0;
     w->draw_while_hidden = d->draw_while_hidden;
     w->trust_hidden_signals = _sapp_tc_x11_trust_hidden_signals();
     w->wake_on_input = d->swap_interval > 0;
@@ -12794,6 +12832,7 @@ static _sapp_tc_window_t* _sapp_tc_x11_create_window(const _sapp_tc_native_desc*
         _sapp_tc_x11_update_dimensions(w);
     }
     creation.commit();
+    if (w->swap_interval > 0) _sapp_tc.pacer = {w->win_id};
     return w;
 }
 
@@ -12856,14 +12895,10 @@ sapp_window sapp_create_window(const sapp_window_desc* desc) {
     native.depth_format = SAPP_PIXELFORMAT_DEPTH_STENCIL;
     native.window = _sapp_tc_normalize_window(desc);
     native.fullscreen = desc->fullscreen;
-    /* Allowed X11 pacing difference: the shared GL context must not block on
-       every window. Main keeps blocking vsync; secondaries swap at interval 0
-       and follow every Nth main presentation or refresh-timer tick, where N is
-       the requested interval (GLX and EGL). */
+    // [TrussC #997] The constructor retains requested N from the window descriptor.
     native.swap_interval = 0;
     native.window.sample_count = _sapp_tc.app.desc.sample_count;
     _sapp_tc_window_t* w = _sapp_tc_x11_create_window(&native);
-    if (w) w->requested_swap_interval = desc->swap_interval > 0 ? desc->swap_interval : 1;
     return {w ? w->win_id : 0};
 }
 
@@ -12871,6 +12906,7 @@ void sapp_destroy_window(sapp_window win) {
     _sapp_tc_window_t* w = _sapp_tc_lookup(win);
     if (!w) return;
     if (w->constructing) { w->close_requested = true; return; }
+    if (_sapp_tc.pacer.id == w->win_id) _sapp_tc.pacer = {};
     for (size_t i = 0; i < _sapp_tc.window_slots; i++) {
         if (_sapp_tc.windows[i] == w) { _sapp_tc.windows[i] = 0; break; }
     }
