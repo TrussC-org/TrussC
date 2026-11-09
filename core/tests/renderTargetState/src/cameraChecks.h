@@ -108,7 +108,8 @@ public:
         if (frame_ >= 6 && frame_ < 9) { drawDepthFixture(frame_ - 6, fbo_); ++frame_; return; }
         if (frame_ == 9) { runReviewChecks(fbo_); ++frame_; return; }
         if (frame_ >= 10 && frame_ < 14) { drawDepthSetterFixture(frame_ - 10); ++frame_; return; }
-        if (frame_ == 14) { exitApp(); return; }
+        if (frame_ == 14) { runEasyCamDepthChecks(); ++frame_; return; }
+        if (frame_ == 15) { exitApp(); return; }
         const char* scenarios[] = {"default-frame", "screen-fov", "screen-ortho",
                                    "easycam", "nested-push-pop", "default-ortho"};
         const char* scenario = scenarios[frame_];
@@ -190,7 +191,7 @@ int runCameraChecks(int samples = 1) {
         check("GPU checks emit no unexpected stack or target warnings", gpuWarnings.unexpected == 0);
         check("GPU checks emit exactly one intended unmatched-Fbo warning", gpuWarnings.expected == 1);
         check("GPU checks emit one intended open-at-draw warning per Fbo drawn through App::handleDraw (#925)",
-              gpuWarnings.openAtDrawWarnings == 3);
+              gpuWarnings.openAtDrawWarnings == 4);
         check("all six camera scenarios completed", cameraChecksFinished);
         check("review behavior probes and screen readback completed", reviewDrawn && reviewCaptured);
         check("all three overlapping-depth variants captured", depthCaptures == 3);

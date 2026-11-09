@@ -6789,26 +6789,23 @@ description.ko = "3D 그리기에 카메라를 적용한다."
 details.en = '''
 - Call `begin()`, draw the scene, then call `end()` on the same camera and render target. Scopes may be nested and must end in reverse order.
 - Applies the camera view and the selected perspective or orthographic projection, using the full render target size for the aspect ratio. Window sizes use logical pixels unless pixel-perfect mode is enabled; Fbo sizes use attachment pixels.
-- Selects the 3D pipeline with alpha blending, depth testing, and depth writing, without changing the logical blend-mode or depth-test flags. The current model transform remains in effect.
-- Saves the previous camera state and selected pipeline. After `end()`, drawing uses that previous camera, so 2D drawing can follow when the saved state was the normal screen view.
+- Like `enableDepthTest()`, saves the current target's depth flag and enables depth testing and writing with the current blend mode. `popStyle()`, `resetStyle()`, and child Node draws preserve depth; an explicit `disableDepthTest()` clears it until it is enabled again or the scope ends.
+- Saves the previous camera state and selected pipeline. `end()` restores them and the saved depth flag. An Fbo entered inside the scope has its own camera stack and depth flag.
 - Updates the matrices used by `worldToScreen` and records the camera context for mouse picking of nodes drawn within the scope.
-- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (popStyle(), resetStyle(), and each child Node's draw turn depth testing off inside the camera scope unless enableDepthTest() is enabled).
 '''
 details.ja = '''
 - `begin()`、シーンの描画、`end()` の順に呼び出してください。開始時と同じカメラと描画先で終了します。入れ子にでき、終了は開始と逆の順序で行います。
 - カメラのビューと、選択されている透視投影または正射影を適用します。アスペクト比には描画先全体のサイズを使います。ウィンドウでは pixelPerfect が有効な場合を除いて論理ピクセル、Fbo ではアタッチメントのピクセルを使います。
-- アルファブレンド、深度テスト、深度書き込みを行う3Dパイプラインを選択します。ブレンドモードと深度テストの論理フラグは変更せず、現在のモデル変換も維持します。
-- 直前のカメラ状態と選択パイプラインを保存します。`end()` 後はそのカメラに戻るため、保存した状態が通常の画面表示なら、そのまま2D描画を続けられます。
+- `enableDepthTest()` と同様に、現在の描画先の深度フラグを保存して、現在のブレンドモードのまま深度テストと書き込みを有効にします。`popStyle()`、`resetStyle()`、子 Node の描画でも深度は維持されます。明示的な `disableDepthTest()` は、再び有効にするか範囲を終了するまで深度を無効にします。
+- 直前のカメラ状態と選択パイプラインを保存します。`end()` はそれらと保存した深度フラグを復元します。範囲内で開始した Fbo は独自のカメラスタックと深度フラグを持ちます。
 - `worldToScreen` が使う行列を更新し、範囲内で描画したノードのマウス判定に使うカメラ情報を記録します。
-- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（enableDepthTest() が有効でない場合、カメラの範囲内で popStyle()、resetStyle()、各子 Node の描画が深度テストを無効にします）。
 '''
 details.ko = '''
 - `begin()`, 씬 그리기, `end()` 순서로 호출하세요. 시작할 때와 같은 카메라와 렌더 타깃에서 종료해야 합니다. 범위를 중첩할 수 있으며 시작한 순서의 역순으로 종료해야 합니다.
 - 카메라 뷰와 선택된 원근 투영 또는 정사영을 적용합니다. 종횡비에는 렌더 타깃 전체 크기를 사용합니다. 윈도에서는 pixelPerfect가 활성화된 경우를 제외하고 논리 픽셀을, Fbo에서는 어태치먼트 픽셀을 사용합니다.
-- 알파 블렌딩, 깊이 테스트, 깊이 쓰기를 수행하는 3D 파이프라인을 선택합니다. 블렌드 모드와 깊이 테스트의 논리 플래그는 변경하지 않으며 현재 모델 변환도 유지합니다.
-- 이전 카메라 상태와 선택된 파이프라인을 저장합니다. `end()` 후에는 해당 카메라로 돌아가므로 저장한 상태가 일반 화면 뷰였다면 이어서 2D를 그릴 수 있습니다.
+- `enableDepthTest()`와 마찬가지로 현재 렌더 타깃의 깊이 플래그를 저장하고 현재 블렌드 모드를 유지하면서 깊이 테스트와 쓰기를 활성화합니다. `popStyle()`, `resetStyle()`, 자식 Node 그리기도 깊이를 유지합니다. 명시적인 `disableDepthTest()`는 다시 활성화하거나 범위가 끝날 때까지 깊이를 끕니다.
+- 이전 카메라 상태와 선택된 파이프라인을 저장합니다. `end()`는 이들과 저장한 깊이 플래그를 복원합니다. 범위 안에서 시작한 Fbo는 자체 카메라 스택과 깊이 플래그를 가집니다.
 - `worldToScreen`이 사용하는 행렬을 갱신하고 범위 안에서 그린 노드의 마우스 판정에 사용할 카메라 정보를 기록합니다.
-- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(enableDepthTest()가 활성화되어 있지 않으면 카메라 범위 안에서 popStyle(), resetStyle(), 각 자식 Node의 그리기가 깊이 테스트를 비활성화합니다).
 '''
 related = ["setupScreenPerspective", "pushMatrix", "EasyCam::end", "EasyCam::enableOrtho", "enableDepthTest"]
 snippet = '''
@@ -6962,19 +6959,19 @@ description.en = "Restores the camera state saved by the matching begin()."
 description.ja = "対応する begin() が保存したカメラ状態を復元する。"
 description.ko = "대응하는 begin()이 저장한 카메라 상태를 복원한다."
 details.en = '''
-- Restores the saved camera state and selected pipeline on the current render target; see `EasyCam::begin` for scope order and drawing 2D afterward.
-- Leaves the current model transform and logical blend-mode and depth-test flags unchanged, including changes made inside the scope.
-- If the current target has no scope, or its innermost scope belongs to another camera, leaves the state unchanged and logs a warning only on the first such failure.
+- Restores the saved camera state, selected pipeline, and depth flag on the current render target. Nested scopes restore their own entry state in reverse order; see `EasyCam::begin`.
+- Leaves the current model transform and logical blend mode unchanged. The current blend mode applies inside the camera, including modes selected before `begin()`.
+- End on the same camera and target where the scope began. An unmatched call leaves state unchanged and logs a warning on the first failure.
 '''
 details.ja = '''
-- 現在の描画先で、保存したカメラ状態と選択パイプラインを復元します。範囲の呼び出し順と終了後の2D描画は `EasyCam::begin` を参照してください。
-- 現在のモデル変換と、ブレンドモードおよび深度テストの論理フラグは変更しません。範囲内で行った変更も維持します。
-- 現在の描画先に範囲がない場合や、最も内側の範囲が別のカメラのものである場合は、状態を変更せず、この失敗が初めて起きたときだけ警告を出します。
+- 現在の描画先で、保存したカメラ状態、選択パイプライン、深度フラグを復元します。入れ子の範囲は開始と逆の順に各開始時の状態を復元します。`EasyCam::begin` を参照してください。
+- 現在のモデル変換とブレンドモードの論理フラグは維持します。`begin()` 前に選んだモードも含め、カメラ内では現在のブレンドモードが適用されます。
+- 開始時と同じカメラと描画先で終了してください。対応しない呼び出しは状態を変更せず、最初の失敗時に警告を記録します。
 '''
 details.ko = '''
-- 현재 렌더 타깃에서 저장된 카메라 상태와 선택된 파이프라인을 복원합니다. 범위의 호출 순서와 종료 후 2D 그리기는 `EasyCam::begin`을 참조하세요.
-- 현재 모델 변환과 블렌드 모드 및 깊이 테스트의 논리 플래그는 변경하지 않습니다. 범위 안에서 변경한 값도 유지합니다.
-- 현재 타깃에 범위가 없거나 가장 안쪽 범위가 다른 카메라의 것이면 상태를 변경하지 않고 이러한 실패가 처음 발생했을 때만 경고를 기록합니다.
+- 현재 렌더 타깃에서 저장한 카메라 상태, 선택된 파이프라인, 깊이 플래그를 복원합니다. 중첩 범위는 시작한 역순으로 각 시작 상태를 복원합니다. `EasyCam::begin`을 참고하세요.
+- 현재 모델 변환과 논리 블렌드 모드는 유지합니다. `begin()` 전에 선택한 모드도 포함하여 카메라 안에서는 현재 블렌드 모드가 적용됩니다.
+- 시작한 카메라와 타깃에서 종료하세요. 대응하지 않는 호출은 상태를 변경하지 않고 첫 실패 시 경고를 기록합니다.
 '''
 related = ["popMatrix", "EasyCam::begin"]
 snippet = '''
@@ -44494,35 +44491,27 @@ description.en = "Turns the depth test for ordinary (blend-mode) drawing off aga
 description.ja = "通常の（ブレンドモードでの）描画のデプステストを再び無効にする（デフォルトの状態）。"
 description.ko = "일반(블렌드 모드) 그리기의 깊이 테스트를 다시 끈다(기본 상태)."
 details.en = '''
-- Call it before drawing 2D overlays such as a HUD or text after a 3D scene, so the scene does not hide them.
-- It takes effect immediately, even inside an `EasyCam` scope: drawing after it no longer tests or writes depth.
-- The setting stays off across frames and `Fbo` passes until `enableDepthTest()` is called again.
-- How the depth test works and when it is needed are explained in `enableDepthTest`.
+- Immediately disables depth testing and writing for the current blend mode, including inside `EasyCam`. Later style resets and child Node draws keep it off.
+- `EasyCam::begin()` saves the target's flag and enables depth with the current blend mode; `end()` restores that saved flag, including after an explicit disable inside the scope.
+- Outside camera scopes the flag persists across frames until changed. Fbo entry and return inherit it; each target keeps its own flag and camera stack.
+- Use this before overlays that should ignore scene depth. See `enableDepthTest` for depth comparison behavior.
 '''
 details.ja = '''
-- 3D シーンのあとに HUD やテキストなどの 2D を重ねて描く前に呼んでください。シーンに隠れなくなります。
-- `EasyCam` の範囲内でもすぐに反映され、それ以降の描画は深度の判定も書き込みもしなくなります。
-- `enableDepthTest()` を再び呼ぶまで、フレームや `Fbo` の描画をまたいで無効のままです。
-- デプステストの仕組みと必要になる場面は `enableDepthTest` を参照してください。
+- `EasyCam` 内も含め、現在のブレンドモードの深度テストと書き込みを即座に無効にします。その後のスタイルリセットや子 Node の描画でも無効のままです。
+- `EasyCam::begin()` は描画先のフラグを保存し、現在のブレンドモードで深度を有効にします。範囲内で明示的に無効にしても、`end()` は保存したフラグを復元します。
+- カメラの範囲外では変更するまでフレームをまたいで維持されます。Fbo への移行と復帰時には引き継ぎ、各描画先は独自のフラグとカメラスタックを持ちます。
+- シーンの深度を無視する重ね描きの前に使ってください。深度比較の動作は `enableDepthTest` を参照してください。
 '''
 details.ko = '''
-- 3D 씬 다음에 HUD나 텍스트 같은 2D를 겹쳐 그리기 전에 호출하세요. 씬에 가려지지 않게 됩니다.
-- `EasyCam` 범위 안에서도 즉시 반영되며, 이후의 그리기는 깊이를 판정하지도 기록하지도 않습니다.
-- `enableDepthTest()`를 다시 호출할 때까지 프레임과 `Fbo` 그리기를 넘어 꺼진 상태로 유지됩니다.
-- 깊이 테스트의 동작과 필요한 경우는 `enableDepthTest`를 참고하세요.
+- `EasyCam` 안에서도 현재 블렌드 모드의 깊이 테스트와 쓰기를 즉시 끕니다. 이후 스타일 초기화와 자식 Node 그리기도 꺼진 상태를 유지합니다.
+- `EasyCam::begin()`은 타깃의 플래그를 저장하고 현재 블렌드 모드로 깊이를 활성화합니다. 범위 안에서 명시적으로 꺼도 `end()`는 저장한 플래그를 복원합니다.
+- 카메라 범위 밖에서는 변경할 때까지 프레임을 넘어 유지됩니다. Fbo 진입과 복귀 시 이어받으며 각 타깃은 자체 플래그와 카메라 스택을 가집니다.
+- 씬 깊이를 무시하는 오버레이 전에 사용하세요. 깊이 비교 동작은 `enableDepthTest`를 참고하세요.
 '''
 related = ["enableDepthTest", "isDepthTestEnabled", "setBlendMode"]
 snippet = '''
-void tcApp::draw() {
-    cam.begin();
-    setBlendMode(BlendMode::Add);
-    enableDepthTest();
-    drawSphere(0, 0, 0, 50);
-    resetBlendMode();
-    cam.end();
-    disableDepthTest();                       // 2D from here is never hidden by the scene
-    drawBitmapString("score: 10", 20, 20);
-}
+disableDepthTest();
+drawBitmapString("score: 10", 20, 20);
 '''
 
 ["disable3D"]
@@ -45440,48 +45429,31 @@ description.en = "Turns the depth test on for ordinary (blend-mode) drawing, so 
 description.ja = "通常の（ブレンドモードでの）描画でデプステストを有効にし、手前の図形が奥の図形を隠すようにする。"
 description.ko = "일반(블렌드 모드) 그리기에서 깊이 테스트를 켜서 가까운 도형이 먼 도형을 가리게 한다."
 details.en = '''
-- Depth testing is off by default for ordinary drawing in `draw()`. Only the 3D pipeline that `EasyCam::begin()` (and a perspective screen setup such as `setupScreenPerspective()`) loads tests and writes depth, so inside a camera scope nearer objects hide farther ones.
-- Inside a camera scope, `setBlendMode()`, `resetBlendMode()`, `popStyle()` and `resetStyle()` switch to a blend pipeline, and blend pipelines have no depth test in every mode, including `BlendMode::Disabled`. Everything drawn after that ignores depth. Call `enableDepthTest()` right after the blend change to restore it without starting a new camera scope.
-- TrussC also calls `resetStyle()` before each Node's `draw()`, so a Node drawn inside a camera scope is not depth-tested unless this setting is on.
-- With the depth test on, a pixel is drawn only when it is at the same depth as or nearer than what is already there (compare LESS_EQUAL), and it writes its own depth. These are the same settings as the 3D pipeline.
-- It applies to the current blend mode and to every later `setBlendMode()`, image draw and text draw.
-- **The setting is not reset each frame.** Like the blend mode, it stays on across frames and into `Fbo` passes until you call `disableDepthTest()`. An `Fbo` always has a depth buffer, so the depth test also works between `fbo.begin()` and `fbo.end()`, and a change made inside the `Fbo` remains after `end()`.
-- Call `disableDepthTest()` before drawing 2D overlays such as text or a HUD, or the 3D scene can hide them.
-- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (a style reset inside a camera scope drops the depth test).
+- Ordinary blend-mode drawing starts with depth testing off. With it enabled, a pixel passes when it is as near as or nearer than the stored depth (LESS_EQUAL), then writes its depth.
+- Applies to the current blend mode and subsequent blend changes, style resets, image draws, and child Node draws.
+- `EasyCam::begin()` saves the target's depth flag and enables it through this same path, keeping the current blend mode. `end()` restores the saved flag and pipeline. Explicit `disableDepthTest()` inside the camera takes effect immediately.
+- Outside camera scopes the flag persists across frames until changed. Fbo entry and return inherit the flag; each active target has its own flag and camera stack. Fbos have a depth buffer.
+- Use `disableDepthTest()` for overlays that should ignore scene depth. Perspective screen setup separately selects its depth-tested 3D pipeline.
 '''
 details.ja = '''
-- `draw()` での通常の描画では、デプステストは最初は無効です。深度を判定・書き込みするのは `EasyCam::begin()`（および `setupScreenPerspective()` などの透視投影の画面設定）が読み込む 3D パイプラインだけなので、カメラの範囲内では手前の物体が奥の物体を隠します。
-- カメラの範囲内で `setBlendMode()`、`resetBlendMode()`、`popStyle()`、`resetStyle()` を呼ぶと、ブレンド用のパイプラインに切り替わります。ブレンド用のパイプラインは、`BlendMode::Disabled` を含むどのモードでもデプステストを行いません。そのため、それ以降に描いたものは深度を無視します。ブレンドを変えた直後に `enableDepthTest()` を呼ぶと、カメラを開き直さずに深度を元に戻せます。
-- TrussC は各 Node の `draw()` の前にも `resetStyle()` を呼びます。そのため、カメラの範囲内で描かれる Node も、この設定が有効でなければデプステストされません。
-- デプステストが有効なときは、すでに描かれているものと同じ深さか、それより手前のピクセルだけが描かれ（LESS_EQUAL 比較）、そのピクセルの深度も書き込まれます。3D パイプラインと同じ設定です。
-- 現在のブレンドモードと、それ以降のすべての `setBlendMode()`、画像の描画、文字の描画に適用されます。
-- **この設定はフレームごとにリセットされません。** ブレンドモードと同じく、`disableDepthTest()` を呼ぶまでフレームをまたいで有効のままで、`Fbo` の描画にも引き継がれます。`Fbo` は常に深度バッファを持つので、`fbo.begin()` と `fbo.end()` の間でもデプステストが使えます。`Fbo` の中で変更した設定は `end()` のあとも残ります。
-- テキストや HUD などの 2D の重ね描きの前には `disableDepthTest()` を呼んでください。呼ばないと 3D シーンに隠れることがあります。
-- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内でスタイルをリセットすると深度テストが切れる）。
+- 通常のブレンドモードでの描画では深度テストは最初は無効です。有効時は保存された深度と同じか手前のピクセルが描かれ（LESS_EQUAL）、その深度を書き込みます。
+- 現在のブレンドモードと、その後のブレンド変更、スタイルリセット、画像描画、子 Node の描画に適用されます。
+- `EasyCam::begin()` は描画先の深度フラグを保存し、この関数と同じ経路で有効にします。現在のブレンドモードを維持し、`end()` で保存したフラグとパイプラインを復元します。カメラ内の明示的な `disableDepthTest()` も即座に反映されます。
+- カメラの範囲外では変更するまでフレームをまたいで維持されます。Fbo への移行と復帰時にはフラグを引き継ぎます。各描画先は独自のフラグとカメラスタックを持ち、Fbo には深度バッファがあります。
+- シーンの深度を無視する重ね描きには `disableDepthTest()` を使ってください。透視投影の画面設定は別途、深度テスト付きの3Dパイプラインを選択します。
 '''
 details.ko = '''
-- `draw()`에서의 일반 그리기는 처음에는 깊이 테스트가 꺼져 있습니다. 깊이를 판정하고 기록하는 것은 `EasyCam::begin()`(및 `setupScreenPerspective()` 같은 원근 투영 화면 설정)이 불러오는 3D 파이프라인뿐이므로, 카메라 범위 안에서는 가까운 물체가 먼 물체를 가립니다.
-- 카메라 범위 안에서 `setBlendMode()`, `resetBlendMode()`, `popStyle()`, `resetStyle()`을 호출하면 블렌드용 파이프라인으로 바뀝니다. 블렌드용 파이프라인은 `BlendMode::Disabled`를 포함한 모든 모드에서 깊이 테스트를 하지 않습니다. 따라서 그 이후에 그린 것은 깊이를 무시합니다. 블렌드를 바꾼 직후에 `enableDepthTest()`를 호출하면 카메라를 다시 시작하지 않고 깊이를 되돌릴 수 있습니다.
-- TrussC는 각 Node의 `draw()` 전에도 `resetStyle()`을 호출합니다. 그래서 카메라 범위 안에서 그려지는 Node도 이 설정이 켜져 있지 않으면 깊이 테스트되지 않습니다.
-- 깊이 테스트가 켜져 있으면 이미 그려진 것과 같은 깊이이거나 더 가까운 픽셀만 그려지고(LESS_EQUAL 비교), 그 픽셀의 깊이도 기록됩니다. 3D 파이프라인과 같은 설정입니다.
-- 현재 블렌드 모드와 이후의 모든 `setBlendMode()`, 이미지 그리기, 텍스트 그리기에 적용됩니다.
-- **이 설정은 프레임마다 초기화되지 않습니다.** 블렌드 모드와 마찬가지로 `disableDepthTest()`를 호출할 때까지 프레임을 넘어 유지되며 `Fbo` 그리기에도 이어집니다. `Fbo`는 항상 깊이 버퍼를 가지므로 `fbo.begin()`과 `fbo.end()` 사이에서도 깊이 테스트를 쓸 수 있습니다. `Fbo` 안에서 바꾼 설정은 `end()` 이후에도 남습니다.
-- 텍스트나 HUD 같은 2D 오버레이를 그리기 전에는 `disableDepthTest()`를 호출하세요. 그렇지 않으면 3D 씬에 가려질 수 있습니다.
-- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서 스타일을 초기화하면 깊이 테스트가 꺼짐).
+- 일반 블렌드 모드 그리기는 깊이 테스트가 꺼진 상태로 시작합니다. 켜면 저장된 깊이와 같거나 더 가까운 픽셀이 통과하고(LESS_EQUAL) 깊이를 기록합니다.
+- 현재 블렌드 모드와 이후 블렌드 변경, 스타일 초기화, 이미지 그리기, 자식 Node 그리기에 적용됩니다.
+- `EasyCam::begin()`은 타깃의 깊이 플래그를 저장하고 이 함수와 같은 경로로 활성화하며 현재 블렌드 모드를 유지합니다. `end()`는 저장한 플래그와 파이프라인을 복원합니다. 카메라 안에서 명시적으로 호출한 `disableDepthTest()`도 즉시 적용됩니다.
+- 카메라 범위 밖에서는 변경할 때까지 프레임을 넘어 유지됩니다. Fbo 진입과 복귀 시 플래그를 이어받으며 각 타깃은 자체 플래그와 카메라 스택을 가집니다. Fbo에는 깊이 버퍼가 있습니다.
+- 씬 깊이를 무시할 오버레이에는 `disableDepthTest()`를 사용하세요. 원근 화면 설정은 별도로 깊이 테스트를 사용하는 3D 파이프라인을 선택합니다.
 '''
 related = ["disableDepthTest", "isDepthTestEnabled", "setBlendMode"]
 snippet = '''
-// cam is an EasyCam member of tcApp
-void tcApp::draw() {
-    cam.begin();
-    drawBox(100);                     // depth-tested (3D pipeline)
-    setBlendMode(BlendMode::Add);     // blend change: depth test is off from here
-    enableDepthTest();                // turn it back on for the additive pass
-    drawSphere(60, 0, 0, 40);         // correctly hidden where the box is in front
-    resetBlendMode();
-    cam.end();
-    disableDepthTest();               // back to the default before 2D overlays
-}
+enableDepthTest();
+drawBox(100);
+disableDepthTest();
 '''
 
 ["enable3D"]
@@ -49254,18 +49226,21 @@ description.ja = "通常の（ブレンドモードでの）描画のデプス�
 description.ko = "일반(블렌드 모드) 그리기의 깊이 테스트가 켜져 있는지 반환한다."
 details.en = '''
 - In App code it uses the App's own window; elsewhere it needs exactly one open window, and otherwise logs an error and returns a neutral value. While an `Fbo` is active, the `Fbo`'s own state and size are used.
-- Returns `true` after `enableDepthTest()` until `disableDepthTest()` is called. The default is `false`.
-- It reports only this setting. Inside `cam.begin()` the 3D pipeline tests depth even when this returns `false`.
+- Reports the current target's depth flag, which defaults to `false`.
+- `EasyCam::begin()` enables the flag; explicit `disableDepthTest()` clears it, and `end()` restores its entry value.
+- Screen setup can separately select a depth-tested 3D pipeline; this getter reports the logical flag.
 '''
 details.ja = '''
 - App のコードではその App のウィンドウが対象です。それ以外の場所では、開いているウィンドウがちょうど 1 つのときだけ動き、そうでなければエラーを記録して中立の値を返します。`Fbo` が有効な間は、その `Fbo` 自身の状態とサイズが使われます。
-- `enableDepthTest()` を呼んでから `disableDepthTest()` を呼ぶまでは `true` を返します。初期値は `false` です。
-- この設定だけを返します。`cam.begin()` の範囲内では、これが `false` でも 3D パイプラインが深度を判定します。
+- 現在の描画先の深度フラグを返します。初期値は `false` です。
+- `EasyCam::begin()` はフラグを有効にし、明示的な `disableDepthTest()` は無効にします。`end()` は開始時の値を復元します。
+- 画面設定は別途、深度テスト付きの3Dパイプラインを選択できます。この関数は論理フラグを返します。
 '''
 details.ko = '''
 - App 코드에서는 그 App의 창이 대상입니다. 그 밖의 곳에서는 열린 창이 정확히 하나일 때만 동작하며, 그렇지 않으면 오류를 기록하고 중립적인 값을 반환합니다. `Fbo`가 활성화된 동안에는 그 `Fbo` 자신의 상태와 크기가 사용됩니다.
-- `enableDepthTest()`를 호출한 뒤 `disableDepthTest()`를 호출할 때까지 `true`를 반환합니다. 기본값은 `false`입니다.
-- 이 설정만 반환합니다. `cam.begin()` 범위 안에서는 이 값이 `false`여도 3D 파이프라인이 깊이를 판정합니다.
+- 현재 타깃의 깊이 플래그를 반환합니다. 기본값은 `false`입니다.
+- `EasyCam::begin()`은 플래그를 켜고 명시적인 `disableDepthTest()`는 끕니다. `end()`는 시작 시 값을 복원합니다.
+- 화면 설정은 별도로 깊이 테스트를 사용하는 3D 파이프라인을 선택할 수 있습니다. 이 함수는 논리 플래그를 반환합니다.
 '''
 related = ["enableDepthTest", "disableDepthTest"]
 
@@ -50810,19 +50785,16 @@ details.en = '''
 - `popStyle()` takes the style saved by the matching `pushStyle()` off the stack and makes it current again. The color, fill and stroke, point and curve settings, text alignment, and blend mode all return at once. See `pushStyle` for the full list of saved items and for how TrussC resets the style before each Node's `draw()`.
 - If nothing is left on the stack (more pops than pushes), a rate-limited warning is logged and nothing happens. The stack and the current style stay as they are. Inside a Node's `draw()`, a pop that would remove a style pushed outside that node is refused in the same way.
 - The depth test setting is not saved by `pushStyle()` and is not restored by `popStyle()`. `popStyle()` restores the blend mode with the current depth test setting, so call `disableDepthTest()` yourself when you want the depth test off.
-- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 '''
 details.ja = '''
 - `popStyle()` は、対応する `pushStyle()` がスタックに保存したスタイルを取り出し、現在の状態に戻します。色、塗りとストローク、点や曲線の設定、文字の配置、ブレンドモードがまとめて戻ります。保存される項目の一覧と、Node の `draw()` の前にスタイルがリセットされる仕組みは `pushStyle` を参照してください。
 - スタックに何も残っていない状態で呼ぶと（push より pop が多い場合）、頻度を抑えた警告が出力され、何も起こりません。スタックと現在のスタイルはそのまま保たれます。Node の `draw()` の中では、その Node の外で push されたスタイルを取り出そうとする pop も、同じように無視されます。
 - デプステストの設定は `pushStyle()` で保存されず、`popStyle()` でも復元されません。`popStyle()` は現在のデプステスト設定のままブレンドモードを戻すため、デプステストを無効にしたい場合は `disableDepthTest()` を明示的に呼んでください。
-- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内では、enableDepthTest() を有効にしていないと深度テストが切れる）。
 '''
 details.ko = '''
 - `popStyle()`은 대응하는 `pushStyle()`이 스택에 저장한 스타일을 꺼내어 현재 상태로 되돌립니다. 색상, 채우기와 스트로크, 포인트·곡선 설정, 텍스트 정렬, 블렌드 모드가 한꺼번에 돌아갑니다. 저장되는 항목의 목록과 Node의 `draw()` 전에 스타일이 초기화되는 방식은 `pushStyle`을 참고하세요.
 - 스택에 아무것도 남지 않은 상태에서 호출하면(push보다 pop이 많은 경우) 빈도를 제한한 경고가 출력되고 아무 일도 일어나지 않습니다. 스택과 현재 스타일은 그대로 유지됩니다. Node의 `draw()` 안에서는 그 Node 바깥에서 push된 스타일을 꺼내려는 pop도 같은 방식으로 무시됩니다.
 - 깊이 테스트 설정은 `pushStyle()`로 저장되지 않고 `popStyle()`로 복원되지도 않습니다. `popStyle()`은 현재 깊이 테스트 설정 그대로 블렌드 모드를 되돌리므로, 깊이 테스트를 끄려면 `disableDepthTest()`를 명시적으로 호출하세요.
-- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서는 enableDepthTest()를 켜지 않으면 깊이 테스트가 꺼짐).
 '''
 related = ["pushStyle", "popMatrix"]
 
@@ -51507,19 +51479,16 @@ details.en = '''
 - `resetStyle()` sets the current style back to its defaults: white color (1, 1, 1, 1), fill on, stroke off, stroke weight 1 logical pixel with the `Butt` cap and `Miter` join, point size 1 with the `Square` point style, curves in tolerance mode at 0.1 pixels, text aligned to the top-left, and blend mode `Alpha`.
 - It changes only the current style and does not touch the `pushStyle()` / `popStyle()` stack. A later `popStyle()` therefore restores what was pushed before `resetStyle()` was called, not these defaults.
 - TrussC also calls `resetStyle()` automatically right before and right after each Node's `draw()`. See `pushStyle` for what this means for your own `draw()` code.
-- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (inside a camera scope this turns the depth test off unless enableDepthTest() is on).
 '''
 details.ja = '''
 - `resetStyle()` は、現在のスタイルを初期値に戻します。初期値は、白色 (1, 1, 1, 1)、塗り有効、ストローク無効、線幅 1 論理ピクセル（端は `Butt`、角は `Miter`）、点サイズ 1・`Square`、曲線は許容誤差モードで 0.1 ピクセル、文字配置は左上、ブレンドモードは `Alpha` です。
 - 変更するのは現在のスタイルだけで、`pushStyle()` / `popStyle()` のスタックには影響しません。そのため、あとで `popStyle()` を呼ぶと、この初期値ではなく、`resetStyle()` を呼ぶ前に push した状態に戻ります。
 - TrussC は、各 Node の `draw()` の直前と直後にも自動で `resetStyle()` を実行します。自分の `draw()` のコードにどう影響するかは `pushStyle` を参照してください。
-- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内では、enableDepthTest() を有効にしていないと深度テストが切れる）。
 '''
 details.ko = '''
 - `resetStyle()`은 현재 스타일을 기본값으로 되돌립니다. 기본값은 흰색 (1, 1, 1, 1), 채우기 활성, 스트로크 비활성, 선 두께 1 논리 픽셀(끝은 `Butt`, 모서리는 `Miter`), 포인트 크기 1·`Square`, 곡선은 허용 오차 모드 0.1픽셀, 텍스트 정렬은 좌상단, 블렌드 모드는 `Alpha`입니다.
 - 바뀌는 것은 현재 스타일뿐이며, `pushStyle()` / `popStyle()` 스택에는 영향을 주지 않습니다. 그래서 이후 `popStyle()`을 호출하면 이 기본값이 아니라 `resetStyle()`을 호출하기 전에 push한 상태로 돌아갑니다.
 - TrussC는 각 Node의 `draw()` 직전과 직후에도 자동으로 `resetStyle()`을 실행합니다. 자신의 `draw()` 코드에 어떤 영향이 있는지는 `pushStyle`을 참고하세요.
-- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서는 enableDepthTest()를 켜지 않으면 깊이 테스트가 꺼짐).
 '''
 
 ["rotate"]
@@ -60766,19 +60735,16 @@ details.en = '''
 - This protected override draws one vertical or horizontal stroke in local coordinates, using the stored bar color and thickness; it draws no track.
 - The stroke's endpoints are inset by half the thickness so the round caps reach the ends of the node's rectangle. It saves and restores the drawing style with `pushStyle()` and `popStyle()`.
 - Drawing does not synchronize the bar with the container; see `ScrollBar::updateFromContainer`. See `Node::draw` for callback timing and coordinates.
-- Known issue: [#915](https://github.com/TrussC-org/TrussC/issues/915) (the internal popStyle() turns depth testing off inside a camera scope unless enableDepthTest() is enabled).
 '''
 details.ja = '''
 - この protected のオーバーライドは、保存されたバーの色と太さを使い、ローカル座標で縦または横のストロークを 1 本描画します。トラックは描画しません。
 - 丸いキャップがノードの矩形の両端に届くように、ストロークの端点を太さの半分だけ内側に配置します。描画スタイルは `pushStyle()` と `popStyle()` で保存・復元します。
 - 描画時にはコンテナとの同期を行いません。`ScrollBar::updateFromContainer` を参照してください。コールバックのタイミングと座標は `Node::draw` を参照してください。
-- 既知の問題: [#915](https://github.com/TrussC-org/TrussC/issues/915)（カメラの範囲内では、enableDepthTest() が有効でない場合、内部の popStyle() が深度テストを無効にします）。
 '''
 details.ko = '''
 - 이 protected 재정의는 저장된 바 색상과 두께로 로컬 좌표에서 세로 또는 가로 선을 하나 그립니다. 트랙은 그리지 않습니다.
 - 둥근 캡이 노드 사각형의 양 끝에 닿도록 선의 끝점을 두께의 절반만큼 안쪽에 배치합니다. 그리기 스타일은 `pushStyle()`과 `popStyle()`로 저장하고 복원합니다.
 - 그리기에서는 컨테이너와 동기화하지 않습니다. `ScrollBar::updateFromContainer`를 참조하세요. 콜백 시점과 좌표는 `Node::draw`를 참조하세요.
-- 알려진 문제: [#915](https://github.com/TrussC-org/TrussC/issues/915)(카메라 범위 안에서 enableDepthTest()가 활성화되어 있지 않으면 내부 popStyle()이 깊이 테스트를 비활성화합니다).
 '''
 snippet = '''
 class CustomScrollBar : public ScrollBar {
