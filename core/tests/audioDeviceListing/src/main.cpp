@@ -78,11 +78,17 @@ TC_CORE_TEST_MAIN() {
     check("default listing follows current engine context", AudioEngine::listDevices()[0].backend == AudioBackend::Null);
 
     atomic<int> missingWarnings{0};
+    atomic<int> errors{0};
+    bool requestedNameLogged = false;
     auto warning = getLogger().onLog.listen([&](LogEventArgs& args) {
         if (args.level == LogLevel::Warning && args.message.find("not found") != string::npos) ++missingWarnings;
+        if (args.level == LogLevel::Error) ++errors;
+        if (args.level == LogLevel::Notice && args.message.find("re-initializing (") != string::npos)
+            requestedNameLogged = args.message.find("dev='stale name'") != string::npos;
     });
     settings.device->uniqueId = "missing-id";
     check("missing output ID fails instead of opening default", !engine.init(settings) && !engine.isInitialized());
+    check("reinit notice uses requested device object's name", requestedNameLogged);
     check("missing output ID warns", missingWarnings == 1);
     settings.device.reset(); settings.backend = AudioBackend::Null;
     check("missing output name also fails without fallback", !engine.init(settings) && !engine.isInitialized());
@@ -100,6 +106,7 @@ TC_CORE_TEST_MAIN() {
     mic.setDevice(input);
     check("missing capture ID fails without fallback", !mic.start() && !mic.isRunning());
     check("missing capture ID warns", missingWarnings == 3);
+    check("missing capture ID emits no error log", errors == 0);
     mic.stop(); internal::waitForResourceLoadsForTests();
 
     // Exercise real async startup and main-thread failure delivery, without hardware.
@@ -108,12 +115,14 @@ TC_CORE_TEST_MAIN() {
     auto result = mic.onStart.listen([&](MicStartResult& args) {
         ++events;
         check("async missing-device result arrives on main with no fallback",
-            !args.success && !args.message.empty() && isMainThread() && !mic.isRunning() && !mic.isStarting());
+            !args.success && args.message == "Selected capture device not found" &&
+            isMainThread() && !mic.isRunning() && !mic.isStarting());
     });
     mic.startAsync();
     internal::waitForResourceLoadsForTests();
     internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
     check("async missing capture ID reports exactly one failure and warning", events == 1 && missingWarnings == 4);
+    check("async missing capture ID emits no error log", errors == 0);
     mic.stop(); internal::waitForResourceLoadsForTests();
     internal::appRunToken()->store(false);
     internal::appRunToken().reset();

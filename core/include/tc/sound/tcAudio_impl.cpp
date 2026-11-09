@@ -2139,7 +2139,8 @@ bool AudioEngine::init(const AudioSettings& settings) {
         // preserve their playback position.
         logNotice("AudioEngine") << "re-initializing (" << sampleRate_ << " Hz, " << channels_
                                  << " ch -> " << settings.sampleRate << " Hz, "
-                                 << settings.channels << " ch, dev='" << settings.deviceName << "')";
+                                 << settings.channels << " ch, dev='"
+                                 << (settings.device ? settings.device->name : settings.deviceName) << "')";
 
         if (device_) {
             ma_device* device = static_cast<ma_device*>(device_);
@@ -2753,6 +2754,7 @@ MicStartResult openMic(MicState& state) {
             const std::string name = state.selectedDevice->name;
             ma_context_uninit(context);
             delete context;
+            state.startFailureLogged = true;
             logWarning("MicInput") << "capture device '" << name << "' not found; startup failed";
             return {false, "Selected capture device not found"};
         }
