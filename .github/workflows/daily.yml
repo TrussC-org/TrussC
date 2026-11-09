@@ -132,6 +132,9 @@ jobs:
       # Same cache keys as build.yml, so the sweep starts warm from PR builds
       # (the build-directory cache only when the runner image matches).
       - name: Setup compiler cache
+        id: compiler_cache
+        # Cache setup is optional on Windows; build and test failures still gate CI.
+        continue-on-error: ${{ runner.os == 'Windows' }}
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           variant: ${{ matrix.launcher }}
@@ -141,6 +144,7 @@ jobs:
           max-size: 2G
 
       - name: Enable compiler launcher
+        if: steps.compiler_cache.outcome == 'success'
         shell: bash
         run: |
           launcher="${{ matrix.launcher }}"
@@ -161,7 +165,9 @@ jobs:
         shell: bash
         run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
 
+      # A restored CMake cache may retain a launcher from an earlier run.
       - name: Cache build directories
+        if: steps.compiler_cache.outcome == 'success'
         uses: actions/cache@v5
         with:
           path: |

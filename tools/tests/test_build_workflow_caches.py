@@ -1,6 +1,6 @@
 """Offline checks that Build caches never save on merge_group (#352).
 
-Only boolean expressions and event-name comparisons are supported; unfamiliar
+Only boolean expressions and known context comparisons are supported; unfamiliar
 conditions fail closed so they require review instead of silently passing.
 """
 import ast
@@ -17,15 +17,16 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
-MATRIX_TERM = re.compile(r"matrix\.\w+\s*(?:==|!=)\s*(?:\d+|'[^']*')")
+CONTEXT_TERM = re.compile(
+    r"(?:matrix\.\w+|steps\.[\w-]+\.outcome)\s*(?:==|!=)\s*(?:\d+|'[^']*')")
 
 
 def on_merge_group(expression):
-    """Whether the expression can be true on merge_group. A matrix comparison
-    (e.g. `matrix.shard == 1`) can go either way in some job, so every
+    """Whether the expression can be true on merge_group. Matrix comparisons
+    and step outcomes can go either way, so every
     combination of their values is tried; any true one counts."""
     expression = expression.strip().removeprefix('${{').removesuffix('}}').strip()
-    terms = sorted(set(MATRIX_TERM.findall(expression)))
+    terms = sorted(set(CONTEXT_TERM.findall(expression)))
     for i, term in enumerate(terms):
         expression = expression.replace(term, f'_m{i}')
     expression = expression.replace('github.event_name', "'merge_group'")
@@ -72,6 +73,77 @@ class BuildWorkflowCacheTests(unittest.TestCase):
                                                     'hendrikmuhs/ccache-action@')):
                     with self.subTest(job=job_name, step=step.get('name', step['uses'])):
                         self.assertFalse(can_save_on_merge_group(step))
+
+    def test_windows_compiler_cache_is_optional_in_every_workflow(self):
+        # Scan release/daily workflows too, so a new Windows cache cannot
+        # silently reintroduce a fatal setup step.
+        windows_jobs = []
+        for path in sorted((ROOT / '.github/workflows').glob('*.yml')):
+            workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+            for job_name, job in workflow['jobs'].items():
+                matrix = job.get('strategy', {}).get('matrix', {})
+                runs_on = job.get('runs-on', '')
+                has_windows = 'windows' in (str(matrix) + str(runs_on)).lower()
+                for cache in job.get('steps', []):
+                    if not cache.get('uses', '').startswith('hendrikmuhs/ccache-action@'):
+                        continue
+                    if not has_windows:
+                        continue
+                    with self.subTest(workflow=path.name, job=job_name):
+                        windows_jobs.append((path.name, job_name))
+                        self.assertEqual(cache['continue-on-error'], "${{ runner.os == 'Windows' }}")
+                        self.assertEqual(cache['id'], 'compiler_cache')
+                        steps = job['steps']
+                        launcher = next(s for s in steps if s.get('name') == 'Enable compiler launcher')
+                        self.assertEqual(launcher['if'], "steps.compiler_cache.outcome == 'success'")
+                        self.assertLess(steps.index(cache), steps.index(launcher))
+                        for step in steps:
+                            name = step.get('name', '')
+                            if name.startswith('Cache build directories') or name == 'Verify cached warning replay (MSVC)':
+                                self.assertIn("steps.compiler_cache.outcome == 'success'", step['if'])
+                            # Build/test correctness must still fail the job.
+                            if name.startswith(('Build ', 'Build &', 'Run ')):
+                                self.assertNotIn('continue-on-error', step)
+        self.assertIn(('build.yml', 'build'), windows_jobs)
+        self.assertIn(('daily.yml', 'sweep'), windows_jobs)
+
+    @unittest.skipIf(sys.platform == 'win32', 'runs workflow launcher scripts through bash')
+    def test_windows_cache_failure_leaves_no_launcher_or_restored_cmake_cache(self):
+        from test_daily_workflow import should_run
+
+        for filename, job_name in [('build.yml', 'build'), ('daily.yml', 'sweep')]:
+            workflow = yaml.load((ROOT / '.github/workflows' / filename).read_text(encoding="utf-8"),
+                                 Loader=yaml.BaseLoader)
+            steps = workflow['jobs'][job_name]['steps']
+            launcher = next(s for s in steps if s.get('name') == 'Enable compiler launcher')
+            build = next(s for s in steps if s.get('name') == 'Build trusscli')
+            self.assertTrue(should_run(build, {}))
+            dependent = [s for s in steps if s.get('name', '').startswith('Cache build directories')
+                         or s.get('name') == 'Verify cached warning replay (MSVC)']
+            for outcome in ('success', 'failure'):
+                for event in ('pull_request', 'merge_group'):
+                    with self.subTest(workflow=filename, outcome=outcome, event=event), tempfile.TemporaryDirectory(dir=ROOT) as scratch:
+                        env_file = Path(scratch) / 'github-env'
+                        env_file.touch()
+                        for step in [launcher] + dependent:
+                            condition = step.get('if', 'true').replace('runner.os', "'Windows'")
+                            condition = condition.replace('github.event_name', repr(event))
+                            # continue-on-error makes the setup conclusion successful,
+                            # while its raw outcome remains failure for the guards.
+                            condition = condition.replace('steps.compiler_cache.outcome', repr(outcome))
+                            enabled = should_run({'if': condition}, {})
+                            if outcome == 'failure':
+                                self.assertFalse(enabled, step['name'])
+                            if step is launcher and enabled:
+                                script = step['run'].replace('${{ matrix.launcher }}', 'sccache')
+                                subprocess.run(['bash', '-eu', '-c', script], check=True,
+                                               env=dict(os.environ, GITHUB_ENV=str(env_file)))
+                        lines = env_file.read_text(encoding="utf-8").splitlines()
+                        if outcome == 'failure':
+                            self.assertEqual(lines, [])
+                        else:
+                            for lang in ('C', 'CXX', 'OBJC', 'OBJCXX'):
+                                self.assertIn(f'CMAKE_{lang}_COMPILER_LAUNCHER=sccache', lines)
 
     def test_render_cache_matches_linux_setup_and_shares_refs(self):
         job = self.workflow['jobs']['render-regression']
