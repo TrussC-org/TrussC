@@ -337,6 +337,7 @@ class Scope {
     };
 public:
     Scope() {
+        // Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring; visualize in update() via getAnalysisBuffer().
         listener_ = tc::AudioEngine::getInstance().audioOut.listen(
             [state = state_](tc::AudioOutBuffer& b) { state->push(b); },
             tc::audio::priority::Monitor);

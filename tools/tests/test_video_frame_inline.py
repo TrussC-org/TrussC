@@ -1,4 +1,4 @@
-"""Compile the production frame facade: delivery policies cannot be supplied."""
+"""Compile the production frame facade: only compile-time Inline delivery is accepted."""
 from pathlib import Path
 import os
 import subprocess
@@ -26,9 +26,12 @@ namespace internal { struct GrabberSharedState; }
         with tempfile.TemporaryDirectory() as scratch:
             source = Path(scratch)/'probe.cpp'
             for arguments, rejected in (('', False), (', 5', False),
+                                        (', trussc::Deliver::Inline', False),
+                                        (', trussc::Deliver::Inline, 5', False),
                                         (', trussc::Deliver::Main', True),
-                                        (', trussc::Deliver::Inline', True)):
-                source.write_text(prefix + declarations + '\n}\nvoid probe() {\n'
+                                        (', trussc::Deliver::Main, 5', True),
+                                        (', runtime', True), (', runtime, 5', True)):
+                source.write_text(prefix + declarations + '\n}\nvoid probe(trussc::Deliver runtime) {\n'
                                   'trussc::VideoFrameEvent event;\n'
                                   'auto listener = event.listen([](const trussc::VideoFrameView&) {}'
                                   + arguments + ');\n}\n', encoding='utf-8')
@@ -37,7 +40,10 @@ namespace internal { struct GrabberSharedState; }
                                          '-D__ANDROID__', str(source)], capture_output=True, text=True, encoding='utf-8')
                 self.assertEqual(result.returncode != 0, rejected, result.stderr)
                 if rejected:
-                    self.assertIn('Deliver', result.stderr)
+                    self.assertIn('constant expression', result.stderr)
+                    if 'Main' in arguments:
+                        self.assertIn('getQueuedFrames()', result.stderr)
+                        self.assertIn('isFrameNew()/getPixels()', result.stderr)
 
 
 if __name__ == '__main__':

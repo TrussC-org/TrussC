@@ -119,7 +119,7 @@ TC_CORE_TEST_MAIN() {
         nextListener = 0;
         frames += b.frameCount;
         ++calls;
-    }, Deliver::Main);
+    }, Deliver::Inline);
     std::thread capture([&] {
         for (int count : sizes) {
             samples.fill(float(calls + 1));
@@ -127,7 +127,7 @@ TC_CORE_TEST_MAIN() {
         }
     });
     capture.join();
-    check("every block is delivered inline, in order, including Deliver::Main", valid && calls == int(sizes.size()));
+    check("every block is delivered inline, in order, including explicit Inline", valid && calls == int(sizes.size()));
     check("every App receives every captured block in order", app->ordered && otherApp->ordered &&
           app->calls == calls && otherApp->calls == calls && app->frames == frames && otherApp->frames == frames);
     first.disconnect(); second.disconnect();

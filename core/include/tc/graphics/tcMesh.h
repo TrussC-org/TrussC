@@ -519,17 +519,31 @@ public:
         for (auto& v : vertices_) {
             v = m * v;
         }
-        // Transform normals (rotation only, no translation)
+        // Normals use the inverse-transpose of the upper 3x3, computed as its
+        // cofactor (det(m) * inverse-transpose(m)) and renormalized.
+        // Divide by the largest entry first so a small uniform scale doesn't
+        // shrink the result below the zero check (the direction is unchanged).
+        float largest = 0.0f;
+        for (int row = 0; row < 3; ++row)
+            for (int col = 0; col < 3; ++col)
+                largest = std::max(largest, std::abs(m.m[row * 4 + col]));
+        const float unit = largest > 0.0f ? 1.0f / largest : 0.0f;
+        const Vec3 column0(m.m[0] * unit, m.m[4] * unit, m.m[8] * unit);
+        const Vec3 column1(m.m[1] * unit, m.m[5] * unit, m.m[9] * unit);
+        const Vec3 column2(m.m[2] * unit, m.m[6] * unit, m.m[10] * unit);
+        // A mirror (det < 0) flips the cofactor; negate it so normals keep the
+        // inverse-transpose direction and stay outward, like Mesh::scale(-1, 1, 1).
+        const float sign = column0.dot(column1.cross(column2)) < 0.0f ? -1.0f : 1.0f;
+        const Vec3 cofactor0 = column1.cross(column2) * sign;
+        const Vec3 cofactor1 = column2.cross(column0) * sign;
+        const Vec3 cofactor2 = column0.cross(column1) * sign;
         for (auto& n : normals_) {
-            Vec3 transformed;
-            transformed.x = m.m[0] * n.x + m.m[1] * n.y + m.m[2] * n.z;
-            transformed.y = m.m[4] * n.x + m.m[5] * n.y + m.m[6] * n.z;
-            transformed.z = m.m[8] * n.x + m.m[9] * n.y + m.m[10] * n.z;
+            const Vec3 transformed = cofactor0 * n.x + cofactor1 * n.y + cofactor2 * n.z;
             // Normalize
             float len = std::sqrt(transformed.x * transformed.x +
                                   transformed.y * transformed.y +
                                   transformed.z * transformed.z);
-            if (len > 0.0001f) {
+            if (len > 1e-12f) {
                 n.x = transformed.x / len;
                 n.y = transformed.y / len;
                 n.z = transformed.z / len;
