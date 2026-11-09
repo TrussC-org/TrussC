@@ -844,8 +844,11 @@ void checkSurrogateSoundPath(const fs::path& directory) {
 } // namespace
 #endif
 
+bool audioInDeliveryDoesNotAllocate();
+
 int main() {
     getMainThreadId();   // this thread is the main thread
+    check("capture ring and inline delivery allocate nothing", audioInDeliveryDoesNotAllocate());
 
     EventListener logSub = getLogger().onLog.listen([](LogEventArgs& e) {
         lock_guard<mutex> lock(g_logMutex);

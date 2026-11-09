@@ -138,6 +138,7 @@ struct AudioEngine {
     static constexpr int DEFAULT_SAMPLE_RATE = 48000, DEFAULT_CHANNELS = 2,
                          DEFAULT_BUFFER_SIZE = 256, ANALYSIS_BUFFER_SIZE = 8;
     bool initialized_ = true;
+    std::atomic<bool> inputNotifyEnabled_{true};
     void* device_ = new ma_device;
     int sampleRate_ = 48000, channels_ = 2, bufferSize_ = 256, maxPolyphony_ = 3;
     mutable ObservedMutex mutex_;

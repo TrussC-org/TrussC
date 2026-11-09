@@ -56,7 +56,20 @@ TC_CORE_TEST_MAIN() {
     // playback unavailable: MicInput must not attempt lazy engine init.
     internal::setAudioDeviceFaultForTests(internal::AudioDeviceFaultForTests::OpenFails);
     check("playback open failure leaves engine stopped", !engine.init(settings) && !engine.isInitialized());
+    atomic<int> inputCalls{0};
+    atomic<bool> inputValid{true};
+    uint64_t inputFrames = 0; // only the capture thread touches this
+    auto inputListener = engine.audioIn.listen([&](AudioInBuffer& b) {
+        if (isMainThread() || b.channels != 1 || b.sampleRate != MicInput::DEFAULT_SAMPLE_RATE ||
+            b.frameCount <= 0 || b.framePosition != inputFrames || b.data[0] != 0.0f)
+            inputValid = false;
+        inputFrames += b.frameCount;
+        ++inputCalls;
+    });
     check("mic starts without playback", mic.start());
+    check("real Null capture delivers blocks inline", waitFor([&] { return inputCalls >= 3; }) && inputValid);
+    inputListener.disconnect();
+    engine.waitForAudioCallbacks();
     check("mic-only start does not initialize playback", !engine.isInitialized());
     check("mic-only capture callbacks advance", captureAdvances(mic));
     mic.stop();

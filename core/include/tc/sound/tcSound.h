@@ -82,6 +82,7 @@ protected:
 
 
 namespace internal {
+struct MicState;
 
 // Interleaved sample count of `frames` frames of `channels` channels, for
 // sizing SoundBuffer::samples. False when channels < 1 or when the count
@@ -798,9 +799,12 @@ struct AudioDeviceChangedArgs {
 // ADD their contribution to `data` (mixer already wrote pre-existing
 // Sound voices into it); zeroing or overwriting silences other voices.
 //
-// framePosition is a monotonic count of output frames emitted by the
-// engine since init(). Useful as a phase / time reference inside the
-// callback (sample-accurate, independent of wall clock).
+// Output framePosition counts frames since engine init(); input counts frames
+// since this MicInput start. Both are sample-accurate callback time references,
+// independent of wall clock.
+// Two running MicInputs both feed the one audioIn event, possibly concurrently
+// from two capture threads. Each framePosition starts at 0; AudioInBuffer has
+// no source ID.
 //
 // IMPORTANT: these structs are passed by reference to a callback that
 // runs on the audio thread. Do NOT call AudioEngine::play() / load() /
@@ -1082,6 +1086,9 @@ public:
     // sounds if you want the requested device.
     bool init();
     bool init(const AudioSettings& settings);
+    // Closes input-notify admission and drains audio callbacks; MicInput's ring
+    // keeps capturing. init() reopens admission, even if output init fails.
+    // Do not call shutdown() from an audio listener.
     void shutdown();
 
     // Device lifecycle (docs/DEVICE_LIFECYCLE.md). setup() is init() and
@@ -1129,11 +1136,11 @@ public:
 
     // Real-time audio listeners. audioOut fires once per audio device
     // callback AFTER all Sound voices have been mixed into the output
-    // buffer; listeners should ADD their contribution. audioIn is
-    // declared for microphone input, but nothing fires it today (no
-    // engine-side source, and MicInput does not route into it either), so
-    // a listener on it is never called (#907). Use MicInput to read the
-    // microphone.
+    // buffer; listeners should ADD their contribution. Native audioIn fires
+    // once per captured mono block while an explicitly started MicInput is
+    // capturing, on that device's capture thread. Web only updates the ring.
+    // Samples are borrowed for the callback only. Native input delivery is
+    // inline, including listeners registered with Deliver::Main.
     //
     // Listeners run on the audio thread with NO engine lock held. Do
     // not call AudioEngine::play() / Sound::load() / etc. from inside
@@ -1256,6 +1263,7 @@ private:
     friend internal::AudioDeviceReport internal::audioDeviceReport(bool);
     friend struct internal::AudioDeviceLoss;
     friend class MicInput;
+    friend struct internal::MicState;
     friend class SoundBuffer;
     friend void internal::seekVoice(PlayingSound&, double);
     friend double internal::voicePosition(const PlayingSound&);
@@ -1270,8 +1278,7 @@ private:
     // Mark an audioOut / audioIn notify in flight for waitForAudioCallbacks()
     // (tcAudio_impl.cpp). Audio thread; a thread_local depth and one atomic
     // add each, no lock. beginCallback() returns the slot to pass to
-    // endCallback(). audioIn is never fired today (#907): whatever starts
-    // firing it must enclose that notify the same way.
+    // endCallback(). Both output and native capture enclose their notify.
     int  beginCallback();
     void endCallback(int slot);
 
@@ -1548,6 +1555,8 @@ private:
     // releases it for onLog, then restarts both passes after reacquiring it.
     // The audio thread never takes it. Timed, so waitForAudioCallbacks() keeps its one-second limit
     // while a framework teardown holds it waiting for a stuck listener.
+    // Initially open for capture-only use; shutdown closes it, init reopens it.
+    std::atomic<bool>     inputNotifyEnabled_{true};
     std::atomic<uint32_t> callbackEpoch_{0};
     std::atomic<int>      callbacksInFlight_[2]{};
     std::timed_mutex      callbackBarrierMutex_;
@@ -2018,7 +2027,6 @@ struct MicStartResult {
     std::string message;
     explicit operator bool() const { return success; }
 };
-namespace internal { struct MicState; }
 
 class MicInput {
 public:
@@ -2047,7 +2055,9 @@ public:
     Event<MicStartResult> onStart;
     bool isStarting() const;
 
-    // Stop
+    // Stop closes input-notify admission and drains callbacks before returning,
+    // as does destruction. Calling either from an audio listener is unsupported:
+    // the callback barrier cannot wait for the calling callback itself.
     void stop();
 
     // Device lifecycle (docs/DEVICE_LIFECYCLE.md). The microphone is always

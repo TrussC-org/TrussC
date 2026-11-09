@@ -46,7 +46,12 @@ MicInput::~MicInput() {
     gate_->close();
     apply_.reset();
     lostApply_.reset();
-    if (state_) internal::cancelMic(state_);
+    if (state_) {
+        internal::cancelMic(state_);
+#ifndef __EMSCRIPTEN__
+        internal::waitForAudioCallbacksNoTimeout();
+#endif
+    }
 }
 bool MicInput::isStarting() const {
     return starting_ && state_ && !state_->cancelled && (!state_->runBound || internal::appRunIsAlive(state_->run));
@@ -62,6 +67,9 @@ void MicInput::stop() {
     lostApply_.reset();
     if (state_) {
         internal::cancelMic(state_);
+#ifndef __EMSCRIPTEN__
+        internal::waitForAudioCallbacksNoTimeout();
+#endif
         predecessor_ = std::move(state_);
         // Permission failures/cancellations have no worker to consume their
         // chain. Hand only unfinished cleanup forward, releasing completed
