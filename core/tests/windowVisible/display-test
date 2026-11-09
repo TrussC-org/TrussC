@@ -1,3 +1,4 @@
 {test} --display
 {test} --display --start-visible
 {test} --display --fullscreen
+{test} --display --draw-while-hidden

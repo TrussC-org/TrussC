@@ -489,6 +489,7 @@ static void cover_other() {
     (void)operator*(af::val<float>(), af::val<const Vec4>());
     (void)runtime();
     (void)saveScreenshotAsync(af::val<const fs::path>());
+    (void)setDrawWhileHidden(af::val<bool>());
     (void)setResourceLoadConcurrency(af::val<int>());
 }
 
@@ -4957,6 +4958,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<const Window>().isOpen();
         (void)af::val<const Window>().isVisible();
         (void)af::val<Window>().setClearColor(af::val<const Color>());
+        (void)af::val<Window>().setDrawWhileHidden(af::val<bool>());
         (void)af::val<Window>().setFps(af::val<float>());
         (void)af::val<Window>().setFullscreen(af::val<bool>());
         (void)af::val<Window>().setIndependentFps(af::val<float>(), af::val<float>());

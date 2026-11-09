@@ -41714,6 +41714,67 @@ description.ja = "setPosition と同じスクリーン座標系での、この�
 description.ko = "setPosition과 같은 스크린 좌표계에서의 이 윈도우의 현재 위치. 네이티브 윈도우가 없으면 (-1, -1)"
 related = ["Window::setPosition"]
 
+["Window::setDrawWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
+description.en = "Keeps this window drawing while hidden when enabled."
+description.ja = "有効にすると、非表示中もこのウィンドウの描画を続けます。"
+description.ko = "활성화하면 숨겨진 동안에도 이 윈도우의 그리기를 계속합니다."
+details.en = '''
+- With `true`, update and draw keep running while minimized or fully covered. Use this when `draw()` sends frames to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
+- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see `setDrawWhileHidden`).
+- The default is `false`: hidden windows keep updating and stop drawing. This window inherits the global default at creation; the last global or per-window call wins. A local call does not change the default for future windows.
+- Call on the main thread. The setting survives App replacement on this Window.
+'''
+details.ja = '''
+- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送る場合に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
+- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（`setDrawWhileHidden` を参照）。
+- 既定値は `false` で、非表示中も更新を続けますが描画は停止します。作成時にグローバルの既定値を引き継ぎ、その後はグローバルとウィンドウ単位の最後の呼び出しが優先されます。この呼び出しは今後作成するウィンドウの既定値を変更しません。
+- メインスレッドで呼び出してください。この Window の App を差し替えても設定を保持します。
+'''
+details.ko = '''
+- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 보낼 때 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
+- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(`setDrawWhileHidden` 참조).
+- 기본값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다. 생성 시 전역 기본값을 상속하며 이후에는 전역 호출과 윈도우별 호출 중 마지막 호출이 우선합니다. 이 호출은 앞으로 생성할 윈도우의 기본값을 변경하지 않습니다.
+- 메인 스레드에서 호출합니다. 이 Window의 App을 교체해도 설정을 유지합니다.
+'''
+related = ["setDrawWhileHidden", "Window::isOccluded", "Window::setVisible", "Window::setFps"]
+snippet = '''
+window->setDrawWhileHidden(true);
+'''
+
+["setDrawWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
+description.en = "Sets drawing while hidden for all existing windows and the default for new ones."
+description.ja = "非表示中に描画するかを全ウィンドウに設定し、新規ウィンドウの既定値にします。"
+description.ko = "숨겨진 동안 그릴지 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다."
+details.en = '''
+- Sets every existing window and becomes the default for new windows, even when called from one App's callbacks. The initial default is `false`: hidden windows keep updating and stop drawing.
+- With `true`, hidden windows keep updating and drawing, including while minimized or fully covered. This supports sending frames from `draw()` to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
+- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see the snippet).
+- `Window::setDrawWhileHidden()` changes one window only. The last global or per-window call wins. Call on the main thread; setup may set the policy before the first draw.
+'''
+details.ja = '''
+- ある App のコールバックから呼んだ場合も、既存のすべてのウィンドウに設定し、新規ウィンドウの既定値にします。初期値は `false` で、非表示中も更新を続けますが描画は停止します。
+- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送り続ける用途に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
+- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（スニペット参照）。
+- `Window::setDrawWhileHidden()` は 1 つのウィンドウだけを変更し、最後の呼び出しが優先されます。メインスレッドで呼び出してください。setup で初回描画の前に設定できます。
+'''
+details.ko = '''
+- 한 App의 콜백에서 호출해도 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다. 초기값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다.
+- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 계속 보내는 데 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
+- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(스니펫 참조).
+- `Window::setDrawWhileHidden()`는 하나의 윈도우만 변경하며 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다. setup에서 첫 그리기 전에 설정할 수 있습니다.
+'''
+related = ["Window::setDrawWhileHidden", "Window::isOccluded", "setFps"]
+snippet = '''
+EventListener occListener;  // member
+setDrawWhileHidden(true);
+// Optional: a slower rate while hidden
+occListener = events().occludedChanged.listen([](OccludedEventArgs& e) {
+    setFps(e.occluded ? 10 : VSYNC);
+});
+'''
+
 ["Window::setFps"]
 keywords = ["frame rate", "framerate", "throttle", "vsync", "speed"]
 description.en = "Sets this window's target frame rate."

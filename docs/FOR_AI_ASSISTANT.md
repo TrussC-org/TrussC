@@ -2665,6 +2665,7 @@ void requestExitApp() ⚠️deprecated  // Asks the process to quit, through a d
 Right  // Provides shorthand for `Direction::Right`.
 Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
+void setDrawWhileHidden(bool allow)  // Sets drawing while hidden for all existing windows and the default for new ones.
 void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
@@ -4848,6 +4849,7 @@ bool Window::isOpen() const  // Returns whether this window is open.
 bool Window::isVisible() const  // Returns this open window's requested visibility.
 void Window::setApp(Args &&... args)  // Creates a new App of the given class and puts it in this window.
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
+void Window::setDrawWhileHidden(bool allow)  // Keeps this window drawing while hidden when enabled.
 void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
 void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
