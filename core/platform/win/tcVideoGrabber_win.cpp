@@ -151,6 +151,9 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
                 if (internal::copyGrabberRGB32(data->backBuffer, rawData,
                         currentLength, w, h, data->bufferStride)) {
 
+                    state->notifyFrame(data->backBuffer, data->bufferWidth,
+                                       data->bufferHeight, arrivalUs);
+
                     // Publish under the State lock, including pointer/size checks.
                     {
                         std::lock_guard<std::mutex> lock(state->mtx);

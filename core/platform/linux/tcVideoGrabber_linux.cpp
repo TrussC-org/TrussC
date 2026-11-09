@@ -135,7 +135,7 @@ static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
     }
 
     stbi_image_free(decoded);
-    return true;
+    return w == width && h == height;
 }
 
 // =============================================================================
@@ -193,11 +193,18 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
         if (data->backBuffer && buf.index < data->bufferCount) {
             const unsigned char* src = (const unsigned char*)data->buffers[buf.index].start;
 
+            bool converted = false;
             if (data->pixelFormat == V4L2_PIX_FMT_YUYV) {
                 convertYUYVtoRGBA(src, data->backBuffer, data->bufferWidth, data->bufferHeight);
+                converted = true;
             } else if (data->pixelFormat == V4L2_PIX_FMT_MJPEG) {
-                decodeMJPEGtoRGBA(src, buf.bytesused, data->backBuffer,
-                                  data->bufferWidth, data->bufferHeight);
+                converted = decodeMJPEGtoRGBA(src, buf.bytesused, data->backBuffer,
+                                              data->bufferWidth, data->bufferHeight);
+            }
+
+            if (converted) {
+                state->notifyFrame(data->backBuffer, data->bufferWidth,
+                                   data->bufferHeight, arrivalUs);
             }
 
             // Publish under the State lock, including pointer/size checks.
