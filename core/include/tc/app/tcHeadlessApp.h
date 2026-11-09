@@ -73,7 +73,8 @@ namespace headless {
     // Headless-only state: hot reload is windowed and never runs this loop, so
     // a per-module copy is fine (tools/header_state_allowlist.txt).
 
-    // First signal only publishes; a second pending signal forces exit.
+    // First signal only publishes. On POSIX, while pending, SIGTERM is
+    // ignored and SIGINT forces exit (including after a pending SIGTERM).
     // The main thread acknowledges delivery and records the reason.
     static_assert(std::atomic<sig_atomic_t>::is_always_lock_free);
     inline std::atomic<sig_atomic_t> pendingSignal{0};
@@ -107,7 +108,9 @@ namespace headless {
 #else
     // POSIX signal handler
     inline void signalHandler(int sig) {
-        if (pendingSignal.exchange(sig, std::memory_order_relaxed)) _exit(128 + sig);
+        sig_atomic_t expected = 0;
+        if (!pendingSignal.compare_exchange_strong(expected, sig, std::memory_order_relaxed)
+            && sig == SIGINT) _exit(128 + sig);
     }
 #endif
 
@@ -123,7 +126,7 @@ namespace headless {
 
     // Main thread only, including between catch-up steps.
     inline void pollExitSignal() {
-        // Keep the pending value so a later signal escalates even after
+        // Keep the pending value so a later SIGINT escalates even after
         // delivery. Signals are uncancellable; only a new run resets it.
         const sig_atomic_t sig = pendingSignal.load(std::memory_order_relaxed);
         if (sig == deliveredSignal) return;
