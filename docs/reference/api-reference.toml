@@ -38333,6 +38333,109 @@ details.ko = '''
 - 실제 날짜나 시각을 나타내는 값이 아닙니다. 차이를 이용한 간격 계산이나 같은 시계를 사용하는 입력과의 동기화에 사용합니다.
 '''
 
+["VideoFrameView"]
+description.en = "Borrowed view of a converted camera frame, valid only during onFrame delivery."
+description.ja = "onFrame の呼び出し中だけ有効な、変換済みカメラフレームの借用ビューです。"
+description.ko = "onFrame 호출 중에만 유효한 변환된 카메라 프레임의 빌린 뷰입니다."
+details.en = '''
+- `pixels` and `byteSize` describe read-only, tightly packed RGBA8 bytes: `size_t(width) * height * 4`, R/G/B/A order, row stride `width * 4`. `format` is always `PixelFormat::U8` and `channels` is always 4.
+- `width` and `height` are the actual capture-buffer dimensions, even before a resized main-thread texture catches up.
+- `timestampUs` is the FIFO's same `steady_clock` arrival stamp in microseconds, recorded before conversion. Use differences only; it is neither wall time nor a device presentation timestamp.
+- The view and pixels expire when the listener returns. Copy anything you keep.
+'''
+details.ja = '''
+- `pixels` と `byteSize` は読み取り専用の密な RGBA8 バイト列を表します。サイズは `size_t(width) * height * 4`、順序は R/G/B/A、行ストライドは `width * 4` です。`format` は常に `PixelFormat::U8`、`channels` は常に 4 です。
+- `width` と `height` は実際のキャプチャバッファの寸法です。リサイズ後にメインスレッドのテクスチャが追いつく前でも、新しい寸法を示します。
+- `timestampUs` は FIFO と同じ `steady_clock` の到着時刻（マイクロ秒）で、変換前に記録します。差分の計算専用です。実時刻でもデバイスの表示時刻でもありません。
+- ビューとピクセルはリスナーが戻ると無効になります。保持するデータはコピーしてください。
+'''
+details.ko = '''
+- `pixels`와 `byteSize`는 읽기 전용의 촘촘한 RGBA8 바이트를 나타냅니다. 크기는 `size_t(width) * height * 4`, 순서는 R/G/B/A, 행 간격은 `width * 4`입니다. `format`은 항상 `PixelFormat::U8`이고 `channels`는 항상 4입니다.
+- `width`와 `height`는 실제 캡처 버퍼의 크기입니다. 크기가 변경된 메인 스레드 텍스처가 갱신되기 전에도 새 크기를 나타냅니다.
+- `timestampUs`는 FIFO와 동일한 `steady_clock` 도착 시각(마이크로초)이며 변환 전에 기록합니다. 시간 차이 계산에만 사용합니다. 실제 시각이나 장치 표시 타임스탬프가 아닙니다.
+- 리스너가 반환하면 뷰와 픽셀이 만료됩니다. 보관할 데이터는 복사합니다.
+'''
+related = ["VideoGrabber::onFrame", "GrabberFrame"]
+
+["VideoFrameView::pixels"]
+description.en = "Borrowed read-only tight RGBA8 bytes; valid only during the callback."
+description.ja = "コールバック中だけ有効な、読み取り専用の密な RGBA8 バイト列です。"
+description.ko = "콜백 중에만 유효한 읽기 전용의 촘촘한 RGBA8 바이트입니다."
+related = ["VideoFrameView", "VideoGrabber::onFrame"]
+
+["VideoFrameView::byteSize"]
+description.en = "Byte count: size_t(width) * height * 4."
+description.ja = "バイト数は size_t(width) * height * 4 です。"
+description.ko = "바이트 수는 size_t(width) * height * 4입니다."
+related = ["VideoFrameView", "VideoGrabber::onFrame"]
+
+["VideoFrameView::width"]
+description.en = "Actual capture-buffer width in pixels."
+description.ja = "実際のキャプチャバッファの幅（ピクセル）です。"
+description.ko = "실제 캡처 버퍼의 너비(픽셀)입니다."
+related = ["VideoFrameView", "VideoGrabber::onFrame"]
+
+["VideoFrameView::height"]
+description.en = "Actual capture-buffer height in pixels."
+description.ja = "実際のキャプチャバッファの高さ（ピクセル）です。"
+description.ko = "실제 캡처 버퍼의 높이(픽셀)입니다."
+related = ["VideoFrameView", "VideoGrabber::onFrame"]
+
+["VideoFrameView::format"]
+description.en = "Always PixelFormat::U8 (unsigned 8-bit components)."
+description.ja = "常に PixelFormat::U8（符号なし8ビット成分）です。"
+description.ko = "항상 PixelFormat::U8(부호 없는 8비트 성분)입니다."
+related = ["VideoFrameView", "VideoGrabber::onFrame"]
+
+["VideoFrameView::channels"]
+description.en = "Always four channels, in R/G/B/A byte order."
+description.ja = "常に4チャンネルで、バイト順は R/G/B/A です。"
+description.ko = "항상 4채널이며 바이트 순서는 R/G/B/A입니다."
+related = ["VideoFrameView", "VideoGrabber::onFrame"]
+
+["VideoFrameView::timestampUs"]
+description.en = "The FIFO arrival stamp: steady_clock microseconds recorded before conversion; use interval math only."
+description.ja = "FIFO と同じ到着時刻です。変換前に記録した steady_clock のマイクロ秒値で、差分の計算専用です。"
+description.ko = "FIFO와 같은 도착 시각입니다. 변환 전에 기록한 steady_clock 마이크로초 값이며 시간 차이 계산에만 사용합니다."
+related = ["VideoFrameView", "VideoGrabber::onFrame"]
+
+["VideoGrabber::onFrame"]
+description.en = "Subscribe to borrowed RGBA8 frames directly on the capture thread."
+description.ja = "キャプチャスレッドで借用 RGBA8 フレームを直接受け取ります。"
+description.ko = "캡처 스레드에서 빌린 RGBA8 프레임을 직접 수신합니다."
+details.en = '''
+- Keep the `EventListener` returned by `onFrame.listen(callback)` (optional integer priority). Multiple listeners use existing Event snapshot/removal rules. There is no `Deliver` overload: `Deliver::Main` fails to compile. Main-thread consumers can use `getQueuedFrames()`.
+- Register before `setup()`: capture can start before setup returns. Fires on macOS/iOS AVFoundation queues, the Windows MF worker, and the Linux V4L2 worker. On Web and Android it never fires; listening emits no warning.
+- Runs immediately after RGBA conversion, before latest-frame publication and FIFO push, outside their locks, with no extra pixel copy. FIFO capacity, copying, overflow and draining behavior are unchanged, including capacity zero. A slow callback delays capture and may cause driver drops.
+- CPU work only: no GPU/Node operations or waiting for the main thread. Return without throwing. Copy anything retained and synchronize callback-owned data shared with the app.
+- Listeners survive `close()`/`setup()`. Across moves they stay with the original public handle, like `onDisconnect`. On ordinary main-thread close/destruction, capture stops and running callbacks finish before buffers are released. Disconnecting a listener from another thread is not a wait/barrier; stop capture before releasing listener-owned data.
+- Grabber lifecycle, update or resize calls from a callback, callback-triggered restart, and concurrent lifecycle calls are unsupported; no additional lifecycle guards are provided.
+'''
+details.ja = '''
+- `onFrame.listen(callback)` が返す `EventListener` を保持してください。整数の優先度も指定できます。複数リスナーは既存の Event のスナップショットと解除の規則に従います。`Deliver` を指定するオーバーロードはなく、`Deliver::Main` はコンパイルできません。メインスレッドでは `getQueuedFrames()` を使えます。
+- `setup()` の前に登録してください。setup が戻る前にキャプチャが始まる場合があります。macOS/iOS の AVFoundation キュー、Windows の MF ワーカー、Linux の V4L2 ワーカーで発火します。Web と Android では発火せず、登録時の警告もありません。
+- RGBA 変換直後、最新フレームの公開と FIFO への追加の前に、それらのロックの外で実行します。追加のピクセルコピーはありません。容量 0 の場合も含め、FIFO の容量、コピー、あふれた場合の動作、取り出し方法は変わりません。遅いコールバックはキャプチャを遅らせ、ドライバー側でフレームを落とす場合があります。
+- CPU 処理専用です。GPU/Node の操作やメインスレッドの待機は行わず、例外を投げずに戻ってください。保持するデータはコピーし、アプリと共有するデータは同期してください。
+- リスナーは `close()`/`setup()` をまたいで保持します。move 時は `onDisconnect` と同様に元の公開ハンドルに残ります。通常のメインスレッドでの close や破棄では、キャプチャを停止し、実行中のコールバックが終わってからバッファを解放します。別スレッドでのリスナー解除は待機・バリアではありません。リスナーが所有するデータの解放前にキャプチャを停止してください。
+- コールバック内からのグラバーのライフサイクル・update・リサイズ操作や再起動、並行したライフサイクル操作はサポートしません。追加のライフサイクルガードはありません。
+'''
+details.ko = '''
+- `onFrame.listen(callback)`이 반환한 `EventListener`를 보관합니다. 정수 우선순위도 지정할 수 있습니다. 여러 리스너는 기존 Event의 스냅샷 및 제거 규칙을 따릅니다. `Deliver` 오버로드가 없으므로 `Deliver::Main`은 컴파일되지 않습니다. 메인 스레드에서는 `getQueuedFrames()`를 사용할 수 있습니다.
+- `setup()` 전에 등록합니다. setup이 반환되기 전에 캡처가 시작될 수 있습니다. macOS/iOS의 AVFoundation 큐, Windows의 MF 작업자, Linux의 V4L2 작업자에서 발생합니다. Web과 Android에서는 발생하지 않으며 등록 시 경고도 없습니다.
+- RGBA 변환 직후, 최신 프레임 게시와 FIFO 추가 전에 해당 잠금 밖에서 실행합니다. 추가 픽셀 복사는 없습니다. 용량이 0인 경우를 포함하여 FIFO 용량, 복사, 넘침 처리 및 비우기 동작은 그대로입니다. 느린 콜백은 캡처를 지연시켜 드라이버의 프레임 손실을 일으킬 수 있습니다.
+- CPU 작업 전용입니다. GPU/Node 작업이나 메인 스레드 대기를 수행하지 않고 예외 없이 반환합니다. 보관할 데이터는 복사하고 앱과 공유하는 데이터는 동기화합니다.
+- 리스너는 `close()`/`setup()` 후에도 유지됩니다. 이동 시 `onDisconnect`처럼 원래 공개 핸들에 남습니다. 일반적인 메인 스레드의 close나 소멸은 캡처를 중단하고 실행 중인 콜백이 끝난 후 버퍼를 해제합니다. 다른 스레드의 리스너 해제는 대기나 배리어가 아닙니다. 리스너 소유 데이터를 해제하기 전에 캡처를 중단합니다.
+- 콜백 안에서 그래버의 수명 주기, update, 크기 변경 또는 재시작을 호출하거나 수명 주기 호출을 동시에 수행하는 것은 지원하지 않습니다. 추가 수명 주기 가드는 제공하지 않습니다.
+'''
+related = ["VideoFrameView", "VideoGrabber::getQueuedFrames", "VideoGrabber::close"]
+example = '''
+// tcApp members: VideoGrabber grabber; EventListener frameListener;
+frameListener = grabber.onFrame.listen([](const VideoFrameView& f) {
+    // CPU processing only; copy pixels here if they must outlive this call.
+    (void)f;
+});
+'''
+
 ["VideoGrabber"]
 keywords = ["webcam", "camera", "capture", "live"]
 description.en = "Captures live camera frames as pixels and a texture."
@@ -65757,4 +65860,10 @@ related = ["StorageBuffer", "ComputeShader::setStorageBuffer", "Shader::setTextu
 
 # Internal validation shared by Shader and FullscreenShader.
 ["Shader::validateStorageBindings"]
+hide = true
+
+["VideoFrameEvent"]
+hide = true
+
+["VideoFrameEvent::listen"]
 hide = true

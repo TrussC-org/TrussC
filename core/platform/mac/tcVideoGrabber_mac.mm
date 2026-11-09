@@ -124,6 +124,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
             }
         }
 
+        state->notifyFrame(data->backBuffer, (int)width, (int)height, arrivalUs);
+
         // メインスレッド用バッファにコピー
         {
             // リサイズされてない場合のみコピー（リサイズはメインスレッドで処理）

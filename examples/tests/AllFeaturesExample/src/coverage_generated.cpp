@@ -4400,6 +4400,19 @@ struct Cover_VideoErrorEventArgs : af::Scope<VideoErrorEventArgs> {
     }
 };
 
+struct Cover_VideoFrameView : af::Scope<VideoFrameView> {
+    ~Cover_VideoFrameView(); // Never instantiated.
+    static void run() {
+        (void)af::val<VideoFrameView>().byteSize;
+        (void)af::val<VideoFrameView>().channels;
+        (void)af::val<VideoFrameView>().format;
+        (void)af::val<VideoFrameView>().height;
+        (void)af::val<VideoFrameView>().pixels;
+        (void)af::val<VideoFrameView>().timestampUs;
+        (void)af::val<VideoFrameView>().width;
+    }
+};
+
 struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
     ~Cover_VideoGrabber(); // Never instantiated.
     static void run() {
@@ -4428,7 +4441,7 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<const VideoGrabber>().getDeviceName();
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<const VideoGrabber>().getFrameQueueSize();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -4444,7 +4457,7 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
         (void)af::val<VideoGrabber>().getPixels();
         (void)af::val<const VideoGrabber>().getPixels();
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<VideoGrabber>().getQueuedFrames(af::val<std::vector<GrabberFrame>>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -4484,6 +4497,9 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().onDisconnect;
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
+        (void)af::val<VideoGrabber>().onFrame;
+#endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().requestCameraPermission();
 #endif
@@ -4499,7 +4515,7 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().setFilter(af::val<TextureFilter>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<VideoGrabber>().setFrameQueueSize(af::val<size_t>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -5251,6 +5267,7 @@ void af::coverGenerated() {
     af_generated::Cover_Vec4::run();
     af_generated::Cover_VideoDeviceInfo::run();
     af_generated::Cover_VideoErrorEventArgs::run();
+    af_generated::Cover_VideoFrameView::run();
     af_generated::Cover_VideoGrabber::run();
     af_generated::Cover_VideoPlayer::run();
     af_generated::Cover_VideoPlayerBase::run();

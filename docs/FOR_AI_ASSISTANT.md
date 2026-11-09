@@ -4646,6 +4646,11 @@ const std::string & VideoDeviceInfo::getUniqueId() const  // Returns the camera'
 ```cpp
 ```
 
+### VideoFrameView — Borrowed view of a converted camera frame, valid only during onFrame delivery.
+
+```cpp
+```
+
 ### VideoGrabber — Captures live camera frames as pixels and a texture.
 
 ```cpp
@@ -4655,10 +4660,10 @@ void VideoGrabber::copyToImage(Image & image) const [macos,windows,linux,ios,web
 int VideoGrabber::getDesiredFrameRate() const [macos,windows,linux,ios,web]  // Return the requested capture frame rate.
 int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return the selected camera device ID.
 const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the stored capture device name.
-size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the configured frame queue capacity.
+size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux,ios]  // Return the configured frame queue capacity.
 int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the current capture frame height.
 unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current camera pixel buffer.
-size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Move queued camera frames into a vector.
+size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux,ios]  // Move queued camera frames into a vector.
 Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture used to display the camera frame.
 int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the current capture frame width.
 bool VideoGrabber::isConnected() const [macos,windows,linux,ios,web]  // Return whether the camera is open.
@@ -4670,7 +4675,7 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,io
 void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access permission.
 void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Set the requested capture frame rate.
 void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select the camera device for setup.
-void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Set the capacity of the timestamped camera frame queue.
+void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux,ios]  // Set the capacity of the timestamped camera frame queue.
 bool VideoGrabber::setup(int width, int height) [+1] [macos,windows,linux,ios,web]  // Open the camera at a requested size, or reopen the last one.
 void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose camera logging.
 void VideoGrabber::update() [macos,windows,linux,ios,web]  // Process camera updates and upload the latest frame.
