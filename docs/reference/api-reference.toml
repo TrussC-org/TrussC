@@ -39579,17 +39579,17 @@ description.ja = "動画のフレームレートを返す。"
 description.ko = "비디오의 프레임 레이트를 반환한다."
 details.en = '''
 - Returns a positive finite frame rate in fps, or `0` when unknown or unloaded; Web always returns `0`. This getter does not log a warning.
-- Windows reads `MF_MT_FRAME_RATE`; Linux uses average frame-rate metadata, falling back to nominal metadata; macOS and iOS use the nominal rate. Frame counts and seeks derived from these rates are approximate for variable-frame-rate files.
+- On Windows, local MKV/WebM files use the declared `DefaultDuration` (or `0` if absent or invalid); URLs and other containers use `MF_MT_FRAME_RATE`. Linux uses average frame-rate metadata, falling back to nominal metadata; macOS and iOS use the nominal rate. Frame counts and seeks derived from these rates are approximate for variable-frame-rate files.
 - Unknown rates are not replaced with 30 fps: frame queries return `0` and frame operations do nothing, with one shared warning per player instance. Use `getPosition()`, `setPosition()`, and `getDuration()` for portable time-based control.
 '''
 details.ja = '''
 - 正の有限値のフレームレートを fps 単位で返します。不明な場合や未ロード時は `0`、Web では常に `0` を返します。この関数自体は警告を出力しません。
-- Windows は `MF_MT_FRAME_RATE` を読み取り、Linux は平均フレームレートのメタデータを使用し、取得できなければ公称値を使用します。macOS と iOS は公称値を使用します。可変フレームレートのファイルでは、これらの値から求めるフレーム数やシーク位置は近似になります。
+- Windows のローカル MKV/WebM ファイルは宣言された `DefaultDuration` を使用し、不明・不正な場合は `0` を返します。URL と他のコンテナは `MF_MT_FRAME_RATE` を使用します。Linux は平均フレームレートのメタデータを使用し、取得できなければ公称値を使用します。macOS と iOS は公称値を使用します。可変フレームレートのファイルでは、これらの値から求めるフレーム数やシーク位置は近似になります。
 - 不明なレートを 30 fps で代用しません。フレーム単位の取得は `0` を返し、操作は何も行わず、プレイヤーのインスタンスごとに共通の警告を一度だけ出力します。移植可能な時間ベースの制御には `getPosition()`、`setPosition()`、`getDuration()` を使用してください。
 '''
 details.ko = '''
 - 양의 유한한 프레임 레이트를 fps 단위로 반환합니다. 알 수 없거나 로드되지 않았으면 `0`을 반환하며 Web에서는 항상 `0`을 반환합니다. 이 함수 자체는 경고를 출력하지 않습니다.
-- Windows는 `MF_MT_FRAME_RATE`를 읽고, Linux는 평균 프레임 레이트 메타데이터를 사용하며 없으면 명목값을 사용합니다. macOS와 iOS는 명목값을 사용합니다. 가변 프레임 레이트 파일에서는 이 값으로 계산한 프레임 수와 탐색 위치가 근사값입니다.
+- Windows의 로컬 MKV/WebM 파일은 선언된 `DefaultDuration`을 사용하며 없거나 잘못된 경우 `0`을 반환합니다. URL과 다른 컨테이너는 `MF_MT_FRAME_RATE`를 사용합니다. Linux는 평균 프레임 레이트 메타데이터를 사용하며 없으면 명목값을 사용합니다. macOS와 iOS는 명목값을 사용합니다. 가변 프레임 레이트 파일에서는 이 값으로 계산한 프레임 수와 탐색 위치가 근사값입니다.
 - 알 수 없는 레이트를 30 fps로 대체하지 않습니다. 프레임 조회는 `0`을 반환하고 프레임 조작은 아무 작업도 하지 않으며, 플레이어 인스턴스마다 공통 경고를 한 번 출력합니다. 이식 가능한 시간 기반 제어에는 `getPosition()`, `setPosition()`, `getDuration()`을 사용하세요.
 '''
 related = ["VideoPlayerBase::getFrameRate", "VideoPlayerBase::getCurrentFrame", "VideoPlayerBase::getTotalFrames", "VideoPlayerBase::setFrame", "VideoPlayer::getPosition"]
