@@ -23,13 +23,16 @@ inline bool cubeElements(int side, size_t stride, size_t& elements) {
 }
 struct CubeData {
     int side = 0;
+    int curveSize = 0;
     std::string title;
+    std::vector<float> curve;
     std::vector<float> rgb;
 };
 inline bool parseCube(std::istream& input, CubeData& result, std::string& error) {
     CubeData parsed;
     std::string line;
     size_t expected = 0;
+    size_t expectedCurve = 0;
     bool sawData = false;
     while (std::getline(input, line)) {
         std::istringstream fields(line);
@@ -37,15 +40,33 @@ inline bool parseCube(std::istream& input, CubeData& result, std::string& error)
         if (!(fields >> keyword) || keyword[0] == '#') continue;
         if (keyword == "TITLE") {
             std::string title;
-            std::getline(fields, title);
-            auto first = title.find_first_not_of(" \t\r\"");
-            auto last = title.find_last_not_of(" \t\r\"");
-            if (first != std::string::npos) parsed.title = title.substr(first, last - first + 1);
-        } else if (keyword == "LUT_3D_SIZE") {
+            fields >> std::ws;
+            if (fields.peek() == '"') {
+                // Read up to the closing quote; backslashes are literal (Adobe Cube 1.0, 5.6).
+                fields.get();
+                std::getline(fields, title, '"');
+            } else {
+                std::getline(fields, title, '#');
+                const auto last = title.find_last_not_of(" \t\r");
+                title = last == std::string::npos ? "" : title.substr(0, last + 1);
+            }
+            parsed.title = std::move(title);
+        } else if (keyword == "LUT_3D_SIZE" || keyword == "LUT_1D_SIZE") {
             std::string extra;
-            if (parsed.side || sawData || !(fields >> parsed.side) ||
-                ((fields >> extra) && extra[0] != '#') ||
-                !cubeElements(parsed.side, 3, expected) || expected > parsed.rgb.max_size()) {
+            const bool curve = keyword == "LUT_1D_SIZE";
+            int& size = curve ? parsed.curveSize : parsed.side;
+            if (size || sawData || !(fields >> size) || size < 2 ||
+                ((fields >> extra) && extra[0] != '#')) {
+                error = "invalid LUT dimensions"; return false;
+            }
+            if (curve) {
+                // Bound (storage): RGB float entries and their bytes must fit host storage.
+                if (size_t(size) > SIZE_MAX / (3 * sizeof(float)) ||
+                    size_t(size) > parsed.curve.max_size() / 3) {
+                    error = "invalid LUT dimensions"; return false;
+                }
+                expectedCurve = size_t(size) * 3;
+            } else if (!cubeElements(size, 3, expected) || expected > parsed.rgb.max_size()) {
                 error = "invalid LUT dimensions"; return false;
             }
             // No reserve from the declaration: storage grows only with actual complete rows.
@@ -87,20 +108,23 @@ inline bool parseCube(std::istream& input, CubeData& result, std::string& error)
             }
             error = "unsupported LUT range (" + keyword + "): only full range is supported"; return false;
         } else {
-            if (keyword == "LUT_1D_SIZE") { error = "1D LUT not supported"; return false; }
             float r, g, b;
             std::istringstream row(line);
             std::string extra;
-            if (!expected || parsed.rgb.size() > expected - 3 || !(row >> r >> g >> b) ||
+            const bool curve = parsed.curve.size() < expectedCurve;
+            auto& table = curve ? parsed.curve : parsed.rgb;
+            const size_t count = curve ? expectedCurve : expected;
+            if (!count || table.size() > count - 3 || !(row >> r >> g >> b) ||
                 !std::isfinite(r) || !std::isfinite(g) || !std::isfinite(b) ||
                 ((row >> extra) && extra[0] != '#')) {
                 error = "invalid LUT row"; return false;
             }
             sawData = true;
-            parsed.rgb.insert(parsed.rgb.end(), {r, g, b});
+            table.insert(table.end(), {r, g, b});
         }
     }
-    if (input.bad() || !expected || parsed.rgb.size() != expected) {
+    if (input.bad() || (!expected && !expectedCurve) || parsed.rgb.size() != expected ||
+        parsed.curve.size() != expectedCurve) {
         error = "incomplete LUT table"; return false;
     }
     result = std::move(parsed);

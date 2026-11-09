@@ -1,0 +1,8 @@
+# Synthetic identity curve
+TITLE "Identity 1D"
+LUT_1D_SIZE 3 # three entries
+DOMAIN_MIN 0 0 0
+DOMAIN_MAX 1 1 1
+0 0 0
+0.5 0.5 0.5
+1 1 1 # endpoint
