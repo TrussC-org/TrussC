@@ -206,7 +206,7 @@ bool inheritedPipelineProbe() {
         setColor(0,1,0,0.5f); drawRect(0,0,16,16);
         fbo.end();
         const bool correct = role == internal::fillSelection(BlendMode::Add, depth) &&
-            appliedPipeline.depth.write_enabled == depth &&
+            !appliedPipeline.depth.write_enabled &&
             appliedPipeline.depth.compare == (depth ? SG_COMPAREFUNC_LESS_EQUAL : SG_COMPAREFUNC_ALWAYS) &&
             appliedPipeline.colors[0].blend.src_factor_rgb == SG_BLENDFACTOR_SRC_ALPHA &&
             appliedPipeline.colors[0].blend.dst_factor_rgb == SG_BLENDFACTOR_ONE;
