@@ -4513,6 +4513,9 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
         (void)af::val<VideoGrabber>().setDeviceID(af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().setDeviceUniqueID(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().setFilter(af::val<TextureFilter>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)

@@ -38165,22 +38165,22 @@ value_desc.ProRes4444.ko = "Apple ProRes 4444 — 알파를 지원하는 편집�
 ["VideoDeviceInfo"]
 keywords = ["camera", "webcam"]
 description.en = "Describes a camera returned by VideoGrabber::listDevices()."
-description.ja = "VideoGrabber::listDevices() が返すカメラの情報を表す。"
-description.ko = "VideoGrabber::listDevices()가 반환하는 카메라 정보를 나타낸다."
+description.ja = "VideoGrabber::listDevices() が返すカメラの情報を表します。"
+description.ko = "VideoGrabber::listDevices()가 반환하는 카메라 정보를 나타냅니다."
 details.en = '''
 - `deviceId` identifies the camera for `VideoGrabber::setDeviceID()`, `deviceName` is its display name, and `uniqueId` contains a platform-dependent identifier. A default-constructed value has ID `-1` and empty strings.
 - `getDeviceID()`, `getDeviceName()`, and `getUniqueId()` expose the same fields. The string getters return const references to this object's strings.
-- `uniqueId` is not uniformly persistent: macOS and iOS use the device identifier, Linux uses the device path, and Windows uses the enumeration index as a string.
+- `uniqueId` selects a camera through `VideoGrabber::setDeviceUniqueID()`. See `VideoDeviceInfo::uniqueId` for platform IDs and the Linux fallback.
 '''
 details.ja = '''
 - `deviceId` は `VideoGrabber::setDeviceID()` に渡すカメラの ID、`deviceName` は表示名、`uniqueId` はプラットフォーム依存の識別子です。デフォルト構築では ID は `-1`、文字列は空です。
 - `getDeviceID()`、`getDeviceName()`、`getUniqueId()` でも同じフィールドを取得できます。文字列のゲッターは、このオブジェクト内の文字列への const 参照を返します。
-- `uniqueId` の永続性は共通ではありません。macOS と iOS はデバイスの識別子、Linux はデバイスのパス、Windows は列挙時のインデックスを文字列にしたものを使います。
+- `uniqueId` は `VideoGrabber::setDeviceUniqueID()` での選択に使います。プラットフォーム別の ID と Linux の代替値は `VideoDeviceInfo::uniqueId` を参照してください。
 '''
 details.ko = '''
 - `deviceId`는 `VideoGrabber::setDeviceID()`에 전달할 카메라 ID, `deviceName`은 표시 이름, `uniqueId`는 플랫폼별 식별자입니다. 기본 생성 시 ID는 `-1`이고 문자열은 비어 있습니다.
 - `getDeviceID()`, `getDeviceName()`, `getUniqueId()`로 같은 필드를 읽을 수 있습니다. 문자열 getter는 이 객체의 문자열에 대한 const 참조를 반환합니다.
-- `uniqueId`의 지속성은 플랫폼마다 다릅니다. macOS와 iOS는 기기 식별자, Linux는 기기 경로, Windows는 열거 인덱스를 문자열로 사용합니다.
+- `uniqueId`는 `VideoGrabber::setDeviceUniqueID()`를 통한 선택에 사용합니다. 플랫폼별 ID와 Linux 대체 값은 `VideoDeviceInfo::uniqueId`를 참조합니다.
 '''
 related = ["VideoGrabber"]
 
@@ -38261,20 +38261,23 @@ details.ko = '''
 '''
 
 ["VideoDeviceInfo::uniqueId"]
-description.en = "Stores the camera's platform-provided identifier."
-description.ja = "カメラのプラットフォーム別の識別子を保持する。"
-description.ko = "카메라의 플랫폼별 식별자를 저장한다."
+description.en = "Stores the camera's stable platform identifier."
+description.ja = "カメラの安定したプラットフォーム識別子を保持します。"
+description.ko = "카메라의 안정적인 플랫폼 식별자를 저장합니다."
 details.en = '''
-- This `string` is initially empty. Camera enumeration uses the native device unique ID on macOS/iOS, the enumeration index as a decimal string on Windows, the `/dev/videoN` path on Linux, and `"default"` on web.
-- The Windows index and Linux device path do not guarantee stable identity across device reordering.
+- Initially empty. macOS/iOS use `AVCaptureDevice.uniqueID`; Windows uses the VIDCAP symbolic link converted to UTF-8; Linux uses the `/dev/v4l/by-path/...` link pointing to the device, falling back to `/dev/videoN` when unavailable. Web uses the placeholder `"default"`.
+- Native IDs remain stable across reboots while the camera stays in the same USB port; the Linux fallback node path can change. Pass this string to `VideoGrabber::setDeviceUniqueID()` before setup.
+- Windows and Linux values have changed from enumeration-index strings and node paths. Save existing configured IDs again; use `deviceId` for numeric selection.
 '''
 details.ja = '''
-- 型は `string` で、初期状態では空です。カメラ一覧では、macOS/iOS はネイティブのデバイス固有 ID、Windows は列挙順の番号を十進文字列にした値、Linux は `/dev/videoN` のパス、web は `"default"` を設定します。
-- Windows の番号と Linux のデバイスパスは、デバイスの順序が変わっても同じ機器を識別できることを保証しません。
+- 初期状態は空です。macOS/iOS は `AVCaptureDevice.uniqueID`、Windows は UTF-8 に変換した VIDCAP シンボリックリンク、Linux はデバイスを指す `/dev/v4l/by-path/...` リンクを使います。Linux でリンクがなければ `/dev/videoN` を使います。Web は仮の値 `"default"` です。
+- ネイティブの ID は、カメラを同じ USB ポートに接続している間は再起動後も安定しています。Linux の代替ノードパスは変わる場合があります。この文字列はセットアップ前に `VideoGrabber::setDeviceUniqueID()` へ渡します。
+- Windows と Linux の値は、列挙順の番号の文字列とノードパスから変更されています。保存済みの ID は保存し直してください。番号で選択する場合は `deviceId` を使います。
 '''
 details.ko = '''
-- 형식은 `string`이며 초기 상태에서는 비어 있습니다. 카메라 목록에서는 macOS/iOS는 네이티브 장치 고유 ID, Windows는 열거 순서의 번호를 십진수 문자열로 변환한 값, Linux는 `/dev/videoN` 경로, web은 `"default"`를 설정합니다.
-- Windows의 번호와 Linux의 장치 경로는 장치 순서가 바뀌어도 같은 기기를 식별한다고 보장하지 않습니다.
+- 초기 상태는 비어 있습니다. macOS/iOS는 `AVCaptureDevice.uniqueID`, Windows는 UTF-8로 변환한 VIDCAP 심볼릭 링크, Linux는 장치를 가리키는 `/dev/v4l/by-path/...` 링크를 사용합니다. Linux에서 링크가 없으면 `/dev/videoN`을 사용합니다. Web은 임시 값 `"default"`를 사용합니다.
+- 네이티브 ID는 카메라를 같은 USB 포트에 연결하는 동안 재부팅 후에도 유지됩니다. Linux의 대체 노드 경로는 바뀔 수 있습니다. 이 문자열을 설정 전에 `VideoGrabber::setDeviceUniqueID()`에 전달합니다.
+- Windows와 Linux의 값은 열거 인덱스 문자열과 노드 경로에서 변경되었습니다. 저장한 ID는 다시 저장합니다. 번호로 선택하려면 `deviceId`를 사용합니다.
 '''
 
 ["GrabberFrame"]
@@ -38632,19 +38635,19 @@ details.ko = '''
 
 ["VideoGrabber::getDeviceID"]
 description.en = "Return the selected camera device ID."
-description.ja = "選択したカメラのデバイス ID を返す。"
-description.ko = "선택한 카메라 디바이스 ID를 반환한다."
+description.ja = "選択したカメラのデバイス ID を返します。"
+description.ko = "선택한 카메라 디바이스 ID를 반환합니다."
 details.en = '''
 - Returns the stored selection, initially `0`; it does not verify that the device exists or that capture is active.
-- Changing the selection during capture changes this value without switching the active camera; see `VideoGrabber::setDeviceID`.
+- `setDeviceID()` changes this value without switching the active camera. With `setDeviceUniqueID()`, the numeric ID is resolved during setup; see `VideoGrabber::setDeviceUniqueID`.
 '''
 details.ja = '''
 - 保存された選択値を返します。初期値は `0` です。デバイスの存在やキャプチャ中かどうかは確認しません。
-- キャプチャ中に選択値を変更すると、使用中のカメラは切り替わらず、この戻り値だけが変わります。`VideoGrabber::setDeviceID` を参照してください。
+- `setDeviceID()` は使用中のカメラを切り替えずにこの値を変更します。`setDeviceUniqueID()` の場合、番号はセットアップ時に解決します。`VideoGrabber::setDeviceUniqueID` を参照してください。
 '''
 details.ko = '''
 - 저장된 선택값을 반환하며 초기값은 `0`입니다. 디바이스 존재 여부나 캡처 중인지는 확인하지 않습니다.
-- 캡처 중 선택값을 변경하면 사용 중인 카메라는 전환되지 않고 이 반환값만 바뀝니다. `VideoGrabber::setDeviceID`를 참조합니다.
+- `setDeviceID()`는 사용 중인 카메라를 전환하지 않고 이 값을 변경합니다. `setDeviceUniqueID()`의 경우 숫자 ID는 설정할 때 확인합니다. `VideoGrabber::setDeviceUniqueID`를 참조합니다.
 '''
 
 ["VideoGrabber::getDeviceName"]
@@ -38862,21 +38865,24 @@ details.ko = '''
 
 ["VideoGrabber::listDevices"]
 description.en = "Return the available camera device list."
-description.ja = "利用可能なカメラデバイスの一覧を返す。"
-description.ko = "사용 가능한 카메라 디바이스 목록을 반환한다."
+description.ja = "利用可能なカメラデバイスの一覧を返します。"
+description.ko = "사용 가능한 카메라 디바이스 목록을 반환합니다."
 details.en = '''
+- Pass `uniqueId` to `setDeviceUniqueID()` to select by stable identity instead of list order; see `VideoDeviceInfo::uniqueId`.
 - Returns a `vector<VideoDeviceInfo>` containing device IDs, names, and unique ID strings; pass a returned device ID to `setDeviceID()` before setup.
 - Native enumeration can return an empty list when no devices are found or enumeration fails.
 - Linux scans accessible capture devices from `/dev/video0` through `/dev/video9`; IDs are device-number suffixes and need not be consecutive.
 - Web returns one placeholder entry, `{0, "Default Camera", "default"}`, without enumerating hardware; Android returns an empty list.
 '''
 details.ja = '''
+- 一覧の順番によらず選択する場合は `uniqueId` を `setDeviceUniqueID()` に渡します。`VideoDeviceInfo::uniqueId` を参照してください。
 - デバイス ID、名前、一意識別子の文字列を含む `vector<VideoDeviceInfo>` を返します。使用する ID はセットアップ前に `setDeviceID()` へ渡してください。
 - ネイティブ環境では、デバイスが見つからない場合や列挙に失敗した場合に空の一覧を返すことがあります。
 - Linux ではアクセス可能な `/dev/video0` から `/dev/video9` のキャプチャデバイスを調べます。ID はデバイス名の末尾の番号で、連番とは限りません。
 - Web はハードウェアを列挙せず、仮の項目 `{0, "Default Camera", "default"}` を 1 件返します。Android は空の一覧を返します。
 '''
 details.ko = '''
+- 목록 순서와 관계없이 선택하려면 `uniqueId`를 `setDeviceUniqueID()`에 전달합니다. `VideoDeviceInfo::uniqueId`를 참조합니다.
 - 디바이스 ID, 이름, 고유 식별자 문자열을 포함한 `vector<VideoDeviceInfo>`를 반환합니다. 사용할 ID는 설정 전에 `setDeviceID()`에 전달합니다.
 - 네이티브 환경에서는 디바이스가 없거나 열거에 실패하면 빈 목록을 반환할 수 있습니다.
 - Linux에서는 접근 가능한 `/dev/video0`부터 `/dev/video9`까지의 캡처 디바이스를 검색합니다. ID는 디바이스 이름 끝의 번호이며 연속되지 않을 수 있습니다.
@@ -38964,42 +38970,74 @@ details.ko = '''
 
 ["VideoGrabber::setDesiredFrameRate"]
 description.en = "Set the requested capture frame rate."
-description.ja = "要求するキャプチャフレームレートを設定する。"
-description.ko = "요청할 캡처 프레임 레이트를 설정한다."
+description.ja = "要求するキャプチャフレームレートを設定します。"
+description.ko = "요청할 캡처 프레임 레이트를 설정합니다."
 details.en = '''
 - Stores an integer frame rate in frames per second for the next setup; the default `-1` leaves the rate unspecified, and only positive values are submitted as rate requests.
 - Call before `setup()`; changing this value does not reconfigure an active capture session.
-- macOS, iOS, and Linux attempt to apply the request subject to device support; Windows and Web ignore it, so the actual rate is not guaranteed.
+- Windows and macOS use fps support to break ties between equally close native sizes. macOS, iOS, and Linux also attempt to apply the requested rate subject to device support. Web ignores it; the actual rate is not guaranteed.
 '''
 details.ja = '''
 - 次回のセットアップに使うフレームレートを整数の fps で保存します。既定値の `-1` は未指定で、正の値だけがレートの要求として使われます。
 - `setup()` の前に呼んでください。値を変更しても実行中のキャプチャは再設定されません。
-- macOS、iOS、Linux はデバイスの対応範囲で要求の適用を試みます。Windows と Web は無視するため、実際のレートは保証されません。
+- Windows と macOS は、同じ距離のネイティブサイズ間では fps の対応を優先します。macOS、iOS、Linux はデバイスの対応範囲で要求レートの適用も試みます。Web は無視し、実際のレートは保証されません。
 '''
 details.ko = '''
 - 다음 설정에 사용할 프레임 레이트를 정수 fps로 저장합니다. 기본값 `-1`은 미지정이며 양수만 레이트 요청에 사용됩니다.
 - `setup()` 전에 호출합니다. 값을 변경해도 실행 중인 캡처는 다시 설정되지 않습니다.
-- macOS, iOS, Linux는 디바이스 지원 범위에서 요청 적용을 시도합니다. Windows와 Web은 무시하므로 실제 레이트는 보장되지 않습니다.
+- Windows와 macOS는 거리가 같은 네이티브 크기에서 fps 지원을 우선합니다. macOS, iOS, Linux는 장치 지원 범위에서 요청 레이트 적용도 시도합니다. Web은 무시하며 실제 레이트는 보장되지 않습니다.
 '''
 
 ["VideoGrabber::setDeviceID"]
 description.en = "Select the camera device for setup."
-description.ja = "セットアップで使うカメラデバイスを選択する。"
-description.ko = "설정에 사용할 카메라 디바이스를 선택한다."
+description.ja = "セットアップで使うカメラデバイスを選択します。"
+description.ko = "설정에 사용할 카메라 디바이스를 선택합니다."
 details.en = '''
+- Clears a prior `setDeviceUniqueID()` selection; the last setter wins.
 - Stores an integer device ID, initially `0`; use an ID returned by `listDevices()` and call this function before `setup()`.
 - The setter does not validate the ID or switch an active camera; Web ignores the selection.
 - It also makes the next `setup()` open this index, not the camera name remembered from an earlier open.
 '''
 details.ja = '''
+- 以前の `setDeviceUniqueID()` の指定を解除します。最後に呼んだ設定関数が優先されます。
 - 整数のデバイス ID を保存します。初期値は `0` です。`listDevices()` が返した ID を使い、`setup()` の前に呼んでください。
 - この設定処理は ID を検証せず、使用中のカメラも切り替えません。Web はこの選択を無視します。
 - 以前に開いたカメラの名前の記憶も消えるため、次の `setup()` はこの番号を開きます。
 '''
 details.ko = '''
+- 이전 `setDeviceUniqueID()` 선택을 해제합니다. 마지막으로 호출한 설정 함수를 우선합니다.
 - 정수 디바이스 ID를 저장하며 초기값은 `0`입니다. `listDevices()`가 반환한 ID를 사용하고 `setup()` 전에 호출합니다.
 - 이 설정 함수는 ID를 검증하거나 사용 중인 카메라를 전환하지 않습니다. Web은 이 선택을 무시합니다.
 - 이전에 연 카메라 이름의 기억도 지워지므로, 다음 `setup()`은 이 번호를 엽니다.
+'''
+
+["VideoGrabber::setDeviceUniqueID"]
+keywords = ["camera", "uniqueId", "device", "stable"]
+description.en = "Selects a camera by its unique ID for the next setup."
+description.ja = "次回のセットアップで使うカメラを一意識別子で選択します。"
+description.ko = "다음 설정에 사용할 카메라를 고유 식별자로 선택합니다."
+related = ["VideoGrabber::setDeviceID", "VideoGrabber::listDevices", "VideoDeviceInfo::uniqueId", "VideoGrabber::setup"]
+details.en = '''
+- Call before `setup()` with a `uniqueId` returned by `listDevices()`. Each setup resolves it in a fresh list and opens that device, overriding the remembered camera name. `getDeviceID()` then contains the resolved numeric ID.
+- The last of `setDeviceID()` and `setDeviceUniqueID()` wins. The setter does not switch a running camera, and the selection persists across close, setup, and moves.
+- An empty or missing ID makes setup log an error and return false, without opening another camera. On Web only the `"default"` placeholder is available.
+'''
+details.ja = '''
+- `listDevices()` が返す `uniqueId` を指定し、`setup()` の前に呼びます。毎回のセットアップで新しい一覧から ID を解決し、記憶したカメラ名より優先してそのデバイスを開きます。その後の `getDeviceID()` は解決した番号を返します。
+- `setDeviceID()` と `setDeviceUniqueID()` は最後に呼んだ方が優先されます。実行中のカメラは切り替えません。指定は close、setup、ムーブ後も保持されます。
+- ID が空、または一覧にない場合、セットアップはエラーログを出して false を返し、別のカメラは開きません。Web では仮の値 `"default"` だけを利用できます。
+'''
+details.ko = '''
+- `listDevices()`가 반환한 `uniqueId`로 `setup()` 전에 호출합니다. 설정할 때마다 새 목록에서 ID를 확인하고, 기억한 카메라 이름보다 우선하여 해당 장치를 엽니다. 이후 `getDeviceID()`는 확인한 숫자 ID를 반환합니다.
+- `setDeviceID()`와 `setDeviceUniqueID()` 중 마지막으로 호출한 함수를 우선합니다. 실행 중인 카메라는 전환하지 않습니다. 선택은 close, setup, 이동 후에도 유지됩니다.
+- ID가 비어 있거나 목록에 없으면 설정은 오류 로그를 남기고 false를 반환하며 다른 카메라는 열지 않습니다. Web에서는 임시 값 `"default"`만 사용할 수 있습니다.
+'''
+snippet = '''
+// tcApp member: VideoGrabber camera; string savedCameraId;
+void tcApp::setup() {
+    camera.setDeviceUniqueID(savedCameraId);
+    camera.setup(1280, 720);
+}
 '''
 
 ["VideoGrabber::setFrameQueueSize"]
@@ -39067,11 +39105,13 @@ details.ko = '''
 
 ["VideoGrabber::setup"]
 description.en = "Open the camera at a requested size, or reopen the last one."
-description.ja = "指定した寸法でカメラを開く、または最後のカメラを開き直す。"
-description.ko = "요청한 크기로 카메라를 열거나 마지막 카메라를 다시 연다."
+description.ja = "指定した寸法でカメラを開く、または最後のカメラを開き直します。"
+description.ko = "요청한 크기로 카메라를 열거나 마지막 카메라를 다시 엽니다."
 related = ["VideoGrabber::isConnected", "VideoGrabber::close", "VideoGrabber::onDisconnect", "VideoGrabber::setDeviceID"]
 details.en = '''
-- `setup(int width, int height)` requests dimensions in pixels, with no defaults, and first closes any previous capture without firing `onDisconnect`; actual dimensions can differ, so read `getWidth()` and `getHeight()`. It opens the camera with the name it remembers from the last successful open, or, before any, the device chosen by `setDeviceID()`; it also remembers the requested size.
+- Windows and macOS choose the closest native size by Euclidean distance, preferring support for the desired fps at equal distance and otherwise preserving enumeration order. Windows sets that native mode, then requests RGB32 at the chosen size, and fails if the final subtype is not RGB32. This can change the mode, fps, subtype, or CPU cost of previously working Windows cameras.
+- `setDeviceUniqueID()` overrides name selection: every setup resolves that exact ID against `listDevices()`, and an empty or missing ID logs an error and returns false. `setDeviceID()` clears this selection.
+- `setup(int width, int height)` requests dimensions in pixels, with no defaults, and first closes any previous capture without firing `onDisconnect`; actual dimensions can differ, so read `getWidth()` and `getHeight()`. Without an explicit unique ID, it opens the camera with the name it remembers from the last successful open, or, before any, the device chosen by `setDeviceID()`; it also remembers the requested size.
 - `setup()` with no arguments reopens the camera with the last settings: the camera with the same name as the last one that opened, and the size of the last `setup(width, height)` (before any open: the `setDeviceID()` device, 0 by default, at 640 × 480). The name is looked up in a fresh `listDevices()`, because the order of cameras can change while one is unplugged. If no camera has that name, it logs an error and returns false; it never opens another camera. Two cameras with the same name cannot be told apart, so the first one opens. Calling `setDeviceID()` makes the next `setup()` use that index again. On failure it logs an error and returns false. Use it to reconnect, for example `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`.
 - Returns true after platform setup and allocation of a zero-filled RGBA8 CPU buffer and a streaming texture; a captured frame need not be available yet.
 - Until the first `isFrameNew()` after setup, the texture can still show the previous camera image (for example the last frame before an unplug). To draw only live frames, start drawing after `isFrameNew()` has been true once.
@@ -39082,7 +39122,9 @@ details.en = '''
 - Android capture is unimplemented: permission checks return false and permission requests only log a warning, so setup remains pending.
 '''
 details.ja = '''
-- `setup(int width, int height)` はピクセル単位で寸法を要求します。既定値はありません。最初に以前のキャプチャを、`onDisconnect` を発火せずに閉じます。実際の寸法は異なる場合があるため、`getWidth()` と `getHeight()` で確認してください。最後に開けたカメラの名前を覚えていればその名前のカメラを、まだ開けていなければ `setDeviceID()` で選んだデバイスを開き、要求したサイズも覚えます。
+- Windows と macOS はユークリッド距離で最も近いネイティブサイズを選びます。同距離では要求 fps に対応するモードを優先し、それ以外は列挙順を保ちます。Windows はそのモードを設定後、選択したサイズの RGB32 を要求し、最終サブタイプが RGB32 でなければ失敗します。従来動作していた Windows カメラでも、モード、fps、サブタイプ、CPU 負荷が変わる場合があります。
+- `setDeviceUniqueID()` は名前による選択より優先されます。毎回のセットアップで `listDevices()` からその ID を解決します。空、または一覧にない ID はエラーログを出して false を返します。`setDeviceID()` はこの指定を解除します。
+- `setup(int width, int height)` はピクセル単位で寸法を要求します。既定値はありません。最初に以前のキャプチャを、`onDisconnect` を発火せずに閉じます。実際の寸法は異なる場合があるため、`getWidth()` と `getHeight()` で確認してください。一意識別子の指定がなければ、最後に開けたカメラの名前を覚えていればその名前のカメラを、まだ開けていなければ `setDeviceID()` で選んだデバイスを開き、要求したサイズも覚えます。
 - 引数なしの `setup()` は、最後の設定でカメラを開き直します。最後に開いたカメラと同じ名前のカメラと、最後の `setup(width, height)` のサイズです（一度も開いていなければ、`setDeviceID()` のデバイス（既定は 0）の 640 × 480）。カメラが抜き差しされるとデバイスの並び順が変わることがあるため、名前は新しい `listDevices()` から探します。その名前のカメラがなければ、エラーログを出して false を返し、別のカメラは開きません。同じ名前のカメラが 2 台あると区別できず、最初の 1 台が開きます。`setDeviceID()` を呼ぶと、次の `setup()` はその番号を使います。失敗するとエラーログを出して false を返します。再接続に使います。例: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
 - プラットフォームのセットアップと、0 で埋めた RGBA8 の CPU バッファおよびストリーミングテクスチャの確保後に true を返します。この時点でキャプチャ済みフレームがあるとは限りません。
 - セットアップ後、最初に `isFrameNew()` が true になるまでは、テクスチャに前のカメラ画像（抜く前の最後のフレームなど）が残っていることがあります。新しい映像だけを描きたいときは、`isFrameNew()` が一度 true になってから描き始めてください。
@@ -39093,7 +39135,9 @@ details.ja = '''
 - Android のキャプチャは未実装です。許可確認は false を返し、許可要求は警告を出すだけなので、セットアップは待機状態のままです。
 '''
 details.ko = '''
-- `setup(int width, int height)`는 픽셀 단위로 크기를 요청하며 기본값이 없습니다. 먼저 이전 캡처를 `onDisconnect` 없이 닫습니다. 실제 크기는 다를 수 있으므로 `getWidth()`와 `getHeight()`로 확인합니다. 마지막으로 연 카메라의 이름을 기억하고 있으면 그 이름의 카메라를, 아직 연 적이 없으면 `setDeviceID()`로 고른 장치를 열고 요청한 크기도 기억합니다.
+- Windows와 macOS는 유클리드 거리로 가장 가까운 네이티브 크기를 선택합니다. 거리가 같으면 요청 fps를 지원하는 모드를 우선하고, 그 외에는 열거 순서를 유지합니다. Windows는 해당 모드를 설정한 뒤 선택한 크기의 RGB32를 요청하며 최종 하위 형식이 RGB32가 아니면 실패합니다. 기존에 작동하던 Windows 카메라도 모드, fps, 하위 형식, CPU 부하가 바뀔 수 있습니다.
+- `setDeviceUniqueID()`는 이름 선택보다 우선합니다. 설정할 때마다 `listDevices()`에서 해당 ID를 확인합니다. 비어 있거나 목록에 없는 ID는 오류 로그를 남기고 false를 반환합니다. `setDeviceID()`는 이 선택을 해제합니다.
+- `setup(int width, int height)`는 픽셀 단위로 크기를 요청하며 기본값이 없습니다. 먼저 이전 캡처를 `onDisconnect` 없이 닫습니다. 실제 크기는 다를 수 있으므로 `getWidth()`와 `getHeight()`로 확인합니다. 고유 식별자를 지정하지 않으면 마지막으로 연 카메라의 이름을 기억하고 있을 때 그 이름의 카메라를, 아직 연 적이 없으면 `setDeviceID()`로 고른 장치를 열고 요청한 크기도 기억합니다.
 - 인수 없는 `setup()`은 마지막 설정으로 카메라를 다시 엽니다. 마지막으로 연 카메라와 같은 이름의 카메라와 마지막 `setup(width, height)`의 크기입니다(한 번도 연 적이 없다면 `setDeviceID()`의 장치(기본값 0)의 640 × 480). 카메라를 뽑고 꽂으면 장치 순서가 바뀔 수 있으므로, 이름은 새 `listDevices()`에서 찾습니다. 그 이름의 카메라가 없으면 오류 로그를 남기고 false를 반환하며, 다른 카메라는 열지 않습니다. 이름이 같은 카메라가 2대 있으면 구분할 수 없어 첫 번째가 열립니다. `setDeviceID()`를 호출하면 다음 `setup()`은 그 번호를 사용합니다. 실패하면 오류 로그를 남기고 false를 반환합니다. 재연결에 사용합니다. 예: `if (!camera.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); camera.setup(); }`
 - 플랫폼 설정과 0으로 채운 RGBA8 CPU 버퍼 및 스트리밍 텍스처 할당 후 true를 반환합니다. 이 시점에 캡처된 프레임이 있다는 뜻은 아닙니다.
 - 설정 후 처음으로 `isFrameNew()`가 true가 될 때까지 텍스처에 이전 카메라 이미지(뽑기 전 마지막 프레임 등)가 남아 있을 수 있습니다. 새 영상만 그리려면 `isFrameNew()`가 한 번 true가 된 뒤부터 그립니다.
