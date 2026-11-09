@@ -122,6 +122,39 @@ namespace priority {
 // and the existing listen(fn, int priority) overloads never collide.
 enum class Deliver { Inline, Main };
 
+// Borrowed device buffers cannot be queued. Keep a separate diagnostic for
+// each event and reject runtime delivery choices at the call site.
+struct AudioOutBuffer;
+struct AudioInBuffer;
+namespace internal {
+// A runtime Deliver value fails as "not a constant expression" and points here:
+// audioOut runs on the audio thread; read AudioEngine::getAnalysisBuffer() in update().
+struct AudioOutDelivery {
+    consteval AudioOutDelivery(Deliver delivery) {
+        if (delivery != Deliver::Inline)
+            throw "audioOut runs on the audio thread; read AudioEngine::getAnalysisBuffer() in update() to visualize";
+    }
+};
+// audioIn runs on the capture thread; read MicInput::getBuffer() in update().
+struct AudioInDelivery {
+    consteval AudioInDelivery(Deliver delivery) {
+        if (delivery != Deliver::Inline)
+            throw "audioIn runs on the capture thread; read MicInput::getBuffer() in update()";
+    }
+};
+// onFrame runs on the capture thread; use getQueuedFrames() or isFrameNew()/getPixels() in update().
+struct VideoFrameDelivery {
+    consteval VideoFrameDelivery(Deliver delivery) {
+        if (delivery != Deliver::Inline)
+            throw "onFrame runs on the capture thread; use getQueuedFrames() or isFrameNew()/getPixels() in update()";
+    }
+};
+template<class T>
+inline constexpr bool isAudioEvent = std::is_same_v<T, AudioOutBuffer> || std::is_same_v<T, AudioInBuffer>;
+template<class T>
+using AudioEventDelivery = std::conditional_t<std::is_same_v<T, AudioOutBuffer>, AudioOutDelivery, AudioInDelivery>;
+}
+
 // ---------------------------------------------------------------------------
 // Event<T> - Event with arguments
 // ---------------------------------------------------------------------------
@@ -161,7 +194,7 @@ public:
     [[nodiscard]] EventListener listen(Callback callback) {
         return listen(std::move(callback), defaultPriority_);
     }
-    [[nodiscard]] EventListener listen(Callback callback, Deliver deliver) {
+    [[nodiscard]] EventListener listen(Callback callback, Deliver deliver) requires (!internal::isAudioEvent<T>) {
         return listen(std::move(callback), deliver, defaultPriority_);
     }
     template<typename Obj>
@@ -169,7 +202,7 @@ public:
         return listen(obj, method, defaultPriority_);
     }
     template<typename Obj>
-    [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&), Deliver deliver) {
+    [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&), Deliver deliver) requires (!internal::isAudioEvent<T>) {
         return listen(obj, method, deliver, defaultPriority_);
     }
     [[deprecated("Use 'listener = event.listen(callback)' instead")]]
@@ -194,7 +227,7 @@ public:
     // Same, but declare the delivery thread. listen(fn, Deliver::Main) runs the
     // listener on the main thread regardless of which thread fires notify().
     [[nodiscard]] EventListener listen(Callback callback, Deliver deliver,
-                                       int priority) {
+                                       int priority) requires (!internal::isAudioEvent<T>) {
         EventListener listener;
         listenImpl(listener, std::move(callback), deliver, priority);
         return listener;
@@ -213,10 +246,31 @@ public:
     template<typename Obj>
     [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&),
                                        Deliver deliver,
-                                       int priority) {
+                                       int priority) requires (!internal::isAudioEvent<T>) {
         return listen([obj, method](T& arg) {
             (obj->*method)(arg);
         }, deliver, priority);
+    }
+
+    // Audio events accept only a compile-time Inline choice. Omission and
+    // explicit integer priorities continue to use the existing inline path.
+    [[nodiscard]] EventListener listen(Callback callback, internal::AudioEventDelivery<T>)
+        requires internal::isAudioEvent<T> {
+        return listen(std::move(callback), defaultPriority_);
+    }
+    [[nodiscard]] EventListener listen(Callback callback, internal::AudioEventDelivery<T>, int priority)
+        requires internal::isAudioEvent<T> {
+        return listen(std::move(callback), priority);
+    }
+    template<typename Obj>
+    [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&), internal::AudioEventDelivery<T>)
+        requires internal::isAudioEvent<T> {
+        return listen(obj, method, defaultPriority_);
+    }
+    template<typename Obj>
+    [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&), internal::AudioEventDelivery<T>, int priority)
+        requires internal::isAudioEvent<T> {
+        return listen(obj, method, priority);
     }
 
     // Deprecated: use `listener = event.listen(callback)` instead
