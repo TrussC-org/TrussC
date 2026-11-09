@@ -17949,19 +17949,19 @@ description.ja = "メッシュの頂点と法線に行列を適用する。"
 description.ko = "메시의 정점과 법선에 행렬을 적용한다."
 details.en = '''
 - `transform(const Mat4& m)` changes the stored geometry on the CPU, replacing each vertex with `m * v`; it includes translation and division by the resulting homogeneous `w`, without checking for zero.
-- Normals are multiplied by the upper-left 3×3 part of `m`, without translation or an inverse transpose. Each result is normalized only when its length exceeds `0.0001f`; otherwise the original normal is retained.
+- Normals are transformed by the inverse transpose of the upper-left 3×3 part of `m`, without translation, and renormalized. This handles non-uniform scale and shear, and a mirror keeps them pointing outward, matching `scale()`. A degenerate matrix that maps a normal to zero leaves that normal unchanged.
 - Tangents, colors, texture coordinates, and indices remain unchanged.
 - Returns `Mesh&` for chaining and marks the mesh changed for the next GPU upload.
 '''
 details.ja = '''
 - `transform(const Mat4& m)` は CPU 上の保存済みジオメトリを変更し、各頂点を `m * v` に置き換えます。平行移動と変換後の同次座標 `w` による除算を含み、`w` が 0 かどうかは確認しません。
-- 法線には `m` の左上の 3×3 部分を掛け、平行移動や逆転置行列は使用しません。結果の長さが `0.0001f` を超える場合だけ正規化し、それ以外は元の法線を保持します。
+- 法線には `m` の左上の 3×3 部分の逆転置行列を適用し（平行移動は含みません）、正規化し直します。非一様スケールとせん断に対応し、鏡映でも法線は外向きのままで、`scale()` と一致します。法線が 0 になる退化した行列では、その法線を変更しません。
 - 接線、色、テクスチャ座標、インデックスは変更しません。
 - 呼び出しを連結できるように `Mesh&` を返し、次の GPU アップロードに向けてメッシュを変更済みとして記録します。
 '''
 details.ko = '''
 - `transform(const Mat4& m)`은 CPU에 저장된 지오메트리를 변경하며 각 정점을 `m * v`로 교체합니다. 평행 이동과 변환 후의 동차 좌표 `w`에 의한 나눗셈을 포함하며, `w`가 0인지는 확인하지 않습니다.
-- 법선에는 `m`의 왼쪽 위 3×3 부분을 곱하며, 평행 이동이나 역전치 행렬은 사용하지 않습니다. 결과의 길이가 `0.0001f`를 초과할 때만 정규화하고, 그 외에는 원래 법선을 유지합니다.
+- 법선에는 `m`의 왼쪽 위 3×3 부분의 역전치 행렬을 적용하고(평행 이동은 포함하지 않습니다) 다시 정규화합니다. 비균일 스케일과 전단을 처리하며, 반사 시에도 법선은 바깥쪽을 향하고 `scale()`과 일치합니다. 법선이 0이 되는 퇴화 행렬에서는 해당 법선을 변경하지 않습니다.
 - 접선, 색상, 텍스처 좌표, 인덱스는 변경하지 않습니다.
 - 호출을 연결할 수 있도록 `Mesh&`를 반환하며, 다음 GPU 업로드를 위해 메시가 변경된 것으로 기록합니다.
 '''
