@@ -371,12 +371,9 @@ bool VideoGrabber::setupPlatform() {
         return false;
     }
     const auto& mode = modes[selected];
-    logNotice("VideoGrabber") << "Native mode: " << mode.width << "x" << mode.height
-                             << " (requested " << state_->requestedWidth << "x" << state_->requestedHeight << ")";
-
-    if (!mode.frameRates.empty()) {
-        logNotice("VideoGrabber") << "Native frame rate: " << mode.frameRates.front().maxFrameRate;
-    }
+    logNotice("VideoGrabber") << "Native mode: " << mode.width << "x" << mode.height << " @ "
+                             << (mode.frameRates.empty() ? 0.0 : mode.frameRates.front().maxFrameRate)
+                             << " fps (requested " << state_->requestedWidth << "x" << state_->requestedHeight << ")";
 
     // Set output format to RGB32 (BGRA, better supported than RGB24)
     IMFMediaType* outputType = nullptr;
