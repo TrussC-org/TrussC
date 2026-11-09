@@ -23,6 +23,8 @@ Inspired by openFrameworks, implemented simply with modern C++.
 Build it once from `tools/` (run `tools/build_mac.command`, `tools/build_linux.sh`, or `tools/build_win.bat`) to create projects via GUI.
 Supports VSCode, Cursor, Xcode, and Visual Studio.
 
+Project and binary names replace each character outside ASCII letters, digits, `_ . + -` with one `_` (a non-ASCII character such as 日 counts as one); reserved names get `app_`, and the folder keeps its name.
+
 ### Command Line Build
 
 ```bash

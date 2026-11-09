@@ -1,6 +1,7 @@
 #include "TrussC.h"
 #include "tcApp.h"
 #include "ProjectGenerator.h"
+#include "ProjectName.h"
 #include "GeneratedFile.h"
 #include "ProjectState.h"
 #include "BuildSetup.h"
@@ -761,6 +762,8 @@ static void printNewHelp() {
          << "Create a new TrussC project at <path>. The project name is the last\n"
          << "path component (e.g. `trusscli new ./apps/myApp` creates ./apps/myApp\n"
          << "with name 'myApp').\n"
+         << "Project/binary names replace bytes outside ASCII letters, digits, _ . + -\n"
+         << "with _; reserved names get app_. The folder keeps its name.\n"
          << "\n"
          << "Options:\n"
          << "      --web                  Enable Web (WebAssembly) build\n"
@@ -1277,6 +1280,8 @@ static void printUpdateHelp() {
          << "Regenerate build files (CMakeLists.txt, CMakePresets.json, IDE files)\n"
          << "for the TrussC project in the current directory. The addon list is\n"
          << "read from the existing addons.make.\n"
+         << "Project/binary names replace bytes outside ASCII letters, digits, _ . + -\n"
+         << "with _; reserved names get app_. The folder keeps its name.\n"
          << "\n"
          << "The IDE, the Web / Android / iOS targets and the web backend are kept\n"
          << "from the project's CMakePresets.json. Flags change them: --ide switches\n"
@@ -3637,6 +3642,7 @@ static int cmdBuild(const vector<string>& args) {
     fs::path projectDir = fs::weakly_canonical(projectPath, nameEc);
     string projectName = projectDir.filename().string();
     if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
+    projectName = sanitizeProjectName(projectName);
 
     // Run from the project directory
     string savedCwd = fs::current_path().string();
@@ -3851,7 +3857,7 @@ static int cmdRun(const vector<string>& args) {
         return 1;
     }
 
-    string projectName = fs::canonical(projectPath).filename().string();
+    string projectName = sanitizeProjectName(fs::canonical(projectPath).filename().string());
 
     // Android / iOS: not yet implemented — check before building
     if (target == "android") {
