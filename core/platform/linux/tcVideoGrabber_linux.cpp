@@ -219,23 +219,24 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
                                               data->bufferWidth, data->bufferHeight, data->rgbaBytes);
             }
 
+            // A frame that didn't convert (e.g. an MJPEG of another size) is not published.
             if (converted) {
                 state->notifyFrame(data->backBuffer, data->bufferWidth,
                                    data->bufferHeight, arrivalUs);
-            }
 
-            // Publish under the State lock, including pointer/size checks.
-            {
-                std::lock_guard<std::mutex> lock(state->mtx);
-                if (state->pixels && state->width == data->bufferWidth &&
-                    state->height == data->bufferHeight) {
-                    std::memcpy(state->pixels.get(), data->backBuffer,
-                                data->rgbaBytes);
-                    state->dirty.store(true);
+                // Publish under the State lock, including pointer/size checks.
+                {
+                    std::lock_guard<std::mutex> lock(state->mtx);
+                    if (state->pixels && state->width == data->bufferWidth &&
+                        state->height == data->bufferHeight) {
+                        std::memcpy(state->pixels.get(), data->backBuffer,
+                                    data->rgbaBytes);
+                        state->dirty.store(true);
+                    }
                 }
+                state->frameQueue.push(data->backBuffer, data->bufferWidth,
+                                       data->bufferHeight, arrivalUs);
             }
-            state->frameQueue.push(data->backBuffer, data->bufferWidth,
-                                   data->bufferHeight, arrivalUs);
         }
 
         // Re-queue buffer
