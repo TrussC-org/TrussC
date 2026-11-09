@@ -18080,6 +18080,7 @@ details.en = '''
 - Serialize operations on each instance on the main thread. The capture callback and `getBuffer()` protect sample copying with a mutex. Instances cannot be copied or moved; destruction cancels capture, and `stop()` also cancels pending startup.
 - On native platforms, `start()` returns whether startup succeeded. On macOS and iOS, undecided microphone consent is requested and `start()` returns `false`; call it again after permission is granted. `startAsync()` instead waits for the answer and reports completion through `onStart` on the main thread during `runApp` or `runHeadlessApp`; completion events are not delivered without an app run.
 - On Web, startup requires a secure context and a user gesture. `start()` returns `true` after submitting the request, before capture is ready; use `isRunning()` to check readiness or `startAsync()` with `onStart` to receive the result.
+- On Linux with PulseAudio or PipeWire and no microphone, an output's monitor can become the default input, so `start()` succeeds and captures silence.
 - Audio-listener restrictions are described in `AudioEngine`.
 '''
 details.ja = '''
@@ -18088,6 +18089,7 @@ details.ja = '''
 - 各インスタンスの操作はメインスレッドで順に行ってください。入力コールバックと `getBuffer()` は、サンプルのコピーをミューテックスで保護します。インスタンスはコピーもムーブもできません。破棄すると入力をキャンセルし、`stop()` は開始待ちの処理もキャンセルします。
 - ネイティブ環境では、`start()` は開始の成否を返します。macOS と iOS でマイクの許可が未決定の場合は、許可を要求して `false` を返します。許可後に再度呼んでください。`startAsync()` は回答を待ち、`runApp` または `runHeadlessApp` の実行中にメインスレッドの `onStart` で結果を通知します。アプリの実行ループがなければ完了イベントは通知されません。
 - Web では安全なコンテキストとユーザー操作からの開始が必要です。`start()` は要求を送信した時点で `true` を返し、その時点では入力が始まっていない場合があります。`isRunning()` で開始を確認するか、`startAsync()` と `onStart` で結果を受け取ってください。
+- Linux で PulseAudio または PipeWire を使い、マイクがない場合は、出力のモニターが既定の入力になることがあります。その場合 `start()` は成功し、無音を取り込みます。
 - オーディオのリスナー内での制約は `AudioEngine` を参照してください。
 '''
 details.ko = '''
@@ -18096,6 +18098,7 @@ details.ko = '''
 - 각 인스턴스의 작업은 메인 스레드에서 순서대로 수행해야 합니다. 입력 콜백과 `getBuffer()`는 뮤텍스로 샘플 복사를 보호합니다. 인스턴스는 복사하거나 이동할 수 없습니다. 파괴하면 입력을 취소하며 `stop()`은 대기 중인 시작 작업도 취소합니다.
 - 네이티브 환경에서 `start()`는 시작 성공 여부를 반환합니다. macOS와 iOS에서 마이크 권한이 미정이면 권한을 요청하고 `false`를 반환합니다. 허용 후 다시 호출해야 합니다. `startAsync()`는 응답을 기다린 뒤 `runApp` 또는 `runHeadlessApp` 실행 중 메인 스레드의 `onStart`로 결과를 알립니다. 앱 실행 루프가 없으면 완료 이벤트를 전달하지 않습니다.
 - Web에서는 보안 컨텍스트와 사용자 동작에서 시작해야 합니다. `start()`는 요청을 제출한 시점에 `true`를 반환하며 이때 입력이 아직 준비되지 않았을 수 있습니다. `isRunning()`으로 준비 여부를 확인하거나 `startAsync()`와 `onStart`로 결과를 받습니다.
+- Linux에서 PulseAudio 또는 PipeWire를 사용하고 마이크가 없으면 출력의 모니터가 기본 입력이 될 수 있습니다. 이 경우 `start()`는 성공하고 무음을 캡처합니다.
 - 오디오 리스너 내부의 제약은 `AudioEngine`을 참조하세요.
 '''
 related = ["getMicInput", "AudioEngine", "getMicAnalysisBuffer"]
