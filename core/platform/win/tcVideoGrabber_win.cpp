@@ -361,7 +361,11 @@ bool VideoGrabber::setupPlatform() {
     const int selected = internal::selectGrabberFormat(modes,
         state_->requestedWidth, state_->requestedHeight, desiredFrameRate_);
     UINT64 selectedFrameRate = 0;
-    if (selected >= 0) nativeTypes[selected]->GetUINT64(MF_MT_FRAME_RATE, &selectedFrameRate);
+    GUID selectedSubtype = GUID_NULL;
+    if (selected >= 0) {
+        nativeTypes[selected]->GetUINT64(MF_MT_FRAME_RATE, &selectedFrameRate);
+        nativeTypes[selected]->GetGUID(MF_MT_SUBTYPE, &selectedSubtype);
+    }
     hr = selected < 0 ? MF_E_INVALIDMEDIATYPE : data->sourceReader->SetCurrentMediaType(
         MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, nativeTypes[selected]);
     for (auto* type : nativeTypes) type->Release();
@@ -371,7 +375,14 @@ bool VideoGrabber::setupPlatform() {
         return false;
     }
     const auto& mode = modes[selected];
-    logNotice("VideoGrabber") << "Native mode: " << mode.width << "x" << mode.height << " @ "
+    // Video subtypes carry their FOURCC in Data1 (YUY2, MJPG, NV12); show others as a number.
+    std::string nativeFourcc;
+    for (int shift = 0; shift < 32; shift += 8) {
+        const char c = char((selectedSubtype.Data1 >> shift) & 0xFF);
+        if (c < 0x20 || c > 0x7E) { nativeFourcc = std::to_string(selectedSubtype.Data1); break; }
+        nativeFourcc += c;
+    }
+    logNotice("VideoGrabber") << "Native mode: " << mode.width << "x" << mode.height << " " << nativeFourcc << " @ "
                              << (mode.frameRates.empty() ? 0.0 : mode.frameRates.front().maxFrameRate)
                              << " fps (requested " << state_->requestedWidth << "x" << state_->requestedHeight << ")";
 
