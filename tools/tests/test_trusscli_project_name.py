@@ -41,7 +41,9 @@ class SanitizerTests(unittest.TestCase):
 #include <cassert>
 int main() {
     assert(sanitizeProjectName("sample project") == "sample_project");
-    assert(sanitizeProjectName("\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e") == "_________");
+    assert(sanitizeProjectName("\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e") == "___");
+    assert(sanitizeProjectName("a\xff" "b") == "a_b");
+    assert(sanitizeProjectName("a\xe6\x97" "b") == "a__b");
     assert(sanitizeProjectName("+ ( ) & ' #") == "+__________");
     assert(sanitizeProjectName("9valid_Name-1.2+3") == "9valid_Name-1.2+3");
     assert(sanitizeProjectName("") == "app");
@@ -162,7 +164,7 @@ class GeneratorTests(unittest.TestCase):
         self.assertTrue(project.is_dir())
 
     def test_new_and_update_keep_folder_and_use_sanitized_target(self):
-        cases = [("sample project", "sample_project"), ("日本語", "_________"),
+        cases = [("sample project", "sample_project"), ("日本語", "___"),
                  ("+ ( ) & '", "+________"), ("hash#project", "hash_project"),
                  ("9valid_Name-1.2+3", "9valid_Name-1.2+3"),
                  ("all", "app_all"), ("test", "app_test")]
