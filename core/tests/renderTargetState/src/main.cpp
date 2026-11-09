@@ -1,7 +1,10 @@
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
+#include <array>
+#include <cstdlib>
 #include <cstdio>
+#include <string>
 #include <cstring>
 #if defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 #include <X11/Xlib.h>
@@ -172,6 +175,7 @@ bool sameMatrix(const Mat4&, const Mat4&);
 #include "matrixChecks.h"
 #include "depthSetterChecks.h"
 #include "easyCamDepthChecks.h"
+#include "blendDepthChecks.h"
 #include "cameraChecks.h"
 #include "resizeChecks.h"
 }

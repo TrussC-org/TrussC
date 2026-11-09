@@ -47,6 +47,12 @@ inline sg_vertex_layout_state sglColorVertexLayout() {
     return layout;
 }
 
+// Order-independent blended passes test opaque depth without becoming occluders.
+constexpr bool blendModeWritesDepth(BlendMode mode) {
+    return mode != BlendMode::Add && mode != BlendMode::Screen &&
+           mode != BlendMode::Multiply && mode != BlendMode::Subtract;
+}
+
 // --- Role blend/depth specs (the blend tables formerly duplicated in tcGlobal.cpp).
 // Pixel format / sample count / depth format are left at defaults on purpose: sgl
 // fills them from the target's context, so the same desc is correct for swapchain
@@ -102,11 +108,10 @@ inline sg_pipeline_desc pipeDesc2D(BlendMode mode, bool depthTest = false) {
             b.enabled = false;
             break;
     }
-    // Depth-tested variant (tc::enableDepthTest()): same depth config as the 3D
-    // pipeline (pipeDesc3D below), so blended draws can rejoin the scene's depth
-    // buffer after a blend-mode change mid-frame.
+    // Blended draws can rejoin the scene's depth buffer after a blend change;
+    // order-independent modes leave the stored depth unchanged.
     if (depthTest) {
-        d.depth.write_enabled = true;
+        d.depth.write_enabled = blendModeWritesDepth(mode);
         d.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
     }
     return d;

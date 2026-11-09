@@ -45428,25 +45428,31 @@ related = ["EaseType", "EaseFunction", "easeIn", "easeInOut", "ease"]
 ["enableDepthTest"]
 category = "graphics_style"
 keywords = ["depth", "z-buffer", "occlusion", "3d", "blend", "restore"]
-description.en = "Turns the depth test on for ordinary (blend-mode) drawing, so nearer shapes hide farther ones."
-description.ja = "通常の（ブレンドモードでの）描画でデプステストを有効にし、手前の図形が奥の図形を隠すようにする。"
-description.ko = "일반(블렌드 모드) 그리기에서 깊이 테스트를 켜서 가까운 도형이 먼 도형을 가리게 한다."
+description.en = "Turns the depth test on for ordinary (blend-mode) drawing."
+description.ja = "通常の（ブレンドモードでの）描画でデプステストを有効にする。"
+description.ko = "일반(블렌드 모드) 그리기에서 깊이 테스트를 켠다."
 details.en = '''
-- Ordinary blend-mode drawing starts with depth testing off. With it enabled, a pixel passes when it is as near as or nearer than the stored depth (LESS_EQUAL), then writes its depth.
+- Ordinary blend-mode drawing starts with depth testing off. With it enabled, a pixel passes when it is as near as or nearer than the stored depth (LESS_EQUAL).
+- `Add`, `Screen`, `Multiply` and `Subtract` test depth without writing it, so previously drawn opaque geometry hides them while draws using the same blend mode can combine in either order. `Alpha` (the default, also used for opaque 3D) and `Disabled` keep writing depth.
+- A translucent `Alpha` shape also writes depth, hiding anything drawn behind it afterwards. For correct transparency, draw opaque objects first, then translucent ones from back to front; TrussC does not sort draws.
 - Applies to the current blend mode and subsequent blend changes, style resets, image draws, and child Node draws.
 - `EasyCam::begin()` saves the target's depth flag and enables it through this same path, keeping the current blend mode. `end()` restores the saved flag and pipeline. Explicit `disableDepthTest()` inside the camera takes effect immediately.
 - Outside camera scopes the flag persists across frames until changed. Fbo entry and return inherit the flag; each active target has its own flag and camera stack. Fbos have a depth buffer.
 - Use `disableDepthTest()` for overlays that should ignore scene depth. Perspective screen setup separately selects its depth-tested 3D pipeline.
 '''
 details.ja = '''
-- 通常のブレンドモードでの描画では深度テストは最初は無効です。有効時は保存された深度と同じか手前のピクセルが描かれ（LESS_EQUAL）、その深度を書き込みます。
+- 通常のブレンドモードでの描画では深度テストは最初は無効です。有効時は保存された深度と同じか手前のピクセルが描かれます（LESS_EQUAL）。
+- `Add`、`Screen`、`Multiply`、`Subtract` は深度を判定しますが、書き込みません。そのため、先に描いた不透明な物体には隠れますが、同じモードのブレンド描画同士はどちらの順序でも合成できます。`Alpha`（既定値で、不透明な 3D 描画にも使用します）と `Disabled` は深度を書き込みます。
+- 半透明の `Alpha` の図形も深度を書き込むため、そのあとに奥へ描いたものは隠れます。透明度を正しく合成するには、不透明な物体を先に描き、次に半透明の物体を奥から手前へ描いてください（TrussC は描画順を並べ替えません）。
 - 現在のブレンドモードと、その後のブレンド変更、スタイルリセット、画像描画、子 Node の描画に適用されます。
 - `EasyCam::begin()` は描画先の深度フラグを保存し、この関数と同じ経路で有効にします。現在のブレンドモードを維持し、`end()` で保存したフラグとパイプラインを復元します。カメラ内の明示的な `disableDepthTest()` も即座に反映されます。
 - カメラの範囲外では変更するまでフレームをまたいで維持されます。Fbo への移行と復帰時にはフラグを引き継ぎます。各描画先は独自のフラグとカメラスタックを持ち、Fbo には深度バッファがあります。
 - シーンの深度を無視する重ね描きには `disableDepthTest()` を使ってください。透視投影の画面設定は別途、深度テスト付きの3Dパイプラインを選択します。
 '''
 details.ko = '''
-- 일반 블렌드 모드 그리기는 깊이 테스트가 꺼진 상태로 시작합니다. 켜면 저장된 깊이와 같거나 더 가까운 픽셀이 통과하고(LESS_EQUAL) 깊이를 기록합니다.
+- 일반 블렌드 모드 그리기는 깊이 테스트가 꺼진 상태로 시작합니다. 켜면 저장된 깊이와 같거나 더 가까운 픽셀이 통과합니다(LESS_EQUAL).
+- `Add`, `Screen`, `Multiply`, `Subtract`는 깊이를 판정하지만 기록하지 않습니다. 따라서 먼저 그린 불투명 물체에는 가려지지만 같은 모드의 블렌드 그리기끼리는 어느 순서로든 합성할 수 있습니다. `Alpha`(기본값이며 불투명 3D 그리기에도 사용합니다)와 `Disabled`는 깊이를 기록합니다.
+- 반투명 `Alpha` 도형도 깊이를 기록하므로 이후에 그 뒤에 그린 것은 가려집니다. 투명도를 올바르게 합성하려면 불투명 물체를 먼저 그리고 반투명 물체를 먼 곳에서 가까운 곳 순서로 그려야 하며, TrussC는 그리기 순서를 정렬하지 않습니다.
 - 현재 블렌드 모드와 이후 블렌드 변경, 스타일 초기화, 이미지 그리기, 자식 Node 그리기에 적용됩니다.
 - `EasyCam::begin()`은 타깃의 깊이 플래그를 저장하고 이 함수와 같은 경로로 활성화하며 현재 블렌드 모드를 유지합니다. `end()`는 저장한 플래그와 파이프라인을 복원합니다. 카메라 안에서 명시적으로 호출한 `disableDepthTest()`도 즉시 적용됩니다.
 - 카메라 범위 밖에서는 변경할 때까지 프레임을 넘어 유지됩니다. Fbo 진입과 복귀 시 플래그를 이어받으며 각 타깃은 자체 플래그와 카메라 스택을 가집니다. Fbo에는 깊이 버퍼가 있습니다.
@@ -52258,18 +52264,24 @@ details.en = '''
 - The mode stays in effect until you change it. It works the same way on the main window and inside an `Fbo`, it carries over to later frames, and it is passed on to a later `Fbo::begin()`. A forgotten `Add` or `Multiply` can therefore affect drawing you did not intend. When you are done with a temporary mode, call `resetBlendMode()` or wrap the change in `pushStyle()` and `popStyle()`.
 - With `Add`, the resulting RGB is `sourceRGB * sourceAlpha + destinationRGB` (RGB factors `SRC_ALPHA` and `ONE`). With `Screen`, the source RGB is multiplied by its alpha first, and the RGB factors are `ONE` and `ONE_MINUS_SRC_COLOR`.
 - For the output alpha, `Alpha`, `Multiply` and `Screen` use `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` (alpha factors `ONE` and `ONE_MINUS_SRC_ALPHA`). For example, drawing twice with alpha `0.5` on a transparent target gives `0.75`. `Add` and `Subtract` add the two alpha values (alpha factors `ONE` and `ONE`). `Disabled` overwrites without blending.
+- With depth testing active (compare LESS_EQUAL), `Add`, `Screen`, `Multiply` and `Subtract` test depth without writing it, so previously drawn opaque geometry hides them while draws using the same blend mode can combine in either order. `Alpha` (the default, also used for opaque 3D) and `Disabled` keep writing depth.
+- A translucent `Alpha` shape also writes depth, hiding anything drawn behind it afterwards. For correct transparency, draw opaque objects first, then translucent ones from back to front; TrussC does not sort draws.
 '''
 details.ja = '''
 - `setBlendMode()` は、これから描くものを、すでに描かれている内容とどのように合成するかを選びます。モードは `BlendMode::Alpha`（デフォルト。通常のアルファブレンディング）、`Add`（加算）、`Multiply`（乗算）、`Screen`（スクリーン）、`Subtract`（減算）、`Disabled`（ブレンドせず、新しい色でそのまま上書き）です。
 - 設定したモードは、変更するまで有効です。メインウィンドウでも `Fbo` の中でも同じように働き、次のフレームにも、その後の `Fbo::begin()` にも引き継がれます。そのため、`Add` や `Multiply` を戻し忘れると、意図しない描画にも影響します。一時的なモードが済んだら `resetBlendMode()` を呼ぶか、変更を `pushStyle()` と `popStyle()` で囲んでください。
 - `Add` では、合成後の RGB は `sourceRGB * sourceAlpha + destinationRGB` になります（RGB の係数は `SRC_ALPHA` と `ONE`）。`Screen` では、描画元の RGB にあらかじめアルファを掛け、RGB の係数は `ONE` と `ONE_MINUS_SRC_COLOR` になります。
 - 出力のアルファは、`Alpha`、`Multiply`、`Screen` では `sourceAlpha + destinationAlpha * (1 - sourceAlpha)` です（アルファの係数は `ONE` と `ONE_MINUS_SRC_ALPHA`）。たとえば、透明な描画先にアルファ `0.5` で 2 回重ねると `0.75` になります。`Add` と `Subtract` は両方のアルファを足します（アルファの係数は `ONE` と `ONE`）。`Disabled` はブレンドせずに上書きします。
+- デプステストが有効なとき（LESS_EQUAL 比較）、`Add`、`Screen`、`Multiply`、`Subtract` は深度を判定しますが、書き込みません。そのため、先に描いた不透明な物体には隠れますが、同じモードのブレンド描画同士はどちらの順序でも合成できます。`Alpha`（既定値で、不透明な 3D 描画にも使用します）と `Disabled` は深度を書き込みます。
+- 半透明の `Alpha` の図形も深度を書き込むため、そのあとに奥へ描いたものは隠れます。透明度を正しく合成するには、不透明な物体を先に描き、次に半透明の物体を奥から手前へ描いてください（TrussC は描画順を並べ替えません）。
 '''
 details.ko = '''
 - `setBlendMode()`는 지금부터 그리는 내용을 이미 그려진 내용과 어떻게 합성할지 선택합니다. 모드는 `BlendMode::Alpha`(기본값, 일반 알파 블렌딩), `Add`(가산), `Multiply`(곱셈), `Screen`(스크린), `Subtract`(감산), `Disabled`(블렌딩 없이 새 색으로 그대로 덮어쓰기)입니다.
 - 설정한 모드는 바꾸기 전까지 유지됩니다. 메인 윈도우에서도 `Fbo` 안에서도 똑같이 동작하며, 다음 프레임에도, 이후의 `Fbo::begin()`에도 이어집니다. 그래서 `Add`나 `Multiply`를 되돌리는 것을 잊으면 의도하지 않은 그리기에도 영향을 줍니다. 임시 모드가 끝나면 `resetBlendMode()`를 호출하거나 변경을 `pushStyle()`과 `popStyle()`로 감싸세요.
 - `Add`에서는 합성된 RGB가 `sourceRGB * sourceAlpha + destinationRGB`가 됩니다(RGB 계수는 `SRC_ALPHA`와 `ONE`). `Screen`에서는 소스 RGB에 알파를 미리 곱하며, RGB 계수는 `ONE`과 `ONE_MINUS_SRC_COLOR`입니다.
 - 출력 알파는 `Alpha`, `Multiply`, `Screen`에서는 `sourceAlpha + destinationAlpha * (1 - sourceAlpha)`입니다(알파 계수는 `ONE`과 `ONE_MINUS_SRC_ALPHA`). 예를 들어 투명한 대상에 알파 `0.5`로 두 번 겹쳐 그리면 `0.75`가 됩니다. `Add`와 `Subtract`는 두 알파 값을 더합니다(알파 계수는 `ONE`과 `ONE`). `Disabled`는 블렌딩 없이 덮어씁니다.
+- 깊이 테스트가 활성화되어 있으면(LESS_EQUAL 비교) `Add`, `Screen`, `Multiply`, `Subtract`는 깊이를 판정하지만 기록하지 않습니다. 따라서 먼저 그린 불투명 물체에는 가려지지만 같은 모드의 블렌드 그리기끼리는 어느 순서로든 합성할 수 있습니다. `Alpha`(기본값이며 불투명 3D 그리기에도 사용합니다)와 `Disabled`는 깊이를 기록합니다.
+- 반투명 `Alpha` 도형도 깊이를 기록하므로 이후에 그 뒤에 그린 것은 가려집니다. 투명도를 올바르게 합성하려면 불투명 물체를 먼저 그리고 반투명 물체를 먼 곳에서 가까운 곳 순서로 그려야 하며, TrussC는 그리기 순서를 정렬하지 않습니다.
 '''
 related = ["BlendMode", "getBlendMode", "clear"]
 snippet = '''
