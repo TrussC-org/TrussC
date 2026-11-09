@@ -44,6 +44,11 @@ int main() {
     assert(sanitizeProjectName("\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e") == "___");
     assert(sanitizeProjectName("a\xff" "b") == "a_b");
     assert(sanitizeProjectName("a\xe6\x97" "b") == "a__b");
+    assert(sanitizeProjectName("\xe0\x80\x80") == "___");      // overlong
+    assert(sanitizeProjectName("\xed\xa0\x80") == "___");      // surrogate
+    assert(sanitizeProjectName("\xf0\x80\x80\x80") == "____"); // overlong
+    assert(sanitizeProjectName("\xf4\x90\x80\x80") == "____"); // above U+10FFFF
+    assert(sanitizeProjectName("\xf0\x9f\x98\x80") == "_");    // valid 4-byte
     assert(sanitizeProjectName("+ ( ) & ' #") == "+__________");
     assert(sanitizeProjectName("9valid_Name-1.2+3") == "9valid_Name-1.2+3");
     assert(sanitizeProjectName("") == "app");
@@ -167,7 +172,8 @@ class GeneratorTests(unittest.TestCase):
         cases = [("sample project", "sample_project"), ("日本語", "___"),
                  ("+ ( ) & '", "+________"), ("hash#project", "hash_project"),
                  ("9valid_Name-1.2+3", "9valid_Name-1.2+3"),
-                 ("all", "app_all"), ("test", "app_test")]
+                 ("all", "app_all"), ("test", "app_test"),
+                 ("my project-NOTFOUND", "my_project-NOTFOUND")]
         if sys.platform != "win32":  # Windows cannot create this folder.
             cases.append(("NUL", "app_NUL"))
         for folder, expected in cases:

@@ -16,12 +16,20 @@ inline std::string sanitizeProjectName(const std::string& input) {
             ch == '_' || ch == '.' || ch == '+' || ch == '-';
         if (allowed) { name += char(ch); ++i; continue; }
         name += '_';
-        // Length of a well-formed UTF-8 sequence; anything else is one byte.
-        size_t length = ch >= 0xF0 && ch <= 0xF4 ? 4 : ch >= 0xE0 ? 3 : ch >= 0xC2 && ch <= 0xDF ? 2 : 1;
-        if (ch >= 0xF5 || (ch >= 0x80 && ch < 0xC2)) length = 1;
+        // Length of a well-formed UTF-8 sequence (RFC 3629: no overlongs,
+        // surrogates or values above U+10FFFF); anything else is one byte.
+        size_t length = ch >= 0xF0 && ch <= 0xF4 ? 4 : ch >= 0xE0 && ch <= 0xEF ? 3 : ch >= 0xC2 && ch <= 0xDF ? 2 : 1;
+        unsigned char low = 0x80, high = 0xBF; // allowed range of the second byte
+        if (ch == 0xE0) low = 0xA0;
+        if (ch == 0xED) high = 0x9F;
+        if (ch == 0xF0) low = 0x90;
+        if (ch == 0xF4) high = 0x8F;
         size_t next = i + 1;
-        while (next < i + length && next < input.size() &&
-               (static_cast<unsigned char>(input[next]) & 0xC0) == 0x80) ++next;
+        while (next < i + length && next < input.size()) {
+            const unsigned char c = static_cast<unsigned char>(input[next]);
+            if (next == i + 1 ? (c < low || c > high) : (c & 0xC0) != 0x80) break;
+            ++next;
+        }
         i = next == i + length ? next : i + 1;
     }
     if (name.empty()) return "app";
