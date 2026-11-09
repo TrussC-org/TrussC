@@ -50,6 +50,7 @@
 #include <thread>
 #include <vector>
 
+#include "tcAnnotations.h"
 #include "tcFileIO.h"
 #include "../events/tcEvent.h"
 
@@ -59,7 +60,7 @@ namespace trussc {
 // Synchronous
 // -----------------------------------------------------------------------------
 
-struct ProcessResult {
+struct TC_LUA_SKIP ProcessResult {
     int exitCode = -1;      // -1 when the program could not be started
     std::string output;     // stdout and stderr lines in arrival order, each ending in '\n'
     bool started = false;   // false: not found, not executable, or unsupported platform
@@ -67,19 +68,19 @@ struct ProcessResult {
 
 // Blocks until the program (not its children) exits. Do not call it from
 // draw()/update() for anything slow: the frame waits too. Use Process instead.
-ProcessResult runProcess(const std::vector<std::string>& args,
-                         const fs::path& workingDir = {});
+TC_LUA_SKIP ProcessResult runProcess(const std::vector<std::string>& args,
+                                     const fs::path& workingDir = {});
 
 // -----------------------------------------------------------------------------
 // Asynchronous
 // -----------------------------------------------------------------------------
 
-struct ProcessLineEventArgs {
+struct TC_LUA_SKIP ProcessLineEventArgs {
     std::string line;
     bool isStderr = false;
 };
 
-struct ProcessExitEventArgs {
+struct TC_LUA_SKIP ProcessExitEventArgs {
     int exitCode = -1;
     float seconds = 0;      // time from start() to exit
     bool killed = false;    // ended by kill() or by destroying the Process
@@ -87,7 +88,7 @@ struct ProcessExitEventArgs {
 
 namespace internal { class ProcessRunner; }
 
-class Process {
+class TC_LUA_SKIP Process {
 public:
     // Fired on the worker thread. onLine for every line of output (all lines
     // come before onExit); onExit once per successful start().
