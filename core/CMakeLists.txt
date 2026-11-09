@@ -401,6 +401,7 @@ function(_trussc_setup_icon_ios TARGET_NAME ICON_DIR DEFAULT_DIR)
     if(PROJECT_PNGS)
         list(GET PROJECT_PNGS 0 PROJECT_PNG)
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PROJECT_PNG}")
+        _trussc_warn_non_square_png(${TARGET_NAME} "${PROJECT_PNG}")
         find_program(TRUSSC_SIPS_EXECUTABLE sips)
         if(TRUSSC_SIPS_EXECUTABLE)
             _trussc_check_png_conversion("${PROJECT_PNG}" "${ICON_PNG}" PNG_HASH CONVERTED)
@@ -447,7 +448,8 @@ function(_trussc_setup_icon_ios TARGET_NAME ICON_DIR DEFAULT_DIR)
 }
 ")
 
-    # Add xcassets to target (Xcode handles asset catalog compilation automatically)
+    # Add xcassets to target as a bundle resource so Xcode compiles the asset catalog
+    set_source_files_properties("${XCASSETS_DIR}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(${TARGET_NAME} PRIVATE "${XCASSETS_DIR}")
 
     # Tell Xcode to use this icon
@@ -489,9 +491,12 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         file(GLOB PNG_FILES CONFIGURE_DEPENDS "${ICON_DIR}/*.png")
         if(PNG_FILES)
             list(GET PNG_FILES 0 PNG_FILE)
+            _trussc_warn_non_square_png(${TARGET_NAME} "${PNG_FILE}")
             set(OUTPUT_ICNS "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_icon.icns")
             _trussc_convert_png_to_icns(${TARGET_NAME} "${PNG_FILE}" "${OUTPUT_ICNS}" SUCCESS)
             if(SUCCESS)
+                get_filename_component(PNG_NAME "${PNG_FILE}" NAME)
+                message(STATUS "[${TARGET_NAME}] Using icon from PNG: ${PNG_NAME}")
                 _trussc_apply_macos_icns(${TARGET_NAME} "${OUTPUT_ICNS}")
                 set(FOUND_ANY TRUE)
             endif()
@@ -519,6 +524,24 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         COMMAND xattr -cr "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
         COMMENT "Removing quarantine attribute from ${TARGET_NAME}.app"
     )
+endfunction()
+
+# sips -z stretches to a square; tell the user once per configure when the PNG isn't square.
+function(_trussc_warn_non_square_png TARGET_NAME PNG_FILE)
+    # PNG IHDR: width and height are big-endian 32-bit at byte offset 16.
+    file(READ "${PNG_FILE}" IHDR OFFSET 16 LIMIT 8 HEX)
+    string(LENGTH "${IHDR}" IHDR_LENGTH)
+    if(NOT IHDR_LENGTH EQUAL 16)
+        return()
+    endif()
+    string(SUBSTRING "${IHDR}" 0 8 WIDTH_HEX)
+    string(SUBSTRING "${IHDR}" 8 8 HEIGHT_HEX)
+    math(EXPR WIDTH "0x${WIDTH_HEX}")
+    math(EXPR HEIGHT "0x${HEIGHT_HEX}")
+    if(NOT WIDTH EQUAL HEIGHT)
+        get_filename_component(PNG_NAME "${PNG_FILE}" NAME)
+        message(WARNING "[${TARGET_NAME}] icon PNG ${PNG_NAME} is not square (${WIDTH}x${HEIGHT}); it will be stretched")
+    endif()
 endfunction()
 
 # Reuse a successful PNG conversion when its input is unchanged.

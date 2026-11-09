@@ -66,7 +66,8 @@ endif()
 get_target_property(ICON_FILE app MACOSX_BUNDLE_ICON_FILE)
 get_target_property(ICON_SOURCES app SOURCES)
 get_property(ICON_DEPENDENCIES DIRECTORY PROPERTY CMAKE_CONFIGURE_DEPENDS)
-file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\n${ICON_DEPENDENCIES}")
+get_source_file_property(CATALOG_LOCATION "${CMAKE_BINARY_DIR}/AppIcon.xcassets" MACOSX_PACKAGE_LOCATION)
+file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\n${ICON_DEPENDENCIES}\\ncatalog=${CATALOG_LOCATION}")
 ''', encoding='utf-8')
 
     def configure(self, platform='macos', missing=(), fail='', folder=False):
@@ -135,6 +136,29 @@ file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\
         self.assertEqual(len(self.calls()), 22)
         self.assertEqual(sorted(p.name for p in self.icons.iterdir()), [png.name])
         self.assertEqual(png.read_bytes(), b'changed project PNG')
+
+    def png_header(self, width, height):
+        # Signature + IHDR length/type + big-endian width/height; the stubs only copy bytes.
+        path = self.icons / 'sized.png'
+        path.write_bytes(b'\x89PNG\r\n\x1a\n' + struct.pack('>I', 13) + b'IHDR' + struct.pack('>II', width, height))
+        return path
+
+    def test_non_square_png_warns_that_it_will_be_stretched(self):
+        self.png_header(300, 500)
+        for platform in ('macos', 'ios'):
+            output = self.configure(platform)
+            self.assertIn('sized.png is not square (300x500); it will be stretched', output)
+        self.png_header(512, 512)
+        for platform in ('macos', 'ios'):
+            self.assertNotIn('not square', self.configure(platform))
+
+    def test_macos_png_reports_the_icon_it_uses(self):
+        self.png()
+        self.assertIn('Using icon from PNG: custom image.png', self.configure())
+
+    def test_ios_asset_catalog_is_a_bundle_resource(self):
+        self.configure('ios')
+        self.assertIn('catalog=Resources', self.selection)
 
     def test_missing_tools_warn_and_use_default(self):
         self.png()
