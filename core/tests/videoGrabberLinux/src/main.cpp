@@ -1,4 +1,5 @@
-// Headless checks for Linux capture selection, UVC MJPEG decoding and device enumeration.
+// Headless checks for Linux capture format selection and device enumeration (#1369, #1384).
+// Native DHT-less decoding is covered by jpegDecode.
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 
@@ -6,8 +7,6 @@
 #include <TrussC.h>
 #include "../../common/tcDisplayTest.h"
 #include "../../../platform/linux/tcVideoGrabberLinux.h"
-#include <stb/stb_image.h>
-#include <stb/stb_image_write.h>
 #include <array>
 #include <algorithm>
 #include <cstdlib>
@@ -195,130 +194,6 @@ void negotiationChecks() {
     }
 }
 
-void appendJpeg(void* context, void* data, int size) {
-    auto& bytes = *static_cast<std::vector<unsigned char>*>(context);
-    const auto* first = static_cast<unsigned char*>(data);
-    bytes.insert(bytes.end(), first, first + size);
-}
-
-void jpegChecks() {
-    constexpr int width = 32, height = 32;
-    std::array<unsigned char, width * height * 3> rgb{};
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const int offset = (y * width + x) * 3;
-            rgb[offset] = 32 + x * 5;
-            rgb[offset + 1] = 40 + y * 4;
-            rgb[offset + 2] = 160 - x * 3;
-        }
-    }
-    std::vector<unsigned char> jpeg;
-    check("encode baseline JPEG in memory", stbi_write_jpg_to_func(appendJpeg, &jpeg,
-        width, height, 3, rgb.data(), 95) != 0);
-    if (jpeg.empty()) return;
-
-    // Strip complete DHT segments, preserving the encoded scan and other headers.
-    std::vector<unsigned char> withoutDht(jpeg.begin(), jpeg.begin() + 2);
-    std::vector<unsigned char> encodedDht;
-    size_t pos = 2;
-    while (pos + 4 <= jpeg.size()) {
-        const auto marker = jpeg[pos + 1];
-        if (marker == 0xda) break;
-        const size_t segmentSize = 2 + (size_t(jpeg[pos + 2]) << 8) + jpeg[pos + 3];
-        if (segmentSize > jpeg.size() - pos) { check("encoder segment length", false); return; }
-        auto& target = marker == 0xc4 ? encodedDht : withoutDht;
-        target.insert(target.end(), jpeg.begin() + pos, jpeg.begin() + pos + segmentSize);
-        pos += segmentSize;
-    }
-    const size_t scanOffset = withoutDht.size();
-    withoutDht.insert(withoutDht.end(), jpeg.begin() + pos, jpeg.end());
-    check("default tables match the encoder's standard DHT", encodedDht.size() == sizeof(mjpegDefaultDht) &&
-        std::equal(encodedDht.begin(), encodedDht.end(), mjpegDefaultDht));
-
-    const unsigned char app[] = {0xff, 0xe0, 0, 6, 0xff, 0xc4, 0xff, 0xda};
-    const size_t maxFrameSize = withoutDht.size() + sizeof(app) + 32;
-    MjpegDhtBuffer scratch;
-    check("allocate scratch from driver buffer length", scratch.allocate(maxFrameSize));
-    auto original = scratch.prepare(jpeg);
-    check("JPEG with DHT passes through by address and size",
-        original.data() == jpeg.data() && original.size() == jpeg.size());
-    auto repaired = scratch.prepare(withoutDht);
-    check("missing DHT inserts exactly 420 bytes after SOI",
-        repaired.data() != withoutDht.data() && repaired.size() == withoutDht.size() + 420 &&
-        repaired[0] == 0xff && repaired[1] == 0xd8 &&
-        std::equal(encodedDht.begin(), encodedDht.end(), repaired.begin() + 2) &&
-        std::equal(withoutDht.begin() + 2, withoutDht.end(), repaired.begin() + 422));
-    int decodedWidth = 0, decodedHeight = 0, channels = 0;
-    auto* decoded = stbi_load_from_memory(repaired.data(), static_cast<int>(repaired.size()),
-        &decodedWidth, &decodedHeight, &channels, 4);
-    check("repaired JPEG decodes to expected dimensions", decoded && decodedWidth == width && decodedHeight == height);
-    if (decoded && decodedWidth == width && decodedHeight == height) {
-        bool colorsMatch = true;
-        for (int i = 0; i < width * height; ++i) {
-            for (int channel = 0; channel < 3; ++channel)
-                colorsMatch &= std::abs(int(decoded[i * 4 + channel]) - int(rgb[i * 3 + channel])) <= 8;
-            colorsMatch &= decoded[i * 4 + 3] == 255;
-        }
-        check("known gradient colors and alpha within JPEG tolerance", colorsMatch);
-    }
-    stbi_image_free(decoded);
-    const auto* storage = repaired.data();
-    bool reused = true;
-    for (int i = 0; i < 10; ++i) reused &= scratch.prepare(withoutDht).data() == storage;
-    check("successive frames reuse scratch storage", reused);
-    check("DHT frames still pass through after scratch allocation", scratch.prepare(jpeg).data() == jpeg.data());
-    MjpegDhtBuffer otherGrabber;
-    check("allocate separate grabber scratch", otherGrabber.allocate(maxFrameSize));
-    check("each grabber owns separate storage", otherGrabber.prepare(withoutDht).data() != storage);
-
-    // Markers in an APP payload must not be mistaken for header markers.
-    auto withApp = withoutDht;
-    withApp.insert(withApp.begin() + 2, std::begin(app), std::end(app));
-    check("embedded DHT/SOS bytes in payload are skipped", scratch.prepare(withApp).size() == withApp.size() + 420);
-    bool increasingReuses = true;
-    auto growingFrame = withApp;
-    for (; growingFrame.size() <= maxFrameSize; growingFrame.push_back(0)) {
-        const auto result = scratch.prepare(growingFrame);
-        increasingReuses &= result.data() == storage && result.size() == growingFrame.size() + sizeof(mjpegDefaultDht);
-    }
-    check("increasing frames through capacity reuse setup allocation", increasingReuses);
-    const auto oversized = scratch.prepare(growingFrame);
-    check("frame exceeding capacity passes through by address and size",
-        oversized.data() == growingFrame.data() && oversized.size() == growingFrame.size());
-    check("smaller frame still uses setup allocation", scratch.prepare(withoutDht).data() == storage);
-    MjpegDhtBuffer unallocated;
-    const auto unchanged = unallocated.prepare(withoutDht);
-    check("prepare without scratch passes through without allocating",
-        unchanged.data() == withoutDht.data() && unchanged.size() == withoutDht.size());
-    check("scratch size addition overflow rejected", !unallocated.allocate((std::numeric_limits<size_t>::max)()));
-
-    bool truncatedPasses = true;
-    const size_t scanHeaderEnd = scanOffset + 2 + (size_t(withoutDht[scanOffset + 2]) << 8) + withoutDht[scanOffset + 3];
-    for (size_t count = 0; count < scanHeaderEnd; ++count) {
-        std::span<const unsigned char> prefix(withoutDht.data(), count);
-        const auto result = scratch.prepare(prefix);
-        truncatedPasses &= result.data() == prefix.data() && result.size() == count;
-    }
-    check("all truncated header prefixes pass through", truncatedPasses);
-    for (const std::vector<unsigned char>& invalid : {
-        std::vector<unsigned char>{0, 0, 0xff, 0xda, 0, 2},
-        {0xff, 0xd8, 0xff, 0xe0, 0, 1}, // Invalid segment length.
-        {0xff, 0xd8, 0xff, 0xe0, 0xff, 0xff}, // Length exceeds bytesused.
-        {0xff, 0xd8, 0xff, 0xda, 0, 1}, // Invalid SOS length.
-        {0xff, 0xd8, 0xff, 0xc4, 0xff, 0xff}, // Invalid DHT length.
-        {0xff, 0xd8, 0xff, 0xc4, 0, 2, 0xff, 0xda, 0, 9},
-        {0xff, 0xd8, 0xff, 0xd9}, // No scan.
-        {0xff, 0xd8, 0xff, 0x00}, // Stuffed byte outside scan.
-        {0xff, 0xd8, 0xff, 0xd0}, // Restart outside scan.
-        {0xff, 0xd8, 0x11, 0xff, 0xda, 0, 2}}) {
-        const auto result = scratch.prepare(invalid);
-        check("malformed header passes through unchanged", result.data() == invalid.data() && result.size() == invalid.size());
-    }
-    auto fillAndTem = withoutDht;
-    fillAndTem.insert(fillAndTem.begin() + 2, {0xff, 0x01, 0xff});
-    check("marker fill and standalone TEM accepted", scratch.prepare(fillAndTem).size() == fillAndTem.size() + 420);
-}
-
 void capabilityChecks() {
     v4l2_capability caps{};
     caps.capabilities = V4L2_CAP_VIDEO_CAPTURE;
@@ -434,7 +309,6 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     selectionChecks();
     enumerationChecks();
     negotiationChecks();
-    jpegChecks();
     capabilityChecks();
     deviceNameChecks();
     return failures ? 1 : 0;

@@ -81,6 +81,17 @@ Linux では追加の開発パッケージが必要です。ヘルパースク�
 
 > **注意:** ビルドスクリプト（`tools/build_linux.sh`）実行時にも自動でこのチェックが走ります。
 
+Linux の JPEG デコードには、システムの **libjpeg-turbo** (`pkg-config libjpeg`) が必要です。
+インストーラーは `libjpeg-dev`（Ubuntu: `libjpeg-turbo8-dev`、Debian/Pi OS: `libjpeg62-turbo-dev`）も含みます。
+手動で入れる場合:
+
+```bash
+sudo apt install libjpeg-dev
+```
+
+パッケージがない場合や `JCS_EXT_RGBA` がない場合は configure が失敗します。
+Linux の JPEG に stb フォールバックはありません。他の画像形式・プラットフォームは stb_image を使います。
+
 ### エディタのセットアップ
 
 入れる拡張機能はどのエディタでも共通です。エディタによって変わるのは IntelliSense だけです。

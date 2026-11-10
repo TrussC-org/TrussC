@@ -1,6 +1,7 @@
 """Offline installer checks: fake package queries and sudo, never invoke apt."""
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -47,6 +48,7 @@ class AptDependenciesTests(unittest.TestCase):
         self.assertEqual(baseline[0], options + ['update'])
         self.assertEqual(baseline[1][:7], options + ['install', '-y'])
         self.assertGreater(len(baseline[1]), 7)
+        self.assertIn("libjpeg-dev", baseline[1])
         for archive in ('', str(self.directory / 'archives'),
                         str(self.directory / 'archives with spaces')):
             with self.subTest(archive=archive):
@@ -55,6 +57,14 @@ class AptDependenciesTests(unittest.TestCase):
                 cache = ['-o', f'Dir::Cache::Archives={archive}'] if archive else []
                 expected = [options + cache + call[len(options):] for call in baseline]
                 self.assertEqual(self.run_installer(), expected)
+
+    def test_ci_jpeg_dependency(self):
+        action = (ROOT / '.github/actions/apt-deps/action.yml').read_text(encoding='utf-8')
+        release = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+        # CI installs through the cached apt-deps action's package list and release's own list.
+        defaults = action.split('default: >-', 1)[1].split('runs:', 1)[0].split()
+        self.assertIn('libjpeg-dev', defaults)
+        self.assertIn('libjpeg-dev', release.split())
 
     def test_installed_packages_do_not_invoke_sudo(self):
         self.stub('dpkg', '#!/bin/bash\nexit 0\n')
@@ -170,7 +180,7 @@ if args[0] == 'timeout':
                             self.assertEqual(installs[0][installs[0].index('install') + 2:], [
                                 'build-essential', 'cmake', 'libgl1-mesa-dev', 'libx11-dev',
                                 'libxrandr-dev', 'libxinerama-dev', 'libxcursor-dev', 'libxi-dev',
-                                'libgtk-3-dev', 'libavcodec-dev', 'libavformat-dev', 'libswscale-dev',
+                                'libgtk-3-dev', 'libjpeg-dev', 'libavcodec-dev', 'libavformat-dev', 'libswscale-dev',
                                 'libavutil-dev', 'libgstreamer1.0-dev',
                                 'libgstreamer-plugins-base1.0-dev', 'extra-one', 'extra-two'])
                         else:

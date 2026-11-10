@@ -26,9 +26,7 @@
 #include <chrono>
 #include <limits>
 
-// For MJPEG decoding
-#define STB_IMAGE_IMPLEMENTATION_ALREADY_DONE
-#include <stb/stb_image.h>
+#include "impl/tcJpegDecode.h"
 
 namespace trussc {
 
@@ -53,7 +51,6 @@ struct VideoGrabberPlatformData {
     int bufferWidth = 0;
     int bufferHeight = 0;
     size_t rgbaBytes = 0;
-    internal::MjpegDhtBuffer mjpegScratch;
 
     // Resize notification
     std::atomic<bool> needsResize{false};
@@ -100,26 +97,12 @@ static int xioctl(int fd, unsigned long request, void* arg) {
     return r;
 }
 
-// Decode MJPEG to RGBA using stb_image
+// Decode directly into the capture back buffer, after validating frame dimensions.
 static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
-                               unsigned char* dst, int width, int height, size_t rgbaBytes,
-                               internal::MjpegDhtBuffer& scratch) {
-    const auto jpeg = scratch.prepare({src, srcSize});
-    // Bound (decoder ABI): stb_image takes an int byte count.
-    if (jpeg.size() > size_t((std::numeric_limits<int>::max)())) return false;
-    int w, h, channels;
-    unsigned char* decoded = stbi_load_from_memory(jpeg.data(), static_cast<int>(jpeg.size()), &w, &h, &channels, 4);
-
-    if (!decoded) {
-        return false;
-    }
-
-    if (w == width && h == height) {
-        memcpy(dst, decoded, rgbaBytes);
-    }
-
-    stbi_image_free(decoded);
-    return w == width && h == height;
+                               unsigned char* dst, int width, int height, size_t rgbaBytes) {
+    internal::JpegDecode jpeg;
+    return jpeg.open(src, srcSize) && jpeg.width() == width && jpeg.height() == height &&
+           jpeg.decode(dst, rgbaBytes);
 }
 
 // =============================================================================
@@ -188,7 +171,7 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
                 converted = true;
             } else if (data->pixelFormat == V4L2_PIX_FMT_MJPEG) {
                 converted = decodeMJPEGtoRGBA(src, buf.bytesused, data->backBuffer,
-                                              data->bufferWidth, data->bufferHeight, data->rgbaBytes, data->mjpegScratch);
+                                              data->bufferWidth, data->bufferHeight, data->rgbaBytes);
             }
 
             // A frame that didn't convert (e.g. an MJPEG of another size) is not published.
@@ -301,7 +284,6 @@ bool VideoGrabber::setupPlatform() {
     data->buffers = new VideoGrabberPlatformData::Buffer[req.count];
 
     // Map buffers
-    size_t maxBufferLength = 0;
     for (unsigned int i = 0; i < req.count; i++) {
         struct v4l2_buffer buf = {};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -315,7 +297,6 @@ bool VideoGrabber::setupPlatform() {
         }
 
         data->buffers[i].length = buf.length;
-        maxBufferLength = std::max(maxBufferLength, data->buffers[i].length);
         data->buffers[i].start = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE,
                                        MAP_SHARED, data->fd, buf.m.offset);
 
@@ -324,13 +305,6 @@ bool VideoGrabber::setupPlatform() {
             state_->platformData.reset();
             return false;
         }
-    }
-
-    // Bound (driver buffer length): scratch holds the largest VIDIOC_QUERYBUF buffer plus the DHT block.
-    if (data->pixelFormat == V4L2_PIX_FMT_MJPEG && !data->mjpegScratch.allocate(maxBufferLength)) {
-        logError("VideoGrabber") << "MJPEG scratch size overflow";
-        state_->platformData.reset();
-        return false;
     }
 
     // Allocate back buffer

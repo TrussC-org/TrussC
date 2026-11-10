@@ -46,6 +46,9 @@ message(STATUS "TrussC version: ${TC_VERSION}")
 # Platform detection
 # =============================================================================
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tc_platform.cmake")
+if(TC_PLATFORM_LINUX OR TC_PLATFORM_RASPBIAN)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/tc_linux_jpeg.cmake")
+endif()
 
 # =============================================================================
 # Library definition (STATIC)
@@ -300,6 +303,7 @@ elseif(TC_PLATFORM_WINDOWS)
     target_compile_options(TrussC PUBLIC /utf-8 /wd4244 /wd4267 /bigobj)
 
 elseif(TC_PLATFORM_LINUX)
+    target_link_libraries(TrussC PUBLIC PkgConfig::TC_JPEG)
     target_compile_definitions(TrussC PUBLIC SOKOL_GLCORE)
     find_package(X11 REQUIRED)
     find_package(OpenGL REQUIRED)
@@ -341,6 +345,7 @@ elseif(TC_PLATFORM_ANDROID)
     )
 
 elseif(TC_PLATFORM_RASPBIAN)
+    target_link_libraries(TrussC PUBLIC PkgConfig::TC_JPEG)
     target_compile_definitions(TrussC PUBLIC SOKOL_GLES3)
     find_package(X11 REQUIRED)
     find_package(PkgConfig REQUIRED)

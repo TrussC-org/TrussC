@@ -11763,6 +11763,7 @@ description.en = "An image containing CPU pixels and a GPU texture."
 description.ja = "CPU ピクセルと GPU テクスチャを持つ画像を表す。"
 description.ko = "CPU 픽셀과 GPU 텍스처를 가진 이미지를 나타낸다."
 details.en = '''
+- Linux decodes JPEG with libjpeg-turbo; CMYK/YCCK JPEGs fall back to stb_image.
 - Moving a loading Image, or copying, assigning or moving a loading SoundBuffer or Font, is not supported; the destination is not loading. If you keep loading objects in a container, make sure it does not move them: call `reserve()` on a `vector` before loading, or hold them through pointers such as `unique_ptr`.
 - Pixel access and `save()` use the CPU `Pixels`; drawing uses the GPU `Texture`. Changes to the texture do not update the CPU pixels.
 - Loading uploads pixels into an Immutable texture. `allocate()` creates a Dynamic texture without uploading the zero-filled CPU pixels.
@@ -11773,6 +11774,7 @@ details.en = '''
 - See `Texture` for GPU resource rules and upload costs, and `TextureFormat` for pixel and texture formats.
 '''
 details.ja = '''
+- Linux では libjpeg-turbo で JPEG をデコードします。CMYK/YCCK JPEG は stb_image にフォールバックします。
 - 読み込み中の Image の移動や、読み込み中の SoundBuffer・Font のコピー・代入・移動はサポートしません。コピー先・移動先は読み込み中にはなりません。読み込み中のオブジェクトをコンテナに入れる場合は、中身が移動しないようにしてください。`vector` なら読み込む前に `reserve()` するか、`unique_ptr` などのポインタで持ちます。
 - ピクセルの参照と `save()` は CPU の `Pixels` を使い、描画は GPU の `Texture` を使います。テクスチャを変更しても CPU ピクセルは更新されません。
 - 読み込みではピクセルを Immutable テクスチャに転送します。`allocate()` は Dynamic テクスチャを作成しますが、ゼロで初期化した CPU ピクセルは転送しません。
@@ -11783,6 +11785,7 @@ details.ja = '''
 - GPU リソースの扱いと転送コストは `Texture`、ピクセルとテクスチャの形式は `TextureFormat` を参照してください。
 '''
 details.ko = '''
+- Linux에서는 libjpeg-turbo로 JPEG를 디코딩합니다. CMYK/YCCK JPEG는 stb_image로 폴백합니다.
 - 로드 중인 Image의 이동, 그리고 로드 중인 SoundBuffer, Font의 복사, 대입 또는 이동은 지원하지 않습니다. 대상은 로드 중인 상태가 되지 않습니다. 로드 중인 객체를 컨테이너에 넣을 때는 내용이 이동하지 않게 하세요. `vector`라면 로드 전에 `reserve()`하거나 `unique_ptr` 같은 포인터로 보관합니다.
 - 픽셀 접근과 `save()`는 CPU의 `Pixels`를 사용하고, 그리기는 GPU의 `Texture`를 사용합니다. 텍스처를 변경해도 CPU 픽셀은 갱신되지 않습니다.
 - 로드하면 픽셀을 Immutable 텍스처에 업로드합니다. `allocate()`는 Dynamic 텍스처를 생성하지만, 0으로 초기화한 CPU 픽셀은 업로드하지 않습니다.

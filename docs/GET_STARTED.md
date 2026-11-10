@@ -95,6 +95,17 @@ This will list any missing packages and ask to install them. Use `-y` to skip th
 
 > **Note:** The build script (`tools/build_linux.sh`) also runs this check automatically.
 
+Linux JPEG decoding requires the system **libjpeg-turbo** through `pkg-config libjpeg`.
+The installer includes `libjpeg-dev` (Ubuntu: `libjpeg-turbo8-dev`;
+Debian/Pi OS: `libjpeg62-turbo-dev`). To install it manually:
+
+```bash
+sudo apt install libjpeg-dev
+```
+
+Configure fails if the package is missing or lacks `JCS_EXT_RGBA`; there is no
+stb fallback for JPEG on Linux. Other image formats and other platforms keep stb_image.
+
 ### Editor Setup
 
 One set of extensions for every editor. The only choice that depends on the
