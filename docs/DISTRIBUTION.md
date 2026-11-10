@@ -86,6 +86,15 @@ fs::path nodeAppDir() {
 // then run: node <nodeAppDir()>/index.js
 ```
 
+```cpp
+// With "to": "nodeApp" (next to the executable).
+fs::path nodeAppDir() {
+    const fs::path packaged = getExecutableDir() / "nodeApp";   // in the package
+    if (fs::exists(packaged)) return packaged;
+    return getExecutableDir() / "../../nodeApp";                // development: bin/../../ is projectLocation
+}
+```
+
 Run it with `trusscli run` during development and package it with `trusscli dist`; neither the code nor `dist.json` changes in between. `from` is read on your machine when packaging: a path relative to the project folder, as above, works on every developer's machine and in CI, an absolute one only on yours.
 
 A script also needs its interpreter on the other machine. Ship it (for example the `node` executable, with another `include` entry, and run that one), or tell the people installing the app to install it.
