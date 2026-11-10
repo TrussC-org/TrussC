@@ -1,4 +1,4 @@
-"""Exercise the production Apple icon CMake functions with local tool stubs."""
+"""Exercise the production icon CMake functions with local tool stubs."""
 import json
 import os
 from pathlib import Path
@@ -24,9 +24,9 @@ class AppIconTests(unittest.TestCase):
         self.icons.mkdir()
         self.build = self.base / 'build'
         self.log = self.base / 'tools.jsonl'
-        self.tool_dir = self.base / 'tools'
+        self.tool_dir = self.base / 'tools with spaces'
         self.tool_dir.mkdir()
-        for tool in ('sips', 'iconutil'):
+        for tool in ('sips', 'iconutil', 'magick', 'convert'):
             script = self.tool_dir / tool
             script.write_text(f'#!{sys.executable}\n' + r'''
 import json, os, pathlib, shutil, sys
@@ -39,13 +39,16 @@ if os.environ.get('ICON_TEST_FAIL') == name:
 if name == 'sips':
     assert args[0] == '-z' and args[1] == args[2] and args[4] == '--out'
     shutil.copyfile(args[3], args[5])
-else:
+elif name == 'iconutil':
     assert args[:2] == ['-c', 'icns'] and args[3] == '-o'
     pathlib.Path(args[4]).write_text('converted icns')
+else:
+    assert args[1:3] == ['-define', 'icon:auto-resize=256,128,64,48,32,16']
+    shutil.copyfile(args[0], args[3])
 ''', encoding='utf-8')
             script.chmod(0o755)
         core = (ROOT / 'core/CMakeLists.txt').read_text(encoding='utf-8')
-        functions = core[core.index('function(trussc_setup_icon '):core.index('# Windows icon setup')]
+        functions = core[core.index('function(trussc_setup_icon '):core.index('# trussc_setup_manifest(')]
         (self.source / 'icons.cmake').write_text(functions, encoding='utf-8')
         (self.source / 'CMakeLists.txt').write_text('''cmake_minimum_required(VERSION 3.20)
 project(IconTest NONE)
@@ -60,6 +63,8 @@ endfunction()
 add_custom_target(app)
 if(TEST_PLATFORM STREQUAL "ios")
     _trussc_setup_icon_ios(app "${CMAKE_CURRENT_SOURCE_DIR}/icon" "${DEFAULT_DIR}")
+elseif(TEST_PLATFORM STREQUAL "windows")
+    _trussc_setup_icon_windows(app "${CMAKE_CURRENT_SOURCE_DIR}/icon" "${DEFAULT_DIR}")
 else()
     _trussc_setup_icon_macos(app "${CMAKE_CURRENT_SOURCE_DIR}/icon" "${DEFAULT_DIR}")
 endif()
@@ -82,10 +87,15 @@ file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\
         for tool in ('sips', 'iconutil'):
             value = tool + '-NOTFOUND' if tool in missing else (self.tool_dir / tool).as_posix()
             command.append('-DTRUSSC_' + tool.upper() + '_EXECUTABLE=' + value)
+        # Exercise production magick/convert discovery, with no host tools.
+        command.extend(['-DMAGICK_EXECUTABLE:FILEPATH=MAGICK_EXECUTABLE-NOTFOUND',
+                        '-DCMAKE_PROGRAM_PATH=' + ('' if 'magick' in missing else self.tool_dir.as_posix())])
         self.env = env
         result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.selection = (self.build / 'selection.txt').read_text(encoding='utf-8')
+        if platform == 'windows':
+            self.selection += (self.build / 'app_icon.rc').read_text(encoding='utf-8')
         return result.stdout + result.stderr
 
     def png(self):
@@ -145,11 +155,11 @@ file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\
 
     def test_non_square_png_warns_that_it_will_be_stretched(self):
         self.png_header(300, 500)
-        for platform in ('macos', 'ios'):
+        for platform in ('macos', 'ios', 'windows'):
             output = self.configure(platform)
             self.assertIn('sized.png is not square (300x500); it will be stretched', output)
         self.png_header(512, 512)
-        for platform in ('macos', 'ios'):
+        for platform in ('macos', 'ios', 'windows'):
             self.assertNotIn('not square', self.configure(platform))
 
     def test_macos_png_reports_the_icon_it_uses(self):
@@ -219,6 +229,70 @@ file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\
         self.assertEqual(self.calls(), [call, call])
         self.assertEqual(Path(call[-1]).read_bytes(), b'changed project PNG')
         self.assertEqual(png.read_bytes(), b'changed project PNG')
+
+    def test_windows_png_conversion_reuse_and_changed_input(self):
+        png = self.png()
+        output = self.configure('windows')
+        ico = self.build / 'app_icon.ico'
+        self.assertNotIn('Warning', output)
+        self.assertIn('Using icon from PNG: custom image.png', output)
+        self.assertIn(ico.as_posix(), self.selection)
+        self.assertIn(png.as_posix(), self.selection)
+        call, = self.calls()
+        self.assertEqual(call[0], 'magick')
+        self.assertEqual(Path(call[-1]), ico)
+        self.assertEqual(ico.read_bytes(), png.read_bytes())
+        before = ico.stat().st_mtime_ns
+        self.configure('windows')
+        self.assertEqual(self.calls(), [call])
+        self.assertEqual(ico.stat().st_mtime_ns, before)
+        png.write_bytes(b'changed project PNG')
+        rebuilt = subprocess.run(['cmake', '--build', str(self.build)],
+                                 capture_output=True, text=True, encoding='utf-8', env=self.env)
+        self.assertEqual(rebuilt.returncode, 0, rebuilt.stdout + rebuilt.stderr)
+        self.assertEqual(self.calls(), [call, call])
+        self.assertEqual(ico.read_bytes(), b'changed project PNG')
+        self.assertEqual(sorted(p.name for p in self.icons.iterdir()), [png.name])
+        self.assertEqual(png.read_bytes(), b'changed project PNG')
+
+    def test_windows_user_ico_wins_over_png(self):
+        self.png()
+        ico = self.icons / 'existing.ico'
+        ico.write_bytes(b'user ico')
+        output = self.configure('windows', missing=('magick',))
+        self.assertNotIn('Warning', output)
+        self.assertIn(ico.as_posix(), self.selection)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(ico.read_bytes(), b'user ico')
+
+    def test_windows_missing_imagemagick_warns_and_uses_default(self):
+        self.png()
+        output = self.configure('windows', missing=('magick',))
+        self.assertIn('ImageMagick (magick or convert) not found', output)
+        self.assertIn('using default TrussC icon', output)
+        self.assertIn((ROOT / 'core/resources/default.ico').as_posix(), self.selection)
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((self.build / 'app_icon.ico').exists())
+
+    def test_windows_failed_conversion_warns_and_recovers(self):
+        png = self.png()
+        self.configure('windows')
+        png.write_bytes(b'changed project PNG')
+        output = self.configure('windows', fail='magick')
+        self.assertIn('magick failed to convert PNG', output)
+        self.assertIn('using default TrussC icon', output)
+        self.assertIn((ROOT / 'core/resources/default.ico').as_posix(), self.selection)
+        self.assertFalse((self.build / 'app_icon.ico.sha256').exists())
+        self.configure('windows')
+        self.assertEqual(len(self.calls()), 3)
+        self.assertEqual((self.build / 'app_icon.ico').read_bytes(), png.read_bytes())
+
+    def test_windows_uses_convert_when_magick_is_missing(self):
+        self.png()
+        (self.tool_dir / 'magick').unlink()
+        self.assertNotIn('Warning', self.configure('windows'))
+        call, = self.calls()
+        self.assertEqual(call[0], 'convert')
 
 
 if __name__ == '__main__':
