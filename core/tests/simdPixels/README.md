@@ -30,5 +30,7 @@ executes the production `tcVideoPlayerPixels.h` helpers. Normal tests also check
 odd widths around vector boundaries, independent unaligned pointers, input and
 output padding, preserved/forced alpha, cropped player columns/untouched rows,
 and negative source-reader stride against those original loops. Apple recorder
-rows retain their existing top-down order. Native adoption is pending the
-per-site checks and keep/revert table in `DEVICE_CHECK.md`.
+rows retain their existing top-down order. Native checks (#1408) kept tcSimd at
+the Apple grabbers and both Windows player paths; Apple Clang already
+vectorizes the original player and recorder loops, so those sites keep their
+original loops. Their rows stay here for later measurements.
