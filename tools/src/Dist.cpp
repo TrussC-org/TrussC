@@ -628,6 +628,37 @@ const char* platformName(Platform platform) {
     return "unknown";
 }
 
+LinuxDistro parseOsRelease(const std::string& text) {
+    LinuxDistro distro;
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos || line[0] == '#') continue;
+        const std::string key = line.substr(0, eq);
+        std::string value = line.substr(eq + 1);
+        if (value.size() >= 2 && (value.front() == '"' || value.front() == '\'') && value.back() == value.front())
+            value = value.substr(1, value.size() - 2);
+        if (key == "ID") distro.id = value;
+        else if (key == "VERSION_ID") distro.versionId = value;
+        else if (key == "ID_LIKE") {
+            std::istringstream words(value);
+            std::string word;
+            while (words >> word) distro.idLike.push_back(word);
+        }
+    }
+    return distro;
+}
+
+std::string distroTag(const LinuxDistro& distro) {
+    std::string tag;
+    for (char c : lower(distro.id + distro.versionId)) {
+        if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_') tag += c;
+    }
+    return distro.id.empty() || tag.empty() ? "linux" : tag;
+}
+
 bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
     plan = Plan{};
     std::error_code ec;
@@ -673,7 +704,8 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
     if (in.platform != Platform::MacOS) plan.executableName = toUtf8(executable.filename());
 
     const std::string name = fileSafeName(config.name);
-    plan.folderName = name + "-" + config.version + "-" + platformName(in.platform) + "-" + plan.arch;
+    const std::string platform = in.platformTag.empty() ? platformName(in.platform) : in.platformTag;
+    plan.folderName = name + "-" + config.version + "-" + platform + "-" + plan.arch;
     plan.packageDir = in.outputDir / fromUtf8(plan.folderName);
 
     std::set<std::string> targets;

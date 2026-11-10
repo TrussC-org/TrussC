@@ -199,6 +199,27 @@ void testNames() {
                                 dist::fileSafeName(" x ") == "x" && dist::fileSafeName("") == "app");
 }
 
+void testDistro() {
+    const dist::LinuxDistro ubuntu = dist::parseOsRelease(
+        "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nID=ubuntu\nID_LIKE=debian\n# ID=commented\n");
+    check("os-release: quoted VERSION_ID, plain ID, comment skipped",
+          ubuntu.id == "ubuntu" && ubuntu.versionId == "24.04" &&
+              ubuntu.idLike == std::vector<std::string>{"debian"});
+    check("distro tag: id + version", dist::distroTag(ubuntu) == "ubuntu24.04");
+
+    const dist::LinuxDistro arch = dist::parseOsRelease("NAME=\"Arch Linux\"\r\nID=arch\r\nBUILD_ID=rolling\r\n");
+    check("distro tag: rolling release, CRLF", dist::distroTag(arch) == "arch");
+
+    const dist::LinuxDistro mint = dist::parseOsRelease("ID=linuxmint\nVERSION_ID='22.1'\nID_LIKE=\"ubuntu debian\"\n");
+    check("os-release: single quotes, ID_LIKE list",
+          dist::distroTag(mint) == "linuxmint22.1" &&
+              mint.idLike == std::vector<std::string>{"ubuntu", "debian"});
+
+    check("distro tag: odd characters dropped",
+          dist::distroTag(dist::parseOsRelease("ID=Open SUSE/x\nVERSION_ID=15 SP6\n")) == "opensusex15sp6");
+    check("distro tag: unknown -> linux", dist::distroTag(dist::parseOsRelease("")) == "linux");
+}
+
 void testGlobs() {
     check("glob: ** spans folders", dist::globMatch("data/**/*.psd", "data/x/y/a.psd"));
     check("glob: ** spans no folder", dist::globMatch("data/**/*.psd", "data/a.psd") &&
@@ -408,6 +429,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 
     testConfig();
     testNames();
+    testDistro();
     testGlobs();
     testNsis();
 #if defined(_WIN32) || (defined(__APPLE__) && !TARGET_OS_IPHONE) || \

@@ -4116,6 +4116,8 @@ static void printDistHelp() {
          << "Windows .pdb symbols go to <name>-<version>-<platform>-<arch>-symbols/, beside it.\n"
          << "On macOS bin/data goes into the bundle's Contents/Resources/data and the bundle\n"
          << "is signed ad hoc.\n"
+         << "On Linux <platform> is the distribution it was built on (arch, ubuntu24.04, ...):\n"
+         << "the app uses that distribution's shared libraries and runs where they match.\n"
          << "\n"
          << "Settings come from dist.json in the project folder (optional; see --init):\n"
          << "name, version, author, eulaFile, include, exclude, licenses, and installer\n"
@@ -4432,6 +4434,12 @@ static int cmdDist(const vector<string>& args) {
     input.platform = dist::Platform::MacOS;
 #else
     input.platform = dist::Platform::Linux;
+    {
+        // The package runs on the distribution it was built on; say which one.
+        std::stringstream osRelease;
+        osRelease << ifstream("/etc/os-release").rdbuf();
+        input.platformTag = dist::distroTag(dist::parseOsRelease(osRelease.str()));
+    }
 #endif
     input.projectDir = projectDir;
     input.binDir = projectDir / "bin";

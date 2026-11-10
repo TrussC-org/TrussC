@@ -160,8 +160,26 @@ std::string formatLicenseReport(const std::vector<LicenseSource>& sources);
 enum class Platform { Windows, MacOS, Linux };
 const char* platformName(Platform platform);  // "windows", "macos", "linux"
 
+// Linux: the distribution, from /etc/os-release. A Linux package depends on
+// the shared libraries of the distribution it was built on, so its name says
+// which one.
+struct LinuxDistro {
+    std::string id;         // ID: "arch", "ubuntu", "debian", ...
+    std::string versionId;  // VERSION_ID: "24.04"; "" on a rolling release
+    std::vector<std::string> idLike;  // ID_LIKE: "ubuntu debian" -> {"ubuntu", "debian"}
+};
+
+// Reads the text of /etc/os-release (KEY=value lines, values optionally quoted).
+LinuxDistro parseOsRelease(const std::string& text);
+
+// The distribution in package names: id + versionId ("ubuntu24.04", "arch"),
+// lowercase, only [a-z0-9._]. "linux" when the id is unknown.
+std::string distroTag(const LinuxDistro& distro);
+
 struct PlanInput {
     Platform platform = Platform::Windows;
+    std::string platformTag;    // in the package name; "" = platformName(platform)
+                                // (Linux: distroTag of the build machine)
     fs::path projectDir;
     fs::path binDir;            // projectDir/bin
     fs::path outputDir;         // where the package folder goes
