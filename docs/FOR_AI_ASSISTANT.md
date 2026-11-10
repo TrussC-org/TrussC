@@ -668,6 +668,20 @@ RenderTarget mip chains still use `getCubemapFaceAttachmentView()` for rendering
 This replaces `uploadCubemapFace()` and `uploadCubemapMip()` in v0.8.
 
 ### Fbo (Off-screen rendering)
+
+Stencil diagnostics (#1386 slice 1a) currently have only internal test entry
+points: `internal::FboStencilAccess::writeGray(gray, destination)` replaces all
+eight stencil bits from an R8 Fbo, and `readR8(source, destination)` reconstructs
+them in an R8 Fbo. Both require distinct, ended, equally sized, owned single-sample
+Fbos; read targets must have no mipmaps. Unsupported inputs warn and return false.
+The caller owns all eight bits. Each direction uses eight cached sokol bit-plane
+draws; writing clears stencil first, while reading preserves the source color,
+depth and stencil. Main targets and MSAA are outside this slice. The 256-value
+test certifies byte-exact R8 reconstruction only on the tested Linux GL/Mesa
+configuration. Metal, D3D11, GLES and WebGPU are **pending device check**; shader
+translation alone does not certify exactness. Public stencil drawing, Pixels/PNG
+readback wrappers, ownership scopes and MCP support are later slices.
+
 ```cpp
 Fbo fbo;
 fbo.allocate(512, 512);             // Basic

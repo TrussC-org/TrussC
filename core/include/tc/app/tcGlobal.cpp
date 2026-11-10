@@ -325,6 +325,7 @@ void cleanup() {
     // can recycle their IDs into another device's live resources.
     internal::drainPendingGpuDestroys();
     internal::discardRetiredShadows();
+    internal::FboStencilAccess::shutdown();
     // The 2D blend / 3D / premultiplied / clear sgl pipelines live in the
     // swapchain and per-FBO RenderTarget caches. sgl pipelines are in one
     // global pool (sgl_destroy_context() frees only the context's own default
@@ -628,7 +629,9 @@ void ensureTargetStack(WindowContext& window) {
 bool validTargetAttachments(const RenderTarget& target) {
     if (target.width <= 0 || target.height <= 0 || target.sampleCount <= 0) return false;
     const auto& attachments = target.binding.attachments;
-    if (sg_query_view_state(attachments.colors[0]) != SG_RESOURCESTATE_VALID) return false;
+    if (target.colorFormat != SG_PIXELFORMAT_NONE &&
+        sg_query_view_state(attachments.colors[0]) != SG_RESOURCESTATE_VALID) return false;
+    if (target.colorFormat == SG_PIXELFORMAT_NONE && !target.hasDepth) return false;
     if (target.hasDepth && sg_query_view_state(attachments.depth_stencil) != SG_RESOURCESTATE_VALID) return false;
     if (!target.hasDepth && attachments.depth_stencil.id) return false;
     if (attachments.resolves[0].id && sg_query_view_state(attachments.resolves[0]) != SG_RESOURCESTATE_VALID) return false;
