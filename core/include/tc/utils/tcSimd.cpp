@@ -24,13 +24,11 @@
 #define HWY_TARGET_INCLUDE "tc/utils/tcSimd.cpp"
 #include "hwy/foreach_target.h"
 #include "hwy/highway.h"
-#if defined(__aarch64__) || defined(_M_ARM64)
-// targets.cc needs VectorBytes when detecting ARM SVE vector lengths.
+// targets.cc references VectorBytes even on x86 in unoptimized builds.
 // Include its per-target implementation during our existing target pass.
 #include "hwy/per_target.cc"
 #undef HWY_TARGET_INCLUDE
 #define HWY_TARGET_INCLUDE "tc/utils/tcSimd.cpp"
-#endif
 
 HWY_BEFORE_NAMESPACE();
 namespace trussc::simd {
