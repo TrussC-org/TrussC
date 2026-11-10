@@ -520,18 +520,18 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
         if(EXISTS "${DEFAULT_DIR}/default.icns")
             _trussc_apply_macos_icns(${TARGET_NAME} "${DEFAULT_DIR}/default.icns")
         endif()
-        # Default .icon (for Tahoe)
-        if(EXISTS "${DEFAULT_DIR}/default.icon")
-            _trussc_apply_macos_icon_folder(${TARGET_NAME} "${DEFAULT_DIR}/default.icon" _DEFAULT_ICON_SUCCESS)
-            if(_DEFAULT_ICON_SUCCESS)
-                message(STATUS "[${TARGET_NAME}] Using default Tahoe icon")
-            endif()
-        endif()
+        # Precompiled Tahoe icon; default builds do not require Xcode.
+        # Share the user catalog's path so resource copies see icon changes.
+        set(ASSETS_CAR "${CMAKE_CURRENT_BINARY_DIR}/icon_assets/Assets.car")
+        configure_file("${DEFAULT_DIR}/Assets.car" "${ASSETS_CAR}" COPYONLY)
+        _trussc_apply_macos_icon_assets(${TARGET_NAME} "${ASSETS_CAR}" default)
     endif()
 
     # Remove the quarantine attribute (only once, at the end)
     add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
         COMMAND xattr -cr "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
+        # Bump the bundle's mtime so Finder and the Dock pick up a changed icon.
+        COMMAND touch "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
         COMMENT "Removing quarantine attribute from ${TARGET_NAME}.app"
     )
 endfunction()
@@ -644,7 +644,10 @@ endfunction()
 function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
     set(${OUT_SUCCESS} FALSE PARENT_SCOPE)
 
-    # Require full Xcode (actool shim exists in CLI tools but doesn't work)
+    file(GLOB_RECURSE ICON_FILES CONFIGURE_DEPENDS "${ICON_FOLDER}/*")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ICON_FILES})
+
+    # Prefer the selected Xcode. The CLT actool is a non-working shim.
     execute_process(
         COMMAND xcode-select -p
         OUTPUT_VARIABLE XCODE_DEV_DIR
@@ -652,20 +655,34 @@ function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
         RESULT_VARIABLE XCODE_SELECT_RESULT
         ERROR_QUIET
     )
-    if(NOT XCODE_SELECT_RESULT EQUAL 0 OR NOT XCODE_DEV_DIR MATCHES "Xcode.*\\.app")
+    if(XCODE_SELECT_RESULT EQUAL 0 AND XCODE_DEV_DIR MATCHES "/Xcode[^/]*\\.app/Contents/Developer$")
+        set(XCODE_DEV_DIRS "${XCODE_DEV_DIR}")
+        set(ACTOOL_SOURCE "xcode-select -p")
+    else()
+        # Prefer the stable app, then other installed Xcode apps in name order.
+        set(XCODE_DEV_DIRS "/Applications/Xcode.app/Contents/Developer")
+        file(GLOB XCODE_APPS "/Applications/Xcode*.app")
+        list(SORT XCODE_APPS)
+        foreach(XCODE_APP IN LISTS XCODE_APPS)
+            list(APPEND XCODE_DEV_DIRS "${XCODE_APP}/Contents/Developer")
+        endforeach()
+        list(REMOVE_DUPLICATES XCODE_DEV_DIRS)
+        set(ACTOOL_SOURCE "/Applications fallback")
+    endif()
+
+    set(ACTOOL_EXECUTABLE "")
+    foreach(XCODE_DIR IN LISTS XCODE_DEV_DIRS)
+        if(EXISTS "${XCODE_DIR}/usr/bin/actool")
+            set(XCODE_DEV_DIR "${XCODE_DIR}")
+            set(ACTOOL_EXECUTABLE "${XCODE_DIR}/usr/bin/actool")
+            break()
+        endif()
+    endforeach()
+    if(NOT ACTOOL_EXECUTABLE)
         message(STATUS "[${TARGET_NAME}] Skipping .icon folder (requires full Xcode)")
         return()
     endif()
-
-    # Find actool from Xcode
-    find_program(ACTOOL_EXECUTABLE actool
-        HINTS "${XCODE_DEV_DIR}/usr/bin"
-        NO_DEFAULT_PATH
-    )
-    if(NOT ACTOOL_EXECUTABLE)
-        message(STATUS "[${TARGET_NAME}] actool not found - skipping .icon folder")
-        return()
-    endif()
+    message(STATUS "[${TARGET_NAME}] Using actool: ${ACTOOL_EXECUTABLE} (${ACTOOL_SOURCE})")
 
     get_filename_component(ICON_NAME "${ICON_FOLDER}" NAME_WE)
     set(OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/icon_assets")
@@ -675,7 +692,8 @@ function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
     file(MAKE_DIRECTORY "${OUTPUT_DIR}")
     set(PARTIAL_PLIST "${OUTPUT_DIR}/partial-info.plist")
     execute_process(
-        COMMAND ${ACTOOL_EXECUTABLE} "${ICON_FOLDER}"
+        COMMAND "${CMAKE_COMMAND}" -E env "DEVELOPER_DIR=${XCODE_DEV_DIR}"
+            "${ACTOOL_EXECUTABLE}" "${ICON_FOLDER}"
             --compile "${OUTPUT_DIR}"
             --output-format human-readable-text
             --app-icon "${ICON_NAME}"
@@ -694,7 +712,12 @@ function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
         return()
     endif()
 
-    # Add Assets.car to Resources
+    _trussc_apply_macos_icon_assets(${TARGET_NAME} "${ASSETS_CAR}" "${ICON_NAME}")
+    set(${OUT_SUCCESS} TRUE PARENT_SCOPE)
+endfunction()
+
+# Bundle an asset catalog and name its icon, keeping any legacy .icns key.
+function(_trussc_apply_macos_icon_assets TARGET_NAME ASSETS_CAR ICON_NAME)
     set_source_files_properties("${ASSETS_CAR}" PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
     )
@@ -706,8 +729,6 @@ function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
         COMMAND /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string ${ICON_NAME}" "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>/Contents/Info.plist"
         COMMENT "Adding CFBundleIconName to Info.plist for Tahoe icon"
     )
-
-    set(${OUT_SUCCESS} TRUE PARENT_SCOPE)
 endfunction()
 
 # -----------------------------------------------------------------------------
