@@ -254,23 +254,18 @@ bool VideoGrabber::setupPlatform() {
     deviceName_ = std::string((char*)cap.card);
     logNotice("VideoGrabber") << "Device: " << deviceName_;
 
-    // Set format
-    struct v4l2_format fmt = {};
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = state_->requestedWidth;
-    fmt.fmt.pix.height = state_->requestedHeight;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;  // Try MJPEG first
-    fmt.fmt.pix.field = V4L2_FIELD_NONE;
-
-    if (xioctl(data->fd, VIDIOC_S_FMT, &fmt) == -1) {
-        // Try YUYV
-        fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
-        if (xioctl(data->fd, VIDIOC_S_FMT, &fmt) == -1) {
-            logError("VideoGrabber") << "Failed to set format";
-            state_->platformData.reset();
-            return false;
-        }
+    const auto call = [fd = data->fd](unsigned long request, void* arg) {
+        return xioctl(fd, request, arg);
+    };
+    const auto modes = internal::enumerateLinuxCaptureModes(call, state_->requestedWidth, state_->requestedHeight);
+    internal::LinuxCaptureNegotiation negotiated;
+    if (!internal::negotiateLinuxCapture(call, modes, state_->requestedWidth,
+                                        state_->requestedHeight, desiredFrameRate_, negotiated)) {
+        logError("VideoGrabber") << "Failed to set format";
+        state_->platformData.reset();
+        return false;
     }
+    const auto& fmt = negotiated.format;
 
     if (!checkedRgbaBytes(fmt.fmt.pix.width, fmt.fmt.pix.height, data->rgbaBytes) ||
         (fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV && fmt.fmt.pix.width % 2 != 0)) {
@@ -288,16 +283,7 @@ bool VideoGrabber::setupPlatform() {
     char fourcc[5] = {};
     std::memcpy(fourcc, &data->pixelFormat, 4);
     logNotice("VideoGrabber") << "Format: " << state_->width << "x" << state_->height
-                                << " (" << fourcc << ")";
-
-    // Set frame rate if specified
-    if (desiredFrameRate_ > 0) {
-        struct v4l2_streamparm parm = {};
-        parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        parm.parm.capture.timeperframe.numerator = 1;
-        parm.parm.capture.timeperframe.denominator = desiredFrameRate_;
-        xioctl(data->fd, VIDIOC_S_PARM, &parm);
-    }
+                                << " (" << fourcc << ") at " << negotiated.fps << " fps: " << negotiated.reason;
 
     // Request buffers
     struct v4l2_requestbuffers req = {};
