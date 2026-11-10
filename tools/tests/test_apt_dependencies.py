@@ -61,10 +61,10 @@ class AptDependenciesTests(unittest.TestCase):
     def test_ci_jpeg_dependency(self):
         action = (ROOT / '.github/actions/apt-deps/action.yml').read_text(encoding='utf-8')
         release = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
-        self.assertIn('./tools/install_dependencies_linux.sh -y', action)
-        installs = [shlex.split(line.strip()) for line in release.replace('\\\n', ' ').splitlines()
-                    if 'sudo apt-get install -y' in line]
-        self.assertTrue(any('libjpeg-dev' in arguments for arguments in installs))
+        # CI installs through the cached apt-deps action's package list and release's own list.
+        defaults = action.split('default: >-', 1)[1].split('runs:', 1)[0].split()
+        self.assertIn('libjpeg-dev', defaults)
+        self.assertIn('libjpeg-dev', release.split())
 
     def test_installed_packages_do_not_invoke_sudo(self):
         self.stub('dpkg', '#!/bin/bash\nexit 0\n')
@@ -180,7 +180,7 @@ if args[0] == 'timeout':
                             self.assertEqual(installs[0][installs[0].index('install') + 2:], [
                                 'build-essential', 'cmake', 'libgl1-mesa-dev', 'libx11-dev',
                                 'libxrandr-dev', 'libxinerama-dev', 'libxcursor-dev', 'libxi-dev',
-                                'libgtk-3-dev', 'libavcodec-dev', 'libavformat-dev', 'libswscale-dev',
+                                'libgtk-3-dev', 'libjpeg-dev', 'libavcodec-dev', 'libavformat-dev', 'libswscale-dev',
                                 'libavutil-dev', 'libgstreamer1.0-dev',
                                 'libgstreamer-plugins-base1.0-dev', 'extra-one', 'extra-two'])
                         else:
