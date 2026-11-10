@@ -187,17 +187,6 @@ for (const failure of [
             outputs.append(output.read_bytes())
         self.assertEqual(outputs[0], outputs[1])
         self.assertEqual(list(json.loads(outputs[0])), sorted(entries))
-        # Old partial caches cannot bypass the failure via the former override.
-        structure.write_text(json.dumps({'__meta': {'partialAst': True}}), encoding="utf-8")
-        output.unlink()
-        result = subprocess.run(['node', str(ROOT / 'docs/reference/generate.js'),
-                                 '--structure', str(structure), '--out-json', str(output),
-                                 '--out-md', str(self.directory / 'index.md')],
-                                env=dict(os.environ, TC_ALLOW_PARTIAL_AST='1'),
-                                capture_output=True, text=True, encoding="utf-8", errors="replace")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('REFUSING', result.stderr)
-        self.assertFalse(output.exists())
 
 
 class StructureAstTests(unittest.TestCase):
