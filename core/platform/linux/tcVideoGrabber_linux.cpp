@@ -9,6 +9,7 @@
 
 #include "TrussC.h"
 #include "tcVideoGrabberLinux.h"
+#include "tc/utils/tcSimd.h"
 #include <filesystem>
 #include <algorithm>
 
@@ -99,43 +100,6 @@ static int xioctl(int fd, unsigned long request, void* arg) {
     return r;
 }
 
-// Convert YUYV (YUV422) to RGBA
-static void convertYUYVtoRGBA(const unsigned char* src, unsigned char* dst, size_t pixelCount) {
-    for (size_t i = 0; i < pixelCount; i += 2) {
-        int y0 = src[0];
-        int u  = src[1];
-        int y1 = src[2];
-        int v  = src[3];
-        src += 4;
-
-        // YUV to RGB conversion
-        int c = y0 - 16;
-        int d = u - 128;
-        int e = v - 128;
-
-        int r = (298 * c + 409 * e + 128) >> 8;
-        int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-        int b = (298 * c + 516 * d + 128) >> 8;
-
-        dst[0] = (r < 0) ? 0 : (r > 255) ? 255 : r;
-        dst[1] = (g < 0) ? 0 : (g > 255) ? 255 : g;
-        dst[2] = (b < 0) ? 0 : (b > 255) ? 255 : b;
-        dst[3] = 255;
-        dst += 4;
-
-        c = y1 - 16;
-        r = (298 * c + 409 * e + 128) >> 8;
-        g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-        b = (298 * c + 516 * d + 128) >> 8;
-
-        dst[0] = (r < 0) ? 0 : (r > 255) ? 255 : r;
-        dst[1] = (g < 0) ? 0 : (g > 255) ? 255 : g;
-        dst[2] = (b < 0) ? 0 : (b > 255) ? 255 : b;
-        dst[3] = 255;
-        dst += 4;
-    }
-}
-
 // Decode MJPEG to RGBA using stb_image
 static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
                                unsigned char* dst, int width, int height, size_t rgbaBytes,
@@ -220,7 +184,7 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
                     xioctl(data->fd, VIDIOC_QBUF, &buf);
                     continue;
                 }
-                convertYUYVtoRGBA(src, data->backBuffer, data->rgbaBytes / 4);
+                simd::yuyvToRgba(src, data->backBuffer, data->rgbaBytes / 4);
                 converted = true;
             } else if (data->pixelFormat == V4L2_PIX_FMT_MJPEG) {
                 converted = decodeMJPEGtoRGBA(src, buf.bytesused, data->backBuffer,

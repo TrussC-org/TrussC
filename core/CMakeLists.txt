@@ -119,6 +119,16 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${TC_ALL_SOURCES})
 
 add_library(TrussC STATIC ${TC_ALL_SOURCES})
 
+# Highway remains private to the standalone tcSimd implementation TU.
+# Source INCLUDE_DIRECTORIES cannot mark vendor headers as system headers.
+if(MSVC)
+    set_property(SOURCE include/tc/utils/tcSimd.cpp APPEND PROPERTY
+        COMPILE_OPTIONS "/external:I${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/highway")
+else()
+    set_property(SOURCE include/tc/utils/tcSimd.cpp APPEND PROPERTY
+        COMPILE_OPTIONS "-isystem" "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/highway")
+endif()
+
 # PRIVATE (not PUBLIC): the core lib's own TUs must not emit TrussC.h's
 # /subsystem:windows pragma — a library .drectve overrides the command-line
 # /SUBSYSTEM and would flip console tools to the GUI subsystem. The app's own
