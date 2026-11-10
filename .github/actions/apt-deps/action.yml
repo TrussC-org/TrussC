@@ -1,5 +1,16 @@
 name: Install Linux dependencies
 description: Cache apt archives and install the TrussC Linux dependencies
+inputs:
+  packages:
+    description: Whitespace-separated package list (defaults to the Linux installer set)
+    required: false
+    # Keep this default in sync with REQUIRED_PACKAGES_DEBIAN; tested offline.
+    default: >-
+      libx11-dev libxcursor-dev libxi-dev libxrandr-dev libgl1-mesa-dev
+      libasound2-dev libgtk-3-dev libavcodec-dev libavformat-dev libswscale-dev
+      libavutil-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+      libfontconfig-dev pkg-config libcurl4-openssl-dev cmake
 runs:
   using: composite
   steps:
@@ -18,10 +29,42 @@ runs:
 
     - name: Install dependencies
       shell: bash
+      env:
+        APT_PACKAGES: ${{ inputs.packages }}
       run: |
+        # Inputs are package names, never shell code or pathname patterns.
+        read -r -a packages <<< "${APT_PACKAGES//$'\n'/ }"
+        missing=()
+        for package in "${packages[@]}"; do
+          if ! dpkg -s "$package" &>/dev/null; then
+            missing+=("$package")
+          fi
+        done
+        if (( ${#missing[@]} == 0 )); then
+          exit 0
+        fi
         mkdir -p ~/.apt-archives/partial
-        TRUSSC_APT_ARCHIVES=~/.apt-archives ./tools/install_dependencies_linux.sh -y
-        # apt runs as root (partial/ is 0700, plus a lock file); hand the
-        # directory back so the cache post step can read and save it.
-        sudo rm -f ~/.apt-archives/lock
-        sudo chown -R "$(id -u):$(id -g)" ~/.apt-archives
+        cleanup() {
+          sudo rm -f ~/.apt-archives/lock
+          sudo chown -R "$(id -u):$(id -g)" ~/.apt-archives
+        }
+        trap cleanup EXIT
+        sudo tee /etc/apt/apt.conf.d/80-ci-retries >/dev/null <<'APT_CONFIG'
+        Acquire::Retries "3";
+        Acquire::http::Timeout "30";
+        Acquire::https::Timeout "30";
+        Acquire::ftp::Timeout "30";
+        APT_CONFIG
+        # Total apt bound: 3 * (60 + 5 kill grace) + 2 * 5 + (300 + 5)
+        # = 510 seconds, leaving 90 seconds of the 10-minute caller step.
+        for attempt in 1 2 3; do
+          if sudo timeout --kill-after=5s 60s apt-get -o APT::Update::Error-Mode=any update; then
+            break
+          fi
+          if (( attempt == 3 )); then
+            exit 1
+          fi
+          sleep 5
+        done
+        sudo timeout --kill-after=5s 300s apt-get \
+          -o "Dir::Cache::Archives=$HOME/.apt-archives" install -y "${missing[@]}"
