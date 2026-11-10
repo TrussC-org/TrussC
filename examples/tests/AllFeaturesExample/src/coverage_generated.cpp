@@ -654,7 +654,9 @@ static void cover_utility() {
     (void)parseXml(af::val<const std::string>());
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)runOnMainThread(af::val<std::function<void ()>>(), af::val<std::weak_ptr<std::atomic<bool>>>());
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
     (void)runProcess(af::val<const std::vector<std::string>>(), af::val<const fs::path>());
+#endif
     (void)setConsoleLogLevel(af::val<LogLevel>());
     (void)setFileLogLevel(af::val<LogLevel>());
     (void)setLogFile(af::val<const fs::path>());
@@ -2665,16 +2667,36 @@ struct Cover_PlayingSoundInfo : af::Scope<PlayingSoundInfo> {
 struct Cover_Process : af::Scope<Process> {
     ~Cover_Process(); // Never instantiated.
     static void run() {
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)Process();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Process>().getExitCode();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Process>().getKillOnDestroy();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<const Process>().isRunning();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Process>().kill();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Process>().onExit;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Process>().onLine;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Process>().setKillOnDestroy(af::val<bool>());
-        (void)af::val<Process>().start(af::val<const std::vector<std::string>>(), af::val<const fs::path>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Process>().startAsync(af::val<const std::vector<std::string>>(), af::val<const fs::path>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
         (void)af::val<Process>().waitForExit();
+#endif
     }
 };
 

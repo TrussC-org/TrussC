@@ -2349,7 +2349,7 @@ Xml parseXml(const std::string & str)  // Parses an XML string into an Xml objec
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Applies JSON values to an object's reflected members.
 Json reflectToJson(T & obj, bool includeDerived = false)  // Returns an object's reflected members as JSON.
 void runOnMainThread(std::function<void ()> fn) [+1]  // Dispatches a callback to the main thread.
-ProcessResult runProcess(const std::vector<std::string> & args, const fs::path & workingDir = fs::path())  // Runs an external program and waits for it to finish.
+ProcessResult runProcess(const std::vector<std::string> & args, const fs::path & workingDir = fs::path()) [macos,windows,linux]  // Runs an external program and waits for it to finish.
 void setConsoleLogLevel(LogLevel level)  // Sets the minimum severity for console output.
 void setFileLogLevel(LogLevel level)  // Sets the minimum severity for log file output.
 SaveResult setLogFile(const fs::path & path)  // Opens a file for the global logger's output.
@@ -3912,13 +3912,13 @@ const char * Platform::name()  // Returns the short name of the target platform.
 ### Process — Runs an external program in the background and reports its output line by line.
 
 ```cpp
-int Process::getExitCode() const  // Returns the exit code of the last finished run.
-bool Process::getKillOnDestroy() const  // Returns whether destroying the Process kills a running program.
-bool Process::isRunning() const  // Returns whether the program is running.
-void Process::kill()  // Ends the program and the processes it started.
-void Process::setKillOnDestroy(bool kill)  // Sets whether destroying the Process kills a running program.
-bool Process::start(const std::vector<std::string> & args, const fs::path & workingDir = fs::path())  // Starts the program in the background.
-int Process::waitForExit()  // Blocks until the program has exited and returns its exit code.
+int Process::getExitCode() const [macos,windows,linux]  // Returns the exit code of the last finished run.
+bool Process::getKillOnDestroy() const [macos,windows,linux]  // Returns whether destroying the Process kills a running program.
+bool Process::isRunning() const [macos,windows,linux]  // Returns whether the program is running.
+void Process::kill() [macos,windows,linux]  // Ends the program and the processes it started.
+void Process::setKillOnDestroy(bool kill) [macos,windows,linux]  // Sets whether destroying the Process kills a running program.
+bool Process::startAsync(const std::vector<std::string> & args, const fs::path & workingDir = fs::path()) [macos,windows,linux]  // Starts the program in the background.
+int Process::waitForExit() [macos,windows,linux]  // Blocks until the program has exited and returns its exit code.
 ```
 
 ### ProcessExitEventArgs — Carries the result of a program that has exited.

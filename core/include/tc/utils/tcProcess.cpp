@@ -56,6 +56,7 @@ namespace internal {
 // Splits a byte stream into lines at "\n", "\r\n" and a lone "\r".
 class ProcessLineSplitter {
 public:
+    // Bound (child output): split lines at 1 MiB to bound each buffered line and event payload.
     static constexpr size_t maxLine = 1024 * 1024;
 
     template <class Emit>
@@ -70,8 +71,11 @@ public:
                 lastWasCR_ = true;
             } else {
                 lastWasCR_ = false;
+                // Bound (UTF-8): allow at most three continuation bytes past maxLine to finish a code point.
+                if (line_.size() >= maxLine &&
+                    ((static_cast<unsigned char>(c) & 0xc0) != 0x80 || line_.size() >= maxLine + 3))
+                    emitLine(emit);
                 line_ += c;
-                if (line_.size() >= maxLine) emitLine(emit);
             }
         }
     }
@@ -230,7 +234,18 @@ public:
         cleanup();
         process_ = info.hProcess;
         job_ = CreateJobObjectW(nullptr, nullptr);
-        if (job_ && !AssignProcessToJobObject(job_, process_)) close(job_);  // kill() falls back to the program alone
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!job_ ||
+            !SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &limits, sizeof(limits)) ||
+            !AssignProcessToJobObject(job_, process_)) {
+            error = windowsError("Establishing process job ownership");
+            TerminateProcess(process_, 1);  // child has never been resumed
+            WaitForSingleObject(process_, INFINITE);
+            reaped_ = true;
+            CloseHandle(info.hThread);
+            return false;
+        }
         ResumeThread(info.hThread);
         CloseHandle(info.hThread);
         return true;
@@ -399,22 +414,28 @@ public:
     int run(Sink&& sink, const std::atomic<bool>* killFlag, bool& killed) {
         using Clock = std::chrono::steady_clock;
         Clock::time_point terminatedAt;
-        bool forced = false;
+        bool groupPending = false;
         bool finished = false;
         bool statusKnown = false;
         int status = 0;
         size_t remaining[2] = {};
         pollfd descriptors[2] = {{reads_[0], POLLIN, 0}, {reads_[1], POLLIN, 0}};
-        while (!finished || descriptors[0].fd >= 0 || descriptors[1].fd >= 0) {
-            if (!finished && killFlag && !killed && killFlag->load(std::memory_order_acquire)) {
+        while (!finished || descriptors[0].fd >= 0 || descriptors[1].fd >= 0 || groupPending) {
+            if (killFlag && !killed && killFlag->load(std::memory_order_acquire)) {
                 killed = true;
+                groupPending = true;
                 terminatedAt = Clock::now();
                 ::kill(-pid_, SIGTERM);
             }
-            if (!finished && killed && !forced && Clock::now() - terminatedAt > std::chrono::seconds(3)) {
-                forced = true;
-                ::kill(-pid_, SIGKILL);
+            // Reaping the leader does not end ownership of its group.
+            if (groupPending) {
+                if (::kill(-pid_, 0) < 0 && errno == ESRCH) groupPending = false;
+                else if (Clock::now() - terminatedAt >= std::chrono::seconds(3)) {
+                    ::kill(-pid_, SIGKILL);
+                    groupPending = false;
+                }
             }
+            if (finished && groupPending) poll(nullptr, 0, 25);
             if (!finished) {
                 pid_t waited;
                 do { waited = waitpid(pid_, &status, WNOHANG); } while (waited < 0 && errno == EINTR);
@@ -495,6 +516,13 @@ std::unique_ptr<ProcessRunner> spawnRunner(const std::vector<std::string>& args,
         logError("Process") << "no program given";
         return nullptr;
     }
+    const auto& directory = workingDir.native();
+    if (std::any_of(args.begin(), args.end(), [](const auto& arg) {
+            return arg.find('\0') != std::string::npos;
+        }) || directory.find(fs::path::value_type{}) != fs::path::string_type::npos) {
+        logError("Process") << "program, arguments and working directory must not contain NUL";
+        return nullptr;
+    }
     auto runner = std::make_unique<ProcessRunner>();
     std::string error;
     if (!runner->spawn(args, workingDir, error)) {
@@ -534,15 +562,25 @@ ProcessResult runProcess(const std::vector<std::string>& args, const fs::path& w
 // Process
 // -----------------------------------------------------------------------------
 
-Process::Process() = default;
+struct Process::State {
+    Event<ProcessLineEventArgs> onLine{EventPriority::App, Deliver::Main};
+    Event<ProcessExitEventArgs> onExit{EventPriority::App, Deliver::Main};
+    std::unique_ptr<internal::ProcessRunner> runner;
+    std::atomic<std::thread::id> workerId{};
+    std::atomic<bool> running{false};
+    std::atomic<bool> killRequested{false};
+    std::atomic<int> exitCode{-1};
+};
+
+Process::Process() : state_(std::make_shared<State>()), onLine(state_->onLine), onExit(state_->onExit) {}
 
 Process::~Process() {
     if (killOnDestroy_) kill();
-    if (std::this_thread::get_id() == workerId_.load()) {
-        // Destroyed by its own inline listener: the worker cannot wait for
-        // itself. It still uses this object when the listener returns.
-        logError("Process") << "destroyed from its own onLine/onExit listener on the worker "
-                               "thread; listen with Deliver::Main instead";
+    // Cancel queued callbacks and further emissions, including inline teardown.
+    onLine.clear();
+    onExit.clear();
+    if (std::this_thread::get_id() == state_->workerId.load()) {
+        // The worker owns State until it returns; it never accesses Process.
         std::lock_guard<std::mutex> lock(mutex_);
         worker_.detach();
         return;
@@ -550,78 +588,82 @@ Process::~Process() {
     joinWorker();
 }
 
-bool Process::start(const std::vector<std::string>& args, const fs::path& workingDir) {
-    if (std::this_thread::get_id() == workerId_.load()) {
-        logError("Process") << "start() from an inline onLine/onExit listener is not possible; "
+bool Process::startAsync(const std::vector<std::string>& args, const fs::path& workingDir) {
+    getMainThreadId();  // Pin the caller before a worker's first Main delivery, even before runApp().
+    if (std::this_thread::get_id() == state_->workerId.load()) {
+        logError("Process") << "startAsync() from an inline onLine/onExit listener is not possible; "
                                "listen with Deliver::Main to restart";
         return false;
     }
     std::lock_guard<std::mutex> lock(mutex_);
-    if (running_.load(std::memory_order_acquire)) {
-        logError("Process") << "start(): already running";
+    if (state_->running.load(std::memory_order_acquire)) {
+        logError("Process") << "startAsync(): already running";
         return false;
     }
     if (worker_.joinable()) worker_.join();  // previous run, already finished
-    runner_.reset();
+    state_->runner.reset();
 
     auto runner = internal::spawnRunner(args, workingDir);
     if (!runner) return false;
-    runner_ = std::move(runner);
-    killRequested_.store(false, std::memory_order_release);
-    running_.store(true, std::memory_order_release);
+    state_->runner = std::move(runner);
+    state_->killRequested.store(false, std::memory_order_release);
+    state_->running.store(true, std::memory_order_release);
 
     const auto startedAt = std::chrono::steady_clock::now();
-    worker_ = std::thread([this, runner = runner_.get(), startedAt] {
-        workerId_.store(std::this_thread::get_id());
+    worker_ = std::thread([state = state_, startedAt] {
+        state->workerId.store(std::this_thread::get_id());
         internal::ProcessLineSplitter splitters[2];
-        auto emitter = [this](bool isStderr) {
-            return [this, isStderr](std::string& line) {
+        auto emitter = [state](bool isStderr) {
+            return [state, isStderr](std::string& line) {
                 ProcessLineEventArgs args;
                 args.line = std::move(line);
                 args.isStderr = isStderr;
-                onLine.notify(args);
+                internal::ExternalEventDelivery<ProcessLineEventArgs>::notify(state->onLine, args);
             };
         };
         auto emitStdout = emitter(false);
         auto emitStderr = emitter(true);
         bool killed = false;
-        const int code = runner->run(
+        const int code = state->runner->run(
             [&](int stream, const char* data, size_t size) {
                 if (stream == 0) splitters[0].feed(data, size, emitStdout);
                 else splitters[1].feed(data, size, emitStderr);
             },
-            &killRequested_, killed);
+            &state->killRequested, killed);
         splitters[0].flush(emitStdout);
         splitters[1].flush(emitStderr);
 
-        exitCode_.store(code, std::memory_order_release);
-        running_.store(false, std::memory_order_release);
+        state->exitCode.store(code, std::memory_order_release);
+        state->running.store(false, std::memory_order_release);
         ProcessExitEventArgs exit;
         exit.exitCode = code;
         exit.seconds = std::chrono::duration<float>(std::chrono::steady_clock::now() - startedAt).count();
         exit.killed = killed;
-        onExit.notify(exit);
-        workerId_.store(std::thread::id());
+        internal::ExternalEventDelivery<ProcessExitEventArgs>::notify(state->onExit, exit);
+        state->workerId.store(std::thread::id());
     });
     return true;
 }
 
+bool Process::isRunning() const { return state_->running.load(std::memory_order_acquire); }
+int Process::getExitCode() const { return state_->exitCode.load(std::memory_order_acquire); }
+
 void Process::kill() {
-    if (running_.load(std::memory_order_acquire)) killRequested_.store(true, std::memory_order_release);
+    if (state_->running.load(std::memory_order_acquire)) state_->killRequested.store(true, std::memory_order_release);
 }
 
 int Process::waitForExit() {
-    if (std::this_thread::get_id() == workerId_.load()) {
+    if (std::this_thread::get_id() == state_->workerId.load()) {
         logError("Process") << "waitForExit() from an inline onLine/onExit listener would wait "
                                "for itself";
         return -1;
     }
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!runner_) return -1;
+        if (!state_->runner) return -1;
     }
     joinWorker();
-    return exitCode_.load(std::memory_order_acquire);
+    return state_->exitCode.load(std::memory_order_acquire);
 }
 
 void Process::joinWorker() {

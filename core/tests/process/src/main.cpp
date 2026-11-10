@@ -12,15 +12,16 @@
 //     workingDir; a missing program reports started == false.
 //   - Output larger than a pipe buffer on both streams does not deadlock.
 //   - Process: onLine per line and one onExit with the exit code; a second
-//     start() while running is refused; kill() ends a sleeping child (and is
-//     reported as killed); the destructor kills by default; Deliver::Main
-//     listeners run when the main-thread queue is drained.
+//     startAsync() while running is refused; kill() ends a sleeping child (and is
+//     reported as killed); the destructor kills by default; default listeners
+//     run on main when the main-thread queue is drained.
 // =============================================================================
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -28,6 +29,15 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
+#else
+#include <cerrno>
+#include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <sys/prctl.h>
 #endif
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -87,6 +97,12 @@ int runChildMode(int argc, char** argv) {
         std::printf("%s\n", fs::current_path().string().c_str());
         return 0;
     }
+    if (mode == "cap" || mode == "utf8cap") {
+        const std::string line = mode == "cap" ? std::string(1024 * 1024, 'x') + "\n" :
+            std::string(1024 * 1024 - 1, 'x') + "\xe3\x81\x82tail\n";
+        std::fwrite(line.data(), 1, line.size(), stdout);
+        return 0;
+    }
     if (mode == "spam") {
         const std::string line(1023, 'x');
         for (int i = 0; i < 1024; ++i) {  // 1 MiB on each stream
@@ -98,8 +114,45 @@ int runChildMode(int argc, char** argv) {
     if (mode == "sleep") {
         std::puts("ready");
         std::fflush(stdout);
-        std::this_thread::sleep_for(std::chrono::seconds(30));
-        return 0;
+        for (;;) std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+    if (mode == "tree") {
+        int readyPipe[2];
+        if (pipe(readyPipe) != 0) return 98;
+        const pid_t worker = fork();
+        if (worker < 0) return 98;
+        if (worker == 0) {
+            close(readyPipe[0]);
+            signal(SIGTERM, SIG_IGN);
+            const char readyByte = 'r';
+            if (write(readyPipe[1], &readyByte, 1) != 1) _exit(98);
+            close(readyPipe[1]);
+            for (;;) pause();
+        }
+        close(readyPipe[1]);
+        char readyByte;
+        if (read(readyPipe[0], &readyByte, 1) != 1) return 98;
+        close(readyPipe[0]);
+        std::printf("%ld\n", static_cast<long>(worker));
+        std::fflush(stdout);
+        for (;;) pause();  // default SIGTERM disposition: launcher dies first
+    }
+    if (mode == "stubborn") {
+        signal(SIGTERM, SIG_IGN);
+        std::puts("ready");
+        std::fflush(stdout);
+        for (;;) pause();
+    }
+#endif
+    if (mode == "pid") {
+#ifdef _WIN32
+        std::printf("%lu\n", static_cast<unsigned long>(GetCurrentProcessId()));
+#else
+        std::printf("%ld\n", static_cast<long>(getpid()));
+#endif
+        std::fflush(stdout);
+        for (;;) std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     std::fprintf(stderr, "unknown child mode %s\n", mode.c_str());
     return 99;
@@ -108,6 +161,50 @@ int runChildMode(int argc, char** argv) {
 // ---------------------------------------------------------------------------
 // Parent side
 // ---------------------------------------------------------------------------
+
+// Must run before any TrussC thread helper or app initialization.
+void testMainThreadIdentity() {
+    const auto caller = std::this_thread::get_id();
+    Process process;
+    bool called = false, onCaller = false;
+    auto listener = process.onExit.listen([&](ProcessExitEventArgs&) {
+        called = true;
+        onCaller = std::this_thread::get_id() == caller;
+    });
+    check("start before app initialization", process.startAsync(child({"args"})));
+    process.waitForExit();
+    check("first Main callback waits for drain", !called);
+    check("Process pins caller as main", getMainThreadId() == caller);
+    internal::drainMainThreadQueue();
+    check("first Main callback runs on caller", called && onCaller);
+}
+
+void testMainDeliveryLimit() {
+    Process process;
+    process.onLine.setMainThreadDeliveryLimit(2);
+    process.onExit.setMainThreadDeliveryLimit(2);
+    int lines = 0, exits = 0;
+    auto line = process.onLine.listen([&](ProcessLineEventArgs&) { ++lines; });
+    auto exit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; });
+    auto extraExit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; });
+    auto droppedExit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; });
+    for (int run = 0; run < 2; ++run) {
+        check("limited output start", process.startAsync(child({"spam"})));
+        check("limited output finishes", process.waitForExit() == 0);
+        const auto store = internal::ExternalEventDelivery<ProcessLineEventArgs>::diagnostics(process.onLine);
+        const auto exitStore = internal::ExternalEventDelivery<ProcessExitEventArgs>::diagnostics(process.onExit);
+        check("child output respects limit before drain", store && store->pending == 2);
+        check("exit copies share the per-event limit", exitStore && exitStore->pending == 2);
+#ifndef __EMSCRIPTEN__
+        // Four event copies plus one overflow warning per event.
+        check("only limited copies and overflow warnings queued", internal::mainThreadQueue().size() == 6);
+#endif
+        check("limited callbacks wait for drain", lines == run * 2 && exits == run * 2);
+        internal::drainMainThreadQueue();
+        check("limited callbacks delivered and capacity released",
+              lines == (run + 1) * 2 && exits == (run + 1) * 2 && store && store->pending == 0);
+    }
+}
 
 void testRunProcess() {
     const auto result = runProcess(child({"echo"}));
@@ -139,6 +236,22 @@ void testRunProcess() {
     const auto missing = runProcess({"tc-process-test-no-such-program"});
     check("missing program is not started", !missing.started && missing.exitCode == -1);
 
+    const std::string withNul("a\0b", 3);
+    Process process;
+    for (const auto& invalid : {std::vector<std::string>{withNul}, child({"args", withNul})}) {
+        const auto rejected = runProcess(invalid);
+        check("runProcess rejects NUL in program/argument", !rejected.started && rejected.exitCode == -1);
+        check("startAsync rejects NUL in program/argument", !process.startAsync(invalid) && !process.isRunning());
+    }
+    const auto rejectedDir = runProcess(child({"echo"}), fs::path(withNul));
+    check("runProcess rejects NUL in workingDir", !rejectedDir.started && rejectedDir.exitCode == -1);
+    check("startAsync rejects NUL in workingDir", !process.startAsync(child({"echo"}), fs::path(withNul)));
+
+    const auto capped = runProcess(child({"cap"}));
+    check("exact line cap has no extra empty line", capped.exitCode == 0 && capped.output == std::string(1024 * 1024, 'x') + "\n");
+    const auto utf8 = runProcess(child({"utf8cap"}));
+    check("line cap preserves UTF-8 code points", utf8.exitCode == 0 && utf8.output == std::string(1024 * 1024 - 1, 'x') + "\xe3\x81\x82\ntail\n");
+
     const auto spam = runProcess(child({"spam"}));
     check("large output on both streams", spam.exitCode == 0 && spam.output.size() == 2 * 1024 * 1024);
 }
@@ -159,10 +272,11 @@ void testProcess() {
         ++exits;
         exitArgs = e;
     });
-    check("Process start", process.start(child({"echo"})));
+    check("Process start", process.startAsync(child({"echo"})));
     const int code = process.waitForExit();
     check("Process waitForExit returns the exit code", code == 7 && process.getExitCode() == 7);
     check("Process not running after exit", !process.isRunning());
+    internal::drainMainThreadQueue();
     {
         std::lock_guard<std::mutex> lock(mutex);
         bool stderrSeen = false;
@@ -177,47 +291,216 @@ void testProcess() {
     }
 
     // Restart after exit, refuse a second start while running, kill.
-    std::atomic<bool> ready{false};
+    std::mutex readyMutex;
+    std::condition_variable readyCondition;
+    bool ready = false;
     auto readyListener = process.onLine.listen([&](ProcessLineEventArgs& e) {
-        if (e.line == "ready") ready = true;
-    });
-    check("Process restarts", process.start(child({"sleep"})));
-    check("second start while running is refused", !process.start(child({"echo"})));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (!ready && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    check("sleeping child is ready", ready.load());
+        if (e.line == "ready") {
+            { std::lock_guard<std::mutex> lock(readyMutex); ready = true; }
+            readyCondition.notify_one();
+        }
+    }, Deliver::Inline);
+    check("Process restarts", process.startAsync(child({"sleep"})));
+    check("second start while running is refused", !process.startAsync(child({"echo"})));
+    {
+        std::unique_lock<std::mutex> lock(readyMutex);
+        readyCondition.wait(lock, [&] { return ready; });  // outer harness bounds hangs
+    }
     process.kill();
-    process.waitForExit();
+    const int killedCode = process.waitForExit();
+    internal::drainMainThreadQueue();
     {
         std::lock_guard<std::mutex> lock(mutex);
-        check("kill() ends the child", exits == 2 && exitArgs.killed && exitArgs.seconds < 10);
+        check("kill() ends the child", exits == 2 && exitArgs.killed && killedCode != 0);
     }
 }
 
 void testDestructorKills() {
-    const auto begin = std::chrono::steady_clock::now();
+    std::mutex mutex;
+    std::condition_variable ready;
+    unsigned long childPid = 0;
+#ifdef _WIN32
+    HANDLE childHandle = nullptr;
+#endif
     {
         Process process;
-        check("destructor test start", process.start(child({"sleep"})));
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        auto listener = process.onLine.listen([&](ProcessLineEventArgs& e) {
+            { std::lock_guard<std::mutex> lock(mutex); childPid = std::stoul(e.line); }
+            ready.notify_one();
+        }, Deliver::Inline);
+        check("destructor test start", process.startAsync(child({"pid"})));
+        std::unique_lock<std::mutex> lock(mutex);
+        ready.wait(lock, [&] { return childPid != 0; });
+#ifdef _WIN32
+        childHandle = OpenProcess(SYNCHRONIZE, FALSE, static_cast<DWORD>(childPid));
+#endif
     }
-    const auto elapsed = std::chrono::steady_clock::now() - begin;
-    check("destructor kills the child", elapsed < std::chrono::seconds(10));
+#ifdef _WIN32
+    check("destructor kills the child", childHandle && WaitForSingleObject(childHandle, INFINITE) == WAIT_OBJECT_0);
+    if (childHandle) CloseHandle(childHandle);
+#else
+    int status = 0;
+    check("destructor kills the child", ::kill(static_cast<pid_t>(childPid), 0) == -1 && errno == ESRCH);
+    check("destructor reaps the child", waitpid(static_cast<pid_t>(childPid), &status, WNOHANG) == -1 && errno == ECHILD);
+#endif
 }
 
 void testDeliverMain() {
     Process process;
-    std::vector<std::string> lines;  // main thread only
+    std::vector<std::string> lines;
     bool exited = false;
-    auto lineListener = process.onLine.listen([&](ProcessLineEventArgs& e) { lines.push_back(e.line); },
-                                              Deliver::Main);
-    auto exitListener = process.onExit.listen([&](ProcessExitEventArgs&) { exited = true; }, Deliver::Main);
-    process.start(child({"echo"}));
+    bool mainOnly = true;
+    bool inlineOnWorker = false;
+    auto lineListener = process.onLine.listen([&](ProcessLineEventArgs& e) {
+        mainOnly = mainOnly && isMainThread();
+        lines.push_back(e.line);
+    });
+    auto exitListener = process.onExit.listen([&](ProcessExitEventArgs&) {
+        mainOnly = mainOnly && isMainThread();
+        exited = true;
+    });
+    auto inlineListener = process.onExit.listen([&](ProcessExitEventArgs&) {
+        inlineOnWorker = !isMainThread();
+    }, Deliver::Inline);
+    struct Receiver {
+        int calls = 0;
+        bool mainOnly = true;
+        void receive(ProcessLineEventArgs&) { ++calls; mainOnly = mainOnly && isMainThread(); }
+    } receiver;
+    auto receive = [&](ProcessLineEventArgs& e) { receiver.receive(e); };
+    auto callbackPriority = process.onLine.listen(receive, -1);
+    auto member = process.onLine.listen(&receiver, &Receiver::receive);
+    auto memberPriority = process.onLine.listen(&receiver, &Receiver::receive, -1);
+    EventListener legacyCallback, legacyCallbackPriority, legacyMember, legacyMemberPriority;
+    // Deprecated forms still honor the event's delivery default.
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#endif
+    process.onLine.listen(legacyCallback, receive);
+    process.onLine.listen(legacyCallbackPriority, receive, -1);
+    process.onLine.listen(legacyMember, &receiver, &Receiver::receive);
+    process.onLine.listen(legacyMemberPriority, &receiver, &Receiver::receive, -1);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
+#endif
+    process.startAsync(child({"echo"}));
     process.waitForExit();
-    internal::drainMainThreadQueue();  // what the app loop does each frame
-    check("Deliver::Main listeners run on drain", exited && lines.size() == 5);
+    check("default callbacks wait for main drain", !exited && lines.empty() && receiver.calls == 0);
+    internal::drainMainThreadQueue();
+    check("default callbacks run on main", exited && lines.size() == 5 && mainOnly);
+    check("all omitted-delivery overloads run on main", receiver.calls == 35 && receiver.mainOnly);
+    check("Deliver::Inline opts into worker", inlineOnWorker);
+
+    bool staleCallback = false;
+    EventListener listener;
+    {
+        Process temporary;
+        listener = temporary.onExit.listen([&](ProcessExitEventArgs&) { staleCallback = true; });
+        temporary.startAsync(child({"echo"}));
+        temporary.waitForExit();
+    }
+    internal::drainMainThreadQueue();
+    check("destruction cancels queued callbacks", !staleCallback);
 }
+
+void testExitDestroysProcess() {
+    auto process = std::make_unique<Process>();
+    auto listener = process->onExit.listen([&](ProcessExitEventArgs&) { process.reset(); });
+    check("callback destruction start", process->startAsync(child({"echo"})));
+    process->waitForExit();
+    internal::drainMainThreadQueue();
+    check("main onExit may destroy Process", !process);
+}
+
+// The thread-exit signal comes after the worker's post-callback instructions.
+void testInlineDestroysProcess() {
+    struct Completion {
+        std::mutex mutex;
+        std::condition_variable condition;
+        bool ended = false;
+    };
+    struct SignalOnThreadExit {
+        Completion* completion = nullptr;
+        ~SignalOnThreadExit() {
+            if (!completion) return;
+            std::lock_guard<std::mutex> lock(completion->mutex);
+            completion->ended = true;
+            completion->condition.notify_one();
+        }
+    };
+    for (bool destroyOnLine : {false, true}) {
+        Completion completion;
+        auto* process = new Process;
+        auto destroy = [&](auto&) {
+            thread_local SignalOnThreadExit afterWorker;
+            afterWorker.completion = &completion;
+            delete process;
+        };
+        EventListener listener;
+        if (destroyOnLine) listener = process->onLine.listen(destroy, Deliver::Inline);
+        else listener = process->onExit.listen(destroy, Deliver::Inline);
+        check("inline callback destruction starts", process->startAsync(child({destroyOnLine ? "sleep" : "echo"})));
+        std::unique_lock<std::mutex> lock(completion.mutex);
+        completion.condition.wait(lock, [&] { return completion.ended; });
+        check("inline callback may destroy Process and worker finishes", completion.ended);
+    }
+}
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+void testGroupCancellation() {
+#if defined(__linux__)
+    // Adopt the worker after its launcher exits, so death is proved by reaping.
+    int previousSubreaper = 0;
+    prctl(PR_GET_CHILD_SUBREAPER, &previousSubreaper);
+    prctl(PR_SET_CHILD_SUBREAPER, 1);
+#endif
+    for (const char* mode : {"stubborn", "tree"}) {
+        Process process;
+        std::mutex mutex;
+        std::condition_variable readyCondition;
+        std::string readyLine;
+        bool killed = false;
+        auto lineListener = process.onLine.listen([&](ProcessLineEventArgs& e) {
+            { std::lock_guard<std::mutex> lock(mutex); readyLine = e.line; }
+            readyCondition.notify_one();
+        }, Deliver::Inline);
+        auto exitListener = process.onExit.listen([&](ProcessExitEventArgs& e) { killed = e.killed; }, Deliver::Inline);
+        check("group cancellation starts", process.startAsync(child({mode})));
+        {
+            std::unique_lock<std::mutex> lock(mutex);
+            readyCondition.wait(lock, [&] { return !readyLine.empty(); });
+        }
+        process.kill();
+        const int code = process.waitForExit();
+        check("group cancellation reports killed", killed);
+        if (std::strcmp(mode, "stubborn") == 0) {
+            check("stubborn immediate child killed", code == 128 + SIGKILL);
+        } else {
+            check("launcher exits on SIGTERM", code == 128 + SIGTERM);
+            const pid_t workerPid = static_cast<pid_t>(std::stol(readyLine));
+#if defined(__linux__)
+            int status = 0;
+            pid_t reaped;
+            do { reaped = waitpid(workerPid, &status, 0); } while (reaped < 0 && errno == EINTR);
+            check("stubborn descendant killed and reaped", reaped == workerPid && WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+#else
+            // init reaps the orphan on macOS; the outer harness bounds this wait.
+            while (::kill(workerPid, 0) == 0) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            check("stubborn descendant gone", errno == ESRCH);
+#endif
+        }
+    }
+#if defined(__linux__)
+    prctl(PR_SET_CHILD_SUBREAPER, previousSubreaper);
+#endif
+}
+#endif
 
 } // namespace
 
@@ -228,11 +511,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     selfPath = fs::absolute(argv[0], error).string();
 #if defined(_WIN32) || (defined(__APPLE__) && !TARGET_OS_IPHONE) || \
     (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
-    isMainThread();  // pin the main thread before any worker runs
+    testMainThreadIdentity();
+    testMainDeliveryLimit();
     testRunProcess();
     testProcess();
     testDestructorKills();
     testDeliverMain();
+    testExitDestroysProcess();
+    testInlineDestroysProcess();
+#if !defined(_WIN32)
+    testGroupCancellation();
+#endif
 #else
     const auto result = runProcess({"anything"});
     check("unsupported platform reports not started", !result.started);

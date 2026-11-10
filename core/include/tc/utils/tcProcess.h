@@ -4,30 +4,32 @@
 // TrussC Process - run an external program and read its output
 //
 // Two forms, both without a shell (arguments are passed as-is, no quoting or
-// globbing; args[0] is looked up on PATH):
+// globbing; embedded NUL is rejected; args[0] is looked up on PATH):
 //
 //   runProcess(args)  synchronous, like openFrameworks' ofSystem(): blocks the
 //                     calling thread until the program exits and returns its
 //                     exit code and output.
 //
-//   Process           asynchronous: start() returns at once, a worker thread
+//   Process           asynchronous: startAsync() returns at once, a worker thread
 //                     reads the output and fires onLine per line and onExit
-//                     once. Both fire on the worker thread; listen with
-//                     Deliver::Main to touch the Node tree / GPU:
+//                     once. Listeners run on the main thread by default;
+//                     Deliver::Inline opts into worker-thread delivery:
 //
-//     process.onLine.listen([this](auto& e) { status = e.line; }, Deliver::Main);
-//     process.onExit.listen([this](auto& e) { if (e.exitCode == 0) reload(); },
-//                           Deliver::Main);
-//     process.start({"node", "render.js", "--out", path});
+//     // process, lineListener and exitListener are App members.
+//     lineListener = process.onLine.listen([this](auto& e) { status = e.line; });
+//     exitListener = process.onExit.listen([this](auto& e) { if (e.exitCode == 0) reload(); });
+//     process.startAsync({"node", "render.js", "--out", path});
 //
-// Platforms: macOS, Windows, Linux. Elsewhere (Web, iOS, Android) start()
+// Platforms: macOS, Windows, Linux. Elsewhere (Web, iOS, Android) startAsync()
 // returns false and runProcess() returns started == false, with one error log.
 //
 // Output: stdout and stderr are read from separate pipes, so neither can fill
 // up and block the program. Lines end at "\n", "\r\n" or a lone "\r" (progress
 // bars that redraw one line count as one line per redraw); the terminator is
 // not part of the line. A line longer than 1 MiB is split.
-// The program's stdin is the null device.
+// The program's stdin is the null device. The environment is inherited, with
+// no per-child override. Windows output bytes are not converted from the
+// child's code page.
 //
 // Exit codes: the program's exit status. On macOS/Linux a program ended by a
 // signal reports 128 + the signal number (as a shell does).
@@ -68,7 +70,7 @@ struct TC_LUA_SKIP ProcessResult {
 
 // Blocks until the program (not its children) exits. Do not call it from
 // draw()/update() for anything slow: the frame waits too. Use Process instead.
-TC_LUA_SKIP ProcessResult runProcess(const std::vector<std::string>& args,
+TC_PLATFORMS("macos,windows,linux") TC_LUA_SKIP ProcessResult runProcess(const std::vector<std::string>& args,
                                      const fs::path& workingDir = {});
 
 // -----------------------------------------------------------------------------
@@ -82,18 +84,22 @@ struct TC_LUA_SKIP ProcessLineEventArgs {
 
 struct TC_LUA_SKIP ProcessExitEventArgs {
     int exitCode = -1;
-    float seconds = 0;      // time from start() to exit
+    float seconds = 0;      // time from startAsync() to exit
     bool killed = false;    // ended by kill() or by destroying the Process
 };
 
 namespace internal { class ProcessRunner; }
 
-class TC_LUA_SKIP Process {
+class TC_PLATFORMS("macos,windows,linux") TC_LUA_SKIP Process {
+    struct State;
+    std::shared_ptr<State> state_;  // also held by the worker across callbacks
 public:
-    // Fired on the worker thread. onLine for every line of output (all lines
-    // come before onExit); onExit once per successful start().
-    Event<ProcessLineEventArgs> onLine;
-    Event<ProcessExitEventArgs> onExit;
+    // Main-thread delivery by default; Deliver::Inline opts into the worker.
+    // onLine for every line (all lines come before onExit); onExit once per
+    // successful startAsync(). Keep the returned EventListener tokens.
+    // setMainThreadDeliveryLimit(count) optionally bounds pending Main copies per event; 0 is unlimited.
+    Event<ProcessLineEventArgs>& onLine;
+    Event<ProcessExitEventArgs>& onExit;
 
     Process();
     // Kills the program (and its children) unless setKillOnDestroy(false),
@@ -103,18 +109,20 @@ public:
     Process(const Process&) = delete;
     Process& operator=(const Process&) = delete;
 
-    // Starts the program. Returns false (and logs why) when it is already
+    // Starts without waiting; results arrive on the main thread by default.
+    // Call from the main thread, including before runApp()/runHeadlessApp().
+    // Returns false (and logs why) when it is already
     // running, could not be started, or the platform has no processes.
     // A finished Process can be started again. Not from its own listeners
     // that run on the worker thread (Deliver::Inline): that returns false.
-    bool start(const std::vector<std::string>& args, const fs::path& workingDir = {});
+    bool startAsync(const std::vector<std::string>& args, const fs::path& workingDir = {});
 
-    // True from a successful start() until the program has exited and its
-    // remaining output has been delivered (just before onExit fires).
-    bool isRunning() const { return running_.load(std::memory_order_acquire); }
+    // True from a successful startAsync() until the program has exited and its
+    // remaining output has been dispatched (just before onExit fires).
+    bool isRunning() const;
 
-    // Ends the program and its children. POSIX: SIGTERM, then SIGKILL if it
-    // is still running 3 seconds later. Windows: terminated at once.
+    // Ends the program and its children. POSIX: SIGTERM, then SIGKILL if its
+    // group is still present 3 seconds later. Windows: terminated at once.
     // Returns immediately; onExit follows with killed == true. No-op when
     // nothing runs.
     void kill();
@@ -128,18 +136,13 @@ public:
     bool getKillOnDestroy() const { return killOnDestroy_; }
 
     // Exit code of the last finished run, -1 before the first one ends.
-    int getExitCode() const { return exitCode_.load(std::memory_order_acquire); }
+    int getExitCode() const;
 
 private:
     void joinWorker();
 
-    std::mutex mutex_;  // guards runner_ and worker_
-    std::unique_ptr<internal::ProcessRunner> runner_;
+    std::mutex mutex_;  // guards starting and joining the worker
     std::thread worker_;
-    std::atomic<std::thread::id> workerId_{};  // set while the worker runs (refuses self-waits)
-    std::atomic<bool> running_{false};
-    std::atomic<bool> killRequested_{false};
-    std::atomic<int> exitCode_{-1};
     bool killOnDestroy_ = true;
 };
 
