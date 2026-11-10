@@ -4199,7 +4199,8 @@ static int distInit(const string& projectPath, const string& projectName,
         return 1;
     }
     cout << "Wrote dist.json. Edit it for include / exclude / licenses, then run 'trusscli dist'.\n"
-         << "  eulaFile  your license terms; shipped as EULA.txt when the file exists\n"
+         << "  eulaFile  your license terms, shipped as EULA.txt; \"\" = EULA.txt in the project\n"
+         << "            folder if there is one (a file named here must exist)\n"
          << "  include   [{\"from\": \"../tools/node\", \"to\": \"data/tools/node\"}]  files from outside bin/data\n"
          << "  exclude   [\"data/**/*.psd\"]                                    left out of the package\n"
          << "  licenses  [{\"name\": \"Node.js\", \"file\": \"...\"}]                  your own third-party notices\n";

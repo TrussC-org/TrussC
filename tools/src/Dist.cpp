@@ -375,7 +375,9 @@ std::string configTemplate(const std::string& name, const std::string& version,
     text += "  \"name\": " + json(name).dump() + ",\n";
     text += "  \"version\": " + json(version).dump() + ",\n";
     text += "  \"author\": " + json(author).dump() + ",\n";
-    text += "  \"eulaFile\": " + json(std::string(kDefaultEula)).dump() + ",\n";
+    // Empty: EULA.txt in the project folder ships when it exists. A file named
+    // here must exist, so naming EULA.txt would fail apps without one.
+    text += "  \"eulaFile\": \"\",\n";
     text += "  \"include\": [],\n";
     text += "  \"exclude\": [],\n";
     text += "  \"licenses\": [],\n";

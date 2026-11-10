@@ -124,7 +124,7 @@ void testConfig() {
     check("--init template parses back",
           dist::parseConfig(dist::configTemplate("My \"App\"", "0.1.0", "Studio"), config, warnings, error) &&
               config.name == "My \"App\"" && config.version == "0.1.0" && config.author == "Studio" &&
-              config.eulaFile == "EULA.txt" && warnings.empty());
+              config.eulaFile.empty() && warnings.empty());
     check("copyright line", dist::copyrightLine("").empty() &&
                                 contains(dist::copyrightLine("My Studio"), " My Studio") &&
                                 dist::copyrightLine("My Studio").rfind("\xC2\xA9 20", 0) == 0);
@@ -588,6 +588,18 @@ void testPackage(const fs::path& self, const fs::path& scratch) {
     fs::remove(project / "EULA.txt");
     check("no EULA without eulaFile or EULA.txt",
           dist::makePlan(input, plan, error) && plan.eulaSource.empty());
+    {
+        // --init, then dist, on an app without an EULA.
+        auto fromInit = input;
+        std::vector<std::string> initWarnings;
+        check("the --init template packages an app without an EULA",
+              dist::parseConfig(dist::configTemplate("My App", "1.2.0", ""), fromInit.config, initWarnings, error) &&
+                  dist::makePlan(fromInit, plan, error) && plan.eulaSource.empty());
+        write(project / "EULA.txt", "my terms\n");
+        check("the --init template ships EULA.txt once it is there",
+              dist::makePlan(fromInit, plan, error) && plan.eulaSource.filename() == "EULA.txt");
+        fs::remove(project / "EULA.txt");
+    }
 
     auto failing = input;
     failing.config.eulaFile = "EULA-missing.txt";
