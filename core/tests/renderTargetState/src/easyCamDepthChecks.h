@@ -9,7 +9,7 @@ class CameraDepthChild : public Node {
 
 void runEasyCamDepthChecks() {
     const char* names[] = {"alpha", "popStyle", "resetStyle", "childNode", "disabled",
-                           "restoreOff", "restoreOn", "nested", "fboInside", "add", "addOcclusion"};
+                           "restoreOff", "restoreOn", "nested", "fboInside", "add", "addFarther"};
     for (int variant = 0; variant < 11; ++variant) {
         Fbo target, innerTarget; target.allocate(96, 96);
         target.begin(0.125f, 0.125f, 0.125f);
@@ -81,7 +81,7 @@ void runEasyCamDepthChecks() {
         if (variant == 5) expected = Color(0, 1, 0);
         if (variant == 6) expected = Color(0, 0, 1); // disabled inside, restored on at exit
         if (variant == 9) expected = Color(1, 0.125f, 1); // equal depth: Add sums both
-        if (variant == 10) expected = Color(1, 0.125f, 0.125f); // farther blue occluded under Add
+        if (variant == 10) expected = Color(1, 0.125f, 1); // #1334: Add writes no depth, farther blue sums
         std::printf("EASYCAM DEPTH %s\n", names[variant]);
         expectPixel(pixels, 48, 48, expected, names[variant]);
         if (const char* directory = std::getenv("TC_EASYCAM_IMAGES")) {

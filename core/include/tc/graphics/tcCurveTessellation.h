@@ -21,6 +21,7 @@
 #include "../utils/tcAnnotations.h"
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace trussc {
 
@@ -177,40 +178,34 @@ void subdivideQuad(const Vec3& p0, const Vec3& p1, const Vec3& p2,
 
 // N-th order Bezier via in-place de Casteljau. `pts` is mutated as scratch.
 template <class Out>
-void subdivideBezierN(std::vector<Vec3> pts, float tolSq, int depth, Out& out) {
-    int n = (int)pts.size();
+void subdivideBezierN(Vec3* pts, int n, Vec3* scratch, float tolSq, int depth, Out& out) {
     if (n < 2) return;
 
     // Flatness: max perpendicular distance of any interior control point
     // to the chord pts[0]--pts[n-1].
     float maxD = 0.0f;
     for (int i = 1; i < n - 1; i++) {
-        float d = pointLineDistSq(pts[i], pts.front(), pts.back());
+        float d = pointLineDistSq(pts[i], pts[0], pts[n - 1]);
         if (d > maxD) maxD = d;
     }
     if (depth >= kBezierMaxDepth || maxD <= tolSq) {
-        out.push_back(pts.back());
+        out.push_back(pts[n - 1]);
         return;
     }
-    // Split at t = 0.5 via de Casteljau: build the left/right control
-    // polygons in two extra buffers.
-    std::vector<Vec3> left, right;
-    left.reserve(n);
-    right.reserve(n);
-    left.push_back(pts.front());
-    right.push_back(pts.back());
+    // Each recursion depth reuses its slice of the caller's scratch buffer.
+    Vec3* left = scratch;
+    Vec3* right = scratch + n;
+    left[0] = pts[0];
+    right[n - 1] = pts[n - 1];
     for (int level = 1; level < n; level++) {
         for (int i = 0; i < n - level; i++) {
             pts[i] = lerp3(pts[i], pts[i + 1], 0.5f);
         }
-        left.push_back(pts.front());
-        right.push_back(pts[n - level - 1]);
+        left[level] = pts[0];
+        right[n - level - 1] = pts[n - level - 1];
     }
-    // `right` was built end-first; reverse to get the right half's
-    // control polygon in the conventional order.
-    std::reverse(right.begin(), right.end());
-    subdivideBezierN(std::move(left),  tolSq, depth + 1, out);
-    subdivideBezierN(std::move(right), tolSq, depth + 1, out);
+    subdivideBezierN(left, n, scratch + 2 * n, tolSq, depth + 1, out);
+    subdivideBezierN(right, n, scratch + 2 * n, tolSq, depth + 1, out);
 }
 
 } // namespace internal
@@ -252,7 +247,11 @@ void tessellateBezierN(const std::vector<Vec3>& pts, float tolerance, Out& out) 
         return;
     }
     if (tolerance <= 0.0f) tolerance = 0.1f;
-    internal::subdivideBezierN(pts, tolerance * tolerance, 0, out);
+    const int n = static_cast<int>(pts.size());
+    std::vector<Vec3> scratch(static_cast<size_t>(n) * (1 + 2 * kBezierMaxDepth));
+    std::copy(pts.begin(), pts.end(), scratch.begin());
+    internal::subdivideBezierN(scratch.data(), n, scratch.data() + n,
+                              tolerance * tolerance, 0, out);
 }
 
 } // namespace trussc

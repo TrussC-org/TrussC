@@ -50,6 +50,7 @@ void sapp_tc_window_skip_present(sapp_window) { ++desktopSkips; }
 void publishWindowMetadata(Window& w,const sapp_tc_window_metadata& m) { w.binding.metadata=m; }
 bool refreshWindowMetadata(Window&) { return true; }
 void syncWindowAppSize(Window&) {}
+void applyWindowDrawWhileHidden(Window&) {}
 struct WindowEntryScope { WindowEntryScope(Window&,bool) { refreshSelectedWindowMetadata(); } operator bool() { return true; } static void refreshSelectedWindowMetadata(); };
 struct TeardownSteps { template<class F> void run(const char*,F fn) { fn(); } };
 struct WindowTickPresentation {};

@@ -210,6 +210,9 @@ jobs:
       # the CMAKE_*_COMPILER_LAUNCHER env vars, which CMake reads at configure
       # time. The action handles install + restore/save + restore-key prefix.
       - name: Setup compiler cache
+        id: compiler_cache
+        # Cache setup is optional on Windows; build and test failures still gate CI.
+        continue-on-error: ${{ runner.os == 'Windows' }}
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           variant: ${{ matrix.launcher }}
@@ -228,6 +231,7 @@ jobs:
           save: ${{ github.event_name != 'merge_group' && matrix.shard == 1 }}
 
       - name: Enable compiler launcher
+        if: steps.compiler_cache.outcome == 'success'
         shell: bash
         run: |
           launcher="${{ matrix.launcher }}"
@@ -259,8 +263,9 @@ jobs:
         shell: bash
         run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
 
+      # A restored CMake cache may retain a launcher from an earlier run.
       - name: Cache build directories
-        if: github.event_name != 'merge_group'
+        if: github.event_name != 'merge_group' && steps.compiler_cache.outcome == 'success'
         uses: actions/cache@v5
         with:
           path: |
@@ -271,7 +276,7 @@ jobs:
             ${{ runner.os }}-${{ env.RUNNER_IMAGE }}-build-v5-
 
       - name: Cache build directories (restore only, merge queue)
-        if: github.event_name == 'merge_group'
+        if: github.event_name == 'merge_group' && steps.compiler_cache.outcome == 'success'
         uses: actions/cache/restore@v5
         with:
           path: |
@@ -306,8 +311,11 @@ jobs:
         uses: ./.github/actions/apt-deps
 
       - name: Install xrdb for native DPI checks
+        timeout-minutes: 10
         if: runner.os == 'Linux' && matrix.shard == 1
-        run: sudo apt-get install -y x11-xserver-utils
+        uses: ./.github/actions/apt-deps
+        with:
+          packages: x11-xserver-utils
 
       # Windows: Setup MSVC environment (provides cl.exe, ninja, etc. in PATH)
       - name: Setup MSVC (Windows)
@@ -315,7 +323,7 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Verify cached warning replay (MSVC)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.compiler_cache.outcome == 'success'
         shell: bash
         run: |
           cmake --version
@@ -896,7 +904,9 @@ jobs:
         run: |
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/warning_build_9.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
-          ./examples/build_all.py --web-only --test-only --verbose
+          # emcc fetches emdawnwebgpu lazily; retry once after a transient download failure.
+          ./examples/build_all.py --web-only --test-only --verbose ||
+            ./examples/build_all.py --web-only --test-only --verbose
           TC_BUILD
 
       - name: Check build warnings (9)
@@ -1088,8 +1098,12 @@ jobs:
         with:
           fetch-depth: 0
       - uses: ./.github/actions/apt-deps
+        timeout-minutes: 10
       - name: Install software display
-        run: sudo apt-get install -y xvfb libgl1-mesa-dri mesa-utils
+        timeout-minutes: 10
+        uses: ./.github/actions/apt-deps
+        with:
+          packages: xvfb libgl1-mesa-dri mesa-utils
       - name: Setup compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:

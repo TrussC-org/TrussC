@@ -27,6 +27,7 @@ class AdapterTests(unittest.TestCase):
         command = launch.call_args.args[0]
         self.assertEqual(command[0], 'device-chrome')
         self.assertIn('--headless=new', command)
+        self.assertIn('--password-store=basic', command)
         self.assertIn('--enable-unsafe-webgpu', command)
         self.assertIn('--remote-debugging-port=0', command)
         self.assertEqual(command[-1], 'about:blank')
@@ -36,11 +37,15 @@ class AdapterTests(unittest.TestCase):
         command = self.command()
         self.assertIn('--use-angle=swiftshader', command)
         self.assertIn('--use-webgpu-adapter=swiftshader', command)
+        self.assertIn('--enable-features=Vulkan', command)
+        self.assertIn('--use-vulkan=swiftshader', command)
 
     def test_explicit_swiftshader(self):
         command = self.command('--adapter', 'swiftshader')
         self.assertIn('--use-angle=swiftshader', command)
         self.assertIn('--use-webgpu-adapter=swiftshader', command)
+        self.assertIn('--enable-features=Vulkan', command)
+        self.assertIn('--use-vulkan=swiftshader', command)
 
     def test_device_selection_removes_both_software_overrides(self):
         for arguments in [[], ['--url', 'http://localhost:8631/example.html', '--frames', '60']]:
@@ -48,6 +53,8 @@ class AdapterTests(unittest.TestCase):
                 command = self.command('--adapter', 'default', *arguments)
                 self.assertFalse(any(arg.startswith('--use-angle=') for arg in command))
                 self.assertFalse(any(arg.startswith('--use-webgpu-adapter=') for arg in command))
+                self.assertFalse(any(arg.startswith('--enable-features=') for arg in command))
+                self.assertFalse(any(arg.startswith('--use-vulkan=') for arg in command))
 
     def test_invalid_adapter_stops_before_launch(self):
         with patch('sys.argv', ['run.py', '--adapter', 'unknown']), \

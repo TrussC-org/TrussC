@@ -13,6 +13,17 @@ TrussC uses a modern CMake-based build system designed to be automated via the *
 
 ---
 
+Linux JPEG decoding requires the system **libjpeg-turbo** through `pkg-config libjpeg`.
+The installer includes `libjpeg-dev` (Ubuntu: `libjpeg-turbo8-dev`;
+Debian/Pi OS: `libjpeg62-turbo-dev`). To install it manually:
+
+```bash
+sudo apt install libjpeg-dev
+```
+
+Configure fails if the package is missing or lacks `JCS_EXT_RGBA`; there is no
+stb fallback for JPEG on Linux. Other image formats and other platforms keep stb_image.
+
 ## 1. Project Generator
 
 The **Project Generator** is the core tool for managing TrussC projects. It handles:
@@ -422,15 +433,18 @@ with its data folder and ad-hoc signing (`sign-identity: '-'`). Ad-hoc signing
 skips certificate import, notarization and stapling, and uses no timestamp.
 
 ### App Icon
-Place icon files in the `icon/` folder:
+Place icon files in the `icon/` folder. For PNG input, use a 1024×1024 square image; smaller PNGs are scaled up to 1024 on macOS/iOS and look blurry:
 
 - **macOS:**
   - `.icns` - Traditional icon format (required for older macOS)
   - `.icon` - New format for macOS 26 Tahoe+ (created with Icon Composer, requires Xcode)
   - Both can coexist for compatibility across macOS versions
+  - Otherwise, a `.png` is converted at configure time with `sips` + `iconutil` (no full Xcode required); missing or failing tools produce a warning and use the default TrussC icon. A non-square PNG is stretched to a square, with a warning. To test the fallback, configure with `-DTRUSSC_SIPS_EXECUTABLE=NOTFOUND` (or `TRUSSC_ICONUTIL_EXECUTABLE`).
+  - An empty `icon/` uses the default icon without a warning.
+- **iOS:** A `.png` is resized to 1024×1024 at configure time with `sips`, inside the build tree. Without a PNG, the 1024×1024 TrussC default is used; missing or failing `sips` warns and uses that default.
 - **Windows:**
-  - `.ico` - Windows icon format
-  - `.png` - Converted to `.ico` automatically (requires ImageMagick)
+  - `.ico` - Windows icon format; a user file in `icon/` takes priority over PNG
+  - `.png` - Converted at configure time with ImageMagick 7 (`magick`) to `<target>_icon.ico` in the build tree; nothing is written into `icon/`. The result is reused while the PNG's SHA-256 is unchanged; PNG edits trigger reconfiguration and conversion. A non-square PNG produces a warning. Missing or failing ImageMagick warns and uses `default.ico`.
 
 ### Windows Application Manifest (UTF-8)
 Every Windows executable built through `trussc_app()` embeds an application manifest (`core/resources/windows/app.manifest`), merged with the linker's default one:

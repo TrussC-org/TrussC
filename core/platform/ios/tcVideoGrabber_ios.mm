@@ -137,6 +137,8 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
             }
         }
 
+        state->notifyFrame(data->backBuffer, (int)width, (int)height, arrivalUs);
+
         // Copy to main thread buffer
         {
             // Convert unlocked above; lock only for the copy the main thread reads.

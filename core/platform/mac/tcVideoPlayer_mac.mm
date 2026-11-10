@@ -10,6 +10,7 @@
 #import <CoreVideo/CoreVideo.h>
 
 #include "TrussC.h"
+#include "../metal/tcVideoAsyncLoad.h"
 
 // Text of an Objective-C object (NSString, NSError, ...) for the Logger: its
 // description as UTF-8, or "(null)" for nil (what %@ formatting printed).
@@ -81,6 +82,7 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
 @property (nonatomic, assign) int audioChannels;
 
 - (BOOL)loadWithPath:(NSString*)path;
+- (BOOL)loadAsset:(AVAsset*)asset;
 - (void)close;
 - (void)update;
 - (void)play;
@@ -187,6 +189,13 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
         self.asset = nil;
         return NO;
     }
+
+    return [self loadAsset:self.asset];
+}
+
+// Both entry points share setup; the asynchronous caller supplies loaded keys.
+- (BOOL)loadAsset:(AVAsset*)asset {
+    self.asset = asset;
 
     // Get video track info
     NSArray* videoTracks = tcv_tracks_with_media_type(self.asset, AVMediaTypeVideo);
@@ -711,14 +720,24 @@ static void createADTSHeader(uint8_t* header, int frameLength, int sampleRate, i
 
 namespace trussc {
 
+void VideoPlayer::prepareAsyncPlatform(const std::shared_ptr<AsyncState>& state) {
+    internal::prepareVideoAssetAsync(state);
+}
+
 bool VideoPlayer::loadPlatform(const fs::path& path) {
+    return loadPreparedPlatform(path, nullptr);
+}
+
+bool VideoPlayer::loadPreparedPlatform(const fs::path& path, void* asset) {
     // Create Objective-C implementation
     TCVideoPlayerImpl* impl = [[TCVideoPlayerImpl alloc] init];
     decodeStatus_ = impl->status_;
 
     NSString* nsPath = [NSString stringWithUTF8String:internal::pathToUtf8(path).c_str()];
 
-    if (![impl loadWithPath:nsPath]) {
+    const BOOL loaded = asset ? [impl loadAsset:(__bridge AVAsset*)asset]
+                              : [impl loadWithPath:nsPath];
+    if (!loaded) {
         return false;
     }
 

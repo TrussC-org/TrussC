@@ -95,6 +95,13 @@ EM_JS(void, beginWebMic, (unsigned key, int rate, int frames, ReadyCallback read
 });
 }
 void launchMic(const std::shared_ptr<MicState>& state, bool) {
+    if (state->selectedDevice) {
+        logWarning("MicInput") << "capture device selection is unavailable on Web";
+        state->result = {false, "Capture device selection is unavailable on Web"};
+        state->startupDone = state->done = true;
+        completeMic(state);
+        return;
+    }
     state->ring.resize(MicInput::BUFFER_SIZE, 0.0f);
     do { state->webKey = ++nextMicKey; } while (!state->webKey || micStates().contains(state->webKey));
     micStates().emplace(state->webKey, state);

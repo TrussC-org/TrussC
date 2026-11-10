@@ -10,6 +10,8 @@ struct WindowSettings;
 namespace internal {
 struct Runtime;
 Runtime& runtime();
+bool& defaultDrawWhileHidden();
+void applyWindowDrawWhileHidden(Window&);
 // Host/guest internal ABI: null type disables the creation-time Warning.
 void setHotReloadSource(const char* type, const char* file);
 void retainRuntimeWindow(const std::shared_ptr<Window>&);

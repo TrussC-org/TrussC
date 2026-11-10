@@ -19,6 +19,15 @@ class Fbo;
 
 namespace internal {
 
+// Slice 1a diagnostic entry points, not an application stencil API. Both Fbos
+// must be ended, owned, single-sample and equally sized. Replaces all 8 bits;
+// callers own the entire stencil field (shared clip/draw-once state is later).
+struct FboStencilAccess {
+    static bool writeGray(const Fbo& gray, Fbo& destination);
+    static bool readR8(const Fbo& source, Fbo& destination);
+    static void shutdown();
+};
+
 // Exclusive leases per (sampleCount, format): sequential activations reuse a
 // context/cache; concurrently active or parked targets each retain their own.
 struct FboSharedResources {
@@ -440,6 +449,7 @@ public:
     sg_sampler getSampler() const { return curColorTex_().getSampler(); }
 
 private:
+    friend struct internal::FboStencilAccess;
     internal::DebugName debugName_{internal::DebugObjectKind::Fbo, this};
     static bool needsGlYFlip() {
         sg_backend be = sg_query_backend();

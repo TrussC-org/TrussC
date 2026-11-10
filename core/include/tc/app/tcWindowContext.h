@@ -35,12 +35,6 @@ class Shader;          // shader stack holds Shader* (defined in tc/gpu/tcShader
 class Light;
 class Material;
 class Environment;
-// Stroke cap of the first beginStroke() vertex (per-window shape accumulator).
-// Opaque-enum-declaration: a scoped enum is a COMPLETE type once declared this
-// way (underlying type int, matching the real definition in tcRenderContext.h,
-// included after this file), so it can be a value member with a value-init
-// default (StrokeCap{} == Butt == 0, byte-identical to the old global default).
-enum class StrokeCap;
 
 namespace internal {
 
@@ -300,14 +294,13 @@ struct WindowContext {
 
     // --- per-window shape / stroke accumulators (beginShape/endShape etc.) -
     // Made per-window so a shape left open at end-of-tick can't bleed into the
-    // next window. strokeStartCap defaults to Butt (StrokeCap{} == 0).
+    // next window.
     std::vector<Vec3>         shapeVertices;
     bool                      shapeStarted = false;
     std::vector<LinesVertex>  linesVertices;
     bool                      linesStarted = false;
     std::vector<StrokeVertex> strokeVertices;
     bool                      strokeStarted = false;
-    StrokeCap                 strokeStartCap{};   // Butt; real enum in tcRenderContext.h
 
     // Prewired by Window construction; the non-window fallback wires them
     // explicitly before exposing its context.

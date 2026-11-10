@@ -81,6 +81,17 @@ Linux では追加の開発パッケージが必要です。ヘルパースク�
 
 > **注意:** ビルドスクリプト（`tools/build_linux.sh`）実行時にも自動でこのチェックが走ります。
 
+Linux の JPEG デコードには、システムの **libjpeg-turbo** (`pkg-config libjpeg`) が必要です。
+インストーラーは `libjpeg-dev`（Ubuntu: `libjpeg-turbo8-dev`、Debian/Pi OS: `libjpeg62-turbo-dev`）も含みます。
+手動で入れる場合:
+
+```bash
+sudo apt install libjpeg-dev
+```
+
+パッケージがない場合や `JCS_EXT_RGBA` がない場合は configure が失敗します。
+Linux の JPEG に stb フォールバックはありません。他の画像形式・プラットフォームは stb_image を使います。
+
 ### エディタのセットアップ
 
 入れる拡張機能はどのエディタでも共通です。エディタによって変わるのは IntelliSense だけです。
@@ -264,7 +275,7 @@ void tcApp::mousePressed(Vec2 pos, int button) {
 
 ## 8. アプリアイコン
 
-`icon/` フォルダにアイコンファイルを配置します:
+`icon/` フォルダにアイコンファイルを配置します。PNG は 1024×1024 の正方形を使ってください。小さい PNG は macOS/iOS で 1024×1024 に拡大され、ぼやけます:
 
 ```
 myProject/
@@ -280,10 +291,14 @@ myProject/
 - `.icns` - 従来のアイコン形式（古い macOS に必要）
 - `.icon` - macOS 26 Tahoe 以降の新形式（Xcode の Icon Composer で作成、actool が必要）
 - 両方配置すると、両方のバージョンに対応できます
+- 上記形式が使えない場合、`.png` を構成時に `sips` + `iconutil` で変換します（フル Xcode は不要）。ツールがない場合や失敗時は警告を出し、TrussC の既定アイコンを使います。
+- `icon/` が空なら、警告なしで既定アイコンを使います。
+
+**iOS:** `.png` を構成時に `sips` で 1024×1024 にリサイズし、ビルド先に保存します。PNG がない場合は 1024×1024 の TrussC 既定アイコンを使います。`sips` がない場合や失敗時は警告を出し、既定アイコンを使います。
 
 **Windows:**
-- `.ico` - Windows アイコン形式
-- `.png` - ImageMagick があれば `.ico` に自動変換されます
+- `.ico` - Windows アイコン形式。`icon/` 内のユーザーの `.ico` は PNG より優先されます。
+- `.png` - 構成時に ImageMagick 7（`magick`）でビルド先の `<target>_icon.ico` に変換します。`icon/` 内には書き込みません。PNG の SHA-256 が変わらなければ変換結果を再利用し、PNG を編集すると再構成・再変換されます。正方形でない PNG には警告を出します。ImageMagick がない場合や変換失敗時は警告を出し、`default.ico` を使います。
 
 
 ## 9. 展示・常設での運用

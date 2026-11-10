@@ -18,6 +18,7 @@ void ImGuiManager::setup(int initialVertices) {
     // CURRENT window context, so these listeners land on this window's
     // event streams (main or secondary alike).
     renderListener_ = tc::events().onRender.listen([this]() {
+        uiLive_ = renderPending_;
         if (renderPending_) {
             simgui_tc_set_context(simguiCtx_);
             detail::renderTargetFrame(simguiCtx_);
@@ -46,14 +47,12 @@ void ImGuiManager::setup(int initialVertices) {
     tc::internal::overlayHoveredQuery() = []() {
         ImGuiManager* m = ImGuiManager::findForCurrentWindow();
         if (!m || !m->isInitialized()) return false;
-        simgui_tc_set_context(m->simguiCtx_);
-        return ImGui::GetIO().WantCaptureMouse;
+        return m->wantsMouse_();
     };
     tc::internal::overlayFocusedQuery() = []() {
         ImGuiManager* m = ImGuiManager::findForCurrentWindow();
         if (!m || !m->isInitialized()) return false;
-        simgui_tc_set_context(m->simguiCtx_);
-        return ImGui::GetIO().WantCaptureKeyboard;
+        return m->wantsKeyboard_();
     };
 
     // Consume input before default listeners and the node tree. Pointer
@@ -61,9 +60,10 @@ void ImGuiManager::setup(int initialVertices) {
     // imgui's until release, so a drag begun on the canvas is never stolen
     // mid-way, and a press over a panel owns the whole gesture. Move/scroll
     // and keys are stateless — consumed whenever imgui wants them.
+    // Only while imgui is being drawn (see uiLive_): a panel the app stopped
+    // drawing (closed, toggled off) must not keep swallowing input.
     mousePressConsume_ = tc::events().mousePressed.listen([this](tc::MouseEventArgs& e) {
-        simgui_tc_set_context(simguiCtx_);
-        if (ImGui::GetIO().WantCaptureMouse) { pointerCaptured_ = true; e.consumed = true; }
+        if (wantsMouse_()) { pointerCaptured_ = true; e.consumed = true; }
     }, -20);
     mouseReleaseConsume_ = tc::events().mouseReleased.listen([this](tc::MouseEventArgs& e) {
         if (pointerCaptured_) { e.consumed = true; pointerCaptured_ = false; }
@@ -72,20 +72,16 @@ void ImGuiManager::setup(int initialVertices) {
         if (pointerCaptured_) e.consumed = true;
     }, -20);
     mouseMoveConsume_ = tc::events().mouseMoved.listen([this](tc::MouseMoveEventArgs& e) {
-        simgui_tc_set_context(simguiCtx_);
-        if (ImGui::GetIO().WantCaptureMouse) e.consumed = true;
+        if (wantsMouse_()) e.consumed = true;
     }, -20);
     mouseScrollConsume_ = tc::events().mouseScrolled.listen([this](tc::ScrollEventArgs& e) {
-        simgui_tc_set_context(simguiCtx_);
-        if (ImGui::GetIO().WantCaptureMouse) e.consumed = true;
+        if (wantsMouse_()) e.consumed = true;
     }, -20);
     keyPressConsume_ = tc::events().keyPressed.listen([this](tc::KeyEventArgs& e) {
-        simgui_tc_set_context(simguiCtx_);
-        if (ImGui::GetIO().WantCaptureKeyboard) e.consumed = true;
+        if (wantsKeyboard_()) e.consumed = true;
     }, -20);
     keyReleaseConsume_ = tc::events().keyReleased.listen([this](tc::KeyEventArgs& e) {
-        simgui_tc_set_context(simguiCtx_);
-        if (ImGui::GetIO().WantCaptureKeyboard) e.consumed = true;
+        if (wantsKeyboard_()) e.consumed = true;
     }, -20);
 
     // Auto-teardown at the framework's exit event, while sokol_gfx and the
@@ -156,6 +152,19 @@ void ImGuiManager::setupOffscreen(int initialVertices) {
     }, 1000);
     exitListener_ = tc::internal::FrameworkEventAccess::listen(tc::events().exit,
         [this]() { shutdown(); }, tc::EventPriority::AfterApp);
+}
+
+// The io capture flags, honoured only while imgui is drawn (uiLive_)
+bool ImGuiManager::wantsMouse_() const {
+    if (!uiLive_) return false;
+    simgui_tc_set_context(simguiCtx_);
+    return ImGui::GetIO().WantCaptureMouse;
+}
+
+bool ImGuiManager::wantsKeyboard_() const {
+    if (!uiLive_) return false;
+    simgui_tc_set_context(simguiCtx_);
+    return ImGui::GetIO().WantCaptureKeyboard;
 }
 
 bool ImGuiManager::begin() {

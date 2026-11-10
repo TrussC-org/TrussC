@@ -55,6 +55,7 @@ def main():
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -122,9 +123,11 @@ struct Diagnostics {
     std::atomic<bool> running{true}, lossPending{false};
     bool isStalled() const { return false; }
 };
+struct AudioDeviceInfo { std::string name; };
 struct AudioSettings {
     int sampleRate = 96000, channels = 2, bufferSize = 256, maxPolyphony = 1;
     std::string deviceName;
+    std::optional<AudioDeviceInfo> device;
 };
 namespace internal { struct AudioOutputRing { AudioOutputRing(int, int) {} }; }
 struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
@@ -138,6 +141,7 @@ struct AudioEngine {
     static constexpr int DEFAULT_SAMPLE_RATE = 48000, DEFAULT_CHANNELS = 2,
                          DEFAULT_BUFFER_SIZE = 256, ANALYSIS_BUFFER_SIZE = 8;
     bool initialized_ = true;
+    std::atomic<bool> inputNotifyEnabled_{true};
     void* device_ = new ma_device;
     int sampleRate_ = 48000, channels_ = 2, bufferSize_ = 256, maxPolyphony_ = 3;
     mutable ObservedMutex mutex_;

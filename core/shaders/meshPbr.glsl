@@ -30,8 +30,10 @@ out vec2 v_uv;
 void main() {
     vec4 wp = model * vec4(position, 1.0);
     v_worldPos = wp.xyz;
-    v_worldNormal = normalize((normalMat * vec4(normal, 0.0)).xyz);
-    v_worldTangent = normalize((normalMat * vec4(tangent.xyz, 0.0)).xyz);
+    vec3 transformedNormal = (normalMat * vec4(normal, 0.0)).xyz;
+    float normalLength = length(transformedNormal);
+    v_worldNormal = normalLength > 1e-12 ? normalize(transformedNormal) : normal;
+    v_worldTangent = normalize((model * vec4(tangent.xyz, 0.0)).xyz);
     v_bitangentSign = tangent.w;
     v_uv = texcoord0;
     gl_Position = viewProj * wp;

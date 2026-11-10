@@ -1,1 +1,1 @@
-# No addons required.
+# TrussC addons - one addon per line

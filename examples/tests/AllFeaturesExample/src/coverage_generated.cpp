@@ -489,6 +489,7 @@ static void cover_other() {
     (void)operator*(af::val<float>(), af::val<const Vec4>());
     (void)runtime();
     (void)saveScreenshotAsync(af::val<const fs::path>());
+    (void)setDrawWhileHidden(af::val<bool>());
     (void)setResourceLoadConcurrency(af::val<int>());
 }
 
@@ -954,8 +955,12 @@ struct Cover_AudioDeviceChangedArgs : af::Scope<AudioDeviceChangedArgs> {
 struct Cover_AudioDeviceInfo : af::Scope<AudioDeviceInfo> {
     ~Cover_AudioDeviceInfo(); // Never instantiated.
     static void run() {
+        (void)af::val<AudioDeviceInfo>().backend;
+        (void)af::val<AudioDeviceInfo>().channels;
         (void)af::val<AudioDeviceInfo>().isDefault;
         (void)af::val<AudioDeviceInfo>().name;
+        (void)af::val<AudioDeviceInfo>().sampleRates;
+        (void)af::val<AudioDeviceInfo>().uniqueId;
     }
 };
 
@@ -978,7 +983,7 @@ struct Cover_AudioEngine : af::Scope<AudioEngine> {
         (void)af::val<AudioEngine>().init(af::val<const AudioSettings>());
         (void)af::val<const AudioEngine>().isConnected();
         (void)af::val<const AudioEngine>().isInitialized();
-        (void)af::val<AudioEngine>().listDevices();
+        (void)af::val<AudioEngine>().listDevices(af::val<AudioBackend>());
         (void)af::val<AudioEngine>().mixAudio(af::val<float *>(), af::val<int>(), af::val<int>());
         (void)af::val<AudioEngine>().onDisconnect;
         (void)af::val<AudioEngine>().play(af::val<std::shared_ptr<SoundSource>>());
@@ -1039,6 +1044,7 @@ struct Cover_AudioSettings : af::Scope<AudioSettings> {
         (void)af::val<AudioSettings>().backend;
         (void)af::val<AudioSettings>().bufferSize;
         (void)af::val<AudioSettings>().channels;
+        (void)af::val<AudioSettings>().device;
         (void)af::val<AudioSettings>().deviceName;
         (void)af::val<AudioSettings>().maxPolyphony;
         (void)af::val<AudioSettings>().sampleRate;
@@ -2261,9 +2267,11 @@ struct Cover_MicInput : af::Scope<MicInput> {
         (void)af::val<const MicInput>().isConnected();
         (void)af::val<const MicInput>().isRunning();
         (void)af::val<const MicInput>().isStarting();
+        (void)af::val<MicInput>().listDevices(af::val<AudioBackend>());
         (void)af::val<MicInput>().onAudioData(af::val<const float *>(), af::val<size_t>());
         (void)af::val<MicInput>().onDisconnect;
         (void)af::val<MicInput>().onStart;
+        (void)af::val<MicInput>().setDevice(af::val<const AudioDeviceInfo>());
         (void)af::val<MicInput>().setup();
         (void)af::val<MicInput>().start(af::val<int>());
         (void)af::val<MicInput>().startAsync(af::val<int>());
@@ -2704,6 +2712,17 @@ struct Cover_Ray__Hit : af::Scope<Ray::Hit> {
         (void)af::val<Ray::Hit>().hit;
         (void)af::val<Ray::Hit>().point;
         (void)af::val<Ray::Hit>().t;
+    }
+};
+
+struct Cover_ReadbackResult : af::Scope<ReadbackResult> {
+    ~Cover_ReadbackResult(); // Never instantiated.
+    static void run() {
+        (void)ReadbackResult();
+        (void)ReadbackResult(af::val<std::vector<unsigned char>>());
+        (void)af::val<const ReadbackResult>().getData();
+        (void)af::val<const ReadbackResult>().ok();
+        (void)af::val<const ReadbackResult>().size();
     }
 };
 
@@ -3661,6 +3680,7 @@ struct Cover_StorageBuffer : af::Scope<StorageBuffer> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID)
         (void)af::val<StorageBuffer>().read(af::val<void *>(), af::val<size_t>());
 #endif
+        (void)af::val<StorageBuffer>().readAsync(af::val<std::function<void (ReadbackResult)>>());
         (void)af::val<StorageBuffer>().update(af::val<const void *>(), af::val<size_t>());
     }
 };
@@ -4388,6 +4408,19 @@ struct Cover_VideoErrorEventArgs : af::Scope<VideoErrorEventArgs> {
     }
 };
 
+struct Cover_VideoFrameView : af::Scope<VideoFrameView> {
+    ~Cover_VideoFrameView(); // Never instantiated.
+    static void run() {
+        (void)af::val<VideoFrameView>().byteSize;
+        (void)af::val<VideoFrameView>().channels;
+        (void)af::val<VideoFrameView>().format;
+        (void)af::val<VideoFrameView>().height;
+        (void)af::val<VideoFrameView>().pixels;
+        (void)af::val<VideoFrameView>().timestampUs;
+        (void)af::val<VideoFrameView>().width;
+    }
+};
+
 struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
     ~Cover_VideoGrabber(); // Never instantiated.
     static void run() {
@@ -4416,7 +4449,7 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<const VideoGrabber>().getDeviceName();
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<const VideoGrabber>().getFrameQueueSize();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -4432,7 +4465,7 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
         (void)af::val<VideoGrabber>().getPixels();
         (void)af::val<const VideoGrabber>().getPixels();
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<VideoGrabber>().getQueuedFrames(af::val<std::vector<GrabberFrame>>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -4472,6 +4505,9 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().onDisconnect;
 #endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
+        (void)af::val<VideoGrabber>().onFrame;
+#endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().requestCameraPermission();
 #endif
@@ -4485,9 +4521,12 @@ struct Cover_VideoGrabber : af::Scope<VideoGrabber> {
         (void)af::val<VideoGrabber>().setDeviceID(af::val<int>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoGrabber>().setDeviceUniqueID(af::val<const std::string>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoGrabber>().setFilter(af::val<TextureFilter>());
 #endif
-#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS)
         (void)af::val<VideoGrabber>().setFrameQueueSize(af::val<size_t>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -4660,6 +4699,9 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<const VideoPlayer>().isLoaded();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<const VideoPlayer>().isLoading();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<const VideoPlayer>().isLoop();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
@@ -4678,10 +4720,16 @@ struct Cover_VideoPlayer : af::Scope<VideoPlayer> {
         (void)af::val<VideoPlayer>().load(af::val<const fs::path>());
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().loadAsync(af::val<const fs::path>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().nextFrame();
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().onError;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
+        (void)af::val<VideoPlayer>().onLoad;
 #endif
 #if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_WEB)
         (void)af::val<VideoPlayer>().play();
@@ -4926,6 +4974,7 @@ struct Cover_Window : af::Scope<Window> {
         (void)af::val<const Window>().isOpen();
         (void)af::val<const Window>().isVisible();
         (void)af::val<Window>().setClearColor(af::val<const Color>());
+        (void)af::val<Window>().setDrawWhileHidden(af::val<bool>());
         (void)af::val<Window>().setFps(af::val<float>());
         (void)af::val<Window>().setFullscreen(af::val<bool>());
         (void)af::val<Window>().setIndependentFps(af::val<float>(), af::val<float>());
@@ -5188,6 +5237,7 @@ void af::coverGenerated() {
     af_generated::Cover_Quaternion::run();
     af_generated::Cover_Ray::run();
     af_generated::Cover_Ray__Hit::run();
+    af_generated::Cover_ReadbackResult::run();
     af_generated::Cover_Rect::run();
     af_generated::Cover_RectNode::run();
     af_generated::Cover_RectNodeButton::run();
@@ -5238,6 +5288,7 @@ void af::coverGenerated() {
     af_generated::Cover_Vec4::run();
     af_generated::Cover_VideoDeviceInfo::run();
     af_generated::Cover_VideoErrorEventArgs::run();
+    af_generated::Cover_VideoFrameView::run();
     af_generated::Cover_VideoGrabber::run();
     af_generated::Cover_VideoPlayer::run();
     af_generated::Cover_VideoPlayerBase::run();

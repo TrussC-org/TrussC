@@ -132,6 +132,9 @@ jobs:
       # Same cache keys as build.yml, so the sweep starts warm from PR builds
       # (the build-directory cache only when the runner image matches).
       - name: Setup compiler cache
+        id: compiler_cache
+        # Cache setup is optional on Windows; build and test failures still gate CI.
+        continue-on-error: ${{ runner.os == 'Windows' }}
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           variant: ${{ matrix.launcher }}
@@ -141,6 +144,7 @@ jobs:
           max-size: 2G
 
       - name: Enable compiler launcher
+        if: steps.compiler_cache.outcome == 'success'
         shell: bash
         run: |
           launcher="${{ matrix.launcher }}"
@@ -161,7 +165,9 @@ jobs:
         shell: bash
         run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
 
+      # A restored CMake cache may retain a launcher from an earlier run.
       - name: Cache build directories
+        if: steps.compiler_cache.outcome == 'success'
         uses: actions/cache@v5
         with:
           path: |
@@ -263,6 +269,13 @@ jobs:
         shell: bash
         run: python3 tools/check_build_warnings.py "$RUNNER_TEMP/daily_core_tests.log"
 
+      - name: Install software display
+        timeout-minutes: 10
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/apt-deps
+        with:
+          packages: xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
+
       - name: Run core display modes (Xvfb + Mesa)
         id: display_tests
         if: runner.os == 'Linux'
@@ -270,8 +283,6 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: '1'
           __EGL_VENDOR_LIBRARY_FILENAMES: /usr/share/glvnd/egl_vendor.d/50_mesa.json
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb xauth libgl1-mesa-dri libglx-mesa0 libegl-mesa0
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_display_builds.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           xvfb-run -a -s '-screen 0 1280x1024x24' python3 tools/run_core_display_tests.py
           TC_BUILD
@@ -403,7 +414,9 @@ jobs:
         run: |
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/web_examples.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
           chmod +x examples/build_all.py
-          ./examples/build_all.py --web-only --verbose
+          # emcc fetches emdawnwebgpu lazily; retry once after a transient download failure.
+          ./examples/build_all.py --web-only --verbose ||
+            ./examples/build_all.py --web-only --verbose
           TC_BUILD
 
       - name: Check build warnings (web_examples)
@@ -423,7 +436,9 @@ jobs:
         shell: bash
         run: |
           python3 tools/check_build_warnings.py --capture-builds "$RUNNER_TEMP/daily_core_tests_web.log" -- "$BASH" -eo pipefail <<'TC_BUILD'
-          ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
+          # emcc fetches emdawnwebgpu lazily; retry once after a transient download failure.
+          ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose ||
+            ./examples/build_all.py --web-only --core-tests-only --include-daily --verbose
           TC_BUILD
 
       - name: Check build warnings (daily_core_tests_web)

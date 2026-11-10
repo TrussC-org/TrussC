@@ -141,7 +141,7 @@ static void receive(const sapp_html5_fetch_response* response) {
 static void logMessage(const char*, uint32_t level, uint32_t, const char*, uint32_t, const char*, void*) {
     if (level == 2) ++warnings;
 }
-#if defined(__EMSCRIPTEN__) && defined(TEST_HAS_SIZE64)
+#ifdef __EMSCRIPTEN__
 static int cleanups;
 static int lateCallbacks;
 static void receiveOldRun(const sapp_html5_fetch_response* response) {
@@ -202,7 +202,6 @@ int main() {
     rejected("file index past count is rejected", 4, sizeof(buffer), SAPP_HTML5_FETCH_ERROR_OTHER);
     request.dropped_file_index = 0;
     setFile(4294967300.0);
-#ifdef TEST_HAS_SIZE64
     check("64-bit getter retains full size", sapp_html5_get_dropped_file_size64(0) == UINT64_C(4294967300));
     check("legacy getter saturates at UINT32_MAX", sapp_html5_get_dropped_file_size(0) == UINT32_MAX);
     setFile(9007199254740991.0);
@@ -212,9 +211,6 @@ int main() {
     _sapp_tc.drop.enabled = false;
     check("disabled drops have zero file size", sapp_html5_get_dropped_file_size64(0) == 0);
     _sapp_tc.drop.enabled = true;
-#else
-    check("legacy getter does not wrap large sizes", sapp_html5_get_dropped_file_size(0) == UINT32_MAX);
-#endif
     setFile(4);
     request.buffer.size = sizeof(buffer);
     const int beforeReaders = readerCount();
@@ -226,7 +222,7 @@ int main() {
     check("normal file completes with bytes and request metadata", callbacks == beforeCallbacks + 1 &&
         last.succeeded && last.data.size == 4 && last.data.ptr == buffer &&
         last.buffer.size == sizeof(buffer) && last.user_data == &user && memcmp(buffer, expected, 4) == 0);
-#if defined(__EMSCRIPTEN__) && defined(TEST_HAS_SIZE64)
+#ifdef __EMSCRIPTEN__
     // Metadata-only files exercise the limits without reserving their content.
     for (double size : {-1.0, 1.5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
         rejected("invalid file size is rejected", size, sizeof(buffer), SAPP_HTML5_FETCH_ERROR_OTHER);
@@ -333,9 +329,6 @@ int main() {
     sapp_quit();
     check("second shutdown also releases all slots", !_sapp_tc_emsc_frame_animation_loop(2.0, nullptr) &&
         activeReaders() == 0);
-#endif
-#if defined(__EMSCRIPTEN__) && !defined(TEST_HAS_SIZE64)
-    _sapp_tc_discard_state();
 #endif
     printf("webDropSize: %d checks, %d failures, %d readers, %d callbacks, %d warnings\n",
         checks, failures, readerCount(), callbacks, warnings);

@@ -4,11 +4,6 @@
 #include <type_traits>
 
 namespace {
-template<class T> concept HasWindowReserve = requires(T t) { t.uniformBufferReserve; t.reserveUniformBuffer(1); };
-template<class T> concept HasClipboardSize = requires(T t) { t.clipboardSize; };
-template<class T> concept HasClipboardSetter = requires(T t) { t.setClipboardSize(1); };
-static_assert(!HasWindowReserve<tc::WindowSettings>);
-static_assert(!HasClipboardSize<tc::WindowSettings> && !HasClipboardSetter<tc::WindowSettings>);
 static_assert(std::is_aggregate_v<tc::RuntimeSettings>);
 struct SmokeApp : tc::App {};
 using WindowLauncher = int (*)(const tc::WindowSettings&);

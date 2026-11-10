@@ -1,7 +1,7 @@
 // =============================================================================
-// lut.glsl - LUT (3D Look-Up Table) shader for color grading
+// lut.glsl - 1D / 3D Look-Up Table shader for color grading
 // =============================================================================
-// Applies 3D LUT color transformation to input texture
+// Applies a per-channel 1D curve, a 3D table, or both in that order.
 // =============================================================================
 
 // Vertex shader
@@ -26,11 +26,15 @@ layout(binding=0) uniform texture2D srcTex;
 layout(binding=0) uniform sampler srcSmp;
 layout(binding=1) uniform texture3D lutTex;
 layout(binding=1) uniform sampler lutSmp;
+layout(binding=2) uniform texture2D curveTex;
+layout(binding=2) uniform sampler curveSmp;
+@image_sample_type curveTex unfilterable_float
+@sampler_type curveSmp nonfiltering
 
 layout(binding=0) uniform fs_params {
     float lutSize;
     float blend;
-    float _pad0;
+    float curveSize;
     float _pad1;
     vec4 viewport;  // x, y, w, h (normalized 0-1)
 };
@@ -45,14 +49,26 @@ void main() {
     // Sample source texture
     vec4 src = texture(sampler2D(srcTex, srcSmp), texUV);
 
-    // Calculate LUT sampling coordinates (texel center)
-    // The scale and offset ensure we sample at texel centers
-    float scale = (lutSize - 1.0) / lutSize;
-    float offset = 0.5 / lutSize;
-    vec3 lutCoord = src.rgb * scale + offset;
-
-    // Sample 3D LUT
-    vec3 lutColor = texture(sampler3D(lutTex, lutSmp), lutCoord).rgb;
+    vec3 lutColor = src.rgb;
+    if (curveSize > 0.0) {
+        vec3 position = clamp(lutColor, 0.0, 1.0) * (curveSize - 1.0);
+        ivec3 lower = ivec3(floor(position));
+        ivec3 upper = min(lower + ivec3(1), ivec3(int(curveSize) - 1));
+        // Explicit fetches keep RGBA32F usable without float filtering (WebGPU).
+        vec3 a = vec3(texelFetch(sampler2D(curveTex, curveSmp), ivec2(lower.r, 0), 0).r,
+                      texelFetch(sampler2D(curveTex, curveSmp), ivec2(lower.g, 0), 0).g,
+                      texelFetch(sampler2D(curveTex, curveSmp), ivec2(lower.b, 0), 0).b);
+        vec3 b = vec3(texelFetch(sampler2D(curveTex, curveSmp), ivec2(upper.r, 0), 0).r,
+                      texelFetch(sampler2D(curveTex, curveSmp), ivec2(upper.g, 0), 0).g,
+                      texelFetch(sampler2D(curveTex, curveSmp), ivec2(upper.b, 0), 0).b);
+        lutColor = mix(a, b, position - vec3(lower));
+    }
+    if (lutSize > 0.0) {
+        float scale = (lutSize - 1.0) / lutSize;
+        float offset = 0.5 / lutSize;
+        vec3 lutCoord = clamp(lutColor, 0.0, 1.0) * scale + offset;
+        lutColor = texture(sampler3D(lutTex, lutSmp), lutCoord).rgb;
+    }
 
     // Blend between original and LUT-applied color
     frag_color = vec4(mix(src.rgb, lutColor, blend), src.a);

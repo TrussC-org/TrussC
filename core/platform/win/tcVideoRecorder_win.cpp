@@ -52,6 +52,7 @@
 #include <mferror.h>
 
 #include "TrussC.h"
+#include "tc/utils/tcSimd.h"
 
 #include <cmath>
 #include <cstdio>
@@ -580,12 +581,7 @@ bool VideoWriter::appendPlatform(const unsigned char* rgba, double timeSec) {
     for (int y = 0; y < h; ++y) {
         const unsigned char* srow = rgba + (size_t)y * stride;
         BYTE* drow = dst + (size_t)(h - 1 - y) * stride;
-        for (size_t x = 0; x < (size_t)w; ++x) {
-            drow[x * 4 + 0] = srow[x * 4 + 2];  // B
-            drow[x * 4 + 1] = srow[x * 4 + 1];  // G
-            drow[x * 4 + 2] = srow[x * 4 + 0];  // R
-            drow[x * 4 + 3] = srow[x * 4 + 3];  // A
-        }
+        simd::rgbaToBgra(srow, drow, static_cast<size_t>(w));
     }
     buffer->Unlock();
     buffer->SetCurrentLength(frameBytes);

@@ -42,6 +42,7 @@ struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     Window xwin;
     bool fullscreen_requested;
     int requested_swap_interval;
+    bool swap_interval_pending;
     int pacing_ticks;
     bool surface_resize_pending=false;
     float mouse_x, mouse_y, mouse_dx, mouse_dy;
@@ -56,6 +57,8 @@ static struct {
     EGLDisplay egl_display = (EGLDisplay)1;
     float dpi = 96;
     double refresh_period = 1.0 / 60.0;
+    double hidden_refresh_period = 1.0 / 60.0;
+    sapp_window pacer{};
     unsigned next_id;
     size_t window_slots = 4;
     _sapp_tc_window_t* windows[4];
@@ -66,6 +69,8 @@ static struct {
     EGLContext ctx = (EGLContext)4;
 #else
     GLXContext ctx = (GLXContext)4;
+    void (*SwapIntervalEXT)(Display*, GLXDrawable, int) = nullptr;
+    int (*SwapIntervalMESA)(int) = nullptr;
 #endif
 } _sapp_tc;
 static int failures, failAt, titleBytes, titleCalls, presents, bindingCalls, shows;
@@ -187,7 +192,8 @@ for name in ('static uint32_t _sapp_tc_x11_surface_window_id(', 'static bool _sa
     else:
         code += helper + '\n'
 code += body('struct _sapp_tc_x11_surface_scope {') + ';\n'
-for name in ('static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_create_window(',
+for name in ('static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {',
+             'static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_create_window(',
              'void sapp_destroy_window(sapp_window win) {',
              'static void _sapp_tc_x11_update_window_title(', 'void sapp_window_set_title(',
              'void sapp_set_window_title(', 'void sapp_tc_window_skip_present(',

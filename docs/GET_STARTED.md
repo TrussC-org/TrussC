@@ -95,6 +95,17 @@ This will list any missing packages and ask to install them. Use `-y` to skip th
 
 > **Note:** The build script (`tools/build_linux.sh`) also runs this check automatically.
 
+Linux JPEG decoding requires the system **libjpeg-turbo** through `pkg-config libjpeg`.
+The installer includes `libjpeg-dev` (Ubuntu: `libjpeg-turbo8-dev`;
+Debian/Pi OS: `libjpeg62-turbo-dev`). To install it manually:
+
+```bash
+sudo apt install libjpeg-dev
+```
+
+Configure fails if the package is missing or lacks `JCS_EXT_RGBA`; there is no
+stb fallback for JPEG on Linux. Other image formats and other platforms keep stb_image.
+
 ### Editor Setup
 
 One set of extensions for every editor. The only choice that depends on the
@@ -294,7 +305,7 @@ void tcApp::mousePressed(Vec2 pos, int button) {
 
 ## 8. App Icon
 
-Place icon files in the `icon/` folder:
+Place icon files in the `icon/` folder. For PNG input, use a 1024×1024 square image; smaller PNGs are scaled up to 1024 on macOS/iOS and look blurry:
 
 ```
 myProject/
@@ -310,10 +321,14 @@ myProject/
 - `.icns` - Traditional icon format (required for older macOS)
 - `.icon` - New format for macOS 26 Tahoe+ (created with Xcode's Icon Composer, requires actool)
 - Both can coexist for compatibility across macOS versions
+- Otherwise, a `.png` is converted at configure time with `sips` + `iconutil` (no full Xcode required); missing or failing tools produce a warning and use the default TrussC icon.
+- An empty `icon/` uses the default icon without a warning.
+
+**iOS:** A `.png` is resized to 1024×1024 at configure time with `sips`, inside the build tree. Without a PNG, the 1024×1024 TrussC default is used; missing or failing `sips` warns and uses that default.
 
 **Windows:**
-- `.ico` - Windows icon format
-- `.png` - Automatically converted to `.ico` if ImageMagick is available
+- `.ico` - Windows icon format; a user file in `icon/` takes priority over PNG
+- `.png` - Converted at configure time with ImageMagick 7 (`magick`) to `<target>_icon.ico` in the build tree; nothing is written into `icon/`. The result is reused while the PNG's SHA-256 is unchanged; PNG edits trigger reconfiguration and conversion. A non-square PNG produces a warning. Missing or failing ImageMagick warns and uses `default.ico`.
 
 
 ## 9. Deploying an Installation

@@ -72,6 +72,7 @@ def _macros(*names):
 
 
 VENDORED_VERSIONS = {
+    "Highway": [("core/3rdparty/highway/hwy/base.h", _macros("HWY_MAJOR", "HWY_MINOR", "HWY_PATCH"))],
     "stb_image": [("core/include/stb/stb_image.h", _line(r"stb_image - v(\S+)"))],
     "stb_image_write": [("core/include/stb/stb_image_write.h", _line(r"stb_image_write - v(\S+)"))],
     "stb_perlin": [("core/include/stb/stb_perlin.h", _line(r"stb_perlin\.h - v(\S+)"))],
@@ -112,6 +113,7 @@ def _table_commit(file_name):
 
 # Provenance files that record the upstream commit of a vendored copy.
 PROVENANCE_COMMITS = {
+    "Highway": ("core/3rdparty/highway/README.md", _line(r"Upstream commit: `([0-9a-f]{7,40})`")),
     "sokol": ("core/include/sokol/TRUSSC_MODIFICATIONS.md", _line(r"\*\*Upstream base:\*\*.*?commit `([0-9a-f]{7,40})`")),
     "sokol_imgui.h": ("addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md",
                       _line(r"\*\*Upstream base:\*\*.*?`util/sokol_imgui\.h` at commit `([0-9a-f]{7,40})`")),

@@ -1,0 +1,8 @@
+CMakeLists.txt
+CMakePresets.json
+.trussc
+build/
+build-*/
+bin/*
+!bin/data/
+*.glsl.h

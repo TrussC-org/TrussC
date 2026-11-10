@@ -158,6 +158,8 @@ setFps(EVENT_DRIVEN);  // Redraw only on demand
 setIndependentFps(60, EVENT_DRIVEN);   // call redraw() on every visible change
 ```
 
+On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+
 ## Drawing
 
 ### Shapes
@@ -176,6 +178,8 @@ drawTriangle(x1, y1, x2, y2, x3, y3)
 ```
 
 ### Stroke Path
+In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
+
 ```cpp
 beginStroke();           // Start a free-form thick stroke path
 vertex(x, y);            // Add points
@@ -626,6 +630,8 @@ cancelAllAsyncTimers();          // e.g. on mode change
 ## GPU Resources
 
 ### Image
+
+Linux decodes JPEG with libjpeg-turbo; CMYK/YCCK JPEGs fall back to stb_image.
 ```cpp
 Image img;
 img.load("photo.png");              // Load from bin/data/
@@ -1145,6 +1151,17 @@ Two layers. The core is built once as `libTrussC.a` and shared across all projec
 
 For a plain configure outside the repository, pass `-DTRUSSC_DIR=<TrussC-root>/core`. The generated CMakeLists retains the `../../../core` fallback and checks for `cmake/trussc_app.cmake` before including it. If missing, it stops with instructions to run `trusscli update`, configure with the host preset (`macos`, `linux`, or `windows`), or set `TRUSSC_DIR`.
 
+### App icon
+
+Custom icons come from the project's `icon/` folder, with separate rules per platform. For multiple files of one type, the first in glob order wins. Use a 1024×1024 square PNG; smaller PNGs are scaled up to 1024 on macOS/iOS and look blurry.
+
+- **macOS:** `.icns` and a Tahoe `.icon` folder can apply together; `.icon` needs full Xcode and `actool`. Only if neither was applied, a PNG is converted with `sips` + `iconutil` into the build tree. Missing or failing conversion tools warn and fall back to `default.icns` plus `default.icon` (the latter still needs full Xcode/`actool`). With no custom icon, the same defaults are used without a warning.
+- **iOS:** Only PNG is used; `.icns`, `.icon` and `.ico` are ignored. `sips` resizes the PNG to 1024×1024 in the build tree. No PNG, or missing/failing `sips`, uses the 1024×1024 `default-ios.png`; missing/failing `sips` warns.
+- **Windows:** A user `.ico` in `icon/` takes priority over PNG. Otherwise, ImageMagick 7 (`magick`) converts a PNG at configure time to `<target>_icon.ico` in the build tree, at sizes up to 256 pixels; nothing is written into `icon/`. The converted icon is reused while the PNG's SHA-256 is unchanged; PNG edits trigger reconfiguration and conversion. A non-square PNG produces a configure warning. Missing or failing ImageMagick warns and falls back to `default.ico`.
+- **Linux and Web:** This icon setup applies no app icon.
+
+On macOS/iOS, a non-square PNG produces a configure warning and is stretched to a square.
+
 ### trusscli command reference
 
 `trusscli` with no args launches the GUI (TrussC Project Generator). Main commands:
@@ -1294,6 +1311,7 @@ class Synth : public Node {
     EventListener audioListener_;
 public:
     void setup() override {
+        // Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring; visualize in update() via getAnalysisBuffer().
         audioListener_ = AudioEngine::getInstance().audioOut.listen(
             [this](AudioOutBuffer& b) { render(b); });   // audio thread, reads table_
     }
@@ -1361,15 +1379,15 @@ No PR needed — discovery is by GitHub topic. Three conditions: ① the repo ha
 
 ### How do I list / select audio devices?
 
-`AudioEngine` handles devices. `AudioEngine::listDevices()` returns the available devices (`vector<AudioDeviceInfo>`). Select the output device by passing `AudioSettings` (with `deviceName`, sample rate, etc.) to `AudioEngine::getInstance().init(settings)`. An empty `deviceName` selects the system default playback device. For headless runs, set `settings.backend = AudioBackend::Null` and call `init(settings)` before loading sounds; this runs the real mixer and callbacks silently and logs a Notice. Zero-argument `init()` selects `Default`. Enumeration and native `MicInput` follow the engine backend; before init, enumeration probes real backends.
+`AudioEngine` handles output devices. `AudioEngine::listDevices(backend)` returns outputs and `MicInput::listDevices(backend)` returns inputs (`vector<AudioDeviceInfo>` with backend-native IDs and reported native channels/rates). Select output with `AudioSettings::device = entry`, or input with `mic.setDevice(entry)` before starting it. Object selection uses the entry's backend and `uniqueId`; output object selection takes precedence over `deviceName` and `backend`. A missing explicit ID or name fails with a warning without opening another device. Without an object, empty `deviceName` selects the system default playback device; an unselected MicInput uses the OS default input. For headless runs, set `settings.backend = AudioBackend::Null` and call `init(settings)` before loading sounds; this runs the real mixer and callbacks silently and logs a Notice. Zero-argument `init()` selects `Default`. Listing with `Default` uses the current engine context, or probes miniaudio's default backend order before init. An explicit backend is tried alone. Detailed enumeration can probe each device (especially ALSA); call it when needed, not every frame. Web lists are empty.
 
 A backend context that opens but cannot open its device leaves the engine stopped; it does not switch to Null. miniaudio reaches Null automatically only when no real backend context can be created. `getStats()` records the last init failure (`initFailure`, `initFailureResult`, `initFailureBackend`) until an init succeeds, using only atomic state. `tc_get_audio_state` includes an `initFailure` object with the reason, result, backend and requested device name while that failure is recorded.
 
 ### Per-buffer synthesis / processing? (audioIn / audioOut)
 
-Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. `audioIn` (`AudioInBuffer`, read-only) is declared for mic input but nothing fires it today (#907), so read the microphone with `MicInput` instead. The callback runs on the audio thread, so avoid heavy work or engine-API calls and return quickly.
+Real-time synthesis/processing is done through `AudioEngine` events. Listening to `audioOut` gives you one callback's output buffer (`AudioOutBuffer`, mutable — **ADD** to the already-mixed audio), where you write oscillators etc. On native platforms, an explicitly started `MicInput` delivers every captured block to `audioIn` (`AudioInBuffer`, read-only) inline on its capture thread, while preserving the ring read by `MicInput::getBuffer()`. Subscribing does not start capture. The input buffer carries its mono samples, frame count, capture sample rate, and a frame position counted from that MicInput start. Input and output samples are borrowed only for the callback; do not retain their pointers. Use the short form `audioOut.listen(callback)` / `audioIn.listen(callback)`: delivery is inline. Explicit `Deliver::Inline` also compiles; `Deliver::Main` and runtime delivery variables are compile errors for both audio events. The callbacks are not thread-safe with the main thread: no Nodes/GPU; share data through atomics, a lock or a ring buffer. Read `AudioEngine::getAnalysisBuffer()` for output visualization or `MicInput::getBuffer()` for input in `update()`. Two running MicInputs both feed the one audioIn event, possibly concurrently from two capture threads, with separate framePosition counters starting at 0 and no source ID. MicInput stop/destruction and engine shutdown drain in-flight notifications; do not call these from an audio listener. Engine shutdown closes input notifications while ring capture continues; init reopens notifications, even if output init fails. Avoid allocation, blocking, heavy work, and engine-API calls, and return quickly. Web input continues to update only the MicInput ring; default Web output runs on the browser main thread.
 
-Overriding `App::audioOut()` (and `App::audioIn()`, which is never called today) needs no setup or teardown code: they are first called right after `setup()` returns, so buffers or tables you allocate in `setup()` are there when they run. The framework calls `exit()`, detaches them and waits for a callback in flight, as long as it takes, before calling `cleanup()`, which may free their audio state (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
+The framework subscribes `App::audioOut()` and `App::audioIn()` right after the first `setup()` returns, so buffers or tables allocated in `setup()` are ready before callbacks run. Device startup is explicit: output needs a running AudioEngine, and native input needs a started MicInput. The framework calls `exit()`, detaches them and waits for a callback in flight, as long as it takes, before calling `cleanup()`, which may free their audio state (so never wait on the main thread or on its locks in there: the exit would hang). Any other object that listens with `[this]` disconnects and then calls `AudioEngine::getInstance().waitForAudioCallbacks()` in its own destructor (or `cleanup()`), before its members go (see "Removing a listener while the event fires").
 
 ### How long does a Sound play? (Sound lifetime)
 
@@ -1389,7 +1407,7 @@ Use it for multichannel output (multi-speaker, installations). `clearChannelMap(
 Pass a **priority** to `audioOut.listen(...)` and listeners compose in a fixed order regardless of instantiation order. `audio::priority::Generator` (100, default) / `Effect` (500) / `Monitor` (900):
 - **Generator** (oscillators / synths) adds audio into the buffer,
 - **Effect** (reverb / filter / EQ) reads + writes to process it,
-- **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **ideal for visualization.**
+- **Monitor** (scope / FFT / record) **reads last** — it sees the finished buffer, so it's **suitable for copying samples for later analysis.** Use `getAnalysisBuffer()` in `update()` for main-thread visualization.
 Adding a Generator later never moves it behind Effect / Monitor — order is fixed by priority. Within one priority, listeners run in the order they subscribed. The App's own `audioOut()` / `audioIn()` overrides run just before the Generator priority, so ahead of every default-priority listener, including one you subscribe in `setup()` (before the framework subscribes the App's hooks); a listener that must see what `App::audioOut()` wrote uses `Effect` or `Monitor`. A default-priority listener subscribed before the App was constructed (a static object, or in `main()` before `runApp()`) used to run before `App::audioOut()` and now runs after it.
 
 ### How do I record the audio the app is playing? (AudioRecorder)
@@ -1659,7 +1677,7 @@ Most crashes come from a handful of patterns. Write it the safe way from the sta
 | Callback | Runs on |
 |---|---|
 | `setup()` / `update()` / `draw()`, input handlers, Node events, `callAfter` / `callEvery`, Tween, MCP tools | main thread |
-| `AudioEngine` `audioOut` / `audioIn` listeners | audio thread |
+| `AudioEngine` `audioOut` / `audioIn` listeners | native output / capture thread; default Web output: browser main thread; Web input event unavailable |
 | `callAfterAsync` / `callEveryAsync` | background scheduler thread |
 | `TcpClient` events (`onConnect`, `onReceive`, `onDisconnect`, `onError`, `onSendComplete`) | the receive, connect or writer thread; events fired directly by an API call run on the calling thread. `onSendComplete` runs on the writer thread, or from `processNetwork()` without threads |
 | `TcpServer` events (`onClientConnect`, `onReceive`, `onClientDisconnect`, `onError`, `onSendComplete`) | the server's threads; errors reported directly by calls such as `start()` or `send()` run on the calling thread |
@@ -1994,7 +2012,7 @@ void vertex(float x, float y, float z) [+3]  // Add a vertex to the shape, lines
 
 ```cpp
 void disableDepthTest()  // Turns the depth test for ordinary (blend-mode) drawing off again, which is the default.
-void enableDepthTest()  // Turns the depth test on for ordinary (blend-mode) drawing, so nearer shapes hide farther ones.
+void enableDepthTest()  // Turns the depth test on for ordinary (blend-mode) drawing.
 void fill()  // Enable fill mode.
 BlendMode getBlendMode()  // Get the current blend mode.
 int getCircleResolution() ⚠️deprecated  // Deprecated alias for getCurveResolution().
@@ -2665,6 +2683,7 @@ void requestExitApp() ⚠️deprecated  // Asks the process to quit, through a d
 Right  // Provides shorthand for `Direction::Right`.
 Runtime & runtime()  // Returns the object that represents the whole running process.
 void saveScreenshotAsync(const fs::path & path)  // Requests an asynchronous screenshot save.
+void setDrawWhileHidden(bool allow)  // Sets drawing while hidden for all existing windows and the default for new ones.
 void setResourceLoadConcurrency(int count)  // Sets how many resource loads can prepare at once.
 float tanh(float x) [std]  // Returns the hyperbolic tangent.
 TAU  // Represents one full turn in radians.
@@ -2678,7 +2697,7 @@ VSYNC  // Selects frame scheduling at the display refresh rate.
 ### App — The base class your app inherits from; TrussC calls its setup(), update() and draw() for you.
 
 ```cpp
-void App::audioIn(const AudioInBuffer & buf)  // Meant for reading incoming audio on the audio thread, but currently never called.
+void App::audioIn(const AudioInBuffer & buf)  // Called inline on the native capture thread for every microphone block.
 void App::audioOut(AudioOutBuffer & buf)  // Called on the audio thread once per device buffer, so you can add your own sound to the output.
 void App::exit()  // Called once when the App ends, right before cleanup().
 void App::filesDropped(const std::vector<std::string> & files)  // Called when files are dropped onto this Window, with their paths.
@@ -2708,7 +2727,7 @@ void App::windowResized(int width, int height)  // Called when the window size c
 ```cpp
 ```
 
-### AudioDeviceInfo — Describes an available audio playback device.
+### AudioDeviceInfo — Describes a device in an input or output list.
 
 ```cpp
 ```
@@ -2728,7 +2747,7 @@ AudioStats AudioEngine::getStats() const  // Returns a snapshot of audio engine 
 bool AudioEngine::init() [+1]  // Initializes or reinitializes the audio output engine.
 bool AudioEngine::isConnected() const  // Returns whether the audio output device is open and running.
 bool AudioEngine::isInitialized() const  // Returns whether audio output is initialized.
-std::vector<AudioDeviceInfo> AudioEngine::listDevices()  // Lists available audio playback devices.
+std::vector<AudioDeviceInfo> AudioEngine::listDevices(AudioBackend backend = Default)  // Enumerates playback devices with native capabilities.
 void AudioEngine::mixAudio(float * buffer, int num_frames, int num_channels)  // Mixes audio voices and listeners into an output buffer.
 std::shared_ptr<PlayingSound> AudioEngine::play(std::shared_ptr<SoundSource> source) [+1]  // Starts a mixer voice for an audio source.
 bool AudioEngine::setup() [+1]  // Opens the audio output device (the same as init).
@@ -2736,7 +2755,7 @@ void AudioEngine::shutdown()  // Stops and closes the audio output device.
 bool AudioEngine::waitForAudioCallbacks()  // Waits for audio listeners to finish during teardown.
 ```
 
-### AudioInBuffer — Describes a read-only audio input buffer.
+### AudioInBuffer — Describes a borrowed native microphone block.
 
 ```cpp
 ```
@@ -3005,7 +3024,7 @@ void Environment::release()  // Releases the environment's texture resources.
 
 ```cpp
 void Event::clear()  // Removes user listeners, preserving framework-owned listeners.
-EventListener Event::listen(Callback callback) [+11]  // Registers an event listener and returns its connection token.
+EventListener Event::listen(Callback callback) [+15]  // Registers an event listener and returns its connection token.
 size_t Event::listenerCount() const  // Returns the number of registered listeners.
 void Event::notify(T & arg)  // Notifies the event's listeners.
 void Event::setMainThreadDeliveryLimit(size_t count)  // Sets an optional limit for external main-thread copies.
@@ -3588,7 +3607,9 @@ int MicInput::getSampleRate() const  // Returns the stored microphone sample rat
 bool MicInput::isConnected() const  // Returns whether the microphone is open and capturing (alias of isRunning).
 bool MicInput::isRunning() const  // Reports whether microphone capture is running.
 bool MicInput::isStarting() const  // Reports whether microphone startup is pending.
+std::vector<AudioDeviceInfo> MicInput::listDevices(AudioBackend backend = Default)  // Enumerates capture devices separately from outputs.
 void MicInput::onAudioData(const float * input, size_t frameCount)  // Writes input samples into the microphone ring buffer.
+void MicInput::setDevice(const AudioDeviceInfo & device)  // Selects a capture device for subsequent startup by its ID.
 bool MicInput::setup()  // Reopens the microphone at the last sample rate.
 bool MicInput::start(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts microphone capture.
 void MicInput::startAsync(int sampleRate = DEFAULT_SAMPLE_RATE)  // Starts a microphone capture attempt asynchronously.
@@ -3914,6 +3935,15 @@ Hit Ray::intersectPlane(const Vec3 & planeNormal, float planeD) const [+1]  // T
 Hit Ray::intersectSphere(float radius) const [+1]  // Tests the ray against a sphere centered at the coordinate origin.
 Hit Ray::intersectZPlane() const [+1]  // Tests the ray against the Z=0 plane.
 Ray Ray::transformed(const Mat4 & inverseMatrix) const  // Returns a ray transformed by a matrix.
+```
+
+### ReadbackResult — Owns a storage readback snapshot or an empty failure result (C++ only).
+
+```cpp
+T ReadbackResult::get(size_t index) const  // Returns the index-th T in the owned snapshot (C++ only).
+const unsigned char * ReadbackResult::getData() const  // Returns read-only bytes owned by this result; check ok() before reading.
+bool ReadbackResult::ok() const  // Returns whether the readback succeeded.
+size_t ReadbackResult::size() const  // Returns the owned byte count, or zero on failure.
 ```
 
 ### Rect — Represents a rectangle using position and size.
@@ -4244,7 +4274,8 @@ sg_buffer StorageBuffer::getBuffer() const  // Returns the borrowed sokol storag
 size_t StorageBuffer::getSize() const  // Returns the allocated size in bytes.
 sg_view StorageBuffer::getView() const  // Returns the borrowed sokol storage buffer view.
 bool StorageBuffer::isAllocated() const  // Returns whether the storage buffer and view are valid.
-bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and waits for GPU completion.
+bool StorageBuffer::read(void * destination, size_t bytes) [macos,windows,linux,ios,android]  // Reads bytes from the start of storage and blocks until GPU completion (native only; use readAsync() on Web).
+void StorageBuffer::readAsync(std::function<void (ReadbackResult)> callback)  // Reads the whole buffer on every platform, including WebGPU, with a callback in a later main-thread update (C++ only).
 bool StorageBuffer::update(const void * data, size_t size)  // Uploads CPU bytes to the beginning of persistent storage once per device frame.
 ```
 
@@ -4636,6 +4667,11 @@ const std::string & VideoDeviceInfo::getUniqueId() const  // Returns the camera'
 ```cpp
 ```
 
+### VideoFrameView — Borrowed view of a converted camera frame, valid only during onFrame delivery.
+
+```cpp
+```
+
 ### VideoGrabber — Captures live camera frames as pixels and a texture.
 
 ```cpp
@@ -4645,10 +4681,10 @@ void VideoGrabber::copyToImage(Image & image) const [macos,windows,linux,ios,web
 int VideoGrabber::getDesiredFrameRate() const [macos,windows,linux,ios,web]  // Return the requested capture frame rate.
 int VideoGrabber::getDeviceID() const [macos,windows,linux,ios,web]  // Return the selected camera device ID.
 const std::string & VideoGrabber::getDeviceName() const [macos,windows,linux,ios,web]  // Return the stored capture device name.
-size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux]  // Return the configured frame queue capacity.
+size_t VideoGrabber::getFrameQueueSize() const [macos,windows,linux,ios]  // Return the configured frame queue capacity.
 int VideoGrabber::getHeight() const [macos,windows,linux,ios,web]  // Return the current capture frame height.
 unsigned char * VideoGrabber::getPixels() [+1] [macos,windows,linux,ios,web]  // Return a pointer to the current camera pixel buffer.
-size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux]  // Move queued camera frames into a vector.
+size_t VideoGrabber::getQueuedFrames(std::vector<GrabberFrame> & out) [macos,windows,linux,ios]  // Move queued camera frames into a vector.
 Texture & VideoGrabber::getTexture() [+1] [macos,windows,linux,ios,web]  // Return the texture used to display the camera frame.
 int VideoGrabber::getWidth() const [macos,windows,linux,ios,web]  // Return the current capture frame width.
 bool VideoGrabber::isConnected() const [macos,windows,linux,ios,web]  // Return whether the camera is open.
@@ -4660,7 +4696,8 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevices() [macos,windows,linux,io
 void VideoGrabber::requestCameraPermission() [macos,windows,linux,ios,web]  // Request camera access permission.
 void VideoGrabber::setDesiredFrameRate(int fps) [macos,windows,linux,ios,web]  // Set the requested capture frame rate.
 void VideoGrabber::setDeviceID(int deviceId) [macos,windows,linux,ios,web]  // Select the camera device for setup.
-void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux]  // Set the capacity of the timestamped camera frame queue.
+void VideoGrabber::setDeviceUniqueID(const std::string & uniqueId) [macos,windows,linux,ios,web]  // Selects a camera by its unique ID for the next setup.
+void VideoGrabber::setFrameQueueSize(size_t maxFrames) [macos,windows,linux,ios]  // Set the capacity of the timestamped camera frame queue.
 bool VideoGrabber::setup(int width, int height) [+1] [macos,windows,linux,ios,web]  // Open the camera at a requested size, or reopen the last one.
 void VideoGrabber::setVerbose(bool verbose) [macos,windows,linux,ios,web]  // Enable or disable verbose camera logging.
 void VideoGrabber::update() [macos,windows,linux,ios,web]  // Process camera updates and upload the latest frame.
@@ -4692,8 +4729,10 @@ int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Re
 bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Returns the hardware decoding preference.
 bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Reports whether an audio track was detected.
 bool VideoPlayer::isAudioStreaming() const [macos,windows,linux,ios,web]  // Returns the audio streaming preference.
+bool VideoPlayer::isLoading() const [macos,windows,linux,ios,web]  // Reports whether a video load is pending for the current App run.
 bool VideoPlayer::isUsingHwAccel() const [macos,windows,linux,ios,web]  // Returns the reported hardware decoding state.
-LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Loads a video source for playback.
+LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Loads a video source synchronously, blocking the caller.
+void VideoPlayer::loadAsync(const fs::path & path) [macos,windows,linux,ios,web]  // Starts a video load with completion on a later main-loop pass.
 void VideoPlayer::nextFrameImpl() [macos,windows,linux,ios,web]  // Advances one frame through the playback backend.
 void VideoPlayer::play() [macos,windows,linux,ios,web]  // Starts or resumes video playback.
 void VideoPlayer::playImpl() [macos,windows,linux,ios,web]  // Starts or resumes playback through the playback backend.
@@ -4832,6 +4871,7 @@ bool Window::isOpen() const  // Returns whether this window is open.
 bool Window::isVisible() const  // Returns this open window's requested visibility.
 void Window::setApp(Args &&... args)  // Creates a new App of the given class and puts it in this window.
 void Window::setClearColor(const Color & c)  // Sets this window's background clear color.
+void Window::setDrawWhileHidden(bool allow)  // Keeps this window drawing while hidden when enabled.
 void Window::setFps(float fps)  // Sets this window's target frame rate.
 void Window::setFullscreen(bool full)  // Sets this window's fullscreen mode.
 void Window::setIndependentFps(float updateFps, float drawFps)  // Sets separate update and drawing rates for this window.
@@ -4917,7 +4957,7 @@ ToolBuilder & mcp::ToolBuilder::level(ToolLevel value)  // Sets the access level
 ## Enums
 
 ```cpp
-enum AudioBackend { Default, Null }  // Selects the audio engine backend.
+enum AudioBackend { Default, Null, WASAPI, DirectSound, WinMM, CoreAudio, PulseAudio, ALSA, JACK, AAudio, OpenSLES, WebAudio }  // Selects the audio engine backend.
 enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Identifies the stage at which audio initialization failed.
 enum AudioRecordSettings::SampleFormat { S16, F32 }  // Selects the sample representation stored in the WAV file.
 enum AxisMode { None, Fill, Content }  // Selects how a layout axis determines sizes.
@@ -5311,6 +5351,7 @@ Two entry points. Use either or both.
 class tcApp : public App {
     double phase = 0;
     void audioOut(AudioOutBuffer& buf) override {
+        // Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring; visualize in update() via getAnalysisBuffer().
         for (int i = 0; i < buf.frameCount; i++) {
             float v = 0.3f * sinf(phase);
             for (int c = 0; c < buf.channels; c++)
@@ -5322,6 +5363,7 @@ class tcApp : public App {
 
 // 2. Event<AudioOutBuffer> for non-App-bound code, multiple listeners
 EventListener synthListener;
+// Audio thread (Inline): no Nodes/GPU; share via atomics/lock/ring; visualize in update() via getAnalysisBuffer().
 synthListener = AudioEngine::getInstance().audioOut.listen(
     [](AudioOutBuffer& buf) { /* ... */ });
 ```
@@ -5394,7 +5436,7 @@ Sound sfx = bundle.build();
 17. **Unqualified `random()` may resolve to POSIX `::random()`** and compile to the wrong thing silently. Write `tc::random(min, max)` explicitly; there is no `randomf`.
 18. **EasyCam starts at elevation 0** — a true side-on view, so flat scenes (ground planes, orbits) look like a line on first launch. Set `cam.setElevation(...)` / `setAzimuth(...)` explicitly.
 19. **EasyCam `enableMouseInput()` eats every left press.** It consumes the press as orbit-start during `events().mousePressed`, and node-tree dispatch only runs when the event wasn't consumed — all Node mouse handlers silently stop working (app-level `mousePressed()` still fires, which is confusing). With clickable nodes, use `setOrbitButton(MOUSE_BUTTON_RIGHT)` or `setDragModifier(...)` instead.
-20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth (LESS_EQUAL + depth write, same as the 3D pipeline) for all subsequent draws; it persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
+20. **`setBlendMode()` inside a 3D scene kills depth — restore it with `enableDepthTest()`.** Every blend pipeline (Alpha, Add, even Disabled) has depth write/test OFF by default; only the 3D pipeline (screen setup / `EasyCam::begin()`) writes depth. Geometry then renders in submission order (e.g. a box's unlit bottom face overwrites its lit front face). Call `tc::enableDepthTest()` after the blend-mode change to restore depth testing (LESS_EQUAL) for all subsequent draws. `Add`, `Screen`, `Multiply` and `Subtract` test without writing depth; `Alpha` (the default, also used for opaque 3D) and `Disabled` keep writing it. Translucent `Alpha` also writes depth, so draw opaque objects first and translucent ones back to front; TrussC does not sort draws. The setting persists like the blend mode (across frames and Fbo passes) until `disableDepthTest()` — call that before 2D overlays (HUD, text) so they draw on top. Query with `isDepthTestEnabled()`.
 21. **IBL no-ops on iOS Safari (wasm).** `Environment::loadProcedural()`/`loadFromHDR()` return false on iOS web (the cube-face bake breaks the canvas swapchain there); PBR falls back to flat hemisphere ambient + direct lights. Don't rely on IBL reflections for cross-platform looks if you target iOS web. Native, desktop web, and Android web are unaffected.
 22. **Don't hand-parse JSON/XML.** `tc::Json` (nlohmann) and `tc::Xml` (pugixml) are bundled and included via `<TrussC.h>` — use `loadJson`/`parseJson`/`loadXml`/`parseXml`.
 23. **Move things with `getDeltaTime()` / `getElapsedTime()`, not a fixed step per frame.** The frame rate follows the monitor (60/120/144 Hz, or 30 on some external displays), so `x += 2` runs at different speeds on different screens; `x += speed * getDeltaTime()` does not.

@@ -108,7 +108,7 @@ public:
         if (frame_ >= 6 && frame_ < 9) { drawDepthFixture(frame_ - 6, fbo_); ++frame_; return; }
         if (frame_ == 9) { runReviewChecks(fbo_); ++frame_; return; }
         if (frame_ >= 10 && frame_ < 14) { drawDepthSetterFixture(frame_ - 10); ++frame_; return; }
-        if (frame_ == 14) { runEasyCamDepthChecks(); ++frame_; return; }
+        if (frame_ == 14) { runEasyCamDepthChecks(); runBlendDepthChecks(); ++frame_; return; }
         if (frame_ == 15) { exitApp(); return; }
         const char* scenarios[] = {"default-frame", "screen-fov", "screen-ortho",
                                    "easycam", "nested-push-pop", "default-ortho"};

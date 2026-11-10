@@ -736,6 +736,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setDefaultScreenFov", [](float fovRadians) { return trussc::setDefaultScreenFov(fovRadians); });
     lua->set_function("setDefaultScreenFovDeg", [](float fovDeg) { return trussc::setDefaultScreenFovDeg(fovDeg); });
     lua->set_function("setDefaultScreenOrtho", []() { return trussc::setDefaultScreenOrtho(); });
+    lua->set_function("setDrawWhileHidden", [](bool allow) { return trussc::setDrawWhileHidden(allow); });
     lua->set_function("setEnvironment", [](trussc::Environment & env) { return trussc::setEnvironment(env); });
     lua->set_function("setFarClip", [](float farDist) { return trussc::setFarClip(farDist); });
     lua->set_function("setFileLogLevel", [](trussc::LogLevel level) { return trussc::setFileLogLevel(level); });

@@ -1,0 +1,12 @@
+# Standalone CPU test and reusable Pi benchmark; no TrussC runtime or display.
+cmake_minimum_required(VERSION 3.20)
+project(jpegDecode LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+add_executable(jpegDecode main.cpp)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    include(../../cmake/tc_linux_jpeg.cmake)
+    target_sources(jpegDecode PRIVATE ../../platform/linux/tcJpegDecode_linux.cpp)
+    target_include_directories(jpegDecode PRIVATE ../../include)
+    target_link_libraries(jpegDecode PRIVATE PkgConfig::TC_JPEG)
+    target_compile_options(jpegDecode PRIVATE -Wall -Wextra -Wno-unused-function)
+endif()

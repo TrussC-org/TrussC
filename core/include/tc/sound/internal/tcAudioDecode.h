@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tc/sound/tcSound.h"
+#include <climits>
 #include <cstdio>
 #include <iomanip>
 

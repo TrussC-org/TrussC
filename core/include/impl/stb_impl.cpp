@@ -41,6 +41,14 @@ void* imageRealloc(void* pointer, size_t size) {
 #define STBI_REALLOC(pointer, size) imageRealloc(pointer, size)
 #define STBI_FREE(pointer) std::free(pointer)
 
+// stb requires an explicit opt-in for NEON. MSVC ARM64 provides arm64_neon.h,
+// not the arm_neon.h used by this vendored version of stb_image.
+#if !defined(_MSC_VER) && (defined(__arm__) || defined(__aarch64__)) && \
+    (defined(__ARM_NEON) || defined(__ARM_NEON__)) && \
+    defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define STBI_NEON
+#endif
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
