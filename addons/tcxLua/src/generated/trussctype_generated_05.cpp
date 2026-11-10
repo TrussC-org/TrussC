@@ -140,39 +140,31 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["update"] = &trussc::RectNodeButton::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::Window
-            , trussc::Window()
+        auto constructors = tcxLuaConstructors<trussc::LayoutMod
+            , trussc::LayoutMod()
+            , trussc::LayoutMod(trussc::LayoutDirection)
+            , trussc::LayoutMod(trussc::LayoutDirection, float)
         >();
-        sol::usertype<trussc::Window> t = lua->new_usertype<trussc::Window>("Window", constructors, sol::call_constructor, constructors);
-        t["bringToFront"] = &trussc::Window::bringToFront;
-        t["close"] = &trussc::Window::close;
-        t["destroyApp"] = &trussc::Window::destroyApp;
-        t["events"] = &trussc::Window::events;
-        t["getApp"] = &trussc::Window::getApp;
-        t["getFps"] = &trussc::Window::getFps;
-        t["getHeight"] = &trussc::Window::getHeight;
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
-        t["getPosition"] = &trussc::Window::getPosition;
-#endif
-        t["getTitle"] = &trussc::Window::getTitle;
-        t["getWidth"] = &trussc::Window::getWidth;
-        t["isFocused"] = &trussc::Window::isFocused;
-        t["isFullscreen"] = &trussc::Window::isFullscreen;
-        t["isOccluded"] = &trussc::Window::isOccluded;
-        t["isOpen"] = &trussc::Window::isOpen;
-        t["isVisible"] = &trussc::Window::isVisible;
-        t["setClearColor"] = &trussc::Window::setClearColor;
-        t["setFps"] = &trussc::Window::setFps;
-        t["setFullscreen"] = &trussc::Window::setFullscreen;
-        t["setIndependentFps"] = &trussc::Window::setIndependentFps;
-#if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
-        t["setPosition"] = &trussc::Window::setPosition;
-#endif
-        t["setQuitOnClose"] = &trussc::Window::setQuitOnClose;
-        t["setSize"] = &trussc::Window::setSize;
-        t["setTitle"] = &trussc::Window::setTitle;
-        t["setVisible"] = &trussc::Window::setVisible;
-        t["toggleFullscreen"] = &trussc::Window::toggleFullscreen;
+        sol::usertype<trussc::LayoutMod> t = lua->new_usertype<trussc::LayoutMod>("LayoutMod", constructors, sol::call_constructor, constructors);
+        t["getCrossAxis"] = &trussc::LayoutMod::getCrossAxis;
+        t["getDirection"] = &trussc::LayoutMod::getDirection;
+        t["getMainAxis"] = &trussc::LayoutMod::getMainAxis;
+        t["getOwner"] = [](trussc::LayoutMod& self) { return self.getOwner(); };
+        t["getPaddingBottom"] = &trussc::LayoutMod::getPaddingBottom;
+        t["getPaddingLeft"] = &trussc::LayoutMod::getPaddingLeft;
+        t["getPaddingRight"] = &trussc::LayoutMod::getPaddingRight;
+        t["getPaddingTop"] = &trussc::LayoutMod::getPaddingTop;
+        t["getSpacing"] = &trussc::LayoutMod::getSpacing;
+        t["setCrossAxis"] = &trussc::LayoutMod::setCrossAxis;
+        t["setDirection"] = &trussc::LayoutMod::setDirection;
+        t["setMainAxis"] = &trussc::LayoutMod::setMainAxis;
+        t["setPadding"] = sol::overload([](trussc::LayoutMod& self, float padding) -> decltype(auto) { return self.setPadding(padding); }, [](trussc::LayoutMod& self, float vertical, float horizontal) -> decltype(auto) { return self.setPadding(vertical, horizontal); }, [](trussc::LayoutMod& self, float top, float right, float bottom, float left) -> decltype(auto) { return self.setPadding(top, right, bottom, left); });
+        t["setPaddingBottom"] = &trussc::LayoutMod::setPaddingBottom;
+        t["setPaddingLeft"] = &trussc::LayoutMod::setPaddingLeft;
+        t["setPaddingRight"] = &trussc::LayoutMod::setPaddingRight;
+        t["setPaddingTop"] = &trussc::LayoutMod::setPaddingTop;
+        t["setSpacing"] = &trussc::LayoutMod::setSpacing;
+        t["updateLayout"] = &trussc::LayoutMod::updateLayout;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
@@ -223,12 +215,10 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["message"] = &trussc::LogEventArgs::message;
         t["timestamp"] = &trussc::LogEventArgs::timestamp;
     }
-    lua->new_usertype<trussc::ThermalState>("ThermalState",
-        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
-        "Nominal", sol::var(trussc::ThermalState::Nominal),
-        "Fair", sol::var(trussc::ThermalState::Fair),
-        "Serious", sol::var(trussc::ThermalState::Serious),
-        "Critical", sol::var(trussc::ThermalState::Critical));
+    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
+        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
+        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
+        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
     {
         sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
         t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
@@ -242,10 +232,11 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["filePath"] = &trussc::FileDialogResult::filePath;
         t["success"] = &trussc::FileDialogResult::success;
     }
-    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
-        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
-        "U8", sol::var(trussc::PixelFormat::U8),
-        "F32", sol::var(trussc::PixelFormat::F32));
+    {
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+    }
     lua->new_usertype<trussc::Codec>("Codec",
         sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
         "None", sol::var(trussc::Codec::None),
