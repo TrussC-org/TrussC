@@ -1906,16 +1906,58 @@ details.en = '''
 - Returns outputs only; `MicInput::listDevices(backend)` returns inputs only. Entries include name, backend-native ID, direction-specific OS default flag, and reported native channels/rates. Pass an entry to `AudioSettings::device`.
 - `backend` defaults to `Default`: use the existing engine context if present, otherwise probe miniaudio’s default backend order without starting playback. An explicit backend probes only that backend; unavailable backends return an empty list and log a Warning. Native iOS probing leaves the audio session untouched and lists current routes; output routing remains OS controlled.
 - Enumeration queries each device with `ma_context_get_device_info`; this can open/probe devices (especially ALSA) and may be slow. Call from the main thread when needed, not every frame. A failed detail query keeps the device entry with unspecified capabilities. Web returns an empty list because miniaudio exposes only default placeholders, not selectable device IDs.
+
+OS-decorated names such as "マイク (Logitech StreamCam)" vary with the OS language, so match a stable part of the name.
+
+```cpp
+auto devices = AudioEngine::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) {
+    AudioSettings settings;
+    settings.device = *it;
+    AudioEngine::getInstance().init(settings);
+}
+```
 '''
 details.ja = '''
 - 出力だけを返します。`MicInput::listDevices(backend)` は入力だけを返します。各要素には名前、バックエンド固有ID、この方向でのOS既定フラグ、報告されたネイティブチャンネル数とレートが入ります。出力の要素は `AudioSettings::device` に渡します。
 - `backend` の既定値は `Default` です。エンジンのコンテキストがあれば使い、なければ再生を開始せず miniaudio の既定順で調べます。明示したバックエンドだけを調べ、利用できなければ Warning と空リストを返します。iOSの調査ではオーディオセッションを変更せず、現在のルートを列挙します。出力ルートはOSが制御します。
 - 各デバイスに `ma_context_get_device_info` を呼びます。特にALSAではデバイスを開いて調べるため時間がかかる場合があります。毎フレームではなく必要なときにメインスレッドで呼んでください。詳細取得に失敗しても、対応形式が未指定の要素を残します。Webでは選択可能なIDを取得できず既定デバイスの仮の情報だけになるため、空リストを返します。
+
+「マイク (Logitech StreamCam)」のように OS が装飾する名前は OS の言語によって変わるため、名前の安定した部分で照合します。
+
+```cpp
+auto devices = AudioEngine::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) {
+    AudioSettings settings;
+    settings.device = *it;
+    AudioEngine::getInstance().init(settings);
+}
+```
 '''
 details.ko = '''
 - 출력만 반환합니다. `MicInput::listDevices(backend)`는 입력만 반환합니다. 각 항목에는 이름, 백엔드 고유 ID, 해당 방향의 OS 기본 플래그, 보고된 네이티브 채널 수와 레이트가 들어 있습니다. 출력 항목은 `AudioSettings::device`에 전달합니다.
 - `backend` 기본값은 `Default`이며 엔진 컨텍스트가 있으면 사용하고, 없으면 재생을 시작하지 않고 miniaudio의 기본 순서로 조회합니다. 명시한 백엔드만 조회하며 사용할 수 없으면 Warning과 빈 목록을 반환합니다. iOS 조회는 오디오 세션을 변경하지 않고 현재 경로를 열거합니다. 출력 경로는 OS가 제어합니다.
 - 장치마다 `ma_context_get_device_info`를 호출합니다. 특히 ALSA는 장치를 열어 조회할 수 있어 느릴 수 있습니다. 매 프레임 대신 필요할 때 메인 스레드에서 호출합니다. 상세 조회에 실패해도 지원 형식이 미지정인 항목을 유지합니다. Web은 선택 가능한 ID 대신 기본 장치의 임시 정보만 제공하므로 빈 목록을 반환합니다.
+
+"マイク (Logitech StreamCam)"처럼 OS가 꾸미는 이름은 OS 언어에 따라 달라지므로 이름에서 변하지 않는 부분으로 비교합니다.
+
+```cpp
+auto devices = AudioEngine::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) {
+    AudioSettings settings;
+    settings.device = *it;
+    AudioEngine::getInstance().init(settings);
+}
+```
 '''
 
 ["AudioEngine::onDisconnect"]
@@ -38887,6 +38929,16 @@ details.en = '''
 - Native enumeration can return an empty list when no devices are found or enumeration fails.
 - Linux scans accessible capture devices from `/dev/video0` through `/dev/video9`; IDs are device-number suffixes and need not be consecutive.
 - Web returns one placeholder entry, `{0, "Default Camera", "default"}`, without enumerating hardware; Android returns an empty list.
+
+OS-decorated names such as "マイク (Logitech StreamCam)" vary with the OS language, so match a stable part of the name.
+
+```cpp
+auto devices = grabber.listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) grabber.setDeviceUniqueID(it->uniqueId);
+```
 '''
 details.ja = '''
 - 一覧の順番によらず選択する場合は `uniqueId` を `setDeviceUniqueID()` に渡します。`VideoDeviceInfo::uniqueId` を参照してください。
@@ -38894,6 +38946,16 @@ details.ja = '''
 - ネイティブ環境では、デバイスが見つからない場合や列挙に失敗した場合に空の一覧を返すことがあります。
 - Linux ではアクセス可能な `/dev/video0` から `/dev/video9` のキャプチャデバイスを調べます。ID はデバイス名の末尾の番号で、連番とは限りません。
 - Web はハードウェアを列挙せず、仮の項目 `{0, "Default Camera", "default"}` を 1 件返します。Android は空の一覧を返します。
+
+「マイク (Logitech StreamCam)」のように OS が装飾する名前は OS の言語によって変わるため、名前の安定した部分で照合します。
+
+```cpp
+auto devices = grabber.listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) grabber.setDeviceUniqueID(it->uniqueId);
+```
 '''
 details.ko = '''
 - 목록 순서와 관계없이 선택하려면 `uniqueId`를 `setDeviceUniqueID()`에 전달합니다. `VideoDeviceInfo::uniqueId`를 참조합니다.
@@ -38901,6 +38963,16 @@ details.ko = '''
 - 네이티브 환경에서는 디바이스가 없거나 열거에 실패하면 빈 목록을 반환할 수 있습니다.
 - Linux에서는 접근 가능한 `/dev/video0`부터 `/dev/video9`까지의 캡처 디바이스를 검색합니다. ID는 디바이스 이름 끝의 번호이며 연속되지 않을 수 있습니다.
 - Web은 하드웨어를 열거하지 않고 임시 항목 `{0, "Default Camera", "default"}` 하나를 반환합니다. Android는 빈 목록을 반환합니다.
+
+"マイク (Logitech StreamCam)"처럼 OS가 꾸미는 이름은 OS 언어에 따라 달라지므로 이름에서 변하지 않는 부분으로 비교합니다.
+
+```cpp
+auto devices = grabber.listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) grabber.setDeviceUniqueID(it->uniqueId);
+```
 '''
 snippet = '''
 // tcApp member: VideoGrabber camera;
@@ -66082,14 +66154,44 @@ description.ko = "출력과 별도로 캡처 장치 목록을 조회합니다."
 details.en = '''
 - Returns input entries only, including monitor sources exposed by the OS. Use `setDevice(entry)` to select one. `backend` defaults to `Default` and follows the current engine context or probes miniaudio’s default order. An explicit backend is used alone.
 - The capability, cost, failure, iOS session and Web limitations are the same as `AudioEngine::listDevices`. Web returns an empty list. Enumeration does not request microphone permission.
+
+OS-decorated names such as "マイク (Logitech StreamCam)" vary with the OS language, so match a stable part of the name.
+
+```cpp
+auto devices = MicInput::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) mic.setDevice(*it);
+```
 '''
 details.ja = '''
 - OSが公開するモニターソースも含め、入力の要素だけを返します。`setDevice(entry)` で選択します。`backend` は既定で `Default` となり、エンジンのコンテキスト、または miniaudio の既定順に従います。明示したバックエンドは単独で使います。
 - 対応形式、処理時間、失敗、iOSセッション、Webの制限は `AudioEngine::listDevices` と同じです。Webは空リストを返します。列挙ではマイク権限を要求しません。
+
+「マイク (Logitech StreamCam)」のように OS が装飾する名前は OS の言語によって変わるため、名前の安定した部分で照合します。
+
+```cpp
+auto devices = MicInput::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) mic.setDevice(*it);
+```
 '''
 details.ko = '''
 - OS가 공개하는 모니터 소스를 포함하여 입력 항목만 반환합니다. `setDevice(entry)`로 선택합니다. `backend` 기본값은 `Default`이며 현재 엔진 컨텍스트 또는 miniaudio의 기본 순서를 따릅니다. 명시한 백엔드는 단독으로 사용합니다.
 - 지원 형식, 비용, 실패, iOS 세션 및 Web 제한은 `AudioEngine::listDevices`와 같습니다. Web은 빈 목록을 반환합니다. 열거는 마이크 권한을 요청하지 않습니다.
+
+"マイク (Logitech StreamCam)"처럼 OS가 꾸미는 이름은 OS 언어에 따라 달라지므로 이름에서 변하지 않는 부분으로 비교합니다.
+
+```cpp
+auto devices = MicInput::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) mic.setDevice(*it);
+```
 '''
 
 ["MicInput::setDevice"]
