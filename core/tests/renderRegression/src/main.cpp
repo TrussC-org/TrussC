@@ -31,6 +31,20 @@ struct Scene { const char* name; int tolerance; };
 // Baseline comparison tolerances (maximum difference in any RGBA8 channel).
 // Only rasterized 3D/MSAA scenes have a nonzero allowance; never auto-adjust.
 constexpr Scene scenes[] = {
+    {"strokeRoundStartSquareEnd", 0}, {"strokeAlternatingMiterRoundBevel", 0},
+    {"strokeClosedMixedJoins", 0}, {"strokeMidCapChangeEndOnly", 0},
+    {"strokeConstantStyles", 0},
+    {"cpuNormalUniformSphere", 0},
+    {"cpuNormalUniformBox", 0},
+    {"cpuNormalNonUniform", 0},
+    {"cpuNormalRotated", 0},
+    {"cpuNormalMirror", 0},
+    {"pbrNormalUniformSphere", 0},
+    {"pbrNormalUniformBox", 0},
+    {"pbrNormalNonUniform", 0},
+    {"pbrNormalRotated", 0},
+    {"pbrNormalMirror", 0},
+    {"pbrNormalTangent", 0},
     {"blendModes", 0}, {"text", 0}, {"premultImage", 0},
     {"fboClearLoad", 0}, {"msaaResolve", 2}, {"transformPbr", 2},
     {"easyCamFbo", 2}, {"scissorFbo", 0}, {"fullscreenShader", 0},
@@ -159,6 +173,8 @@ class RegressionApp : public App {
         triangle_.draw(); popMatrix(); clearMaterial();
     }
     #include "followupScenes.h"
+    #include "normalScenes.h"
+    #include "strokeScenes.h"
     void prepare() {
         if (is("imguiWindowFbo")) {
             screenUi_.setup(); fboUi_.setupOffscreen();
@@ -223,6 +239,8 @@ class RegressionApp : public App {
             // emitted by the later onRender listener installed in setup().
             return;
         }
+        if (drawStrokeScene()) return;
+        if (drawNormalScene(w, h)) return;
         if (drawFollowupScene(w, h)) return;
         if (is("blendModes")) {
             constexpr BlendMode blends[] = {BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply,
@@ -363,6 +381,23 @@ class RegressionApp : public App {
                 px.getHeight() == int(logicalH_*getDpiScale()));
             expect(px, offscreen, label+" pixel column", w-1.5f, h/4, {255,0,255,255}, s);
             expect(px, offscreen, label+" pixel row", w/4, h-1.5f, {0,255,255,255}, s);
+        }
+        const Rgba strokeInk{20,51,89,255}, paper{255,255,255,255};
+        if (is("strokeRoundStartSquareEnd")) {
+            expect(px, offscreen, label+" round start", 37, 86, paper, s, 1);
+            expect(px, offscreen, label+" square end", 219, 86, strokeInk, s, 1);
+        } else if (is("strokeMidCapChangeEndOnly")) {
+            expect(px, offscreen, label+" butt start preserved", 40, 96, paper, s, 1);
+            expect(px, offscreen, label+" last cap applied", 215, 96, strokeInk, s, 1);
+        } else if (is("strokeAlternatingMiterRoundBevel")) {
+            expect(px, offscreen, label+" first miter tip", 78, 28, strokeInk, s, 1);
+            expect(px, offscreen, label+" round corner", 128, 154, strokeInk, s, 1);
+            expect(px, offscreen, label+" bevel tip absent", 178, 28, paper, s, 1);
+        } else if (is("strokeClosedMixedJoins")) {
+            expect(px, offscreen, label+" first round corner outside", 46, 38, paper, s, 1);
+            expect(px, offscreen, label+" first round corner inside", 48, 40, strokeInk, s, 1);
+            expect(px, offscreen, label+" miter corner", 210, 38, strokeInk, s, 1);
+            expect(px, offscreen, label+" bevel corner", 210, 154, paper, s, 1);
         }
         if (is("blendModes")) {
             constexpr Rgba expected[] = {{160,96,95,255}, {192,160,191,255},
@@ -597,6 +632,7 @@ public:
         light_.setShadowArea(Vec3(128,96,0),128);
         camera_.setDistance(180);
         setupFollowupScenes();
+        setupNormalScenes();
         prepare();
         after_ = events().afterFrame.listen([this] { afterFrame(); });
     }

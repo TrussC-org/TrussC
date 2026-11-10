@@ -49,6 +49,97 @@ static Mesh makeMesh(int n) {
     return m;
 }
 
+// CPU normal transforms (#1353); no rendering context is needed.
+static void checkNormalTransforms() {
+    const Vec3 source = Vec3(1, 2, 3).normalized();
+    const Mat4 rotationOnly = Mat4::rotateY(0.7f) * Mat4::rotateZ(0.4f);
+    auto transformedNormal = [](const Mat4& matrix, const Vec3& normal) {
+        return internal::transformMeshNormal(internal::meshNormalMatrix(matrix), normal);
+    };
+    check("normal helper: rotation unchanged",
+          (transformedNormal(rotationOnly, source) - rotationOnly * source).length() < 1e-5f);
+    check("normal helper: rotation plus scale matches inverse transpose",
+          (transformedNormal(rotationOnly * Mat4::scale(2, 1, 0.5f), source) -
+           (rotationOnly * Vec3(source.x / 2, source.y, source.z * 2)).normalized()).length() < 1e-5f);
+    check("normal helper: mirror keeps outward direction",
+          (transformedNormal(Mat4::scale(-1, 1, 1), source) -
+           Vec3(-source.x, source.y, source.z)).length() < 1e-5f);
+    check("normal helper: zero result keeps the original normal",
+          transformedNormal(Mat4::scale(0), source) == source);
+    check("normal helper: cutoff keeps the original normal",
+          transformedNormal(Mat4::scale(1, 1e-7f, 1e-7f), Vec3(2, 0, 0)) == Vec3(2, 0, 0));
+    const Mat4 shear(1, 0.5f, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+    check("normal helper: shear matches inverse transpose",
+          (transformedNormal(shear, Vec3(1, 0, 0)) - Vec3(1, -0.5f, 0).normalized()).length() < 1e-5f);
+    const Mesh sphere = createSphere(1.0f, 12);
+    Mesh scaled = sphere;
+    scaled.scale(2.0f, 1.0f, 0.5f);
+    Mesh transformed = sphere;
+    transformed.transform(Mat4::scale(2.0f, 1.0f, 0.5f));
+    bool sameScale = true;
+    for (int i = 0; i < sphere.getNumNormals(); ++i) {
+        sameScale &= (scaled.getNormal(i) - transformed.getNormal(i)).length() < 1e-5f;
+    }
+    check("normals: transform(scale) matches Mesh::scale on sphere", sameScale);
+
+    const Mat4 rotation = Mat4::rotateY(0.7f) * Mat4::rotateZ(0.4f);
+    const Mat4 linear = rotation * Mat4::scale(2.0f, 1.0f, 0.5f);
+    transformed = sphere;
+    transformed.transform(Mat4::translate(3, -2, 4) * linear);
+    bool ellipsoid = true;
+    bool perpendicular = true;
+    for (int i = 0; i < sphere.getNumNormals(); ++i) {
+        const Vec3 original = sphere.getNormal(i);
+        const Vec3 normal = transformed.getNormal(i);
+        const Vec3 expected = (rotation * Vec3(original.x / 2.0f, original.y,
+                                                original.z / 0.5f)).normalized();
+        ellipsoid &= (normal - expected).length() < 1e-5f;
+        const Vec3 axis = std::abs(original.y) < 0.9f ? Vec3(0, 1, 0) : Vec3(1, 0, 0);
+        const Vec3 tangent0 = original.cross(axis).normalized();
+        const Vec3 tangent1 = original.cross(tangent0).normalized();
+        perpendicular &= std::abs(normal.dot((linear * tangent0).normalized())) < 1e-5f;
+        perpendicular &= std::abs(normal.dot((linear * tangent1).normalized())) < 1e-5f;
+    }
+    check("normals: rotated non-uniform scale matches ellipsoid gradient", ellipsoid);
+    check("normals: perpendicular to both transformed sphere tangents", perpendicular);
+
+    // A mirror keeps normals outward (inverse-transpose), matching Mesh::scale.
+    const Mat4 mirror = Mat4::scale(-1, 1, 1);
+    transformed = sphere;
+    transformed.transform(mirror);
+    scaled = sphere;
+    scaled.scale(-1, 1, 1);
+    bool mirrored = true;
+    for (int i = 0; i < sphere.getNumNormals(); ++i) {
+        const Vec3 original = sphere.getNormal(i);
+        const Vec3 outward = Vec3(-original.x, original.y, original.z);
+        mirrored &= (transformed.getNormal(i) - outward).length() < 1e-5f;
+        mirrored &= (transformed.getNormal(i) - scaled.getNormal(i)).length() < 1e-5f;
+    }
+    check("normals: mirror keeps normals outward and matches Mesh::scale", mirrored);
+
+    Mesh tiny;
+    tiny.addVertex(1, 0, 0).addNormal(1, 0, 0);
+    tiny.transform(Mat4::rotateZ(HALF_TAU / 2) * Mat4::scale(0.005f));
+    check("normals: a small uniform scale still rotates the normal",
+          (tiny.getNormal(0) - Vec3(0, 1, 0)).length() < 1e-5f);
+    transformed = sphere;
+    transformed.transform(Mat4::scale(0.01f, 0.005f, 0.0025f));
+    scaled = sphere;
+    scaled.scale(0.01f, 0.005f, 0.0025f);
+    bool smallScale = true;
+    for (int i = 0; i < sphere.getNumNormals(); ++i) {
+        smallScale &= (scaled.getNormal(i) - transformed.getNormal(i)).length() < 1e-5f;
+    }
+    check("normals: small non-uniform scale matches Mesh::scale", smallScale);
+
+    Mesh degenerate;
+    degenerate.addVertex(1, 2, 3).addNormal(0, 1, 0);
+    degenerate.transform(Mat4::scale(0, 0, 0));
+    check("normals: zero cofactor result retains original normal",
+          (degenerate.getNormal(0) - Vec3(0, 1, 0)).length() == 0.0f);
+}
+
 // The revision changes across op(m).
 static void expectChange(const char* name, const function<void(Mesh&)>& op) {
     Mesh m = makeMesh(99);
@@ -207,6 +298,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         });
     }
     printf("=== meshGpuDirty (#267) ===\n");
+    checkNormalTransforms();
 
     // Same-size rebuild: clear() then re-add the same 100 vertices.
     {

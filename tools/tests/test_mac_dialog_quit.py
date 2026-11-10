@@ -82,6 +82,7 @@ code = r'''
 #include <utility>
 #include <vector>
 #include "tc/utils/tcTeardown.h"
+#include "tc/gpu/internal/tcBufferReadback.h"
 #define __APPLE__ 1
 #define TARGET_OS_OSX 1
 using NSModalResponse = int;
@@ -107,6 +108,7 @@ void endSheet(NSWindow* sheet, int response) {
 namespace trussc {
 '''+helpers+r'''
 namespace internal {
+BufferReadbackQueue& bufferReadbacks() { static BufferReadbackQueue queue; return queue; }
 struct FileDialogResult { bool success = false; };
 struct Request {
     bool finished = false, valid = true;
@@ -155,7 +157,7 @@ struct WindowRequestAccess {
 void retireAppOwner(std::shared_ptr<Owner>) {}
 bool sg_isvalid() { return false; }
 void sapp_tc_gl_activate_idle() {}
-void cancelLogoutWatchdog() {}
+void cancelLogoutWatchdog() noexcept {}
 void cancelAsyncDialogs() {}
 int orders = 0, cancels = 0;
 void sapp_quit() { ++orders; }
@@ -240,7 +242,7 @@ int main() {
         lateReplies.push_back([pending](int response) { completeDialogSheet(pending, response); });
         if (sheet == &confirm || sheet == &save) sheet->nativeReply = lateReplies.back();
     }
-    state.windows.push_back(std::make_shared<Window>());
+    state.windows.push_back(std::make_shared<trussc::internal::Window>());
     state.quitPending = true;
     processPendingQuit();
     check("veto preserves every sheet and callback", callbacks == 0 && dialogSheets().size() == 4 &&
@@ -283,7 +285,7 @@ int main() {
         check("routed quit cancels before teardown", !result.success && state.runToken->load());
     });
     trackDialogSheet(&routedAlert, [routedReply](int response) { routedReply({response == 42}); });
-    state.windows.push_back(std::make_shared<Window>());
+    state.windows.push_back(std::make_shared<trussc::internal::Window>());
     routedAlert.duringClose = [&] {
         trace.push_back(5);
         const int queries = native::queries, appKitCalls = native::appKitCalls;

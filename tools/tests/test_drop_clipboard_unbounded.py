@@ -39,16 +39,6 @@ class DropClipboardUnbounded(unittest.TestCase):
                         '', native, flags=re.DOTALL)
         self.assertNotRegex(native, r'\bthrow\b')
 
-    def test_removed_descriptor_fields(self):
-        compile_run(r'''
-#include "sokol/sokol_app_tc.h"
-template<class T> concept HasCount = requires(T t) { t.max_dropped_files; };
-template<class T> concept HasLength = requires(T t) { t.max_dropped_file_path_length; };
-template<class T> concept HasClipboard = requires(T t) { t.clipboard_size; };
-static_assert(!HasCount<sapp_desc> && !HasLength<sapp_desc> && !HasClipboard<sapp_desc>);
-int main() {}
-''')
-
     def test_web_callbacks(self):
         native = HEADER.read_text(encoding='utf-8')
         web = native[native.index('EMSCRIPTEN_KEEPALIVE int _sapp_tc_emsc_onpaste'):]

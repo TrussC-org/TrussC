@@ -4,8 +4,12 @@
 
 #include "TrussC.h"
 #include "impl/tcImageDecode.h"
+#include "impl/tcJpegDecode.h"
 #include <atomic>
+#include <array>
+#include <bit>
 #include <climits>
+#include <cstdint>
 #include <new>
 #ifdef __EMSCRIPTEN__
 #include <emscripten/console.h>
@@ -159,6 +163,45 @@ LoadResult Pixels::loadEncoded(const unsigned char* buffer, size_t len, bool asF
     if (!buffer || len == 0)
         return LoadResult::fail(LoadError::DecodeFailed, "invalid encoded image data");
     internal::ImageDecodeAllocationScope allocation;
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (internal::isJpeg(buffer, len)) {
+        internal::JpegDecode jpeg;
+        if (!jpeg.open(buffer, len)) {
+            if (!jpeg.needsStbFallback())
+                return LoadResult::fail(LoadError::DecodeFailed, "libjpeg rejected JPEG header");
+        } else {
+            const int w = jpeg.width(), h = jpeg.height();
+            // Bound (stb parity): JPEG output plus its extra byte and HDR RGB float conversion must fit INT_MAX.
+            const uint64_t pixels = uint64_t(w) * uint64_t(h);
+            if (pixels > uint64_t(INT_MAX - 1) / (asFloat ? 3 : 4) ||
+                (asFloat && pixels > uint64_t(INT_MAX) / 3 / sizeof(float)))
+                return LoadResult::fail(LoadError::DecodeFailed, "too large");
+            size_t elements = 0;
+            if (!internal::pixelBufferCount(w, h, 4, asFloat ? sizeof(float) : 1, SIZE_MAX, elements))
+                return LoadResult::fail(LoadError::TooLarge, "decoded pixel storage exceeds size_t capacity");
+            std::unique_ptr<unsigned char[]> output(internal::imageDecodeAllocationAllowed(elements)
+                ? new (std::nothrow) unsigned char[elements] : nullptr);
+            if (!output) return internal::imageDecodeOutOfMemory();
+            if (!jpeg.decode(output.get(), elements))
+                return LoadResult::fail(LoadError::DecodeFailed, "libjpeg rejected JPEG data");
+            if (asFloat) {
+                std::unique_ptr<float[]> linear(internal::imageDecodeAllocationAllowed(elements * sizeof(float))
+                    ? new (std::nothrow) float[elements] : nullptr);
+                if (!linear) return internal::imageDecodeOutOfMemory();
+                // Match stb's default LDR-to-HDR gamma conversion and opaque alpha.
+                for (size_t i = 0; i < elements; ++i)
+                    linear[i] = i % 4 == 3 ? 1.0f : std::pow(output[i] / 255.0f, 2.2f);
+                data_ = linear.release();
+            } else data_ = output.release();
+            width_ = w;
+            height_ = h;
+            channels_ = 4;
+            format_ = asFloat ? PixelFormat::F32 : PixelFormat::U8;
+            allocated_ = true;
+            return LoadResult::success();
+        }
+    }
+#endif
     int decodedW = 0, decodedH = 0, decodedChannels = 0;
     using Decoded = std::unique_ptr<void, decltype(&stbi_image_free)>;
     Decoded decoded(nullptr, &stbi_image_free);
@@ -344,8 +387,44 @@ inline float catmullRomWeight(float d) {
 
 // sRGB <-> linear conversion (gamma 2.2 approximation), same convention
 // as the rest of the gamma-correct pipeline.
-inline float sRGBToLinear(float s) { return std::pow(s, 2.2f); }
-inline float linearToSRGB(float l) { return std::pow(l, 1.0f / 2.2f); }
+struct GammaTables {
+    std::array<float, 256> decode;
+    std::array<float, 255> encodeThreshold;
+
+    GammaTables() {
+        for (size_t i = 0; i < decode.size(); ++i)
+            decode[i] = std::pow(static_cast<float>(i) / 255.0f, 2.2f);
+        // Find the first float that rounds up at each U8 boundary using
+        // the original float pow/multiply expression. Inverting the curve
+        // analytically would move some boundaries by a few float ULPs.
+        for (size_t i = 0; i < encodeThreshold.size(); ++i) {
+            uint32_t lo = 0, hi = std::bit_cast<uint32_t>(1.0f);
+            while (lo < hi) {
+                uint32_t mid = lo + (hi - lo) / 2;
+                float v = std::pow(std::bit_cast<float>(mid), 1.0f / 2.2f) * 255.0f;
+                if (v >= static_cast<float>(i) + 0.5f) hi = mid;
+                else lo = mid + 1;
+            }
+            encodeThreshold[i] = std::bit_cast<float>(lo);
+        }
+    }
+};
+
+const GammaTables& gammaTables() {
+    static const GammaTables tables;
+    return tables;
+}
+
+inline float sRGBToLinear(unsigned char s) { return gammaTables().decode[s]; }
+inline unsigned char linearToSRGBByte(float v) {
+    const auto& thresholds = gammaTables().encodeThreshold;
+    // 255 boundaries form a complete binary-search tree. Avoid data-dependent
+    // branches at its eight levels, where U8 image noise defeats prediction.
+    size_t index = 0;
+    for (size_t step = 128; step != 0; step >>= 1)
+        index += step * static_cast<size_t>(v >= thresholds[index + step - 1]);
+    return static_cast<unsigned char>(index);
+}
 
 // For 3- and 4-channel buffers, the R/G/B channels are sRGB-encoded;
 // alpha (channel 3 in RGBA) and anything in a single-/two-channel buffer
@@ -405,13 +484,12 @@ void Pixels::halveInto(Pixels& dst) const {
                 } else {
                     bool linear = isLinearChannel(ch, c);
                     auto fetch = [&](size_t i) -> float {
-                        float v = srcU[i] / 255.0f;
-                        return linear ? v : sRGBToLinear(v);
+                        return linear ? srcU[i] / 255.0f : sRGBToLinear(srcU[i]);
                     };
                     float avg = (fetch(i00) + fetch(i01) + fetch(i10) + fetch(i11)) * 0.25f;
-                    if (!linear) avg = linearToSRGB(avg);
                     avg = clampf(avg, 0.0f, 1.0f);
-                    dstU[di] = static_cast<unsigned char>(std::lround(avg * 255.0f));
+                    dstU[di] = linear ? static_cast<unsigned char>(std::lround(avg * 255.0f))
+                                        : linearToSRGBByte(avg);
                 }
             }
         }
@@ -512,7 +590,8 @@ void Pixels::mirror(bool horizontal, bool vertical) {
 // One-axis resample helper for Pixels::resize.
 //
 // Resamples `src` along the X axis only into `dst`. Both buffers must
-// match in height, channels and format; only the widths differ. Picks
+// match in height and channels; only the widths differ. A U8 source
+// can write a linear F32 intermediate, which the Y pass encodes once. Picks
 // BoxArea when downscaling (`dstW < srcW`) and Catmull-Rom bicubic when
 // upscaling. For U8 buffers, RGB channels run through the gamma 2.2
 // curve so the average lives in linear light; alpha and non-RGB buffers
@@ -528,23 +607,25 @@ static void resample1D_X(const Pixels& src, Pixels& dst) {
 
     const float* srcF = isF32 ? static_cast<const float*>(src.getDataVoid()) : nullptr;
     const unsigned char* srcU = isF32 ? nullptr : static_cast<const unsigned char*>(src.getDataVoid());
-    float* dstF = isF32 ? static_cast<float*>(dst.getDataVoid()) : nullptr;
-    unsigned char* dstU = isF32 ? nullptr : static_cast<unsigned char*>(dst.getDataVoid());
+    float* dstF = dst.isFloat() ? static_cast<float*>(dst.getDataVoid()) : nullptr;
+    unsigned char* dstU = dst.isFloat() ? nullptr : static_cast<unsigned char*>(dst.getDataVoid());
 
     auto fetchLinear = [&](int y, int x, int c, bool isLinearCh) -> float {
         if (isF32) return srcF[((size_t)y * sw + x) * ch + c];
-        float v = srcU[((size_t)y * sw + x) * ch + c] / 255.0f;
-        return isLinearCh ? v : sRGBToLinear(v);
+        unsigned char v = srcU[((size_t)y * sw + x) * ch + c];
+        return isLinearCh ? v / 255.0f : sRGBToLinear(v);
     };
     auto storeLinear = [&](int y, int x, int c, bool isLinearCh, float v) {
-        if (isF32) {
-            dstF[((size_t)y * dw + x) * ch + c] = v;
+        if (dstF) {
+            // Preserve the U8 pass's range clipping, without its quantization.
+            // F32 sources remain unclipped linear data.
+            dstF[((size_t)y * dw + x) * ch + c] = isF32 ? v : clampf(v, 0.0f, 1.0f);
             return;
         }
-        if (!isLinearCh) v = linearToSRGB(v);
         if (v < 0.0f) v = 0.0f;
         else if (v > 1.0f) v = 1.0f;
-        dstU[((size_t)y * dw + x) * ch + c] = static_cast<unsigned char>(std::lround(v * 255.0f));
+        dstU[((size_t)y * dw + x) * ch + c] = isLinearCh ? static_cast<unsigned char>(std::lround(v * 255.0f))
+                                                : linearToSRGBByte(v);
     };
 
     auto isLinearChannel = [&](int c) -> bool {
@@ -608,23 +689,23 @@ static void resample1D_Y(const Pixels& src, Pixels& dst) {
 
     const float* srcF = isF32 ? static_cast<const float*>(src.getDataVoid()) : nullptr;
     const unsigned char* srcU = isF32 ? nullptr : static_cast<const unsigned char*>(src.getDataVoid());
-    float* dstF = isF32 ? static_cast<float*>(dst.getDataVoid()) : nullptr;
-    unsigned char* dstU = isF32 ? nullptr : static_cast<unsigned char*>(dst.getDataVoid());
+    float* dstF = dst.isFloat() ? static_cast<float*>(dst.getDataVoid()) : nullptr;
+    unsigned char* dstU = dst.isFloat() ? nullptr : static_cast<unsigned char*>(dst.getDataVoid());
 
     auto fetchLinear = [&](int y, int x, int c, bool isLinearCh) -> float {
         if (isF32) return srcF[((size_t)y * sw + x) * ch + c];
-        float v = srcU[((size_t)y * sw + x) * ch + c] / 255.0f;
-        return isLinearCh ? v : sRGBToLinear(v);
+        unsigned char v = srcU[((size_t)y * sw + x) * ch + c];
+        return isLinearCh ? v / 255.0f : sRGBToLinear(v);
     };
     auto storeLinear = [&](int y, int x, int c, bool isLinearCh, float v) {
-        if (isF32) {
+        if (dstF) {
             dstF[((size_t)y * sw + x) * ch + c] = v;
             return;
         }
-        if (!isLinearCh) v = linearToSRGB(v);
         if (v < 0.0f) v = 0.0f;
         else if (v > 1.0f) v = 1.0f;
-        dstU[((size_t)y * sw + x) * ch + c] = static_cast<unsigned char>(std::lround(v * 255.0f));
+        dstU[((size_t)y * sw + x) * ch + c] = isLinearCh ? static_cast<unsigned char>(std::lround(v * 255.0f))
+                                                : linearToSRGBByte(v);
     };
 
     auto isLinearChannel = [&](int c) -> bool {
@@ -690,8 +771,9 @@ void Pixels::resize(int newW, int newH) {
 
     // 2-pass separable: horizontal first into an intermediate of size
     // (newW x height_), then vertical into the final (newW x newH).
+    // Keep linear floats between passes, without U8 rounding.
     Pixels intermediate;
-    intermediate.allocate(newW, height_, channels_, format_);
+    intermediate.allocate(newW, height_, channels_, PixelFormat::F32);
     if (!intermediate.isAllocated()) return;
     resample1D_X(*this, intermediate);
 

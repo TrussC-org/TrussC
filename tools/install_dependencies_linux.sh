@@ -39,6 +39,7 @@ REQUIRED_PACKAGES_DEBIAN=(
     gstreamer1.0-plugins-bad
     gstreamer1.0-plugins-ugly
     libfontconfig-dev
+    libjpeg-dev
     pkg-config
     libcurl4-openssl-dev
     cmake
@@ -59,6 +60,7 @@ REQUIRED_PACKAGES_ARCH=(
     gst-plugins-bad
     gst-plugins-ugly
     fontconfig
+    libjpeg-turbo
     pkgconf
     curl
     cmake

@@ -4,7 +4,7 @@
 lane runs `allCoreTests renderRegression --self-check` under Xvfb/Mesa. A standalone
 project generated with trusscli accepts the same arguments.
 
-- `--self-check`: assertions against known pixel values in all 21 scenes.
+- `--self-check`: assertions against known pixel values in the registered scenes.
 - `--record <dir>`: assertions, PNGs and `samples.json` into an empty directory.
 - `--compare <dir>`: assertions, PNGs, `samples.json` and red difference overlays
   into `<dir>.compare`. A missing image for an existing scene, different size,
@@ -80,3 +80,8 @@ behavior; record its old pixels as evidence even when its self-check fails.
 frame, one on the window and one inside an Fbo. Exact pixels check preceding
 blue geometry, distinct red/green UI, subsequent yellow geometry and black
 exteriors. The same scene uses the public addon API on the old and new backend.
+
+Stroke fixtures (#1381) use a white background and thick dark strokes: round start /
+square end, alternating miter / round / bevel corners, a closed loop with mixed
+joins, and a cap change that affects only the end; `strokeConstantStyles` covers
+all nine constant cap/join combinations.

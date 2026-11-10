@@ -3,7 +3,7 @@
 #include "impl/tcImportError.h"
 
 // =============================================================================
-// tcxLut - 3D LUT (Look-Up Table) for color grading
+// tcxLut - 1D / 3D LUT (Look-Up Table) for color grading
 // =============================================================================
 //
 // Addon for TrussC. Add "tcxLut" to addons.make to use.
@@ -11,13 +11,14 @@
 // Supports .cube file format (industry standard for color LUTs)
 // Only the 0..1 input domain and full-range LUTs are supported;
 // other declared ranges fail to load with a keyword-specific error.
-// Uses 3D texture for GPU-accelerated color transformation
+// LUT_1D_SIZE, LUT_3D_SIZE, or both (1D shaper followed by 3D).
+// CPU: lut.apply(color). GPU: LutShader::setLut(lut), then draw().
 //
 // Usage example:
 //   tcx::lut::Lut3D lut;
 //   lut.load("luts/cinematic.cube");   // relative: bin/data/luts/ (getDataPath)
 //
-//   // In shader, sample using: texture(lut3D, color.rgb)
+//   Color graded = lut.apply(Color(0.25f, 0.5f, 0.75f));
 //
 // =============================================================================
 
@@ -41,7 +42,7 @@ using namespace tc;
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
-// Lut3D class - 3D LUT texture for color grading
+// Lut3D retains its name for compatibility; load() also accepts 1D LUTs.
 // ---------------------------------------------------------------------------
 class Lut3D {
 public:
@@ -71,6 +72,7 @@ public:
 
     // Load from .cube file. Relative paths resolve via getDataPath, like
     // Image::load.
+    // Accepts LUT_1D_SIZE, LUT_3D_SIZE, or both (1D rows first).
     // Range metadata must declare the default 0..1 input domain. Resolve's
     // LUT_IN_VIDEO_RANGE / LUT_OUT_VIDEO_RANGE flags are unsupported.
     // OOM recovery holds in Release, or with iterator debugging off
@@ -108,14 +110,25 @@ public:
             std::string title = parsed.title.empty() ? pathToUtf8(path.stem()) : std::move(parsed.title);
             Lut3D prepared;
             prepared.filter_ = filter_;
-            prepared.allocateDocument(parsed.side, parsed.rgb.data(), &path);
+            const float identity[] = {0,0,0, 1,0,0, 0,1,0, 1,1,0,
+                                      0,0,1, 1,0,1, 0,1,1, 1,1,1};
+            prepared.allocateDocument(parsed.side ? parsed.side : 2,
+                                      parsed.side ? parsed.rgb.data() : identity, &path);
             if (!prepared.isAllocated()) return false;
+            if (parsed.curveSize && !prepared.allocateCurve(parsed.curveSize, parsed.curve.data(), &path)) return false;
+            prepared.size_ = parsed.side;
             prepared.title_.swap(title);
             std::swap(image_, prepared.image_);
             std::swap(view_, prepared.view_);
             std::swap(sampler_, prepared.sampler_);
             std::swap(size_, prepared.size_);
             std::swap(allocated_, prepared.allocated_);
+            std::swap(curveImage_, prepared.curveImage_);
+            std::swap(curveView_, prepared.curveView_);
+            std::swap(curveSampler_, prepared.curveSampler_);
+            std::swap(curveSize_, prepared.curveSize_);
+            curve_.swap(prepared.curve_);
+            rgba_.swap(prepared.rgba_);
             title_.swap(prepared.title_);
             return true;
         } catch (const std::exception&) {
@@ -195,6 +208,60 @@ private:
             return;
         }
         allocated_ = true;
+        rgba_.swap(rgba);
+        // Bind an identity curve for 3D-only LUTs as well, so every shader
+        // binding is valid on all backends. The size uniform skips this stage.
+        const float identityCurve[] = {0,0,0, 1,1,1};
+        try {
+            if (!allocateCurve(2, identityCurve, sourcePath)) { clear(); return; }
+        } catch (const std::exception&) {
+            internal::reportImportError("Lut3D", "cannot allocate 1D LUT conversion", sourcePath);
+            clear(); return;
+        }
+        curveSize_ = 0;
+    }
+
+    bool allocateCurve(int size, const float* data, const fs::path* sourcePath) {
+        // Bound (gpu): the 1D table is an Nx1 texture and must fit the active device.
+        if (size > sg_query_limits().max_image_size_2d) {
+            internal::reportImportError("Lut3D", "1D LUT dimensions exceed the texture range", sourcePath);
+            return false;
+        }
+        std::vector<float> curve(data, data + size_t(size) * 3);
+        std::vector<float> rgba(size_t(size) * 4, 1.0f);
+        for (int i = 0; i < size; ++i)
+            for (size_t channel = 0; channel < 3; ++channel)
+                rgba[size_t(i) * 4 + channel] = curve[size_t(i) * 3 + channel];
+        sg_image_desc desc = {};
+        desc.width = size;
+        desc.height = 1;
+        desc.pixel_format = SG_PIXELFORMAT_RGBA32F;
+        desc.data = {rgba.data(), rgba.size() * sizeof(float)};
+        desc.label = "lut1d_image";
+        sg_image image = sg_make_image(&desc);
+        sg_view_desc viewDesc = {};
+        viewDesc.texture.image = image;
+        sg_view view = sg_make_view(&viewDesc);
+        sg_sampler_desc samplerDesc = {};
+        samplerDesc.min_filter = SG_FILTER_NEAREST;
+        samplerDesc.mag_filter = SG_FILTER_NEAREST;
+        samplerDesc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+        samplerDesc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        sg_sampler sampler = sg_make_sampler(&samplerDesc);
+        if (sg_query_image_state(image) != SG_RESOURCESTATE_VALID ||
+            sg_query_view_state(view) != SG_RESOURCESTATE_VALID ||
+            sg_query_sampler_state(sampler) != SG_RESOURCESTATE_VALID) {
+            sg_destroy_sampler(sampler); sg_destroy_view(view); sg_destroy_image(image);
+            internal::reportImportError("Lut3D", "failed to create 1D LUT texture", sourcePath);
+            return false;
+        }
+        if (curveImage_.id) {
+            sg_destroy_sampler(curveSampler_); sg_destroy_view(curveView_); sg_destroy_image(curveImage_);
+        }
+        curveImage_ = image; curveView_ = view; curveSampler_ = sampler;
+        curveSize_ = size;
+        curve_.swap(curve);
+        return true;
     }
 
 public:
@@ -202,6 +269,9 @@ public:
     // Release resources
     void clear() {
         if (allocated_) {
+            sg_destroy_sampler(curveSampler_);
+            sg_destroy_view(curveView_);
+            sg_destroy_image(curveImage_);
             sg_destroy_sampler(sampler_);
             sg_destroy_view(view_);
             sg_destroy_image(image_);
@@ -212,6 +282,8 @@ public:
         image_ = {};
         view_ = {};
         sampler_ = {};
+        curveImage_ = {}; curveView_ = {}; curveSampler_ = {}; curveSize_ = 0;
+        curve_.clear(); rgba_.clear();
     }
 
     // =========================================================================
@@ -219,8 +291,49 @@ public:
     // =========================================================================
 
     bool isAllocated() const { return allocated_; }
+    // 3D side length, or zero for a 1D-only or empty LUT.
     int getSize() const { return size_; }
     const std::string& getTitle() const { return title_; }
+
+    // Apply the loaded table(s) to finite RGB input, clamped to 0..1 at each
+    // stage. Alpha is preserved. An empty LUT returns the input unchanged.
+    // 1D uses per-channel linear interpolation. 3D follows setFilter(), with
+    // the same RGBA8 table quantization as the GPU path.
+    Color apply(const Color& color) const {
+        if (!allocated_) return color;
+        float values[] = {color.r, color.g, color.b};
+        if (curveSize_) {
+            for (size_t channel = 0; channel < 3; ++channel) {
+                const float position = std::clamp(values[channel], 0.0f, 1.0f) * (curveSize_ - 1);
+                const int lower = int(position);
+                const int upper = std::min(lower + 1, curveSize_ - 1);
+                const float fraction = position - lower;
+                values[channel] = curve_[size_t(lower) * 3 + channel] * (1 - fraction) +
+                                  curve_[size_t(upper) * 3 + channel] * fraction;
+            }
+        }
+        if (size_) {
+            int lower[3], upper[3];
+            float fraction[3];
+            for (size_t channel = 0; channel < 3; ++channel) {
+                const float position = std::clamp(values[channel], 0.0f, 1.0f) * (size_ - 1);
+                lower[channel] = filter_ == TextureFilter::Nearest ? int(std::floor(position + 0.5f)) : int(position);
+                upper[channel] = std::min(lower[channel] + 1, size_ - 1);
+                fraction[channel] = filter_ == TextureFilter::Nearest ? 0.0f : position - lower[channel];
+            }
+            std::fill(std::begin(values), std::end(values), 0.0f);
+            for (int b = 0; b < 2; ++b) for (int g = 0; g < 2; ++g) for (int r = 0; r < 2; ++r) {
+                const float weight = (r ? fraction[0] : 1 - fraction[0]) *
+                                     (g ? fraction[1] : 1 - fraction[1]) *
+                                     (b ? fraction[2] : 1 - fraction[2]);
+                const size_t index = ((size_t(b ? upper[2] : lower[2]) * size_ +
+                                      (g ? upper[1] : lower[1])) * size_ + (r ? upper[0] : lower[0])) * 4;
+                for (size_t channel = 0; channel < 3; ++channel)
+                    values[channel] += weight * (rgba_[index + channel] / 255.0f);
+            }
+        }
+        return Color(values[0], values[1], values[2], color.a);
+    }
 
     // =========================================================================
     // Filter settings
@@ -244,9 +357,16 @@ public:
     sg_sampler getSampler() const { return sampler_; }
 
 private:
+    friend class LutShader;
     sg_image image_ = {};
     sg_view view_ = {};
     sg_sampler sampler_ = {};
+    sg_image curveImage_ = {};
+    sg_view curveView_ = {};
+    sg_sampler curveSampler_ = {};
+    int curveSize_ = 0;
+    std::vector<float> curve_;
+    std::vector<unsigned char> rgba_;
 
     int size_ = 0;
     std::string title_;
@@ -278,12 +398,16 @@ private:
         title_ = std::move(other.title_);
         allocated_ = other.allocated_;
         filter_ = other.filter_;
+        curveImage_ = other.curveImage_; curveView_ = other.curveView_; curveSampler_ = other.curveSampler_;
+        curveSize_ = other.curveSize_;
+        curve_ = std::move(other.curve_); rgba_ = std::move(other.rgba_);
 
         other.image_ = {};
         other.view_ = {};
         other.sampler_ = {};
         other.size_ = 0;
         other.allocated_ = false;
+        other.curveImage_ = {}; other.curveView_ = {}; other.curveSampler_ = {}; other.curveSize_ = 0;
     }
 };
 
@@ -767,7 +891,7 @@ public:
     // sx, sy, sw, sh: source rectangle (in texture coordinates)
     void drawSubsection(float x, float y, float w, float h,
                         float sx, float sy, float sw, float sh) {
-        if (!loaded || !currentLut || !sourceView.id) return;
+        if (!loaded || !currentLut || !currentLut->isAllocated() || !sourceView.id) return;
 
         // Ensure render pass is active
         internal::ensureCurrentPass();
@@ -795,6 +919,8 @@ public:
         bind.views[1] = currentLut->getView();
         bind.samplers[0] = sourceSampler;
         bind.samplers[1] = currentLut->getSampler();
+        bind.views[2] = currentLut->curveView_;
+        bind.samplers[2] = currentLut->curveSampler_;
         sg_apply_bindings(&bind);
 
         // Calculate UV coordinates for subsection
@@ -807,7 +933,7 @@ public:
         float uniforms[8] = {
             (float)currentLut->getSize(),  // lutSize
             blend,                          // blend
-            0, 0,                           // padding
+            (float)currentLut->curveSize_, 0, // curveSize, padding
             u0, v0, u1 - u0, v1 - v0        // viewport (UV offset and scale)
         };
         sg_range range = { uniforms, sizeof(uniforms) };
@@ -874,6 +1000,8 @@ protected:
         if (currentLut && currentLut->isAllocated()) {
             bind.views[1] = currentLut->getView();
             bind.samplers[1] = currentLut->getSampler();
+            bind.views[2] = currentLut->curveView_;
+            bind.samplers[2] = currentLut->curveSampler_;
         }
     }
 

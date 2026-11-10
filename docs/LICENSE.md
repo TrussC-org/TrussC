@@ -59,7 +59,18 @@ This is the one list of third-party code in TrussC and the version the build use
 | **pugixml** | 1.16 | `core/include/pugixml/` | https://github.com/zeux/pugixml | MIT | Arseny Kapoulkine |
 | **cpp-httplib** | 0.18.3 | `core/include/impl/httplib.h` ([upstream checksum](../core/include/impl/HTTPLIB_PATCHES.md)) | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
 | **LZ4** | 1.10.0 | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
+| **Highway** | 1.2.0, commit `457c891775a7397bdb0376bb1031e6e027af1c48` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
 | **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
+
+### System JPEG dependency (Linux)
+
+Linux links the distribution's libjpeg-turbo through its classic libjpeg API
+(`pkg-config libjpeg`); TrussC does not bundle it. Its permissive license summary
+is **IJG + Modified BSD + zlib**. The installed version and full license texts
+come from the distribution package (`libjpeg-dev`). Applications distributing
+libjpeg-turbo binaries should retain the applicable upstream notices.
+
+> This software is based in part on the work of the Independent JPEG Group
 
 ### Build Tools
 
@@ -187,6 +198,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+### Apache-2.0 / BSD-3-Clause (Highway)
+
+Highway's upstream license files are retained in
+[LICENSE](../core/3rdparty/highway/LICENSE) and
+[LICENSE-BSD3](../core/3rdparty/highway/LICENSE-BSD3).
+See each source file's SPDX identifiers for the applicable license.
 
 ### Apache-2.0 / GPL-2.0-or-later (mbedTLS)
 

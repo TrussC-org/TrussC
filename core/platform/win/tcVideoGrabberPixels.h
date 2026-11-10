@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include "../../include/tc/utils/tcSimd.h"
 
 namespace trussc::internal {
 
@@ -25,12 +26,7 @@ inline bool copyGrabberRGB32(unsigned char* dst, const unsigned char* src,
         const int sourceY = stride < 0 ? height - 1 - y : y;
         const auto* srcRow = src + static_cast<std::size_t>(sourceY) * pitch;
         auto* dstRow = dst + static_cast<std::size_t>(y) * rowBytes;
-        for (std::size_t x = 0; x < rowBytes; x += 4) {
-            dstRow[x + 0] = srcRow[x + 2];
-            dstRow[x + 1] = srcRow[x + 1];
-            dstRow[x + 2] = srcRow[x + 0];
-            dstRow[x + 3] = 255;
-        }
+        simd::bgraToRgba(srcRow, dstRow, static_cast<std::size_t>(width), true);
     }
     return true;
 }

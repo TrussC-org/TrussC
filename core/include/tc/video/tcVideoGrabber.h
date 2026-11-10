@@ -29,6 +29,7 @@
 #include "tc/utils/tcMainThread.h"
 #include "tc/events/tcEvent.h"
 #include "tc/events/tcEventArgs.h"
+#include "tcGrabberSelection.h"
 
 namespace trussc {
 
@@ -57,6 +58,49 @@ struct VideoDeviceInfo {
 struct GrabberFrame {
     Pixels pixels;             // RGBA8 (carries its own width/height/channels)
     uint64_t timestampUs = 0;  // steady_clock, microseconds since epoch of that clock
+};
+
+namespace internal { struct GrabberSharedState; }
+
+// Borrowed tight RGBA8, valid only during an onFrame listener call.
+struct TC_LUA_SKIP VideoFrameView {
+    const unsigned char* pixels = nullptr;
+    size_t byteSize = 0;
+    int width = 0;
+    int height = 0;
+    PixelFormat format = PixelFormat::U8;
+    int channels = 4;
+    // steady_clock arrival time, before conversion; interval math only.
+    uint64_t timestampUs = 0;
+
+private:
+    friend struct internal::GrabberSharedState;
+    friend class VideoFrameEvent;
+    const std::atomic<bool>* stopped_ = nullptr;
+};
+
+// Event storage and RAII listeners, with inline delivery only.
+class TC_LUA_SKIP VideoFrameEvent {
+public:
+    VideoFrameEvent() = default;
+    VideoFrameEvent(const VideoFrameEvent&) = delete;
+    VideoFrameEvent& operator=(const VideoFrameEvent&) = delete;
+    using Callback = std::function<void(const VideoFrameView&)>;
+    [[nodiscard]] EventListener listen(Callback callback, int priority = EventPriority::App) {
+        return event_->listen([callback = std::move(callback)](const VideoFrameView& frame) {
+            if (!frame.stopped_->load()) callback(frame);
+        }, priority);
+    }
+
+    [[nodiscard]] EventListener listen(Callback callback, internal::VideoFrameDelivery,
+                                       int priority = EventPriority::App) {
+        return listen(std::move(callback), priority);
+    }
+
+private:
+    friend class VideoGrabber;
+    std::shared_ptr<Event<const VideoFrameView>> event_ =
+        std::make_shared<Event<const VideoFrameView>>();
 };
 
 namespace internal {
@@ -127,6 +171,24 @@ struct GrabberSharedState {
     std::atomic<bool> stopped{false};
     std::unique_ptr<unsigned char[]> pixels;
     GrabberFrameQueue frameQueue;
+    // Retained Event storage, never a pointer to the public grabber. Moves
+    // rebind this target atomically; an in-flight dispatch owns its snapshot.
+    AtomicSharedPtr<Event<const VideoFrameView>> frameEvent;
+
+    void notifyFrame(const unsigned char* rgba, int w, int h, uint64_t tUs) {
+        if (stopped.load()) return;
+        const auto delivery = sharedLoad(frameEvent);
+        if (!delivery) return;
+        VideoFrameView frame;
+        frame.pixels = rgba;
+        frame.byteSize = size_t(w) * h * 4;
+        frame.width = w;
+        frame.height = h;
+        frame.timestampUs = tUs;
+        frame.stopped_ = &stopped;
+        delivery->notify(frame);
+    }
+
     std::shared_ptr<void> platformData;
     int width = 0;
     int height = 0;
@@ -195,6 +257,16 @@ public:
     // index.
     void setDeviceID(int deviceId) {
         deviceId_ = deviceId;
+        useDeviceUniqueId_ = false;
+        deviceUniqueId_.clear();
+        reopenName_.clear();
+    }
+
+    // Resolve this exact ID in a fresh listDevices() on every setup().
+    // The last of setDeviceID() / setDeviceUniqueID() wins. Missing IDs fail.
+    void setDeviceUniqueID(const std::string& uniqueId) {
+        deviceUniqueId_ = uniqueId;
+        useDeviceUniqueId_ = true;
         reopenName_.clear();
     }
 
@@ -232,13 +304,28 @@ public:
     // grabber they were added to: a move does not carry them over.
     Event<DeviceDisconnectEventArgs> onDisconnect;
 
+    // Capture thread, immediately after conversion and before latest-frame
+    // publication/FIFO push, outside their locks. No pixel copy. Supported on
+    // macOS/iOS/Windows/Linux; never fires on Web/Android (no warning).
+    // Keep the EventListener. Register before setup(), which can start capture.
+    // Borrowed pixels/view expire on return; copy anything you keep. CPU only:
+    // no GPU/Node work, main-thread waits, or grabber lifecycle/update/resize
+    // calls from a listener. Concurrent lifecycle calls are unsupported.
+    // Return without throwing; a slow listener delays capture. Synchronize
+    // shared app data. Disconnect is not a barrier; close() from the main
+    // thread waits for running callbacks before releasing capture buffers.
+    // Listeners survive close()/setup(), and stay with their original handle
+    // across moves, like onDisconnect. Main-thread consumers use the FIFO.
+    TC_PLATFORMS("macos,windows,linux,ios") TC_LUA_SKIP VideoFrameEvent onFrame;
+
     // =========================================================================
     // Setup / Close
     // =========================================================================
 
     // Start the camera at the requested size: the camera with the name
     // remembered from the last successful open, or, before any, the one chosen
-    // by setDeviceID() (device 0 by default). An open camera is closed first,
+    // by setDeviceID() (device 0 by default). setDeviceUniqueID() overrides
+    // this with an exact ID lookup on every setup(). An open camera is closed first,
     // without onDisconnect.
     // If permission is not granted, requests it and returns false.
     // Call update() every frame - it will automatically initialize once permission is granted.
@@ -268,6 +355,8 @@ public:
     // Before any successful open it uses the setDeviceID() index (device 0 at
     // 640x480 by default). setDeviceID() forgets the remembered name. Two
     // cameras with the same name can't be told apart: the first one opens.
+    // With setDeviceUniqueID(), setup() always resolves that exact ID instead
+    // of the remembered name, and fails if it is absent.
     // This is the reconnect call:
     //   if (!grabber.isConnected() && getElapsedTime() - lastTry > 2.0f) { lastTry = getElapsedTime(); grabber.setup(); }
     // Returns false and logs an error when the camera cannot be opened, also
@@ -297,7 +386,7 @@ public:
             texture_.clear();
         }
         // The last callback releases the old run, including its pixel buffer.
-        state_ = std::make_shared<internal::GrabberSharedState>();
+        state_ = makeState();
 
         setFrameQueueSize(queueSize);
         initialized_ = false;
@@ -394,7 +483,7 @@ public:
     // When full, the oldest frame is dropped. Sizing hint: keep it at least
     // ceil(cameraFps / appFps) + a little headroom; 8-16 is plenty.
     // Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
-    TC_PLATFORMS("macos,windows,linux") void setFrameQueueSize(size_t maxFrames) {
+    TC_PLATFORMS("macos,windows,linux,ios") void setFrameQueueSize(size_t maxFrames) {
         state_->frameQueue.maxFrames.store(maxFrames, std::memory_order_relaxed);
         if (maxFrames == 0) {
             std::lock_guard<std::mutex> lock(state_->frameQueue.mtx);
@@ -403,14 +492,14 @@ public:
     }
 
     // Camera frames can outpace a stalled reader; an opt-in cap keeps queued frame memory finite. Overflow drops the oldest frame.
-    TC_PLATFORMS("macos,windows,linux") size_t getFrameQueueSize() const {
+    TC_PLATFORMS("macos,windows,linux,ios") size_t getFrameQueueSize() const {
         return state_->frameQueue.maxFrames.load(std::memory_order_relaxed);
     }
 
     // Drain all frames captured since the last call (appended to out, oldest
     // first). Returns the number of frames appended. Frames are moved out of
     // the internal queue, so each frame is delivered exactly once.
-    TC_PLATFORMS("macos,windows,linux") size_t getQueuedFrames(std::vector<GrabberFrame>& out) {
+    TC_PLATFORMS("macos,windows,linux,ios") size_t getQueuedFrames(std::vector<GrabberFrame>& out) {
         std::lock_guard<std::mutex> lock(state_->frameQueue.mtx);
         size_t n = state_->frameQueue.frames.size();
         for (auto& f : state_->frameQueue.frames) out.push_back(std::move(f));
@@ -452,6 +541,8 @@ private:
     friend struct internal::VideoGrabberTestAccess;
 
     int deviceId_ = 0;
+    std::string deviceUniqueId_;
+    bool useDeviceUniqueId_ = false;
     int desiredFrameRate_ = -1;  // -1 = unspecified (camera default)
     int lastWidth_ = 640;        // size of the last setup(), for setup()
     int lastHeight_ = 480;
@@ -465,7 +556,7 @@ private:
     std::string reopenName_;     // listDevices() name of the last opened camera; setDeviceID() clears it
 
     std::shared_ptr<internal::GrabberSharedState> state_ =
-        std::make_shared<internal::GrabberSharedState>();
+        makeState();
 
     // Texture (Stream mode)
     Texture texture_;
@@ -474,8 +565,16 @@ private:
     // Internal methods
     // -------------------------------------------------------------------------
 
+    std::shared_ptr<internal::GrabberSharedState> makeState() {
+        auto state = std::make_shared<internal::GrabberSharedState>();
+        internal::sharedStore(state->frameEvent, onFrame.event_);
+        return state;
+    }
+
     void moveFrom(VideoGrabber&& other) {
         deviceId_ = other.deviceId_;
+        deviceUniqueId_ = std::move(other.deviceUniqueId_);
+        useDeviceUniqueId_ = other.useDeviceUniqueId_;
         desiredFrameRate_ = other.desiredFrameRate_;
         lastWidth_ = other.lastWidth_;
         lastHeight_ = other.lastHeight_;
@@ -486,7 +585,8 @@ private:
         deviceName_ = std::move(other.deviceName_);
         reopenName_ = std::move(other.reopenName_);
         state_ = std::move(other.state_);
-        other.state_ = std::make_shared<internal::GrabberSharedState>();
+        internal::sharedStore(state_->frameEvent, onFrame.event_);
+        other.state_ = other.makeState();
         texture_ = std::move(other.texture_);
 
         // Invalidate source object
@@ -510,9 +610,20 @@ private:
 
     // Complete setup after permission is granted
     bool completeSetup() {
-        // Resolve the camera in a fresh device list: the remembered name wins
-        // over the index, which can point at another camera after a replug.
-        auto pick = internal::pickGrabberDevice(listDevices(), reopenName_, deviceId_);
+        // Resolve an explicit unique ID first. Otherwise preserve the existing
+        // remembered-name selection when indices change after a replug.
+        auto devices = listDevices();
+        internal::GrabberDevicePick pick;
+        if (useDeviceUniqueId_) {
+            pick.index = internal::resolveGrabberUniqueID(devices, deviceUniqueId_);
+            if (pick.index < 0) {
+                logError("VideoGrabber") << "No camera with unique ID \"" << deviceUniqueId_ << "\" is present";
+                return false;
+            }
+            pick = internal::pickGrabberDevice(devices, "", pick.index);
+        } else {
+            pick = internal::pickGrabberDevice(devices, reopenName_, deviceId_);
+        }
         if (!pick.ok) {
             logError("VideoGrabber") << "No camera named \"" << reopenName_ << "\" is present";
             return false;

@@ -57,7 +57,7 @@ namespace trussc {
 
 namespace {
 // Main thread only: backend request used to open the persistent context.
-bool g_engineNullBackendRequested = false;
+AudioBackend g_engineBackendRequested = AudioBackend::Default;
 
 std::atomic<int> g_audioDeviceFault{0};
 
@@ -113,10 +113,8 @@ ma_uint64 streamDecoderLength(ma_decoder& decoder, bool nativeRate = false) {
     return frames;
 }
 
-const ma_backend kNullBackend = ma_backend_null;
-
 // ma_context_init with miniaudio's default backend order for the platform,
-// or only the explicitly requested null backend.
+// or only the explicitly requested backend (no fallback).
 ma_result initContext(ma_context* ctx, bool probe = false,
                       AudioBackend backend = AudioBackend::Default) {
     ma_context_config cfg = ma_context_config_init();
@@ -128,14 +126,116 @@ ma_result initContext(ma_context* ctx, bool probe = false,
         cfg.coreaudio.sessionCategory = ma_ios_session_category_none;
         cfg.coreaudio.noAudioSessionActivate = MA_TRUE;
     }
-    if (backend == AudioBackend::Null) {
-        return ma_context_init(&kNullBackend, 1, &cfg, ctx);
+    if (backend != AudioBackend::Default) {
+        const ma_backend requested = internal::audioBackendToMA(backend);
+        return ma_context_init(&requested, 1, &cfg, ctx);
     }
     return ma_context_init(NULL, 0, &cfg, ctx);
 }
 } // namespace
 
 namespace internal {
+ma_backend audioBackendToMA(AudioBackend backend) {
+    switch (backend) {
+        case AudioBackend::Null: return ma_backend_null;
+        case AudioBackend::WASAPI: return ma_backend_wasapi;
+        case AudioBackend::DirectSound: return ma_backend_dsound;
+        case AudioBackend::WinMM: return ma_backend_winmm;
+        case AudioBackend::CoreAudio: return ma_backend_coreaudio;
+        case AudioBackend::PulseAudio: return ma_backend_pulseaudio;
+        case AudioBackend::ALSA: return ma_backend_alsa;
+        case AudioBackend::JACK: return ma_backend_jack;
+        case AudioBackend::AAudio: return ma_backend_aaudio;
+        case AudioBackend::OpenSLES: return ma_backend_opensl;
+        case AudioBackend::WebAudio: return ma_backend_webaudio;
+        default: return ma_backend_custom; // Default is handled by initContext.
+    }
+}
+AudioBackend audioBackendFromMA(ma_backend backend) {
+    switch (backend) {
+        case ma_backend_null: return AudioBackend::Null;
+        case ma_backend_wasapi: return AudioBackend::WASAPI;
+        case ma_backend_dsound: return AudioBackend::DirectSound;
+        case ma_backend_winmm: return AudioBackend::WinMM;
+        case ma_backend_coreaudio: return AudioBackend::CoreAudio;
+        case ma_backend_pulseaudio: return AudioBackend::PulseAudio;
+        case ma_backend_alsa: return AudioBackend::ALSA;
+        case ma_backend_jack: return AudioBackend::JACK;
+        case ma_backend_aaudio: return AudioBackend::AAudio;
+        case ma_backend_opensl: return AudioBackend::OpenSLES;
+        case ma_backend_webaudio: return AudioBackend::WebAudio;
+        default: return AudioBackend::Default;
+    }
+}
+std::string audioDeviceUniqueId(ma_backend backend, const ma_device_id& id) {
+    switch (backend) {
+        case ma_backend_wasapi:
+#ifdef _WIN32
+            return pathToUtf8(fs::path(id.wasapi));
+#else
+            return {}; // WASAPI is unavailable outside Windows.
+#endif
+        case ma_backend_dsound: {
+            static constexpr char digits[] = "0123456789abcdef";
+            std::string guid;
+            for (auto byte : id.dsound) {
+                guid += digits[byte >> 4];
+                guid += digits[byte & 15];
+            }
+            return guid;
+        }
+        case ma_backend_winmm: return std::to_string(id.winmm);
+        case ma_backend_coreaudio: return id.coreaudio;
+        case ma_backend_pulseaudio: return id.pulse;
+        case ma_backend_alsa: return id.alsa;
+        case ma_backend_jack: return std::to_string(id.jack);
+        case ma_backend_aaudio: return std::to_string(id.aaudio);
+        case ma_backend_opensl: return std::to_string(id.opensl);
+        case ma_backend_webaudio: return id.webaudio;
+        case ma_backend_sndio: return id.sndio;
+        case ma_backend_audio4: return id.audio4;
+        case ma_backend_oss: return id.oss;
+        case ma_backend_null: return std::to_string(id.nullbackend);
+        default: return {};
+    }
+}
+AudioDeviceInfo audioDeviceInfo(ma_backend backend, const ma_device_info& info) {
+    AudioDeviceInfo result;
+    result.name = info.name;
+    result.isDefault = info.isDefault != 0;
+    result.uniqueId = audioDeviceUniqueId(backend, info.id);
+    result.backend = audioBackendFromMA(backend);
+    for (ma_uint32 i = 0; i < info.nativeDataFormatCount; ++i) {
+        const auto& format = info.nativeDataFormats[i];
+        result.channels = std::max(result.channels, static_cast<int>(format.channels));
+        if (format.sampleRate != 0)
+            result.sampleRates.push_back(static_cast<int>(format.sampleRate));
+    }
+    std::sort(result.sampleRates.begin(), result.sampleRates.end());
+    result.sampleRates.erase(std::unique(result.sampleRates.begin(), result.sampleRates.end()),
+                             result.sampleRates.end());
+    return result;
+}
+bool findAudioDevice(ma_context* context, ma_device_type direction,
+                     const AudioDeviceInfo* device, const std::string& name,
+                     ma_device_id& selectedID) {
+    if (device && (device->uniqueId.empty() || device->backend != audioBackendFromMA(context->backend)))
+        return false;
+    ma_device_info* infos = nullptr;
+    ma_uint32 count = 0;
+    const auto status = direction == ma_device_type_playback
+        ? ma_context_get_devices(context, &infos, &count, nullptr, nullptr)
+        : ma_context_get_devices(context, nullptr, nullptr, &infos, &count);
+    if (status != MA_SUCCESS) return false;
+    for (ma_uint32 i = 0; i < count; ++i) {
+        if (device ? device->uniqueId == audioDeviceUniqueId(context->backend, infos[i].id)
+                   : name == infos[i].name) {
+            selectedID = infos[i].id;
+            return true;
+        }
+    }
+    return false;
+}
 bool openedDeviceIsDefault(const ma_device_id* selectedID,
                            const ma_device_info* infos, ma_uint32 count) {
     // Some backends leave playback.id zeroed when opening the default.
@@ -264,7 +364,7 @@ struct AudioDiagnostics {
     // release the device, so the stop that releasing causes is dropped, and so
     // is a loss the app has already reopened or closed.
     std::atomic<bool> lossPending{false};
-    // The device was opened by name (AudioSettings::deviceName found), not as
+    // The device was explicitly selected (by object or name), rather than as
     // the system default. Only such a device reports a loss. init() sets it
     // before the device exists; the notification thread reads it.
     std::atomic<bool> openedByName{false};
@@ -598,10 +698,10 @@ AudioDeviceReport audioDeviceReport(bool enumerate) {
                                           &capture, &captureCount) == MA_SUCCESS) {
             r.enumerated = true;
             for (ma_uint32 i = 0; i < playbackCount; ++i) {
-                r.playbackDevices.push_back({playback[i].name, playback[i].isDefault != 0});
+                r.playbackDevices.push_back(audioDeviceInfo(ctx->backend, playback[i]));
             }
             for (ma_uint32 i = 0; i < captureCount; ++i) {
-                r.captureDevices.push_back({capture[i].name, capture[i].isDefault != 0});
+                r.captureDevices.push_back(audioDeviceInfo(ctx->backend, capture[i]));
             }
         }
         if (tempInit) ma_context_uninit(&temp);
@@ -2024,6 +2124,8 @@ bool AudioEngine::init() {
 }
 
 bool AudioEngine::init(const AudioSettings& settings) {
+    // Capture is independent of output, including when output init fails.
+    inputNotifyEnabled_.store(true); // seq_cst, paired with capture admission
     // A device that stopped by itself is still allocated until its loss is
     // delivered: re-init releases it like a running one (voices move over the
     // same way).
@@ -2037,7 +2139,8 @@ bool AudioEngine::init(const AudioSettings& settings) {
         // preserve their playback position.
         logNotice("AudioEngine") << "re-initializing (" << sampleRate_ << " Hz, " << channels_
                                  << " ch -> " << settings.sampleRate << " Hz, "
-                                 << settings.channels << " ch, dev='" << settings.deviceName << "')";
+                                 << settings.channels << " ch, dev='"
+                                 << (settings.device ? settings.device->name : settings.deviceName) << "')";
 
         if (device_) {
             ma_device* device = static_cast<ma_device*>(device_);
@@ -2103,8 +2206,10 @@ bool AudioEngine::init(const AudioSettings& settings) {
     // every device init/uninit cycle keeps CoreAudio's internal state
     // consistent on macOS — without it, the second ma_device_uninit in a
     // tight cycle hangs waiting for the audio thread to join.
-    const bool nullRequested = settings.backend == AudioBackend::Null;
-    if (context_ && nullRequested != g_engineNullBackendRequested) {
+    const AudioBackend requestedBackend = settings.device ? settings.device->backend : settings.backend;
+    const auto* requestedDevice = settings.device ? &*settings.device : nullptr;
+    const std::string requestedName = requestedDevice ? requestedDevice->name : settings.deviceName;
+    if (context_ && requestedBackend != g_engineBackendRequested) {
         auto* ctx = static_cast<ma_context*>(context_);
         ma_context_uninit(ctx);
         delete ctx;
@@ -2112,53 +2217,37 @@ bool AudioEngine::init(const AudioSettings& settings) {
     }
     if (!context_) {
         ma_context* ctx = new ma_context();
-        ma_result ctxResult = initContext(ctx, false, settings.backend);
+        ma_result ctxResult = initContext(ctx, false, requestedBackend);
         if (ctxResult != MA_SUCCESS) {
-            diag_->recordInitFailure(AudioInitFailure::NoBackend, ctxResult, -1, settings.deviceName);
-            logError("AudioEngine") << "no audio backend available (ma_context_init result="
-                                    << (int)ctxResult
-                                    << (settings.deviceName.empty() ? std::string()
-                                        : ", requested device '" + settings.deviceName + "'")
-                                    << "); sounds will not play";
             delete ctx;
+            diag_->recordInitFailure(AudioInitFailure::NoBackend, ctxResult, -1, requestedName);
+            logWarning("AudioEngine") << "no audio backend available (ma_context_init result="
+                                    << (int)ctxResult
+                                    << (requestedName.empty() ? std::string()
+                                        : ", requested device '" + requestedName + "'")
+                                    << "); sounds will not play";
             return false;
         }
         context_ = ctx;
-        g_engineNullBackendRequested = nullRequested;
+        g_engineBackendRequested = requestedBackend;
     }
     ma_context* ctxArg = static_cast<ma_context*>(context_);
 
-    // Device selection — if the caller specified a deviceName, look it up
-    // via the persistent context. Empty string = system default.
-    ma_device_id  selectedDeviceID;
+    // Object selection owns its backend and wins over the legacy name.
+    ma_device_id selectedDeviceID{};
     ma_device_id* deviceIDPtr = nullptr;
-    if (!settings.deviceName.empty()) {
-        ma_device_info* infos = nullptr;
-        ma_uint32 count = 0;
-        if (ma_context_get_devices(ctxArg, &infos, &count, NULL, NULL) == MA_SUCCESS) {
-            for (ma_uint32 i = 0; i < count; ++i) {
-                if (settings.deviceName == infos[i].name) {
-                    selectedDeviceID = infos[i].id;
-                    deviceIDPtr = &selectedDeviceID;
-                    break;
-                }
-            }
+    if (requestedDevice || !settings.deviceName.empty()) {
+        if (!internal::findAudioDevice(ctxArg, ma_device_type_playback, requestedDevice,
+                                       settings.deviceName, selectedDeviceID)) {
+            diag_->recordInitFailure(AudioInitFailure::DeviceOpen, MA_NO_DEVICE, ctxArg->backend, requestedName);
+            // Log listeners can synchronously shut down and delete the context.
+            logWarning("AudioEngine") << "output device '" << requestedName << "' not found; initialization failed";
+            return false;
         }
-        if (!deviceIDPtr) {
-            logWarning("AudioEngine") << "device '" << settings.deviceName
-                                      << "' not found, using the system default";
-        }
+        deviceIDPtr = &selectedDeviceID;
     }
-
-    // How the failure messages below name the device: the requested one, or
-    // the default it fell back to (#279).
-    std::string deviceDesc = "the output device";
-    if (!settings.deviceName.empty()) {
-        deviceDesc = deviceIDPtr
-            ? "the output device '" + settings.deviceName + "'"
-            : "the system default output device (requested '" + settings.deviceName
-              + "' was not found)";
-    }
+    const std::string deviceDesc = requestedDevice || !requestedName.empty()
+        ? "the output device '" + requestedName + "'" : "the output device";
 
     ma_device* device = new ma_device();
     // Before the device exists, so its notifications see the right value
@@ -2180,7 +2269,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
             == (int)internal::AudioDeviceFaultForTests::OpenFails
         ? MA_FAILED_TO_OPEN_BACKEND_DEVICE : ma_device_init(ctxArg, &config, device);
     if (result != MA_SUCCESS) {
-        diag_->recordInitFailure(AudioInitFailure::DeviceOpen, result, ctxArg->backend, settings.deviceName);
+        diag_->recordInitFailure(AudioInitFailure::DeviceOpen, result, ctxArg->backend, requestedName);
         logError("AudioEngine") << "failed to initialize " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         delete device;
@@ -2198,7 +2287,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
     result = ma_device_start(device);
     if (result != MA_SUCCESS) {
         diag_->running.store(false, std::memory_order_release);
-        diag_->recordInitFailure(AudioInitFailure::DeviceStart, result, ctxArg->backend, settings.deviceName);
+        diag_->recordInitFailure(AudioInitFailure::DeviceStart, result, ctxArg->backend, requestedName);
         logError("AudioEngine") << "failed to start " << deviceDesc << " (result="
                                 << (int)result << "); sounds will not play";
         ma_device_uninit(device);
@@ -2211,7 +2300,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
     diag_->initFailureDevice.clear();
     diag_->initFailure.store(0, std::memory_order_relaxed);
 
-    if (g_engineNullBackendRequested) {
+    if (g_engineBackendRequested == AudioBackend::Null) {
         logNotice("AudioEngine") << "audio backend: Null (requested); output is silent";
     }
     logNotice("AudioEngine") << "initialized (" << sampleRate_ << " Hz, " << channels_ << " ch, "
@@ -2222,7 +2311,7 @@ bool AudioEngine::init(const AudioSettings& settings) {
 
     // miniaudio's default backend order ends with the null backend, so with
     // no real backend context init() still succeeds on a silent device.
-    if (ctxArg->backend == ma_backend_null && !g_engineNullBackendRequested) {
+    if (ctxArg->backend == ma_backend_null && g_engineBackendRequested != AudioBackend::Null) {
         logWarning("AudioEngine") << "no usable audio backend; output is silent (miniaudio Null device)";
     }
 
@@ -2263,29 +2352,59 @@ bool AudioEngine::init(const AudioSettings& settings) {
     return true;
 }
 
-std::vector<AudioDeviceInfo> AudioEngine::listDevices() {
+namespace {
+std::vector<AudioDeviceInfo> listAudioDevices(ma_context* context, ma_device_type direction,
+                                               AudioBackend backend) {
     std::vector<AudioDeviceInfo> result;
-
+#ifdef __EMSCRIPTEN__
+    // miniaudio exposes default placeholders, not browser device identities.
+    // Do not present them as selectable physical devices.
+    (void)context; (void)direction; (void)backend;
+#else
     ma_context temporary;
-    auto* context = static_cast<ma_context*>(getInstance().context_);
-    const bool probe = context == nullptr;
+    const bool probe = !context || (backend != AudioBackend::Default &&
+                                    internal::audioBackendToMA(backend) != context->backend);
     if (probe) {
-        if (initContext(&temporary, true) != MA_SUCCESS) return result;
+        if (initContext(&temporary, true, backend) != MA_SUCCESS) {
+            logWarning("Audio") << "cannot enumerate the requested audio backend";
+            return result;
+        }
         context = &temporary;
     }
-
-    ma_device_info* playbackInfos = nullptr;
-    ma_uint32 playbackCount = 0;
-    if (ma_context_get_devices(context, &playbackInfos, &playbackCount,
-                               NULL, NULL) == MA_SUCCESS) {
-        result.reserve(playbackCount);
-        for (ma_uint32 i = 0; i < playbackCount; ++i) {
-            result.push_back({playbackInfos[i].name, playbackInfos[i].isDefault != 0});
+    ma_device_info* infos = nullptr;
+    ma_uint32 count = 0;
+    const auto status = direction == ma_device_type_playback
+        ? ma_context_get_devices(context, &infos, &count, nullptr, nullptr)
+        : ma_context_get_devices(context, nullptr, nullptr, &infos, &count);
+    if (status == MA_SUCCESS) {
+        result.reserve(count);
+        for (ma_uint32 i = 0; i < count; ++i) {
+            ma_device_info details{};
+            const bool detailed = ma_context_get_device_info(context, direction, &infos[i].id, &details) == MA_SUCCESS;
+            // Some backends do not copy basic enumeration fields into details.
+            details.id = infos[i].id;
+            std::strcpy(details.name, infos[i].name);
+            if (!detailed) {
+                details.isDefault = infos[i].isDefault;
+                details.nativeDataFormatCount = 0;
+            }
+            result.push_back(internal::audioDeviceInfo(context->backend, details));
         }
+    } else {
+        if (probe) ma_context_uninit(&temporary);
+        logWarning("Audio") << "audio device enumeration failed (result=" << status << ")";
+        return result;
     }
-
     if (probe) ma_context_uninit(&temporary);
+#endif
     return result;
+}
+} // namespace
+std::vector<AudioDeviceInfo> AudioEngine::listDevices(AudioBackend backend) {
+    return listAudioDevices(static_cast<ma_context*>(getInstance().context_), ma_device_type_playback, backend);
+}
+std::vector<AudioDeviceInfo> MicInput::listDevices(AudioBackend backend) {
+    return listAudioDevices(static_cast<ma_context*>(AudioEngine::getInstance().context_), ma_device_type_capture, backend);
 }
 
 // ---------------------------------------------------------------------------
@@ -2418,6 +2537,7 @@ void AudioEngine::migrateVoicesToNewRate(int oldRate, int newRate) {
 }
 
 void AudioEngine::shutdown() {
+    inputNotifyEnabled_.store(false); // close admission before draining #256
     // Read before the device is released: for a device opened by name, the
     // stop that releasing causes reaches AudioDeviceLoss::stopped(), which
     // clears initialized_ (cleared below for any device).
@@ -2428,6 +2548,7 @@ void AudioEngine::shutdown() {
         delete device;
         device_ = nullptr;
     }
+    waitForCallbacks(false);
     diag_->lossPending.store(false, std::memory_order_release);
     if (context_) {
         ma_context* ctx = static_cast<ma_context*>(context_);
@@ -2607,37 +2728,63 @@ void micNotificationCallback(const ma_device_notification* notification) {
         micStopped(*static_cast<MicState*>(notification->pDevice->pUserData));
 }
 void micDataCallback(ma_device* device, void*, const void* input, ma_uint32 frames) {
-    if (input) static_cast<MicState*>(device->pUserData)->audio(static_cast<const float*>(input), frames);
+    if (input) static_cast<MicState*>(device->pUserData)->capture(static_cast<const float*>(input), frames);
 }
 MicStartResult openMic(MicState& state) {
+    ma_context_config contextConfig = ma_context_config_init();
+    contextConfig.coreaudio.noAudioSessionDeactivate = MA_TRUE;
+    // Synthetic silence is valid only when explicitly requested.
+    std::vector<ma_backend> backends;
+    if (state.selectedDevice)
+        backends.push_back(audioBackendToMA(state.selectedDevice->backend));
+    else if (state.backend >= 0) backends.push_back(static_cast<ma_backend>(state.backend));
+    else for (int backend = 0; backend < ma_backend_null; ++backend)
+        backends.push_back(static_cast<ma_backend>(backend));
+    ma_device_id selectedID{};
+    ma_context* context = nullptr;
+    if (state.selectedDevice) {
+        context = new ma_context();
+        auto result = ma_context_init(backends.data(), static_cast<ma_uint32>(backends.size()), &contextConfig, context);
+        if (result != MA_SUCCESS) {
+            delete context;
+            logWarning("MicInput") << "requested capture backend is unavailable";
+            return {false, "No usable microphone backend (miniaudio result=" + std::to_string(result) + ")"};
+        }
+        if (!findAudioDevice(context, ma_device_type_capture, &*state.selectedDevice, {}, selectedID)) {
+            const std::string name = state.selectedDevice->name;
+            ma_context_uninit(context);
+            delete context;
+            state.startFailureLogged = true;
+            logWarning("MicInput") << "capture device '" << name << "' not found; startup failed";
+            return {false, "Selected capture device not found"};
+        }
+        state.context = context;
+    }
     auto* device = new ma_device();
     ma_device_config config = ma_device_config_init(ma_device_type_capture);
     config.capture.format = ma_format_f32;
     config.capture.channels = 1;
+    config.capture.pDeviceID = state.selectedDevice ? &selectedID : nullptr;
     config.sampleRate = state.sampleRate;
     config.dataCallback = micDataCallback;
     config.notificationCallback = micNotificationCallback;
     config.pUserData = &state;
-    ma_context_config contextConfig = ma_context_config_init();
-    contextConfig.coreaudio.noAudioSessionDeactivate = MA_TRUE;
-    // Match miniaudio's default priority, but synthetic silence is only valid
-    // when the application explicitly requested the Null backend.
-    std::vector<ma_backend> backends;
-    if (state.backend >= 0) backends.push_back(static_cast<ma_backend>(state.backend));
-    else for (int backend = 0; backend < ma_backend_null; ++backend)
-        backends.push_back(static_cast<ma_backend>(backend));
-    auto result = ma_device_init_ex(backends.data(), static_cast<ma_uint32>(backends.size()),
-                                   &contextConfig, &config, device);
+    // Without a device selection, try each backend's context AND device open,
+    // as before. A selected backend still supplies only one entry.
+    auto result = context ? ma_device_init(context, &config, device)
+        : ma_device_init_ex(backends.data(), static_cast<ma_uint32>(backends.size()),
+                            &contextConfig, &config, device);
     if (result != MA_SUCCESS) {
         delete device;
         return {false, "No usable microphone capture device (miniaudio result=" + std::to_string(result) +
             "); connect or enable a microphone and check input permissions"};
     }
     state.device = device;
+    // Publish the granted rate before capture callbacks can read it.
+    state.sampleRate = static_cast<int>(device->sampleRate);
     result = ma_device_start(device);
     if (result != MA_SUCCESS)
         return {false, "Capture device start failed (miniaudio result=" + std::to_string(result) + ")"};
-    state.sampleRate = static_cast<int>(device->sampleRate);
     state.name = device->capture.name;
     return {true, {}};
 }
@@ -2648,7 +2795,25 @@ void closeMic(MicState& state) {
         delete device;
         state.device = nullptr;
     }
+    if (auto* context = static_cast<ma_context*>(state.context)) {
+        ma_context_uninit(context);
+        delete context;
+        state.context = nullptr;
+    }
 }
+}
+void MicState::capture(const float* input, size_t frames) {
+    audio(input, frames); // Keep MicInput's existing ring, releasing its lock first.
+    auto& engine = AudioEngine::getInstance();
+    AudioInBuffer buffer{input, static_cast<int>(frames), 1, sampleRate, framePosition};
+    // The borrowed block must stay inline, inside the existing #256 barrier.
+    const int slot = engine.beginCallback();
+    // Enter the slot FIRST, then read both seq_cst admission flags. A stop or
+    // shutdown either drains this notify or prevents it from starting.
+    if (!cancelled.load() && engine.inputNotifyEnabled_.load())
+        GuardedEventDelivery<AudioInBuffer>::notify(engine.audioIn, buffer, [] { return true; });
+    engine.endCallback(slot);
+    framePosition += frames;
 }
 void setMicBackendForTests(MicOpen open, MicClose close) {
     micTestBackend().open = std::move(open); micTestBackend().close = std::move(close);
@@ -2774,7 +2939,7 @@ int MicInput::selectedBackend() {
     const auto* context = static_cast<const ma_context*>(AudioEngine::getInstance().context_);
     // The playback engine can itself fall back to Null without an explicit
     // request. That must not turn a real microphone request into fake capture.
-    return context && (context->backend != ma_backend_null || g_engineNullBackendRequested)
+    return context && (context->backend != ma_backend_null || g_engineBackendRequested == AudioBackend::Null)
         ? static_cast<int>(context->backend) : -1;
 }
 

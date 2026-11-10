@@ -751,14 +751,8 @@ static void bakeTransform(Mesh& mesh, const Mat4& m) {
         float z = m.m[8]*v.x + m.m[9]*v.y + m.m[10]*v.z + m.m[11];
         v = Vec3(x, y, z);
     }
-    for (auto& n : mesh.getNormals()) {
-        float x = m.m[0]*n.x + m.m[1]*n.y + m.m[2]*n.z;
-        float y = m.m[4]*n.x + m.m[5]*n.y + m.m[6]*n.z;
-        float z = m.m[8]*n.x + m.m[9]*n.y + m.m[10]*n.z;
-        float len = sqrt(x*x + y*y + z*z);
-        if (len > 1e-6f) { x /= len; y /= len; z /= len; }
-        n = Vec3(x, y, z);
-    }
+    const Mat4 normalMatrix = tc::internal::meshNormalMatrix(m);
+    for (auto& n : mesh.getNormals()) n = tc::internal::transformMeshNormal(normalMatrix, n);
 }
 
 // ---------------------------------------------------------------------------

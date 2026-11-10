@@ -11,11 +11,13 @@ namespace trussc {
 // Internal state for shape/stroke drawing
 namespace internal {
 
-    // Stroke vertex (position + color + width)
+    // Stroke vertex: capture the current style together with its position.
     struct StrokeVertex {
         Vec3 pos;
         Color color;
         float width;
+        StrokeCap cap;
+        StrokeJoin join;
     };
 
     // Lines (independent line segments) vertices + colors
@@ -25,7 +27,7 @@ namespace internal {
     };
 
     // The begin/end{Shape,Lines,Stroke} accumulators (shapeVertices/shapeStarted,
-    // linesVertices/linesStarted, strokeVertices/strokeStarted, strokeStartCap)
+    // linesVertices/linesStarted, strokeVertices/strokeStarted)
     // are now PER-WINDOW: they live in WindowContext (tc/app/tcWindowContext.h)
     // and are reached through currentWindowContext(). Moved out of process
     // globals so a shape left open at end-of-tick can't bleed into the next
@@ -160,14 +162,12 @@ inline void vertex(float x, float y, float z) {
         wctx.shapeVertices.push_back(Vec3{x, y, z});
     } else if (wctx.strokeStarted) {
         auto& ctx = getDefaultContext();
-        // Save start cap on first vertex
-        if (wctx.strokeVertices.empty()) {
-            wctx.strokeStartCap = ctx.getStrokeCap();
-        }
         wctx.strokeVertices.push_back({
             Vec3{x, y, z},
             ctx.getColor(),
-            ctx.getStrokeWeight()
+            ctx.getStrokeWeight(),
+            ctx.getStrokeCap(),
+            ctx.getStrokeJoin()
         });
     }
 }
@@ -255,12 +255,11 @@ struct CurveAppendCheckpoint {
     WindowContext& window = currentWindowContext();
     size_t size = window.linesStarted ? window.linesVertices.size() :
                   window.shapeStarted ? window.shapeVertices.size() : window.strokeVertices.size();
-    StrokeCap startCap = window.strokeStartCap;
     void restore() const {
         if (window.linesStarted) window.linesVertices.resize(size);
         else if (window.shapeStarted) window.shapeVertices.resize(size);
+        // Resizing also rolls back the colors, widths, caps and joins.
         else if (window.strokeStarted) window.strokeVertices.resize(size);
-        window.strokeStartCap = startCap;
     }
 };
 inline void appendCatmullRomSegment_(const Vec3& p0, const Vec3& p1,

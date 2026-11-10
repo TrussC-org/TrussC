@@ -336,32 +336,48 @@ bool resourceLoadIsLocalPath(const std::filesystem::path& path,
     };
     return local(path) && local(resolvedPath);
 }
+namespace {
+// owner.mutex is held. Worker and caller-scheduled backends share admission.
+bool admitExternalLoad(LoadHost& owner, ResourceLoadState& state) {
+    if (state.localFile || (owner.outstanding < owner.requestLimit &&
+            owner.pendingCount < owner.pendingLimit && owner.retained < owner.byteLimit)) {
+        ++owner.outstanding;
+        state.requestCredit = true;
+        return true;
+    }
+    if (owner.retained >= owner.byteLimit)
+        reject(owner, "retained result bytes", owner.byteLimit, owner.retained + 1);
+    else if (owner.outstanding >= owner.requestLimit)
+        reject(owner, "live external load requests", owner.requestLimit, owner.outstanding + 1);
+    else reject(owner, "pending load requests", owner.pendingLimit, owner.pendingCount + 1);
+    state.result.error = LoadError::TooLarge;
+    return false;
+}
+}
+bool admitExternalResourceLoad(const std::shared_ptr<ResourceLoadState>& state) {
+    bool accepted;
+    {
+        std::lock_guard<std::mutex> lock(host().mutex);
+        accepted = admitExternalLoad(host(), *state);
+    }
+    if (!accepted) completeResourceLoad(state);
+    return accepted;
+}
 void startExternalResourceLoad(std::shared_ptr<ResourceLoadState> state, std::function<void()> preparation) {
     auto& owner = host();
     bool accepted = false;
     {
         std::lock_guard<std::mutex> lock(owner.mutex);
-        const size_t requestLimit = owner.requestLimit;
-        if (state->localFile || (owner.outstanding < requestLimit && owner.pendingCount < owner.pendingLimit && owner.retained < owner.byteLimit)) {
+        if (admitExternalLoad(owner, *state)) {
             state->preparation = std::move(preparation);
             if (owner.pendingTail) owner.pendingTail->nextPending = state;
             else owner.pendingHead = state;
             owner.pendingTail = state;
             ++owner.pendingCount;
-            ++owner.outstanding;
-            state->requestCredit = true;
             accepted = true;
-        }
-        if (!accepted) {
-            if (owner.retained >= owner.byteLimit)
-                reject(owner, "retained result bytes", owner.byteLimit, owner.retained + 1);
-            else if (owner.outstanding >= requestLimit)
-                reject(owner, "live external load requests", requestLimit, owner.outstanding + 1);
-            else reject(owner, "pending load requests", owner.pendingLimit, owner.pendingCount + 1);
         }
     }
     if (!accepted) {
-        state->result.error = LoadError::TooLarge;
         completeResourceLoad(state);
         return;
     }

@@ -1,0 +1,17 @@
+# Synthetic per-channel shaper followed by a 2x2x2 table
+TITLE "shaper-brg"
+LUT_1D_SIZE 3
+LUT_3D_SIZE 2
+LUT_1D_INPUT_RANGE 0 1
+LUT_3D_INPUT_RANGE 0 1
+0 0 1
+0.25 0.5 0.25
+1 1 0
+0 0 0
+0 1 0
+0 0 1
+0 1 1
+1 0 0
+1 1 0
+1 0 1
+1 1 1

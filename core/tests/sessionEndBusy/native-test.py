@@ -285,6 +285,9 @@ int runtimeEpoch() { return 1; }
 Context*& currentWindowCtx() { static Context* ctx = nullptr; return ctx; }
 void restoreWindowContext(Context* ctx) { currentWindowCtx() = ctx; }
 void closeScreenshots(int) {}
+// No GPU readbacks are queued by this disposal probe.
+struct BufferReadbacks { void shutdown() {} };
+BufferReadbacks& bufferReadbacks() { static BufferReadbacks queue; return queue; }
 // No dialogs are staged by this disposal probe.
 void cancelAsyncDialogs() {}
 void cancelWindowAsyncDialogs(Window&) {}

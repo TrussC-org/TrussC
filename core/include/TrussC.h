@@ -1471,6 +1471,11 @@ inline void setWindowTitle(const std::string& title) {
 const std::string& getWindowTitle();
 bool isWindowOccluded();
 
+// Keep drawing hidden windows for Spout / Syphon / NDI or recording.
+// Sets every existing window and the default for new windows (initially false).
+// Screen output while hidden is up to the OS.
+void setDrawWhileHidden(bool allow);
+
 // ---------------------------------------------------------------------------
 // Cursor
 // ---------------------------------------------------------------------------

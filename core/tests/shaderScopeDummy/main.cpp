@@ -206,7 +206,7 @@ bool inheritedPipelineProbe() {
         setColor(0,1,0,0.5f); drawRect(0,0,16,16);
         fbo.end();
         const bool correct = role == internal::fillSelection(BlendMode::Add, depth) &&
-            appliedPipeline.depth.write_enabled == depth &&
+            !appliedPipeline.depth.write_enabled &&
             appliedPipeline.depth.compare == (depth ? SG_COMPAREFUNC_LESS_EQUAL : SG_COMPAREFUNC_ALWAYS) &&
             appliedPipeline.colors[0].blend.src_factor_rgb == SG_BLENDFACTOR_SRC_ALPHA &&
             appliedPipeline.colors[0].blend.dst_factor_rgb == SG_BLENDFACTOR_ONE;
@@ -1147,6 +1147,64 @@ bool growthFailureProbe() {
     return ok;
 }
 
+// Inspect the real endStroke triangle stream without a native window/GPU.
+bool strokeStyleProbe() {
+    DummyWindowPair windows;
+    internal::restoreWindowContext(&windows.main);
+    auto style = scopedStyle();
+    auto capture = [&](auto draw) {
+        beginFrame();
+        setStrokeWeight(20); setStrokeCap(StrokeCap::Butt); setStrokeJoin(StrokeJoin::Miter);
+        draw();
+        auto* context = _sgl_lookup_context(sgl_get_context().id);
+        std::vector<Vec3> points;
+        for (int i = 0; i < context->vertices.next; ++i) {
+            const auto& p = context->vertices.ptr[i].pos;
+            points.emplace_back(p[0], p[1], p[2]);
+        }
+        present();
+        return points;
+    };
+    auto hasPoint = [](const auto& points, float x, float y) {
+        return std::any_of(points.begin(), points.end(), [=](const Vec3& p) {
+            return std::abs(p.x - x) < 0.001f && std::abs(p.y - y) < 0.001f;
+        });
+    };
+    const auto caps = capture([] {
+        beginStroke();
+        setStrokeCap(StrokeCap::Round); vertex(0, 0);
+        setStrokeCap(StrokeCap::Square); vertex(100, 0);
+        setStrokeCap(StrokeCap::Butt); endStroke();
+    });
+    const bool capturedCaps = hasPoint(caps, -10, 0) && !hasPoint(caps, -10, -10) && hasPoint(caps, 110, -10);
+    const auto joins = capture([] {
+        beginStroke(); vertex(0, 0);
+        vertex(100, 0);
+        setStrokeJoin(StrokeJoin::Round); vertex(100, 100);
+        setStrokeJoin(StrokeJoin::Bevel); vertex(200, 100);
+        vertex(200, 200);
+        setStrokeJoin(StrokeJoin::Miter); endStroke();
+    });
+    const bool capturedJoins = hasPoint(joins, 110, -10) && !hasPoint(joins, 90, 110) &&
+        hasPoint(joins, 90, 100) && !hasPoint(joins, 210, 90);
+    auto closed = [](StrokeCap cap) {
+        setStrokeCap(cap); beginStroke();
+        setStrokeJoin(StrokeJoin::Round); vertex(0, 0);
+        setStrokeJoin(StrokeJoin::Miter); vertex(100, 0);
+        setStrokeJoin(StrokeJoin::Bevel); vertex(100, 100);
+        setStrokeJoin(StrokeJoin::Round); vertex(0, 100);
+        setStrokeJoin(StrokeJoin::Bevel); vertex(0, 0);
+        endStroke(true);
+    };
+    const auto loop = capture([&] { closed(StrokeCap::Round); });
+    const auto noCaps = capture([&] { closed(StrokeCap::Butt); });
+    const bool closingJoin = !hasPoint(loop, -10, -10) && hasPoint(loop, -10, 0) &&
+        hasPoint(loop, 110, -10) && !hasPoint(loop, 110, 110) && loop == noCaps;
+    std::printf("STROKE STYLE captured_caps=%d captured_joins=%d closing_first_join_and_no_caps=%d\n",
+        capturedCaps, capturedJoins, closingJoin);
+    return capturedCaps && capturedJoins && closingJoin;
+}
+
 bool curveRollbackProbe() {
     DummyWindowPair windows;
     internal::restoreWindowContext(&windows.main);
@@ -1162,25 +1220,30 @@ bool curveRollbackProbe() {
             beginStroke();
             if (mode == 2) vertex(-1,-1);
             if (mode == 3) {
-                w.strokeStartCap = StrokeCap::Butt;
                 getDefaultContext().setStrokeCap(StrokeCap::Round);
             }
             w.strokeVertices.shrink_to_fit();
         }
-        const auto cap = w.strokeStartCap;
+        const auto captured = w.strokeVertices;
+        getDefaultContext().setStrokeCap(StrokeCap::Square);
+        getDefaultContext().setStrokeJoin(StrokeJoin::Bevel);
         const size_t original = mode == 3 ? 0 : 1;
         const int rejected = rejectedAllocations;
         allocationsUntilFailure = 1; // First growth succeeds; a later growth fails.
         if (closed) appendCurve(points, true); else appendCurve(points);
         allocationsUntilFailure = -1;
-        ok &= rejectedAllocations > rejected && w.strokeStartCap == cap;
+        ok &= rejectedAllocations > rejected;
         if (mode == 0) ok &= w.shapeVertices.size() == original && w.shapeVertices.front().x == -1;
         if (mode == 1) {
             ok &= w.linesVertices.size() == original && w.linesVertices.front().pos.x == -1;
             vertex(9,9); // The pre-existing unpaired vertex still pairs with this one.
             ok &= w.linesVertices.size() == 2 && w.linesVertices.back().pos.x == 9;
         }
-        if (mode >= 2) ok &= w.strokeVertices.size() == original;
+        if (mode >= 2) {
+            ok &= w.strokeVertices.size() == original;
+            if (original) ok &= w.strokeVertices.front().cap == captured.front().cap &&
+                                w.strokeVertices.front().join == captured.front().join;
+        }
     }
     w.shapeStarted = w.linesStarted = w.strokeStarted = false;
     std::printf("CURVE ROLLBACK open/closed/shape/lines/stroke/empty_stroke=%d\n", ok);
@@ -2249,10 +2312,11 @@ int main(int argc, char** argv) {
     for (int mode = 0; mode < 3; ++mode) for (bool resize : {false, true}) for (int selection = 0; selection < 4; ++selection)
         resizeBeforeDraw &= resizeEarlyAcquireProbe(mode, resize, selection);
     // Last: it shuts the device down and re-creates it.
+    const bool strokeStyles = strokeStyleProbe();
     const bool curveRollback = curveRollbackProbe();
     const bool retirementRestart = retirementRestartProbe();
     const bool shadowRestart = shadowDeviceRestartProbe();
-    const int result=textureUploads && curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
+    const int result=textureUploads && strokeStyles && curveRollback && retirementRestart && closedWindows && targetStacks && shadowReplay && shadowRestart && teardown && inherited && replay && normal && flushed && failedLease && stores && pipelines && lazyResize && tickRestore && interleaved && parity && rawKinds && parking && shadowOwnership && shadowParking && capturePhase && foreignTeardown && begunResize && retirement && growth && rawFailure && resizeBeforeDraw && scissorLogical && destruction ? 0 : 1;
     return result;
 }
 #else

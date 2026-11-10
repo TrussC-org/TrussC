@@ -8,6 +8,10 @@
 #ifdef __linux__
 
 #include "TrussC.h"
+#include "tcVideoGrabberLinux.h"
+#include "tc/utils/tcSimd.h"
+#include <filesystem>
+#include <algorithm>
 
 #include <linux/videodev2.h>
 #include <sys/ioctl.h>
@@ -20,10 +24,9 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <limits>
 
-// For MJPEG decoding
-#define STB_IMAGE_IMPLEMENTATION_ALREADY_DONE
-#include <stb/stb_image.h>
+#include "impl/tcJpegDecode.h"
 
 namespace trussc {
 
@@ -47,6 +50,7 @@ struct VideoGrabberPlatformData {
     unsigned char* backBuffer = nullptr;
     int bufferWidth = 0;
     int bufferHeight = 0;
+    size_t rgbaBytes = 0;
 
     // Resize notification
     std::atomic<bool> needsResize{false};
@@ -75,6 +79,16 @@ struct VideoGrabberPlatformData {
 // Helper functions
 // =============================================================================
 
+static bool checkedRgbaBytes(int64_t width, int64_t height, size_t& bytes) {
+    if (width <= 0 || height <= 0) return false;
+    if (uint64_t(width) > std::numeric_limits<size_t>::max() / 4 / uint64_t(height))
+        return false;
+    // Bound (gpu): 16384 per axis matches the image decoder's fallback texture limit; larger negotiated frames fail setup.
+    if (width > 16384 || height > 16384) return false;
+    bytes = size_t(width) * size_t(height) * 4;
+    return true;
+}
+
 static int xioctl(int fd, unsigned long request, void* arg) {
     int r;
     do {
@@ -83,59 +97,12 @@ static int xioctl(int fd, unsigned long request, void* arg) {
     return r;
 }
 
-// Convert YUYV (YUV422) to RGBA
-static void convertYUYVtoRGBA(const unsigned char* src, unsigned char* dst, int width, int height) {
-    for (int i = 0; i < width * height; i += 2) {
-        int y0 = src[0];
-        int u  = src[1];
-        int y1 = src[2];
-        int v  = src[3];
-        src += 4;
-
-        // YUV to RGB conversion
-        int c = y0 - 16;
-        int d = u - 128;
-        int e = v - 128;
-
-        int r = (298 * c + 409 * e + 128) >> 8;
-        int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-        int b = (298 * c + 516 * d + 128) >> 8;
-
-        dst[0] = (r < 0) ? 0 : (r > 255) ? 255 : r;
-        dst[1] = (g < 0) ? 0 : (g > 255) ? 255 : g;
-        dst[2] = (b < 0) ? 0 : (b > 255) ? 255 : b;
-        dst[3] = 255;
-        dst += 4;
-
-        c = y1 - 16;
-        r = (298 * c + 409 * e + 128) >> 8;
-        g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-        b = (298 * c + 516 * d + 128) >> 8;
-
-        dst[0] = (r < 0) ? 0 : (r > 255) ? 255 : r;
-        dst[1] = (g < 0) ? 0 : (g > 255) ? 255 : g;
-        dst[2] = (b < 0) ? 0 : (b > 255) ? 255 : b;
-        dst[3] = 255;
-        dst += 4;
-    }
-}
-
-// Decode MJPEG to RGBA using stb_image
+// Decode directly into the capture back buffer, after validating frame dimensions.
 static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
-                               unsigned char* dst, int width, int height) {
-    int w, h, channels;
-    unsigned char* decoded = stbi_load_from_memory(src, srcSize, &w, &h, &channels, 4);
-
-    if (!decoded) {
-        return false;
-    }
-
-    if (w == width && h == height) {
-        memcpy(dst, decoded, width * height * 4);
-    }
-
-    stbi_image_free(decoded);
-    return true;
+                               unsigned char* dst, int width, int height, size_t rgbaBytes) {
+    internal::JpegDecode jpeg;
+    return jpeg.open(src, srcSize) && jpeg.width() == width && jpeg.height() == height &&
+           jpeg.decode(dst, rgbaBytes);
 }
 
 // =============================================================================
@@ -193,25 +160,38 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
         if (data->backBuffer && buf.index < data->bufferCount) {
             const unsigned char* src = (const unsigned char*)data->buffers[buf.index].start;
 
+            bool converted = false;
             if (data->pixelFormat == V4L2_PIX_FMT_YUYV) {
-                convertYUYVtoRGBA(src, data->backBuffer, data->bufferWidth, data->bufferHeight);
+                // A YUYV frame holds 2 bytes per pixel; skip a short buffer.
+                if (buf.bytesused < data->rgbaBytes / 2) {
+                    xioctl(data->fd, VIDIOC_QBUF, &buf);
+                    continue;
+                }
+                simd::yuyvToRgba(src, data->backBuffer, data->rgbaBytes / 4);
+                converted = true;
             } else if (data->pixelFormat == V4L2_PIX_FMT_MJPEG) {
-                decodeMJPEGtoRGBA(src, buf.bytesused, data->backBuffer,
-                                  data->bufferWidth, data->bufferHeight);
+                converted = decodeMJPEGtoRGBA(src, buf.bytesused, data->backBuffer,
+                                              data->bufferWidth, data->bufferHeight, data->rgbaBytes);
             }
 
-            // Publish under the State lock, including pointer/size checks.
-            {
-                std::lock_guard<std::mutex> lock(state->mtx);
-                if (state->pixels && state->width == data->bufferWidth &&
-                    state->height == data->bufferHeight) {
-                    std::memcpy(state->pixels.get(), data->backBuffer,
-                                (size_t)data->bufferWidth * data->bufferHeight * 4);
-                    state->dirty.store(true);
-                }
-            }
-            state->frameQueue.push(data->backBuffer, data->bufferWidth,
+            // A frame that didn't convert (e.g. an MJPEG of another size) is not published.
+            if (converted) {
+                state->notifyFrame(data->backBuffer, data->bufferWidth,
                                    data->bufferHeight, arrivalUs);
+
+                // Publish under the State lock, including pointer/size checks.
+                {
+                    std::lock_guard<std::mutex> lock(state->mtx);
+                    if (state->pixels && state->width == data->bufferWidth &&
+                        state->height == data->bufferHeight) {
+                        std::memcpy(state->pixels.get(), data->backBuffer,
+                                    data->rgbaBytes);
+                        state->dirty.store(true);
+                    }
+                }
+                state->frameQueue.push(data->backBuffer, data->bufferWidth,
+                                       data->bufferHeight, arrivalUs);
+            }
         }
 
         // Re-queue buffer
@@ -248,7 +228,7 @@ bool VideoGrabber::setupPlatform() {
         return false;
     }
 
-    if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
+    if (!internal::isVideoCaptureDevice(cap)) {
         logError("VideoGrabber") << "Device does not support video capture";
         state_->platformData.reset();
         return false;
@@ -257,22 +237,24 @@ bool VideoGrabber::setupPlatform() {
     deviceName_ = std::string((char*)cap.card);
     logNotice("VideoGrabber") << "Device: " << deviceName_;
 
-    // Set format
-    struct v4l2_format fmt = {};
-    fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt.fmt.pix.width = state_->requestedWidth;
-    fmt.fmt.pix.height = state_->requestedHeight;
-    fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;  // Try MJPEG first
-    fmt.fmt.pix.field = V4L2_FIELD_NONE;
+    const auto call = [fd = data->fd](unsigned long request, void* arg) {
+        return xioctl(fd, request, arg);
+    };
+    const auto modes = internal::enumerateLinuxCaptureModes(call, state_->requestedWidth, state_->requestedHeight);
+    internal::LinuxCaptureNegotiation negotiated;
+    if (!internal::negotiateLinuxCapture(call, modes, state_->requestedWidth,
+                                        state_->requestedHeight, desiredFrameRate_, negotiated)) {
+        logError("VideoGrabber") << "Failed to set format";
+        state_->platformData.reset();
+        return false;
+    }
+    const auto& fmt = negotiated.format;
 
-    if (xioctl(data->fd, VIDIOC_S_FMT, &fmt) == -1) {
-        // Try YUYV
-        fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
-        if (xioctl(data->fd, VIDIOC_S_FMT, &fmt) == -1) {
-            logError("VideoGrabber") << "Failed to set format";
-            state_->platformData.reset();
-            return false;
-        }
+    if (!checkedRgbaBytes(fmt.fmt.pix.width, fmt.fmt.pix.height, data->rgbaBytes) ||
+        (fmt.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV && fmt.fmt.pix.width % 2 != 0)) {
+        logError("VideoGrabber") << "Invalid negotiated frame size";
+        state_->platformData.reset();
+        return false;
     }
 
     state_->width = fmt.fmt.pix.width;
@@ -281,17 +263,10 @@ bool VideoGrabber::setupPlatform() {
     data->bufferHeight = state_->height;
     data->pixelFormat = fmt.fmt.pix.pixelformat;
 
+    char fourcc[5] = {};
+    std::memcpy(fourcc, &data->pixelFormat, 4);
     logNotice("VideoGrabber") << "Format: " << state_->width << "x" << state_->height
-                                << " (" << (char*)&data->pixelFormat << ")";
-
-    // Set frame rate if specified
-    if (desiredFrameRate_ > 0) {
-        struct v4l2_streamparm parm = {};
-        parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        parm.parm.capture.timeperframe.numerator = 1;
-        parm.parm.capture.timeperframe.denominator = desiredFrameRate_;
-        xioctl(data->fd, VIDIOC_S_PARM, &parm);
-    }
+                                << " (" << fourcc << ") at " << negotiated.fps << " fps: " << negotiated.reason;
 
     // Request buffers
     struct v4l2_requestbuffers req = {};
@@ -333,7 +308,7 @@ bool VideoGrabber::setupPlatform() {
     }
 
     // Allocate back buffer
-    data->backBuffer = new unsigned char[state_->width * state_->height * 4];
+    data->backBuffer = new unsigned char[data->rgbaBytes];
 
     // Queue buffers
     for (unsigned int i = 0; i < data->bufferCount; i++) {
@@ -380,19 +355,41 @@ void VideoGrabber::updateDelegatePixels() {
 std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
     std::vector<VideoDeviceInfo> devices;
 
-    // Scan /dev/video*
-    for (int i = 0; i < 10; i++) {
-        std::string path = "/dev/video" + std::to_string(i);
+    // by-path identifies a camera by its USB port, even for identical models.
+    std::vector<std::filesystem::path> byPathLinks;
+    std::error_code pathError;
+    for (const auto& entry : std::filesystem::directory_iterator("/dev/v4l/by-path", pathError)) {
+        byPathLinks.push_back(entry.path());
+    }
+    std::sort(byPathLinks.begin(), byPathLinks.end());
+
+    // Enumerate actual nodes and sort by numeric suffix (video2 before video10).
+    std::vector<std::pair<int, std::filesystem::path>> nodes;
+    std::error_code deviceError;
+    for (const auto& entry : std::filesystem::directory_iterator("/dev", deviceError)) {
+        const int number = internal::videoDeviceNumber(entry.path().filename().string());
+        if (number >= 0) nodes.emplace_back(number, entry.path());
+    }
+    std::sort(nodes.begin(), nodes.end());
+    for (const auto& [number, node] : nodes) {
+        std::string path = node.string();
         int fd = open(path.c_str(), O_RDWR);
         if (fd == -1) continue;
 
         struct v4l2_capability cap;
         if (xioctl(fd, VIDIOC_QUERYCAP, &cap) == 0) {
-            if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) {
+            if (internal::isVideoCaptureDevice(cap)) {
                 VideoDeviceInfo info;
-                info.deviceId = i;
+                info.deviceId = number;
                 info.deviceName = std::string((char*)cap.card);
                 info.uniqueId = path;
+                for (const auto& link : byPathLinks) {
+                    std::error_code linkError;
+                    if (std::filesystem::equivalent(link, path, linkError)) {
+                        info.uniqueId = link.string();
+                        break;
+                    }
+                }
                 devices.push_back(info);
             }
         }

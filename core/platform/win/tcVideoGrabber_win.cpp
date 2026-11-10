@@ -151,6 +151,9 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
                 if (internal::copyGrabberRGB32(data->backBuffer, rawData,
                         currentLength, w, h, data->bufferStride)) {
 
+                    state->notifyFrame(data->backBuffer, data->bufferWidth,
+                                       data->bufferHeight, arrivalUs);
+
                     // Publish under the State lock, including pointer/size checks.
                     {
                         std::lock_guard<std::mutex> lock(state->mtx);
@@ -171,6 +174,16 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
         }
         sample->Release();
     }
+}
+
+// Media Foundation strings use UTF-16; preserve the whole symbolic link.
+static std::string wideToUtf8(const WCHAR* value) {
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 0) return {};
+    std::string result(size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), size, nullptr, nullptr);
+    result.pop_back();
+    return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -217,13 +230,15 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
             VideoDeviceInfo info;
             info.deviceId = (int)i;
 
-            // WCHAR から UTF-8 に変換
-            int size = WideCharToMultiByte(CP_UTF8, 0, friendlyName, -1, nullptr, 0, nullptr, nullptr);
-            if (size > 0) {
-                info.deviceName.resize(size - 1);
-                WideCharToMultiByte(CP_UTF8, 0, friendlyName, -1, info.deviceName.data(), size, nullptr, nullptr);
+            info.deviceName = wideToUtf8(friendlyName);
+            WCHAR* symbolicLink = nullptr;
+            UINT32 linkLength = 0;
+            if (SUCCEEDED(ppDevices[i]->GetAllocatedString(
+                    MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+                    &symbolicLink, &linkLength))) {
+                info.uniqueId = wideToUtf8(symbolicLink);
+                CoTaskMemFree(symbolicLink);
             }
-            info.uniqueId = std::to_string(i);
 
             devices.push_back(info);
             CoTaskMemFree(friendlyName);
@@ -289,11 +304,7 @@ bool VideoGrabber::setupPlatform() {
         &nameLength
     );
     if (SUCCEEDED(hr) && friendlyName) {
-        int size = WideCharToMultiByte(CP_UTF8, 0, friendlyName, -1, nullptr, 0, nullptr, nullptr);
-        if (size > 0) {
-            deviceName_.resize(size - 1);
-            WideCharToMultiByte(CP_UTF8, 0, friendlyName, -1, deviceName_.data(), size, nullptr, nullptr);
-        }
+        deviceName_ = wideToUtf8(friendlyName);
         CoTaskMemFree(friendlyName);
     }
 
@@ -324,6 +335,57 @@ bool VideoGrabber::setupPlatform() {
         return false;
     }
 
+    // Select a native mode before asking MF for color conversion at that size.
+    // Keep native types alongside the pure, platform-independent descriptions.
+    std::vector<IMFMediaType*> nativeTypes;
+    std::vector<internal::GrabberFormat> modes;
+    for (DWORD index = 0; ; ++index) {
+        IMFMediaType* nativeType = nullptr;
+        hr = data->sourceReader->GetNativeMediaType(
+            MF_SOURCE_READER_FIRST_VIDEO_STREAM, index, &nativeType);
+        if (FAILED(hr)) break;
+        UINT32 modeWidth = 0, modeHeight = 0;
+        if (FAILED(MFGetAttributeSize(nativeType, MF_MT_FRAME_SIZE, &modeWidth, &modeHeight))) {
+            nativeType->Release();
+            continue;
+        }
+        internal::GrabberFormat mode{static_cast<int>(modeWidth), static_cast<int>(modeHeight), {}};
+        UINT32 numerator = 0, denominator = 0;
+        if (SUCCEEDED(MFGetAttributeRatio(nativeType, MF_MT_FRAME_RATE, &numerator, &denominator)) && denominator) {
+            const double fps = double(numerator) / denominator;
+            mode.frameRates.push_back({fps, fps});
+        }
+        modes.push_back(std::move(mode));
+        nativeTypes.push_back(nativeType);
+    }
+    const int selected = internal::selectGrabberFormat(modes,
+        state_->requestedWidth, state_->requestedHeight, desiredFrameRate_);
+    UINT64 selectedFrameRate = 0;
+    GUID selectedSubtype = GUID_NULL;
+    if (selected >= 0) {
+        nativeTypes[selected]->GetUINT64(MF_MT_FRAME_RATE, &selectedFrameRate);
+        nativeTypes[selected]->GetGUID(MF_MT_SUBTYPE, &selectedSubtype);
+    }
+    hr = selected < 0 ? MF_E_INVALIDMEDIATYPE : data->sourceReader->SetCurrentMediaType(
+        MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, nativeTypes[selected]);
+    for (auto* type : nativeTypes) type->Release();
+    if (FAILED(hr)) {
+        logError("VideoGrabber") << "Cannot set native camera mode, hr=" << std::hex << hr;
+        state_->platformData.reset();
+        return false;
+    }
+    const auto& mode = modes[selected];
+    // Video subtypes carry their FOURCC in Data1 (YUY2, MJPG, NV12); show others as a number.
+    std::string nativeFourcc;
+    for (int shift = 0; shift < 32; shift += 8) {
+        const char c = char((selectedSubtype.Data1 >> shift) & 0xFF);
+        if (c < 0x20 || c > 0x7E) { nativeFourcc = std::to_string(selectedSubtype.Data1); break; }
+        nativeFourcc += c;
+    }
+    logNotice("VideoGrabber") << "Native mode: " << mode.width << "x" << mode.height << " " << nativeFourcc << " @ "
+                             << (mode.frameRates.empty() ? 0.0 : mode.frameRates.front().maxFrameRate)
+                             << " fps (requested " << state_->requestedWidth << "x" << state_->requestedHeight << ")";
+
     // Set output format to RGB32 (BGRA, better supported than RGB24)
     IMFMediaType* outputType = nullptr;
     MFCreateMediaType(&outputType);
@@ -331,7 +393,8 @@ bool VideoGrabber::setupPlatform() {
         outputType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
         outputType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
         outputType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
-        MFSetAttributeSize(outputType, MF_MT_FRAME_SIZE, state_->requestedWidth, state_->requestedHeight);
+        MFSetAttributeSize(outputType, MF_MT_FRAME_SIZE, mode.width, mode.height);
+        if (selectedFrameRate) outputType->SetUINT64(MF_MT_FRAME_RATE, selectedFrameRate);
 
         hr = data->sourceReader->SetCurrentMediaType(
             MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, outputType);

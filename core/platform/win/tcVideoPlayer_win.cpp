@@ -15,7 +15,9 @@
 #include "TrussC.h"
 #include <vector>
 #include <chrono>
+#include <fstream>
 #include "tc/video/internal/tcVideoNotifyQueue.h"
+#include "tc/video/internal/tcMatroskaDuration.h"
 
 #include <windows.h>
 #include <mfapi.h>
@@ -517,10 +519,6 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
     // Read video metadata before probing audio: silent videos need this too.
     ComPtr<IMFMediaType> videoType;
     UINT32 numerator = 0, denominator = 0;
-    // Known issue (see #697): for Matroska sources Media Foundation reports
-    // half the real rate in MF_MT_FRAME_RATE, while IMFSample::GetSampleDuration
-    // is correct there. Only the frame-index APIs (getFrameRate, frame
-    // stepping) are affected; playback is paced by MediaEngine.
     UINT32 metadataWidth = 0, metadataHeight = 0;
     size_t metadataBytes = 0;
     // Some MediaEngine sources expose metadata only after loading. Admit
@@ -534,6 +532,23 @@ bool TCVideoPlayerImpl::loadMediaInfo(const std::string& path) {
         if (SUCCEEDED(MFGetAttributeRatio(videoType.Get(), MF_MT_FRAME_RATE, &numerator, &denominator)) &&
             numerator > 0 && denominator > 0)
             state_->frameRate_ = static_cast<float>(numerator) / denominator;
+    }
+
+    // MF reports half the declared Matroska rate (#697). Probe local files
+    // by DocType; URLs and other containers retain their MF metadata.
+    if (path.find("://") == std::string::npos) {
+        std::ifstream file(internal::utf8ToPath(path), std::ios::binary | std::ios::ate);
+        const auto fileSize = file.tellg();
+        if (fileSize > std::streampos(0)) {
+            const auto declared = internal::readMatroskaDuration(static_cast<uint64_t>(fileSize),
+                [&file](uint64_t offset, uint8_t* bytes, size_t count) {
+                    file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
+                    return file.good() && bool(file.read(reinterpret_cast<char*>(bytes),
+                                                        static_cast<std::streamsize>(count)));
+                });
+            if (declared.isMatroska)
+                state_->frameRate_ = declared.nanoseconds ? static_cast<float>(1e9 / static_cast<double>(declared.nanoseconds)) : 0.0f;
+        }
     }
 
     // Get native audio media type
