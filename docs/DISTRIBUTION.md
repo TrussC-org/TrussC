@@ -97,7 +97,7 @@ fs::path nodeAppDir() {
 
 Run it with `trusscli run` during development and package it with `trusscli dist`; neither the code nor `dist.json` changes in between. `from` is read on your machine when packaging: a path relative to the project folder, as above, works on every developer's machine and in CI, an absolute one only on yours.
 
-A script also needs its interpreter on the other machine. Ship it (for example the `node` executable, with another `include` entry, and run that one), or tell the people installing the app to install it.
+A script also needs its interpreter on the other machine, and `dist` cannot tell that the app runs one. Either ship it yourself (for example the `node` executable, with another `include` entry, and have the app run that one), or tell the people installing the app to install it.
 
 #### Large data
 
