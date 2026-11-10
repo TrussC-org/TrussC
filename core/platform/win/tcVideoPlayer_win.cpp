@@ -13,6 +13,7 @@
 #ifdef _WIN32
 
 #include "TrussC.h"
+#include "tcVideoPlayerPixels.h"
 #include <vector>
 #include <chrono>
 #include <fstream>
@@ -475,24 +476,8 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
             state_->playbackErrors_.report("Video frame stride exceeds decode limits", E_INVALIDARG);
             return false;
         }
-        // Copy row by row (handle pitch/stride)
-        unsigned char* src = static_cast<unsigned char*>(mapped.pData);
-        unsigned char* dst = state_->pixels_.data();
-        int rowBytes = state_->width_ * 4;
-
-        for (int y = 0; y < state_->height_; y++) {
-            // BGRA to RGBA conversion
-            for (int x = 0; x < state_->width_; x++) {
-                int srcIdx = x * 4;
-                int dstIdx = x * 4;
-                dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
-                dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
-                dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
-                dst[dstIdx + 3] = src[srcIdx + 3]; // A <- A
-            }
-            src += mapped.RowPitch;
-            dst += rowBytes;
-        }
+        internal::copyPlayerStagingBGRA(static_cast<const unsigned char*>(mapped.pData),
+            state_->pixels_.data(), state_->width_, state_->height_, mapped.RowPitch);
 
         state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0);
         return true;
@@ -1328,27 +1313,7 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                             decoded.clear();
                         }
                         if (decoded.getData()) {
-                        unsigned char* dst = decoded.getData();
-                        int rowBytes = (int)width * 4;
-
-                        for (UINT32 y = 0; y < height; y++) {
-                            // Negative stride means the image is stored bottom-up.
-                            UINT32 srcRow = stride < 0 ? (height - 1 - y) : y;
-                            const BYTE* src = data + (size_t)srcRow * absStride;
-                            // BGRA to RGBA conversion
-                            for (UINT32 x = 0; x < width; x++) {
-                                int srcIdx = x * 4;
-                                int dstIdx = x * 4;
-                                dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
-                                dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
-                                dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
-                                // RGB32 from the source reader is BGRX: the 4th byte
-                                // is undefined padding, not alpha. Force opaque so the
-                                // extracted frame isn't fully transparent.
-                                dst[dstIdx + 3] = 255;             // A = opaque
-                            }
-                            dst += rowBytes;
-                        }
+                        internal::copyPlayerRGB32(data, decoded.getData(), width, height, stride);
 
                         buffer->Unlock();
                         ok = true;
