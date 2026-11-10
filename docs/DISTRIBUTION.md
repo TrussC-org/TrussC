@@ -40,21 +40,27 @@ Windows `.pdb` files go to a separate `<name>-<version>-windows-<arch>-symbols/`
 
 ### Other programs and large files
 
-A helper program, a script, or large data the app uses has to be in the package too. Find it from the app through `getDataPath()`, never by its path on your machine: `getDataPath()` resolves against the data folder next to the app, `bin/data/` during development and `data/` in the package, so the same code works in both.
+A helper program, a script, or large data the app uses has to be in the package too. There are two ways: keep it inside the project under `bin/data/`, or keep it outside and let `include` copy it.
 
-**Only this app uses it:** put it under `bin/data/`. It goes into the package as it is, and git keeps it with the rest of `bin/data/`.
+Either way, find it from the app through `getDataPath()`, never by its path on your machine. `getDataPath()` resolves against the data folder next to the app: `bin/data/` during development, `data/` in the package.
+
+#### 1. Inside the project: `bin/data/`
+
+Put it under `bin/data/`. It goes into the package as it is, git keeps it with the rest of `bin/data/`, and the same `getDataPath()` call finds it during development and in the package.
 
 ```
 myApp/bin/data/tools/converter/   ->   <package>/data/tools/converter/      getDataPath("tools/converter")
 ```
 
-**It has its own repository:** add it as a git submodule under `bin/data/`. It keeps its own history, this project records which commit it uses, and the files are in `bin/data/`, so the rest is as above.
+If it has its own repository, add it there as a git submodule: it keeps its own history, and this project records which commit it uses.
 
 ```bash
 git submodule add https://github.com/me/nodeApp.git bin/data/nodeApp
 ```
 
-**It lives outside the project** (shared by several projects, or kept out of this repository): leave it there and let `include` copy it into the package. Example: a TrussC app that runs a Node.js app kept next to it.
+#### 2. Outside the project: `include`
+
+For something shared by several projects, or kept out of this repository: leave it where it is and let `include` copy it into the package. Example: a TrussC app that runs a Node.js app kept next to it.
 
 ```
 projectLocation/
@@ -88,7 +94,9 @@ A script needs its interpreter on the other machine as well. Ship it (for exampl
 
 `from` is read on your machine when packaging. A path relative to the project folder, as above, works on every developer's machine and in CI; an absolute one only on yours. `to` is a path inside the package.
 
-Any other folder in `bin/` is packaged too and lands next to the executable (`bin/otherApps/` becomes `<package>/otherApps/`, found with `getExecutableDir()`), but the project template's `.gitignore` keeps only `bin/data/` in git; add `!bin/otherApps/` to it.
+#### Next to the executable instead
+
+Any other folder in `bin/` is packaged too and lands next to the executable (`bin/otherApps/` becomes `<package>/otherApps/`, found with `getExecutableDir()`). The project template's `.gitignore` keeps only `bin/data/` in git, so add `!bin/otherApps/` to it.
 
 ### Symlinks
 
