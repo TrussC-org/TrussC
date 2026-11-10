@@ -108,7 +108,7 @@ Put it in `bin/data/`. `dist` packages what is in `bin/`, whether git tracks it 
 
 ### Symlinks
 
-A symlink in `bin/` or in an include folder is packaged as the same link when it is relative and points inside that folder, such as `libfoo.so.1 -> libfoo.so.1.2` (on Windows, which needs a privilege to create links, as a copy under the link's name). Any other link stops `dist` with an error that shows the `include` entry to use instead, because the package would not hold what it points to.
+A symlink in `bin/`, or in a folder copied by `include`, is packaged as the same link when it is relative and points inside that folder, such as `libfoo.so.1 -> libfoo.so.1.2` (on Windows, which needs a privilege to create links, as a copy under the link's name). Any other link stops `dist` with an error, because the package would not hold what it points to. For a link out of the folder, the error shows the `include` entry that would copy its target instead.
 
 ### Names
 
