@@ -178,6 +178,8 @@ drawTriangle(x1, y1, x2, y2, x3, y3)
 ```
 
 ### Stroke Path
+In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
+
 ```cpp
 beginStroke();           // Start a free-form thick stroke path
 vertex(x, y);            // Add points
