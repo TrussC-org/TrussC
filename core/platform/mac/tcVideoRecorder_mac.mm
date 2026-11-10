@@ -14,7 +14,6 @@
 #import <CoreMedia/CoreMedia.h>
 
 #include "TrussC.h"
-#include "tc/utils/tcSimd.h"
 #include <chrono>
 #include "../metal/tcRecorderPixelBuffer.h"
 #include <cmath>
@@ -353,7 +352,12 @@ bool VideoWriter::appendPlatformDeferred(const unsigned char* rgba, double timeS
         for (int y = 0; y < h; ++y) {
             const unsigned char* srow = rgba + (size_t)y * w * 4;
             uint8_t* drow = dst + (size_t)y * dstStride;
-            simd::rgbaToBgra(srow, drow, static_cast<size_t>(w));
+            for (size_t x = 0; x < (size_t)w; ++x) {
+                drow[x * 4 + 0] = srow[x * 4 + 2];  // B
+                drow[x * 4 + 1] = srow[x * 4 + 1];  // G
+                drow[x * 4 + 2] = srow[x * 4 + 0];  // R
+                drow[x * 4 + 3] = srow[x * 4 + 3];  // A
+            }
         }
         CVPixelBufferUnlockBaseAddress(pb, 0);
 

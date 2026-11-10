@@ -10,7 +10,6 @@
 #import <CoreVideo/CoreVideo.h>
 
 #include "TrussC.h"
-#include "tc/utils/tcSimd.h"
 #include "../metal/tcVideoAsyncLoad.h"
 
 // Text of an Objective-C object (NSString, NSError, ...) for the Logger: its
@@ -427,7 +426,13 @@ NS_INLINE CGImageRef tcv_copy_cgimage_at_time(AVAssetImageGenerator* gen,
                     unsigned char* srcRow = baseAddress + y * bytesPerRow;
                     unsigned char* dstRow = _pixelBuffer + y * (size_t)_videoWidth * 4;
 
-                    trussc::simd::bgraToRgba(srcRow, dstRow, copyW);
+                    for (size_t x = 0; x < copyW; x++) {
+                        // BGRA -> RGBA
+                        dstRow[x * 4 + 0] = srcRow[x * 4 + 2];  // R <- B
+                        dstRow[x * 4 + 1] = srcRow[x * 4 + 1];  // G <- G
+                        dstRow[x * 4 + 2] = srcRow[x * 4 + 0];  // B <- R
+                        dstRow[x * 4 + 3] = srcRow[x * 4 + 3];  // A <- A
+                    }
                 }
                 _hasNewFrame = YES;
             }
