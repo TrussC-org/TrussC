@@ -4178,7 +4178,7 @@ static int distInit(const string& projectPath, const string& projectName,
     string version;
     if (!appVersion.empty()) {
         if (!dist::normalizeVersion(appVersion, version)) {
-            cerr << "Error: --app-version must look like 1.2.0 (got '" << appVersion << "')\n";
+            cerr << "Error: --app-version must be three numbers like 1.2.0 (got \"" << appVersion << "\").\n";
             return 1;
         }
     } else {
@@ -4187,7 +4187,7 @@ static int distInit(const string& projectPath, const string& projectName,
             string answer = promptString(string("Version [") + dist::kDefaultVersion + "]: ");
             if (answer.empty()) break;
             if (dist::normalizeVersion(answer, version)) break;
-            cout << "  A version looks like 1.2.0 (up to four numbers).\n";
+            cout << "  A version is three numbers, like 1.2.0.\n";
             version = dist::kDefaultVersion;
         }
     }
@@ -4653,7 +4653,8 @@ static int cmdDist(const vector<string>& args) {
     {
         string version;
         if (!dist::normalizeVersion(config.version, version)) {
-            cerr << "Error: version must look like 1.2.0 (got '" << config.version << "')\n";
+            cerr << "Error: the version must be three numbers like 1.2.0 (got \"" << config.version << "\").\n"
+                 << "Set it in dist.json \"version\" or with --app-version.\n";
             return 1;
         }
         config.version = version;

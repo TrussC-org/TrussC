@@ -392,10 +392,20 @@ std::string configTemplate(const std::string& name, const std::string& version,
 bool normalizeVersion(const std::string& input, std::string& out) {
     std::string v = input;
     if (!v.empty() && (v[0] == 'v' || v[0] == 'V')) v.erase(0, 1);
-    const auto key = versionKey(v);
-    if (key.empty() || key.size() > 4) return false;
-    for (char c : v) if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '.')) return false;
-    for (int part : key) if (part > 65535) return false;  // Windows version fields are 16-bit
+    // Split by hand: std::getline drops a trailing empty part, so "1.2." would
+    // pass as two numbers and become "1.2..0" for the installer.
+    std::vector<std::string> parts(1);
+    for (char c : v) {
+        if (c == '.') parts.emplace_back();
+        else parts.back() += c;
+    }
+    if (parts.size() != 3) return false;
+    for (const std::string& part : parts) {
+        if (part.empty() || part.size() > 5 ||
+            !std::all_of(part.begin(), part.end(), [](unsigned char c) { return std::isdigit(c); }))
+            return false;
+        if (std::stoi(part) > 65535) return false;  // Windows version fields are 16-bit
+    }
     out = v;
     return true;
 }

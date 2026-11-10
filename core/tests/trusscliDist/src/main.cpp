@@ -15,8 +15,8 @@
 //     login (unchecked) as checkboxes, and an uninstaller
 //     that deletes the listed files and any of the shortcuts, then the
 //     folders deepest first, never recursively.
-//   - Versions: "v1.2.0" -> "1.2.0", one to four numbers of at most 65535,
-//     anything else rejected. File-safe names: spaces -> '-', characters not
+//   - Versions: "v1.2.0" -> "1.2.0", exactly three numbers of at most 65535,
+//     anything else rejected ("1.2." too). File-safe names: spaces -> '-', characters not
 //     allowed in file names dropped, never empty.
 //   - exclude globs: '*' and '?' stay in one segment, '**' spans any number
 //     (including none); a pattern for a folder excludes what is inside it.
@@ -188,12 +188,17 @@ void testNsis() {
 void testNames() {
     std::string v;
     check("version: v prefix dropped", dist::normalizeVersion("v1.2.0", v) && v == "1.2.0");
-    check("version: one to four numbers",
-          dist::normalizeVersion("1", v) && dist::normalizeVersion("1.2.3.4", v) && v == "1.2.3.4");
+    check("version: three numbers", dist::normalizeVersion("10.0.65535", v) && v == "10.0.65535");
+    check("version: not three numbers rejected",
+          !dist::normalizeVersion("1", v) && !dist::normalizeVersion("1.2", v) &&
+              !dist::normalizeVersion("1.2.3.4", v));
+    check("version: an empty part rejected (\"1.2.\" became \"1.2..0\" for NSIS)",
+          !dist::normalizeVersion("1.2.", v) && !dist::normalizeVersion(".1.2", v) &&
+              !dist::normalizeVersion("1..2", v) && !dist::normalizeVersion("1.2.3.", v));
     check("version: invalid forms rejected",
-          !dist::normalizeVersion("1.2.3.4.5", v) && !dist::normalizeVersion("beta", v) &&
-              !dist::normalizeVersion("1..2", v) && !dist::normalizeVersion("", v) &&
-              !dist::normalizeVersion("1.2-rc1", v) && !dist::normalizeVersion("70000.0", v));
+          !dist::normalizeVersion("beta", v) && !dist::normalizeVersion("", v) && !dist::normalizeVersion("v", v) &&
+              !dist::normalizeVersion("1.2.0-rc1", v) && !dist::normalizeVersion("70000.0.0", v) &&
+              !dist::normalizeVersion("1.2.99999999999", v));
     check("file-safe name", dist::fileSafeName("My App") == "My-App" &&
                                 dist::fileSafeName("a/b:c?") == "abc" &&
                                 dist::fileSafeName(" x ") == "x" && dist::fileSafeName("") == "app");

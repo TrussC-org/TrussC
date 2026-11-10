@@ -75,8 +75,9 @@ bool parseConfig(const std::string& text, Config& out, std::vector<std::string>&
 std::string configTemplate(const std::string& name, const std::string& version,
                            const std::string& author);
 
-// "v1.2.0" / "1.2.0" -> "1.2.0". One to four dot-separated numbers (the
-// Windows version resource has four). False for anything else.
+// "v1.2.0" / "1.2.0" -> "1.2.0". Exactly three dot-separated numbers of at
+// most 65535 (the Windows installer adds the fourth, 0). False for anything
+// else: "1.2", "1.2.", "1.2.3.4", "1.2.0-rc1".
 bool normalizeVersion(const std::string& input, std::string& out);
 
 // The name used in file and folder names: spaces become '-', characters that
