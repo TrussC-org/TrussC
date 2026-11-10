@@ -209,6 +209,14 @@ void inputChecks() {
     feed(SAPP_EVENTTYPE_MOUSE_SCROLL); expect("mouseScrolled", "cdpa");
     scrollConsumer.disconnect(); order.clear();
 
+    auto sourceCheck = events().keyPressed.listen([](const KeyEventArgs& e) {
+        check("public/MCP source visible before App", e.source == InputSource::Injected);
+    });
+    auto* target = app->getWindow();
+    check("public key press accepted", target->injectInput(InputEvent::keyPress(SAPP_KEYCODE_A)));
+    expect("keyPressed", "cdpatblz");
+    check("public key release accepted", target->injectInput(InputEvent::keyRelease(SAPP_KEYCODE_A)));
+    expect("keyReleased", "cdpatblz");
     mcp::setToolLevel(mcp::ToolLevel::Control);
     tool("tc_key_press", {{"key", SAPP_KEYCODE_A}}); expect("keyPressed", "cdpatblz");
     tool("tc_key_release", {{"key", SAPP_KEYCODE_A}}); expect("keyReleased", "cdpatblz");

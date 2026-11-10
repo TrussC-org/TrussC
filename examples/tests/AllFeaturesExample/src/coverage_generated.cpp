@@ -1847,6 +1847,21 @@ struct Cover_Image : af::Scope<Image> {
     }
 };
 
+struct Cover_InputEvent : af::Scope<InputEvent> {
+    ~Cover_InputEvent(); // Never instantiated.
+    static void run() {
+        (void)af::val<InputEvent>().keyPress(af::val<int>(), af::val<uint32_t>(), af::val<bool>());
+        (void)af::val<InputEvent>().keyRelease(af::val<int>(), af::val<uint32_t>());
+        (void)af::val<InputEvent>().mouseMove(af::val<Vec2>(), af::val<uint32_t>());
+        (void)af::val<InputEvent>().mousePress(af::val<Vec2>(), af::val<int>(), af::val<uint32_t>());
+        (void)af::val<InputEvent>().mouseRelease(af::val<Vec2>(), af::val<int>(), af::val<uint32_t>());
+        (void)af::val<InputEvent>().mouseScroll(af::val<Vec2>(), af::val<uint32_t>());
+        (void)af::val<InputEvent>().touchMove(af::val<const TouchEventArgs>(), af::val<uint32_t>());
+        (void)af::val<InputEvent>().touchPress(af::val<const TouchEventArgs>(), af::val<uint32_t>());
+        (void)af::val<InputEvent>().touchRelease(af::val<const TouchEventArgs>(), af::val<uint32_t>());
+    }
+};
+
 struct Cover_JsonReadReflector : af::Scope<JsonReadReflector> {
     ~Cover_JsonReadReflector(); // Never instantiated.
     static void run() {
@@ -1910,6 +1925,7 @@ struct Cover_KeyEventArgs : af::Scope<KeyEventArgs> {
         (void)af::val<KeyEventArgs>().isRepeat;
         (void)af::val<KeyEventArgs>().key;
         (void)af::val<KeyEventArgs>().shift;
+        (void)af::val<KeyEventArgs>().source;
         (void)af::val<KeyEventArgs>().super;
     }
 };
@@ -2309,6 +2325,7 @@ struct Cover_MouseDragEventArgs : af::Scope<MouseDragEventArgs> {
         (void)af::val<MouseDragEventArgs>().globalPos;
         (void)af::val<MouseDragEventArgs>().pos;
         (void)af::val<MouseDragEventArgs>().shift;
+        (void)af::val<MouseDragEventArgs>().source;
         (void)af::val<MouseDragEventArgs>().super;
         (void)af::val<MouseDragEventArgs>().syncLegacy();
         (void)af::val<MouseDragEventArgs>().x;
@@ -2326,6 +2343,7 @@ struct Cover_MouseEventArgs : af::Scope<MouseEventArgs> {
         (void)af::val<MouseEventArgs>().globalPos;
         (void)af::val<MouseEventArgs>().pos;
         (void)af::val<MouseEventArgs>().shift;
+        (void)af::val<MouseEventArgs>().source;
         (void)af::val<MouseEventArgs>().super;
         (void)af::val<MouseEventArgs>().syncLegacy();
         (void)af::val<MouseEventArgs>().x;
@@ -2346,6 +2364,7 @@ struct Cover_MouseMoveEventArgs : af::Scope<MouseMoveEventArgs> {
         (void)af::val<MouseMoveEventArgs>().globalPos;
         (void)af::val<MouseMoveEventArgs>().pos;
         (void)af::val<MouseMoveEventArgs>().shift;
+        (void)af::val<MouseMoveEventArgs>().source;
         (void)af::val<MouseMoveEventArgs>().super;
         (void)af::val<MouseMoveEventArgs>().syncLegacy();
         (void)af::val<MouseMoveEventArgs>().x;
@@ -3421,6 +3440,7 @@ struct Cover_ScrollEventArgs : af::Scope<ScrollEventArgs> {
         (void)af::val<ScrollEventArgs>().scrollX;
         (void)af::val<ScrollEventArgs>().scrollY;
         (void)af::val<ScrollEventArgs>().shift;
+        (void)af::val<ScrollEventArgs>().source;
         (void)af::val<ScrollEventArgs>().super;
         (void)af::val<ScrollEventArgs>().syncLegacy();
     }
@@ -4063,6 +4083,7 @@ struct Cover_TouchEventArgs : af::Scope<TouchEventArgs> {
         (void)af::val<TouchEventArgs>().cancelled;
         (void)af::val<const TouchEventArgs>().id();
         (void)af::val<TouchEventArgs>().numTouches;
+        (void)af::val<TouchEventArgs>().source;
         (void)af::val<TouchEventArgs>().touches;
         (void)af::val<const TouchEventArgs>().x();
         (void)af::val<const TouchEventArgs>().y();
@@ -4968,6 +4989,7 @@ struct Cover_Window : af::Scope<Window> {
 #endif
         (void)af::val<const Window>().getTitle();
         (void)af::val<const Window>().getWidth();
+        (void)af::val<Window>().injectInput(af::val<const InputEvent>(), af::val<InputSource>());
         (void)af::val<const Window>().isFocused();
         (void)af::val<const Window>().isFullscreen();
         (void)af::val<const Window>().isOccluded();
@@ -5204,6 +5226,7 @@ void af::coverGenerated() {
     af_generated::Cover_IVec3::run();
     af_generated::Cover_IesProfile::run();
     af_generated::Cover_Image::run();
+    af_generated::Cover_InputEvent::run();
     af_generated::Cover_JsonReadReflector::run();
     af_generated::Cover_JsonWriteReflector::run();
     af_generated::Cover_KeyEventArgs::run();

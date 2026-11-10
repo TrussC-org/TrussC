@@ -51,6 +51,18 @@ void stages(bool before) {
 #undef STAGE
 }
 void feed(sapp_event_type type, float x = 20, float y = 20, unsigned int modifiers = 0) {
+    // General routing uses the public logical input facade. Native-only
+    // lifecycle/resize stimuli keep their backend seam below.
+    auto inject = [](const InputEvent& input) { check("secondary public input accepted", secondary->injectInput(input)); };
+    switch (type) {
+        case SAPP_EVENTTYPE_KEY_DOWN: inject(InputEvent::keyPress(SAPP_KEYCODE_A, modifiers)); return;
+        case SAPP_EVENTTYPE_KEY_UP: inject(InputEvent::keyRelease(SAPP_KEYCODE_A, modifiers)); return;
+        case SAPP_EVENTTYPE_MOUSE_DOWN: inject(InputEvent::mousePress({x, y}, 0, modifiers)); return;
+        case SAPP_EVENTTYPE_MOUSE_UP: inject(InputEvent::mouseRelease({x, y}, 0, modifiers)); return;
+        case SAPP_EVENTTYPE_MOUSE_MOVE: inject(InputEvent::mouseMove({x, y}, modifiers)); return;
+        case SAPP_EVENTTYPE_MOUSE_SCROLL: inject(InputEvent::mouseScroll({0, 1}, modifiers)); return;
+        default: break;
+    }
     sapp_event e{}; e.type = type; e.key_code = SAPP_KEYCODE_A;
     e.mouse_button = SAPP_MOUSEBUTTON_LEFT;
     const float dpi = trussc::internal::WindowRequestAccess::context(*secondary).dpiScale;
@@ -108,7 +120,10 @@ void extraEvents() {
 }
 void inputChecks() {
     order.clear();
-    auto down = source().keyPressed.listen([](auto& e) { check("listener sees held key", isKeyPressed(e.key)); });
+    auto down = source().keyPressed.listen([](auto& e) {
+        check("secondary source visible before App", e.source == InputSource::Injected);
+        check("listener sees held key", isKeyPressed(e.key));
+    });
     auto up = source().keyReleased.listen([](auto& e) { check("listener sees released key", !isKeyPressed(e.key)); });
     feed(SAPP_EVENTTYPE_KEY_DOWN); expect("keyPressed", "cdpatblz");
     feed(SAPP_EVENTTYPE_KEY_UP); expect("keyReleased", "cdpatblz");

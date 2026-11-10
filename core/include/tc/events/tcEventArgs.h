@@ -27,6 +27,9 @@ enum class MouseButton {
     None   = 0x100,  // SAPP_MOUSEBUTTON_INVALID (no button; e.g. during a plain move)
 };
 
+/// Origin of framework input; diagnostic metadata, not authentication.
+enum class InputSource { Real, Injected, Replayed };
+
 // ---------------------------------------------------------------------------
 // Key event arguments
 // ---------------------------------------------------------------------------
@@ -40,6 +43,7 @@ struct KeyEventArgs {
     // Set by a listener to stop propagation to lower-priority listeners
     // (Event<T>::notify breaks once this is true). See tcEvent.h.
     bool consumed = false;
+    InputSource source = InputSource::Real;
 };
 
 // ---------------------------------------------------------------------------
@@ -83,6 +87,8 @@ struct MouseEventArgs {
     // lives on MouseMoveEventArgs / MouseDragEventArgs.
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
+    InputSource source = InputSource::Real;
+
     // Sync legacy scalar mirrors from the canonical Vec2 fields.
     void syncLegacy() { x = pos.x; y = pos.y; }
 };
@@ -104,6 +110,8 @@ struct MouseMoveEventArgs {
     Vec2 delta;               // Movement since last event, local space
     Vec2 globalDelta;         // Movement since last event, screen space
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
+
+    InputSource source = InputSource::Real;
 
     void syncLegacy() { x = pos.x; y = pos.y; deltaX = delta.x; deltaY = delta.y; }
 };
@@ -127,6 +135,8 @@ struct MouseDragEventArgs {
     Vec2 globalDelta;
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
 
+    InputSource source = InputSource::Real;
+
     void syncLegacy() { x = pos.x; y = pos.y; deltaX = delta.x; deltaY = delta.y; }
 };
 
@@ -146,6 +156,8 @@ struct ScrollEventArgs {
     Vec2 globalPos;           // Screen position of the cursor
     Vec2 scroll;              // Scroll amount (x: horizontal, y: vertical)
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
+
+    InputSource source = InputSource::Real;
 
     void syncLegacy() { scrollX = scroll.x; scrollY = scroll.y; }
 };
@@ -170,6 +182,7 @@ struct MouseEventRaw {
     bool alt = false;
     bool super = false;
     bool consumed = false;    // Stop propagation to lower-priority listeners (see tcEvent.h)
+    InputSource source = InputSource::Real;
 };
 
 // ---------------------------------------------------------------------------
@@ -181,6 +194,7 @@ inline MouseMoveEventArgs toMoveArgs(const MouseEventRaw& m) {
     a.delta = m.delta; a.globalDelta = m.globalDelta;
     a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
     a.consumed = m.consumed;
+    a.source = m.source;
     a.syncLegacy();
     return a;
 }
@@ -192,6 +206,7 @@ inline MouseDragEventArgs toDragArgs(const MouseEventRaw& m) {
     a.button = m.button;
     a.shift = m.shift; a.ctrl = m.ctrl; a.alt = m.alt; a.super = m.super;
     a.consumed = m.consumed;
+    a.source = m.source;
     a.syncLegacy();
     return a;
 }
@@ -205,6 +220,7 @@ inline MouseEventRaw toRaw(const T& a) {
     if constexpr (requires { a.button; }) m.button = a.button;
     m.shift = a.shift; m.ctrl = a.ctrl; m.alt = a.alt; m.super = a.super;
     m.consumed = a.consumed;
+    m.source = a.source;
     return m;
 }
 
@@ -271,6 +287,8 @@ struct TouchEventArgs {
     bool cancelled = false;   // true when touchReleased is due to system cancellation
                               // (e.g. incoming call, system gesture). Released is still
                               // fired — check this flag for cancellation-specific handling.
+
+    InputSource source = InputSource::Real;
 
     // Convenience: first touch
     float x() const { return numTouches > 0 ? touches[0].x : 0.0f; }

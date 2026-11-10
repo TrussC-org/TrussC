@@ -384,45 +384,31 @@ struct InputTarget {
         return buildPointer(type, x, y, button);
     }
     sapp_event buildPointer(sapp_event_type type, float x, float y, int button) const {
-        sapp_event event{}; event.type = type; event.modifiers = modifiers();
-        event.mouse_button = button >= 0 ? static_cast<sapp_mousebutton>(button) : SAPP_MOUSEBUTTON_INVALID;
-        if (type == SAPP_EVENTTYPE_MOUSE_DOWN && button >= 0) event.modifiers |= SAPP_MODIFIER_LMB << button;
-        if (type == SAPP_EVENTTYPE_MOUSE_UP && button >= 0) event.modifiers &= ~(SAPP_MODIFIER_LMB << button);
-        const double dpi = snapshot.dpi_scale > 0 ? snapshot.dpi_scale : ctx.dpiScale;
-        const double factor = trussc::internal::pixelPerfectMode() ? 1 : dpi;
-        const double nx = double(x) * factor, ny = double(y) * factor;
-        const double basis = trussc::internal::pixelPerfectMode() ? dpi : 1;
-        const double dx = ctx.pointerValid ? double(x) - double(ctx.pointerLogicalX) * basis : 0;
-        const double dy = ctx.pointerValid ? double(y) - double(ctx.pointerLogicalY) * basis : 0;
-        // Bound (abi): transformed positions and differences must fit finite float event fields; reject before injection.
-        for (double value : {nx, ny, dx, dy, dx * factor, dy * factor})
-            if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
-                throw InputArgumentError("transformed pointer position or delta is out of range");
-        event.mouse_x = float(nx); event.mouse_y = float(ny);
-        event.mouse_dx = float(dx * factor); event.mouse_dy = float(dy * factor);
+        const auto input = type == SAPP_EVENTTYPE_MOUSE_DOWN ? InputEvent::mousePress({x, y}, button, modifiers()) :
+            type == SAPP_EVENTTYPE_MOUSE_UP ? InputEvent::mouseRelease({x, y}, button, modifiers()) :
+            InputEvent::mouseMove({x, y}, modifiers());
+        sapp_event event{};
+        if (!trussc::internal::buildInputEvent(input, ctx, snapshot.dpi_scale, event, true))
+            throw InputArgumentError("transformed pointer position or delta is out of range");
         return event;
     }
     void send(sapp_event event, const void* pressOwner = nullptr) {
         begin();
-        const auto& binding = trussc::internal::WindowRequestAccess::binding(window);
-        event.source = SAPP_EVENTSOURCE_INJECTED;
         struct PressOwnerScope {
             trussc::internal::WindowContext& ctx;
             const void* previous;
             ~PressOwnerScope() { ctx.pendingMousePressOwner = previous; }
         } ownerScope{ctx, ctx.pendingMousePressOwner};
         ctx.pendingMousePressOwner = pressOwner;
-        bool delivered = false;
-        if constexpr (trussc::internal::supportsSecondaryWindows()) {
-            delivered = binding.operations && binding.operations->injectEvent &&
-                binding.operations->injectEvent(binding.handle, binding.user, &event);
-        } else delivered = sapp_window_inject_event(binding.handle, &event);
+        const bool delivered = trussc::internal::sendInputEvent(window, event, InputSource::Injected);
         if (!delivered) throw InputArgumentError("target window rejected input");
     }
     void key(int key, bool down) {
+        const auto input = down ? InputEvent::keyPress(key, modifiers(key, down)) :
+            InputEvent::keyRelease(key, modifiers(key, down));
         sapp_event event{};
-        event.type = down ? SAPP_EVENTTYPE_KEY_DOWN : SAPP_EVENTTYPE_KEY_UP;
-        event.key_code = static_cast<sapp_keycode>(key); event.modifiers = modifiers(key, down);
+        if (!trussc::internal::buildInputEvent(input, ctx, snapshot.dpi_scale, event))
+            throw InputArgumentError("invalid key input");
         send(event);
     }
 };
@@ -1176,8 +1162,10 @@ void registerStandardTools(Server& server) {
             const float dx = internal::inputFloat(a, "dx");
             const float dy = internal::inputFloat(a, "dy");
             internal::InputTarget target(a);
-            sapp_event event{}; event.type = SAPP_EVENTTYPE_MOUSE_SCROLL;
-            event.scroll_x = dx; event.scroll_y = dy; event.modifiers = target.modifiers();
+            sapp_event event{};
+            if (!trussc::internal::buildInputEvent(InputEvent::mouseScroll({dx, dy}, target.modifiers()),
+                    target.ctx, target.snapshot.dpi_scale, event))
+                throw internal::InputArgumentError("invalid scroll input");
             target.send(event);
 
             return json{{"status", "ok"}};
