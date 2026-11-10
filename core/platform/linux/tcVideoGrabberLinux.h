@@ -2,6 +2,7 @@
 
 // Internal Linux capture helpers, shared with headless tests.
 #include <linux/videodev2.h>
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <cstring>
@@ -159,10 +160,13 @@ bool negotiateLinuxCapture(Ioctl&& call, std::span<const LinuxCaptureMode> modes
     }
     const double mjpgFps = maxCaptureFps(modes, V4L2_PIX_FMT_MJPEG, width, height);
     const double requiredFps = requestedFps > 0 ? requestedFps : mjpgFps;
+    const bool mjpgOffersSize = std::any_of(modes.begin(), modes.end(), [&](const auto& mode) {
+        return mode.fourcc == V4L2_PIX_FMT_MJPEG && mode.width == width && mode.height == height;
+    });
     const auto& pixel = result.format.fmt.pix;
     if (first == V4L2_PIX_FMT_YUYV &&
         (pixel.pixelformat != first || pixel.width != width || pixel.height != height || result.fps < requiredFps) &&
-        mjpgFps > 0 && mjpgFps >= requiredFps) {
+        mjpgOffersSize) {
         result.reason = "YUYV negotiated a different format/size or insufficient fps; falling back to MJPG";
         return attempt(V4L2_PIX_FMT_MJPEG);
     }

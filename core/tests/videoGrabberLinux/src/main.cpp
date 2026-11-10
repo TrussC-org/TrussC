@@ -179,13 +179,20 @@ void negotiationChecks() {
     LinuxCaptureNegotiation result;
     check("old MJPG S_FMT failure still tries YUYV", negotiateLinuxCapture(driver, {}, 640, 480, 0, result) &&
         driver.attempts == std::vector<uint32_t>{V4L2_PIX_FMT_MJPEG, V4L2_PIX_FMT_YUYV});
-    driver = {};
-    driver.lowerYuyvFps = true;
     const std::vector<LinuxCaptureMode> slowerMjpg{
         {V4L2_PIX_FMT_YUYV, 640, 480, {discreteInterval(1, 30)}},
         {V4L2_PIX_FMT_MJPEG, 640, 480, {discreteInterval(1, 15)}}};
-    check("no MJPG fallback when MJPG cannot meet request", negotiateLinuxCapture(driver, slowerMjpg, 640, 480, 30, result) &&
-        driver.attempts == std::vector<uint32_t>{V4L2_PIX_FMT_YUYV});
+    for (bool wrongSize : {true, false}) {
+        driver = {};
+        driver.resizeYuyv = wrongSize;
+        driver.rejectRate = !wrongSize;
+        check(wrongSize ? "wrong YUYV size falls back to slower MJPG"
+                        : "rejected YUYV rate falls back to slower MJPG",
+            negotiateLinuxCapture(driver, slowerMjpg, 640, 480, 30, result) &&
+            driver.attempts == std::vector<uint32_t>{V4L2_PIX_FMT_YUYV, V4L2_PIX_FMT_MJPEG} &&
+            result.format.fmt.pix.pixelformat == V4L2_PIX_FMT_MJPEG &&
+            result.format.fmt.pix.width == 640 && result.format.fmt.pix.height == 480);
+    }
 }
 
 void appendJpeg(void* context, void* data, int size) {
