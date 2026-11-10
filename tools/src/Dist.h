@@ -183,7 +183,8 @@ struct PlanInput {
     fs::path projectDir;
     fs::path binDir;            // projectDir/bin
     fs::path outputDir;         // where the package folder goes
-    std::string projectName;    // executable / bundle name
+    std::string projectName;    // executable / bundle name: the CMake target
+                                // (sanitizeProjectName of the folder name)
     Config config;              // name and version already resolved
     std::vector<LicenseSource> licenses;
     fs::path vcRuntimeDir;      // Windows: from findVcRuntimeDir, may be empty

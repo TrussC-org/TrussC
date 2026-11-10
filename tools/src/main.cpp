@@ -4606,8 +4606,12 @@ static int cmdDist(const vector<string>& args) {
     }
     error_code ec;
     const fs::path projectDir = fs::weakly_canonical(fs::absolute(projectPath), ec);
+    // The folder name is what people see (the app name by default); the
+    // executable / bundle is named after the CMake target, which build and
+    // run derive with sanitizeProjectName() ("sample project" -> sample_project).
     string projectName = projectDir.filename().string();
     if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
+    const string targetName = sanitizeProjectName(projectName);
 
     if (init) return distInit(projectDir.string(), projectName, appName, appVersion, appAuthor, appAuthorGiven);
 
@@ -4727,14 +4731,14 @@ static int cmdDist(const vector<string>& args) {
     input.binDir = projectDir / "bin";
     input.outputDir = fs::weakly_canonical(
         fs::absolute(outputDir.empty() ? (projectDir / "dist") : fs::path(outputDir)), ec);
-    input.projectName = projectName;
+    input.projectName = targetName;
     input.config = config;
     input.licenses = dist::collectLicenses(tcRoot, projectAddonDirs(projectDir.string(), tcRoot),
                                            config.licenses, projectDir);
 #ifdef _WIN32
     {
         const auto installs = VsDetector::detectInstalledVersions();
-        const dist::BinaryInfo exe = dist::readBinaryInfo(input.binDir / (projectName + ".exe"));
+        const dist::BinaryInfo exe = dist::readBinaryInfo(input.binDir / (targetName + ".exe"));
         const string arch = exe.arch.empty() ? "x64" : exe.arch;
         for (const auto& vs : installs) {  // newest first
             input.vcRuntimeDir = dist::findVcRuntimeDir(vs.installPath, arch);
