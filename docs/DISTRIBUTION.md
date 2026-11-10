@@ -29,7 +29,7 @@ The top of the package is your project's `bin/` folder, minus build leftovers:
 |---|---|
 | `bin/myApp` (`myApp.exe`, `myApp.app`) | `myApp` |
 | `bin/data/...` | `data/...` (macOS: inside the `.app`, `Contents/Resources/data/`) |
-| `bin/otherApps/...` | `otherApps/...` |
+| other folders in `bin/` | next to the executable |
 | `dist.json` `include` entries | where their `to` says |
 | `EULA.txt` in the project folder, or `eulaFile` | `EULA.txt` |
 | (written by dist) | `licenses/`, `THIRD_PARTY_NOTICES.txt` |
@@ -40,29 +40,55 @@ Windows `.pdb` files go to a separate `<name>-<version>-windows-<arch>-symbols/`
 
 ### Other programs and large files
 
-To ship a helper program, a script with its runtime, or large data with the app, put it in a folder under `bin/`:
+A helper program, a script, or large data the app uses has to be in the package too. Find it from the app through `getDataPath()`, never by its path on your machine: `getDataPath()` resolves against the data folder next to the app, `bin/data/` during development and `data/` in the package, so the same code works in both.
+
+**Only this app uses it:** put it under `bin/data/`. It goes into the package as it is, and git keeps it with the rest of `bin/data/`.
 
 ```
-myApp/bin/otherApps/yourApp/yourApp.sh   ->   <package>/otherApps/yourApp/yourApp.sh
+myApp/bin/data/tools/converter/   ->   <package>/data/tools/converter/      getDataPath("tools/converter")
 ```
 
-The project template's `.gitignore` keeps only `bin/data/` in git. For another folder, add it:
+**It has its own repository:** add it as a git submodule under `bin/data/`. It keeps its own history, this project records which commit it uses, and the files are in `bin/data/`, so the rest is as above.
 
-```
-bin/*
-!bin/data/
-!bin/otherApps/
+```bash
+git submodule add https://github.com/me/nodeApp.git bin/data/nodeApp
 ```
 
-Find the files from the app relative to the app itself, never by the path on your machine: `getDataPath("tools/x")` for files under `data/`, or `getExecutableDir()` for files next to the executable. The same code then works during development and after installation.
+**It lives outside the project** (shared by several projects, or kept out of this repository): leave it there and let `include` copy it into the package. Example: a TrussC app that runs a Node.js app kept next to it.
 
-Files that live outside the project (shared by several projects, or too large for git) go in with `include`. They are copied:
+```
+projectLocation/
+  myApp/        this TrussC project
+  nodeApp/      the Node.js app, with its own repository
+    index.js
+```
+
+`dist.json` copies it into the package's `data/`:
 
 ```json
-"include": [{ "from": "../shared-tools", "to": "data/tools" }]
+"include": [{ "from": "../nodeApp", "to": "data/nodeApp" }]
 ```
 
-`from` is read on your machine when packaging; a path relative to the project folder works on every developer's machine and in CI, an absolute one only on yours. `to` is a path inside the package.
+During development it is not in `bin/data/` (only the package gets the copy), so the app looks in both places:
+
+```cpp
+// Packaged: "include" copied it to data/nodeApp.
+// Development: the checkout next to this project (bin/data/../../../ is projectLocation).
+fs::path nodeAppDir() {
+    const fs::path packaged = getDataPath("nodeApp");
+    if (fs::exists(packaged)) return packaged;
+    return getDataPath("../../../nodeApp");
+}
+// then run: node <nodeAppDir()>/index.js
+```
+
+Run it with `trusscli run` during development and package it with `trusscli dist`; neither the code nor `dist.json` changes in between.
+
+A script needs its interpreter on the other machine as well. Ship it (for example the `node` executable, with another `include` entry, and run that one), or tell the people installing the app to install it.
+
+`from` is read on your machine when packaging. A path relative to the project folder, as above, works on every developer's machine and in CI; an absolute one only on yours. `to` is a path inside the package.
+
+Any other folder in `bin/` is packaged too and lands next to the executable (`bin/otherApps/` becomes `<package>/otherApps/`, found with `getExecutableDir()`), but the project template's `.gitignore` keeps only `bin/data/` in git; add `!bin/otherApps/` to it.
 
 ### Symlinks
 
