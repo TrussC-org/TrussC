@@ -536,7 +536,7 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
     )
 endfunction()
 
-# sips -z stretches to a square; tell the user once per configure when the PNG isn't square.
+# Tell the user once per configure when the icon PNG isn't square.
 function(_trussc_warn_non_square_png TARGET_NAME PNG_FILE)
     # PNG IHDR: width and height are big-endian 32-bit at byte offset 16.
     file(READ "${PNG_FILE}" IHDR OFFSET 16 LIMIT 8 HEX)
@@ -725,15 +725,16 @@ function(_trussc_setup_icon_windows TARGET_NAME ICON_DIR DEFAULT_DIR)
     endif()
 
     # 2. Try converting from .png
-    file(GLOB PNG_FILES "${ICON_DIR}/*.png")
+    file(GLOB PNG_FILES CONFIGURE_DEPENDS "${ICON_DIR}/*.png")
     if(PNG_FILES)
         list(GET PNG_FILES 0 PNG_FILE)
-        get_filename_component(PNG_NAME "${PNG_FILE}" NAME_WE)
-        set(OUTPUT_ICO "${ICON_DIR}/${PNG_NAME}.ico")
+        _trussc_warn_non_square_png(${TARGET_NAME} "${PNG_FILE}")
+        set(OUTPUT_ICO "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_icon.ico")
 
-        _trussc_convert_png_to_ico("${PNG_FILE}" "${OUTPUT_ICO}" SUCCESS)
+        _trussc_convert_png_to_ico(${TARGET_NAME} "${PNG_FILE}" "${OUTPUT_ICO}" SUCCESS)
         if(SUCCESS)
-            message(STATUS "[${TARGET_NAME}] Converted PNG to ICO: ${PNG_NAME}.ico")
+            get_filename_component(PNG_NAME "${PNG_FILE}" NAME)
+            message(STATUS "[${TARGET_NAME}] Using icon from PNG: ${PNG_NAME}")
             _trussc_apply_windows_icon(${TARGET_NAME} "${OUTPUT_ICO}")
             return()
         endif()
@@ -756,27 +757,53 @@ function(_trussc_apply_windows_icon TARGET_NAME ICON_FILE)
 endfunction()
 
 # PNG -> ICO conversion (using ImageMagick)
-function(_trussc_convert_png_to_ico PNG_FILE OUTPUT_ICO OUT_SUCCESS)
+function(_trussc_convert_png_to_ico TARGET_NAME PNG_FILE OUTPUT_ICO OUT_SUCCESS)
     set(${OUT_SUCCESS} FALSE PARENT_SCOPE)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PNG_FILE}")
 
-    # Requires ImageMagick (magick or convert)
+    # Windows' convert.exe is a disk utility, not ImageMagick.
+    if(CMAKE_HOST_WIN32)
+        get_filename_component(MAGICK_TOOL_NAME "${MAGICK_EXECUTABLE}" NAME)
+        string(TOLOWER "${MAGICK_TOOL_NAME}" MAGICK_TOOL_NAME)
+        if(MAGICK_TOOL_NAME STREQUAL "convert" OR MAGICK_TOOL_NAME STREQUAL "convert.exe")
+            unset(MAGICK_EXECUTABLE CACHE)
+            unset(MAGICK_EXECUTABLE)
+        endif()
+    endif()
     find_program(MAGICK_EXECUTABLE magick)
-    if(NOT MAGICK_EXECUTABLE)
+    if(NOT MAGICK_EXECUTABLE AND NOT CMAKE_HOST_WIN32)
         find_program(MAGICK_EXECUTABLE convert)
     endif()
     if(NOT MAGICK_EXECUTABLE)
+        if(CMAKE_HOST_WIN32)
+            message(WARNING "[${TARGET_NAME}] ImageMagick 7 (magick) not found; using default TrussC icon")
+        else()
+            message(WARNING "[${TARGET_NAME}] ImageMagick (magick or convert) not found; using default TrussC icon")
+        endif()
+        return()
+    endif()
+
+    # Reconfigure when the PNG changes, but reuse a successful unchanged result.
+    _trussc_check_png_conversion("${PNG_FILE}" "${OUTPUT_ICO}" PNG_HASH REUSABLE)
+    set(STAMP "${OUTPUT_ICO}.sha256")
+    if(REUSABLE)
+        set(${OUT_SUCCESS} TRUE PARENT_SCOPE)
         return()
     endif()
 
     execute_process(
-        COMMAND ${MAGICK_EXECUTABLE} "${PNG_FILE}" -define icon:auto-resize=256,128,64,48,32,16 "${OUTPUT_ICO}"
+        COMMAND "${MAGICK_EXECUTABLE}" "${PNG_FILE}" -define icon:auto-resize=256,128,64,48,32,16 "${OUTPUT_ICO}"
         RESULT_VARIABLE RESULT
         OUTPUT_QUIET ERROR_QUIET
     )
 
-    if(RESULT EQUAL 0 AND EXISTS "${OUTPUT_ICO}")
-        set(${OUT_SUCCESS} TRUE PARENT_SCOPE)
+    if(NOT RESULT EQUAL 0 OR NOT EXISTS "${OUTPUT_ICO}")
+        get_filename_component(TOOL_NAME "${MAGICK_EXECUTABLE}" NAME)
+        message(WARNING "[${TARGET_NAME}] ${TOOL_NAME} failed to convert PNG; using default TrussC icon")
+        return()
     endif()
+    file(WRITE "${STAMP}" "${PNG_HASH}")
+    set(${OUT_SUCCESS} TRUE PARENT_SCOPE)
 endfunction()
 
 # =============================================================================
