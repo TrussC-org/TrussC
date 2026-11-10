@@ -202,6 +202,8 @@ pathlib.Path(args[2], 'Assets.car').write_bytes(b'user icon catalog')
         custom.rmdir()
         self.assertIn('Using default TrussC icon', self.configure(folder=None, bundle=True))
         self.assertIn('Add :CFBundleIconName string default', self.bundle_commands())
+        # Finder and the Dock refresh a changed icon only when the bundle's mtime moves.
+        self.assertIn('COMMAND;touch;$<TARGET_BUNDLE_DIR:app>', self.bundle_commands())
         self.assertEqual(build_catalog(), catalog.read_bytes())
 
     def test_user_icon_uses_selected_xcode_and_its_own_catalog(self):
@@ -214,7 +216,10 @@ pathlib.Path(args[2], 'Assets.car').write_bytes(b'user icon catalog')
 
     def assert_user_icon(self, actool, discovery):
         (self.icons / 'custom.icon').mkdir()
+        icon_json = self.icons / 'custom.icon/icon.json'
+        icon_json.write_text('{}', encoding='utf-8')
         output = self.configure(folder=None)
+        self.assertIn(icon_json.as_posix(), self.selection.splitlines()[2].split(';'))
         self.assertIn(f'Using actool: {actool} ({discovery})', output)
         self.assertEqual(output.count('Using actool:'), 1)
         call, = self.calls()

@@ -530,6 +530,8 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
     # Remove the quarantine attribute (only once, at the end)
     add_custom_command(TARGET ${TARGET_NAME} POST_BUILD
         COMMAND xattr -cr "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
+        # Bump the bundle's mtime so Finder and the Dock pick up a changed icon.
+        COMMAND touch "$<TARGET_BUNDLE_DIR:${TARGET_NAME}>"
         COMMENT "Removing quarantine attribute from ${TARGET_NAME}.app"
     )
 endfunction()
@@ -641,6 +643,9 @@ endfunction()
 # Apply a macOS .icon folder (macOS 26 Tahoe+, compiled with actool)
 function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
     set(${OUT_SUCCESS} FALSE PARENT_SCOPE)
+
+    file(GLOB_RECURSE ICON_FILES CONFIGURE_DEPENDS "${ICON_FOLDER}/*")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ICON_FILES})
 
     # Prefer the selected Xcode. The CLT actool is a non-working shim.
     execute_process(
