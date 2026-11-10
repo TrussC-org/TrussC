@@ -11,6 +11,7 @@
 *.cmd text eol=crlf
 
 # Binary files
+*.car binary
 *.png binary
 *.jpg binary
 *.jpeg binary
