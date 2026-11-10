@@ -90,13 +90,10 @@ A script also needs its interpreter on the other machine. Ship it (for example t
 
 #### Large data
 
-Put it in `bin/data/`, and keep it out of git with `.gitignore`. `dist` packages what is in `bin/`, whether git tracks it or not:
+Put it in `bin/data/`. `dist` packages what is in `bin/`, whether git tracks it or not, so keep large files out of the repository in one of two ways:
 
-```
-bin/data/videos/
-```
-
-Other developers and machines then get those files some other way (a shared drive, a download script), since cloning the repository does not bring them.
+- **Ignore them** with `.gitignore` (`bin/data/videos/`) and share them another way, for example a shared drive. Cloning the repository does not bring them.
+- **Track them with [Git LFS](https://git-lfs.com/)** (`git lfs track "bin/data/videos/**"`). The repository keeps small pointers, and cloning with Git LFS installed brings the files.
 
 ### Symlinks
 
