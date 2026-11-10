@@ -38,6 +38,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND (TC_X11_GL_DEPS OR TC_X11_EGL_DEPS))
         COMMAND "${CMAKE_COMMAND}" -E env "CXX=${CMAKE_CXX_COMPILER}"
             "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/../windowTick/x11-pacing-test"
+        COMMAND "${CMAKE_COMMAND}" -E env "CXX=${CMAKE_CXX_COMPILER}"
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../tools/tests/test_x11_movable_pacer.py"
         VERBATIM)
     add_test(NAME x11Pacing COMMAND "${CMAKE_COMMAND}" -E env "CXX=${CMAKE_CXX_COMPILER}"
         "${Python3_EXECUTABLE}"
@@ -64,7 +67,7 @@ if(TC_X11_AVAILABLE)
     target_include_directories(x11Regression PRIVATE ../../include/sokol)
     target_link_libraries(x11Regression PRIVATE X11 Xcursor Xi EGL GLESv2)
     foreach(boundary clock_gettime XPending XFlush XNextEvent XGetWindowAttributes poll
-            eglMakeCurrent eglGetCurrentContext eglGetCurrentSurface eglGetCurrentDisplay eglSwapBuffers
+            eglSwapInterval eglMakeCurrent eglGetCurrentContext eglGetCurrentSurface eglGetCurrentDisplay eglSwapBuffers
             XGrabPointer XUngrabPointer XWarpPointer XSetSelectionOwner XGetSelectionOwner XInternAtom
             XConvertSelection XDeleteProperty XCheckTypedWindowEvent XCheckIfEvent XGetWindowProperty
             XLookupString XFilterEvent XSendEvent XGetAtomName XFree)

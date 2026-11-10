@@ -9,8 +9,17 @@
 #include <cstdlib>
 #include <algorithm>
 #include <initializer_list>
+#include <vector>
 namespace trussc::internal { void setExitReasonIfEmpty(const char*) {} }
 
+
+#if defined(SOKOL_GLES3)
+static std::vector<std::string> nativeSequence;
+extern "C" EGLBoolean __wrap_eglSwapInterval(EGLDisplay, EGLint interval) {
+    nativeSequence.push_back("interval:" + std::to_string((uintptr_t)eglGetCurrentSurface(EGL_DRAW)) + ":" + std::to_string(interval));
+    return EGL_TRUE;
+}
+#endif
 
 static long observedState = NormalState;
 static bool visibilityProbe;
@@ -173,12 +182,16 @@ extern "C" int __wrap_poll(pollfd*, nfds_t, int timeout) {
     now += timeout * .001; return 0;
 }
 extern "C" EGLBoolean __wrap_eglMakeCurrent(EGLDisplay, EGLSurface draw, EGLSurface read, EGLContext context) {
+    nativeSequence.push_back("current:" + std::to_string((uintptr_t)draw));
     currentDraw = draw; currentRead = read; currentContext = context; return EGL_TRUE;
 }
 extern "C" EGLContext __wrap_eglGetCurrentContext() { return currentContext; }
 extern "C" EGLSurface __wrap_eglGetCurrentSurface(EGLint which) { return which == EGL_DRAW ? currentDraw : currentRead; }
 extern "C" EGLDisplay __wrap_eglGetCurrentDisplay() { return currentContext ? (EGLDisplay)1 : EGL_NO_DISPLAY; }
-extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay, EGLSurface surface) { presentedSurface = surface; ++swaps; now += .0664; return EGL_TRUE; }
+extern "C" EGLBoolean __wrap_eglSwapBuffers(EGLDisplay, EGLSurface surface) {
+    nativeSequence.push_back("swap:" + std::to_string((uintptr_t)surface));
+    presentedSurface = surface; ++swaps; now += .0664; return EGL_TRUE;
+}
 extern "C" int __wrap_XGrabPointer(Display*, Window, Bool, unsigned int, int, int, Window, Cursor, Time) { return GrabSuccess; }
 extern "C" int __wrap_XUngrabPointer(Display*, Time) { return 1; }
 extern "C" int __wrap_XWarpPointer(Display*, Window, Window, int, int, unsigned int, unsigned int, int x, int y) {
@@ -276,13 +289,14 @@ static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display*
     main.desc.event_cb = _sapp_tc_main_event_tramp;
     main.desc.tick_cb = _sapp_tc_main_tick_tramp;
     main.events_enabled = _sapp_tc_app_events_enabled;
-    main.swap_interval = 4; main.wake_on_input = true; main.draw_while_hidden = true;
+    main.swap_interval = main.requested_swap_interval = 4; _sapp_tc.pacer = {1}; main.wake_on_input = true; main.draw_while_hidden = true;
     _sapp_tc.display = display; _sapp_tc.windows = windows; _sapp_tc.window_slots = 1;
     _sapp_tc.ctx = (EGLContext)1; _sapp_tc.egl_display = (EGLDisplay)1;
     _sapp_tc.app.main = &main; _sapp_tc.app.init_called = true;
     _sapp_tc.app.desc.event_cb = event; _sapp_tc.app.desc.frame_cb = frame;
     _sapp_tc.app.desc.swap_interval = 4; _sapp_tc.app.desc.logger.func = logger;
     _sapp_tc.refresh_period = .0166;
+    _sapp_tc.hidden_refresh_period = .0166;
     _sapp_tc.keycodes[24] = SAPP_KEYCODE_A;
     lookupKeysym = XK_a; callbacks = keyCallbacks = charCallbacks = dropCallbacks = 0;
     polls = pending = frames = swaps = 0;
@@ -291,6 +305,7 @@ static void reset(_sapp_tc_window_t& main, _sapp_tc_window_t** windows, Display*
     injectedType = FocusIn; injectedWindow = 1; flood = false; eventsRead = floodEvents = 0;
     nextExpose = 10.001;
     currentContext = (EGLContext)1; currentDraw = currentRead = (EGLSurface)1;
+    nativeSequence.clear();
 }
 static bool parseDrop(const std::string& text) {
     property = text; propertyCalls = 0;
@@ -326,11 +341,70 @@ int main() {
         check("main key/button at 10ms re-admits", inputAt > 0 && nextFrame - inputAt < .002);
     }
     _sapp_tc_window_t secondary{}; secondary.ready = secondary.trust_hidden_signals = true; secondary.xwin = 2;
-    secondary.drawable = (EGLSurface)2; secondary.earliest_next = 20;
+    secondary.drawable = (EGLSurface)2; secondary.earliest_next = 20; secondary.requested_swap_interval = 1;
     secondary.fb_width = secondary.fb_height = 64; // initialized native metadata precedes readiness
     _sapp_tc_window_t* pair[] = { &main, &secondary };
     reset(main, pair, display); _sapp_tc.window_slots = 2;
     main.win_id = 1; secondary.win_id = 2;
+    // Real WM_STATE conversion + selector + native surface-scope restoration.
+    // D formerly activated the iconified surface and applied interval zero.
+    for (bool paired : {false, true}) for (bool draw : {false, true}) {
+        reset(main, paired ? pair : windows, display); _sapp_tc.window_slots = paired ? 2 : 1;
+        secondary.iconified = secondary.occluded = false;
+        secondary.swap_interval = 0; secondary.swap_interval_pending = false;
+        main.draw_while_hidden = draw; main.desc.tick_cb = [](sapp_window, void*) { ++frames; };
+        _sapp_tc.WM_STATE = 101; visibilityProbe = true; observedState = IconicState;
+        XEvent ev{}; ev.type = PropertyNotify; ev.xproperty.window = main.xwin;
+        ev.xproperty.atom = _sapp_tc.WM_STATE; ev.xproperty.state = PropertyNewValue;
+        nativeSequence.clear();
+        _sapp_tc_x11_process_event(&ev); visibilityProbe = false;
+        check("WM_STATE marks pacer iconified", main.iconified);
+        _sapp_tc_x11_update_pacer();
+        check("iconify selector avoids demoted EGL surface", nativeSequence == (paired ?
+            std::vector<std::string>{"current:2", "interval:2:1", "current:1"} : std::vector<std::string>{}));
+        check("iconified native demotion is pending", main.swap_interval == 0 && main.swap_interval_pending);
+        nativeSequence.clear(); _sapp_tc_x11_tick(&main);
+        check("iconified ON/OFF native tick sequence", nativeSequence == (draw ?
+            std::vector<std::string>{"current:1"} : std::vector<std::string>{}));
+    }
+    // The oldest visible window can occupy the last slot after slot reuse.
+    // Exercise the activation helper used by Runtime context restoration from
+    // both lifecycle callbacks, with the shared context parked on idle.
+    _sapp_tc_window_t newest{};
+    _sapp_tc_window_t* reused[] = { &newest, &secondary, &main };
+    reset(main, reused, display); _sapp_tc.window_slots = 3;
+    main.win_id = main.xwin = 3; main.drawable = (EGLSurface)3; _sapp_tc.pacer = {3};
+    main.draw_while_hidden = false; // OFF: a hidden window that never draws doesn't need its surface.
+    secondary.win_id = secondary.xwin = 4; secondary.drawable = (EGLSurface)4;
+    secondary.iconified = secondary.occluded = false;
+    secondary.swap_interval = 0; secondary.requested_swap_interval = 1;
+    newest.win_id = newest.xwin = 5; newest.drawable = (EGLSurface)5; newest.ready = true;
+    newest.requested_swap_interval = 1;
+    _sapp_tc.idle.drawable = (EGLSurface)9;
+    sapp_tc_gl_activate_idle(); nativeSequence.clear();
+    main.desc.event_cb = [](const sapp_event* ev, sapp_window handle, void*) {
+        ++callbacks;
+        check("WM_STATE hands pacer to earliest visible window before dispatch", _sapp_tc.pacer.id == 4);
+        check("WM_STATE dispatches iconified then suspended", ev->type ==
+            (callbacks == 1 ? SAPP_EVENTTYPE_ICONIFIED : SAPP_EVENTTYPE_SUSPENDED));
+        _sapp_tc_x11_surface_scope restore;
+        for (int i = 0; i < 2; ++i) {
+            sapp_tc_gl_make_current(handle);
+            check("hidden event activation keeps shared context on idle",
+                currentDraw == _sapp_tc.idle.drawable && currentContext == _sapp_tc.ctx);
+        }
+    };
+    _sapp_tc.WM_STATE = 101; visibilityProbe = true; observedState = IconicState;
+    XEvent iconify{}; iconify.type = PropertyNotify; iconify.xproperty.window = main.xwin;
+    iconify.xproperty.atom = _sapp_tc.WM_STATE; iconify.xproperty.state = PropertyNewValue;
+    _sapp_tc_x11_process_event(&iconify); visibilityProbe = false;
+    check("trusted WM_STATE delivers both lifecycle callbacks", callbacks == 2);
+    check("WM_STATE event dispatch never activates iconified surface",
+        std::find(nativeSequence.begin(), nativeSequence.end(), "current:3") == nativeSequence.end());
+    secondary.win_id = secondary.xwin = 2; secondary.drawable = (EGLSurface)2;
+    observedState = NormalState;
+    secondary.swap_interval = 0; secondary.swap_interval_pending = false;
+    reset(main, pair, display); _sapp_tc.window_slots = 2;
     main.desc.tick_cb = secondary.desc.tick_cb = [](sapp_window, void*) { ++frames; };
     for (auto* target : {&main, &secondary}) {
         for (bool trust : {false, true}) for (bool iconified : {false, true}) {
@@ -340,7 +414,7 @@ int main() {
                 target->draw_while_hidden = allow; frames = swaps = 0;
                 _sapp_tc_x11_tick(target);
                 check("native hidden admission and trust follow data for either role",
-                    frames == 1 && swaps == int(!trust || allow));
+                    frames == 1 && swaps == int(!trust));
                 check("untrusted hidden flags report visible", sapp_window_occluded({target->win_id}) == trust &&
                     (target != &main || sapp_window_occluded({0}) == trust));
             }

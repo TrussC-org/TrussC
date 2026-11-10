@@ -1906,16 +1906,58 @@ details.en = '''
 - Returns outputs only; `MicInput::listDevices(backend)` returns inputs only. Entries include name, backend-native ID, direction-specific OS default flag, and reported native channels/rates. Pass an entry to `AudioSettings::device`.
 - `backend` defaults to `Default`: use the existing engine context if present, otherwise probe miniaudio’s default backend order without starting playback. An explicit backend probes only that backend; unavailable backends return an empty list and log a Warning. Native iOS probing leaves the audio session untouched and lists current routes; output routing remains OS controlled.
 - Enumeration queries each device with `ma_context_get_device_info`; this can open/probe devices (especially ALSA) and may be slow. Call from the main thread when needed, not every frame. A failed detail query keeps the device entry with unspecified capabilities. Web returns an empty list because miniaudio exposes only default placeholders, not selectable device IDs.
+
+OS-decorated names such as "スピーカー (USB Audio Device)" vary with the OS language, so match a stable part of the name.
+
+```cpp
+auto devices = AudioEngine::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("USB Audio") != string::npos;
+});
+if (it != devices.end()) {
+    AudioSettings settings;
+    settings.device = *it;
+    AudioEngine::getInstance().init(settings);
+}
+```
 '''
 details.ja = '''
 - 出力だけを返します。`MicInput::listDevices(backend)` は入力だけを返します。各要素には名前、バックエンド固有ID、この方向でのOS既定フラグ、報告されたネイティブチャンネル数とレートが入ります。出力の要素は `AudioSettings::device` に渡します。
 - `backend` の既定値は `Default` です。エンジンのコンテキストがあれば使い、なければ再生を開始せず miniaudio の既定順で調べます。明示したバックエンドだけを調べ、利用できなければ Warning と空リストを返します。iOSの調査ではオーディオセッションを変更せず、現在のルートを列挙します。出力ルートはOSが制御します。
 - 各デバイスに `ma_context_get_device_info` を呼びます。特にALSAではデバイスを開いて調べるため時間がかかる場合があります。毎フレームではなく必要なときにメインスレッドで呼んでください。詳細取得に失敗しても、対応形式が未指定の要素を残します。Webでは選択可能なIDを取得できず既定デバイスの仮の情報だけになるため、空リストを返します。
+
+「スピーカー (USB Audio Device)」のように OS が装飾する名前は OS の言語によって変わるため、名前の安定した部分で照合します。
+
+```cpp
+auto devices = AudioEngine::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("USB Audio") != string::npos;
+});
+if (it != devices.end()) {
+    AudioSettings settings;
+    settings.device = *it;
+    AudioEngine::getInstance().init(settings);
+}
+```
 '''
 details.ko = '''
 - 출력만 반환합니다. `MicInput::listDevices(backend)`는 입력만 반환합니다. 각 항목에는 이름, 백엔드 고유 ID, 해당 방향의 OS 기본 플래그, 보고된 네이티브 채널 수와 레이트가 들어 있습니다. 출력 항목은 `AudioSettings::device`에 전달합니다.
 - `backend` 기본값은 `Default`이며 엔진 컨텍스트가 있으면 사용하고, 없으면 재생을 시작하지 않고 miniaudio의 기본 순서로 조회합니다. 명시한 백엔드만 조회하며 사용할 수 없으면 Warning과 빈 목록을 반환합니다. iOS 조회는 오디오 세션을 변경하지 않고 현재 경로를 열거합니다. 출력 경로는 OS가 제어합니다.
 - 장치마다 `ma_context_get_device_info`를 호출합니다. 특히 ALSA는 장치를 열어 조회할 수 있어 느릴 수 있습니다. 매 프레임 대신 필요할 때 메인 스레드에서 호출합니다. 상세 조회에 실패해도 지원 형식이 미지정인 항목을 유지합니다. Web은 선택 가능한 ID 대신 기본 장치의 임시 정보만 제공하므로 빈 목록을 반환합니다.
+
+"スピーカー (USB Audio Device)"처럼 OS가 꾸미는 이름은 OS 언어에 따라 달라지므로 이름에서 변하지 않는 부분으로 비교합니다.
+
+```cpp
+auto devices = AudioEngine::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("USB Audio") != string::npos;
+});
+if (it != devices.end()) {
+    AudioSettings settings;
+    settings.device = *it;
+    AudioEngine::getInstance().init(settings);
+}
+```
 '''
 
 ["AudioEngine::onDisconnect"]
@@ -38887,6 +38929,16 @@ details.en = '''
 - Native enumeration can return an empty list when no devices are found or enumeration fails.
 - Linux scans accessible capture devices from `/dev/video0` through `/dev/video9`; IDs are device-number suffixes and need not be consecutive.
 - Web returns one placeholder entry, `{0, "Default Camera", "default"}`, without enumerating hardware; Android returns an empty list.
+
+OS-decorated names such as "マイク (Logitech StreamCam)" vary with the OS language, so match a stable part of the name.
+
+```cpp
+auto devices = grabber.listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) grabber.setDeviceUniqueID(it->uniqueId);
+```
 '''
 details.ja = '''
 - 一覧の順番によらず選択する場合は `uniqueId` を `setDeviceUniqueID()` に渡します。`VideoDeviceInfo::uniqueId` を参照してください。
@@ -38894,6 +38946,16 @@ details.ja = '''
 - ネイティブ環境では、デバイスが見つからない場合や列挙に失敗した場合に空の一覧を返すことがあります。
 - Linux ではアクセス可能な `/dev/video0` から `/dev/video9` のキャプチャデバイスを調べます。ID はデバイス名の末尾の番号で、連番とは限りません。
 - Web はハードウェアを列挙せず、仮の項目 `{0, "Default Camera", "default"}` を 1 件返します。Android は空の一覧を返します。
+
+「マイク (Logitech StreamCam)」のように OS が装飾する名前は OS の言語によって変わるため、名前の安定した部分で照合します。
+
+```cpp
+auto devices = grabber.listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) grabber.setDeviceUniqueID(it->uniqueId);
+```
 '''
 details.ko = '''
 - 목록 순서와 관계없이 선택하려면 `uniqueId`를 `setDeviceUniqueID()`에 전달합니다. `VideoDeviceInfo::uniqueId`를 참조합니다.
@@ -38901,6 +38963,16 @@ details.ko = '''
 - 네이티브 환경에서는 디바이스가 없거나 열거에 실패하면 빈 목록을 반환할 수 있습니다.
 - Linux에서는 접근 가능한 `/dev/video0`부터 `/dev/video9`까지의 캡처 디바이스를 검색합니다. ID는 디바이스 이름 끝의 번호이며 연속되지 않을 수 있습니다.
 - Web은 하드웨어를 열거하지 않고 임시 항목 `{0, "Default Camera", "default"}` 하나를 반환합니다. Android는 빈 목록을 반환합니다.
+
+"マイク (Logitech StreamCam)"처럼 OS가 꾸미는 이름은 OS 언어에 따라 달라지므로 이름에서 변하지 않는 부분으로 비교합니다.
+
+```cpp
+auto devices = grabber.listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) grabber.setDeviceUniqueID(it->uniqueId);
+```
 '''
 snippet = '''
 // tcApp member: VideoGrabber camera;
@@ -41820,6 +41892,73 @@ description.ja = "setPosition と同じスクリーン座標系での、この�
 description.ko = "setPosition과 같은 스크린 좌표계에서의 이 윈도우의 현재 위치. 네이티브 윈도우가 없으면 (-1, -1)"
 related = ["Window::setPosition"]
 
+["Window::setDrawWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
+description.en = "Keeps this window drawing while hidden when enabled."
+description.ja = "有効にすると、非表示中もこのウィンドウの描画を続けます。"
+description.ko = "활성화하면 숨겨진 동안에도 이 윈도우의 그리기를 계속합니다."
+details.en = '''
+- With `true`, update and draw keep running while minimized or fully covered. Use this when `draw()` sends frames to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
+- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see `setDrawWhileHidden`).
+- The default is `false`: hidden windows keep updating and stop drawing. This window inherits the global default at creation; the last global or per-window call wins. A local call does not change the default for future windows.
+- Call on the main thread. The setting survives App replacement on this Window.
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+'''
+details.ja = '''
+- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送る場合に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
+- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（`setDrawWhileHidden` を参照）。
+- 既定値は `false` で、非表示中も更新を続けますが描画は停止します。作成時にグローバルの既定値を引き継ぎ、その後はグローバルとウィンドウ単位の最後の呼び出しが優先されます。この呼び出しは今後作成するウィンドウの既定値を変更しません。
+- メインスレッドで呼び出してください。この Window の App を差し替えても設定を保持します。
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
+'''
+details.ko = '''
+- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 보낼 때 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
+- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(`setDrawWhileHidden` 참조).
+- 기본값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다. 생성 시 전역 기본값을 상속하며 이후에는 전역 호출과 윈도우별 호출 중 마지막 호출이 우선합니다. 이 호출은 앞으로 생성할 윈도우의 기본값을 변경하지 않습니다.
+- 메인 스레드에서 호출합니다. 이 Window의 App을 교체해도 설정을 유지합니다.
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
+'''
+related = ["setDrawWhileHidden", "Window::isOccluded", "Window::setVisible", "Window::setFps"]
+snippet = '''
+window->setDrawWhileHidden(true);
+'''
+
+["setDrawWhileHidden"]
+keywords = ["hidden", "occluded", "minimized", "Spout", "Syphon", "NDI", "recorder"]
+description.en = "Sets drawing while hidden for all existing windows and the default for new ones."
+description.ja = "非表示中に描画するかを全ウィンドウに設定し、新規ウィンドウの既定値にします。"
+description.ko = "숨겨진 동안 그릴지 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다."
+details.en = '''
+- Sets every existing window and becomes the default for new windows, even when called from one App's callbacks. The initial default is `false`: hidden windows keep updating and stop drawing.
+- With `true`, hidden windows keep updating and drawing, including while minimized or fully covered. This supports sending frames from `draw()` to Spout, Syphon, NDI or a recorder. Screen output while hidden is up to the OS.
+- While hidden, frames come from the hidden tick at about the display's base rate (~60 Hz); faster pacing and `swapInterval` aren't kept, while `setFps(30)`/`setFps(60)` still hold. To use another rate while hidden, change it yourself from `events().occludedChanged` (see the snippet).
+- `Window::setDrawWhileHidden()` changes one window only. The last global or per-window call wins. Call on the main thread; setup may set the policy before the first draw.
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
+'''
+details.ja = '''
+- ある App のコールバックから呼んだ場合も、既存のすべてのウィンドウに設定し、新規ウィンドウの既定値にします。初期値は `false` で、非表示中も更新を続けますが描画は停止します。
+- `true` にすると、最小化中や完全に覆われている間も更新と描画を続けます。`draw()` から Spout・Syphon・NDI・レコーダーへフレームを送り続ける用途に使います。非表示中に画面へ出力されるかどうかは OS に依存します。
+- 非表示中のフレームは、非表示用の tick によって画面の基本レート（約 60 Hz）で進みます。それより速いペースと `swapInterval` は保たれませんが、`setFps(30)`/`setFps(60)` はそのまま有効です。非表示中に別のレートにしたい場合は、`events().occludedChanged` で自分で切り替えてください（スニペット参照）。
+- `Window::setDrawWhileHidden()` は 1 つのウィンドウだけを変更し、最後の呼び出しが優先されます。メインスレッドで呼び出してください。setup で初回描画の前に設定できます。
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
+'''
+details.ko = '''
+- 한 App의 콜백에서 호출해도 모든 기존 윈도우에 설정하고 새 윈도우의 기본값으로 지정합니다. 초기값은 `false`이며 숨겨진 윈도우는 업데이트를 계속하고 그리기는 중지합니다.
+- `true`이면 최소화되거나 완전히 가려진 동안에도 업데이트와 그리기를 계속합니다. `draw()`에서 Spout, Syphon, NDI 또는 레코더로 프레임을 계속 보내는 데 사용합니다. 숨겨진 동안 화면에 출력되는지는 OS에 따라 달라집니다.
+- 숨겨진 동안의 프레임은 숨김용 틱에 의해 화면의 기본 레이트(약 60 Hz)로 진행됩니다. 그보다 빠른 페이스와 `swapInterval`은 유지되지 않지만 `setFps(30)`/`setFps(60)`은 그대로 유효합니다. 숨겨진 동안 다른 레이트를 쓰려면 `events().occludedChanged`에서 직접 전환하세요(스니펫 참조).
+- `Window::setDrawWhileHidden()`는 하나의 윈도우만 변경하며 마지막 호출이 우선합니다. 메인 스레드에서 호출합니다. setup에서 첫 그리기 전에 설정할 수 있습니다.
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
+'''
+related = ["Window::setDrawWhileHidden", "Window::isOccluded", "setFps"]
+snippet = '''
+EventListener occListener;  // member
+setDrawWhileHidden(true);
+// Optional: a slower rate while hidden
+occListener = events().occludedChanged.listen([](OccludedEventArgs& e) {
+    setFps(e.occluded ? 10 : VSYNC);
+});
+'''
+
 ["Window::setFps"]
 keywords = ["frame rate", "framerate", "throttle", "vsync", "speed"]
 description.en = "Sets this window's target frame rate."
@@ -41829,16 +41968,19 @@ details.en = '''
 - Sets synchronized update/draw pacing for this window, including main. `VSYNC` (-1, default) follows the OS tick source, `EVENT_DRIVEN` (0) draws on `redraw()`, and a positive rate skips native ticks as needed. Drawing runs at most once per native tick.
 - From this window's callbacks, `setIndependentFps()` and `redraw()` use the same scheduler. `getFps()` returns the draw target; `getFrameRate()` measures updates without changing its samples.
 - For main-thread requirements, see `Window::setApp`.
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
 '''
 details.ja = '''
 - メインを含むこのウィンドウの update/draw を同期して設定します。`VSYNC`（-1、既定）は OS の tick に従い、`EVENT_DRIVEN`（0）は `redraw()` で描画し、正の値では必要な tick を間引きます。描画は native tick ごとに最大 1 回です。
 - このウィンドウのコールバック内の `setIndependentFps()` と `redraw()` も同じスケジューラを使います。`getFps()` は描画の目標値、`getFrameRate()` はサンプルを変更しない実測の更新レートです。
 - メインスレッドでの使用は `Window::setApp` を参照してください。
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
 '''
 details.ko = '''
 - 메인을 포함한 이 윈도우의 update/draw를 동기화하여 설정합니다. `VSYNC`(-1, 기본값)는 OS 틱을 따르고, `EVENT_DRIVEN`(0)은 `redraw()`로 그리며, 양수는 필요한 틱을 건너뜁니다. 네이티브 틱당 최대 한 번 그립니다.
 - 이 윈도우의 콜백에서 `setIndependentFps()`와 `redraw()`도 같은 스케줄러를 사용합니다. `getFps()`는 그리기 목표값이며 `getFrameRate()`는 샘플을 변경하지 않는 실측 업데이트 빈도입니다.
 - 메인 스레드 사용 규칙은 `Window::setApp`을 참조하세요.
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
 '''
 related = ["Window::getFps"]
 
@@ -53099,18 +53241,21 @@ details.en = '''
 - Under `setFps`, `update()` and `draw()` are called together at the same rate; to run them at independent rates (for example a fast simulation with a slower draw, or the reverse), use `setIndependentFps()` instead.
 - Switching the rate at runtime takes effect immediately from the moment of the call, with no catch-up: on a fixed fps the next frame is drawn right away, and the first `update()` after the switch has a `getDeltaTime()` that excludes time spent in the previous mode. Called between updates, the new timer starts from the call; called from inside an `update()`, it starts from that update's beginning. The time this drops is under one frame in the usual modes, and only grows larger after an idle period such as `EVENT_DRIVEN` waiting for a redraw.
 - Calling `setFps` again with the rate it is already at does nothing, so it is safe to call every frame (for example from a GUI slider). On the one frame where the value actually changes, that update's `getDeltaTime()` is shorter than a normal frame, since it is measured only from the moment of the call.
+- On Linux (X11), all windows share one clock: the display of the earliest-created visible window. If that window is hidden, the next visible one takes over. If none is visible, a timer at about 60 Hz paces them. Mixed-refresh displays can change the rate; use `setFps(…)` for a fixed rate. macOS and Windows pace each window to its own display.
 '''
 details.ja = '''
 - 現在のウィンドウの update/draw を同期して設定します。`VSYNC`（-1）は OS の tick、`EVENT_DRIVEN`（0）は `redraw()` またはキャプチャ要求に従い、正の値では tick を間引きます。native tick 以上の目標値では毎回描画します。
 - `setFps` のもとでは `update()` と `draw()` は同じレートでまとめて呼ばれます。それぞれを独立したレートで動かしたい場合(高速なシミュレーションに低速な描画を組み合わせる場合など)は、代わりに `setIndependentFps()` を使用してください。
 - 実行中にレートを切り替えると、呼び出した瞬間から即座に新しいレートで動き始め、遅れを取り戻す動作はしません。固定fpsの場合、次のフレームはすぐに描画され、切り替え後最初の `update()` の `getDeltaTime()` には前のモードで経過した時間は含まれません。update の外で呼び出した場合はその呼び出し時点から、update の中で呼び出した場合はその update の開始時点から数え始めます。ここで捨てられる時間は通常のモードでは1フレーム未満で、`EVENT_DRIVEN` の待機のようなアイドル期間のあとだけ大きくなります。
 - 現在と同じレートで `setFps` を呼んでも何も起きないため、GUIのスライダー操作中など、毎フレーム呼び出しても安全です。値が実際に変わったそのフレームだけは、その update の `getDeltaTime()` が呼び出し時点からの時間になるため、通常のフレームより短くなります。
+- Linux（X11）では、すべてのウィンドウが、表示中のうち最も早く作成されたウィンドウのディスプレイを共通のクロックに使います。そのウィンドウが非表示になると、次の表示中のウィンドウが引き継ぎます。表示中のウィンドウがなければ、約 60 Hz のタイマーで進みます。リフレッシュレートの異なるディスプレイが混在するとレートが変わるため、固定レートには `setFps(…)` を使います。macOS と Windows では、各ウィンドウがそれぞれのディスプレイに合わせて進みます。
 '''
 details.ko = '''
 - 현재 윈도우의 update/draw를 동기화하여 설정합니다. `VSYNC`(-1)는 OS 틱, `EVENT_DRIVEN`(0)은 `redraw()` 또는 캡처 요청을 따르며 양수는 틱을 건너뜁니다. 네이티브 틱 이상의 목표값은 매 틱 그립니다.
 - `setFps` 아래에서는 `update()`와 `draw()`가 같은 레이트로 함께 호출됩니다. 각각을 독립된 레이트로 돌리고 싶다면(예: 빠른 시뮬레이션에 느린 그리기를 조합하는 경우 등) 대신 `setIndependentFps()`를 사용하세요.
 - 실행 중에 레이트를 전환하면 호출한 순간부터 즉시 새 레이트로 동작하며, 밀린 시간을 따라잡지 않습니다. 고정 fps의 경우 다음 프레임이 바로 그려지며, 전환 후 첫 `update()`의 `getDeltaTime()`에는 이전 모드에서 경과한 시간이 포함되지 않습니다. update 밖에서 호출했다면 호출 시점부터, update 안에서 호출했다면 그 update의 시작 시점부터 셉니다. 여기서 버려지는 시간은 일반적인 모드에서는 1프레임 미만이며, `EVENT_DRIVEN`의 대기처럼 유휴 기간이 있었을 때만 커집니다.
 - 현재와 같은 레이트로 `setFps`를 호출하면 아무 일도 일어나지 않으므로, GUI 슬라이더 조작 중처럼 매 프레임 호출해도 안전합니다. 값이 실제로 바뀐 그 프레임에서만 해당 update의 `getDeltaTime()`이 호출 시점부터의 시간이 되어 일반 프레임보다 짧아집니다.
+- Linux(X11)에서는 모든 윈도우가 표시 중인 윈도우 중 가장 먼저 생성된 윈도우의 디스플레이를 공통 클록으로 사용합니다. 해당 윈도우가 숨겨지면 다음 표시 중인 윈도우가 이어받습니다. 표시 중인 윈도우가 없으면 약 60 Hz의 타이머로 진행합니다. 주사율이 다른 디스플레이가 섞여 있으면 레이트가 달라질 수 있으므로 고정 레이트에는 `setFps(…)`를 사용합니다. macOS와 Windows에서는 각 윈도우가 자신의 디스플레이에 맞춰 진행합니다.
 '''
 snippet = '''
 void tcApp::setup() {
@@ -66082,14 +66227,47 @@ description.ko = "출력과 별도로 캡처 장치 목록을 조회합니다."
 details.en = '''
 - Returns input entries only, including monitor sources exposed by the OS. Use `setDevice(entry)` to select one. `backend` defaults to `Default` and follows the current engine context or probes miniaudio’s default order. An explicit backend is used alone.
 - The capability, cost, failure, iOS session and Web limitations are the same as `AudioEngine::listDevices`. Web returns an empty list. Enumeration does not request microphone permission.
+- On iOS the list shows the audio session's current inputs and leaves `isDefault` false. A microphone started without `setDevice()` reports its name as "Default Capture Device", which differs from the listed name.
+
+OS-decorated names such as "マイク (Logitech StreamCam)" vary with the OS language, so match a stable part of the name.
+
+```cpp
+auto devices = MicInput::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) mic.setDevice(*it);
+```
 '''
 details.ja = '''
 - OSが公開するモニターソースも含め、入力の要素だけを返します。`setDevice(entry)` で選択します。`backend` は既定で `Default` となり、エンジンのコンテキスト、または miniaudio の既定順に従います。明示したバックエンドは単独で使います。
 - 対応形式、処理時間、失敗、iOSセッション、Webの制限は `AudioEngine::listDevices` と同じです。Webは空リストを返します。列挙ではマイク権限を要求しません。
+- iOS では、オーディオセッションの現在の入力だけが並び、`isDefault` は false のままです。`setDevice()` を使わずに開いたマイクの名前は "Default Capture Device" となり、一覧の名前とは異なります。
+
+「マイク (Logitech StreamCam)」のように OS が装飾する名前は OS の言語によって変わるため、名前の安定した部分で照合します。
+
+```cpp
+auto devices = MicInput::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) mic.setDevice(*it);
+```
 '''
 details.ko = '''
 - OS가 공개하는 모니터 소스를 포함하여 입력 항목만 반환합니다. `setDevice(entry)`로 선택합니다. `backend` 기본값은 `Default`이며 현재 엔진 컨텍스트 또는 miniaudio의 기본 순서를 따릅니다. 명시한 백엔드는 단독으로 사용합니다.
 - 지원 형식, 비용, 실패, iOS 세션 및 Web 제한은 `AudioEngine::listDevices`와 같습니다. Web은 빈 목록을 반환합니다. 열거는 마이크 권한을 요청하지 않습니다.
+- iOS에서는 오디오 세션의 현재 입력만 나열되며 `isDefault`는 false로 남습니다. `setDevice()` 없이 연 마이크의 이름은 "Default Capture Device"로 보고되어 목록의 이름과 다릅니다.
+
+"マイク (Logitech StreamCam)"처럼 OS가 꾸미는 이름은 OS 언어에 따라 달라지므로 이름에서 변하지 않는 부분으로 비교합니다.
+
+```cpp
+auto devices = MicInput::listDevices();
+auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
+    return d.name.find("StreamCam") != string::npos;
+});
+if (it != devices.end()) mic.setDevice(*it);
+```
 '''
 
 ["MicInput::setDevice"]

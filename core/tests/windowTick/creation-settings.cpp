@@ -71,6 +71,7 @@ DeviceContext deviceContext;
 struct {
     unsigned next_id=0; _sapp_tc_window_t* windows[32]{};
     int constructing=0, callbacks_active=0; bool deferred_blocked=false;
+    sapp_window pacer{UINT32_MAX}; // Existing launch pacer is outside this secondary-only seam.
     size_t window_slots=32; const char* create_error=nullptr;
     int display=1,ctx=1,NET_WM_STATE=1,NET_WM_STATE_FULLSCREEN=2; float dpi=96;
     struct { sapp_desc desc{}; bool valid=true; const void* device=(void*)1;
@@ -101,6 +102,7 @@ void dispose(_sapp_tc_window_t* w) {
 }
 void _sapp_tc_win32_unwind(_sapp_tc_window_t* w) { dispose(w); }
 void _sapp_tc_x11_unwind(_sapp_tc_window_t* w) { dispose(w); }
+void _sapp_tc_x11_update_pacer() {} // Existing launch pacer is outside this creation-only seam.
 _sapp_tc_window_t* _sapp_tc_mac_fail(_sapp_tc_window_t* w,const char*) { dispose(w); return nullptr; }
 bool _sapp_tc_win32_trust_hidden_signals() { return true; }
 bool _sapp_tc_mac_trust_hidden_signals() { return true; }

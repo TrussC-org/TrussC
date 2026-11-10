@@ -85,7 +85,12 @@ def generate(backend, variant):
                'native.swap_interval = desc->swap_interval > 0 ? desc->swap_interval : 1;')
         entry = replace_once(entry, old, 'native.swap_interval = 1;')
     elif variant == 'record_interval':
-        constructor = replace_once(constructor, 'w->swap_interval = d->swap_interval;', 'w->swap_interval = 1;')
+        if port == 'x11':
+            old = ('w->requested_swap_interval = d->swap_interval > 0 ? d->swap_interval :\n'
+                   '        (d->window.swap_interval > 0 ? d->window.swap_interval : 1);')
+            constructor = replace_once(constructor, old, 'w->requested_swap_interval = 1;')
+        else:
+            constructor = replace_once(constructor, 'w->swap_interval = d->swap_interval;', 'w->swap_interval = 1;')
     elif variant == 'constructor_fullscreen':
         condition = 'if (d->fullscreen && !w->desc.hidden)' if port == 'x11' else 'if (d->fullscreen)'
         constructor = replace_once(constructor, condition, 'if (false && d->fullscreen)')
