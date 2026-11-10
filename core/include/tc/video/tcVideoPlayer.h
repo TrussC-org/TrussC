@@ -2,6 +2,7 @@
 #include "tc/utils/tcAnnotations.h"
 #include <mutex>
 #include "tc/utils/tcOnceGate.h"
+#include "tc/utils/tcResourceLoad.h"
 #include "internal/tcVideoDecodeLimits.h"
 
 // =============================================================================
@@ -36,11 +37,28 @@ namespace internal { class VideoPlayerPlatformAccess; }  // friend, defined belo
 // VideoPlayer - Standard video playback (RGBA output)
 // ---------------------------------------------------------------------------
 class TC_PLATFORMS("macos,windows,linux,ios,web") VideoPlayer : public VideoPlayerBase {
+    struct AsyncState : internal::ResourceLoadState {
+        fs::path path;
+#ifdef __APPLE__
+        std::shared_ptr<void> asset;
+        Pixels poster;
+        bool autoPoster = true;
+        size_t retainedBytes() const noexcept override { return poster.getTotalBytes(); }
+        void discardPayload() noexcept override { asset.reset(); poster.clear(); }
+#elif defined(__EMSCRIPTEN__)
+        std::unique_ptr<VideoPlayer> prepared;
+        size_t retainedBytes() const noexcept override {
+            return prepared && prepared->pixels_ ? size_t(prepared->width_) * prepared->height_ * 4 : 0;
+        }
+        void discardPayload() noexcept override { prepared.reset(); }
+#endif
+    };
+    internal::ResourceLoadSlot<AsyncState> async_;
 public:
     VideoPlayer() = default;
     ~VideoPlayer() { close(); }
 
-    // Move-enabled. onError listeners are not moved.
+    // Move-enabled. onLoad and onError listeners are not moved.
     VideoPlayer(VideoPlayer&& other) noexcept {
         moveFrom(std::move(other));
     }
@@ -72,7 +90,66 @@ public:
     }
     bool isAudioStreaming() const { return audioStreaming_; }
 
-    LoadResult load(const fs::path& path) override try {
+    LoadResult load(const fs::path& path) override {
+        async_.cancel();
+        return loadInternal(path);
+    }
+
+    // Main thread only. Completion uses the App's resource-load mailbox.
+    void loadAsync(const fs::path& path) {
+        auto state = async_.begin(onLoad, [this](AsyncState& ready) {
+            if (!ready.result) {
+                internal::clearLoadName(sourcePath_);
+                closeInternal(false);
+                return;
+            }
+#ifdef __APPLE__
+            ready.result = loadInternal(ready.path, &ready);
+#elif defined(__EMSCRIPTEN__)
+            // The Asyncify wait already finished outside this application.
+            // Keep settings changed while waiting, then publish without yielding.
+            auto& prepared = *ready.prepared;
+            prepared.volume_ = volume_;
+            prepared.speed_ = speed_;
+            prepared.loop_ = loop_;
+            prepared.autoPoster_ = autoPoster_;
+            prepared.audioStreaming_ = audioStreaming_;
+            moveFrom(std::move(prepared));
+            applyCachedStateToPlatform();
+#else
+            // These backends own main-thread/GPU state. Keep their existing
+            // blocking load path, but run it in a later resource-load pass.
+            ready.result = loadInternal(ready.path);
+#endif
+        });
+        const auto text = internal::pathToDisplayUtf8(path);
+        const bool isUrl = text.rfind("http://", 0) == 0 || text.rfind("https://", 0) == 0;
+        state->path = internal::resolveLoadPath(path, isUrl);
+        state->localFile = internal::resourceLoadIsLocalPath(path, state->path);
+        if (isUrl && !internal::admitExternalResourceLoad(state)) return;
+#ifdef __APPLE__
+        state->autoPoster = autoPoster_;
+        state->result = internal::checkLoadFile(state->path, "VideoPlayer", isUrl);
+        if (state->result) prepareAsyncPlatform(state);
+        else internal::completeResourceLoad(state);
+#elif defined(__EMSCRIPTEN__)
+        // Web waits like load(). The private player survives input callbacks
+        // destroying this player during Asyncify; never touch this after the wait.
+        closeInternal(false);
+        state->prepared = std::make_unique<VideoPlayer>();
+        state->result = state->prepared->loadInternal(state->path);
+        internal::completeResourceLoad(state);
+#else
+        internal::completeResourceLoad(state);
+#endif
+    }
+    Event<LoadResult> onLoad;
+    bool isLoading() const { return async_.loading(); }
+
+    void close() override { async_.cancel(); closeInternal(true); }
+
+private:
+    LoadResult loadInternal(const fs::path& path, AsyncState* prepared = nullptr) try {
         internal::clearLoadName(sourcePath_);
         if (initialized_) {
             closeInternal(false);
@@ -90,7 +167,14 @@ public:
         if (!entry) return entry;
 
         // Platform-specific load
-        if (!loadPlatform(resolvedPath)) {
+#ifdef __APPLE__
+        const bool opened = prepared ? loadPreparedPlatform(resolvedPath, prepared->asset.get())
+                                     : loadPlatform(resolvedPath);
+#else
+        (void)prepared;
+        const bool opened = loadPlatform(resolvedPath);
+#endif
+        if (!opened) {
             initialized_ = true;
             closeInternal(false);
 #ifdef __EMSCRIPTEN__
@@ -155,7 +239,14 @@ public:
         // the Web frame-extraction stub cannot provide an auto-poster.
         update();
 #else
+#ifdef __APPLE__
+        // The async path already decoded its optional poster through AVFoundation.
+        // Never reopen the asset with the synchronous extraction helper here.
+        bool postered = prepared ? applyPosterFrame(std::move(prepared->poster), 0.0f)
+                                 : autoPoster_ && loadPosterFrame(0.0f);
+#else
         bool postered = autoPoster_ && loadPosterFrame(0.0f);
+#endif
         if (!postered) clearTexture();
 #endif
         return LoadResult::success();
@@ -165,9 +256,6 @@ public:
         return LoadResult::fail(LoadError::Unknown);
     }
 
-    void close() override { closeInternal(true); }
-
-private:
     // Failed loads release partial resources without discarding a delivered error.
     void closeInternal(bool clearError) {
         if (!initialized_) { if (clearError) clearPlaybackError(); return; }
@@ -525,6 +613,7 @@ private:
     // -------------------------------------------------------------------------
 
     void moveFrom(VideoPlayer&& other) {
+        other.async_.cancel();
         movePlaybackErrorFrom(other);
         width_ = other.width_;
         height_ = other.height_;
@@ -583,7 +672,13 @@ private:
         bool ok = (timeSec <= 0.001f)
                       ? extractKeyFramePlatform(sourcePath_, px, 0.0f, nullptr, decodeStatus_)
                       : extractFramePlatform(sourcePath_, px, timeSec, nullptr, decodeStatus_);
-        if (!ok || px.getWidth() != width_ || px.getHeight() != height_) return false;
+        return ok && applyPosterFrame(std::move(px), timeSec);
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+
+    bool applyPosterFrame(Pixels px, float timeSec) try {
+        if (!px.getData() || px.getWidth() != width_ || px.getHeight() != height_) return false;
         bool freshTexture = !texture_.isAllocated();
         if (freshTexture) {
             texture_.allocate(width_, height_, 4, TextureUsage::Stream);
@@ -631,6 +726,10 @@ private:
     // Platform-specific methods (implemented in tcVideoPlayer_mac.mm, etc.)
     // -------------------------------------------------------------------------
     bool loadPlatform(const fs::path& path);
+#ifdef __APPLE__
+    static void prepareAsyncPlatform(const std::shared_ptr<AsyncState>& state);
+    bool loadPreparedPlatform(const fs::path& path, void* asset);
+#endif
 #ifdef __EMSCRIPTEN__
     LoadResult webLoadResult_;
 #endif

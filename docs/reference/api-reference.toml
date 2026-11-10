@@ -39329,21 +39329,24 @@ related = ["VideoPlayer::setAudioStreaming"]
 category = "video"
 keywords = ["finish"]
 description.en = "Closes the video and releases its resources."
-description.ja = "動画を閉じてリソースを解放する。"
-description.ko = "비디오를 닫고 리소스를 해제한다."
+description.ja = "動画を閉じてリソースを解放します。"
+description.ko = "비디오를 닫고 리소스를 해제합니다."
 details.en = '''
+- Cancels a pending `loadAsync()` without waiting or sending `onLoad`, even while unloaded.
 - Releases the decoder, textures, pixel buffers, and pending poster; clears the source path, dimensions, playback state, and playback error.
-- Playback preferences remain stored for later loads; calling this while unloaded only clears the playback error.
+- Playback preferences remain stored for later loads. After cancellation, calling this while unloaded clears the playback error.
 - See `VideoPlayer::load` for main-thread requirements.
 '''
 details.ja = '''
+- 未ロードの場合も、保留中の `loadAsync()` を待機や `onLoad` 通知なしで取り消します。
 - デコーダ、テクスチャ、ピクセルバッファ、保留中のポスターを解放し、ソースパス、寸法、再生状態、再生エラーをクリアします。
-- 再生設定は次回以降の読み込み用に保持されます。未ロード時に呼ぶと、再生エラーだけをクリアします。
+- 再生設定は次回以降の読み込み用に保持されます。読み込みの取消し後、未ロードの場合は再生エラーをクリアします。
 - メインスレッドの要件は `VideoPlayer::load` を参照してください。
 '''
 details.ko = '''
+- 로드되지 않은 상태에서도 대기 중인 `loadAsync()`를 기다리거나 `onLoad`로 알리지 않고 취소합니다.
 - 디코더, 텍스처, 픽셀 버퍼, 대기 중인 포스터를 해제하고 소스 경로, 크기, 재생 상태, 재생 오류를 초기화합니다.
-- 재생 설정은 이후 로드를 위해 유지됩니다. 로드되지 않은 상태에서 호출하면 재생 오류만 초기화합니다.
+- 재생 설정은 이후 로드를 위해 유지됩니다. 로드를 취소한 뒤 로드되지 않은 상태에서는 재생 오류를 초기화합니다.
 - 메인 스레드 요구 사항은 `VideoPlayer::load`를 참조하세요.
 '''
 
@@ -39804,13 +39807,93 @@ details.ko = '''
 - 로드되지 않았으면 `false`를 반환합니다. Web은 이 조회에 사용하는 플랫폼 핸들을 설정하지 않으므로 현재는 로드 후에도 `false`를 반환합니다.
 '''
 
+["VideoPlayer::loadAsync"]
+category = "video"
+keywords = ["async", "background", "load", "cancel"]
+description.en = "Starts a video load with completion on a later main-loop pass."
+description.ja = "後のメインループ処理で完了を通知する動画読み込みを開始します。"
+description.ko = "이후 메인 루프 처리에서 완료를 알리는 비디오 로드를 시작합니다."
+details.en = '''
+- `loadAsync(path)` returns no result directly. Retain an `onLoad` listener to receive one `LoadResult` after application in a later frame or headless loop pass; notification never occurs inside this call. `isLoading()` becomes false before notification. A running `runApp()` or `runHeadlessApp()` loop is required.
+- macOS/iOS prepare AVFoundation tracks, duration, and the optional automatic poster through completion-handler APIs without a semaphore wait. Existing playback remains available until application. Main-thread application creates the player and textures and uploads the prepared poster; a failed optional poster leaves the initial texture cleared, as with `load()`.
+- Linux and Windows defer the existing blocking `load()` path to a later main-loop pass. That pass can stall while the decoder opens or the poster is extracted; these backends do not prepare on a worker. Android uses the same deferred path but playback remains unimplemented and loading fails.
+- Web waits like `load()` inside `loadAsync()`, using Asyncify to wait for the first decoded frame (up to 30 seconds). Private preparation survives cancellation or destruction during the wait. Application never yields; `onLoad` still fires in a later update. Browser codec and CORS rules still apply.
+- Access VideoPlayer instances, including loading, playback, moves, and destruction, on main. Each new `loadAsync()`, `load()`, `close()`, move, or destruction cancels pending delivery without waiting or notifying. Listeners stay with their original object; pending loads are not transferred by a move. Keep loading players at stable addresses. A completion listener may restart loading or destroy the player.
+- One completion batch is taken at the start of each loop pass. Requests created by listeners wait for another pass. App exit or hot reload cancels pending delivery; late AVFoundation callbacks only release private preparation data. Path resolution and load errors follow `VideoPlayer::load`; failed replacement clears the previous video. Web closes it before preparing an admitted request; other platforms clear it when applying the failure.
+- URL loads use the shared request admission described in `Image::loadAsync`; rejection reports `LoadError::TooLarge` through `onLoad` in a later update without starting the decoder. Local files keep their existing policy. Shared result rejections are also delivered unchanged.
+- Uses the shared resource-load cancellation and completion mailbox. Apple preparation is scheduled by AVFoundation; the other platforms run on main, so video loads do not use the Image/SoundBuffer/Font worker-concurrency setting. Decoded Apple posters and prepared Web frames use the shared retained-result byte accounting and external-result bound described in `Image::loadAsync`.
+'''
+details.ja = '''
+- `loadAsync(path)` は結果を直接返しません。`onLoad` のリスナーを保持すると、後のフレームまたはヘッドレスループ処理で反映後に `LoadResult` を 1 回受け取ります。この呼び出しの中では通知しません。通知前に `isLoading()` が false になります。実行中の `runApp()` または `runHeadlessApp()` が必要です。
+- macOS/iOS は AVFoundation の完了ハンドラー API でトラック、長さ、任意の自動ポスターを準備し、セマフォで待機しません。反映までは既存の動画を利用できます。メインスレッドでプレーヤーとテクスチャを作り、準備したポスターを転送します。任意のポスターに失敗した場合は `load()` と同様に初期テクスチャをクリアします。
+- Linux と Windows は既存のブロックする `load()` の処理を後のメインループ処理に回します。デコーダを開く処理やポスター抽出中にその処理が停止する場合があり、ワーカーでは準備しません。Android も同じ遅延処理を使用しますが、再生は未実装のため読み込みに失敗します。
+- Web は `load()` と同様に `loadAsync()` 内で待機し、Asyncify で最初のデコード済みフレームを最大 30 秒待ちます。専用の準備データは待機中の取消しや破棄後も安全に処理を終えます。反映処理では Asyncify による待機を行わず、`onLoad` は後の更新で通知します。ブラウザーのコーデックと CORS の規則も適用されます。
+- VideoPlayer インスタンスの参照、読み込み、再生操作、移動、破棄はメインスレッドで行ってください。新しい `loadAsync()`、`load()`、`close()`、移動、破棄は待機や通知なしで保留中の通知を取り消します。リスナーは元のオブジェクトに残り、移動しても保留中の読み込みは引き継ぎません。読み込み中のプレーヤーのアドレスを維持してください。完了リスナーでは再読み込みやプレーヤーの破棄ができます。
+- 各ループ処理の冒頭で完了処理を一度取り出します。リスナーが作った要求は次回に回します。App 終了やホットリロードは保留中の通知を取り消し、遅れて届く AVFoundation コールバックは専用の準備データだけを解放します。パス解決とエラーは `VideoPlayer::load` に従い、置換失敗時は以前の動画をクリアします。Web は受け付けた要求の準備前にクリアし、他のプラットフォームでは失敗の反映時にクリアします。
+- URL 読み込みは `Image::loadAsync` に記載した共通の要求受付を使用します。拒否時はデコーダを起動せず、後の更新で `onLoad` に `LoadError::TooLarge` を通知します。ローカルファイルの方針は従来どおりです。共通の結果受付で拒否された場合も、そのエラーをそのまま通知します。
+- 共通のリソース読み込みの取消しと完了キューを使用します。Apple の準備は AVFoundation がスケジュールし、他のプラットフォームではメインスレッドで処理するため、動画は Image/SoundBuffer/Font のワーカー同時実行数設定を使用しません。デコード済み Apple ポスターと準備済み Web フレームは `Image::loadAsync` に記載した共有の結果保持バイト数管理と外部結果の上限を使用します。
+'''
+details.ko = '''
+- `loadAsync(path)`는 결과를 직접 반환하지 않습니다. `onLoad` 리스너를 유지하면 이후 프레임이나 헤드리스 루프 처리에서 반영 후 `LoadResult`를 한 번 받습니다. 이 호출 안에서는 알리지 않으며 알림 전에 `isLoading()`이 false가 됩니다. 실행 중인 `runApp()` 또는 `runHeadlessApp()`이 필요합니다.
+- macOS/iOS는 AVFoundation 완료 핸들러 API로 트랙, 길이 및 선택적인 자동 포스터를 준비하며 세마포어로 기다리지 않습니다. 반영 전까지 기존 비디오를 사용할 수 있습니다. 메인 스레드에서 플레이어와 텍스처를 만들고 준비한 포스터를 업로드합니다. 선택적인 포스터가 실패하면 `load()`와 같이 초기 텍스처를 지웁니다.
+- Linux와 Windows는 기존의 차단하는 `load()` 처리를 이후 메인 루프 처리로 미룹니다. 디코더를 열거나 포스터를 추출하는 동안 해당 처리가 멈출 수 있으며 워커에서 준비하지 않습니다. Android도 같은 지연 경로를 사용하지만 재생이 구현되지 않아 로드에 실패합니다.
+- Web은 `load()`처럼 `loadAsync()` 안에서 Asyncify로 첫 디코딩 프레임을 최대 30초 기다립니다. 전용 준비 데이터는 대기 중 취소나 객체 소멸 후에도 안전하게 처리를 마칩니다. 반영 처리는 실행을 양보하지 않으며 `onLoad`는 이후 업데이트에서 알립니다. 브라우저 코덱과 CORS 규칙도 적용됩니다.
+- VideoPlayer 인스턴스의 접근, 로드, 재생 조작, 이동 및 소멸은 메인 스레드에서 수행합니다. 새 `loadAsync()`, `load()`, `close()`, 이동 또는 소멸은 기다리거나 알리지 않고 대기 중인 전달을 취소합니다. 리스너는 원래 객체에 남으며 이동으로 대기 중인 로드를 이전하지 않습니다. 로드 중인 플레이어의 주소를 유지합니다. 완료 리스너에서 다시 로드하거나 플레이어를 파괴할 수 있습니다.
+- 각 루프 처리 시작에 완료 묶음을 한 번 가져옵니다. 리스너가 만든 요청은 다음 처리로 넘깁니다. App 종료나 핫 리로드는 대기 중인 전달을 취소하며 늦게 도착한 AVFoundation 콜백은 전용 준비 데이터만 해제합니다. 경로 해석과 오류는 `VideoPlayer::load`를 따르며 교체 실패 시 이전 비디오를 지웁니다. Web은 접수된 요청의 준비 전에 지우고 다른 플랫폼은 실패를 반영할 때 지웁니다.
+- URL 로드는 `Image::loadAsync`에 설명된 공통 요청 접수를 사용합니다. 거부되면 디코더를 시작하지 않고 이후 업데이트에서 `onLoad`로 `LoadError::TooLarge`를 알립니다. 로컬 파일 정책은 기존과 같습니다. 공통 결과 접수에서 거부된 오류도 그대로 알립니다.
+- 공통 리소스 로드 취소 및 완료 큐를 사용합니다. Apple 준비는 AVFoundation이 예약하고 다른 플랫폼은 메인 스레드에서 처리하므로 비디오 로드는 Image/SoundBuffer/Font의 워커 동시 실행 수 설정을 사용하지 않습니다. 디코딩된 Apple 포스터와 준비된 Web 프레임은 `Image::loadAsync`에 설명된 공유 결과 보유 바이트 계산과 외부 결과 한도를 사용합니다.
+'''
+related = ["VideoPlayer::load", "VideoPlayer::onLoad", "VideoPlayer::isLoading", "Image::loadAsync"]
+snippet = '''
+// tcApp members: VideoPlayer player; EventListener loadListener;
+void tcApp::setup() {
+    loadListener = player.onLoad.listen([this](LoadResult& result) {
+        if (result) player.play();
+    });
+    player.loadAsync("movie.mp4");
+}
+void tcApp::update() { player.update(); }
+void tcApp::draw() { player.draw(0, 0); }
+'''
+
+["VideoPlayer::onLoad"]
+category = "video"
+description.en = "Reports asynchronous video load completion."
+description.ja = "動画の非同期読み込みの完了を通知します。"
+description.ko = "비디오 비동기 로드의 완료를 알립니다."
+details.en = '''
+- Sends one `Event<LoadResult>` on main after applying a surviving result, with `isLoading()` already false. Success and failure are reported; synchronous loading and cancellation do not send this event. Retain the listener returned by `listen()`. See `VideoPlayer::loadAsync` for timing and lifetime rules.
+'''
+details.ja = '''
+- 取り消されていない結果の反映後、`isLoading()` が false になってから、メインスレッドで `Event<LoadResult>` を 1 回通知します。成功と失敗を通知し、同期読み込みと取消しでは通知しません。`listen()` が返すリスナーを保持してください。タイミングと寿命の規則は `VideoPlayer::loadAsync` を参照してください。
+'''
+details.ko = '''
+- 취소되지 않은 결과를 반영하고 `isLoading()`이 false가 된 후 메인 스레드에서 `Event<LoadResult>`를 한 번 알립니다. 성공과 실패를 알리며 동기 로드와 취소에서는 알리지 않습니다. `listen()`이 반환하는 리스너를 유지합니다. 시점과 수명 규칙은 `VideoPlayer::loadAsync`를 참조합니다.
+'''
+
+["VideoPlayer::isLoading"]
+category = "video"
+description.en = "Reports whether a video load is pending for the current App run."
+description.ja = "現在の App 実行に属する動画読み込みが保留中かを返します。"
+description.ko = "현재 App 실행에 속한 비디오 로드가 대기 중인지 반환합니다."
+details.en = '''
+- True while preparing or awaiting application; false after application, cancellation, or App exit, before `onLoad` is sent. Use `isLoaded()` to query the committed video instead.
+'''
+details.ja = '''
+- 準備中または反映待ちの間は true です。反映後、取消し後、App 終了後は `onLoad` 通知前に false になります。反映済みの動画の状態には `isLoaded()` を使用してください。
+'''
+details.ko = '''
+- 준비 중이거나 반영을 기다리는 동안 true입니다. 반영, 취소 또는 App 종료 후에는 `onLoad` 알림 전에 false가 됩니다. 반영된 비디오 상태는 `isLoaded()`로 확인합니다.
+'''
+
 ["VideoPlayer::load"]
 category = "video"
 keywords = ["open", "read", "file", "movie"]
-description.en = "Loads a video source for playback."
-description.ja = "再生する動画ソースを読み込む。"
-description.ko = "재생할 비디오 소스를 로드한다."
+description.en = "Loads a video source synchronously, blocking the caller."
+description.ja = "呼び出し元をブロックして動画ソースを読み込みます。"
+description.ko = "호출 스레드를 차단하여 비디오 소스를 로드합니다."
 details.en = '''
+- Blocks the calling thread, including while macOS/iOS wait for AVFoundation tracks. Use `VideoPlayer::loadAsync` for deferred loading and completion notification. Cancels a pending asynchronous request without notifying it.
 - `load()` accepts HTTP(S) URLs and passes them to the platform decoder for streaming: Linux uses FFmpeg, Windows uses Media Foundation, and Web uses the browser video element (browser codec and CORS rules apply). The current macOS/iOS backend constructs file URLs and supports local files only; Android playback is unimplemented.
 - Video dimensions, decoded frame bytes and extracted audio tracks have no fixed TrussC size cap or per-player memory budget. Decoder format and integer ranges still apply; GPU uploads check device texture limits. Allocation failure fails the load or frame cleanly. With an active GPU, load succeeds only after the RGBA texture or both NV12 textures have valid image, view and sampler resources; failure releases the backend and leaves `getPath()` empty. Headless loading keeps CPU pixels without requiring textures. FFmpeg selects its decode thread count automatically.
 - Accepts an `fs::path`, resolves relative file paths through `getDataPath()`, and passes HTTP(S) sources through without data-directory resolution; URL support depends on the backend.
@@ -39821,6 +39904,7 @@ details.en = '''
 - Call `load()`, `close()`, `play()`, `update()`, and `draw()` on the main thread because these operations create, release, upload, or draw GPU textures.
 '''
 details.ja = '''
+- 呼び出し元のスレッドをブロックします。macOS/iOS では AVFoundation のトラックの準備も待ちます。遅延読み込みと完了通知には `VideoPlayer::loadAsync` を使用してください。保留中の非同期要求は通知せずに取り消します。
 - `load()` は HTTP(S) URL を受け取り、対応するプラットフォームのデコーダーへ渡してストリーミングします。Linux は FFmpeg、Windows は Media Foundation、Web はブラウザーの video 要素を使います（ブラウザーのコーデックと CORS の規則に従います）。現在の macOS/iOS バックエンドはファイル URL を作るためローカルファイルのみ対応し、Android の再生は未実装です。
 - 動画の寸法、デコード済みフレーム、抽出する音声トラックには TrussC 独自の固定サイズ上限やプレイヤーごとのメモリ予算はありません。形式と整数の表現範囲、および GPU 転送時のデバイスのテクスチャ上限は確認します。メモリ確保に失敗すると読み込みまたはフレーム処理が失敗します。GPU 使用時は RGBA テクスチャまたは NV12 の両テクスチャの image・view・sampler が有効な場合にのみ成功し、失敗時はバックエンドを解放して `getPath()` を空にします。ヘッドレスではテクスチャを要求せず CPU ピクセルを保持します。FFmpeg のデコードスレッド数は自動です。
 - `fs::path` を受け取り、相対ファイルパスを `getDataPath()` で解決します。HTTP(S) のソースはデータディレクトリで解決せずに渡します。URL への対応はバックエンドによって異なります。
@@ -39831,6 +39915,7 @@ details.ja = '''
 - `load()`、`close()`、`play()`、`update()`、`draw()` は GPU テクスチャの作成、解放、アップロード、描画を行うため、メインスレッドで呼んでください。
 '''
 details.ko = '''
+- 호출 스레드를 차단하며 macOS/iOS에서는 AVFoundation 트랙 준비도 기다립니다. 지연 로드와 완료 알림에는 `VideoPlayer::loadAsync`를 사용합니다. 대기 중인 비동기 요청은 알림 없이 취소합니다.
 - `load()`는 HTTP(S) URL을 받아 지원하는 플랫폼 디코더에 전달하여 스트리밍합니다. Linux는 FFmpeg, Windows는 Media Foundation, Web은 브라우저 video 요소를 사용합니다(브라우저 코덱 및 CORS 규칙 적용). 현재 macOS/iOS 백엔드는 파일 URL을 만들므로 로컬 파일만 지원하며 Android 재생은 미구현입니다.
 - 동영상 크기, 디코딩한 프레임, 추출할 오디오 트랙에는 TrussC 고유의 고정 크기 제한이나 플레이어별 메모리 예산이 없습니다. 형식과 정수 표현 범위, GPU 업로드 시 장치의 텍스처 제한은 확인합니다. 메모리 할당 실패는 로드나 프레임 처리 실패로 반환합니다. GPU 사용 시 RGBA 텍스처 또는 NV12 텍스처 두 개의 image, view, sampler가 모두 유효해야 성공하며 실패하면 백엔드를 해제하고 `getPath()`를 비웁니다. 헤드리스에서는 텍스처 없이 CPU 픽셀을 유지합니다. FFmpeg 디코딩 스레드 수는 자동으로 선택합니다.
 - `fs::path`를 받고 상대 파일 경로를 `getDataPath()`로 해석합니다. HTTP(S) 소스는 데이터 디렉터리로 해석하지 않고 전달합니다. URL 지원 여부는 백엔드에 따라 다릅니다.
@@ -39840,7 +39925,7 @@ details.ko = '''
 - Web은 첫 프레임의 디코딩과 유효한 크기를 기다린 후 해당 프레임을 업로드하고 반환합니다. 로드 대기 제한 시간은 30초입니다. Android의 비디오 재생은 구현되지 않았습니다.
 - `load()`, `close()`, `play()`, `update()`, `draw()`는 GPU 텍스처를 생성, 해제, 업로드하거나 그리므로 메인 스레드에서 호출해야 합니다.
 '''
-related = ["VideoPlayer::play", "VideoPlayerBase::isFrameNew", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath", "VideoPlayer::setAutoPoster", "LoadResult"]
+related = ["VideoPlayer::loadAsync", "VideoPlayer::play", "VideoPlayerBase::isFrameNew", "VideoPlayer::extractKeyFrame", "VideoPlayer::getPath", "VideoPlayer::setAutoPoster", "LoadResult"]
 snippet = '''
 void tcApp::setup() {
     if (video.load("movie.mp4")) {
@@ -40236,9 +40321,10 @@ void tcApp::setup() {
 category = "video"
 keywords = ["poster", "first frame", "black flash", "auto", "preload"]
 description.en = "Controls automatic still frames that bridge playback transitions."
-description.ja = "再生の切り替わりを補う自動静止フレームを設定する。"
-description.ko = "재생 전환을 보완하는 자동 정지 프레임을 설정한다."
+description.ja = "再生の切り替わりを補う自動静止フレームを設定します。"
+description.ko = "재생 전환을 보완하는 자동 정지 프레임을 설정합니다."
 details.en = '''
+- macOS/iOS `loadAsync()` captures this setting when requested and prepares its poster asynchronously; see `VideoPlayer::loadAsync` for platform fallbacks.
 - Defaults to `true`. On supported platforms, `load()` and `stop()` synchronously extract a poster at time zero; successful extraction with matching dimensions marks `isReady()` true and supplies a real image before live frames arrive.
 - Before `play()`, refreshes the poster when no image is ready or the pending seek target or current time differs from the last shown time by more than `0.05` seconds. This bridges seeks made while stopped or paused.
 - Times at or below `0.001` seconds use keyframe extraction at zero; later times use exact extraction. Each attempt opens a separate decoder and can block; see `VideoPlayer::extractFrame` for extraction behavior and platform support.
@@ -40246,6 +40332,7 @@ details.en = '''
 - `setAutoPoster(false)` skips future automatic extractions without clearing the current image; after a new native load, the image remains cleared until a live frame arrives. Web independently waits for and uploads its first decoded frame regardless of this setting; Android video playback is not implemented.
 '''
 details.ja = '''
+- macOS/iOS の `loadAsync()` は要求時の設定を保存し、ポスターを非同期で準備します。他のプラットフォームの代替動作は `VideoPlayer::loadAsync` を参照してください。
 - 既定値は `true` です。対応プラットフォームでは `load()` と `stop()` が時刻ゼロのポスターを同期的に抽出します。寸法が一致する画像の抽出に成功すると `isReady()` が true になり、ライブフレームが届く前に実画像を用意します。
 - `play()` の前に、画像が準備できていない場合、または保留中のシーク先や現在時刻が最後に表示した時刻から `0.05` 秒を超えて離れている場合にポスターを更新します。停止中や一時停止中のシークを補います。
 - `0.001` 秒以下の時刻ではゼロ時点のキーフレーム抽出を使用し、それより後では正確な抽出を使用します。試行ごとに独立したデコーダを開くため、処理がブロックする場合があります。抽出の動作と対応プラットフォームは `VideoPlayer::extractFrame` を参照してください。
@@ -40253,6 +40340,7 @@ details.ja = '''
 - `setAutoPoster(false)` は現在の画像を消さずに、以降の自動抽出を省略します。ネイティブ環境で新しく読み込んだ後は、ライブフレームが届くまでクリアされた画像が残ります。Web はこの設定に関係なく最初のフレームのデコードを待ってアップロードします。Android の動画再生は未実装です。
 '''
 details.ko = '''
+- macOS/iOS의 `loadAsync()`는 요청 시 설정을 저장하고 포스터를 비동기로 준비합니다. 다른 플랫폼의 대체 동작은 `VideoPlayer::loadAsync`를 참조합니다.
 - 기본값은 `true`입니다. 지원 플랫폼에서는 `load()`와 `stop()`이 시각 0의 포스터를 동기적으로 추출합니다. 크기가 일치하는 이미지 추출에 성공하면 `isReady()`가 true가 되고 실시간 프레임이 도착하기 전에 실제 이미지를 준비합니다.
 - `play()` 전에 이미지가 준비되지 않았거나 대기 중인 탐색 목표 또는 현재 시각이 마지막으로 표시한 시각과 `0.05`초를 초과하여 차이 나면 포스터를 갱신합니다. 정지 또는 일시 정지 중의 탐색을 보완합니다.
 - `0.001`초 이하의 시각에는 0 시점의 키프레임 추출을 사용하고 이후 시각에는 정확한 추출을 사용합니다. 시도마다 별도의 디코더를 열므로 처리가 블록될 수 있습니다. 추출 동작과 지원 플랫폼은 `VideoPlayer::extractFrame`을 참조하세요.

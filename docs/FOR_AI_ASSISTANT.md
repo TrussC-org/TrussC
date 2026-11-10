@@ -4711,8 +4711,10 @@ int VideoPlayer::getTotalFramesImpl() const [macos,windows,linux,ios,web]  // Re
 bool VideoPlayer::getUseHwAccel() const [macos,windows,linux,ios,web]  // Returns the hardware decoding preference.
 bool VideoPlayer::hasAudio() const [macos,windows,linux,ios,web]  // Reports whether an audio track was detected.
 bool VideoPlayer::isAudioStreaming() const [macos,windows,linux,ios,web]  // Returns the audio streaming preference.
+bool VideoPlayer::isLoading() const [macos,windows,linux,ios,web]  // Reports whether a video load is pending for the current App run.
 bool VideoPlayer::isUsingHwAccel() const [macos,windows,linux,ios,web]  // Returns the reported hardware decoding state.
-LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Loads a video source for playback.
+LoadResult VideoPlayer::load(const fs::path & path) [macos,windows,linux,ios,web]  // Loads a video source synchronously, blocking the caller.
+void VideoPlayer::loadAsync(const fs::path & path) [macos,windows,linux,ios,web]  // Starts a video load with completion on a later main-loop pass.
 void VideoPlayer::nextFrameImpl() [macos,windows,linux,ios,web]  // Advances one frame through the playback backend.
 void VideoPlayer::play() [macos,windows,linux,ios,web]  // Starts or resumes video playback.
 void VideoPlayer::playImpl() [macos,windows,linux,ios,web]  // Starts or resumes playback through the playback backend.
