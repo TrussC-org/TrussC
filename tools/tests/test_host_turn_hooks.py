@@ -107,7 +107,7 @@ struct Descriptor { void (*init_cb)()=nullptr; void (*init_userdata_cb)(void*)=n
     void (*_tc_before_turn)()=nullptr; void (*_tc_after_turn)()=nullptr; bool (*_tc_callbacks_active)()=nullptr;
     void (*_tc_event_cb)(const sapp_event*,sapp_window,void*)=nullptr; };
 _sapp_tc_window_t window;
-struct { int display=0; double refresh_period=1.0/60.0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&window};
+struct { int display=0; double refresh_period=1.0/60.0; sapp_window pacer{27}; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&window};
     struct { bool init_called=false,quit_ordered=false,quit_requested=false; Descriptor desc; _sapp_tc_window_t* main=&window; } app; } _sapp_tc;
 _sapp_tc_window_t* _sapp_tc_lookup(sapp_window h) { return h.id==window.win_id ? &window : nullptr; }
 int before=0,after=0,init=0,ticks=0,clockCalls=0,visibilitySync=0;
@@ -139,6 +139,8 @@ struct XEvent {};
 void XNextEvent(int,XEvent*) {} void _sapp_tc_x11_process_event(XEvent*) {}
 void _sapp_tc_x11_wait_until(double) {}
 void _sapp_tc_x11_tick(_sapp_tc_window_t*) { ++ticks; }
+// Role transitions are covered by test_x11_movable_pacer.py; this seam checks turn hooks.
+_sapp_tc_window_t* _sapp_tc_x11_update_pacer() { return &window; }
 bool _sapp_tc_native_hidden(_sapp_tc_window_t*) { return false; }
 bool _sapp_tc_native_iconified(_sapp_tc_window_t*) { return false; }
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}

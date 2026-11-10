@@ -331,6 +331,62 @@ void setMainHidden(bool hidden) {
     b.operations = &visibilityOperations(); b.user = &w;
     internal::refreshWindowMetadata(w);
 }
+// Exercise the production metadata gate with deterministic ticks and no GPU.
+void drawWhileHiddenPolicy(Window& main) {
+    auto second = std::make_shared<Secondary>();
+    internal::retainRuntimeWindow(second);
+    auto allowed = [](Window& window) { return internal::WindowRequestAccess::context(window).drawWhileHidden; };
+    check("draw while hidden defaults to false", !allowed(main) && !allowed(*second));
+    setDrawWhileHidden(true);
+    check("global draw while hidden sets all existing windows", allowed(main) && allowed(*second));
+    second->setDrawWhileHidden(false);
+    check("per-window draw while hidden wins locally", allowed(main) && !allowed(*second));
+    Window inherited;
+    check("new window inherits global true after local override", allowed(inherited));
+    setDrawWhileHidden(false);
+    check("later global draw while hidden overrides local settings", !allowed(main) && !allowed(*second));
+    Window defaultOff;
+    check("new window inherits later global false", !allowed(defaultOff));
+    double seconds = 7900;
+    for (Window* window : {&main, static_cast<Window*>(second.get())}) {
+        setUnitApp(*window, internal::makeConstructedApp<Probe>());
+        auto operations = visibilityOperations();
+        operations.readMetadata = [](sapp_window, void* user, sapp_tc_window_metadata& out) {
+            out = internal::WindowRequestAccess::binding(*static_cast<Window*>(user)).metadata;
+            return true;
+        };
+        auto& binding = internal::WindowRequestAccess::binding(*window);
+        auto* previousOperations = binding.operations;
+        void* previousUser = binding.user;
+        binding.operations = &operations; binding.user = window;
+        auto& context = internal::WindowRequestAccess::context(*window);
+        window->setFps(VSYNC);
+        for (int reason = 0; reason < 3; ++reason) {
+            auto metadata = binding.metadata;
+            metadata.trust_hidden_signals = true;
+            metadata.hidden = reason == 0;
+            metadata.iconified = reason == 1;
+            metadata.occluded = reason == 2;
+            internal::publishWindowMetadata(*window, metadata);
+            for (bool allow : {false, true, false}) {
+                window->setDrawWhileHidden(allow);
+                const auto updates = context.updateCount, draws = context.drawCount;
+                const auto callbacks = std::static_pointer_cast<Probe>(window->getApp())->draws;
+                fakeNow = at(seconds++);
+                const bool drawn = internal::enterWindowTick(*window, binding.handle, fakeNow, .25, &fakePresentation);
+                check("hidden policy keeps updating for hide/minimize/cover", context.updateCount == updates + 1);
+                check("hidden policy admits draw callbacks only when enabled", drawn == allow &&
+                    context.drawCount == draws + unsigned(allow) &&
+                    std::static_pointer_cast<Probe>(window->getApp())->draws == callbacks + int(allow));
+            }
+        }
+        auto metadata = binding.metadata;
+        metadata.hidden = metadata.iconified = metadata.occluded = false;
+        internal::publishWindowMetadata(*window, metadata);
+        binding.operations = previousOperations; binding.user = previousUser;
+    }
+    internal::releaseRuntimeWindow(*second);
+}
 void hiddenInterval(Window& main) {
     Secondary visible;
     setUnitApp(main, internal::makeConstructedApp<Probe>());
@@ -648,6 +704,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     independentTargets(main);
     nativeGatedTicks(main);
     exercise(main);
+    drawWhileHiddenPolicy(main);
     hiddenInterval(main);
     const auto mainLoop = trussc::internal::WindowRequestAccess::context(main).loop;
     {

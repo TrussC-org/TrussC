@@ -14,7 +14,7 @@ Window::Window()
     : owned_(std::make_unique<OwnedState>()), ctx_(owned_->context),
       events_(owned_->events), render_(owned_->render), title_(owned_->title) {
     ctx_.hostWindow = this;
-    ctx_.drawWhileHidden = false;
+    ctx_.drawWhileHidden = internal::defaultDrawWhileHidden();
     ctx_.deferredResponseTarget = &ctx_;
     clearColorSet_ = true;
     internal::WindowRequestAccess::prepareInitialBindings(*this);
@@ -43,6 +43,17 @@ void Window::setVisible(bool visible) {
 }
 bool Window::isVisible() const {
     return isOpen() && !binding_.metadata.hidden;
+}
+
+void Window::setDrawWhileHidden(bool allow) {
+    ctx_.drawWhileHidden = allow;
+    internal::applyWindowDrawWhileHidden(*this);
+}
+
+void setDrawWhileHidden(bool allow) {
+    // The default is host-owned, shared by ordinary and hot-reload Apps.
+    internal::defaultDrawWhileHidden() = allow;
+    for (auto* window : internal::openWindows()) window->setDrawWhileHidden(allow);
 }
 
 namespace internal {
@@ -121,6 +132,7 @@ private:
 struct Runtime {
     unsigned entries = 0, turns = 0, appExitCallbacks = 0;
     bool servicing = false, pollingReload = false, bootstrapping = false, servicedTurn = false;
+    bool drawWhileHidden = false;
     uint64_t epoch = 0;
     void (*reload)() = nullptr;
     std::string hotReloadType, hotReloadFile;
@@ -158,6 +170,16 @@ Runtime& runtime() {
     return *state;
 }
 BufferReadbackQueue& bufferReadbacks() { return runtime().readbacks; }
+bool& defaultDrawWhileHidden() { return runtime().drawWhileHidden; }
+void applyWindowDrawWhileHidden(Window& window) {
+#if defined(_WIN32) || (defined(__APPLE__) && TARGET_OS_OSX) || (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
+    const auto& binding = WindowRequestAccess::binding(window);
+    if (binding.bound)
+        sapp_tc_window_draw_while_hidden(binding.handle, WindowRequestAccess::context(window).drawWhileHidden);
+#else
+    (void)window;
+#endif
+}
 RuntimeActivityScope::RuntimeActivityScope() noexcept { ++runtime().entries; }
 RuntimeActivityScope::~RuntimeActivityScope() noexcept { --runtime().entries; }
 WindowContext*& currentWindowCtx() { return runtime().selected; }
@@ -1145,7 +1167,14 @@ bool bindWindow(Window& window, sapp_window handle, const WindowNativeOperations
 }
 bool bindNativeWindow(uint32_t id, void* user) noexcept {
     if (!id || !user) return false;
-    try { return bindWindow(*static_cast<Window*>(user), {id}, productionWindowOperations(), nullptr); }
+    try {
+        auto& window = *static_cast<Window*>(user);
+        if (!bindWindow(window, {id}, productionWindowOperations(), nullptr)) return false;
+        // Preserve native first-tick admission, but admit new hidden windows
+        // immediately when the global default requests drawing.
+        if (WindowRequestAccess::context(window).drawWhileHidden) applyWindowDrawWhileHidden(window);
+        return true;
+    }
     catch (...) { reportTeardownFailure("native window binding"); return false; }
 }
 void syncWindowAppSize(Window& window, bool initial) {
@@ -1999,6 +2028,10 @@ bool enterWindowTick(Window& window, sapp_window handle, std::chrono::steady_clo
     const double source = metadata.source_interval > 0 ? metadata.source_interval : duration;
     const bool drawn = runWindowTick(now, source, forceDraw, presentation, gated);
     ctx.pmouseX = ctx.mouseX; ctx.pmouseY = ctx.mouseY;
+    // Initial native admission lets setup run even when covered before the
+    // first tick. From here use the saved setting, including setup's calls,
+    // while the entry still retains the Window. No main-window special case.
+    applyWindowDrawWhileHidden(window);
     return drawn;
 }
 void windowTick(sapp_window handle, void* user) noexcept {

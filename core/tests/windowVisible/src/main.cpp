@@ -188,6 +188,49 @@ struct Secondary : App {
         if (hideInAppDraw) { hideInAppDraw = false; hideDuringDraw(); }
     }
 };
+// Native smoke test: count callbacks while every window is explicitly hidden.
+struct DrawHiddenProbe : App {
+    int phase = 0, updates = 0, baselineUpdates = 0, baselineSecondaryUpdates = 0;
+    int baselineMain = 0, baselineSecondary = 0;
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    void snapshot() {
+        baselineMain = mainDraws; baselineSecondary = secondaryDraws;
+        baselineUpdates = updates; baselineSecondaryUpdates = secondaryUpdates;
+    }
+    void setup() override {
+        setDrawWhileHidden(true);
+        secondary = createWindow(WindowSettings().setSize(100, 80).setVisible(false));
+        check("draw override creates hidden secondary", secondary && secondary->isOpen());
+        if (!secondary) { exitApp(1); return; }
+        secondary->setApp<Secondary>();
+        getWindow()->setDrawWhileHidden(false);
+    }
+    void update() override {
+        ++updates;
+        if (std::chrono::steady_clock::now() - started > std::chrono::seconds(30)) {
+            check("draw override probe completes", false); exitApp(1); return;
+        }
+        if (!secondary) return;
+        if (phase == 0 && updates >= 4 && secondaryUpdates >= 4 && secondaryDraws >= 3) {
+            check("setup local false wins while new hidden window inherits global true", mainDraws == 0);
+            setDrawWhileHidden(true); snapshot(); phase = 1;
+        } else if (phase == 1 && mainDraws >= baselineMain + 3 && secondaryDraws >= baselineSecondary + 3) {
+            check("later global true draws both hidden windows", true);
+            secondary->setDrawWhileHidden(false); snapshot(); phase = 2;
+        } else if (phase == 2 && mainDraws >= baselineMain + 3 && secondaryUpdates >= baselineSecondaryUpdates + 4) {
+            check("later local false stops only secondary draw", secondaryDraws == baselineSecondary);
+            setDrawWhileHidden(false); snapshot(); phase = 3;
+        } else if (phase == 3 && updates >= baselineUpdates + 4 && secondaryUpdates >= baselineSecondaryUpdates + 4) {
+            check("global false stops draw while every hidden window updates", mainDraws == baselineMain && secondaryDraws == baselineSecondary);
+            secondary->setDrawWhileHidden(true); snapshot(); phase = 4;
+        } else if (phase == 4 && secondaryDraws >= baselineSecondary + 3 && updates >= baselineUpdates + 4) {
+            check("local true resumes only the hidden secondary", mainDraws == baselineMain);
+            setDrawWhileHidden(false); finished = true; exitApp(failures ? 1 : 0);
+        }
+    }
+    void draw() override { ++mainDraws; clear(0.1f); }
+    void cleanup() override { secondary.reset(); }
+};
 struct Probe : App {
     int phase = 0, updates = 0, phaseUpdates = 0;
     const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
@@ -433,10 +476,11 @@ struct Probe : App {
 };
 }
 TC_CORE_TEST_MAIN(int argc, char** argv) {
-    bool display = false;
+    bool display = false, drawHidden = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         display |= arg == "--display";
+        drawHidden |= arg == "--draw-while-hidden";
         startVisible |= arg == "--start-visible";
         fullscreen |= arg == "--fullscreen";
         decoratedMain |= arg == "--decorated-main";
@@ -463,6 +507,10 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return failures ? 1 : 0;
     }
     if (!internal::supportsSecondaryWindows()) { std::puts("SKIP: windowVisible requires desktop windows"); return 0; }
+    if (drawHidden) return tcCoreTest::runDisplayTest<DrawHiddenProbe>(WindowSettings().setSize(160, 120).setVisible(false), failures, [] {
+        check("draw override probe reached final phase", finished);
+        std::printf("windowVisible drawWhileHidden verdict: %s\n", failures ? "FAIL" : "PASS");
+    });
     return tcCoreTest::runDisplayTest<Probe>(WindowSettings().setSize(160, 120).setVisible(startVisible).setDecorated(decoratedMain), failures, [] {
         check("probe reached final phase", finished);
         std::printf("windowVisible verdict: %s\n", failures ? "FAIL" : "PASS");
