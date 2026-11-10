@@ -4098,8 +4098,10 @@ static void printDistHelp() {
          << "Options:\n"
          << "      --release              Build as Release instead of RelWithDebInfo (no symbols)\n"
          << "      --archive, --zip       Also write a zip (Windows/macOS) or tar.gz (Linux)\n"
-         << "      --installer            Also build <package>-setup.exe with NSIS (Windows;\n"
-         << "                             install it with 'winget install NSIS.NSIS')\n"
+         << "      --installer            Also build an installer: <package>-setup.exe with NSIS\n"
+         << "                             (Windows; 'winget install NSIS.NSIS'), or a package for\n"
+         << "                             the Linux distribution it runs on (pacman on Arch and\n"
+         << "                             derivatives, .deb on Debian/Ubuntu and derivatives)\n"
          << "      --no-build             Package the existing build (refuses a Debug build)\n"
          << "      --dry-run              List what would go into the package, change nothing\n"
          << "      --init                 Write a dist.json template (never overwrites) and stop\n"
@@ -4120,13 +4122,16 @@ static void printDistHelp() {
          << "is signed ad hoc.\n"
          << "On Linux <platform> is the distribution it was built on (arch, ubuntu24.04, ...):\n"
          << "the app uses that distribution's shared libraries and runs where they match.\n"
+         << "A Linux package installs the app to /opt/<package>/ with a Start menu entry,\n"
+         << "and the package manager installs the libraries it needs.\n"
          << "\n"
          << "Settings come from dist.json in the project folder (optional; see --init):\n"
          << "name, version, author, eulaFile, include, exclude, licenses, and installer\n"
          << "(showEula, showNotices). Your license terms (eulaFile, or EULA.txt in the\n"
-         << "project folder) go into the package as EULA.txt. The installer asks about\n"
-         << "shortcuts and starting at login.\n"
-         << "trusscli collects the license files it finds; checking them is up to you.\n";
+         << "project folder) go into the package as EULA.txt. The Windows installer asks\n"
+         << "about shortcuts and starting at login.\n"
+         << "trusscli collects the license files it finds; checking them is up to you.\n"
+         << "More: docs/DISTRIBUTION.md\n";
 }
 
 static bool stdinIsTty() {
@@ -4983,7 +4988,7 @@ _trusscli() {
         update|build|run|clean|dist)
             local -a opts
             case "$words[2]" in
-                dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--installer:Also build a setup.exe (NSIS)' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '--app-author:App author' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;
+                dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--installer:Also build an installer (setup.exe, pacman package or .deb)' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '--app-author:App author' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
                 build)  opts=('--web:Web build' '--android:Android build' '--ios:iOS build' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--clean:Clean first' '--dry-run:Print cmake commands only' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
                 run)    opts=('--web:Web' '--android:Android' '--ios:iOS' '--session:Display session' '--debug:Debug build type' '--relwithdebinfo:RelWithDebInfo build type' '--release:Release build type' '--mcp:MCP development build' '--warnings:Enable -Wall -Wextra' '-j:Parallel jobs' '--jobs:Parallel jobs' '-p:Project path' '--path:Project path') ;;
