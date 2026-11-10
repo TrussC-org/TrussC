@@ -264,7 +264,7 @@ void tcApp::mousePressed(Vec2 pos, int button) {
 
 ## 8. アプリアイコン
 
-`icon/` フォルダにアイコンファイルを配置します:
+`icon/` フォルダにアイコンファイルを配置します。PNG は 1024×1024 の正方形を使ってください。小さい PNG は macOS/iOS で 1024×1024 に拡大され、ぼやけます:
 
 ```
 myProject/

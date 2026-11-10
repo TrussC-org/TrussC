@@ -1145,6 +1145,17 @@ Two layers. The core is built once as `libTrussC.a` and shared across all projec
 
 For a plain configure outside the repository, pass `-DTRUSSC_DIR=<TrussC-root>/core`. The generated CMakeLists retains the `../../../core` fallback and checks for `cmake/trussc_app.cmake` before including it. If missing, it stops with instructions to run `trusscli update`, configure with the host preset (`macos`, `linux`, or `windows`), or set `TRUSSC_DIR`.
 
+### App icon
+
+Custom icons come from the project's `icon/` folder, with separate rules per platform. For multiple files of one type, the first in glob order wins. Use a 1024×1024 square PNG; smaller PNGs are scaled up to 1024 on macOS/iOS and look blurry.
+
+- **macOS:** `.icns` and a Tahoe `.icon` folder can apply together; `.icon` needs full Xcode and `actool`. Only if neither was applied, a PNG is converted with `sips` + `iconutil` into the build tree. Missing or failing conversion tools warn and fall back to `default.icns` plus `default.icon` (the latter still needs full Xcode/`actool`). With no custom icon, the same defaults are used without a warning.
+- **iOS:** Only PNG is used; `.icns`, `.icon` and `.ico` are ignored. `sips` resizes the PNG to 1024×1024 in the build tree. No PNG, or missing/failing `sips`, uses the 1024×1024 `default-ios.png`; missing/failing `sips` warns.
+- **Windows:** `.ico` takes priority over PNG. ImageMagick (`magick` or `convert`) converts a PNG to `<name>.ico` in the user's `icon/` folder, at sizes up to 256 pixels. On later configures, that `.ico` wins: delete it to pick up PNG edits. Without ImageMagick, or if conversion fails, `default.ico` is used without a warning.
+- **Linux and Web:** This icon setup applies no app icon.
+
+On macOS/iOS, a non-square PNG produces a configure warning and is stretched to a square.
+
 ### trusscli command reference
 
 `trusscli` with no args launches the GUI (TrussC Project Generator). Main commands:

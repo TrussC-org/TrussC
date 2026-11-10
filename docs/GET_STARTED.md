@@ -294,7 +294,7 @@ void tcApp::mousePressed(Vec2 pos, int button) {
 
 ## 8. App Icon
 
-Place icon files in the `icon/` folder:
+Place icon files in the `icon/` folder. For PNG input, use a 1024×1024 square image; smaller PNGs are scaled up to 1024 on macOS/iOS and look blurry:
 
 ```
 myProject/

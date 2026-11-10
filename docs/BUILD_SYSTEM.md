@@ -422,7 +422,7 @@ with its data folder and ad-hoc signing (`sign-identity: '-'`). Ad-hoc signing
 skips certificate import, notarization and stapling, and uses no timestamp.
 
 ### App Icon
-Place icon files in the `icon/` folder:
+Place icon files in the `icon/` folder. For PNG input, use a 1024×1024 square image; smaller PNGs are scaled up to 1024 on macOS/iOS and look blurry:
 
 - **macOS:**
   - `.icns` - Traditional icon format (required for older macOS)
