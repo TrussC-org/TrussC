@@ -248,10 +248,11 @@ void testLinuxPackage() {
     desktop.name = "My\nApp";
     desktop.exec = "/opt/my-app/My App.sh";
     desktop.icon = "my-app";
+    desktop.wmClass = "myApp";
     const std::string entry = dist::desktopEntry(desktop);
-    check("desktop entry: one-line name, quoted Exec",
+    check("desktop entry: one-line name, quoted Exec, WM class",
           contains(entry, "Name=My App\n") && contains(entry, "Exec=\"/opt/my-app/My App.sh\"\n") &&
-              contains(entry, "Icon=my-app\n"));
+              contains(entry, "Icon=my-app\n") && contains(entry, "StartupWMClass=myApp\n"));
 
     dist::PacmanInput pkg;
     pkg.pkgname = "my-app";

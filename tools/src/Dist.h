@@ -292,6 +292,7 @@ struct DesktopEntryInput {
     std::string name;       // shown in the menu
     std::string exec;       // absolute path of the launcher
     std::string icon;       // icon name (the package name)
+    std::string wmClass;    // the window's WM_CLASS (TrussC: the executable's name)
 };
 
 // A freedesktop .desktop file for the Start menu.

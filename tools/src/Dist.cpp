@@ -1266,7 +1266,8 @@ std::string desktopEntry(const DesktopEntryInput& input) {
            "Name=" + oneLine(input.name) + "\n"
            "Exec=" + desktopExecArg(oneLine(input.exec)) + "\n"
            "Icon=" + oneLine(input.icon) + "\n"
-           "Terminal=false\n";
+           "Terminal=false\n" +
+           (input.wmClass.empty() ? std::string() : "StartupWMClass=" + oneLine(input.wmClass) + "\n");
 }
 
 std::string pkgbuild(const PacmanInput& in) {

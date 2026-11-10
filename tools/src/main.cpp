@@ -4405,6 +4405,7 @@ static fs::path buildPacmanPackage(const dist::PlanInput& input, const dist::Pla
         desktop.name = input.config.name;
         desktop.exec = "/opt/" + pkg.pkgname + "/" + plan.launcherName;
         desktop.icon = pkg.pkgname;
+        desktop.wmClass = plan.executableName;  // TrussC sets WM_CLASS to it
         ofstream(pkg.desktopFile, ios::binary) << dist::desktopEntry(desktop);
         ofstream(work / "PKGBUILD", ios::binary) << dist::pkgbuild(pkg);
         if (!fs::is_regular_file(work / "PKGBUILD", ec)) {
