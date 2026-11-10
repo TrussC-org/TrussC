@@ -128,6 +128,27 @@ void cpuTests() {
     beginStroke();
     check("new stroke clears captured colors", internal::currentWindowContext().strokeVertices.empty());
     internal::currentWindowContext().strokeStarted = false;
+    beginStroke();
+    setStrokeCap(StrokeCap::Round); setStrokeJoin(StrokeJoin::Miter); vertex(0, 0);
+    const internal::CurveAppendCheckpoint checkpoint;
+    setStrokeCap(StrokeCap::Butt); setStrokeJoin(StrokeJoin::Bevel); vertex(40, 0);
+    checkpoint.restore();
+    check("checkpoint restores vertex styles together", vertices.size() == 1 &&
+        vertices.front().cap == StrokeCap::Round && vertices.front().join == StrokeJoin::Miter);
+    setStrokeJoin(StrokeJoin::Round); vertex(100, 0);
+    setStrokeCap(StrokeCap::Square); setStrokeJoin(StrokeJoin::Bevel); vertex(100, 100);
+    setStrokeCap(StrokeCap::Butt); setStrokeJoin(StrokeJoin::Miter);
+    check("start and end caps captured before later changes", vertices.front().cap == StrokeCap::Round &&
+        vertices.back().cap == StrokeCap::Square);
+    check("each corner captures its own join", vertices[1].join == StrokeJoin::Round &&
+        vertices[2].join == StrokeJoin::Bevel);
+    beginStroke();
+    const internal::CurveAppendCheckpoint emptyCheckpoint;
+    vertex(1, 1); emptyCheckpoint.restore();
+    setStrokeCap(StrokeCap::Square); setStrokeJoin(StrokeJoin::Round); vertex(2, 2);
+    check("empty checkpoint leaves no stale first style", vertices.size() == 1 &&
+        vertices.front().cap == StrokeCap::Square && vertices.front().join == StrokeJoin::Round);
+    beginStroke(); internal::currentWindowContext().strokeStarted = false;
     Path path; path.addVertex(0, 0); path.addVertex(100, 0); path.addVertex(100, 100);
     for (auto join : {StrokeMesh::JOIN_MITER, StrokeMesh::JOIN_ROUND, StrokeMesh::JOIN_BEVEL}) {
         for (auto cap : {StrokeMesh::CAP_BUTT, StrokeMesh::CAP_ROUND, StrokeMesh::CAP_SQUARE}) {
@@ -140,6 +161,20 @@ void cpuTests() {
                 std::all_of(actual.begin(), actual.end(), [](const Color& c) { return sameColor(c, uniform); }));
         }
     }
+    path.addVertex(200, 100);
+    StrokeMesh reset(path), expected(path);
+    reset.setWidth(12).setCapType(StrokeMesh::CAP_ROUND).setJoinType(StrokeMesh::JOIN_ROUND);
+    reset.update();
+    reset.setCapType(StrokeMesh::CAP_SQUARE).setJoinType(StrokeMesh::JOIN_BEVEL); reset.update();
+    expected.setWidth(12).setCapType(StrokeMesh::CAP_SQUARE).setJoinType(StrokeMesh::JOIN_BEVEL);
+    expected.update();
+    check("direct setters replace the whole stroke after update",
+        reset.getMesh().getVertices() == expected.getMesh().getVertices());
+    const auto& points = reset.getMesh().getVertices();
+    check("whole-stroke join setter changes both corners", points.size() == 42);
+    check("whole-stroke cap setter extends both ends", std::any_of(points.begin(), points.end(),
+        [](const Vec3& p) { return p.x == -6; }) && std::any_of(points.begin(), points.end(),
+        [](const Vec3& p) { return p.x == 206; }));
 }
 
 }

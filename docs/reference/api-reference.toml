@@ -43801,6 +43801,7 @@ description.ja = "ストローク描画を開始する。"
 description.ko = "stroke 그리기를 시작한다."
 related = ["endStroke", "vertex", "beginShape", "setStrokeWeight", "setStrokeCap", "setStrokeJoin"]
 details.en = '''
+- In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Draws a connected line with **width, end caps and corner joins**. The outline of `beginShape` is always a thin 1px line, but this one follows the stroke settings.
 - Set the look with `setStrokeWeight`, `setStrokeCap` and `setStrokeJoin`, add points with `vertex()`, and finish with `endStroke()`.
 
@@ -43816,11 +43817,11 @@ endStroke();        // open line; pass true to close it into a loop
 ```
 
 - Each `vertex()` stores the **current stroke weight**. Calling `setStrokeWeight` between points changes the width along the line.
-- The cap is the `setStrokeCap` value that is set when the **first** point is added. It is used at both ends, and changing it later has no effect on this stroke. The join is the `setStrokeJoin` value that is set when `endStroke()` is called.
 - Each `vertex()` also stores the current `setColor()` color. Each joint and cap uses its vertex's color throughout; each segment blends between its endpoints, with both quad corners at each end using that endpoint's color.
 - Internally it builds a `StrokeMesh`.
 '''
 details.ja = '''
+- ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - **太さ・端の cap・角の join** を持つ、つながった線を描きます。`beginShape` の輪郭は常に細い 1px の線ですが、こちらは線の設定に従います。
 - 見た目を `setStrokeWeight`、`setStrokeCap`、`setStrokeJoin` で設定し、`vertex()` で点を追加して、`endStroke()` で終わります。
 
@@ -43836,11 +43837,11 @@ endStroke();        // open line; pass true to close it into a loop
 ```
 
 - 各 `vertex()` は**その時点の線の太さ**を記録します。点の間で `setStrokeWeight` を呼ぶと、線の途中で太さが変わります。
-- cap は、**最初**の点を追加した時点の `setStrokeCap` の値になり、両端に使われます。あとから変えても、そのストロークには反映されません。join は、`endStroke()` を呼んだ時点の `setStrokeJoin` の値になります。
 - 各 `vertex()` は、その時点の `setColor()` の色も記録します。各接合部とキャップの全体に、その頂点の色を使います。線分では両端の色を補間し、四角形の各端にある 2 頂点には、その端の色を使います。
 - 内部では `StrokeMesh` を作って描画します。
 '''
 details.ko = '''
+- 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - **두께, 끝의 cap, 모서리의 join**을 가진 이어진 선을 그립니다. `beginShape`의 윤곽은 항상 가는 1px 선이지만, 이 함수는 선 설정을 따릅니다.
 - 모양을 `setStrokeWeight`, `setStrokeCap`, `setStrokeJoin`으로 설정하고, `vertex()`로 점을 추가한 뒤 `endStroke()`로 마칩니다.
 
@@ -43856,7 +43857,6 @@ endStroke();        // open line; pass true to close it into a loop
 ```
 
 - 각 `vertex()`는 **그 시점의 선 두께**를 기록합니다. 점 사이에서 `setStrokeWeight`를 호출하면 선 도중에 두께가 바뀝니다.
-- cap은 **첫** 점을 추가한 시점의 `setStrokeCap` 값이 되며 양쪽 끝에 사용됩니다. 나중에 바꿔도 그 stroke에는 반영되지 않습니다. join은 `endStroke()`를 호출한 시점의 `setStrokeJoin` 값이 됩니다.
 - 각 `vertex()`는 그 시점의 `setColor()` 색상도 기록합니다. 각 조인과 캡 전체에는 해당 정점의 색상을 사용합니다. 선분에서는 양 끝의 색상을 보간하며 사각형의 각 끝에 있는 두 정점에는 해당 끝의 색상을 사용합니다.
 - 내부적으로 `StrokeMesh`를 만들어 그립니다.
 '''
@@ -45989,18 +45989,21 @@ description.ja = "現在のストローク描画を終了する。"
 description.ko = "현재 stroke 그리기를 종료한다."
 related = ["beginStroke"]
 details.en = '''
+- In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Joints and caps use their vertex's stored color; segments blend between endpoint colors. A closed stroke also blends from the last vertex's color back to the first vertex's color.
 - Draws the points added since `beginStroke()` as a thick line with the stroke width, caps and joins, and then empties the buffer. At least 2 points are needed. See `beginStroke` for the full pattern and a code example.
 - `endStroke(true)` closes the line into a loop by connecting the last point back to the first.
 - When you close the loop, a last point placed at the same position as the first point is removed automatically. This prevents a small spike at the closing corner.
 '''
 details.ja = '''
+- ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - 接合部とキャップには、その頂点に記録した色を使い、線分では両端の色を補間します。閉じたストロークでは、最後の頂点から最初の頂点への線分でも色を補間します。
 - `beginStroke()` 以降に追加した点を、線の太さ・cap・join を使った太い線として描画し、バッファを空にします。最低 2 点が必要です。全体の書き方とコード例は `beginStroke` を参照してください。
 - `endStroke(true)` にすると、最後の点を最初の点につないでループとして閉じます。
 - ループを閉じるとき、最後の点が最初の点と同じ位置にあれば、その点は自動的に取り除かれます。これにより、閉じた角に小さなとげが出ることを防ぎます。
 '''
 details.ko = '''
+- 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - 조인과 캡에는 해당 정점에 기록된 색상을 사용하고 선분에서는 양 끝의 색상을 보간합니다. 닫힌 스트로크에서는 마지막 정점에서 첫 정점으로 이어지는 선분의 색상도 보간합니다.
 - `beginStroke()` 이후에 추가한 점을 선 두께, cap, join을 적용한 굵은 선으로 그리고 버퍼를 비웁니다. 최소 2개의 점이 필요합니다. 전체 작성법과 코드 예시는 `beginStroke`를 참고하세요.
 - `endStroke(true)`로 하면 마지막 점을 첫 점에 이어 루프로 닫습니다.
@@ -53740,6 +53743,7 @@ description.en = "Set the stroke cap style."
 description.ja = "ストローク端点のスタイルを設定する。"
 description.ko = "stroke 끝점 스타일을 설정한다."
 details.en = '''
+- In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Controls how the open ends of a stroked line or path are drawn, as one of the `StrokeCap` enum values:
 - `StrokeCap::Butt` — cut flat at the endpoint (default).
 - `StrokeCap::Round` — a semicircle extending past the endpoint.
@@ -53747,6 +53751,7 @@ details.en = '''
 - `pushStyle()` / `popStyle()` save and restore this along with the rest of the drawing style.
 '''
 details.ja = '''
+- ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - ストローク付きの線やパスの両端の描き方を、`StrokeCap` 列挙型の値で指定します。
 - `StrokeCap::Butt` — 端点で平らに切られます（デフォルト）。
 - `StrokeCap::Round` — 端点の先に半円が付きます。
@@ -53754,6 +53759,7 @@ details.ja = '''
 - `pushStyle()` / `popStyle()` を使うと、他の描画スタイルと一緒にこの値も保存・復元できます。
 '''
 details.ko = '''
+- 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - stroke가 적용된 선이나 패스의 양 끝을 어떻게 그릴지를 `StrokeCap` 열거형 값으로 지정합니다.
 - `StrokeCap::Butt` — 끝점에서 평평하게 잘립니다(기본값).
 - `StrokeCap::Round` — 끝점 너머로 반원이 붙습니다.
@@ -53777,6 +53783,7 @@ description.en = "Set the stroke join style."
 description.ja = "ストローク結合部のスタイルを設定する。"
 description.ko = "stroke 결합부 스타일을 설정한다."
 details.en = '''
+- In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Controls how corners between segments of a stroked path are drawn, as one of the `StrokeJoin` enum values:
 - `StrokeJoin::Miter` — pointed, sharp corners (default). Very sharp angles can extend far past the corner; `StrokeMesh::setMiterLimit` bounds that.
 - `StrokeJoin::Round` — rounded corners.
@@ -53784,6 +53791,7 @@ details.en = '''
 - `pushStyle()` / `popStyle()` save and restore this along with the rest of the drawing style.
 '''
 details.ja = '''
+- ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - ストローク付きパスの各セグメントの間の角を、`StrokeJoin` 列挙型の値でどう描くか指定します。
 - `StrokeJoin::Miter` — 尖った鋭い角になります（デフォルト）。角度が非常に鋭い場合、角から大きく突き出ることがあります。`StrokeMesh::setMiterLimit` でその突出を制限できます。
 - `StrokeJoin::Round` — 角が丸くなります。
@@ -53791,6 +53799,7 @@ details.ja = '''
 - `pushStyle()` / `popStyle()` を使うと、他の描画スタイルと一緒にこの値も保存・復元できます。
 '''
 details.ko = '''
+- 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - stroke가 적용된 패스의 각 세그먼트 사이 모서리를 `StrokeJoin` 열거형 값으로 어떻게 그릴지 지정합니다.
 - `StrokeJoin::Miter` — 날카롭게 뾰족한 모서리가 됩니다(기본값). 각도가 매우 예리하면 모서리 밖으로 크게 돌출될 수 있으며, `StrokeMesh::setMiterLimit`로 이 돌출을 제한할 수 있습니다.
 - `StrokeJoin::Round` — 모서리가 둥글게 됩니다.
@@ -55733,6 +55742,7 @@ description.ja = "現在開いている shape・lines・stroke のバッファ�
 description.ko = "현재 열려 있는 shape·lines·stroke 버퍼에 정점을 추가한다."
 related = ["beginShape", "endShape", "beginLines", "beginStroke"]
 details.en = '''
+- In a stroke, each `vertex()` captures color, width, cap and join: the first and last vertices set the start and end caps, each corner uses its vertex's join, and a closed stroke uses the first vertex's join at closure with no caps.
 - Adds one point to the buffer that is open: `beginShape`, `beginLines` or `beginStroke`. If none of them is open, `vertex()` does nothing.
 - You can pass 2D points (`vertex(x, y)`, `vertex(Vec2)`) or 3D points (`vertex(x, y, z)`, `vertex(Vec3)`). For a 2D point, z is 0.
 - Inside `beginShape()`, only the position is stored. `endShape()` uses the color that is set when it is called.
@@ -55740,6 +55750,7 @@ details.en = '''
 - Inside `beginStroke()`, each point stores the **current stroke weight and color**, so width and color can vary along the line. Joints and caps use their vertex's color; segments blend between endpoint colors. See `beginStroke`.
 '''
 details.ja = '''
+- ストロークでは各 `vertex()` がその時点の色・太さ・cap・join を記録し、始点と終点の cap はそれぞれ最初と最後の頂点の値、各角の join はその頂点の値を使い、閉じたストロークの閉じる角には最初の頂点の join を使って cap は適用しません。
 - 開いているバッファ（`beginShape`、`beginLines`、`beginStroke` のいずれか）に点を 1 つ追加します。どれも開いていないときは何もしません。
 - 2D の点（`vertex(x, y)`、`vertex(Vec2)`）と 3D の点（`vertex(x, y, z)`、`vertex(Vec3)`）を渡せます。2D の点では z は 0 になります。
 - `beginShape()` の中では位置だけを記録します。色は `endShape()` を呼んだ時点のものが使われます。
@@ -55747,6 +55758,7 @@ details.ja = '''
 - `beginStroke()` の中では、点ごとに**その時点の線の太さと色**を記録するので、1 本の線の中で太さと色を変えられます。接合部とキャップにはその頂点の色を使い、線分では両端の色を補間します。`beginStroke` を参照してください。
 '''
 details.ko = '''
+- 스트로크에서는 각 `vertex()`가 그 시점의 색상·두께·cap·join을 기록하며, 시작과 끝의 cap은 각각 첫 정점과 마지막 정점의 값을, 각 모서리의 join은 해당 정점의 값을 사용하고, 닫힌 스트로크의 닫는 모서리에는 첫 정점의 join을 사용하며 cap은 적용하지 않습니다.
 - 열려 있는 버퍼(`beginShape`, `beginLines`, `beginStroke` 중 하나)에 점을 하나 추가합니다. 어느 것도 열려 있지 않으면 아무 일도 하지 않습니다.
 - 2D 점(`vertex(x, y)`, `vertex(Vec2)`)과 3D 점(`vertex(x, y, z)`, `vertex(Vec3)`)을 전달할 수 있습니다. 2D 점의 z는 0이 됩니다.
 - `beginShape()` 안에서는 위치만 기록합니다. 색은 `endShape()`를 호출한 시점의 색이 사용됩니다.
