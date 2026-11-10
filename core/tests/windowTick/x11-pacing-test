@@ -377,7 +377,7 @@ for placeholder, marker in (
     ('PERIODIC', 'static void _sapp_tc_x11_pace_periodic('),
     ('DUE', 'static bool _sapp_tc_x11_window_due('),
     ('PACE', 'static void _sapp_tc_x11_pace('),
-    ('ROLESELECT', 'static _sapp_tc_window_t* _sapp_tc_x11_update_pacer('),
+    ('ROLESELECT', 'static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {'),
     ('TICK', 'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'),
     ('LOOP', 'static void _sapp_tc_x11_run_loop('),
 ):

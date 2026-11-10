@@ -12178,6 +12178,7 @@ static void _sapp_tc_x11_lock_mouse(bool lock) {
 #endif
 
 /*-- event dispatch ---------------------------------------------------------------*/
+static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void);
 static void _sapp_tc_x11_process_event(XEvent* ev) {
 #if defined(SOKOL_GLES3)
     if (ev->type == GenericEvent) {
@@ -12360,9 +12361,11 @@ static void _sapp_tc_x11_process_event(XEvent* ev) {
                 const int state = _sapp_tc_x11_get_window_state(w);
                 if ((state == IconicState) && !_sapp_tc_native_iconified(w)) {
                     w->iconified = true;
+                    _sapp_tc_x11_update_pacer();
                     _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_ICONIFIED);
                 } else if ((state == NormalState) && _sapp_tc_native_iconified(w)) {
                     w->iconified = false;
+                    _sapp_tc_x11_update_pacer();
                     _sapp_tc_x11_app_event(w, SAPP_EVENTTYPE_RESTORED);
                 }
                 if (!(w = _sapp_tc_lookup(handle))) return;
@@ -12893,6 +12896,9 @@ extern "C" {
 
 void sapp_tc_gl_make_current(sapp_window win) {
     _sapp_tc_window_t* w = win.id ? _sapp_tc_lookup(win) : _sapp_tc.app.main;
+    // A hidden window that doesn't draw while hidden never needs its surface;
+    // touching an iconified surface can block on a back buffer (Xwayland).
+    if (w && _sapp_tc_native_hidden(w) && !w->draw_while_hidden) { sapp_tc_gl_activate_idle(); return; }
     if (w && w->drawable && _sapp_tc.ctx)
         _sapp_tc_x11_make_current(w);
 }

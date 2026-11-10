@@ -31,7 +31,7 @@ def main():
     # Helper ordering matches the snapshot; the role selector is new.
     current = '\n\n'.join(body(source, marker) for marker in markers)
     insertion = 'static void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {'
-    current = current.replace(insertion, body(source, 'static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(') + '\n' + insertion)
+    current = current.replace(insertion, body(source, 'static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {') + '\n' + insertion)
     template = (FIXTURES / 'probe.cpp').read_text(encoding='utf-8')
     with tempfile.TemporaryDirectory(prefix='x11-pacer-', dir=os.environ.get('TMPDIR')) as temporary:
         work = Path(temporary)

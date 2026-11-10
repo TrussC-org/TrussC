@@ -192,7 +192,7 @@ for name in ('static uint32_t _sapp_tc_x11_surface_window_id(', 'static bool _sa
     else:
         code += helper + '\n'
 code += body('struct _sapp_tc_x11_surface_scope {') + ';\n'
-for name in ('static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(',
+for name in ('static _sapp_tc_window_t* _sapp_tc_x11_update_pacer(void) {',
              'static _sapp_tc_window_t* _sapp_tc_x11_create_window(', 'sapp_window sapp_create_window(',
              'void sapp_destroy_window(sapp_window win) {',
              'static void _sapp_tc_x11_update_window_title(', 'void sapp_window_set_title(',

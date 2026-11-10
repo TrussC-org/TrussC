@@ -356,9 +356,10 @@ int main() {
         _sapp_tc.WM_STATE = 101; visibilityProbe = true; observedState = IconicState;
         XEvent ev{}; ev.type = PropertyNotify; ev.xproperty.window = main.xwin;
         ev.xproperty.atom = _sapp_tc.WM_STATE; ev.xproperty.state = PropertyNewValue;
+        nativeSequence.clear();
         _sapp_tc_x11_process_event(&ev); visibilityProbe = false;
         check("WM_STATE marks pacer iconified", main.iconified);
-        nativeSequence.clear(); _sapp_tc_x11_update_pacer();
+        _sapp_tc_x11_update_pacer();
         check("iconify selector avoids demoted EGL surface", nativeSequence == (paired ?
             std::vector<std::string>{"current:2", "interval:2:1", "current:1"} : std::vector<std::string>{}));
         check("iconified native demotion is pending", main.swap_interval == 0 && main.swap_interval_pending);
@@ -366,6 +367,41 @@ int main() {
         check("iconified ON/OFF native tick sequence", nativeSequence == (draw ?
             std::vector<std::string>{"current:1"} : std::vector<std::string>{}));
     }
+    // The oldest visible window can occupy the last slot after slot reuse.
+    // Exercise the activation helper used by Runtime context restoration from
+    // both lifecycle callbacks, with the shared context parked on idle.
+    _sapp_tc_window_t newest{};
+    _sapp_tc_window_t* reused[] = { &newest, &secondary, &main };
+    reset(main, reused, display); _sapp_tc.window_slots = 3;
+    main.win_id = main.xwin = 3; main.drawable = (EGLSurface)3; _sapp_tc.pacer = {3};
+    main.draw_while_hidden = false; // OFF: a hidden window that never draws doesn't need its surface.
+    secondary.win_id = secondary.xwin = 4; secondary.drawable = (EGLSurface)4;
+    secondary.iconified = secondary.occluded = false;
+    secondary.swap_interval = 0; secondary.requested_swap_interval = 1;
+    newest.win_id = newest.xwin = 5; newest.drawable = (EGLSurface)5; newest.ready = true;
+    newest.requested_swap_interval = 1;
+    _sapp_tc.idle.drawable = (EGLSurface)9;
+    sapp_tc_gl_activate_idle(); nativeSequence.clear();
+    main.desc.event_cb = [](const sapp_event* ev, sapp_window handle, void*) {
+        ++callbacks;
+        check("WM_STATE hands pacer to earliest visible window before dispatch", _sapp_tc.pacer.id == 4);
+        check("WM_STATE dispatches iconified then suspended", ev->type ==
+            (callbacks == 1 ? SAPP_EVENTTYPE_ICONIFIED : SAPP_EVENTTYPE_SUSPENDED));
+        _sapp_tc_x11_surface_scope restore;
+        for (int i = 0; i < 2; ++i) {
+            sapp_tc_gl_make_current(handle);
+            check("hidden event activation keeps shared context on idle",
+                currentDraw == _sapp_tc.idle.drawable && currentContext == _sapp_tc.ctx);
+        }
+    };
+    _sapp_tc.WM_STATE = 101; visibilityProbe = true; observedState = IconicState;
+    XEvent iconify{}; iconify.type = PropertyNotify; iconify.xproperty.window = main.xwin;
+    iconify.xproperty.atom = _sapp_tc.WM_STATE; iconify.xproperty.state = PropertyNewValue;
+    _sapp_tc_x11_process_event(&iconify); visibilityProbe = false;
+    check("trusted WM_STATE delivers both lifecycle callbacks", callbacks == 2);
+    check("WM_STATE event dispatch never activates iconified surface",
+        std::find(nativeSequence.begin(), nativeSequence.end(), "current:3") == nativeSequence.end());
+    secondary.win_id = secondary.xwin = 2; secondary.drawable = (EGLSurface)2;
     observedState = NormalState;
     secondary.swap_interval = 0; secondary.swap_interval_pending = false;
     reset(main, pair, display); _sapp_tc.window_slots = 2;
