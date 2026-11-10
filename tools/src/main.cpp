@@ -4607,11 +4607,9 @@ static int cmdDist(const vector<string>& args) {
     error_code ec;
     const fs::path projectDir = fs::weakly_canonical(fs::absolute(projectPath), ec);
     // The folder name is what people see (the app name by default); the
-    // executable / bundle is named after the CMake target, which build and
-    // run derive with sanitizeProjectName() ("sample project" -> sample_project).
+    // executable / bundle is named after the CMake target (see targetName below).
     string projectName = projectDir.filename().string();
     if (projectName.empty()) projectName = projectDir.parent_path().filename().string();
-    const string targetName = sanitizeProjectName(projectName);
 
     if (init) return distInit(projectDir.string(), projectName, appName, appVersion, appAuthor, appAuthorGiven);
 
@@ -4689,6 +4687,14 @@ static int cmdDist(const vector<string>& args) {
             return 1;
         }
     }
+
+    // The executable / bundle name: the project name the build used, from its
+    // CMake cache. Generated projects name it sanitizeProjectName(<folder>)
+    // ("sample project" -> sample_project); reading it back instead of
+    // computing it again also holds for projects made before that, and on
+    // Windows, where the folder name reaches here in the ANSI code page.
+    string targetName = readCacheValue(buildDir / "CMakeCache.txt", "CMAKE_PROJECT_NAME");
+    if (targetName.empty()) targetName = sanitizeProjectName(projectName);  // not configured yet
 
     // --- Plan ---
     dist::PlanInput input;
