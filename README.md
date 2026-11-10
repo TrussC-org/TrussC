@@ -160,6 +160,7 @@ src/                  # Platform-specific implementations
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Design philosophy and architecture
 - [CONTRIBUTING.md](docs/CONTRIBUTING.md) - How changes are proposed, decided and merged
 - [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) - CMake build system details
+- [DISTRIBUTION.md](docs/DISTRIBUTION.md) - Packaging an app for other machines (`trusscli dist`)
 - [ROADMAP.md](docs/ROADMAP.md) - Development roadmap
 
 ## Support
