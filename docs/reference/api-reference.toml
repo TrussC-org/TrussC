@@ -1907,12 +1907,12 @@ details.en = '''
 - `backend` defaults to `Default`: use the existing engine context if present, otherwise probe miniaudio’s default backend order without starting playback. An explicit backend probes only that backend; unavailable backends return an empty list and log a Warning. Native iOS probing leaves the audio session untouched and lists current routes; output routing remains OS controlled.
 - Enumeration queries each device with `ma_context_get_device_info`; this can open/probe devices (especially ALSA) and may be slow. Call from the main thread when needed, not every frame. A failed detail query keeps the device entry with unspecified capabilities. Web returns an empty list because miniaudio exposes only default placeholders, not selectable device IDs.
 
-OS-decorated names such as "マイク (Logitech StreamCam)" vary with the OS language, so match a stable part of the name.
+OS-decorated names such as "スピーカー (USB Audio Device)" vary with the OS language, so match a stable part of the name.
 
 ```cpp
 auto devices = AudioEngine::listDevices();
 auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
-    return d.name.find("StreamCam") != string::npos;
+    return d.name.find("USB Audio") != string::npos;
 });
 if (it != devices.end()) {
     AudioSettings settings;
@@ -1926,12 +1926,12 @@ details.ja = '''
 - `backend` の既定値は `Default` です。エンジンのコンテキストがあれば使い、なければ再生を開始せず miniaudio の既定順で調べます。明示したバックエンドだけを調べ、利用できなければ Warning と空リストを返します。iOSの調査ではオーディオセッションを変更せず、現在のルートを列挙します。出力ルートはOSが制御します。
 - 各デバイスに `ma_context_get_device_info` を呼びます。特にALSAではデバイスを開いて調べるため時間がかかる場合があります。毎フレームではなく必要なときにメインスレッドで呼んでください。詳細取得に失敗しても、対応形式が未指定の要素を残します。Webでは選択可能なIDを取得できず既定デバイスの仮の情報だけになるため、空リストを返します。
 
-「マイク (Logitech StreamCam)」のように OS が装飾する名前は OS の言語によって変わるため、名前の安定した部分で照合します。
+「スピーカー (USB Audio Device)」のように OS が装飾する名前は OS の言語によって変わるため、名前の安定した部分で照合します。
 
 ```cpp
 auto devices = AudioEngine::listDevices();
 auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
-    return d.name.find("StreamCam") != string::npos;
+    return d.name.find("USB Audio") != string::npos;
 });
 if (it != devices.end()) {
     AudioSettings settings;
@@ -1945,12 +1945,12 @@ details.ko = '''
 - `backend` 기본값은 `Default`이며 엔진 컨텍스트가 있으면 사용하고, 없으면 재생을 시작하지 않고 miniaudio의 기본 순서로 조회합니다. 명시한 백엔드만 조회하며 사용할 수 없으면 Warning과 빈 목록을 반환합니다. iOS 조회는 오디오 세션을 변경하지 않고 현재 경로를 열거합니다. 출력 경로는 OS가 제어합니다.
 - 장치마다 `ma_context_get_device_info`를 호출합니다. 특히 ALSA는 장치를 열어 조회할 수 있어 느릴 수 있습니다. 매 프레임 대신 필요할 때 메인 스레드에서 호출합니다. 상세 조회에 실패해도 지원 형식이 미지정인 항목을 유지합니다. Web은 선택 가능한 ID 대신 기본 장치의 임시 정보만 제공하므로 빈 목록을 반환합니다.
 
-"マイク (Logitech StreamCam)"처럼 OS가 꾸미는 이름은 OS 언어에 따라 달라지므로 이름에서 변하지 않는 부분으로 비교합니다.
+"スピーカー (USB Audio Device)"처럼 OS가 꾸미는 이름은 OS 언어에 따라 달라지므로 이름에서 변하지 않는 부분으로 비교합니다.
 
 ```cpp
 auto devices = AudioEngine::listDevices();
 auto it = find_if(devices.begin(), devices.end(), [](const auto& d) {
-    return d.name.find("StreamCam") != string::npos;
+    return d.name.find("USB Audio") != string::npos;
 });
 if (it != devices.end()) {
     AudioSettings settings;
