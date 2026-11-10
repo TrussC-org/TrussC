@@ -428,6 +428,9 @@ Place icon files in the `icon/` folder:
   - `.icns` - Traditional icon format (required for older macOS)
   - `.icon` - New format for macOS 26 Tahoe+ (created with Icon Composer, requires Xcode)
   - Both can coexist for compatibility across macOS versions
+  - Otherwise, a `.png` is converted at configure time with `sips` + `iconutil` (no full Xcode required); missing or failing tools produce a warning and use the default TrussC icon. A non-square PNG is stretched to a square, with a warning. To test the fallback, configure with `-DTRUSSC_SIPS_EXECUTABLE=NOTFOUND` (or `TRUSSC_ICONUTIL_EXECUTABLE`).
+  - An empty `icon/` uses the default icon without a warning.
+- **iOS:** A `.png` is resized to 1024×1024 at configure time with `sips`, inside the build tree. Without a PNG, the 1024×1024 TrussC default is used; missing or failing `sips` warns and uses that default.
 - **Windows:**
   - `.ico` - Windows icon format
   - `.png` - Converted to `.ico` automatically (requires ImageMagick)
