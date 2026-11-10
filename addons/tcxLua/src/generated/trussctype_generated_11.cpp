@@ -197,56 +197,62 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::FileReader
-            , trussc::FileReader()
+        auto constructors = tcxLuaConstructors<trussc::IesProfile
+            , trussc::IesProfile()
         >();
-        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
-        t["close"] = &trussc::FileReader::close;
-        t["eof"] = &trussc::FileReader::eof;
-        t["isOpen"] = &trussc::FileReader::isOpen;
-        t["open"] = &trussc::FileReader::open;
-        t["readChar"] = &trussc::FileReader::readChar;
-        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
-        t["remaining"] = &trussc::FileReader::remaining;
-        t["seek"] = &trussc::FileReader::seek;
-        t["tell"] = &trussc::FileReader::tell;
+        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile", constructors, sol::call_constructor, constructors);
+        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
+        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
+        t["getSampler"] = &trussc::IesProfile::getSampler;
+        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
+        t["getView"] = &trussc::IesProfile::getView;
+        t["isLoaded"] = &trussc::IesProfile::isLoaded;
+        t["load"] = &trussc::IesProfile::load;
+        t["loadFromString"] = &trussc::IesProfile::loadFromString;
     }
     {
-        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
-        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
-        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
-        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
-        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
-        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
-        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
-    }
-    lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
-        sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
-        "None", sol::var(trussc::EasyCam::Modifier::None),
-        "Shift", sol::var(trussc::EasyCam::Modifier::Shift),
-        "Ctrl", sol::var(trussc::EasyCam::Modifier::Ctrl),
-        "Alt", sol::var(trussc::EasyCam::Modifier::Alt),
-        "Super", sol::var(trussc::EasyCam::Modifier::Super));
-    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
-        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
-        "H264", sol::var(trussc::VideoCodec::H264),
-        "HEVC", sol::var(trussc::VideoCodec::HEVC),
-        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
-        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
-    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
-        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
-        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
-        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
-    {
-        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
-        t["getHost"] = &trussc::TcpServerClient::getHost;
-        t["getId"] = &trussc::TcpServerClient::getId;
-        t["getPort"] = &trussc::TcpServerClient::getPort;
+        sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
+        t["date"] = &trussc::BuildInfo::date;
+        t["dateTime"] = &trussc::BuildInfo::dateTime;
+        t["day"] = &trussc::BuildInfo::day;
+        t["hour"] = &trussc::BuildInfo::hour;
+        t["minute"] = &trussc::BuildInfo::minute;
+        t["month"] = &trussc::BuildInfo::month;
+        t["second"] = &trussc::BuildInfo::second;
+        t["time"] = &trussc::BuildInfo::time;
+        t["timestamp"] = &trussc::BuildInfo::timestamp;
+        t["year"] = &trussc::BuildInfo::year;
     }
     {
-        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
-        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
-        t["reason"] = &trussc::ExitRequestEventArgs::reason;
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["backend"] = &trussc::AudioDeviceInfo::backend;
+        t["channels"] = &trussc::AudioDeviceInfo::channels;
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
+        t["sampleRates"] = &trussc::AudioDeviceInfo::sampleRates;
+        t["uniqueId"] = &trussc::AudioDeviceInfo::uniqueId;
+    }
+    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
+        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
+        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
+        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
+    {
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["changed"] = &trussc::TouchPoint::changed;
+        t["id"] = &trussc::TouchPoint::id;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
+    }
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
+    {
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
     }
     {
         sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");

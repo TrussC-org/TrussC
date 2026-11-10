@@ -31,6 +31,17 @@ struct Scene { const char* name; int tolerance; };
 // Baseline comparison tolerances (maximum difference in any RGBA8 channel).
 // Only rasterized 3D/MSAA scenes have a nonzero allowance; never auto-adjust.
 constexpr Scene scenes[] = {
+    {"cpuNormalUniformSphere", 0},
+    {"cpuNormalUniformBox", 0},
+    {"cpuNormalNonUniform", 0},
+    {"cpuNormalRotated", 0},
+    {"cpuNormalMirror", 0},
+    {"pbrNormalUniformSphere", 0},
+    {"pbrNormalUniformBox", 0},
+    {"pbrNormalNonUniform", 0},
+    {"pbrNormalRotated", 0},
+    {"pbrNormalMirror", 0},
+    {"pbrNormalTangent", 0},
     {"blendModes", 0}, {"text", 0}, {"premultImage", 0},
     {"fboClearLoad", 0}, {"msaaResolve", 2}, {"transformPbr", 2},
     {"easyCamFbo", 2}, {"scissorFbo", 0}, {"fullscreenShader", 0},
@@ -159,6 +170,7 @@ class RegressionApp : public App {
         triangle_.draw(); popMatrix(); clearMaterial();
     }
     #include "followupScenes.h"
+    #include "normalScenes.h"
     void prepare() {
         if (is("imguiWindowFbo")) {
             screenUi_.setup(); fboUi_.setupOffscreen();
@@ -223,6 +235,7 @@ class RegressionApp : public App {
             // emitted by the later onRender listener installed in setup().
             return;
         }
+        if (drawNormalScene(w, h)) return;
         if (drawFollowupScene(w, h)) return;
         if (is("blendModes")) {
             constexpr BlendMode blends[] = {BlendMode::Alpha, BlendMode::Add, BlendMode::Multiply,
@@ -597,6 +610,7 @@ public:
         light_.setShadowArea(Vec3(128,96,0),128);
         camera_.setDistance(180);
         setupFollowupScenes();
+        setupNormalScenes();
         prepare();
         after_ = events().afterFrame.listen([this] { afterFrame(); });
     }

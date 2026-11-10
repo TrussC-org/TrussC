@@ -199,28 +199,28 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["toRGB"] = &trussc::ColorHSB::toRGB;
     }
     {
-        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
-        t["duration"] = &trussc::PlayingSoundInfo::duration;
-        t["level"] = &trussc::PlayingSoundInfo::level;
-        t["loop"] = &trussc::PlayingSoundInfo::loop;
-        t["pan"] = &trussc::PlayingSoundInfo::pan;
-        t["path"] = &trussc::PlayingSoundInfo::path;
-        t["paused"] = &trussc::PlayingSoundInfo::paused;
-        t["position"] = &trussc::PlayingSoundInfo::position;
-        t["slot"] = &trussc::PlayingSoundInfo::slot;
-        t["speed"] = &trussc::PlayingSoundInfo::speed;
-        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
-        t["volume"] = &trussc::PlayingSoundInfo::volume;
+        auto constructors = tcxLuaConstructors<trussc::FileReader
+            , trussc::FileReader()
+        >();
+        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
+        t["close"] = &trussc::FileReader::close;
+        t["eof"] = &trussc::FileReader::eof;
+        t["isOpen"] = &trussc::FileReader::isOpen;
+        t["open"] = &trussc::FileReader::open;
+        t["readChar"] = &trussc::FileReader::readChar;
+        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
+        t["remaining"] = &trussc::FileReader::remaining;
+        t["seek"] = &trussc::FileReader::seek;
+        t["tell"] = &trussc::FileReader::tell;
     }
     {
-        sol::usertype<trussc::Font::PlacedGlyph> t = lua->new_usertype<trussc::Font::PlacedGlyph>("FontPlacedGlyph");
-        t["baselineY"] = &trussc::Font::PlacedGlyph::baselineY;
-        t["codepoint"] = &trussc::Font::PlacedGlyph::codepoint;
-        t["drawX"] = &trussc::Font::PlacedGlyph::drawX;
-        t["pivotX"] = &trussc::Font::PlacedGlyph::pivotX;
-        t["pivotY"] = &trussc::Font::PlacedGlyph::pivotY;
-        t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
-        t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
+        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
+        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
+        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
+        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
+        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
+        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
     lua->new_usertype<trussc::Direction>("Direction",
         sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
@@ -230,31 +230,31 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         "Top", sol::var(trussc::Direction::Top),
         "Bottom", sol::var(trussc::Direction::Bottom),
         "Baseline", sol::var(trussc::Direction::Baseline));
-    {
-        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
-        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
-        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
-        t["id"] = &trussc::TouchEventArgs::id;
-        t["x"] = &trussc::TouchEventArgs::x;
-        t["y"] = &trussc::TouchEventArgs::y;
-    }
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
     lua->new_usertype<trussc::LightType>("LightType",
         sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
         "Directional", sol::var(trussc::LightType::Directional),
         "Point", sol::var(trussc::LightType::Point),
         "Spot", sol::var(trussc::LightType::Spot));
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
     {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-        t["success"] = &trussc::TcpConnectEventArgs::success;
+        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
+        t["getHost"] = &trussc::TcpServerClient::getHost;
+        t["getId"] = &trussc::TcpServerClient::getId;
+        t["getPort"] = &trussc::TcpServerClient::getPort;
     }
     {
-        sol::usertype<trussc::FilesOpenedEventArgs> t = lua->new_usertype<trussc::FilesOpenedEventArgs>("FilesOpenedEventArgs");
-        t["files"] = &trussc::FilesOpenedEventArgs::files;
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        t["reason"] = &trussc::ExitRequestEventArgs::reason;
+    }
+    {
+        sol::usertype<trussc::DeviceDisconnectEventArgs> t = lua->new_usertype<trussc::DeviceDisconnectEventArgs>("DeviceDisconnectEventArgs");
+        t["reason"] = &trussc::DeviceDisconnectEventArgs::reason;
     }
 }
 #ifdef _MSC_VER

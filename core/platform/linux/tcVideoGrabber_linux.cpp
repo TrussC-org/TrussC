@@ -8,6 +8,7 @@
 #ifdef __linux__
 
 #include "TrussC.h"
+#include "tcVideoGrabberLinux.h"
 #include <filesystem>
 #include <algorithm>
 
@@ -51,6 +52,7 @@ struct VideoGrabberPlatformData {
     int bufferWidth = 0;
     int bufferHeight = 0;
     size_t rgbaBytes = 0;
+    internal::MjpegDhtBuffer mjpegScratch;
 
     // Resize notification
     std::atomic<bool> needsResize{false};
@@ -136,9 +138,13 @@ static void convertYUYVtoRGBA(const unsigned char* src, unsigned char* dst, size
 
 // Decode MJPEG to RGBA using stb_image
 static bool decodeMJPEGtoRGBA(const unsigned char* src, size_t srcSize,
-                               unsigned char* dst, int width, int height, size_t rgbaBytes) {
+                               unsigned char* dst, int width, int height, size_t rgbaBytes,
+                               internal::MjpegDhtBuffer& scratch) {
+    const auto jpeg = scratch.prepare({src, srcSize});
+    // Bound (decoder ABI): stb_image takes an int byte count.
+    if (jpeg.size() > size_t((std::numeric_limits<int>::max)())) return false;
     int w, h, channels;
-    unsigned char* decoded = stbi_load_from_memory(src, srcSize, &w, &h, &channels, 4);
+    unsigned char* decoded = stbi_load_from_memory(jpeg.data(), static_cast<int>(jpeg.size()), &w, &h, &channels, 4);
 
     if (!decoded) {
         return false;
@@ -218,7 +224,7 @@ static void captureThreadFunc(std::shared_ptr<internal::GrabberSharedState> stat
                 converted = true;
             } else if (data->pixelFormat == V4L2_PIX_FMT_MJPEG) {
                 converted = decodeMJPEGtoRGBA(src, buf.bytesused, data->backBuffer,
-                                              data->bufferWidth, data->bufferHeight, data->rgbaBytes);
+                                              data->bufferWidth, data->bufferHeight, data->rgbaBytes, data->mjpegScratch);
             }
 
             // A frame that didn't convert (e.g. an MJPEG of another size) is not published.
@@ -275,7 +281,7 @@ bool VideoGrabber::setupPlatform() {
         return false;
     }
 
-    if (!(cap.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
+    if (!internal::isVideoCaptureDevice(cap)) {
         logError("VideoGrabber") << "Device does not support video capture";
         state_->platformData.reset();
         return false;
@@ -315,8 +321,10 @@ bool VideoGrabber::setupPlatform() {
     data->bufferHeight = state_->height;
     data->pixelFormat = fmt.fmt.pix.pixelformat;
 
+    char fourcc[5] = {};
+    std::memcpy(fourcc, &data->pixelFormat, 4);
     logNotice("VideoGrabber") << "Format: " << state_->width << "x" << state_->height
-                                << " (" << (char*)&data->pixelFormat << ")";
+                                << " (" << fourcc << ")";
 
     // Set frame rate if specified
     if (desiredFrameRate_ > 0) {
@@ -343,6 +351,7 @@ bool VideoGrabber::setupPlatform() {
     data->buffers = new VideoGrabberPlatformData::Buffer[req.count];
 
     // Map buffers
+    size_t maxBufferLength = 0;
     for (unsigned int i = 0; i < req.count; i++) {
         struct v4l2_buffer buf = {};
         buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -356,6 +365,7 @@ bool VideoGrabber::setupPlatform() {
         }
 
         data->buffers[i].length = buf.length;
+        maxBufferLength = std::max(maxBufferLength, data->buffers[i].length);
         data->buffers[i].start = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE,
                                        MAP_SHARED, data->fd, buf.m.offset);
 
@@ -364,6 +374,13 @@ bool VideoGrabber::setupPlatform() {
             state_->platformData.reset();
             return false;
         }
+    }
+
+    // Bound (driver buffer length): scratch holds the largest VIDIOC_QUERYBUF buffer plus the DHT block.
+    if (data->pixelFormat == V4L2_PIX_FMT_MJPEG && !data->mjpegScratch.allocate(maxBufferLength)) {
+        logError("VideoGrabber") << "MJPEG scratch size overflow";
+        state_->platformData.reset();
+        return false;
     }
 
     // Allocate back buffer
@@ -422,17 +439,24 @@ std::vector<VideoDeviceInfo> VideoGrabber::listDevicesPlatform() {
     }
     std::sort(byPathLinks.begin(), byPathLinks.end());
 
-    // Scan /dev/video*
-    for (int i = 0; i < 10; i++) {
-        std::string path = "/dev/video" + std::to_string(i);
+    // Enumerate actual nodes and sort by numeric suffix (video2 before video10).
+    std::vector<std::pair<int, std::filesystem::path>> nodes;
+    std::error_code deviceError;
+    for (const auto& entry : std::filesystem::directory_iterator("/dev", deviceError)) {
+        const int number = internal::videoDeviceNumber(entry.path().filename().string());
+        if (number >= 0) nodes.emplace_back(number, entry.path());
+    }
+    std::sort(nodes.begin(), nodes.end());
+    for (const auto& [number, node] : nodes) {
+        std::string path = node.string();
         int fd = open(path.c_str(), O_RDWR);
         if (fd == -1) continue;
 
         struct v4l2_capability cap;
         if (xioctl(fd, VIDIOC_QUERYCAP, &cap) == 0) {
-            if (cap.capabilities & V4L2_CAP_VIDEO_CAPTURE) {
+            if (internal::isVideoCaptureDevice(cap)) {
                 VideoDeviceInfo info;
-                info.deviceId = i;
+                info.deviceId = number;
                 info.deviceName = std::string((char*)cap.card);
                 info.uniqueId = path;
                 for (const auto& link : byPathLinks) {

@@ -51,6 +51,26 @@ static Mesh makeMesh(int n) {
 
 // CPU normal transforms (#1353); no rendering context is needed.
 static void checkNormalTransforms() {
+    const Vec3 source = Vec3(1, 2, 3).normalized();
+    const Mat4 rotationOnly = Mat4::rotateY(0.7f) * Mat4::rotateZ(0.4f);
+    auto transformedNormal = [](const Mat4& matrix, const Vec3& normal) {
+        return internal::transformMeshNormal(internal::meshNormalMatrix(matrix), normal);
+    };
+    check("normal helper: rotation unchanged",
+          (transformedNormal(rotationOnly, source) - rotationOnly * source).length() < 1e-5f);
+    check("normal helper: rotation plus scale matches inverse transpose",
+          (transformedNormal(rotationOnly * Mat4::scale(2, 1, 0.5f), source) -
+           (rotationOnly * Vec3(source.x / 2, source.y, source.z * 2)).normalized()).length() < 1e-5f);
+    check("normal helper: mirror keeps outward direction",
+          (transformedNormal(Mat4::scale(-1, 1, 1), source) -
+           Vec3(-source.x, source.y, source.z)).length() < 1e-5f);
+    check("normal helper: zero result keeps the original normal",
+          transformedNormal(Mat4::scale(0), source) == source);
+    check("normal helper: cutoff keeps the original normal",
+          transformedNormal(Mat4::scale(1, 1e-7f, 1e-7f), Vec3(2, 0, 0)) == Vec3(2, 0, 0));
+    const Mat4 shear(1, 0.5f, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+    check("normal helper: shear matches inverse transpose",
+          (transformedNormal(shear, Vec3(1, 0, 0)) - Vec3(1, -0.5f, 0).normalized()).length() < 1e-5f);
     const Mesh sphere = createSphere(1.0f, 12);
     Mesh scaled = sphere;
     scaled.scale(2.0f, 1.0f, 0.5f);
