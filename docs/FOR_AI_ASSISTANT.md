@@ -630,6 +630,8 @@ cancelAllAsyncTimers();          // e.g. on mode change
 ## GPU Resources
 
 ### Image
+
+Linux decodes JPEG with libjpeg-turbo; CMYK/YCCK JPEGs fall back to stb_image.
 ```cpp
 Image img;
 img.load("photo.png");              // Load from bin/data/

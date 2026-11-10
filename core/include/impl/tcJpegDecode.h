@@ -23,6 +23,7 @@ public:
     JpegDecode(const JpegDecode&) = delete;
     JpegDecode& operator=(const JpegDecode&) = delete;
     bool open(const unsigned char* bytes, size_t length);
+    bool needsStbFallback() const { return needsStbFallback_; }
     int width() const { return static_cast<int>(info_.image_width); }
     int height() const { return static_cast<int>(info_.image_height); }
     bool decode(unsigned char* rgba, size_t capacity);
@@ -32,6 +33,7 @@ private:
         std::jmp_buf jump;
     } error_{};
     jpeg_decompress_struct info_{};
+    bool needsStbFallback_ = false;
 };
 
 } // namespace trussc::internal

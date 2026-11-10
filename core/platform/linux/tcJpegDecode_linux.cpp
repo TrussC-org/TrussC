@@ -33,6 +33,12 @@ bool JpegDecode::open(const unsigned char* bytes, size_t length) {
         return FALSE;
     };
     if (jpeg_read_header(&info_, TRUE) != JPEG_HEADER_OK) return false;
+    needsStbFallback_ = info_.jpeg_color_space == JCS_CMYK || info_.jpeg_color_space == JCS_YCCK;
+    if (needsStbFallback_) {
+        // Image loading retries the original bytes with stb; cameras reject CMYK.
+        jpeg_destroy_decompress(&info_);
+        return false;
+    }
     return info_.image_width > 0 && info_.image_width <= INT_MAX &&
            info_.image_height > 0 && info_.image_height <= INT_MAX;
 }

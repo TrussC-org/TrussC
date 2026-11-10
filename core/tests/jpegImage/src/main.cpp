@@ -53,6 +53,64 @@ TC_CORE_TEST_MAIN() {
         }
         check("HDR gamma and alpha retained", matches);
     }
+    // CMYK, Adobe-inverted CMYK and YCCK must use the same bytes as other platforms.
+    for (auto [adobe, ycck] : {std::pair{true, false}, {false, false}, {true, true}}) {
+        const auto cmyk = jpegTest::cmyk(adobe, ycck);
+        internal::JpegDecode camera;
+        check("camera rejects CMYK/YCCK without stb fallback", !camera.open(cmyk.data(), cmyk.size()) &&
+            camera.needsStbFallback());
+        int w = 0, h = 0, channels = 0;
+        auto* stb = stbi_load_from_memory(cmyk.data(), int(cmyk.size()), &w, &h, &channels, 4);
+        check("CMYK/YCCK stb fixture decodes", stb && w == 8 && h == 8);
+        check("CMYK/YCCK Image memory equals stb byte for byte",
+            image.loadFromMemory(cmyk.data(), int(cmyk.size())) && image.getWidth() == 8 &&
+            image.getHeight() == 8 && stb && std::memcmp(image.getPixelsData(), stb, 8 * 8 * 4) == 0);
+        {
+            std::ofstream file(path, std::ios::binary);
+            file.write(reinterpret_cast<const char*>(cmyk.data()), cmyk.size());
+        }
+        check("CMYK/YCCK Image file equals stb byte for byte", image.load(path) && stb &&
+            std::memcmp(image.getPixelsData(), stb, 8 * 8 * 4) == 0);
+        stbi_image_free(stb);
+        auto* stbFloat = stbi_loadf_from_memory(cmyk.data(), int(cmyk.size()), &w, &h, &channels, 3);
+        bool matches = linear.loadHDR(path) && stbFloat && linear.isFloat();
+        if (matches) for (size_t i = 0; i < 8 * 8; ++i) {
+            matches &= std::memcmp(linear.getDataF32() + i * 4, stbFloat + i * 3, 3 * sizeof(float)) == 0;
+            matches &= linear.getDataF32()[i * 4 + 3] == 1.0f;
+        }
+        check("CMYK/YCCK HDR equals stb RGB conversion", matches);
+        stbi_image_free(stbFloat);
+    }
+    const auto huge = jpegTest::withDimensions(jpegTest::encode(8, 8), 60000, 60000);
+    int w = 0, h = 0, channels = 0;
+    auto* stb = stbi_load_from_memory(huge.data(), int(huge.size()), &w, &h, &channels, 4);
+    check("60000x60000 stb rejects as too large", !stb && std::string(stbi_failure_reason()) == "too large");
+    stbi_image_free(stb);
+    internal::failImageDecodeAllocationAfterForTests(0);
+    const auto rejected = image.loadFromMemory(huge.data(), int(huge.size()));
+    check("60000x60000 keeps stb error class with no pixel allocation",
+        rejected.error == LoadError::DecodeFailed && rejected.message == "too large" && !image.isAllocated() &&
+        internal::imageDecodeAllocationAttemptsForTests() == 0);
+    internal::failImageDecodeAllocationAfterForTests(-1);
+    const auto rgbaHuge = jpegTest::withDimensions(jpegTest::encode(8, 8), 32768, 16384);
+    internal::failImageDecodeAllocationAfterForTests(0);
+    const auto rgbaRejected = pixels.loadFromMemory(rgbaHuge.data(), int(rgbaHuge.size()));
+    check("RGB header fits but RGBA plus extra byte exceeds stb int limit",
+        rgbaRejected.error == LoadError::DecodeFailed && !pixels.isAllocated() &&
+        internal::imageDecodeAllocationAttemptsForTests() == 0);
+    internal::failImageDecodeAllocationAfterForTests(-1);
+    // RGB bytes fit INT_MAX, but stb's three-channel float conversion does not.
+    const auto hdrHuge = jpegTest::withDimensions(jpegTest::encode(8, 8), 14000, 14000);
+    {
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(hdrHuge.data()), hdrHuge.size());
+    }
+    internal::failImageDecodeAllocationAfterForTests(1); // Encoded snapshot only.
+    const auto hdrRejected = linear.loadHDR(path);
+    check("HDR keeps stb float size limit before pixel allocation",
+        hdrRejected.error == LoadError::DecodeFailed && !linear.isAllocated() &&
+        internal::imageDecodeAllocationAttemptsForTests() == 1);
+    internal::failImageDecodeAllocationAfterForTests(-1);
     fs::remove(path);
     check("truncated JPEG fails without publishing pixels", !pixels.loadFromMemory(bytes.data(), int(bytes.size() - 2)) &&
         !pixels.isAllocated());
