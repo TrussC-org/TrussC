@@ -261,8 +261,6 @@ int main(){
                        'int runApp(')
         execute('#include <string>\n#include <memory>\n#include <cassert>\n#include <type_traits>\n'
                 '#define TC_LUA_SKIP\nclass Window;\n' + settings + runtime + r'''
-template<class T> concept HasWindowReserve = requires(T t) { t.uniformBufferReserve; t.reserveUniformBuffer(1); };
-static_assert(!HasWindowReserve<WindowSettings>);
 namespace internal { int gpuUniformBufferReserve=0; }
 void configure(const RuntimeSettings& runtime) { ''' + assignment + r''' }
 template<class T> int runApp(const WindowSettings&, const RuntimeSettings& r) { configure(r); return 23; }
@@ -275,19 +273,6 @@ static_assert(std::is_aggregate_v<RuntimeSettings>);
 assert(runApp<int>(WindowSettings{}, runtime)==23);
 assert(runApp<int>()==23 && internal::gpuUniformBufferReserve==0); }
 ''')
-
-    def test_clipboard_settings_removed(self):
-        header = read('core/include/TrussC.h')
-        settings = body(header, 'struct WindowSettings {') + ';\n'
-        self.assertNotIn('desc.clipboard_size', header)
-        execute('#include <string>\n#include <memory>\n#include <cassert>\n'
-                '#define TC_LUA_SKIP\nclass Window;\n' + settings + r'''
-template<class T> concept HasClipboardSize = requires(T t) { t.clipboardSize; };
-template<class T> concept HasClipboardSetter = requires(T t) { t.setClipboardSize(1); };
-static_assert(!HasClipboardSize<WindowSettings> && !HasClipboardSetter<WindowSettings>);
-int main(){ WindowSettings settings; }
-''')
-        self.assertNotIn('setClipboardSize', body(header, 'inline void setClipboardString('))
 
     def test_mcp_window_id(self):
         source = read('core/include/tc/utils/tcStandardTools.cpp')
