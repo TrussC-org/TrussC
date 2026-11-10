@@ -106,6 +106,10 @@ private:
     bool entered_ = false, admitted_ = false, dispatch_ = false, requestsReady_ = false;
     void leave() noexcept;
 };
+// Shared public/MCP input construction and native delivery. MCP retains its
+// existing app-coordinate basis; public input always uses logical points.
+bool buildInputEvent(const InputEvent&, const WindowContext&, float dpi, sapp_event&, bool appCoordinates = false);
+bool sendInputEvent(Window&, sapp_event, InputSource);
 void windowEvent(const sapp_event*, sapp_window, void*) noexcept;
 void singleWindowEvent(const sapp_event*) noexcept;
 void enterWindowEvent(const sapp_event*, sapp_window, void*) noexcept;

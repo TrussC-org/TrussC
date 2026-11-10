@@ -3307,6 +3307,20 @@ void Image::setDirty()  // Marks the image as needing a texture update.
 void Image::update()  // Uploads pending CPU pixel changes to the texture.
 ```
 
+### InputEvent — Constructs a synchronous input request in window-local logical points.
+
+```cpp
+InputEvent InputEvent::keyPress(int key, uint32_t modifiers = 0, bool isRepeat = false)  // Constructs a defined nonzero key-code press, optionally with flags and repeat.
+InputEvent InputEvent::keyRelease(int key, uint32_t modifiers = 0)  // Constructs a key release, optionally with modifier flags.
+InputEvent InputEvent::mouseMove(Vec2 pos, uint32_t modifiers = 0)  // Constructs a pointer move; held buttons determine move or drag delivery.
+InputEvent InputEvent::mousePress(Vec2 pos, int button = 0, uint32_t modifiers = 0)  // Constructs a mouse-button press at a logical position.
+InputEvent InputEvent::mouseRelease(Vec2 pos, int button = 0, uint32_t modifiers = 0)  // Constructs a mouse-button release at a logical position.
+InputEvent InputEvent::mouseScroll(Vec2 scroll, uint32_t modifiers = 0)  // Constructs wheel input at the current pointer; scroll units are unchanged.
+InputEvent InputEvent::touchMove(const TouchEventArgs & touches, uint32_t modifiers = 0)  // Copies touch IDs, logical positions and changed flags for a touch move.
+InputEvent InputEvent::touchPress(const TouchEventArgs & touches, uint32_t modifiers = 0)  // Copies touch IDs, logical positions and changed flags for a touch press.
+InputEvent InputEvent::touchRelease(const TouchEventArgs & touches, uint32_t modifiers = 0)  // Copies touch input for release; cancelled selects touch cancellation.
+```
+
 ### JsonReadReflector — Reads JSON values into reflected members.
 
 ```cpp
@@ -4864,6 +4878,7 @@ int Window::getHeight() const  // Returns this window's content height.
 IVec2 Window::getPosition() const [macos,windows,linux]  // This window's current position in the same screen-coordinate space as setPosition; (-1, -1) if the native window is gone
 const std::string & Window::getTitle() const  // Returns the title stored for this window.
 int Window::getWidth() const  // Returns this window's content width.
+bool Window::injectInput(const InputEvent & event, InputSource source = Injected)  // Synchronously dispatches debug input through this window’s ordinary input route.
 bool Window::isFocused() const  // Returns whether this window has keyboard focus, as last reported by the operating system.
 bool Window::isFullscreen() const  // Returns this window's observed fullscreen state.
 bool Window::isOccluded() const  // Returns whether this window is explicitly hidden, minimized or fully occluded.
@@ -4973,6 +4988,7 @@ enum EaseMode { In, Out, InOut }  // Selects the direction of an easing curve.
 enum EaseType { Linear, Quad, Cubic, Quart, Quint, Sine, Expo, Circ, Back, Elastic, Bounce, Custom }  // Selects an easing curve family.
 enum EasyCam::Modifier { None, Shift, Ctrl, Alt, Super }  // Specifies a modifier key for camera mouse control.
 enum ImageType { Color, Grayscale }  // Defines color and grayscale image types.
+enum InputSource { Real, Injected, Replayed }  // Identifies the origin of a typed input event.
 enum KinsokuLevel { Off, PunctuationOnly, Standard }  // Selects Japanese line-breaking restrictions for text wrapping.
 enum LayoutDirection { Vertical, Horizontal }  // Selects the stacking axis for child layout.
 enum LightType { Directional, Point, Spot }  // Identifies a directional, point, or spot light.

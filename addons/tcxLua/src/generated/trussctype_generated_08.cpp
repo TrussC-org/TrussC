@@ -132,40 +132,44 @@ void tcxLuaGenShard_08(const std::shared_ptr<sol::state>& lua) {
         "PinkNoise", sol::var(trussc::ChipSoundNote::Wave::PinkNoise),
         "Silent", sol::var(trussc::ChipSoundNote::Wave::Silent));
     {
-        sol::usertype<trussc::SaveResult> t = lua->new_usertype<trussc::SaveResult>("SaveResult");
-        t["error"] = &trussc::SaveResult::error;
-        t["message"] = &trussc::SaveResult::message;
-        t["ok"] = &trussc::SaveResult::ok;
-        t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
-        t["success"] = &trussc::SaveResult::success;
+        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
+        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
+        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
+        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
+        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
     }
     {
-        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
-        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
-        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
-        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
-        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
+        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
+        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
+        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
+        t["source"] = &trussc::TouchEventArgs::source;
+        t["id"] = &trussc::TouchEventArgs::id;
+        t["x"] = &trussc::TouchEventArgs::x;
+        t["y"] = &trussc::TouchEventArgs::y;
     }
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
+    {
+        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
+        t["accuracy"] = &trussc::Location::accuracy;
+        t["altitude"] = &trussc::Location::altitude;
+        t["latitude"] = &trussc::Location::latitude;
+        t["longitude"] = &trussc::Location::longitude;
+    }
     {
         sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
         t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
         t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
-    {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
-    }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
     {
         sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
         t["focused"] = &trussc::FocusEventArgs::focused;

@@ -66320,3 +66320,153 @@ details.ko = '''
 - 초기값이 미설정인 `optional<AudioDeviceInfo>`입니다. `AudioEngine::listDevices()`의 출력 항목을 대입합니다. 설정하면 해당 백엔드가 `AudioSettings::backend`보다 우선하며 `uniqueId`가 `deviceName`보다 우선합니다. 이름 변경은 비교에 영향을 주지 않습니다.
 - ID가 비어 있거나 없으면 다른 장치를 열지 않고 Warning과 함께 초기화에 실패합니다. 이름 또는 기본 장치 선택으로 돌아가려면 optional을 초기화합니다. 인수 없는 `AudioEngine::init()`은 이 선택을 유지하지 않습니다.
 '''
+
+["InputSource"]
+description.en = "Identifies the origin of a typed input event."
+description.ja = "型付き入力イベントの発生元を表します。"
+description.ko = "형식이 지정된 입력 이벤트의 출처를 나타냅니다."
+details.en = '''
+`Real` is native input, `Injected` is public/MCP injection, and `Replayed` is explicitly replayed input. The trailing `source` field on key, mouse, scroll and touch args defaults to `Real`. Touch-derived mouse events preserve it. Source is diagnostic metadata, not authentication.
+'''
+details.ja = '''
+`Real` はネイティブ入力、`Injected` は公開 API・MCP による注入、`Replayed` は明示的な再生入力です。キー・マウス・スクロール・タッチ引数の末尾の `source` は既定で `Real` です。タッチ由来のマウスイベントにも引き継がれます。発生元は診断情報であり、認証情報ではありません。
+'''
+details.ko = '''
+`Real`은 네이티브 입력, `Injected`는 공개 API·MCP 주입, `Replayed`는 명시적 재생 입력입니다. 키·마우스·스크롤·터치 인자 끝의 `source`는 기본값이 `Real`입니다. 터치에서 변환된 마우스 이벤트도 이를 유지합니다. 출처는 진단 정보이며 인증 정보가 아닙니다.
+'''
+snippet = '''
+auto listener = getWindow()->events().keyPressed.listen([](const KeyEventArgs& e) {
+    if (e.source == InputSource::Replayed) logNotice() << "Replay key: " << e.key;
+});
+'''
+related = ["Window::injectInput", "InputEvent"]
+value_desc.Real.en = "Native input, including framework recovery releases."
+value_desc.Injected.en = "Public or MCP injected input."
+value_desc.Replayed.en = "Input explicitly marked as replayed."
+
+["InputEvent"]
+description.en = "Constructs a synchronous input request in window-local logical points."
+description.ja = "ウィンドウ内の論理ポイントで同期入力の要求を作成します。"
+description.ko = "창 내부 논리 포인트로 동기 입력 요청을 만듭니다."
+details.en = '''
+Use factories for mouse move/press/release/scroll, key press/release and touch press/move/release. Positions always use logical points; callbacks and queries still follow `pixelPerfect` (at DPI 2, logical x=20 yields x=40 when enabled). Wheel units are unchanged. Modifier flags use `SAPP_MODIFIER_*` and also inherit held modifier keys from the target. Flags describe an event; held modifier queries require pressing/releasing the modifier key itself. No timestamps, text or drop payloads. C++ debug/test tool; see `Window::injectInput`.
+'''
+details.ja = '''
+マウス移動・押下・解放・スクロール、キー押下・解放、タッチ押下・移動・解放のファクトリーを使います。位置は常に論理ポイントです。コールバックと状態取得は `pixelPerfect` に従い、DPI 2 で有効なら論理 x=20 は x=40 になります。スクロール量の単位は変わりません。修飾フラグは `SAPP_MODIFIER_*` で、対象の保持修飾キーも引き継ぎます。フラグはイベントを表し、修飾キーの保持状態を変えるにはそのキー自体を押下・解放します。時刻・文字・ドロップは含みません。C++ のデバッグ・テスト用です。
+'''
+details.ko = '''
+마우스 이동·누름·해제·스크롤, 키 누름·해제, 터치 누름·이동·해제 팩터리를 사용합니다. 위치는 항상 논리 포인트입니다. 콜백과 상태 조회는 `pixelPerfect`를 따르며, DPI 2에서 활성화하면 논리 x=20이 x=40이 됩니다. 스크롤 단위는 그대로입니다. 수정 플래그는 `SAPP_MODIFIER_*`이며 대상의 유지 수정 키도 반영합니다. 플래그는 이벤트를 설명하며 수정 키 유지 상태는 해당 키 자체를 누르고 해제하여 바꿉니다. 시간·문자·드롭은 포함하지 않습니다. C++ 디버그·테스트 도구입니다.
+'''
+snippet = '''
+getWindow()->injectInput(InputEvent::mouseMove({120, 80}), InputSource::Replayed);
+'''
+related = ["Window::injectInput", "InputSource"]
+
+["Window::injectInput"]
+description.en = "Synchronously dispatches debug input through this window’s ordinary input route."
+description.ja = "このウィンドウの通常の入力経路にデバッグ入力を同期配送します。"
+description.ko = "이 창의 일반 입력 경로로 디버그 입력을 동기 전달합니다."
+details.en = '''
+Main thread only. Returns `true` when accepted and dispatched, even if consumed. Rejects closed/closing targets, invalid or unrepresentable input, and `InputSource::Real`. Default source is `Injected`. Delivery is raw → ImGui priority -20 → BeforeApp → App → eligible tree → AfterApp; consumption stops typed propagation. Pointer and held-key queries update before typed listeners. Calls run in call order; nested injection completes before the outer event resumes, so injecting the same event from its listener can recurse indefinitely. Use update for replay. No queue or timestamps. This C++ debug/test tool is not recommended for shipped apps and does not operate OS input, native dialogs, system shortcuts or IME.
+'''
+details.ja = '''
+メインスレッド専用です。受理して配送すると、消費されても `true` を返します。閉じた・終了中の対象、不正・表現範囲外の入力、`InputSource::Real` は拒否します。既定は `Injected` です。順序は raw → ImGui 優先度 -20 → BeforeApp → App → 対象ツリー → AfterApp で、消費すると後続の型付き配送が止まります。ポインター・保持キー状態は型付きリスナーの前に更新します。呼び出し順で同期配送し、入れ子の注入は外側の再開前に完了します。同じイベントをリスナーから注入すると無限再帰になり得ます。再生は update で行ってください。キュー・時刻はありません。配布用アプリには推奨しない C++ デバッグ・テスト用機能です。OS 入力・ネイティブダイアログ・システムショートカット・IME は操作しません。
+'''
+details.ko = '''
+메인 스레드 전용입니다. 수락하여 전달하면 소비되어도 `true`를 반환합니다. 닫혔거나 종료 중인 대상, 잘못되거나 표현 범위를 벗어난 입력, `InputSource::Real`은 거부합니다. 기본 출처는 `Injected`입니다. 순서는 raw → ImGui 우선순위 -20 → BeforeApp → App → 대상 트리 → AfterApp이며 소비하면 이후 형식 지정 전달이 중단됩니다. 포인터·유지 키 상태는 형식 지정 리스너 전에 갱신합니다. 호출 순서대로 동기 전달하며 중첩 주입은 바깥 이벤트가 재개되기 전에 완료됩니다. 리스너에서 같은 이벤트를 주입하면 무한 재귀가 발생할 수 있습니다. 재생은 update에서 수행해야 합니다. 큐·시간은 없습니다. 배포 앱에는 권장하지 않는 C++ 디버그·테스트 기능입니다. OS 입력·네이티브 대화 상자·시스템 단축키·IME는 조작하지 않습니다.
+'''
+snippet = '''
+getWindow()->injectInput(InputEvent::mousePress({120, 80}));
+getWindow()->injectInput(InputEvent::mouseRelease({120, 80}));
+'''
+related = ["InputEvent", "InputSource", "EventPriority::BeforeApp"]
+
+["InputEvent::mouseMove"]
+description.en = "Constructs a pointer move; held buttons determine move or drag delivery."
+description.ja = "ポインター移動を作成します。保持ボタンにより移動・ドラッグの配送が決まります。"
+description.ko = "포인터 이동을 만듭니다. 유지 버튼에 따라 이동·드래그 전달이 결정됩니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mousePress"]
+description.en = "Constructs a mouse-button press at a logical position."
+description.ja = "論理位置でのマウスボタン押下を作成します。"
+description.ko = "논리 위치에서 마우스 버튼 누름을 만듭니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mouseRelease"]
+description.en = "Constructs a mouse-button release at a logical position."
+description.ja = "論理位置でのマウスボタン解放を作成します。"
+description.ko = "논리 위치에서 마우스 버튼 해제를 만듭니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::mouseScroll"]
+description.en = "Constructs wheel input at the current pointer; scroll units are unchanged."
+description.ja = "現在のポインター位置でのホイール入力を作成します。スクロール単位は変わりません。"
+description.ko = "현재 포인터 위치의 휠 입력을 만듭니다. 스크롤 단위는 그대로입니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::keyPress"]
+description.en = "Constructs a defined nonzero key-code press, optionally with flags and repeat."
+description.ja = "定義済みの非ゼロキーコードの押下を作成します。修飾フラグとリピートも指定できます。"
+description.ko = "정의된 0이 아닌 키 코드 누름을 만듭니다. 수정 플래그와 반복도 지정할 수 있습니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::keyRelease"]
+description.en = "Constructs a key release, optionally with modifier flags."
+description.ja = "キー解放を作成します。修飾フラグも指定できます。"
+description.ko = "키 해제를 만듭니다. 수정 플래그도 지정할 수 있습니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::touchPress"]
+description.en = "Copies touch IDs, logical positions and changed flags for a touch press."
+description.ja = "タッチ押下用に ID・論理位置・changed フラグをコピーします。"
+description.ko = "터치 누름을 위해 ID·논리 위치·changed 플래그를 복사합니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::touchMove"]
+description.en = "Copies touch IDs, logical positions and changed flags for a touch move."
+description.ja = "タッチ移動用に ID・論理位置・changed フラグをコピーします。"
+description.ko = "터치 이동을 위해 ID·논리 위치·changed 플래그를 복사합니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["InputEvent::touchRelease"]
+description.en = "Copies touch input for release; cancelled selects touch cancellation."
+description.ja = "解放用のタッチ入力をコピーします。cancelled でタッチキャンセルを選択します。"
+description.ko = "해제용 터치 입력을 복사합니다. cancelled로 터치 취소를 선택합니다."
+related = ["InputEvent", "Window::injectInput"]
+
+["KeyEventArgs::source"]
+description.en = "Reports native, injected or replayed input; defaults to Real."
+description.ja = "ネイティブ入力・注入・再生の発生元を表します。既定は Real です。"
+description.ko = "네이티브 입력·주입·재생의 출처를 나타냅니다. 기본값은 Real입니다."
+related = ["InputSource"]
+
+["MouseEventArgs::source"]
+description.en = "Reports native, injected or replayed input; defaults to Real."
+description.ja = "ネイティブ入力・注入・再生の発生元を表します。既定は Real です。"
+description.ko = "네이티브 입력·주입·재생의 출처를 나타냅니다. 기본값은 Real입니다."
+related = ["InputSource"]
+
+["MouseMoveEventArgs::source"]
+description.en = "Reports native, injected or replayed input; defaults to Real."
+description.ja = "ネイティブ入力・注入・再生の発生元を表します。既定は Real です。"
+description.ko = "네이티브 입력·주입·재생의 출처를 나타냅니다. 기본값은 Real입니다."
+related = ["InputSource"]
+
+["MouseDragEventArgs::source"]
+description.en = "Reports native, injected or replayed input; defaults to Real."
+description.ja = "ネイティブ入力・注入・再生の発生元を表します。既定は Real です。"
+description.ko = "네이티브 입력·주입·재생의 출처를 나타냅니다. 기본값은 Real입니다."
+related = ["InputSource"]
+
+["ScrollEventArgs::source"]
+description.en = "Reports native, injected or replayed input; defaults to Real."
+description.ja = "ネイティブ入力・注入・再生の発生元を表します。既定は Real です。"
+description.ko = "네이티브 입력·주입·재생의 출처를 나타냅니다. 기본값은 Real입니다."
+related = ["InputSource"]
+
+["TouchEventArgs::source"]
+description.en = "Reports native, injected or replayed input; defaults to Real."
+description.ja = "ネイティブ入力・注入・再生の発生元を表します。既定は Real です。"
+description.ko = "네이티브 입력·주입·재생의 출처를 나타냅니다. 기본값은 Real입니다."
+related = ["InputSource"]

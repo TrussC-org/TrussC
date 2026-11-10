@@ -124,21 +124,23 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        auto constructors = tcxLuaConstructors<trussc::ColorOKLCH
-            , trussc::ColorOKLCH()
-            , trussc::ColorOKLCH(float, float, float)
-            , trussc::ColorOKLCH(float, float, float, float)
-        >();
-        sol::usertype<trussc::ColorOKLCH> t = lua->new_usertype<trussc::ColorOKLCH>("ColorOKLCH", constructors, sol::call_constructor, constructors);
-        t["C"] = &trussc::ColorOKLCH::C;
-        t["H"] = &trussc::ColorOKLCH::H;
-        t["L"] = &trussc::ColorOKLCH::L;
-        t["alpha"] = &trussc::ColorOKLCH::alpha;
-        t["lerp"] = sol::overload([](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t) { return self.lerp(target, t); }, [](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
-        t["toHSB"] = &trussc::ColorOKLCH::toHSB;
-        t["toLinear"] = &trussc::ColorOKLCH::toLinear;
-        t["toOKLab"] = &trussc::ColorOKLCH::toOKLab;
-        t["toRGB"] = &trussc::ColorOKLCH::toRGB;
+        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
+        t["alt"] = &trussc::MouseDragEventArgs::alt;
+        t["button"] = &trussc::MouseDragEventArgs::button;
+        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
+        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
+        t["delta"] = &trussc::MouseDragEventArgs::delta;
+        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
+        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
+        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
+        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
+        t["pos"] = &trussc::MouseDragEventArgs::pos;
+        t["shift"] = &trussc::MouseDragEventArgs::shift;
+        t["source"] = &trussc::MouseDragEventArgs::source;
+        t["super"] = &trussc::MouseDragEventArgs::super;
+        t["x"] = &trussc::MouseDragEventArgs::x;
+        t["y"] = &trussc::MouseDragEventArgs::y;
+        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
     }
     {
         sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
@@ -178,14 +180,11 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["y"] = &trussc::ShaderVertex::y;
         t["z"] = &trussc::ShaderVertex::z;
     }
-    {
-        auto constructors = tcxLuaConstructors<trussc::EventListener
-            , trussc::EventListener()
-        >();
-        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
-        t["disconnect"] = &trussc::EventListener::disconnect;
-        t["isConnected"] = &trussc::EventListener::isConnected;
-    }
+    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
+        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
+        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
+        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
     {
         sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
         t["distance"] = &trussc::Node::HitResult::distance;
@@ -193,19 +192,20 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["node"] = &trussc::Node::HitResult::node;
         t["hit"] = &trussc::Node::HitResult::hit;
     }
-    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
-        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
-        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
     {
-        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
-        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
-        t["format"] = &trussc::AudioRecordSettings::format;
+        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
+        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
+        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
     }
     {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
+        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
+        t["args"] = &trussc::ConsoleEventArgs::args;
+        t["raw"] = &trussc::ConsoleEventArgs::raw;
     }
 }
 #ifdef _MSC_VER

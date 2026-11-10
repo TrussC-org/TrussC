@@ -186,28 +186,16 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         "OpenSLES", sol::var(trussc::AudioBackend::OpenSLES),
         "WebAudio", sol::var(trussc::AudioBackend::WebAudio));
     {
-        sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
-        t["alt"] = &trussc::MouseEventArgs::alt;
-        t["button"] = &trussc::MouseEventArgs::button;
-        t["consumed"] = &trussc::MouseEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseEventArgs::ctrl;
-        t["globalPos"] = &trussc::MouseEventArgs::globalPos;
-        t["pos"] = &trussc::MouseEventArgs::pos;
-        t["shift"] = &trussc::MouseEventArgs::shift;
-        t["super"] = &trussc::MouseEventArgs::super;
-        t["x"] = &trussc::MouseEventArgs::x;
-        t["y"] = &trussc::MouseEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
-    }
-    {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["view"] = &trussc::CameraContext::view;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
+        t["audio"] = &trussc::VideoRecordSettings::audio;
+        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
+        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
+        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
+        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
+        t["codec"] = &trussc::VideoRecordSettings::codec;
+        t["duration"] = &trussc::VideoRecordSettings::duration;
+        t["fps"] = &trussc::VideoRecordSettings::fps;
+        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
     }
     {
         sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
@@ -217,36 +205,39 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
         t["key"] = &trussc::KeyEventArgs::key;
         t["shift"] = &trussc::KeyEventArgs::shift;
+        t["source"] = &trussc::KeyEventArgs::source;
         t["super"] = &trussc::KeyEventArgs::super;
     }
+    lua->new_usertype<trussc::SaveError>("SaveError",
+        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
+        "None", sol::var(trussc::SaveError::None),
+        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
+        "NoSpace", sol::var(trussc::SaveError::NoSpace),
+        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
+        "Unknown", sol::var(trussc::SaveError::Unknown));
+    lua->new_usertype<trussc::MouseButton>("MouseButton",
+        sol::meta_function::equal_to, [](trussc::MouseButton a, trussc::MouseButton b){ return a == b; },
+        "Left", sol::var(trussc::MouseButton::Left),
+        "Right", sol::var(trussc::MouseButton::Right),
+        "Middle", sol::var(trussc::MouseButton::Middle),
+        "None", sol::var(trussc::MouseButton::None));
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
+    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
+        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
+        "Nearest", sol::var(trussc::TextureFilter::Nearest),
+        "Linear", sol::var(trussc::TextureFilter::Linear));
     {
-        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
-        t["channels"] = &trussc::AudioOutBuffer::channels;
-        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
-        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
-        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
+        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
+        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
+        t["message"] = &trussc::TcpErrorEventArgs::message;
     }
     {
-        sol::usertype<trussc::Location> t = lua->new_usertype<trussc::Location>("Location");
-        t["accuracy"] = &trussc::Location::accuracy;
-        t["altitude"] = &trussc::Location::altitude;
-        t["latitude"] = &trussc::Location::latitude;
-        t["longitude"] = &trussc::Location::longitude;
-    }
-    {
-        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
-        t["files"] = &trussc::DragDropEventArgs::files;
-        t["x"] = &trussc::DragDropEventArgs::x;
-        t["y"] = &trussc::DragDropEventArgs::y;
-    }
-    {
-        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
-        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
-        t["reason"] = &trussc::DeviceLostEventArgs::reason;
-    }
-    {
-        sol::usertype<trussc::FilesOpenedEventArgs> t = lua->new_usertype<trussc::FilesOpenedEventArgs>("FilesOpenedEventArgs");
-        t["files"] = &trussc::FilesOpenedEventArgs::files;
+        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
+        t["text"] = &trussc::ClipboardPastedEventArgs::text;
     }
 }
 #ifdef _MSC_VER

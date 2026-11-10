@@ -102,6 +102,7 @@
 
 // TrussC event system
 #include "tc/events/tcCoreEvents.h"
+#include "tc/app/tcInput.h"
 #include "tc/events/tcTouchMouse.h"  // internal::TouchMouseMapper (touch-as-mouse)
 
 // TrussC utilities

@@ -1,6 +1,7 @@
 #include <TrussC.h>
 #include "tc/utils/internal/tcAsyncDialog.h"
 #include "tc/app/internal/tcCommandLine.h"
+#include "sokol/util/sokol_window_event.h"
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -18,6 +19,23 @@ Window::Window()
     ctx_.deferredResponseTarget = &ctx_;
     clearColorSet_ = true;
     internal::WindowRequestAccess::prepareInitialBindings(*this);
+}
+
+bool Window::injectInput(const InputEvent& input, InputSource source) {
+    if (!isMainThread() || !isOpen() || closeRequested_ || internal::runtimeEnding() ||
+        (source != InputSource::Injected && source != InputSource::Replayed)) return false;
+    // App entry can destroy the owner of a borrowed request.
+    const InputEvent request = input;
+    auto metadata = binding_.metadata;
+    if (binding_.operations && binding_.operations->readMetadata &&
+        !binding_.operations->readMetadata(binding_.handle, binding_.user, metadata)) return false;
+    sapp_event event{};
+    // Validate before pending App operations can run, then rebuild against the
+    // current target revision. Both paths use the same constructor as MCP.
+    if (!internal::buildInputEvent(request, ctx_, metadata.dpi_scale, event)) return false;
+    internal::WindowEntryScope entry(*this, false, false, false);
+    if (!entry || !internal::buildInputEvent(request, ctx_, binding_.metadata.dpi_scale, event)) return false;
+    return internal::sendInputEvent(*this, event, source);
 }
 
 void Window::setVisible(bool visible) {
@@ -1525,6 +1543,8 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
 }
     void convertWindowEvent(const sapp_event* ev, Window& window) {
         auto& ctx = WindowRequestAccess::context(window);
+        const InputSource source = ev->source == SAPP_EVENTSOURCE_REPLAYED ? InputSource::Replayed :
+            ev->source == SAPP_EVENTSOURCE_INJECTED ? InputSource::Injected : InputSource::Real;
         // Native mapping or resizing invalidates previously presented content.
         if (ev->type == SAPP_EVENTTYPE_TC_REDRAW_REQUESTED || ev->type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED) {
             const int count = ev->type == SAPP_EVENTTYPE_TC_RESIZE_REDRAW_REQUESTED ? 2 : 1;
@@ -1661,7 +1681,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             ctx.snapshotMouseButtons &= ~bit;
             ctx.mouseButton = -1;
             ctx.mousePressed = false;
-            MouseEventArgs args;
+            MouseEventArgs args; args.source = source;
             args.pos = args.globalPos = Vec2(ctx.lastPointerX, ctx.lastPointerY);
             args.button = button;
             args.shift = hasModShift;
@@ -1706,7 +1726,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     std::sort(heldKeys.begin(), heldKeys.end());
                     ctx.keysPressed.clear();
                     for (int key : heldKeys) {
-                        KeyEventArgs args;
+                        KeyEventArgs args; args.source = source;
                         args.key = key;
                         window.events().keyReleased.notify(args);
                     }
@@ -1718,7 +1738,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 break;
             case SAPP_EVENTTYPE_KEY_DOWN: {
                 // Notify event system
-                KeyEventArgs args;
+                KeyEventArgs args; args.source = source;
                 args.key = ev->key_code;
                 args.isRepeat = ev->key_repeat;
                 args.shift = hasModShift;
@@ -1736,7 +1756,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
             case SAPP_EVENTTYPE_KEY_UP: {
                 // A late OS key-up must not repeat a focus-loss release.
                 if (ctx.keysPressed.erase(ev->key_code) == 0) break;
-                KeyEventArgs args;
+                KeyEventArgs args; args.source = source;
                 args.key = ev->key_code;
                 args.isRepeat = false;
                 args.shift = hasModShift;
@@ -1756,7 +1776,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 ctx.mousePressed = true;
 
                 // App-level args: no node transform, so pos == globalPos.
-                MouseEventArgs args;
+                MouseEventArgs args; args.source = source;
                 args.pos = args.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                 args.button = ev->mouse_button;
                 args.shift = hasModShift;
@@ -1794,7 +1814,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
 
                 // Rich carrier (internal::MouseEventRaw); the per-kind public type is
                 // built from it at the boundary (internal::toDragArgs / internal::toMoveArgs).
-                internal::MouseEventRaw args;
+                internal::MouseEventRaw args; args.source = source;
                 args.pos = args.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                 args.delta = args.globalDelta = delta;
                 args.shift = hasModShift;
@@ -1817,7 +1837,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 ctx.mouseX = ctx.mouseY = -1.0f;
                 break;
             case SAPP_EVENTTYPE_MOUSE_SCROLL: {
-                ScrollEventArgs args;
+                ScrollEventArgs args; args.source = source;
                 args.pos = args.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                 args.scroll = Vec2(ev->scroll_x, ev->scroll_y);
                 args.shift = hasModShift;
@@ -1836,7 +1856,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 // Build TouchEventArgs from sokol touchpoints. The mapper below
                 // keeps sokol's full uintptr_t identifier; TouchPoint::id is int.
                 static_assert(TouchEventArgs::MAX_TOUCHES == SAPP_MAX_TOUCHPOINTS);
-                TouchEventArgs touchArgs;
+                TouchEventArgs touchArgs; touchArgs.source = source;
                 touchArgs.numTouches = std::max(0, ev->num_touches);
                 // Bound (platform): OS touch events must fit the SDK-sized event array. Overflow clamps the delivered touch count.
                 if (touchArgs.numTouches > TouchEventArgs::MAX_TOUCHES)
@@ -1879,7 +1899,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     ctx.mouseButton = 0;
                     ctx.mousePressed = true;
 
-                    MouseEventArgs margs;
+                    MouseEventArgs margs; margs.source = source;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                     margs.button = MOUSE_BUTTON_LEFT;
                     margs.syncLegacy();
@@ -1887,7 +1907,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 } else if (action.kind == internal::TouchMouseAction::Kind::Drag) {
                     const Vec2 delta = touchDelta;
 
-                    internal::MouseEventRaw margs;
+                    internal::MouseEventRaw margs; margs.source = source;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                     margs.delta = margs.globalDelta = delta;
                     margs.button = MOUSE_BUTTON_LEFT;
@@ -1900,7 +1920,7 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                     ctx.mouseButton = -1;
                     ctx.mousePressed = false;
 
-                    MouseEventArgs margs;
+                    MouseEventArgs margs; margs.source = source;
                     margs.pos = margs.globalPos = Vec2(ctx.mouseX, ctx.mouseY);
                     margs.button = MOUSE_BUTTON_LEFT;
                     margs.syncLegacy();
@@ -1952,6 +1972,71 @@ VisibilityDelivery prepareWindowVisibilityDelivery(Window& window, sapp_event_ty
                 break;
         }
     }
+bool buildInputEvent(const InputEvent& input, const WindowContext& ctx, float nativeDpi,
+                     sapp_event& event, bool appCoordinates) {
+    event = WindowRequestAccess::inputPayload(input);
+    if (!_sapp_tc_valid_injected_event(event)) return false;
+    const bool isTouch = event.type >= SAPP_EVENTTYPE_TOUCHES_BEGAN && event.type <= SAPP_EVENTTYPE_TOUCHES_CANCELLED;
+    if (isTouch && event.num_touches == 0) return false;
+    const double dpi = nativeDpi > 0 ? nativeDpi : ctx.dpiScale;
+    if (!std::isfinite(dpi) || dpi <= 0) return false;
+    const double factor = appCoordinates && pixelPerfectMode() ? 1 : dpi;
+    const bool keyEvent = event.type == SAPP_EVENTTYPE_KEY_DOWN || event.type == SAPP_EVENTTYPE_KEY_UP;
+    const auto held = [&](int code) {
+        return keyEvent && code == event.key_code ? event.type == SAPP_EVENTTYPE_KEY_DOWN : ctx.keysPressed.contains(code);
+    };
+    if (held(SAPP_KEYCODE_LEFT_SHIFT) || held(SAPP_KEYCODE_RIGHT_SHIFT)) event.modifiers |= SAPP_MODIFIER_SHIFT;
+    if (held(SAPP_KEYCODE_LEFT_CONTROL) || held(SAPP_KEYCODE_RIGHT_CONTROL)) event.modifiers |= SAPP_MODIFIER_CTRL;
+    if (held(SAPP_KEYCODE_LEFT_ALT) || held(SAPP_KEYCODE_RIGHT_ALT)) event.modifiers |= SAPP_MODIFIER_ALT;
+    if (held(SAPP_KEYCODE_LEFT_SUPER) || held(SAPP_KEYCODE_RIGHT_SUPER)) event.modifiers |= SAPP_MODIFIER_SUPER;
+    event.modifiers |= (ctx.pressedMouseButtons & 7u) << 8;
+    const auto finiteFloat = [](double value) {
+        return std::isfinite(value) && std::abs(value) <= std::numeric_limits<float>::max();
+    };
+    if (event.type == SAPP_EVENTTYPE_MOUSE_DOWN || event.type == SAPP_EVENTTYPE_MOUSE_UP ||
+        event.type == SAPP_EVENTTYPE_MOUSE_MOVE) {
+        const double nx = double(event.mouse_x) * factor, ny = double(event.mouse_y) * factor;
+        const double dx = ctx.pointerValid ? nx - ctx.pointerLogicalX * dpi : 0;
+        const double dy = ctx.pointerValid ? ny - ctx.pointerLogicalY * dpi : 0;
+        // Bound (abi): transformed positions and differences must fit finite
+        // float fields in both native and typed coordinate bases.
+        const double scale = pixelPerfectMode() ? 1 : 1 / dpi;
+        for (double value : {nx, ny, dx, dy, nx * scale, ny * scale, dx * scale, dy * scale})
+            if (!finiteFloat(value)) return false;
+        event.mouse_x = float(nx); event.mouse_y = float(ny);
+        event.mouse_dx = float(dx); event.mouse_dy = float(dy);
+        // Match the converter's rounded ABI delta as well as the logical one.
+        if (ctx.pointerValid) {
+            for (double value : {double(float(nx * scale)) - double(float(ctx.pointerLogicalX * dpi * scale)),
+                                 double(float(ny * scale)) - double(float(ctx.pointerLogicalY * dpi * scale))})
+                if (!finiteFloat(value)) return false;
+        }
+        unsigned int buttons = ctx.pressedMouseButtons;
+        if (event.type == SAPP_EVENTTYPE_MOUSE_DOWN) buttons |= 1u << event.mouse_button;
+        if (event.type == SAPP_EVENTTYPE_MOUSE_UP) buttons &= ~(1u << event.mouse_button);
+        event.modifiers = (event.modifiers & ~(SAPP_MODIFIER_LMB | SAPP_MODIFIER_RMB | SAPP_MODIFIER_MMB)) |
+            ((buttons & 7u) << 8);
+    }
+    for (int i = 0; i < event.num_touches; ++i) {
+        const double x = double(event.touches[i].pos_x) * factor;
+        const double y = double(event.touches[i].pos_y) * factor;
+        const double scale = pixelPerfectMode() ? 1 : 1 / dpi;
+        for (double value : {x, y, x * scale, y * scale}) if (!finiteFloat(value)) return false;
+        event.touches[i].pos_x = float(x); event.touches[i].pos_y = float(y);
+    }
+    event.dpi_scale = float(dpi);
+    return true;
+}
+bool sendInputEvent(Window& window, sapp_event event, InputSource source) {
+    if (!isMainThread() || !window.isOpen() || WindowRequestAccess::closeRequested(window) || runtimeEnding()) return false;
+    if (source != InputSource::Injected && source != InputSource::Replayed) return false;
+    event.source = source == InputSource::Replayed ? SAPP_EVENTSOURCE_REPLAYED : SAPP_EVENTSOURCE_INJECTED;
+    const auto& binding = WindowRequestAccess::binding(window);
+    if constexpr (supportsSecondaryWindows()) {
+        return binding.operations && binding.operations->injectEvent &&
+            binding.operations->injectEvent(binding.handle, binding.user, &event);
+    } else return sapp_window_inject_event(binding.handle, &event);
+}
 void dispatchWindowEventForTests(const sapp_event* input, Window& window) {
     if (!input) return;
     sapp_event event = *input;

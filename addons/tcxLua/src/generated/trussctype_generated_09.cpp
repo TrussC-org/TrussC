@@ -163,42 +163,44 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["fromScreenPoint2D"] = sol::overload([](float screenX, float screenY) { return trussc::Ray::fromScreenPoint2D(screenX, screenY); }, [](float screenX, float screenY, float startZ) { return trussc::Ray::fromScreenPoint2D(screenX, screenY, startZ); });
     }
     {
-        sol::usertype<trussc::NetworkInterface> t = lua->new_usertype<trussc::NetworkInterface>("NetworkInterface");
-        t["address"] = &trussc::NetworkInterface::address;
-        t["isIPv4"] = &trussc::NetworkInterface::isIPv4;
-        t["isLoopback"] = &trussc::NetworkInterface::isLoopback;
-        t["isUp"] = &trussc::NetworkInterface::isUp;
-        t["mac"] = &trussc::NetworkInterface::mac;
-        t["name"] = &trussc::NetworkInterface::name;
-        t["netmask"] = &trussc::NetworkInterface::netmask;
-        t["getAddress"] = &trussc::NetworkInterface::getAddress;
-        t["getIsIPv4"] = &trussc::NetworkInterface::getIsIPv4;
-        t["getIsLoopback"] = &trussc::NetworkInterface::getIsLoopback;
-        t["getIsUp"] = &trussc::NetworkInterface::getIsUp;
-        t["getMac"] = &trussc::NetworkInterface::getMac;
-        t["getName"] = &trussc::NetworkInterface::getName;
-        t["getNetmask"] = &trussc::NetworkInterface::getNetmask;
+        auto constructors = tcxLuaConstructors<trussc::IVec2
+            , trussc::IVec2()
+            , trussc::IVec2(int, int)
+            , trussc::IVec2(int)
+        >();
+        sol::usertype<trussc::IVec2> t = lua->new_usertype<trussc::IVec2>("IVec2", constructors, sol::call_constructor, constructors);
+        t[sol::meta_function::multiplication] = [](const trussc::IVec2& a, int b){ return a * b; };
+        t[sol::meta_function::addition] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a + b; };
+        t[sol::meta_function::subtraction] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a - b; };
+        t[sol::meta_function::unary_minus] = [](const trussc::IVec2& a){ return -a; };
+        t[sol::meta_function::equal_to] = [](const trussc::IVec2& a, const trussc::IVec2 & b){ return a == b; };
+        t["x"] = &trussc::IVec2::x;
+        t["y"] = &trussc::IVec2::y;
+        t["toVec2"] = &trussc::IVec2::toVec2;
     }
     {
-        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
-        t["audio"] = &trussc::VideoRecordSettings::audio;
-        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
-        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
-        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
-        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
-        t["codec"] = &trussc::VideoRecordSettings::codec;
-        t["duration"] = &trussc::VideoRecordSettings::duration;
-        t["fps"] = &trussc::VideoRecordSettings::fps;
-        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
+        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
+        t["duration"] = &trussc::PlayingSoundInfo::duration;
+        t["level"] = &trussc::PlayingSoundInfo::level;
+        t["loop"] = &trussc::PlayingSoundInfo::loop;
+        t["pan"] = &trussc::PlayingSoundInfo::pan;
+        t["path"] = &trussc::PlayingSoundInfo::path;
+        t["paused"] = &trussc::PlayingSoundInfo::paused;
+        t["position"] = &trussc::PlayingSoundInfo::position;
+        t["slot"] = &trussc::PlayingSoundInfo::slot;
+        t["speed"] = &trussc::PlayingSoundInfo::speed;
+        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
+        t["volume"] = &trussc::PlayingSoundInfo::volume;
     }
     {
-        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
-        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
-        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
-        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
-        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
+        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
+        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
+        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
+        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
+        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
+        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
+        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
+        t["name"] = &trussc::GraphicsBackend::name;
     }
     lua->new_usertype<trussc::AudioInitFailure>("AudioInitFailure",
         sol::meta_function::equal_to, [](trussc::AudioInitFailure a, trussc::AudioInitFailure b){ return a == b; },
@@ -218,18 +220,18 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         "Round", sol::var(trussc::PointStyle::Round),
         "Pixel", sol::var(trussc::PointStyle::Pixel));
     {
-        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
-        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
-        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
+        sol::usertype<trussc::RuntimeSettings> t = lua->new_usertype<trussc::RuntimeSettings>("RuntimeSettings");
+        t["uniformBufferReserve"] = &trussc::RuntimeSettings::uniformBufferReserve;
+        t["reserveUniformBuffer"] = &trussc::RuntimeSettings::reserveUniformBuffer;
     }
     {
-        sol::usertype<trussc::TcpErrorEventArgs> t = lua->new_usertype<trussc::TcpErrorEventArgs>("TcpErrorEventArgs");
-        t["errorCode"] = &trussc::TcpErrorEventArgs::errorCode;
-        t["message"] = &trussc::TcpErrorEventArgs::message;
+        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
+        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
+        t["message"] = &trussc::UdpErrorEventArgs::message;
     }
     {
-        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
-        t["occluded"] = &trussc::OccludedEventArgs::occluded;
+        sol::usertype<trussc::CloseRequestEventArgs> t = lua->new_usertype<trussc::CloseRequestEventArgs>("CloseRequestEventArgs");
+        t["cancel"] = &trussc::CloseRequestEventArgs::cancel;
     }
 }
 #ifdef _MSC_VER

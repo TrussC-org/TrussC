@@ -76,6 +76,12 @@ public:
     // This window's event stream (mousePressed / keyPressed / draw / ...).
     CoreEvents& events() { return events_; }
 
+    // Debug/test input in window-local logical points. Main thread only.
+    // Synchronous ordinary raw/listener/App/tree delivery; nested calls finish
+    // before the outer event resumes. Real is reserved for native input.
+    // Returns acceptance/dispatch, regardless of typed consumption.
+    TC_LUA_SKIP bool injectInput(const InputEvent& event, InputSource source = InputSource::Injected);
+
     // Request closure at the next safe boundary. Pending replacement is
     // canceled. App ending and owner retirement precede native/GPU disposal.
     // Last-window/quitOnClose asks exitRequested first; any veto keeps all windows.
@@ -362,6 +368,7 @@ public:
     }
     // Creation identity stays internal; IDs are never reused.
     static uint64_t creationId(const Window& w) { return w.binding_.handle.id; }
+    static const sapp_event& inputPayload(const InputEvent& event) { return event.event_; }
     static WindowBinding& binding(Window& w) { return w.binding_; }
     static const WindowBinding& binding(const Window& w) { return w.binding_; }
     static void unbind(Window& w) noexcept { w.binding_.bound = false; w.binding_.handle = {}; w.binding_.focused = false; w.ctx_.suspended = false; }

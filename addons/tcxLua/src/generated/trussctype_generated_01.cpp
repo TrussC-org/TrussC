@@ -151,21 +151,21 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
-        t["error"] = &trussc::LoadResult::error;
-        t["message"] = &trussc::LoadResult::message;
-        t["ok"] = &trussc::LoadResult::ok;
-        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
-        t["success"] = &trussc::LoadResult::success;
+        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
+        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
+        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
+        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
+        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::OnceGate
-            , trussc::OnceGate()
-            , trussc::OnceGate(double)
+        auto constructors = tcxLuaConstructors<trussc::EventListener
+            , trussc::EventListener()
         >();
-        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
-        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
-        t["reset"] = &trussc::OnceGate::reset;
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
     }
     {
         sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
@@ -173,18 +173,23 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
         t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
         t["message"] = &trussc::TcpServerErrorEventArgs::message;
     }
-    lua->new_usertype<trussc::SoundBuffer::Kind>("SoundBufferKind",
-        sol::meta_function::equal_to, [](trussc::SoundBuffer::Kind a, trussc::SoundBuffer::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundBuffer::Kind::Eager),
-        "Stream", sol::var(trussc::SoundBuffer::Kind::Stream));
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
+        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
+        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
     {
-        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
-        t["args"] = &trussc::ConsoleEventArgs::args;
-        t["raw"] = &trussc::ConsoleEventArgs::raw;
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+        t["format"] = &trussc::AudioRecordSettings::format;
+    }
+    {
+        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
+        t["message"] = &trussc::MicStartResult::message;
+        t["success"] = &trussc::MicStartResult::success;
+    }
+    {
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
     }
 }
 #ifdef _MSC_VER
