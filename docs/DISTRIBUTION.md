@@ -38,29 +38,27 @@ The top of the package is your project's `bin/` folder, minus build leftovers:
 
 Windows `.pdb` files go to a separate `<name>-<version>-windows-<arch>-symbols/` folder next to the package. Keep it to read crash reports; do not ship it.
 
-### Other programs and large files
+### Other programs and large data
 
-A helper program, a script, or large data the app uses has to be in the package too. There are two ways: keep it inside the project under `bin/data/`, or keep it outside and let `include` copy it.
+Files the app uses have to be in the package too. Find them from the app relative to the app, never by their path on your machine: `getDataPath()` resolves against the data folder next to the app, `bin/data/` during development and `data/` in the package.
 
-Either way, find it from the app through `getDataPath()`, never by its path on your machine. `getDataPath()` resolves against the data folder next to the app: `bin/data/` during development, `data/` in the package.
+> **macOS is not settled yet:** where these files land inside the `.app` may change (see [5. macOS](#5-macos)). The examples below are tested on Linux.
 
-#### 1. Inside the project: `bin/data/`
+#### Other programs
 
-Put it under `bin/data/`. It goes into the package as it is, git keeps it with the rest of `bin/data/`, and the same `getDataPath()` call finds it during development and in the package.
+A program the app runs (a Node.js app, a converter, ...) usually has its own repository. Keep it either way:
 
-```
-myApp/bin/data/tools/converter/   ->   <package>/data/tools/converter/      getDataPath("tools/converter")
-```
-
-If it has its own repository, add it there as a git submodule: it keeps its own history, and this project records which commit it uses.
+**1. In `bin/data/` as a git submodule.** It keeps its own history, this project records which commit it uses, and it goes into the package as it is.
 
 ```bash
 git submodule add https://github.com/me/nodeApp.git bin/data/nodeApp
 ```
 
-#### 2. Outside the project: `include`
+```cpp
+fs::path nodeAppDir() { return getDataPath("nodeApp"); }   // development and package alike
+```
 
-For something shared by several projects, or kept out of this repository: leave it where it is and let `include` copy it into the package. Example: a TrussC app that runs a Node.js app kept next to it.
+**2. Outside the project, copied by `include`.** For a program several projects share. `include` copies it into the package only; `bin/` and git are not involved.
 
 ```
 projectLocation/
@@ -69,34 +67,36 @@ projectLocation/
     index.js
 ```
 
-`dist.json` copies it into the package's `data/`:
+`to` is where it goes in the package; choose what suits the app. During development it is not there (only the package gets the copy), so the app also looks in the original place:
 
-```json
-"include": [{ "from": "../nodeApp", "to": "data/nodeApp" }]
-```
-
-During development it is not in `bin/data/` (only the package gets the copy), so the app looks in both places:
+| `dist.json` | In the package | Found with |
+|---|---|---|
+| `{"from": "../nodeApp", "to": "data/nodeApp"}` | `data/nodeApp/` | `getDataPath("nodeApp")`; during development `getDataPath("../../../nodeApp")` |
+| `{"from": "../nodeApp", "to": "nodeApp"}` | `nodeApp/`, next to the executable | `getExecutableDir() / "nodeApp"`; during development `getExecutableDir() / "../../nodeApp"` |
 
 ```cpp
-// Packaged: "include" copied it to data/nodeApp.
-// Development: the checkout next to this project (bin/data/../../../ is projectLocation).
+// With "to": "data/nodeApp".
 fs::path nodeAppDir() {
-    const fs::path packaged = getDataPath("nodeApp");
+    const fs::path packaged = getDataPath("nodeApp");   // in the package
     if (fs::exists(packaged)) return packaged;
-    return getDataPath("../../../nodeApp");
+    return getDataPath("../../../nodeApp");             // development: bin/data/../../../ is projectLocation
 }
 // then run: node <nodeAppDir()>/index.js
 ```
 
-Run it with `trusscli run` during development and package it with `trusscli dist`; neither the code nor `dist.json` changes in between.
+Run it with `trusscli run` during development and package it with `trusscli dist`; neither the code nor `dist.json` changes in between. `from` is read on your machine when packaging: a path relative to the project folder, as above, works on every developer's machine and in CI, an absolute one only on yours.
 
-A script needs its interpreter on the other machine as well. Ship it (for example the `node` executable, with another `include` entry, and run that one), or tell the people installing the app to install it.
+A script also needs its interpreter on the other machine. Ship it (for example the `node` executable, with another `include` entry, and run that one), or tell the people installing the app to install it.
 
-`from` is read on your machine when packaging. A path relative to the project folder, as above, works on every developer's machine and in CI; an absolute one only on yours. `to` is a path inside the package.
+#### Large data
 
-#### Next to the executable instead
+Put it in `bin/data/`, and keep it out of git with `.gitignore`. `dist` packages what is in `bin/`, whether git tracks it or not:
 
-Any other folder in `bin/` is packaged too and lands next to the executable (`bin/otherApps/` becomes `<package>/otherApps/`, found with `getExecutableDir()`). The project template's `.gitignore` keeps only `bin/data/` in git, so add `!bin/otherApps/` to it.
+```
+bin/data/videos/
+```
+
+Other developers and machines then get those files some other way (a shared drive, a download script), since cloning the repository does not bring them.
 
 ### Symlinks
 
