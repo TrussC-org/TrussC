@@ -2,7 +2,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(videoGrabberRGB32 CXX)
 
-add_executable(videoGrabberRGB32 main.cpp)
+add_executable(videoGrabberRGB32 main.cpp ../../include/tc/utils/tcSimd.cpp)
+target_include_directories(videoGrabberRGB32 PRIVATE
+    ../../include ../../3rdparty/highway)
 target_compile_features(videoGrabberRGB32 PRIVATE cxx_std_20)
 if(MSVC)
     # Sources and core headers are UTF-8; without /utf-8 MSVC reads them in the

@@ -15,7 +15,7 @@ class StandaloneHeaders(unittest.TestCase):
             self.skipTest('requires Clang or GCC')
         for compiler in compilers:
             for header in ('tc/comm/tcSerial.h', 'tc/utils/tcFileIO.h',
-                           'tc/gpu/tcReadbackResult.h'):
+                           'tc/gpu/tcReadbackResult.h', 'tc/utils/tcSimd.h'):
                 with self.subTest(compiler=compiler, header=header):
                     result = subprocess.run(
                         [compiler, '-std=c++20', '-Wall', '-Wextra',
