@@ -139,8 +139,16 @@ void roundTrip(int width, int height, bool ramp) {
         check("MSAA allocated", msaa.isAllocated());
         check("MSAA write refused", !internal::FboStencilAccess::writeGray(gray, msaa));
         check("MSAA read refused", !internal::FboStencilAccess::readR8(msaa, result));
+        int warnings = 0;
+        auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
+            if (e.level == LogLevel::Warning) ++warnings;
+        });
         check("public MSAA read refused", !msaa.readStencil(sentinel));
+        check("public MSAA read refused again", !msaa.readStencil(sentinel));
+        check("readStencil warns on every call", warnings == 2);
         msaa.drawStencil(0, 0);
+        msaa.drawStencil(0, 0);
+        check("drawStencil warns once per Fbo", warnings == 3);
     }
     check("failed public reads leave Pixels unchanged", sentinel.getWidth() == 1 &&
           sentinel.getChannels() == 1 && sentinel.getData()[0] == 123);

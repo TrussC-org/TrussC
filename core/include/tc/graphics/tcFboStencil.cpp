@@ -154,9 +154,12 @@ void FboStencilAccess::shutdown() {
 } // namespace trussc::internal
 
 namespace trussc {
-Fbo* Fbo::captureStencil_() const {
+Fbo* Fbo::captureStencil_(bool perFrame) const {
     if (!allocated_ || target_.activation || target_.sampleCount != 1) {
-        logWarning("Fbo") << "stencil diagnostics require an ended, allocated, single-sample owned Fbo; main targets and MSAA are unsupported";
+        if (!perFrame || !warnedStencilPreview_) {
+            if (perFrame) warnedStencilPreview_ = true;
+            logWarning("Fbo") << "stencil diagnostics require an ended, allocated, single-sample owned Fbo; main targets and MSAA are unsupported";
+        }
         return nullptr;
     }
     if (!stencilCache_) {
@@ -172,7 +175,7 @@ bool Fbo::readStencil(Pixels& pixels) const {
         logWarning("Fbo") << "readStencil() requires end() on all active Fbos";
         return false;
     }
-    auto* cache = captureStencil_();
+    auto* cache = captureStencil_(false);
     if (!cache) return false;
     Pixels rgba;
     rgba.allocate(target_.width, target_.height, 4);
@@ -184,7 +187,7 @@ bool Fbo::readStencil(Pixels& pixels) const {
 }
 
 void Fbo::drawStencil(float x, float y) const {
-    auto* cache = captureStencil_();
+    auto* cache = captureStencil_(true);
     if (!cache) return;
     auto& s = internal::stencilResources();
     if (!s.previewShader.id) s.previewShader = sg_make_shader(tc_fbostencil_preview_shader_desc(sg_query_backend()));

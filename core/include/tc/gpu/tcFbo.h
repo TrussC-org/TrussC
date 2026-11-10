@@ -471,7 +471,9 @@ private:
     TextureFormat format_ = TextureFormat::RGBA8;
     bool allocated_ = false;
     mutable std::unique_ptr<Fbo> stencilCache_;
-    Fbo* captureStencil_() const;
+    mutable bool warnedStencilPreview_ = false;
+    // perFrame: drawStencil() warns once per Fbo, readStencil() on every call
+    Fbo* captureStencil_(bool perFrame) const;
     bool mipmaps_ = false;
     int  numMipLevels_ = 1;
 
