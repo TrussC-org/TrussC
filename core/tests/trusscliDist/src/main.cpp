@@ -431,7 +431,114 @@ void testSymlinks(const fs::path& self, const fs::path& scratch) {
         check(b.name, !plan({}, q, message) && contains(message, b.message) && contains(message, "bad.so"));
         fs::remove(bin / "bad.so");
     }
+
+    // A link out of bin/ names the include entry that would copy it.
+    link("../../outside-models", bin / "data" / "models");
+    {
+        dist::Plan q;
+        std::string message;
+        check("a link out of bin/ suggests an include entry",
+              !plan({}, q, message) && contains(message, "\"include\"") &&
+                  contains(message, "outside-models\", \"to\": \"data/models\"}"));
+    }
+    fs::remove(bin / "data" / "models");
+
+    // Nothing is written through a link the package has: an include entry
+    // aimed into the folder link bin/sub -> real.
+    write(bin / "real" / "a.txt", "real");
+    link("real", bin / "sub");
+    write(project / "extra.txt", "extra");
+    {
+        dist::Plan q;
+        std::string message;
+        check("no file is written through a link in the package",
+              !plan({{"extra.txt", "sub/extra.txt"}}, q, message) && contains(message, "through the symlink") &&
+                  !fs::exists(q.packageDir / "real" / "extra.txt"));
+    }
+    fs::remove(bin / "sub");
+    fs::remove_all(bin / "real");
+
+    // macOS bundle (laid out by hand, so it runs here too).
+    const fs::path macProject = scratch / "links" / "macApp";
+    const fs::path app = macProject / "bin" / "myApp.app";
+    fs::create_directories(app / "Contents" / "MacOS");
+    fs::copy_file(self, app / "Contents" / "MacOS" / "myApp");
+    write(app / "Contents" / "Info.plist", "<plist><dict></dict></plist>");
+    write(macProject / "bin" / "data" / "a.txt", "app data");
+    const fs::path framework = app / "Contents" / "Frameworks" / "Foo.framework";
+    write(framework / "Versions" / "A" / "Foo", "framework");
+    link("A", framework / "Versions" / "Current");
+    link("Versions/Current/Foo", framework / "Foo");
+    auto macInput = [&] {
+        dist::PlanInput input;
+        input.platform = dist::Platform::MacOS;
+        input.projectDir = macProject;
+        input.binDir = macProject / "bin";
+        input.outputDir = macProject / "dist";
+        input.projectName = "myApp";
+        input.config.name = "My App";
+        input.config.version = "1.0.0";
+        return input;
+    };
+    {
+        dist::Plan q;
+        std::string message;
+        const auto input = macInput();
+        const bool packaged = dist::makePlan(input, q, message) && dist::writePackage(input, q, message);
+        const fs::path out = q.packageDir / "myApp.app" / "Contents";
+        check("bundle: framework links inside it are kept",
+              packaged && fs::is_symlink(out / "Frameworks" / "Foo.framework" / "Versions" / "Current") &&
+                  fs::is_symlink(out / "Frameworks" / "Foo.framework" / "Foo") &&
+                  read(out / "Resources" / "data" / "a.txt") == "app data");
+    }
+    // Contents/Resources linking out of the bundle: replacing data/ in the
+    // copy would have removed the folder it points to.
+    const fs::path outside = scratch / "links" / "outside";
+    write(outside / "data" / "precious.txt", "keep");
+    link(outside, app / "Contents" / "Resources");
+    {
+        dist::Plan q;
+        std::string message;
+        const auto input = macInput();
+        check("bundle: a link out of it is refused before anything is written",
+              !dist::makePlan(input, q, message) && contains(message, "points outside") &&
+                  read(outside / "data" / "precious.txt") == "keep" && !fs::exists(outside / "data" / "a.txt"));
+    }
 #endif
+}
+
+// The output folder must be a real absolute path: an empty one would put the
+// package folder in the current directory and replace a folder of that name.
+void testOutputFolder(const fs::path& self, const fs::path& scratch) {
+    const fs::path project = scratch / "output" / "myApp";
+    const fs::path cwd = scratch / "output" / "cwd";
+    fs::remove_all(scratch / "output");
+    fs::create_directories(project / "bin");
+#if defined(_WIN32)
+    fs::copy_file(self, project / "bin" / "myApp.exe");
+    const auto platform = dist::Platform::Windows;
+#else
+    fs::copy_file(self, project / "bin" / "myApp");
+    const auto platform = dist::Platform::Linux;
+#endif
+    dist::PlanInput input;
+    input.platform = platform;
+    input.projectDir = project;
+    input.binDir = project / "bin";
+    input.outputDir = "";
+    input.projectName = "myApp";
+    input.config.name = "My App";
+    input.config.version = "1.0.0";
+    dist::Plan plan;
+    std::string error;
+    const bool planned = dist::makePlan(input, plan, error);
+    write(cwd / plan.folderName / "keep.txt", "my files");
+    const fs::path before = fs::current_path();
+    fs::current_path(cwd);
+    const bool written = planned && dist::writePackage(input, plan, error);
+    fs::current_path(before);
+    check("an empty output folder is refused, nothing in the current directory is replaced",
+          planned && !written && contains(error, "absolute") && read(cwd / plan.folderName / "keep.txt") == "my files");
 }
 
 void testPackage(const fs::path& self, const fs::path& scratch) {
@@ -637,6 +744,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     testBinary(exe, scratch);
     testPackage(exe, scratch);
     testSymlinks(exe, scratch);
+    testOutputFolder(exe, scratch);
 #else
     std::printf("SKIP: packaging checks are desktop only\n");
 #endif

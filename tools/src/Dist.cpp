@@ -741,8 +741,10 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
     // libfoo.so.1.2 and the name the executable loads would be lost. A symlink
     // is kept as one (`link`) when its target is relative and stays under
     // `root`; any other symlink is an error, since the package would not hold
-    // what it points to. Symlinked folders are not entered.
-    auto walk = [&](const fs::path& root, const auto& visit) -> bool {
+    // what it points to. Symlinked folders are not entered. `packagePrefix` is
+    // where `root` lands in the package, for the "include" hint of that error
+    // (nullptr: no hint, as for the macOS bundle).
+    auto walk = [&](const fs::path& root, const char* packagePrefix, const auto& visit) -> bool {
         for (auto it = fs::recursive_directory_iterator(root, ec); it != fs::recursive_directory_iterator();
              it.increment(ec)) {
             if (ec) {
@@ -760,6 +762,14 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
                     error = "the symlink " + toUtf8(path) + " -> " + toUtf8(pointsTo) +
                             " points outside " + toUtf8(root) +
                             "; only relative links to files in the same folder tree are packaged";
+                    if (packagePrefix) {
+                        const fs::path from = pointsTo.is_absolute()
+                                                  ? pointsTo
+                                                  : (path.parent_path() / pointsTo).lexically_normal();
+                        error += ".\nCopy the files in, or list them in \"include\" in dist.json (they are copied):\n"
+                                 "  {\"from\": " + json(toUtf8(from)).dump() + ", \"to\": " +
+                                 json(std::string(packagePrefix) + rel).dump() + "}";
+                    }
                     return false;
                 }
                 if (!fs::exists(path, ec)) {
@@ -780,9 +790,15 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
 
     // --- bin/ ---
     if (in.platform == Platform::MacOS) {
+        // The bundle is copied whole with its links (framework Versions/Current
+        // and the like). Each one has to stay inside the bundle: a link out of
+        // it would be copied as a link, and writing bin/data into the copy would
+        // then reach the folder it points to.
+        if (!walk(plan.bundle, nullptr, [](const fs::path&, const std::string&, const std::string&) {}))
+            return false;
         const fs::path data = in.binDir / "data";
         if (fs::is_directory(data, ec)) {
-            const bool ok = walk(data, [&](const fs::path& path, const std::string& rel, const std::string& link) {
+            const bool ok = walk(data, "data/", [&](const fs::path& path, const std::string& rel, const std::string& link) {
                 const std::string name = path.filename().string();
                 if (name == ".DS_Store" || name == ".gitkeep") return;
                 const std::string logical = "data/" + rel;
@@ -796,7 +812,7 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
             error = "exclude matches the executable " + exeRel;
             return false;
         }
-        const bool ok = walk(in.binDir, [&](const fs::path& path, const std::string& rel, const std::string& link) {
+        const bool ok = walk(in.binDir, "", [&](const fs::path& path, const std::string& rel, const std::string& link) {
             const std::string fileName = lower(path.filename().string());
             const std::string ext = lower(path.extension().string());
             if (fileName == ".ds_store" || fileName == "thumbs.db" || fileName == ".gitkeep") return;
@@ -820,7 +836,8 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
             return false;
         }
         if (fs::is_directory(from, ec)) {
-            const bool ok = walk(from, [&](const fs::path& path, const std::string& rel, const std::string& link) {
+            const std::string prefix = to + "/";
+            const bool ok = walk(from, prefix.c_str(), [&](const fs::path& path, const std::string& rel, const std::string& link) {
                 const std::string logical = to + "/" + rel;
                 addFile(path, logical, targetOf(logical), link);
             });
@@ -909,8 +926,42 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
     return true;
 }
 
+namespace {
+
+// True when writing or removing `target` stays inside `root`: `target` is
+// lexically under `root`, and none of the folders between them that exist
+// yet, nor `target` itself, is a symlink that could lead somewhere else.
+bool staysInside(const fs::path& root, const fs::path& target, std::string& error) {
+    const fs::path rel = target.lexically_normal().lexically_relative(root.lexically_normal());
+    if (rel.empty() || *rel.begin() == ".." || rel.is_absolute()) {
+        error = "refusing to write outside " + toUtf8(root) + ": " + toUtf8(target);
+        return false;
+    }
+    fs::path at = root;
+    for (const auto& part : rel) {
+        at /= part;
+        std::error_code ec;
+        const fs::file_status status = fs::symlink_status(at, ec);
+        if (ec || !fs::exists(status)) return true;  // the rest is created by us
+        if (fs::is_symlink(status)) {
+            error = "refusing to write through the symlink " + toUtf8(at);
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
     std::error_code ec;
+    // Everything below is written inside the output folder, so it has to be a
+    // real absolute path: an empty one would make the package folder relative
+    // to the current directory, and replacing it would delete a folder there.
+    if (in.outputDir.empty() || !in.outputDir.is_absolute()) {
+        error = "the output folder must be an absolute path (got \"" + toUtf8(in.outputDir) + "\")";
+        return false;
+    }
     // Only ever replace the two folders this plan names, inside the output folder.
     for (const fs::path& dir : {plan.packageDir, plan.symbolsDir}) {
         if (dir.empty()) continue;
@@ -926,14 +977,22 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
 
     if (!plan.bundle.empty()) {
         const fs::path bundle = plan.packageDir / fromUtf8(plan.bundleName);
+        // Links are copied as links; makePlan has checked that they all stay
+        // inside the bundle.
         fs::copy(plan.bundle, bundle, fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
         if (ec) { error = "cannot copy " + toUtf8(plan.bundle) + ": " + ec.message(); return false; }
-        fs::remove_all(bundle / "Contents" / "Resources" / "data", ec);  // replaced by bin/data below
+        // Replaced by bin/data below. Never through a link: Contents/Resources
+        // as a link would make this remove a folder outside the package.
+        const fs::path data = bundle / "Contents" / "Resources" / "data";
+        if (!staysInside(plan.packageDir, data, error)) return false;
+        fs::remove_all(data, ec);
+        if (ec) { error = "cannot remove " + toUtf8(data) + ": " + ec.message(); return false; }
     }
 
     auto copyItems = [&](const std::vector<CopyItem>& items, const fs::path& root) {
         for (const auto& item : items) {
             const fs::path target = root / fromUtf8(item.target);
+            if (!staysInside(root, target, error)) return false;
             fs::create_directories(target.parent_path(), ec);
             if (!item.link.empty() && in.platform != Platform::Windows) {
                 // The same relative link: its target is in the package too.
@@ -972,8 +1031,13 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
         if (source.files.empty()) notices += "(" + source.note + ")\n";
         const fs::path dir = licenses / fromUtf8(fileSafeName(source.component));
         for (const auto& file : source.files) {
+            if (!staysInside(plan.packageDir, dir / file.filename(), error)) return false;
             fs::create_directories(dir, ec);
             fs::copy_file(file, dir / file.filename(), fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                error = "cannot copy the license file " + toUtf8(file) + ": " + ec.message();
+                return false;
+            }
             std::string text;
             if (readFile(file, text)) {
                 notices += "\n--- " + toUtf8(file.filename()) + " ---\n" + text;
@@ -989,10 +1053,15 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
         note += "\nSource folder: " + toUtf8(in.vcRuntimeDir) + "\n"
                 "They are covered by the license terms of that Visual Studio installation.\n";
         const fs::path dir = licenses / "Microsoft-VC-Runtime";
+        if (!staysInside(plan.packageDir, dir / "README.txt", error)) return false;
         fs::create_directories(dir, ec);
-        writeFile(dir / "README.txt", note);
+        if (!writeFile(dir / "README.txt", note)) {
+            error = "cannot write " + toUtf8(dir / "README.txt");
+            return false;
+        }
         notices += "\n" + std::string(78, '=') + "\n" + note;
     }
+    if (!staysInside(plan.packageDir, plan.packageDir / "THIRD_PARTY_NOTICES.txt", error)) return false;
     if (!writeFile(plan.packageDir / "THIRD_PARTY_NOTICES.txt", notices)) {
         error = "cannot write THIRD_PARTY_NOTICES.txt";
         return false;
@@ -1002,12 +1071,16 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
     if (!plan.bundle.empty()) {
         const fs::path plistPath = plan.packageDir / fromUtf8(plan.bundleName) / "Contents" / "Info.plist";
         std::string plist;
+        if (!staysInside(plan.packageDir, plistPath, error)) return false;
         if (readFile(plistPath, plist) && !startsWith(plist, "bplist")) {
             setPlistString(plist, "CFBundleShortVersionString", in.config.version);
             setPlistString(plist, "CFBundleVersion", in.config.version);
             if (!in.config.author.empty())
                 setPlistString(plist, "NSHumanReadableCopyright", copyrightLine(in.config.author));
-            writeFile(plistPath, plist);
+            if (!writeFile(plistPath, plist)) {
+                error = "cannot write " + toUtf8(plistPath);
+                return false;
+            }
         }
     }
 
@@ -1021,6 +1094,7 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
             "here=\"$(cd \"$(dirname \"$(readlink -f \"$0\")\")\" && pwd)\"\n"
             "LD_LIBRARY_PATH=\"$here${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\" exec \"$here/" +
             in.projectName + "\" \"$@\"\n";
+        if (!staysInside(plan.packageDir, launcher, error)) return false;
         if (!writeFile(launcher, script)) {
             error = "cannot write " + plan.launcherName;
             return false;
@@ -1062,7 +1136,7 @@ std::vector<std::string> listPackageFiles(const fs::path& packageDir) {
     std::error_code ec;
     for (auto it = fs::recursive_directory_iterator(packageDir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
         if (ec) break;
-        if (it->is_regular_file(ec)) files.push_back(toUtf8(fs::relative(it->path(), packageDir, ec)));
+        if (it->is_regular_file(ec)) files.push_back(toUtf8(it->path().lexically_relative(packageDir)));
     }
     std::sort(files.begin(), files.end());
     return files;

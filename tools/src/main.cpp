@@ -4607,6 +4607,11 @@ static int cmdDist(const vector<string>& args) {
     }
     error_code ec;
     const fs::path projectDir = fs::weakly_canonical(fs::absolute(projectPath), ec);
+    if (ec || projectDir.empty()) {
+        cerr << "Error: cannot resolve the project folder " << projectPath << ": "
+             << (ec ? ec.message() : string("empty path")) << "\n";
+        return 1;
+    }
     // The folder name is what people see (the app name by default); the
     // executable / bundle is named after the CMake target (see targetName below).
     string projectName = projectDir.filename().string();
@@ -4736,8 +4741,18 @@ static int cmdDist(const vector<string>& args) {
 #endif
     input.projectDir = projectDir;
     input.binDir = projectDir / "bin";
-    input.outputDir = fs::weakly_canonical(
-        fs::absolute(outputDir.empty() ? (projectDir / "dist") : fs::path(outputDir)), ec);
+    {
+        // An error here would leave an empty path, and the package folder would
+        // then be replaced relative to the current directory: stop instead.
+        const fs::path requested = fs::absolute(outputDir.empty() ? (projectDir / "dist") : fs::path(outputDir), ec);
+        if (!ec) input.outputDir = fs::weakly_canonical(requested, ec);
+        if (ec || input.outputDir.empty() || !input.outputDir.is_absolute()) {
+            cerr << "Error: cannot resolve the output folder "
+                 << (outputDir.empty() ? (projectDir / "dist").string() : outputDir) << ": "
+                 << (ec ? ec.message() : string("not an absolute path")) << "\n";
+            return 1;
+        }
+    }
     input.projectName = targetName;
     input.config = config;
     input.licenses = dist::collectLicenses(tcRoot, projectAddonDirs(projectDir.string(), tcRoot),
@@ -4793,6 +4808,10 @@ static int cmdDist(const vector<string>& args) {
     }
 
     fs::create_directories(input.outputDir, ec);
+    if (ec) {
+        cerr << "Error: cannot create the output folder " << input.outputDir.string() << ": " << ec.message() << "\n";
+        return 1;
+    }
     if (!dist::writePackage(input, plan, error)) {
         cerr << "Error: " << error << "\n";
         return 1;
