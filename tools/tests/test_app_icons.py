@@ -75,7 +75,7 @@ get_source_file_property(CATALOG_LOCATION "${CMAKE_BINARY_DIR}/AppIcon.xcassets"
 file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\n${ICON_DEPENDENCIES}\\ncatalog=${CATALOG_LOCATION}")
 ''', encoding='utf-8')
 
-    def configure(self, platform='macos', missing=(), fail='', folder=False):
+    def configure(self, platform='macos', missing=(), fail='', folder=False, host_windows=False):
         env = dict(os.environ, ICON_TEST_LOG=str(self.log), ICON_TEST_FAIL=fail)
         command = ['cmake', '--no-warn-unused-cli', '-S', str(self.source), '-B', str(self.build),
                    '-G', 'Unix Makefiles', '-DCMAKE_MAKE_PROGRAM=' + shutil.which('make'),
@@ -90,6 +90,10 @@ file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\
         # Exercise production magick/convert discovery, with no host tools.
         command.extend(['-DMAGICK_EXECUTABLE:FILEPATH=MAGICK_EXECUTABLE-NOTFOUND',
                         '-DCMAKE_PROGRAM_PATH=' + ('' if 'magick' in missing else self.tool_dir.as_posix())])
+        if host_windows:
+            # CMake accepts a host override in this isolated project on Linux.
+            command.extend(['-DCMAKE_HOST_WIN32=TRUE', '--trace-expand',
+                            '--trace-source=' + str(self.source / 'icons.cmake')])
         self.env = env
         result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -293,6 +297,18 @@ file(WRITE "${CMAKE_BINARY_DIR}/selection.txt" "${ICON_FILE}\\n${ICON_SOURCES}\\
         self.assertNotIn('Warning', self.configure('windows'))
         call, = self.calls()
         self.assertEqual(call[0], 'convert')
+
+    def test_windows_host_never_searches_or_runs_convert(self):
+        self.png()
+        (self.tool_dir / 'magick').unlink()
+        output = self.configure('windows', host_windows=True)
+        self.assertRegex(output, r'find_program\(MAGICK_EXECUTABLE magick\b')
+        self.assertNotRegex(output, r'find_program\(MAGICK_EXECUTABLE convert\b')
+        self.assertIn('ImageMagick 7 (magick) not found', output)
+        self.assertIn('using default TrussC icon', output)
+        self.assertIn((ROOT / 'core/resources/default.ico').as_posix(), self.selection)
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((self.build / 'app_icon.ico').exists())
 
 
 if __name__ == '__main__':

@@ -287,7 +287,7 @@ myProject/
 
 **Windows:**
 - `.ico` - Windows アイコン形式。`icon/` 内のユーザーの `.ico` は PNG より優先されます。
-- `.png` - 構成時に ImageMagick（`magick` または `convert`）でビルド先の `<target>_icon.ico` に変換します。`icon/` 内には書き込みません。PNG の SHA-256 が変わらなければ変換結果を再利用し、PNG を編集すると再構成・再変換されます。正方形でない PNG には警告を出します。ImageMagick がない場合や変換失敗時は警告を出し、`default.ico` を使います。
+- `.png` - 構成時に ImageMagick 7（`magick`）でビルド先の `<target>_icon.ico` に変換します。`icon/` 内には書き込みません。PNG の SHA-256 が変わらなければ変換結果を再利用し、PNG を編集すると再構成・再変換されます。正方形でない PNG には警告を出します。ImageMagick がない場合や変換失敗時は警告を出し、`default.ico` を使います。
 
 
 ## 9. 展示・常設での運用

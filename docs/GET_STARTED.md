@@ -317,7 +317,7 @@ myProject/
 
 **Windows:**
 - `.ico` - Windows icon format; a user file in `icon/` takes priority over PNG
-- `.png` - Converted at configure time with ImageMagick (`magick` or `convert`) to `<target>_icon.ico` in the build tree; nothing is written into `icon/`. The result is reused while the PNG's SHA-256 is unchanged; PNG edits trigger reconfiguration and conversion. A non-square PNG produces a warning. Missing or failing ImageMagick warns and uses `default.ico`.
+- `.png` - Converted at configure time with ImageMagick 7 (`magick`) to `<target>_icon.ico` in the build tree; nothing is written into `icon/`. The result is reused while the PNG's SHA-256 is unchanged; PNG edits trigger reconfiguration and conversion. A non-square PNG produces a warning. Missing or failing ImageMagick warns and uses `default.ico`.
 
 
 ## 9. Deploying an Installation
