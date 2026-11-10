@@ -1304,4 +1304,35 @@ std::string pkgbuild(const PacmanInput& in) {
     return s;
 }
 
+std::string debArch(const std::string& arch) {
+    if (arch == "x64") return "amd64";
+    if (arch == "x86") return "i386";
+    return arch;  // "arm64" is the same in both
+}
+
+std::string parseShlibdeps(const std::string& output) {
+    std::istringstream lines(output);
+    std::string line;
+    const std::string key = "shlibs:Depends=";
+    while (std::getline(lines, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (startsWith(line, key)) return line.substr(key.size());
+    }
+    return {};
+}
+
+std::string debControl(const DebInput& in) {
+    std::string s;
+    s += "Package: " + in.package + "\n";
+    s += "Version: " + in.version + "\n";
+    s += "Architecture: " + in.arch + "\n";
+    s += "Maintainer: " + oneLine(in.maintainer) + "\n";
+    s += "Installed-Size: " + std::to_string(in.installedSizeKiB) + "\n";
+    if (!in.depends.empty()) s += "Depends: " + oneLine(in.depends) + "\n";
+    s += "Section: misc\n";
+    s += "Priority: optional\n";
+    s += "Description: " + oneLine(in.description) + "\n";
+    return s;
+}
+
 } // namespace dist

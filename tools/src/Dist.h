@@ -313,4 +313,24 @@ struct PacmanInput {
 // A PKGBUILD that packages the already-built dist folder (no build step).
 std::string pkgbuild(const PacmanInput& input);
 
+// dpkg's architecture name: "x64" -> "amd64", "arm64" -> "arm64", "x86" -> "i386".
+std::string debArch(const std::string& arch);
+
+// The value of "shlibs:Depends=" in `dpkg-shlibdeps -O` output
+// ("libc6 (>= 2.34), libgtk-3-0t64 (>= 3.0.0)"), or "" when there is none.
+std::string parseShlibdeps(const std::string& output);
+
+struct DebInput {
+    std::string package;        // linuxPackageName
+    std::string version;
+    std::string arch;           // debArch
+    std::string maintainer;     // the author, or the app name without one
+    std::string description;
+    std::string depends;        // parseShlibdeps
+    uint64_t installedSizeKiB = 0;
+};
+
+// DEBIAN/control of the .deb.
+std::string debControl(const DebInput& input);
+
 } // namespace dist

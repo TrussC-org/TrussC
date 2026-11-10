@@ -4363,6 +4363,33 @@ static bool pacmanDepends(const fs::path& packageDir, vector<string>& depends, s
     return true;
 }
 
+// The menu icon: the first PNG in the project's icon/ folder, else TrussC's.
+// Empty if neither exists.
+static fs::path linuxAppIcon(const dist::PlanInput& input, const fs::path& tcRoot) {
+    error_code ec;
+    vector<fs::path> pngs;
+    for (const auto& entry : fs::directory_iterator(input.projectDir / "icon", ec)) {
+        if (entry.is_regular_file(ec) && entry.path().extension() == ".png") pngs.push_back(entry.path());
+    }
+    sort(pngs.begin(), pngs.end());
+    fs::path icon = !pngs.empty() ? pngs.front() : tcRoot / "core" / "resources" / "default.png";
+    return fs::is_regular_file(icon, ec) ? icon : fs::path();
+}
+
+// The Start menu entry of an app installed to /opt/<package>/.
+static string linuxDesktopEntry(const dist::PlanInput& input, const dist::Plan& plan, const string& package) {
+    dist::DesktopEntryInput desktop;
+    desktop.name = input.config.name;
+    desktop.exec = "/opt/" + package + "/" + plan.launcherName;
+    desktop.icon = package;
+    desktop.wmClass = plan.executableName;  // TrussC sets WM_CLASS to it
+    return dist::desktopEntry(desktop);
+}
+
+static string linuxPackageDescription(const dist::Config& config) {
+    return config.name + (config.author.empty() ? "" : " by " + config.author);
+}
+
 // Builds a pacman package (<pkgname>-<version>-1-<arch>.pkg.tar.zst) of the
 // dist folder with makepkg, next to it. The PKGBUILD and makepkg's work go to
 // a <folder>-pacman/ folder, removed on success and kept on failure. Returns
@@ -4377,7 +4404,7 @@ static fs::path buildPacmanPackage(const dist::PlanInput& input, const dist::Pla
     dist::PacmanInput pkg;
     pkg.pkgname = dist::linuxPackageName(input.config.name);
     pkg.version = input.config.version;
-    pkg.description = input.config.name + (input.config.author.empty() ? "" : " by " + input.config.author);
+    pkg.description = linuxPackageDescription(input.config);
     pkg.arch = dist::pacmanArch(plan.arch);
     pkg.packageDir = plan.packageDir;
     pkg.launcher = plan.launcherName;
@@ -4388,25 +4415,10 @@ static fs::path buildPacmanPackage(const dist::PlanInput& input, const dist::Pla
     for (const string& d : pkg.depends) cout << " " << d;
     cout << "\n";
 
-    // The icon: the first PNG in the project's icon/ folder, else TrussC's.
-    {
-        vector<fs::path> pngs;
-        for (const auto& entry : fs::directory_iterator(input.projectDir / "icon", ec)) {
-            if (entry.is_regular_file(ec) && entry.path().extension() == ".png") pngs.push_back(entry.path());
-        }
-        sort(pngs.begin(), pngs.end());
-        pkg.icon = !pngs.empty() ? pngs.front() : tcRoot / "core" / "resources" / "default.png";
-        if (!fs::is_regular_file(pkg.icon, ec)) pkg.icon.clear();
-    }
-
+    pkg.icon = linuxAppIcon(input, tcRoot);
     pkg.desktopFile = work / (pkg.pkgname + ".desktop");
     {
-        dist::DesktopEntryInput desktop;
-        desktop.name = input.config.name;
-        desktop.exec = "/opt/" + pkg.pkgname + "/" + plan.launcherName;
-        desktop.icon = pkg.pkgname;
-        desktop.wmClass = plan.executableName;  // TrussC sets WM_CLASS to it
-        ofstream(pkg.desktopFile, ios::binary) << dist::desktopEntry(desktop);
+        ofstream(pkg.desktopFile, ios::binary) << linuxDesktopEntry(input, plan, pkg.pkgname);
         ofstream(work / "PKGBUILD", ios::binary) << dist::pkgbuild(pkg);
         if (!fs::is_regular_file(work / "PKGBUILD", ec)) {
             error = "cannot write " + (work / "PKGBUILD").string();
@@ -4436,6 +4448,98 @@ static fs::path buildPacmanPackage(const dist::PlanInput& input, const dist::Pla
     }
     fs::remove_all(work, ec);
     return built;
+}
+
+// Builds <package>_<version>_<arch>.deb of the dist folder with dpkg-deb, next
+// to it. The package tree is staged in a <folder>-deb/ folder (removed on
+// success, kept on failure); its ELF files are stripped of debug info, and
+// dpkg-shlibdeps names the packages (with minimum versions) that provide the
+// libraries they load. Returns the .deb path, or empty with `error`.
+static fs::path buildDebPackage(const dist::PlanInput& input, const dist::Plan& plan,
+                                const fs::path& tcRoot, string& error) {
+    error_code ec;
+    const fs::path work = input.outputDir / (plan.folderName + "-deb");
+    const fs::path root = work / "root";
+    fs::remove_all(work, ec);
+
+    dist::DebInput deb;
+    deb.package = dist::linuxPackageName(input.config.name);
+    deb.version = input.config.version;
+    deb.arch = dist::debArch(plan.arch);
+    deb.maintainer = input.config.author.empty() ? input.config.name : input.config.author;
+    deb.description = linuxPackageDescription(input.config);
+
+    // --- The tree: /opt/<package>, /usr/bin link, menu entry and icon ---
+    const fs::path opt = root / "opt" / deb.package;
+    fs::create_directories(opt.parent_path(), ec);
+    fs::copy(plan.packageDir, opt, fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
+    if (ec) {
+        error = "cannot stage the package in " + work.string() + ": " + ec.message();
+        return {};
+    }
+    fs::create_directories(root / "usr" / "bin", ec);
+    fs::create_symlink("/opt/" + deb.package + "/" + plan.launcherName, root / "usr" / "bin" / deb.package, ec);
+    fs::create_directories(root / "usr" / "share" / "applications", ec);
+    ofstream(root / "usr" / "share" / "applications" / (deb.package + ".desktop"), ios::binary)
+        << linuxDesktopEntry(input, plan, deb.package);
+    if (const fs::path icon = linuxAppIcon(input, tcRoot); !icon.empty()) {
+        fs::create_directories(root / "usr" / "share" / "pixmaps", ec);
+        fs::copy_file(icon, root / "usr" / "share" / "pixmaps" / (deb.package + ".png"),
+                      fs::copy_options::overwrite_existing, ec);
+    }
+
+    // --- ELF files: strip debug info, then find what they depend on ---
+    vector<string> elfFiles;
+    for (const auto& entry : fs::recursive_directory_iterator(opt, ec)) {
+        if (entry.is_regular_file(ec) && !entry.is_symlink(ec) &&
+            dist::readBinaryInfo(entry.path()).format == "elf")
+            elfFiles.push_back(entry.path().string());
+    }
+    for (const string& file : elfFiles) {
+        if (runInherited({"strip", "--strip-debug", file}) != 0) {
+            error = "strip failed on " + file;
+            return {};
+        }
+    }
+    cout << "Finding the packages " << input.config.name << " depends on ...\n";
+    {
+        // dpkg-shlibdeps reads debian/control in its working folder.
+        fs::create_directories(work / "debian", ec);
+        ofstream(work / "debian" / "control", ios::binary)
+            << "Source: " << deb.package << "\n\nPackage: " << deb.package << "\nArchitecture: any\n";
+        // -l: libraries shipped in the package are found there, not reported missing.
+        vector<string> argv = {"sh", "-c", "cd \"$1\" && shift && exec dpkg-shlibdeps \"$@\"", "sh",
+                               work.string(), "-O", "--ignore-missing-info", "-l" + opt.string()};
+        argv.insert(argv.end(), elfFiles.begin(), elfFiles.end());
+        const auto output = captureCommand(argv);
+        if (!output) {
+            error = "dpkg-shlibdeps failed; the staged package is kept in " + work.string();
+            return {};
+        }
+        deb.depends = dist::parseShlibdeps(*output);
+        cout << "  depends: " << (deb.depends.empty() ? string("(none)") : deb.depends) << "\n";
+        fs::remove_all(work / "debian", ec);
+    }
+
+    // --- DEBIAN/control ---
+    uintmax_t bytes = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(root, ec)) {
+        if (entry.is_regular_file(ec) && !entry.is_symlink(ec)) bytes += entry.file_size(ec);
+    }
+    deb.installedSizeKiB = (bytes + 1023) / 1024;
+    fs::create_directories(root / "DEBIAN", ec);
+    ofstream(root / "DEBIAN" / "control", ios::binary) << dist::debControl(deb);
+
+    const fs::path out = input.outputDir / (deb.package + "_" + deb.version + "_" + deb.arch + ".deb");
+    fs::remove(out, ec);
+    cout << "Building the .deb with dpkg-deb ...\n";
+    if (runInherited({"dpkg-deb", "--build", "--root-owner-group", root.string(), out.string()}) != 0 ||
+        !fs::is_regular_file(out, ec)) {
+        error = "dpkg-deb failed; the staged package is kept in " + work.string();
+        return {};
+    }
+    fs::remove_all(work, ec);
+    return out;
 }
 #endif
 
@@ -4606,14 +4710,14 @@ static int cmdDist(const vector<string>& args) {
                  << ") is neither. Use --archive.\n";
             return 1;
         }
-        if (linuxFormat == dist::LinuxPackageFormat::Deb) {
-            cerr << "Error: --installer does not make a .deb yet. Use --archive.\n";
-            return 1;
-        }
-        for (const char* tool : {"makepkg", "objdump", "ldd"}) {
+        const bool pacman = linuxFormat == dist::LinuxPackageFormat::Pacman;
+        const vector<const char*> tools = pacman ? vector<const char*>{"makepkg", "objdump", "ldd"}
+                                                 : vector<const char*>{"dpkg-deb", "dpkg-shlibdeps", "strip"};
+        for (const char* tool : tools) {
             if (findOnPath(tool).empty()) {
-                cerr << "Error: --installer needs " << tool
-                     << " (install it with 'sudo pacman -S --needed base-devel').\n";
+                cerr << "Error: --installer needs " << tool << " (install it with '"
+                     << (pacman ? "sudo pacman -S --needed base-devel" : "sudo apt install dpkg-dev binutils")
+                     << "').\n";
                 return 1;
             }
         }
@@ -4662,10 +4766,16 @@ static int cmdDist(const vector<string>& args) {
             cout << "Would also build " << plan.folderName << "-setup.exe"
                  << (makensis.empty() ? " (NSIS not found: install it with 'winget install NSIS.NSIS')" : "")
                  << "\n";
-        } else if (installer) {
+        }
+#ifdef __linux__
+        if (installer && linuxFormat == dist::LinuxPackageFormat::Pacman) {
             cout << "Would also build a pacman package " << dist::linuxPackageName(config.name) << "-"
                  << config.version << "-1-" << dist::pacmanArch(plan.arch) << ".pkg.tar.zst\n";
+        } else if (installer) {
+            cout << "Would also build " << dist::linuxPackageName(config.name) << "_" << config.version << "_"
+                 << dist::debArch(plan.arch) << ".deb\n";
         }
+#endif
         cout << "Would write to " << input.outputDir.string() << ":\n" << dist::formatPlan(plan) << "\n"
              << dist::formatLicenseReport(input.licenses);
         return 0;
@@ -4703,7 +4813,11 @@ static int cmdDist(const vector<string>& args) {
     fs::path setupPath;
     string installerError;
 #ifdef __linux__
-    if (installer) setupPath = buildPacmanPackage(input, plan, fs::path(tcRoot), installerError);
+    if (installer) {
+        setupPath = linuxFormat == dist::LinuxPackageFormat::Pacman
+                        ? buildPacmanPackage(input, plan, fs::path(tcRoot), installerError)
+                        : buildDebPackage(input, plan, fs::path(tcRoot), installerError);
+    }
 #else
     if (installer) {
         if (makensis.empty()) {
@@ -4734,9 +4848,14 @@ static int cmdDist(const vector<string>& args) {
              << ". Run 'trusscli dist --init' to set them.\n";
     }
 #ifdef __linux__
-    if (!setupPath.empty()) {
+    if (!setupPath.empty() && linuxFormat == dist::LinuxPackageFormat::Pacman) {
         cout << "Install with:  sudo pacman -U " << setupPath.filename().string() << "\n"
              << "(installs the dependencies too; remove with: sudo pacman -R "
+             << dist::linuxPackageName(config.name) << ")\n";
+    } else if (!setupPath.empty()) {
+        // "./": apt installs a local file only when it is given as a path.
+        cout << "Install with:  sudo apt install ./" << setupPath.filename().string() << "\n"
+             << "(installs the dependencies too; remove with: sudo apt remove "
              << dist::linuxPackageName(config.name) << ")\n";
     } else if (!installer) {
         cout << "Note: the folder runs on " << input.platformTag

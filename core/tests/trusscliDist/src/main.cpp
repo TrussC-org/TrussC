@@ -276,6 +276,31 @@ void testLinuxPackage() {
               contains(script, "/usr/share/applications/my-app.desktop") &&
               contains(script, "/usr/share/pixmaps/my-app.png") &&
               contains(script, "ln -s '/opt/my-app/licenses' \"$pkgdir/usr/share/licenses/my-app\""));
+
+    check("deb arch", dist::debArch("x64") == "amd64" && dist::debArch("arm64") == "arm64" &&
+                          dist::debArch("x86") == "i386");
+    check("shlibs:Depends found among warnings",
+          dist::parseShlibdeps("dpkg-shlibdeps: warning: x\nshlibs:Depends=libc6 (>= 2.34), libx11-6\r\n") ==
+                  "libc6 (>= 2.34), libx11-6" &&
+              dist::parseShlibdeps("nothing here\n").empty());
+
+    dist::DebInput deb;
+    deb.package = "my-app";
+    deb.version = "1.2.0";
+    deb.arch = "amd64";
+    deb.maintainer = "Studio\nX";
+    deb.description = "My App by Studio";
+    deb.depends = "libc6 (>= 2.34)";
+    deb.installedSizeKiB = 42;
+    const std::string control = dist::debControl(deb);
+    check("deb control: fields, one-line values",
+          contains(control, "Package: my-app\n") && contains(control, "Version: 1.2.0\n") &&
+              contains(control, "Architecture: amd64\n") && contains(control, "Maintainer: Studio X\n") &&
+              contains(control, "Installed-Size: 42\n") && contains(control, "Depends: libc6 (>= 2.34)\n") &&
+              contains(control, "Description: My App by Studio\n"));
+    deb.depends.clear();
+    check("deb control: no Depends line without dependencies",
+          !contains(dist::debControl(deb), "Depends:"));
 }
 
 void testGlobs() {
