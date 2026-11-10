@@ -521,7 +521,10 @@ function(_trussc_setup_icon_macos TARGET_NAME ICON_DIR DEFAULT_DIR)
             _trussc_apply_macos_icns(${TARGET_NAME} "${DEFAULT_DIR}/default.icns")
         endif()
         # Precompiled Tahoe icon; default builds do not require Xcode.
-        _trussc_apply_macos_icon_assets(${TARGET_NAME} "${DEFAULT_DIR}/Assets.car" default)
+        # Share the user catalog's path so resource copies see icon changes.
+        set(ASSETS_CAR "${CMAKE_CURRENT_BINARY_DIR}/icon_assets/Assets.car")
+        configure_file("${DEFAULT_DIR}/Assets.car" "${ASSETS_CAR}" COPYONLY)
+        _trussc_apply_macos_icon_assets(${TARGET_NAME} "${ASSETS_CAR}" default)
     endif()
 
     # Remove the quarantine attribute (only once, at the end)

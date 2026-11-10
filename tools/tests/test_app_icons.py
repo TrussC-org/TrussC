@@ -75,7 +75,16 @@ function(_trussc_apply_macos_icon_folder TARGET_NAME ICON_FOLDER OUT_SUCCESS)
     set(${OUT_SUCCESS} ${TEST_FOLDER_SUCCESS} PARENT_SCOPE)
 endfunction()
 endif()
-add_custom_target(app)
+if(TEST_BUNDLE)
+    # Exercise real Darwin Makefile resource copies without a macOS compiler.
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/main.c" "")
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/main.c" PROPERTIES HEADER_FILE_ONLY TRUE)
+    set(CMAKE_C_LINK_EXECUTABLE "\\"${CMAKE_COMMAND}\\" -E touch <TARGET>")
+    add_executable(app MACOSX_BUNDLE "${CMAKE_CURRENT_BINARY_DIR}/main.c")
+    set_target_properties(app PROPERTIES LINKER_LANGUAGE C)
+else()
+    add_custom_target(app)
+endif()
 if(TEST_PLATFORM STREQUAL "ios")
     _trussc_setup_icon_ios(app "${CMAKE_CURRENT_SOURCE_DIR}/icon" "${DEFAULT_DIR}")
 elseif(TEST_PLATFORM STREQUAL "windows")
@@ -94,7 +103,7 @@ foreach(ICON_SOURCE IN LISTS ICON_SOURCES)
 endforeach()
 ''', encoding='utf-8')
 
-    def configure(self, platform='macos', missing=(), fail='', folder=False, host_windows=False):
+    def configure(self, platform='macos', missing=(), fail='', folder=False, host_windows=False, bundle=False):
         env = dict(os.environ, ICON_TEST_LOG=str(self.log), ICON_TEST_FAIL=fail)
         env['PATH'] = str(self.tool_dir) + os.pathsep + env.get('PATH', '')
         env['ICON_TEST_DEVELOPER'] = str(self.selected_developer)
@@ -106,6 +115,8 @@ endforeach()
                    '-DDEFAULT_DIR=' + (ROOT / 'core/resources').as_posix()]
         if folder is not None:
             command.append('-DTEST_FOLDER_SUCCESS=' + ('TRUE' if folder else 'FALSE'))
+        if bundle:
+            command.extend(['-DCMAKE_SYSTEM_NAME=Darwin', '-DTEST_BUNDLE=TRUE'])
         for tool in ('sips', 'iconutil'):
             value = tool + '-NOTFOUND' if tool in missing else (self.tool_dir / tool).as_posix()
             command.append('-DTRUSSC_' + tool.upper() + '_EXECUTABLE=' + value)
@@ -163,11 +174,35 @@ pathlib.Path(args[2], 'Assets.car').write_bytes(b'user icon catalog')
         self.assertEqual(catalog.stat().st_size, 1009512)
         self.assertEqual(hashlib.sha256(catalog.read_bytes()).hexdigest(),
                          '9542254266304d1e785ef47ef2ff620c235f3fa45d75df98e783875139c628b2')
-        self.assertIn(catalog.as_posix() + '=Resources', self.selection)
+        staged = self.build / 'icon_assets/Assets.car'
+        self.assertIn(staged.as_posix() + '=Resources', self.selection)
+        self.assertEqual(staged.read_bytes(), catalog.read_bytes())
         self.assertIn('default.icns', self.selection)
         self.assertIn('Add :CFBundleIconName string default', self.bundle_commands())
         self.assertNotIn('Using actool:', output)
         self.assertEqual(self.calls(), [])
+
+    def test_user_catalog_switches_to_default_in_same_bundle(self):
+        self.xcode()
+        custom = self.icons / 'custom.icon'
+        custom.mkdir()
+        catalog = ROOT / 'core/resources/Assets.car'
+        bundled = self.build / 'app.app/Contents/Resources/Assets.car'
+
+        def build_catalog():
+            result = subprocess.run(['cmake', '--build', str(self.build)],
+                                    capture_output=True, text=True, encoding='utf-8', env=self.env)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return bundled.read_bytes()
+
+        self.configure(folder=None, bundle=True)
+        self.assertEqual(build_catalog(), b'user icon catalog')
+        # Keep the checked-in catalog older than the already bundled user data.
+        self.assertLess(catalog.stat().st_mtime_ns, bundled.stat().st_mtime_ns)
+        custom.rmdir()
+        self.assertIn('Using default TrussC icon', self.configure(folder=None, bundle=True))
+        self.assertIn('Add :CFBundleIconName string default', self.bundle_commands())
+        self.assertEqual(build_catalog(), catalog.read_bytes())
 
     def test_user_icon_uses_selected_xcode_and_its_own_catalog(self):
         self.xcode()
