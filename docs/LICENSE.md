@@ -62,6 +62,16 @@ This is the one list of third-party code in TrussC and the version the build use
 | **Highway** | 1.2.0, commit `457c891775a7397bdb0376bb1031e6e027af1c48` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
 | **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
 
+### System JPEG dependency (Linux)
+
+Linux links the distribution's libjpeg-turbo through its classic libjpeg API
+(`pkg-config libjpeg`); TrussC does not bundle it. Its permissive license summary
+is **IJG + Modified BSD + zlib**. The installed version and full license texts
+come from the distribution package (`libjpeg-dev`). Applications distributing
+libjpeg-turbo binaries should retain the applicable upstream notices.
+
+> This software is based in part on the work of the Independent JPEG Group
+
 ### Build Tools
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | SHA-256 |

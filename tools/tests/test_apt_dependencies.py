@@ -1,6 +1,7 @@
 """Offline installer checks: fake package queries and sudo, never invoke apt."""
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 import sys
@@ -47,6 +48,7 @@ class AptDependenciesTests(unittest.TestCase):
         self.assertEqual(baseline[0], options + ['update'])
         self.assertEqual(baseline[1][:7], options + ['install', '-y'])
         self.assertGreater(len(baseline[1]), 7)
+        self.assertIn("libjpeg-dev", baseline[1])
         for archive in ('', str(self.directory / 'archives'),
                         str(self.directory / 'archives with spaces')):
             with self.subTest(archive=archive):
@@ -55,6 +57,14 @@ class AptDependenciesTests(unittest.TestCase):
                 cache = ['-o', f'Dir::Cache::Archives={archive}'] if archive else []
                 expected = [options + cache + call[len(options):] for call in baseline]
                 self.assertEqual(self.run_installer(), expected)
+
+    def test_ci_jpeg_dependency(self):
+        action = (ROOT / '.github/actions/apt-deps/action.yml').read_text(encoding='utf-8')
+        release = (ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+        self.assertIn('./tools/install_dependencies_linux.sh -y', action)
+        installs = [shlex.split(line.strip()) for line in release.replace('\\\n', ' ').splitlines()
+                    if 'sudo apt-get install -y' in line]
+        self.assertTrue(any('libjpeg-dev' in arguments for arguments in installs))
 
     def test_installed_packages_do_not_invoke_sudo(self):
         self.stub('dpkg', '#!/bin/bash\nexit 0\n')

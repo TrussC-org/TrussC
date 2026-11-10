@@ -4,6 +4,7 @@
 
 #include "TrussC.h"
 #include "impl/tcImageDecode.h"
+#include "impl/tcJpegDecode.h"
 #include <atomic>
 #include <array>
 #include <bit>
@@ -162,6 +163,37 @@ LoadResult Pixels::loadEncoded(const unsigned char* buffer, size_t len, bool asF
     if (!buffer || len == 0)
         return LoadResult::fail(LoadError::DecodeFailed, "invalid encoded image data");
     internal::ImageDecodeAllocationScope allocation;
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (internal::isJpeg(buffer, len)) {
+        internal::JpegDecode jpeg;
+        if (!jpeg.open(buffer, len))
+            return LoadResult::fail(LoadError::DecodeFailed, "libjpeg rejected JPEG header");
+        const int w = jpeg.width(), h = jpeg.height();
+        size_t elements = 0;
+        if (!internal::pixelBufferCount(w, h, 4, asFloat ? sizeof(float) : 1, SIZE_MAX, elements))
+            return LoadResult::fail(LoadError::TooLarge, "decoded pixel storage exceeds size_t capacity");
+        std::unique_ptr<unsigned char[]> output(internal::imageDecodeAllocationAllowed(elements)
+            ? new (std::nothrow) unsigned char[elements] : nullptr);
+        if (!output) return internal::imageDecodeOutOfMemory();
+        if (!jpeg.decode(output.get(), elements))
+            return LoadResult::fail(LoadError::DecodeFailed, "libjpeg rejected JPEG data");
+        if (asFloat) {
+            std::unique_ptr<float[]> linear(internal::imageDecodeAllocationAllowed(elements * sizeof(float))
+                ? new (std::nothrow) float[elements] : nullptr);
+            if (!linear) return internal::imageDecodeOutOfMemory();
+            // Match stb's default LDR-to-HDR gamma conversion and opaque alpha.
+            for (size_t i = 0; i < elements; ++i)
+                linear[i] = i % 4 == 3 ? 1.0f : std::pow(output[i] / 255.0f, 2.2f);
+            data_ = linear.release();
+        } else data_ = output.release();
+        width_ = w;
+        height_ = h;
+        channels_ = 4;
+        format_ = asFloat ? PixelFormat::F32 : PixelFormat::U8;
+        allocated_ = true;
+        return LoadResult::success();
+    }
+#endif
     int decodedW = 0, decodedH = 0, decodedChannels = 0;
     using Decoded = std::unique_ptr<void, decltype(&stbi_image_free)>;
     Decoded decoded(nullptr, &stbi_image_free);

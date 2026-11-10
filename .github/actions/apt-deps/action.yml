@@ -10,7 +10,7 @@ inputs:
       libasound2-dev libgtk-3-dev libavcodec-dev libavformat-dev libswscale-dev
       libavutil-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
       gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
-      libfontconfig-dev pkg-config libcurl4-openssl-dev cmake
+      libfontconfig-dev libjpeg-dev pkg-config libcurl4-openssl-dev cmake
 runs:
   using: composite
   steps:
