@@ -1,4 +1,4 @@
-"""Run Windows power-command policy and native fixture contracts without a GPU."""
+"""Run Windows icon/power policy and native fixture contracts without a GPU."""
 from pathlib import Path
 import os
 import subprocess
@@ -11,6 +11,83 @@ SOURCE = Path(os.environ.get('TC_WIN32_FIXTURE_SOURCE', ROOT / 'core/tests/nativ
 
 
 class NativeFixtureTests(unittest.TestCase):
+    def test_window_class_uses_sized_executable_icons(self):
+        header = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+        registration = body(header, 'static bool _sapp_tc_win32_ensure_wndclass(')
+        cleanup_start = header.index('    // [TrussC] Release owned icon images')
+        cleanup = header[cleanup_start:header.index('    for (int i = 0;', cleanup_start)]
+        code = r'''
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <cwchar>
+using HICON = void*;
+using DWORD = unsigned long;
+constexpr int CS_HREDRAW=1, CS_VREDRAW=2, CS_OWNDC=4, IDC_ARROW=1, IDI_WINLOGO=2;
+constexpr int IMAGE_ICON=1, SM_CXICON=0, SM_CYICON=1, SM_CXSMICON=2, SM_CYSMICON=3;
+constexpr int ERROR_CLASS_ALREADY_EXISTS=1410, SAPP_LOGITEM_OK=0;
+#define HRESULT_FROM_WIN32(value) (value)
+struct WNDCLASSEXW {
+    unsigned cbSize, style;
+    void* lpfnWndProc;
+    void* hInstance;
+    void* hCursor;
+    HICON hIcon, hIconSm;
+    const wchar_t* lpszClassName;
+};
+struct {
+    bool wndclass_registered;
+    HICON class_icon, class_icon_small;
+    struct { struct { int logger; } desc; } app;
+} _sapp_tc{};
+void* _sapp_tc_wndproc = nullptr;
+void* GetModuleHandleW(void*) { return (void*)1; }
+void* LoadCursor(void*, int) { return (void*)2; }
+int GetSystemMetrics(int metric) { return metric < 2 ? 32 : 16; }
+bool resourcePresent = true;
+int loads = 0, registrations = 0;
+HICON LoadImageW(void* instance, const wchar_t* name, int kind, int width, int height, unsigned flags) {
+    assert(instance == (void*)1 && std::wcscmp(name, L"IDI_ICON1") == 0);
+    assert(kind == IMAGE_ICON && flags == 0); // Separate owned images, no shared size cache.
+    assert(width == (loads == 0 ? 32 : 16) && height == width);
+    ++loads;
+    return resourcePresent ? (width == 32 ? (void*)3 : (void*)4) : nullptr;
+}
+HICON LoadIcon(void* instance, int id) { assert(!instance && id == IDI_WINLOGO); return (void*)5; }
+bool RegisterClassExW(WNDCLASSEXW* cls) {
+    ++registrations;
+    assert(cls->cbSize == sizeof(*cls));
+    assert(std::wcscmp(cls->lpszClassName, L"SOKOLAPP_TC") == 0);
+    assert(cls->hIcon == (resourcePresent ? (void*)3 : (void*)5));
+    assert(cls->hIconSm == (resourcePresent ? (void*)4 : (void*)5));
+    return true;
+}
+DWORD GetLastError() { return 0; }
+void _sapp_tc_log(...) {}
+int releases = 0;
+void DestroyIcon(HICON icon) { assert(icon == (void*)3 || icon == (void*)4); ++releases; }
+''' + registration + '\nvoid cleanupIcons() {\n' + cleanup + '}\n' + r'''
+int main() {
+    for (int scenario = 0; scenario < 2; ++scenario) {
+        resourcePresent = scenario == 0;
+        _sapp_tc = {}; loads = registrations = 0;
+        assert(_sapp_tc_win32_ensure_wndclass());
+        assert(_sapp_tc_win32_ensure_wndclass()); // Main and secondary share the class.
+        assert(loads == 2 && registrations == 1);
+        assert(_sapp_tc.class_icon == (resourcePresent ? (void*)3 : nullptr));
+        assert(_sapp_tc.class_icon_small == (resourcePresent ? (void*)4 : nullptr));
+        releases = 0;
+        cleanupIcons(); cleanupIcons();
+        assert(releases == (resourcePresent ? 2 : 0));
+    }
+}
+'''
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / 'icons.cpp').write_text(code, encoding='utf-8')
+            subprocess.run(['c++', '-std=c++20', str(path / 'icons.cpp'), '-o', str(path / 'icons')], check=True)
+            subprocess.run([str(path / 'icons')], check=True)
+
     def test_keep_screen_on_power_commands(self):
         header = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
         platform = (ROOT / 'core/platform/win/tcPlatform_win.cpp').read_text(encoding='utf-8')
