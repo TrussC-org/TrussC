@@ -715,7 +715,8 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
     plan.packageDir = in.outputDir / fromUtf8(plan.folderName);
 
     std::set<std::string> targets;
-    auto addFile = [&](const fs::path& source, const std::string& logical, const std::string& target) {
+    auto addFile = [&](const fs::path& source, const std::string& logical, const std::string& target,
+                       const std::string& link = {}) {
         if (isExcluded(config.exclude, logical)) {
             plan.excluded.push_back(logical);
             return;
@@ -724,7 +725,7 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
             plan.warnings.push_back(target + " comes from two places; kept the first");
             return;
         }
-        plan.files.push_back({source, target});
+        plan.files.push_back({source, target, link});
     };
     // Where a logical path ("data/a.png", an include "to") lands in the package.
     const std::string resources = plan.bundleName + "/Contents/Resources/";
@@ -732,39 +733,79 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
         return in.platform == Platform::MacOS ? resources + logical : logical;
     };
 
+    // Every file and symlink under `root`, with its path relative to `root`.
+    // Paths are taken lexically: fs::relative() would resolve a symlink to its
+    // target, so libfoo.so.1 -> libfoo.so.1.2 would become a second copy of
+    // libfoo.so.1.2 and the name the executable loads would be lost. A symlink
+    // is kept as one (`link`) when its target is relative and stays under
+    // `root`; any other symlink is an error, since the package would not hold
+    // what it points to. Symlinked folders are not entered.
+    auto walk = [&](const fs::path& root, const auto& visit) -> bool {
+        for (auto it = fs::recursive_directory_iterator(root, ec); it != fs::recursive_directory_iterator();
+             it.increment(ec)) {
+            if (ec) {
+                error = "cannot read " + toUtf8(root) + ": " + ec.message();
+                return false;
+            }
+            const fs::path path = it->path();
+            const std::string rel = toUtf8(path.lexically_relative(root));
+            if (it->is_symlink(ec)) {
+                const fs::path pointsTo = fs::read_symlink(path, ec);
+                const fs::path inside =
+                    (path.parent_path() / pointsTo).lexically_normal().lexically_relative(root.lexically_normal());
+                if (ec || pointsTo.empty() || pointsTo.is_absolute() || inside.empty() ||
+                    *inside.begin() == "..") {
+                    error = "the symlink " + toUtf8(path) + " -> " + toUtf8(pointsTo) +
+                            " points outside " + toUtf8(root) +
+                            "; only relative links to files in the same folder tree are packaged";
+                    return false;
+                }
+                if (!fs::exists(path, ec)) {
+                    error = "the symlink " + toUtf8(path) + " -> " + toUtf8(pointsTo) + " points to nothing";
+                    return false;
+                }
+                visit(path, rel, toUtf8(pointsTo));
+            } else if (it->is_regular_file(ec)) {
+                visit(path, rel, std::string());
+            }
+        }
+        if (ec) {
+            error = "cannot read " + toUtf8(root) + ": " + ec.message();
+            return false;
+        }
+        return true;
+    };
+
     // --- bin/ ---
     if (in.platform == Platform::MacOS) {
         const fs::path data = in.binDir / "data";
         if (fs::is_directory(data, ec)) {
-            for (auto it = fs::recursive_directory_iterator(data, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
-                if (ec) break;
-                if (!it->is_regular_file(ec)) continue;
-                const std::string name = it->path().filename().string();
-                if (name == ".DS_Store" || name == ".gitkeep") continue;
-                const std::string logical = "data/" + toUtf8(fs::relative(it->path(), data, ec));
-                addFile(it->path(), logical, targetOf(logical));
-            }
+            const bool ok = walk(data, [&](const fs::path& path, const std::string& rel, const std::string& link) {
+                const std::string name = path.filename().string();
+                if (name == ".DS_Store" || name == ".gitkeep") return;
+                const std::string logical = "data/" + rel;
+                addFile(path, logical, targetOf(logical), link);
+            });
+            if (!ok) return false;
         }
     } else {
-        const std::string exeRel = toUtf8(fs::relative(executable, in.binDir, ec));
+        const std::string exeRel = toUtf8(executable.lexically_relative(in.binDir));
         if (isExcluded(config.exclude, exeRel)) {
             error = "exclude matches the executable " + exeRel;
             return false;
         }
-        for (auto it = fs::recursive_directory_iterator(in.binDir, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
-            if (ec) break;
-            if (!it->is_regular_file(ec)) continue;
-            const std::string rel = toUtf8(fs::relative(it->path(), in.binDir, ec));
-            const std::string fileName = lower(it->path().filename().string());
-            const std::string ext = lower(it->path().extension().string());
-            if (fileName == ".ds_store" || fileName == "thumbs.db" || fileName == ".gitkeep") continue;
-            if (in.platform == Platform::Windows && (ext == ".ilk" || ext == ".exp" || ext == ".lib")) continue;
+        const bool ok = walk(in.binDir, [&](const fs::path& path, const std::string& rel, const std::string& link) {
+            const std::string fileName = lower(path.filename().string());
+            const std::string ext = lower(path.extension().string());
+            if (fileName == ".ds_store" || fileName == "thumbs.db" || fileName == ".gitkeep") return;
+            if (in.platform == Platform::Windows && (ext == ".ilk" || ext == ".exp" || ext == ".lib")) return;
             if (in.platform == Platform::Windows && ext == ".pdb") {
-                plan.symbols.push_back({it->path(), rel});
-                continue;
+                plan.symbols.push_back({path, rel, link});
+                return;
             }
-            addFile(it->path(), rel, rel);
-        }
+            addFile(path, rel, rel, link);
+        });
+        if (!ok) return false;
     }
 
     // --- include ---
@@ -777,12 +818,11 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
             return false;
         }
         if (fs::is_directory(from, ec)) {
-            for (auto it = fs::recursive_directory_iterator(from, ec); it != fs::recursive_directory_iterator(); it.increment(ec)) {
-                if (ec) break;
-                if (!it->is_regular_file(ec)) continue;
-                const std::string logical = to + "/" + toUtf8(fs::relative(it->path(), from, ec));
-                addFile(it->path(), logical, targetOf(logical));
-            }
+            const bool ok = walk(from, [&](const fs::path& path, const std::string& rel, const std::string& link) {
+                const std::string logical = to + "/" + rel;
+                addFile(path, logical, targetOf(logical), link);
+            });
+            if (!ok) return false;
         } else if (fs::is_regular_file(from, ec)) {
             const std::string logical = endsWith(entry.to, "/") ? to + "/" + toUtf8(from.filename()) : to;
             addFile(from, logical, targetOf(logical));
@@ -893,6 +933,17 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
         for (const auto& item : items) {
             const fs::path target = root / fromUtf8(item.target);
             fs::create_directories(target.parent_path(), ec);
+            if (!item.link.empty() && in.platform != Platform::Windows) {
+                // The same relative link: its target is in the package too.
+                fs::remove(target, ec);
+                fs::create_symlink(fromUtf8(item.link), target, ec);
+                if (ec) {
+                    error = "cannot create the link " + toUtf8(target) + ": " + ec.message();
+                    return false;
+                }
+                continue;
+            }
+            // Windows needs a privilege to create links: a copy under the link's name.
             fs::copy_file(item.source, target, fs::copy_options::overwrite_existing, ec);
             if (ec) {
                 error = "cannot copy " + toUtf8(item.source) + ": " + ec.message();
@@ -983,7 +1034,8 @@ std::string formatPlan(const Plan& plan) {
     std::string out = plan.folderName + "/\n";
     if (!plan.bundleName.empty()) out += "  " + plan.bundleName + "/  (the whole bundle)\n";
     std::vector<std::string> files;
-    for (const auto& item : plan.files) files.push_back(item.target);
+    for (const auto& item : plan.files)
+        files.push_back(item.target + (item.link.empty() ? "" : "  -> " + item.link));
     std::sort(files.begin(), files.end());
     for (const auto& f : files) out += "  " + f + "\n";
     out += "  licenses/, THIRD_PARTY_NOTICES.txt  (always included)\n";

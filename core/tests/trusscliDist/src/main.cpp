@@ -362,6 +362,78 @@ void testBinary(const fs::path& self, const fs::path& scratch) {
                                  !dist::isDebugCrt("vcruntime140.dll"));
 }
 
+// Symlinks in bin/ and include folders (Linux .so name chains): kept as
+// links when they stay inside the folder, refused otherwise.
+void testSymlinks(const fs::path& self, const fs::path& scratch) {
+#if defined(_WIN32)
+    (void)self;
+    (void)scratch;
+#else
+    const fs::path project = scratch / "links" / "myApp";
+    const fs::path bin = project / "bin";
+    auto plan = [&](const std::vector<dist::IncludeEntry>& include, dist::Plan& out, std::string& error) {
+        dist::PlanInput input;
+        input.platform = dist::Platform::Linux;
+        input.projectDir = project;
+        input.binDir = bin;
+        input.outputDir = project / "dist";
+        input.projectName = "myApp";
+        input.config.name = "My App";
+        input.config.version = "1.0.0";
+        input.config.include = include;
+        const bool ok = dist::makePlan(input, out, error);
+        if (ok && !dist::writePackage(input, out, error)) return false;
+        return ok;
+    };
+    auto link = [](const fs::path& target, const fs::path& at) {
+        fs::create_directories(at.parent_path());
+        fs::remove(at);
+        fs::create_symlink(target, at);
+    };
+    fs::remove_all(scratch / "links");
+    fs::create_directories(bin);
+    fs::copy_file(self, bin / "myApp");
+    write(bin / "libfoo.so.1.2", "library");
+    link("libfoo.so.1.2", bin / "libfoo.so.1");
+    link("../libfoo.so.1.2", bin / "lib" / "libfoo.so");
+    write(project / "sdk" / "libsdk.so.3.0", "sdk");
+    link("libsdk.so.3.0", project / "sdk" / "libsdk.so.3");
+
+    dist::Plan p;
+    std::string error;
+    const bool ok = plan({{"sdk", "sdk"}}, p, error);
+    check("symlinks inside bin/ and an include folder are packaged", ok);
+    if (!ok) {
+        std::printf("  error: %s\n", error.c_str());
+    } else {
+        const fs::path pkg = p.packageDir;
+        check("the SONAME link stays a link to the same name",
+              fs::is_symlink(pkg / "libfoo.so.1") && fs::read_symlink(pkg / "libfoo.so.1") == "libfoo.so.1.2" &&
+                  read(pkg / "libfoo.so.1") == "library");
+        check("a link into a parent folder of bin/ stays a link",
+              fs::is_symlink(pkg / "lib" / "libfoo.so") && read(pkg / "lib" / "libfoo.so") == "library");
+        check("a link in an include folder stays a link",
+              fs::is_symlink(pkg / "sdk" / "libsdk.so.3") && read(pkg / "sdk" / "libsdk.so.3") == "sdk");
+        check("the dry-run list shows links", contains(dist::formatPlan(p), "libfoo.so.1  -> libfoo.so.1.2"));
+    }
+
+    // Links whose target would not be in the package.
+    struct Bad { const char* name; fs::path target; const char* message; };
+    const Bad bad[] = {
+        {"an absolute link is refused", "/usr/lib/libz.so.1", "points outside"},
+        {"a link out of bin/ is refused", "../../outside.so", "points outside"},
+        {"a dangling link is refused", "missing.so", "points to nothing"},
+    };
+    for (const Bad& b : bad) {
+        link(b.target, bin / "bad.so");
+        dist::Plan q;
+        std::string message;
+        check(b.name, !plan({}, q, message) && contains(message, b.message) && contains(message, "bad.so"));
+        fs::remove(bin / "bad.so");
+    }
+#endif
+}
+
 void testPackage(const fs::path& self, const fs::path& scratch) {
 #if defined(_WIN32)
     const auto platform = dist::Platform::Windows;
@@ -552,6 +624,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
 #endif
     testBinary(exe, scratch);
     testPackage(exe, scratch);
+    testSymlinks(exe, scratch);
 #else
     std::printf("SKIP: packaging checks are desktop only\n");
 #endif

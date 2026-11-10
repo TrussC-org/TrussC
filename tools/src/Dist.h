@@ -193,6 +193,10 @@ struct PlanInput {
 struct CopyItem {
     fs::path source;
     std::string target;         // inside the package folder, '/'-separated
+    std::string link;           // non-empty: `source` is a symlink with this
+                                // relative target, to the same folder tree; the
+                                // package gets the same link (Windows: a copy of
+                                // the file under the link's name)
 };
 
 struct Plan {
