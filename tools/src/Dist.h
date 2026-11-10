@@ -260,4 +260,56 @@ std::string nsisScript(const NsisInput& input);
 // read non-ASCII text on its license pages. False if it cannot be written.
 bool writeWithBom(const fs::path& source, const fs::path& target);
 
+// -----------------------------------------------------------------------------
+// Linux packages (--installer)
+// -----------------------------------------------------------------------------
+// The package installs the dist folder to /opt/<package>/, links
+// /usr/bin/<package> to the launcher, and adds a Start menu entry and its
+// icon. Its dependencies are the distribution packages that own the shared
+// libraries the app loads, so the package manager installs them too.
+
+enum class LinuxPackageFormat { None, Pacman, Deb };
+
+// From ID, then ID_LIKE: arch -> Pacman; debian, ubuntu -> Deb.
+LinuxPackageFormat packageFormatFor(const LinuxDistro& distro);
+
+// The package name: lowercase, only [a-z0-9+._-], starting with a letter or
+// digit (what pacman and dpkg both accept). Never empty ("app").
+std::string linuxPackageName(const std::string& name);
+
+// pacman's architecture name: "x64" -> "x86_64", "arm64" -> "aarch64".
+std::string pacmanArch(const std::string& arch);
+
+// The NEEDED entries in `objdump -p` output: the shared libraries an ELF file
+// loads directly, in order.
+std::vector<std::string> parseNeeded(const std::string& objdumpOutput);
+
+// `ldd` output -> (library name, resolved path) for each library it found.
+// "not found" and the loader line are left out.
+std::vector<std::pair<std::string, std::string>> parseLdd(const std::string& lddOutput);
+
+struct DesktopEntryInput {
+    std::string name;       // shown in the menu
+    std::string exec;       // absolute path of the launcher
+    std::string icon;       // icon name (the package name)
+};
+
+// A freedesktop .desktop file for the Start menu.
+std::string desktopEntry(const DesktopEntryInput& input);
+
+struct PacmanInput {
+    std::string pkgname;    // linuxPackageName
+    std::string version;
+    std::string description;
+    std::string arch;       // pacmanArch
+    std::vector<std::string> depends;
+    fs::path packageDir;    // the dist folder, installed to /opt/<pkgname>
+    std::string launcher;   // file name of the launcher in packageDir
+    fs::path desktopFile;   // written by desktopEntry
+    fs::path icon;          // PNG, any size (goes to /usr/share/pixmaps)
+};
+
+// A PKGBUILD that packages the already-built dist folder (no build step).
+std::string pkgbuild(const PacmanInput& input);
+
 } // namespace dist

@@ -218,6 +218,63 @@ void testDistro() {
     check("distro tag: odd characters dropped",
           dist::distroTag(dist::parseOsRelease("ID=Open SUSE/x\nVERSION_ID=15 SP6\n")) == "opensusex15sp6");
     check("distro tag: unknown -> linux", dist::distroTag(dist::parseOsRelease("")) == "linux");
+
+    using F = dist::LinuxPackageFormat;
+    check("package format: arch, ID_LIKE arch, ubuntu, ID_LIKE ubuntu, unknown",
+          dist::packageFormatFor(arch) == F::Pacman &&
+              dist::packageFormatFor(dist::parseOsRelease("ID=endeavouros\nID_LIKE=arch\n")) == F::Pacman &&
+              dist::packageFormatFor(ubuntu) == F::Deb && dist::packageFormatFor(mint) == F::Deb &&
+              dist::packageFormatFor(dist::parseOsRelease("ID=fedora\n")) == F::None);
+}
+
+void testLinuxPackage() {
+    check("package name: lowercase, spaces -> '-', others dropped",
+          dist::linuxPackageName("My App: Deluxe!") == "my-app-deluxe" &&
+              dist::linuxPackageName("--Tool_2.0--") == "tool_2.0" && dist::linuxPackageName("日本") == "app");
+    check("pacman arch", dist::pacmanArch("x64") == "x86_64" && dist::pacmanArch("arm64") == "aarch64");
+
+    const std::string objdump =
+        "Dynamic Section:\n  NEEDED               libGL.so.1\n  NEEDED               libc.so.6\n"
+        "  SONAME               libx.so\n";
+    check("NEEDED entries", dist::parseNeeded(objdump) == std::vector<std::string>{"libGL.so.1", "libc.so.6"});
+
+    const auto ldd = dist::parseLdd(
+        "\tlinux-vdso.so.1 (0x00007ffd)\n\tlibz.so.1 => /usr/lib/libz.so.1 (0x00007f00)\n"
+        "\tlibmine.so => not found\n\t/lib64/ld-linux-x86-64.so.2 => /usr/lib64/ld-linux-x86-64.so.2 (0x0)\n");
+    check("ldd: resolved libraries only",
+          ldd.size() == 2 && ldd[0].first == "libz.so.1" && ldd[0].second == "/usr/lib/libz.so.1");
+
+    dist::DesktopEntryInput desktop;
+    desktop.name = "My\nApp";
+    desktop.exec = "/opt/my-app/My App.sh";
+    desktop.icon = "my-app";
+    const std::string entry = dist::desktopEntry(desktop);
+    check("desktop entry: one-line name, quoted Exec",
+          contains(entry, "Name=My App\n") && contains(entry, "Exec=\"/opt/my-app/My App.sh\"\n") &&
+              contains(entry, "Icon=my-app\n"));
+
+    dist::PacmanInput pkg;
+    pkg.pkgname = "my-app";
+    pkg.version = "1.2.0";
+    pkg.description = "It's mine";
+    pkg.arch = "x86_64";
+    pkg.depends = {"ffmpeg", "gtk3"};
+    pkg.packageDir = "/tmp/dist/My App's";
+    pkg.launcher = "myApp.sh";
+    pkg.desktopFile = "/tmp/work/my-app.desktop";
+    pkg.icon = "/tmp/icon.png";
+    const std::string script = dist::pkgbuild(pkg);
+    check("PKGBUILD: name, version, depends, no debug package",
+          contains(script, "pkgname=my-app\n") && contains(script, "pkgver=1.2.0\n") &&
+              contains(script, "depends=('ffmpeg' 'gtk3')\n") && contains(script, "options=('!debug')"));
+    check("PKGBUILD: single quotes escaped",
+          contains(script, "pkgdesc='It'\\''s mine'") && contains(script, "cp -a '/tmp/dist/My App'\\''s/.'"));
+    check("PKGBUILD: /opt, /usr/bin link, menu entry, icon, licenses",
+          contains(script, "\"$pkgdir/opt/my-app/\"") &&
+              contains(script, "ln -s '/opt/my-app/myApp.sh' \"$pkgdir/usr/bin/my-app\"") &&
+              contains(script, "/usr/share/applications/my-app.desktop") &&
+              contains(script, "/usr/share/pixmaps/my-app.png") &&
+              contains(script, "ln -s '/opt/my-app/licenses' \"$pkgdir/usr/share/licenses/my-app\""));
 }
 
 void testGlobs() {
@@ -387,6 +444,7 @@ void testPackage(const fs::path& self, const fs::path& scratch) {
               contains(plist, "<key>NSHumanReadableCopyright</key>") && contains(plist, "My Studio"));
     } else {
         check("launcher written", contains(read(pkg / "myApp.sh"), "exec \"$here/myApp\""));
+        check("launcher follows a link to it", contains(read(pkg / "myApp.sh"), "readlink -f \"$0\""));
     }
 
     // Writing again replaces the folder (a file removed from bin/ is gone).
@@ -430,6 +488,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     testConfig();
     testNames();
     testDistro();
+    testLinuxPackage();
     testGlobs();
     testNsis();
 #if defined(_WIN32) || (defined(__APPLE__) && !TARGET_OS_IPHONE) || \

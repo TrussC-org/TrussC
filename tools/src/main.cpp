@@ -15,6 +15,8 @@
 #include <fstream>
 #include <sstream>
 #include <set>
+#include <map>
+#include <optional>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -4283,6 +4285,159 @@ static fs::path buildWindowsInstaller(const fs::path& makensis, const dist::Plan
     return setup;
 }
 
+#ifdef __linux__
+// A program on PATH, or empty.
+static fs::path findOnPath(const string& name) {
+    if (const char* path = std::getenv("PATH")) {
+        stringstream dirs(path);
+        string dir;
+        while (getline(dirs, dir, ':')) {
+            if (dir.empty()) continue;
+            const fs::path candidate = fs::path(dir) / name;
+            if (access(candidate.c_str(), X_OK) == 0) return candidate;
+        }
+    }
+    return {};
+}
+
+// The output of a command (stdout and stderr together), or nullopt when it
+// fails.
+static optional<string> captureCommand(const vector<string>& argv) {
+    string output;
+    const int code = runCaptured(argv, [&](const char* data, size_t size) { output.append(data, size); });
+    if (code != 0) return nullopt;
+    return output;
+}
+
+// The distribution packages the app depends on: the owners of the shared
+// libraries that the ELF files in the package load directly. Libraries
+// shipped inside the package are not dependencies. False with `error` when a
+// library cannot be found or has no owning package.
+static bool pacmanDepends(const fs::path& packageDir, vector<string>& depends, string& error) {
+    error_code ec;
+    vector<fs::path> elfFiles;
+    set<string> shipped;
+    for (const auto& entry : fs::recursive_directory_iterator(packageDir, ec)) {
+        if (!entry.is_regular_file(ec)) continue;
+        shipped.insert(entry.path().filename().string());
+        if (dist::readBinaryInfo(entry.path()).format == "elf") elfFiles.push_back(entry.path());
+    }
+    set<string> needed;
+    map<string, string> resolved;
+    for (const fs::path& file : elfFiles) {
+        const auto objdump = captureCommand({"objdump", "-p", file.string()});
+        if (!objdump) { error = "objdump failed on " + file.string(); return false; }
+        for (const string& name : dist::parseNeeded(*objdump)) {
+            if (!shipped.count(name)) needed.insert(name);
+        }
+        // ldd exits non-zero for a library that is not an executable's; the
+        // libraries it did resolve are still in the output.
+        string lddOut;
+        runCaptured({"ldd", file.string()}, [&](const char* data, size_t size) { lddOut.append(data, size); });
+        for (const auto& [name, path] : dist::parseLdd(lddOut)) resolved.emplace(name, path);
+    }
+    vector<string> paths;
+    for (const string& name : needed) {
+        auto it = resolved.find(name);
+        if (it == resolved.end()) {
+            error = name + " is not found on this system";
+            return false;
+        }
+        paths.push_back(fs::canonical(it->second, ec).string());
+    }
+    if (paths.empty()) return true;
+    vector<string> argv = {"pacman", "-Qqo"};
+    argv.insert(argv.end(), paths.begin(), paths.end());
+    const auto owners = captureCommand(argv);
+    if (!owners) {
+        error = "pacman could not name the package of every library (one is not installed by pacman?)";
+        return false;
+    }
+    set<string> unique;
+    stringstream lines(*owners);
+    string line;
+    while (getline(lines, line)) {
+        if (!line.empty()) unique.insert(line);
+    }
+    depends.assign(unique.begin(), unique.end());
+    return true;
+}
+
+// Builds a pacman package (<pkgname>-<version>-1-<arch>.pkg.tar.zst) of the
+// dist folder with makepkg, next to it. The PKGBUILD and makepkg's work go to
+// a <folder>-pacman/ folder, removed on success and kept on failure. Returns
+// the package path, or empty with `error`.
+static fs::path buildPacmanPackage(const dist::PlanInput& input, const dist::Plan& plan,
+                                   const fs::path& tcRoot, string& error) {
+    error_code ec;
+    const fs::path work = input.outputDir / (plan.folderName + "-pacman");
+    fs::remove_all(work, ec);
+    fs::create_directories(work, ec);
+
+    dist::PacmanInput pkg;
+    pkg.pkgname = dist::linuxPackageName(input.config.name);
+    pkg.version = input.config.version;
+    pkg.description = input.config.name + (input.config.author.empty() ? "" : " by " + input.config.author);
+    pkg.arch = dist::pacmanArch(plan.arch);
+    pkg.packageDir = plan.packageDir;
+    pkg.launcher = plan.launcherName;
+
+    cout << "Finding the packages " << input.config.name << " depends on ...\n";
+    if (!pacmanDepends(plan.packageDir, pkg.depends, error)) return {};
+    cout << "  depends:";
+    for (const string& d : pkg.depends) cout << " " << d;
+    cout << "\n";
+
+    // The icon: the first PNG in the project's icon/ folder, else TrussC's.
+    {
+        vector<fs::path> pngs;
+        for (const auto& entry : fs::directory_iterator(input.projectDir / "icon", ec)) {
+            if (entry.is_regular_file(ec) && entry.path().extension() == ".png") pngs.push_back(entry.path());
+        }
+        sort(pngs.begin(), pngs.end());
+        pkg.icon = !pngs.empty() ? pngs.front() : tcRoot / "core" / "resources" / "default.png";
+        if (!fs::is_regular_file(pkg.icon, ec)) pkg.icon.clear();
+    }
+
+    pkg.desktopFile = work / (pkg.pkgname + ".desktop");
+    {
+        dist::DesktopEntryInput desktop;
+        desktop.name = input.config.name;
+        desktop.exec = "/opt/" + pkg.pkgname + "/" + plan.launcherName;
+        desktop.icon = pkg.pkgname;
+        ofstream(pkg.desktopFile, ios::binary) << dist::desktopEntry(desktop);
+        ofstream(work / "PKGBUILD", ios::binary) << dist::pkgbuild(pkg);
+        if (!fs::is_regular_file(work / "PKGBUILD", ec)) {
+            error = "cannot write " + (work / "PKGBUILD").string();
+            return {};
+        }
+    }
+
+    // makepkg writes the package to PKGDEST.
+    const string pkgdest = input.outputDir.string();
+    for (const auto& entry : fs::directory_iterator(input.outputDir, ec)) {
+        const string file = entry.path().filename().string();
+        if (file.rfind(pkg.pkgname + "-" + pkg.version + "-1-" + pkg.arch + ".pkg.tar", 0) == 0)
+            fs::remove(entry.path(), ec);
+    }
+    cout << "Building the pacman package with makepkg ...\n";
+    setenv("PKGDEST", pkgdest.c_str(), 1);
+    const int rc = runInherited({"makepkg", "--force", "--nodeps", "--noconfirm", "-D", work.string()});
+    unsetenv("PKGDEST");
+    fs::path built;
+    for (const auto& entry : fs::directory_iterator(input.outputDir, ec)) {
+        const string file = entry.path().filename().string();
+        if (file.rfind(pkg.pkgname + "-" + pkg.version + "-1-" + pkg.arch + ".pkg.tar", 0) == 0) built = entry.path();
+    }
+    if (rc != 0 || built.empty()) {
+        error = "makepkg failed; the PKGBUILD is kept in " + work.string();
+        return {};
+    }
+    fs::remove_all(work, ec);
+    return built;
+}
+#endif
+
 static int cmdDist(const vector<string>& args) {
     string explicitPath, outputDir, appName, appVersion, appAuthor;
     bool appAuthorGiven = false;  // --app-author "" is a valid (empty) author
@@ -4311,7 +4466,7 @@ static int cmdDist(const vector<string>& args) {
         else if (a == "--init") init = true;
         else if (a == "--verbose") verbose = true;
         else if (a == "--installer") {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__linux__)
             installer = true;
 #else
             cerr << "Error: --installer is not available on this platform yet "
@@ -4434,11 +4589,33 @@ static int cmdDist(const vector<string>& args) {
     input.platform = dist::Platform::MacOS;
 #else
     input.platform = dist::Platform::Linux;
+    dist::LinuxPackageFormat linuxFormat = dist::LinuxPackageFormat::None;
     {
         // The package runs on the distribution it was built on; say which one.
         std::stringstream osRelease;
         osRelease << ifstream("/etc/os-release").rdbuf();
-        input.platformTag = dist::distroTag(dist::parseOsRelease(osRelease.str()));
+        const dist::LinuxDistro distro = dist::parseOsRelease(osRelease.str());
+        input.platformTag = dist::distroTag(distro);
+        linuxFormat = dist::packageFormatFor(distro);
+    }
+    if (installer) {
+        if (linuxFormat == dist::LinuxPackageFormat::None) {
+            cerr << "Error: --installer makes a pacman package (Arch and derivatives) or a .deb (Debian,\n"
+                    "Ubuntu and derivatives); this distribution (" << input.platformTag
+                 << ") is neither. Use --archive.\n";
+            return 1;
+        }
+        if (linuxFormat == dist::LinuxPackageFormat::Deb) {
+            cerr << "Error: --installer does not make a .deb yet. Use --archive.\n";
+            return 1;
+        }
+        for (const char* tool : {"makepkg", "objdump", "ldd"}) {
+            if (findOnPath(tool).empty()) {
+                cerr << "Error: --installer needs " << tool
+                     << " (install it with 'sudo pacman -S --needed base-devel').\n";
+                return 1;
+            }
+        }
     }
 #endif
     input.projectDir = projectDir;
@@ -4470,7 +4647,7 @@ static int cmdDist(const vector<string>& args) {
     for (const string& w : plan.warnings) cerr << "Warning: " << w << "\n";
 
     fs::path makensis;
-    if (installer) {
+    if (installer && input.platform == dist::Platform::Windows) {
         if (config.installer.showEula && plan.eulaSource.empty()) {
             cerr << "Error: dist.json \"installer.showEula\" needs an EULA: create EULA.txt in the "
                     "project folder with your license terms (or set \"eulaFile\").\n";
@@ -4480,10 +4657,13 @@ static int cmdDist(const vector<string>& args) {
     }
 
     if (dryRun) {
-        if (installer) {
+        if (installer && input.platform == dist::Platform::Windows) {
             cout << "Would also build " << plan.folderName << "-setup.exe"
                  << (makensis.empty() ? " (NSIS not found: install it with 'winget install NSIS.NSIS')" : "")
                  << "\n";
+        } else if (installer) {
+            cout << "Would also build a pacman package " << dist::linuxPackageName(config.name) << "-"
+                 << config.version << "-1-" << dist::pacmanArch(plan.arch) << ".pkg.tar.zst\n";
         }
         cout << "Would write to " << input.outputDir.string() << ":\n" << dist::formatPlan(plan) << "\n"
              << dist::formatLicenseReport(input.licenses);
@@ -4521,6 +4701,9 @@ static int cmdDist(const vector<string>& args) {
 
     fs::path setupPath;
     string installerError;
+#ifdef __linux__
+    if (installer) setupPath = buildPacmanPackage(input, plan, fs::path(tcRoot), installerError);
+#else
     if (installer) {
         if (makensis.empty()) {
             installerError = "NSIS (makensis.exe) was not found, so no installer was built. Install it "
@@ -4529,6 +4712,7 @@ static int cmdDist(const vector<string>& args) {
             setupPath = buildWindowsInstaller(makensis, input, plan, installerError);
         }
     }
+#endif
 
     cout << dist::formatLicenseReport(input.licenses) << "\n"
          << "Packaged " << config.name << " " << config.version
@@ -4548,6 +4732,17 @@ static int cmdDist(const vector<string>& args) {
         cout << "No dist.json: used name \"" << config.name << "\", version " << config.version
              << ". Run 'trusscli dist --init' to set them.\n";
     }
+#ifdef __linux__
+    if (!setupPath.empty()) {
+        cout << "Install with:  sudo pacman -U " << setupPath.filename().string() << "\n"
+             << "(installs the dependencies too; remove with: sudo pacman -R "
+             << dist::linuxPackageName(config.name) << ")\n";
+    } else if (!installer) {
+        cout << "Note: the folder runs on " << input.platformTag
+             << " with the same libraries installed. For other people, prefer\n"
+             << "'trusscli dist --installer': the package manager then installs what it needs.\n";
+    }
+#endif
 #ifdef __APPLE__
     cout << "Note: an app signed ad hoc is blocked by Gatekeeper when downloaded from the internet\n"
          << "(open it with right-click > Open). Copying it by USB or network share is fine.\n";
