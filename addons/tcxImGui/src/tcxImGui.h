@@ -104,6 +104,13 @@ private:
 
     // Input arbitration: consume listeners (-20) + pointer-gesture capture.
     bool pointerCaptured_ = false;  // imgui owns the current press→release gesture
+    // An imgui frame was rendered in the last window frame. The io capture
+    // flags (WantCaptureMouse / WantCaptureKeyboard) are only recomputed by
+    // NewFrame, so when the app stops drawing imgui they freeze at their last
+    // value; input arbitration and the overlay queries ignore them then.
+    bool uiLive_ = false;
+    bool wantsMouse_() const;
+    bool wantsKeyboard_() const;
     tc::EventListener mousePressConsume_;
     tc::EventListener mouseReleaseConsume_;
     tc::EventListener mouseDragConsume_;
