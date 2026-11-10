@@ -331,6 +331,33 @@ void testBinary(const fs::path& self, const fs::path& scratch) {
 #endif
     write(scratch / "text.txt", "not a binary");
     check("a text file is not a binary", !dist::readBinaryInfo(scratch / "text.txt").valid);
+
+    // A PE32+ header (x64, no sections) whose NumberOfRvaAndSizes claims 16
+    // data directories while the optional header has room for `room`, and the
+    // file ends right after it: only the directories that are there are read.
+    auto damagedPe = [](uint16_t room) {
+        const uint16_t optionalSize = static_cast<uint16_t>(112 + room * 8);
+        std::string d(0x40 + 24 + optionalSize, '\0');
+        auto put16 = [&](size_t o, uint16_t v) { d[o] = char(v & 0xFF); d[o + 1] = char(v >> 8); };
+        auto put32 = [&](size_t o, uint32_t v) { put16(o, uint16_t(v & 0xFFFF)); put16(o + 2, uint16_t(v >> 16)); };
+        d[0] = 'M';
+        d[1] = 'Z';
+        put32(0x3C, 0x40);
+        d.replace(0x40, 4, std::string("PE\0\0", 4));
+        put16(0x40 + 4, 0x8664);
+        put16(0x40 + 20, optionalSize);
+        put16(0x40 + 24, 0x20B);
+        put32(0x40 + 24 + 108, 16);
+        return d;
+    };
+    for (uint16_t room : {0, 2}) {
+        const fs::path file = scratch / ("damaged" + std::to_string(room) + ".exe");
+        write(file, damagedPe(room));
+        const auto damaged = dist::readBinaryInfo(file);
+        check(room == 0 ? "PE claiming 16 directories with room for none: read within the file"
+                        : "PE claiming 16 directories with room for 2: read within the file",
+              damaged.valid && damaged.arch == "x64" && damaged.imports.empty());
+    }
     check("debug CRT names", dist::isDebugCrt("vcruntime140d.dll") && dist::isDebugCrt("ucrtbased.dll") &&
                                  !dist::isDebugCrt("vcruntime140.dll"));
 }

@@ -125,7 +125,12 @@ void readPe(const std::string& d, BinaryInfo& info) {
     const size_t countAt = magic == 0x20B ? 108 : 92;     // NumberOfRvaAndSizes
     const size_t directories = magic == 0x20B ? 112 : 96;
     if (optionalSize < directories) return;
-    const uint32_t directoryCount = le32(d, optional + countAt);
+    // The data directories (8 bytes each) are read only as far as the optional
+    // header holds them; the header itself was checked to lie inside the file.
+    // NumberOfRvaAndSizes alone is not trusted: a truncated or damaged file can
+    // claim more than there is.
+    const uint32_t directoryCount = (std::min)(le32(d, optional + countAt),
+                                               static_cast<uint32_t>((optionalSize - directories) / 8));
 
     std::vector<PeSection> sections;
     const size_t table = optional + optionalSize;
@@ -134,10 +139,11 @@ void readPe(const std::string& d, BinaryInfo& info) {
         if (s + 40 > d.size()) break;
         sections.push_back({le32(d, s + 12), le32(d, s + 8), le32(d, s + 20), le32(d, s + 16)});
     }
+    // A file offset for an RVA, only where the section has data in the file
+    // (its raw size; the rest of virtualSize is zero-filled memory, not file).
     auto offsetOf = [&](uint32_t rva, size_t& out) {
         for (const auto& s : sections) {
-            const uint32_t size = (std::max)(s.virtualSize, s.rawSize);
-            if (rva >= s.virtualAddress && rva - s.virtualAddress < size) {
+            if (rva >= s.virtualAddress && rva - s.virtualAddress < s.rawSize) {
                 out = static_cast<size_t>(s.rawOffset) + (rva - s.virtualAddress);
                 return out < d.size();
             }
