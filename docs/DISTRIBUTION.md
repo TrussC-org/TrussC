@@ -74,7 +74,7 @@ projectLocation/
 | `{"from": "../nodeApp", "to": "data/nodeApp"}` | `data/nodeApp/` | `getDataPath("nodeApp")`; during development `getDataPath("../../../nodeApp")` |
 | `{"from": "../nodeApp", "to": "nodeApp"}` | `nodeApp/`, next to the executable | `getExecutableDir() / "nodeApp"`; during development `getExecutableDir() / "../../nodeApp"` |
 
-> **Note:** `getDataPath("x")` takes the path inside the data folder, but `getExecutableDir()` takes no argument: it returns the executable's folder, and `/` (from `std::filesystem::path`) joins a path to it. `getExecutableDir("nodeApp")` does not compile.
+> **Note:** `getExecutableDir()` takes no argument; join a path to it with `/`.
 
 ```cpp
 // With "to": "data/nodeApp".
