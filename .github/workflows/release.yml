@@ -594,17 +594,56 @@ jobs:
             'trussc_app()' \
             > CMakeLists.txt
 
+      # This reusable workflow checks out the caller and an arbitrary TrussC
+      # ref (including old tags), so it cannot require the new local action.
+      - name: Apt cache month
+        id: apt_month
+        run: echo "value=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache apt archives
+        uses: actions/cache@v5
+        with:
+          path: ~/.apt-archives
+          key: apt-${{ runner.os }}-release-${{ hashFiles('TrussC/tools/install_dependencies_linux.sh') }}-${{ steps.apt_month.outputs.value }}
+          restore-keys: |
+            apt-${{ runner.os }}-release-${{ hashFiles('TrussC/tools/install_dependencies_linux.sh') }}-
+
       - name: Install dependencies
+        timeout-minutes: 10
+        env:
+          EXTRA_APT_PACKAGES: ${{ inputs.extra-apt-packages }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake libgl1-mesa-dev \
+          mkdir -p ~/.apt-archives/partial
+          cleanup() {
+            sudo rm -f ~/.apt-archives/lock
+            sudo chown -R "$(id -u):$(id -g)" ~/.apt-archives
+          }
+          trap cleanup EXIT
+          sudo tee /etc/apt/apt.conf.d/80-ci-retries >/dev/null <<'APT_CONFIG'
+          Acquire::Retries "3";
+          Acquire::http::Timeout "30";
+          Acquire::https::Timeout "30";
+          Acquire::ftp::Timeout "30";
+          APT_CONFIG
+          # Total apt bound: 3 * (60 + 5 kill grace) + 2 * 5 + (300 + 5)
+          # = 510 seconds, leaving 90 seconds of the 10-minute caller step.
+          for attempt in 1 2 3; do
+            if sudo timeout --kill-after=5s 60s apt-get -o APT::Update::Error-Mode=any update; then
+              break
+            fi
+            if (( attempt == 3 )); then
+              exit 1
+            fi
+            sleep 5
+          done
+          read -r -a extra_packages <<< "${EXTRA_APT_PACKAGES//$'\n'/ }"
+          sudo timeout --kill-after=5s 300s apt-get \
+            -o "Dir::Cache::Archives=$HOME/.apt-archives" install -y \
+            build-essential cmake libgl1-mesa-dev \
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev \
             libgtk-3-dev \
             libavcodec-dev libavformat-dev libswscale-dev libavutil-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
-          if [ -n "${{ inputs.extra-apt-packages }}" ]; then
-            sudo apt-get install -y ${{ inputs.extra-apt-packages }}
-          fi
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev "${extra_packages[@]}"
 
       - name: Configure (CMake)
         run: |
