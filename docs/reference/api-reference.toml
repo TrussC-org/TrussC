@@ -8625,19 +8625,19 @@ details.en = '''
 - `drawStencil(x, y)` reconstructs all eight stencil bits into a cached R8 Fbo using the internal eight-draw path, then draws at attachment size with nearest sampling. Each byte is displayed as gray `value / 255`; no CPU readback is needed. It preserves the source color and stencil.
 - Uses the current target's coordinates, transformations, depth test and scissor. The preview is opaque and ignores the current tint and blend mode; the tint, blend mode and pipeline are restored afterward. Like other image draws, it leaves texturing off, so call `bind()` again on a texture you were drawing with. Repeated calls refresh the capture and reuse the cache.
 - Only allocated, ended, owned single-sample Fbos are supported. Unallocated, active or MSAA sources warn and draw nothing. There is no main-target/free-function form in this slice.
-- The snippet uses the internal round-trip test fixture to write an ended R8 pattern into stencil; `writeGray` is not a public application API. Public stencil writing and main-target capture are later slices.
+- The snippet uses the internal round-trip test fixture to write an ended R8 pattern into stencil; `writeGray` is not a public application API. Use `beginStencil` and `clearStencil` for uniform public byte clearing. Geometry writing and main-target capture are later slices.
 '''
 details.ja = '''
 - `drawStencil(x, y)` は内部の 8 回描画の処理で stencil の全 8 ビットをキャッシュした R8 Fbo に復元し、添付画像と同じサイズで最近傍サンプリングして描画します。各バイトを `value / 255` のグレーで表示し、CPU への読み出しは行いません。元の色と stencil は保持します。
 - 現在の描画先の座標、変換、深度テスト、scissor を使います。プレビューは不透明で、現在の色とブレンドモードを使いません。色、ブレンドモード、パイプラインは呼び出し後に復元します。ほかの画像の描画と同じく、テクスチャは無効のままになるので、使っていたテクスチャは `bind()` し直してください。繰り返し呼び出すとキャッシュを再利用して内容を更新します。
 - 確保済みで `end()` 後の、所有するシングルサンプル Fbo のみ対応します。未確保、アクティブ、MSAA の場合は警告して描画しません。この段階ではメイン描画先や自由関数の形式はありません。
-- 使用例は内部の往復テスト用処理で、描画済みの R8 パターンを stencil に書き込みます。`writeGray` は公開アプリ API ではありません。公開書き込み API とメイン描画先の取得は後の段階で扱います。
+- 使用例は内部の往復テスト用処理で、描画済みの R8 パターンを stencil に書き込みます。`writeGray` は公開アプリ API ではありません。一様なバイト値のクリアには公開 API の `beginStencil` と `clearStencil` を使います。形状の書き込みとメイン描画先の取得は後の段階で扱います。
 '''
 details.ko = '''
 - `drawStencil(x, y)`는 내부의 8회 그리기 경로로 스텐실의 전체 8비트를 캐시된 R8 Fbo에 복원하고 첨부 이미지 크기로 최근접 샘플링하여 그립니다. 각 바이트를 `value / 255` 회색으로 표시하며 CPU로 읽지 않습니다. 원본 색상과 스텐실을 보존합니다.
 - 현재 타깃의 좌표, 변환, 깊이 테스트와 scissor를 사용합니다. 미리보기는 불투명하며 현재 색상과 블렌드 모드를 사용하지 않습니다. 색상, 블렌드 모드, 파이프라인은 호출 후 복원합니다. 다른 이미지 그리기와 마찬가지로 텍스처는 비활성 상태로 남으므로, 사용하던 텍스처는 `bind()`를 다시 호출하세요. 반복 호출하면 캐시를 재사용하고 캡처를 갱신합니다.
 - 할당되었고 `end()`가 끝난 소유 단일 샘플 Fbo만 지원합니다. 미할당, 활성 또는 MSAA 소스는 경고하고 그리지 않습니다. 이 단계에는 메인 타깃이나 자유 함수 형식이 없습니다.
-- 예제는 내부 왕복 테스트용 처리로 렌더링이 끝난 R8 패턴을 스텐실에 기록합니다. `writeGray`는 공개 애플리케이션 API가 아닙니다. 공개 쓰기 API와 메인 타깃 캡처는 이후 단계에서 다룹니다.
+- 예제는 내부 왕복 테스트용 처리로 렌더링이 끝난 R8 패턴을 스텐실에 기록합니다. `writeGray`는 공개 애플리케이션 API가 아닙니다. 균일한 바이트 값 지우기에는 공개 API인 `beginStencil`과 `clearStencil`을 사용합니다. 도형 쓰기와 메인 타깃 캡처는 이후 단계에서 다룹니다.
 '''
 snippet = '''
 // gray: ended R8 pattern; fbo: equally sized, ended, single-sample Fbo
@@ -8658,19 +8658,19 @@ details.en = '''
 - `bool readStencil(Pixels& pixels) const` uses the same cached R8 reconstruction as `drawStencil`, then the existing Fbo color readback. On success it replaces `pixels` with top-left, one-channel U8 bytes and returns `true`. On failure it returns `false` and leaves `pixels` unchanged. The source color and stencil are preserved.
 - Call after `end()` on all active Fbos. Unallocated, active and MSAA sources are refused with a warning. Main-target capture is unavailable. GPU readback synchronizes work and is intended for debugging.
 - Save through `pixels.save("stencil.png")`; the existing PNG writer stores the channel bytes without gamma remapping. WebGL2 uses existing GL readback; WebGPU synchronous readback is unsupported and returns `false` (a later slice adds asynchronous readback).
-- The snippet's `writeGray` is an internal test fixture, not a public stencil-writing API; `gray` contains an ended R8 pattern.
+- The snippet's `writeGray` is an internal test fixture, not a public stencil-writing API; `gray` contains an ended R8 pattern. Use `beginStencil` and `clearStencil` for uniform clearing while owned.
 '''
 details.ja = '''
 - `bool readStencil(Pixels& pixels) const` は `drawStencil` と同じキャッシュした R8 への復元処理と、既存の Fbo カラー読み出しを使います。成功すると `pixels` を左上原点の 1 チャンネル U8 バイト列に置き換えて `true` を返します。失敗すると `false` を返し、`pixels` は変更しません。元の色と stencil は保持します。
 - すべてのアクティブな Fbo の `end()` 後に呼んでください。未確保、アクティブ、MSAA の場合は警告して拒否します。メイン描画先の取得には対応しません。GPU の読み出しは処理を同期するため、デバッグ用です。
 - `pixels.save("stencil.png")` で保存します。既存の PNG ライターはガンマ変換をせずにチャンネルのバイトを保存します。WebGL2 は既存の GL 読み出しを使います。WebGPU の同期読み出しは非対応で `false` を返します。非同期読み出しは後の段階で扱います。
-- 使用例の `writeGray` は内部テスト用で、公開の stencil 書き込み API ではありません。`gray` には描画済みの R8 パターンを用意します。
+- 使用例の `writeGray` は内部テスト用で、公開の stencil 書き込み API ではありません。`gray` には描画済みの R8 パターンを用意します。所有中の一様なクリアには `beginStencil` と `clearStencil` を使います。
 '''
 details.ko = '''
 - `bool readStencil(Pixels& pixels) const`는 `drawStencil`과 같은 캐시된 R8 복원 경로와 기존 Fbo 색상 읽기를 사용합니다. 성공하면 `pixels`를 왼쪽 위 원점의 1채널 U8 바이트로 교체하고 `true`를 반환합니다. 실패하면 `false`를 반환하며 `pixels`를 변경하지 않습니다. 원본 색상과 스텐실을 보존합니다.
 - 모든 활성 Fbo에서 `end()`를 호출한 뒤 사용합니다. 미할당, 활성 또는 MSAA 소스는 경고하고 거부합니다. 메인 타깃 캡처는 지원하지 않습니다. GPU 읽기는 작업을 동기화하므로 디버깅용입니다.
 - `pixels.save("stencil.png")`로 저장합니다. 기존 PNG 작성기는 감마 변환 없이 채널 바이트를 저장합니다. WebGL2는 기존 GL 읽기를 사용합니다. WebGPU의 동기 읽기는 지원하지 않으며 `false`를 반환합니다. 비동기 읽기는 이후 단계에서 다룹니다.
-- 예제의 `writeGray`는 내부 테스트용이며 공개 스텐실 쓰기 API가 아닙니다. `gray`에는 렌더링이 끝난 R8 패턴을 준비합니다.
+- 예제의 `writeGray`는 내부 테스트용이며 공개 스텐실 쓰기 API가 아닙니다. `gray`에는 렌더링이 끝난 R8 패턴을 준비합니다. 소유 중인 균일한 지우기에는 `beginStencil`과 `clearStencil`을 사용합니다.
 '''
 snippet = '''
 // gray: ended R8 pattern; fbo: equally sized, ended, single-sample Fbo
@@ -44573,6 +44573,96 @@ details.ko = '''
 - 이 자유 함수는 오버라이드할 수 있는 `Node::cleanup()` 콜백과 별개입니다. 앱과 노드의 종료 처리는 `App`과 `Node`를 참조하세요.
 '''
 related = ["setup", "exitApp", "App", "Node"]
+
+["beginStencil"]
+category = "graphics_fbo"
+keywords = ["stencil", "ownership", "mask"]
+description.en = "Borrows all eight stencil bits on the current drawing target."
+description.ja = "現在の描画先の stencil の全 8 ビットを借り受けます。"
+description.ko = "현재 그리기 타깃의 스텐실 전체 8비트를 빌립니다."
+details.en = '''
+- Returns `true` on success without clearing stored bytes. Pair `endStencil()` only with a successful begin, while that target is current. Ownership is independent per target and may span Fbo end/begin calls and frames. Fbo allocation initializes stencil to zero; reallocation resets ownership.
+- Returns `false` with a warning when there is no stencil attachment, the target is already owned, or a framework stencil clip scope is active. There is no shared user mode.
+- While owned, values are plain bytes 0–255. Framework stencil clipping and draw-once are suspended; scissor still works. Slice 2a provides uniform clearing; geometry writing and value testing come later.
+- endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values. It restores saved semantic state, without restoring previous pixels. Fbo bytes persist across frames and color/depth clears; screen persistence is not guaranteed.
+'''
+details.ja = '''
+- 保存済みの値をクリアせず、成功時に `true` を返します。成功した場合だけ、その描画先が現在の描画先である間に `endStencil()` を呼びます。所有権は描画先ごとに独立し、Fbo の end/begin やフレームをまたいで保持できます。Fbo の確保時に stencil をゼロで初期化し、再確保時に所有権をリセットします。
+- stencil 添付画像がない場合、すでに所有中の場合、フレームワークの stencil クリップスコープが有効な場合は、警告して `false` を返します。ユーザー用の共有モードはありません。
+- 所有中の値は 0〜255 の通常のバイト値です。フレームワークの stencil クリップと draw-once は停止しますが、scissor は使えます。2a では一様なクリアを提供し、形状の書き込みと値のテストは後の段階で追加します。
+- endStencil は stencil を 0 に戻します。値が必要な場合は、endStencil の前に readStencil で読み取ってください。保存した意味上の状態を復元しますが、以前のピクセル値は復元しません。Fbo の値はフレームや色・深度のクリアをまたいで保持しますが、画面の保持は保証しません。
+'''
+details.ko = '''
+- 저장된 값을 지우지 않고 성공 시 `true`를 반환합니다. 성공한 경우에만 해당 타깃이 현재 타깃일 때 `endStencil()`을 호출합니다. 소유권은 타깃별로 독립적이며 Fbo의 end/begin 호출과 프레임을 넘어 유지할 수 있습니다. Fbo 할당 시 스텐실을 0으로 초기화하고 재할당 시 소유권을 초기화합니다.
+- 스텐실 첨부 이미지가 없거나 이미 소유 중이거나 프레임워크 스텐실 클립 스코프가 활성화된 경우 경고하고 `false`를 반환합니다. 사용자 공유 모드는 없습니다.
+- 소유 중인 값은 0~255의 일반 바이트 값입니다. 프레임워크 스텐실 클립과 draw-once는 중단되지만 scissor는 작동합니다. 2a는 균일한 지우기를 제공하며 도형 쓰기와 값 테스트는 이후 단계에서 추가합니다.
+- endStencil은 스텐실을 0으로 되돌립니다. 값이 필요하면 endStencil 전에 readStencil로 읽어야 합니다. 저장한 의미상 상태를 복원하지만 이전 픽셀 값은 복원하지 않습니다. Fbo 값은 프레임과 색상·깊이 지우기를 넘어 유지하지만 화면의 지속성은 보장하지 않습니다.
+'''
+snippet = '''
+canvas.begin();
+if (beginStencil()) { clearStencil(5); endStencil(); }
+canvas.end();
+'''
+related = ["clearStencil", "endStencil", "Fbo::readStencil"]
+
+["clearStencil"]
+category = "graphics_fbo"
+keywords = ["stencil", "clear", "byte"]
+description.en = "Replaces all stencil bytes with a plain value while owned."
+description.ja = "所有中の stencil の全バイトを通常の値で置き換えます。"
+description.ko = "소유 중인 스텐실의 모든 바이트를 일반 값으로 바꿉니다."
+details.en = '''
+- `clearStencil(value = 0)` requires successful `beginStencil()` on the current target. Outside ownership, every call warns and does nothing.
+- Replaces all eight bits over the full attachment with a value 0–255. Earlier drawing finishes first; later drawing follows the clear. Color and depth are preserved. Transforms, viewport and scissor do not restrict the clear, and drawing state is restored afterward.
+- See `beginStencil` for target lifetime and handback behavior.
+'''
+details.ja = '''
+- `clearStencil(value = 0)` は現在の描画先での `beginStencil()` の成功を必要とします。所有していない場合は呼び出すたびに警告し、何も変更しません。
+- 添付画像全体の全 8 ビットを 0〜255 の値で置き換えます。それまでの描画を先に実行し、以降の描画はクリアの後に実行します。色と深度を保持します。変換、viewport、scissor はクリア範囲を制限せず、描画状態は呼び出し後に復元します。
+- 描画先の寿命と返却時の動作は `beginStencil` を参照してください。
+'''
+details.ko = '''
+- `clearStencil(value = 0)`은 현재 타깃에서 `beginStencil()`이 성공해야 합니다. 소유권이 없으면 호출할 때마다 경고하고 아무것도 변경하지 않습니다.
+- 첨부 이미지 전체의 8비트를 0~255 값으로 바꿉니다. 이전 그리기를 먼저 실행하며 이후 그리기는 지우기 뒤에 실행합니다. 색상과 깊이를 보존합니다. 변환, viewport, scissor는 지우기 영역을 제한하지 않으며 호출 후 그리기 상태를 복원합니다.
+- 타깃 수명과 반환 동작은 `beginStencil`을 참조합니다.
+'''
+snippet = '''
+canvas.begin();
+if (beginStencil()) { clearStencil(5); endStencil(); }
+canvas.end();
+'''
+related = ["beginStencil", "endStencil", "clear"]
+
+["endStencil"]
+category = "graphics_fbo"
+keywords = ["stencil", "restore", "ownership"]
+description.en = "Returns stencil ownership and restores the saved framework state."
+description.ja = "stencil の所有権を返却し、保存したフレームワークの状態を復元します。"
+description.ko = "스텐실 소유권을 반환하고 저장한 프레임워크 상태를 복원합니다."
+details.en = '''
+- Call on the target with a successful `beginStencil()`. An unmatched call warns and does nothing.
+- endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values.
+- Submits earlier drawing, zeroes all eight stencil bits with a colorless draw using write mask `0xFF`, then restores saved semantic state. No pixel snapshot is restored.
+- See `beginStencil` for the complete ownership rules.
+'''
+details.ja = '''
+- `beginStencil()` が成功した描画先で呼びます。対応する開始がない場合は警告し、何もしません。
+- endStencil は stencil を 0 に戻します。値が必要な場合は、endStencil の前に readStencil で読み取ってください。
+- それまでの描画を実行し、書き込みマスク `0xFF` で色を書かずに stencil の全 8 ビットをゼロにしてから、保存した意味上の状態を復元します。ピクセルのスナップショットは復元しません。
+- 所有権の全規則は `beginStencil` を参照してください。
+'''
+details.ko = '''
+- `beginStencil()`이 성공한 타깃에서 호출합니다. 대응하는 시작이 없으면 경고하고 아무것도 하지 않습니다.
+- endStencil은 스텐실을 0으로 되돌립니다. 값이 필요하면 endStencil 전에 readStencil로 읽어야 합니다.
+- 이전 그리기를 실행하고 쓰기 마스크 `0xFF`로 색상을 쓰지 않으면서 스텐실 전체 8비트를 0으로 지운 뒤 저장한 의미상 상태를 복원합니다. 픽셀 스냅샷은 복원하지 않습니다.
+- 전체 소유권 규칙은 `beginStencil`을 참조합니다.
+'''
+snippet = '''
+canvas.begin();
+if (beginStencil()) { clearStencil(5); endStencil(); }
+canvas.end();
+'''
+related = ["beginStencil", "clearStencil"]
 
 ["clear"]
 category = "graphics_color"

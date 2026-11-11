@@ -145,6 +145,12 @@ static void cover_graphics_color() {
     (void)srgbToLinear(af::val<float>());
 }
 
+static void cover_graphics_fbo() {
+    (void)beginStencil();
+    (void)clearStencil(af::val<uint8_t>());
+    (void)endStencil();
+}
+
 static void cover_graphics_lighting() {
     (void)addLight(af::val<Light>());
     (void)beginShadowPass(af::val<Light>());
@@ -5195,6 +5201,7 @@ void af::coverGenerated() {
     af_generated::cover_graphics_backend();
     af_generated::cover_graphics_camera();
     af_generated::cover_graphics_color();
+    af_generated::cover_graphics_fbo();
     af_generated::cover_graphics_lighting();
     af_generated::cover_graphics_shader();
     af_generated::cover_graphics_shapes();

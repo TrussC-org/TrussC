@@ -686,6 +686,13 @@ fbo.draw(0, 0);                     // Composite to screen
 fbo.draw(0, 0, w, h);              // Scaled
 fbo.copyTo(image);                  // FBO → Image
 fbo.save("output.png");
+// Full stencil ownership on the current target (plain bytes 0–255):
+canvas.begin();
+if (beginStencil()) { clearStencil(5); endStencil(); }
+canvas.end();
+// endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values.
+// clearStencil outside ownership warns.
+
 // Stencil debugging: ended, owned, single-sample Fbos only.
 fbo.drawStencil(0, 0);              // Opaque gray byte/255, nearest sampling
 Pixels stencilBytes;
@@ -2551,6 +2558,14 @@ Mesh createTorus(float radius, float tubeRadius, int sides = 24, int rings = 16)
 int bytesPerPixel(TextureFormat fmt)  // Returns the byte size of one pixel for a TextureFormat.
 int channelCount(TextureFormat fmt)  // Returns the number of channels in a TextureFormat.
 bool isFloatFormat(TextureFormat fmt)  // Reports whether a TextureFormat uses floating-point components.
+```
+
+### Graphics - FBO
+
+```cpp
+bool beginStencil()  // Borrows all eight stencil bits on the current drawing target.
+void clearStencil(uint8_t value = 0)  // Replaces all stencil bytes with a plain value while owned.
+void endStencil()  // Returns stencil ownership and restores the saved framework state.
 ```
 
 ### Graphics - Shader

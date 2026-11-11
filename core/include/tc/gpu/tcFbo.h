@@ -258,6 +258,18 @@ public:
         // FBO color texture stores premultiplied alpha (due to alpha blending + MSAA resolve)
         colorTexture_.setPremultipliedAlpha(true);
 
+        // Initialize this attachment once. All later activations, including
+        // color/depth clears, load and store stencil across frame boundaries.
+        sg_pass initial = {};
+        initial.attachments.depth_stencil = depthAttView_;
+        initial.action.depth.load_action = SG_LOADACTION_CLEAR;
+        initial.action.depth.clear_value = 1;
+        initial.action.stencil.load_action = SG_LOADACTION_CLEAR;
+        initial.action.stencil.clear_value = 0;
+        {
+            internal::TargetPassScope scope(initial, w, h, SG_PIXELFORMAT_NONE, sampleCount, true);
+            if (!scope.active()) { failed(); return; }
+        }
         allocated_ = true;
     }
 
@@ -269,6 +281,10 @@ public:
             return;
         }
         stencilCache_.reset();
+        target_.stencil = {};
+        target_.savedStencil = {};
+        target_.stencilOwned = false;
+        target_.frameworkStencilClipDepth = 0;
         // Also release partial allocations, before allocated_ is published.
         // Shared context/pipelines are NOT destroyed here (shared across FBOs)
         if (depthAttView_.id) sg_destroy_view(depthAttView_);
@@ -903,6 +919,7 @@ private:
             target_.clearAction.colors[0].clear_value = {r, g, b, a};
             target_.clearAction.depth.load_action = SG_LOADACTION_CLEAR;
             target_.clearAction.depth.clear_value = 1;
+            target_.clearAction.stencil.load_action = SG_LOADACTION_LOAD;
             internal::setupScreenFovWithSize(TAU / 8, float(target_.width), float(target_.height), 0, 0, false);
             // Match the base: camera setup selects 3D; a fresh Fbo starts in
             // the inherited 2D blend mode, including its logical depth flag.

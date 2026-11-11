@@ -440,6 +440,14 @@ inline void beginFrame() {
 // (Implementation in tc/app/tcGlobal.cpp)
 void clear(float r, float g, float b, float a = 1.0f);
 
+// Borrow all eight stencil bits on the current target. Pair end only with a
+// successful begin. Ownership may span Fbo activations; end on that target.
+bool beginStencil();
+// Zero the framework's internal bits, then restore its saved semantic state.
+void endStencil();
+// Full-target, colorless clear to a plain byte. Warns outside ownership.
+void clearStencil(uint8_t value = 0);
+
 // Clear screen (transparent black)
 inline void clear() {
     clear(0.0f, 0.0f, 0.0f, 0.0f);
