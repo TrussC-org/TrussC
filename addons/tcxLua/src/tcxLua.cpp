@@ -2,6 +2,7 @@
 #include "TrussC.h"
 
 #include "sol/sol.hpp"
+#include <tuple>
 using namespace tc;
 
 // WORKAROUND: to support deprecated functions in lua
@@ -120,7 +121,7 @@ bool tcxLua::isLuaJITUsedEstimated(const std::shared_ptr<sol::state>& lua){
 
 void tcxLua::setBindings(const std::shared_ptr<sol::state>& lua){
     setTrussCGeneratedBindings(lua);
-    setGeneratedTypeBindings(lua);   // luagen-types: 83 generated usertypes (Phase 2)
+    setGeneratedTypeBindings(lua);   // luagen-types: generated usertypes
     setTypeBindings(lua);
     setConstBindings(lua);
     setColorConstBindings(lua);
@@ -246,7 +247,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         )
     );
     mat4_type["at"] = [](Mat4& m, int raw, int col) { return m.at(raw, col); };
-    mat4_type["set"] = [](Mat4& m, int raw, int col, int v){ m.at(raw, col) = v; }; // WORKAROUND
+    mat4_type["set"] = [](Mat4& m, int raw, int col, float v){ m.at(raw, col) = v; }; // WORKAROUND
     mat4_type["identity"] = &Mat4::identity;
     mat4_type["fromHomography"] = &Mat4::fromHomography;
     mat4_type["translate"] = sol::overload(
@@ -264,6 +265,12 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     );
     mat4_type["transposed"] = &Mat4::transposed;
     mat4_type["inverted"] = &Mat4::inverted;
+    // Lua returns the status and output matrix as separate values.
+    mat4_type["tryInvert"] = [](const Mat4& m) {
+        Mat4 inverse;
+        bool success = m.tryInvert(inverse);
+        return std::make_tuple(success, inverse);
+    };
     mat4_type["lookAt"] = &Mat4::lookAt;
     mat4_type["ortho"] = &Mat4::ortho;
     mat4_type["perspective"] = &Mat4::perspective;
@@ -288,7 +295,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         )
     );
     mat3_type["at"] = [](Mat3& m, int raw, int col) { return m.at(raw, col); };
-    mat3_type["set"] = [](Mat3& m, int raw, int col, int v){ m.at(raw, col) = v; }; // WORKAROUND
+    mat3_type["set"] = [](Mat3& m, int raw, int col, float v){ m.at(raw, col) = v; }; // WORKAROUND
     mat3_type["identity"] = &Mat3::identity;
     mat3_type["getHomography"] = &Mat3::getHomography;
     mat3_type["determinant"] = &Mat3::determinant;
@@ -359,6 +366,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     fbo_type["getSampleCount"] = &Fbo::getSampleCount;
     fbo_type["getTextureFormat"] = &Fbo::getTextureFormat;
     fbo_type["isAllocated"] = &Fbo::isAllocated;
+    fbo_type["setDebugName"] = &Fbo::setDebugName;
+    fbo_type["getDebugName"] = &Fbo::getDebugName;
     fbo_type["isActive"] = &Fbo::isActive;
     fbo_type["getTexture"] = [](Fbo& f) -> Texture& { return f.getTexture(); };
     fbo_type["save"] = sol::overload(
@@ -458,11 +467,19 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         [](Image& t, int w, int h, int c){ return t.allocate(w, h, c); }
     );
     img_type["clear"] = &Image::clear;
+    img_type["crop"] = &Image::crop;
+    img_type["halve"] = &Image::halve;
+    img_type["mirror"] = &Image::mirror;
+    img_type["mirrorH"] = &Image::mirrorH;
+    img_type["mirrorV"] = &Image::mirrorV;
+    img_type["resize"] = &Image::resize;
     img_type["draw"] = sol::overload(
         [](Image& t, float x, float y){ return t.draw(x, y); },
         [](Image& t, float x, float y, float w, float h){ return t.draw(x, y, w, h); }
     );
     img_type["isAllocated"] = &Image::isAllocated;
+    img_type["setDebugName"] = &Image::setDebugName;
+    img_type["getDebugName"] = &Image::getDebugName;
     img_type["getWidth"] = &Image::getWidth;
     img_type["getHeight"] = &Image::getHeight;
     img_type["getChannels"] = &Image::getChannels;
@@ -484,6 +501,12 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         [](Pixels& f, int w, int h, int c, PixelFormat t){ return f.allocate(w, h, c, t); }
     );
     pix_type["clear"] = &Pixels::clear;
+    pix_type["crop"] = &Pixels::crop;
+    pix_type["halve"] = &Pixels::halve;
+    pix_type["mirror"] = &Pixels::mirror;
+    pix_type["mirrorH"] = &Pixels::mirrorH;
+    pix_type["mirrorV"] = &Pixels::mirrorV;
+    pix_type["resize"] = &Pixels::resize;
     pix_type["isAllocated"] = &Pixels::isAllocated;
     pix_type["getWidth"] = &Pixels::getWidth;
     pix_type["getHeight"] = &Pixels::getHeight;
@@ -547,6 +570,10 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         [](Shader& f, int s, sg_view i, sg_sampler p){ return f.setTexture(s, i, p); }
     );
     shader_type["submitVertices"] = &Shader::submitVertices;
+    shader_type["drawVertices"] = sol::overload(
+        [](Shader& s, int vertexCount){ return s.drawVertices(vertexCount); },
+        [](Shader& s, int vertexCount, int instanceCount){ return s.drawVertices(vertexCount, instanceCount); }
+    );
 
     sol::usertype<EasyCam> easycam_t = lua->new_usertype<EasyCam>("EasyCam",
         sol::constructors<EasyCam()>(),
@@ -572,6 +599,22 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     easycam_t["setFov"] = &EasyCam::setFov;
     easycam_t["getFov"] = &EasyCam::getFov;
     easycam_t["getPosition"] = &EasyCam::getPosition;
+    easycam_t["setAzimuth"] = &EasyCam::setAzimuth;
+    easycam_t["getAzimuth"] = &EasyCam::getAzimuth;
+    easycam_t["setElevation"] = &EasyCam::setElevation;
+    easycam_t["getElevation"] = &EasyCam::getElevation;
+    easycam_t["enableOrtho"] = &EasyCam::enableOrtho;
+    easycam_t["disableOrtho"] = &EasyCam::disableOrtho;
+    easycam_t["setOrtho"] = &EasyCam::setOrtho;
+    easycam_t["getOrtho"] = &EasyCam::getOrtho;
+    easycam_t["setOrbitButton"] = sol::policies(&EasyCam::setOrbitButton, sol::returns_self{});
+    easycam_t["getOrbitButton"] = &EasyCam::getOrbitButton;
+    easycam_t["setPanButton"] = sol::policies(&EasyCam::setPanButton, sol::returns_self{});
+    easycam_t["getPanButton"] = &EasyCam::getPanButton;
+    easycam_t["setDragModifier"] = sol::policies(&EasyCam::setDragModifier, sol::returns_self{});
+    easycam_t["getDragModifier"] = &EasyCam::getDragModifier;
+    easycam_t["setOrientation"] = &EasyCam::setOrientation;
+    easycam_t["getOrientation"] = &EasyCam::getOrientation;
     easycam_t["setFovDeg"] = &EasyCam::setFovDeg;
     easycam_t["setNearClip"] = &EasyCam::setNearClip;
     easycam_t["setFarClip"] = &EasyCam::setFarClip;
@@ -906,6 +949,21 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         sol::call_constructor, sol::constructors<SoundBuffer(),
             SoundBuffer(const SoundBuffer&), SoundBuffer(SoundBuffer&&)>(),
         sol::base_classes, sol::bases<SoundSource>(),
+        "load", &SoundBuffer::load,
+        "loadFlac", &SoundBuffer::loadFlac,
+        "getPath", &SoundBuffer::getPath,
+        "numSamples", &SoundBuffer::numSamples,
+        // Keep the mutable sample view's owning userdata alive.
+        "samples", sol::property([](SoundBuffer& b, sol::this_state state) {
+            sol::object view = sol::make_object(state, std::ref(b.samples));
+            view.push();
+            lua_createtable(state, 1, 0);
+            lua_pushvalue(state, 1);
+            lua_rawseti(state, -2, 1);
+            lua_setuservalue(state, -2);
+            lua_pop(state, 1);
+            return view;
+        }, &SoundBuffer::samples),
         "loadOgg", &SoundBuffer::loadOgg,
         "loadWav", &SoundBuffer::loadWav,
         "loadMp3", &SoundBuffer::loadMp3,
@@ -941,6 +999,26 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
             static_cast<bool (AudioEngine::*)(const AudioSettings&)>(&AudioEngine::init)
         ),
         "shutdown", &AudioEngine::shutdown,
+        "setup", sol::overload(
+            static_cast<bool (AudioEngine::*)()>(&AudioEngine::setup),
+            static_cast<bool (AudioEngine::*)(const AudioSettings&)>(&AudioEngine::setup)
+        ),
+        "close", &AudioEngine::close,
+        "isConnected", &AudioEngine::isConnected,
+        "isInitialized", &AudioEngine::isInitialized,
+        "getSampleRate", &AudioEngine::getSampleRate,
+        "getChannels", &AudioEngine::getChannels,
+        "getBufferSize", &AudioEngine::getBufferSize,
+        "getPlayingSounds", [](const AudioEngine& engine, sol::this_state state) {
+            auto playing = engine.getPlayingSounds();
+            sol::state_view lua(state);
+            sol::table result = lua.create_table(static_cast<int>(playing.size()), 0);
+            // Each userdata owns its entry independently of the snapshot table.
+            for (const auto& info : playing) result.add(PlayingSoundInfo(info));
+            return result;
+        },
+        "getMaxPolyphony", &AudioEngine::getMaxPolyphony,
+        "getStats", &AudioEngine::getStats,
         "getAnalysisBuffer", &AudioEngine::getAnalysisBuffer,
         // play() now has two overloads (SoundSource and SoundBuffer);
         // resolve to the SoundSource one explicitly. The SoundBuffer
@@ -963,6 +1041,15 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
             [](AudioBackend backend) { return MicInput::listDevices(backend); }
         ),
         "setDevice", &MicInput::setDevice,
+        "setup", &MicInput::setup,
+        "close", &MicInput::close,
+        "startAsync", sol::overload(
+            [](MicInput& m){ return m.startAsync(); },
+            [](MicInput& m, int sampleRate){ return m.startAsync(sampleRate); }
+        ),
+        "getDeviceName", &MicInput::getDeviceName,
+        "isConnected", &MicInput::isConnected,
+        "isStarting", &MicInput::isStarting,
         "start", &MicInput::start,
         "stop", &MicInput::stop,
         "getBuffer", &MicInput::getBuffer,

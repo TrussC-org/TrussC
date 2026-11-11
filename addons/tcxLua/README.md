@@ -7,7 +7,7 @@
 
 ## Binding coverage
 
-### Dones
+### Registered surface
 
 - trussc (TrussC.h directly defined functions)
 - cmath (common use ones only), tcMath
@@ -20,7 +20,41 @@
 - Font, Path
 - Json, Xml
 - `Tween<T>` (as TweenFloat, TweenVec2, TweenVec3, TweenColor)
-- Sound, MicInput
+- Sound, SoundBuffer, AudioEngine, MicInput
+
+The generated surface contains 124 types, 47 enums, 149 named colors and 45
+constants. Hand-written registrations extend that surface; a registered type
+can still have omitted members or overloads.
+
+Of the 73 hand-written gaps recorded in the November 11 audit, this slice adds
+55 non-event entries: all 16 EasyCam controls, 10 AudioEngine methods, six
+MicInput methods, six operations each on Image and Pixels, five SoundBuffer
+entries, Image/Fbo debug names, Shader.drawVertices and Mat4.tryInvert.
+Mat3.set and Mat4.set now preserve floating-point values.
+
+- `matrix:tryInvert()` returns `ok, inverse`. Use the matrix only when `ok` is
+  true; the original matrix stays unchanged.
+- `SoundBuffer.samples` is a mutable sol2 sequence with 1-based indices that
+  keeps its SoundBuffer alive; `numSamples` is the samples-per-channel
+  field. Keep sample edits on the main thread and stop playback before editing,
+  as in C++. `load` and `loadFlac` return `LoadResult`; check `result:ok()`.
+- EasyCam's `setOrbitButton`, `setPanButton` and `setDragModifier` return the
+  original Lua camera, so constructor chains retain ownership.
+- `AudioEngine:getPlayingSounds()` returns a 1-based Lua table of independently
+  owned `PlayingSoundInfo` copies. Entries remain valid after the table is collected.
+- `AudioEngine:setup()` and `setup(settings)` return bool. `MicInput:setup()`
+  returns bool; `startAsync()` / `startAsync(sampleRate)` return no values.
+  Read `isStarting`, `isConnected` and `getDeviceName` to observe startup.
+- `Shader:drawVertices(vertexCount, instanceCount)` defaults to one instance.
+  Image/Pixels operations return no values, matching C++.
+
+The remaining 18 audited entries stay unbound: 11 need an Event listener
+lifetime decision (including Tween.complete and asynchronous resource loads),
+six are intentionally excluded (audioIn/audioOut, waitForAudioCallbacks,
+Texture mip views and Fbo.lifetimeToken), and Texture.drawFlippedY is on hold
+in #1422. Lua Event delivery is limited to the main thread; audio events are
+not exposed. This count describes this slice, without defining overall
+completion of the Lua API.
 
 ### Sound lifetime
 

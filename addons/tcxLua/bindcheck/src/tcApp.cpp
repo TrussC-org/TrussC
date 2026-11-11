@@ -1,4 +1,6 @@
 #include "tcApp.h"
+#include "binding_test.glsl.h"
+#include <chrono>
 
 // Lua binding verification harness.
 // Loads data/bindcheck.lua (generated alongside data/expected.lua) which checks
@@ -8,7 +10,24 @@
 void tcApp::setup() {
     lua = tcx_lua.getLuaState();
 
+    const auto source = fs::path(__FILE__).parent_path().parent_path().parent_path() / "tests";
+    const auto temp = fs::temp_directory_path() /
+        ("tcxlua-bindcheck-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    fs::create_directories(temp);
+    (*lua)["bindingTestSource"] = source;
+    (*lua)["bindingTestTemp"] = temp;
+#ifndef __EMSCRIPTEN__
+    (*lua)["bindingTestNativeAudio"] = true;
+#else
+    (*lua)["bindingTestNativeAudio"] = false;
+#endif
+    Shader shader;
+    shader.load(binding_test_triangles_shader_desc);
+    (*lua)["bindingTestShader"] = &shader;
     tcxLua::runFile(*lua, getDataPath("bindcheck.lua"));
+    (*lua)["bindingTestShader"] = sol::nil;
+    std::error_code error;
+    fs::remove_all(temp, error);
 
     // No need to keep a window open; exit as soon as the check has run.
     exitApp();
