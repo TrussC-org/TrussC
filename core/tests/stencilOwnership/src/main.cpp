@@ -6,6 +6,12 @@
 
 using namespace tc;
 namespace {
+// Count only this module's warnings; sokol may log unrelated ones (e.g. a
+// one-time uniform buffer growth on Metal) during the same loop.
+bool isStencilWarning(const LogEventArgs& e) {
+    return e.level == LogLevel::Warning && e.message.rfind("[Stencil] ", 0) == 0;
+}
+
 int failures = 0;
 bool completed = false;
 void check(const char* label, bool ok) {
@@ -31,7 +37,7 @@ void allValues() {
     bool exact = true, handback = true, refused = true;
     int warnings = 0;
     auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
-        if (e.level == LogLevel::Warning) ++warnings;
+        if (isStencilWarning(e)) ++warnings;
     });
     for (int v = 0; v < 256; ++v) {
         fbo.begin();
@@ -124,7 +130,7 @@ void refusals() {
     auto& target = internal::currentTarget();
     int warnings = 0;
     auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
-        if (e.level == LogLevel::Warning) ++warnings;
+        if (isStencilWarning(e)) ++warnings;
     });
     target.frameworkStencilClipDepth = 1;
     check("active framework clip refused", !beginStencil() && !target.stencilOwned);
@@ -226,7 +232,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     int warnings = 0;
     {
         auto listener = getLogger().onLog.listen([&](LogEventArgs& e) {
-            if (e.level == LogLevel::Warning) ++warnings;
+            if (isStencilWarning(e)) ++warnings;
         });
         const bool first = beginStencil();
         const bool second = beginStencil();
