@@ -76,7 +76,80 @@ and multiwindow implementation are self-contained, retaining zlib licensing:
 macOS NSWindow/CAMetalLayer/CADisplayLink; Win32 HWND/D3D11/DXGI waitable;
 X11 GLX and Pi GLES3/EGL. Single-window backends: Web rAF/WebGPU/WebGL2,
 iOS UIWindowScene/Metal, Android NativeActivity/EGL/Choreographer.
-Contracts: `docs/dev/sokol_app_tc-design.md`, `docs/dev/sapp-*-impl-spec.md`.
+The inherited contracts below and the cherry-pick map under “How to Update Sokol”
+are self-contained; feature entries record subsequent TrussC changes.
+
+### Inherited platform contracts
+
+Current implementation rules retained from the graduation notes, checked against
+`sokol_app_tc.h` and its callers. Symbols identify the implementation to preserve;
+the feature entries take precedence over historical upstream behavior.
+
+| Scope / source anchor | Rule |
+|---|---|
+| Integration: `buildWindowDescriptor`, `tcWindowRuntime.cpp` | Runtime owns loop modes, update/draw decisions, WindowContext switching and App/Node lifecycle; native backends provide ticks/events/handles. |
+| Integration: `sglue_environment`, `sglue_swapchain` | Translate defaults plus Metal device/drawable/depth/MSAA, D3D11 device/context/render/resolve/depth views, WebGPU device/views or GL default framebuffer; unused backend fields stay zero. |
+| Native handles: `sapp_*_get_*` / `sapp_window_*` | Keep native handles for platform window operations and IME; desktop resize uses native APIs, iOS document pickers use `sapp_ios_get_window`, Android JNI consumers use `sapp_android_get_native_activity`. |
+| Keyboard: `_sapp_tc_translate_key`, `_sapp_tc_emsc_keymap` | Desktop key identities follow physical positions (macOS virtual keycodes, Win32 scancodes, XKB names, browser `code`); layout-dependent text uses separate CHAR events. |
+| Desktop modifiers: `_sapp_tc_mods`, `_sapp_tc_win32_mods`, `_sapp_tc_x11_mods` | SHIFT/CTRL/ALT/SUPER masks combine left/right; sided identity belongs to `key_code`. |
+| Desktop paste: `keyEvt:pressed:`, `_sapp_tc_win32_key_event`, `_sapp_tc_x11_key_event` | Enabled clipboard emits CLIPBOARD_PASTED on exact Cmd+V (macOS) or Ctrl+V (Win32/X11); the handler reads the clipboard. |
+| Desktop clipboard: `sapp_set_clipboard_string`, `sapp_get_clipboard_string` | macOS uses NSPasteboardTypeString, Win32 CF_UNICODETEXT (OS takes the allocation on successful SetClipboardData), X11 CLIPBOARD/UTF8_STRING rather than PRIMARY. |
+| Singleton lifecycle: `_sapp_tc_frame`, `_sapp_tc_events_enabled` | iOS/Android/Web call init once before the first frame callback, increment frame_count afterward and gate ordinary events on init plus an installed event callback. |
+| Singleton timing: `_sapp_tc_timing_*` | Seed 1/60 s; clamp deltas to 1 µs–100 ms; reset EMA beyond 4 ms error, otherwise smooth with alpha 0.025. |
+| macOS: `sapp_run`, `applicationDidFinishLaunching:` | AppKit owns the loop; set Regular activation policy before creating windows, and run user cleanup before releasing native/GPU state. |
+| macOS: `keyup_monitor` | Forward Command-modified key-up to the key window to avoid Cocoa swallowing it; remove the local monitor during teardown. |
+| macOS: `_sapp_tc_mac_scale`, `_sapp_tc_mac_update_dimensions` | Backing scale (or 1 for no_high_dpi) sizes framebuffer and mouse coordinates; reapply contentsScale during resize and retain last dimensions for zero-area views. |
+| macOS: `_sapp_tc_mac_update_frame_rate` | Display-link preferred rate follows the window's current screen maximum / swap_interval, with a 60 Hz fallback. |
+| macOS: `_sapp_tc_view` | Mouse positions are view points × render DPI; cursorUpdate reapplies custom/hidden cursors on reentry. |
+| macOS: `_sapp_tc_main_next_drawable` | Main-window acquisition reuses the lazy drawable inside its tick; outside a tick each call may acquire a fresh drawable. Do not apply the old unconditional “exactly once” claim to in-tick getters. |
+| Win32: `_sapp_tc_wndproc_impl` | KEY/SYSKEY use the 9-bit scancode including extended bit; WM_CHAR assembles UTF-16 pairs per window and filters control characters. |
+| Win32: `_sapp_tc_win32_init_dpi`, `_sapp_tc_win32_update_scale` | Set process awareness once (prefer per-monitor v2); window DPI/96 sizes the client, high_dpi selects framebuffer scale, and low-DPI mouse coordinates divide by window scale. |
+| Win32: WM_DPICHANGED / `_sapp_tc_win32_tick` | Apply the OS-proposed rectangle, then coalesce dimension/render-target resize into the tick; WM_SIZE tracks iconify/restore without calling ResizeBuffers. |
+| Win32: `_sapp_tc_d3d11_create_swapchain` | Flip-discard backbuffers are single-sampled; use a separate MSAA render target, latency 1 when waitables are available, and disable DXGI Alt+Enter. |
+| Win32: `_sapp_tc_d3d11_resize` | Release backbuffer views, unbind render targets and Flush before ResizeBuffers; carry creation flags through resize so the waitable remains valid. |
+| Win32: `_sapp_tc_win32_set_fullscreen` | Fullscreen swaps window styles and saves/restores the windowed rectangle; it is borderless window fullscreen, not exclusive DXGI mode. |
+| Win32: `_sapp_tc_win32_apply_cursor`, WM_SETCURSOR | Apply/hide cursors only in the client area with SetCursor (NULL hides), avoiding the ShowCursor counter. |
+| Win32: `_sapp_tc_win32_capture_mouse`, `_sapp_tc_win32_release_mouse` | Capture lasts until the last held button releases; wheel deltas divide by WHEEL_DELTA, with horizontal sign negated. |
+| X11: `sapp_run` | XInitThreads precedes other Xlib calls; share one Display, atoms and GL context, with a drawable/surface and colormap per window. |
+| X11: `_sapp_tc_x11_query_system_dpi`, `_sapp_tc_x11_update_dimensions` | Read display-wide Xft.dpi (96 fallback); framebuffer matches X window pixels, logical dimensions divide by render scale, and XGetWindowAttributes remains the tick's size authority. |
+| X11: `_sapp_tc_x11_init_keytable`, `_sapp_tc_x11_keypress_repeat` | Prefer XKB physical names with keysym fallback; enable XkbSetDetectableAutoRepeat and track repeat per window/keycode. |
+| X11: `_sapp_tc_x11_process_event` | CHAR uses XLookupString plus keysym→Unicode; no XIM/XIC, compose or dead-key composition is supplied by sapp (IME stays in TrussC/addons). |
+| X11: `_sapp_tc_x11_mods`, `_sapp_tc_x11_process_event` | Correct modifier/button bits on the transition event; buttons 4/5 give vertical +1/−1 wheel steps, 6/7 horizontal +1/−1. |
+| X11: `_sapp_tc_x11_set_fullscreen` | EWMH fullscreen requests require a mapped window; requested/observed reconciliation is owned by the visibility/fullscreen feature below. |
+| X11: `_sapp_tc_x11_create_standard_cursor`, `_sapp_tc_x11_update_window_title` | Prefer themed Xcursor images with font-cursor fallback; retain UTF-8 WM_NAME/ICON_NAME and EWMH title properties. |
+| X11: `_sapp_tc_x11_on_clientmessage`, `_sapp_tc_x11_parse_dropped_files_list` | Advertise XDND v5, negotiate text/uri-list, decode file:// paths and reply XdndFinished after the transfer. |
+| X11: `_sapp_tc_x11_create_window`, `sapp_create_window` | GLX/EGL secondaries inherit the app sample count/compatible visual; GL swapchains report RGBA8 and the default framebuffer, not RGB10A2. |
+| iOS: `_sapp_tc_ios_run`, `_sapp_tc_scene_delegate` | UIApplicationMain owns the loop; programmatic UISceneConfiguration selects the delegate without an Info.plist scene manifest; create Metal/window state only on scene connection. |
+| iOS: `scene:willConnectToSession:` | Size from the scene screen, ignoring descriptor width/height; high_dpi selects nativeScale, otherwise 1. |
+| iOS: `sceneWillResignActive:` / `sceneDidBecomeActive:` | Pause/unpause CADisplayLink and emit SUSPENDED/RESUMED; do no background drawable rendering. Native termination cleanup is best effort (SIGKILL commonly bypasses it). |
+| iOS: `_sapp_tc_ios_mtl_timing_update`, `_sapp_tc_ios_mtl_start_display_link` | Preferred rate is screen maximum / swap_interval; frame_duration uses clamped display-link timestamp differences (first sample keeps the refresh seed), not the EMA. |
+| iOS: `_sapp_tc_ios_touch_event` | Enumerate allTouches with UITouch pointer identity, framebuffer positions = view points × DPI and changed-set membership; retain changed points on overflow. |
+| iOS: `_sapp_tc_textfield_dlg`, `_sapp_tc_ios_show_keyboard` | Hidden UITextField emits nonsurrogate CHAR and Enter/Space/Backspace key pairs; notifications track keyboard visibility, and keyboard_resizes_canvas alone enables view shrinking. |
+| Android: `ANativeActivity_onCreate`, `sokol_main`, `g_androidDesc` | UI-thread entry calls user main/runApp to store the descriptor, then starts the app pthread; SOKOL_NO_ENTRY is forbidden and sapp_run is unsupported. |
+| Android: `_sapp_tc_android_loop`, `_sapp_tc_android_main_cb` | App thread owns EGL, input and init/frame/cleanup callbacks; UI callbacks use pipe + mutex/condition handshakes for lifecycle/window/input changes. |
+| Android: `_sapp_tc_android_should_update` | Require resumed + focused + live EGL surface; recreate the surface independently of the context and call init only on the first admitted frame. |
+| Android: `_sapp_tc_android_loop`, `_sapp_tc_android_frame_callback` | Keep API≥29 Choreographer timestamps and the poll fallback; fallback blocks when inactive and renders/polls when active (stock android-26 builds use it). |
+| Android: `_sapp_tc_android_update_dimensions` | Poll native/EGL size each frame and force RESIZED after surface recreation (except first frame); high_dpi=false requests half-size buffers. |
+| Android: `_sapp_tc_android_touch_event` | Use pointer IDs/tooltype and framebuffer/window coordinate ratios; POINTER_DOWN/UP marks the indexed pointer changed and retains it on overflow. |
+| Android: `sapp_android_get_native_activity`, `ANativeActivity_onCreate` | Activity is available during sokol_main without a valid-state assertion; restore its pointer after init_state clears shared state. JNI callers attach their thread as needed. |
+| Android: `_sapp_tc_android_show_keyboard` | NativeActivity soft-input show/hide remains limited; no general key/CHAR bridge or keyboard-shown tracking exists. Orientation/immersive policy stays in TrussC JNI. |
+| Android: `_sapp_tc_android_cleanup`, `_sapp_tc_android_on_destroy` | Call user cleanup only with a bound surface; destroy EGL, acknowledge app-thread stop, release UI bridge resources, then exit(0) for a clean restart. |
+| Mobile: `sapp_get_clipboard_string` / `sapp_set_clipboard_string` | iOS/Android keep internal clipboard text only; no OS clipboard or native file-drop path is provided by sapp. |
+| Web: `_sapp_tc_emsc_run`, `_sapp_tc_emsc_frame_animation_loop` | Register rAF then return; quit cancels reads/unregisters handlers, discards WGPU, calls cleanup and stops callbacks; the tab/module remain alive. |
+| Web: `_sapp_tc_emsc_frame_animation_loop`, `_sapp_tc_emsc_frame_main_loop` | Feed rAF milliseconds / 1000 or performance.now() into timing; the internal timestamp_now path is unused/asserting. |
+| Web: `_sapp_tc_wgpu_frame`, `_sapp_tc_wgpu_request_device_cb` | Pump wgpuInstanceProcessEvents and gate init/frame on init_done; modern Dawn webgpu.h requires emdawnwebgpu, including at link time. |
+| Web: `_sapp_tc_emsc_webgl_init`, `_sapp_tc_emsc_webgl_context_cb` | WebGL2 antialias toggles with sample_count>1 (actual samples are browser-chosen); context lost/restored emits SUSPENDED/RESUMED without rebuilding resources. |
+| Web: `_sapp_tc_emsc_run`, `_sapp_tc_emsc_size_changed` | canvas_resize owns descriptor/default 640×480 size; otherwise track CSS size on window resize; high_dpi multiplies by DPR and updates backing storage plus WGPU size-dependent surfaces. |
+| Web: `_sapp_tc_emsc_register_eventhandlers` | Canvas receives mouse/wheel/key/touch; window receives focus/blur/paste, document receives pointer-lock changes; unregister the matching listeners on quit. |
+| Web: `_sapp_tc_emsc_key_cb` | Prefer browser code strings, fall back to localized key's small supported subset; keep character keys bubbling for keypress/CHAR and synthetic Cmd-modified key-up to prevent stuck keys. |
+| Web: `_sapp_tc_emsc_mouse_cb`, `_sapp_tc_emsc_touch_cb` | Scale CSS positions by DPI; preserve touch identifier/isChanged and changed points on overflow; browser button bits use L/R/M order, unlike the button enum's L/M/R. |
+| Web: `_sapp_tc_emsc_wheel_cb` | Scale deltaMode pixel/line/page/unknown by −0.01/−1.33/−10/−0.1; bubble flags plus sapp_consume_event determine preventDefault. |
+| Web: `_sapp_tc_emsc_update_mouse_lock_state`, `_sapp_tc_js_toggle_fullscreen` | Pointer lock is deferred to a mouse-button/wheel/key gesture; fullscreen starts false, requires a gesture and reconciles promise rejection/Esc. |
+| Web: `_sapp_tc_js_add_clipboard_listener`, `_sapp_tc_js_write_clipboard` | Paste asynchronously fills internal text before CLIPBOARD_PASTED; copy uses a temporary textarea/execCommand inside a gesture. |
+| Web: `_sapp_tc_emsc_drop`, `_sapp_tc_js_fetch_dropped_file` | Drops expose filenames, not native paths; FileReader fetch is asynchronous, retaining the fetch response/error surface and the bounds/ownership below. |
+| Web: `_sapp_tc_js_init`, `_sapp_tc_js_make_custom_mouse_cursor` | Honor Module.canvas via specialHTMLTargets; retain JS Module state, KEEPALIVE bridges and EM_JS_DEPS; custom cursor Blob URLs must be revoked on unbind. |
+| Web: `_sapp_tc_js_add_beforeunload_listener` | html5_ask_leave_site controls the browser leave prompt independently of stopping rAF. |
+| Web: `_sapp_tc_emsc_set_icon`, `_sapp_tc_js_set_favicon` | Real images update a favicon; sokol_default icon generation is a no-op, and show_keyboard has no Web implementation. |
 
 ## sokol_app_tc.h (replaces sokol_app.h)
 
@@ -1077,6 +1150,42 @@ Do not overwrite them and reconstruct local patches manually.
 against native equivalents and the feature invariants above. Singleton sharing
 does not make it an automatic three-way target. Keep its original lineage and
 compatibility-sync revision separate from each patched copy's upstream base.
+
+### App cherry-pick map
+
+The ranges below identify the **historical vendored `sokol_app.h`** used by the
+graduation notes (14,602 lines, including then-current TC patches), retrievable
+locally with `git show '7a1347e2^:core/include/sokol/sokol_app.h'`. They are search
+coordinates, not ranges in e7a48ed6 or current upstream. Locate the same upstream
+symbols in the intended revision, compare behavior, then apply to the current
+TC anchors below; never transplant an entire rewritten desktop section.
+All TC anchors are in `sokol_app_tc.h` unless a path is specified. Singleton
+helpers/public APIs currently repeat in iOS/Android/Web: check each live copy.
+
+| Historical source range / concern | Current TC section / anchors |
+|---|---|
+| 4–2269 public docs/types/declarations | `SOKOL_APP_INCLUDED` compatibility block plus fork declarations; actual supported enums/API and Q10 naming policy above override inherited prose. |
+| 2314–2552 platform selection/includes | Native `__APPLE__`/`_WIN32`/Linux/Android/Emscripten sections; preserve ObjC++/Metal and GLES3/NO_ENTRY guards, backend header order and Linux GL_GLEXT_PROTOTYPES. |
+| 2554–2711 clock/timing; 3298–3660 state/defaults/callbacks | iOS/Android/Web `_sapp_tc_timestamp_*`, `_sapp_tc_timing_*`, `_sapp_tc_desc_defaults`, `_sapp_tc_init_state`, `_sapp_tc_frame`; desktop native timing/init/send adapters. |
+| 2790–2823 macOS state; 5056–5252 Metal layer/textures/timing | `_sapp_tc_window_t`, app device; `_sapp_tc_ensure_swapchain_textures`, `_sapp_tc_mac_drawable`, `_sapp_tc_mac_update_dimensions`, `_sapp_tc_mac_select_source`. |
+| 5359–5551 macOS keytable/bootstrap; 5553–5945 helpers/app delegate | `_sapp_tc_translate_key`, `sapp_run`, `_sapp_tc_mods`, `_sapp_tc_apply_cursor`, `_sapp_tc_app_delegate`; current Runtime quit/session preflight replaces old sole-window termination. |
+| 5947–6353 macOS window delegate/view input | `_sapp_tc_win_delegate`, `_sapp_tc_window`, `_sapp_tc_view`; per-window close, visibility/fullscreen and event conversion. |
+| 8328–8470 Win32 UTF/keytable | `_sapp_tc_win32_utf8_to_wide`, `_sapp_tc_translate_key`, `_sapp_tc_win32_mods`; retain 9-bit physical scancode indexing. |
+| 8477–8766 D3D11 setup/targets/present | `_sapp_tc_d3d11_create_device`, `_sapp_tc_d3d11_create_swapchain`, `_sapp_tc_d3d11_create_render_targets`, `_sapp_tc_d3d11_resize`, `_sapp_tc_win32_swap`; shared device/per-window flip targets replace old vtable/singleton model. |
+| 9080–9570 Win32 dimensions/cursor/input/frame | `_sapp_tc_win32_update_dimensions`, `_sapp_tc_win32_apply_cursor`, `_sapp_tc_win32_*_event`, `_sapp_tc_win32_tick`; pacing is waitable-credit admission, not old Present-driven spin. |
+| 9570–9853 WndProc/window creation | `_sapp_tc_wndproc_impl`, `_sapp_tc_win32_create_native_window`; keep tick-coalesced resize and current close/session ownership. |
+| 9871–10304 Win32 console/DPI/clipboard/run | `_sapp_tc_win32_init_console`, `_sapp_tc_win32_init_dpi`, `sapp_set_clipboard_string`, `sapp_get_clipboard_string`, `sapp_run`; native per-window DPI and growable conversion replace old fixed storage. |
+| 11050–11882 X11 keysym table; 11884–12317 extensions/keys/DPI | `_sapp_tc_x11_keysymtab`, `_sapp_tc_x11_init_extensions`, `_sapp_tc_x11_init_keytable`, `_sapp_tc_x11_query_system_dpi`. |
+| 12319–12579 GLX renderer | `_sapp_tc_glx_choose_fbconfig`, `_sapp_tc_glx_create_context`, `_sapp_tc_x11_set_swapinterval`, `_sapp_tc_x11_make_current`; linked GLX core entry points replace dlopen; extensions still use glXGetProcAddressARB. |
+| 12581–13685 X11 helpers/window/input/selection dispatch | `_sapp_tc_x11_create_window`, `_sapp_tc_x11_process_event`, `_sapp_tc_x11_*_event`, `_sapp_tc_x11_serve_selection_request`; shared GLX/EGL runtime, visibility reconciliation and growable INCR transfers. |
+| 13687–13816 X11 EGL renderer | `_sapp_tc_egl_init`, `_sapp_tc_x11_create_surface`, `_sapp_tc_x11_resize_surface`; shared context plus per-window EGL surfaces replaces the former single-window Pi path. |
+| 13818–13957 Linux frame/run | `_sapp_tc_x11_tick`, `_sapp_tc_x11_run_loop`, `sapp_run`; movable pacer/follower intervals and poll deadlines replace unconditional main-window blocking swap. |
+| 2827–2879 iOS interfaces/state; 6367–6932 native body | `_sapp_tc_ios_t`, `_sapp_tc_ios_mtl_*`, `_sapp_tc_ios_frame`, `_sapp_tc_ios_touch_event`, `_sapp_tc_scene_delegate`, `_sapp_tc_textfield_dlg`, `_sapp_tc_ios_view_ctrl`; Metal branch only. |
+| 3027–3074 Android state; 10319–11038 native body | `_sapp_tc_android_t`, `_sapp_tc_android_*`, exported `ANativeActivity_onCreate`; retain platform/android/sokol_impl.cpp's sokol_main bridge and both frame-loop paths. |
+| 2720–2733 WGPU state; 3827–4271 device/surface/async chain | Web `_sapp_tc_wgpu_t`, `_sapp_tc_wgpu_*`; preserve async init_done gating and unavailable-swapchain propagation. |
+| 2881–2887 Web state; 6945–7505 JS shims/C bridges | `_sapp_tc_emsc_t`, `_sapp_tc_js_*`, KEEPALIVE `_sapp_tc_emsc_*`, EM_JS_DEPS; names cross the JS/C boundary and cannot be treated as unused private helpers. |
+| 7507–8110 Web resize/input/keymap/WebGL/run | `_sapp_tc_emsc_size_changed`, `_sapp_tc_emsc_*_cb`, `_sapp_tc_emsc_keymap`, `_sapp_tc_emsc_run`, `_sapp_tc_emsc_frame_animation_loop`; retain canvas keys and visibilitychange resume rebase. |
+| 13941–14601 public implementations | Each native section's `sapp_*` definitions/reachable stubs, plus shared tail `sapp_tc_window_*` metadata/visibility; acquire_swapchain and current format names replace historical get_swapchain/SBGRA8. |
 
 ### Recommended: three-way merge for patched copies
 
