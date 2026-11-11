@@ -34,3 +34,9 @@ rows retain their existing top-down order. Native checks (#1408) kept tcSimd at
 the Apple grabbers and both Windows player paths; Apple Clang already
 vectorizes the original player and recorder loops, so those sites keep their
 original loops. Their rows stay here for later measurements.
+
+Windows source-reader tests also compare offset apertures against the original
+cropped extraction loop: 642x362 visible in 656x368 coded, X/Y offsets (7,3)
+and (14,6), both stride signs, row padding, and unaligned buffers. Smaller crop
+widths cover vector boundaries. The two `crop_642x362` benchmark rows use the
+(7,3) aperture and check equality before timing, like the full-frame rows.

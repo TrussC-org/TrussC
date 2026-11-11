@@ -3,6 +3,7 @@
 struct SiteLayout {
     int width, height, outputWidth;
     size_t pitch;
+    trussc::internal::VideoDisplayRect display{0, 0, std::uint32_t(width), std::uint32_t(height)};
 };
 using RowKernel = void (*)(std::uint8_t*, std::uint8_t*, const SiteLayout&);
 struct RowSite {
@@ -83,9 +84,9 @@ const RowSite rowSites[] = {
         [](auto s, auto d, const SiteLayout& l) { originalPixels::winStaging(s, d, l.width, l.height, l.pitch); },
         [](auto s, auto d, const SiteLayout& l) { trussc::internal::copyPlayerStagingBGRA(s, d, l.width, l.height, l.pitch); }},
     {"windows_player_source_positive",
-        [](auto s, auto d, const SiteLayout& l) { originalPixels::winRGB32(s, d, l.width, l.height, static_cast<std::int32_t>(l.pitch)); },
-        [](auto s, auto d, const SiteLayout& l) { trussc::internal::copyPlayerRGB32(s, d, l.width, l.height, static_cast<std::int32_t>(l.pitch)); }},
+        [](auto s, auto d, const SiteLayout& l) { originalPixels::winRGB32(s, d, l.width, l.height, static_cast<std::int32_t>(l.pitch), l.display); },
+        [](auto s, auto d, const SiteLayout& l) { trussc::internal::copyPlayerRGB32(s, d, l.width, l.height, static_cast<std::int32_t>(l.pitch), l.display); }},
     {"windows_player_source_negative",
-        [](auto s, auto d, const SiteLayout& l) { originalPixels::winRGB32(s, d, l.width, l.height, -static_cast<std::int32_t>(l.pitch)); },
-        [](auto s, auto d, const SiteLayout& l) { trussc::internal::copyPlayerRGB32(s, d, l.width, l.height, -static_cast<std::int32_t>(l.pitch)); }},
+        [](auto s, auto d, const SiteLayout& l) { originalPixels::winRGB32(s, d, l.width, l.height, -static_cast<std::int32_t>(l.pitch), l.display); },
+        [](auto s, auto d, const SiteLayout& l) { trussc::internal::copyPlayerRGB32(s, d, l.width, l.height, -static_cast<std::int32_t>(l.pitch), l.display); }},
 };
