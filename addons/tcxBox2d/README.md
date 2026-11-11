@@ -1,7 +1,7 @@
 # tcxBox2d
 
 2D physics for [TrussC](https://github.com/TrussC-org/TrussC), built on
-[Box2D](https://box2d.org/) (fetched by CMake; version in
+[Box2D 2.4.2](https://box2d.org/) (fetched by CMake; version in
 [docs/LICENSE.md](../../docs/LICENSE.md#third-party-libraries)). Namespace `tcx::box2d`.
 
 Add `tcxBox2d` to your project's `addons.make`, then `#include <tcxBox2d.h>`.
@@ -143,6 +143,15 @@ for solid contacts.
   in Box2D's destruction-listener slot.
 
 Migration: move destroyed-side Exit cleanup before release, accept callback-return surviving Exits with null counterparts, and drain raw Step events through update.
+
+## Box2D 2.4.2 compatibility
+
+Both wrapper APIs keep their polygon welding tolerance and hull order by passing
+the checked hull to Box2D directly. Raw Box2D polygon creation now uses stronger
+welding and removes nearly collinear points; its point-array `Set()` returns
+`bool`. Raw body mass data is returned by `GetMassData()` instead of written to
+a pointer. Math types now have defaulted constructors (value initialization
+zero-initializes them; ordinary default initialization still leaves values unset).
 
 ## Raw Box2D access
 
