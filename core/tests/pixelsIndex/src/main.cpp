@@ -176,6 +176,26 @@ static void checkAllocateGuard() {
     }
 }
 
+static void checkCropEdges() {
+    for (auto format : {PixelFormat::U8, PixelFormat::F32}) {
+        Pixels source;
+        source.allocate(2, 1, 4, format);
+        source.setColor(0, 0, Color(1, 0, 0));
+        source.setColor(1, 0, Color(0, 1, 0));
+        source.crop(INT_MAX, 0, 2, 1);
+        check("crop: x + dx past INT_MAX clamps to the right edge",
+              source.getWidth() == 2 && source.getHeight() == 1 &&
+              source.getColor(0, 0).g == 1 && source.getColor(1, 0).g == 1);
+        source.allocate(1, 2, 4, format);
+        source.setColor(0, 0, Color(1, 0, 0));
+        source.setColor(0, 1, Color(0, 1, 0));
+        source.crop(0, INT_MAX, 1, 2);
+        check("crop: y + dy past INT_MAX clamps to the bottom edge",
+              source.getWidth() == 1 && source.getHeight() == 2 &&
+              source.getColor(0, 0).g == 1 && source.getColor(0, 1).g == 1);
+    }
+}
+
 // --- allocate() refuses a channel count other than 1-4 -----------------------------
 static void checkAllocateChannels() {
     for (PixelFormat fmt : {PixelFormat::U8, PixelFormat::F32}) {
@@ -404,6 +424,7 @@ TC_CORE_TEST_MAIN() {
     checkOffset();
     checkBufferCount();
     checkAllocateGuard();
+    checkCropEdges();
     checkAllocateChannels();
     checkLargeBuffers();
 
