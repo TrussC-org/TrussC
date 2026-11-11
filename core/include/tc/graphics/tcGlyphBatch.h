@@ -30,10 +30,6 @@ public:
     void setAlign(Direction h, Direction v) { alignH_ = h; alignV_ = v; }
     void setAlignToInk(bool enabled) { alignToInk_ = enabled; }
     void setWritingMode(WritingMode mode) { font_.setWritingMode(mode); }
-#ifdef TC_GLYPH_BATCH_PROTOTYPE
-    // Branch-only prototype, pending owner approval. Affects subsequent adds.
-    void setGlyphTransform(const Mat4& transform) { glyphTransform_ = transform; }
-#endif
 
     void add(uint32_t codepoint, const Color& color) {
         if (font_.atlasManager_) add(codepoint, getMatrix(), color);
@@ -42,7 +38,6 @@ public:
         if (!font_.atlasManager_ || codepoint == '\n' || codepoint == '\t') return;
         auto* glyph = font_.atlasManager_->getOrLoadGlyph(codepoint);
         if (!glyph || !glyph->isValid()) return;
-        const Mat4 glyphMatrix = matrix * glyphTransform_;
         const float s = 1.0f / font_.dpiScale_;
         float x = 0, baseline = font_.getAscent();
         if (alignToInk_) {
@@ -56,21 +51,18 @@ public:
             if (alignV_ == Direction::Center) baseline -= font_.getLineHeight() / 2;
             if (alignV_ == Direction::Bottom) baseline -= font_.getLineHeight();
             // Match Font's grid-fit rule using the supplied model matrix.
-            const auto& m = glyphMatrix.m;
+            const auto& m = matrix.m;
             const float sx = std::sqrt(m[0]*m[0] + m[4]*m[4] + m[8]*m[8]);
             const float sy = std::sqrt(m[1]*m[1] + m[5]*m[5] + m[9]*m[9]);
             const float scale = std::max(sx, sy);
             if (font_.gridFit_ && std::fabs((scale > 0 ? scale : 1) * internal::targetPixelScale() - 1) < 0.01f)
                 baseline = std::round(baseline);
         }
-        append({codepoint, x, baseline, 0, 0, 0, 1}, glyphMatrix, color);
+        append({codepoint, x, baseline, 0, 0, 0, 1}, matrix, color);
     }
     // String layout follows Font; ink pivot selection applies to independent glyphs.
     void add(const std::string& text, const Color& color) {
         if (!font_.atlasManager_) return;
-        // Font layout also reads the matrix to decide baseline grid fitting.
-        auto matrixScope = scopedMatrix();
-        multMatrix(glyphTransform_);
         const Mat4 matrix = getMatrix();
         font_.forEachGlyph(text, 0, 0, alignH_, alignV_, [&](const Font::PlacedGlyph& placed) {
             append(placed, matrix, color);
@@ -242,7 +234,6 @@ private:
     Font font_;
     std::vector<Run> runs_;
     size_t activeRuns_ = 0;
-    Mat4 glyphTransform_ = Mat4::identity();
     Direction alignH_ = Direction::Left;
     Direction alignV_ = Direction::Top;
     bool alignToInk_ = false;
