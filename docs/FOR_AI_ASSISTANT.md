@@ -295,6 +295,15 @@ font.load("myfont.ttf", 24);                  // TrueType font
 font.drawString("Hello", x, y);
 ```
 
+`GlyphBatch` retains many individually transformed glyphs. Call `setFont(font)`,
+`add(codepoint, color)` at each current matrix, then `draw()` under the intended camera
+scope. The current view/projection is applied once at draw time. `draw()` keeps the batch and reuses unchanged GPU buffers across frames;
+`draw(transform)` applies an extra uniform transform. `setAlignToInk(true)` centers
+independent glyphs on `Font::getGlyphInkBox(codepoint)` (logical pixels, baseline
+relative; half-size is width/2, height/2). String adds use Font layout. Output is
+straight alpha; colors keep float RGB. Blend is taken at draw time. Pages draw in
+first-add order, with add order inside each page; interleaved pages are grouped.
+
 #### Extending drawBitmapString
 ASCII is built in. Apps / addons register additional glyphs for any
 Unicode codepoint via `tc::bitmapfont::`. The atlas is allocated **lazily**
@@ -3148,6 +3157,7 @@ Rect Font::getBBox(const std::string & text) const  // Returns a rectangle conta
 float Font::getDefaultLineHeight() const  // Returns the font's default line height.
 int Font::getDefaultOversampling()  // Return the oversampling default for newly constructed fonts.
 float Font::getDescent() const  // Returns the font's descent below the baseline.
+Rect Font::getGlyphInkBox(uint32_t codepoint) const  // Returns a glyph's outline ink rectangle in logical pixels relative to the horizontal baseline.
 Path Font::getGlyphPath(uint32_t codepoint) const  // Returns a single glyph's vector outline as a Path.
 bool Font::getGridFit() const  // Return whether baseline grid fitting is enabled.
 bool Font::getHangingPunctuation() const  // Returns whether hanging punctuation is enabled.
@@ -3209,6 +3219,18 @@ sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Builds the pipeline 
 void FullscreenShader::createVertexBuffer()  // Creates the vertex and index buffers for the fullscreen quad.
 void FullscreenShader::draw()  // Draws a fullscreen quad with this shader.
 void FullscreenShader::setParams(const T & params)  // Sets the uniform parameter block for fullscreen drawing.
+```
+
+### GlyphBatch — Retains transformed glyph quads for repeated drawing with one draw per atlas page.
+
+```cpp
+void GlyphBatch::add(uint32_t codepoint, const Color & color) [+2]  // Appends colored glyph quads at the current matrix or an explicit model matrix.
+void GlyphBatch::clear()  // Discards retained geometry while keeping the font and batch settings.
+void GlyphBatch::draw() [+1]  // Draws retained glyphs using the current target and blend; an optional transform applies through a uniform.
+void GlyphBatch::setAlign(Direction h, Direction v)  // Sets horizontal and vertical alignment for subsequent adds; defaults to Left/Top like Font.
+void GlyphBatch::setAlignToInk(bool enabled)  // Centers subsequent independent glyphs on their outline ink box instead of advance and line metrics.
+void GlyphBatch::setFont(const Font & font)  // Clears the batch and retains a copy of a Font and its current settings.
+void GlyphBatch::setWritingMode(WritingMode mode)  // Sets writing mode for subsequent string adds; independent codepoints ignore it.
 ```
 
 ### GrabberFrame — Pairs a captured camera frame with its capture-time timestamp.

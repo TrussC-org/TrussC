@@ -51,6 +51,7 @@
 #include "tc/gpu/shaders/sglPremult.glsl.h"
 // Same, from core/shaders/sglCoverage.glsl: internal::sglCoverageShader().
 #include "tc/gpu/shaders/sglCoverage.glsl.h"
+#include "tc/gpu/shaders/glyphBatch.glsl.h"
 
 #ifdef __APPLE__
 #include <pthread.h>
@@ -388,6 +389,13 @@ sg_shader sglCoverageShader() {
         shd = sg_make_shader(tc_sglcov_coverage_shader_desc(sg_query_backend()));
     }
     return shd;
+}
+
+// Host-owned, shared across hot reload guests, like the sgl coverage program.
+sg_shader glyphBatchShader() {
+    static sg_shader shader = {};
+    if (!shader.id && sg_isvalid()) shader = sg_make_shader(tc_glyphbatch_coverage_shader_desc(sg_query_backend()));
+    return shader;
 }
 
 void resizeSgl(int newMaxVertices, int newMaxCommands) {

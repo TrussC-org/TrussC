@@ -66740,3 +66740,104 @@ details.ko = '''
 - 초기값이 미설정인 `optional<AudioDeviceInfo>`입니다. `AudioEngine::listDevices()`의 출력 항목을 대입합니다. 설정하면 해당 백엔드가 `AudioSettings::backend`보다 우선하며 `uniqueId`가 `deviceName`보다 우선합니다. 이름 변경은 비교에 영향을 주지 않습니다.
 - ID가 비어 있거나 없으면 다른 장치를 열지 않고 Warning과 함께 초기화에 실패합니다. 이름 또는 기본 장치 선택으로 돌아가려면 optional을 초기화합니다. 인수 없는 `AudioEngine::init()`은 이 선택을 유지하지 않습니다.
 '''
+
+["GlyphBatch"]
+category = "font"
+keywords = ["glyph", "batch", "retained", "atlas", "text"]
+description.en = "Retains transformed glyph quads for repeated drawing with one draw per atlas page."
+description.ja = "変換済みのグリフを保持し、アトラスページごとに 1 回の描画で繰り返し表示します。"
+description.ko = "변환된 글리프를 유지하고 아틀라스 페이지마다 한 번의 그리기로 반복 표시합니다."
+details.en = '''
+Call setFont with a loaded Font. Independent glyphs capture the current model matrix at add time; the explicit Mat4 replaces it. Draw under the intended camera. draw applies the active view/projection once and does not apply the current model again, does not clear, and uploads vertex/index buffers only after adds change the geometry. draw(transform) applies transform × recorded positions through a uniform. clear discards geometry; setFont also clears and retains a copy of the loaded font/settings.
+Pages draw in first-add order; glyph order is preserved within each page. Interleaved pages are grouped by page. Use separate batches when overlapping glyphs on different pages need strict painter order. Blend and depth come from the active target at draw time, including its format and MSAA. Colors retain unclamped float RGB and normal Color alpha. Output is straight alpha like drawString; Screen/Multiply use the framework's corresponding premultiplied blend equations. Atlas sampling is trilinear with mips when the Font permits them (mip 0 at bilinear-safe rates of at most two texels per pixel, like Font); current page views and dimensions are resolved at draw time, so atlas growth preserves retained quads. Rebuild the batch after Font::clearAtlas.
+With custom blends (#1436), BlendDesc::addKeepAlpha() uses SRC_ALPHA/ONE for RGB and ZERO/ONE for alpha: light-only addition keeping destination alpha, equivalent to premultiplied ONE/ONE on coverage. That descriptor is not yet part of this branch.
+'''
+details.ja = '''
+読み込み済みの Font を setFont に渡します。単独グリフは add 時のモデル行列を記録し、明示した Mat4 はこの行列を置き換えます。使いたいカメラの下で draw してください。draw は現在の view/projection を一度適用し、現在のモデル行列は再適用せず、内容を消去しません。頂点・インデックスバッファは add によって内容が変わったときだけ転送します。draw(transform) は uniform で transform × 記録済み座標を適用します。clear は形状を破棄します。setFont も形状を消去し、フォントと設定のコピーを保持します。
+ページは最初に追加された順に描画し、各ページ内では追加順を保ちます。ページが交互になる場合はページ単位にまとめます。異なるページのグリフが重なり、厳密な描画順が必要な場合はバッチを分けてください。ブレンド、深度、描画先の形式、MSAA は draw 時に反映します。RGB は範囲外の float 値を保持し、Color の alpha も有効です。出力は drawString と同じ straight alpha です。Screen・Multiply ではフレームワークの対応する乗算済みブレンド式を使います。Font で有効な場合はミップ付きトライリニア補間を使います。Font と同様に、1 ピクセルあたり 2 テクセル以下の縮小では mip 0 を使います。ページ画像とサイズを描画時に解決するため、アトラス拡張後も座標を保ちます。Font::clearAtlas 後はバッチを作り直してください。
+カスタムブレンド（#1436）の BlendDesc::addKeepAlpha() は RGB に SRC_ALPHA/ONE、alpha に ZERO/ONE を使います。描画先 alpha を保った発光用加算で、カバレッジに対する乗算済み ONE/ONE と等価です。このブランチにはまだこの記述子は含まれません。
+'''
+details.ko = '''
+로드된 Font를 setFont에 전달합니다. 독립 글리프는 add 시점의 모델 행렬을 기록하며 명시적 Mat4는 이를 대체합니다. 사용할 카메라 아래에서 draw를 호출합니다. draw는 현재 view/projection을 한 번 적용하고 현재 모델을 다시 적용하거나 내용을 지우지 않으며, add로 형상이 변경된 경우에만 정점/인덱스 버퍼를 업로드합니다. draw(transform)은 uniform으로 transform × 기록된 좌표를 적용합니다. clear는 형상을 버립니다. setFont도 형상을 지우고 로드된 폰트와 설정의 복사본을 유지합니다.
+페이지는 처음 추가된 순서로 그리며 각 페이지 안에서는 추가 순서를 유지합니다. 교차하는 페이지는 페이지별로 묶습니다. 서로 다른 페이지의 겹친 글리프에 엄격한 그리기 순서가 필요하면 배치를 나눕니다. 블렌드, 깊이, 대상 형식 및 MSAA는 draw 시점에 적용합니다. RGB는 범위 밖 float 값을 유지하며 Color alpha도 적용합니다. 출력은 drawString과 같은 straight alpha입니다. Screen/Multiply는 프레임워크의 해당 사전 곱셈 블렌드 식을 사용합니다. Font가 허용하면 밉을 사용하는 삼선형 샘플링을 적용합니다. Font처럼 픽셀당 2텍셀 이하인 경우에는 mip 0을 사용합니다. 현재 페이지 이미지와 크기를 그릴 때 확인하므로 아틀라스가 커져도 유지된 좌표가 맞습니다. Font::clearAtlas 후에는 배치를 다시 만듭니다.
+사용자 지정 블렌드(#1436)의 BlendDesc::addKeepAlpha()는 RGB에 SRC_ALPHA/ONE, alpha에 ZERO/ONE을 사용합니다. 대상 alpha를 유지하는 발광용 가산이며 커버리지에 대한 사전 곱셈 ONE/ONE과 같습니다. 이 브랜치에는 아직 해당 서술자가 포함되지 않습니다.
+'''
+related = ["Font", "Font::getGlyphInkBox", "GlyphBatch::add", "GlyphBatch::draw"]
+snippet = '''
+GlyphBatch batch;
+batch.setFont(font);
+batch.add(U'A', Color(2.0f, 1.0f, 0.5f));
+batch.draw();
+'''
+
+["GlyphBatch::setFont"]
+category = "font"
+description.en = "Clears the batch and retains a copy of a Font and its current settings."
+description.ja = "バッチを消去し、Font と現在の設定のコピーを保持します。"
+description.ko = "배치를 지우고 Font와 현재 설정의 복사본을 유지합니다."
+related = ["GlyphBatch", "Font::load"]
+
+["GlyphBatch::setAlign"]
+category = "font"
+description.en = "Sets horizontal and vertical alignment for subsequent adds; defaults to Left/Top like Font."
+description.ja = "以後の追加に使う水平・垂直揃えを設定します。既定値は Font と同じ Left・Top です。"
+description.ko = "이후 추가에 사용할 가로/세로 정렬을 설정합니다. 기본값은 Font와 같은 Left/Top입니다."
+related = ["GlyphBatch::add", "GlyphBatch::setAlignToInk"]
+
+["GlyphBatch::setAlignToInk"]
+category = "font"
+description.en = "Centers subsequent independent glyphs on their outline ink box instead of advance and line metrics."
+description.ja = "以後の単独グリフを、送り幅と行メトリクスの代わりに輪郭のインク矩形の中心へ揃えます。"
+description.ko = "이후 독립 글리프를 전진 폭과 행 메트릭 대신 윤곽 잉크 사각형의 중심에 정렬합니다."
+details.en = "Defaults to false. When true, independent codepoint adds ignore setAlign. The pivot excludes raster/filter padding and is a box center, not an optical centroid. String adds keep drawString layout."
+details.ja = "既定値は false です。true のとき、単独コードポイントの追加は setAlign を使いません。基準点はラスタライズやフィルターの余白を含まない矩形の中心で、見た目の重心ではありません。文字列の追加は drawString の配置を保ちます。"
+details.ko = "기본값은 false입니다. true이면 독립 코드 포인트 추가는 setAlign을 무시합니다. 기준점은 래스터/필터 여백을 제외한 사각형의 중심이며 시각적 무게 중심은 아닙니다. 문자열 추가는 drawString 배치를 유지합니다."
+related = ["Font::getGlyphInkBox", "GlyphBatch::setAlign"]
+
+["GlyphBatch::setWritingMode"]
+category = "font"
+description.en = "Sets writing mode for subsequent string adds; independent codepoints ignore it."
+description.ja = "以後の文字列追加に使う書字方向を設定します。単独コードポイントには影響しません。"
+description.ko = "이후 문자열 추가의 쓰기 방향을 설정합니다. 독립 코드 포인트에는 영향을 주지 않습니다."
+related = ["Font::setWritingMode", "GlyphBatch::add"]
+
+["GlyphBatch::add"]
+category = "font"
+description.en = "Appends colored glyph quads at the current matrix or an explicit model matrix."
+description.ja = "現在の行列または明示したモデル行列で、色付きグリフを追加します。"
+description.ko = "현재 행렬 또는 명시적 모델 행렬로 색상이 있는 글리프를 추가합니다."
+details.en = "The codepoint overload adds one independent glyph without cursor advance or vertical substitution. The Mat4 overload replaces the current model matrix; the active camera view/projection is applied once at draw time. The UTF-8 string overload uses the retained Font's drawString layout, including wrapping, vertical forms, and TCY. Color floats are copied without clamping. Additions mark GPU geometry dirty; existing recorded draws retain their previous buffers. Empty ink emits no quad. Call on the main thread."
+details.ja = "コードポイント版は、カーソル送りや縦書き字形への置換を行わず、単独グリフを追加します。Mat4 版は現在のモデル行列を置き換えます。現在のカメラの view/projection は draw 時に一度適用します。UTF-8 文字列版は、保持した Font の drawString と同じ配置を使い、折り返し、縦書き字形、縦中横を反映します。色の float 値は制限せずにコピーします。追加後は GPU 形状を更新対象にしますが、記録済みの描画は以前のバッファを保持します。インクが空の場合は四角形を追加しません。メインスレッドで呼び出してください。"
+details.ko = "코드 포인트 버전은 커서 전진이나 세로쓰기 글리프 대체 없이 독립 글리프를 추가합니다. Mat4 버전은 현재 모델 행렬을 대체합니다. 현재 카메라의 view/projection은 draw 시점에 한 번 적용합니다. UTF-8 문자열 버전은 유지한 Font의 drawString 배치를 사용하며 자동 줄바꿈, 세로쓰기 글리프 및 다테추요코를 반영합니다. 색상의 float 값은 제한 없이 복사합니다. 추가하면 GPU 형상을 갱신 대상으로 표시하지만 기록된 그리기는 이전 버퍼를 유지합니다. 잉크가 비어 있으면 사각형을 추가하지 않습니다. 메인 스레드에서 호출합니다."
+related = ["GlyphBatch::draw", "Font::forEachGlyph"]
+
+["GlyphBatch::draw"]
+category = "font"
+description.en = "Draws retained glyphs using the current target and blend; an optional transform applies through a uniform."
+description.ja = "保持したグリフを現在の描画先とブレンドで描画し、任意の変換を uniform で適用します。"
+description.ko = "유지한 글리프를 현재 대상과 블렌드로 그리고 선택적 변환을 uniform으로 적용합니다."
+details.en = "draw() uses identity; draw(transform) applies transform × recorded model positions, then the active view/projection. Neither overload reapplies the current model or clears the batch. Draw under the intended camera; camera changes do not re-upload geometry. Unchanged batches reuse their vertex/index buffers across frames. See GlyphBatch for straight alpha, page ordering and mip sampling."
+details.ja = "draw() は単位変換を使います。draw(transform) は記録済みのモデル座標に transform を左から適用し、続いて現在の view/projection を適用します。どちらも現在のモデルを再適用せず、バッチを消去しません。使いたいカメラの下で描画してください。カメラ変更時も形状を再転送しません。内容が変わらなければ、フレームをまたいで頂点・インデックスバッファを再利用します。straight alpha、ページ順、ミップサンプリングは GlyphBatch を参照してください。"
+details.ko = "draw()는 단위 변환을 사용합니다. draw(transform)은 기록된 모델 좌표에 transform을 왼쪽에서 적용한 뒤 현재 view/projection을 적용합니다. 두 버전 모두 현재 모델을 다시 적용하거나 배치를 지우지 않습니다. 사용할 카메라 아래에서 그리며 카메라 변경은 형상 재업로드를 일으키지 않습니다. 내용이 바뀌지 않으면 프레임 간 정점/인덱스 버퍼를 재사용합니다. straight alpha, 페이지 순서 및 밉 샘플링은 GlyphBatch를 참조합니다."
+related = ["GlyphBatch", "GlyphBatch::clear"]
+
+["GlyphBatch::clear"]
+category = "font"
+description.en = "Discards retained geometry while keeping the font and batch settings."
+description.ja = "フォントとバッチ設定を保ったまま、保持した形状を破棄します。"
+description.ko = "폰트와 배치 설정을 유지하면서 보관한 형상을 버립니다."
+details.en = "Already submitted draws keep valid GPU resources until replay. draw does not clear automatically."
+details.ja = "送信済みの描画は再生まで有効な GPU リソースを保持します。draw は自動で消去しません。"
+details.ko = "제출된 그리기는 재생할 때까지 유효한 GPU 리소스를 유지합니다. draw는 자동으로 지우지 않습니다."
+related = ["GlyphBatch::draw"]
+
+["Font::getGlyphInkBox"]
+category = "font"
+keywords = ["ink", "glyph", "pivot", "bounds", "half-size"]
+description.en = "Returns a glyph's outline ink rectangle in logical pixels relative to the horizontal baseline."
+description.ja = "水平ベースラインを基準に、グリフ輪郭のインク矩形を論理ピクセルで返します。"
+description.ko = "가로 기준선을 기준으로 글리프 윤곽의 잉크 사각형을 논리 픽셀로 반환합니다."
+details.en = "Excludes advance, line metrics, atlas padding and oversampling/filter margins. Y points down; ascenders have negative Y. Rect::getCenter gives the box pivot and Vec2(box.width / 2, box.height / 2) gives half-size. An unloaded font or empty outline returns an empty Rect; missing glyphs follow Font's .notdef fallback. This metric does not rasterize or upload glyphs."
+details.ja = "送り幅、行メトリクス、アトラスの余白、オーバーサンプリングやフィルターの余白を含みません。Y は下向きで、ベースラインより上の部分は負の Y になります。Rect::getCenter で矩形の基準点、Vec2(box.width / 2, box.height / 2) で半サイズを取得できます。未読み込みや空の輪郭では空の Rect を返し、未収録文字は Font の .notdef に置き換えます。この計測はグリフのラスタライズや転送を行いません。"
+details.ko = "전진 폭, 행 메트릭, 아틀라스 여백 및 오버샘플링/필터 여백을 제외합니다. Y는 아래쪽이며 기준선 위 부분은 음수 Y입니다. Rect::getCenter는 사각형 기준점을, Vec2(box.width / 2, box.height / 2)는 절반 크기를 제공합니다. 로드되지 않은 폰트나 빈 윤곽은 빈 Rect를 반환하며 없는 글리프는 Font의 .notdef로 대체합니다. 이 측정은 글리프를 래스터화하거나 업로드하지 않습니다."
+related = ["GlyphBatch::setAlignToInk", "Font::getGlyphPath", "Rect"]
