@@ -5,8 +5,8 @@
 // - a page holds one byte of glyph coverage per texel: getMemoryUsage() is
 //   the sum of width * height over the pages, and each page's CPU copy is
 //   exactly width * height bytes,
-// - 300 glyphs loaded one after another grow the page through several
-//   doubling steps, and every glyph is still in the page afterwards: the
+// - 300 glyphs loaded one after another grow an unrecorded page,
+//   and every glyph is still in the page afterwards: the
 //   texel at the center of each glyph's UV rectangle holds full coverage
 //   (the test font's glyph is a filled square), and texels outside the
 //   glyph rectangles hold none.
@@ -110,7 +110,9 @@ static const uint32_t kCodepointCount = 600;
 // Glyph 0: empty .notdef; 600 squares (100..900 x 0..800); empty space.
 // Codepoints U+4E00..U+4E00+kCodepointCount-1 have distinct glyph indices,
 // ' ' maps to the final glyph. 1000 units per em, ascender 800, descender -200.
-static Bytes makeSquareFont(bool withCounter = false) {
+// The large-cell variant uses descender 0 (388 padded texels at 128px/3x)
+// and maps U+4E00+7*i to glyph i+1 to match the reported per-call workload.
+static Bytes makeSquareFont(bool withCounter = false, bool largeCells = false) {
     Bytes head;
     put32(head, 0x00010000);
     put32(head, 0x00010000);
@@ -129,7 +131,7 @@ static Bytes makeSquareFont(bool withCounter = false) {
     Bytes hhea;
     put32(hhea, 0x00010000);
     put16(hhea, 800);
-    put16(hhea, (uint16_t)-200);
+    put16(hhea, largeCells ? 0 : (uint16_t)-200);
     put16(hhea, 0);
     put16(hhea, 1000);
     for (int i = 0; i < 11; i++) put16(hhea, 0);
@@ -154,11 +156,19 @@ static Bytes makeSquareFont(bool withCounter = false) {
         Bytes s12;
         put16(s12, 12);
         put16(s12, 0);
-        put32(s12, 16 + 12 * 2);
+        put32(s12, 16 + 12 * (largeCells ? kCodepointCount + 1 : 2));
         put32(s12, 0);
-        put32(s12, 2);
+        put32(s12, largeCells ? kCodepointCount + 1 : 2);
         put32(s12, 0x20); put32(s12, 0x20); put32(s12, kCodepointCount + 1);
-        put32(s12, kFirstCodepoint); put32(s12, kFirstCodepoint + kCodepointCount - 1); put32(s12, 1);
+        if (largeCells) {
+            for (uint32_t i = 0; i < kCodepointCount; ++i) {
+                put32(s12, kFirstCodepoint + 7 * i);
+                put32(s12, kFirstCodepoint + 7 * i);
+                put32(s12, i + 1);
+            }
+        } else {
+            put32(s12, kFirstCodepoint); put32(s12, kFirstCodepoint + kCodepointCount - 1); put32(s12, 1);
+        }
         cmap.insert(cmap.end(), s12.begin(), s12.end());
     }
 
@@ -208,12 +218,15 @@ static string utf8(uint32_t cp) {
 static void checkCpuPages() {
     const Bytes font = makeSquareFont();
     internal::FontAtlasManager mgr;
-    check("the built font loads", mgr.setupFromMemory(font.data(), font.size(), 48));
+    check("the built small font loads", mgr.setupFromMemory(font.data(), font.size(), 32));
 
     const size_t initialBytes = mgr.getMemoryUsage();
     check("a new font has one 256x256 page of 65536 bytes",
           mgr.getAtlasCount() == 1 && initialBytes == 256u * 256u,
           "bytes " + to_string(initialBytes));
+    check("the built font loads", mgr.setupFromMemory(font.data(), font.size(), 48));
+    check("a larger font reserves its recording size before packing",
+          mgr.getAtlas(0).getWidth() == 512 && mgr.getAtlas(0).getHeight() == 512);
 
     const uint32_t kGlyphs = 300;
     int invalid = 0;
@@ -236,7 +249,7 @@ static void checkCpuPages() {
           mgr.getMemoryUsage() == pageBytes,
           to_string(mgr.getMemoryUsage()) + " vs " + to_string(pageBytes));
     check("each page's CPU copy is width * height bytes", sizesMatch);
-    check("the page grew through more than one doubling step (>= 1024)", maxSide >= 1024,
+    check("the unrecorded page grew (>= 1024)", maxSide >= 1024,
           "largest side " + to_string(maxSide));
 
     // Every glyph is still where its UVs point after the growth steps, and
@@ -372,6 +385,7 @@ private:
 };
 
 #include "midpassChecks.h"
+bool g_burstPerGlyph = false;
 #include "burstChecks.h"
 
 } // namespace
@@ -386,7 +400,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
         return g_fail == 0 ? 0 : 1;
     }
 
-    const Bytes font = makeSquareFont(midpassCheck || burstCheck);
+    g_burstPerGlyph = burstCheck && argc > 2 && strcmp(argv[2], "--per-glyph") == 0;
+    const Bytes font = makeSquareFont(midpassCheck || burstCheck, g_burstPerGlyph);
     g_fontPath = (filesystem::temp_directory_path() / "fontAtlasR8_square.ttf").string();
     {
         ofstream f(g_fontPath, ios::binary);

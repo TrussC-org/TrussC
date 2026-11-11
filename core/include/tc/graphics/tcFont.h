@@ -206,6 +206,7 @@ private:
     int rowHeight_ = 0;          // Current row height
     int width_ = 0;
     int height_ = 0;
+    bool expanded_ = false;     // Only grown pages have an occupied top-left quadrant.
 
     // GPU resources
     sg_image texture_ = {};
@@ -537,14 +538,7 @@ public:
     sg_view recordAtlas(size_t index) {
         auto& page = atlases_[index];
         auto& atlas = *page;
-        if (!atlas.sealed_) {
-            // Give large glyphs room without allocating 8192 squared for every
-            // small label. All growth is CPU-only, before the first recorded UV.
-            const int desired = std::min(maxAtlasSize_, std::max(INITIAL_ATLAS_SIZE,
-                std::min(2048, fontSize_ * oversample_ * 8)));
-            while (atlas.width_ < desired && expandAtlas(index)) {}
-            atlas.sealed_ = true;
-        }
+        atlas.sealed_ = true;
         atlas.mipmaps_ = wantMipmaps_ && mipsBuilt_;
         if (atlas.textureDirty_ && !atlas.pendingView_.id) {
             atlas.pendingView_ = sg_alloc_view();
@@ -690,6 +684,7 @@ private:
         atlas.pixels_ = std::move(newPixels);
         atlas.width_ = newWidth;
         atlas.height_ = newHeight;
+        atlas.expanded_ = true;
 
         // Start filling from top-right corner of new space
         // Old content is in top-left quadrant (newWidth/2 x newHeight/2)
@@ -838,7 +833,7 @@ private:
 
             // After expand, old content occupies top-left quadrant (width/2 x height/2).
             // While in that vertical range, start rows from the right half.
-            if (atlas.width_ > INITIAL_ATLAS_SIZE && atlas.currentY_ < atlas.height_ / 2) {
+            if (atlas.expanded_ && atlas.currentY_ < atlas.height_ / 2) {
                 atlas.currentX_ = atlas.width_ / 2 + GLYPH_PADDING;
             } else {
                 atlas.currentX_ = GLYPH_PADDING;
@@ -956,7 +951,7 @@ private:
             // Check if the glyph fits horizontally in the next row
             // (right-half rows are narrower)
             int nextX = GLYPH_PADDING;
-            if (atlas.width_ > INITIAL_ATLAS_SIZE && nextY < atlas.height_ / 2) {
+            if (atlas.expanded_ && nextY < atlas.height_ / 2) {
                 nextX = atlas.width_ / 2 + GLYPH_PADDING;
             }
             if (nextX + width <= atlas.width_) {

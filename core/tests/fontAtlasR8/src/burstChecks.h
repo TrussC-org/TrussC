@@ -2,7 +2,7 @@
 // count production uploads without adding counters to the Font API.
 bool burstCompleted = false;
 
-class BurstCheckApp : public App {
+class BurstCheckNode : public Node {
     Font font_;
     Fbo fbo_;
     Fbo later_;
@@ -25,6 +25,12 @@ public:
         const auto before = sg_query_stats().total.images;
         map<uint32_t, size_t> images;
         map<size_t, int> creations;
+        map<size_t, int> glyphsPerPage;
+        const auto manager = internal::SharedFontCache::getInstance().get(
+            internal::FontCacheKey{g_fontPath, 128, 0, mipmaps_, 3});
+        check("burst: inspect the same cached atlas manager", bool(manager));
+        if (!manager) { exitApp(); return; }
+        const int stride = g_burstPerGlyph ? 7 : 1;
         size_t liveBytes = 0;
         int mipRebuilds = 0;
         auto observe = [&] {
@@ -48,8 +54,9 @@ public:
         int completed = 0;
         for (int i = 0; i < count; ++i) {
             // A separated grid leaves every first/last glyph observable.
-            font_.drawString(utf8(kFirstCodepoint + i), 96 + (i % 25) * 140,
+            font_.drawString(utf8(kFirstCodepoint + stride * i), 96 + (i % 25) * 140,
                              110 + (i / 25) * 172, Direction::Center, Direction::Center);
+            ++glyphsPerPage[manager->getOrLoadGlyph(kFirstCodepoint + stride * i)->getAtlasIndex()];
             observe();
             ++completed;
             if (limit && liveBytes >= limit) break;
@@ -64,6 +71,22 @@ public:
                completed, font_.getAtlasCount(), after.inited - before.inited, mipRebuilds,
                maxCreations, images.size(), liveBytes, seconds);
         fflush(stdout);
+        // GlyphInfo includes the oversampling filter margin. The first glyph's
+        // top inset gives the packer's padding; rows also leave that inset.
+        const auto* glyph = manager->getOrLoadGlyph(kFirstCodepoint);
+        const auto* page = font_.getAtlas(0);
+        const int padding = int(lround(glyph->getV0() * page->getHeight()));
+        const int cellWidth = int(lround(glyph->getWidth() * manager->getOversample())) + padding;
+        const int cellHeight = int(lround(glyph->getHeight() * manager->getOversample())) + padding;
+        const int capacity = ((page->getWidth() - padding) / cellWidth) *
+                             (page->getHeight() / (cellHeight + padding));
+        const size_t sanePages = (completed + capacity - 1) / capacity + 1;
+        printf("FONT_PACKING variant=%s cell=%dx%d page=%dx%d capacity=%d max_pages=%zu pages=%zu glyphs_per_page=",
+               g_burstPerGlyph ? "per-glyph" : "original", cellWidth, cellHeight,
+               page->getWidth(), page->getHeight(), capacity, sanePages, font_.getAtlasCount());
+        for (const auto& entry : glyphsPerPage) printf("%zu:%d,", entry.first, entry.second);
+        printf("\n");
+        check("burst: pages fill before spilling", font_.getAtlasCount() <= sanePages);
         check("burst: all requested distinct glyphs rasterized", completed == count && font_.getLoadedGlyphCount() >= size_t(count));
         check("burst: image creations/uploads per page per flush <= 1", maxCreations <= 1 &&
               after.inited - before.inited == font_.getAtlasCount() && images.size() == font_.getAtlasCount() &&
@@ -88,8 +111,8 @@ public:
         creations.clear();
         const auto secondBefore = sg_query_stats().total.images;
         fbo_.begin();
-        font_.drawString(utf8(kFirstCodepoint + 500), -300, -300);
-        font_.drawString(utf8(kFirstCodepoint + 500), -300, -300);
+        font_.drawString(utf8(kFirstCodepoint + stride * 500), -300, -300);
+        font_.drawString(utf8(kFirstCodepoint + stride * 500), -300, -300);
         fbo_.end();
         observe();
         check("burst: next pass coalesces fresh glyphs", sg_query_stats().total.images.inited - secondBefore.inited == 1);
@@ -98,8 +121,8 @@ public:
         const auto thirdBefore = sg_query_stats().total.images;
         later_.begin(0, 0, 0, 0);
         setColor(1, .5f, .25f);
-        font_.drawString(utf8(kFirstCodepoint + 501), 128, 96, Direction::Center, Direction::Center);
-        font_.drawString(utf8(kFirstCodepoint + 501), -300, -300);
+        font_.drawString(utf8(kFirstCodepoint + stride * 501), 128, 96, Direction::Center, Direction::Center);
+        font_.drawString(utf8(kFirstCodepoint + stride * 501), -300, -300);
         later_.end();
         observe();
         check("burst: fresh coverage on a published page uploads once",
@@ -116,4 +139,9 @@ public:
         burstCompleted = true;
         exitApp();
     }
+};
+
+class BurstCheckApp : public App {
+public:
+    void setup() override { addChild(make_shared<BurstCheckNode>()); }
 };
