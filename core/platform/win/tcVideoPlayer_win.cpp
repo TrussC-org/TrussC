@@ -13,11 +13,13 @@
 #ifdef _WIN32
 
 #include "TrussC.h"
+#include "tcVideoPlayerPixels.h"
 #include <vector>
 #include <chrono>
 #include <fstream>
 #include "tc/video/internal/tcVideoNotifyQueue.h"
 #include "tc/video/internal/tcMatroskaDuration.h"
+#include "tc/video/internal/tcVideoDisplayRect.h"
 
 #include <windows.h>
 #include <mfapi.h>
@@ -475,24 +477,8 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
             state_->playbackErrors_.report("Video frame stride exceeds decode limits", E_INVALIDARG);
             return false;
         }
-        // Copy row by row (handle pitch/stride)
-        unsigned char* src = static_cast<unsigned char*>(mapped.pData);
-        unsigned char* dst = state_->pixels_.data();
-        int rowBytes = state_->width_ * 4;
-
-        for (int y = 0; y < state_->height_; y++) {
-            // BGRA to RGBA conversion
-            for (int x = 0; x < state_->width_; x++) {
-                int srcIdx = x * 4;
-                int dstIdx = x * 4;
-                dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
-                dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
-                dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
-                dst[dstIdx + 3] = src[srcIdx + 3]; // A <- A
-            }
-            src += mapped.RowPitch;
-            dst += rowBytes;
-        }
+        internal::copyPlayerStagingBGRA(static_cast<const unsigned char*>(mapped.pData),
+            state_->pixels_.data(), state_->width_, state_->height_, mapped.RowPitch);
 
         state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0);
         return true;
@@ -1286,11 +1272,27 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
         // during the read).
         UINT32 width = 0, height = 0;
         LONG stride = 0;
+        internal::VideoDisplayRect display = {};
         if (SUCCEEDED(hr) && sample) {
             ComPtr<IMFMediaType> curType;
             if (SUCCEEDED(reader->GetCurrentMediaType(
                     MF_SOURCE_READER_FIRST_VIDEO_STREAM, &curType))) {
                 MFGetAttributeSize(curType.Get(), MF_MT_FRAME_SIZE, &width, &height);
+                display = {0, 0, width, height};
+                MFVideoArea aperture = {};
+                UINT32 apertureBytes = 0;
+                HRESULT apertureResult = curType->GetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE,
+                    reinterpret_cast<UINT8*>(&aperture), sizeof(aperture), &apertureBytes);
+                if (FAILED(apertureResult) || apertureBytes != sizeof(aperture)) {
+                    apertureResult = curType->GetBlob(MF_MT_GEOMETRIC_APERTURE,
+                        reinterpret_cast<UINT8*>(&aperture), sizeof(aperture), &apertureBytes);
+                }
+                if (SUCCEEDED(apertureResult) && apertureBytes == sizeof(aperture)) {
+                    display = internal::videoDisplayRect(width, height,
+                        int64_t(aperture.OffsetX.value) * 65536 + aperture.OffsetX.fract,
+                        int64_t(aperture.OffsetY.value) * 65536 + aperture.OffsetY.fract,
+                        aperture.Area.cx, aperture.Area.cy);
+                }
                 UINT32 mfStride = 0;
                 if (SUCCEEDED(curType->GetUINT32(MF_MT_DEFAULT_STRIDE, &mfStride))) {
                     stride = (LONG)(INT32)mfStride;  // negative => bottom-up
@@ -1322,36 +1324,15 @@ static bool tcv_extract_frame_win(const std::string& path, Pixels& outPixels,
                         status->reject(length, 0);
                         buffer->Unlock();
                     } else {
-                        try { decoded.allocate((int)width, (int)height, 4); }
+                        try { decoded.allocate((int)display.width, (int)display.height, 4); }
                         catch (const std::bad_alloc&) {
                             status->reject(outputBytes, 0);
                             decoded.clear();
                         }
                         if (decoded.getData()) {
-                        unsigned char* dst = decoded.getData();
-                        int rowBytes = (int)width * 4;
-
-                        for (UINT32 y = 0; y < height; y++) {
-                            // Negative stride means the image is stored bottom-up.
-                            UINT32 srcRow = stride < 0 ? (height - 1 - y) : y;
-                            const BYTE* src = data + (size_t)srcRow * absStride;
-                            // BGRA to RGBA conversion
-                            for (UINT32 x = 0; x < width; x++) {
-                                int srcIdx = x * 4;
-                                int dstIdx = x * 4;
-                                dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
-                                dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
-                                dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
-                                // RGB32 from the source reader is BGRX: the 4th byte
-                                // is undefined padding, not alpha. Force opaque so the
-                                // extracted frame isn't fully transparent.
-                                dst[dstIdx + 3] = 255;             // A = opaque
-                            }
-                            dst += rowBytes;
-                        }
-
-                        buffer->Unlock();
-                        ok = true;
+                            internal::copyPlayerRGB32(data, decoded.getData(), width, height, stride, display);
+                            buffer->Unlock();
+                            ok = true;
                         } else { buffer->Unlock(); }
                     }
                 }

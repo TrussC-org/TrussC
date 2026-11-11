@@ -1,5 +1,6 @@
 #include <tc/utils/tcSimd.h>
 #include "../../../platform/win/tcVideoGrabberPixels.h"
+#include "../../../platform/win/tcVideoPlayerPixels.h"
 #include "../../common/tcCoreTest.h"
 #include <algorithm>
 #include <cstdio>
@@ -22,6 +23,9 @@
 #endif
 
 namespace {
+#include "originalPixels.h"
+#include "sitePixels.h"
+
 namespace simd = trussc::simd;
 using Bytes = std::vector<std::uint8_t>;
 using Swizzle = void (*)(const std::uint8_t*, std::uint8_t*, std::size_t, bool);
@@ -151,9 +155,70 @@ void originalRecorder(const unsigned char* rgba, unsigned char* dst) {
     }
 }
 
+// Compare the complete destination (including untouched padding/cropped rows)
+// and source against the original platform loops, independently of --bench.
+void rowConversions() {
+    for (int width : {1, 3, 7, 15, 16, 17, 31, 33, 65}) {
+        for (int height : {1, 3, 6}) {
+            for (int padding : {0, 4, 64}) {
+                for (int crop : {0, 5}) {
+                    const SiteLayout layout{width, height, width + crop,
+                        static_cast<size_t>(width + crop) * 4 + padding};
+                    for (size_t srcOffset : {0u, 1u, 7u}) {
+                        for (size_t dstOffset : {0u, 3u}) {
+                            const size_t dstExtent = (layout.outputWidth * 4 + padding) * (height + 2);
+                            for (const auto& site : rowSites) {
+                                // Allocate the SDK's pitched frame extent, or
+                                // exactly the recorder's packed input extent.
+                                const size_t extent = site.packedInput ? size_t(width) * height * 4 :
+                                    layout.pitch * height;
+                                Bytes src(srcOffset + extent);
+                                fill(src);
+                                const auto original = src;
+                                Bytes expected(dstOffset + dstExtent + 19, 0xA5), result = expected;
+                                site.before(src.data() + srcOffset, expected.data() + dstOffset, layout);
+                                site.after(src.data() + srcOffset, result.data() + dstOffset, layout);
+                                check(expected == result && src == original, site.name, width * height);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Aperture origins are in top-down coded coordinates, even for bottom-up storage.
+    for (int width : {1, 3, 15, 16, 17, 31, 33, 642}) {
+        const int codedWidth = width == 642 ? 656 : width + 14;
+        for (const auto& display : {trussc::internal::VideoDisplayRect{7, 3, std::uint32_t(width), 362},
+                                   trussc::internal::VideoDisplayRect{14, 6, std::uint32_t(width), 362}}) {
+            for (size_t padding : {0u, 4u, 64u}) {
+                const SiteLayout layout{codedWidth, 368, width, size_t(codedWidth) * 4 + padding, display};
+                for (size_t srcOffset : {0u, 1u, 7u}) {
+                    for (size_t dstOffset : {0u, 3u}) {
+                        Bytes src(srcOffset + layout.pitch * layout.height);
+                        fill(src);
+                        const auto original = src;
+                        Bytes expected(dstOffset + size_t(display.width) * display.height * 4 + 19, 0xA5);
+                        for (int index : {7, 8}) {
+                            auto result = expected;
+                            auto reference = expected;
+                            rowSites[index].before(src.data() + srcOffset, reference.data() + dstOffset, layout);
+                            rowSites[index].after(src.data() + srcOffset, result.data() + dstOffset, layout);
+                            check(reference == result && src == original, rowSites[index].name,
+                                  size_t(display.width) * display.height);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 constexpr int benchWidth = 1920, benchHeight = 1080;
 constexpr size_t benchPixels = benchWidth * benchHeight;
 constexpr size_t benchPitch = benchWidth * 4 + 64;
+constexpr SiteLayout cropLayout{656, 368, 642, 656 * 4 + 64, {7, 3, 642, 362}};
 using Kernel = void (*)(const std::uint8_t*, std::uint8_t*);
 volatile unsigned benchChecksum = 0;
 
@@ -185,6 +250,79 @@ int benchmark() {
             for (int y = 0; y < benchHeight; ++y)
                 simd::rgbaToBgra(s + y * benchWidth * 4,
                     d + (benchHeight - 1 - y) * benchWidth * 4, benchWidth);
+        }},
+        {"macos_grabber", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[0].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[0].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"macos_player", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[1].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[1].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"macos_recorder", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[2].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[2].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"ios_grabber", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[3].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[3].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"ios_player", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[4].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[4].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"ios_recorder", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[5].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[5].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"windows_player_staging", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[6].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[6].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"windows_player_source_positive", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[7].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[7].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"windows_player_source_negative", [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[8].before(const_cast<std::uint8_t*>(s), d, layout);
+        }, [](auto s, auto d) {
+            const SiteLayout layout{benchWidth, benchHeight, benchWidth, benchPitch};
+            rowSites[8].after(const_cast<std::uint8_t*>(s), d, layout);
+        }},
+        {"windows_player_source_positive_crop_642x362", [](auto s, auto d) {
+            rowSites[7].before(const_cast<std::uint8_t*>(s), d, cropLayout);
+        }, [](auto s, auto d) {
+            rowSites[7].after(const_cast<std::uint8_t*>(s), d, cropLayout);
+        }},
+        {"windows_player_source_negative_crop_642x362", [](auto s, auto d) {
+            rowSites[8].before(const_cast<std::uint8_t*>(s), d, cropLayout);
+        }, [](auto s, auto d) {
+            rowSites[8].after(const_cast<std::uint8_t*>(s), d, cropLayout);
         }},
         // The symmetric swizzle is the shared BGRA/RGBA kernel.
         {"swizzle_kernel", [](auto s, auto d) { simd::scalar::bgraToRgba(s, d, benchPixels); },
@@ -238,6 +376,7 @@ int benchmark() {
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     if (argc == 2 && std::strcmp(argv[1], "--bench") == 0) return benchmark();
+    rowConversions();
     simd::bgraToRgba(nullptr, nullptr, 0);
     simd::rgbaToBgra(nullptr, nullptr, 0, true);
     simd::yuyvToRgba(nullptr, nullptr, 0);

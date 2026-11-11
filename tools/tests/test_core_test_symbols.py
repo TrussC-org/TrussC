@@ -18,7 +18,7 @@ spec.loader.exec_module(check)
 
 
 class CoreTestSymbolTests(unittest.TestCase):
-    def check_listings(self, listings, demangled=None):
+    def check_listings(self, listings, demangled=None, demangler_error=None):
         objects = {Path("first.o"): "firstTest", Path("second.o"): "secondTest"}
         demangled = demangled or {}
         output = io.StringIO()
@@ -26,6 +26,8 @@ class CoreTestSymbolTests(unittest.TestCase):
 
         def run(command, **kwargs):
             if command == ["c++filt"]:
+                if demangler_error:
+                    raise demangler_error
                 names = kwargs["input"].splitlines()
                 listing = "".join(demangled.get(name, name) + "\n" for name in names)
             else:
@@ -71,6 +73,33 @@ class CoreTestSymbolTests(unittest.TestCase):
                     {"_Z12sharedHelperv": "sharedHelper()"})
                 self.assert_collision_message(status, message, "sharedHelper()")
                 self.assertNotIn("firstOnly", message)
+
+    def test_undemangled_constrained_members(self):
+        # GCC 15's requires-clause suffix is unknown to older c++filt versions.
+        symbol = "_ZN6trussc5EventIiE6listenESt8functionIFvRiEENS_7DeliverEQnt12isAudioEventIT_E"
+        for kind in ("W", "V", "u", "T", "D", "B", "R"):
+            with self.subTest(kind=kind):
+                status, message = self.check_listings([f"00000000 {kind} {symbol}\n"] * 2)
+                if kind in check.STRONG_KINDS:
+                    self.assert_collision_message(status, message, symbol)
+                else:
+                    self.assertEqual(status, 0)
+
+    def test_mangled_scope_fallback_preserves_exclusions(self):
+        for scope in [*check.EXCLUDED_WEAK_NAMESPACES, "tcCoreTest", "helpers", "trusscExtra"]:
+            for qualifiers in ("", "K", "VK", "rVK", "R", "O", "KR", "KO"):
+                symbol = f"_ZN{qualifiers}{len(scope)}{scope}5EventIiEC1EiQnt12isAudioEventIT_E"
+                with self.subTest(scope=scope, qualifiers=qualifiers):
+                    self.assertEqual(check.outermost_scope(symbol), scope)
+                    status, _ = self.check_listings([f"00000000 W {symbol}\n"] * 2)
+                    self.assertEqual(status, 0 if scope in [*check.EXCLUDED_WEAK_NAMESPACES, "tcCoreTest"] else 1)
+        # Mentions of a library in a helper's arguments must not exempt it.
+        for symbol in ("_Z6helperN6trussc1XE", "_ZN7helpers6trussc1fEv",
+                       "_ZN", "_ZN6trussc", "_ZN6trusscE", "_ZN99trussc1fEv", "_ZN06trussc1fEv",
+                       "_ZN" + "9" * 5000 + "trussc1fEv"):
+            with self.subTest(symbol=symbol[:80]):
+                status, message = self.check_listings([f"00000000 W {symbol}\n"] * 2)
+                self.assert_collision_message(status, message, symbol)
 
     def test_strong_duplicates_fail_even_in_exempt_namespaces(self):
         for kind in ("T", "D", "B", "R"):
@@ -193,12 +222,18 @@ class CoreTestSymbolTests(unittest.TestCase):
             {"constructor1": "Helper::Helper()", "constructor2": "Helper::Helper()"})
         self.assertEqual(status, 0)
 
-    def test_demangler_errors_fail_closed(self):
+    def test_demangler_errors_use_raw_identities(self):
         for error in (FileNotFoundError("c++filt"),
                       subprocess.CalledProcessError(1, "c++filt", stderr="failed")):
-            with patch.object(check.subprocess, "run", side_effect=error), \
-                    self.assertRaises(type(error)):
-                check.demangle_symbols(["helper"])
+            with patch.object(check.subprocess, "run", side_effect=error):
+                self.assertEqual(check.demangle_symbols(["helper"]), {"helper": "helper"})
+            # Keep the nm fixtures deterministic while failing c++filt only.
+            for symbol, kind, expected in (("_ZN6trussc1fEv", "W", 0),
+                                           ("_ZN7helpers1fEv", "W", 1),
+                                           ("_ZN6trussc1fEv", "T", 1)):
+                status, _ = self.check_listings([f"00000000 {kind} {symbol}\n"] * 2,
+                                                demangler_error=error)
+                self.assertEqual(status, expected)
         with patch.object(check.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")), \
                 self.assertRaisesRegex(ValueError, r"Unexpected c\+\+filt output"):
             check.demangle_symbols(["helper"])

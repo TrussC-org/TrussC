@@ -34,3 +34,33 @@ void main() {
 
 @program write fullscreen write_bits
 @program read fullscreen read_bits
+
+// Same vertex layout and uniform blocks as sokol_gl's textured quads.
+@vs preview_vs
+layout(binding=0) uniform vs_params { mat4 mvp; mat4 tm; };
+in vec4 position;
+in vec2 texcoord0;
+in vec4 color0;
+out vec4 uv;
+out vec4 color;
+void main() {
+    gl_Position = mvp * position;
+    uv = tm * vec4(texcoord0, 0.0, 1.0);
+    color = color0;
+}
+@end
+
+@fs preview_fs
+precision highp float;
+layout(binding=0) uniform texture2D previewTex;
+layout(binding=0) uniform sampler previewSmp;
+in vec4 uv;
+in vec4 color;
+out vec4 frag_color;
+void main() {
+    float gray = texture(sampler2D(previewTex, previewSmp), uv.xy).r;
+    frag_color = vec4(vec3(gray), 1.0) * color;
+}
+@end
+
+@program preview preview_vs preview_fs

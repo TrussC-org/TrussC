@@ -1170,6 +1170,9 @@ bool bindNativeWindow(uint32_t id, void* user) noexcept {
     try {
         auto& window = *static_cast<Window*>(user);
         if (!bindWindow(window, {id}, productionWindowOperations(), nullptr)) return false;
+#if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
+        nativeWindowSetClass(id);
+#endif
         // Preserve native first-tick admission, but admit new hidden windows
         // immediately when the global default requests drawing.
         if (WindowRequestAccess::context(window).drawWhileHidden) applyWindowDrawWhileHidden(window);

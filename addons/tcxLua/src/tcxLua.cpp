@@ -352,6 +352,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     fbo_type["end_fbo"] = &Fbo::end;
     fbo_type["readPixels"] = &Fbo::readPixels;
     fbo_type["readPixelsFloat"] = &Fbo::readPixelsFloat;
+    fbo_type["readStencil"] = &Fbo::readStencil;
     fbo_type["copyTo"] = &Fbo::copyTo;
     fbo_type["getWidth"] = &Fbo::getWidth;
     fbo_type["getHeight"] = &Fbo::getHeight;
@@ -368,6 +369,7 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         [](Fbo& t, float x, float y){ return t.draw(x, y); },
         [](Fbo& t, float x, float y, float w, float h){ return t.draw(x, y, w, h); }
     );
+    fbo_type["drawStencil"] = &Fbo::drawStencil;
     fbo_type["getColorImage"] = &Fbo::getColorImage;
     fbo_type["getTextureView"] = &Fbo::getTextureView;
     fbo_type["getSampler"] = &Fbo::getSampler;
