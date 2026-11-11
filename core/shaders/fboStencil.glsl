@@ -35,6 +35,13 @@ void main() {
 @program write fullscreen write_bits
 @program read fullscreen read_bits
 
+@fs clear_fs
+void main() {
+}
+@end
+
+@program clear fullscreen clear_fs
+
 // Same vertex layout and uniform blocks as sokol_gl's textured quads.
 @vs preview_vs
 layout(binding=0) uniform vs_params { mat4 mvp; mat4 tm; };
