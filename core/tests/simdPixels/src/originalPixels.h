@@ -2,7 +2,8 @@
 
 // Original row loops copied verbatim from origin/main for #1361 part 2.
 // Indentation is normalized; wrapper variables/byte aliases replace platform
-// objects. Loop statements and comments are unchanged; no OS SDK is needed.
+// objects. The Windows RGB32 reference includes #1414's aperture crop below;
+// the other loop statements and comments are unchanged. No OS SDK is needed.
 namespace originalPixels {
 using BYTE = unsigned char;
 using UINT32 = std::uint32_t;
@@ -113,15 +114,18 @@ inline void winStaging(unsigned char* src, unsigned char* dst, int width, int he
     }
 }
 
-inline void winRGB32(const BYTE* data, unsigned char* dst, UINT32 width, UINT32 height, std::int32_t stride) {
+// #1414 extraction loop, including its aperture crop, before the row helper replacement.
+inline void winRGB32(const BYTE* data, unsigned char* dst, UINT32 /*width*/, UINT32 height, std::int32_t stride,
+                      const trussc::internal::VideoDisplayRect& display) {
     const size_t absStride = size_t(stride < 0 ? -int64_t(stride) : int64_t(stride));
-    int rowBytes = (int)width * 4;
-    for (UINT32 y = 0; y < height; y++) {
+    int rowBytes = (int)display.width * 4;
+    for (UINT32 y = 0; y < display.height; y++) {
         // Negative stride means the image is stored bottom-up.
-        UINT32 srcRow = stride < 0 ? (height - 1 - y) : y;
-        const BYTE* src = data + (size_t)srcRow * absStride;
+        UINT32 frameRow = display.y + y;
+        UINT32 srcRow = stride < 0 ? (height - 1 - frameRow) : frameRow;
+        const BYTE* src = data + (size_t)srcRow * absStride + size_t(display.x) * 4;
         // BGRA to RGBA conversion
-        for (UINT32 x = 0; x < width; x++) {
+        for (UINT32 x = 0; x < display.width; x++) {
             int srcIdx = x * 4;
             int dstIdx = x * 4;
             dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
