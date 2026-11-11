@@ -13,6 +13,7 @@
 #ifdef _WIN32
 
 #include "TrussC.h"
+#include "tcVideoPlayerPixels.h"
 #include <vector>
 #include <chrono>
 #include <fstream>
@@ -476,24 +477,8 @@ bool TCVideoPlayerImpl::transferVideoFrame() {
             state_->playbackErrors_.report("Video frame stride exceeds decode limits", E_INVALIDARG);
             return false;
         }
-        // Copy row by row (handle pitch/stride)
-        unsigned char* src = static_cast<unsigned char*>(mapped.pData);
-        unsigned char* dst = state_->pixels_.data();
-        int rowBytes = state_->width_ * 4;
-
-        for (int y = 0; y < state_->height_; y++) {
-            // BGRA to RGBA conversion
-            for (int x = 0; x < state_->width_; x++) {
-                int srcIdx = x * 4;
-                int dstIdx = x * 4;
-                dst[dstIdx + 0] = src[srcIdx + 2]; // R <- B
-                dst[dstIdx + 1] = src[srcIdx + 1]; // G <- G
-                dst[dstIdx + 2] = src[srcIdx + 0]; // B <- R
-                dst[dstIdx + 3] = src[srcIdx + 3]; // A <- A
-            }
-            src += mapped.RowPitch;
-            dst += rowBytes;
-        }
+        internal::copyPlayerStagingBGRA(static_cast<const unsigned char*>(mapped.pData),
+            state_->pixels_.data(), state_->width_, state_->height_, mapped.RowPitch);
 
         state_->d3dContext_->Unmap(state_->stagingTexture_.Get(), 0);
         return true;

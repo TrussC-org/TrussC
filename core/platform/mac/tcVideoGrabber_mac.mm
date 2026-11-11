@@ -9,6 +9,7 @@
 #import <CoreVideo/CoreVideo.h>
 
 #include "TrussC.h"
+#include "tc/utils/tcSimd.h"
 
 // Text of an Objective-C object (NSString, NSError, ...) for the Logger: its
 // description as UTF-8, or "(null)" for nil (what %@ formatting printed).
@@ -114,14 +115,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
         for (size_t y = 0; y < height; y++) {
             unsigned char* srcRow = src + y * bytesPerRow;
             unsigned char* dstRow = dst + y * width * 4;
-            for (size_t x = 0; x < width; x++) {
-                size_t srcIdx = x * 4;
-                size_t dstIdx = x * 4;
-                dstRow[dstIdx + 0] = srcRow[srcIdx + 2];  // R <- B
-                dstRow[dstIdx + 1] = srcRow[srcIdx + 1];  // G <- G
-                dstRow[dstIdx + 2] = srcRow[srcIdx + 0];  // B <- R
-                dstRow[dstIdx + 3] = 255;                  // A = 不透明
-            }
+            trussc::simd::bgraToRgba(srcRow, dstRow, width, true);
         }
 
         state->notifyFrame(data->backBuffer, (int)width, (int)height, arrivalUs);
