@@ -25,3 +25,10 @@ and require no changes to upstream source.
 Filesystem-aware file callbacks contain exceptions and return cgltf result
 codes; exceptions never unwind through cgltf callbacks. TrussC model building
 has one exception boundary that clears partial state and returns a load failure.
+
+## Generated patch identification
+
+C1's two insertions have no inline `[TrussC]` markers. The owned CMake recipe,
+`cgltf-safe/tcxGltfCgltf.h` output path and the input/output hashes above
+identify the generated patch; the fetched upstream file remains intact.
+This attribution reconciliation does not rewrite the generated header.

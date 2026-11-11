@@ -1,5 +1,8 @@
 #pragma once
 
+// ofxMidi-derived port; BSD notice: ../OFXMIDI_LICENSE.txt.
+// Source identity and adaptation record: ../OFXMIDI_PROVENANCE.md.
+
 // =============================================================================
 // tcxMidiTimecode.h - MIDI Time Code (MTC) decoder (counterpart to ofxMidiTimecode)
 // =============================================================================

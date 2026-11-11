@@ -133,6 +133,8 @@ NO_SOURCE = {
 # Copies without a version extractor still need a row and the correct path.
 # Provenance files live outside some listed paths, so name the actual copy.
 VENDORED_PATHS = {
+    "Bitmap ASCII glyph data": "core/include/tcBitmapFont.h",
+    "ofxMidi helper ports": "addons/tcxMidi/src/tcxMidiClock.h",
     "sokol": "core/include/sokol/",
     "tinyobjloader": "addons/tcxObj/src/tiny_obj_loader.h",
     "earcut.hpp": "core/include/earcut/earcut.hpp",

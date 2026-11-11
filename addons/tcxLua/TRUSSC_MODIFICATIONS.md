@@ -23,7 +23,7 @@ verified offline. Original MIT copyright notices are retained.
 
 ## Build integration retained
 
-TrussC does not enable `LUAJIT_USE_GDBJIT`. Its luajit-cmake integration now
+TrussC does not enable `LUAJIT_USE_GDBJIT`. Its owned `cmake/LuaJIT.cmake` integration now
 excludes `lj_gdbjit.c` from ordinary builds and rejects the GDB JIT CMake
 switches. The optional upstream amalgamation still includes its disabled body;
 no TrussC build defines the enabling macro. Custom compiler flags enabling it
@@ -50,3 +50,12 @@ through those functions. Native engine and sol2 C++ APIs are also unchanged.
 Run `tests/engine` for both engines and the full addon tests when updating.
 Tests for the removed reader guards were removed; text-loading and independent
 lint lifetime/failure regressions remain.
+
+## Rolling public header and complete source inventory
+
+The OpenResty-marked `luajit-header/include/luajit.h` compatibility copy
+reported 2.1.0-beta3 and its old version symbol. It is retired in favor of the
+engine-generated rolling header, exported through `luajit::header` with a build
+dependency. The library and its consumers use that same generated header.
+See [LuaJIT/PROVENANCE.md](LuaJIT/PROVENANCE.md) and its complete source hash list;
+exact upstream commit and archive hash remain **not recorded**.
