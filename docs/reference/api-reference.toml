@@ -34230,7 +34230,7 @@ details.en = '''
 - It waits for the program, not for children it leaves running.
 - The frame waits too when it is called from `update()` or `draw()`. For anything slow, use `Process`.
 - `started == false` means the program could not be started (not found, not executable, or a platform without processes: Web, iOS, Android); an error is logged.
-- Windows: `args[0]` is found on PATH only as an `.exe`. Run batch scripts through cmd: `{"cmd", "/c", "npm", "run", "build"}`. Console programs run without a console window.
+- Windows: `args[0]` is found on PATH only as an `.exe`. Run batch scripts through cmd: `{"cmd", "/c", "npm", "run", "build"}`. Embedded quotes are escaped for CommandLineToArgvW / the MSVC CRT; `cmd /c` uses its own parser and does not receive them verbatim. Console programs run without a console window.
 '''
 details.ja = '''
 - プログラム名、引数、作業ディレクトリに埋め込み NUL があれば起動前に拒否します。環境変数は継承し、子プロセスごとの上書きはありません。Windows の出力バイト列は子プロセスのコードページから変換しません。
@@ -34240,7 +34240,7 @@ details.ja = '''
 - 待つのはプログラム本体だけで、そのプログラムが残した子プロセスは待ちません。
 - `update()` や `draw()` から呼ぶとフレームも待たされます。時間のかかる処理には `Process` を使ってください。
 - `started == false` はプログラムを起動できなかったことを表します（見つからない、実行できない、またはプロセスのないプラットフォーム: Web、iOS、Android）。エラーがログに出ます。
-- Windows: `args[0]` は PATH 上の `.exe` だけが見つかります。バッチスクリプトは cmd 経由で実行してください: `{"cmd", "/c", "npm", "run", "build"}`。コンソールプログラムはコンソールウィンドウを開かずに実行されます。
+- Windows: `args[0]` は PATH 上の `.exe` だけが見つかります。バッチスクリプトは cmd 経由で実行してください: `{"cmd", "/c", "npm", "run", "build"}`。引数内の引用符は CommandLineToArgvW / MSVC CRT 向けにエスケープされるため、独自のパーサーを使う `cmd /c` にはそのまま渡りません。コンソールプログラムはコンソールウィンドウを開かずに実行されます。
 '''
 details.ko = '''
 - 프로그램 이름, 인자 또는 작업 디렉터리에 포함된 NUL은 시작 전에 거부합니다. 환경 변수는 상속하며 자식별 재정의는 없습니다. Windows 출력 바이트는 자식의 코드 페이지에서 변환하지 않습니다.
@@ -34250,7 +34250,7 @@ details.ko = '''
 - 프로그램 자체만 기다리며, 프로그램이 남겨 둔 자식 프로세스는 기다리지 않습니다.
 - `update()`나 `draw()`에서 호출하면 프레임도 함께 멈춥니다. 오래 걸리는 작업에는 `Process`를 사용합니다.
 - `started == false`는 프로그램을 시작하지 못했다는 뜻입니다(찾을 수 없음, 실행할 수 없음, 또는 프로세스가 없는 플랫폼: Web, iOS, Android). 오류가 로그에 남습니다.
-- Windows: `args[0]`은 PATH에 있는 `.exe`만 찾습니다. 배치 스크립트는 cmd를 거쳐 실행합니다: `{"cmd", "/c", "npm", "run", "build"}`. 콘솔 프로그램은 콘솔 창을 열지 않고 실행됩니다.
+- Windows: `args[0]`은 PATH에 있는 `.exe`만 찾습니다. 배치 스크립트는 cmd를 거쳐 실행합니다: `{"cmd", "/c", "npm", "run", "build"}`. 인자 안의 따옴표는 CommandLineToArgvW / MSVC CRT에 맞게 이스케이프되므로 자체 파서를 쓰는 `cmd /c`에는 그대로 전달되지 않습니다. 콘솔 프로그램은 콘솔 창을 열지 않고 실행됩니다.
 '''
 snippet = '''
 ProcessResult r = runProcess({"git", "rev-parse", "HEAD"});
@@ -34350,10 +34350,10 @@ details.ko = '''
 - macOS, Windows, Linux를 지원합니다. 그 밖의 플랫폼에서는 `startAsync()`가 false를 반환하고 오류가 로그에 남습니다.
 '''
 snippet = '''
-// App members: std::mutex outputMutex; std::vector<std::string> output;
+// App members: mutex outputMutex; vector<string> output;
 // Process process; EventListener lineListener, exitListener;
 lineListener = process.onLine.listen([this](ProcessLineEventArgs& e) {
-    std::lock_guard<std::mutex> lock(outputMutex);
+    lock_guard<mutex> lock(outputMutex);
     output.push_back(e.line);
 });
 exitListener = process.onExit.listen([this](ProcessExitEventArgs& e) {
@@ -34566,9 +34566,9 @@ description.ja = "`startAsync()` から終了までの時間を秒で保持し�
 description.ko = "`startAsync()`부터 종료까지의 시간을 초 단위로 담습니다."
 
 ["ProcessExitEventArgs::killed"]
-description.en = "Indicates whether the program was ended by `kill()` or by destroying the Process."
-description.ja = "プログラムが `kill()` または Process の破棄で終了したかどうかを表します。"
-description.ko = "프로그램이 `kill()`이나 Process 파괴로 종료되었는지 나타냅니다."
+description.en = "Indicates whether the program was ended by `kill()`. Destroying the Process clears listeners, so `onExit` is not delivered on destruction."
+description.ja = "プログラムが `kill()` で終了したかどうかを表します。Process の破棄時はリスナーが解除されるため、`onExit` は通知されません。"
+description.ko = "프로그램이 `kill()`로 종료되었는지 나타냅니다. Process를 파괴할 때는 리스너를 해제하므로 `onExit`는 전달되지 않습니다."
 
 ["Top"]
 keywords = ["direction", "align", "vertical"]
