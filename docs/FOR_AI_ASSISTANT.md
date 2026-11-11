@@ -686,11 +686,19 @@ fbo.draw(0, 0);                     // Composite to screen
 fbo.draw(0, 0, w, h);              // Scaled
 fbo.copyTo(image);                  // FBO → Image
 fbo.save("output.png");
+// Stencil debugging: ended, owned, single-sample Fbos only.
+fbo.drawStencil(0, 0);              // Opaque gray byte/255, nearest sampling
+Pixels stencilBytes;
+if (fbo.readStencil(stencilBytes)) stencilBytes.save("stencil.png");
 ```
 - `begin()` preserves previous frame content (trail/afterimage effects)
 - `begin(r,g,b,a)` clears with specified color
 - Use `clear()` inside begin/end to clear to transparent black
 - Nested `begin()` is NOT supported. Must `end()` before another `begin()`.
+- Stencil diagnostics preserve source color/stencil and reuse an internal R8 Fbo.
+  Active/unallocated/MSAA sources warn and are refused; main-target capture is
+  unavailable. `readStencil` requires all Fbos ended and returns one-channel U8
+  bytes; synchronous WebGPU readback is unsupported.
 - `mipmaps=true` is for FBOs sampled at varying scales (post-process
   bloom downsamples, 3D textures rendered into). Adds cost at every
   `end()` — leave off for one-shot composites drawn at native size.
@@ -2349,6 +2357,7 @@ Xml parseXml(const std::string & str)  // Parses an XML string into an Xml objec
 JsonReadReflector reflectFromJson(T & obj, const Json & j)  // Applies JSON values to an object's reflected members.
 Json reflectToJson(T & obj, bool includeDerived = false)  // Returns an object's reflected members as JSON.
 void runOnMainThread(std::function<void ()> fn) [+1]  // Dispatches a callback to the main thread.
+ProcessResult runProcess(const std::vector<std::string> & args, const fs::path & workingDir = fs::path()) [macos,windows,linux]  // Runs an external program and waits for it to finish.
 void setConsoleLogLevel(LogLevel level)  // Sets the minimum severity for console output.
 void setFileLogLevel(LogLevel level)  // Sets the minimum severity for log file output.
 SaveResult setLogFile(const fs::path & path)  // Opens a file for the global logger's output.
@@ -3051,6 +3060,7 @@ void Fbo::clear()  // Releases the framebuffer resources.
 void Fbo::clearColor(float r, float g, float b, float a)  // Clears the active framebuffer to a solid color.
 bool Fbo::copyTo(Image & image) const  // Copies the framebuffer contents into an Image.
 void Fbo::draw(float x, float y) const [+1]  // Draws the framebuffer contents onto the current target.
+void Fbo::drawStencil(float x, float y) const  // Draws the framebuffer's stencil bytes as an opaque gray image.
 void Fbo::end()  // Finishes framebuffer rendering and returns to the parent target.
 sg_image Fbo::getColorImage() const  // Returns the underlying sokol color image handle.
 const std::string & Fbo::getDebugName() const  // Returns the Fbo's inspection name.
@@ -3066,6 +3076,7 @@ bool Fbo::isAllocated() const  // Reports whether framebuffer allocation succeed
 std::shared_ptr<void> Fbo::lifetimeToken() const  // Returns a token for observing this Fbo object's lifetime.
 bool Fbo::readPixels(unsigned char * pixels) const [macos,windows,linux,ios,android,web]  // Reads framebuffer contents into a CPU RGBA8 buffer.
 bool Fbo::readPixelsFloat(float * pixels) const [macos,ios,windows,linux,android,web]  // Reads framebuffer contents into a CPU float buffer.
+bool Fbo::readStencil(Pixels & pixels) const [macos,windows,linux,ios,android,web]  // Reads the framebuffer's stencil bytes into one-channel U8 Pixels.
 SaveResult Fbo::save(const fs::path & path) const  // Saves framebuffer contents to an image file.
 void Fbo::setDebugName(const std::string & name)  // Sets the Fbo's inspection name.
 ```
@@ -3904,6 +3915,33 @@ const char * Platform::name()  // Returns the short name of the target platform.
 ```
 
 ### PlayingSoundInfo — Holds a snapshot of one playing or paused sound.
+
+```cpp
+```
+
+### Process — Runs an external program in the background and reports its output line by line.
+
+```cpp
+int Process::getExitCode() const [macos,windows,linux]  // Returns the exit code of the last finished run.
+bool Process::getKillOnDestroy() const [macos,windows,linux]  // Returns whether destroying the Process kills a running program.
+bool Process::isRunning() const [macos,windows,linux]  // Returns whether the program is running.
+void Process::kill() [macos,windows,linux]  // Ends the program and the processes it started.
+void Process::setKillOnDestroy(bool kill) [macos,windows,linux]  // Sets whether destroying the Process kills a running program.
+bool Process::startAsync(const std::vector<std::string> & args, const fs::path & workingDir = fs::path()) [macos,windows,linux]  // Starts the program in the background.
+int Process::waitForExit() [macos,windows,linux]  // Blocks until the program has exited and returns its exit code.
+```
+
+### ProcessExitEventArgs — Carries the result of a program that has exited.
+
+```cpp
+```
+
+### ProcessLineEventArgs — Carries one line of a program's output.
+
+```cpp
+```
+
+### ProcessResult — Holds the exit code and output of a finished `runProcess` call.
 
 ```cpp
 ```

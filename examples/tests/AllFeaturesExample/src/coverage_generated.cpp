@@ -654,6 +654,9 @@ static void cover_utility() {
     (void)parseXml(af::val<const std::string>());
     (void)runOnMainThread(af::val<std::function<void ()>>());
     (void)runOnMainThread(af::val<std::function<void ()>>(), af::val<std::weak_ptr<std::atomic<bool>>>());
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+    (void)runProcess(af::val<const std::vector<std::string>>(), af::val<const fs::path>());
+#endif
     (void)setConsoleLogLevel(af::val<LogLevel>());
     (void)setFileLogLevel(af::val<LogLevel>());
     (void)setLogFile(af::val<const fs::path>());
@@ -1476,6 +1479,7 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)af::val<const Fbo>().copyTo(af::val<Image>());
         (void)af::val<const Fbo>().draw(af::val<float>(), af::val<float>());
         (void)af::val<const Fbo>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const Fbo>().drawStencil(af::val<float>(), af::val<float>());
         (void)af::val<Fbo>().end();
         (void)af::val<const Fbo>().getColorImage();
         (void)af::val<const Fbo>().getDebugName();
@@ -1500,6 +1504,9 @@ struct Cover_Fbo : af::Scope<Fbo> {
 #endif
 #if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixelsFloat(af::val<float *>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
+        (void)af::val<const Fbo>().readStencil(af::val<Pixels>());
 #endif
         (void)af::val<const Fbo>().save(af::val<const fs::path>());
         (void)af::val<Fbo>().setDebugName(af::val<const std::string>());
@@ -2658,6 +2665,68 @@ struct Cover_PlayingSoundInfo : af::Scope<PlayingSoundInfo> {
         (void)af::val<PlayingSoundInfo>().speed;
         (void)af::val<PlayingSoundInfo>().streaming;
         (void)af::val<PlayingSoundInfo>().volume;
+    }
+};
+
+struct Cover_Process : af::Scope<Process> {
+    ~Cover_Process(); // Never instantiated.
+    static void run() {
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)Process();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Process>().getExitCode();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Process>().getKillOnDestroy();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<const Process>().isRunning();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Process>().kill();
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Process>().onExit;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Process>().onLine;
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Process>().setKillOnDestroy(af::val<bool>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Process>().startAsync(af::val<const std::vector<std::string>>(), af::val<const fs::path>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX)
+        (void)af::val<Process>().waitForExit();
+#endif
+    }
+};
+
+struct Cover_ProcessExitEventArgs : af::Scope<ProcessExitEventArgs> {
+    ~Cover_ProcessExitEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<ProcessExitEventArgs>().exitCode;
+        (void)af::val<ProcessExitEventArgs>().killed;
+        (void)af::val<ProcessExitEventArgs>().seconds;
+    }
+};
+
+struct Cover_ProcessLineEventArgs : af::Scope<ProcessLineEventArgs> {
+    ~Cover_ProcessLineEventArgs(); // Never instantiated.
+    static void run() {
+        (void)af::val<ProcessLineEventArgs>().isStderr;
+        (void)af::val<ProcessLineEventArgs>().line;
+    }
+};
+
+struct Cover_ProcessResult : af::Scope<ProcessResult> {
+    ~Cover_ProcessResult(); // Never instantiated.
+    static void run() {
+        (void)af::val<ProcessResult>().exitCode;
+        (void)af::val<ProcessResult>().output;
+        (void)af::val<ProcessResult>().started;
     }
 };
 
@@ -5234,6 +5303,10 @@ void af::coverGenerated() {
     af_generated::Cover_Platform::run();
     af_generated::Cover_PlayingSound::run();
     af_generated::Cover_PlayingSoundInfo::run();
+    af_generated::Cover_Process::run();
+    af_generated::Cover_ProcessExitEventArgs::run();
+    af_generated::Cover_ProcessLineEventArgs::run();
+    af_generated::Cover_ProcessResult::run();
     af_generated::Cover_Quaternion::run();
     af_generated::Cover_Ray::run();
     af_generated::Cover_Ray__Hit::run();

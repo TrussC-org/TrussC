@@ -268,6 +268,7 @@ public:
             logWarning("Fbo") << "clear rejected while active";
             return;
         }
+        stencilCache_.reset();
         // Also release partial allocations, before allocated_ is published.
         // Shared context/pipelines are NOT destroyed here (shared across FBOs)
         if (depthAttView_.id) sg_destroy_view(depthAttView_);
@@ -375,6 +376,15 @@ public:
         return readPixelsFloatPlatform(pixels);
     }
 
+    // Stencil diagnostics for ended, owned, single-sample Fbos only.
+    // Draw opaque gray (byte / 255), nearest sampled, at attachment size in
+    // the current coordinate system. Does not use the current tint/blend mode.
+    void drawStencil(float x, float y) const;
+
+    // Read top-left, one-channel U8 bytes. Leaves pixels unchanged on failure.
+    // Call outside all Fbo activations. WebGPU synchronous readback is unsupported.
+    TC_PLATFORMS("macos,windows,linux,ios,android,web") bool readStencil(Pixels& pixels) const;
+
     // Copy to Image
     bool copyTo(Image& image) const {
         if (!allocated_) return false;
@@ -460,6 +470,10 @@ private:
     mutable bool warnedActiveSampling_ = false;
     TextureFormat format_ = TextureFormat::RGBA8;
     bool allocated_ = false;
+    mutable std::unique_ptr<Fbo> stencilCache_;
+    mutable bool warnedStencilPreview_ = false;
+    // perFrame: drawStencil() warns once per Fbo, readStencil() on every call
+    Fbo* captureStencil_(bool perFrame) const;
     bool mipmaps_ = false;
     int  numMipLevels_ = 1;
 
@@ -917,6 +931,7 @@ private:
         numMipLevels_ = other.numMipLevels_;
         colorTexture_ = std::move(other.colorTexture_);
         mipScratchTexture_ = std::move(other.mipScratchTexture_);
+        stencilCache_ = std::move(other.stencilCache_);
         versionPool_ = std::move(other.versionPool_);
         currentVersion_ = other.currentVersion_;
         poolFrame_ = other.poolFrame_;
