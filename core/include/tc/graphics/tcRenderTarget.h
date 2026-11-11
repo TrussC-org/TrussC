@@ -167,7 +167,8 @@ inline sg_pipeline_desc pipeDesc3D() {
 // by the target. Pipeline programs and caches live in the host (#249).
 enum class PipelineFamily { Immediate, Raw };
 enum class PipelineRole { Fill, Premult, Coverage, Clear, Geometry3D,
-    Pbr, PointSplat, PointPixel, Shader, Shadow, Mip, Blit, Ibl, ImGui, StencilClear };
+    Pbr, PointSplat, PointPixel, Shader, Shadow, Mip, Blit, Ibl, ImGui, StencilClear,
+    GlyphBatch };
 struct ImmediateSelection {
     PipelineRole role = PipelineRole::Fill;
     BlendMode blend = BlendMode::Alpha;

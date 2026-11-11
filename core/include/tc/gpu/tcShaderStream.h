@@ -2,8 +2,10 @@
 
 // Custom Shader stream accounting and replay, shared by swapchain and FBO draws.
 #include <cstdint>
+#include <array>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -155,6 +157,8 @@ struct DeferredShaderDraw {
     sg_bindings uploadedBindings = {};
     int uploadedIndexCount = 0;
     bool uploadPrepared = false;
+    // Raw geometry can have no preceding sgl vertices to replay clip commands.
+    std::optional<std::array<float, 4>> scissor;
 };
 
 inline std::vector<uint32_t> shaderDrawIndices(const DeferredShaderDraw& d) {
