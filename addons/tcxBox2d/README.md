@@ -13,7 +13,7 @@ Two APIs share one `box2d::World`:
 
 - **Classic**: `World` plus body nodes: `CircleBody`, `RectBody`, `PolyShape`.
   See `example-node` / `example-collision` / `example-rawAccess`.
-- **Mod** (experimental): `node->addMod<box2d::RigidBody2D>(box2d::Shape2D::...)`
+- **Mod** (recommended): `node->addMod<box2d::RigidBody2D>(box2d::Shape2D::...)`
   plus `box2d::ColliderRenderer2D` to draw it. See `example-basic`.
 
 Units are pixels (30 px = 1 m by default, `World::scale`) and radians.
