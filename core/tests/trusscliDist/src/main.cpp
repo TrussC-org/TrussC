@@ -10,7 +10,8 @@
 //     type or invalid JSON is an error; the --init template parses back.
 //     The copyright line is "© <year> <author>".
 //   - NSIS script: zlib compression (no LZMA), a four-part version, names
-//     escaped for NSIS ("$" and '"'), Program Files by arch, the EULA and
+//     escaped for NSIS ("$" and '"'), Program Files and the registry view by
+//     arch, the installed size, the EULA and
 //     notices pages only when asked for, shortcuts (checked) and start at
 //     login (unchecked) as checkboxes, and an uninstaller
 //     that deletes the listed files and any of the shortcuts, then the
@@ -35,7 +36,8 @@
 //     launcher (Linux), licenses/ and THIRD_PARTY_NOTICES.txt with the
 //     author, and the author as the bundle copyright (macOS). The EULA:
 //     EULA.txt in the project folder ships without any setting, eulaFile
-//     ships under the name EULA.txt, neither ships none. A missing eulaFile,
+//     ships under the name EULA.txt, neither ships none; one that is not
+//     UTF-8 ships with a warning. UTF-8 detection. A missing eulaFile,
 //     a missing include source and an "include" target outside the package
 //     fail.
 // =============================================================================
@@ -172,6 +174,14 @@ void testNsis() {
           contains(s, "Delete \"$INSTDIR\\data\\a b.txt\"") && contains(s, "Delete \"$INSTDIR\\myApp.exe\"") &&
               sub != std::string::npos && data != std::string::npos && sub < data &&
               !contains(s, "RMDir /r"));
+    check("nsis: x64 registers in the 64-bit registry view, install and uninstall",
+          contains(s, "Function .onInit\n  SetRegView 64\n") &&
+              contains(s, "Function un.onInit\n  SetRegView 64\n") &&
+              contains(s, "ReadRegStr $0 HKLM \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\") &&
+              !contains(s, "InstallDirRegKey"));
+    check("nsis: installed size for Apps & features",
+          contains(s, "!include \"FileFunc.nsh\"") && contains(s, "${GetSize} \"$INSTDIR\" \"/S=0K\" $0 $1 $2") &&
+              contains(s, "\"EstimatedSize\" $0"));
 
     in.arch = "x86";
     in.eulaPage.clear();
@@ -183,6 +193,23 @@ void testNsis() {
               contains(t, "Third-party notices"));
     check("nsis: uninstall removes every shortcut whatever was chosen",
           contains(t, "Delete \"$SMSTARTUP\\") && contains(t, "Delete \"$DESKTOP\\"));
+    check("nsis: x86 keeps the 32-bit registry view",
+          !contains(t, "SetRegView") && contains(t, "InstallDirRegKey HKLM"));
+}
+
+void testUtf8Text() {
+    check("utf-8: ASCII, Korean, Japanese, emoji, with or without BOM",
+          dist::isUtf8Text("") && dist::isUtf8Text("EULA\r\n") &&
+              dist::isUtf8Text("\xEC\x82\xAC\xEC\x9A\xA9\xEA\xB6\x8C") &&      // 사용권
+              dist::isUtf8Text("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E") &&      // 日本語
+              dist::isUtf8Text("\xF0\x9F\x98\x80") && dist::isUtf8Text("\xEF\xBB\xBFok"));
+    check("utf-8: CP949 / CP932 text is not UTF-8",
+          !dist::isUtf8Text("\xBB\xE7\xBF\xEB\xB1\xC7") &&                    // 사용권 in CP949
+              !dist::isUtf8Text("\x93\xFA\x96\x7B\x8C\xEA"));                  // 日本語 in CP932
+    check("utf-8: overlong, surrogate, cut off and out-of-range forms rejected",
+          !dist::isUtf8Text("\xC0\xAF") && !dist::isUtf8Text("\xE0\x80\xAF") &&
+              !dist::isUtf8Text("\xED\xA0\x80") && !dist::isUtf8Text("\xEC\x82") &&
+              !dist::isUtf8Text("\xF4\x90\x80\x80"));
 }
 
 void testNames() {
@@ -710,6 +737,16 @@ void testPackage(const fs::path& self, const fs::path& scratch) {
         write(project / "EULA.txt", "my terms\n");
         check("the --init template ships EULA.txt once it is there",
               dist::makePlan(fromInit, plan, error) && plan.eulaSource.filename() == "EULA.txt");
+        auto warnsAboutEncoding = [&] {
+            for (const auto& w : plan.warnings)
+                if (contains(w, "EULA.txt is not UTF-8")) return true;
+            return false;
+        };
+        check("a UTF-8 EULA gives no encoding warning", !warnsAboutEncoding());
+        write(project / "EULA.txt", "\xBB\xE7\xBF\xEB\xB1\xC7\n");  // CP949 text
+        check("an EULA saved in a system code page is shipped with a warning",
+              dist::makePlan(fromInit, plan, error) && plan.eulaSource.filename() == "EULA.txt" &&
+                  warnsAboutEncoding());
         fs::remove(project / "EULA.txt");
     }
 
@@ -740,6 +777,7 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     testLinuxPackage();
     testGlobs();
     testNsis();
+    testUtf8Text();
 #if defined(_WIN32) || (defined(__APPLE__) && !TARGET_OS_IPHONE) || \
     (defined(__linux__) && !defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
     fs::path exe = self;

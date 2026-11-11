@@ -16,6 +16,10 @@ namespace {
 
 using nlohmann::json;
 
+// The "=====" lines in THIRD_PARTY_NOTICES.txt. Short enough not to wrap on
+// the installer's notices page (78 wrapped there with a Korean UI font).
+constexpr size_t kNoticesRuleWidth = 48;
+
 // fs::path <-> UTF-8, '/'-separated
 std::string toUtf8(const fs::path& path) {
 #if defined(__cpp_char8_t)
@@ -873,6 +877,12 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
             }
             plan.files.push_back({eula, "EULA.txt"});
             plan.eulaSource = eula;
+            std::string text;
+            if (readFile(eula, text) && !isUtf8Text(text)) {
+                plan.warnings.push_back(toUtf8(eula.filename()) + " is not UTF-8 text (saved as ANSI / "
+                                        "a system code page?): its non-ASCII text shows garbled on the "
+                                        "installer page and on other systems. Save it as UTF-8");
+            }
         } else if (!config.eulaFile.empty()) {
             error = "dist.json \"eulaFile\" not found: " + config.eulaFile;
             return false;
@@ -930,9 +940,18 @@ bool makePlan(const PlanInput& in, Plan& plan, std::string& error) {
     if (!plan.symbols.empty())
         plan.symbolsDir = in.outputDir / fromUtf8(plan.folderName + "-symbols");
     if (in.platform == Platform::Linux) plan.launcherName = in.projectName + ".sh";
-    for (const auto& source : in.licenses)
+    for (const auto& source : in.licenses) {
         if (source.files.empty() && startsWith(source.note, "file not found"))
             plan.warnings.push_back("dist.json licenses \"" + source.component + "\": " + source.note);
+        for (const auto& file : source.files) {
+            std::string text;
+            if (readFile(file, text) && !isUtf8Text(text)) {
+                plan.warnings.push_back("the license file " + toUtf8(file) + " (" + source.component +
+                                        ") is not UTF-8 text: its non-ASCII text shows garbled in "
+                                        "THIRD_PARTY_NOTICES.txt. Save it as UTF-8");
+            }
+        }
+    }
     return true;
 }
 
@@ -1035,9 +1054,9 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
     notices += "Collected by trusscli dist from the files the components ship.\n";
     const fs::path licenses = plan.packageDir / "licenses";
     for (const auto& source : in.licenses) {
-        notices += "\n" + std::string(78, '=') + "\n" + source.component;
+        notices += "\n" + std::string(kNoticesRuleWidth, '=') + "\n" + source.component;
         if (!source.declared.empty()) notices += " (" + source.declared + ")";
-        notices += "\n" + std::string(78, '=') + "\n";
+        notices += "\n" + std::string(kNoticesRuleWidth, '=') + "\n";
         if (source.files.empty()) notices += "(" + source.note + ")\n";
         const fs::path dir = licenses / fromUtf8(fileSafeName(source.component));
         for (const auto& file : source.files) {
@@ -1069,7 +1088,7 @@ bool writePackage(const PlanInput& in, const Plan& plan, std::string& error) {
             error = "cannot write " + toUtf8(dir / "README.txt");
             return false;
         }
-        notices += "\n" + std::string(78, '=') + "\n" + note;
+        notices += "\n" + std::string(kNoticesRuleWidth, '=') + "\n" + note;
     }
     if (!staysInside(plan.packageDir, plan.packageDir / "THIRD_PARTY_NOTICES.txt", error)) return false;
     if (!writeFile(plan.packageDir / "THIRD_PARTY_NOTICES.txt", notices)) {
@@ -1204,7 +1223,13 @@ std::string nsisScript(const NsisInput& in) {
     s += "ManifestDPIAware true\n";
     s += "SetCompressor /SOLID zlib\n";  // zlib/libpng like the rest of NSIS
     s += "RequestExecutionLevel admin\n";
-    s += "!include \"MUI2.nsh\"\n\n";
+    s += "!include \"MUI2.nsh\"\n";
+    s += "!include \"FileFunc.nsh\"\n\n";
+    // makensis builds a 32-bit installer, which writes to the 32-bit registry
+    // view (WOW6432Node) unless told otherwise. A 64-bit app installed under
+    // $PROGRAMFILES64 belongs in the 64-bit view. InstallDirRegKey would read
+    // the 32-bit view, so .onInit reads the previous location itself.
+    const bool view64 = in.arch != "x86";
     s += "Name " + q(in.name) + "\n";
     // Bottom line of every installer page; " " because an empty text would
     // bring back NSIS's own "Nullsoft Install System" line.
@@ -1212,7 +1237,7 @@ std::string nsisScript(const NsisInput& in) {
     s += "OutFile " + q(windowsPath(in.setupExe)) + "\n";
     s += std::string("InstallDir \"") + (in.arch == "x86" ? "$PROGRAMFILES" : "$PROGRAMFILES64") +
          "\\" + q(name).substr(1) + "\n";
-    s += "InstallDirRegKey HKLM " + q(uninstallKey) + " \"InstallLocation\"\n";
+    if (!view64) s += "InstallDirRegKey HKLM " + q(uninstallKey) + " \"InstallLocation\"\n";
     s += "VIProductVersion " + q(version4) + "\n";
     s += "VIAddVersionKey \"ProductName\" " + q(in.name) + "\n";
     s += "VIAddVersionKey \"ProductVersion\" " + q(in.version) + "\n";
@@ -1243,6 +1268,17 @@ std::string nsisScript(const NsisInput& in) {
     s += "!insertmacro MUI_UNPAGE_CONFIRM\n";
     s += "!insertmacro MUI_UNPAGE_INSTFILES\n";
     s += "!insertmacro MUI_LANGUAGE \"English\"\n\n";
+    if (view64) {
+        s += "Function .onInit\n";
+        s += "  SetRegView 64\n";
+        s += "  ReadRegStr $0 HKLM " + q(uninstallKey) + " \"InstallLocation\"\n";
+        s += "  StrCmp $0 \"\" +2\n";
+        s += "  StrCpy $INSTDIR $0\n";
+        s += "FunctionEnd\n\n";
+        s += "Function un.onInit\n";
+        s += "  SetRegView 64\n";
+        s += "FunctionEnd\n\n";
+    }
     const std::string shortcutName = name + ".lnk";
 
     // "-" hides the required section; "/o" starts a checkbox unchecked.
@@ -1260,6 +1296,9 @@ std::string nsisScript(const NsisInput& in) {
     s += "  WriteRegStr HKLM " + q(uninstallKey) + " \"UninstallString\" \"$\\\"$INSTDIR\\Uninstall.exe$\\\"\"\n";
     s += "  WriteRegDWORD HKLM " + q(uninstallKey) + " \"NoModify\" 1\n";
     s += "  WriteRegDWORD HKLM " + q(uninstallKey) + " \"NoRepair\" 1\n";
+    // The size shown in Apps & features, in KB.
+    s += "  ${GetSize} \"$INSTDIR\" \"/S=0K\" $0 $1 $2\n";
+    s += "  WriteRegDWORD HKLM " + q(uninstallKey) + " \"EstimatedSize\" $0\n";
     s += "SectionEnd\n\n";
 
     s += "Section \"Start menu and desktop shortcuts\"\n";
@@ -1301,6 +1340,32 @@ std::string nsisScript(const NsisInput& in) {
     s += "  DeleteRegKey HKLM " + q(uninstallKey) + "\n";
     s += "SectionEnd\n";
     return s;
+}
+
+bool isUtf8Text(const std::string& bytes) {
+    size_t i = startsWith(bytes, "\xEF\xBB\xBF") ? 3 : 0;
+    while (i < bytes.size()) {
+        const unsigned char c = static_cast<unsigned char>(bytes[i]);
+        size_t extra;
+        uint32_t cp;
+        if (c < 0x80) { ++i; continue; }
+        else if (c >= 0xC2 && c <= 0xDF) { extra = 1; cp = c & 0x1F; }
+        else if (c >= 0xE0 && c <= 0xEF) { extra = 2; cp = c & 0x0F; }
+        else if (c >= 0xF0 && c <= 0xF4) { extra = 3; cp = c & 0x07; }
+        else return false;
+        if (i + extra >= bytes.size()) return false;   // cut off at the end
+        for (size_t k = 1; k <= extra; ++k) {
+            const unsigned char d = static_cast<unsigned char>(bytes[i + k]);
+            if ((d & 0xC0) != 0x80) return false;
+            cp = (cp << 6) | (d & 0x3F);
+        }
+        // overlong forms, UTF-16 surrogates, beyond U+10FFFF
+        if ((extra == 2 && cp < 0x800) || (extra == 3 && cp < 0x10000) ||
+            (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF)
+            return false;
+        i += extra + 1;
+    }
+    return true;
 }
 
 bool writeWithBom(const fs::path& source, const fs::path& target) {

@@ -4851,7 +4851,7 @@ static int cmdDist(const vector<string>& args) {
         cerr << "Warning: ad-hoc signing failed; macOS may refuse to start the app.\n";
 #endif
 
-    string archiveName;
+    string archiveName, archiveError;
     if (archive) {
         const string cmake = findCMake();
         const bool tarball = input.platform == dist::Platform::Linux;
@@ -4886,9 +4886,12 @@ static int cmdDist(const vector<string>& args) {
             if (!tarball) tarArgs.push_back("--format=zip");
             tarArgs.push_back(plan.folderName);
         }
+        // On failure keep going: the folder is written, and the installer does
+        // not need the archive. The error is reported at the end.
         if (runInherited(tarArgs) != 0) {
-            cerr << "Error: could not write " << archiveName << "\n";
-            return 1;
+            archiveError = "could not write " + archiveName;
+            fs::remove(input.outputDir / archiveName, ec);
+            archiveName.clear();
         }
     }
 
@@ -4949,9 +4952,10 @@ static int cmdDist(const vector<string>& args) {
     cout << "Note: an app signed ad hoc is blocked by Gatekeeper when downloaded from the internet\n"
          << "(open it with right-click > Open). Copying it by USB or network share is fine.\n";
 #endif
-    if (!installerError.empty()) {
-        cerr << "Error: " << installerError << "\n"
-             << "The folder" << (archiveName.empty() ? "" : " and the archive") << " above were written.\n";
+    if (!archiveError.empty()) cerr << "Error: " << archiveError << "\n";
+    if (!installerError.empty()) cerr << "Error: " << installerError << "\n";
+    if (!archiveError.empty() || !installerError.empty()) {
+        cerr << "What is listed above was written.\n";
         return 1;
     }
     return 0;

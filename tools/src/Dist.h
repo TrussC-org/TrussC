@@ -254,7 +254,8 @@ struct NsisInput {
 };
 
 // An NSIS script (Unicode; give makensis /INPUTCHARSET UTF8). Installs for
-// all users under Program Files, registers in Apps & features, offers the
+// all users under Program Files, registers in Apps & features (the 64-bit
+// registry view for x64 / arm64, with the installed size), offers the
 // shortcuts (checked) and start at login (unchecked) as checkboxes; a silent
 // install (setup.exe /S) takes those defaults. The uninstaller deletes
 // exactly the installed files (and any of the shortcuts), then the folders
@@ -265,6 +266,11 @@ std::string nsisScript(const NsisInput& input);
 // A copy of a UTF-8 text file with a byte order mark, which NSIS needs to
 // read non-ASCII text on its license pages. False if it cannot be written.
 bool writeWithBom(const fs::path& source, const fs::path& target);
+
+// True for valid UTF-8 (a leading BOM allowed). makePlan warns about an EULA
+// or license file that is not, such as one saved in a system code page
+// (CP949, CP932): its text would show garbled in the installer and notices.
+bool isUtf8Text(const std::string& bytes);
 
 // -----------------------------------------------------------------------------
 // Linux packages (--installer)
