@@ -46,7 +46,7 @@ void tcApp::setup() {
             -- Save to file
             -- local path = "/tmp/trussc_test.json"
             local path = "trussc_test.json"
-            if saveJson(j, path) then
+            if saveJson(j, path):ok() then
                 addMessage("Saved to: " .. path)
             end
 
@@ -92,7 +92,7 @@ void tcApp::setup() {
 
             -- Save to file
             local path = "/tmp/trussc_test.xml"
-            if xml:save(path) then
+            if xml:save(path):ok() then
                 addMessage("Saved to: " .. path)
             end
 

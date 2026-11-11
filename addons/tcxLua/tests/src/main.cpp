@@ -468,6 +468,24 @@ int main(int argc, char** argv) {
         return result.valid() && result.get<bool>();
     });
 
+    L["saveTestDir"] = tc::pathToUtf8(dir);
+    checkNoThrow("SaveResult: JSON/XML success and failure use ok()", true, [&] {
+        auto result = L.safe_script(R"lua(
+            local json = Json.new()
+            json["name"] = "TrussC"
+            local xml = Xml.new()
+            xml:addRoot("project")
+            assert(saveJson(json, saveTestDir .. "/saved.json"):ok())
+            assert(xml:save(saveTestDir .. "/saved.xml"):ok())
+            -- An existing directory cannot be used as an output file.
+            local jsonFailure = saveJson(json, saveTestDir)
+            local xmlFailure = xml:save(saveTestDir)
+            assert(not jsonFailure:ok() and not xmlFailure:ok())
+            return true
+        )lua", sol::script_pass_on_error);
+        return result.valid() && result.get<bool>();
+    });
+
     // Exercise the bundled sketch's guard, rather than a copy of it.
     fs::path sketch = fs::path(__FILE__).parent_path().parent_path().parent_path() /
         "exampleFileReload/bin/data/sketch.lua";
