@@ -73,7 +73,8 @@ class UpstreamTests(unittest.TestCase):
         self.assertTrue(rows)
         for r in rows:
             with self.subTest(library=r["name"]):
-                self.assertTrue(r["slug"])
+                # The CA bundle comes from curl.se, not a GitHub repository.
+                self.assertTrue(r["upstream"].startswith("https://"))
                 self.assertTrue(r["paths"])
                 self.assertTrue(r["version"] or r["commit"] or r["branch"] or r["not_recorded"])
                 for p in r["paths"]:

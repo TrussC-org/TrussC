@@ -85,12 +85,44 @@ def demangle_symbols(symbols):
     names = sorted(symbols)
     if not names:
         return {}
-    result = subprocess.run(["c++filt"], input="\n".join(names) + "\n",
-                            capture_output=True, text=True, check=True, encoding="utf-8")
+    try:
+        result = subprocess.run(["c++filt"], input="\n".join(names) + "\n",
+                                capture_output=True, text=True, check=True, encoding="utf-8")
+    except (OSError, subprocess.CalledProcessError):
+        # A missing/older demangler must not hide duplicates. Only recognized
+        # library scopes below are exempt; other raw identities still fail.
+        return dict(zip(names, names))
     demangled = result.stdout.splitlines()
     if len(demangled) != len(names) or any(not name for name in demangled):
         raise ValueError("Unexpected c++filt output")
     return dict(zip(names, demangled))
+
+
+def mangled_outermost_scope(name):
+    """Read only the first source-name of an Itanium nested name.
+
+    New constraint encodings can be beyond c++filt's version. The leading
+    namespace is still length-prefixed, independently of the remaining name.
+    Unsupported/truncated prefixes stay unclassified (and fail closed).
+    """
+    if not name.startswith("_ZN"):
+        return None
+    pos = 3
+    while pos < len(name) and name[pos] in "rVK":  # Member CV qualifiers.
+        pos += 1
+    if pos < len(name) and name[pos] in "RO":  # Member reference qualifier.
+        pos += 1
+    start = pos
+    while pos < len(name) and name[pos] in "0123456789":
+        pos += 1
+    digits = name[start:pos]
+    # Bound (malformed nm input): cap length digits before integer conversion.
+    if not digits or digits[0] == "0" or len(digits) > len(str(len(name))):
+        return None
+    end = pos + int(digits)
+    if end >= len(name) or name[end] == "E":
+        return None
+    return name[pos:end]
 
 
 def outermost_scope(name):
@@ -101,6 +133,8 @@ def outermost_scope(name):
     namespace. Stop at function arguments or an operator name (whose spelling
     may itself contain spaces, parentheses or angle brackets).
     """
+    if name.startswith("_Z"):
+        return mangled_outermost_scope(name)
     while True:
         prefix = next((p for p in DEMANGLED_PREFIXES if name.startswith(p)), None)
         if prefix is None:

@@ -67,8 +67,8 @@ function argBindable(a) {
     }
     return true;
 }
-// types NOT bound (mirror emit-sketch-api / luagen-types EXCLUDE of internal::-poisoned ones)
-const UNBOUND_TYPES = new Set(['Thread', 'SoundSource', 'Environment', 'VideoPlayerBase']);
+// Types with no Lua binding; keep in sync with emit-sketch-api.
+const UNBOUND_TYPES = new Set(['Thread', 'Environment']);
 
 // ---- small helpers ----------------------------------------------------------
 const en = d => (d && d.en) || '';
@@ -294,7 +294,8 @@ for (const id in REF) {
         }
     } else {
         // Generated usertype — reference-data IS the binding source (luagen-types).
-        if (bindCtors.length) t.constructor = { signatures: bindCtors.map(c => luaParams(c.args)) };
+        // VideoPlayerBase is abstract: its bound methods do not imply a constructor.
+        if (bindCtors.length && e.name !== 'VideoPlayerBase') t.constructor = { signatures: bindCtors.map(c => luaParams(c.args)) };
         for (const mid in REF) {
             const m = REF[mid];
             if (m.owner !== e.id) continue;

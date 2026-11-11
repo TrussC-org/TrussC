@@ -412,6 +412,7 @@ Reference for oF users finding equivalent features in TrussC.
 | `ofGetVersionInfo` | `getVersion()` |  |
 | `ofJoinString` | `joinString(stringElements, delimiter)` |  |
 | `ofLog` | `logNotice(module)` |  |
+| `ofSystem` | `runProcess(args, workingDir)` |  |
 | `ofSplitString` | `splitString(source, delimiter, ignoreEmpty, trim)` |  |
 | `ofStringReplace` | `stringReplace(input, searchStr, replaceStr)` |  |
 | `ofToFloat` | `toFloat(str)` |  |

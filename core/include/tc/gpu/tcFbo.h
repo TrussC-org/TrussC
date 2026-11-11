@@ -258,6 +258,18 @@ public:
         // FBO color texture stores premultiplied alpha (due to alpha blending + MSAA resolve)
         colorTexture_.setPremultipliedAlpha(true);
 
+        // Initialize this attachment once. All later activations, including
+        // color/depth clears, load and store stencil across frame boundaries.
+        sg_pass initial = {};
+        initial.attachments.depth_stencil = depthAttView_;
+        initial.action.depth.load_action = SG_LOADACTION_CLEAR;
+        initial.action.depth.clear_value = 1;
+        initial.action.stencil.load_action = SG_LOADACTION_CLEAR;
+        initial.action.stencil.clear_value = 0;
+        {
+            internal::TargetPassScope scope(initial, w, h, SG_PIXELFORMAT_NONE, sampleCount, true);
+            if (!scope.active()) { failed(); return; }
+        }
         allocated_ = true;
     }
 
@@ -268,6 +280,11 @@ public:
             logWarning("Fbo") << "clear rejected while active";
             return;
         }
+        stencilCache_.reset();
+        target_.stencil = {};
+        target_.savedStencil = {};
+        target_.stencilOwned = false;
+        target_.frameworkStencilClipDepth = 0;
         // Also release partial allocations, before allocated_ is published.
         // Shared context/pipelines are NOT destroyed here (shared across FBOs)
         if (depthAttView_.id) sg_destroy_view(depthAttView_);
@@ -375,6 +392,15 @@ public:
         return readPixelsFloatPlatform(pixels);
     }
 
+    // Stencil diagnostics for ended, owned, single-sample Fbos only.
+    // Draw opaque gray (byte / 255), nearest sampled, at attachment size in
+    // the current coordinate system. Does not use the current tint/blend mode.
+    void drawStencil(float x, float y) const;
+
+    // Read top-left, one-channel U8 bytes. Leaves pixels unchanged on failure.
+    // Call outside all Fbo activations. WebGPU synchronous readback is unsupported.
+    TC_PLATFORMS("macos,windows,linux,ios,android,web") bool readStencil(Pixels& pixels) const;
+
     // Copy to Image
     bool copyTo(Image& image) const {
         if (!allocated_) return false;
@@ -464,6 +490,10 @@ private:
     mutable bool warnedActiveSampling_ = false;
     TextureFormat format_ = TextureFormat::RGBA8;
     bool allocated_ = false;
+    mutable std::unique_ptr<Fbo> stencilCache_;
+    mutable bool warnedStencilPreview_ = false;
+    // perFrame: drawStencil() warns once per Fbo, readStencil() on every call
+    Fbo* captureStencil_(bool perFrame) const;
     bool mipmaps_ = false;
     int  numMipLevels_ = 1;
 
@@ -893,6 +923,7 @@ private:
             target_.clearAction.colors[0].clear_value = {r, g, b, a};
             target_.clearAction.depth.load_action = SG_LOADACTION_CLEAR;
             target_.clearAction.depth.clear_value = 1;
+            target_.clearAction.stencil.load_action = SG_LOADACTION_LOAD;
             internal::setupScreenFovWithSize(TAU / 8, float(target_.width), float(target_.height), 0, 0, false);
             // Match the base: camera setup selects 3D; a fresh Fbo starts in
             // the inherited 2D blend mode, including its logical depth flag.
@@ -921,6 +952,7 @@ private:
         numMipLevels_ = other.numMipLevels_;
         colorTexture_ = std::move(other.colorTexture_);
         mipScratchTexture_ = std::move(other.mipScratchTexture_);
+        stencilCache_ = std::move(other.stencilCache_);
         versionPool_ = std::move(other.versionPool_);
         currentVersion_ = other.currentVersion_;
         poolFrame_ = other.poolFrame_;

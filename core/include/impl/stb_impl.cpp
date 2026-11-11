@@ -53,7 +53,21 @@ void* imageRealloc(void* pointer, size_t size) {
 #include "stb/stb_image.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#if defined(__APPLE__) && defined(__clang__)
+// [TrussC] Keep macOS SDK deprecation policy outside the pristine HDR writer.
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(_MSC_VER)
+// [TrussC] Same for MSVC's C4996 on the writer's sprintf.
+#  pragma warning(push)
+#  pragma warning(disable: 4996)
+#endif
 #include "stb/stb_image_write.h"
+#if defined(__APPLE__) && defined(__clang__)
+#  pragma clang diagnostic pop
+#elif defined(_MSC_VER)
+#  pragma warning(pop)
+#endif
 
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb/stb_perlin.h"

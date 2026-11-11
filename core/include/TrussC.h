@@ -440,6 +440,14 @@ inline void beginFrame() {
 // (Implementation in tc/app/tcGlobal.cpp)
 void clear(float r, float g, float b, float a = 1.0f);
 
+// Borrow all eight stencil bits on the current target. Pair end only with a
+// successful begin. Ownership may span Fbo activations; end on that target.
+bool beginStencil();
+// Return the whole stencil to 0 and restore the framework's saved state; readStencil before this to keep the values.
+void endStencil();
+// Full-target, colorless clear to a plain byte. Warns outside ownership.
+void clearStencil(uint8_t value = 0);
+
 // Clear screen (transparent black)
 inline void clear() {
     clear(0.0f, 0.0f, 0.0f, 0.0f);
@@ -2896,6 +2904,7 @@ inline void drawCone(float x, float y, float z, float radius, float height, int 
 // TrussC threading
 #include "tc/utils/tcThread.h"
 #include "tc/utils/tcThreadChannel.h"
+#include "tc/utils/tcProcess.h"
 
 // TrussC animation
 #include "tc/animation/tcEasing.h"

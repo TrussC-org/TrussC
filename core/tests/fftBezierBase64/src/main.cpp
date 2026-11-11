@@ -2,6 +2,7 @@
 #include "../../common/tcCoreTest.h"
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <random>
 #include <thread>
 
@@ -15,7 +16,7 @@ void check(bool ok, const char* label) {
     if (!ok) ++failures;
 }
 void testFFT() {
-    bool ok = true;
+    bool realWindowOK = true, complexWindowOK = true, forwardOK = true, inverseOK = true;
     std::mt19937 random(1360);
     for (int n : {2, 16, 2048, 512, 2048}) {
         std::vector<std::complex<float>> input(n);
@@ -27,18 +28,33 @@ void testFFT() {
                 realExpected[i]=realSignal[i]*windowFunction(type,i,n);
             }
             applyWindow(realSignal,type);
-            ok &= std::memcmp(realSignal.data(),realExpected.data(),n*sizeof(float))==0;
+            realWindowOK &= std::memcmp(realSignal.data(),realExpected.data(),n*sizeof(float))==0;
             auto expected=input, actual=input;
             for (int i=0;i<n;++i) expected[i]*=windowFunction(type,i,n);
             applyWindow(actual,type);
-            ok &= std::memcmp(actual.data(),expected.data(),n*sizeof(actual[0]))==0;
+            complexWindowOK &= std::memcmp(actual.data(),expected.data(),n*sizeof(actual[0]))==0;
             referenceFFT(expected); fft(actual);
-            for (int i=0;i<n;++i) ok &= std::abs(actual[i]-expected[i]) <= 1e-5f;
+            // The old loop can contract a complex multiply and butterfly add
+            // into FMA differently from the cached loop. Allow a few float
+            // rounding steps at the bin's scale, retaining the absolute floor
+            // for bins near zero (where relative error is ill-conditioned).
+            for (int i=0;i<n;++i) {
+                float tolerance = 1e-5f + 4 * std::numeric_limits<float>::epsilon() * std::abs(expected[i]);
+                bool matches = std::abs(actual[i]-expected[i]) <= tolerance;
+                if (!matches && forwardOK) {
+                    std::printf("FFT mismatch: n=%d window=%d bin=%d error=%g tolerance=%g\n",
+                                n, static_cast<int>(type), i, std::abs(actual[i]-expected[i]), tolerance);
+                }
+                forwardOK &= matches;
+            }
             ifft(actual);
-            for (int i=0;i<n;++i) ok &= std::abs(actual[i]-input[i]*windowFunction(type,i,n)) < 1e-4f;
+            for (int i=0;i<n;++i) inverseOK &= std::abs(actual[i]-input[i]*windowFunction(type,i,n)) < 1e-4f;
         }
     }
-    check(ok,"FFT/window: old path tolerance, inverse and cache size changes");
+    check(realWindowOK,"Window: byte-identical real samples across cache size changes");
+    check(complexWindowOK,"Window: byte-identical complex samples across cache size changes");
+    check(forwardOK,"FFT: old path within absolute and relative float tolerance");
+    check(inverseOK,"FFT: inverse across cache size changes");
     bool threadOK[2] = {false,false};
     std::thread a([&] { std::vector<std::complex<float>> v(2048,{1,0}); fft(v); threadOK[0]=v[0].real()==2048; });
     std::thread b([&] { std::vector<std::complex<float>> v(512,{1,0}); fft(v); threadOK[1]=v[0].real()==512; });

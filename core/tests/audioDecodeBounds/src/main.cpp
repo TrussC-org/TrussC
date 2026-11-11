@@ -182,8 +182,29 @@ void vorbisCommentLengths(vector<char> ogg, const fs::path& dir) {
             const size_t largest = audioMallocProbeDisarm();
             printf("Vorbis claimed comment: %s, %s, largest malloc=%zu\n",
                    offset == vendorLengthOffset ? "vendor" : "user", file ? "file" : "memory", largest);
-            check("Vorbis truncated comment fails cleanly keeping PCM and metadata", !ok && intact(previous));
+            // The pristine fork skips unused metadata with NO_COMMENTS. Its
+            // claimed lengths do not affect the decoded audio.
+            check("Vorbis ignores unused comment lengths and keeps complete PCM",
+                  ok && previous.samples == valid.samples && previous.numSamples == valid.numSamples &&
+                  previous.channels == valid.channels && previous.sampleRate == valid.sampleRate);
             check("Vorbis comment length cannot request large raw malloc", largest <= 1024 * 1024);
+        }
+    }
+    // Actual input truncation must still fail cleanly at packet boundaries,
+    // length fields and the end of the comment payload, for both input routes.
+    for (size_t cut : {page + 27, vendorLengthOffset + 2, countOffset + 2,
+                       countOffset + 4 + comment.size()}) {
+        const vector<char> truncated(ogg.begin(), ogg.begin() + cut);
+        const auto path = dir / "truncated-packet.ogg";
+        writeBytes(path, truncated);
+        for (bool file : {false, true}) {
+            SoundBuffer previous;
+            previous.samples = {0.25f}; previous.numSamples = 1; previous.channels = 1; previous.sampleRate = 48000;
+            audioMallocProbeArm();
+            const bool ok = bool(file ? previous.loadOgg(path) : previous.loadOggFromMemory(truncated.data(), truncated.size()));
+            const size_t largest = audioMallocProbeDisarm();
+            check("Vorbis truncated packet fails cleanly keeping PCM and metadata", !ok && intact(previous));
+            check("Vorbis truncated packet cannot request large raw malloc", largest <= 1024 * 1024);
         }
     }
 }
