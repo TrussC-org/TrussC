@@ -18,6 +18,7 @@
 #if defined(__linux__) && !defined(__ANDROID__) && (defined(SOKOL_GLCORE) || defined(SOKOL_GLES3))
 #include "tcWindowGeometryX11.h"
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
+#include <unistd.h>
 
 using namespace trussc;
 
@@ -54,6 +55,25 @@ void Window::disposeNativeBacking() noexcept {
 }
 
 namespace internal {
+void nativeWindowSetClass(uint32_t id) {
+    auto* display = (Display*)sapp_x11_get_display();
+    const auto window = (::Window)(uintptr_t)sapp_window_x11_get_window({id});
+    if (!display || !window) return;
+    static std::string name = [] {
+        // Bound (procfs): a path that fills PATH_MAX may be truncated, so fall back to "TrussC".
+        char path[PATH_MAX];
+        const auto length = readlink("/proc/self/exe", path, sizeof(path));
+        if (length <= 0 || static_cast<size_t>(length) >= sizeof(path)) return std::string("TrussC");
+        std::string executable(path, static_cast<size_t>(length));
+        const auto slash = executable.find_last_of('/');
+        auto basename = executable.substr(slash == std::string::npos ? 0 : slash + 1);
+        return basename.empty() ? std::string("TrussC") : basename;
+    }();
+    // ICCCM: install the class before the first map, including hidden startup.
+    XClassHint hint{};
+    hint.res_name = hint.res_class = name.data();
+    XSetClassHint(display, window, &hint);
+}
 namespace {
 sapp_window handle(const Window& w) { return WindowRequestAccess::binding(w).handle; }
 }

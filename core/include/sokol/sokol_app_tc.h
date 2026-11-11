@@ -9260,8 +9260,6 @@ sapp_swapchain sapp_acquire_swapchain(void) {
 #include <poll.h>
 #include <limits.h>
 #include <stdio.h>
-#include <string.h>     /* strrchr (WM_CLASS) */
-#include <unistd.h>     /* readlink (WM_CLASS) */
 #include <errno.h>
 #include <new>
 
@@ -12037,29 +12035,6 @@ static bool _sapp_tc_x11_create_native_window(_sapp_tc_window_t* w, const char* 
     }
     Atom protocols[] = { _sapp_tc.WM_DELETE_WINDOW };
     XSetWMProtocols(_sapp_tc.display, w->xwin, protocols, 1);
-    /* [TrussC] WM_CLASS = the executable's name, so the desktop can match the
-       window to its menu entry (.desktop StartupWMClass) and show its icon. */
-    {
-        static char exe_name[256];
-        if (!exe_name[0]) {
-            char path[4096];
-            const ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
-            const char* base = "TrussC";
-            if (n > 0) {
-                path[n] = 0;
-                const char* slash = strrchr(path, '/');
-                if (slash && slash[1]) base = slash + 1;
-            }
-            snprintf(exe_name, sizeof(exe_name), "%s", base);
-        }
-        XClassHint* class_hint = XAllocClassHint();
-        if (class_hint) {
-            class_hint->res_name = exe_name;
-            class_hint->res_class = exe_name;
-            XSetClassHint(_sapp_tc.display, w->xwin, class_hint);
-            XFree(class_hint);
-        }
-    }
     /* Explicit position hints are supplied by the shared X11 geometry helper. */
     XSizeHints* hints = XAllocSizeHints();
     if (hints) {
