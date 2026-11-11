@@ -88,36 +88,70 @@ class GlyphApp : public App {
         }
     }
     void pageOrderChecks() {
-        // Publish through the normal cache path; a small atlas cap forces two
-        // pages without changing the GPU's texture limit or production code.
-        const auto path = systemFontPath(testFontName).string();
+        auto file = systemFontPath(testFontName);
+        const bool fallback = file.empty();
+        if (fallback) file = getDataPath(utf8ToPath(testFontName));
+        std::error_code error;
+        if (!fs::is_regular_file(file, error)) {
+            std::printf("SKIP pageOrderChecks: no local font; pass --font <path>\n");
+            return;
+        }
+        const auto path = pathToUtf8(file);
+        std::printf("PAGE_ORDER font=%s source=%s\n", path.c_str(), fallback ? "--font fallback" : "system");
+        // Publish through the normal cache path. Fill until a glyph actually
+        // lands on another page instead of assuming a font's glyph dimensions.
         internal::FontCacheKey key{path, 27};
         key.oversample = Font::getDefaultOversampling();
         auto manager = std::make_shared<internal::FontAtlasManager>();
         manager->setOversample(key.oversample); manager->setMipmaps(true);
-        check("small atlas prepared", manager->prepareFile(path, 27, 0, 256));
+        const bool prepared = manager->prepareFile(path, 27, 0, 256);
+        check("small atlas prepared", prepared);
+        if (!prepared) return;
         internal::SharedFontCache::getInstance().publishPrepared(key, manager);
-        Font multi; check("small atlas font loads", bool(multi.load(path, 27)));
+        Font multi;
+        const bool loaded = bool(multi.load(path, 27));
+        check("small atlas font loads", loaded);
+        if (!loaded) return;
         manager->getOrLoadGlyph(U'A');
-        for (uint32_t cp = 33; cp <= U'Ä'; ++cp) manager->getOrLoadGlyph(cp);
+        uint32_t second = 0;
+        int filled = 0;
+        // Scan below the BMP surrogate range, stopping at 4096 nonempty glyphs.
+        for (uint32_t cp = 33; cp < 0xD800 && filled < 4096; ++cp) {
+            if (!manager->fontHasGlyph(cp)) continue;
+            const auto* glyph = manager->getOrLoadGlyph(cp);
+            if (!glyph->isValid() || glyph->getWidth() <= 0 || glyph->getHeight() <= 0) continue;
+            ++filled;
+            if (glyph->getAtlasIndex() > 0) { second = cp; break; }
+        }
         const auto* a = manager->getOrLoadGlyph(U'A');
-        const auto* umlaut = manager->getOrLoadGlyph(U'Ä');
-        check("A and Ä occupy pages zero and one", a && umlaut && a->getAtlasIndex() == 0 && umlaut->getAtlasIndex() == 1);
+        check("fill found a glyph on a second atlas page (limit: 4096 glyphs below U+D800)", second != 0);
+        if (!second) return;
+        check("A and B occupy pages zero and one", a->isValid() && a->getWidth() > 0 &&
+            a->getAtlasIndex() == 0 && manager->getOrLoadGlyph(second)->getAtlasIndex() == 1);
+        // The bounded scan selects a BMP codepoint; encode it for drawString.
+        std::string secondText;
+        if (second < 0x80) secondText += char(second);
+        else {
+            if (second >= 0x800) secondText += char(0xE0 | (second >> 12));
+            secondText += char((second < 0x800 ? 0xC0 : 0x80) | ((second >> 6) & 0x3F));
+            secondText += char(0x80 | (second & 0x3F));
+        }
         const Color red(1, 0, 0, 0.8f), blue(0, 0, 1, 0.8f), green(0, 1, 0, 0.8f);
         const auto expected = render(reference_, [&] {
             setColor(red); multi.drawString("A", 40, 40);
-            setColor(blue); multi.drawString("Ä", 40, 40);
+            setColor(blue); multi.drawString(secondText, 40, 40);
             setColor(green); multi.drawString("A", 40, 40);
         });
         const auto before = sg_query_stats().cur_frame.num_draw;
         const auto got = render(actual_, [&] {
             GlyphBatch batch; batch.setFont(multi);
             const auto matrix = Mat4::translate(40, 40, 0);
-            batch.add(U'A', matrix, red); batch.add(U'Ä', matrix, blue); batch.add(U'A', matrix, green);
+            batch.add(U'A', matrix, red); batch.add(second, matrix, blue); batch.add(U'A', matrix, green);
             batch.draw();
         });
         const auto draws = sg_query_stats().cur_frame.num_draw - before;
-        std::printf("PAGE_ORDER pages=%zu draws=%u\n", multi.getAtlasCount(), draws);
+        std::printf("PAGE_ORDER pages=%zu draws=%u B=U+%04X filled=%d A_size=%.1fx%.1f\n",
+                    multi.getAtlasCount(), draws, second, filled, a->getWidth(), a->getHeight());
         compare("interleaved page painter order", expected, got);
         check("A/B/A issues three consecutive run draws", draws == 3);
         const auto singleBefore = sg_query_stats().cur_frame.num_draw;
