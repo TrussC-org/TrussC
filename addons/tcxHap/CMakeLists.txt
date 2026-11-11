@@ -21,6 +21,11 @@ set(SNAPPY_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(SNAPPY_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 set(SNAPPY_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(snappy)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # Snappy's SIMD implementation uses __m128i as a template argument.
+    # GCC 15 warns about its attributes; keep the suppression on snappy only.
+    target_compile_options(snappy PRIVATE -Wno-ignored-attributes)
+endif()
 if(EMSCRIPTEN)
     # snappy compiles itself with -Werror on Clang; its '#pragma clang loop'
     # vectorization hints cannot be honored under wasm, and the resulting
