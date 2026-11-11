@@ -19,6 +19,15 @@
 //
 //   drawCircle(400, 400, 50);  // Normal sokol_gl drawing
 //
+// Fullscreen effect (include TrussC.h, then generated shaders/effect.glsl.h):
+//   FullscreenShader effect;
+//   effect.load(effect_shader_desc);
+//   effect_params_t params = {};  // generated from the uniform block
+//   effect.setParams(params);
+//   effect.setTexture(0, source.getTextureView(), source.getSampler()); // source: Fbo
+//   effect.draw();  // fills the current render target
+// Fbo sampling needs a GL/GLES V flip: see docs/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
+//
 // =============================================================================
 
 // Note: This file is included from TrussC.h after tcMath.h, tcLog.h, etc.
@@ -675,7 +684,9 @@ class FullscreenShader : public Shader {
 public:
     FullscreenShader() = default;
 
-    // Set uniform params (call before draw)
+    // Set fragment uniform block 0 (call before draw). Copies raw bytes.
+    // T must match the sokol-shdc <block>_t layout, including padding;
+    // prefer the generated type (GLSL vec4 maps to float[4] by default).
     template<typename T>
     void setParams(const T& params) {
         paramsData_.resize(sizeof(T));

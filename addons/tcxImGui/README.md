@@ -52,6 +52,16 @@ shuts itself down when the app closes, so there is nothing to call in `cleanup()
 With hot reload, the same teardown runs on its App’s `events().hotReloadUnload` before
 that generation reloads, and the new build sets ImGui up again in its `setup()`.
 
+## EVENT_DRIVEN input
+
+With `setFps(EVENT_DRIVEN)`, input does not request a frame, and tcxImGui does
+not call `redraw()` itself. One `redraw()` per event can leave ImGui input
+pending: requests coalesce, while ImGui can spread queued input across frames.
+`redraw(2)` covers a batched press/release pair, but larger batches can need
+more frames. For reliable hover and value changes, render continuously with
+`setFps(60)` while the UI is in use. See the minimal
+[tcApp example](../../docs/FOR_AI_ASSISTANT.md#event_driven--imgui).
+
 ## Vertex and index buffers / 頂点・インデックスバッファ / 정점·인덱스 버퍼
 
 ### English
@@ -168,7 +178,7 @@ imguiEnd();
 |----------|-------------|
 | `imguiSetup()` / `imguiSetup(int initialVertices)` | Initialize ImGui with an optional initial vertex capacity (call in setup) |
 | `imguiShutdown()` | Shut down ImGui early (optional — runs automatically on app exit) |
-| `imguiBegin()` | Attempt to start a window UI frame; returns false on refusal. Always pair with `imguiEnd()` |
+| `imguiBegin()` | Attempt to start a window UI frame; returns false on refusal. Always pair with `imguiEnd()`. Render continuously while the UI is in use; see EVENT_DRIVEN input above |
 | `imguiEnd()` | End ImGui frame (rendering is deferred to onRender) |
 
 ### Owned offscreen manager (`tcx::imgui::ImGuiManager`)

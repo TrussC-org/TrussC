@@ -573,6 +573,13 @@ void mousePressed(Vec2 pos, int button) override;
 void mouseDragged(Vec2 pos, int button) override;
 ```
 
+`keyPressed()` receives sokol key codes: letters are uppercase ASCII (`'S'`,
+regardless of Shift). The defined `KEY_*` constants are `KEY_SPACE`, `KEY_ESCAPE`,
+`KEY_ENTER`, `KEY_TAB`, `KEY_BACKSPACE`, `KEY_DELETE`, `KEY_RIGHT`, `KEY_LEFT`,
+`KEY_DOWN`, `KEY_UP`, `KEY_LEFT_SHIFT`, `KEY_RIGHT_SHIFT`, `KEY_LEFT_CONTROL`,
+`KEY_RIGHT_CONTROL`, `KEY_LEFT_ALT`, `KEY_RIGHT_ALT`, `KEY_LEFT_SUPER`,
+`KEY_RIGHT_SUPER`, and `KEY_F1` through `KEY_F12`.
+
 #### Rich form (dual API)
 Every mouse handler also has a rich overload that takes a per-kind args
 struct. Override **either** the simple `(Vec2, int)` form above (oF-style,
@@ -759,6 +766,121 @@ popShader();
 ```
 
 Uniform slots match `layout(binding=N)`. Vertex layout is fixed: position(vec3), texcoord(vec2), color(vec4).
+
+### Running an Fbo through your own shader
+
+Use two float Fbos for repeated passes: sample one and render into the other
+(ping-pong). Never sample the target you are currently rendering into.
+Unlike ordinary textures, Fbo textures need a V flip on GL/GLES when sampled
+by FullscreenShader. `getTextureView()` does not apply the correction that
+`Fbo::draw()` does; use sokol-shdc's `SOKOL_GLSL` define as below on every pass.
+Put this in `src/shaders/filter.glsl`; CMake generates `filter.glsl.h`:
+
+```glsl
+@vs vs
+in vec2 position;
+in vec2 texcoord0;
+out vec2 uv;
+void main() {
+    gl_Position = vec4(position, 0.0, 1.0);
+    uv = texcoord0;
+    #if defined(SOKOL_GLSL)
+        uv.y = 1.0 - uv.y;
+    #endif
+}
+@end
+@fs fs
+layout(binding=0) uniform texture2D sourceTex;
+layout(binding=0) uniform sampler sourceSampler;
+layout(binding=0) uniform filter_params { vec4 tint; };
+in vec2 uv;
+out vec4 frag_color;
+void main() {
+    frag_color = texture(sampler2D(sourceTex, sourceSampler), uv) * tint;
+}
+@end
+@program filter vs fs
+```
+
+```cpp
+#include <TrussC.h>
+#include "shaders/filter.glsl.h"
+using namespace std;
+using namespace tc;
+
+class tcApp : public App {
+    Fbo buffers[2];
+    FullscreenShader effect;
+    filter_params_t params = {};  // vec4 tint becomes float tint[4]
+    int source = 0;
+public:
+    void setup() override {
+        for (auto& fbo : buffers) {
+            fbo.allocate(512, 512, 1, TextureFormat::RGBA16F);
+        }
+        buffers[source].begin(0.2f, 0.4f, 0.8f, 1.0f);
+        buffers[source].end();
+        effect.load(filter_shader_desc);
+        for (auto& channel : params.tint) channel = 1.0f;
+    }
+    void draw() override {
+        int destination = 1 - source;
+        buffers[destination].begin(0, 0, 0, 1);
+        effect.setTexture(0, buffers[source].getTextureView(), buffers[source].getSampler());
+        effect.setParams(params);
+        effect.draw();
+        buffers[destination].end();
+        source = destination;
+        buffers[source].draw(0, 0);
+    }
+};
+```
+
+`setParams()` copies raw bytes into fragment uniform block 0. Prefer the generated
+`<block>_t`; a custom struct must match its member order, types and padding
+exactly (a GLSL `vec4` is `float[4]` by default). Texture and sampler bindings
+are separate declarations in `@fs`; here both use slot 0, matching `setTexture(0, ...)`.
+
+### EVENT_DRIVEN + ImGui
+
+Input events do not request redraws, and tcxImGui does not call `redraw()` itself.
+One `redraw()` per input event is insufficient: requests coalesce, while ImGui
+can spread queued input across frames (for example, a press and release arriving
+together). `redraw(2)` covers that pair, but larger batches can need more frames.
+For reliable interaction, render continuously while the UI is in use:
+
+```cpp
+#include <TrussC.h>
+#include <tcxImGui.h>
+using namespace std;
+using namespace tc;
+using namespace tcx;
+
+class tcApp : public App {
+    float value = 0.5f;
+public:
+    void setup() override {
+        imguiSetup();
+        setFps(60);
+    }
+    void draw() override {
+        clear(0.1f);
+        if (imguiBegin()) {
+            ImGui::Begin("Controls");
+            ImGui::SliderFloat("Value", &value, 0.0f, 1.0f);
+            ImGui::End();
+        }
+        imguiEnd();
+    }
+};
+```
+
+### Starting with an addon
+
+Add its name (for example `tcxImGui`) on its own line in your project's
+`addons.make`. A plain `trusscli new` project starts with no addons selected.
+Run `trusscli update` from that project to regenerate build files, then read
+`addons/<addon>/README.md` for its header, namespace and setup calls.
 
 ## Data Folder
 

@@ -1815,6 +1815,7 @@ inline size_t getFboCount() { return internal::fboCount().load(); }
 
 // Special FPS values (exposed to user)
 constexpr float VSYNC = internal::VSYNC;              // Sync to monitor refresh rate
+// Input events do not request a redraw; call redraw() from input handlers.
 constexpr float EVENT_DRIVEN = internal::EVENT_DRIVEN; // Only on redraw() call
 
 // FPS settings structure
@@ -1962,7 +1963,9 @@ inline float getFps() {
     return static_cast<float>(getFrameRate());
 }
 
-// Request redraw (used when auto-draw is stopped)
+// Request redraw (used when auto-draw is stopped).
+// In EVENT_DRIVEN mode, mouse/keyboard input does not request a redraw.
+// Call this from input handlers when the visible content changes.
 // count: number of draws (max value is used when called multiple times)
 // Acts on the current window.
 inline void redraw(int count = 1) {
@@ -2152,6 +2155,11 @@ inline bool saveScreenshot(const std::filesystem::path& path) {
 // ---------------------------------------------------------------------------
 // Key code constants (wraps sokol_app key codes)
 // ---------------------------------------------------------------------------
+
+// keyPressed/keyReleased receive sokol key_code values, not typed characters.
+// Letter keys use uppercase ASCII regardless of Shift: compare with 'S', not 's'.
+// The KEY_* constants below cover special keys, arrows, modifiers and F1-F12;
+// letters and digits use character literals.
 
 // Special keys
 constexpr int KEY_SPACE = SAPP_KEYCODE_SPACE;

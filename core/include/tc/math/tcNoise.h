@@ -8,7 +8,9 @@
 namespace trussc {
 
 // ---------------------------------------------------------------------------
-// Basic noise functions (returns -1.0 to 1.0)
+// signedNoise(): signed Perlin noise (-1.0 to 1.0).
+// noise(): normalized below as signedNoise(...) * 0.5 + 0.5 (0.0 to 1.0).
+// Values tend toward the midpoint; this is not a uniform random distribution.
 // ---------------------------------------------------------------------------
 
 // 1D noise

@@ -442,6 +442,10 @@ public:
         return SaveResult::fail(SaveError::WriteFailed, "Cannot read Fbo pixels");
     }
 
+    // To sample this Fbo in a shader, use getTextureView()/getSampler():
+    // shader.setTexture(0, fbo.getTextureView(), fbo.getSampler());
+    // FullscreenShader needs a GL/GLES V flip: see docs/FOR_AI_ASSISTANT.md, "Running an Fbo through your own shader".
+    // End this Fbo before sampling it; render into a different target.
     // Access to internal resources (for advanced users).
     // Like getTexture(), these refer to the CURRENT version's texture.
     sg_image getColorImage() const { return curColorTex_().getImage(); }
