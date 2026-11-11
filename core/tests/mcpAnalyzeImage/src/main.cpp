@@ -9,6 +9,7 @@ using namespace std;
 namespace {
 int failures=0;
 bool completed=false;
+string evidenceDirectory;
 void check(const char* name,bool ok) {
     printf("%-65s %s\n",name,ok?"PASS":"FAIL");
     if(!ok) ++failures;
@@ -41,6 +42,27 @@ void headlessChecks() {
             t["inputSchema"]["properties"]["ops"]["type"]=="array" &&
             t["inputSchema"]["properties"]["save"]["type"]==json::array({"string","null"}));
     }
+    bool stencilListed = false;
+    for (const auto& t : schema["result"]["tools"]) if (t["name"] == "tc_get_stencil") {
+        stencilListed = true;
+        check("stencil schema accepts name/index and optional preview width",
+            t["inputSchema"]["properties"].size() == 2 &&
+            t["inputSchema"]["properties"]["fbo"]["type"] == json::array({"string","integer"}) &&
+            t["inputSchema"]["required"] == json::array({"fbo"}));
+    }
+    check("stencil tool listed at ReadOnly", stencilListed);
+    check("unknown stencil Fbo rejected", call("tc_get_stencil", {{"fbo","missing"}})["status"] == "error");
+    check("window stencil target rejected clearly", call("tc_get_stencil", {{"window",1}})["message"].get<string>().find("window/main") != string::npos);
+    check("missing stencil target rejected", call("tc_get_stencil")["status"] == "error");
+#ifndef __EMSCRIPTEN__
+    // Width is validated before the Fbo lookup, so the message names width.
+    auto widthRejected = [&](const json& width) {
+        const auto r = call("tc_get_stencil", {{"fbo","missing"},{"width",width}});
+        return r["status"] == "error" && r["message"].get<string>().find("width") != string::npos;
+    };
+    check("invalid stencil width rejected", widthRejected(0) && widthRejected(-1) &&
+          widthRejected("8") && widthRejected(uint64_t(1) << 40));
+#endif
     const auto dir=filesystem::temp_directory_path()/ ("tc-analyze-"+to_string(getSystemTimeMicros()));
     filesystem::create_directories(dir);
     setDataPathRoot(dir);
@@ -119,6 +141,9 @@ void headlessChecks() {
             if (!indices.empty()) indices += ", ";
             indices += to_string(entry["index"].get<uint64_t>());
         }
+        auto stencil = call("tc_get_stencil", {{"fbo",duplicate}});
+        check("stencil shares ambiguous name handling", stencil["status"] == "error" &&
+            stencil["message"].get<string>().find("use an index") != string::npos);
         r=analyze({{"fbo",duplicate}},json::array({op("stats")}));
         check("ambiguous Fbo name reports indices and escapes the name",
             r["status"]=="error" && r["message"]==
@@ -170,11 +195,41 @@ void headlessChecks() {
 }
 #ifndef __EMSCRIPTEN__
 class CaptureApp : public App {
-    Fbo fbo_,hdr_,moved_,changing_,integer_;
+    Fbo fbo_,hdr_,moved_,changing_,integer_,gray_,stencil_,stencilMoved_,msaa_;
+    uint64_t stencilIndex_ = 0;
+    vector<function<mcp::internal::ReplyThunk()>> stencilPending_;
     bool rgba16Renderable_ = false;
     TextureFormat alternate_ = TextureFormat::RGBA16;
     EventListener after_;
     vector<function<mcp::internal::ReplyThunk()>> pending_;
+    void verifyStencil(const string& response, int width, int height) {
+        const auto content = json::parse(response).at("result").at("content");
+        check("stencil returns MCP PNG image and text metadata", content.size() == 2 &&
+            content[0]["type"] == "image" && content[0]["mimeType"] == "image/png" && content[1]["type"] == "text");
+        const auto meta = json::parse(content[1].at("text").get<string>());
+        check("stencil metadata describes actual source and capture", meta == json({
+            {"width",width},{"height",height},{"sourceWidth",16},{"sourceHeight",16},
+            {"format","R8"},{"encoding","png"},{"origin","top-left"},
+            {"interpretation",width == 16 ? "exact" : "preview"},
+            {"frame",getFrameCount()},{"target",{{"fbo",stencilIndex_}}}}));
+        const auto bytes = fromBase64(content[0].at("data").get<string>());
+        check("stencil PNG is 8-bit grayscale", bytes.size() > 25 && bytes[24] == 8 && bytes[25] == 0);
+        Pixels decoded;
+        check("returned stencil PNG decodes", bool(decoded.loadFromMemory(bytes.data(), int(bytes.size()))));
+        bool exact = decoded.getWidth() == width && decoded.getHeight() == height && decoded.getChannels() == 4;
+        if (exact) for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x)
+            for (int c = 0; c < 4; ++c)
+                exact &= decoded.getData()[(y * width + x) * 4 + c] ==
+                    (c == 3 ? 255 : (x * 16 / width) + 16 * (y * 16 / height));
+        check("PNG bytes equal stencil pattern with top-left nearest sampling", exact);
+        if (width == 16 && exact && !evidenceDirectory.empty()) {
+            Pixels enlarged;
+            enlarged.allocate(256,256,1);
+            for (int y = 0; y < 256; ++y) for (int x = 0; x < 256; ++x)
+                enlarged.getData()[y * 256 + x] = decoded.getData()[((y / 16) * 16 + x / 16) * 4];
+            check("returned PNG nearest-neighbor PR evidence saved", bool(enlarged.save(filesystem::path(evidenceDirectory)/"00_tc_get_stencil.png")));
+        }
+    }
 public:
     void setup() override {
         fbo_.allocate(8,8);fbo_.setDebugName("round-trip");
@@ -193,6 +248,10 @@ public:
             check("unsupported RGBA16 allocation is rejected", !integer_.isAllocated());
         }
 
+        gray_.allocate(16,16,1,TextureFormat::R8);
+        stencil_.allocate(16,16); stencil_.setDebugName("stencil-pattern");
+        msaa_.allocate(16,16,4); msaa_.setDebugName("stencil-msaa");
+        stencilIndex_ = named(call("tc_list_fbos"),"fbos","stencil-pattern")["index"];
         after_=events().afterFrame.listen([this]() {
             if(pending_.empty()) return;
             auto first=decode(pending_[0]()());
@@ -213,6 +272,15 @@ public:
                 check("RGBA16 Fbo analysis returns converted RGBA8 colors",integer["format"]=="RGBA8"&&
                     integer["results"][0]["color"]==json::array({0,0,1,1}));
             }
+            verifyStencil(stencilPending_[0]()(),16,16);
+            verifyStencil(stencilPending_[1]()(),7,7);
+            verifyStencil(stencilPending_[2]()(),16,16); // Never upscale.
+            auto msaa = decode(stencilPending_[3]()());
+            check("MSAA stencil rejected without an image", msaa["status"] == "error" &&
+                msaa["message"].get<string>().find("MSAA") != string::npos);
+            auto disappeared = decode(stencilPending_[4]()());
+            check("destroyed deferred stencil source returns error", disappeared["status"] == "error");
+            stencilPending_.clear();
             pending_.clear(); completed=true;exitApp();
         });
     }
@@ -223,6 +291,23 @@ public:
             check("GPU source response is deferred",response.empty());
             pending_.push_back(std::move(mcp::internal::deferralState().envelope));
         };
+        auto deferStencil = [this](json args) {
+            check("stencil response is deferred", request("tc_get_stencil",args).empty());
+            stencilPending_.push_back(std::move(mcp::internal::deferralState().envelope));
+        };
+        deferStencil({{"fbo","stencil-pattern"}});
+        deferStencil({{"fbo",stencilIndex_},{"width",7}});
+        deferStencil({{"fbo",to_string(stencilIndex_)},{"width",32}});
+        deferStencil({{"fbo","stencil-msaa"}});
+        { Fbo dead; dead.setDebugName("stencil-dead"); deferStencil({{"fbo","stencil-dead"}}); }
+        // Same gray-to-stencil fixture as stencilRoundTrip: all 256 byte values.
+        gray_.begin(0,0,0); setupScreenOrtho(); setBlendMode(BlendMode::Disabled);
+        for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
+            setColor((x + 16 * y) / 255.0f); drawRect(float(x),float(y),1,1);
+        }
+        gray_.end();
+        check("known pattern written to owned stencil", internal::FboStencilAccess::writeGray(gray_,stencil_));
+        stencilMoved_ = std::move(stencil_);
         defer({{"fbo","round-trip"}});
         fbo_.begin(1,0,0,1); fbo_.end();fbo_.begin(0,1,0,1);fbo_.end();
         moved_=std::move(fbo_); // Deferred lookup must follow the new address.
@@ -244,7 +329,8 @@ TC_CORE_TEST_MAIN(int argc,char** argv) {
     headlessChecks();
 #ifndef __EMSCRIPTEN__
     if(argc>1 && strcmp(argv[1],"--gpu-check")==0) {
-        WindowSettings settings;settings.setSize(32,32);settings.setHighDpi(false);settings.setSwapInterval(0);
+        if (argc > 2) evidenceDirectory = argv[2];
+        WindowSettings settings;settings.setSampleCount(1);settings.setSize(32,32);settings.setHighDpi(false);settings.setSwapInterval(0);
         return tcCoreTest::runDisplayTest<CaptureApp>(settings, failures, [] {
             check("GPU test completed",completed);
         });
