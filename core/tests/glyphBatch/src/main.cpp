@@ -1,3 +1,4 @@
+#define TC_GLYPH_BATCH_PROTOTYPE
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -302,14 +303,93 @@ class GlyphApp : public App {
         const auto& command = internal::currentTarget().deferredShaderDraws.back();
         if (first) { retainedVertices_ = command.bindings.vertex_buffers[0]; retainedIndices_ = command.bindings.index_buffer; }
         const auto after = sg_query_stats();
-        check(first ? "dirty upload creates exactly two buffers" : "retained frame has zero buffer uploads",
+        check(first ? "dirty upload creates reusable vertex and upload buffers" : "retained frame has zero buffer uploads",
             after.total.buffers.inited - before.total.buffers.inited == (first ? 2u : 0u) &&
-            after.cur_frame.num_write_buffer_transient == before.cur_frame.num_write_buffer_transient &&
+            after.cur_frame.num_write_buffer_transient - before.cur_frame.num_write_buffer_transient == (first ? 1u : 0u) &&
             after.cur_frame.num_write_buffer_unsealed == before.cur_frame.num_write_buffer_unsealed &&
             command.bindings.vertex_buffers[0].id == retainedVertices_.id && command.bindings.index_buffer.id == retainedIndices_.id);
         actual_.end();
         auto expected = render(reference_, [&] { font_.drawString("R", 40, 40); });
         compare("retained redraw pixels", expected, read(actual_));
+    }
+    void streamChecks() {
+        GlyphBatch batch, other; batch.setFont(font_); other.setFont(font_);
+        const Mat4 left = Mat4::translate(20, 40, 0), right = Mat4::translate(80, 40, 0);
+        const auto expected = render(reference_, [&] {
+            font_.drawString("A", 20, 40); font_.drawString("A", 20, 40);
+            font_.drawString("B", 80, 40);
+        });
+        unsigned steadyCreates = 0, steadyUploads = 0;
+        for (int frame = 0; frame < 8; ++frame) {
+            sg_commit(); internal::drainPendingGpuDestroys();
+            const auto before = sg_query_stats();
+            auto pixels = render(actual_, [&] {
+                batch.clear(); batch.add(U'A', left, tint); batch.draw();
+                const auto once = sg_query_stats().cur_frame.num_write_buffer_transient;
+                batch.draw();
+                check("second draw uploads nothing", sg_query_stats().cur_frame.num_write_buffer_transient == once);
+                batch.add(U'B', right, tint); batch.draw();
+            });
+            if (frame) {
+                steadyCreates += sg_query_stats().total.buffers.inited - before.total.buffers.inited;
+                steadyUploads += sg_query_stats().cur_frame.num_write_buffer_transient - before.cur_frame.num_write_buffer_transient;
+            }
+            // First snapshot draws twice, so the reference has three As total.
+            const auto reference = render(reference_, [&] {
+                font_.drawString("A", 20, 40); font_.drawString("A", 20, 40);
+                font_.drawString("A", 20, 40); font_.drawString("B", 80, 40);
+            });
+            compare("same-frame append preserves earlier draws", reference, pixels);
+        }
+        std::printf("STREAM frames=8 measured_frames=7 creates=%u uploads=%u expected_uploads=14\n", steadyCreates, steadyUploads);
+        check("changed same-frame snapshots reuse buffers after warmup", steadyCreates == 0 && steadyUploads == 14);
+        const auto got = render(actual_, [&] {
+            batch.clear(); batch.add(U'A', left, tint); batch.draw();
+            const auto first = internal::currentTarget().deferredShaderDraws.back().bindings;
+            batch.clear(); batch.add(U'B', right, tint); batch.draw();
+            const auto second = internal::currentTarget().deferredShaderDraws.back().bindings;
+            check("clear plus draw preserves first snapshot", first.vertex_buffers[0].id != second.vertex_buffers[0].id);
+            other.add(U'A', left, tint); other.draw();
+            check("batches share one quad index buffer", first.index_buffer.id == second.index_buffer.id &&
+                second.index_buffer.id == internal::currentTarget().deferredShaderDraws.back().bindings.index_buffer.id);
+        });
+        compare("same-frame clear preserves earlier draws", expected, got);
+        // Force both shared-index and vertex growth after a queued draw.
+        const auto growthReference = render(reference_, [&] {
+            for (int i = 0; i < 130; ++i) font_.drawString("A", 20, 40);
+        });
+        const auto growth = render(actual_, [&] {
+            GlyphBatch growing; growing.setFont(font_); growing.add(U'A', left, tint); growing.draw();
+            const auto oldIndex = internal::currentTarget().deferredShaderDraws.back().bindings.index_buffer;
+            for (int i = 0; i < 128; ++i) growing.add(U'A', left, tint);
+            growing.draw();
+            check("shared index grows for larger runs", oldIndex.id != internal::currentTarget().deferredShaderDraws.back().bindings.index_buffer.id);
+        });
+        compare("buffer growth preserves queued draws", growthReference, growth);
+    }
+    void glyphTransformChecks() {
+        const Mat4 glyph = Mat4::scale(0.7f, -0.7f, 1);
+        const Mat4 current = Mat4::translate(70, 100, 0) * Mat4::rotateZ(0.2f);
+        const auto expected = render(reference_, [&] {
+            GlyphBatch batch; batch.setFont(font_);
+            batch.add(U'A', current * glyph, tint);
+            pushMatrix(); multMatrix(current * glyph); batch.add(std::string("xy"), tint); popMatrix();
+            batch.draw();
+        });
+        const auto got = render(actual_, [&] {
+            GlyphBatch batch; batch.setFont(font_); batch.setGlyphTransform(glyph);
+            pushMatrix(); multMatrix(current); batch.add(U'A', tint); batch.add(std::string("xy"), tint); popMatrix();
+            batch.draw();
+        });
+        compare("prototype matches premultiplied per-add matrices", expected, got, 0);
+        const auto explicitMatrix = render(actual_, [&] {
+            GlyphBatch batch; batch.setFont(font_); batch.setGlyphTransform(glyph);
+            batch.add(U'A', current, tint);
+            pushMatrix(); multMatrix(current); batch.add(std::string("xy"), tint); popMatrix();
+            batch.setGlyphTransform(Mat4::identity()); // changes future adds only
+            batch.draw();
+        });
+        compare("prototype explicit matrix and retained transform", expected, explicitMatrix, 0);
     }
     void benchmark() {
         font_.setGridFit(false);
@@ -317,6 +397,7 @@ class GlyphApp : public App {
         std::vector<double> times[3];
         unsigned draws[3]{};
         for (int count : {3000, 6000}) {
+            unsigned creations[3]{}, warmCreations[3]{};
             GlyphBatch bands[3];
             reference_.begin(0,0,0,0); setupScreenOrtho();
             for (auto& band : bands) band.setFont(font_);
@@ -327,6 +408,7 @@ class GlyphApp : public App {
                 const auto start = std::chrono::steady_clock::now();
                 reference_.begin(0,0,0,0); setupScreenOrtho(); setColor(tint); setTextAlign(Direction::Left, Direction::Top);
                 const auto before = sg_query_stats().cur_frame.num_draw;
+                const auto buffersBefore = sg_query_stats().total.buffers.inited;
                 if (method == 0) for (int band = 0; band < 3; ++band) for (int i = band; i < count; i += 3) {
                     pushMatrix(); translate(float(i%180), float(i/180%180)); scale(0.2f);
                     font_.drawString("A", 0, 0); popMatrix();
@@ -342,19 +424,25 @@ class GlyphApp : public App {
                 draws[method] = sg_query_stats().cur_frame.num_draw - before;
                 auto pixels = read(reference_); // synchronizes the same GPU work for both methods
                 const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now()-start).count();
-                if (iteration >= 3) times[method].push_back(ms);
+                if (iteration >= 3) {
+                    times[method].push_back(ms);
+                    creations[method] += sg_query_stats().total.buffers.inited - buffersBefore;
+                } else warmCreations[method] += sg_query_stats().total.buffers.inited - buffersBefore;
+                sg_commit(); internal::drainPendingGpuDestroys();
             }
             for (int method = 0; method < 3; ++method) {
                 auto& values = times[method]; std::sort(values.begin(), values.end());
-                std::printf("BENCH glyphs=%d bands=3 method=%s median_ms=%.3f p95_ms=%.3f draws=%u\n", count, method == 0 ? "drawString" : (method == 1 ? "GlyphBatch_retained" : "GlyphBatch_rebuild"), (values[values.size()/2] + values[(values.size()-1)/2]) * 0.5, values.back(), draws[method]);
+                std::printf("BENCH glyphs=%d bands=3 method=%s median_ms=%.3f p95_ms=%.3f draws=%u measured_creates=%u warmup_creates=%u\n", count, method == 0 ? "drawString" : (method == 1 ? "GlyphBatch_retained" : "GlyphBatch_rebuild"), (values[values.size()/2] + values[(values.size()-1)/2]) * 0.5, values.back(), draws[method], creations[method], warmCreations[method]);
             }
             check("three batches issue three page draws", draws[1] == 3 && draws[2] == 3);
+            check("rebuilt frames create zero buffers after warmup", creations[2] == 0);
         }
     }
 public:
     void runOffscreenChecks() {
         setup();
-        scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck(); growthAndTransform(); targetAndBlendChecks();
+        scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck();
+        streamChecks(); glyphTransformChecks(); growthAndTransform(); targetAndBlendChecks();
         reference_.allocate(extent, extent); retain(true);
         for (int frame = 0; frame < 2; ++frame) {
             sg_commit(); internal::drainPendingGpuDestroys(); retain(false);
@@ -368,7 +456,8 @@ public:
     }
     void draw() override {
         if (frame_ == 0) {
-            scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck(); growthAndTransform(); targetAndBlendChecks();
+            scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck();
+        streamChecks(); glyphTransformChecks(); growthAndTransform(); targetAndBlendChecks();
             reference_.allocate(extent, extent);
             retain(true);
         } else {

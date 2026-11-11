@@ -5,3 +5,5 @@ Build through the core test runner. `allCoreTests glyphBatch` checks unloaded/em
 Linux builds with EGL development files also support `LIBGL_ALWAYS_SOFTWARE=1 allCoreTests glyphBatch --egl-check`. This runs the same Fbo checks using a surfaceless Mesa OpenGL context when an X server is unavailable. It does not test native window presentation.
 
 Checks cover horizontal/vertical/TCY/wrapping layout and alignment, ink pivots, 3D EasyCam transforms, minification, atlas growth and queued-image lifetime, RGBA8/RGBA16F/MSAA, blend equations, draw transforms, clearing and retained buffer reuse across device commits. The 3,000/6,000-glyph benchmark compares separate drawString calls, retained batches and batches rebuilt each frame, with three bands. Median/p95 and draw counts are diagnostic; there is no speed assertion.
+
+Round 3 also checks repeated draws without another upload, same-frame append/clear snapshots, reusable capacities after warmup and the shared quad index buffer. Benchmark samples commit each device frame and report `sg_make_buffer` initialization counts for warmup and ten measured frames.

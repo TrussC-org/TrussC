@@ -7,6 +7,7 @@
 namespace trussc {
 namespace internal {
 sg_shader glyphBatchShader();
+sg_buffer glyphBatchIndices(size_t quads);
 }
 
 // Retained glyph quads. Record model transforms; draw applies the active camera
@@ -20,7 +21,8 @@ public:
     GlyphBatch(GlyphBatch&&) = default;
     GlyphBatch& operator=(GlyphBatch&&) = default;
 
-    // Retain the loaded font/settings. Changing fonts starts a new batch.
+    // Copy settings and share the current atlas, as Font copies do. Later source
+    // option changes replace its atlas; call setFont again to adopt them.
     void setFont(const Font& font) {
         clear();
         font_ = font;
@@ -28,6 +30,10 @@ public:
     void setAlign(Direction h, Direction v) { alignH_ = h; alignV_ = v; }
     void setAlignToInk(bool enabled) { alignToInk_ = enabled; }
     void setWritingMode(WritingMode mode) { font_.setWritingMode(mode); }
+#ifdef TC_GLYPH_BATCH_PROTOTYPE
+    // Branch-only prototype, pending owner approval. Affects subsequent adds.
+    void setGlyphTransform(const Mat4& transform) { glyphTransform_ = transform; }
+#endif
 
     void add(uint32_t codepoint, const Color& color) {
         if (font_.atlasManager_) add(codepoint, getMatrix(), color);
@@ -36,6 +42,7 @@ public:
         if (!font_.atlasManager_ || codepoint == '\n' || codepoint == '\t') return;
         auto* glyph = font_.atlasManager_->getOrLoadGlyph(codepoint);
         if (!glyph || !glyph->isValid()) return;
+        const Mat4 glyphMatrix = matrix * glyphTransform_;
         const float s = 1.0f / font_.dpiScale_;
         float x = 0, baseline = font_.getAscent();
         if (alignToInk_) {
@@ -49,18 +56,21 @@ public:
             if (alignV_ == Direction::Center) baseline -= font_.getLineHeight() / 2;
             if (alignV_ == Direction::Bottom) baseline -= font_.getLineHeight();
             // Match Font's grid-fit rule using the supplied model matrix.
-            const auto& m = matrix.m;
+            const auto& m = glyphMatrix.m;
             const float sx = std::sqrt(m[0]*m[0] + m[4]*m[4] + m[8]*m[8]);
             const float sy = std::sqrt(m[1]*m[1] + m[5]*m[5] + m[9]*m[9]);
             const float scale = std::max(sx, sy);
             if (font_.gridFit_ && std::fabs((scale > 0 ? scale : 1) * internal::targetPixelScale() - 1) < 0.01f)
                 baseline = std::round(baseline);
         }
-        append({codepoint, x, baseline, 0, 0, 0, 1}, matrix, color);
+        append({codepoint, x, baseline, 0, 0, 0, 1}, glyphMatrix, color);
     }
     // String layout follows Font; ink pivot selection applies to independent glyphs.
     void add(const std::string& text, const Color& color) {
         if (!font_.atlasManager_) return;
+        // Font layout also reads the matrix to decide baseline grid fitting.
+        auto matrixScope = scopedMatrix();
+        multMatrix(glyphTransform_);
         const Mat4 matrix = getMatrix();
         font_.forEachGlyph(text, 0, 0, alignH_, alignV_, [&](const Font::PlacedGlyph& placed) {
             append(placed, matrix, color);
@@ -69,7 +79,7 @@ public:
 
     void draw() { draw(Mat4::identity()); }
     void draw(const Mat4& transform) {
-        if (runs_.empty() || !sg_isvalid()) return;
+        if (!activeRuns_ || !sg_isvalid()) return;
         auto* target = internal::drawingApiTarget();
         if (!target || !font_.atlasManager_) return;
         font_.initResources();
@@ -89,8 +99,18 @@ public:
         const auto pipeline = target->pipeline(internal::PipelineKey::raw(internal::PipelineRole::GlyphBatch, recipe));
         if (!pipeline.raw.id) return;
         const Mat4 mvp = (target->camera.currentProjectionMatrix * target->camera.currentViewMatrix * transform).transposed();
-        for (auto& page : runs_) {
-            if (!page.upload()) continue;
+        // Upload every dirty run before queuing any of this batch's draws.
+        // Buffer copies suspend/flush the existing target prefix, like StorageBuffer.
+        size_t quads = 0;
+        for (size_t i = 0; i < activeRuns_; ++i) {
+            if (runs_[i].upload()) quads = std::max(quads, runs_[i].vertices.size() / 4);
+        }
+        if (!quads) return;
+        const auto indices = internal::glyphBatchIndices(quads);
+        if (sg_query_buffer_state(indices) != SG_RESOURCESTATE_VALID) return;
+        for (size_t i = 0; i < activeRuns_; ++i) {
+            auto& page = runs_[i];
+            if (page.dirty || !page.gpu) continue;
             if (page.atlasIndex >= font_.atlasManager_->getAtlasCount()) continue;
             const auto& atlas = font_.atlasManager_->getAtlas(page.atlasIndex);
             struct Params { float mvp[16]; float atlas[4]; } params{};
@@ -105,9 +125,9 @@ public:
                                clip.active ? clip.h : float(target->height)};
             command.pipeline = pipeline.raw;
             command.pipelineGeneration = pipeline.generation;
-            command.vertexCount = static_cast<int>(page.indices.size()); // indexed sg_draw count
+            command.vertexCount = static_cast<int>(page.vertices.size() / 4 * 6); // indexed sg_draw count
             command.bindings.vertex_buffers[0] = page.gpu->vertices;
-            command.bindings.index_buffer = page.gpu->indices;
+            command.bindings.index_buffer = indices;
             command.bindings.views[0] = atlas.getView();
             command.bindings.samplers[0] = internal::fontSamplers().mipped;
             command.uniforms.emplace_back(0, std::vector<uint8_t>(sizeof(params)));
@@ -117,45 +137,76 @@ public:
                 target->advanceLayer();
         }
     }
-    void clear() { runs_.clear(); }
+    void clear() {
+        activeRuns_ = 0;
+        for (auto& run : runs_) { run.vertices.clear(); run.dirty = true; }
+    }
 
 private:
     struct Vertex { Vec4 position; Vec2 texcoord; Color color; };
     struct Buffers {
-        sg_buffer vertices{}, indices{};
+        sg_buffer vertices{}, staging{};
+        uint32_t frame = 0;
         ~Buffers() {
             internal::deferGpuDestroy(vertices);
-            internal::deferGpuDestroy(indices);
+            internal::deferGpuDestroy(staging);
         }
     };
     struct Run {
-        size_t atlasIndex;
+        size_t atlasIndex = 0;
         std::vector<Vertex> vertices;
-        std::vector<uint32_t> indices;
-        std::shared_ptr<Buffers> gpu;
+        std::vector<std::unique_ptr<Buffers>> uploads;
+        Buffers* gpu = nullptr;
         bool dirty = true;
         bool upload() {
             if (!dirty) return gpu != nullptr;
             // Bound (abi): sg_draw counts and buffer byte sizes use signed int.
             const size_t limit = static_cast<size_t>((std::numeric_limits<int>::max)());
-            if (vertices.size() > limit / sizeof(Vertex) || indices.size() > limit / sizeof(uint32_t)) {
+            if (vertices.size() > limit / sizeof(Vertex) || vertices.size() / 4 > limit / (6 * sizeof(uint32_t))) {
                 internal::reportImportError("GlyphBatch", "glyph buffer size cannot be represented");
                 return false;
             }
-            auto replacement = std::make_shared<Buffers>();
-            sg_buffer_desc desc{};
-            desc.data = {vertices.data(), vertices.size() * sizeof(Vertex)};
-            desc.label = "tc_glyph_batch_vertices";
-            replacement->vertices = sg_make_buffer(&desc);
-            desc.data = {indices.data(), indices.size() * sizeof(uint32_t)};
-            desc.usage.index_buffer = true;
-            desc.label = "tc_glyph_batch_indices";
-            replacement->indices = sg_make_buffer(&desc);
-            if (sg_query_buffer_state(replacement->vertices) != SG_RESOURCESTATE_VALID ||
-                sg_query_buffer_state(replacement->indices) != SG_RESOURCESTATE_VALID) return false;
-            // Immutable replacements preserve earlier queued draws, even if add
-            // and draw are called again before this frame's replay.
-            gpu = std::move(replacement);
+            const auto frame = internal::shaderStreamFrame();
+            size_t slot = 0;
+            // A changed batch drawn again in this frame uses another snapshot.
+            // Keep these slots for reuse next frame; never overwrite a queued draw.
+            while (slot < uploads.size() && uploads[slot]->frame == frame) ++slot;
+            if (slot == uploads.size()) uploads.push_back(std::make_unique<Buffers>());
+            auto& buffers = uploads[slot];
+            const size_t bytes = vertices.size() * sizeof(Vertex);
+            if (!internal::shaderStreamFits(buffers->vertices, bytes)) {
+                const size_t capacity = internal::ShaderStreamState::capacityFor(buffers->vertices, bytes);
+                auto replacement = std::make_unique<Buffers>();
+                sg_buffer_desc desc{};
+                desc.size = capacity;
+                desc.usage.vertex_buffer = true;
+                desc.usage.copy_dst = true;
+                desc.label = "tc_glyph_batch_vertices";
+                replacement->vertices = sg_make_buffer(&desc);
+                // This sokol revision replaces sg_update_buffer with transient
+                // writes + copies. The destination persists on clean frames.
+                // A GPU copy source preserves WebGPU command-encoder ordering.
+                desc.usage.copy_dst = false;
+                desc.usage.copy_src = true;
+                desc.usage.write_transient = true;
+                desc.label = "tc_glyph_batch_upload";
+                replacement->staging = sg_make_buffer(&desc);
+                if (sg_query_buffer_state(replacement->vertices) != SG_RESOURCESTATE_VALID ||
+                    sg_query_buffer_state(replacement->staging) != SG_RESOURCESTATE_VALID) return false;
+                buffers = std::move(replacement);
+            }
+            internal::suspendForImageUpload();
+            sg_write_buffer_desc write{};
+            write.src.data = {vertices.data(), bytes};
+            write.dst.buffer = buffers->staging;
+            sg_write_buffer_transient(&write);
+            sg_copy_buffer_to_buffer_desc copy{};
+            copy.src.buffer = buffers->staging;
+            copy.dst.buffer = buffers->vertices;
+            copy.size = bytes;
+            sg_copy_buffer_to_buffer(&copy);
+            buffers->frame = frame;
+            gpu = buffers.get();
             dirty = false;
             return true;
         }
@@ -164,9 +215,11 @@ private:
         const auto* glyph = font_.atlasManager_->getOrLoadGlyph(placed.codepoint);
         if (!glyph || !glyph->isValid() || glyph->getWidth() <= 0 || glyph->getHeight() <= 0) return;
         const size_t index = glyph->getAtlasIndex();
-        if (runs_.empty() || runs_.back().atlasIndex != index)
-            runs_.push_back(Run{index, {}, {}, {}, true});
-        auto& page = runs_.back();
+        if (!activeRuns_ || runs_[activeRuns_ - 1].atlasIndex != index) {
+            if (activeRuns_ == runs_.size()) runs_.emplace_back();
+            runs_[activeRuns_++].atlasIndex = index;
+        }
+        auto& page = runs_[activeRuns_ - 1];
         const auto& atlas = font_.atlasManager_->getAtlas(index);
         const float s = 1.0f / font_.dpiScale_;
         const float x = placed.drawX + glyph->getXoff() * s * placed.scaleX;
@@ -178,18 +231,18 @@ private:
         const float u0 = glyph->getU0() * atlas.getWidth(), u1 = glyph->getU1() * atlas.getWidth();
         const float v0 = glyph->getV0() * atlas.getHeight(), v1 = glyph->getV1() * atlas.getHeight();
         const Vec2 uv[] = {{u0,v0}, {u1,v0}, {u1,v1}, {u0,v1}};
-        const auto base = static_cast<uint32_t>(page.vertices.size());
         const float c = std::cos(placed.rotationCw), si = std::sin(placed.rotationCw);
         for (int i = 0; i < 4; ++i) {
             const float dx = corners[i].x - placed.pivotX, dy = corners[i].y - placed.pivotY;
             const Vec4 pos(placed.pivotX + c*dx - si*dy, placed.pivotY + si*dx + c*dy, 0, 1);
             page.vertices.push_back({matrix * pos, uv[i], color});
         }
-        page.indices.insert(page.indices.end(), {base, base+1, base+2, base, base+2, base+3});
         page.dirty = true;
     }
     Font font_;
     std::vector<Run> runs_;
+    size_t activeRuns_ = 0;
+    Mat4 glyphTransform_ = Mat4::identity();
     Direction alignH_ = Direction::Left;
     Direction alignV_ = Direction::Top;
     bool alignToInk_ = false;

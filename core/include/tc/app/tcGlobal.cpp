@@ -398,6 +398,37 @@ sg_shader glyphBatchShader() {
     return shader;
 }
 
+// One host-owned immutable quad pattern shared by all GlyphBatch instances.
+// Like the coverage shader, the final buffer belongs to sg_shutdown; no static
+// destructor issues GPU calls. Growth retires the old handle for queued draws.
+sg_buffer glyphBatchIndices(size_t quads) {
+    static sg_buffer buffer{};
+    const size_t limit = static_cast<size_t>(INT_MAX) / (6 * sizeof(uint32_t));
+    if (!quads || quads > limit) return {};
+    size_t capacity = sg_query_buffer_size(buffer) / (6 * sizeof(uint32_t));
+    if (capacity >= quads) return buffer;
+    capacity = std::max(capacity, size_t(64));
+    while (capacity < quads) capacity = std::min(capacity * 2, limit);
+    std::vector<uint32_t> indices(capacity * 6);
+    for (size_t i = 0; i < capacity; ++i) {
+        const auto base = static_cast<uint32_t>(i * 4);
+        const uint32_t quad[] = {base, base+1, base+2, base, base+2, base+3};
+        std::memcpy(indices.data() + i * 6, quad, sizeof(quad));
+    }
+    sg_buffer_desc desc{};
+    desc.usage.index_buffer = true;
+    desc.data = {indices.data(), indices.size() * sizeof(uint32_t)};
+    desc.label = "tc_glyph_batch_shared_indices";
+    const auto replacement = sg_make_buffer(&desc);
+    if (sg_query_buffer_state(replacement) != SG_RESOURCESTATE_VALID) {
+        deferGpuDestroy(replacement);
+        return {};
+    }
+    deferGpuDestroy(buffer);
+    buffer = replacement;
+    return buffer;
+}
+
 void resizeSgl(int newMaxVertices, int newMaxCommands) {
     auto& budget = sglBudget();
     logNotice("sokol_gl") << "Resizing: vertices " << budget.maxVertices
