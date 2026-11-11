@@ -36,6 +36,9 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#if defined(__EMSCRIPTEN__)
+#include <GLES3/gl3.h>
+#endif
 
 using namespace std;
 using namespace tc;
@@ -105,7 +108,7 @@ static const uint32_t kCodepointCount = 400;
 // Glyph 0: empty .notdef, glyph 1: filled square (100..900 x 0..800), glyph 2:
 // empty space. Codepoints U+4E00..U+4E00+kCodepointCount-1 map to glyph 1,
 // ' ' to glyph 2. 1000 units per em, ascender 800, descender -200.
-static Bytes makeSquareFont() {
+static Bytes makeSquareFont(bool withCounter = false) {
     Bytes head;
     put32(head, 0x00010000);
     put32(head, 0x00010000);
@@ -158,15 +161,24 @@ static Bytes makeSquareFont() {
         cmap.insert(cmap.end(), s13.begin(), s13.end());
     }
 
-    // glyf: glyph 1 only (one contour, four on-curve points).
+    // The mid-pass fixture adds a reverse-wound inner contour. A transparent
+    // counter inside the quad distinguishes actual glyph coverage from a
+    // constant-white texture or an opaque rectangle.
     Bytes square;
-    put16(square, 1);
+    put16(square, withCounter ? 2 : 1);
     put16(square, 100); put16(square, 0); put16(square, 900); put16(square, 800);
     put16(square, 3);                           // endPtsOfContours
+    if (withCounter) put16(square, 7);
     put16(square, 0);                           // instructionLength
-    for (int i = 0; i < 4; i++) square.push_back(1);   // on-curve, int16 deltas
+    for (int i = 0; i < (withCounter ? 8 : 4); i++) square.push_back(1);
     put16(square, 100); put16(square, 800); put16(square, 0); put16(square, (uint16_t)-800);
+    if (withCounter) {
+        put16(square, 200); put16(square, 0); put16(square, 400); put16(square, 0);
+    }
     put16(square, 0); put16(square, 0); put16(square, 800); put16(square, 0);
+    if (withCounter) {
+        put16(square, (uint16_t)-600); put16(square, 400); put16(square, 0); put16(square, (uint16_t)-400);
+    }
     while (square.size() % 4) square.push_back(0);
 
     Bytes glyf = square;
@@ -323,8 +335,7 @@ public:
         check("gpu: fully covered texels have the setColor() color", wrongColour == 0,
               to_string(wrongColour) + " texels");
 
-        // Minified draws: the first one asks for the mip chain, the next one
-        // builds the R8 chain and samples it.
+        // Minified draws build and sample the R8 chain on the first draw.
         fbo_.begin(0.0f, 0.0f, 0.0f, 0.0f);
         setColor(1.0f, 0.5f, 0.25f);
         pushMatrix();
@@ -356,17 +367,20 @@ private:
     Fbo fbo_;
 };
 
+#include "midpassChecks.h"
+
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
-    const bool gpuCheck = argc > 1 && strcmp(argv[1], "--gpu-check") == 0;
+    const bool midpassCheck = argc > 1 && strcmp(argv[1], "--midpass-check") == 0;
+    const bool gpuCheck = midpassCheck || (argc > 1 && strcmp(argv[1], "--gpu-check") == 0);
     if (!gpuCheck) {
         checkCpuPages();
         printf("fontAtlasR8: %s\n", g_fail == 0 ? "OK" : "FAIL");
         return g_fail == 0 ? 0 : 1;
     }
 
-    const Bytes font = makeSquareFont();
+    const Bytes font = makeSquareFont(midpassCheck);
     g_fontPath = (filesystem::temp_directory_path() / "fontAtlasR8_square.ttf").string();
     {
         ofstream f(g_fontPath, ios::binary);
@@ -375,6 +389,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     WindowSettings settings;
     settings.setSize(kCols * kCell, kRows * kCell);
     settings.setHighDpi(false);
+    if (midpassCheck) {
+        settings.setSize(256, 192);
+        return tcCoreTest::runDisplayTest<MidpassCheckApp>(settings, g_fail, [] {
+            filesystem::remove(g_fontPath);
+            check("one-shot and later-frame checks completed", midpassCompleted);
+        });
+    }
     return tcCoreTest::runDisplayTest<GpuCheckApp>(settings, g_fail, [] {
         filesystem::remove(g_fontPath);
         printf("fontAtlasR8 --gpu-check: %s\n", g_fail == 0 ? "OK" : "FAIL");
