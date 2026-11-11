@@ -60,10 +60,12 @@ public:
 #if defined(__EMSCRIPTEN__)
             // grabScreen is unavailable on Web. Read the canvas before the
             // browser presents this tick; raw GL rows start at the bottom.
-            screen.allocate(256, 192, 4);
-            glReadPixels(0, 0, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, screen.getData());
+            // The canvas may be larger than the requested window size.
+            const int w = sapp_width(), h = sapp_height();
+            screen.allocate(w, h, 4);
+            glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, screen.getData());
             check("swapchain capture after overlay", glGetError() == GL_NO_ERROR);
-            const int glyphY = 192 - 1 - 80, overlayY = 192 - 1 - 16;
+            const int glyphY = h - 1 - 80, overlayY = h - 1 - 16;
 #else
             check("swapchain capture after overlay", grabScreen(screen));
             const int glyphY = 80, overlayY = 16;
