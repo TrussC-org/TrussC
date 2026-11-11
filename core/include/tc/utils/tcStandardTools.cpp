@@ -154,6 +154,40 @@ int inputMouseButton(const json& a, bool move = false) {
     return inputInteger(a, "button", move ? -1 : SAPP_MOUSEBUTTON_LEFT, SAPP_MOUSEBUTTON_MIDDLE);
 }
 
+// Shared by color analysis and stencil capture; resolve again in the deferred
+// producer so a moved or destroyed Fbo cannot leave a stale pointer there.
+json resolveDebugObject(trussc::internal::DebugObjectKind kind, const json& selector,
+                        uint64_t& index, void*& object) {
+    auto error = [](const std::string& message) { return json{{"status","error"},{"message",message}}; };
+    bool byIndex = selector.is_number_unsigned() || selector.is_number_integer();
+    std::string name;
+    if (byIndex) {
+        if (selector.is_number_integer() && selector.get<int64_t>()<0) return error("negative object index");
+        index=selector.get<uint64_t>();
+    } else {
+        name=selector.get<std::string>();
+        if (name.empty()) return error("use an index for unnamed objects");
+    }
+    std::string matchingIndices;
+    size_t matches = 0;
+    for (const auto& e : trussc::internal::debugObjects(kind)) {
+        if ((byIndex && e.index==index)||(!byIndex && e.name==name)) {
+            if (matches++) matchingIndices += ", ";
+            matchingIndices += std::to_string(e.index);
+            object=e.object; index=e.index;
+        }
+    }
+    if (matches>1) return error("debug name " + json(name).dump() +
+        " is ambiguous (indices " + matchingIndices + "); use an index");
+    if (!object && !byIndex && name.find_first_not_of("0123456789")==std::string::npos) {
+        index=std::stoull(name);
+        for (const auto& e : trussc::internal::debugObjects(kind))
+            if (e.index==index) object=e.object;
+    }
+    if (!object) return error("image source no longer exists or was not found");
+    return nullptr;
+}
+
 } // namespace
 
 void downscaleImage(const unsigned char* src, int srcW, int srcH, int channels,
@@ -222,7 +256,8 @@ json pixelsToImageJson(const trussc::Pixels& px, const std::string& format,
 json imageContentResult(json img) {
     if (!img.contains("data")) return img;  // error object
     json meta = json::object();
-    for (auto& key : {"width", "height"}) {
+    for (auto& key : {"width", "height", "sourceWidth", "sourceHeight", "format",
+                      "encoding", "origin", "interpretation", "frame", "target"}) {
         if (img.contains(key)) meta[key] = img[key];
     }
     return json::array({
@@ -552,34 +587,10 @@ void registerStandardTools(Server& server) {
                 const bool fbo = source.contains("fbo");
                 const auto kind = fbo ? trussc::internal::DebugObjectKind::Fbo : trussc::internal::DebugObjectKind::Image;
                 const auto& selector = source.at(fbo?"fbo":"image");
-                bool byIndex = selector.is_number_unsigned() || selector.is_number_integer();
                 uint64_t index = 0;
-                std::string name;
-                if (byIndex) {
-                    if (selector.is_number_integer() && selector.get<int64_t>()<0) return error("negative object index");
-                    index=selector.get<uint64_t>();
-                } else {
-                    name=selector.get<std::string>();
-                    if (name.empty()) return error("use an index for unnamed objects");
-                }
                 void* object = nullptr;
-                std::string matchingIndices;
-                size_t matches = 0;
-                for (const auto& e : trussc::internal::debugObjects(kind)) {
-                    if ((byIndex && e.index==index)||(!byIndex && e.name==name)) {
-                        if (matches++) matchingIndices += ", ";
-                        matchingIndices += std::to_string(e.index);
-                        object=e.object; index=e.index;
-                    }
-                }
-                if (matches>1) return error("debug name " + json(name).dump() +
-                    " is ambiguous (indices " + matchingIndices + "); use an index");
-                if (!object && !byIndex && name.find_first_not_of("0123456789")==std::string::npos) {
-                    index=std::stoull(name);
-                    for (const auto& e : trussc::internal::debugObjects(kind))
-                        if (e.index==index) object=e.object;
-                }
-                if (!object) return error("image source no longer exists or was not found");
+                auto lookupError = internal::resolveDebugObject(kind, selector, index, object);
+                if (!lookupError.is_null()) return lookupError;
                 if (!fbo) {
                     const auto& p=static_cast<Image*>(object)->getPixels();
                     return internal::analyzeImage(p,args,(p.isFloat()||p.getChannels()<=2)?"linear":"sRGB");
@@ -695,6 +706,61 @@ void registerStandardTools(Server& server) {
             }, ctx);
             return json(nullptr);  // ignored — deferred result is sent instead
         });
+
+    Tool stencil;
+    stencil.level = ToolLevel::ReadOnly;
+    stencil.name = "tc_get_stencil";
+    stencil.description = "Fbo stencil as a lossless grayscale PNG image plus metadata. Select a registered Fbo by name or index from tc_list_fbos. Optional width downsizes with nearest-neighbor sampling (aspect preserved, never upscales); full resolution is exact, resized output is preview. Window/main targets and MSAA Fbos are unsupported; failed backend readback returns an error. Capture runs after the frame on the render thread; PNG encoding runs on the HTTP worker.";
+    stencil.args = {{"fbo","string|integer","Registered Fbo name or index from tc_list_fbos",true},
+                    {"width","integer","Positive preview width; omit for full resolution",false}};
+    stencil.handler = [](const json& args) -> json {
+        auto error = [](const std::string& message) { return json{{"status","error"},{"message",message}}; };
+        try {
+            if (args.contains("window")) return error("window/main stencil capture is not supported; select an Fbo with fbo");
+            if (!args.contains("fbo")) return error("fbo is required; window/main stencil capture is not supported");
+            // Bound (MCP input): preview width in [1, INT_MAX]; never larger than the source.
+            const int reqWidth = args.contains("width") ?
+                internal::inputInteger(args, "width", 1, std::numeric_limits<int>::max()) : 0;
+            uint64_t index = 0;
+            void* object = nullptr;
+            auto lookupError = internal::resolveDebugObject(trussc::internal::DebugObjectKind::Fbo,
+                                                            args.at("fbo"), index, object);
+            if (!lookupError.is_null()) return lookupError;
+            mcp::deferToolResultTwoStage([index,reqWidth,error]() -> std::function<json()> {
+                Fbo* current = nullptr;
+                for (const auto& e : trussc::internal::debugObjects(trussc::internal::DebugObjectKind::Fbo))
+                    if (e.index == index) current = static_cast<Fbo*>(e.object);
+                auto pixels = std::make_shared<Pixels>();
+                std::string failure;
+                if (!current || !current->isAllocated()) failure = "Fbo disappeared or is not allocated";
+                else if (current->getSampleCount() != 1) failure = "MSAA Fbo stencil capture is not supported";
+                else if (!current->readStencil(*pixels)) failure = "Fbo stencil readback failed or is unsupported on this backend";
+                const auto frame = getFrameCount();
+                return [pixels,index,reqWidth,frame,failure,error]() -> json {
+                    if (!failure.empty()) return error(failure);
+                    const int sourceWidth = pixels->getWidth(), sourceHeight = pixels->getHeight();
+                    const int width = reqWidth > 0 ? std::min(reqWidth, sourceWidth) : sourceWidth;
+                    Pixels preview;
+                    if (width != sourceWidth) {
+                        const int height = std::max(1, int(std::lround(double(sourceHeight) * width / sourceWidth)));
+                        preview.allocate(width, height, 1);
+                        for (int y = 0; y < height; ++y)
+                            for (int x = 0; x < width; ++x)
+                                preview.getData()[size_t(y) * width + x] = pixels->getData()[
+                                    (size_t(y) * sourceHeight / height) * sourceWidth + size_t(x) * sourceWidth / width];
+                    }
+                    auto image = internal::pixelsToImageJson(width == sourceWidth ? *pixels : preview, "png", 0, 0);
+                    image.update(json{{"sourceWidth",sourceWidth},{"sourceHeight",sourceHeight},
+                                      {"format","R8"},{"encoding","png"},{"origin","top-left"},
+                                      {"interpretation",width == sourceWidth ? "exact" : "preview"},
+                                      {"frame",frame},{"target",{{"fbo",index}}}});
+                    return internal::imageContentResult(std::move(image));
+                };
+            });
+            return nullptr;
+        } catch (const std::exception& e) { return error(e.what()); }
+    };
+    server.registerTool(std::move(stencil));
 
     coreTool(server, "tc_save_screenshot", "Save screenshot to file. A Window is captured only while visible: one tc_list_windows reports occluded fails at once, and one that renders no frame within 5 s fails then.")
         .level(ToolLevel::ReadOnly)

@@ -60,14 +60,14 @@ void downscaleImage(const unsigned char* src, int srcW, int srcH, int channels,
                     std::vector<unsigned char>& dst, int dstW, int dstH);
 
 // Optional downscale + PNG/JPEG encode + Base64. Runs on the HTTP worker
-// inside two-stage deferral thunks (tc_get_screenshot / tc_get_status_image),
+// inside two-stage deferral thunks (screenshot, stencil and status image),
 // never on the main loop. reqWidth <= 0 means "no resize"; never upscales.
 json pixelsToImageJson(const trussc::Pixels& px, const std::string& format,
                        int reqWidth, int quality);
 
 // Wrap an encoded image as MCP-standard content blocks: an image block
 // (clients like Claude Code render it inline) followed by a text block with
-// the metadata (width/height as JSON, for scripted consumers). Error objects
+// the dimensions and available capture metadata as JSON. Error objects
 // pass through untouched and get the normal text wrapping.
 json imageContentResult(json img);
 

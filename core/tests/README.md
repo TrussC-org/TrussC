@@ -10,6 +10,12 @@ This is the *behavioral* tier — it complements, and does not replace, the
 **build canaries** in `examples/tests/` (e.g. `AllFeaturesExample`), which prove
 the API still compiles/links/instantiates but do not assert runtime behavior.
 
+`mcpAnalyzeImage/` also tests `tc_get_stencil`: headless tool schema and target errors,
+then `allCoreTests mcpAnalyzeImage --gpu-check` checks an owned Fbo containing
+all 256 stencil values, PNG bytes and orientation, nearest-neighbor preview,
+name/index lookup, a moved/deleted source, and MSAA rejection. An optional final
+argument names an evidence directory for the returned PNG enlarged with nearest sampling.
+
 ## What belongs here
 
 `windowState` also has a production-linked hidden-resize reentry probe. After
