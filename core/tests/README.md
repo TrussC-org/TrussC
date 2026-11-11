@@ -1168,6 +1168,17 @@ Process and close coverage:
   headless stdin subprocess cases remain part of the own-binary suite.
 - `windowTick/event-converter-test` classifies quit/device loss as process events;
   they have no Window raw-event fan-out. Native input keeps raw-before-typed order.
+- `process/` — running external programs (#1271). `runProcess()` returns the
+  exit code and the stdout and stderr lines (`\r\n` and a lone `\r` end a
+  line, an unterminated last line is kept); arguments with spaces, quotes,
+  trailing backslashes and empty ones arrive unchanged; `workingDir` is used;
+  a missing program reports `started == false`; 1 MiB on both streams does
+  not deadlock. `Process` fires `onLine` per line and one `onExit`, refuses a
+  second `startAsync()` while running, restarts after exit, `kill()` and the
+  destructor end a sleeping child. Listeners run on the worker by default;
+  `Deliver::Main` listeners run on the main-thread drain and honor the optional
+  per-event pending-copy limit. Inline and Main callbacks may destroy Process. The children are the test binary itself (`--child`).
+  Desktop only; elsewhere it checks that nothing starts.
 
 ### Session authority and OS-only exit deadline
 

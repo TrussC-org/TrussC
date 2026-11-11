@@ -34150,6 +34150,360 @@ details.ko = '''
 '''
 related = ["Thread"]
 
+["runProcess"]
+category = "utility"
+keywords = ["system", "shell", "exec", "command", "external program", "subprocess", "spawn", "ofsystem"]
+description.en = "Runs an external program and waits for it to finish."
+description.ja = "外部プログラムを実行し、終了を待ちます。"
+description.ko = "외부 프로그램을 실행하고 끝날 때까지 기다립니다."
+details.en = '''
+- Embedded NUL in the program, any argument or the working directory is rejected before spawning. The environment is inherited with no per-child override. Windows output bytes are not converted from the child's code page.
+- `runProcess(args, workingDir)` starts `args[0]` with the remaining arguments, blocks the calling thread until the program exits, and returns a `ProcessResult` with the exit code and the output. Like `ofSystem()`, but without a shell: arguments are passed as-is, with no quoting, globbing or redirection. `args[0]` is looked up on PATH.
+- An empty `workingDir` keeps the current directory.
+- stdout and stderr are both captured, as lines in arrival order, each ending in `\n`. The program's stdin is the null device.
+- It waits for the program, not for children it leaves running.
+- The frame waits too when it is called from `update()` or `draw()`. For anything slow, use `Process`.
+- `started == false` means the program could not be started (not found, not executable, or a platform without processes: Web, iOS, Android); an error is logged.
+- Windows: `args[0]` is found on PATH only as an `.exe`. Run batch scripts through cmd: `{"cmd", "/c", "npm", "run", "build"}`. Console programs run without a console window.
+'''
+details.ja = '''
+- プログラム名、引数、作業ディレクトリに埋め込み NUL があれば起動前に拒否します。環境変数は継承し、子プロセスごとの上書きはありません。Windows の出力バイト列は子プロセスのコードページから変換しません。
+- `runProcess(args, workingDir)` は `args[0]` を残りの引数とともに起動し、プログラムが終了するまで呼び出し元のスレッドをブロックして、終了コードと出力を持つ `ProcessResult` を返します。`ofSystem()` に相当しますが、シェルを経由しません。引数はそのまま渡され、クォート、グロブ、リダイレクトは行われません。`args[0]` は PATH から探します。
+- `workingDir` が空の場合は現在のディレクトリのままです。
+- stdout と stderr の両方を、届いた順に 1 行ずつ `\n` 付きで取得します。プログラムの stdin は null デバイスです。
+- 待つのはプログラム本体だけで、そのプログラムが残した子プロセスは待ちません。
+- `update()` や `draw()` から呼ぶとフレームも待たされます。時間のかかる処理には `Process` を使ってください。
+- `started == false` はプログラムを起動できなかったことを表します（見つからない、実行できない、またはプロセスのないプラットフォーム: Web、iOS、Android）。エラーがログに出ます。
+- Windows: `args[0]` は PATH 上の `.exe` だけが見つかります。バッチスクリプトは cmd 経由で実行してください: `{"cmd", "/c", "npm", "run", "build"}`。コンソールプログラムはコンソールウィンドウを開かずに実行されます。
+'''
+details.ko = '''
+- 프로그램 이름, 인자 또는 작업 디렉터리에 포함된 NUL은 시작 전에 거부합니다. 환경 변수는 상속하며 자식별 재정의는 없습니다. Windows 출력 바이트는 자식의 코드 페이지에서 변환하지 않습니다.
+- `runProcess(args, workingDir)`는 `args[0]`을 나머지 인자와 함께 실행하고, 프로그램이 끝날 때까지 호출한 스레드를 블록한 뒤 종료 코드와 출력을 담은 `ProcessResult`를 반환합니다. `ofSystem()`과 비슷하지만 셸을 거치지 않습니다. 인자는 그대로 전달되며 따옴표 처리, 글롭, 리다이렉트는 없습니다. `args[0]`은 PATH에서 찾습니다.
+- `workingDir`가 비어 있으면 현재 디렉터리를 그대로 씁니다.
+- stdout과 stderr를 모두 도착한 순서대로 한 줄씩 `\n`을 붙여 받습니다. 프로그램의 stdin은 null 장치입니다.
+- 프로그램 자체만 기다리며, 프로그램이 남겨 둔 자식 프로세스는 기다리지 않습니다.
+- `update()`나 `draw()`에서 호출하면 프레임도 함께 멈춥니다. 오래 걸리는 작업에는 `Process`를 사용합니다.
+- `started == false`는 프로그램을 시작하지 못했다는 뜻입니다(찾을 수 없음, 실행할 수 없음, 또는 프로세스가 없는 플랫폼: Web, iOS, Android). 오류가 로그에 남습니다.
+- Windows: `args[0]`은 PATH에 있는 `.exe`만 찾습니다. 배치 스크립트는 cmd를 거쳐 실행합니다: `{"cmd", "/c", "npm", "run", "build"}`. 콘솔 프로그램은 콘솔 창을 열지 않고 실행됩니다.
+'''
+snippet = '''
+ProcessResult r = runProcess({"git", "rev-parse", "HEAD"});
+if (r.started && r.exitCode == 0) logNotice() << r.output;
+'''
+related = ["ProcessResult", "Process"]
+of = ["ofSystem"]
+
+["ProcessResult"]
+keywords = ["exit code", "output", "system"]
+description.en = "Holds the exit code and output of a finished `runProcess` call."
+description.ja = "終了した `runProcess` の終了コードと出力を保持します。"
+description.ko = "끝난 `runProcess` 호출의 종료 코드와 출력을 담습니다."
+details.en = '''
+- `started` tells whether the program ran at all, `exitCode` is its exit status, and `output` holds stdout and stderr together.
+'''
+details.ja = '''
+- `started` はプログラムが実行されたかどうか、`exitCode` は終了ステータス、`output` は stdout と stderr をまとめた出力です。
+'''
+details.ko = '''
+- `started`는 프로그램이 실행되었는지, `exitCode`는 종료 상태, `output`은 stdout과 stderr를 합친 출력입니다.
+'''
+related = ["runProcess"]
+
+["ProcessResult::exitCode"]
+description.en = "Holds the program's exit code."
+description.ja = "プログラムの終了コードを保持します。"
+description.ko = "프로그램의 종료 코드를 담습니다."
+details.en = '''
+- `-1` when the program could not be started. On macOS and Linux a program ended by a signal reports 128 + the signal number, as a shell does.
+'''
+details.ja = '''
+- プログラムを起動できなかった場合は `-1` です。macOS と Linux では、シグナルで終了したプログラムはシェルと同じく 128 + シグナル番号になります。
+'''
+details.ko = '''
+- 프로그램을 시작하지 못했으면 `-1`입니다. macOS와 Linux에서 시그널로 종료된 프로그램은 셸과 같이 128 + 시그널 번호가 됩니다.
+'''
+
+["ProcessResult::output"]
+description.en = "Holds the program's stdout and stderr lines."
+description.ja = "プログラムの stdout と stderr の行を保持します。"
+description.ko = "프로그램의 stdout과 stderr 줄을 담습니다."
+details.en = '''
+- Lines from both streams in arrival order, each ending in `\n`. Lines ending in `\r\n` or a lone `\r` are stored with `\n`.
+'''
+details.ja = '''
+- 両方のストリームの行が届いた順に入り、各行は `\n` で終わります。`\r\n` や単独の `\r` で終わる行も `\n` で格納されます。
+'''
+details.ko = '''
+- 두 스트림의 줄이 도착한 순서대로 들어가며, 각 줄은 `\n`으로 끝납니다. `\r\n`이나 단독 `\r`로 끝나는 줄도 `\n`으로 저장됩니다.
+'''
+
+["ProcessResult::started"]
+description.en = "Indicates whether the program could be started."
+description.ja = "プログラムを起動できたかどうかを表します。"
+description.ko = "프로그램을 시작할 수 있었는지 나타냅니다."
+details.en = '''
+- `false` when the program was not found, is not executable, or the platform has no processes (Web, iOS, Android). `exitCode` is then `-1`.
+'''
+details.ja = '''
+- プログラムが見つからない、実行できない、またはプロセスのないプラットフォーム（Web、iOS、Android）の場合は `false` です。そのとき `exitCode` は `-1` です。
+'''
+details.ko = '''
+- 프로그램을 찾을 수 없거나 실행할 수 없거나 프로세스가 없는 플랫폼(Web, iOS, Android)이면 `false`입니다. 이때 `exitCode`는 `-1`입니다.
+'''
+
+["Process"]
+keywords = ["system", "exec", "command", "external program", "subprocess", "spawn", "async", "ofsystem", "child process"]
+description.en = "Runs an external program in the background and reports its output line by line."
+description.ja = "外部プログラムをバックグラウンドで実行し、出力を 1 行ずつ通知します。"
+description.ko = "외부 프로그램을 백그라운드에서 실행하고 출력을 한 줄씩 알립니다."
+details.en = '''
+- `startAsync(args, workingDir)` returns at once. A worker thread reads the output, fires `onLine` for every line and `onExit` once at the end.
+- Listeners run inline on the worker thread by default, as with Serial. A listener that touches Nodes, GPU resources, or unguarded app state must use `listen(callback, Deliver::Main)` to run on the main thread.
+- `Deliver::Main` copies the payload and runs the listener at the start of the next frame. Each event supports `setMainThreadDeliveryLimit(count)` for queued and executing Main copies; 0 (the default) is unlimited, and excess copies are dropped.
+- Arguments are passed without a shell, as in `runProcess`. stdout and stderr are read from separate pipes, so neither can fill up and block the program.
+- `kill()` ends the program and every process it started (POSIX: its own process group; Windows: a job object).
+- Destroying a running `Process` kills it and waits for the worker, unless `setKillOnDestroy(false)`. Copying is disabled.
+- macOS, Windows and Linux. Elsewhere `startAsync()` returns false and logs an error.
+'''
+details.ja = '''
+- `startAsync(args, workingDir)` はすぐに戻ります。ワーカースレッドが出力を読み、行ごとに `onLine` を、最後に 1 回 `onExit` を発火します。
+- Serial と同じく、リスナーは既定ではワーカースレッドでインライン実行します。Node、GPU リソース、同期していないアプリの状態に触れる場合は、`listen(callback, Deliver::Main)` でメインスレッドで実行してください。
+- `Deliver::Main` は引数をコピーし、次のフレームの先頭でリスナーを実行します。各イベントの `setMainThreadDeliveryLimit(count)` で待機中・実行中の Main コピー数を制限できます。0（既定値）は無制限で、上限を超えるコピーは破棄します。
+- 引数は `runProcess` と同じくシェルを経由せずに渡されます。stdout と stderr は別のパイプから読むので、どちらかが詰まってプログラムが止まることはありません。
+- `kill()` はプログラムと、それが起動したすべてのプロセスを終了します（POSIX: 専用のプロセスグループ、Windows: ジョブオブジェクト）。
+- 実行中の `Process` を破棄すると、`setKillOnDestroy(false)` でない限りプログラムを終了してワーカーを待ちます。コピーはできません。
+- macOS、Windows、Linux に対応します。それ以外では `startAsync()` が false を返し、エラーがログに出ます。
+'''
+details.ko = '''
+- `startAsync(args, workingDir)`는 바로 반환합니다. 워커 스레드가 출력을 읽어 줄마다 `onLine`을, 마지막에 한 번 `onExit`를 발생시킵니다.
+- Serial과 같이 리스너는 기본적으로 워커 스레드에서 인라인으로 실행합니다. Node, GPU 리소스 또는 동기화하지 않은 앱 상태에 접근하는 리스너는 `listen(callback, Deliver::Main)`으로 메인 스레드에서 실행해야 합니다.
+- `Deliver::Main`은 인자를 복사하고 다음 프레임 시작 시 리스너를 실행합니다. 각 이벤트의 `setMainThreadDeliveryLimit(count)`로 대기 및 실행 중인 Main 복사본 수를 제한할 수 있습니다. 0(기본값)은 무제한이며, 한도를 넘는 복사본은 버립니다.
+- 인자는 `runProcess`와 같이 셸을 거치지 않고 전달됩니다. stdout과 stderr는 별도의 파이프에서 읽으므로 어느 쪽이 가득 차서 프로그램이 멈추는 일이 없습니다.
+- `kill()`은 프로그램과 그 프로그램이 시작한 모든 프로세스를 종료합니다(POSIX: 전용 프로세스 그룹, Windows: 잡 오브젝트).
+- 실행 중인 `Process`를 파괴하면 `setKillOnDestroy(false)`가 아닌 한 프로그램을 종료하고 워커를 기다립니다. 복사할 수 없습니다.
+- macOS, Windows, Linux를 지원합니다. 그 밖의 플랫폼에서는 `startAsync()`가 false를 반환하고 오류가 로그에 남습니다.
+'''
+snippet = '''
+// App members: std::mutex outputMutex; std::vector<std::string> output;
+// Process process; EventListener lineListener, exitListener;
+lineListener = process.onLine.listen([this](ProcessLineEventArgs& e) {
+    std::lock_guard<std::mutex> lock(outputMutex);
+    output.push_back(e.line);
+});
+exitListener = process.onExit.listen([this](ProcessExitEventArgs& e) {
+    if (e.exitCode == 0) reload();
+}, Deliver::Main);
+process.startAsync({"node", "render.js", "--out", path});
+'''
+related = ["runProcess", "ProcessLineEventArgs", "ProcessExitEventArgs", "Event<T>"]
+
+["Process::onLine"]
+keywords = ["stdout", "stderr", "output", "line"]
+description.en = "Fires for each line the program writes."
+description.ja = "プログラムが出力した行ごとに発火します。"
+description.ko = "프로그램이 출력한 줄마다 발생합니다."
+details.en = '''
+- This `Event<ProcessLineEventArgs>` fires on the worker thread for stdout and stderr alike (`isStderr`). All lines are emitted before `onExit`. Use `Deliver::Main` for listeners that touch Nodes or the GPU.
+- Lines end at `\n`, `\r\n` or a lone `\r`, so a progress bar that redraws one line gives one line per redraw. The terminator is not part of `line`; a line longer than 1 MiB is split.
+'''
+details.ja = '''
+- この `Event<ProcessLineEventArgs>` はワーカースレッドで、stdout と stderr の両方について発火します（`isStderr`）。すべての行は `onExit` より前に発火します。Node や GPU に触れるリスナーには `Deliver::Main` を指定してください。
+- 行は `\n`、`\r\n`、単独の `\r` で区切られるため、1 行を描き直すプログレスバーは描き直すたびに 1 行になります。区切り文字は `line` に含まれません。1 MiB を超える行は分割されます。
+'''
+details.ko = '''
+- 이 `Event<ProcessLineEventArgs>`는 워커 스레드에서 stdout과 stderr 모두에 대해 발생합니다(`isStderr`). 모든 줄은 `onExit`보다 먼저 발생합니다. Node나 GPU에 접근하는 리스너에는 `Deliver::Main`을 지정해야 합니다.
+- 줄은 `\n`, `\r\n`, 단독 `\r`에서 끝나므로 한 줄을 다시 그리는 진행 표시줄은 다시 그릴 때마다 한 줄이 됩니다. 줄 끝 문자는 `line`에 포함되지 않으며, 1 MiB보다 긴 줄은 나뉩니다.
+'''
+related = ["ProcessLineEventArgs", "Process::onExit"]
+
+["Process::onExit"]
+description.en = "Fires once when the program has exited."
+description.ja = "プログラムの終了時に 1 回発火します。"
+description.ko = "프로그램이 끝났을 때 한 번 발생합니다."
+details.en = '''
+- This `Event<ProcessExitEventArgs>` fires on the worker thread once per successful `startAsync()`, after the last `onLine`. Use `Deliver::Main` for listeners that touch Nodes or the GPU.
+'''
+details.ja = '''
+- この `Event<ProcessExitEventArgs>` はワーカースレッドで、成功した `startAsync()` ごとに 1 回、最後の `onLine` の後に発火します。Node や GPU に触れるリスナーには `Deliver::Main` を指定してください。
+'''
+details.ko = '''
+- 이 `Event<ProcessExitEventArgs>`는 워커 스레드에서 성공한 `startAsync()`마다 한 번, 마지막 `onLine` 뒤에 발생합니다. Node나 GPU에 접근하는 리스너에는 `Deliver::Main`을 지정해야 합니다.
+'''
+related = ["ProcessExitEventArgs", "Process::onLine"]
+
+["Process::startAsync"]
+description.en = "Starts the program in the background."
+description.ja = "プログラムをバックグラウンドで起動します。"
+description.ko = "프로그램을 백그라운드에서 시작합니다."
+details.en = '''
+- `startAsync(args, workingDir)` starts `args[0]` with the remaining arguments; an empty `workingDir` keeps the current directory. The rules for arguments and PATH are those of `runProcess`.
+- Returns false and logs why when it is already running or the program could not be started. A finished `Process` can be started again.
+- Call from the main thread, including before `runApp()`/`runHeadlessApp()`. Calling it from its own listener on the worker thread (`Deliver::Inline`) returns false.
+'''
+details.ja = '''
+- `startAsync(args, workingDir)` は `args[0]` を残りの引数とともに起動します。`workingDir` が空の場合は現在のディレクトリのままです。引数と PATH の扱いは `runProcess` と同じです。
+- すでに実行中の場合やプログラムを起動できなかった場合は false を返し、理由をログに出します。終了した `Process` は再び起動できます。
+- `runApp()`/`runHeadlessApp()` より前も含め、メインスレッドから呼んでください。ワーカースレッド上の自身のリスナー（`Deliver::Inline`）から呼ぶと false を返します。
+'''
+details.ko = '''
+- `startAsync(args, workingDir)`는 `args[0]`을 나머지 인자와 함께 시작합니다. `workingDir`가 비어 있으면 현재 디렉터리를 그대로 씁니다. 인자와 PATH 규칙은 `runProcess`와 같습니다.
+- 이미 실행 중이거나 프로그램을 시작하지 못하면 false를 반환하고 이유를 로그에 남깁니다. 끝난 `Process`는 다시 시작할 수 있습니다.
+- `runApp()`/`runHeadlessApp()` 이전을 포함하여 메인 스레드에서 호출해야 합니다. 워커 스레드에서 실행되는 자신의 리스너(`Deliver::Inline`)에서 호출하면 false를 반환합니다.
+'''
+
+["Process::isRunning"]
+description.en = "Returns whether the program is running."
+description.ja = "プログラムが実行中かどうかを返します。"
+description.ko = "프로그램이 실행 중인지 반환합니다."
+details.en = '''
+- True from a successful `startAsync()` until the program has exited and its remaining output has been dispatched, just before `onExit` is dispatched.
+'''
+details.ja = '''
+- 成功した `startAsync()` から、プログラムが終了して残りの出力を配送するまで（`onExit` の配送直前まで）true です。
+'''
+details.ko = '''
+- 성공한 `startAsync()`부터 프로그램이 끝나고 남은 출력의 전달을 예약할 때까지(`onExit` 전달 예약 직전까지) true입니다.
+'''
+
+["Process::kill"]
+description.en = "Ends the program and the processes it started."
+description.ja = "プログラムとそれが起動したプロセスを終了します。"
+description.ko = "프로그램과 그 프로그램이 시작한 프로세스를 종료합니다."
+details.en = '''
+- POSIX: SIGTERM, then SIGKILL to the group if it is still present 3 seconds later, even if the launcher has exited. Windows: terminated at once.
+- Returns immediately; `onExit` follows with `killed == true`. Does nothing when nothing runs.
+- A process that leaves its process group or job on purpose is not followed.
+'''
+details.ja = '''
+- POSIX: SIGTERM を送り、起動したプロセスの終了後も、3 秒後にグループが残っていればグループへ SIGKILL を送ります。Windows: すぐに終了します。
+- すぐに戻り、その後 `killed == true` の `onExit` が発火します。何も実行していなければ何もしません。
+- 意図的にプロセスグループやジョブから抜けたプロセスは追跡しません。
+'''
+details.ko = '''
+- POSIX: SIGTERM을 보내고, 시작한 프로세스가 종료되어도 3초 뒤에 그룹이 남아 있으면 그룹에 SIGKILL을 보냅니다. Windows: 바로 종료합니다.
+- 바로 반환하며, 이어서 `killed == true`인 `onExit`가 발생합니다. 실행 중인 것이 없으면 아무것도 하지 않습니다.
+- 일부러 프로세스 그룹이나 잡에서 빠져나간 프로세스는 따라가지 않습니다.
+'''
+
+["Process::waitForExit"]
+description.en = "Blocks until the program has exited and returns its exit code."
+description.ja = "プログラムが終了するまでブロックし、終了コードを返します。"
+description.ko = "프로그램이 끝날 때까지 블록하고 종료 코드를 반환합니다."
+details.en = '''
+- Returns after `onExit` has fired: inline listeners have run, `Deliver::Main` ones are queued. Returns `-1` if nothing was started.
+- From the worker thread, that is from its own inline listeners, it returns `-1` at once and logs an error, since it would wait for itself.
+'''
+details.ja = '''
+- `onExit` の発火後に戻ります。インラインのリスナーは実行済みで、`Deliver::Main` のリスナーはキューに入っています。何も起動していなければ `-1` を返します。
+- ワーカースレッド、つまり自身のインラインリスナーから呼ぶと、自分自身を待つことになるため、すぐに `-1` を返してエラーをログに出します。
+'''
+details.ko = '''
+- `onExit`가 발생한 뒤 반환합니다. 인라인 리스너는 이미 실행되었고 `Deliver::Main` 리스너는 큐에 들어가 있습니다. 시작한 것이 없으면 `-1`을 반환합니다.
+- 워커 스레드, 즉 자신의 인라인 리스너에서 호출하면 자기 자신을 기다리게 되므로 바로 `-1`을 반환하고 오류를 로그에 남깁니다.
+'''
+
+["Process::getExitCode"]
+description.en = "Returns the exit code of the last finished run."
+description.ja = "最後に終了した実行の終了コードを返します。"
+description.ko = "마지막으로 끝난 실행의 종료 코드를 반환합니다."
+details.en = '''
+- `-1` before the first run ends. The same value is passed to `onExit` as `exitCode`.
+'''
+details.ja = '''
+- 最初の実行が終わるまでは `-1` です。同じ値が `onExit` の `exitCode` として渡されます。
+'''
+details.ko = '''
+- 첫 실행이 끝나기 전에는 `-1`입니다. 같은 값이 `onExit`의 `exitCode`로 전달됩니다.
+'''
+
+["Process::setKillOnDestroy"]
+description.en = "Sets whether destroying the Process kills a running program."
+description.ja = "Process の破棄時に実行中のプログラムを終了するかを設定します。"
+description.ko = "Process를 파괴할 때 실행 중인 프로그램을 종료할지 설정합니다."
+details.en = '''
+- Defaults to `true`. With `false`, the destructor waits until the program exits by itself.
+- If the app is hard-killed, Windows also ends its children (kill-on-close job); POSIX leaves the child group running.
+'''
+details.ja = '''
+- デフォルトは `true` です。`false` にすると、デストラクタはプログラムが自分で終了するまで待ちます。
+- アプリが強制終了されると、Windows では kill-on-close ジョブにより子プロセスも終了します。POSIX では子プロセスのグループが動き続けます。
+'''
+details.ko = '''
+- 기본값은 `true`입니다. `false`이면 소멸자는 프로그램이 스스로 끝날 때까지 기다립니다.
+- 앱이 강제 종료되면 Windows에서는 kill-on-close 잡으로 자식 프로세스도 종료합니다. POSIX에서는 자식 프로세스 그룹이 계속 실행됩니다.
+'''
+related = ["Process::getKillOnDestroy"]
+
+["Process::getKillOnDestroy"]
+description.en = "Returns whether destroying the Process kills a running program."
+description.ja = "Process の破棄時に実行中のプログラムを終了するかを返します。"
+description.ko = "Process를 파괴할 때 실행 중인 프로그램을 종료하는지 반환합니다."
+related = ["Process::setKillOnDestroy"]
+
+["ProcessLineEventArgs"]
+description.en = "Carries one line of a program's output."
+description.ja = "プログラムの出力 1 行の情報を保持します。"
+description.ko = "프로그램 출력 한 줄의 정보를 담습니다."
+details.en = '''
+- Passed to `Process::onLine`. `line` is the text without its terminator, `isStderr` tells which stream it came from.
+'''
+details.ja = '''
+- `Process::onLine` に渡されます。`line` は区切り文字を除いたテキスト、`isStderr` はどちらのストリームから来たかを表します。
+'''
+details.ko = '''
+- `Process::onLine`에 전달됩니다. `line`은 줄 끝 문자를 뺀 텍스트이고, `isStderr`는 어느 스트림에서 왔는지 나타냅니다.
+'''
+related = ["Process::onLine"]
+
+["ProcessLineEventArgs::line"]
+description.en = "Holds the line, without its terminator."
+description.ja = "区切り文字を除いた行を保持します。"
+description.ko = "줄 끝 문자를 뺀 줄을 담습니다."
+
+["ProcessLineEventArgs::isStderr"]
+description.en = "Indicates whether the line came from stderr."
+description.ja = "行が stderr から来たかどうかを表します。"
+description.ko = "줄이 stderr에서 왔는지 나타냅니다."
+
+["ProcessExitEventArgs"]
+description.en = "Carries the result of a program that has exited."
+description.ja = "終了したプログラムの結果を保持します。"
+description.ko = "끝난 프로그램의 결과를 담습니다."
+details.en = '''
+- Passed to `Process::onExit`.
+'''
+details.ja = '''
+- `Process::onExit` に渡されます。
+'''
+details.ko = '''
+- `Process::onExit`에 전달됩니다.
+'''
+related = ["Process::onExit"]
+
+["ProcessExitEventArgs::exitCode"]
+description.en = "Holds the program's exit code."
+description.ja = "プログラムの終了コードを保持します。"
+description.ko = "프로그램의 종료 코드를 담습니다."
+details.en = '''
+- On macOS and Linux a program ended by a signal (including `kill()`) reports 128 + the signal number, as a shell does.
+'''
+details.ja = '''
+- macOS と Linux では、シグナルで終了したプログラム（`kill()` を含む）はシェルと同じく 128 + シグナル番号になります。
+'''
+details.ko = '''
+- macOS와 Linux에서 시그널로 종료된 프로그램(`kill()` 포함)은 셸과 같이 128 + 시그널 번호가 됩니다.
+'''
+
+["ProcessExitEventArgs::seconds"]
+description.en = "Holds the time from `startAsync()` to the exit, in seconds."
+description.ja = "`startAsync()` から終了までの時間を秒で保持します。"
+description.ko = "`startAsync()`부터 종료까지의 시간을 초 단위로 담습니다."
+
+["ProcessExitEventArgs::killed"]
+description.en = "Indicates whether the program was ended by `kill()` or by destroying the Process."
+description.ja = "プログラムが `kill()` または Process の破棄で終了したかどうかを表します。"
+description.ko = "프로그램이 `kill()`이나 Process 파괴로 종료되었는지 나타냅니다."
+
 ["Top"]
 keywords = ["direction", "align", "vertical"]
 description.en = "Provides the shorthand constant for Direction::Top."
