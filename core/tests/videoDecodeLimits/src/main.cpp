@@ -2,6 +2,7 @@
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 #include "tc/video/internal/tcVideoDecodeLimits.h"
+#include "tc/video/internal/tcVideoDisplayRect.h"
 #include <cstdio>
 #if defined(__linux__) && !defined(__ANDROID__)
 extern "C" {
@@ -24,6 +25,25 @@ using Limits = tc::internal::VideoDecodeLimits;
 using Status = tc::internal::VideoDecodeStatus;
 
 void layoutChecks() {
+    const auto rectCheck = [](const char* label, int64_t xFixed, int64_t yFixed,
+                              int64_t width, int64_t height, tc::internal::VideoDisplayRect expected) {
+        const auto rect = tc::internal::videoDisplayRect(656, 368, xFixed, yFixed, width, height);
+        check(label, rect.x == expected.x && rect.y == expected.y &&
+            rect.width == expected.width && rect.height == expected.height);
+    };
+    rectCheck("odd display size excludes coded padding", 0, 0, 642, 362, {0, 0, 642, 362});
+    rectCheck("offset aperture reaches coded edge", 14 * 65536, 6 * 65536, 642, 362, {14, 6, 642, 362});
+    rectCheck("fractional offset uses containing pixel", 65536 + 32768, 2 * 65536, 642, 362, {1, 2, 642, 362});
+    rectCheck("negative offset falls back", -1, 0, 642, 362, {0, 0, 656, 368});
+    rectCheck("empty aperture falls back", 0, 0, 0, 362, {0, 0, 656, 368});
+    rectCheck("negative size falls back", 0, 0, 642, -1, {0, 0, 656, 368});
+    rectCheck("oversized aperture falls back", 0, 0, 657, 362, {0, 0, 656, 368});
+    rectCheck("horizontal offset overflow falls back", 15 * 65536, 0, 642, 362, {0, 0, 656, 368});
+    rectCheck("vertical offset overflow falls back", 0, 7 * 65536, 642, 362, {0, 0, 656, 368});
+    rectCheck("fractional edge overflow falls back", 14 * 65536 + 1, 0, 642, 362, {0, 0, 656, 368});
+    const auto hd = tc::internal::videoDisplayRect(1920, 1088, 0, 0, 1920, 1080);
+    check("1080 display excludes eight coded rows", hd.width == 1920 && hd.height == 1080);
+    rectCheck("multiple-of-16 frame unchanged", 0, 0, 656, 368, {0, 0, 656, 368});
     size_t bytes = 0;
     check("8K frame admitted", Limits::rgba(7680, 4320, bytes) && bytes == 132710400);
     check("large frame layout", Limits::rgba(8192, 4096, bytes) && bytes == 134217728);
