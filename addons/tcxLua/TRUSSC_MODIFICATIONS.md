@@ -7,10 +7,11 @@ The L3 MSVC source rewrite in `lj_gdbjit.c` was also removed. Each restored
 file is byte-identical to the imported source before `cc1f0733` (#969), recovered
 with `git show cc1f0733^:<path>` without network access.
 
-PUC Lua is 5.4.9 (import update `9feb00f5`). LuaJIT is 2.1.ROLLING,
-imported in `4e4bed81`; its exact upstream commit was not recorded. Therefore
-LuaJIT identity against a separately downloaded upstream commit cannot be
-verified offline. Original MIT copyright notices are retained.
+PUC Lua is 5.4.9 (import update `9feb00f5`). [LuaJIT](https://github.com/LuaJIT/LuaJIT)
+is 2.1.ROLLING, imported in `4e4bed81`; its exact upstream commit is **not recorded**.
+Its 230 imported files are unchanged; build integration and retired source patches
+are described below. License: MIT; retain `LuaJIT/COPYRIGHT` and the bundled
+DynASM/minilua notices. Import equality does not authenticate an upstream revision.
 
 | Restored file | Imported upstream version | SHA-256 |
 | --- | --- | --- |
@@ -51,11 +52,9 @@ Run `tests/engine` for both engines and the full addon tests when updating.
 Tests for the removed reader guards were removed; text-loading and independent
 lint lifetime/failure regressions remain.
 
-## Rolling public header and complete source inventory
+## Rolling public header
 
 The OpenResty-marked `luajit-header/include/luajit.h` compatibility copy
 reported 2.1.0-beta3 and its old version symbol. It is retired in favor of the
 engine-generated rolling header, exported through `luajit::header` with a build
 dependency. The library and its consumers use that same generated header.
-See [LuaJIT/PROVENANCE.md](LuaJIT/PROVENANCE.md) and its complete source hash list;
-exact upstream commit and archive hash remain **not recorded**.

@@ -60,8 +60,8 @@ This is the one list of third-party code in TrussC and the version the build use
 | **cpp-httplib** | 0.18.3 | `core/include/impl/httplib.h` ([upstream checksum](../core/include/impl/HTTPLIB_PATCHES.md)) | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
 | **LZ4** | 1.10.0 | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
 | **Highway** | 1.2.0, commit `457c891775a7397bdb0376bb1031e6e027af1c48` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
-| **earcut.hpp** | not recorded ([provenance and hash](../core/include/earcut/README.md)) | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
-| **Bitmap ASCII glyph data** | version/commit not recorded ([payload/file hashes](../core/include/BITMAP_FONT_PROVENANCE.md)) | `core/include/tcBitmapFont.h` | https://github.com/freeglut/freeglut | See bitmap notice below; exact import notice not recorded | freeglut / X11 contributors |
+| **earcut.hpp** | version/commit not recorded; unchanged since TrussC import `8807ee2e`; used for Path fills in `tc/graphics/tcPath.h` | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
+| **Bitmap ASCII glyph data** | version/commit not recorded; see [bitmap notice](#bitmap-font-data) for source and local changes | `core/include/tcBitmapFont.h` | https://github.com/freeglut/freeglut | See bitmap notice below; exact import notice not recorded | freeglut / X11 contributors |
 
 ### System JPEG dependency (Linux)
 
@@ -100,16 +100,12 @@ These libraries are only included if you use the corresponding addon.
 | **bcdec** | 0.985 | `addons/tcxHap/src/impl/bcdec.h` | https://github.com/iOrange/bcdec | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxHap |
 | **Lua** | 5.4.9 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
 | **sol2** | 3.5.0 | `addons/tcxLua/include/sol/` | https://github.com/ThePhD/sol2 | MIT | ThePhD | tcxLua |
-| **LuaJIT** | 2.1 (rolling), commit not recorded ([provenance and file hashes](../addons/tcxLua/LuaJIT/PROVENANCE.md)) | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
+| **LuaJIT** | 2.1 (rolling), commit not recorded (see [local changes](../addons/tcxLua/TRUSSC_MODIFICATIONS.md)) | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
 | **luajit-cmake** | commit `94444a6` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
-| **ofxMidi helper ports** | version/commit not recorded ([file hashes and port history](../addons/tcxMidi/OFXMIDI_PROVENANCE.md)) | `addons/tcxMidi/src/tcxMidiClock.h`, `addons/tcxMidi/src/tcxMidiTimecode.h` | https://github.com/danomatika/ofxMidi | BSD Simplified; [notice](../addons/tcxMidi/OFXMIDI_LICENSE.txt) | Dan Wilcox and contributors | tcxMidi |
+| **ofxMidi helper ports** | version/commit not recorded (see [port history](../addons/tcxMidi/README.md#ofxmidi-helper-ports)) | `addons/tcxMidi/src/tcxMidiClock.h`, `addons/tcxMidi/src/tcxMidiTimecode.h` | https://github.com/danomatika/ofxMidi | BSD Simplified; [notice](../addons/tcxMidi/OFXMIDI_LICENSE.txt) | Dan Wilcox and contributors | tcxMidi |
+| **Mozilla/curl CA bundle** | snapshot 2026-02-11; source commit not recorded; payload unchanged since TrussC import `f59a10fd`; refresh via [update_ca_bundle.sh](../addons/tcxTls/scripts/update_ca_bundle.sh) | `addons/tcxTls/data/cacert.pem` | https://curl.se/ca/cacert.pem ([extraction/source](https://curl.se/docs/caextract.html)) | Mozilla source database: MPL-2.0; exact standalone redistribution terms not recorded; retain bundle notices | Mozilla / curl contributors | tcxTls |
 
 > **Note**: Box2D v2.3.x以前はzlib Licenseでした。TrussCはv2.4.0以降 (MIT) を使用しています。
-
-The unchanged Mozilla/curl CA payload has a separate
-[source, hash and refresh record](../addons/tcxTls/data/PROVENANCE.md).
-[Additional clean-import hashes](vendor-provenance.md) identify local bytes
-without claiming an independently authenticated upstream revision.
 
 ---
 
@@ -342,12 +338,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ### Bitmap font data
 
-The original glyph import is labeled freeglut/X11 8x13. Its precise upstream
-file/revision and import-time notice were not recorded. X11 font-misc-misc's
+The original glyph import (`51c74486`) is labeled [freeglut](https://github.com/freeglut/freeglut)/[X11 fixed 8x13](https://gitlab.freedesktop.org/xorg/font/misc-misc).
+Its precise source file, version/commit and import-time notice were not recorded.
+The 95 ASCII glyphs (1,235 bytes) are unchanged; table layout and registration/UTF-8
+APIs in `core/include/tcBitmapFont.h` are local changes. X11 font-misc-misc's
 notice is "Public domain font. Share and enjoy." Freeglut's MIT/X11 notice
 below is reproduced from the locally installed freeglut copyright record;
 it does not authenticate the origin of these particular glyph bytes.
-See [the payload record](../core/include/BITMAP_FONT_PROVENANCE.md).
 
 ```
 Copyright (c) 1999-2000 Pawel W. Olszta. All Rights Reserved.
@@ -379,7 +376,7 @@ W. Olszta.
 
 The ports retain a [BSD notice](../addons/tcxMidi/OFXMIDI_LICENSE.txt) for
 Dan Wilcox and ofxMidi contributors. The exact source revision and original
-copyright years are not recorded; see the [port ledger](../addons/tcxMidi/OFXMIDI_PROVENANCE.md).
+copyright years are not recorded; see the [port history](../addons/tcxMidi/README.md#ofxmidi-helper-ports).
 
 ### ISC License (earcut.hpp)
 
