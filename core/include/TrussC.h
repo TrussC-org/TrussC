@@ -443,7 +443,7 @@ void clear(float r, float g, float b, float a = 1.0f);
 // Borrow all eight stencil bits on the current target. Pair end only with a
 // successful begin. Ownership may span Fbo activations; end on that target.
 bool beginStencil();
-// Zero the framework's internal bits, then restore its saved semantic state.
+// Return the whole stencil to 0 and restore the framework's saved state; readStencil before this to keep the values.
 void endStencil();
 // Full-target, colorless clear to a plain byte. Warns outside ownership.
 void clearStencil(uint8_t value = 0);

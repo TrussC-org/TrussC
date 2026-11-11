@@ -2565,7 +2565,7 @@ bool isFloatFormat(TextureFormat fmt)  // Reports whether a TextureFormat uses f
 ```cpp
 bool beginStencil()  // Borrows all eight stencil bits on the current drawing target.
 void clearStencil(uint8_t value = 0)  // Replaces all stencil bytes with a plain value while owned.
-void endStencil()  // Returns stencil ownership and restores the saved framework state.
+void endStencil()  // Returns the whole stencil to 0, ends ownership and restores the saved framework state.
 ```
 
 ### Graphics - Shader

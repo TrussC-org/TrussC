@@ -44636,9 +44636,9 @@ related = ["beginStencil", "endStencil", "clear"]
 ["endStencil"]
 category = "graphics_fbo"
 keywords = ["stencil", "restore", "ownership"]
-description.en = "Returns stencil ownership and restores the saved framework state."
-description.ja = "stencil の所有権を返却し、保存したフレームワークの状態を復元します。"
-description.ko = "스텐실 소유권을 반환하고 저장한 프레임워크 상태를 복원합니다."
+description.en = "Returns the whole stencil to 0, ends ownership and restores the saved framework state."
+description.ja = "stencil 全体を 0 に戻して所有権を返却し、保存したフレームワークの状態を復元します。"
+description.ko = "스텐실 전체를 0으로 되돌리고 소유권을 반환하며 저장한 프레임워크 상태를 복원합니다."
 details.en = '''
 - Call on the target with a successful `beginStencil()`. An unmatched call warns and does nothing.
 - endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values.
