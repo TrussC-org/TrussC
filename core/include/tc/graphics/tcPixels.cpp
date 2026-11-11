@@ -541,11 +541,11 @@ void Pixels::crop(int x, int y, int w, int h) {
 
     for (int dy = 0; dy < h; dy++) {
         // clamp-to-edge: rows outside the source repeat the nearest in-bounds row.
-        int sy = y + dy;
+        int64_t sy = int64_t(y) + dy;
         if (sy < 0) sy = 0;
         else if (sy >= sh) sy = sh - 1;
         for (int dx = 0; dx < w; dx++) {
-            int sx = x + dx;
+            int64_t sx = int64_t(x) + dx;
             if (sx < 0) sx = 0;
             else if (sx >= sw) sx = sw - 1;
             std::memcpy(dstBytes + ((size_t)dy * w + dx) * bpp,

@@ -88,8 +88,8 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
     // Bound (platform): the Box2D SDK stores polygon vertices in a fixed array. Overflow returns TooManyPoints.
     if (count > b2_maxPolygonVertices) return PolygonError::TooManyPoints;
 
-    // The steps below mirror b2PolygonShape::Set() in Box2D v2.4.1 exactly, so
-    // what fails here is what Set() would assert on.
+    // Keep the established tcxBox2d hull order and welding tolerance. Box2D
+    // 2.4.2 uses more aggressive welding in its point-array Set() overload.
     std::vector<b2Vec2> input(count);
     for (size_t i = 0; i < count; ++i) input[i] = World::toBox2d(points[i]);
 
@@ -156,9 +156,12 @@ PolygonError makePolygonShape(const std::vector<tc::Vec2>& points,
     }
     if (!(area > b2_epsilon)) return PolygonError::Degenerate;
 
-    // Same input as the checks above, so Set() takes the same path.
+    // Pass the checked hull directly so Box2D does not weld it again.
+    b2Hull checkedHull;
+    checkedHull.count = m;
+    for (int32 i = 0; i < m; ++i) checkedHull.points[i] = ps[hullIdx[i]];
     b2PolygonShape built;
-    built.Set(input.data(), static_cast<int32>(count));
+    built.Set(checkedHull);
 
     // The polygon as a body of its own: its inertia about its centroid must
     // survive float rounding (see inertiaSurvives()).

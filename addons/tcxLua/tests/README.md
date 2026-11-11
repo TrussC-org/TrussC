@@ -5,6 +5,8 @@ runtime.
 
 XML bindings: empty-text serialization, escaped text and attribute round trips
 through `Xml` and `parseXml` using the vendored pugixml.
+JSON/XML saves check `SaveResult:ok()` for successful writes and failed writes
+to an existing directory.
 
 Error-contained entry points (`tcxLua::call` / `tcxLua::runFile`):
 
@@ -56,3 +58,22 @@ The PUC targets `lintGlobalLifetime` and `lintScanLifetime` retain the lookup/GC
 and throwing-container-move regressions. Configure with ASan flags to check
 those lifetimes. Tests of the removed binary-buffer and reader patches were
 removed with those patches.
+
+The shared `bindings.lua` checks all 55 approved non-event additions and the
+Mat3/Mat4 fractional setters. It runs headless here and under a GPU context in
+bindcheck: EasyCam round trips and fluent returns, image/pixel transformations,
+debug names, successful/failed LoadResult values, writable PCM fields,
+AudioEngine setup overloads and diagnostics, and MicInput startup/cancellation.
+Audio uses the Null backend; the zero-argument engine setup may fail when no
+system default device is available. No assertion depends on device timing.
+
+`data/samples.flac` is an 8-frame mono PCM16 fixture at 8 kHz, generated locally
+with libsndfile: `[0, .25, .5, .75, 0, -.25, -.5, -.75]`. The tests need no
+encoder or external audio files. Bindcheck additionally checks instanced shader
+drawing and rebuilt image textures by reading Fbo pixels under Xvfb/Mesa.
+
+GC regressions drop the original owner and collect twice: sample views retain
+their SoundBuffer and stay mutable, all three EasyCam fluent methods return the
+owning Lua self, and playing-sound entries survive collection of their snapshot
+table without aliasing another snapshot. Image/Pixels also crop a 2x1 source at
+INT_MAX to check clamp-to-edge behavior with a small allocation.
