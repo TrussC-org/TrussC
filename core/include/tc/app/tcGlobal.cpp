@@ -2919,11 +2919,26 @@ void RenderTargetResources::release() {
         pipelineOwnerCtx().erase(entry.second.id);
 #endif
     }
-    cache.clear(); selections.clear(); rawCache.reset();
+    cache.clear(); immediateCache.clear(); selections.clear(); rawCache.reset();
     // sokol_gl owns its mandatory default context until shutdown. A resized
     // Window may switch to a dedicated context without destroying that default.
     if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
     context = {}; contextFailed = false;
+}
+sgl_pipeline RenderTarget::immediatePipeline(ImmediateSelection selection) {
+    auto& bundle = resources();
+    if (!sg_isvalid() || !bundle.context.id) return {};
+    for (const auto& entry : bundle.immediateCache) {
+        if (entry.first == selection) {
+            // Canonical recipes can share a handle (including failed id 0).
+            // Preserve loadPipeline's semantic selection on cache hits too.
+            bundle.selections[entry.second.id] = selection;
+            return entry.second;
+        }
+    }
+    const auto handle = pipeline(PipelineKey::immediate(selection)).immediate;
+    bundle.immediateCache.emplace_back(selection, handle);
+    return handle;
 }
 PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     PipelineSelection result;
@@ -3138,7 +3153,7 @@ bool rebuildTargetResources() {
     pipelineOwnerCtx().clear();
 #endif
     auto discard = [](RenderTargetResources& bundle) {
-        bundle.cache.clear(); bundle.selections.clear(); bundle.context = {};
+        bundle.cache.clear(); bundle.immediateCache.clear(); bundle.selections.clear(); bundle.context = {};
         bundle.contextFailed = false; bundle.rawCache.reset();
     };
     for (auto* window : windows) discard(window->swapchainTarget.resources());
