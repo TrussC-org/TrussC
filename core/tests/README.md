@@ -586,6 +586,19 @@ checks wait for confirmed entry, and size-restoration checks wait for exit.
   A retained recording contains a destroyed view (or a live view of a
   destroyed image), followed by a healthy draw using the same pipeline.
   All four replays must render the healthy draw without validation errors.
+  Like `sglLayerUpload` and `sglPoolLimits`, this owns a dummy sokol
+  implementation and stays outside `allCoreTests` on every platform. The core
+  sweep discovers it automatically. To run it directly:
+
+  ```sh
+  cmake -S core/tests/sglInvalidTexture -B core/tests/sglInvalidTexture/build -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+  cmake --build core/tests/sglInvalidTexture/build --config Release
+  # Linux/macOS:
+  core/tests/sglInvalidTexture/build/sglInvalidTexture
+  # Windows (Visual Studio generator):
+  core/tests/sglInvalidTexture/build/Release/sglInvalidTexture.exe
+  ```
+
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
@@ -1031,12 +1044,16 @@ checks wait for confirmed entry, and size-restoration checks wait for exit.
   `drawString()` each, and checks that the page texture is
   `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` color,
   and a minified draw builds and samples the R8 mip chain. The font is
-  built at runtime. `--midpass-check` (#1439) requests mips while a swapchain
+  built at runtime. `--burst-check` renders 500 distinct glyphs at 128px with
+  oversampling 3 into a 3680² mipmapped Fbo. It checks one image upload/mip
+  rebuild per page per flush, bounded live image bytes, and every glyph’s
+  coverage. It prints first-pass timing and image counts. `--midpass-check`
+  (#1439) requests mips while a swapchain
   pass is suspended by a one-shot mipmapped Fbo. It checks the first draw's
   mip chain, glyph stroke color and transparent counter, empty pixels, and
   retirement without another draw of that Font. Four frames check the preserved
   Fbo and swapchain/overlay pixels. An independent Font makes a 500-call burst
-  and exercises allocation retry after the one-shot draw. Both modes are listed
+  and exercises allocation retry after the one-shot draw. All three modes are listed
   in `display-test` for every display backend.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks

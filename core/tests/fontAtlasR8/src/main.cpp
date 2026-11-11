@@ -13,21 +13,23 @@
 //
 // `fontAtlasR8 --gpu-check` (daily CI under Xvfb) opens a window
 // and, in one frame, draws 150 glyphs that were never drawn before into an
-// Fbo, one drawString() call each, so the page grows several times inside
+// Fbo, one drawString() call each, filling multiple fixed-size pages inside
 // the frame. It checks that the page texture is SG_PIXELFORMAT_R8 and that
 // every glyph is in the Fbo with the color set by setColor() at full
 // coverage (straight alpha over a transparent Fbo: rgb = color, a = 1).
 // Then it draws minified text, which gives the R8 page a mip chain, and
 // checks that the glyphs are in the Fbo.
 //
-// The font is built here (a TrueType font whose codepoints U+4E00.. all map
-// to one filled square glyph), so the test runs the same everywhere.
+// The font is built here with 600 distinct glyph indices and identical square
+// outlines, so the test runs the same everywhere.
 // =============================================================================
 
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
 
+#include <chrono>
+#include <map>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -103,11 +105,11 @@ static Bytes buildSfnt(const vector<Table>& tables) {
 }
 
 static const uint32_t kFirstCodepoint = 0x4E00;
-static const uint32_t kCodepointCount = 400;
+static const uint32_t kCodepointCount = 600;
 
-// Glyph 0: empty .notdef, glyph 1: filled square (100..900 x 0..800), glyph 2:
-// empty space. Codepoints U+4E00..U+4E00+kCodepointCount-1 map to glyph 1,
-// ' ' to glyph 2. 1000 units per em, ascender 800, descender -200.
+// Glyph 0: empty .notdef; 600 squares (100..900 x 0..800); empty space.
+// Codepoints U+4E00..U+4E00+kCodepointCount-1 have distinct glyph indices,
+// ' ' maps to the final glyph. 1000 units per em, ascender 800, descender -200.
 static Bytes makeSquareFont(bool withCounter = false) {
     Bytes head;
     put32(head, 0x00010000);
@@ -131,14 +133,14 @@ static Bytes makeSquareFont(bool withCounter = false) {
     put16(hhea, 0);
     put16(hhea, 1000);
     for (int i = 0; i < 11; i++) put16(hhea, 0);
-    put16(hhea, 3);                             // numberOfHMetrics
+    put16(hhea, kCodepointCount + 2);          // numberOfHMetrics
 
     Bytes maxp;
     put32(maxp, 0x00005000);
-    put16(maxp, 3);
+    put16(maxp, kCodepointCount + 2);
 
     Bytes hmtx;
-    for (int i = 0; i < 3; i++) { put16(hmtx, 1000); put16(hmtx, 0); }
+    for (uint32_t i = 0; i < kCodepointCount + 2; i++) { put16(hmtx, 1000); put16(hmtx, 0); }
 
     // cmap: one Microsoft / Unicode full subtable.
     Bytes cmap;
@@ -148,17 +150,16 @@ static Bytes makeSquareFont(bool withCounter = false) {
     put16(cmap, 10);
     put32(cmap, 12);
     {
-        // Format 13 (many-to-one): every codepoint in a group maps to the
-        // same glyph.
-        Bytes s13;
-        put16(s13, 13);
-        put16(s13, 0);
-        put32(s13, 16 + 12 * 2);
-        put32(s13, 0);
-        put32(s13, 2);
-        put32(s13, 0x20); put32(s13, 0x20); put32(s13, 2);
-        put32(s13, kFirstCodepoint); put32(s13, kFirstCodepoint + kCodepointCount - 1); put32(s13, 1);
-        cmap.insert(cmap.end(), s13.begin(), s13.end());
+        // Format 12 gives every CJK codepoint its own glyph index.
+        Bytes s12;
+        put16(s12, 12);
+        put16(s12, 0);
+        put32(s12, 16 + 12 * 2);
+        put32(s12, 0);
+        put32(s12, 2);
+        put32(s12, 0x20); put32(s12, 0x20); put32(s12, kCodepointCount + 1);
+        put32(s12, kFirstCodepoint); put32(s12, kFirstCodepoint + kCodepointCount - 1); put32(s12, 1);
+        cmap.insert(cmap.end(), s12.begin(), s12.end());
     }
 
     // The mid-pass fixture adds a reverse-wound inner contour. A transparent
@@ -181,13 +182,15 @@ static Bytes makeSquareFont(bool withCounter = false) {
     }
     while (square.size() % 4) square.push_back(0);
 
-    Bytes glyf = square;
+    Bytes glyf;
     Bytes loca;
-    put32(loca, 0);                             // glyph 0: empty
-    put32(loca, 0);                             // glyph 1
-    put32(loca, (uint32_t)square.size());       // glyph 2: empty
-    put32(loca, (uint32_t)square.size());
-    put32(loca, (uint32_t)square.size());
+    put32(loca, 0); // empty .notdef
+    for (uint32_t i = 0; i < kCodepointCount; ++i) {
+        put32(loca, (uint32_t)glyf.size());
+        glyf.insert(glyf.end(), square.begin(), square.end());
+    }
+    put32(loca, (uint32_t)glyf.size()); // empty space
+    put32(loca, (uint32_t)glyf.size()); // end
 
     return buildSfnt({{"cmap", cmap}, {"glyf", glyf}, {"head", head}, {"hhea", hhea},
                       {"hmtx", hmtx}, {"loca", loca}, {"maxp", maxp}});
@@ -288,9 +291,11 @@ public:
         // One frame: 150 glyphs never drawn before, one drawString() each.
         fbo_.begin(0.0f, 0.0f, 0.0f, 0.0f);
         setColor(1.0f, 0.5f, 0.25f);
+        int recordedWidth = 0;
         for (int i = 0; i < kCols * kRows; i++) {
             const int cx = (i % kCols) * kCell, cy = (i / kCols) * kCell;
             font_.drawString(utf8(kFirstCodepoint + (uint32_t)i), (float)cx + 8, (float)cy + 36);
+            if (i == 0) recordedWidth = font_.getAtlas(0)->getWidth();
         }
         fbo_.end();
 
@@ -305,9 +310,8 @@ public:
         check("gpu: every atlas page texture is SG_PIXELFORMAT_R8", r8);
         check("gpu: getMemoryUsage() is the sum of width * height over the pages",
               font_.getMemoryUsage() == pageBytes);
-        check("gpu: the page grew within the frame (largest side >= 512)",
-              font_.getAtlasCount() > 0 && font_.getAtlas(0)->getWidth() >= 512,
-              "side " + to_string(font_.getAtlasCount() ? font_.getAtlas(0)->getWidth() : 0));
+        check("gpu: recorded page dimensions stay fixed while the burst spills",
+              font_.getAtlasCount() > 1 && font_.getAtlas(0)->getWidth() == recordedWidth);
 
         const int W = kCols * kCell, H = kRows * kCell;
         vector<unsigned char> px((size_t)W * H * 4);
@@ -316,7 +320,7 @@ public:
         // Fully covered texels must be exactly the color (straight alpha over
         // transparent black: rgb = color, a = 1). Counted per cell, so the
         // readback's row order does not matter (the grid fills the Fbo).
-        int cellsWithGlyph = 0, wrongColour = 0;
+        int cellsWithGlyph = 0, wrongColor = 0;
         for (int i = 0; i < kCols * kRows; i++) {
             const int cx = (i % kCols) * kCell, cy = (i / kCols) * kCell;
             int full = 0;
@@ -325,15 +329,15 @@ public:
                     const unsigned char* p = &px[((size_t)y * W + x) * 4];
                     if (p[3] != 255) continue;
                     full++;
-                    if (abs(p[0] - 255) > 2 || abs(p[1] - 128) > 2 || abs(p[2] - 64) > 2) wrongColour++;
+                    if (abs(p[0] - 255) > 2 || abs(p[1] - 128) > 2 || abs(p[2] - 64) > 2) wrongColor++;
                 }
             }
             if (full >= 200) cellsWithGlyph++;
         }
         check("gpu: all 150 glyphs drawn in the burst are in the Fbo",
               cellsWithGlyph == kCols * kRows, to_string(cellsWithGlyph) + " of 150");
-        check("gpu: fully covered texels have the setColor() color", wrongColour == 0,
-              to_string(wrongColour) + " texels");
+        check("gpu: fully covered texels have the setColor() color", wrongColor == 0,
+              to_string(wrongColor) + " texels");
 
         // Minified draws build and sample the R8 chain on the first draw.
         fbo_.begin(0.0f, 0.0f, 0.0f, 0.0f);
@@ -368,19 +372,21 @@ private:
 };
 
 #include "midpassChecks.h"
+#include "burstChecks.h"
 
 } // namespace
 
 TC_CORE_TEST_MAIN(int argc, char** argv) {
     const bool midpassCheck = argc > 1 && strcmp(argv[1], "--midpass-check") == 0;
-    const bool gpuCheck = midpassCheck || (argc > 1 && strcmp(argv[1], "--gpu-check") == 0);
+    const bool burstCheck = argc > 1 && strcmp(argv[1], "--burst-check") == 0;
+    const bool gpuCheck = burstCheck || midpassCheck || (argc > 1 && strcmp(argv[1], "--gpu-check") == 0);
     if (!gpuCheck) {
         checkCpuPages();
         printf("fontAtlasR8: %s\n", g_fail == 0 ? "OK" : "FAIL");
         return g_fail == 0 ? 0 : 1;
     }
 
-    const Bytes font = makeSquareFont(midpassCheck);
+    const Bytes font = makeSquareFont(midpassCheck || burstCheck);
     g_fontPath = (filesystem::temp_directory_path() / "fontAtlasR8_square.ttf").string();
     {
         ofstream f(g_fontPath, ios::binary);
@@ -389,6 +395,13 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     WindowSettings settings;
     settings.setSize(kCols * kCell, kRows * kCell);
     settings.setHighDpi(false);
+    if (burstCheck) {
+        settings.setSize(256, 192);
+        return tcCoreTest::runDisplayTest<BurstCheckApp>(settings, g_fail, [] {
+            filesystem::remove(g_fontPath);
+            check("burst checks completed", burstCompleted);
+        });
+    }
     if (midpassCheck) {
         settings.setSize(256, 192);
         return tcCoreTest::runDisplayTest<MidpassCheckApp>(settings, g_fail, [] {

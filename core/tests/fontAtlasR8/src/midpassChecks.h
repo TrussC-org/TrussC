@@ -90,22 +90,25 @@ public:
             scale(2);
             font_.drawString(utf8(kFirstCodepoint), -200, -200);
             popMatrix();
+            internal::currentTarget().flushLayers();
             const auto oldImage = font_.getAtlas(0)->getTexture();
             const auto oldView = font_.getAtlas(0)->getView();
             retiredImage_ = oldImage;
             retiredView_ = oldView;
-            // First draw must have mips immediately; no second draw is needed
-            // to repair this one-shot Fbo.
+            // The consuming flush must include mips; no later pass may be
+            // needed to repair this one-shot Fbo.
             font_.drawString(utf8(kFirstCodepoint), 128, 96, Direction::Center, Direction::Center);
-            check("first minified draw already has a mip chain",
-                  sg_query_image_desc(font_.getAtlas(0)->getTexture()).num_mipmaps > 1);
             check("queued old atlas remains valid during replacement",
                   sg_query_image_state(oldImage) == SG_RESOURCESTATE_VALID &&
                   sg_query_view_state(oldView) == SG_RESOURCESTATE_VALID);
             // A further offscreen draw exercises retirement independently of
             // the first-draw mip assertion, without repainting the glyph.
             font_.drawString(utf8(kFirstCodepoint), -200, -200);
+            const auto pendingView = font_.getAtlas(0)->getView();
+            font_.clearAtlas(); // The target must retain pending CPU coverage.
             once_.end();
+            check("first minified flush already has a mip chain after clearAtlas",
+                  sg_query_image_desc(sg_query_view_image(pendingView)).num_mipmaps > 1);
             painted_ = true;
         }
         if (frame_ == 1) {
@@ -126,9 +129,11 @@ public:
                 held.push_back(image);
             }
             burstFont_.drawString(utf8(kFirstCodepoint), 128, 96, Direction::Center, Direction::Center);
+            internal::currentTarget().flushLayers();
             check("failed atlas allocation is not published as valid", !burstFont_.getAtlas(0)->isTextureValid());
             for (auto image : held) sg_dealloc_image(image);
             burstFont_.drawString(utf8(kFirstCodepoint), 128, 96, Direction::Center, Direction::Center);
+            internal::currentTarget().flushLayers();
             check("atlas retries successfully in the same pass", burstFont_.getAtlas(0)->isTextureValid() &&
                   sg_query_image_desc(burstFont_.getAtlas(0)->getTexture()).num_mipmaps > 1);
         }

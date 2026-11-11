@@ -593,6 +593,7 @@ void WindowContext::teardownTargets() noexcept {
         attempt([&] { swapchainTarget.flushLayers(); });
         attempt([&] { swapchainTarget.endPass(); });
     }
+    swapchainTarget.fontAtlasUploads.clear();
     swapchainTarget.deferredShaderDraws.clear();
     swapchainTarget.deferredPbrDraws.clear();
     shadow.storage.reset();
@@ -763,6 +764,7 @@ void RenderTarget::flushLayers() {
     if (!inPass) return;
     const auto err = sgl_context_error(resources().context);
     const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
+    for (auto& page : fontAtlasUploads) FontAtlasManager::publishAtlas(*page);
     prepareDeferredShaderDraws(deferredShaderDraws);
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
@@ -773,6 +775,7 @@ void RenderTarget::flushLayers() {
         for (auto& draw : deferredPointDraws)
             if (draw.layerId == layer) executePointDraw(draw.cmd);
     }
+    fontAtlasUploads.clear();
     deferredShaderDraws.clear();
     deferredPbrDraws.clear();
     deferredPointDraws.clear();
@@ -862,6 +865,7 @@ bool popTarget(RenderTarget& target, uint64_t token) {
     window.targetStack.back().phase = TargetPassPhase::Finalizing;
     // Do not generate mips from a partially replayed or incomplete target.
     if (!failure) attempt([&] { if (target.finalize) target.finalize(target.owner); });
+    target.fontAtlasUploads.clear();
     target.deferredShaderDraws.clear();
     target.deferredPbrDraws.clear();
     target.deferredPointDraws.clear();

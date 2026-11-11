@@ -202,7 +202,8 @@ bool FontAtlasManager::initFromFontData(int fontSize, int fontIndex, const fs::p
 }
 
 size_t FontAtlasManager::createNewAtlas() {
-    AtlasState atlas;
+    auto page = std::make_shared<AtlasState>();
+    AtlasState& atlas = *page;
     atlas.width_ = INITIAL_ATLAS_SIZE;
     atlas.height_ = INITIAL_ATLAS_SIZE;
     atlas.currentX_ = GLYPH_PADDING;
@@ -211,7 +212,7 @@ size_t FontAtlasManager::createNewAtlas() {
     atlas.pixels_.resize((size_t)atlas.width_ * atlas.height_, 0);
     atlas.textureDirty_ = true;
 
-    atlases_.push_back(std::move(atlas));
+    atlases_.push_back(std::move(page));
     return atlases_.size() - 1;
 }
 

@@ -1,2 +1,3 @@
 {test} --gpu-check
 {test} --midpass-check
+{test} --burst-check

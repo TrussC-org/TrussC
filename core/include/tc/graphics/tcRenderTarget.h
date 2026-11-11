@@ -239,6 +239,7 @@ void refreshWindowDrawingSize();
 struct DeferredPbrDraw;
 struct DeferredPointDraw;
 struct DeferredShaderDraw;
+class AtlasState;
 
 struct ScissorRect {
     float x, y, w, h;
@@ -350,6 +351,7 @@ struct RenderTarget {
     std::vector<DeferredPbrDraw> deferredPbrDraws;
     std::vector<DeferredPointDraw> deferredPointDraws;
     std::vector<DeferredShaderDraw> deferredShaderDraws;
+    std::vector<std::shared_ptr<AtlasState>> fontAtlasUploads;
     int sglLayerNext = 0;
 
     RenderTargetResources windowResources;

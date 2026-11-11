@@ -14,8 +14,10 @@
 // Atlas pages are R8: one byte of glyph coverage per texel, on the CPU and on
 // the GPU. They are drawn with internal::activeCoverage2D(), whose shader
 // (core/shaders/sglCoverage.glsl) uses R as alpha. A page starts at 256x256 and
-// doubles up to the GPU's max 2D image size, capped at 8192x8192 (4096x4096
-// when the limit cannot be queried); after that a new page is added.
+// grows on the CPU until first recorded use. Recording reserves space based
+// on font size (up to 2048x2048 for ordinary glyphs), then fixes its dimensions
+// so earlier UVs remain valid. Full pages spill into another page. Dirty pages
+// publish one immutable image, including requested mips, at the consuming flush.
 // =============================================================================
 
 #include <string>
@@ -182,10 +184,19 @@ public:
     int getWidth() const { return width_; }
     int getHeight() const { return height_; }
     sg_image getTexture() const { return texture_; }
-    sg_view getView() const { return view_; }
+    sg_view getView() const { return pendingView_.id ? pendingView_ : view_; }
     bool isTextureValid() const { return textureValid_; }
     // CPU copy of the page: width * height bytes, glyph coverage per texel.
     const std::vector<uint8_t>& getPixels() const { return pixels_; }
+
+    ~AtlasState() {
+        if (!texture_.id && !view_.id && !pendingView_.id) return;
+        if (!internal::frameworkShutdown() && sg_isvalid()) {
+            internal::deferGpuDestroy(pendingView_);
+            internal::deferGpuDestroy(view_);
+            internal::deferGpuDestroy(texture_);
+        }
+    }
 
 private:
     friend class FontAtlasManager;
@@ -199,6 +210,9 @@ private:
     // GPU resources
     sg_image texture_ = {};
     sg_view view_ = {};
+    sg_view pendingView_ = {}; // Reserved before recording, initialized at flush.
+    bool sealed_ = false;     // Recorded UVs require a fixed page size.
+    bool mipmaps_ = false;
     bool textureValid_ = false;
     bool textureDirty_ = false;
 
@@ -241,17 +255,12 @@ public:
     // texture is (re)built lazily in updateAtlasTexture, which reads this).
     void setMipmaps(bool enabled) { wantMipmaps_ = enabled; }
 
-    // Called from the draw path the first time this atlas is sampled below the
-    // bilinear-safe rate. Building the chain eagerly would tax every app that
-    // never minifies: the atlas texture is destroyed and recreated on every new
-    // glyph (see updateAtlasTexture), so a mip chain means re-walking ~1.33x
-    // the atlas on the CPU each time a fresh glyph shows up -- which for CJK is
-    // most frames during warm-up. Deferring it makes the cost land only on apps
-    // that actually draw small text, and only once.
+    // Request the chain before recording. Publication at the consuming flush
+    // includes every glyph rasterized during that recording burst.
     void requestMipmaps() {
         if (!wantMipmaps_ || mipsBuilt_) return;
         mipsBuilt_ = true;
-        for (auto& atlas : atlases_) atlas.textureDirty_ = true;
+        for (auto& atlas : atlases_) { atlas->textureDirty_ = true; atlas->mipmaps_ = true; }
         // Fires at most once per atlas, and marks a real one-off cost (~33%
         // more atlas texture, plus a rebuild), so it is worth saying out loud.
         logNotice("Font") << "text drawn minified — building glyph atlas mipmaps";
@@ -370,19 +379,11 @@ public:
         // via setup(), and draws recorded earlier that frame may still
         // reference the old atlas views.
         const bool hasGpuResources = std::any_of(atlases_.begin(), atlases_.end(),
-            [](const AtlasState& atlas) { return atlas.textureValid_; });
+            [](const auto& atlas) { return atlas->texture_.id || atlas->pendingView_.id; });
         // A canceled worker owns CPU-only pages. Short-circuit before even
         // sg_isvalid(): sokol queries also belong to main, not the decoder.
         if (!hasGpuResources && !atlases_.empty() && !isMainThread()) {
             internal::probeResourceLoad("font.cpu-atlas-retired", {});
-        }
-        if (hasGpuResources && sg_isvalid()) {
-            for (auto& atlas : atlases_) {
-                if (atlas.textureValid_) {
-                    internal::deferGpuDestroy(atlas.view_);
-                    internal::deferGpuDestroy(atlas.texture_);
-                }
-            }
         }
         atlases_.clear();
         glyphs_.clear();
@@ -531,17 +532,35 @@ public:
     // -------------------------------------------------------------------------
     // Get texture
     // -------------------------------------------------------------------------
-    void ensureTexturesUpdated() {
-        for (auto& atlas : atlases_) {
-            if (atlas.textureDirty_) {
-                updateAtlasTexture(atlas);
-            }
+    // The target retains the page, including when Font::clearAtlas/reload drops
+    // the cache. Its reserved view becomes valid before any layer is replayed.
+    sg_view recordAtlas(size_t index) {
+        auto& page = atlases_[index];
+        auto& atlas = *page;
+        if (!atlas.sealed_) {
+            // Give large glyphs room without allocating 8192 squared for every
+            // small label. All growth is CPU-only, before the first recorded UV.
+            const int desired = std::min(maxAtlasSize_, std::max(INITIAL_ATLAS_SIZE,
+                std::min(2048, fontSize_ * oversample_ * 8)));
+            while (atlas.width_ < desired && expandAtlas(index)) {}
+            atlas.sealed_ = true;
         }
+        atlas.mipmaps_ = wantMipmaps_ && mipsBuilt_;
+        if (atlas.textureDirty_ && !atlas.pendingView_.id) {
+            atlas.pendingView_ = sg_alloc_view();
+        }
+        auto& uploads = internal::currentTarget().fontAtlasUploads;
+        if (std::find(uploads.begin(), uploads.end(), page) == uploads.end())
+            uploads.push_back(page);
+        return atlas.getView();
+    }
+
+    static void publishAtlas(AtlasState& atlas) {
+        if (atlas.textureDirty_) updateAtlasTexture(atlas);
     }
 
     size_t getAtlasCount() const { return atlases_.size(); }
-
-    const AtlasState& getAtlas(size_t index) const { return atlases_[index]; }
+    const AtlasState& getAtlas(size_t index) const { return *atlases_[index]; }
 
     // -------------------------------------------------------------------------
     // Metrics
@@ -560,15 +579,7 @@ public:
     // Clear all atlas pages and cached glyphs.
     // Font data and metrics are preserved, so glyphs are re-rasterized on demand.
     void clearAtlas() {
-        // Deferred destroy: text drawn earlier this frame may still have
-        // sokol_gl commands referencing the old atlas views (drained in
-        // present(); skipped there if sokol has already shut down).
-        for (auto& atlas : atlases_) {
-            if (atlas.textureValid_) {
-                internal::deferGpuDestroy(atlas.view_);
-                internal::deferGpuDestroy(atlas.texture_);
-            }
-        }
+        // Pending target uploads retain their pages through replay.
         atlases_.clear();
         glyphs_.clear();
         if (loaded_) {
@@ -582,7 +593,7 @@ public:
     size_t getMemoryUsage() const {
         size_t total = 0;
         for (const auto& atlas : atlases_) {
-            total += atlas.pixels_.size();
+            total += atlas->pixels_.size();
         }
         return total;
     }
@@ -591,8 +602,8 @@ public:
     size_t preparedResourceBytes() const noexcept {
         size_t bytes = fontData_.capacity();
         for (const auto& atlas : atlases_) {
-            if (atlas.pixels_.capacity() > SIZE_MAX - bytes) return SIZE_MAX;
-            bytes += atlas.pixels_.capacity();
+            if (atlas->pixels_.capacity() > SIZE_MAX - bytes) return SIZE_MAX;
+            bytes += atlas->pixels_.capacity();
         }
         return bytes;
     }
@@ -620,7 +631,7 @@ private:
     float spaceAdvance_ = 0;
 
     // Atlases
-    std::vector<AtlasState> atlases_;
+    std::vector<std::shared_ptr<AtlasState>> atlases_;
     bool wantMipmaps_ = true;    // mip chain allowed (opt out via Font::setMipmaps)
     bool mipsBuilt_ = false;     // ...and actually needed, i.e. something minified
     int oversample_ = 1;         // NxN supersampling of the rasterized glyph
@@ -638,7 +649,8 @@ private:
     size_t createNewAtlas();
 
     bool expandAtlas(size_t atlasIndex) {
-        AtlasState& atlas = atlases_[atlasIndex];
+        AtlasState& atlas = *atlases_[atlasIndex];
+        if (atlas.sealed_) return false;
 
         int newWidth = atlas.width_ * 2;
         int newHeight = atlas.height_ * 2;
@@ -685,14 +697,6 @@ private:
         atlas.currentY_ = GLYPH_PADDING;
         atlas.rowHeight_ = 0;
 
-        // Defer GPU resource destruction (old view may still be in sgl command queue)
-        if (atlas.textureValid_) {
-            internal::deferGpuDestroy(atlas.view_);
-            internal::deferGpuDestroy(atlas.texture_);
-            atlas.view_ = {};
-            atlas.texture_ = {};
-            atlas.textureValid_ = false;
-        }
         atlas.textureDirty_ = true;
 
         return true;
@@ -825,7 +829,7 @@ private:
             }
         }
 
-        AtlasState& atlas = atlases_[targetAtlas];
+        AtlasState& atlas = *atlases_[targetAtlas];
 
         // Move to next row if current row overflows
         if (atlas.currentX_ + paddedWidth > atlas.width_) {
@@ -935,7 +939,9 @@ private:
     }
 
     bool tryFitGlyph(size_t atlasIndex, int width, int height) {
-        const AtlasState& atlas = atlases_[atlasIndex];
+        const AtlasState& atlas = *atlases_[atlasIndex];
+        // A recorded page can accept more coverage, but its UV dimensions
+        // stay fixed. expandAtlas alone is forbidden after recording.
 
         // Fits in current row?
         if (atlas.currentX_ + width <= atlas.width_) {
@@ -961,15 +967,9 @@ private:
         return false;
     }
 
-    void updateAtlasTexture(AtlasState& atlas) {
-        // Re-upload whenever the atlas is dirty (only reached via
-        // ensureTexturesUpdated, which already gates on textureDirty_). No
-        // once-per-frame throttle: glyphs may be added across several draw calls
-        // in one frame (e.g. text rendered into multiple FBOs at setup), and
-        // each needs its new glyphs on the GPU before its draw. Deferred
-        // destruction uses the shared queue: a commit alone does not consume
-        // recordings parked on another render target or window.
-
+    static void updateAtlasTexture(AtlasState& atlas) {
+        // Called once per page at a consuming target flush. Old views remain
+        // immutable for retained recordings and earlier passes in this frame.
         // Defer destruction of existing resources
         if (atlas.textureValid_) {
             internal::deferGpuDestroy(atlas.view_);
@@ -979,8 +979,7 @@ private:
             atlas.textureValid_ = false;
         }
 
-        // Create as immutable texture (with initial data)
-        // NOTE: Not most efficient, but works for now
+        // Immutable snapshots keep earlier passes and retained recordings valid.
         sg_image_desc img_desc = {};
         img_desc.width = atlas.width_;
         img_desc.height = atlas.height_;
@@ -999,7 +998,6 @@ private:
         // coarse mips bleed slightly between neighbors, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
         std::vector<uint8_t> mipBlob;
-        std::vector<std::vector<uint8_t>> lowerMips;   // levels 1..N (level 0 = atlas.pixels_)
         // Oversampling and mipmapping compose: oversampling owns 1:1 and above,
         // the mip chain owns minification -- which is exactly where a denser
         // atlas would otherwise make aliasing worse. pickSampler() keeps the
@@ -1007,22 +1005,24 @@ private:
         // are only ever reached when they are the right answer. On an NxN
         // atlas the chain also lands better than on a 1x one: drawing at 1/N
         // scale reads mip log2(N), whose resolution matches the target exactly.
-        if (wantMipmaps_ && mipsBuilt_) {
-            mipBlob.assign(atlas.pixels_.begin(), atlas.pixels_.end());
+        if (atlas.mipmaps_) {
+            size_t mipBytes = atlas.pixels_.size();
             int numMips = 1;
             for (int mw = atlas.width_, mh = atlas.height_; mw > 1 || mh > 1; ) {
                 mw = std::max(1, mw / 2);
                 mh = std::max(1, mh / 2);
+                mipBytes += static_cast<size_t>(mw) * mh;
                 ++numMips;
             }
-            lowerMips.reserve(numMips - 1);   // reserve so .data() pointers stay valid
-
-            const uint8_t* prev = atlas.pixels_.data();
+            mipBlob.resize(mipBytes);
+            memcpy(mipBlob.data(), atlas.pixels_.data(), atlas.pixels_.size());
+            size_t offset = atlas.pixels_.size();
+            const uint8_t* prev = mipBlob.data();
             int pw = atlas.width_, ph = atlas.height_;
             img_desc.num_mipmaps = numMips;
             for (int level = 1; level < numMips; ++level) {
                 int cw = std::max(1, pw / 2), ch = std::max(1, ph / 2);
-                std::vector<uint8_t> dst(static_cast<size_t>(cw) * ch);
+                uint8_t* dst = mipBlob.data() + offset;
                 for (int y = 0; y < ch; ++y) {
                     for (int x = 0; x < cw; ++x) {
                         int x0 = x * 2, y0 = y * 2;
@@ -1032,9 +1032,8 @@ private:
                         dst[static_cast<size_t>(y) * cw + x] = static_cast<uint8_t>(a);
                     }
                 }
-                lowerMips.push_back(std::move(dst));
-                mipBlob.insert(mipBlob.end(), lowerMips.back().begin(), lowerMips.back().end());
-                prev = lowerMips.back().data();
+                prev = dst;
+                offset += static_cast<size_t>(cw) * ch;
                 pw = cw; ph = ch;
             }
         }
@@ -1043,8 +1042,15 @@ private:
 
         sg_view_desc view_desc = {};
         view_desc.texture.image = atlas.texture_;
-        if (sg_query_image_state(atlas.texture_) == SG_RESOURCESTATE_VALID)
-            atlas.view_ = sg_make_view(&view_desc);
+        if (sg_query_image_state(atlas.texture_) == SG_RESOURCESTATE_VALID) {
+            if (atlas.pendingView_.id) {
+                atlas.view_ = atlas.pendingView_;
+                atlas.pendingView_ = {};
+                sg_init_view(atlas.view_, &view_desc);
+            } else {
+                atlas.view_ = sg_make_view(&view_desc);
+            }
+        }
 
         atlas.textureValid_ = sg_query_image_state(atlas.texture_) == SG_RESOURCESTATE_VALID &&
                               sg_query_view_state(atlas.view_) == SG_RESOURCESTATE_VALID;
@@ -1878,24 +1884,22 @@ protected:
     void emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph>& placed) const {
         if (!atlasManager_ || placed.empty()) return;
 
-        // Sampler selection requests lazy mips. Publish the replacement before
-        // recording even the first glyph; one-shot Fbos cannot wait a frame.
+        // Request lazy mips now; publish all new coverage at the flush.
         const sg_sampler sampler = pickSampler();
-        atlasManager_->ensureTexturesUpdated();
 
         const float s = 1.0f / dpiScale_;
         const size_t atlasCount = atlasManager_->getAtlasCount();
 
         for (size_t atlasIdx = 0; atlasIdx < atlasCount; ++atlasIdx) {
-            const internal::AtlasState& atlas = atlasManager_->getAtlas(atlasIdx);
-            if (!atlas.isTextureValid()) continue;
+            const sg_view view = atlasManager_->recordAtlas(atlasIdx);
+            if (!view.id) continue;
 
             // Coverage pipeline for the active target (swapchain or FBO): the
             // Alpha blend of activeFill2D() (dst alpha accumulates) with a shader
             // that reads the R8 atlas's R channel as alpha.
             internal::loadTemporaryPipeline(internal::activeCoverage2D());
             sgl_enable_texture();
-            sgl_texture(atlas.getView(), sampler);
+            sgl_texture(view, sampler);
 
             Color col = getColor();
             sgl_c4f(col.r, col.g, col.b, col.a);
