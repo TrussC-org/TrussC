@@ -1174,9 +1174,10 @@ Process and close coverage:
   trailing backslashes and empty ones arrive unchanged; `workingDir` is used;
   a missing program reports `started == false`; 1 MiB on both streams does
   not deadlock. `Process` fires `onLine` per line and one `onExit`, refuses a
-  second `start()` while running, restarts after exit, `kill()` and the
-  destructor end a sleeping child, and `Deliver::Main` listeners run on the
-  main-thread drain. The children are the test binary itself (`--child`).
+  second `startAsync()` while running, restarts after exit, `kill()` and the
+  destructor end a sleeping child. Listeners run on the worker by default;
+  `Deliver::Main` listeners run on the main-thread drain and honor the optional
+  per-event pending-copy limit. Inline and Main callbacks may destroy Process. The children are the test binary itself (`--child`).
   Desktop only; elsewhere it checks that nothing starts.
 
 ### Session authority and OS-only exit deadline

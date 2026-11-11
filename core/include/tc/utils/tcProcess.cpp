@@ -563,8 +563,8 @@ ProcessResult runProcess(const std::vector<std::string>& args, const fs::path& w
 // -----------------------------------------------------------------------------
 
 struct Process::State {
-    Event<ProcessLineEventArgs> onLine{EventPriority::App, Deliver::Main};
-    Event<ProcessExitEventArgs> onExit{EventPriority::App, Deliver::Main};
+    Event<ProcessLineEventArgs> onLine;
+    Event<ProcessExitEventArgs> onExit;
     std::unique_ptr<internal::ProcessRunner> runner;
     std::atomic<std::thread::id> workerId{};
     std::atomic<bool> running{false};

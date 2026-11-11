@@ -28,24 +28,6 @@ class AudioEventDeliveryTests(unittest.TestCase):
                     ('audioOut', 'AudioOutBuffer', 'AudioEngine::getAnalysisBuffer()'),
                     ('audioIn', 'AudioInBuffer', 'MicInput::getBuffer()'),
                 ):
-                    for delivery, rejected in (('', False), (', Deliver::Inline', False),
-                                               (', Deliver::Main', True), (', runtime', True)):
-                        with self.subTest(compiler=compiler, buffer=buffer, constructor=delivery):
-                            source.write_text(prefix + f'''
-void probe(Deliver runtime) {{
-    (void)runtime;
-    Event<{buffer}> event(EventPriority::App{delivery});
-}}
-''', encoding='utf-8')
-                            result = subprocess.run(
-                                [compiler, '-std=c++20', '-Wall', '-Wextra', '-Werror',
-                                 '-fsyntax-only', '-I'+str(ROOT/'core/include'), str(source)],
-                                capture_output=True, text=True, encoding='utf-8')
-                            self.assertEqual(result.returncode != 0, rejected, result.stderr)
-                            if delivery == ', Deliver::Main':
-                                self.assertIn(message, result.stderr)
-                            elif rejected:
-                                self.assertIn('constant expression', result.stderr)
                     for member in (False, True):
                         callback = '&receiver, &Receiver::receive' if member else f'[]({buffer}&) {{}}'
                         for priority in ('', ', 500'):

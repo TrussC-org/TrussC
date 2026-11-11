@@ -167,14 +167,8 @@ public:
     using Callback = std::function<void(T&)>;
 
     Event() : Event(EventPriority::App) {}
-    explicit Event(int defaultPriority, Deliver defaultDelivery = Deliver::Inline)
-        requires (!internal::isAudioEvent<T>)
-        : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority),
-          defaultDelivery_(defaultDelivery) {}
-    explicit Event(int defaultPriority, internal::AudioEventDelivery<T> = Deliver::Inline)
-        requires internal::isAudioEvent<T>
-        : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority),
-          defaultDelivery_(Deliver::Inline) {}
+    explicit Event(int defaultPriority)
+        : alive_(std::make_shared<std::atomic<bool>>(true)), defaultPriority_(defaultPriority) {}
     ~Event() { alive_->store(false, std::memory_order_relaxed); }
 
     // Optional count limit for external Main copies across this event's listeners.
@@ -213,20 +207,20 @@ public:
     }
     [[deprecated("Use 'listener = event.listen(callback)' instead")]]
     void listen(EventListener& listener, Callback callback) {
-        listenImpl(listener, std::move(callback), defaultDelivery_, defaultPriority_);
+        listenImpl(listener, std::move(callback), Deliver::Inline, defaultPriority_);
     }
     template<typename Obj>
     [[deprecated("Use 'listener = event.listen(obj, &Class::method)' instead")]]
     void listen(EventListener& listener, Obj* obj, void (Obj::*method)(T&)) {
         listenImpl(listener, [obj, method](T& arg) { (obj->*method)(arg); },
-                   defaultDelivery_, defaultPriority_);
+                   Deliver::Inline, defaultPriority_);
     }
 
     // Register listener with lambda (returns EventListener) - preferred API
     [[nodiscard]] EventListener listen(Callback callback,
                                        int priority) {
         EventListener listener;
-        listenImpl(listener, std::move(callback), defaultDelivery_, priority);
+        listenImpl(listener, std::move(callback), Deliver::Inline, priority);
         return listener;
     }
 
@@ -262,32 +256,28 @@ public:
     // explicit integer priorities continue to use the existing inline path.
     [[nodiscard]] EventListener listen(Callback callback, internal::AudioEventDelivery<T>)
         requires internal::isAudioEvent<T> {
-        return listen(std::move(callback), Deliver::Inline, defaultPriority_);
+        return listen(std::move(callback), defaultPriority_);
     }
     [[nodiscard]] EventListener listen(Callback callback, internal::AudioEventDelivery<T>, int priority)
         requires internal::isAudioEvent<T> {
-        EventListener listener;
-        listenImpl(listener, std::move(callback), Deliver::Inline, priority);
-        return listener;
+        return listen(std::move(callback), priority);
     }
     template<typename Obj>
     [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&), internal::AudioEventDelivery<T>)
         requires internal::isAudioEvent<T> {
-        return listen(obj, method, Deliver::Inline, defaultPriority_);
+        return listen(obj, method, defaultPriority_);
     }
     template<typename Obj>
     [[nodiscard]] EventListener listen(Obj* obj, void (Obj::*method)(T&), internal::AudioEventDelivery<T>, int priority)
         requires internal::isAudioEvent<T> {
-        return listen([obj, method](T& arg) {
-            (obj->*method)(arg);
-        }, Deliver::Inline, priority);
+        return listen(obj, method, priority);
     }
 
     // Deprecated: use `listener = event.listen(callback)` instead
     [[deprecated("Use 'listener = event.listen(callback)' instead")]]
     void listen(EventListener& listener, Callback callback,
                 int priority) {
-        listenImpl(listener, std::move(callback), defaultDelivery_, priority);
+        listenImpl(listener, std::move(callback), Deliver::Inline, priority);
     }
 
     // Deprecated: use `listener = event.listen(obj, &Class::method)` instead
@@ -297,7 +287,7 @@ public:
                 int priority) {
         listenImpl(listener, [obj, method](T& arg) {
             (obj->*method)(arg);
-        }, defaultDelivery_, priority);
+        }, Deliver::Inline, priority);
     }
 
 private:
@@ -539,7 +529,6 @@ private:
     // Liveness only, not a teardown barrier or publication of other state.
     std::shared_ptr<std::atomic<bool>> alive_;
     const int defaultPriority_;
-    const Deliver defaultDelivery_;
     mutable TC_MUTEX mutex_;            // serializes listen / remove / clear
     internal::AtomicSharedPtr<const EntryList> entries_;  // RCU snapshot: sharedLoad (acquire) / sharedStore (release)
     ConstEntryListPtr frameworkEntries_; // guarded by mutex_; prepared clear() survivors

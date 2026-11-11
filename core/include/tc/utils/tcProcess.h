@@ -12,12 +12,18 @@
 //
 //   Process           asynchronous: startAsync() returns at once, a worker thread
 //                     reads the output and fires onLine per line and onExit
-//                     once. Listeners run on the main thread by default;
-//                     Deliver::Inline opts into worker-thread delivery:
+//                     once. Listeners run on the worker thread by default.
+//                     Do not touch Nodes or the GPU there; use Deliver::Main:
 //
-//     // process, lineListener and exitListener are App members.
-//     lineListener = process.onLine.listen([this](auto& e) { status = e.line; });
-//     exitListener = process.onExit.listen([this](auto& e) { if (e.exitCode == 0) reload(); });
+//     // App members: std::mutex outputMutex; std::vector<std::string> output;
+//     // Process process; EventListener lineListener, exitListener;
+//     lineListener = process.onLine.listen([this](auto& e) {
+//         std::lock_guard<std::mutex> lock(outputMutex);
+//         output.push_back(e.line);
+//     });
+//     exitListener = process.onExit.listen([this](auto& e) {
+//         if (e.exitCode == 0) reload();
+//     }, Deliver::Main);
 //     process.startAsync({"node", "render.js", "--out", path});
 //
 // Platforms: macOS, Windows, Linux. Elsewhere (Web, iOS, Android) startAsync()
@@ -94,7 +100,11 @@ class TC_PLATFORMS("macos,windows,linux") TC_LUA_SKIP Process {
     struct State;
     std::shared_ptr<State> state_;  // also held by the worker across callbacks
 public:
-    // Main-thread delivery by default; Deliver::Inline opts into the worker.
+    // THREADING: these events fire on the worker thread. A listener that
+    // touches Nodes, GPU resources, or unguarded app state must opt into
+    // main-thread delivery: listener = process.onLine.listen(fn, Deliver::Main).
+    // Deliver::Main copies the payload and runs the listener at the start of
+    // the next frame (see tcEvent.h). Plain listen(fn) runs inline on the worker.
     // onLine for every line (all lines come before onExit); onExit once per
     // successful startAsync(). Keep the returned EventListener tokens.
     // setMainThreadDeliveryLimit(count) optionally bounds pending Main copies per event; 0 is unlimited.
@@ -109,7 +119,7 @@ public:
     Process(const Process&) = delete;
     Process& operator=(const Process&) = delete;
 
-    // Starts without waiting; results arrive on the main thread by default.
+    // Starts without waiting; listeners run on the worker thread by default.
     // Call from the main thread, including before runApp()/runHeadlessApp().
     // Returns false (and logs why) when it is already
     // running, could not be started, or the platform has no processes.
@@ -132,6 +142,7 @@ public:
     // code, or -1 if nothing was started. Not from the worker thread.
     int waitForExit();
 
+    // If the app is hard-killed, Windows ends its children (kill-on-close job); POSIX leaves the child group running.
     void setKillOnDestroy(bool kill) { killOnDestroy_ = kill; }
     bool getKillOnDestroy() const { return killOnDestroy_; }
 

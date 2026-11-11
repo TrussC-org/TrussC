@@ -14,7 +14,7 @@
 //   - Process: onLine per line and one onExit with the exit code; a second
 //     startAsync() while running is refused; kill() ends a sleeping child (and is
 //     reported as killed); the destructor kills by default; default listeners
-//     run on main when the main-thread queue is drained.
+//     run on the worker; Deliver::Main runs on the main-thread queue drain.
 // =============================================================================
 
 #include <TrussC.h>
@@ -170,7 +170,7 @@ void testMainThreadIdentity() {
     auto listener = process.onExit.listen([&](ProcessExitEventArgs&) {
         called = true;
         onCaller = std::this_thread::get_id() == caller;
-    });
+    }, Deliver::Main);
     check("start before app initialization", process.startAsync(child({"args"})));
     process.waitForExit();
     check("first Main callback waits for drain", !called);
@@ -184,10 +184,10 @@ void testMainDeliveryLimit() {
     process.onLine.setMainThreadDeliveryLimit(2);
     process.onExit.setMainThreadDeliveryLimit(2);
     int lines = 0, exits = 0;
-    auto line = process.onLine.listen([&](ProcessLineEventArgs&) { ++lines; });
-    auto exit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; });
-    auto extraExit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; });
-    auto droppedExit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; });
+    auto line = process.onLine.listen([&](ProcessLineEventArgs&) { ++lines; }, Deliver::Main);
+    auto exit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; }, Deliver::Main);
+    auto extraExit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; }, Deliver::Main);
+    auto droppedExit = process.onExit.listen([&](ProcessExitEventArgs&) { ++exits; }, Deliver::Main);
     for (int run = 0; run < 2; ++run) {
         check("limited output start", process.startAsync(child({"spam"})));
         check("limited output finishes", process.waitForExit() == 0);
@@ -261,24 +261,28 @@ void testProcess() {
     std::vector<ProcessLineEventArgs> lines;
     int exits = 0;
     ProcessExitEventArgs exitArgs;
+    const auto caller = std::this_thread::get_id();
+    bool onWorker = true;
 
     Process process;
     auto lineListener = process.onLine.listen([&](ProcessLineEventArgs& e) {
         std::lock_guard<std::mutex> lock(mutex);
+        onWorker = onWorker && std::this_thread::get_id() != caller;
         lines.push_back(e);
     });
     auto exitListener = process.onExit.listen([&](ProcessExitEventArgs& e) {
         std::lock_guard<std::mutex> lock(mutex);
         ++exits;
         exitArgs = e;
+        onWorker = onWorker && std::this_thread::get_id() != caller;
     });
     check("Process start", process.startAsync(child({"echo"})));
     const int code = process.waitForExit();
     check("Process waitForExit returns the exit code", code == 7 && process.getExitCode() == 7);
     check("Process not running after exit", !process.isRunning());
-    internal::drainMainThreadQueue();
     {
         std::lock_guard<std::mutex> lock(mutex);
+        check("default callbacks finish on the worker before wait returns", onWorker && exits == 1);
         bool stderrSeen = false;
         std::string stdoutText;
         for (const auto& line : lines) {
@@ -299,7 +303,7 @@ void testProcess() {
             { std::lock_guard<std::mutex> lock(readyMutex); ready = true; }
             readyCondition.notify_one();
         }
-    }, Deliver::Inline);
+    });
     check("Process restarts", process.startAsync(child({"sleep"})));
     check("second start while running is refused", !process.startAsync(child({"echo"})));
     {
@@ -308,7 +312,6 @@ void testProcess() {
     }
     process.kill();
     const int killedCode = process.waitForExit();
-    internal::drainMainThreadQueue();
     {
         std::lock_guard<std::mutex> lock(mutex);
         check("kill() ends the child", exits == 2 && exitArgs.killed && killedCode != 0);
@@ -327,7 +330,7 @@ void testDestructorKills() {
         auto listener = process.onLine.listen([&](ProcessLineEventArgs& e) {
             { std::lock_guard<std::mutex> lock(mutex); childPid = std::stoul(e.line); }
             ready.notify_one();
-        }, Deliver::Inline);
+        });
         check("destructor test start", process.startAsync(child({"pid"})));
         std::unique_lock<std::mutex> lock(mutex);
         ready.wait(lock, [&] { return childPid != 0; });
@@ -350,58 +353,25 @@ void testDeliverMain() {
     std::vector<std::string> lines;
     bool exited = false;
     bool mainOnly = true;
-    bool inlineOnWorker = false;
     auto lineListener = process.onLine.listen([&](ProcessLineEventArgs& e) {
         mainOnly = mainOnly && isMainThread();
         lines.push_back(e.line);
-    });
+    }, Deliver::Main);
     auto exitListener = process.onExit.listen([&](ProcessExitEventArgs&) {
         mainOnly = mainOnly && isMainThread();
         exited = true;
-    });
-    auto inlineListener = process.onExit.listen([&](ProcessExitEventArgs&) {
-        inlineOnWorker = !isMainThread();
-    }, Deliver::Inline);
-    struct Receiver {
-        int calls = 0;
-        bool mainOnly = true;
-        void receive(ProcessLineEventArgs&) { ++calls; mainOnly = mainOnly && isMainThread(); }
-    } receiver;
-    auto receive = [&](ProcessLineEventArgs& e) { receiver.receive(e); };
-    auto callbackPriority = process.onLine.listen(receive, -1);
-    auto member = process.onLine.listen(&receiver, &Receiver::receive);
-    auto memberPriority = process.onLine.listen(&receiver, &Receiver::receive, -1);
-    EventListener legacyCallback, legacyCallbackPriority, legacyMember, legacyMemberPriority;
-    // Deprecated forms still honor the event's delivery default.
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#elif defined(_MSC_VER)
-#pragma warning(push)
-#pragma warning(disable: 4996)
-#endif
-    process.onLine.listen(legacyCallback, receive);
-    process.onLine.listen(legacyCallbackPriority, receive, -1);
-    process.onLine.listen(legacyMember, &receiver, &Receiver::receive);
-    process.onLine.listen(legacyMemberPriority, &receiver, &Receiver::receive, -1);
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#elif defined(_MSC_VER)
-#pragma warning(pop)
-#endif
-    process.startAsync(child({"echo"}));
+    }, Deliver::Main);
+    check("Main delivery starts", process.startAsync(child({"echo"})));
     process.waitForExit();
-    check("default callbacks wait for main drain", !exited && lines.empty() && receiver.calls == 0);
+    check("Main callbacks wait for drain", !exited && lines.empty());
     internal::drainMainThreadQueue();
-    check("default callbacks run on main", exited && lines.size() == 5 && mainOnly);
-    check("all omitted-delivery overloads run on main", receiver.calls == 35 && receiver.mainOnly);
-    check("Deliver::Inline opts into worker", inlineOnWorker);
+    check("Deliver::Main runs on main", exited && lines.size() == 5 && mainOnly);
 
     bool staleCallback = false;
     EventListener listener;
     {
         Process temporary;
-        listener = temporary.onExit.listen([&](ProcessExitEventArgs&) { staleCallback = true; });
+        listener = temporary.onExit.listen([&](ProcessExitEventArgs&) { staleCallback = true; }, Deliver::Main);
         temporary.startAsync(child({"echo"}));
         temporary.waitForExit();
     }
@@ -411,7 +381,7 @@ void testDeliverMain() {
 
 void testExitDestroysProcess() {
     auto process = std::make_unique<Process>();
-    auto listener = process->onExit.listen([&](ProcessExitEventArgs&) { process.reset(); });
+    auto listener = process->onExit.listen([&](ProcessExitEventArgs&) { process.reset(); }, Deliver::Main);
     check("callback destruction start", process->startAsync(child({"echo"})));
     process->waitForExit();
     internal::drainMainThreadQueue();
@@ -469,7 +439,7 @@ void testGroupCancellation() {
         auto lineListener = process.onLine.listen([&](ProcessLineEventArgs& e) {
             { std::lock_guard<std::mutex> lock(mutex); readyLine = e.line; }
             readyCondition.notify_one();
-        }, Deliver::Inline);
+        });
         auto exitListener = process.onExit.listen([&](ProcessExitEventArgs& e) { killed = e.killed; }, Deliver::Inline);
         check("group cancellation starts", process.startAsync(child({mode})));
         {

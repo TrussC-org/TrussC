@@ -23,34 +23,6 @@ template<class Predicate> void waitFor(Predicate predicate) {
         std::this_thread::yield();
     }
 }
-
-template<class Buffer> void checkBorrowedEventDelivery() {
-    Event<Buffer> defaultEvent;
-    Event<Buffer> priorityEvent(500);
-    Event<Buffer> inlineEvent(500, Deliver::Inline);
-    for (auto* event : {&defaultEvent, &priorityEvent, &inlineEvent}) {
-        struct Receiver {
-            int calls = 0;
-            bool onWorker = true;
-            void receive(Buffer&) { ++calls; onWorker &= !isMainThread(); }
-        } receiver;
-        auto callback = [&](Buffer& buffer) { receiver.receive(buffer); };
-        auto lambda = event->listen(callback, Deliver::Inline);
-        auto lambdaPriority = event->listen(callback, Deliver::Inline, 500);
-        auto member = event->listen(&receiver, &Receiver::receive, Deliver::Inline);
-        auto memberPriority = event->listen(&receiver, &Receiver::receive, Deliver::Inline, 500);
-        bool synchronous = false;
-        std::thread worker([&] {
-            Buffer borrowed{};
-            event->notify(borrowed);
-            synchronous = receiver.calls == 4 && receiver.onWorker;
-        });
-        worker.join();
-        check("borrowed audio explicit Inline stays synchronous", synchronous);
-        internal::drainMainThreadQueue();
-        check("borrowed audio has no deferred callbacks", receiver.calls == 4);
-    }
-}
 struct InputApp : App {
     int calls = 0;
     uint64_t frames = 0;
@@ -109,8 +81,6 @@ TC_CORE_TEST_MAIN() {
     return 0;
 #else
     getMainThreadId();
-    checkBorrowedEventDelivery<AudioOutBuffer>();
-    checkBorrowedEventDelivery<AudioInBuffer>();
     auto& engine = AudioEngine::getInstance();
     std::shared_ptr<internal::MicState> state;
     internal::setMicAuthorizationForTests([] { return internal::MicAuthorization::Authorized; }, {});
