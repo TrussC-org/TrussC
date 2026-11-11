@@ -1479,6 +1479,7 @@ struct Cover_Fbo : af::Scope<Fbo> {
         (void)af::val<const Fbo>().copyTo(af::val<Image>());
         (void)af::val<const Fbo>().draw(af::val<float>(), af::val<float>());
         (void)af::val<const Fbo>().draw(af::val<float>(), af::val<float>(), af::val<float>(), af::val<float>());
+        (void)af::val<const Fbo>().drawStencil(af::val<float>(), af::val<float>());
         (void)af::val<Fbo>().end();
         (void)af::val<const Fbo>().getColorImage();
         (void)af::val<const Fbo>().getDebugName();
@@ -1503,6 +1504,9 @@ struct Cover_Fbo : af::Scope<Fbo> {
 #endif
 #if defined(AF_MACOS) || defined(AF_IOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_ANDROID) || defined(AF_WEB)
         (void)af::val<const Fbo>().readPixelsFloat(af::val<float *>());
+#endif
+#if defined(AF_MACOS) || defined(AF_WINDOWS) || defined(AF_LINUX) || defined(AF_IOS) || defined(AF_ANDROID) || defined(AF_WEB)
+        (void)af::val<const Fbo>().readStencil(af::val<Pixels>());
 #endif
         (void)af::val<const Fbo>().save(af::val<const fs::path>());
         (void)af::val<Fbo>().setDebugName(af::val<const std::string>());

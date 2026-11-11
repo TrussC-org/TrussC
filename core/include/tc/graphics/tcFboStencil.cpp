@@ -9,6 +9,7 @@ struct StencilResources {
     bool initialized = false;
     bool ready = false;
     sg_shader writeShader = {}, readShader = {};
+    sg_shader previewShader = {};
     sg_sampler sampler = {};
     sg_pipeline writes[8] = {}, reads[8] = {};
 };
@@ -147,6 +148,71 @@ void FboStencilAccess::shutdown() {
     if (s.sampler.id) sg_destroy_sampler(s.sampler);
     if (s.writeShader.id) sg_destroy_shader(s.writeShader);
     if (s.readShader.id) sg_destroy_shader(s.readShader);
+    if (s.previewShader.id) sg_destroy_shader(s.previewShader);
     s = {};
 }
 } // namespace trussc::internal
+
+namespace trussc {
+Fbo* Fbo::captureStencil_(bool perFrame) const {
+    if (!allocated_ || target_.activation || target_.sampleCount != 1) {
+        if (!perFrame || !warnedStencilPreview_) {
+            if (perFrame) warnedStencilPreview_ = true;
+            logWarning("Fbo") << "stencil diagnostics require an ended, allocated, single-sample owned Fbo; main targets and MSAA are unsupported";
+        }
+        return nullptr;
+    }
+    if (!stencilCache_) {
+        stencilCache_ = std::make_unique<Fbo>();
+        stencilCache_->allocate(target_.width, target_.height, 1, TextureFormat::R8);
+        stencilCache_->getTexture().setFilter(TextureFilter::Nearest);
+    }
+    return internal::FboStencilAccess::readR8(*this, *stencilCache_) ? stencilCache_.get() : nullptr;
+}
+
+bool Fbo::readStencil(Pixels& pixels) const {
+    if (internal::hasPublicFboActivation()) {
+        logWarning("Fbo") << "readStencil() requires end() on all active Fbos";
+        return false;
+    }
+    auto* cache = captureStencil_(false);
+    if (!cache) return false;
+    Pixels rgba;
+    rgba.allocate(target_.width, target_.height, 4);
+    if (!cache->readPixels(rgba.getData())) return false;
+    pixels.allocate(target_.width, target_.height, 1, PixelFormat::U8);
+    const size_t count = size_t(target_.width) * size_t(target_.height);
+    for (size_t i = 0; i < count; ++i) pixels.getData()[i] = rgba.getData()[i * 4];
+    return true;
+}
+
+void Fbo::drawStencil(float x, float y) const {
+    auto* cache = captureStencil_(true);
+    if (!cache) return;
+    auto& s = internal::stencilResources();
+    if (!s.previewShader.id) s.previewShader = sg_make_shader(tc_fbostencil_preview_shader_desc(sg_query_backend()));
+    if (!internal::internalShaderReady(s.previewShader, "Fbo stencil preview")) return;
+    auto& target = internal::currentTarget();
+    internal::PipelineKey key;
+    key.role = internal::PipelineRole::Shader;
+    key.desc = internal::pipeDesc2D(BlendMode::Disabled, target.depthTestEnabled);
+    key.desc.shader = s.previewShader;
+    key.desc.layout = internal::sglColorVertexLayout();
+    const auto pipeline = target.pipeline(key).immediate;
+    if (!pipeline.id) return;
+    cache->markDrawnThisFrame_();
+    internal::loadTemporaryPipeline(pipeline);
+    sgl_enable_texture();
+    sgl_texture(cache->getTextureView(), cache->getSampler());
+    const float topV = needsGlYFlip() ? 1.0f : 0.0f;
+    sgl_begin_quads();
+    sgl_c4f(1, 1, 1, 1);
+    sgl_v2f_t2f(x, y, 0, topV);
+    sgl_v2f_t2f(x + target_.width, y, 1, topV);
+    sgl_v2f_t2f(x + target_.width, y + target_.height, 1, 1 - topV);
+    sgl_v2f_t2f(x, y + target_.height, 0, 1 - topV);
+    sgl_end();
+    sgl_disable_texture();
+    internal::restoreCurrentPipeline();
+}
+} // namespace trussc
