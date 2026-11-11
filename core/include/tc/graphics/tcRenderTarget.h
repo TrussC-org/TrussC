@@ -216,6 +216,9 @@ struct PipelineSelection {
 struct RenderTargetResources {
     sgl_context context = {};
     std::unordered_map<PipelineCacheKey, sgl_pipeline, PipelineCacheHash> cache;
+    // Standard immediate recipes only. The owning context fixes attachment
+    // formats/sample count; release() clears this alongside the canonical cache.
+    std::vector<std::pair<ImmediateSelection, sgl_pipeline>> immediateCache;
     std::unordered_map<uint32_t, ImmediateSelection> selections;
     std::shared_ptr<PipelineGeneration> rawCache;
     uint64_t generation = 0;
@@ -344,6 +347,7 @@ struct RenderTarget {
     int getWidth() const { return width; }
     int getHeight() const { return height; }
     PipelineSelection pipeline(const PipelineKey& key);
+    sgl_pipeline immediatePipeline(ImmediateSelection selection);
 
     // Only these logical flags retain continuity across targets in PR 2.
     void inheritLogicalDrawFlags(const RenderTarget& previous) {
