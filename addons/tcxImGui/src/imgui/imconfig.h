@@ -56,8 +56,7 @@
 //#define IMGUI_DISABLE_SSE                                 // Disable use of SSE intrinsics even if available
 
 //---- Enable Test Engine / Automation features.
-// [TrussC] Enable test engine hooks for MCP ImGui tools (widget collection)
-#define IMGUI_ENABLE_TEST_ENGINE
+//#define IMGUI_ENABLE_TEST_ENGINE
 
 // [TrussC] begin: widget value hook (MCP tools read the values of value widgets)
 // Dear ImGui keeps no widget values (the caller's variable owns them) and the

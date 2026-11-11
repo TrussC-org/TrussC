@@ -314,4 +314,13 @@ hardware):
 
 ## License
 
-MIT (same as TrussC). libremidi is BSD-2-Clause.
+MIT (same as TrussC). libremidi is BSD-2-Clause; the ofxMidi helper ports are BSD Simplified.
+
+### ofxMidi helper ports
+
+`src/tcxMidiClock.h` and `src/tcxMidiTimecode.h` are C++ ports from
+[ofxMidi](https://github.com/danomatika/ofxMidi), imported in `65fe10a3`;
+upstream version/commit and original copyright years are **not recorded**.
+Retain [OFXMIDI_LICENSE.txt](OFXMIDI_LICENSE.txt) (BSD Simplified).
+Import-time adaptations are unrecorded; later changes add a quarter-frame length
+check (`d5d7a95c`) and `tcx::midi` with compatibility aliases (`13af5e86`, `8bf5bd21`).

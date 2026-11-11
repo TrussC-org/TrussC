@@ -49,7 +49,7 @@ This is the one list of third-party code in TrussC and the version the build use
 | **stb_image** | 2.30, commit `1cafe0e` (fork, branch `nv/all-fixes`, + 4 TrussC patches, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb/stb_image.h` | https://github.com/nvpro-samples/stb | Public Domain or MIT | Sean Barrett |
 | **stb_image_write** | 1.16, commit `1ee679c` (unmodified) | `core/include/stb/stb_image_write.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_perlin** | 0.5, commit `2bb4a0a` | `core/include/stb/stb_perlin.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
-| **stb_truetype** | 1.26, commit `6e9f34d` (+ TrussC patches, including per-shape compound visit/copy budgets and CFF interpreter-instruction budgets; see [stb notes](../core/include/stb/README.md)) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
+| **stb_truetype** | 1.26, commit `6e9f34d` (+ TrussC patches, including compound-depth, vertex-count and allocation-failure checks; see [stb notes](../core/include/stb/README.md)) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_vorbis** | 1.22, commit `dd0c5ec` (unmodified fork, branch `stb_vorbis-sezero`, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb_vorbis.c` | https://github.com/sezero/stb | Public Domain or MIT | Sean Barrett |
 | **miniaudio** | 0.11.25 (unmodified, see [MINIAUDIO_TRUSSC_MODIFICATIONS.md](../core/include/MINIAUDIO_TRUSSC_MODIFICATIONS.md)) | `core/include/miniaudio.h` | https://github.com/mackron/miniaudio | Public Domain or MIT-0 | David Reid |
 | **dr_wav** | 0.14.5 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
@@ -60,7 +60,8 @@ This is the one list of third-party code in TrussC and the version the build use
 | **cpp-httplib** | 0.18.3 | `core/include/impl/httplib.h` ([upstream checksum](../core/include/impl/HTTPLIB_PATCHES.md)) | https://github.com/yhirose/cpp-httplib | MIT | Yuji Hirose |
 | **LZ4** | 1.10.0 | `core/include/lz4/` | https://github.com/lz4/lz4 | BSD 2-Clause | Yann Collet |
 | **Highway** | 1.2.0, commit `457c891775a7397bdb0376bb1031e6e027af1c48` (unmodified subset, see [README](../core/3rdparty/highway/README.md)) | `core/3rdparty/highway/` | https://github.com/google/highway | Apache-2.0 / BSD-3-Clause | Google LLC and contributors |
-| **earcut.hpp** | not recorded | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
+| **earcut.hpp** | version/commit not recorded; unchanged since TrussC import `8807ee2e`; used for Path fills in `tc/graphics/tcPath.h` | `core/include/earcut/earcut.hpp` | https://github.com/mapbox/earcut.hpp | ISC | Mapbox |
+| **Bitmap ASCII glyph data** | version/commit not recorded; see [bitmap notice](#bitmap-font-data) for source and local changes | `core/include/tcBitmapFont.h` | https://github.com/freeglut/freeglut | See bitmap notice below; exact import notice not recorded | freeglut / X11 contributors |
 
 ### System JPEG dependency (Linux)
 
@@ -86,7 +87,7 @@ These libraries are only included if you use the corresponding addon.
 
 | Library | Version | Pinned / vendored in | Upstream | License | Author/Organization | Addon |
 |---------|---------|----------------------|----------|---------|---------------------|-------|
-| **Dear ImGui** | 1.92.9b (+ TrussC test engine and widget value hooks, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
+| **Dear ImGui** | 1.92.9b (owned test engine configuration + TrussC widget value hooks, see [TRUSSC_MODIFICATIONS.md](../addons/tcxImGui/src/imgui/TRUSSC_MODIFICATIONS.md)) | `addons/tcxImGui/src/imgui/` | https://github.com/ocornut/imgui | MIT | Omar Cornut | tcxImGui |
 | **sokol_imgui.h** | commit `e7a48ed6` (+ TrussC multi-context and GPU buffer growth patches) | `addons/tcxImGui/src/sokol_imgui.h` | https://github.com/floooh/sokol | zlib License | Andre Weissflog | tcxImGui |
 | **mbedTLS** | 3.6.7 | `addons/tcxTls/CMakeLists.txt` | https://github.com/Mbed-TLS/mbedtls | Apache-2.0 or GPL-2.0-or-later (dual-licensed) | Arm Limited | tcxTls |
 | **libcurl** | 8.22.0 (Windows; macOS/Linux use system libcurl) | `addons/tcxCurl/CMakeLists.txt` | https://github.com/curl/curl | curl License (MIT-style) | Daniel Stenberg and contributors | tcxCurl |
@@ -99,8 +100,10 @@ These libraries are only included if you use the corresponding addon.
 | **bcdec** | 0.985 | `addons/tcxHap/src/impl/bcdec.h` | https://github.com/iOrange/bcdec | MIT or Public Domain (dual-licensed) | Sergii "iOrange" Kudlai | tcxHap |
 | **Lua** | 5.4.9 | `addons/tcxLua/lua/` | https://github.com/lua/lua | MIT | Lua.org, PUC-Rio | tcxLua |
 | **sol2** | 3.5.0 | `addons/tcxLua/include/sol/` | https://github.com/ThePhD/sol2 | MIT | ThePhD | tcxLua |
-| **LuaJIT** | 2.1 (rolling), commit not recorded | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
+| **LuaJIT** | 2.1 (rolling), commit not recorded (see [local changes](../addons/tcxLua/TRUSSC_MODIFICATIONS.md)) | `addons/tcxLua/LuaJIT/` | https://github.com/LuaJIT/LuaJIT | MIT | Mike Pall | tcxLua |
 | **luajit-cmake** | commit `94444a6` | `addons/tcxLua/luajit-cmake/` | https://github.com/zhaozg/luajit-cmake | MIT | George Zhao (zhaozg) | tcxLua |
+| **ofxMidi helper ports** | version/commit not recorded (see [port history](../addons/tcxMidi/README.md#ofxmidi-helper-ports)) | `addons/tcxMidi/src/tcxMidiClock.h`, `addons/tcxMidi/src/tcxMidiTimecode.h` | https://github.com/danomatika/ofxMidi | BSD Simplified; [notice](../addons/tcxMidi/OFXMIDI_LICENSE.txt) | Dan Wilcox and contributors | tcxMidi |
+| **Mozilla/curl CA bundle** | snapshot 2026-02-11; source commit not recorded; payload unchanged since TrussC import `f59a10fd`; refresh via [update_ca_bundle.sh](../addons/tcxTls/scripts/update_ca_bundle.sh) | `addons/tcxTls/data/cacert.pem` | https://curl.se/ca/cacert.pem ([extraction/source](https://curl.se/docs/caextract.html)) | Mozilla source database: MPL-2.0; exact standalone redistribution terms not recorded; retain bundle notices | Mozilla / curl contributors | tcxTls |
 
 > **Note**: Box2D v2.3.x以前はzlib Licenseでした。TrussCはv2.4.0以降 (MIT) を使用しています。
 
@@ -332,6 +335,48 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
+
+### Bitmap font data
+
+The original glyph import (`51c74486`) is labeled [freeglut](https://github.com/freeglut/freeglut)/[X11 fixed 8x13](https://gitlab.freedesktop.org/xorg/font/misc-misc).
+Its precise source file, version/commit and import-time notice were not recorded.
+The 95 ASCII glyphs (1,235 bytes) are unchanged; table layout and registration/UTF-8
+APIs in `core/include/tcBitmapFont.h` are local changes. X11 font-misc-misc's
+notice is "Public domain font. Share and enjoy." Freeglut's MIT/X11 notice
+below is reproduced from the locally installed freeglut copyright record;
+it does not authenticate the origin of these particular glyph bytes.
+
+```
+Copyright (c) 1999-2000 Pawel W. Olszta. All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies or substantial portions of the Software.
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+PAWEL W. OLSZTA BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Except as contained in this notice, the name of Pawel W. Olszta shall not
+be used in advertising or otherwise to promote the sale, use or other
+dealings in this Software without prior written authorization from Pawel
+W. Olszta.
+```
+
+### ofxMidi helper ports (BSD Simplified)
+
+The ports retain a [BSD notice](../addons/tcxMidi/OFXMIDI_LICENSE.txt) for
+Dan Wilcox and ofxMidi contributors. The exact source revision and original
+copyright years are not recorded; see the [port history](../addons/tcxMidi/README.md#ofxmidi-helper-ports).
 
 ### ISC License (earcut.hpp)
 

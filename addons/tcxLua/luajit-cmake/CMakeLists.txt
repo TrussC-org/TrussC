@@ -1,5 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
-cmake_policy(SET CMP0077 NEW)
+cmake_minimum_required(VERSION 3.10)
 
 option(LUA_DIR "Path of Lua 5.4 source dir" OFF)
 option(LUAJIT_DIR "Path of LuaJIT 2.1 source dir" OFF)
