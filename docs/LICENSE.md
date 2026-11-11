@@ -47,10 +47,10 @@ This is the one list of third-party code in TrussC and the version the build use
 |---------|---------|----------------------|----------|---------|---------------------|
 | **sokol** | commit `e7a48ed6` (+ TrussC patches, see [TRUSSC_MODIFICATIONS.md](../core/include/sokol/TRUSSC_MODIFICATIONS.md)) | `core/include/sokol/` | https://github.com/floooh/sokol | zlib License | Andre Weissflog |
 | **stb_image** | 2.30, commit `1cafe0e` (fork, branch `nv/all-fixes`, + 4 TrussC patches, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb/stb_image.h` | https://github.com/nvpro-samples/stb | Public Domain or MIT | Sean Barrett |
-| **stb_image_write** | 1.16, commit `1ee679c` (+ 1 TrussC patch) | `core/include/stb/stb_image_write.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
+| **stb_image_write** | 1.16, commit `1ee679c` (unmodified) | `core/include/stb/stb_image_write.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_perlin** | 0.5, commit `2bb4a0a` | `core/include/stb/stb_perlin.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
 | **stb_truetype** | 1.26, commit `6e9f34d` (+ TrussC patches, including per-shape compound visit/copy budgets and CFF interpreter-instruction budgets; see [stb notes](../core/include/stb/README.md)) | `core/include/stb/stb_truetype.h` | https://github.com/nothings/stb | Public Domain or MIT | Sean Barrett |
-| **stb_vorbis** | 1.22, commit `dd0c5ec` (fork, branch `stb_vorbis-sezero`, + 1 TrussC patch, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb_vorbis.c` | https://github.com/sezero/stb | Public Domain or MIT | Sean Barrett |
+| **stb_vorbis** | 1.22, commit `dd0c5ec` (unmodified fork, branch `stb_vorbis-sezero`, see [stb/README.md](../core/include/stb/README.md)) | `core/include/stb_vorbis.c` | https://github.com/sezero/stb | Public Domain or MIT | Sean Barrett |
 | **miniaudio** | 0.11.25 (unmodified, see [MINIAUDIO_TRUSSC_MODIFICATIONS.md](../core/include/MINIAUDIO_TRUSSC_MODIFICATIONS.md)) | `core/include/miniaudio.h` | https://github.com/mackron/miniaudio | Public Domain or MIT-0 | David Reid |
 | **dr_wav** | 0.14.5 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
 | **dr_mp3** | 0.7.3 (bundled in miniaudio.h) | `core/include/miniaudio.h` | https://github.com/mackron/dr_libs | Public Domain or MIT-0 | David Reid |
