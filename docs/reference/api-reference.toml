@@ -5643,17 +5643,17 @@ description.ko = "장치 손실이 보고된 이유를 담는다."
 details.en = '''
 - The argument of a device class's `onDisconnect` event, such as `Serial::onDisconnect` or `VideoGrabber::onDisconnect`. It has one field, `reason`.
 - It is not `DeviceLostEventArgs`, which belongs to the graphics device (`deviceLost`).
-- `onDisconnect` fires only when the OS or driver reports the device lost. Closing the device yourself never fires it. See the device lifecycle note (`docs/DEVICE_LIFECYCLE.md`).
+- `onDisconnect` fires only when the OS or driver reports the device lost. Closing the device yourself never fires it. See the device lifecycle note (`docs/architecture/DEVICE_LIFECYCLE.md`).
 '''
 details.ja = '''
 - `Serial::onDisconnect` や `VideoGrabber::onDisconnect` など、デバイスクラスの `onDisconnect` イベントの引数です。項目は `reason` だけです。
 - グラフィックスデバイスの `deviceLost` が渡す `DeviceLostEventArgs` とは別の型です。
-- `onDisconnect` が発火するのは、OS やドライバがデバイスの喪失を報告したときだけです。自分で閉じたときは発火しません。詳しくはデバイスのライフサイクルの説明（`docs/DEVICE_LIFECYCLE.md`）を参照してください。
+- `onDisconnect` が発火するのは、OS やドライバがデバイスの喪失を報告したときだけです。自分で閉じたときは発火しません。詳しくはデバイスのライフサイクルの説明（`docs/architecture/DEVICE_LIFECYCLE.md`）を参照してください。
 '''
 details.ko = '''
 - `Serial::onDisconnect`나 `VideoGrabber::onDisconnect`와 같은 장치 클래스의 `onDisconnect` 이벤트의 인수입니다. 항목은 `reason` 하나뿐입니다.
 - 그래픽 장치의 `deviceLost`가 전달하는 `DeviceLostEventArgs`와는 다른 타입입니다.
-- `onDisconnect`는 OS나 드라이버가 장치 손실을 보고했을 때만 발생합니다. 직접 닫았을 때는 발생하지 않습니다. 자세한 내용은 장치 수명 주기 설명(`docs/DEVICE_LIFECYCLE.md`)을 참조하세요.
+- `onDisconnect`는 OS나 드라이버가 장치 손실을 보고했을 때만 발생합니다. 직접 닫았을 때는 발생하지 않습니다. 자세한 내용은 장치 수명 주기 설명(`docs/architecture/DEVICE_LIFECYCLE.md`)을 참조하세요.
 '''
 related = ["Serial::onDisconnect", "VideoGrabber::onDisconnect", "DeviceLostEventArgs"]
 of_category = "serial-types"
@@ -38926,7 +38926,7 @@ description.ko = "카메라의 실시간 영상을 픽셀과 텍스처로 가져
 details.en = '''
 - Call `setup(width, height)` once, then `update()` each frame to upload the latest pixels to the texture. Use `getTexture()` or the inherited `draw()` methods to display it.
 - Select a device and desired frame rate before setup. Defaults are device 0, 640 × 480 pixels, and the camera's default frame rate; the actual capture size may differ.
-- `isConnected()` is true only while the camera is open. When the OS reports the camera lost (unplugged), `update()` closes the grabber and fires `onDisconnect` once; `close()` never fires it. To reconnect, call `setup()` with no arguments, which reopens the same device at the last size. See the device lifecycle note (`docs/DEVICE_LIFECYCLE.md`).
+- `isConnected()` is true only while the camera is open. When the OS reports the camera lost (unplugged), `update()` closes the grabber and fires `onDisconnect` once; `close()` never fires it. To reconnect, call `setup()` with no arguments, which reopens the same device at the last size. See the device lifecycle note (`docs/architecture/DEVICE_LIFECYCLE.md`).
 - On macOS and iOS, setup requests missing camera permission and returns `false` while permission is pending. Continue calling `update()` so initialization can finish after permission is granted.
 - Run setup, update, and drawing on the main thread because they create or update GPU resources. Native capture callbacks publish pixels in the background; `getPixels()` exposes a borrowed buffer without locking, so concurrent reads can race with capture writes.
 - The latest-frame path can skip intermediate camera frames. An optional frame queue stores owned `GrabberFrame` values with capture timestamps; it is disabled by default and drops the oldest frame when full. The web backend does not populate this queue.
@@ -38935,7 +38935,7 @@ details.en = '''
 details.ja = '''
 - `setup(width, height)` を一度呼び、各フレームで `update()` を呼んで最新のピクセルをテクスチャへ転送します。表示には `getTexture()` または継承した `draw()` を使ってください。
 - デバイスと希望フレームレートはセットアップ前に指定します。既定値はデバイス 0、640 × 480 ピクセル、カメラの既定フレームレートです。実際のキャプチャサイズは異なる場合があります。
-- `isConnected()` は、カメラを開いている間だけ true です。OS がカメラの喪失（抜かれたこと）を報告すると、`update()` がグラバーを閉じて `onDisconnect` を 1 回発火します。`close()` では発火しません。再接続するには引数なしの `setup()` を呼びます。同じデバイスを、最後に使ったサイズで開き直します。デバイスのライフサイクルの説明（`docs/DEVICE_LIFECYCLE.md`）も参照してください。
+- `isConnected()` は、カメラを開いている間だけ true です。OS がカメラの喪失（抜かれたこと）を報告すると、`update()` がグラバーを閉じて `onDisconnect` を 1 回発火します。`close()` では発火しません。再接続するには引数なしの `setup()` を呼びます。同じデバイスを、最後に使ったサイズで開き直します。デバイスのライフサイクルの説明（`docs/architecture/DEVICE_LIFECYCLE.md`）も参照してください。
 - macOS と iOS では、カメラ権限がなければセットアップ時に要求し、許可待ちの間は `false` を返します。許可後に初期化を完了できるよう、`update()` を呼び続けてください。
 - セットアップ、更新、描画は GPU リソースを作成または更新するため、メインスレッドで実行してください。ネイティブのキャプチャコールバックはバックグラウンドでピクセルを更新します。`getPixels()` はロックせずに借用バッファを公開するため、読み取りとキャプチャの書き込みが競合する場合があります。
 - 最新フレームだけを取得する方法では、途中のカメラフレームを取りこぼす場合があります。任意のフレームキューを使うと、キャプチャ時刻付きの `GrabberFrame` を所有バッファとして保持します。既定では無効で、満杯になると最も古いフレームを破棄します。web バックエンドは、このキューにフレームを追加しません。
@@ -38944,7 +38944,7 @@ details.ja = '''
 details.ko = '''
 - `setup(width, height)`를 한 번 호출한 다음 매 프레임 `update()`를 호출하여 최신 픽셀을 텍스처에 업로드합니다. 표시에는 `getTexture()` 또는 상속받은 `draw()`를 사용합니다.
 - 장치와 원하는 프레임 레이트는 설정 전에 지정합니다. 기본값은 장치 0, 640 × 480 픽셀, 카메라의 기본 프레임 레이트입니다. 실제 캡처 크기는 다를 수 있습니다.
-- `isConnected()`는 카메라가 열려 있는 동안만 true입니다. OS가 카메라 손실(뽑힘)을 보고하면 `update()`가 그래버를 닫고 `onDisconnect`를 한 번 발생시킵니다. `close()`는 발생시키지 않습니다. 다시 연결하려면 인수 없는 `setup()`을 호출합니다. 같은 장치를 마지막으로 사용한 크기로 다시 엽니다. 장치 수명 주기 설명(`docs/DEVICE_LIFECYCLE.md`)도 참조하세요.
+- `isConnected()`는 카메라가 열려 있는 동안만 true입니다. OS가 카메라 손실(뽑힘)을 보고하면 `update()`가 그래버를 닫고 `onDisconnect`를 한 번 발생시킵니다. `close()`는 발생시키지 않습니다. 다시 연결하려면 인수 없는 `setup()`을 호출합니다. 같은 장치를 마지막으로 사용한 크기로 다시 엽니다. 장치 수명 주기 설명(`docs/architecture/DEVICE_LIFECYCLE.md`)도 참조하세요.
 - macOS와 iOS에서는 카메라 권한이 없으면 설정 시 요청하고, 권한을 기다리는 동안 `false`를 반환합니다. 허용 후 초기화를 완료할 수 있도록 `update()`를 계속 호출합니다.
 - 설정, 업데이트, 그리기는 GPU 리소스를 생성하거나 갱신하므로 메인 스레드에서 실행합니다. 네이티브 캡처 콜백은 백그라운드에서 픽셀을 갱신합니다. `getPixels()`는 잠금 없이 빌린 버퍼를 노출하므로 읽기와 캡처 쓰기가 경쟁할 수 있습니다.
 - 최신 프레임만 가져오는 경로는 중간 카메라 프레임을 놓칠 수 있습니다. 선택적인 프레임 큐는 캡처 타임스탬프가 있는 `GrabberFrame`을 자체 버퍼로 보관합니다. 기본적으로 비활성화되어 있으며 가득 차면 가장 오래된 프레임을 버립니다. web 백엔드는 이 큐에 프레임을 추가하지 않습니다.

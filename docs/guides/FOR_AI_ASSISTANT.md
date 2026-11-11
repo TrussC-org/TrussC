@@ -71,7 +71,7 @@ Argument-free Window APIs in App callbacks, owned listeners and async completion
 
 App code uses `events()`; non-App code (addons, app-wide handling) uses `runtime().events()`. Runtime owns exitRequested, deviceLost, hotReloadUnload and console. Lifecycle events notify Runtime first, then one reverse-attachment App snapshot (reload targets replacing Apps only). Quit gives every listener fresh cancel=false, ORs all vetoes, keeps the first nonempty veto reason and treats a throw as a veto while continuing. Device loss keeps its mutable cancellation behavior. Console is Runtime-only, once per subscribed slot, with subscriber ownership restored. See MIGRATION_0_8.md for `console::start()` usage.
 
-Device classes (serial ports, cameras, MIDI, depth cameras, audio devices) share one small lifecycle convention: `setup()` / `isConnected()` / `close()` / `onDisconnect`, where `onDisconnect` fires only when the OS reports the device lost. See [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md).
+Device classes (serial ports, cameras, MIDI, depth cameras, audio devices) share one small lifecycle convention: `setup()` / `isConnected()` / `close()` / `onDisconnect`, where `onDisconnect` fires only when the OS reports the device lost. See [DEVICE_LIFECYCLE.md](../architecture/DEVICE_LIFECYCLE.md).
 
 OS close asks the addressed Window's closeRequested with the same per-listener OR/throw-veto policy. On acceptance, quitOnClose/last-window process quit asks exitRequested before any closure. Either veto keeps all Windows open; both accepted use common ending. Window::close and process shutdown bypass closeRequested. App swap/destroy/reload call App::exit without a Window exit. exitApp inside App::exit or Runtime shutdown is inert; an owned Window exit listener can request normal quit while the process is still running. ImGui deadlines run in Runtime maintenance before MCP expiry, including no-draw turns.
 
@@ -957,7 +957,7 @@ This is for changes to TrussC itself (`core/include`), not app code. On Windows,
 3. **Otherwise, unsure?** Move it to a `.cpp` (e.g. `tcGlobal.cpp`) and reach it through a function, like `bool& touchAsMouse();` there. Always correct.
 4. **Only a cache of derived data, and sure** a separate copy breaks nothing? Keep it and add it to `tools/header_state_allowlist.txt` with a reason; the check's failure message prints the line to paste.
 
-Details: docs/ARCHITECTURE.md, "One instance per process".
+Details: docs/architecture/README.md, "One instance per process".
 
 ## AI Automation (MCP)
 
@@ -966,7 +966,7 @@ node-tree read/write over HTTP. In default builds, `TRUSSC_MCP=1` or
 `TRUSSC_MCP_PORT` opens only loopback health; other tools need a code grant.
 AI agents can drive and verify the running app directly. As a chat assistant you
 won't use this yourself; just know it exists so you can point users to it
-(details: docs/AI_AUTOMATION.md, agent workflows: the trussc-dev-skill repo).
+(details: docs/guides/AI_AUTOMATION.md, agent workflows: the trussc-dev-skill repo).
 
 ### Numeric image inspection
 
@@ -1478,7 +1478,7 @@ While audio is recorded, the **video PTS runs on the audio device clock** (frame
 
 ### Can an AI agent start/stop recording over MCP?
 
-Yes — dev builds (`trusscli run --mcp`) or apps granting `mcp::ToolLevel::ReadOnly` expose `tc_start_recording` and `tc_stop_recording` as standard tools (the video counterpart of `tc_save_screenshot`). `tc_start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `tc_stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/AI_AUTOMATION.md.
+Yes — dev builds (`trusscli run --mcp`) or apps granting `mcp::ToolLevel::ReadOnly` expose `tc_start_recording` and `tc_stop_recording` as standard tools (the video counterpart of `tc_save_screenshot`). `tc_start_recording` takes optional `path` (omit → timestamped file in the data dir), `duration` (fixed-length auto-stop), `fps`, and `codec`, and returns the resolved path; `tc_stop_recording` returns `{path, frames, length}` and is a no-op (not an error) when nothing is recording. See docs/guides/AI_AUTOMATION.md.
 
 ### How do I avoid a black first frame when a VideoPlayer starts?
 
@@ -1659,7 +1659,7 @@ listener_ = events().exitRequested.listen([this](ExitRequestEventArgs& e){
 ### My app crashed — how do I find where? (getting a backtrace)
 
 Outside a debugger, a crash usually leaves very little: `Segmentation fault` / exit code 139 on macOS and Linux, or an "Application Error" entry (`0xc0000005`) in the Windows Event Log. That is also all an AI agent sees when it launches the app from a shell. To get the call stack:
-- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. VS Code uses CodeLLDB on macOS / Linux and the MSVC debugger (`cppvsdbg`) on Windows. Cursor and other forks use CodeLLDB on every OS (see [GET_STARTED.md](GET_STARTED.md)).
+- **Run it under the debugger.** In VS Code / Cursor press F5: it stops at the crash and shows the stack. VS Code uses CodeLLDB on macOS / Linux and the MSVC debugger (`cppvsdbg`) on Windows. Cursor and other forks use CodeLLDB on every OS (see [GET_STARTED.md](../GET_STARTED.md)).
 - **From a terminal** (handy for agents), run the app under the debugger in batch mode so it prints the stack and exits:
   - macOS: `lldb --batch -o run -k bt -k quit -- bin/MyApp.app/Contents/MacOS/MyApp`. After a crash, lldb skips the rest of the `-o` commands and runs only the `-k` ones, so `bt` must be a `-k` command. Use `-k "thread backtrace all"` for every thread.
   - Linux: `gdb -batch -ex run -ex bt --args bin/MyApp`
@@ -1909,7 +1909,7 @@ The file writers (`saveTextFile`, `appendToFile`, `FileWriter::open`, `saveJson`
 
 Non-ASCII paths (Japanese filenames, `新しいフォルダー (2)`, spaces) work on every platform. Strings are UTF-8 everywhere in TrussC; on Windows that holds for paths because apps built through TrussC's CMake (`trussc_app()`, i.e. every generated project) embed an application manifest that sets the process code page to UTF-8. This needs Windows 10 version 1903 or later. On older Windows, or in an executable built with your own CMake setup, `fs::path(std::string)` decodes in the system code page (CP932 / CP1252) instead: convert with `utf8ToPath(str)`, or build paths from `u8"..."` / `L"..."` literals, `loadDialog()` results or `directory_iterator` entries.
 
-Allocation failure in resource-load or screenshot bookkeeping follows the normal exception policy; completion under OOM is not guaranteed. See [Asynchronous resource loading](ASYNC_LOADING.md) for handle lifetime and copy rules.
+Allocation failure in resource-load or screenshot bookkeeping follows the normal exception policy; completion under OOM is not guaranteed. See [Asynchronous resource loading](../architecture/ASYNC_LOADING.md) for handle lifetime and copy rules.
 
 
 Addons must use `pathToUtf8()` / `utf8ToPath()` for IO or display instead of `path.string()`, and `log << path` for logging; third-party narrow file IO still needs the Windows UTF-8 manifest described above.
@@ -5133,7 +5133,7 @@ World reserves Box2D's destruction-listener slot to retire owned and ownerless
 endpoints before storage reuse. Migrate raw `SetDestructionListener` registration
 to `World::setDestructionListener(b2DestructionListener*)`; the non-owning user
 delegate receives fixture callbacks after endpoint retirement, also receives
-joint callbacks, and survives clear/setup. See [tcxBox2d tests](../addons/tcxBox2d/tests/README.md) for regression
+joint callbacks, and survives clear/setup. See [tcxBox2d tests](../../addons/tcxBox2d/tests/README.md) for regression
 setups and supported delivery boundaries.
 
 ### Bundled Addons (ship with TrussC)
@@ -5205,7 +5205,7 @@ To make a repo discoverable by the registry, the GitHub repo needs:
 3. An `addon.json` at the root (even `{}` is enough to opt in)
 4. Public, not archived
 
-`addon.json` fields (all optional but recommended): `description`, `author`, `license`, `category`, `keywords`, `platforms`, `screenshot`, `demo_url`, `trussc_version`, `dependencies`. Categories are picked from a fixed set: `3d`, `ai`, `algorithms`, `animation`, `bridges`, `computer-vision`, `game`, `graphics`, `gui`, `hardware`, `machine-learning`, `network`, `physics`, `sound`, `typography`, `utilities`, `video`, `web`, `misc`. See [docs/ADDONS.md](ADDONS.md) for the full spec.
+`addon.json` fields (all optional but recommended): `description`, `author`, `license`, `category`, `keywords`, `platforms`, `screenshot`, `demo_url`, `trussc_version`, `dependencies`. Categories are picked from a fixed set: `3d`, `ai`, `algorithms`, `animation`, `bridges`, `computer-vision`, `game`, `graphics`, `gui`, `hardware`, `machine-learning`, `network`, `physics`, `sound`, `typography`, `utilities`, `video`, `web`, `misc`. See [docs/guides/ADDONS.md](ADDONS.md) for the full spec.
 
 ## Window & Input
 ```cpp
@@ -5289,7 +5289,7 @@ void confirmQuit() {
     exitApp();
 }
 ```
-See [exitExample](../examples/events/exitExample/src/tcApp.cpp) for a complete app.
+See [exitExample](../../examples/events/exitExample/src/tcApp.cpp) for a complete app.
 
 ## Sound
 
@@ -5774,7 +5774,7 @@ void tcApp::setup() {
   2. **CodeLLDB** (`vadimcn.vscode-lldb`) — Debugger (every editor)
   3. IntelliSense: **C/C++** (`ms-vscode.cpptools`) in VSCode only; **clangd** (`llvm-vs-code-extensions.vscode-clangd`) in VS Code forks (Cursor, Antigravity, VSCodium, Windsurf). The C/C++ extension refuses to run outside the official VS Code, so don't suggest it for forks, and don't install clangd next to it in VSCode.
   - If the popup doesn't appear, open Extensions panel and search for each one
-  - For a VS Code fork, generate the project with `--ide cursor` (e.g. `trusscli update --ide cursor`): its popup suggests clangd, and its `launch.json` uses CodeLLDB on every OS. This matters on Windows, where the MSVC debugger (`cppvsdbg`) that VSCode projects use is not available in forks. See [GET_STARTED.md](GET_STARTED.md).
+  - For a VS Code fork, generate the project with `--ide cursor` (e.g. `trusscli update --ide cursor`): its popup suggests clangd, and its `launch.json` uses CodeLLDB on every OS. This matters on Windows, where the MSVC debugger (`cppvsdbg`) that VSCode projects use is not available in forks. See [GET_STARTED.md](../GET_STARTED.md).
 - Build key is F5.
 - Xcode: Can build directly. The .xcodeproj file is inside the `xcode` folder within the project.
 

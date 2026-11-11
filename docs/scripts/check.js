@@ -20,12 +20,12 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const TOML = require(path.join(__dirname, '../node_modules/smol-toml'));
+const TOML = require('smol-toml');
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
 const argVal = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };
-const TOML_PATH = argVal('--toml') || path.join(__dirname, 'api-reference.toml');
+const TOML_PATH = argVal('--toml') || path.join(__dirname, '../reference/api-reference.toml');
 // Characters mean UTF-16 code units (String.length); keep equal to
 // API_NOTES_BUDGET_CHARACTERS in trussc-docs-ai/build-chunks.mjs. Check details
 // per language here; the builder caps the whole formatted notes block, including

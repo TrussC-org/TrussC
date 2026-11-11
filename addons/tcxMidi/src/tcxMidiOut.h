@@ -9,7 +9,7 @@
 //   out.openPort(0);                 // or out.openPort("Launchpad")
 //   out.sendNoteOn(1, 60, 100);      // channel 1, middle C, velocity 100
 //
-// Device lifecycle (docs/DEVICE_LIFECYCLE.md): isConnected(), setup(), close(),
+// Device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md): isConnected(), setup(), close(),
 // onDisconnect. When the OS reports the opened port removed (CoreMIDI, ALSA
 // sequencer, WinMM; not WebMIDI), the port is closed, one warning is logged and
 // onDisconnect fires once on the main thread, so a listener may call setup().

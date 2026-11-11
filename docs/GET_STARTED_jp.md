@@ -305,13 +305,13 @@ myProject/
 
 何日も何週間も無人で動かす場合（展示、サイネージなど）は、ビルドとは別にマシン側の設定が必要です。
 
-- **Windows:** [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md)（英語）で次の設定を説明しています。
+- **Windows:** [INSTALLATION_WINDOWS.md](guides/INSTALLATION_WINDOWS.md)（英語）で次の設定を説明しています。
   - Smart App Control
   - 画面を消さない設定
   - Windows Update による再起動
   - ダイアログを出さずにクラッシュダンプを残す方法
   - 自動起動と再起動
-- **Linux（Raspberry Pi などの SBC）:** 起動時の自動起動とモニタのスリープ対策は、[GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) を参照してください。
+- **Linux（Raspberry Pi などの SBC）:** 起動時の自動起動とモニタのスリープ対策は、[GET_STARTED_CONSOLE_MODE.md](guides/HEADLESS_LINUX.md) を参照してください。
 
 相手機器の電源が切れる構成では、`connectAsync()` の前に
 `client.setConnectTimeout(5)` を設定します。既定では OS の TCP 接続期限

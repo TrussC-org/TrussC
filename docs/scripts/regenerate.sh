@@ -2,7 +2,7 @@
 # Regenerate the API outputs using clang on a supported host.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD="$ROOT/docs/reference/build-regenerate"
+BUILD="$ROOT/docs/scripts/build-regenerate"
 if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --shaders-only ) ]]; then
     echo "Usage: $0 [--shaders-only]" >&2
     exit 2
@@ -13,7 +13,8 @@ python3 "$ROOT/tools/check_build_warnings.py" --run-build -- cmake -S "$ROOT/cor
 python3 "$ROOT/tools/check_build_warnings.py" --run-build -- cmake --build "$BUILD" --target TrussC_shaders_gen --config Release
 [[ "${1:-}" != --shaders-only ]] || exit 0
 
-cd "$ROOT/docs/reference"
+cd "$ROOT/docs/scripts"
+REF="$ROOT/docs/reference"
 # Keep scratch files and website outputs inside this checkout; no sibling
 # trussc.org checkout is required. A fresh structure is shared by all emitters.
 mkdir -p "$BUILD/web"
@@ -22,9 +23,9 @@ node generate.js --structure "$BUILD/structure.json" --out-md "$BUILD/API_INDEX.
 node emit-forai.js
 node emit-of.js --json "$BUILD/web/of-mapping.json"
 node emit-coverage.js
-node "$ROOT/addons/tcxLua/tools/luagen/luagen.js" reference-data.json \
+node "$ROOT/addons/tcxLua/tools/luagen/luagen.js" "$REF/reference-data.json" \
     > "$ROOT/addons/tcxLua/src/generated/trussc_generated.cpp"
-node "$ROOT/addons/tcxLua/tools/luagen-types/luagen-types.js" reference-data.json colors.json
-node ../scripts/emit-web.js --out "$BUILD/web/trussc-api.js"
-node ../scripts/emit-sketch-api.js --out "$BUILD/web/trusssketch-api.js"
-node ../scripts/emit-sketch-reference.js --out "$BUILD/web/trusssketch-ref.js"
+node "$ROOT/addons/tcxLua/tools/luagen-types/luagen-types.js" "$REF/reference-data.json" "$REF/colors.json"
+node emit-web.js --out "$BUILD/web/trussc-api.js"
+node emit-sketch-api.js --out "$BUILD/web/trusssketch-api.js"
+node emit-sketch-reference.js --out "$BUILD/web/trusssketch-ref.js"

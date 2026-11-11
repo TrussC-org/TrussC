@@ -304,7 +304,7 @@ For the Linux console framebuffer (non-X), add `consoleblank=0` to `/boot/firmwa
 
 ## See Also
 
-- [GET_STARTED.md](GET_STARTED.md) — General getting started guide
+- [GET_STARTED.md](../GET_STARTED.md) — General getting started guide
 - [BUILD_SYSTEM.md](BUILD_SYSTEM.md) — Build system details and hot reload
 - [AI_AUTOMATION.md](AI_AUTOMATION.md) — MCP mode for headless AI interaction
 - [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md) — Checklist for Windows PCs that run an app unattended

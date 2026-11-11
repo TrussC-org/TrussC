@@ -76,7 +76,7 @@ public:
     // Range metadata must declare the default 0..1 input domain. Resolve's
     // LUT_IN_VIDEO_RANGE / LUT_OUT_VIDEO_RANGE flags are unsupported.
     // OOM recovery holds in Release, or with iterator debugging off
-    // (_ITERATOR_DEBUG_LEVEL=0); see docs/ADDONS.md.
+    // (_ITERATOR_DEBUG_LEVEL=0); see docs/guides/ADDONS.md.
     bool load(const fs::path& filePath) {
         fs::path path;
         try {

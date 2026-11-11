@@ -299,7 +299,7 @@ struct DeferralState {
 // The MCP state below is one per process, so it is defined non-inline in
 // tcMCP.cpp: a hot reload guest on Windows would otherwise get its own copy of
 // each, and a tool handler it runs would defer into a DeferralState the host
-// never reads (#249; docs/ARCHITECTURE.md, "One instance per process").
+// never reads (#249; docs/architecture/README.md, "One instance per process").
 DeferralState& deferralState();
 void resetDeferralState() noexcept;
 std::function<ReplyThunk()> retainDeferredCode(std::function<ReplyThunk()>,

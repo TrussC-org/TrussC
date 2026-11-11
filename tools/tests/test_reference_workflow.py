@@ -10,7 +10,7 @@ import unittest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-OUTPUTS = ['docs/FOR_AI_ASSISTANT.md', 'docs/TrussC_vs_openFrameworks.md',
+OUTPUTS = ['docs/guides/FOR_AI_ASSISTANT.md', 'docs/guides/TrussC_vs_openFrameworks.md',
            'examples/tests/AllFeaturesExample/src/coverage_generated.cpp',
            'addons/tcxLua/src/generated/*.cpp']
 
@@ -40,9 +40,9 @@ class ReferenceWorkflowTests(unittest.TestCase):
         self.assertNotIn('if', self.job)
         steps = self.job['steps']
         runs = [step.get('run') for step in steps]
-        bootstrap = runs.index('docs/reference/regenerate.sh --shaders-only')
-        check = runs.index('node docs/reference/check.js --strict')
-        regen = runs.index('docs/reference/regenerate.sh')
+        bootstrap = runs.index('docs/scripts/regenerate.sh --shaders-only')
+        check = runs.index('node docs/scripts/check.js --strict')
+        regen = runs.index('docs/scripts/regenerate.sh')
         freshness = next(s for s in steps if s.get('id') == 'freshness')
         self.assertLess(bootstrap, check)
         self.assertLess(check, regen)
@@ -97,14 +97,15 @@ print('diff --git a/generated.cpp b/generated.cpp')
 
     @unittest.skipIf(sys.platform == 'win32', 'runs Linux workflow steps through bash')
     def test_regenerate_order_and_fail_fast(self):
-        reference = self.directory / 'docs/reference'
-        reference.mkdir(parents=True)
+        scripts = self.directory / 'docs/scripts'
+        scripts.mkdir(parents=True)
+        (self.directory / 'docs/reference').mkdir()
         (self.directory / 'addons/tcxLua/src/generated').mkdir(parents=True)
         (self.directory / 'tools').mkdir()
         for name in ('check_build_warnings.py', 'build_warning_allowlist.json'):
             (self.directory / 'tools' / name).write_bytes((ROOT / 'tools' / name).read_bytes())
-        script = reference / 'regenerate.sh'
-        script.write_text((ROOT / 'docs/reference/regenerate.sh').read_text(encoding="utf-8"), encoding="utf-8")
+        script = scripts / 'regenerate.sh'
+        script.write_text((ROOT / 'docs/scripts/regenerate.sh').read_text(encoding="utf-8"), encoding="utf-8")
         stub = '''import json, os, sys
 with open(os.environ['CALLS'], 'a', encoding='utf-8') as log:
     log.write(json.dumps([os.path.basename(sys.argv[0]), *sys.argv[1:]]) + '\\n')
@@ -170,9 +171,9 @@ for (const failure of [
     assert.equal(writes.length, 1); // probe input only, no exported AST/structure
 }
 """
-        subprocess.run(['node', '-e', runner, str(ROOT / 'docs/reference/structure.js')], check=True)
+        subprocess.run(['node', '-e', runner, str(ROOT / 'docs/scripts/structure.js')], check=True)
 
-    @unittest.skipUnless((ROOT / 'docs/node_modules').is_dir(), 'requires docs/node_modules')
+    @unittest.skipUnless((ROOT / 'docs/scripts/node_modules').is_dir(), 'requires docs/scripts/node_modules')
     def test_join_sorts_input_ids(self):
         entries = {'zzFixture': {'kind': 'func', 'name': 'zzFixture', 'signatures': []},
                    'aaFixture': {'kind': 'func', 'name': 'aaFixture', 'signatures': []}}
@@ -181,7 +182,7 @@ for (const failure of [
             structure = self.directory / 'structure.json'
             structure.write_text(json.dumps(data), encoding="utf-8")
             output = self.directory / 'reference.json'
-            subprocess.run(['node', str(ROOT / 'docs/reference/generate.js'), '--structure', str(structure),
+            subprocess.run(['node', str(ROOT / 'docs/scripts/generate.js'), '--structure', str(structure),
                             '--out-json', str(output), '--out-md', str(self.directory / 'index.md')],
                            check=True, stdout=subprocess.PIPE)
             outputs.append(output.read_bytes())
@@ -199,7 +200,7 @@ class StructureAstTests(unittest.TestCase):
         self.output = self.directory / 'structure.json'
 
     def run_structure(self, *args):
-        return subprocess.run(['node', str(ROOT / 'docs/reference/structure.js'), '--ast', str(self.ast), *args],
+        return subprocess.run(['node', str(ROOT / 'docs/scripts/structure.js'), '--ast', str(self.ast), *args],
                               capture_output=True, text=True, encoding='utf-8')
 
     def test_many_objects_and_cached_export(self):

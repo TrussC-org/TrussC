@@ -9,7 +9,7 @@ Members/types with a `platforms` annotation are wrapped in preprocessor guards.
 Regenerate on macOS from the repository root:
 
 ```bash
-docs/reference/regenerate.sh
+docs/scripts/regenerate.sh
 ```
 
 See the [reference pipeline](../../../../docs/reference/README.md) for prerequisites,

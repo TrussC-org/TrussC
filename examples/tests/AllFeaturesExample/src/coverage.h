@@ -4,7 +4,7 @@
 // AllFeaturesExample — API coverage support
 //
 // The example is CI's compile-and-link canary. coverage_generated.cpp (from
-// docs/reference/emit-coverage.js) references every documented public core API
+// docs/scripts/emit-coverage.js) references every documented public core API
 // once; coverage_manual.cpp adds what the generator can't express (templates,
 // the bundled addons). All of it sits behind af::never, a volatile flag that
 // is always false: the code is compiled and linked on every platform but never

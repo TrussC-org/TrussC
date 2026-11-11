@@ -9,7 +9,7 @@ the real headers (witness).
 Regenerate on macOS from the repository root:
 
 ```bash
-docs/reference/regenerate.sh
+docs/scripts/regenerate.sh
 ```
 
 See the [reference pipeline](../../../../docs/reference/README.md) for prerequisites,

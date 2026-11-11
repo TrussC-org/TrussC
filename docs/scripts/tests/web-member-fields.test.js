@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
-const file = path.resolve(__dirname, '../../scripts/emit-web.js');
+const file = path.resolve(__dirname, '../emit-web.js');
 const realRequire = require('node:module').createRequire(file);
 function emit(ref, yaml = '{}') {
     const ctx = {

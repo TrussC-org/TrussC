@@ -3,7 +3,7 @@
 // TC_* annotation macros — source-coupled metadata for the reference generator.
 //
 // These expand to `[[clang::annotate("tc:...")]]` under Clang, which the
-// reference structure generator (docs/reference/structure.js) reads back from
+// reference structure generator (docs/scripts/structure.js) reads back from
 // the AST to enrich a symbol with information that can't be derived from its
 // signature: which platforms it exists on, how a template should be
 // instantiated for the Lua binding, and whether it is exposed to Lua at all. (Hiding an internal-but-public symbol is

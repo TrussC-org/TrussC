@@ -37,7 +37,7 @@ When a change can take more than one reasonable shape, these rules decide it.
 
 ## 2. Tech Stack
 
-Hybrid composition of native wrappers and high-quality lightweight libraries. See [BUILD_SYSTEM.md](BUILD_SYSTEM.md) for CMake details.
+Hybrid composition of native wrappers and high-quality lightweight libraries. See [BUILD_SYSTEM.md](../guides/BUILD_SYSTEM.md) for CMake details.
 
 | Category | Library / Strategy | License |
 |:---------|:-------------------|:--------|
@@ -601,11 +601,11 @@ with `mcp::setToolLevel(mcp::ToolLevel::ReadOnly)` in `setup()` (or `Control`
 for input). In default builds `TRUSSC_MCP=1` or `TRUSSC_MCP_PORT` opens
 only the loopback health endpoint. Registration alone never starts a listener.
 
-See [AI_AUTOMATION.md](AI_AUTOMATION.md) for full reference.
+See [AI_AUTOMATION.md](../guides/AI_AUTOMATION.md) for full reference.
 
 ### G. One Instance per Process (header-inline state)
 
-A hot reload build runs the core in the **host** executable and the app (plus its addons) in a **guest** shared library ([BUILD_SYSTEM.md §7](BUILD_SYSTEM.md#7-hot-reload-development)). The guest calls TrussC functions that live in the host, but it also compiles every **header-inline** function and variable it uses into itself. Whether those copies are merged with the host's depends on the platform:
+A hot reload build runs the core in the **host** executable and the app (plus its addons) in a **guest** shared library ([BUILD_SYSTEM.md §7](../guides/BUILD_SYSTEM.md#7-hot-reload-development)). The guest calls TrussC functions that live in the host, but it also compiles every **header-inline** function and variable it uses into itself. Whether those copies are merged with the host's depends on the platform:
 
 | Platform | How the guest reaches the host | Header-inline state used by the guest |
 |---|---|---|
@@ -717,7 +717,7 @@ TrussC can be extended with addons (similar to openFrameworks' ofxAddon).
 - **Core modules** (`tc::`): Built into libTrussC, always available
 - **Addons** (`tcx::`): Optional, require `addons.make` configuration
 
-See [ADDONS.md](ADDONS.md) for details on using and creating addons.
+See [ADDONS.md](../guides/ADDONS.md) for details on using and creating addons.
 
 ---
 

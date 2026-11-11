@@ -1,7 +1,7 @@
 # Header-inline state accepted by tools/check_header_state.py (CI).
 #
 # Each entry is a function-local static or an inline variable in core/include
-# that a hot reload guest can get its own copy of (docs/ARCHITECTURE.md, "One
+# that a hot reload guest can get its own copy of (docs/architecture/README.md, "One
 # instance per process"). On WINDOWS it always does: the guest is a DLL, and a
 # DLL compiles every header-inline function and variable into itself. Linux
 # and macOS give the guest the host's copy only when the host contains the

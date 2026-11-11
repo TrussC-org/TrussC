@@ -79,7 +79,7 @@ switch**: turning it back on requires reinstalling Windows.
 
 ### Linux Dependencies
 
-> **Headless Linux (no desktop)?** See [GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) for Raspberry Pi Lite, Orange Pi, and other console-only setups.
+> **Headless Linux (no desktop)?** See [GET_STARTED_CONSOLE_MODE.md](guides/HEADLESS_LINUX.md) for Raspberry Pi Lite, Orange Pi, and other console-only setups.
 
 Linux requires additional development packages. A helper script is provided to check and install them:
 
@@ -187,7 +187,7 @@ TrussC supports browser deployment via **WebGPU** (not WebGL). To build for web:
 
 That's it!
 
-> **Tip:** Want to see code changes reflected instantly without restarting? Add `TC_HOT_RELOAD(tcApp)` to your `tcApp.cpp` and save — the app reloads automatically. See [Hot Reload](BUILD_SYSTEM.md#7-hot-reload-development) for details.
+> **Tip:** Want to see code changes reflected instantly without restarting? Add `TC_HOT_RELOAD(tcApp)` to your `tcApp.cpp` and save — the app reloads automatically. See [Hot Reload](guides/BUILD_SYSTEM.md#7-hot-reload-development) for details.
 
 ---
 
@@ -335,8 +335,8 @@ myProject/
 
 Running an app unattended for days or weeks (exhibitions, signage) needs a few machine settings beyond the build itself:
 
-- **Windows:** [INSTALLATION_WINDOWS.md](INSTALLATION_WINDOWS.md) covers Smart App Control, keeping the display on, Windows Update restarts, crash dumps without dialogs, auto-start and restart.
-- **Linux (Raspberry Pi and other SBCs):** [GET_STARTED_CONSOLE_MODE.md](GET_STARTED_CONSOLE_MODE.md) covers auto-start at boot and keeping the monitor awake.
+- **Windows:** [INSTALLATION_WINDOWS.md](guides/INSTALLATION_WINDOWS.md) covers Smart App Control, keeping the display on, Windows Update restarts, crash dumps without dialogs, auto-start and restart.
+- **Linux (Raspberry Pi and other SBCs):** [GET_STARTED_CONSOLE_MODE.md](guides/HEADLESS_LINUX.md) covers auto-start at boot and keeping the monitor awake.
 
 For a network peer that may power off, set `client.setConnectTimeout(5)` before
 using `connectAsync()`. The default keeps the OS TCP timeout (about 127 seconds

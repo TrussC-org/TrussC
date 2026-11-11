@@ -46,7 +46,7 @@
 
 | Addon | Description |
 |:------|:------------|
-| tcxInputRecorder | Possible addon: record timestamped input and replay it through input injection for **attract mode**, **repro debugging** and **regression tests**. A showcase of the [App, window and runtime](MIGRATION_0_8.md#app-window-and-runtime) architecture (案2): the Runtime / Window / App layers with per-window event routing make clean record/replay possible as an addon rather than a core feature. **Prerequisite:** a public input-injection API in core; MCP already injects via `tc_mouse_*` / `tc_key_*`, but a public C++ injection API does not exist yet. |
+| tcxInputRecorder | Possible addon: record timestamped input and replay it through input injection for **attract mode**, **repro debugging** and **regression tests**. A showcase of the [App, window and runtime](guides/MIGRATION_0_8.md#app-window-and-runtime) architecture (案2): the Runtime / Window / App layers with per-window event routing make clean record/replay possible as an addon rather than a core feature. **Prerequisite:** a public input-injection API in core; MCP already injects via `tc_mouse_*` / `tc_key_*`, but a public C++ injection API does not exist yet. |
 | tcxTimeline | Keyframe timeline editor for any `TC_REFLECT`ed property — the building blocks all exist in TrussC already (property enumeration via reflection, tcxImGui for the editor UI, JSON serialization for saving tracks). Spiritual successor to ofxTimeline / Duration (James George, developed with YCAM InterLab), which is effectively unmaintained — its users (installation / show-control / VJ work) have nowhere current to go. Also the natural showcase for the reflection system. |
 
 ---
@@ -91,7 +91,7 @@ Image processing libraries are particularly prone to vulnerabilities, so **check
 |:--------|:--------|:----------------|:------|
 | **stb_image** | Image loading | **High** | Many CVEs, always use latest |
 | **stb_image_write** | Image writing | **High** | Same as above |
-| **stb_truetype** | Font rendering | **High** | Upstream explicitly states "NO SECURITY GUARANTEE — do not use on untrusted font files". See [docs/SECURITY.md](SECURITY.md). |
+| **stb_truetype** | Font rendering | **High** | Upstream explicitly states "NO SECURITY GUARANTEE — do not use on untrusted font files". See [docs/architecture/SECURITY_NOTES.md](architecture/SECURITY_NOTES.md). |
 | **mbedTLS** (tcxTls) | TLS for tcxTls / tcxWebSocket | **High** | Track the v3.6.x LTS branch for CVE fixes. |
 | pugixml | XML parsing | Medium | |
 | nlohmann/json | JSON parsing | Medium | |

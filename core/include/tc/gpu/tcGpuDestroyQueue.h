@@ -21,7 +21,7 @@
 // This is invariant 2 of the deferred draw model. The other three (commands
 // capture inputs by value, mutable-content resources need per-frame snapshots,
 // per-frame record state is per-window) are documented together in
-// docs/ARCHITECTURE.md, section 5.D "Deferred Draw Model" — read that before
+// docs/architecture/README.md, section 5.D "Deferred Draw Model" — read that before
 // adding a new deferred draw path.
 
 // The queues are one per process, so the functions below are defined in

@@ -92,7 +92,7 @@ struct GlyphCell {
 // -----------------------------------------------------------------------------
 // Defined in tcGlobal.cpp, not inline here: app code registers glyphs and the
 // host bakes the atlas from them, so both must reach one registry, also from a
-// Windows hot reload guest DLL (docs/ARCHITECTURE.md, "One instance per
+// Windows hot reload guest DLL (docs/architecture/README.md, "One instance per
 // process").
 namespace internal {
     struct StoredGlyph {

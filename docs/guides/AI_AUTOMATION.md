@@ -294,7 +294,7 @@ The "tweak by hand, then bake" loop: the user adjusts sliders / the inspector in
 the running app → `tcx_imgui_get_touched` → write the values into the source →
 `tcx_imgui_reset_touched`.
 
-See [addons/tcxImGui/README.md](../addons/tcxImGui/README.md) for full details on available tools and setup.
+See [addons/tcxImGui/README.md](../../addons/tcxImGui/README.md) for full details on available tools and setup.
 
 ## Publishing Custom Ops Status
 

@@ -1,4 +1,4 @@
-// Run with CXX=clang++ node --test docs/reference/tests/resolved-list.test.js.
+// Run with CXX=clang++ node --test docs/scripts/tests/resolved-list.test.js.
 // Uses a tiny real clang AST, without a TrussC build or generated doc changes.
 const assert = require('node:assert/strict');
 const { test, after } = require('node:test');

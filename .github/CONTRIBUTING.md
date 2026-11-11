@@ -1,6 +1,6 @@
 # Contributing to TrussC
 
-How changes to TrussC itself are proposed, decided and merged. The rules behind the decisions are in [ARCHITECTURE.md, "How design decisions are made"](ARCHITECTURE.md#how-design-decisions-are-made).
+How changes to TrussC itself are proposed, decided and merged. The rules behind the decisions are in [ARCHITECTURE.md, "How design decisions are made"](../docs/architecture/README.md#how-design-decisions-are-made).
 
 ## Every change starts as an issue
 
@@ -50,10 +50,10 @@ On every pull request and in the merge queue (`.github/workflows/build.yml`). Th
 | `build` (macOS, Windows, Linux) | Builds trusscli and `AllFeaturesExample`, which calls every documented public core API (its `coverage_generated.cpp`). Then it builds and runs the core tests (`core/tests`). | Fix the build error or the failing test on that platform. |
 | `addon-tests` (Linux, macOS) | Builds and runs affected addons’ `tests` and `tests-*` harnesses, including `daily-only`. Network headers select tcxMidi, tcxOsc, tcxTls and tcxWebSocket; runner changes select all addons. Empty selections succeed without building. | Fix the selected addon build or test failure. |
 | `build-android`, `build-web`, `build-ios` | Builds `AllFeaturesExample` for that platform (iOS: device SDK, unsigned). | Fix the compile or link error for that platform. |
-| `reference-check` | `node docs/reference/check.js --strict`: every public symbol has an entry in `docs/reference/api-reference.toml`, with no orphans and no duplicates. | Add the missing entry (en / ja / ko), or remove the orphaned one. |
-| `header-state-check` | `python3 tools/check_header_state.py`: no new mutable state (static locals, `inline` variables, ...) in core headers outside `tools/header_state_allowlist.txt`. | Move the state to a `.cpp` behind an accessor ([ARCHITECTURE.md §5.G](ARCHITECTURE.md#g-one-instance-per-process-header-inline-state)), or add an allowlist line with its category and reason. The failure message prints the line. |
+| `reference-check` | `node docs/scripts/check.js --strict`: every public symbol has an entry in `docs/reference/api-reference.toml`, with no orphans and no duplicates. | Add the missing entry (en / ja / ko), or remove the orphaned one. |
+| `header-state-check` | `python3 tools/check_header_state.py`: no new mutable state (static locals, `inline` variables, ...) in core headers outside `tools/header_state_allowlist.txt`. | Move the state to a `.cpp` behind an accessor ([ARCHITECTURE.md §5.G](../docs/architecture/README.md#g-one-instance-per-process-header-inline-state)), or add an allowlist line with its category and reason. The failure message prints the line. |
 | `header-state-check` (second step) | `python3 tools/check_core_logging.py`: no `printf` / `cerr` / `cout` / `NSLog` in `core/include/tc` and `core/platform`, so core's messages go through the Logger (log file, `onLog`, platform log). | Log through `logNotice()` / `logWarning()` / `logError()` instead. Only the Logger's own sinks carry a `log-check: allow` marker. |
-| `header-state-check` (third step) | Offline regression tests, then `python3 tools/check_dependencies.py`: the third-party list in [LICENSE.md](LICENSE.md#third-party-libraries) matches the build. Every `FetchContent_Declare` has a row, each row's version equals the `GIT_TAG` / `URL` tag, the vendored copy's version line, or its provenance commit, and every listed path exists. Reads files only. | Update the row in `docs/LICENSE.md` (or the build) so the two agree. A new `FetchContent_Declare` or vendored library gets a row; register a vendored one's version / provenance extractor, or its path when neither is recorded. |
+| `header-state-check` (third step) | Offline regression tests, then `python3 tools/check_dependencies.py`: the third-party list in [LICENSE.md](../docs/LICENSE.md#third-party-libraries) matches the build. Every `FetchContent_Declare` has a row, each row's version equals the `GIT_TAG` / `URL` tag, the vendored copy's version line, or its provenance commit, and every listed path exists. Reads files only. | Update the row in `docs/LICENSE.md` (or the build) so the two agree. A new `FetchContent_Declare` or vendored library gets a row; register a vendored one's version / provenance extractor, or its path when neither is recorded. |
 
 Once a day on `main` (`.github/workflows/daily.yml`), the daily run builds every example (including the addon examples) on every desktop platform and on the web. It also runs the addon tests, including the `daily-only` ones, and the core tests. A failure there opens or updates a tracking issue instead of blocking a pull request.
 
@@ -74,4 +74,4 @@ python -m unittest discover -s tools/tests
 
 ## Security
 
-Don't open a public issue for a security problem. Report it privately, as described in [SECURITY.md](SECURITY.md#reporting).
+Don't open a public issue for a security problem. Report it privately, as described in [SECURITY.md](SECURITY.md#how-to-report).

@@ -43,7 +43,7 @@ Releasing a Window handle does not close it; call `close()` explicitly.
 Process-wide startup options belong in `RuntimeSettings`, passed to
 `runApp<MyApp>(windowSettings, runtimeSettings)`; `WindowSettings` configures
 window creation.
-See [App lifetimes](docs/ARCHITECTURE.md#window-handles-and-app-lifetimes) for
+See [App lifetimes](docs/architecture/README.md#window-handles-and-app-lifetimes) for
 closing, replacement and shutdown rules.
 
 ### Minimal Code
@@ -92,7 +92,7 @@ Source code is available in the `examples/` directory.
 
 Comprehensive API reference is available at **[trussc.org/reference](https://trussc.org/reference/)**.
 
-For AI coding assistants, [docs/FOR_AI_ASSISTANT.md](docs/FOR_AI_ASSISTANT.md) carries an auto-generated C++ API index.
+For AI coding assistants, [docs/guides/FOR_AI_ASSISTANT.md](docs/guides/FOR_AI_ASSISTANT.md) carries an auto-generated C++ API index.
 
 ## Why TAU?
 
@@ -154,12 +154,12 @@ src/                  # Platform-specific implementations
 - [GET_STARTED.md](docs/GET_STARTED.md) - Getting started guide
 - [API Reference](https://trussc.org/reference/) - Full API reference (web)
 - [Docs search MCP (beta)](docs/GET_STARTED.md#docs-search-for-your-own-ai-mcp-beta) - Let your AI search the TrussC docs at `https://api.trussc.org/mcp`
-- [TrussC_vs_openFrameworks.md](docs/TrussC_vs_openFrameworks.md) - API mapping for oF users
-- [ADDONS.md](docs/ADDONS.md) - How to use addons
-- [AI_AUTOMATION.md](docs/AI_AUTOMATION.md) - MCP Integration & Automation
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - Design philosophy and architecture
-- [CONTRIBUTING.md](docs/CONTRIBUTING.md) - How changes are proposed, decided and merged
-- [BUILD_SYSTEM.md](docs/BUILD_SYSTEM.md) - CMake build system details
+- [TrussC_vs_openFrameworks.md](docs/guides/TrussC_vs_openFrameworks.md) - API mapping for oF users
+- [ADDONS.md](docs/guides/ADDONS.md) - How to use addons
+- [AI_AUTOMATION.md](docs/guides/AI_AUTOMATION.md) - MCP Integration & Automation
+- [ARCHITECTURE.md](docs/architecture/README.md) - Design philosophy and architecture
+- [CONTRIBUTING.md](.github/CONTRIBUTING.md) - How changes are proposed, decided and merged
+- [BUILD_SYSTEM.md](docs/guides/BUILD_SYSTEM.md) - CMake build system details
 - [ROADMAP.md](docs/ROADMAP.md) - Development roadmap
 
 ## Support

@@ -63,7 +63,7 @@ Runtime owns open Windows and their App attachments. Apps are constructed by
 creates a fresh App. Releasing an external Window handle does not close it.
 Close, replacement, removal and shutdown use the same normal App ending:
 detach, call `exit()` once, disconnect audio and wait, then call `cleanup()`.
-See [App lifetimes](ARCHITECTURE.md#window-handles-and-app-lifetimes).
+See [App lifetimes](../architecture/README.md#window-handles-and-app-lifetimes).
 
 Inside an App, Window helpers such as `setWindowPosition()`, `getWindowTitle()`
 and `isWindowOccluded()` use that App's Window. Outside an App, they require

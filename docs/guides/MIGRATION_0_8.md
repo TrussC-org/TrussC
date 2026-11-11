@@ -83,7 +83,7 @@ exitApp(3);      // with an exit code
 ### Quitting can be canceled, and each window can refuse to close
 
 - `exitApp()` now asks `exitRequested` first, so a listener can cancel it. In v0.7.7 it could not be canceled. The exit code you pass is kept even if a listener cancels the quit.
-- A common pattern is "show a confirm dialog, then call `exitApp()`". That call asks `exitRequested` again, so remember that the user already said yes, as `quitConfirmed_` does in [exitExample](../examples/events/exitExample/src/tcApp.cpp).
+- A common pattern is "show a confirm dialog, then call `exitApp()`". That call asks `exitRequested` again, so remember that the user already said yes, as `quitConfirmed_` does in [exitExample](../../examples/events/exitExample/src/tcApp.cpp).
 - Every listener now gets its own `cancel = false` and the answers are combined: if any listener cancels, the quit is canceled. A listener can no longer undo an earlier listener's cancel by setting `cancel = false`. A listener that throws counts as a cancel. Only the quit request keeps the first non-empty `reason`.
 - New: each window has `closeRequested` (`CloseRequestEventArgs`, one field, `cancel`). It is asked when the user closes that window from the OS, for example with the × button.
 
@@ -635,7 +635,7 @@ Some sounds whose format changes partway through now fail to load instead of pla
 
 ## Devices
 
-`Serial`, `VideoGrabber`, `DepthCamera`, `MidiIn`/`MidiOut`, `AudioEngine` and `MicInput` now share one small surface, described in [DEVICE_LIFECYCLE.md](DEVICE_LIFECYCLE.md):
+`Serial`, `VideoGrabber`, `DepthCamera`, `MidiIn`/`MidiOut`, `AudioEngine` and `MicInput` now share one small surface, described in [DEVICE_LIFECYCLE.md](../architecture/DEVICE_LIFECYCLE.md):
 
 - `setup(...)` opens a device; `setup()` with no arguments opens it again;
 - `isConnected()` tells you whether it is open;
@@ -739,7 +739,7 @@ Everything that compiled before still compiles. The changes are new functions pl
   ```
 
 - **New: `engine.onDisconnect`.** It fires once, on the main thread on the runtime's next turn, when the OS or the audio library reports that a running output device opened by name (`AudioSettings::deviceName`) stopped by itself, for example a USB audio interface unplugged or a Bluetooth headset switched off. The device is closed first, and `isConnected()` is already `false`; to keep playing on the system default, call `setup()` inside the listener. A device opened as the system default follows the OS default and never reports a loss. `close()`, `shutdown()` and setting the engine up again never fire it. Whether a stop is reported depends on the OS; where the backend says nothing, the audio stops and `isConnected()` stays `true`.
-- **New: `engine.setup()` and `engine.setup(settings)`** are other names for `init()` and `init(settings)`. They open the system default device, and keep the last sample rate, channel count, buffer size and polyphony. They do not keep `AudioSettings::deviceName` or `backend`. To use a specific device, pass `AudioSettings` with `deviceName` each time. This holds for every reopen: after `close()`, after the OS stopped the device, and from `Sound::load*()`, which calls `init()` while the engine is not connected. See [audioDeviceExample](../examples/sound/audioDeviceExample/src/tcApp.cpp) for choosing a device by name with `AudioEngine::listDevices()`.
+- **New: `engine.setup()` and `engine.setup(settings)`** are other names for `init()` and `init(settings)`. They open the system default device, and keep the last sample rate, channel count, buffer size and polyphony. They do not keep `AudioSettings::deviceName` or `backend`. To use a specific device, pass `AudioSettings` with `deviceName` each time. This holds for every reopen: after `close()`, after the OS stopped the device, and from `Sound::load*()`, which calls `init()` while the engine is not connected. See [audioDeviceExample](../../examples/sound/audioDeviceExample/src/tcApp.cpp) for choosing a device by name with `AudioEngine::listDevices()`.
 - **New: `engine.isConnected()` and `engine.close()`.** `isInitialized()` and `shutdown()` stay as other names for them.
 - **New: `MicInput` has `setup()`, `isConnected()`, `close()` and `onDisconnect`.** `setup()` is `start()` at the sample rate of the last start. The microphone is always the system default capture device. `isConnected()` is `isRunning()`, and `close()` is `stop()`. `isRunning()` also turns `false` when the OS stops the capture device, which on Windows includes a change of the default microphone; call `setup()` in the `onDisconnect` listener to reopen the default microphone. The web reports no loss.
 
@@ -859,7 +859,7 @@ ws.setMaxMessageSize(256 * 1024 * 1024);   // if your server sends larger messag
   ```
 
 - **User data is reserved.** TrussC uses the `b2Body` user data and the fixture user data. Put your own data in your `Body` subclass.
-- **Contact events moved.** Begin and End now run after each sub-step that TrussC runs, in Box2D's order, instead of inside `Step`. Stay runs once per `update()`. Events from a raw `b2World::Step()` wait for the next `World::update()` of a new frame. See the [addon event contract](../addons/tcxBox2d/README.md#collision-events).
+- **Contact events moved.** Begin and End now run after each sub-step that TrussC runs, in Box2D's order, instead of inside `Step`. Stay runs once per `update()`. Events from a raw `b2World::Step()` wait for the next `World::update()` of a new frame. See the [addon event contract](../../addons/tcxBox2d/README.md#collision-events).
 - **Destroying inside a listener.** Listeners may destroy bodies or the World, so check borrowed pointers from the event again after releasing anything. Move the cleanup for the destroyed side of an Exit before you release it; the surviving side receives Exit with a null counterpart.
 - **Destroy TrussC bodies through TrussC.** Bodies owned by a TrussC `Body` or `RigidBody2D` are destroyed with `Body::destroy()`, by removing the Mod, or with `World::clear()`. Do not call `b2World::DestroyBody` or `DestroyFixture` on them. Raw destroys of bodies you created yourself are tracked while the body still has fixtures (through the destruction listener). If you remove a body's last fixture and then the body, with no `update()` in between, that destroy is not tracked.
 - Register your own destruction listener through `World::setDestructionListener()`, so TrussC's internal one keeps working.
@@ -976,7 +976,7 @@ add_dependencies(myTool myApp_shaders_gen)
 
 You do not need these to upgrade.
 
-- **Loading in the background:** `Image::loadAsync()`, `SoundBuffer::loadAsync()` and `Font::loadAsync()`, with `onLoad` on a later frame. Canceling never waits. `setResourceLoadConcurrency()` / `getResourceLoadConcurrency()` set how many loads prepare at once (4 by default). See [ASYNC_LOADING.md](ASYNC_LOADING.md).
+- **Loading in the background:** `Image::loadAsync()`, `SoundBuffer::loadAsync()` and `Font::loadAsync()`, with `onLoad` on a later frame. Canceling never waits. `setResourceLoadConcurrency()` / `getResourceLoadConcurrency()` set how many loads prepare at once (4 by default). See [ASYNC_LOADING.md](../architecture/ASYNC_LOADING.md).
 - **Screenshots and microphone without blocking:** `saveScreenshotAsync()` with `onScreenshotSave()`, and `MicInput::startAsync()` with `onStart` and `isStarting()`.
 - **Windows and quitting:** `closeRequested` and `occludedChanged` events, `WindowSettings::setQuitOnClose()` and `Window::setQuitOnClose()`, `Window::destroyApp()`, `runtime().setLogoutTimeout()`, `Window::setIndependentFps()`.
 - **Runtime settings:** `RuntimeSettings` and `runApp<T>(windowSettings, runtimeSettings)`.

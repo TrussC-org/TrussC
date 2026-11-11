@@ -18,7 +18,7 @@
 //
 // When adding a new global singleton accessor, define it here (or in a
 // sibling .cpp) rather than inline in a header. tools/check_header_state.py
-// (run in CI) fails on new header-inline state; docs/ARCHITECTURE.md, "One
+// (run in CI) fails on new header-inline state; docs/architecture/README.md, "One
 // instance per process", has the rule and the reasons.
 // =============================================================================
 

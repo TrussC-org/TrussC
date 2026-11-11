@@ -43,7 +43,7 @@
 // ---------------------------------------------------------------------------
 // The Node tree is owned by the main thread; mutating its structure from another
 // thread is a data race on children_ (it crashes — see runOnMainThread() and the
-// threading section of SECURITY.md). In debug builds the structural mutators
+// threading section of docs/architecture/SECURITY_NOTES.md). In debug builds the structural mutators
 // assert they run on the main thread, so the bug is caught at its source. In
 // release (NDEBUG) this compiles to nothing — zero cost. destroy() is exempt: it
 // only flips an atomic flag and is deliberately safe from any thread.

@@ -175,7 +175,7 @@ enum class TextureWrap {
 // The state behind the accessors below is defined in tcGlobal.cpp, not inline
 // here: host code (the frame loop, RenderContext) and app code both use it, and
 // a Windows hot reload guest DLL would get its own copy of an inline variable
-// (docs/ARCHITECTURE.md, "One instance per process").
+// (docs/architecture/README.md, "One instance per process").
 namespace internal {
     // Shared frame-end tail for drawn and non-drawing ticks (#332).
     void endGpuFrame();

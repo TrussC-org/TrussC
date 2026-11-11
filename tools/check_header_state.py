@@ -12,7 +12,7 @@ contains too, i.e. state host code uses; state only guest code touches is the
 guest's own there as well (on Linux, a fresh copy per reloaded generation).
 So a split between host and guest shows only on Windows, and only at run
 time. State that must be one per process therefore lives non-inline in a .cpp
-(docs/ARCHITECTURE.md, "One instance per process").
+(docs/architecture/README.md, "One instance per process").
 
 What is flagged, in core/include (vendored libraries excluded):
   - a `static` / `thread_local` local variable inside a function body
@@ -1222,7 +1222,7 @@ def failure_message(new, problems):
         if new:
             out.append("")
         out += problems
-    out += ["", "More: docs/ARCHITECTURE.md, \"One instance per process\"."]
+    out += ["", "More: docs/architecture/README.md, \"One instance per process\"."]
     return out
 
 
@@ -1259,8 +1259,8 @@ def message_self_test():
             errors.append(f"failure message: category '{c}' is not listed")
     if not any("wrong move" in ln for ln in lines):
         errors.append("failure message: must say that picking a category without being sure is wrong")
-    if "docs/ARCHITECTURE.md" not in lines[-1]:
-        errors.append("failure message: must end with the pointer to docs/ARCHITECTURE.md")
+    if "docs/architecture/README.md" not in lines[-1]:
+        errors.append("failure message: must end with the pointer to docs/architecture/README.md")
     with open(GLOBAL_CPP, encoding="utf-8") as g:
         if EXAMPLE_CPP not in g.read():
             errors.append(f"failure message: its example, {EXAMPLE_CPP} in tcGlobal.cpp, is gone: "

@@ -21,9 +21,9 @@ const path = require('path');
 
 const argv = process.argv.slice(2);
 const argVal = (f, d) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : d; };
-const DATA = argVal('--data', path.join(__dirname, 'reference-data.json'));
+const DATA = argVal('--data', path.join(__dirname, '../reference/reference-data.json'));
 const OUT_JSON = argVal('--json', path.join(__dirname, '../../../trussc.org/generated/of-mapping.json'));
-const OUT_MD = argVal('--md', path.join(__dirname, '../TrussC_vs_openFrameworks.md'));
+const OUT_MD = argVal('--md', path.join(__dirname, '../guides/TrussC_vs_openFrameworks.md'));
 const START = '<!-- AUTO-GENERATED-START -->';
 const END = '<!-- AUTO-GENERATED-END -->';
 

@@ -772,7 +772,7 @@ All modifications by tettou771
   After idle cleanup, Runtime closes the Logger file sink and flushes stdout /
   stderr before terminal process exit. Busy termination does not flush sinks.
 - Shared runtime signal handling, Logger markers and MCP drain semantics are
-  documented in [EXIT_PROTOCOL.md](../../../docs/EXIT_PROTOCOL.md).
+  documented in [EXIT_PROTOCOL.md](../../../docs/architecture/EXIT_PROTOCOL.md).
 
 ## Mesa V3D pre-resolve submission and activation Notice (#858)
 

@@ -10,30 +10,6 @@ URL, or network input from outside your own build.
 
 ---
 
-## Security policy
-
-### Supported versions
-
-Security fixes go to the latest minor release line only. For example, once
-v0.8.0 is out, fixes ship as v0.8.x releases; older lines such as v0.7.x do
-not get them.
-
-### How to report
-
-Report security issues privately through the repository's **Security** tab:
-choose **Report a vulnerability** (GitHub's private vulnerability reporting).
-Please do not open public issues for security bugs.
-
-### What happens next
-
-- You get a first reply within **7 days**.
-- We fix the issue and ship it in a release.
-- We publish a GitHub Security Advisory and, where it applies, request a CVE
-  ID through GitHub.
-- We credit you in the advisory, unless you ask us not to.
-
----
-
 ## Untrusted input — what is and isn't safe
 
 TrussC's parsers and loaders fall into three tiers. Your application's threat
@@ -138,7 +114,7 @@ Never ship `setVerifyNone()` to end users — it silently allows MITM.
 ### Upstream mbedTLS version
 
 `tcxTls` pins mbedTLS to the v3.6.x LTS branch via FetchContent. When bumping
-to a newer patch release, also update its row in [LICENSE.md](LICENSE.md#third-party-libraries) (the one
+to a newer patch release, also update its row in [LICENSE.md](../LICENSE.md#third-party-libraries) (the one
 list of third-party versions; `tools/check_dependencies.py` checks it in CI).
 
 ---
@@ -175,7 +151,7 @@ Not adversarial-input related, but a memory-safety pitfall worth knowing: the
 worker thread — most commonly inside a network `onReceive` handler, which fires
 on the receive thread — is a data race that crashes. Use `runOnMainThread(...)`
 or an `Event` listener registered with `Deliver::Main`. See
-[ARCHITECTURE.md → 5.E Threading](ARCHITECTURE.md#e-threading) for the full
+[ARCHITECTURE.md → 5.E Threading](README.md#e-threading) for the full
 contract (which callbacks run off the main thread, the safe patterns, and the
 debug-only main-thread assert).
 
@@ -183,4 +159,4 @@ debug-only main-thread assert).
 
 ## Reporting
 
-See [Security policy](#security-policy) at the top of this page.
+See the [security policy](../../.github/SECURITY.md) for supported versions and how to report a vulnerability.

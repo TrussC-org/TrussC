@@ -692,8 +692,8 @@ after each managed sub-step; Stay runs once per update. Raw `b2World::Step()`
 events wait for the next fresh-frame `World::update()`. Listeners may release
 bodies or the World; recheck borrowed payload pointers after release.
 The classic alternative uses `CircleBody`, `RectBody` and `PolyShape` body nodes.
-See the [addon README](../addons/tcxBox2d/README.md) for shapes and the
-[collision event contract](../addons/tcxBox2d/README.md#collision-events).
+See the [addon README](../../addons/tcxBox2d/README.md) for shapes and the
+[collision event contract](../../addons/tcxBox2d/README.md#collision-events).
 
 b2Body user data is reserved by TrussC; put application data in your Body subclass. Fixture user data is reserved too.
 
@@ -730,7 +730,7 @@ BC support (Hap1 and Hap Q playback checked on an iPhone 16 in the #645
 experiment). Where BC is not supported, for example on the Simulator, loading
 fails cleanly with `Compressed texture format not supported on this GPU`,
 without a crash. See
-[tcxHap GPU requirements](../addons/tcxHap/README.md#gpu-requirements).
+[tcxHap GPU requirements](../../addons/tcxHap/README.md#gpu-requirements).
 
 `HapPlayer::load()` resolves relative paths against the data folder via
 `getDataPath()`, like `VideoPlayer::load()`. Absolute paths pass through;
@@ -809,7 +809,7 @@ TLS/SSL communication support (mbedTLS).
 
 **Features:**
 - Secure TCP communication
-- Server certificate verification **required by default** (see [SECURITY.md](SECURITY.md))
+- Server certificate verification **required by default** (see [SECURITY_NOTES.md](../architecture/SECURITY_NOTES.md))
 - Custom CA bundle via `setCACertificate()` / `setCACertificateFile()`
 - Dev-only opt-out via `setVerifyNone()` (don't ship)
 - TCP connect deadline: `setConnectTimeout(seconds)`, inherited from
@@ -828,7 +828,7 @@ WebSocket client and server.
 - Text and binary messages
 - For `wss://`: TLS cert verification **on by default**. Use
   `setTlsVerifyNone()` or `setTlsCACertificate(pem)` on the client if needed
-  (see [SECURITY.md](SECURITY.md))
+  (see [SECURITY_NOTES.md](../architecture/SECURITY_NOTES.md))
 - TCP connect deadline: `setConnectTimeout(seconds)` (default `0` = the OS
   deadline; applies from the next connect), passed to the TCP/TLS transport
 - Handshake deadline: `setHandshakeTimeout(seconds)` (default 15 s), one
