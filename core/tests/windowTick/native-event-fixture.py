@@ -1,6 +1,16 @@
 """SDK-free production visibility and XI2 construction used by the linked converter probe."""
 from pathlib import Path
 import re
+import runpy
+
+FixtureBodies = runpy.run_path(str(Path(__file__).with_name('native-fixture-helpers.py')))['FixtureBodies']
+
+# OS/pacing seams replaced by this visibility and packet-conversion fixture.
+STUBS = (
+    '_sapp_tc_lookup', '_sapp_tc_send_type', '_sapp_tc_mac_select_source',
+    '_sapp_tc_win32_app_event', '_sapp_tc_x11_app_event',
+    '_sapp_tc_x11_get_window_state', '_sapp_tc_x11_update_pacer', '_sapp_tc_x11_mods',
+)
 
 
 def body(source, marker):
@@ -23,6 +33,7 @@ def definition(source, name):
 
 
 def generate(source):
+    body = FixtureBodies(globals()['body'])
     shared = (Path(__file__).resolve().parents[2] / 'include/sokol/util/sokol_window_native.h').read_text(encoding='utf-8')
     helpers = ''.join(body(shared, 'static inline bool ' + name + '(') for name in
                       ('_sapp_tc_native_iconified', '_sapp_tc_native_occluded', '_sapp_tc_native_hidden'))
@@ -56,7 +67,7 @@ Record* _sapp_tc_lookup(sapp_window h){return live&&live->win_id==h.id?live:null
 void _sapp_tc_send_type(Record* w,sapp_event_type type){w->send(type);}
 void _sapp_tc_mac_select_source(Record*){}
 ''' + declaration(source, '_sapp_tc_mac_observe') + body(source, 'static _sapp_tc_window_t* _sapp_tc_mac_live(') + body(source, 'static void _sapp_tc_mac_update_suspension(')
-    observation = definition(source, '_sapp_tc_mac_observe')
+    observation = body.record(definition(source, '_sapp_tc_mac_observe'))
     code += observation.replace('w->window.occlusionState', 'w->window->occlusionState').replace('w->window.miniaturized', 'w->window->miniaturized')
     for name, cpp in [('Miniaturize', 'minimize'), ('Deminiaturize', 'restore')]:
         marker = '- (void)windowDid' + name + ':(NSNotification*)n'
@@ -88,6 +99,8 @@ struct Event{struct{int state=PropertyNewValue,atom=1;}xproperty;struct{int stat
 struct{int WM_STATE=1;}_sapp_tc;
 int state=NormalState;
 int _sapp_tc_x11_get_window_state(Record*){return state;}
+// Visibility delivery ignores pacing; this fixture owns no presentation source.
+Record* _sapp_tc_x11_update_pacer(){return nullptr;}
 void minimize(Record* w,bool iconic){state=iconic?IconicState:NormalState;Event input{};auto* ev=&input;
 ''' + body(source, 'if (w && w->trust_hidden_signals && (ev->xproperty.state == PropertyNewValue) &&') + r'''}
 void cover(Record* w,bool covered){Event input{};input.xvisibility.state=covered?VisibilityFullyObscured:VisibilityUnobscured;auto* ev=&input;
@@ -128,4 +141,5 @@ void motion(Record& w,double dx,double dy){
 }
 }
 '''
-    return code
+    return body.check(code, fixture='native-event-fixture', stubs=STUBS,
+                      declarations=('_sapp_tc_deliver_event',))  # sokol_window_event.h

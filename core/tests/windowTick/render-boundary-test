@@ -12,9 +12,19 @@ flags = []
 build = Path(os.environ.get('TC_RENDER_TEST_BUILD', root/'core/build-linux'))
 for line in (build/'CMakeFiles/TrussC.dir/flags.make').read_text(encoding='utf-8').splitlines():
     if line.startswith(('CXX_DEFINES =','CXX_INCLUDES =')): flags += shlex.split(line.split('=',1)[1])
-link = shlex.split((root/'core/tests/allCoreTests/build-linux/CMakeFiles/allCoreTests.dir/link.txt').read_text(encoding='utf-8'))
+link_build = root/'core/tests/allCoreTests/build-linux'
+link = shlex.split((link_build/'CMakeFiles/allCoreTests.dir/link.txt').read_text(encoding='utf-8'))
 libs = link[link.index('-o')+2:]
 libs = [x for x in libs if not x.endswith('.o') and x != '-Wl,--wrap=malloc']
+# CMake's relative archives are relative to the original link directory.
+libs = [str(link_build/x) if not x.startswith('-') and not Path(x).is_absolute() else x for x in libs]
+# The core sweep configures addons but may not have built this archive yet.
+# Inherit tcbuild.sh's parallel limit when this harness is run through it.
+if any(x.endswith('libtcxImGui.a') and not (root/x).exists() for x in libs):
+    print('render-boundary: building required tcxImGui archive', flush=True)
+    subprocess.run(['cmake', '--build', str(link_build),
+                    '--target', 'tcxImGui', '--parallel',
+                    os.environ.get('CMAKE_BUILD_PARALLEL_LEVEL', '4')], check=True)
 if os.environ.get('TC_RENDER_TEST_ARCHIVE'):
     libs = [os.environ['TC_RENDER_TEST_ARCHIVE'] if x.endswith('libTrussC.a') else x for x in libs]
 if '-DSOKOL_GLES3' in flags:

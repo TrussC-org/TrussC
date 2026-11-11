@@ -1,0 +1,42 @@
+# Linked windowTick harnesses
+
+`event-converter-test`, `host-entry-test`, and `render-boundary-test` are
+local-only regression checks. Run them from the repository root through the
+local build guard, after building the core tests:
+
+```sh
+TCBUILD=/path/to/tcbuild.sh
+"$TCBUILD" build_all --core-tests-only
+"$TCBUILD" sh -ec '
+  core/tests/windowTick/event-converter-test
+  core/tests/windowTick/host-entry-test
+  core/tests/windowTick/render-boundary-test
+'
+```
+
+They use the generated compiler/link metadata in
+`core/tests/allCoreTests/build-linux` and the core library in `core/build-linux`.
+The render harness resolves archives relative to that link metadata and builds
+the `tcxImGui` target there if its required archive is missing. Build, compile,
+link, and assertion failures return a nonzero status.
+
+These Linux checks need a C++20 compiler and the normal TrussC development
+libraries, plus EGL and Mesa software rendering. They need no display server:
+the render harness uses surfaceless EGL, and the other two use deterministic
+native fixtures. Their copied macOS and Windows code runs against recording
+structs rather than those operating systems.
+
+On November 11, 2026, a sequential run with the prerequisites built and a warm
+shared ccache took 57.68 s (events), 50.98 s (host entry), and 12.22 s (render),
+120.88 s total. That exceeded the two-minute CI budget, so these checks remain
+local-only. The linked probes invoke the compiler directly; CMake's ccache
+launcher applies to prerequisite builds.
+
+The fixture generators list their stub and header dependencies explicitly.
+An unknown `_sapp_tc_*` helper fails generation with its name; copy its
+production body or add a deliberate replacement to the appropriate list.
+The dependency checker has offline regression checks:
+
+```sh
+python3 tools/tests/test_window_tick_harnesses.py -v
+```
