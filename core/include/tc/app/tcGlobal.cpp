@@ -772,10 +772,18 @@ void RenderTarget::flushLayers() {
     const auto err = sgl_context_error(resources().context);
     const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
     prepareDeferredShaderDraws(deferredShaderDraws);
+    bool appliedScissor = false;
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
-        for (auto& draw : deferredShaderDraws)
-            if (draw.layerId == layer) executeDeferredShaderDraw(draw);
+        for (auto& draw : deferredShaderDraws) {
+            if (draw.layerId != layer) continue;
+            if (draw.scissor) {
+                const auto& clip = *draw.scissor;
+                sg_apply_scissor_rectf(clip[0], clip[1], clip[2], clip[3], true);
+                appliedScissor = true;
+            }
+            executeDeferredShaderDraw(draw);
+        }
         for (auto& draw : deferredPbrDraws)
             if (draw.layerId == layer) getPbrPipeline().executePbrDraw(draw.cmd);
         for (auto& draw : deferredPointDraws)
@@ -784,6 +792,13 @@ void RenderTarget::flushLayers() {
     deferredShaderDraws.clear();
     deferredPbrDraws.clear();
     deferredPointDraws.clear();
+    // Replay used draw-time clips; subsequent direct drawing uses the current
+    // CPU state, including a popScissor recorded after the last raw draw.
+    if (appliedScissor) {
+        const auto& clip = currentScissor;
+        sg_apply_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
+                              clip.active ? clip.w : float(width), clip.active ? clip.h : float(height), true);
+    }
     // Shader::begin reserved a screen layer. Keep that reservation even when
     // all preceding commands have been consumed, until its owning scope closes.
     if (!openShaderScopes) sglLayerNext = 0;

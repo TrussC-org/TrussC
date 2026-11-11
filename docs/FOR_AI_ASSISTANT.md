@@ -301,8 +301,8 @@ scope. The current view/projection is applied once at draw time. `draw()` keeps 
 `draw(transform)` applies an extra uniform transform. `setAlignToInk(true)` centers
 independent glyphs on `Font::getGlyphInkBox(codepoint)` (logical pixels, baseline
 relative; half-size is width/2, height/2). String adds use Font layout. Output is
-straight alpha; colors keep float RGB. Blend is taken at draw time. Pages draw in
-first-add order, with add order inside each page; interleaved pages are grouped.
+straight alpha; colors keep float RGB. Blend and scissor are captured at draw time. Glyphs draw in add order, with one
+draw per consecutive run on the same atlas page (A/B/A uses three draws).
 
 #### Extending drawBitmapString
 ASCII is built in. Apps / addons register additional glyphs for any
@@ -3221,7 +3221,7 @@ void FullscreenShader::draw()  // Draws a fullscreen quad with this shader.
 void FullscreenShader::setParams(const T & params)  // Sets the uniform parameter block for fullscreen drawing.
 ```
 
-### GlyphBatch — Retains transformed glyph quads for repeated drawing with one draw per atlas page.
+### GlyphBatch — Retains transformed glyph quads for repeated drawing in add order, batching consecutive glyphs on the same atlas page.
 
 ```cpp
 void GlyphBatch::add(uint32_t codepoint, const Color & color) [+2]  // Appends colored glyph quads at the current matrix or an explicit model matrix.

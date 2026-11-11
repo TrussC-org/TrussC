@@ -10,8 +10,8 @@ sg_shader glyphBatchShader();
 }
 
 // Retained glyph quads. Record model transforms; draw applies the active camera
-// view/projection once. The current model is not applied again. Pages are
-// submitted in first-add order, with glyph order preserved within each page.
+// view/projection once. The current model is not applied again. Consecutive
+// glyphs sharing an atlas page form one draw, preserving add order.
 class GlyphBatch {
 public:
     GlyphBatch() = default;
@@ -69,7 +69,7 @@ public:
 
     void draw() { draw(Mat4::identity()); }
     void draw(const Mat4& transform) {
-        if (pages_.empty() || !sg_isvalid()) return;
+        if (runs_.empty() || !sg_isvalid()) return;
         auto* target = internal::drawingApiTarget();
         if (!target || !font_.atlasManager_) return;
         font_.initResources();
@@ -89,7 +89,7 @@ public:
         const auto pipeline = target->pipeline(internal::PipelineKey::raw(internal::PipelineRole::GlyphBatch, recipe));
         if (!pipeline.raw.id) return;
         const Mat4 mvp = (target->camera.currentProjectionMatrix * target->camera.currentViewMatrix * transform).transposed();
-        for (auto& page : pages_) {
+        for (auto& page : runs_) {
             if (!page.upload()) continue;
             if (page.atlasIndex >= font_.atlasManager_->getAtlasCount()) continue;
             const auto& atlas = font_.atlasManager_->getAtlas(page.atlasIndex);
@@ -99,6 +99,10 @@ public:
             params.atlas[1] = 1.0f / atlas.getHeight();
             params.atlas[2] = (blend == BlendMode::Screen || blend == BlendMode::Multiply) ? 1.0f : 0.0f;
             internal::DeferredShaderDraw command;
+            const auto& clip = target->currentScissor;
+            command.scissor = {clip.active ? clip.x : 0, clip.active ? clip.y : 0,
+                               clip.active ? clip.w : float(target->width),
+                               clip.active ? clip.h : float(target->height)};
             command.pipeline = pipeline.raw;
             command.pipelineGeneration = pipeline.generation;
             command.vertexCount = static_cast<int>(page.indices.size()); // indexed sg_draw count
@@ -113,7 +117,7 @@ public:
                 target->advanceLayer();
         }
     }
-    void clear() { pages_.clear(); }
+    void clear() { runs_.clear(); }
 
 private:
     struct Vertex { Vec4 position; Vec2 texcoord; Color color; };
@@ -124,7 +128,7 @@ private:
             internal::deferGpuDestroy(indices);
         }
     };
-    struct Page {
+    struct Run {
         size_t atlasIndex;
         std::vector<Vertex> vertices;
         std::vector<uint32_t> indices;
@@ -160,9 +164,9 @@ private:
         const auto* glyph = font_.atlasManager_->getOrLoadGlyph(placed.codepoint);
         if (!glyph || !glyph->isValid() || glyph->getWidth() <= 0 || glyph->getHeight() <= 0) return;
         const size_t index = glyph->getAtlasIndex();
-        auto it = std::find_if(pages_.begin(), pages_.end(), [index](const Page& p) { return p.atlasIndex == index; });
-        if (it == pages_.end()) { pages_.push_back(Page{index, {}, {}, {}, true}); it = pages_.end() - 1; }
-        auto& page = *it;
+        if (runs_.empty() || runs_.back().atlasIndex != index)
+            runs_.push_back(Run{index, {}, {}, {}, true});
+        auto& page = runs_.back();
         const auto& atlas = font_.atlasManager_->getAtlas(index);
         const float s = 1.0f / font_.dpiScale_;
         const float x = placed.drawX + glyph->getXoff() * s * placed.scaleX;
@@ -185,7 +189,7 @@ private:
         page.dirty = true;
     }
     Font font_;
-    std::vector<Page> pages_;
+    std::vector<Run> runs_;
     Direction alignH_ = Direction::Left;
     Direction alignV_ = Direction::Top;
     bool alignToInk_ = false;

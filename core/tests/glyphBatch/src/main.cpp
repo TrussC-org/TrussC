@@ -55,6 +55,78 @@ class GlyphApp : public App {
         fbo.end();
         return read(fbo);
     }
+    void scissorChecks() {
+        GlyphBatch batch; batch.setFont(font_);
+        batch.add(U'A', Mat4::translate(40, 40, 0), tint);
+        const auto expected = render(reference_, [&] {
+            pushScissor(0, 0, 1, 1); font_.drawString("A", 40, 40); popScissor();
+        });
+        const auto got = render(actual_, [&] {
+            pushScissor(0, 0, 1, 1); batch.draw(); popScissor();
+        });
+        const auto nonzero = [](const Bytes& pixels) {
+            return std::count_if(pixels.begin(), pixels.end(), [](unsigned char value) { return value != 0; });
+        };
+        std::printf("SCISSOR reference_nonzero=%zu batch_nonzero=%zu\n",
+                    size_t(nonzero(expected)), size_t(nonzero(got)));
+        check("batch-only pass respects captured scissor", nonzero(expected) == 0 && expected == got);
+
+        const auto scene = [&](bool batched, bool mixed) {
+            if (mixed) drawRect(10, 10, 8, 8);
+            pushScissor(45, 45, 8, 8);
+            if (batched) batch.draw(); else font_.drawString("A", 40, 40);
+            if (mixed) drawRect(48, 48, 12, 12);
+            popScissor();
+            if (batched) batch.draw(Mat4::translate(60, 0, 0));
+            else font_.drawString("A", 100, 40);
+            if (mixed) drawRect(140, 40, 8, 8);
+        };
+        for (bool mixed : {false, true}) {
+            const auto reference = render(reference_, [&] { scene(false, mixed); });
+            const auto actual = render(actual_, [&] { scene(true, mixed); });
+            compare(mixed ? "mixed sgl/batch scissor and restoration" : "batch-only changing scissor", reference, actual);
+        }
+    }
+    void pageOrderChecks() {
+        // Publish through the normal cache path; a small atlas cap forces two
+        // pages without changing the GPU's texture limit or production code.
+        const auto path = systemFontPath(testFontName).string();
+        internal::FontCacheKey key{path, 27};
+        key.oversample = Font::getDefaultOversampling();
+        auto manager = std::make_shared<internal::FontAtlasManager>();
+        manager->setOversample(key.oversample); manager->setMipmaps(true);
+        check("small atlas prepared", manager->prepareFile(path, 27, 0, 256));
+        internal::SharedFontCache::getInstance().publishPrepared(key, manager);
+        Font multi; check("small atlas font loads", bool(multi.load(path, 27)));
+        manager->getOrLoadGlyph(U'A');
+        for (uint32_t cp = 33; cp <= U'Ä'; ++cp) manager->getOrLoadGlyph(cp);
+        const auto* a = manager->getOrLoadGlyph(U'A');
+        const auto* umlaut = manager->getOrLoadGlyph(U'Ä');
+        check("A and Ä occupy pages zero and one", a && umlaut && a->getAtlasIndex() == 0 && umlaut->getAtlasIndex() == 1);
+        const Color red(1, 0, 0, 0.8f), blue(0, 0, 1, 0.8f), green(0, 1, 0, 0.8f);
+        const auto expected = render(reference_, [&] {
+            setColor(red); multi.drawString("A", 40, 40);
+            setColor(blue); multi.drawString("Ä", 40, 40);
+            setColor(green); multi.drawString("A", 40, 40);
+        });
+        const auto before = sg_query_stats().cur_frame.num_draw;
+        const auto got = render(actual_, [&] {
+            GlyphBatch batch; batch.setFont(multi);
+            const auto matrix = Mat4::translate(40, 40, 0);
+            batch.add(U'A', matrix, red); batch.add(U'Ä', matrix, blue); batch.add(U'A', matrix, green);
+            batch.draw();
+        });
+        const auto draws = sg_query_stats().cur_frame.num_draw - before;
+        std::printf("PAGE_ORDER pages=%zu draws=%u\n", multi.getAtlasCount(), draws);
+        compare("interleaved page painter order", expected, got);
+        check("A/B/A issues three consecutive run draws", draws == 3);
+        const auto singleBefore = sg_query_stats().cur_frame.num_draw;
+        render(actual_, [&] {
+            GlyphBatch batch; batch.setFont(multi);
+            batch.add(std::string("AAA"), tint); batch.draw();
+        });
+        check("consecutive glyphs on one page issue one draw", sg_query_stats().cur_frame.num_draw - singleBefore == 1);
+    }
     void layoutChecks() {
         const std::string text = "Ag 12\nxy";
         for (auto mode : {WritingMode::Horizontal, WritingMode::VerticalRL}) {
@@ -282,7 +354,7 @@ class GlyphApp : public App {
 public:
     void runOffscreenChecks() {
         setup();
-        layoutChecks(); cameraCheck(); growthAndTransform(); targetAndBlendChecks();
+        scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck(); growthAndTransform(); targetAndBlendChecks();
         reference_.allocate(extent, extent); retain(true);
         for (int frame = 0; frame < 2; ++frame) {
             sg_commit(); internal::drainPendingGpuDestroys(); retain(false);
@@ -296,7 +368,7 @@ public:
     }
     void draw() override {
         if (frame_ == 0) {
-            layoutChecks(); cameraCheck(); growthAndTransform(); targetAndBlendChecks();
+            scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck(); growthAndTransform(); targetAndBlendChecks();
             reference_.allocate(extent, extent);
             retain(true);
         } else {

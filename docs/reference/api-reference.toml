@@ -66744,22 +66744,22 @@ details.ko = '''
 ["GlyphBatch"]
 category = "font"
 keywords = ["glyph", "batch", "retained", "atlas", "text"]
-description.en = "Retains transformed glyph quads for repeated drawing with one draw per atlas page."
-description.ja = "変換済みのグリフを保持し、アトラスページごとに 1 回の描画で繰り返し表示します。"
-description.ko = "변환된 글리프를 유지하고 아틀라스 페이지마다 한 번의 그리기로 반복 표시합니다."
+description.en = "Retains transformed glyph quads for repeated drawing in add order, batching consecutive glyphs on the same atlas page."
+description.ja = "変換済みのグリフを保持し、同じアトラスページが連続する区間をまとめて追加順に繰り返し描画します。"
+description.ko = "변환된 글리프를 유지하고 같은 아틀라스 페이지의 연속 구간을 묶어 추가 순서대로 반복 표시합니다."
 details.en = '''
 Call setFont with a loaded Font. Independent glyphs capture the current model matrix at add time; the explicit Mat4 replaces it. Draw under the intended camera. draw applies the active view/projection once and does not apply the current model again, does not clear, and uploads vertex/index buffers only after adds change the geometry. draw(transform) applies transform × recorded positions through a uniform. clear discards geometry; setFont also clears and retains a copy of the loaded font/settings.
-Pages draw in first-add order; glyph order is preserved within each page. Interleaved pages are grouped by page. Use separate batches when overlapping glyphs on different pages need strict painter order. Blend and depth come from the active target at draw time, including its format and MSAA. Colors retain unclamped float RGB and normal Color alpha. Output is straight alpha like drawString; Screen/Multiply use the framework's corresponding premultiplied blend equations. Atlas sampling is trilinear with mips when the Font permits them (mip 0 at bilinear-safe rates of at most two texels per pixel, like Font); current page views and dimensions are resolved at draw time, so atlas growth preserves retained quads. Rebuild the batch after Font::clearAtlas.
+Glyphs draw in add order. Each consecutive run sharing an atlas page uses one draw; a single-page batch uses one draw, while A/B/A uses three. Scissor is captured at draw time. Blend and depth come from the active target at draw time, including its format and MSAA. Colors retain unclamped float RGB and normal Color alpha. Output is straight alpha like drawString; Screen/Multiply use the framework's corresponding premultiplied blend equations. Atlas sampling is trilinear with mips when the Font permits them (mip 0 at bilinear-safe rates of at most two texels per pixel, like Font); current page views and dimensions are resolved at draw time, so atlas growth preserves retained quads. Rebuild the batch after Font::clearAtlas.
 With custom blends (#1436), BlendDesc::addKeepAlpha() uses SRC_ALPHA/ONE for RGB and ZERO/ONE for alpha: light-only addition keeping destination alpha, equivalent to premultiplied ONE/ONE on coverage. That descriptor is not yet part of this branch.
 '''
 details.ja = '''
 読み込み済みの Font を setFont に渡します。単独グリフは add 時のモデル行列を記録し、明示した Mat4 はこの行列を置き換えます。使いたいカメラの下で draw してください。draw は現在の view/projection を一度適用し、現在のモデル行列は再適用せず、内容を消去しません。頂点・インデックスバッファは add によって内容が変わったときだけ転送します。draw(transform) は uniform で transform × 記録済み座標を適用します。clear は形状を破棄します。setFont も形状を消去し、フォントと設定のコピーを保持します。
-ページは最初に追加された順に描画し、各ページ内では追加順を保ちます。ページが交互になる場合はページ単位にまとめます。異なるページのグリフが重なり、厳密な描画順が必要な場合はバッチを分けてください。ブレンド、深度、描画先の形式、MSAA は draw 時に反映します。RGB は範囲外の float 値を保持し、Color の alpha も有効です。出力は drawString と同じ straight alpha です。Screen・Multiply ではフレームワークの対応する乗算済みブレンド式を使います。Font で有効な場合はミップ付きトライリニア補間を使います。Font と同様に、1 ピクセルあたり 2 テクセル以下の縮小では mip 0 を使います。ページ画像とサイズを描画時に解決するため、アトラス拡張後も座標を保ちます。Font::clearAtlas 後はバッチを作り直してください。
+グリフは追加順に描画します。同じアトラスページが連続する区間ごとに 1 回描画し、単一ページのバッチは 1 回、A/B/A は 3 回になります。scissor は draw 時に記録します。ブレンド、深度、描画先の形式、MSAA は draw 時に反映します。RGB は範囲外の float 値を保持し、Color の alpha も有効です。出力は drawString と同じ straight alpha です。Screen・Multiply ではフレームワークの対応する乗算済みブレンド式を使います。Font で有効な場合はミップ付きトライリニア補間を使います。Font と同様に、1 ピクセルあたり 2 テクセル以下の縮小では mip 0 を使います。ページ画像とサイズを描画時に解決するため、アトラス拡張後も座標を保ちます。Font::clearAtlas 後はバッチを作り直してください。
 カスタムブレンド（#1436）の BlendDesc::addKeepAlpha() は RGB に SRC_ALPHA/ONE、alpha に ZERO/ONE を使います。描画先 alpha を保った発光用加算で、カバレッジに対する乗算済み ONE/ONE と等価です。このブランチにはまだこの記述子は含まれません。
 '''
 details.ko = '''
 로드된 Font를 setFont에 전달합니다. 독립 글리프는 add 시점의 모델 행렬을 기록하며 명시적 Mat4는 이를 대체합니다. 사용할 카메라 아래에서 draw를 호출합니다. draw는 현재 view/projection을 한 번 적용하고 현재 모델을 다시 적용하거나 내용을 지우지 않으며, add로 형상이 변경된 경우에만 정점/인덱스 버퍼를 업로드합니다. draw(transform)은 uniform으로 transform × 기록된 좌표를 적용합니다. clear는 형상을 버립니다. setFont도 형상을 지우고 로드된 폰트와 설정의 복사본을 유지합니다.
-페이지는 처음 추가된 순서로 그리며 각 페이지 안에서는 추가 순서를 유지합니다. 교차하는 페이지는 페이지별로 묶습니다. 서로 다른 페이지의 겹친 글리프에 엄격한 그리기 순서가 필요하면 배치를 나눕니다. 블렌드, 깊이, 대상 형식 및 MSAA는 draw 시점에 적용합니다. RGB는 범위 밖 float 값을 유지하며 Color alpha도 적용합니다. 출력은 drawString과 같은 straight alpha입니다. Screen/Multiply는 프레임워크의 해당 사전 곱셈 블렌드 식을 사용합니다. Font가 허용하면 밉을 사용하는 삼선형 샘플링을 적용합니다. Font처럼 픽셀당 2텍셀 이하인 경우에는 mip 0을 사용합니다. 현재 페이지 이미지와 크기를 그릴 때 확인하므로 아틀라스가 커져도 유지된 좌표가 맞습니다. Font::clearAtlas 후에는 배치를 다시 만듭니다.
+글리프는 추가 순서대로 그립니다. 같은 아틀라스 페이지의 연속 구간마다 한 번 그리므로 단일 페이지 배치는 한 번, A/B/A는 세 번 그립니다. scissor는 draw 시점에 기록합니다. 블렌드, 깊이, 대상 형식 및 MSAA는 draw 시점에 적용합니다. RGB는 범위 밖 float 값을 유지하며 Color alpha도 적용합니다. 출력은 drawString과 같은 straight alpha입니다. Screen/Multiply는 프레임워크의 해당 사전 곱셈 블렌드 식을 사용합니다. Font가 허용하면 밉을 사용하는 삼선형 샘플링을 적용합니다. Font처럼 픽셀당 2텍셀 이하인 경우에는 mip 0을 사용합니다. 현재 페이지 이미지와 크기를 그릴 때 확인하므로 아틀라스가 커져도 유지된 좌표가 맞습니다. Font::clearAtlas 후에는 배치를 다시 만듭니다.
 사용자 지정 블렌드(#1436)의 BlendDesc::addKeepAlpha()는 RGB에 SRC_ALPHA/ONE, alpha에 ZERO/ONE을 사용합니다. 대상 alpha를 유지하는 발광용 가산이며 커버리지에 대한 사전 곱셈 ONE/ONE과 같습니다. 이 브랜치에는 아직 해당 서술자가 포함되지 않습니다.
 '''
 related = ["Font", "Font::getGlyphInkBox", "GlyphBatch::add", "GlyphBatch::draw"]
