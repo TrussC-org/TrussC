@@ -26,11 +26,8 @@ the render harness uses surfaceless EGL, and the other two use deterministic
 native fixtures. Their copied macOS and Windows code runs against recording
 structs rather than those operating systems.
 
-On November 11, 2026, a sequential run with the prerequisites built and a warm
-shared ccache took 57.68 s (events), 50.98 s (host entry), and 12.22 s (render),
-120.88 s total. That exceeded the two-minute CI budget, so these checks remain
-local-only. The linked probes invoke the compiler directly; CMake's ccache
-launcher applies to prerequisite builds.
+Together they take about 2 minutes, over the CI budget, so they stay
+local-only. CI runs only the offline fixture boundary checks below.
 
 The fixture generators list their stub and header dependencies explicitly.
 An unknown `_sapp_tc_*` helper fails generation with its name; copy its
