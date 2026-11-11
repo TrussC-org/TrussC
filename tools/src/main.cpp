@@ -171,7 +171,7 @@ static bool parseAddonValue(const string& value,
 // streams through to this process's stdout/stderr (builds that need filtered
 // output use runCaptured() instead).
 // Returns the child's exit code, or -1 on spawn failure.
-static int runProcess(const vector<string>& argv) {
+static int runInherited(const vector<string>& argv) {
     if (argv.empty()) return -1;
     // Text printed so far must come before the child's output, also through a pipe.
     cout.flush();
@@ -1431,7 +1431,7 @@ static int cmdUpgrade(const vector<string>& args) {
 
     // Step 1: git pull
     cout << "Upgrading TrussC (" << tcRoot << ") ...\n";
-    int rc = runProcess({"git", "-C", tcRoot, "pull"});
+    int rc = runInherited({"git", "-C", tcRoot, "pull"});
     if (rc != 0) {
         cerr << "Error: git pull failed (exit code " << rc << ").\n";
         return 1;
@@ -1451,13 +1451,13 @@ static int cmdUpgrade(const vector<string>& args) {
 
     fs::create_directories(buildDir);
 
-    rc = runProcess({cmake, "-S", toolsDir, "-B", buildDir});
+    rc = runInherited({cmake, "-S", toolsDir, "-B", buildDir});
     if (rc != 0) {
         cerr << "Error: cmake configure failed.\n";
         return 1;
     }
 
-    rc = runProcess({cmake, "--build", buildDir,
+    rc = runInherited({cmake, "--build", buildDir,
                      jobs > 0 ? "--parallel=" + to_string(jobs) : string("--parallel")});
     if (rc != 0) {
         cerr << "Error: build failed.\n";
@@ -2203,12 +2203,12 @@ static int gitCloneWithRef(const string& url, const string& ref,
         return 1;
     }
     if ((refKind == "branch" || refKind == "tag") && !ref.empty()) {
-        return runProcess({"git", "clone", "-b", ref, "--", url, targetDir});
+        return runInherited({"git", "clone", "-b", ref, "--", url, targetDir});
     }
-    int rc = runProcess({"git", "clone", "--", url, targetDir});
+    int rc = runInherited({"git", "clone", "--", url, targetDir});
     if (rc != 0) return rc;
     if (refKind == "commit" && !ref.empty()) {
-        return runProcess({"git", "-C", targetDir, "checkout", ref});
+        return runInherited({"git", "-C", targetDir, "checkout", ref});
     }
     return 0;
 }
@@ -2393,7 +2393,7 @@ static int cmdAddonClone(const vector<string>& args) {
                     continue;
                 }
                 cout << "Cloning " << query << " ...\n";
-                int rc = runProcess({"git", "clone", "--", query, targetDir});
+                int rc = runInherited({"git", "clone", "--", query, targetDir});
                 if (rc != 0) {
                     cerr << "Error: git clone failed for " << query << "\n";
                     failures++;
@@ -2475,7 +2475,7 @@ static int cmdAddonClone(const vector<string>& args) {
                 continue;
             }
             cout << "Cloning " << (picked ? displayName(*picked) : cloneUrl) << " ...\n";
-            int rc = runProcess({"git", "clone", "--", cloneUrl, targetDir});
+            int rc = runInherited({"git", "clone", "--", cloneUrl, targetDir});
             if (rc != 0) {
                 cerr << "Error: git clone failed for " << targetName << "\n";
                 failures++;
@@ -2574,7 +2574,7 @@ static int cmdAddonPull(const vector<string>& args) {
             continue;
         }
         cout << "Pulling " << name << " ...\n";
-        int rc = runProcess({"git", "-C", addonDir, "pull"});
+        int rc = runInherited({"git", "-C", addonDir, "pull"});
         if (rc != 0) {
             cerr << "  Error: git pull failed for " << name << "\n";
             failures++;
@@ -3906,13 +3906,13 @@ static int cmdRun(const vector<string>& args) {
         // Try emrun first (Emscripten's built-in server)
         auto [emrunCode, emrunOut] = captureCommand(TC_WHICH " emrun 2>" TC_DEV_NULL);
         if (emrunCode == 0 && !emrunOut.empty()) {
-            return runProcess({"emrun", htmlPath});
+            return runInherited({"emrun", htmlPath});
         }
         // Fallback: python3 http.server
         cout << "emrun not found, using python3 http.server ...\n";
         string binDir = projectPath + "/bin";
         cout << "Open http://localhost:8000/" << projectName << ".html in your browser.\n";
-        return runProcess({"python3", "-m", "http.server", "8000", "-d", binDir});
+        return runInherited({"python3", "-m", "http.server", "8000", "-d", binDir});
     }
 
     // Native: find and launch the binary
@@ -3924,14 +3924,14 @@ static int cmdRun(const vector<string>& args) {
             cerr << "Warning: --session is a Linux-only option (ignored on macOS).\n";
         }
         cout << "Launching " << projectName << " ...\n";
-        return runProcess({binPath});
+        return runInherited({binPath});
     }
 #elif defined(__linux__)
     string binPath = projectPath + "/bin/" + projectName;
     if (fs::exists(binPath)) {
         if (session == "labwc") {
             cout << "Launching via labwc Wayland session ...\n";
-            return runProcess({"labwc", "-s", binPath});
+            return runInherited({"labwc", "-s", binPath});
         }
         if (session == "x11") {
             // On Pi 5 (modesetting + V3D), running the binary directly as
@@ -4007,11 +4007,11 @@ static int cmdRun(const vector<string>& args) {
             // the server's XAUTHORITY file (which xinit keeps private).
             const char* user = getenv("USER");
             if (user && *user) {
-                runProcess({"xhost", string("+SI:localuser:") + user});
+                runInherited({"xhost", string("+SI:localuser:") + user});
             }
 
             // 4. Run the app (blocks until it exits).
-            int rc = runProcess({binPath});
+            int rc = runInherited({binPath});
 
             // 5. Tear down the X session.
             kill(xinitPid, SIGTERM);
@@ -4020,7 +4020,7 @@ static int cmdRun(const vector<string>& args) {
             return rc;
         }
         cout << "Launching " << projectName << " ...\n";
-        return runProcess({binPath});
+        return runInherited({binPath});
     }
 #elif defined(_WIN32)
     string exePath = projectPath + "/bin/" + projectName + ".exe";
@@ -4029,7 +4029,7 @@ static int cmdRun(const vector<string>& args) {
             cerr << "Warning: --session is a Linux-only option (ignored on Windows).\n";
         }
         cout << "Launching " << projectName << " ...\n";
-        return runProcess({exePath});
+        return runInherited({exePath});
     }
 #endif
 

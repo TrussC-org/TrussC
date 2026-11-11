@@ -773,10 +773,7 @@ static int stbi_write_hdr_core(stbi__write_context *s, int x, int y, int comp, f
 #ifdef __STDC_LIB_EXT1__
       len = sprintf_s(buffer, sizeof(buffer), "EXPOSURE=          1.0000000000000\n\n-Y %d +X %d\n", y, x);
 #else
-      // [TrussC] sprintf -> snprintf to silence -Wdeprecated-declarations on macOS SDK.
-      // Upstream PR pending: https://github.com/nothings/stb/pull/1887 (retry of #1619).
-      // Revert this hunk once upstream lands the fix.
-      len = snprintf(buffer, sizeof(buffer), "EXPOSURE=          1.0000000000000\n\n-Y %d +X %d\n", y, x);
+      len = sprintf(buffer, "EXPOSURE=          1.0000000000000\n\n-Y %d +X %d\n", y, x);
 #endif
       s->func(s->context, buffer, len);
 

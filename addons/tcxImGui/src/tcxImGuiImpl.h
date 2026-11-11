@@ -37,6 +37,9 @@ void ImGuiManager::setup(int initialVertices) {
     eventListener_ = tc::events().rawEvent.listen([this](const sapp_event& ev) {
         simgui_tc_set_context(simguiCtx_);
         simgui_handle_event(&ev);
+        if (tc::getFpsSettings().drawFps == tc::EVENT_DRIVEN && !imguiCtx_->InputEventsQueue.empty()) {
+            tc::redraw();
+        }
     }, tc::EventPriority::BeforeApp);
 
     // Overlay capture queries — tell the framework when imgui owns the
@@ -199,6 +202,12 @@ void ImGuiManager::end() {
     simgui_tc_set_context(simguiCtx_);
     if (!detail::validateTargetFrame(simguiCtx_)) return;
     swapFrames();
+    // Public IO exposes processed characters and capture state, but no pending
+    // mouse/key queue. Read it without changing ImGui's input trickling: each
+    // remaining batch needs another frame, even when redraw requests coalesce.
+    if (tc::getFpsSettings().drawFps == tc::EVENT_DRIVEN && !imguiCtx_->InputEventsQueue.empty()) {
+        tc::redraw();
+    }
     if (offscreenOwner_) offscreenFrameCompleted_ = true;
     if (synchronous_) detail::renderTargetFrame(simguiCtx_);
     else renderPending_ = true;

@@ -167,7 +167,7 @@ inline sg_pipeline_desc pipeDesc3D() {
 // by the target. Pipeline programs and caches live in the host (#249).
 enum class PipelineFamily { Immediate, Raw };
 enum class PipelineRole { Fill, Premult, Coverage, Clear, Geometry3D,
-    Pbr, PointSplat, PointPixel, Shader, Shadow, Mip, Blit, Ibl, ImGui };
+    Pbr, PointSplat, PointPixel, Shader, Shadow, Mip, Blit, Ibl, ImGui, StencilClear };
 struct ImmediateSelection {
     PipelineRole role = PipelineRole::Fill;
     BlendMode blend = BlendMode::Alpha;
@@ -216,6 +216,9 @@ struct PipelineSelection {
 struct RenderTargetResources {
     sgl_context context = {};
     std::unordered_map<PipelineCacheKey, sgl_pipeline, PipelineCacheHash> cache;
+    // Standard immediate recipes only. The owning context fixes attachment
+    // formats/sample count; release() clears this alongside the canonical cache.
+    std::vector<std::pair<ImmediateSelection, sgl_pipeline>> immediateCache;
     std::unordered_map<uint32_t, ImmediateSelection> selections;
     std::shared_ptr<PipelineGeneration> rawCache;
     uint64_t generation = 0;
@@ -243,6 +246,20 @@ struct DeferredShaderDraw;
 struct ScissorRect {
     float x, y, w, h;
     bool active;
+};
+
+// Framework-only layout. Applications borrow the entire byte, never a field.
+constexpr uint8_t frameworkStencilMask = 0x87; // draw-once 0x80, clip 0x07
+struct StencilState {
+    sg_stencil_state raster = [] {
+        sg_stencil_state state = {};
+        state.front.compare = SG_COMPAREFUNC_ALWAYS;
+        state.front.fail_op = state.front.depth_fail_op = state.front.pass_op = SG_STENCILOP_KEEP;
+        state.back = state.front;
+        state.read_mask = state.write_mask = 0xFF;
+        return state;
+    }();
+    sg_color_mask colorWriteMask = SG_COLORMASK_RGBA;
 };
 
 struct TargetCameraState {
@@ -328,6 +345,11 @@ struct RenderTarget {
     BlendMode currentBlendMode = BlendMode::Alpha;
     bool depthTestEnabled = false;
 
+    StencilState stencil;
+    StencilState savedStencil;
+    bool stencilOwned = false;
+    unsigned frameworkStencilClipDepth = 0;
+
     std::vector<DeferredPbrDraw> deferredPbrDraws;
     std::vector<DeferredPointDraw> deferredPointDraws;
     std::vector<DeferredShaderDraw> deferredShaderDraws;
@@ -344,6 +366,7 @@ struct RenderTarget {
     int getWidth() const { return width; }
     int getHeight() const { return height; }
     PipelineSelection pipeline(const PipelineKey& key);
+    sgl_pipeline immediatePipeline(ImmediateSelection selection);
 
     // Only these logical flags retain continuity across targets in PR 2.
     void inheritLogicalDrawFlags(const RenderTarget& previous) {

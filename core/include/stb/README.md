@@ -8,10 +8,10 @@ and contributors, under the stb dual license (MIT or Public Domain, see
 | File | Version string | Source | Commit | Imported | TrussC patches |
 |---|---|---|---|---|---|
 | `stb_image.h` | v2.30 | [nvpro-samples/stb](https://github.com/nvpro-samples/stb), branch `nv/all-fixes` | `1cafe0e01eeaf4142f05b36218793cb46c7ce433` (2025-12-24) | 2026-09-30 | 4 |
-| `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | 1 |
+| `stb_image_write.h` | v1.16 | [nothings/stb](https://github.com/nothings/stb), `master` | `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11) | 2025-12-16 | none |
 | `stb_perlin.h` | v0.5 | [nothings/stb](https://github.com/nothings/stb), `master` | `2bb4a0accd4003c1db4c24533981e01b1adfd656` (2020-02-02) | 2025-12-16 | none |
 | `stb_truetype.h` | v1.26 | [nothings/stb](https://github.com/nothings/stb), `master` | `6e9f34d5429cf16790ec43c9bac3f1ee4ad1f760` (2024-07-15) | 2025-12-16 | 5 |
-| `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | 2 |
+| `../stb_vorbis.c` | v1.22 | [sezero/stb](https://github.com/sezero/stb), branch `stb_vorbis-sezero` | `dd0c5eccaf092012b531d69d595fb587ece79571` (2026-07-13) | 2026-09-30 | none |
 
 `stb_vorbis.c` lives one level up, in `core/include/`, because
 `core/include/tc/sound/tcSound_impl.cpp` includes it as `"stb_vorbis.c"`.
@@ -20,7 +20,8 @@ The implementations are compiled in `core/include/impl/stb_impl.cpp`
 (`stb_image`, `stb_image_write`, `stb_perlin`, `stb_truetype`, with
 `STBI_WINDOWS_UTF8` / `STBIW_WINDOWS_UTF8`, and `STBTT_assert`,
 `STBTT_malloc` / `STBTT_free` for stb_truetype, see below) and in
-`core/include/tc/sound/tcSound_impl.cpp` (`stb_vorbis`, inside `extern "C"`).
+`core/include/tc/sound/tcSound_impl.cpp` (`stb_vorbis`, inside `extern "C"`,
+with `STB_VORBIS_NO_COMMENTS`).
 Pixels and MCP file decoding observe allocation failures through the ordinary
 image-load scope, without an MCP working-memory budget or custom allocation
 layout. MCP local files use Pixels loading. Encoded image size has no cap, for
@@ -74,11 +75,12 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
 
 - **Source**: nothings/stb `master`, the file as of
   `1ee679ca2ef753a528db5ba6801e1067b40481b8`.
-- **TrussC patches** (marked `[TrussC]` in the file):
-  1. `stbi_write_hdr_core`: `sprintf` into the header buffer became
-     `snprintf(buffer, sizeof(buffer), ...)`, to silence the deprecation
-     warning of the macOS SDK. Upstream has an open pull request for the same
-     change (nothings/stb#1887); drop the patch once upstream has it.
+- **TrussC patches**: none. The former HDR `sprintf` → `snprintf` patch
+  was removed under owner decision V4 (2026-11-11). The implementation include
+  in `impl/stb_impl.cpp` suppresses macOS SDK deprecation warnings locally.
+- **SHA-256**: `cbd5f0ad7a9cf4468affb36354a1d2338034f2c12473cf1a8e32053cb6914a05`.
+- **Covered by**: `core/tests/mediaDecode`, including HDR write/read round
+  trips with RLE and flat scanlines.
 
 ## stb_perlin.h
 
@@ -133,8 +135,8 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      failures return before pointer arithmetic. The former per-shape visit and
      append-copy counters, CFF dispatch counter and subroutine-call ceiling
      have been removed. Glyphs are no longer rejected for exceeding those work
-     allowances. The shared backend still checks allocation failures and its
-     per-glyph workspace independently; see the v0.8 import notes below.
+     allowances. The shared backend still checks allocation failures
+     independently; see the v0.8 import notes below.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
   file): `STBTT_assert` does nothing in every build type, so Debug and
   Release builds handle font data the same way. Allocations through
@@ -154,7 +156,7 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   (for CFF, past the CharStrings count) and a codepoint above U+10FFFF map
   to .notdef. Fonts of 1 GiB or more are refused by the existing backend addressing guard.
   Supported cmap sections and ranges are checked before initialization. Glyph
-  records, compound depth and decoded workspace are checked when a shape is
+  records and compound depth are checked when a shape is
   requested. A font with no supported Unicode map is refused with a diagnostic.
 - **Covered by**: `core/tests/fontSfntCheck`.
 
@@ -170,16 +172,18 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   as upstream.
 - **Before 2026-09-30**: unmodified upstream nothings/stb v1.22,
   `1ee679ca2ef753a528db5ba6801e1067b40481b8` (2021-07-11).
-- **Kept patches**: V1 is the pinned sezero fork above, retained for its
-  malformed-input fixes. V3 is the checked `STB_VORBIS_NO_COMMENTS` path:
-  vendor/user strings are consumed without allocation, checking packet/input
-  end. TrussC does not use comments. Comments-enabled behavior is unchanged.
-  Reapply V3 on updates and retain the wrapper's no-comments macro.
-- **Removed patch**: V2 (`STB_VORBIS_VALIDATE_FORMAT`) and its wrapper hook.
-  The fork's own `start_decoder` rejects channels above
-  `STB_VORBIS_MAX_CHANNELS` with `VORBIS_too_many_channels` before setup;
-  no additional TrussC channel check is needed. File loads use the decoder's
-  file API, without the encoded-memory input cap.
+- **TrussC patches**: none. The pinned sezero fork retains its upstream
+  malformed-input fixes. `tc/sound/tcSound_impl.cpp` defines the upstream
+  `STB_VORBIS_NO_COMMENTS` option, so unused vendor/user metadata is skipped
+  without allocating comment strings; its lengths and framing follow upstream.
+- **#1106 history**: that change removed V2 (`STB_VORBIS_VALIDATE_FORMAT`)
+  and its wrapper hook while retaining V3's comment validation. Owner decision
+  V2 (2026-11-11) also removes V3 and the residual channel-check reorder,
+  restoring the pristine fork. No comment-validation patch needs reapplying.
+  The fork rejects channels above `STB_VORBIS_MAX_CHANNELS` before reading
+  the sample rate. File loads still use the decoder's file API, without the
+  encoded-memory input cap.
+- **SHA-256**: `6f4805310469cd087e771c30866d5259a0725905a8eff06cfcb406c0ce41e68c`.
 - **Verification**: run the comment-length, direct PCM malloc/free and file
   ownership checks in `audioDecodeBounds` / `audioDiagnostics`, plus the core
   sweep after updates.
@@ -213,20 +217,21 @@ To check which upstream commit a nothings/stb file matches, run in a clone
 of nothings/stb: `git log --all -m --format='%H %ci' --find-object=$(git
 hash-object <TrussC copy>)` and take the oldest line (`-m` is needed when the
 file last changed in a merge, as `stb_truetype.h` did). For
-`stb_image_write.h` and `stb_truetype.h`, undo the TrussC patch first.
+`stb_truetype.h`, undo the TrussC patches first.
 
 ### Document/font import workspace (v0.8)
 
-`impl/tcFontInput.h` holds the shared sfnt directory checks used before core
-and ImGui font imports. Local fonts retain only the backend addressing guard.
-`impl/tcFontScratch.h` tracks live stb allocations per glyph, checks glyph counts and raster metrics
-against its live workspace, and reports allocation failure before a
-glyph is published. Atlas pages remain independent. Compound TrueType shapes
+`impl/tcFontInput.h` holds the sfnt directory checks used before core font
+imports. ImGui uses its unmodified bundled decoder (see the addon ledger).
+Local fonts retain only the backend addressing guard.
+`impl/tcFontScratch.h` reports allocation failure before a glyph is published;
+it no longer tracks live allocation bytes or enforces a per-glyph workspace cap.
+Atlas pages remain independent. Compound TrueType shapes
 have a 64-level depth guard and checked combined vertex counts. There are no
 per-shape visit/copy counters or CFF dispatch/subroutine-call ceilings. CFF
 retains its upstream subroutine stack depth limit and the vertex-count checks
 above. Raster scanline allocation failure returns before pointer arithmetic.
-The 256 MiB per-glyph workspace cap remains separate from the 1 GiB font-input
-addressing guard; removing work counters does not change either limit.
+The former 256 MiB per-glyph workspace cap was removed in `c2c56496`
+(#1124/#1131). The separate 1 GiB font-input addressing guard remains.
 Keep these remaining patches when updating stb and run `documentImports`,
 `fontSfntCheck`, `fontScratch`, and ImGui addon tests.

@@ -10,6 +10,12 @@ This is the *behavioral* tier — it complements, and does not replace, the
 **build canaries** in `examples/tests/` (e.g. `AllFeaturesExample`), which prove
 the API still compiles/links/instantiates but do not assert runtime behavior.
 
+`mcpAnalyzeImage/` also tests `tc_get_stencil`: headless tool schema and target errors,
+then `allCoreTests mcpAnalyzeImage --gpu-check` checks an owned Fbo containing
+all 256 stencil values, PNG bytes and orientation, nearest-neighbor preview,
+name/index lookup, a moved/deleted source, and MSAA rejection. An optional final
+argument names an evidence directory for the returned PNG enlarged with nearest sampling.
+
 ## What belongs here
 
 `windowState` also has a production-linked hidden-resize reentry probe. After
@@ -1168,6 +1174,17 @@ Process and close coverage:
   headless stdin subprocess cases remain part of the own-binary suite.
 - `windowTick/event-converter-test` classifies quit/device loss as process events;
   they have no Window raw-event fan-out. Native input keeps raw-before-typed order.
+- `process/` — running external programs (#1271). `runProcess()` returns the
+  exit code and the stdout and stderr lines (`\r\n` and a lone `\r` end a
+  line, an unterminated last line is kept); arguments with spaces, quotes,
+  trailing backslashes and empty ones arrive unchanged; `workingDir` is used;
+  a missing program reports `started == false`; 1 MiB on both streams does
+  not deadlock. `Process` fires `onLine` per line and one `onExit`, refuses a
+  second `startAsync()` while running, restarts after exit, `kill()` and the
+  destructor end a sleeping child. Listeners run on the worker by default;
+  `Deliver::Main` listeners run on the main-thread drain and honor the optional
+  per-event pending-copy limit. Inline and Main callbacks may destroy Process. The children are the test binary itself (`--child`).
+  Desktop only; elsewhere it checks that nothing starts.
 
 ### Session authority and OS-only exit deadline
 

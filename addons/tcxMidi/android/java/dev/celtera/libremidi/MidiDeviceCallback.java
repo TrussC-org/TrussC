@@ -7,7 +7,7 @@
 // dev.celtera.libremidi.MidiDeviceCallback or the native lookup fails.
 //
 // Bundled by TrussC's addon Java aggregation (tcxMidi/android/java/**). Vendored
-// verbatim from libremidi (BSD-2-Clause, https://github.com/celtera/libremidi).
+// Adapted from libremidi (BSD-2-Clause, https://github.com/celtera/libremidi).
 // =============================================================================
 package dev.celtera.libremidi;
 

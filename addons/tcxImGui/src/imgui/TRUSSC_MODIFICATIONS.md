@@ -15,7 +15,7 @@ Search for `[TrussC]` to find all modified sections.
 ```
 addons/tcxImGui/src/
 ├── imgui/
-│   ├── imconfig.h            # Modified (test engine hooks on + value hook)
+│   ├── imconfig.h            # Modified (I2 value hook only)
 │   ├── imgui_widgets.cpp     # Modified (19 value-hook call sites + 24 wrapped returns, one line each)
 │   ├── imgui.cpp             # Untouched
 │   ├── imgui.h               # Untouched
@@ -41,7 +41,7 @@ is copied verbatim.
 
 ---
 
-## imconfig.h
+## Owned build configuration
 
 ### I1. Test engine hooks on
 
@@ -49,12 +49,16 @@ is copied verbatim.
 for the MCP tools (`tcx_imgui_get_widgets`, `tcx_imgui_click`, ...).
 
 **Changes:**
-- `#define IMGUI_ENABLE_TEST_ENGINE` (upstream ships it commented out). The
+- `addons/tcxImGui/CMakeLists.txt` supplies `IMGUI_ENABLE_TEST_ENGINE=` as a
+  PUBLIC compile definition, for the platform TU and every consumer. Upstream
+  `imconfig.h` keeps this option commented out. The
   four extern functions it requires (`ImGuiTestEngineHook_ItemAdd`,
   `ImGuiTestEngineHook_ItemInfo`, `ImGuiTestEngineHook_Log`,
   `ImGuiTestEngine_FindItemDebugLabel`) are implemented in `tcImGuiHooksImpl.h`.
   They run only for contexts whose `TestEngineHookItems` is set, which
   tcxImGui does when `imguiSetup()` registers its MCP tools (independent of the grant).
+
+## imconfig.h
 
 ### I2. Widget value hook (`IMGUI_TC_ITEM_VALUE`)
 
@@ -346,7 +350,7 @@ Expected counts (lines containing the marker; this file excluded):
 
 | File | Lines |
 |---|---|
-| `imgui/imconfig.h` | 4 (the hooks-on line, `begin`, a comment, `end`) |
+| `imgui/imconfig.h` | 3 (`begin`, a comment, `end`; I1 moved to owned CMake) |
 | `imgui/imgui_widgets.cpp` | 43 (19 call sites + 24 wrapped returns) |
 | `sokol_imgui.h` | 18 |
 

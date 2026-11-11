@@ -9,12 +9,46 @@ struct StencilResources {
     bool initialized = false;
     bool ready = false;
     sg_shader writeShader = {}, readShader = {};
+    sg_shader previewShader = {};
+    sg_shader clearShader = {};
     sg_sampler sampler = {};
     sg_pipeline writes[8] = {}, reads[8] = {};
 };
 StencilResources& stencilResources() {
     static StencilResources resources;
     return resources;
+}
+
+// Ordered draw, rather than a native load clear: preserve color/depth and
+// replace only the requested bits, independently of transforms and scissor.
+bool clearTargetStencil(uint8_t value, uint8_t mask) {
+    auto& target = currentTarget();
+    if (!ensureCurrentPass()) return false;
+    target.flushLayers();
+    auto& s = stencilResources();
+    if (!s.clearShader.id) s.clearShader = sg_make_shader(tc_fbostencil_clear_shader_desc(sg_query_backend()));
+    if (!internalShaderReady(s.clearShader, "stencil clear")) return false;
+    sg_pipeline_desc desc = {};
+    desc.shader = s.clearShader;
+    desc.colors[0].write_mask = SG_COLORMASK_NONE;
+    desc.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    desc.stencil.enabled = true;
+    desc.stencil.front.compare = SG_COMPAREFUNC_ALWAYS;
+    desc.stencil.front.pass_op = SG_STENCILOP_REPLACE;
+    desc.stencil.back = desc.stencil.front;
+    desc.stencil.read_mask = 0xFF;
+    desc.stencil.write_mask = mask;
+    desc.stencil.ref = value;
+    const auto selected = target.pipeline(PipelineKey::raw(PipelineRole::StencilClear, desc));
+    if (!selected.raw.id) return false;
+    sg_apply_pipeline(selected.raw);
+    sg_apply_viewport(0, 0, target.width, target.height, true);
+    sg_apply_scissor_rect(0, 0, target.width, target.height, true);
+    sg_bindings bindings = {};
+    sg_apply_bindings(&bindings);
+    sg_draw(0, 3, 1);
+    applyTargetDrawingState();
+    return true;
 }
 
 bool ensureStencilResources() {
@@ -147,6 +181,114 @@ void FboStencilAccess::shutdown() {
     if (s.sampler.id) sg_destroy_sampler(s.sampler);
     if (s.writeShader.id) sg_destroy_shader(s.writeShader);
     if (s.readShader.id) sg_destroy_shader(s.readShader);
+    if (s.previewShader.id) sg_destroy_shader(s.previewShader);
+    if (s.clearShader.id) sg_destroy_shader(s.clearShader);
     s = {};
 }
 } // namespace trussc::internal
+
+namespace trussc {
+bool beginStencil() {
+    auto& target = internal::currentTarget();
+    if (!target.hasDepth || target.depthFormat != SG_PIXELFORMAT_DEPTH_STENCIL ||
+        (target.passKind == internal::TargetPassKind::Swapchain &&
+         !internal::currentWindowContext().hostWindow)) {
+        logWarning("Stencil") << "beginStencil() requires a stencil attachment";
+        return false;
+    }
+    if (target.stencilOwned || target.frameworkStencilClipDepth) {
+        logWarning("Stencil") << "beginStencil() refused: already owned or framework stencil clip scope active";
+        return false;
+    }
+    if (!internal::ensureCurrentPass()) return false;
+    target.flushLayers();
+    target.savedStencil = target.stencil;
+    target.stencil = {};
+    target.stencilOwned = true;
+    internal::restoreCurrentPipeline();
+    return true;
+}
+
+void endStencil() {
+    auto& target = internal::currentTarget();
+    if (!target.stencilOwned) {
+        logWarning("Stencil") << "endStencil() requires successful beginStencil() on this target";
+        return;
+    }
+    if (!internal::clearTargetStencil(0, 0xFF)) return;
+    target.stencil = target.savedStencil;
+    target.savedStencil = {};
+    target.stencilOwned = false;
+    internal::restoreCurrentPipeline();
+}
+
+void clearStencil(uint8_t value) {
+    if (!internal::currentTarget().stencilOwned) {
+        logWarning("Stencil") << "clearStencil() requires successful beginStencil() on this target";
+        return;
+    }
+    internal::clearTargetStencil(value, 0xFF);
+}
+
+Fbo* Fbo::captureStencil_(bool perFrame) const {
+    if (!allocated_ || target_.activation || target_.sampleCount != 1) {
+        if (!perFrame || !warnedStencilPreview_) {
+            if (perFrame) warnedStencilPreview_ = true;
+            logWarning("Fbo") << "stencil diagnostics require an ended, allocated, single-sample owned Fbo; main targets and MSAA are unsupported";
+        }
+        return nullptr;
+    }
+    if (!stencilCache_) {
+        stencilCache_ = std::make_unique<Fbo>();
+        stencilCache_->allocate(target_.width, target_.height, 1, TextureFormat::R8);
+        stencilCache_->getTexture().setFilter(TextureFilter::Nearest);
+    }
+    return internal::FboStencilAccess::readR8(*this, *stencilCache_) ? stencilCache_.get() : nullptr;
+}
+
+bool Fbo::readStencil(Pixels& pixels) const {
+    if (internal::hasPublicFboActivation()) {
+        logWarning("Fbo") << "readStencil() requires end() on all active Fbos";
+        return false;
+    }
+    auto* cache = captureStencil_(false);
+    if (!cache) return false;
+    Pixels rgba;
+    rgba.allocate(target_.width, target_.height, 4);
+    if (!cache->readPixels(rgba.getData())) return false;
+    pixels.allocate(target_.width, target_.height, 1, PixelFormat::U8);
+    const size_t count = size_t(target_.width) * size_t(target_.height);
+    for (size_t i = 0; i < count; ++i) pixels.getData()[i] = rgba.getData()[i * 4];
+    return true;
+}
+
+void Fbo::drawStencil(float x, float y) const {
+    auto* cache = captureStencil_(true);
+    if (!cache) return;
+    auto& s = internal::stencilResources();
+    if (!s.previewShader.id) s.previewShader = sg_make_shader(tc_fbostencil_preview_shader_desc(sg_query_backend()));
+    if (!internal::internalShaderReady(s.previewShader, "Fbo stencil preview")) return;
+    auto& target = internal::currentTarget();
+    internal::PipelineKey key;
+    key.role = internal::PipelineRole::Shader;
+    key.desc = internal::pipeDesc2D(BlendMode::Disabled, target.depthTestEnabled);
+    key.desc.shader = s.previewShader;
+    key.desc.layout = internal::sglColorVertexLayout();
+    const auto pipeline = target.pipeline(key).immediate;
+    if (!pipeline.id) return;
+    cache->markDrawnThisFrame_();
+    internal::loadTemporaryPipeline(pipeline);
+    sgl_enable_texture();
+    sgl_texture(cache->getTextureView(), cache->getSampler());
+    const float topV = needsGlYFlip() ? 1.0f : 0.0f;
+    sgl_begin_quads();
+    sgl_c4f(1, 1, 1, 1);
+    sgl_v2f_t2f(x, y, 0, topV);
+    sgl_v2f_t2f(x + target_.width, y, 1, topV);
+    sgl_v2f_t2f(x + target_.width, y + target_.height, 1, 1 - topV);
+    sgl_v2f_t2f(x, y + target_.height, 0, 1 - topV);
+    sgl_end();
+    sgl_disable_texture();
+    internal::restoreCurrentPipeline();
+}
+} // namespace trussc

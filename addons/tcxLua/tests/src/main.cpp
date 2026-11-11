@@ -468,6 +468,24 @@ int main(int argc, char** argv) {
         return result.valid() && result.get<bool>();
     });
 
+    L["saveTestDir"] = tc::pathToUtf8(dir);
+    checkNoThrow("SaveResult: JSON/XML success and failure use ok()", true, [&] {
+        auto result = L.safe_script(R"lua(
+            local json = Json.new()
+            json["name"] = "TrussC"
+            local xml = Xml.new()
+            xml:addRoot("project")
+            assert(saveJson(json, saveTestDir .. "/saved.json"):ok())
+            assert(xml:save(saveTestDir .. "/saved.xml"):ok())
+            -- An existing directory cannot be used as an output file.
+            local jsonFailure = saveJson(json, saveTestDir)
+            local xmlFailure = xml:save(saveTestDir)
+            assert(not jsonFailure:ok() and not xmlFailure:ok())
+            return true
+        )lua", sol::script_pass_on_error);
+        return result.valid() && result.get<bool>();
+    });
+
     // Exercise the bundled sketch's guard, rather than a copy of it.
     fs::path sketch = fs::path(__FILE__).parent_path().parent_path().parent_path() /
         "exampleFileReload/bin/data/sketch.lua";
@@ -475,6 +493,32 @@ int main(int argc, char** argv) {
     checkNoThrow("bundled sketch: Shift is ignored", true, [&] { return tcxLua::call(L, "keyPressed", 340); });
     checkNoThrow("bundled sketch: arrow is ignored", true, [&] { return tcxLua::call(L, "keyPressed", 262); });
     checkNoThrow("bundled sketch: ordinary key works", true, [&] { return tcxLua::call(L, "keyPressed", 65); });
+
+    // The same call-level checks also run with a GPU in bindcheck.
+    fs::path bindingSource = fs::path(__FILE__).parent_path().parent_path();
+    L["bindingTestSource"] = bindingSource;
+    L["bindingTestTemp"] = dir;
+#ifndef __EMSCRIPTEN__
+    L["bindingTestNativeAudio"] = true;
+#else
+    L["bindingTestNativeAudio"] = false;
+#endif
+    auto bindingCases = L.safe_script_file((bindingSource / "bindings.lua").string(), sol::script_pass_on_error);
+    check("approved bindings: shared checks load", bindingCases.valid());
+    if (bindingCases.valid()) {
+        sol::table cases = bindingCases;
+        for (size_t i = 1; i <= cases.size(); ++i) {
+            sol::table test = cases[i];
+            string label = test[1];
+            sol::protected_function body = test[2];
+            auto result = body();
+            if (!result.valid()) {
+                sol::error error = result;
+                std::printf("  %s\n", error.what());
+            }
+            check(label.c_str(), result.valid() && result.get<bool>());
+        }
+    }
 
     bool defaultHandlerThrows = false;
     try {
