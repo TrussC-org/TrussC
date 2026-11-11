@@ -20,6 +20,13 @@ set(BOX2D_USER_SETTINGS OFF CACHE BOOL "" FORCE)
 include("${CMAKE_CURRENT_LIST_DIR}/../../core/cmake/tc_fetch_quiet.cmake")
 tc_fetch_quiet(box2d)
 
+# GCC 15 miscompiles Box2D with tree vectorization: b2CircleShape::ComputeAABB
+# returns a broken AABB ([8,1] instead of [2,4] in x), so sensor contacts are
+# missed. Disabling vectorization for the box2d target alone fixes it.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+    target_compile_options(box2d PRIVATE -fno-tree-vectorize)
+endif()
+
 # Source files
 file(GLOB ADDON_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 file(GLOB ADDON_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.h)
