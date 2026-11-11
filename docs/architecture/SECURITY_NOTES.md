@@ -151,7 +151,7 @@ Not adversarial-input related, but a memory-safety pitfall worth knowing: the
 worker thread — most commonly inside a network `onReceive` handler, which fires
 on the receive thread — is a data race that crashes. Use `runOnMainThread(...)`
 or an `Event` listener registered with `Deliver::Main`. See
-[ARCHITECTURE.md → 5.E Threading](README.md#e-threading) for the full
+[Architecture → 5.E Threading](README.md#e-threading) for the full
 contract (which callbacks run off the main thread, the safe patterns, and the
 debug-only main-thread assert).
 

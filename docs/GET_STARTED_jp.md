@@ -311,7 +311,7 @@ myProject/
   - Windows Update による再起動
   - ダイアログを出さずにクラッシュダンプを残す方法
   - 自動起動と再起動
-- **Linux（Raspberry Pi などの SBC）:** 起動時の自動起動とモニタのスリープ対策は、[GET_STARTED_CONSOLE_MODE.md](guides/HEADLESS_LINUX.md) を参照してください。
+- **Linux（Raspberry Pi などの SBC）:** 起動時の自動起動とモニタのスリープ対策は、[HEADLESS_LINUX.md](guides/HEADLESS_LINUX.md) を参照してください。
 
 相手機器の電源が切れる構成では、`connectAsync()` の前に
 `client.setConnectTimeout(5)` を設定します。既定では OS の TCP 接続期限

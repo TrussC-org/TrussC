@@ -157,7 +157,7 @@ src/                  # Platform-specific implementations
 - [TrussC_vs_openFrameworks.md](docs/guides/TrussC_vs_openFrameworks.md) - API mapping for oF users
 - [ADDONS.md](docs/guides/ADDONS.md) - How to use addons
 - [AI_AUTOMATION.md](docs/guides/AI_AUTOMATION.md) - MCP Integration & Automation
-- [ARCHITECTURE.md](docs/architecture/README.md) - Design philosophy and architecture
+- [Architecture](docs/architecture/README.md) - Design philosophy and architecture
 - [CONTRIBUTING.md](.github/CONTRIBUTING.md) - How changes are proposed, decided and merged
 - [BUILD_SYSTEM.md](docs/guides/BUILD_SYSTEM.md) - CMake build system details
 - [ROADMAP.md](docs/ROADMAP.md) - Development roadmap

@@ -4,7 +4,7 @@ A checklist for PCs that run a TrussC app unattended for days or weeks: exhibiti
 
 Almost everything here is configuration, not code. The registry and power commands change the whole machine and need an administrator prompt.
 
-For Linux boxes (Raspberry Pi and other SBCs), see [GET_STARTED_CONSOLE_MODE.md](HEADLESS_LINUX.md).
+For Linux boxes (Raspberry Pi and other SBCs), see [HEADLESS_LINUX.md](HEADLESS_LINUX.md).
 
 ---
 
