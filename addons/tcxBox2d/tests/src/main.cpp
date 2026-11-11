@@ -4030,6 +4030,69 @@ static void testMixedFixtureRelease(int kind) {
     }
 }
 
+// Only sensor-snapshot failures print this trace. Copy values while bodies and
+// fixtures are live; stable names survive the managed case's world.clear().
+// Each failed check prints at most 64 lines (511 characters each), a header,
+// and a truncation notice.
+struct SensorSnapshotTrace {
+    vector<string> lines;
+    bool truncated = false;
+    int step = 0;
+    b2Body* compound = nullptr;
+    b2Body* mover = nullptr;
+    b2Fixture* solid = nullptr;
+    b2Fixture* sensor = nullptr;
+
+    template<class... Args>
+    void record(const char* format, Args... args) {
+        if (lines.size() == 64) { truncated = true; return; }
+        char text[512];
+        snprintf(text, sizeof(text), format, args...);
+        lines.emplace_back(text);
+    }
+    const char* fixtureName(b2Fixture* f) const {
+        return f == solid ? "compound.solid" : f == sensor ? "compound.sensor" :
+            f->GetBody() == mover ? "mover.circle" : "unknown";
+    }
+    void bodyState(const char* name, b2Body* body) {
+        auto p = body->GetPosition(), v = body->GetLinearVelocity();
+        record("step=%d body=%s position_m=(%.9g,%.9g) velocity_m_s=(%.9g,%.9g) angle=%.9g angular_velocity=%.9g",
+            step, name, p.x, p.y, v.x, v.y, body->GetAngle(), body->GetAngularVelocity());
+    }
+    void state(const char* stage) {
+        record("step=%d %s", step, stage);
+        bodyState("compound", compound); bodyState("mover", mover);
+        int contributors = 0, sensorContributors = 0;
+        for (auto* edge = mover->GetContactList(); edge; edge = edge->next) {
+            auto* c = edge->contact;
+            if (!c->IsTouching()) continue;
+            ++contributors;
+            if (c->GetFixtureA()->IsSensor() || c->GetFixtureB()->IsSensor()) ++sensorContributors;
+            record("step=%d touching=%s/%s sensor_flags=%d/%d", step,
+                fixtureName(c->GetFixtureA()), fixtureName(c->GetFixtureB()),
+                int(c->GetFixtureA()->IsSensor()), int(c->GetFixtureB()->IsSensor()));
+        }
+        record("step=%d touching_contributors=%d sensor_contributors=%d", step, contributors, sensorContributors);
+    }
+    void contact(const char* phase, b2Contact* c) {
+        record("step=%d Box2D %s fixtures=%s/%s sensor_flags=%d/%d touching=%d manifold_points=%d",
+            step, phase, fixtureName(c->GetFixtureA()), fixtureName(c->GetFixtureB()),
+            int(c->GetFixtureA()->IsSensor()), int(c->GetFixtureB()->IsSensor()),
+            int(c->IsTouching()), c->GetManifold()->pointCount);
+    }
+    void snapshot(const char* phase, const char* kind, const box2d::Contact2D& c) {
+        record("step=%d Mod %s kind=%s self=mover other=%s otherNode=%s point_px=(%.9g,%.9g) normal=(%.9g,%.9g)",
+            step, phase, kind, c.other ? "RigidBody2D" : "null(raw compound)",
+            c.otherNode ? "present" : "null", c.point.x, c.point.y, c.normal.x, c.normal.y);
+    }
+    void dump(const string& name, bool rawSteps) const {
+        printf("--- sensor-snapshot diagnostic (%s): %s ---\n", rawSteps ? "raw" : "managed", name.c_str());
+        for (const auto& line : lines) printf("  %s\n", line.c_str());
+        if (truncated) printf("  trace truncated at 64 lines\n");
+        fflush(stdout);
+    }
+};
+
 static void testSensorJournalSnapshot(bool rawSteps) {
     WorldTestFrames frames;
     box2d::World world; world.setup(0, 0); world.setAutoUpdate(false);
@@ -4040,31 +4103,55 @@ static void testSensorJournalSnapshot(bool rawSteps) {
     shape.m_p.Set(3, 0); fixture.isSensor = true; compound->CreateFixture(&fixture);
     auto node = liveNode(); node->setPos(-15, 0);
     auto* mod = node->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30));
+    SensorSnapshotTrace trace;
+    trace.compound = compound; trace.mover = mod->getBody();
+    trace.sensor = compound->GetFixtureList(); trace.solid = trace.sensor->GetNext();
+    auto sensorCheck = [&](const string& name, bool ok) {
+        check(name, ok);
+        if (!ok) trace.dump(name, rawSteps);
+    };
     struct Proxy : b2ContactListener {
         b2ContactListener* target;
+        SensorSnapshotTrace& trace;
         vector<bool> sensors;
-        explicit Proxy(b2ContactListener* t) : target(t) {}
+        Proxy(b2ContactListener* t, SensorSnapshotTrace& diagnostic) : target(t), trace(diagnostic) {}
         void BeginContact(b2Contact* c) override {
             sensors.push_back(c->GetFixtureA()->IsSensor() || c->GetFixtureB()->IsSensor());
+            trace.contact("Begin", c);
+            trace.record("step=%d observed_Begin[%zu].sensor=%d", trace.step, sensors.size() - 1, int(sensors.back()));
             target->BeginContact(c);
         }
-        void EndContact(b2Contact* c) override { target->EndContact(c); }
-    } proxy(world.getCollisionManager());
+        void EndContact(b2Contact* c) override { trace.contact("Exit", c); target->EndContact(c); }
+    } proxy(world.getCollisionManager(), trace);
     raw->SetContactListener(&proxy);
     int collision = 0, trigger = 0, triggerStay = 0;
-    auto solid = mod->onCollisionEnter.listen([&](box2d::Contact2D&) { ++collision; });
-    auto sensor = mod->onTriggerEnter.listen([&](box2d::Contact2D&) { ++trigger; });
-    auto stay = mod->onTriggerStay.listen([&](box2d::Contact2D&) { ++triggerStay; });
+    auto solid = mod->onCollisionEnter.listen([&](box2d::Contact2D& c) { ++collision; trace.snapshot("Begin", "solid", c); });
+    auto sensor = mod->onTriggerEnter.listen([&](box2d::Contact2D& c) { ++trigger; trace.snapshot("Begin", "sensor", c); });
+    auto stay = mod->onTriggerStay.listen([&](box2d::Contact2D& c) { ++triggerStay; trace.snapshot("Stay", "sensor", c); });
+    auto solidStay = mod->onCollisionStay.listen([&](box2d::Contact2D& c) { trace.snapshot("Stay", "solid", c); });
+    auto solidExit = mod->onCollisionExit.listen([&](box2d::Contact2D& c) { trace.snapshot("Exit", "solid", c); });
+    auto sensorExit = mod->onTriggerExit.listen([&](box2d::Contact2D& c) { trace.snapshot("Exit", "sensor", c); });
+    ++trace.step; trace.state(rawSteps ? "before raw Step (dt=0)" : "before managed step (dt=1/60)");
     if (rawSteps) raw->Step(0, 8, 3); else frames.update(world);
+    trace.state("after step");
+    trace.record("step=%d observed_Begins=%zu collision=%d trigger=%d triggerStay=%d",
+        trace.step, proxy.sensors.size(), collision, trigger, triggerStay);
     mod->getBody()->SetTransform(b2Vec2(1.5f, 0), 0);
+    ++trace.step; trace.state(rawSteps ? "before raw Step (dt=0)" : "before managed step (dt=1/60)");
     if (rawSteps) raw->Step(0, 8, 3); else frames.update(world);
-    check("sensor snapshot: observed solid then sensor contributions", proxy.sensors == vector<bool>({false, true}));
+    trace.state("after step");
+    trace.record("step=%d observed_Begins=%zu collision=%d trigger=%d triggerStay=%d",
+        trace.step, proxy.sensors.size(), collision, trigger, triggerStay);
+    sensorCheck("sensor snapshot: observed solid then sensor contributions", proxy.sensors == vector<bool>({false, true}));
     if (rawSteps) {
-        check("sensor snapshot: raw Steps have no early delivery", collision == 0 && trigger == 0 && triggerStay == 0);
+        sensorCheck("sensor snapshot: raw Steps have no early delivery", collision == 0 && trigger == 0 && triggerStay == 0);
+        ++trace.step; trace.state("before deferred delivery (dt=0)");
         frames.update(world, 0);
+        trace.state("after deferred delivery");
+        trace.record("step=%d collision=%d trigger=%d triggerStay=%d", trace.step, collision, trigger, triggerStay);
     }
-    check("sensor snapshot: original Begin stays solid", collision == 1 && trigger == 0);
-    check("sensor snapshot: later Stay includes sensor contributor", triggerStay == 1);
+    sensorCheck("sensor snapshot: original Begin stays solid", collision == 1 && trigger == 0);
+    sensorCheck("sensor snapshot: later Stay includes sensor contributor", triggerStay == 1);
     world.clear();
     if (!rawSteps) {
         // Two contributors within ONE managed bracket still aggregate sensors.
@@ -4073,13 +4160,23 @@ static void testSensorJournalSnapshot(bool rawSteps) {
         shape.m_p.Set(3, 0); fixture.isSensor = true; compound->CreateFixture(&fixture);
         auto fresh = liveNode(); fresh->setPos(45, 0);
         auto* freshMod = fresh->addMod<box2d::RigidBody2D>(world, box2d::Shape2D::circle(30));
+        trace.compound = compound; trace.mover = freshMod->getBody();
+        trace.sensor = compound->GetFixtureList(); trace.solid = trace.sensor->GetNext();
         int solidEnters = 0, triggerEnters = 0;
-        auto c = freshMod->onCollisionEnter.listen([&](box2d::Contact2D&) { ++solidEnters; });
-        auto t = freshMod->onTriggerEnter.listen([&](box2d::Contact2D&) { ++triggerEnters; });
+        auto c = freshMod->onCollisionEnter.listen([&](box2d::Contact2D& contact) { ++solidEnters; trace.snapshot("Begin", "solid", contact); });
+        auto t = freshMod->onTriggerEnter.listen([&](box2d::Contact2D& contact) { ++triggerEnters; trace.snapshot("Begin", "sensor", contact); });
         proxy.sensors.clear();
+        auto cs = freshMod->onCollisionStay.listen([&](box2d::Contact2D& contact) { trace.snapshot("Stay", "solid", contact); });
+        auto ts = freshMod->onTriggerStay.listen([&](box2d::Contact2D& contact) { trace.snapshot("Stay", "sensor", contact); });
+        auto ce = freshMod->onCollisionExit.listen([&](box2d::Contact2D& contact) { trace.snapshot("Exit", "solid", contact); });
+        auto te = freshMod->onTriggerExit.listen([&](box2d::Contact2D& contact) { trace.snapshot("Exit", "sensor", contact); });
+        ++trace.step; trace.state("before fresh managed step");
         frames.update(world);
-        check("sensor snapshot: one managed step observes both contributors", proxy.sensors.size() == 2);
-        check("sensor snapshot: one managed step still aggregates sensors", solidEnters == 0 && triggerEnters == 1);
+        trace.state("after fresh managed step");
+        trace.record("step=%d observed_Begins=%zu solidEnters=%d triggerEnters=%d",
+            trace.step, proxy.sensors.size(), solidEnters, triggerEnters);
+        sensorCheck("sensor snapshot: one managed step observes both contributors", proxy.sensors.size() == 2);
+        sensorCheck("sensor snapshot: one managed step still aggregates sensors", solidEnters == 0 && triggerEnters == 1);
         world.clear();
     }
 }
