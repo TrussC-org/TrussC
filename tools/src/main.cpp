@@ -4236,6 +4236,27 @@ static fs::path findMakensis() {
     return {};
 }
 
+// Windows' own bsdtar (%SystemRoot%\System32\tar.exe, Windows 10 1803 and
+// later). Not looked up on PATH, where another tar (Git's GNU tar) may come
+// first. Empty elsewhere or when it is missing.
+static fs::path findSystemTar() {
+#ifdef _WIN32
+    if (const char* root = std::getenv("SystemRoot")) {
+        const fs::path candidate = fs::path(root) / "System32" / "tar.exe";
+        error_code ec;
+        if (fs::is_regular_file(candidate, ec)) return candidate;
+    }
+#endif
+    return {};
+}
+
+#ifdef _WIN32
+static bool isAscii(const string& text) {
+    for (unsigned char c : text) if (c >= 0x80) return false;
+    return true;
+}
+#endif
+
 // Builds <folder>-setup.exe with NSIS next to the package. The script and the
 // page texts go to a <folder>-installer/ work folder, removed on success and
 // kept on failure. Returns the installer path, or empty with `error`.
@@ -4836,10 +4857,35 @@ static int cmdDist(const vector<string>& args) {
         const bool tarball = input.platform == dist::Platform::Linux;
         archiveName = plan.folderName + (tarball ? ".tar.gz" : ".zip");
         fs::remove(input.outputDir / archiveName, ec);
-        vector<string> tarArgs = {cmake, "-E", "chdir", input.outputDir.string(), cmake, "-E", "tar",
-                                  tarball ? "czf" : "cf", archiveName};
-        if (!tarball) tarArgs.push_back("--format=zip");
-        tarArgs.push_back(plan.folderName);
+        vector<string> tarArgs;
+#ifdef _WIN32
+        // cmake -E tar stores zip entry names in the system code page without
+        // the UTF-8 flag, so non-ASCII names come out garbled when the zip is
+        // extracted on a machine with another code page, or on macOS / Linux.
+        // Windows' bsdtar writes them as UTF-8 with the flag set.
+        if (const fs::path systemTar = findSystemTar(); !systemTar.empty()) {
+            tarArgs = {systemTar.string(), "--format=zip", "--options", "hdrcharset=UTF-8",
+                       "-c", "-f", (input.outputDir / archiveName).string(),
+                       "-C", input.outputDir.string(), plan.folderName};
+        } else {
+            bool ascii = isAscii(plan.folderName);
+            for (const string& file : dist::listPackageFiles(plan.packageDir)) {
+                if (!ascii) break;
+                ascii = isAscii(file);
+            }
+            if (!ascii) {
+                cerr << "Warning: %SystemRoot%\\System32\\tar.exe not found; the zip's "
+                        "non-ASCII file names may be garbled when it is extracted on another "
+                        "system.\n";
+            }
+        }
+#endif
+        if (tarArgs.empty()) {
+            tarArgs = {cmake, "-E", "chdir", input.outputDir.string(), cmake, "-E", "tar",
+                       tarball ? "czf" : "cf", archiveName};
+            if (!tarball) tarArgs.push_back("--format=zip");
+            tarArgs.push_back(plan.folderName);
+        }
         if (runInherited(tarArgs) != 0) {
             cerr << "Error: could not write " << archiveName << "\n";
             return 1;
