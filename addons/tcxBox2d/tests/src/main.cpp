@@ -59,6 +59,8 @@
 // =============================================================================
 
 #include <tcxBox2d.h>
+#include <box2d/b2_broad_phase.h>
+#include <box2d/b2_distance.h>
 #include "../../../../core/tests/common/tcWindowTest.h"
 
 #include <algorithm>
@@ -4032,10 +4034,11 @@ static void testMixedFixtureRelease(int kind) {
 
 // Only sensor-snapshot failures print this trace. Copy values while bodies and
 // fixtures are live; stable names survive the managed case's world.clear().
-// Each failed check prints at most 64 lines (511 characters each), a header,
-// and a truncation notice.
+// Each failing raw/managed case prints once: at most 160 live trace lines plus
+// 32 Box2D-only self-check lines (511 characters each), a header and cap notice.
 struct SensorSnapshotTrace {
     vector<string> lines;
+    size_t lineLimit = 160;
     bool truncated = false;
     int step = 0;
     b2Body* compound = nullptr;
@@ -4045,7 +4048,7 @@ struct SensorSnapshotTrace {
 
     template<class... Args>
     void record(const char* format, Args... args) {
-        if (lines.size() == 64) { truncated = true; return; }
+        if (lines.size() == lineLimit) { truncated = true; return; }
         char text[512];
         snprintf(text, sizeof(text), format, args...);
         lines.emplace_back(text);
@@ -4054,41 +4057,144 @@ struct SensorSnapshotTrace {
         return f == solid ? "compound.solid" : f == sensor ? "compound.sensor" :
             f->GetBody() == mover ? "mover.circle" : "unknown";
     }
+    const char* bodyName(b2Body* body) const {
+        return body == compound ? "compound" : body == mover ? "mover" : "unknown";
+    }
     void bodyState(const char* name, b2Body* body) {
         auto p = body->GetPosition(), v = body->GetLinearVelocity();
-        record("step=%d body=%s position_m=(%.9g,%.9g) velocity_m_s=(%.9g,%.9g) angle=%.9g angular_velocity=%.9g",
-            step, name, p.x, p.y, v.x, v.y, body->GetAngle(), body->GetAngularVelocity());
+        record("step=%d body=%s ptr=%p position_m=(%.9g,%.9g) velocity_m_s=(%.9g,%.9g) angle=%.9g angular_velocity=%.9g awake=%d enabled=%d type=%d",
+            step, name, static_cast<void*>(body), p.x, p.y, v.x, v.y, body->GetAngle(), body->GetAngularVelocity(),
+            int(body->IsAwake()), int(body->IsEnabled()), int(body->GetType()));
+    }
+    void aabb(const char* label, const b2AABB& bounds) {
+        record("%s aabb_m=[%.9g,%.9g]x[%.9g,%.9g]", label,
+            bounds.lowerBound.x, bounds.upperBound.x, bounds.lowerBound.y, bounds.upperBound.y);
+    }
+    void fixtureState(b2Fixture* f) {
+        auto* body = f->GetBody();
+        auto* shape = f->GetShape();
+        b2MassData mass;
+        shape->ComputeMass(&mass, 1); // Circle centroid is the cloned shape's m_p.
+        auto center = body->GetWorldPoint(mass.center);
+        const auto& filter = f->GetFilterData();
+        record("step=%d fixture=%s ptr=%p body=%s shape_type=%d center_m=(%.9g,%.9g) radius_m=%.9g sensor=%d category=0x%04x mask=0x%04x group=%d",
+            step, fixtureName(f), static_cast<void*>(f), bodyName(body), int(shape->GetType()), center.x, center.y,
+            shape->m_radius, int(f->IsSensor()), unsigned(filter.categoryBits), unsigned(filter.maskBits), int(filter.groupIndex));
+        // GetAABB exposes fixture proxy bounds, not the tree's fat AABB.
+        for (int child = 0; body->IsEnabled() && child < shape->GetChildCount(); ++child) {
+            const auto& bounds = f->GetAABB(child);
+            record("step=%d fixture=%s proxy_child=%d proxy_aabb_m=[%.9g,%.9g]x[%.9g,%.9g]", step, fixtureName(f), child,
+                bounds.lowerBound.x, bounds.upperBound.x, bounds.lowerBound.y, bounds.upperBound.y);
+        }
     }
     void state(const char* stage) {
         record("step=%d %s", step, stage);
-        bodyState("compound", compound); bodyState("mover", mover);
+        auto* world = mover->GetWorld();
+        for (auto* body = world->GetBodyList(); body; body = body->GetNext()) {
+            bodyState(bodyName(body), body);
+            for (auto* f = body->GetFixtureList(); f; f = f->GetNext()) fixtureState(f);
+        }
+        auto* circle = mover->GetFixtureList();
+        record("step=%d direct_overlap mover.circle/compound.sensor=%d", step,
+            int(b2TestOverlap(circle->GetShape(), 0, sensor->GetShape(), 0, mover->GetTransform(), sensor->GetBody()->GetTransform())));
         int contributors = 0, sensorContributors = 0;
+        int bodyCandidates = 0, worldCandidates = 0;
         for (auto* edge = mover->GetContactList(); edge; edge = edge->next) {
             auto* c = edge->contact;
+            ++bodyCandidates;
+            contact("body-list candidate", c);
             if (!c->IsTouching()) continue;
             ++contributors;
             if (c->GetFixtureA()->IsSensor() || c->GetFixtureB()->IsSensor()) ++sensorContributors;
-            record("step=%d touching=%s/%s sensor_flags=%d/%d", step,
-                fixtureName(c->GetFixtureA()), fixtureName(c->GetFixtureB()),
-                int(c->GetFixtureA()->IsSensor()), int(c->GetFixtureB()->IsSensor()));
         }
-        record("step=%d touching_contributors=%d sensor_contributors=%d", step, contributors, sensorContributors);
+        for (auto* c = world->GetContactList(); c; c = c->GetNext()) {
+            if (c->GetFixtureA()->GetBody() != mover && c->GetFixtureB()->GetBody() != mover) continue;
+            ++worldCandidates;
+            contact("world-list candidate", c);
+        }
+        record("step=%d body_candidates=%d world_candidates=%d touching_contributors=%d sensor_contributors=%d",
+            step, bodyCandidates, worldCandidates, contributors, sensorContributors);
     }
     void contact(const char* phase, b2Contact* c) {
-        record("step=%d Box2D %s fixtures=%s/%s sensor_flags=%d/%d touching=%d manifold_points=%d",
+        // Remaining b2Contact::m_flags are protected; use public flag accessors.
+        record("step=%d Box2D %s fixtures=%s/%s children=%d/%d sensor_flags=%d/%d touching=%d enabled=%d manifold_points=%d",
             step, phase, fixtureName(c->GetFixtureA()), fixtureName(c->GetFixtureB()),
+            c->GetChildIndexA(), c->GetChildIndexB(),
             int(c->GetFixtureA()->IsSensor()), int(c->GetFixtureB()->IsSensor()),
-            int(c->IsTouching()), c->GetManifold()->pointCount);
+            int(c->IsTouching()), int(c->IsEnabled()), c->GetManifold()->pointCount);
     }
     void snapshot(const char* phase, const char* kind, const box2d::Contact2D& c) {
         record("step=%d Mod %s kind=%s self=mover other=%s otherNode=%s point_px=(%.9g,%.9g) normal=(%.9g,%.9g)",
             step, phase, kind, c.other ? "RigidBody2D" : "null(raw compound)",
             c.otherNode ? "present" : "null", c.point.x, c.point.y, c.normal.x, c.normal.y);
     }
-    void dump(const string& name, bool rawSteps) const {
+    void selfCheck() {
+        // Same geometry and checks as evidence/round2-overlap.cpp, using only
+        // Box2D and the very library linked into this test executable.
+        record("%s", "Box2D-only self-check (independent worlds; no TrussC)");
+        b2BroadPhase broadPhase;
+        b2AABB sensorBounds{{2, -1}, {4, 1}}, start{{-1.5f, -1}, {0.5f, 1}}, end{{0.5f, -1}, {2.5f, 1}};
+        int sensorId = broadPhase.CreateProxy(sensorBounds, nullptr);
+        int moverId = broadPhase.CreateProxy(start, nullptr);
+        struct Pairs { int count = 0; void AddPair(void*, void*) { ++count; } } pairs;
+        broadPhase.UpdatePairs(&pairs);
+        aabb("self-check sensor fat", broadPhase.GetFatAABB(sensorId));
+        aabb("self-check old mover fat", broadPhase.GetFatAABB(moverId));
+        broadPhase.MoveProxy(moverId, end, {0, 0});
+        broadPhase.UpdatePairs(&pairs);
+        aabb("self-check new mover fat", broadPhase.GetFatAABB(moverId));
+        record("self-check new_pairs=%d extension=%.9g multiplier=%.9g", pairs.count, b2_aabbExtension, b2_aabbMultiplier);
+        bool ok = pairs.count == 1;
+        for (float dt : {0.0f, 1.0f / 60.0f}) {
+            for (bool fresh : {false, true}) {
+                struct Listener : b2ContactListener {
+                    vector<bool> begins;
+                    void BeginContact(b2Contact* c) override {
+                        begins.push_back(c->GetFixtureA()->IsSensor() || c->GetFixtureB()->IsSensor());
+                    }
+                } listener;
+                b2World world({0, 0});
+                world.SetContactListener(&listener);
+                b2BodyDef def;
+                auto* compound = world.CreateBody(&def);
+                b2CircleShape shape; shape.m_radius = 1;
+                b2FixtureDef fixture; fixture.shape = &shape;
+                compound->CreateFixture(&fixture);
+                shape.m_p.Set(3, 0); fixture.isSensor = true;
+                auto* sensor = compound->CreateFixture(&fixture);
+                def.type = b2_dynamicBody; def.position.Set(fresh ? 1.5f : -0.5f, 0);
+                auto* mover = world.CreateBody(&def);
+                shape.m_p.SetZero();
+                auto* circle = mover->CreateFixture(&shape, 1);
+                if (!fresh) { world.Step(dt, 8, 3); mover->SetTransform({1.5f, 0}, 0); }
+                b2DistanceInput input;
+                input.proxyA.Set(sensor->GetShape(), 0); input.proxyB.Set(circle->GetShape(), 0);
+                input.transformA = compound->GetTransform(); input.transformB = mover->GetTransform(); input.useRadii = true;
+                b2SimplexCache cache{};
+                b2DistanceOutput output;
+                b2Distance(&output, &cache, &input);
+                bool overlap = b2TestOverlap(sensor->GetShape(), 0, circle->GetShape(), 0, input.transformA, input.transformB);
+                record("self-check dt=%.9g fresh=%d direct_overlap=%d distance=%.9g epsilon10=%.9g", dt, int(fresh), int(overlap), output.distance, 10 * b2_epsilon);
+                aabb("self-check sensor proxy", sensor->GetAABB(0));
+                aabb("self-check mover proxy", circle->GetAABB(0));
+                world.Step(dt, 8, 3);
+                bool found = listener.begins.size() == 2 && (fresh ? listener.begins[0] != listener.begins[1]
+                    : listener.begins == vector<bool>({false, true}));
+                bool passed = overlap && output.distance == 0 && found;
+                record("self-check after x=%.9g begins=%zu sensor_flags_first_two=%d/%d pair_found=%d result=%s",
+                    mover->GetPosition().x, listener.begins.size(), listener.begins.empty() ? -1 : int(listener.begins[0]),
+                    listener.begins.size() < 2 ? -1 : int(listener.begins[1]), int(found), passed ? "PASS" : "FAIL");
+                ok = passed && ok;
+            }
+        }
+        record("Box2D-only self-check result=%s", ok ? "PASS" : "FAIL");
+    }
+    void dump(const string& name, bool rawSteps) {
+        lineLimit = 192; // Reserve 32 lines so live trace truncation cannot hide the self-check.
+        selfCheck();
         printf("--- sensor-snapshot diagnostic (%s): %s ---\n", rawSteps ? "raw" : "managed", name.c_str());
         for (const auto& line : lines) printf("  %s\n", line.c_str());
-        if (truncated) printf("  trace truncated at 64 lines\n");
+        if (truncated) printf("  trace truncated (160 live + 32 self-check lines maximum)\n");
         fflush(stdout);
     }
 };
@@ -4106,9 +4212,10 @@ static void testSensorJournalSnapshot(bool rawSteps) {
     SensorSnapshotTrace trace;
     trace.compound = compound; trace.mover = mod->getBody();
     trace.sensor = compound->GetFixtureList(); trace.solid = trace.sensor->GetNext();
+    string firstFailure;
     auto sensorCheck = [&](const string& name, bool ok) {
         check(name, ok);
-        if (!ok) trace.dump(name, rawSteps);
+        if (!ok && firstFailure.empty()) firstFailure = name;
     };
     struct Proxy : b2ContactListener {
         b2ContactListener* target;
@@ -4179,6 +4286,7 @@ static void testSensorJournalSnapshot(bool rawSteps) {
         sensorCheck("sensor snapshot: one managed step still aggregates sensors", solidEnters == 0 && triggerEnters == 1);
         world.clear();
     }
+    if (!firstFailure.empty()) trace.dump(firstFailure, rawSteps);
 }
 
 static void testDeliveryPR2(const string& selected = "all") {
