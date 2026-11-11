@@ -319,6 +319,7 @@ extern "C" sapp_mouse_cursor __wrap_sapp_get_mouse_cursor() { ++cursorCalls; ret
 extern "C" bool __wrap_sapp_keyboard_shown() { ++keyboardQueries; return keyboard; }
 extern "C" void __wrap_sapp_show_keyboard(bool shown) { ++keyboardCalls; keyboard = shown; }
 #include "bufferGrow.h"
+#include "eventDriven.h"
 
 int main(int argc, char** argv) {
     EGLDisplay display = eglGetPlatformDisplay(EGL_PLATFORM_SURFACELESS_MESA, EGL_DEFAULT_DISPLAY, nullptr);
@@ -348,8 +349,11 @@ int main(int argc, char** argv) {
     w.swapchainTarget.width = w.swapchainTarget.height = 256;
     w.swapchainTarget.colorFormat = SG_PIXELFORMAT_RGBA8;
     if (argc == 2 && std::string(argv[1]) == "--static-exit") staticExitRegression();
-    bufferGrowRegression();
-    if (argc != 2 || std::string(argv[1]) != "--buffer-grow") regressions();
+    if (argc != 2 || std::string(argv[1]) != "--buffer-grow") eventDrivenRegression();
+    if (argc != 2 || std::string(argv[1]) != "--event-driven") {
+        bufferGrowRegression();
+        if (argc != 2 || std::string(argv[1]) != "--buffer-grow") regressions();
+    }
     w.teardownTargets();
     internal::currentWindowCtx() = nullptr;
     internal::WindowRequestAccess::unbind(owner);

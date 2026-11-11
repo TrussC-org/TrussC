@@ -112,3 +112,11 @@ The surfaceless probe supplies the existing virtual-window ownership fixture
 for global window metrics and dispatches runtime maintenance for idle deadlines.
 Its two growth-test windows remain partly visible to keep both draw lists active
 after the first frame.
+
+Run `bin/imguiNativeProbe --event-driven` to isolate the EVENT_DRIVEN input
+regression. It forwards batched press/release pairs, three clicks, a drag and
+repeated keys through the manager's raw-event listener, then counts scheduled frames
+deterministically. It checks that input drains without application redraws,
+idle admits no more frames even with mouse capture or an active widget, and VSYNC/fixed-rate modes
+receive no extra redraw requests. No native display or timing assertions are
+needed.
