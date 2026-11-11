@@ -17,7 +17,8 @@ all outputs and the CI freshness check.
 
 ## What it does (Phase 1 = free functions)
 - Binds entries with `kind:"func"`, no `owner`, no `ns` (top-level `trussc::` free fns).
-  Type members (`owner`) and sub-namespaced fns (`ns` → Lua tables) are Phase 2.
+  Type members (`owner`) are handled by `luagen-types`; sub-namespaced APIs
+  (`ns`) are excluded by both generators.
 - Everything is derived from the structured `signatures[].args[]`
   (`{type, name, hasDefault, isRef, isConst, isPointer, isArray}`):
   - lambda decl + call come straight from `type`/`name` (synthesize `aN` if name empty)
@@ -30,7 +31,8 @@ all outputs and the CI freshness check.
   - signatures flagged `tmpl:true` (template-derived phantom overloads) are skipped
 
 ## Status
-**In production** — ~420 free functions generated from reference-data.json, adopted
+**In production** — 460 free functions generated from reference-data.json (including
+platform-guarded registrations), adopted
 as the real bindings (`src/generated/trussc_generated.cpp`, called from
 `setBindings()`). Skipped: type members (→ `tools/luagen-types`), sub-namespaced
 fns, templates, unbindable args (out-params / raw pointers / C arrays), and

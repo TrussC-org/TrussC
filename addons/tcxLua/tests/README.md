@@ -5,6 +5,8 @@ runtime.
 
 XML bindings: empty-text serialization, escaped text and attribute round trips
 through `Xml` and `parseXml` using the vendored pugixml.
+JSON/XML saves check `SaveResult:ok()` for successful writes and failed writes
+to an existing directory.
 
 Error-contained entry points (`tcxLua::call` / `tcxLua::runFile`):
 

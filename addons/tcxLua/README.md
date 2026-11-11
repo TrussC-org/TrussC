@@ -149,26 +149,66 @@ historical context — these were on by default until 2026-05-27 (PR #97).
 
 ## Known Issues
 
-- Default value is not treated perfectly now ([Issue#1](https://github.com/ffunatsu/tcxLua/issues/1)). So you may need additional values when using methods for example:
-  - `clear(0.08, 1.0)` instead of `clear(0.08)`
-  - `setColor(1.0, 0.0, 0.0, 1.0)` instead of `setColor(1.0, 0.0, 0.0)`
+- Generated bindings expand trailing default arguments, so `clear(0.08)` and
+  `setColor(1.0, 0.0, 0.0)` work. Handwritten bindings expose only their registered
+  overloads; new members and default arguments need separate updates.
+- Namespaced APIs and generic `Event<T>:listen` are not bound. Subscribe to
+  events such as console and device disconnects in the C++ host.
 - `end()` methods are replaced to `end_fbo()`, `end_shader()`, `end_cam()` etc ([Issue#11](https://github.com/ffunatsu/tcxLua/issues/11)).
+
+## Migrating from v0.7.7 / v0.8.0
+
+Since v0.7.7, 20 generated Lua names were removed (listed below); since v0.8.0,
+none were removed. Two handwritten Texture methods were also removed since
+v0.7.7, bringing the total to 22. Replacements marked C++ host are not Lua calls.
+See also the [C++ v0.8 migration guide](../../docs/MIGRATION_0_8.md).
+
+| Removed name(s) since v0.7.7 | Replacement / action |
+| --- | --- |
+| `Window.dispatchKeyPressToTree`, `Window.dispatchKeyReleaseToTree`, `Window.dispatchMousePressToTree`, `Window.dispatchMouseReleaseToTree`, `Window.dispatchMouseScrollToTree` (5) | Remove calls; input dispatch is internal, with no public replacement. |
+| `Window.drawTreeNow`, `Window.syncRootSize`, `Window.tickTree` (3) | Remove manual tree work; the runtime handles it. |
+| `Window.setApp` | Use `window->setApp<Scene>()` in the C++ host; the template has no Lua binding. |
+| `WindowSettings.clipboardSize`, `WindowSettings.setClipboardSize` (2) | Remove the limit settings; clipboard storage grows with its content. |
+| `WindowSettings.reserveUniformBuffer`, `WindowSettings.uniformBufferReserve` (2) | Move to `RuntimeSettings` and pass it to `runApp` in the C++ host. |
+| `CoreEvents.setup` | Remove the call; initialization belongs to the runtime. |
+| `CoreEvents.console` | Subscribe to `runtime().events().console` and call `tc::console::start()` in the C++ host. |
+| `SerialDisconnectEventArgs`, `SerialDisconnectEventArgs.reason` (2) | Use `DeviceDisconnectEventArgs` and its `reason` field in the C++ host's disconnect listener. |
+| `SerialDisconnectEventArgs.portName`, `.baudRate`, `.wasClean` (3) | Keep port/baud information yourself; `wasClean` has no replacement (explicit close no longer notifies). |
+| `Texture.uploadCubemapFace`, `Texture.uploadCubemapMip` (handwritten, 2) | Use `Texture::loadCubemapData` in the C++ host; its pointer-array input has no Lua adapter. |
+
+Names can remain while their behavior or arguments change:
+
+| Change | Lua migration |
+| --- | --- |
+| Save/record functions return `SaveResult` | Use `if result:ok() then` (e.g. `if saveJson(j, path):ok() then`); userdata is truthy even on failure. |
+| Angles use radians throughout | Convert degrees with `degrees * TAU / 360`, or use a `Deg` variant where available; FOV 45° is `TAU / 8`, and saved `Node.rotation` is radians too. |
+| `VideoGrabber.setup` no longer accepts one argument | Supply width and height (`grabber:setup(width, height)`); no arguments reconnects at the last size. |
+| `TcpServer.start` limits clients | The maximum defaults to 64 and must be positive; unlimited mode (`0`) is no longer supported. |
+| `Fbo.begin` resets drawing state each time | Reapply matrix, camera, viewport and clip state after each begin; size queries refer to the active Fbo, scissor uses logical coordinates, and point size uses Fbo pixels. |
+| `Fbo.readPixels` returns 8-bit RGBA | Even float Fbos read back as 0–255; ordinary Color components and hue remain 0–1. |
+| Serial disconnect arguments and delivery | Handle `DeviceDisconnectEventArgs.reason` in the C++ host on the detecting read/write thread; `close`/`setup` do not notify, and `serial:setup()` reconnects. |
+| Lua file loading is text-only | Ship text for `runFile`, initial loads, reloads, live editing and lint; standard Lua `load`/`loadfile`/`dofile`/`require` retain engine behavior. |
+| `App.handleUpdate` changed after v0.8.0 | Replace `app:handleUpdate(width, height)` with `app:handleUpdate()`; headless updates already update children, Mods and timers. |
+| App lifetime and event ordering | Review the C++ host: queued main-thread work runs between loop turns and is discarded when its App ends; closing the main window can leave other windows running. |
 
 ## Development
 
 Local patches to both bundled Lua engines are recorded in [TRUSSC_MODIFICATIONS.md](TRUSSC_MODIFICATIONS.md).
 
-### Bindgen
+### Binding generation
 
-Please read [tools/bindgen/README.md](tools/bindgen/README.md) in detail.
+The current generators are [luagen](tools/luagen/README.md) (free functions) and
+[luagen-types](tools/luagen-types/README.md) (types, enums and constants).
+`tools/bindgen` is legacy. Regenerate from the repository root:
 
 ```bash
-$ cd tools/bingen
-# $ pip install uv # only at first time
-# $ uv sync # only at first time
-$ uv run main.py ../../../../core/include/TrussC.h
-$ cp trussc_generated.cpp ../../src/generated
+docs/reference/regenerate.sh
 ```
+
+See the [reference pipeline](../../docs/reference/README.md) for prerequisites
+and outputs. Build a tcxLua app, run [bindcheck](bindcheck/README.md), and run the
+examples after regeneration. Json/Xml, SoundSource, Tween and the custom types
+listed in luagen-types still have handwritten glue in `src/tcxLua.cpp`.
 
 ## License
 
@@ -183,8 +223,9 @@ Registrations created in an App constructor, callback or owned completion follow
 
 Process lifecycle names are the same on App/Window events and
 `runtime().events()`: `exitRequested`, `deviceLost`, `hotReloadUnload`.
-Console moved from CoreEvents to `runtime().events().console`; subscribe once
-and opt into stdin from the C++ host with `tc::console::start()` as described in the v0.8 migration.
+Console moved from CoreEvents to `runtime().events().console`; the C++ host must
+subscribe once and opt into stdin with `tc::console::start()`. Generic
+`Event<T>:listen` is not registered for Lua.
 Generated bindings include CloseRequestEventArgs and Window closeRequested;
 code close skips that query. App ending retires owner-scoped subscriptions.
 `Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and
