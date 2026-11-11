@@ -1,4 +1,3 @@
-#define TC_GLYPH_BATCH_PROTOTYPE
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -367,30 +366,6 @@ class GlyphApp : public App {
         });
         compare("buffer growth preserves queued draws", growthReference, growth);
     }
-    void glyphTransformChecks() {
-        const Mat4 glyph = Mat4::scale(0.7f, -0.7f, 1);
-        const Mat4 current = Mat4::translate(70, 100, 0) * Mat4::rotateZ(0.2f);
-        const auto expected = render(reference_, [&] {
-            GlyphBatch batch; batch.setFont(font_);
-            batch.add(U'A', current * glyph, tint);
-            pushMatrix(); multMatrix(current * glyph); batch.add(std::string("xy"), tint); popMatrix();
-            batch.draw();
-        });
-        const auto got = render(actual_, [&] {
-            GlyphBatch batch; batch.setFont(font_); batch.setGlyphTransform(glyph);
-            pushMatrix(); multMatrix(current); batch.add(U'A', tint); batch.add(std::string("xy"), tint); popMatrix();
-            batch.draw();
-        });
-        compare("prototype matches premultiplied per-add matrices", expected, got, 0);
-        const auto explicitMatrix = render(actual_, [&] {
-            GlyphBatch batch; batch.setFont(font_); batch.setGlyphTransform(glyph);
-            batch.add(U'A', current, tint);
-            pushMatrix(); multMatrix(current); batch.add(std::string("xy"), tint); popMatrix();
-            batch.setGlyphTransform(Mat4::identity()); // changes future adds only
-            batch.draw();
-        });
-        compare("prototype explicit matrix and retained transform", expected, explicitMatrix, 0);
-    }
     void benchmark() {
         font_.setGridFit(false);
         reference_.allocate(extent, extent);
@@ -442,7 +417,7 @@ public:
     void runOffscreenChecks() {
         setup();
         scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck();
-        streamChecks(); glyphTransformChecks(); growthAndTransform(); targetAndBlendChecks();
+        streamChecks(); growthAndTransform(); targetAndBlendChecks();
         reference_.allocate(extent, extent); retain(true);
         for (int frame = 0; frame < 2; ++frame) {
             sg_commit(); internal::drainPendingGpuDestroys(); retain(false);
@@ -457,7 +432,7 @@ public:
     void draw() override {
         if (frame_ == 0) {
             scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck();
-        streamChecks(); glyphTransformChecks(); growthAndTransform(); targetAndBlendChecks();
+        streamChecks(); growthAndTransform(); targetAndBlendChecks();
             reference_.allocate(extent, extent);
             retain(true);
         } else {
