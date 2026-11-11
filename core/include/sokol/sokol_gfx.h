@@ -7579,6 +7579,7 @@ typedef struct {
     bool ext_anisotropic;
     GLint max_anisotropy;
     // [TrussC] Mesa V3D requires submission before MSAA resolves (#858).
+    // keep for now; remove once Mesa < 25.1.5 is legacy on supported Raspberry Pi OS
     bool v3d_resolve_flush;
     sg_store_action color_store_actions[SG_MAX_COLOR_ATTACHMENTS];
     sg_store_action depth_store_action;
