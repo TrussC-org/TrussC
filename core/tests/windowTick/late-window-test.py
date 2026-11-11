@@ -218,6 +218,8 @@ struct Window {
 #include <cstdlib>
 #include <unordered_map>
 #include <memory>
+#include <utility>
+#include <vector>
 namespace internal {
 bool frameworkShutdown() noexcept { return true; }
 bool sg_isvalid() { std::abort(); }
@@ -228,6 +230,8 @@ void sgl_destroy_pipeline(Handle) { std::abort(); }
 auto& pipelineOwnerCtx() { static std::unordered_map<unsigned,unsigned> map; std::abort(); return map; }
 struct RenderTargetResources {
  std::unordered_map<int,Handle> cache, selections;
+ std::vector<std::pair<int,Handle>> immediateCache;
+ std::shared_ptr<void> selectionCache;
  std::shared_ptr<int> rawCache;
  Handle context{99}; bool contextFailed = false;
  void release();

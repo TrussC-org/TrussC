@@ -1,4 +1,4 @@
-// #1432: frozen text tree benchmark and temporary-pipeline restoration.
+// #1432: frozen text/Shader/PBR benchmark and temporary-pipeline restoration.
 #include <TrussC.h>
 #include "../../common/tcCoreTest.h"
 #include "../../common/tcDisplayTest.h"
@@ -12,6 +12,7 @@ namespace {
 int failures = 0;
 bool completed = false, benchmark = false;
 int measuredFrames = 240;
+const char* benchmarkMode = "text";
 void check(const char* label, bool passed) {
     std::printf("%s %s\n", passed ? "PASS" : "FAIL", label);
     if (!passed) ++failures;
@@ -38,6 +39,9 @@ void expect(const Pixels& pixels, int x, int y, Color wanted, const char* label)
 class PipelineApp : public App {
     Font font_;
     Shader shader_;
+    Mesh mesh_;
+    Material material_;
+    ShaderVertex triangle_[3] = {};
     std::shared_ptr<DrawTree> tree_ = std::make_shared<DrawTree>();
     int frame_ = 0;
     std::vector<double> treeTimes_, frameTimes_;
@@ -48,6 +52,10 @@ class PipelineApp : public App {
         std::sort(values.begin(),values.end());
         const auto mid=values.size()/2;
         return (values[mid]+values[(values.size()-1)/2])*0.5;
+    }
+    static double p95(std::vector<double> values) {
+        std::sort(values.begin(), values.end());
+        return values[size_t(std::ceil(values.size() * 0.95)) - 1];
     }
     void correctness() {
         check("custom shader loads", shader_.load(node_pipeline_mesh_shader_desc));
@@ -144,6 +152,12 @@ public:
     void setup() override {
         setFps(VSYNC);
         check("synthetic font loads",font_.load(fs::path(__FILE__).parent_path()/"../../renderTargetState/src/fixture.ttf",16).ok());
+        if (benchmark) {
+            check("benchmark shader loads", shader_.load(node_pipeline_mesh_shader_desc));
+            mesh_.addVertex(0,0,0).addVertex(4,0,0).addVertex(0,4,0);
+            for (int i=0; i<3; ++i) mesh_.addNormal(0,0,1);
+            material_.setEmissive(0.25f,0.5f,0.75f);
+        }
         // One glyph per node fits the default immediate vertex budget.
         for(int i=0;i<3000;++i) {
             auto node=std::make_shared<DrawNode>([this] { font_.drawString("A",0,0); });
@@ -155,8 +169,8 @@ public:
             if(frame_>30) frameTimes_.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameStart_).count());
             if(frame_==30+measuredFrames) {
                 std::vector<double> counts(commands_.begin(),commands_.end());
-                std::printf("BENCH nodes=3000 frames=%d drawTree_median_ms=%.6f frame_median_ms=%.6f sgl_commands_median=%.0f\n",
-                    measuredFrames,median(treeTimes_),median(frameTimes_),median(counts));
+                std::printf("BENCH mode=%s draws=3000 frames=%d submit_median_ms=%.6f submit_p95_ms=%.6f frame_median_ms=%.6f frame_p95_ms=%.6f draw_commands_median=%.0f\n",
+                    benchmarkMode,measuredFrames,median(treeTimes_),p95(treeTimes_),median(frameTimes_),p95(frameTimes_),median(counts));
                 completed=true; exitApp();
             }
         });
@@ -167,20 +181,42 @@ public:
         clear(0,0,0); setupScreenOrtho(); disableDepthTest();
         const int before=sgl_num_commands();
         const auto started=std::chrono::steady_clock::now();
-        tree_->drawChildren();
+        if (std::strcmp(benchmarkMode,"text")==0) tree_->drawChildren();
+        else if (std::strcmp(benchmarkMode,"shader")==0) {
+            shader_.begin();
+            for (int i=0; i<3000; ++i) {
+                const float x=-1.f+float(i%100)*0.02f, y=-1.f+float(i/100)*0.06f;
+                triangle_[0]={x,y,0,0,0,1,0,0,1};
+                triangle_[1]={x+0.01f,y,0,0,0,1,0,0,1};
+                triangle_[2]={x,y+0.03f,0,0,0,1,0,0,1};
+                shader_.submitVertices(triangle_,3,PrimitiveType::Triangles);
+            }
+            shader_.end();
+        } else {
+            setMaterial(material_);
+            for (int i=0; i<3000; ++i) {
+                pushMatrix(); translate(float(i%100)*6,float(i/100)*8); mesh_.draw(); popMatrix();
+            }
+            clearMaterial();
+        }
         const auto ended=std::chrono::steady_clock::now();
         ++frame_;
         if(frame_>30) {
             treeTimes_.push_back(std::chrono::duration<double,std::milli>(ended-started).count());
-            commands_.push_back(sgl_num_commands()-before);
+            const auto& target=internal::currentTarget();
+            commands_.push_back(sgl_num_commands()-before + int(target.deferredShaderDraws.size()) + int(target.deferredPbrDraws.size()));
         }
     }
 };
 }
 TC_CORE_TEST_MAIN(int argc,char** argv) {
-    if(argc==1) { std::puts("SKIP: use --gpu-check or --benchmark [frames]"); return 0; }
+    if(argc==1) { std::puts("SKIP: use --gpu-check or --benchmark [frames] [text|shader|pbr]"); return 0; }
     benchmark=std::strcmp(argv[1],"--benchmark")==0;
     if(benchmark && argc>2) measuredFrames=std::max(1,std::atoi(argv[2]));
+    if(benchmark && argc>3) benchmarkMode=argv[3];
+    if(benchmark && std::strcmp(benchmarkMode,"text") && std::strcmp(benchmarkMode,"shader") && std::strcmp(benchmarkMode,"pbr")) {
+        std::puts("FAIL: benchmark mode must be text, shader, or pbr"); return 1;
+    }
     WindowSettings settings; settings.setSize(640,256); settings.sampleCount=1;
     return tcCoreTest::runDisplayTest<PipelineApp>(settings,failures,[] { check("suite completed",completed); });
 }

@@ -98,10 +98,6 @@ public:
         shader_ = sg_make_shader(tc_pbr_pbr_mesh_shader_desc(sg_query_backend()));
         shaderReady_ = internal::internalShaderReady(shader_, "PBR");
         initialized_ = true;
-    }
-
-    // Get or create a pipeline for the given color pixel format and sample count.
-    PipelineSelection getPipeline(bool lines = false) {
         sg_pipeline_desc pd = {};
         pd.shader = shader_;
 
@@ -120,10 +116,16 @@ public:
 
 
         pd.index_type = SG_INDEXTYPE_UINT32;
-        pd.primitive_type = lines ? SG_PRIMITIVETYPE_LINES : SG_PRIMITIVETYPE_TRIANGLES;
+        pd.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
         pd.label = "tc_mesh_pbr_pipeline";
 
-        return currentTarget().pipeline(PipelineKey::raw(PipelineRole::Pbr, pd));
+        pbrRecipes_[0].reset(PipelineKey::raw(PipelineRole::Pbr, pd));
+        pd.primitive_type = SG_PRIMITIVETYPE_LINES;
+        pbrRecipes_[1].reset(PipelineKey::raw(PipelineRole::Pbr, pd));
+    }
+
+    PipelineSelection getPipeline(bool lines = false) {
+        return pbrRecipes_[lines ? 1 : 0].select(currentTarget());
     }
 
     // Draw a single Mesh with the current PBR state.
@@ -637,7 +639,8 @@ public:
         target.passKind = internal::TargetPassKind::Fixed;
         target.isFbo = true;
         target.binding = pass;
-        target.fixedPipeline = shadowRecipe_;
+        target.fixedPipeline = shadowRecipe_.key();
+        target.fixedPipelineRevision = shadowRecipe_.revision();
         target.hasFixedPipeline = true;
         target.clearAction = pass.action;
         target.width = target.height = storage.resolution;
@@ -690,7 +693,7 @@ public:
 
         // Render at this owner's array resolution (max of its requested sizes)
         sg_apply_viewport(0, 0, storage.resolution, storage.resolution, true);
-        const auto selected = internal::currentTarget().pipeline(shadowRecipe_);
+        const auto selected = shadowRecipe_.select(internal::currentTarget());
         if (!selected.raw.id) { sh.scope.reset(); discard(); return; }
         sg_apply_pipeline(selected.raw);
 
@@ -792,18 +795,19 @@ private:
         pd.sample_count = 1;
         pd.label = "tc_shadow_depth_pipeline";
 
-        shadowRecipe_ = PipelineKey::raw(PipelineRole::Shadow, pd);
+        shadowRecipe_.reset(PipelineKey::raw(PipelineRole::Shadow, pd));
         shadowInitialized_ = true;
     }
 
     // --- PBR pipeline state ---
     sg_shader shader_{};
+    PipelineRecipe pbrRecipes_[2];
     bool shaderReady_{false};
     bool initialized_{false};
 
     // --- Shadow pipeline state ---
     sg_shader shadowShader_{};
-    PipelineKey shadowRecipe_;
+    PipelineRecipe shadowRecipe_;
     bool shadowReady_{false};
     bool shadowInitialized_{false};
 
