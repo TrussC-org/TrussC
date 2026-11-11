@@ -582,6 +582,23 @@ checks wait for confirmed entry, and size-restoration checks wait for exit.
   guard inside a `pushMatrix()` / `pushStyle()` pair (pops only its own
   entry); the matrix and color set inside are undone after it. Checks run in
   a release build only (headless `pushMatrix()` reaches sokol_gl).
+- `sglInvalidTexture/` — standalone dummy-backend regression for #1439.
+  A retained recording contains a destroyed view (or a live view of a
+  destroyed image), followed by a healthy draw using the same pipeline.
+  All four replays must render the healthy draw without validation errors.
+  Like `sglLayerUpload` and `sglPoolLimits`, this owns a dummy sokol
+  implementation and stays outside `allCoreTests` on every platform. The core
+  sweep discovers it automatically. To run it directly:
+
+  ```sh
+  cmake -S core/tests/sglInvalidTexture -B core/tests/sglInvalidTexture/build -DFETCHCONTENT_FULLY_DISCONNECTED=ON
+  cmake --build core/tests/sglInvalidTexture/build --config Release
+  # Linux/macOS:
+  core/tests/sglInvalidTexture/build/sglInvalidTexture
+  # Windows (Visual Studio generator):
+  core/tests/sglInvalidTexture/build/Release/sglInvalidTexture.exe
+  ```
+
 - `sglLayerUpload/` — *(standalone, dummy backend)* the sokol_gl `_sgl_draw()`
   vertex upload is done **once per frame** and shared across layer draws, instead
   of re-appending the whole vertex set per layer. Guards against the O(N layers ×
