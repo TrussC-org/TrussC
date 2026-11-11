@@ -3945,16 +3945,6 @@ static void _sgl_draw(_sgl_context_t* ctx, int layer_id) {
                         if (args->pip.id == SG_INVALID_ID) {
                             break;
                         }
-                        /* [TrussC fork] A retired texture must only drop its
-                           own draw. Passing it to sg_apply_bindings latches
-                           next_draw_valid=false until sg_apply_pipeline; our
-                           same-pipeline cache would then drop healthy draws,
-                           again on every replay of a retained recording. A
-                           view can outlive its backing image, so check both. */
-                        if (sg_query_view_state(args->view) != SG_RESOURCESTATE_VALID ||
-                            sg_query_image_state(sg_query_view_image(args->view)) != SG_RESOURCESTATE_VALID) {
-                            break;
-                        }
                         if (args->pip.id != cur_pip_id) {
                             sg_apply_pipeline(args->pip);
                             cur_pip_id = args->pip.id;
