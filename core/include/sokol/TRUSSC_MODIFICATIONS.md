@@ -1237,6 +1237,20 @@ After updating:
 5. Regenerate checked API outputs using the repository workflow; use strict
    reference validation if api-reference.toml changed.
 
+## Retired atlas texture draws (#1439)
+
+`util/sokol_gl_tc.h`: `_sgl_draw` checks both a recorded texture view and its
+backing image before applying bindings. A dead texture drops only its own draw.
+Previously it latched sokol's `next_draw_valid` false while the local pipeline
+cache skipped reapplying the same pipeline; healthy draws following it were
+also skipped on every replay of a retained recording. No upstream code or other
+TrussC modification sections were removed.
+
+Regression: `core/tests/sglInvalidTexture` replays dead-view and dead-image
+recordings followed by a healthy draw through four commits on the dummy backend.
+`core/tests/fontAtlasR8 --midpass-check` checks a one-shot mipmapped Fbo and later
+swapchain/overlay frames with real backend pixels.
+
 ## Author
 
 All modifications by tettou771
