@@ -257,7 +257,8 @@ struct NsisInput {
 // all users under Program Files, registers in Apps & features (the 64-bit
 // registry view for x64 / arm64, with the installed size), offers the
 // shortcuts (checked) and start at login (unchecked) as checkboxes; a silent
-// install (setup.exe /S) takes those defaults. The uninstaller deletes
+// install (setup.exe /S) takes those defaults. Installing over an earlier
+// version runs its uninstaller first. The uninstaller deletes
 // exactly the installed files (and any of the shortcuts), then the folders
 // left empty. zlib compression keeps the whole installer under the zlib/libpng
 // license (LZMA's decompressor would be CPL code).

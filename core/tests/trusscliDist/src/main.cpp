@@ -11,7 +11,8 @@
 //     The copyright line is "© <year> <author>".
 //   - NSIS script: zlib compression (no LZMA), a four-part version, names
 //     escaped for NSIS ("$" and '"'), Program Files and the registry view by
-//     arch, the installed size, the EULA and
+//     arch, the installed size, an update uninstalling the earlier version
+//     first, the EULA and
 //     notices pages only when asked for, shortcuts (checked) and start at
 //     login (unchecked) as checkboxes, and an uninstaller
 //     that deletes the listed files and any of the shortcuts, then the
@@ -179,6 +180,14 @@ void testNsis() {
               contains(s, "Function un.onInit\n  SetRegView 64\n") &&
               contains(s, "ReadRegStr $0 HKLM \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\") &&
               !contains(s, "InstallDirRegKey"));
+    {
+        const size_t previous = s.find("ExecWait '\"$0\\Uninstall.exe\" /S _?=$0'");
+        const size_t files = s.find("File /r ");
+        check("nsis: an update runs the installed version's uninstaller before copying",
+              contains(s, "ReadRegStr $0 HKLM \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\") &&
+                  previous != std::string::npos && files != std::string::npos && previous < files &&
+                  contains(s, "  noPrevious:\n"));
+    }
     check("nsis: installed size for Apps & features",
           contains(s, "!include \"FileFunc.nsh\"") && contains(s, "${GetSize} \"$INSTDIR\" \"/S=0K\" $0 $1 $2") &&
               contains(s, "\"EstimatedSize\" $0"));

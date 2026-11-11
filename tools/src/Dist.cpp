@@ -1284,6 +1284,17 @@ std::string nsisScript(const NsisInput& in) {
     // "-" hides the required section; "/o" starts a checkbox unchecked.
     s += "Section \"-Install\"\n";
     s += "  SetShellVarContext all\n";
+    // Updating: run the installed version's uninstaller first, so files the new
+    // version no longer ships do not stay behind (it removes exactly what it
+    // installed; files the user added stay). "_?=" runs it in place, so
+    // ExecWait waits for it; it cannot delete itself then, so delete it here.
+    s += "  ReadRegStr $0 HKLM " + q(uninstallKey) + " \"InstallLocation\"\n";
+    s += "  StrCmp $0 \"\" noPrevious\n";
+    s += "  IfFileExists \"$0\\Uninstall.exe\" 0 noPrevious\n";
+    s += "  ExecWait '\"$0\\Uninstall.exe\" /S _?=$0'\n";
+    s += "  Delete \"$0\\Uninstall.exe\"\n";
+    s += "  RMDir \"$0\"\n";
+    s += "  noPrevious:\n";
     s += "  SetOutPath \"$INSTDIR\"\n";
     s += "  File /r " + q(windowsPath(in.packageDir) + "\\*.*") + "\n";
     s += "  WriteUninstaller \"$INSTDIR\\Uninstall.exe\"\n";
