@@ -60,14 +60,14 @@ void nativeWindowSetClass(uint32_t id) {
     const auto window = (::Window)(uintptr_t)sapp_window_x11_get_window({id});
     if (!display || !window) return;
     static std::string name = [] {
-        // Bound (procfs): a path that fills PATH_MAX may be truncated, so fall back to "TrussC".
+        // Bound (procfs): a path that fills PATH_MAX may be truncated, so fall back to "TrussC App".
         char path[PATH_MAX];
         const auto length = readlink("/proc/self/exe", path, sizeof(path));
-        if (length <= 0 || static_cast<size_t>(length) >= sizeof(path)) return std::string("TrussC");
+        if (length <= 0 || static_cast<size_t>(length) >= sizeof(path)) return std::string("TrussC App");
         std::string executable(path, static_cast<size_t>(length));
         const auto slash = executable.find_last_of('/');
         auto basename = executable.substr(slash == std::string::npos ? 0 : slash + 1);
-        return basename.empty() ? std::string("TrussC") : basename;
+        return basename.empty() ? std::string("TrussC App") : basename;
     }();
     // ICCCM: install the class before the first map, including hidden startup.
     XClassHint hint{};
