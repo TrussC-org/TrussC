@@ -7,6 +7,21 @@
 #include <cstdio>
 #include <cstring>
 #include <unordered_set>
+#if defined(SOKOL_GLES3)
+#if defined(__APPLE__)
+#include <OpenGLES/ES3/gl.h>
+#else
+#include <GLES3/gl3.h>
+#endif
+#elif defined(SOKOL_GLCORE)
+#if defined(__APPLE__)
+#include <OpenGL/gl3.h>
+#else
+#define GL_GLEXT_PROTOTYPES
+#include <GL/gl.h>
+#include <GL/glext.h>
+#endif
+#endif
 using namespace tc;
 namespace {
 int failures = 0;
@@ -221,12 +236,15 @@ class CustomBlendApp : public App {
         }
         resetStyle(); setupScreenOrtho(); disableDepthTest();
         clear(destination_); drawCases();
+#if defined(__EMSCRIPTEN__)
+        std::printf("SKIP swapchain readback: grabScreen is not implemented on Web; pixel coverage uses Fbo and MSAA Fbo\n");
+#else
         Pixels screen; check("swapchain readback",grabScreen(screen));
-        // Native swapchains expose RGBA8, BGRA8 or RGB10A2 through TrussC.
-        // Low-precision destination alpha is quantized before each blend;
-        // Fbo targets above retain the full alpha oracle.
+        // Low-precision or absent destination alpha cannot use the RGBA oracle.
+        // GL visuals/configs can differ from the nominal swapchain format.
         const auto format=internal::currentTarget().colorFormat;
         const char* formatName="unknown";
+        const char* alphaSource="swapchain color format";
         int alphaBits=0;
         switch(format) {
             case SG_PIXELFORMAT_RGBA8: formatName="RGBA8"; alphaBits=8; break;
@@ -234,10 +252,27 @@ class CustomBlendApp : public App {
             case SG_PIXELFORMAT_RGB10A2: formatName="RGB10A2"; alphaBits=2; break;
             default: break;
         }
+#if defined(SOKOL_GLCORE) || defined(SOKOL_GLES3)
+        GLint previousDrawFbo=0;
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&previousDrawFbo);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,0);
+#if defined(SOKOL_GLES3)
+        const GLenum attachment=GL_BACK;
+        alphaSource="GL default framebuffer GL_BACK attachment";
+#else
+        const GLenum attachment=GL_BACK_LEFT;
+        alphaSource="GL default framebuffer GL_BACK_LEFT attachment";
+#endif
+        glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER,attachment,
+            GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE,&alphaBits);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,GLuint(previousDrawFbo));
+#endif
         const bool compareAlpha=alphaBits>=8;
-        if(!compareAlpha) std::printf("SKIP swapchain alpha: format=%s (%d), alpha_bits=%d < 8; checking RGB only, alpha covered by Fbo targets\n",
-            formatName,int(format),alphaBits);
+        std::printf("SWAPCHAIN alpha_bits=%d source=%s\n",alphaBits,alphaSource);
+        if(!compareAlpha) std::printf("SKIP swapchain alpha: format=%s (%d), alpha_bits=%d < 8, source=%s; checking RGB only, alpha covered by Fbo targets\n",
+            formatName,int(format),alphaBits,alphaSource);
         if(screen.isAllocated()) checkCases(screen,float(screen.getWidth())/width,"swapchain",compareAlpha);
+#endif
         resetStyle();
         setBlendMode(BlendMode::Custom); setCustomBlendDesc(descriptors[0]);
         const auto saved=internal::currentTarget().selectedPipeline;
@@ -276,7 +311,12 @@ class CustomBlendApp : public App {
 public:
     void setup() override {
         setFps(VSYNC);
-        check("font fixture loads",font_.load(fs::path(__FILE__).parent_path()/"../../renderTargetState/src/fixture.ttf",16).ok());
+#if defined(__EMSCRIPTEN__)
+        const fs::path fixture="/data/customBlend-fixture.ttf";
+#else
+        const auto fixture=fs::path(__FILE__).parent_path()/"../../renderTargetState/src/fixture.ttf";
+#endif
+        check("font fixture loads",font_.load(fixture,16).ok());
         const unsigned char texel[]={51,26,77,64};
         texture_.allocate(1,1,TextureFormat::RGBA8,TextureUsage::Dynamic); texture_.loadData(texel,1,1,4);
         source_.allocate(24,24);
