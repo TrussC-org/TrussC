@@ -112,6 +112,14 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
         self.assertLess(steps.index(display_step), steps.index(example_step))
         self.assertNotIn('continue-on-error', example_step)
 
+    def test_example_checks_discover_both_check_projects(self):
+        import run_example_self_checks as checks
+        sys.path.insert(0, str(ROOT / 'examples'))
+        from build_all import find_addon_tests
+        self.assertEqual([p.relative_to(ROOT).as_posix() for p in checks.discover_examples(ROOT)],
+                         ['examples/tests/grabScreen', 'examples/tests/quadWarp'])
+        self.assertFalse(any('quadWarp' in p for p in find_addon_tests(str(ROOT), include_daily=True)))
+
     def test_display_step_is_linux_daily_only(self):
         daily = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         steps = daily['jobs']['sweep']['steps']

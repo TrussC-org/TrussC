@@ -1,4 +1,5 @@
 #include "../../../graphics/grabScreenExample/src/tcApp.h"
+#include "../../../../core/tests/common/tcDisplayTest.h"
 #include <cmath>
 
 namespace {
@@ -75,7 +76,10 @@ private:
 };
 
 int runSelfCheck(const WindowSettings& settings) {
-    int result = TC_RUN_APP(SelfCheckApp, settings);
-    if (!completed) { logError("self-check") << "Did not complete"; return 1; }
-    return result;
+    return tcCoreTest::runDisplayTest<SelfCheckApp>(settings, failures, [] {
+        if (!completed) {
+            logError("self-check") << "Did not complete";
+            ++failures;
+        }
+    });
 }

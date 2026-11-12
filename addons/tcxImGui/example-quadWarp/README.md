@@ -40,4 +40,4 @@ cmake --build addons/tcxImGui/example-quadWarp/build-linux
 addons/tcxImGui/example-quadWarp/bin/example-quadWarp
 ```
 
-Automated checks live in `addons/tcxImGui/tests-quadWarp` and run as a separate test app.
+Automated checks live in `examples/tests/quadWarp` and run as a separate test app.

@@ -20,11 +20,12 @@ class ExampleSelfChecksTests(unittest.TestCase):
         display.start()
         self.addCleanup(display.stop)
 
-    def test_discovery_uses_example_sources(self):
+    def test_discovery_uses_only_check_project_sources(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            included = ['examples/graphics/newExample', 'addons/demo/example-new']
-            for name in included + ['examples/graphics/ordinary', 'addons/demo/tests']:
+            included = ['examples/tests/grabScreen', 'examples/tests/quadWarp']
+            for name in included + ['examples/tests/ordinary', 'examples/graphics/newExample',
+                                    'addons/demo/example-new', 'addons/demo/tests']:
                 source = root / name / 'src'
                 source.mkdir(parents=True)
                 (source / 'main.cpp').write_text(
@@ -35,14 +36,14 @@ class ExampleSelfChecksTests(unittest.TestCase):
 
     def test_nonzero_exit_and_timeout_fail_but_continue(self):
         root = Path('/checkout')
-        examples = [root / 'examples' / name for name in ['failed', 'ok']]
+        examples = [root / 'examples/tests' / name for name in ['failed', 'ok']]
         for outcome in (Mock(returncode=7), subprocess.TimeoutExpired('failed', 60)):
             with self.subTest(outcome=outcome), \
                     patch.object(runner, 'discover_examples', return_value=examples), \
                     patch.object(runner.subprocess, 'run', side_effect=[outcome, Mock(returncode=0)]) as run:
                 self.assertEqual(runner.run_checks(root), 1)
                 self.assertEqual(run.call_count, 2)
-                self.assertEqual(run.call_args_list[0].args[0], ['/checkout/examples/failed/bin/failed', '--self-check'])
+                self.assertEqual(run.call_args_list[0].args[0], ['/checkout/examples/tests/failed/bin/failed', '--self-check'])
                 self.assertEqual(run.call_args_list[0].kwargs['cwd'], examples[0])
                 self.assertEqual(runner.EXAMPLE_TIMEOUT, 60)
                 self.assertTrue(all(call.kwargs['timeout'] == 60 for call in run.call_args_list))

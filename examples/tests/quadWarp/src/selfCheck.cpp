@@ -1,4 +1,5 @@
-#include "../../example-quadWarp/src/tcApp.h"
+#include "../../../../addons/tcxImGui/example-quadWarp/src/tcApp.h"
+#include "../../../../core/tests/common/tcDisplayTest.h"
 #include <imgui/imgui_internal.h> // Test-only observation of ImGui's pending input count.
 #include <cfloat>
 #include <limits>
@@ -249,7 +250,10 @@ private:
 };
 
 int runSelfCheck(const WindowSettings& settings) {
-    int result = TC_RUN_APP(SelfCheckApp, settings);
-    if (!completed) { logError("self-check") << "Did not complete"; return 1; }
-    return result;
+    return tcCoreTest::runDisplayTest<SelfCheckApp>(settings, failures, [] {
+        if (!completed) {
+            logError("self-check") << "Did not complete";
+            ++failures;
+        }
+    });
 }
