@@ -521,6 +521,12 @@ sg_apply_pipeline(pipeline);
 sg_apply_pipeline(pipelineForCurrentTarget());
 ```
 
+For code that uses rendering internals directly:
+
+- TrueType atlas pages now store R8 coverage. Drawing them with sokol_gl's default shader produces red glyphs; use `internal::sglCoverageShader()` or `internal::activeCoverage2D()` to interpret R as alpha.
+- `internal::FontCacheKey` now includes `faceIndex`. Use designated initialization instead of positional initialization so later fields keep their meaning.
+- `internal::RenderTarget::pipeline(uint32_t, desc)` is replaced by `pipeline(internal::PipelineKey)`. Use `PipelineKey::immediate(selection)` for immediate recipes or `PipelineKey::raw(role, desc)` for custom raster state.
+
 ### Fbo::readPixels() on float Fbos, and failed allocations
 
 - `Fbo::readPixels()` on a float Fbo now always returns RGBA8 values clamped to 0–255, on every backend. Before, the result depended on the backend; Metal, for example, returned `false`. It now also works on the web with WebGL2 (not with WebGPU). Use `readPixelsFloat()` for full precision.

@@ -421,6 +421,18 @@ public:
         return &(glyphs_[codepoint] = info);
     }
 
+    // Outline ink box in physical pixels, relative to the horizontal baseline.
+    Rect getGlyphInkBox(uint32_t codepoint) const {
+        if (!loaded_) return {};
+        const int glyph = findGlyphIndex(codepoint);
+        if (!fontGlyphRangeFits(&fontInfo_, fontData_.size(), glyph)) return {};
+        FontScratchScope scratch(fontData_.size());
+        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        if (!stbtt_GetGlyphBox(&fontInfo_, glyph, &x0, &y0, &x1, &y1) || scratch.failed()) return {};
+        return {float(x0) * scale_, -float(y1) * scale_,
+                (float(x1) - float(x0)) * scale_, (float(y1) - float(y0)) * scale_};
+    }
+
     bool hasGlyph(uint32_t codepoint) const {
         return glyphs_.find(codepoint) != glyphs_.end();
     }
@@ -1628,6 +1640,15 @@ public:
     // alignment, wrap, kinsoku, TCY all apply. Coordinates are in logical
     // pixels relative to (x, y).
     // -------------------------------------------------------------------------
+    // Logical-pixel outline bounds, excluding advance and raster/filter padding.
+    // Empty ink returns an empty Rect. Half-size is (width / 2, height / 2).
+    Rect getGlyphInkBox(uint32_t codepoint) const {
+        if (!atlasManager_) return {};
+        const Rect box = atlasManager_->getGlyphInkBox(codepoint);
+        const float s = 1.0f / dpiScale_;
+        return {box.x * s, box.y * s, box.width * s, box.height * s};
+    }
+
     Path getGlyphPath(uint32_t codepoint) const {
         if (!atlasManager_) return {};
         return atlasManager_->getGlyphPath(codepoint);
@@ -2745,6 +2766,7 @@ public:
     }
 
 private:
+    friend class GlyphBatch;
     std::shared_ptr<internal::FontAtlasManager> atlasManager_;
     internal::FontCacheKey cacheKey_;
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)
