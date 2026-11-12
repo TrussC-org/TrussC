@@ -386,6 +386,7 @@ endif()
 #   iOS: .png (resized to 1024x1024 with sips)
 #   macOS: .icns, .icon (macOS 26 Tahoe+, requires actool), .png (sips + iconutil)
 #   Windows: .ico (or auto-converted from .png)
+#   Linux: .png (embedded for every X11 window)
 # =============================================================================
 
 function(trussc_setup_icon TARGET_NAME)
@@ -398,7 +399,37 @@ function(trussc_setup_icon TARGET_NAME)
         _trussc_setup_icon_macos(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
     elseif(WIN32)
         _trussc_setup_icon_windows(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        _trussc_setup_icon_linux(${TARGET_NAME} "${ICON_DIR}" "${DEFAULT_DIR}")
     endif()
+endfunction()
+
+# -----------------------------------------------------------------------------
+# Linux icon setup (PNG embedded in the executable, decoded with stb_image)
+# -----------------------------------------------------------------------------
+function(_trussc_setup_icon_linux TARGET_NAME ICON_DIR DEFAULT_DIR)
+    file(GLOB PNG_FILES CONFIGURE_DEPENDS "${ICON_DIR}/*.png")
+    if(PNG_FILES)
+        list(GET PNG_FILES 0 PNG_FILE)
+    else()
+        set(PNG_FILE "${DEFAULT_DIR}/default.png")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PNG_FILE}")
+    file(READ "${PNG_FILE}" PNG_HEX HEX)
+    string(REGEX REPLACE "(..)" "0x\\1," PNG_BYTES "${PNG_HEX}")
+    set(ICON_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_icon.cpp")
+    # configure_file avoids rebuilding the app when the bytes have not changed.
+    file(WRITE "${ICON_SOURCE}.in"
+        "namespace trussc::internal {
+const unsigned char* linuxAppIcon(int& size) {
+    static const unsigned char png[] = {${PNG_BYTES}};
+    size = sizeof(png);
+    return png;
+}
+}
+")
+    configure_file("${ICON_SOURCE}.in" "${ICON_SOURCE}" COPYONLY)
+    target_sources(${TARGET_NAME} PRIVATE "${ICON_SOURCE}")
 endfunction()
 
 # -----------------------------------------------------------------------------

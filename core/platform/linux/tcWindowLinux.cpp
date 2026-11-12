@@ -19,6 +19,7 @@
 #include "tcWindowGeometryX11.h"
 #include "sokol_app_tc.h"   // declarations only (impl lives in sokol_impl.cpp)
 #include <unistd.h>
+#include "stb/stb_image.h"
 
 using namespace trussc;
 
@@ -55,6 +56,40 @@ void Window::disposeNativeBacking() noexcept {
 }
 
 namespace internal {
+// Supplied by trussc_setup_icon() in the app target. Keep manual core-only
+// linkers and hosts without the app helper usable as well.
+const unsigned char* linuxAppIcon(int& size) __attribute__((weak));
+
+namespace {
+const std::vector<unsigned long>& windowIcon() {
+    static const auto icon = [] {
+        std::vector<unsigned long> data;
+        if (!linuxAppIcon) return data;
+        int size = 0;
+        const auto* png = linuxAppIcon(size);
+        int width = 0, height = 0, channels = 0;
+        auto* rgba = stbi_load_from_memory(png, size, &width, &height, &channels, 4);
+        if (!rgba) {
+            logWarning("Window") << "Could not decode embedded window icon";
+            return data;
+        }
+        // Xlib format 32 takes native longs, including on 64-bit Linux.
+        data.reserve(2 + static_cast<size_t>(width) * height);
+        data.push_back(width);
+        data.push_back(height);
+        for (size_t i = 0; i < static_cast<size_t>(width) * height; ++i) {
+            const auto* pixel = rgba + 4 * i;
+            data.push_back((static_cast<unsigned long>(pixel[3]) << 24) |
+                           (static_cast<unsigned long>(pixel[0]) << 16) |
+                           (static_cast<unsigned long>(pixel[1]) << 8) | pixel[2]);
+        }
+        stbi_image_free(rgba);
+        return data;
+    }();
+    return icon;
+}
+} // namespace
+
 void nativeWindowSetClass(uint32_t id) {
     auto* display = (Display*)sapp_x11_get_display();
     const auto window = (::Window)(uintptr_t)sapp_window_x11_get_window({id});
@@ -73,6 +108,12 @@ void nativeWindowSetClass(uint32_t id) {
     XClassHint hint{};
     hint.res_name = hint.res_class = name.data();
     XSetClassHint(display, window, &hint);
+    const auto& icon = windowIcon();
+    if (!icon.empty()) {
+        XChangeProperty(display, window, XInternAtom(display, "_NET_WM_ICON", False),
+            XA_CARDINAL, 32, PropModeReplace,
+            reinterpret_cast<const unsigned char*>(icon.data()), static_cast<int>(icon.size()));
+    }
 }
 namespace {
 sapp_window handle(const Window& w) { return WindowRequestAccess::binding(w).handle; }
