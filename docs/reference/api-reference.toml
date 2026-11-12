@@ -67309,71 +67309,92 @@ details.ko = '''
 ["GlyphBatch"]
 category = "font"
 keywords = ["glyph", "batch", "retained", "atlas", "text"]
-description.en = "Retains transformed glyph quads for repeated drawing in add order, batching consecutive glyphs on the same atlas page."
-description.ja = "変換済みのグリフを保持し、同じアトラスページが連続する区間をまとめて追加順に繰り返し描画します。"
-description.ko = "변환된 글리프를 유지하고 같은 아틀라스 페이지의 연속 구간을 묶어 추가 순서대로 반복 표시합니다."
+description.en = "Stores glyphs for repeated drawing; use it instead of drawString when text or per-glyph placement can be reused."
+description.ja = "グリフを保持して繰り返し描画します。文字列やグリフごとの配置を再利用するときに、drawString の代わりに使います。"
+description.ko = "글리프를 저장하여 반복해서 그립니다. 텍스트나 글리프별 배치를 재사용할 때 drawString 대신 사용합니다."
 details.en = '''
-Call setFont with a loaded Font. Adds use current matrix × batch transform; an explicit Mat4 replaces both. Omitted colors use the batch color; explicit colors replace it for that add. Settings persist across adds and clear(). Draw under the intended camera. draw applies the active view/projection once and does not apply the current model again, does not clear, and uploads vertices only after adds change the geometry, reusing grow-only buffers and a shared static quad index buffer. draw(transform) applies transform × recorded positions through a uniform. clear discards geometry; setFont also clears and copies the Font settings, sharing its current atlas. Later source setOversampling/setMipmaps calls replace the source atlas and do not reach this copy; configure first or call setFont again and rebuild.
-Glyphs draw in add order. Each consecutive run sharing an atlas page uses one draw; a single-page batch uses one draw, while A/B/A uses three. Scissor is captured at draw time. Blend is the mode current at draw(), not at add(). Depth, target format and MSAA also come from the draw target. Colors retain unclamped float RGB and normal Color alpha. Output is straight alpha like drawString; Screen/Multiply use the framework's corresponding premultiplied blend equations. Atlas sampling is trilinear with mips when the Font permits them (mip 0 at bilinear-safe rates of at most two texels per pixel, like Font); current page views and dimensions are resolved at draw time, so atlas growth preserves retained quads. Rebuild the batch after Font::clearAtlas.
-Custom uses the descriptor current at draw(), including glyph coverage; use conversion for screen, as in BlendDesc::premultiplySource.
+- Transforms and colors are recorded at add(); changing batch settings does not change retained glyphs, and blending uses the mode current at draw().
 
-Draw retained text with glow (inside tcApp::draw() with member `GlyphBatch batch`):
+Create the batch, set a loaded font, add once, and draw every frame:
 ```cpp
-void tcApp::draw() {
-    setCustomBlendDesc(BlendDesc::addKeepAlpha());
-    setBlendMode(BlendMode::Custom);
-    batch.draw();
+GlyphBatch batch; Font font; // tcApp members
+void tcApp::setup() { font.load(TC_FONT_SANS, 48); batch.setFont(font); batch.add("Hello", Color(1)); }
+void tcApp::draw() { batch.draw(); }
+```
+
+Call this tcApp member when the text changes; draw() keeps using the rebuilt batch:
+```cpp
+void tcApp::rebuildText() {
+    batch.clear(); batch.add("Updated", Color(1));
 }
 ```
+
+After setup(), this alternative rebuild applies transform and color settings to the new glyph:
+```cpp
+void tcApp::rebuildText() { batch.clear();
+    batch.setTransform(Mat4::scale(2)); batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A'); }
+```
+
+- Configure Font options before setFont(); see GlyphBatch::setFont for copying behavior. Rebuild after Font::clearAtlas.
 '''
 details.ja = '''
-読み込み済みの Font を setFont に渡します。追加には現在の行列 × バッチ変換を使います。明示した Mat4 は両方を置き換えます。色を省略するとバッチ色を使い、指定するとその追加だけ置き換えます。設定は追加や clear() をまたいで保持します。使いたいカメラの下で draw してください。draw は現在の view/projection を一度適用し、現在のモデル行列は再適用せず、内容を消去しません。頂点は add で内容が変わったときだけ転送し、拡張時だけ作成するバッファと共有の静的インデックスを再利用します。draw(transform) は uniform で transform × 記録済み座標を適用します。clear は形状を破棄します。setFont も形状を消去し、設定をコピーして現在のアトラスを共有します。元 Font の setOversampling/setMipmaps はアトラスを差し替えるため追従しません。先に設定するか、setFont を再度呼んで再構築してください。
-グリフは追加順に描画します。同じアトラスページが連続する区間ごとに 1 回描画し、単一ページのバッチは 1 回、A/B/A は 3 回になります。scissor は draw 時に記録します。ブレンドは add() 時ではなく draw() 時のモードを使います。深度、描画先の形式、MSAA も draw 時に反映します。RGB は範囲外の float 値を保持し、Color の alpha も有効です。出力は drawString と同じ straight alpha です。Screen・Multiply ではフレームワークの対応する乗算済みブレンド式を使います。Font で有効な場合はミップ付きトライリニア補間を使います。Font と同様に、1 ピクセルあたり 2 テクセル以下の縮小では mip 0 を使います。ページ画像とサイズを描画時に解決するため、アトラス拡張後も座標を保ちます。Font::clearAtlas 後はバッチを作り直してください。
-Custom は draw() 時の式を使い、グリフの被覆率も反映します。screen 用の変換は BlendDesc::premultiplySource を参照してください。
+- 変換と色は add() 時に記録します。バッチ設定を変えても保持済みのグリフは変わりません。ブレンドは draw() 時のモードを使います。
 
-保持済みの文字に光を加算します（tcApp::draw() 内でメンバー `GlyphBatch batch` を使います）。
+バッチを作り、読み込み済みのフォントを設定して一度追加し、毎フレーム描画します。
 ```cpp
-void tcApp::draw() {
-    setCustomBlendDesc(BlendDesc::addKeepAlpha());
-    setBlendMode(BlendMode::Custom);
-    batch.draw();
+GlyphBatch batch; Font font; // tcApp のメンバーです
+void tcApp::setup() { font.load(TC_FONT_SANS, 48); batch.setFont(font); batch.add("Hello", Color(1)); }
+void tcApp::draw() { batch.draw(); }
+```
+
+文字列が変わったときに、この tcApp メンバーを呼びます。draw() は再構築したバッチを使い続けます。
+```cpp
+void tcApp::rebuildText() {
+    batch.clear(); batch.add("Updated", Color(1));
 }
 ```
+
+setup() 後に使う別の再構築例です。変換と色の設定を新しいグリフに適用します。
+```cpp
+void tcApp::rebuildText() { batch.clear();
+    batch.setTransform(Mat4::scale(2)); batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A'); }
+```
+
+- Font のオプションは setFont() より先に設定します。コピーの動作は GlyphBatch::setFont を参照してください。Font::clearAtlas 後は再構築してください。
 '''
 details.ko = '''
-로드된 Font를 setFont에 전달합니다. 추가에는 현재 행렬 × 배치 변환을 사용합니다. 명시적 Mat4는 둘 다 대체합니다. 색상을 생략하면 배치 색상을 사용하고 지정하면 해당 추가에서만 대체합니다. 설정은 추가와 clear() 후에도 유지합니다. 사용할 카메라 아래에서 draw를 호출합니다. draw는 현재 view/projection을 한 번 적용하고 현재 모델을 다시 적용하거나 내용을 지우지 않으며, add로 형상이 바뀐 경우에만 정점을 업로드하며 확장할 때만 생성하는 버퍼와 공유 정적 인덱스를 재사용합니다. draw(transform)은 uniform으로 transform × 기록된 좌표를 적용합니다. clear는 형상을 버립니다. setFont도 형상을 지우고 설정을 복사하며 현재 아틀라스를 공유합니다. 원본 Font의 setOversampling/setMipmaps는 아틀라스를 교체하므로 반영되지 않습니다. 먼저 설정하거나 setFont를 다시 호출하고 재구성합니다.
-글리프는 추가 순서대로 그립니다. 같은 아틀라스 페이지의 연속 구간마다 한 번 그리므로 단일 페이지 배치는 한 번, A/B/A는 세 번 그립니다. scissor는 draw 시점에 기록합니다. 블렌드는 add()가 아닌 draw() 시점의 모드를 사용합니다. 깊이, 대상 형식 및 MSAA도 draw 시점에 적용합니다. RGB는 범위 밖 float 값을 유지하며 Color alpha도 적용합니다. 출력은 drawString과 같은 straight alpha입니다. Screen/Multiply는 프레임워크의 해당 사전 곱셈 블렌드 식을 사용합니다. Font가 허용하면 밉을 사용하는 삼선형 샘플링을 적용합니다. Font처럼 픽셀당 2텍셀 이하인 경우에는 mip 0을 사용합니다. 현재 페이지 이미지와 크기를 그릴 때 확인하므로 아틀라스가 커져도 유지된 좌표가 맞습니다. Font::clearAtlas 후에는 배치를 다시 만듭니다.
-Custom은 draw() 시점의 수식을 사용하며 글리프 커버리지도 반영합니다. screen용 변환은 BlendDesc::premultiplySource를 참조합니다.
+- 변환과 색상은 add() 시점에 기록합니다. 배치 설정을 변경해도 저장된 글리프는 바뀌지 않으며, 블렌드는 draw() 시점의 모드를 사용합니다.
 
-유지된 텍스트에 빛을 더합니다(tcApp::draw() 안에서 멤버 `GlyphBatch batch`를 사용합니다).
+배치를 만들고 로드된 폰트를 설정한 뒤 한 번 추가하고 매 프레임 그립니다.
 ```cpp
-void tcApp::draw() {
-    setCustomBlendDesc(BlendDesc::addKeepAlpha());
-    setBlendMode(BlendMode::Custom);
-    batch.draw();
+GlyphBatch batch; Font font; // tcApp 멤버입니다
+void tcApp::setup() { font.load(TC_FONT_SANS, 48); batch.setFont(font); batch.add("Hello", Color(1)); }
+void tcApp::draw() { batch.draw(); }
+```
+
+텍스트가 바뀌면 이 tcApp 멤버를 호출합니다. draw()는 재구성된 배치를 계속 사용합니다.
+```cpp
+void tcApp::rebuildText() {
+    batch.clear(); batch.add("Updated", Color(1));
 }
 ```
+
+setup() 후에 사용하는 다른 재구성 예입니다. 변환과 색상 설정을 새 글리프에 적용합니다.
+```cpp
+void tcApp::rebuildText() { batch.clear();
+    batch.setTransform(Mat4::scale(2)); batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A'); }
+```
+
+- Font 옵션은 setFont() 전에 설정합니다. 복사 동작은 GlyphBatch::setFont를 참조합니다. Font::clearAtlas 후에는 재구성합니다.
 '''
-related = ["Font", "Font::getGlyphInkBox", "GlyphBatch::add", "GlyphBatch::draw"]
+related = ["Font", "Font::drawString", "GlyphBatch::setFont", "GlyphBatch::add", "GlyphBatch::draw", "GlyphBatch::clear", "GlyphBatch::setTransform", "GlyphBatch::setColor"]
 snippet = '''
-// tcApp.h (inside class tcApp : public App)
-Font font;
-GlyphBatch batch;
-void setup() override {
-    font.load(TC_FONT_SANS, 24);
-    batch.setFont(font);
-    batch.setAlignToInk(true);
-    batch.setTransform(Mat4::scale(2));
-    batch.setColor(Color(1, 0.5f, 0.2f));
-}
-void draw() override {
-    batch.clear(); // Keeps transform and color.
-    pushMatrix();
-    translate(100, 100);
-    batch.add(U'A');
-    popMatrix();
-    batch.draw();
-}
+GlyphBatch batch; Font font; // tcApp members
+void setup() override { font.load(TC_FONT_SANS, 48); batch.setFont(font); batch.add("Hello", Color(1)); }
+void draw() override { batch.draw(); }
 '''
 
 ["GlyphBatch::setFont"]
@@ -67494,9 +67515,9 @@ category = "font"
 description.en = "Draws retained glyphs using the current target and blend; an optional transform applies through a uniform."
 description.ja = "保持したグリフを現在の描画先とブレンドで描画し、任意の変換を uniform で適用します。"
 description.ko = "유지한 글리프를 현재 대상과 블렌드로 그리고 선택적 변환을 uniform으로 적용합니다."
-details.en = "Uses the blend mode current at draw(), not at add(). draw() uses identity; draw(transform) applies transform × recorded model positions, then the active view/projection. Neither overload reapplies the current model or clears the batch. Draw under the intended camera; camera changes do not re-upload geometry. Unchanged batches reuse their vertex/index buffers across frames. See GlyphBatch for straight alpha, page ordering and mip sampling."
-details.ja = "draw() は単位変換を使います。draw(transform) は記録済みのモデル座標に transform を左から適用し、続いて現在の view/projection を適用します。どちらも現在のモデルを再適用せず、バッチを消去しません。使いたいカメラの下で描画してください。カメラ変更時も形状を再転送しません。内容が変わらなければ、フレームをまたいで頂点・インデックスバッファを再利用します。straight alpha、ページ順、ミップサンプリングは GlyphBatch を参照してください。"
-details.ko = "draw()는 단위 변환을 사용합니다. draw(transform)은 기록된 모델 좌표에 transform을 왼쪽에서 적용한 뒤 현재 view/projection을 적용합니다. 두 버전 모두 현재 모델을 다시 적용하거나 배치를 지우지 않습니다. 사용할 카메라 아래에서 그리며 카메라 변경은 형상 재업로드를 일으키지 않습니다. 내용이 바뀌지 않으면 프레임 간 정점/인덱스 버퍼를 재사용합니다. straight alpha, 페이지 순서 및 밉 샘플링은 GlyphBatch를 참조합니다."
+details.en = "Uses the blend mode current at draw(), not at add(). draw() uses identity; draw(transform) applies transform × recorded model positions, then the active view/projection. Neither overload reapplies the current model or clears the batch. Draw under the intended camera; camera changes do not re-upload geometry. Unchanged batches reuse their vertex/index buffers across frames. Glyphs draw in add order, with one draw per consecutive run on the same atlas page. Atlas growth preserves retained quads; rebuild after Font::clearAtlas."
+details.ja = "draw() は単位変換を使います。draw(transform) は記録済みのモデル座標に transform を左から適用し、続いて現在の view/projection を適用します。どちらも現在のモデルを再適用せず、バッチを消去しません。使いたいカメラの下で描画してください。カメラ変更時も形状を再転送しません。内容が変わらなければ、フレームをまたいで頂点・インデックスバッファを再利用します。グリフは追加順に描画し、同じアトラスページが連続する区間ごとに 1 回描画します。アトラスが拡張しても保持したグリフは有効です。Font::clearAtlas 後は再構築してください。"
+details.ko = "draw()는 단위 변환을 사용합니다. draw(transform)은 기록된 모델 좌표에 transform을 왼쪽에서 적용한 뒤 현재 view/projection을 적용합니다. 두 버전 모두 현재 모델을 다시 적용하거나 배치를 지우지 않습니다. 사용할 카메라 아래에서 그리며 카메라 변경은 형상 재업로드를 일으키지 않습니다. 내용이 바뀌지 않으면 프레임 간 정점/인덱스 버퍼를 재사용합니다. 글리프는 추가 순서대로 그리며 같은 아틀라스 페이지의 연속 구간마다 한 번 그립니다. 아틀라스가 커져도 저장된 글리프는 유효합니다. Font::clearAtlas 후에는 재구성합니다."
 related = ["GlyphBatch", "GlyphBatch::clear"]
 
 ["GlyphBatch::clear"]
