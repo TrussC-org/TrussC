@@ -1788,12 +1788,7 @@ public:
     void forEachGlyph(const std::string& text, float x, float y,
                       Direction h, Direction v,
                       const GlyphVisitor& visitor) const {
-        const std::string wrapped = wrapTextIfEnabled(text);
-        if (writingMode_ == WritingMode::VerticalRL) {
-            forEachGlyphVertical(wrapped, x, y, h, v, visitor);
-        } else {
-            forEachGlyphHorizontal(wrapped, x, y, h, v, visitor);
-        }
+        forEachGlyphWithMatrix(text, x, y, h, v, visitor, getMatrix());
     }
 
     // Convenience overload using current alignment settings.
@@ -1808,10 +1803,22 @@ public:
     // Internal drawing implementation
     // -------------------------------------------------------------------------
 protected:
+    // GlyphBatch supplies its final model without changing the global matrix.
+    void forEachGlyphWithMatrix(const std::string& text, float x, float y,
+                                Direction h, Direction v, const GlyphVisitor& visitor,
+                                const Mat4& matrix) const {
+        const std::string wrapped = wrapTextIfEnabled(text);
+        if (writingMode_ == WritingMode::VerticalRL) {
+            forEachGlyphVertical(wrapped, x, y, h, v, visitor, &matrix);
+        } else {
+            forEachGlyphHorizontal(wrapped, x, y, h, v, visitor, &matrix);
+        }
+    }
+
     // Layout pass for horizontal writing mode. Text is assumed pre-wrapped.
     void forEachGlyphHorizontal(const std::string& text, float x, float y,
                                 Direction h, Direction v,
-                                const GlyphVisitor& visitor) const {
+                                const GlyphVisitor& visitor, const Mat4* matrix = nullptr) const {
         if (!atlasManager_ || text.empty()) return;
 
         // Preload required glyphs (atlas-side); cheap if already cached.
@@ -1867,7 +1874,7 @@ protected:
         // Baseline of line n. Accumulated from the anchor, then snapped once --
         // see fitY() for why stepping by a snapped line height is wrong.
         auto baselineOf = [&](int lineIdx) -> float {
-            return y + fitY(offsetY + ascent + lineH * (float)lineIdx);
+            return y + fitY(offsetY + ascent + lineH * (float)lineIdx, matrix);
         };
 
         int currentLine = 0;
@@ -1997,7 +2004,7 @@ protected:
     // Layout pass for vertical writing mode. Text is assumed pre-wrapped.
     void forEachGlyphVertical(const std::string& text, float x, float y,
                               Direction h, Direction v,
-                              const GlyphVisitor& visitor) const {
+                              const GlyphVisitor& visitor, const Mat4* matrix = nullptr) const {
         if (!atlasManager_ || text.empty()) return;
 
         const float s   = 1.0f / dpiScale_;
@@ -2124,7 +2131,7 @@ protected:
         // the rotation, so moving baselineY moves them ACROSS the column rather
         // than along it, and grid fit has nothing to say about that axis.
         auto uprightBaseline = [&](float cellTop) -> float {
-            return colTop + fitY(cellTop - colTop + asc);
+            return colTop + fitY(cellTop - colTop + asc, matrix);
         };
 
         for (const auto& t : toks) {
@@ -2659,6 +2666,14 @@ protected:
         return std::fabs(getDefaultContext().getScale() * internal::targetPixelScale() - 1.0f) < 0.01f;
     }
 
+    bool gridFitLands(const Mat4& matrix) const {
+        const auto& m = matrix.m;
+        const float sx = std::sqrt(m[0]*m[0] + m[4]*m[4] + m[8]*m[8]);
+        const float sy = std::sqrt(m[1]*m[1] + m[5]*m[5] + m[9]*m[9]);
+        const float scale = std::max(sx, sy);
+        return gridFit_ && std::fabs((scale > 0 ? scale : 1) * internal::targetPixelScale() - 1) < 0.01f;
+    }
+
     // Snap a baseline offset to the pixel grid.
     //
     // Callers must pass the offset ACCUMULATED from the anchor (ascent +
@@ -2672,8 +2687,8 @@ protected:
     // The offset is snapped rather than the final position so that a caller
     // animating y still gets smooth sub-pixel motion instead of whole-pixel
     // judder; what is fixed is the spacing within the block.
-    float fitY(float offsetFromAnchor) const {
-        return gridFitLands() ? std::round(offsetFromAnchor) : offsetFromAnchor;
+    float fitY(float offsetFromAnchor, const Mat4* matrix = nullptr) const {
+        return (matrix ? gridFitLands(*matrix) : gridFitLands()) ? std::round(offsetFromAnchor) : offsetFromAnchor;
     }
 
     // -------------------------------------------------------------------------
