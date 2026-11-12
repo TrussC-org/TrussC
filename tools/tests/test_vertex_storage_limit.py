@@ -161,7 +161,7 @@ class VertexStorageLimitTests(unittest.TestCase):
         self.assertTrue(compiler.is_file(), 'requires the locally installed sokol-shdc; no downloads')
         with tempfile.TemporaryDirectory(dir=ROOT / '.build') as temporary:
             generated = Path(temporary) / 'particles.glsl.h'
-            shader = ROOT / 'examples/graphics/computeParticlesExample/src/particles.compute.glsl'
+            shader = ROOT / 'examples/compute/computeParticlesExample/src/particles.compute.glsl'
             result = subprocess.run([str(compiler), '-i', str(shader), '-o', str(generated),
                                      '-l', 'glsl430', '--ifdef'],
                                     capture_output=True, text=True, encoding='utf-8')

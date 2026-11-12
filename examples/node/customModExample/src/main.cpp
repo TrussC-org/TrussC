@@ -1,9 +1,14 @@
+// =============================================================================
+// main.cpp - Entry point
+// =============================================================================
+
 #include "tcApp.h"
 
 int main() {
-    WindowSettings settings;
-    settings.title = "customModExample";
+    tc::WindowSettings settings;
     settings.setSize(640, 400);
-    TC_RUN_APP(tcApp, settings);
-    return 0;
+
+    settings.setTitle("customModExample");
+
+    return TC_RUN_APP(tcApp, settings);
 }
