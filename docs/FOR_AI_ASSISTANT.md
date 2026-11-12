@@ -2964,7 +2964,7 @@ SaveResult AudioRecorder::stop()  // Stops recording and finalizes the audio fil
 ```cpp
 ```
 
-### BlendDesc — Sets the GPU's RGB and alpha blend equations and optional source conversion.
+### BlendDesc — Defines blend equations that standard modes cannot express, such as adding light while keeping destination alpha.
 
 ```cpp
 BlendDesc BlendDesc::addKeepAlpha()  // Adds RGB with SrcAlpha/One and preserves destination alpha with Zero/One.

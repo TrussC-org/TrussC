@@ -3174,11 +3174,11 @@ value_desc.Custom.ko = "저장된 BlendDesc로 RGB 및 알파 수식을 지정�
 
 ["BlendDesc"]
 category = "graphics"
-description.en = "Sets the GPU's RGB and alpha blend equations and optional source conversion."
-description.ja = "GPU の RGB・アルファのブレンド式と、任意の描画元変換を指定します。"
-description.ko = "GPU의 RGB 및 알파 블렌드 수식과 선택적 소스 변환을 지정합니다."
+description.en = "Defines blend equations that standard modes cannot express, such as adding light while keeping destination alpha."
+description.ja = "光を加算しながら描画先のアルファを保つなど、標準モードでは表せないブレンド式を指定します。"
+description.ko = "빛을 더하면서 대상 알파를 유지하는 등 표준 모드로 표현할 수 없는 블렌드 수식을 지정합니다."
 details.en = '''
-- Use with BlendMode::Custom for separate RGB and alpha equations: `op(source * src, destination * dst)`. Defaults to straight Alpha. Presets leave source conversion off; screenKeepAlpha and premultipliedAdd need it on for straight-alpha text, shapes and images. Fbo sources are already premultiplied. Custom tests depth when enabled but never writes it; windows, Fbos and MSAA support shapes, textures, Font and GlyphBatch.
+- Use BlendDesc with BlendMode::Custom to write blend equations beyond the standard modes, such as adding light while keeping destination alpha.
 
 Text glow:
 ```cpp
@@ -3188,9 +3188,11 @@ void tcApp::draw() {
     drawBitmapString("Glow", 20, 20);
 }
 ```
+
+- Use with BlendMode::Custom for separate RGB and alpha equations: `op(source * src, destination * dst)`. Defaults to straight Alpha. Presets leave source conversion off; screenKeepAlpha and premultipliedAdd need it on for straight-alpha text, shapes and images. Fbo sources are already premultiplied. Custom tests depth when enabled but never writes it; windows, Fbos and MSAA support shapes, textures, Font and GlyphBatch.
 '''
 details.ja = '''
-- BlendMode::Custom で RGB とアルファに別々の式 `op(source * src, destination * dst)` を使います。既定値は通常の Alpha です。プリセットは変換をオフにします。screenKeepAlpha と premultipliedAdd で通常の文字・図形・画像を描くときは変換をオンにします。Fbo は乗算済みです。Custom は有効な深度テストに従いますが、深度は書き込みません。ウィンドウ・Fbo・MSAA で図形、テクスチャ、Font、GlyphBatch に使えます。
+- BlendDesc は、光を加算しながら描画先のアルファを保つなど、標準モードでは表せないブレンド式を BlendMode::Custom で使うための設定です。
 
 文字の光を加算します。
 ```cpp
@@ -3200,9 +3202,11 @@ void tcApp::draw() {
     drawBitmapString("Glow", 20, 20);
 }
 ```
+
+- BlendMode::Custom で RGB とアルファに別々の式 `op(source * src, destination * dst)` を使います。既定値は通常の Alpha です。プリセットは変換をオフにします。screenKeepAlpha と premultipliedAdd で通常の文字・図形・画像を描くときは変換をオンにします。Fbo は乗算済みです。Custom は有効な深度テストに従いますが、深度は書き込みません。ウィンドウ・Fbo・MSAA で図形、テクスチャ、Font、GlyphBatch に使えます。
 '''
 details.ko = '''
-- BlendMode::Custom에서 RGB와 알파에 별도 수식 `op(source * src, destination * dst)`을 사용합니다. 기본값은 일반 Alpha입니다. 프리셋은 변환을 끕니다. screenKeepAlpha와 premultipliedAdd로 일반 텍스트, 도형, 이미지를 그릴 때는 변환을 켭니다. Fbo는 이미 사전 곱셈 상태입니다. Custom은 활성 깊이 테스트를 따르지만 깊이를 기록하지 않습니다. 창, Fbo, MSAA에서 도형, 텍스처, Font, GlyphBatch에 사용합니다.
+- BlendDesc는 빛을 더하면서 대상 알파를 유지하는 등 표준 모드로 표현할 수 없는 블렌드 수식을 BlendMode::Custom에서 사용하기 위한 설정입니다.
 
 텍스트의 빛을 더합니다.
 ```cpp
@@ -3212,6 +3216,8 @@ void tcApp::draw() {
     drawBitmapString("Glow", 20, 20);
 }
 ```
+
+- BlendMode::Custom에서 RGB와 알파에 별도 수식 `op(source * src, destination * dst)`을 사용합니다. 기본값은 일반 Alpha입니다. 프리셋은 변환을 끕니다. screenKeepAlpha와 premultipliedAdd로 일반 텍스트, 도형, 이미지를 그릴 때는 변환을 켭니다. Fbo는 이미 사전 곱셈 상태입니다. Custom은 활성 깊이 테스트를 따르지만 깊이를 기록하지 않습니다. 창, Fbo, MSAA에서 도형, 텍스처, Font, GlyphBatch에 사용합니다.
 '''
 related = ["BlendFactor", "BlendOp", "setCustomBlendDesc", "getCustomBlendDesc", "BlendMode", "BlendDesc::premultiplySource"]
 
@@ -67313,88 +67319,138 @@ description.en = "Stores glyphs for repeated drawing; use it instead of drawStri
 description.ja = "グリフを保持して繰り返し描画します。文字列やグリフごとの配置を再利用するときに、drawString の代わりに使います。"
 description.ko = "글리프를 저장하여 반복해서 그립니다. 텍스트나 글리프별 배치를 재사용할 때 drawString 대신 사용합니다."
 details.en = '''
-- Transforms and colors are recorded at add(); changing batch settings does not change retained glyphs, and blending uses the mode current at draw().
+- GlyphBatch reuses built text and gives each glyph its own color and matrix (for rotation, for example). Font::drawString normally draws text, but rebuilding its layout on every call can be costly. GlyphBatch builds the text once and draws it repeatedly. Like Mesh, it separates building from drawing with draw().
 
 Create the batch, set a loaded font, add once, and draw every frame:
 ```cpp
-GlyphBatch batch; Font font; // tcApp members
-void tcApp::setup() { font.load(TC_FONT_SANS, 48); batch.setFont(font); batch.add("Hello", Color(1)); }
-void tcApp::draw() { batch.draw(); }
+// tcApp members
+GlyphBatch batch;
+Font font;
+void tcApp::setup() {
+    font.load(TC_FONT_SANS, 48);
+    batch.setFont(font);
+    batch.add("Hello", Color(1));
+}
+void tcApp::draw() {
+    batch.draw();
+}
 ```
 
 Call this tcApp member when the text changes; draw() keeps using the rebuilt batch:
 ```cpp
 void tcApp::rebuildText() {
-    batch.clear(); batch.add("Updated", Color(1));
+    batch.clear();
+    batch.add("Updated", Color(1));
 }
 ```
 
 After setup(), this alternative rebuild applies transform and color settings to the new glyph:
 ```cpp
-void tcApp::rebuildText() { batch.clear();
-    batch.setTransform(Mat4::scale(2)); batch.setColor(Color(1, 0.5f, 0.2f));
-    batch.add(U'A'); }
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A');
+}
 ```
+
+- Transforms and colors are recorded at add(); changing batch settings does not change retained glyphs. Blending uses the mode current at draw().
 
 - Configure Font options before setFont(); see GlyphBatch::setFont for copying behavior. Rebuild after Font::clearAtlas.
 '''
 details.ja = '''
-- 変換と色は add() 時に記録します。バッチ設定を変えても保持済みのグリフは変わりません。ブレンドは draw() 時のモードを使います。
+- GlyphBatch は、一度組み立てたテキストを繰り返し描画し、一文字ずつ色や Matrix（回転など）を指定するために使います。通常は Font::drawString で文字を描画しますが、呼び出すたびに配置を再構築するため、処理が重くなる場合があります。GlyphBatch は組み立てたテキストを再利用できます。使い方は Mesh と似ていて、構築するコードと描画するコード（draw）を分けます。
 
 バッチを作り、読み込み済みのフォントを設定して一度追加し、毎フレーム描画します。
 ```cpp
-GlyphBatch batch; Font font; // tcApp のメンバーです
-void tcApp::setup() { font.load(TC_FONT_SANS, 48); batch.setFont(font); batch.add("Hello", Color(1)); }
-void tcApp::draw() { batch.draw(); }
+// tcApp members
+GlyphBatch batch;
+Font font;
+void tcApp::setup() {
+    font.load(TC_FONT_SANS, 48);
+    batch.setFont(font);
+    batch.add("Hello", Color(1));
+}
+void tcApp::draw() {
+    batch.draw();
+}
 ```
 
 文字列が変わったときに、この tcApp メンバーを呼びます。draw() は再構築したバッチを使い続けます。
 ```cpp
 void tcApp::rebuildText() {
-    batch.clear(); batch.add("Updated", Color(1));
+    batch.clear();
+    batch.add("Updated", Color(1));
 }
 ```
 
 setup() 後に使う別の再構築例です。変換と色の設定を新しいグリフに適用します。
 ```cpp
-void tcApp::rebuildText() { batch.clear();
-    batch.setTransform(Mat4::scale(2)); batch.setColor(Color(1, 0.5f, 0.2f));
-    batch.add(U'A'); }
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A');
+}
 ```
+
+- 変換と色は add() 時に記録します。バッチ設定を変えても保持済みのグリフは変わりません。ブレンドは draw() 時のモードを使います。
 
 - Font のオプションは setFont() より先に設定します。コピーの動作は GlyphBatch::setFont を参照してください。Font::clearAtlas 後は再構築してください。
 '''
 details.ko = '''
-- 변환과 색상은 add() 시점에 기록합니다. 배치 설정을 변경해도 저장된 글리프는 바뀌지 않으며, 블렌드는 draw() 시점의 모드를 사용합니다.
+- GlyphBatch는 한 번 구성한 텍스트를 반복해서 그리고 글리프마다 색상과 Matrix(회전 등)를 지정할 때 사용합니다. 보통 Font::drawString으로 텍스트를 그리지만 호출할 때마다 배치를 다시 구성하므로 처리 비용이 커질 수 있습니다. GlyphBatch는 구성한 텍스트를 재사용합니다. Mesh처럼 구성 코드와 그리기 코드(draw)를 분리합니다.
 
 배치를 만들고 로드된 폰트를 설정한 뒤 한 번 추가하고 매 프레임 그립니다.
 ```cpp
-GlyphBatch batch; Font font; // tcApp 멤버입니다
-void tcApp::setup() { font.load(TC_FONT_SANS, 48); batch.setFont(font); batch.add("Hello", Color(1)); }
-void tcApp::draw() { batch.draw(); }
+// tcApp members
+GlyphBatch batch;
+Font font;
+void tcApp::setup() {
+    font.load(TC_FONT_SANS, 48);
+    batch.setFont(font);
+    batch.add("Hello", Color(1));
+}
+void tcApp::draw() {
+    batch.draw();
+}
 ```
 
 텍스트가 바뀌면 이 tcApp 멤버를 호출합니다. draw()는 재구성된 배치를 계속 사용합니다.
 ```cpp
 void tcApp::rebuildText() {
-    batch.clear(); batch.add("Updated", Color(1));
+    batch.clear();
+    batch.add("Updated", Color(1));
 }
 ```
 
 setup() 후에 사용하는 다른 재구성 예입니다. 변환과 색상 설정을 새 글리프에 적용합니다.
 ```cpp
-void tcApp::rebuildText() { batch.clear();
-    batch.setTransform(Mat4::scale(2)); batch.setColor(Color(1, 0.5f, 0.2f));
-    batch.add(U'A'); }
+void tcApp::rebuildText() {
+    batch.clear();
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+    batch.add(U'A');
+}
 ```
+
+- 변환과 색상은 add() 시점에 기록합니다. 배치 설정을 변경해도 저장된 글리프는 바뀌지 않습니다. 블렌드는 draw() 시점의 모드를 사용합니다.
 
 - Font 옵션은 setFont() 전에 설정합니다. 복사 동작은 GlyphBatch::setFont를 참조합니다. Font::clearAtlas 후에는 재구성합니다.
 '''
 related = ["Font", "Font::drawString", "GlyphBatch::setFont", "GlyphBatch::add", "GlyphBatch::draw", "GlyphBatch::clear", "GlyphBatch::setTransform", "GlyphBatch::setColor"]
 snippet = '''
-GlyphBatch batch; Font font; // tcApp members
-void setup() override { font.load(TC_FONT_SANS, 48); batch.setFont(font); batch.add("Hello", Color(1)); }
-void draw() override { batch.draw(); }
+// tcApp members
+GlyphBatch batch;
+Font font;
+void setup() override {
+    font.load(TC_FONT_SANS, 48);
+    batch.setFont(font);
+    batch.add("Hello", Color(1));
+}
+void draw() override {
+    batch.draw();
+}
 '''
 
 ["GlyphBatch::setFont"]
@@ -67520,15 +67576,23 @@ details.en = '''
 
 Under an EasyCam, the current camera applies and moving it does not re-upload the glyphs:
 ```cpp
+// tcApp members
+GlyphBatch batch;
+EasyCam cam;
 void tcApp::draw() {
-    cam.begin(); batch.draw(); cam.end();
+    cam.begin();
+    batch.draw();
+    cam.end();
 }
 ```
 
 draw(transform) draws the same batch at different places:
 ```cpp
+// tcApp members
+GlyphBatch batch;
 void tcApp::draw() {
-    batch.draw(Mat4::translate(100, 100, 0)); batch.draw(Mat4::translate(100, 300, 0));
+    batch.draw(Mat4::translate(100, 100, 0));
+    batch.draw(Mat4::translate(100, 300, 0));
 }
 ```
 '''
@@ -67537,15 +67601,23 @@ details.ja = '''
 
 EasyCam の下では現在のカメラが適用され、カメラを動かしてもグリフは再転送されません。
 ```cpp
+// tcApp members
+GlyphBatch batch;
+EasyCam cam;
 void tcApp::draw() {
-    cam.begin(); batch.draw(); cam.end();
+    cam.begin();
+    batch.draw();
+    cam.end();
 }
 ```
 
 draw(transform) で同じバッチを別の場所に描画できます。
 ```cpp
+// tcApp members
+GlyphBatch batch;
 void tcApp::draw() {
-    batch.draw(Mat4::translate(100, 100, 0)); batch.draw(Mat4::translate(100, 300, 0));
+    batch.draw(Mat4::translate(100, 100, 0));
+    batch.draw(Mat4::translate(100, 300, 0));
 }
 ```
 '''
@@ -67554,15 +67626,23 @@ details.ko = '''
 
 EasyCam 아래에서는 현재 카메라가 적용되며 카메라를 움직여도 글리프를 다시 업로드하지 않습니다.
 ```cpp
+// tcApp members
+GlyphBatch batch;
+EasyCam cam;
 void tcApp::draw() {
-    cam.begin(); batch.draw(); cam.end();
+    cam.begin();
+    batch.draw();
+    cam.end();
 }
 ```
 
 draw(transform)으로 같은 배치를 다른 위치에 그릴 수 있습니다.
 ```cpp
+// tcApp members
+GlyphBatch batch;
 void tcApp::draw() {
-    batch.draw(Mat4::translate(100, 100, 0)); batch.draw(Mat4::translate(100, 300, 0));
+    batch.draw(Mat4::translate(100, 100, 0));
+    batch.draw(Mat4::translate(100, 300, 0));
 }
 ```
 '''
