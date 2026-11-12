@@ -415,20 +415,34 @@ function(_trussc_setup_icon_linux TARGET_NAME ICON_DIR DEFAULT_DIR)
         set(PNG_FILE "${DEFAULT_DIR}/default.png")
     endif()
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${PNG_FILE}")
-    file(READ "${PNG_FILE}" PNG_HEX HEX)
-    string(REGEX REPLACE "(..)" "0x\\1," PNG_BYTES "${PNG_HEX}")
+    file(RELATIVE_PATH ICON_NAME "${CMAKE_CURRENT_SOURCE_DIR}" "${PNG_FILE}")
+    # Escape assembler paths; the C++ raw strings preserve spaces and UTF-8.
+    string(REPLACE "\\" "\\\\" PNG_PATH "${PNG_FILE}")
+    string(REPLACE "\"" "\\\"" PNG_PATH "${PNG_PATH}")
     set(ICON_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}_icon.cpp")
-    # configure_file avoids rebuilding the app when the bytes have not changed.
-    file(WRITE "${ICON_SOURCE}.in"
-        "namespace trussc::internal {
-const unsigned char* linuxAppIcon(int& size) {
-    static const unsigned char png[] = {${PNG_BYTES}};
-    size = sizeof(png);
-    return png;
+    file(WRITE "${ICON_SOURCE}.in" [=[
+asm(R"TCICON(
+.pushsection .rodata
+.global trussc_linux_icon_start, trussc_linux_icon_end
+.hidden trussc_linux_icon_start, trussc_linux_icon_end
+trussc_linux_icon_start:
+.incbin "@PNG_PATH@"
+trussc_linux_icon_end:
+.popsection
+)TCICON");
+extern "C" {
+extern const unsigned char trussc_linux_icon_start[], trussc_linux_icon_end[];
+}
+namespace trussc::internal {
+const unsigned char* linuxAppIcon(int& size, const char*& name) {
+    size = trussc_linux_icon_end - trussc_linux_icon_start;
+    name = R"TCICON(@ICON_NAME@)TCICON";
+    return trussc_linux_icon_start;
 }
 }
-")
-    configure_file("${ICON_SOURCE}.in" "${ICON_SOURCE}" COPYONLY)
+]=])
+    configure_file("${ICON_SOURCE}.in" "${ICON_SOURCE}" @ONLY)
+    set_source_files_properties("${ICON_SOURCE}" PROPERTIES OBJECT_DEPENDS "${PNG_FILE}")
     target_sources(${TARGET_NAME} PRIVATE "${ICON_SOURCE}")
 endfunction()
 
