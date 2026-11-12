@@ -4110,7 +4110,7 @@ _trusscli() {
                     return
                     ;;
                 --ide)
-                    _describe 'IDE' '(vscode cursor xcode vs cmake)'
+                    compadd vscode cursor xcode vs cmake
                     return
                     ;;
             esac
@@ -4128,11 +4128,11 @@ _trusscli() {
                     return
                     ;;
                 --ide)
-                    _describe 'IDE' '(vscode cursor xcode vs cmake)'
+                    compadd vscode cursor xcode vs cmake
                     return
                     ;;
                 --session)
-                    _describe 'session' '(labwc x11)'
+                    compadd labwc x11
                     return
                     ;;
             esac
