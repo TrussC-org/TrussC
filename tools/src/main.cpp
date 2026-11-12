@@ -4104,6 +4104,16 @@ _trusscli() {
             _files -/
             ;;
         cp)
+            case "$words[CURRENT-1]" in
+                --tc-root)
+                    _files -/
+                    return
+                    ;;
+                --ide)
+                    _describe 'IDE' '(vscode cursor xcode vs cmake)'
+                    return
+                    ;;
+            esac
             local -a cp_opts
             cp_opts=('-n:Dry run' '--dry-run:Dry run' '--no-git:Use built-in skip list'
                      '--web:Enable web' '--android:Enable android' '--ios:Enable ios'
@@ -4112,6 +4122,20 @@ _trusscli() {
             _files -/
             ;;
         update|build|run|clean)
+            case "$words[CURRENT-1]" in
+                -p|--path|--tc-root)
+                    _files -/
+                    return
+                    ;;
+                --ide)
+                    _describe 'IDE' '(vscode cursor xcode vs cmake)'
+                    return
+                    ;;
+                --session)
+                    _describe 'session' '(labwc x11)'
+                    return
+                    ;;
+            esac
             local -a opts
             case "$words[2]" in
                 update) opts=('-p:Project path' '--path:Project path' '--web:Enable web' '--android:Enable android' '--ios:Enable ios' '--no-web:Disable web' '--no-android:Disable android' '--no-ios:Disable ios' '--ide:IDE type' '--tc-root:TrussC root') ;;
