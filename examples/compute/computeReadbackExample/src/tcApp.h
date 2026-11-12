@@ -7,7 +7,7 @@ class tcApp : public App {
     // one uint on the GPU; the compute shader adds to it
     StorageBuffer counter;
 
-    // counts the thread IDs that are at least 64
+    // adds 1..100 into counter, one number per thread
     ComputeShader compute;
 
     // CPU copy of the result, filled by read()
