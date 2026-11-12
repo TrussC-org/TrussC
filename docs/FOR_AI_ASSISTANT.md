@@ -3393,7 +3393,7 @@ void FullscreenShader::setParams(const T & params)  // Sets the uniform paramete
 ```cpp
 void GlyphBatch::add(uint32_t codepoint) [+5]  // Appends a glyph or UTF-8 string, using batch settings for omitted arguments.
 void GlyphBatch::clear()  // Discards retained geometry while keeping the font and batch settings.
-void GlyphBatch::draw() [+1]  // Draws retained glyphs using the current target and blend; an optional transform applies through a uniform.
+void GlyphBatch::draw() [+1]  // Draws the retained glyphs with the current camera, target and blend mode; draw(transform) places the whole batch.
 const Color & GlyphBatch::getColor() const  // Returns the current batch color.
 const Mat4 & GlyphBatch::getTransform() const  // Returns the current batch transform.
 void GlyphBatch::resetColor()  // Resets the batch color to white (1,1,1,1).
