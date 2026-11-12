@@ -25,6 +25,9 @@ build-web.*
 bin/*
 !bin/data/
 
+# Packages written by 'trusscli dist'
+dist/
+
 # IDE specific
 .vscode/
 .vs/
