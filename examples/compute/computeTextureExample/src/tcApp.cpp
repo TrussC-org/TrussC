@@ -19,8 +19,10 @@ void tcApp::setup() {
 }
 
 void tcApp::update() {
-    // 32x32 groups of 8x8 threads (local_size) = 256x256, one thread per pixel.
-    // The image is the same every frame; pass a time uniform to animate it
+    // the shader uses the elapsed time to move the rings, so the image changes every frame
+    compute.setUniform(UB_texture_params, Vec4(getElapsedTime(), 0, 0, 0));
+
+    // 32x32 groups of 8x8 threads (local_size) = 256x256, one thread per pixel
     compute.dispatch(32, 32, 1);
 }
 
