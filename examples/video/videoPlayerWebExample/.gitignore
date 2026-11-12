@@ -28,6 +28,9 @@ bin/*
 .vs/
 .cache/
 
+# Generated shader headers (rebuilt by CMake)
+*.glsl.h
+
 # OS specific
 .DS_Store
 Thumbs.db
