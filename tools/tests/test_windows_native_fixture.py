@@ -8,12 +8,13 @@ from test_web_window_controls import body
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = Path(os.environ.get('TC_WIN32_FIXTURE_SOURCE', ROOT / 'core/tests/nativeWindow/win32.cpp'))
+HEADER = Path(os.environ.get('TC_WIN32_FIXTURE_HEADER', ROOT / 'core/include/sokol/sokol_app_tc.h'))
 
 
 class NativeFixtureTests(unittest.TestCase):
 
     def test_per_window_max_frame_latency(self):
-        header = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+        header = HEADER.read_text(encoding='utf-8')
         create = body(header, 'static bool _sapp_tc_d3d11_create_swapchain(')
         code = r"""
 #include <cassert>
@@ -43,12 +44,17 @@ struct IDXGISwapChain2 {
     void Release() {}
 };
 struct IDXGISwapChain1 : IDXGISwapChain2 {
+    int bufferCount=0;
     HRESULT QueryInterface(int, void** out) { *out=static_cast<IDXGISwapChain2*>(this); return 0; }
 };
+bool waitableSupported=true;
 struct IDXGIFactory2 {
     HRESULT CreateSwapChainForHwnd(IUnknown*,void* hwnd,DXGI_SWAP_CHAIN_DESC1* desc,void*,void*,IDXGISwapChain1** out) {
-        assert(desc->Flags==DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
-        *out=static_cast<IDXGISwapChain1*>(hwnd); return 0;
+        auto* chain=static_cast<IDXGISwapChain1*>(hwnd);
+        if (!waitableSupported && desc->Flags) { chain->bufferCount=desc->BufferCount; return -1; }
+        if (!waitableSupported) assert(chain->bufferCount==desc->BufferCount);
+        chain->bufferCount=desc->BufferCount;
+        *out=chain; return 0;
     }
     void MakeWindowAssociation(void*,int) {}
     void Release() {}
@@ -96,6 +102,21 @@ int main() {
         assert(peer.frame_wait==&secondary && launch.latency==3);
     }
     assert(launch.applications==1 && secondary.applications==6);
+    // Check actual creation descriptors, including the non-waitable retry.
+    for (bool supported : {true,false}) {
+        waitableSupported=supported;
+        for (int value : {1,3,16,0,-1,17}) {
+            IDXGISwapChain1 chain;
+            _sapp_tc_window_t window; window.hwnd=&chain; window.desc.max_frame_latency=value;
+            const int before=warnings;
+            assert(_sapp_tc_d3d11_create_swapchain(&window));
+            const int expected=value==1 ? 2 : value==16 ? 16 : 4;
+            assert(chain.bufferCount==expected);
+            assert(warnings==before+int(value<0 || value>16));
+            assert(chain.applications==int(supported));
+            assert(window.swapchain_flags==(supported ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT : 0));
+        }
+    }
 }
 """
         with tempfile.TemporaryDirectory() as tmp:
@@ -103,6 +124,53 @@ int main() {
             (path / 'latency.cpp').write_text(code, encoding='utf-8')
             subprocess.run(['c++', '-std=c++20', str(path / 'latency.cpp'), '-o', str(path / 'latency')], check=True)
             subprocess.run([str(path / 'latency')], check=True)
+
+    def test_resize_keeps_created_buffer_count(self):
+        header = HEADER.read_text(encoding='utf-8')
+        resize = body(header, 'static bool _sapp_tc_d3d11_resize(')
+        code = r"""
+#include <cassert>
+#include <cstddef>
+#include <initializer_list>
+using UINT = unsigned;
+using HRESULT = int;
+struct Chain {
+    UINT count;
+    HRESULT ResizeBuffers(UINT requested, UINT width, UINT height, int format, UINT flags) {
+        assert(requested==0); // Preserve the count chosen at creation.
+        assert(width==160 && height==90 && format==1 && flags==7);
+        if (requested) count=requested;
+        return 0;
+    }
+};
+struct Context {
+    void OMSetRenderTargets(int,void*,void*) {}
+    void Flush() {}
+} context;
+struct { struct { bool device_lost_notified=false; Context* device_context=&context; } app; } _sapp_tc;
+struct _sapp_tc_window_t {
+    Chain* swap_chain;
+    int fb_width=160,fb_height=90,color_fmt=1;
+    UINT swapchain_flags=7;
+};
+void _sapp_tc_d3d11_destroy_render_targets(_sapp_tc_window_t*) {}
+bool _sapp_tc_d3d11_check_device_loss(HRESULT) { return false; }
+bool _sapp_tc_d3d11_create_render_targets(_sapp_tc_window_t*) { return true; }
+""" + resize + r"""
+int main() {
+    for (UINT count : {2u,4u,16u}) {
+        Chain chain{count};
+        _sapp_tc_window_t window{&chain};
+        assert(_sapp_tc_d3d11_resize(&window));
+        assert(chain.count==count);
+    }
+}
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / 'resize.cpp').write_text(code, encoding='utf-8')
+            subprocess.run(['c++', '-std=c++20', str(path / 'resize.cpp'), '-o', str(path / 'resize')], check=True)
+            subprocess.run([str(path / 'resize')], check=True)
 
     def test_window_class_uses_sized_executable_icons(self):
         header = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')

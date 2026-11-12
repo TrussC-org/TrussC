@@ -544,7 +544,7 @@ The existing fullscreen policy is unchanged.
 
 **Classification:** KEEP decided by owner (2026-11-12).
 
-**Code locations:** `sapp_desc::max_frame_latency`, `sapp_window_desc::max_frame_latency`, `_sapp_tc_win32_create_main_window`, `_sapp_tc_d3d11_create_swapchain`.
+**Code locations:** `sapp_desc::max_frame_latency`, `sapp_window_desc::max_frame_latency`, `_sapp_tc_win32_create_main_window`, `_sapp_tc_d3d11_create_swapchain`, `_sapp_tc_d3d11_resize`.
 
 **Planned slice:** None; preserve this per-window setting on fork updates.
 
@@ -552,6 +552,10 @@ Both descriptors carry the Windows D3D11 maximum frame latency. Zero selects
 3; 1–16 is accepted, other values warn on each creation and use 3. TrussC's
 `WindowSettings::setMaxFrameLatency` warns on each invalid call and stores 3.
 Each waitable swapchain applies its own value with `SetMaximumFrameLatency`.
+Creation validates the latency before allocating `clamp(latency + 1, 2, 16)`
+back buffers, including the non-waitable fallback. The extra buffer avoids
+blocking Present when the latency waitable signals with queued frames still
+in flight. `ResizeBuffers(0, ...)` preserves that count on resize.
 The default permits CPU/GPU overlap; 1 minimizes input latency. Other backends
 ignore the field. Held-credit deadlines stay unchanged. After MsgWait, the
 Windows loop polls the other admitted waitables once (never the signal already

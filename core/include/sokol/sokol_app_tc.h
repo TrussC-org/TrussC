@@ -7665,7 +7665,8 @@ static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w) {
     }
     /* the creation flags (frame latency waitable!) must be passed unchanged
        on every resize, or the waitable handle is silently invalidated */
-    const HRESULT hr = w->swap_chain->ResizeBuffers(2, (UINT)w->fb_width, (UINT)w->fb_height,
+    /* [TrussC #1447] Zero preserves the buffer count selected at creation. */
+    const HRESULT hr = w->swap_chain->ResizeBuffers(0, (UINT)w->fb_width, (UINT)w->fb_height,
                                  w->color_fmt, w->swapchain_flags);
     if (_sapp_tc_d3d11_check_device_loss(hr)) return false;
     _sapp_tc_d3d11_create_render_targets(w);
@@ -7682,6 +7683,14 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
     bool ok = false;
     if (_sapp_tc_d3d11_check(dxgi_device->GetAdapter(&adapter), "GetAdapter") &&
         _sapp_tc_d3d11_check(adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory), "GetParent(IDXGIFactory2)")) {
+        /* [TrussC #1447] Per-window CPU/GPU overlap; zero selects the default. */
+        int latency = w->desc.max_frame_latency;
+        if (latency == 0) latency = 3;
+        if (latency < 1 || latency > 16) {
+            _sapp_tc_log(&_sapp_tc.app.desc.logger, 2, SAPP_LOGITEM_OK, __LINE__,
+                "warning: ", "max_frame_latency %d is outside 1–16; using default 3", latency);
+            latency = 3;
+        }
         DXGI_SWAP_CHAIN_DESC1 d;
         memset(&d, 0, sizeof(d));
         d.Width = (UINT)(w->fb_width > 0 ? w->fb_width : 1);
@@ -7689,7 +7698,8 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
         d.Format = w->color_fmt;
         d.SampleDesc.Count = 1;     /* MSAA lives in a separate render target */
         d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        d.BufferCount = 2;
+        /* [TrussC #1447] Leave a free back buffer beyond the queued frames. */
+        d.BufferCount = (UINT)(latency < 16 ? latency + 1 : 16);
         d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         d.Scaling = DXGI_SCALING_STRETCH;
         d.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
@@ -7709,14 +7719,6 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
             if (d.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) {
                 IDXGISwapChain2* sc2 = 0;
                 if (SUCCEEDED(w->swap_chain->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&sc2))) {
-                    /* [TrussC #1447] Per-window CPU/GPU overlap; zero selects the default. */
-                    int latency = w->desc.max_frame_latency;
-                    if (latency == 0) latency = 3;
-                    if (latency < 1 || latency > 16) {
-                        _sapp_tc_log(&_sapp_tc.app.desc.logger, 2, SAPP_LOGITEM_OK, __LINE__,
-                            "warning: ", "max_frame_latency %d is outside 1–16; using default 3", latency);
-                        latency = 3;
-                    }
                     sc2->SetMaximumFrameLatency((UINT)latency);
                     w->frame_wait = sc2->GetFrameLatencyWaitableObject();
                     sc2->Release();

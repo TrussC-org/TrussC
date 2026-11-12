@@ -304,7 +304,9 @@ Windows D3D11 now defaults to a maximum frame latency of **3**, previously **1**
 CPU and GPU work can overlap for a smoother frame rate, at the cost of up to
 N−1 frames of extra input latency. Set `WindowSettings::setMaxFrameLatency(1)`
 for the lowest input latency and the previous behavior. This is per window;
-other backends ignore it.
+other backends ignore it. Each window holds latency + 1 back buffers, capped
+at 16 buffers when latency is 16. Each extra buffer uses about 8 MB at 1080p
+RGBA8 (default 3: four buffers; latency 1: two). Resizing preserves the count.
 
 ```cpp
 return runApp<tcApp>(WindowSettings().setMaxFrameLatency(1));
