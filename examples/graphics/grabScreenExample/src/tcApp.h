@@ -5,6 +5,7 @@ using namespace tc;
 
 class tcApp : public App {
 public:
+    void afterFrame();
     void setup() override;
     void draw() override;
     void keyPressed(int key) override;
@@ -17,6 +18,3 @@ private:
 
     friend class SelfCheckApp;
 };
-
-// Kept separately so the reference example stays focused on capturing a frame.
-int runSelfCheck(const WindowSettings& settings);

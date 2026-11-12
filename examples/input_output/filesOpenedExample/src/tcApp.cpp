@@ -8,12 +8,7 @@
 #include "tcApp.h"
 
 void tcApp::setup() {
-    opened = runtime().events().filesOpened.listen([this](FilesOpenedEventArgs& e) {
-    files = e.files;
-        for (const auto& file : files) {
-            if (image.load(file)) break;
-        }
-    });
+    opened = runtime().events().filesOpened.listen(this, &tcApp::filesOpened);
 }
 
 void tcApp::draw() {
@@ -26,5 +21,12 @@ void tcApp::draw() {
     for (const auto& file : files) {
         drawBitmapStringHighlight(pathToUtf8(file.filename()), 20, y);
         y += 20;
+    }
+}
+
+void tcApp::filesOpened(FilesOpenedEventArgs& e) {
+    files = e.files;
+    for (const auto& file : files) {
+        if (image.load(file)) break;
     }
 }

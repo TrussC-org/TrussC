@@ -1,5 +1,5 @@
 // =============================================================================
-// tcApp.cpp - Tool palette example
+// toolPaletteExample - Use a floating palette to control a canvas window.
 // =============================================================================
 // The main window is a canvas: drag to paint. A small palette window, opened
 // with WindowSettings::setParentWindow(), offers colors and brush sizes. The

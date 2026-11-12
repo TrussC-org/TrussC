@@ -9,14 +9,7 @@
 
 void tcApp::setup() {
     // Keep the listener in a member so it stays subscribed.
-    afterFrameListener_ = events().afterFrame.listen([this]() {
-        if (!grabRequested_) return;
-        grabRequested_ = false;
-        // The frame is finished here, including ImGui if the app uses it.
-        // Drawing to the screen in afterFrame will not appear: only read back
-        // the frame or render into an Fbo. Show the uploaded texture in draw().
-        if (grabScreen(pixels_)) thumbnail_.allocate(pixels_);
-    });
+    afterFrameListener_ = events().afterFrame.listen(this, &tcApp::afterFrame);
 }
 
 void tcApp::draw() {
@@ -51,4 +44,13 @@ void tcApp::draw() {
 
 void tcApp::keyPressed(int key) {
     if (key == ' ') grabRequested_ = true;
+}
+
+void tcApp::afterFrame() {
+    if (!grabRequested_) return;
+    grabRequested_ = false;
+    // The frame is finished here, including ImGui if the app uses it.
+    // Drawing to the screen in afterFrame will not appear: only read back
+    // the frame or render into an Fbo. Show the uploaded texture in draw().
+    if (grabScreen(pixels_)) thumbnail_.allocate(pixels_);
 }

@@ -1,5 +1,5 @@
 // =============================================================================
-// tcApp.cpp - Window gallery example
+// windowGalleryExample - Compare native window settings and frame rates.
 // =============================================================================
 // SPACE opens the next window of the gallery. Each one is created with its own
 // WindowSettings (decorated, swapInterval or size), plus a Window::setFps()

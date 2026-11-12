@@ -1,4 +1,4 @@
-#include "tcApp.h"
+#include "../../../graphics/grabScreenExample/src/tcApp.h"
 #include <cmath>
 
 namespace {

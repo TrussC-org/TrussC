@@ -19,10 +19,7 @@ void tcApp::setup() {
     warp_.dstPoints[2] = {900, 610};
     warp_.dstPoints[3] = {160, 540};
     // App/CoreEvents have no dedicated window-leave or focus-loss callback.
-    cancelListener_ = events().rawEvent.listen([this](const sapp_event& event) {
-        if (event.type == SAPP_EVENTTYPE_MOUSE_LEAVE || event.type == SAPP_EVENTTYPE_UNFOCUSED)
-            pointerInput({}, PointerAction::Cancel);
-    });
+    cancelListener_ = events().rawEvent.listen(this, &tcApp::rawEvent);
 }
 
 bool tcApp::screenToFbo(Vec2 screen, Vec2& fboPx) {
@@ -107,4 +104,9 @@ void tcApp::draw() {
 void tcApp::keyPressed(int key) {
     if (key == 'w' || key == 'W') warp_.toggleInput();
     if ((key == 'w' || key == 'W') && warp_.isInputEnabled()) pointerInput({}, PointerAction::Cancel);
+}
+
+void tcApp::rawEvent(const sapp_event& event) {
+    if (event.type == SAPP_EVENTTYPE_MOUSE_LEAVE || event.type == SAPP_EVENTTYPE_UNFOCUSED)
+        pointerInput({}, PointerAction::Cancel);
 }

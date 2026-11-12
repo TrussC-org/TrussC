@@ -18,16 +18,4 @@ cmake --build examples/graphics/grabScreenExample/build-linux --config Release -
 examples/graphics/grabScreenExample/bin/grabScreenExample
 ```
 
-Pass `--self-check` to request one grab after five frames, check the framebuffer
-dimensions, rectangle and background colors, and thumbnail upload, then exit
-with status 0 on success or 1 on failure. On Linux with Xvfb:
-
-```sh
-LIBGL_ALWAYS_SOFTWARE=1 __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json xvfb-run -a examples/graphics/grabScreenExample/bin/grabScreenExample --self-check
-```
-
-Add `--portrait` after `--self-check` to check the thumbnail in a 402 × 874 window.
-The thumbnail and its label move below the scene in a narrow window.
-
-The daily CI example sweep (`examples/build_all.py --verbose`) discovers this
-folder automatically through its `src/` directory; there is no separate list.
+Automated checks live in `examples/tests/grabScreen` and run as a separate test app.

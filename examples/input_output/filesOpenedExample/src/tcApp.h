@@ -4,6 +4,7 @@ using namespace std;
 using namespace tc;
 
 class tcApp : public App {
+    void filesOpened(FilesOpenedEventArgs& e);
     Image image;
     vector<fs::path> files;
     EventListener opened;
