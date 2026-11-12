@@ -36,6 +36,6 @@ struct DotNode : Node {
 class tcApp : public App {
 public:
     void setup() override;
-
+    void update() override;
     void draw() override;
 };

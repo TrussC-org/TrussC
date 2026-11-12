@@ -10,21 +10,33 @@
 #include "particles.compute.glsl.h"
 
 void tcApp::setup() {
+    // random start: anywhere on screen, with a slow velocity (y is always positive)
     vector<Vec4> initial(count);
     for (auto& p : initial) p = Vec4(random(-1, 1), random(-1, 1), random(-0.2f, 0.2f), random(0.05f, 0.2f));
+
+    // copy the array to the GPU once; from here on it only lives there
     particles.allocate(initial.size() * sizeof(Vec4), initial.data());
+
+    // the compute shader's "particle_state" buffer is this StorageBuffer
     step.load(step_particles_shader_desc);
     step.setStorageBuffer(VIEW_particle_state, particles);
+
+    // the vertex shader's "particle_input" is the same buffer, so nothing is copied back to the CPU
     points.load(draw_particles_shader_desc);
     points.setStorageBuffer(VIEW_particle_input, particles);
 }
 
 void tcApp::update() {
+    // x = seconds since last frame, y = particle count (threads past it do nothing)
     step.setUniform(UB_step_params, Vec4(getDeltaTime(), count, 0, 0));
+
+    // one thread per particle: count / 64 groups x 64 threads (local_size_x in step.compute.glsl)
     step.dispatch(count / 64);
 }
 
 void tcApp::draw() {
     clear(0.02f, 0.02f, 0.04f);
+
+    // 3 vertices x count instances: each instance is one particle's triangle
     points.drawVertices(3, count);
 }
