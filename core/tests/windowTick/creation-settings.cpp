@@ -210,6 +210,8 @@ void _sapp_tc_log(...) {}
 namespace trussc {
 struct Window;
 #define TC_LUA_SKIP
+struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
+Log logError(const char*) { return {}; } Log logWarning(const char*) { return {}; }
 // Keep the production WindowSettings declaration, including defaults/setters.
 // PRODUCTION_SETTINGS
 struct Window {
@@ -220,8 +222,6 @@ struct Window {
 };
 namespace mcp::internal { std::string markedWindowTitle(const std::string& title) { return title; } }
 namespace headless { bool isActive() { return false; } }
-struct Log { template<class T> Log& operator<<(const T&) { return *this; } };
-Log logError(const char*) { return {}; } Log logWarning(const char*) { return {}; }
 bool pixelPerfectMode() { return false; }
 namespace internal {
 struct WindowLifecycleScope { explicit WindowLifecycleScope(Window&) {} };

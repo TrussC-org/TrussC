@@ -2189,6 +2189,7 @@ typedef struct sapp_desc {
     int _tc_pixel_width, _tc_pixel_height;
     int sample_count;                   // MSAA sample count
     int swap_interval;                  // the preferred swap interval (ignored on some platforms)
+    int max_frame_latency;              /* [TrussC] Windows D3D11: 1–16 queued frames, 0 = default (2); ignored elsewhere */
     bool high_dpi;                      // whether the rendering canvas is full-resolution on HighDPI displays
     bool fullscreen;                    // whether the window should be created in fullscreen mode
     bool alpha;                         // whether the framebuffer should have an alpha channel (ignored on some platforms)
@@ -2457,6 +2458,7 @@ typedef struct sapp_window_desc {
     int swap_interval;          /* macOS/Win32: 0 = default (1), positive = display interval;
                                   X11 secondaries use nonblocking swaps and main presentation admission,
                                   with a refresh timer fallback */
+    int max_frame_latency;      /* [TrussC] Windows D3D11: 1–16 queued frames, 0 = default (2); ignored elsewhere */
     sapp_window parent;         /* [TrussC] z-order-only parent (id 0 = none): the window stays above it.
                                   macOS child window, Win32 owner HWND, X11 WM_TRANSIENT_FOR.
                                   An unknown or closed id is ignored. */
@@ -7663,7 +7665,8 @@ static bool _sapp_tc_d3d11_resize(_sapp_tc_window_t* w) {
     }
     /* the creation flags (frame latency waitable!) must be passed unchanged
        on every resize, or the waitable handle is silently invalidated */
-    const HRESULT hr = w->swap_chain->ResizeBuffers(2, (UINT)w->fb_width, (UINT)w->fb_height,
+    /* [TrussC #1447] Zero preserves the buffer count selected at creation. */
+    const HRESULT hr = w->swap_chain->ResizeBuffers(0, (UINT)w->fb_width, (UINT)w->fb_height,
                                  w->color_fmt, w->swapchain_flags);
     if (_sapp_tc_d3d11_check_device_loss(hr)) return false;
     _sapp_tc_d3d11_create_render_targets(w);
@@ -7680,6 +7683,14 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
     bool ok = false;
     if (_sapp_tc_d3d11_check(dxgi_device->GetAdapter(&adapter), "GetAdapter") &&
         _sapp_tc_d3d11_check(adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory), "GetParent(IDXGIFactory2)")) {
+        /* [TrussC #1447] Per-window CPU/GPU overlap; zero selects the default. */
+        int latency = w->desc.max_frame_latency;
+        if (latency == 0) latency = 2;
+        if (latency < 1 || latency > 16) {
+            _sapp_tc_log(&_sapp_tc.app.desc.logger, 2, SAPP_LOGITEM_OK, __LINE__,
+                "warning: ", "max_frame_latency %d is outside 1–16; using default 2", latency);
+            latency = 2;
+        }
         DXGI_SWAP_CHAIN_DESC1 d;
         memset(&d, 0, sizeof(d));
         d.Width = (UINT)(w->fb_width > 0 ? w->fb_width : 1);
@@ -7687,7 +7698,8 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
         d.Format = w->color_fmt;
         d.SampleDesc.Count = 1;     /* MSAA lives in a separate render target */
         d.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        d.BufferCount = 2;
+        /* [TrussC #1447] Leave a free back buffer beyond the queued frames. */
+        d.BufferCount = (UINT)(latency < 16 ? latency + 1 : 16);
         d.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         d.Scaling = DXGI_SCALING_STRETCH;
         d.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
@@ -7707,7 +7719,7 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
             if (d.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) {
                 IDXGISwapChain2* sc2 = 0;
                 if (SUCCEEDED(w->swap_chain->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&sc2))) {
-                    sc2->SetMaximumFrameLatency(1);
+                    sc2->SetMaximumFrameLatency((UINT)latency);
                     w->frame_wait = sc2->GetFrameLatencyWaitableObject();
                     sc2->Release();
                 }
@@ -8582,6 +8594,7 @@ static bool _sapp_tc_win32_create_main_window(void) {
     const sapp_desc* d = &_sapp_tc.app.desc;
     _sapp_tc_native_desc native = {};
     native.window = _sapp_tc_normalize_main_window(d);
+    native.window.max_frame_latency = d->max_frame_latency;
     native.events_enabled = _sapp_tc_app_events_enabled;
     native.window.event_cb = d->_tc_event_cb ? d->_tc_event_cb : _sapp_tc_main_event_tramp;
     native.window.close_cb = d->_tc_close_cb;
@@ -8662,10 +8675,17 @@ static void _sapp_tc_win32_run_loop(void) {
             timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
         /* If a frame latency waitable satisfied the wait, it was auto-reset here.
            Record it so the due-check consumes THIS signal instead of re-waiting
-           the (now-unsignaled) handle. Only one handle is reported per wait; the
-           rest stay signaled and are caught on the next loop. */
+           the (now-unsignaled) handle. */
         if (wr >= WAIT_OBJECT_0 && wr < WAIT_OBJECT_0 + num_handles) {
             handle_owner[wr - WAIT_OBJECT_0]->waitable_ready = true;
+        }
+        /* [TrussC #1447] With latency > 1 the first swapchain can remain ready
+           after Present. Sample the other waitables too, or MsgWait can keep
+           selecting that first handle and starve another ready display.
+           Never re-wait the auto-reset signal already reported above. */
+        for (DWORD i = 0; i < num_handles; ++i) {
+            if (wr != WAIT_OBJECT_0 + i && WaitForSingleObject(handles[i], 0) == WAIT_OBJECT_0)
+                handle_owner[i]->waitable_ready = true;
         }
         /* WAIT_OBJECT_0 + num_handles (when armed) is the pace timer: nothing to
            record, the due-check below sees earliest_next has passed. A timer

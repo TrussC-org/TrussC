@@ -37,7 +37,7 @@ constexpr int CREATE_WAITABLE_TIMER_HIGH_RESOLUTION=2, TIMER_MODIFY_STATE=2,
     SYNCHRONIZE=4, FALSE=0, QS_ALLINPUT=1, MWMO_INPUTAVAILABLE=4,
     PM_REMOVE=1, WM_QUIT=18, WM_CLOSE=16, WAIT_OBJECT_0=0,
     DXGI_FORMAT_R10G10B10A2_UNORM=24,
-    DXGI_FORMAT_B8G8R8A8_UNORM=87, _SAPP_TC_MAX_WINDOWS=3;
+    DXGI_FORMAT_B8G8R8A8_UNORM=87, WAIT_TIMEOUT=258, _SAPP_TC_MAX_WINDOWS=3;
 struct _sapp_tc_window_t : _sapp_tc_native_window_t {
     HANDLE frame_wait=nullptr;
     bool swap_chain=true, credit_held=false, waitable_ready=false;
@@ -55,7 +55,7 @@ struct {
 } _sapp_tc;
 double clockValue=10, oldDeadline=10+4.0/60.0;
 int turns=0, checks=0, failures=0, receiver=0, deliveries=0;
-bool pending=false, timerAvailable=false;
+bool pending=false, timerAvailable=false, heldCreditScenario=false, availableCreditScenario=false;
 sapp_event_type eventType=SAPP_EVENTTYPE_MOUSE_MOVE;
 struct MSG { unsigned message=1; };
 double _sapp_tc_now() { return clockValue; }
@@ -68,15 +68,40 @@ void check(const char* label, bool ok) {
     if (!ok) { ++failures; std::printf("FAIL: %s\n",label); }
 }
 HANDLE CreateWaitableTimerExW(void*,void*,int,int) {
-    return timerAvailable ? reinterpret_cast<HANDLE>(2) : nullptr;
+    return timerAvailable ? reinterpret_cast<HANDLE>(3) : nullptr;
 }
 bool SetWaitableTimer(HANDLE,LARGE_INTEGER* due,int,void*,void*,int) {
     check("wait is armed for a future deadline",due->QuadPart<0);
     return true;
 }
 void CloseHandle(HANDLE) {}
-DWORD MsgWaitForMultipleObjectsEx(DWORD count,HANDLE*,DWORD,int,int) {
+DWORD WaitForSingleObject(HANDLE handle,DWORD timeout) {
+    check("peer signal polls never block",timeout==0);
+    if (availableCreditScenario) {
+        check("reported auto-reset signal is not consumed twice",handle!=reinterpret_cast<HANDLE>(1));
+        return handle==reinterpret_cast<HANDLE>(2) ? WAIT_OBJECT_0 : WAIT_TIMEOUT;
+    }
+    return WAIT_TIMEOUT;
+}
+DWORD MsgWaitForMultipleObjectsEx(DWORD count,HANDLE* handles,DWORD,int,int) {
     ++turns;
+    if (availableCreditScenario) {
+        check("each swapchain has its own waitable",count==3);
+        // More queue capacity can leave the first handle ready after every
+        // Present. MsgWait always reports that first signaled handle.
+        return WAIT_OBJECT_0;
+    }
+    if (heldCreditScenario) {
+        if (turns==1) {
+            check("only unheld peer waitable is polled",count==2 && handles[0]==reinterpret_cast<HANDLE>(2) && handles[1]==reinterpret_cast<HANDLE>(3));
+            return WAIT_OBJECT_0;
+        }
+        // A latency > 1 swapchain may still signal while a credit is held.
+        // Neither held handle may enter MsgWait and cause an immediate wake.
+        check("held credits exclude still-signaled waitables",count==1 && handles[0]==reinterpret_cast<HANDLE>(2+1));
+        clockValue=10+(turns==2 ? 1.0/120.0 : 1.0/60.0);
+        return WAIT_OBJECT_0;
+    }
     // First wake is input during the skipped-present delay. Second wake has
     // no input and must retain the deadline re-armed by the admitted tick.
     clockValue+=.01;
@@ -99,6 +124,17 @@ PACE
 DUE
 void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     ++w->ticks;
+    if (availableCreditScenario) {
+        // Model a successful Present with spare queue capacity.
+        w->credit_held=false; w->waitable_ready=false; w->earliest_next=0;
+        return;
+    }
+    if (heldCreditScenario) {
+        // Model a completed tick without Present: retain its consumed credit.
+        w->credit_held=true; w->waitable_ready=false;
+        _sapp_tc_win32_pace(w,w->refresh_period*w->swap_interval);
+        return;
+    }
     check("input admits next tick before old deadline",clockValue<oldDeadline);
     // Model another skipped present using the production deadline helper.
     _sapp_tc_win32_pace(w,w->refresh_period*w->swap_interval);
@@ -142,6 +178,39 @@ int main() {
         check("next turn clears input flag",!target.input_delivered && !peer.input_delivered);
         check("input preserves GPU credit state",target.credit_held==(creditMode==1) && !target.waitable_ready);
         if (!inputWake) check("non-waking event retains deadline",target.earliest_next==oldDeadline);
+    }
+    heldCreditScenario=true; timerAvailable=true;
+    for (int latency : {1,3,16}) {
+        _sapp_tc={}; turns=0; clockValue=10;
+        _sapp_tc_window_t target{}, peer{};
+        target.win_id=1; peer.win_id=2; target.ready=peer.ready=true;
+        target.desc.max_frame_latency=peer.desc.max_frame_latency=latency;
+        target.frame_wait=reinterpret_cast<HANDLE>(1); peer.frame_wait=reinterpret_cast<HANDLE>(2);
+        target.credit_held=true; target.earliest_next=10+1.0/60.0;
+        target.refresh_period=1.0/60.0; peer.refresh_period=1.0/120.0;
+        target.swap_interval=peer.swap_interval=1;
+        _sapp_tc.windows[0]=&target; _sapp_tc.windows[1]=&peer;
+        _sapp_tc.app.desc._tc_after_turn=[]() { if (turns==3) _sapp_tc.app.quit_ordered=true; };
+        _sapp_tc_win32_run_loop();
+        check("held window progresses at its display deadline",target.ticks==1);
+        check("120 Hz peer progresses independently of 60 Hz held window",peer.ticks==3);
+        check("no-Present ticks retain credits",target.credit_held && peer.credit_held);
+    }
+    heldCreditScenario=false; availableCreditScenario=true; timerAvailable=false;
+    for (int latency : {3,16}) {
+        _sapp_tc={}; turns=0; clockValue=10;
+        _sapp_tc_window_t first{}, peer{}, waiting{};
+        first.frame_wait=reinterpret_cast<HANDLE>(1);
+        peer.frame_wait=reinterpret_cast<HANDLE>(2);
+        waiting.frame_wait=reinterpret_cast<HANDLE>(4);
+        first.ready=peer.ready=waiting.ready=true;
+        first.desc.max_frame_latency=peer.desc.max_frame_latency=latency;
+        _sapp_tc.windows[0]=&first; _sapp_tc.windows[1]=&peer; _sapp_tc.windows[2]=&waiting;
+        _sapp_tc.app.desc._tc_after_turn=[]() { if (turns==3) _sapp_tc.app.quit_ordered=true; };
+        _sapp_tc_win32_run_loop();
+        check("always-ready first swapchain keeps progressing",first.ticks==3);
+        check("spare capacity cannot starve another ready display",peer.ticks==3);
+        check("a display without a signal never ticks",waiting.ticks==0);
     }
     std::printf("Win32 skipped-present input: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
