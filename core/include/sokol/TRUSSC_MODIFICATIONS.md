@@ -232,6 +232,7 @@ are live, without a second backend session state machine/deferred-state engine.
 
 | History | Contract and reason |
 |---|---|
+| macOS host-turn quit #1445 | `sapp_quit` and `sapp_request_quit` schedule `_sapp_tc_mac_schedule_deferred` after setting their flags (`[TrussC #1445]`). Async completion/host-turn teardown can destroy the last window and its display link before another tick; the existing coalesced run-loop block still reaches `_sapp_tc_mac_process_deferred` and `[NSApp terminate:nil]`. |
 | macOS async preflight #1117, PR #1254 | `sapp_run` creates `_sapp_tc_application`; its `terminate:` calls `applicationShouldTerminate:` before AppKit can dismiss/refuse async confirm/save sheets. Menu Quit/Cmd+Q/SIGTERM use deferred sokol quit; ordinary Dock/Apple-event quit calls `[NSApp terminate:nil]`. |
 | Apple-event installation | `applicationWillFinishLaunching:` replaces `kCoreEventClass` / `kAEQuitApplication` after default installation, only for `_sapp_tc_application`. Runtime veto precedes AppKit; accepted-quit cancellation/shutdown is idempotent, so AppKit's second query repeats neither veto nor cancellation. |
 | Apple-event replies/session end | Synchronous handling keeps the event as `currentAppleEvent` for its quit reason and existing query/commit policy. On veto/deferral set requested reply `keyErrorNumber` to `userCanceledErr` (also tells loginwindow); leave `typeNull` untouched. Last-window-close policy stays. |
