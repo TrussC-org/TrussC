@@ -763,8 +763,10 @@ void RenderTarget::beginPass(TargetPassStart reason) {
     if (passKind == TargetPassKind::Swapchain) refreshWindowDrawingSize();
     sg_begin_pass(&pass);
     if (hasFixedPipeline) {
-        const auto selected = pipeline(fixedPipeline);
-        if (selected.raw.id) sg_apply_pipeline(selected.raw);
+        const auto selected = fixedPipelineRevision
+            ? selectPipeline({fixedPipelineRevision, uint64_t(fixedPipeline.role)}, [&]() -> const PipelineKey& { return fixedPipeline; }).raw
+            : pipeline(fixedPipeline).raw;
+        if (selected.id) sg_apply_pipeline(selected);
     }
     inPass = true;
     passStartedThisFrame = true;
@@ -2907,7 +2909,8 @@ std::shared_ptr<PipelineGeneration> makePipelineGeneration() {
 }
 PipelineCacheKey canonicalPipeline(const PipelineKey& request, const sg_pipeline_desc& d) {
     PipelineCacheKey key;
-    auto add = [&](auto value) { key.fields.push_back(uint32_t(value)); };
+    size_t field = 0;
+    auto add = [&](auto value) { key.fields[field++] = uint32_t(value); };
     auto real = [&](float value) {
         uint32_t bits = 0; if (value != 0) std::memcpy(&bits, &value, sizeof(bits));
         add(bits);
@@ -2932,12 +2935,27 @@ PipelineCacheKey canonicalPipeline(const PipelineKey& request, const sg_pipeline
     add(d.primitive_type); add(d.index_type); add(d.cull_mode); add(d.face_winding); add(d.sample_count);
     real(d.blend_color.r); real(d.blend_color.g); real(d.blend_color.b); real(d.blend_color.a);
     add(d.alpha_to_coverage_enabled);
+    assert(field == key.fields.size());
     return key;
 }
 }
 std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx() {
     static auto* owners = new std::unordered_map<uint32_t, uint32_t>;
     return *owners;
+}
+uint64_t nextPipelineRecipeRevision() { return nextPipelineGeneration(); }
+void retirePipelineRecipe(uint64_t revision) noexcept {
+    if (!revision || frameworkShutdown()) return;
+    for (const auto& weak : pipelineGenerations()) {
+        if (auto generation = weak.lock()) {
+            std::erase_if(generation->selections, [&](const auto& entry) {
+                auto selections = entry.lock();
+                if (!selections) return true;
+                std::erase_if(*selections, [&](const auto& selected) { return selected.first.recipe == revision; });
+                return false;
+            });
+        }
+    }
 }
 PipelineKey PipelineKey::immediate(ImmediateSelection selection) {
     PipelineKey key; key.selection = selection; key.role = selection.role;
@@ -2965,6 +2983,14 @@ bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const ch
     if (contextFailed) logWarning("RenderTarget") << "could not create context for " << what;
     return !contextFailed;
 }
+void RenderTargetResources::rememberSelection(PipelineSelectionId id, PipelineHandles handles) {
+    if (!selectionCache) {
+        // The control block/deleter must live in the host across guest reloads.
+        selectionCache = std::make_shared<PipelineSelectionCache>();
+        rawCache->selections.push_back(selectionCache);
+    }
+    selectionCache->emplace(id, handles);
+}
 void RenderTargetResources::release() {
     if (frameworkShutdown() || !sg_isvalid()) return;
     for (const auto& entry : cache) {
@@ -2973,7 +2999,7 @@ void RenderTargetResources::release() {
         pipelineOwnerCtx().erase(entry.second.id);
 #endif
     }
-    cache.clear(); immediateCache.clear(); selections.clear(); rawCache.reset();
+    cache.clear(); immediateCache.clear(); selectionCache.reset(); selections.clear(); rawCache.reset();
     // sokol_gl owns its mandatory default context until shutdown. A resized
     // Window may switch to a dedicated context without destroying that default.
     if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
@@ -2990,14 +3016,19 @@ sgl_pipeline RenderTarget::immediatePipeline(ImmediateSelection selection) {
             return entry.second;
         }
     }
-    const auto handle = pipeline(PipelineKey::immediate(selection)).immediate;
-    bundle.immediateCache.emplace_back(selection, handle);
-    return handle;
+    const auto selected = selectPipeline(PipelineSelectionId::immediate(selection),
+        [&] { return PipelineKey::immediate(selection); });
+    bundle.immediateCache.emplace_back(selection, selected.immediate);
+    // Canonical recipes can share a handle (including failed id 0). Preserve
+    // loadPipeline's semantic selection on cache hits too.
+    bundle.selections[selected.immediate.id] = selection;
+    return selected.immediate;
 }
 PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     PipelineSelection result;
     if (!sg_isvalid()) return result;
     auto& bundle = resources();
+    ++bundle.canonicalLookups;
     if (!bundle.rawCache) {
         if (passKind == TargetPassKind::Swapchain) bundle.rawCache = makePipelineGeneration();
         else {
@@ -3069,6 +3100,15 @@ void retirePipelineProgram(sg_shader shader) {
     };
     for (const auto& weak : pipelineGenerations()) {
         RenderTargetResources bundle; bundle.rawCache = weak.lock(); erase(bundle);
+        if (!bundle.rawCache) continue;
+        // Weak maps let late global Shaders retire selections without touching
+        // Window/Fbo statics after their teardown, or pinning target resources.
+        std::erase_if(bundle.rawCache->selections, [&](const auto& entry) {
+            auto selections = entry.lock();
+            if (!selections) return true;
+            std::erase_if(*selections, [&](const auto& selected) { return selected.second.program.id == shader.id; });
+            return false;
+        });
     }
     pipelinePrograms().erase(shader.id);
 }
@@ -3207,7 +3247,7 @@ bool rebuildTargetResources() {
     pipelineOwnerCtx().clear();
 #endif
     auto discard = [](RenderTargetResources& bundle) {
-        bundle.cache.clear(); bundle.immediateCache.clear(); bundle.selections.clear(); bundle.context = {};
+        bundle.cache.clear(); bundle.immediateCache.clear(); bundle.selectionCache.reset(); bundle.selections.clear(); bundle.context = {};
         bundle.contextFailed = false; bundle.rawCache.reset();
     };
     for (auto* window : windows) discard(window->swapchainTarget.resources());

@@ -55,6 +55,7 @@ struct IblBakeResources {
     sg_shader irrShader{};
     sg_shader preShader{};
     sg_shader lutShader{};
+    PipelineRecipe irrRecipe, preRecipe, lutRecipe;
     sg_buffer quadVbuf{};      // 6 verts, 2 triangles
     sg_sampler linearSampler{};
     bool ready = false;        // all four shaders usable (internalShaderReady)
@@ -243,6 +244,16 @@ private:
             return;
         }
 
+        auto initRecipe = [](internal::PipelineRecipe& recipe, sg_shader program) {
+            sg_pipeline_desc desc = {};
+            desc.shader = program;
+            desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
+            recipe.reset(internal::PipelineKey::raw(internal::PipelineRole::Ibl, desc));
+        };
+        initRecipe(r.irrRecipe, r.irrShader);
+        initRecipe(r.preRecipe, r.preShader);
+        initRecipe(r.lutRecipe, r.lutShader);
+
         // Fullscreen quad in NDC, as two triangles.
         const float verts[] = {
             -1.0f, -1.0f,
@@ -276,7 +287,7 @@ private:
     // populates `bind` (texture/sampler slots) and uploads uniforms beforehand.
     static void runFullscreenPass(sg_view colorAttachment,
                                   int viewportW, int viewportH,
-                                  sg_shader shader, sg_pixel_format format,
+                                  internal::PipelineRecipe& recipe, sg_pixel_format format,
                                   const sg_bindings& bindings,
                                   int uniformSlot,
                                   const void* uniformData, size_t uniformSize) {
@@ -291,10 +302,7 @@ private:
             format);
         if (!scope.active()) return;
         sg_apply_viewport(0, 0, viewportW, viewportH, true);
-        sg_pipeline_desc desc = {};
-        desc.shader = shader;
-        desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
-        const auto selected = internal::currentTarget().pipeline(internal::PipelineKey::raw(internal::PipelineRole::Ibl, desc));
+        const auto selected = recipe.select(internal::currentTarget());
         if (!selected.raw.id) return;
         sg_apply_pipeline(selected.raw);
         sg_apply_bindings(&bindings);
@@ -352,7 +360,7 @@ private:
 
             runFullscreenPass(irradiance_.getCubemapFaceAttachmentView(face, 0),
                               kIrradianceSize, kIrradianceSize,
-                              r.irrShader, SG_PIXELFORMAT_RGBA16F, bind,
+                              r.irrRecipe, SG_PIXELFORMAT_RGBA16F, bind,
                               UB_tc_ibl_irradiance_params, &params, sizeof(params));
         }
 
@@ -376,7 +384,7 @@ private:
 
                 runFullscreenPass(prefilter_.getCubemapFaceAttachmentView(face, mip),
                                   mipSize, mipSize,
-                                  r.preShader, SG_PIXELFORMAT_RGBA16F, bind,
+                                  r.preRecipe, SG_PIXELFORMAT_RGBA16F, bind,
                                   UB_tc_ibl_prefilter_params, &params, sizeof(params));
             }
         }
@@ -389,7 +397,7 @@ private:
             bind.vertex_buffers[0] = r.quadVbuf;
             runFullscreenPass(brdfLut_.getAttachmentView(),
                               kBrdfLutSize, kBrdfLutSize,
-                              r.lutShader, SG_PIXELFORMAT_RG16F, bind,
+                              r.lutRecipe, SG_PIXELFORMAT_RG16F, bind,
                               0, nullptr, 0);
         }
 

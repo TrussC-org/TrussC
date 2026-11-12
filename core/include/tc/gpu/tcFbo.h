@@ -41,6 +41,7 @@ struct FboSharedMipResources {
     bool ready = false;   // both shaders usable (internalShaderReady)
     sg_shader shader = {};
     sg_shader blitShader = {};
+    PipelineRecipe mipRecipe, blitRecipe;
     sg_buffer vbuf = {};
     sg_sampler sampler = {};
     bool initialized = false;
@@ -708,7 +709,7 @@ private:
         internal::TargetPassScope scope(pass, dst.getWidth(), dst.getHeight(), target_.colorFormat);
         if (!scope.active()) return;
 
-        if (!applyMipPipeline_(s.blitShader, internal::PipelineRole::Blit)) return;
+        if (!applyMipPipeline_(s.blitRecipe)) return;
         sg_bindings bind = {};
         bind.vertex_buffers[0] = s.vbuf;
         bind.views[VIEW_tc_fbomip_srcTex] = src.getViewForMip(0);
@@ -770,16 +771,19 @@ private:
             return;
         }
 
-        s.initialized = true;
-    }
-
-    static bool applyMipPipeline_(sg_shader shader, internal::PipelineRole role) {
         sg_pipeline_desc desc = {};
-        desc.shader = shader;
+        desc.shader = s.shader;
         desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT2;
         desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
         desc.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
-        const auto selected = internal::currentTarget().pipeline(internal::PipelineKey::raw(role, desc));
+        s.mipRecipe.reset(internal::PipelineKey::raw(internal::PipelineRole::Mip, desc));
+        desc.shader = s.blitShader;
+        s.blitRecipe.reset(internal::PipelineKey::raw(internal::PipelineRole::Blit, desc));
+        s.initialized = true;
+    }
+
+    static bool applyMipPipeline_(internal::PipelineRecipe& recipe) {
+        const auto selected = recipe.select(internal::currentTarget());
         if (!selected.raw.id) return false;
         sg_apply_pipeline(selected.raw);
         return true;
@@ -809,7 +813,7 @@ private:
                     std::max(1, target_.height >> level), target_.colorFormat);
                 if (!scope.active()) return;
 
-                if (!applyMipPipeline_(s.shader, internal::PipelineRole::Mip)) return;
+                if (!applyMipPipeline_(s.mipRecipe)) return;
 
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = s.vbuf;
@@ -829,7 +833,7 @@ private:
                     std::max(1, target_.height >> level), target_.colorFormat);
                 if (!scope.active()) return;
 
-                if (!applyMipPipeline_(s.blitShader, internal::PipelineRole::Blit)) return;
+                if (!applyMipPipeline_(s.blitRecipe)) return;
 
                 sg_bindings bind = {};
                 bind.vertex_buffers[0] = s.vbuf;

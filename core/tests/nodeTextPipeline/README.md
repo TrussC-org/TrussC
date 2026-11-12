@@ -6,12 +6,20 @@ text, Fill in the next node, Add/Alpha changes, a custom Shader between text
 nodes, nested Fbos, depth on/off, RGBA8/RGBA16F and 1x/4x MSAA. It reuses the
 synthetic font from `renderTargetState`, with no system font dependency.
 
-`allCoreTests nodeTextPipeline --benchmark 240` draws a frozen tree of 3,000
-text nodes, one glyph per node. After 30 warmup frames it reports median
-`drawTree` time, frame submission time (draw entry through `afterFrame`,
-including graphics synchronization), and the number of sgl commands recorded
-by the tree. Use the same Release build configuration, machine, explicit
-`DISPLAY`, and private Xvfb/Mesa instance for baseline and changed builds.
+Run a frozen workload with one of these modes:
+
+```
+allCoreTests nodeTextPipeline --benchmark 240 text
+allCoreTests nodeTextPipeline --benchmark 240 shader
+allCoreTests nodeTextPipeline --benchmark 240 pbr
+```
+
+Each mode submits 3,000 draws in a fixed grid: text Nodes, custom Shader
+triangles, or PBR meshes. After 30 warmup frames it reports median/p95 CPU
+submission time, frame time (draw entry through `afterFrame`, including graphics
+synchronization), and recorded draw-command count (sgl plus deferred Shader/PBR
+commands). Use the same Release configuration, machine, explicit `DISPLAY`,
+and private Xvfb/Mesa instance for interleaved baseline and changed runs.
 Timings are informational and never decide the test result.
 
 Pipeline loads alone do not split sgl commands. The pixel test also checks

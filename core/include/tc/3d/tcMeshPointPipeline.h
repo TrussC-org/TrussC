@@ -77,52 +77,13 @@ public:
         quadBuf_ = sg_make_buffer(&qbd);
 
         initialized_ = true;
+        initRecipes();
     }
 
-    // Get or create a pipeline for the given color format and sample count.
-    // alpha-to-coverage anti-aliases the round splats on a multisampled target
-    // without alpha blending, so depth stays correct and order-independent.
-    PipelineSelection getPipeline() {
-        sg_pipeline_desc pd = {};
-        pd.shader = shader_;
-        pd.layout.buffers[0].stride = sizeof(float) * 2;                  // corner (per-vertex)
-        pd.layout.buffers[1].stride = sizeof(float) * 7;                  // pos3 + color4 (per-instance)
-        pd.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
-        pd.layout.attrs[ATTR_tc_pointcloud_point_corner]  = { 0, 0,                 SG_VERTEXFORMAT_FLOAT2 };
-        pd.layout.attrs[ATTR_tc_pointcloud_point_inPos]   = { 1, 0,                 SG_VERTEXFORMAT_FLOAT3 };
-        pd.layout.attrs[ATTR_tc_pointcloud_point_inColor] = { 1, sizeof(float) * 3, SG_VERTEXFORMAT_FLOAT4 };
-        pd.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
-        pd.cull_mode = SG_CULLMODE_NONE;
-        pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-        pd.depth.write_enabled = true;
-        pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-
-        pd.alpha_to_coverage_enabled = true;
-
-        pd.label = "tc_mesh_point_pipeline";
-
-        return currentTarget().pipeline(PipelineKey::raw(PipelineRole::PointSplat, pd));
-    }
-
-    // Pipeline for PointStyle::Pixel: draws the per-point buffer directly as
-    // POINTS (1 device pixel, no quad expansion, no instancing, no a2c).
-    PipelineSelection getPrimPipeline() {
-        sg_pipeline_desc pd = {};
-        pd.shader = shaderPrim_;
-        pd.layout.buffers[0].stride = sizeof(float) * 7;                  // pos3 + color4 (per-vertex)
-        pd.layout.attrs[ATTR_tc_pointcloud_point_prim_inPos]   = { 0, 0,                 SG_VERTEXFORMAT_FLOAT3 };
-        pd.layout.attrs[ATTR_tc_pointcloud_point_prim_inColor] = { 0, sizeof(float) * 3, SG_VERTEXFORMAT_FLOAT4 };
-        pd.primitive_type = SG_PRIMITIVETYPE_POINTS;
-        pd.cull_mode = SG_CULLMODE_NONE;
-        pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-        pd.depth.write_enabled = true;
-        pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
-
-
-        pd.label = "tc_mesh_point_prim_pipeline";
-
-        return currentTarget().pipeline(PipelineKey::raw(PipelineRole::PointPixel, pd));
-    }
+    // Alpha-to-coverage splats preserve depth without alpha blending.
+    PipelineSelection getPipeline() { return splatRecipe_.select(currentTarget()); }
+    // Pixel style draws true one-device-pixel POINTS, without instancing/a2c.
+    PipelineSelection getPrimPipeline() { return pixelRecipe_.select(currentTarget()); }
 
     // Draw a Points mesh. Assumes the mesh has uploaded its point instance buffer.
     void drawMesh(const Mesh& mesh) {
@@ -162,6 +123,47 @@ public:
     }
 
 private:
+    void initRecipes() {
+        {
+            sg_pipeline_desc pd = {};
+            pd.shader = shader_;
+            pd.layout.buffers[0].stride = sizeof(float) * 2;                  // corner (per-vertex)
+            pd.layout.buffers[1].stride = sizeof(float) * 7;                  // pos3 + color4 (per-instance)
+            pd.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
+            pd.layout.attrs[ATTR_tc_pointcloud_point_corner]  = { 0, 0,                 SG_VERTEXFORMAT_FLOAT2 };
+            pd.layout.attrs[ATTR_tc_pointcloud_point_inPos]   = { 1, 0,                 SG_VERTEXFORMAT_FLOAT3 };
+            pd.layout.attrs[ATTR_tc_pointcloud_point_inColor] = { 1, sizeof(float) * 3, SG_VERTEXFORMAT_FLOAT4 };
+            pd.primitive_type = SG_PRIMITIVETYPE_TRIANGLE_STRIP;
+            pd.cull_mode = SG_CULLMODE_NONE;
+            pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+            pd.depth.write_enabled = true;
+            pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+
+            pd.alpha_to_coverage_enabled = true;
+
+            pd.label = "tc_mesh_point_pipeline";
+
+            splatRecipe_.reset(PipelineKey::raw(PipelineRole::PointSplat, pd));
+        }
+        {
+            sg_pipeline_desc pd = {};
+            pd.shader = shaderPrim_;
+            pd.layout.buffers[0].stride = sizeof(float) * 7;                  // pos3 + color4 (per-vertex)
+            pd.layout.attrs[ATTR_tc_pointcloud_point_prim_inPos]   = { 0, 0,                 SG_VERTEXFORMAT_FLOAT3 };
+            pd.layout.attrs[ATTR_tc_pointcloud_point_prim_inColor] = { 0, sizeof(float) * 3, SG_VERTEXFORMAT_FLOAT4 };
+            pd.primitive_type = SG_PRIMITIVETYPE_POINTS;
+            pd.cull_mode = SG_CULLMODE_NONE;
+            pd.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+            pd.depth.write_enabled = true;
+            pd.depth.pixel_format = SG_PIXELFORMAT_DEPTH_STENCIL;
+
+
+            pd.label = "tc_mesh_point_prim_pipeline";
+
+            pixelRecipe_.reset(PipelineKey::raw(PipelineRole::PointPixel, pd));
+        }
+    }
+
     // Pack the shared vertex-stage uniforms. Size is a logical-pixel point size
     // converted to an NDC half-extent (matching strokeWeight's unit), tint is the
     // current draw color so uncolored point meshes take it.
@@ -190,6 +192,7 @@ private:
         return vsp;
     }
 
+    PipelineRecipe splatRecipe_, pixelRecipe_;
     bool initialized_ = false;
     sg_shader shader_{};       // quad splat (Square/Round)
     sg_shader shaderPrim_{};   // point primitive (Pixel)
