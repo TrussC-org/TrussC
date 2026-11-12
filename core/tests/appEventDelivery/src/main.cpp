@@ -111,7 +111,14 @@ struct DeliveryApp : App {
         listeners.push_back(events().afterFrame.listen([] {
             if (exitOrderMode) { exitApp(); return; }
             if (!tested) {
-                expect("update", "cdpatblz");
+                // Hidden startup ticks update without afterFrame (#997).
+                // Count framework updates, not deliveries: a second notify in
+                // the same update must still fail this comparison.
+                std::string expectedUpdates;
+                for (uint64_t tick = 0; tick < getUpdateCount(); ++tick)
+                    expectedUpdates += "cdpatblz";
+                check("at least one framework update", !expectedUpdates.empty());
+                expect("update", expectedUpdates.c_str());
                 if (displayMode) expect("draw", "cdpatblz");
                 inputChecks(); cameraChecks(); clearChecks(); tested = true;
             } else {
@@ -381,10 +388,17 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 128;
     internal::appSetupFunc();
     internal::windowApiContext().fbWidth = internal::windowApiContext().fbHeight = 128; internal::syncWindowAppSize(*internal::resolveWindow());
-    events().update.notify();
+    // Model a native-gated, occluded startup tick through the real scheduler.
+    native.metadata.occluded = true;
+    internal::refreshWindowMetadata(*launch);
+    internal::runWindowTick(std::chrono::steady_clock::now(), 1.0 / 60, false, nullptr, true);
+    check("occluded startup updates without afterFrame", updates == 1 && !tested);
+    native.metadata.occluded = false;
+    internal::refreshWindowMetadata(*launch);
+    internal::runSyncedUpdate();
     events().afterFrame.notify();
     for (int pass = 0; pass < 2; ++pass) {
-        events().update.notify();
+        internal::runSyncedUpdate();
         events().afterFrame.notify();
     }
     internal::shutdownRuntime(); finalChecks();

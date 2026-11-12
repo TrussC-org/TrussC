@@ -41,5 +41,25 @@ TC_CORE_TEST_MAIN() {
     if (!lifetime.expired() || retiredCalls != 0 || completions != 1) ++failures;
     std::printf("retired App receives no completion and is not retained: %s\n", failures ? "FAIL" : "PASS");
     std::printf("window close completes with failure: %s\n", failures ? "FAIL" : "PASS");
+    int endedRunErrors = 0;
+    auto logs = getLogger().onLog.listen([&](LogEventArgs& args) {
+        if (args.level == LogLevel::Error &&
+            args.message.find("ended-run.png") != std::string::npos &&
+            args.message.find("Window closed before screenshot capture; app run already ended") != std::string::npos)
+            ++endedRunErrors;
+    });
+    for (int pass = 0; pass < 2; ++pass) {
+        internal::appRunToken() = std::make_shared<std::atomic<bool>>(true);
+        {
+            tcCoreTest::WindowFixture closing;
+            internal::submitScreenshot(&internal::WindowRequestAccess::context(*closing.window).asyncScreenshots, "ended-run.png");
+            *internal::appRunToken() = false;
+        }
+        if (endedRunErrors != pass + 1) ++failures; // synchronous, before mailbox drain
+        internal::deliverResourceLoadBatch(internal::takeResourceLoadBatch());
+    }
+    const bool endedRunReported = endedRunErrors == 2 && completions == 1;
+    if (!endedRunReported) ++failures;
+    std::printf("ended run reports every canceled screenshot without completion: %s\n", endedRunReported ? "PASS" : "FAIL");
     return failures ? 1 : 0;
 }

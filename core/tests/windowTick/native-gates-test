@@ -508,7 +508,7 @@ BOOL native_perform_close(View* delegate) {
 // Legacy process-quit seam used by the round-2 tests; round-3 native requests
 // enter the real translated window/application delegates above.
 void perform_close(NSWindow*) { ++quit; _sapp_tc.app.quit_requested=_sapp_tc.app.quit_ordered=false; }
-''' + extract('static void _sapp_tc_mac_init_client(void) {') + extract('static bool _sapp_tc_mac_deferred_pending(void) {') + mac_deferred + mac_schedule + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_main_drawable + mac_swap + mac_tick_scope + mac_tick_body + extract('static bool _sapp_tc_mac_tick_blocked(') + extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {') + extract('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {') + mac_link + mac_fallback + mac_minimize + mac_occlusion + mac_restore + mac_recheck + extract('static void _sapp_tc_mac_key_event(') + extract('static void _sapp_tc_mac_process_visibility(') + mac_visibility_transitions + r'''
+''' + extract('static void _sapp_tc_mac_init_client(void) {') + extract('static bool _sapp_tc_mac_deferred_pending(void) {') + mac_deferred + mac_schedule + extract('void sapp_request_quit(void) {') + extract('void sapp_quit(void) {') + mac_source + extract('static void _sapp_tc_mac_update_suspension(') + mac_observe + mac_drawable + mac_main_drawable + mac_swap + mac_tick_scope + mac_tick_body + extract('static bool _sapp_tc_mac_tick_blocked(') + extract('static void _sapp_tc_mac_tick(_sapp_tc_window_t* w, CADisplayLink* link) {') + extract('static void _sapp_tc_mac_source_tick(_sapp_tc_window_t* w, CADisplayLink* link, bool from_fallback) {') + mac_link + mac_fallback + mac_minimize + mac_occlusion + mac_restore + mac_recheck + extract('static void _sapp_tc_mac_key_event(') + extract('static void _sapp_tc_mac_process_visibility(') + mac_visibility_transitions + r'''
 void probe_closed_window(Native* w) {
     const int ticks=consulted, samples=timing, sizes=dimensions, draws=acquired, reconciles=reconciled;
     const int event_count=events.size(), timer_count=timers, installed=installs;
@@ -1146,6 +1146,16 @@ void run() {
     check("macOS public constructor returns invalid handle if destroyed", handle.id==0 && !_sapp_tc_lookup({w.win_id}) && _sapp_tc.constructing==0);
     summary("macOS round 2 callbacks / deferred close / construction / exceptions", before, count);
     before=failures; count=checks;
+    // #1445: a host-turn quit still reaches AppKit after teardown removes the
+    // last tick source. Execute both public entry points and the real scheduler.
+    for (auto request : {sapp_quit, sapp_request_quit}) {
+        reset(w,window,view,false);
+        request();
+        check("macOS host-turn quit queues a run-loop pass", enqueued==1 && wakes==1 && quit==0);
+        dispose(&w);
+        drain_run_loop();
+        check("macOS host-turn quit reaches terminate without a window tick", quit==1 && consulted==0);
+    }
     // Native requests arrive in event and tick callbacks, with a nested event
     // and repeated requests to expose premature delivery and duplicate replay.
     for (int kind : {0,1}) for (int request : {0,1,2}) {

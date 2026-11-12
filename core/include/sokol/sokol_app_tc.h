@@ -4791,6 +4791,8 @@ double sapp_frame_duration(void) {
 
 void sapp_request_quit(void) {
     _sapp_tc.app.quit_requested = true;
+    /* [TrussC #1445] Host-turn quit must progress without another window tick. */
+    _sapp_tc_mac_schedule_deferred();
 }
 
 void sapp_cancel_quit(void) {
@@ -4799,6 +4801,8 @@ void sapp_cancel_quit(void) {
 
 void sapp_quit(void) {
     _sapp_tc.app.quit_ordered = true;
+    /* [TrussC #1445] Teardown may stop the last display link before its next tick. */
+    _sapp_tc_mac_schedule_deferred();
 }
 
 void sapp_consume_event(void) {
