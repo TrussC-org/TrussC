@@ -7017,7 +7017,32 @@ uint32_t sapp_window_gl_framebuffer(sapp_window win) { _SOKOL_UNUSED(win); retur
 #define _SAPP_TC_MODAL_TIMER (1)
 #define _SAPP_TC_RELEASE(obj) do { if (obj) { (obj)->Release(); (obj) = 0; } } while (0)
 
+/* [TrussC #1447 DIAG] Temporary, enabled on this diagnostic branch only. */
+struct _sapp_tc_diag_time {
+    double total, peak;
+    unsigned long long calls;
+};
+struct _sapp_tc_diag_window {
+    unsigned long long ticks, held, fresh, fallback, callbacks, draw_proxy;
+    unsigned long long skipped, skip_flag, occluded, minimized, other_skip;
+    unsigned long long not_due, no_credit, unavailable, own_wake;
+    unsigned long long zero_saved, zero_held, zero_deadline;
+    unsigned long long presents, presented, probes;
+    DWORD wait_index;
+    _sapp_tc_diag_time present_time, sample_time;
+};
+static struct {
+    double since;
+    unsigned long long loops, waits, ticks, zero, zero_subms, messages, timer, timeout, other, frame;
+    _sapp_tc_diag_time wait_time, sample_time;
+} _sapp_tc_diag_loop;
+
 typedef struct _sapp_tc_window_t : _sapp_tc_native_window_t {
+    /* [TrussC #1447 DIAG] Counters reset on each report; DXGI baselines persist. */
+    _sapp_tc_diag_window diag;
+    UINT diag_last_present;
+    DXGI_FRAME_STATISTICS diag_stats;
+    bool diag_last_valid, diag_stats_valid;
     HWND hwnd;
     HMONITOR hmonitor;
     DXGI_FORMAT color_fmt;
@@ -7106,6 +7131,87 @@ static double _sapp_tc_now(void) {
     LARGE_INTEGER qpc;
     QueryPerformanceCounter(&qpc);
     return (double)qpc.QuadPart * _sapp_tc.qpc_period;
+}
+
+/* [TrussC #1447 DIAG] QPC-backed elapsed seconds; no allocations per call. */
+static void _sapp_tc_diag_elapsed(_sapp_tc_diag_time* timing, double began) {
+    const double elapsed = _sapp_tc_now() - began;
+    timing->total += elapsed;
+    if (elapsed > timing->peak) timing->peak = elapsed;
+    ++timing->calls;
+}
+
+/* [TrussC #1447 DIAG] Same zero-timeout sample, with timing only. */
+static DWORD _sapp_tc_diag_sample(_sapp_tc_window_t* w, HANDLE handle) {
+    const double began = _sapp_tc_now();
+    const DWORD result = WaitForSingleObject(handle, 0);
+    _sapp_tc_diag_elapsed(&w->diag.sample_time, began);
+    _sapp_tc_diag_elapsed(&_sapp_tc_diag_loop.sample_time, began);
+    return result;
+}
+
+/* [TrussC #1447 DIAG] stderr is intentional: stdout belongs to MCP. */
+static void _sapp_tc_diag_report(void) {
+    const double now = _sapp_tc_now();
+    if (!_sapp_tc_diag_loop.since) { _sapp_tc_diag_loop.since = now; return; }
+    const double seconds = now - _sapp_tc_diag_loop.since;
+    if (seconds < 1.0) return;
+    const auto& d = _sapp_tc_diag_loop;
+    fprintf(stderr, "[TrussC #1447 DIAG] loop dt=%.3fs loops/s=%.1f waits/s=%.1f ticks/s=%.1f zero/s=%.1f zero_subms/s=%.1f "
+        "wake/s(frame,msg,timer,timeout,other)=%.1f,%.1f,%.1f,%.1f,%.1f "
+        "MsgWait(ms/s,max_ms)=%.3f,%.3f sample(ms/s,max_ms,calls/s)=%.3f,%.3f,%.1f frame_latency_wait=none\n",
+        seconds, d.loops/seconds, d.waits/seconds, d.ticks/seconds, d.zero/seconds, d.zero_subms/seconds,
+        d.frame/seconds, d.messages/seconds, d.timer/seconds, d.timeout/seconds, d.other/seconds,
+        d.wait_time.total*1000/seconds, d.wait_time.peak*1000,
+        d.sample_time.total*1000/seconds, d.sample_time.peak*1000, d.sample_time.calls/seconds);
+    for (int i = 0; i < _SAPP_TC_MAX_WINDOWS; ++i) {
+        auto* w = _sapp_tc.windows[i];
+        if (!w || !w->swap_chain) continue;
+        const auto& c = w->diag;
+        UINT last = 0;
+        DXGI_FRAME_STATISTICS stats = {};
+        const HRESULT last_hr = w->swap_chain->GetLastPresentCount(&last);
+        const HRESULT stats_hr = w->swap_chain->GetFrameStatistics(&stats);
+        // -1 means unavailable/reset/disjoint, never an unsigned rollover spike.
+        const double last_delta = SUCCEEDED(last_hr) && w->diag_last_valid && last >= w->diag_last_present
+            ? (last - w->diag_last_present)/seconds : -1.0;
+        const bool stats_ok = SUCCEEDED(stats_hr) && w->diag_stats_valid &&
+            stats.PresentCount >= w->diag_stats.PresentCount &&
+            stats.PresentRefreshCount >= w->diag_stats.PresentRefreshCount &&
+            stats.SyncRefreshCount >= w->diag_stats.SyncRefreshCount;
+        fprintf(stderr, "[TrussC #1447 DIAG] win=%u Hz=%.2f ticks/s=%.1f presents/s=%.1f "
+            "tick/Hz=%.2f present/Hz=%.2f credit/s(held,fresh,fallback)=%.1f,%.1f,%.1f "
+            "callbacks/s=%.1f draw_proxy/s=%.1f no_draw_proxy/s=%.1f "
+            "skipped/s=%.1f why/s(skip_present,occluded,minimized,other)=%.1f,%.1f,%.1f,%.1f "
+            "rejected/s(not_due,no_credit,other)=%.1f,%.1f,%.1f "
+            "wake/s(own[index=%lu],peer,msg,timer,timeout,other)=%.1f,%.1f,%.1f,%.1f,%.1f,%.1f "
+            "zero_reason/s(saved,held,deadline)=%.1f,%.1f,%.1f "
+            "Present(ms/s,max_ms)=%.3f,%.3f successful/s=%.1f probes/s=%.1f "
+            "sample(ms/s,max_ms,calls/s)=%.3f,%.3f,%.1f "
+            "DXGI/s(last,Present,PresentRefresh,SyncRefresh)=%.1f,%.1f,%.1f,%.1f stats_hr=0x%08lx\n",
+            w->win_id, 1.0/w->refresh_period, c.ticks/seconds, c.presents/seconds,
+            c.ticks/seconds*w->refresh_period, c.presents/seconds*w->refresh_period,
+            c.held/seconds, c.fresh/seconds, c.fallback/seconds, c.callbacks/seconds,
+            c.draw_proxy/seconds, (c.ticks-c.draw_proxy)/seconds,
+            c.skipped/seconds, c.skip_flag/seconds, c.occluded/seconds, c.minimized/seconds, c.other_skip/seconds,
+            c.not_due/seconds, c.no_credit/seconds, c.unavailable/seconds,
+            (unsigned long)c.wait_index, c.own_wake/seconds, (d.frame-c.own_wake)/seconds,
+            d.messages/seconds, d.timer/seconds, d.timeout/seconds, d.other/seconds,
+            c.zero_saved/seconds, c.zero_held/seconds, c.zero_deadline/seconds,
+            c.present_time.total*1000/seconds, c.present_time.peak*1000, c.presented/seconds, c.probes/seconds,
+            c.sample_time.total*1000/seconds, c.sample_time.peak*1000, c.sample_time.calls/seconds,
+            last_delta, stats_ok ? (stats.PresentCount-w->diag_stats.PresentCount)/seconds : -1.0,
+            stats_ok ? (stats.PresentRefreshCount-w->diag_stats.PresentRefreshCount)/seconds : -1.0,
+            stats_ok ? (stats.SyncRefreshCount-w->diag_stats.SyncRefreshCount)/seconds : -1.0,
+            (unsigned long)(UINT)stats_hr);
+        w->diag_last_present = last;
+        w->diag_last_valid = SUCCEEDED(last_hr);
+        w->diag_stats = stats;
+        w->diag_stats_valid = SUCCEEDED(stats_hr); // DISJOINT invalidates the baseline.
+        w->diag = {};
+    }
+    _sapp_tc_diag_loop = {};
+    _sapp_tc_diag_loop.since = _sapp_tc_now();
 }
 
 static void _sapp_tc_timing_reset(_sapp_tc_timing_t* t) {
@@ -7978,15 +8084,30 @@ static void _sapp_tc_win32_pace(_sapp_tc_window_t* w, double seconds) {
 }
 
 static bool _sapp_tc_win32_window_due(_sapp_tc_window_t* w) {
-    if (!w || !w->swap_chain || w->constructing || w->in_tick) return false;
-    if (w->earliest_next > _sapp_tc_now()) return false;
+    if (!w || !w->swap_chain || w->constructing || w->in_tick) { /* [TrussC #1447 DIAG] */
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        if (w) ++w->diag.unavailable;
+#endif /* [TrussC #1447 DIAG] */
+        return false;
+    }
+    if (w->earliest_next > _sapp_tc_now()) { /* [TrussC #1447 DIAG] */
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        ++w->diag.not_due;
+#endif /* [TrussC #1447 DIAG] */
+        return false;
+    }
     /* Waitable pacing: the frame latency waitable is an auto-reset object that
        the run-loop's MsgWaitForMultipleObjectsEx already waits on. That wait
        CONSUMES the signal, so we must NOT re-wait the handle here (doing so
        missed the consumed signal and stalled the render loop after frame 1).
        Instead the run-loop records the consumed signal in waitable_ready. */
     if (w->frame_wait && !w->credit_held) {
-        if (!w->waitable_ready) return false;
+        if (!w->waitable_ready) { /* [TrussC #1447 DIAG] */
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+            ++w->diag.no_credit;
+#endif /* [TrussC #1447 DIAG] */
+            return false;
+        }
     }
     return true;
 }
@@ -8030,12 +8151,24 @@ static void _sapp_tc_win32_observe_occlusion(_sapp_tc_window_t* w, bool occluded
 static void _sapp_tc_win32_swap(_sapp_tc_window_t* w) {
     const sapp_window handle{w->win_id};
     const UINT flags = w->from_modal ? DXGI_PRESENT_DO_NOT_WAIT : 0;
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+    ++w->diag.presents;
+    const double diag_began = _sapp_tc_now();
+#endif /* [TrussC #1447 DIAG] */
     const HRESULT hr = w->swap_chain->Present((UINT)w->swap_interval, flags);
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+    _sapp_tc_diag_elapsed(&w->diag.present_time, diag_began);
+#endif /* [TrussC #1447 DIAG] */
+
     if (_sapp_tc_d3d11_check_device_loss(hr)) return;
     _sapp_tc_win32_observe_occlusion(w, hr == DXGI_STATUS_OCCLUDED);
     if (!(w = _sapp_tc_lookup(handle))) return;
     const bool presented = SUCCEEDED(hr) && hr != DXGI_STATUS_OCCLUDED;
     if (presented) {
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        ++w->diag.presented;
+#endif /* [TrussC #1447 DIAG] */
+
         w->credit_held = false;
         w->last_present = _sapp_tc_now();
     }
@@ -8045,6 +8178,28 @@ static void _sapp_tc_win32_swap(_sapp_tc_window_t* w) {
 
 static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     if (!w || !w->ready || w->constructing || _sapp_tc.app.quit_ordered || w->in_tick || !w->swap_chain) return;
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+    ++w->diag.ticks;
+    ++_sapp_tc_diag_loop.ticks;
+    if (!w->frame_wait) ++w->diag.fallback;
+    else if (w->credit_held) ++w->diag.held;
+    else ++w->diag.fresh;
+    const auto diag_present_before = w->diag.presents;
+    struct DiagTickScope {
+        sapp_window handle;
+        unsigned long long present_before;
+        bool skipped_by_client = false; /* [TrussC #1447 DIAG] */
+        ~DiagTickScope() {
+            auto* live = _sapp_tc_lookup(handle);
+            if (!live || live->diag.presents != present_before) return;
+            ++live->diag.skipped;
+            if (_sapp_tc_native_iconified(live)) ++live->diag.minimized;
+            else if (_sapp_tc_native_occluded(live)) ++live->diag.occluded;
+            else if (skipped_by_client || live->skip_present) ++live->diag.skip_flag;
+            else ++live->diag.other_skip;
+        }
+    } diag_scope{{w->win_id}, diag_present_before};
+#endif /* [TrussC #1447 DIAG] */
     w->in_tick = true;
     w->cancel_tick = false;
     const sapp_window tick_handle{w->win_id};
@@ -8060,7 +8215,15 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
 
     // Probe, dimensions, drawable admission: RESUMED precedes RESIZED.
     if (_sapp_tc_native_occluded(w) && !_sapp_tc.app.device_lost_notified) {
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        ++w->diag.probes;
+        const double diag_began = _sapp_tc_now();
+#endif /* [TrussC #1447 DIAG] */
         const HRESULT hr = w->swap_chain->Present(0, DXGI_PRESENT_TEST);
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        _sapp_tc_diag_elapsed(&w->diag.present_time, diag_began);
+#endif /* [TrussC #1447 DIAG] */
+
         if (_sapp_tc_d3d11_check_device_loss(hr)) return;
         _sapp_tc_win32_observe_occlusion(w, hr == DXGI_STATUS_OCCLUDED);
         if (!(w = _sapp_tc_lookup(tick_handle))) return;
@@ -8089,7 +8252,14 @@ static void _sapp_tc_win32_tick(_sapp_tc_window_t* w) {
     }
     if (!(w = _sapp_tc_lookup(tick_handle)) || w->cancel_tick) return;
     ++w->frame_count;
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+    if (w->desc.tick_cb) ++w->diag.callbacks;
+    if (w->desc.tick_cb && !w->skip_present) ++w->diag.draw_proxy;
+#endif /* [TrussC #1447 DIAG] */
     const bool skip = w->skip_present;
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+    diag_scope.skipped_by_client = skip;
+#endif /* [TrussC #1447 DIAG] */
     w->skip_present = false; // one-shot is consumed at the completed tick boundary, even on loss
     // Callbacks may explicitly hide a window after draw admission.
     if (admitted && !skip && !_sapp_tc.app.device_lost_notified
@@ -8337,7 +8507,7 @@ static LRESULT _sapp_tc_wndproc_impl(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
                        poll the frame latency waitable here instead -- otherwise the
                        due-check never sees a credit and drag/resize stops rendering */
                     if (tw->frame_wait && !tw->credit_held && !tw->waitable_ready &&
-                        WaitForSingleObject(tw->frame_wait, 0) == WAIT_OBJECT_0) {
+                        _sapp_tc_diag_sample(tw, tw->frame_wait) /* [TrussC #1447 DIAG] */ == WAIT_OBJECT_0) {
                         tw->waitable_ready = true;
                     }
                     if (_sapp_tc_win32_window_due(tw)) {
@@ -8636,8 +8806,15 @@ static void _sapp_tc_win32_run_loop(void) {
     HANDLE pace_timer = CreateWaitableTimerExW(NULL, NULL,
         CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_MODIFY_STATE | SYNCHRONIZE);
     bool done = false;
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+    _sapp_tc_diag_loop = {};
+    _sapp_tc_diag_loop.since = _sapp_tc_now();
+#endif /* [TrussC #1447 DIAG] */
 
     while (!done && !_sapp_tc.app.quit_ordered) {
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        ++_sapp_tc_diag_loop.loops;
+#endif /* [TrussC #1447 DIAG] */
         HANDLE handles[_SAPP_TC_MAX_WINDOWS + 1];   /* + the pace timer */
         _sapp_tc_window_t* handle_owner[_SAPP_TC_MAX_WINDOWS];
         DWORD num_handles = 0;          /* frame latency waitables (handle_owner) */
@@ -8653,6 +8830,11 @@ static void _sapp_tc_win32_run_loop(void) {
                 handle_owner[num_handles] = w;
                 handles[num_handles++] = w->frame_wait;
             } else {
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+                if (w->waitable_ready) ++w->diag.zero_saved;
+                else if (w->credit_held) ++w->diag.zero_held;
+                else ++w->diag.zero_deadline;
+#endif /* [TrussC #1447 DIAG] */
                 wake_at = now;          /* due immediately (timer-paced / credit or signal held) */
             }
         }
@@ -8669,8 +8851,28 @@ static void _sapp_tc_win32_run_loop(void) {
                 timeout_ms = (DWORD)ceil((wake_cap - now) * 1000.0);   /* only the cap */
             }
         }
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        if (timeout_ms == 0) {
+            ++_sapp_tc_diag_loop.zero;
+            if (wake_at > now) ++_sapp_tc_diag_loop.zero_subms;
+        }
+        const double diag_began = _sapp_tc_now();
+#endif /* [TrussC #1447 DIAG] */
         DWORD wr = MsgWaitForMultipleObjectsEx(num_wait, handles,
             timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        _sapp_tc_diag_elapsed(&_sapp_tc_diag_loop.wait_time, diag_began);
+        ++_sapp_tc_diag_loop.waits;
+        if (wr < WAIT_OBJECT_0 + num_handles) {
+            ++_sapp_tc_diag_loop.frame;
+            ++handle_owner[wr - WAIT_OBJECT_0]->diag.own_wake;
+            handle_owner[wr - WAIT_OBJECT_0]->diag.wait_index = wr - WAIT_OBJECT_0;
+        } else if (num_wait > num_handles && wr == WAIT_OBJECT_0 + num_handles) ++_sapp_tc_diag_loop.timer;
+        else if (wr == WAIT_OBJECT_0 + num_wait) ++_sapp_tc_diag_loop.messages;
+        else if (wr == WAIT_TIMEOUT) ++_sapp_tc_diag_loop.timeout;
+        else ++_sapp_tc_diag_loop.other;
+#endif /* [TrussC #1447 DIAG] */
+
         /* If a frame latency waitable satisfied the wait, it was auto-reset here.
            Record it so the due-check consumes THIS signal instead of re-waiting
            the (now-unsignaled) handle. */
@@ -8682,7 +8884,11 @@ static void _sapp_tc_win32_run_loop(void) {
            selecting that first handle and starve another ready display.
            Never re-wait the auto-reset signal already reported above. */
         for (DWORD i = 0; i < num_handles; ++i) {
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+            if (wr != WAIT_OBJECT_0 + i && _sapp_tc_diag_sample(handle_owner[i], handles[i]) == WAIT_OBJECT_0)
+#else /* [TrussC #1447 DIAG] Keep extracted Linux scheduling fixtures unchanged. */
             if (wr != WAIT_OBJECT_0 + i && WaitForSingleObject(handles[i], 0) == WAIT_OBJECT_0)
+#endif /* [TrussC #1447 DIAG] */
                 handle_owner[i]->waitable_ready = true;
         }
         /* WAIT_OBJECT_0 + num_handles (when armed) is the pace timer: nothing to
@@ -8719,6 +8925,9 @@ static void _sapp_tc_win32_run_loop(void) {
             }
         }
         if (_sapp_tc.app.desc._tc_after_turn) _sapp_tc.app.desc._tc_after_turn();
+#if defined(_WIN32) /* [TrussC #1447 DIAG] */
+        _sapp_tc_diag_report();
+#endif /* [TrussC #1447 DIAG] */
         /* sapp_window_request_close(): post WM_CLOSE to that window, so the
            close lands through the same WM_CLOSE branch (close_cb) as a click
            on its close button, outside every tick */
