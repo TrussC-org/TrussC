@@ -2,6 +2,18 @@
 
 Raspberry Pi 5 (Mesa V3D, GLES). Assumes already installed: a C++17 compiler, Python 3, and EGL / GLESv2 / X11 development packages. Install nothing; if something is missing, stop and report it.
 
+## MESA_framebuffer_flip_y smoke (#1422) — run this first
+
+```sh
+cd inv-1422-measure
+c++ -std=c++17 -O2 -Wall -Wextra -Werror fbo_measure.cpp -o fbo_measure -lEGL -lGLESv2 -lX11
+export DISPLAY=:0          # the Pi's own desktop session (use its actual display number)
+unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER
+./fbo_measure --flip-y-smoke > PI_FLIP_Y.log 2>&1; echo "exit=$?"; cat PI_FLIP_Y.log
+```
+
+Send back PI_FLIP_Y.log and the exit code. It must show renderer=V3D. Each check prints PASS/FAIL (orientation via sampling, MSAA resolve, readback row order, viewport, facing, derivatives, scissor at 1x/4x, plus a native 4x scissor control); then `COMPLETE gl_error=0`. On Linux llvmpipe everything passed except the 4x scissor checks, which also failed in the native control, so we need to know whether V3D passes them.
+
 ## Extension check (#1422 clip control) — run this first
 
 ```sh

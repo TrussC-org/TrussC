@@ -1,6 +1,7 @@
 // Scratch mechanism probe for #1422; deliberately independent of TrussC.
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
 #include <X11/Xlib.h>
 #include <algorithm>
 #include <array>
@@ -175,6 +176,224 @@ void smoke(Mode mode,int samples) {
     glDisable(GL_CULL_FACE); glDisable(GL_SCISSOR_TEST); checked();
     std::printf("SMOKE mode=%s samples=%d canonical=PASS nested=PASS scissor=PASS culling=PASS window=PASS chain_1_to_6=PASS pixels=PASS\n",names[mode],samples);
 }
+bool flipYSmoke() {
+    bool available=false;
+    GLint extensionCount=0;
+    glGetIntegerv(GL_NUM_EXTENSIONS,&extensionCount);
+    for(GLint i=0;i<extensionCount;++i) {
+        if(!std::strcmp(reinterpret_cast<const char*>(glGetStringi(GL_EXTENSIONS,i)),"GL_MESA_framebuffer_flip_y")) available=true;
+    }
+    if(!available) {
+        std::puts("SKIP flip-y-smoke GL_MESA_framebuffer_flip_y absent");
+        return true;
+    }
+    auto setFlip=reinterpret_cast<PFNGLFRAMEBUFFERPARAMETERIMESAPROC>(eglGetProcAddress("glFramebufferParameteriMESA"));
+    auto getFlip=reinterpret_cast<PFNGLGETFRAMEBUFFERPARAMETERIVMESAPROC>(eglGetProcAddress("glGetFramebufferParameterivMESA"));
+    require(setFlip&&getFlip,"MESA framebuffer entry points missing");
+    bool passed=true;
+    auto report=[&](int samples,const char* check,bool ok) {
+        std::printf("%s flip-y samples=%d check=%s\n",ok?"PASS":"FAIL",samples,check);
+        passed=passed&&ok;
+    };
+    auto flip=[&](GLuint fb,int value) {
+        glBindFramebuffer(GL_FRAMEBUFFER,fb);
+        setFlip(GL_FRAMEBUFFER,GL_FRAMEBUFFER_FLIP_Y_MESA,value);
+    };
+    auto reversed=[](const std::vector<unsigned char>& data) {
+        std::vector<unsigned char> result(data.size());
+        for(int y=0;y<fh;++y) std::memcpy(&result[y*fw*4],&data[(fh-1-y)*fw*4],fw*4);
+        return result;
+    };
+    // Independent fragment probe: native window Y, facing, and the sign of a Y derivative.
+    GLuint vs=compile(GL_VERTEX_SHADER,R"(#version 300 es
+        precision highp float;
+        out vec2 uv;
+        const vec2 corners[6]=vec2[6](vec2(-1,-1),vec2(1,-1),vec2(-1,1),vec2(-1,1),vec2(1,-1),vec2(1,1));
+        void main() {
+            vec2 p=corners[gl_VertexID];
+            uv=vec2(p.x*.5+.5,.5-p.y*.5);
+            gl_Position=vec4(p,0,1);
+        }
+    )");
+    GLuint fs=compile(GL_FRAGMENT_SHADER,R"(#version 300 es
+        precision highp float;
+        in vec2 uv;
+        out vec4 color;
+        void main() {
+            color=vec4(floor(gl_FragCoord.y)/255.,gl_FrontFacing?1.:0.,dFdy(uv.y)<0.?1.:0.,1.);
+        }
+    )");
+    GLuint probe=glCreateProgram();
+    glAttachShader(probe,vs);
+    glAttachShader(probe,fs);
+    glLinkProgram(probe);
+    GLint linked=0;
+    glGetProgramiv(probe,GL_LINK_STATUS,&linked);
+    require(linked,"flip-y probe link");
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    for(int samples:{1,4}) {
+        Target target(fw,fh,false,samples,false);
+        GLuint renderFb=samples>1?target.msaa:target.framebuffer;
+        flip(renderFb,1);
+        GLint parameter=0;
+        getFlip(GL_FRAMEBUFFER,GL_FRAMEBUFFER_FLIP_Y_MESA,&parameter);
+        report(samples,"parameter",parameter==1);
+        flip(target.framebuffer,1);
+        GLint actualSamples=0;
+        glBindRenderbuffer(GL_RENDERBUFFER,target.renderbuffer);
+        if(samples>1) glGetRenderbufferParameteriv(GL_RENDERBUFFER,GL_RENDERBUFFER_SAMPLES,&actualSamples);
+        std::printf("CONFIG requested_samples=%d renderbuffer_samples=%d\n",samples,actualSamples);
+        auto selectRender=[&]() {
+            glUseProgram(program);
+            glBindFramebuffer(GL_FRAMEBUFFER,renderFb);
+            glViewport(0,0,fw,fh);
+            glDisable(GL_SCISSOR_TEST);
+            glFrontFace(GL_CCW);
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            glUniform1f(reflectionLoc,1.f);
+            glClearColor(1,0,1,1);
+            glClear(GL_COLOR_BUFFER_BIT);
+        };
+        auto resolve=[&]() {
+            glDisable(GL_SCISSOR_TEST);
+            if(samples>1) {
+                glBindFramebuffer(GL_READ_FRAMEBUFFER,renderFb);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER,target.framebuffer);
+                glBlitFramebuffer(0,0,fw,fh,0,0,fw,fh,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+            }
+        };
+        auto sampleDefault=[&](GLuint source=0) {
+            glUseProgram(program);
+            glBindFramebuffer(GL_FRAMEBUFFER,0);
+            glViewport(0,0,fw,fh);
+            glDisable(GL_SCISSOR_TEST);
+            glDisable(GL_CULL_FACE);
+            glUniform1f(reflectionLoc,1.f);
+            quad(source?source:target.texture);
+            // Default framebuffer readback is bottom-first; comparison is top-first.
+            return reversed(read(0,fw,fh));
+        };
+        selectRender();
+        quad(fixture);
+        resolve();
+        report(samples,"ordinary_texture_sample_top_at_v0",sampleDefault()==pixels);
+        auto flaggedRows=read(target.framebuffer,fw,fh);
+        report(samples,"readpixels_flipped_fbo_bottom_first",flaggedRows==reversed(pixels));
+        flip(target.framebuffer,0);
+        report(samples,"readpixels_unflipped_alias_top_first",read(target.framebuffer,fw,fh)==pixels);
+        if(samples>1) {
+            // Equal blit bounds preserve logical coordinates, so differing flags reverse storage rows.
+            resolve();
+            report(samples,"resolve_different_flags_reverses_storage",sampleDefault()==reversed(pixels));
+        }
+        flip(target.framebuffer,1);
+        resolve();
+        report(samples,"resolve_matching_flags_preserves_storage",sampleDefault()==pixels);
+
+        selectRender();
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(4,fh-2-7,19,7);
+        quad(fixture);
+        resolve();
+        auto clipped=sampleDefault();
+        bool scissorOk=true;
+        int clipMismatches=0;
+        for(int y=0;y<fh;++y) for(int x=0;x<fw;++x) {
+            const unsigned char background[]={255,0,255,255};
+            const auto* expected=x>=4&&x<23&&y>=2&&y<9?&pixels[(y*fw+x)*4]:background;
+            const auto* actual=&clipped[(y*fw+x)*4];
+            if(std::memcmp(actual,expected,4)!=0) {
+                if(clipMismatches++<4) std::printf("DETAIL scissor samples=%d x=%d y=%d rgba=%u,%u,%u,%u expected=%u,%u,%u,%u\n",
+                    samples,x,y,actual[0],actual[1],actual[2],actual[3],expected[0],expected[1],expected[2],expected[3]);
+                scissorOk=false;
+            }
+        }
+        report(samples,"scissor_existing_top_left_mapping",scissorOk);
+        if(samples>1) {
+            // Fresh native FBOs have never had flip-y enabled.
+            Target native(fw,fh,false,samples,false);
+            selectRender();
+            glBindFramebuffer(GL_FRAMEBUFFER,native.msaa);
+            glClear(GL_COLOR_BUFFER_BIT);
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(4,fh-2-7,19,7);
+            quad(fixture);
+            glDisable(GL_SCISSOR_TEST);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER,native.msaa);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,native.framebuffer);
+            glBlitFramebuffer(0,0,fw,fh,0,0,fw,fh,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+            auto nativeClip=reversed(sampleDefault(native.texture));
+            bool nativeOk=true;
+            int nativeMismatches=0;
+            for(int y=0;y<fh;++y) for(int x=0;x<fw;++x) {
+                const unsigned char background[]={255,0,255,255};
+                const auto* expected=x>=4&&x<23&&y>=2&&y<9?&pixels[(y*fw+x)*4]:background;
+                const auto* actual=&nativeClip[(y*fw+x)*4];
+                if(std::memcmp(actual,expected,4)!=0) {
+                    if(nativeMismatches++<4) std::printf("DETAIL native_scissor samples=%d x=%d y=%d rgba=%u,%u,%u,%u expected=%u,%u,%u,%u\n",
+                        samples,x,y,actual[0],actual[1],actual[2],actual[3],expected[0],expected[1],expected[2],expected[3]);
+                    nativeOk=false;
+                }
+            }
+            report(samples,"scissor_native_control",nativeOk);
+            report(samples,"scissor_flip_matches_native_control",nativeClip==clipped);
+        }
+
+        selectRender();
+        glViewport(3,fh-4-11,19,11);
+        quad(fixture);
+        resolve();
+        auto viewport=sampleDefault();
+        bool viewportOk=true;
+        for(int y=0;y<fh;++y) for(int x=0;x<fw;++x) {
+            const unsigned char background[]={255,0,255,255};
+            const unsigned char* expected=background;
+            if(x>=3&&x<22&&y>=4&&y<15) {
+                int sx=static_cast<int>((x-3+.5)*fw/19),sy=static_cast<int>((y-4+.5)*fh/11);
+                expected=&pixels[(sy*fw+sx)*4];
+            }
+            viewportOk=viewportOk&&std::memcmp(&viewport[(y*fw+x)*4],expected,4)==0;
+        }
+        report(samples,"viewport_existing_top_left_mapping",viewportOk);
+
+        selectRender();
+        glFrontFace(GL_CW);
+        quad(fixture);
+        resolve();
+        auto culled=sampleDefault();
+        bool cullOk=true;
+        for(size_t i=0;i<culled.size();i+=4) cullOk=cullOk&&culled[i]==255&&culled[i+1]==0&&culled[i+2]==255;
+        report(samples,"culling_CW_rejected_CCW_kept",cullOk);
+        for(GLenum winding:{GL_CCW,GL_CW}) {
+            selectRender();
+            glDisable(GL_CULL_FACE);
+            glFrontFace(winding);
+            glUseProgram(probe);
+            glDrawArrays(GL_TRIANGLES,0,6);
+            resolve();
+            auto fragment=sampleDefault();
+            bool coordOk=true,facingOk=true,derivativeOk=true;
+            // Interior pixels avoid primitive-edge helper invocations and MSAA coverage.
+            for(int y=2;y<fh-2;++y) for(int x=2;x<fw-2;++x) {
+                const auto* p=&fragment[(y*fw+x)*4];
+                coordOk=coordOk&&p[0]==fh-1-y;
+                facingOk=facingOk&&p[1]==(winding==GL_CCW?255:0);
+                derivativeOk=derivativeOk&&p[2]==255;
+            }
+            report(samples,winding==GL_CCW?"fragcoord_native_bottom_origin":"fragcoord_native_bottom_origin_CW",coordOk);
+            report(samples,winding==GL_CCW?"frontfacing_CCW_true":"frontfacing_CW_false",facingOk);
+            report(samples,winding==GL_CCW?"derivative_native_sign":"derivative_native_sign_CW",derivativeOk);
+        }
+        checked();
+    }
+    glDeleteProgram(probe);
+    glUseProgram(program);
+    glDisable(GL_CULL_FACE);
+    glFrontFace(GL_CCW);
+    return passed;
+}
 struct Case { const char* name; int w,h; bool halfFloat; int samples,count,passes; };
 double percentile(std::vector<double> v,double q) { std::sort(v.begin(),v.end()); return v[static_cast<size_t>(std::ceil(q*v.size()))-1]; }
 void bench(const Case& c,int rounds,int batch) {
@@ -212,16 +431,18 @@ void bench(const Case& c,int rounds,int batch) {
 }
 int main(int argc,char** argv) {
     try {
-        bool gles=false,onlySmoke=false,extensions=false; int rounds=15,batch=3;
+        bool gles=false,onlySmoke=false,extensions=false,flipSmoke=false; int rounds=15,batch=3;
         for(int i=1;i<argc;++i) {
             if(!std::strcmp(argv[i],"--gles")) gles=true;
             else if(!std::strcmp(argv[i],"--gl")) gles=false;
             else if(!std::strcmp(argv[i],"--extensions")) extensions=true;
+            else if(!std::strcmp(argv[i],"--flip-y-smoke")) flipSmoke=true;
             else if(!std::strcmp(argv[i],"--smoke-only")) onlySmoke=true;
             else if(!std::strcmp(argv[i],"--rounds")&&i+1<argc) rounds=std::stoi(argv[++i]);
             else if(!std::strcmp(argv[i],"--batch")&&i+1<argc) batch=std::stoi(argv[++i]);
-            else throw std::runtime_error("usage: fbo_measure [--gl|--gles] [--extensions] [--smoke-only] [--rounds N] [--batch N]");
+            else throw std::runtime_error("usage: fbo_measure [--gl|--gles] [--extensions] [--flip-y-smoke] [--smoke-only] [--rounds N] [--batch N]");
         }
+        if(flipSmoke) gles=true;
         require(rounds>0&&batch>0,"positive sample counts required");
         Display* xd=XOpenDisplay(nullptr); require(xd,"XOpenDisplay failed (explicit DISPLAY required)");
         EGLDisplay d=eglGetDisplay(static_cast<EGLNativeDisplayType>(xd)); require(d!=EGL_NO_DISPLAY,"EGL display");
@@ -234,6 +455,11 @@ int main(int argc,char** argv) {
         EGLint surfaceAttrs[]={EGL_WIDTH,64,EGL_HEIGHT,64,EGL_NONE};
         EGLSurface surface=eglCreatePbufferSurface(d,config,surfaceAttrs); require(surface!=EGL_NO_SURFACE,"EGL pbuffer");
         require(eglMakeCurrent(d,surface,surface,context),"EGL current");
+        if(flipSmoke) {
+            EGLint surfaceSamples=0;
+            eglGetConfigAttrib(d,config,EGL_SAMPLES,&surfaceSamples);
+            std::printf("CONFIG default_surface_samples=%d\n",surfaceSamples);
+        }
         if(extensions) {
             std::printf("GL_VERSION=%s\n",glGetString(GL_VERSION));
             std::printf("GL_RENDERER=%s\n",glGetString(GL_RENDERER));
@@ -251,10 +477,13 @@ int main(int argc,char** argv) {
             return 0;
         }
         std::printf("DEVICE api=%s vendor=%s renderer=%s version=%s\n",gles?"GLES":"GL",glGetString(GL_VENDOR),glGetString(GL_RENDERER),glGetString(GL_VERSION));
-        std::printf("METHOD rounds=%d batch=%d warmup_per_block=2 order=rotating_B_E_A timer=steady_clock_with_glFinish frozen=37x23_markers\n",rounds,batch);
+        if(flipSmoke) std::puts("METHOD flip-y-smoke samples=1,4 frozen=37x23_markers no_clip_control no_vertex_reflection");
+        else std::printf("METHOD rounds=%d batch=%d warmup_per_block=2 order=rotating_B_E_A timer=steady_clock_with_glFinish frozen=37x23_markers\n",rounds,batch);
         initShader(gles);
-        for(Mode mode:{E,A}) for(int samples:{1,4}) smoke(mode,samples);
-        if(!onlySmoke) {
+        bool passed=true;
+        if(flipSmoke) passed=flipYSmoke();
+        else for(Mode mode:{E,A}) for(int samples:{1,4}) smoke(mode,samples);
+        if(!onlySmoke&&!flipSmoke) {
             const Case cases[]={ {"1080p_RGBA8",1920,1080,false,1,1,1}, {"4K_RGBA16F",3840,2160,true,1,1,1},
                 {"1080p_MSAA4",1920,1080,false,4,1,1}, {"six_pass",1920,1080,false,1,2,6}, {"100_small",256,256,false,1,100,100} };
             stack.push_back({0,64,64,Baseline,false,0,0,0,0});
@@ -263,5 +492,6 @@ int main(int argc,char** argv) {
         }
         checked(); std::puts("COMPLETE gl_error=0");
         eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT); eglDestroySurface(d,surface); eglDestroyContext(d,context); eglTerminate(d); XCloseDisplay(xd);
+        return passed?0:1;
     } catch(const std::exception& e) { std::fprintf(stderr,"FAIL %s\n",e.what()); return 1; }
 }
