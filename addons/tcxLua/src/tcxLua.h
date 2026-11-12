@@ -4,6 +4,7 @@
 #include "tcxLuaPathAdapter.h"  // sol2 <-> std::filesystem::path (Lua string) conversion; must precede any path binding TU
 #include "TrussC.h"
 #include <fstream>
+#include "tcxLuaEvents.h"
 
 // namespace tcx::lua {
 
@@ -78,7 +79,12 @@ public:
     ///         error or a runtime error (logged).
     static bool runFile(sol::state& lua, const std::filesystem::path& path);
 
+    // Host reloads through runFile clear subscriptions automatically. Hosts that
+    // replace scripts directly through sol2 must call this before replacement.
+    static void clearEventListeners(sol::state& lua);
+
 protected:
+    void setEventBindings(const std::shared_ptr<sol::state>& lua);
     void setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua);
     void setGeneratedTypeBindings(const std::shared_ptr<sol::state>& lua);   // luagen-types (Phase 2 usertypes)
     void setTypeBindings(const std::shared_ptr<sol::state>& lua);
@@ -105,6 +111,9 @@ protected:
                 TweenT(TweenValue, TweenValue, float, EaseType),
                 TweenT(TweenValue, TweenValue, float, EaseType, EaseMode)
             >(),
+            "complete", sol::property([](TweenT& tween, sol::this_state state) {
+                return tcx_lua_detail::eventView(*tween.complete, state);
+            }),
             "from", &TweenT::from,
             "to", &TweenT::to,
             "duration", &TweenT::duration,

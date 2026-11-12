@@ -1022,12 +1022,22 @@ checks wait for confirmed entry, and size-restoration checks wait for exit.
   per texel (#293): `getMemoryUsage()` is the sum of width × height over the
   pages, and after 300 glyphs grow a page through several doubling steps
   every glyph still has full coverage at its UV center and nothing lies
-  outside the glyph rectangles. `fontAtlasR8 --gpu-check` (needs a display,
-  not run in CI) draws 150 new glyphs into an Fbo in one frame, one
+  outside the glyph rectangles. `fontAtlasR8 --gpu-check` (needs a display)
+  draws 150 new glyphs into an Fbo in one frame, one
   `drawString()` each, and checks that the page texture is
   `SG_PIXELFORMAT_R8`, every glyph is in the Fbo in the `setColor()` color,
   and a minified draw builds and samples the R8 mip chain. The font is
-  built at runtime.
+  built at runtime. `--burst-check` renders 500 distinct glyphs at 128px with
+  oversampling 3 into a 3680² mipmapped Fbo. It checks one image upload/mip
+  rebuild per page per flush, bounded live image bytes, and every glyph’s
+  coverage. It prints first-pass timing and image counts. `--midpass-check`
+  (#1439) requests mips while a swapchain
+  pass is suspended by a one-shot mipmapped Fbo. It checks the first draw's
+  mip chain, glyph stroke color and transparent counter, empty pixels, and
+  retirement without another draw of that Font. Four frames check the preserved
+  Fbo and swapchain/overlay pixels. An independent Font makes a 500-call burst
+  and exercises allocation retry after the one-shot draw. All three modes are listed
+  in `display-test` for every display backend.
 - `extensionCase/` — loaders and savers match the file extension
   case-insensitively; file names keep their case as written (#305). `Sound::load()` picks
   its decoder for `.Wav` / `.Mp3` / `.OgG` / `.Flac` / `.M4a` as

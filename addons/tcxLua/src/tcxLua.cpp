@@ -120,6 +120,7 @@ bool tcxLua::isLuaJITUsedEstimated(const std::shared_ptr<sol::state>& lua){
 }
 
 void tcxLua::setBindings(const std::shared_ptr<sol::state>& lua){
+    setEventBindings(lua);
     setTrussCGeneratedBindings(lua);
     setGeneratedTypeBindings(lua);   // luagen-types: generated usertypes
     setTypeBindings(lua);
@@ -461,6 +462,12 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         &Image::save,
         [](Image& t, const std::string& s){ return t.save(s); }
     );
+    img_type["loadAsync"] = sol::overload(
+        [](Image& image, const std::filesystem::path& path) { image.loadAsync(path); },
+        [](Image& image, const std::filesystem::path& path, bool mipmaps) { image.loadAsync(path, mipmaps); }
+    );
+    img_type["isLoading"] = &Image::isLoading;
+    img_type["onLoad"] = tcx_lua_detail::eventProperty(&Image::onLoad);
     img_type["loadFromMemory"] = &Image::loadFromMemory;
     img_type["allocate"] = sol::overload(
         [](Image& t, int w, int h){ return t.allocate(w, h); },
@@ -907,8 +914,9 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         "last_attribute", &XmlNode::last_attribute,
         "remove_children", &XmlNode::remove_children,
         // "children", [](XmlNode& x){ return x.children(); }
-        "children", [lua](XmlNode& x){ // WORKAROUND for ipairs etc
-            auto&& tbl = lua->create_table();
+        "children", [](XmlNode& x, sol::this_state state){ // WORKAROUND for ipairs etc
+            sol::state_view view(state);
+            auto tbl = view.create_table();
             for(auto&& n : x.children()){
                 tbl.add(n);
             }
@@ -949,6 +957,9 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         sol::call_constructor, sol::constructors<SoundBuffer(),
             SoundBuffer(const SoundBuffer&), SoundBuffer(SoundBuffer&&)>(),
         sol::base_classes, sol::bases<SoundSource>(),
+        "loadAsync", &SoundBuffer::loadAsync,
+        "isLoading", &SoundBuffer::isLoading,
+        "onLoad", tcx_lua_detail::eventProperty(&SoundBuffer::onLoad),
         "load", &SoundBuffer::load,
         "loadFlac", &SoundBuffer::loadFlac,
         "getPath", &SoundBuffer::getPath,
@@ -987,6 +998,8 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
     );
 
     lua->new_usertype<AudioEngine>("AudioEngine",
+        "onDisconnect", tcx_lua_detail::eventProperty(&AudioEngine::onDisconnect),
+        "audioDeviceChanged", tcx_lua_detail::eventProperty(&AudioEngine::audioDeviceChanged),
         "getInstance", sol::var(&AudioEngine::getInstance),
         "listDevices", sol::overload(
             [] { return AudioEngine::listDevices(); },
@@ -1055,7 +1068,9 @@ void tcxLua::setTypeBindings(const std::shared_ptr<sol::state>& lua){
         "getBuffer", &MicInput::getBuffer,
         "isRunning", &MicInput::isRunning,
         "getSampleRate", &MicInput::getSampleRate,
-        "onAudioData", &MicInput::onAudioData
+        "onAudioData", &MicInput::onAudioData,
+        "onStart", tcx_lua_detail::eventProperty(&MicInput::onStart),
+        "onDisconnect", tcx_lua_detail::eventProperty(&MicInput::onDisconnect)
     );
 }
 

@@ -553,6 +553,13 @@ vector<float> values(w * h * 4);
 fbo.readPixelsFloat(values.data());
 ```
 
+### Font atlas pages are published when the target flushes
+
+Glyphs drawn in a pass are rasterized on the CPU, and each changed atlas page gets its new texture once, just before the target replays its draws. For code that reads a page through `Font::getAtlas(index)`:
+- `getView()` returns the page's view right away, so you can record draws with it.
+- `getTexture()` and `isTextureValid()` describe the last *published* image. Read them after the frame or Fbo has flushed (for example after `Fbo::end()`).
+- An atlas page keeps the size it had at its first recorded draw. New glyphs that don't fit go to a new page.
+
 ## Loading and saving
 
 ### Saving and recording return SaveResult

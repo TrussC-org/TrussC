@@ -250,14 +250,9 @@ return {
         assert(not shader:isLoaded())
         return true
     end},
-    {'Event-dependent, NEVER and HOLD entries stay absent', function()
-        assert(TweenFloat.complete == nil and TweenVec2.complete == nil)
-        assert(TweenVec3.complete == nil and TweenColor.complete == nil)
+    {'NEVER and HOLD entries stay absent', function()
         assert(AudioEngine.audioIn == nil and AudioEngine.audioOut == nil)
-        assert(AudioEngine.waitForAudioCallbacks == nil and AudioEngine.audioDeviceChanged == nil)
-        assert(AudioEngine.onDisconnect == nil and MicInput.onStart == nil and MicInput.onDisconnect == nil)
-        assert(Image.loadAsync == nil and Image.isLoading == nil and Image.onLoad == nil)
-        assert(SoundBuffer.loadAsync == nil and SoundBuffer.isLoading == nil and SoundBuffer.onLoad == nil)
+        assert(AudioEngine.waitForAudioCallbacks == nil)
         assert(Texture.getViewForMip == nil and Texture.getAttachmentViewForMip == nil)
         assert(Texture.drawFlippedY == nil and Fbo.lifetimeToken == nil)
         return true
