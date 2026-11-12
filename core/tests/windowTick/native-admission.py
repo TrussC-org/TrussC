@@ -129,6 +129,7 @@ constexpr int _SAPP_TC_MAX_WINDOWS=1,TRUE=1,FALSE=0,CP_UTF8=65001,WM_QUERYENDSES
 HANDLE CreateWaitableTimerExW(...) { return nullptr; } bool SetWaitableTimer(...) { return false; }
 void CloseHandle(...) {} void PostMessageW(...) {} void PostQuitMessage(int) {}
 DWORD MsgWaitForMultipleObjectsEx(...) { return 3; }
+DWORD WaitForSingleObject(...) { return 1; }
 struct MSG { int message=0; };
 bool PeekMessageW(MSG*,void*,int,int,int) { if (!queued) return false; queued=false;return true; }
 void TranslateMessage(MSG*) {} void DispatchMessageW(MSG*) { ++drained; emit(SAPP_EVENTTYPE_KEY_DOWN); }

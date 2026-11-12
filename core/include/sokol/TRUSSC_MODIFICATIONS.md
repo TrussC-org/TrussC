@@ -105,7 +105,7 @@ the feature entries take precedence over historical upstream behavior.
 | Win32: `_sapp_tc_wndproc_impl` | KEY/SYSKEY use the 9-bit scancode including extended bit; WM_CHAR assembles UTF-16 pairs per window and filters control characters. |
 | Win32: `_sapp_tc_win32_init_dpi`, `_sapp_tc_win32_update_scale` | Set process awareness once (prefer per-monitor v2); window DPI/96 sizes the client, high_dpi selects framebuffer scale, and low-DPI mouse coordinates divide by window scale. |
 | Win32: WM_DPICHANGED / `_sapp_tc_win32_tick` | Apply the OS-proposed rectangle, then coalesce dimension/render-target resize into the tick; WM_SIZE tracks iconify/restore without calling ResizeBuffers. |
-| Win32: `_sapp_tc_d3d11_create_swapchain` | Flip-discard backbuffers are single-sampled; use a separate MSAA render target, latency 1 when waitables are available, and disable DXGI Alt+Enter. |
+| Win32: `_sapp_tc_d3d11_create_swapchain` | Flip-discard backbuffers are single-sampled; use a separate MSAA render target, per-window maximum frame latency (default 2) when waitables are available, and disable DXGI Alt+Enter. |
 | Win32: `_sapp_tc_d3d11_resize` | Release backbuffer views, unbind render targets and Flush before ResizeBuffers; carry creation flags through resize so the waitable remains valid. |
 | Win32: `_sapp_tc_win32_set_fullscreen` | Fullscreen swaps window styles and saves/restores the windowed rectangle; it is borderless window fullscreen, not exclusive DXGI mode. |
 | Win32: `_sapp_tc_win32_apply_cursor`, WM_SETCURSOR | Apply/hide cursors only in the client area with SetCursor (NULL hides), avoiding the ShowCursor counter. |
@@ -232,6 +232,7 @@ are live, without a second backend session state machine/deferred-state engine.
 
 | History | Contract and reason |
 |---|---|
+| macOS host-turn quit #1445 | `sapp_quit` and `sapp_request_quit` schedule `_sapp_tc_mac_schedule_deferred` after setting their flags (`[TrussC #1445]`). Async completion/host-turn teardown can destroy the last window and its display link before another tick; the existing coalesced run-loop block still reaches `_sapp_tc_mac_process_deferred` and `[NSApp terminate:nil]`. |
 | macOS async preflight #1117, PR #1254 | `sapp_run` creates `_sapp_tc_application`; its `terminate:` calls `applicationShouldTerminate:` before AppKit can dismiss/refuse async confirm/save sheets. Menu Quit/Cmd+Q/SIGTERM use deferred sokol quit; ordinary Dock/Apple-event quit calls `[NSApp terminate:nil]`. |
 | Apple-event installation | `applicationWillFinishLaunching:` replaces `kCoreEventClass` / `kAEQuitApplication` after default installation, only for `_sapp_tc_application`. Runtime veto precedes AppKit; accepted-quit cancellation/shutdown is idempotent, so AppKit's second query repeats neither veto nor cancellation. |
 | Apple-event replies/session end | Synchronous handling keeps the event as `currentAppleEvent` for its quit reason and existing query/commit policy. On veto/deferral set requested reply `keyErrorNumber` to `userCanceledErr` (also tells loginwindow); leave `typeNull` untouched. Last-window-close policy stays. |
@@ -539,6 +540,31 @@ refuses `SC_SCREENSAVE` and `SC_MONITORPOWER` when that flag is set or any app
 window is fullscreen. This applies to every TrussC HWND. Windows does not ask
 TrussC when another app is in front, so screen-saver suppression has that limit.
 The existing fullscreen policy is unchanged.
+
+### D3D11 maximum frame latency (#1447)
+
+**Classification:** KEEP decided by owner (2026-11-12).
+
+**Code locations:** `sapp_desc::max_frame_latency`, `sapp_window_desc::max_frame_latency`, `_sapp_tc_win32_create_main_window`, `_sapp_tc_d3d11_create_swapchain`, `_sapp_tc_d3d11_resize`.
+
+**Planned slice:** None; preserve this per-window setting on fork updates.
+
+Both descriptors carry the Windows D3D11 maximum frame latency. Zero selects
+2; 1–16 is accepted, other values warn on each creation and use 2. TrussC's
+`WindowSettings::setMaxFrameLatency` warns on each invalid call and stores 2.
+Each waitable swapchain applies its own value with `SetMaximumFrameLatency`.
+Creation validates the latency before allocating `clamp(latency + 1, 2, 16)`
+back buffers, including the non-waitable fallback. The extra buffer avoids
+blocking Present when the latency waitable signals with queued frames still
+in flight. `ResizeBuffers(0, ...)` preserves that count on resize.
+The default permits CPU/GPU overlap; 1 minimizes input latency. Other backends
+ignore the field. Held-credit deadlines stay unchanged. After MsgWait, the
+Windows loop polls the other admitted waitables once (never the signal already
+consumed), so a first swapchain with spare capacity cannot starve another ready
+display. Every tick still requires that window's own signal or held-credit deadline.
+
+Verification: production-body swapchain fixture, Win32 pacing harness,
+Windows cross-target syntax check; real 60/120 Hz and two-display checks required.
 
 ### D3D11 borrowed views (#910)
 

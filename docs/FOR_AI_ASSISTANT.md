@@ -63,6 +63,8 @@ TrussC itself builds without compiler warnings on macOS, Windows and Linux, whic
 - **Colors:** 0.0–1.0 float range, NOT 0–255
 - **Angles:** Use `TAU` (= 2π, one full turn), not `PI`. Quarter turn = `TAU * 0.25`
 
+WindowSettings::setMaxFrameLatency(1–16) sets per-window Windows D3D11 latency (default 2); 1 minimizes input latency, higher values overlap CPU/GPU work with up to N−1 extra frames of input latency; other backends ignore it.
+
 ## App Structure
 
 Runtime strongly owns every open Window. Releasing the last external shared handle does not close it. Explicit close and normal Runtime shutdown detach the App before disposing the native surface and GPU backing. A retained closed handle remains closed across later runs and owns no live backing. There is no default or main Window.
@@ -5124,6 +5126,7 @@ void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
+WindowSettings & WindowSettings::setMaxFrameLatency(int latency)  // Sets per-window Windows D3D11 CPU/GPU overlap; lower values reduce input latency and back-buffer memory.
 WindowSettings & WindowSettings::setParentWindow(const std::shared_ptr<Window> & parent) [+1]  // Keeps a new window above a parent window.
 WindowSettings & WindowSettings::setPipelinePoolSize(int count)  // Sets the startup pipeline pool slot count.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.

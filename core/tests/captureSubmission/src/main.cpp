@@ -22,6 +22,11 @@ struct ScreenshotApp : App {
     bool requested = false;
     void setup() override {
         listener = onScreenshotSave().listen([this](ScreenshotSaveEventArgs& args) {
+            if (args.path == sandbox / "exit.png") {
+                check("exit screenshot completion stays on main", isMainThread());
+                if (!args.result) exitWriteFailed = true;
+                return; // Exit may report cancellation before the run ends.
+            }
             check("shot completes on main and makes a decodable file", isMainThread() && args.result && fs::exists(args.path));
             Pixels pixels;
             check("shot contains the presented frame", pixels.load(args.path) && pixels.getWidth() == getFramebufferWidth() && pixels.getHeight() == getFramebufferHeight() && pixels.getData()[0] == 255);
@@ -48,6 +53,8 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     sandbox = fs::absolute("screenshot-smoke");
     fs::remove_all(sandbox);
     fs::create_directories(sandbox);
+    // After the run ends, teardown cancellation is reported by Error instead
+    // of delivering another screenshot completion to the app.
     exitLog = getLogger().onLog.listen([](LogEventArgs& args) {
         if (args.level == LogLevel::Error &&
             args.message.find((sandbox / "exit.png").string()) != string::npos)

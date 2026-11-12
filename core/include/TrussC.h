@@ -2296,6 +2296,7 @@ struct WindowSettings {
     WindowSettings& setVisible(bool enabled) { visible = enabled; return *this; }
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
     int swapInterval = 1;  // VSync: 1 = on (default); 0 is treated as 1 on desktop/iOS, ignored on Web/Android
+    int maxFrameLatency = 2;  // Windows D3D11 only; other backends ignore this setting
     // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
@@ -2347,6 +2348,18 @@ struct WindowSettings {
     // expressible this way; for arbitrary rates use setFps().
     WindowSettings& setSwapInterval(int interval) {
         swapInterval = interval;
+        return *this;
+    }
+
+    // Windows D3D11, per swapchain. 1 minimizes input latency; higher values
+    // overlap CPU/GPU work, adding up to N-1 frames of input latency.
+    // Other backends ignore this creation-time setting.
+    WindowSettings& setMaxFrameLatency(int latency) {
+        if (latency < 1 || latency > 16) {
+            logWarning("Window") << "setMaxFrameLatency(): expected 1–16; using default 2";
+            latency = 2;
+        }
+        maxFrameLatency = latency;
         return *this;
     }
 
@@ -2570,6 +2583,7 @@ inline sapp_window_desc buildNativeWindowDescriptor(const WindowSettings& settin
     d.fullscreen = settings.fullscreen;
     d.hidden = !settings.visible;
     d.swap_interval = settings.swapInterval;
+    d.max_frame_latency = settings.maxFrameLatency;
     d.sample_count = settings.sampleCount;
     return d;
 }
@@ -2609,6 +2623,7 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
     if constexpr (Platform::isDesktop()) desc._tc_start_hidden = window.hidden;
     else if (window.hidden) logNotice("Window") << "WindowSettings::setVisible(): unsupported on this platform";
     desc.swap_interval = window.swap_interval;
+    desc.max_frame_latency = window.max_frame_latency;
     // Admit setup and the first draw even when covered before the first tick.
     desc._tc_draw_while_hidden = 1;
     desc._tc_bind_cb = bindNativeWindow;
