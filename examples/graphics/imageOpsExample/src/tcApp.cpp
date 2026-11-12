@@ -1,3 +1,9 @@
+// =============================================================================
+// imageOpsExample - Compare image resizing and pixel operations.
+//
+// Procedural source pixels make the effects visible without an external image.
+// =============================================================================
+
 #include "tcApp.h"
 #include <cmath>
 

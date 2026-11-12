@@ -1,3 +1,10 @@
+// =============================================================================
+// reflectExample - Serialize reflected properties and load edited JSON.
+//
+// Shows nested properties, enum labels, setters, and read-only values.
+// The displayed sprites reflect the original and loaded property values.
+// =============================================================================
+
 #include "tcApp.h"
 
 // Draw a sprite purely from its reflected data — proof the values are real.

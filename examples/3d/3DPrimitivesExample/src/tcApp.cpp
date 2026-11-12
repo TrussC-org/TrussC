@@ -1,3 +1,10 @@
+// =============================================================================
+// 3DPrimitivesExample - Draw and rebuild lit 3D primitive meshes.
+//
+// Compare primitive shapes and materials with direct lighting in screen coordinates.
+// The scene uses Y-down coordinates and does not use cubemap lighting.
+// =============================================================================
+
 #include "tcApp.h"
 #include "TrussC.h"
 

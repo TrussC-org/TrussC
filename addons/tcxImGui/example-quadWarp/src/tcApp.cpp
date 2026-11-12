@@ -1,3 +1,10 @@
+// =============================================================================
+// example-quadWarp - Render ImGui into an Fbo and map input through a quad warp.
+//
+// Inverse mapping turns screen positions into Fbo pixels for ImGui input.
+// W toggles warp handles; keep the quad convex and cancel disappearing pointers.
+// =============================================================================
+
 #include "tcApp.h"
 #include <cfloat>
 

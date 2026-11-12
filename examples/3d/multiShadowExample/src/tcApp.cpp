@@ -1,3 +1,10 @@
+// =============================================================================
+// multiShadowExample - Render independent shadows from two moving spotlights.
+//
+// Draw the scene in each light's shadow pass before the main material pass.
+// Each light writes its own layer in the shared shadow map array.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

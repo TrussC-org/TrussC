@@ -1,3 +1,9 @@
+// =============================================================================
+// chipSoundExample - Play synthesized notes, chords, and sound effects.
+//
+// Click the labeled buttons to compare waveforms and short synthesized sounds.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

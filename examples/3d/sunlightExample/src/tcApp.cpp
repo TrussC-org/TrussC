@@ -1,3 +1,10 @@
+// =============================================================================
+// sunlightExample - Animate directional sunlight and city shadows.
+//
+// An orthographic shadow volume covers the city block. The moving sun changes
+// shadow direction and length; softness presets compare the shadow edges.
+// =============================================================================
+
 #include "tcApp.h"
 
 constexpr float tcApp::softnessPresets[3];

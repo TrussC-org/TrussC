@@ -1,3 +1,9 @@
+// =============================================================================
+// HotReloadFallback - Exercise hot reload and its platform fallback.
+//
+// Desktop uses a host/guest split; unsupported platforms run a normal app.
+// =============================================================================
+
 #include "tcApp.h"
 
 // Desktop: host/guest split. Web / Android / iOS: a no-op, normal app.

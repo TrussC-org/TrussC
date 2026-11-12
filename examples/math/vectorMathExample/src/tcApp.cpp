@@ -1,3 +1,9 @@
+// =============================================================================
+// vectorMathExample - Compare vector operations visually.
+//
+// Shows vector arithmetic and geometric relationships with labeled drawings.
+// =============================================================================
+
 #include "tcApp.h"
 #include <iostream>
 

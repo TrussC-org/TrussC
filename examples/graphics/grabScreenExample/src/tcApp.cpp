@@ -1,3 +1,10 @@
+// =============================================================================
+// grabScreenExample - Capture a finished frame and display a thumbnail.
+//
+// Read back in afterFrame so the capture includes the completed frame.
+// Upload the pixels there and display the texture during the next draw.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

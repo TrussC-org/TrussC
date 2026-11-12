@@ -1,3 +1,10 @@
+// =============================================================================
+// fboBlendModeExample - Compare blend modes on screen and in an Fbo.
+//
+// The same additive scene is drawn directly and into an opaque Fbo.
+// Both panes should show a white overlap, so the render target does not change blending.
+// =============================================================================
+
 #include "tcApp.h"
 
 static constexpr int kPane = 400;   // one test pane (and the Fbo) is 400x400

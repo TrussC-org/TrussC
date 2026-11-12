@@ -1,3 +1,9 @@
+// =============================================================================
+// timerExample - Schedule repeating and one-shot node callbacks.
+//
+// Compare periodic color changes, a delayed message, and a canceled pulse timer.
+// =============================================================================
+
 #include "tcApp.h"
 
 // =============================================================================

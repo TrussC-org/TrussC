@@ -1,3 +1,9 @@
+// =============================================================================
+// mouseExample - Display pointer motion, buttons, and scrolling.
+//
+// Shows coordinates and event state while interacting with the window.
+// =============================================================================
+
 #include "tcApp.h"
 #include <sstream>
 #include <algorithm>

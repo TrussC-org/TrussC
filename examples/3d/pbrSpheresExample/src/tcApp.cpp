@@ -1,3 +1,10 @@
+// =============================================================================
+// pbrSpheresExample - Compare roughness and metallic material parameters.
+//
+// A sphere grid varies the two parameters while keeping its base color fixed.
+// Image-based lighting supplies the environment reflections metallic surfaces need.
+// =============================================================================
+
 #include "tcApp.h"
 
 /*

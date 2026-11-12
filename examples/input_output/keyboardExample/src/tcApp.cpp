@@ -1,3 +1,9 @@
+// =============================================================================
+// keyboardExample - Display key presses, releases, and modifier state.
+//
+// Use the event display to compare key codes and text input.
+// =============================================================================
+
 #include "tcApp.h"
 #include <sstream>
 

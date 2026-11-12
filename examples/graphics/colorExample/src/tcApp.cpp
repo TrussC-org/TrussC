@@ -1,3 +1,9 @@
+// =============================================================================
+// colorExample - Compare color creation, conversion, and interpolation.
+//
+// Draws labeled swatches so color values can be compared visually.
+// =============================================================================
+
 #include "tcApp.h"
 
 // ---------------------------------------------------------------------------

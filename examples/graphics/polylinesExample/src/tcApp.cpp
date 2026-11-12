@@ -1,3 +1,9 @@
+// =============================================================================
+// polylinesExample - Build and draw polylines with curve operations.
+//
+// Compare the paths and their sampled points on screen.
+// =============================================================================
+
 #include "tcApp.h"
 #include <sstream>
 

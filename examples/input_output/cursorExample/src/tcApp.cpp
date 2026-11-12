@@ -1,3 +1,9 @@
+// =============================================================================
+// cursorExample - Switch among system cursor shapes.
+//
+// Move over the labeled regions to compare the cursors provided by the platform.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

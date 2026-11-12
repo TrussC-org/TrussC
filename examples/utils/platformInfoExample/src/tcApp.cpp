@@ -1,3 +1,9 @@
+// =============================================================================
+// platformInfoExample - Display platform, graphics backend, and build information.
+//
+// Compare compile-time platform detection with the active graphics backend.
+// =============================================================================
+
 #include "tcApp.h"
 
 // Displays:
