@@ -75,10 +75,9 @@ public:
         auto* target = internal::drawingApiTarget();
         if (!target || !font_.atlasManager_) return;
         font_.initResources();
-        // Request before replacing images and snapshotting their views. Creating
-        // immutable images does not end/rebuild the active render pass.
+        // Request mips before recording; dirty pages are published once at the
+        // target flush, before any recorded draw replays.
         font_.atlasManager_->requestMipmaps();
-        font_.atlasManager_->ensureTexturesUpdated();
         const auto blend = target->currentBlendMode;
         auto recipe = internal::pipeDesc2D(blend, target->depthTestEnabled);
         recipe.shader = internal::glyphBatchShader();
@@ -104,6 +103,8 @@ public:
             auto& page = runs_[i];
             if (page.dirty || !page.gpu) continue;
             if (page.atlasIndex >= font_.atlasManager_->getAtlasCount()) continue;
+            const sg_view view = font_.atlasManager_->recordAtlas(page.atlasIndex);
+            if (!view.id) continue;
             const auto& atlas = font_.atlasManager_->getAtlas(page.atlasIndex);
             struct Params { float mvp[16]; float atlas[4]; } params{};
             std::memcpy(params.mvp, mvp.m, sizeof(params.mvp));
@@ -120,7 +121,7 @@ public:
             command.vertexCount = static_cast<int>(page.vertices.size() / 4 * 6); // indexed sg_draw count
             command.bindings.vertex_buffers[0] = page.gpu->vertices;
             command.bindings.index_buffer = indices;
-            command.bindings.views[0] = atlas.getView();
+            command.bindings.views[0] = view;
             command.bindings.samplers[0] = internal::fontSamplers().mipped;
             command.uniforms.emplace_back(0, std::vector<uint8_t>(sizeof(params)));
             std::memcpy(command.uniforms.back().second.data(), &params, sizeof(params));

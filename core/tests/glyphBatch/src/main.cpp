@@ -254,16 +254,17 @@ class GlyphApp : public App {
         // A new cache key keeps this growth test cold after the layout tests.
         Font growing; check("growth font", static_cast<bool>(growing.load(testFontName, 31)));
         GlyphBatch batch; batch.setFont(growing);
+        sg_view recorded{};
         auto got = render(actual_, [&] {
             pushMatrix(); translate(20, 20); batch.add(U'A', tint); popMatrix();
-            batch.draw(); // capture the pre-growth image/buffers before replacing them
+            batch.draw(); // record page 0 before adding more coverage
             const int before = growing.getAtlas(0)->getWidth();
             for (uint32_t cp = 33; cp < 600; ++cp) batch.add(cp, Mat4::translate(-5000, -5000, 0), tint);
-            check("atlas grew during add", growing.getAtlas(0)->getWidth() > before);
+            check("recorded atlas page keeps its size", growing.getAtlas(0)->getWidth() == before);
             batch.draw(Mat4::translate(65, 45, 0));
-            const auto& cmd = internal::currentTarget().deferredShaderDraws.back();
-            check("mip chain built before recording", sg_query_image_desc(sg_query_view_desc(cmd.bindings.views[0]).texture.image).num_mipmaps > 1);
+            recorded = internal::currentTarget().deferredShaderDraws.back().bindings.views[0];
         });
+        check("mip chain built at the flush", sg_query_image_desc(sg_query_view_desc(recorded).texture.image).num_mipmaps > 1);
         const auto expected = render(reference_, [&] {
             growing.drawString("A", 20, 20);
             growing.drawString("A", 85, 65);
