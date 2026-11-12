@@ -440,6 +440,14 @@ inline void beginFrame() {
 // (Implementation in tc/app/tcGlobal.cpp)
 void clear(float r, float g, float b, float a = 1.0f);
 
+// Borrow all eight stencil bits on the current target. Pair end only with a
+// successful begin. Ownership may span Fbo activations; end on that target.
+bool beginStencil();
+// Return the whole stencil to 0 and restore the framework's saved state; readStencil before this to keep the values.
+void endStencil();
+// Full-target, colorless clear to a plain byte. Warns outside ownership.
+void clearStencil(uint8_t value = 0);
+
 // Clear screen (transparent black)
 inline void clear() {
     clear(0.0f, 0.0f, 0.0f, 0.0f);
@@ -1815,6 +1823,7 @@ inline size_t getFboCount() { return internal::fboCount().load(); }
 
 // Special FPS values (exposed to user)
 constexpr float VSYNC = internal::VSYNC;              // Sync to monitor refresh rate
+// Input events do not request a redraw; call redraw() from input handlers.
 constexpr float EVENT_DRIVEN = internal::EVENT_DRIVEN; // Only on redraw() call
 
 // FPS settings structure
@@ -1962,7 +1971,9 @@ inline float getFps() {
     return static_cast<float>(getFrameRate());
 }
 
-// Request redraw (used when auto-draw is stopped)
+// Request redraw (used when auto-draw is stopped).
+// In EVENT_DRIVEN mode, mouse/keyboard input does not request a redraw.
+// Call this from input handlers when the visible content changes.
 // count: number of draws (max value is used when called multiple times)
 // Acts on the current window.
 inline void redraw(int count = 1) {
@@ -2153,6 +2164,11 @@ inline bool saveScreenshot(const std::filesystem::path& path) {
 // Key code constants (wraps sokol_app key codes)
 // ---------------------------------------------------------------------------
 
+// keyPressed/keyReleased receive sokol key_code values, not typed characters.
+// Letter keys use uppercase ASCII regardless of Shift: compare with 'S', not 's'.
+// The KEY_* constants below cover special keys, arrows, modifiers and F1-F12;
+// letters and digits use character literals.
+
 // Special keys
 constexpr int KEY_SPACE = SAPP_KEYCODE_SPACE;
 constexpr int KEY_ESCAPE = SAPP_KEYCODE_ESCAPE;
@@ -2227,6 +2243,7 @@ struct WindowSettings {
     WindowSettings& setVisible(bool enabled) { visible = enabled; return *this; }
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
     int swapInterval = 1;  // VSync: 1 = on (default); 0 is treated as 1 on desktop/iOS, ignored on Web/Android
+    int maxFrameLatency = 2;  // Windows D3D11 only; other backends ignore this setting
     // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
@@ -2278,6 +2295,18 @@ struct WindowSettings {
     // expressible this way; for arbitrary rates use setFps().
     WindowSettings& setSwapInterval(int interval) {
         swapInterval = interval;
+        return *this;
+    }
+
+    // Windows D3D11, per swapchain. 1 minimizes input latency; higher values
+    // overlap CPU/GPU work, adding up to N-1 frames of input latency.
+    // Other backends ignore this creation-time setting.
+    WindowSettings& setMaxFrameLatency(int latency) {
+        if (latency < 1 || latency > 16) {
+            logWarning("Window") << "setMaxFrameLatency(): expected 1–16; using default 2";
+            latency = 2;
+        }
+        maxFrameLatency = latency;
         return *this;
     }
 
@@ -2501,6 +2530,7 @@ inline sapp_window_desc buildNativeWindowDescriptor(const WindowSettings& settin
     d.fullscreen = settings.fullscreen;
     d.hidden = !settings.visible;
     d.swap_interval = settings.swapInterval;
+    d.max_frame_latency = settings.maxFrameLatency;
     d.sample_count = settings.sampleCount;
     return d;
 }
@@ -2540,6 +2570,7 @@ inline sapp_desc buildWindowDescriptor(const WindowSettings& settings, Window* t
     if constexpr (Platform::isDesktop()) desc._tc_start_hidden = window.hidden;
     else if (window.hidden) logNotice("Window") << "WindowSettings::setVisible(): unsupported on this platform";
     desc.swap_interval = window.swap_interval;
+    desc.max_frame_latency = window.max_frame_latency;
     // Admit setup and the first draw even when covered before the first tick.
     desc._tc_draw_while_hidden = 1;
     desc._tc_bind_cb = bindNativeWindow;
@@ -2769,6 +2800,7 @@ inline void bindCursorImage(Cursor cursor, const Image& image,
 // TrussC custom shader
 #include "tc/gpu/tcStorageBuffer.h"
 #include "tc/gpu/tcShader.h"
+#include "tc/graphics/tcGlyphBatch.h"
 #include "tc/gpu/tcComputeShader.h"
 
 // TrussC 3D LUT (color grading)

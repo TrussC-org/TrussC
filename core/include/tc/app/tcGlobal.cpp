@@ -51,6 +51,7 @@
 #include "tc/gpu/shaders/sglPremult.glsl.h"
 // Same, from core/shaders/sglCoverage.glsl: internal::sglCoverageShader().
 #include "tc/gpu/shaders/sglCoverage.glsl.h"
+#include "tc/gpu/shaders/glyphBatch.glsl.h"
 
 #ifdef __APPLE__
 #include <pthread.h>
@@ -390,6 +391,44 @@ sg_shader sglCoverageShader() {
     return shd;
 }
 
+// Host-owned, shared across hot reload guests, like the sgl coverage program.
+sg_shader glyphBatchShader() {
+    static sg_shader shader = {};
+    if (!shader.id && sg_isvalid()) shader = sg_make_shader(tc_glyphbatch_coverage_shader_desc(sg_query_backend()));
+    return shader;
+}
+
+// One host-owned immutable quad pattern shared by all GlyphBatch instances.
+// Like the coverage shader, the final buffer belongs to sg_shutdown; no static
+// destructor issues GPU calls. Growth retires the old handle for queued draws.
+sg_buffer glyphBatchIndices(size_t quads) {
+    static sg_buffer buffer{};
+    const size_t limit = static_cast<size_t>(INT_MAX) / (6 * sizeof(uint32_t));
+    if (!quads || quads > limit) return {};
+    size_t capacity = sg_query_buffer_size(buffer) / (6 * sizeof(uint32_t));
+    if (capacity >= quads) return buffer;
+    capacity = std::max(capacity, size_t(64));
+    while (capacity < quads) capacity = std::min(capacity * 2, limit);
+    std::vector<uint32_t> indices(capacity * 6);
+    for (size_t i = 0; i < capacity; ++i) {
+        const auto base = static_cast<uint32_t>(i * 4);
+        const uint32_t quad[] = {base, base+1, base+2, base, base+2, base+3};
+        std::memcpy(indices.data() + i * 6, quad, sizeof(quad));
+    }
+    sg_buffer_desc desc{};
+    desc.usage.index_buffer = true;
+    desc.data = {indices.data(), indices.size() * sizeof(uint32_t)};
+    desc.label = "tc_glyph_batch_shared_indices";
+    const auto replacement = sg_make_buffer(&desc);
+    if (sg_query_buffer_state(replacement) != SG_RESOURCESTATE_VALID) {
+        deferGpuDestroy(replacement);
+        return {};
+    }
+    deferGpuDestroy(buffer);
+    buffer = replacement;
+    return buffer;
+}
+
 void resizeSgl(int newMaxVertices, int newMaxCommands) {
     auto& budget = sglBudget();
     logNotice("sokol_gl") << "Resizing: vertices " << budget.maxVertices
@@ -593,6 +632,7 @@ void WindowContext::teardownTargets() noexcept {
         attempt([&] { swapchainTarget.flushLayers(); });
         attempt([&] { swapchainTarget.endPass(); });
     }
+    swapchainTarget.fontAtlasUploads.clear();
     swapchainTarget.deferredShaderDraws.clear();
     swapchainTarget.deferredPbrDraws.clear();
     shadow.storage.reset();
@@ -724,8 +764,10 @@ void RenderTarget::beginPass(TargetPassStart reason) {
     if (passKind == TargetPassKind::Swapchain) refreshWindowDrawingSize();
     sg_begin_pass(&pass);
     if (hasFixedPipeline) {
-        const auto selected = pipeline(fixedPipeline);
-        if (selected.raw.id) sg_apply_pipeline(selected.raw);
+        const auto selected = fixedPipelineRevision
+            ? selectPipeline({fixedPipelineRevision, uint64_t(fixedPipeline.role)}, [&]() -> const PipelineKey& { return fixedPipeline; }).raw
+            : pipeline(fixedPipeline).raw;
+        if (selected.id) sg_apply_pipeline(selected);
     }
     inPass = true;
     passStartedThisFrame = true;
@@ -763,19 +805,36 @@ void RenderTarget::flushLayers() {
     if (!inPass) return;
     const auto err = sgl_context_error(resources().context);
     const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
+    for (auto& page : fontAtlasUploads) FontAtlasManager::publishAtlas(*page);
     prepareDeferredShaderDraws(deferredShaderDraws);
+    bool appliedScissor = false;
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
-        for (auto& draw : deferredShaderDraws)
-            if (draw.layerId == layer) executeDeferredShaderDraw(draw);
+        for (auto& draw : deferredShaderDraws) {
+            if (draw.layerId != layer) continue;
+            if (draw.scissor) {
+                const auto& clip = *draw.scissor;
+                sg_apply_scissor_rectf(clip[0], clip[1], clip[2], clip[3], true);
+                appliedScissor = true;
+            }
+            executeDeferredShaderDraw(draw);
+        }
         for (auto& draw : deferredPbrDraws)
             if (draw.layerId == layer) getPbrPipeline().executePbrDraw(draw.cmd);
         for (auto& draw : deferredPointDraws)
             if (draw.layerId == layer) executePointDraw(draw.cmd);
     }
+    fontAtlasUploads.clear();
     deferredShaderDraws.clear();
     deferredPbrDraws.clear();
     deferredPointDraws.clear();
+    // Replay used draw-time clips; subsequent direct drawing uses the current
+    // CPU state, including a popScissor recorded after the last raw draw.
+    if (appliedScissor) {
+        const auto& clip = currentScissor;
+        sg_apply_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
+                              clip.active ? clip.w : float(width), clip.active ? clip.h : float(height), true);
+    }
     // Shader::begin reserved a screen layer. Keep that reservation even when
     // all preceding commands have been consumed, until its owning scope closes.
     if (!openShaderScopes) sglLayerNext = 0;
@@ -862,6 +921,7 @@ bool popTarget(RenderTarget& target, uint64_t token) {
     window.targetStack.back().phase = TargetPassPhase::Finalizing;
     // Do not generate mips from a partially replayed or incomplete target.
     if (!failure) attempt([&] { if (target.finalize) target.finalize(target.owner); });
+    target.fontAtlasUploads.clear();
     target.deferredShaderDraws.clear();
     target.deferredPbrDraws.clear();
     target.deferredPointDraws.clear();
@@ -2853,7 +2913,8 @@ std::shared_ptr<PipelineGeneration> makePipelineGeneration() {
 }
 PipelineCacheKey canonicalPipeline(const PipelineKey& request, const sg_pipeline_desc& d) {
     PipelineCacheKey key;
-    auto add = [&](auto value) { key.fields.push_back(uint32_t(value)); };
+    size_t field = 0;
+    auto add = [&](auto value) { key.fields[field++] = uint32_t(value); };
     auto real = [&](float value) {
         uint32_t bits = 0; if (value != 0) std::memcpy(&bits, &value, sizeof(bits));
         add(bits);
@@ -2878,12 +2939,27 @@ PipelineCacheKey canonicalPipeline(const PipelineKey& request, const sg_pipeline
     add(d.primitive_type); add(d.index_type); add(d.cull_mode); add(d.face_winding); add(d.sample_count);
     real(d.blend_color.r); real(d.blend_color.g); real(d.blend_color.b); real(d.blend_color.a);
     add(d.alpha_to_coverage_enabled);
+    assert(field == key.fields.size());
     return key;
 }
 }
 std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx() {
     static auto* owners = new std::unordered_map<uint32_t, uint32_t>;
     return *owners;
+}
+uint64_t nextPipelineRecipeRevision() { return nextPipelineGeneration(); }
+void retirePipelineRecipe(uint64_t revision) noexcept {
+    if (!revision || frameworkShutdown()) return;
+    for (const auto& weak : pipelineGenerations()) {
+        if (auto generation = weak.lock()) {
+            std::erase_if(generation->selections, [&](const auto& entry) {
+                auto selections = entry.lock();
+                if (!selections) return true;
+                std::erase_if(*selections, [&](const auto& selected) { return selected.first.recipe == revision; });
+                return false;
+            });
+        }
+    }
 }
 PipelineKey PipelineKey::immediate(ImmediateSelection selection) {
     PipelineKey key; key.selection = selection; key.role = selection.role;
@@ -2911,6 +2987,14 @@ bool RenderTargetResources::makeContext(const sgl_context_desc_t& desc, const ch
     if (contextFailed) logWarning("RenderTarget") << "could not create context for " << what;
     return !contextFailed;
 }
+void RenderTargetResources::rememberSelection(PipelineSelectionId id, PipelineHandles handles) {
+    if (!selectionCache) {
+        // The control block/deleter must live in the host across guest reloads.
+        selectionCache = std::make_shared<PipelineSelectionCache>();
+        rawCache->selections.push_back(selectionCache);
+    }
+    selectionCache->emplace(id, handles);
+}
 void RenderTargetResources::release() {
     if (frameworkShutdown() || !sg_isvalid()) return;
     for (const auto& entry : cache) {
@@ -2919,16 +3003,36 @@ void RenderTargetResources::release() {
         pipelineOwnerCtx().erase(entry.second.id);
 #endif
     }
-    cache.clear(); selections.clear(); rawCache.reset();
+    cache.clear(); immediateCache.clear(); selectionCache.reset(); selections.clear(); rawCache.reset();
     // sokol_gl owns its mandatory default context until shutdown. A resized
     // Window may switch to a dedicated context without destroying that default.
     if (context.id && context.id != sgl_default_context().id) sgl_destroy_context(context);
     context = {}; contextFailed = false;
 }
+sgl_pipeline RenderTarget::immediatePipeline(ImmediateSelection selection) {
+    auto& bundle = resources();
+    if (!sg_isvalid() || !bundle.context.id) return {};
+    for (const auto& entry : bundle.immediateCache) {
+        if (entry.first == selection) {
+            // Canonical recipes can share a handle (including failed id 0).
+            // Preserve loadPipeline's semantic selection on cache hits too.
+            bundle.selections[entry.second.id] = selection;
+            return entry.second;
+        }
+    }
+    const auto selected = selectPipeline(PipelineSelectionId::immediate(selection),
+        [&] { return PipelineKey::immediate(selection); });
+    bundle.immediateCache.emplace_back(selection, selected.immediate);
+    // Canonical recipes can share a handle (including failed id 0). Preserve
+    // loadPipeline's semantic selection on cache hits too.
+    bundle.selections[selected.immediate.id] = selection;
+    return selected.immediate;
+}
 PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     PipelineSelection result;
     if (!sg_isvalid()) return result;
     auto& bundle = resources();
+    ++bundle.canonicalLookups;
     if (!bundle.rawCache) {
         if (passKind == TargetPassKind::Swapchain) bundle.rawCache = makePipelineGeneration();
         else {
@@ -3000,6 +3104,15 @@ void retirePipelineProgram(sg_shader shader) {
     };
     for (const auto& weak : pipelineGenerations()) {
         RenderTargetResources bundle; bundle.rawCache = weak.lock(); erase(bundle);
+        if (!bundle.rawCache) continue;
+        // Weak maps let late global Shaders retire selections without touching
+        // Window/Fbo statics after their teardown, or pinning target resources.
+        std::erase_if(bundle.rawCache->selections, [&](const auto& entry) {
+            auto selections = entry.lock();
+            if (!selections) return true;
+            std::erase_if(*selections, [&](const auto& selected) { return selected.second.program.id == shader.id; });
+            return false;
+        });
     }
     pipelinePrograms().erase(shader.id);
 }
@@ -3138,7 +3251,7 @@ bool rebuildTargetResources() {
     pipelineOwnerCtx().clear();
 #endif
     auto discard = [](RenderTargetResources& bundle) {
-        bundle.cache.clear(); bundle.selections.clear(); bundle.context = {};
+        bundle.cache.clear(); bundle.immediateCache.clear(); bundle.selectionCache.reset(); bundle.selections.clear(); bundle.context = {};
         bundle.contextFailed = false; bundle.rawCache.reset();
     };
     for (auto* window : windows) discard(window->swapchainTarget.resources());

@@ -15,10 +15,10 @@
 //                     once. Listeners run on the worker thread by default.
 //                     Do not touch Nodes or the GPU there; use Deliver::Main:
 //
-//     // App members: std::mutex outputMutex; std::vector<std::string> output;
+//     // App members: mutex outputMutex; vector<string> output;
 //     // Process process; EventListener lineListener, exitListener;
 //     lineListener = process.onLine.listen([this](auto& e) {
-//         std::lock_guard<std::mutex> lock(outputMutex);
+//         lock_guard<mutex> lock(outputMutex);
 //         output.push_back(e.line);
 //     });
 //     exitListener = process.onExit.listen([this](auto& e) {
@@ -43,6 +43,7 @@
 // Windows: args[0] is found on PATH only as an .exe. Batch scripts (npm.cmd,
 // foo.bat) need cmd: {"cmd", "/c", "npm", "run", "build"}. Arguments are UTF-8
 // and are quoted for the usual argv parsing (CommandLineToArgvW / MSVC CRT).
+// Embedded quotes are escaped for argv parsing; cmd /c uses its own parser and does not receive them verbatim.
 // Console programs run without opening a console window.
 //
 // Child processes: the program and every process it starts are killed
@@ -91,7 +92,7 @@ struct TC_LUA_SKIP ProcessLineEventArgs {
 struct TC_LUA_SKIP ProcessExitEventArgs {
     int exitCode = -1;
     float seconds = 0;      // time from startAsync() to exit
-    bool killed = false;    // ended by kill() or by destroying the Process
+    bool killed = false;    // ended by kill(); destruction clears listeners, so no onExit is delivered
 };
 
 namespace internal { class ProcessRunner; }

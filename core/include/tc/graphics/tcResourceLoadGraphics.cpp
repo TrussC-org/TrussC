@@ -202,16 +202,34 @@ bool FontAtlasManager::initFromFontData(int fontSize, int fontIndex, const fs::p
 }
 
 size_t FontAtlasManager::createNewAtlas() {
-    AtlasState atlas;
+    auto page = std::make_shared<AtlasState>();
+    AtlasState& atlas = *page;
     atlas.width_ = INITIAL_ATLAS_SIZE;
-    atlas.height_ = INITIAL_ATLAS_SIZE;
-    atlas.currentX_ = GLYPH_PADDING;
-    atlas.currentY_ = GLYPH_PADDING;
+    // Font receives physical pixels (Font multiplies logical size by DPI).
+    // Use the face's bounding box width and the larger of its box/line height,
+    // then include stb's prefilter margin, padding and aligned shelf strides.
+    int bx0, by0, bx1, by1;
+    stbtt_GetFontBoundingBox(&fontInfo_, &bx0, &by0, &bx1, &by1);
+    const double rasterScale = double(scale_) * oversample_;
+    const double boxWidth = std::ceil(bx1 * rasterScale) - std::floor(bx0 * rasterScale);
+    const double boxHeight = std::ceil(by1 * rasterScale) - std::floor(by0 * rasterScale);
+    const double height = std::max(boxHeight, std::ceil(double(ascent_ - descent_) * oversample_));
+    const double cellWidth = std::max(16.0, std::ceil((boxWidth + oversample_ - 1 + GLYPH_PADDING) / 16) * 16);
+    const double cellHeight = std::max(16.0, std::ceil((height + oversample_ - 1 + 2 * GLYPH_PADDING) / 16) * 16);
+    const int inset = alignGlyphOffset(GLYPH_PADDING);
+    // Reserve about 32 cells before packing; later CPU growth is still allowed
+    // until the first recorded draw seals the page's dimensions.
+    while (atlas.width_ * 2 <= maxAtlasSize_ &&
+           std::floor((atlas.width_ - inset) / cellWidth) *
+           std::floor((atlas.width_ - inset) / cellHeight) < 32) atlas.width_ *= 2;
+    atlas.height_ = atlas.width_;
+    atlas.currentX_ = inset;
+    atlas.currentY_ = inset;
     atlas.rowHeight_ = 0;
     atlas.pixels_.resize((size_t)atlas.width_ * atlas.height_, 0);
     atlas.textureDirty_ = true;
 
-    atlases_.push_back(std::move(atlas));
+    atlases_.push_back(std::move(page));
     return atlases_.size() - 1;
 }
 

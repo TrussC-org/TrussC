@@ -7,7 +7,7 @@
 
 ## Binding coverage
 
-### Dones
+### Registered surface
 
 - trussc (TrussC.h directly defined functions)
 - cmath (common use ones only), tcMath
@@ -20,7 +20,83 @@
 - Font, Path
 - Json, Xml
 - `Tween<T>` (as TweenFloat, TweenVec2, TweenVec3, TweenColor)
-- Sound, MicInput
+- Sound, SoundBuffer, AudioEngine, MicInput
+
+The generated surface contains 124 types, 47 enums, 149 named colors and 45
+constants. Hand-written registrations extend that surface; a registered type
+can still have omitted members or overloads.
+
+The non-event bindings cover 55 of the 73 hand-written gaps recorded in the
+November 11 audit: all 16 EasyCam controls, 10 AudioEngine methods, six
+MicInput methods, six operations each on Image and Pixels, five SoundBuffer
+entries, Image/Fbo debug names, Shader.drawVertices and Mat4.tryInvert.
+Mat3.set and Mat4.set now preserve floating-point values.
+
+- `matrix:tryInvert()` returns `ok, inverse`. Use the matrix only when `ok` is
+  true; the original matrix stays unchanged.
+- `SoundBuffer.samples` is a mutable sol2 sequence with 1-based indices that
+  keeps its SoundBuffer alive; `numSamples` is the samples-per-channel
+  field. Keep sample edits on the main thread and stop playback before editing,
+  as in C++. `load` and `loadFlac` return `LoadResult`; check `result:ok()`.
+- EasyCam's `setOrbitButton`, `setPanButton` and `setDragModifier` return the
+  original Lua camera, so constructor chains retain ownership.
+- `AudioEngine:getPlayingSounds()` returns a 1-based Lua table of independently
+  owned `PlayingSoundInfo` copies. Entries remain valid after the table is collected.
+- `AudioEngine:setup()` and `setup(settings)` return bool. `MicInput:setup()`
+  returns bool; `startAsync()` / `startAsync(sampleRate)` return no values.
+  Read `isStarting`, `isConnected` and `getDeviceName` to observe startup.
+- `Shader:drawVertices(vertexCount, instanceCount)` defaults to one instance.
+  Image/Pixels operations return no values, matching C++.
+
+The approved event-dependent entries are also bound: Image/SoundBuffer
+`loadAsync`, `isLoading`, and `onLoad`; AudioEngine `onDisconnect` and
+`audioDeviceChanged`; MicInput `onStart` and `onDisconnect`; each Tween's
+`complete`; and console input through `runtime():events().console` with
+`console.start()`, `console.stop()`, and `console.isEnabled()`.
+
+The intentionally excluded entries remain audioIn/audioOut,
+waitForAudioCallbacks, Texture mip views and Fbo.lifetimeToken.
+Texture.drawFlippedY remains on hold in #1422. This describes the approved
+surface without defining overall completion of the Lua API.
+
+### Event listeners
+
+```lua
+Loader = {}
+function Loader:start()
+    self.image = Image()
+    self.handle = self.image.onLoad:listen(function(result) self:onLoad(result) end)
+    self.image:loadAsync('photo.png')
+end
+function Loader:onLoad(result)
+    if result:ok() then print('loaded') end
+end
+function Loader:cleanup()
+    self.handle:disconnect()
+end
+
+loader = setmetatable({}, {__index = Loader})
+loader:start()
+-- When the owner is finished:
+loader:cleanup()
+```
+
+`event:listen(fn)` returns a handle. Call `handle:disconnect()` to stop
+immediately, including pending delivery and later callbacks in the same frame.
+Dropping the owner or handle does not disconnect. A closure keeps its captured
+objects alive until disconnect or script reload. Store the handle on the owner
+and disconnect it in the owner's own cleanup, as above.
+
+GC can run at any time and must not control behavior. Subscription cleanup is
+explicit and deterministic; do not rely on GC to call the owner's cleanup.
+All delivery runs on the main thread. Lua has no Deliver argument or
+audio-thread callback binding. Callback errors are logged and contained.
+Payloads can be retained; main-thread edits are written back before the next
+listener. `tcxLua::runFile` clears subscriptions before each load or reload,
+even on load failure. Hosts replacing scripts directly through sol2 call
+`tcxLua::clearEventListeners` first. App exit, hot reload unload, and Lua state
+close also disconnect subscriptions. Create the Lua state in App setup or its
+constructor so exit hooks follow that App.
 
 ### Sound lifetime
 
@@ -42,7 +118,8 @@ A `Sound` held only in a local variable stops when the GC collects it.
 Call Lua entry points through the two helpers. They do not throw: a Lua error
 (syntax or runtime) is logged with `logError("tcxLua")`, the helper returns
 `false`, and the app keeps running. In a hot-reload setup, fix the script and
-load it again to recover.
+load it again to recover. Create the state in App setup or its constructor so
+its frame and exit hooks follow that App.
 
 ```cpp
 auto lua = tcxLua().getLuaState();
@@ -149,26 +226,66 @@ historical context — these were on by default until 2026-05-27 (PR #97).
 
 ## Known Issues
 
-- Default value is not treated perfectly now ([Issue#1](https://github.com/ffunatsu/tcxLua/issues/1)). So you may need additional values when using methods for example:
-  - `clear(0.08, 1.0)` instead of `clear(0.08)`
-  - `setColor(1.0, 0.0, 0.0, 1.0)` instead of `setColor(1.0, 0.0, 0.0)`
+- Generated bindings expand trailing default arguments, so `clear(0.08)` and
+  `setColor(1.0, 0.0, 0.0)` work. Handwritten bindings expose only their registered
+  overloads; new members and default arguments need separate updates.
+- Namespaced APIs remain excluded. Bound events provide `event:listen(fn)`
+  with main-thread delivery and explicit `handle:disconnect()`.
 - `end()` methods are replaced to `end_fbo()`, `end_shader()`, `end_cam()` etc ([Issue#11](https://github.com/ffunatsu/tcxLua/issues/11)).
+
+## Migrating from v0.7.7 / v0.8.0
+
+Since v0.7.7, 20 generated Lua names were removed (listed below); since v0.8.0,
+none were removed. Two handwritten Texture methods were also removed since
+v0.7.7, bringing the total to 22. Replacements marked C++ host are not Lua calls.
+See also the [C++ v0.8 migration guide](../../docs/MIGRATION_0_8.md).
+
+| Removed name(s) since v0.7.7 | Replacement / action |
+| --- | --- |
+| `Window.dispatchKeyPressToTree`, `Window.dispatchKeyReleaseToTree`, `Window.dispatchMousePressToTree`, `Window.dispatchMouseReleaseToTree`, `Window.dispatchMouseScrollToTree` (5) | Remove calls; input dispatch is internal, with no public replacement. |
+| `Window.drawTreeNow`, `Window.syncRootSize`, `Window.tickTree` (3) | Remove manual tree work; the runtime handles it. |
+| `Window.setApp` | Use `window->setApp<Scene>()` in the C++ host; the template has no Lua binding. |
+| `WindowSettings.clipboardSize`, `WindowSettings.setClipboardSize` (2) | Remove the limit settings; clipboard storage grows with its content. |
+| `WindowSettings.reserveUniformBuffer`, `WindowSettings.uniformBufferReserve` (2) | Move to `RuntimeSettings` and pass it to `runApp` in the C++ host. |
+| `CoreEvents.setup` | Remove the call; initialization belongs to the runtime. |
+| `CoreEvents.console` | Subscribe to `runtime():events().console` and call `console.start()` in Lua. |
+| `SerialDisconnectEventArgs`, `SerialDisconnectEventArgs.reason` (2) | Read `event.reason` in the Lua disconnect listener. |
+| `SerialDisconnectEventArgs.portName`, `.baudRate`, `.wasClean` (3) | Keep port/baud information yourself; `wasClean` has no replacement (explicit close no longer notifies). |
+| `Texture.uploadCubemapFace`, `Texture.uploadCubemapMip` (handwritten, 2) | Use `Texture::loadCubemapData` in the C++ host; its pointer-array input has no Lua adapter. |
+
+Names can remain while their behavior or arguments change:
+
+| Change | Lua migration |
+| --- | --- |
+| Save/record functions return `SaveResult` | Use `if result:ok() then` (e.g. `if saveJson(j, path):ok() then`); userdata is truthy even on failure. |
+| Angles use radians throughout | Convert degrees with `degrees * TAU / 360`, or use a `Deg` variant where available; FOV 45° is `TAU / 8`, and saved `Node.rotation` is radians too. |
+| `VideoGrabber.setup` no longer accepts one argument | Supply width and height (`grabber:setup(width, height)`); no arguments reconnects at the last size. |
+| `TcpServer.start` limits clients | The maximum defaults to 64 and must be positive; unlimited mode (`0`) is no longer supported. |
+| `Fbo.begin` resets drawing state each time | Reapply matrix, camera, viewport and clip state after each begin; size queries refer to the active Fbo, scissor uses logical coordinates, and point size uses Fbo pixels. |
+| `Fbo.readPixels` returns 8-bit RGBA | Even float Fbos read back as 0–255; ordinary Color components and hue remain 0–1. |
+| Serial disconnect arguments and delivery | Handle `DeviceDisconnectEventArgs.reason` in the C++ host on the detecting read/write thread; `close`/`setup` do not notify, and `serial:setup()` reconnects. |
+| Lua file loading is text-only | Ship text for `runFile`, initial loads, reloads, live editing and lint; standard Lua `load`/`loadfile`/`dofile`/`require` retain engine behavior. |
+| `App.handleUpdate` changed after v0.8.0 | Replace `app:handleUpdate(width, height)` with `app:handleUpdate()`; headless updates already update children, Mods and timers. |
+| App lifetime and event ordering | Review the C++ host: queued main-thread work runs between loop turns and is discarded when its App ends; closing the main window can leave other windows running. |
 
 ## Development
 
 Local patches to both bundled Lua engines are recorded in [TRUSSC_MODIFICATIONS.md](TRUSSC_MODIFICATIONS.md).
 
-### Bindgen
+### Binding generation
 
-Please read [tools/bindgen/README.md](tools/bindgen/README.md) in detail.
+The current generators are [luagen](tools/luagen/README.md) (free functions) and
+[luagen-types](tools/luagen-types/README.md) (types, enums and constants).
+`tools/bindgen` is legacy. Regenerate from the repository root:
 
 ```bash
-$ cd tools/bingen
-# $ pip install uv # only at first time
-# $ uv sync # only at first time
-$ uv run main.py ../../../../core/include/TrussC.h
-$ cp trussc_generated.cpp ../../src/generated
+docs/reference/regenerate.sh
 ```
+
+See the [reference pipeline](../../docs/reference/README.md) for prerequisites
+and outputs. Build a tcxLua app, run [bindcheck](bindcheck/README.md), and run the
+examples after regeneration. Json/Xml, SoundSource, Tween and the custom types
+listed in luagen-types still have handwritten glue in `src/tcxLua.cpp`.
 
 ## License
 
@@ -183,8 +300,9 @@ Registrations created in an App constructor, callback or owned completion follow
 
 Process lifecycle names are the same on App/Window events and
 `runtime().events()`: `exitRequested`, `deviceLost`, `hotReloadUnload`.
-Console moved from CoreEvents to `runtime().events().console`; subscribe once
-and opt into stdin from the C++ host with `tc::console::start()` as described in the v0.8 migration.
+Console moved from CoreEvents to `runtime():events().console`; Lua scripts
+subscribe with `:listen(...)` and opt into stdin with `console.start()`.
+The listener forms and lifetime rules are described above.
 Generated bindings include CloseRequestEventArgs and Window closeRequested;
 code close skips that query. App ending retires owner-scoped subscriptions.
 `Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and

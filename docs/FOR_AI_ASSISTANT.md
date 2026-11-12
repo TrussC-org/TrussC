@@ -51,6 +51,8 @@ TrussC itself builds without compiler warnings on macOS, Windows and Linux, whic
 - **Colors:** 0.0–1.0 float range, NOT 0–255
 - **Angles:** Use `TAU` (= 2π, one full turn), not `PI`. Quarter turn = `TAU * 0.25`
 
+WindowSettings::setMaxFrameLatency(1–16) sets per-window Windows D3D11 latency (default 2); 1 minimizes input latency, higher values overlap CPU/GPU work with up to N−1 extra frames of input latency; other backends ignore it.
+
 ## App Structure
 
 Runtime strongly owns every open Window. Releasing the last external shared handle does not close it. Explicit close and normal Runtime shutdown detach the App before disposing the native surface and GPU backing. A retained closed handle remains closed across later runs and owns no live backing. There is no default or main Window.
@@ -294,6 +296,15 @@ Font font;
 font.load("myfont.ttf", 24);                  // TrueType font
 font.drawString("Hello", x, y);
 ```
+
+`GlyphBatch` retains many individually transformed glyphs. Call `setFont(font)`,
+`add(codepoint)` at each current matrix, then `draw()` under the intended camera
+scope. The current view/projection is applied once at draw time. `draw()` keeps the batch and reuses unchanged GPU buffers across frames;
+`draw(transform)` applies an extra uniform transform. `setAlignToInk(true)` centers
+independent glyphs on `Font::getGlyphInkBox(codepoint)` (logical pixels, baseline
+relative; half-size is width/2, height/2). String adds use Font layout. `setTransform(T)` and `setColor(c)` persist across `clear()`; omitted add arguments use those settings (current matrix × T), while explicit matrices/colors replace them for that add. Scaling pivots on the align point (ink center with `setAlignToInk`); `draw(transform)` instead moves the whole recorded batch. Output is
+straight alpha; colors keep float RGB. Blend and scissor are captured at draw time. Glyphs draw in add order, with one
+draw per consecutive run on the same atlas page (A/B/A uses three draws).
 
 #### Extending drawBitmapString
 ASCII is built in. Apps / addons register additional glyphs for any
@@ -573,6 +584,13 @@ void mousePressed(Vec2 pos, int button) override;
 void mouseDragged(Vec2 pos, int button) override;
 ```
 
+`keyPressed()` receives sokol key codes: letters are uppercase ASCII (`'S'`,
+regardless of Shift). The defined `KEY_*` constants are `KEY_SPACE`, `KEY_ESCAPE`,
+`KEY_ENTER`, `KEY_TAB`, `KEY_BACKSPACE`, `KEY_DELETE`, `KEY_RIGHT`, `KEY_LEFT`,
+`KEY_DOWN`, `KEY_UP`, `KEY_LEFT_SHIFT`, `KEY_RIGHT_SHIFT`, `KEY_LEFT_CONTROL`,
+`KEY_RIGHT_CONTROL`, `KEY_LEFT_ALT`, `KEY_RIGHT_ALT`, `KEY_LEFT_SUPER`,
+`KEY_RIGHT_SUPER`, and `KEY_F1` through `KEY_F12`.
+
 #### Rich form (dual API)
 Every mouse handler also has a rich overload that takes a per-kind args
 struct. Override **either** the simple `(Vec2, int)` form above (oF-style,
@@ -686,6 +704,13 @@ fbo.draw(0, 0);                     // Composite to screen
 fbo.draw(0, 0, w, h);              // Scaled
 fbo.copyTo(image);                  // FBO → Image
 fbo.save("output.png");
+// Full stencil ownership on the current target (plain bytes 0–255):
+canvas.begin();
+if (beginStencil()) { clearStencil(5); endStencil(); }
+canvas.end();
+// endStencil returns the stencil to 0; read it with readStencil before endStencil if you need the values.
+// clearStencil outside ownership warns.
+
 // Stencil debugging: ended, owned, single-sample Fbos only.
 fbo.drawStencil(0, 0);              // Opaque gray byte/255, nearest sampling
 Pixels stencilBytes;
@@ -767,6 +792,121 @@ popShader();
 ```
 
 Uniform slots match `layout(binding=N)`. Vertex layout is fixed: position(vec3), texcoord(vec2), color(vec4).
+
+### Running an Fbo through your own shader
+
+Use two float Fbos for repeated passes: sample one and render into the other
+(ping-pong). Never sample the target you are currently rendering into.
+Unlike ordinary textures, Fbo textures need a V flip on GL/GLES when sampled
+by FullscreenShader. `getTextureView()` does not apply the correction that
+`Fbo::draw()` does; use sokol-shdc's `SOKOL_GLSL` define as below on every pass.
+Put this in `src/shaders/filter.glsl`; CMake generates `filter.glsl.h`:
+
+```glsl
+@vs vs
+in vec2 position;
+in vec2 texcoord0;
+out vec2 uv;
+void main() {
+    gl_Position = vec4(position, 0.0, 1.0);
+    uv = texcoord0;
+    #if defined(SOKOL_GLSL)
+        uv.y = 1.0 - uv.y;
+    #endif
+}
+@end
+@fs fs
+layout(binding=0) uniform texture2D sourceTex;
+layout(binding=0) uniform sampler sourceSampler;
+layout(binding=0) uniform filter_params { vec4 tint; };
+in vec2 uv;
+out vec4 frag_color;
+void main() {
+    frag_color = texture(sampler2D(sourceTex, sourceSampler), uv) * tint;
+}
+@end
+@program filter vs fs
+```
+
+```cpp
+#include <TrussC.h>
+#include "shaders/filter.glsl.h"
+using namespace std;
+using namespace tc;
+
+class tcApp : public App {
+    Fbo buffers[2];
+    FullscreenShader effect;
+    filter_params_t params = {};  // vec4 tint becomes float tint[4]
+    int source = 0;
+public:
+    void setup() override {
+        for (auto& fbo : buffers) {
+            fbo.allocate(512, 512, 1, TextureFormat::RGBA16F);
+        }
+        buffers[source].begin(0.2f, 0.4f, 0.8f, 1.0f);
+        buffers[source].end();
+        effect.load(filter_shader_desc);
+        for (auto& channel : params.tint) channel = 1.0f;
+    }
+    void draw() override {
+        int destination = 1 - source;
+        buffers[destination].begin(0, 0, 0, 1);
+        effect.setTexture(0, buffers[source].getTextureView(), buffers[source].getSampler());
+        effect.setParams(params);
+        effect.draw();
+        buffers[destination].end();
+        source = destination;
+        buffers[source].draw(0, 0);
+    }
+};
+```
+
+`setParams()` copies raw bytes into fragment uniform block 0. Prefer the generated
+`<block>_t`; a custom struct must match its member order, types and padding
+exactly (a GLSL `vec4` is `float[4]` by default). Texture and sampler bindings
+are separate declarations in `@fs`; here both use slot 0, matching `setTexture(0, ...)`.
+
+### EVENT_DRIVEN + ImGui
+
+Input events do not request redraws, and tcxImGui does not call `redraw()` itself.
+One `redraw()` per input event is insufficient: requests coalesce, while ImGui
+can spread queued input across frames (for example, a press and release arriving
+together). `redraw(2)` covers that pair, but larger batches can need more frames.
+For reliable interaction, render continuously while the UI is in use:
+
+```cpp
+#include <TrussC.h>
+#include <tcxImGui.h>
+using namespace std;
+using namespace tc;
+using namespace tcx;
+
+class tcApp : public App {
+    float value = 0.5f;
+public:
+    void setup() override {
+        imguiSetup();
+        setFps(60);
+    }
+    void draw() override {
+        clear(0.1f);
+        if (imguiBegin()) {
+            ImGui::Begin("Controls");
+            ImGui::SliderFloat("Value", &value, 0.0f, 1.0f);
+            ImGui::End();
+        }
+        imguiEnd();
+    }
+};
+```
+
+### Starting with an addon
+
+Add its name (for example `tcxImGui`) on its own line in your project's
+`addons.make`. A plain `trusscli new` project starts with no addons selected.
+Run `trusscli update` from that project to regenerate build files, then read
+`addons/<addon>/README.md` for its header, namespace and setup calls.
 
 ## Data Folder
 
@@ -1256,6 +1396,8 @@ TrussC's app structure is openFrameworks-like on the surface but **Unity-like** 
 - **"What it *is*" (identity) → subclass Node.** Buttons, enemies, panels.
 - **"What it *can also do*" (capability) → Mod.** Animation, layout, drag-to-move — especially if unrelated node types want it.
 If you start copy-pasting the same block into two nodes' `update()`, that block wants to be a Mod. `addMod<T>(args...)` returns `T*` (chainable: `node->addMod<LayoutMod>()->setPadding(5)`); the Mod's `setup()` runs once its node is set up in the App's tree (inside `addMod` if it already is), so pass what `setup()` needs as constructor arguments. Look up with `getMod<T>()`, detach with `removeMod<T>()`.
+
+See [`customModExample`](../examples/node/customModExample/src/tcApp.h) for three small custom Mods: Draggable on different node types, Shake stacked with Draggable, and FollowMouse on a separate node.
 
 ### Constructor vs setup() in a Node? (common trap)
 
@@ -1939,6 +2081,8 @@ Every TrussC app can become an **MCP server.** Build and launch with `trusscli r
 
 A rebuild-free loop: build and launch (`trusscli run --mcp`) → `tc_get_screenshot` to see the current state → `tc_get_node_tree` to read pos / rotation (radians) / rotationDeg (derived degrees) / color as numbers → `tc_set_node_members` to nudge them directly → screenshot to check → repeat → finally bake the values into C++ source. Main tools: `tc_get_node_tree` / `tc_get_selected_node` / `tc_select_node` / `tc_set_node_members`. In default builds, mouse/key injection is opt-in via `mcp::setToolLevel(mcp::ToolLevel::Control)` in `setup()`. Drive ImGui UIs with dedicated tools (`tcx_imgui_get_widgets` / `tcx_imgui_click` / `tcx_imgui_input` / `tcx_imgui_checkbox`) — raw `tc_mouse_click` doesn't reach ImGui. `tcx_imgui_get_widgets` also returns each value widget's current value (full-precision floats, `DragFloat3` as one array, colors 0-1 as the variable holds them, `SliderAngle` in radians). `tcx_imgui_input` takes values in the form `tcx_imgui_get_widgets` / `tcx_imgui_get_touched` report (the variable's form): `SliderAngle` input and its response value are radians, with `"unit": "rad"` in the response, although the widget displays degrees. Non-numeric or non-finite angle text returns `{"status": "error", "message": "..."}`. When the user says "make it like this" after tweaking sliders or the NodeInspector by hand, call `tcx_imgui_get_touched`: it lists exactly what they changed since startup, with current values (ImGui value widgets — including `Checkbox`, `MenuItem`/`Selectable` with a `bool*`, `RadioButton` with an `int*` and `ListBox` — + per-node inspector edits; buttons, menu headers, action menu items, `MenuItem(label, shortcut, bool selected)` toggles, plain `Selectable`s and `RadioButton(label, bool)` change no variable and are not listed); write those into the code, then `tcx_imgui_reset_touched`. Expose your own state with `TC_REFLECT`, or return JSON via `mcp::tool` / `mcp::resource`. This enables a closed AI development loop, so you can hand off long, autonomous development sessions.
 
+Use `tc_get_stencil` with `{fbo: debugNameOrIndex}` (from `tc_list_fbos`) to inspect an owned Fbo's stencil as a lossless grayscale PNG. Optional positive `width` returns a nearest-neighbor preview without upscaling. Its image content block is followed by metadata: `width`, `height`, `sourceWidth`, `sourceHeight`, `format:"R8"`, `encoding:"png"`, `origin:"top-left"`, `interpretation:"exact"|"preview"`, `frame`, and `target:{fbo:index}`. Window/main targets, MSAA Fbos and unsupported readback return errors.
+
 ## Community & support
 
 ### Where do I ask questions / report issues?
@@ -2553,6 +2697,14 @@ int channelCount(TextureFormat fmt)  // Returns the number of channels in a Text
 bool isFloatFormat(TextureFormat fmt)  // Reports whether a TextureFormat uses floating-point components.
 ```
 
+### Graphics - FBO
+
+```cpp
+bool beginStencil()  // Borrows all eight stencil bits on the current drawing target.
+void clearStencil(uint8_t value = 0)  // Replaces all stencil bytes with a plain value while owned.
+void endStencil()  // Returns the whole stencil to 0, ends ownership and restores the saved framework state.
+```
+
 ### Graphics - Shader
 
 ```cpp
@@ -3132,10 +3284,11 @@ void Font::drawStringInternal(const std::string & text, float x, float y, Direct
 void Font::drawStringVerticalInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text with vertical glyph layout.
 void Font::emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph> & placed) const  // Emits textured quads for positioned glyphs.
 void Font::enableWrap(bool enabled)  // Enables or disables automatic text wrapping.
-float Font::fitY(float offsetFromAnchor) const  // Round a baseline offset when grid fitting is applicable.
+float Font::fitY(float offsetFromAnchor, const Mat4 * matrix = nullptr) const  // Round a baseline offset when grid fitting is applicable.
 void Font::forEachGlyph(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const [+1]  // Calls a visitor for each laid-out glyph.
-void Font::forEachGlyphHorizontal(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Visits glyphs positioned by horizontal text layout.
-void Font::forEachGlyphVertical(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Visit each glyph placed by the vertical text layout.
+void Font::forEachGlyphHorizontal(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor, const Mat4 * matrix = nullptr) const  // Visits glyphs positioned by horizontal text layout.
+void Font::forEachGlyphVertical(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor, const Mat4 * matrix = nullptr) const  // Visit each glyph placed by the vertical text layout.
+void Font::forEachGlyphWithMatrix(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor, const Mat4 & matrix) const  // Protected layout helper that uses a supplied model matrix for baseline grid fitting.
 Direction Font::getAlignH() const  // Returns the font's stored horizontal alignment.
 Direction Font::getAlignV() const  // Returns the font's stored vertical alignment.
 float Font::getAscent() const  // Returns the font's ascent above the baseline.
@@ -3146,6 +3299,7 @@ Rect Font::getBBox(const std::string & text) const  // Returns a rectangle conta
 float Font::getDefaultLineHeight() const  // Returns the font's default line height.
 int Font::getDefaultOversampling()  // Return the oversampling default for newly constructed fonts.
 float Font::getDescent() const  // Returns the font's descent below the baseline.
+Rect Font::getGlyphInkBox(uint32_t codepoint) const  // Returns a glyph's outline ink rectangle in logical pixels relative to the horizontal baseline.
 Path Font::getGlyphPath(uint32_t codepoint) const  // Returns a single glyph's vector outline as a Path.
 bool Font::getGridFit() const  // Return whether baseline grid fitting is enabled.
 bool Font::getHangingPunctuation() const  // Returns whether hanging punctuation is enabled.
@@ -3166,7 +3320,7 @@ TcyMode Font::getTcyLatinMode() const  // Returns the tate-chu-yoko mode for Lat
 size_t Font::getTotalCacheMemoryUsage()  // Returns the shared font cache's total atlas pixel storage size.
 float Font::getWidth(const std::string & text) const  // Returns the text's measured width.
 WritingMode Font::getWritingMode() const  // Returns the current writing mode.
-bool Font::gridFitLands() const  // Test whether the current scale permits baseline grid fitting.
+bool Font::gridFitLands() const [+1]  // Tests whether the current or supplied model scale permits baseline grid fitting.
 bool Font::isLoaded() const  // Returns whether the font is loaded.
 bool Font::isLoading() const  // Return whether an asynchronous font request is pending.
 bool Font::isWrapEnabled() const  // Returns whether automatic text wrapping is enabled.
@@ -3207,6 +3361,24 @@ sg_pipeline_desc FullscreenShader::createPipelineDesc()  // Builds the pipeline 
 void FullscreenShader::createVertexBuffer()  // Creates the vertex and index buffers for the fullscreen quad.
 void FullscreenShader::draw()  // Draws a fullscreen quad with this shader.
 void FullscreenShader::setParams(const T & params)  // Sets the uniform parameter block for fullscreen drawing.
+```
+
+### GlyphBatch — Retains transformed glyph quads for repeated drawing in add order, batching consecutive glyphs on the same atlas page.
+
+```cpp
+void GlyphBatch::add(uint32_t codepoint) [+5]  // Appends a glyph or UTF-8 string, using batch settings for omitted arguments.
+void GlyphBatch::clear()  // Discards retained geometry while keeping the font and batch settings.
+void GlyphBatch::draw() [+1]  // Draws retained glyphs using the current target and blend; an optional transform applies through a uniform.
+const Color & GlyphBatch::getColor() const  // Returns the current batch color.
+const Mat4 & GlyphBatch::getTransform() const  // Returns the current batch transform.
+void GlyphBatch::resetColor()  // Resets the batch color to white (1,1,1,1).
+void GlyphBatch::resetTransform()  // Resets the batch transform to identity.
+void GlyphBatch::setAlign(Direction h, Direction v)  // Sets horizontal and vertical alignment for subsequent adds; defaults to Left/Top like Font.
+void GlyphBatch::setAlignToInk(bool enabled)  // Centers subsequent independent glyphs on their outline ink box instead of advance and line metrics.
+void GlyphBatch::setColor(const Color & color)  // Sets the color for later adds that omit a color; defaults to white (1,1,1,1).
+void GlyphBatch::setFont(const Font & font)  // Clears the batch and retains a copy of a Font and its current settings.
+void GlyphBatch::setTransform(const Mat4 & transform)  // Sets the transform for each later glyph; defaults to identity.
+void GlyphBatch::setWritingMode(WritingMode mode)  // Sets writing mode for subsequent string adds; independent codepoints ignore it.
 ```
 
 ### GrabberFrame — Pairs a captured camera frame with its capture-time timestamp.
@@ -4927,6 +5099,7 @@ void Window::toggleFullscreen()  // Toggles this window's fullscreen mode.
 WindowSettings & WindowSettings::setDecorated(bool enabled)  // Sets whether the window displays its frame and title bar.
 WindowSettings & WindowSettings::setFullscreen(bool enabled)  // Sets whether the Window starts in fullscreen.
 WindowSettings & WindowSettings::setHighDpi(bool enabled)  // Sets whether rendering uses the display's high pixel density.
+WindowSettings & WindowSettings::setMaxFrameLatency(int latency)  // Sets per-window Windows D3D11 CPU/GPU overlap; lower values reduce input latency and back-buffer memory.
 WindowSettings & WindowSettings::setParentWindow(const std::shared_ptr<Window> & parent) [+1]  // Keeps a new window above a parent window.
 WindowSettings & WindowSettings::setPipelinePoolSize(int count)  // Sets the startup pipeline pool slot count.
 WindowSettings & WindowSettings::setPixelPerfect(bool enabled)  // Sets whether window coordinates use framebuffer pixels.

@@ -145,6 +145,12 @@ static void cover_graphics_color() {
     (void)srgbToLinear(af::val<float>());
 }
 
+static void cover_graphics_fbo() {
+    (void)beginStencil();
+    (void)clearStencil(af::val<uint8_t>());
+    (void)endStencil();
+}
+
 static void cover_graphics_lighting() {
     (void)addLight(af::val<Light>());
     (void)beginShadowPass(af::val<Light>());
@@ -1595,6 +1601,7 @@ struct Cover_Font : af::Scope<Font> {
         (void)af::val<const Font>().getDefaultLineHeight();
         (void)af::val<Font>().getDefaultOversampling();
         (void)af::val<const Font>().getDescent();
+        (void)af::val<const Font>().getGlyphInkBox(af::val<uint32_t>());
         (void)af::val<const Font>().getGlyphPath(af::val<uint32_t>());
         (void)af::val<const Font>().getGridFit();
         (void)af::val<const Font>().getHangingPunctuation();
@@ -1690,6 +1697,32 @@ struct Cover_FullscreenShader : af::Scope<FullscreenShader> {
         (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const std::vector<Vec4>>());
         (void)af::val<FullscreenShader>().setUniform(af::val<int>(), af::val<const void *>(), af::val<size_t>());
         (void)af::val<FullscreenShader>().submitVertices(af::val<const ShaderVertex *>(), af::val<int>(), af::val<PrimitiveType>());
+    }
+};
+
+struct Cover_GlyphBatch : af::Scope<GlyphBatch> {
+    ~Cover_GlyphBatch(); // Never instantiated.
+    static void run() {
+        (void)GlyphBatch();
+        (void)af::val<GlyphBatch>().add(af::val<uint32_t>());
+        (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Mat4>());
+        (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Mat4>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().clear();
+        (void)af::val<GlyphBatch>().draw();
+        (void)af::val<GlyphBatch>().draw(af::val<const Mat4>());
+        (void)af::val<const GlyphBatch>().getColor();
+        (void)af::val<const GlyphBatch>().getTransform();
+        (void)af::val<GlyphBatch>().resetColor();
+        (void)af::val<GlyphBatch>().resetTransform();
+        (void)af::val<GlyphBatch>().setAlign(af::val<Direction>(), af::val<Direction>());
+        (void)af::val<GlyphBatch>().setAlignToInk(af::val<bool>());
+        (void)af::val<GlyphBatch>().setColor(af::val<const Color>());
+        (void)af::val<GlyphBatch>().setFont(af::val<const Font>());
+        (void)af::val<GlyphBatch>().setTransform(af::val<const Mat4>());
+        (void)af::val<GlyphBatch>().setWritingMode(af::val<WritingMode>());
     }
 };
 
@@ -5065,6 +5098,7 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().fullscreen;
         (void)af::val<WindowSettings>().height;
         (void)af::val<WindowSettings>().highDpi;
+        (void)af::val<WindowSettings>().maxFrameLatency;
         (void)af::val<WindowSettings>().parentWindow;
         (void)af::val<WindowSettings>().pipelinePoolSize;
         (void)af::val<WindowSettings>().pixelPerfect;
@@ -5074,6 +5108,7 @@ struct Cover_WindowSettings : af::Scope<WindowSettings> {
         (void)af::val<WindowSettings>().setDecorated(af::val<bool>());
         (void)af::val<WindowSettings>().setFullscreen(af::val<bool>());
         (void)af::val<WindowSettings>().setHighDpi(af::val<bool>());
+        (void)af::val<WindowSettings>().setMaxFrameLatency(af::val<int>());
         (void)af::val<WindowSettings>().setParentWindow(af::val<const std::shared_ptr<Window>>());
         (void)af::val<WindowSettings>().setParentWindow(af::val<Window>());
         (void)af::val<WindowSettings>().setPipelinePoolSize(af::val<int>());
@@ -5195,6 +5230,7 @@ void af::coverGenerated() {
     af_generated::cover_graphics_backend();
     af_generated::cover_graphics_camera();
     af_generated::cover_graphics_color();
+    af_generated::cover_graphics_fbo();
     af_generated::cover_graphics_lighting();
     af_generated::cover_graphics_shader();
     af_generated::cover_graphics_shapes();
@@ -5265,6 +5301,7 @@ void af::coverGenerated() {
     af_generated::Cover_Font__PlacedGlyph::run();
     af_generated::Cover_FpsSettings::run();
     af_generated::Cover_FullscreenShader::run();
+    af_generated::Cover_GlyphBatch::run();
     af_generated::Cover_GrabberFrame::run();
     af_generated::Cover_GraphicsBackend::run();
     af_generated::Cover_HasTexture::run();

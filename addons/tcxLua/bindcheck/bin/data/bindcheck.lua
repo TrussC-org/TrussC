@@ -177,6 +177,54 @@ try("ctor CALL form (hand-written)", function()
     return f ~= nil and m ~= nil
 end)
 
+-- Each approved binding is called in both harnesses, with real Lua values.
+for _, case in ipairs(dofile(bindingTestSource .. '/bindings.lua')) do
+    try(case[1], case[2])
+end
+try("Shader.drawVertices GPU default and explicit instance count", function()
+    assert(bindingTestShader:isLoaded())
+    local fbo, readback = Fbo(), Image()
+    fbo:allocate(8, 8)
+    for _, instances in ipairs({1, 2}) do
+        fbo:begin(0, 0, 0, 1)
+        if instances == 1 then
+            assert(select('#', bindingTestShader:drawVertices(3)) == 0)
+        else
+            assert(select('#', bindingTestShader:drawVertices(3, instances)) == 0)
+        end
+        fbo:end_fbo()
+        assert(fbo:copyTo(readback))
+        local color = readback:getColor(4, 4)
+        assert(math.abs(color.r - instances / 2) < 0.01 and color.g == 0)
+    end
+    assert(fbo:save(bindingTestTemp .. '/fbo.png'):ok())
+    return true
+end)
+try("Image operations rebuild the GPU texture", function()
+    local image, fbo, readback = Image(), Fbo(), Image()
+    image:allocate(4, 4)
+    for y = 0, 3 do
+        for x = 0, 3 do image:setColor(x, y, Color(1, 0, 0)) end
+    end
+    image:crop(1, 1, 2, 2)
+    image:resize(4, 4)
+    image:halve()
+    image:mirror(true, true)
+    image:mirrorH()
+    image:mirrorV()
+    image:update()
+    fbo:allocate(8, 8)
+    fbo:begin(0, 0, 0, 1)
+    setColor(1, 1, 1)
+    image:draw(0, 0, 8, 8)
+    fbo:end_fbo()
+    assert(fbo:copyTo(readback))
+    local color = readback:getColor(4, 4)
+    assert(color.r > 0.99 and color.g == 0 and color.b == 0,
+        string.format("readback: %.3f %.3f %.3f", color.r, color.g, color.b))
+    return true
+end)
+
 -- Emit machine-parseable summary via print (base lib; goes to stdout).
 print("##BINDCHECK_BEGIN##")
 print(string.format("functions_expected=%d", #expected.functions))

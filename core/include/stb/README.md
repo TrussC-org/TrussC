@@ -135,8 +135,8 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
      failures return before pointer arithmetic. The former per-shape visit and
      append-copy counters, CFF dispatch counter and subroutine-call ceiling
      have been removed. Glyphs are no longer rejected for exceeding those work
-     allowances. The shared backend still checks allocation failures and its
-     per-glyph workspace independently; see the v0.8 import notes below.
+     allowances. The shared backend still checks allocation failures
+     independently; see the v0.8 import notes below.
 - **Configuration** (in `core/include/impl/stb_impl.cpp`, not a change to the
   file): `STBTT_assert` does nothing in every build type, so Debug and
   Release builds handle font data the same way. Allocations through
@@ -156,7 +156,7 @@ the file is unchanged from there to upstream `master` as of 2026-08-01
   (for CFF, past the CharStrings count) and a codepoint above U+10FFFF map
   to .notdef. Fonts of 1 GiB or more are refused by the existing backend addressing guard.
   Supported cmap sections and ranges are checked before initialization. Glyph
-  records, compound depth and decoded workspace are checked when a shape is
+  records and compound depth are checked when a shape is
   requested. A font with no supported Unicode map is refused with a diagnostic.
 - **Covered by**: `core/tests/fontSfntCheck`.
 
@@ -221,16 +221,17 @@ file last changed in a merge, as `stb_truetype.h` did). For
 
 ### Document/font import workspace (v0.8)
 
-`impl/tcFontInput.h` holds the shared sfnt directory checks used before core
-and ImGui font imports. Local fonts retain only the backend addressing guard.
-`impl/tcFontScratch.h` tracks live stb allocations per glyph, checks glyph counts and raster metrics
-against its live workspace, and reports allocation failure before a
-glyph is published. Atlas pages remain independent. Compound TrueType shapes
+`impl/tcFontInput.h` holds the sfnt directory checks used before core font
+imports. ImGui uses its unmodified bundled decoder (see the addon ledger).
+Local fonts retain only the backend addressing guard.
+`impl/tcFontScratch.h` reports allocation failure before a glyph is published;
+it no longer tracks live allocation bytes or enforces a per-glyph workspace cap.
+Atlas pages remain independent. Compound TrueType shapes
 have a 64-level depth guard and checked combined vertex counts. There are no
 per-shape visit/copy counters or CFF dispatch/subroutine-call ceilings. CFF
 retains its upstream subroutine stack depth limit and the vertex-count checks
 above. Raster scanline allocation failure returns before pointer arithmetic.
-The 256 MiB per-glyph workspace cap remains separate from the 1 GiB font-input
-addressing guard; removing work counters does not change either limit.
+The former 256 MiB per-glyph workspace cap was removed in `c2c56496`
+(#1124/#1131). The separate 1 GiB font-input addressing guard remains.
 Keep these remaining patches when updating stb and run `documentImports`,
 `fontSfntCheck`, `fontScratch`, and ImGui addon tests.

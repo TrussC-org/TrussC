@@ -1,9 +1,10 @@
 # luagen-types (Phase 2 — usertype generation)
 
 Generates tcxLua Sol2 **usertype** bindings (constructors, properties, methods,
-static methods, operators), **enums** (32, same usertype+`sol::var` style as the
-old hand bindings), and the **`colors` constant table** (from `colors.json`, 149
-colors) — all from `docs/reference/`. Pairs with `luagen/` (Phase 1 = free fns).
+static methods, operators), **enums** (47, same usertype+`sol::var` style as the
+old hand bindings), the **`colors` constant table** (from `colors.json`, 149
+colors), and **45 global constants** — all from `docs/reference/`.
+Pairs with `luagen/` (Phase 1 = free fns).
 Members/types with a `platforms` annotation are wrapped in preprocessor guards.
 
 Regenerate on macOS from the repository root:
@@ -15,7 +16,7 @@ docs/reference/regenerate.sh
 See the [reference pipeline](../../../../docs/reference/README.md) for prerequisites,
 all outputs and the CI freshness check.
 
-## Status — 110 types compile clean (isolation syntax-only witness), 0 errors
+## Status — 124 generated types
 
 Generated from reference-data, verified by compiling against the real headers.
 Derives everything from the data:
@@ -30,12 +31,18 @@ Derives everything from the data:
 - qualifies TrussC types (`trussc::Vec2`), nested types (`trussc::SoundSource::Kind`),
   and falls back to owner-nested for unrecorded member typedefs (`Node::Ptr`)
 
-### Excluded (6) — see Obsidian handoff
-`Serial Node Thread SoundSource Environment VideoPlayerBase`: sol's new_usertype
-instantiation pulls in the incomplete `internal::StreamInstance` through their C++
-definition (NOT visible in reference-data signatures) — needs deeper handling / a
-hand-written shim. `Json`/`Xml` keep custom Lua glue (hand-written). (PlayingSound
-recovered once fields are filtered by `type`.)
+### Excluded and handwritten types
+
+`Thread` and `Environment` are not bound. `SoundSource` has handwritten bindings.
+These three are excluded from generation because of incomplete internal types.
+`Serial`, `Node` and `VideoPlayerBase` are generated; the abstract
+`VideoPlayerBase` has methods but no constructor. Namespaced APIs (`ns`) remain
+excluded by both generators.
+
+`Json`/`Xml` keep custom Lua glue. The other 13 handwritten custom types are
+AudioEngine, EasyCam, Fbo, Image, Light, Mat3, Mat4, Material, MicInput, Pixels,
+Shader, SoundBuffer and Texture. Their custom overloads and new members must be
+maintained separately from generation.
 
 `Tween` is excluded for a different reason: `defineTween` in `tcxLua.cpp` owns it and
 registers the same C++ types under different Lua names (`TweenFloat` vs a generated
@@ -50,14 +57,10 @@ name is invisible to literal-string greps.
 
 ## Integration — IN PRODUCTION
 `setGeneratedTypeBindings()` (in `src/generated/trussctype_generated.cpp`) is called
-from `setBindings()` and registers **99 generated usertypes**, including the core
-value types (Vec2/Vec3/Vec4/IVec2/IVec3/Color/Font/Mesh/Path/PlayingSound/Quaternion/
-Rect/Sound/SoundStream — their hand-written versions were removed). Still hand-written
-in `tcxLua.cpp`: 13 types with custom members (raw-pointer marshalling, `end_*`
-Lua-keyword renames, texture setters), enums/constants, and Json/Xml glue.
-Excluded from generation: Thread/SoundSource/Environment/VideoPlayerBase (their C++
-definition embeds the incomplete `internal::StreamInstance`, so `new_usertype<T>`
-can't instantiate sol's traits) — plus Json/Xml (custom glue).
+from `setBindings()` and registers **124 generated usertypes**, **47 enums**,
+**149 colors** and **45 global constants**. Counts describe generated output,
+including platform-guarded registrations, rather than the entire Lua surface.
+Custom types and Tween remain handwritten as described above.
 
 ## Verify after regenerating
 `cd ../../bindcheck && ./run_bindcheck.sh --regen` (existence + call asserts, incl.

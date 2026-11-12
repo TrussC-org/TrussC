@@ -300,6 +300,19 @@ void tcApp::setup() {
 
 ### Window and runtime settings
 
+Windows D3D11 now defaults to a maximum frame latency of **2**, previously **1**.
+CPU and GPU work can overlap for a smoother frame rate, at the cost of up to
+N−1 frames of extra input latency. Set `WindowSettings::setMaxFrameLatency(1)`
+for the lowest input latency and the previous behavior. This is per window;
+other backends ignore it. Values up to 16 are available. Each window holds
+latency + 1 back buffers, capped at 16 buffers when latency is 16. Each extra
+buffer uses about 8 MB at 1080p RGBA8 (default 2: three buffers, or triple buffering; latency 1: two).
+Resizing preserves the count.
+
+```cpp
+return runApp<tcApp>(WindowSettings().setMaxFrameLatency(1));
+```
+
 - **The uniform buffer reservation moved to `RuntimeSettings`.** Pass it as the second argument of `runApp()`. The one-argument `runApp<T>(windowSettings)` uses the default runtime settings.
 
   ```cpp
@@ -521,6 +534,12 @@ sg_apply_pipeline(pipeline);
 sg_apply_pipeline(pipelineForCurrentTarget());
 ```
 
+For code that uses rendering internals directly:
+
+- TrueType atlas pages now store R8 coverage. Drawing them with sokol_gl's default shader produces red glyphs; use `internal::sglCoverageShader()` or `internal::activeCoverage2D()` to interpret R as alpha.
+- `internal::FontCacheKey` now includes `faceIndex`. Use designated initialization instead of positional initialization so later fields keep their meaning.
+- `internal::RenderTarget::pipeline(uint32_t, desc)` is replaced by `pipeline(internal::PipelineKey)`. Use `PipelineKey::immediate(selection)` for immediate recipes or `PipelineKey::raw(role, desc)` for custom raster state.
+
 ### Fbo::readPixels() on float Fbos, and failed allocations
 
 - `Fbo::readPixels()` on a float Fbo now always returns RGBA8 values clamped to 0–255, on every backend. Before, the result depended on the backend; Metal, for example, returned `false`. It now also works on the web with WebGL2 (not with WebGPU). Use `readPixelsFloat()` for full precision.
@@ -533,6 +552,13 @@ fbo.readPixels(bytes);
 vector<float> values(w * h * 4);
 fbo.readPixelsFloat(values.data());
 ```
+
+### Font atlas pages are published when the target flushes
+
+Glyphs drawn in a pass are rasterized on the CPU, and each changed atlas page gets its new texture once, just before the target replays its draws. For code that reads a page through `Font::getAtlas(index)`:
+- `getView()` returns the page's view right away, so you can record draws with it.
+- `getTexture()` and `isTextureValid()` describe the last *published* image. Read them after the frame or Fbo has flushed (for example after `Fbo::end()`).
+- An atlas page keeps the size it had at its first recorded draw. New glyphs that don't fit go to a new page.
 
 ## Loading and saving
 
