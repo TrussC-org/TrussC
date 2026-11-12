@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #ifdef TC_GLYPH_EGL
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -14,6 +15,8 @@ using namespace tc;
 namespace {
 int failures = 0;
 bool completed = false;
+bool onlyEasycam = false;
+fs::path dumpDirectory;
 std::string testFontName = TC_FONT_SANS;
 void check(const char* name, bool ok) {
     std::printf("%s: %s\n", name, ok ? "PASS" : "FAIL");
@@ -39,6 +42,51 @@ void compare(const char* label, const Bytes& reference, const Bytes& actual, int
     }
     std::printf("PIXELS %s max=%d different=%d lit=%d\n", label, worst, different, lit);
     check(label, different == 0 && lit > 0);
+}
+
+// Only the two camera comparisons are dumped; keep normal runs unchanged.
+void compareCamera(const char* label, const Bytes& reference, const Bytes& actual) {
+    compare(label, reference, actual);
+    if (dumpDirectory.empty()) return;
+    std::string name = label;
+    for (char& c : name) if (c == ' ' || c == '/') c = '_';
+    Pixels pixels;
+    pixels.setFromPixels(reference.data(), extent, extent, 4);
+    check("save reference PNG", bool(pixels.save(dumpDirectory / (name + "-reference.png"))));
+    pixels.setFromPixels(actual.data(), extent, extent, 4);
+    check("save result PNG", bool(pixels.save(dumpDirectory / (name + "-result.png"))));
+    std::ofstream diff(dumpDirectory / (name + "-diff.txt"));
+    diff << "# x y reference_RGBA result_RGBA abs_max_diff (all nonzero differences; tolerance=2)\n"
+         << "# Coordinates follow the saved PNG. Glyph index omitted: overlapping translucent glyphs have no unique owner.\n";
+    int worst = 0, different = 0, aboveTolerance = 0, lit = 0;
+    for (int y = 0; y < extent; ++y) for (int x = 0; x < extent; ++x) {
+        const size_t offset = (y * extent + x) * 4;
+        int maximum = 0;
+        bool visible = false;
+        for (int c = 0; c < 4; ++c) {
+            maximum = std::max(maximum, std::abs(int(reference[offset+c]) - int(actual[offset+c])));
+            visible |= reference[offset+c] != 0;
+        }
+        worst = std::max(worst, maximum);
+        lit += visible;
+        aboveTolerance += maximum > 2;
+        if (!maximum) continue;
+        ++different;
+        diff << x << ' ' << y;
+        for (const auto* bytes : {&reference, &actual}) {
+            diff << " (";
+            for (int c = 0; c < 4; ++c) diff << (c ? "," : "") << int((*bytes)[offset+c]);
+            diff << ')';
+        }
+        diff << ' ' << maximum << '\n';
+    }
+    diff.close();
+    check("save pixel diff", bool(diff));
+    std::ofstream summary(dumpDirectory / "summary.txt", std::ios::app);
+    summary << label << " max=" << worst << " different_pixels=" << different
+            << " above_tolerance_pixels=" << aboveTolerance << " lit_pixels=" << lit << '\n';
+    summary.close();
+    check("save diff summary", bool(summary));
 }
 
 class GlyphApp : public App {
@@ -369,7 +417,12 @@ class GlyphApp : public App {
         auto drawScene = [&](bool batched, bool record) {
             camera.begin(); enableDepthTest();
             for (int i = 0; i < 8; ++i) {
-                pushMatrix(); translate(float(i * 3) - 10.5f, float(i % 2 * 2), float(i % 3 * 12));
+                // Glyph 0 is in front of glyph 1, which is submitted later.
+                // Keep all eight rotations, including the nearly edge-on glyph 6.
+                pushMatrix();
+                translate(i < 2 ? 0.0f : float(i * 3) - 10.5f,
+                          i == 1 ? 0.0f : float(i % 2 * 2),
+                          i == 0 ? 24.0f : (i == 1 ? 0.0f : float(i % 3 * 12)));
                 rotateY(0.25f * i); rotateZ(0.1f * i); scale(0.25f);
                 const Color glyphColor(0.2f + 0.08f * i, 0.4f, 0.8f - 0.05f * i, 0.7f);
                 if (batched) { if (record) batch.add(U'R', glyphColor); }
@@ -388,11 +441,11 @@ class GlyphApp : public App {
         };
         const auto expected = render(reference_, [&] { drawScene(false, false); });
         const auto got = render(actual_, [&] { drawScene(true, true); });
-        compare("EasyCam 3D rotated glyphs/depth", expected, got);
+        compareCamera("EasyCam 3D rotated glyphs/depth", expected, got);
         camera.setDistance(260);
         const auto movedReference = render(reference_, [&] { drawScene(false, false); });
         const auto movedBatch = render(actual_, [&] { drawScene(true, false); });
-        compare("retained glyphs follow the current EasyCam view", movedReference, movedBatch);
+        compareCamera("retained glyphs follow the current EasyCam view", movedReference, movedBatch);
     }
     void growthAndTransform() {
         // A new cache key keeps this growth test cold after the layout tests.
@@ -595,6 +648,7 @@ class GlyphApp : public App {
 public:
     void runOffscreenChecks() {
         setup();
+        if (onlyEasycam) { cameraCheck(); completed = true; return; }
         scissorChecks(); pageOrderChecks(); layoutChecks(); batchSettingsChecks(); cameraCheck();
         streamChecks(); growthAndTransform(); targetAndBlendChecks();
         reference_.allocate(extent, extent); retain(true);
@@ -609,6 +663,7 @@ public:
         reference_.allocate(extent, extent); actual_.allocate(extent, extent);
     }
     void draw() override {
+        if (onlyEasycam) { cameraCheck(); completed = true; exitApp(); return; }
         if (frame_ == 0) {
             scissorChecks(); pageOrderChecks(); layoutChecks(); batchSettingsChecks(); cameraCheck();
         streamChecks(); growthAndTransform(); targetAndBlendChecks();
@@ -692,8 +747,24 @@ int runEglChecks() {
 
 } // namespace
 TC_CORE_TEST_MAIN(int argc, char** argv) {
-    for (int i = 1; i + 1 < argc; ++i)
-        if (std::strcmp(argv[i], "--font") == 0) testFontName = argv[i + 1];
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--font") == 0 || std::strcmp(argv[i], "--dump-diff") == 0 ||
+            std::strcmp(argv[i], "--only") == 0) {
+            const std::string option = argv[i];
+            if (++i == argc) { std::fprintf(stderr, "Missing value for %s\n", option.c_str()); return 1; }
+            if (option == "--font") testFontName = argv[i];
+            else if (option == "--dump-diff") dumpDirectory = fs::absolute(utf8ToPath(argv[i]));
+            else if (std::strcmp(argv[i], "easycam") == 0) onlyEasycam = true;
+            else { std::fprintf(stderr, "Expected --only easycam\n"); return 1; }
+        }
+    }
+    if (!dumpDirectory.empty()) {
+        std::error_code error;
+        fs::create_directories(dumpDirectory, error);
+        if (error) { std::fprintf(stderr, "Cannot create dump directory: %s\n", error.message().c_str()); return 1; }
+        std::ofstream summary(dumpDirectory / "summary.txt");
+        if (!summary) { std::fprintf(stderr, "Cannot write dump summary\n"); return 1; }
+    }
     Font font;
     check("unloaded font has empty ink", font.getGlyphInkBox(U'A').width == 0);
     GlyphBatch empty;
