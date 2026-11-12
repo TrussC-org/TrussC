@@ -19,6 +19,18 @@
 You are a coding assistant for the TrussC framework.
 When a `trussc_api_details.txt` reference file is available, look up an entry's `## <id>` section there for its details and code examples.
 
+Custom blends are public: store a `BlendDesc` with `setCustomBlendDesc(desc)` and
+select `BlendMode::Custom`. Use this instead of internal pipeline recipes.
+Custom runs literal equations in the GPU fixed blend unit, with one factor per side.
+Straight-alpha glyph quads can have RGB in transparent pixels, so One/One adds
+light there too. Use addKeepAlpha with conversion off for straight-alpha glow.
+For screenKeepAlpha or premultipliedAdd, set desc.premultiplySource = true for
+straight-alpha text (Font/GlyphBatch), shapes and images; leave it false for
+Fbos and other premultiplied sources to avoid darkening from double premultiplication.
+All presets leave the flag false. Conversion is opt-in because automatic conversion
+would apply SrcAlpha twice and change equations that use color values as data.
+Nodes reset Style before draw(); select both descriptor and mode inside draw().
+
 ## Docs search (MCP, beta)
 If the `trussc_search` tool is available (the TrussC docs MCP server at `https://api.trussc.org/mcp`), use it whenever you need TrussC knowledge: which API to use, how something behaves, examples, addons.
 - Ask freely, in English or Japanese. A plain question works, and so does describing what the user wants to make; you don't need the exact API name.
@@ -2772,11 +2784,13 @@ void console::stop()  // Disables command delivery from standard input.
 ### graphics
 
 ```cpp
+BlendDesc getCustomBlendDesc()  // Returns a copy of the custom blend slot, regardless of the active mode.
 int getHeight()  // Returns the current drawing target's height.
 Mat4 getProjectionMatrix()  // Returns the current drawing target's camera projection matrix.
 Vec2 getSize()  // Returns the width and height of the active drawing target as a Vec2.
 Mat4 getViewMatrix()  // Returns the current drawing target's camera view matrix.
 int getWidth()  // Returns the current drawing target's width.
+void setCustomBlendDesc(const BlendDesc & desc)  // Stores a blend equation and source-conversion flag; updates an active Custom mode immediately.
 ```
 
 ### Other
@@ -2952,6 +2966,14 @@ SaveResult AudioRecorder::stop()  // Stops recording and finalizes the audio fil
 ```cpp
 ```
 
+### BlendDesc — Defines blend equations that standard modes cannot express, such as adding light while keeping destination alpha.
+
+```cpp
+BlendDesc BlendDesc::addKeepAlpha()  // Adds RGB with SrcAlpha/One and preserves destination alpha with Zero/One.
+BlendDesc BlendDesc::premultipliedAdd()  // Adds RGB and alpha with One/One; leaves source conversion off.
+BlendDesc BlendDesc::screenKeepAlpha()  // Screens RGB with OneMinusDstColor/One and preserves destination alpha.
+```
+
 ### BuildInfo — Provides build configuration timestamps.
 
 ```cpp
@@ -3065,6 +3087,11 @@ ColorHSB ColorOKLab::toHSB() const  // Converts the color to HSB.
 ColorLinear ColorOKLab::toLinear() const  // Converts the color to linear RGB.
 ColorOKLCH ColorOKLab::toOKLCH() const  // Converts the color to OKLCH.
 Color ColorOKLab::toRGB() const  // Converts the color to an sRGB Color.
+```
+
+### Component — Holds source and destination factors and an operation.
+
+```cpp
 ```
 
 ### ComputeShader — Runs a sokol compute program between drawing passes (C++ only).
@@ -3363,12 +3390,12 @@ void FullscreenShader::draw()  // Draws a fullscreen quad with this shader.
 void FullscreenShader::setParams(const T & params)  // Sets the uniform parameter block for fullscreen drawing.
 ```
 
-### GlyphBatch — Retains transformed glyph quads for repeated drawing in add order, batching consecutive glyphs on the same atlas page.
+### GlyphBatch — Stores glyphs for repeated drawing; use it instead of drawString when text or per-glyph placement can be reused.
 
 ```cpp
 void GlyphBatch::add(uint32_t codepoint) [+5]  // Appends a glyph or UTF-8 string, using batch settings for omitted arguments.
 void GlyphBatch::clear()  // Discards retained geometry while keeping the font and batch settings.
-void GlyphBatch::draw() [+1]  // Draws retained glyphs using the current target and blend; an optional transform applies through a uniform.
+void GlyphBatch::draw() [+1]  // Draws the retained glyphs with the current camera, target and blend mode; draw(transform) places the whole batch.
 const Color & GlyphBatch::getColor() const  // Returns the current batch color.
 const Mat4 & GlyphBatch::getTransform() const  // Returns the current batch transform.
 void GlyphBatch::resetColor()  // Resets the batch color to white (1,1,1,1).
@@ -5173,7 +5200,9 @@ enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Identifie
 enum AudioRecordSettings::SampleFormat { S16, F32 }  // Selects the sample representation stored in the WAV file.
 enum AxisMode { None, Fill, Content }  // Selects how a layout axis determines sizes.
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Selects a built-in synthesized notification sound.
-enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Selects how drawing colors blend with the existing image.
+enum BlendFactor { Zero, One, SrcColor, OneMinusSrcColor, SrcAlpha, OneMinusSrcAlpha, DstColor, OneMinusDstColor, DstAlpha, OneMinusDstAlpha }  // Selects a portable source or destination blend factor.
+enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled, Custom }  // Selects how drawing colors blend with the existing image.
+enum BlendOp { Add, Subtract, ReverseSubtract, Minimum, Maximum }  // Selects Add, Subtract, ReverseSubtract, Minimum or Maximum.
 enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }  // Defines the waveform choices for ChipSoundNote.
 enum Codec { None, LZ4 }  // Selects a byte-buffer compression codec.
 enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Selects a mouse cursor shape.

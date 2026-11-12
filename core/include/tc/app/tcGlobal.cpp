@@ -391,6 +391,15 @@ sg_shader sglCoverageShader() {
     return shd;
 }
 
+// R8 coverage needs its own fragment entry: the RGBA premult shader samples A.
+sg_shader sglCoveragePremultShader() {
+    static sg_shader shd = {};
+    if (shd.id == SG_INVALID_ID && sg_isvalid()) {
+        shd = sg_make_shader(tc_sglcov_coverage_premult_shader_desc(sg_query_backend()));
+    }
+    return shd;
+}
+
 // Host-owned, shared across hot reload guests, like the sgl coverage program.
 sg_shader glyphBatchShader() {
     static sg_shader shader = {};
@@ -949,8 +958,11 @@ bool popTarget(RenderTarget& target, uint64_t token) {
         parent.inheritLogicalDrawFlags(target);
         // Preserve the parent's effective role/depth (e.g. EasyCam), while
         // reconciling its blend-sensitive selection with returned logical state.
-        if (parent.selectedPipeline.role == PipelineRole::Fill || parent.selectedPipeline.role == PipelineRole::Geometry3D)
+        if (parent.selectedPipeline.role == PipelineRole::Fill || parent.selectedPipeline.role == PipelineRole::Geometry3D) {
             parent.selectedPipeline.blend = parent.currentBlendMode;
+            parent.selectedPipeline.customBlendId = parent.currentBlendMode == BlendMode::Custom ?
+                parent.customBlendId : 0;
+        }
     }
     attempt([&] { selectTarget(parent); });
     if (entry.resumeParent && window.targetStack.back().phase == TargetPassPhase::Rendering) {
@@ -2965,11 +2977,11 @@ PipelineKey PipelineKey::immediate(ImmediateSelection selection) {
     PipelineKey key; key.selection = selection; key.role = selection.role;
     switch (selection.role) {
         case PipelineRole::Premult: key.desc = pipeDescPremult(selection.depth); break;
-        case PipelineRole::Coverage: key.desc = pipeDescCoverage2D(selection.depth); break;
+        case PipelineRole::Coverage: key.desc = pipeDescCoverage2D(selection.depth, selection.blend, blendDescFromId(selection.customBlendId)); break;
         case PipelineRole::Clear: key.desc = pipeDescClear(); break;
         case PipelineRole::Geometry3D:
-            key.desc = pipeDesc2D(selection.blend, selection.depth); break;
-        default: key.desc = pipeDesc2D(selection.blend, selection.depth); break;
+            key.desc = pipeDesc2D(selection.blend, selection.depth, blendDescFromId(selection.customBlendId)); break;
+        default: key.desc = pipeDesc2D(selection.blend, selection.depth, blendDescFromId(selection.customBlendId)); break;
     }
     return key;
 }
@@ -3012,6 +3024,14 @@ void RenderTargetResources::release() {
 sgl_pipeline RenderTarget::immediatePipeline(ImmediateSelection selection) {
     auto& bundle = resources();
     if (!sg_isvalid() || !bundle.context.id) return {};
+    if (selection.blend == BlendMode::Custom) {
+        // Unbounded value-keyed shared selection cache: A/B/A never canonicalizes
+        // again. Keep custom values out of the small linear standard-mode cache.
+        const auto selected = selectPipeline(PipelineSelectionId::immediate(selection),
+            [&] { return PipelineKey::immediate(selection); });
+        bundle.selections[selected.immediate.id] = selection;
+        return selected.immediate;
+    }
     for (const auto& entry : bundle.immediateCache) {
         if (entry.first == selection) {
             // Canonical recipes can share a handle (including failed id 0).
@@ -3054,10 +3074,12 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     result.generation = bundle.rawCache;
     const bool customImmediate = request.role == PipelineRole::Coverage ||
         ((request.role == PipelineRole::Fill || request.role == PipelineRole::Geometry3D) &&
-         (request.selection.blend == BlendMode::Multiply || request.selection.blend == BlendMode::Screen));
+         (request.selection.blend == BlendMode::Multiply || request.selection.blend == BlendMode::Screen ||
+          (request.selection.blend == BlendMode::Custom && blendDescFromId(request.selection.customBlendId).premultiplySource)));
     const bool needsProgram = request.family == PipelineFamily::Raw ||
         (customImmediate && sg_query_backend() != SG_BACKEND_DUMMY);
-    const bool programReady = desc.shader.id ? sg_query_shader_state(desc.shader) == SG_RESOURCESTATE_VALID : !needsProgram;
+    const bool blendable = request.selection.blend != BlendMode::Custom || sg_query_pixelformat(colorFormat).blend;
+    const bool programReady = blendable && (desc.shader.id ? sg_query_shader_state(desc.shader) == SG_RESOURCESTATE_VALID : !needsProgram);
     if (request.family == PipelineFamily::Raw) {
         auto& cache = bundle.rawCache->cache;
         auto found = cache.find(key);

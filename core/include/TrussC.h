@@ -149,9 +149,45 @@ enum class BlendMode {
     Multiply,   // Multiply blending
     Screen,     // Screen blending
     Subtract,   // Subtractive blending
-    Disabled    // No blending (overwrite)
+    Disabled,   // No blending (overwrite)
+    Custom      // Literal equations from the custom BlendDesc slot
 };
-TC_ENUM_LABELS(BlendMode, "Alpha", "Add", "Multiply", "Screen", "Subtract", "Disabled")
+TC_ENUM_LABELS(BlendMode, "Alpha", "Add", "Multiply", "Screen", "Subtract", "Disabled", "Custom")
+
+// Portable factors on the literal fragment output; no automatic premultiply.
+enum class BlendFactor : uint8_t {
+    Zero, One, SrcColor, OneMinusSrcColor, SrcAlpha, OneMinusSrcAlpha,
+    DstColor, OneMinusDstColor, DstAlpha, OneMinusDstAlpha
+};
+TC_ENUM_LABELS(BlendFactor, "Zero", "One", "SrcColor", "OneMinusSrcColor", "SrcAlpha", "OneMinusSrcAlpha",
+    "DstColor", "OneMinusDstColor", "DstAlpha", "OneMinusDstAlpha")
+enum class BlendOp : uint8_t { Add, Subtract, ReverseSubtract, Minimum, Maximum };
+TC_ENUM_LABELS(BlendOp, "Add", "Subtract", "ReverseSubtract", "Minimum", "Maximum")
+
+struct BlendDesc {
+    struct Component {
+        BlendFactor src = BlendFactor::One;
+        BlendFactor dst = BlendFactor::Zero;
+        BlendOp op = BlendOp::Add;
+        bool operator==(const Component&) const = default;
+    };
+    Component rgb = {BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha};
+    Component alpha = {BlendFactor::One, BlendFactor::OneMinusSrcAlpha};
+    bool premultiplySource = false;
+    bool operator==(const BlendDesc&) const = default;
+
+    // ONE/ONE is intended for premultiplied sources such as Fbo textures.
+    // Set premultiplySource for straight-alpha text, shapes and images.
+    static constexpr BlendDesc premultipliedAdd() {
+        return {{BlendFactor::One, BlendFactor::One}, {BlendFactor::One, BlendFactor::One}};
+    }
+    static constexpr BlendDesc addKeepAlpha() {
+        return {{BlendFactor::SrcAlpha, BlendFactor::One}, {BlendFactor::Zero, BlendFactor::One}};
+    }
+    static constexpr BlendDesc screenKeepAlpha() {
+        return {{BlendFactor::OneMinusDstColor, BlendFactor::One}, {BlendFactor::Zero, BlendFactor::One}};
+    }
+};
 
 // ---------------------------------------------------------------------------
 // Texture filter
@@ -655,14 +691,13 @@ inline void popScissor() {
 // ---------------------------------------------------------------------------
 
 // Set blend mode
-// Alpha channel is additive in all modes (to prevent transparency when drawing to FBO)
 // Works on the swapchain AND inside an Fbo pass: active2D() resolves the
 // pipeline against the current render target, so each target lazily gets a
 // pipeline matching its own color format / sample count.
 inline void setBlendMode(BlendMode mode) {
     auto& target = internal::currentTarget();
     target.currentBlendMode = mode;
-    target.selectedPipeline = internal::fillSelection(mode, target.depthTestEnabled);
+    target.selectedPipeline = internal::fillSelection(mode, target.depthTestEnabled, target.customBlendId);
     if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(mode));
 }
@@ -671,6 +706,24 @@ inline void setBlendMode(BlendMode mode) {
 inline BlendMode getBlendMode() {
     auto* target = internal::drawingApiTarget();
     return target ? target->currentBlendMode : BlendMode::Alpha;
+}
+
+// Store the custom slot; an active Custom selection changes immediately.
+inline void setCustomBlendDesc(const BlendDesc& desc) {
+    if (!internal::validBlendDesc(desc)) {
+        logWarning("Blend") << "invalid custom blend descriptor; previous state retained";
+        return;
+    }
+    auto& target = internal::currentTarget();
+    target.customBlendDesc = desc;
+    target.customBlendId = internal::blendDescId(desc);
+    if (target.currentBlendMode == BlendMode::Custom) setBlendMode(BlendMode::Custom);
+}
+
+// The slot is queryable even when a standard blend mode is active.
+inline BlendDesc getCustomBlendDesc() {
+    auto* target = internal::drawingApiTarget();
+    return target ? target->customBlendDesc : BlendDesc{};
 }
 
 // Reset to default blend mode (Alpha)
@@ -698,7 +751,7 @@ inline void restoreBlendPipeline() {
 inline void enableDepthTest() {
     auto& target = internal::currentTarget();
     target.depthTestEnabled = true;
-    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, true);
+    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, true, target.customBlendId);
     if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(getBlendMode()));
 }
@@ -707,7 +760,7 @@ inline void enableDepthTest() {
 inline void disableDepthTest() {
     auto& target = internal::currentTarget();
     target.depthTestEnabled = false;
-    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, false);
+    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, false, target.customBlendId);
     if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(getBlendMode()));
 }

@@ -16,8 +16,8 @@
 //                                                    any backdrop alpha.
 //   Multiply (src=DST_COLOR, dst=ONE_MINUS_SRC_ALPHA) = α-correct over an opaque
 //                                                    backdrop.
-// Only Screen/Multiply pipelines use this; everything else keeps sgl's straight
-// shader, so Alpha/Add/text/images/FBO compositing are byte-for-byte unchanged.
+// Screen/Multiply and Custom with premultiplySource use this. Other pipelines
+// keep sgl's straight shader.
 // =============================================================================
 
 @vs vs
@@ -32,8 +32,8 @@ out vec4 uv;
 out vec4 color;
 void main() {
     gl_Position = mvp * position;
-    // NOTE: no gl_PointSize write — this variant is only bound for Screen/Multiply
-    // filled primitives, and writing a non-constant PointSize fails shdc/SPIRV-Cross
+    // NOTE: no gl_PointSize write — this variant is bound for filled primitives,
+    // and writing a non-constant PointSize fails shdc/SPIRV-Cross
     // validation.
     uv = tm * vec4(texcoord0, 0.0, 1.0);
     color = color0;

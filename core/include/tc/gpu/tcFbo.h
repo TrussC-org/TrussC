@@ -884,7 +884,7 @@ private:
         target_.viewport = {0, 0, float(target_.width), float(target_.height), true};
         target_.sglLayerNext = 0;
         target_.openShaderScopes = 0;
-        target_.selectedPipeline = internal::fillSelection(target_.currentBlendMode, target_.depthTestEnabled);
+        target_.selectedPipeline = internal::fillSelection(target_.currentBlendMode, target_.depthTestEnabled, target_.customBlendId);
         target_.owner = this;
         target_.finalize = [](void* owner) { static_cast<Fbo*>(owner)->finishActivation_(); };
         // A preparation entry parks the outgoing parent while version-copy

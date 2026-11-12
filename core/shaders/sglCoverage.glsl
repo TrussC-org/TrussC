@@ -45,3 +45,18 @@ void main() {
 @end
 
 @program coverage vs fs
+
+// Custom's opt-in conversion uses coverage as part of the source alpha.
+@fs fs_premult
+layout(binding=0) uniform texture2D tex;
+layout(binding=0) uniform sampler smp;
+in vec4 uv;
+in vec4 color;
+out vec4 frag_color;
+void main() {
+    float alpha = color.a * texture(sampler2D(tex, smp), uv.xy).r;
+    frag_color = vec4(color.rgb * alpha, alpha);
+}
+@end
+
+@program coverage_premult vs fs_premult
