@@ -3388,7 +3388,7 @@ void FullscreenShader::draw()  // Draws a fullscreen quad with this shader.
 void FullscreenShader::setParams(const T & params)  // Sets the uniform parameter block for fullscreen drawing.
 ```
 
-### GlyphBatch — Retains transformed glyph quads for repeated drawing in add order, batching consecutive glyphs on the same atlas page.
+### GlyphBatch — Stores glyphs for repeated drawing; use it instead of drawString when text or per-glyph placement can be reused.
 
 ```cpp
 void GlyphBatch::add(uint32_t codepoint) [+5]  // Appends a glyph or UTF-8 string, using batch settings for omitted arguments.
