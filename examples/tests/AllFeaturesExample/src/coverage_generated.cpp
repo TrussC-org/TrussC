@@ -1090,6 +1090,7 @@ struct Cover_BlendDesc : af::Scope<BlendDesc> {
         (void)af::val<BlendDesc>().addKeepAlpha();
         (void)af::val<BlendDesc>().alpha;
         (void)af::val<BlendDesc>().premultipliedAdd();
+        (void)af::val<BlendDesc>().premultiplySource;
         (void)af::val<BlendDesc>().rgb;
         (void)af::val<BlendDesc>().screenKeepAlpha();
     }

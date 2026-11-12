@@ -29,7 +29,7 @@ std::unordered_map<uint32_t, uint32_t>& pipelineOwnerCtx();
 
 // Premultiplied-alpha sgl shader handle (defined in tcGlobal.cpp, built from
 // core/shaders/sglPremult.glsl). Screen/Multiply pipelines bind it so their blend
-// equations respect source alpha; every other role keeps sgl's straight shader.
+// equations respect source alpha. Custom also binds it with premultiplySource.
 // Returns {0} before sokol is up — sgl then falls back to its built-in shader.
 sg_shader sglPremultShader();
 
@@ -37,6 +37,7 @@ sg_shader sglPremultShader();
 // core/shaders/sglCoverage.glsl): samples a single-channel texture and uses R as
 // alpha. Bound by pipeDescCoverage2D() for the R8 TrueType glyph atlas.
 sg_shader sglCoverageShader();
+sg_shader sglCoveragePremultShader();
 
 // The custom sgl shaders read pos/uv/float color at offsets 0/12/20. Retain
 // the full 40-byte sgl vertex stride, including the unused point-size slot.
@@ -77,11 +78,13 @@ inline bool validBlendDesc(const BlendDesc& desc) {
 // No registry, allocation or canonical recipe lookup is needed to intern it.
 constexpr uint32_t blendDescId(const BlendDesc& d) {
     return uint32_t(d.rgb.src) | (uint32_t(d.rgb.dst) << 4) | (uint32_t(d.rgb.op) << 8) |
-        (uint32_t(d.alpha.src) << 11) | (uint32_t(d.alpha.dst) << 15) | (uint32_t(d.alpha.op) << 19);
+        (uint32_t(d.alpha.src) << 11) | (uint32_t(d.alpha.dst) << 15) | (uint32_t(d.alpha.op) << 19) |
+        (uint32_t(d.premultiplySource) << 22);
 }
 constexpr BlendDesc blendDescFromId(uint32_t id) {
     return {{BlendFactor(id & 15), BlendFactor((id >> 4) & 15), BlendOp((id >> 8) & 7)},
-        {BlendFactor((id >> 11) & 15), BlendFactor((id >> 15) & 15), BlendOp((id >> 19) & 7)}};
+        {BlendFactor((id >> 11) & 15), BlendFactor((id >> 15) & 15), BlendOp((id >> 19) & 7)},
+        bool((id >> 22) & 1)};
 }
 inline sg_blend_factor blendFactor(BlendFactor factor) {
     switch (factor) {
@@ -161,6 +164,10 @@ inline sg_pipeline_desc pipeDesc2D(BlendMode mode, bool depthTest = false, const
             break;
         case BlendMode::Custom:
             b.enabled = true;
+            if (custom.premultiplySource) {
+                d.shader = sglPremultShader();
+                d.layout = sglColorVertexLayout();
+            }
             b.src_factor_rgb = blendFactor(custom.rgb.src);
             b.dst_factor_rgb = blendFactor(custom.rgb.dst);
             b.op_rgb = blendOp(custom.rgb.op);
@@ -210,11 +217,11 @@ inline sg_pipeline_desc pipeDescPremult(bool depthTest = false) {
     return d;
 }
 
-// Single-channel coverage texture (the R8 TrueType glyph atlas): the Alpha blend
-// of pipeDesc2D with sglCoverageShader(), which turns the R channel into alpha.
+// R8 glyph coverage supplies alpha, then optionally premultiplies source RGB.
 inline sg_pipeline_desc pipeDescCoverage2D(bool depthTest = false, BlendMode mode = BlendMode::Alpha, const BlendDesc& custom = {}) {
     sg_pipeline_desc d = pipeDesc2D(mode, depthTest, custom);
-    d.shader = sglCoverageShader();
+    d.shader = mode == BlendMode::Custom && custom.premultiplySource ?
+        sglCoveragePremultShader() : sglCoverageShader();
     d.layout = sglColorVertexLayout();
     return d;
 }

@@ -173,10 +173,11 @@ struct BlendDesc {
     };
     Component rgb = {BlendFactor::SrcAlpha, BlendFactor::OneMinusSrcAlpha};
     Component alpha = {BlendFactor::One, BlendFactor::OneMinusSrcAlpha};
+    bool premultiplySource = false;
     bool operator==(const BlendDesc&) const = default;
 
     // ONE/ONE is intended for premultiplied sources such as Fbo textures.
-    // Straight-alpha text also adds RGB in transparent parts of the glyph quad.
+    // Set premultiplySource for straight-alpha text, shapes and images.
     static constexpr BlendDesc premultipliedAdd() {
         return {{BlendFactor::One, BlendFactor::One}, {BlendFactor::One, BlendFactor::One}};
     }

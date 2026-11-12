@@ -21,7 +21,15 @@ When a `trussc_api_details.txt` reference file is available, look up an entry's 
 
 Custom blends are public: store a `BlendDesc` with `setCustomBlendDesc(desc)` and
 select `BlendMode::Custom`. Use this instead of internal pipeline recipes.
-Factors apply literally to shader output; no automatic premultiplication occurs.
+Custom runs literal equations in the GPU fixed blend unit, with one factor per side.
+Straight-alpha glyph quads can have RGB in transparent pixels, so One/One adds
+light there too. Use addKeepAlpha with conversion off for straight-alpha glow.
+For screenKeepAlpha or premultipliedAdd, set desc.premultiplySource = true for
+straight-alpha text (Font/GlyphBatch), shapes and images; leave it false for
+Fbos and other premultiplied sources to avoid darkening from double premultiplication.
+All presets leave the flag false. Conversion is opt-in because automatic conversion
+would apply SrcAlpha twice and change equations that use color values as data.
+Nodes reset Style before draw(); select both descriptor and mode inside draw().
 
 ## Docs search (MCP, beta)
 If the `trussc_search` tool is available (the TrussC docs MCP server at `https://api.trussc.org/mcp`), use it whenever you need TrussC knowledge: which API to use, how something behaves, examples, addons.
@@ -2780,7 +2788,7 @@ Mat4 getProjectionMatrix()  // Returns the current drawing target's camera proje
 Vec2 getSize()  // Returns the width and height of the active drawing target as a Vec2.
 Mat4 getViewMatrix()  // Returns the current drawing target's camera view matrix.
 int getWidth()  // Returns the current drawing target's width.
-void setCustomBlendDesc(const BlendDesc & desc)  // Stores the custom blend slot and immediately updates an active Custom mode.
+void setCustomBlendDesc(const BlendDesc & desc)  // Stores a blend equation and source-conversion flag; updates an active Custom mode immediately.
 ```
 
 ### Other
@@ -2956,12 +2964,12 @@ SaveResult AudioRecorder::stop()  // Stops recording and finalizes the audio fil
 ```cpp
 ```
 
-### BlendDesc — Describes literal RGB and alpha blend equations.
+### BlendDesc — Sets the GPU's RGB and alpha blend equations and optional source conversion.
 
 ```cpp
 BlendDesc BlendDesc::addKeepAlpha()  // Adds RGB with SrcAlpha/One and preserves destination alpha with Zero/One.
-BlendDesc BlendDesc::premultipliedAdd()  // Adds source and destination RGB and alpha with One/One.
-BlendDesc BlendDesc::screenKeepAlpha()  // Combines RGB with OneMinusDstColor/One and preserves destination alpha.
+BlendDesc BlendDesc::premultipliedAdd()  // Adds RGB and alpha with One/One; leaves source conversion off.
+BlendDesc BlendDesc::screenKeepAlpha()  // Screens RGB with OneMinusDstColor/One and preserves destination alpha.
 ```
 
 ### BuildInfo — Provides build configuration timestamps.

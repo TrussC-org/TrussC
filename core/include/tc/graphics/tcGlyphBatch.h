@@ -115,7 +115,8 @@ public:
             std::memcpy(params.mvp, mvp.m, sizeof(params.mvp));
             params.atlas[0] = 1.0f / atlas.getWidth();
             params.atlas[1] = 1.0f / atlas.getHeight();
-            params.atlas[2] = (blend == BlendMode::Screen || blend == BlendMode::Multiply) ? 1.0f : 0.0f;
+            params.atlas[2] = (blend == BlendMode::Screen || blend == BlendMode::Multiply ||
+                (blend == BlendMode::Custom && target->customBlendDesc.premultiplySource)) ? 1.0f : 0.0f;
             internal::DeferredShaderDraw command;
             const auto& clip = target->currentScissor;
             command.scissor = {clip.active ? clip.x : 0, clip.active ? clip.y : 0,

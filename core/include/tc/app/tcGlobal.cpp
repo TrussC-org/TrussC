@@ -391,6 +391,15 @@ sg_shader sglCoverageShader() {
     return shd;
 }
 
+// R8 coverage needs its own fragment entry: the RGBA premult shader samples A.
+sg_shader sglCoveragePremultShader() {
+    static sg_shader shd = {};
+    if (shd.id == SG_INVALID_ID && sg_isvalid()) {
+        shd = sg_make_shader(tc_sglcov_coverage_premult_shader_desc(sg_query_backend()));
+    }
+    return shd;
+}
+
 // Host-owned, shared across hot reload guests, like the sgl coverage program.
 sg_shader glyphBatchShader() {
     static sg_shader shader = {};
@@ -3061,7 +3070,8 @@ PipelineSelection RenderTarget::pipeline(const PipelineKey& request) {
     result.generation = bundle.rawCache;
     const bool customImmediate = request.role == PipelineRole::Coverage ||
         ((request.role == PipelineRole::Fill || request.role == PipelineRole::Geometry3D) &&
-         (request.selection.blend == BlendMode::Multiply || request.selection.blend == BlendMode::Screen));
+         (request.selection.blend == BlendMode::Multiply || request.selection.blend == BlendMode::Screen ||
+          (request.selection.blend == BlendMode::Custom && blendDescFromId(request.selection.customBlendId).premultiplySource)));
     const bool needsProgram = request.family == PipelineFamily::Raw ||
         (customImmediate && sg_query_backend() != SG_BACKEND_DUMMY);
     const bool blendable = request.selection.blend != BlendMode::Custom || sg_query_pixelformat(colorFormat).blend;

@@ -25,11 +25,19 @@ BlendDesc maximumDesc() {
     desc.alpha = {BlendFactor::Zero, BlendFactor::One};
     return desc;
 }
+constexpr BlendDesc premultiply(BlendDesc desc) { desc.premultiplySource = true; return desc; }
 const BlendDesc descriptors[] = {BlendDesc::premultipliedAdd(), BlendDesc::addKeepAlpha(),
-    BlendDesc::screenKeepAlpha(), maximumDesc()};
-const char* names[] = {"premultipliedAdd", "addKeepAlpha", "screenKeepAlpha", "Maximum"};
-// Independent numeric oracle: literal straight shader output, no conversion.
+    BlendDesc::screenKeepAlpha(), maximumDesc(), premultiply(BlendDesc::premultipliedAdd()),
+    premultiply(BlendDesc::screenKeepAlpha())};
+const char* names[] = {"premultipliedAdd", "addKeepAlpha", "screenKeepAlpha", "Maximum",
+    "premultipliedAdd + premultiplySource", "screenKeepAlpha + premultiplySource"};
+constexpr int width = 48 * std::size(descriptors);
+// Independent numeric oracle: convert source RGB only when explicitly requested.
 Color expected(int preset, Color source, Color destination) {
+    if (descriptors[preset].premultiplySource) {
+        source.r*=source.a; source.g*=source.a; source.b*=source.a;
+        preset = preset==4 ? 0 : 2;
+    }
     if (preset == 0) return Color(source.r+destination.r, source.g+destination.g,
         source.b+destination.b, source.a+destination.a);
     if (preset == 1) return Color(source.r*source.a+destination.r, source.g*source.a+destination.g,
@@ -45,7 +53,9 @@ void expect(Color actual, Color wanted, const char* label) {
     check(label,approxEq(actual,wanted));
 }
 void valueChecks() {
-    static_assert(sizeof(BlendDesc) == 6);
+    static_assert(sizeof(BlendDesc) == 7);
+    check("presets leave premultiplySource off", !descriptors[0].premultiplySource &&
+        !descriptors[1].premultiplySource && !descriptors[2].premultiplySource);
     check("default slot is straight Alpha", getCustomBlendDesc() == BlendDesc{});
     setCustomBlendDesc(descriptors[0]);
     check("storing slot does not activate Custom",getBlendMode()==BlendMode::Alpha && getCustomBlendDesc()==descriptors[0]);
@@ -95,12 +105,24 @@ void valueChecks() {
     for(int as=0;as<10;++as) for(int ad=0;ad<10;++ad) for(int ao=0;ao<5;++ao) {
         BlendDesc d{{BlendFactor(rs),BlendFactor(rd),BlendOp(ro)},{BlendFactor(as),BlendFactor(ad),BlendOp(ao)}};
         if(!internal::validBlendDesc(d)) continue;
-        const auto id=internal::blendDescId(d);
-        unique &= ids.insert(id).second;
-        roundTrips &= internal::blendDescFromId(id)==d;
+        for (bool convert : {false,true}) {
+            d.premultiplySource=convert;
+            const auto id=internal::blendDescId(d);
+            unique &= ids.insert(id).second;
+            roundTrips &= internal::blendDescFromId(id)==d;
+        }
     }
-    check("all portable descriptor identities are unique and round trip",unique && roundTrips && ids.size()==33220);
+    check("all portable descriptor identities include premultiplySource and round trip",unique && roundTrips && ids.size()==66440);
     check("all factor and operation mappings",mappings);
+    setCustomBlendDesc(descriptors[5]);
+    const auto convertedSelection=internal::currentTarget().selectedPipeline;
+    pushStyle(); resetStyle(); popStyle();
+    check("Style restores premultiplySource and its selection identity",getCustomBlendDesc()==descriptors[5] &&
+        internal::currentTarget().selectedPipeline==convertedSelection);
+    setCustomBlendDesc(descriptors[2]);
+    check("flag alone changes selection identity",internal::currentTarget().selectedPipeline!=convertedSelection &&
+        internal::PipelineSelectionId::immediate(convertedSelection)!=
+            internal::PipelineSelectionId::immediate(internal::currentTarget().selectedPipeline));
     check("Custom tests depth without writing",!internal::pipeDesc2D(BlendMode::Custom,true,{}).depth.write_enabled &&
         internal::pipeDesc2D(BlendMode::Custom,true,{}).depth.compare==SG_COMPAREFUNC_LESS_EQUAL);
     resetStyle();
@@ -122,7 +144,7 @@ class CustomBlendApp : public App {
     const Color sourceColor_{0.2f,0.1f,0.3f,0.25f};
     const Color destination_{0.1f,0.3f,0.2f,0.4f};
     void drawCases() {
-        for(int i=0;i<4;++i) {
+        for(int i=0;i<int(std::size(descriptors));++i) {
             setCustomBlendDesc(descriptors[i]); setBlendMode(BlendMode::Custom);
             setColor(sourceColor_); drawRect(float(i*48),0,24,24);
             setColor(1); texture_.draw(float(i*48),24,24,24);
@@ -130,23 +152,24 @@ class CustomBlendApp : public App {
             // One text case per preset, including fractional/zero glyph coverage.
             setColor(sourceColor_); font_.drawString("A",float(i*48),80);
             drawBitmapString("A",float(i*48),104);
-            setColor(sourceColor_); drawRect(float(i*48),128,24,24);
+            setColor(sourceColor_.r,sourceColor_.g,sourceColor_.b,0); drawRect(float(i*48),128,24,24);
             glyphs_.draw(Mat4::translate(float(i*48),152,0));
         }
     }
     void checkCases(const Pixels& pixels, float scale, const char* target) {
         std::printf("TARGET %s\n",target);
-        for(int i=0;i<4;++i) {
+        for(int i=0;i<int(std::size(descriptors));++i) {
             for(int row : {0,1,2,5}) {
                 const int actualY=row==5 ? 136 : row*24+8;
                 auto source=sourceColor_;
                 if(row==2) { source.r*=source.a; source.g*=source.a; source.b*=source.a; }
+                if(row==5) source.a=0;
                 expect(pixels.getColor(int((i*48+8)*scale),int(actualY*scale)),expected(i,source,destination_),names[i]);
             }
             // The overwrite reference records shader coverage in alpha and
             // marks the entire emitted quad with white RGB, including alpha=0.
             for(int text=0;text<3;++text) {
-                bool matches=true; int ink=0;
+                bool matches=true; int ink=0, transparent=0;
                 for(int y=0;y<24;++y) for(int x=0;x<24;++x) {
                     const auto mask=textMask_.getColor(x,y+text*24);
                     auto source=sourceColor_; source.a*=mask.a;
@@ -154,11 +177,21 @@ class CustomBlendApp : public App {
                     const auto c=pixels.getColor(int((i*48+x)*scale),int(((text==2 ? 152 : 80+text*24)+y)*scale));
                     matches &= approxEq(c,wanted);
                     ink+=mask.a>0;
+                    if(mask.r>0.5f && mask.a==0) {
+                        ++transparent;
+                        if(descriptors[i].premultiplySource) matches &= approxEq(c,destination_);
+                    }
                 }
                 check(text==0 ? "Font text follows literal custom blend and coverage" :
                     text==1 ? "bitmap text follows literal custom blend and coverage" :
-                    "GlyphBatch follows draw-time custom blend and straight coverage", matches && ink>0);
+                    "GlyphBatch follows draw-time custom blend and coverage", matches && ink>0 && transparent>0);
             }
+        }
+        for (auto pair : {std::pair{0,4}, std::pair{2,5}}) {
+            const auto once=pixels.getColor(int((pair.first*48+8)*scale),int(56*scale));
+            const auto twice=pixels.getColor(int((pair.second*48+8)*scale),int(56*scale));
+            check("Fbo premultiplySource on is darker from double premultiplication",
+                twice.r<once.r && twice.g<once.g && twice.b<once.b);
         }
     }
     void gpuChecks() {
@@ -174,22 +207,22 @@ class CustomBlendApp : public App {
         source_.begin(0,0,0,0); setBlendMode(BlendMode::Alpha); setColor(sourceColor_);
         drawRect(0,0,24,24); source_.end();
         for(int samples : {1,4}) {
-            Fbo fbo; fbo.allocate(192,184,samples);
+            Fbo fbo; fbo.allocate(width,184,samples);
             resetStyle(); setCustomBlendDesc(descriptors[1]); setBlendMode(BlendMode::Custom);
             fbo.begin(destination_.r,destination_.g,destination_.b,destination_.a);
             setupScreenOrtho(); disableDepthTest();
             check("Fbo entry inherits mode and slot",getBlendMode()==BlendMode::Custom && getCustomBlendDesc()==descriptors[1]);
             drawCases();
             fbo.end();
-            check("Fbo return propagates mode and slot",getBlendMode()==BlendMode::Custom && getCustomBlendDesc()==descriptors[3]);
-            Pixels pixels; pixels.allocate(192,184,4);
+            check("Fbo return propagates mode and slot",getBlendMode()==BlendMode::Custom && getCustomBlendDesc()==descriptors[5]);
+            Pixels pixels; pixels.allocate(width,184,4);
             check("Fbo readback",fbo.readPixels(pixels.getData()));
             checkCases(pixels,1,samples==1 ? "Fbo" : "MSAA Fbo");
         }
         resetStyle(); setupScreenOrtho(); disableDepthTest();
         clear(destination_); drawCases();
         Pixels screen; check("swapchain readback",grabScreen(screen));
-        if(screen.isAllocated()) checkCases(screen,float(screen.getWidth())/192,"swapchain");
+        if(screen.isAllocated()) checkCases(screen,float(screen.getWidth())/width,"swapchain");
         resetStyle();
         setBlendMode(BlendMode::Custom); setCustomBlendDesc(descriptors[0]);
         const auto saved=internal::currentTarget().selectedPipeline;
@@ -208,7 +241,7 @@ class CustomBlendApp : public App {
         if(custom) setBlendMode(BlendMode::Custom);
         const auto started=std::chrono::steady_clock::now();
         for(int i=0;i<draws;++i) {
-            if(custom) setCustomBlendDesc(descriptors[i%2]);
+            if(custom) setCustomBlendDesc(descriptors[i%2 ? 5 : 2]);
             else setBlendMode(i%2 ? BlendMode::Alpha : BlendMode::Add);
             setColor(0.01f,0.02f,0.03f,0.05f);
             drawRect(float(i%192),float((i/192)%160),1,1);
@@ -216,7 +249,7 @@ class CustomBlendApp : public App {
         const double elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
         // Exercise Coverage/Fill variants and thousands of reset/reselect nodes.
         if(custom) for(int i=0;i<2000;++i) {
-            resetStyle(); setCustomBlendDesc(descriptors[i%2]); setBlendMode(BlendMode::Custom);
+            resetStyle(); setCustomBlendDesc(descriptors[i%2 ? 5 : 2]); setBlendMode(BlendMode::Custom);
             font_.drawString("A",0,0);
             if(i<32) glyphs_.draw();
         }
@@ -260,6 +293,6 @@ public:
 }
 TC_CORE_TEST_MAIN(int argc,char** argv) {
     if(argc==1) { runHeadlessApp<ValueApp>(); return failures ? 1 : 0; }
-    WindowSettings settings; settings.setSize(192,184); settings.setHighDpi(false); settings.sampleCount=argc>2 && std::strcmp(argv[2],"--msaa4")==0 ? 4 : 1;
+    WindowSettings settings; settings.setSize(width,184); settings.setHighDpi(false); settings.sampleCount=argc>2 && std::strcmp(argv[2],"--msaa4")==0 ? 4 : 1;
     return tcCoreTest::runDisplayTest<CustomBlendApp>(settings,failures,[] { check("suite completed",completed); });
 }

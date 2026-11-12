@@ -25,6 +25,7 @@ using namespace tc;
 namespace trussc::internal {
 sg_shader sglPremultShader() { return {}; }
 sg_shader sglCoverageShader() { return {}; }
+sg_shader sglCoveragePremultShader() { return {}; }
 }
 // One-shot failure at the real deferred replay allocation, as in the review.
 static bool failAllocation = false;
