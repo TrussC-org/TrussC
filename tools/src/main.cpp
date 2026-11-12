@@ -42,6 +42,19 @@ namespace fs = std::filesystem;
 // Helpers
 // =============================================================================
 
+#ifdef _WIN32
+static fs::path runningExecutablePath() {
+    // Use the module path, including when invoked via PATH or the tools/ copy.
+    vector<wchar_t> buffer(32768);
+    DWORD length = GetModuleFileNameW(nullptr, buffer.data(),
+                                     static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size()) return {};
+    error_code ec;
+    // Resolve the tools/trusscli.exe symlink to the binary that is locked.
+    return fs::canonical(fs::path(wstring(buffer.data(), length)), ec);
+}
+#endif
+
 static void scanAddons(const string& tcRoot, vector<string>& addons) {
     addons.clear();
     if (tcRoot.empty()) return;
@@ -593,14 +606,14 @@ static CheckResult checkVersionMismatch(const string& tcRoot) {
     if (a.ok && b.ok && (a.major != b.major || a.minor != b.minor)) {
         r.status = CheckStatus::Error;
         r.detail = "trusscli " + built + " vs TrussC " + current;
-        r.hint = "Rebuild trusscli (cd tools && ./build_<platform>.{sh,command,bat})";
+        r.hint = "Run 'trusscli upgrade' to rebuild trusscli";
         return r;
     }
 
     // Patch / commit drift only → soft warning
     r.status = CheckStatus::Warning;
     r.detail = "trusscli " + built + " vs TrussC " + current;
-    r.hint = "Rebuild trusscli to sync with the current TrussC";
+    r.hint = "Run 'trusscli upgrade' to sync with the current TrussC";
     return r;
 }
 
@@ -622,7 +635,7 @@ static void printVersion() {
     cout << "TrussC   " << current << " at " << tcRoot << "\n";
     if (current != built) {
         cout << "  note: TrussC has changed since trusscli was built — "
-             << "rebuild trusscli to sync\n";
+             << "run 'trusscli upgrade' to sync\n";
     }
 }
 
@@ -1393,8 +1406,8 @@ static void printUpgradeHelp() {
          << "the git repository and rebuilding trusscli. The /usr/local/bin symlink\n"
          << "(if present) automatically points to the new binary.\n"
          << "\n"
-         << "On Windows, the rebuild step is skipped — you'll be asked to run the\n"
-         << "build script manually.\n"
+         << "On Windows, tools/build_win.bat sets up Visual Studio and rebuilds\n"
+         << "trusscli. The previous executable is removed on the next start.\n"
          << "\n"
          << "Options:\n"
          << "      --tc-root <path>       Path to TrussC root directory\n"
@@ -1442,9 +1455,55 @@ static int cmdUpgrade(const vector<string>& args) {
 
     // Step 2: rebuild trusscli
 #ifdef _WIN32
-    cout << "\nGit pull succeeded. Please rebuild trusscli manually:\n"
-         << "  cd " << tcRoot << "\\tools\n"
-         << "  build_win.bat\n";
+    const auto manualInstructions = [&] {
+        cerr << "Please rebuild trusscli manually:\n"
+             << "  cd " << tcRoot << "\\tools\n"
+             << "  build_win.bat\n";
+    };
+    const fs::path toolsDir = fs::absolute(fs::path(tcRoot) / "tools");
+    const fs::path previousDir = fs::current_path();
+    const fs::path exePath = runningExecutablePath();
+    fs::path oldPath = exePath;
+    oldPath += ".old";
+    error_code ec;
+    if (!exePath.empty()) fs::rename(exePath, oldPath, ec);
+    if (exePath.empty() || ec) {
+        cerr << "Error: could not rename the running trusscli executable.\n";
+        manualInstructions();
+        return 1;
+    }
+
+    cout << "\nRebuilding trusscli ...\n";
+    fs::current_path(toolsDir.parent_path(), ec);
+    rc = -1;
+    if (!ec) {
+        // The batch script handles VS setup. Avoid launching a second GUI.
+        _putenv_s("TC_NO_LAUNCH", "1");
+        rc = runInherited({"cmd", "/c", "tools\\build_win.bat"});
+        fs::current_path(previousDir, ec);
+    }
+    if (rc == 0) {
+        // build_win.bat updates tools/bin and its tools/ link or copy. Also
+        // refresh the running location if it was a copy elsewhere.
+        const fs::path rebuilt = toolsDir / "bin" / "trusscli.exe";
+        if (!fs::equivalent(rebuilt, exePath, ec)) {
+            fs::copy_file(rebuilt, exePath, fs::copy_options::overwrite_existing, ec);
+            if (ec) rc = -1;
+        }
+    }
+    if (rc != 0) {
+        // A failed build may already have produced a replacement executable.
+        fs::remove(exePath, ec);
+        ec.clear();
+        fs::rename(oldPath, exePath, ec);
+        cerr << "Error: trusscli rebuild failed (exit code " << rc << ").\n";
+        if (ec) cerr << "Could not restore trusscli; previous executable: "
+                     << oldPath << " (" << ec.message() << ").\n";
+        manualInstructions();
+        return 1;
+    }
+    cout << "\ntrusscli upgraded successfully.\n"
+         << "The new version will be used on the next invocation.\n";
     return 0;
 #else
     cout << "\nRebuilding trusscli ...\n";
@@ -5223,6 +5282,22 @@ static void printTopHelp() {
 // =============================================================================
 
 int main(int argc, char* argv[]) try {
+#ifdef _WIN32
+    // Best effort: an earlier process may still have the old image locked.
+    const fs::path exePath = runningExecutablePath();
+    if (!exePath.empty()) {
+        fs::path oldPath = exePath;
+        oldPath += ".old";
+        error_code ec;
+        fs::remove(oldPath, ec);
+        // A tools/ copy can become a symlink to tools/bin after upgrading.
+        if (exePath.filename() == "trusscli.exe" &&
+            exePath.parent_path().filename() == "bin" &&
+            exePath.parent_path().parent_path().filename() == "tools") {
+            fs::remove(exePath.parent_path().parent_path() / "trusscli.exe.old", ec);
+        }
+    }
+#endif
     vector<string> args(argv + 1, argv + argc);
 
     // No args → launch the GUI (TrussC Project Generator)

@@ -112,8 +112,14 @@ so it can fall out of step with the framework.
 trusscli upgrade
 ```
 
-If you pull manually instead, rebuild `trusscli` afterwards
-(`tools/build_mac.command` / `build_win.bat` / `build_linux.sh`). `trusscli`
+On Windows, `upgrade` runs `tools/build_win.bat`, which sets up Visual Studio
+and rebuilds both `tools/bin/trusscli.exe` (the PATH location) and the
+`tools/trusscli.exe` link or copy. The running executable is renamed to
+`trusscli.exe.old` before building; the next start removes it. If the build
+fails, the previous executable is restored and manual rebuild instructions
+are printed.
+
+If you pull manually instead, run `trusscli upgrade` to rebuild afterwards. `trusscli`
 detects this drift and prints a reminder on startup when the source has changed
 since the binary was built:
 
