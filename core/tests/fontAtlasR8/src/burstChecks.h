@@ -71,15 +71,31 @@ public:
                completed, font_.getAtlasCount(), after.inited - before.inited, mipRebuilds,
                maxCreations, images.size(), liveBytes, seconds);
         fflush(stdout);
-        // GlyphInfo includes the oversampling filter margin. The first glyph's
-        // top inset gives the packer's padding; rows also leave that inset.
+        // Shelf strides include the trailing padding and round the next
+        // raster origin up to 16. The final row/column need no rounded tail.
         const auto* glyph = manager->getOrLoadGlyph(kFirstCodepoint);
         const auto* page = font_.getAtlas(0);
         const int padding = int(lround(glyph->getV0() * page->getHeight()));
-        const int cellWidth = int(lround(glyph->getWidth() * manager->getOversample())) + padding;
-        const int cellHeight = int(lround(glyph->getHeight() * manager->getOversample())) + padding;
-        const int capacity = ((page->getWidth() - padding) / cellWidth) *
-                             (page->getHeight() / (cellHeight + padding));
+        const int glyphWidth = int(lround((glyph->getU1() - glyph->getU0()) * page->getWidth()));
+        const int glyphHeight = int(lround((glyph->getV1() - glyph->getV0()) * page->getHeight()));
+        const int cellWidth = (glyphWidth + 2 + 15) / 16 * 16;
+        const int cellHeight = (glyphHeight + 4 + 15) / 16 * 16;
+        const int capacity = (1 + (page->getWidth() - padding - glyphWidth - 2) / cellWidth) *
+                             (1 + (page->getHeight() - padding - glyphHeight - 2) / cellHeight);
+        const int unalignedCapacity = ((page->getWidth() - 2) / (glyphWidth + 2)) *
+            (1 + (page->getHeight() - 2 - glyphHeight - 2) / (glyphHeight + 4));
+        bool aligned = true;
+        for (int i = 0; i < completed; ++i) {
+            const auto* g = manager->getOrLoadGlyph(kFirstCodepoint + stride * i);
+            const auto& a = manager->getAtlas(g->getAtlasIndex());
+            aligned &= int(lround(g->getU0() * a.getWidth())) % 16 == 0 &&
+                       int(lround(g->getV0() * a.getHeight())) % 16 == 0;
+        }
+        check("burst: every recorded glyph origin is 16-aligned", aligned);
+        printf("FONT_ALIGNMENT capacity=%d unaligned_capacity=%d unused_area=%.4f%% unaligned_unused_area=%.4f%%\n",
+               capacity, unalignedCapacity,
+               100.0 * (1 - double(capacity) * glyphWidth * glyphHeight / (page->getWidth() * page->getHeight())),
+               100.0 * (1 - double(unalignedCapacity) * glyphWidth * glyphHeight / (page->getWidth() * page->getHeight())));
         const size_t sanePages = (completed + capacity - 1) / capacity + 1;
         printf("FONT_PACKING variant=%s cell=%dx%d page=%dx%d capacity=%d max_pages=%zu pages=%zu glyphs_per_page=",
                g_burstPerGlyph ? "per-glyph" : "original", cellWidth, cellHeight,
@@ -106,6 +122,8 @@ public:
         }
         check("burst: every glyph survives the one-shot pass", strokes == completed, to_string(strokes));
         check("burst: every glyph counter stays transparent", counters == completed, to_string(counters));
+        const size_t burstBytes = liveBytes;
+        const size_t pageImageBytes = images.empty() ? 0 : images.begin()->second;
         // A second pass adds new coverage to the same fixed-size pages. Each
         // dirty page still publishes once, and the first pass remains intact.
         creations.clear();
@@ -135,7 +153,7 @@ public:
         printf("FONT_BURST_MULTIPASS peak_live_images=%zu peak_live_bytes=%zu\n", images.size(), liveBytes);
         check("burst: snapshots stay bounded across three consuming flushes",
               images.size() == sg_query_stats().total.images.alive - before.alive &&
-              images.size() <= 2 * font_.getAtlasCount() && liveBytes < 128u * 1024 * 1024);
+              images.size() <= 2 * font_.getAtlasCount() && liveBytes <= burstBytes + 2 * pageImageBytes);
         burstCompleted = true;
         exitApp();
     }

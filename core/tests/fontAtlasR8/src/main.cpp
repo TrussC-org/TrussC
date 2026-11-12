@@ -13,12 +13,12 @@
 //
 // `fontAtlasR8 --gpu-check` (daily CI under Xvfb) opens a window
 // and, in one frame, draws 150 glyphs that were never drawn before into an
-// Fbo, one drawString() call each, filling multiple fixed-size pages inside
+// Fbo, one drawString() call each, using pages whose sizes stay fixed inside
 // the frame. It checks that the page texture is SG_PIXELFORMAT_R8 and that
 // every glyph is in the Fbo with the color set by setColor() at full
 // coverage (straight alpha over a transparent Fbo: rgb = color, a = 1).
-// Then it draws minified text, which gives the R8 page a mip chain, and
-// checks that the glyphs are in the Fbo.
+// Then it checks real-metric page sizing, aligned placement and identical
+// minified pixels for identical glyph rasters at different atlas offsets.
 //
 // The font is built here with 600 distinct glyph indices and identical square
 // outlines, so the test runs the same everywhere.
@@ -218,7 +218,7 @@ static string utf8(uint32_t cp) {
 static void checkCpuPages() {
     const Bytes font = makeSquareFont();
     internal::FontAtlasManager mgr;
-    check("the built small font loads", mgr.setupFromMemory(font.data(), font.size(), 32));
+    check("the built small font loads", mgr.setupFromMemory(font.data(), font.size(), 16));
 
     const size_t initialBytes = mgr.getMemoryUsage();
     check("a new font has one 256x256 page of 65536 bytes",
@@ -255,6 +255,7 @@ static void checkCpuPages() {
     // Every glyph is still where its UVs point after the growth steps, and
     // the space between glyphs is empty.
     int missing = 0;
+    bool aligned = true;
     vector<vector<uint8_t>> inside(mgr.getAtlasCount());
     for (size_t p = 0; p < mgr.getAtlasCount(); p++) {
         const auto& a = mgr.getAtlas(p);
@@ -280,6 +281,13 @@ static void checkCpuPages() {
         for (size_t t = 0; t < min(px.size(), inside[p].size()); t++)
             if (px[t] != 0 && !inside[p][t]) stray++;
     }
+    for (uint32_t i = 0; i < kGlyphs; ++i) {
+        const auto* g = mgr.getOrLoadGlyph(kFirstCodepoint + i);
+        const auto& a = mgr.getAtlas(g->getAtlasIndex());
+        aligned &= int(lround(g->getU0() * a.getWidth())) % 16 == 0 &&
+                   int(lround(g->getV0() * a.getHeight())) % 16 == 0;
+    }
+    check("every glyph raster/UV origin stays 16-aligned after CPU growth", aligned);
     check("texels outside the glyph rectangles hold no coverage", stray == 0,
           to_string(stray) + " texels");
 }
@@ -290,9 +298,76 @@ static const int kCell = 48;
 static const int kCols = 15;
 static const int kRows = 10;
 
+// The fixture uses ascent 800/descent 0 and a 1000x800 font box.
+// Font passes rounded logical-size * DPI to the manager; pass 256 here to
+// exercise 128px at DPI 2 independently of the Xvfb display's actual scale.
+static void checkPageSizing() {
+    const Bytes bytes = makeSquareFont(false, true);
+    internal::FontAtlasManager mgr;
+    mgr.setOversample(3);
+    check("gpu: 128px at DPI 2 loads through Font's physical-size input",
+          mgr.setupFromMemory(bytes.data(), bytes.size(), 256));
+    const int gpuLimit = min(sg_query_limits().max_image_size_2d, 8192);
+    int expected = 256;
+    // Raster scale = 256/800 * 3; aligned cells include filter + padding.
+    while (expected * 2 <= gpuLimit &&
+           ((expected - 16) / 976) * ((expected - 16) / 784) < 32) expected *= 2;
+    printf("FONT_SIZING physical_size=256 oversample=3 gpu_max=%d expected=%d page=%dx%d\n",
+           sg_query_limits().max_image_size_2d, expected,
+           mgr.getAtlas(0).getWidth(), mgr.getAtlas(0).getHeight());
+    check("gpu: big font reserves 32 real cells up to the GPU ceiling",
+          mgr.getAtlas(0).getWidth() == expected,
+          "expected " + to_string(expected) + ", got " + to_string(mgr.getAtlas(0).getWidth()));
+    internal::FontAtlasManager plain;
+    check("gpu: small font at 1x loads", plain.setupFromMemory(bytes.data(), bytes.size(), 16));
+    check("gpu: small font uses a 256x256 page", plain.getAtlas(0).getWidth() == 256);
+}
+
+static void checkAlignedMove() {
+    Font font;
+    font.setOversampling(1);
+    check("aligned move: font loads", bool(font.load(g_fontPath, 37)));
+    auto mgr = internal::SharedFontCache::getInstance().get(
+        internal::FontCacheKey{g_fontPath, 37, 0, true, 1});
+    if (!mgr) { check("aligned move: manager available", false); return; }
+    const auto* first = mgr->getOrLoadGlyph(kFirstCodepoint);
+    // Fill past a shelf boundary so both x and y phases are exercised.
+    for (uint32_t i = 1; i <= 16; ++i) mgr->getOrLoadGlyph(kFirstCodepoint + i);
+    const auto* second = mgr->getOrLoadGlyph(kFirstCodepoint + 16);
+    const auto& page = mgr->getAtlas(0);
+    const int x0 = int(lround(first->getU0() * page.getWidth()));
+    const int x1 = int(lround(second->getU0() * page.getWidth()));
+    const int y0 = int(lround(first->getV0() * page.getHeight()));
+    const int y1 = int(lround(second->getV0() * page.getHeight()));
+    check("aligned move: identical rasters occupy different 16-aligned offsets",
+          y0 != y1 && x0 != x1 && x0 % 16 == 0 && x1 % 16 == 0 &&
+          y0 % 16 == 0 && y1 % 16 == 0);
+    Fbo target;
+    target.allocate(64, 64);
+    vector<unsigned char> pixels[2];
+    for (int i = 0; i < 2; ++i) {
+        target.begin(0, 0, 0, 0);
+        setColor(1);
+        pushMatrix();
+        scale(.25f); // Font chooses the trilinear mip sampler.
+        font.drawString(utf8(kFirstCodepoint + (i == 0 ? 0 : 16)), 48, 160);
+        popMatrix();
+        target.end();
+        pixels[i].resize(64 * 64 * 4);
+        check("aligned move: readback", target.readPixels(pixels[i].data()));
+    }
+    check("aligned move: production page has mipmaps",
+          sg_query_image_desc(mgr->getAtlas(0).getTexture()).num_mipmaps > 1);
+    bool hasInk = false;
+    for (size_t i = 3; i < pixels[0].size(); i += 4) hasInk |= pixels[0][i] != 0;
+    check("aligned move: 0.25x trilinear pixels are identical and contain ink",
+          hasInk && pixels[0] == pixels[1]);
+}
+
 class GpuCheckApp : public App {
 public:
     void setup() override {
+        checkPageSizing();
         check("gpu: the built font loads from a file", (bool)font_.load(g_fontPath, 32));
         fbo_.allocate(kCols * kCell, kRows * kCell);
     }
@@ -323,8 +398,8 @@ public:
         check("gpu: every atlas page texture is SG_PIXELFORMAT_R8", r8);
         check("gpu: getMemoryUsage() is the sum of width * height over the pages",
               font_.getMemoryUsage() == pageBytes);
-        check("gpu: recorded page dimensions stay fixed while the burst spills",
-              font_.getAtlasCount() > 1 && font_.getAtlas(0)->getWidth() == recordedWidth);
+        check("gpu: recorded page dimensions stay fixed during the burst",
+              font_.getAtlas(0)->getWidth() == recordedWidth);
 
         const int W = kCols * kCell, H = kRows * kCell;
         vector<unsigned char> px((size_t)W * H * 4);
@@ -369,6 +444,8 @@ public:
         int inked = 0;
         for (size_t t = 0; t < (size_t)W * H; t++) if (px[t * 4 + 3] > 0) inked++;
         check("gpu: the minified glyphs are in the Fbo", inked > 20, to_string(inked) + " texels");
+
+        checkAlignedMove();
 
         // Look at it on screen too (not checked).
         setColor(1.0f);

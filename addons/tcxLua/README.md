@@ -26,8 +26,8 @@ The generated surface contains 124 types, 47 enums, 149 named colors and 45
 constants. Hand-written registrations extend that surface; a registered type
 can still have omitted members or overloads.
 
-Of the 73 hand-written gaps recorded in the November 11 audit, this slice adds
-55 non-event entries: all 16 EasyCam controls, 10 AudioEngine methods, six
+The non-event bindings cover 55 of the 73 hand-written gaps recorded in the
+November 11 audit: all 16 EasyCam controls, 10 AudioEngine methods, six
 MicInput methods, six operations each on Image and Pixels, five SoundBuffer
 entries, Image/Fbo debug names, Shader.drawVertices and Mat4.tryInvert.
 Mat3.set and Mat4.set now preserve floating-point values.
@@ -48,13 +48,55 @@ Mat3.set and Mat4.set now preserve floating-point values.
 - `Shader:drawVertices(vertexCount, instanceCount)` defaults to one instance.
   Image/Pixels operations return no values, matching C++.
 
-The remaining 18 audited entries stay unbound: 11 need an Event listener
-lifetime decision (including Tween.complete and asynchronous resource loads),
-six are intentionally excluded (audioIn/audioOut, waitForAudioCallbacks,
-Texture mip views and Fbo.lifetimeToken), and Texture.drawFlippedY is on hold
-in #1422. Lua Event delivery is limited to the main thread; audio events are
-not exposed. This count describes this slice, without defining overall
-completion of the Lua API.
+The approved event-dependent entries are also bound: Image/SoundBuffer
+`loadAsync`, `isLoading`, and `onLoad`; AudioEngine `onDisconnect` and
+`audioDeviceChanged`; MicInput `onStart` and `onDisconnect`; each Tween's
+`complete`; and console input through `runtime():events().console` with
+`console.start()`, `console.stop()`, and `console.isEnabled()`.
+
+The intentionally excluded entries remain audioIn/audioOut,
+waitForAudioCallbacks, Texture mip views and Fbo.lifetimeToken.
+Texture.drawFlippedY remains on hold in #1422. This describes the approved
+surface without defining overall completion of the Lua API.
+
+### Event listeners
+
+```lua
+Loader = {}
+function Loader:start()
+    self.image = Image()
+    self.handle = self.image.onLoad:listen(function(result) self:onLoad(result) end)
+    self.image:loadAsync('photo.png')
+end
+function Loader:onLoad(result)
+    if result:ok() then print('loaded') end
+end
+function Loader:cleanup()
+    self.handle:disconnect()
+end
+
+loader = setmetatable({}, {__index = Loader})
+loader:start()
+-- When the owner is finished:
+loader:cleanup()
+```
+
+`event:listen(fn)` returns a handle. Call `handle:disconnect()` to stop
+immediately, including pending delivery and later callbacks in the same frame.
+Dropping the owner or handle does not disconnect. A closure keeps its captured
+objects alive until disconnect or script reload. Store the handle on the owner
+and disconnect it in the owner's own cleanup, as above.
+
+GC can run at any time and must not control behavior. Subscription cleanup is
+explicit and deterministic; do not rely on GC to call the owner's cleanup.
+All delivery runs on the main thread. Lua has no Deliver argument or
+audio-thread callback binding. Callback errors are logged and contained.
+Payloads can be retained; main-thread edits are written back before the next
+listener. `tcxLua::runFile` clears subscriptions before each load or reload,
+even on load failure. Hosts replacing scripts directly through sol2 call
+`tcxLua::clearEventListeners` first. App exit, hot reload unload, and Lua state
+close also disconnect subscriptions. Create the Lua state in App setup or its
+constructor so exit hooks follow that App.
 
 ### Sound lifetime
 
@@ -76,7 +118,8 @@ A `Sound` held only in a local variable stops when the GC collects it.
 Call Lua entry points through the two helpers. They do not throw: a Lua error
 (syntax or runtime) is logged with `logError("tcxLua")`, the helper returns
 `false`, and the app keeps running. In a hot-reload setup, fix the script and
-load it again to recover.
+load it again to recover. Create the state in App setup or its constructor so
+its frame and exit hooks follow that App.
 
 ```cpp
 auto lua = tcxLua().getLuaState();
@@ -186,8 +229,8 @@ historical context — these were on by default until 2026-05-27 (PR #97).
 - Generated bindings expand trailing default arguments, so `clear(0.08)` and
   `setColor(1.0, 0.0, 0.0)` work. Handwritten bindings expose only their registered
   overloads; new members and default arguments need separate updates.
-- Namespaced APIs and generic `Event<T>:listen` are not bound. Subscribe to
-  events such as console and device disconnects in the C++ host.
+- Namespaced APIs remain excluded. Bound events provide `event:listen(fn)`
+  with main-thread delivery and explicit `handle:disconnect()`.
 - `end()` methods are replaced to `end_fbo()`, `end_shader()`, `end_cam()` etc ([Issue#11](https://github.com/ffunatsu/tcxLua/issues/11)).
 
 ## Migrating from v0.7.7 / v0.8.0
@@ -205,8 +248,8 @@ See also the [C++ v0.8 migration guide](../../docs/MIGRATION_0_8.md).
 | `WindowSettings.clipboardSize`, `WindowSettings.setClipboardSize` (2) | Remove the limit settings; clipboard storage grows with its content. |
 | `WindowSettings.reserveUniformBuffer`, `WindowSettings.uniformBufferReserve` (2) | Move to `RuntimeSettings` and pass it to `runApp` in the C++ host. |
 | `CoreEvents.setup` | Remove the call; initialization belongs to the runtime. |
-| `CoreEvents.console` | Subscribe to `runtime().events().console` and call `tc::console::start()` in the C++ host. |
-| `SerialDisconnectEventArgs`, `SerialDisconnectEventArgs.reason` (2) | Use `DeviceDisconnectEventArgs` and its `reason` field in the C++ host's disconnect listener. |
+| `CoreEvents.console` | Subscribe to `runtime():events().console` and call `console.start()` in Lua. |
+| `SerialDisconnectEventArgs`, `SerialDisconnectEventArgs.reason` (2) | Read `event.reason` in the Lua disconnect listener. |
 | `SerialDisconnectEventArgs.portName`, `.baudRate`, `.wasClean` (3) | Keep port/baud information yourself; `wasClean` has no replacement (explicit close no longer notifies). |
 | `Texture.uploadCubemapFace`, `Texture.uploadCubemapMip` (handwritten, 2) | Use `Texture::loadCubemapData` in the C++ host; its pointer-array input has no Lua adapter. |
 
@@ -257,9 +300,9 @@ Registrations created in an App constructor, callback or owned completion follow
 
 Process lifecycle names are the same on App/Window events and
 `runtime().events()`: `exitRequested`, `deviceLost`, `hotReloadUnload`.
-Console moved from CoreEvents to `runtime().events().console`; the C++ host must
-subscribe once and opt into stdin with `tc::console::start()`. Generic
-`Event<T>:listen` is not registered for Lua.
+Console moved from CoreEvents to `runtime():events().console`; Lua scripts
+subscribe with `:listen(...)` and opt into stdin with `console.start()`.
+The listener forms and lifetime rules are described above.
 Generated bindings include CloseRequestEventArgs and Window closeRequested;
 code close skips that query. App ending retires owner-scoped subscriptions.
 `Window::context()`, `dispatch*ToTree`, `tickTree`, `drawTreeNow` and
