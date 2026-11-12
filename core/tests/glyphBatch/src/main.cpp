@@ -463,6 +463,8 @@ class GlyphApp : public App {
                     case BlendMode::Multiply: expected = src[channel]*alpha*dst[channel] + dst[channel]*(1-alpha); break;
                     case BlendMode::Subtract: expected = dst[channel]-src[channel]*alpha; break;
                     case BlendMode::Disabled: expected = src[channel]; break;
+                    // Custom equations have their own oracle in customBlend.
+                    case BlendMode::Custom: matches = false; break;
                 }
                 matches &= std::fabs(pixels[probe+channel]-expected) < 0.004f;
             }

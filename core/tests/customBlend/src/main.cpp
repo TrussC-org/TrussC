@@ -15,9 +15,9 @@ void check(const char* label, bool passed) {
     std::printf("%s %s\n", passed ? "PASS" : "FAIL", label);
     if (!passed) ++failures;
 }
-bool approxEq(Color a, Color b) {
+bool approxEq(Color a, Color b, bool compareAlpha = true) {
     return std::abs(a.r-b.r) <= 3.f/255 && std::abs(a.g-b.g) <= 3.f/255 &&
-        std::abs(a.b-b.b) <= 3.f/255 && std::abs(a.a-b.a) <= 3.f/255;
+        std::abs(a.b-b.b) <= 3.f/255 && (!compareAlpha || std::abs(a.a-b.a) <= 3.f/255);
 }
 BlendDesc maximumDesc() {
     BlendDesc desc;
@@ -47,10 +47,10 @@ Color expected(int preset, Color source, Color destination) {
     return Color(std::fmax(source.r,destination.r), std::fmax(source.g,destination.g),
         std::fmax(source.b,destination.b), destination.a);
 }
-void expect(Color actual, Color wanted, const char* label) {
+void expect(Color actual, Color wanted, const char* label, bool compareAlpha) {
     std::printf("PIXEL %s actual=%.5f,%.5f,%.5f,%.5f expected=%.5f,%.5f,%.5f,%.5f\n",
         label,actual.r,actual.g,actual.b,actual.a,wanted.r,wanted.g,wanted.b,wanted.a);
-    check(label,approxEq(actual,wanted));
+    check(label,approxEq(actual,wanted,compareAlpha));
 }
 void valueChecks() {
     static_assert(sizeof(BlendDesc) == 7);
@@ -156,7 +156,7 @@ class CustomBlendApp : public App {
             glyphs_.draw(Mat4::translate(float(i*48),152,0));
         }
     }
-    void checkCases(const Pixels& pixels, float scale, const char* target) {
+    void checkCases(const Pixels& pixels, float scale, const char* target, bool compareAlpha = true) {
         std::printf("TARGET %s\n",target);
         for(int i=0;i<int(std::size(descriptors));++i) {
             for(int row : {0,1,2,5}) {
@@ -164,7 +164,7 @@ class CustomBlendApp : public App {
                 auto source=sourceColor_;
                 if(row==2) { source.r*=source.a; source.g*=source.a; source.b*=source.a; }
                 if(row==5) source.a=0;
-                expect(pixels.getColor(int((i*48+8)*scale),int(actualY*scale)),expected(i,source,destination_),names[i]);
+                expect(pixels.getColor(int((i*48+8)*scale),int(actualY*scale)),expected(i,source,destination_),names[i],compareAlpha);
             }
             // The overwrite reference records shader coverage in alpha and
             // marks the entire emitted quad with white RGB, including alpha=0.
@@ -175,11 +175,11 @@ class CustomBlendApp : public App {
                     auto source=sourceColor_; source.a*=mask.a;
                     const auto wanted=mask.r>0.5f ? expected(i,source,destination_) : destination_;
                     const auto c=pixels.getColor(int((i*48+x)*scale),int(((text==2 ? 152 : 80+text*24)+y)*scale));
-                    matches &= approxEq(c,wanted);
+                    matches &= approxEq(c,wanted,compareAlpha);
                     ink+=mask.a>0;
                     if(mask.r>0.5f && mask.a==0) {
                         ++transparent;
-                        if(descriptors[i].premultiplySource) matches &= approxEq(c,destination_);
+                        if(descriptors[i].premultiplySource) matches &= approxEq(c,destination_,compareAlpha);
                     }
                 }
                 check(text==0 ? "Font text follows literal custom blend and coverage" :
@@ -222,7 +222,22 @@ class CustomBlendApp : public App {
         resetStyle(); setupScreenOrtho(); disableDepthTest();
         clear(destination_); drawCases();
         Pixels screen; check("swapchain readback",grabScreen(screen));
-        if(screen.isAllocated()) checkCases(screen,float(screen.getWidth())/width,"swapchain");
+        // Native swapchains expose RGBA8, BGRA8 or RGB10A2 through TrussC.
+        // Low-precision destination alpha is quantized before each blend;
+        // Fbo targets above retain the full alpha oracle.
+        const auto format=internal::currentTarget().colorFormat;
+        const char* formatName="unknown";
+        int alphaBits=0;
+        switch(format) {
+            case SG_PIXELFORMAT_RGBA8: formatName="RGBA8"; alphaBits=8; break;
+            case SG_PIXELFORMAT_BGRA8: formatName="BGRA8"; alphaBits=8; break;
+            case SG_PIXELFORMAT_RGB10A2: formatName="RGB10A2"; alphaBits=2; break;
+            default: break;
+        }
+        const bool compareAlpha=alphaBits>=8;
+        if(!compareAlpha) std::printf("SKIP swapchain alpha: format=%s (%d), alpha_bits=%d < 8; checking RGB only, alpha covered by Fbo targets\n",
+            formatName,int(format),alphaBits);
+        if(screen.isAllocated()) checkCases(screen,float(screen.getWidth())/width,"swapchain",compareAlpha);
         resetStyle();
         setBlendMode(BlendMode::Custom); setCustomBlendDesc(descriptors[0]);
         const auto saved=internal::currentTarget().selectedPipeline;
@@ -271,7 +286,8 @@ public:
         if(frame_==0) { valueChecks(); gpuChecks(); }
         clear(0,0,0); setupScreenOrtho(); disableDepthTest();
         auto& resources=internal::currentTarget().resources();
-        const auto lookups=resources.canonicalLookups, pipelines=resources.cache.size();
+        const auto lookups=resources.canonicalLookups;
+        const auto pipelines=resources.cache.size();
         const auto rawPipelines=resources.rawCache->cache.size();
         const bool custom=frame_%2==0;
         const double elapsed=alternate(custom);

@@ -108,7 +108,8 @@ void recipeMutationChecks() {
 void recipeRetirementChecks(RecipeShader& shader) {
     auto& target = internal::currentTarget();
     auto& selections = *target.resources().selectionCache;
-    auto disabled = shader.recipe(), enabled = disabled;
+    auto disabled = shader.recipe();
+    auto enabled = disabled;
     disabled.colors[0].blend.enabled = false;
     enabled.colors[0].blend.enabled = true;
     const auto off = internal::PipelineKey::raw(internal::PipelineRole::Shader, disabled);
@@ -117,7 +118,8 @@ void recipeRetirementChecks(RecipeShader& shader) {
     {
         internal::PipelineRecipe live[2];
         live[0].reset(off); live[1].reset(on);
-        const auto first = live[0].select(target), second = live[1].select(target);
+        const auto first = live[0].select(target);
+        const auto second = live[1].select(target);
         const auto pipelines = target.resources().rawCache->cache.size();
         bool bounded = true, reused = true;
         {
@@ -166,7 +168,8 @@ void rememberedSelections(RecipeShader& shader) {
             return internal::PipelineKey::raw(internal::PipelineRole::Shader, desc);
         });
     };
-    const auto packedFirst = select(1), packedSecond = select(2);
+    const auto packedFirst = select(1);
+    const auto packedSecond = select(2);
     internal::active2D(BlendMode::Alpha); internal::active2D(BlendMode::Add);
     auto& pbr = internal::getPbrPipeline(); pbr.ensureInit();
     auto& points = internal::getPointPipeline(); points.ensureInit();
