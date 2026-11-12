@@ -13,10 +13,11 @@
 //
 // Atlas pages are R8: one byte of glyph coverage per texel, on the CPU and on
 // the GPU. They are drawn with internal::activeCoverage2D(), whose shader
-// (core/shaders/sglCoverage.glsl) uses R as alpha. A page starts at 256x256 and
-// grows on the CPU until first recorded use. Recording reserves space based
-// on font size (up to 2048x2048 for ordinary glyphs), then fixes its dimensions
-// so earlier UVs remain valid. Full pages spill into another page. Dirty pages
+// (core/shaders/sglCoverage.glsl) uses R as alpha. New pages reserve about
+// 32 scaled metric cells, from 256x256 up to the GPU limit (capped at 8192).
+// They may grow on the CPU until the first recorded draw fixes their size
+// so earlier UVs remain valid. Glyph raster origins are 16-texel aligned.
+// Full pages spill into another page. Dirty pages
 // publish one immutable image, including requested mips, at the consuming flush.
 // =============================================================================
 
@@ -301,11 +302,11 @@ private:
 
     // A glyph fits the largest page when its padded box fits the region the
     // packer fills first on a page grown to maxAtlasSize_: the right half,
-    // starting GLYPH_PADDING in from the top and from the middle.
+    // starting at the aligned inset from the top and from the middle.
     bool fitsLargestPage(int paddedWidth, int paddedHeight) const {
         // Bound (gpu): file glyphs must fit the atlas page packing region. Overflow triggers downsampling, then invalidation with a log if the glyph still cannot fit.
-        return paddedWidth <= maxAtlasSize_ / 2 - GLYPH_PADDING &&
-               paddedHeight <= maxAtlasSize_ - GLYPH_PADDING;
+        return paddedWidth <= maxAtlasSize_ / 2 - alignGlyphOffset(GLYPH_PADDING) &&
+               paddedHeight <= maxAtlasSize_ - alignGlyphOffset(GLYPH_PADDING);
     }
 
     // Load-time check: the font's overall bounding box at this size and
@@ -619,6 +620,9 @@ public:
 private:
     static constexpr int INITIAL_ATLAS_SIZE = 256;
     static constexpr int GLYPH_PADDING = 2;
+    // Align the raster/UV rectangle's top-left, after the leading padding.
+    // Cursor steps round trailing padding up too, preserving mip phase to L4.
+    static int alignGlyphOffset(int value) { return (value + 15) & ~15; }
 
     // Queried at runtime from GPU limits (capped to 8192 for sanity)
     int maxAtlasSize_ = 4096;
@@ -700,8 +704,8 @@ private:
 
         // Start filling from top-right corner of new space
         // Old content is in top-left quadrant (newWidth/2 x newHeight/2)
-        atlas.currentX_ = newWidth / 2 + GLYPH_PADDING;
-        atlas.currentY_ = GLYPH_PADDING;
+        atlas.currentX_ = newWidth / 2 + alignGlyphOffset(GLYPH_PADDING);
+        atlas.currentY_ = alignGlyphOffset(GLYPH_PADDING);
         atlas.rowHeight_ = 0;
 
         atlas.textureDirty_ = true;
@@ -774,8 +778,8 @@ private:
         // keep the box prefilter; below 1 the glyph is rasterized directly.
         // Bound (gpu): the atlas page size limits file glyphs; at most 32 raster-scale retries downsample them. Overflow marks a still-oversized glyph invalid with a log.
         for (int attempt = 0; attempt < 32 && !fitsLargestPage(paddedWidth, paddedHeight); ++attempt) {
-            const float fitW = (float)(maxAtlasSize_ / 2 - 2 * GLYPH_PADDING) / (float)glyphWidth;
-            const float fitH = (float)(maxAtlasSize_ - 2 * GLYPH_PADDING) / (float)glyphHeight;
+            const float fitW = (float)(maxAtlasSize_ / 2 - alignGlyphOffset(GLYPH_PADDING) - GLYPH_PADDING) / (float)glyphWidth;
+            const float fitH = (float)(maxAtlasSize_ - alignGlyphOffset(GLYPH_PADDING) - GLYPH_PADDING) / (float)glyphHeight;
             const float next = rs * std::min(fitW, fitH) * 0.99f;
             if (next >= 1.0f) {
                 os = (int)next;
@@ -840,15 +844,15 @@ private:
 
         // Move to next row if current row overflows
         if (atlas.currentX_ + paddedWidth > atlas.width_) {
-            atlas.currentY_ += atlas.rowHeight_ + GLYPH_PADDING;
+            atlas.currentY_ = alignGlyphOffset(atlas.currentY_ + atlas.rowHeight_ + GLYPH_PADDING);
             atlas.rowHeight_ = 0;
 
             // After expand, old content occupies top-left quadrant (width/2 x height/2).
             // While in that vertical range, start rows from the right half.
             if (atlas.expanded_ && atlas.currentY_ < atlas.height_ / 2) {
-                atlas.currentX_ = atlas.width_ / 2 + GLYPH_PADDING;
+                atlas.currentX_ = atlas.width_ / 2 + alignGlyphOffset(GLYPH_PADDING);
             } else {
-                atlas.currentX_ = GLYPH_PADDING;
+                atlas.currentX_ = alignGlyphOffset(GLYPH_PADDING);
             }
         }
 
@@ -936,7 +940,7 @@ private:
         outInfo.valid_ = true;
 
         // Advance cursor
-        atlas.currentX_ += paddedWidth;
+        atlas.currentX_ = alignGlyphOffset(atlas.currentX_ + paddedWidth);
         if (paddedHeight > atlas.rowHeight_) {
             atlas.rowHeight_ = paddedHeight;
         }
@@ -958,13 +962,13 @@ private:
         }
 
         // Fits in next row?
-        int nextY = atlas.currentY_ + atlas.rowHeight_ + GLYPH_PADDING;
+        int nextY = alignGlyphOffset(atlas.currentY_ + atlas.rowHeight_ + GLYPH_PADDING);
         if (nextY + height <= atlas.height_) {
             // Check if the glyph fits horizontally in the next row
             // (right-half rows are narrower)
-            int nextX = GLYPH_PADDING;
+            int nextX = alignGlyphOffset(GLYPH_PADDING);
             if (atlas.expanded_ && nextY < atlas.height_ / 2) {
-                nextX = atlas.width_ / 2 + GLYPH_PADDING;
+                nextX = atlas.width_ / 2 + alignGlyphOffset(GLYPH_PADDING);
             }
             if (nextX + width <= atlas.width_) {
                 return true;
