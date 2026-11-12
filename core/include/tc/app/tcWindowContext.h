@@ -414,8 +414,8 @@ inline sgl_pipeline activePremult() {
     return currentTarget().immediatePipeline({PipelineRole::Premult, BlendMode::Alpha, currentTarget().depthTestEnabled});
 }
 inline sgl_pipeline activeCoverage2D() {
-    auto selection = fillSelection(currentTarget().currentBlendMode == BlendMode::Custom ?
-        BlendMode::Custom : BlendMode::Alpha, currentTarget().depthTestEnabled, currentTarget().customBlendId);
+    auto selection = fillSelection(currentTarget().currentBlendMode,
+        currentTarget().depthTestEnabled, currentTarget().customBlendId);
     selection.role = PipelineRole::Coverage;
     return currentTarget().immediatePipeline(selection);
 }

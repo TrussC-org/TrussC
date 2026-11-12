@@ -1922,8 +1922,8 @@ protected:
             if (!view.id) continue;
 
             // Coverage pipeline for the active target (swapchain or FBO): the
-            // Alpha blend of activeFill2D() (dst alpha accumulates) with a shader
-            // that reads the R8 atlas's R channel as alpha.
+            // current blend mode with a shader that reads the R8 atlas's R
+            // channel as coverage, including premultiplication when needed.
             internal::loadTemporaryPipeline(internal::activeCoverage2D());
             sgl_enable_texture();
             sgl_texture(view, sampler);
