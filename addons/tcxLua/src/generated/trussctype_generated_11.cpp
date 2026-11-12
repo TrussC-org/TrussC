@@ -156,26 +156,23 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["stop"] = &trussc::Sound::stop;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::StrokeMesh
-            , trussc::StrokeMesh()
-            , trussc::StrokeMesh(const trussc::Path &)
+        auto constructors = tcxLuaConstructors<trussc::GlyphBatch
+            , trussc::GlyphBatch()
         >();
-        sol::usertype<trussc::StrokeMesh> t = lua->new_usertype<trussc::StrokeMesh>("StrokeMesh", constructors, sol::call_constructor, constructors);
-        t["addVertex"] = sol::overload([](trussc::StrokeMesh& self, float x, float y) -> decltype(auto) { return self.addVertex(x, y); }, [](trussc::StrokeMesh& self, float x, float y, float z) -> decltype(auto) { return self.addVertex(x, y, z); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p) -> decltype(auto) { return self.addVertex(p); }, [](trussc::StrokeMesh& self, const trussc::Vec2 & p) -> decltype(auto) { return self.addVertex(p); });
-        t["addVertexWithWidth"] = sol::overload([](trussc::StrokeMesh& self, float x, float y, float width) -> decltype(auto) { return self.addVertexWithWidth(x, y, width); }, [](trussc::StrokeMesh& self, const trussc::Vec3 & p, float width) -> decltype(auto) { return self.addVertexWithWidth(p, width); });
-        t["clear"] = &trussc::StrokeMesh::clear;
-        t["draw"] = &trussc::StrokeMesh::draw;
-        t["getMesh"] = &trussc::StrokeMesh::getMesh;
-        t["getPolylines"] = &trussc::StrokeMesh::getPolylines;
-        t["setCapType"] = &trussc::StrokeMesh::setCapType;
-        t["setClosed"] = &trussc::StrokeMesh::setClosed;
-        t["setColor"] = &trussc::StrokeMesh::setColor;
-        t["setJoinType"] = &trussc::StrokeMesh::setJoinType;
-        t["setMiterLimit"] = &trussc::StrokeMesh::setMiterLimit;
-        t["setShape"] = &trussc::StrokeMesh::setShape;
-        t["setWidth"] = &trussc::StrokeMesh::setWidth;
-        t["setWidths"] = &trussc::StrokeMesh::setWidths;
-        t["update"] = &trussc::StrokeMesh::update;
+        sol::usertype<trussc::GlyphBatch> t = lua->new_usertype<trussc::GlyphBatch>("GlyphBatch", constructors, sol::call_constructor, constructors);
+        t["add"] = sol::overload([](trussc::GlyphBatch& self, uint32_t codepoint) { return self.add(codepoint); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix) { return self.add(codepoint, matrix); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Color & color) { return self.add(codepoint, color); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix, const trussc::Color & color) { return self.add(codepoint, matrix, color); }, [](trussc::GlyphBatch& self, const std::string & text) { return self.add(text); }, [](trussc::GlyphBatch& self, const std::string & text, const trussc::Color & color) { return self.add(text, color); });
+        t["clear"] = &trussc::GlyphBatch::clear;
+        t["draw"] = sol::overload([](trussc::GlyphBatch& self) { return self.draw(); }, [](trussc::GlyphBatch& self, const trussc::Mat4 & transform) { return self.draw(transform); });
+        t["getColor"] = &trussc::GlyphBatch::getColor;
+        t["getTransform"] = &trussc::GlyphBatch::getTransform;
+        t["resetColor"] = &trussc::GlyphBatch::resetColor;
+        t["resetTransform"] = &trussc::GlyphBatch::resetTransform;
+        t["setAlign"] = &trussc::GlyphBatch::setAlign;
+        t["setAlignToInk"] = &trussc::GlyphBatch::setAlignToInk;
+        t["setColor"] = &trussc::GlyphBatch::setColor;
+        t["setFont"] = &trussc::GlyphBatch::setFont;
+        t["setTransform"] = &trussc::GlyphBatch::setTransform;
+        t["setWritingMode"] = &trussc::GlyphBatch::setWritingMode;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
@@ -242,15 +239,15 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["filePath"] = &trussc::FileDialogResult::filePath;
         t["success"] = &trussc::FileDialogResult::success;
     }
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
     {
-        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
-        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
-        t["message"] = &trussc::VideoErrorEventArgs::message;
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

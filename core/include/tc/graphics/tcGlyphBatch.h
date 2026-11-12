@@ -31,8 +31,17 @@ public:
     void setAlignToInk(bool enabled) { alignToInk_ = enabled; }
     void setWritingMode(WritingMode mode) { font_.setWritingMode(mode); }
 
+    void setTransform(const Mat4& transform) { transform_ = transform; }
+    const Mat4& getTransform() const { return transform_; }
+    void resetTransform() { transform_ = Mat4::identity(); }
+    void setColor(const Color& color) { color_ = color; }
+    const Color& getColor() const { return color_; }
+    void resetColor() { color_ = Color(1, 1, 1, 1); }
+
+    void add(uint32_t codepoint) { add(codepoint, color_); }
+    void add(uint32_t codepoint, const Mat4& matrix) { add(codepoint, matrix, color_); }
     void add(uint32_t codepoint, const Color& color) {
-        if (font_.atlasManager_) add(codepoint, getMatrix(), color);
+        if (font_.atlasManager_) add(codepoint, getMatrix() * transform_, color);
     }
     void add(uint32_t codepoint, const Mat4& matrix, const Color& color) {
         if (!font_.atlasManager_ || codepoint == '\n' || codepoint == '\t') return;
@@ -50,23 +59,19 @@ public:
             if (alignV_ == Direction::Baseline) baseline = 0;
             if (alignV_ == Direction::Center) baseline -= font_.getLineHeight() / 2;
             if (alignV_ == Direction::Bottom) baseline -= font_.getLineHeight();
-            // Match Font's grid-fit rule using the supplied model matrix.
-            const auto& m = matrix.m;
-            const float sx = std::sqrt(m[0]*m[0] + m[4]*m[4] + m[8]*m[8]);
-            const float sy = std::sqrt(m[1]*m[1] + m[5]*m[5] + m[9]*m[9]);
-            const float scale = std::max(sx, sy);
-            if (font_.gridFit_ && std::fabs((scale > 0 ? scale : 1) * internal::targetPixelScale() - 1) < 0.01f)
-                baseline = std::round(baseline);
+            // Grid fit uses the final model, including the batch transform.
+            if (font_.gridFitLands(matrix)) baseline = std::round(baseline);
         }
         append({codepoint, x, baseline, 0, 0, 0, 1}, matrix, color);
     }
     // String layout follows Font; ink pivot selection applies to independent glyphs.
+    void add(const std::string& text) { add(text, color_); }
     void add(const std::string& text, const Color& color) {
         if (!font_.atlasManager_) return;
-        const Mat4 matrix = getMatrix();
-        font_.forEachGlyph(text, 0, 0, alignH_, alignV_, [&](const Font::PlacedGlyph& placed) {
+        const Mat4 matrix = getMatrix() * transform_;
+        font_.forEachGlyphWithMatrix(text, 0, 0, alignH_, alignV_, [&](const Font::PlacedGlyph& placed) {
             append(placed, matrix, color);
-        });
+        }, matrix);
     }
 
     void draw() { draw(Mat4::identity()); }
@@ -232,6 +237,8 @@ private:
         }
         page.dirty = true;
     }
+    Mat4 transform_ = Mat4::identity();
+    Color color_{1, 1, 1, 1};
     Font font_;
     std::vector<Run> runs_;
     size_t activeRuns_ = 0;

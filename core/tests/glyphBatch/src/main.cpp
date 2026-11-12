@@ -19,6 +19,9 @@ void check(const char* name, bool ok) {
     std::printf("%s: %s\n", name, ok ? "PASS" : "FAIL");
     if (!ok) ++failures;
 }
+bool sameMatrix(const Mat4& a, const Mat4& b) {
+    return std::equal(a.m, a.m + 16, b.m);
+}
 constexpr int extent = 192;
 const Color tint(0.8f, 0.4f, 0.2f, 0.7f);
 using Bytes = std::vector<unsigned char>;
@@ -218,6 +221,147 @@ class GlyphApp : public App {
             });
             compare("4x/8x minification with mips", expected, got);
         }
+    }
+    void batchSettingsChecks() {
+        const Mat4 current = Mat4::translate(65, 60, 0) * Mat4::rotateZ(0.17f);
+        const Color overrideColor(0.2f, 0.7f, 0.9f, 0.8f);
+        // Both directions across the grid-fit boundary, including a final 1:1.
+        for (float factor : {0.5f, 2.0f}) {
+            const Mat4 transform = Mat4::translate(3, 5, 0) * Mat4::scale(factor);
+            const Mat4 explicitModel = Mat4::translate(105, 95, 0) * Mat4::scale(1 / factor);
+            for (int form = 0; form < 4; ++form) {
+                const bool explicitMatrix = form == 1 || form == 3;
+                const bool explicitColor = form >= 2;
+                const auto expected = render(reference_, [&] {
+                    GlyphBatch batch; batch.setFont(font_);
+                    batch.add(U'g', explicitMatrix ? explicitModel : current * transform,
+                              explicitColor ? overrideColor : tint);
+                    batch.draw();
+                });
+                const auto actual = render(actual_, [&] {
+                    GlyphBatch batch; batch.setFont(font_);
+                    batch.setTransform(transform); batch.setColor(tint);
+                    pushMatrix(); setMatrix(current);
+                    switch (form) {
+                        case 0: batch.add(U'g'); break;
+                        case 1: batch.add(uint32_t(U'g'), explicitModel); break;
+                        case 2: batch.add(uint32_t(U'g'), overrideColor); break;
+                        case 3: batch.add(U'g', explicitModel, overrideColor); break;
+                    }
+                    popMatrix(); batch.draw();
+                });
+                compare("codepoint overload uses final matrix and selected color", expected, actual);
+            }
+            for (auto mode : {WritingMode::Horizontal, WritingMode::VerticalRL}) {
+                font_.setWritingMode(mode);
+                for (bool explicitColor : {false, true}) {
+                    const auto expected = render(reference_, [&] {
+                        GlyphBatch explicitBatch; explicitBatch.setFont(font_);
+                        pushMatrix(); setMatrix(current * transform);
+                        explicitBatch.add(std::string("Ag\n12"), explicitColor ? overrideColor : tint);
+                        popMatrix(); explicitBatch.draw();
+                    });
+                    const auto actual = render(actual_, [&] {
+                        GlyphBatch batch; batch.setFont(font_);
+                        batch.setTransform(transform); batch.setColor(tint);
+                        pushMatrix(); setMatrix(current);
+                        if (explicitColor) batch.add(std::string("Ag\n12"), overrideColor);
+                        else batch.add("Ag\n12");
+                        check("string add preserves global matrix", sameMatrix(getMatrix(), current));
+                        popMatrix(); batch.draw();
+                    });
+                    compare("string overload uses final matrix for layout", expected, actual);
+                }
+            }
+            font_.setWritingMode(WritingMode::Horizontal);
+        }
+        // A local inverse scale returns the final model to the grid-fit range.
+        const auto fittedReference = render(reference_, [&] {
+            font_.drawString("Ag\nxy", 70, 60);
+        });
+        const auto fittedActual = render(actual_, [&] {
+            GlyphBatch batch; batch.setFont(font_); batch.setTransform(Mat4::scale(2)); batch.setColor(tint);
+            pushMatrix(); translate(70, 60); scale(0.5f); batch.add("Ag\nxy"); popMatrix(); batch.draw();
+        });
+        compare("string grid fit follows final 1:1 product", fittedReference, fittedActual);
+
+        for (float factor : {0.5f, 1.0f, 2.0f}) {
+            const Mat4 finalModel = Mat4::translate(65, 60, 0) * Mat4::scale(factor);
+            const auto expected = render(reference_, [&] {
+                pushMatrix(); setMatrix(finalModel); font_.drawString("g", 0, 0); popMatrix();
+            });
+            const auto actual = render(actual_, [&] {
+                GlyphBatch glyph; glyph.setFont(font_); glyph.setTransform(Mat4::scale(3));
+                // Ambient and batch scales must not affect an explicit matrix.
+                pushMatrix(); scale(4); glyph.add(U'g', finalModel, tint); popMatrix(); glyph.draw();
+            });
+            compare("explicit glyph grid fit follows supplied matrix", expected, actual);
+        }
+        GlyphBatch batch; batch.setFont(font_);
+        check("default transform and color", sameMatrix(batch.getTransform(), Mat4::identity()) && batch.getColor() == Color(1, 1, 1, 1));
+        const Mat4 transform = Mat4::scale(1.5f);
+        batch.setTransform(transform); batch.setColor(tint);
+        const auto expected = render(reference_, [&] {
+            GlyphBatch explicitBatch; explicitBatch.setFont(font_);
+            explicitBatch.add(U'A', Mat4::translate(25, 30, 0) * transform, tint);
+            explicitBatch.add(U'B', Mat4::translate(75, 30, 0), overrideColor);
+            explicitBatch.add(U'C', Mat4::translate(115, 30, 0) * transform, tint);
+            explicitBatch.draw();
+        });
+        const auto actual = render(actual_, [&] {
+            pushMatrix(); translate(25, 30); batch.add(U'A'); popMatrix();
+            batch.add(U'B', Mat4::translate(75, 30, 0), overrideColor);
+            pushMatrix(); translate(115, 30); batch.add(U'C'); popMatrix(); batch.draw();
+        });
+        compare("settings persist across adds and explicit replacements", expected, actual);
+        batch.clear();
+        check("clear keeps transform and color", sameMatrix(batch.getTransform(), transform) && batch.getColor() == tint);
+        auto cleared = render(actual_, [&] {
+            pushMatrix(); translate(65, 60); batch.add(U'g'); popMatrix(); batch.draw();
+        });
+        auto explicitResult = render(reference_, [&] {
+            GlyphBatch explicitBatch; explicitBatch.setFont(font_);
+            explicitBatch.add(U'g', Mat4::translate(65, 60, 0) * transform, tint); explicitBatch.draw();
+        });
+        compare("settings affect adds after clear", explicitResult, cleared);
+        batch.resetTransform();
+        check("resetTransform keeps color", sameMatrix(batch.getTransform(), Mat4::identity()) && batch.getColor() == tint);
+        batch.setTransform(transform); batch.resetColor();
+        check("resetColor keeps transform", sameMatrix(batch.getTransform(), transform) && batch.getColor() == Color(1, 1, 1, 1));
+        batch.resetTransform(); batch.clear();
+        cleared = render(actual_, [&] {
+            pushMatrix(); translate(65, 60); batch.add(U'g'); popMatrix(); batch.draw();
+        });
+        explicitResult = render(reference_, [&] {
+            GlyphBatch explicitBatch; explicitBatch.setFont(font_);
+            explicitBatch.add(U'g', Mat4::translate(65, 60, 0), Color(1, 1, 1, 1)); explicitBatch.draw();
+        });
+        compare("resets restore identity and white for later adds", explicitResult, cleared);
+
+        const auto inkCenter = [](const Bytes& pixels) {
+            int x0 = extent, y0 = extent, x1 = -1, y1 = -1;
+            for (int y = 0; y < extent; ++y) for (int x = 0; x < extent; ++x) {
+                if (pixels[(y * extent + x) * 4 + 3] < 128) continue;
+                x0 = std::min(x0, x); x1 = std::max(x1, x);
+                y0 = std::min(y0, y); y1 = std::max(y1, y);
+            }
+            check("scaled glyph has visible ink", x1 >= x0 && y1 >= y0);
+            return Vec2((x0 + x1 + 1) * 0.5f, (y0 + y1 + 1) * 0.5f);
+        };
+        Vec2 centers[2];
+        for (int i = 0; i < 2; ++i) {
+            const auto pixels = render(actual_, [&] {
+                GlyphBatch centered; centered.setFont(font_); centered.setAlignToInk(true);
+                centered.setTransform(Mat4::scale(i == 0 ? 1.0f : 2.0f));
+                pushMatrix(); translate(96, 96); centered.add(U'g'); popMatrix(); centered.draw();
+            });
+            centers[i] = inkCenter(pixels);
+        }
+        std::printf("INK_CENTERS identity=(%.1f,%.1f) scale2=(%.1f,%.1f)\n",
+                    centers[0].x, centers[0].y, centers[1].x, centers[1].y);
+        check("batch scaling keeps ink center fixed in pixels",
+              std::fabs(centers[0].x - centers[1].x) <= 1 && std::fabs(centers[0].y - centers[1].y) <= 1 &&
+              std::fabs(centers[1].x - 96) <= 1 && std::fabs(centers[1].y - 96) <= 1);
     }
     void cameraCheck() {
         EasyCam camera; camera.setDistance(200);
@@ -451,7 +595,7 @@ class GlyphApp : public App {
 public:
     void runOffscreenChecks() {
         setup();
-        scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck();
+        scissorChecks(); pageOrderChecks(); layoutChecks(); batchSettingsChecks(); cameraCheck();
         streamChecks(); growthAndTransform(); targetAndBlendChecks();
         reference_.allocate(extent, extent); retain(true);
         for (int frame = 0; frame < 2; ++frame) {
@@ -466,7 +610,7 @@ public:
     }
     void draw() override {
         if (frame_ == 0) {
-            scissorChecks(); pageOrderChecks(); layoutChecks(); cameraCheck();
+            scissorChecks(); pageOrderChecks(); layoutChecks(); batchSettingsChecks(); cameraCheck();
         streamChecks(); growthAndTransform(); targetAndBlendChecks();
             reference_.allocate(extent, extent);
             retain(true);
@@ -553,7 +697,15 @@ TC_CORE_TEST_MAIN(int argc, char** argv) {
     Font font;
     check("unloaded font has empty ink", font.getGlyphInkBox(U'A').width == 0);
     GlyphBatch empty;
-    empty.add(U'A', Color(1)); empty.clear(); empty.draw();
+    for (auto cp : {uint32_t(U'A')}) {
+        empty.add(cp); empty.add(cp, Mat4::identity());
+        empty.add(cp, Color(1)); empty.add(cp, Mat4::identity(), Color(1));
+    }
+    empty.add(U'A'); empty.add(U'A', Mat4::identity());
+    empty.add(U'A', Color(1)); empty.add(U'A', Mat4::identity(), Color(1));
+    empty.add("A"); empty.add("A", Color(1));
+    empty.add(std::string("A")); empty.add(std::string("A"), Color(1));
+    empty.clear(); empty.draw();
 #ifdef TC_GLYPH_EGL
     if (argc > 1 && std::strcmp(argv[1], "--egl-check") == 0) return runEglChecks();
 #endif
