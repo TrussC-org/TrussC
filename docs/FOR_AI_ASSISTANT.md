@@ -308,11 +308,11 @@ font.drawString("Hello", x, y);
 ```
 
 `GlyphBatch` retains many individually transformed glyphs. Call `setFont(font)`,
-`add(codepoint, color)` at each current matrix, then `draw()` under the intended camera
+`add(codepoint)` at each current matrix, then `draw()` under the intended camera
 scope. The current view/projection is applied once at draw time. `draw()` keeps the batch and reuses unchanged GPU buffers across frames;
 `draw(transform)` applies an extra uniform transform. `setAlignToInk(true)` centers
 independent glyphs on `Font::getGlyphInkBox(codepoint)` (logical pixels, baseline
-relative; half-size is width/2, height/2). String adds use Font layout. Output is
+relative; half-size is width/2, height/2). String adds use Font layout. `setTransform(T)` and `setColor(c)` persist across `clear()`; omitted add arguments use those settings (current matrix × T), while explicit matrices/colors replace them for that add. Scaling pivots on the align point (ink center with `setAlignToInk`); `draw(transform)` instead moves the whole recorded batch. Output is
 straight alpha; colors keep float RGB. Blend and scissor are captured at draw time. Glyphs draw in add order, with one
 draw per consecutive run on the same atlas page (A/B/A uses three draws).
 
@@ -3309,10 +3309,11 @@ void Font::drawStringInternal(const std::string & text, float x, float y, Direct
 void Font::drawStringVerticalInternal(const std::string & text, float x, float y, Direction h, Direction v) const  // Draw pre-wrapped text with vertical glyph layout.
 void Font::emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph> & placed) const  // Emits textured quads for positioned glyphs.
 void Font::enableWrap(bool enabled)  // Enables or disables automatic text wrapping.
-float Font::fitY(float offsetFromAnchor) const  // Round a baseline offset when grid fitting is applicable.
+float Font::fitY(float offsetFromAnchor, const Mat4 * matrix = nullptr) const  // Round a baseline offset when grid fitting is applicable.
 void Font::forEachGlyph(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const [+1]  // Calls a visitor for each laid-out glyph.
-void Font::forEachGlyphHorizontal(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Visits glyphs positioned by horizontal text layout.
-void Font::forEachGlyphVertical(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor) const  // Visit each glyph placed by the vertical text layout.
+void Font::forEachGlyphHorizontal(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor, const Mat4 * matrix = nullptr) const  // Visits glyphs positioned by horizontal text layout.
+void Font::forEachGlyphVertical(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor, const Mat4 * matrix = nullptr) const  // Visit each glyph placed by the vertical text layout.
+void Font::forEachGlyphWithMatrix(const std::string & text, float x, float y, Direction h, Direction v, const GlyphVisitor & visitor, const Mat4 & matrix) const  // Protected layout helper that uses a supplied model matrix for baseline grid fitting.
 Direction Font::getAlignH() const  // Returns the font's stored horizontal alignment.
 Direction Font::getAlignV() const  // Returns the font's stored vertical alignment.
 float Font::getAscent() const  // Returns the font's ascent above the baseline.
@@ -3344,7 +3345,7 @@ TcyMode Font::getTcyLatinMode() const  // Returns the tate-chu-yoko mode for Lat
 size_t Font::getTotalCacheMemoryUsage()  // Returns the shared font cache's total atlas pixel storage size.
 float Font::getWidth(const std::string & text) const  // Returns the text's measured width.
 WritingMode Font::getWritingMode() const  // Returns the current writing mode.
-bool Font::gridFitLands() const  // Test whether the current scale permits baseline grid fitting.
+bool Font::gridFitLands() const [+1]  // Tests whether the current or supplied model scale permits baseline grid fitting.
 bool Font::isLoaded() const  // Returns whether the font is loaded.
 bool Font::isLoading() const  // Return whether an asynchronous font request is pending.
 bool Font::isWrapEnabled() const  // Returns whether automatic text wrapping is enabled.
@@ -3390,12 +3391,18 @@ void FullscreenShader::setParams(const T & params)  // Sets the uniform paramete
 ### GlyphBatch — Retains transformed glyph quads for repeated drawing in add order, batching consecutive glyphs on the same atlas page.
 
 ```cpp
-void GlyphBatch::add(uint32_t codepoint, const Color & color) [+2]  // Appends colored glyph quads at the current matrix or an explicit model matrix.
+void GlyphBatch::add(uint32_t codepoint) [+5]  // Appends a glyph or UTF-8 string, using batch settings for omitted arguments.
 void GlyphBatch::clear()  // Discards retained geometry while keeping the font and batch settings.
 void GlyphBatch::draw() [+1]  // Draws retained glyphs using the current target and blend; an optional transform applies through a uniform.
+const Color & GlyphBatch::getColor() const  // Returns the current batch color.
+const Mat4 & GlyphBatch::getTransform() const  // Returns the current batch transform.
+void GlyphBatch::resetColor()  // Resets the batch color to white (1,1,1,1).
+void GlyphBatch::resetTransform()  // Resets the batch transform to identity.
 void GlyphBatch::setAlign(Direction h, Direction v)  // Sets horizontal and vertical alignment for subsequent adds; defaults to Left/Top like Font.
 void GlyphBatch::setAlignToInk(bool enabled)  // Centers subsequent independent glyphs on their outline ink box instead of advance and line metrics.
+void GlyphBatch::setColor(const Color & color)  // Sets the color for later adds that omit a color; defaults to white (1,1,1,1).
 void GlyphBatch::setFont(const Font & font)  // Clears the batch and retains a copy of a Font and its current settings.
+void GlyphBatch::setTransform(const Mat4 & transform)  // Sets the transform for each later glyph; defaults to identity.
 void GlyphBatch::setWritingMode(WritingMode mode)  // Sets writing mode for subsequent string adds; independent codepoints ignore it.
 ```
 

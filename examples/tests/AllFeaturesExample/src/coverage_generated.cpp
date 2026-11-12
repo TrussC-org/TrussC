@@ -1727,15 +1727,24 @@ struct Cover_GlyphBatch : af::Scope<GlyphBatch> {
     ~Cover_GlyphBatch(); // Never instantiated.
     static void run() {
         (void)GlyphBatch();
+        (void)af::val<GlyphBatch>().add(af::val<uint32_t>());
+        (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Mat4>());
         (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Color>());
         (void)af::val<GlyphBatch>().add(af::val<uint32_t>(), af::val<const Mat4>(), af::val<const Color>());
+        (void)af::val<GlyphBatch>().add(af::val<const std::string>());
         (void)af::val<GlyphBatch>().add(af::val<const std::string>(), af::val<const Color>());
         (void)af::val<GlyphBatch>().clear();
         (void)af::val<GlyphBatch>().draw();
         (void)af::val<GlyphBatch>().draw(af::val<const Mat4>());
+        (void)af::val<const GlyphBatch>().getColor();
+        (void)af::val<const GlyphBatch>().getTransform();
+        (void)af::val<GlyphBatch>().resetColor();
+        (void)af::val<GlyphBatch>().resetTransform();
         (void)af::val<GlyphBatch>().setAlign(af::val<Direction>(), af::val<Direction>());
         (void)af::val<GlyphBatch>().setAlignToInk(af::val<bool>());
+        (void)af::val<GlyphBatch>().setColor(af::val<const Color>());
         (void)af::val<GlyphBatch>().setFont(af::val<const Font>());
+        (void)af::val<GlyphBatch>().setTransform(af::val<const Mat4>());
         (void)af::val<GlyphBatch>().setWritingMode(af::val<WritingMode>());
     }
 };

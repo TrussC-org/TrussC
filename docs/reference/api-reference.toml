@@ -59420,6 +59420,16 @@ details.ko = '''
 - 고급 처리에서 컨텍스트가 필요하면 `internal::getDefaultContext()`로 얻을 수 있습니다.
 '''
 
+["Font::forEachGlyphWithMatrix"]
+category = "font"
+description.en = "Protected layout helper that uses a supplied model matrix for baseline grid fitting."
+description.ja = "指定したモデル行列でベースラインのグリッドフィットを判定する protected の配置ヘルパーです。"
+description.ko = "지정한 모델 행렬로 베이스라인 그리드 피팅을 판정하는 protected 배치 헬퍼입니다."
+details.en = "Uses the same wrapping, writing mode, alignment, and synchronous visitor as forEachGlyph. GlyphBatch supplies current matrix × batch transform without changing the global matrix."
+details.ja = "forEachGlyph と同じ折り返し、書字方向、揃え、同期ビジターを使います。GlyphBatch はグローバル行列を変えずに、現在の行列 × バッチ変換を渡します。"
+details.ko = "forEachGlyph와 같은 줄 바꿈, 쓰기 방향, 정렬 및 동기 비지터를 사용합니다. GlyphBatch는 전역 행렬을 바꾸지 않고 현재 행렬 × 배치 변환을 전달합니다."
+related = ["Font::forEachGlyph", "GlyphBatch::setTransform", "Font::gridFitLands"]
+
 ["Font::forEachGlyphHorizontal"]
 description.en = "Visits glyphs positioned by horizontal text layout."
 description.ja = "横書きレイアウトで配置したグリフを順に処理する。"
@@ -62259,20 +62269,23 @@ details.ko = '''
 related = ["Font::setGridFit", "Font::gridFitLands"]
 
 ["Font::gridFitLands"]
-description.en = "Test whether the current scale permits baseline grid fitting."
-description.ja = "現在の倍率でベースラインのグリッドフィットを適用できるか判定する。"
-description.ko = "현재 배율에서 베이스라인 그리드 피팅을 적용할 수 있는지 판정한다."
+description.en = "Tests whether the current or supplied model scale permits baseline grid fitting."
+description.ja = "現在または指定したモデルの倍率でベースラインのグリッドフィットを適用できるか判定します。"
+description.ko = "현재 또는 지정한 모델 배율에서 베이스라인 그리드 피팅을 적용할 수 있는지 판정합니다."
 details.en = '''
+- The matrix overload tests the supplied final model; the no-argument overload uses the current model.
 - This protected helper returns `true` only when grid fitting is enabled and the effective scale differs from 1 by less than `0.01`.
-- Effective scale is the larger X/Y basis length of the model-view matrix, replaced with 1 if nonpositive, then multiplied by the target pixel scale. The test does not account for anchor translation or camera projection, so `true` does not guarantee that the final baseline lies on an absolute device-pixel boundary.
+- Effective scale is the larger X/Y basis length of the model matrix, replaced with 1 if nonpositive, then multiplied by the target pixel scale. The test does not account for anchor translation or camera projection, so `true` does not guarantee that the final baseline lies on an absolute device-pixel boundary.
 '''
 details.ja = '''
+- 行列を渡す版は指定した最終モデルを判定し、引数なしの版は現在のモデルを使います。
 - この protected ヘルパーは、グリッドフィットが有効で、実効倍率と 1 の差の絶対値が `0.01` 未満の場合だけ `true` を返します。
-- 実効倍率には、モデルビュー行列の X/Y 基底の長さの大きい方を使い、その値が 0 以下なら 1 に置き換えてから描画先のピクセル倍率を掛けます。アンカーの平行移動とカメラの投影は判定しないため、`true` でも最終的なベースラインが絶対的なデバイスピクセル境界に乗るとは限りません。
+- 実効倍率には、モデル行列の X/Y 基底の長さの大きい方を使い、その値が 0 以下なら 1 に置き換えてから描画先のピクセル倍率を掛けます。アンカーの平行移動とカメラの投影は判定しないため、`true` でも最終的なベースラインが絶対的なデバイスピクセル境界に乗るとは限りません。
 '''
 details.ko = '''
+- 행렬을 전달하는 버전은 지정한 최종 모델을 판정하고 인수가 없는 버전은 현재 모델을 사용합니다.
 - 이 protected 헬퍼는 그리드 피팅이 활성화되어 있고 실효 배율과 1의 차이의 절댓값이 `0.01` 미만일 때만 `true`를 반환합니다.
-- 실효 배율은 모델뷰 행렬의 X/Y 기저 길이 중 큰 값이 0 이하이면 1로 바꾼 뒤 대상 픽셀 배율을 곱한 값입니다. 기준점의 평행 이동과 카메라 투영은 판정하지 않으므로, `true`여도 최종 베이스라인이 절대적인 장치 픽셀 경계에 놓인다고 보장하지 않습니다.
+- 실효 배율은 모델 행렬의 X/Y 기저 길이 중 큰 값이 0 이하이면 1로 바꾼 뒤 대상 픽셀 배율을 곱한 값입니다. 기준점의 평행 이동과 카메라 투영은 판정하지 않으므로, `true`여도 최종 베이스라인이 절대적인 장치 픽셀 경계에 놓인다고 보장하지 않습니다.
 '''
 related = ["Font::setGridFit", "Font::getGridFit", "Font::fitY"]
 
@@ -62282,16 +62295,19 @@ description.ja = "グリッドフィットを適用できる場合にベース�
 description.ko = "그리드 피팅을 적용할 수 있으면 베이스라인 오프셋을 반올림한다."
 details.en = '''
 - This protected helper returns `round(offsetFromAnchor)` when `Font::gridFitLands` is `true`; otherwise, it returns the input unchanged. The offset is measured in logical pixels.
+- A non-null matrix pointer selects the supplied final model for the scale test; otherwise the current model is used.
 - Pass the offset accumulated from the anchor, such as `getAscent() + lineIdx * getLineHeight()`, then round once. Rounding the line height before repeated addition causes layout error to accumulate across lines.
 - Add the returned offset to the unchanged anchor. This preserves fractional anchor movement while limiting each fitted baseline offset to half a unit of rounding error.
 '''
 details.ja = '''
 - この protected ヘルパーは、`Font::gridFitLands` が `true` の場合に `round(offsetFromAnchor)` を返し、それ以外では入力をそのまま返します。オフセットの単位は論理ピクセルです。
+- 行列ポインターが非 null なら指定した最終モデルで倍率を判定し、それ以外では現在のモデルを使います。
 - `getAscent() + lineIdx * getLineHeight()` のようにアンカーから累積したオフセットを渡し、一度だけ丸めてください。行の高さを先に丸めて繰り返し加算すると、行が増えるほど配置の誤差が蓄積します。
 - 返されたオフセットを、変更していないアンカーに加えます。これによりアンカーの小数座標での移動を保ち、各ベースラインオフセットの丸め誤差を最大で半単位に抑えます。
 '''
 details.ko = '''
 - 이 protected 헬퍼는 `Font::gridFitLands`가 `true`이면 `round(offsetFromAnchor)`를 반환하고, 그렇지 않으면 입력을 그대로 반환합니다. 오프셋의 단위는 논리 픽셀입니다.
+- 행렬 포인터가 null이 아니면 지정한 최종 모델로 배율을 판정하고 그렇지 않으면 현재 모델을 사용합니다.
 - `getAscent() + lineIdx * getLineHeight()`처럼 기준점에서 누적한 오프셋을 전달한 뒤 한 번만 반올림합니다. 줄 높이를 먼저 반올림하여 반복해서 더하면 줄 수가 늘어날수록 배치 오차가 누적됩니다.
 - 반환된 오프셋을 변경하지 않은 기준점에 더합니다. 이렇게 하면 기준점의 소수 좌표 이동을 유지하면서 각 베이스라인 오프셋의 반올림 오차를 최대 반 단위로 제한합니다.
 '''
@@ -67023,26 +67039,40 @@ description.en = "Retains transformed glyph quads for repeated drawing in add or
 description.ja = "変換済みのグリフを保持し、同じアトラスページが連続する区間をまとめて追加順に繰り返し描画します。"
 description.ko = "변환된 글리프를 유지하고 같은 아틀라스 페이지의 연속 구간을 묶어 추가 순서대로 반복 표시합니다."
 details.en = '''
-Call setFont with a loaded Font. Independent glyphs capture the current model matrix at add time; the explicit Mat4 replaces it. Draw under the intended camera. draw applies the active view/projection once and does not apply the current model again, does not clear, and uploads vertices only after adds change the geometry, reusing grow-only buffers and a shared static quad index buffer. draw(transform) applies transform × recorded positions through a uniform. clear discards geometry; setFont also clears and copies the Font settings, sharing its current atlas. Later source setOversampling/setMipmaps calls replace the source atlas and do not reach this copy; configure first or call setFont again and rebuild.
+Call setFont with a loaded Font. Adds use current matrix × batch transform; an explicit Mat4 replaces both. Omitted colors use the batch color; explicit colors replace it for that add. Settings persist across adds and clear(). Draw under the intended camera. draw applies the active view/projection once and does not apply the current model again, does not clear, and uploads vertices only after adds change the geometry, reusing grow-only buffers and a shared static quad index buffer. draw(transform) applies transform × recorded positions through a uniform. clear discards geometry; setFont also clears and copies the Font settings, sharing its current atlas. Later source setOversampling/setMipmaps calls replace the source atlas and do not reach this copy; configure first or call setFont again and rebuild.
 Glyphs draw in add order. Each consecutive run sharing an atlas page uses one draw; a single-page batch uses one draw, while A/B/A uses three. Scissor is captured at draw time. Blend is the mode current at draw(), not at add(). Depth, target format and MSAA also come from the draw target. Colors retain unclamped float RGB and normal Color alpha. Output is straight alpha like drawString; Screen/Multiply use the framework's corresponding premultiplied blend equations. Atlas sampling is trilinear with mips when the Font permits them (mip 0 at bilinear-safe rates of at most two texels per pixel, like Font); current page views and dimensions are resolved at draw time, so atlas growth preserves retained quads. Rebuild the batch after Font::clearAtlas.
 Custom uses the BlendDesc slot current at draw(); premultiplySource opts into multiplying RGB by alpha, including glyph coverage.
 '''
 details.ja = '''
-読み込み済みの Font を setFont に渡します。単独グリフは add 時のモデル行列を記録し、明示した Mat4 はこの行列を置き換えます。使いたいカメラの下で draw してください。draw は現在の view/projection を一度適用し、現在のモデル行列は再適用せず、内容を消去しません。頂点は add で内容が変わったときだけ転送し、拡張時だけ作成するバッファと共有の静的インデックスを再利用します。draw(transform) は uniform で transform × 記録済み座標を適用します。clear は形状を破棄します。setFont も形状を消去し、設定をコピーして現在のアトラスを共有します。元 Font の setOversampling/setMipmaps はアトラスを差し替えるため追従しません。先に設定するか、setFont を再度呼んで再構築してください。
+読み込み済みの Font を setFont に渡します。追加には現在の行列 × バッチ変換を使います。明示した Mat4 は両方を置き換えます。色を省略するとバッチ色を使い、指定するとその追加だけ置き換えます。設定は追加や clear() をまたいで保持します。使いたいカメラの下で draw してください。draw は現在の view/projection を一度適用し、現在のモデル行列は再適用せず、内容を消去しません。頂点は add で内容が変わったときだけ転送し、拡張時だけ作成するバッファと共有の静的インデックスを再利用します。draw(transform) は uniform で transform × 記録済み座標を適用します。clear は形状を破棄します。setFont も形状を消去し、設定をコピーして現在のアトラスを共有します。元 Font の setOversampling/setMipmaps はアトラスを差し替えるため追従しません。先に設定するか、setFont を再度呼んで再構築してください。
 グリフは追加順に描画します。同じアトラスページが連続する区間ごとに 1 回描画し、単一ページのバッチは 1 回、A/B/A は 3 回になります。scissor は draw 時に記録します。ブレンドは add() 時ではなく draw() 時のモードを使います。深度、描画先の形式、MSAA も draw 時に反映します。RGB は範囲外の float 値を保持し、Color の alpha も有効です。出力は drawString と同じ straight alpha です。Screen・Multiply ではフレームワークの対応する乗算済みブレンド式を使います。Font で有効な場合はミップ付きトライリニア補間を使います。Font と同様に、1 ピクセルあたり 2 テクセル以下の縮小では mip 0 を使います。ページ画像とサイズを描画時に解決するため、アトラス拡張後も座標を保ちます。Font::clearAtlas 後はバッチを作り直してください。
 Custom は draw() 時の BlendDesc スロットを使います。premultiplySource をオンにすると、グリフの被覆率を含むアルファを RGB に掛けます。
 '''
 details.ko = '''
-로드된 Font를 setFont에 전달합니다. 독립 글리프는 add 시점의 모델 행렬을 기록하며 명시적 Mat4는 이를 대체합니다. 사용할 카메라 아래에서 draw를 호출합니다. draw는 현재 view/projection을 한 번 적용하고 현재 모델을 다시 적용하거나 내용을 지우지 않으며, add로 형상이 바뀐 경우에만 정점을 업로드하며 확장할 때만 생성하는 버퍼와 공유 정적 인덱스를 재사용합니다. draw(transform)은 uniform으로 transform × 기록된 좌표를 적용합니다. clear는 형상을 버립니다. setFont도 형상을 지우고 설정을 복사하며 현재 아틀라스를 공유합니다. 원본 Font의 setOversampling/setMipmaps는 아틀라스를 교체하므로 반영되지 않습니다. 먼저 설정하거나 setFont를 다시 호출하고 재구성합니다.
+로드된 Font를 setFont에 전달합니다. 추가에는 현재 행렬 × 배치 변환을 사용합니다. 명시적 Mat4는 둘 다 대체합니다. 색상을 생략하면 배치 색상을 사용하고 지정하면 해당 추가에서만 대체합니다. 설정은 추가와 clear() 후에도 유지합니다. 사용할 카메라 아래에서 draw를 호출합니다. draw는 현재 view/projection을 한 번 적용하고 현재 모델을 다시 적용하거나 내용을 지우지 않으며, add로 형상이 바뀐 경우에만 정점을 업로드하며 확장할 때만 생성하는 버퍼와 공유 정적 인덱스를 재사용합니다. draw(transform)은 uniform으로 transform × 기록된 좌표를 적용합니다. clear는 형상을 버립니다. setFont도 형상을 지우고 설정을 복사하며 현재 아틀라스를 공유합니다. 원본 Font의 setOversampling/setMipmaps는 아틀라스를 교체하므로 반영되지 않습니다. 먼저 설정하거나 setFont를 다시 호출하고 재구성합니다.
 글리프는 추가 순서대로 그립니다. 같은 아틀라스 페이지의 연속 구간마다 한 번 그리므로 단일 페이지 배치는 한 번, A/B/A는 세 번 그립니다. scissor는 draw 시점에 기록합니다. 블렌드는 add()가 아닌 draw() 시점의 모드를 사용합니다. 깊이, 대상 형식 및 MSAA도 draw 시점에 적용합니다. RGB는 범위 밖 float 값을 유지하며 Color alpha도 적용합니다. 출력은 drawString과 같은 straight alpha입니다. Screen/Multiply는 프레임워크의 해당 사전 곱셈 블렌드 식을 사용합니다. Font가 허용하면 밉을 사용하는 삼선형 샘플링을 적용합니다. Font처럼 픽셀당 2텍셀 이하인 경우에는 mip 0을 사용합니다. 현재 페이지 이미지와 크기를 그릴 때 확인하므로 아틀라스가 커져도 유지된 좌표가 맞습니다. Font::clearAtlas 후에는 배치를 다시 만듭니다.
 Custom은 draw() 시점의 BlendDesc 슬롯을 사용합니다. premultiplySource를 켜면 글리프 커버리지를 포함한 알파를 RGB에 곱합니다.
 '''
 related = ["Font", "Font::getGlyphInkBox", "GlyphBatch::add", "GlyphBatch::draw"]
 snippet = '''
+// tcApp.h (inside class tcApp : public App)
+Font font;
 GlyphBatch batch;
-batch.setFont(font);
-batch.add(U'A', Color(2.0f, 1.0f, 0.5f));
-batch.draw();
+void setup() override {
+    font.load(TC_FONT_SANS, 24);
+    batch.setFont(font);
+    batch.setAlignToInk(true);
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+}
+void draw() override {
+    batch.clear(); // Keeps transform and color.
+    pushMatrix();
+    translate(100, 100);
+    batch.add(U'A');
+    popMatrix();
+    batch.draw();
+}
 '''
 
 ["GlyphBatch::setFont"]
@@ -67054,7 +67084,7 @@ related = ["GlyphBatch", "Font::load"]
 
 details.en = "Copies Font settings and shares its current atlas. Later source setOversampling/setMipmaps changes do not propagate: configure first, or call setFont again and rebuild."
 details.ja = "設定をコピーし、現在のアトラスを共有します。元 Font の setOversampling/setMipmaps の変更は追従しません。先に設定するか、setFont を再度呼んで再構築してください。"
-details.ko = "설정을 복사하고 현재 아틀라스를 공유합니다. 이후 원본의 setOversampling/setMipmaps 변경은 반영되지 않습니다. 먼저 설정하거나 setFont를 다시 호출하고 재구성하세요."
+details.ko = "설정을 복사하고 현재 아틀라스를 공유합니다. 이후 원본의 setOversampling/setMipmaps 변경은 반영되지 않습니다. 먼저 설정하거나 setFont를 다시 호출하고 재구성합니다."
 
 ["GlyphBatch::setAlign"]
 category = "font"
@@ -67080,14 +67110,82 @@ description.ja = "以後の文字列追加に使う書字方向を設定しま�
 description.ko = "이후 문자열 추가의 쓰기 방향을 설정합니다. 독립 코드 포인트에는 영향을 주지 않습니다."
 related = ["Font::setWritingMode", "GlyphBatch::add"]
 
+["GlyphBatch::setTransform"]
+category = "font"
+description.en = "Sets the transform for each later glyph; defaults to identity."
+description.ja = "以後の各グリフに使う変換を設定します。既定値は単位行列です。"
+description.ko = "이후 각 글리프에 사용할 변환을 설정합니다. 기본값은 단위 행렬입니다."
+details.en = "Uses current matrix × transform for later adds without a matrix. An explicit matrix replaces both. Scaling pivots on the align point: the ink center with setAlignToInk(true). A string uses one matrix for its whole layout. Unlike setTransform, draw(transform) moves the whole recorded batch at draw time. clear() keeps transform and color."
+details.ja = "行列を省略した以後の追加に、現在の行列 × transform を使います。明示した行列は両方を置き換えます。拡大縮小の基準点は揃え位置で、setAlignToInk(true) ではインク中心です。文字列全体には 1 つの行列を使います。setTransform と異なり、draw(transform) は記録済みバッチ全体を描画時に動かします。clear() は変換と色を保持します。"
+details.ko = "행렬을 생략한 이후 추가에 현재 행렬 × transform을 사용합니다. 명시적 행렬은 둘 다 대체합니다. 배율의 기준점은 정렬 위치이며 setAlignToInk(true)에서는 잉크 중심입니다. 문자열 전체에는 하나의 행렬을 사용합니다. setTransform과 달리 draw(transform)은 기록된 배치 전체를 그릴 때 이동합니다. clear()는 변환과 색상을 유지합니다."
+related = ["GlyphBatch::add", "GlyphBatch::draw", "GlyphBatch::setAlignToInk", "GlyphBatch::clear"]
+snippet = '''
+// tcApp.h (inside class tcApp : public App)
+Font font;
+GlyphBatch batch;
+void setup() override {
+    font.load(TC_FONT_SANS, 24);
+    batch.setFont(font);
+    batch.setAlignToInk(true);
+    batch.setTransform(Mat4::scale(2));
+    batch.setColor(Color(1, 0.5f, 0.2f));
+}
+void draw() override {
+    batch.clear(); // Keeps transform and color.
+    pushMatrix();
+    translate(100, 100);
+    batch.add(U'A');
+    popMatrix();
+    batch.draw();
+}
+'''
+
+["GlyphBatch::getTransform"]
+category = "font"
+description.en = "Returns the current batch transform."
+description.ja = "現在のバッチ変換を返します。"
+description.ko = "현재 배치 변환을 반환합니다."
+related = ["GlyphBatch::setTransform"]
+
+["GlyphBatch::resetTransform"]
+category = "font"
+description.en = "Resets the batch transform to identity."
+description.ja = "バッチ変換を単位行列に戻します。"
+description.ko = "배치 변환을 단위 행렬로 초기화합니다."
+related = ["GlyphBatch::setTransform"]
+
+["GlyphBatch::setColor"]
+category = "font"
+description.en = "Sets the color for later adds that omit a color; defaults to white (1,1,1,1)."
+description.ja = "色を省略した以後の追加に使う色を設定します。既定値は白 (1,1,1,1) です。"
+description.ko = "색상을 생략한 이후 추가에 사용할 색상을 설정합니다. 기본값은 흰색 (1,1,1,1)입니다."
+details.en = "A color passed to add replaces this setting for that add. The setting persists until setColor or resetColor, including across clear()."
+details.ja = "add に色を渡すと、その追加だけこの設定を置き換えます。設定は setColor または resetColor まで保持し、clear() でも残ります。"
+details.ko = "add에 전달한 색상은 해당 추가에서만 이 설정을 대체합니다. 설정은 setColor 또는 resetColor까지 유지하며 clear() 후에도 남습니다."
+related = ["GlyphBatch::add", "GlyphBatch::resetColor", "GlyphBatch::clear"]
+
+["GlyphBatch::getColor"]
+category = "font"
+description.en = "Returns the current batch color."
+description.ja = "現在のバッチ色を返します。"
+description.ko = "현재 배치 색상을 반환합니다."
+related = ["GlyphBatch::setColor"]
+
+["GlyphBatch::resetColor"]
+category = "font"
+description.en = "Resets the batch color to white (1,1,1,1)."
+description.ja = "バッチ色を白 (1,1,1,1) に戻します。"
+description.ko = "배치 색상을 흰색 (1,1,1,1)으로 초기화합니다."
+related = ["GlyphBatch::setColor"]
+
 ["GlyphBatch::add"]
 category = "font"
-description.en = "Appends colored glyph quads at the current matrix or an explicit model matrix."
-description.ja = "現在の行列または明示したモデル行列で、色付きグリフを追加します。"
-description.ko = "현재 행렬 또는 명시적 모델 행렬로 색상이 있는 글리프를 추가합니다."
-details.en = "The codepoint overload adds one independent glyph without cursor advance or vertical substitution. The Mat4 overload replaces the current model matrix; the active camera view/projection is applied once at draw time. The UTF-8 string overload uses the retained Font's drawString layout, including wrapping, vertical forms, and TCY. Color floats are copied without clamping. Additions mark GPU geometry dirty; existing recorded draws retain their previous buffers. Empty ink emits no quad. Call on the main thread."
-details.ja = "コードポイント版は、カーソル送りや縦書き字形への置換を行わず、単独グリフを追加します。Mat4 版は現在のモデル行列を置き換えます。現在のカメラの view/projection は draw 時に一度適用します。UTF-8 文字列版は、保持した Font の drawString と同じ配置を使い、折り返し、縦書き字形、縦中横を反映します。色の float 値は制限せずにコピーします。追加後は GPU 形状を更新対象にしますが、記録済みの描画は以前のバッファを保持します。インクが空の場合は四角形を追加しません。メインスレッドで呼び出してください。"
-details.ko = "코드 포인트 버전은 커서 전진이나 세로쓰기 글리프 대체 없이 독립 글리프를 추가합니다. Mat4 버전은 현재 모델 행렬을 대체합니다. 현재 카메라의 view/projection은 draw 시점에 한 번 적용합니다. UTF-8 문자열 버전은 유지한 Font의 drawString 배치를 사용하며 자동 줄바꿈, 세로쓰기 글리프 및 다테추요코를 반영합니다. 색상의 float 값은 제한 없이 복사합니다. 추가하면 GPU 형상을 갱신 대상으로 표시하지만 기록된 그리기는 이전 버퍼를 유지합니다. 잉크가 비어 있으면 사각형을 추가하지 않습니다. 메인 스레드에서 호출합니다."
+description.en = "Appends a glyph or UTF-8 string, using batch settings for omitted arguments."
+description.ja = "グリフまたは UTF-8 文字列を追加します。省略した引数にはバッチ設定を使います。"
+description.ko = "글리프 또는 UTF-8 문자열을 추가하며 생략한 인수에는 배치 설정을 사용합니다."
+details.en = "The codepoint overload adds one independent glyph without cursor advance or vertical substitution. add(cp), add(cp, color), add(text), and add(text, color) use current matrix × batch transform. add(cp, M) and add(cp, M, color) use only M. An omitted color uses the batch color; a supplied color replaces it for that add. The Mat4 overload replaces both current and batch matrices; the active camera view/projection is applied once at draw time. The UTF-8 string overload uses the retained Font's drawString layout, including wrapping, vertical forms, and TCY. Color floats are copied without clamping. Additions mark GPU geometry dirty; existing recorded draws retain their previous buffers. Empty ink emits no quad. Call on the main thread."
+details.ja = "コードポイント版は、カーソル送りや縦書き字形への置換を行わず、単独グリフを追加します。add(cp)、add(cp, color)、add(text)、add(text, color) は現在の行列 × バッチ変換を使います。add(cp, M)、add(cp, M, color) は M だけを使います。色を省略するとバッチ色を使い、指定するとその追加だけ置き換えます。Mat4 版は現在とバッチの両行列を置き換えます。現在のカメラの view/projection は draw 時に一度適用します。UTF-8 文字列版は、保持した Font の drawString と同じ配置を使い、折り返し、縦書き字形、縦中横を反映します。色の float 値は制限せずにコピーします。追加後は GPU 形状を更新対象にしますが、記録済みの描画は以前のバッファを保持します。インクが空の場合は四角形を追加しません。メインスレッドで呼び出してください。"
+details.ko = "코드 포인트 버전은 커서 전진이나 세로쓰기 글리프 대체 없이 독립 글리프를 추가합니다. add(cp), add(cp, color), add(text), add(text, color)는 현재 행렬 × 배치 변환을 사용합니다. add(cp, M), add(cp, M, color)는 M만 사용합니다. 색상을 생략하면 배치 색상을 사용하고 지정하면 해당 추가에서만 대체합니다. Mat4 버전은 현재 행렬과 배치 행렬을 모두 대체합니다. 현재 카메라의 view/projection은 draw 시점에 한 번 적용합니다. UTF-8 문자열 버전은 유지한 Font의 drawString 배치를 사용하며 자동 줄바꿈, 세로쓰기 글리프 및 다테추요코를 반영합니다. 색상의 float 값은 제한 없이 복사합니다. 추가하면 GPU 형상을 갱신 대상으로 표시하지만 기록된 그리기는 이전 버퍼를 유지합니다. 잉크가 비어 있으면 사각형을 추가하지 않습니다. 메인 스레드에서 호출합니다."
 related = ["GlyphBatch::draw", "Font::forEachGlyph"]
 
 ["GlyphBatch::draw"]
@@ -67105,9 +67203,9 @@ category = "font"
 description.en = "Discards retained geometry while keeping the font and batch settings."
 description.ja = "フォントとバッチ設定を保ったまま、保持した形状を破棄します。"
 description.ko = "폰트와 배치 설정을 유지하면서 보관한 형상을 버립니다."
-details.en = "Keeps CPU/GPU capacity for rebuilding each frame. Already submitted draws keep valid GPU resources until replay. draw does not clear automatically."
-details.ja = "送信済みの描画は再生まで有効な GPU リソースを保持します。draw は自動で消去しません。"
-details.ko = "제출된 그리기는 재생할 때까지 유효한 GPU 리소스를 유지합니다. draw는 자동으로 지우지 않습니다."
+details.en = "Keeps transform, color, alignment, and CPU/GPU capacity for rebuilding each frame. Already submitted draws keep valid GPU resources until replay. draw does not clear automatically."
+details.ja = "変換、色、揃えを保持します。送信済みの描画は再生まで有効な GPU リソースを保持します。draw は自動で消去しません。"
+details.ko = "변환, 색상, 정렬을 유지합니다. 제출된 그리기는 재생할 때까지 유효한 GPU 리소스를 유지합니다. draw는 자동으로 지우지 않습니다."
 related = ["GlyphBatch::draw"]
 
 ["Font::getGlyphInkBox"]
