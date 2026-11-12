@@ -1,3 +1,10 @@
+// =============================================================================
+// easyCamWindowExample - Orbit independent cameras in two windows.
+//
+// Each window owns its camera and receives its own mouse input.
+// Secondary windows require macOS, Windows, or Linux.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

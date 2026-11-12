@@ -1,3 +1,10 @@
+// =============================================================================
+// systemInfoExample - Display device status and sensor readings.
+//
+// Availability depends on the platform and hardware; some readings require
+// OS permission and may be unavailable on desktop systems.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

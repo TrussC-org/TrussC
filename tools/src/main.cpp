@@ -5087,6 +5087,16 @@ _trusscli() {
             _files -/
             ;;
         cp)
+            case "$words[CURRENT-1]" in
+                --tc-root)
+                    _files -/
+                    return
+                    ;;
+                --ide)
+                    compadd vscode cursor xcode vs cmake
+                    return
+                    ;;
+            esac
             local -a cp_opts
             cp_opts=('-n:Dry run' '--dry-run:Dry run' '--no-git:Use built-in skip list'
                      '--web:Enable web' '--android:Enable android' '--ios:Enable ios'
@@ -5095,6 +5105,20 @@ _trusscli() {
             _files -/
             ;;
         update|build|run|clean|dist)
+            case "$words[CURRENT-1]" in
+                -p|--path|--tc-root)
+                    _files -/
+                    return
+                    ;;
+                --ide)
+                    compadd vscode cursor xcode vs cmake
+                    return
+                    ;;
+                --session)
+                    compadd labwc x11
+                    return
+                    ;;
+            esac
             local -a opts
             case "$words[2]" in
                 dist)   opts=('--release:Release build' '--archive:Also write a zip / tar.gz' '--installer:Also build an installer (setup.exe, pacman package or .deb)' '--zip:Also write a zip / tar.gz' '--no-build:Package the existing build' '--dry-run:List the package contents only' '--init:Write a dist.json template' '-o:Output folder' '--output:Output folder' '--app-name:App name' '--app-version:App version' '--app-author:App author' '-j:Parallel jobs' '--jobs:Parallel jobs' '--verbose:Full build output' '-p:Project path' '--path:Project path') ;;

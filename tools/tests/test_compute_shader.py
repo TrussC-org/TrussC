@@ -191,11 +191,11 @@ class ComputeShaderTests(unittest.TestCase):
             directory = Path(directory)
             shaders = directory / 'src'
             shaders.mkdir()
-            shutil.copyfile(ROOT / 'examples/graphics/computeTextureExample/src/texture.compute.glsl',
+            shutil.copyfile(ROOT / 'examples/compute/computeTextureExample/src/texture.compute.glsl',
                             shaders / 'texture.compute.glsl')
-            shutil.copyfile(ROOT / 'examples/graphics/computeParticlesExample/src/particles.compute.glsl',
+            shutil.copyfile(ROOT / 'examples/compute/computeParticlesExample/src/particles.compute.glsl',
                             shaders / 'particles.compute.glsl')
-            shutil.copyfile(ROOT / 'examples/graphics/computeParticlesExample/src/step.compute.glsl',
+            shutil.copyfile(ROOT / 'examples/compute/computeParticlesExample/src/step.compute.glsl',
                             shaders / 'step.compute.glsl')
             shutil.copyfile(ROOT / 'core/tests/computeBuffer/src/pattern.compute.glsl',
                             shaders / 'buffer.compute.glsl')

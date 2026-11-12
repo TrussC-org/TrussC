@@ -1,3 +1,9 @@
+// =============================================================================
+// dragDropExample - Load image files dropped into the window.
+//
+// The drop event supplies file paths; supported images are displayed in the app.
+// =============================================================================
+
 #include "TrussC.h"
 #include "tcApp.h"
 #include <sstream>

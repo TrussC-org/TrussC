@@ -1,3 +1,9 @@
+// =============================================================================
+// fontWrapExample - Wrap text within horizontal and vertical layout bounds.
+//
+// Compare line breaks and spacing with the displayed bounds.
+// =============================================================================
+
 #include "tcApp.h"
 #include "TrussC.h"
 

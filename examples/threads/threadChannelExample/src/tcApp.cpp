@@ -1,3 +1,10 @@
+// =============================================================================
+// threadChannelExample - Exchange analysis work with a background thread.
+//
+// ThreadChannel transfers requests and results without sharing a mutable pixel
+// array. The main thread polls for completed analysis while continuing to draw.
+// =============================================================================
+
 #include "tcApp.h"
 #include <cmath>
 

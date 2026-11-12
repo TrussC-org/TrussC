@@ -1,3 +1,10 @@
+// =============================================================================
+// hitTestExample - Route pointer events through a transformed node tree.
+//
+// Hit testing uses each node's local coordinates. Compare overlapping nodes
+// and event handling while interacting with the scene.
+// =============================================================================
+
 #include "tcApp.h"
 
 

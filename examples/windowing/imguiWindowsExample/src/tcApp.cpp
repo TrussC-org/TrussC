@@ -1,3 +1,10 @@
+// =============================================================================
+// imguiWindowsExample - Run independent ImGui panels in two windows.
+//
+// Each App sets up its own ImGui context; W toggles the secondary window.
+// Secondary windows require macOS, Windows, or Linux.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

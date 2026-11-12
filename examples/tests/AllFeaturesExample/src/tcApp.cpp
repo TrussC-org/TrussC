@@ -1,3 +1,9 @@
+// =============================================================================
+// AllFeaturesExample - Compile and link the public API surface.
+//
+// This is a test app: API coverage calls are compiled but never executed.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

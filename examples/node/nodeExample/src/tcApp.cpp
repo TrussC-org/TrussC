@@ -1,3 +1,10 @@
+// =============================================================================
+// nodeExample - Compose animated nodes with local transforms.
+//
+// Children inherit parent transforms and update automatically.
+// Mouse positions are converted into each container's coordinate system.
+// =============================================================================
+
 #include "tcApp.h"
 
 using namespace std;

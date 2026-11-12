@@ -40,6 +40,4 @@ cmake --build addons/tcxImGui/example-quadWarp/build-linux
 addons/tcxImGui/example-quadWarp/bin/example-quadWarp
 ```
 
-Pass `--self-check` under a display (Xvfb works on Linux) for synthetic input,
-mapping, cancellation, per-frame input forwarding, handle toggling and ImGui button clicks.
-The checks live separately in `src/selfCheck.cpp`.
+Automated checks live in `examples/tests/quadWarp` and run as a separate test app.

@@ -1,3 +1,10 @@
+// =============================================================================
+// eventsExample - Subscribe to input events and toggle listeners.
+//
+// Keep EventListener objects alive to retain subscriptions; disconnecting one
+// listener leaves the other input subscriptions active.
+// =============================================================================
+
 #include "tcApp.h"
 #include <sstream>
 

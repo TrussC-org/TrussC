@@ -1,3 +1,9 @@
+// =============================================================================
+// strokeExample - Draw connected strokes with adjustable styling.
+//
+// Compare stroke caps and joins; use Space to switch the displayed mode.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

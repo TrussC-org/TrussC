@@ -1,3 +1,9 @@
+// =============================================================================
+// fboExample - Render into an Fbo and draw its texture.
+//
+// Offscreen drawing uses begin/end; the resulting image can be reused on screen.
+// =============================================================================
+
 #include "tcApp.h"
 
 void tcApp::setup() {

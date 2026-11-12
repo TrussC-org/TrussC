@@ -1,3 +1,9 @@
+// =============================================================================
+// consoleExample - Receive stdin commands and emit JSON responses.
+//
+// Opt in with console::start; custom commands spawn or clear the displayed balls.
+// =============================================================================
+
 #include "tcApp.h"
 #include <cerrno>
 #include <cmath>

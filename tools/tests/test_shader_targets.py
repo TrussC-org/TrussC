@@ -26,7 +26,7 @@ def probe_directory(prefix):
 class ShaderTargetTests(unittest.TestCase):
     def test_plain_glsl_storage_requires_compute_suffix(self):
         module = ROOT / 'core/cmake/trussc_shaders.cmake'
-        storage = (ROOT / 'examples/graphics/computeParticlesExample/src/particles.compute.glsl').read_text(encoding='utf-8')
+        storage = (ROOT / 'examples/compute/computeParticlesExample/src/particles.compute.glsl').read_text(encoding='utf-8')
         graphics = (ROOT / 'core/tests/hotReloadLifecycle/src/shaders/reloadProbe.glsl').read_text(encoding='utf-8')
         graphics = graphics.replace('gl_Position = position;',
                                     'vec4 vertexBuffer = position; gl_Position = vertexBuffer;')

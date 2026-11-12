@@ -1,3 +1,10 @@
+// =============================================================================
+// fontPathExample - Draw scalable text outlines and per-glyph paths.
+//
+// Unlike atlas text, outline paths stay crisp under large transforms.
+// The panels compare stroked paths, vertical writing, and animated glyph fills.
+// =============================================================================
+
 #include "tcApp.h"
 #include "TrussC.h"
 
