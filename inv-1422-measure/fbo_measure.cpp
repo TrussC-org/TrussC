@@ -212,13 +212,15 @@ void bench(const Case& c,int rounds,int batch) {
 }
 int main(int argc,char** argv) {
     try {
-        bool gles=false,onlySmoke=false; int rounds=15,batch=3;
+        bool gles=false,onlySmoke=false,extensions=false; int rounds=15,batch=3;
         for(int i=1;i<argc;++i) {
             if(!std::strcmp(argv[i],"--gles")) gles=true;
+            else if(!std::strcmp(argv[i],"--gl")) gles=false;
+            else if(!std::strcmp(argv[i],"--extensions")) extensions=true;
             else if(!std::strcmp(argv[i],"--smoke-only")) onlySmoke=true;
             else if(!std::strcmp(argv[i],"--rounds")&&i+1<argc) rounds=std::stoi(argv[++i]);
             else if(!std::strcmp(argv[i],"--batch")&&i+1<argc) batch=std::stoi(argv[++i]);
-            else throw std::runtime_error("usage: fbo_measure [--gles] [--smoke-only] [--rounds N] [--batch N]");
+            else throw std::runtime_error("usage: fbo_measure [--gl|--gles] [--extensions] [--smoke-only] [--rounds N] [--batch N]");
         }
         require(rounds>0&&batch>0,"positive sample counts required");
         Display* xd=XOpenDisplay(nullptr); require(xd,"XOpenDisplay failed (explicit DISPLAY required)");
@@ -232,6 +234,22 @@ int main(int argc,char** argv) {
         EGLint surfaceAttrs[]={EGL_WIDTH,64,EGL_HEIGHT,64,EGL_NONE};
         EGLSurface surface=eglCreatePbufferSurface(d,config,surfaceAttrs); require(surface!=EGL_NO_SURFACE,"EGL pbuffer");
         require(eglMakeCurrent(d,surface,surface,context),"EGL current");
+        if(extensions) {
+            std::printf("GL_VERSION=%s\n",glGetString(GL_VERSION));
+            std::printf("GL_RENDERER=%s\n",glGetString(GL_RENDERER));
+            std::printf("GL_SHADING_LANGUAGE_VERSION=%s\n",glGetString(GL_SHADING_LANGUAGE_VERSION));
+            if(gles) {
+                std::printf("GL_EXTENSIONS=%s\n",glGetString(GL_EXTENSIONS));
+            } else {
+                GLint extensionCount=0;
+                glGetIntegerv(GL_NUM_EXTENSIONS,&extensionCount);
+                std::puts("GL_EXTENSIONS:");
+                for(GLint i=0;i<extensionCount;++i) std::printf("%s\n",glGetStringi(GL_EXTENSIONS,static_cast<GLuint>(i)));
+            }
+            checked();
+            eglMakeCurrent(d,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT); eglDestroySurface(d,surface); eglDestroyContext(d,context); eglTerminate(d); XCloseDisplay(xd);
+            return 0;
+        }
         std::printf("DEVICE api=%s vendor=%s renderer=%s version=%s\n",gles?"GLES":"GL",glGetString(GL_VENDOR),glGetString(GL_RENDERER),glGetString(GL_VERSION));
         std::printf("METHOD rounds=%d batch=%d warmup_per_block=2 order=rotating_B_E_A timer=steady_clock_with_glFinish frozen=37x23_markers\n",rounds,batch);
         initShader(gles);

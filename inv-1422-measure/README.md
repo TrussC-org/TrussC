@@ -2,6 +2,18 @@
 
 Raspberry Pi 5 (Mesa V3D, GLES). Assumes already installed: a C++17 compiler, Python 3, and EGL / GLESv2 / X11 development packages. Install nothing; if something is missing, stop and report it.
 
+## Extension check (#1422 clip control) — run this first
+
+```sh
+cd inv-1422-measure
+c++ -std=c++17 -O2 -Wall -Wextra -Werror fbo_measure.cpp -o fbo_measure -lEGL -lGLESv2 -lX11
+export DISPLAY=:0          # the Pi's own desktop session (use its actual display number)
+unset LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER
+./fbo_measure --gles --extensions > PI_EXTENSIONS.log 2>&1; cat PI_EXTENSIONS.log
+```
+
+Send back PI_EXTENSIONS.log. The answer we need: does it list `GL_EXT_clip_control`, and what are GL_VERSION / GL_RENDERER (must be V3D, not llvmpipe)?
+
 ## Exact commands (run on the Pi, in a desktop session backed by V3D)
 
 ```sh
