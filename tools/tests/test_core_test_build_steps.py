@@ -20,6 +20,9 @@ REVIEWED_TARGET_OPTIONS = {
     ('customBlend', 'target_link_options',
      ('allCoreTests', 'PRIVATE',
       f'SHELL:--preload-file {ROOT}/core/tests/customBlend/../renderTargetState/src/fixture.ttf@/data/customBlend-fixture.ttf')),
+    ('textBlend', 'target_link_options',
+     ('allCoreTests', 'PRIVATE',
+      f'SHELL:--preload-file {ROOT}/core/tests/textBlend/../renderTargetState/src/fixture.ttf@/data/textBlend-fixture.ttf')),
     # HEAD's legacy define has no consumer in the merged production sources;
     # it enables no interception. Preserve the existing per-test recipe.
     ('eglWindowSurfaces', 'target_compile_definitions',
