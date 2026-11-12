@@ -10274,7 +10274,7 @@ description.en = "Draws text with the loaded font."
 description.ja = "読み込んだフォントでテキストを描画する。"
 description.ko = "로드된 폰트로 텍스트를 그린다."
 details.en = '''
-- Draws UTF-8 `text` at the alignment anchor `(x, y)` using the current color, transform, and rendering target; an unloaded font or empty string draws nothing.
+- Draws UTF-8 `text` at the alignment anchor `(x, y)` using the current color, blend mode, transform, and rendering target; an unloaded font or empty string draws nothing.
 - The three-argument overload uses the global alignment set by `setTextAlign`, rather than the values stored by `Font::setAlign`; the five-argument overload uses its explicit `Direction h, Direction v` arguments.
 - Missing characters use glyph index `0` in the loaded font; there is no automatic fallback to OS fonts. Load a font that contains the characters you need.
 - Horizontal writing advances left to right and starts a new row at each newline; `WritingMode::VerticalRL` advances top to bottom and starts successive columns to the left. Horizontal tabs advance by four spaces; vertical tabs are ignored.
@@ -10284,7 +10284,7 @@ details.en = '''
 - Call Font methods on the main thread. `loadAsync` handles background preparation internally, while shared-cache access, GPU work, and completion delivery occur on the main thread.
 '''
 details.ja = '''
-- UTF-8 の `text` を、揃えの基準点 `(x, y)` に現在の色、変換、描画先で描画します。フォントが未読み込みの場合や文字列が空の場合は何も描画しません。
+- UTF-8 の `text` を、揃えの基準点 `(x, y)` に現在の色、ブレンドモード、変換、描画先で描画します。フォントが未読み込みの場合や文字列が空の場合は何も描画しません。
 - 引数が 3 個の版は、`Font::setAlign` が保持する値ではなく、`setTextAlign` で設定したグローバルな揃えを使います。引数が 5 個の版は、明示した `Direction h, Direction v` を使います。
 - 読み込んだフォントにない文字はグリフ番号 `0` を使い、OS のフォントには自動で切り替わりません。必要な文字を含むフォントを読み込んでください。
 - 横書きは左から右に進み、改行で次の行へ移ります。`WritingMode::VerticalRL` は上から下に進み、改行で左隣の列へ移ります。横書きのタブはスペース 4 個分進み、縦書きのタブは無視します。
@@ -10294,7 +10294,7 @@ details.ja = '''
 - Font の関数はメインスレッドで呼び出してください。`loadAsync` は内部でバックグラウンドの準備を行いますが、共有キャッシュへのアクセス、GPU 処理、完了通知はメインスレッドで行います。
 '''
 details.ko = '''
-- UTF-8 `text`를 정렬 기준점 `(x, y)`에 현재 색상, 변환 및 렌더링 대상으로 그립니다. 폰트가 로드되지 않았거나 문자열이 비어 있으면 아무것도 그리지 않습니다.
+- UTF-8 `text`를 정렬 기준점 `(x, y)`에 현재 색상, 블렌드 모드, 변환 및 렌더링 대상으로 그립니다. 폰트가 로드되지 않았거나 문자열이 비어 있으면 아무것도 그리지 않습니다.
 - 인수가 세 개인 오버로드는 `Font::setAlign`에 저장된 값 대신 `setTextAlign`으로 설정한 전역 정렬을 사용합니다. 인수가 다섯 개인 오버로드는 명시한 `Direction h, Direction v`를 사용합니다.
 - 로드한 폰트에 없는 문자는 글리프 인덱스 `0`을 사용하며 OS 폰트로 자동 전환하지 않습니다. 필요한 문자가 포함된 폰트를 로드해야 합니다.
 - 가로쓰기는 왼쪽에서 오른쪽으로 진행하고 줄바꿈에서 다음 행으로 이동합니다. `WritingMode::VerticalRL`은 위에서 아래로 진행하고 줄바꿈에서 왼쪽 열로 이동합니다. 가로쓰기의 탭은 공백 네 개만큼 진행하며 세로쓰기의 탭은 무시합니다.
@@ -53669,6 +53669,15 @@ description.en = "Set the blend mode used by drawing from now on."
 description.ja = "これ以降の描画が使うブレンドモードを設定する。"
 description.ko = "이후 그리기에 사용할 블렌드 모드를 설정한다."
 details.en = '''
+- Applies to shapes, images, Font::drawString and GlyphBatch::draw on windows and Fbos, including MSAA. Text coverage scales source alpha; Multiply and Screen premultiply that covered source automatically. Custom uses BlendDesc::premultiplySource, like shapes and images. The mode persists until changed.
+
+With a Font loaded in setup(), draw additive text, then restore Alpha:
+```cpp
+setBlendMode(BlendMode::Add);
+font.drawString("Glow", 20, 20);
+resetBlendMode();
+```
+
 - `setBlendMode()` chooses how new drawing is combined with what is already on the target. The modes are `BlendMode::Alpha` (the default, normal alpha blending), `Add` (additive), `Multiply`, `Screen`, `Subtract`, and `Disabled` (no blending; the new color simply overwrites the old one).
 - `Custom` selects the slot stored by `setCustomBlendDesc`; `getBlendMode()` then returns `Custom`. See `BlendDesc` for literal equations and the no-depth-write rule.
 - The mode stays in effect until you change it. It works the same way on the main window and inside an `Fbo`, it carries over to later frames, and it is passed on to a later `Fbo::begin()`. A forgotten `Add` or `Multiply` can therefore affect drawing you did not intend. When you are done with a temporary mode, call `resetBlendMode()` or wrap the change in `pushStyle()` and `popStyle()`.
@@ -53678,6 +53687,15 @@ details.en = '''
 - A translucent `Alpha` shape also writes depth, hiding anything drawn behind it afterwards. For correct transparency, draw opaque objects first, then translucent ones from back to front; TrussC does not sort draws.
 '''
 details.ja = '''
+- ウィンドウと Fbo（MSAA を含む）の図形、画像、Font::drawString、GlyphBatch::draw に適用します。文字の被覆率を描画元のアルファに掛け、Multiply と Screen ではその描画元を自動で乗算済みにします。Custom は図形・画像と同じ BlendDesc::premultiplySource に従います。変更するまでモードは維持されます。
+
+setup() で読み込んだ Font を使い、加算で文字を描いて Alpha に戻します。
+```cpp
+setBlendMode(BlendMode::Add);
+font.drawString("Glow", 20, 20);
+resetBlendMode();
+```
+
 - `setBlendMode()` は、これから描くものを、すでに描かれている内容とどのように合成するかを選びます。モードは `BlendMode::Alpha`（デフォルト。通常のアルファブレンディング）、`Add`（加算）、`Multiply`（乗算）、`Screen`（スクリーン）、`Subtract`（減算）、`Disabled`（ブレンドせず、新しい色でそのまま上書き）です。
 - `Custom` は `setCustomBlendDesc` で保存したスロットを選択し、`getBlendMode()` も `Custom` を返します。式の適用と深度を書き込まない規則は `BlendDesc` を参照してください。
 - 設定したモードは、変更するまで有効です。メインウィンドウでも `Fbo` の中でも同じように働き、次のフレームにも、その後の `Fbo::begin()` にも引き継がれます。そのため、`Add` や `Multiply` を戻し忘れると、意図しない描画にも影響します。一時的なモードが済んだら `resetBlendMode()` を呼ぶか、変更を `pushStyle()` と `popStyle()` で囲んでください。
@@ -53687,6 +53705,15 @@ details.ja = '''
 - 半透明の `Alpha` の図形も深度を書き込むため、そのあとに奥へ描いたものは隠れます。透明度を正しく合成するには、不透明な物体を先に描き、次に半透明の物体を奥から手前へ描いてください（TrussC は描画順を並べ替えません）。
 '''
 details.ko = '''
+- 창과 Fbo(MSAA 포함)의 도형, 이미지, Font::drawString, GlyphBatch::draw에 적용됩니다. 텍스트 커버리지는 소스 알파에 곱해지며 Multiply와 Screen은 해당 소스를 자동으로 사전 곱셈합니다. Custom은 도형 및 이미지와 같은 BlendDesc::premultiplySource를 따릅니다. 모드는 변경할 때까지 유지됩니다.
+
+setup()에서 로드한 Font로 가산 텍스트를 그린 다음 Alpha로 복원합니다.
+```cpp
+setBlendMode(BlendMode::Add);
+font.drawString("Glow", 20, 20);
+resetBlendMode();
+```
+
 - `setBlendMode()`는 지금부터 그리는 내용을 이미 그려진 내용과 어떻게 합성할지 선택합니다. 모드는 `BlendMode::Alpha`(기본값, 일반 알파 블렌딩), `Add`(가산), `Multiply`(곱셈), `Screen`(스크린), `Subtract`(감산), `Disabled`(블렌딩 없이 새 색으로 그대로 덮어쓰기)입니다.
 - `Custom`은 `setCustomBlendDesc`로 저장한 슬롯을 선택하며 `getBlendMode()`도 `Custom`을 반환합니다. 수식 적용과 깊이를 기록하지 않는 규칙은 `BlendDesc`를 참조하십시오.
 - 설정한 모드는 바꾸기 전까지 유지됩니다. 메인 윈도우에서도 `Fbo` 안에서도 똑같이 동작하며, 다음 프레임에도, 이후의 `Fbo::begin()`에도 이어집니다. 그래서 `Add`나 `Multiply`를 되돌리는 것을 잊으면 의도하지 않은 그리기에도 영향을 줍니다. 임시 모드가 끝나면 `resetBlendMode()`를 호출하거나 변경을 `pushStyle()`과 `popStyle()`로 감싸세요.

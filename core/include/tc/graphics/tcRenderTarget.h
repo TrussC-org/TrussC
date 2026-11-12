@@ -220,7 +220,8 @@ inline sg_pipeline_desc pipeDescPremult(bool depthTest = false) {
 // R8 glyph coverage supplies alpha, then optionally premultiplies source RGB.
 inline sg_pipeline_desc pipeDescCoverage2D(bool depthTest = false, BlendMode mode = BlendMode::Alpha, const BlendDesc& custom = {}) {
     sg_pipeline_desc d = pipeDesc2D(mode, depthTest, custom);
-    d.shader = mode == BlendMode::Custom && custom.premultiplySource ?
+    d.shader = mode == BlendMode::Multiply || mode == BlendMode::Screen ||
+        (mode == BlendMode::Custom && custom.premultiplySource) ?
         sglCoveragePremultShader() : sglCoverageShader();
     d.layout = sglColorVertexLayout();
     return d;
