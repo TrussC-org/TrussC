@@ -112,10 +112,17 @@ static bool preCompileAllocationFailure(const fs::path& dir, bool solPanic) {
         lua_type(raw, base + 4) == LUA_TTABLE && lua_topointer(raw, base + 4) == table;
 }
 
+int runLuaEventTests(const std::filesystem::path& temp);
+
 int main(int argc, char** argv) {
     fs::path dir = fs::temp_directory_path() /
         ("tcxLua-tests-" + to_string(chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(dir);
+    if (argc > 1 && string(argv[1]) == "--events-only") {
+        int failures = runLuaEventTests(dir);
+        fs::remove_all(dir);
+        return failures ? 1 : 0;
+    }
     check("pre-compile allocation failure: custom panic", preCompileAllocationFailure(dir, false));
     check("pre-compile allocation failure: sol panic", preCompileAllocationFailure(dir, true));
     if (argc > 1 && string(argv[1]) == "--pre-compile-allocation") {
@@ -458,6 +465,8 @@ int main(int argc, char** argv) {
             root:append_child("empty"):text():set("")
             root:append_child("item"):append_attribute("value"):set("seven")
             root:child("item"):text():set("text & <markup>")
+            local children = root:children()
+            assert(#children == 2 and children[2]:name() == "item")
             local serialized = xml:toString()
             assert(serialized:find("<empty />", 1, true))
             local restored = parseXml(serialized)
@@ -519,6 +528,8 @@ int main(int argc, char** argv) {
             check(label.c_str(), result.valid() && result.get<bool>());
         }
     }
+
+    check("Lua event lifetime and delivery regressions", runLuaEventTests(dir) == 0);
 
     bool defaultHandlerThrows = false;
     try {

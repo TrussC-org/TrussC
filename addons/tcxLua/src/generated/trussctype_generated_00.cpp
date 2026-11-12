@@ -32,10 +32,10 @@ void tcxLuaGenShard_00(const std::shared_ptr<sol::state>& lua) {
         >();
         sol::usertype<trussc::VideoPlayer> t = lua->new_usertype<trussc::VideoPlayer>("VideoPlayer", constructors, sol::call_constructor, constructors);
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
-        t["onError"] = &trussc::VideoPlayer::onError;
+        t["onError"] = tcx_lua_detail::eventProperty<trussc::VideoPlayer>(&trussc::VideoPlayer::onError);
 #endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
-        t["onLoad"] = &trussc::VideoPlayer::onLoad;
+        t["onLoad"] = tcx_lua_detail::eventProperty<trussc::VideoPlayer>(&trussc::VideoPlayer::onLoad);
 #endif
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE) || defined(__EMSCRIPTEN__)
         t["close"] = &trussc::VideoPlayer::close;

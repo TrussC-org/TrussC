@@ -77,3 +77,16 @@ their SoundBuffer and stay mutable, all three EasyCam fluent methods return the
 owning Lua self, and playing-sound entries survive collection of their snapshot
 table without aliasing another snapshot. Image/Pixels also crop a 2x1 source at
 INT_MAX to check clamp-to-edge behavior with a small allocation.
+
+## Event listener regressions
+
+The headless harness checks closure captures through GC, ignored handles,
+owner cleanup, immediate and queued disconnect, disconnect during delivery,
+reload, App exit, Lua state close, main-thread delivery, and retained payloads.
+It runs real Image/SoundBuffer asynchronous decoders with explicit worker
+completion and main-thread delivery, plus injected payloads for
+MicInput/AudioEngine notifications and console input. All four Tween completion
+events are exercised. Audio-thread callback registrations remain absent.
+
+Run the suite with both the default Lua engine and `-DUSE_LUAJIT=ON` in a
+separate build directory.
