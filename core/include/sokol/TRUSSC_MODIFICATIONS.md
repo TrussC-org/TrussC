@@ -105,7 +105,7 @@ the feature entries take precedence over historical upstream behavior.
 | Win32: `_sapp_tc_wndproc_impl` | KEY/SYSKEY use the 9-bit scancode including extended bit; WM_CHAR assembles UTF-16 pairs per window and filters control characters. |
 | Win32: `_sapp_tc_win32_init_dpi`, `_sapp_tc_win32_update_scale` | Set process awareness once (prefer per-monitor v2); window DPI/96 sizes the client, high_dpi selects framebuffer scale, and low-DPI mouse coordinates divide by window scale. |
 | Win32: WM_DPICHANGED / `_sapp_tc_win32_tick` | Apply the OS-proposed rectangle, then coalesce dimension/render-target resize into the tick; WM_SIZE tracks iconify/restore without calling ResizeBuffers. |
-| Win32: `_sapp_tc_d3d11_create_swapchain` | Flip-discard backbuffers are single-sampled; use a separate MSAA render target, per-window maximum frame latency (default 3) when waitables are available, and disable DXGI Alt+Enter. |
+| Win32: `_sapp_tc_d3d11_create_swapchain` | Flip-discard backbuffers are single-sampled; use a separate MSAA render target, per-window maximum frame latency (default 2) when waitables are available, and disable DXGI Alt+Enter. |
 | Win32: `_sapp_tc_d3d11_resize` | Release backbuffer views, unbind render targets and Flush before ResizeBuffers; carry creation flags through resize so the waitable remains valid. |
 | Win32: `_sapp_tc_win32_set_fullscreen` | Fullscreen swaps window styles and saves/restores the windowed rectangle; it is borderless window fullscreen, not exclusive DXGI mode. |
 | Win32: `_sapp_tc_win32_apply_cursor`, WM_SETCURSOR | Apply/hide cursors only in the client area with SetCursor (NULL hides), avoiding the ShowCursor counter. |
@@ -549,8 +549,8 @@ The existing fullscreen policy is unchanged.
 **Planned slice:** None; preserve this per-window setting on fork updates.
 
 Both descriptors carry the Windows D3D11 maximum frame latency. Zero selects
-3; 1–16 is accepted, other values warn on each creation and use 3. TrussC's
-`WindowSettings::setMaxFrameLatency` warns on each invalid call and stores 3.
+2; 1–16 is accepted, other values warn on each creation and use 2. TrussC's
+`WindowSettings::setMaxFrameLatency` warns on each invalid call and stores 2.
 Each waitable swapchain applies its own value with `SetMaximumFrameLatency`.
 Creation validates the latency before allocating `clamp(latency + 1, 2, 16)`
 back buffers, including the non-waitable fallback. The extra buffer avoids

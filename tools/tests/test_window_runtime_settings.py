@@ -268,12 +268,12 @@ void configure(const RuntimeSettings& runtime) { ''' + assignment + r''' }
 template<class T> int runApp(const WindowSettings&, const RuntimeSettings& r) { configure(r); return 23; }
 template<class AppClass>
 ''' + forward + r'''
-int main(){ WindowSettings window; assert(window.maxFrameLatency==3);
-assert(buildNativeWindowDescriptor(window,false).max_frame_latency==3);
-for (int value : {1,3,16}) { assert(&window.setMaxFrameLatency(value)==&window); assert(window.maxFrameLatency==value);
+int main(){ WindowSettings window; assert(window.maxFrameLatency==2);
+assert(buildNativeWindowDescriptor(window,false).max_frame_latency==2);
+for (int value : {1,2,3,16}) { assert(&window.setMaxFrameLatency(value)==&window); assert(window.maxFrameLatency==value);
 assert(buildNativeWindowDescriptor(window,false).max_frame_latency==value); }
 assert(warnings==0);
-for (int value : {-1,0,17,17}) { window.setMaxFrameLatency(value); assert(window.maxFrameLatency==3); }
+for (int value : {-1,0,17,17}) { window.setMaxFrameLatency(value); assert(window.maxFrameLatency==2); }
 assert(warnings==4);
 RuntimeSettings runtime; assert(runtime.uniformBufferReserve==0);
 assert(&runtime.reserveUniformBuffer(4096)==&runtime); configure(runtime);

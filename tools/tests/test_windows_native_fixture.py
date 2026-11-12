@@ -91,26 +91,27 @@ int main() {
     IDXGISwapChain1 launch, secondary;
     _sapp_tc_window_t mainWindow; mainWindow.hwnd=&launch;
     assert(_sapp_tc_d3d11_create_swapchain(&mainWindow));
-    assert(launch.latency==3 && warnings==0 && mainWindow.frame_wait==&launch);
-    for (int value : {1,3,16,-1,17,17}) {
+    assert(launch.bufferCount==3);
+    assert(launch.latency==2 && warnings==0 && mainWindow.frame_wait==&launch);
+    for (int value : {0,1,2,3,16,-1,17,17}) {
         _sapp_tc_window_t peer; peer.hwnd=&secondary; peer.desc.max_frame_latency=value;
         const int before=warnings;
         assert(_sapp_tc_d3d11_create_swapchain(&peer));
-        const bool invalid=value<1 || value>16;
-        assert(secondary.latency==UINT(invalid ? 3 : value));
+        const bool invalid=value<0 || value>16;
+        assert(secondary.latency==UINT(invalid || value==0 ? 2 : value));
         assert(warnings==before+int(invalid));
-        assert(peer.frame_wait==&secondary && launch.latency==3);
+        assert(peer.frame_wait==&secondary && launch.latency==2);
     }
-    assert(launch.applications==1 && secondary.applications==6);
+    assert(launch.applications==1 && secondary.applications==8);
     // Check actual creation descriptors, including the non-waitable retry.
     for (bool supported : {true,false}) {
         waitableSupported=supported;
-        for (int value : {1,3,16,0,-1,17}) {
+        for (int value : {1,2,3,16,0,-1,17}) {
             IDXGISwapChain1 chain;
             _sapp_tc_window_t window; window.hwnd=&chain; window.desc.max_frame_latency=value;
             const int before=warnings;
             assert(_sapp_tc_d3d11_create_swapchain(&window));
-            const int expected=value==1 ? 2 : value==16 ? 16 : 4;
+            const int expected=value==1 ? 2 : value==16 ? 16 : value==3 ? 4 : 3;
             assert(chain.bufferCount==expected);
             assert(warnings==before+int(value<0 || value>16));
             assert(chain.applications==int(supported));

@@ -2235,7 +2235,7 @@ struct WindowSettings {
     WindowSettings& setVisible(bool enabled) { visible = enabled; return *this; }
     bool decorated = true;  // false: borderless/chromeless window (no title bar)
     int swapInterval = 1;  // VSync: 1 = on (default); 0 is treated as 1 on desktop/iOS, ignored on Web/Android
-    int maxFrameLatency = 3;  // Windows D3D11 only; other backends ignore this setting
+    int maxFrameLatency = 2;  // Windows D3D11 only; other backends ignore this setting
     // bool headless = false;  // For future use
 
     WindowSettings& setSize(int w, int h) {
@@ -2295,8 +2295,8 @@ struct WindowSettings {
     // Other backends ignore this creation-time setting.
     WindowSettings& setMaxFrameLatency(int latency) {
         if (latency < 1 || latency > 16) {
-            logWarning("Window") << "setMaxFrameLatency(): expected 1–16; using default 3";
-            latency = 3;
+            logWarning("Window") << "setMaxFrameLatency(): expected 1–16; using default 2";
+            latency = 2;
         }
         maxFrameLatency = latency;
         return *this;

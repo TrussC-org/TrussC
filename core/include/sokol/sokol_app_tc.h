@@ -2189,7 +2189,7 @@ typedef struct sapp_desc {
     int _tc_pixel_width, _tc_pixel_height;
     int sample_count;                   // MSAA sample count
     int swap_interval;                  // the preferred swap interval (ignored on some platforms)
-    int max_frame_latency;              /* [TrussC] Windows D3D11: 1–16 queued frames, 0 = default (3); ignored elsewhere */
+    int max_frame_latency;              /* [TrussC] Windows D3D11: 1–16 queued frames, 0 = default (2); ignored elsewhere */
     bool high_dpi;                      // whether the rendering canvas is full-resolution on HighDPI displays
     bool fullscreen;                    // whether the window should be created in fullscreen mode
     bool alpha;                         // whether the framebuffer should have an alpha channel (ignored on some platforms)
@@ -2458,7 +2458,7 @@ typedef struct sapp_window_desc {
     int swap_interval;          /* macOS/Win32: 0 = default (1), positive = display interval;
                                   X11 secondaries use nonblocking swaps and main presentation admission,
                                   with a refresh timer fallback */
-    int max_frame_latency;      /* [TrussC] Windows D3D11: 1–16 queued frames, 0 = default (3); ignored elsewhere */
+    int max_frame_latency;      /* [TrussC] Windows D3D11: 1–16 queued frames, 0 = default (2); ignored elsewhere */
     sapp_window parent;         /* [TrussC] z-order-only parent (id 0 = none): the window stays above it.
                                   macOS child window, Win32 owner HWND, X11 WM_TRANSIENT_FOR.
                                   An unknown or closed id is ignored. */
@@ -7685,11 +7685,11 @@ static bool _sapp_tc_d3d11_create_swapchain(_sapp_tc_window_t* w) {
         _sapp_tc_d3d11_check(adapter->GetParent(__uuidof(IDXGIFactory2), (void**)&factory), "GetParent(IDXGIFactory2)")) {
         /* [TrussC #1447] Per-window CPU/GPU overlap; zero selects the default. */
         int latency = w->desc.max_frame_latency;
-        if (latency == 0) latency = 3;
+        if (latency == 0) latency = 2;
         if (latency < 1 || latency > 16) {
             _sapp_tc_log(&_sapp_tc.app.desc.logger, 2, SAPP_LOGITEM_OK, __LINE__,
-                "warning: ", "max_frame_latency %d is outside 1–16; using default 3", latency);
-            latency = 3;
+                "warning: ", "max_frame_latency %d is outside 1–16; using default 2", latency);
+            latency = 2;
         }
         DXGI_SWAP_CHAIN_DESC1 d;
         memset(&d, 0, sizeof(d));

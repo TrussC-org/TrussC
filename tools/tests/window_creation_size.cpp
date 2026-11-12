@@ -37,7 +37,7 @@ struct Descriptor {
 };
 using sapp_desc = Descriptor;
 using sapp_window_desc = Descriptor;
-struct Settings { int width = 0, height = 0; bool pixelPerfect = false, highDpi = true, decorated=true, fullscreen=false, visible=true; int swapInterval=1,sampleCount=1,maxFrameLatency=3; std::string title="probe"; };
+struct Settings { int width = 0, height = 0; bool pixelPerfect = false, highDpi = true, decorated=true, fullscreen=false, visible=true; int swapInterval=1,sampleCount=1,maxFrameLatency=2; std::string title="probe"; };
 struct Platform { static constexpr bool isDesktop() { return true; } };
 float displayScale = 1, renderScale = 1, preWindowScale = 1;
 bool enabled = false;

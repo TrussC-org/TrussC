@@ -51,7 +51,7 @@ TrussC itself builds without compiler warnings on macOS, Windows and Linux, whic
 - **Colors:** 0.0–1.0 float range, NOT 0–255
 - **Angles:** Use `TAU` (= 2π, one full turn), not `PI`. Quarter turn = `TAU * 0.25`
 
-WindowSettings::setMaxFrameLatency(1–16) sets per-window Windows D3D11 latency (default 3); 1 minimizes input latency, higher values overlap CPU/GPU work with up to N−1 extra frames of input latency; other backends ignore it.
+WindowSettings::setMaxFrameLatency(1–16) sets per-window Windows D3D11 latency (default 2); 1 minimizes input latency, higher values overlap CPU/GPU work with up to N−1 extra frames of input latency; other backends ignore it.
 
 ## App Structure
 

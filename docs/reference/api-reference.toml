@@ -42977,12 +42977,12 @@ details.ko = '''
 '''
 
 ["WindowSettings::maxFrameLatency"]
-description.en = "Windows D3D11 maximum frame latency; defaults to 3."
-description.ja = "Windows D3D11 の最大フレーム遅延です。既定値は 3 です。"
-description.ko = "Windows D3D11의 최대 프레임 지연이며 기본값은 3입니다."
-details.en = "See `WindowSettings::setMaxFrameLatency` for the range and latency trade-off."
-details.ja = "範囲と遅延のトレードオフは `WindowSettings::setMaxFrameLatency` を参照してください。"
-details.ko = "범위와 지연의 절충 관계는 `WindowSettings::setMaxFrameLatency`을 참조하시기 바랍니다."
+description.en = "Windows D3D11 maximum frame latency; defaults to 2."
+description.ja = "Windows D3D11 の最大フレーム遅延です。既定値は 2 です。"
+description.ko = "Windows D3D11의 최대 프레임 지연이며 기본값은 2입니다."
+details.en = "Use at window creation to balance CPU/GPU overlap against input latency and GPU memory on Windows D3D11. Accepts 1–16 (default 2, three back buffers); other backends ignore it. See `WindowSettings::setMaxFrameLatency` for details."
+details.ja = "Windows D3D11 で CPU/GPU の並行処理、入力遅延、GPU メモリのバランスを調整するため、ウィンドウの作成時に指定します。範囲は 1〜16、既定値は 2（バックバッファ 3 個）です。他のバックエンドは無視します。詳細は `WindowSettings::setMaxFrameLatency` を参照してください。"
+details.ko = "Windows D3D11에서 CPU/GPU 병렬 처리, 입력 지연, GPU 메모리의 균형을 조정할 때 윈도우 생성 시 지정합니다. 범위는 1–16이며 기본값은 2(백 버퍼 3개)입니다. 다른 백엔드는 이 설정을 무시합니다. 자세한 내용은 `WindowSettings::setMaxFrameLatency`을 참조하시기 바랍니다."
 related = ["WindowSettings::setMaxFrameLatency"]
 
 ["WindowSettings::setMaxFrameLatency"]
@@ -42990,20 +42990,20 @@ description.en = "Sets per-window Windows D3D11 CPU/GPU overlap; lower values re
 description.ja = "Windows D3D11 でウィンドウごとの CPU/GPU の並行処理量を設定します。小さな値は入力遅延とバックバッファのメモリ使用量を抑えます。"
 description.ko = "Windows D3D11에서 윈도우별 CPU/GPU 병렬 처리량을 설정합니다. 작은 값은 입력 지연과 백 버퍼 메모리 사용량을 줄입니다."
 details.en = '''
-- Use at window creation to balance CPU/GPU overlap against input latency and GPU memory on Windows D3D11. Accepts 1–16 (default 3); each window holds latency + 1 back buffers, capped at 16 buffers for latency 16. Other backends ignore it.
-- Each extra back buffer uses about 8 MB at 1080p RGBA8. Each out-of-range call logs a Warning and uses 3. Returns the same `WindowSettings&` for chaining.
+- Use at window creation to balance CPU/GPU overlap against input latency and GPU memory on Windows D3D11. Accepts 1–16 (default 2); each window holds latency + 1 back buffers, capped at 16 buffers for latency 16. Other backends ignore it.
+- Each extra back buffer uses about 8 MB at 1080p RGBA8. Each out-of-range call logs a Warning and uses 2. Returns the same `WindowSettings&` for chaining.
 - 1 gives the lowest input latency. Higher values let CPU and GPU work overlap for a smoother frame rate, with up to N−1 frames of extra input latency.
 - It does not set the update or draw rate.
 '''
 details.ja = '''
-- Windows D3D11 で CPU/GPU の並行処理、入力遅延、GPU メモリのバランスを調整するため、ウィンドウの作成時に指定します。範囲は 1〜16、既定値は 3 です。各ウィンドウは遅延値 + 1 個のバックバッファを保持しますが、遅延値 16 では 16 個を上限とします。他のバックエンドは無視します。
-- バックバッファ 1 個の追加につき、1080p RGBA8 で約 8 MB を使います。範囲外の呼び出しは毎回 Warning を記録し、3 を使います。連結用に同じ `WindowSettings&` を返します。
+- Windows D3D11 で CPU/GPU の並行処理、入力遅延、GPU メモリのバランスを調整するため、ウィンドウの作成時に指定します。範囲は 1〜16、既定値は 2 です。各ウィンドウは遅延値 + 1 個のバックバッファを保持しますが、遅延値 16 では 16 個を上限とします。他のバックエンドは無視します。
+- バックバッファ 1 個の追加につき、1080p RGBA8 で約 8 MB を使います。範囲外の呼び出しは毎回 Warning を記録し、2 を使います。連結用に同じ `WindowSettings&` を返します。
 - 1 は入力遅延を最小にします。大きな値では CPU と GPU の処理が重なり、フレームレートが滑らかになりますが、入力遅延が最大 N−1 フレーム増えます。
 - update や draw のレートは設定しません。
 '''
 details.ko = '''
-- Windows D3D11에서 CPU/GPU 병렬 처리, 입력 지연, GPU 메모리의 균형을 조정할 때 윈도우 생성 시 지정합니다. 범위는 1–16이며 기본값은 3입니다. 각 윈도우는 지연 값 + 1개의 백 버퍼를 유지하며 지연 값 16에서는 16개로 제한합니다. 다른 백엔드는 이 설정을 무시합니다.
-- 백 버퍼를 하나 추가할 때마다 1080p RGBA8에서 약 8 MB를 사용합니다. 범위를 벗어난 호출마다 Warning을 기록하고 3을 사용합니다. 연결 호출을 위해 같은 `WindowSettings&`를 반환합니다.
+- Windows D3D11에서 CPU/GPU 병렬 처리, 입력 지연, GPU 메모리의 균형을 조정할 때 윈도우 생성 시 지정합니다. 범위는 1–16이며 기본값은 2입니다. 각 윈도우는 지연 값 + 1개의 백 버퍼를 유지하며 지연 값 16에서는 16개로 제한합니다. 다른 백엔드는 이 설정을 무시합니다.
+- 백 버퍼를 하나 추가할 때마다 1080p RGBA8에서 약 8 MB를 사용합니다. 범위를 벗어난 호출마다 Warning을 기록하고 2를 사용합니다. 연결 호출을 위해 같은 `WindowSettings&`를 반환합니다.
 - 1은 입력 지연을 최소화합니다. 값이 높으면 CPU와 GPU 작업이 겹쳐 프레임 속도가 부드러워지지만 입력 지연이 최대 N−1프레임 늘어납니다.
 - update나 draw 빈도를 설정하지 않습니다.
 '''

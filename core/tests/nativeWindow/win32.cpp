@@ -659,7 +659,7 @@ void initialized() {
     auto* other = _sapp_tc_lookup(second);
     check("one main and two secondaries constructed", other && sapp_window_valid(third) && liveHwnds == 3);
     if (!other || !sapp_window_valid(third)) { sapp_quit(); return; }
-    for (auto item : {std::pair{first,3u}, std::pair{other,1u}, std::pair{_sapp_tc_lookup(third),16u}}) {
+    for (auto item : {std::pair{first,2u}, std::pair{other,1u}, std::pair{_sapp_tc_lookup(third),16u}}) {
         IDXGISwapChain2* chain = nullptr;
         UINT latency = 0;
         const HRESULT queried = item.first->swap_chain->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&chain);
