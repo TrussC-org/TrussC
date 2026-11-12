@@ -158,7 +158,7 @@ function emitType(typeEntry, cppType, luaName, T) {
             const ft = subT(e.type || '', T);
             // skip fields of incomplete internal:: types, raw pointers, or C arrays
             if (!ft || /\binternal::/.test(ft) || /\*/.test(ft) || /\[/.test(ft)) { skip.unbindable++; continue; }
-            props.push({ name: e.name, guard: platformGuard(e.platforms) });
+            props.push({ name: e.name, event: /^(?:trussc::)?Event</.test(ft), guard: platformGuard(e.platforms) });
             continue;
         }
         if (e.kind === 'method') {
@@ -201,7 +201,8 @@ function emitType(typeEntry, cppType, luaName, T) {
     for (const p of props) {
         if (seenProps.has(p.name)) continue;
         seenProps.add(p.name);
-        const line = `        t["${p.name}"] = &${Q}::${p.name};\n`;
+        const value = p.event ? `tcx_lua_detail::eventProperty<${Q}>(&${Q}::${p.name})` : `&${Q}::${p.name}`;
+        const line = `        t["${p.name}"] = ${value};\n`;
         s += p.guard ? `#if ${p.guard}\n${line}#endif\n` : line;
     }
     const emitFns = (map, isStatic) => {

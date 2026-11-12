@@ -16,6 +16,7 @@ const data = {
     'Derived::operator-': { kind: 'method', name: 'operator-', owner: 'Derived',
         platforms: ['windows'], signatures: [{ ret: 'Derived', args: [] },
             { ret: 'Derived', args: [{ type: 'const Derived &', isRef: true, isConst: true }] }] },
+    'Derived::onLoad': { kind: 'field', name: 'onLoad', owner: 'Derived', type: 'Event<LoadResult>' },
     Base: { id: 'Base', kind: 'type', name: 'Base' },
     'Base::Result': { id: 'Base::Result', kind: 'type', name: 'Result', owner: 'Base' },
     'Derived::Result': { id: 'Derived::Result', kind: 'type', name: 'Result', owner: 'Derived', declaredIn: 'Base' },
@@ -55,6 +56,7 @@ assert.match(types, /t\["hit"\] = &trussc::Base::Result::hit;/);
 assert.match(types, /t\["distance"\] = &trussc::Base::Result::distance;/);
 assert.doesNotMatch(types, /DerivedResult|new_usertype<[^>]*Derived::Result>/);
 assert.doesNotMatch(types, /registry\(\)|registered\.as|\(\*lua\)\["Derived"\] = t;/);
+assert.match(types, /t\["onLoad"\] = tcx_lua_detail::eventProperty<trussc::Derived>\(&trussc::Derived::onLoad\);/);
 const funcs = generate('luagen/luagen.js');
 for (const generated of [types, funcs]) {
     assert.match(generated, /#ifdef _MSC_VER\n#pragma warning\(push\)\n#pragma warning\(disable: 4996\)\n#else/);
