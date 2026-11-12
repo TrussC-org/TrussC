@@ -182,37 +182,35 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["toSRGB"] = &trussc::ColorLinear::toSRGB;
     }
     {
-        sol::usertype<trussc::MouseDragEventArgs> t = lua->new_usertype<trussc::MouseDragEventArgs>("MouseDragEventArgs");
-        t["alt"] = &trussc::MouseDragEventArgs::alt;
-        t["button"] = &trussc::MouseDragEventArgs::button;
-        t["consumed"] = &trussc::MouseDragEventArgs::consumed;
-        t["ctrl"] = &trussc::MouseDragEventArgs::ctrl;
-        t["delta"] = &trussc::MouseDragEventArgs::delta;
-        t["deltaX"] = &trussc::MouseDragEventArgs::deltaX;
-        t["deltaY"] = &trussc::MouseDragEventArgs::deltaY;
-        t["globalDelta"] = &trussc::MouseDragEventArgs::globalDelta;
-        t["globalPos"] = &trussc::MouseDragEventArgs::globalPos;
-        t["pos"] = &trussc::MouseDragEventArgs::pos;
-        t["shift"] = &trussc::MouseDragEventArgs::shift;
-        t["super"] = &trussc::MouseDragEventArgs::super;
-        t["x"] = &trussc::MouseDragEventArgs::x;
-        t["y"] = &trussc::MouseDragEventArgs::y;
-        t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
+        auto constructors = tcxLuaConstructors<trussc::ColorHSB
+            , trussc::ColorHSB()
+            , trussc::ColorHSB(float, float, float)
+            , trussc::ColorHSB(float, float, float, float)
+        >();
+        sol::usertype<trussc::ColorHSB> t = lua->new_usertype<trussc::ColorHSB>("ColorHSB", constructors, sol::call_constructor, constructors);
+        t["a"] = &trussc::ColorHSB::a;
+        t["b"] = &trussc::ColorHSB::b;
+        t["h"] = &trussc::ColorHSB::h;
+        t["s"] = &trussc::ColorHSB::s;
+        t["lerp"] = sol::overload([](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t) { return self.lerp(target, t); }, [](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
+        t["toLinear"] = &trussc::ColorHSB::toLinear;
+        t["toOKLCH"] = &trussc::ColorHSB::toOKLCH;
+        t["toOKLab"] = &trussc::ColorHSB::toOKLab;
+        t["toRGB"] = &trussc::ColorHSB::toRGB;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::FileReader
-            , trussc::FileReader()
+        auto constructors = tcxLuaConstructors<trussc::IesProfile
+            , trussc::IesProfile()
         >();
-        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
-        t["close"] = &trussc::FileReader::close;
-        t["eof"] = &trussc::FileReader::eof;
-        t["isOpen"] = &trussc::FileReader::isOpen;
-        t["open"] = &trussc::FileReader::open;
-        t["readChar"] = &trussc::FileReader::readChar;
-        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
-        t["remaining"] = &trussc::FileReader::remaining;
-        t["seek"] = &trussc::FileReader::seek;
-        t["tell"] = &trussc::FileReader::tell;
+        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile", constructors, sol::call_constructor, constructors);
+        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
+        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
+        t["getSampler"] = &trussc::IesProfile::getSampler;
+        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
+        t["getView"] = &trussc::IesProfile::getView;
+        t["isLoaded"] = &trussc::IesProfile::isLoaded;
+        t["load"] = &trussc::IesProfile::load;
+        t["loadFromString"] = &trussc::IesProfile::loadFromString;
     }
     {
         sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
@@ -223,42 +221,37 @@ void tcxLuaGenShard_14(const std::shared_ptr<sol::state>& lua) {
         t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
         t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
-    lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
-        sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
-        "None", sol::var(trussc::EasyCam::Modifier::None),
-        "Shift", sol::var(trussc::EasyCam::Modifier::Shift),
-        "Ctrl", sol::var(trussc::EasyCam::Modifier::Ctrl),
-        "Alt", sol::var(trussc::EasyCam::Modifier::Alt),
-        "Super", sol::var(trussc::EasyCam::Modifier::Super));
     {
-        sol::usertype<trussc::BlendDesc> t = lua->new_usertype<trussc::BlendDesc>("BlendDesc");
-        t["alpha"] = &trussc::BlendDesc::alpha;
-        t["rgb"] = &trussc::BlendDesc::rgb;
-        t["addKeepAlpha"] = &trussc::BlendDesc::addKeepAlpha;
-        t["premultipliedAdd"] = &trussc::BlendDesc::premultipliedAdd;
-        t["screenKeepAlpha"] = &trussc::BlendDesc::screenKeepAlpha;
+        sol::usertype<trussc::AudioDeviceInfo> t = lua->new_usertype<trussc::AudioDeviceInfo>("AudioDeviceInfo");
+        t["backend"] = &trussc::AudioDeviceInfo::backend;
+        t["channels"] = &trussc::AudioDeviceInfo::channels;
+        t["isDefault"] = &trussc::AudioDeviceInfo::isDefault;
+        t["name"] = &trussc::AudioDeviceInfo::name;
+        t["sampleRates"] = &trussc::AudioDeviceInfo::sampleRates;
+        t["uniqueId"] = &trussc::AudioDeviceInfo::uniqueId;
+    }
+    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
+        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
+        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
+        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
+    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
+        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
+        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
+        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
+    lua->new_usertype<trussc::EaseMode>("EaseMode",
+        sol::meta_function::equal_to, [](trussc::EaseMode a, trussc::EaseMode b){ return a == b; },
+        "In", sol::var(trussc::EaseMode::In),
+        "Out", sol::var(trussc::EaseMode::Out),
+        "InOut", sol::var(trussc::EaseMode::InOut));
+    {
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        t["reason"] = &trussc::ExitRequestEventArgs::reason;
     }
     {
-        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
-        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
-        t["drawFps"] = &trussc::FpsSettings::drawFps;
-        t["synced"] = &trussc::FpsSettings::synced;
-        t["updateFps"] = &trussc::FpsSettings::updateFps;
-    }
-    lua->new_usertype<trussc::AxisMode>("AxisMode",
-        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
-        "None", sol::var(trussc::AxisMode::None),
-        "Fill", sol::var(trussc::AxisMode::Fill),
-        "Content", sol::var(trussc::AxisMode::Content));
-    {
-        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
-        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
-        t["format"] = &trussc::AudioRecordSettings::format;
-    }
-    {
-        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
-        t["pixels"] = &trussc::GrabberFrame::pixels;
-        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
+        sol::usertype<trussc::Runtime> t = lua->new_usertype<trussc::Runtime>("Runtime");
+        t["events"] = &trussc::Runtime::events;
+        t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
     }
 }
 #ifdef _MSC_VER

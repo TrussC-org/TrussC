@@ -152,50 +152,40 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["updateScrollBounds"] = &trussc::ScrollContainer::updateScrollBounds;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::IVec3
-            , trussc::IVec3()
-            , trussc::IVec3(int, int, int)
-            , trussc::IVec3(int)
-            , trussc::IVec3(const trussc::IVec2 &)
-            , trussc::IVec3(const trussc::IVec2 &, int)
+        auto constructors = tcxLuaConstructors<trussc::GlyphBatch
+            , trussc::GlyphBatch()
         >();
-        sol::usertype<trussc::IVec3> t = lua->new_usertype<trussc::IVec3>("IVec3", constructors, sol::call_constructor, constructors);
-        t[sol::meta_function::multiplication] = [](const trussc::IVec3& a, int b){ return a * b; };
-        t[sol::meta_function::addition] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a + b; };
-        t[sol::meta_function::subtraction] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a - b; };
-        t[sol::meta_function::unary_minus] = [](const trussc::IVec3& a){ return -a; };
-        t[sol::meta_function::equal_to] = [](const trussc::IVec3& a, const trussc::IVec3 & b){ return a == b; };
-        t["x"] = &trussc::IVec3::x;
-        t["y"] = &trussc::IVec3::y;
-        t["z"] = &trussc::IVec3::z;
-        t["toVec3"] = &trussc::IVec3::toVec3;
-        t["xy"] = &trussc::IVec3::xy;
+        sol::usertype<trussc::GlyphBatch> t = lua->new_usertype<trussc::GlyphBatch>("GlyphBatch", constructors, sol::call_constructor, constructors);
+        t["add"] = sol::overload([](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Color & color) { return self.add(codepoint, color); }, [](trussc::GlyphBatch& self, uint32_t codepoint, const trussc::Mat4 & matrix, const trussc::Color & color) { return self.add(codepoint, matrix, color); }, [](trussc::GlyphBatch& self, const std::string & text, const trussc::Color & color) { return self.add(text, color); });
+        t["clear"] = &trussc::GlyphBatch::clear;
+        t["draw"] = sol::overload([](trussc::GlyphBatch& self) { return self.draw(); }, [](trussc::GlyphBatch& self, const trussc::Mat4 & transform) { return self.draw(transform); });
+        t["setAlign"] = &trussc::GlyphBatch::setAlign;
+        t["setAlignToInk"] = &trussc::GlyphBatch::setAlignToInk;
+        t["setFont"] = &trussc::GlyphBatch::setFont;
+        t["setWritingMode"] = &trussc::GlyphBatch::setWritingMode;
     }
-    lua->new_usertype<trussc::AudioBackend>("AudioBackend",
-        sol::meta_function::equal_to, [](trussc::AudioBackend a, trussc::AudioBackend b){ return a == b; },
-        "Default", sol::var(trussc::AudioBackend::Default),
-        "Null", sol::var(trussc::AudioBackend::Null),
-        "WASAPI", sol::var(trussc::AudioBackend::WASAPI),
-        "DirectSound", sol::var(trussc::AudioBackend::DirectSound),
-        "WinMM", sol::var(trussc::AudioBackend::WinMM),
-        "CoreAudio", sol::var(trussc::AudioBackend::CoreAudio),
-        "PulseAudio", sol::var(trussc::AudioBackend::PulseAudio),
-        "ALSA", sol::var(trussc::AudioBackend::ALSA),
-        "JACK", sol::var(trussc::AudioBackend::JACK),
-        "AAudio", sol::var(trussc::AudioBackend::AAudio),
-        "OpenSLES", sol::var(trussc::AudioBackend::OpenSLES),
-        "WebAudio", sol::var(trussc::AudioBackend::WebAudio));
     {
-        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
-        t["audio"] = &trussc::VideoRecordSettings::audio;
-        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
-        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
-        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
-        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
-        t["codec"] = &trussc::VideoRecordSettings::codec;
-        t["duration"] = &trussc::VideoRecordSettings::duration;
-        t["fps"] = &trussc::VideoRecordSettings::fps;
-        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
+        sol::usertype<trussc::ChipSoundBundle> t = lua->new_usertype<trussc::ChipSoundBundle>("ChipSoundBundle");
+        t["entries"] = &trussc::ChipSoundBundle::entries;
+        t["volume"] = &trussc::ChipSoundBundle::volume;
+        t["add"] = sol::overload([](trussc::ChipSoundBundle& self, const trussc::ChipSoundNote & note, float time) -> decltype(auto) { return self.add(note, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time) -> decltype(auto) { return self.add(wave, hz, duration, time); }, [](trussc::ChipSoundBundle& self, trussc::ChipSoundNote::Wave wave, float hz, float duration, float time, float vol) -> decltype(auto) { return self.add(wave, hz, duration, time, vol); });
+        t["build"] = &trussc::ChipSoundBundle::build;
+        t["clear"] = &trussc::ChipSoundBundle::clear;
+        t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
+    }
+    {
+        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
+        t["buffer"] = &trussc::PlayingSound::buffer;
+        t["level"] = &trussc::PlayingSound::level;
+        t["loop"] = &trussc::PlayingSound::loop;
+        t["mixMode"] = &trussc::PlayingSound::mixMode;
+        t["pan"] = &trussc::PlayingSound::pan;
+        t["paused"] = &trussc::PlayingSound::paused;
+        t["playing"] = &trussc::PlayingSound::playing;
+        t["positionF"] = &trussc::PlayingSound::positionF;
+        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
+        t["speed"] = &trussc::PlayingSound::speed;
+        t["volume"] = &trussc::PlayingSound::volume;
     }
     {
         sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
@@ -207,37 +197,40 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
         t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
     }
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
-    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
-        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
-        "H264", sol::var(trussc::VideoCodec::H264),
-        "HEVC", sol::var(trussc::VideoCodec::HEVC),
-        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
-        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
-    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
-        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
-        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
-        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
     {
-        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
-        t["note"] = &trussc::ChipSoundBundle::Entry::note;
-        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
+        t["alt"] = &trussc::KeyEventArgs::alt;
+        t["consumed"] = &trussc::KeyEventArgs::consumed;
+        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
+        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
+        t["key"] = &trussc::KeyEventArgs::key;
+        t["shift"] = &trussc::KeyEventArgs::shift;
+        t["super"] = &trussc::KeyEventArgs::super;
     }
     {
-        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
-        t["hit"] = &trussc::Ray::Hit::hit;
-        t["point"] = &trussc::Ray::Hit::point;
-        t["t"] = &trussc::Ray::Hit::t;
+        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
+        t["channels"] = &trussc::AudioOutBuffer::channels;
+        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
+        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
+        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
+    }
+    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
+        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
+        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
+        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
+    {
+        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
+        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
+        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
+    }
+    {
+        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
+        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
+        t["reason"] = &trussc::DeviceLostEventArgs::reason;
+    }
+    {
+        sol::usertype<trussc::CloseRequestEventArgs> t = lua->new_usertype<trussc::CloseRequestEventArgs>("CloseRequestEventArgs");
+        t["cancel"] = &trussc::CloseRequestEventArgs::cancel;
     }
 }
 #ifdef _MSC_VER

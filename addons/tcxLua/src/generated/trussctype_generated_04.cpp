@@ -182,35 +182,38 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["set"] = sol::overload([](trussc::Rect& self, float x_, float y_, float w_, float h_) -> decltype(auto) { return self.set(x_, y_, w_, h_); }, [](trussc::Rect& self, const trussc::Vec2 & pos, float w_, float h_) -> decltype(auto) { return self.set(pos, w_, h_); });
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::ColorHSB
-            , trussc::ColorHSB()
-            , trussc::ColorHSB(float, float, float)
-            , trussc::ColorHSB(float, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::Logger
+            , trussc::Logger()
         >();
-        sol::usertype<trussc::ColorHSB> t = lua->new_usertype<trussc::ColorHSB>("ColorHSB", constructors, sol::call_constructor, constructors);
-        t["a"] = &trussc::ColorHSB::a;
-        t["b"] = &trussc::ColorHSB::b;
-        t["h"] = &trussc::ColorHSB::h;
-        t["s"] = &trussc::ColorHSB::s;
-        t["lerp"] = sol::overload([](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t) { return self.lerp(target, t); }, [](trussc::ColorHSB& self, const trussc::ColorHSB & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
-        t["toLinear"] = &trussc::ColorHSB::toLinear;
-        t["toOKLCH"] = &trussc::ColorHSB::toOKLCH;
-        t["toOKLab"] = &trussc::ColorHSB::toOKLab;
-        t["toRGB"] = &trussc::ColorHSB::toRGB;
+        sol::usertype<trussc::Logger> t = lua->new_usertype<trussc::Logger>("Logger", constructors, sol::call_constructor, constructors);
+        t["onLog"] = &trussc::Logger::onLog;
+        t["closeFile"] = &trussc::Logger::closeFile;
+        t["getConsoleLogLevel"] = &trussc::Logger::getConsoleLogLevel;
+        t["getFileLogLevel"] = &trussc::Logger::getFileLogLevel;
+        t["getLogFilePath"] = &trussc::Logger::getLogFilePath;
+        t["getSystemLogLevel"] = &trussc::Logger::getSystemLogLevel;
+        t["isFileOpen"] = &trussc::Logger::isFileOpen;
+        t["log"] = &trussc::Logger::log;
+        t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
+        t["setFileLogLevel"] = &trussc::Logger::setFileLogLevel;
+        t["setLogFile"] = &trussc::Logger::setLogFile;
+        t["setLogLevel"] = &trussc::Logger::setLogLevel;
+        t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::IesProfile
-            , trussc::IesProfile()
+        auto constructors = tcxLuaConstructors<trussc::FileReader
+            , trussc::FileReader()
         >();
-        sol::usertype<trussc::IesProfile> t = lua->new_usertype<trussc::IesProfile>("IesProfile", constructors, sol::call_constructor, constructors);
-        t["getMaxCandela"] = &trussc::IesProfile::getMaxCandela;
-        t["getMaxVerticalAngle"] = &trussc::IesProfile::getMaxVerticalAngle;
-        t["getSampler"] = &trussc::IesProfile::getSampler;
-        t["getTextureWidth"] = &trussc::IesProfile::getTextureWidth;
-        t["getView"] = &trussc::IesProfile::getView;
-        t["isLoaded"] = &trussc::IesProfile::isLoaded;
-        t["load"] = &trussc::IesProfile::load;
-        t["loadFromString"] = &trussc::IesProfile::loadFromString;
+        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
+        t["close"] = &trussc::FileReader::close;
+        t["eof"] = &trussc::FileReader::eof;
+        t["isOpen"] = &trussc::FileReader::isOpen;
+        t["open"] = &trussc::FileReader::open;
+        t["readChar"] = &trussc::FileReader::readChar;
+        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
+        t["remaining"] = &trussc::FileReader::remaining;
+        t["seek"] = &trussc::FileReader::seek;
+        t["tell"] = &trussc::FileReader::tell;
     }
     {
         sol::usertype<trussc::BuildInfo> t = lua->new_usertype<trussc::BuildInfo>("BuildInfo");
@@ -225,17 +228,19 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["timestamp"] = &trussc::BuildInfo::timestamp;
         t["year"] = &trussc::BuildInfo::year;
     }
-    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
-        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
-        "Immutable", sol::var(trussc::TextureUsage::Immutable),
-        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
-        "Stream", sol::var(trussc::TextureUsage::Stream),
-        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget),
-        "Storage", sol::var(trussc::TextureUsage::Storage));
-    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
-        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
-        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
-        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
+    lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
+        sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
+        "None", sol::var(trussc::EasyCam::Modifier::None),
+        "Shift", sol::var(trussc::EasyCam::Modifier::Shift),
+        "Ctrl", sol::var(trussc::EasyCam::Modifier::Ctrl),
+        "Alt", sol::var(trussc::EasyCam::Modifier::Alt),
+        "Super", sol::var(trussc::EasyCam::Modifier::Super));
+    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
+        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
+        "H264", sol::var(trussc::VideoCodec::H264),
+        "HEVC", sol::var(trussc::VideoCodec::HEVC),
+        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
+        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
     {
         sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
         t["changed"] = &trussc::TouchPoint::changed;
@@ -244,19 +249,23 @@ void tcxLuaGenShard_04(const std::shared_ptr<sol::state>& lua) {
         t["x"] = &trussc::TouchPoint::x;
         t["y"] = &trussc::TouchPoint::y;
     }
-    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
-        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
-        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
     {
-        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
-        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
-        t["message"] = &trussc::VideoErrorEventArgs::message;
+        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
+        t["getHost"] = &trussc::TcpServerClient::getHost;
+        t["getId"] = &trussc::TcpServerClient::getId;
+        t["getPort"] = &trussc::TcpServerClient::getPort;
     }
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
+    {
+        sol::usertype<trussc::ChipSoundBundle::Entry> t = lua->new_usertype<trussc::ChipSoundBundle::Entry>("ChipSoundBundleEntry");
+        t["note"] = &trussc::ChipSoundBundle::Entry::note;
+        t["time"] = &trussc::ChipSoundBundle::Entry::time;
+    }
+    {
+        sol::usertype<trussc::Ray::Hit> t = lua->new_usertype<trussc::Ray::Hit>("RayHit");
+        t["hit"] = &trussc::Ray::Hit::hit;
+        t["point"] = &trussc::Ray::Hit::point;
+        t["t"] = &trussc::Ray::Hit::t;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

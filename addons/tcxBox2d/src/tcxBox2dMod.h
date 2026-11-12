@@ -1,7 +1,7 @@
 #pragma once
 
 // =============================================================================
-// tcxBox2dMod.h - Box2D physics as Node Mods (EXPERIMENTAL).
+// tcxBox2dMod.h - Box2D physics as Node Mods (recommended API).
 //
 //   auto n = make_shared<Node>();
 //   n->setPos(x, y);
@@ -25,7 +25,6 @@
 // Naming: the "2D" suffix avoids clashing with tcxPhysics' tcx::RigidBody /
 // tcx::ColliderRenderer when both addons are `using namespace tcx;`'d together.
 //
-// EXPERIMENTAL: rides the core Node/Mod API; expect churn while that settles.
 // Assumes the owner node lives in the X/Y plane (2D), rotated only about Z.
 // =============================================================================
 

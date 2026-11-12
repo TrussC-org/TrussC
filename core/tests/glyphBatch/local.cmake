@@ -1,0 +1,14 @@
+# The same Fbo pixel checks can run without an X socket on Linux/Mesa.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_library(TC_GLYPH_EGL_LIBRARY EGL)
+    find_path(TC_GLYPH_EGL_INCLUDE EGL/egl.h)
+    if(TC_GLYPH_EGL_LIBRARY AND TC_GLYPH_EGL_INCLUDE)
+        set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
+            TARGET_DIRECTORY ${PROJECT_NAME} APPEND PROPERTY COMPILE_DEFINITIONS
+            TC_GLYPH_EGL "TC_GLYPH_EGL_LIBRARY_PATH=\"${TC_GLYPH_EGL_LIBRARY}\"")
+        if(NOT TC_GLYPH_EGL_INCLUDE IN_LIST CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
+            set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp"
+                TARGET_DIRECTORY ${PROJECT_NAME} APPEND PROPERTY INCLUDE_DIRECTORIES ${TC_GLYPH_EGL_INCLUDE})
+        endif()
+    endif()
+endif()

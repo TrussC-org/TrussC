@@ -51,6 +51,7 @@
 #include "tc/gpu/shaders/sglPremult.glsl.h"
 // Same, from core/shaders/sglCoverage.glsl: internal::sglCoverageShader().
 #include "tc/gpu/shaders/sglCoverage.glsl.h"
+#include "tc/gpu/shaders/glyphBatch.glsl.h"
 
 #ifdef __APPLE__
 #include <pthread.h>
@@ -388,6 +389,44 @@ sg_shader sglCoverageShader() {
         shd = sg_make_shader(tc_sglcov_coverage_shader_desc(sg_query_backend()));
     }
     return shd;
+}
+
+// Host-owned, shared across hot reload guests, like the sgl coverage program.
+sg_shader glyphBatchShader() {
+    static sg_shader shader = {};
+    if (!shader.id && sg_isvalid()) shader = sg_make_shader(tc_glyphbatch_coverage_shader_desc(sg_query_backend()));
+    return shader;
+}
+
+// One host-owned immutable quad pattern shared by all GlyphBatch instances.
+// Like the coverage shader, the final buffer belongs to sg_shutdown; no static
+// destructor issues GPU calls. Growth retires the old handle for queued draws.
+sg_buffer glyphBatchIndices(size_t quads) {
+    static sg_buffer buffer{};
+    const size_t limit = static_cast<size_t>(INT_MAX) / (6 * sizeof(uint32_t));
+    if (!quads || quads > limit) return {};
+    size_t capacity = sg_query_buffer_size(buffer) / (6 * sizeof(uint32_t));
+    if (capacity >= quads) return buffer;
+    capacity = std::max(capacity, size_t(64));
+    while (capacity < quads) capacity = std::min(capacity * 2, limit);
+    std::vector<uint32_t> indices(capacity * 6);
+    for (size_t i = 0; i < capacity; ++i) {
+        const auto base = static_cast<uint32_t>(i * 4);
+        const uint32_t quad[] = {base, base+1, base+2, base, base+2, base+3};
+        std::memcpy(indices.data() + i * 6, quad, sizeof(quad));
+    }
+    sg_buffer_desc desc{};
+    desc.usage.index_buffer = true;
+    desc.data = {indices.data(), indices.size() * sizeof(uint32_t)};
+    desc.label = "tc_glyph_batch_shared_indices";
+    const auto replacement = sg_make_buffer(&desc);
+    if (sg_query_buffer_state(replacement) != SG_RESOURCESTATE_VALID) {
+        deferGpuDestroy(replacement);
+        return {};
+    }
+    deferGpuDestroy(buffer);
+    buffer = replacement;
+    return buffer;
 }
 
 void resizeSgl(int newMaxVertices, int newMaxCommands) {
@@ -766,10 +805,18 @@ void RenderTarget::flushLayers() {
     const auto err = sgl_context_error(resources().context);
     const bool overflow = err.vertices_full || err.commands_full || err.uniforms_full;
     prepareDeferredShaderDraws(deferredShaderDraws);
+    bool appliedScissor = false;
     for (int64_t layer = 0; layer <= sglLayerNext; ++layer) {
         if (!overflow) sgl_context_draw_layer(resources().context, (int)layer);
-        for (auto& draw : deferredShaderDraws)
-            if (draw.layerId == layer) executeDeferredShaderDraw(draw);
+        for (auto& draw : deferredShaderDraws) {
+            if (draw.layerId != layer) continue;
+            if (draw.scissor) {
+                const auto& clip = *draw.scissor;
+                sg_apply_scissor_rectf(clip[0], clip[1], clip[2], clip[3], true);
+                appliedScissor = true;
+            }
+            executeDeferredShaderDraw(draw);
+        }
         for (auto& draw : deferredPbrDraws)
             if (draw.layerId == layer) getPbrPipeline().executePbrDraw(draw.cmd);
         for (auto& draw : deferredPointDraws)
@@ -778,6 +825,13 @@ void RenderTarget::flushLayers() {
     deferredShaderDraws.clear();
     deferredPbrDraws.clear();
     deferredPointDraws.clear();
+    // Replay used draw-time clips; subsequent direct drawing uses the current
+    // CPU state, including a popScissor recorded after the last raw draw.
+    if (appliedScissor) {
+        const auto& clip = currentScissor;
+        sg_apply_scissor_rectf(clip.active ? clip.x : 0, clip.active ? clip.y : 0,
+                              clip.active ? clip.w : float(width), clip.active ? clip.h : float(height), true);
+    }
     // Shader::begin reserved a screen layer. Keep that reservation even when
     // all preceding commands have been consumed, until its owning scope closes.
     if (!openShaderScopes) sglLayerNext = 0;

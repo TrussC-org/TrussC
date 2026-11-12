@@ -369,18 +369,13 @@ public:
         // deferred: cleanup() also runs mid-frame when a font is re-loaded
         // via setup(), and draws recorded earlier that frame may still
         // reference the old atlas views.
-        const bool hasGpuResources = !pendingDestroys_.empty() ||
-            std::any_of(atlases_.begin(), atlases_.end(), [](const AtlasState& atlas) { return atlas.textureValid_; });
+        const bool hasGpuResources = std::any_of(atlases_.begin(), atlases_.end(), [](const AtlasState& atlas) { return atlas.textureValid_; });
         // A canceled worker owns CPU-only pages. Short-circuit before even
         // sg_isvalid(): sokol queries also belong to main, not the decoder.
         if (!hasGpuResources && !atlases_.empty() && !isMainThread()) {
             internal::probeResourceLoad("font.cpu-atlas-retired", {});
         }
         if (hasGpuResources && sg_isvalid()) {
-            for (auto& pd : pendingDestroys_) {
-                internal::deferGpuDestroy(pd.view);
-                internal::deferGpuDestroy(pd.image);
-            }
             for (auto& atlas : atlases_) {
                 if (atlas.textureValid_) {
                     internal::deferGpuDestroy(atlas.view_);
@@ -388,7 +383,6 @@ public:
                 }
             }
         }
-        pendingDestroys_.clear();
         atlases_.clear();
         glyphs_.clear();
         if (emptyFontData_) {
@@ -404,7 +398,6 @@ public:
         scale_ = ascent_ = descent_ = lineGap_ = spaceAdvance_ = 0;
         mipsBuilt_ = false;
         pageLimitWarned_.reset();
-        lastDestroyFlushFrame_ = 0;
         glyphLimit_ = 0;
         loaded_ = false;
     }
@@ -423,6 +416,18 @@ public:
         GlyphInfo info{};
         if (!addGlyphToAtlas(codepoint, info)) info.valid_ = false;
         return &(glyphs_[codepoint] = info);
+    }
+
+    // Outline ink box in physical pixels, relative to the horizontal baseline.
+    Rect getGlyphInkBox(uint32_t codepoint) const {
+        if (!loaded_) return {};
+        const int glyph = findGlyphIndex(codepoint);
+        if (!fontGlyphRangeFits(&fontInfo_, fontData_.size(), glyph)) return {};
+        FontScratchScope scratch(fontData_.size());
+        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        if (!stbtt_GetGlyphBox(&fontInfo_, glyph, &x0, &y0, &x1, &y1) || scratch.failed()) return {};
+        return {float(x0) * scale_, -float(y1) * scale_,
+                (float(x1) - float(x0)) * scale_, (float(y1) - float(y0)) * scale_};
     }
 
     bool hasGlyph(uint32_t codepoint) const {
@@ -538,9 +543,6 @@ public:
     // Get texture
     // -------------------------------------------------------------------------
     void ensureTexturesUpdated() {
-        // Destroy GPU resources from previous frame (safe: sgl commands already consumed)
-        flushPendingDestroys();
-
         for (auto& atlas : atlases_) {
             if (atlas.textureDirty_) {
                 updateAtlasTexture(atlas);
@@ -572,17 +574,12 @@ public:
         // Deferred destroy: text drawn earlier this frame may still have
         // sokol_gl commands referencing the old atlas views (drained in
         // present(); skipped there if sokol has already shut down).
-        for (auto& pd : pendingDestroys_) {
-            internal::deferGpuDestroy(pd.view);
-            internal::deferGpuDestroy(pd.image);
-        }
         for (auto& atlas : atlases_) {
             if (atlas.textureValid_) {
                 internal::deferGpuDestroy(atlas.view_);
                 internal::deferGpuDestroy(atlas.texture_);
             }
         }
-        pendingDestroys_.clear();
         atlases_.clear();
         glyphs_.clear();
         if (loaded_) {
@@ -646,15 +643,6 @@ private:
 
     bool loaded_ = false;
 
-    // Deferred GPU resource destruction (views/images may still be referenced
-    // by queued sgl commands from earlier draw calls in the same frame)
-    struct PendingDestroy {
-        sg_view view;
-        sg_image image;
-    };
-    std::vector<PendingDestroy> pendingDestroys_;
-    uint64_t lastDestroyFlushFrame_ = 0;
-
     // -------------------------------------------------------------------------
     // Atlas management
     // -------------------------------------------------------------------------
@@ -710,7 +698,8 @@ private:
 
         // Defer GPU resource destruction (old view may still be in sgl command queue)
         if (atlas.textureValid_) {
-            pendingDestroys_.push_back({atlas.view_, atlas.texture_});
+            internal::deferGpuDestroy(atlas.view_);
+            internal::deferGpuDestroy(atlas.texture_);
             atlas.view_ = {};
             atlas.texture_ = {};
             atlas.textureValid_ = false;
@@ -983,32 +972,19 @@ private:
         return false;
     }
 
-    // Destroy old GPU resources that are safe to release (previous frame's sgl
-    // commands have already been consumed by _sgl_draw)
-    void flushPendingDestroys() {
-        uint64_t currentFrame = internal::deviceFrameCount();
-        if (lastDestroyFlushFrame_ == currentFrame) return;
-        lastDestroyFlushFrame_ = currentFrame;
-
-        for (auto& pd : pendingDestroys_) {
-            sg_destroy_view(pd.view);
-            sg_destroy_image(pd.image);
-        }
-        pendingDestroys_.clear();
-    }
-
     void updateAtlasTexture(AtlasState& atlas) {
         // Re-upload whenever the atlas is dirty (only reached via
         // ensureTexturesUpdated, which already gates on textureDirty_). No
         // once-per-frame throttle: glyphs may be added across several draw calls
         // in one frame (e.g. text rendered into multiple FBOs at setup), and
-        // each needs its new glyphs on the GPU before its draw. Deferred
-        // destruction (pendingDestroys_, freed next frame after the commands
-        // referencing the old view are consumed) keeps mid-frame recreate safe.
+        // each needs its new glyphs on the GPU before its draw. Create a new
+        // immutable image without restarting the open pass. The recording-aware
+        // retirement queue keeps old views/images alive until replay consumes them.
 
         // Defer destruction of existing resources
         if (atlas.textureValid_) {
-            pendingDestroys_.push_back({atlas.view_, atlas.texture_});
+            internal::deferGpuDestroy(atlas.view_);
+            internal::deferGpuDestroy(atlas.texture_);
             atlas.view_ = {};
             atlas.texture_ = {};
             atlas.textureValid_ = false;
@@ -1653,6 +1629,15 @@ public:
     // alignment, wrap, kinsoku, TCY all apply. Coordinates are in logical
     // pixels relative to (x, y).
     // -------------------------------------------------------------------------
+    // Logical-pixel outline bounds, excluding advance and raster/filter padding.
+    // Empty ink returns an empty Rect. Half-size is (width / 2, height / 2).
+    Rect getGlyphInkBox(uint32_t codepoint) const {
+        if (!atlasManager_) return {};
+        const Rect box = atlasManager_->getGlyphInkBox(codepoint);
+        const float s = 1.0f / dpiScale_;
+        return {box.x * s, box.y * s, box.width * s, box.height * s};
+    }
+
     Path getGlyphPath(uint32_t codepoint) const {
         if (!atlasManager_) return {};
         return atlasManager_->getGlyphPath(codepoint);
@@ -1904,6 +1889,7 @@ protected:
     void emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph>& placed) const {
         if (!atlasManager_ || placed.empty()) return;
 
+        const sg_sampler sampler = pickSampler();
         atlasManager_->ensureTexturesUpdated();
 
         const float s = 1.0f / dpiScale_;
@@ -1918,7 +1904,7 @@ protected:
             // that reads the R8 atlas's R channel as alpha.
             internal::loadTemporaryPipeline(internal::activeCoverage2D());
             sgl_enable_texture();
-            sgl_texture(atlas.getView(), pickSampler());
+            sgl_texture(atlas.getView(), sampler);
 
             Color col = getColor();
             sgl_c4f(col.r, col.g, col.b, col.a);
@@ -2769,6 +2755,7 @@ public:
     }
 
 private:
+    friend class GlyphBatch;
     std::shared_ptr<internal::FontAtlasManager> atlasManager_;
     internal::FontCacheKey cacheKey_;
     float dpiScale_ = 1.0f;    // DPI scale at load time (physical/logical ratio)

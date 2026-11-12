@@ -167,21 +167,23 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["updateLayout"] = &trussc::LayoutMod::updateLayout;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
-            , trussc::JsonReadReflector(trussc::Json)
+        auto constructors = tcxLuaConstructors<trussc::ChipSoundNote
+            , trussc::ChipSoundNote()
+            , trussc::ChipSoundNote(trussc::Wave, float, float)
+            , trussc::ChipSoundNote(trussc::Wave, float, float, float)
         >();
-        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector", constructors, sol::call_constructor, constructors);
-        t["applied"] = &trussc::JsonReadReflector::applied;
-        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
-        t["skipped"] = &trussc::JsonReadReflector::skipped;
-        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
-        t["isDerived"] = &trussc::JsonReadReflector::isDerived;
-        t["isReadOnly"] = &trussc::JsonReadReflector::isReadOnly;
-        t["popDerived"] = &trussc::JsonReadReflector::popDerived;
-        t["popReadOnly"] = &trussc::JsonReadReflector::popReadOnly;
-        t["pushDerived"] = &trussc::JsonReadReflector::pushDerived;
-        t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
-        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
+        sol::usertype<trussc::ChipSoundNote> t = lua->new_usertype<trussc::ChipSoundNote>("ChipSoundNote", constructors, sol::call_constructor, constructors);
+        t["attack"] = &trussc::ChipSoundNote::attack;
+        t["decay"] = &trussc::ChipSoundNote::decay;
+        t["duration"] = &trussc::ChipSoundNote::duration;
+        t["hz"] = &trussc::ChipSoundNote::hz;
+        t["release"] = &trussc::ChipSoundNote::release;
+        t["sustain"] = &trussc::ChipSoundNote::sustain;
+        t["volume"] = &trussc::ChipSoundNote::volume;
+        t["wave"] = &trussc::ChipSoundNote::wave;
+        t["build"] = &trussc::ChipSoundNote::build;
+        t["generateBuffer"] = &trussc::ChipSoundNote::generateBuffer;
+        t["getTotalDuration"] = &trussc::ChipSoundNote::getTotalDuration;
     }
     lua->new_usertype<trussc::TextureFormat>("TextureFormat",
         sol::meta_function::equal_to, [](trussc::TextureFormat a, trussc::TextureFormat b){ return a == b; },
@@ -214,34 +216,31 @@ void tcxLuaGenShard_05(const std::shared_ptr<sol::state>& lua) {
         t["message"] = &trussc::LogEventArgs::message;
         t["timestamp"] = &trussc::LogEventArgs::timestamp;
     }
+    lua->new_usertype<trussc::ThermalState>("ThermalState",
+        sol::meta_function::equal_to, [](trussc::ThermalState a, trussc::ThermalState b){ return a == b; },
+        "Nominal", sol::var(trussc::ThermalState::Nominal),
+        "Fair", sol::var(trussc::ThermalState::Fair),
+        "Serious", sol::var(trussc::ThermalState::Serious),
+        "Critical", sol::var(trussc::ThermalState::Critical));
     {
-        auto constructors = tcxLuaConstructors<trussc::OnceGate
-            , trussc::OnceGate()
-            , trussc::OnceGate(double)
-        >();
-        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
-        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
-        t["reset"] = &trussc::OnceGate::reset;
+        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
+        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
+        t["drawFps"] = &trussc::FpsSettings::drawFps;
+        t["synced"] = &trussc::FpsSettings::synced;
+        t["updateFps"] = &trussc::FpsSettings::updateFps;
     }
+    lua->new_usertype<trussc::SoundStream::Kind>("SoundStreamKind",
+        sol::meta_function::equal_to, [](trussc::SoundStream::Kind a, trussc::SoundStream::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundStream::Kind::Eager),
+        "Stream", sol::var(trussc::SoundStream::Kind::Stream));
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
     {
-        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
-        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
-        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
-        t["message"] = &trussc::TcpServerErrorEventArgs::message;
-    }
-    lua->new_usertype<trussc::SoundBuffer::Kind>("SoundBufferKind",
-        sol::meta_function::equal_to, [](trussc::SoundBuffer::Kind a, trussc::SoundBuffer::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundBuffer::Kind::Eager),
-        "Stream", sol::var(trussc::SoundBuffer::Kind::Stream));
-    {
-        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
-        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
-        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
-    }
-    {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
 }
 #ifdef _MSC_VER

@@ -151,46 +151,44 @@ void tcxLuaGenShard_01(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["endGroup"] = &trussc::Reflector::endGroup;
-        t["isDerived"] = &trussc::Reflector::isDerived;
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["popDerived"] = &trussc::Reflector::popDerived;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["pushDerived"] = &trussc::Reflector::pushDerived;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
+        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
+        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
+        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
+        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
+    }
+    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
+        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
+        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
+        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    {
+        auto constructors = tcxLuaConstructors<trussc::LogStream
+            , trussc::LogStream(trussc::LogLevel)
+            , trussc::LogStream(trussc::LogLevel, const std::string &)
+        >();
+        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
+    }
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
+    {
+        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
+        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
+        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
     }
     {
-        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
-        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
-        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
-        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
-        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
-    }
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
-    {
-        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
-        t["files"] = &trussc::DragDropEventArgs::files;
-        t["x"] = &trussc::DragDropEventArgs::x;
-        t["y"] = &trussc::DragDropEventArgs::y;
+        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
+        t["message"] = &trussc::MicStartResult::message;
+        t["success"] = &trussc::MicStartResult::success;
     }
     {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
-    }
-    {
-        sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
-        t["focused"] = &trussc::FocusEventArgs::focused;
+        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
+        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
     }
 }
 #ifdef _MSC_VER

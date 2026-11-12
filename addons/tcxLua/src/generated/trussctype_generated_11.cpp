@@ -178,23 +178,21 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["update"] = &trussc::StrokeMesh::update;
     }
     {
-        auto constructors = tcxLuaConstructors<trussc::Logger
-            , trussc::Logger()
+        auto constructors = tcxLuaConstructors<trussc::JsonReadReflector
+            , trussc::JsonReadReflector(trussc::Json)
         >();
-        sol::usertype<trussc::Logger> t = lua->new_usertype<trussc::Logger>("Logger", constructors, sol::call_constructor, constructors);
-        t["onLog"] = &trussc::Logger::onLog;
-        t["closeFile"] = &trussc::Logger::closeFile;
-        t["getConsoleLogLevel"] = &trussc::Logger::getConsoleLogLevel;
-        t["getFileLogLevel"] = &trussc::Logger::getFileLogLevel;
-        t["getLogFilePath"] = &trussc::Logger::getLogFilePath;
-        t["getSystemLogLevel"] = &trussc::Logger::getSystemLogLevel;
-        t["isFileOpen"] = &trussc::Logger::isFileOpen;
-        t["log"] = &trussc::Logger::log;
-        t["setConsoleLogLevel"] = &trussc::Logger::setConsoleLogLevel;
-        t["setFileLogLevel"] = &trussc::Logger::setFileLogLevel;
-        t["setLogFile"] = &trussc::Logger::setLogFile;
-        t["setLogLevel"] = &trussc::Logger::setLogLevel;
-        t["setSystemLogLevel"] = &trussc::Logger::setSystemLogLevel;
+        sol::usertype<trussc::JsonReadReflector> t = lua->new_usertype<trussc::JsonReadReflector>("JsonReadReflector", constructors, sol::call_constructor, constructors);
+        t["applied"] = &trussc::JsonReadReflector::applied;
+        t["readOnly"] = &trussc::JsonReadReflector::readOnly;
+        t["skipped"] = &trussc::JsonReadReflector::skipped;
+        t["endGroup"] = &trussc::JsonReadReflector::endGroup;
+        t["isDerived"] = &trussc::JsonReadReflector::isDerived;
+        t["isReadOnly"] = &trussc::JsonReadReflector::isReadOnly;
+        t["popDerived"] = &trussc::JsonReadReflector::popDerived;
+        t["popReadOnly"] = &trussc::JsonReadReflector::popReadOnly;
+        t["pushDerived"] = &trussc::JsonReadReflector::pushDerived;
+        t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
+        t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
     }
     lua->new_usertype<trussc::EaseType>("EaseType",
         sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
@@ -219,43 +217,40 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         "QueueFull", sol::var(trussc::SendError::QueueFull),
         "NotRunning", sol::var(trussc::SendError::NotRunning),
         "AllocationFailed", sol::var(trussc::SendError::AllocationFailed));
-    {
-        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
-        t["error"] = &trussc::LoadResult::error;
-        t["message"] = &trussc::LoadResult::message;
-        t["ok"] = &trussc::LoadResult::ok;
-        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
-        t["success"] = &trussc::LoadResult::success;
-    }
+    lua->new_usertype<trussc::BlendMode>("BlendMode",
+        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
+        "Alpha", sol::var(trussc::BlendMode::Alpha),
+        "Add", sol::var(trussc::BlendMode::Add),
+        "Multiply", sol::var(trussc::BlendMode::Multiply),
+        "Screen", sol::var(trussc::BlendMode::Screen),
+        "Subtract", sol::var(trussc::BlendMode::Subtract),
+        "Disabled", sol::var(trussc::BlendMode::Disabled));
     lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
         sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
         "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
         "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
         "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
     {
-        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
-        t["distance"] = &trussc::Node::HitResult::distance;
-        t["localPoint"] = &trussc::Node::HitResult::localPoint;
-        t["node"] = &trussc::Node::HitResult::node;
-        t["hit"] = &trussc::Node::HitResult::hit;
-    }
-    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
-        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
-        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
-    {
-        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
-        t["message"] = &trussc::MicStartResult::message;
-        t["success"] = &trussc::MicStartResult::success;
+        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
+        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
+        t["host"] = &trussc::TcpClientConnectEventArgs::host;
+        t["port"] = &trussc::TcpClientConnectEventArgs::port;
     }
     {
-        sol::usertype<trussc::Mod> t = lua->new_usertype<trussc::Mod>("Mod");
-        t["getOwner"] = [](trussc::Mod& self) { return self.getOwner(); };
+        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
+        t["fileName"] = &trussc::FileDialogResult::fileName;
+        t["filePath"] = &trussc::FileDialogResult::filePath;
+        t["success"] = &trussc::FileDialogResult::success;
     }
+    {
+        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
+        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
+        t["message"] = &trussc::VideoErrorEventArgs::message;
+    }
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

@@ -170,22 +170,21 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["setVisible"] = &trussc::WindowSettings::setVisible;
     }
     {
-        sol::usertype<trussc::AudioStats> t = lua->new_usertype<trussc::AudioStats>("AudioStats");
-        t["clippedSamples"] = &trussc::AudioStats::clippedSamples;
-        t["cpuUsage"] = &trussc::AudioStats::cpuUsage;
-        t["cpuUsagePeak"] = &trussc::AudioStats::cpuUsagePeak;
-        t["droppedDecoderError"] = &trussc::AudioStats::droppedDecoderError;
-        t["droppedNotRunning"] = &trussc::AudioStats::droppedNotRunning;
-        t["droppedPlays"] = &trussc::AudioStats::droppedPlays;
-        t["droppedPolyphonyLimit"] = &trussc::AudioStats::droppedPolyphonyLimit;
-        t["droppedStreamLimit"] = &trussc::AudioStats::droppedStreamLimit;
-        t["initFailure"] = &trussc::AudioStats::initFailure;
-        t["initFailureResult"] = &trussc::AudioStats::initFailureResult;
-        t["peak"] = &trussc::AudioStats::peak;
-        t["rms"] = &trussc::AudioStats::rms;
-        t["stalled"] = &trussc::AudioStats::stalled;
-        t["underrunFrames"] = &trussc::AudioStats::underrunFrames;
-        t["voicesStoppedByReinit"] = &trussc::AudioStats::voicesStoppedByReinit;
+        sol::usertype<trussc::HasTexture> t = lua->new_usertype<trussc::HasTexture>("HasTexture");
+        t["draw"] = sol::overload([](trussc::HasTexture& self, float x, float y) { return self.draw(x, y); }, [](trussc::HasTexture& self, float x, float y, float w, float h) { return self.draw(x, y, w, h); });
+        t["getMagFilter"] = &trussc::HasTexture::getMagFilter;
+        t["getMinFilter"] = &trussc::HasTexture::getMinFilter;
+        t["getTexture"] = [](trussc::HasTexture& self) -> decltype(auto) { return self.getTexture(); };
+        t["getWrapU"] = &trussc::HasTexture::getWrapU;
+        t["getWrapV"] = &trussc::HasTexture::getWrapV;
+        t["hasTexture"] = &trussc::HasTexture::hasTexture;
+        t["save"] = &trussc::HasTexture::save;
+        t["setFilter"] = &trussc::HasTexture::setFilter;
+        t["setMagFilter"] = &trussc::HasTexture::setMagFilter;
+        t["setMinFilter"] = &trussc::HasTexture::setMinFilter;
+        t["setWrap"] = &trussc::HasTexture::setWrap;
+        t["setWrapU"] = &trussc::HasTexture::setWrapU;
+        t["setWrapV"] = &trussc::HasTexture::setWrapV;
     }
     {
         auto constructors = tcxLuaConstructors<trussc::AudioRecorder
@@ -216,13 +215,13 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["fail"] = sol::overload([](trussc::SaveError error) { return trussc::SaveResult::fail(error); }, [](trussc::SaveError error, std::string message) { return trussc::SaveResult::fail(error, message); });
         t["success"] = &trussc::SaveResult::success;
     }
-    lua->new_usertype<trussc::BlendOp>("BlendOp",
-        sol::meta_function::equal_to, [](trussc::BlendOp a, trussc::BlendOp b){ return a == b; },
-        "Add", sol::var(trussc::BlendOp::Add),
-        "Subtract", sol::var(trussc::BlendOp::Subtract),
-        "ReverseSubtract", sol::var(trussc::BlendOp::ReverseSubtract),
-        "Minimum", sol::var(trussc::BlendOp::Minimum),
-        "Maximum", sol::var(trussc::BlendOp::Maximum));
+    {
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
+    }
     {
         sol::usertype<trussc::AudioInBuffer> t = lua->new_usertype<trussc::AudioInBuffer>("AudioInBuffer");
         t["channels"] = &trussc::AudioInBuffer::channels;
@@ -237,18 +236,19 @@ void tcxLuaGenShard_07(const std::shared_ptr<sol::state>& lua) {
         t["latitude"] = &trussc::Location::latitude;
         t["longitude"] = &trussc::Location::longitude;
     }
-    lua->new_usertype<trussc::TextureFilter>("TextureFilter",
-        sol::meta_function::equal_to, [](trussc::TextureFilter a, trussc::TextureFilter b){ return a == b; },
-        "Nearest", sol::var(trussc::TextureFilter::Nearest),
-        "Linear", sol::var(trussc::TextureFilter::Linear));
     {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-        t["message"] = &trussc::UdpErrorEventArgs::message;
+        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
+        t["files"] = &trussc::DragDropEventArgs::files;
+        t["x"] = &trussc::DragDropEventArgs::x;
+        t["y"] = &trussc::DragDropEventArgs::y;
     }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
     {
-        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
-        t["occluded"] = &trussc::OccludedEventArgs::occluded;
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
     }
 }
 #ifdef _MSC_VER

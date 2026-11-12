@@ -124,21 +124,16 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
     }
 #endif
     {
-        auto constructors = tcxLuaConstructors<trussc::ColorOKLCH
-            , trussc::ColorOKLCH()
-            , trussc::ColorOKLCH(float, float, float)
-            , trussc::ColorOKLCH(float, float, float, float)
+        auto constructors = tcxLuaConstructors<trussc::FileWriter
+            , trussc::FileWriter()
         >();
-        sol::usertype<trussc::ColorOKLCH> t = lua->new_usertype<trussc::ColorOKLCH>("ColorOKLCH", constructors, sol::call_constructor, constructors);
-        t["C"] = &trussc::ColorOKLCH::C;
-        t["H"] = &trussc::ColorOKLCH::H;
-        t["L"] = &trussc::ColorOKLCH::L;
-        t["alpha"] = &trussc::ColorOKLCH::alpha;
-        t["lerp"] = sol::overload([](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t) { return self.lerp(target, t); }, [](trussc::ColorOKLCH& self, const trussc::ColorOKLCH & target, float t, bool shortestPath) { return self.lerp(target, t, shortestPath); });
-        t["toHSB"] = &trussc::ColorOKLCH::toHSB;
-        t["toLinear"] = &trussc::ColorOKLCH::toLinear;
-        t["toOKLab"] = &trussc::ColorOKLCH::toOKLab;
-        t["toRGB"] = &trussc::ColorOKLCH::toRGB;
+        sol::usertype<trussc::FileWriter> t = lua->new_usertype<trussc::FileWriter>("FileWriter", constructors, sol::call_constructor, constructors);
+        t["close"] = &trussc::FileWriter::close;
+        t["flush"] = &trussc::FileWriter::flush;
+        t["isOpen"] = &trussc::FileWriter::isOpen;
+        t["open"] = sol::overload([](trussc::FileWriter& self, const fs::path & path) { return self.open(path); }, [](trussc::FileWriter& self, const fs::path & path, bool append) { return self.open(path, append); });
+        t["write"] = sol::overload([](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.write(text); }, [](trussc::FileWriter& self, char c) -> decltype(auto) { return self.write(c); });
+        t["writeLine"] = sol::overload([](trussc::FileWriter& self) -> decltype(auto) { return self.writeLine(); }, [](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.writeLine(text); });
     }
     {
         auto constructors = tcxLuaConstructors<trussc::ColorOKLab
@@ -167,40 +162,41 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
         "Points", sol::var(trussc::PrimitiveMode::Points));
     {
-        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
-        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
-        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
-        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
-        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
-        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
-        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
+        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
+        t["error"] = &trussc::LoadResult::error;
+        t["message"] = &trussc::LoadResult::message;
+        t["ok"] = &trussc::LoadResult::ok;
+        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+        t["success"] = &trussc::LoadResult::success;
     }
-    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
-        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
-        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
-        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
-    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
-        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
-        "Off", sol::var(trussc::KinsokuLevel::Off),
-        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
-        "Standard", sol::var(trussc::KinsokuLevel::Standard));
-    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
-        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
-        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
-        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
     {
-        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
-        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
+        auto constructors = tcxLuaConstructors<trussc::EventListener
+            , trussc::EventListener()
+        >();
+        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
+        t["disconnect"] = &trussc::EventListener::disconnect;
+        t["isConnected"] = &trussc::EventListener::isConnected;
     }
-    lua->new_usertype<trussc::Deliver>("Deliver",
-        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
-        "Inline", sol::var(trussc::Deliver::Inline),
-        "Main", sol::var(trussc::Deliver::Main));
     {
-        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
-        t["data"] = &trussc::TcpReceiveEventArgs::data;
+        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
+        t["distance"] = &trussc::Node::HitResult::distance;
+        t["localPoint"] = &trussc::Node::HitResult::localPoint;
+        t["node"] = &trussc::Node::HitResult::node;
+        t["hit"] = &trussc::Node::HitResult::hit;
+    }
+    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
+        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
+        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
+        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
+    {
+        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
+        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
+        t["format"] = &trussc::AudioRecordSettings::format;
+    }
+    {
+        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
+        t["height"] = &trussc::ResizeEventArgs::height;
+        t["width"] = &trussc::ResizeEventArgs::width;
     }
 }
 #ifdef _MSC_VER
