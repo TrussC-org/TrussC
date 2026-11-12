@@ -5,8 +5,23 @@ script through tcbuild.sh for the macOS init Quit/close exception and mutations.
 """
 from pathlib import Path
 import sys
+import runpy
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'tools/tests'))
 from test_web_window_controls import body
+
+FixtureBodies = runpy.run_path(str(Path(__file__).with_name('native-fixture-helpers.py')))['FixtureBodies']
+
+COMMON_STUBS = (
+    '_sapp_tc_lookup', '_sapp_tc_now', '_sapp_tc_d3d11_dispatch_pending_device_loss',
+    '_sapp_tc_mac_schedule_deferred', '_sapp_tc_native_hidden', '_sapp_tc_native_iconified',
+)
+PLATFORM_STUBS = {
+    'mac': ('_sapp_tc_mac_contained',),
+    'win32': ('_sapp_tc_win32_window_due', '_sapp_tc_win32_tick'),
+    'x11': ('_sapp_tc_x11_process_event', '_sapp_tc_x11_wait_until',
+            '_sapp_tc_x11_sync_visibility', '_sapp_tc_x11_close',
+            '_sapp_tc_x11_app_event', '_sapp_tc_x11_tick', '_sapp_tc_x11_update_pacer'),
+}
 
 
 def generate(native, early=False):
@@ -15,6 +30,7 @@ def generate(native, early=False):
     for platform, index, backend in [('mac', 0, 'SOKOL_GLCORE'), ('win32', 1, 'SOKOL_GLCORE'),
                                       ('x11_glx', 2, 'SOKOL_GLCORE'), ('x11_egl', 2, 'SOKOL_GLES3')]:
         port = platform.split('_')[0]
+        body = FixtureBodies(globals()['body'])
         start = predicates[index].start()
         send_start = native.rfind('\nstatic ', 0, native.rindex('_sapp_tc_send(_sapp_tc_window_t* w, sapp_event* ev) {', 0, start)) + 1
         send = body(native[send_start:start], native[send_start:native.index('{', send_start)])
@@ -39,7 +55,7 @@ struct _sapp_tc_window_t {
     void* hwnd=nullptr; bool (*events_enabled)()=nullptr; sapp_window_desc desc{};
 } record;
 struct { bool mouse_locked=false; _sapp_tc_window_t* lock_owner=nullptr; int display=0; double refresh_period=1.0/60.0; size_t window_slots=1; _sapp_tc_window_t* windows[1]={&record};
-    int callbacks_active=0,constructing=0; bool deferred_blocked=false;
+    int callbacks_active=0,constructing=0; bool deferred_blocked=false; sapp_window pacer{};
     struct { bool init_called=false,quit_requested=false,quit_ordered=false;
         unsigned host_loop_depth=1; bool host_turn_open=false;
         Descriptor desc; _sapp_tc_window_t* main=&record; } app; } _sapp_tc;
@@ -85,6 +101,8 @@ constexpr int _SAPP_TC_X11_VISIBILITY_NONE=0;
 void _sapp_tc_x11_sync_visibility(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_close(_sapp_tc_window_t*) {}
 void _sapp_tc_x11_app_event(_sapp_tc_window_t*,sapp_event_type type) { emit(type); }
+// The sole visible fixture window must exercise the leading pacer pass.
+_sapp_tc_window_t* _sapp_tc_x11_update_pacer() { _sapp_tc.pacer={record.win_id}; return &record; }
 ''' + body(native, 'static void _sapp_tc_x11_request_exit(') + r'''
 void _sapp_tc_x11_tick(_sapp_tc_window_t* w) {
     const sapp_window handle{w->win_id}; w->in_tick=true;
@@ -168,6 +186,9 @@ void run(std::function<void()> host) {
     check("native startup initializes and ticks once",initCount==1 && ticks==1);
 }
 '''
+        body.check(code, fixture='native-admission/' + platform,
+                   stubs=COMMON_STUBS + PLATFORM_STUBS[port],
+                   declarations=('_sapp_tc_deliver_event', '_sapp_tc_deliver_runtime_quit'))
         parts.append('#pragma push_macro("SOKOL_GLCORE")\n#pragma push_macro("SOKOL_GLES3")\n#undef SOKOL_GLCORE\n#undef SOKOL_GLES3\n#define ' + backend + '\nnamespace admission_' + platform + ' {\n' + code + '\n}\n#pragma pop_macro("SOKOL_GLES3")\n#pragma pop_macro("SOKOL_GLCORE")\n')
     return ''.join(parts)
 
