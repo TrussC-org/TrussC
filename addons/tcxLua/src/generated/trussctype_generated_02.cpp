@@ -135,68 +135,62 @@ void tcxLuaGenShard_02(const std::shared_ptr<sol::state>& lua) {
         t["write"] = sol::overload([](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.write(text); }, [](trussc::FileWriter& self, char c) -> decltype(auto) { return self.write(c); });
         t["writeLine"] = sol::overload([](trussc::FileWriter& self) -> decltype(auto) { return self.writeLine(); }, [](trussc::FileWriter& self, const std::string & text) -> decltype(auto) { return self.writeLine(text); });
     }
+    lua->new_usertype<trussc::BlendFactor>("BlendFactor",
+        sol::meta_function::equal_to, [](trussc::BlendFactor a, trussc::BlendFactor b){ return a == b; },
+        "Zero", sol::var(trussc::BlendFactor::Zero),
+        "One", sol::var(trussc::BlendFactor::One),
+        "SrcColor", sol::var(trussc::BlendFactor::SrcColor),
+        "OneMinusSrcColor", sol::var(trussc::BlendFactor::OneMinusSrcColor),
+        "SrcAlpha", sol::var(trussc::BlendFactor::SrcAlpha),
+        "OneMinusSrcAlpha", sol::var(trussc::BlendFactor::OneMinusSrcAlpha),
+        "DstColor", sol::var(trussc::BlendFactor::DstColor),
+        "OneMinusDstColor", sol::var(trussc::BlendFactor::OneMinusDstColor),
+        "DstAlpha", sol::var(trussc::BlendFactor::DstAlpha),
+        "OneMinusDstAlpha", sol::var(trussc::BlendFactor::OneMinusDstAlpha));
+    lua->new_usertype<trussc::Orientation>("Orientation",
+        sol::meta_function::equal_to, [](trussc::Orientation a, trussc::Orientation b){ return a == b; },
+        "Portrait", sol::var(trussc::Orientation::Portrait),
+        "PortraitUpsideDown", sol::var(trussc::Orientation::PortraitUpsideDown),
+        "LandscapeLeft", sol::var(trussc::Orientation::LandscapeLeft),
+        "LandscapeRight", sol::var(trussc::Orientation::LandscapeRight),
+        "Landscape", sol::var(trussc::Orientation::Landscape),
+        "All", sol::var(trussc::Orientation::All),
+        "AllButUpsideDown", sol::var(trussc::Orientation::AllButUpsideDown));
     {
-        auto constructors = tcxLuaConstructors<trussc::ColorOKLab
-            , trussc::ColorOKLab()
-            , trussc::ColorOKLab(float, float, float)
-            , trussc::ColorOKLab(float, float, float, float)
-        >();
-        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab", constructors, sol::call_constructor, constructors);
-        t["L"] = &trussc::ColorOKLab::L;
-        t["a"] = &trussc::ColorOKLab::a;
-        t["alpha"] = &trussc::ColorOKLab::alpha;
-        t["b"] = &trussc::ColorOKLab::b;
-        t["lerp"] = &trussc::ColorOKLab::lerp;
-        t["toHSB"] = &trussc::ColorOKLab::toHSB;
-        t["toLinear"] = &trussc::ColorOKLab::toLinear;
-        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
-        t["toRGB"] = &trussc::ColorOKLab::toRGB;
+        sol::usertype<trussc::VideoDeviceInfo> t = lua->new_usertype<trussc::VideoDeviceInfo>("VideoDeviceInfo");
+        t["deviceId"] = &trussc::VideoDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::VideoDeviceInfo::deviceName;
+        t["uniqueId"] = &trussc::VideoDeviceInfo::uniqueId;
+        t["getDeviceID"] = &trussc::VideoDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::VideoDeviceInfo::getDeviceName;
+        t["getUniqueId"] = &trussc::VideoDeviceInfo::getUniqueId;
     }
-    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
-        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
-        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
-        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
-        "Lines", sol::var(trussc::PrimitiveMode::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
-        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
-        "Points", sol::var(trussc::PrimitiveMode::Points));
+    lua->new_usertype<trussc::StrokeMesh::JoinType>("StrokeMeshJoinType",
+        sol::meta_function::equal_to, [](trussc::StrokeMesh::JoinType a, trussc::StrokeMesh::JoinType b){ return a == b; },
+        "JOIN_MITER", sol::var(trussc::StrokeMesh::JoinType::JOIN_MITER),
+        "JOIN_ROUND", sol::var(trussc::StrokeMesh::JoinType::JOIN_ROUND),
+        "JOIN_BEVEL", sol::var(trussc::StrokeMesh::JoinType::JOIN_BEVEL));
+    lua->new_usertype<trussc::KinsokuLevel>("KinsokuLevel",
+        sol::meta_function::equal_to, [](trussc::KinsokuLevel a, trussc::KinsokuLevel b){ return a == b; },
+        "Off", sol::var(trussc::KinsokuLevel::Off),
+        "PunctuationOnly", sol::var(trussc::KinsokuLevel::PunctuationOnly),
+        "Standard", sol::var(trussc::KinsokuLevel::Standard));
+    lua->new_usertype<trussc::LayoutDirection>("LayoutDirection",
+        sol::meta_function::equal_to, [](trussc::LayoutDirection a, trussc::LayoutDirection b){ return a == b; },
+        "Vertical", sol::var(trussc::LayoutDirection::Vertical),
+        "Horizontal", sol::var(trussc::LayoutDirection::Horizontal));
     {
-        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
-        t["error"] = &trussc::LoadResult::error;
-        t["message"] = &trussc::LoadResult::message;
-        t["ok"] = &trussc::LoadResult::ok;
-        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
-        t["success"] = &trussc::LoadResult::success;
+        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
+        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
     }
+    lua->new_usertype<trussc::Deliver>("Deliver",
+        sol::meta_function::equal_to, [](trussc::Deliver a, trussc::Deliver b){ return a == b; },
+        "Inline", sol::var(trussc::Deliver::Inline),
+        "Main", sol::var(trussc::Deliver::Main));
     {
-        auto constructors = tcxLuaConstructors<trussc::EventListener
-            , trussc::EventListener()
-        >();
-        sol::usertype<trussc::EventListener> t = lua->new_usertype<trussc::EventListener>("EventListener", constructors, sol::call_constructor, constructors);
-        t["disconnect"] = &trussc::EventListener::disconnect;
-        t["isConnected"] = &trussc::EventListener::isConnected;
-    }
-    {
-        sol::usertype<trussc::Node::HitResult> t = lua->new_usertype<trussc::Node::HitResult>("NodeHitResult");
-        t["distance"] = &trussc::Node::HitResult::distance;
-        t["localPoint"] = &trussc::Node::HitResult::localPoint;
-        t["node"] = &trussc::Node::HitResult::node;
-        t["hit"] = &trussc::Node::HitResult::hit;
-    }
-    lua->new_usertype<trussc::SoundSource::Kind>("SoundSourceKind",
-        sol::meta_function::equal_to, [](trussc::SoundSource::Kind a, trussc::SoundSource::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundSource::Kind::Eager),
-        "Stream", sol::var(trussc::SoundSource::Kind::Stream));
-    {
-        sol::usertype<trussc::AudioRecordSettings> t = lua->new_usertype<trussc::AudioRecordSettings>("AudioRecordSettings");
-        t["channelMap"] = &trussc::AudioRecordSettings::channelMap;
-        t["format"] = &trussc::AudioRecordSettings::format;
-    }
-    {
-        sol::usertype<trussc::ResizeEventArgs> t = lua->new_usertype<trussc::ResizeEventArgs>("ResizeEventArgs");
-        t["height"] = &trussc::ResizeEventArgs::height;
-        t["width"] = &trussc::ResizeEventArgs::width;
+        sol::usertype<trussc::TcpReceiveEventArgs> t = lua->new_usertype<trussc::TcpReceiveEventArgs>("TcpReceiveEventArgs");
+        t["data"] = &trussc::TcpReceiveEventArgs::data;
     }
 }
 #ifdef _MSC_VER

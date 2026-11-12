@@ -167,58 +167,62 @@ void tcxLuaGenShard_15(const std::shared_ptr<sol::state>& lua) {
         t["getNetmask"] = &trussc::NetworkInterface::getNetmask;
     }
     {
-        sol::usertype<trussc::VideoRecordSettings> t = lua->new_usertype<trussc::VideoRecordSettings>("VideoRecordSettings");
-        t["audio"] = &trussc::VideoRecordSettings::audio;
-        t["audioBitrate"] = &trussc::VideoRecordSettings::audioBitrate;
-        t["audioChannels"] = &trussc::VideoRecordSettings::audioChannels;
-        t["audioSampleRate"] = &trussc::VideoRecordSettings::audioSampleRate;
-        t["bitrate"] = &trussc::VideoRecordSettings::bitrate;
-        t["codec"] = &trussc::VideoRecordSettings::codec;
-        t["duration"] = &trussc::VideoRecordSettings::duration;
-        t["fps"] = &trussc::VideoRecordSettings::fps;
-        t["keyframeInterval"] = &trussc::VideoRecordSettings::keyframeInterval;
+        sol::usertype<trussc::ScrollEventArgs> t = lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
+        t["alt"] = &trussc::ScrollEventArgs::alt;
+        t["consumed"] = &trussc::ScrollEventArgs::consumed;
+        t["ctrl"] = &trussc::ScrollEventArgs::ctrl;
+        t["globalPos"] = &trussc::ScrollEventArgs::globalPos;
+        t["pos"] = &trussc::ScrollEventArgs::pos;
+        t["scroll"] = &trussc::ScrollEventArgs::scroll;
+        t["scrollX"] = &trussc::ScrollEventArgs::scrollX;
+        t["scrollY"] = &trussc::ScrollEventArgs::scrollY;
+        t["shift"] = &trussc::ScrollEventArgs::shift;
+        t["super"] = &trussc::ScrollEventArgs::super;
+        t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
     }
     {
-        sol::usertype<trussc::GraphicsBackend> t = lua->new_usertype<trussc::GraphicsBackend>("GraphicsBackend");
-        t["isD3D11"] = &trussc::GraphicsBackend::isD3D11;
-        t["isMetal"] = &trussc::GraphicsBackend::isMetal;
-        t["isOpenGL"] = &trussc::GraphicsBackend::isOpenGL;
-        t["isVulkan"] = &trussc::GraphicsBackend::isVulkan;
-        t["isWebGL2"] = &trussc::GraphicsBackend::isWebGL2;
-        t["isWebGPU"] = &trussc::GraphicsBackend::isWebGPU;
-        t["name"] = &trussc::GraphicsBackend::name;
+        sol::usertype<trussc::AudioSettings> t = lua->new_usertype<trussc::AudioSettings>("AudioSettings");
+        t["backend"] = &trussc::AudioSettings::backend;
+        t["bufferSize"] = &trussc::AudioSettings::bufferSize;
+        t["channels"] = &trussc::AudioSettings::channels;
+        t["device"] = &trussc::AudioSettings::device;
+        t["deviceName"] = &trussc::AudioSettings::deviceName;
+        t["maxPolyphony"] = &trussc::AudioSettings::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioSettings::sampleRate;
     }
-    lua->new_usertype<trussc::SaveError>("SaveError",
-        sol::meta_function::equal_to, [](trussc::SaveError a, trussc::SaveError b){ return a == b; },
-        "None", sol::var(trussc::SaveError::None),
-        "AccessDenied", sol::var(trussc::SaveError::AccessDenied),
-        "NoSpace", sol::var(trussc::SaveError::NoSpace),
-        "WriteFailed", sol::var(trussc::SaveError::WriteFailed),
-        "Unknown", sol::var(trussc::SaveError::Unknown));
+    lua->new_usertype<trussc::LogLevel>("LogLevel",
+        sol::meta_function::equal_to, [](trussc::LogLevel a, trussc::LogLevel b){ return a == b; },
+        "Verbose", sol::var(trussc::LogLevel::Verbose),
+        "Notice", sol::var(trussc::LogLevel::Notice),
+        "Warning", sol::var(trussc::LogLevel::Warning),
+        "Error", sol::var(trussc::LogLevel::Error),
+        "Fatal", sol::var(trussc::LogLevel::Fatal),
+        "Silent", sol::var(trussc::LogLevel::Silent));
+    lua->new_usertype<trussc::WindowType>("WindowType",
+        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
+        "Rect", sol::var(trussc::WindowType::Rect),
+        "Hanning", sol::var(trussc::WindowType::Hanning),
+        "Hamming", sol::var(trussc::WindowType::Hamming),
+        "Blackman", sol::var(trussc::WindowType::Blackman));
+    lua->new_usertype<trussc::LightType>("LightType",
+        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
+        "Directional", sol::var(trussc::LightType::Directional),
+        "Point", sol::var(trussc::LightType::Point),
+        "Spot", sol::var(trussc::LightType::Spot));
     {
-        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
-        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
-        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
-    }
-    lua->new_usertype<trussc::PointStyle>("PointStyle",
-        sol::meta_function::equal_to, [](trussc::PointStyle a, trussc::PointStyle b){ return a == b; },
-        "Square", sol::var(trussc::PointStyle::Square),
-        "Round", sol::var(trussc::PointStyle::Round),
-        "Pixel", sol::var(trussc::PointStyle::Pixel));
-    {
-        sol::usertype<trussc::RuntimeSettings> t = lua->new_usertype<trussc::RuntimeSettings>("RuntimeSettings");
-        t["uniformBufferReserve"] = &trussc::RuntimeSettings::uniformBufferReserve;
-        t["reserveUniformBuffer"] = &trussc::RuntimeSettings::reserveUniformBuffer;
-    }
-    {
-        sol::usertype<trussc::UdpErrorEventArgs> t = lua->new_usertype<trussc::UdpErrorEventArgs>("UdpErrorEventArgs");
-        t["errorCode"] = &trussc::UdpErrorEventArgs::errorCode;
-        t["message"] = &trussc::UdpErrorEventArgs::message;
+        sol::usertype<trussc::BlendDesc::Component> t = lua->new_usertype<trussc::BlendDesc::Component>("BlendDescComponent");
+        t["dst"] = &trussc::BlendDesc::Component::dst;
+        t["op"] = &trussc::BlendDesc::Component::op;
+        t["src"] = &trussc::BlendDesc::Component::src;
     }
     {
-        sol::usertype<trussc::OccludedEventArgs> t = lua->new_usertype<trussc::OccludedEventArgs>("OccludedEventArgs");
-        t["occluded"] = &trussc::OccludedEventArgs::occluded;
+        sol::usertype<trussc::ExitRequestEventArgs> t = lua->new_usertype<trussc::ExitRequestEventArgs>("ExitRequestEventArgs");
+        t["cancel"] = &trussc::ExitRequestEventArgs::cancel;
+        t["reason"] = &trussc::ExitRequestEventArgs::reason;
+    }
+    {
+        sol::usertype<trussc::DeviceDisconnectEventArgs> t = lua->new_usertype<trussc::DeviceDisconnectEventArgs>("DeviceDisconnectEventArgs");
+        t["reason"] = &trussc::DeviceDisconnectEventArgs::reason;
     }
 }
 #ifdef _MSC_VER

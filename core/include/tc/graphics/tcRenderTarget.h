@@ -243,8 +243,8 @@ struct ImmediateSelection {
         return role == other.role && blend == other.blend && depth == other.depth && customBlendId == other.customBlendId;
     }
 };
-inline ImmediateSelection fillSelection(BlendMode blend, bool depth = false, const BlendDesc& custom = {}) {
-    return {PipelineRole::Fill, blend, depth, blend == BlendMode::Custom ? blendDescId(custom) : 0};
+inline ImmediateSelection fillSelection(BlendMode blend, bool depth = false, uint32_t customId = blendDescId(BlendDesc{})) {
+    return {PipelineRole::Fill, blend, depth, blend == BlendMode::Custom ? customId : 0};
 }
 struct PipelineKey {
     PipelineFamily family = PipelineFamily::Immediate;
@@ -452,6 +452,8 @@ struct RenderTarget {
     std::vector<ScissorRect> scissorStack;
     BlendMode currentBlendMode = BlendMode::Alpha;
     BlendDesc customBlendDesc;
+    // Packed once at the public setter; copy it together with the slot value.
+    uint32_t customBlendId = blendDescId(BlendDesc{});
     bool depthTestEnabled = false;
 
     StencilState stencil;
@@ -501,6 +503,7 @@ struct RenderTarget {
     void inheritLogicalDrawFlags(const RenderTarget& previous) {
         currentBlendMode = previous.currentBlendMode;
         customBlendDesc = previous.customBlendDesc;
+        customBlendId = previous.customBlendId;
         depthTestEnabled = previous.depthTestEnabled;
     }
 };

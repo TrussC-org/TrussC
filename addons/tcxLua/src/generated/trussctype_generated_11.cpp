@@ -194,63 +194,75 @@ void tcxLuaGenShard_11(const std::shared_ptr<sol::state>& lua) {
         t["pushReadOnly"] = &trussc::JsonReadReflector::pushReadOnly;
         t["unknownKeys"] = &trussc::JsonReadReflector::unknownKeys;
     }
-    lua->new_usertype<trussc::EaseType>("EaseType",
-        sol::meta_function::equal_to, [](trussc::EaseType a, trussc::EaseType b){ return a == b; },
-        "Linear", sol::var(trussc::EaseType::Linear),
-        "Quad", sol::var(trussc::EaseType::Quad),
-        "Cubic", sol::var(trussc::EaseType::Cubic),
-        "Quart", sol::var(trussc::EaseType::Quart),
-        "Quint", sol::var(trussc::EaseType::Quint),
-        "Sine", sol::var(trussc::EaseType::Sine),
-        "Expo", sol::var(trussc::EaseType::Expo),
-        "Circ", sol::var(trussc::EaseType::Circ),
-        "Back", sol::var(trussc::EaseType::Back),
-        "Elastic", sol::var(trussc::EaseType::Elastic),
-        "Bounce", sol::var(trussc::EaseType::Bounce),
-        "Custom", sol::var(trussc::EaseType::Custom));
-    lua->new_usertype<trussc::SendError>("SendError",
-        sol::meta_function::equal_to, [](trussc::SendError a, trussc::SendError b){ return a == b; },
-        "None", sol::var(trussc::SendError::None),
-        "ClientNotFound", sol::var(trussc::SendError::ClientNotFound),
-        "Disconnected", sol::var(trussc::SendError::Disconnected),
-        "Timeout", sol::var(trussc::SendError::Timeout),
-        "QueueFull", sol::var(trussc::SendError::QueueFull),
-        "NotRunning", sol::var(trussc::SendError::NotRunning),
-        "AllocationFailed", sol::var(trussc::SendError::AllocationFailed));
-    lua->new_usertype<trussc::BlendMode>("BlendMode",
-        sol::meta_function::equal_to, [](trussc::BlendMode a, trussc::BlendMode b){ return a == b; },
-        "Alpha", sol::var(trussc::BlendMode::Alpha),
-        "Add", sol::var(trussc::BlendMode::Add),
-        "Multiply", sol::var(trussc::BlendMode::Multiply),
-        "Screen", sol::var(trussc::BlendMode::Screen),
-        "Subtract", sol::var(trussc::BlendMode::Subtract),
-        "Disabled", sol::var(trussc::BlendMode::Disabled));
-    lua->new_usertype<trussc::StrokeMesh::CapType>("StrokeMeshCapType",
-        sol::meta_function::equal_to, [](trussc::StrokeMesh::CapType a, trussc::StrokeMesh::CapType b){ return a == b; },
-        "CAP_BUTT", sol::var(trussc::StrokeMesh::CapType::CAP_BUTT),
-        "CAP_ROUND", sol::var(trussc::StrokeMesh::CapType::CAP_ROUND),
-        "CAP_SQUARE", sol::var(trussc::StrokeMesh::CapType::CAP_SQUARE));
+    lua->new_usertype<trussc::TextureFormat>("TextureFormat",
+        sol::meta_function::equal_to, [](trussc::TextureFormat a, trussc::TextureFormat b){ return a == b; },
+        "RGBA8", sol::var(trussc::TextureFormat::RGBA8),
+        "RGBA16F", sol::var(trussc::TextureFormat::RGBA16F),
+        "RGBA32F", sol::var(trussc::TextureFormat::RGBA32F),
+        "R8", sol::var(trussc::TextureFormat::R8),
+        "R16F", sol::var(trussc::TextureFormat::R16F),
+        "R32F", sol::var(trussc::TextureFormat::R32F),
+        "RG8", sol::var(trussc::TextureFormat::RG8),
+        "RG16F", sol::var(trussc::TextureFormat::RG16F),
+        "RG32F", sol::var(trussc::TextureFormat::RG32F),
+        "BGRA8", sol::var(trussc::TextureFormat::BGRA8),
+        "RGBA16", sol::var(trussc::TextureFormat::RGBA16));
     {
-        sol::usertype<trussc::TcpClientConnectEventArgs> t = lua->new_usertype<trussc::TcpClientConnectEventArgs>("TcpClientConnectEventArgs");
-        t["clientId"] = &trussc::TcpClientConnectEventArgs::clientId;
-        t["host"] = &trussc::TcpClientConnectEventArgs::host;
-        t["port"] = &trussc::TcpClientConnectEventArgs::port;
+        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
+        t["isAndroid"] = &trussc::Platform::isAndroid;
+        t["isApple"] = &trussc::Platform::isApple;
+        t["isDesktop"] = &trussc::Platform::isDesktop;
+        t["isIOS"] = &trussc::Platform::isIOS;
+        t["isLinux"] = &trussc::Platform::isLinux;
+        t["isMacOS"] = &trussc::Platform::isMacOS;
+        t["isMobile"] = &trussc::Platform::isMobile;
+        t["isWeb"] = &trussc::Platform::isWeb;
+        t["isWindows"] = &trussc::Platform::isWindows;
+        t["name"] = &trussc::Platform::name;
     }
     {
-        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
-        t["fileName"] = &trussc::FileDialogResult::fileName;
-        t["filePath"] = &trussc::FileDialogResult::filePath;
-        t["success"] = &trussc::FileDialogResult::success;
+        sol::usertype<trussc::LoadResult> t = lua->new_usertype<trussc::LoadResult>("LoadResult");
+        t["error"] = &trussc::LoadResult::error;
+        t["message"] = &trussc::LoadResult::message;
+        t["ok"] = &trussc::LoadResult::ok;
+        t["fail"] = sol::overload([](trussc::LoadError e) { return trussc::LoadResult::fail(e); }, [](trussc::LoadError e, std::string msg) { return trussc::LoadResult::fail(e, msg); });
+        t["success"] = &trussc::LoadResult::success;
     }
     {
-        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
-        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
-        t["message"] = &trussc::VideoErrorEventArgs::message;
+        auto constructors = tcxLuaConstructors<trussc::OnceGate
+            , trussc::OnceGate()
+            , trussc::OnceGate(double)
+        >();
+        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
+        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
+        t["reset"] = &trussc::OnceGate::reset;
     }
-    lua->new_usertype<trussc::Codec>("Codec",
-        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
-        "None", sol::var(trussc::Codec::None),
-        "LZ4", sol::var(trussc::Codec::LZ4));
+    {
+        auto constructors = tcxLuaConstructors<trussc::LogStream
+            , trussc::LogStream(trussc::LogLevel)
+            , trussc::LogStream(trussc::LogLevel, const std::string &)
+        >();
+        sol::usertype<trussc::LogStream> t = lua->new_usertype<trussc::LogStream>("LogStream", constructors, sol::call_constructor, constructors);
+    }
+    lua->new_usertype<trussc::TcyMode>("TcyMode",
+        sol::meta_function::equal_to, [](trussc::TcyMode a, trussc::TcyMode b){ return a == b; },
+        "Rotate", sol::var(trussc::TcyMode::Rotate),
+        "Upright", sol::var(trussc::TcyMode::Upright),
+        "Combine", sol::var(trussc::TcyMode::Combine));
+    {
+        sol::usertype<trussc::ScreenshotSaveEventArgs> t = lua->new_usertype<trussc::ScreenshotSaveEventArgs>("ScreenshotSaveEventArgs");
+        t["path"] = &trussc::ScreenshotSaveEventArgs::path;
+        t["result"] = &trussc::ScreenshotSaveEventArgs::result;
+    }
+    {
+        sol::usertype<trussc::MicStartResult> t = lua->new_usertype<trussc::MicStartResult>("MicStartResult");
+        t["message"] = &trussc::MicStartResult::message;
+        t["success"] = &trussc::MicStartResult::success;
+    }
+    {
+        sol::usertype<trussc::EnumLabelSpan> t = lua->new_usertype<trussc::EnumLabelSpan>("EnumLabelSpan");
+        t["count"] = &trussc::EnumLabelSpan::count;
+    }
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

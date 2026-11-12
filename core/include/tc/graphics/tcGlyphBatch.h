@@ -80,15 +80,21 @@ public:
         font_.atlasManager_->requestMipmaps();
         font_.atlasManager_->ensureTexturesUpdated();
         const auto blend = target->currentBlendMode;
-        auto recipe = internal::pipeDesc2D(blend, target->depthTestEnabled);
-        recipe.shader = internal::glyphBatchShader();
-        recipe.layout = {};
-        recipe.layout.buffers[0].stride = sizeof(Vertex);
-        recipe.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT4;
-        recipe.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
-        recipe.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4;
-        recipe.index_type = SG_INDEXTYPE_UINT32;
-        const auto pipeline = target->pipeline(internal::PipelineKey::raw(internal::PipelineRole::GlyphBatch, recipe));
+        auto selection = internal::fillSelection(blend, target->depthTestEnabled, target->customBlendId);
+        selection.role = internal::PipelineRole::GlyphBatch;
+        const auto pipeline = target->selectPipeline(internal::PipelineSelectionId::immediate(selection), [&] {
+            auto recipe = internal::pipeDesc2D(blend, target->depthTestEnabled, target->customBlendDesc);
+            recipe.shader = internal::glyphBatchShader();
+            recipe.layout = {};
+            recipe.layout.buffers[0].stride = sizeof(Vertex);
+            recipe.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT4;
+            recipe.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT2;
+            recipe.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4;
+            recipe.index_type = SG_INDEXTYPE_UINT32;
+            auto key = internal::PipelineKey::raw(internal::PipelineRole::GlyphBatch, recipe);
+            key.selection = selection;
+            return key;
+        });
         if (!pipeline.raw.id) return;
         const Mat4 mvp = (target->camera.currentProjectionMatrix * target->camera.currentViewMatrix * transform).transposed();
         // Upload every dirty run before queuing any of this batch's draws.
@@ -116,7 +122,7 @@ public:
                                clip.active ? clip.w : float(target->width),
                                clip.active ? clip.h : float(target->height)};
             command.pipeline = pipeline.raw;
-            command.pipelineGeneration = pipeline.generation;
+            command.pipelineGeneration = target->resources().rawCache;
             command.vertexCount = static_cast<int>(page.vertices.size() / 4 * 6); // indexed sg_draw count
             command.bindings.vertex_buffers[0] = page.gpu->vertices;
             command.bindings.index_buffer = indices;

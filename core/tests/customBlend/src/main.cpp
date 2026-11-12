@@ -64,7 +64,8 @@ void valueChecks() {
     for (auto mode : {BlendMode::Alpha,BlendMode::Add,BlendMode::Multiply,BlendMode::Screen,
                       BlendMode::Subtract,BlendMode::Disabled,BlendMode::Custom}) {
         setBlendMode(mode);
-        check("set/get mode symmetry and persistent slot",getBlendMode()==mode && getCustomBlendDesc()==descriptors[0]);
+        check("set/get mode symmetry and persistent slot",getBlendMode()==mode && getCustomBlendDesc()==descriptors[0] &&
+            internal::currentTarget().customBlendId==internal::blendDescId(descriptors[0]));
     }
     int warnings = 0;
     auto listener=getLogger().onLog.listen([&](LogEventArgs& event) {
@@ -111,6 +112,7 @@ public:
 };
 class CustomBlendApp : public App {
     Font font_;
+    GlyphBatch glyphs_;
     Texture texture_;
     Fbo source_;
     Pixels textMask_;
@@ -129,6 +131,7 @@ class CustomBlendApp : public App {
             setColor(sourceColor_); font_.drawString("A",float(i*48),80);
             drawBitmapString("A",float(i*48),104);
             setColor(sourceColor_); drawRect(float(i*48),128,24,24);
+            glyphs_.draw(Mat4::translate(float(i*48),152,0));
         }
     }
     void checkCases(const Pixels& pixels, float scale, const char* target) {
@@ -142,33 +145,36 @@ class CustomBlendApp : public App {
             }
             // The overwrite reference records shader coverage in alpha and
             // marks the entire emitted quad with white RGB, including alpha=0.
-            for(int text=0;text<2;++text) {
+            for(int text=0;text<3;++text) {
                 bool matches=true; int ink=0;
                 for(int y=0;y<24;++y) for(int x=0;x<24;++x) {
                     const auto mask=textMask_.getColor(x,y+text*24);
                     auto source=sourceColor_; source.a*=mask.a;
                     const auto wanted=mask.r>0.5f ? expected(i,source,destination_) : destination_;
-                    const auto c=pixels.getColor(int((i*48+x)*scale),int((80+text*24+y)*scale));
+                    const auto c=pixels.getColor(int((i*48+x)*scale),int(((text==2 ? 152 : 80+text*24)+y)*scale));
                     matches &= approxEq(c,wanted);
                     ink+=mask.a>0;
                 }
                 check(text==0 ? "Font text follows literal custom blend and coverage" :
-                    "bitmap text follows literal custom blend and coverage", matches && ink>0);
+                    text==1 ? "bitmap text follows literal custom blend and coverage" :
+                    "GlyphBatch follows draw-time custom blend and straight coverage", matches && ink>0);
             }
         }
     }
     void gpuChecks() {
-        Fbo mask; mask.allocate(24,48);
+        Fbo mask; mask.allocate(24,72);
         mask.begin(0,0,0,0); setupScreenOrtho();
         BlendDesc overwrite{{BlendFactor::One,BlendFactor::Zero},{BlendFactor::One,BlendFactor::Zero}};
         setCustomBlendDesc(overwrite); setBlendMode(BlendMode::Custom);
-        setColor(1); font_.drawString("A",0,0); drawBitmapString("A",0,24); mask.end();
-        textMask_.allocate(24,48,4); check("text coverage reference",mask.readPixels(textMask_.getData()));
+        setColor(1); font_.drawString("A",0,0); drawBitmapString("A",0,24);
+        GlyphBatch maskGlyphs; maskGlyphs.setFont(font_); maskGlyphs.add("A",Color(1));
+        maskGlyphs.draw(Mat4::translate(0,48,0)); mask.end();
+        textMask_.allocate(24,72,4); check("text coverage reference",mask.readPixels(textMask_.getData()));
         // Alpha drawing stores premultiplied RGB; Custom uses those values once.
         source_.begin(0,0,0,0); setBlendMode(BlendMode::Alpha); setColor(sourceColor_);
         drawRect(0,0,24,24); source_.end();
         for(int samples : {1,4}) {
-            Fbo fbo; fbo.allocate(192,160,samples);
+            Fbo fbo; fbo.allocate(192,184,samples);
             resetStyle(); setCustomBlendDesc(descriptors[1]); setBlendMode(BlendMode::Custom);
             fbo.begin(destination_.r,destination_.g,destination_.b,destination_.a);
             setupScreenOrtho(); disableDepthTest();
@@ -176,7 +182,7 @@ class CustomBlendApp : public App {
             drawCases();
             fbo.end();
             check("Fbo return propagates mode and slot",getBlendMode()==BlendMode::Custom && getCustomBlendDesc()==descriptors[3]);
-            Pixels pixels; pixels.allocate(192,160,4);
+            Pixels pixels; pixels.allocate(192,184,4);
             check("Fbo readback",fbo.readPixels(pixels.getData()));
             checkCases(pixels,1,samples==1 ? "Fbo" : "MSAA Fbo");
         }
@@ -192,8 +198,11 @@ class CustomBlendApp : public App {
         Fbo nested; nested.allocate(8,8);
         nested.begin(); setBlendMode(BlendMode::Alpha); setCustomBlendDesc(descriptors[2]); nested.end();
         check("inactive Fbo slot propagates too",getBlendMode()==BlendMode::Alpha && getCustomBlendDesc()==descriptors[2]);
+        setBlendMode(BlendMode::Custom);
+        check("inactive Fbo slot retains packed identity",internal::currentTarget().selectedPipeline.customBlendId==internal::blendDescId(descriptors[2]));
         resetStyle();
     }
+
     double alternate(bool custom) {
         auto& target=internal::currentTarget();
         if(custom) setBlendMode(BlendMode::Custom);
@@ -209,6 +218,7 @@ class CustomBlendApp : public App {
         if(custom) for(int i=0;i<2000;++i) {
             resetStyle(); setCustomBlendDesc(descriptors[i%2]); setBlendMode(BlendMode::Custom);
             font_.drawString("A",0,0);
+            if(i<32) glyphs_.draw();
         }
         check("custom values stay outside the finite standard cache",std::none_of(
             target.resources().immediateCache.begin(),target.resources().immediateCache.end(),
@@ -222,17 +232,19 @@ public:
         const unsigned char texel[]={51,26,77,64};
         texture_.allocate(1,1,TextureFormat::RGBA8,TextureUsage::Dynamic); texture_.loadData(texel,1,1,4);
         source_.allocate(24,24);
+        glyphs_.setFont(font_); glyphs_.add("A",sourceColor_);
     }
     void draw() override {
         if(frame_==0) { valueChecks(); gpuChecks(); }
         clear(0,0,0); setupScreenOrtho(); disableDepthTest();
         auto& resources=internal::currentTarget().resources();
         const auto lookups=resources.canonicalLookups, pipelines=resources.cache.size();
+        const auto rawPipelines=resources.rawCache->cache.size();
         const bool custom=frame_%2==0;
         const double elapsed=alternate(custom);
         if(frame_>=2) {
             check("alternation has zero canonical lookups after warm-up",resources.canonicalLookups==lookups);
-            check("alternation creates zero pipelines after warm-up",resources.cache.size()==pipelines);
+            check("alternation creates zero pipelines after warm-up",resources.cache.size()==pipelines && resources.rawCache->cache.size()==rawPipelines);
             (custom ? customTimes_ : standardTimes_).push_back(elapsed);
         }
         ++frame_;
@@ -248,6 +260,6 @@ public:
 }
 TC_CORE_TEST_MAIN(int argc,char** argv) {
     if(argc==1) { runHeadlessApp<ValueApp>(); return failures ? 1 : 0; }
-    WindowSettings settings; settings.setSize(192,160); settings.setHighDpi(false); settings.sampleCount=argc>2 && std::strcmp(argv[2],"--msaa4")==0 ? 4 : 1;
+    WindowSettings settings; settings.setSize(192,184); settings.setHighDpi(false); settings.sampleCount=argc>2 && std::strcmp(argv[2],"--msaa4")==0 ? 4 : 1;
     return tcCoreTest::runDisplayTest<CustomBlendApp>(settings,failures,[] { check("suite completed",completed); });
 }

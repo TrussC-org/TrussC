@@ -948,7 +948,7 @@ bool popTarget(RenderTarget& target, uint64_t token) {
         if (parent.selectedPipeline.role == PipelineRole::Fill || parent.selectedPipeline.role == PipelineRole::Geometry3D) {
             parent.selectedPipeline.blend = parent.currentBlendMode;
             parent.selectedPipeline.customBlendId = parent.currentBlendMode == BlendMode::Custom ?
-                blendDescId(parent.customBlendDesc) : 0;
+                parent.customBlendId : 0;
         }
     }
     attempt([&] { selectTarget(parent); });

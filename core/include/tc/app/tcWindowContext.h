@@ -405,7 +405,7 @@ bool runWindowTick(std::chrono::steady_clock::time_point now, double sourceDurat
 
 inline RenderTarget& currentTarget() { return *currentWindowContext().currentTarget; }
 inline sgl_pipeline active2D(BlendMode mode) {
-    return currentTarget().immediatePipeline(fillSelection(mode, currentTarget().depthTestEnabled, currentTarget().customBlendDesc));
+    return currentTarget().immediatePipeline(fillSelection(mode, currentTarget().depthTestEnabled, currentTarget().customBlendId));
 }
 inline sgl_pipeline activeFill2D() {
     return active2D(currentTarget().currentBlendMode == BlendMode::Custom ? BlendMode::Custom : BlendMode::Alpha);
@@ -415,7 +415,7 @@ inline sgl_pipeline activePremult() {
 }
 inline sgl_pipeline activeCoverage2D() {
     auto selection = fillSelection(currentTarget().currentBlendMode == BlendMode::Custom ?
-        BlendMode::Custom : BlendMode::Alpha, currentTarget().depthTestEnabled, currentTarget().customBlendDesc);
+        BlendMode::Custom : BlendMode::Alpha, currentTarget().depthTestEnabled, currentTarget().customBlendId);
     selection.role = PipelineRole::Coverage;
     return currentTarget().immediatePipeline(selection);
 }

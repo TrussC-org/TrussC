@@ -186,61 +186,66 @@ void tcxLuaGenShard_10(const std::shared_ptr<sol::state>& lua) {
         t["syncLegacy"] = &trussc::MouseDragEventArgs::syncLegacy;
     }
     {
-        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
-        t["duration"] = &trussc::PlayingSoundInfo::duration;
-        t["level"] = &trussc::PlayingSoundInfo::level;
-        t["loop"] = &trussc::PlayingSoundInfo::loop;
-        t["pan"] = &trussc::PlayingSoundInfo::pan;
-        t["path"] = &trussc::PlayingSoundInfo::path;
-        t["paused"] = &trussc::PlayingSoundInfo::paused;
-        t["position"] = &trussc::PlayingSoundInfo::position;
-        t["slot"] = &trussc::PlayingSoundInfo::slot;
-        t["speed"] = &trussc::PlayingSoundInfo::speed;
-        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
-        t["volume"] = &trussc::PlayingSoundInfo::volume;
+        auto constructors = tcxLuaConstructors<trussc::FileReader
+            , trussc::FileReader()
+        >();
+        sol::usertype<trussc::FileReader> t = lua->new_usertype<trussc::FileReader>("FileReader", constructors, sol::call_constructor, constructors);
+        t["close"] = &trussc::FileReader::close;
+        t["eof"] = &trussc::FileReader::eof;
+        t["isOpen"] = &trussc::FileReader::isOpen;
+        t["open"] = &trussc::FileReader::open;
+        t["readChar"] = &trussc::FileReader::readChar;
+        t["readLine"] = [](trussc::FileReader& self) { return self.readLine(); };
+        t["remaining"] = &trussc::FileReader::remaining;
+        t["seek"] = &trussc::FileReader::seek;
+        t["tell"] = &trussc::FileReader::tell;
     }
     {
-        sol::usertype<trussc::Font::PlacedGlyph> t = lua->new_usertype<trussc::Font::PlacedGlyph>("FontPlacedGlyph");
-        t["baselineY"] = &trussc::Font::PlacedGlyph::baselineY;
-        t["codepoint"] = &trussc::Font::PlacedGlyph::codepoint;
-        t["drawX"] = &trussc::Font::PlacedGlyph::drawX;
-        t["pivotX"] = &trussc::Font::PlacedGlyph::pivotX;
-        t["pivotY"] = &trussc::Font::PlacedGlyph::pivotY;
-        t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
-        t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
+        sol::usertype<trussc::AudioDeviceChangedArgs> t = lua->new_usertype<trussc::AudioDeviceChangedArgs>("AudioDeviceChangedArgs");
+        t["bufferSize"] = &trussc::AudioDeviceChangedArgs::bufferSize;
+        t["channels"] = &trussc::AudioDeviceChangedArgs::channels;
+        t["deviceName"] = &trussc::AudioDeviceChangedArgs::deviceName;
+        t["isDefaultDevice"] = &trussc::AudioDeviceChangedArgs::isDefaultDevice;
+        t["maxPolyphony"] = &trussc::AudioDeviceChangedArgs::maxPolyphony;
+        t["sampleRate"] = &trussc::AudioDeviceChangedArgs::sampleRate;
     }
-    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
-        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
-        "Immutable", sol::var(trussc::TextureUsage::Immutable),
-        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
-        "Stream", sol::var(trussc::TextureUsage::Stream),
-        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget),
-        "Storage", sol::var(trussc::TextureUsage::Storage));
-    lua->new_usertype<trussc::WindowType>("WindowType",
-        sol::meta_function::equal_to, [](trussc::WindowType a, trussc::WindowType b){ return a == b; },
-        "Rect", sol::var(trussc::WindowType::Rect),
-        "Hanning", sol::var(trussc::WindowType::Hanning),
-        "Hamming", sol::var(trussc::WindowType::Hamming),
-        "Blackman", sol::var(trussc::WindowType::Blackman));
+    lua->new_usertype<trussc::EasyCam::Modifier>("EasyCamModifier",
+        sol::meta_function::equal_to, [](trussc::EasyCam::Modifier a, trussc::EasyCam::Modifier b){ return a == b; },
+        "None", sol::var(trussc::EasyCam::Modifier::None),
+        "Shift", sol::var(trussc::EasyCam::Modifier::Shift),
+        "Ctrl", sol::var(trussc::EasyCam::Modifier::Ctrl),
+        "Alt", sol::var(trussc::EasyCam::Modifier::Alt),
+        "Super", sol::var(trussc::EasyCam::Modifier::Super));
     {
-        sol::usertype<trussc::UdpReceiveEventArgs> t = lua->new_usertype<trussc::UdpReceiveEventArgs>("UdpReceiveEventArgs");
-        t["data"] = &trussc::UdpReceiveEventArgs::data;
-        t["remoteHost"] = &trussc::UdpReceiveEventArgs::remoteHost;
-        t["remotePort"] = &trussc::UdpReceiveEventArgs::remotePort;
-    }
-    lua->new_usertype<trussc::AxisMode>("AxisMode",
-        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
-        "None", sol::var(trussc::AxisMode::None),
-        "Fill", sol::var(trussc::AxisMode::Fill),
-        "Content", sol::var(trussc::AxisMode::Content));
-    {
-        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
-        t["message"] = &trussc::TcpConnectEventArgs::message;
-        t["success"] = &trussc::TcpConnectEventArgs::success;
+        sol::usertype<trussc::BlendDesc> t = lua->new_usertype<trussc::BlendDesc>("BlendDesc");
+        t["alpha"] = &trussc::BlendDesc::alpha;
+        t["rgb"] = &trussc::BlendDesc::rgb;
+        t["addKeepAlpha"] = &trussc::BlendDesc::addKeepAlpha;
+        t["premultipliedAdd"] = &trussc::BlendDesc::premultipliedAdd;
+        t["screenKeepAlpha"] = &trussc::BlendDesc::screenKeepAlpha;
     }
     {
-        sol::usertype<trussc::DeviceDisconnectEventArgs> t = lua->new_usertype<trussc::DeviceDisconnectEventArgs>("DeviceDisconnectEventArgs");
-        t["reason"] = &trussc::DeviceDisconnectEventArgs::reason;
+        sol::usertype<trussc::FpsSettings> t = lua->new_usertype<trussc::FpsSettings>("FpsSettings");
+        t["actualVsyncFps"] = &trussc::FpsSettings::actualVsyncFps;
+        t["drawFps"] = &trussc::FpsSettings::drawFps;
+        t["synced"] = &trussc::FpsSettings::synced;
+        t["updateFps"] = &trussc::FpsSettings::updateFps;
+    }
+    {
+        sol::usertype<trussc::FileDialogResult> t = lua->new_usertype<trussc::FileDialogResult>("FileDialogResult");
+        t["fileName"] = &trussc::FileDialogResult::fileName;
+        t["filePath"] = &trussc::FileDialogResult::filePath;
+        t["success"] = &trussc::FileDialogResult::success;
+    }
+    {
+        sol::usertype<trussc::VideoErrorEventArgs> t = lua->new_usertype<trussc::VideoErrorEventArgs>("VideoErrorEventArgs");
+        t["errorCode"] = &trussc::VideoErrorEventArgs::errorCode;
+        t["message"] = &trussc::VideoErrorEventArgs::message;
+    }
+    {
+        sol::usertype<trussc::GrabberFrame> t = lua->new_usertype<trussc::GrabberFrame>("GrabberFrame");
+        t["pixels"] = &trussc::GrabberFrame::pixels;
+        t["timestampUs"] = &trussc::GrabberFrame::timestampUs;
     }
 }
 #ifdef _MSC_VER

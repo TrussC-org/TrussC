@@ -696,7 +696,7 @@ inline void popScissor() {
 inline void setBlendMode(BlendMode mode) {
     auto& target = internal::currentTarget();
     target.currentBlendMode = mode;
-    target.selectedPipeline = internal::fillSelection(mode, target.depthTestEnabled, target.customBlendDesc);
+    target.selectedPipeline = internal::fillSelection(mode, target.depthTestEnabled, target.customBlendId);
     if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(mode));
 }
@@ -715,6 +715,7 @@ inline void setCustomBlendDesc(const BlendDesc& desc) {
     }
     auto& target = internal::currentTarget();
     target.customBlendDesc = desc;
+    target.customBlendId = internal::blendDescId(desc);
     if (target.currentBlendMode == BlendMode::Custom) setBlendMode(BlendMode::Custom);
 }
 
@@ -749,7 +750,7 @@ inline void restoreBlendPipeline() {
 inline void enableDepthTest() {
     auto& target = internal::currentTarget();
     target.depthTestEnabled = true;
-    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, true, target.customBlendDesc);
+    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, true, target.customBlendId);
     if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(getBlendMode()));
 }
@@ -758,7 +759,7 @@ inline void enableDepthTest() {
 inline void disableDepthTest() {
     auto& target = internal::currentTarget();
     target.depthTestEnabled = false;
-    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, false, target.customBlendDesc);
+    target.selectedPipeline = internal::fillSelection(target.currentBlendMode, false, target.customBlendId);
     if (!target.resources().context.id) return;
     internal::loadPipeline(internal::active2D(getBlendMode()));
 }

@@ -179,60 +179,61 @@ void tcxLuaGenShard_09(const std::shared_ptr<sol::state>& lua) {
         t["toVec2"] = &trussc::IVec2::toVec2;
     }
     {
-        sol::usertype<trussc::ScrollEventArgs> t = lua->new_usertype<trussc::ScrollEventArgs>("ScrollEventArgs");
-        t["alt"] = &trussc::ScrollEventArgs::alt;
-        t["consumed"] = &trussc::ScrollEventArgs::consumed;
-        t["ctrl"] = &trussc::ScrollEventArgs::ctrl;
-        t["globalPos"] = &trussc::ScrollEventArgs::globalPos;
-        t["pos"] = &trussc::ScrollEventArgs::pos;
-        t["scroll"] = &trussc::ScrollEventArgs::scroll;
-        t["scrollX"] = &trussc::ScrollEventArgs::scrollX;
-        t["scrollY"] = &trussc::ScrollEventArgs::scrollY;
-        t["shift"] = &trussc::ScrollEventArgs::shift;
-        t["super"] = &trussc::ScrollEventArgs::super;
-        t["syncLegacy"] = &trussc::ScrollEventArgs::syncLegacy;
+        sol::usertype<trussc::PlayingSoundInfo> t = lua->new_usertype<trussc::PlayingSoundInfo>("PlayingSoundInfo");
+        t["duration"] = &trussc::PlayingSoundInfo::duration;
+        t["level"] = &trussc::PlayingSoundInfo::level;
+        t["loop"] = &trussc::PlayingSoundInfo::loop;
+        t["pan"] = &trussc::PlayingSoundInfo::pan;
+        t["path"] = &trussc::PlayingSoundInfo::path;
+        t["paused"] = &trussc::PlayingSoundInfo::paused;
+        t["position"] = &trussc::PlayingSoundInfo::position;
+        t["slot"] = &trussc::PlayingSoundInfo::slot;
+        t["speed"] = &trussc::PlayingSoundInfo::speed;
+        t["streaming"] = &trussc::PlayingSoundInfo::streaming;
+        t["volume"] = &trussc::PlayingSoundInfo::volume;
     }
-    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
-        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
-        "Points", sol::var(trussc::PrimitiveType::Points),
-        "Lines", sol::var(trussc::PrimitiveType::Lines),
-        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
-        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
-        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
-        "Quads", sol::var(trussc::PrimitiveType::Quads));
-    lua->new_usertype<trussc::Direction>("Direction",
-        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
-        "Left", sol::var(trussc::Direction::Left),
-        "Center", sol::var(trussc::Direction::Center),
-        "Right", sol::var(trussc::Direction::Right),
-        "Top", sol::var(trussc::Direction::Top),
-        "Bottom", sol::var(trussc::Direction::Bottom),
-        "Baseline", sol::var(trussc::Direction::Baseline));
     {
-        sol::usertype<trussc::TouchEventArgs> t = lua->new_usertype<trussc::TouchEventArgs>("TouchEventArgs");
-        t["cancelled"] = &trussc::TouchEventArgs::cancelled;
-        t["numTouches"] = &trussc::TouchEventArgs::numTouches;
-        t["id"] = &trussc::TouchEventArgs::id;
-        t["x"] = &trussc::TouchEventArgs::x;
-        t["y"] = &trussc::TouchEventArgs::y;
+        sol::usertype<trussc::Font::PlacedGlyph> t = lua->new_usertype<trussc::Font::PlacedGlyph>("FontPlacedGlyph");
+        t["baselineY"] = &trussc::Font::PlacedGlyph::baselineY;
+        t["codepoint"] = &trussc::Font::PlacedGlyph::codepoint;
+        t["drawX"] = &trussc::Font::PlacedGlyph::drawX;
+        t["pivotX"] = &trussc::Font::PlacedGlyph::pivotX;
+        t["pivotY"] = &trussc::Font::PlacedGlyph::pivotY;
+        t["rotationCw"] = &trussc::Font::PlacedGlyph::rotationCw;
+        t["scaleX"] = &trussc::Font::PlacedGlyph::scaleX;
     }
-    lua->new_usertype<trussc::LightType>("LightType",
-        sol::meta_function::equal_to, [](trussc::LightType a, trussc::LightType b){ return a == b; },
-        "Directional", sol::var(trussc::LightType::Directional),
-        "Point", sol::var(trussc::LightType::Point),
-        "Spot", sol::var(trussc::LightType::Spot));
-    lua->new_usertype<trussc::WritingMode>("WritingMode",
-        sol::meta_function::equal_to, [](trussc::WritingMode a, trussc::WritingMode b){ return a == b; },
-        "Horizontal", sol::var(trussc::WritingMode::Horizontal),
-        "VerticalRL", sol::var(trussc::WritingMode::VerticalRL));
-    lua->new_usertype<trussc::MixMode>("MixMode",
-        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
-        "Auto", sol::var(trussc::MixMode::Auto),
-        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
+    lua->new_usertype<trussc::TextureUsage>("TextureUsage",
+        sol::meta_function::equal_to, [](trussc::TextureUsage a, trussc::TextureUsage b){ return a == b; },
+        "Immutable", sol::var(trussc::TextureUsage::Immutable),
+        "Dynamic", sol::var(trussc::TextureUsage::Dynamic),
+        "Stream", sol::var(trussc::TextureUsage::Stream),
+        "RenderTarget", sol::var(trussc::TextureUsage::RenderTarget),
+        "Storage", sol::var(trussc::TextureUsage::Storage));
+    lua->new_usertype<trussc::AudioRecordSettings::SampleFormat>("AudioRecordSettingsSampleFormat",
+        sol::meta_function::equal_to, [](trussc::AudioRecordSettings::SampleFormat a, trussc::AudioRecordSettings::SampleFormat b){ return a == b; },
+        "S16", sol::var(trussc::AudioRecordSettings::SampleFormat::S16),
+        "F32", sol::var(trussc::AudioRecordSettings::SampleFormat::F32));
     {
-        sol::usertype<trussc::ClipboardPastedEventArgs> t = lua->new_usertype<trussc::ClipboardPastedEventArgs>("ClipboardPastedEventArgs");
-        t["text"] = &trussc::ClipboardPastedEventArgs::text;
+        sol::usertype<trussc::TouchPoint> t = lua->new_usertype<trussc::TouchPoint>("TouchPoint");
+        t["changed"] = &trussc::TouchPoint::changed;
+        t["id"] = &trussc::TouchPoint::id;
+        t["pressure"] = &trussc::TouchPoint::pressure;
+        t["x"] = &trussc::TouchPoint::x;
+        t["y"] = &trussc::TouchPoint::y;
     }
+    lua->new_usertype<trussc::AxisMode>("AxisMode",
+        sol::meta_function::equal_to, [](trussc::AxisMode a, trussc::AxisMode b){ return a == b; },
+        "None", sol::var(trussc::AxisMode::None),
+        "Fill", sol::var(trussc::AxisMode::Fill),
+        "Content", sol::var(trussc::AxisMode::Content));
+    lua->new_usertype<trussc::PixelFormat>("PixelFormat",
+        sol::meta_function::equal_to, [](trussc::PixelFormat a, trussc::PixelFormat b){ return a == b; },
+        "U8", sol::var(trussc::PixelFormat::U8),
+        "F32", sol::var(trussc::PixelFormat::F32));
+    lua->new_usertype<trussc::Codec>("Codec",
+        sol::meta_function::equal_to, [](trussc::Codec a, trussc::Codec b){ return a == b; },
+        "None", sol::var(trussc::Codec::None),
+        "LZ4", sol::var(trussc::Codec::LZ4));
 }
 #ifdef _MSC_VER
 #pragma warning(pop)

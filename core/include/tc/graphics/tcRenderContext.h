@@ -335,6 +335,7 @@ public:
         // style_) so it is saved/restored alongside color/fill/stroke.
         style_.blend = internal::currentWindowContext().currentTarget->currentBlendMode;
         style_.customBlendDesc = internal::currentTarget().customBlendDesc;
+        style_.customBlendId = internal::currentTarget().customBlendId;
         styleStack_.push_back(style_);
     }
 
@@ -465,7 +466,8 @@ private:
     void applyBlend(BlendMode mode) {
         internal::currentTarget().currentBlendMode = mode;
         internal::currentTarget().customBlendDesc = style_.customBlendDesc;
-        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled, style_.customBlendDesc);
+        internal::currentTarget().customBlendId = style_.customBlendId;
+        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled, style_.customBlendId);
         internal::loadPipeline(internal::active2D(mode));
     }
 public:
@@ -1134,6 +1136,7 @@ private:
         // restore it explicitly rather than via this field's value alone.
         BlendMode blend = BlendMode::Alpha;
         BlendDesc customBlendDesc;
+        uint32_t customBlendId = internal::blendDescId(BlendDesc{});
     };
 
     // Current style

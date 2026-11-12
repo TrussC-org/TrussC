@@ -157,70 +157,72 @@ void tcxLuaGenShard_13(const std::shared_ptr<sol::state>& lua) {
         t["toRGB"] = &trussc::ColorOKLCH::toRGB;
     }
     {
-        sol::usertype<trussc::JsonWriteReflector> t = lua->new_usertype<trussc::JsonWriteReflector>("JsonWriteReflector");
-        t["derived"] = &trussc::JsonWriteReflector::derived;
-        t["includeDerived"] = &trussc::JsonWriteReflector::includeDerived;
-        t["members"] = &trussc::JsonWriteReflector::members;
-        t["endGroup"] = &trussc::JsonWriteReflector::endGroup;
-        t["isDerived"] = &trussc::JsonWriteReflector::isDerived;
-        t["isReadOnly"] = &trussc::JsonWriteReflector::isReadOnly;
-        t["popDerived"] = &trussc::JsonWriteReflector::popDerived;
-        t["popReadOnly"] = &trussc::JsonWriteReflector::popReadOnly;
-        t["pushDerived"] = &trussc::JsonWriteReflector::pushDerived;
-        t["pushReadOnly"] = &trussc::JsonWriteReflector::pushReadOnly;
-    }
-    {
-        sol::usertype<trussc::Platform> t = lua->new_usertype<trussc::Platform>("Platform");
-        t["isAndroid"] = &trussc::Platform::isAndroid;
-        t["isApple"] = &trussc::Platform::isApple;
-        t["isDesktop"] = &trussc::Platform::isDesktop;
-        t["isIOS"] = &trussc::Platform::isIOS;
-        t["isLinux"] = &trussc::Platform::isLinux;
-        t["isMacOS"] = &trussc::Platform::isMacOS;
-        t["isMobile"] = &trussc::Platform::isMobile;
-        t["isWeb"] = &trussc::Platform::isWeb;
-        t["isWindows"] = &trussc::Platform::isWindows;
-        t["name"] = &trussc::Platform::name;
-    }
-    {
-        sol::usertype<trussc::ShaderVertex> t = lua->new_usertype<trussc::ShaderVertex>("ShaderVertex");
-        t["a"] = &trussc::ShaderVertex::a;
-        t["b"] = &trussc::ShaderVertex::b;
-        t["g"] = &trussc::ShaderVertex::g;
-        t["r"] = &trussc::ShaderVertex::r;
-        t["u"] = &trussc::ShaderVertex::u;
-        t["v"] = &trussc::ShaderVertex::v;
-        t["x"] = &trussc::ShaderVertex::x;
-        t["y"] = &trussc::ShaderVertex::y;
-        t["z"] = &trussc::ShaderVertex::z;
-    }
-    {
-        auto constructors = tcxLuaConstructors<trussc::OnceGate
-            , trussc::OnceGate()
-            , trussc::OnceGate(double)
+        auto constructors = tcxLuaConstructors<trussc::ColorOKLab
+            , trussc::ColorOKLab()
+            , trussc::ColorOKLab(float, float, float)
+            , trussc::ColorOKLab(float, float, float, float)
         >();
-        sol::usertype<trussc::OnceGate> t = lua->new_usertype<trussc::OnceGate>("OnceGate", constructors, sol::call_constructor, constructors);
-        t["isFirstTime"] = &trussc::OnceGate::isFirstTime;
-        t["reset"] = &trussc::OnceGate::reset;
+        sol::usertype<trussc::ColorOKLab> t = lua->new_usertype<trussc::ColorOKLab>("ColorOKLab", constructors, sol::call_constructor, constructors);
+        t["L"] = &trussc::ColorOKLab::L;
+        t["a"] = &trussc::ColorOKLab::a;
+        t["alpha"] = &trussc::ColorOKLab::alpha;
+        t["b"] = &trussc::ColorOKLab::b;
+        t["lerp"] = &trussc::ColorOKLab::lerp;
+        t["toHSB"] = &trussc::ColorOKLab::toHSB;
+        t["toLinear"] = &trussc::ColorOKLab::toLinear;
+        t["toOKLCH"] = &trussc::ColorOKLab::toOKLCH;
+        t["toRGB"] = &trussc::ColorOKLab::toRGB;
+    }
+    lua->new_usertype<trussc::PrimitiveMode>("PrimitiveMode",
+        sol::meta_function::equal_to, [](trussc::PrimitiveMode a, trussc::PrimitiveMode b){ return a == b; },
+        "Triangles", sol::var(trussc::PrimitiveMode::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveMode::TriangleStrip),
+        "TriangleFan", sol::var(trussc::PrimitiveMode::TriangleFan),
+        "Lines", sol::var(trussc::PrimitiveMode::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveMode::LineStrip),
+        "LineLoop", sol::var(trussc::PrimitiveMode::LineLoop),
+        "Points", sol::var(trussc::PrimitiveMode::Points));
+    {
+        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
+        t["endGroup"] = &trussc::Reflector::endGroup;
+        t["isDerived"] = &trussc::Reflector::isDerived;
+        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
+        t["popDerived"] = &trussc::Reflector::popDerived;
+        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
+        t["pushDerived"] = &trussc::Reflector::pushDerived;
+        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
     }
     {
-        sol::usertype<trussc::TcpServerErrorEventArgs> t = lua->new_usertype<trussc::TcpServerErrorEventArgs>("TcpServerErrorEventArgs");
-        t["clientId"] = &trussc::TcpServerErrorEventArgs::clientId;
-        t["errorCode"] = &trussc::TcpServerErrorEventArgs::errorCode;
-        t["message"] = &trussc::TcpServerErrorEventArgs::message;
+        sol::usertype<trussc::TcpSendCompleteEventArgs> t = lua->new_usertype<trussc::TcpSendCompleteEventArgs>("TcpSendCompleteEventArgs");
+        t["bytesSent"] = &trussc::TcpSendCompleteEventArgs::bytesSent;
+        t["clientId"] = &trussc::TcpSendCompleteEventArgs::clientId;
+        t["error"] = &trussc::TcpSendCompleteEventArgs::error;
+        t["sendId"] = &trussc::TcpSendCompleteEventArgs::sendId;
     }
-    lua->new_usertype<trussc::SoundBuffer::Kind>("SoundBufferKind",
-        sol::meta_function::equal_to, [](trussc::SoundBuffer::Kind a, trussc::SoundBuffer::Kind b){ return a == b; },
-        "Eager", sol::var(trussc::SoundBuffer::Kind::Eager),
-        "Stream", sol::var(trussc::SoundBuffer::Kind::Stream));
-    lua->new_usertype<trussc::ImageType>("ImageType",
-        sol::meta_function::equal_to, [](trussc::ImageType a, trussc::ImageType b){ return a == b; },
-        "Color", sol::var(trussc::ImageType::Color),
-        "Grayscale", sol::var(trussc::ImageType::Grayscale));
+    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
+        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
+        "Repeat", sol::var(trussc::TextureWrap::Repeat),
+        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
+        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
+    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
+        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
+        "Butt", sol::var(trussc::StrokeCap::Butt),
+        "Round", sol::var(trussc::StrokeCap::Round),
+        "Square", sol::var(trussc::StrokeCap::Square));
     {
-        sol::usertype<trussc::ConsoleEventArgs> t = lua->new_usertype<trussc::ConsoleEventArgs>("ConsoleEventArgs");
-        t["args"] = &trussc::ConsoleEventArgs::args;
-        t["raw"] = &trussc::ConsoleEventArgs::raw;
+        sol::usertype<trussc::DragDropEventArgs> t = lua->new_usertype<trussc::DragDropEventArgs>("DragDropEventArgs");
+        t["files"] = &trussc::DragDropEventArgs::files;
+        t["x"] = &trussc::DragDropEventArgs::x;
+        t["y"] = &trussc::DragDropEventArgs::y;
+    }
+    {
+        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
+        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
+        t["setFps"] = &trussc::HeadlessSettings::setFps;
+    }
+    {
+        sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
+        t["focused"] = &trussc::FocusEventArgs::focused;
     }
 }
 #ifdef _MSC_VER

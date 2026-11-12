@@ -169,24 +169,27 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["kind"] = &trussc::SoundStream::kind;
         t["loadStream"] = sol::overload([](trussc::SoundStream& self, const fs::path & path) { return self.loadStream(path); }, [](trussc::SoundStream& self, const fs::path & path, int maxPolyphony) { return self.loadStream(path, maxPolyphony); });
     }
-    lua->new_usertype<trussc::ChipSoundNote::Wave>("ChipSoundNoteWave",
-        sol::meta_function::equal_to, [](trussc::ChipSoundNote::Wave a, trussc::ChipSoundNote::Wave b){ return a == b; },
-        "Sin", sol::var(trussc::ChipSoundNote::Wave::Sin),
-        "Square", sol::var(trussc::ChipSoundNote::Wave::Square),
-        "Triangle", sol::var(trussc::ChipSoundNote::Wave::Triangle),
-        "Sawtooth", sol::var(trussc::ChipSoundNote::Wave::Sawtooth),
-        "Noise", sol::var(trussc::ChipSoundNote::Wave::Noise),
-        "PinkNoise", sol::var(trussc::ChipSoundNote::Wave::PinkNoise),
-        "Silent", sol::var(trussc::ChipSoundNote::Wave::Silent));
+    lua->new_usertype<trussc::Beep>("Beep",
+        sol::meta_function::equal_to, [](trussc::Beep a, trussc::Beep b){ return a == b; },
+        "ping", sol::var(trussc::Beep::ping),
+        "success", sol::var(trussc::Beep::success),
+        "complete", sol::var(trussc::Beep::complete),
+        "coin", sol::var(trussc::Beep::coin),
+        "error", sol::var(trussc::Beep::error),
+        "warning", sol::var(trussc::Beep::warning),
+        "cancel", sol::var(trussc::Beep::cancel),
+        "click", sol::var(trussc::Beep::click),
+        "typing", sol::var(trussc::Beep::typing),
+        "notify", sol::var(trussc::Beep::notify),
+        "sweep", sol::var(trussc::Beep::sweep));
     {
-        sol::usertype<trussc::Reflector> t = lua->new_usertype<trussc::Reflector>("Reflector");
-        t["endGroup"] = &trussc::Reflector::endGroup;
-        t["isDerived"] = &trussc::Reflector::isDerived;
-        t["isReadOnly"] = &trussc::Reflector::isReadOnly;
-        t["popDerived"] = &trussc::Reflector::popDerived;
-        t["popReadOnly"] = &trussc::Reflector::popReadOnly;
-        t["pushDerived"] = &trussc::Reflector::pushDerived;
-        t["pushReadOnly"] = &trussc::Reflector::pushReadOnly;
+        sol::usertype<trussc::SerialDeviceInfo> t = lua->new_usertype<trussc::SerialDeviceInfo>("SerialDeviceInfo");
+        t["deviceId"] = &trussc::SerialDeviceInfo::deviceId;
+        t["deviceName"] = &trussc::SerialDeviceInfo::deviceName;
+        t["devicePath"] = &trussc::SerialDeviceInfo::devicePath;
+        t["getDeviceID"] = &trussc::SerialDeviceInfo::getDeviceID;
+        t["getDeviceName"] = &trussc::SerialDeviceInfo::getDeviceName;
+        t["getDevicePath"] = &trussc::SerialDeviceInfo::getDevicePath;
     }
     {
         sol::usertype<trussc::RuntimeEvents> t = lua->new_usertype<trussc::RuntimeEvents>("RuntimeEvents");
@@ -196,29 +199,29 @@ void tcxLuaGenShard_06(const std::shared_ptr<sol::state>& lua) {
         t["filesOpened"] = &trussc::RuntimeEvents::filesOpened;
         t["hotReloadUnload"] = &trussc::RuntimeEvents::hotReloadUnload;
     }
-    lua->new_usertype<trussc::TextureWrap>("TextureWrap",
-        sol::meta_function::equal_to, [](trussc::TextureWrap a, trussc::TextureWrap b){ return a == b; },
-        "Repeat", sol::var(trussc::TextureWrap::Repeat),
-        "ClampToEdge", sol::var(trussc::TextureWrap::ClampToEdge),
-        "MirroredRepeat", sol::var(trussc::TextureWrap::MirroredRepeat));
-    lua->new_usertype<trussc::StrokeCap>("StrokeCap",
-        sol::meta_function::equal_to, [](trussc::StrokeCap a, trussc::StrokeCap b){ return a == b; },
-        "Butt", sol::var(trussc::StrokeCap::Butt),
-        "Round", sol::var(trussc::StrokeCap::Round),
-        "Square", sol::var(trussc::StrokeCap::Square));
     {
-        sol::usertype<trussc::TcpDisconnectEventArgs> t = lua->new_usertype<trussc::TcpDisconnectEventArgs>("TcpDisconnectEventArgs");
-        t["reason"] = &trussc::TcpDisconnectEventArgs::reason;
-        t["wasClean"] = &trussc::TcpDisconnectEventArgs::wasClean;
+        sol::usertype<trussc::TcpClientDisconnectEventArgs> t = lua->new_usertype<trussc::TcpClientDisconnectEventArgs>("TcpClientDisconnectEventArgs");
+        t["clientId"] = &trussc::TcpClientDisconnectEventArgs::clientId;
+        t["reason"] = &trussc::TcpClientDisconnectEventArgs::reason;
+        t["wasClean"] = &trussc::TcpClientDisconnectEventArgs::wasClean;
     }
+    lua->new_usertype<trussc::StrokeJoin>("StrokeJoin",
+        sol::meta_function::equal_to, [](trussc::StrokeJoin a, trussc::StrokeJoin b){ return a == b; },
+        "Miter", sol::var(trussc::StrokeJoin::Miter),
+        "Round", sol::var(trussc::StrokeJoin::Round),
+        "Bevel", sol::var(trussc::StrokeJoin::Bevel));
     {
-        sol::usertype<trussc::HeadlessSettings> t = lua->new_usertype<trussc::HeadlessSettings>("HeadlessSettings");
-        t["targetFps"] = &trussc::HeadlessSettings::targetFps;
-        t["setFps"] = &trussc::HeadlessSettings::setFps;
+        sol::usertype<trussc::RuntimeSettings> t = lua->new_usertype<trussc::RuntimeSettings>("RuntimeSettings");
+        t["uniformBufferReserve"] = &trussc::RuntimeSettings::uniformBufferReserve;
+        t["reserveUniformBuffer"] = &trussc::RuntimeSettings::reserveUniformBuffer;
     }
+    lua->new_usertype<trussc::MixMode>("MixMode",
+        sol::meta_function::equal_to, [](trussc::MixMode a, trussc::MixMode b){ return a == b; },
+        "Auto", sol::var(trussc::MixMode::Auto),
+        "DownmixMono", sol::var(trussc::MixMode::DownmixMono));
     {
-        sol::usertype<trussc::FocusEventArgs> t = lua->new_usertype<trussc::FocusEventArgs>("FocusEventArgs");
-        t["focused"] = &trussc::FocusEventArgs::focused;
+        sol::usertype<trussc::FilesOpenedEventArgs> t = lua->new_usertype<trussc::FilesOpenedEventArgs>("FilesOpenedEventArgs");
+        t["files"] = &trussc::FilesOpenedEventArgs::files;
     }
 }
 #ifdef _MSC_VER

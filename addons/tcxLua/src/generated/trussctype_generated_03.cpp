@@ -174,63 +174,60 @@ void tcxLuaGenShard_03(const std::shared_ptr<sol::state>& lua) {
         t["getDuration"] = &trussc::ChipSoundBundle::getDuration;
     }
     {
-        sol::usertype<trussc::PlayingSound> t = lua->new_usertype<trussc::PlayingSound>("PlayingSound");
-        t["buffer"] = &trussc::PlayingSound::buffer;
-        t["level"] = &trussc::PlayingSound::level;
-        t["loop"] = &trussc::PlayingSound::loop;
-        t["mixMode"] = &trussc::PlayingSound::mixMode;
-        t["pan"] = &trussc::PlayingSound::pan;
-        t["paused"] = &trussc::PlayingSound::paused;
-        t["playing"] = &trussc::PlayingSound::playing;
-        t["positionF"] = &trussc::PlayingSound::positionF;
-        t["rateRatio"] = &trussc::PlayingSound::rateRatio;
-        t["speed"] = &trussc::PlayingSound::speed;
-        t["volume"] = &trussc::PlayingSound::volume;
+        sol::usertype<trussc::MouseEventArgs> t = lua->new_usertype<trussc::MouseEventArgs>("MouseEventArgs");
+        t["alt"] = &trussc::MouseEventArgs::alt;
+        t["button"] = &trussc::MouseEventArgs::button;
+        t["consumed"] = &trussc::MouseEventArgs::consumed;
+        t["ctrl"] = &trussc::MouseEventArgs::ctrl;
+        t["globalPos"] = &trussc::MouseEventArgs::globalPos;
+        t["pos"] = &trussc::MouseEventArgs::pos;
+        t["shift"] = &trussc::MouseEventArgs::shift;
+        t["super"] = &trussc::MouseEventArgs::super;
+        t["x"] = &trussc::MouseEventArgs::x;
+        t["y"] = &trussc::MouseEventArgs::y;
+        t["syncLegacy"] = &trussc::MouseEventArgs::syncLegacy;
+    }
+    lua->new_usertype<trussc::PrimitiveType>("PrimitiveType",
+        sol::meta_function::equal_to, [](trussc::PrimitiveType a, trussc::PrimitiveType b){ return a == b; },
+        "Points", sol::var(trussc::PrimitiveType::Points),
+        "Lines", sol::var(trussc::PrimitiveType::Lines),
+        "LineStrip", sol::var(trussc::PrimitiveType::LineStrip),
+        "Triangles", sol::var(trussc::PrimitiveType::Triangles),
+        "TriangleStrip", sol::var(trussc::PrimitiveType::TriangleStrip),
+        "Quads", sol::var(trussc::PrimitiveType::Quads));
+    lua->new_usertype<trussc::Direction>("Direction",
+        sol::meta_function::equal_to, [](trussc::Direction a, trussc::Direction b){ return a == b; },
+        "Left", sol::var(trussc::Direction::Left),
+        "Center", sol::var(trussc::Direction::Center),
+        "Right", sol::var(trussc::Direction::Right),
+        "Top", sol::var(trussc::Direction::Top),
+        "Bottom", sol::var(trussc::Direction::Bottom),
+        "Baseline", sol::var(trussc::Direction::Baseline));
+    lua->new_usertype<trussc::VideoCodec>("VideoCodec",
+        sol::meta_function::equal_to, [](trussc::VideoCodec a, trussc::VideoCodec b){ return a == b; },
+        "H264", sol::var(trussc::VideoCodec::H264),
+        "HEVC", sol::var(trussc::VideoCodec::HEVC),
+        "ProRes422", sol::var(trussc::VideoCodec::ProRes422),
+        "ProRes4444", sol::var(trussc::VideoCodec::ProRes4444));
+    lua->new_usertype<trussc::ScrollBar::Direction>("ScrollBarDirection",
+        sol::meta_function::equal_to, [](trussc::ScrollBar::Direction a, trussc::ScrollBar::Direction b){ return a == b; },
+        "Vertical", sol::var(trussc::ScrollBar::Direction::Vertical),
+        "Horizontal", sol::var(trussc::ScrollBar::Direction::Horizontal));
+    {
+        sol::usertype<trussc::TcpServerClient> t = lua->new_usertype<trussc::TcpServerClient>("TcpServerClient");
+        t["getHost"] = &trussc::TcpServerClient::getHost;
+        t["getId"] = &trussc::TcpServerClient::getId;
+        t["getPort"] = &trussc::TcpServerClient::getPort;
     }
     {
-        sol::usertype<trussc::CameraContext> t = lua->new_usertype<trussc::CameraContext>("CameraContext");
-        t["pickable"] = &trussc::CameraContext::pickable;
-        t["projection"] = &trussc::CameraContext::projection;
-        t["view"] = &trussc::CameraContext::view;
-        t["viewH"] = &trussc::CameraContext::viewH;
-        t["viewW"] = &trussc::CameraContext::viewW;
-        t["screenPointToRay"] = &trussc::CameraContext::screenPointToRay;
-        t["worldToScreen"] = &trussc::CameraContext::worldToScreen;
+        sol::usertype<trussc::TcpConnectEventArgs> t = lua->new_usertype<trussc::TcpConnectEventArgs>("TcpConnectEventArgs");
+        t["message"] = &trussc::TcpConnectEventArgs::message;
+        t["success"] = &trussc::TcpConnectEventArgs::success;
     }
     {
-        sol::usertype<trussc::KeyEventArgs> t = lua->new_usertype<trussc::KeyEventArgs>("KeyEventArgs");
-        t["alt"] = &trussc::KeyEventArgs::alt;
-        t["consumed"] = &trussc::KeyEventArgs::consumed;
-        t["ctrl"] = &trussc::KeyEventArgs::ctrl;
-        t["isRepeat"] = &trussc::KeyEventArgs::isRepeat;
-        t["key"] = &trussc::KeyEventArgs::key;
-        t["shift"] = &trussc::KeyEventArgs::shift;
-        t["super"] = &trussc::KeyEventArgs::super;
-    }
-    {
-        sol::usertype<trussc::AudioOutBuffer> t = lua->new_usertype<trussc::AudioOutBuffer>("AudioOutBuffer");
-        t["channels"] = &trussc::AudioOutBuffer::channels;
-        t["frameCount"] = &trussc::AudioOutBuffer::frameCount;
-        t["framePosition"] = &trussc::AudioOutBuffer::framePosition;
-        t["sampleRate"] = &trussc::AudioOutBuffer::sampleRate;
-    }
-    lua->new_usertype<trussc::CurveStyle::Mode>("CurveStyleMode",
-        sol::meta_function::equal_to, [](trussc::CurveStyle::Mode a, trussc::CurveStyle::Mode b){ return a == b; },
-        "Tolerance", sol::var(trussc::CurveStyle::Mode::Tolerance),
-        "Resolution", sol::var(trussc::CurveStyle::Mode::Resolution));
-    {
-        sol::usertype<trussc::TcpServerReceiveEventArgs> t = lua->new_usertype<trussc::TcpServerReceiveEventArgs>("TcpServerReceiveEventArgs");
-        t["clientId"] = &trussc::TcpServerReceiveEventArgs::clientId;
-        t["data"] = &trussc::TcpServerReceiveEventArgs::data;
-    }
-    {
-        sol::usertype<trussc::DeviceLostEventArgs> t = lua->new_usertype<trussc::DeviceLostEventArgs>("DeviceLostEventArgs");
-        t["cancel"] = &trussc::DeviceLostEventArgs::cancel;
-        t["reason"] = &trussc::DeviceLostEventArgs::reason;
-    }
-    {
-        sol::usertype<trussc::CloseRequestEventArgs> t = lua->new_usertype<trussc::CloseRequestEventArgs>("CloseRequestEventArgs");
-        t["cancel"] = &trussc::CloseRequestEventArgs::cancel;
+        sol::usertype<trussc::Runtime> t = lua->new_usertype<trussc::Runtime>("Runtime");
+        t["events"] = &trussc::Runtime::events;
+        t["setLogoutTimeout"] = &trussc::Runtime::setLogoutTimeout;
     }
 }
 #ifdef _MSC_VER
