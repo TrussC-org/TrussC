@@ -31,11 +31,23 @@ struct Writer {
     std::deque<std::shared_ptr<ScreenshotState>> jobs;
 };
 Writer& writer() { static auto* value = new Writer; return *value; }
+void reportUndeliverable(const ScreenshotState& state, const SaveResult& result) {
+    logError("Screenshot") << pathToDisplayUtf8(state.path) << ": "
+        << (result ? "Screenshot completion unavailable" : result.message)
+        << "; app run already ended";
+}
 void complete(const std::shared_ptr<ScreenshotState>& state, SaveResult result) {
     // Release the captured pixels before posting completion.
     state->pixels = Pixels{};
+    if (!appRunIsAlive(state->run)) {
+        reportUndeliverable(*state, result);
+        return;
+    }
     enqueueResourceLoad([state, result = std::move(result)]() mutable {
-        if (!appRunIsAlive(state->run)) return;
+        if (!appRunIsAlive(state->run)) {
+            reportUndeliverable(*state, result);
+            return;
+        }
         AppOwnerScope scope(state->owner.lock());
         ScreenshotSaveEventArgs args{state->path, std::move(result)};
         onScreenshotSave().notify(args); // snapshot survives a listener deleting itself
