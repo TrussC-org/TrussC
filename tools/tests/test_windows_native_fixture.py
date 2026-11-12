@@ -11,6 +11,99 @@ SOURCE = Path(os.environ.get('TC_WIN32_FIXTURE_SOURCE', ROOT / 'core/tests/nativ
 
 
 class NativeFixtureTests(unittest.TestCase):
+
+    def test_per_window_max_frame_latency(self):
+        header = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
+        create = body(header, 'static bool _sapp_tc_d3d11_create_swapchain(')
+        code = r"""
+#include <cassert>
+#include <cstring>
+#include <initializer_list>
+using UINT = unsigned;
+using HRESULT = int;
+#define __uuidof(type) 0
+#define SUCCEEDED(value) ((value) >= 0)
+#define FAILED(value) ((value) < 0)
+#define _SAPP_TC_RELEASE(obj) do { if (obj) (obj)->Release(); } while (0)
+constexpr int DXGI_USAGE_RENDER_TARGET_OUTPUT=1, DXGI_SWAP_EFFECT_FLIP_DISCARD=1,
+    DXGI_SCALING_STRETCH=1, DXGI_ALPHA_MODE_IGNORE=1,
+    DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT=1,
+    DXGI_MWA_NO_ALT_ENTER=1, DXGI_MWA_NO_PRINT_SCREEN=2, SAPP_LOGITEM_OK=0;
+struct DXGI_SWAP_CHAIN_DESC1 {
+    UINT Width,Height,Format;
+    struct { int Count; } SampleDesc;
+    int BufferUsage,BufferCount,SwapEffect,Scaling,AlphaMode,Flags;
+};
+struct IUnknown {};
+struct IDXGISwapChain2 {
+    UINT latency=0;
+    int applications=0;
+    HRESULT SetMaximumFrameLatency(UINT value) { latency=value; ++applications; return 0; }
+    void* GetFrameLatencyWaitableObject() { return this; }
+    void Release() {}
+};
+struct IDXGISwapChain1 : IDXGISwapChain2 {
+    HRESULT QueryInterface(int, void** out) { *out=static_cast<IDXGISwapChain2*>(this); return 0; }
+};
+struct IDXGIFactory2 {
+    HRESULT CreateSwapChainForHwnd(IUnknown*,void* hwnd,DXGI_SWAP_CHAIN_DESC1* desc,void*,void*,IDXGISwapChain1** out) {
+        assert(desc->Flags==DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+        *out=static_cast<IDXGISwapChain1*>(hwnd); return 0;
+    }
+    void MakeWindowAssociation(void*,int) {}
+    void Release() {}
+} factory;
+struct IDXGIAdapter {
+    HRESULT GetParent(int,void** out) { *out=&factory; return 0; }
+    void Release() {}
+} adapter;
+struct IDXGIDevice1 {
+    HRESULT GetAdapter(IDXGIAdapter** out) { *out=&adapter; return 0; }
+    void Release() {}
+} device;
+struct Device : IUnknown {
+    HRESULT QueryInterface(int,void** out) { *out=&device; return 0; }
+} appDevice;
+struct { struct { Device* device=&appDevice; struct { int logger=0; } desc; } app; } _sapp_tc;
+struct _sapp_tc_window_t {
+    int fb_width=80,fb_height=40,color_fmt=1;
+    struct { int max_frame_latency=0; } desc;
+    void* hwnd;
+    IDXGISwapChain1* swap_chain=nullptr;
+    UINT swapchain_flags=0;
+    void* frame_wait=nullptr;
+};
+bool _sapp_tc_d3d11_check(HRESULT hr,const char*) { return SUCCEEDED(hr); }
+bool _sapp_tc_d3d11_create_render_targets(_sapp_tc_window_t*) { return true; }
+int warnings=0;
+void _sapp_tc_log(int*,unsigned level,int,unsigned,const char*,const char*,int) {
+    assert(level==2); ++warnings;
+}
+""" + create + r"""
+int main() {
+    // Distinct swapchains prove that secondary settings cannot alter the main.
+    IDXGISwapChain1 launch, secondary;
+    _sapp_tc_window_t mainWindow; mainWindow.hwnd=&launch;
+    assert(_sapp_tc_d3d11_create_swapchain(&mainWindow));
+    assert(launch.latency==3 && warnings==0 && mainWindow.frame_wait==&launch);
+    for (int value : {1,3,16,-1,17,17}) {
+        _sapp_tc_window_t peer; peer.hwnd=&secondary; peer.desc.max_frame_latency=value;
+        const int before=warnings;
+        assert(_sapp_tc_d3d11_create_swapchain(&peer));
+        const bool invalid=value<1 || value>16;
+        assert(secondary.latency==UINT(invalid ? 3 : value));
+        assert(warnings==before+int(invalid));
+        assert(peer.frame_wait==&secondary && launch.latency==3);
+    }
+    assert(launch.applications==1 && secondary.applications==6);
+}
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            (path / 'latency.cpp').write_text(code, encoding='utf-8')
+            subprocess.run(['c++', '-std=c++20', str(path / 'latency.cpp'), '-o', str(path / 'latency')], check=True)
+            subprocess.run([str(path / 'latency')], check=True)
+
     def test_window_class_uses_sized_executable_icons(self):
         header = (ROOT / 'core/include/sokol/sokol_app_tc.h').read_text(encoding='utf-8')
         registration = body(header, 'static bool _sapp_tc_win32_ensure_wndclass(')

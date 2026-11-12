@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <initializer_list>
+#include <utility>
 
 namespace {
 bool failAllocation, failTitle, failHwnd, destroyOnShow;
@@ -653,10 +654,19 @@ void initialized() {
     auto d = nativeDesc().window;
     d.width = 1001; d.height = 667;
     if (pixelSizes) { d._tc_pixel_width = 1001; d._tc_pixel_height = 667; }
-    second = sapp_create_window(&d); d.x = 700; third = sapp_create_window(&d);
+    d.max_frame_latency = 1;
+    second = sapp_create_window(&d); d.x = 700; d.max_frame_latency = 16; third = sapp_create_window(&d);
     auto* other = _sapp_tc_lookup(second);
     check("one main and two secondaries constructed", other && sapp_window_valid(third) && liveHwnds == 3);
     if (!other || !sapp_window_valid(third)) { sapp_quit(); return; }
+    for (auto item : {std::pair{first,3u}, std::pair{other,1u}, std::pair{_sapp_tc_lookup(third),16u}}) {
+        IDXGISwapChain2* chain = nullptr;
+        UINT latency = 0;
+        const HRESULT queried = item.first->swap_chain->QueryInterface(__uuidof(IDXGISwapChain2), (void**)&chain);
+        const HRESULT read = chain ? chain->GetMaximumFrameLatency(&latency) : E_FAIL;
+        check("DXGI stores per-window maximum frame latency", SUCCEEDED(queried) && SUCCEEDED(read) && latency == item.second);
+        if (chain) chain->Release();
+    }
     const float expected = noHighDpi ? 1 : float(_sapp_tc.GetDpiForWindow(first->hwnd)) / 96;
     std::printf("nativeWindow/Win32: dpi=%g pixelPerfect=%d noHighDpi=%d main=%dx%d secondary=%dx%d\n", expected,pixelSizes,noHighDpi,first->fb_width,first->fb_height,other->fb_width,other->fb_height);
     bool firstClamped = false, otherClamped = false;

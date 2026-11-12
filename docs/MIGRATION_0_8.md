@@ -300,6 +300,16 @@ void tcApp::setup() {
 
 ### Window and runtime settings
 
+Windows D3D11 now defaults to a maximum frame latency of **3**, previously **1**.
+CPU and GPU work can overlap for a smoother frame rate, at the cost of up to
+N−1 frames of extra input latency. Set `WindowSettings::setMaxFrameLatency(1)`
+for the lowest input latency and the previous behavior. This is per window;
+other backends ignore it.
+
+```cpp
+return runApp<tcApp>(WindowSettings().setMaxFrameLatency(1));
+```
+
 - **The uniform buffer reservation moved to `RuntimeSettings`.** Pass it as the second argument of `runApp()`. The one-argument `runApp<T>(windowSettings)` uses the default runtime settings.
 
   ```cpp

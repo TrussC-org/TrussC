@@ -260,13 +260,22 @@ int main(){
         forward = body(header[header.index('#endif\n\ntemplate<typename AppClass>\nint runApp('):],
                        'int runApp(')
         execute('#include <string>\n#include <memory>\n#include <cassert>\n#include <type_traits>\n'
-                '#define TC_LUA_SKIP\nclass Window;\n' + settings + runtime + r'''
+                '#include <sokol/sokol_app_tc.h>\n#define TC_LUA_SKIP\nclass Window;\n'
+                'int warnings=0; struct Log { void operator<<(const char*) {} };\n'
+                'Log logWarning(const char*) { ++warnings; return {}; }\n' + settings + runtime + body(header, 'inline sapp_window_desc buildNativeWindowDescriptor(') + r'''
 namespace internal { int gpuUniformBufferReserve=0; }
 void configure(const RuntimeSettings& runtime) { ''' + assignment + r''' }
 template<class T> int runApp(const WindowSettings&, const RuntimeSettings& r) { configure(r); return 23; }
 template<class AppClass>
 ''' + forward + r'''
-int main(){ RuntimeSettings runtime; assert(runtime.uniformBufferReserve==0);
+int main(){ WindowSettings window; assert(window.maxFrameLatency==3);
+assert(buildNativeWindowDescriptor(window,false).max_frame_latency==3);
+for (int value : {1,3,16}) { assert(&window.setMaxFrameLatency(value)==&window); assert(window.maxFrameLatency==value);
+assert(buildNativeWindowDescriptor(window,false).max_frame_latency==value); }
+assert(warnings==0);
+for (int value : {-1,0,17,17}) { window.setMaxFrameLatency(value); assert(window.maxFrameLatency==3); }
+assert(warnings==4);
+RuntimeSettings runtime; assert(runtime.uniformBufferReserve==0);
 assert(&runtime.reserveUniformBuffer(4096)==&runtime); configure(runtime);
 assert(internal::gpuUniformBufferReserve==4096);
 static_assert(std::is_aggregate_v<RuntimeSettings>);

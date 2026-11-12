@@ -42976,6 +42976,43 @@ details.ko = '''
 - `WindowSettings&`를 반환합니다. 설정 함수의 공통 동작은 `WindowSettings::setSize`에 설명되어 있습니다.
 '''
 
+["WindowSettings::maxFrameLatency"]
+description.en = "Windows D3D11 maximum frame latency; defaults to 3."
+description.ja = "Windows D3D11 の最大フレーム遅延です。既定値は 3 です。"
+description.ko = "Windows D3D11의 최대 프레임 지연이며 기본값은 3입니다."
+details.en = "See `WindowSettings::setMaxFrameLatency` for the range and latency trade-off."
+details.ja = "範囲と遅延のトレードオフは `WindowSettings::setMaxFrameLatency` を参照してください。"
+details.ko = "범위와 지연의 절충 관계는 `WindowSettings::setMaxFrameLatency`을 참조하시기 바랍니다."
+related = ["WindowSettings::setMaxFrameLatency"]
+
+["WindowSettings::setMaxFrameLatency"]
+description.en = "Sets the per-window maximum frame latency on Windows D3D11."
+description.ja = "Windows D3D11 でウィンドウごとの最大フレーム遅延を設定します。"
+description.ko = "Windows D3D11에서 윈도우별 최대 프레임 지연을 설정합니다."
+details.en = '''
+- Read when each window is created. Accepts 1–16; the default is 3. Each out-of-range call logs a Warning and uses 3. Returns the same `WindowSettings&` for chaining.
+- 1 gives the lowest input latency. Higher values let CPU and GPU work overlap for a smoother frame rate, with up to N−1 frames of extra input latency.
+- Other backends ignore this setting. It does not set the update or draw rate.
+'''
+details.ja = '''
+- 各ウィンドウの作成時に読み取ります。範囲は 1〜16、既定値は 3 です。範囲外の呼び出しは毎回 Warning を記録し、3 を使います。連結用に同じ `WindowSettings&` を返します。
+- 1 は入力遅延を最小にします。大きな値では CPU と GPU の処理が重なり、フレームレートが滑らかになりますが、入力遅延が最大 N−1 フレーム増えます。
+- 他のバックエンドは無視します。update や draw のレートは設定しません。
+'''
+details.ko = '''
+- 각 윈도우를 생성할 때 읽습니다. 범위는 1–16이며 기본값은 3입니다. 범위를 벗어난 호출마다 Warning을 기록하고 3을 사용합니다. 연결 호출을 위해 같은 `WindowSettings&`를 반환합니다.
+- 1은 입력 지연을 최소화합니다. 값이 높으면 CPU와 GPU 작업이 겹쳐 프레임 속도가 부드러워지지만 입력 지연이 최대 N−1프레임 늘어납니다.
+- 다른 백엔드는 이 설정을 무시합니다. update나 draw 빈도를 설정하지 않습니다.
+'''
+related = ["WindowSettings::maxFrameLatency", "WindowSettings::setSwapInterval", "createWindow"]
+snippet = '''
+class tcApp : public App {
+    void setup() override {
+        auto window = createWindow(WindowSettings().setMaxFrameLatency(1));
+    }
+};
+'''
+
 ["WindowSettings::visible"]
 description.en = "Initial requested visibility; true by default."
 description.ja = "作成時に要求する表示状態です。既定値は true です。"
