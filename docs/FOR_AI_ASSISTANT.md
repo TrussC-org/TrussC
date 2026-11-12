@@ -19,6 +19,10 @@
 You are a coding assistant for the TrussC framework.
 When a `trussc_api_details.txt` reference file is available, look up an entry's `## <id>` section there for its details and code examples.
 
+Custom blends are public: store a `BlendDesc` with `setCustomBlendDesc(desc)` and
+select `BlendMode::Custom`. Use this instead of internal pipeline recipes.
+Factors apply literally to shader output; no automatic premultiplication occurs.
+
 ## Docs search (MCP, beta)
 If the `trussc_search` tool is available (the TrussC docs MCP server at `https://api.trussc.org/mcp`), use it whenever you need TrussC knowledge: which API to use, how something behaves, examples, addons.
 - Ask freely, in English or Japanese. A plain question works, and so does describing what the user wants to make; you don't need the exact API name.
@@ -2637,11 +2641,13 @@ void console::stop()  // Disables command delivery from standard input.
 ### graphics
 
 ```cpp
+BlendDesc getCustomBlendDesc()  // Returns a copy of the custom blend slot, regardless of the active mode.
 int getHeight()  // Returns the current drawing target's height.
 Mat4 getProjectionMatrix()  // Returns the current drawing target's camera projection matrix.
 Vec2 getSize()  // Returns the width and height of the active drawing target as a Vec2.
 Mat4 getViewMatrix()  // Returns the current drawing target's camera view matrix.
 int getWidth()  // Returns the current drawing target's width.
+void setCustomBlendDesc(const BlendDesc & desc)  // Stores the custom blend slot and immediately updates an active Custom mode.
 ```
 
 ### Other
@@ -2817,6 +2823,14 @@ SaveResult AudioRecorder::stop()  // Stops recording and finalizes the audio fil
 ```cpp
 ```
 
+### BlendDesc — Describes literal RGB and alpha blend equations.
+
+```cpp
+BlendDesc BlendDesc::addKeepAlpha()  // Adds RGB with SrcAlpha/One and preserves destination alpha with Zero/One.
+BlendDesc BlendDesc::premultipliedAdd()  // Adds source and destination RGB and alpha with One/One.
+BlendDesc BlendDesc::screenKeepAlpha()  // Combines RGB with OneMinusDstColor/One and preserves destination alpha.
+```
+
 ### BuildInfo — Provides build configuration timestamps.
 
 ```cpp
@@ -2930,6 +2944,11 @@ ColorHSB ColorOKLab::toHSB() const  // Converts the color to HSB.
 ColorLinear ColorOKLab::toLinear() const  // Converts the color to linear RGB.
 ColorOKLCH ColorOKLab::toOKLCH() const  // Converts the color to OKLCH.
 Color ColorOKLab::toRGB() const  // Converts the color to an sRGB Color.
+```
+
+### Component — Holds source and destination factors and an operation.
+
+```cpp
 ```
 
 ### ComputeShader — Runs a sokol compute program between drawing passes (C++ only).
@@ -5017,7 +5036,9 @@ enum AudioInitFailure { None, NoBackend, DeviceOpen, DeviceStart }  // Identifie
 enum AudioRecordSettings::SampleFormat { S16, F32 }  // Selects the sample representation stored in the WAV file.
 enum AxisMode { None, Fill, Content }  // Selects how a layout axis determines sizes.
 enum Beep { ping, success, complete, coin, error, warning, cancel, click, typing, notify, sweep }  // Selects a built-in synthesized notification sound.
-enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled }  // Selects how drawing colors blend with the existing image.
+enum BlendFactor { Zero, One, SrcColor, OneMinusSrcColor, SrcAlpha, OneMinusSrcAlpha, DstColor, OneMinusDstColor, DstAlpha, OneMinusDstAlpha }  // Selects a portable source or destination blend factor.
+enum BlendMode { Alpha, Add, Multiply, Screen, Subtract, Disabled, Custom }  // Selects how drawing colors blend with the existing image.
+enum BlendOp { Add, Subtract, ReverseSubtract, Minimum, Maximum }  // Selects Add, Subtract, ReverseSubtract, Minimum or Maximum.
 enum ChipSoundNote::Wave { Sin, Square, Triangle, Sawtooth, Noise, PinkNoise, Silent }  // Defines the waveform choices for ChipSoundNote.
 enum Codec { None, LZ4 }  // Selects a byte-buffer compression codec.
 enum Cursor { Default, Arrow, IBeam, Crosshair, Hand, ResizeEW, ResizeNS, ResizeNWSE, ResizeNESW, ResizeAll, NotAllowed, Custom0, Custom1, Custom2, Custom3, Custom4, Custom5, Custom6, Custom7, Custom8, Custom9, Custom10, Custom11, Custom12, Custom13, Custom14, Custom15 }  // Selects a mouse cursor shape.

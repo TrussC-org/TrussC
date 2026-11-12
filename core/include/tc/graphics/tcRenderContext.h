@@ -334,6 +334,7 @@ public:
         // Capture the live blend mode (it lives in internal::currentWindowContext().currentTarget->currentBlendMode, not in
         // style_) so it is saved/restored alongside color/fill/stroke.
         style_.blend = internal::currentWindowContext().currentTarget->currentBlendMode;
+        style_.customBlendDesc = internal::currentTarget().customBlendDesc;
         styleStack_.push_back(style_);
     }
 
@@ -463,7 +464,8 @@ public:
 private:
     void applyBlend(BlendMode mode) {
         internal::currentTarget().currentBlendMode = mode;
-        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled);
+        internal::currentTarget().customBlendDesc = style_.customBlendDesc;
+        internal::currentTarget().selectedPipeline = internal::fillSelection(mode, internal::currentTarget().depthTestEnabled, style_.customBlendDesc);
         internal::loadPipeline(internal::active2D(mode));
     }
 public:
@@ -1131,6 +1133,7 @@ private:
         // RenderContext (it maps to an sgl pipeline), so push/popStyle capture and
         // restore it explicitly rather than via this field's value alone.
         BlendMode blend = BlendMode::Alpha;
+        BlendDesc customBlendDesc;
     };
 
     // Current style

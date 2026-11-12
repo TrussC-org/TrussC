@@ -427,6 +427,7 @@ pushMatrix(); translate(100, 40); fbo.draw(0, 0); popMatrix();
 - **Text and `RectNode` clipping use the target's scale.** A font rasterized on a DPI-2 window keeps its requested size in an Fbo measured in pixels.
 - **`setCameraPosition`** applies to the current target and returns to its previous value when the camera or target ends. Its default (zero, set by hand) is unchanged, and so is how lights, materials and environments register with the window.
 - **Picking:** the default Fbo camera cannot be picked through; an explicit screen setup and EasyCam can. This is unchanged.
+- **Custom blending:** replace `internal::` pipeline recipes with `setCustomBlendDesc(desc)` and `setBlendMode(BlendMode::Custom)`. The slot is saved by `pushStyle()`/`popStyle()` and reset by `resetStyle()`. Factors apply literally; `BlendDesc::premultipliedAdd()` is for premultiplied sources such as Fbos.
 - **Blending:** the logical blend and depth settings carry across targets. Calling `setBlendMode` with the current value now selects that blend pipeline again.
 
 Behavior that changes the pixels:

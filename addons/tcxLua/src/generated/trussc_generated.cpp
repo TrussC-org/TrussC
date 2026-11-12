@@ -367,6 +367,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("getCurveMode", []() { return trussc::getCurveMode(); });
     lua->set_function("getCurveResolution", []() { return trussc::getCurveResolution(); });
     lua->set_function("getCurveTolerance", []() { return trussc::getCurveTolerance(); });
+    lua->set_function("getCustomBlendDesc", []() { return trussc::getCustomBlendDesc(); });
     lua->set_function("getDataPath", [](const fs::path & filename) { return trussc::getDataPath(filename); });
     lua->set_function("getDataPathRoot", []() { return trussc::getDataPathRoot(); });
     lua->set_function("getDay", []() { return trussc::getDay(); });
@@ -735,6 +736,7 @@ void tcxLua::setTrussCGeneratedBindings(const std::shared_ptr<sol::state>& lua) 
     lua->set_function("setCursor", [](trussc::Cursor cursor) { return trussc::setCursor(cursor); });
     lua->set_function("setCurveResolution", [](int n) { return trussc::setCurveResolution(n); });
     lua->set_function("setCurveTolerance", [](float pixels) { return trussc::setCurveTolerance(pixels); });
+    lua->set_function("setCustomBlendDesc", [](const trussc::BlendDesc & desc) { return trussc::setCustomBlendDesc(desc); });
     lua->set_function("setDataPathRoot", [](const fs::path & path) { return trussc::setDataPathRoot(path); });
 #if (defined(__APPLE__) && (!defined(TARGET_OS_IPHONE) || !TARGET_OS_IPHONE)) || (defined(__APPLE__) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
     lua->set_function("setDataPathToResources", []() { return trussc::setDataPathToResources(); });

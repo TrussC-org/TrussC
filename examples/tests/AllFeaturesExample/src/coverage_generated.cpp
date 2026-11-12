@@ -81,11 +81,13 @@ static void cover_font() {
 }
 
 static void cover_graphics() {
+    (void)getCustomBlendDesc();
     (void)getHeight();
     (void)getProjectionMatrix();
     (void)getSize();
     (void)getViewMatrix();
     (void)getWidth();
+    (void)setCustomBlendDesc(af::val<const BlendDesc>());
 }
 
 static void cover_graphics_3d_setup() {
@@ -1079,6 +1081,26 @@ struct Cover_AudioStats : af::Scope<AudioStats> {
         (void)af::val<AudioStats>().stalled;
         (void)af::val<AudioStats>().underrunFrames;
         (void)af::val<AudioStats>().voicesStoppedByReinit;
+    }
+};
+
+struct Cover_BlendDesc : af::Scope<BlendDesc> {
+    ~Cover_BlendDesc(); // Never instantiated.
+    static void run() {
+        (void)af::val<BlendDesc>().addKeepAlpha();
+        (void)af::val<BlendDesc>().alpha;
+        (void)af::val<BlendDesc>().premultipliedAdd();
+        (void)af::val<BlendDesc>().rgb;
+        (void)af::val<BlendDesc>().screenKeepAlpha();
+    }
+};
+
+struct Cover_BlendDesc__Component : af::Scope<BlendDesc::Component> {
+    ~Cover_BlendDesc__Component(); // Never instantiated.
+    static void run() {
+        (void)af::val<BlendDesc::Component>().dst;
+        (void)af::val<BlendDesc::Component>().op;
+        (void)af::val<BlendDesc::Component>().src;
     }
 };
 
@@ -5238,6 +5260,8 @@ void af::coverGenerated() {
     af_generated::Cover_AudioRecorder::run();
     af_generated::Cover_AudioSettings::run();
     af_generated::Cover_AudioStats::run();
+    af_generated::Cover_BlendDesc::run();
+    af_generated::Cover_BlendDesc__Component::run();
     af_generated::Cover_BuildInfo::run();
     af_generated::Cover_CameraContext::run();
     af_generated::Cover_ChipSoundBundle::run();
