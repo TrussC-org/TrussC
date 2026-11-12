@@ -8,7 +8,7 @@ public:
     // 256x256 image the compute shader writes into
     Texture output;
 
-    // fills output with a gradient
+    // fills output with a gradient and moving rings
     ComputeShader compute;
 
     void setup() override;
