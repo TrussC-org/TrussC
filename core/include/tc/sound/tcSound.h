@@ -1099,7 +1099,7 @@ public:
     // Do not call shutdown() from an audio listener.
     void shutdown();
 
-    // Device lifecycle (docs/DEVICE_LIFECYCLE.md). setup() is init() and
+    // Device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md). setup() is init() and
     // setup(settings) is init(settings); close() is shutdown(). setup() and
     // init() open the system default device; to use a specific device, pass
     // AudioSettings with device or deviceName. This holds for any reopen of a closed
@@ -2074,7 +2074,7 @@ public:
     // the callback barrier cannot wait for the calling callback itself.
     void stop();
 
-    // Device lifecycle (docs/DEVICE_LIFECYCLE.md): setup() reuses the last
+    // Device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md): setup() reuses the last
     // sample rate and selected device; isConnected() is isRunning(), close() is stop().
     bool setup() { return start(sampleRate_); }
     bool isConnected() const { return isRunning(); }

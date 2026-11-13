@@ -12,7 +12,7 @@
 // tools landed in a registry the host never served (#249). A non-inline
 // function lives in TrussC.lib, the host exports it, and the guest imports it:
 // one instance on Windows too, as on Linux and macOS.
-// See docs/ARCHITECTURE.md, "One instance per process".
+// See docs/architecture/README.md, "One instance per process".
 // =============================================================================
 
 #include <TrussC.h>

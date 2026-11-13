@@ -307,7 +307,7 @@ struct DeviceLostEventArgs {
 
 // A peripheral (serial port, camera, MIDI port, ...) the OS reported lost, for
 // the onDisconnect event of the device classes. Not the graphics device:
-// that is DeviceLostEventArgs above. See docs/DEVICE_LIFECYCLE.md.
+// that is DeviceLostEventArgs above. See docs/architecture/DEVICE_LIFECYCLE.md.
 struct DeviceDisconnectEventArgs {
     std::string reason;            // Human-readable, e.g. "read: Input/output error"
 };

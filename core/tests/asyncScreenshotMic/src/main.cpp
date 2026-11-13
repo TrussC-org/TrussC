@@ -184,7 +184,7 @@ void micTests() {
     internal::setMicBackendForTests({}, {});
 }
 
-// #415: device lifecycle (docs/DEVICE_LIFECYCLE.md) of MicInput. The fake
+// #415: device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md) of MicInput. The fake
 // backend stands in for miniaudio: micStopped() is what its stop notification
 // calls, and the fake close calls it too, as uninit of a real device does.
 void micLifecycleTests() {

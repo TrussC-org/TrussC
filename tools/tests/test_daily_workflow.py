@@ -120,6 +120,16 @@ class DailyDisplayWorkflowTests(unittest.TestCase):
                          ['examples/tests/grabScreen', 'examples/tests/quadWarp'])
         self.assertFalse(any('quadWarp' in p for p in find_addon_tests(str(ROOT), include_daily=True)))
 
+    def test_example_check_projects_survive_trusscli_update(self):
+        # The example sweep runs `trusscli update`, which rewrites CMakeLists.txt
+        # from the template; extra sources must live in local.cmake.
+        import run_example_self_checks as checks
+        template = (ROOT / 'examples/templates/emptyExample/CMakeLists.txt').read_text(encoding='utf-8')
+        for project in checks.discover_examples(ROOT):
+            cmake = (project / 'CMakeLists.txt').read_text(encoding='utf-8')
+            self.assertEqual(cmake, template.replace('emptyExample', project.name), project.name)
+            self.assertIn('target_sources', (project / 'local.cmake').read_text(encoding='utf-8'))
+
     def test_display_step_is_linux_daily_only(self):
         daily = yaml.load((ROOT / '.github/workflows/daily.yml').read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
         steps = daily['jobs']['sweep']['steps']

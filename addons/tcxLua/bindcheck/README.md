@@ -25,7 +25,7 @@ not detect public C++ APIs that have no binding.
 ## Workflow after editing / regenerating the bindings
 
 Regenerate the API outputs on macOS with
-[`docs/reference/regenerate.sh`](../../../docs/reference/regenerate.sh) from the
+[`docs/scripts/regenerate.sh`](../../../docs/scripts/regenerate.sh) from the
 repository root (see the [pipeline prerequisites](../../../docs/reference/README.md)).
 
 ```bash

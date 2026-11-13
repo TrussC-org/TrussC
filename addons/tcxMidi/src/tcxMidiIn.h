@@ -24,7 +24,7 @@
 // Native SysEx assembly uses upstream libremidi without an addon size cap.
 // WebMIDI access does not enable SysEx.
 //
-// Device lifecycle (docs/DEVICE_LIFECYCLE.md): isConnected(), setup(), close(),
+// Device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md): isConnected(), setup(), close(),
 // onDisconnect. When the OS reports the opened port removed (CoreMIDI, ALSA
 // sequencer, WinMM; not WebMIDI), the port is closed, one warning is logged and
 // onDisconnect fires once on the main thread, so a listener may call setup().

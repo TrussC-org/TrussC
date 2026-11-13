@@ -21,8 +21,8 @@ const TOML_FILE = argVal('--toml', path.join(__dirname, '../reference/api-refere
 if (!OUT || OUT.startsWith('--')) { console.error('usage: emit-api-details.js <out.txt> [--toml <api-reference.toml>]'); process.exit(2); }
 
 let TOML;
-try { TOML = require(path.join(__dirname, '../node_modules/smol-toml')); }
-catch { console.error('smol-toml not found: run `cd docs && npm ci` first'); process.exit(1); }
+try { TOML = require('smol-toml'); }
+catch { console.error('smol-toml not found: run `cd docs/scripts && npm ci` first'); process.exit(1); }
 
 const prose = TOML.parse(fs.readFileSync(TOML_FILE, 'utf8'));
 let out = `# TrussC API details

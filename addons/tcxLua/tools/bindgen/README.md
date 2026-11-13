@@ -7,7 +7,7 @@ bindings come from the canonical `reference-data.json` through `luagen` and
 Regenerate all API outputs on macOS from the repository root:
 
 ```bash
-docs/reference/regenerate.sh
+docs/scripts/regenerate.sh
 ```
 
 See the [reference pipeline](../../../../docs/reference/README.md) for prerequisites,

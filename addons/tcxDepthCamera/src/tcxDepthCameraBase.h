@@ -30,7 +30,7 @@
 // pointer swaps, never during device I/O or per-pixel reads. setThreaded(false)
 // captures inline.
 //
-// Device lifecycle (docs/DEVICE_LIFECYCLE.md, #415): setup() (no arguments,
+// Device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md, #415): setup() (no arguments,
 // reopens through openDevice() with the settings the backend remembers),
 // isConnected(), close() and onDisconnect. onDisconnect fires only when a
 // backend calls the protected reportLost(); a backend that never does simply

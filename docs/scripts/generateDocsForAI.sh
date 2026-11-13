@@ -107,7 +107,7 @@ add_file "$ROOT_DIR/core/include/TrussC.h" "$API_FILE"
 # =============================================================================
 echo "  [4/4] Collecting API details..."
 
-# Needs docs/node_modules (cd docs && npm ci)
+# Needs docs/scripts/node_modules (cd docs/scripts && npm ci)
 node "$SCRIPT_DIR/emit-api-details.js" "$DETAILS_FILE" > /dev/null || exit 1
 
 # =============================================================================

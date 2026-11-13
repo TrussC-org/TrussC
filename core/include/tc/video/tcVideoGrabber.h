@@ -8,7 +8,7 @@
 // This file is included from TrussC.h
 // Texture, HasTexture must be included first
 //
-// Device lifecycle (docs/DEVICE_LIFECYCLE.md): setup(), isConnected(), close(),
+// Device lifecycle (docs/architecture/DEVICE_LIFECYCLE.md): setup(), isConnected(), close(),
 // onDisconnect. A camera the OS reports lost (unplugged) is noticed by the
 // backend and reported from update(): the grabber closes itself, then fires
 // onDisconnect once. close() and the destructor never fire it. The backends

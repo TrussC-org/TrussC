@@ -441,7 +441,7 @@ print('200 MiB clean and middle-warning passes under 80 MiB RLIMIT_AS')
         self.assertFalse(any(isinstance(node.func, ast.Attribute) and
                              isinstance(node.func.value, ast.Name) and
                              node.func.value.id == 'subprocess' for node in calls))
-        regen = (ROOT / 'docs/reference/regenerate.sh').read_text(encoding='utf-8')
+        regen = (ROOT / 'docs/scripts/regenerate.sh').read_text(encoding='utf-8')
         self.assertEqual(regen.count('check_build_warnings.py" --run-build -- cmake'), 2)
 
     @unittest.skipUnless(sys.platform != 'win32' and shutil.which('c++'), 'requires a host C++ compiler')

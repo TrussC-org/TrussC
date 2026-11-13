@@ -75,7 +75,7 @@ function dumpAst() {
         if (e.code || (e.status == null && !err)) dumpFailure(e.message || String(e));
         process.stderr.write(`structure: clang AST dump FAILED using CXX=${CXX}: ${e.message || `exit status ${e.status}`}\n`);
         if (/fatal error:/.test(err)) {
-            process.stderr.write('structure: hint: core/include/tc/gpu/shaders/*.glsl.h may be missing; generate the shaders first with docs/reference/regenerate.sh --shaders-only.\n');
+            process.stderr.write('structure: hint: core/include/tc/gpu/shaders/*.glsl.h may be missing; generate the shaders first with docs/scripts/regenerate.sh --shaders-only.\n');
         }
         if (/unrecognized command-line option/.test(err)) {
             process.stderr.write('structure: that compiler is not clang -- this dump requires clang (-Xclang -ast-dump=json).\n'
