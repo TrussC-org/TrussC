@@ -28,6 +28,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <signal.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #else
 #include <process.h>
 #include <io.h>
@@ -1519,8 +1522,45 @@ static int cmdUpgrade(const vector<string>& args) {
         return 1;
     }
 
-    rc = runInherited({cmake, "--build", buildDir,
-                     jobs > 0 ? "--parallel=" + to_string(jobs) : string("--parallel")});
+    // Determine parallel job count (same logic as cmdBuild)
+    string parallelArg = "--parallel";
+    if (jobs > 0) {
+        parallelArg = "--parallel=" + to_string(jobs);
+    }
+#ifdef __linux__
+    else {
+        ifstream meminfo("/proc/meminfo");
+        string line;
+        long availKB = 0;
+        while (getline(meminfo, line)) {
+            if (line.rfind("MemAvailable:", 0) == 0) {
+                sscanf(line.c_str(), "MemAvailable: %ld", &availKB);
+                break;
+            }
+        }
+        if (availKB > 0) {
+            const long kbPerJob = 1572864; // 1.5 GiB
+            int ramJobs = max(1, (int)(availKB / kbPerJob));
+            long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+            if (cpus > 0 && ramJobs > (int)cpus + 2) ramJobs = (int)cpus + 2;
+            parallelArg = "--parallel=" + to_string(ramJobs);
+        }
+    }
+#elif defined(__APPLE__)
+    else {
+        int64_t memsize = 0;
+        size_t len = sizeof(memsize);
+        if (sysctlbyname("hw.memsize", &memsize, &len, nullptr, 0) == 0 && memsize > 0) {
+            const int64_t bytesPerJob = 1610612736LL; // 1.5 GiB
+            int ramJobs = max(1, (int)(memsize / bytesPerJob));
+            long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+            if (cpus > 0 && ramJobs > (int)cpus) ramJobs = (int)cpus;
+            parallelArg = "--parallel=" + to_string(ramJobs);
+        }
+    }
+#endif
+
+    rc = runInherited({cmake, "--build", buildDir, parallelArg});
     if (rc != 0) {
         cerr << "Error: build failed.\n";
         return 1;
@@ -3698,7 +3738,8 @@ static int cmdBuild(const vector<string>& args) {
 
     // Determine the parallel job count. -j wins. Without it, Linux limits jobs
     // by available RAM (~1.5 GB per compile job) to prevent OOM on
-    // memory-constrained SBCs; elsewhere the build tool decides.
+    // memory-constrained SBCs; macOS defaults to CPU count; elsewhere the build
+    // tool decides.
     string parallelArg = "--parallel";
     if (jobs > 0) {
         parallelArg = "--parallel=" + to_string(jobs);
@@ -3728,6 +3769,21 @@ static int cmdBuild(const vector<string>& args) {
                      << " (" << fixed << setprecision(1) << availGB
                      << " GB RAM available, ~1.5 GB per job)\n";
             }
+            parallelArg = "--parallel=" + to_string(ramJobs);
+        }
+    }
+#elif defined(__APPLE__)
+    else {
+        // macOS: limit jobs by available RAM (~1.5 GB per compile job) to prevent
+        // memory exhaustion on memory-constrained systems (e.g., 8 GB MacBook Air)
+        int64_t memsize = 0;
+        size_t len = sizeof(memsize);
+        if (sysctlbyname("hw.memsize", &memsize, &len, nullptr, 0) == 0 && memsize > 0) {
+            const int64_t bytesPerJob = 1610612736LL; // 1.5 GiB
+            int ramJobs = max(1, (int)(memsize / bytesPerJob));
+            // Cap at CPU count
+            long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+            if (cpus > 0 && ramJobs > (int)cpus) ramJobs = (int)cpus;
             parallelArg = "--parallel=" + to_string(ramJobs);
         }
     }
