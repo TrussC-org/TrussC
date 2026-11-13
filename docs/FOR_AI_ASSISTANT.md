@@ -456,8 +456,11 @@ leave it at 1.
 
 Neither knob helps if the text is *minified* (drawn smaller than its loaded
 size) — for that, load the font at the size you actually draw it, or rely on
-mipmaps (`setMipmaps`, on by default, built lazily on the first minified
-draw).
+mipmaps (`setMipmaps`, on by default, built at each consuming flush when
+the atlas is dirty). Font and GlyphBatch share screen-space mip selection:
+base level through two atlas texels per target pixel, then continuous, sharp-leaning
+trilinear LOD with a bias of minus one level.
+Perspective, rotation and one-axis scaling use the same rule.
 
 ### Color
 ```cpp

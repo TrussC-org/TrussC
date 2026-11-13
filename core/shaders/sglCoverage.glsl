@@ -13,6 +13,8 @@
 // (1, 1, 1, coverage). Output is straight alpha, for the Alpha blend pipeline.
 // =============================================================================
 
+@include textCoverage.glslinc
+
 @vs vs
 layout(binding=0) uniform vs_params {
     mat4 mvp;
@@ -38,8 +40,9 @@ layout(binding=0) uniform sampler smp;
 in vec4 uv;
 in vec4 color;
 out vec4 frag_color;
+@include_block text_coverage
 void main() {
-    float coverage = texture(sampler2D(tex, smp), uv.xy).r;
+    float coverage = textCoverage(uv.xy);
     frag_color = vec4(color.rgb, color.a * coverage);
 }
 @end
@@ -53,8 +56,9 @@ layout(binding=0) uniform sampler smp;
 in vec4 uv;
 in vec4 color;
 out vec4 frag_color;
+@include_block text_coverage
 void main() {
-    float alpha = color.a * texture(sampler2D(tex, smp), uv.xy).r;
+    float alpha = color.a * textCoverage(uv.xy);
     frag_color = vec4(color.rgb * alpha, alpha);
 }
 @end

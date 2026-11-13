@@ -258,7 +258,7 @@ void runMatrixChecks() {
         fontKey.fontPath = internal::pathToUtf8(fs::path(__FILE__).parent_path() / "fixture.ttf");
         fontKey.fontSize = int(20 * dpi); fontKey.oversample = 1;
         const auto manager = internal::SharedFontCache::getInstance().get(fontKey);
-        check("font sampler requests mipmaps from raster DPI versus target density", manager && manager->hasMipmaps() == (dpi == 2));
+        check("font draws request mipmaps regardless of raster DPI or target density", manager && manager->hasMipmaps());
         check("text restores camera, pipeline and matrix scopes", internal::currentTarget().camera.currentCameraContext == context && internal::currentTarget().selectedPipeline == selected &&
               sameMatrix(getMatrix(), Mat4::identity()) && internal::currentTarget().matrixStack.empty() && !sgl_error().stack_underflow && !sgl_error().stack_overflow);
         first.end();

@@ -124,7 +124,7 @@ struct FontCacheKey {
     std::string fontPath;
     int fontSize;
     int faceIndex = 0;      // face inside a collection (.ttc / .otc); 0 for a single font
-    bool mipmaps = true;    // allowed to build a mip chain (built lazily on first minified draw)
+    bool mipmaps = true;    // build a mip chain when drawn
     int oversample = 1;     // rasterize NxN finer, then box-prefilter back down
 
     // Grid fit is deliberately absent: it is a draw-time placement decision
@@ -253,7 +253,7 @@ public:
 
     bool setupFromMemory(const uint8_t* data, size_t size, int fontSize, int faceIndex = 0);
 
-    // Opt-in mipmapping. Must be set before glyphs are uploaded (the atlas
+    // Mipmapping is enabled by default. Set before glyphs are uploaded (the atlas
     // texture is (re)built lazily in updateAtlasTexture, which reads this).
     void setMipmaps(bool enabled) { wantMipmaps_ = enabled; }
 
@@ -263,9 +263,6 @@ public:
         if (!wantMipmaps_ || mipsBuilt_) return;
         mipsBuilt_ = true;
         for (auto& atlas : atlases_) { atlas->textureDirty_ = true; atlas->mipmaps_ = true; }
-        // Fires at most once per atlas, and marks a real one-off cost (~33%
-        // more atlas texture, plus a rebuild), so it is worth saying out loud.
-        logNotice("Font") << "text drawn minified — building glyph atlas mipmaps";
     }
     bool hasMipmaps() const { return mipsBuilt_; }
 
@@ -643,7 +640,7 @@ private:
     // Atlases
     std::vector<std::shared_ptr<AtlasState>> atlases_;
     bool wantMipmaps_ = true;    // mip chain allowed (opt out via Font::setMipmaps)
-    bool mipsBuilt_ = false;     // ...and actually needed, i.e. something minified
+    bool mipsBuilt_ = false;     // ...and requested by a consuming draw
     int oversample_ = 1;         // NxN supersampling of the rasterized glyph
     std::string fontName_;       // path, for log messages
     OnceGate pageLimitWarned_;   // load-time page-limit warning, once per font
@@ -1009,13 +1006,7 @@ private:
         // coarse mips bleed slightly between neighbors, but that range is
         // sub-pixel on screen and far preferable to shimmer.)
         std::vector<uint8_t> mipBlob;
-        // Oversampling and mipmapping compose: oversampling owns 1:1 and above,
-        // the mip chain owns minification -- which is exactly where a denser
-        // atlas would otherwise make aliasing worse. pickSampler() keeps the
-        // GPU on mip 0 while the modelview is not minifying, so the mips below
-        // are only ever reached when they are the right answer. On an NxN
-        // atlas the chain also lands better than on a 1x one: drawing at 1/N
-        // scale reads mip log2(N), whose resolution matches the target exactly.
+        // Both text shaders select the level from the screen-space footprint.
         if (atlas.mipmaps_) {
             size_t mipBytes = atlas.pixels_.size();
             int numMips = 1;
@@ -1311,10 +1302,8 @@ public:
     }
     bool getGridFit() const { return gridFit_; }
 
-    // Allow a mip chain for this atlas. On by default and built lazily: nothing
-    // is generated until a draw actually samples below the bilinear-safe rate,
-    // so apps that never minify text pay nothing. Turn it off to trade shimmer
-    // on small/distant text for ~33% less atlas memory and no rebuild cost.
+    // Build a mip chain when drawn (on by default). Both text paths select
+    // mip levels from the screen-space footprint; false keeps base-only filtering.
     Font& setMipmaps(bool enabled) {
         cancelAsync();
         if (enabled == mipmaps_) return *this;
@@ -1911,8 +1900,9 @@ protected:
     void emitPlacedGlyphsToAtlas(const std::vector<PlacedGlyph>& placed) const {
         if (!atlasManager_ || placed.empty()) return;
 
-        // Request lazy mips now; publish all new coverage at the flush.
-        const sg_sampler sampler = pickSampler();
+        // Publish all new coverage and enabled mips at the consuming flush.
+        atlasManager_->requestMipmaps();
+        const sg_sampler sampler = internal::fontSamplers().mipped;
 
         const float s = 1.0f / dpiScale_;
         const size_t atlasCount = atlasManager_->getAtlasCount();
@@ -2809,46 +2799,13 @@ private:
     // only needs its own samplers: internal::fontSamplers(), one pair per
     // process, lazily created by initResources().
 
-    // Minified text wants the mip chain; everything sharper wants the
-    // oversampled mip 0. The quantity that decides it is texels per screen
-    // pixel: raster DPI normalizes glyph coordinates, while target pixel scale
-    // converts them to attachment pixels. They cancel only when those scales
-    // agree (e.g. a screen font drawn on its original display).
-    //
-    // The threshold is 2, not 1, because a bilinear fetch reads a 2x2
-    // neighborhood and copes with 2:1 on its own. Measured on 16px text
-    // (phase-sweep shimmer, un-oversampled atlas): at 2 texels/px mip 0 is
-    // actually BETTER (1.05% vs 1.16% — the mip chain only adds blur where
-    // nothing was broken), while at 4 it is not close (9.79% vs 2.95%) and it
-    // keeps growing from there (16 texels/px: 28.4% vs 13.6%).
-    //
-    // getScale() takes the same shortcuts the adaptive curve tessellator
-    // already accepts (tcRenderContext.h): column lengths approximate rotation
-    // and shear, and perspective is not considered. Choosing a mip level is a
-    // far more forgiving use of that estimate than choosing a segment count.
-    sg_sampler pickSampler() const {
-        const int   oversample = atlasManager_->getOversample();
-        const float scale = getDefaultContext().getScale() * internal::targetPixelScale() / dpiScale_;
-        const float texelsPerPixel = (scale > 0.0f) ? (oversample / scale)
-                                                    : (float)oversample;
-        if (texelsPerPixel <= 2.0f) return internal::fontSamplers().sharp;
-
-        // First draw below the bilinear-safe rate is what pays for the chain.
-        atlasManager_->requestMipmaps();
-        return internal::fontSamplers().mipped;
-    }
-
     void initResources() {
         if (!sg_isvalid()) return;
         internal::FontSamplers& samplers = internal::fontSamplers();
         if (samplers.initialized) return;
 
-        // Two samplers, picked per draw by the effective scale (see
-        // pickSampler). Trilinear on both: without mipmap_filter sokol defaults
-        // to NEAREST, which snaps to the nearest level and makes a 0.6x draw
-        // jump to the half-resolution mip and magnify it back up -- visibly
-        // soft, with a pop at the boundary. Texture already sets LINEAR here
-        // (tcTexture.h); the font path was the outlier.
+        // Draws use trilinear filtering with screen-space selection in the shader.
+        // The sharp sampler remains available for debug atlas rendering.
         sg_sampler_desc smp_desc = {};
         smp_desc.min_filter = SG_FILTER_LINEAR;
         smp_desc.mag_filter = SG_FILTER_LINEAR;
