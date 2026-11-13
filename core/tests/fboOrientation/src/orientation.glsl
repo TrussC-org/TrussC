@@ -23,7 +23,8 @@ void main() {
 in vec2 uv;
 out vec4 frag_color;
 void main() {
-    frag_color = gl_FrontFacing ? vec4(1, 0, 0, 1) : vec4(0, 1, 0, 1);
+    // Read uv (alpha stays 1 for uv in [0, 1]) so GLES drivers keep texcoord0 bound.
+    frag_color = vec4(gl_FrontFacing ? vec3(1, 0, 0) : vec3(0, 1, 0), step(-1.0, uv.x));
 }
 @end
 @program facing vs facing_fs
