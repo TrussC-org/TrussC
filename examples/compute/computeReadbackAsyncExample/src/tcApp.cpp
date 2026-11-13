@@ -1,5 +1,5 @@
 // =============================================================================
-// computeReadbackAsyncExample - Read a GPU counter without blocking the app.
+// computeReadbackAsyncExample - Read a GPU sum without blocking the app.
 //
 // readAsync delivers the result in a later update. Check the result before
 // accessing its values; this path also works on WebGPU.
@@ -9,7 +9,7 @@
 #include "sum.compute.glsl.h"
 
 void tcApp::setup() {
-    // upload the starting value (0) so the count begins from zero
+    // upload the starting value (0) so the sum begins from zero
     counter.allocate(sizeof(count), &count);
 
     compute.load(sum_values_shader_desc);
